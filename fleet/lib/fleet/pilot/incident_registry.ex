@@ -521,7 +521,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # The registry file lives on the SHARED forge (work/ops) and the WAL on local disk — both
+  # The registry file lives on the SHARED forge (ops) and the WAL on local disk — both
   # hand-editable. A non-map VALUE under a signature ({"sig": "garbage"}) would enter RAM,
   # contaminate the WAL, then raise in merge_entry during handle_continue(:load) → boot-loop
   # REPRODUCIBLE at every reboot until the file is repaired by hand. Same doctrine as the
@@ -541,7 +541,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # Encode the registry with ONE incident per line, sorted keys. The git diff of the file (committed on
-  # work/ops AND the local WAL) then shows an added incident = an added line, instead of a single-line
+  # ops AND the local WAL) then shows an added incident = an added line, instead of a single-line
   # JSON blob where the slightest addition rewrites everything. Stays valid JSON — `decode/1` reads it as
   # is; sorting by key guarantees a stable order (otherwise map order would make noise in the diff).
   defp encode_registry(registry) when map_size(registry) == 0, do: "{}\n"
@@ -634,7 +634,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 
-  # SINGLE ops-repo authority (`:ops_repo`): the incident REGISTRY (this file, work/ops branch) and
+  # SINGLE ops-repo authority (`:ops_repo`): the incident REGISTRY (this file, ops branch) and
   # the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces of
   # one incident. Two separate keys with two inline defaults would sit one edit away from
   # a registry on repo A and its issues on repo B, with nothing to catch it. `:incident_registry_repo`
@@ -645,7 +645,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
   defp branch(opts),
-    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "work/ops")
+    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "ops")
 
   defp path(opts),
     do:

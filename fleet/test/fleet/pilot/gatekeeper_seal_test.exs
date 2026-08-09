@@ -359,7 +359,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     [
       head_branch: "lcars/issue-9-engineer",
       projects_root: Path.join(tmp, "p"),
-      work_root: Path.join(tmp, "w"),
+      ops_root: Path.join(tmp, "w"),
       __head_sha__: head
     ]
   end

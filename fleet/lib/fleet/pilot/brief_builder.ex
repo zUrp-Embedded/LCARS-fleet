@@ -198,7 +198,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         opts \\ []
       ) do
     # POINTER resolution FIRST (E4): a consequential brief lives as a doc committed in
-    # work/ops; the ticket body then carries summary + `Brief: <ref> @ <commit>` (composed by
+    # ops; the ticket body then carries summary + `Brief: <ref> @ <commit>` (composed by
     # the delegation tool, notation in Fleet.Layout). Resolved HERE, once, for every path
     # (worker order, brief judge, deliverable-judge criterion): the pinned doc BECOMES the
     # brief downstream. Unresolvable pointer → DEFER (`:criterion_unavailable` — the existing
@@ -300,10 +300,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
-  # (`ref @ commit`, the walkable link into work/ops history); an inline brief says so
+  # (`ref @ commit`, the walkable link into ops history); an inline brief says so
   # honestly (never a fabricated citation). FR: rendered to the human eye via the forge.
   defp brief_source_line(%{"_brief_source" => {ref, sha}}),
-    do: "`#{ref} @ #{sha}` (doc d'auteur commité dans work/ops — version pinnée ci-dessus)"
+    do: "`#{ref} @ #{sha}` (doc d'auteur commité dans ops — version pinnée ci-dessus)"
 
   defp brief_source_line(_issue), do: "brief inline du ticket (pas de doc d'auteur séparé)"
 
@@ -327,7 +327,7 @@ defmodule Fleet.Pilot.BriefBuilder do
                repo,
                ref,
                sha,
-               Keyword.take(opts, [:work_root])
+               Keyword.take(opts, [:ops_root])
              ) do
           # F-25 — the resolved pointer is KEPT alongside the pinned content: the work order
           # cites its source doc (`ref @ commit`) instead of consuming the link silently.
@@ -454,7 +454,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # THE CRITERION TRAVELS AS TEXT, and the address travels beside it. The dedup this used to do —
-  # cite the doc, let the judge `git show` it through a mounted work/ops — bought one copy and cost
+  # cite the doc, let the judge `git show` it through a mounted ops — bought one copy and cost
   # the mount: every project pod had to carry the runtime's own record so that ONE role could read
   # ONE file out of it. The record is where what was asked and what was judged is kept; handing it
   # to every producer to save a paragraph is the wrong side of that trade.
@@ -501,7 +501,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       end
 
     # THE BRIEF TRAVELS, the address travels WITH it. This used to send only `{ref, sha}` and let
-    # the judge read the doc through a mounted work/ops — which is what made that mount necessary
+    # the judge read the doc through a mounted ops — which is what made that mount necessary
     # on every project pod. Sending the text costs a paragraph; the mount cost every producer a
     # read handle on the record of what was asked of it and what was judged of its work.
     #

@@ -108,7 +108,7 @@ defmodule Fleet.Application do
     # emitted prompt its shape. Under a published image a missing entry is a CLOSED-WORLD error, never
     # a silent re-read of the live file — that fallback is what reopened the epoch where it mattered.
     # OUTSIDE the image, deliberately and exhaustively: the per-project assets a running fleet
-    # legitimately rewrites (project maps, briefs, work/ops docs) — data the pods act ON, never the
+    # legitimately rewrites (project maps, briefs, ops docs) — data the pods act ON, never the
     # prompt material they are BUILT from. Adding a prompt input without adding it here re-widens the
     # promise past the mechanism; the boot log's version covers exactly the list above.
     if Application.get_env(:fleet_cap_profile, :publish_image, true),

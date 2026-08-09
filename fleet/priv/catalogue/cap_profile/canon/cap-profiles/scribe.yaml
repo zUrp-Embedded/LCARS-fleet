@@ -6,7 +6,7 @@
 # engineer — git-native commits, forge-blind, the system verifies and pushes — on the OTHER face
 # of the project. The card's step says `face: ops`; this profile only says WHO works and HOW.
 # A doc deliverable that needed different mechanics would be the design smell, not the goal:
-# work/ops is ordinary git, and that identity is the whole thesis of the chantier.
+# ops is ordinary git, and that identity is the whole thesis of the chantier.
 kind: CapabilityProfile
 metadata:
   name: scribe

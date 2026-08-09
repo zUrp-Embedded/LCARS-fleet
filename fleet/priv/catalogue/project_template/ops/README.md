@@ -31,7 +31,7 @@ La raison est simple : un acteur capable d'écrire ici pourrait réécrire, **ap
 de ce qu'on lui a demandé et de ce qu'on a jugé de son travail. Une preuve que le prouvé peut
 éditer n'est pas une preuve.
 
-La documentation du produit ne vit donc **pas** ici : elle est sur la face `doc` (`work/doc`), où
+La documentation du produit ne vit donc **pas** ici : elle est sur la face `doc` (`workshop`), où
 un producteur l'écrit et où l'architecte la relit.
 
 ## Qui lit

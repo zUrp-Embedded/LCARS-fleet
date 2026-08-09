@@ -119,7 +119,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
   test "BND-120 : livrable_sha with a separator/traversal → refused (never interpolated as a path segment)",
        %{tmp_dir: tmp} do
     # livrable_sha is interpolated into `provenance/<sha>.json`: a `/` or `..` would escape
-    # the work/ops. It is a git digest (hex) in prod; a value carrying a separator is refused BEFORE
+    # the ops. It is a git digest (hex) in prod; a value carrying a separator is refused BEFORE
     # any write.
     for hostile <- ["../../etc/passwd", "a/b", "..", "x/../y"] do
       assert {:error, {:invalid_livrable_sha, ^hostile}} =

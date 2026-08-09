@@ -5,7 +5,7 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   BUSINESS layer over `Fleet.Workflow.OpsObject` (the one commit-an-object mechanic): this
   module only knows brief NAMING and the dispatch degradation semantics. It materializes a
-  brief's content into the system's work/ops worktree and returns `{ref, sha}` — the
+  brief's content into the system's ops worktree and returns `{ref, sha}` — the
   `brief_sha` of the SLSA triplet `(brief_sha, input_sha, livrable_sha)`.
 
   **The identity is the COMMIT sha** (like the triplet's two other vertices — three
@@ -25,7 +25,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   for both and was wrong for one of them):
 
     * TICKET CREATION (`physicalize_attrs/3`, the arch writing an issue) — degrades on every
-      cause. Refusing to create a ticket because work/ops is not ready would block the very
+      cause. Refusing to create a ticket because ops is not ready would block the very
       gesture that gets a project going.
     * ORDER DELIVERY (`materialize/3`, the step dispatcher) — breaks on the three PERMANENT
       causes. The nominal path replaces the brief TEXT with a pointer as soon as a sha exists, so
@@ -38,13 +38,13 @@ defmodule Fleet.Workflow.BriefArtifact do
   result reports rather than a silence.
 
   Publication (`:push`) is best-effort on top of the local truth — cf. `OpsObject` (F-15:
-  both dispatch-side callers pass `push: :work_ops`).
+  both dispatch-side callers pass `push: :ops`).
   """
 
   require Logger
 
   # Writes go through the SERIALIZER (CI-11): concurrent brief materializations (several MCP
-  # connections + the poller dispatch) on the same project's work/ops worktree would race on
+  # connections + the poller dispatch) on the same project's ops worktree would race on
   # `.git/index.lock`. `OpsObjectSync` funnels one git transaction at a time; `OpsObject` stays the
   # engine (reached only via the gate). Same signature, so the switch is a one-liner.
   alias Fleet.Workflow.{OpsObject, OpsObjectSync}
@@ -52,7 +52,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   @type ok :: %{ref: String.t(), sha: String.t(), push: OpsObject.push_state() | :unknown}
 
   @doc """
-  Commits the brief `content` into `work_dir` (the project's work/ops worktree) and returns
+  Commits the brief `content` into `work_dir` (the project's ops worktree) and returns
   `{:ok, %{ref, sha, push}}` — `sha` = the introducing COMMIT (the version's identity), `push` the
   publication outcome (`OpsObject.push_state/0`, plus `:unknown` when a serializer timeout lost the
   reply that carried it). Idempotent
@@ -63,7 +63,7 @@ defmodule Fleet.Workflow.BriefArtifact do
     content's sha256 (hintless legacy/test path). Sanitized by `Fleet.Layout`.
   - `:kind` = `"judge"` routes the object under `gate-briefs/`; any other value → `briefs/`.
   - `:author` = `{name, email}` (system default).
-  - `:push` = `:work_ops` | `{remote, refspec}` — best-effort publication (cf. `OpsObject`).
+  - `:push` = `:ops` | `{remote, refspec}` — best-effort publication (cf. `OpsObject`).
 
   `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
   """
@@ -101,7 +101,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   Kept for the callers that genuinely have one policy for every cause (`physicalize_attrs/3`).
   A caller that must tell a permanent failure from a transient one uses `materialize/3` — this
   form cannot express the difference, and that flattening is what let a misconfigured project
-  produce unauditable work indefinitely. `opts[:work_root]` injectable (tests).
+  produce unauditable work indefinitely. `opts[:ops_root]` injectable (tests).
   """
   @spec physicalize(String.t() | nil, String.t() | nil, keyword()) ::
           {String.t() | nil, String.t() | nil}
@@ -129,7 +129,7 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   What each caller does with them is the caller's contract, and they differ on purpose:
   `physicalize_attrs/3` degrades on all four (it serves TICKET CREATION — an arch writing an issue
-  must not be refused because work/ops is not ready), the step dispatcher breaks on the first three
+  must not be refused because ops is not ready), the step dispatcher breaks on the first three
   (it serves ORDER DELIVERY — a pod that cannot be given a provable order should not start).
   """
   @spec materialize(String.t() | nil, String.t() | nil, keyword()) ::
@@ -138,10 +138,10 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   def materialize(brief, repo, opts)
       when is_binary(brief) and brief != "" and is_binary(repo) and repo != "" do
-    work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
-    work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
+    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
+    work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
 
-    case commit(work_dir, brief, Keyword.delete(opts, :work_root)) do
+    case commit(work_dir, brief, Keyword.delete(opts, :ops_root)) do
       # `push` is dropped HERE and only here: the brief's load-bearing reader is the pod, which
       # reads the object from its LOCAL `--ro-bind` of the worktree at its pin. A publication that
       # has not landed yet changes nothing for the delivery this function serves, and `OpsObject`
@@ -153,7 +153,7 @@ defmodule Fleet.Workflow.BriefArtifact do
       {:error, {:work_dir_missing, _} = cause} ->
         Logger.warning(
           "BriefArtifact: brief NOT materialized (repo=#{repo}): #{inspect(cause)} — the project " <>
-            "has no work/ops. PERMANENT until it is onboarded; a caller that degrades here " <>
+            "has no ops. PERMANENT until it is onboarded; a caller that degrades here " <>
             "produces work nobody can prove was asked for."
         )
 
@@ -179,17 +179,17 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   @doc """
   Reads a brief object at its PINNED version (`git show <sha>:<ref>` in the project's
-  work/ops worktree) — the resolution side of the ticket pointer (`Layout.parse_brief_pointer`).
+  ops worktree) — the resolution side of the ticket pointer (`Layout.parse_brief_pointer`).
   The pointer can lie, git cannot: unknown commit / path absent from that commit / missing
-  worktree → typed error, the caller DEFERS (never a guessed brief). `opts[:work_root]`
+  worktree → typed error, the caller DEFERS (never a guessed brief). `opts[:ops_root]`
   injectable (tests).
   """
   @spec resolve(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
   def resolve(repo, ref, sha, opts \\ [])
       when is_binary(repo) and is_binary(ref) and is_binary(sha) do
-    work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
-    work_dir = Path.join(work_root, Fleet.Layout.project_name(repo))
+    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
+    work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
 
     cond do
       not Fleet.Layout.valid_brief_ref?(ref) -> {:error, {:invalid_pointer_ref, ref}}

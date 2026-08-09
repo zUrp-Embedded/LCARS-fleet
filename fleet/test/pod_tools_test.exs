@@ -1127,13 +1127,13 @@ defmodule Fleet.MCP.PodToolsTest do
       refute_received {:idem_create, _}
     end
 
-    test "inline brief is ALWAYS materialized: doc committed in work/ops, ticket = dedicated summary + pinned pointer",
+    test "inline brief is ALWAYS materialized: doc committed in ops, ticket = dedicated summary + pinned pointer",
          %{tmp_dir: tmp} do
-      # Seam: work_root → tmp; the project's work/ops is a real git dir (physicalize commits there).
+      # Seam: ops_root → tmp; the project's ops is a real git dir (physicalize commits there).
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
 
       long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1} du brief complet")
 
@@ -1162,7 +1162,7 @@ defmodule Fleet.MCP.PodToolsTest do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
 
       long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1}")
 
@@ -1180,12 +1180,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _} = Fleet.Layout.parse_brief_pointer(body)
     end
 
-    test "degraded materialization (no work/ops) → full inline body, the legacy behavior", %{
+    test "degraded materialization (no ops) → full inline body, the legacy behavior", %{
       tmp_dir: tmp
     } do
-      # work_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
+      # ops_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
       # (The binding repo is fleet/demo but tmp/demo was NOT created in this test → degraded path.)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_work_root, tmp)
+      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -1199,7 +1199,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert log != ""
       assert_received {:create_issue, _, _, body, _}
-      # Inline brief (degraded, no work/ops) — followed by the idempotency marker (an HTML
+      # Inline brief (degraded, no ops) — followed by the idempotency marker (an HTML
       # comment, invisible in the rendered issue).
       assert String.starts_with?(body, "tout le brief inline")
       assert body =~ ~r/<!-- lcars-op:[0-9a-f]{16} -->/
@@ -1546,7 +1546,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {"revise_project_card",
        %{
          "full_name" => "fleet/demo-proj",
-         "workflow_map" => "doc-direct",
+         "workflow_map" => "workshop-direct",
          "justification" => "le poc est devenu serieux"
        }},
       {"close_project", %{"full_name" => "fleet/demo-proj"}},
@@ -1715,7 +1715,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  "revise_project_card",
                  %{
                    "full_name" => "fleet/demo-proj",
-                   "workflow_map" => "doc-direct",
+                   "workflow_map" => "workshop-direct",
                    "justification" => "le poc est devenu serieux"
                  },
                  pod_state(uniq("pod-sf"))
@@ -1724,13 +1724,13 @@ defmodule Fleet.MCP.PodToolsTest do
       # The seam receives the declaration verbatim + the ACTING role (revised_by = channel
       # identity, never a wire field).
       assert_received {:revise_card, "fleet/demo-proj", opts}
-      assert opts[:workflow_map] == "doc-direct"
+      assert opts[:workflow_map] == "workshop-direct"
       assert opts[:justification] == "le poc est devenu serieux"
       assert opts[:revised_by] == "starfleet"
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "card_revised"
-      assert result["card"] == "doc-direct"
+      assert result["card"] == "workshop-direct"
       assert result["previous_card"] == "brief-gate"
       assert result["outcome"] == "revised"
       # The one semantic the human must hear at this moment: engraved routes do not re-route.

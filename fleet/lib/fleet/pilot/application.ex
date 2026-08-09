@@ -357,7 +357,7 @@ defmodule Fleet.Pilot.Application do
     case Fleet.Pilot.WorkflowMapNav.safe_load(&Fleet.Workflow.Loader.load!(&1, opts), name) do
       {:ok, card} ->
         doc_producers =
-          for {_step, %{"face" => "doc"} = spec} <- card["steps"] || %{},
+          for {_step, %{"face" => "workshop"} = spec} <- card["steps"] || %{},
               is_binary(Map.get(spec, "role")),
               do: spec["role"]
 

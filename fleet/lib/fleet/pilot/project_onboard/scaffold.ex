@@ -53,7 +53,7 @@ defmodule Fleet.Pilot.ProjectOnboard.Scaffold do
   end
 
   @doc """
-  Writes a WRITER face's template subtree (`"work-ops"`, `"work-doc"`). `:pitch` falls back to
+  Writes a WRITER face's template subtree (`"ops"`, `"workshop"`). `:pitch` falls back to
   `:description`, then `""`; `:today` overrides the current UTC date.
 
   The subtree name is a PARAMETER and not a per-face function because nothing about the writing

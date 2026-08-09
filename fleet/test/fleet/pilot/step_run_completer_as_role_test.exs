@@ -134,7 +134,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
 
   # B-04 (catalogue chantier 2026-07-20): the producer is whoever the CARD dispatched — read from the
   # feature branch, NOT the `Roles.producer_role` config global (a fixed "engineer"). A `documentalist`
-  # card (docs into work/ops, not code into main) is the motivating case: pre-B-04 the ISSUE stopwatch
+  # card (docs into ops, not code into main) is the motivating case: pre-B-04 the ISSUE stopwatch
   # stop was signed "engineer" (config) → Gitea per-user refuses the mis-signed stop → the
   # documentalist's watch leaks forever. This is the SAME branch source the poller-driven promote
   # already reads (`ReviewLifecycle.promote_pr` — "no fork"); this test locks the workflow_map path onto it.
@@ -182,7 +182,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
       repo: "fleet/poc",
       issue_number: 9,
       role: "scribe",
-      base_branch: "work/ops",
+      base_branch: "ops",
       deliverable_opts: %{
         mode: :git_native,
         workspace: "/tmp/ws",

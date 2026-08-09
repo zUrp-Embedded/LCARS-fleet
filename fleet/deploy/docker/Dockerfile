@@ -46,7 +46,7 @@ ARG TARGETARCH
 # worktrees en `add -f -B` (vérifié dans pilot/conflict_apply + project_onboard), donc l'image
 # finale garde le git de bookworm sans rien perdre.
 # LES RACINES DE FACE SONT DES CONSTANTES DE COMPILATION, DONC DES DÉPENDANCES DU STAGE.
-# `Fleet.Layout` fige `@work_root "/home/projects.work"` et `@doc_root "/home/projects.doc"` ; le
+# `Fleet.Layout` fige `@work_root "/home/projects.ops"` et `@doc_root "/home/projects.workshop"` ; le
 # test d'admission du poller crée son répertoire de
 # projet LÀ où le code ira le lire — c'est le point du test, il refuse de mesurer un stub de
 # lui-même. Sous `builder`, `/home` appartient à root : `mkdir_p` échoue et le test rougit sans
@@ -66,7 +66,7 @@ RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/s
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
     && install -d -o builder -g fleet /local /src /src/fleet /src/fleet \
-    && install -d -o builder -g fleet /home/projects.work /home/projects.doc
+    && install -d -o builder -g fleet /home/projects.ops /home/projects.workshop
 
 # HOME suit l'utilisateur — `USER` ne le change PAS (il resterait /root, et mix/hex écriraient
 # leurs caches dans un dossier interdit à builder).

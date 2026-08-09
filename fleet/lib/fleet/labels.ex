@@ -54,7 +54,7 @@ defmodule Fleet.Labels do
   # independently — the wire enum offered to the arch, the clause that routes the wire value, and
   # the label posted on the forge — so the wire could ANNOUNCE a token the code did not accept and
   # nothing would be red (measured: renaming the enum alone survived the whole suite). It shipped
-  # exactly that way: the wire said `"ops"` long after the deliverable moved to `work/doc`.
+  # exactly that way: the wire said `"ops"` long after the deliverable moved to `workshop`.
   @genre_doc_token "doc"
   @genre_doc "genre/" <> @genre_doc_token
 

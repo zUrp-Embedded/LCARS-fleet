@@ -134,18 +134,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # Called from `open_deliverable_pr` — the publication point of the producer deliverable (PR-native
   # path), NOT `complete/2` (which only carries verdicts without a deliverable). `brief_sha`/`base_sha`
   # traveled via pod.completed → step_run; `livrable_sha` = the published commit. Emits ONLY for a real
-  # git deliverable (`:deliverable_opts` present = producer) with a work/ops. brief_sha absent
+  # git deliverable (`:deliverable_opts` present = producer) with a ops. brief_sha absent
   # (degraded) → 2/3 provenance (input→output), never an invented digest (cf. Provenance).
-  # `:work_root` (opt, default `Fleet.Layout.work_root()`) = SEAM of the work/ops root — test
+  # `:ops_root` (opt, default `Fleet.Layout.ops_root()`) = SEAM of the ops root — test
   # hermeticity (the real root is a hardcoded global path; injecting it makes the
   # producer→provenance wiring exercisable — otherwise the green never walks the real path).
-  # The project's work/ops worktree, or `nil` when there is none — a project that was never onboarded
-  # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:work_root` seam as
+  # The project's ops worktree, or `nil` when there is none — a project that was never onboarded
+  # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:ops_root` seam as
   # the provenance emission below, for the same reason: the real root is a hardcoded global path.
   defp verdict_work_dir(repo, opts) do
     dir =
       Path.join(
-        Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
+        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
         Fleet.Layout.project_name(repo)
       )
 
@@ -153,11 +153,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
-    work_root = Keyword.get(opts, :work_root, Fleet.Layout.work_root())
+    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
 
     with %{} = dopts <- Map.get(step_run, :deliverable_opts),
          repo when is_binary(repo) <- Map.get(step_run, :repo),
-         work_dir = Path.join(work_root, Fleet.Layout.project_name(repo)),
+         work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo)),
          true <- File.dir?(work_dir) do
       emit_provenance(work_dir, step_run, dopts, livrable_sha)
     else
@@ -190,7 +190,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # (a proof from the wrong viewpoint is a protocol violation, not a degrade), the completion
     # itself stays unharmed either way (the deliverable is real and pushed).
     emit_opts = [
-      push: :work_ops,
+      push: :ops,
       subject_workspace: Map.get(dopts, :workspace) || Map.get(dopts, "workspace")
     ]
 
@@ -325,7 +325,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
            open_pr_step(forge, repo, head, base, title, body, role_opts)
            |> record_pr_open_failure(step_run, sha, opts) do
       # SLSA triplet: (brief_sha, base_sha=input_sha, livrable_sha=sha) → in-toto provenance
-      # committed under work/ops `provenance/`. HERE = the ONLY point where a real producer git
+      # committed under ops `provenance/`. HERE = the ONLY point where a real producer git
       # deliverable is published (PR-native path); `complete/2` carries ONLY verdicts without
       # deliverable_opts (abandon/brief), never a deliverable. Engraved AFTER the PR exists
       # (BL-6-34): a completion that stalls between push and PR must never leave a "delivered"

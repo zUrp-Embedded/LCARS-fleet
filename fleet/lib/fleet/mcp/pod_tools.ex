@@ -125,7 +125,7 @@ defmodule Fleet.MCP.PodTools do
           "ready for delivery (engineer → PR → review → merge). Use it to DELEGATE rather than code " <>
           "yourself (the fleet delivers better and preserves your context). `brief` = the FULL brief " <>
           "for the engineer. The system commits your `brief` as the authored doc in your " <>
-          "project's work/ops and the ticket then carries `summary` + the pinned pointer " <>
+          "project's ops and the ticket then carries `summary` + the pinned pointer " <>
           "(`Brief: <ref> @ <commit>`); if that materialization cannot complete it DEGRADES to your " <>
           "`brief` INLINE in the ticket instead (logged loud) — never a wall — so ALSO pass " <>
           "`summary`: 2-6 lines, human-facing, " <>
@@ -174,7 +174,7 @@ defmodule Fleet.MCP.PodTools do
           "enum" => ["code", Fleet.Labels.genre_doc_token()],
           "description" =>
             "WHERE THE DELIVERABLE LANDS — not what kind of artefact it is. \"doc\" = it stays " <>
-              "in the project's WORKSHOP (`work/doc`): backlog, plans, specs in progress, design " <>
+              "in the project's WORKSHOP (`workshop`): backlog, plans, specs in progress, design " <>
               "notes — material the project is built FROM, which never ships with it. Routed to " <>
               "the scribe, direct path: no scoper (you authored the brief, you judge the return " <>
               "in your own mount), no PR jury (nothing leaves the project, so there is no absent " <>
@@ -196,8 +196,8 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "Start a NEW project: creates the repo on the forge + the THREE face folders " <>
-          "(`/home/projects/<name>` on `main` = the deliverable, `/home/projects.work/<name>` on " <>
-          "`work/ops` = the record the runtime keeps, `/home/projects.doc/<name>` on `work/doc` = " <>
+          "(`/home/projects/<name>` on `main` = the deliverable, `/home/projects.ops/<name>` on " <>
+          "`ops` = the record the runtime keeps, `/home/projects.workshop/<name>` on `workshop` = " <>
           "the workshop your drafts live in) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
@@ -261,7 +261,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "Import an EXISTING repo (already on the forge, in the org — pushed outside the fleet or by a human) " <>
           "into the agent machine: the three faces (`/home/projects/<name>` on `main`, " <>
-          "`/home/projects.work/<name>` on `work/ops`, `/home/projects.doc/<name>` on `work/doc`) + " <>
+          "`/home/projects.ops/<name>` on `ops`, `/home/projects.workshop/<name>` on `workshop`) + " <>
           "forge-enforced gate, WITHOUT touching the content " <>
           "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
           "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
@@ -285,7 +285,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "ADOPT a project that lives on the agent machine's DISK but not on the forge — the " <>
           "inverse of import_project: publishes the existing local content (repo created EMPTY, " <>
-          "the local main is pushed as-is, work/ops face brought up, forge gate placed). Use it " <>
+          "the local main is pushed as-is, ops face brought up, forge gate placed). Use it " <>
           "for a project someone built locally (or whose forge was lost) that the fleet should " <>
           "now work. The local content is NEVER overwritten. `name` = the local dirs' basename " <>
           "(kebab-case). The card/criticality declaration relays like create_project (present " <>
@@ -781,7 +781,7 @@ defmodule Fleet.MCP.PodTools do
     else
       {:error,
        {:invalid_brief_pointer,
-        "`brief_ref`+`brief_sha` come TOGETHER: ref = work/ops brief path " <>
+        "`brief_ref`+`brief_sha` come TOGETHER: ref = ops brief path " <>
           "(e.g. `briefs/<slug>.md`), sha = the introducing 40-hex COMMIT sha"}, state}
     end
   end

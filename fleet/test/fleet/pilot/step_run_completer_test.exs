@@ -419,12 +419,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     # Regression: provenance hooked onto `complete/2` (verdicts WITHOUT deliverable) is never
     # emitted on the REAL producer path (`open_deliverable_pr` is the only publication point of a
     # git deliverable). This test walks that path and demands the full triplet — it would go red on
-    # the wrong wiring. (The `:work_root` seam replaces the untestable global
-    # `Fleet.Layout.work_root()`.)
+    # the wrong wiring. (The `:ops_root` seam replaces the untestable global
+    # `Fleet.Layout.ops_root()`.)
     @tag :tmp_dir
-    test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under work/ops `provenance/`",
+    test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under ops `provenance/`",
          %{tmp_dir: tmp} do
-      # the project's work/ops: project_name("lordzurp/lcars-test") = "lcars-test", a real git repo.
+      # the project's ops: project_name("lordzurp/lcars-test") = "lcars-test", a real git repo.
       work_dir = Path.join(tmp, "lcars-test")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -447,7 +447,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           }
         })
 
-      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], ops_root: tmp]
 
       assert {:ok, %{commit_sha: ^sha}} = StepRunCompleter.open_deliverable_pr(step_run, opts)
 
@@ -495,7 +495,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           }
         })
 
-      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+      opts = [deliverable: HeadDeliverable, forge_client: PrForge, forge_opts: [], ops_root: tmp]
       assert {:ok, %{commit_sha: ^sha}} = StepRunCompleter.open_deliverable_pr(step_run, opts)
 
       json =
@@ -519,7 +519,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         deliverable: StubDeliverable,
         forge_client: PrFailForge,
         forge_opts: [],
-        work_root: tmp
+        ops_root: tmp
       ]
 
       assert {:error, {:open_pr, {:http, 422, _}}} =
@@ -556,7 +556,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
           }
         })
 
-      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], work_root: tmp]
+      opts = [deliverable: StubDeliverable, forge_client: PrForge, forge_opts: [], ops_root: tmp]
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -872,7 +872,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "producer :review on a ROUTED map → the ENGRAVED card's jury, never the project's (faceproof bench)" do
-      # chantier face-projet: the step_run carries the engraved map (doc-direct, jury []) — the
+      # chantier face-projet: the step_run carries the engraved map (workshop-direct, jury []) — the
       # review request must convene THAT card's jury, not the project card's. Reading the project
       # card laid brief-gate's qualifier+reviewer onto a zero-judge ops PR: REQUEST_CHANGES x2 on
       # prose, rework loop. Measured on the faceproof bench before this test existed.

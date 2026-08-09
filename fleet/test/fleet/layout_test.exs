@@ -11,9 +11,9 @@ defmodule Fleet.LayoutTest do
   alias Fleet.Layout
 
   test "the three face roots are the imposed container roots" do
-    assert Layout.projects_root() == "/home/projects"
-    assert Layout.work_root() == "/home/projects.work"
-    assert Layout.doc_root() == "/home/projects.doc"
+    assert Layout.code_root() == "/home/projects"
+    assert Layout.ops_root() == "/home/projects.ops"
+    assert Layout.workshop_root() == "/home/projects.workshop"
   end
 
   describe "brief pointer trailer — the ticket says which text is the order" do
@@ -38,7 +38,7 @@ defmodule Fleet.LayoutTest do
     # Two derivations of the same thing coexist. `project_name/1` is the DIRECTORY authority (its
     # own @doc says so, and fourteen sites build paths from it); `project_slug/1` folds anything
     # outside `[A-Za-z0-9-]` into `-` and exists for shell/tmux names. They diverge on `_`, `.` and
-    # uppercase — and `LaunchSpec` derives HOST paths (the work/ops mount, the code reference) from
+    # uppercase — and `LaunchSpec` derives HOST paths (the ops mount, the code reference) from
     # the SLUG, which the plan first read as a live bug.
     #
     # It is not one, and the reason is worth pinning rather than remembering: all SEVEN onboarding
@@ -93,7 +93,7 @@ defmodule Fleet.LayoutTest do
     end
   end
 
-  describe "work/ops artifact layout (the producer/validator shared truth)" do
+  describe "ops artifact layout (the producer/validator shared truth)" do
     test "brief_ref: worker → briefs/, judge → gate-briefs/, name sanitized" do
       assert Layout.brief_ref(nil, "issue-3-engineer") == "briefs/issue-3-engineer.md"
       assert Layout.brief_ref("worker", "issue-3-engineer") == "briefs/issue-3-engineer.md"
@@ -166,21 +166,21 @@ defmodule Fleet.LayoutTest do
   describe "project faces (chantier face-projet — the branch half of the layout)" do
     test "face_branch/1: each declared face maps to its structural branch" do
       assert Layout.face_branch("code") == "main"
-      assert Layout.face_branch("doc") == "work/doc"
-      assert Layout.face_branch("ops") == "work/ops"
+      assert Layout.face_branch("workshop") == "workshop"
+      assert Layout.face_branch("ops") == "ops"
       assert Layout.code_branch() == "main"
-      assert Layout.doc_branch() == "work/doc"
-      assert Layout.ops_branch() == "work/ops"
+      assert Layout.workshop_branch() == "workshop"
+      assert Layout.ops_branch() == "ops"
     end
 
     test "face_root/1: each face pairs with its own host root — three branches, three clones" do
       # Git allows one worktree per branch, so the pairing is not a convention that could be
       # collapsed: two faces sharing a root is not a tidier layout, it is an impossible one.
-      assert Layout.face_root("code") == Layout.projects_root()
-      assert Layout.face_root("doc") == Layout.doc_root()
-      assert Layout.face_root("ops") == Layout.work_root()
+      assert Layout.face_root("code") == Layout.code_root()
+      assert Layout.face_root("workshop") == Layout.workshop_root()
+      assert Layout.face_root("ops") == Layout.ops_root()
 
-      assert [Layout.projects_root(), Layout.doc_root(), Layout.work_root()]
+      assert [Layout.code_root(), Layout.workshop_root(), Layout.ops_root()]
              |> Enum.uniq()
              |> length() == 3,
              "two faces sharing a root would make one of them uncheckoutable"
@@ -217,13 +217,13 @@ defmodule Fleet.LayoutTest do
           "enum"
         ])
 
-      assert Enum.sort(enum) == ["code", "doc"]
+      assert Enum.sort(enum) == ["code", "workshop"]
       refute "ops" in enum
     end
 
     test "face_of/1 NAMES the face — a non-face answers nil, never another face by default" do
-      assert Layout.face_of("work/ops") == "ops"
-      assert Layout.face_of("work/doc") == "doc"
+      assert Layout.face_of("ops") == "ops"
+      assert Layout.face_of("workshop") == "workshop"
       assert Layout.face_of("main") == "code"
 
       # The distinction a per-face predicate cannot draw: a producer's feature branch is not the
@@ -240,7 +240,7 @@ defmodule Fleet.LayoutTest do
       # `face_of/1` clause would be a branch the runtime routes and cannot name, and the generation
       # is the only thing standing between here and that. If the `for` comprehension is ever
       # unrolled into hand-written clauses, this test is what notices the one that was forgotten.
-      for face <- ["code", "doc", "ops"] do
+      for face <- ["code", "workshop", "ops"] do
         assert Layout.face_of(Layout.face_branch(face)) == face,
                "#{face}: face_branch/1 and face_of/1 must be inverse on every declared face"
       end

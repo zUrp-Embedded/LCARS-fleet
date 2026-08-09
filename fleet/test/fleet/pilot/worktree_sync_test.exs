@@ -30,23 +30,26 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
 
     # the DOC face: an orphan branch on the same origin, cloned into its own root. Its clone is a
     # WRITER (the architect and the human author in it), which is the property the alignment turns on.
-    doc_root = Path.join(tmp, "projects.doc")
-    File.mkdir_p!(doc_root)
-    git_in!(seed, ["checkout", "-q", "--orphan", "work/doc"])
+    workshop_root = Path.join(tmp, "projects.doc")
+    File.mkdir_p!(workshop_root)
+    git_in!(seed, ["checkout", "-q", "--orphan", "workshop"])
     git_in!(seed, ["rm", "-rq", "--cached", "."])
     File.write!(Path.join(seed, "backlog.md"), "v0\n")
     git_in!(seed, ["add", "-A"])
     git_in!(seed, ["commit", "-qm", "init doc"])
-    git_in!(seed, ["push", "-q", "origin", "work/doc"])
+    git_in!(seed, ["push", "-q", "origin", "workshop"])
     git_in!(seed, ["checkout", "-q", "main"])
-    doc = Path.join(doc_root, "myproj")
-    git!(["clone", "-q", "--branch", "work/doc", origin, doc])
+    doc = Path.join(workshop_root, "myproj")
+    git!(["clone", "-q", "--branch", "workshop", origin, doc])
     git_in!(doc, ["config", "user.email", "t@lcars"])
     git_in!(doc, ["config", "user.name", "t"])
 
     # unique name → async tests without collision on the GenServer's global name.
     name = :"wt_#{System.unique_integer([:positive])}"
-    start_supervised!({WorktreeSync, name: name, projects_root: root, doc_root: doc_root})
+
+    start_supervised!(
+      {WorktreeSync, name: name, projects_root: root, workshop_root: workshop_root}
+    )
 
     %{seed: seed, proj: proj, doc: doc, origin: origin, sync: name}
   end
@@ -105,14 +108,14 @@ defmodule Fleet.Pilot.WorktreeSyncTest do
     git_in!(doc, ["add", "-A"])
     git_in!(doc, ["commit", "-qm", "docs: arch note"])
 
-    # the forge advances on work/doc (a scribe's PR merged)
-    git_in!(seed, ["checkout", "-q", "work/doc"])
+    # the forge advances on workshop (a scribe's PR merged)
+    git_in!(seed, ["checkout", "-q", "workshop"])
     File.write!(Path.join(seed, "spec-notes.md"), "merged from a PR\n")
     git_in!(seed, ["add", "-A"])
     git_in!(seed, ["commit", "-qm", "docs: merged deliverable"])
-    git_in!(seed, ["push", "-q", "origin", "work/doc"])
+    git_in!(seed, ["push", "-q", "origin", "workshop"])
 
-    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "work/doc")
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "workshop")
 
     assert File.exists?(Path.join(doc, "spec-notes.md")),
            "the merged deliverable must have landed"

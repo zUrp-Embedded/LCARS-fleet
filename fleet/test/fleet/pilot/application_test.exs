@@ -109,7 +109,7 @@ defmodule Fleet.Pilot.ApplicationTest do
   # `genre/doc` ticket burns, and nothing checked that the name resolves to a card that can serve
   # a doc ticket — a dead name or an all-code-face card failed at the FIRST doc ticket, silently.
   describe "validate_doc_card!/1 — the doc knob resolves to a card that can serve a doc ticket" do
-    test "the shipped canon passes (doc-direct carries its face: doc producer)" do
+    test "the shipped canon passes (workshop-direct carries its face: doc producer)" do
       assert :ok = Application.validate_doc_card!()
     end
 

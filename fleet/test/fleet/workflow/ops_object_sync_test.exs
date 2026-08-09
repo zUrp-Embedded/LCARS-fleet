@@ -1,6 +1,6 @@
 defmodule Fleet.Workflow.OpsObjectSyncTest do
   @moduledoc """
-  CI-11 — the work/ops write serializer. `OpsObject` is the untouched engine; this GenServer is the
+  CI-11 — the ops write serializer. `OpsObject` is the untouched engine; this GenServer is the
   gate that funnels concurrent git transactions (briefs from several MCP connections + the poller,
   provenance from up to 16 completion Tasks) ONE at a time onto the shared worktree, against the
   `.git/index.lock` + moving-HEAD race. Real temp git repo (`git init`) — the gate commits for real,

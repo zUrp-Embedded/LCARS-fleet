@@ -70,7 +70,7 @@ def pod_projects():
 
     POURQUOI PAS LE NOM DU POD : `Fleet.Pilot.PodId` declare l'identifiant OPAQUE (« we don't
     re-parse the id, we ANCHOR it by prefix ») et il a trois formes (worker, architecte,
-    permanent). Le montage `/home/projects.work/<projet>`, lui, EST le rattachement — c'est le
+    permanent). Le montage `/home/projects.ops/<projet>`, lui, EST le rattachement — c'est le
     projet que le pod peut lire, pas une chaine qui lui ressemble. Un pod sans ce montage n'a pas
     de projet : il est fleet-level, et c'est une reponse, pas un manque.
     """
@@ -89,7 +89,7 @@ def pod_projects():
                 v = argv[i + 1].decode("utf-8", "replace")
                 if v.startswith("lcars-pod-"):
                     pod_id = v[len("lcars-pod-"):]
-            elif a.startswith(b"/home/projects.work/"):
+            elif a.startswith(b"/home/projects.ops/"):
                 seg = a.decode("utf-8", "replace").split("/")
                 if len(seg) > 3 and seg[3]:
                     project = seg[3]

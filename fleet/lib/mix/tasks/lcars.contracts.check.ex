@@ -1480,7 +1480,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
   # fleet started, and the first `create_project` died on `could not make directory (with -p)
-  # "/home/projects.doc": permission denied`. Nothing before that moment could have said it.
+  # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
   #
   # FAIL-CLOSED ON THE ANCHOR: if the `install -d` line cannot be found, this check FAILS instead of
   # passing on an empty read. A renamed line would otherwise turn the guard off in silence, which is

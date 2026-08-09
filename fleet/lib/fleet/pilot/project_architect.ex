@@ -14,7 +14,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `/home/projects/<name>` **RO** — read the code to frame briefs (the host-side dir, the same
       view the human has). Read-only and HARD: a typo fixed by hand here is a change nobody
       reviewed, and an actor with a pen uses it where nobody is looking;
-    * `/home/projects.doc/<name>` **RW** — this IS its producing face. The documentation is written
+    * `/home/projects.workshop/<name>` **RW** — this IS its producing face. The documentation is written
       here, with the human, at the terminal — which is the bulk of what actually happens — and a
       scribe enriches it through the ordinary pipeline.
 
@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
       pipeline, judged and sealed like any other, even when the pass is only an eval. The pod is
       told this in its own words, because a pod that believes it published fills the gap the same
       way one that cannot see its deliverable does;
-    * `/home/projects.work/<name>` **RO** — the record: briefs, verdicts, provenance. The arch is
+    * `/home/projects.ops/<name>` **RO** — the record: briefs, verdicts, provenance. The arch is
       the ONLY pod that mounts it, and reading it is its function — following the work and
       reporting it to the human. **Read-only, and the mode is the point**: it is the party being
       judged, and a judged party that can rewrite the tree it is judged on is not judged at all.
@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
     * `:spawner` — default `Fleet.Spawner` (the `spawn_pod/3` provider).
     * `:forge_client` — default `Fleet.Forge.Client` (numeric repo id for the UUID).
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
-    * `:projects_root` / `:work_root` / `:doc_root` — FS roots (defaults `Fleet.Layout`), same
+    * `:projects_root` / `:ops_root` / `:workshop_root` — FS roots (defaults `Fleet.Layout`), same
       keys as `ProjectOnboard` (the onboard opts thread through unchanged).
   """
 
@@ -80,9 +80,9 @@ defmodule Fleet.Pilot.ProjectArchitect do
     forge_opts = Keyword.take(opts, [:token, :base_url])
 
     name = Fleet.Layout.project_name(repo)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
-    work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
-    doc_dir = Path.join(Keyword.get(opts, :doc_root, Fleet.Layout.doc_root()), name)
+    proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.code_root()), name)
+    work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
+    doc_dir = Path.join(Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root()), name)
     repo_id_result = Spawn.repo_id(forge, repo, forge_opts)
 
     cond do

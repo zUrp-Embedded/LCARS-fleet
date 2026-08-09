@@ -268,7 +268,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   defp conflict_report_work_dir(%Ctx{} = ctx) do
-    dir = Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(ctx.repo))
+    dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(ctx.repo))
     if File.dir?(dir), do: dir
   end
 
@@ -362,9 +362,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     # Written out because as an `else` it also swallowed every future face.
     dir =
       case Fleet.Layout.face_of(base) do
-        "ops" -> Path.join(Fleet.Layout.work_root(), name)
-        "code" -> Path.join(Fleet.Layout.projects_root(), name)
-        nil -> Path.join(Fleet.Layout.projects_root(), name)
+        "ops" -> Path.join(Fleet.Layout.ops_root(), name)
+        "code" -> Path.join(Fleet.Layout.code_root(), name)
+        nil -> Path.join(Fleet.Layout.code_root(), name)
       end
 
     [base_branch: "origin/" <> base, dir: dir]

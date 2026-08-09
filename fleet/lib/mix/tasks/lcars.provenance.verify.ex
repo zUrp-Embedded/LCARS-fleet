@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
       mix lcars.provenance.verify <project-name>
       mix lcars.provenance.verify <project-name> --work-root /path --projects-root /path
 
-  It checks every work/ops provenance statement against code commits and exits
+  It checks every ops provenance statement against code commits and exits
   nonzero on incoherence. No statement is reported but remains valid.
   """
   use Mix.Task
@@ -16,14 +16,14 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   @impl Mix.Task
   def run(argv) do
     {opts, args, _} =
-      OptionParser.parse(argv, strict: [work_root: :string, projects_root: :string])
+      OptionParser.parse(argv, strict: [ops_root: :string, projects_root: :string])
 
     case args do
       [name] ->
-        work_dir = Path.join(Keyword.get(opts, :work_root, Fleet.Layout.work_root()), name)
+        work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
 
         project_dir =
-          Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.projects_root()), name)
+          Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.code_root()), name)
 
         verify_all(name, work_dir, project_dir)
 
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   end
 
   defp verify_all(name, work_dir, project_dir) do
-    unless File.dir?(work_dir), do: Mix.raise("work/ops repo not found: #{work_dir}")
+    unless File.dir?(work_dir), do: Mix.raise("ops repo not found: #{work_dir}")
     unless File.dir?(project_dir), do: Mix.raise("code repo not found: #{project_dir}")
 
     refs =

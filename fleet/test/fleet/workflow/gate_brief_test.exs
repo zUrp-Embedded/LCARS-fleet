@@ -93,7 +93,7 @@ defmodule Fleet.Workflow.GateBriefTest do
       })
 
     # THE SUBJECT IS PRESENT, not addressed. The judge used to receive only `{ref, sha}` plus a
-    # `git show` against a mounted work/ops — which is what obliged EVERY project pod to carry the
+    # `git show` against a mounted ops — which is what obliged EVERY project pod to carry the
     # runtime's record so that this one role could read one file out of it. Now the runtime
     # resolves the pin at dispatch and the text travels.
     assert brief =~ "> Implémente le décodeur morse."

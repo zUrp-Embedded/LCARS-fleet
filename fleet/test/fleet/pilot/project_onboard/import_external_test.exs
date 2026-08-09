@@ -81,8 +81,8 @@ defmodule Fleet.Pilot.ProjectOnboard.ImportExternalTest do
 
     [
       projects_root: Path.join(tmp, "projects"),
-      work_root: Path.join(tmp, "work"),
-      doc_root: Path.join(tmp, "doc"),
+      ops_root: Path.join(tmp, "work"),
+      workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: ExtForge,
       forge_users: Humans,
@@ -149,10 +149,10 @@ defmodule Fleet.Pilot.ProjectOnboard.ImportExternalTest do
     assert_received {:labels_seeded, "fleet/pong"}
     assert_received {:protect_branch, "fleet/pong", _rule}
 
-    # The local import leg ran: dual-dir present, work/ops on the forge.
+    # The local import leg ran: dual-dir present, ops on the forge.
     assert File.dir?(Path.join(o[:projects_root], "pong"))
-    assert File.dir?(Path.join(o[:work_root], "pong"))
-    assert ExtForge.branch_exists?("fleet/pong", "work/ops", [])
+    assert File.dir?(Path.join(o[:ops_root], "pong"))
+    assert ExtForge.branch_exists?("fleet/pong", "ops", [])
 
     # One-way: the local clone's origin is OUR forge, never the external URL.
     {origin, 0} =

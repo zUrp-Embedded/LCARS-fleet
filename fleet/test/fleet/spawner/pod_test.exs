@@ -170,7 +170,7 @@ defmodule Fleet.Spawner.PodTest do
     }
   end
 
-  # Source repo for the project tests: `main` (src.txt) + orphan branch `work/ops` (BACKLOG.md).
+  # Source repo for the project tests: `main` (src.txt) + orphan branch `ops` (BACKLOG.md).
   defp source_repo_with_doc(dir) do
     File.mkdir_p!(dir)
     g = fn args -> System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true) end
@@ -180,7 +180,7 @@ defmodule Fleet.Spawner.PodTest do
     File.write!(Path.join(dir, "src.txt"), "code")
     {_, 0} = g.(["add", "."])
     {_, 0} = g.(["commit", "-q", "-m", "code"])
-    {_, 0} = g.(["checkout", "-q", "--orphan", "work/ops"])
+    {_, 0} = g.(["checkout", "-q", "--orphan", "ops"])
     {_, _} = g.(["rm", "-rfq", "."])
     File.write!(Path.join(dir, "BACKLOG.md"), "doc")
     {_, 0} = g.(["add", "."])
@@ -2138,7 +2138,7 @@ defmodule Fleet.Spawner.PodTest do
       Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
       on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
 
-      # source repo with a code branch (main) + a doc branch (work/ops)
+      # source repo with a code branch (main) + a doc branch (ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
 
       base = valid_profile()

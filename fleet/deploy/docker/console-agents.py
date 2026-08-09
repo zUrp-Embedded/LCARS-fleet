@@ -729,7 +729,7 @@ function stepBox(sname, st){
   const f = {};
   if(st.judge_target) f['juge'] = st.judge_target;
   if(st.brief_kind) f['brief_kind'] = st.brief_kind;
-  if(st.face) f['face'] = st.face + (st.face==='ops' ? ' → livrable sur work/ops' : ' → livrable sur main');
+  if(st.face) f['face'] = st.face + (st.face==='ops' ? ' → livrable sur ops' : ' → livrable sur main');
   if((st.inputs||[]).length) f['inputs'] = st.inputs.join(', ');
   b.appendChild(fact(f));
   return b;
@@ -1020,7 +1020,7 @@ function editor(body, src){
         const dspan = el('span','del'); dspan.appendChild(del); sh.appendChild(dspan);
       }
       sf.appendChild(sh);
-      sf.appendChild(el('div','mini', (pr.face==='ops' ? 'livrable sur work/ops (chemin ticket-doc)' : pr.face==='code' ? 'livrable sur main (chemin ticket-code)' : 'face par defaut du moteur') + ' · sieges = capabilities: producer'));
+      sf.appendChild(el('div','mini', (pr.face==='ops' ? 'livrable sur ops (chemin ticket-doc)' : pr.face==='code' ? 'livrable sur main (chemin ticket-code)' : 'face par defaut du moteur') + ' · sieges = capabilities: producer'));
       prodBox.appendChild(sf);
     });
     const add = el('button','btn','+ producteur (enchaine apres le precedent)');

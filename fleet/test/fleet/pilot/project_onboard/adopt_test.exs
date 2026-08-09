@@ -82,8 +82,8 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
 
     [
       projects_root: Path.join(tmp, "projects"),
-      work_root: Path.join(tmp, "work"),
-      doc_root: Path.join(tmp, "doc"),
+      ops_root: Path.join(tmp, "work"),
+      workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: AdoptForge,
       forge_users: Humans,
@@ -117,7 +117,7 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
     out
   end
 
-  test "nominal adopt: main published AS-IS, labels seeded, work/ops created, protection, arch",
+  test "nominal adopt: main published AS-IS, labels seeded, ops created, protection, arch",
        %{tmp_dir: tmp} do
     o = opts(tmp)
     build_local_main(o, "garage")
@@ -133,21 +133,21 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
     # The bare-create lesson (BL-6-33) applies to adopt too.
     assert_received {:labels_seeded, "fleet/garage"}
 
-    # The work/ops face exists on the forge; the protection landed; the arch is up.
-    assert AdoptForge.branch_exists?("fleet/garage", "work/ops", [])
+    # The ops face exists on the forge; the protection landed; the arch is up.
+    assert AdoptForge.branch_exists?("fleet/garage", "ops", [])
     assert_received {:protect_branch, "fleet/garage", _rule}
     assert_received {:arch_ensured, "fleet/garage"}
   end
 
-  test "a PRESENT work/ops git dir is pushed AS-IS (no scaffold over the user's work)",
+  test "a PRESENT ops git dir is pushed AS-IS (no scaffold over the user's work)",
        %{tmp_dir: tmp} do
     o = opts(tmp)
     build_local_main(o, "garage")
 
-    wdir = Path.join(o[:work_root], "garage")
+    wdir = Path.join(o[:ops_root], "garage")
     File.mkdir_p!(wdir)
     g = fn args -> {_, 0} = System.cmd("git", ["-C", wdir] ++ args, stderr_to_stdout: true) end
-    {_, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", wdir], stderr_to_stdout: true)
+    {_, 0} = System.cmd("git", ["init", "-q", "-b", "ops", wdir], stderr_to_stdout: true)
     g.(["config", "user.email", "t@lcars.local"])
     g.(["config", "user.name", "test"])
     File.write!(Path.join(wdir, "notes.md"), "briefs existants")
@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
     g.(["commit", "-q", "-m", "ops history"])
 
     assert {:ok, _} = ProjectOnboard.adopt_project("garage", o)
-    assert bare_git!(o, "fleet/garage", ["show", "work/ops:notes.md"]) =~ "briefs existants"
+    assert bare_git!(o, "fleet/garage", ["show", "ops:notes.md"]) =~ "briefs existants"
   end
 
   test "refusals name the right verb, nothing touched", %{tmp_dir: tmp} do
@@ -205,6 +205,6 @@ defmodule Fleet.Pilot.ProjectOnboard.AdoptTest do
     assert_received {:forge_deleted, "fleet/garage"}
     # The user's local content is sacred — untouched through the unwind.
     assert File.exists?(Path.join(proj, "code.txt"))
-    refute File.exists?(Path.join(o[:work_root], "garage"))
+    refute File.exists?(Path.join(o[:ops_root], "garage"))
   end
 end

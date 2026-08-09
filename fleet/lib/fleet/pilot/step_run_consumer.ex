@@ -729,12 +729,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # coarsely translated to a decision-v1 `{decision: "escalate", reason: "audit_verdict"}` (which matches
   # the coord policy `escalate.audit_verdict`); the REAL verdict + issue + role + trace ride in `details`
   # so nothing is lost. Routed by DriftMonitor DIRECTLY to CoordBackend.handle_decision.
-  # The project's work/ops worktree, or nil when there is none. A project never onboarded has
+  # The project's ops worktree, or nil when there is none. A project never onboarded has
   # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
   # brief materialization already takes on that path.
   defp verdict_work_dir(state) do
     dir =
-      Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(Map.get(state, :repo, "")))
+      Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(Map.get(state, :repo, "")))
 
     if File.dir?(dir), do: dir
   end

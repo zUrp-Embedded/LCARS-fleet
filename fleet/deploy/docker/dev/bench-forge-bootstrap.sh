@@ -338,9 +338,9 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
       && say "fleet/lcars : main pousse" || say "fleet/lcars : main NON pousse"
 
-    WORK_TREE="${LCARS_WORK_TREE:-/home/projects.work/LCARS/work}"
-    [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" work/ops:work/ops 2>/dev/null \
-      && say "fleet/lcars : work/ops pousse" || say "fleet/lcars : work/ops NON pousse" ; }
+    WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
+    [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
+      && say "fleet/lcars : ops pousse" || say "fleet/lcars : ops NON pousse" ; }
 
     # Le modele passe par SA tache mix (contenu + flag template + labels protocole) — jamais un
     # push a la main : le contenu vient du catalogue, la tache est la seule a savoir l'assembler.

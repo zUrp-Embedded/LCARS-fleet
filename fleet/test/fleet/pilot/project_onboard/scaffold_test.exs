@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
   test "face/4 on the DOC template: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
     # The arch's planning material moved to the doc face with the three-face split: it is neither
     # product source nor runtime-written evidence, and the ops face now carries only the latter.
-    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", [])
+    assert :ok = Scaffold.face(dir, "workshop", "monprojet", [])
     assert File.exists?(Path.join(dir, "backlog.md"))
     assert File.dir?(Path.join(dir, "plans"))
   end
@@ -52,7 +52,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     # `RepoSections` carries SIX level-two headings and drops everything else. A rule written under
     # a heading of its own would be a page nobody ever receives: the file would exist, the test
     # would pass on its existence, and no producer would ever be told.
-    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", [])
+    assert :ok = Scaffold.face(dir, "workshop", "monprojet", [])
     path = Path.join(dir, "CLAUDE.md")
 
     assert {:ok, carried} = Fleet.SPBuilder.RepoSections.read(path)
@@ -77,7 +77,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     # The ops face ships ONE file and it is not decoration: an empty tree cannot be committed, and
     # the branch has to exist before the first brief is materialized onto it. That the one file
     # states the read-only invariant is what makes it worth shipping rather than a `.gitkeep`.
-    assert :ok = Scaffold.face(dir, "work-ops", "monprojet", [])
+    assert :ok = Scaffold.face(dir, "ops", "monprojet", [])
     readme = File.read!(Path.join(dir, "README.md"))
     assert readme =~ "monprojet"
     assert readme =~ "face `ops`"
@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert spec =~ "**Date** : 2026-07-11"
     refute spec =~ "2026-06-14"
 
-    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", today: "2026-07-11")
+    assert :ok = Scaffold.face(dir, "workshop", "monprojet", today: "2026-07-11")
     assert File.read!(Path.join(dir, "backlog.md")) =~ "**Date** : 2026-07-11"
   end
 

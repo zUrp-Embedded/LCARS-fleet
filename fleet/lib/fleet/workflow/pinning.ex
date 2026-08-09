@@ -46,8 +46,8 @@ defmodule Fleet.Workflow.Pinning do
   Renders `body` for posting: either as-is, or as a summary plus a `<kind>: <ref> @ <sha>` pointer.
 
   `opts`:
-    * `:work_dir` — the project's work/ops worktree (REQUIRED to pin; absent → always inline)
-    * `:ref` — work/ops-relative ref to commit at (REQUIRED to pin)
+    * `:work_dir` — the project's ops worktree (REQUIRED to pin; absent → always inline)
+    * `:ref` — ops-relative ref to commit at (REQUIRED to pin)
     * `:kind` — the pointer keyword and the noun of the disclaimer, e.g. `"Verdict"`
     * `:label` — commit-message prefix handed to `OpsObject` (default `"emission"`)
     * `:commit_fun` — seam (tests): `(work_dir, ref, content, opts) -> {:ok, sha, push_state} |
@@ -76,7 +76,7 @@ defmodule Fleet.Workflow.Pinning do
     label = Keyword.get(opts, :label, "emission")
     commit = Keyword.get(opts, :commit_fun, &OpsObjectSync.commit_object/4)
 
-    case commit.(work_dir, ref, body, label: label, push: :work_ops) do
+    case commit.(work_dir, ref, body, label: label, push: :ops) do
       # `:local_only` does NOT fall back to inlining, and that is a deliberate asymmetry with the
       # commit failure below. A commit that did not happen leaves the pointer naming nothing, ever.
       # A push that did not land leaves an object that exists, is addressable by sha, and reaches

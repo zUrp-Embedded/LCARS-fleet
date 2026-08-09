@@ -78,12 +78,12 @@ fi
 # Mesure du 2026-08-09, sur un banc neuf : la face `doc` etait posee dans le code et dans l'etage
 # `build` de l'image (pour le gate), et PAS ici. La boite avait l'air saine, la fleet demarrait,
 # et le premier `create_project` mourait sur « could not make directory (with -p)
-# "/home/projects.doc": permission denied » — le runtime tourne sous l'humain, `/home` est a root,
+# "/home/projects.workshop": permission denied » — le runtime tourne sous l'humain, `/home` est a root,
 # donc creer la zone n'est PAS un geste qu'il peut rattraper. La divergence est tenue par le check
 # `layout.face_roots_provisioned` de `mix lcars.contracts.check` : ajouter une face sans l'ajouter
 # ici fait rougir le gate, en la NOMMANT.
-install -d -m 2775 -g fleet /home/projects /home/projects.work /home/projects.doc
-say "zones de face : /home/projects /home/projects.work /home/projects.doc (2775 root:fleet)"
+install -d -m 2775 -g fleet /home/projects /home/projects.ops /home/projects.workshop
+say "zones de face : /home/projects /home/projects.ops /home/projects.workshop (2775 root:fleet)"
 
 # La SOURCE — l'auto-maintenance en dépend : c'est le checkout que la fleet lit, met à jour
 # (`provision update`) et sur lequel ses agents travaillent.
@@ -124,26 +124,26 @@ if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   fi
 fi
 
-# LE CORPUS work/ops — même contrat que les projets nés ici : un projet canon a DEUX arbres,
-# `main` (le code, ci-dessus) et `work/ops` (plans, journaux, gate-briefs), checkouté dans le
-# dual-dir /home/projects.work/<nom>. Si le remote porte la branche, on la pose ; sinon on le
+# LE CORPUS ops — même contrat que les projets nés ici : un projet canon a DEUX arbres,
+# `main` (le code, ci-dessus) et `ops` (plans, journaux, gate-briefs), checkouté dans le
+# dual-dir /home/projects.ops/<nom>. Si le remote porte la branche, on la pose ; sinon on le
 # dit et la boîte vit sans (une source sans corpus reste maintenable, elle est juste amnésique).
 # Même règle de non-écrasement : un dual-dir déjà là n'est jamais touché.
-LCARS_WORK_DIR="/home/projects.work/$(basename "$LCARS_SOURCE_DIR")"
+LCARS_WORK_DIR="/home/projects.ops/$(basename "$LCARS_SOURCE_DIR")"
 if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
-  if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" work/ops >/dev/null 2>&1; then
-    say "clonage du corpus work/ops → $LCARS_WORK_DIR"
+  if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" ops >/dev/null 2>&1; then
+    say "clonage du corpus ops → $LCARS_WORK_DIR"
     rm -rf "${LCARS_WORK_DIR}.part"
-    if git clone --depth 1 --branch work/ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
+    if git clone --depth 1 --branch ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
        && mv "${LCARS_WORK_DIR}.part" "$LCARS_WORK_DIR"; then
       chown -R "$LCARS_HUMAN:fleet" "$LCARS_WORK_DIR"
-      say "corpus work/ops posé"
+      say "corpus ops posé"
     else
       rm -rf "${LCARS_WORK_DIR}.part"
-      say "CLONAGE work/ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
+      say "CLONAGE ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
     fi
   else
-    say "pas de branche work/ops sur le remote — dual-dir non posé (le corpus arrive par l'adopt)"
+    say "pas de branche ops sur le remote — dual-dir non posé (le corpus arrive par l'adopt)"
   fi
 fi
 

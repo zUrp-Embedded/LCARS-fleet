@@ -156,7 +156,7 @@ defmodule Fleet.Spawner do
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
       * `:brief` — the pod's work as a FILE copy (string). The live order reaches the pod through
         the task queue; this is the copy written into its home.
-      * `:brief_ref` — the address of the brief materialized in the project's work/ops. A dispatch
+      * `:brief_ref` — the address of the brief materialized in the project's ops. A dispatch
         that posts one drops the file copy (it would drift from the pinned version).
       * A `one-shot` pod must have an order in ONE of those two forms, otherwise
         `{:error, :brief_required}`.

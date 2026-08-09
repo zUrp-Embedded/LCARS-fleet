@@ -31,7 +31,7 @@ prouver ce qu'on livre ; `## Doc` dit **où va la documentation livrée et ce qu
 elle, `docs/` est un dossier que tout projet possède et qu'aucun producteur ne reçoit jamais la
 consigne de nourrir : la doc qui sort finit écrite par qui la remarque, ou pas écrite du tout.
 
-⚠ Ne pas confondre avec la face **atelier** (`work/doc`). Là-bas vivent les brouillons, le backlog
+⚠ Ne pas confondre avec la face **atelier** (`workshop`). Là-bas vivent les brouillons, le backlog
 et les plans — le matériau dont ce projet est fait, qui **ne part avec aucune release**. Ici, dans
 `docs/`, vit ce qui **sort** : doc utilisateur, doc mainteneur, doc de fork. Le critère n'est pas la
 nature de l'artefact (de la prose reste de la prose) mais sa **destination** — et ce qui sort se

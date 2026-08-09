@@ -1,6 +1,6 @@
 defmodule Fleet.Workflow.OpsObject do
   @moduledoc """
-  The ONE parametric mechanic "commit an object into the work/ops worktree" — engine, no
+  The ONE parametric mechanic "commit an object into the ops worktree" — engine, no
   business: write the file, commit it atomically (`add_paths: [ref]`, one object per commit),
   publish best-effort. `BriefArtifact` (briefs) and `Provenance` (statements) are pure
   BUSINESS layers (naming, content) plugged onto this mechanic; duplicating it per artifact
@@ -11,8 +11,8 @@ defmodule Fleet.Workflow.OpsObject do
   (`Git.last_commit_sha/2`); different content ⇒ a new commit on the same path (a VERSION —
   git history is the ledger, nothing is ever rewritten).
 
-  **Publication is BEST-EFFORT on top of the local truth** (F-15): `push: :work_ops` (the
-  single owner of the `{"origin", "work/ops"}` target) or an explicit `{remote, refspec}`;
+  **Publication is BEST-EFFORT on top of the local truth** (F-15): `push: :ops` (the
+  single owner of the `{"origin", "ops"}` target) or an explicit `{remote, refspec}`;
   a push failure logs LOUD and keeps the local success — the branch catches up whole at the
   next successful push. Local commit failure remains a real failure.
   """
@@ -21,11 +21,11 @@ defmodule Fleet.Workflow.OpsObject do
 
   alias Fleet.Workflow.Git
 
-  # The ONLY site that knows where work/ops publishes (F-15). Callers say `push: :work_ops`.
-  @work_ops_push {"origin", "work/ops"}
+  # The ONLY site that knows where ops publishes (F-15). Callers say `push: :ops`.
+  @ops_push {"origin", "ops"}
 
   @doc """
-  Commits `content` at `ref` (work/ops-relative) inside `work_dir` and returns
+  Commits `content` at `ref` (ops-relative) inside `work_dir` and returns
   `{:ok, commit_sha, push_state}` — the introducing commit (the version's identity), and what
   happened to the publication.
 
@@ -40,7 +40,7 @@ defmodule Fleet.Workflow.OpsObject do
   - `:label` — commit-message prefix (`"<label>: <ref>"`), REQUIRED (the artifact family
     speaks its name in the log rail).
   - `:author` — `{name, email}`, system default.
-  - `:push` — `:work_ops` | `{remote, refspec}` | absent (local only, tests).
+  - `:push` — `:ops` | `{remote, refspec}` | absent (local only, tests).
 
   `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
   """
@@ -150,8 +150,8 @@ defmodule Fleet.Workflow.OpsObject do
       nil ->
         :not_requested
 
-      :work_ops ->
-        do_push(work_dir, @work_ops_push, opts)
+      :ops ->
+        do_push(work_dir, @ops_push, opts)
 
       {_remote, _refspec} = target ->
         do_push(work_dir, target, opts)
@@ -165,7 +165,7 @@ defmodule Fleet.Workflow.OpsObject do
 
       {:error, reason} ->
         Logger.warning(
-          "OpsObject: work/ops publication failed (#{Keyword.fetch!(opts, :label)}, " <>
+          "OpsObject: ops publication failed (#{Keyword.fetch!(opts, :label)}, " <>
             "#{inspect(reason)}) — local object kept, forge catches up at next push"
         )
 

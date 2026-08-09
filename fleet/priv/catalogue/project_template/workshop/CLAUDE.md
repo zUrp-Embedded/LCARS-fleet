@@ -9,7 +9,7 @@
 
 Le matériau à partir duquel le projet se construit, et qui **ne part pas avec lui** : backlog,
 plans, brouillons de spec, notes de conception, scratchpad. Il vit sur une branche orpheline
-(`work/doc`) et n'est jamais mergé dans le produit.
+(`workshop`) et n'est jamais mergé dans le produit.
 
 **La documentation qui SORT n'est pas ici.** Doc utilisateur, doc mainteneur, doc de fork : elles
 vivent dans `docs/` sur la face code, sont écrites par un producteur qui travaille là-bas, et se

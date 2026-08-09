@@ -49,7 +49,7 @@ metadata:
   mounts:
     - path: /home/projects        # RO: read any project, act on it only through the runtime verbs
       mode: ro
-    - path: /home/projects.doc    # RO: the drafting face — backlog, plans, specs, upstream of tickets
+    - path: /home/projects.workshop    # RO: the drafting face — backlog, plans, specs, upstream of tickets
       mode: ro
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
@@ -76,7 +76,7 @@ spec:
       # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
       # it does not do a project's métier). get_work_item/submit_result (universal) come from the launcher.
       - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
-      - mcp__fleet__create_project       # start a fresh project (repo + dual-dir + card)
+      - mcp__fleet__create_project       # start a fresh project (repo + its three faces + card)
       - mcp__fleet__import_project       # twin of create_project: ADOPTS an existing repo
       - mcp__fleet__open_project         # third verb: RELAUNCH a project already on the machine
       - mcp__fleet__revise_project_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)

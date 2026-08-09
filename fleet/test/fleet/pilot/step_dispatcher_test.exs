@@ -576,7 +576,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "the step's FACE reaches the resolver as :base_branch — and its absence means code (THE default site)" do
       # chantier face-projet: the card step is the ONLY place the face is decided. `face: ops` →
-      # the resolver is asked for work/ops; no face → main. Downstream nobody re-defaults (the
+      # the resolver is asked for ops; no face → main. Downstream nobody re-defaults (the
       # resolver raises without :base_branch — its own test) : this is the one site, so this test
       # is the one that guards the default.
       payload = eng_issue()
@@ -598,7 +598,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       opts = dispatch_opts(project_resolver: capturing_resolver, workflow_map_loader: ops_loader)
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
-      assert_received {:resolver_base, "work/ops"}
+      assert_received {:resolver_base, "ops"}
 
       # Face-less step (every pre-existing card) → the code face, decided here and only here.
       opts2 = dispatch_opts(project_resolver: capturing_resolver)
@@ -830,13 +830,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts =
         dispatch_opts(
           forge_opts: [_test_route: :none],
-          workflow_map_loader: fn "doc-direct" ->
+          workflow_map_loader: fn "workshop-direct" ->
             %{"steps" => %{"build" => %{"role" => "engineer", "face" => "ops", "needs" => []}}}
           end
         )
 
       assert {:skipped, :onboarded} = StepDispatcher.dispatch_issue(payload, opts)
-      assert_received {:routed, 42, "doc-direct", "build"}
+      assert_received {:routed, 42, "workshop-direct", "build"}
       refute_received {:spawned, _, _}
     end
 
@@ -1517,17 +1517,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       name = Fleet.Layout.project_name("lordzurp/lcars-test")
 
-      ops_pr = Map.put(conflict_pr(), "base", %{"ref" => "work/ops"})
+      ops_pr = Map.put(conflict_pr(), "base", %{"ref" => "ops"})
       _ = StepDispatcher.dispatch_review(ops_pr, conflict_opts([]))
       assert_received {:probe_opts, ops_opts}
-      assert ops_opts[:dir] == Path.join(Fleet.Layout.work_root(), name)
-      assert ops_opts[:base_branch] == "origin/work/ops"
+      assert ops_opts[:dir] == Path.join(Fleet.Layout.ops_root(), name)
+      assert ops_opts[:base_branch] == "origin/ops"
 
       # Et le jumeau code, sans quoi l'assertion ci-dessus passerait aussi si les deux faces
       # pointaient le meme arbre.
       _ = StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
       assert_received {:probe_opts, code_opts}
-      assert code_opts[:dir] == Path.join(Fleet.Layout.projects_root(), name)
+      assert code_opts[:dir] == Path.join(Fleet.Layout.code_root(), name)
       assert code_opts[:base_branch] == "origin/main"
     end
 

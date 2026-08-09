@@ -44,7 +44,7 @@ defmodule Fleet.Workflow do
       # pilot (the review posted at completion, the merge report). The domain owns where a committed
       # object goes; the rule of what stays on the surface travels with it.
       Pinning,
-      # OpsObjectSync exported: the work/ops write serializer is SUPERVISED by Fleet.Pilot.Application
+      # OpsObjectSync exported: the ops write serializer is SUPERVISED by Fleet.Pilot.Application
       # (always-on, next to the ForgeFinch pool — MCP briefs write outside the step rail). The domain
       # owns the engine (OpsObject, internal); pilot only starts the gate → the child spec must be
       # nameable from the supervisor (CI-11).

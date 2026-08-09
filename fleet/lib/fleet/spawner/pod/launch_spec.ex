@@ -306,7 +306,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   Earlier entries win on duplicate paths. Modes must be `ro` or `rw`; newline-bearing fields raise.
 
   THE PROJECT'S OPS TREE IS NOT HERE, and its absence is the point. Every project pod used to carry
-  a read-only bind of `<work_root>/<project>` — the runtime's own record: what was asked, what was
+  a read-only bind of `<ops_root>/<project>` — the runtime's own record: what was asked, what was
   judged, what was proven. It was there so that ONE role could read ONE file out of it, and the
   brief and the judging criterion now travel as text instead. A producer holding the ledger its own
   work is scored in is a hazard that buys nothing once the text is in its hands. The architect keeps
@@ -334,7 +334,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @doc """
   Returns the OTHER production face's worktree as a read-only reference for this pod.
 
-  A producer on `code` gets `doc`, a producer on `doc` gets `code` — each one reads what it must
+  A producer on `code` gets `workshop`, a producer on `workshop` gets `code` — each one reads what it must
   compose with and may not edit. A branch that is neither face (a judge cloning a producer's head)
   and a missing worktree both return `nil`.
 
@@ -342,11 +342,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   clone ever sits on that branch and `face_of/1` never answers it here. `face_root/1` raises on
   anything outside the declared faces rather than guessing a directory.
 
-  `roots` is a test seam: `%{"code" => path, "doc" => path}`, defaulting to the layout.
+  `roots` is a test seam: `%{"code" => path, "workshop" => path}`, defaulting to the layout.
   """
   @spec other_face_reference_path(keyword(), Fleet.CapProfile.t(), map()) :: String.t() | nil
   def other_face_reference_path(opts, cap_profile, roots \\ default_face_roots()) do
-    with face when face in ["code", "doc"] <-
+    with face when face in ["code", "workshop"] <-
            Fleet.Layout.face_of(effective_project(opts, cap_profile)["base_branch"]),
          project when is_binary(project) <- rc_project(opts, cap_profile),
          path = Path.join(Map.fetch!(roots, other_face(face)), project),
@@ -357,11 +357,14 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  defp other_face("code"), do: "doc"
-  defp other_face("doc"), do: "code"
+  defp other_face("code"), do: "workshop"
+  defp other_face("workshop"), do: "code"
 
   defp default_face_roots,
-    do: %{"code" => Fleet.Layout.face_root("code"), "doc" => Fleet.Layout.face_root("doc")}
+    do: %{
+      "code" => Fleet.Layout.face_root("code"),
+      "workshop" => Fleet.Layout.face_root("workshop")
+    }
 
   defp cap_profile_mounts(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "mounts") || Map.get(meta, :mounts) || []

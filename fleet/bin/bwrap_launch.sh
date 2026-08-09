@@ -116,7 +116,7 @@ SESSION_NAME_PREFIX="${LCARS_POD_SESSION_NAME_PREFIX:?pod label required (Fleet.
 SANDBOX_HOME="${LCARS_POD_HOME:-$POD_DIR}"
 
 # cwd = branch root (invoked-world). Defaults to SANDBOX_HOME (the home); worker/orchestrator set
-# LCARS_POD_CWD (/home/<project> or /home/projects.work).
+# LCARS_POD_CWD (/home/<project> or /home/projects.ops).
 WORKDIR="${LCARS_POD_CWD:-$SANDBOX_HOME}"
 
 # Clean-world: remaps the INTRA-POD cwd only. If the spawner set LCARS_POD_CWD_SRC (the REAL workspace

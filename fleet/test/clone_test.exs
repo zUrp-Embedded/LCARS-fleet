@@ -3,7 +3,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
   # it reaches the pod as an RO bind (`LaunchSpec.other_face_reference_path/3`). A second mechanism
   # cloning it into `<pod_dir>/work` existed and NEVER ran (its trigger field had no writer in the
   # whole corpus); removed 2026-08-03.
-  # REAL git fixture (no mock) — source repo with `main` + orphan branch `work/ops`.
+  # REAL git fixture (no mock) — source repo with `main` + orphan branch `ops`.
   # async: git fixtures isolated by tmp_dir (git -C) — no application env mutated.
   use ExUnit.Case, async: true
 
@@ -13,7 +13,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
 
   defp git(args, dir), do: System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
 
-  # Source repo: 1 commit on `main` (src.txt) + ORPHAN branch `work/ops` (BACKLOG.md).
+  # Source repo: 1 commit on `main` (src.txt) + ORPHAN branch `ops` (BACKLOG.md).
   defp make_source_repo(dir) do
     File.mkdir_p!(dir)
     {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", dir], stderr_to_stdout: true)
@@ -23,7 +23,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     {_, 0} = git(["add", "."], dir)
     {_, 0} = git(["commit", "-q", "-m", "code"], dir)
 
-    {_, 0} = git(["checkout", "-q", "--orphan", "work/ops"], dir)
+    {_, 0} = git(["checkout", "-q", "--orphan", "ops"], dir)
     {_, _} = git(["rm", "-rfq", "."], dir)
     File.write!(Path.join(dir, "BACKLOG.md"), "doc-branch")
     {_, 0} = git(["add", "."], dir)

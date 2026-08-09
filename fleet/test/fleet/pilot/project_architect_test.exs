@@ -52,8 +52,8 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
       {proj, work, doc,
        [
          projects_root: Path.join(tmp, "projects"),
-         work_root: Path.join(tmp, "projects.work"),
-         doc_root: Path.join(tmp, "projects.doc")
+         ops_root: Path.join(tmp, "projects.work"),
+         workshop_root: Path.join(tmp, "projects.doc")
        ]}
     end
 
@@ -130,7 +130,7 @@ defmodule Fleet.Pilot.ProjectArchitectTest do
                  spawner: CaptureSpawner,
                  forge_client: StubForge,
                  projects_root: Path.join(tmp, "projects"),
-                 work_root: Path.join(tmp, "projects.work")
+                 ops_root: Path.join(tmp, "projects.work")
                )
 
       refute_received {:spawn_pod, _, _, _}

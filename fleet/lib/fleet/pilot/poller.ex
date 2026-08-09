@@ -583,7 +583,7 @@ defmodule Fleet.Pilot.Poller do
     # ones we can SERVE. A repo that reached the org without ever being onboarded has no project
     # directory, and the rail half-serves it FOREVER: the route gets engraved on its issues
     # (`ensure_workflow_map_or_onboard` posts labels and nothing else), then every dispatch
-    # degrades — no work/ops to materialize the brief in, so no `brief_sha` and no provenance; no
+    # degrades — no ops to materialize the brief in, so no `brief_sha` and no provenance; no
     # face worktrees, so no read-only reference for a producer. Each of those is a LOUD warning on
     # its own line, once per dispatch, and none of them names the actual cause: this project was
     # never set up.
@@ -606,7 +606,7 @@ defmodule Fleet.Pilot.Poller do
   defp repo_scoped_suspects(state),
     do: MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
 
-  # The project's work/ops worktree on disk — what `BriefArtifact.physicalize` commits into. Its
+  # The project's ops worktree on disk — what `BriefArtifact.physicalize` commits into. Its
   # ABSENCE is the mechanical signature of a repo that no onboarding verb ever touched: the
   # consumer already degrades on exactly this condition, in its own corner and without naming it.
   # `:require_onboarded` is a TEST-HERMETICITY lever, not an operator knob: the unit tests drive
@@ -621,7 +621,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp project_work_dir(repo),
-    do: Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name(repo))
+    do: Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(repo))
 
   # Same stance and same shape as `parked_skip/2`: no dispatch, no lease, no reclaim seeding, no
   # awaits union, suspects passed through unchanged. Logged ONCE per repo (display-only pdict
@@ -632,7 +632,7 @@ defmodule Fleet.Pilot.Poller do
       Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
 
       Logger.warning(
-        "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no work/ops at " <>
+        "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no ops at " <>
           "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
           "and dispatch without provenance or project doctrine. Onboard it " <>
           "(create / import / open / adopt) to bring it in."

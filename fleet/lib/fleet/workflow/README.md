@@ -1,7 +1,7 @@
 # Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-08-01
+**Last revised**: 2026-08-09
 **Status**: active — domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: —
 
@@ -28,9 +28,9 @@ is restated, only pointed at.
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push
 - `Fleet.Workflow.Git` — system-side git publication mechanism (add → commit → [push]), fail-closed
-- `Fleet.Workflow.BriefArtifact` — physical brief in work/ops (`briefs/` worker / `gate-briefs/` judge, plain names, identity = introducing commit)
-- `Fleet.Workflow.OpsObject` — the ONE commit-an-object-into-work/ops mechanic (write → commit → best-effort push)
-- `Fleet.Workflow.OpsObjectSync` — per-node serializer in front of `OpsObject`: the work/ops worktree gate (one git transaction at a time per node).
+- `Fleet.Workflow.BriefArtifact` — physical brief in ops (`briefs/` worker / `gate-briefs/` judge, plain names, identity = introducing commit)
+- `Fleet.Workflow.OpsObject` — the ONE commit-an-object-into-ops mechanic (write → commit → best-effort push)
+- `Fleet.Workflow.OpsObjectSync` — per-node serializer in front of `OpsObject`: the ops worktree gate (one git transaction at a time per node).
 - `Fleet.Workflow.BriefTemplate` — calibration-template renderer (`priv/catalogue/workflow/brief_templates/`, F-23: prose is data)
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
 - `Fleet.Workflow.Provenance.Verifier` — deterministic triplet verifier, the non-LLM wall (+ `mix lcars.provenance.verify`)

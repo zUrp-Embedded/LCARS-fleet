@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.SyncTest do
              )
 
     calls = drain_git_calls([])
-    # 4 ops (init/add/commit/push) × 2 faces (main + work-ops).
+    # 4 ops (init/add/commit/push) × 2 faces (main + ops).
     assert length(calls) == 8
 
     push_calls = Enum.filter(calls, fn {args, _opts} -> "push" in args end)

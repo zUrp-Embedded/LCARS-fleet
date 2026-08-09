@@ -3,7 +3,7 @@ metadata:
   name: alpha
   description: "Doctrine pure — moon-shot v2 corpus (théorie LCARS conceptuelle)"
 spec:
-  corpus_path: /home/projects.work/LCARS/work/moon-shot
+  corpus_path: /home/projects.ops/LCARS/work/moon-shot
   archivist_cap_profile: archivist
   monk_cap_profile: monk
   # Consolidation 5 monks observee sur runtime v1.5 actuel (test live 2026-05-17 PASS)
@@ -12,15 +12,15 @@ spec:
   # cette structure sert de reference pour les definitions sub-agent.
   monks:
     - label: vision-doctrine
-      glob: "/home/projects.work/LCARS/work/moon-shot/#00_vision/**/*.md /home/projects.work/LCARS/work/moon-shot/#01_doctrine/**/*.md"
+      glob: "/home/projects.ops/LCARS/work/moon-shot/#00_vision/**/*.md /home/projects.ops/LCARS/work/moon-shot/#01_doctrine/**/*.md"
     - label: methodo-decisions
-      glob: "/home/projects.work/LCARS/work/moon-shot/#02_methodology/**/*.md /home/projects.work/LCARS/work/moon-shot/#07_decisions/**/*.md"
+      glob: "/home/projects.ops/LCARS/work/moon-shot/#02_methodology/**/*.md /home/projects.ops/LCARS/work/moon-shot/#07_decisions/**/*.md"
     - label: phase1-extraction
-      glob: "/home/projects.work/LCARS/work/moon-shot/#03_phase-1-core/**/*.md /home/projects.work/LCARS/work/moon-shot/#05_extraction-v1/**/*.md"
+      glob: "/home/projects.ops/LCARS/work/moon-shot/#03_phase-1-core/**/*.md /home/projects.ops/LCARS/work/moon-shot/#05_extraction-v1/**/*.md"
     - label: beyond-reverse
-      glob: "/home/projects.work/LCARS/work/moon-shot/#08_beyond/**/*.md /home/projects.work/LCARS/work/moon-shot/#90_reverse-claude-code/**/*.md"
+      glob: "/home/projects.ops/LCARS/work/moon-shot/#08_beyond/**/*.md /home/projects.ops/LCARS/work/moon-shot/#90_reverse-claude-code/**/*.md"
     - label: archive
-      glob: "/home/projects.work/LCARS/work/moon-shot/#99_archive/**/*.md"
+      glob: "/home/projects.ops/LCARS/work/moon-shot/#99_archive/**/*.md"
   # Sous-corpus non couverts par la consolidation actuelle :
   # - #04_phase-2-gui (vide ou marginal)
   # - #06_reference-package (vide en l'etat)

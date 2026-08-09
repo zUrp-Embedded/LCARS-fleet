@@ -80,7 +80,7 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   # JSON envelope of the work order exposed to the pod — work_item_id = correlation_id.
   #
   # `brief_ref`/`brief_sha` = the ADDRESS of the physical brief (`briefs/issue-<n>-<role>.md`
-  # committed in work/ops; `gate-briefs/` for judges; `brief_sha` = the introducing COMMIT).
+  # committed in ops; `gate-briefs/` for judges; `brief_sha` = the introducing COMMIT).
   # Exposed so the pod CITES the version it acted on, auditable from the forge by any third party.
   #
   # WHAT `"brief"` CARRIES: the FULL TEXT of the order, always. The dispatcher resolves the pinned
@@ -88,7 +88,7 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   # that object lives in.
   #
   # This comment claimed the opposite for one commit longer than it was true, and the cost was
-  # measured: it described the field as a short pointer into a mounted work/ops, which is what the
+  # measured: it described the field as a short pointer into a mounted ops, which is what the
   # rail did BEFORE the order was weaned off that mount. A reader — human or agent — meets the
   # claim before the code, so a stale comment on a payload contract does not sit inert: it sends
   # the next change to the wrong mechanism.

@@ -1385,12 +1385,12 @@ defmodule Fleet.Forge.Client do
   end
 
   # Ce texte est lu par un HUMAIN sur la forge, et il a nommé la mauvaise branche pendant tout le
-  # chantier des trois faces : il disait « la voie ops (branche work/ops) » alors que le livrable
-  # documentaire part sur `work/doc`. `work/ops` est le registre que le runtime écrit, qu'aucun
+  # chantier des trois faces : il disait « la voie ops (branche ops) » alors que le livrable
+  # documentaire part sur `workshop`. `ops` est le registre que le runtime écrit, qu'aucun
   # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
   defp label_description(@lbl_genre_doc),
     do:
-      "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche work/doc, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
+      "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche workshop, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
 
   defp label_description("type:" <> _kind),
     do:

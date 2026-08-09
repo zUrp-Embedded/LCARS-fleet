@@ -95,12 +95,12 @@ defmodule Fleet.Workflow.BriefArtifactTest do
        %{tmp_dir: tmp} do
     git_init(tmp)
 
-    # `:work_ops` resolves to origin/work-ops — no such remote in this repo → Git.push fails;
+    # `:ops` resolves to origin/ops — no such remote in this repo → Git.push fails;
     # the materialization must NOT (F-15: local commit = base truth, publication degrades LOUD).
     # And it SAYS SO. `:ok` alone was the whole answer until 2026-08-05: the caller got a citable
     # pointer and no way to learn the object it names is reachable from nowhere but this disk.
     assert {:ok, %{ref: ref, push: :local_only}} =
-             BriefArtifact.commit(tmp, "pushed brief\n", push: :work_ops)
+             BriefArtifact.commit(tmp, "pushed brief\n", push: :ops)
 
     assert File.exists?(Path.join(tmp, ref))
     assert {_, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
@@ -157,14 +157,14 @@ defmodule Fleet.Workflow.BriefArtifactTest do
   test "physicalize_attrs: commits the object + adds brief_ref/brief_sha, attrs preserved", %{
     tmp_dir: tmp
   } do
-    # the 'fleet/demo' project work/ops = <work_root>/demo
+    # the 'fleet/demo' project ops = <ops_root>/demo
     work_dir = Path.join(tmp, "demo")
     File.mkdir_p!(work_dir)
     git_init(work_dir)
 
     out =
       BriefArtifact.physicalize_attrs(%{brief: "do X\n", role: "engineer"}, "fleet/demo",
-        work_root: tmp
+        ops_root: tmp
       )
 
     assert out.role == "engineer"
@@ -175,11 +175,11 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert File.read!(Path.join(work_dir, out.brief_ref)) == "do X\n"
   end
 
-  test "physicalize_attrs: DEGRADES (attrs unchanged) when the project work/ops does not exist",
+  test "physicalize_attrs: DEGRADES (attrs unchanged) when the project ops does not exist",
        %{tmp_dir: tmp} do
     attrs = %{brief: "x\n", role: "engineer"}
-    # <work_root>/demo missing → degrades, dispatch preserved, no brief_ref/brief_sha.
-    assert BriefArtifact.physicalize_attrs(attrs, "fleet/demo", work_root: tmp) == attrs
+    # <ops_root>/demo missing → degrades, dispatch preserved, no brief_ref/brief_sha.
+    assert BriefArtifact.physicalize_attrs(attrs, "fleet/demo", ops_root: tmp) == attrs
   end
 
   test "physicalize_attrs: nothing to materialize (no brief / nil repo / empty brief) → unchanged" do
@@ -204,7 +204,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
       # where `{:git, _}` is transient. A caller that cannot tell them apart cannot break on one
       # and retry on the other.
       assert {:error, {:work_dir_missing, _}} =
-               BriefArtifact.materialize("x\n", "fleet/demo", work_root: tmp)
+               BriefArtifact.materialize("x\n", "fleet/demo", ops_root: tmp)
     end
 
     test "and the happy path returns the pair the pointer is built from", %{tmp_dir: tmp} do
@@ -213,7 +213,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
       git_init(work_dir)
 
       assert {:ok, {ref, sha}} =
-               BriefArtifact.materialize("do X\n", "fleet/demo", work_root: tmp)
+               BriefArtifact.materialize("do X\n", "fleet/demo", ops_root: tmp)
 
       assert sha =~ ~r/\A[0-9a-f]{40}\z/
       assert String.starts_with?(ref, "briefs/")
@@ -229,9 +229,9 @@ defmodule Fleet.Workflow.BriefArtifactTest do
   # Ce qui les remplace n'est pas ici : le contenu voyage dans le work item (`Spawn.materialize`),
   # et l'adresse l'accompagne pour etre CITEE. Les proprietes de cette forme-la se mesurent la ou
   # elle est construite.
-  test "commit inside an orphan git WORKTREE (the REAL work/ops: `.git` is a FILE, not a dir)",
+  test "commit inside an orphan git WORKTREE (the REAL ops: `.git` is a FILE, not a dir)",
        %{tmp_dir: tmp} do
-    # Live regression: `git init` (`.git` = dir) passed, but the real work/ops is an orphan git
+    # Live regression: `git init` (`.git` = dir) passed, but the real ops is an orphan git
     # WORKTREE (ProjectOnboard `git worktree add --orphan`) whose `.git` is a FILE →
     # `ensure_git_workspace` rejected it (`:not_a_git_workspace`) → brief never committed. This test
     # walks the REAL case, not the plausible one.
@@ -252,7 +252,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     # image that runs this gate) ships 2.39 and answers exit 129. The two-step below builds the
     # SAME shape on every version — a worktree whose `.git` is a FILE, on an orphan branch — so
     # the case under test is unchanged and the gate stops depending on the runner's git.
-    case g.(["worktree", "add", "--orphan", "-b", "work/ops", wt]) do
+    case g.(["worktree", "add", "--orphan", "-b", "ops", wt]) do
       {_, 0} ->
         :ok
 
@@ -262,7 +262,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
         {_, 0} =
           System.cmd(
             "git",
-            ["-c", "user.name=t", "-c", "user.email=t@t", "checkout", "--orphan", "work/ops"],
+            ["-c", "user.name=t", "-c", "user.email=t@t", "checkout", "--orphan", "ops"],
             cd: wt
           )
     end

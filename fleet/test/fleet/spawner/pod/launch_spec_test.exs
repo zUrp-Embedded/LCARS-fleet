@@ -94,7 +94,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     test "AUCUN montage n'est derive de la racine ops — le registre n'est pas le monde d'un pod" do
       # LA PROPRIETE DU SEVRAGE, et c'est une ABSENCE, donc elle a besoin d'un garde explicite : une
       # absence ne rougit jamais toute seule. Chaque pod projet portait un `--ro-bind` de
-      # `<work_root>/<projet>` — briefs, gate-briefs, verdicts, provenance : le registre que le
+      # `<ops_root>/<projet>` — briefs, gate-briefs, verdicts, provenance : le registre que le
       # runtime tient sur le travail, y compris celui du pod qui le lisait. Il etait la pour qu'UN
       # role lise UN fichier, et ce fichier voyage desormais en texte dans le work item.
       #
@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       env =
         LaunchSpec.pod_mounts_env(cap_with_mounts([]), opts, "/usr/local/bin/claude_launch.sh")
 
-      refute env =~ Fleet.Layout.work_root(),
+      refute env =~ Fleet.Layout.ops_root(),
              "un pod producteur ne monte pas l'arbre ou son propre travail est juge"
     end
 
@@ -121,7 +121,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
   describe "other_face_reference_path/3 — the OTHER production face, read-only" do
     # WHAT REPLACED THE OPS MOUNT. Every project pod used to carry a read-only bind of the
-    # runtime's record (`<work_root>/<project>`): briefs, gate-briefs, verdicts, provenance. It
+    # runtime's record (`<ops_root>/<project>`): briefs, gate-briefs, verdicts, provenance. It
     # was there so ONE role could read ONE file out of it, and the brief and the judging criterion
     # now travel as text. What a producer actually needs is the OTHER production face — the code it
     # documents, or the documentation it implements against — and nothing else.
@@ -135,7 +135,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       ]
     end
 
-    defp roots(tmp), do: %{"code" => Path.join(tmp, "code"), "doc" => Path.join(tmp, "doc")}
+    defp roots(tmp), do: %{"code" => Path.join(tmp, "code"), "workshop" => Path.join(tmp, "doc")}
 
     @tag :tmp_dir
     test "a DOC producer gets the code tree", %{tmp_dir: tmp} do
@@ -143,7 +143,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       File.mkdir_p!(Path.join([tmp, "doc", "myproj"]))
 
       assert LaunchSpec.other_face_reference_path(
-               face_opts("work/doc"),
+               face_opts("workshop"),
                cap_with_mounts([]),
                roots(tmp)
              ) == Path.join([tmp, "code", "myproj"])
@@ -184,12 +184,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     test "the OPS branch is not a production face → nil, and no clause says so", %{tmp_dir: tmp} do
       # `face_of/1` answers "ops" here, and `other_face/1` has no clause for it — the guard is the
       # `when face in ["code", "doc"]`, which is the same list the card enum allows. A pod on
-      # work/ops is unreachable by construction; this pins that the reference path agrees rather
+      # ops is unreachable by construction; this pins that the reference path agrees rather
       # than inventing a direction for it.
       File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
 
       assert LaunchSpec.other_face_reference_path(
-               face_opts("work/ops"),
+               face_opts("ops"),
                cap_with_mounts([]),
                roots(tmp)
              ) == nil
@@ -199,7 +199,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert LaunchSpec.other_face_reference_path(
                [project: %{"base_branch" => "main"}],
                cap_with_mounts([]),
-               %{"code" => "/tmp", "doc" => "/tmp"}
+               %{"code" => "/tmp", "workshop" => "/tmp"}
              ) == nil
     end
 
@@ -207,7 +207,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert LaunchSpec.other_face_reference_path(
                face_opts("main"),
                cap_with_mounts([]),
-               %{"code" => "/tmp/nexiste-pas-43", "doc" => "/tmp/nexiste-pas-44"}
+               %{"code" => "/tmp/nexiste-pas-43", "workshop" => "/tmp/nexiste-pas-44"}
              ) == nil
     end
   end

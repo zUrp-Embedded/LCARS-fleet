@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   @doc """
   The fleet's OPS repo — SINGLE authority (`:fleet_pilot, :ops_repo`, default `"fleet/lcars"`).
 
-  Two things land there and must never drift apart: the incident REGISTRY file (branch `work/ops`,
+  Two things land there and must never drift apart: the incident REGISTRY file (branch `ops`,
   `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
   incident — a registry on repo A whose issues open on repo B is an alarm nobody finds. The two
   specific knobs (`:incident_registry_repo` / `:system_issue_repo`) remain as explicit overrides.
@@ -264,7 +264,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp correlation_block(_), do: ""
 
   defp kind_describe(:recurrence),
-    do: {"récurrence", "Déjà vu (registre `work/ops`) — pattern, pas random → ROOT-CAUSE requis."}
+    do: {"récurrence", "Déjà vu (registre `ops`) — pattern, pas random → ROOT-CAUSE requis."}
 
   defp kind_describe(:reroll_failed),
     do:
@@ -274,12 +274,12 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp kind_describe(:pod_failed),
     do:
       {"pod en échec récurrent",
-       "Pod déjà tombé sur la même cause (registre `work/ops`) → pattern → ROOT-CAUSE requis."}
+       "Pod déjà tombé sur la même cause (registre `ops`) → pattern → ROOT-CAUSE requis."}
 
   defp kind_describe(:sp_suspect),
     do:
       {"SP suspect (wake récurrent)",
-       "Le wake-fallback de ce rôle a déjà raté (registre `work/ops`). Avec de l'inférence, 1× = random ; " <>
+       "Le wake-fallback de ce rôle a déjà raté (registre `ops`). Avec de l'inférence, 1× = random ; " <>
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
 

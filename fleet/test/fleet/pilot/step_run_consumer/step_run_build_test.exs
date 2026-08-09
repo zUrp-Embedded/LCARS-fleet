@@ -31,15 +31,15 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
   end
 
   # chantier face-projet: the step_run's base_branch used to be the LITERAL "main". Every legacy
-  # fixture says "main", so only a NON-main face can catch the literal coming back — hence work/ops
+  # fixture says "main", so only a NON-main face can catch the literal coming back — hence ops
   # here, and this is the test the mutation check leans on.
   describe "base_branch — the face rides the event, the PR base wins" do
     test "payload base_branch (non-main face) reaches the step_run — no literal survives" do
       route = %{intent: :review, next_assignee: nil, next_step: nil}
-      payload = %{"pod_id" => "p1", "base_branch" => "work/ops"}
+      payload = %{"pod_id" => "p1", "base_branch" => "ops"}
 
       step_run = StepRunBuild.build(payload, 9, "engineer", route, seams(NoPrForge))
-      assert step_run.base_branch == "work/ops"
+      assert step_run.base_branch == "ops"
     end
 
     test "pr_base_branch WINS over base_branch (judge/rework: the clone-base answers another question)" do
@@ -50,11 +50,11 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
         # the judge's clone base: the FEATURE branch — must never become the PR base
         "base_branch" => "lcars/issue-9-scribe",
         # the PR's own base, stamped at review dispatch
-        "pr_base_branch" => "work/ops"
+        "pr_base_branch" => "ops"
       }
 
       step_run = StepRunBuild.build(payload, 9, "reviewer", route, seams(NoPrForge))
-      assert step_run.base_branch == "work/ops"
+      assert step_run.base_branch == "ops"
     end
 
     test "payload with NEITHER → nil (payload-only judge; the PR contact points assert, not here)" do

@@ -3,7 +3,7 @@
 **Date** : ${YEAR}-${MONTH}-${DAY}
 **Dernière révision** : ${YEAR}-${MONTH}-${DAY}
 **Statut** : draft v1
-**Référencé par** : work/doc:backlog.md
+**Référencé par** : workshop:backlog.md
 **Dérivé de** : —
 
 ## Pitch

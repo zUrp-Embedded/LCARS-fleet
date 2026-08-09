@@ -176,7 +176,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
   end
 
-  describe "brief pointer (E4) — the ticket points at a work/ops-authored doc" do
+  describe "brief pointer (E4) — the ticket points at a ops-authored doc" do
     @moduletag :tmp_dir
 
     defp worker_profile do
@@ -203,7 +203,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
 
     defp authored_workops(tmp) do
-      # the project's work/ops = <work_root>/widget with an authored brief committed.
+      # the project's ops = <ops_root>/widget with an authored brief committed.
       work_dir = Path.join(tmp, "widget")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -220,7 +220,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
       assert {:ok, brief, "worker"} =
-               build_worker(%{"number" => 42, "body" => body}, work_root: tmp)
+               build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
 
       assert brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
@@ -237,14 +237,14 @@ defmodule Fleet.Pilot.BriefBuilderTest do
         "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40))
 
       assert {:error, {:criterion_unavailable, {:brief_pointer, _}}} =
-               build_worker(%{"number" => 42, "body" => body}, work_root: tmp)
+               build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
     end
 
     test "no pointer → inline body IS the brief (both channels honest, same downstream)", %{
       tmp_dir: tmp
     } do
       assert {:ok, brief, "worker"} =
-               build_worker(%{"number" => 42, "body" => "inline brief"}, work_root: tmp)
+               build_worker(%{"number" => 42, "body" => "inline brief"}, ops_root: tmp)
 
       assert brief =~ "inline brief"
       # F-25 — honest citation: no separate authored doc → the order says so, it never
@@ -274,10 +274,10 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
       assert {:ok, brief, "judge"} =
-               build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
+               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
       # THE CRITERION IS IN THE BRIEF. It used to be an ERRAND — cite the doc, let the judge
-      # `git show` it out of a mounted work/ops — and that errand is the whole reason every project
+      # `git show` it out of a mounted ops — and that errand is the whole reason every project
       # pod carried a read-only bind of the runtime's record: what was asked, what was judged, what
       # was proven, handed to the producer whose work it scores.
       assert brief =~ "LE CRITÈRE COMPLET."
@@ -298,7 +298,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
       assert {:ok, brief, "judge"} =
-               build([_issue: {:ok, %{"body" => body}}], work_root: tmp)
+               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
       # It lands under "CONTEXT — already handled, DO NOT execute". A judge reading that as
       # do-not-read skips its only criterion, and a judge without a criterion APPROVES — the false
@@ -312,7 +312,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       tmp_dir: tmp
     } do
       assert {:ok, brief, "judge"} =
-               build([_issue: {:ok, %{"body" => "CRITÈRE INLINE."}}], work_root: tmp)
+               build([_issue: {:ok, %{"body" => "CRITÈRE INLINE."}}], ops_root: tmp)
 
       assert brief =~ "CRITÈRE INLINE."
       refute brief =~ "LCARS_PROJECT_OPS"

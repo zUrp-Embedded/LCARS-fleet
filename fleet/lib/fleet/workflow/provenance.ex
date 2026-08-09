@@ -26,7 +26,7 @@ defmodule Fleet.Workflow.Provenance do
   """
 
   # Writes go through the SERIALIZER (CI-11): up to 16 concurrent completion Tasks engrave provenance
-  # onto the same project's work/ops worktree → `.git/index.lock` race. `OpsObjectSync` serializes one
+  # onto the same project's ops worktree → `.git/index.lock` race. `OpsObjectSync` serializes one
   # git transaction at a time; `OpsObject` stays the engine (reached only via the gate).
   alias Fleet.Workflow.OpsObjectSync
 
@@ -67,7 +67,7 @@ defmodule Fleet.Workflow.Provenance do
     cond do
       not safe_path_segment?(livrable_sha) ->
         # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
-        # separator/traversal (`/`, `\`, `..`) would escape the work/ops dir. It IS a git commit
+        # separator/traversal (`/`, `\`, `..`) would escape the ops dir. It IS a git commit
         # digest (hex) in production — a value carrying a path separator is refused, never
         # trusted as a path segment. (Layout sanitizes too — belt kept: this refuses LOUDLY
         # instead of silently mangling a corrupt anchor into a plausible name.)

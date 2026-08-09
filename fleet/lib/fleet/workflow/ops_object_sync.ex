@@ -1,9 +1,9 @@
 defmodule Fleet.Workflow.OpsObjectSync do
   @moduledoc """
-  Per-node SERIALIZER in front of `Fleet.Workflow.OpsObject` — the work/ops worktree gate.
+  Per-node SERIALIZER in front of `Fleet.Workflow.OpsObject` — the ops worktree gate.
 
   `OpsObject.commit_object/4` is the single parametric engine (write → `git add`/commit → best-effort
-  push) but it runs DIRECTLY on the shared work/ops worktree. Its writers are concurrent and span
+  push) but it runs DIRECTLY on the shared ops worktree. Its writers are concurrent and span
   domains:
 
     * BRIEFS — materialized from several MCP connections (`Delegation.physicalize`, a pod creating an
@@ -40,7 +40,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   WorktreeSync is a cast (the merge does not wait, the clone is a mirror). Here the return — the
   introducing COMMIT sha — IS the committed object's IDENTITY, consumed by `BriefArtifact`/`Provenance`.
   So `commit_object/4` is a `call`: it serializes AND returns the sha. The best-effort push stays inside
-  the transaction (as WorktreeSync's `fetch` is inside its handler); if work/ops push throughput ever
+  the transaction (as WorktreeSync's `fetch` is inside its handler); if ops push throughput ever
   proves a bottleneck, moving the push out of the critical section is safe (it touches refs, not
   `.git/index.lock`, and is already race-tolerant) — noted, not needed.
 

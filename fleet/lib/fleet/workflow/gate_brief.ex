@@ -65,7 +65,7 @@ defmodule Fleet.Workflow.GateBrief do
   # agent (same stance as the git-native `livrable` text).
   #
   # THE SUBJECT IS HERE, IT IS NOT AN ERRAND. This used to carry only `{ref, sha}` and a
-  # `git show` command against a mounted work/ops, which is what obliged every project pod to
+  # `git show` command against a mounted ops, which is what obliged every project pod to
   # carry the runtime's record so that one judge could read one file out of it. The runtime
   # resolves the pin at dispatch and ships the resolved text: the judge reads what it judges,
   # and it never holds the tree where what was asked of it is written down.

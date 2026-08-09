@@ -175,7 +175,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          alive_before?,
          log_ctx
        ) do
-    # PHYSICAL brief: materialized ONCE (committed into work/ops → {ref, introducing-commit sha}) BEFORE the spawn,
+    # PHYSICAL brief: materialized ONCE (committed into ops → {ref, introducing-commit sha}) BEFORE the spawn,
     # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
     # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
     # Three of its four failure causes REFUSE the dispatch instead of degrading it — cf.
@@ -191,15 +191,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # re-derives it from a card that may not declare it — the fail-open default this closes.
     brief_kind = Keyword.get(spawn_opts, :brief_kind, "worker")
 
-    # `:work_root` — SEAM of the work/ops root, the exact twin of `StepRunCompleter`'s and for the
+    # `:ops_root` — SEAM of the ops root, the exact twin of `StepRunCompleter`'s and for the
     # same reason: the real root is a hardcoded global path, so without injecting it NO dispatcher
     # test can walk the materialized branch. Measured before adding it: zero test in
     # `step_dispatcher_test.exs` materializes a brief — all of them run with the work_dir absent,
     # i.e. on the DEGRADED rail. The nominal path of the order delivery had no coverage at all,
     # which is how it could carry a self-referential instruction for a whole chantier.
-    work_root = Keyword.get(spawn_opts, :work_root)
+    ops_root = Keyword.get(spawn_opts, :ops_root)
 
-    case materialize_order(brief, repo, issue_number, role, brief_kind, work_root) do
+    case materialize_order(brief, repo, issue_number, role, brief_kind, ops_root) do
       {:error, _} = refusal ->
         refusal
 
@@ -271,10 +271,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       else: spawn_opts
   end
 
-  defp materialize_order(brief, repo, issue_number, role, brief_kind, work_root) do
+  defp materialize_order(brief, repo, issue_number, role, brief_kind, ops_root) do
     materialize_opts =
-      [name_hint: "issue-#{issue_number}-#{role}", kind: brief_kind, push: :work_ops]
-      |> then(fn o -> if work_root, do: Keyword.put(o, :work_root, work_root), else: o end)
+      [name_hint: "issue-#{issue_number}-#{role}", kind: brief_kind, push: :ops]
+      |> then(fn o -> if ops_root, do: Keyword.put(o, :ops_root, ops_root), else: o end)
 
     case Fleet.Workflow.BriefArtifact.materialize(brief, repo, materialize_opts) do
       {:ok, {ref, sha}} ->
@@ -332,7 +332,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   # Emitted payload → French with its accents (operator/agent-facing data, cf. CLAUDE.md).
   defp degraded_order(brief) do
-    "⚠ PROVENANCE ABSENTE — cet ordre n'a pas pu être commité dans le work/ops du projet (panne " <>
+    "⚠ PROVENANCE ABSENTE — cet ordre n'a pas pu être commité dans le ops du projet (panne " <>
       "transitoire). Il n'a donc PAS de sha à citer : signale-le dans ton résultat plutôt que " <>
       "d'omettre la citation.\n\n" <> brief
   end

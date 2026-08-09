@@ -27,7 +27,7 @@ l'implémentation livrable passe par la fleet.
 
 - **Le code du projet** : monté en LECTURE chez toi — lis-le pour cadrer tes briefs (l'état livré,
   la branche principale).
-- **Ta face doc (work/doc)** : montée en ÉCRITURE — c'est ta face de production, là où vivent la
+- **Ta face doc (workshop)** : montée en ÉCRITURE — c'est ta face de production, là où vivent la
   documentation du produit, tes notes de design, le backlog. Tu y **commit**.
 
   **C'est un ESPACE DE BROUILLON, et c'est délibéré.** Rien ne pousse cette face toute seule : tes
@@ -68,7 +68,7 @@ Appelle le tool MCP **`mcp__fleet__create_issue`** avec :
 - `brief` : le brief clair et COMPLET pour l'engineer — quoi produire, le critère de réussite,
   les contraintes. Plus ton brief est net, meilleur est le livrable. **C'est ICI que ta valeur
   d'architecte s'exprime : un brief bien cadré.** Le système le committe TOUJOURS comme doc
-  d'auteur dans SON registre (`work/ops`) — le ticket ne porte que le résumé + le pointeur pinné
+  d'auteur dans SON registre (`ops`) — le ticket ne porte que le résumé + le pointeur pinné
   (`Brief: <ref> @ <commit>`), le doc porte le détail. Ce registre n'est pas ta zone : tu le lis,
   le système seul y écrit.
 - `summary` : le résumé DÉDIÉ pour le ticket (2-6 lignes, œil humain : quoi / pourquoi / fini

@@ -1,8 +1,8 @@
-# Pipeline V2 — doc-direct (chantier trois faces)
+# Pipeline V2 — workshop-direct (chantier trois faces)
 #
 # Date: 2026-08-02
 # Statut: actif — rail cable et PROUVE le 2026-08-02 sur fleet neuve docker (banc faceproof) :
-#         ticket genre/doc -> burn doc-direct -> scribe -> PR base=work/doc -> merge scelle
+#         ticket genre/doc -> burn workshop-direct -> scribe -> PR base=workshop -> merge scelle
 #         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
 # Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
 # Consommé par: Fleet.Workflow.Loader (schema v2.5, clé `face` du step).
@@ -30,16 +30,16 @@
 
 kind: WorkflowMap
 metadata:
-  name: doc-direct
-  description: "Ticket d'atelier — le scribe rédige sur work/doc, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (rien ne sort du projet, donc aucun lecteur absent à protéger)."
-  presentation: "C0→C4 — le chemin DIRECT de l'ATELIER : le scribe rédige sur work/doc (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (genre/doc), jamais par projet — toute carte de criticité garde son pipeline code."
+  name: workshop-direct
+  description: "Ticket d'atelier — le scribe rédige sur workshop, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (rien ne sort du projet, donc aucun lecteur absent à protéger)."
+  presentation: "C0→C4 — le chemin DIRECT de l'ATELIER : le scribe rédige sur workshop (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (genre/doc), jamais par projet — toute carte de criticité garde son pipeline code."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
   # Jury VIDE délibéré — cf. l'en-tête. Le plancher mécanique tient seul (précédent c0-poc).
   jury: []
   # CI IGNORÉE, et ici la raison est MÉCANIQUE, pas doctrinale : le rail CI livré aux projets vit
-  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `work/doc`
+  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `workshop`
   # ne porte aucune définition de workflow, donc aucun runner ne la sert : sous `required` le gate
   # lirait `:none`, attendrait sa borne, puis escaladerait — sur CHAQUE ticket documentaire. Le
   # jour où la face doc porte son propre rail, cette ligne se relit.
@@ -52,14 +52,14 @@ spec:
     # --- Step unique (racine ET terminal) : rédaction sur la face doc ---
     build:
       role: scribe
-      # LA clé du chantier : le workspace du producteur clone work/doc, sa PR y retourne,
+      # LA clé du chantier : le workspace du producteur clone workshop, sa PR y retourne,
       # le réalignement post-merge suit cette face, et `main` devient sa référence RO.
       #
       # PAS `ops`, et l'enum du schéma ne le permet plus. La face ops porte le REGISTRE que le
       # runtime tient — briefs, verdicts, provenance. Un producteur qui y écrirait pourrait
       # réécrire après coup ce qu'on lui a demandé et ce qu'on a jugé de son travail. La
       # documentation du produit n'a rien à faire dans le même arbre que la preuve.
-      face: doc
+      face: workshop
       needs: []                     # racine DAG — et pas de successeur : chemin direct
       inputs:
         - ticket.body               # le brief rédigé par l'arch

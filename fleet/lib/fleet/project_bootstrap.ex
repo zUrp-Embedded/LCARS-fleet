@@ -1,7 +1,7 @@
 defmodule Fleet.ProjectBootstrap do
   @moduledoc """
   Project-bootstrap domain facade — provisioning of a pod's project workspace
-  (base_sha-pinned clone, work-doc branch).
+  (base_sha-pinned clone, workshop branch).
 
   Boundary anchor; the contract lives in the @moduledoc of
   `Fleet.ProjectBootstrap.Phase` (+ `Phase.Clone`: `clone_or_skip`,

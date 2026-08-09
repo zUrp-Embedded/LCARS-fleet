@@ -303,7 +303,7 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "one-shot + POINTER (brief_ref, no inline text) → {:ok, _} — the nominal rail" do
-      # THE RAIL THIS GUARD REFUSED IN PRODUCTION. Once a brief is materialized into work/ops, the
+      # THE RAIL THIS GUARD REFUSED IN PRODUCTION. Once a brief is materialized into ops, the
       # dispatch drops the inline copy BECAUSE an address replaces it, and hands the pod a
       # `:brief_ref` — the shape the arbitration made canonical. A guard reading only `:brief` saw
       # nothing and refused, the reconciliation re-dispatched, and it looped every 30s forever.

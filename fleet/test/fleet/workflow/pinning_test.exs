@@ -56,7 +56,7 @@ defmodule Fleet.Workflow.PinningTest do
 
       assert_received {:committed, "/tmp/demo", "verdicts/issue-42-qualifier.md", content, opts}
       assert content == body
-      assert opts[:push] == :work_ops
+      assert opts[:push] == :ops
       assert opts[:label] == "verdict"
     end
 

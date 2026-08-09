@@ -205,8 +205,8 @@ defmodule Fleet.Forge.ClientTest do
     test "accepte aussi une liste de NOMS — l'appelant chaud a deja projete" do
       # `Poller.Lease.classify_issue` tient `Enum.map(labels, & &1["name"])`. Lui imposer une
       # re-projection pour appeler cette fonction lui ferait payer l'economie qu'il vient de faire.
-      assert {:ok, {"doc-direct", "redaction"}} =
-               ForgeClient.route_from_labels(["wfmap/doc-direct", "stage/redaction"])
+      assert {:ok, {"workshop-direct", "redaction"}} =
+               ForgeClient.route_from_labels(["wfmap/workshop-direct", "stage/redaction"])
     end
 
     test "un seul des deux → :none, jamais une route a moitie" do

@@ -133,7 +133,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
 
   describe "order materialization — the delivery breaks, it does not degrade" do
     setup do
-      # The gate the hermetic baseline keeps open (fictional repos have no work/ops on disk). Same
+      # The gate the hermetic baseline keeps open (fictional repos have no ops on disk). Same
       # single lever as the poller's admission gate: one policy, two depths.
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
       :ok
@@ -187,7 +187,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # ("read the pin if the file changed", which requires the pin to evaluate) for a whole chantier
     # without a test noticing.
     #
-    # It needed a SEAM: `materialize/3` had `:work_root`, but the dispatcher never threaded it, so
+    # It needed a SEAM: `materialize/3` had `:ops_root`, but the dispatcher never threaded it, so
     # the real hardcoded global root was the only reachable one. Same seam, same reason, as
     # `StepRunCompleter`'s.
     Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                "engineer",
                profile(),
                order,
-               [repo_id: 7, work_root: tmp],
+               [repo_id: 7, ops_root: tmp],
                42,
                42,
                "ctx"
@@ -269,7 +269,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                "engineer",
                profile(),
                order,
-               [repo_id: 7, work_root: tmp],
+               [repo_id: 7, ops_root: tmp],
                42,
                42,
                "ctx"
@@ -314,7 +314,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                profile(),
                order,
                # EXACTLY what the dispatcher builds: the order text under `:brief`.
-               [repo_id: 7, work_root: tmp, brief: order],
+               [repo_id: 7, ops_root: tmp, brief: order],
                42,
                42,
                "ctx"
@@ -348,7 +348,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
                "engineer",
                profile(),
                order,
-               [repo_id: 7, work_root: Path.join(tmp, "absent"), brief: order],
+               [repo_id: 7, ops_root: Path.join(tmp, "absent"), brief: order],
                43,
                43,
                "ctx"

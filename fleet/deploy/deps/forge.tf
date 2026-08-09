@@ -42,7 +42,7 @@ locals {
   # le runtime l'a retiré ({:error, :not_found}) AVANT cette dépose — un compte sans cap-profile
   # est inerte, l'ordre inverse ne l'est pas.
   # scribe (2026-08-02, chantier face-projet) : le producteur DOCUMENTAIRE — meme mecanique de
-  # livraison que l'engineer (git-native, forge-blind), sur la face work/ops. Team writers, comme
+  # livraison que l'engineer (git-native, forge-blind), sur la face ops. Team writers, comme
   # tout producteur. Lecon scoper (BL du 2026-08-02) : un role ajoute au catalogue SANS son compte
   # forge boucle en role_token_unavailable — le compte nait ICI, avec le role.
   roles = ["architect", "engineer", "scribe", "chief", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
@@ -152,7 +152,7 @@ resource "gitea_team" "writers" {
   }
 }
 
-# judges : qualifier/reviewer — WRITE. Ils postent des RAPPORTS D'AUDIT lourds committés dans work/ops
+# judges : qualifier/reviewer — WRITE. Ils postent des RAPPORTS D'AUDIT lourds committés dans ops
 # (via le système `as_role`, jamais le pod forge-aveugle) → ils ont besoin de write, pas juste de la
 # review en read. Corollaire : le grant per-repo `add_collaborator` du runtime (engineer/qualifier/
 # reviewer/gatekeeper) devient REDONDANT avec les teams writers+judges → à retirer côté runtime.

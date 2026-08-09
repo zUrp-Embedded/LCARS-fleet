@@ -114,8 +114,8 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
 
     [
       projects_root: Path.join(tmp, "projects"),
-      work_root: Path.join(tmp, "work"),
-      doc_root: Path.join(tmp, "doc"),
+      ops_root: Path.join(tmp, "work"),
+      workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: FileForge,
       forge_users: Humans,
@@ -200,7 +200,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
     # first documentary ticket, far from the cause — which is the shape of failure the guard
     # exists to prevent, not a new one.
     assert {:ok, _} = ProjectOnboard.close_project("fleet/pong", o)
-    File.rm_rf!(Path.join(o[:doc_root], "pong"))
+    File.rm_rf!(Path.join(o[:workshop_root], "pong"))
 
     assert {:error, {:not_on_machine, "fleet/pong"}} = ProjectOnboard.open("fleet/pong", o)
     refute_received {:arch_ensured, _}

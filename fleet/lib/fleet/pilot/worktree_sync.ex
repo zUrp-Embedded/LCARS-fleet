@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.WorktreeSync do
 
   alias Fleet.Pilot.GitOps
 
-  @projects_root Fleet.Layout.projects_root()
+  @projects_root Fleet.Layout.code_root()
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -59,8 +59,8 @@ defmodule Fleet.Pilot.WorktreeSync do
     {:ok,
      %{
        root: Keyword.get(opts, :projects_root, @projects_root),
-       work_root: Keyword.get(opts, :work_root, Fleet.Layout.work_root()),
-       doc_root: Keyword.get(opts, :doc_root, Fleet.Layout.doc_root())
+       ops_root: Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
+       workshop_root: Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root())
      }}
   end
 
@@ -89,10 +89,18 @@ defmodule Fleet.Pilot.WorktreeSync do
     # realigned into the code worktree is a corruption nobody attributes.
     {dir, aligner} =
       case Fleet.Layout.face_of(branch) do
-        "code" -> {Path.join(state.root, name), &align_code/1}
-        "doc" -> {Path.join(state.doc_root, name), &align_writer(&1, Fleet.Layout.doc_branch())}
-        "ops" -> {Path.join(state.work_root, name), &align_writer(&1, Fleet.Layout.ops_branch())}
-        nil -> {nil, nil}
+        "code" ->
+          {Path.join(state.root, name), &align_code/1}
+
+        "workshop" ->
+          {Path.join(state.workshop_root, name),
+           &align_writer(&1, Fleet.Layout.workshop_branch())}
+
+        "ops" ->
+          {Path.join(state.ops_root, name), &align_writer(&1, Fleet.Layout.ops_branch())}
+
+        nil ->
+          {nil, nil}
       end
 
     cond do

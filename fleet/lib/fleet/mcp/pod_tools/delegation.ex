@@ -117,9 +117,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
     # `brief_pointer` (E4, validated by the tool handler): the ticket body becomes
-    # summary + the canonical pointer line (Layout notation) — the pinned work/ops doc IS the
+    # summary + the canonical pointer line (Layout notation) — the pinned ops doc IS the
     # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
-    # dispatch-time work/ops push (F-15) — no separate publication rail.
+    # dispatch-time ops push (F-15) — no separate publication rail.
     # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
     # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
     # committed doc carries the detail; degraded → inline legacy, never a wall).
@@ -132,7 +132,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
          {:ok, target_state} <- target_state_preflight(forge, repo, supersedes) do
       # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
-      # forge POST CONTINUE — a physicalize (push work/ops) + create_issue can exceed it. The agent then
+      # forge POST CONTINUE — a physicalize (push ops) + create_issue can exceed it. The agent then
       # re-emits the SAME tool call and a bare create would post a DUPLICATE issue (the forge enforces no
       # uniqueness on issues). Idempotency by READBACK (same family as the incident dedup marker): the act
       # carries a content-derived `<!-- lcars-op:<sig> -->` marker; we look for an open issue already
@@ -655,7 +655,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # ============================================================
 
   # The onboarding sequence proper. The SYSTEM runs the mechanics (forge repo +
-  # three faces main/work-ops/work-doc + scaffold + push) via the :project_onboard seam (contract =
+  # three faces main/ops/workshop + scaffold + push) via the :project_onboard seam (contract =
   # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args, onboarder_role) do
@@ -1029,16 +1029,16 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp ensure_pointer(repo, title, brief, nil, summary) do
     opts =
-      case Application.get_env(:fleet_mcp, :brief_work_root) do
+      case Application.get_env(:fleet_mcp, :brief_ops_root) do
         nil ->
-          [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :work_ops]
+          [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :ops]
 
         root ->
           [
             name_hint: Fleet.Layout.sanitize_artifact_name(title),
             kind: "worker",
-            push: :work_ops,
-            work_root: root
+            push: :ops,
+            ops_root: root
           ]
       end
 
@@ -1215,7 +1215,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #
   # PUBLIC (@doc false), same reason as `retire_superseded/5`: the property under test is the SHAPE
   # OF THE DEGRADATION (the created issue survives a seam that cannot write edges), and reaching this
-  # through `create_issue` would need an arch pod, role credentials and a work/ops tree — a test that
+  # through `create_issue` would need an arch pod, role credentials and a ops tree — a test that
   # proves the fixture, not the guard.
   @doc false
   def attach_dependencies(_forge, _repo, result, nil), do: result
@@ -1650,11 +1650,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        # The genre label rides the CREATE so polling cannot route an unlabeled doc issue as
-        # project work. THE WIRE TOKEN IS THE FACE, and it used to be "ops" — a leftover from
-        # before the third tree, when the documentary deliverable landed on `work/ops`. It lands
-        # on `work/doc`; a token naming the wrong face sends the only reader who has to choose
-        # (the arch, from the tool description) to the wrong tree in their head.
+        # The genre label rides the CREATE so polling cannot route an unlabeled workshop issue as
+        # project work.
         issue_opts_result =
           case genre do
             @doc_genre ->

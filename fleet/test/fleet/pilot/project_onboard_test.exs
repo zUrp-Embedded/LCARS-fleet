@@ -69,11 +69,11 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
     setup %{tmp_dir: tmp} do
       proj_root = Path.join(tmp, "projects")
-      work_root = Path.join(tmp, "work")
-      doc_root = Path.join(tmp, "doc")
+      ops_root = Path.join(tmp, "work")
+      workshop_root = Path.join(tmp, "doc")
       proj_dir = Path.join(proj_root, "demo")
-      work_dir = Path.join(work_root, "demo")
-      doc_dir = Path.join(doc_root, "demo")
+      work_dir = Path.join(ops_root, "demo")
+      doc_dir = Path.join(workshop_root, "demo")
       # The local `demo` belongs to fleet/demo (origin says so) — on all three faces.
       init_repo_with_origin(proj_dir, "https://forge.test/fleet/demo.git")
       init_repo_with_origin(work_dir, "https://forge.test/fleet/demo.git")
@@ -81,8 +81,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
       {:ok,
        proj_root: proj_root,
-       work_root: work_root,
-       doc_root: doc_root,
+       ops_root: ops_root,
+       workshop_root: workshop_root,
        proj_dir: proj_dir,
        work_dir: work_dir,
        doc_dir: doc_dir}
@@ -94,8 +94,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
         Keyword.merge(
           [
             projects_root: ctx.proj_root,
-            work_root: ctx.work_root,
-            doc_root: ctx.doc_root,
+            ops_root: ctx.ops_root,
+            workshop_root: ctx.workshop_root,
             spawner: OkSpawner
           ],
           extra
@@ -161,8 +161,8 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
                ProjectOnboard.delete_project(
                  "other/demo",
                  projects_root: ctx.proj_root,
-                 work_root: ctx.work_root,
-                 doc_root: ctx.doc_root,
+                 ops_root: ctx.ops_root,
+                 workshop_root: ctx.workshop_root,
                  force: true,
                  forge_repo: AbsentRepo,
                  spawner: OkSpawner
@@ -192,12 +192,12 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     @tag :tmp_dir
     test "force + NO origin + provably empty → removed as onboard debris (the wedge is gone)",
          ctx do
-      # The exact residue a crash between `git init -b work/ops` and `remote add origin` leaves:
+      # The exact residue a crash between `git init -b ops` and `remote add origin` leaves:
       # a git repo, no origin, nothing in it. Refusing to remove it protected nothing and wedged the
       # next onboard on `refute_existing`, with a host-side `rm` as the only way out.
       File.rm_rf!(ctx.work_dir)
       File.mkdir_p!(ctx.work_dir)
-      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
 
       assert {:ok, %{local: %{project: :removed, work: :removed}}} =
                del(ctx, force: true, forge_repo: OkRepo)
@@ -213,7 +213,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       # the two. Proving debris must never degrade into "no origin, therefore expendable".
       File.rm_rf!(ctx.work_dir)
       File.mkdir_p!(ctx.work_dir)
-      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
       File.write!(Path.join(ctx.work_dir, "notes.md"), "someone's local-only work")
       {_out, 0} = System.cmd("git", ["-C", ctx.work_dir, "add", "-A"])
 
@@ -244,7 +244,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       # emptiness proof were the commit check alone, this dir would be erased with its content.
       File.rm_rf!(ctx.work_dir)
       File.mkdir_p!(ctx.work_dir)
-      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
       File.write!(Path.join(ctx.work_dir, "draft.md"), "uncommitted, still someone's")
 
       assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
@@ -262,7 +262,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
       File.rm_rf!(ctx.work_dir)
       File.mkdir_p!(ctx.work_dir)
       git = fn args -> {_out, 0} = System.cmd("git", ["-C", ctx.work_dir | args]) end
-      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "work/ops", ctx.work_dir])
+      {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
 
       File.write!(
         Path.join(ctx.work_dir, "history.md"),
@@ -285,7 +285,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
 
   describe "reconcile_main_protection/2 (periodic pass — only a SEEDED project is a target)" do
     defmodule ProbeRepo do
-      # `work/ops` is pushed AFTER `main` by both onboard and import, so its presence on the forge
+      # `ops` is pushed AFTER `main` by both onboard and import, so its presence on the forge
       # PROVES the seed push already landed. Driven here by the repo name.
       def branch_exists?(repo, branch, _opts) do
         send(self(), {:branch_exists?, repo, branch})
@@ -316,7 +316,7 @@ defmodule Fleet.Pilot.ProjectOnboardTest do
     end
 
     test "the project TEMPLATE is never protected (its sync FORCE-pushes main)" do
-      # The template carries a `work/ops` face of its own, so the seeded-project test alone would
+      # The template carries a `ops` face of its own, so the seeded-project test alone would
       # let it through. `mix lcars.project_template.sync` force-pushes both faces: a protected
       # `main` breaks the projection that every new project is generated from.
       assert :ok = reconcile("fleet/project-template")

@@ -8,9 +8,10 @@ defmodule Fleet.Layout do
 
   LCARS runs ALONE in a dedicated container (docker/WSL), never installed on a user's
   workstation. The layout is imposed by design (BSD philosophy: we impose OUR own clean
-  tree, we do not adapt to the surrounding mess): `/home/projects` (the working repos),
-  `/home/projects.work` (the meta: journals, seeds, ops), `~/.lcars` (the per-human runtime
-  state — each human is created with their home at register/onboarding). **These are NOT
+  tree, we do not adapt to the surrounding mess): one root per FACE — `/home/projects` (code),
+  `/home/projects.workshop` (drafts), `/home/projects.ops` (the runtime's record) — plus
+  `~/.lcars` (the per-human runtime state, each human created with their home at
+  register/onboarding). **These are NOT
   deployment knobs**: a config file for paths that must never vary would be an API lie
   (over-parametrizing the structural is a mistake). Structural → hardcoded, but typed in ONE
   place: this module is the sole origin of these roots, so they are never re-hardcoded or
@@ -21,14 +22,14 @@ defmodule Fleet.Layout do
   Foundation (next to `Fleet.Slug`): anything may depend down onto it.
   """
 
-  @projects_root "/home/projects"
-  @work_root "/home/projects.work"
+  @code_root "/home/projects"
+  @ops_root "/home/projects.ops"
   # THIRD ROOT, and it is a root and not a subdirectory because git imposes one worktree per
-  # branch: `work/doc` cannot live inside `<work_root>/<project>`, which is already checked out on
-  # `work/ops`. Same shape as the other two — a standalone clone, NOT a linked worktree, for the
+  # branch: `workshop` cannot live inside `<ops_root>/<project>`, which is already checked out on
+  # `ops`. Same shape as the other two — a standalone clone, NOT a linked worktree, for the
   # reason `ProjectOnboard` states about the ops face: a linked worktree keeps its git directory
   # under the parent repo, which a pod mounting the parent RO could then not commit into.
-  @doc_root "/home/projects.doc"
+  @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
@@ -38,7 +39,7 @@ defmodule Fleet.Layout do
   # edge would close a cycle. The foundation is the third way — both already depend down onto it.
   @pod_workspace_subdir "workspace"
 
-  # work/ops artifact layout — the SINGLE truth of where brief/provenance objects live and
+  # ops artifact layout — the SINGLE truth of where brief/provenance objects live and
   # what a valid object name looks like. Producer (Fleet.Workflow.BriefArtifact/Provenance)
   # COMPOSES through it; validator (Fleet.TaskQueue.WorkItem, BND-123) VALIDATES through it —
   # the two sides of the boundary read one source instead of carrying twin copies.
@@ -75,36 +76,49 @@ defmodule Fleet.Layout do
   # from convention.
   #
   # THE CUT, and it is the whole reason there are three rather than two: `ops` carries what the
-  # SYSTEM manipulates — what was asked, what was judged, what was proven. `doc` carries what the
-  # PRODUCT states. `code` carries what it IS. While `ops` held both the record and the
-  # documentation, one branch was simultaneously the tree a producer writes and the tree its
-  # judgement is recorded in, and no rule could separate them because they were the same object.
+  # SYSTEM manipulates — what was asked, what was judged, what was proven. `workshop` carries the
+  # material the project is built FROM. `code` carries what it IS. While `ops` held both the record
+  # and the drafting material, one branch was simultaneously the tree a producer writes and the
+  # tree its judgement is recorded in, and no rule could separate them because they were the same
+  # object.
+  #
+  # THE NAMES PAIR MECHANICALLY: root = `projects.<face>`, branch = `<face>`, with `code` as the one
+  # named exception (`/home/projects`, `main`) for a reason that is not ours — `main` is git's
+  # default. The old names broke that pairing by one notch: `/home/projects.work` was named after
+  # the `work/` PREFIX the two orphan branches shared, so it named the family and not the member,
+  # and four independent sites read it as "the doc one". The prefix carried no mechanism either —
+  # measured: never a glob, a refspec, a branch-protection rule or a `starts_with?` — so it went.
+  #
+  # ⚠ THE DOCUMENTATION THAT SHIPS IS NOT THE `workshop` FACE. It lives in `docs/` on `code`, is
+  # written by a producer working there, and is judged like any other deliverable. What separates
+  # the two is the DESTINATION, never the nature of the artefact — this is the confusion the face
+  # was renamed to end, back when it was called `doc` and collided head-on with `docs/`.
   #
   # TWO VOCABULARIES, and their difference is what makes the invariant structural rather than
-  # checked. A CARD's `face` enum is `code | doc` — the faces a producer may work. This map is
-  # `code | doc | ops` — the branches a project HAS. `ops` being absent from the card enum means no
-  # card can declare it, so no pod is ever given a workspace on it: the read-only treatment of the
-  # record has no exception to enforce because the exception cannot be written down.
-  @face_branches %{"code" => "main", "doc" => "work/doc", "ops" => "work/ops"}
+  # checked. A CARD's `face` enum is `code | workshop` — the faces a producer may work. This map is
+  # `code | workshop | ops` — the branches a project HAS. `ops` being absent from the card enum
+  # means no card can declare it, so no pod is ever given a workspace on it: the read-only treatment
+  # of the record has no exception to enforce because the exception cannot be written down.
+  @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
 
-  @doc "Root of the working repos (`/home/projects`) — imposed container layout."
-  @spec projects_root() :: Path.t()
-  def projects_root, do: @projects_root
+  @doc "Root of the CODE face (`/home/projects`) — imposed container layout."
+  @spec code_root() :: Path.t()
+  def code_root, do: @code_root
 
   @doc "Branch of the CODE face (`main`) — pairs with `projects_root/0`."
   @spec code_branch() :: String.t()
   def code_branch, do: @face_branches["code"]
 
-  @doc "Branch of the DOC face (`work/doc`, orphan) — pairs with `doc_root/0`."
-  @spec doc_branch() :: String.t()
-  def doc_branch, do: @face_branches["doc"]
+  @doc "Branch of the WORKSHOP face (`workshop`, orphan) — pairs with `workshop_root/0`."
+  @spec workshop_branch() :: String.t()
+  def workshop_branch, do: @face_branches["workshop"]
 
-  @doc "Branch of the OPS face (`work/ops`, orphan) — pairs with `work_root/0`."
+  @doc "Branch of the OPS face (`ops`, orphan) — pairs with `ops_root/0`."
   @spec ops_branch() :: String.t()
   def ops_branch, do: @face_branches["ops"]
 
   @doc """
-  Branch of a face named by the card's `face` step key (`"code"` | `"ops"`). Raises on anything
+  Branch of a face named by the card's `face` step key (`"code"` | `"workshop"`). Raises on anything
   else: the workflow-map schema enum guards the vocabulary upstream, so an unknown face here is a
   BYPASS of the schema (or a drift between it and this map), never an operator input to soften.
   """
@@ -149,14 +163,14 @@ defmodule Fleet.Layout do
     do: Path.join(pod_dir, @pod_workspace_subdir)
 
   @doc """
-  OPS root (`/home/projects.work`) — the record the RUNTIME keeps: briefs, gate-briefs, verdicts,
+  OPS root (`/home/projects.ops`) — the record the RUNTIME keeps: briefs, gate-briefs, verdicts,
   provenance, conflicts. Nothing a producer authors lives here, and no pod writes into it.
   """
-  @spec work_root() :: Path.t()
-  def work_root, do: @work_root
+  @spec ops_root() :: Path.t()
+  def ops_root, do: @ops_root
 
   @doc """
-  DRAFTING root (`/home/projects.doc`) — the project's workshop, authored by a producer.
+  DRAFTING root (`/home/projects.workshop`) — the project's workshop, authored by a producer.
 
   NOT the product's documentation, and reading it that way inverts the delivery boundary. What
   lives here is the material a project is built FROM and that never ships with it: backlog, plans,
@@ -167,8 +181,8 @@ defmodule Fleet.Layout do
   The distinction that decides which is which is the DESTINATION, never the nature of the artefact:
   prose bound for `docs/` is a deliverable, prose bound for this tree is not.
   """
-  @spec doc_root() :: Path.t()
-  def doc_root, do: @doc_root
+  @spec workshop_root() :: Path.t()
+  def workshop_root, do: @workshop_root
 
   @doc """
   Host root of a face, by the name a card and `@face_branches` use.
@@ -178,9 +192,9 @@ defmodule Fleet.Layout do
   reason `face_branch/1` does — the schema enum bounds the vocabulary upstream.
   """
   @spec face_root(String.t()) :: Path.t()
-  def face_root("code"), do: @projects_root
-  def face_root("doc"), do: @doc_root
-  def face_root("ops"), do: @work_root
+  def face_root("code"), do: @code_root
+  def face_root("workshop"), do: @workshop_root
+  def face_root("ops"), do: @ops_root
 
   def face_root(other) do
     raise ArgumentError,
@@ -191,7 +205,7 @@ defmodule Fleet.Layout do
 
   @doc """
   Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory
-  under `projects_root`/`work_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
+  under `projects_root`/`ops_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
   derivation (C-06) — copied across ~8 sites before.
   """
   @spec project_name(String.t()) :: String.t()
@@ -263,7 +277,7 @@ defmodule Fleet.Layout do
     do: Path.join(Path.dirname(socket_path), @mcp_activity_marker)
 
   @doc """
-  work/ops-relative ref of a brief object: `briefs/<name>.md` (worker) or
+  ops-relative ref of a brief object: `briefs/<name>.md` (worker) or
   `gate-briefs/<name>.md` (`kind` = `"judge"` — judge work-orders never mix with worker
   briefs). `name` is sanitized to the path-safe charset (one flat segment: no `/`, no
   leading dot → no traversal; versions live in git history, not in the name).
@@ -274,7 +288,7 @@ defmodule Fleet.Layout do
     Path.join(subdir, sanitize_artifact_name(name) <> ".md")
   end
 
-  @doc "work/ops-relative ref of a provenance statement: `provenance/<name>.json` (sanitized)."
+  @doc "ops-relative ref of a provenance statement: `provenance/<name>.json` (sanitized)."
   @spec provenance_ref(String.t()) :: String.t()
   def provenance_ref(name),
     do: Path.join(@provenance_subdir, sanitize_artifact_name(name) <> ".json")
@@ -287,7 +301,7 @@ defmodule Fleet.Layout do
   def valid_brief_ref?(_), do: false
 
   @doc """
-  work/ops-relative ref of a committed gate-decision trace: `gate-verdicts/issue-<n>-<role>.md`.
+  ops-relative ref of a committed gate-decision trace: `gate-verdicts/issue-<n>-<role>.md`.
   """
   @spec gate_verdict_ref(integer(), String.t()) :: String.t()
   def gate_verdict_ref(issue_number, role) when is_integer(issue_number) and is_binary(role),
@@ -298,7 +312,7 @@ defmodule Fleet.Layout do
       )
 
   @doc """
-  work/ops-relative ref of a committed conflict report: `conflicts/pr-<n>.md`.
+  ops-relative ref of a committed conflict report: `conflicts/pr-<n>.md`.
 
   Keyed on the PULL REQUEST, not the issue: a conflict is a property of the merge, and the same
   issue can carry several. One file per PR, versioned by git like every other object here — a second
@@ -309,7 +323,7 @@ defmodule Fleet.Layout do
     do: Path.join(@conflicts_subdir, "pr-#{pr_number}.md")
 
   @doc """
-  work/ops-relative ref of a committed verdict: `verdicts/issue-<n>-<role>.md`.
+  ops-relative ref of a committed verdict: `verdicts/issue-<n>-<role>.md`.
 
   Same plain-human naming as `brief_ref/2`, and the symmetry is the point: an order and the
   judgement of its delivery sit side by side under the same issue number, readable by eye.
@@ -347,14 +361,14 @@ defmodule Fleet.Layout do
   end
 
   # ── brief POINTER notation ────────────────────────────────────────────────
-  # A consequential brief lives as doc(s) committed in work/ops; the ticket body then carries a
+  # A consequential brief lives as doc(s) committed in ops; the ticket body then carries a
   # SUMMARY + this pointer line (`Brief: <ref> @ <commit>`). Composed by the delegation tool
   # (mcp), parsed by the dispatch (pilot) — the notation lives HERE once (same reason as the
   # ref shapes: two domains, one truth, foundation).
   @brief_pointer_re Regex.compile!("^Brief: (\\S+) @ ([0-9a-f]{40})$", "m")
 
   @doc """
-  The pointer BLOCK closing a ticket whose brief lives in work/ops: a sentence that names what the
+  The pointer BLOCK closing a ticket whose brief lives in ops: a sentence that names what the
   body above actually is, then the machine-parseable line `Brief: <ref> @ <commit-sha>`.
 
   The sentence is not decoration. Without it the ticket shows a summary and a pointer side by side

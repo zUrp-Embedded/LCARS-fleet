@@ -333,7 +333,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "boot: NON-MAP entry in the WAL/forge (hand-edited file) → LOUD drop, NEVER a boot-loop",
          %{tmp_dir: tmp} do
-      # The forge file (work/ops) and the WAL are hand-editable: a non-map VALUE under a signature
+      # The forge file (ops) and the WAL are hand-editable: a non-map VALUE under a signature
       # entered RAM then made merge_entry raise in handle_continue(:load) → boot-loop reproducible
       # at every reboot until the file was repaired. Unreadable-WAL doctrine: VISIBLE memory loss
       # (drop logged error), never a boot crash.

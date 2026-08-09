@@ -75,7 +75,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
 
   # Force-push BOTH faces of the priv tree, each as a single fresh commit (projection
   # semantics: the forge copy mirrors priv exactly; template history is NOT load-bearing).
-  # `main/` → the default branch (served by `generate`); `work-ops/` → the `work/ops`
+  # `main/` → the default branch (served by `generate`); `ops/` → the `ops`
   # branch (pure blueprint: `generate` ignores non-default branches — verified live — the
   # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
   # forge are the honest blueprint, expansion happens at write time).
@@ -98,12 +98,12 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
 
     with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result(),
          :ok <- push_face(url, auth_env, "main", "main") do
-      push_face(url, auth_env, "work-ops", "work/ops")
+      push_face(url, auth_env, "ops", "ops")
     end
   end
 
   # Each face is its own throwaway git repo → the two pushed branches share no ancestor
-  # (work/ops is orphan by construction, exactly like the runtime's add_work_ops). Force-push is the
+  # (ops is orphan by construction, exactly like the runtime's add_work_ops). Force-push is the
   # projection semantic (overwrite the forge copy, never merge — L13); a lease would need a
   # remote-tracking ref this fresh `git init` never had, so the blind force is correct HERE.
   defp push_face(url, auth_env, face, branch) do

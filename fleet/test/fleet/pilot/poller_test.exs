@@ -727,9 +727,9 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "an ONBOARDED repo goes through — the gate is the directory, nothing else" do
-      # `work_root` is a compile-time constant, so the directory is created where the code will
+      # `ops_root` is a compile-time constant, so the directory is created where the code will
       # actually look: this pins that the gate reads the REAL path rather than a stub of itself.
-      dir = Path.join(Fleet.Layout.work_root(), Fleet.Layout.project_name("lordzurp/lcars-test"))
+      dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name("lordzurp/lcars-test"))
       existed? = File.dir?(dir)
       unless existed?, do: File.mkdir_p!(dir)
       on_exit(fn -> unless existed?, do: File.rm_rf(dir) end)

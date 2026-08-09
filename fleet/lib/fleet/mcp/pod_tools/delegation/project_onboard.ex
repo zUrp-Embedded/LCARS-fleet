@@ -15,7 +15,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   ## Implementations
 
     * `Fleet.Pilot.ProjectOnboard` — the REAL impl (canonical default: forge repo +
-      three faces `main`/`work/ops`/`work/doc` + scaffold + push). It lives in
+      three faces `main`/`ops`/`workshop` + scaffold + push). It lives in
       `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt this
       behaviour and stays DUCK-TYPED with a cross-reference comment; the callback
       type is aligned on its `@spec onboard/2` (`result()`).
@@ -84,7 +84,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   @doc """
   ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:
-  publishes the existing local pair (empty org repo, labels seeded, origin set, main + work/ops
+  publishes the existing local pair (empty org repo, labels seeded, origin set, main + ops
   pushed, protection, architect). `name` = the dirs' basename; `opts` may relay the criticality
   declaration (same keys as `onboard/2`). The local content is never scaffolded over. Same 3
   return keys as `onboard/2` (+ `architect`).

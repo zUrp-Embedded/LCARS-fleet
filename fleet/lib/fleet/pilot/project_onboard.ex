@@ -5,10 +5,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
   Replicates the multi-face architecture of LCARS itself (one forge repo, **three local repos**):
 
     * `/home/projects/<name>`       → clone, branch `main`       (the deliverable, push origin)
-    * `/home/projects.work/<name>`  → STANDALONE repo, branch `work/ops` (orphan) — the RECORD:
+    * `/home/projects.ops/<name>`  → STANDALONE repo, branch `ops` (orphan) — the RECORD:
       briefs, gate-briefs, verdicts, provenance. Written by the RUNTIME; no pod writes here, and
       since the mount that read it moved, no pod reads it either.
-    * `/home/projects.doc/<name>`   → STANDALONE repo, branch `work/doc` (orphan) — the WORKSHOP:
+    * `/home/projects.workshop/<name>`   → STANDALONE repo, branch `workshop` (orphan) — the WORKSHOP:
       plans, backlog, scratchpad, specs in progress. Written by a PRODUCER, ships with nothing.
 
   Each writer face is STANDALONE and not a linked worktree, and the reason is the same for both:
@@ -34,13 +34,13 @@ defmodule Fleet.Pilot.ProjectOnboard do
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
     5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
        `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
-       * `work/ops` → `/home/projects.work/<name>` — the RECORD the runtime keeps (README only:
+       * `ops` → `/home/projects.ops/<name>` — the RECORD the runtime keeps (README only:
          briefs, gate-briefs, verdicts and provenance are written there BY the runtime, never by a pod)
-       * `work/doc` → `/home/projects.doc/<name>` — the project's WORKSHOP (CLAUDE.md, backlog.md,
+       * `workshop` → `/home/projects.workshop/<name>` — the project's WORKSHOP (CLAUDE.md, backlog.md,
          scratchpad.md, plans/), the material the project is built FROM and that never ships with it
 
-  THREE faces, not two, and the third is not a variation on the second: `work/ops` is written by the
-  runtime and `work/doc` by a producer. Reading the planning material as living on the ops face —
+  THREE faces, not two, and the third is not a variation on the second: `ops` is written by the
+  runtime and `workshop` by a producer. Reading the planning material as living on the ops face —
   as this list did until the split caught up with it — puts a pod's workspace on the tree that
   records how that pod was judged.
 
@@ -70,9 +70,9 @@ defmodule Fleet.Pilot.ProjectOnboard do
   require Logger
 
   # Derived from the single authority of the container layout (Fleet.Layout).
-  @projects_root Fleet.Layout.projects_root()
-  @work_root Fleet.Layout.work_root()
-  @doc_root Fleet.Layout.doc_root()
+  @projects_root Fleet.Layout.code_root()
+  @ops_root Fleet.Layout.ops_root()
+  @workshop_root Fleet.Layout.workshop_root()
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
   # (wrote nothing). committer = the human (git config) traces who initiated.
   # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
@@ -95,8 +95,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
     * `:org`           — forge org (default `"fleet"`)
     * `:description`   — repo description (default `""`)
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
-    * `:projects_root` / `:work_root` / `:doc_root` — FS roots, one per face (defaults:
-      `/home/projects`, `/home/projects.work`, `/home/projects.doc`)
+    * `:projects_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
+      `/home/projects`, `/home/projects.ops`, `/home/projects.workshop`)
     * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
 
   Returns `{:ok, %{repo, project_dir, work_dir, doc_dir}}` or `{:error, term()}` (fail-fast) —
@@ -170,7 +170,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
              url,
              dirs.ops,
              Fleet.Layout.ops_branch(),
-             "work-ops",
+             "ops",
              name,
              opts
            ),
@@ -180,15 +180,15 @@ defmodule Fleet.Pilot.ProjectOnboard do
              full_name,
              url,
              dirs.doc,
-             Fleet.Layout.doc_branch(),
-             "work-doc",
+             Fleet.Layout.workshop_branch(),
+             "workshop",
              name,
              opts
            ),
          :ok <- lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ready — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.doc_branch()}=#{dirs.doc}"
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.doc}"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
@@ -297,7 +297,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.doc_branch()}=#{dirs.doc}"
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.doc}"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
@@ -581,10 +581,10 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @doc """
   Publishes a disk-only project to a new empty forge repository. `BL-6-32`
 
-  The local `main` and any valid local `work/ops` history are preserved. The call seeds protocol
+  The local `main` and any valid local `ops` history are preserved. The call seeds protocol
   labels, ensures the project declaration, publishes both faces, protects `main`, and ensures the
   architect. It refuses conflicting origins, existing forge state and malformed local faces.
-  Compensation removes only the forge repository and a `work/ops` directory created by this call.
+  Compensation removes only the forge repository and a `ops` directory created by this call.
   """
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def adopt_project(name, opts \\ []) when is_binary(name) do
@@ -650,7 +650,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp classify_adopt_writer_faces(dirs) do
     with {:ok, ops} <- classify_adopt_face(dirs.ops, Fleet.Layout.ops_branch()),
-         {:ok, doc} <- classify_adopt_face(dirs.doc, Fleet.Layout.doc_branch()) do
+         {:ok, doc} <- classify_adopt_face(dirs.doc, Fleet.Layout.workshop_branch()) do
       {:ok, %{ops: ops, doc: doc}}
     end
   end
@@ -688,7 +688,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
              url,
              dirs.ops,
              Fleet.Layout.ops_branch(),
-             "work-ops",
+             "ops",
              name,
              opts
            ),
@@ -698,15 +698,15 @@ defmodule Fleet.Pilot.ProjectOnboard do
              states.doc,
              url,
              dirs.doc,
-             Fleet.Layout.doc_branch(),
-             "work-doc",
+             Fleet.Layout.workshop_branch(),
+             "workshop",
              name,
              opts
            ),
          :ok <- lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ADOPTED from disk — main published, " <>
-          "#{Fleet.Layout.ops_branch()} and #{Fleet.Layout.doc_branch()} up, protection placed"
+          "#{Fleet.Layout.ops_branch()} and #{Fleet.Layout.workshop_branch()} up, protection placed"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
@@ -761,8 +761,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
       end
 
     # A face we BUILT is removed; a face that was already the user's is KEPT. The distinction is
-    # per-face because the states are: adopting a project with a work/ops of its own and no
-    # work/doc must not delete the former while cleaning up the latter.
+    # per-face because the states are: adopting a project with a ops of its own and no
+    # workshop must not delete the former while cleaning up the latter.
     undo = fn state, dir ->
       if state == :absent, do: compensate_dir(dir), else: :kept_preexisting
     end
@@ -803,7 +803,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     5. Empty org repo + protocol labels + intensity committed IN the scratch BEFORE the push
        (the push must CARRY intensity.json or every later jury read falls back in silence) →
        push main (full history) → the local `finish_import` leg (clone from OUR forge,
-       work/ops, protection — its `lock_main` reads the now-present local intensity).
+       ops, protection — its `lock_main` reads the now-present local intensity).
 
   Refusals before any effect: dirs already on machine (`{:already_on_machine, _}` — that
   project wants `open`/`import`), forge repo existing (`{:repo_already_exists, _}`).
@@ -1491,11 +1491,19 @@ defmodule Fleet.Pilot.ProjectOnboard do
              url,
              dirs.ops,
              Fleet.Layout.ops_branch(),
-             "work-ops",
+             "ops",
              name,
              opts
            ) do
-      ensure_face(full_name, url, dirs.doc, Fleet.Layout.doc_branch(), "work-doc", name, opts)
+      ensure_face(
+        full_name,
+        url,
+        dirs.doc,
+        Fleet.Layout.workshop_branch(),
+        "workshop",
+        name,
+        opts
+      )
     end
   end
 
@@ -1517,7 +1525,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   defp seeded_project?(repo, opts) do
     repo != project_template(opts) and
-      repo_mod(opts).branch_exists?(repo, "work/ops", fc_opts(opts))
+      repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
   end
 
   defp protect_main(repo, opts) do
@@ -1675,7 +1683,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
       end)
 
     published? =
-      Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.doc_branch()], fn branch ->
+      Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.workshop_branch()], fn branch ->
         repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts))
       end)
 
@@ -1818,8 +1826,8 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp face_dirs(name, opts) do
     %{
       code: Path.join(Keyword.get(opts, :projects_root, @projects_root), name),
-      doc: Path.join(Keyword.get(opts, :doc_root, @doc_root), name),
-      ops: Path.join(Keyword.get(opts, :work_root, @work_root), name)
+      doc: Path.join(Keyword.get(opts, :workshop_root, @workshop_root), name),
+      ops: Path.join(Keyword.get(opts, :ops_root, @ops_root), name)
     }
   end
 

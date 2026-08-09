@@ -63,11 +63,11 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     end
 
     # Answered from the bare repo this forge actually holds. Hardcoded `false`, it sent the
-    # import RETRY into re-pushing a freshly recreated orphan `work/ops` — a no-op only while
+    # import RETRY into re-pushing a freshly recreated orphan `ops` — a no-op only while
     # the new commit lands on the same SHA, i.e. within the same SECOND (git timestamps are
     # second-granular). Under load the second flips, the SHA differs, and the push is refused
     # non-fast-forward: a test whose verdict came from the clock. Answering truthfully also
-    # exercises the `work/ops` idempotence `import/2` promises, instead of bypassing it.
+    # exercises the `ops` idempotence `import/2` promises, instead of bypassing it.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
@@ -97,8 +97,8 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
 
     [
       projects_root: Path.join(tmp, "projects"),
-      work_root: Path.join(tmp, "work"),
-      doc_root: Path.join(tmp, "doc"),
+      ops_root: Path.join(tmp, "work"),
+      workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
       forge_repo: FileForge,
       forge_users: Humans,
@@ -133,8 +133,8 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     # the retry hits no wall (409 / refute_existing).
     assert_received {:forge_deleted, "fleet/nolabel"}
     refute File.exists?(Path.join(o[:projects_root], "nolabel"))
-    refute File.exists?(Path.join(o[:work_root], "nolabel"))
-    refute File.exists?(Path.join(o[:doc_root], "nolabel"))
+    refute File.exists?(Path.join(o[:ops_root], "nolabel"))
+    refute File.exists?(Path.join(o[:workshop_root], "nolabel"))
   end
 
   test "a LATE onboard failure (protect_branch) compensates: forge repo deleted, dirs removed, retry possible",
@@ -148,19 +148,19 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     # wedge a retry on the refute_existing / create_repo-409 walls.
     assert_received {:forge_deleted, "fleet/phoenix"}
     refute File.exists?(Path.join(o[:projects_root], "phoenix"))
-    refute File.exists?(Path.join(o[:work_root], "phoenix"))
-    refute File.exists?(Path.join(o[:doc_root], "phoenix"))
+    refute File.exists?(Path.join(o[:ops_root], "phoenix"))
+    refute File.exists?(Path.join(o[:workshop_root], "phoenix"))
 
     # The RETRY of the same onboard now goes through cleanly (fresh create, full sequence).
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/phoenix"}} = ProjectOnboard.onboard("phoenix", o)
     assert File.dir?(Path.join(o[:projects_root], "phoenix"))
-    assert File.dir?(Path.join(o[:work_root], "phoenix"))
-    assert File.dir?(Path.join(o[:doc_root], "phoenix"))
+    assert File.dir?(Path.join(o[:ops_root], "phoenix"))
+    assert File.dir?(Path.join(o[:workshop_root], "phoenix"))
   end
 
   test "an onboard that RAISES compensates too — and the crash stays a crash", %{tmp_dir: tmp} do
-    # The exit compensation did not cover, found on a bench: /home/projects.doc absent →
+    # The exit compensation did not cover, found on a bench: /home/projects.workshop absent →
     # `mkdir_p!` raised → the forge repo, the code face and the ops face all survived a failed
     # onboard, and the caller saw only `tool_crashed`. The stub raises the very same exception.
     o = opts(tmp)
@@ -171,13 +171,13 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     # RE-RAISED, so the caller still sees a crash — and the machine is clean anyway.
     assert_received {:forge_deleted, "fleet/vulcan"}
     refute File.exists?(Path.join(o[:projects_root], "vulcan"))
-    refute File.exists?(Path.join(o[:work_root], "vulcan"))
-    refute File.exists?(Path.join(o[:doc_root], "vulcan"))
+    refute File.exists?(Path.join(o[:ops_root], "vulcan"))
+    refute File.exists?(Path.join(o[:workshop_root], "vulcan"))
 
     # And the retry is possible — which is the whole reason compensation exists.
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/vulcan"}} = ProjectOnboard.onboard("vulcan", o)
-    assert File.dir?(Path.join(o[:doc_root], "vulcan"))
+    assert File.dir?(Path.join(o[:workshop_root], "vulcan"))
   end
 
   test "a successful onboard compensates NOTHING (dirs + repo stay)", %{tmp_dir: tmp} do
@@ -189,8 +189,8 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
 
     refute_received {:forge_deleted, _}
     assert File.dir?(Path.join(o[:projects_root], "apollo"))
-    assert File.dir?(Path.join(o[:work_root], "apollo"))
-    assert File.dir?(Path.join(o[:doc_root], "apollo"))
+    assert File.dir?(Path.join(o[:ops_root], "apollo"))
+    assert File.dir?(Path.join(o[:workshop_root], "apollo"))
   end
 
   test "a LATE import failure compensates the DIRS ONLY — the pre-existing repo is NEVER deleted",
@@ -205,13 +205,13 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     # Dirs unwound; the repo was NOT ours to delete.
     refute_received {:forge_deleted, _}
     refute File.exists?(Path.join(o[:projects_root], "heritage"))
-    refute File.exists?(Path.join(o[:work_root], "heritage"))
+    refute File.exists?(Path.join(o[:ops_root], "heritage"))
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
 
-    # `work/ops` was published BEFORE the late failure (ensure_work_ops precedes lock_main), so
+    # `ops` was published BEFORE the late failure (ensure_work_ops precedes lock_main), so
     # the forge holds it and the retry below must SEE it and skip the re-push. Pinned here
     # because a forge lying `false` makes that retry depend on the wall clock, not on the code.
-    assert FileForge.branch_exists?("fleet/heritage", "work/ops", [])
+    assert FileForge.branch_exists?("fleet/heritage", "ops", [])
 
     # Retry clean.
     Process.put(:protect_result, {:ok, :created})
@@ -227,7 +227,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     defp landed_onboard(tmp) do
       o = opts(tmp)
       assert {:ok, %{repo: "fleet/apollo"}} = ProjectOnboard.onboard("apollo", o)
-      {o, Path.join(o[:projects_root], "apollo"), Path.join(o[:work_root], "apollo")}
+      {o, Path.join(o[:projects_root], "apollo"), Path.join(o[:ops_root], "apollo")}
     end
 
     test "re-emit of a fully landed onboard → {:ok, idempotent}, nothing created", %{tmp_dir: tmp} do
@@ -276,16 +276,16 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
 
-    test "a HALF onboard (work/ops never published) → still REFUSED, never answered 'done'", %{
+    test "a HALF onboard (ops never published) → still REFUSED, never answered 'done'", %{
       tmp_dir: tmp
     } do
-      # `work/ops` is the LAST step of the sequence, so it standing is what proves the whole sequence
+      # `ops` is the LAST step of the sequence, so it standing is what proves the whole sequence
       # ran. Missing, the residue is a half-onboard and answering success would be the same lie in
-      # the other direction — a caller told 'created' over a project that has no work/ops.
+      # the other direction — a caller told 'created' over a project that has no ops.
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
-      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/work/ops"])
-      refute FileForge.branch_exists?("fleet/apollo", "work/ops", [])
+      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/ops"])
+      refute FileForge.branch_exists?("fleet/apollo", "ops", [])
 
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
@@ -308,7 +308,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       # a two-face check from a three-face one. A doc dir alone is exactly the residue a compensated
       # onboard can leave — the face is built LAST.
       o = opts(tmp)
-      doc_dir = Path.join(o[:doc_root], "apollo")
+      doc_dir = Path.join(o[:workshop_root], "apollo")
       File.mkdir_p!(doc_dir)
 
       assert {:error, {:already_exists, ^doc_dir}} = ProjectOnboard.onboard("apollo", o)
@@ -317,13 +317,13 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     test "a landed onboard whose DOC branch vanished is NOT satisfied — no idempotent 'done'", %{
       tmp_dir: tmp
     } do
-      # The twin of the work/ops case above, and it has to be stated per face: convergence answers
+      # The twin of the ops case above, and it has to be stated per face: convergence answers
       # "already realized" and creates nothing, so a face missing from what it verifies is a face
       # that never gets built while the caller is told the project is ready.
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
-      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/work/doc"])
-      refute FileForge.branch_exists?("fleet/apollo", "work/doc", [])
+      {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/workshop"])
+      refute FileForge.branch_exists?("fleet/apollo", "workshop", [])
 
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
