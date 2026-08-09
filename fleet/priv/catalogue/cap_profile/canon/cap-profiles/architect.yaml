@@ -41,11 +41,29 @@ spec:
     # lists to the CLI, and the vendor decides. Naming a mechanism the runtime does not have made a
     # reader believe the enforcement was ours and auditable in `lib/`.
     #
-    # ⚠ AND THE LISTS DECLARE, they do not construct. Measured from inside a pod (audit 2026-08-08):
-    # a tool ABSENT from `allowedTools` was invoked successfully. Whether `disallowedTools` bites is
-    # NOT measured — it needs a probe from inside a pod, which is a different question from the one
-    # answered. Until it is answered, read these lists as an INTENT the runtime declares, never as a
-    # guarantee it holds.
+    # ⚠ THE TWO LISTS ARE NOT THE SAME KIND OF THING, AND THIS COMMENT SAID THEY WERE. It read
+    # "the lists declare, they do not construct" — half right, and the wrong half was load-bearing.
+    # Measured on a bench 2026-08-09, CLI 2.1.221, three runs of one prompt that asks for `Bash`:
+    #
+    #   allow=Bash            deny=—      -> the tool runs
+    #   allow=Read (no Bash)  deny=—      -> the tool runs ANYWAY        <- allow DECLARES
+    #   allow=Bash            deny=Bash   -> the tool is ABSENT from the session, and deny beats
+    #                                        allow when both name it     <- deny CONSTRUCTS
+    #
+    # So: `allowedTools` is an INTENT — a tool merely missing from it stays reachable.
+    # `disallowedTools` is a WALL: the CLI removes the tool from the session, and it validates its
+    # own rules ("Permission deny rule X matches no known tool") so a typo announces itself instead
+    # of silently opening.
+    #
+    # ⚠ THE MODE OF THAT MEASUREMENT IS NOT THE POD'S. Those three runs were `-p` (one shot, no one
+    # to prompt), and a pod runs `--remote-control`. The DENY result is a session-construction fact
+    # and does not depend on the mode; the ALLOW result could — under a mode with a prompt path, an
+    # unlisted tool might ask instead of proceeding. It is stated anyway because the audit of
+    # 2026-08-08 saw the same porosity FROM INSIDE A POD, with a Skill: two observations, two
+    # modes, one direction. Name the gap rather than close it with a deduction.
+    #
+    # THE RULE THAT FOLLOWS: what a role must NOT do belongs in `disallowedTools`. Leaving it out of
+    # `allowedTools` closes nothing and reads exactly like closing it.
     allowedTools:
       - Read
       - Glob
