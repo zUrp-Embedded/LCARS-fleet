@@ -14,6 +14,10 @@
 # un banc detruit par une commande sans argument. Un banc qui TRAVAILLE se detruit comme un autre —
 # la machine ne sait pas lequel compte, c'est a toi de le savoir.
 #
+# UN BANC = TROIS PROJETS COMPOSE : la boite (`<projet>`), la forge (`<projet>forge`) et le
+# runner (`<projet>-runner`). Les trois partent ici, le runner en premier parce qu'il tient le
+# reseau de la forge.
+#
 # USAGE : bench-down.sh --project lcars-nuit --yes
 # EXIT  : 0 detruit · 1 arguments · 2 rien a detruire sous ce nom
 
@@ -39,10 +43,32 @@ done
 [[ "$CONFIRM" -eq 1 ]] || { echo "bench-down: --yes requis — ceci efface les volumes de '$PROJECT'" >&2; exit 1; }
 
 FORGE_PROJECT="${PROJECT}forge"
+RUNNER_PROJECT="${PROJECT}-runner"
 BOX="${PROJECT}-lcars-1"
+RUNNER="${RUNNER_PROJECT}-runner-1"
 
-"$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX" \
-  || { echo "bench-down: aucun conteneur '$BOX' — rien a detruire" >&2; exit 2; }
+# UN BANC A TROIS PROJETS COMPOSE, ET CELUI-CI N'EN VOYAIT QUE DEUX. `bench-up.sh` lance aussi un
+# runner (`bench-runner.sh --project "${PROJECT}-runner"`) ; il n'etait jamais detruit. Mesure du
+# 2026-08-09 : apres un `bench-down` complet, `lcars-faces-runner-runner-1` tournait toujours, et
+# le `down` de la forge finissait sur « Network ... Resource is still in use » — le runner est
+# branche sur le reseau de la forge, donc tant qu'il vit ce reseau ne part pas. Il reste enregistre
+# contre une forge qui n'existe plus : le zombie que bench-runner decrit dans son propre en-tete,
+# sauf que la, personne ne le nettoie avant le banc SUIVANT.
+#
+# LE DISCRIMINANT COUVRE LES DEUX, et pas seulement la boite : un banc a moitie detruit (boite
+# partie, runner debout) etait impossible a finir — ce script sortait en 2 avant d'atteindre le
+# runner, et il fallait un `docker rm` a la main.
+"$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qxE "$BOX|$RUNNER" \
+  || { echo "bench-down: ni '$BOX' ni '$RUNNER' — rien a detruire" >&2; exit 2; }
+
+# LE RUNNER D'ABORD, et l'ordre n'est pas cosmetique : il tient le reseau de la forge, donc le
+# detruire apres laisserait ce reseau debout. Valeurs factices comme dans le nettoyage de
+# bench-runner : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et l'interpolation refuse MEME
+# un down — sans elles ce nettoyage echoue en silence sous le `|| true`.
+echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
+LCARS_FORGE_URL="http://forge:3000" LCARS_RUNNER_TOKEN=" " \
+  "$DOCKER_BIN" compose -f "$HERE/runner-compose.yml" -p "$RUNNER_PROJECT" \
+  down -v --remove-orphans || true
 
 echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" down -v --remove-orphans || true
