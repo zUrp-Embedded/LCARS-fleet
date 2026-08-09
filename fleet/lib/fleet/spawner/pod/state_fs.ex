@@ -103,7 +103,22 @@ defmodule Fleet.Spawner.Pod.StateFs do
       "conditions" => state.conditions |> MapSet.to_list() |> Enum.map(&Atom.to_string/1),
       "issue_id" => state.issue_id,
       # Distinguishes a pod-process crash from a Fleet restart.
-      "boot_id" => Fleet.Spawner.BootEpoch.id()
+      "boot_id" => Fleet.Spawner.BootEpoch.id(),
+      # THE POOL SLOT THIS POD HOLDS, made durable.
+      #
+      # `PoolSlot` exists to stop two processes from sharing a deterministic `session_id`, and its
+      # source of truth was the in-memory `Registry` alone. Pods are `:temporary` and the Registry
+      # dies with the BEAM, so after a restart it reads EMPTY while orphaned bwrap holders are
+      # still alive (a `kill -9` never runs `terminate/3`, and closing the port does not kill the
+      # holder). The PodWarden reaps them, but only after two ticks — and in that window the same
+      # index was reallocatable, which is exactly the collision the module exists to prevent.
+      #
+      # WRITTEN, not derived. The pool is already recoverable in principle — `SessionId.encode/5`
+      # packs it into the high nibble of the id stored right above — but decoding it would create a
+      # SECOND authority on that format, and a decoder drifting from the encoder narrows or widens
+      # the allocation SILENTLY. That is the very disease this module guards against. A fact
+      # written by its owner has no inverse to get wrong.
+      "slot" => slot_payload(state)
     }
 
     tmp = state.state_fs_path <> ".tmp"
@@ -141,6 +156,28 @@ defmodule Fleet.Spawner.Pod.StateFs do
         )
 
         :ok
+    end
+  end
+
+  # `nil` for a pod outside the managed fan-out (recall, hand-built tests): it holds no slot, and
+  # `null` says that positively where an absent key would read as "older format, unknown".
+  defp slot_payload(state) do
+    case {Map.get(state, :opts), cap_role(state)} do
+      {opts, role} when is_list(opts) and is_binary(role) ->
+        case {Keyword.get(opts, :pool), Keyword.get(opts, :repo_id)} do
+          {pool, repo} when is_integer(pool) -> %{"role" => role, "repo" => repo, "pool" => pool}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp cap_role(state) do
+    case Map.get(state, :cap_profile) do
+      nil -> nil
+      cap -> Fleet.CapProfile.name(cap)
     end
   end
 end

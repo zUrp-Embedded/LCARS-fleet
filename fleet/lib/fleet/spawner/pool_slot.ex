@@ -143,14 +143,60 @@ defmodule Fleet.Spawner.PoolSlot do
     Enum.any?(@first_slot..(@first_slot + max - 1), &(&1 not in taken))
   end
 
-  @doc "Live pool indexes held by `(role, repo)` — read from the Registry values, no pod is called."
-  @spec taken_slots(String.t(), integer() | nil) :: MapSet.t(non_neg_integer())
-  def taken_slots(role, repo) when is_binary(role) do
+  @doc """
+  Pool indexes held by `(role, repo)` — the LIVE registry UNION the survivors on disk.
+
+  ## Why the registry alone was not the answer
+
+  This module exists so two processes never share a deterministic `session_id`, and it read only
+  `Fleet.Spawner.Registry` — which lives in RAM. Pods are `:temporary` and the registry dies with
+  the BEAM, so after a restart it reads EMPTY. Meanwhile a `kill -9` or a VM crash leaves the bwrap
+  holder alive: `terminate/3` never ran, and closing the port does not kill it (the holder is a
+  `sleep infinity` that ignores an stdin EOF on its own). The PodWarden collects those, but only
+  after two ticks. In that window the registry said "free" about an index a live holder was sitting
+  on — the exact collision this module is for.
+
+  The survivors are read from the state snapshots each pod wrote, and counted only when the pod is
+  PROVEN alive. Two failure directions, and they are not symmetric: a survivor missed lets the
+  collision happen, a dead pod counted wastes a seat until the warden reaps it. So liveness decides,
+  and an unreadable or slot-less snapshot is skipped rather than guessed.
+
+  `opts`: `:state_fs_root` (test seam) and `:alive_fun` (test seam, default `PodTmux.alive?/1` —
+  same shape as `confirm_dead?/2`'s `state_fun`, since asking tmux forks a process).
+  """
+  @spec taken_slots(String.t(), integer() | nil, keyword()) :: MapSet.t(non_neg_integer())
+  def taken_slots(role, repo, opts \\ []) when is_binary(role) do
+    MapSet.union(registry_slots(role, repo), surviving_slots(role, repo, opts))
+  end
+
+  defp registry_slots(role, repo) do
     Fleet.Spawner.Registry
     |> Registry.select([{{:_, :_, :"$1"}, [], [:"$1"]}])
     |> Enum.reduce(MapSet.new(), fn
       %{role: ^role, repo: ^repo, pool: pool}, acc when is_integer(pool) -> MapSet.put(acc, pool)
       _other, acc -> acc
+    end)
+  end
+
+  defp surviving_slots(role, repo, opts) do
+    alive? = Keyword.get(opts, :alive_fun, &Fleet.Spawner.PodTmux.alive?/1)
+    root = Fleet.Spawner.Pod.Paths.state_fs_root_for(opts)
+
+    root
+    |> Path.join("*/*/state.json")
+    |> Path.wildcard()
+    |> Enum.reduce(MapSet.new(), fn path, acc ->
+      pod_id = path |> Path.dirname() |> Path.basename()
+
+      with {:ok, json} <- File.read(path),
+           {:ok, %{"slot" => %{"role" => ^role, "repo" => ^repo, "pool" => pool}}} <-
+             Jason.decode(json),
+           true <- is_integer(pool),
+           true <- alive?.(pod_id) do
+        MapSet.put(acc, pool)
+      else
+        _ -> acc
+      end
     end)
   end
 end
