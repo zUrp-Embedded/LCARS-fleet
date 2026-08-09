@@ -2,13 +2,23 @@ defmodule Fleet.Pilot.ProjectOnboard do
   @moduledoc """
   Onboarding of a project: "idea → the project exists".
 
-  Replicates the dual-dir architecture of LCARS itself (one forge repo, **two local repos**):
+  Replicates the multi-face architecture of LCARS itself (one forge repo, **three local repos**):
 
     * `/home/projects/<name>`       → clone, branch `main`       (the deliverable, push origin)
-    * `/home/projects.work/<name>`  → STANDALONE repo, branch `work/ops` (orphan: plans, backlog,
-      briefs, provenance). Its ENTIRE gitdir lives on the `.work` side (F-24): the arch pod
-      mounts `/home/projects` ro — a linked worktree would leave work/ops uncommittable for
-      the producer (`add_work_ops` carries the full rationale).
+    * `/home/projects.work/<name>`  → STANDALONE repo, branch `work/ops` (orphan) — the RECORD:
+      briefs, gate-briefs, verdicts, provenance. Written by the RUNTIME; no pod writes here, and
+      since the mount that read it moved, no pod reads it either.
+    * `/home/projects.doc/<name>`   → STANDALONE repo, branch `work/doc` (orphan) — the WORKSHOP:
+      plans, backlog, scratchpad, specs in progress. Written by a PRODUCER, ships with nothing.
+
+  Each writer face is STANDALONE and not a linked worktree, and the reason is the same for both:
+  its ENTIRE gitdir must live on its own side (F-24). A linked worktree keeps its gitdir under the
+  parent repo, which a pod mounting that parent read-only could then not commit into
+  (`add_work_ops` carries the full rationale).
+
+  ⚠ The documentation that SHIPS is none of the above two: it lives in `docs/` on `main`, is
+  written by a producer working the code face, and is judged like any other deliverable. The
+  criterion separating the workshop from it is the DESTINATION, never the nature of the artefact.
 
   It is a **mechanical rail** (structural compliance): starfleet (the fleet-master) *triggers* via the
   MCP tool `create_project`, the SYSTEM *executes* this deterministic sequence — the caller never types
@@ -20,11 +30,19 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
     1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
     2. `git clone --branch main` → `/home/projects/<name>`
-    3. scaffold `main` (README, .gitignore, .editorconfig, docs/spec.md)
+    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, docs/spec.md, CI)
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
-    5. `git init -b work/ops` + `remote add origin` → `/home/projects.work/<name>` (standalone)
-    6. scaffold `work/ops` (backlog.md, scratchpad.md, plans/)
-    7. commit + push `-u work/ops`
+    5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
+       `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
+       * `work/ops` → `/home/projects.work/<name>` — the RECORD the runtime keeps (README only:
+         briefs, gate-briefs, verdicts and provenance are written there BY the runtime, never by a pod)
+       * `work/doc` → `/home/projects.doc/<name>` — the project's WORKSHOP (CLAUDE.md, backlog.md,
+         scratchpad.md, plans/), the material the project is built FROM and that never ships with it
+
+  THREE faces, not two, and the third is not a variation on the second: `work/ops` is written by the
+  runtime and `work/doc` by a producer. Reading the planning material as living on the ops face —
+  as this list did until the split caught up with it — puts a pod's workspace on the tree that
+  records how that pod was judged.
 
   Identity (onboarding is an act of system INFRA, not creative work):
   `author=lcars-system` (the SYSTEM generates the scaffold from templates; the arch writes no file,
@@ -45,7 +63,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   alias Fleet.Pilot.GitOps
   alias Fleet.Pilot.Roles
 
-  # Content + writing of the scaffold (pure templates, dual-dir main / work-ops) — extracted:
+  # Content + writing of the scaffold (pure templates, one subtree per face) — extracted:
   # no dependency on the orchestration, onboard calls it at the right moments of its sequence.
   alias Fleet.Pilot.ProjectOnboard.Scaffold
 

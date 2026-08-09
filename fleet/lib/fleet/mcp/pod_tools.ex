@@ -22,8 +22,8 @@ defmodule Fleet.MCP.PodTools do
     * `Fleet.MCP.PodTools.Delegation` — forge delegation (architect only, server-side
       `require_architect` gate):
       - `create_issue`     : the arch delegates an implementation brick (forge issue).
-      - `create_project`   : the arch starts a fresh project (repo + dual-dir + scaffold).
-      - `import_project`   : the arch imports an EXISTING forge repo (dual-dir, main content
+      - `create_project`   : the arch starts a fresh project (repo + three faces + scaffold).
+      - `import_project`   : the arch imports an EXISTING forge repo (three faces, main content
         intact — ≠ create_project which starts a fresh one).
       - `revise_project_card` : revises an existing project's validation card (BL-6-29 — the
         engraved declaration gets a tracked revision path; future tickets only).
@@ -195,8 +195,10 @@ defmodule Fleet.MCP.PodTools do
       name("Create Project")
 
       description(
-        "Start a NEW project: creates the repo on the forge + the 2 dual-dir folders " <>
-          "(`/home/projects/<name>` on `main`, `/home/projects.work/<name>` on `work/ops`) + " <>
+        "Start a NEW project: creates the repo on the forge + the THREE face folders " <>
+          "(`/home/projects/<name>` on `main` = the deliverable, `/home/projects.work/<name>` on " <>
+          "`work/ops` = the record the runtime keeps, `/home/projects.doc/<name>` on `work/doc` = " <>
+          "the workshop your drafts live in) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
           "catalogue first (`list_workflow_cards`) and pass the human's chosen card as `workflow_map` " <>
@@ -258,8 +260,9 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "Import an EXISTING repo (already on the forge, in the org — pushed outside the fleet or by a human) " <>
-          "into the agent machine: dual-dir (`/home/projects/<name>` on `main`, " <>
-          "`/home/projects.work/<name>` on `work/ops`) + forge-enforced gate, WITHOUT touching the content " <>
+          "into the agent machine: the three faces (`/home/projects/<name>` on `main`, " <>
+          "`/home/projects.work/<name>` on `work/ops`, `/home/projects.doc/<name>` on `work/doc`) + " <>
+          "forge-enforced gate, WITHOUT touching the content " <>
           "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
           "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
           "the fleet org, default branch `main`. Returns {\"status\":\"imported\",\"repo\":...}."
@@ -313,7 +316,7 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "IMPORT a repo from an EXTERNAL forge (GitHub or GitLab ONLY — https URL) into the " <>
-          "fleet: full history repatriated, repo created in the org, dual-dir + work/ops + " <>
+          "fleet: full history repatriated, repo created in the org, the three faces + " <>
           "forge gate like import_project. ONE-WAY: the external origin is left behind (this " <>
           "is an import, never a mirror). THE ADOPTION GATE runs first (a foreign repo is the " <>
           "found-USB-key of the parking lot): a repo shipping a `.claude/` tree is REFUSED en " <>
@@ -410,7 +413,7 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "DELETE a project entirely: stops its architect, deletes the forge repo (branch-protection " <>
-          "falls with it), and removes the 2 local dual-dir folders. IRREVERSIBLE, and it destroys " <>
+          "falls with it), and removes the 3 local face folders. IRREVERSIBLE, and it destroys " <>
           "WHATEVER `full_name` you pass → FAIL-CLOSED: it does NOTHING unless you pass `force: true` to " <>
           "confirm the destruction (there is no safe auto-detect — an imported repo has real content with " <>
           "0 fleet issues/PRs). Use it to RETIRE a project, or to clean up a FAILED `create_project` " <>

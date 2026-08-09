@@ -7,14 +7,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   the architect delegates work to the fleet and tracks it.
 
     * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
-    * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + dual-dir).
+    * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + its three faces).
     * `import_project/2` — ONBOARDING channel (variant): imports an EXISTING forge repo into
-      the machine (dual-worktree, `main` content intact — ≠ `create_project`).
+      the machine (the three faces, `main` content intact — ≠ `create_project`).
     * `open_project/2` — ONBOARDING channel (variant): relaunches a project ALREADY on the
       machine (the third portfolio verb — create / import / open; no forge/disk write, ensures
       the per-project architect — the path back to a project after a fleet restart).
     * `delete_project/3` — ONBOARDING channel: general teardown of a project (forge repo, then the
-      dual-dir, then the architect pod — stopped last, only if a dir is proven to be `full_name`),
+      the face dirs, then the architect pod — stopped last, only if a dir is proven to be `full_name`),
       fail-closed unless `args["force"] == true` (the delete is irreversible).
     * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
     * `list_issues/1` — READ channel (BL-6-28): the project's open-ticket board.
@@ -209,7 +209,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   @doc """
   DELETES a project `full_name` (`"owner/name"`) — general teardown via the `:project_onboard` seam,
-  in order: forge repo first, then the dual-dir, then the architect pod (stopped LAST, and only once a
+  in order: forge repo first, then the face dirs, then the architect pod (stopped LAST, and only once a
   dir is proven to BE `full_name` — a homonym owned by someone else is never touched). Onboarder gate
   (starfleet/architect), same as create/import. FAIL-CLOSED: `args["force"]` MUST be the boolean `true` to act — without it the seam
   returns `{:error, {:force_required, _}}` and destroys nothing (the target is a free argument and the
@@ -655,7 +655,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # ============================================================
 
   # The onboarding sequence proper. The SYSTEM runs the mechanics (forge repo +
-  # dual-worktree main/work-ops + scaffold + push) via the :project_onboard seam (contract =
+  # three faces main/work-ops/work-doc + scaffold + push) via the :project_onboard seam (contract =
   # behaviour Delegation.ProjectOnboard; default Fleet.Pilot.ProjectOnboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args, onboarder_role) do

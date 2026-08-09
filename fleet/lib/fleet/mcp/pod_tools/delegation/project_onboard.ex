@@ -15,7 +15,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   ## Implementations
 
     * `Fleet.Pilot.ProjectOnboard` — the REAL impl (canonical default: forge repo +
-      dual-worktree `main`/`work/ops` + scaffold + push). It lives in
+      three faces `main`/`work/ops`/`work/doc` + scaffold + push). It lives in
       `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt this
       behaviour and stays DUCK-TYPED with a cross-reference comment; the callback
       type is aligned on its `@spec onboard/2` (`result()`).
@@ -75,7 +75,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               | {:error, term()}
 
   @doc """
-  DELETES a project — general teardown (architect pod + forge repo + dual-dir). `opts[:force]` bypasses
+  DELETES a project — general teardown (architect pod + forge repo + the three faces). `opts[:force]` bypasses
   the anti-work safety guard (a DELIBERATE end-of-life delete). Result carries `repo` (+ `forge`/
   `architect` status keys); `Delegation.do_delete_project/2` reads `%{repo: _}`.
   """

@@ -119,6 +119,6 @@ defmodule Fleet.Pilot do
   @doc "Immediate synchronous poll (ops/debug) — cf. `Fleet.Pilot.Poller.force_poll/1`."
   defdelegate force_poll, to: Fleet.Pilot.Poller
 
-  @doc "Onboarding of a fresh project (repo + dual-worktree + scaffold) — cf. `Fleet.Pilot.ProjectOnboard.onboard/2`."
+  @doc "Onboarding of a fresh project (repo + its three faces + scaffold) — cf. `Fleet.Pilot.ProjectOnboard.onboard/2`."
   defdelegate onboard(name, opts \\ []), to: Fleet.Pilot.ProjectOnboard
 end
