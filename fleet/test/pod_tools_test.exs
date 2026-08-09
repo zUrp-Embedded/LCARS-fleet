@@ -1224,7 +1224,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert opts[:assignees] == [human]
       refute Keyword.has_key?(opts, :labels)
 
-      # The visual type is DERIVED from the genre — absent genre = a code ticket = `type:feature`.
+      # The visual type is DERIVED from the destination — absent destination = a code ticket = `type:feature`.
       # NEVER routing: nothing mechanical reads it, its result is discarded, and its absence is
       # directly visible on the issue in the forge UI.
       assert_received {:add_label, "fleet/demo", 77, "type:feature", _}
@@ -1237,7 +1237,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["assignee"] == human
     end
 
-    test "genre `doc` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
+    test "destination `workshop` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
       # The branch that had no test until 2026-08-03, and could not have one: `repo_label_id` was
       # missing from the seam contract, so every stub raised UndefinedFunctionError here. What
       # shipped in that blind spot: a documentary ticket wearing `type:feature` — the interface
@@ -1247,18 +1247,18 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "create_issue",
-                 %{"title" => "doc", "brief" => "documente Y", "genre" => "doc"},
+                 %{"title" => "doc", "brief" => "documente Y", "destination" => "workshop"},
                  pod_state(pod)
                )
 
-      # The genre label rides the CREATE call as an id — never a post-create add: a poller tick
+      # The destination label rides the CREATE call as an id — never a post-create add: a poller tick
       # landing between the two burns the PROJECT card and sends a doc brief down the code path.
       assert_received {:create_issue, "fleet/demo", "doc", _body, opts}
       assert [id] = opts[:labels]
-      assert id == :erlang.phash2(Fleet.Labels.genre_doc(), 10_000)
+      assert id == :erlang.phash2(Fleet.Labels.destination_workshop(), 10_000)
 
       # And the decoration agrees with the routing instead of contradicting it.
-      assert_received {:add_label, "fleet/demo", 77, "type:doc", _}
+      assert_received {:add_label, "fleet/demo", 77, "type:workshop", _}
       refute_received {:add_label, _, _, "type:feature", _}
     end
 
@@ -2095,10 +2095,10 @@ defmodule Fleet.MCP.PodToolsTest do
          "title" => "vraie feature",
          "state" => "open",
          "body" => "le brief complet du ticket",
-         # Coherent pair: a `genre/doc` ticket wears `type:doc`. The fixture used to pin
+         # Coherent pair: a `destination/workshop` ticket wears `type:workshop`. The fixture used to pin
          # `type:feature` here — a read-side fixture teaching the very contradiction the write
          # side was producing.
-         "labels" => [%{"name" => "type:doc"}, %{"name" => "genre/doc"}]
+         "labels" => [%{"name" => "type:workshop"}, %{"name" => "destination/workshop"}]
        }}
     end
 
@@ -2221,7 +2221,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["title"] == "vraie feature"
       assert result["state"] == "open"
       assert result["body"] == "le brief complet du ticket"
-      assert result["labels"] == ["type:doc", "genre/doc"]
+      assert result["labels"] == ["type:workshop", "destination/workshop"]
 
       assert [
                %{

@@ -194,7 +194,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       defmodule Inbox do
         @awaits_arch_label Fleet.Labels.awaits_arch()
         def list(issues), do: Enum.filter(issues, &(@awaits_arch_label in &1.labels))
-        def tag(repo, n), do: forge().add_label(repo, n, Fleet.Labels.genre_doc(), [])
+        def tag(repo, n), do: forge().add_label(repo, n, Fleet.Labels.destination_workshop(), [])
       end
       """)
 

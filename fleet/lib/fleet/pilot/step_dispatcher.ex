@@ -494,8 +494,8 @@ defmodule Fleet.Pilot.StepDispatcher do
     labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
 
     workflow_map_name =
-      if Fleet.Labels.genre_doc() in labels,
-        do: Fleet.Pilot.Roles.doc_workflow_map(),
+      if Fleet.Labels.destination_workshop() in labels,
+        do: Fleet.Pilot.Roles.workshop_workflow_map(),
         else: Fleet.Pilot.ProjectIntensity.pipeline_default(repo)
 
     with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),

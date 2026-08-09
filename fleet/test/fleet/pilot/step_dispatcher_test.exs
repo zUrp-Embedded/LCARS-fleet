@@ -822,10 +822,10 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "ROUTELESS issue with `genre/doc` → onboarded onto the OPS card, not the project's (chantier face-projet)" do
-      # The genre gate of the burn: the label is the INPUT, the engraved wfmap/* the OUTPUT — read
+      # The destination gate of the burn: the label is the INPUT, the engraved wfmap/* the OUTPUT — read
       # once, here. A face-projet mutation that drops the gate re-routes ops tickets down the code
       # path silently; this is the test that falls.
-      payload = eng_issue(%{"labels" => [%{"name" => "genre/doc"}]})
+      payload = eng_issue(%{"labels" => [%{"name" => "destination/workshop"}]})
 
       opts =
         dispatch_opts(

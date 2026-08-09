@@ -1195,7 +1195,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Ensures static lock, genre, and stage labels exist with their protocol metadata.
+  Ensures static lock, destination, and stage labels exist with their protocol metadata.
 
   Success is based on complete readback, not create responses. Missing or unreadable labels return
   `:labels_missing` or `:labels_unverifiable`; dynamic workflow-map labels are not seeded.
@@ -1208,7 +1208,7 @@ defmodule Fleet.Forge.Client do
   # la compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
   @lbl_in_flight Fleet.Labels.in_flight()
   @lbl_awaits_arch Fleet.Labels.awaits_arch()
-  @lbl_genre_doc Fleet.Labels.genre_doc()
+  @lbl_destination_workshop Fleet.Labels.destination_workshop()
   @lbl_stage_review Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review()
   @lbl_stage_merged Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
   @lbl_stage_retired Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
@@ -1222,7 +1222,7 @@ defmodule Fleet.Forge.Client do
           @lbl_awaits_arch,
           # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-          @lbl_genre_doc,
+          @lbl_destination_workshop,
           # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step
           # names carried by the workflow MAPS (data), not protocol constants — `Fleet.Labels` says
           # so itself ("brief-review/build values come from the MAP"). Seeding them here pre-creates
@@ -1341,7 +1341,7 @@ defmodule Fleet.Forge.Client do
   # kinship the code does not have.
   defp label_color(@lbl_in_flight), do: "#FF9900"
   defp label_color(@lbl_awaits_arch), do: "#CC6666"
-  defp label_color(@lbl_genre_doc), do: "#33BBCC"
+  defp label_color(@lbl_destination_workshop), do: "#33BBCC"
   defp label_color("stage/brief-review"), do: "#6699CC"
   defp label_color("stage/build"), do: "#FFCC33"
   defp label_color(@lbl_stage_review), do: "#9966CC"
@@ -1388,13 +1388,13 @@ defmodule Fleet.Forge.Client do
   # chantier des trois faces : il disait « la voie ops (branche ops) » alors que le livrable
   # documentaire part sur `workshop`. `ops` est le registre que le runtime écrit, qu'aucun
   # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
-  defp label_description(@lbl_genre_doc),
+  defp label_description(@lbl_destination_workshop),
     do:
       "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche workshop, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
 
   defp label_description("type:" <> _kind),
     do:
-      "Type VISUEL du ticket — décoratif, aucun mécanisme ne le lit. Il suit le genre : ce qui ROUTE est `genre/*`."
+      "Type VISUEL du ticket — décoratif, aucun mécanisme ne le lit. Il suit la destination : ce qui ROUTE est `destination/*`."
 
   defp label_description(_),
     do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."

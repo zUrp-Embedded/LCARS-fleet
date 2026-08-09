@@ -123,10 +123,10 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
        %{tmp_dir: tmp} do
     o =
       Keyword.put(opts(tmp), :ensure_labels, fn _repo, _o ->
-        {:error, {:labels_missing_after_ensure, ["genre/doc"]}}
+        {:error, {:labels_missing_after_ensure, ["destination/workshop"]}}
       end)
 
-    assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["genre/doc"]}}} =
+    assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["destination/workshop"]}}} =
              ProjectOnboard.onboard("nolabel", o)
 
     # Inside the compensated window: the forge repo this call created is unwound, dirs absent —

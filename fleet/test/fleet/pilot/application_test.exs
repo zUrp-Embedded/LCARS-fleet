@@ -105,21 +105,21 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # Interim brake (IPC consultant 2026-08-02): the :doc_workflow_map knob names the card every
+  # Interim brake (IPC consultant 2026-08-02): the :workshop_workflow_map knob names the card every
   # `genre/doc` ticket burns, and nothing checked that the name resolves to a card that can serve
   # a doc ticket — a dead name or an all-code-face card failed at the FIRST doc ticket, silently.
-  describe "validate_doc_card!/1 — the doc knob resolves to a card that can serve a doc ticket" do
+  describe "validate_workshop_card!/1 — the doc knob resolves to a card that can serve a doc ticket" do
     test "the shipped canon passes (workshop-direct carries its face: doc producer)" do
-      assert :ok = Application.validate_doc_card!()
+      assert :ok = Application.validate_workshop_card!()
     end
 
     @tag :tmp_dir
     test "a knob EXPLICITLY set to a dead name raises with the operator's diagnosis",
          %{tmp_dir: tmp} do
       assert_raise RuntimeError, ~r/doc card "no-such-card" .*does NOT load/s, fn ->
-        Application.validate_doc_card!(
+        Application.validate_workshop_card!(
           workflow_maps_root: tmp,
-          doc_workflow_map: "no-such-card"
+          workshop_workflow_map: "no-such-card"
         )
       end
     end
@@ -132,7 +132,7 @@ defmodule Fleet.Pilot.ApplicationTest do
       # deployment cannot do instead.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = Application.validate_doc_card!(workflow_maps_root: tmp)
+          assert :ok = Application.validate_workshop_card!(workflow_maps_root: tmp)
         end)
 
       assert log =~ "no doc card in this catalogue"
@@ -165,7 +165,10 @@ defmodule Fleet.Pilot.ApplicationTest do
       File.write!(Path.join(tmp, "all-code.yaml"), card)
 
       assert_raise RuntimeError, ~r/carries NO producer step on `face: doc`/, fn ->
-        Application.validate_doc_card!(workflow_maps_root: tmp, doc_workflow_map: "all-code")
+        Application.validate_workshop_card!(
+          workflow_maps_root: tmp,
+          workshop_workflow_map: "all-code"
+        )
       end
     end
   end

@@ -38,8 +38,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
             ) :: {:ok, issue_number :: integer()} | {:error, term()}
 
   @doc """
-  Labels an issue. Delegation's only call site posts the VISUAL type derived from the genre
-  (`Fleet.Labels.type_for_genre/1`) and discards the result: the label is human-facing decoration,
+  Labels an issue. Delegation's only call site posts the VISUAL type derived from the destination
+  (`Fleet.Labels.type_for_destination/1`) and discards the result: the label is human-facing decoration,
   nothing mechanical reads it, and its absence is directly visible on the issue in the forge UI.
   Derived and not constant — the decoration is the only thing a human scanning a list of issues
   reads, so a fixed `type:feature` on a documentary ticket misleads exactly the reader it exists for.
@@ -53,10 +53,10 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   @doc """
   Resolves a repo label NAME to its Gitea id. Needed because a label can only ride the issue
-  CREATE call as an id, and the genre label MUST ride it (a post-create add leaves a window where
+  CREATE call as an id, and the destination label MUST ride it (a post-create add leaves a window where
   a poller tick burns the project card on a documentary ticket).
 
-  Declared here after the fact, and the omission is the reason the genre path had no test
+  Declared here after the fact, and the omission is the reason the destination path had no test
   (2026-08-03): the seam is duck-typed, so an undeclared call compiles fine against the real
   module and raises `UndefinedFunctionError` against every stub — which made the ops branch of
   `do_create_issue` the one branch that could not be exercised. A contract with a hole does not

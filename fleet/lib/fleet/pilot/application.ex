@@ -204,7 +204,7 @@ defmodule Fleet.Pilot.Application do
     validate_card_juries!()
     validate_card_steps!()
     validate_structural_roles!()
-    validate_doc_card!()
+    validate_workshop_card!()
 
     # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
     # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
@@ -328,7 +328,7 @@ defmodule Fleet.Pilot.Application do
 
   @doc false
   # The OPS knob → CARD coherence, checked at boot (interim brake, IPC consultant 2026-08-02).
-  # `Roles.doc_workflow_map/1` names the card a `genre/doc` ticket burns, and NOTHING verified
+  # `Roles.workshop_workflow_map/1` names the card a `genre/doc` ticket burns, and NOTHING verified
   # that the name resolves to a card that can actually SERVE a doc ticket: a dead name, or a card
   # whose steps all sit on the code face, fails at the FIRST doc ticket — silently, one wedged
   # ticket at a time, far from the config that caused it.
@@ -347,12 +347,12 @@ defmodule Fleet.Pilot.Application do
   # redesign (ONE card declaring face-tagged producers, killing this knob) is the real exit; a
   # check that anticipated it would be rewritten with it. This one only closes the silence.
   # (`opts` carries the test roots; prod calls it argument-less.)
-  def validate_doc_card!(opts \\ []) do
-    name = Fleet.Pilot.Roles.doc_workflow_map(opts)
+  def validate_workshop_card!(opts \\ []) do
+    name = Fleet.Pilot.Roles.workshop_workflow_map(opts)
 
     chosen? =
-      Keyword.has_key?(opts, :doc_workflow_map) or
-        not is_nil(Application.get_env(:fleet_pilot, :doc_workflow_map))
+      Keyword.has_key?(opts, :workshop_workflow_map) or
+        not is_nil(Application.get_env(:fleet_pilot, :workshop_workflow_map))
 
     case Fleet.Pilot.WorkflowMapNav.safe_load(&Fleet.Workflow.Loader.load!(&1, opts), name) do
       {:ok, card} ->
@@ -362,7 +362,7 @@ defmodule Fleet.Pilot.Application do
               do: spec["role"]
 
         if doc_producers == [] do
-          raise "fleet_pilot: the doc card #{inspect(name)} (:doc_workflow_map) carries NO " <>
+          raise "fleet_pilot: the doc card #{inspect(name)} (:workshop_workflow_map) carries NO " <>
                   "producer step on `face: doc` — a documentary ticket routed here would be built " <>
                   "on the code face (or not at all). Declare the face on its producer step, or " <>
                   "point the knob at a card that does."
@@ -371,7 +371,7 @@ defmodule Fleet.Pilot.Application do
         :ok
 
       {:error, {:workflow_map_load_failed, _name, why}} when chosen? ->
-        raise "fleet_pilot: the doc card #{inspect(name)} (:doc_workflow_map) does NOT load " <>
+        raise "fleet_pilot: the doc card #{inspect(name)} (:workshop_workflow_map) does NOT load " <>
                 "(#{why}) — every `genre/doc` ticket burns this name and would wedge at its " <>
                 "first dispatch. Fix the config or the card."
 
@@ -379,7 +379,7 @@ defmodule Fleet.Pilot.Application do
         Logger.warning(
           "fleet_pilot: no doc card in this catalogue (default #{inspect(name)} absent: #{why}) " <>
             "— this deployment serves NO `genre/doc` ticket; such a ticket would wedge at dispatch. " <>
-            "Ship a doc card or point :doc_workflow_map at one."
+            "Ship a doc card or point :workshop_workflow_map at one."
         )
 
         :ok

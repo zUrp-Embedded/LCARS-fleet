@@ -169,12 +169,12 @@ defmodule Fleet.MCP.PodTools do
               "precondition block of your brief: the producer is forge-blind, it never sees the " <>
               "edge — the edge holds the machine, the prose tells the agent what to assume."
         },
-        "genre" => %{
+        "destination" => %{
           "type" => "string",
-          "enum" => ["code", Fleet.Labels.genre_doc_token()],
+          "enum" => ["code", Fleet.Labels.destination_workshop_token()],
           "description" =>
-            "WHERE THE DELIVERABLE LANDS — not what kind of artefact it is. \"doc\" = it stays " <>
-              "in the project's WORKSHOP (`workshop`): backlog, plans, specs in progress, design " <>
+            "WHERE THE DELIVERABLE LANDS — not what kind of artefact it is. \"workshop\" = it stays " <>
+              "in the project's workshop face: backlog, plans, specs in progress, design " <>
               "notes — material the project is built FROM, which never ships with it. Routed to " <>
               "the scribe, direct path: no scoper (you authored the brief, you judge the return " <>
               "in your own mount), no PR jury (nothing leaves the project, so there is no absent " <>
@@ -772,7 +772,7 @@ defmodule Fleet.MCP.PodTools do
              brief_pointer(args),
              summary,
              args["supersedes"],
-             args["genre"],
+             args["destination"],
              args["depends_on"]
            ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}

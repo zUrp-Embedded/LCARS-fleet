@@ -32,18 +32,18 @@ defmodule Fleet.Labels do
     * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` — concurrency / escalation.
     * SCOPED POSITION `wfmap/<map>` + `stage/<step>` — the workflow_map position; the state lives
       in the label and the mutex is native.
-    * SCOPED GENRE `genre/doc` — an INPUT to the burn (which card gets engraved).
+    * SCOPED DESTINATION `destination/workshop` — an INPUT to the burn (which card gets engraved).
     * FLAT VISUAL `type:*` — decoration, `:` and not `/` so the namespace cannot be mistaken for a
       routing scope. Nothing mechanical reads it back.
 
   The first three MEAN something to the machine; the fourth means something only to a human. That
   asymmetry is a trap, not a detail: a wrong routing label breaks something and gets found, a wrong
   visual label breaks nothing and simply misinforms every reader (measured 2026-08-03 — a doc
-  ticket wearing `type:feature`). Hence `type_for_genre/1`: the decoration is DERIVED from the
+  ticket wearing `type:feature`). Hence `type_for_destination/1`: the decoration is DERIVED from the
   routing decision, never posted as its own constant.
 
   This list said "two families" until 2026-08-03, and closed with "outside these two families, a
-  label does not exist" — while `genre/doc` had been shipping for a chantier and `type:feature` was
+  label does not exist" — while `genre/doc` (as it was then called) had been shipping for a chantier and `type:feature` was
   posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
   is the first thing a reader trusts and the last thing anyone updates.
   """
@@ -55,8 +55,8 @@ defmodule Fleet.Labels do
   # the label posted on the forge — so the wire could ANNOUNCE a token the code did not accept and
   # nothing would be red (measured: renaming the enum alone survived the whole suite). It shipped
   # exactly that way: the wire said `"ops"` long after the deliverable moved to `workshop`.
-  @genre_doc_token "doc"
-  @genre_doc "genre/" <> @genre_doc_token
+  @destination_workshop_token "workshop"
+  @destination_workshop "destination/" <> @destination_workshop_token
 
   @doc "\"Pod in flight\" lock: set BEFORE the spawn (anti double-spawn), lifted at end-of-step-run."
   @spec in_flight() :: String.t()
@@ -67,38 +67,39 @@ defmodule Fleet.Labels do
   def awaits_arch, do: @awaits_arch
 
   @doc """
-  Genre marker of a DOCUMENTARY ticket (`genre/doc`, chantier face-projet): an INPUT to the
+  DESTINATION marker of a WORKSHOP ticket (`destination/workshop`): an INPUT to the
   workflow-map burn — present on a routeless issue, the poller engraves the doc card instead of
   the project's declared card; absent, nothing changes. Read ONCE at burn time: the engraved
   `wfmap/*` stays the only route (the forge is the state machine). Distinct namespace from
   `type:*` on purpose — those are documented visual-never-routing, and this one routes.
   """
-  @spec genre_doc() :: String.t()
-  def genre_doc, do: @genre_doc
+  @spec destination_workshop() :: String.t()
+  def destination_workshop, do: @destination_workshop
 
   @doc """
-  The WIRE token of the documentary genre (`"doc"`) — what an architect passes to `create_issue`,
-  and the value the routing clause matches. Same literal as `genre_doc/0`'s scope, on purpose: the
+  The WIRE token of the workshop destination (`"workshop"`) — what an architect passes to `create_issue`,
+  and the value the routing clause matches. Same literal as `destination_workshop/0`'s scope, on purpose: the
   token names the FACE the deliverable lands on, and a wire that offers a token the handler does
   not accept refuses every documentary ticket while looking perfectly documented.
   """
-  @spec genre_doc_token() :: String.t()
-  def genre_doc_token, do: @genre_doc_token
+  @spec destination_workshop_token() :: String.t()
+  def destination_workshop_token, do: @destination_workshop_token
 
   @doc """
-  VISUAL type of a ticket, derived from its genre — `type:doc` for a documentary ticket
-  (wire token `"doc"`, label `genre/doc`), `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
+  VISUAL type of a ticket, derived from its destination — `type:workshop` for a ticket whose
+  deliverable stays in the workshop (wire token `"workshop"`, label `destination/workshop`),
+  `type:feature` otherwise. Flat and NON-routing by construction: `:` and not `/`,
   so Gitea creates it non-exclusive and no code reads it back. It exists for the human who scans
   a list of issues and wants to know what kind of thing each one is.
 
-  DERIVED, never posted as a constant: the genre is resolved at create time, and a visual type
+  DERIVED, never posted as a constant: the destination is resolved at create time, and a visual type
   contradicting it is a lie told by the interface — a doc ticket wearing `type:feature` (measured
   2026-08-03) says "feature" to every human who reads the list, while the burn routes it to the
   doc card. One decision, one source; the label follows.
   """
-  @spec type_for_genre(String.t() | nil) :: String.t()
-  def type_for_genre(@genre_doc_token), do: "type:doc"
-  def type_for_genre(_), do: "type:feature"
+  @spec type_for_destination(String.t() | nil) :: String.t()
+  def type_for_destination(@destination_workshop_token), do: "type:workshop"
+  def type_for_destination(_), do: "type:feature"
 
   @doc "The visual types, for the seeding that must create them before anyone can wear them."
   @spec visual_types() :: [String.t()]

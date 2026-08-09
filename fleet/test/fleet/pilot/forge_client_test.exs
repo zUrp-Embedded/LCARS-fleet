@@ -69,7 +69,7 @@ defmodule Fleet.Forge.ClientTest do
     @protocol_labels [
                        Fleet.Labels.in_flight(),
                        Fleet.Labels.awaits_arch(),
-                       Fleet.Labels.genre_doc(),
+                       Fleet.Labels.destination_workshop(),
                        Fleet.Labels.stage_prefix() <> "brief-review",
                        Fleet.Labels.stage_prefix() <> "build",
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
@@ -125,7 +125,7 @@ defmodule Fleet.Forge.ClientTest do
       # Only `genre/doc` carries an id+color, so exactly one label is a repaint candidate.
       labels_with = fn color ->
         Enum.map(@protocol_labels, fn name ->
-          if name == Fleet.Labels.genre_doc(),
+          if name == Fleet.Labels.destination_workshop(),
             do: %{"id" => 7, "name" => name, "color" => color},
             else: %{"name" => name}
         end)
@@ -221,7 +221,7 @@ defmodule Fleet.Forge.ClientTest do
       assert :none =
                ForgeClient.route_from_labels([
                  %{"name" => "type:doc"},
-                 %{"name" => "genre/doc"},
+                 %{"name" => "destination/workshop"},
                  %{"name" => "lcars-awaits-arch"}
                ])
     end

@@ -63,7 +63,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # wire enum and this clause drift apart, and the drift is silent in the worst direction: the
   # tool advertises a value the router does not match, so every documentary ticket takes the
   # code path while the description says otherwise.
-  @doc_genre Fleet.Labels.genre_doc_token()
+  @workshop_destination Fleet.Labels.destination_workshop_token()
 
   require Logger
 
@@ -107,7 +107,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         brief_pointer \\ nil,
         summary \\ nil,
         supersedes \\ nil,
-        genre \\ nil,
+        destination \\ nil,
         depends_on \\ nil
       )
       when is_binary(title) and is_binary(brief) do
@@ -153,7 +153,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
           full_body =
             body |> with_pointer(pointer) |> with_supersedes(supersedes) |> with_op_marker(marker)
 
-          case do_create_issue(forge, repo, title, full_body, [token: identity.token], genre) do
+          case do_create_issue(
+                 forge,
+                 repo,
+                 title,
+                 full_body,
+                 [token: identity.token],
+                 destination
+               ) do
             {:ok, result} ->
               # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge
               # refuses to close a blocked ticket, and admission refuses to START one while a
@@ -1644,20 +1651,20 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # Creates as the role and assigns the human owner.
-  defp do_create_issue(forge, repo, title, brief, author_opts, genre) do
+  defp do_create_issue(forge, repo, title, brief, author_opts, destination) do
     # Human ownership is distinct from the producing role.
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(author_opts, :assignees, [human])
 
-        # The genre label rides the CREATE so polling cannot route an unlabeled workshop issue as
+        # The destination label rides the CREATE so polling cannot route an unlabeled workshop issue as
         # project work.
         issue_opts_result =
-          case genre do
-            @doc_genre ->
-              case forge.repo_label_id(repo, Fleet.Labels.genre_doc(), author_opts) do
+          case destination do
+            @workshop_destination ->
+              case forge.repo_label_id(repo, Fleet.Labels.destination_workshop(), author_opts) do
                 {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
-                {:error, reason} -> {:error, {:genre_label_unresolved, inspect(reason)}}
+                {:error, reason} -> {:error, {:destination_label_unresolved, inspect(reason)}}
               end
 
             _ ->
@@ -1673,10 +1680,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
               # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
               # onboarded the same way.) The visual TYPE is a label for humans — NEVER routing: the
               # result is discarded, nothing mechanical reads it, and its absence is directly
-              # visible on the issue in the forge UI. It is DERIVED from the genre, not fixed: a
-              # documentary ticket wearing `type:feature` contradicts the card its own genre routes
+              # visible on the issue in the forge UI. It is DERIVED from the destination, not fixed: a
+              # workshop ticket wearing `type:feature` contradicts the card its own destination routes
               # it to, and the contradiction is only visible to the human it misleads.
-              _ = forge.add_label(repo, number, Fleet.Labels.type_for_genre(genre), [])
+              _ =
+                forge.add_label(repo, number, Fleet.Labels.type_for_destination(destination), [])
 
               # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
               # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
