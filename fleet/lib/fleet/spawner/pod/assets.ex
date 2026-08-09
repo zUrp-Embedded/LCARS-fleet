@@ -57,7 +57,12 @@ defmodule Fleet.Spawner.Pod.Assets do
     base = %{
       "hasCompletedOnboarding" => true,
       "hasAcknowledgedCostThreshold" => true,
-      "autoMemoryEnabled" => false
+      "autoMemoryEnabled" => false,
+      # TUI plein ecran (release vendor recente). C'est une CLE DE SETTINGS, pas un flag : les 62
+      # options de la CLI 2.1.221 n'en portent aucune equivalente, donc `--settings` est la seule
+      # voie vers un pod. Verifie a la main par l'user dans un vrai terminal ET sous tmux, ce qui
+      # est le cas d'un pod (PTY de tmux, ADR-G).
+      "tui" => "fullscreen"
     }
 
     settings =
