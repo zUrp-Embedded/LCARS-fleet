@@ -105,15 +105,17 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Returns whether `opts` carry an ORDER for the pod, in either of its two shapes.
+  Returns whether an ORDER exists for this pod — handed inline, or materialized at an address.
 
-  SHARED AUTHORITY, and it exists because the two shapes are decided in two different places. The
-  order is the inline text (`:brief`, degraded rail) or the ADDRESS of a materialized brief
-  (`:brief_ref`, nominal rail); the dispatch drops the inline copy precisely BECAUSE it posts an
-  address. Two sites therefore answer the same question — "is there still an order?" — and when
-  they answered it with two hand-written shapes they disagreed: the dispatch dropped on the ref,
-  the spawn guard looked only at the text, and every one-shot pod whose brief was materialized was
-  refused, forever, on the rail the arbitration had made canonical.
+  This is an ADMISSION question, not a delivery one: the live order reaches the pod through the
+  task queue either way. `:brief` here is the pod's FILE copy of it, and a caller that materialized
+  the brief drops that copy on purpose (the durable, citable version now lives at `:brief_ref`, and
+  a file copy nobody rewrites on a live pod drifts from it round after round).
+
+  SHARED AUTHORITY, because two sites answer this same question and they answered it with two
+  hand-written shapes: the dispatch dropped the copy on the presence of the ref, the spawn guard
+  looked only for the text. They disagreed, and every one-shot pod whose brief was materialized was
+  refused at spawn, forever, on the rail two arbitrations had made canonical.
 
   Call this from BOTH sides rather than re-deriving the shape. A caller that drops the copy must
   ask it about what REMAINS, not about what it is dropping.
@@ -152,10 +154,11 @@ defmodule Fleet.Spawner do
         since interpolated into FS paths (`~/pods/pod_<id>`, sock, state recovery);
         otherwise `{:error, :invalid_pod_id}`.
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
-      * `:brief` — the pod's work, inline (string).
-      * `:brief_ref` — the ADDRESS of a materialized brief, the nominal shape of the same order
-        (the dispatch drops the inline copy when it posts an address).
-      * A `one-shot` pod must carry an order in ONE of those two shapes, otherwise
+      * `:brief` — the pod's work as a FILE copy (string). The live order reaches the pod through
+        the task queue; this is the copy written into its home.
+      * `:brief_ref` — the address of the brief materialized in the project's work/ops. A dispatch
+        that posts one drops the file copy (it would drift from the pinned version).
+      * A `one-shot` pod must have an order in ONE of those two forms, otherwise
         `{:error, :brief_required}`.
       * `:allow_no_brief` — admin/diagnostic escape hatch (bool, default false).
   """
