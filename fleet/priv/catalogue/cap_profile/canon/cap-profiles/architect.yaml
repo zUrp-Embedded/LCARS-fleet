@@ -55,12 +55,24 @@ spec:
     # own rules ("Permission deny rule X matches no known tool") so a typo announces itself instead
     # of silently opening.
     #
-    # ⚠ THE MODE OF THAT MEASUREMENT IS NOT THE POD'S, AND THE MODE USED IS NOT ONE TO RE-RUN.
-    # Those three runs were `-p` (one shot, no one to prompt); a pod runs `--remote-control`. The
-    # DENY result is a session-construction fact and does not depend on the mode; the ALLOW result
-    # could — under a mode with a prompt path, an unlisted tool might ask instead of proceeding. It
-    # is stated anyway because the audit of 2026-08-08 saw the same porosity FROM INSIDE A POD, with
-    # a Skill: two observations, two modes, one direction.
+    # ⚠ AND IN A POD THE ALLOW LIST DOES NOT MERELY DECLARE — IT DECIDES WHAT DOES NOT HANG.
+    # The three runs above were `-p` (one shot, nobody to prompt), where an unlisted tool simply
+    # proceeded. A pod runs `--remote-control` with `--permission-mode default`, and MEASURED there
+    # on 2026-08-09: a scribe reached for `NotebookEdit` — absent from its allow list AND from its
+    # deny list — and the CLI asked "Do you want to insert this cell? 1. Yes 2. Yes, allow all
+    # 3. No". The pod froze on that prompt. Not refused: WAITING, and nobody answers a pod.
+    #
+    # So a tool missing from `allowedTools` is not a tool the pod will avoid — it is a tool that
+    # WEDGES it: still "alive", holding its slot and the ticket's `lcars-in-flight` lock, producing
+    # nothing. `claude_launch.sh` names this for MCP tools ("an unlisted MCP tool PROMPTS → headless
+    # hang"); it holds for native tools too. The list must therefore cover everything a role might
+    # LEGITIMATELY reach for, not only what we want it to do — and a gap shows up neither at the
+    # gate, nor at spawn, nor in a log, only in a pod that returns nothing.
+    #
+    # The recovery chain DOES hold (seen end to end on the bench): pod.failed →
+    # `exited_before_result` → incident → the poller's reconciliation finds the orphan lock
+    # ("no live pod (dead/reaped) → reclaiming") → re-dispatch. It works well enough that the next
+    # pod goes and wedges in the same place, which is exactly what makes the gap expensive.
     #
     # 🛑 DO NOT RE-MEASURE THIS WITH `-p`. That mode is FORBIDDEN for production here — it is under
     # a x50 billing reprieve from the vendor (user, 2026-08-09). The admissible probe is a real pod
