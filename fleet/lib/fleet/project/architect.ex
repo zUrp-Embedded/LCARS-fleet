@@ -46,7 +46,7 @@ defmodule Fleet.Project.Architect do
     * `:spawner` — default `Fleet.Spawner` (the `spawn_pod/3` provider).
     * `:forge_client` — default `Fleet.Forge.Client` (numeric repo id for the UUID).
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
-    * `:projects_root` / `:ops_root` / `:workshop_root` — FS roots (defaults `Fleet.Layout`), same
+    * `:code_root` / `:ops_root` / `:workshop_root` — FS roots (defaults `Fleet.Layout`), same
       keys as `ProjectOnboard` (the onboard opts thread through unchanged).
   """
 
@@ -78,7 +78,7 @@ defmodule Fleet.Project.Architect do
     forge_opts = Keyword.take(opts, [:token, :base_url])
 
     name = Fleet.Layout.project_name(repo)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.code_root()), name)
+    proj_dir = Path.join(Keyword.get(opts, :code_root, Fleet.Layout.code_root()), name)
     work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
     doc_dir = Path.join(Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root()), name)
     repo_id_result = Fleet.Forge.repo_id(forge, repo, forge_opts)

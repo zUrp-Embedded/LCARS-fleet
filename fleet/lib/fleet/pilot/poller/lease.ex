@@ -135,7 +135,7 @@ defmodule Fleet.Pilot.Poller.Lease do
     # flipping anything, which is the point of the item and the reason the ceiling is low.
     # PER PROJECT, not per box (2026-08-05): the count was already per project and the knob was
     # fleet-wide, so serializing one project to watch its pipeline end to end serialized every other
-    # project too. `dispatch_opts` carries the `:projects_root` seam tests inject.
+    # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)
 
     # IN-FLIGHT crosses BOTH dispatch rails. It used to count only what it could see on its own rail

@@ -377,7 +377,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # Roots injectable (tests) — defaults = the container layout authority.
     project_dir =
       Path.join(
-        Keyword.get(opts, :projects_root, Fleet.Layout.code_root()),
+        Keyword.get(opts, :code_root, Fleet.Layout.code_root()),
         Fleet.Layout.project_name(repo)
       )
 

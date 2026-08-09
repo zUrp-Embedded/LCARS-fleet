@@ -113,7 +113,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,

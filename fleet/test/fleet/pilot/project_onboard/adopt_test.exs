@@ -81,7 +81,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
@@ -99,7 +99,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
   # The measured wedge: a LOCAL project that exists nowhere else — a git repo on main with
   # real content, no origin, no forge repo.
   defp build_local_main(o, name) do
-    dir = Path.join(o[:projects_root], name)
+    dir = Path.join(o[:code_root], name)
     File.mkdir_p!(dir)
     g = fn args -> {_, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true) end
     {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", dir], stderr_to_stdout: true)
@@ -112,7 +112,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
   end
 
   defp bare_git!(o, repo, args) do
-    bare = Path.join([Path.dirname(o[:projects_root]), "forge", "#{repo}.git"])
+    bare = Path.join([Path.dirname(o[:code_root]), "forge", "#{repo}.git"])
     {out, 0} = System.cmd("git", ["-C", bare | args], stderr_to_stdout: true)
     out
   end

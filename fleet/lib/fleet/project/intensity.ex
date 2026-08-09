@@ -76,7 +76,7 @@ defmodule Fleet.Project.Intensity do
   """
   @spec pipeline_default(String.t(), keyword()) :: String.t()
   def pipeline_default(repo, opts \\ []) when is_binary(repo) do
-    root = Keyword.get(opts, :projects_root, Fleet.Layout.code_root())
+    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
     path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
 
     with {:ok, raw} <- File.read(path),
@@ -123,7 +123,7 @@ defmodule Fleet.Project.Intensity do
   """
   @spec declared_max_fan(String.t(), keyword()) :: pos_integer() | nil
   def declared_max_fan(repo, opts \\ []) when is_binary(repo) do
-    root = Keyword.get(opts, :projects_root, Fleet.Layout.code_root())
+    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
     path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
 
     with {:ok, raw} <- File.read(path),

@@ -93,7 +93,7 @@ defmodule Fleet.Project.OnboardTest do
         "fleet/demo",
         Keyword.merge(
           [
-            projects_root: ctx.proj_root,
+            code_root: ctx.proj_root,
             ops_root: ctx.ops_root,
             workshop_root: ctx.workshop_root,
             spawner: OkSpawner
@@ -156,11 +156,11 @@ defmodule Fleet.Project.OnboardTest do
                 repo: "other/demo",
                 forge: :absent,
                 architect: :skipped_identity,
-                local: %{project: :kept_identity_unproven, work: :kept_identity_unproven}
+                local: %{project: :kept_identity_unproven, ops: :kept_identity_unproven}
               }} =
                ProjectOnboard.delete_project(
                  "other/demo",
-                 projects_root: ctx.proj_root,
+                 code_root: ctx.proj_root,
                  ops_root: ctx.ops_root,
                  workshop_root: ctx.workshop_root,
                  force: true,
@@ -182,7 +182,7 @@ defmodule Fleet.Project.OnboardTest do
       File.rm_rf!(ctx.proj_dir)
       init_repo_with_origin(ctx.proj_dir, "https://forge.test/someone-else/demo.git")
 
-      assert {:ok, %{forge: :deleted, local: %{project: :kept_identity_unproven, work: :removed}}} =
+      assert {:ok, %{forge: :deleted, local: %{project: :kept_identity_unproven, ops: :removed}}} =
                del(ctx, force: true, forge_repo: OkRepo)
 
       assert File.exists?(ctx.proj_dir)
@@ -199,7 +199,7 @@ defmodule Fleet.Project.OnboardTest do
       File.mkdir_p!(ctx.work_dir)
       {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
 
-      assert {:ok, %{local: %{project: :removed, work: :removed}}} =
+      assert {:ok, %{local: %{project: :removed, ops: :removed}}} =
                del(ctx, force: true, forge_repo: OkRepo)
 
       refute File.exists?(ctx.work_dir)
@@ -230,7 +230,7 @@ defmodule Fleet.Project.OnboardTest do
           "keep me"
         ])
 
-      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+      assert {:ok, %{local: %{ops: :kept_identity_unproven}}} =
                del(ctx, force: true, forge_repo: OkRepo)
 
       assert File.exists?(ctx.work_dir)
@@ -247,7 +247,7 @@ defmodule Fleet.Project.OnboardTest do
       {_out, 0} = System.cmd("git", ["init", "-q", "-b", "ops", ctx.work_dir])
       File.write!(Path.join(ctx.work_dir, "draft.md"), "uncommitted, still someone's")
 
-      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+      assert {:ok, %{local: %{ops: :kept_identity_unproven}}} =
                del(ctx, force: true, forge_repo: OkRepo)
 
       assert File.exists?(Path.join(ctx.work_dir, "draft.md"))
@@ -276,7 +276,7 @@ defmodule Fleet.Project.OnboardTest do
       assert {:ok, entries} = File.ls(ctx.work_dir)
       assert entries -- [".git"] == [], "fixture must look empty on disk"
 
-      assert {:ok, %{local: %{work: :kept_identity_unproven}}} =
+      assert {:ok, %{local: %{ops: :kept_identity_unproven}}} =
                del(ctx, force: true, forge_repo: OkRepo)
 
       assert File.exists?(ctx.work_dir)

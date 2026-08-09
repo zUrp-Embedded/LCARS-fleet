@@ -178,20 +178,20 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
 
     test "a declared value wins over the fleet flag" do
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 7)
-      assert Admission.max_fan("fleet/p", projects_root: root_with(decl(2))) == 2
+      assert Admission.max_fan("fleet/p", code_root: root_with(decl(2))) == 2
     end
 
     test "clamped to the pool seats at both ends — a declaration is not a way past the ceiling" do
       root_hi = root_with(decl(99))
       root_lo = root_with(decl(0))
 
-      assert Admission.max_fan("fleet/p", projects_root: root_hi) == Admission.max_fan_ceiling()
-      assert Admission.max_fan("fleet/p", projects_root: root_lo) == 1
+      assert Admission.max_fan("fleet/p", code_root: root_hi) == Admission.max_fan_ceiling()
+      assert Admission.max_fan("fleet/p", code_root: root_lo) == 1
     end
 
     test "no project directory at all → the fleet default, quietly (legacy projects are normal)" do
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
-      assert Admission.max_fan("fleet/nowhere", projects_root: root_with(decl(2))) == 4
+      assert Admission.max_fan("fleet/nowhere", code_root: root_with(decl(2))) == 4
     end
 
     test "an UNPARSEABLE declaration does not invent a throughput" do
@@ -199,13 +199,13 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       # judgment layer. Here the fallback changes a RATE, and a second alarm for the same file
       # would teach a reader that it means something new.
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
-      assert Admission.max_fan("fleet/p", projects_root: root_with("{ not json")) == 4
+      assert Admission.max_fan("fleet/p", code_root: root_with("{ not json")) == 4
     end
 
     test "a non-integer max_fan is refused rather than coerced" do
       Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
       body = decl(3) |> Jason.decode!() |> Map.put("max_fan", "beaucoup") |> Jason.encode!()
-      assert Admission.max_fan("fleet/p", projects_root: root_with(body)) == 4
+      assert Admission.max_fan("fleet/p", code_root: root_with(body)) == 4
     end
   end
 end

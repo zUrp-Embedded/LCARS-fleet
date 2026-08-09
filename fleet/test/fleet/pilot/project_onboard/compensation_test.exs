@@ -96,7 +96,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
@@ -132,7 +132,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # Inside the compensated window: the forge repo this call created is unwound, dirs absent —
     # the retry hits no wall (409 / refute_existing).
     assert_received {:forge_deleted, "fleet/nolabel"}
-    refute File.exists?(Path.join(o[:projects_root], "nolabel"))
+    refute File.exists?(Path.join(o[:code_root], "nolabel"))
     refute File.exists?(Path.join(o[:ops_root], "nolabel"))
     refute File.exists?(Path.join(o[:workshop_root], "nolabel"))
   end
@@ -147,14 +147,14 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # The unwind: the forge repo THIS call created is deleted, both dirs are gone — nothing left to
     # wedge a retry on the refute_existing / create_repo-409 walls.
     assert_received {:forge_deleted, "fleet/phoenix"}
-    refute File.exists?(Path.join(o[:projects_root], "phoenix"))
+    refute File.exists?(Path.join(o[:code_root], "phoenix"))
     refute File.exists?(Path.join(o[:ops_root], "phoenix"))
     refute File.exists?(Path.join(o[:workshop_root], "phoenix"))
 
     # The RETRY of the same onboard now goes through cleanly (fresh create, full sequence).
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/phoenix"}} = ProjectOnboard.onboard("phoenix", o)
-    assert File.dir?(Path.join(o[:projects_root], "phoenix"))
+    assert File.dir?(Path.join(o[:code_root], "phoenix"))
     assert File.dir?(Path.join(o[:ops_root], "phoenix"))
     assert File.dir?(Path.join(o[:workshop_root], "phoenix"))
   end
@@ -170,7 +170,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
     # RE-RAISED, so the caller still sees a crash — and the machine is clean anyway.
     assert_received {:forge_deleted, "fleet/vulcan"}
-    refute File.exists?(Path.join(o[:projects_root], "vulcan"))
+    refute File.exists?(Path.join(o[:code_root], "vulcan"))
     refute File.exists?(Path.join(o[:ops_root], "vulcan"))
     refute File.exists?(Path.join(o[:workshop_root], "vulcan"))
 
@@ -188,7 +188,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
              ProjectOnboard.onboard("apollo", o)
 
     refute_received {:forge_deleted, _}
-    assert File.dir?(Path.join(o[:projects_root], "apollo"))
+    assert File.dir?(Path.join(o[:code_root], "apollo"))
     assert File.dir?(Path.join(o[:ops_root], "apollo"))
     assert File.dir?(Path.join(o[:workshop_root], "apollo"))
   end
@@ -204,7 +204,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
     # Dirs unwound; the repo was NOT ours to delete.
     refute_received {:forge_deleted, _}
-    refute File.exists?(Path.join(o[:projects_root], "heritage"))
+    refute File.exists?(Path.join(o[:code_root], "heritage"))
     refute File.exists?(Path.join(o[:ops_root], "heritage"))
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
 
@@ -227,7 +227,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     defp landed_onboard(tmp) do
       o = opts(tmp)
       assert {:ok, %{repo: "fleet/apollo"}} = ProjectOnboard.onboard("apollo", o)
-      {o, Path.join(o[:projects_root], "apollo"), Path.join(o[:ops_root], "apollo")}
+      {o, Path.join(o[:code_root], "apollo"), Path.join(o[:ops_root], "apollo")}
     end
 
     test "re-emit of a fully landed onboard → {:ok, idempotent}, nothing created", %{tmp_dir: tmp} do

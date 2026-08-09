@@ -228,7 +228,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 3)
       root = declare(%{"fleet/p" => %{"max_fan" => 1}})
 
-      declared = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+      declared = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
       assert declared.dispatched == 1
       assert declared.skipped == 2
 
@@ -237,7 +237,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
         Lease.process_issues(
           issues(),
           MapSet.new(),
-          opts(projects_root: root, repo: "fleet/other"),
+          opts(code_root: root, repo: "fleet/other"),
           seams("fleet/other")
         )
 
@@ -250,17 +250,17 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
       root = declare(%{"fleet/p" => %{"max_fan" => 99}})
 
-      tally = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+      tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
 
       assert tally.dispatched == 3
-      assert Admission.max_fan("fleet/p", projects_root: root) == Admission.max_fan_ceiling()
+      assert Admission.max_fan("fleet/p", code_root: root) == Admission.max_fan_ceiling()
     end
 
     test "a project with a declaration that names no throughput falls back to the fleet default" do
       TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
       root = declare(%{"fleet/p" => %{}})
 
-      tally = Lease.process_issues(issues(), MapSet.new(), opts(projects_root: root), seams())
+      tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
 
       # Absent is not zero and not one: the key was never written, so the fleet answers.
       assert tally.dispatched == 2

@@ -16,14 +16,14 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   @impl Mix.Task
   def run(argv) do
     {opts, args, _} =
-      OptionParser.parse(argv, strict: [ops_root: :string, projects_root: :string])
+      OptionParser.parse(argv, strict: [ops_root: :string, code_root: :string])
 
     case args do
       [name] ->
         work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
 
         project_dir =
-          Path.join(Keyword.get(opts, :projects_root, Fleet.Layout.code_root()), name)
+          Path.join(Keyword.get(opts, :code_root, Fleet.Layout.code_root()), name)
 
         verify_all(name, work_dir, project_dir)
 

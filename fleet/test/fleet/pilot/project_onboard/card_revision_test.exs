@@ -81,7 +81,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
@@ -102,7 +102,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
       revised_by: "starfleet",
       sync_showcase: fn repo ->
         name = repo |> String.split("/") |> List.last()
-        dir = Path.join(o[:projects_root], name)
+        dir = Path.join(o[:code_root], name)
 
         {_, 0} =
           System.cmd("git", ["-C", dir, "pull", "-q", "--ff-only", "origin", "main"],
@@ -156,7 +156,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # The geste that pointed here asked for MONOTONICITY (forbid C3 -> C0). That is the wrong wall:
     # the code says out loud, at `jury_delta/3`, that a downgrade is the human's to make and must
     # only be LOUD. What was happening is not a downgrade — it is an erasure nobody declared.
-    proj = Path.join([o[:projects_root], "tetris"])
+    proj = Path.join([o[:code_root], "tetris"])
 
     :ok =
       Fleet.Project.Intensity.write(proj,
@@ -213,7 +213,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
        %{
          o: o
        } do
-    proj = Path.join([o[:projects_root], "tetris"])
+    proj = Path.join([o[:code_root], "tetris"])
 
     :ok =
       Fleet.Project.Intensity.write(proj,
@@ -298,7 +298,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # Reachable: a project declares a card, the operator's catalogue drops it, the project keeps
     # naming it in `intensity.json` until the next revision. The NEW card is guarded
     # (`require_loadable_card`); the previous one never was.
-    proj = Path.join([o[:projects_root], "tetris"])
+    proj = Path.join([o[:code_root], "tetris"])
     intensity = Path.join(proj, "intensity.json")
 
     File.write!(
@@ -376,7 +376,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # The showcase moved: the next burn reads the NEW card.
     assert_received {:showcase_synced, "fleet/tetris"}
 
-    assert File.read!(Path.join([o[:projects_root], "tetris", "intensity.json"])) =~
+    assert File.read!(Path.join([o[:code_root], "tetris", "intensity.json"])) =~
              "workshop-direct"
   end
 

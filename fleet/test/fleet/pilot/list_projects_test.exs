@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
   end
 
   defp list(root, forge \\ OpenForge),
-    do: ProjectOnboard.list_projects(projects_root: root, forge_issues: forge)
+    do: ProjectOnboard.list_projects(code_root: root, forge_issues: forge)
 
   describe "enumeration" do
     test "every project directory is listed, sorted, with its repo name", %{tmp_dir: tmp} do
@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
     end
 
     test "an unreadable projects root is a NAMED error, never an empty listing", %{tmp_dir: tmp} do
-      assert {:error, {:projects_root_unreadable, _, :enoent}} =
+      assert {:error, {:code_root_unreadable, _, :enoent}} =
                list(Path.join(tmp, "nowhere"))
     end
   end

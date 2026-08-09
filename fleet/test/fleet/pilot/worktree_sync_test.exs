@@ -47,9 +47,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
     # unique name → async tests without collision on the GenServer's global name.
     name = :"wt_#{System.unique_integer([:positive])}"
 
-    start_supervised!(
-      {WorktreeSync, name: name, projects_root: root, workshop_root: workshop_root}
-    )
+    start_supervised!({WorktreeSync, name: name, code_root: root, workshop_root: workshop_root})
 
     %{seed: seed, proj: proj, doc: doc, origin: origin, sync: name}
   end

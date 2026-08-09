@@ -44,7 +44,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
     do: [
       human: "ghost-human",
       forge_users: users,
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc")
     ]

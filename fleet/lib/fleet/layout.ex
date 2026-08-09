@@ -105,7 +105,7 @@ defmodule Fleet.Layout do
   @spec code_root() :: Path.t()
   def code_root, do: @code_root
 
-  @doc "Branch of the CODE face (`main`) — pairs with `projects_root/0`."
+  @doc "Branch of the CODE face (`main`) — pairs with `code_root/0`."
   @spec code_branch() :: String.t()
   def code_branch, do: @face_branches["code"]
 
@@ -205,7 +205,7 @@ defmodule Fleet.Layout do
 
   @doc """
   Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory
-  under `projects_root`/`ops_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
+  under `code_root`/`ops_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
   derivation (C-06) — copied across ~8 sites before.
   """
   @spec project_name(String.t()) :: String.t()

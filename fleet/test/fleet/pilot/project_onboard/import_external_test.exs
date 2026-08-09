@@ -80,7 +80,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      projects_root: Path.join(tmp, "projects"),
+      code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
       base_url: "file://" <> forge_root,
@@ -128,7 +128,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
   end
 
   defp bare_git!(o, repo, args) do
-    bare = Path.join([Path.dirname(o[:projects_root]), "forge", "#{repo}.git"])
+    bare = Path.join([Path.dirname(o[:code_root]), "forge", "#{repo}.git"])
     {out, 0} = System.cmd("git", ["-C", bare | args], stderr_to_stdout: true)
     out
   end
@@ -150,7 +150,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     assert_received {:protect_branch, "fleet/pong", _rule}
 
     # The local import leg ran: dual-dir present, ops on the forge.
-    assert File.dir?(Path.join(o[:projects_root], "pong"))
+    assert File.dir?(Path.join(o[:code_root], "pong"))
     assert File.dir?(Path.join(o[:ops_root], "pong"))
     assert ExtForge.branch_exists?("fleet/pong", "ops", [])
 
@@ -158,11 +158,11 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     {origin, 0} =
       System.cmd(
         "git",
-        ["-C", Path.join(o[:projects_root], "pong"), "config", "--get", "remote.origin.url"],
+        ["-C", Path.join(o[:code_root], "pong"), "config", "--get", "remote.origin.url"],
         stderr_to_stdout: true
       )
 
-    assert String.trim(origin) =~ Path.dirname(o[:projects_root])
+    assert String.trim(origin) =~ Path.dirname(o[:code_root])
     refute String.trim(origin) =~ "external-src"
   end
 
@@ -175,7 +175,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
              ProjectOnboard.import_external(url, "pong", o)
 
     refute_received {:repo_created, _}
-    refute File.exists?(Path.join(o[:projects_root], "pong"))
+    refute File.exists?(Path.join(o[:code_root], "pong"))
   end
 
   test "adoption gate: a hostile CLAUDE.md refuses NAMED (pattern + path)", %{tmp_dir: tmp} do
@@ -203,7 +203,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
        %{tmp_dir: tmp} do
     o = opts(tmp)
     url = build_external_repo(tmp)
-    File.mkdir_p!(Path.join(o[:projects_root], "pong"))
+    File.mkdir_p!(Path.join(o[:code_root], "pong"))
 
     assert {:error, {:already_on_machine, "fleet/pong"}} =
              ProjectOnboard.import_external(url, "pong", o)
@@ -223,7 +223,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
 
     assert_received {:repo_created, "fleet/pong"}
     assert_received {:forge_deleted, "fleet/pong"}
-    refute File.exists?(Path.join(o[:projects_root], "pong"))
+    refute File.exists?(Path.join(o[:code_root], "pong"))
     assert log =~ "compensated"
   end
 

@@ -70,7 +70,7 @@ defmodule Fleet.Project.Onboard do
   require Logger
 
   # Derived from the single authority of the container layout (Fleet.Layout).
-  @projects_root Fleet.Layout.code_root()
+  @code_root Fleet.Layout.code_root()
   @ops_root Fleet.Layout.ops_root()
   @workshop_root Fleet.Layout.workshop_root()
   # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
@@ -95,7 +95,7 @@ defmodule Fleet.Project.Onboard do
     * `:org`           — forge org (default `"fleet"`)
     * `:description`   — repo description (default `""`)
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
-    * `:projects_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
+    * `:code_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
       `/home/projects`, `/home/projects.ops`, `/home/projects.workshop`)
     * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
 
@@ -179,7 +179,7 @@ defmodule Fleet.Project.Onboard do
            build_writer_face(
              full_name,
              url,
-             dirs.doc,
+             dirs.workshop,
              Fleet.Layout.workshop_branch(),
              "workshop",
              name,
@@ -188,7 +188,7 @@ defmodule Fleet.Project.Onboard do
          :ok <- lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ready — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.doc}"
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
@@ -210,7 +210,7 @@ defmodule Fleet.Project.Onboard do
       repo: full_name,
       project_dir: dirs.code,
       work_dir: dirs.ops,
-      doc_dir: dirs.doc,
+      doc_dir: dirs.workshop,
       architect: ensure_architect(full_name, opts)
     }
   end
@@ -226,7 +226,7 @@ defmodule Fleet.Project.Onboard do
       "ProjectOnboard: onboard #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
         "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
         "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-        "doc_dir #{inspect(compensate_dir(dirs.doc))} " <>
+        "doc_dir #{inspect(compensate_dir(dirs.workshop))} " <>
         "(a clean retry is possible; incomplete legs above must be cleared first)"
     )
   end
@@ -278,7 +278,7 @@ defmodule Fleet.Project.Onboard do
             "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
               "project_dir #{inspect(compensate_dir(dirs.code))}, " <>
               "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-              "doc_dir #{inspect(compensate_dir(dirs.doc))} (repo untouched — " <>
+              "doc_dir #{inspect(compensate_dir(dirs.workshop))} (repo untouched — " <>
               "pre-existing; a clean retry is possible)"
           )
 
@@ -297,7 +297,7 @@ defmodule Fleet.Project.Onboard do
          :ok <- lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.doc}"
+          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
@@ -374,7 +374,7 @@ defmodule Fleet.Project.Onboard do
   is that missing half, and it is a pure read — the only listing in the delegation surface that
   writes nothing.
 
-  Enumerated from DISK (`projects_root`), which is what "this fleet's projects" means: a repo on
+  Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
   the forge that was never cloned here is not something this box can act on, and a disk project not
   yet published is precisely what `adopt_project` exists for.
 
@@ -393,7 +393,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec list_projects(keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_projects(opts \\ []) do
-    root = Keyword.get(opts, :projects_root, @projects_root)
+    root = Keyword.get(opts, :code_root, @code_root)
 
     case File.ls(root) do
       {:ok, entries} ->
@@ -406,7 +406,7 @@ defmodule Fleet.Project.Onboard do
         {:ok, projects}
 
       {:error, reason} ->
-        {:error, {:projects_root_unreadable, root, reason}}
+        {:error, {:code_root_unreadable, root, reason}}
     end
   end
 
@@ -516,7 +516,7 @@ defmodule Fleet.Project.Onboard do
   @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def close_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
     forge = forge_issues(opts)
 
     with :ok <- validate_name(name),
@@ -650,8 +650,9 @@ defmodule Fleet.Project.Onboard do
 
   defp classify_adopt_writer_faces(dirs) do
     with {:ok, ops} <- classify_adopt_face(dirs.ops, Fleet.Layout.ops_branch()),
-         {:ok, doc} <- classify_adopt_face(dirs.doc, Fleet.Layout.workshop_branch()) do
-      {:ok, %{ops: ops, doc: doc}}
+         {:ok, workshop} <-
+           classify_adopt_face(dirs.workshop, Fleet.Layout.workshop_branch()) do
+      {:ok, %{ops: ops, workshop: workshop}}
     end
   end
 
@@ -695,9 +696,9 @@ defmodule Fleet.Project.Onboard do
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
-             states.doc,
+             states.workshop,
              url,
-             dirs.doc,
+             dirs.workshop,
              Fleet.Layout.workshop_branch(),
              "workshop",
              name,
@@ -770,7 +771,7 @@ defmodule Fleet.Project.Onboard do
     Logger.warning(
       "ProjectOnboard: adopt #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
         "forge #{inspect(forge)}, work_dir #{inspect(undo.(states.ops, dirs.ops))}, " <>
-        "doc_dir #{inspect(undo.(states.doc, dirs.doc))} (proj_dir untouched — the user's; " <>
+        "doc_dir #{inspect(undo.(states.workshop, dirs.workshop))} (proj_dir untouched — the user's; " <>
         "a clean retry is possible)"
     )
   end
@@ -896,7 +897,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp require_machine_absent(full_name, dirs) do
-    if Enum.any?([dirs.code, dirs.ops, dirs.doc], &File.exists?/1),
+    if Enum.any?([dirs.code, dirs.ops, dirs.workshop], &File.exists?/1),
       do: {:error, {:already_on_machine, full_name}},
       else: :ok
   end
@@ -1029,7 +1030,7 @@ defmodule Fleet.Project.Onboard do
       "ProjectOnboard: import_external #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
         "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
         "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-        "doc_dir #{inspect(compensate_dir(dirs.doc))} (a clean retry is possible)"
+        "doc_dir #{inspect(compensate_dir(dirs.workshop))} (a clean retry is possible)"
     )
   end
 
@@ -1051,17 +1052,17 @@ defmodule Fleet.Project.Onboard do
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- delete_forge(full_name, opts) do
       proj = nuke_if_is(full_name, dirs.code, opts)
-      work = nuke_if_is(full_name, dirs.ops, opts)
-      doc = nuke_if_is(full_name, dirs.doc, opts)
+      ops = nuke_if_is(full_name, dirs.ops, opts)
+      workshop = nuke_if_is(full_name, dirs.workshop, opts)
 
       architect =
-        if :removed in [proj, work, doc],
+        if :removed in [proj, ops, workshop],
           do: stop_architect(full_name, opts),
           else: :skipped_identity
 
       Logger.info(
         "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, " <>
-          "project_dir #{proj}, work_dir #{work}, doc_dir #{doc}"
+          "project_dir #{proj}, ops_dir #{ops}, workshop_dir #{workshop}"
       )
 
       {:ok,
@@ -1071,8 +1072,8 @@ defmodule Fleet.Project.Onboard do
          architect: architect,
          project_dir: dirs.code,
          work_dir: dirs.ops,
-         doc_dir: dirs.doc,
-         local: %{project: proj, work: work, doc: doc}
+         doc_dir: dirs.workshop,
+         local: %{project: proj, ops: ops, workshop: workshop}
        }}
     end
   end
@@ -1089,7 +1090,7 @@ defmodule Fleet.Project.Onboard do
   @spec revise_card(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def revise_card(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :projects_root, @projects_root), name)
+    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
     card = Keyword.get(opts, :workflow_map)
 
     with :ok <- require_on_machine(full_name, proj_dir),
@@ -1465,7 +1466,7 @@ defmodule Fleet.Project.Onboard do
   # architect, whose producer path is on `doc`. Opening a project whose doc face never landed would
   # succeed and then fail at the first documentary ticket, far from the cause.
   defp require_all_faces_on_machine(full_name, dirs) do
-    if Enum.all?([dirs.code, dirs.ops, dirs.doc], &File.dir?/1),
+    if Enum.all?([dirs.code, dirs.ops, dirs.workshop], &File.dir?/1),
       do: :ok,
       else: {:error, {:not_on_machine, full_name}}
   end
@@ -1498,7 +1499,7 @@ defmodule Fleet.Project.Onboard do
       ensure_face(
         full_name,
         url,
-        dirs.doc,
+        dirs.workshop,
         Fleet.Layout.workshop_branch(),
         "workshop",
         name,
@@ -1651,7 +1652,7 @@ defmodule Fleet.Project.Onboard do
   # EVERY face, not two: a project whose doc face is missing is not realized, and answering `:ok`
   # here would let a half-built project through the door that exists to refuse exactly that.
   defp refute_existing(dirs) do
-    case Enum.find([dirs.code, dirs.ops, dirs.doc], &File.exists?/1) do
+    case Enum.find([dirs.code, dirs.ops, dirs.workshop], &File.exists?/1) do
       nil -> :ok
       dir -> {:error, {:already_exists, dir}}
     end
@@ -1678,7 +1679,7 @@ defmodule Fleet.Project.Onboard do
 
   defp satisfied_end_state?(full_name, dirs, opts) do
     ours? =
-      Enum.all?([dirs.code, dirs.ops, dirs.doc], fn dir ->
+      Enum.all?([dirs.code, dirs.ops, dirs.workshop], fn dir ->
         origin_full_name(dir, opts) == {:ok, full_name}
       end)
 
@@ -1825,8 +1826,8 @@ defmodule Fleet.Project.Onboard do
   # every signature between here and the git calls.
   defp face_dirs(name, opts) do
     %{
-      code: Path.join(Keyword.get(opts, :projects_root, @projects_root), name),
-      doc: Path.join(Keyword.get(opts, :workshop_root, @workshop_root), name),
+      code: Path.join(Keyword.get(opts, :code_root, @code_root), name),
+      workshop: Path.join(Keyword.get(opts, :workshop_root, @workshop_root), name),
       ops: Path.join(Keyword.get(opts, :ops_root, @ops_root), name)
     }
   end

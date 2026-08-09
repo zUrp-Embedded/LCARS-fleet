@@ -13,7 +13,7 @@ defmodule Fleet.Project.WorktreeSync do
 
   alias Fleet.Project.GitOps
 
-  @projects_root Fleet.Layout.code_root()
+  @code_root Fleet.Layout.code_root()
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -58,7 +58,7 @@ defmodule Fleet.Project.WorktreeSync do
   def init(opts) do
     {:ok,
      %{
-       root: Keyword.get(opts, :projects_root, @projects_root),
+       root: Keyword.get(opts, :code_root, @code_root),
        ops_root: Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
        workshop_root: Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root())
      }}

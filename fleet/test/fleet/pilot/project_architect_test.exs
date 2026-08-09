@@ -51,7 +51,7 @@ defmodule Fleet.Project.ArchitectTest do
 
       {proj, work, doc,
        [
-         projects_root: Path.join(tmp, "projects"),
+         code_root: Path.join(tmp, "projects"),
          ops_root: Path.join(tmp, "projects.work"),
          workshop_root: Path.join(tmp, "projects.doc")
        ]}
@@ -129,7 +129,7 @@ defmodule Fleet.Project.ArchitectTest do
                  "fleet/demo",
                  spawner: CaptureSpawner,
                  forge_client: StubForge,
-                 projects_root: Path.join(tmp, "projects"),
+                 code_root: Path.join(tmp, "projects"),
                  ops_root: Path.join(tmp, "projects.work")
                )
 

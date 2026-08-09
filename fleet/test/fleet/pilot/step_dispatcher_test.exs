@@ -343,7 +343,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         task_queue: StubTaskQueue,
         # Hermetic root for `Roles.project_jury` (never created): no intensity.json →
         # the delegation default card, regardless of the REAL filesystem's state.
-        projects_root: Path.join(System.tmp_dir!(), "lcars-void-projects"),
+        code_root: Path.join(System.tmp_dir!(), "lcars-void-projects"),
         # default stub resolver: no project (ordering tests clone nothing).
         project_resolver: fn _repo, _opts -> {:ok, nil} end,
         # #5.2 D2 — default route (step build=engineer): since the decoupling, a ROUTELESS issue is

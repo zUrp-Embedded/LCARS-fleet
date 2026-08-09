@@ -358,7 +358,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defp wall_opts(tmp, head) do
     [
       head_branch: "lcars/issue-9-engineer",
-      projects_root: Path.join(tmp, "p"),
+      code_root: Path.join(tmp, "p"),
       ops_root: Path.join(tmp, "w"),
       __head_sha__: head
     ]

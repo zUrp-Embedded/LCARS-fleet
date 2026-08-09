@@ -137,10 +137,10 @@ defmodule Fleet.Project.IntensityTest do
         workflow_map: "standard-qa"
       )
 
-    assert "standard-qa" == ProjectIntensity.pipeline_default("fleet/demo", projects_root: tmp)
+    assert "standard-qa" == ProjectIntensity.pipeline_default("fleet/demo", code_root: tmp)
 
     # absent (legacy project) → the delegation default, no log requirement
-    assert "brief-gate" == ProjectIntensity.pipeline_default("fleet/ghost", projects_root: tmp)
+    assert "brief-gate" == ProjectIntensity.pipeline_default("fleet/ghost", code_root: tmp)
 
     # invalid file → default + LOUD warning
     broken = Path.join(tmp, "broken")
@@ -150,7 +150,7 @@ defmodule Fleet.Project.IntensityTest do
     log =
       capture_log(fn ->
         assert "brief-gate" ==
-                 ProjectIntensity.pipeline_default("fleet/broken", projects_root: tmp)
+                 ProjectIntensity.pipeline_default("fleet/broken", code_root: tmp)
       end)
 
     assert log =~ "unreadable/invalid"
@@ -172,7 +172,7 @@ defmodule Fleet.Project.IntensityTest do
       capture_log(fn ->
         assert "brief-gate" ==
                  ProjectIntensity.pipeline_default("fleet/broken",
-                   projects_root: tmp,
+                   code_root: tmp,
                    incident_fun: fn op, subject, reason, opts ->
                      send(me, {:incident, op, subject, reason, opts})
                      :recorded

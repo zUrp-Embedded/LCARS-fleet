@@ -252,7 +252,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
             role: engineer
       """)
 
-      ctx = card_ctx(canon_loader(), projects_root: tmp, workflow_maps_root: maps)
+      ctx = card_ctx(canon_loader(), code_root: tmp, workflow_maps_root: maps)
 
       assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
                "lcars/issue-8-engineer",

@@ -61,7 +61,7 @@ defmodule Fleet.Project.RolesTest do
           workflow_map: "c1-light"
         )
 
-      assert ["qualifier"] == Roles.project_jury("fleet/demo", projects_root: tmp)
+      assert ["qualifier"] == Roles.project_jury("fleet/demo", code_root: tmp)
 
       poc = Path.join(tmp, "poc")
       File.mkdir_p!(poc)
@@ -73,19 +73,19 @@ defmodule Fleet.Project.RolesTest do
           workflow_map: "c0-poc"
         )
 
-      assert [] == Roles.project_jury("fleet/poc", projects_root: tmp)
+      assert [] == Roles.project_jury("fleet/poc", code_root: tmp)
     end
 
     @tag :tmp_dir
     test "undeclared project → the delegation default card's jury (quiet)", %{tmp_dir: tmp} do
-      assert ["qualifier", "reviewer"] == Roles.project_jury("fleet/ghost", projects_root: tmp)
+      assert ["qualifier", "reviewer"] == Roles.project_jury("fleet/ghost", code_root: tmp)
     end
 
     test "seam :reviewer_roles wins FIRST — no disk read under the seam" do
       assert ["x"] ==
                Roles.project_jury("fleet/any",
                  reviewer_roles: ["x"],
-                 projects_root: "/nonexistent-root"
+                 code_root: "/nonexistent-root"
                )
     end
 
@@ -110,7 +110,7 @@ defmodule Fleet.Project.RolesTest do
       log =
         capture_log(fn ->
           assert ["qualifier", "reviewer"] ==
-                   Roles.project_jury("fleet/broken", projects_root: tmp)
+                   Roles.project_jury("fleet/broken", code_root: tmp)
         end)
 
       assert log =~ "does not load"
@@ -154,7 +154,7 @@ defmodule Fleet.Project.RolesTest do
         ExUnit.CaptureLog.capture_log(fn ->
           assert ["qualifier"] ==
                    Roles.project_jury("fleet/demo",
-                     projects_root: tmp,
+                     code_root: tmp,
                      workflow_maps_root: maps,
                      incident_fun: fn op, subject, reason, opts ->
                        send(me, {:incident, op, subject, reason, opts})
