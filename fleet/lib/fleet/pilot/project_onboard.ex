@@ -96,7 +96,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
-      case finish_onboard(full_name, provision, dirs, name, opts) do
+      case guarded_finish(full_name, provision, dirs, name, opts) do
         {:ok, result} ->
           {:ok, result}
 
@@ -108,6 +108,27 @@ defmodule Fleet.Pilot.ProjectOnboard do
       {:already_satisfied, result} -> {:ok, result}
       {:error, _} = err -> err
     end
+  end
+
+  # `finish_onboard` has TWO ways out and compensation covered ONE. An exception — a face root that
+  # cannot be created, a git binary gone, a full disk — walks straight past the `case` above, and
+  # what it leaves is a repo on the forge plus however many face trees were already built.
+  #
+  # Measured 2026-08-09 on a fresh bench, and it is the shape of the whole failure: `/home/
+  # projects.doc` did not exist, `mkdir_p!` raised, and the forge repo, the cloned-and-committed
+  # code face and the initialised ops face ALL survived. The caller got `tool_crashed` and no way
+  # to know a cleanup was owed; the next attempt then met the 409/refute_existing walls this
+  # compensation exists to prevent.
+  #
+  # RE-RAISED, NOT SWALLOWED. The crash stays a crash, with its kind and its stacktrace — only the
+  # machine is left clean. Converting it to `{:error, _}` here would dress an unforeseen failure as
+  # a handled one, and a caller cannot tell those apart afterwards.
+  defp guarded_finish(full_name, provision, dirs, name, opts) do
+    finish_onboard(full_name, provision, dirs, name, opts)
+  catch
+    kind, payload ->
+      compensate_onboard(full_name, dirs, {kind, payload}, opts)
+      :erlang.raise(kind, payload, __STACKTRACE__)
   end
 
   defp finish_onboard(full_name, provision, dirs, name, opts) do

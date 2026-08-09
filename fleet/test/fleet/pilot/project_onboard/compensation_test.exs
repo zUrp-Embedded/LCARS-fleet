@@ -40,7 +40,17 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
       {:ok, "fleet/#{name}"}
     end
 
-    def protect_branch(_repo, _rule, _fc), do: Process.get(:protect_result, {:ok, :created})
+    # `:raise` is a THIRD outcome, and it is the point of one of the tests below: an onboard can
+    # die by exception, not only by `{:error, _}`, and the compensation must cover both exits.
+    def protect_branch(_repo, _rule, _fc) do
+      case Process.get(:protect_result, {:ok, :created}) do
+        :raise ->
+          raise File.Error, reason: :eacces, action: "make directory (with -p)", path: "/x"
+
+        other ->
+          other
+      end
+    end
 
     def default_branch(full_name, _fc) do
       if File.dir?(bare_path(full_name)), do: {:ok, "main"}, else: {:error, {:http, 404, "gone"}}
@@ -124,6 +134,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     assert_received {:forge_deleted, "fleet/nolabel"}
     refute File.exists?(Path.join(o[:projects_root], "nolabel"))
     refute File.exists?(Path.join(o[:work_root], "nolabel"))
+    refute File.exists?(Path.join(o[:doc_root], "nolabel"))
   end
 
   test "a LATE onboard failure (protect_branch) compensates: forge repo deleted, dirs removed, retry possible",
@@ -138,12 +149,35 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     assert_received {:forge_deleted, "fleet/phoenix"}
     refute File.exists?(Path.join(o[:projects_root], "phoenix"))
     refute File.exists?(Path.join(o[:work_root], "phoenix"))
+    refute File.exists?(Path.join(o[:doc_root], "phoenix"))
 
     # The RETRY of the same onboard now goes through cleanly (fresh create, full sequence).
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/phoenix"}} = ProjectOnboard.onboard("phoenix", o)
     assert File.dir?(Path.join(o[:projects_root], "phoenix"))
     assert File.dir?(Path.join(o[:work_root], "phoenix"))
+    assert File.dir?(Path.join(o[:doc_root], "phoenix"))
+  end
+
+  test "an onboard that RAISES compensates too — and the crash stays a crash", %{tmp_dir: tmp} do
+    # The exit compensation did not cover, found on a bench: /home/projects.doc absent →
+    # `mkdir_p!` raised → the forge repo, the code face and the ops face all survived a failed
+    # onboard, and the caller saw only `tool_crashed`. The stub raises the very same exception.
+    o = opts(tmp)
+    Process.put(:protect_result, :raise)
+
+    assert_raise File.Error, fn -> ProjectOnboard.onboard("vulcan", o) end
+
+    # RE-RAISED, so the caller still sees a crash — and the machine is clean anyway.
+    assert_received {:forge_deleted, "fleet/vulcan"}
+    refute File.exists?(Path.join(o[:projects_root], "vulcan"))
+    refute File.exists?(Path.join(o[:work_root], "vulcan"))
+    refute File.exists?(Path.join(o[:doc_root], "vulcan"))
+
+    # And the retry is possible — which is the whole reason compensation exists.
+    Process.put(:protect_result, {:ok, :created})
+    assert {:ok, %{repo: "fleet/vulcan"}} = ProjectOnboard.onboard("vulcan", o)
+    assert File.dir?(Path.join(o[:doc_root], "vulcan"))
   end
 
   test "a successful onboard compensates NOTHING (dirs + repo stay)", %{tmp_dir: tmp} do
@@ -156,6 +190,7 @@ defmodule Fleet.Pilot.ProjectOnboardCompensationTest do
     refute_received {:forge_deleted, _}
     assert File.dir?(Path.join(o[:projects_root], "apollo"))
     assert File.dir?(Path.join(o[:work_root], "apollo"))
+    assert File.dir?(Path.join(o[:doc_root], "apollo"))
   end
 
   test "a LATE import failure compensates the DIRS ONLY — the pre-existing repo is NEVER deleted",
