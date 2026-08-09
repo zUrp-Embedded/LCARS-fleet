@@ -43,40 +43,52 @@ defmodule Fleet.Pilot do
 
   ## Operator entries (delegated here — the facade is the contract)
 
-  ## The escalation FAMILY — the register, because the posture has a threshold
+  ## The escalation FAMILY — links of ONE chain, ordered by the DEPTH they reach
 
-  Five modules escalate, with five DISTINCT exits, and that is why none of them was merged:
+  Escalation is not five comparable objects. It is one chain, and each site is a LINK at a
+  different depth: the question a reader needs answered is never "how many escalate?" but **how far
+  did this one have to go before something absorbed it?**
 
-  | Module | Exit | Object |
-  |---|---|---|
-  | `StepRunConsumer.TerminalEscalation` | human wall: freeze + unlock `lcars-in-flight` | issue |
-  | `StepDispatcher.ArchEscalation` | deduplicated comment + `lcars-awaits-arch` | issue (PR-originated) |
-  | `StepRunConsumer.GatekeeperEscalation` | summons the gatekeeper | PR |
-  | `IncidentRegistry.Escalation` | sysadmin issue | separate repo |
-  | `IncidentConsumer.default_brake/3` | recurrence brake: `lcars-awaits-arch`, out of dispatch | issue |
+  | Link | Depth reached | Absorbed by | Gesture |
+  |---|---|---|---|
+  | `StepRunConsumer.GatekeeperEscalation` | **internal** — never leaves the machine | a gatekeeper pod | summons on the PR |
+  | `StepDispatcher.ArchEscalation` | **agent** | the architect | comment + `lcars-awaits-arch` on the issue (PR-originated) |
+  | `StepRunConsumer.TerminalEscalation` | **agent** | the architect | DECIDES; the gesture is `StepRunCompleter.await_arch/2` (step_run that cannot conclude) |
+  | `IncidentConsumer.default_brake/3` | **agent** | the architect | `lcars-awaits-arch`, out of dispatch (recurrence brake) |
+  | `IncidentRegistry.Escalation` | **LAST LINK** — leaves the product | a human sysadmin | issue in a separate repo |
 
-  **The overlap under watch, and its COUNT: 2 of the 4 aim at the same target with neighbouring
-  gestures** — `ArchEscalation` and `TerminalEscalation` both end at "the arch decides", both write
-  an arch-addressed comment plus `lcars-awaits-arch` on the ISSUE. They differ by ORIGIN (a PR that
-  cannot advance vs a step_run that cannot conclude) and by one effect (only the terminal one
-  unlocks `lcars-in-flight`).
+  **The user is the last link, and reaching them is not a failure — never reaching them is the sign
+  the work was good.** It can be the legitimate exit, but then it has to be PROVEN the right one.
+  Which sets the metric, and it is not a population count: what matters is **the rate at which the
+  last link is reached**. An `awaits-arch` the architect resolves is the system succeeding; a
+  system error opened toward the human is the opposite. Today the two are indistinguishable in any
+  tally, and that is the gap this table names rather than closes.
 
-  The standing decision was to WATCH, not to merge — the two origins are genuinely different and a
-  premature merge would fuse two lifecycles. The threshold: **merge when a 5th escalation appears.**
+  Three links land identically — `lcars-awaits-arch` on an ISSUE, absorbed by the architect — and
+  they are NOT redundant: they differ by ORIGIN (a PR that cannot advance, a step_run that cannot
+  conclude, a recurring incident). Merging them would fuse three lifecycles into one.
 
-  ⚠ **THE THRESHOLD IS MET, and the merge is NOT decided.** The 5th exists and had been escalating
-  outside this table. Meeting the threshold is a measured fact; merging is a decision, and it is not
-  this moduledoc's to take. Until it is taken, the state is: five exits, three of which land on
-  `lcars-awaits-arch` on an ISSUE (`TerminalEscalation`, `ArchEscalation`, `default_brake`), and
-  nothing prevents a fourth from being added to that same landing.
+  ⚠ A link DECIDES; it does not always execute. `TerminalEscalation` is the decision
+  (`terminal_escalate?/1`) and `StepRunCompleter.await_arch/2` is the gesture — looking for the
+  label write inside the escalation module finds nothing, which is why the three files the wall
+  below measures are the completer, `ArchEscalation` and `IncidentConsumer`.
 
-  **This register exists because that threshold had no counter.** The posture was written in an
-  audit as "to merge at the 5th appearance" while nothing anywhere counted, which makes the rule
-  unfalsifiable: the next reader adding an escalation cannot know whether they are the 4th or the
-  6th, so the threshold can never trigger. A rule with a number and no place to read the number is
-  a rule that will not fire (BL-6-42.4). And a register kept BY HAND is a counter that drifts in
-  silence: this one said four while a fifth was live, so the threshold it exists to arm could not
-  arm. Whoever adds one updates this table FIRST — that update is what makes the threshold real.
+  They no longer differ by effect. This register used to say *"only the terminal one unlocks
+  `lcars-in-flight`"*, which CI-04 had already made false at `ArchEscalation` — and the entry
+  claiming to be the family's single source pointed at the OPPOSITE of the code. All three clear
+  the lock today, and it is no longer a convention anyone must remember:
+  `labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` refuses a writer that sets
+  the brake without releasing the lock. The reason is in that check's `@doc` — a lock left on a
+  ticket nobody can advance is reclaimed by reconciliation and re-dispatched, so the brake is on
+  and the wheel keeps turning.
+
+  ⚠ **On the old "merge at the 5th appearance" threshold: it counted the wrong dimension.** A
+  population of modules says nothing about a chain whose links sit at different depths — the fifth
+  link to appear was the LAST one, the only one that leaves the product, and merging on that count
+  would have fused the internal link with the sysadmin one. The threshold is not re-armed here, and
+  the merge is still not decided; what replaces it is the axis above. Whoever adds a link places it
+  in this table **by the depth it reaches**, which is the only thing that makes it comparable to
+  the others.
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
