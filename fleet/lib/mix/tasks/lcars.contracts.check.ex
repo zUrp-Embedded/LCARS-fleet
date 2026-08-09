@@ -90,6 +90,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
+        check_face_roots_provisioned(root),
         check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
@@ -1368,6 +1369,128 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           note:
             "every sourcer of provision-lib.sh sets -u (BL-6-36: bash's silent-coercion class)"
         }
+    end
+  end
+
+  # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime
+  # cannot create it: the fleet runs as the human, `/home` belongs to root. The creator is the
+  # container entrypoint, and its `install -d` line is a hand-written mirror of
+  # `Fleet.Layout.face_root/1` in another language — the exact shape that drifts without a word.
+  #
+  # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
+  # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
+  # fleet started, and the first `create_project` died on `could not make directory (with -p)
+  # "/home/projects.doc": permission denied`. Nothing before that moment could have said it.
+  #
+  # FAIL-CLOSED ON THE ANCHOR: if the `install -d` line cannot be found, this check FAILS instead of
+  # passing on an empty read. A renamed line would otherwise turn the guard off in silence, which is
+  # worse than the drift it watches.
+  @doc false
+  def check_face_roots_provisioned(root) do
+    entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
+    expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
+
+    remediation =
+      "add the face root to the `install -d` line of deploy/docker/entrypoint.sh — a face declared " <>
+        "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
+        "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
+
+    case tree_scope(Path.expand("deploy", root)) do
+      :out_of_scope ->
+        %{
+          id: "layout.face_roots_provisioned",
+          remediation: "—",
+          status: :pass,
+          evidence: [],
+          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+        }
+
+      :required ->
+        case {expected, read_install_zone_paths(entrypoint)} do
+          {nil, _} ->
+            %{
+              id: "layout.face_roots_provisioned",
+              remediation: remediation,
+              status: :fail,
+              evidence: ["lib/fleet/layout.ex"],
+              note: "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"
+            }
+
+          {_, nil} ->
+            %{
+              id: "layout.face_roots_provisioned",
+              remediation: remediation,
+              status: :fail,
+              evidence: [Path.relative_to(entrypoint, root)],
+              note: "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"
+            }
+
+          {expected, provisioned} ->
+            missing = expected -- provisioned
+
+            %{
+              id: "layout.face_roots_provisioned",
+              remediation: remediation,
+              status: if(missing == [], do: :pass, else: :fail),
+              evidence: missing,
+              note:
+                "every Fleet.Layout face root is created by the entrypoint " <>
+                  "(#{length(expected)} face(s): #{Enum.join(expected, ", ")})"
+            }
+        end
+    end
+  end
+
+  # The face roots, READ from `Fleet.Layout`'s source rather than called. This task references no
+  # Fleet module at runtime — by design: a contract checker that CALLED the code would be measuring
+  # the code with the code, and `Fleet.Application` (which classifies this task, Z4) does not carry
+  # an edge to Layout. Same shape as `read_list/3` above: cross-language facts are read, and the
+  # authority stays where it is.
+  #
+  # `face_root/1` has one clause per face; the body is an attribute (today) or could be the literal
+  # itself. BOTH are read, and a body that is NEITHER makes the whole read nil.
+  #
+  # That last part is the point, and it cost a surviving mutation to find. The first version matched
+  # only `do: @attr`; inlining one clause's literal made that clause invisible, and the check then
+  # declared a 2-face population fully provisioned — green, with a smaller subject than it names.
+  # The mutation was semantically harmless, the READER was not: any face whose body it cannot parse
+  # would vanish the same way, including one whose root is genuinely missing from the machine.
+  # A guard that silently narrows its population is the exact defect this check exists to close.
+  defp read_face_roots(layout_path) do
+    with {:ok, src} <- File.read(layout_path),
+         [_ | _] = clauses <- Regex.scan(~r/^\s*def face_root\("([a-z]+)"\), do: (.+)$/m, src) do
+      attrs =
+        ~r/^\s*@([a-z_]+)\s+"(\/[^"]+)"$/m
+        |> Regex.scan(src)
+        |> Map.new(fn [_, name, value] -> {name, value} end)
+
+      roots = Enum.map(clauses, fn [_, _face, body] -> resolve_face_root(body, attrs) end)
+      if Enum.any?(roots, &is_nil/1), do: nil, else: Enum.sort(roots)
+    else
+      _ -> nil
+    end
+  end
+
+  defp resolve_face_root(body, attrs) do
+    case String.trim(body) do
+      "@" <> attr -> Map.get(attrs, attr)
+      ~s(") <> _ = literal -> literal |> String.trim(~s(")) |> nonempty_abs_path()
+      _ -> nil
+    end
+  end
+
+  defp nonempty_abs_path("/" <> _ = p), do: p
+  defp nonempty_abs_path(_), do: nil
+
+  # The paths of the entrypoint's zone-creating line. Absolute tokens only — the flags (`-d`,
+  # `-m 2775`, `-g fleet`) are not paths, and matching them as such would make a missing face
+  # indistinguishable from a changed mode.
+  defp read_install_zone_paths(path) do
+    with {:ok, content} <- File.read(path),
+         [_, tail] <- Regex.run(~r/^install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
+      tail |> String.split() |> Enum.filter(&String.starts_with?(&1, "/"))
+    else
+      _ -> nil
     end
   end
 

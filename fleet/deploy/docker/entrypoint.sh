@@ -67,14 +67,23 @@ else
   say "pas de LCARS_SSH_AUTHORIZED_KEYS — accès par « docker exec -it -u $LCARS_HUMAN <ctr> bash » seulement"
 fi
 
-# ─── 1bis. Les zones catalogue : /home/projects + /home/projects.work, groupe fleet ──────────────
+# ─── 1bis. Les zones de FACE : une racine par face, groupe fleet ─────────────────────────────────
 # Le sanctuaire bwrap des pods monte ces zones (cap-profile starfleet : les deux en rw) —
 # ABSENTE, le spawn meurt (« catalogue mount path missing host-side », vu au premier E2E,
 # une zone par crash). Sur WSL elles existent (histoire du substrat) ; ICI, l'entrypoint est
 # le créateur de zones du conteneur (comme pour l'humain). setgid fleet : chaque humain du
 # groupe y crée ses projets/worktrees.
-install -d -m 2775 -g fleet /home/projects /home/projects.work
-say "zones catalogue : /home/projects /home/projects.work (2775 root:fleet)"
+#
+# CETTE LIGNE EST LE MIROIR DE `Fleet.Layout.face_root/1`, ET UNE FACE MANQUANTE NE SE VOIT PAS.
+# Mesure du 2026-08-09, sur un banc neuf : la face `doc` etait posee dans le code et dans l'etage
+# `build` de l'image (pour le gate), et PAS ici. La boite avait l'air saine, la fleet demarrait,
+# et le premier `create_project` mourait sur « could not make directory (with -p)
+# "/home/projects.doc": permission denied » — le runtime tourne sous l'humain, `/home` est a root,
+# donc creer la zone n'est PAS un geste qu'il peut rattraper. La divergence est tenue par le check
+# `layout.face_roots_provisioned` de `mix lcars.contracts.check` : ajouter une face sans l'ajouter
+# ici fait rougir le gate, en la NOMMANT.
+install -d -m 2775 -g fleet /home/projects /home/projects.work /home/projects.doc
+say "zones de face : /home/projects /home/projects.work /home/projects.doc (2775 root:fleet)"
 
 # La SOURCE — l'auto-maintenance en dépend : c'est le checkout que la fleet lit, met à jour
 # (`provision update`) et sur lequel ses agents travaillent.
