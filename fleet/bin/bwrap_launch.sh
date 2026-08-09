@@ -267,6 +267,7 @@ done <<< "${LCARS_SKILLS_PATHS:-}"
 # authorizes project/local). Fix: only `.credentials.json` is bound (native OAuth refresh writes IN
 # PLACE, which survives a single-file bind and rewrites the human's file); `.claude/` stays pod-owned
 # (created by do_project) → no human settings.json → no hook.
+# ###################### /!\ NEVER DELETE /!\ ###################### ADR-F
 # THIS BIND IS NOT A SECURITY HOLE. IT IS THE PLATE. Read it before proposing to close it.
 # The Anthropic credential BUYS THE TOKENS the model eats — it is a meter, it signs nothing.
 # What signs is the ROLE token (`/home/private/<role>.gitea_token`): per role, on every forge act.
@@ -274,6 +275,7 @@ done <<< "${LCARS_SKILLS_PATHS:-}"
 # turn this into a per-pod identity: a single credential RW-bound and refreshed IN PLACE is the
 # pattern Anthropic recommends for multi-agent refresh, and it is the only shape without the ~8h
 # cliff (the mechanism is at the top of this file, LCARS_AUTH_MODE).
+# ################################################################## ADR-F
 AUTH_BIND_ARGS=()
 HUMAN_CREDS="$CLAUDE_DIR/.credentials.json"
 [[ -f "$HUMAN_CREDS" ]] || { echo "ERR: creds $HUMAN_CREDS missing (human registration — adr-f)" >&2; exit 1; }
