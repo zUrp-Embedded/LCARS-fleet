@@ -42,7 +42,10 @@ Chaque emprunt est qualifié par sa **forme**, parce que les obligations et les 
 - **Source** : https://github.com/ppgranger/token-saver
 - **Auteur** : ppgranger
 - **Licence** : Apache License 2.0 — texte intégral conservé en [`fleet/vendor/token_saver/LICENSE.upstream`](fleet/vendor/token_saver/LICENSE.upstream)
-- **Version reprise** : v2.6.3, commit `098873e04c6c49cbdc25c1c5f795986f5f170f16` (2026-06-02)
+- **Version reprise** : commit `098873e04c6c49cbdc25c1c5f795986f5f170f16` (2026-06-02), soit
+  `v1.3.1-84-g098873e` — **le commit fait foi, pas une étiquette de version**. Cette ligne a annoncé
+  « v2.6.3 » : faux, ce tag est 16 commits plus loin (`0767a57`, même date). Vérifiable :
+  `fleet/vendor/token_saver/update_vendor.sh --verify` compare le sous-arbre au commit déclaré.
 
 **Ce qui est repris** : les répertoires `src/`, `scripts/` et `tests/` — 67 fichiers Python, moteur de compression d'output CLI et ses 36 processeurs spécialisés.
 

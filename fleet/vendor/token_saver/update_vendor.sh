@@ -27,7 +27,8 @@
 #     [FR]
 #     Met a jour la brique vendoree depuis l'amont.
 #
-#         Usage:   ./update_vendor.sh [ref]            inspection seule
+#         Usage:   ./update_vendor.sh --verify           le sous-arbre EST-IL le pin ?
+#                  ./update_vendor.sh [ref]            inspection seule
 #                  ./update_vendor.sh [ref] --apply    re-copie + gate
 #         Output:  rapport amont, puis sous-arbre a jour si --apply
 #
@@ -36,10 +37,12 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 
 UPSTREAM="https://github.com/ppgranger/token-saver.git"
 APPLY=0
+VERIFY=0
 REF="main"
 for a in "$@"; do
     case "$a" in
-        --apply) APPLY=1 ;;
+        --apply)  APPLY=1 ;;
+        --verify) VERIFY=1 ;;
         *) REF="$a" ;;
     esac
 done
@@ -48,13 +51,55 @@ PIN=$(grep -oP '@ `\K[0-9a-f]{40}' VENDOR.md | head -1)
 echo "=== brique vendoree : token_saver ==="
 echo "  amont   : $UPSTREAM"
 echo "  pin     : ${PIN:-inconnu}"
-echo "  cible   : $REF"
-[ $APPLY -eq 1 ] && echo "  mode    : APPLY (le sous-arbre sera remplace)" \
-                 || echo "  mode    : inspection (aucune ecriture)"
+[ $VERIFY -eq 1 ] || echo "  cible   : $REF"
+if   [ $VERIFY -eq 1 ]; then echo "  mode    : VERIFY (le sous-arbre est-il le pin ?)"
+elif [ $APPLY  -eq 1 ]; then echo "  mode    : APPLY (le sous-arbre sera remplace)"
+else                         echo "  mode    : inspection (aucune ecriture)"
+fi
 echo
 
 TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
+
+# ─── MODE --verify : le pin est-il un FAIT, ou seulement une phrase ? ───────────────────────────
+# Ce script comparait l'amont au pin DECLARE dans VENDOR.md, sans jamais verifier que notre
+# sous-arbre corresponde a ce pin. Deux choses pouvaient donc diverger en silence : le sha lui-meme
+# (l'etape 5 dit a l'humain de le recopier a la main, et une main oublie) et l'ETIQUETTE posee a
+# cote. Mesure du 2026-08-09 : le sha etait juste, l'etiquette annonçait « v2.6.3 » alors que
+# `git describe` rend `v1.3.1-84-g098873e` et que ce tag est 16 commits plus loin — meme date, donc
+# invisible a l'oeil. Un update « vers v2.6.3 » aurait embarque 16 commits en croyant n'en embarquer
+# aucun.
+#
+# Ce mode rejoue la mesure : archive de l'amont AU PIN, diff contre notre sous-arbre. `.go7-exempt`
+# est le seul ecart admis — c'est notre marqueur, pas du code amont.
+if [ $VERIFY -eq 1 ]; then
+    [ -n "$PIN" ] || { echo "  ECHEC : aucun pin lisible dans VENDOR.md"; exit 1; }
+    TMPV=$(mktemp -d) || exit 1
+    trap 'rm -rf "$TMPV"' EXIT
+    git clone --quiet "$UPSTREAM" "$TMPV/up" || { echo "  ECHEC clone"; exit 1; }
+    git -C "$TMPV/up" cat-file -e "$PIN^{commit}" 2>/dev/null \
+        || { echo "  ECHEC : le pin $PIN n'existe pas en amont"; exit 1; }
+
+    echo "  describe : $(git -C "$TMPV/up" describe --tags "$PIN" 2>/dev/null || echo '<sans tag ancetre>')"
+    mkdir -p "$TMPV/pin"
+    git -C "$TMPV/up" archive "$PIN" src scripts tests | tar -x -C "$TMPV/pin"
+    rm -f "$TMPV/pin/tests/test_installers.py"
+
+    RCV=0
+    for d in src scripts tests; do
+        out=$(diff -rq --exclude=__pycache__ --exclude=.go7-exempt "$TMPV/pin/$d" "./$d" 2>&1)
+        if [ -z "$out" ]; then
+            echo "  $d/ : identique au pin"
+        else
+            echo "  $d/ : DIVERGE du pin"
+            echo "$out" | sed 's/^/      /' | head -20
+            RCV=1
+        fi
+    done
+    [ $RCV -eq 0 ] && echo "  VERIFIE : le sous-arbre EST le pin." \
+                   || echo "  ECHEC : le sous-arbre n'est pas le pin declare dans VENDOR.md."
+    exit $RCV
+fi
 
 echo "=== 1/5 · recuperation ==="
 git clone --quiet "$UPSTREAM" "$TMP/up" || { echo "  ECHEC clone"; exit 1; }

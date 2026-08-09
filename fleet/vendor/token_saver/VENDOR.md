@@ -1,11 +1,22 @@
 # token_saver — brique vendorée
 
 **Date** : 2026-08-04
-**Dernière révision** : 2026-08-07
+**Dernière révision** : 2026-08-09
 **Statut** : actif — contrat de vendoring de la brique token_saver
 **Référencé par** : `THIRD_PARTY_NOTICES.md`, `update_vendor.sh`
 
-**Dérivé de** : [`ppgranger/token-saver`](https://github.com/ppgranger/token-saver) @ `098873e04c6c49cbdc25c1c5f795986f5f170f16` (v2.6.3, 2026-06-02) — **Apache-2.0**
+**Dérivé de** : [`ppgranger/token-saver`](https://github.com/ppgranger/token-saver) @ `098873e04c6c49cbdc25c1c5f795986f5f170f16` — **Apache-2.0**
+
+⚠ **Le sha fait foi, PAS une étiquette de version.** Cette ligne a annoncé « v2.6.3 » pendant cinq
+jours : faux. `git describe` sur ce sha rend **`v1.3.1-84-g098873e`**, et le tag `v2.6.3`
+(`0767a57`) est **16 commits PLUS LOIN** — même date (2026-06-02), ce qui explique la confusion et
+la rend indétectable à l'œil. Un lecteur qui cherchait « ce qu'on a vendoré » lisait un numéro de
+version qui ne désigne pas notre code, et un update « vers v2.6.3 » aurait embarqué 16 commits en
+croyant n'en embarquer aucun.
+
+Ce que la vérification a établi le 2026-08-09 : le sous-arbre `src/`, `scripts/`, `tests/` est
+**identique** à ce sha, au seul marqueur `.go7-exempt` près (posé par nous). `./update_vendor.sh
+--verify` rejoue cette mesure — elle n'est plus une phrase.
 **Forme d'emprunt** : `import` (vendoring de `src/` + `scripts/` + `tests/`)
 **Analyse** : reverse complet → `#3_ponce-reverse/token-saver/` (specs, architecture, harnais de mesure)
 **Vendoré le** : 2026-08-04
