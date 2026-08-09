@@ -168,8 +168,26 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
         onboarded_by: "human"
       )
 
+    # IDENTITE EXPLICITE, comme tout autre `git commit` de cette suite. Sans elle ce commit marche
+    # sur un poste (le `~/.gitconfig` de l'humain) et meurt en clean-room sur « Author identity
+    # unknown » — mesure du 2026-08-09, l'etage `build` de l'image a rougi sur ces deux tests-la
+    # alors qu'ils etaient verts ici. Un test vert grace a l'environnement de celui qui l'ecrit.
     {_, 0} =
-      System.cmd("git", ["-C", proj, "commit", "-aqm", "seed intensity"], stderr_to_stdout: true)
+      System.cmd(
+        "git",
+        [
+          "-C",
+          proj,
+          "-c",
+          "user.email=t@t",
+          "-c",
+          "user.name=t",
+          "commit",
+          "-aqm",
+          "seed intensity"
+        ],
+        stderr_to_stdout: true
+      )
 
     {_, 0} =
       System.cmd("git", ["-C", proj, "push", "-q", "origin", "main"], stderr_to_stdout: true)
@@ -205,8 +223,26 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
         onboarded_by: "human"
       )
 
+    # IDENTITE EXPLICITE, comme tout autre `git commit` de cette suite. Sans elle ce commit marche
+    # sur un poste (le `~/.gitconfig` de l'humain) et meurt en clean-room sur « Author identity
+    # unknown » — mesure du 2026-08-09, l'etage `build` de l'image a rougi sur ces deux tests-la
+    # alors qu'ils etaient verts ici. Un test vert grace a l'environnement de celui qui l'ecrit.
     {_, 0} =
-      System.cmd("git", ["-C", proj, "commit", "-aqm", "seed intensity"], stderr_to_stdout: true)
+      System.cmd(
+        "git",
+        [
+          "-C",
+          proj,
+          "-c",
+          "user.email=t@t",
+          "-c",
+          "user.name=t",
+          "commit",
+          "-aqm",
+          "seed intensity"
+        ],
+        stderr_to_stdout: true
+      )
 
     {_, 0} =
       System.cmd("git", ["-C", proj, "push", "-q", "origin", "main"], stderr_to_stdout: true)
