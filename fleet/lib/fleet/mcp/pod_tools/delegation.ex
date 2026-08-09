@@ -688,13 +688,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.onboard(name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
              "status" => "onboarded",
              "repo" => repo,
              "project_dir" => pdir,
              "work_dir" => wdir,
+             "doc_dir" => ddir,
              "delegation_target" => repo
            }
            |> put_architect(result)}
@@ -716,13 +717,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.import(full_name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
              "status" => "imported",
              "repo" => repo,
              "project_dir" => pdir,
              "work_dir" => wdir,
+             "doc_dir" => ddir,
              "delegation_target" => repo
            }
            |> put_architect(result)}
@@ -787,13 +789,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.adopt_project(name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
              "status" => "adopted",
              "repo" => repo,
              "project_dir" => pdir,
              "work_dir" => wdir,
+             "doc_dir" => ddir,
              "delegation_target" => repo
            }
            |> put_architect(result)}
@@ -834,13 +837,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
       ]
 
       case onboard.import_external(url, name, opts) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
              "status" => "imported_external",
              "repo" => repo,
              "project_dir" => pdir,
              "work_dir" => wdir,
+             "doc_dir" => ddir,
              "delegation_target" => repo
            }
            |> put_architect(result)}
@@ -974,13 +978,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp do_open_project(full_name) do
     with {:ok, onboard} <- conforming_onboard() do
       case onboard.open(full_name, []) do
-        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir} = result} ->
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
              "status" => "opened",
              "repo" => repo,
              "project_dir" => pdir,
-             "work_dir" => wdir
+             "work_dir" => wdir,
+             "doc_dir" => ddir
            }
            |> put_architect(result)}
 

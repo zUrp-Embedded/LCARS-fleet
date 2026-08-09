@@ -26,31 +26,52 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @doc """
   Onboards the project `name` (kebab-case slug). `opts` consumed by the real default:
   `:org`, `:description`, `:pitch` (cf. `Fleet.Pilot.ProjectOnboard.onboard/2`).
-  The result MUST carry the 3 keys — `Delegation.do_create_project/2` pattern-matches
-  `%{repo: _, project_dir: _, work_dir: _}` strictly.
+  The result MUST carry the 4 keys — `Delegation.do_create_project/2` pattern-matches
+  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE, and the fourth
+  was missing while the runtime already produced it: the wire announced two of the three trees it
+  had just created, so a caller could not name the doc face at all.
   """
   @callback onboard(name :: String.t(), opts :: keyword()) ::
-              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              {:ok,
+               %{
+                 repo: String.t(),
+                 project_dir: Path.t(),
+                 work_dir: Path.t(),
+                 doc_dir: Path.t()
+               }}
               | {:error, term()}
 
   @doc """
   Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — WITHOUT creating
-  nor scaffolding `main` (content intact). Same 3 return keys as `onboard/2`:
-  `Delegation.do_import_project/2` pattern-matches `%{repo: _, project_dir: _, work_dir: _}`
-  strictly, identical to the onboarding channel.
+  nor scaffolding `main` (content intact). Same 4 return keys as `onboard/2`:
+  `Delegation.do_import_project/2` pattern-matches
+  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly, identical to the onboarding
+  channel.
   """
   @callback import(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              {:ok,
+               %{
+                 repo: String.t(),
+                 project_dir: Path.t(),
+                 work_dir: Path.t(),
+                 doc_dir: Path.t()
+               }}
               | {:error, term()}
 
   @doc """
   OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
-  2026-07-19): no forge/disk write, ensures the project's per-project architect. Same 3 return
+  2026-07-19): no forge/disk write, ensures the project's per-project architect. Same 4 return
   keys as `onboard/2` (+ `architect`, the ensure outcome). Dirs absent →
   `{:error, {:not_on_machine, _}}` (open never creates — that is `create`/`import`'s job).
   """
   @callback open(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              {:ok,
+               %{
+                 repo: String.t(),
+                 project_dir: Path.t(),
+                 work_dir: Path.t(),
+                 doc_dir: Path.t()
+               }}
               | {:error, term()}
 
   @doc """
@@ -69,7 +90,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   return keys as `onboard/2` (+ `architect`).
   """
   @callback adopt_project(name :: String.t(), opts :: keyword()) ::
-              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              {:ok,
+               %{
+                 repo: String.t(),
+                 project_dir: Path.t(),
+                 work_dir: Path.t(),
+                 doc_dir: Path.t()
+               }}
               | {:error, term()}
 
   @doc """
@@ -81,7 +108,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   `onboard/2` (+ `architect`).
   """
   @callback import_external(url :: String.t(), name :: String.t(), opts :: keyword()) ::
-              {:ok, %{repo: String.t(), project_dir: Path.t(), work_dir: Path.t()}}
+              {:ok,
+               %{
+                 repo: String.t(),
+                 project_dir: Path.t(),
+                 work_dir: Path.t(),
+                 doc_dir: Path.t()
+               }}
               | {:error, term()}
 
   @doc """

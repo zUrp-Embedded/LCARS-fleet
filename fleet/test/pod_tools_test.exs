@@ -572,7 +572,8 @@ defmodule Fleet.MCP.PodToolsTest do
        %{
          repo: "fleet/#{name}",
          project_dir: "/tmp/projects/#{name}",
-         work_dir: "/tmp/projects.work/#{name}"
+         work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}"
        }}
     end
 
@@ -584,7 +585,8 @@ defmodule Fleet.MCP.PodToolsTest do
        %{
          repo: full_name,
          project_dir: "/tmp/projects/#{name}",
-         work_dir: "/tmp/projects.work/#{name}"
+         work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}"
        }}
     end
 
@@ -597,6 +599,7 @@ defmodule Fleet.MCP.PodToolsTest do
          repo: full_name,
          project_dir: "/tmp/projects/#{name}",
          work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}",
          architect: %{status: "up", pod_id: "architect-#{name}"}
        }}
     end
@@ -654,7 +657,8 @@ defmodule Fleet.MCP.PodToolsTest do
        %{
          repo: "fleet/#{name}",
          project_dir: "/tmp/projects/#{name}",
-         work_dir: "/tmp/projects.work/#{name}"
+         work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}"
        }}
     end
 
@@ -666,7 +670,8 @@ defmodule Fleet.MCP.PodToolsTest do
        %{
          repo: "fleet/#{name}",
          project_dir: "/tmp/projects/#{name}",
-         work_dir: "/tmp/projects.work/#{name}"
+         work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}"
        }}
     end
   end
@@ -1626,6 +1631,38 @@ defmodule Fleet.MCP.PodToolsTest do
         assert {:error, :forbidden_not_architect, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf"))),
                "tool=#{tool}: starfleet must NOT reach the delegation head"
+      end
+    end
+
+    # ONE KEY PER FACE ON THE WIRE, and the third was missing while the runtime already produced
+    # it: `onboard_result/3` has carried `doc_dir` since the three-face chantier, and every
+    # delegation site pattern-matched `%{repo, project_dir, work_dir}` and emitted those three
+    # alone. A caller was told about two of the three trees the call had just created, so it could
+    # not name the doc face at all. Nothing was red: no test asserted the emitted keys ANYWHERE.
+    #
+    # The four verbs that CREATE or REATTACH faces are checked; `delete_project` is not — it
+    # reports what it removed, a different shape with its own keys.
+    test "the wire carries one dir per FACE — doc included, on every verb that lands faces" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "starfleet"}} end)
+
+      for {tool, biz_args} <- [
+            {"create_project", %{"name" => "demo-proj"}},
+            {"import_project", %{"full_name" => "fleet/demo-proj"}},
+            {"open_project", %{"full_name" => "fleet/demo-proj"}},
+            {"adopt_project", %{"name" => "demo-proj"}}
+          ] do
+        assert {:ok, %{content: [%{"text" => text}]}, _} =
+                 PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
+
+        assert {:ok, payload} = Jason.decode(text)
+
+        for key <- ["project_dir", "work_dir", "doc_dir"] do
+          assert Map.has_key?(payload, key),
+                 "tool=#{tool}: the wire drops #{key} — #{inspect(Map.keys(payload))}"
+        end
+
+        assert payload["doc_dir"] =~ "demo-proj",
+               "tool=#{tool}: doc_dir must name the project, got #{inspect(payload["doc_dir"])}"
       end
     end
 

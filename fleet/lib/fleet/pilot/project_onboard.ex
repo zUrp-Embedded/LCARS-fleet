@@ -77,15 +77,20 @@ defmodule Fleet.Pilot.ProjectOnboard do
     * `:org`           — forge org (default `"fleet"`)
     * `:description`   — repo description (default `""`)
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
-    * `:projects_root` / `:work_root` — FS roots (defaults: `/home/projects`, `/home/projects.work`)
+    * `:projects_root` / `:work_root` / `:doc_root` — FS roots, one per face (defaults:
+      `/home/projects`, `/home/projects.work`, `/home/projects.doc`)
     * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
 
-  Returns `{:ok, %{repo, project_dir, work_dir}}` or `{:error, term()}` (fail-fast). On an error
-  return the sequence compensates automatically: the forge repo and both local dirs are removed so
-  a clean retry is possible (see `compensate_onboard/5`). A BEAM crash mid-sequence skips the
-  unwind, and its residue is recoverable agent-side via `delete_project(force: true)`: the dirs it
-  can leave are either origin-carrying (identity provable) or empty (provable as debris), which are
-  exactly the two proofs that teardown accepts — no host-side `rm` in the loop.
+  Returns `{:ok, %{repo, project_dir, work_dir, doc_dir}}` or `{:error, term()}` (fail-fast) —
+  one key per face. On an error return AND on an exception the sequence compensates automatically:
+  the forge repo and all three local dirs are removed so a clean retry is possible (see
+  `compensate_onboard/5` and `guarded_finish/5`; the two exits are covered because only one used
+  to be, and the uncovered one left a repo on the forge with two of its faces built).
+
+  What still skips the unwind is a BEAM crash — the process dies with the `catch`, not through it.
+  Its residue is recoverable agent-side via `delete_project(force: true)`: the dirs it can leave are
+  either origin-carrying (identity provable) or empty (provable as debris), which are exactly the
+  two proofs that teardown accepts — no host-side `rm` in the loop.
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
