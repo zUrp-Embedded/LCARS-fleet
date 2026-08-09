@@ -150,4 +150,37 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
       assert log =~ "MyEmitter: pod.completed"
     end
   end
+
+  describe "the `:broadcast_fun` seam is ANNOUNCED at boot when it is declared" do
+    test "declared in config → the supervisor init says so, LOUD" do
+      # CI-03 rests on "an {:error} from the bus means ZERO subscriber was delivered". This seam
+      # replaces the bus with an arbitrary function, read hot on every broadcast, with no
+      # environment guard — a function that delivers THEN errors makes that assumption false and
+      # duplicates downstream work on the honest re-submit.
+      Application.put_env(:fleet_event_router, :broadcast_fun, fn _n, _t, _e -> :ok end)
+      on_exit(fn -> Application.delete_env(:fleet_event_router, :broadcast_fun) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Fleet.EventRouter.Application.init([])
+        end)
+
+      assert log =~ "`:broadcast_fun` is DECLARED at boot"
+      assert log =~ "CI-03"
+    end
+
+    test "absent → boot says NOTHING about it (the per-test put_env must stay silent)" do
+      # The check exists for the form DECLARED in a config file. The single test that legitimately
+      # uses the seam sets it after boot, so a boot that never sees it must not cry — a warning
+      # nobody can act on trains an operator to filter the rail out.
+      Application.delete_env(:fleet_event_router, :broadcast_fun)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Fleet.EventRouter.Application.init([])
+        end)
+
+      refute log =~ "broadcast_fun"
+    end
+  end
 end

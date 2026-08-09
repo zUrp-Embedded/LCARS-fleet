@@ -10,6 +10,43 @@ defmodule Fleet.EventRouter.Application do
   @spec gitea_event_types() :: [String.t()]
   def gitea_event_types, do: @gitea_event_types
 
+  # THE ONE INVARIANT THE COMPLETION RAIL RESTS ON, AND THE ONE SEAM THAT CAN TURN IT OFF.
+  #
+  # `Broadcast.required/3` treats an `{:error, _}` from the bus as "ZERO subscriber was delivered",
+  # and the whole non-commit-on-failed-broadcast discipline (CI-03) depends on that being true. It
+  # holds on the mono-node Phoenix.PubSub because both of its failure modes are pre-dispatch.
+  #
+  # `:broadcast_fun` replaces that bus with an arbitrary 3-arity function, read HOT on every
+  # broadcast, with no environment guard. A function that DELIVERS and then returns `{:error, _}`
+  # reproduces partial delivery exactly: the item is not committed, the downstream already left,
+  # and the honest re-submit sends it a second time. It is a test seam, and nothing stopped it from
+  # being declared in a config file.
+  #
+  # Checked at BOOT and not per-call, deliberately: the dangerous form is the one DECLARED in
+  # config, and it is the only one visible here. The single test that uses the seam sets it with
+  # `put_env` after boot, so this stays silent for it — a warning on every broadcast would be noise
+  # nobody reads, which is the same as no warning at all.
+  #
+  # A warning and not a refusal: the seam is legitimate machinery, and a node that will not boot
+  # because someone left a debug hook is a worse failure than one that says so loudly.
+  defp warn_if_broadcast_seam_declared do
+    case Application.get_env(:fleet_event_router, :broadcast_fun) do
+      nil ->
+        :ok
+
+      other ->
+        require Logger
+
+        Logger.error(
+          "EventRouter: `:broadcast_fun` is DECLARED at boot (#{inspect(other)}) — the bus is " <>
+            "replaced by an injected function. This is a TEST seam: if it delivers and then " <>
+            "returns {:error, _}, the completion rail's all-or-nothing assumption (CI-03) is " <>
+            "false, work items are not committed while downstream already ran, and honest " <>
+            "re-submits duplicate that work. Remove it from the deployed config."
+        )
+    end
+  end
+
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -17,6 +54,7 @@ defmodule Fleet.EventRouter.Application do
   @impl Supervisor
   def init(_init_arg) do
     preregister_event_atoms()
+    warn_if_broadcast_seam_declared()
     Fleet.EventRouter.Catalog.load!()
 
     children =
