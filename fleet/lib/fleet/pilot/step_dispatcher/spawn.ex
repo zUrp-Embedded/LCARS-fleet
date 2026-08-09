@@ -56,7 +56,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     defstruct [:forge, :spawner, :task_queue, :repo, :forge_opts, :wake_recovery]
 
     @type t :: %__MODULE__{
-            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Forge.Client`).
             forge: module(),
             # Injected spawner (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),
@@ -548,7 +548,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # third answer, not an error, so a caller cannot fold it into the failure branch by accident.
   defp forge_identity_or_none(profile, forge_opts, role) do
     if Fleet.CapProfile.forge_identity?(profile) do
-      Fleet.Pilot.ForgeClient.as_role(forge_opts, role)
+      Fleet.Forge.Client.as_role(forge_opts, role)
     else
       :no_identity
     end
@@ -804,7 +804,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # (The conditional puts of ONE key — `:project`, `:repo_id` — go through the single source
-  # `Fleet.Pilot.Opts.maybe_put/3` at the call sites: no fixed-key wrapper here. Only
+  # `Fleet.Opts.maybe_put/3` at the call sites: no fixed-key wrapper here. Only
   # `maybe_put_route/2` lives here — it puts TWO coupled keys, which is not the maybe_put idiom.)
 
   @doc "Puts `:workflow_map`/`:step` into the spawn_opts if the route is present (nil = no-op)."
@@ -857,7 +857,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # module — it answers about the code table as it stands. On a freshly booted BEAM the forge
     # client is not loaded yet, so the guard alone reports "this module has no repo_id/2" about a
     # module that plainly does, and every caller reads that as an absent id.
-    # Measured: on a cold node, `:erlang.module_loaded(Fleet.Pilot.ForgeClient)` is false and
+    # Measured: on a cold node, `:erlang.module_loaded(Fleet.Forge.Client)` is false and
     # `function_exported?(_, :repo_id, 2)` is false; after `Code.ensure_loaded?/1`, both are true.
     # The visible symptom was the FIRST project onboarded after a start losing its architect, with
     # a log blaming the forge — which was answering the whole time.

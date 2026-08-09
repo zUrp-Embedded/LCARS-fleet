@@ -152,7 +152,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
              ProjectOnboard.close_project("fleet/pong", o)
 
     assert_received {:issue_created, "fleet/pong", 1, title, body, issue_opts}
-    assert Fleet.Pilot.ForgeProtocol.parked_issue_title?(title)
+    assert Fleet.Forge.Protocol.parked_issue_title?(title)
     # Assignee = the human (the poller's assigned_by scoping must SEE the marker).
     assert [_human] = issue_opts[:assignees]
     # The body documents BOTH reopening paths (UI-close is a designed unpark).
@@ -212,7 +212,7 @@ defmodule Fleet.Pilot.ProjectOnboard.CloseOpenTest do
     Process.put(
       :issues,
       Process.get(:issues, []) ++
-        [%{"number" => 99, "title" => Fleet.Pilot.ForgeProtocol.parked_issue_title()}]
+        [%{"number" => 99, "title" => Fleet.Forge.Protocol.parked_issue_title()}]
     )
 
     assert {:ok, %{repo: "fleet/pong", architect: arch}} = ProjectOnboard.open("fleet/pong", o)

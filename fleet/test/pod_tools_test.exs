@@ -1769,7 +1769,7 @@ defmodule Fleet.MCP.PodToolsTest do
        |> Enum.reverse()
        |> Enum.find_value(fn c ->
          b = is_map(c) and c["body"]
-         if is_binary(b) and Fleet.Pilot.ForgeProtocol.escalation_marker?(b), do: b
+         if is_binary(b) and Fleet.Forge.Protocol.escalation_marker?(b), do: b
        end)}
     end
 
@@ -1830,7 +1830,7 @@ defmodule Fleet.MCP.PodToolsTest do
        |> Enum.reverse()
        |> Enum.find_value(fn c ->
          b = is_map(c) and c["body"]
-         if is_binary(b) and Fleet.Pilot.ForgeProtocol.escalation_marker?(b), do: b
+         if is_binary(b) and Fleet.Forge.Protocol.escalation_marker?(b), do: b
        end)}
     end
 

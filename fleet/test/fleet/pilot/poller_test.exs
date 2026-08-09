@@ -376,7 +376,7 @@ defmodule Fleet.Pilot.PollerTest do
     # DELEGATION a la vraie fonction, et c'est deliberé : `route_from_labels/1` est PURE (zero I/O)
     # — la stubber reviendrait a re-implementer la regle de derivation dans le harnais, donc a
     # tester une copie au lieu du contrat. Les stubs existent pour couper les I/O, pas les regles.
-    def route_from_labels(labels), do: Fleet.Pilot.ForgeClient.route_from_labels(labels)
+    def route_from_labels(labels), do: Fleet.Forge.Client.route_from_labels(labels)
 
     # #8: the route lives in the route-comment (state-machine). Stub configurable via
     # `_test_routes` (map n → {workflow_map, step}). Default :none (unrouted issue → A1 producer).
@@ -772,7 +772,7 @@ defmodule Fleet.Pilot.PollerTest do
       issues = [
         %{
           "number" => 3,
-          "title" => Fleet.Pilot.ForgeProtocol.parked_issue_title(),
+          "title" => Fleet.Forge.Protocol.parked_issue_title(),
           "labels" => [],
           "assignees" => [%{"login" => "lordzurp"}]
         },

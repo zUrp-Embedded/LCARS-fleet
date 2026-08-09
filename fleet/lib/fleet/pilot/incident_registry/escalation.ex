@@ -40,9 +40,9 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
           {:ok, integer()} | {:error, term()}
   def escalate(kind, subject, reason, sig, opts \\ []) do
-    create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Pilot.ForgeClient.create_issue/4)
-    add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Pilot.ForgeClient.add_label/4)
-    list_fun = Keyword.get(opts, :list_issues_fun, &Fleet.Pilot.ForgeClient.list_open_issues/2)
+    create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Forge.Client.create_issue/4)
+    add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Forge.Client.add_label/4)
+    list_fun = Keyword.get(opts, :list_issues_fun, &Fleet.Forge.Client.list_open_issues/2)
     repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo) || ops_repo()
 
     label =

@@ -35,7 +35,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     def list_pulls(_repo, _opts), do: {:ok, Process.get(:pulls, [])}
 
     @impl true
-    def parse_feature_branch(ref), do: Fleet.Pilot.ForgeProtocol.parse_feature_branch(ref)
+    def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
 
     @impl true
     def close_pr(_repo, pr, _opts) do

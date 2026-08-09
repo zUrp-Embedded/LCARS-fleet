@@ -27,8 +27,8 @@ defmodule Fleet.MCP.SeamContractTest do
   # same silent break at runtime. A lock that covers some instances of a hazard and not others
   # reads, to whoever adds the next one, as if the uncovered ones were deliberate.
   @seams [
-    {Fleet.MCP.PodTools.Delegation.ForgeClient, Fleet.Pilot.ForgeClient},
-    {Fleet.MCP.PodTools.Delegation.EscalationForge, Fleet.Pilot.ForgeClient},
+    {Fleet.MCP.PodTools.Delegation.ForgeClient, Fleet.Forge.Client},
+    {Fleet.MCP.PodTools.Delegation.EscalationForge, Fleet.Forge.Client},
     # spawner → mcp: a pod spawn cannot provision its socket if this one drifts.
     {Fleet.Spawner.McpSocketProvisioner, Fleet.MCP.PodSocketSupervisor},
     # mcp → pilot: the arch's `create_project` lands here.

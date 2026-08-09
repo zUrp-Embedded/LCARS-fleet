@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   end
 
   defp write_wait(opts, number, op) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     repo = Keyword.get(opts, :repo)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 

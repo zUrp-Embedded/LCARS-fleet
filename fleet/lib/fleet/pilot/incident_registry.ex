@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
 
   @forge_fail_threshold 3
   @sync_debounce_ms 2_000

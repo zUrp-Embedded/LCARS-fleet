@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
   """
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Pilot.GitOps
   alias Fleet.Pilot.Roles
 
@@ -155,7 +155,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp finish_onboard(full_name, provision, dirs, name, opts) do
-    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+    with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
          :ok <- clone_main(url, dirs.code),
@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- Fleet.Pilot.ProjectIntensity.write(dirs.code, opts),
          :ok <- commit(dirs.code, onboard_commit_msg(provision)),
          :ok <- push(dirs.code, "main", false),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            build_writer_face(
              full_name,
@@ -174,7 +174,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
              name,
              opts
            ),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            build_writer_face(
              full_name,
@@ -332,7 +332,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     case forge.list_open_issues(full_name, fc_opts(opts)) do
       {:ok, issues} ->
         issues
-        |> Enum.filter(&Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        |> Enum.filter(&Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
         |> close_markers(full_name, forge, opts)
 
       {:error, reason} ->
@@ -364,7 +364,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
 
   # Issue-side forge seam of the close/open verbs (the repo seam `:forge_repo` carries only the
   # provisioning ops). Default = the real client; injectable for tests.
-  defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, Fleet.Pilot.ForgeClient)
+  defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, Fleet.Forge.Client)
 
   @doc """
   Enumerates the projects on this box, with what governs each one.
@@ -433,7 +433,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
            ) do
       numbers =
         issues
-        |> Enum.reject(&Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        |> Enum.reject(&Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
         |> Enum.map(&Map.get(&1, "number"))
         |> Enum.filter(&is_integer/1)
 
@@ -486,7 +486,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   defp parked_state(full_name, opts) do
     case forge_issues(opts).list_open_issues(full_name, fc_opts(opts)) do
       {:ok, issues} ->
-        parked? = Enum.any?(issues, &Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+        parked? = Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
         %{"state" => if(parked?, do: "parked", else: "open")}
 
       {:error, reason} ->
@@ -523,7 +523,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
          :ok <- require_on_machine(full_name, proj_dir),
          :ok <- require_proven_identity(full_name, proj_dir, opts),
          {:ok, issues} <- read_parked_state(forge, full_name, opts) do
-      if Enum.any?(issues, &Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"])) do
+      if Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"])) do
         {:ok,
          %{
            repo: full_name,
@@ -553,7 +553,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(fc_opts(opts), :assignees, [human])
-        title = Fleet.Pilot.ForgeProtocol.parked_issue_title()
+        title = Fleet.Forge.Protocol.parked_issue_title()
 
         case forge.create_issue(full_name, title, parked_marker_body(), issue_opts) do
           {:ok, n} ->
@@ -676,12 +676,12 @@ defmodule Fleet.Pilot.ProjectOnboard do
   end
 
   defp finish_adopt(full_name, url, dirs, states, name, opts) do
-    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+    with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
          :ok <- set_origin(dirs.code, url),
          :ok <- ensure_intensity(dirs.code, opts),
          :ok <- push(dirs.code, "main", true),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
              states.ops,
@@ -692,7 +692,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
              name,
              opts
            ),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
              states.doc,
@@ -863,7 +863,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # existing local import leg for what it does (clone from OUR forge brings intensity.json
   # back down, so ITS lock_main reads the right jury).
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
-    with :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+    with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
          :ok <-
            ensure_intensity(
@@ -873,7 +873,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
            ),
          :ok <- set_origin(scratch, forge_url),
          :ok <- push(scratch, "main", true),
-         :ok <- Fleet.Pilot.WriteSpacing.gap(opts),
+         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          {:ok, result} <- finish_import(full_name, dirs, name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} imported from EXTERNAL " <>
@@ -1727,7 +1727,7 @@ defmodule Fleet.Pilot.ProjectOnboard do
   # BL-6-33
   defp maybe_seed_protocol_labels(:bare, full_name, opts) do
     seeder =
-      Keyword.get(opts, :ensure_labels, &Fleet.Pilot.ForgeClient.ensure_protocol_labels/2)
+      Keyword.get(opts, :ensure_labels, &Fleet.Forge.Client.ensure_protocol_labels/2)
 
     case seeder.(full_name, fc_opts(opts)) do
       :ok -> :ok

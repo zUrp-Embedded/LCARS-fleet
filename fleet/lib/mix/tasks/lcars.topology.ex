@@ -80,6 +80,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Conflict" => "foundation",
     "Fleet.Shutdown.Quiesce" => "foundation",
     "Fleet.Publish.InFlight" => "foundation",
+    "Fleet.Opts" => "foundation",
     "Fleet.EventRouter" => "substrate",
     "Fleet.CapProfile" => "substrate",
     "Fleet.Credentials" => "pod primitives",
@@ -89,6 +90,10 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.ProjectBootstrap" => "pod composition",
     "Fleet.Spawner" => "pod composition",
     "Fleet.Workflow" => "work",
+    # The forge sits ABOVE work and BELOW steering: the pilot drives it, it drives nothing. Its
+    # floor is what makes "one HTTP exit" compiled rather than conventional — `Req` is fenced to
+    # this boundary alone.
+    "Fleet.Forge" => "work",
     "Fleet.MCP" => "work",
     "Fleet.Observation" => "surface",
     "Fleet.Pilot" => "steering",
@@ -133,7 +138,7 @@ defmodule Mix.Tasks.Lcars.Topology do
   # Domain boundaries = TOP-LEVEL boundaries of `:lcars_fleet` declared under `lib/`. Excluded, in
   # this order: another app's boundaries; boundaries compiled from `test/support` (they exist in the
   # `:test` env the gate runs in, and are not runtime topology); SUB-boundaries (a boundary whose
-  # module name is prefixed by another one, e.g. `Fleet.Pilot.ForgeClient` under `Fleet.Pilot` — an
+  # module name is prefixed by another one, e.g. `Fleet.Forge.Client` under `Fleet.Pilot` — an
   # intra-domain wall, not a floor of the ladder). `classify_to:` needs no filter here: a module
   # classified INTO a domain is not a boundary of its own in the compiled graph.
   defp parse_boundaries do

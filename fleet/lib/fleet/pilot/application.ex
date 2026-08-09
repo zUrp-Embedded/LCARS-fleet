@@ -56,7 +56,7 @@ defmodule Fleet.Pilot.Application do
   # HTTP pool dedicated to the ForgeClient. `conn_max_idle_time: 30_000` closes any connection left idle >30s
   # BEFORE the forge closes it server-side (the Finch default `:infinity` would keep it until
   # it goes stale → next call hangs until receive_timeout, suspected cause of the ~30s
-  # cumulated on create_issue). Simple HTTP/1 pool, lazy. `Req.request(finch: Fleet.Pilot.ForgeFinch)`
+  # cumulated on create_issue). Simple HTTP/1 pool, lazy. `Req.request(finch: Fleet.Forge.finch_name())`
   # on the ForgeClient side uses it.
   @doc """
   The ForgeClient's Finch pool child spec — SINGLE writer of the pool shape, shared with
@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.Application do
   supervisor: no `app.start`, a second fleet must never boot from a mix task).
   """
   def forge_finch_spec do
-    {Finch, name: Fleet.Pilot.ForgeFinch, pools: %{default: [conn_max_idle_time: 30_000]}}
+    {Finch, name: Fleet.Forge.finch_name(), pools: %{default: [conn_max_idle_time: 30_000]}}
   end
 
   @doc """

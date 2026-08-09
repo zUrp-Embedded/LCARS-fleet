@@ -89,7 +89,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     defstruct [:forge, :spawner, :task_queue, :repo, :forge_opts]
 
     @type t :: %__MODULE__{
-            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Forge.Client`).
             forge: module(),
             # Injected spawner, ALREADY resolved by the caller (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),

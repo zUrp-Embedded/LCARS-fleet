@@ -37,7 +37,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   ## Seams
 
   `:deliverable` (default `Fleet.Workflow.Deliverable`), `:forge_client` (default
-  `Fleet.Pilot.ForgeClient`) — stubbed in test. `:deliverable_opts` when the step_run
+  `Fleet.Forge.Client`) — stubbed in test. `:deliverable_opts` when the step_run
   produces a git deliverable; absent/`nil` = no git deliverable (e.g. judge
   verdict in payload mode — the `step_run_sha` is then supplied explicitly).
 
@@ -57,8 +57,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   require Logger
 
-  alias Fleet.Pilot.ForgeClient
-  alias Fleet.Pilot.ForgeProtocol
+  alias Fleet.Forge.Client, as: ForgeClient
+  alias Fleet.Forge.Protocol, as: ForgeProtocol
   alias Fleet.Labels
   alias Fleet.Pilot.Roles
 
@@ -112,7 +112,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
           {:ok, :completed | :reassigned} | {:error, {atom(), term()}}
   def complete(step_run, opts \\ []) when is_map(step_run) do
     deliverable = Keyword.get(opts, :deliverable, Fleet.Workflow.Deliverable)
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     repo = Map.fetch!(step_run, :repo)
@@ -227,7 +227,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   """
   @spec await_arch(map(), keyword()) :: {:ok, :awaiting_arch} | {:error, {:await_arch, term()}}
   def await_arch(step_run, opts \\ []) when is_map(step_run) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
     n = Map.fetch!(step_run, :issue_number)
@@ -281,7 +281,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
           {:ok, %{commit_sha: String.t(), pr_number: integer()}} | {:error, {atom(), term()}}
   def open_deliverable_pr(step_run, opts \\ []) when is_map(step_run) do
     deliverable = Keyword.get(opts, :deliverable, Fleet.Workflow.Deliverable)
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     repo = Map.fetch!(step_run, :repo)
@@ -364,7 +364,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   """
   @spec record_review(map(), keyword()) :: {:ok, :reviewed} | {:error, {:review, term()}}
   def record_review(step_run, opts \\ []) when is_map(step_run) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
     pr = Map.fetch!(step_run, :pr_number)
@@ -415,7 +415,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   """
   @spec promote(map(), keyword()) :: {:ok, :promoted} | {:error, {:merge, term()}}
   def promote(step_run, opts \\ []) when is_map(step_run) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
     pr = Map.fetch!(step_run, :pr_number)
@@ -486,7 +486,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       _ = Emissions.post_eng_summary(step_run, opts)
 
       :ok = space_writes(opts)
-      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
       forge_opts = Keyword.get(opts, :forge_opts, [])
       repo = Map.fetch!(step_run, :repo)
       n = Map.fetch!(step_run, :issue_number)
@@ -509,7 +509,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp complete_judge(step_run, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = Map.fetch!(step_run, :repo)
     base = Map.fetch!(step_run, :base_branch)
@@ -563,7 +563,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp route(%{intent: :promote} = step_run, pr, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     promote_step_run = %{
@@ -592,7 +592,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp route(%{intent: :advance} = step_run, pr, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = step_run.repo
     next = Map.fetch!(step_run, :next_assignee)
@@ -606,7 +606,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp route(%{intent: :rework} = step_run, pr, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = step_run.repo
 
@@ -619,7 +619,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp route(%{intent: :review} = step_run, pr, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
     repo = step_run.repo
 
@@ -633,7 +633,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp route(%{intent: :reviewed} = step_run, pr, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
     with {:ok, _} <-
@@ -708,7 +708,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  defp space_writes(opts), do: Fleet.Pilot.WriteSpacing.gap(opts)
+  defp space_writes(opts), do: Fleet.Forge.WriteSpacing.gap(opts)
 
   defp lock_number(%{pr_role: :judge}, pr) when is_integer(pr), do: pr
   defp lock_number(%{issue_number: n}, _pr), do: n
@@ -816,7 +816,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          n when is_integer(n) <- Map.get(step_run, :issue_number),
          base when is_binary(base) and base != "" <-
            get_in(step_run, [:deliverable_opts, :base_sha]) do
-      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
       forge_opts = Keyword.get(opts, :forge_opts, [])
       marker = ForgeProtocol.publish_fail_marker(n, base)
 
@@ -855,7 +855,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp record_pr_open_failure({:error, reason} = err, step_run, sha, opts) do
     with repo when is_binary(repo) <- Map.get(step_run, :repo),
          n when is_integer(n) <- Map.get(step_run, :issue_number) do
-      forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+      forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
       forge_opts = Keyword.get(opts, :forge_opts, [])
       branch = get_in(step_run, [:deliverable_opts, :target_branch])
       marker = ForgeProtocol.pr_open_fail_marker(n, sha)

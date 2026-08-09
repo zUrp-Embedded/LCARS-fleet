@@ -1,7 +1,12 @@
-defmodule Fleet.Pilot.WriteSpacing do
+defmodule Fleet.Forge.WriteSpacing do
   @moduledoc """
   Shared gap between distinct forge writes whose second-resolution display order
   matters. Events produced by one forge call remain inseparable by construction.
+
+  It lives in the FORGE domain and not the pilot's, because that is what it is about: the pilot
+  called it only where it writes to the forge. The config key stays `:fleet_pilot,
+  :forge_write_spacing_ms` — the `:fleet_<dom>` atoms are legacy-and-valid, and renaming one at the
+  edge of a move is how an operator's env file silently stops being read.
   """
 
   @doc """

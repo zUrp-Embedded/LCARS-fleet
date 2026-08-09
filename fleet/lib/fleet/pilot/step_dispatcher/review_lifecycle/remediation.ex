@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
   alias Fleet.Pilot.ConflictReport
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Workflow.Pinning
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
@@ -52,7 +52,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   @spec dispatch_rework(integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch_rework(pr_number, head, %Ctx{} = ctx) do
-    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
+    case Fleet.Forge.Protocol.parse_feature_branch(head) do
       {:ok, {issue_n, producer_role}} ->
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, rounds} <-
@@ -567,7 +567,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # The head was already parsed by the caller (conflict_rework) — a re-parse failure here is
   # unreachable by construction; raise loud rather than a silent wrong role.
   defp producer_of!(head) do
-    {:ok, {_issue_n, producer}} = Fleet.Pilot.ForgeProtocol.parse_feature_branch(head)
+    {:ok, {_issue_n, producer}} = Fleet.Forge.Protocol.parse_feature_branch(head)
     producer
   end
 

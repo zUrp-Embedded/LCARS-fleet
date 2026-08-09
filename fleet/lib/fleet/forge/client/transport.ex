@@ -1,12 +1,12 @@
-defmodule Fleet.Pilot.ForgeClient.Transport do
+defmodule Fleet.Forge.Client.Transport do
   @moduledoc """
-  HTTP/config engine of the forge client — the plumbing UNDER `Fleet.Pilot.ForgeClient`.
+  HTTP/config engine of the forge client — the plumbing UNDER `Fleet.Forge.Client`.
   Vendor-agnostic in the "domain" sense: here live config/token resolution, the Req
   call (dedicated pool + instrumentation of slow calls), the pagination of source-of-truth
   collections and the derivation of the system login. (The safe encoding of URL
-  segments — path-traversal lock — lives in `Fleet.Pilot.ForgeClient.UrlSafe`.)
+  segments — path-traversal lock — lives in `Fleet.Forge.Client.UrlSafe`.)
   No knowledge of the forge *protocol* (branches, labels, markers): that's
-  `Fleet.Pilot.ForgeClient` (domain) + `Fleet.Pilot.ForgeProtocol` (vocab).
+  `Fleet.Forge.Client` (domain) + `Fleet.Forge.Protocol` (vocab).
 
   INTERNAL surface (`@doc false`): everything is public so that `ForgeClient` can call it,
   but it is not an app contract — no caller outside `fleet_pilot`.
@@ -23,7 +23,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
 
   require Logger
 
-  alias Fleet.Pilot.Opts
+  alias Fleet.Opts
 
   @type config :: %{
           base_url: String.t(),
@@ -250,7 +250,7 @@ defmodule Fleet.Pilot.ForgeClient.Transport do
         ],
         receive_timeout: 10_000,
         retry: false,
-        finch: [name: Fleet.Pilot.ForgeFinch]
+        finch: [name: Fleet.Forge.finch_name()]
       ]
       |> Opts.maybe_put(:json, body)
       |> Keyword.merge(config.req_options)

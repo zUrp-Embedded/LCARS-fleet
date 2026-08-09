@@ -1,6 +1,12 @@
-defmodule Fleet.Pilot.Opts do
+defmodule Fleet.Opts do
+  use Boundary, deps: [], exports: []
+
   @moduledoc """
-  Pure option-list helpers shared by Pilot flows.
+  Pure option-list helpers, shared across domains.
+
+  Foundation because it is: two total functions over keyword lists, no dependency, no subject of
+  its own. It sat under the pilot for as long as the pilot was its only caller — which stopped
+  being true the day the forge became a domain, and an upward reference is what said so.
   """
 
   @doc """

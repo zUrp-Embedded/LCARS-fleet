@@ -80,7 +80,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Forge.Client`).
             forge: module(),
             # Injected cap-profile loader (seam `:loader`, prod default `Fleet.CapProfile`).
             loader: module(),
@@ -132,7 +132,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     # The classification is NOT re-derived here: `Jury.review_outcome/2` is the single truth
     # (also carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) —
     # a divergence between what the gate does and what the status says would be a second truth.
-    case Fleet.Pilot.ForgeClient.Jury.review_outcome(requested, verdicts) do
+    case Fleet.Forge.Client.Jury.review_outcome(requested, verdicts) do
       {:pending, [next | _]} ->
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
         # not a fleet feature branch can never receive a judge — `RoleDispatch.dispatch` refuses it

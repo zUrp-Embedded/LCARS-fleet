@@ -1,9 +1,9 @@
-defmodule Fleet.Pilot.ForgeProtocol do
+defmodule Fleet.Forge.Protocol do
   @moduledoc """
   **Pure** vocabulary of the forge-state-machine wire-protocol: the forge IS the state machine,
   these formats are its thread. SINGLE SOURCE of the markers recorded on issues/PRs and of the
   feature-branches. No I/O — only build + parse of strings (the HTTP ops that
-  *post*/*read* them live in `Fleet.Pilot.ForgeClient`).
+  *post*/*read* them live in `Fleet.Forge.Client`).
 
   Counterpart of `Fleet.Labels` (both carry the wire-protocol): `Labels` = the
   **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches,
@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   # (The workflow_map position is NOT a `[lcars-route:...]` comment-marker: it lives in the
   # issue's SCOPED label `stage/*` — Gitea native mutex, human-visible, read without a comment scan.
-  # Builder/reader: `Fleet.Pilot.ForgeClient.post_route`/`get_route`.)
+  # Builder/reader: `Fleet.Forge.Client.post_route`/`get_route`.)
 
   # ============================================================
   # Signed STEP_RUN marker `[step_run:<role>:<sha>]` — forge-native anti-runaway counter.
@@ -97,12 +97,12 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   Round-trip builder -> predicate (the predicate recognises what the builder records):
 
-      iex> marker = Fleet.Pilot.ForgeProtocol.step_run_marker("engineer", "deadbeef")
+      iex> marker = Fleet.Forge.Protocol.step_run_marker("engineer", "deadbeef")
       iex> marker
       "[step_run:engineer:deadbeef]"
-      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?(marker)
+      iex> Fleet.Forge.Protocol.step_run_marker?(marker)
       true
-      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?("juste un commentaire")
+      iex> Fleet.Forge.Protocol.step_run_marker?("juste un commentaire")
       false
   """
   @spec step_run_marker(String.t(), String.t()) :: String.t()
@@ -131,15 +131,15 @@ defmodule Fleet.Pilot.ForgeProtocol do
   builder and parser derive from the same literal. Posted by `StepRunCompleter` when the
   deliverable publication fails; counted by `Remediation.dispatch_rework` (the brake).
 
-      iex> m = Fleet.Pilot.ForgeProtocol.publish_fail_marker(7, String.duplicate("a", 40))
+      iex> m = Fleet.Forge.Protocol.publish_fail_marker(7, String.duplicate("a", 40))
       iex> m
       "[publish-fail:issue-7:base-aaaaaaaaaaaa]"
-      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker(m)
+      iex> Fleet.Forge.Protocol.parse_publish_fail_marker(m)
       {:ok, {7, "aaaaaaaaaaaa"}}
-      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker("un commentaire")
+      iex> Fleet.Forge.Protocol.parse_publish_fail_marker("un commentaire")
       :error
-      iex> Fleet.Pilot.ForgeProtocol.parse_publish_fail_marker(
-      ...>   Fleet.Pilot.ForgeProtocol.publish_fail_marker(42, "cafe")
+      iex> Fleet.Forge.Protocol.parse_publish_fail_marker(
+      ...>   Fleet.Forge.Protocol.publish_fail_marker(42, "cafe")
       ...> )
       {:ok, {42, "cafe"}}
   """
@@ -197,12 +197,12 @@ defmodule Fleet.Pilot.ForgeProtocol do
   pas, ce qui est voulu : une escalade n'est pas un step-run acheve et ne doit pas se compter comme
   tel.
 
-      iex> m = Fleet.Pilot.ForgeProtocol.await_marker("engineer", "escalate_user")
+      iex> m = Fleet.Forge.Protocol.await_marker("engineer", "escalate_user")
       iex> m
       "[step_run:engineer:await:escalate_user]"
-      iex> Fleet.Pilot.ForgeProtocol.escalation_marker?(m)
+      iex> Fleet.Forge.Protocol.escalation_marker?(m)
       true
-      iex> Fleet.Pilot.ForgeProtocol.step_run_marker?(m)
+      iex> Fleet.Forge.Protocol.step_run_marker?(m)
       false
   """
   @spec await_marker(String.t(), String.t()) :: String.t()
@@ -212,10 +212,10 @@ defmodule Fleet.Pilot.ForgeProtocol do
   @doc """
   Format du marqueur d'escalade « budget de rework epuise » `[rework-exhausted-escalation:pr-<n>]`.
 
-      iex> m = Fleet.Pilot.ForgeProtocol.rework_exhausted_marker(42)
+      iex> m = Fleet.Forge.Protocol.rework_exhausted_marker(42)
       iex> m
       "[rework-exhausted-escalation:pr-42]"
-      iex> Fleet.Pilot.ForgeProtocol.escalation_marker?(m)
+      iex> Fleet.Forge.Protocol.escalation_marker?(m)
       true
   """
   @spec rework_exhausted_marker(integer()) :: String.t()
@@ -239,9 +239,9 @@ defmodule Fleet.Pilot.ForgeProtocol do
   savoir si un commentaire a bien ete pose par la fleet n'a donc pas besoin d'enumerer les comptes —
   il demande au marqueur QUI il pretend etre, puis verifie que l'auteur est bien ce compte-la.
 
-      iex> Fleet.Pilot.ForgeProtocol.step_run_marker_role("fait [step_run:engineer:deadbeef]")
+      iex> Fleet.Forge.Protocol.step_run_marker_role("fait [step_run:engineer:deadbeef]")
       "engineer"
-      iex> Fleet.Pilot.ForgeProtocol.step_run_marker_role("rien a signaler")
+      iex> Fleet.Forge.Protocol.step_run_marker_role("rien a signaler")
       nil
   """
   @spec step_run_marker_role(term()) :: String.t() | nil
@@ -296,12 +296,12 @@ defmodule Fleet.Pilot.ForgeProtocol do
 
   Round-trip builder -> parser:
 
-      iex> marker = Fleet.Pilot.ForgeProtocol.merge_marker(6)
+      iex> marker = Fleet.Forge.Protocol.merge_marker(6)
       iex> marker
       "[merge:pr-6]"
-      iex> Fleet.Pilot.ForgeProtocol.parse_merge_marker("scellé.\\n\\n" <> marker)
+      iex> Fleet.Forge.Protocol.parse_merge_marker("scellé.\\n\\n" <> marker)
       {:ok, 6}
-      iex> Fleet.Pilot.ForgeProtocol.parse_merge_marker("juste un commentaire")
+      iex> Fleet.Forge.Protocol.parse_merge_marker("juste un commentaire")
       :error
   """
   @spec merge_marker(integer()) :: String.t()

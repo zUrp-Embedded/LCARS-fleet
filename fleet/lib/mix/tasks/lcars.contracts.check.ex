@@ -1960,7 +1960,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `iex>` lines to zero, `mix test` reported "0 failures" on both sides, and the count moved from
   # 13 doctests to 10 with nothing to see. The examples were round-trip assertions — the predicate
   # recognises what the builder records — and `test/…/forge_protocol_test.exs` still carries
-  # `doctest Fleet.Pilot.ForgeProtocol`. The file LOOKS covered and executes nothing.
+  # `doctest Fleet.Forge.Protocol`. The file LOOKS covered and executes nothing.
   #
   # This wall answers the DECIDABLE half of that: a declaration whose module holds no example runs
   # no test. It does NOT claim to notice a deleted test file or a shrunk suite — those need a

@@ -199,7 +199,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
              )
 
     assert_received {:marker, 9, body, "system-token"}
-    assert body =~ Fleet.Pilot.ForgeProtocol.pr_open_fail_marker(9, "deadbeef")
+    assert body =~ Fleet.Forge.Protocol.pr_open_fail_marker(9, "deadbeef")
     assert body =~ "role_token_unavailable"
     assert body =~ "lcars/issue-9-scribe"
   end

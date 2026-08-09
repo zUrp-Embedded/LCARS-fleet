@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ForgeClient.Files do
+defmodule Fleet.Forge.Client.Files do
   @moduledoc """
   Reads and writes repository files through the forge contents API.
 
@@ -6,10 +6,10 @@ defmodule Fleet.Pilot.ForgeClient.Files do
   as author and the commissioning human as committer.
   """
 
-  import Fleet.Pilot.ForgeClient.Transport,
+  import Fleet.Forge.Client.Transport,
     only: [resolve_config: 1, http_get: 2, http_put: 3]
 
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_path: 1]
+  import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_path: 1]
 
   @doc """
   Writes text at `path` on a branch, returning the commit SHA.

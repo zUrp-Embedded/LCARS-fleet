@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
 
   defmodule ParkedForge do
     def list_open_issues(_repo, _opts),
-      do: {:ok, [%{"title" => Fleet.Pilot.ForgeProtocol.parked_issue_title()}]}
+      do: {:ok, [%{"title" => Fleet.Forge.Protocol.parked_issue_title()}]}
   end
 
   defmodule MuteForge do

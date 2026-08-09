@@ -41,7 +41,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
     @impl true
     def list_pulls(_r, _o), do: {:ok, []}
     @impl true
-    def parse_feature_branch(ref), do: Fleet.Pilot.ForgeProtocol.parse_feature_branch(ref)
+    def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
     @impl true
     def create_issue(_r, _t, _b, _o), do: {:ok, 1}
     @impl true

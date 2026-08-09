@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     defstruct [:forge, :repo, :forge_opts]
 
     @type t :: %__MODULE__{
-            # Injected forge client (seam `:forge_client`, prod default `Fleet.Pilot.ForgeClient`).
+            # Injected forge client (seam `:forge_client`, prod default `Fleet.Forge.Client`).
             forge: module(),
             # The repo's `owner/name` (the escalation writes on this repo's ISSUE).
             repo: String.t(),
@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
           {:skipped, term()} | {:error, term()}
   def escalate_rework(%Seams{} = seams, pr_number, head, detail) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
-      signature = Fleet.Pilot.ForgeProtocol.rework_exhausted_marker(pr_number)
+      signature = Fleet.Forge.Protocol.rework_exhausted_marker(pr_number)
 
       body =
         "**Architecte** — ⚠ Rework non convergent sur la PR ##{pr_number} (issue ##{issue_n}) : le budget " <>
@@ -266,12 +266,12 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   # Extracts the parent ISSUE number from the feature-branch (`lcars/issue-<n>-<role>`) via the
-  # UNIQUE parser `Fleet.Pilot.ForgeProtocol.parse_feature_branch/1` (not a homemade re-parse). Local
+  # UNIQUE parser `Fleet.Forge.Protocol.parse_feature_branch/1` (not a homemade re-parse). Local
   # adapter `{:ok, issue_n} | {:skipped, :not_fleet_branch}` — the producer does not interest
   # the escalation (it writes on the issue), hence a narrower return than
   # `RoleDispatch.parse_feature_branch_or_skip` (which returns the full `{n, role}` tuple for the review dispatch).
   defp issue_of_branch_or_skip(head) do
-    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
+    case Fleet.Forge.Protocol.parse_feature_branch(head) do
       {:ok, {issue_n, _producer}} -> {:ok, issue_n}
       :error -> {:skipped, :not_fleet_branch}
     end

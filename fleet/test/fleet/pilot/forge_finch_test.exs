@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.ForgeFinchTest do
+defmodule Fleet.Forge.FinchTest do
   @moduledoc """
-  Dedicated HTTP pool `Fleet.Pilot.ForgeFinch` — the ForgeClient's anti-stale wiring.
+  Dedicated HTTP pool `Fleet.Forge.Finch` — the ForgeClient's anti-stale wiring.
 
   We PROBE the real process (anti-hollow-green), not a config knob: if the pool is removed from the
   `Fleet.Pilot.Application` tree, this test breaks. The BEHAVIOR (`conn_max_idle_time` closes a
@@ -11,6 +11,6 @@ defmodule Fleet.Pilot.ForgeFinchTest do
   use ExUnit.Case, async: true
 
   test "the dedicated forge pool runs in the tree (started unconditionally by the Application)" do
-    assert is_pid(Process.whereis(Fleet.Pilot.ForgeFinch))
+    assert is_pid(Process.whereis(Fleet.Forge.Finch))
   end
 end

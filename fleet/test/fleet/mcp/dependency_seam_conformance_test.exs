@@ -36,11 +36,11 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
     end
 
     test "the REAL forge client satisfies it — otherwise the guard refuses production" do
-      Code.ensure_loaded!(Fleet.Pilot.ForgeClient)
+      Code.ensure_loaded!(Fleet.Forge.Client)
 
       missing =
         for {fun, arity} <- DependencyForge.behaviour_info(:callbacks),
-            not function_exported?(Fleet.Pilot.ForgeClient, fun, arity),
+            not function_exported?(Fleet.Forge.Client, fun, arity),
             do: {fun, arity}
 
       assert missing == []

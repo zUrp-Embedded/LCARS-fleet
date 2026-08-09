@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   `function_exported?/3` does not load a module: on a freshly booted BEAM it answers "no such
   function" about a module that has one and is simply not loaded yet. That made the FIRST project
   onboarded after a fleet start lose its architect, under a log that blamed the forge — measured on
-  a cold node, where `:erlang.module_loaded(Fleet.Pilot.ForgeClient)` was false while the same call
+  a cold node, where `:erlang.module_loaded(Fleet.Forge.Client)` was false while the same call
   succeeded a minute later.
 
   `async: false` — these tests mutate the global code table (delete/purge).

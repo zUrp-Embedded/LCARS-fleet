@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.ForgeClient.Repo do
+defmodule Fleet.Forge.Client.Repo do
   @moduledoc """
-  **Repo provisioning** in the agent machine — sub-domain of `Fleet.Pilot.ForgeClient`:
+  **Repo provisioning** in the agent machine — sub-domain of `Fleet.Forge.Client`:
   repo creation, discovery by org-membership (WS3), branch-protection, the repo's forge
   identity. (Admission is org membership, managed UPSTREAM by the human admin — no
   server-side admission marker, no mutable topic, no collaborator management here.)
@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
   are called directly by `Fleet.Pilot.ProjectOnboard`.
   """
 
-  import Fleet.Pilot.ForgeClient.Transport,
+  import Fleet.Forge.Client.Transport,
     only: [
       resolve_config: 1,
       http_get: 2,
@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.ForgeClient.Repo do
       paginate: 3
     ]
 
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
+  import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   @doc """
   Creates an organization or token-owned repository, initialized on `main` by default.

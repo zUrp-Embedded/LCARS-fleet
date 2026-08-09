@@ -1,6 +1,6 @@
-defmodule Fleet.Pilot.ForgeClient.Jury do
+defmodule Fleet.Forge.Client.Jury do
   @moduledoc """
-  Reads the **jury state** of a PR (native Gitea reviews) — sub-domain of `Fleet.Pilot.ForgeClient`.
+  Reads the **jury state** of a PR (native Gitea reviews) — sub-domain of `Fleet.Forge.Client`.
   Self-contained concern: it reads ONLY `GET .../pulls/{index}/reviews` and derives verdicts/jury/feedback
   from it; it calls no other forge op (zero coupling to the issues/PR core). `ForgeClient` forwards these
   functions (the module injected by the `:forge_client` seam stays `ForgeClient`; the implementation lives here).
@@ -10,10 +10,10 @@ defmodule Fleet.Pilot.ForgeClient.Jury do
   not the requested field. Details in each `@doc`.
   """
 
-  import Fleet.Pilot.ForgeClient.Transport, only: [resolve_config: 1, paginate: 3]
+  import Fleet.Forge.Client.Transport, only: [resolve_config: 1, paginate: 3]
 
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1]
+  import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
   @doc """
   THE review-routing predicate — the SINGLE truth of "where does a jury stand", shared by the

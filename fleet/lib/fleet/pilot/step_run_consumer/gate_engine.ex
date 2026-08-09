@@ -251,18 +251,18 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp max_rework_rounds(workflow_map), do: Map.fetch!(workflow_map, "max_rework_rounds")
 
   defp count_step_runs(seams, n) do
-    forge = seams.forge_client || Fleet.Pilot.ForgeClient
+    forge = seams.forge_client || Fleet.Forge.Client
     forge.count_signed_step_runs(seams.repo, n, seams.forge_opts)
   end
 
   @spec sign_failed_run(map(), pos_integer(), String.t() | nil, String.t(), term()) ::
           :ok | {:error, term()}
   defp sign_failed_run(seams, n, role, step, reason) do
-    forge = seams.forge_client || Fleet.Pilot.ForgeClient
+    forge = seams.forge_client || Fleet.Forge.Client
 
     body =
       "Gate en échec — step `#{step}` : #{reason}\n\n" <>
-        Fleet.Pilot.ForgeProtocol.step_run_marker(role || "unknown", "gate-fail")
+        Fleet.Forge.Protocol.step_run_marker(role || "unknown", "gate-fail")
 
     case forge.post_comment(seams.repo, n, body, seams.forge_opts) do
       {:ok, _} ->

@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.CloseIssueKindTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
 
   describe "the kind is required, not defaulted" do
     test "no `closure:` → refused, and the refusal says why" do

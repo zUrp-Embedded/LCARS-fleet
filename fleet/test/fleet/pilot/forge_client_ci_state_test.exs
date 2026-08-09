@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.ForgeClientCiStateTest do
+defmodule Fleet.Forge.ClientCiStateTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
 
   # THE CURRENT STATUS PER CONTEXT, AND WHY THE RESPONSE ORDER IS NOT ALLOWED TO DECIDE IT.
   #

@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.ForgeClientPaginationTest do
+defmodule Fleet.Forge.ClientPaginationTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
 
   # THE STOP CONDITION OF `paginate/3`, and why it has two of them.
   #

@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   alias Fleet.Pilot.BriefBuilder
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
-  alias Fleet.Pilot.Opts
+  alias Fleet.Opts
 
   # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation); its naming
   # helpers (rc_name / maybe_put_route / resolve_repo_id) are shared with the issue flow.
@@ -81,7 +81,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   @spec parse_feature_branch_or_skip(String.t()) ::
           {:ok, {integer(), String.t()}} | {:skipped, :not_fleet_branch}
   def parse_feature_branch_or_skip(head) do
-    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
+    case Fleet.Forge.Protocol.parse_feature_branch(head) do
       {:ok, _} = ok -> ok
       :error -> {:skipped, :not_fleet_branch}
     end

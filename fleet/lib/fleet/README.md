@@ -1,7 +1,7 @@
 # Fleet — root map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-08-03
+**Last revised**: 2026-08-09
 **Status**: active — generated topology map + root pointers
 **Referenced by**: `CLAUDE.md`, `README.md`
 
@@ -28,9 +28,10 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | OTP root | `Fleet.Application` | 9 |
 | surface | `Fleet.Observation` | 5 |
 | surface | `Fleet.API` | 8 |
-| steering | `Fleet.Pilot` | 6 |
+| steering | `Fleet.Pilot` | 7 |
 | steering | `Fleet.Starfleet` | 7 |
 | work | `Fleet.Workflow` | 5 |
+| work | `Fleet.Forge` | 6 |
 | work | `Fleet.MCP` | 6 |
 | pod composition | `Fleet.ProjectBootstrap` | 3 |
 | pod composition | `Fleet.Spawner` | 4 |
@@ -49,6 +50,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.GitRef` | 0 |
 | foundation | `Fleet.Labels` | 0 |
 | foundation | `Fleet.Layout` | 0 |
+| foundation | `Fleet.Opts` | 0 |
 | foundation | `Fleet.Publish.InFlight` | 0 |
 | foundation | `Fleet.ReceptionFilter` | 0 |
 | foundation | `Fleet.SchemaCache` | 0 |

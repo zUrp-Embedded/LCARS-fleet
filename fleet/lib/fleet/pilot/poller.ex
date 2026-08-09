@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
-  alias Fleet.Pilot.Opts
+  alias Fleet.Opts
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
 
@@ -677,7 +677,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp parked?(issues),
-    do: Enum.any?(issues, &Fleet.Pilot.ForgeProtocol.parked_issue_title?(&1["title"]))
+    do: Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
 
   # The full per-repo skip: no dispatch, no lease, no reclaim seeding, no awaits union.
   # Suspects pass through UNCHANGED (same stance as `:kick` — the 2-tick grace stays frozen,
@@ -891,7 +891,7 @@ defmodule Fleet.Pilot.Poller do
   defp pulls_issue_ids(pulls) do
     # C-05: the single Fleet-PR selector (ForgeProtocol); local projection = the SET of issue numbers.
     pulls
-    |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
+    |> Fleet.Forge.Protocol.fleet_prs_by_issue()
     |> Enum.map(fn {n, _pr} -> n end)
     |> MapSet.new()
   end
@@ -943,7 +943,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp pr_issue_number(pr) do
-    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
+    case Fleet.Forge.Protocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
       {:ok, {n, _role}} -> n
       _ -> nil
     end
@@ -990,7 +990,7 @@ defmodule Fleet.Pilot.Poller do
   defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: cl}),
     do: fn name -> cl.load!(name) end
 
-  defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Pilot.ForgeClient
+  defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Forge.Client
   defp step_forge_client(%__MODULE__{forge_client_override: fc}), do: fc
 
   defp elapsed_ms(started_native) do

@@ -26,7 +26,7 @@ defmodule Fleet.Pilot.ArchFeed do
   the forge; the feed is a courtesy mirror, full stop). Title unreadable → line without it.
 
   Test seams: `:subscribe` (default true), `:pod_info` (default `Fleet.Spawner.pod_info/1`),
-  `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Pilot.ForgeClient`).
+  `:notify` (default `Fleet.Spawner.notify_pod/2`), `:forge` (default `Fleet.Forge.Client`).
   """
 
   use GenServer
@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.ArchFeed do
      %{
        pod_info: Keyword.get(opts, :pod_info, &Fleet.Spawner.pod_info/1),
        notify: Keyword.get(opts, :notify, &Fleet.Spawner.notify_pod/2),
-       forge: Keyword.get(opts, :forge, Fleet.Pilot.ForgeClient)
+       forge: Keyword.get(opts, :forge, Fleet.Forge.Client)
      }}
   end
 

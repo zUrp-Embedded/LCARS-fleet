@@ -1,7 +1,7 @@
 # Fleet.Pilot — domain card
 
 **Date**: 2026-05-26
-**Last revised**: 2026-08-05
+**Last revised**: 2026-08-09
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
@@ -27,10 +27,9 @@ restated, only pointed at.
 - `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
 - `Fleet.Pilot.GatekeeperSeal` — the SINGLE merge seal (`seal_and_merge/6`), shared by both merge points.
 
-**Forge client (domain layer)**
-- `Fleet.Pilot.ForgeClient` — Gitea client, injected via the `:forge_client` seam. Sub-modules `{Transport, UrlSafe, Jury, Repo, Files}`.
-- `Fleet.Pilot.ForgeProtocol` — pure wire-protocol vocabulary (branch/route/step_run formats). The lock-label vocabulary lives at the foundation (`Fleet.Labels`, `deps: []`) — a declared dep, not a pilot module.
-- `Fleet.Pilot.MergeOutcome` — pure structural classification of a merge failure.
+**Forge — NOT here any more**
+- The client and the wire protocol are their own domain: `Fleet.Forge` (`lib/fleet/forge/`, own map). The pilot DRIVES it and declares it as a dep; it does not contain it. What made the move necessary: `Req`/`Req.Response` were deps of THIS boundary, so "one HTTP exit" was a convention any new call could break — it is compiled over there now.
+- `Fleet.Pilot.MergeOutcome` — pure structural classification of a merge failure. Stays: it reads a forge failure to decide what the PILOT does next.
 
 **Incidents & onboarding**
 - `Fleet.Pilot.IncidentConsumer` — Bus consumer of pod-failure events (`pod.failed` / `wake.failed`) → `IncidentRegistry`.

@@ -59,7 +59,7 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
          ]}
 
     @impl true
-    def parse_feature_branch(ref), do: Fleet.Pilot.ForgeProtocol.parse_feature_branch(ref)
+    def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
 
     @impl true
     def pr_review_state(_repo, _index, _opts), do: Process.get(:review_state)

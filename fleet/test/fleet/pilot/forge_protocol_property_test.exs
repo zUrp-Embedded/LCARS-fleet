@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ForgeProtocolPropertyTest do
+defmodule Fleet.Forge.ProtocolPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.ForgeProtocolPropertyTest do
   # The example-based tests (forge_protocol_test.exs) pin named cases; here we bombard with
   # generated role/sha/steps to prove the invariant holds on the whole REALISTIC charset, not only
   # on the hardwired examples.
-  alias Fleet.Pilot.ForgeProtocol
+  alias Fleet.Forge.Protocol, as: ForgeProtocol
 
   # Realistic charset of a wire-protocol token (role, workflow_map name, step):
   # letters/digits + `_`/`-` (kebab and snake). Excludes by construction the marker's grave

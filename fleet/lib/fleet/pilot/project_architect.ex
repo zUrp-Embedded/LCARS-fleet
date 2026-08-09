@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
   ## Seams (keyword opts, defaults = real)
 
     * `:spawner` — default `Fleet.Spawner` (the `spawn_pod/3` provider).
-    * `:forge_client` — default `Fleet.Pilot.ForgeClient` (numeric repo id for the UUID).
+    * `:forge_client` — default `Fleet.Forge.Client` (numeric repo id for the UUID).
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
     * `:projects_root` / `:work_root` / `:doc_root` — FS roots (defaults `Fleet.Layout`), same
       keys as `ProjectOnboard` (the onboard opts thread through unchanged).
@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.ProjectArchitect do
   @spec ensure(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def ensure(repo, opts \\ []) when is_binary(repo) and is_list(opts) do
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     forge_opts = Keyword.take(opts, [:token, :base_url])
 

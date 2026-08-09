@@ -33,7 +33,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   alias Fleet.Pilot.BriefBuilder
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
-  alias Fleet.Pilot.Opts
+  alias Fleet.Opts
 
   # REVIEW (PR) lifecycle extracted: `dispatch_review/2` (below, poller contract) does the PR gate +
   # reads `pr_review_state`, THEN delegates all the routing (verdicts / rework / conflict / promotion) to
@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   defp do_dispatch_issue(payload, opts) do
-    forge = Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient)
+    forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
@@ -316,7 +316,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # Spawn.route_for/Opts.tag_err at the source; ReviewLifecycle never references this
     # module (uni-directional, no cycle).
     ctx = %ReviewLifecycle.Ctx{
-      forge: Keyword.get(opts, :forge_client, Fleet.Pilot.ForgeClient),
+      forge: Keyword.get(opts, :forge_client, Fleet.Forge.Client),
       loader: Keyword.get(opts, :loader, Fleet.CapProfile),
       workflow_map_loader:
         Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
@@ -376,7 +376,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp awaits_arch_issue?(head, opts) do
     ids = Keyword.get(opts, :awaits_arch_ids, MapSet.new())
 
-    case Fleet.Pilot.ForgeProtocol.parse_feature_branch(head) do
+    case Fleet.Forge.Protocol.parse_feature_branch(head) do
       {:ok, {n, _role}} -> MapSet.member?(ids, n)
       :error -> false
     end

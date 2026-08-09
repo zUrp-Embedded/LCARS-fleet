@@ -100,6 +100,7 @@ defmodule Fleet.Pilot do
       Fleet.Slug,
       Fleet.EnvParse,
       Fleet.GitRef,
+      Fleet.Opts,
       Fleet.Labels,
       Fleet.Layout,
       Fleet.Catalogue,
@@ -119,9 +120,10 @@ defmodule Fleet.Pilot do
       # BL-6-31: the adoption gate of import_external scans instruction material through the
       # reception filter — foundation, shared with SPBuilder's RepoSections door.
       Fleet.ReceptionFilter,
-      # — external wire surface (lib fencing: every reference is declared) —
-      Req,
-      Req.Response
+      # The forge is a DOMAIN now, not a corner of this one. What used to sit here in its place was
+      # `Req`/`Req.Response`: the business domain declared the HTTP library, so "one HTTP exit" was
+      # a convention. It is compiled in `Fleet.Forge` instead.
+      Fleet.Forge
     ],
     exports: [Application]
 

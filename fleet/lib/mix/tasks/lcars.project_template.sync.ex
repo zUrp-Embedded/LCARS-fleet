@@ -37,8 +37,8 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
 
     with :ok <- ensure_repo(org, name, repo, fc),
          :ok <- push_template(repo, fc),
-         :ok <- Fleet.Pilot.ForgeClient.Repo.set_template(repo, true, fc),
-         :ok <- Fleet.Pilot.ForgeClient.ensure_protocol_labels(repo, fc) do
+         :ok <- Fleet.Forge.Client.Repo.set_template(repo, true, fc),
+         :ok <- Fleet.Forge.Client.ensure_protocol_labels(repo, fc) do
       Mix.shell().info("project-template: #{repo} synced (content + template flag + labels)")
     else
       {:error, reason} -> Mix.raise("project-template sync FAILED: #{inspect(reason)}")
@@ -58,7 +58,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   end
 
   defp ensure_repo(org, name, repo, fc) do
-    case Fleet.Pilot.ForgeClient.Repo.create_repo(
+    case Fleet.Forge.Client.Repo.create_repo(
            name,
            Keyword.merge(fc,
              org: org,

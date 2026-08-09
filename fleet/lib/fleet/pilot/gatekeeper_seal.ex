@@ -10,12 +10,12 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Both call `seal_and_merge/7` → same gatekeeper signature, same trace, everywhere (without this
   single point, a merge would go through with a raw system token, without a comment, attributed to `lcars-system`).
 
-  The gatekeeper signature (`as_gatekeeper/1` = `Fleet.Pilot.ForgeClient.as_role(forge_opts,
+  The gatekeeper signature (`as_gatekeeper/1` = `Fleet.Forge.Client.as_role(forge_opts,
   gatekeeper_role())`) is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`
   and signs itself — there is only ONE writer of the `as_role(_, gatekeeper_role())` idiom
   in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
   `as_gatekeeper/1`). A caller cannot forget the signature nor fork it. `as_role` remains
-  the single source of the credential→wire adapter (`Fleet.Pilot.ForgeClient.as_role/2` — not
+  the single source of the credential→wire adapter (`Fleet.Forge.Client.as_role/2` — not
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Pilot.Roles`;
   `gatekeeper_role/0` here is only a re-export.
   """
@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   """
   @spec as_gatekeeper(keyword()) :: {:ok, keyword()} | {:error, :role_token_unavailable}
   def as_gatekeeper(forge_opts),
-    do: Fleet.Pilot.ForgeClient.as_role(forge_opts, gatekeeper_role())
+    do: Fleet.Forge.Client.as_role(forge_opts, gatekeeper_role())
 
   @doc """
   Seals the PR: **merge FIRST** (gatekeeper token), THEN posts the closing comment
@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `get_issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
-    signature = Fleet.Pilot.ForgeProtocol.merge_marker(pr_number)
+    signature = Fleet.Forge.Protocol.merge_marker(pr_number)
 
     # WHO ACTUALLY APPROVED — read, never asserted. The comment used to state "the judges APPROVED
     # the PR (native reviews)" unconditionally, which is FALSE on a zero-judge card: `doc-direct`
@@ -193,7 +193,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # tell "merged") and `merge_pr` already gaps its own head-branch delete. Gap HERE so the
     # seal comment lands strictly AFTER the delete's second, and again before the close —
     # read bottom-up the feed then tells: merged, branch deleted, sealed, closed.
-    Fleet.Pilot.WriteSpacing.gap(opts)
+    Fleet.Forge.WriteSpacing.gap(opts)
 
     # POST-merge trace. A failed seal comment does not block the sequence (the merge stays
     # the authoritative truth) but is LOGGED: nothing re-posts it (the dedup only guards
@@ -235,7 +235,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # else in the pipeline) — not concerned by this inconsistency.
     # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
     # the close action (a same-second tie renders inverted in the feed).
-    Fleet.Pilot.WriteSpacing.gap(opts)
+    Fleet.Forge.WriteSpacing.gap(opts)
 
     close_result = close_with_retry(forge, repo, issue_n, gk_opts, pr_number)
 

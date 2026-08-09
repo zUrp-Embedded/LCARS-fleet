@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ForgeClient.UrlSafe do
+defmodule Fleet.Forge.Client.UrlSafe do
   @moduledoc """
   Encodes forge path segments without changing their structural separators.
 

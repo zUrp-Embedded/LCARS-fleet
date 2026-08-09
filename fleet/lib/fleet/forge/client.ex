@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ForgeClient do
+defmodule Fleet.Forge.Client do
   @moduledoc """
   `fleet_pilot`'s Gitea REST API client — the DOMAIN layer of the forge-state-machine
   (the forge IS the state machine). Carries the ops on issues/PRs (idempotent read/write),
@@ -7,9 +7,9 @@ defmodule Fleet.Pilot.ForgeClient do
 
   Two layers live BELOW it (re-exported here to preserve the historical contract):
 
-    * `Fleet.Pilot.ForgeClient.Transport` — HTTP/config/encoding/pagination engine + system login.
+    * `Fleet.Forge.Client.Transport` — HTTP/config/encoding/pagination engine + system login.
       No knowledge of the forge protocol. `ForgeClient` `import`s it (`http_get`, `paginate`, …).
-    * `Fleet.Pilot.ForgeProtocol` — PURE vocabulary of the wire-protocol (feature-branches,
+    * `Fleet.Forge.Protocol` — PURE vocabulary of the wire-protocol (feature-branches,
       route/step_run/onboard markers, result blocks, `system_authored?`), build+parse co-located. Callers
       call it DIRECTLY. Only `parse_feature_branch/1` is re-exported here (`defdelegate`) because
       `fleet_mcp` reaches it via the `:forge_client` seam (avoids a compile-time dep on fleet_pilot).
@@ -38,11 +38,11 @@ defmodule Fleet.Pilot.ForgeClient do
 
   require Logger
 
-  alias Fleet.Pilot.ForgeClient.Jury
-  alias Fleet.Pilot.ForgeClient.Repo
-  alias Fleet.Pilot.ForgeProtocol
+  alias Fleet.Forge.Client.Jury
+  alias Fleet.Forge.Client.Repo
+  alias Fleet.Forge.Protocol, as: ForgeProtocol
 
-  import Fleet.Pilot.ForgeClient.Transport,
+  import Fleet.Forge.Client.Transport,
     only: [
       resolve_config: 1,
       http_get: 2,
@@ -55,11 +55,11 @@ defmodule Fleet.Pilot.ForgeClient do
       login_of: 1
     ]
 
-  import Fleet.Pilot.ForgeClient.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
+  import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
-  defdelegate branch_head(repo, branch, opts), to: Fleet.Pilot.ForgeClient.Repo
+  defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
   @doc """
   Adds and verifies a label, returning `:already_present` without writing when applicable.
@@ -390,7 +390,7 @@ defmodule Fleet.Pilot.ForgeClient do
   @doc "Org repos (WS3 discovery, org-membership = admission). See `ForgeClient.Repo.list_org_repos/2`."
   def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
 
-  @doc "Numeric forge id of the repo. See `Fleet.Pilot.ForgeClient.Repo.repo_id/2`."
+  @doc "Numeric forge id of the repo. See `Fleet.Forge.Client.Repo.repo_id/2`."
   def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
 
   @doc """
@@ -629,7 +629,7 @@ defmodule Fleet.Pilot.ForgeClient do
   defp delete_head_branch_spaced(config, repo, index) do
     with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
          head_ref when is_binary(head_ref) and head_ref != "" <- get_in(pr, ["head", "ref"]) do
-      Fleet.Pilot.WriteSpacing.gap()
+      Fleet.Forge.WriteSpacing.gap()
 
       case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(head_ref)}") do
         {:ok, _} ->
@@ -766,10 +766,10 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc "Jury state (verdicts + jury SET + outcome) of a PR. See `Fleet.Pilot.ForgeClient.Jury.pr_review_state/3`."
+  @doc "Jury state (verdicts + jury SET + outcome) of a PR. See `Fleet.Forge.Client.Jury.pr_review_state/3`."
   def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
-  @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Pilot.ForgeClient.Jury.change_request_feedback/3`."
+  @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Forge.Client.Jury.change_request_feedback/3`."
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 
@@ -794,7 +794,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc "Counts the rework rounds. See `Fleet.Pilot.ForgeClient.Jury.count_change_request_rounds/3`."
+  @doc "Counts the rework rounds. See `Fleet.Forge.Client.Jury.count_change_request_rounds/3`."
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
 
@@ -893,7 +893,7 @@ defmodule Fleet.Pilot.ForgeClient do
     end
   end
 
-  @doc "Judges re-requested after judgment (timeline). See `Fleet.Pilot.ForgeClient.Jury.pr_rerequested_reviewers/3`."
+  @doc "Judges re-requested after judgment (timeline). See `Fleet.Forge.Client.Jury.pr_rerequested_reviewers/3`."
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 

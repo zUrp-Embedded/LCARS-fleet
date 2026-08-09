@@ -389,7 +389,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # ISSUE, carrying the gate base (deliverable_opts.base_sha "cafe"). Without it the brake
       # counts nothing and the loop is unbounded — this is the half the poster owns.
       assert_received {:comment, 42, body, _}
-      assert body =~ Fleet.Pilot.ForgeProtocol.publish_fail_marker(42, "cafe")
+      assert body =~ Fleet.Forge.Protocol.publish_fail_marker(42, "cafe")
       assert body =~ ":base_not_ancestor"
     end
 
@@ -528,7 +528,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute File.exists?(Path.join(work_dir, "provenance"))
 
       assert_received {:comment, 42, body, _}
-      assert body =~ Fleet.Pilot.ForgeProtocol.pr_open_fail_marker(42, "deadbeef")
+      assert body =~ Fleet.Forge.Protocol.pr_open_fail_marker(42, "deadbeef")
       assert body =~ "422"
       assert body =~ "feature/issue-42"
     end

@@ -18,7 +18,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   ## Implementations
 
-    * `Fleet.Pilot.ForgeClient` — the REAL impl (canonical default). It lives in
+    * `Fleet.Forge.Client` — the REAL impl (canonical default). It lives in
       `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt
       this behaviour (`@behaviour` = a compile reference, would create a new edge)
       and stays DUCK-TYPED with a cross-reference comment. This module is the source
@@ -90,7 +90,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @doc """
   Parses a system feature-branch `lcars/issue-<n>-<role>` → `{:ok, {n, role}}`,
   `:error` if the ref is not a fleet feature-branch. Carried by the seam so that
-  `Delegation` never calls `Fleet.Pilot.ForgeProtocol` directly (compile dep).
+  `Delegation` never calls `Fleet.Forge.Protocol` directly (compile dep).
   """
   @callback parse_feature_branch(head :: String.t()) ::
               {:ok, {issue_number :: integer(), role :: String.t()}} | :error
@@ -154,7 +154,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @callback merged_pr_of_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::
               {:ok, map()} | :none | {:error, term()}
 
-  @default_client Fleet.Pilot.ForgeClient
+  @default_client Fleet.Forge.Client
 
   @doc "Returns the configured forge client or the canonical Pilot implementation."
   @spec resolved() :: module()

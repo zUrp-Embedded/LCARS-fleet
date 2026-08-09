@@ -98,7 +98,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Pilot.Opts
+  alias Fleet.Opts
 
   alias Fleet.Pilot.StepRunConsumer.Verdict
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
@@ -362,7 +362,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
     repo = Map.get(meta, "repo")
     number = Map.get(meta, "number")
-    forge = state.forge_client || Fleet.Pilot.ForgeClient
+    forge = state.forge_client || Fleet.Forge.Client
 
     if is_binary(repo) and is_integer(number) do
       case forge.remove_label(repo, number, Fleet.Labels.awaits_arch(), state.forge_opts) do

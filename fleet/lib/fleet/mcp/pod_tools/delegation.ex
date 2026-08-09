@@ -44,7 +44,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   ## Seams (app-env `:fleet_mcp`)
 
-    * `:forge_client` (default `Fleet.Pilot.ForgeClient`) — forge client, runtime
+    * `:forge_client` (default `Fleet.Forge.Client`) — forge client, runtime
       dispatch (no compile-time dep on fleet_pilot). TWO declared behaviours over the SAME seam module
       (DR-012): `Delegation.ForgeClient` (DELEGATION/TRACKING surface: create_issue/add_label/get_issue/…)
       and `Delegation.EscalationForge` (ESCALATION surface: list_org_repos/list_open_issues/list_comments/
@@ -68,7 +68,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   require Logger
 
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
-  # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Pilot.ForgeClient`
+  # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
   alias Fleet.MCP.PodTools.Delegation.{
     DependencyForge,

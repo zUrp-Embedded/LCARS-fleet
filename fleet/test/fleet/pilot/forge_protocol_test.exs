@@ -1,13 +1,13 @@
-defmodule Fleet.Pilot.ForgeProtocolTest do
+defmodule Fleet.Forge.ProtocolTest do
   use ExUnit.Case, async: true
 
   # PURE wire-protocol vocabulary (no I/O): build+parse co-located. Each describe proves the
   # invariant `parse ∘ build == identity` (a format change breaks the test here, not in prod).
-  alias Fleet.Pilot.ForgeProtocol
+  alias Fleet.Forge.Protocol, as: ForgeProtocol
 
   # Executable examples of the @doc (step_run_marker/2 + step_run_marker?/1): the doc stays true
   # or the suite breaks.
-  doctest Fleet.Pilot.ForgeProtocol
+  doctest Fleet.Forge.Protocol
 
   describe "feature_branch/2 + parse_feature_branch/1 (build+parse co-located)" do
     test "parse_feature_branch extracts {issue, role} from a system branch" do

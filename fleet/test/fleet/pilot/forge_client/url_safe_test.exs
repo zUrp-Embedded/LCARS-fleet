@@ -1,7 +1,7 @@
-defmodule Fleet.Pilot.ForgeClient.UrlSafeTest do
+defmodule Fleet.Forge.Client.UrlSafeTest do
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.ForgeClient.UrlSafe
+  alias Fleet.Forge.Client.UrlSafe
 
   # Confinement E (WI-E4) — a hostile repo/path/ref segment produces a SAFE URL.
   # The right treatment = ENCODING (not slugging: repo=`owner/name`, path=`dir/file` carry legitimate `/`):

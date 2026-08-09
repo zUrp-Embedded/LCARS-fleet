@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ForgeClient
+  alias Fleet.Forge.Client, as: ForgeClient
 
   # THE BOT LOGIN IS A PROPERTY OF THE TOKEN, NOT OF THE MODULE.
   #
@@ -72,7 +72,7 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
     # No public accessor for the login; the transport exposes it to the client, so we go through the
     # documented seam rather than reaching into persistent_term (which would test the cache, not the
     # behaviour that depends on it).
-    apply(Fleet.Pilot.ForgeClient.Transport, :forge_bot_login, [
+    apply(Fleet.Forge.Client.Transport, :forge_bot_login, [
       %{
         base_url: Keyword.fetch!(opts, :base_url),
         token: Keyword.fetch!(opts, :token),

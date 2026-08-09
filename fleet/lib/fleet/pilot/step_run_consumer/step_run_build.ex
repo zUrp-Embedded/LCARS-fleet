@@ -88,7 +88,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   defp classify_pr_role(payload, n, role, seams) do
     case GateEngine.producer?(role, seams.deliverable_mode_fun, payload["deliverable_mode"]) do
       {:ok, true} ->
-        {:producer, Fleet.Pilot.ForgeProtocol.feature_branch(n, role)}
+        {:producer, Fleet.Forge.Protocol.feature_branch(n, role)}
 
       {:ok, false} ->
         {:judge, judge_producer_branch(payload, n, seams)}
@@ -99,7 +99,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   end
 
   defp judge_producer_branch(_payload, n, seams) do
-    forge = seams.forge_client || Fleet.Pilot.ForgeClient
+    forge = seams.forge_client || Fleet.Forge.Client
 
     with {:ok, pulls} <- forge.list_open_pulls(seams.repo, seams.forge_opts),
          head when is_binary(head) <- producer_head_for_issue(pulls, n) do
@@ -111,7 +111,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
   defp producer_head_for_issue(pulls, n) do
     case pulls
-         |> Fleet.Pilot.ForgeProtocol.fleet_prs_by_issue()
+         |> Fleet.Forge.Protocol.fleet_prs_by_issue()
          |> Enum.filter(&match?({^n, _}, &1)) do
       [] ->
         nil
@@ -145,7 +145,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
       allowed_emails: seams.role_emails.(role),
       coauthor_role: role,
       remote: seams.remote,
-      target_branch: Fleet.Pilot.ForgeProtocol.feature_branch(n, role),
+      target_branch: Fleet.Forge.Protocol.feature_branch(n, role),
       push?: true,
       local_ref: "HEAD"
     }
