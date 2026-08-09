@@ -206,15 +206,50 @@ defmodule Fleet.TaskQueueTest do
   end
 
   test "4. submit_result idempotent (double submit ignored, no double broadcast)", %{q: q} do
-    {:ok, _} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
+    {:ok, item} = TaskQueue.enqueue(q, "pod-A", %{brief: "x"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
-    {:ok, _} = TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+
+    {:ok, _} =
+      TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven", "work_item_id" => item.id})
+
     assert_receive %Fleet.Event{type: :"work_item.completed"}
 
+    # The re-submit carries the SAME id, which is what a pod really sends: the MCP layer injects
+    # `work_item_id` on every call and the tool schema requires it. The id-less form these tests
+    # used to make is unreachable from a pod, and reading a double-submit off "this pod completed
+    # something once" is what let a CLEARED mandate be acknowledged (cf. `completed_submit?/3`).
     assert {:error, :double_submit_ignored} =
-             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+             TaskQueue.submit_result(q, "pod-A", %{
+               "verdict" => "proven",
+               "work_item_id" => item.id
+             })
 
     refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
+  end
+
+  test "a CLEARED mandate's result is NOT acknowledged because an EARLIER one completed", %{q: q} do
+    # THE LIE THIS PREDICATE USED TO TELL. `:double_submit_ignored` is not an error to the pod: the
+    # MCP layer turns it into `{:ok, "Result already received (ignored)."}`. So answering it on the
+    # wrong grounds tells a pod its work landed while the result goes in the bin.
+    #
+    # Sequence, and nothing in it is exotic: A is completed, B is enqueued (superseding nothing, A
+    # is terminal), a teardown clears B, and B's submit — already in flight on the socket — lands.
+    # `find_active` is nil; the old predicate saw A and answered "already received" about B.
+    {:ok, a} = TaskQueue.enqueue(q, "pod-lie", %{brief: "A"})
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-lie")
+    {:ok, _} = TaskQueue.submit_result(q, "pod-lie", %{"verdict" => "ok", "work_item_id" => a.id})
+    assert_receive %Fleet.Event{type: :"work_item.completed"}
+
+    {:ok, b} = TaskQueue.enqueue(q, "pod-lie", %{brief: "B"})
+    :ok = TaskQueue.clear_for_pod(q, "pod-lie")
+
+    # B's result must NOT be acknowledged: nothing of B was ever received.
+    assert {:error, :no_active_work_item} =
+             TaskQueue.submit_result(q, "pod-lie", %{"verdict" => "b", "work_item_id" => b.id})
+
+    # And A's own re-submit is still recognised — the fix narrows the answer, it does not remove it.
+    assert {:error, :double_submit_ignored} =
+             TaskQueue.submit_result(q, "pod-lie", %{"verdict" => "ok", "work_item_id" => a.id})
   end
 
   # CI-03 — broadcast BEFORE commit. A failed `work_item.completed` broadcast must NOT commit the
@@ -280,7 +315,10 @@ defmodule Fleet.TaskQueueTest do
 
     # NOW genuinely delivered → a further double-submit IS ignored (no second emission).
     assert {:error, :double_submit_ignored} =
-             TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
+             TaskQueue.submit_result(q, "pod-A", %{
+               "verdict" => "proven",
+               "work_item_id" => completed.id
+             })
 
     refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
   end
@@ -738,8 +776,13 @@ defmodule Fleet.TaskQueueTest do
 
     # The most recently completed (pod-5) survives → double-submit ALWAYS detected, not degraded
     # into :no_active_work_item by a retention cutting the wrong item (recency, not FIFO).
+    kept5 = Enum.find(terminal, &(&1.pod_id == "pod-5"))
+
     assert {:error, :double_submit_ignored} =
-             TaskQueue.submit_result(q, "pod-5", %{"verdict" => "retry"})
+             TaskQueue.submit_result(q, "pod-5", %{
+               "verdict" => "retry",
+               "work_item_id" => kept5.id
+             })
   end
 
   # MA-27 — "1 ACTIVE work item/pod" invariant held AT WRITE TIME. Re-briefing a pod carrying an

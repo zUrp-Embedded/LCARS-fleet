@@ -240,7 +240,7 @@ defmodule Fleet.TaskQueue.Server do
   def handle_call({:submit_result, pod_id, result}, _from, state) do
     case find_active(state.work_items, pod_id) do
       nil ->
-        if has_completed?(state.work_items, pod_id),
+        if completed_submit?(state.work_items, pod_id, result),
           do: {:reply, {:error, :double_submit_ignored}, state},
           else: {:reply, {:error, :no_active_work_item}, state}
 
@@ -446,8 +446,33 @@ defmodule Fleet.TaskQueue.Server do
     {%{state | work_items: work_items}, superseded}
   end
 
-  defp has_completed?(work_items, pod_id) do
-    Enum.any?(Map.values(work_items), &(&1.pod_id == pod_id and &1.state == :completed))
+  # "HAS THIS MANDATE ALREADY BEEN RECEIVED?" — not "has this pod ever completed anything".
+  #
+  # The difference is the whole point, because the answer is told to the pod as a SUCCESS: the MCP
+  # layer turns `:double_submit_ignored` into `{:ok, "Result already received (ignored)."}`. Answer
+  # the neighbouring question and a pod is told its work landed when it went in the bin.
+  #
+  # The sequence that produced it, and none of its steps is exotic: the pod completes mandate A, a
+  # mandate B is enqueued, a teardown clears B, and B's `submit_result` — already in flight on the
+  # socket — arrives. `find_active` is nil, the old predicate saw A, and B's result was dropped
+  # under an acknowledgement. The `work_item_id_mismatch` guard could not catch it either: it only
+  # runs on the branch where an ACTIVE item exists, so on this path the submitted id was never
+  # compared to anything.
+  #
+  # Correlating by id also states the honest answer when there is nothing to correlate: no id, or
+  # an id we never completed, is `:no_active_work_item` — "we have nothing of yours", which is
+  # true — and never "already received", which would be a claim we cannot support.
+  defp completed_submit?(work_items, pod_id, result) do
+    case result["work_item_id"] || result[:work_item_id] do
+      nil ->
+        false
+
+      id ->
+        case Map.get(work_items, id) do
+          %WorkItem{pod_id: ^pod_id, state: :completed} -> true
+          _ -> false
+        end
+    end
   end
 
   defp record_poll(state, pod_id) when is_binary(pod_id) do
