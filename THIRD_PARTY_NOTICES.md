@@ -1,7 +1,7 @@
 # Third-Party Notices
 
 **Date** : 2026-08-04
-**Dernière révision** : 2026-08-07
+**Dernière révision** : 2026-08-09
 **Statut** : actif — recensement des emprunts externes (Apache-2.0 §4)
 **Référencé par** : `fleet/vendor/*/VENDOR.md`
 
@@ -80,6 +80,10 @@ L'attribution et la notice de copyright figurent dans [`knowledge/wshobson-agent
 La périphérie du projet d'origine — résolveurs sensibles au format, fusion structurelle par AST, repli LLM, interface MCP, application de bureau — a été délibérément écartée après audit.
 
 Le module porte la mention de sa filiation dans son `@moduledoc`. Le travail dérive d'une lecture attentive d'un travail publié : nous le déclarons, même si la MIT n'impose rien pour une réimplémentation.
+
+**L'étude elle-même vit HORS de ce dépôt, et y reste délibérément** : c'est du reverse-engineering du produit de quelqu'un d'autre, reproductible par qui refait le même travail. On crédite l'origine ; on ne publie pas quatre mois d'exploration du code d'un tiers. Aucun texte de licence n'est reproduit ici puisque aucune ligne de GitWand n'est présente — cette entrée est une attribution d'**ORIGINE**, pas une obligation de licence qu'on acquitte, et c'est écrit parce que la distinction cesse d'être évidente dès que la prose qui la portait a bougé.
+
+La chaîne complète — audit, ce qui a été gardé, ce qui a été refusé et pourquoi — est dans `fleet/CONFLICT-ENGINE-handoff.md`.
 
 ---
 

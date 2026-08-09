@@ -11,7 +11,7 @@ defmodule Fleet.Conflict do
   audit flagged as unreliable. The durable value is the DecisionTrace: every classification records
   WHY, and the refusal is traced as clearly as the resolution.
 
-  The origin is indexed at the ROOT (`NOTICE`), not only here. A credit that lives solely in the
+  The origin is indexed at the ROOT (`THIRD_PARTY_NOTICES.md`), not only here. A credit that lives solely in the
   prose of the file it applies to is one refactor away from disappearing with it, and the question
   it answers -- does anything in this repository come from somewhere else -- is asked from outside,
   by someone who has no reason to open this module.
