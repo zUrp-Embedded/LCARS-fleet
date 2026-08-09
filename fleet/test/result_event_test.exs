@@ -19,6 +19,9 @@ defmodule Fleet.MCP.ResultEventTest do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
+    # The pull is not decoration: a mandate is not closable before it is read, and a pod cannot
+    # know the id without pulling anyway. Skipping it here modelled a call no pod makes.
+    {:ok, _} = TaskQueue.get_for_pod(pod)
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
     payload = %{"answer" => "42", "nonce" => "evt-#{System.unique_integer([:positive])}"}
@@ -61,6 +64,9 @@ defmodule Fleet.MCP.ResultEventTest do
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
+    # The pull is not decoration: a mandate is not closable before it is read, and a pod cannot
+    # know the id without pulling anyway. Skipping it here modelled a call no pod makes.
+    {:ok, _} = TaskQueue.get_for_pod(pod)
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
 
     # work_item_id ABSENT from the top level, present INSIDE the payload — the exact shape produced by

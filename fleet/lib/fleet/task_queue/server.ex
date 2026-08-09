@@ -249,6 +249,26 @@ defmodule Fleet.TaskQueue.Server do
           tid when tid != nil and tid != work_item.id ->
             {:reply, {:error, :work_item_id_mismatch}, state}
 
+          # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and until now that held by accident.
+          #
+          # `@active_states` is `[:pending, :assigned]`, so this branch accepted a `:pending` item —
+          # one the pod never pulled. Nothing exploited it, for a reason that is not a rule: the id
+          # is only obtainable through `get_work_item`, which transitions the item to `:assigned` on
+          # its way out. The guarantee "the pod saw the brief before closing it" was therefore a
+          # property of who knows an id, not of the state machine. A confused pod, a misplaced retry
+          # or a future caller holding an id another way would each turn it off silently.
+          #
+          # The distinction already exists in the codebase — `Poller.Reconciliation` keys its own
+          # ownership rule on `@pulled_states [:assigned]` for exactly this reason. Applying it here
+          # is consistency, not a new invention.
+          #
+          # AFTER the id check and not before, deliberately: a stale id submitted while a pending
+          # item is active must still answer `:work_item_id_mismatch`, which names the real problem.
+          # Refusing on the state first would report "not pulled" about a mandate the pod never
+          # meant to close — an instrument answering the neighbouring question.
+          _ok when work_item.state == :pending ->
+            {:reply, {:error, :work_item_not_pulled}, state}
+
           _ok ->
             clean_result = result |> Map.delete("work_item_id") |> Map.delete(:work_item_id)
 

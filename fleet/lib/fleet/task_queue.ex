@@ -57,6 +57,7 @@ defmodule Fleet.TaskQueue do
           | {:error,
              :no_active_work_item
              | :double_submit_ignored
+             | :work_item_not_pulled
              | :work_item_id_mismatch
              | {:broadcast_failed, term()}}
   def submit_result(pod_id, result), do: submit_result(@server, pod_id, result)
@@ -66,6 +67,7 @@ defmodule Fleet.TaskQueue do
           | {:error,
              :no_active_work_item
              | :double_submit_ignored
+             | :work_item_not_pulled
              | :work_item_id_mismatch
              | {:broadcast_failed, term()}}
   def submit_result(server, pod_id, result) when is_binary(pod_id) and is_map(result),

@@ -252,6 +252,39 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.submit_result(q, "pod-lie", %{"verdict" => "ok", "work_item_id" => a.id})
   end
 
+  test "a mandate never PULLED cannot be closed — and the id error still wins when it applies", %{
+    q: q
+  } do
+    # Unreachable through the pod today, and that is the point: the id is only obtainable through
+    # `get_work_item`, which assigns the item on its way out. So "the pod read its brief before
+    # closing it" held as a property of id-distribution, not of the state machine.
+    {:ok, pending} = TaskQueue.enqueue(q, "pod-quiet", %{brief: "never pulled"})
+
+    assert {:error, :work_item_not_pulled} =
+             TaskQueue.submit_result(q, "pod-quiet", %{
+               "verdict" => "x",
+               "work_item_id" => pending.id
+             })
+
+    # ORDER MATTERS: a stale id submitted while a pending item is active must still name the id
+    # problem, not the state one — otherwise the refusal describes a mandate the pod never meant to
+    # close.
+    assert {:error, :work_item_id_mismatch} =
+             TaskQueue.submit_result(q, "pod-quiet", %{
+               "verdict" => "x",
+               "work_item_id" => "stale"
+             })
+
+    # And pulling it makes the close legitimate again — the guard gates on READING, nothing else.
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-quiet")
+
+    assert {:ok, %{state: :completed}} =
+             TaskQueue.submit_result(q, "pod-quiet", %{
+               "verdict" => "x",
+               "work_item_id" => pending.id
+             })
+  end
+
   # CI-03 — broadcast BEFORE commit. A failed `work_item.completed` broadcast must NOT commit the
   # terminal `:completed` state: the item STAYS ACTIVE so a re-submit RE-PLAYS the delivery instead of
   # being lied to with `:double_submit_ignored` (pre-CI-03 the commit was done first → lost broadcast =

@@ -62,6 +62,13 @@ defmodule Fleet.MCP.PodTools.WorkItems do
           {:error, :work_item_id_mismatch} ->
             {:error, :work_item_id_mismatch}
 
+          # The pod is closing a mandate it never pulled. Surfaced as an ERROR and not softened:
+          # unlike a double submit, nothing about this one is idempotent — there is no earlier
+          # delivery to point at, and answering `{:ok, ...}` would acknowledge work that was never
+          # even read.
+          {:error, :work_item_not_pulled} ->
+            {:error, :work_item_not_pulled}
+
           {:error, {:broadcast_failed, _reason}} ->
             {:error, :broadcast_failed}
         end
