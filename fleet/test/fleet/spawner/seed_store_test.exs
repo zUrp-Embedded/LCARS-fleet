@@ -97,9 +97,16 @@ defmodule Fleet.Spawner.SeedStoreTest do
     # au lieu d'echouer. C'est la moitie muette du contrat vendor (BL-6-44).
     #
     # Ces deux attentes ne sont pas deduites de notre code : elles sont les noms de repertoire que
-    # `claude --print` a REELLEMENT ecrits sous `~/.claude/projects/` le 2026-08-03, depuis les
+    # le binaire vendor a REELLEMENT ecrits sous `~/.claude/projects/` le 2026-08-03, depuis les
     # deux `cwd` ci-dessous, sur un binaire 2.1.220. Un test qui rejouerait notre propre fonction
     # re-affirmerait notre lecture de l'algo ; ceux-la confrontent.
+    #
+    # 🛑 CES TEMOINS NE SE RE-PRODUISENT PAS AVEC `--print`. Ce mode est INTERDIT ici : hors
+    # abonnement il n'est pas cher, il est BLOQUE — la facturation a l'unite est mesuree a 90 $ en
+    # 2 h contre 90 $/mois d'abonnement, donc le jour ou le vendor l'en sort, c'est un mur, pas une
+    # ligne de budget. `claude_launch.sh` le dit au site de lancement (ADR-G : « NO -p, NO
+    # stream-json »). Pour rafraichir ces temoins : `mix lcars.slug_witness --root <arbre de pods>`,
+    # qui lit ce que des pods NORMAUX ont ecrit au lieu d'en fabriquer.
     #
     # Le second cas est le DISCRIMINANT : `__` et deux espaces donnent `----` — l'absence de
     # collapsing est exactement ce qui distingue l'algo gele d'une slugification naive, et c'est

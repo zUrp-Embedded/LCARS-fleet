@@ -55,12 +55,17 @@ spec:
     # own rules ("Permission deny rule X matches no known tool") so a typo announces itself instead
     # of silently opening.
     #
-    # ⚠ THE MODE OF THAT MEASUREMENT IS NOT THE POD'S. Those three runs were `-p` (one shot, no one
-    # to prompt), and a pod runs `--remote-control`. The DENY result is a session-construction fact
-    # and does not depend on the mode; the ALLOW result could — under a mode with a prompt path, an
-    # unlisted tool might ask instead of proceeding. It is stated anyway because the audit of
-    # 2026-08-08 saw the same porosity FROM INSIDE A POD, with a Skill: two observations, two
-    # modes, one direction. Name the gap rather than close it with a deduction.
+    # ⚠ THE MODE OF THAT MEASUREMENT IS NOT THE POD'S, AND THE MODE USED IS NOT ONE TO RE-RUN.
+    # Those three runs were `-p` (one shot, no one to prompt); a pod runs `--remote-control`. The
+    # DENY result is a session-construction fact and does not depend on the mode; the ALLOW result
+    # could — under a mode with a prompt path, an unlisted tool might ask instead of proceeding. It
+    # is stated anyway because the audit of 2026-08-08 saw the same porosity FROM INSIDE A POD, with
+    # a Skill: two observations, two modes, one direction.
+    #
+    # 🛑 DO NOT RE-MEASURE THIS WITH `-p`. That mode is FORBIDDEN for production here — it is under
+    # a x50 billing reprieve from the vendor (user, 2026-08-09). The admissible probe is a real pod
+    # given a work item whose deliverable IS the report of what it could invoke, which is also the
+    # only mode that answers the question being asked.
     #
     # THE RULE THAT FOLLOWS: what a role must NOT do belongs in `disallowedTools`. Leaving it out of
     # `allowedTools` closes nothing and reads exactly like closing it.
