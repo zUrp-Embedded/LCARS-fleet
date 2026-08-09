@@ -28,7 +28,6 @@ cette section n'existe pas, tu ne l'inventes pas et tu ne devines pas** : tu éc
 que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce verdict-là. Un « tests verts »
 non joué est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
 
-`git_ops_denied` : <%= if @git_ops_denied == [], do: "aucun ajout (baseline destructive seule)", else: Enum.join(@git_ops_denied, ", ") %>
 
 <%= if @repo_claude_md_sections != "" do %>
 ---

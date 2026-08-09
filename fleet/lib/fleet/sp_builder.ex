@@ -178,7 +178,6 @@ defmodule Fleet.SPBuilder do
         role: Fleet.CapProfile.name(cap_profile),
         containment: Fleet.CapProfile.containment(cap_profile),
         lifetime_scope: Fleet.CapProfile.lifetime_scope(cap_profile, "unknown"),
-        git_ops_denied: get_in(cap_profile.spec, ["scope", "git_ops_denied"]) || [],
         repo_claude_md_sections: repo_sections
       ]
 

@@ -364,9 +364,19 @@ defmodule Fleet.SPBuilderTest do
       assert claude_md =~ "mensonge opérationnel"
 
       # The containment doctrine it replaced: a constat that named the interdictions to the very
-      # agent they confine, and told it nothing it could act on.
+      # agent they confine, and told it nothing it could act on. N8/A8 — same family as the launch
+      # trace that handed a confined agent the table of its own confinement.
+      #
+      # `git_ops_denied` went with it, and the reason is MEASURED, not aesthetic: a denied Bash
+      # pattern announces itself precisely at the moment it bites — "Permission to use Bash with
+      # command `git push origin main` has been denied" — and the agent attributes it to the
+      # permission layer, not to git, and does not retry. The obligation that replaces it is not
+      # here but where behaviour is shaped: the role SP already says "tu commites en LOCAL et le
+      # SYSTÈME pousse — tu ne push JAMAIS". Naming the wall a second time, in the file the agent
+      # re-reads most, bought nothing and cost the map of its own cage.
       refute claude_md =~ "Contraintes pod"
       refute claude_md =~ "disallowedTools"
+      refute claude_md =~ "git_ops_denied"
     end
 
     test "returns :repo_claude_md_unreadable when path absent" do
