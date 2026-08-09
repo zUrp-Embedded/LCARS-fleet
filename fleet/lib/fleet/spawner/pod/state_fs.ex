@@ -108,9 +108,25 @@ defmodule Fleet.Spawner.Pod.StateFs do
 
     tmp = state.state_fs_path <> ".tmp"
 
+    # `[:sync]` ON THE WRITE, and it is not the same guarantee as the rename.
+    #
+    # write-then-rename buys ATOMICITY: a reader sees the old file or the new one, never a torn
+    # one. It buys nothing about DURABILITY — POSIX rename orders the directory entry, it does not
+    # promise the bytes reached the platter. Without the flag, a machine losing power after the
+    # rename can leave the entry pointing at a zero-length file.
+    #
+    # It matters HERE and not for every writer of the codebase: this is the pod's only persistent
+    # state, and it carries the `boot_id` that arbitrates recovery. Losing it after a power cut
+    # loses the distinction "this pod died" / "the whole fleet restarted" — the one question the
+    # file exists to answer, at exactly the moment it is asked.
+    #
+    # NOT covered, and naming it rather than implying otherwise: the PARENT DIRECTORY is not
+    # fsynced, so the rename itself is not durable either. Doing that needs an `:file.open` on the
+    # directory and a `:file.sync`, which is a second gesture with its own failure modes; the write
+    # flag closes the half that costs one atom.
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
-           :ok <- File.write(tmp, Jason.encode!(payload, pretty: true)) do
+           :ok <- File.write(tmp, Jason.encode!(payload, pretty: true), [:sync]) do
         File.rename(tmp, state.state_fs_path)
       end
 

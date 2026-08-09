@@ -1706,7 +1706,12 @@ defmodule Fleet.Spawner.PodTest do
       # A pipe returning to :monitoring after a submit does NOT re-emit (first entry only).
       submit_result_event(pod_id, %{"cycle" => 1})
       assert_receive %Fleet.Event{type: :"pod.completed"}, 2_000
-      refute_receive %Fleet.Event{type: :"pod.spawned"}, 200
+
+      # PINNED ON THIS POD. The subscription is to the SHARED `fleet.events` topic, so an
+      # unqualified refute fails on any other test's pod spawning inside the 200 ms window — which
+      # is exactly what it did the day an unrelated `[:sync]` on a file write shifted the
+      # scheduling. The claim is "THIS pipe does not re-emit", not "nothing in the fleet spawns".
+      refute_receive %Fleet.Event{type: :"pod.spawned", payload: %{"pod_id" => ^pod_id}}, 200
 
       Process.exit(pid, :kill)
     end
