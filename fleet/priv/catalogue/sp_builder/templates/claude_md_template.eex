@@ -19,10 +19,16 @@ Chaque livrable ouvre sur son en-tête LCARS — deux familles selon la nature d
 
 Exception by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles, binaires, données brutes) ne portent AUCUN header — en ajouter un casserait le fichier.
 
-## Contraintes pod
+## Prouver ce que tu livres
 
-- `disallowedTools` : refusés par le cap-profile (claude refuse les outils interdits) ; le pod est une sandbox isolée (containment substrat — ADR-D : pas de filtre IPC runtime, isolation R+W intérieur)
-- `git_ops_denied` : <%= if @git_ops_denied == [], do: "aucun ajout (baseline destructive seule)", else: Enum.join(@git_ops_denied, ", ") %>
+Joue la suite de tests du dépôt **avant** de rendre, et rends le verdict avec le livrable.
+
+La commande est dans la section `## Test` (ou `## Commands`) des conventions du dépôt, plus bas. **Si
+cette section n'existe pas, tu ne l'inventes pas et tu ne devines pas** : tu écris dans ton livrable
+que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce verdict-là. Un « tests verts »
+non joué est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
+
+`git_ops_denied` : <%= if @git_ops_denied == [], do: "aucun ajout (baseline destructive seule)", else: Enum.join(@git_ops_denied, ", ") %>
 
 <%= if @repo_claude_md_sections != "" do %>
 ---

@@ -349,6 +349,26 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "Random"
     end
 
+    # D1 — the pod's own CLAUDE.md said what it was FORBIDDEN and never how to prove a deliverable.
+    # A producer with no test command has two ways out and one of them is a lie; this block closes
+    # the second by naming it, so the absence gets REPORTED instead of papered over with "tests
+    # green". Rule P2(b): the obligation, not the observation.
+    test "the pod is told to prove its deliverable, and what to do when the repo does not say how" do
+      assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
+
+      assert claude_md =~ "## Prouver ce que tu livres"
+
+      # WHERE to look — the exact heading the extraction carries over, not a vague "the repo doc".
+      assert claude_md =~ "## Test"
+      # And the clause that makes a missing runner visible rather than silently assumed.
+      assert claude_md =~ "mensonge opérationnel"
+
+      # The containment doctrine it replaced: a constat that named the interdictions to the very
+      # agent they confine, and told it nothing it could act on.
+      refute claude_md =~ "Contraintes pod"
+      refute claude_md =~ "disallowedTools"
+    end
+
     test "returns :repo_claude_md_unreadable when path absent" do
       assert {:error, {:repo_claude_md_unreadable, _path, _reason}} =
                Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), "/tmp/__no_such_file")
