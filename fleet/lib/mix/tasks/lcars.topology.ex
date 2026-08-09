@@ -59,11 +59,12 @@ defmodule Mix.Tasks.Lcars.Topology do
   # — those swap an implementation for hermeticity, they do not cross a forbidden edge.
   @seams [
     {"Fleet.Spawner", "Fleet.MCP", ":mcp_socket_provisioner"},
-    # Both are RETIRABLE now and neither is retired: `Fleet.Forge` and `Fleet.Project` were
-    # extracted BELOW MCP precisely so these edges could become ordinary compile deps. What still
-    # holds them up is not the graph but the `conforming/2` check each behaviour carries — the
-    # anti-lying-stub guarantee that would go with it. One gesture each, not a cleanup.
-    {"Fleet.MCP", "Fleet.Pilot", ":forge_client / :project_onboard"}
+    # `:forge_client` and `:project_onboard` USED TO BE HERE, and they are not upward any more:
+    # their targets were extracted into `Fleet.Forge` and `Fleet.Project`, both BELOW MCP, so the
+    # edges are ordinary compile deps the boundary checker holds. The seams still exist — they are
+    # how a test injects a stub — but as INJECTION over a declared dep, which this table does not
+    # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
+    {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"}
   ]
 
   # Editorial layer names — the ONLY place they are declared. Keys are domain module
