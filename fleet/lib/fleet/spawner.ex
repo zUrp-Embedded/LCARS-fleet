@@ -74,7 +74,7 @@ defmodule Fleet.Spawner do
       (the tag is NESTED in the reason: matching a flat `{:error, :cap_profile_invalid, _}` never fires)
     * `{:error, {:already_started, pid}}` — pod_id collision
     * `{:error, :invalid_pod_id}` — pod_id not path-safe (outside `[A-Za-z0-9._-]` or contains `..`)
-    * `{:error, :brief_required}` — one-shot pod without a brief
+    * `{:error, :brief_required}` — one-shot pod without an order (neither inline text nor pointer)
   """
 
   alias Fleet.Spawner.Pod
@@ -105,6 +105,29 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Returns whether `opts` carry an ORDER for the pod, in either of its two shapes.
+
+  SHARED AUTHORITY, and it exists because the two shapes are decided in two different places. The
+  order is the inline text (`:brief`, degraded rail) or the ADDRESS of a materialized brief
+  (`:brief_ref`, nominal rail); the dispatch drops the inline copy precisely BECAUSE it posts an
+  address. Two sites therefore answer the same question — "is there still an order?" — and when
+  they answered it with two hand-written shapes they disagreed: the dispatch dropped on the ref,
+  the spawn guard looked only at the text, and every one-shot pod whose brief was materialized was
+  refused, forever, on the rail the arbitration had made canonical.
+
+  Call this from BOTH sides rather than re-deriving the shape. A caller that drops the copy must
+  ask it about what REMAINS, not about what it is dropping.
+
+  An empty `:brief` is not an order (an empty `build_brief` over a malformed step context), and a
+  `:brief_sha` without a `:brief_ref` names nothing resolvable.
+  """
+  @spec order_present?(keyword()) :: boolean()
+  def order_present?(opts) when is_list(opts) do
+    brief = Keyword.get(opts, :brief)
+    (is_binary(brief) and brief != "") or is_binary(Keyword.get(opts, :brief_ref))
+  end
+
+  @doc """
   Returns whether a role declares a business capability.
 
   This cross-boundary resolver fails closed when the role's profile cannot be loaded.
@@ -129,8 +152,11 @@ defmodule Fleet.Spawner do
         since interpolated into FS paths (`~/pods/pod_<id>`, sock, state recovery);
         otherwise `{:error, :invalid_pod_id}`.
       * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
-      * `:brief` — the pod's work (string). **Mandatory** for a
-        `one-shot` pod (otherwise `{:error, :brief_required}`).
+      * `:brief` — the pod's work, inline (string).
+      * `:brief_ref` — the ADDRESS of a materialized brief, the nominal shape of the same order
+        (the dispatch drops the inline copy when it posts an address).
+      * A `one-shot` pod must carry an order in ONE of those two shapes, otherwise
+        `{:error, :brief_required}`.
       * `:allow_no_brief` — admin/diagnostic escape hatch (bool, default false).
   """
   @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
@@ -329,13 +355,13 @@ defmodule Fleet.Spawner do
   end
 
   defp brief_guard(%Fleet.CapProfile{} = cap_profile, opts) do
-    brief = Keyword.get(opts, :brief)
-    # `nil` AND `""` (empty brief — e.g. a `build_brief` over an empty/malformed
-    # step context) both count as "no brief".
-    has_brief? = is_binary(brief) and brief != ""
-
+    # THE QUESTION IS "DOES THIS POD HAVE AN ORDER?", NOT "IS THERE TEXT IN `:brief`?" — and it is
+    # answered by `order_present?/1`, the shared authority, NOT by a shape re-written here. The
+    # dispatch that drops the inline copy asks the same function about what remains, so the two
+    # halves of the invariant cannot drift apart. Re-deriving the shape locally is what produced
+    # the endless re-dispatch loop this guard now accepts.
     cond do
-      has_brief? ->
+      order_present?(opts) ->
         :ok
 
       Keyword.get(opts, :allow_no_brief, false) ->
@@ -343,8 +369,9 @@ defmodule Fleet.Spawner do
 
       brief_required?(cap_profile) ->
         Logger.warning(
-          "Spawner: spawn_pod refused: one-shot pod without brief — " <>
-            "provide :brief (the work) or :allow_no_brief (admin/diagnostic)."
+          "Spawner: spawn_pod refused: one-shot pod without order — " <>
+            "provide :brief (the text), :brief_ref (the address of a materialized brief), " <>
+            "or :allow_no_brief (admin/diagnostic)."
         )
 
         {:error, :brief_required}

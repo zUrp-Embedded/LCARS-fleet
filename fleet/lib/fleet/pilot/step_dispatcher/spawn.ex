@@ -256,9 +256,18 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # La copie ne part que si une ADRESSE la remplace. `brief_ref` est le marqueur de la
   # materialisation : present, l'ordre est un objet git que le pod resout par son pointeur ; absent
   # (rail degrade), il n'y a rien vers quoi pointer.
+  #
+  # La question « ce qui reste est-il encore un ordre ? » se pose a `Fleet.Spawner.order_present?/1`
+  # — l'AUTORITE PARTAGEE, celle que le spawn consultera juste apres. Ecrite ici en dur, elle a
+  # diverge de celle du garde : on retirait la copie sur la presence du `ref`, le garde ne
+  # regardait que le TEXTE, et tout pod one-shot dont le brief etait materialise se faisait
+  # refuser au spawn — indefiniment, la reconciliation redispatchant toutes les 30s. On interroge
+  # donc le RESTE, pas ce qu'on retire : si la reponse est non, la copie ne part pas.
   defp drop_duplicated_order(spawn_opts, extra_opts) do
-    if Keyword.has_key?(extra_opts, :brief_ref),
-      do: Keyword.delete(spawn_opts, :brief),
+    without_copy = Keyword.delete(spawn_opts, :brief)
+
+    if Keyword.has_key?(extra_opts, :brief_ref) and Fleet.Spawner.order_present?(without_copy),
+      do: without_copy,
       else: spawn_opts
   end
 

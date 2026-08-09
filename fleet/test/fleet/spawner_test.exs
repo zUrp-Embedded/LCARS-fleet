@@ -179,6 +179,24 @@ defmodule Fleet.SpawnerTest do
       refute Fleet.Spawner.brief_required?(no_scope)
     end
 
+    test "order_present?/1 — shared authority: the order has TWO shapes, text and address" do
+      # The predicate both halves consult. The dispatch drops the inline copy when it posts an
+      # address and asks this about WHAT REMAINS; the spawn guard asks it about what arrived. Two
+      # hand-written shapes disagreed once and looped every one-shot dispatch forever — the point
+      # of this function is that there is now only one shape to get wrong.
+      assert Fleet.Spawner.order_present?(brief: "fix bug X")
+      assert Fleet.Spawner.order_present?(brief_ref: "briefs/x.md", brief_sha: "abc")
+
+      # An address with no text is the NOMINAL rail, not a degradation.
+      assert Fleet.Spawner.order_present?(brief_ref: "briefs/x.md")
+
+      refute Fleet.Spawner.order_present?([])
+      refute Fleet.Spawner.order_present?(brief: "")
+      refute Fleet.Spawner.order_present?(brief: nil)
+      # A sha names nothing without a path to resolve it against.
+      refute Fleet.Spawner.order_present?(brief_sha: "abc")
+    end
+
     test "DR-019: cap-profile WITHOUT lifetime_scope → spawn REFUSED (invalid state, never spawned)" do
       # `lifetime_scope` is schema-REQUIRED: a %CapProfile{} without it was never validated by the
       # schema. Letting it spawn gives downstream reads that DIVERGE (brief-exempt at the guard, but
@@ -281,6 +299,32 @@ defmodule Fleet.SpawnerTest do
                  brief: "fix bug X",
                  pod_id: "pod-r18-brief-#{System.unique_integer([:positive])}",
                  repo_id: @test_repo_id
+               )
+    end
+
+    test "one-shot + POINTER (brief_ref, no inline text) → {:ok, _} — the nominal rail" do
+      # THE RAIL THIS GUARD REFUSED IN PRODUCTION. Once a brief is materialized into work/ops, the
+      # dispatch drops the inline copy BECAUSE an address replaces it, and hands the pod a
+      # `:brief_ref` — the shape the arbitration made canonical. A guard reading only `:brief` saw
+      # nothing and refused, the reconciliation re-dispatched, and it looped every 30s forever.
+      # Every one-shot role was affected (scoper, qualifier, reviewer, gatekeeper, chief); the
+      # degraded rail, having no address to name, kept working and kept every test green.
+      assert {:ok, _pid} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-brief-ptr",
+                 brief_ref: "briefs/x.md",
+                 brief_sha: "62e36295c11f459baed13ebd724583508dc36388",
+                 pod_id: "pod-r18-ptr-#{System.unique_integer([:positive])}",
+                 repo_id: @test_repo_id
+               )
+    end
+
+    test "a pointer with NO ref is not an order — the sha alone names nothing" do
+      # The pair keys on the ref, exactly like the dispatch site that drops the copy. A sha without
+      # a path is not resolvable, so it must NOT open the guard: an order the pod cannot read is
+      # the expensive failure this whole guard exists to prevent.
+      assert {:error, :brief_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-sha-only",
+                 brief_sha: "62e36295c11f459baed13ebd724583508dc36388"
                )
     end
 
