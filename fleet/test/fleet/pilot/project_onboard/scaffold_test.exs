@@ -44,6 +44,31 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     assert File.dir?(Path.join(dir, "plans"))
   end
 
+  test "the atelier door TRAVELS: its rule sits under a heading RepoSections carries", %{
+    tmp_dir: dir
+  } do
+    # The doc face is the only one whose CLAUDE.md states a rule that is true by CONSTRUCTION for
+    # every project — nothing here ships. But a door is only a door if a pod opens it, and
+    # `RepoSections` carries SIX level-two headings and drops everything else. A rule written under
+    # a heading of its own would be a page nobody ever receives: the file would exist, the test
+    # would pass on its existence, and no producer would ever be told.
+    assert :ok = Scaffold.face(dir, "work-doc", "monprojet", [])
+    path = Path.join(dir, "CLAUDE.md")
+
+    assert {:ok, carried} = Fleet.SPBuilder.RepoSections.read(path)
+    assert carried =~ "## Conventions"
+    assert carried =~ "jamais livré"
+    # The operative half: a producer handed a SHIPPING deliverable here must say so instead of
+    # writing it on a branch nobody opens. That sentence has to survive the filter too.
+    assert carried =~ "docs/"
+
+    # And the five other headings stay CLOSED, for the reason the code face states: a hollow title
+    # makes the fleet believe it has context and the agent believe it has a command.
+    for absent <- ["## Stack", "## Build", "## Test", "## Commands", "## Gotchas"] do
+      refute carried =~ absent, "#{absent} should not be pre-opened on the doc face"
+    end
+  end
+
   test "face/4 on the OPS template: writes the README that states who writes there", %{
     tmp_dir: dir
   } do
