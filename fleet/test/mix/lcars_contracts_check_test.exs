@@ -137,4 +137,91 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              "the tuple on the guard's executable line must count"
     end
   end
+
+  describe "labels.awaits_arch_clears_in_flight — the wall that makes the registry irrelevant" do
+    defp lib_file(tmp, name, body) do
+      dir = Path.join([tmp, "lib", "fleet"])
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, name), body)
+    end
+
+    defp verdict(tmp), do: Mix.Tasks.Lcars.Contracts.Check.check_awaits_arch_clears_in_flight(tmp)
+
+    @tag :tmp_dir
+    test "a writer that sets the brake WITHOUT releasing the lock is named", %{tmp_dir: tmp} do
+      # `awaits-arch` takes the ticket out of dispatch; the in-flight lock left behind is then
+      # reclaimed by reconciliation as orphaned, and the ticket re-dispatches into the same wall.
+      lib_file(tmp, "brake.ex", """
+      defmodule Brake do
+        def apply(repo, n), do: forge().add_label(repo, n, Fleet.Labels.awaits_arch(), [])
+      end
+      """)
+
+      v = verdict(tmp)
+      assert v.status == :fail
+      assert Enum.any?(v.evidence, &(&1 =~ "brake.ex"))
+    end
+
+    @tag :tmp_dir
+    test "a writer that releases the lock passes — and the note SAYS what it measured", %{
+      tmp_dir: tmp
+    } do
+      lib_file(tmp, "disciplined.ex", """
+      defmodule Disciplined do
+        def apply(repo, n) do
+          forge().add_label(repo, n, @awaits_arch_label, [])
+          forge().remove_label(repo, n, @in_flight_label, [])
+        end
+      end
+      """)
+
+      v = verdict(tmp)
+      assert v.status == :pass
+      # A count in the note, because a wall that passes on a population of zero reads exactly like
+      # a wall that passes on a compliant one.
+      assert v.note =~ "1 writer(s) measured"
+    end
+
+    @tag :tmp_dir
+    test "a file that only READS the label is NOT a writer — the false positive that shipped", %{
+      tmp_dir: tmp
+    } do
+      # The first version asked "does this file mention add_label AND the awaits-arch label?" and
+      # flagged the module that lists the arch's escalation inbox: it READS the label to filter
+      # issues, and adds an unrelated one. Co-occurrence in a file answers a neighbouring question,
+      # and its answer looks exactly like a finding.
+      lib_file(tmp, "inbox.ex", """
+      defmodule Inbox do
+        @awaits_arch_label Fleet.Labels.awaits_arch()
+        def list(issues), do: Enum.filter(issues, &(@awaits_arch_label in &1.labels))
+        def tag(repo, n), do: forge().add_label(repo, n, Fleet.Labels.genre_doc(), [])
+      end
+      """)
+
+      # No writer at all in this tree: the check must say it measured NOTHING rather than pass —
+      # and it must not name this file as a violator either, which is the actual regression.
+      v = verdict(tmp)
+      assert v.status == :fail
+      assert v.note == "population empty"
+      assert Enum.any?(v.evidence, &(&1 =~ "no site setting awaits-arch found"))
+      refute Enum.any?(v.evidence, &(&1 =~ "sets awaits-arch without clearing"))
+    end
+
+    @tag :tmp_dir
+    test "delegating to unlock/6 counts as releasing the lock", %{tmp_dir: tmp} do
+      # `unlock/6` removes the label AND stops the role stopwatch AND emits `step.unlocked`. A site
+      # that delegates to it clears the lock without ever naming it — reading only `remove_label`
+      # would flag the most disciplined writer of the three.
+      lib_file(tmp, "completer.ex", """
+      defmodule Completer do
+        def apply(repo, n) do
+          forge().add_label(repo, n, @awaits_arch_label, [])
+          unlock(forge(), repo, n, [], "engineer", :awaiting_arch)
+        end
+      end
+      """)
+
+      assert verdict(tmp).status == :pass
+    end
+  end
 end

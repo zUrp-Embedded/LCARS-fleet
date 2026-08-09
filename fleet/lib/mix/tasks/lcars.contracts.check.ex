@@ -91,6 +91,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
+        check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
@@ -502,6 +503,105 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           evidence: Enum.map(unregistered, &"consumed type outside registry: #{&1}"),
           note: "every consumed type (handle_info %Fleet.Event{type:}) must be an events.yaml key"
         }
+    end
+  end
+
+  @doc """
+  Every site that SETS `awaits-arch` must CLEAR `in-flight` in the same file.
+
+  The invariant was stated in three places and guarded in none, so two writers honoured it and the
+  third did not — and the registry that was supposed to record which is which had itself gone
+  stale. A wall makes the registry's accuracy irrelevant: the property holds whether or not anyone
+  remembered to write it down.
+
+  What the third writer cost, observed on the bench: `awaits-arch` takes a ticket out of dispatch
+  but the in-flight lock stays. Reconciliation then finds that lock orphaned (no live pod),
+  reclaims it, re-dispatches — and a fresh pod goes to block in the same place, every tick, until a
+  human closes the ticket. The brake was on and the wheel kept turning.
+
+  Clearing is any of the three real shapes: `remove_label` with the in-flight label,
+  `StepRunCompleter.unlock/6` (which removes it, stops the role stopwatch and emits
+  `step.unlocked`), or the `@in_flight_label` attribute passed to a removal. File granularity is
+  deliberate — the pairing is a property of the escalation PATH, and a checker chasing it across
+  call boundaries would be guessing.
+
+  ## What this check does NOT see, and what does
+
+  Measured with two mutations. Strip the clearing from a writer entirely and this check FAILS,
+  naming the file. Strip only the CALL and leave the clearing function behind, and this check
+  PASSES — file granularity cannot tell a live helper from a dead one.
+
+  That second one is caught, but by the compiler: an unused private function is a warning, and the
+  gate compiles `--warnings-as-errors`. The two layers compose and neither covers the other, which
+  is worth stating because the obvious "improvement" — chasing the call graph here — would trade a
+  precise wall for a guessing one and cover nothing new.
+  """
+  @spec check_awaits_arch_clears_in_flight(Path.t()) :: map()
+  def check_awaits_arch_clears_in_flight(root) do
+    sources = Path.wildcard(Path.join(root, "lib/**/*.ex"))
+
+    writers = Enum.filter(sources, &sets_awaits_arch?/1)
+
+    setters =
+      writers
+      |> Enum.reject(&clears_in_flight?/1)
+      |> Enum.map(&Path.relative_to(&1, root))
+
+    # The population is the SETTERS, and an empty one is not a green: it means the reader stopped
+    # seeing the label writers — the exact way a wall goes quiet while the code drifts underneath.
+    cond do
+      measured_nothing?(sources) ->
+        broken_result("labels.awaits_arch_clears_in_flight", "source under lib/")
+
+      measured_nothing?(writers) ->
+        broken_result("labels.awaits_arch_clears_in_flight", "site setting awaits-arch")
+
+      true ->
+        %{
+          id: "labels.awaits_arch_clears_in_flight",
+          remediation:
+            "clear `lcars-in-flight` on that path (remove_label, or StepRunCompleter.unlock/6 when " <>
+              "the role identity is known) — awaits-arch alone stops the dispatch but leaves a lock " <>
+              "that reconciliation reclaims and re-dispatches",
+          status: if(setters == [], do: :pass, else: :fail),
+          evidence: Enum.map(setters, &"sets awaits-arch without clearing in-flight: #{&1}"),
+          note:
+            "every awaits-arch writer releases the in-flight lock in the same file " <>
+              "(#{length(writers)} writer(s) measured: #{Enum.map_join(writers, ", ", &Path.relative_to(&1, root))})"
+        }
+    end
+  end
+
+  # ANCHORED ON THE CALL, not on the file. The first version asked "does this file mention
+  # add_label AND the awaits-arch label?" and flagged `pod_tools/delegation.ex`, which READS the
+  # label to list the arch's escalation inbox and adds an unrelated one. A file-level co-occurrence
+  # answers a neighbouring question, and the answer looks like a finding.
+  #
+  # The label may arrive as `@attr` or as the accessor call, so the argument span has to tolerate
+  # ONE level of nesting (`Fleet.Labels.awaits_arch()` carries its own parens) — a plain `[^)]*`
+  # stops at that inner paren and sees nothing. Newlines are allowed on purpose: all three real
+  # sites keep the label on the call's line today, and a checker that silently depends on that
+  # would go quiet the day someone reformats.
+  @label_arg_span "(?:[^()]|\\([^()]*\\)){0,200}?"
+
+  defp sets_awaits_arch?(path),
+    do: calls_with_label?(path, "add_label", "@awaits_arch_label|Labels\\.awaits_arch\\(\\)")
+
+  defp clears_in_flight?(path) do
+    # `unlock/6` is the third real shape: it removes the label AND stops the role stopwatch AND
+    # emits `step.unlocked`. A site delegating to it clears the lock without naming it.
+    calls_with_label?(path, "remove_label", "@in_flight_label|Labels\\.in_flight\\(\\)") or
+      match_source?(path, ~r/\bunlock\(/)
+  end
+
+  defp calls_with_label?(path, fun, label_alt) do
+    match_source?(path, Regex.compile!("#{fun}\\(#{@label_arg_span}(#{label_alt})", "s"))
+  end
+
+  defp match_source?(path, re) do
+    case File.read(path) do
+      {:ok, src} -> Regex.match?(re, src)
+      _ -> false
     end
   end
 

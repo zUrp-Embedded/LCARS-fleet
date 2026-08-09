@@ -274,6 +274,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
             "recurrent) : `#{Fleet.Labels.awaits_arch()}` pose, l'arch tranche"
         )
 
+        clear_in_flight(forge, repo, number)
         :ok
 
       {:error, e} ->
@@ -288,6 +289,39 @@ defmodule Fleet.Pilot.IncidentConsumer do
     e ->
       Logger.error("IncidentConsumer: FREIN a leve sur #{repo}##{number} : #{inspect(e)}")
       :ok
+  end
+
+  # THE BRAKE IS TWO GESTURES, NOT ONE — and the second is what makes the first hold.
+  #
+  # `awaits-arch` takes the ticket out of dispatch. It does NOT release the in-flight lock, and a
+  # lock left on a ticket nobody can advance is not inert: the poller's reconciliation finds it
+  # orphaned (no live pod), reclaims it, and re-dispatches — a fresh pod goes and blocks in the
+  # same place. Observed on the bench 2026-08-09, and only closing the ticket by hand stopped it.
+  # So the two labels must never coexist, and every site that sets one clears the other
+  # (`labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` holds all three).
+  #
+  # A bare `remove_label` and not `StepRunCompleter.unlock/6`, deliberately: unlock also stops the
+  # ROLE's forge stopwatch and emits `step.unlocked`, and both need the role identity that took the
+  # lock. This rail acts as the SYSTEM on a recurring incident — it does not know that identity and
+  # will not guess it. What it therefore cannot do: the role's stopwatch keeps running through the
+  # human wait, and this escalation produces no feed line.
+  #
+  # Best-effort like its sibling, and for the same reason: a brake that cannot be fully placed must
+  # not break the rail of last resort. Failure is LOUD, because half a brake reads as a whole one.
+  defp clear_in_flight(forge, repo, number) do
+    case forge.remove_label(repo, number, Fleet.Labels.in_flight(), []) do
+      {:ok, _} ->
+        :ok
+
+      {:error, e} ->
+        Logger.error(
+          "IncidentConsumer: FREIN pose mais `#{Fleet.Labels.in_flight()}` NON retire sur " <>
+            "#{repo}##{number} (#{inspect(e)}) — le verrou orphelin sera repris par la " <>
+            "reconciliation et le ticket re-dispatche malgre le frein"
+        )
+
+        :ok
+    end
   end
 
   defp run_sync(fun), do: fun.()
