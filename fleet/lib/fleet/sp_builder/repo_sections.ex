@@ -4,7 +4,7 @@ defmodule Fleet.SPBuilder.RepoSections do
   parser split out of `Fleet.SPBuilder`, used by `compose_claude_md/3` to carry
   over into the pod's `CLAUDE.md` (N3) the useful sections of the target repo.
 
-  Sections kept: `Stack`, `Build`, `Test`, `Conventions`, `Commands`, `Gotchas`
+  Sections kept: `Stack`, `Build`, `Test`, `Doc`, `Conventions`, `Commands`, `Gotchas`
   — each level-2 markdown header (`## Name`) and its body up to the next level-2
   header. Everything else in the file is ignored (the repo CLAUDE.md also carries
   human sections with no value for a pod).
@@ -12,10 +12,23 @@ defmodule Fleet.SPBuilder.RepoSections do
   **Pure** functions (FS read only for `read/1`, no process) — except the "nothing matched" warning,
   which `read/1` emits (never `extract/1`, which stays a pure parser).
 
-  The kept list is a BET, not a convention LCARS imposes: `priv/catalogue/project_template` ships no `CLAUDE.md`,
-  so a target repo is free to name its sections otherwise and then contributes nothing. That outcome is
-  legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching with zero repo context
-  used to be indistinguishable from a pod that was given no repo file at all.
+  ## Bet on an adopted repo, CONTRACT on an onboarded one
+
+  The distinction matters because the two produce the same silence and deserve opposite reactions.
+
+  A repo LCARS did not create is free to name its sections otherwise and then contributes nothing.
+  That outcome is legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching
+  with zero repo context used to be indistinguishable from a pod given no repo file at all.
+
+  A repo LCARS onboarded is a different case: `priv/catalogue/project_template` ships a `CLAUDE.md`
+  on each writer face, and the one on the code face NAMES these headings and explains what each is
+  for. It deliberately leaves them CLOSED — a hollow heading makes the fleet believe it has context
+  and the agent believe it has a command — so the warning on a fresh project is EXPECTED and says
+  the sections have not been written yet, not that the convention was missed.
+
+  (This paragraph used to read "the template ships no CLAUDE.md, so the kept list is a bet". That
+  stopped being true when the template gained its doors, and it argued for treating an onboarded
+  project's silence as someone else's naming choice.)
   """
 
   require Logger
@@ -23,9 +36,15 @@ defmodule Fleet.SPBuilder.RepoSections do
   # Closed list of the sections carried over into the pod. The `\b` bounds the name on a
   # word boundary: `## Test suite` matches (space after `Test`), `## Testing` or
   # `## Stackoverflow` do not match (the word continues).
-  @repo_section_re ~r/^##\s+(Stack|Build|Test|Conventions|Commands|Gotchas)\b/m
+  # `Doc` is the twin of `Test`, on the other half of the same obligation. `Test` tells a producer
+  # how to PROVE what it delivers; `Doc` tells it where the delivered documentation goes and what
+  # is expected there. Without it, `docs/` is a directory every project has and no producer is ever
+  # told to feed — and the documentation that ships gets written, if at all, by whoever notices.
+  # It carries no `## Doc` for the DRAFTING face: that tree ships nothing, and its own CLAUDE.md
+  # says so under `Conventions`.
+  @repo_section_re ~r/^##\s+(Stack|Build|Test|Doc|Conventions|Commands|Gotchas)\b/m
   # Same list, readable — quoted in the "nothing matched" warning so the operator sees WHAT was expected.
-  @repo_section_names ~w(Stack Build Test Conventions Commands Gotchas)
+  @repo_section_names ~w(Stack Build Test Doc Conventions Commands Gotchas)
 
   @doc """
   Reads the repo `CLAUDE.md`, extracts the named sections, and passes EACH through

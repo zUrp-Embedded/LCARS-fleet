@@ -31,6 +31,28 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     assert log =~ "Gotchas"
   end
 
+  test "`## Doc` travels — the shipped-documentation half of the Test obligation", %{tmp_dir: dir} do
+    # `Test` tells a producer how to PROVE what it delivers; `Doc` tells it where the delivered
+    # documentation goes. Absent from the carried list, a repo could write the instruction and no
+    # pod would ever receive it — the failure is silent on both ends, since the file looks right.
+    # The word boundary is the same bet as the rest of the list: `## Docker` must NOT match.
+    path = Path.join(dir, "CLAUDE.md")
+
+    File.write!(
+      path,
+      "## Doc\nles pages livrees vivent dans docs/, une par commande\n\n" <>
+        "## Docker\nignored — the word continues\n"
+    )
+
+    log = capture_log(fn -> assert {:ok, _} = RepoSections.read(path) end)
+    {:ok, body} = RepoSections.read(path)
+
+    assert body =~ "## Doc"
+    assert body =~ "docs/"
+    refute body =~ "the word continues"
+    refute log =~ "NO section matched"
+  end
+
   test "a matching section is extracted and does NOT warn", %{tmp_dir: dir} do
     path = Path.join(dir, "CLAUDE.md")
     File.write!(path, "## Setup\nignored\n\n## Build\nmix compile\n")

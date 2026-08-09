@@ -62,9 +62,11 @@ defmodule Fleet.Pilot.ProjectOnboard.ScaffoldTest do
     # writing it on a branch nobody opens. That sentence has to survive the filter too.
     assert carried =~ "docs/"
 
-    # And the five other headings stay CLOSED, for the reason the code face states: a hollow title
-    # makes the fleet believe it has context and the agent believe it has a command.
-    for absent <- ["## Stack", "## Build", "## Test", "## Commands", "## Gotchas"] do
+    # And the six other headings stay CLOSED, for the reason the code face states: a hollow title
+    # makes the fleet believe it has context and the agent believe it has a command. `## Doc` in
+    # particular has no business here — it names the documentation that SHIPS, and this tree ships
+    # nothing.
+    for absent <- ["## Stack", "## Build", "## Test", "## Doc", "## Commands", "## Gotchas"] do
       refute carried =~ absent, "#{absent} should not be pre-opened on the doc face"
     end
   end

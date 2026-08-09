@@ -20,19 +20,22 @@ c'est la **destination**.
 
 ## Ce fichier est lu par une machine, et voilà ce qu'elle emporte
 
-À chaque spawn, la fleet lit le `CLAUDE.md` du worktree du pod et recopie dans le sien **six
-sections de niveau 2, et six seulement** :
+À chaque spawn, la fleet lit le `CLAUDE.md` du worktree du pod et recopie dans le sien **sept
+sections de niveau 2, et sept seulement** :
 
-`## Stack` · `## Build` · `## Test` · `## Conventions` · `## Commands` · `## Gotchas`
+`## Stack` · `## Build` · `## Test` · `## Doc` · `## Conventions` · `## Commands` · `## Gotchas`
 
 Tout le reste — y compris la section ci-dessus — est ignoré : un titre nommé autrement ne voyage
 pas.
 
-⚠ Le `CLAUDE.md` de la face code, lui, laisse ces six titres FERMÉS exprès : un titre creux ferait
+⚠ Le `CLAUDE.md` de la face code, lui, laisse ces titres FERMÉS exprès : un titre creux ferait
 croire à la fleet qu'elle a du contexte et à l'agent qu'il a une commande. **Ici `## Conventions`
 est rempli, et ce n'est pas la même situation** : ce qui y est écrit n'est pas du contexte
 spécifique au projet qu'il faudrait deviner, c'est une propriété de la face, vraie pour tout projet
-par construction. Les cinq autres titres restent fermés, pour la raison d'origine.
+par construction. Les six autres titres restent fermés, pour la raison d'origine.
+
+Et `## Doc` en particulier n'a rien à faire ici : il désigne la documentation qui **sort**, elle
+vit dans `docs/` sur la face code, et cet arbre-ci ne livre rien.
 
 ## Conventions
 

@@ -166,7 +166,7 @@ defmodule Fleet.SPBuilder do
 
   @doc """
   Composes the pod `CLAUDE.md` and includes selected level-two sections from a
-  repository `CLAUDE.md` when supplied: Stack, Build, Test, Conventions,
+  repository `CLAUDE.md` when supplied: Stack, Build, Test, Doc, Conventions,
   Commands and Gotchas.
   """
   @impl Fleet.SPBuilder.Composer
