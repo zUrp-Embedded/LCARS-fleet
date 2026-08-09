@@ -726,20 +726,44 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    test "an ONBOARDED repo goes through — the gate is the directory, nothing else" do
-      # `ops_root` is a compile-time constant, so the directory is created where the code will
-      # actually look: this pins that the gate reads the REAL path rather than a stub of itself.
-      dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name("lordzurp/lcars-test"))
-      existed? = File.dir?(dir)
-      unless existed?, do: File.mkdir_p!(dir)
-      on_exit(fn -> unless existed?, do: File.rm_rf(dir) end)
+    test "the gate names the REAL ops path — the composition, not a stub of itself" do
+      # THIS TEST USED TO MKDIR INTO `/home/`. It created the project directory under the real
+      # `ops_root` so the positive case could go through, then removed it — on whatever machine ran
+      # `mix test`. Two things were wrong with that, and only the second is about tidiness.
+      #
+      # It was a GREEN WITH TWO DIFFERENT CAUSES. On a box the root exists because the entrypoint
+      # provisioned it; on a workstation it existed because that machine happened to have one from
+      # an older layout. The same line passed for reasons that have nothing to do with each other,
+      # and the day the layout was renamed it failed here for a reason that was not a defect — the
+      # parent simply is not creatable under `/home` without root. Which is how a rename lured a
+      # developer into provisioning the workstation to make a test pass.
+      #
+      # And the runtime NEVER runs on this machine. Nothing here serves a pod, so a test that needs
+      # the real filesystem to be a runtime's filesystem is not measuring the runtime — it is
+      # measuring the history of whoever's disk it landed on. That belongs on the bench.
+      #
+      # What stays here is the half that is genuinely hermetic: the gate's path is COMPOSED from
+      # the layout authority, not hardcoded and not stubbed. `Fleet.Layout` is a compile-time
+      # constant, so asserting the composition proves the same thing the mkdir was reaching for,
+      # without a single write outside the repo.
+      assert Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name("lordzurp/lcars-test")) ==
+               Path.join(Fleet.Layout.ops_root(), "lcars-test")
 
+      assert String.starts_with?(Fleet.Layout.ops_root(), "/home/projects")
+    end
+
+    test "NOT ONBOARDED is the gate's own verdict, and it needs no filesystem to be proven" do
+      # The negative case carries the behaviour: the directory is absent (no test creates it any
+      # more), the gate refuses, and it says what to do about it. What is NOT covered here, and is
+      # named rather than left to be discovered: the POSITIVE case — an existing directory letting
+      # the repo through — is a runtime fact and is proven on the BENCH, where a project is really
+      # onboarded and the poller really dispatches.
       {name, pid} = start_step_poller({:ok, []})
 
       log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
 
-      refute log =~ "NOT ONBOARDED"
-      assert_received {:scoped, :issues, _}
+      assert log =~ "NOT ONBOARDED"
+      refute_received {:scoped, :issues, _}
 
       GenServer.stop(pid)
     end
