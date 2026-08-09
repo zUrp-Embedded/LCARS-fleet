@@ -37,10 +37,19 @@ metadata:
   # Closed knowingly, and the user said so: the exception path goes away with it, and a better
   # answer will be designed if its absence is felt. Losing a lever nobody pulled is cheaper than
   # keeping one anybody can.
+  # The second mount used to name `/home/projects.work` and describe it as "the DOC" — TRUE when it
+  # was written, because a project then had ONE non-code tree holding everything. The three faces
+  # split it, and this mount did not follow: it kept pointing at the tree that became the RECORD
+  # (briefs, verdicts, provenance) while its comment still promised the drafting one. What this
+  # role needs is the upstream of tickets, so the mount follows the intent, not the old path.
+  #
+  # Consequence, deliberate: NO pod reads the ops tree any more. What was asked, what was judged
+  # and what was proven are readable by the runtime and by a human on the box — by nothing else.
+  # The face enum already made that tree unwritable by any producer; this makes it unread too.
   mounts:
     - path: /home/projects        # RO: read any project, act on it only through the runtime verbs
       mode: ro
-    - path: /home/projects.work   # RO: the DOC (moon-shot/beyond), upstream of tickets
+    - path: /home/projects.doc    # RO: the drafting face — backlog, plans, specs, upstream of tickets
       mode: ro
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.

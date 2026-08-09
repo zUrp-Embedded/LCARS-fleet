@@ -155,7 +155,18 @@ defmodule Fleet.Layout do
   @spec work_root() :: Path.t()
   def work_root, do: @work_root
 
-  @doc "DOC root (`/home/projects.doc`) — the product's documentation, authored by a producer."
+  @doc """
+  DRAFTING root (`/home/projects.doc`) — the project's workshop, authored by a producer.
+
+  NOT the product's documentation, and reading it that way inverts the delivery boundary. What
+  lives here is the material a project is built FROM and that never ships with it: backlog, plans,
+  scratchpad, specs in progress. The documentation that DOES ship — user, maintainer, fork — lives
+  in `docs/` on the code face, is written by a producer working there, and is judged like any other
+  deliverable.
+
+  The distinction that decides which is which is the DESTINATION, never the nature of the artefact:
+  prose bound for `docs/` is a deliverable, prose bound for this tree is not.
+  """
   @spec doc_root() :: Path.t()
   def doc_root, do: @doc_root
 

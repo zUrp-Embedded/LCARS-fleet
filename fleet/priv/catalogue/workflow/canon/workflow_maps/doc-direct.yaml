@@ -15,17 +15,24 @@
 #   qu'une partie. Propriété de CE chemin, pas règle globale — un ticket documentaire routé un jour
 #   vers un jury retrouverait sa porte.
 #
-#   PAS de jury (`jury: []`, configuration supportée — précédent : audit-only, c0-poc) : les juges
-#   sont calibrés sur du mécanique (tests, secrets, ancêtre) ; sur de la prose ils n'ont pas de
-#   vérité terrain — trois opinions convergent vers la moyenne, chacune ajoutant la sienne, et le
-#   livrable devient la bouillie des trois. L'arch juge le doc mergé, directement, dans son mount.
+#   PAS de jury (`jury: []`, configuration supportée — précédent : audit-only, c0-poc) : RIEN NE
+#   SORT DU PROJET par ce chemin. Un jury protège un lecteur ABSENT — un tiers, un fork, une
+#   session future qui devra répondre « ce qui a été demandé, jugé, prouvé ». Ici le consommateur
+#   de la revue est celui qui a écrit la demande, présent et en boucle : le mécanisme n'a pas de
+#   lecteur. Et un verdict ne compose que s'il existe une autorité qui CLÔT ; c'est l'arch, dans
+#   son mount, sur le doc mergé. Un jury de plus n'ajouterait pas un verdict mais un avis, sans
+#   arbitre pour les départager.
+#   ⚠ Ce motif est le bon, et il n'est PAS « la prose n'a pas de vérité terrain ». Ce motif-là
+#   était écrit ici et il devient faux au premier ticket de doc LIVRÉE : un guide utilisateur
+#   destiné à `docs/` est de la prose ET il sort — il passe par la face code et se fait juger comme
+#   le reste. Le critère est la destination, jamais la nature de l'artefact.
 #   Le plancher mécanique (identité, secrets, ancêtre, sceau) tient seul, comme sur tout jury vide.
 
 kind: WorkflowMap
 metadata:
   name: doc-direct
-  description: "Ticket documentaire — le scribe rédige sur work/doc, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (pas de vérité terrain mécanique sur la prose)."
-  presentation: "C0→C4 — le chemin DIRECT des livrables documentaires : le scribe rédige sur work/doc (le code en référence lecture seule), merge scellé sans jury, l'architecte relit le doc à jour dans son mount. Se déclare par ticket (genre/doc), jamais par projet — toute carte de criticité garde son pipeline code."
+  description: "Ticket d'atelier — le scribe rédige sur work/doc, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (rien ne sort du projet, donc aucun lecteur absent à protéger)."
+  presentation: "C0→C4 — le chemin DIRECT de l'ATELIER : le scribe rédige sur work/doc (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (genre/doc), jamais par projet — toute carte de criticité garde son pipeline code."
   applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:

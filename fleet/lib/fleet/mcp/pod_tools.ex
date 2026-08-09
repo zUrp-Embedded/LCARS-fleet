@@ -173,12 +173,17 @@ defmodule Fleet.MCP.PodTools do
           "type" => "string",
           "enum" => ["code", Fleet.Labels.genre_doc_token()],
           "description" =>
-            "Genre of the deliverable. \"doc\" = DOCUMENTARY ticket (spec rework, addendum, " <>
-              "design note): routed to the scribe on the DOC face (`work/doc`), direct path — " <>
-              "no scoper (you authored the brief, you judge the return in your own mount), " <>
-              "no PR jury (no mechanical ground truth on prose). \"code\" or absent = the " <>
-              "project's declared card, unchanged. Use doc for every ticket whose deliverable " <>
-              "is a document, never a hack around the code path."
+            "WHERE THE DELIVERABLE LANDS — not what kind of artefact it is. \"doc\" = it stays " <>
+              "in the project's WORKSHOP (`work/doc`): backlog, plans, specs in progress, design " <>
+              "notes — material the project is built FROM, which never ships with it. Routed to " <>
+              "the scribe, direct path: no scoper (you authored the brief, you judge the return " <>
+              "in your own mount), no PR jury (nothing leaves the project, so there is no absent " <>
+              "reader to protect — you close the loop yourself). \"code\" or absent = the " <>
+              "deliverable SHIPS, on the project's declared card, jury included.\n" <>
+              "A ticket whose deliverable is documentation destined for `docs/` — user guide, " <>
+              "maintainer or fork doc — is a \"code\" ticket: it ships, so it is written on the " <>
+              "code face and judged like any other delivery. Prose is not the criterion; " <>
+              "destination is."
         }
       },
       "required" => ["title", "brief"]
