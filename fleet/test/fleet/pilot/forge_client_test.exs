@@ -73,8 +73,24 @@ defmodule Fleet.Pilot.ForgeClientTest do
                        Fleet.Labels.stage_prefix() <> "brief-review",
                        Fleet.Labels.stage_prefix() <> "build",
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
-                       Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
+                       Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged(),
+                       # `retired` was NOT seeded, and it is the twin of `merged`: the stage a
+                       # supersede stamps when a ticket closes WITHOUT delivering. Not a routing
+                       # hole — `add_issue_label/4` creates a label on demand — but a lazily-created
+                       # label is born with the default grey and no description, so the one stage
+                       # that says "nothing was delivered" looked like noise beside five coloured
+                       # ones. This list is the INDEPENDENT statement of what must be seeded, so it
+                       # is the thing that had to move for the seeding to be allowed to.
+                       Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
                      ] ++ Fleet.Labels.visual_types()
+
+    # The one this suite removes to prove the convergent read surfaces an absence. DERIVED for the
+    # same reason as the list above — and it was re-typed twice, fifteen lines under the comment
+    # that says "never re-typed". Measured: renaming `stage_merged` at its source made the reject
+    # match nothing, every label was present, and the test failed on its own literal instead of on
+    # the code. A mirror that breaks for the wrong reason is worse than no mirror: it reports red
+    # while the property it guards is fine.
+    @missing_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
     test "every protocol label present after the sync → :ok" do
       all = Enum.map(@protocol_labels, &%{"name" => &1})
@@ -88,14 +104,14 @@ defmodule Fleet.Pilot.ForgeClientTest do
       # The read never yields stage/merged and the create POST fails — tolerated by
       # create_repo_label, so the label stays absent. The convergent read must surface it.
       five =
-        @protocol_labels |> Enum.reject(&(&1 == "stage/merged")) |> Enum.map(&%{"name" => &1})
+        @protocol_labels |> Enum.reject(&(&1 == @missing_label)) |> Enum.map(&%{"name" => &1})
 
       h = %{
         {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, five},
         {"POST", "/api/v1/repos/fleet/tmpl/labels"} => {500, %{"error" => "boom"}}
       }
 
-      assert {:error, {:labels_missing, ["stage/merged"]}} =
+      assert {:error, {:labels_missing, [@missing_label]}} =
                ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
     end
 

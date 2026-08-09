@@ -1200,20 +1200,42 @@ defmodule Fleet.Pilot.ForgeClient do
   Success is based on complete readback, not create responses. Missing or unreadable labels return
   `:labels_missing` or `:labels_unverifiable`; dynamic workflow-map labels are not seeded.
   """
+  # LES CONSTANTES DE PROTOCOLE VIENNENT DE `Fleet.Labels`, ET C'EST SON CONTRAT, PAS UN STYLE.
+  # Son `@moduledoc` l'écrit : « Re-declaring one as a local `@attr` or literal = silent drift on a
+  # rename. Centralized here, consumed everywhere. » Ce fichier les épelait toutes en littéral —
+  # dans la liste de seeding ET dans les clauses de `label_color/1` / `label_description/1` — donc
+  # un renommage côté Labels laissait ici sept chaînes orphelines, sans un mot. Attributs évalués à
+  # la compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
+  @lbl_in_flight Fleet.Labels.in_flight()
+  @lbl_awaits_arch Fleet.Labels.awaits_arch()
+  @lbl_genre_doc Fleet.Labels.genre_doc()
+  @lbl_stage_review Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review()
+  @lbl_stage_merged Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
+  @lbl_stage_retired Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
+
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       statics =
         [
-          "lcars-in-flight",
-          "lcars-awaits-arch",
+          @lbl_in_flight,
+          @lbl_awaits_arch,
           # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-          "genre/doc",
+          @lbl_genre_doc,
+          # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step
+          # names carried by the workflow MAPS (data), not protocol constants — `Fleet.Labels` says
+          # so itself ("brief-review/build values come from the MAP"). Seeding them here pre-creates
+          # the two canonical steps' labels; a card naming other steps gets them on demand.
           "stage/brief-review",
           "stage/build",
-          "stage/review",
-          "stage/merged"
+          @lbl_stage_review,
+          @lbl_stage_merged,
+          # RETIRED was missing, and its absence was not a routing hole — `add_issue_label/4`
+          # creates a label on demand when the POST does not take. What it cost is the palette: a
+          # lazily-created label is born with the default grey and no description, so the ONE stage
+          # that says "closed without delivering" looked like noise next to five coloured ones.
+          @lbl_stage_retired
         ] ++ Fleet.Labels.visual_types()
 
       Enum.each(statics, &ensure_repo_label(config, repo, &1))
@@ -1317,13 +1339,16 @@ defmodule Fleet.Pilot.ForgeClient do
   # is reserved for labels that MEAN something mechanically; the decorative `type:*` register gets
   # a visible neutral instead of borrowing a protocol tint, so a color rhyme never suggests a
   # kinship the code does not have.
-  defp label_color("lcars-in-flight"), do: "#FF9900"
-  defp label_color("lcars-awaits-arch"), do: "#CC6666"
-  defp label_color("genre/doc"), do: "#33BBCC"
+  defp label_color(@lbl_in_flight), do: "#FF9900"
+  defp label_color(@lbl_awaits_arch), do: "#CC6666"
+  defp label_color(@lbl_genre_doc), do: "#33BBCC"
   defp label_color("stage/brief-review"), do: "#6699CC"
   defp label_color("stage/build"), do: "#FFCC33"
-  defp label_color("stage/review"), do: "#9966CC"
-  defp label_color("stage/merged"), do: "#99CC66"
+  defp label_color(@lbl_stage_review), do: "#9966CC"
+  defp label_color(@lbl_stage_merged), do: "#99CC66"
+  # Deliberately NOT a green: `retired` is the twin of `merged` in position and its opposite in
+  # meaning — a ticket that closed without delivering. A shared hue would read as a delivery.
+  defp label_color(@lbl_stage_retired), do: "#777788"
   defp label_color("wfmap/" <> _map), do: "#CC99CC"
   defp label_color("type:" <> _kind), do: "#999999"
   defp label_color(_), do: "#999999"
@@ -1332,12 +1357,12 @@ defmodule Fleet.Pilot.ForgeClient do
   # parsed as-is by the code), the description is the ONLY place where we explain in plain terms to a human
   # looking at the forge without the code in front of them. `wfmap/<map>` and `stage/<step>` have
   # dynamic values (map name / step name varying by workflow_map) → match on the PREFIX, not the
-  # exact value (unlike `label_color`, which differentiates ONLY the 4 known stages).
-  defp label_description("lcars-in-flight"),
+  # exact value (unlike `label_color`, which differentiates each stage it knows by name).
+  defp label_description(@lbl_in_flight),
     do:
       "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
 
-  defp label_description("lcars-awaits-arch"),
+  defp label_description(@lbl_awaits_arch),
     do:
       "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
 
@@ -1363,7 +1388,7 @@ defmodule Fleet.Pilot.ForgeClient do
   # chantier des trois faces : il disait « la voie ops (branche work/ops) » alors que le livrable
   # documentaire part sur `work/doc`. `work/ops` est le registre que le runtime écrit, qu'aucun
   # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
-  defp label_description("genre/doc"),
+  defp label_description(@lbl_genre_doc),
     do:
       "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche work/doc, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
 
