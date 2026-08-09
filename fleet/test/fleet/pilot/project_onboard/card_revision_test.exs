@@ -144,6 +144,83 @@ defmodule Fleet.Pilot.ProjectOnboard.CardRevisionTest do
     {:ok, o: Keyword.put(o, :base_url_root, Path.join(tmp, "forge"))}
   end
 
+  test "a revision CARRIES FORWARD what it does not restate — it never erases the human's framing",
+       %{
+         o: o
+       } do
+    # `compose/1` builds the declaration from OPTS ALONE and never reads the file it replaces. So a
+    # revision naming only the card DELETED `level`, `nature` and `max_fan` — the whole record of
+    # the framing interview, gone, with `declared_by` now naming the reviser. Measured before the
+    # fix on this exact fixture: C3 / "outil interne" / max_fan 4 in, nothing but the card out.
+    #
+    # The geste that pointed here asked for MONOTONICITY (forbid C3 -> C0). That is the wrong wall:
+    # the code says out loud, at `jury_delta/3`, that a downgrade is the human's to make and must
+    # only be LOUD. What was happening is not a downgrade — it is an erasure nobody declared.
+    proj = Path.join([o[:projects_root], "tetris"])
+
+    :ok =
+      Fleet.Pilot.ProjectIntensity.write(proj,
+        workflow_map: "c0-poc",
+        intensity_level: "C3",
+        intensity_nature: "outil interne",
+        intensity_justification: "entretien de cadrage",
+        max_fan: 4,
+        onboarded_by: "human"
+      )
+
+    {_, 0} =
+      System.cmd("git", ["-C", proj, "commit", "-aqm", "seed intensity"], stderr_to_stdout: true)
+
+    {_, 0} =
+      System.cmd("git", ["-C", proj, "push", "-q", "origin", "main"], stderr_to_stdout: true)
+
+    assert {:ok, %{outcome: :revised}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "c1-light")
+             )
+
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+
+    # What the revision DID say moves.
+    assert landed["pipeline_default"] == "c1-light"
+    assert landed["justification"] == "le poc est devenu serieux"
+    # What it did NOT say survives — three fields, none of them the reviser's to drop.
+    assert landed["level"] == "C3"
+    assert landed["nature"] == "outil interne"
+    assert landed["max_fan"] == 4
+  end
+
+  test "a revision that DOES restate the level overrides it — carrying forward is not freezing",
+       %{
+         o: o
+       } do
+    proj = Path.join([o[:projects_root], "tetris"])
+
+    :ok =
+      Fleet.Pilot.ProjectIntensity.write(proj,
+        workflow_map: "c0-poc",
+        intensity_level: "C3",
+        intensity_justification: "entretien de cadrage",
+        onboarded_by: "human"
+      )
+
+    {_, 0} =
+      System.cmd("git", ["-C", proj, "commit", "-aqm", "seed intensity"], stderr_to_stdout: true)
+
+    {_, 0} =
+      System.cmd("git", ["-C", proj, "push", "-q", "origin", "main"], stderr_to_stdout: true)
+
+    assert {:ok, %{outcome: :revised}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "c1-light", intensity_level: "C1")
+             )
+
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+    assert landed["level"] == "C1"
+  end
+
   test "a revision that REDUCES the jury names it — in the commit, the log and the payload", %{
     o: o
   } do

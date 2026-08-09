@@ -66,11 +66,21 @@ defmodule Fleet.Pilot.ListProjectsTest do
 
   describe "the card is reported as DECLARED or not — never as its fallback" do
     test "a declared card carries its level and who declared it", %{tmp_dir: tmp} do
-      project(
-        tmp,
-        "alpha",
-        ~s({"pipeline_default":"standard-qa","intensity_level":"C2","declared_by":"starfleet"})
-      )
+      # THE FIXTURE IS WRITTEN BY THE WRITER, and that is the point of this test as much as the
+      # assertions are. It used to be a hand-typed JSON carrying `"intensity_level"` — a shape
+      # `ProjectIntensity.compose/1` has never produced (it writes `"level"`). So the reader was
+      # pinned to a file only this test ever created, `p["level"]` was nil on every real project,
+      # and the suite was green about it. A fixture hand-shaped like the reader proves the reader
+      # agrees with itself.
+      dir = project(tmp, "alpha")
+
+      :ok =
+        Fleet.Pilot.ProjectIntensity.write(dir,
+          workflow_map: "standard-qa",
+          intensity_level: "C2",
+          intensity_justification: "cadrage",
+          onboarded_by: "starfleet"
+        )
 
       assert {:ok, [p]} = list(tmp)
       assert p["card"] == "standard-qa"
