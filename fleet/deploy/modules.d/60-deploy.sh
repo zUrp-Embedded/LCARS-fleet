@@ -37,8 +37,8 @@ mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
 }
 
-release_present() { [[ -x "$PREFIX_REL/bin/fleet_umbrella" ]]; }
-PREFIX_REL="$PROV_PREFIX/rel/fleet_umbrella"
+release_present() { [[ -x "$PREFIX_REL/bin/lcars_fleet" ]]; }
+PREFIX_REL="$PROV_PREFIX/rel/lcars_fleet"
 
 # B2 : le vrai chemin est DANS la release (idiome fleet_v2:316 — lib/lcars_fleet-*/priv/api/),
 # et machine vierge = réponse VIDE, jamais un abort (le sed nu sur fichier absent tuait l'apply

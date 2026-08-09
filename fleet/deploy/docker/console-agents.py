@@ -16,7 +16,7 @@
 #    carte en Python serait creer une seconde autorite de format ; c'est la classe de defaut qui
 #    a tue fleet_v2 hier (un chemin reconstruit en shell, mort au demenagement). Le bouton
 #    « Valider » appelle `Fleet.Workflow.Loader.load!(name, workflow_maps_root: <tmpdir>)` par
-#    `bin/fleet_umbrella eval` : meme YAML, meme schema v2.5, meme GraphValidator que le boot —
+#    `bin/lcars_fleet eval` : meme YAML, meme schema v2.5, meme GraphValidator que le boot —
 #    l'erreur affichee est celle que la fleet aurait crachee.
 #
 # 2. LES CHEMINS SE DEMANDENT AU BEAM. `Fleet.Catalogue` est l'unique autorite de layout du
@@ -60,7 +60,7 @@ CARD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # ─── La porte eval — le seul chemin vers le parseur et les chemins du catalogue ─────────────────
 
 def release_bin():
-    hits = globmod.glob("/local/LCARS_v2/rel/fleet_umbrella/bin/fleet_umbrella")
+    hits = globmod.glob("/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet")
     return hits[0] if hits else None
 
 def run_eval(expr, timeout=60):

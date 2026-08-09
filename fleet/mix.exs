@@ -236,13 +236,17 @@ defmodule LcarsFleet.MixProject do
     ]
   end
 
-  # Mix release (per-human launch via bin/fleet_v2). The NAME `fleet_umbrella` is
-  # KEPT (D-08): bin/fleet_v2 points at `rel/fleet_umbrella/bin/fleet_umbrella`
-  # — renaming it would break the launcher for a cosmetic gain. A single :permanent app;
-  # the domain boot order lives in Fleet.Application (F8 scar there).
+  # Mix release (per-human launch via bin/fleet_v2). The release is named after the app it
+  # contains, `lcars_fleet`, and that is not cosmetic: it used to be `fleet_umbrella`, a name that
+  # stopped being true at the 2026-07-12 collapse and then described the build to every reader for
+  # a month. D-08 had kept it on the ground that renaming "would break the launcher for a cosmetic
+  # gain" — a bad trade once the reader is an agent, for which a name that is not instantly true is
+  # not neutral, it is a wrong model carried into everything it does next. The launcher was three
+  # paths.
+  # A single :permanent app; the domain boot order lives in Fleet.Application (F8 scar there).
   defp releases do
     [
-      fleet_umbrella: [
+      lcars_fleet: [
         include_executables_for: [:unix],
         applications: [lcars_fleet: :permanent],
         steps: [&contracts_gate/1, :assemble, &write_build_info/1, :tar]

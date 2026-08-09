@@ -1,7 +1,7 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
 **Date**: 2026-05-10
-**Last revised**: 2026-08-06
+**Last revised**: 2026-08-09
 **Status**: human-launched model (systemd removed 2026-06-16)
 **Referenced by**: `design-notes/promoted/lcars-fleet_service.md`, `STATUS-CHANTIERS.md`
 
@@ -51,7 +51,7 @@ Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c
 
 ```bash
 MIX_ENV=prod mix release --overwrite
-sudo rsync -a --delete _build/prod/rel/fleet_umbrella/ /local/LCARS_v2/rel/fleet_umbrella/
+sudo rsync -a --delete _build/prod/rel/lcars_fleet/ /local/LCARS_v2/rel/lcars_fleet/
 # la liste des fichiers bin/ vit dans etc/install.manifest (données) — plus jamais recopiée ici :
 sudo cp $(awk 'NF && $1 !~ /^#/ { print "bin/" $1 }' etc/install.manifest) /local/LCARS_v2/bin/
 sudo chgrp -R fleet /local/LCARS_v2 && sudo chmod g+rx /local/LCARS_v2/bin/*

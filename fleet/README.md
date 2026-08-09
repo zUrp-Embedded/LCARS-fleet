@@ -162,7 +162,7 @@ mix deps.get
 mix compile --warnings-as-errors
 mix test
 
-MIX_ENV=prod mix release        # → _build/prod/rel/fleet_umbrella (self-contained, ERTS bundlé)
+MIX_ENV=prod mix release        # → _build/prod/rel/lcars_fleet (self-contained, ERTS bundlé)
 ```
 
 Le runtime est lancé **par un humain** via `bin/fleet_v2` (pas de `systemd User=lcars` : l'humain

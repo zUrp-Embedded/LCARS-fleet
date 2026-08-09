@@ -11,7 +11,7 @@
 # « toolchain posée » n'a pas à être vrai là où on ne buildera jamais ; la vérité docker de ce
 # module, c'est la release présente — sondée par 60-deploy check.)
 #
-# La release fleet_umbrella est self-contained (ERTS bundlé) : la toolchain ne sert qu'à BÂTIR
+# La release lcars_fleet est self-contained (ERTS bundlé) : la toolchain ne sert qu'à BÂTIR
 # (etc/install.sh → mix release), jamais au run. En Docker, elle vit dans le stage builder de
 # l'image (même pin), absente du stage runtime — d'où SUBSTRATE: wsl linux.
 #

@@ -318,7 +318,7 @@ start_fake_beam() {
 # de travail sans reponse de git n'a PAS ete mesure. Les confondre ferait lire « pas de branche » la
 # ou il faut lire « je n'ai pas pu regarder ».
 @test "release sans ref → le status DIT qu'il n'y en a pas, il n'imprime pas un champ vide" {
-  local rel="$TMP_BASE/rt/rel/fleet_umbrella/lib/lcars_fleet-1.0.0/priv/api"
+  local rel="$TMP_BASE/rt/rel/lcars_fleet/lib/lcars_fleet-1.0.0/priv/api"
   mkdir -p "$rel"
   printf 'sha=abc1234\ndirty=false\nref=\n' > "$rel/build_info.txt"
 
@@ -330,7 +330,7 @@ start_fake_beam() {
 }
 
 @test "release AVEC ref → la valeur mesuree passe telle quelle (le defaut ne l'ecrase pas)" {
-  local rel="$TMP_BASE/rt/rel/fleet_umbrella/lib/lcars_fleet-1.0.0/priv/api"
+  local rel="$TMP_BASE/rt/rel/lcars_fleet/lib/lcars_fleet-1.0.0/priv/api"
   mkdir -p "$rel"
   printf 'sha=abc1234\ndirty=true\nref=main\n' > "$rel/build_info.txt"
 

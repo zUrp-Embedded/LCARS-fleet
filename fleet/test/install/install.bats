@@ -18,24 +18,24 @@ setup() {
 teardown() { rm -rf "$TMP"; }
 
 @test "atomic_swap_dir: replaces the live tree and keeps the previous as .prev" {
-  mkdir -p "$TMP/src/bin"; printf '#!/bin/sh\nnew\n' > "$TMP/src/bin/fleet_umbrella"; chmod +x "$TMP/src/bin/fleet_umbrella"
-  mkdir -p "$TMP/dst/bin"; printf '#!/bin/sh\nold\n' > "$TMP/dst/bin/fleet_umbrella"; chmod +x "$TMP/dst/bin/fleet_umbrella"
+  mkdir -p "$TMP/src/bin"; printf '#!/bin/sh\nnew\n' > "$TMP/src/bin/lcars_fleet"; chmod +x "$TMP/src/bin/lcars_fleet"
+  mkdir -p "$TMP/dst/bin"; printf '#!/bin/sh\nold\n' > "$TMP/dst/bin/lcars_fleet"; chmod +x "$TMP/dst/bin/lcars_fleet"
 
-  run atomic_swap_dir "$TMP/src" "$TMP/dst" "bin/fleet_umbrella"
+  run atomic_swap_dir "$TMP/src" "$TMP/dst" "bin/lcars_fleet"
   [ "$status" -eq 0 ]
-  grep -q new "$TMP/dst/bin/fleet_umbrella"
-  grep -q old "$TMP/dst.prev/bin/fleet_umbrella"
+  grep -q new "$TMP/dst/bin/lcars_fleet"
+  grep -q old "$TMP/dst.prev/bin/lcars_fleet"
 }
 
 @test "atomic_swap_dir: a build missing its probe FAILS and leaves the live tree untouched" {
-  mkdir -p "$TMP/src/bin"    # no fleet_umbrella probe inside
-  mkdir -p "$TMP/dst/bin"; printf '#!/bin/sh\nold\n' > "$TMP/dst/bin/fleet_umbrella"; chmod +x "$TMP/dst/bin/fleet_umbrella"
+  mkdir -p "$TMP/src/bin"    # no lcars_fleet probe inside
+  mkdir -p "$TMP/dst/bin"; printf '#!/bin/sh\nold\n' > "$TMP/dst/bin/lcars_fleet"; chmod +x "$TMP/dst/bin/lcars_fleet"
 
-  run atomic_swap_dir "$TMP/src" "$TMP/dst" "bin/fleet_umbrella"
+  run atomic_swap_dir "$TMP/src" "$TMP/dst" "bin/lcars_fleet"
   [ "$status" -ne 0 ]
   [[ "$output" == *"build stage invalide"* ]]
   # The live install survived a bad build — the exact loss the old rm -rf caused.
-  grep -q old "$TMP/dst/bin/fleet_umbrella"
+  grep -q old "$TMP/dst/bin/lcars_fleet"
   [ ! -e "$TMP/dst.staging.$$" ]
 }
 

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-08-05 (règle de langue : arbitrage user — elle garde son pourquoi, perd son caractère de porte ; l'inventaire et l'instrument qui le produisait sont corrigés, cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
+**Dernière révision** : 2026-08-09 (règle de langue : arbitrage user — elle garde son pourquoi, perd son caractère de porte ; l'inventaire et l'instrument qui le produisait sont corrigés, cf. Code conventions ; migration single-app + boundary du 2026-07-12 toujours en vigueur)
 **Statut** : guide runtime v2.
 **Référencé par** : —
 
@@ -21,10 +21,10 @@ mix test                            # suite complète (plus d'umbrella : un seul
 mix test test/fleet/api/rest_test.exs:42    # un seul test (n° de ligne) — le footgun `mix test apps/…` est MORT avec apps/
 
 mix gate                            # gate complet — la CHAÎNE fait autorité dans `mix.exs` (alias `gate:`), pas ici
-MIX_ENV=prod mix release            # _build/prod/rel/fleet_umbrella (self-contained, ERTS bundlé)
+MIX_ENV=prod mix release            # _build/prod/rel/lcars_fleet (self-contained, ERTS bundlé)
 ```
 
-Elixir `~> 1.18`. Le release s'appelle **`fleet_umbrella`** (nom CONSERVÉ au collapse : `bin/fleet_v2` pointe dessus — historique, pas descriptif). La procédure deploy/run (lancement `bin/fleet_v2`, env file, install des launchers) est dans `etc/README.md` — ne pas la re-dériver.
+Elixir `~> 1.18`. Le release s'appelle **`lcars_fleet`**, comme l'app qu'il contient. Il s'appelait `fleet_umbrella` — nom devenu faux au collapse du 2026-07-12 et conservé un mois au motif que le renommer « casserait le launcher pour un gain cosmétique » : mauvais arbitrage dès lors que le lecteur est un agent, pour qui un nom qui n'est pas vrai n'est pas neutre mais un modèle faux emporté dans tout ce qu'il fait ensuite. La procédure deploy/run (lancement `bin/fleet_v2`, env file, install des launchers) est dans `etc/README.md` — ne pas la re-dériver.
 
 ## Architecture
 

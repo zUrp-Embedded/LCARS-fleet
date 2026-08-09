@@ -13,7 +13,7 @@
 # TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
 #   LCARS_INSTALL_PREFIX    where everything is installed (default /local/LCARS_v2)
 #   LCARS_INSTALL_LINK_DIR  where the PATH symlinks go (default /usr/local/bin)
-# Deliberately hardcoded: the `fleet` group and the `fleet_umbrella` release name (kept at the
+# Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
 # app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
 # etc/install.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
 # content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
@@ -171,16 +171,16 @@ require_prefix_writable "$PREFIX"
 #        source tree (build_release: gate → release). A red gate or a failed build dies here.
 say "build release prod (gate complet puis MIX_ENV=prod mix release)…"
 build_release "$RUNTIME_DIR" || die "gate rouge ou build KO — la release n'est PAS posee (arbre source non atteste)"
-REL_SRC="$RUNTIME_DIR/_build/prod/rel/fleet_umbrella"
-[[ -x "$REL_SRC/bin/fleet_umbrella" ]] || die "release introuvable une fois le build fini ($REL_SRC)"
+REL_SRC="$RUNTIME_DIR/_build/prod/rel/lcars_fleet"
+[[ -x "$REL_SRC/bin/lcars_fleet" ]] || die "release introuvable une fois le build fini ($REL_SRC)"
 
 # --- 2. $PREFIX layout (idempotent) ----------------------------------------------------------------
 say "pose sous $PREFIX…"
 mkdir -p "$PREFIX/bin" "$PREFIX/etc" "$PREFIX/rel"
 
-# The release lands under `$PREFIX/rel/fleet_umbrella/` via a staged, verified, atomic swap — the live
+# The release lands under `$PREFIX/rel/lcars_fleet/` via a staged, verified, atomic swap — the live
 # tree is never destroyed before the new one is proven good, and the previous stays as `.prev`.
-atomic_swap_dir "$REL_SRC" "$PREFIX/rel/fleet_umbrella" "bin/fleet_umbrella"
+atomic_swap_dir "$REL_SRC" "$PREFIX/rel/lcars_fleet" "bin/lcars_fleet"
 
 # NON-BEAM files (outside the release): the manifest says WHAT ships and with which mode — this
 # loop is blind to content. Per-file chmod, hard failure (the old blanket `chmod ... || true`
@@ -244,5 +244,5 @@ for i in "${!MF_FILES[@]}"; do
 done
 [[ "$link_fail" -eq 0 ]] && say "symlinks $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrees « link » du manifest)"
 
-say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/fleet_umbrella/releases/start_erl.data" 2>/dev/null || echo '?'))."
+say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
 say "Lancer : fleet_v2 start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."

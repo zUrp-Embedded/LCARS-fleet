@@ -31,9 +31,9 @@ EOF
   export PROVISION_MODULE=60-deploy
 
   # a "deployed" prefix: release marker + every manifest entry posed correctly
-  mkdir -p "$PROV_PREFIX/rel/fleet_umbrella/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
-  printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/fleet_umbrella/bin/fleet_umbrella"
-  chmod +x "$PROV_PREFIX/rel/fleet_umbrella/bin/fleet_umbrella"
+  mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
+  printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  chmod +x "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
   printf 'x\n' > "$PROV_PREFIX/bin/fleet_v2";        chmod +x "$PROV_PREFIX/bin/fleet_v2"
   printf 'x\n' > "$PROV_PREFIX/bin/bwrap_launch.sh"; chmod +x "$PROV_PREFIX/bin/bwrap_launch.sh"
   printf 'x\n' > "$PROV_PREFIX/bin/bridge.py"

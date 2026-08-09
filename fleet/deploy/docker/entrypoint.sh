@@ -37,7 +37,7 @@ if [[ "${1:-}" == "verify" ]]; then
   # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
   exec setpriv --reuid 65534 --regid 2000 --clear-groups \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    /local/LCARS_v2/rel/fleet_umbrella/bin/fleet_umbrella eval \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
 fi
 

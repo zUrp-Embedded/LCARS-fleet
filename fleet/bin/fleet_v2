@@ -27,7 +27,7 @@ RUNTIME_DIR="$(dirname "$BIN_DIR")"
 
 # This script must NEVER depend on the caller's CWD: every path it writes is already absolute (under
 # $HOME), but the PROCESS itself must also start from a directory it is guaranteed to be able to read.
-# `cmd_stop` spins up a TEMPORARY Erlang node (`fleet_umbrella rpc`, not embedded) whose code path
+# `cmd_stop` spins up a TEMPORARY Erlang node (`lcars_fleet rpc`, not embedded) whose code path
 # search includes `.` to load the compiler modules the RPC eval needs — from an unreadable CWD that is
 # a burst of `eacces` from code_server. `cd` BEFORE any relative computation (SELF/BIN_DIR/RUNTIME_DIR
 # are already resolved to absolute above, so they survive this `cd`).
@@ -199,7 +199,7 @@ setup_env() {
   export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
 
   # Erlang distribution (named node, RPC debug) is handled per MODE in cmd_start, under a name DERIVED
-  # PER-HUMAN. The release distributes `-sname fleet_umbrella` by DEFAULT — a FIXED shared name, so two
+  # PER-HUMAN. The release distributes `-sname lcars_fleet` by DEFAULT — a FIXED shared name, so two
   # humans land on the same node in the shared epmd and the second BEAM CRASHES. cmd_start therefore
   # forces either a per-human node (`fleet_<user>`, when LCARS_FLEET_V2_ERL_NODE is set = debug) or
   # `RELEASE_DISTRIBUTION=none` (the normal case: no epmd, no collision). Per-human, like the ports.
@@ -325,22 +325,22 @@ cmd_start() {
   local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
 
   # Mode follows the deployment (derived from where this launcher sits — nothing hardcoded):
-  #   - INSTALL (/local/LCARS_v2): the self-contained RELEASE (`rel/.../bin/fleet_umbrella start`) runs
+  #   - INSTALL (/local/LCARS_v2): the self-contained RELEASE (`rel/.../bin/lcars_fleet start`) runs
   #     WITHOUT the repo (bundled priv, embedded ERTS).
   #   - SOURCE (dev): `mix run --no-halt` from the repo (fast iteration). The catalogue is the live
   #     source tree either way — `_build/<env>/lib/lcars_fleet/priv` is a symlink to `priv/`.
   # Erlang distribution is PER-HUMAN (cf. setup_env): node `fleet_<user>`, never the shared fixed
-  # `fleet_umbrella`. ON only when LCARS_FLEET_V2_ERL_NODE is set (RPC debug); OFF otherwise (no epmd).
+  # `lcars_fleet`. ON only when LCARS_FLEET_V2_ERL_NODE is set (RPC debug); OFF otherwise (no epmd).
   local erl_node="$ERL_NODE" erl_cookie="$ERL_COOKIE" dist_on="$DIST_ON"
 
-  local rel_bin="$RUNTIME_DIR/rel/fleet_umbrella/bin/fleet_umbrella"
+  local rel_bin="$RUNTIME_DIR/rel/lcars_fleet/bin/lcars_fleet"
   local mode launch_cmd
   if [[ -x "$rel_bin" ]]; then
     mode="release"
     # The install is RO (system-owned) → the BEAM writes its tmp in the human's home, not the install.
     export RELEASE_TMP="${RELEASE_TMP:-$HOME/.lcars/tmp}"
     mkdir -p "$RELEASE_TMP"
-    # Override the `-sname fleet_umbrella` default (shared → multi-human collision).
+    # Override the `-sname lcars_fleet` default (shared → multi-human collision).
     if [[ -n "$dist_on" ]]; then
       export RELEASE_DISTRIBUTION=name RELEASE_NODE="$erl_node" RELEASE_COOKIE="$erl_cookie"
     else
@@ -472,7 +472,7 @@ cmd_status() {
 # deployment, like cmd_start: in RELEASE the SHA is embedded in the priv at build time (the repo is not
 # there), in SOURCE/dev we ask git LIVE.
 cmd_version() {
-  local rel_root="$RUNTIME_DIR/rel/fleet_umbrella"
+  local rel_root="$RUNTIME_DIR/rel/lcars_fleet"
   local build_file
   # Single app post-collapse: the priv lives under `lcars_fleet-<vsn>`, NAMESPACED by domain
   # (`priv/api/`, no more per-app umbrella priv). THIS path MUST follow the BEAM writer/reader

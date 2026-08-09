@@ -22,7 +22,7 @@ defmodule Fleet.Application.CatalogueVerify do
   The RELEASE door: run `verify/1`, print the same report the `mix` task prints, and halt with the
   boot's verdict (0 pass, 1 refused). Called from the image's entrypoint via a release eval —
 
-      bin/fleet_umbrella eval 'Fleet.Application.CatalogueVerify.eval_main("/cat")'
+      bin/lcars_fleet eval 'Fleet.Application.CatalogueVerify.eval_main("/cat")'
 
   so the entrypoint's `verify <root>` is a one-liner and the exit code is the whole contract on the
   shell side. Uses `IO.puts` + `System.halt/1` because a release has no `Mix.shell` — the ONLY
