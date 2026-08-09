@@ -269,6 +269,19 @@ EOF
   [[ "$output" == *'"remoteDialogSeen": true'* ]]
 }
 
+@test "the marketplace auto-install is gated in .claude.json — where it actually bites" {
+  # Every spawn cloned Anthropic's plugin marketplace from GitHub to install zero plugin: 7.2 MB
+  # and a network fetch at boot, inside a sandbox whose whole point is a projected world. The
+  # settings file declared `extensions.marketplace.autoInstall: false` and it did NOTHING —
+  # measured on a bench 2026-08-09 (CLI 2.1.221), both directions: two pods with that key had
+  # plugins/ at 7.2 MB, a pod with these two config keys had no plugins/ at all.
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  run cat "$POD_DIR/.claude.json"
+  [[ "$output" == *'"officialMarketplaceAutoInstalled": true'* ]]
+  [[ "$output" == *'"officialMarketplaceAutoInstallAttempted": true'* ]]
+}
+
 @test "flags: first creation → --session-id <UUID> (not --resume)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--session-id test-session-uuid"* ]]

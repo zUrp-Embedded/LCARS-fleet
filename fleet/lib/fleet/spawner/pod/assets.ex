@@ -41,17 +41,23 @@ defmodule Fleet.Spawner.Pod.Assets do
   `autoMemoryEnabled: false` (F-POD-AUTOMEM, moved from the launcher): the pod's claude
   auto-memory is siloed, useless to the fleet, and doctrine pollution (BUG-3) — off for every
   permission mode.
-  `extensions.marketplace.autoInstall: false` — left on, every spawn clones Anthropic's plugin
-  marketplace from GitHub (~40 plugin trees) to install zero plugin: the fleet installs none. A
-  pod runs inside a projected world and must not fetch code from the internet at boot.
+  ⚠ `extensions.marketplace.autoInstall: false` USED TO BE HERE, AND IT DID NOTHING. The problem is
+  real — left on, every spawn clones Anthropic's plugin marketplace from GitHub to install zero
+  plugin, and a pod running inside a projected world must not fetch code from the internet at boot
+  — but this was not the lever. Measured on a bench 2026-08-09, CLI 2.1.221, both directions: two
+  pods carrying this key installed 7.2 MB of plugins anyway; a pod whose `.claude.json` carried
+  `officialMarketplaceAutoInstalled` had no `plugins/` at all. The vendor gates this on its own
+  config keys, and `--settings` is documented as ADDITIONAL settings, not an overriding tier.
+  The effective lever now lives where it works, in `claude_launch.sh`'s `.claude.json`, with the
+  measurement written next to it. A setting that declares an intention it cannot enforce is worse
+  than no setting: it tells every reader the matter is handled.
   """
   @spec pod_settings_json(Fleet.CapProfile.t()) :: String.t()
   def pod_settings_json(%Fleet.CapProfile{} = cap_profile) do
     base = %{
       "hasCompletedOnboarding" => true,
       "hasAcknowledgedCostThreshold" => true,
-      "autoMemoryEnabled" => false,
-      "extensions" => %{"marketplace" => %{"autoInstall" => false}}
+      "autoMemoryEnabled" => false
     }
 
     settings =

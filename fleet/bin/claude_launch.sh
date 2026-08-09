@@ -208,8 +208,23 @@ RC_STARTUP=$([[ "$REMOTE_CONTROL" != "false" ]] && echo true || echo false)
 # clobber it). remoteControlAtStartup is conditional (see above); hasUsedRemoteControl/remoteDialogSeen stay
 # true: they PRE-ACCEPT the RC dialog (which would otherwise block the interactive boot again) WITHOUT
 # forcing RC on. `projects` is the agent's real cwd ($POD_CWD), not $POD_DIR.
+#
+# THE MARKETPLACE GATE IS HERE, AND NOT WHERE IT WAS DECLARED. Every spawn cloned Anthropic's plugin
+# marketplace from GitHub to install zero plugin — 7.2 MB and a network fetch at boot, inside a
+# sandbox whose whole point is a projected world. The settings file carries
+# `extensions.marketplace.autoInstall: false` and `--settings` DOES pass it; the install happened
+# anyway. Measured on a bench 2026-08-09, both directions, CLI 2.1.221:
+#   - two pods with the settings key and WITHOUT these two -> .claude = 7.9 MB, plugins/ = 7.2 MB;
+#   - one pod with the settings key AND these two          -> .claude = 604 KB, plugins/ ABSENT.
+# So the vendor gates this on its own config keys, and the settings key does nothing on this
+# version. `--settings` is documented as ADDITIONAL settings, not a tier that overrides.
+#
+# These are vendor-INTERNAL keys, so they are an anchor to re-measure, not a contract: the day the
+# CLI stops reading them the plugins come back and nothing here will say so. The measurement above
+# is what a future reader re-runs — `du -sh <pod_dir>/.claude/plugins` on a fresh pod.
 cat > "$POD_DIR/.claude.json" <<JSONEOF
 { "hasCompletedOnboarding": true, "lastOnboardingVersion": "${VER:-2.1.150}", "migrationVersion": 13,
+  "officialMarketplaceAutoInstalled": true, "officialMarketplaceAutoInstallAttempted": true,
   "remoteControlAtStartup": $RC_STARTUP, "hasUsedRemoteControl": true, "remoteDialogSeen": true,
   "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF

@@ -23,7 +23,12 @@ defmodule Fleet.Spawner.Pod.AssetsSettingsTest do
 
     assert settings["autoMemoryEnabled"] == false
     assert settings["hasCompletedOnboarding"] == true
-    assert settings["extensions"]["marketplace"]["autoInstall"] == false
+
+    # The marketplace key is NOT here, and its absence is the finding. It shipped in this file for
+    # a chantier and did nothing: measured on a bench 2026-08-09, two pods carrying it installed
+    # 7.2 MB of plugins anyway. The lever that works is in claude_launch.sh's .claude.json, and
+    # this assertion holds the settings file to what it can actually enforce.
+    refute Map.has_key?(settings, "extensions")
     # The kill-yolo policy holds at the owner: a default pod ships NO pre-acceptance.
     refute Map.has_key?(settings, "skipDangerousModePermissionPrompt")
   end
