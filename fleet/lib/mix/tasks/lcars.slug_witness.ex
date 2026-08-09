@@ -41,7 +41,14 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
 
     witnesses =
       [root]
-      |> Enum.flat_map(&Path.wildcard(Path.join([&1, "**", ".claude", "projects", "*"])))
+      # `match_dot: true` OU AUCUN TEMOIN, JAMAIS. Sans lui, `Path.wildcard/2` refuse de traverser
+      # un segment commencant par un point — et le chemin cherche en contient un (`.claude`). Mesure
+      # sur un vrai arbre : 0 avec le defaut, 8 avec. Cette tache a donc rendu un VERT SUR RIEN a
+      # chaque execution depuis qu'elle existe, en disant « rien ne contredit le miroir » — la
+      # promesse creuse contre laquelle son propre @moduledoc met en garde.
+      |> Enum.flat_map(
+        &Path.wildcard(Path.join([&1, "**", ".claude", "projects", "*"]), match_dot: true)
+      )
       |> Enum.filter(&File.dir?/1)
       |> Enum.map(&Path.basename/1)
       |> Enum.uniq()
@@ -62,11 +69,26 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
         "— dont #{exercising} exercant un cas DISCRIMINANT (`_`, `.`, ou `-` consecutifs)"
     )
 
-    if exercising == 0 and disputed == [] do
-      Mix.shell().info(
-        "slug_witness: aucun temoin ne DISTINGUE l'algo gele d'une slugification naive. " <>
-          "Vert = « rien ne contredit », jamais « l'algo est confirme »."
-      )
+    # ZERO TEMOIN N'EST PAS UN VERDICT, et c'etait le mode de defaillance de cette tache. Un compte
+    # nul se lisait dans la meme phrase que « rien ne contredit » — donc comme une mesure rassurante,
+    # alors que rien n'avait ete regarde. Les deux etats se disent maintenant separement : « je n'ai
+    # rien mesure » et « j'ai mesure, et ca ne discrimine pas » sont des reponses differentes.
+    cond do
+      agreed == [] and disputed == [] ->
+        Mix.shell().error(
+          "slug_witness: AUCUN TEMOIN sous #{root} — cette execution ne mesure RIEN. Le miroir " <>
+            "n'est ni confirme ni contredit. Pointe --root sur un arbre ou des pods ont tourne " <>
+            "(le home d'un humain de fleet, ou les pod_dir rapatries d'une boite)."
+        )
+
+      exercising == 0 and disputed == [] ->
+        Mix.shell().info(
+          "slug_witness: aucun temoin ne DISTINGUE l'algo gele d'une slugification naive. " <>
+            "Vert = « rien ne contredit », jamais « l'algo est confirme »."
+        )
+
+      true ->
+        :ok
     end
 
     if disputed != [], do: exit({:shutdown, 1})
