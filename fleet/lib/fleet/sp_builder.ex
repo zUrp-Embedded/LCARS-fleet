@@ -268,7 +268,7 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_modop_fragments_from_disk(modop_bundles) do
-    roots = Fleet.Catalogue.search(modop_root(), Fleet.Catalogue.rel(:modops))
+    roots = Fleet.Catalogue.search(:modops)
 
     result =
       Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
@@ -323,19 +323,14 @@ defmodule Fleet.SPBuilder do
         Map.fetch(templates, name)
 
       nil ->
-        subagent_template_root()
-        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:subagent_templates), "subagent-#{name}.md")
+        :subagent_templates
+        |> Fleet.Catalogue.find("subagent-#{name}.md")
         |> File.read()
         |> case do
           {:ok, content} -> {:ok, content}
           {:error, _} -> :error
         end
     end
-  end
-
-  defp subagent_template_root do
-    Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
-      Fleet.Catalogue.subagent_templates_root()
   end
 
   defp modop_fragments_concat([]), do: ""
@@ -386,14 +381,6 @@ defmodule Fleet.SPBuilder do
   """
   @spec sp_draft_path(String.t()) :: Path.t()
   def sp_draft_path(role) when is_binary(role) do
-    Fleet.Catalogue.find(
-      sp_drafts_root(),
-      Fleet.Catalogue.rel(:sp_drafts),
-      "agent-#{role}-base.md"
-    )
-  end
-
-  defp modop_root do
-    Application.get_env(:fleet_sp_builder, :modop_root) || Fleet.Catalogue.modop_root()
+    Fleet.Catalogue.find(:sp_drafts, "agent-#{role}-base.md")
   end
 end

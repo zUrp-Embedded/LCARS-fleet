@@ -446,7 +446,7 @@ defmodule Fleet.CapProfile.Catalog do
   Absent directories are dropped so a test root or a narrow catalogue does not have to exist twice.
   """
   @spec root_dirs() :: [String.t()]
-  def root_dirs, do: Fleet.Catalogue.search(root_dir(), Fleet.Catalogue.rel(:cap_profiles))
+  def root_dirs, do: Fleet.Catalogue.search(:cap_profiles)
 
   # Union of the search path's role indexes, in PRECEDENCE order — the first root that carries a
   # name wins, and the later one is not read.

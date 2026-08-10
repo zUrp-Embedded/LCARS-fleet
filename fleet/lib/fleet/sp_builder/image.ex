@@ -333,11 +333,7 @@ defmodule Fleet.SPBuilder.Image do
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path do
     Application.get_env(:fleet_spawner, :protocole_user_path) ||
-      Fleet.Catalogue.find(
-        drafts_root(),
-        Fleet.Catalogue.rel(:sp_drafts),
-        "protocole-user-worker.md"
-      )
+      Fleet.Catalogue.find(:sp_drafts, "protocole-user-worker.md")
   end
 
   # No override knob, DELIBERATELY: the machine protocol has one because a deployment may need to
@@ -345,45 +341,25 @@ defmodule Fleet.SPBuilder.Image do
   # operator's own file through the deploy's override scheme, not by a runtime config path. Adding
   # a second knob now would be inventing the mechanism twice before either exists.
   defp human_protocol_path,
-    do:
-      Fleet.Catalogue.find(
-        drafts_root(),
-        Fleet.Catalogue.rel(:sp_drafts),
-        "protocole-user-human.md"
-      )
+    do: Fleet.Catalogue.find(:sp_drafts, "protocole-user-human.md")
 
   # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root). The drafts
   # root is NOT resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
   # unpublished path), so it lives on the facade as the single authority — see `drafts_root/0` below.
-  defp modop_root do
-    Application.get_env(:fleet_sp_builder, :modop_root) || Fleet.Catalogue.modop_root()
-  end
-
-  defp subagent_root do
-    Application.get_env(:fleet_sp_builder, :subagent_template_root) ||
-      Fleet.Catalogue.subagent_templates_root()
-  end
-
   # Single authority on the facade — the image and the spawn's disk fallback MUST read one root.
-  defp drafts_root, do: Fleet.SPBuilder.sp_drafts_root()
-
   # THE search path, resolved by `Fleet.Catalogue` like every other reader. A fine override moves
   # the business root only; the system root is never dropped, and an absent directory is — which is
   # what lets the system catalogue ship only what its roles need (it has no subagent template and
   # must not fake one).
-  defp modop_roots, do: Fleet.Catalogue.search(modop_root(), Fleet.Catalogue.rel(:modops))
+  defp modop_roots, do: Fleet.Catalogue.search(:modops)
 
-  defp subagent_roots,
-    do: Fleet.Catalogue.search(subagent_root(), Fleet.Catalogue.rel(:subagent_templates))
+  defp subagent_roots, do: Fleet.Catalogue.search(:subagent_templates)
 
-  defp drafts_roots, do: Fleet.Catalogue.search(drafts_root(), Fleet.Catalogue.rel(:sp_drafts))
+  defp drafts_roots, do: Fleet.Catalogue.search(:sp_drafts)
 
   # Two of the three readers that never learned the search path, and were defects for it: the EEx
   # templates shape the MECHANISM's prompts, and the human protocol was demanded from catalogues
   # that have no human-facing role at all (W-13). They go through the same door as the rest. The
   # third was `sp_role_bases`, and it is gone rather than fixed — see the publish above.
-  defp template_roots,
-    do: Fleet.Catalogue.search(template_root(), Fleet.Catalogue.rel(:sp_templates))
-
-  defp template_root, do: Fleet.Catalogue.sp_templates_root()
+  defp template_roots, do: Fleet.Catalogue.search(:sp_templates)
 end

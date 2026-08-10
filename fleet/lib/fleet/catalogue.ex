@@ -2,7 +2,14 @@ defmodule Fleet.Catalogue do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  The single authority for WHERE the catalogue lives — one root, one sub-path per tree.
+  The single authority for WHERE the catalogue lives — an ORDERED SEARCH PATH, one sub-path per
+  tree.
+
+  It said "one root" until 2026-08-10 and that was the whole design at the time. There are now
+  several: the ACTIVE catalogues in precedence order, then the system default last, and a reader
+  asks for a TREE (`search(:modops)`) rather than naming a root. `search/2` and its siblings remain
+  for the two callers that legitimately name their own — the composer under `--catalogue`, and the
+  spawn path whose skills root is its own three-state knob.
 
   ## Runtime vs catalogue
 
@@ -35,15 +42,20 @@ defmodule Fleet.Catalogue do
 
   ## The default
 
-  `root/0` defaults to the BUNDLED `priv/catalogue` — a directory that holds the nine trees and
-  nothing else. The physical move that made it so (2026-08-01) changed exactly one line of this
+  `root/0` defaults to the BUNDLED `priv/catalogue` — a directory that holds the catalogue trees
+  and nothing else. (How MANY is deliberately not written here: an inventory in prose is false the
+  day a tree is added, and `rel/1` is the place that has to be right.) The physical move that made it so (2026-08-01) changed exactly one line of this
   module: the `@rel_*` sub-paths were already root-relative, so they did not move. That was the
   point of expressing the layout once.
 
   What the directory buys beyond tidiness: **exporting a catalogue is copying one directory**. The
-  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/sp_builder/sp_blocks/`
-  (build-time only), `priv/canon/` (frozen legacy) — sits OUTSIDE it, so no export can carry a
-  contract an author would edit to no effect.
+  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/canon/` (frozen legacy) —
+  sits OUTSIDE it, so no export can carry a contract an author would edit to no effect.
+
+  ⚠ `sp_builder/sp_blocks/` used to be named on that list as build-time material living outside. It
+  moved INSIDE both catalogues on 2026-08-10: `core/` is a shipped default an author supersedes by
+  name, the rest is their own material. It is build-time all the same — a running fleet never reads
+  it — and that is a property of WHEN it is read, not of where it lives.
 
   ## The manifest
 

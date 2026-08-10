@@ -169,8 +169,8 @@ defmodule Fleet.Spawner.Pod.Assets do
         # catalogue. Reading the business root alone demanded this file from catalogues whose every
         # role is `interlocutor: fleet` (W-13) — the image regime raised, the disk regime here
         # would have returned :enoent on a file its author had no reason to write.
-        Fleet.SPBuilder.sp_drafts_root()
-        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:sp_drafts), "protocole-user-human.md")
+        :sp_drafts
+        |> Fleet.Catalogue.find("protocole-user-human.md")
         |> read_tagged(:protocole_user_human_missing)
     end
   end
@@ -178,8 +178,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   defp read_worker_protocol_from_disk do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
-        Fleet.SPBuilder.sp_drafts_root()
-        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:sp_drafts), "protocole-user-worker.md")
+        :sp_drafts
+        |> Fleet.Catalogue.find("protocole-user-worker.md")
         |> read_tagged(:protocole_user_worker_missing)
 
       path when is_binary(path) ->
