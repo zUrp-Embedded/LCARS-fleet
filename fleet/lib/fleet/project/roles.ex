@@ -295,10 +295,10 @@ defmodule Fleet.Project.Roles do
   @doc """
   Returns the workflow map for routeless `genre/doc` issues, defaulting to `"workshop-direct"`.
   """
-  @spec workshop_workflow_map(keyword()) :: String.t()
+  @spec workshop_workflow_map(keyword()) :: String.t() | nil
   def workshop_workflow_map(opts \\ []) do
     Keyword.get(opts, :workshop_workflow_map) ||
-      Application.get_env(:fleet_pilot, :workshop_workflow_map, "workshop-direct")
+      Fleet.Workflow.Loader.workshop_card_name(opts)
   end
 
   @doc """

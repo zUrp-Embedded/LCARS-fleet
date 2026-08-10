@@ -337,63 +337,27 @@ defmodule Fleet.Pilot.Application do
   end
 
   @doc false
-  # The OPS knob → CARD coherence, checked at boot (interim brake, IPC consultant 2026-08-02).
-  # `Roles.workshop_workflow_map/1` names the card a `genre/doc` ticket burns, and NOTHING verified
-  # that the name resolves to a card that can actually SERVE a doc ticket: a dead name, or a card
-  # whose steps all sit on the code face, fails at the FIRST doc ticket — silently, one wedged
-  # ticket at a time, far from the config that caused it.
+  # The doc rail is resolved by PROPERTY — the card carrying a `face: workshop` producer — so there
+  # is no name to check for coherence any more. `Fleet.Workflow.Loader.publish_image!/0` refuses two
+  # claimants, which is what makes the resolution total; what is left here is telling the operator
+  # when a catalogue simply has no rail. That is a legitimate deployment, not a defect: refusing the
+  # boot there would be a policy this check has no mandate to set.
   #
-  # THREE cases, because "absent" means two different things and only one of them is a defect:
-  #   * knob EXPLICITLY set (opts or app env) → the card MUST load and carry an ops producer.
-  #     Someone chose this name; a dead choice is held to account, fail-loud.
-  #   * knob at its DEFAULT and the card is absent from the catalogue → a catalogue with NO doc
-  #     rail, which is a legitimate deployment (an operator's own catalogue, a narrow fixture).
-  #     Refusing the boot there would be a POLICY this check has no mandate to set: it says so
-  #     LOUD instead, naming what such a deployment cannot do.
-  #   * card PRESENT but carrying no `face: doc` producer → fail-loud whatever the knob's origin:
-  #     that is the drift itself (a card that lost its doc face, the shipped canon breaking).
-  #
-  # What it proves is deliberately MINIMAL — it does not judge the card's shape. The per-face
-  # redesign (ONE card declaring face-tagged producers, killing this knob) is the real exit; a
-  # check that anticipated it would be rewritten with it. This one only closes the silence.
-  # (`opts` carries the test roots; prod calls it argument-less.)
+  # It used to guard a knob (`:fleet_pilot, :workshop_workflow_map`, default `"workshop-direct"` —
+  # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
+  # can be wrong. A property cannot.
   def validate_workshop_card!(opts \\ []) do
-    name = Fleet.Project.Roles.workshop_workflow_map(opts)
-
-    chosen? =
-      Keyword.has_key?(opts, :workshop_workflow_map) or
-        not is_nil(Application.get_env(:fleet_pilot, :workshop_workflow_map))
-
-    case Fleet.Pilot.WorkflowMapNav.safe_load(&Fleet.Workflow.Loader.load!(&1, opts), name) do
-      {:ok, card} ->
-        doc_producers =
-          for {_step, %{"face" => "workshop"} = spec} <- card["steps"] || %{},
-              is_binary(Map.get(spec, "role")),
-              do: spec["role"]
-
-        if doc_producers == [] do
-          raise "fleet_pilot: the doc card #{inspect(name)} (:workshop_workflow_map) carries NO " <>
-                  "producer step on `face: doc` — a documentary ticket routed here would be built " <>
-                  "on the code face (or not at all). Declare the face on its producer step, or " <>
-                  "point the knob at a card that does."
-        end
-
-        :ok
-
-      {:error, {:workflow_map_load_failed, _name, why}} when chosen? ->
-        raise "fleet_pilot: the doc card #{inspect(name)} (:workshop_workflow_map) does NOT load " <>
-                "(#{why}) — every `genre/doc` ticket burns this name and would wedge at its " <>
-                "first dispatch. Fix the config or the card."
-
-      {:error, {:workflow_map_load_failed, _name, why}} ->
+    for scope <- card_scopes(opts) do
+      if Fleet.Workflow.Loader.workshop_card_name(scope) == nil do
         Logger.warning(
-          "fleet_pilot: no doc card in this catalogue (default #{inspect(name)} absent: #{why}) " <>
-            "— this deployment serves NO `genre/doc` ticket; such a ticket would wedge at dispatch. " <>
-            "Ship a doc card or point :workshop_workflow_map at one."
+          "fleet_pilot: no doc card in #{inspect(Keyword.get(scope, :workflow_maps_root))} — no " <>
+            "card there carries a `face: workshop` producer, so this catalogue serves NO " <>
+            "`destination/workshop` ticket. Ship one, or route those tickets elsewhere."
         )
-
-        :ok
+      end
     end
+
+    :ok
   end
 
   @doc false

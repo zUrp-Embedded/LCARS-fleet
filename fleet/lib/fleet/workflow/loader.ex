@@ -160,6 +160,7 @@ defmodule Fleet.Workflow.Loader do
       opts = [workflow_maps_root: dir]
       names = disk_canon_names!(opts)
       image = Map.new(names, fn name -> {name, load_from_disk!(Fleet.Slug.cast!(name), opts)} end)
+      ensure_one_workshop_rail!(image, dir)
       :persistent_term.put(image_key(dir), image)
     end
 
@@ -195,6 +196,51 @@ defmodule Fleet.Workflow.Loader do
       dir -> [dir]
     end
   end
+
+  @doc """
+  The card carrying this catalogue's WORKSHOP producer, or `nil` — the doc rail, resolved by what a
+  card IS rather than by a name someone configured.
+
+  It was a global config knob (`:fleet_pilot, :workshop_workflow_map`, defaulting to
+  `"workshop-direct"` — the name of ONE catalogue's card). One knob cannot name N cards, and the
+  catalogue serving a project is not the one that named the default. Same shape as
+  `Roles.gatekeeper_role/1`, which resolves by capability rather than by a configured name.
+
+  `publish_image!/0` refuses two claimants, so this can only ever find one.
+  """
+  @spec workshop_card_name(keyword()) :: String.t() | nil
+  def workshop_card_name(opts \\ []) do
+    # `canon_names/1` rend toujours une liste — vide quand rien n'est publie ni sur le disque — donc
+    # l'absence de rail est un `Enum.find` qui ne trouve rien, jamais un `nil` a intercepter.
+    opts
+    |> canon_names()
+    |> Enum.find(fn n -> workshop_producer?(load!(Fleet.Slug.cast!(n), opts)) end)
+  end
+
+  # A card claims the doc rail by carrying a producer step on `face: workshop`. TWO claimants make
+  # the resolution meaningless, so the publish refuses them — the same place and the same reason as
+  # two roles on one `role_index`: a guard belongs where the merged object is finally visible.
+  defp ensure_one_workshop_rail!(image, dir) do
+    case image
+         |> Enum.filter(fn {_n, card} -> workshop_producer?(card) end)
+         |> Enum.map(&elem(&1, 0)) do
+      claimants when length(claimants) > 1 ->
+        raise "Fleet.Workflow.Loader: #{dir} has #{length(claimants)} cards carrying a " <>
+                "`face: workshop` producer (#{Enum.join(Enum.sort(claimants), ", ")}) — the doc rail " <>
+                "is resolved by that property, so two claimants have no answer. One card per catalogue."
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp workshop_producer?(card) when is_map(card) do
+    Enum.any?(card["steps"] || %{}, fn {_step, spec} ->
+      is_map(spec) and spec["face"] == "workshop" and is_binary(spec["role"])
+    end)
+  end
+
+  defp workshop_producer?(_), do: false
 
   defp image_key(root), do: {__MODULE__, :image, root}
 

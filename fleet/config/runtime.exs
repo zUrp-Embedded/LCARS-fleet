@@ -492,19 +492,6 @@ if config_env() != :test and not tool_mode? do
       role_tokens_dir: Fleet.EnvParse.path("FORGE_ROLE_TOKENS_DIR", role_tokens_dir)
   end
 
-  # The catalogue's WORKSHOP card, by name. `Fleet.Project.Roles.workshop_workflow_map/1` defaults
-  # to the reference catalogue's card name, which is the one designation in the whole contract that
-  # a catalogue cannot make itself: every structural ROLE resolves by capability with no literal
-  # fallback, this one card resolves by name. An operator bringing their own catalogue could boot
-  # (the check downgrades to a warning when the knob was never set) but had NO way to reach their
-  # own workshop card from a release — no env var, no config entry, so the only working spelling
-  # was the reference's. Set here, the designation travels with the deployment that brings the
-  # catalogue. It is a stopgap by construction: the per-face redesign that lets ONE card declare
-  # face-tagged producers kills the knob, and this line with it.
-  if workshop_card = System.get_env("LCARS_WORKSHOP_CARD") do
-    config :fleet_pilot, workshop_workflow_map: workshop_card
-  end
-
   # ============================================================
   # Runtime STEP-MODE (the forge = the state machine) + push auth
   # ============================================================

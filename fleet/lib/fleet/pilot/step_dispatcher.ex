@@ -498,7 +498,11 @@ defmodule Fleet.Pilot.StepDispatcher do
         do: Fleet.Project.Roles.workshop_workflow_map(),
         else: Fleet.Project.Intensity.pipeline_default(repo)
 
-    with {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
+    # `nil` = this catalogue ships no card with a `face: workshop` producer, so it has no doc rail.
+    # A deployment is allowed not to have one; a doc ticket on it is not, and it says WHICH fact it
+    # hit rather than dying inside a load on a name nobody chose.
+    with {:ok, workflow_map_name} <- refute_missing_rail(workflow_map_name),
+         {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),
          {:ok, _} <- forge.post_route(repo, number, workflow_map_name, step, forge_opts) do
       {:onboarded, step}
@@ -506,6 +510,9 @@ defmodule Fleet.Pilot.StepDispatcher do
       err -> {:error, {:onboard, err}}
     end
   end
+
+  defp refute_missing_rail(nil), do: {:error, :no_doc_rail_in_catalogue}
+  defp refute_missing_rail(name) when is_binary(name), do: {:ok, name}
 
   # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
 

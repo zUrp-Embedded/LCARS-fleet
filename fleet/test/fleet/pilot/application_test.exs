@@ -105,71 +105,73 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # Interim brake (IPC consultant 2026-08-02): the :workshop_workflow_map knob names the card every
-  # `genre/doc` ticket burns, and nothing checked that the name resolves to a card that can serve
-  # a doc ticket — a dead name or an all-code-face card failed at the FIRST doc ticket, silently.
-  describe "validate_workshop_card!/1 — the doc knob resolves to a card that can serve a doc ticket" do
-    test "the shipped canon passes (workshop-direct carries its face: doc producer)" do
+  # THE KNOB IS GONE. `:fleet_pilot, :workshop_workflow_map` named the doc card globally, defaulting
+  # to `"workshop-direct"` — one catalogue's card. One name cannot serve N catalogues, and the
+  # catalogue serving a project is not the one that named the default. The rail is now resolved by
+  # what a card IS: it carries a producer step on `face: workshop`.
+  #
+  # Two of the three regimes that function guarded existed only because a NAME can be wrong (dead
+  # name, name pointing at an all-code card). A property cannot be wrong — it can only be absent, or
+  # claimed twice, and those are the two tests below.
+  describe "le rail doc se resout par PROPRIETE, plus par un nom configure" do
+    test "le canon livre resout son rail sans configuration" do
+      assert Fleet.Workflow.Loader.workshop_card_name() == "workshop-direct"
+      assert Fleet.Project.Roles.workshop_workflow_map() == "workshop-direct"
       assert :ok = Application.validate_workshop_card!()
     end
 
     @tag :tmp_dir
-    test "a knob EXPLICITLY set to a dead name raises with the operator's diagnosis",
-         %{tmp_dir: tmp} do
-      assert_raise RuntimeError, ~r/doc card "no-such-card" .*does NOT load/s, fn ->
-        Application.validate_workshop_card!(
-          workflow_maps_root: tmp,
-          workshop_workflow_map: "no-such-card"
-        )
-      end
-    end
+    test "aucune carte porteuse = pas de rail doc : bruyant, jamais un refus", %{tmp_dir: tmp} do
+      # Un catalogue etroit (celui d'un operateur, une fixture) n'a legitimement pas de rail doc.
+      # Refuser le boot la serait une politique que ce controle n'a pas mandat de poser.
+      File.write!(Path.join(tmp, "all-code.yaml"), card_yaml("all-code", "code"))
 
-    @tag :tmp_dir
-    test "no doc card + knob at its DEFAULT = a catalogue with no doc rail: LOUD, never a refusal",
-         %{tmp_dir: tmp} do
-      # A narrow catalogue (an operator's own, a fixture) legitimately has no doc rail. Refusing
-      # the boot there would be a policy this check has no mandate to set — it names what such a
-      # deployment cannot do instead.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert :ok = Application.validate_workshop_card!(workflow_maps_root: tmp)
         end)
 
-      assert log =~ "no doc card in this catalogue"
-      assert log =~ "would wedge at dispatch"
+      assert log =~ "no doc card"
+      assert log =~ "face: workshop"
+      assert Fleet.Workflow.Loader.workshop_card_name(workflow_maps_root: tmp) == nil
     end
 
     @tag :tmp_dir
-    test "a card with NO producer on face: doc raises — the doc ticket would build on the code face",
-         %{tmp_dir: tmp} do
-      card = """
+    test "DEUX cartes revendiquant le rail : le publish refuse, et il les NOMME", %{tmp_dir: tmp} do
+      # Ce qui rend la resolution totale. Sans ce garde, `Enum.find` rendrait la premiere par ordre
+      # alphabetique — un rail choisi par un tri, ce que personne n'a decide. Meme endroit et meme
+      # raison que deux roles sur un `role_index` : le garde va la ou l'objet fusionne est enfin
+      # visible.
+      File.write!(Path.join(tmp, "atelier-un.yaml"), card_yaml("atelier-un", "workshop"))
+      File.write!(Path.join(tmp, "atelier-deux.yaml"), card_yaml("atelier-deux", "workshop"))
+
+      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+
+      err = assert_raise RuntimeError, fn -> Fleet.Workflow.Loader.publish_image!() end
+      assert err.message =~ "atelier-deux, atelier-un"
+      assert err.message =~ "One card per catalogue"
+    end
+
+    defp card_yaml(name, face) do
+      """
       kind: WorkflowMap
       metadata:
-        name: all-code
-        description: "a card whose steps all sit on the code face"
-        presentation: "test card — no ops face"
+        name: #{name}
+        description: "carte de fixture"
+        applicable_intensity: [C0]
       spec:
-        jury: [qualifier, reviewer]
+        jury: []
         ci: ignore
-        max_rework_rounds: 2
+        max_rework_rounds: 1
         steps:
-          implement:
+          build:
             role: engineer
+            face: #{face}
             needs: []
             inputs:
               - ticket.body
-            outputs:
-              - deliverable
       """
-
-      File.write!(Path.join(tmp, "all-code.yaml"), card)
-
-      assert_raise RuntimeError, ~r/carries NO producer step on `face: doc`/, fn ->
-        Application.validate_workshop_card!(
-          workflow_maps_root: tmp,
-          workshop_workflow_map: "all-code"
-        )
-      end
     end
   end
 end
