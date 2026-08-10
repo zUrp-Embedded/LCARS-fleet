@@ -146,8 +146,13 @@ defmodule Fleet.Spawner.Pod.Assets do
         {:ok, content}
 
       :unpublished ->
+        # THE search path, like the drafts beside it: the human protocol follows the roles that
+        # need it, and after the split the only `interlocutor: both` roles live in the system
+        # catalogue. Reading the business root alone demanded this file from catalogues whose every
+        # role is `interlocutor: fleet` (W-13) — the image regime raised, the disk regime here
+        # would have returned :enoent on a file its author had no reason to write.
         Fleet.SPBuilder.sp_drafts_root()
-        |> Path.join("protocole-user-human.md")
+        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:sp_drafts), "protocole-user-human.md")
         |> read_tagged(:protocole_user_human_missing)
     end
   end
@@ -156,7 +161,7 @@ defmodule Fleet.Spawner.Pod.Assets do
     case Application.get_env(:fleet_spawner, :protocole_user_path) do
       nil ->
         Fleet.SPBuilder.sp_drafts_root()
-        |> Path.join("protocole-user-worker.md")
+        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:sp_drafts), "protocole-user-worker.md")
         |> read_tagged(:protocole_user_worker_missing)
 
       path when is_binary(path) ->

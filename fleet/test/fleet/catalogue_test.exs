@@ -181,7 +181,10 @@ defmodule Fleet.CatalogueTest do
       # do — the image hashes the PARSED profile, so a comment is invisible to it by construction.)
       File.rm!(Path.join(Catalogue.cap_profiles_root(), "scoper.yaml"))
 
-      draft = Path.join(Catalogue.sp_drafts_root(), "protocole-user-worker.md")
+      # Un draft du catalogue METIER : les deux protocoles vivent desormais dans le catalogue
+      # systeme (ils servent les roles `interlocutor: both`, qui y sont tous), donc la copie n'en
+      # porte aucun — les toucher ici reviendrait a editer un fichier que la copie n'a pas.
+      draft = Path.join(Catalogue.sp_drafts_root(), "agent-engineer-base.md")
       File.write!(draft, File.read!(draft) <> "\n<!-- catalogue copy marker -->\n")
 
       Fleet.CapProfile.Image.publish!()

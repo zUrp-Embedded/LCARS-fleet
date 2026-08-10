@@ -279,7 +279,11 @@ defmodule Fleet.SPBuilder.Image do
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path do
     Application.get_env(:fleet_spawner, :protocole_user_path) ||
-      Path.join(drafts_root(), "protocole-user-worker.md")
+      Fleet.Catalogue.find(
+        drafts_root(),
+        Fleet.Catalogue.rel(:sp_drafts),
+        "protocole-user-worker.md"
+      )
   end
 
   # No override knob, DELIBERATELY: the machine protocol has one because a deployment may need to

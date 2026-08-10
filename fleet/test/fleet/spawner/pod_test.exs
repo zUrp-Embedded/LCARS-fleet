@@ -949,12 +949,9 @@ defmodule Fleet.Spawner.PodTest do
 
       Fleet.TestEnv.put_env_restoring(:fleet_spawner, :skills_root, skills_root)
 
-      # La racine SYSTEME est neutralisee : elle porte un vrai `card-revision`, et la resolution
-      # la lit en premier. Sans ca ce test mesurerait le skill du systeme au lieu de la fixture
-      # qu'il vient d'ecrire — vert, sur le mauvais fichier.
-      Fleet.Test.CatalogueIsolation.isolate!(Path.join(tmp, "__cat"),
-        system: Path.join(tmp, "__no-system")
-      )
+      # PAS d'isolation de la racine systeme : depuis que la precedence est METIER D'ABORD, la
+      # fixture ecrite juste au-dessus gagne sur le `card-revision` du systeme sans qu'on ait a
+      # cacher ce dernier. C'est la regle du theme enfant, et c'est ce test qui la constate.
 
       profile = valid_profile()
 
