@@ -73,6 +73,24 @@ USAGE
       Attache ce terminal sur la session tmux du pod (Ctrl-b d rend la main sans
       tuer le pod).
 
+  $PROG catalogue list
+      Les catalogues installes, et lesquels sont ACTIFS, dans l'ordre de precedence.
+
+  $PROG catalogue install <source> [nom]
+      Installe un catalogue depuis un depot git, une archive tar.gz ou un dossier
+      local. N'active RIEN : installe n'est pas actif.
+
+  $PROG catalogue verify <nom>
+      Joue sur ce catalogue exactement les controles que le boot joue. Code de
+      sortie = verdict.
+
+  $PROG catalogue enable <nom> | disable <nom>
+      Ajoute / retire une ligne de la declaration d'activite. REFUSE d'activer un
+      catalogue que verify ne passe pas.
+
+  $PROG catalogue remove <nom>
+      Supprime un catalogue installe. Refuse s'il est actif.
+
   $PROG help
       Cette aide.
 
@@ -182,12 +200,183 @@ cmd_attach() {
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
 
+# --- catalogue -------------------------------------------------------------
+#
+# LES TROIS CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout` : catalogues_operator_dir/0,
+# catalogues_shipped_dir/0, active_catalogues_path/0). C'est un fait ecrit deux fois, dans deux
+# langages qui ne peuvent pas s'appeler — la meme forme que les listes de roles verrouillees par
+# `mix lcars.contracts.check`. Un changement ici sans l'autre cote donne un CLI qui ecrit une
+# declaration que le runtime ne lit pas : rien ne casse, rien ne s'active, et personne ne le voit.
+CAT_DIR="${LCARS_CATALOGUES_DIR:-$HOME/.lcars/catalogues}"
+CAT_ACTIVE="${LCARS_CATALOGUES_ACTIVE:-$HOME/.lcars/catalogues.active}"
+CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
+# Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
+# il s'active et se desactive, mais ne s'installe ni ne se supprime.
+CAT_BUNDLED="lcars"
+
+# Ou vit <nom> : l'operateur d'abord, le livre ensuite — MEME ORDRE que `install_dirs` cote runtime,
+# pour qu'un catalogue importe masque un livre du meme nom des deux cotes.
+cat_dir_of() {
+  local name="$1"
+  if [[ -d "$CAT_DIR/$name" ]]; then echo "$CAT_DIR/$name"
+  elif [[ -d "$CAT_SHIPPED/$name" ]]; then echo "$CAT_SHIPPED/$name"
+  else return 1; fi
+}
+
+# Les noms declares, dans l'ordre, commentaires et lignes vides retires. MEME lecture que
+# `Fleet.Catalogue.declared_names/0` : un `#` coupe la ligne, on trim, on jette le vide.
+cat_declared() {
+  [[ -r "$CAT_ACTIVE" ]] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CAT_ACTIVE" | grep -v '^$' || true
+}
+
+cat_is_active() { cat_declared | grep -qx "$1"; }
+
+cmd_catalogue_list() {
+  local installed=()
+  [[ -d "$CAT_DIR" ]] && while IFS= read -r d; do installed+=("$(basename "$d")"); done \
+    < <(find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+  [[ -d "$CAT_SHIPPED" ]] && while IFS= read -r d; do installed+=("$(basename "$d")"); done \
+    < <(find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d | sort)
+
+  echo "ACTIFS (ordre = precedence, $CAT_ACTIVE)"
+  if [[ -s "$CAT_ACTIVE" ]] && [[ -n "$(cat_declared)" ]]; then
+    local n=0
+    while IFS= read -r name; do
+      n=$((n + 1))
+      if [[ "$name" == "$CAT_BUNDLED" ]]; then
+        echo "  $n. $name    (livre dans le release)"
+      elif cat_dir_of "$name" >/dev/null; then
+        echo "  $n. $name    $(cat_dir_of "$name")"
+      else
+        echo "  $n. $name    INSTALLE NULLE PART — le boot refusera" >&2
+      fi
+    done < <(cat_declared)
+  else
+    echo "  (aucune declaration : le catalogue livre dans le release, seul)"
+  fi
+
+  echo
+  echo "INSTALLES"
+  if [[ ${#installed[@]} -eq 0 ]]; then
+    echo "  (aucun)"
+  else
+    local name
+    for name in "${installed[@]}"; do
+      if cat_is_active "$name"; then echo "  $name    actif"; else echo "  $name    inactif"; fi
+    done
+  fi
+}
+
+# Le binaire de release joue les memes controles que le boot. Dans la boite il est a l'install ;
+# hors boite il n'existe pas, et on le DIT au lieu de deviner une commande de repli.
+cat_verify_root() {
+  local root="$1"
+  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  [[ -x "$bin" ]] || die "catalogue verify: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN, ou lancer « mix lcars.catalogue.verify $root » depuis le depot"
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Application.CatalogueVerify.eval_main(\"$root\")"
+}
+
+cmd_catalogue_verify() {
+  local name="${1:?catalogue verify: nom requis}"
+  [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue verify: « $CAT_BUNDLED » est le catalogue livre dans le release — le boot le verifie a chaque demarrage"
+  local root; root="$(cat_dir_of "$name")" || die "catalogue verify: « $name » n'est installe nulle part (cf. « $PROG catalogue list »)"
+  cat_verify_root "$root"
+}
+
+cmd_catalogue_enable() {
+  local name="${1:?catalogue enable: nom requis}"
+  cat_is_active "$name" && { echo "catalogue enable: « $name » est deja actif" >&2; return 0; }
+
+  if [[ "$name" != "$CAT_BUNDLED" ]]; then
+    local root; root="$(cat_dir_of "$name")" || die "catalogue enable: « $name » n'est installe nulle part"
+    # LE REFUS QUI REND `verify` UTILE : sans lui c'est un outil qu'on peut sauter, avec lui c'est
+    # la condition d'activation. Un catalogue casse active est un boot qui refuse, decouvert au
+    # redemarrage suivant par quelqu'un qui ne fera pas le lien.
+    cat_verify_root "$root" || die "catalogue enable: « $name » ne passe pas verify — non active"
+  fi
+
+  mkdir -p "$(dirname "$CAT_ACTIVE")"
+  printf '%s\n' "$name" >> "$CAT_ACTIVE"
+  echo "catalogue enable: « $name » ajoute en DERNIER dans $CAT_ACTIVE" >&2
+  echo "  l'ordre des lignes EST la precedence — editer le fichier pour le remonter" >&2
+  # Les images gelent au boot : pretendre agir a chaud serait un mensonge operationnel.
+  echo "  la fleet tourne encore sur ses images gelees : « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2
+}
+
+cmd_catalogue_disable() {
+  local name="${1:?catalogue disable: nom requis}"
+  cat_is_active "$name" || die "catalogue disable: « $name » n'est pas actif"
+  local tmp; tmp="$(mktemp)"
+  grep -vx "[[:space:]]*$name[[:space:]]*" "$CAT_ACTIVE" > "$tmp" || true
+  mv "$tmp" "$CAT_ACTIVE"
+  echo "catalogue disable: « $name » retire de $CAT_ACTIVE (rien n'est supprime du disque)" >&2
+  echo "  « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2
+}
+
+cmd_catalogue_remove() {
+  local name="${1:?catalogue remove: nom requis}"
+  [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue remove: « $CAT_BUNDLED » vit dans le release — « $PROG catalogue disable $CAT_BUNDLED » pour cesser de l'utiliser"
+  cat_is_active "$name" && die "catalogue remove: « $name » est ACTIF — le desactiver d'abord"
+  local dir="$CAT_DIR/$name"
+  [[ -d "$dir" ]] || die "catalogue remove: « $name » n'est pas dans $CAT_DIR (les catalogues livres sous $CAT_SHIPPED ne se suppriment pas : ils reviennent au prochain update)"
+  rm -rf "$dir"
+  echo "catalogue remove: $dir supprime" >&2
+}
+
+# Trois sources, zero scp : ce qui manque a une boite headless, c'est un transport qu'on ait deja.
+cmd_catalogue_install() {
+  local src="${1:?catalogue install: source requise (depot git, archive tar.gz, ou dossier)}"
+  local name="${2:-}"
+  [[ -n "$name" ]] || { name="$(basename "$src")"; name="${name%.git}"; name="${name%.tar.gz}"; name="${name%.tgz}"; }
+  [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue install: « $CAT_BUNDLED » est le nom reserve du catalogue livre — en choisir un autre"
+  local dest="$CAT_DIR/$name"
+  [[ -e "$dest" ]] && die "catalogue install: $dest existe deja — « $PROG catalogue remove $name » d'abord"
+  mkdir -p "$CAT_DIR"
+
+  case "$src" in
+    *.git|git@*|*://*.git)
+      command -v git >/dev/null || die "catalogue install: git introuvable"
+      git clone --depth 1 "$src" "$dest" >&2 || die "catalogue install: clone echoue"
+      rm -rf "$dest/.git"
+      ;;
+    http://*|https://*)
+      command -v curl >/dev/null || die "catalogue install: curl introuvable"
+      command -v tar  >/dev/null || die "catalogue install: tar introuvable"
+      mkdir -p "$dest"
+      curl -fsSL "$src" | tar -xz -C "$dest" --strip-components=1 \
+        || { rm -rf "$dest"; die "catalogue install: telechargement ou extraction echoue"; }
+      ;;
+    *)
+      [[ -d "$src" ]] || die "catalogue install: « $src » n'est ni un depot git, ni une URL, ni un dossier"
+      cp -r "$src" "$dest"
+      ;;
+  esac
+
+  echo "catalogue install: « $name » installe dans $dest — INACTIF" >&2
+  echo "  « $PROG catalogue verify $name » puis « $PROG catalogue enable $name »" >&2
+}
+
+cmd_catalogue() {
+  case "${1:-list}" in
+    list|ls)  shift; cmd_catalogue_list "$@" ;;
+    install)  shift; cmd_catalogue_install "$@" ;;
+    verify)   shift; cmd_catalogue_verify "$@" ;;
+    enable)   shift; cmd_catalogue_enable "$@" ;;
+    disable)  shift; cmd_catalogue_disable "$@" ;;
+    remove)   shift; cmd_catalogue_remove "$@" ;;
+    *) die "catalogue: sous-commande inconnue '${1}' (list|install|verify|enable|disable|remove)" ;;
+  esac
+}
+
 # --- dispatch --------------------------------------------------------------
 
 case "${1:-help}" in
   spawn)  shift; cmd_spawn "$@" ;;
   list|ls) shift; cmd_list "$@" ;;
   attach) shift; cmd_attach "$@" ;;
+  catalogue) shift; cmd_catalogue "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
 esac

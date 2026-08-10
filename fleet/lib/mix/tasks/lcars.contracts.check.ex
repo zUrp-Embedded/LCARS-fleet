@@ -96,6 +96,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
         check_capabilities_exercisable(root),
+        check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
@@ -1794,6 +1795,110 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
           "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
     }
+  end
+
+  # ── Catalogue install paths: ONE fact, two languages ─────────────────────
+  # `Fleet.Layout` says where catalogues are installed and where the activity declaration lives.
+  # `bin/lcars` writes that declaration, and it cannot call Elixir — so the three paths exist twice,
+  # in two languages that have no way to agree by construction.
+  #
+  # What a divergence costs is worse than a crash: the CLI writes a file the runtime does not read.
+  # `catalogue enable` reports success, `catalogue list` shows the line, the fleet restarts, and it
+  # runs the OLD roster. Nothing errors, nothing is logged, and the operator has every reason to
+  # believe it worked. Same family as the four provisioning lists locked above, and the same fix —
+  # the shell's DEFAULTS are read out of the script and compared to what the module derives.
+  #
+  # The env overrides (`LCARS_CATALOGUES_*`) are deliberately not checked: an operator pointing them
+  # elsewhere is answering for both halves themselves. What must agree is what happens when nobody
+  # sets anything, which is every deployment.
+  @doc false
+  def check_catalogue_paths_locked(root) do
+    layout = "lib/fleet/layout.ex"
+    cli = "bin/lcars"
+    layout_src = read_or_empty(root, layout)
+    cli_src = read_or_empty(root, cli)
+
+    # Read from the SOURCE, not by calling the module: this check is classified into
+    # `Fleet.Application`, which may not reference foundation's `Fleet.Layout` — and a boundary is
+    # not widened to let a lint reach across it. Reading both files is also the truer comparison:
+    # the fact under test is what the two SOURCES say, and a runtime value could agree with neither.
+    attrs =
+      Map.new(
+        ~w(platform_root catalogues_dirname active_catalogues_basename state_dirname),
+        &{&1, module_attribute(layout_src, &1)}
+      )
+
+    expected =
+      if Enum.any?(attrs, fn {_k, v} -> is_nil(v) end) do
+        nil
+      else
+        %{
+          "LCARS_CATALOGUES_DIR" =>
+            "$HOME/#{attrs["state_dirname"]}/#{attrs["catalogues_dirname"]}",
+          "LCARS_CATALOGUES_ACTIVE" =>
+            "$HOME/#{attrs["state_dirname"]}/#{attrs["active_catalogues_basename"]}",
+          "LCARS_CATALOGUES_SHIPPED" => "#{attrs["platform_root"]}/#{attrs["catalogues_dirname"]}"
+        }
+      end
+
+    mismatches =
+      for {var, want} <- expected || %{},
+          got = shell_default(cli_src, var),
+          got != want,
+          do: "#{var}: #{cli} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
+
+    missing = for {var, _} <- expected || %{}, is_nil(shell_default(cli_src, var)), do: var
+
+    %{
+      id: "catalogue.install_paths_locked",
+      remediation:
+        "make bin/lcars' default agree with Fleet.Layout (@platform_root, @catalogues_dirname, " <>
+          "@active_catalogues_basename, @state_dirname) — a CLI writing a declaration the runtime " <>
+          "does not read reports success and changes nothing",
+      status:
+        if(not is_nil(expected) and mismatches == [] and missing == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          is_nil(expected) ->
+            [
+              "#{layout}: INSTRUMENT BROKEN — a catalogue path attribute is gone or renamed; " <>
+                "this check measured nothing"
+            ]
+
+          missing != [] ->
+            [
+              "#{cli}: no `${VAR:-default}` for #{inspect(Enum.sort(missing))} — the CLI stopped " <>
+                "carrying the path"
+            ]
+
+          true ->
+            Enum.sort(mismatches)
+        end,
+      note: "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}"
+    }
+  end
+
+  defp read_or_empty(root, rel) do
+    path = Path.join(root, rel)
+    if File.regular?(path), do: File.read!(path), else: ""
+  end
+
+  # `@name "value"` — the literal as the module declares it.
+  defp module_attribute(source, name) do
+    case Regex.run(~r/^\s*@#{name}\s+"([^"]*)"/m, source) do
+      [_, value] -> value
+      nil -> nil
+    end
+  end
+
+  # `VAR="${VAR:-<default>}"` — the DEFAULT only, never the override. An operator pointing the env
+  # elsewhere is answering for both halves themselves; what must agree is what happens when nobody
+  # sets anything, which is every deployment.
+  defp shell_default(source, var) do
+    case Regex.run(~r/\$\{#{var}:-([^}]*)\}/, source) do
+      [_, default] -> default
+      nil -> nil
+    end
   end
 
   # ── A declared capability must be EXERCISABLE ────────────────────────
