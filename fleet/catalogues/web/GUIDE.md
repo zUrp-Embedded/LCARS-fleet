@@ -35,6 +35,36 @@ documentation qui part avec le produit, sur la branche principale, avec une rele
 Conséquence pratique : **quand vous voulez changer un comportement, demandez-vous d'abord si c'est
 une propriété de l'agent ou une propriété du traitement.** La réponse vous dit quel fichier ouvrir.
 
+## 2 bis. Ce qu'un rôle n'est pas
+
+C'est le contresens le plus coûteux, et il se fait dans la première heure.
+
+**Un rôle n'est pas un modèle spécialisé.** Il n'y a pas un « modèle relecteur » plus doué pour la
+revue et un « modèle développeur » plus doué pour le code. C'est **le même modèle sous les six**.
+Ce qui les distingue est entièrement dans le catalogue : des outils différents, un prompt différent,
+une place différente dans le pipeline, une durée de vie différente.
+
+**Les noms sont donc là pour vous.** `dev`, `writer`, `maintainer` disent à un humain qui regarde un
+ticket avancer ce que fait l'agent qui le tient. C'est de la lisibilité, pas de la capacité.
+Renommer `code-reviewer` en `relecteur` ne change strictement rien à ce qu'il sait faire.
+
+**Corollaire, et c'est ce qui vous fera écrire de bons profils** : un cap-profile décrit **ce qu'un
+rôle fait et comment il opère** — ce qu'il a le droit de toucher, ce qu'il reçoit, ce qu'il rend,
+combien de temps il vit. Il ne décrit **jamais** ce dont le modèle est capable.
+
+Alors quand un résultat vous déçoit, l'ordre des questions est :
+
+1. **Le prompt** (`agent-<rôle>-base.md`) — lui ai-je dit ce que j'attends ? C'est presque toujours
+   là.
+2. **Le brief** — le ticket disait-il assez pour qu'on n'ait pas à deviner ?
+3. **Les outils** — a-t-il eu de quoi vérifier ce qu'il affirmait ? Un relecteur sans terminal juge
+   à la lecture.
+4. **`effort` et `model`** — en dernier. C'est la manette qu'on tourne en premier par réflexe, et
+   celle qui rattrape le moins un rôle mal décrit.
+
+(Le jour où un autre fournisseur de modèle est câblé, cette page gagnera une nuance. Elle n'en a pas
+besoin aujourd'hui.)
+
 ## 3. Le faire tourner
 
 Deux variables :
