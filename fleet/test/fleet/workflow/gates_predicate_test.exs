@@ -130,7 +130,15 @@ defmodule Fleet.Workflow.Gates.PredicateTest do
           refute Predicate.eval?("absent_fact", %{})
         end)
 
-      refute log =~ "does not parse"
+      # LE REFUTE NOMME SES PROPRES REGLES, et ce n'est pas de la precision decorative :
+      # `capture_log/1` capture le DEVICE, pas le processus. Le fichier est `async: true`, deux
+      # autres fichiers de test font parler ce meme avertissement, et un refute global tombait donc
+      # quand un voisin ecrivait pendant la fenetre — vert en isolation, rouge en suite complete,
+      # une fois sur quatre. L'intention du test est « CETTE regle ne fait pas rale la machine » :
+      # l'avertissement porte `inspect(term)`, donc le nom de la regle suffit a le dire sans
+      # dependre de qui d'autre journalise au meme instant.
+      refute log =~ "all_tests_pass"
+      refute log =~ "absent_fact"
     end
 
     test "a malformed rule still returns FALSE — the signal is added, the policy is unchanged" do

@@ -48,7 +48,12 @@ ALL_FLAGS='  --system-prompt-file <path>
 @test "contrat tenu : tous les drapeaux presents -> exit 0" {
   fake_claude "$ALL_FLAGS"
   run env CLAUDE_BIN="$FAKEBIN/claude" bash "$PROBE"
-  [ "$status" -eq 0 ]
+  # Le statut est asserte AVANT la sortie, donc un rouge n'apprenait rien : la sonde a trois codes
+  # distincts (0 contrat tenu, 1 contrat rompu, 2 vendor absent ou muet) et savoir LEQUEL est tombe
+  # trancherait entre une fuite d'environnement et une fabrication de faux ratee. Vu une fois en
+  # suite complete le 2026-08-10, vert en isolation et sur tous les rejeux depuis — cause inconnue,
+  # occurrence suivante desormais lisible.
+  [ "$status" -eq 0 ] || { echo "claude_probe exit=$status output: $output" >&3; false; }
   [[ "$output" == *"contrat vendor OK"* ]]
 }
 
