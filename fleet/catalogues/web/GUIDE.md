@@ -75,22 +75,55 @@ besoin aujourd'hui.)
 
 ## 3. Le faire tourner
 
-Deux variables :
+Ce catalogue est **livré avec la boîte, et inactif**. C'est délibéré, et c'est la démonstration du
+mécanisme : installé ne veut pas dire actif. Il est là, lisible, copiable, et il ne fait rien tant
+que personne ne le nomme.
+
+```bash
+lcars catalogue list                 # ce qui est installé, et ce qui tourne
+lcars catalogue verify web           # les contrôles du démarrage, sans démarrer
+lcars catalogue enable web           # ajoute une ligne à la déclaration
+```
+
+`enable` **refuse** un catalogue que `verify` ne passe pas — c'est ce qui fait de la vérification
+une condition d'activation plutôt qu'un outil qu'on peut sauter. Et il ne prétend pas agir à chaud :
+la flotte gèle ses images au démarrage, donc il vous rend le geste qui applique
+(`fleet_v2 stop && fleet_v2 start`).
+
+La déclaration est un fichier ordinaire, et l'**ordre des lignes EST la précédence** :
+
+```
+# ~/.lcars/catalogues.active
+web        # le vôtre, devant
+lcars      # le métier livré avec la boîte — retirez la ligne s'il ne sert plus
+```
+
+Le premier qui porte un fichier gagne. C'est la règle du thème enfant, appliquée à des catalogues
+entiers : vous n'avez pas à tout réécrire pour changer une partie.
+
+**Pour l'essayer sans rien activer**, une variable suffit et n'engage rien :
 
 ```bash
 LCARS_CATALOGUE_ROOT=/opt/lcars/catalogues/web
+```
+
+Elle apporte le catalogue entier — chaque arbre en dérive son chemin. C'est la grosse molette : un
+catalogue, une variable. La déclaration ci-dessus est ce qui permet d'en faire tourner **plusieurs**.
+
+Une seconde variable reste nécessaire dans les deux cas :
+
+```bash
 LCARS_WORKSHOP_CARD=content
 ```
 
-La première apporte le catalogue entier — chaque arbre en dérive son chemin.
-
-La seconde désigne la carte d'**atelier**. Elle est nécessaire parce que c'est la seule chose de
+Elle désigne la carte d'**atelier**. Elle est nécessaire parce que c'est la seule chose de
 tout le contrat qu'un catalogue ne peut pas encore déclarer lui-même : les rôles se résolvent par
 capacité (§6), cette carte-là se désigne par son nom, et le nom par défaut est celui du catalogue de
 LCARS. Sans cette variable, la flotte démarre — avec un avertissement explicite — mais aucun ticket
 d'atelier n'atteint la carte.
 
-Avant de démarrer quoi que ce soit :
+Avant de démarrer quoi que ce soit — `lcars catalogue verify <nom>` depuis la boîte, ou, depuis le
+dépôt, sur un chemin quelconque :
 
 ```bash
 mix lcars.catalogue.verify /chemin/vers/le/catalogue
@@ -266,15 +299,31 @@ de sa base. `jury: []` ne désactive rien de tout ça.
 
 ## 9. Les limites, aujourd'hui
 
-Trois, nommées plutôt que découvertes :
+Deux, nommées plutôt que découvertes.
 
-**Le socle des prompts est recopié dans chaque rôle.** La partie commune aux quatre — le protocole
-de boucle, le sanctuaire, la règle de preuve — est identique dans chaque `agent-<rôle>-base.md`. Le
-catalogue de LCARS la compose depuis des blocs partagés ; l'outil qui fait ça ne sert que lui. Si
-vous modifiez le socle, modifiez-le partout : rien ne vous préviendra.
+**~~Le socle des prompts est recopié dans chaque rôle.~~** ✅ **Levée.** C'était la limite la plus
+coûteuse du lot : les quatre prompts de ce catalogue portaient chacun leur copie du socle commun —
+protocole de boucle, sanctuaire, règle de preuve —, et modifier l'un sans les autres ne déclenchait
+rien.
 
-C'est la limite la plus coûteuse du lot, et le découpage système l'a **réduite sans la supprimer** :
-quatre copies au lieu de six, puisque les prompts de la mécanique ne sont plus les vôtres.
+Le composeur ne sert plus seulement au catalogue de LCARS :
+
+```bash
+mix lcars.sp.gen --catalogue /chemin/vers/mon-catalogue
+```
+
+Il lit `sp_builder/sp_blocks/sp-map.yaml` (rôle → liste ordonnée de blocs) et écrit les
+`agent-<rôle>-base.md`. Et les sept blocs `core/` — ceux qui décrivent le contrat du runtime avec
+son pod — sont **livrés par le système** : vous ne les recopiez pas, vous les héritez. Pour en
+réécrire un, posez un fichier du même nom relatif dans votre catalogue ; le vôtre gagne, sans qu'un
+octet du système bouge.
+
+Ce catalogue-ci reste écrit à la main, et c'est légitime : **un catalogue sans `sp_blocks/` du tout
+est valide**, `verify` le dit. Le composeur est un outil, pas une obligation — mais il est là le
+jour où quatre copies deviennent huit.
+
+L'audit qui va avec refuse les trois désaccords : un rôle sans entrée **ni** prompt, une entrée pour
+un rôle absent, et une entrée **plus** un prompt écrit à la main (composer l'écraserait).
 
 **Les comptes forge de vos rôles se dérivent, mais il faut le demander.** Vos rôles ont besoin d'un
 compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La liste ne se devine pas
@@ -295,10 +344,13 @@ Ce que le script **n'écrit pas** : la recette elle-même. Ce qu'un compte a le 
 une organisation, poser un hook serveur, les équipes — appartient au runtime. Votre catalogue nomme
 ses gens ; il ne décide pas de ce qu'être l'un d'eux permet.
 
-**Le catalogue de référence part quand même avec la boîte.** `LCARS_CATALOGUE_ROOT` décide de ce
-qui est **lu**, pas de ce qui est **livré**. Les deux coexistent dans l'image ; c'est la variable qui
-tranche. Vérifiez la ligne `Catalogue: verified (root=…)` dans les journaux de démarrage — elle dit
-lequel tourne.
+**Le catalogue de référence part quand même avec la boîte.** Ce qui est **livré** et ce qui est
+**lu** sont deux questions distinctes : les deux catalogues coexistent dans l'image, et c'est la
+déclaration d'activité (§3) qui tranche — ou `LCARS_CATALOGUE_ROOT` si vous n'en faites tourner
+qu'un. Retirer la ligne `lcars` de la déclaration cesse de l'utiliser sans rien supprimer.
+
+Vérifiez la ligne `Catalogue: verified (root=…)` dans les journaux de démarrage, et
+`lcars catalogue list` à tout moment — elle dit ce qui tourne, dans l'ordre.
 
 ## 10. Où sont les fichiers
 
@@ -310,6 +362,7 @@ cap_profile/canon/modop-bundles/            les modes opératoires (le texte)
 cap_profile/canon/subagent-templates/       les sous-agents
 cap_profile/canon/config/                   le gabarit de criticité d'un projet
 sp_builder/sp_drafts/                       vos prompts, un par rôle, + les protocoles
+sp_builder/sp_blocks/                       (facultatif) les blocs, si vous composez — cf. §9
 sp_builder/templates/                       les deux gabarits qui assemblent tout prompt
 workflow/canon/workflow_maps/               les trois cartes
 workflow/brief_templates/                   ce qu'on remet aux agents et aux juges
