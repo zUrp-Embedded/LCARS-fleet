@@ -103,9 +103,10 @@ defmodule Fleet.Application do
     # SCOPE of "no longer changes the pods" — the promise names what it covers, because a guarantee
     # written wider than its mechanism is the failure mode this doctrine exists to kill. EVERY piece
     # of load-bearing PROMPT material is in the image and consumed exclusively from it: cap-profiles
-    # + overlays, modop SP fragments, subagent templates, role drafts, role SP bases
-    # (`spec.systemPrompt`), the worker protocole-user, and the two EEx templates that give every
-    # emitted prompt its shape. Under a published image a missing entry is a CLOSED-WORLD error, never
+    # + overlays, modop SP fragments, subagent templates, role drafts, the worker protocole-user,
+    # and the two EEx templates that give every emitted prompt its shape. A role BORROWING another's
+    # SP (`spec.systemPrompt`) needs no entry of its own — it resolves to that role's draft, already
+    # on the list. Under a published image a missing entry is a CLOSED-WORLD error, never
     # a silent re-read of the live file — that fallback is what reopened the epoch where it mattered.
     # OUTSIDE the image, deliberately and exhaustively: the per-project assets a running fleet
     # legitimately rewrites (project maps, briefs, ops docs) — data the pods act ON, never the
