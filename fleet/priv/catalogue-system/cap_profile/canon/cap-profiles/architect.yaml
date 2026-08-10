@@ -12,7 +12,12 @@ metadata:
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
-  role_index: 1
+  # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la
+  # convention se LIT sans documentation : une lettre = un role de la mecanique, un chiffre
+  # = un role metier. `0` reste l'accueil de niveau flotte, parce que 0 est deja la valeur
+  # du « sans dimension » partout ailleurs dans cet UUID (starfleet est minte sur repo 0000).
+  # Ce role portait 1 avant le 2026-08-10 : il occupait un chiffre dont le metier a besoin.
+  role_index: 13   # 0xd
   # PER-PROJECT (reorg 2026-07-19): the architect is a project-bound worker, ONE per active project,
   # spawned on-open by starfleet (repo in its UUID → a stable Desktop slot per repo).
   # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`

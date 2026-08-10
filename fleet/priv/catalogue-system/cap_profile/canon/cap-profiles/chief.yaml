@@ -28,7 +28,12 @@ metadata:
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID. 0..8 taken (vulcan holds the reserved seat 8).
-  role_index: 9
+  # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la
+  # convention se LIT sans documentation : une lettre = un role de la mecanique, un chiffre
+  # = un role metier. `0` reste l'accueil de niveau flotte, parce que 0 est deja la valeur
+  # du « sans dimension » partout ailleurs dans cet UUID (starfleet est minte sur repo 0000).
+  # Ce role portait 9 avant le 2026-08-10 : il occupait un chiffre dont le metier a besoin.
+  role_index: 15   # 0xf
   # `forge_identity` is ABSENT on purpose = true, the norm. It is stated here only because it is
   # the load-bearing decision of this profile: chief SIGNS its resolution. A merge conflict is
   # exactly the moment a human wants to know who touched their code, and the alternative — writes

@@ -29,7 +29,13 @@ defmodule Fleet.CapProfileImageTest do
 
   # Epoch mutation on a SCHEMA-ADMITTED field: metadata.role_index (integer) — bumped to a
   # sentinel value the assertions can read on both regimes.
-  @mutated_role_index 14
+  #
+  # ⚠ THE SENTINEL IS NOT FREE TO CHOOSE, and it stopped being so on 2026-08-10. It was 14, picked
+  # as an arbitrary high number; `publish!/0` now refuses two names on one slot on the MERGED
+  # catalogue, and the slot convention put `gatekeeper` on 14 — so the mutation collided with a
+  # system role and the test died on the guard instead of measuring the epoch. It must be a slot no
+  # role of the SYSTEM catalogue holds (0, d, e, f) and none of the business fixture holds.
+  @mutated_role_index 9
 
   defp mutate_role_index(tmp) do
     path = Path.join(tmp, "engineer.yaml")
@@ -142,9 +148,15 @@ defmodule Fleet.CapProfileImageTest do
     tmp_dir: tmp
   } do
     # The legitimate case the search path made free: a business catalogue overriding `architect`
-    # carries its slot 1 too. It must NOT read as two claims on 1, or the override would be
+    # carries its slot too. It must NOT read as two claims on that slot, or the override would be
     # unusable — which is precisely why the check reads the merged index and not the files.
-    write_twin(tmp, "architect", 1)
+    #
+    # The slot is READ from the system profile rather than typed: it was `1` here, and the slot
+    # convention moved the architect to `d` on 2026-08-10. A literal would have kept passing (same
+    # NAME, one entry, whatever the number) while describing a catalogue that no longer exists —
+    # green prose next to a green test is the hardest kind to notice.
+    {:ok, system_arch} = Fleet.CapProfile.load("architect")
+    write_twin(tmp, "architect", Fleet.CapProfile.role_index(system_arch))
 
     assert :ok = Image.publish!()
   end

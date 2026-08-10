@@ -8,6 +8,25 @@
 # selectionne, est de la mecanique.
 #
 #   starfleet    l'accueil de niveau flotte — role_index 0, existe avant tout projet
+#
+# CONVENTION DE SLOT (2026-08-10). Le `role_index` est un nibble HEX dans l'UUID de session, donc
+# la convention se LIT sans documentation : une LETTRE est un role de la mecanique, un CHIFFRE est
+# un role metier. `0` reste l'accueil — c'est deja la valeur du « sans dimension » partout ailleurs
+# dans cet UUID (starfleet est le seul minte sur repo 0000, parce qu'il n'a pas de projet).
+#
+#   0        starfleet          l'accueil, niveau flotte
+#   d e f    architect gatekeeper chief
+#   a b c    LIBRES — reserves a la mecanique a venir
+#   1 .. 9   le METIER, neuf slots
+#
+# Les trois roles mecaniques portaient 1, 2 et 9 avant cette date : des chiffres dont le metier a
+# besoin, sur une echelle qui n'en compte que seize pour tout le deploiement.
+#
+# CONVENTION DE SLOT, posee le 2026-08-10 : le `role_index` est un nibble hex dans l'UUID de
+# session, donc la convention se LIT sans documentation — une LETTRE (a..f) est un role de la
+# mecanique, un CHIFFRE (1..9) est un role metier. `0` reste l'accueil : c'est deja la valeur du
+# « sans dimension » partout ailleurs dans cet UUID (starfleet est le seul minte sur repo 0000).
+# Les trois autres roles systeme portaient 1, 2 et 9 — des chiffres dont le metier a besoin.
 #   architect    le delegue du projet — le runtime l'`ensure` par depot
 #   gatekeeper   le signataire du sceau — exactement un
 #   chief        le resolveur de conflit tier-2 — exactement un
