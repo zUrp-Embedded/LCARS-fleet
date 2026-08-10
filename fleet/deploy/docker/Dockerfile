@@ -241,6 +241,11 @@ COPY fleet/etc     /opt/lcars/fleet/etc
 # pas et s'efface : fail-open, AUCUN symptome, et la compression annoncee ne tourne jamais. C'est le
 # seul defaut du lot dont personne ne peut s'apercevoir en regardant tourner la fleet.
 COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
+# Les catalogues METIER autres que la reference. Le release embarque `priv/catalogue` et lui seul
+# (mix release ne prend que priv/), donc un catalogue alternatif n'atteint l'image que par ici. Il
+# n'est LU par personne tant qu'aucun LCARS_CATALOGUE_ROOT ne le designe : le poser dans l'image ne
+# change pas quel metier tourne, ca rend seulement le choix possible sans remonter une image.
+COPY fleet/catalogues /opt/lcars/catalogues
 COPY fleet/deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/deploy/docker/console.sh         /opt/lcars/console.sh
 COPY fleet/deploy/docker/console-humans.sh  /opt/lcars/console-humans.sh
