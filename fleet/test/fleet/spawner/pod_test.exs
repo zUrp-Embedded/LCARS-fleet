@@ -625,7 +625,7 @@ defmodule Fleet.Spawner.PodTest do
       :ok
     end
 
-    defp gatekeeper_args(pod_id, opts \\ []) do
+    defp gatekeeper_args(pod_id, opts) do
       # gatekeeper = slot 2 — PROJECT-BOUND since the 2026-07-19 reorg (repo in its UUID): the spawn
       # carries a repo_id, like every non-starfleet pod. Catalog in the metadata.
       #

@@ -482,13 +482,11 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
-    @impl true
     def post_comment(repo, n, body, opts) do
       send(self(), {:post_comment, repo, n, body, opts})
       {:ok, :posted}
     end
 
-    @impl true
     @impl true
     def close_issue(repo, n, opts) do
       send(self(), {:close_issue, repo, n, opts})

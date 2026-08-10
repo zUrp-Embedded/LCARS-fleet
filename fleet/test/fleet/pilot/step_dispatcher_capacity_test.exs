@@ -15,7 +15,6 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
   # after the test, and wrong DURING it for everyone else.
 
-  alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StepDispatcher.Spawn
   alias Fleet.Pilot.StubTaskQueue
 
