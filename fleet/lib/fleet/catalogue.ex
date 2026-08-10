@@ -81,6 +81,7 @@ defmodule Fleet.Catalogue do
   @rel_subagent_templates "cap_profile/canon/subagent-templates"
   @rel_monk_registry "cap_profile/canon/cap-profiles/monks"
   @rel_sp_drafts "sp_builder/sp_drafts"
+  @rel_sp_blocks "sp_builder/sp_blocks"
   @rel_sp_templates "sp_builder/templates"
   @rel_workflow_maps "workflow/canon/workflow_maps"
   @rel_brief_templates "workflow/brief_templates"
@@ -202,8 +203,20 @@ defmodule Fleet.Catalogue do
   def rel(:modops), do: @rel_modops
   def rel(:subagent_templates), do: @rel_subagent_templates
   def rel(:sp_drafts), do: @rel_sp_drafts
+  def rel(:sp_blocks), do: @rel_sp_blocks
   def rel(:sp_templates), do: @rel_sp_templates
   def rel(:skills), do: @rel_skills
+
+  @doc """
+  SP blocks, BUSINESS root (`<root>/#{@rel_sp_blocks}`) — the search path is `search/2`.
+
+  BUILD-TIME material, and the only tree here that a running fleet never reads: the composer turns
+  it into `sp_drafts/`, and the pods read those. It is a catalogue tree all the same, because the
+  system half of it (`core/`) is a shipped DEFAULT an operator supersedes by name, exactly like the
+  two `protocole-user-*`.
+  """
+  @spec sp_blocks_root() :: Path.t()
+  def sp_blocks_root, do: Path.join(root(), @rel_sp_blocks)
 
   @doc "Cap-profile YAMLs, BUSINESS root (`<root>/#{@rel_cap_profiles}`) — the search path is `search/2`."
   @spec cap_profiles_root() :: Path.t()

@@ -3,9 +3,10 @@ defmodule Fleet.SPBuilder.BlocksTest do
 
   alias Fleet.SPBuilder.Blocks
 
-  # `priv` resolved at RUNTIME (the app is started in test) — `_build` mirrors the source at the last compile.
-  defp blocks_dir,
-    do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_blocks")
+  # The BUSINESS blocks root. `core/` is not under it — it lives in the system catalogue and is
+  # reached by the resolver, so a hardcoded path here would compose half the corpus and the
+  # no-drift below would compare a truncated SP to the committed one.
+  defp blocks_dir, do: Fleet.Catalogue.sp_blocks_root()
 
   # Le draft d'un role vit avec le role : mecanique dans le catalogue systeme, metier dans l'autre.
   # Le resolveur repond ou qu'il soit — le tester par un chemin en dur reviendrait a epingler la
@@ -39,6 +40,55 @@ defmodule Fleet.SPBuilder.BlocksTest do
 
       assert committed == Blocks.compose!(role, blocks, blocks_dir()),
              "agent-#{role}-base.md drifted from its blocks → run `mix lcars.sp.gen` and commit"
+    end
+  end
+
+  describe "the blocks are a SEARCH PATH — `core/` is a shipped default, not a buried constant" do
+    @moduletag :tmp_dir
+
+    # A business blocks root of our own, with the REAL system root behind it. Nothing is copied:
+    # what the composer finds under `core/` it finds because the resolver went looking there.
+    defp business_blocks(tmp) do
+      dir = Path.join([tmp, "cat", Fleet.Catalogue.rel(:sp_blocks)])
+      File.mkdir_p!(Path.join(dir, "core"))
+      dir
+    end
+
+    test "a business catalogue with NO core/ still composes — the system default is found", %{
+      tmp_dir: tmp
+    } do
+      sp = Blocks.compose!("x", ["core/runtime-contract"], business_blocks(tmp))
+
+      assert sp =~ "submit_result",
+             "the system core/ block was not reached — the composer read one root"
+    end
+
+    test "a business block at the same relative path WINS, and nothing is written to the system",
+         %{tmp_dir: tmp} do
+      dir = business_blocks(tmp)
+
+      system_file =
+        Path.join([
+          Fleet.Catalogue.system_root(),
+          "sp_builder/sp_blocks/core/runtime-contract.md"
+        ])
+
+      before = File.read!(system_file)
+
+      File.write!(
+        Path.join(dir, "core/runtime-contract.md"),
+        "MINE, and in Esperanto if I want.\n"
+      )
+
+      sp = Blocks.compose!("x", ["core/runtime-contract"], dir)
+      assert sp =~ "MINE, and in Esperanto"
+      refute sp =~ "submit_result"
+
+      # The child-theme property: the default is untouched on disk, so removing the override
+      # restores it. Superseding happens at READ time — this is the half a `cp` would break.
+      assert File.read!(system_file) == before
+      File.rm!(Path.join(dir, "core/runtime-contract.md"))
+      assert Blocks.compose!("x", ["core/runtime-contract"], dir) =~ "submit_result"
     end
   end
 

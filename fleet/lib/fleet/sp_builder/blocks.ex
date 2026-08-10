@@ -3,16 +3,36 @@ defmodule Fleet.SPBuilder.Blocks do
   Deterministic per-role system-prompt composition from an ordered block map.
   Blocks carry substrate contracts only; higher-domain contracts arrive through
   briefs. Missing roles or blocks fail hard.
+
+  ## The blocks are a SEARCH PATH, and `core/` is a shipped default
+
+  A block name is resolved through `Fleet.Catalogue.find/3`, business root first — so the seven
+  `core/` blocks live in the system catalogue and an author supersedes one by writing a file at the
+  same relative path. Nothing is written to the system's disk; remove the override and its default
+  is back, intact.
+
+  Why they are there rather than in a runtime tree with no door: `core/` is 148 lines of FRENCH
+  prose describing the runtime contract, and a deployment that rewrites its prompts in another
+  language would receive it untouched under English SPs. Franglais by construction. What the
+  runtime actually owns are the IDENTIFIERS the prose carries — `get_work_item`, `submit_result`,
+  `work_item_id`, `brief_ref`, `Monitor`, `watch.sh`, `turn.flag`, `LCARS_POD_DIR`,
+  `halt_wait_input`, `engage` — and those survive a rewrite because the runtime sends and reads
+  them. The identifiers are the contract; the FILE is a default.
+
+  `sp-map.yaml` is deliberately NOT on the search path: it is the author's manifest, not a default.
+  A catalogue that composes brings its own; one that ships hand-written drafts needs none.
   """
 
   # `Date:` up front → satisfies the GO-7 hook (`<!--\s*Date\s*:`) without polluting the SP with a visible
   # markdown header. STATIC date (not `Date.utc_today`): generation must stay deterministic (the no-drift
   # test compares the committed flat to a regeneration — a dynamic date would break it the next day). The
   # header text stays FR: it is SP-file content (pod-facing convention).
-  @header "<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis priv/sp_builder/sp_blocks/. " <>
+  @header "<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis sp_builder/sp_blocks/. " <>
             "NE PAS ÉDITER (édite les blocs). Bloc ou rôle manquant → échec dur (no-fallback, cf. no-sp-no-pod-no-fleet). -->"
 
-  @doc "Role → ordered block list, read from `<blocks_dir>/sp-map.yaml`."
+  @doc """
+  Role → ordered block list, read from `<blocks_dir>/sp-map.yaml` — the BUSINESS root only.
+  """
   @spec role_map(Path.t()) :: %{String.t() => [String.t()]}
   def role_map(blocks_dir) do
     blocks_dir |> Path.join("sp-map.yaml") |> YamlElixir.read_from_file!()
@@ -61,8 +81,12 @@ defmodule Fleet.SPBuilder.Blocks do
     if File.regular?(system), do: system, else: Path.join(drafts_dir, file)
   end
 
+  # Resolved through the catalogue door, so `core/*` reaches the system default while an author's
+  # own block at the same relative path wins. The refusal names the path the resolver LANDED on,
+  # never the one it looked for first: reading "core/runtime-contract.md unreadable" under the
+  # business root while the system copy exists would send its reader to fix the wrong tree.
   defp read_block!(role, block, blocks_dir) do
-    path = Path.join(blocks_dir, block <> ".md")
+    path = Fleet.Catalogue.find(blocks_dir, Fleet.Catalogue.rel(:sp_blocks), block <> ".md")
 
     case File.read(path) do
       {:ok, content} ->

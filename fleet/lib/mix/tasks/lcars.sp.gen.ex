@@ -1,7 +1,8 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
   # Z4 — Mix task classified into the boundary of its subject (Fleet.SPBuilder).
   use Boundary, classify_to: Fleet.SPBuilder
-  @shortdoc "Compose per-role SPs: priv/sp_blocks/ → priv/sp_drafts/agent-<role>-base.md"
+
+  @shortdoc "Compose per-role SPs: sp_builder/sp_blocks/ -> sp_builder/sp_drafts/agent-<role>-base.md"
   @moduledoc """
   Generates committed per-role system prompts through `Fleet.SPBuilder.Blocks`.
 
@@ -11,22 +12,23 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   """
   use Mix.Task
 
-  # SOURCE path (compile-time) of `priv/sp_builder/`, robust to the cwd: this file lives under
-  # `lib/mix/tasks/`. The `/sp_builder` segment is required (Z3: priv is namespaced per domain);
-  # this RELATIVE Path.expand is not a `:code.priv_dir`, so no sweep tooling tracks it — without
-  # the segment the task crashes on a missing sp-map.yaml (the ONLY tool that regenerates the SPs).
-  # The two ends live on OPPOSITE sides of the runtime/catalogue frontier since `5103eac50`, so one
-  # root can no longer serve both: `sp_blocks` is BUILD-TIME material (its only reader is this task,
-  # it ships in no catalogue), while the generated `sp_drafts` are catalogue — they move with it.
-  @blocks Path.expand("../../../priv/sp_builder/sp_blocks", __DIR__)
-  @drafts Path.expand("../../../priv/catalogue/sp_builder/sp_drafts", __DIR__)
-
+  # BOTH ends are catalogue trees now, resolved through `Fleet.Catalogue` rather than by a relative
+  # `Path.expand` from this file. The blocks stopped being an orphan build-time tree when `core/`
+  # went into the system catalogue as a supersedable default; the two halves are then read by ONE
+  # search path, which no hardcoded pair of paths can express.
+  #
+  # These resolve under `_build`, and the writes still land in the SOURCE tree: Mix symlinks
+  # `_build/<env>/lib/<app>/priv` to it. That symlink is what makes a generator addressing the
+  # app_dir correct rather than a way to write into a build artifact nobody commits.
   @impl Mix.Task
   def run(_argv) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
     roles =
-      Fleet.SPBuilder.Blocks.generate!(@blocks, @drafts)
+      Fleet.SPBuilder.Blocks.generate!(
+        Fleet.Catalogue.sp_blocks_root(),
+        Fleet.Catalogue.sp_drafts_root()
+      )
 
     Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
   end
