@@ -290,8 +290,11 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       p
     end
 
-    assert Fleet.CapProfile.has_capability?(cap.("architect"), :onboarder)
     assert Fleet.CapProfile.has_capability?(cap.("architect"), :project_delegate)
+    # The architect is NOT an onboarder: enrolling a project into the fleet is done from outside
+    # any project, and this role lives inside one. It declared the capability and carried no tool
+    # the capability gates — a permission that granted nothing and described nothing.
+    refute Fleet.CapProfile.has_capability?(cap.("architect"), :onboarder)
     assert Fleet.CapProfile.has_capability?(cap.("starfleet"), :onboarder)
     refute Fleet.CapProfile.has_capability?(cap.("starfleet"), :project_delegate)
     assert Fleet.CapProfile.has_capability?(cap.("gatekeeper"), :exception_judge)

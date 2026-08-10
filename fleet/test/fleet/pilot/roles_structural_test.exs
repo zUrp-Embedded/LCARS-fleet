@@ -143,8 +143,12 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "une capability legitimement multiple n'est PAS une erreur", %{dir: dir} do
-    # `onboarder` est porte par architect ET starfleet dans le canon : l'unicite est une propriete
-    # du concept APPELANT (le role structurel), pas du catalogue.
+    # L'unicite est une propriete du concept APPELANT (le role structurel), pas du catalogue.
+    # `onboarder` n'a pas d'appelant qui resout : c'est un PREDICAT sur un pod (`require_onboarder`
+    # repond oui/non a celui qui frappe), jamais une recherche « qui est l'onboarder ». Rien n'a
+    # donc a departager deux porteurs. Ce test tenait auparavant sur un tout autre motif — « le
+    # canon en porte deux » — qui n'est plus vrai depuis que l'architect a rendu la capacite, et
+    # qui n'aurait de toute facon decrit qu'un inventaire.
     write_role!(dir, "alpha", ["onboarder"])
     write_role!(dir, "beta", ["onboarder"])
 

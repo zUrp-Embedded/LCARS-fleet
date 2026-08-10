@@ -1402,13 +1402,16 @@ defmodule Fleet.MCP.PodToolsTest do
   # Server-side architect gate of the privileged tools
   # ============================================================
   #
-  # `create_project`, `import_project`, `create_issue`, `get_issue_status` require the `architect`
-  # role resolved from the channel's pod_id. Any non-architect role (engineer, reviewer, nil/unknown
-  # role), an unknown pod, or a state without pod_id → REFUSAL on all 4 tools; architect → passes.
+  # TWO gates, not one, and they resolve two DIFFERENT capabilities from the channel's pod_id:
+  # `require_onboarder` (the portfolio verbs: create/import/open/adopt/close/revise/delete, plus the
+  # card listing that frames them) and `require_architect` (the delegation verbs, inside one repo).
+  # An unknown pod or a state without pod_id is refused by both.
   describe "list_workflow_cards (the framing catalogue — the card choice IS the declaration)" do
     setup do
+      # starfleet, not the architect: framing the choice of a card is part of ENROLLING a project,
+      # which happens from outside any project.
       TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
-        {:ok, %{role: "architect"}}
+        {:ok, %{role: "starfleet"}}
       end)
 
       :ok
@@ -1532,10 +1535,10 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "onboarding + delegation gates (the arch's two heads, reorg 2026-07-19)" do
+  describe "onboarding + delegation gates (two heads, two ROLES)" do
     @describetag :tmp_dir
 
-    # Privileged tools split along the arch's two heads. VALID business args so ONLY the role decides.
+    # Privileged tools split along the two gates. VALID business args so ONLY the role decides.
     @onboarding_tools [
       {"create_project", %{"name" => "demo-proj"}},
       {"import_project", %{"full_name" => "fleet/demo-proj"}},
@@ -1560,10 +1563,15 @@ defmodule Fleet.MCP.PodToolsTest do
     ]
     @privileged_tools @onboarding_tools ++ @delegation_tools
 
-    # Neither onboarder nor architect → refused EVERYWHERE. `nil` models a pod without an engraved role
-    # (incomplete binding) — refused too (fail-closed, never access through an absent role).
-    @non_onboarder_roles ["engineer", "reviewer", "scout", nil]
-    # Not the delegation head: starfleet IS an onboarder but NOT an architect → refused on delegation.
+    # `nil` models a pod without an engraved role (incomplete binding) — refused too (fail-closed,
+    # never access through an absent role).
+    #
+    # `architect` is on THIS list, and that is the whole point of the split: it is the delegation
+    # head and NOT an onboarder. It used to declare the capability while carrying none of the tools
+    # the capability gates — a permission that granted nothing, and that made every reader (this
+    # file included) describe the arch as having "two heads".
+    @non_onboarder_roles ["engineer", "reviewer", "scout", "architect", nil]
+    # Symmetrically: starfleet IS an onboarder but NOT the delegation head → refused on delegation.
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
 
     setup %{tmp_dir: tmp} do
@@ -1688,10 +1696,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "DPF-04: delete_project response carries local-dir verdicts — never dropped" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
-        {:ok, %{role: "architect", repo: "fleet/demo"}}
+        {:ok, %{role: "starfleet"}}
       end)
 
-      pod = uniq("pod-arch")
+      pod = uniq("pod-sf")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -1735,19 +1743,27 @@ defmodule Fleet.MCP.PodToolsTest do
       assert result["note"] =~ "FUTURS"
     end
 
-    test "architect → the privileged tools PASS the gate (no :forbidden / :pod_unknown)" do
+    test "architect: ADMITTED on delegation, REFUSED on onboarding (the mirror of starfleet)" do
       # The arch is project-bound (reorg 2026-07-19): the resolver carries its repo binding.
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
-      for {tool, biz_args} <- @privileged_tools do
+      for {tool, biz_args} <- @delegation_tools do
         pod = uniq("pod-arch")
         result = PodTools.handle_tool_call(tool, biz_args, pod_state(pod))
 
         # architect → the gate lets it through: business :ok result (forge/onboard stubs).
         assert match?({:ok, _, _}, result),
-               "tool=#{tool}: architect should pass the gate and get a business :ok (#{inspect(result)})"
+               "tool=#{tool}: architect should pass the delegation gate and get a business :ok (#{inspect(result)})"
+      end
+
+      # And the other head is CLOSED to it. Enrolling a project happens from outside any project;
+      # this role lives inside one.
+      for {tool, biz_args} <- @onboarding_tools do
+        assert {:error, :forbidden_not_onboarder, _} =
+                 PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-arch"))),
+               "tool=#{tool}: the architect is not an onboarder"
       end
     end
   end

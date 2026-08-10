@@ -19,7 +19,13 @@ metadata:
   # (effective_project). Narrow focal length = the box it cannot reach out of.
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
-  capabilities: [onboarder, project_delegate]
+  # `onboarder` was here and is GONE: onboarding means enrolling a project into the fleet, and this
+  # role lives INSIDE one project. The capability was inert anyway — `require_onboarder` guards the
+  # portfolio tools (create/import/open/adopt/close/revise), and `allowedTools` below carries none
+  # of them, by the same reorg that wrote the comment there. So the declaration granted nothing and
+  # described nothing; it only made `onboarder` look like a capability with two carriers, which is
+  # the fact the cardinality regimes were reasoned from.
+  capabilities: [project_delegate]
   # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
   brief_kind: worker
   # Fleet AND human on the same terminal: the machine kicks this pod (`wake_send_keys: true`,
