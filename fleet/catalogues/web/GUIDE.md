@@ -302,9 +302,19 @@ de sa base. `jury: []` ne désactive rien de tout ça.
 Deux, nommées plutôt que découvertes.
 
 **~~Le socle des prompts est recopié dans chaque rôle.~~** ✅ **Levée.** C'était la limite la plus
-coûteuse du lot : les quatre prompts de ce catalogue portaient chacun leur copie du socle commun —
-protocole de boucle, sanctuaire, règle de preuve —, et modifier l'un sans les autres ne déclenchait
-rien.
+coûteuse du lot, et sa forme exacte vaut d'être dite parce qu'elle explique le mécanisme.
+
+Mesuré sur les quatre prompts de ce catalogue (432 lignes) : **27 lignes de fond sont partagées, par
+DEUX ou TROIS d'entre eux — aucune par les quatre.** Le sanctuaire est dans trois, l'armement du
+réveil dans deux (les juges ne vivent pas assez longtemps pour être réveillés), le contrat de
+livrable dans deux (seuls les producteurs rendent du code).
+
+C'est pour ça que `sp-map.yaml` est une **liste par rôle** et pas un préambule global : la
+duplication n'a jamais eu la forme d'un socle unique recopié quatre fois, elle a la forme de
+plusieurs blocs partagés par des sous-ensembles différents. La carte des blocs épouse cette forme —
+chaque rôle nomme les siens.
+
+Et modifier l'une de ces 27 lignes dans un seul prompt ne déclenchait rien.
 
 Le composeur ne sert plus seulement au catalogue de LCARS :
 
