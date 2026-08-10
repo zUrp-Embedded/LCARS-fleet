@@ -98,30 +98,60 @@ ensure_passwords_entries() {
 # A4 (write:repository,write:issue) répond 403 même sur soi. La seule voie recette est donc la
 # basic-auth PAR COMPTE du passwords-file — la même mécanique que le mint A4, les bots gardent
 # le seed. Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
-members_hidden() { # $1=liste de comptes → sous-liste dont l'adhésion n'est PAS publique
-  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok="" acct code hidden=""
+forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
+  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok=""
   local -a auth=()
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
   [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
-  for acct in $1; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
-            "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/public_members/$acct" 2>/dev/null || true)"
-    [[ "$code" == "204" ]] || hidden="$hidden $acct"
-  done
-  printf '%s' "${hidden# }"
+  curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
+       "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
 }
 
+# TROIS états, pas deux — et c'est tout le correctif. `public_members/<u>` rend 404 aussi bien pour
+# un membre qui se cache que pour quelqu'un qui n'est PAS membre (mesuré : `chief` membre caché 404,
+# `nonmember` 404). Les traiter pareil produisait une consigne inapplicable — « rends ton adhésion
+# publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
+# team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
+# membre / 404 non-membre) et c'est la sonde qui manquait.
+member_state() { # $1=compte → visible | hidden | absent
+  [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
+  if [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/public_members/$1")" == "204" ]]; then
+    printf 'visible'
+  else
+    printf 'hidden'
+  fi
+}
+
+members_in_state() { # $1=état recherché, $2=liste → sous-liste
+  local acct out=""
+  for acct in $2; do [[ "$(member_state "$acct")" == "$1" ]] && out="$out $acct"; done
+  printf '%s' "${out# }"
+}
+
+members_hidden() { members_in_state hidden "$1"; }
+
 check_members_visible() {
-  local hidden
+  local hidden absent
+  absent="$(members_in_state absent "$ACCOUNTS")"
   hidden="$(members_hidden "$ACCOUNTS")"
+
+  # Un compte sans adhésion a un jeton et AUCUN droit d'écriture : il échoue au premier geste, et
+  # tard, parce que la recette ne l'a placé dans aucune team. Le publiciser n'y ferait rien.
+  [[ -n "$absent" ]] && p_drift \
+    "comptes SANS adhésion à l'org :$(printf ' %s' $absent) — jeton valide, zéro droit d'écriture. La recette ne les place dans aucune team (vérifier les listes writers/judges/externals)"
+
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"
   else
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — l'apply les publicise (basic-auth par compte)"
   fi
+
   # L'humain : sonde seule, geste instruit — jamais convergé ici (cf. en-tête, point 3).
-  if account_exists "$PROV_HUMAN" && [[ -n "$(members_hidden "$PROV_HUMAN")" ]]; then
-    p_drift "adhésion org de $PROV_HUMAN privée — geste utilisateur : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)"
+  if account_exists "$PROV_HUMAN"; then
+    case "$(member_state "$PROV_HUMAN")" in
+      hidden) p_drift "adhésion org de $PROV_HUMAN privée — geste utilisateur : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
+      absent) p_drift "$PROV_HUMAN n'est membre d'aucune team de $PROV_FORGE_ORG — il ne verra pas les dépôts de l'org (team humans, lecture)" ;;
+    esac
   fi
 }
 
