@@ -1,14 +1,21 @@
 # Role → SP block map. List order = assembly order; `role/*` always last.
-# The generator (`mix lcars.sp.gen`) composes these blocks → `priv/sp_builder/sp_drafts/agent-<role>-base.md`.
+# The generator (`mix lcars.sp.gen`) composes these blocks → `<catalogue>/sp_builder/sp_drafts/agent-<role>-base.md`.
+# Block names resolve on the SEARCH PATH: `core/*` comes from the system catalogue unless a file of
+# the same relative path sits here. This map is NOT on that path — it is the author's manifest.
 #
-# HARD RULE (no-fallback, cf. memory no-sp-no-pod-no-fleet): a catalogue role with no entry here, OR a listed
-# block absent from disk → the generator FAILS (fail-loud). No SP → no pod → no fleet.
-# A non-regression test checks: all blocks exist + the committed flat == the regeneration (no-drift).
+# HARD RULE (no-fallback, cf. memory no-sp-no-pod-no-fleet). Every catalogue role owes EXACTLY ONE
+# source for its SP: an entry here, or a draft. Never both, never neither. The generator refuses all
+# three disagreements before composing anything (`Blocks.audit!/2`), and a listed block absent from
+# disk fails at compose time. No SP → no pod → no fleet.
+#
+# ⚠ Until 2026-08-10 this header promised the first half and NOTHING enforced it: `generate!/2`
+# iterates THIS MAP, never the catalogue, so a role in neither was simply not generated and died far
+# later at spawn with `:agent_draft_missing`. The comment described the code it should have had — it
+# now describes the code that exists.
 #
 # NB: `architect` AND `starfleet` (user-facing orchestrators, outside the pod socle) are NOT here — each
-# keeps a manual draft (a different socle: a human in front — one per-project, one fleet-level). All other
-# roles spawned via `assets.ex` are covered → the no-fallback flip of `read_agent_draft` is done (no more
-# worker-base fallback).
+# keeps a manual draft (a different socle: a human in front — one per-project, one fleet-level). That is
+# the legitimate "draft, no entry" case, and the audit passes it silently.
 
 # --- PR judges (judge the diff in their workspace) ---
 qualifier:

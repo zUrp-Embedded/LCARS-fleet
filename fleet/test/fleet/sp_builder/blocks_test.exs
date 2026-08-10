@@ -104,6 +104,62 @@ defmodule Fleet.SPBuilder.BlocksTest do
     end
   end
 
+  describe "audit!: every role owes EXACTLY ONE source for its SP" do
+    # Measured against the REAL tree on purpose. Each case below needs one real property — a role
+    # that exists, a draft that is hand-written, a name that exists nowhere — and a fixture would
+    # only prove the fixture. `architect` is the hand-written twin, and that is not incidental: it
+    # is the role the "both" refusal must protect.
+
+    test "the bundled catalogue passes its own audit" do
+      assert :ok = Blocks.audit!(roster!(), Blocks.role_map(blocks_dir()))
+    end
+
+    test "NEITHER an entry nor a draft → refused, and the role is named" do
+      assert_raise RuntimeError, ~r/ghost-role-xyz carry NEITHER/, fn ->
+        Blocks.audit!(["ghost-role-xyz"], %{})
+      end
+    end
+
+    test "an entry for a role the catalogue does not carry → refused (blocks for a ghost)" do
+      # Never fatal at spawn — nothing spawns a role that does not exist — which is exactly why
+      # nothing would ever report it.
+      assert_raise RuntimeError, ~r/nobody are named by sp-map.yaml/, fn ->
+        Blocks.audit!(["engineer"], %{"nobody" => ["core/runtime-contract"]})
+      end
+    end
+
+    test "an entry AND a hand-written draft → refused before composing overwrites it" do
+      assert_raise RuntimeError, ~r/architect carry BOTH/, fn ->
+        Blocks.audit!(["architect"], %{"architect" => ["core/runtime-contract"]})
+      end
+    end
+
+    test "a draft and NO entry is the hand-written family — silent, not a violation" do
+      assert :ok = Blocks.audit!(["architect", "starfleet"], %{})
+    end
+
+    test "every disagreement is named at once, not the first one" do
+      # An operator fixes a catalogue in one pass. Reporting one fault per run turns a three-line
+      # fix into three edit-run cycles, which is how the third one gets skipped.
+      message =
+        assert_raise RuntimeError, fn ->
+          Blocks.audit!(["architect", "ghost-role-xyz"], %{
+            "architect" => ["core/runtime-contract"],
+            "nobody" => ["core/runtime-contract"]
+          })
+        end
+
+      assert message.message =~ "ghost-role-xyz carry NEITHER"
+      assert message.message =~ "nobody are named by sp-map.yaml"
+      assert message.message =~ "architect carry BOTH"
+    end
+
+    defp roster! do
+      {:ok, roster} = Fleet.CapProfile.forge_roster()
+      Enum.map(roster, & &1.name)
+    end
+  end
+
   test "catalog completeness: each pod role has its own SP (the no-fallback flip would brick its spawn otherwise)" do
     # Roles spawned via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap pods). `architect` and
     # `starfleet` keep a HISTORICAL/manual draft (user-facing socle — one per-project, one fleet-level —

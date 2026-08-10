@@ -52,6 +52,73 @@ defmodule Fleet.SPBuilder.Blocks do
         "SP blocks: role #{inspect(role)} has no blocks in sp-map.yaml (no-fallback: no SP → no pod)"
       )
 
+  # A generated draft SAYS SO, in its first line. That marker is what tells a composed SP from a
+  # hand-written one, and `audit!/2` needs the distinction: overwriting someone's hand-written SP
+  # because a block map happened to name its role is the one destructive thing this generator could
+  # do. Matching the header text rather than a side file keeps the fact ON the artifact.
+  @generated_marker "GÉNÉRÉ par `mix lcars.sp.gen`"
+
+  @doc """
+  Refuses a catalogue whose ROLES and BLOCKS disagree, naming every disagreement at once.
+
+  `sp-map.yaml` has carried this promise in its header since it was written — *"a catalogue role
+  with no entry here → the generator FAILS (fail-loud)"* — and nothing enforced it: `generate!/2`
+  iterates the MAP, never the catalogue, so a role absent from both simply was not generated and
+  died much later at spawn with `:agent_draft_missing`. The comment described the code it should
+  have had.
+
+  Three disagreements, and the asymmetry between them is the model:
+
+    * a role with **neither** a map entry nor a draft — the promised refusal. It has no SP, and no
+      SP means no pod.
+    * a map entry naming a role the catalogue does **not** carry — blocks composed for a ghost. Not
+      fatal at spawn, which is exactly why nothing would ever report it.
+    * a map entry **and** a hand-written draft — two sources for one SP, and the generator would
+      silently overwrite the hand-written one. A GENERATED draft is not a conflict: that is the
+      normal state after composing, and it is what the marker distinguishes.
+
+  A role with a draft and no map entry is legitimate and NOT reported: that is the hand-written
+  family (the architect and starfleet twins, and every role of a catalogue that composes nothing).
+  """
+  @spec audit!([String.t()], %{String.t() => [String.t()]}) :: :ok
+  def audit!(roles, map) when is_list(roles) and is_map(map) do
+    mapped = MapSet.new(Map.keys(map))
+    known = MapSet.new(roles)
+
+    ghosts = mapped |> MapSet.difference(known) |> Enum.sort()
+
+    orphans =
+      Enum.sort(for r <- roles, not MapSet.member?(mapped, r), not has_draft?(r), do: r)
+
+    doubles =
+      Enum.sort(for r <- roles, MapSet.member?(mapped, r), hand_written?(r), do: r)
+
+    problems =
+      [
+        {orphans, "carry NEITHER an sp-map entry NOR a draft (no SP means no pod)"},
+        {ghosts, "are named by sp-map.yaml and absent from the catalogue (blocks for a ghost)"},
+        {doubles,
+         "carry BOTH an sp-map entry and a HAND-WRITTEN draft — composing would overwrite it"}
+      ]
+      |> Enum.reject(fn {names, _} -> names == [] end)
+      |> Enum.map_join("; ", fn {names, why} -> "#{Enum.join(names, ", ")} #{why}" end)
+
+    if problems != "" do
+      raise "SP blocks: #{problems}. Each role owes exactly one source for its SP — a block list " <>
+              "or a draft, never both, never neither (no-fallback)."
+    end
+
+    :ok
+  end
+
+  defp has_draft?(role), do: role |> Fleet.SPBuilder.sp_draft_path() |> File.regular?()
+
+  defp hand_written?(role) do
+    path = Fleet.SPBuilder.sp_draft_path(role)
+
+    File.regular?(path) and not String.contains?(File.read!(path), @generated_marker)
+  end
+
   @doc """
   Generate ALL `agent-<role>-base.md` flats from the map, into `drafts_dir`. Returns the generated roles.
   """
