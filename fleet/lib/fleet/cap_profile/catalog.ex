@@ -407,26 +407,23 @@ defmodule Fleet.CapProfile.Catalog do
   """
   @spec snapshot_overlays() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_overlays do
-    # Both roots, same rule as the roles: a modop name held on both sides is a refusal. A name must
-    # mean ONE thing — two `rubber-duck` fragments under one deployment is a coin toss over what an
-    # agent is told, decided by directory order.
+    # Search path, precedence order, FIRST WINS — same rule as the roles and the SP fragments. A
+    # business `rubber-duck` overlay replaces the system's; declaring nothing is the point.
     root_dirs()
     |> Enum.flat_map(&Path.wildcard(Path.join([&1, "modop", "*/profile.yaml"])))
     |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
       name = path |> Path.dirname() |> Path.basename()
 
-      cond do
-        Map.has_key?(acc, name) ->
-          {:halt, {:error, {:overlay_collision, name}}}
-
-        true ->
-          with {:ok, raw} <- decode_yaml(path),
-               :ok <- Schema.validate_modop_keys(raw),
-               :ok <- Schema.validate(raw, :modop) do
-            {:cont, {:ok, Map.put(acc, name, raw)}}
-          else
-            {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
-          end
+      if Map.has_key?(acc, name) do
+        {:cont, {:ok, acc}}
+      else
+        with {:ok, raw} <- decode_yaml(path),
+             :ok <- Schema.validate_modop_keys(raw),
+             :ok <- Schema.validate(raw, :modop) do
+          {:cont, {:ok, Map.put(acc, name, raw)}}
+        else
+          {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
+        end
       end
     end)
   end
@@ -449,37 +446,23 @@ defmodule Fleet.CapProfile.Catalog do
   Absent directories are dropped so a test root or a narrow catalogue does not have to exist twice.
   """
   @spec root_dirs() :: [String.t()]
-  def root_dirs do
-    Enum.filter(
-      [Path.join(Fleet.Catalogue.system_root(), "cap_profile/canon/cap-profiles"), root_dir()],
-      &File.dir?/1
-    )
-  end
+  def root_dirs, do: Fleet.Catalogue.search(root_dir(), Fleet.Catalogue.rel(:cap_profiles))
 
-  # Union of several role indexes, REFUSING a name held on both sides.
+  # Union of the search path's role indexes, in PRECEDENCE order — the first root that carries a
+  # name wins, and the later one is not read.
   #
-  # Refusal and not precedence, in either direction: "the business wins" would let a catalogue
-  # redefine the seal's signatory, and "the system wins" would silently ignore a role its author
-  # believes is running. Both are worse than a boot that names the collision.
+  # It REFUSED a name held on both sides until 2026-08-10. Refusing made overriding impossible,
+  # which is the opposite of what a default catalogue is for: a business catalogue that ships its
+  # own `architect.yaml` means to replace the system's, and it should not have to declare it — the
+  # child-theme rule, and the reason a search path costs nothing to extend.
+  #
+  # A collision INSIDE one root stays a refusal (`name_index/1`): two files claiming one name in the
+  # same catalogue is an ambiguity its author can only have made by accident.
   defp union_indexes(dirs) do
     Enum.reduce_while(dirs, {:ok, %{}}, fn dir, {:ok, acc} ->
       case name_index(dir) do
-        {:ok, index} ->
-          case Enum.filter(Map.keys(index), &Map.has_key?(acc, &1)) do
-            [] ->
-              {:cont, {:ok, Map.merge(acc, index)}}
-
-            clashes ->
-              Logger.error(
-                "Catalog: #{inspect(Enum.sort(clashes))} defined in TWO catalogue roots — a " <>
-                  "business catalogue may not redefine a system role (dir: #{dir})"
-              )
-
-              {:halt, {:error, {:root_collision, Enum.sort(clashes)}}}
-          end
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
+        {:ok, index} -> {:cont, {:ok, Map.merge(index, acc)}}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end

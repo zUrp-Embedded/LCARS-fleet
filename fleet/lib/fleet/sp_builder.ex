@@ -195,12 +195,11 @@ defmodule Fleet.SPBuilder do
   @spec filter_skills(Fleet.CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
   def filter_skills(%Fleet.CapProfile{} = cap_profile, skills_root)
       when is_binary(skills_root) do
-    # BOTH roots, and this one was found the hard way: `starfleet` declares `card-revision`, the
-    # skill moved to the system catalogue with the role that needs it, and the permanent pod
-    # respawn-looped on `{:skills_missing, ["card-revision"]}`. A role and the material it declares
-    # must resolve from the same union — anything else means a catalogue can carry a role it cannot
-    # actually equip.
-    roots = with_system_root(skills_root, "skills/canon")
+    # THE resolver, like every other reader — a role and the material it declares resolve from the
+    # same search path, or a catalogue can carry a role it cannot equip (W-11: `starfleet` declares
+    # `card-revision`, the skill followed the role into the system catalogue, and the permanent pod
+    # respawn-looped every five seconds).
+    roots = Fleet.Catalogue.search(skills_root, Fleet.Catalogue.rel(:skills))
 
     if roots == [] do
       {:error, :skills_root_missing}
@@ -306,7 +305,7 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_modop_fragments_from_disk(modop_bundles) do
-    roots = with_system_root(modop_root(), "cap_profile/canon/modop-bundles")
+    roots = Fleet.Catalogue.search(modop_root(), Fleet.Catalogue.rel(:modops))
 
     result =
       Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
@@ -322,14 +321,6 @@ defmodule Fleet.SPBuilder do
       {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
       error -> error
     end
-  end
-
-  # The roots a tree may live in: the SYSTEM catalogue first, then the business one. The system
-  # root is never skipped — the four mechanism roles' material has to be readable whatever an
-  # operator points their own keys at — and an absent directory is dropped so the system catalogue
-  # ships only what it needs.
-  defp with_system_root(business, rel) do
-    Enum.filter([Path.join(Fleet.Catalogue.system_root(), rel), business], &File.dir?/1)
   end
 
   defp read_first_modop([], name), do: {:error, {:modop_bundle_missing, name}}
@@ -370,13 +361,12 @@ defmodule Fleet.SPBuilder do
 
       nil ->
         subagent_template_root()
-        |> with_system_root("cap_profile/canon/subagent-templates")
-        |> Enum.find_value(:error, fn root ->
-          case File.read(Path.join(root, "subagent-#{name}.md")) do
-            {:ok, content} -> {:ok, content}
-            {:error, _} -> nil
-          end
-        end)
+        |> Fleet.Catalogue.find(Fleet.Catalogue.rel(:subagent_templates), "subagent-#{name}.md")
+        |> File.read()
+        |> case do
+          {:ok, content} -> {:ok, content}
+          {:error, _} -> :error
+        end
     end
   end
 
@@ -431,15 +421,13 @@ defmodule Fleet.SPBuilder do
   the file an author would have to create. The two protocol files are NOT resolved this way: they
   are the operator's conversation contract, and only the business catalogue carries them.
   """
-  @spec sp_draft_path(String.t()) :: String.t()
+  @spec sp_draft_path(String.t()) :: Path.t()
   def sp_draft_path(role) when is_binary(role) do
-    file = "agent-#{role}-base.md"
-    business = Path.join(sp_drafts_root(), file)
-
-    sp_drafts_root()
-    |> with_system_root("sp_builder/sp_drafts")
-    |> Enum.map(&Path.join(&1, file))
-    |> Enum.find(business, &File.regular?/1)
+    Fleet.Catalogue.find(
+      sp_drafts_root(),
+      Fleet.Catalogue.rel(:sp_drafts),
+      "agent-#{role}-base.md"
+    )
   end
 
   # The fine cap-profile override does not move role bases; the catalogue root does.

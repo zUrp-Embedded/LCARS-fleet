@@ -123,8 +123,8 @@ defmodule Fleet.Catalogue do
   missing it and choosing differently look identical. Split, the two halves answer separately — the
   system is present and intact, the business is conforming.
 
-  Both catalogues are read as a UNION (see `cap_profiles_roots/0`), and a name held on both sides
-  is a refusal, not a precedence.
+  Both catalogues are read through ONE search path (`search/2`), business first: a business
+  catalogue that ships a file where the system also ships one REPLACES it, the child-theme rule.
   """
   @spec system_root() :: Path.t()
   def system_root do
@@ -142,44 +142,72 @@ defmodule Fleet.Catalogue do
   def system_manifest_path, do: Path.join(system_root(), @manifest_basename)
 
   @doc """
-  The roots of a tree BOTH catalogues may carry, system first, absent directories dropped.
+  The SEARCH PATH of a tree: the business directory, then the system one — existing only.
 
-  Five trees are shared — cap-profiles, modops, subagent templates, SP drafts, skills. The rest
-  (cards, brief templates, escalation policies, project scaffolding, EEx templates) belong to the
-  business alone: the mechanism has no opinion on which pipelines exist.
+  **The order IS the precedence, and it is written here once.** Every reader goes through the four
+  functions below; none of them knows there are two roots, and adding a third one day is one line
+  here and zero elsewhere. That property is the whole point, and its absence was the defect: the
+  same resolution had been hand-rolled at fourteen call sites behind three copies of the same
+  helper, and the three readers that never learned it were three bugs — a permanent pod
+  respawn-looping on a skill (W-11), a conversation contract demanded from a catalogue that has no
+  human-facing role (W-13), a dormant extension point aimed at the wrong root (W-14).
 
-  Dropping absent directories is what lets the system catalogue carry only what its four roles
-  need, instead of shipping empty trees to satisfy a reader.
+  `business` is resolved BY ITS DOMAIN (that is where the fine per-tree overrides live) and passed
+  in; `rel` is the tree's path inside the system catalogue. Absent directories are dropped, which
+  is what lets the system catalogue ship only what its four roles need instead of empty trees.
+
+  **Business first.** A catalogue that ships a file at a path the system also ships REPLACES it —
+  the child-theme rule. An operator who drops their own `rubber-duck` means it; the attacker is
+  never the operator.
   """
-  @spec roots_of(String.t()) :: [Path.t()]
-  def roots_of(rel) when is_binary(rel) do
-    [Path.join(system_root(), rel), Path.join(root(), rel)]
-    |> Enum.filter(&File.dir?/1)
+  @spec search(Path.t(), String.t()) :: [Path.t()]
+  def search(business, rel) when is_binary(business) and is_binary(rel) do
+    Enum.filter([business, Path.join(system_root(), rel)], &File.dir?/1)
   end
 
-  @doc "Cap-profile YAMLs (`<root>/#{@rel_cap_profiles}`) — BUSINESS root only, see `cap_profiles_roots/0`."
+  @doc """
+  First existing `name` on the search path — the BUSINESS path when it exists nowhere.
+
+  Returning the business path rather than `nil` is deliberate: the caller's own `:enoent` then names
+  the file its author would have to create, instead of a path in a tree they do not own.
+  """
+  @spec find(Path.t(), String.t(), String.t()) :: Path.t()
+  def find(business, rel, name) when is_binary(name) do
+    paths = Enum.map(search(business, rel), &Path.join(&1, name))
+    Enum.find(paths, Path.join(business, name), &File.regular?/1)
+  end
+
+  @doc "Every path matching `glob` on the search path, in precedence order."
+  @spec glob(Path.t(), String.t(), String.t()) :: [Path.t()]
+  def glob(business, rel, pattern) when is_binary(pattern) do
+    Enum.flat_map(search(business, rel), &Path.wildcard(Path.join(&1, pattern)))
+  end
+
+  @doc """
+  `pattern` merged across the search path into `%{key => path}` — the FIRST root wins.
+
+  `Map.put_new` and not `Map.merge`: precedence must survive the fold, and a later root silently
+  overwriting an earlier one is the inversion this module exists to prevent.
+  """
+  @spec merge(Path.t(), String.t(), String.t(), (Path.t() -> term())) :: %{term() => Path.t()}
+  def merge(business, rel, pattern, key_fun) when is_function(key_fun, 1) do
+    business
+    |> glob(rel, pattern)
+    |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
+  end
+
+  @doc "Relative path of a shared tree inside a catalogue — the ONE literal each, for `search/2`."
+  @spec rel(atom()) :: String.t()
+  def rel(:cap_profiles), do: @rel_cap_profiles
+  def rel(:modops), do: @rel_modops
+  def rel(:subagent_templates), do: @rel_subagent_templates
+  def rel(:sp_drafts), do: @rel_sp_drafts
+  def rel(:sp_templates), do: @rel_sp_templates
+  def rel(:skills), do: @rel_skills
+
+  @doc "Cap-profile YAMLs, BUSINESS root (`<root>/#{@rel_cap_profiles}`) — the search path is `search/2`."
   @spec cap_profiles_root() :: Path.t()
   def cap_profiles_root, do: Path.join(root(), @rel_cap_profiles)
-
-  @doc "Cap-profile roots, system + business."
-  @spec cap_profiles_roots() :: [Path.t()]
-  def cap_profiles_roots, do: roots_of(@rel_cap_profiles)
-
-  @doc "Modop roots, system + business."
-  @spec modop_roots() :: [Path.t()]
-  def modop_roots, do: roots_of(@rel_modops)
-
-  @doc "Subagent-template roots, system + business."
-  @spec subagent_templates_roots() :: [Path.t()]
-  def subagent_templates_roots, do: roots_of(@rel_subagent_templates)
-
-  @doc "SP-draft roots, system + business."
-  @spec sp_drafts_roots() :: [Path.t()]
-  def sp_drafts_roots, do: roots_of(@rel_sp_drafts)
-
-  @doc "Skill roots, system + business."
-  @spec skills_roots() :: [Path.t()]
-  def skills_roots, do: roots_of(@rel_skills)
 
   @doc "Modop SP fragments, `<root>/#{@rel_modops}/<name>/sp.md`."
   @spec modop_root() :: Path.t()
