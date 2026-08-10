@@ -116,6 +116,27 @@ defmodule Fleet.Application.CatalogueVerifyTest do
            "a role missing its draft should fail the spawn-proof, got: #{inspect(findings)}"
   end
 
+  test "a business catalogue overriding a SYSTEM role BY NAME passes", %{tmp_dir: tmp} do
+    # The gesture the two retracted refusals blocked. An override of `architect` necessarily
+    # declares `project_delegate` (its capability IS what makes it the architect), and the old
+    # "a business role may not declare a system capability" refused exactly that. It was right
+    # while a name collision was itself a refusal; since the resolver reads an ordered search path,
+    # it forbade the feature. What tells an override from a conflict now is the MERGED index —
+    # one entry, one delegate, one slot — checked at boot rather than here.
+    copy = catalogue_copy(tmp)
+
+    override =
+      Fleet.Catalogue.system_root()
+      |> Path.join("cap_profile/canon/cap-profiles/architect.yaml")
+      |> File.read!()
+
+    # Kept byte-identical on purpose: the point under test is that the SUPERPOSITION is admitted,
+    # and any edit would move the failure to whatever the edit broke.
+    File.write!(Path.join(copy, "cap_profile/canon/cap-profiles/architect.yaml"), override)
+
+    assert {:ok, _} = CatalogueVerify.verify(copy)
+  end
+
   test "verify covers the CATALOGUE, not the deployment — no forge/token guard leaks in",
        %{tmp_dir: tmp} do
     # A complete catalogue on a machine with no forge configured must pass: the forge base_url,

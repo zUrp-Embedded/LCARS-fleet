@@ -167,18 +167,30 @@ exactement comme les rôles :
 | `conflict_resolver` | qui tranche un blocage épuisé | système, **exactement un** |
 
 **`producer` est la seule capacité qu'une carte sélectionne. C'est ce qui en fait la seule qui vous
-appartienne.** Les quatre autres, le runtime les résout tout seul, à l'échelle de la flotte : les
-déclarer dans votre catalogue reviendrait à décider qui signe les fusions de tout le monde.
+appartienne.** Les quatre autres, le runtime les résout tout seul, à l'échelle de la flotte, et
+chacune doit avoir **exactement un** porteur.
 
-Le vérificateur le refuse, et il le dit :
+Rien ne vous les interdit *par principe*. Ce qui est refusé, c'est le **résultat** : si votre
+`code-reviewer` déclare `exception_judge`, le `gatekeeper` du système la déclare aussi, et plus
+personne ne sait qui signe. Le démarrage s'arrête, et il nomme les deux :
 
 ```
-business conformance: code-reviewer declares exception_judge — these capabilities belong
-to the system catalogue: the runtime resolves each of them alone and fleet-wide.
+Fleet.Project.Roles: 2 catalogue roles declare the gatekeeper capability
+(:exception_judge): ["code-reviewer", "gatekeeper"] — this one is unique BY DESIGN
 ```
 
-Il refuse aussi `role_index: 0` dans un catalogue métier — c'est l'emplacement de niveau flotte, il
-appartient à la mécanique.
+Même chose pour `role_index`, qui est l'emplacement du rôle dans l'identifiant de session — donc sa
+classe de kill. Deux rôles sur un même emplacement, et `pkill` en atteint deux :
+
+```
+CapProfile.Image: role_index 0 claimed by starfleet, vitrine — a slot is a kill class,
+and two roles sharing one make `pkill` reach both.
+```
+
+La nuance a un usage, et c'est la porte de sortie si vous voulez vraiment votre propre signataire :
+vous ne l'**ajoutez** pas, vous **remplacez** le sien. Un fichier nommé `gatekeeper.yaml` dans
+votre catalogue prend la place de celui du système — un seul porteur, un seul emplacement, ça
+passe. Le nom est le contrat ; le fichier système n'est qu'un défaut. Voyez §8.
 
 **Vos juges n'ont besoin d'aucune capacité.** Regardez `code-reviewer.yaml` : il n'en déclare pas.
 Ce sont les cartes qui le nomment, dans leur liste `jury`. Une capacité sert à répondre à une
@@ -230,8 +242,20 @@ votre métier ; vous ne choisissez pas votre mécanique. C'est aussi ce qui rend
 « ce catalogue est complet » — le système est présent et intact, le vôtre est conforme, et les deux
 questions se posent séparément.
 
-Un nom porté des deux côtés est **refusé**, pas arbitré : votre `rubber-duck` ne remplace pas le
-sien, et le sien n'écrase pas le vôtre. Renommez le vôtre. Un nom doit vouloir dire une seule chose.
+**« Ne se remplacent pas » parle des FICHIERS.** Vous ne pouvez pas éditer le catalogue système :
+il part avec la boîte, personne n'y touche, et c'est ce qui fait qu'il contraint. Mais ce que le
+runtime **lit** n'est pas un dossier, c'est un chemin de recherche : le vôtre d'abord, le sien
+ensuite. Un nom porté des deux côtés n'est donc pas un conflit — c'est une **surcharge**, et c'est
+le vôtre qui gagne.
+
+C'est un mécanisme, pas une permission spéciale : le même qu'un `.htaccess` à côté de la conf
+d'Apache, ou qu'un thème enfant WordPress. Il gagne en existant au même chemin relatif. Rien n'est
+écrit sur le disque du système, rien n'est effacé — la résolution se fait à la lecture, et si vous
+retirez votre fichier, le sien réapparaît intact.
+
+Ce que ça vous ouvre : reprendre un prompt de la mécanique et le réécrire — dans votre langue, à
+votre ton — sans toucher à un octet du runtime. Ce que ça vous coûte : un nom recopié par erreur
+prend silencieusement la place du sien. Un nom doit vouloir dire une seule chose.
 
 Dans l'autre sens, l'héritage est généreux : les modes opératoires du système sont **visibles depuis
 votre catalogue** sans que vous ayez à les recopier. Vous ajoutez les vôtres à côté.

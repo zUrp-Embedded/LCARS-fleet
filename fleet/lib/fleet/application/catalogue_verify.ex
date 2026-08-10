@@ -110,7 +110,7 @@ defmodule Fleet.Application.CatalogueVerify do
           {"canon spawn-proof", fn -> Fleet.Spawner.prove_canon!() end},
           {"cards + structural roles",
            fn -> Fleet.Pilot.Application.verify_cards_and_roles!() end},
-          {"business conformance", fn -> conform_business!(root) end},
+          {"business catalogue advice", fn -> advise_business!(root) end},
           {"escalation policies", fn -> Fleet.Coord.init_policies!() end}
         ]
       else
@@ -128,27 +128,31 @@ defmodule Fleet.Application.CatalogueVerify do
     end
   end
 
-  # The capabilities that belong to the MECHANISM. Each is resolved by the runtime alone, and each
-  # is unique fleet-wide — nothing selects them, so a business catalogue declaring one takes over a
-  # decision that is not its to make. `producer` is deliberately absent: it is the ONE capability a
-  # card selects, which is exactly what makes it business.
-  @system_capabilities ~w(onboarder project_delegate exception_judge conflict_resolver)
-
-  # Conformance of the BUSINESS half, judged alone — what this catalogue DECLARES, not what it
-  # inherits. Two refusals and one warning.
+  # What the BUSINESS half declares on its own, judged alone. One warning, and no refusal — the two
+  # it used to carry were RETRACTED, because the mechanism that made them right was replaced.
   #
-  # The two refusals draw the frontier: a business role carrying a system capability would take the
-  # seal's signatory (or the delegate, or the arbiter) away from the mechanism, and `role_index: 0`
-  # is the fleet-scope slot — the one that exists before any repository and that the reaper spares.
-  # Both are properties of the machinery, and neither is a choice a catalogue gets to make.
+  # They were: "a business role may not declare a system capability" and "a business role may not
+  # take `role_index: 0`". Both were correct while the catalogue was single-rooted and a name
+  # collision was itself a refusal — nothing could superpose anything, so declaring
+  # `project_delegate` could only be an usurpation. Since the resolver reads an ORDERED SEARCH PATH,
+  # overriding a system role BY NAME is the supported gesture, and an override of `architect.yaml`
+  # necessarily declares `project_delegate`; an override of `starfleet.yaml` necessarily carries
+  # slot 0. These two refusals stopped drawing a frontier and started forbidding the feature.
   #
-  # The warning is a warning on purpose: a catalogue with no judge is LEGITIMATE (a card may
+  # What replaces them looks at the MERGED index instead of the files, which is what lets it tell
+  # the two apart on its own: an override is ONE entry (one delegate, one claim on slot 0) and
+  # passes; two different names on one slot, or two delegates, are real conflicts and are refused —
+  # by `Fleet.CapProfile.Image.publish!/0` and `Fleet.Project.Roles.resolve_structural_roles!/0`,
+  # at BOOT, which is also where a deployment that never runs this verifier is finally covered.
+  #
+  # The warning stays a warning on purpose: a catalogue with no judge is LEGITIMATE (a card may
   # declare `jury: []` and mean it), it is just almost always an oversight. Refusing it would set a
   # policy this check has no mandate for — the same restraint `validate_workshop_card!/1` applies.
   #
-  # A producer is NOT re-checked here: `resolve_structural_roles!/0` already refuses a deployment
-  # that names none, and it does it on the UNION, which is the right perimeter for that question.
-  defp conform_business!(root) do
+  # The unreadable case still raises even though the image stage above would normally reach it
+  # first: this reads ONE root where the image reads the union, and a guard that relies on another
+  # stage running before it is a guard with a hidden precondition.
+  defp advise_business!(root) do
     cap_root = Path.join(root, "cap_profile/canon/cap-profiles")
 
     case Fleet.CapProfile.index_of(cap_root) do
@@ -156,37 +160,14 @@ defmodule Fleet.Application.CatalogueVerify do
         :ok
 
       {:error, reason} ->
-        raise "business conformance: #{cap_root} unreadable (#{inspect(reason)})"
+        raise "business catalogue advice: #{cap_root} unreadable (#{inspect(reason)})"
 
       {:ok, index} ->
         roles = Map.to_list(index)
 
-        usurped =
-          for {name, raw} <- roles,
-              cap <- get_in(raw, ["spec", "capabilities"]) || [],
-              cap in @system_capabilities,
-              do: "#{name} declares #{cap}"
-
-        if usurped != [] do
-          raise "business conformance: #{Enum.join(Enum.sort(usurped), ", ")} — these " <>
-                  "capabilities belong to the system catalogue: the runtime resolves each of them " <>
-                  "alone and fleet-wide. A business catalogue names its producers and its judges; " <>
-                  "it does not name who signs a merge."
-        end
-
-        fleet_scoped =
-          for {name, raw} <- roles, get_in(raw, ["metadata", "role_index"]) == 0, do: name
-
-        if fleet_scoped != [] do
-          raise "business conformance: #{Enum.join(Enum.sort(fleet_scoped), ", ")} declare " <>
-                  "role_index 0 — that slot is the FLEET-scope one (it exists before any " <>
-                  "repository and the reaper never kills it), and it belongs to the system " <>
-                  "catalogue. Use 1..15."
-        end
-
         unless Enum.any?(roles, fn {_n, raw} -> get_in(raw, ["spec", "brief_kind"]) == "judge" end) do
           Logger.warning(
-            "business conformance: this catalogue declares NO judge (`brief_kind: judge`). " <>
+            "business catalogue advice: this catalogue declares NO judge (`brief_kind: judge`). " <>
               "Legitimate — a card may carry `jury: []` and mean it — but nothing here can " <>
               "refuse a deliverable, so check it is a choice."
           )
