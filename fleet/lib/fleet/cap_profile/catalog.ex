@@ -395,21 +395,32 @@ defmodule Fleet.CapProfile.Catalog do
   Returns the live disk role index used to build an image.
   """
   @spec snapshot_roles() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
-  def snapshot_roles do
-    case root_dirs() do
-      [] -> {:error, {:catalogue_missing, root_dir()}}
-      dirs -> union_indexes(dirs)
-    end
-  end
+  def snapshot_roles, do: snapshot_roles(root_dirs())
+
+  @doc """
+  The same index over an EXPLICIT search path — one catalogue's, rather than every active one merged.
+
+  `snapshot_roles/0` answers "everything this deployment can see", which a global view wants. A
+  PROJECT wants its own catalogue over the system and nothing from its neighbours, and that path is
+  `Fleet.Catalogue.scopes(:cap_profiles)`.
+  """
+  @spec snapshot_roles([String.t()]) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
+  def snapshot_roles([]), do: {:error, {:catalogue_missing, root_dir()}}
+  def snapshot_roles(dirs) when is_list(dirs), do: union_indexes(dirs)
 
   @doc """
   Returns validated live-disk overlays keyed by modop directory name.
   """
   @spec snapshot_overlays() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
-  def snapshot_overlays do
+  def snapshot_overlays, do: snapshot_overlays(root_dirs())
+
+  @doc "The same overlays over an EXPLICIT search path — cf. `snapshot_roles/1`."
+  @spec snapshot_overlays([String.t()]) ::
+          {:ok, %{optional(String.t()) => map()}} | {:error, term()}
+  def snapshot_overlays(dirs) when is_list(dirs) do
     # Search path, precedence order, FIRST WINS — same rule as the roles and the SP fragments. A
     # business `rubber-duck` overlay replaces the system's; declaring nothing is the point.
-    root_dirs()
+    dirs
     |> Enum.flat_map(&Path.wildcard(Path.join([&1, "modop", "*/profile.yaml"])))
     |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
       name = path |> Path.dirname() |> Path.basename()

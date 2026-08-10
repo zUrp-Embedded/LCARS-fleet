@@ -320,10 +320,14 @@ defmodule Fleet.Spawner.PermanentBootTest do
     test "DPF-08: published cap-profile image preferred over disk scan (empty dir ignored)", %{
       dir: dir
     } do
-      :persistent_term.put(
-        {Fleet.CapProfile.Image, :image},
-        %{index: %{"starfleet" => %{}}, overlays: %{}, version: "v-test"}
-      )
+      # `republish/1` et non un `:persistent_term.put` sur la cle : la cle porte desormais la RACINE
+      # du catalogue (une image par catalogue actif), et un test qui l'ecrit a la main epingle une
+      # representation privee au lieu du contrat.
+      Fleet.CapProfile.Image.republish(%{
+        index: %{"starfleet" => %{}},
+        overlays: %{},
+        version: "v-test"
+      })
 
       on_exit(fn -> Fleet.CapProfile.Image.unpublish() end)
 

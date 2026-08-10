@@ -497,6 +497,32 @@ defmodule Fleet.Catalogue do
   def sp_templates_root, do: Path.join(root(), @rel_sp_templates)
 
   @doc """
+  One search path per active catalogue for a TREE — the per-catalogue door, next to `search/1` which
+  merges them all.
+
+  `search/1` answers "everything this deployment can see for this tree", which is what a global view
+  wants (a dashboard, a contracts check). This answers "what does catalogue N see", which is what a
+  PROJECT wants: its own catalogue over the system, and nothing from its neighbours.
+
+  The FINE override still REPLACES the list — one scope, that directory over the system — for the
+  same reason it does in `search/1`: a fixture pointing a tree at its own root is building an
+  isolated catalogue, and leaving the shipped ones behind would make it read material nobody wrote.
+  """
+  @spec scopes(atom()) :: [[Path.t()]]
+  def scopes(tree) when is_atom(tree) do
+    rel = rel(tree)
+    sys = Path.join(system_root(), rel)
+
+    case fine_override(tree) do
+      nil -> Enum.map(active_roots(), &Path.join(&1, rel))
+      dir -> [dir]
+    end
+    |> Enum.uniq()
+    |> Enum.map(fn dir -> Enum.filter([dir, sys], &File.dir?/1) end)
+    |> Enum.reject(&(&1 == []))
+  end
+
+  @doc """
   The workflow-map directory of EVERY active catalogue, in declaration order.
 
   Cards do not supersede across catalogues and never will: a card names roles, and a role belongs to

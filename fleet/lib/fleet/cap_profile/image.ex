@@ -25,15 +25,23 @@ defmodule Fleet.CapProfile.Image do
 
   alias Fleet.CapProfile.{Catalog, Schema}
 
-  @key {__MODULE__, :image}
-
   @doc """
   Validates and publishes the live catalogue, replacing any previous image.
   """
   @spec publish!() :: :ok
   def publish! do
+    # UNE image PAR CATALOGUE ACTIF, chacune batie sur SON scope — le catalogue par-dessus le
+    # systeme, jamais par-dessus ses voisins. La cle etait scalaire, donc les catalogues fusionnaient
+    # en une seule image : un projet ne pouvait pas avoir « ses » roles, il avait ceux de tout le
+    # monde. Les cartes ne se superposent pas et les cap-profiles si — c'est la difference que
+    # `scopes/1` porte et que `search/1` aplatit.
+    for scope <- Fleet.Catalogue.scopes(:cap_profiles), do: publish_scope!(scope)
+    :ok
+  end
+
+  defp publish_scope!([business | _] = scope) do
     index =
-      case Catalog.snapshot_roles() do
+      case Catalog.snapshot_roles(scope) do
         {:ok, index} ->
           index
 
@@ -70,10 +78,10 @@ defmodule Fleet.CapProfile.Image do
       end
     end)
 
-    ensure_role_indexes_unique!(index)
+    ensure_role_indexes_unique!(index, business)
 
     overlays =
-      case Catalog.snapshot_overlays() do
+      case Catalog.snapshot_overlays(scope) do
         {:ok, overlays} ->
           overlays
 
@@ -83,7 +91,12 @@ defmodule Fleet.CapProfile.Image do
       end
 
     version = version_of(index, overlays)
-    :persistent_term.put(@key, %{index: index, overlays: overlays, version: version})
+
+    :persistent_term.put(image_key(business), %{
+      index: index,
+      overlays: overlays,
+      version: version
+    })
 
     # Reserved seats named ONCE, loud, at the publish (BL-6-45): the state "declared but not
     # spawnable" is voiced here instead of surfacing as a confusing :not_found downstream.
@@ -96,7 +109,7 @@ defmodule Fleet.CapProfile.Image do
       end
 
     Logger.info(
-      "CapProfile.Image: published (#{map_size(index) - length(seats)} profiles, " <>
+      "CapProfile.Image: published #{business} (#{map_size(index) - length(seats)} profiles, " <>
         "#{map_size(overlays)} overlays#{seats_note}, version=#{version})"
     )
 
@@ -115,7 +128,7 @@ defmodule Fleet.CapProfile.Image do
   # Seats included — a ReservedSeat CLAIMS its slot exactly like a spawnable role. Entries whose
   # `role_index` is not an integer are skipped rather than refused: the schema above is the
   # authority on presence, and duplicating its refusal here would report the wrong fault.
-  defp ensure_role_indexes_unique!(index) do
+  defp ensure_role_indexes_unique!(index, business) do
     duplicates =
       index
       |> Enum.flat_map(fn {name, raw} ->
@@ -134,8 +147,9 @@ defmodule Fleet.CapProfile.Image do
           "role_index #{slot} claimed by #{Enum.join(Enum.sort(names), ", ")}"
         end)
 
-      raise "CapProfile.Image: #{detail} — a slot is a kill class, and two roles sharing one " <>
-              "make `pkill` reach both. This is checked on the MERGED catalogue, so an entry " <>
+      raise "CapProfile.Image: #{business}: #{detail} — a slot is a kill class, and two roles " <>
+              "sharing one make `pkill` reach both. This is checked PER CATALOGUE (its own " <>
+              "profiles over the system's), so an entry " <>
               "superposing a system one by NAME is fine (one entry, one slot); two DIFFERENT " <>
               "names on one slot are not. Reassign one (0..15). Proven-good image at boot, or " <>
               "do not boot."
@@ -144,15 +158,42 @@ defmodule Fleet.CapProfile.Image do
     :ok
   end
 
-  @doc "The published image (`%{index, overlays, version}`) or nil (fallback-to-disk regime)."
-  @spec published() :: map() | nil
-  def published, do: :persistent_term.get(@key, nil)
+  @doc """
+  The published image of a catalogue (`%{index, overlays, version}`), or nil (fallback-to-disk).
 
-  @doc "Erases the published image — TESTS ONLY (returns the runtime to the disk regime)."
+  No argument = the FIRST active catalogue, which is what a caller with no project in hand gets.
+  The per-project door is `published/1`, named by that project's catalogue root.
+  """
+  @spec published() :: map() | nil
+  def published do
+    case default_root() do
+      nil -> nil
+      root -> published(root)
+    end
+  end
+
+  @spec published(Path.t()) :: map() | nil
+  def published(root) when is_binary(root), do: :persistent_term.get(image_key(root), nil)
+
+  @doc "Erases every published image — TESTS ONLY (returns the runtime to the disk regime)."
   @spec unpublish() :: :ok
   def unpublish do
-    _ = :persistent_term.erase(@key)
+    for {key, _} <- :persistent_term.get(), match?({__MODULE__, :image, _}, key) do
+      :persistent_term.erase(key)
+    end
+
     :ok
+  end
+
+  defp image_key(root), do: {__MODULE__, :image, root}
+
+  # The cap-profile directory of the first active catalogue — the scope a caller without a project
+  # resolves to. `nil` when nothing is readable at all, which `published/0` reports as "no image".
+  defp default_root do
+    case Fleet.Catalogue.scopes(:cap_profiles) do
+      [[business | _] | _] -> business
+      _ -> nil
+    end
   end
 
   @doc """
@@ -165,7 +206,11 @@ defmodule Fleet.CapProfile.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    :persistent_term.put(@key, image)
+    case default_root() do
+      nil -> :ok
+      root -> :persistent_term.put(image_key(root), image)
+    end
+
     :ok
   end
 
