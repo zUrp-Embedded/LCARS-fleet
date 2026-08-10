@@ -2,3 +2,9 @@ api_version: 1
 
 # Le nom du catalogue — porte ici, pas par le dossier d'installation.
 name: web
+
+# La carte qu'un projet prend quand il n'en declare aucune. Aucune propriete ne la distingue de ses
+# soeurs — contrairement au rail doc, qui se reconnait a son producteur `face: workshop` — donc
+# c'est un CHOIX, et un choix se declare. Le boot refuse un catalogue qui livre des cartes sans dire
+# laquelle est son defaut.
+default_card: standard

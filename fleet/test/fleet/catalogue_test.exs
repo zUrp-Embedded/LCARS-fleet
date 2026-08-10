@@ -402,6 +402,34 @@ defmodule Fleet.CatalogueTest do
       assert err.message =~ inspect(Catalogue.supported_api_versions())
     end
 
+    test "un catalogue qui livre des cartes SANS dire laquelle est son defaut est refuse", %{
+      tmp_dir: tmp
+    } do
+      # Le defaut etait le litteral "brief-gate" dans Fleet.Project.Roles — la carte d'UN catalogue.
+      # Tout catalogue livrant les siennes heritait donc en silence d'un defaut nommant une carte
+      # qu'il n'a pas. Aucune propriete ne distingue la carte par defaut de ses soeurs : il faut le
+      # dire, et le boot le verifie contre les cartes REELLES du catalogue.
+      root = fake_root(tmp)
+      maps = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+      File.mkdir_p!(maps)
+      File.write!(Path.join(maps, "la-mienne.yaml"), "kind: WorkflowMap\n")
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
+      assert err.message =~ "declares no `default_card`"
+      assert err.message =~ "la-mienne", "il doit NOMMER les cartes disponibles"
+
+      # Et un defaut qui nomme une carte d'un AUTRE catalogue est refuse de la meme facon : c'est
+      # exactement l'etat que le litteral produisait.
+      File.write!(
+        Path.join(root, "catalogue.yaml"),
+        "api_version: 1\nname: fixture\ndefault_card: brief-gate\n"
+      )
+
+      err2 = assert_raise RuntimeError, fn -> Catalogue.verify!() end
+      assert err2.message =~ "not one of its own cards"
+    end
+
     test "a manifest with no NAME is refused — the name is the catalogue's, not its directory's",
          %{
            tmp_dir: tmp

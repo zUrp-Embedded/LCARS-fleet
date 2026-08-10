@@ -567,7 +567,13 @@ defmodule Fleet.Catalogue do
     case Map.get(manifest, "api_version") do
       version when version in @supported_api_versions ->
         name = validate_name!(manifest, path)
-        Logger.info("Catalogue: verified (root=#{root}, name=#{name}, api_version=#{version})")
+        card = validate_default_card!(manifest, path, root)
+
+        Logger.info(
+          "Catalogue: verified (root=#{root}, name=#{name}, api_version=#{version}" <>
+            if(card, do: ", default_card=#{card}", else: "") <> ")"
+        )
+
         manifest
 
       other ->
@@ -607,6 +613,59 @@ defmodule Fleet.Catalogue do
 
       other ->
         raise "LCARS catalogue: #{path} declares a non-string name (#{inspect(other)}) — boot refused."
+    end
+  end
+
+  # WHICH card a project gets when it declares none. Not a resolution — no property distinguishes the
+  # default from its siblings, unlike the doc rail (`face: workshop`) — so it is a CHOICE, and a
+  # choice is declared. It lived as a literal in `Fleet.Project.Roles` (`"brief-gate"`, one
+  # catalogue's card): every catalogue that shipped its own cards silently inherited a default that
+  # named a card it does not have.
+  #
+  # Required exactly when it means something: a catalogue that ships NO card has no default to name
+  # (the system catalogue), and one that ships cards must say which — and must name one of its own,
+  # checked by FILENAME here rather than by loading, because this module is foundation and the loader
+  # is not below it.
+  defp validate_default_card!(manifest, path, root) do
+    cards =
+      root
+      |> Path.join(@rel_workflow_maps)
+      |> Path.join("*.yaml")
+      |> Path.wildcard()
+      |> Enum.map(&Path.basename(&1, ".yaml"))
+
+    case {Map.get(manifest, "default_card"), cards} do
+      {nil, []} ->
+        nil
+
+      {nil, _} ->
+        raise "LCARS catalogue: #{path} ships #{length(cards)} card(s) and declares no " <>
+                "`default_card` — boot refused. A project that declares no card takes the " <>
+                "catalogue's default, and no property distinguishes one card from another: it " <>
+                "has to be said. One of #{inspect(Enum.sort(cards))}."
+
+      {card, _} when is_binary(card) ->
+        if card in cards do
+          card
+        else
+          raise "LCARS catalogue: #{path} declares default_card #{inspect(card)}, which is " <>
+                  "not one of its own cards — boot refused. It ships #{inspect(Enum.sort(cards))}."
+        end
+
+      {other, _} ->
+        raise "LCARS catalogue: #{path} declares a non-string default_card (#{inspect(other)}) — boot refused."
+    end
+  end
+
+  @doc """
+  The card a project of THIS catalogue gets when it declares none, or `nil` for a catalogue with no
+  cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
+  """
+  @spec default_card() :: String.t() | nil
+  def default_card do
+    case YamlElixir.read_from_file(manifest_path()) do
+      {:ok, %{"default_card" => card}} when is_binary(card) -> card
+      _ -> nil
     end
   end
 

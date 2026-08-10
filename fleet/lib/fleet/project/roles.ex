@@ -284,12 +284,16 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the delegation workflow map, defaulting to `"brief-gate"`.
+  The card a project takes when it declares none — DECLARED by the catalogue, not defaulted here.
+
+  It was the literal `"brief-gate"`, one catalogue's card: every catalogue shipping its own cards
+  silently inherited a default naming a card it does not have. Unlike the doc rail, no property
+  distinguishes this card from its siblings, so it is a choice and it is declared — the manifest
+  says it, and `Fleet.Catalogue.verify!/0` refuses a catalogue that ships cards without naming one.
   """
-  @spec delegation_workflow_map(keyword()) :: String.t()
+  @spec delegation_workflow_map(keyword()) :: String.t() | nil
   def delegation_workflow_map(opts \\ []) do
-    Keyword.get(opts, :delegation_workflow_map) ||
-      Application.get_env(:fleet_pilot, :delegation_workflow_map, "brief-gate")
+    Keyword.get(opts, :delegation_workflow_map) || Fleet.Catalogue.default_card()
   end
 
   @doc """
