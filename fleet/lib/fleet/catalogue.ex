@@ -279,8 +279,12 @@ defmodule Fleet.Catalogue do
     |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
   end
 
-  # The name of the business catalogue shipped inside the release.
-  @bundled_name "lcars"
+  # The name of the business catalogue shipped inside the release. `fleet` and not `lcars`: the
+  # name is destined to become an identifier OUTSIDE this code (the forge org that carries a
+  # catalogue's projects), and `lcars` is already taken there by LCARS's own repository — an org
+  # `lcars` holding a repo `lcars` reads as a mistake. `fleet/lcars` is what the forge already
+  # shows, and it stays true when the org becomes the catalogue.
+  @bundled_name "fleet"
 
   @doc """
   The ACTIVE catalogues, in precedence order — read from `Fleet.Layout.active_catalogues_path/0`.

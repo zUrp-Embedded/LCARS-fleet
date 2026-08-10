@@ -400,7 +400,7 @@ ses gens ; il ne décide pas de ce qu'être l'un d'eux permet.
 **Le catalogue de référence part quand même avec la boîte.** Ce qui est **livré** et ce qui est
 **lu** sont deux questions distinctes : les deux catalogues coexistent dans l'image, et c'est la
 déclaration d'activité (§3) qui tranche — ou `LCARS_CATALOGUE_ROOT` si vous n'en faites tourner
-qu'un. Retirer la ligne `lcars` de la déclaration cesse de l'utiliser sans rien supprimer.
+qu'un. Retirer la ligne `fleet` de la déclaration cesse de l'utiliser sans rien supprimer.
 
 Vérifiez la ligne `Catalogue: verified (root=…)` dans les journaux de démarrage, et
 `lcars catalogue list` à tout moment — elle dit ce qui tourne, dans l'ordre.

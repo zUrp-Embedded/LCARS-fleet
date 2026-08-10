@@ -221,7 +221,7 @@ CAT_ACTIVE="${LCARS_CATALOGUES_ACTIVE:-$HOME/.lcars/catalogues.active}"
 CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
 # il s'active et se desactive, mais ne s'installe ni ne se supprime.
-CAT_BUNDLED="lcars"
+CAT_BUNDLED="fleet"
 
 # Ou vit <nom> : l'operateur d'abord, le livre ensuite — MEME ORDRE que `install_dirs` cote runtime,
 # pour qu'un catalogue importe masque un livre du meme nom des deux cotes.

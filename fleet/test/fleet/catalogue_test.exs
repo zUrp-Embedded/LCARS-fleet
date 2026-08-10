@@ -221,7 +221,7 @@ defmodule Fleet.CatalogueTest do
       assert Catalogue.active_roots() == [root]
     end
 
-    test "the ORDER of the lines IS the precedence, and `lcars` names the shipped one", %{
+    test "the ORDER of the lines IS the precedence, and `fleet` names the shipped one", %{
       tmp_dir: tmp,
       home: home
     } do
@@ -234,7 +234,7 @@ defmodule Fleet.CatalogueTest do
       # l'ordre est la precedence
       sp-en     # les SP en anglais, devant tout
       mobile
-      lcars     # le metier livre — retire cette ligne s'il ne sert plus
+      fleet     # le metier livre — retire cette ligne s'il ne sert plus
       """)
 
       assert Catalogue.active_roots() == [sp_en, mobile, root]
@@ -247,7 +247,7 @@ defmodule Fleet.CatalogueTest do
              ]
     end
 
-    test "dropping the `lcars` line removes the shipped business catalogue", %{
+    test "dropping the `fleet` line removes the shipped business catalogue", %{
       tmp_dir: tmp,
       home: home
     } do
