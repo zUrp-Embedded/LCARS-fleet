@@ -31,6 +31,22 @@ defmodule Fleet.Layout do
   # under the parent repo, which a pod mounting the parent RO could then not commit into.
   @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
+  # WHERE CATALOGUES ARE INSTALLED, and the two directories are not symmetric.
+  #
+  # `/opt/lcars` is the IMAGE's own tree — the Dockerfile already copies `fleet/catalogues` there,
+  # and it is rewritten by every update. It holds what SHIPS: read-only to the operator, in the
+  # `php.ini-production` sense — a reference you copy from, never edit.
+  #
+  # `~/.lcars/catalogues` holds what the operator IMPORTS, and no update touches it. It is the
+  # `php.ini`. The activity declaration lives beside it for the same reason: changing which
+  # catalogue runs must not require rebuilding an image.
+  #
+  # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
+  # layout INSIDE a catalogue. The split is the same one this module already draws for the project
+  # faces: where things sit on the box is one authority, what is inside them is another.
+  @platform_root "/opt/lcars"
+  @catalogues_dirname "catalogues"
+  @active_catalogues_basename "catalogues.active"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
   @mcp_activity_marker "last_tool_call"
@@ -254,6 +270,31 @@ defmodule Fleet.Layout do
   """
   @spec state_dir() :: Path.t()
   def state_dir, do: Path.join(System.user_home!(), @state_dirname)
+
+  @doc """
+  Catalogues that SHIP with the image (`#{@platform_root}/#{@catalogues_dirname}`) — read-only.
+
+  Rewritten by every update, so an operator who edits one loses the edit at the next deploy. They
+  copy it into `catalogues_operator_dir/0` instead, which is the only half an update never touches.
+  """
+  @spec catalogues_shipped_dir() :: Path.t()
+  def catalogues_shipped_dir, do: Path.join(@platform_root, @catalogues_dirname)
+
+  @doc """
+  Catalogues the operator IMPORTED (`~/.lcars/#{@catalogues_dirname}`) — theirs, never updated over.
+  """
+  @spec catalogues_operator_dir() :: Path.t()
+  def catalogues_operator_dir, do: Path.join(state_dir(), @catalogues_dirname)
+
+  @doc """
+  The ACTIVITY declaration (`~/.lcars/#{@active_catalogues_basename}`): which catalogues run, in
+  precedence order.
+
+  Operator-side, deliberately: changing what runs must not require rebuilding an image. Installed
+  and active are two different facts, and this file is the only one that carries the second.
+  """
+  @spec active_catalogues_path() :: Path.t()
+  def active_catalogues_path, do: Path.join(state_dir(), @active_catalogues_basename)
 
   @doc """
   Absolute path of a pod's MCP ACTIVITY marker, derived from that pod's socket path.

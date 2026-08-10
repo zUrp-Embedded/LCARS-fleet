@@ -170,6 +170,117 @@ defmodule Fleet.CatalogueTest do
     end
   end
 
+  describe "catalogues.active — installed is not active" do
+    # The declaration lives under the operator's `~/.lcars`, so these tests move HOME rather than
+    # a config key: there is no knob, deliberately — changing what runs must not need a rebuild,
+    # and it must not need an env var an image could bake either.
+    # `HOME` is NOT the seam, and trying it is how this was found: `System.user_home!/0` is cached
+    # by the VM and keeps answering the boot-time value, so a test moving HOME would silently
+    # measure the real `~/.lcars` of whoever ran the suite.
+    setup %{tmp_dir: tmp} do
+      home = Path.join(tmp, "operator")
+      File.mkdir_p!(Path.join(home, "catalogues"))
+
+      Fleet.TestEnv.put_env_restoring(
+        :fleet_catalogue,
+        :active_declaration,
+        Path.join(home, "catalogues.active")
+      )
+
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :install_dirs, [
+        Path.join(home, "catalogues")
+      ])
+
+      {:ok, home: home}
+    end
+
+    defp install(home, name) do
+      dir = Path.join([home, "catalogues", name])
+      File.mkdir_p!(Path.join(dir, Catalogue.rel(:cap_profiles)))
+      dir
+    end
+
+    defp declare(home, lines), do: File.write!(Path.join(home, "catalogues.active"), lines)
+
+    test "no file: the shipped business catalogue alone — today's behaviour untouched", %{
+      tmp_dir: tmp
+    } do
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      assert Catalogue.active_roots() == [root]
+    end
+
+    test "installed but NOT declared changes nothing", %{tmp_dir: tmp, home: home} do
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      install(home, "mobile")
+
+      # The whole point of the target state, in one assertion: a catalogue sitting on disk is inert
+      # until a line names it.
+      assert Catalogue.active_roots() == [root]
+    end
+
+    test "the ORDER of the lines IS the precedence, and `lcars` names the shipped one", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      mobile = install(home, "mobile")
+      sp_en = install(home, "sp-en")
+
+      declare(home, """
+      # l'ordre est la precedence
+      sp-en     # les SP en anglais, devant tout
+      mobile
+      lcars     # le metier livre — retire cette ligne s'il ne sert plus
+      """)
+
+      assert Catalogue.active_roots() == [sp_en, mobile, root]
+
+      # And the tree door inherits the order without knowing the list exists.
+      assert Catalogue.search(:cap_profiles) == [
+               Path.join(sp_en, Catalogue.rel(:cap_profiles)),
+               Path.join(mobile, Catalogue.rel(:cap_profiles)),
+               Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
+             ]
+    end
+
+    test "dropping the `lcars` line removes the shipped business catalogue", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      mobile = install(home, "mobile")
+      declare(home, "mobile\n")
+
+      assert Catalogue.active_roots() == [mobile]
+    end
+
+    test "a DECLARED catalogue installed nowhere RAISES, naming it and where it looked", %{
+      home: home
+    } do
+      declare(home, "ghost\n")
+
+      assert_raise RuntimeError, ~r/"ghost" and it is installed nowhere/, fn ->
+        Catalogue.active_roots()
+      end
+    end
+
+    test "the system catalogue is never in the list, and never dropped", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      install(home, "mobile")
+      declare(home, "mobile\n")
+
+      assert List.last(Catalogue.search(:cap_profiles)) ==
+               Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
+    end
+  end
+
   describe "verify!" do
     test "the bundled catalogue passes and returns its manifest" do
       assert %{"api_version" => version} = Catalogue.verify!()

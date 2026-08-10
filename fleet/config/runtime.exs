@@ -140,6 +140,25 @@ if config_env() != :test and not tool_mode? do
     config :fleet_catalogue, root: Fleet.EnvParse.path("LCARS_CATALOGUE_ROOT", path)
   end
 
+  # WHICH catalogues run, and WHERE they are installed — the ordered declaration of section 9.3.
+  # These are platform paths, so `Fleet.Layout` is their authority; they arrive HERE rather than
+  # being called from `Fleet.Catalogue` so that module keeps `deps: []`, which is the one layer
+  # name the topology can check instead of assert.
+  #
+  # The ORDER of `install_dirs` is the lookup order for a NAME, not a precedence between
+  # catalogues (that one is the order of the lines in the file): the operator's own directory
+  # first, so an imported catalogue shadows a shipped one of the same name — the `php.ini` over the
+  # `php.ini-production`, the same rule as everywhere else here.
+  #
+  # No env var: the declaration is a FILE the operator edits, and adding a variable to point at it
+  # would put the answer in two places. Absent file = the bundled business catalogue alone.
+  config :fleet_catalogue,
+    active_declaration: Fleet.Layout.active_catalogues_path(),
+    install_dirs: [
+      Fleet.Layout.catalogues_operator_dir(),
+      Fleet.Layout.catalogues_shipped_dir()
+    ]
+
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================

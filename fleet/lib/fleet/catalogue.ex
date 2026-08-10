@@ -260,16 +260,85 @@ defmodule Fleet.Catalogue do
     |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
   end
 
-  @doc """
-  The ACTIVE catalogues, in precedence order.
+  # The name of the business catalogue shipped inside the release.
+  @bundled_name "lcars"
 
-  One today — the business root, big wheel included — so this changes nothing yet, and it is where
-  the operator's ordered `catalogues.active` will be read. It exists NOW because the SHAPE of the
-  door is what every call site binds to: widening it later would be a second migration of the same
-  sites, for no gain the first one did not already pay for.
+  @doc """
+  The ACTIVE catalogues, in precedence order — read from `Fleet.Layout.active_catalogues_path/0`.
+
+  One NAME per line, first wins, `#` comments and blank lines ignored. Names, not paths: the
+  declaration is written in the operator's vocabulary, and where a catalogue was installed is not
+  their business to restate. `#{@bundled_name}` is reserved for the business catalogue that ships
+  inside the release (the one `LCARS_CATALOGUE_ROOT` moves) — it is a name like any other in the
+  list, so an operator who no longer wants it deletes its line.
+
+  **No file, or an empty one, means the shipped business catalogue alone** — today's behaviour
+  exactly, which is what lets this land without changing a running deployment.
+
+  A name that resolves NOWHERE raises. A declared catalogue is load-bearing by definition: a fleet
+  that silently skipped one would run a roster nobody assembled and refuse work at the first
+  dispatch, far from the line that asked for it. Same rule as everywhere else here — what a
+  declaration names, its absence refuses.
+
+  The system catalogue is NOT in this list and cannot be: it is always last, implicitly, and it is
+  a contract rather than a participant in precedence.
   """
   @spec active_roots() :: [Path.t()]
-  def active_roots, do: [to_string(root())]
+  def active_roots do
+    case declared_names() do
+      [] -> [to_string(root())]
+      names -> Enum.map(names, &resolve_installed!/1)
+    end
+  end
+
+  # WHERE those two things sit on the box arrives by CONFIG, and this module stays `deps: []`.
+  #
+  # It is a platform fact, so its authority is `Fleet.Layout` — but calling it from here would add a
+  # dep to the module whose layer name is the one mechanically checkable thing in the topology
+  # (`foundation ≡ deps: []`, CLAUDE.md). The edge creates no cycle and would still turn a derived
+  # fact into one the map asserts by hand. `config/runtime.exs` passes the paths instead, which is
+  # where every other deployment fact already enters.
+  #
+  # Unset — the whole of `:test`, and any deployment that never wired it — means NO declaration to
+  # read, hence the shipped catalogue alone: today's behaviour, out of the box.
+  #
+  # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed
+  # 2026-08-10, `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
+  # test moving HOME would silently measure the real `~/.lcars` of whoever ran the suite.
+  defp active_path, do: Application.get_env(:fleet_catalogue, :active_declaration)
+
+  defp install_dirs, do: Application.get_env(:fleet_catalogue, :install_dirs, [])
+
+  defp declared_names do
+    case active_path() && File.read(active_path()) do
+      {:ok, content} ->
+        content
+        |> String.split("\n")
+        |> Enum.map(&(&1 |> String.split("#") |> List.first() |> String.trim()))
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.uniq()
+
+      _ ->
+        []
+    end
+  end
+
+  defp resolve_installed!(@bundled_name), do: to_string(root())
+
+  defp resolve_installed!(name) do
+    dirs = install_dirs()
+
+    case Enum.find(dirs, &File.dir?(Path.join(&1, name))) do
+      nil ->
+        raise "Fleet.Catalogue: #{active_path()} declares the catalogue " <>
+                "#{inspect(name)} and it is installed nowhere (looked in #{Enum.join(dirs, ", ")}). " <>
+                "Install it, or remove its line — a fleet that skipped it would run a roster " <>
+                "nobody assembled."
+
+      dir ->
+        Path.join(dir, name)
+    end
+  end
 
   defp fine_override(tree) do
     case Map.get(@fine_overrides, tree) do
