@@ -35,7 +35,7 @@ defmodule Fleet.Project.Architect do
   ## Idempotent ensure (open = relaunch = crash-recovery)
 
   `ensure/2` is the SINGLE entry for "this project must have its architect": deterministic
-  `pod_id` (`architect-<name>`) → alive = `{:already_started}` no-op; dead/never = fresh spawn
+  `pod_id` (`<delegate-role>-<name>`) → alive = `{:already_started}` no-op; dead/never = fresh spawn
   (context back via the slot sidecar). Callers: `ProjectOnboard` (on-open, best-effort),
   `ArchWake` (on-demand when an escalation arrives), the `open_project` tool (human-driven
   relaunch). A project NOT on the machine (`/home/projects/<name>` absent) is REFUSED
@@ -52,18 +52,30 @@ defmodule Fleet.Project.Architect do
 
   require Logger
 
-  # Deterministic per-project arch pod id. NOT `permanent-*`: the arch is not a fleet permanent
-  # (PermanentWarden must not respawn it — the escalation rail and the open verbs do, on demand).
-  @pod_prefix "architect-"
-
   @doc """
-  THE pod-id authority for a project's architect: `architect-<name>` (`name` = the repo's name
+  THE pod-id authority for a project's delegate: `<delegate-role>-<name>` (`name` = the repo's name
   segment). Accepts a `owner/name` full_name or a bare name. Every consumer (ArchWake, ArchFeed,
   open_project) derives through here — never a rebuilt literal.
+
+  The prefix was the LITERAL `architect-`, and it was the last one left: the 2026-08-01 pass closed
+  both literals of role RESOLUTION, so a catalogue naming its delegate `tech-lead` got the right
+  role and a pod called `architect-vitrine`. Measured on a bench, with `CLAUDE.md` and the SP of
+  that same pod both reading `tech-lead`. The operator sees the wrong name in `lcars list`, in the
+  logs and in tmux; an agent reading that trace sees a role its catalogue does not have. *« Tout ce
+  qu'il voit passer EST du poison si c'est pas instantanement vrai. »*
+
+  Deterministic per project and NOT `permanent-*`: the delegate is not a fleet permanent
+  (PermanentWarden must not respawn it — the escalation rail and the open verbs do, on demand).
+
+  It RESOLVES, so it can raise on a catalogue with zero or several delegates — and that is not a new
+  failure mode: since the delegate joined `resolve_structural_roles!/0`, such a catalogue does not
+  reach readiness at all. The boot guard is what makes this call total in a running fleet.
   """
   @spec pod_id_for(String.t()) :: String.t()
   def pod_id_for(repo_or_name) when is_binary(repo_or_name),
-    do: @pod_prefix <> Fleet.Layout.project_name(repo_or_name)
+    do:
+      Fleet.Project.Roles.project_delegate_role() <>
+        "-" <> Fleet.Layout.project_name(repo_or_name)
 
   @doc """
   Ensures the per-project architect of `repo` (`owner/name`) is up — idempotent (alive → no-op).

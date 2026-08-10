@@ -34,6 +34,8 @@ defmodule Fleet.Project.ArchitectTest do
   end
 
   test "pod_id_for/1 — THE per-project authority (full_name or bare name)" do
+    # `architect-` is the RESOLVED role of the bundled catalogue, not a literal in the builder:
+    # see the derivation test below, which renames the delegate and watches the id follow.
     assert ProjectArchitect.pod_id_for("fleet/demo") == "architect-demo"
     assert ProjectArchitect.pod_id_for("demo") == "architect-demo"
   end
@@ -196,5 +198,14 @@ defmodule Fleet.Project.ArchitectTest do
                  [spawner: FailSpawner, forge_client: StubForge] ++ roots
                )
     end
+  end
+
+  test "the prefix is the DELEGATE'S ROLE, not the word architect" do
+    # The defect this closes: a catalogue naming its delegate `tech-lead` resolved the role
+    # correctly and still spawned a pod called `architect-vitrine`, whose own CLAUDE.md and SP both
+    # said `tech-lead`. The name the operator reads was the last literal left.
+    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :project_delegate_role, "tech-lead")
+
+    assert ProjectArchitect.pod_id_for("fleet/vitrine") == "tech-lead-vitrine"
   end
 end
