@@ -95,6 +95,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
+        check_capabilities_exercisable(root),
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
@@ -1642,7 +1643,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               name: get_in(raw, ["metadata", "name"]) || Path.basename(path, ".yaml"),
               kind: Map.get(raw, "kind"),
               forge_identity: get_in(raw, ["metadata", "forge_identity"]) != false,
-              role_index: get_in(raw, ["metadata", "role_index"])
+              role_index: get_in(raw, ["metadata", "role_index"]),
+              capabilities: get_in(raw, ["spec", "capabilities"]) || [],
+              allowed_tools: get_in(raw, ["spec", "scope", "allowedTools"]) || []
             }
           ]
 
@@ -1791,6 +1794,150 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
           "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
     }
+  end
+
+  # ── A declared capability must be EXERCISABLE ────────────────────────
+  # A capability is a permission the runtime resolves — `require_onboarder` asks "does this role
+  # carry `onboarder`?" and opens the portfolio verbs. So a role can declare one and carry NONE of
+  # the tools it opens: the gate would admit the pod, and no call ever reaches the gate. The
+  # declaration then grants nothing and describes nothing, which is worse than absent — measured on
+  # `architect`, which declared `onboarder` for a transition that had ended, and whose own
+  # `allowedTools` comment said the portfolio belonged to starfleet. It stayed green for weeks and
+  # made `onboarder` look like a capability with two carriers, which is the fact the cardinality
+  # regimes were reasoned from.
+  #
+  # DERIVED END TO END — no table of capability names lives here, which is the point. Three reads
+  # of the AST chain together: a `require_*` gate is a `defp` whose body calls
+  # `role_has_capability?(role, :cap)`; a Delegation function is gated by whichever `require_*` its
+  # body calls; a tool carries a capability when its dispatch clause reaches such a function. Add a
+  # gate for a new capability and this check covers it with no edit.
+  #
+  # Only TOOL-GATED capabilities are checkable, and the others are silently out of scope on purpose:
+  # `producer` is selected by a card, `exception_judge` and `conflict_resolver` are resolved by the
+  # runtime to spawn someone. Nothing about them is exercised by the role reaching for a tool, so
+  # there is no allow-list to compare against.
+  #
+  # LIMIT, named rather than papered over: this proves the BUNDLED catalogues, because half its
+  # evidence is the runtime's own source and a release has no AST. A third-party catalogue declaring
+  # an inert capability is not covered — its boot refuses an unresolvable capability, never a
+  # useless one.
+  @doc false
+  def check_capabilities_exercisable(root) do
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    deleg_ast = quoted!(root, deleg_rel)
+    gates = capability_gates(deleg_ast)
+    gated_delegations = delegation_capabilities(deleg_ast, gates)
+    tools_by_capability = capability_tools(quoted!(root, tools_rel), gated_delegations)
+
+    inert =
+      for role <- scan_catalogue_roles(root),
+          cap <- role.capabilities,
+          tools = Map.get(tools_by_capability, cap),
+          tools != nil,
+          not Enum.any?(tools, &(("mcp__fleet__" <> &1) in role.allowed_tools)),
+          do: "#{role.name} declares #{cap} and carries none of its tools"
+
+    # INSTRUMENT GUARD, same reasoning as `mcp.tools_gated`: every finding here is an ABSENCE, and
+    # an AST shape change would empty the derivation and report the same clean absence. Two gates
+    # exist today; the floor is set under that, not at it.
+    broken =
+      cond do
+        map_size(gates) < 2 -> "only #{map_size(gates)} require_* gate(s) derived (expected 2+)"
+        map_size(tools_by_capability) < 2 -> "only #{map_size(tools_by_capability)} capability"
+        true -> nil
+      end
+
+    %{
+      id: "roles.capabilities_exercisable",
+      remediation:
+        "either drop the capability from the cap-profile, or add at least one of the tools it " <>
+          "gates to that role's allowedTools — a capability that opens no reachable tool " <>
+          "authorizes nothing and misdescribes the role",
+      status: if(is_nil(broken) and inert == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["#{deleg_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          inert != [] -> Enum.sort(inert)
+          true -> []
+        end,
+      note:
+        "#{map_size(tools_by_capability)} tool-gated capabilities derived from the AST; " <>
+          "card-selected and runtime-resolved capabilities are out of scope by nature"
+    }
+  end
+
+  # `defp require_x(...)` whose body asks `role_has_capability?(_, :cap)` — the gate, and the
+  # capability it gates, read from the tree so a mention in a comment cannot answer for it. A gate
+  # asking about several capabilities is skipped rather than guessed: there would be no single
+  # answer to "which tools does this capability open".
+  defp capability_gates(ast) do
+    ast
+    |> collect(fn
+      {:defp, _, [head, [do: body]]} ->
+        with name when not is_nil(name) <- def_name(head),
+             [cap] <- body |> collect(&capability_asked/1) |> Enum.uniq() do
+          {name, to_string(cap)}
+        else
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+    |> Map.new()
+  end
+
+  defp capability_asked({:role_has_capability?, _, [_role, cap]}) when is_atom(cap), do: cap
+  defp capability_asked(_), do: nil
+
+  # A `Delegation` function is gated by whichever `require_*` its own body calls.
+  defp delegation_capabilities(ast, gates) do
+    ast
+    |> collect(fn
+      {:def, _, [head, [do: body]]} ->
+        caps =
+          body
+          |> collect(fn
+            {fun, _, _} when is_atom(fun) -> Map.get(gates, fun)
+            _ -> nil
+          end)
+          |> Enum.uniq()
+
+        case {def_name(head), caps} do
+          {nil, _} -> nil
+          {_name, []} -> nil
+          {name, caps} -> {name, caps}
+        end
+
+      _ ->
+        nil
+    end)
+    |> Map.new()
+  end
+
+  # capability => the tool names that reach it, inverted from the dispatch clauses.
+  defp capability_tools(tools_ast, gated_delegations) do
+    tools_ast
+    |> dispatch_clauses()
+    |> Enum.flat_map(fn {tool, clauses} ->
+      clauses
+      |> Enum.flat_map(fn %{body: body} ->
+        collect(body, fn
+          {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
+            if List.last(aliases) == :Delegation, do: Map.get(gated_delegations, fun), else: nil
+
+          _ ->
+            nil
+        end)
+      end)
+      |> List.flatten()
+      |> Enum.uniq()
+      |> Enum.map(&{&1, tool})
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
   end
 
   # ── Seam surface ─────────────────────────────────────────────────────

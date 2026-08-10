@@ -23,18 +23,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
   ## Two server-side gates (reorg 2026-07-19, cf. DESIGN-carte-des-roles §9)
 
   The barrier is server-side: the role is resolved from the CHANNEL identity (`state.pod_id`, carried by
-  the socket acceptor — NOT a wire field), then matched. The tools split along the arch's two heads:
+  the socket acceptor — NOT a wire field), then asked for a CAPABILITY. Two heads, two capabilities,
+  and neither gate knows a role name — which role carries which is the catalogue's business:
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
       `open_project` / `close_project` / `delete_project` / `revise_project_card` /
-      `list_workflow_cards`: the PORTFOLIO head. Admits `starfleet` (fleet-master, owner of
-      onboarding) OR `architect` (transitionally, until it goes per-project).
+      `list_workflow_cards`: the PORTFOLIO head. Admits any role carrying `onboarder`.
       Refusal → `:forbidden_not_onboarder`.
     * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
-      `list_issues` / `get_issue` / `comment_issue`: the per-project head. Admits ONLY `architect`.
-      Refusal → `:forbidden_not_architect`.
+      `list_issues` / `get_issue` / `comment_issue`: the per-project head. Admits the role carrying
+      `project_delegate`, and additionally requires a repo binding — delegating outside a project is
+      not a thing. Refusal → `:forbidden_not_architect`.
 
-  A worker pod (engineer, reviewer), a nil/unknown role or a pod absent from the registry → REFUSAL on
+  The two are DISJOINT in the bundled catalogue and that is a catalogue fact, not a law here: enrolling
+  a project happens from outside any project, delegating happens inside one. A role declaring a
+  capability whose tools it does not carry is caught by `roles.capabilities_exercisable`, because such
+  a declaration reads as a granted permission and grants nothing.
+
+  A pod whose role carries neither, a nil/unknown role, or a pod absent from the registry → REFUSAL on
   both. Fail-closed end to end: no case falls back onto an authorized access. (The tool-visibility filter
   now lives SERVER-side — the acceptor's `tools/list` lists only this role's tools, F-C138; the bridge
   forwards blindly. A UX convenience, but the authorization has always lived HERE.)
