@@ -114,17 +114,14 @@ defmodule Fleet.SPBuilderImageTest do
     :ok = Image.publish!()
     published = Image.published()
 
-    :persistent_term.put(
-      {Image, :image},
-      put_in(published, [:templates, "sp_template.eex"], "MARKER-V1\n")
-    )
+    Image.republish(put_in(published, [:templates, "sp_template.eex"], "MARKER-V1\n"))
 
     profile = %Fleet.CapProfile{kind: "CapabilityProfile", spec: %{}, metadata: %{"name" => "x"}}
     assert {:ok, %{sp_md: sp}} = Fleet.SPBuilder.compose(profile, ["tdd"])
     assert sp == "MARKER-V1\n"
 
     # Closed world: a template the image does not carry is a loud error, never a disk re-read.
-    :persistent_term.put({Image, :image}, put_in(published, [:templates], %{}))
+    Image.republish(put_in(published, [:templates], %{}))
 
     assert {:error, {:template_missing_from_image, "sp_template.eex"}} =
              Fleet.SPBuilder.compose(profile, ["tdd"])

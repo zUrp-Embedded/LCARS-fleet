@@ -523,6 +523,34 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
+  The search path of ONE catalogue for ONE tree: its own directory, then the system's.
+
+  The per-tree door under `scopes/1`, for a consumer whose object spans SEVERAL trees — the SP image
+  covers four, and asking `scopes/1` four times would give four lists to zip, with no defined answer
+  when a tree carries a fine override (one entry) and another does not (N).
+
+  **A fine override replaces its tree for EVERY catalogue.** Measured before choosing: those keys are
+  set only by tests (`:subagent_template_root` by nobody at all), never by `lib/` or `config/`, and a
+  fixture that sets one runs a single catalogue. The regime where "one override, N catalogues" would
+  read as N copies of the same directory is therefore a state nothing reaches.
+  """
+  @spec tree_scope(Path.t(), atom()) :: [Path.t()]
+  def tree_scope(root, tree) when is_binary(root) and is_atom(tree) do
+    rel = rel(tree)
+    own = fine_override(tree) || Path.join(root, rel)
+    Enum.filter([own, Path.join(system_root(), rel)], &File.dir?/1)
+  end
+
+  @doc "First existing `name` on an EXPLICIT scope (`tree_scope/2`), or nil — no config consulted."
+  @spec find_in([Path.t()], String.t()) :: Path.t() | nil
+  def find_in(scope, name) when is_list(scope) and is_binary(name) do
+    Enum.find_value(scope, fn dir ->
+      path = Path.join(dir, name)
+      if File.regular?(path), do: path
+    end)
+  end
+
+  @doc """
   The workflow-map directory of EVERY active catalogue, in declaration order.
 
   Cards do not supersede across catalogues and never will: a card names roles, and a role belongs to
