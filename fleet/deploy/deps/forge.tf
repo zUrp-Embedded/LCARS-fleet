@@ -217,7 +217,14 @@ resource "gitea_team" "humans" {
 variable "writers" {
   type        = list(string)
   description = "Roles qui ecrivent dans les depots — defaut = catalogue de reference"
-  default     = ["architect", "engineer", "scribe", "gatekeeper"]
+  # `chief` manquait ici alors qu'il est dans `roles` : il obtenait un compte et un role-token, et
+  # aucun droit d'ecriture sur l'org. C'est le conflict_resolver — il n'agit que sur un conflit que
+  # le producteur n'a pas su fermer, donc le defaut attendait le pire moment pour se manifester, et
+  # le doctor ne le voyait pas (il verifie les tokens, pas les appartenances). Ce defaut est la
+  # SECONDE ecriture d'un fait que la derivation produit deja (`mix lcars.catalogue.roles --tfvars`
+  # rend `writers: architect chief engineer gatekeeper scribe`) : deux listes pour un fait derivent,
+  # et c'est celle en dur qui servait.
+  default     = ["architect", "chief", "engineer", "scribe", "gatekeeper"]
 }
 
 variable "judges" {
