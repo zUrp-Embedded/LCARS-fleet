@@ -137,6 +137,20 @@ defmodule Fleet.Application.CatalogueVerifyTest do
     assert {:ok, _} = CatalogueVerify.verify(copy)
   end
 
+  test "a catalogue with NO sp_blocks/ passes — hand-written drafts owe no blocks", %{
+    tmp_dir: tmp
+  } do
+    # The web catalogue's shape, and the one a newcomer writes first: four roles, four SPs typed by
+    # hand, no composer. `sp_blocks/` is BUILD-TIME material for an author who composes; a catalogue
+    # that ships its drafts finished never needs it. Proven on a bench up to the seal, held by
+    # nothing until here — and the resolver reaching into the system root for `core/` is exactly the
+    # kind of change that could have made an absent tree start mattering.
+    copy = catalogue_copy(tmp)
+    File.rm_rf!(Path.join(copy, "sp_builder/sp_blocks"))
+
+    assert {:ok, _} = CatalogueVerify.verify(copy)
+  end
+
   test "verify covers the CATALOGUE, not the deployment — no forge/token guard leaks in",
        %{tmp_dir: tmp} do
     # A complete catalogue on a machine with no forge configured must pass: the forge base_url,
