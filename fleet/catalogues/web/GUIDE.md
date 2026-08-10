@@ -12,13 +12,21 @@ connaître le fonctionnement interne de LCARS pour lire cette page — ni pour m
 
 ## 1. Ce que vous avez entre les mains
 
-Une **équipe** : six rôles et trois façons de traiter un ticket. Le runtime n'en connaît aucun. Il
-exécute le catalogue qu'on lui désigne, et ce catalogue-ci décrit une petite équipe de développement
-web.
+Une **équipe** : quatre rôles et trois façons de traiter un ticket. Le runtime n'en connaît aucun.
+Il exécute le catalogue qu'on lui désigne, et ce catalogue-ci décrit une petite équipe de
+développement web.
 
 Ce n'est pas un exemple réduit du catalogue de LCARS : c'est un autre métier. Chaque fichier
 commente ses choix, et là où deux fichiers ne diffèrent que par une clé, cette différence est
 l'explication.
+
+**Quatre rôles seulement, et c'est le point.** Une flotte en fait tourner huit : les quatre d'ici,
+plus quatre autres qui viennent du **catalogue système** — l'accueil, le délégué de projet, le
+signataire des fusions, l'arbitre des blocages. Ceux-là ne sont pas de votre métier : ce sont les
+pièces de la mécanique, ils sont livrés avec le runtime, et vous ne les écrivez pas.
+
+C'est ce qui rend ce catalogue petit. Les quatre rôles qui restent sont ceux dont une équipe web
+discute vraiment : qui écrit le code, qui rédige, qui relit la demande, qui relit le diff.
 
 ## 2. Le modèle, en une phrase
 
@@ -40,11 +48,11 @@ une propriété de l'agent ou une propriété du traitement.** La réponse vous 
 C'est le contresens le plus coûteux, et il se fait dans la première heure.
 
 **Un rôle n'est pas un modèle spécialisé.** Il n'y a pas un « modèle relecteur » plus doué pour la
-revue et un « modèle développeur » plus doué pour le code. C'est **le même modèle sous les six**.
+revue et un « modèle développeur » plus doué pour le code. C'est **le même modèle sous tous**.
 Ce qui les distingue est entièrement dans le catalogue : des outils différents, un prompt différent,
 une place différente dans le pipeline, une durée de vie différente.
 
-**Les noms sont donc là pour vous.** `dev`, `writer`, `maintainer` disent à un humain qui regarde un
+**Les noms sont donc là pour vous.** `dev`, `writer`, `code-reviewer` disent à un humain qui regarde un
 ticket avancer ce que fait l'agent qui le tient. C'est de la lisibilité, pas de la capacité.
 Renommer `code-reviewer` en `relecteur` ne change strictement rien à ce qu'il sait faire.
 
@@ -96,19 +104,32 @@ C'est votre contrat de sortie. **Si elle passe, la flotte démarre dessus.** Lan
 modification : elle est instantanée et elle vous évite de découvrir une faute de frappe trois heures
 plus tard, dans un pod.
 
-## 4. Les six rôles
+## 4. Les quatre rôles — et les quatre que vous héritez
+
+**Les vôtres**, dans ce catalogue :
 
 | Rôle | Ce qu'il fait | Vit |
 |---|---|---|
-| `tech-lead` | parle à l'humain, ouvre les tickets, arbitre | tant que le projet |
 | `dev` | écrit le code | le temps d'un ticket |
 | `writer` | rédige la documentation et les notes | le temps d'un ticket |
 | `spec-reviewer` | relit la **demande**, avant qu'on code | le temps d'un verdict |
 | `code-reviewer` | relit le **code livré** | le temps d'un verdict |
-| `maintainer` | signe la fusion, tranche les exceptions | le temps d'un verdict |
+
+**Ceux du catalogue système**, que toute flotte porte et que vous n'écrivez pas :
+
+| Rôle | Ce qu'il fait | Pourquoi il n'est pas à vous |
+|---|---|---|
+| `starfleet` | l'accueil : ouvre les projets, parle à l'humain | il doit exister **avant** tout dépôt — aucun projet ne peut le porter |
+| `architect` | le délégué d'un projet : arbitre, rédige les tickets | le runtime le crée par dépôt ; aucune carte ne le nomme |
+| `gatekeeper` | signe la fusion | **exactement un** par flotte, rien ne le sélectionne |
+| `chief` | tranche un blocage épuisé | **exactement un**, atteint par escalade |
+
+La règle qui les sépare des vôtres se teste seule : **est-ce qu'une carte le nomme ?** Un rôle qu'une
+carte nomme est du métier — c'est un producteur, c'est un juge. Un rôle que le runtime va chercher
+tout seul, pour tenir sa propre mécanique, est du système.
 
 Ordre de lecture conseillé : **`dev.yaml` en entier** (il commente chaque clé une fois), puis les
-cinq autres — chacun ne commente que ce qui change chez lui.
+trois autres — chacun ne commente que ce qui change chez lui.
 
 Chaque rôle a deux fichiers, et la distinction compte :
 
@@ -131,31 +152,42 @@ tickets du même projet peuvent être traités avec deux niveaux de soin différ
 
 Comparez `quick-fix` et `standard` : trois lignes changent, et rien d'autre.
 
-## 6. Les cinq capacités — la partie qui rend vos noms libres
+## 6. Les capacités — celle qui est à vous, et les quatre qui ne le sont pas
 
 Le runtime ne connaît aucun nom de rôle. Quand il a besoin de savoir qui produit ou qui signe, il
-cherche le rôle qui **déclare la capacité** correspondante.
+cherche le rôle qui **déclare la capacité** correspondante. Il y en a cinq, et elles se répartissent
+exactement comme les rôles :
 
-| Capacité | Répond à | Combien |
+| Capacité | Répond à | À qui |
 |---|---|---|
-| `producer` | qui fabrique le livrable | **au moins un** — plusieurs est normal, les cartes choisissent |
-| `exception_judge` | qui signe la fusion | **exactement un** |
-| `conflict_resolver` | qui tranche un blocage épuisé | **exactement un** |
-| `project_delegate` | qui arbitre pour un projet | **exactement un** |
-| `onboarder` | qui peut accueillir un projet | — |
+| `producer` | qui fabrique le livrable | **à vous** — au moins un, plusieurs est normal, les cartes choisissent |
+| `onboarder` | qui peut accueillir un projet | système |
+| `project_delegate` | qui arbitre pour un projet | système, **exactement un** |
+| `exception_judge` | qui signe la fusion | système, **exactement un** |
+| `conflict_resolver` | qui tranche un blocage épuisé | système, **exactement un** |
 
-Zéro ou deux sur une capacité unique : **le démarrage refuse et nomme le problème.** C'est voulu —
-un catalogue incohérent doit tomber au déploiement, pas au premier ticket.
+**`producer` est la seule capacité qu'une carte sélectionne. C'est ce qui en fait la seule qui vous
+appartienne.** Les quatre autres, le runtime les résout tout seul, à l'échelle de la flotte : les
+déclarer dans votre catalogue reviendrait à décider qui signe les fusions de tout le monde.
 
-Deux conséquences, et ce sont les deux bonnes nouvelles de ce modèle :
+Le vérificateur le refuse, et il le dit :
 
-1. **Renommer un rôle ne casse rien** tant que la capacité reste déclarée. `dev` peut devenir
-   `frontend`. Il faut juste renommer aussi son fichier de prompt et les cartes qui l'appellent —
-   `verify` vous dira si vous en avez oublié.
-2. **Une capacité se pose sur le rôle que votre métier a**, pas un rôle par capacité. Ici,
-   `tech-lead` en porte trois : dans une équipe de cinq personnes, l'accueil, l'arbitrage et la
-   résolution de conflit sont la même personne. Le catalogue de LCARS les répartit sur trois rôles
-   parce qu'il modélise une organisation plus grande. Les deux sont valides.
+```
+business conformance: code-reviewer declares exception_judge — these capabilities belong
+to the system catalogue: the runtime resolves each of them alone and fleet-wide.
+```
+
+Il refuse aussi `role_index: 0` dans un catalogue métier — c'est l'emplacement de niveau flotte, il
+appartient à la mécanique.
+
+**Vos juges n'ont besoin d'aucune capacité.** Regardez `code-reviewer.yaml` : il n'en déclare pas.
+Ce sont les cartes qui le nomment, dans leur liste `jury`. Une capacité sert à répondre à une
+question que le RUNTIME se pose ; en déclarer une décorative n'ajoute que des façons de casser le
+démarrage.
+
+**La bonne nouvelle du modèle : renommer un rôle ne casse rien.** `dev` peut devenir `frontend` tant
+que `producer` reste déclaré. Il faut renommer aussi son fichier de prompt et les cartes qui
+l'appellent — `verify` vous dira si vous en avez oublié.
 
 ## 7. Les gestes courants
 
@@ -183,13 +215,26 @@ rôle reste dans le catalogue, simplement plus personne ne l'appelle. Rien à su
 
 ## 8. Ce qui n'est PAS à vous
 
-Deux arbres restent au runtime et ne se remplacent pas :
+Trois choses restent au runtime et ne se remplacent pas :
 
 - les **schémas** — les contrats contre lesquels votre catalogue est validé ;
-- la **base de sécurité** — les planchers qu'un catalogue ne peut pas abaisser.
+- la **base de sécurité** — les planchers qu'un catalogue ne peut pas abaisser ;
+- le **catalogue système** — les quatre rôles de la mécanique (§4) et les modes opératoires qu'ils
+  déclarent.
 
-Même règle pour les deux : *ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat, et un
+Même règle pour les trois : *ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat, et un
 contrat qu'on peut remplacer ne contraint rien.*
+
+Le catalogue système n'a **pas de variable** : il est embarqué, comme les schémas. Vous apportez
+votre métier ; vous ne choisissez pas votre mécanique. C'est aussi ce qui rend vérifiable la phrase
+« ce catalogue est complet » — le système est présent et intact, le vôtre est conforme, et les deux
+questions se posent séparément.
+
+Un nom porté des deux côtés est **refusé**, pas arbitré : votre `rubber-duck` ne remplace pas le
+sien, et le sien n'écrase pas le vôtre. Renommez le vôtre. Un nom doit vouloir dire une seule chose.
+
+Dans l'autre sens, l'héritage est généreux : les modes opératoires du système sont **visibles depuis
+votre catalogue** sans que vous ayez à les recopier. Vous ajoutez les vôtres à côté.
 
 De la même façon, une carte gouverne le **jugement** — combien de relecteurs, quelle exigence — mais
 jamais le **plancher mécanique** : identité de l'auteur, absence de secrets, la branche descend bien
@@ -199,10 +244,13 @@ de sa base. `jury: []` ne désactive rien de tout ça.
 
 Trois, nommées plutôt que découvertes :
 
-**Le socle des prompts est recopié six fois.** La partie commune aux six rôles — le protocole de
-boucle, le sanctuaire, la règle de preuve — est identique dans chaque `agent-<rôle>-base.md`. Le
+**Le socle des prompts est recopié dans chaque rôle.** La partie commune aux quatre — le protocole
+de boucle, le sanctuaire, la règle de preuve — est identique dans chaque `agent-<rôle>-base.md`. Le
 catalogue de LCARS la compose depuis des blocs partagés ; l'outil qui fait ça ne sert que lui. Si
 vous modifiez le socle, modifiez-le partout : rien ne vous préviendra.
+
+C'est la limite la plus coûteuse du lot, et le découpage système l'a **réduite sans la supprimer** :
+quatre copies au lieu de six, puisque les prompts de la mécanique ne sont plus les vôtres.
 
 **Les comptes forge de vos rôles se dérivent, mais il faut le demander.** Vos rôles ont besoin d'un
 compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La liste ne se devine pas
@@ -232,12 +280,12 @@ lequel tourne.
 
 ```
 catalogue.yaml                              le manifeste (version de contrat)
-cap_profile/canon/cap-profiles/             les six rôles
+cap_profile/canon/cap-profiles/             vos quatre rôles
 cap_profile/canon/cap-profiles/modop/       les modes opératoires (déclaration)
 cap_profile/canon/modop-bundles/            les modes opératoires (le texte)
 cap_profile/canon/subagent-templates/       les sous-agents
 cap_profile/canon/config/                   le gabarit de criticité d'un projet
-sp_builder/sp_drafts/                       les prompts, un par rôle, + les protocoles
+sp_builder/sp_drafts/                       vos prompts, un par rôle, + les protocoles
 sp_builder/templates/                       les deux gabarits qui assemblent tout prompt
 workflow/canon/workflow_maps/               les trois cartes
 workflow/brief_templates/                   ce qu'on remet aux agents et aux juges
@@ -245,3 +293,7 @@ coord/config/coord-policies.yaml            que faire quand ça se passe mal
 project_template/{main,workshop,ops}        le squelette d'un projet accueilli
 skills/canon/                               les procédures montées à la demande (vide ici)
 ```
+
+Et ce qui n'est **pas** ici, parce que ce n'est pas à vous — les quatre rôles de la mécanique, leurs
+prompts et les modes opératoires qu'ils déclarent vivent dans le catalogue système, livré avec le
+runtime. Vous les lisez si vous voulez comprendre ; vous ne les éditez pas.
