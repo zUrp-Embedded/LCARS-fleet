@@ -9,9 +9,19 @@
   Les variables fournies par le runtime, et rien d'autre :
 
     @pod_id @job_id @attempt_id @spawned_at @stable_sha256
-    @sp_role_base      le contenu de sp_drafts/agent-<role>-base.md
     @modop_fragments   les modes operatoires actifs, deja concatenes
     @preloaded_paths   la liste des fichiers montes dans le pod
+
+  Le prompt du role (`sp_drafts/agent-<role>-base.md`) n'est PAS une variable d'ici : le runtime le
+  colle apres ce gabarit, separe par un `---`. Ce fichier decrit l'en-tete et le contexte ; le
+  comportement du role vit dans son propre fichier.
+
+  ATTENTION, et c'est le seul piege du fichier : nommer une variable qui n'existe pas ne fait PAS
+  echouer le demarrage. EEx la rend vide en emettant un simple avertissement, et le prompt part avec
+  une section fantome. Ce gabarit portait `@sp_role_base` — une variable retiree du runtime le
+  2026-08-10 — et chaque prompt de ce catalogue emportait un separateur suivi de rien. Si tu ajoutes
+  une variable, verifie-la dans un `lcars catalogue verify` en lisant les AVERTISSEMENTS, pas
+  seulement le verdict.
 
   L'empreinte identifie la COMPOSITION du prompt : meme role et memes modes donnent la meme
   empreinte, quel que soit le pod. Elle sert a savoir sur quelle version d'instructions un agent a
@@ -23,12 +33,6 @@
 **Tâche**     : <%= @job_id %>
 **Tentative** : <%= @attempt_id %>
 **Empreinte** : <%= @stable_sha256 %>
-
-<%= if @sp_role_base != "" do %>
----
-
-<%= @sp_role_base %>
-<% end %>
 
 <%= if @modop_fragments != "" do %>
 ---

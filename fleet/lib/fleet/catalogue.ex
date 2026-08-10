@@ -109,6 +109,25 @@ defmodule Fleet.Catalogue do
   """
   @spec root() :: Path.t()
   def root do
+    case declared_roots() do
+      [first | _] -> first
+      [] -> bundled_root()
+    end
+  end
+
+  # THE BUSINESS ROOT IS THE FIRST ACTIVE CATALOGUE, and it took a bench to see why that matters.
+  #
+  # `search/1` covers the trees BOTH halves of a deployment share — cap-profiles, modops, drafts,
+  # blocks… The purely business trees (workflow maps, brief templates, project_template, coord
+  # policies) have no system default, so they read this root DIRECTLY. While `root/0` ignored the
+  # declaration, activating a catalogue gave you its ROLES and the bundled catalogue's CARDS.
+  #
+  # Measured on the lcars-d1 bench: cap-profiles resolved to `web-arch` (8 profiles) and the
+  # delegation card still came from the shipped reference, whose jury names `qualifier` — a role the
+  # active catalogue does not carry. The boot REFUSED, loudly, which is the guard working; the
+  # half-wiring was mine. It is exactly the "coherent-looking skew" this module's own header warns
+  # about, one level up.
+  defp bundled_root do
     # An explicit nil (a cross-test config leak) must never reach Path.join — coalesced here, at the
     # boundary, the same guard `CapProfile.Catalog.root_dir/0` carries for its own key.
     Application.get_env(:fleet_catalogue, :root) ||
@@ -285,8 +304,18 @@ defmodule Fleet.Catalogue do
   """
   @spec active_roots() :: [Path.t()]
   def active_roots do
+    case declared_roots() do
+      [] -> [to_string(bundled_root())]
+      roots -> roots
+    end
+  end
+
+  # Split out of `active_roots/0` so `root/0` can ask the same question without recursing through
+  # it: the reserved name resolves to the BUNDLED root, never to `root/0`, which is now derived
+  # from this list.
+  defp declared_roots do
     case declared_names() do
-      [] -> [to_string(root())]
+      [] -> []
       names -> Enum.map(names, &resolve_installed!/1)
     end
   end
@@ -323,7 +352,7 @@ defmodule Fleet.Catalogue do
     end
   end
 
-  defp resolve_installed!(@bundled_name), do: to_string(root())
+  defp resolve_installed!(@bundled_name), do: to_string(bundled_root())
 
   defp resolve_installed!(name) do
     dirs = install_dirs()

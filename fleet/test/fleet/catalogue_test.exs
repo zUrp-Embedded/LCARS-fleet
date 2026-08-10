@@ -258,6 +258,35 @@ defmodule Fleet.CatalogueTest do
       assert Catalogue.active_roots() == [mobile]
     end
 
+    test "the BUSINESS root follows the declaration — sinon les cartes et les roles divergent", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # Trouve sur le banc lcars-d1, et c'est le defaut que ce test existe pour empecher de revenir.
+      # `search/1` couvre les arbres PARTAGES ; les arbres purement metier (cartes, brief templates,
+      # project_template) lisent `root/0` en direct. Tant que `root/0` ignorait la declaration,
+      # activer un catalogue donnait ses ROLES et les CARTES du catalogue livre — la fleet a refuse
+      # au boot sur un jury nommant un role que le catalogue actif ne porte pas.
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      mobile = install(home, "mobile")
+      declare(home, "mobile\n")
+
+      assert to_string(Catalogue.root()) == mobile
+
+      # Les arbres PUREMENT metier suivent, et ce sont eux qui divergeaient : ils n'ont pas de
+      # defaut systeme, donc pas de `rel/1` ni de chemin de recherche — ils derivent de `root/0`.
+      assert String.starts_with?(Catalogue.workflow_maps_root(), mobile <> "/")
+      assert String.starts_with?(Catalogue.brief_templates_root(), mobile <> "/")
+      assert String.starts_with?(Catalogue.project_template_root(), mobile <> "/")
+    end
+
+    test "sans declaration, la grosse molette reste la racine metier", %{tmp_dir: tmp} do
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      assert to_string(Catalogue.root()) == root
+    end
+
     test "a DECLARED catalogue installed nowhere RAISES, naming it and where it looked", %{
       home: home
     } do
