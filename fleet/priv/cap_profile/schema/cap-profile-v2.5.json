@@ -90,8 +90,8 @@
               "items": {
                 "type": "string"
               },
-          "description": "The role's declared MCP/native tool surface \u2014 ONE OF THE TWO GRANTING MECHANISMS, and the per-role one. NOT THE WHOLE SURFACE, and reading it as such is the trap: `claude_launch.sh` APPENDS `mcp__fleet__get_work_item` and `mcp__fleet__submit_result` to every pod, unconditionally, because the fleet work-item protocol is universal \u2014 a pod that cannot pull its order or return its result is not a pod. That pair is a RUNTIME INVARIANT and belongs in the launcher precisely because a catalogue is SUBSTITUTABLE: an operator bringing their own profiles must not be able to produce a pod that cannot answer. Do not migrate it here, and do not list it here either \u2014 a line that restates an invariant reads as the thing that grants it, and the next reader removes it. \u26a0 THE CONVERSE IS NOT TRUE: this list DECLARES a surface, the vendor CONSTRUCTS it. A tool absent here is not thereby unreachable; `disallowedTools` in particular has been measured not to remove what is served to the model. So this field answers \"what did we ask for\", never \"what can this pod do\"."
-        },
+              "description": "The role's declared MCP/native tool surface — ONE OF THE TWO GRANTING MECHANISMS, and the per-role one. NOT THE WHOLE SURFACE, and reading it as such is the trap: `claude_launch.sh` APPENDS `mcp__fleet__get_work_item` and `mcp__fleet__submit_result` to every pod, unconditionally, because the fleet work-item protocol is universal — a pod that cannot pull its order or return its result is not a pod. That pair is a RUNTIME INVARIANT and belongs in the launcher precisely because a catalogue is SUBSTITUTABLE: an operator bringing their own profiles must not be able to produce a pod that cannot answer. Do not migrate it here, and do not list it here either — a line that restates an invariant reads as the thing that grants it, and the next reader removes it. ⚠ THE CONVERSE IS NOT TRUE: this list DECLARES a surface, the vendor CONSTRUCTS it. A tool absent here is not thereby unreachable; `disallowedTools` in particular has been measured not to remove what is served to the model. So this field answers \"what did we ask for\", never \"what can this pod do\"."
+            },
             "disallowedTools": {
               "type": "array",
               "items": {
@@ -310,6 +310,11 @@
             "judge"
           ],
           "description": "Shape of the BRIEF the role receives — entry dual of deliverable_mode (differentiation by catalogue, not by magic code name). `worker`: brief = executable instruction (the issue body); the role ACTS. `judge`: the role JUDGES and receives a defused I-CBC GateBrief (context + deliverable + verdict contract, NO executable instruction). REQUIRED (`spec.required`): judge-ness is a SECURITY property, NEVER inferred — a profile without `brief_kind` is REJECTED at load. No silent `worker` default (a judge missing `judge` would fall back to worker=execute = fail-open on attacking content)."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of ANOTHER catalogue role whose SP this role reuses, INSTEAD of owning an `agent-<name>-base.md` of its own. Absent (the normal case) = this role owns its draft, and having neither is refused: a role's cap-profile grants PERMISSIONS, its SP decides BEHAVIOUR, so a role with no prompt of its own behaves like whoever's prompt it inherited and its name lies. The one case this exists for is RENAMING: a catalogue that renames `architect` to something in its own language declares the new name here with `systemPrompt: architect` and reuses the validated prompt, instead of copying 200 lines that then drift. A ROLE NAME and not a path — the reuse is stated in the vocabulary of the catalogue, and there is no path to sanitise, escape or resolve. Reuse must be DECLARED: a silent fallback to a generic prompt is the trap this whole no-fallback doctrine removed."
         },
         "interlocutor": {
           "type": "string",

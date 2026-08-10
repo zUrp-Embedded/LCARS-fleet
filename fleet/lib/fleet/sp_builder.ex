@@ -58,7 +58,7 @@ defmodule Fleet.SPBuilder do
     * `Fleet.SPBuilder.RepoSections` — extraction of the named sections from the repo
       `CLAUDE.md` (markdown mini-parser).
 
-  Path resolution (`sp_role_root`/`modop_root`) is NOT extracted: these are the
+  Path resolution (`modop_root`) is NOT extracted: these are the
   config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
   with them — a "Paths" module would carry only two getters with no logic.
   """
@@ -115,7 +115,6 @@ defmodule Fleet.SPBuilder do
   def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
     with :ok <- validate_compose_opts(opts),
-         {:ok, sp_role_base} <- read_sp_role_base(cap_profile),
          {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
          {:ok, subagent_fragment} <- read_subagent_template(cap_profile),
          {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
@@ -128,8 +127,6 @@ defmodule Fleet.SPBuilder do
 
       stable_concat =
         IO.iodata_to_binary([
-          sp_role_base,
-          "\n",
           modop_concat,
           "\n",
           preloaded_paths_concat(preloaded_paths)
@@ -144,7 +141,6 @@ defmodule Fleet.SPBuilder do
         attempt_id: Keyword.get(opts, :attempt_id, "n/a"),
         spawned_at: DateTime.to_iso8601(spawned_at),
         stable_sha256: stable_sha256,
-        sp_role_base: sp_role_base,
         modop_fragments: modop_concat,
         preloaded_paths: preloaded_paths
       ]
@@ -247,39 +243,6 @@ defmodule Fleet.SPBuilder do
 
       true ->
         :ok
-    end
-  end
-
-  defp read_sp_role_base(%Fleet.CapProfile{spec: spec}) do
-    case get_in(spec, ["systemPrompt"]) do
-      nil ->
-        {:ok, ""}
-
-      path when is_binary(path) ->
-        root = sp_role_root()
-        full_path = Path.join(root, path)
-
-        cond do
-          String.match?(path, ~r/[\x00-\x1F\x7F]/) ->
-            {:error, {:sp_role_path_unsafe, path}}
-
-          not Fleet.Slug.under_root?(full_path, root) ->
-            {:error, {:sp_role_path_escape, path}}
-
-          true ->
-            case Fleet.SPBuilder.Image.sp_role_base(path) do
-              {:ok, content} -> {:ok, content}
-              :not_found -> {:error, {:sp_role_path_missing, full_path}}
-              :unpublished -> read_sp_role_base_from_disk(full_path)
-            end
-        end
-    end
-  end
-
-  defp read_sp_role_base_from_disk(full_path) do
-    case File.read(full_path) do
-      {:ok, content} -> {:ok, content}
-      {:error, _reason} -> {:error, {:sp_role_path_missing, full_path}}
     end
   end
 
@@ -428,11 +391,6 @@ defmodule Fleet.SPBuilder do
       Fleet.Catalogue.rel(:sp_drafts),
       "agent-#{role}-base.md"
     )
-  end
-
-  # The fine cap-profile override does not move role bases; the catalogue root does.
-  defp sp_role_root do
-    Application.get_env(:fleet_sp_builder, :sp_role_root) || Fleet.Catalogue.cap_profiles_root()
   end
 
   defp modop_root do

@@ -136,7 +136,6 @@ defmodule Fleet.Spawner.PodTest do
       },
       spec: %{
         "lifetime_scope" => "one-shot",
-        "systemPrompt" => "engineer-role.md",
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot"},

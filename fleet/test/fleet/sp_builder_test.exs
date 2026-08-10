@@ -11,23 +11,14 @@ defmodule Fleet.SPBuilderTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
-    sp_role_root = Path.join(tmp_dir, "cap-profiles")
     modop_root = Path.join(tmp_dir, "modop")
-    File.mkdir_p!(sp_role_root)
     File.mkdir_p!(modop_root)
 
-    prev_sp = Application.get_env(:fleet_sp_builder, :sp_role_root)
     prev_mod = Application.get_env(:fleet_sp_builder, :modop_root)
-
-    Application.put_env(:fleet_sp_builder, :sp_role_root, sp_role_root)
     Application.put_env(:fleet_sp_builder, :modop_root, modop_root)
+    on_exit(fn -> Application.put_env(:fleet_sp_builder, :modop_root, prev_mod) end)
 
-    on_exit(fn ->
-      Application.put_env(:fleet_sp_builder, :sp_role_root, prev_sp)
-      Application.put_env(:fleet_sp_builder, :modop_root, prev_mod)
-    end)
-
-    {:ok, sp_role_root: sp_role_root, modop_root: modop_root}
+    {:ok, modop_root: modop_root}
   end
 
   # ============================================================
@@ -38,7 +29,6 @@ defmodule Fleet.SPBuilderTest do
     spec =
       Map.merge(
         %{
-          "systemPrompt" => "engineer-role.md",
           "scope" => %{
             "disallowedTools" => ["web_search", "tool_search_internal"],
             "git_ops_denied" => ["push"]
@@ -61,10 +51,6 @@ defmodule Fleet.SPBuilderTest do
     }
   end
 
-  defp write_sp_role(sp_role_root, name, content) do
-    File.write!(Path.join(sp_role_root, name), content)
-  end
-
   defp write_modop_sp(modop_root, name, content) do
     dir = Path.join(modop_root, name)
     File.mkdir_p!(dir)
@@ -76,9 +62,7 @@ defmodule Fleet.SPBuilderTest do
   # ============================================================
 
   describe "compose/3" do
-    test "composes SP from cap-profile with no modop bundles", %{sp_role_root: sp_root} do
-      write_sp_role(sp_root, "engineer-role.md", "# Engineer role base SP\n\nDoctrine.")
-
+    test "composes SP from cap-profile with no modop bundles" do
       assert {:ok,
               %{
                 sp_md: sp_md,
@@ -86,15 +70,11 @@ defmodule Fleet.SPBuilderTest do
                 metadata: %{modop_bundles_used: []}
               }} = Fleet.SPBuilder.compose(valid_cap_profile(), [], pod_id: "p-1", job_id: "j-1")
 
-      assert sp_md =~ "Engineer role base SP"
+      assert sp_md =~ "p-1"
       assert is_binary(sha) and byte_size(sha) == 64
     end
 
-    test "composes SP with modop bundles in declared order", %{
-      sp_role_root: sp_root,
-      modop_root: mop_root
-    } do
-      write_sp_role(sp_root, "engineer-role.md", "# Role\n")
+    test "composes SP with modop bundles in declared order", %{modop_root: mop_root} do
       write_modop_sp(mop_root, "fire-mode", "# fire-mode discipline")
       write_modop_sp(mop_root, "rubber-duck", "# rubber-duck discipline")
 
@@ -109,22 +89,9 @@ defmodule Fleet.SPBuilderTest do
       assert fire_idx < duck_idx
     end
 
-    test "returns :modop_bundle_missing when a modop sp.md is absent", %{sp_role_root: sp_root} do
-      write_sp_role(sp_root, "engineer-role.md", "# Role")
-
+    test "returns :modop_bundle_missing when a modop sp.md is absent" do
       assert {:error, {:modop_bundle_missing, "ghost"}} =
                Fleet.SPBuilder.compose(valid_cap_profile(), ["ghost"])
-    end
-
-    test "returns :sp_role_path_missing when role base file is absent" do
-      assert {:error, {:sp_role_path_missing, _path}} =
-               Fleet.SPBuilder.compose(valid_cap_profile(), [])
-    end
-
-    test "no role base when systemPrompt is nil" do
-      profile = valid_cap_profile(%{"systemPrompt" => nil})
-      assert {:ok, %{sp_md: sp_md}} = Fleet.SPBuilder.compose(profile, [])
-      refute sp_md =~ "Role base"
     end
 
     test "R1-04: malformed load-bearing opts → {:error, {:bad_opt, _}} (parse at the edge, no raise)" do
@@ -140,26 +107,15 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.compose(valid_cap_profile(), [], spawned_at: "2030-01-01")
     end
 
-    test "R1-01: systemPrompt with traversal (`../`) → {:error, {:sp_role_path_escape, _}} (confined)" do
-      profile = valid_cap_profile(%{"systemPrompt" => "../../../etc/passwd"})
-      assert {:error, {:sp_role_path_escape, _}} = Fleet.SPBuilder.compose(profile, [])
-    end
-
-    test "R1-01: systemPrompt with null byte → {:error, {:sp_role_path_unsafe, _}} (no raise)" do
-      profile = valid_cap_profile(%{"systemPrompt" => "role\0.md"})
-      assert {:error, {:sp_role_path_unsafe, _}} = Fleet.SPBuilder.compose(profile, [])
-    end
-
     test "R1-02/03: modop bundle with traversal (`../`) → {:error, {:modop_bundle_unsafe, _}} (confined_join)" do
-      # systemPrompt=nil → empty sp_role_base, isolating the modop confinement.
-      profile = valid_cap_profile(%{"systemPrompt" => nil})
+      profile = valid_cap_profile()
 
       assert {:error, {:modop_bundle_unsafe, {"../evil", _}}} =
                Fleet.SPBuilder.compose(profile, ["../evil"])
     end
 
     test "R1-29: a non-slug skill name (traversal) → {:error, {:skills_unsafe, _}}", %{
-      sp_role_root: root
+      modop_root: root
     } do
       # `root` exists (dir) → we get past the File.dir? guard; "../../etc" is rejected BEFORE File.exists?.
       profile = valid_cap_profile(%{"knowledge" => %{"skills" => ["../../etc", "loop"]}})
@@ -172,7 +128,7 @@ defmodule Fleet.SPBuilderTest do
       # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
       # app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/modop-bundles") (where the bundles live).
       # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
-      # default, like sp_role_root.
+      # default.
       #
       # SCOPE of this proof, since the default is easy to over-read: it shows that `SPBuilder.compose`
       # RESOLVES its bundle root without an explicit config. It does NOT show that a step's modops
@@ -218,9 +174,7 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.compose(bad, [])
     end
 
-    test "preloaded_paths section is included when given", %{sp_role_root: sp_root} do
-      write_sp_role(sp_root, "engineer-role.md", "# Role")
-
+    test "preloaded_paths section is included when given" do
       paths = ["/tmp/preloaded-1.md", "/tmp/preloaded-2.md"]
 
       assert {:ok, %{sp_md: sp_md}} =
@@ -231,10 +185,8 @@ defmodule Fleet.SPBuilderTest do
     end
 
     test "stable_sha256 is identical across 100 invocations on same input", %{
-      sp_role_root: sp_root,
       modop_root: mop_root
     } do
-      write_sp_role(sp_root, "engineer-role.md", "# Role base")
       write_modop_sp(mop_root, "fire-mode", "# fire-mode")
 
       shas =
@@ -248,9 +200,7 @@ defmodule Fleet.SPBuilderTest do
       assert shas |> Enum.uniq() |> length() == 1
     end
 
-    test "stable_sha256 is invariant to pod_id and spawned_at changes", %{sp_role_root: sp_root} do
-      write_sp_role(sp_root, "engineer-role.md", "# Role")
-
+    test "stable_sha256 is invariant to pod_id and spawned_at changes" do
       profile = valid_cap_profile()
 
       {:ok, %{stable_sha256: sha_a}} =
@@ -269,10 +219,8 @@ defmodule Fleet.SPBuilderTest do
     end
 
     test "stable_sha256 differs when modop order is changed (precedence)", %{
-      sp_role_root: sp_root,
       modop_root: mop_root
     } do
-      write_sp_role(sp_root, "engineer-role.md", "# Role")
       write_modop_sp(mop_root, "m1", "# m1")
       write_modop_sp(mop_root, "m2", "# m2")
 
@@ -282,9 +230,7 @@ defmodule Fleet.SPBuilderTest do
       assert a != b
     end
 
-    test "stable_sha256 differs when preloaded_paths change", %{sp_role_root: sp_root} do
-      write_sp_role(sp_root, "engineer-role.md", "# Role")
-
+    test "stable_sha256 differs when preloaded_paths change" do
       {:ok, %{stable_sha256: sha_a}} =
         Fleet.SPBuilder.compose(valid_cap_profile(), [], preloaded_paths: ["/tmp/a.md"])
 
@@ -462,10 +408,7 @@ defmodule Fleet.SPBuilderTest do
     string(:alphanumeric, min_length: 1, max_length: 24)
   end
 
-  property "stable_sha256 is invariant under arbitrary pod_id/spawned_at", %{
-    sp_role_root: sp_root
-  } do
-    write_sp_role(sp_root, "engineer-role.md", "# Role")
+  property "stable_sha256 is invariant under arbitrary pod_id/spawned_at" do
     profile = valid_cap_profile()
     base = ~U[2026-01-01 00:00:00Z]
 
@@ -485,10 +428,8 @@ defmodule Fleet.SPBuilderTest do
   end
 
   property "stable_sha256 stable across two consecutive identical calls", %{
-    sp_role_root: sp_root,
     modop_root: mop_root
   } do
-    write_sp_role(sp_root, "engineer-role.md", "# Role")
     write_modop_sp(mop_root, "m1", "# m1")
     write_modop_sp(mop_root, "m2", "# m2")
 

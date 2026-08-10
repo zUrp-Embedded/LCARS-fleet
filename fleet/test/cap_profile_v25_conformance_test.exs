@@ -284,6 +284,28 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     end
   end
 
+  test "spec.systemPrompt is ADMITTED by the schema — it was forbidden, and the code read it anyway" do
+    # Measured 2026-08-10: `spec` carries `additionalProperties: false` and did not declare
+    # `systemPrompt`, so a catalogue using it was refused at image publish. Meanwhile ~50 lines of
+    # runtime resolved it, with an image key, a knob and two path guards, documented as a "dormant
+    # EXTENSION POINT". Dormant reads as "nobody uses it yet"; the truth was "nobody CAN".
+    raw =
+      Application.app_dir(
+        :lcars_fleet,
+        "priv/catalogue-system/cap_profile/canon/cap-profiles/architect.yaml"
+      )
+      |> YamlElixir.read_from_file!()
+
+    assert :ok = Fleet.CapProfile.Schema.validate(raw, :cap_profile)
+
+    borrowing = put_in(raw, ["spec", "systemPrompt"], "architect")
+    assert :ok = Fleet.CapProfile.Schema.validate(borrowing, :cap_profile)
+
+    # And it stays STRICT around it: the neighbouring typo is still refused.
+    typo = put_in(raw, ["spec", "systemPromt"], "architect")
+    assert {:error, :invalid_schema} = Fleet.CapProfile.Schema.validate(typo, :cap_profile)
+  end
+
   test "B-03 (catalogue L3): the canon roles carry the RIGHT capabilities (data, not magic names)" do
     cap = fn role ->
       {:ok, p} = Fleet.CapProfile.load(role)

@@ -40,11 +40,6 @@ defmodule Fleet.SpawnerTest do
     Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
     # adr-f: no vault anymore (creds via claudeDir bwrap bind).
 
-    sp_root = Path.join(tmp_dir, "cap-profiles")
-    File.mkdir_p!(sp_root)
-    File.write!(Path.join(sp_root, "engineer-role.md"), "# SP")
-    Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
-
     # auth = single bind mode (token_arg removed); the credentials gate still reads the native
     # creds (scope/plan). Default creds fixture (these tests do not test the credentials door) —
     # cf. pod_test.exs. Without it: {:credentials_invalid, _} → pod dies at boot.
@@ -75,7 +70,6 @@ defmodule Fleet.SpawnerTest do
       # B5 #576: do NOT delete :launch_backend — leave the hermetic
       # config/test.exs baseline (StubBackend) in place, otherwise the
       # REAL code-default LauncherPortBackend is reached under async race.
-      Application.delete_env(:fleet_sp_builder, :sp_role_root)
       Application.delete_env(:fleet_spawner, :claude_dir)
     end)
 
@@ -95,7 +89,6 @@ defmodule Fleet.SpawnerTest do
         "fleet_level" => false
       },
       spec: %{
-        "systemPrompt" => "engineer-role.md",
         "scope" => %{"disallowedTools" => @min_disallowed, "git_ops_denied" => []},
         "knowledge" => %{"skills" => []},
         "invocation" => %{"lifetime_scope" => "one-shot"},

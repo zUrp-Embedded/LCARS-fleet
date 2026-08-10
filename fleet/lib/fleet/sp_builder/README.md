@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-01
+**Last revised**: 2026-08-10
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -22,7 +22,6 @@ there, not restated here.
 - `Fleet.SPBuilder.Composer` — the behaviour (test mock + future 2nd vendor)
 
 ## Config & deps
-- Knob `:fleet_sp_builder, :sp_role_root` — read by the facade; default = bundled cap-profiles canon (rationale on `sp_role_root/0`).
 - Knob `:fleet_sp_builder, :modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`).
 - Knob `:fleet_sp_builder, :monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
 - None set in `config/*.exs` or via env var — inline defaults only (tests override via `put_env`/opt).

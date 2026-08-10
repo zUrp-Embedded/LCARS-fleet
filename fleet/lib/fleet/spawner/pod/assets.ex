@@ -74,18 +74,36 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Reads `agent-<role>-base.md` for the profile's validated role.
+  Reads the profile's SP: `agent-<role>-base.md`, or the draft of the role its `spec.systemPrompt`
+  names.
 
   Missing image or disk content and invalid role slugs return tagged errors; there
   is no generic fallback.
+
+  ## `spec.systemPrompt` — DECLARED reuse, and the only alternative
+
+  A cap-profile grants PERMISSIONS; its SP decides BEHAVIOUR. So a role with no prompt of its own
+  behaves like whoever's prompt it ends up with, and its name lies — which is why the generic
+  `agent-worker-base.md` fallback was removed (no SP, no pod). The single legitimate case is
+  RENAMING: a catalogue that renames a role into its own language would otherwise copy two hundred
+  lines that then drift, the substrate defect one floor up.
+
+  It names a ROLE, not a path. The reuse is then stated in the catalogue's own vocabulary, there is
+  nothing to sanitise or escape, and the key already exists in the frozen image. The distinction
+  that makes it safe is DECLARED versus SILENT: a role inheriting a prompt by accident stays
+  refused; one that says so in its yaml has assumed it.
   """
   @spec read_agent_draft(Fleet.CapProfile.t()) ::
           {:ok, String.t()}
           | {:error,
              {:agent_draft_missing, Path.t(), File.posix()}
              | {:agent_draft_invalid_role, String.t()}}
-  def read_agent_draft(%Fleet.CapProfile{} = cap) do
-    role = Fleet.CapProfile.name(cap)
+  def read_agent_draft(%Fleet.CapProfile{spec: spec} = cap) do
+    role =
+      case spec do
+        %{"systemPrompt" => borrowed} when is_binary(borrowed) -> borrowed
+        _ -> Fleet.CapProfile.name(cap)
+      end
 
     if Fleet.Slug.valid?(role) do
       case Fleet.SPBuilder.image_draft(role) do

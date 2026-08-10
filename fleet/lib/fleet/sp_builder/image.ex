@@ -36,18 +36,11 @@ defmodule Fleet.SPBuilder.Image do
         ),
       worker_protocol: read_worker_protocol!(),
       human_protocol: read_protocol!(human_protocol_path(), "human protocol"),
-      # The role SP bases a cap-profile's `spec.systemPrompt` names, keyed by path RELATIVE to the
-      # SP root — the composer joins that same relative path, so the key is the lookup. Imaged
-      # because it is prompt material like any other: left on a live read, two pods of one
-      # deployment could receive different role bases under one image version.
-      # OPTIONAL by measurement, not by convenience: no cap-profile of the canon declares
-      # `spec.systemPrompt` today (grep: zero), and the root ships no `.md` — the leg is a dormant
-      # EXTENSION POINT. So an empty match is legitimate here and must not raise, unlike the material
-      # the fleet always needs (an empty modop/draft/template root IS a broken deploy). A deployment
-      # that DOES ship role bases gets them frozen; an empty map still closes the world, because a
-      # profile naming a base the image lacks now fails loud instead of silently reading the live file.
-      sp_role_bases:
-        read_dir_map(sp_role_roots(), "**/*.md", &Path.relative_to(&1, sp_role_root())),
+      # (`sp_role_bases` lived here: a SECOND corpus of prompt files, keyed by path under the
+      # cap-profiles root, serving `spec.systemPrompt`. The field was forbidden by the schema, so no
+      # valid catalogue could name one — the map was always empty, and the key it would have been
+      # looked up by was a path. `spec.systemPrompt` now names a ROLE, so it resolves through
+      # `drafts` above and needs no corpus of its own.)
       # The two EEx templates, frozen as SOURCE (rendered with eval_string against the image). A
       # template is the SHAPE of every prompt the fleet emits — the last thing that may drift
       # mid-life while the version claims otherwise.
@@ -74,7 +67,7 @@ defmodule Fleet.SPBuilder.Image do
     Logger.info(
       "SPBuilder.Image: published (#{map_size(image.modop_sp)} modop fragments, " <>
         "#{map_size(image.subagent)} subagent templates, #{map_size(image.drafts)} drafts, " <>
-        "#{map_size(image.sp_role_bases)} role SP bases, #{map_size(image.templates)} EEx templates, " <>
+        "#{map_size(image.templates)} EEx templates, " <>
         "worker + human protocols frozen, version=#{version})"
     )
 
@@ -119,7 +112,6 @@ defmodule Fleet.SPBuilder.Image do
       {modop_roots(), "*/sp.md"},
       {subagent_roots(), "subagent-*.md"},
       {drafts_roots(), "agent-*-base.md"},
-      {sp_role_roots(), "**/*.md"},
       {template_roots(), "*.eex"}
     ]
     |> Enum.flat_map(fn {roots, glob} ->
@@ -185,15 +177,6 @@ defmodule Fleet.SPBuilder.Image do
       %{human_protocol: content} -> {:ok, content}
       nil -> :unpublished
     end
-  end
-
-  @doc """
-  A role SP base by its path RELATIVE to the SP root: `{:ok, content}`, `:not_found` (image
-  published, closed world — the catalogue names a base the deploy does not ship), or `:unpublished`.
-  """
-  @spec sp_role_base(Path.t()) :: {:ok, binary()} | :not_found | :unpublished
-  def sp_role_base(rel_path) when is_binary(rel_path) do
-    lookup(:sp_role_bases, rel_path)
   end
 
   @doc """
@@ -324,21 +307,12 @@ defmodule Fleet.SPBuilder.Image do
 
   defp drafts_roots, do: Fleet.Catalogue.search(drafts_root(), Fleet.Catalogue.rel(:sp_drafts))
 
-  # The three readers that never learned the search path, and were three defects for it: the EEx
-  # templates shape the MECHANISM's prompts, `sp_role_bases` is the dormant `spec.systemPrompt`
-  # extension aimed at the wrong root (W-14), and the human protocol was demanded from catalogues
-  # that have no human-facing role at all (W-13). They go through the same door as the rest.
+  # Two of the three readers that never learned the search path, and were defects for it: the EEx
+  # templates shape the MECHANISM's prompts, and the human protocol was demanded from catalogues
+  # that have no human-facing role at all (W-13). They go through the same door as the rest. The
+  # third was `sp_role_bases`, and it is gone rather than fixed — see the publish above.
   defp template_roots,
     do: Fleet.Catalogue.search(template_root(), Fleet.Catalogue.rel(:sp_templates))
-
-  defp sp_role_roots,
-    do: Fleet.Catalogue.search(sp_role_root(), Fleet.Catalogue.rel(:cap_profiles))
-
-  # SAME roots the composer's disk fallback reads (`SPBuilder.sp_role_root/0` and its template path)
-  # — one resolution per asset, mirrored here, for the reason above.
-  defp sp_role_root do
-    Application.get_env(:fleet_sp_builder, :sp_role_root) || Fleet.Catalogue.cap_profiles_root()
-  end
 
   defp template_root, do: Fleet.Catalogue.sp_templates_root()
 end

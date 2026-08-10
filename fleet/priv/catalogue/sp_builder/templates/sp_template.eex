@@ -5,14 +5,6 @@
 **Attempt ID**     : <%= @attempt_id %>
 **Stable sha256**  : <%= @stable_sha256 %>
 
-<%= if @sp_role_base != "" do %>
----
-
-## Role base
-
-<%= @sp_role_base %>
-<% end %>
-
 <%= if @modop_fragments != "" do %>
 ---
 

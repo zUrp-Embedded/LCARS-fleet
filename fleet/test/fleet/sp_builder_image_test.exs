@@ -130,38 +130,98 @@ defmodule Fleet.SPBuilderImageTest do
              Fleet.SPBuilder.compose(profile, ["tdd"])
   end
 
-  test "a role SP base absent from a published image is a closed-world error, not a disk read", %{
+  test "a BORROWED SP absent from a published image is a closed-world error, not a disk read", %{
     tmp_dir: tmp
   } do
-    # `spec.systemPrompt` is a dormant extension point (no canon profile declares one), so the root
-    # is legitimately empty and publish! must NOT raise on it. But once published, a profile naming
-    # a base the image lacks must fail loud — silently reading the live file is what reopened the
-    # epoch precisely where a deployment had extended it.
+    # `spec.systemPrompt` names ANOTHER ROLE whose SP this one reuses. Once an image is published,
+    # a profile borrowing an SP the image lacks must fail loud — silently reading the live file is
+    # what reopened the epoch precisely where a deployment had extended it.
     #
-    # The fixture is the DISCRIMINATING one, and it has to be: the base is written to disk AFTER the
-    # publish, so it EXISTS and is readable. An image-first lookup refuses it (closed world); a disk
-    # read would serve it. Asserting the error against a file that is missing on disk too would pass
-    # under either implementation and prove nothing.
-    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :sp_role_root, tmp)
+    # The fixture is the DISCRIMINATING one, and it has to be: the draft is written to disk AFTER
+    # the publish, so it EXISTS and is readable. An image-first lookup refuses it (closed world); a
+    # disk read would serve it. Asserting against a file missing on disk too would pass under either
+    # implementation and prove nothing.
+    #
+    # (This test used to prove the same property of `sp_role_bases`, a SECOND corpus keyed by PATH
+    # that served the same field — measured 2026-08-10 to be forbidden by the schema, so no valid
+    # catalogue could ever reach it. The property is real; the mechanism it guarded was not.)
+    # The FINE override, not the catalogue root: moving the whole root would take the modops and
+    # the EEx templates with it and the publish would refuse on those instead — measuring the
+    # fixture rather than the property.
+    drafts = Path.join(tmp, "drafts")
+    File.mkdir_p!(drafts)
+    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :sp_drafts_root, drafts)
     :ok = Image.publish!()
-    assert :not_found = Image.sp_role_base("late-role.md")
-
-    File.write!(Path.join(tmp, "late-role.md"), "# a base the epoch never admitted\n")
-    assert File.exists?(Path.join(tmp, "late-role.md")), "fixture must be readable on disk"
 
     profile = %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      spec: %{"systemPrompt" => "late-role.md"},
+      spec: %{"systemPrompt" => "late-role"},
       metadata: %{"name" => "x"}
     }
 
-    assert {:error, {:sp_role_path_missing, _}} = Fleet.SPBuilder.compose(profile, ["tdd"])
+    assert {:error, {:agent_draft_missing, _, _}} =
+             Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
+
+    File.write!(
+      Path.join(drafts, "agent-late-role-base.md"),
+      "# an SP the epoch never admitted\n"
+    )
+
+    assert File.exists?(Path.join(drafts, "agent-late-role-base.md")),
+           "fixture must be readable on disk"
+
+    assert {:error, {:agent_draft_missing, _, _}} =
+             Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
 
     # Restart-republish → the new epoch admits it, which is the only way in.
     Image.unpublish()
     :ok = Image.publish!()
-    assert {:ok, %{sp_md: sp}} = Fleet.SPBuilder.compose(profile, ["tdd"])
-    assert sp =~ "a base the epoch never admitted"
+
+    assert {:ok, content} = Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
+    assert content =~ "an SP the epoch never admitted"
+  end
+
+  test "systemPrompt: a role REUSES another role's SP instead of copying it" do
+    # The renaming case, verbatim from the user: a catalogue renaming `architect` into its own
+    # language declares the new name and points at the validated prompt. Copying two hundred lines
+    # is what this replaces, and copies drift.
+    :ok = Image.publish!()
+
+    renamed = %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      spec: %{"systemPrompt" => "architect"},
+      metadata: %{"name" => "chef-de-projet"}
+    }
+
+    assert {:ok, borrowed} = Fleet.Spawner.Pod.Assets.read_agent_draft(renamed)
+
+    own = %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      spec: %{},
+      metadata: %{"name" => "architect"}
+    }
+
+    assert {:ok, ^borrowed} = Fleet.Spawner.Pod.Assets.read_agent_draft(own),
+           "the renamed role must receive the SAME bytes, not a lookalike"
+  end
+
+  test "systemPrompt is a ROLE NAME: a path is refused as an invalid role, never resolved" do
+    # R1-01 moved here rather than deleted. The field used to be a PATH, with a null-byte check and
+    # a traversal check guarding it — both real anchors, both guarding a field the schema forbade.
+    # A role name has no path to escape, and the slug guard is what says so.
+    :ok = Image.publish!()
+
+    for hostile <- ["../../../etc/passwd", "role\0", "sub/dir", ""] do
+      profile = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        spec: %{"systemPrompt" => hostile},
+        metadata: %{"name" => "x"}
+      }
+
+      assert {:error, {:agent_draft_invalid_role, ^hostile}} =
+               Fleet.Spawner.Pod.Assets.read_agent_draft(profile),
+             "systemPrompt=#{inspect(hostile)} must be refused as a role, not resolved as a path"
+    end
   end
 
   describe "drift — the epoch knows whether the disk still matches what it validated" do
