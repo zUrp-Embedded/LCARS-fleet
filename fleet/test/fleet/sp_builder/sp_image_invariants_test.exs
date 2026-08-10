@@ -36,12 +36,10 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
     defaults = Fleet.CapProfile.default_modops(profile)
     {:ok, %{sp_md: overlay}} = Fleet.SPBuilder.compose(profile, defaults)
 
-    draft =
-      Application.app_dir(
-        :lcars_fleet,
-        "priv/catalogue/sp_builder/sp_drafts/agent-#{role}-base.md"
-      )
-      |> File.read!()
+    # Through the RESOLVER, not a literal path: the draft of a mechanism role lives in the system
+    # catalogue and a business role's in the business one, and this test is about what a pod
+    # RECEIVES — which is exactly what the resolver answers.
+    draft = role |> Fleet.SPBuilder.sp_draft_path() |> File.read!()
 
     draft <> "\n" <> overlay
   end

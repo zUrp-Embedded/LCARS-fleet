@@ -7,8 +7,10 @@ defmodule Fleet.SPBuilder.BlocksTest do
   defp blocks_dir,
     do: :lcars_fleet |> Application.app_dir("priv/sp_builder") |> Path.join("sp_blocks")
 
-  defp drafts_dir,
-    do: :lcars_fleet |> Application.app_dir("priv/catalogue/sp_builder") |> Path.join("sp_drafts")
+  # Le draft d'un role vit avec le role : mecanique dans le catalogue systeme, metier dans l'autre.
+  # Le resolveur repond ou qu'il soit — le tester par un chemin en dur reviendrait a epingler la
+  # moitie metier et a declarer manquant tout ce qui a demenage.
+  defp draft_path(role), do: Fleet.SPBuilder.sp_draft_path(role)
 
   test "each role in the map composes a non-empty, titled SP" do
     roles = Blocks.role_map(blocks_dir())
@@ -33,7 +35,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
            "empty role_map (sp-map.yaml not found?) → the no-drift compares NOTHING"
 
     for {role, blocks} <- roles do
-      committed = drafts_dir() |> Path.join("agent-#{role}-base.md") |> File.read!()
+      committed = role |> draft_path() |> File.read!()
 
       assert committed == Blocks.compose!(role, blocks, blocks_dir()),
              "agent-#{role}-base.md drifted from its blocks → run `mix lcars.sp.gen` and commit"
@@ -73,7 +75,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
              "not the tree (measured: 8 on 2026-08-03)"
 
     for role <- pod_roles do
-      path = Path.join(drafts_dir(), "agent-#{role}-base.md")
+      path = draft_path(role)
 
       assert File.exists?(path),
              "agent-#{role}-base.md missing → spawning #{role} would brick (no-fallback). " <>

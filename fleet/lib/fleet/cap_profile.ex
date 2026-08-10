@@ -598,6 +598,13 @@ defmodule Fleet.CapProfile do
   defdelegate forge_identity_roles(dir), to: Catalog
 
   @doc """
+  The raw role index of ONE root — the business half judged apart from what it inherits.
+  See `Fleet.CapProfile.Catalog.index_of/1`.
+  """
+  @spec index_of(String.t()) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
+  defdelegate index_of(dir), to: Catalog
+
+  @doc """
   The forge roster with the facts a provisioning needs to place each role — `%{name, seat?,
   judge?}`. See `Fleet.CapProfile.Catalog.forge_roster/1`.
   """

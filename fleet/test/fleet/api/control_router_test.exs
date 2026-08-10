@@ -468,14 +468,7 @@ defmodule Fleet.API.ControlRouterTest do
       tmp_dir: tmp
     } do
       write_hostnative_fixture(tmp)
-      prev = Application.get_env(:fleet_cap_profile, :root_dir)
-      Application.put_env(:fleet_cap_profile, :root_dir, tmp)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-          else: Application.delete_env(:fleet_cap_profile, :root_dir)
-      end)
+      Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
       # Sanity: the fixture really is host-native (else the guard below would test nothing).
       assert {:ok, sf} = Fleet.CapProfile.load("hostnative-probe")

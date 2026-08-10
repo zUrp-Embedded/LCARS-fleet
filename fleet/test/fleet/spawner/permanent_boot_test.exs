@@ -353,11 +353,17 @@ defmodule Fleet.Spawner.PermanentBootTest do
     # canon/cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
     # (nonexistent in a standard install). Same pattern as brick1
     # MonkTest (resolve via Application.app_dir).
-    @canon_dir Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/cap-profiles")
+    # Les deux racines : starfleet et architect sont de la mecanique et vivent dans le catalogue
+    # systeme ; ce bloc mesure le canon REEL, donc il doit voir le deploiement entier.
+    @canon_dirs [
+      Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/canon/cap-profiles"),
+      Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/cap-profiles")
+    ]
 
     defp canon_spec(name) do
-      @canon_dir
-      |> Path.join("#{name}.yaml")
+      @canon_dirs
+      |> Enum.map(&Path.join(&1, "#{name}.yaml"))
+      |> Enum.find(&File.exists?/1)
       |> YamlElixir.read_from_file!()
       |> Map.get("spec")
     end

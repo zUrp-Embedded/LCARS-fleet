@@ -20,7 +20,13 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   # (F-C146/PORT) in `priv/catalogue/cap_profile/canon/` (co-located with the overlay profiles +
   # reachable by SPBuilder); cap-profiles in
   # `priv/catalogue/cap_profile/canon/cap-profiles/` (R0.7). app_dir pattern (brick1/brick5).
-  @modop_canon Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
+  # LES DEUX racines depuis le decoupage systeme/metier : un modop declare par un role mecanique
+  # vit avec lui. Enumerer la seule racine metier compterait les bundles systeme comme absents et
+  # les modops systeme comme des references pendantes — le test mesurerait une moitie de fleet.
+  @modop_canons [
+    Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/canon"),
+    Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
+  ]
 
   @subagent_templates ~w(subagent-code-quality-reviewer subagent-implementer
                          subagent-spec-reviewer)
@@ -34,20 +40,22 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   # SP chantier removing the fossil; growing it must be a conscious, named act.
   @known_orphans ~w(archive-mode fire-mode persuasion-discipline)
 
-  defp bundle_dir, do: Path.join(@modop_canon, "modop-bundles")
+  defp bundle_dirs, do: Enum.map(@modop_canons, &Path.join(&1, "modop-bundles"))
 
   defp existing_bundles do
-    bundle_dir()
-    |> File.ls!()
-    |> Enum.filter(&File.dir?(Path.join(bundle_dir(), &1)))
+    bundle_dirs()
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.flat_map(fn dir ->
+      dir |> File.ls!() |> Enum.filter(&File.dir?(Path.join(dir, &1)))
+    end)
     |> Enum.sort()
   end
 
   # Bundles ACTIVABLE by the canon = the union of every cap-profile's modop_set default ∪ optional.
   # Computed from the cap-profiles themselves (the real consumers), never a hardcoded list.
   defp referenced_bundles do
-    Path.join([@modop_canon, "cap-profiles", "*.yaml"])
-    |> Path.wildcard()
+    @modop_canons
+    |> Enum.flat_map(&Path.wildcard(Path.join([&1, "cap-profiles", "*.yaml"])))
     |> Enum.flat_map(fn f ->
       case YamlElixir.read_from_file(f) do
         {:ok, %{"spec" => %{"modop_set" => set}}} when is_map(set) ->
@@ -63,9 +71,9 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
 
   test "every EXISTING modop-bundle has a well-formed sp.md (GO-7 header + non-empty)" do
     for b <- existing_bundles() do
-      sp = Path.join([bundle_dir(), b, "sp.md"])
-      assert File.exists?(sp), "missing modop-bundle sp.md: #{sp}"
-      content = File.read!(sp)
+      sp = Enum.find(bundle_dirs(), &File.exists?(Path.join([&1, b, "sp.md"])))
+      assert sp, "missing modop-bundle sp.md: #{b}"
+      content = File.read!(Path.join([sp, b, "sp.md"]))
       assert byte_size(content) > 200, "#{b}/sp.md too short (malformed?)"
       assert content =~ ~r/^#\s/, "#{b}/sp.md without markdown title"
       # "Statut" is the FR header of the SP fragments (SP content is FR by design).
@@ -75,8 +83,13 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
 
   test "3 subagent-templates present + well-formed" do
     for t <- @subagent_templates do
-      f = Path.join([@modop_canon, "subagent-templates", "#{t}.md"])
-      assert File.exists?(f), "missing subagent-template: #{f}"
+      f =
+        Enum.find_value(@modop_canons, fn r ->
+          p = Path.join([r, "subagent-templates", "#{t}.md"])
+          if File.exists?(p), do: p
+        end)
+
+      assert f, "missing subagent-template: #{t}.md"
       c = File.read!(f)
       assert byte_size(c) > 150 and c =~ ~r/^#\s/, "#{t}.md malformed"
     end

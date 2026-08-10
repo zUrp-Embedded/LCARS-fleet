@@ -18,16 +18,16 @@ defmodule Fleet.SPBuilder.Image do
   def publish! do
     image = %{
       modop_sp:
-        read_dir_map!(modop_root(), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
+        read_dir_map!(modop_roots(), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
       subagent:
         read_dir_map!(
-          subagent_root(),
+          subagent_roots(),
           "subagent-*.md",
           &(&1 |> Path.basename(".md") |> String.replace_prefix("subagent-", ""))
         ),
       drafts:
         read_dir_map!(
-          drafts_root(),
+          drafts_roots(),
           "agent-*-base.md",
           &(&1
             |> Path.basename(".md")
@@ -112,14 +112,19 @@ defmodule Fleet.SPBuilder.Image do
   # Same roots, same globs as the sections above — one traversal, hashed. Kept beside them on
   # purpose: a section added without a line here would be material the drift check cannot see.
   defp source_fingerprints do
+    # The ROOTS here are the plural ones, and that is the whole point of this function's warning:
+    # reading only the business root would leave the system catalogue's prompt material outside the
+    # fingerprint — editable under a live daemon with nobody told.
     [
-      {modop_root(), "*/sp.md"},
-      {subagent_root(), "subagent-*.md"},
-      {drafts_root(), "agent-*-base.md"},
-      {sp_role_root(), "**/*.md"},
-      {template_root(), "*.eex"}
+      {modop_roots(), "*/sp.md"},
+      {subagent_roots(), "subagent-*.md"},
+      {drafts_roots(), "agent-*-base.md"},
+      {[sp_role_root()], "**/*.md"},
+      {[template_root()], "*.eex"}
     ]
-    |> Enum.flat_map(fn {root, glob} -> root |> Path.join(glob) |> Path.wildcard() end)
+    |> Enum.flat_map(fn {roots, glob} ->
+      Enum.flat_map(roots, &(&1 |> Path.join(glob) |> Path.wildcard()))
+    end)
     |> Enum.concat([worker_protocol_path(), human_protocol_path()])
     |> Enum.uniq()
     |> Map.new(fn path -> {path, path |> File.read!() |> sha_of()} end)
@@ -211,33 +216,49 @@ defmodule Fleet.SPBuilder.Image do
     end
   end
 
-  defp read_dir_map!(root, glob, key_fun) do
-    if Path.wildcard(Path.join(root, glob)) == [] do
-      raise "SPBuilder.Image: no artifact matches #{glob} under #{root} — " <>
+  defp read_dir_map!(roots, glob, key_fun) when is_list(roots) do
+    if Enum.all?(roots, &(Path.wildcard(Path.join(&1, glob)) == [])) do
+      raise "SPBuilder.Image: no artifact matches #{glob} under #{inspect(roots)} — " <>
               "proven-good image at boot, or do not boot (broken deploy?)"
     end
 
-    read_dir_map(root, glob, key_fun)
+    read_dir_map(roots, glob, key_fun)
   end
+
+  defp read_dir_map!(root, glob, key_fun), do: read_dir_map!([root], glob, key_fun)
 
   # Same read, WITHOUT the non-empty-directory requirement — for a root whose emptiness is a valid
   # deployment shape. A truncated FILE still raises either way: an empty artifact is a broken deploy
   # whatever the root, and that check is the one this image exists for.
-  defp read_dir_map(root, glob, key_fun) do
-    root
-    |> Path.join(glob)
-    |> Path.wildcard()
-    |> Map.new(fn path ->
-      content = File.read!(path)
+  defp read_dir_map(roots, glob, key_fun) when is_list(roots) do
+    # Reduce rather than Map.merge: a key held by TWO roots must RAISE, not lose one silently. Two
+    # `rubber-duck` fragments under one deployment is a coin toss over what an agent is told,
+    # decided by directory order — the same refusal the role index applies, for the same reason.
+    Enum.reduce(roots, %{}, fn root, acc ->
+      root
+      |> Path.join(glob)
+      |> Path.wildcard()
+      |> Enum.reduce(acc, fn path, inner ->
+        key = key_fun.(path)
 
-      if content == "" do
-        raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
-                "non-empty artifacts (truncated file in deploy?)"
-      end
+        if Map.has_key?(inner, key) do
+          raise "SPBuilder.Image: #{inspect(key)} is defined in two catalogue roots " <>
+                  "(#{path}) — a name must mean one thing; rename the business one"
+        end
 
-      {key_fun.(path), content}
+        content = File.read!(path)
+
+        if content == "" do
+          raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
+                  "non-empty artifacts (truncated file in deploy?)"
+        end
+
+        Map.put(inner, key, content)
+      end)
     end)
   end
+
+  defp read_dir_map(root, glob, key_fun), do: read_dir_map([root], glob, key_fun)
 
   defp read_worker_protocol!, do: read_protocol!(worker_protocol_path(), "worker protocol")
 
@@ -281,6 +302,20 @@ defmodule Fleet.SPBuilder.Image do
 
   # Single authority on the facade — the image and the spawn's disk fallback MUST read one root.
   defp drafts_root, do: Fleet.SPBuilder.sp_drafts_root()
+
+  # The ROOTS of the three trees both catalogues may carry — the SYSTEM one and the business one.
+  #
+  # A fine override moves the business root only, and the system root is never dropped: the four
+  # mechanism roles' prompts and the modops they declare have to be readable whatever an operator
+  # points their own keys at. Dropping absent directories is what lets the system catalogue ship
+  # only what its roles need — it has no subagent template, and must not have to fake one.
+  defp modop_roots, do: with_system(modop_root(), "cap_profile/canon/modop-bundles")
+  defp subagent_roots, do: with_system(subagent_root(), "cap_profile/canon/subagent-templates")
+  defp drafts_roots, do: with_system(drafts_root(), "sp_builder/sp_drafts")
+
+  defp with_system(business, rel) do
+    Enum.filter([Path.join(Fleet.Catalogue.system_root(), rel), business], &File.dir?/1)
+  end
 
   # SAME roots the composer's disk fallback reads (`SPBuilder.sp_role_root/0` and its template path)
   # — one resolution per asset, mirrored here, for the reason above.

@@ -1625,9 +1625,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (the `_frozen-monks` convention), excluded like name_index does; undecodable yaml = entry
   # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
   defp scan_catalogue_roles(root) do
-    root
-    |> Path.join("priv/catalogue/cap_profile/canon/cap-profiles/*.yaml")
-    |> Path.wildcard()
+    # BOTH catalogues. The provisioning lists cover the whole deployment — a mechanism role needs
+    # its forge account exactly as much as a producer does — so scanning the business tree alone
+    # would declare four roles "extra" in every list and turn a correct deployment red.
+    [
+      "priv/catalogue/cap_profile/canon/cap-profiles/*.yaml",
+      "priv/catalogue-system/cap_profile/canon/cap-profiles/*.yaml"
+    ]
+    |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
     |> Enum.reject(&String.starts_with?(Path.basename(&1), "_"))
     |> Enum.flat_map(fn path ->
       case YamlElixir.read_from_file(path) do

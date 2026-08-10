@@ -41,6 +41,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
       _ ->
         :ok
     end
+
     {:ok, _} = Application.ensure_all_started(:req)
     # The ForgeClient transport rides the app-supervised Finch pool — absent here (no
     # app.start, by design): start the SAME child spec under a task-local supervisor.

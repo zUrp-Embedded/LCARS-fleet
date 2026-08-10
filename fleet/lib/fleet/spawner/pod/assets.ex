@@ -99,7 +99,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
         :unpublished ->
           read_tagged(
-            Path.join(Fleet.SPBuilder.sp_drafts_root(), "agent-#{role}-base.md"),
+            Fleet.SPBuilder.sp_draft_path(role),
             :agent_draft_missing
           )
       end

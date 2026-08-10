@@ -102,9 +102,84 @@ defmodule Fleet.Catalogue do
       Application.app_dir(:lcars_fleet, "priv/catalogue")
   end
 
-  @doc "Cap-profile YAMLs (`<root>/#{@rel_cap_profiles}`)."
+  @doc """
+  Root of the SYSTEM catalogue — the mechanism, never the business.
+
+  Four roles live there and no card names any of them: the fleet-level front desk (`role_index: 0`,
+  which has to exist before any repository does), the project delegate, the seal's signatory and
+  the tier-2 conflict resolver. The runtime resolves each of them BY CAPABILITY, alone, to hold its
+  own machinery — which is exactly the test: a role a card names is business, a role only the
+  runtime looks for is mechanism.
+
+  ## Why this is not a second knob
+
+  The argument above against nine variables holds, and this does not contradict it: the system root
+  is NOT an operator variable. It is embedded and resolved by `:code.priv_dir`, like `schema/` and
+  `baseline/`, for the same reason — **what an operator must not be able to replace is a contract**.
+  An operator brings their business; they do not choose their mechanism.
+
+  That is also what finally makes "this catalogue is complete" checkable. With everything in one
+  tree the sentence has no meaning: a business catalogue would have to carry the machinery, so
+  missing it and choosing differently look identical. Split, the two halves answer separately — the
+  system is present and intact, the business is conforming.
+
+  Both catalogues are read as a UNION (see `cap_profiles_roots/0`), and a name held on both sides
+  is a refusal, not a precedence.
+  """
+  @spec system_root() :: Path.t()
+  def system_root do
+    # `:system_root` is a TEST SEAM, and the distinction from a knob is the whole point: it has no
+    # env var, no line in the env template and no `config/runtime.exs` reader, so no deployment can
+    # set it. Without it no test could build an ISOLATED catalogue — every fixture root would
+    # silently inherit the four mechanism roles and measure a deployment nobody assembled. A seam
+    # a test can reach and an operator cannot is not the knob this module argues against.
+    Application.get_env(:fleet_catalogue, :system_root) ||
+      Application.app_dir(:lcars_fleet, "priv/catalogue-system")
+  end
+
+  @doc "Path of the system manifest."
+  @spec system_manifest_path() :: Path.t()
+  def system_manifest_path, do: Path.join(system_root(), @manifest_basename)
+
+  @doc """
+  The roots of a tree BOTH catalogues may carry, system first, absent directories dropped.
+
+  Five trees are shared — cap-profiles, modops, subagent templates, SP drafts, skills. The rest
+  (cards, brief templates, escalation policies, project scaffolding, EEx templates) belong to the
+  business alone: the mechanism has no opinion on which pipelines exist.
+
+  Dropping absent directories is what lets the system catalogue carry only what its four roles
+  need, instead of shipping empty trees to satisfy a reader.
+  """
+  @spec roots_of(String.t()) :: [Path.t()]
+  def roots_of(rel) when is_binary(rel) do
+    [Path.join(system_root(), rel), Path.join(root(), rel)]
+    |> Enum.filter(&File.dir?/1)
+  end
+
+  @doc "Cap-profile YAMLs (`<root>/#{@rel_cap_profiles}`) — BUSINESS root only, see `cap_profiles_roots/0`."
   @spec cap_profiles_root() :: Path.t()
   def cap_profiles_root, do: Path.join(root(), @rel_cap_profiles)
+
+  @doc "Cap-profile roots, system + business."
+  @spec cap_profiles_roots() :: [Path.t()]
+  def cap_profiles_roots, do: roots_of(@rel_cap_profiles)
+
+  @doc "Modop roots, system + business."
+  @spec modop_roots() :: [Path.t()]
+  def modop_roots, do: roots_of(@rel_modops)
+
+  @doc "Subagent-template roots, system + business."
+  @spec subagent_templates_roots() :: [Path.t()]
+  def subagent_templates_roots, do: roots_of(@rel_subagent_templates)
+
+  @doc "SP-draft roots, system + business."
+  @spec sp_drafts_roots() :: [Path.t()]
+  def sp_drafts_roots, do: roots_of(@rel_sp_drafts)
+
+  @doc "Skill roots, system + business."
+  @spec skills_roots() :: [Path.t()]
+  def skills_roots, do: roots_of(@rel_skills)
 
   @doc "Modop SP fragments, `<root>/#{@rel_modops}/<name>/sp.md`."
   @spec modop_root() :: Path.t()

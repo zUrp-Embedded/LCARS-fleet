@@ -40,14 +40,25 @@ defmodule Fleet.SPBuilder.Blocks do
     blocks_dir
     |> role_map()
     |> Enum.map(fn {role, blocks} ->
-      File.write!(
-        Path.join(drafts_dir, "agent-#{role}-base.md"),
-        compose!(role, blocks, blocks_dir)
-      )
-
+      File.write!(draft_target(drafts_dir, role), compose!(role, blocks, blocks_dir))
       role
     end)
     |> Enum.sort()
+  end
+
+  # A draft is written NEXT TO THE ROLE IT SERVES: a mechanism role's in the system catalogue, a
+  # business role's in the business one. Writing every draft to one root would put a second
+  # `agent-gatekeeper-base.md` beside the system's, and two drafts for one name is a refusal at
+  # image publish — the generator would break the deployment it exists to keep in sync.
+  #
+  # An EXISTING file decides, because the role's home is a fact on disk, not something to infer.
+  # A role with no draft yet is new business material and lands in `drafts_dir`; adding a mechanism
+  # role is a deliberate act that starts by creating its file where it belongs.
+  defp draft_target(drafts_dir, role) do
+    file = "agent-#{role}-base.md"
+    system = Path.join([Fleet.Catalogue.system_root(), "sp_builder/sp_drafts", file])
+
+    if File.regular?(system), do: system, else: Path.join(drafts_dir, file)
   end
 
   defp read_block!(role, block, blocks_dir) do

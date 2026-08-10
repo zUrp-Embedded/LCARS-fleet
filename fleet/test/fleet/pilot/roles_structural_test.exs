@@ -16,10 +16,12 @@ defmodule Fleet.Project.RolesStructuralTest do
   # bootait VERT et mourait au premier dispatch. Ces deux tests sont la seule raison pour laquelle
   # le litteral a ete retire.
   setup do
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
     tmp = Path.join(System.tmp_dir!(), "roles-cat-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    Application.put_env(:fleet_cap_profile, :root_dir, tmp)
+    # LES DEUX racines vers la fixture : ce bloc mesure des catalogues qu'il ecrit lui-meme, et la
+    # racine systeme y apporterait quatre roles que le test n'a pas declares — « 2 roles declarent
+    # exception_judge » sur une fixture qui en ecrit un.
+    Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
     # L'image publiee court-circuiterait le disque : on la retire pour ce bloc. Elle est REPUBLIEE
     # a la sortie — sans ca, la depublication survit au fichier et tout le reste du run resout ses
@@ -29,10 +31,6 @@ defmodule Fleet.Project.RolesStructuralTest do
 
     on_exit(fn ->
       File.rm_rf(tmp)
-
-      if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
 
       case published_before do
         %{} = image -> Fleet.CapProfile.Image.republish(image)

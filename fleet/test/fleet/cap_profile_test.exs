@@ -5,16 +5,10 @@ defmodule Fleet.CapProfileTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
-    Application.put_env(:fleet_cap_profile, :root_dir, tmp_dir)
+    Fleet.Test.CatalogueIsolation.isolate!(tmp_dir)
     # Restore the exact prior state: if :root_dir was not set, DELETE it
     # (not put_env(nil) — that leaks a nil into the shared umbrella env and
     # crashes other apps' tests that read root_dir).
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
-    end)
 
     :ok
   end

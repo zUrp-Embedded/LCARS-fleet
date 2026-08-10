@@ -20,15 +20,20 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
                  "schema",
                  "cap-profile-v2.5.json"
                ])
-  @canon_dir Path.join([
-               __DIR__,
-               "..",
-               "priv",
-               "catalogue",
-               "cap_profile",
-               "canon",
-               "cap-profiles"
-             ])
+  # LES DEUX racines : la mecanique (architect, gatekeeper, starfleet, chief) vit dans le catalogue
+  # systeme, le metier dans l'autre. Le schema est le meme pour les deux — c'est precisement ce que
+  # ce test mesure — donc l'inventaire se resout par recherche, jamais par une racine en dur.
+  @canon_dirs [
+    Path.join([__DIR__, "..", "priv", "catalogue-system", "cap_profile", "canon", "cap-profiles"]),
+    Path.join([__DIR__, "..", "priv", "catalogue", "cap_profile", "canon", "cap-profiles"])
+  ]
+
+  defp canon_path(role) do
+    Enum.find_value(@canon_dirs, fn dir ->
+      path = Path.join(dir, "#{role}.yaml")
+      if File.exists?(path), do: path
+    end)
+  end
 
   @profiles ~w(architect engineer gatekeeper qualifier reviewer scoper starfleet)
 
@@ -46,17 +51,13 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     assert File.exists?(@schema_path), "schema missing: #{@schema_path}"
 
     for p <- @profiles do
-      path = Path.join(@canon_dir, "#{p}.yaml")
-      assert File.exists?(path), "canon cap-profile missing: #{path}"
+      assert canon_path(p), "canon cap-profile missing: #{p}.yaml (ni systeme ni metier)"
     end
   end
 
   for profile <- @profiles do
     test "canon cap-profile #{profile}.yaml validates cap-profile-v2.5.json", %{schema: schema} do
-      canon =
-        @canon_dir
-        |> Path.join("#{unquote(profile)}.yaml")
-        |> YamlElixir.read_from_file!()
+      canon = unquote(profile) |> canon_path() |> YamlElixir.read_from_file!()
 
       assert :ok = ExJsonSchema.Validator.validate(schema, canon),
              "#{unquote(profile)}.yaml NOT conformant to cap-profile-v2.5.json: " <>
@@ -86,10 +87,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
   for profile <- @forge_blind do
     test "cap-profile #{profile}.yaml is forge-blind (mechanical §4 barrier)" do
-      canon =
-        @canon_dir
-        |> Path.join("#{unquote(profile)}.yaml")
-        |> YamlElixir.read_from_file!()
+      canon = unquote(profile) |> canon_path() |> YamlElixir.read_from_file!()
 
       tools = get_in(canon, ["spec", "scope", "allowedTools"]) || []
       denied = get_in(canon, ["spec", "scope", "git_ops_denied"]) || []
@@ -112,9 +110,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     # VALID canon profile and ONLY add apiVersion → the only possible rejection cause is that unknown
     # field (otherwise the test would prove something else, e.g. a rejection for missing `required`).
     base =
-      @canon_dir
-      |> Path.join("engineer.yaml")
-      |> YamlElixir.read_from_file!()
+      "engineer" |> canon_path() |> YamlElixir.read_from_file!()
 
     assert :ok = ExJsonSchema.Validator.validate(schema, base),
            "the base canon profile must be valid, otherwise apiVersion isolation does not hold: " <>
@@ -128,9 +124,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
   test "negative — spec.invocation.lifetime_scope outside enum rejected", %{schema: schema} do
     base =
-      @canon_dir
-      |> Path.join("engineer.yaml")
-      |> YamlElixir.read_from_file!()
+      "engineer" |> canon_path() |> YamlElixir.read_from_file!()
 
     bad = put_in(base, ["spec", "invocation", "lifetime_scope"], "eternal")
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
@@ -145,9 +139,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     # is REQUIRED by the schema → a profile without it is rejected AT LOAD, the worker default becomes
     # unreachable.
     base =
-      @canon_dir
-      |> Path.join("engineer.yaml")
-      |> YamlElixir.read_from_file!()
+      "engineer" |> canon_path() |> YamlElixir.read_from_file!()
 
     {_, bad} = pop_in(base, ["spec", "brief_kind"])
 
@@ -162,9 +154,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     # launches (crash at spawn). Upstream lock D4: the schema MUST reject at LOAD a profile that would
     # crash the launcher, not let it through to explode at spawn. All 7 canon profiles carry them.
     base =
-      @canon_dir
-      |> Path.join("engineer.yaml")
-      |> YamlElixir.read_from_file!()
+      "engineer" |> canon_path() |> YamlElixir.read_from_file!()
 
     for field <- ["allowedTools", "disallowedTools"] do
       {_, bad} = pop_in(base, ["spec", "scope", field])
@@ -177,9 +167,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   test "negative — UNKNOWN field (typo) rejected at every level (additionalProperties:false, R0-CAP-001)",
        %{schema: schema} do
     base =
-      @canon_dir
-      |> Path.join("engineer.yaml")
-      |> YamlElixir.read_from_file!()
+      "engineer" |> canon_path() |> YamlElixir.read_from_file!()
 
     # A mistyped field (e.g. `containmnet`) must be REJECTED, not silently ignored → otherwise the pod
     # runs with the unexpected default. We cover top-level, metadata, spec, spec.invocation.
@@ -226,7 +214,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     # threads it to the central which serves `tools/list`. Since the 2026-07-19 reorg the two heads are
     # split — this proves the canon carries the split, no Python↔Elixir drift, ever.
     tools = fn role ->
-      canon = @canon_dir |> Path.join("#{role}.yaml") |> YamlElixir.read_from_file!()
+      canon = role |> canon_path() |> YamlElixir.read_from_file!()
 
       cp = %Fleet.CapProfile{
         kind: canon["kind"],
@@ -276,7 +264,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
     # ONE role inventory (@profiles) — a second inline list could silently drift from it.
     for profile <- @profiles do
-      raw = YamlElixir.read_from_file!(Path.join(@canon_dir, "#{profile}.yaml"))
+      raw = YamlElixir.read_from_file!(canon_path(profile))
       scope = get_in(raw, ["spec", "invocation", "lifetime_scope"])
       defaults = get_in(raw, ["spec", "modop_set", "default"]) || []
 
@@ -323,7 +311,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       # by whichever modop happens to be active — capabilities, scope and containment must never
       # vary by modop. The canon commits to `{}`; this pins it: a future modop that NEEDS a real
       # overlay must edit this test — a visible design decision, not a quiet deep-merge.
-      overlays = Path.wildcard(Path.join(@canon_dir, "modop/*/profile.yaml"))
+      overlays = Enum.flat_map(@canon_dirs, &Path.wildcard(Path.join(&1, "modop/*/profile.yaml")))
       assert overlays != [], "no modop overlays found - canon moved?"
 
       for overlay <- overlays do
@@ -347,7 +335,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       # and shipped an architect (or a worker) that never boots.
       flag_only =
         for p <- @profiles,
-            raw = YamlElixir.read_from_file!(Path.join(@canon_dir, "#{p}.yaml")),
+            raw = YamlElixir.read_from_file!(canon_path(p)),
             get_in(raw, ["spec", "invocation", "wake_send_keys"]) == false,
             do: p
 

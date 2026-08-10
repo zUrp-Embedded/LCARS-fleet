@@ -27,14 +27,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   test "an EMPTY catalogue is a refusal — nothing to prove means nothing can spawn", %{
     tmp_dir: tmp
   } do
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
-    Application.put_env(:fleet_cap_profile, :root_dir, tmp)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
-    end)
+    Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
     assert_raise RuntimeError, ~r/EMPTY/, fn -> CanonProof.prove_all!() end
   end
@@ -60,14 +53,7 @@ defmodule Fleet.Spawner.CanonProofTest do
         incompatible: []
     """)
 
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
-    Application.put_env(:fleet_cap_profile, :root_dir, tmp)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
-    end)
+    Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
     assert_raise RuntimeError, ~r/"ghostly".*NOT.*spawn-ready/s, fn ->
       CanonProof.prove_all!()
@@ -77,14 +63,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   @tag :tmp_dir
   test "an unenumerable catalogue is a refusal, never a vacuous pass", %{tmp_dir: tmp} do
     missing = Path.join(tmp, "nowhere")
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
-    Application.put_env(:fleet_cap_profile, :root_dir, missing)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
-    end)
+    Fleet.Test.CatalogueIsolation.isolate!(missing)
 
     assert_raise RuntimeError, ~r/not enumerable/, fn ->
       CanonProof.prove_all!()

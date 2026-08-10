@@ -298,25 +298,44 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_modop_fragments_from_disk(modop_bundles) do
-    root = modop_root()
+    roots = with_system_root(modop_root(), "cap_profile/canon/modop-bundles")
 
     result =
       Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-        case Fleet.Slug.confined_join(root, name) do
-          {:ok, dir} ->
-            case File.read(Path.join(dir, "sp.md")) do
-              {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
-              {:error, _reason} -> {:halt, {:error, {:modop_bundle_missing, name}}}
-            end
-
-          {:error, reason} ->
-            {:halt, {:error, {:modop_bundle_unsafe, {name, reason}}}}
+        # The name stays confined under EACH root it is tried in — the confinement is what makes an
+        # untrusted name safe as a path segment, and trying a second root must not weaken it.
+        case read_first_modop(roots, name) do
+          {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
 
     case result do
       {:ok, fragments} -> {:ok, Enum.reverse(fragments)}
       error -> error
+    end
+  end
+
+  # The roots a tree may live in: the SYSTEM catalogue first, then the business one. The system
+  # root is never skipped — the four mechanism roles' material has to be readable whatever an
+  # operator points their own keys at — and an absent directory is dropped so the system catalogue
+  # ships only what it needs.
+  defp with_system_root(business, rel) do
+    Enum.filter([Path.join(Fleet.Catalogue.system_root(), rel), business], &File.dir?/1)
+  end
+
+  defp read_first_modop([], name), do: {:error, {:modop_bundle_missing, name}}
+
+  defp read_first_modop([root | rest], name) do
+    case Fleet.Slug.confined_join(root, name) do
+      {:ok, dir} ->
+        case File.read(Path.join(dir, "sp.md")) do
+          {:ok, content} -> {:ok, content}
+          {:error, _reason} -> read_first_modop(rest, name)
+        end
+
+      {:error, reason} ->
+        {:error, {:modop_bundle_unsafe, {name, reason}}}
     end
   end
 
@@ -342,10 +361,14 @@ defmodule Fleet.SPBuilder do
         Map.fetch(templates, name)
 
       nil ->
-        case File.read(Path.join(subagent_template_root(), "subagent-#{name}.md")) do
-          {:ok, content} -> {:ok, content}
-          {:error, _} -> :error
-        end
+        subagent_template_root()
+        |> with_system_root("cap_profile/canon/subagent-templates")
+        |> Enum.find_value(:error, fn root ->
+          case File.read(Path.join(root, "subagent-#{name}.md")) do
+            {:ok, content} -> {:ok, content}
+            {:error, _} -> nil
+          end
+        end)
     end
   end
 
@@ -390,6 +413,25 @@ defmodule Fleet.SPBuilder do
   @spec sp_drafts_root() :: String.t()
   def sp_drafts_root do
     Application.get_env(:fleet_sp_builder, :sp_drafts_root) || Fleet.Catalogue.sp_drafts_root()
+  end
+
+  @doc """
+  Path of a role's SP draft, looked up in the SYSTEM catalogue then the business one — the
+  unpublished disk fallback's half of what the image does at publish time.
+
+  Returns the business path when the role has no draft anywhere, so the caller's `:enoent` names
+  the file an author would have to create. The two protocol files are NOT resolved this way: they
+  are the operator's conversation contract, and only the business catalogue carries them.
+  """
+  @spec sp_draft_path(String.t()) :: String.t()
+  def sp_draft_path(role) when is_binary(role) do
+    file = "agent-#{role}-base.md"
+    business = Path.join(sp_drafts_root(), file)
+
+    sp_drafts_root()
+    |> with_system_root("sp_builder/sp_drafts")
+    |> Enum.map(&Path.join(&1, file))
+    |> Enum.find(business, &File.regular?/1)
   end
 
   # The fine cap-profile override does not move role bases; the catalogue root does.
