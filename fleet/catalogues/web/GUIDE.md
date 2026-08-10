@@ -204,13 +204,24 @@ boucle, le sanctuaire, la règle de preuve — est identique dans chaque `agent-
 catalogue de LCARS la compose depuis des blocs partagés ; l'outil qui fait ça ne sert que lui. Si
 vous modifiez le socle, modifiez-le partout : rien ne vous préviendra.
 
-**Les comptes forge de vos rôles ne se créent pas tout seuls.** La liste des rôles à provisionner est
-tenue à la main côté déploiement (`PROV_ROLES`). Un rôle absent de cette liste n'a pas de jeton :
-pas de commit à son nom, pas de proposition de fusion. Posez-la à côté du catalogue :
+**Les comptes forge de vos rôles se dérivent, mais il faut le demander.** Vos rôles ont besoin d'un
+compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La liste ne se devine pas
+au démarrage — elle se lit depuis votre catalogue, une fois, au provisionnement :
 
 ```bash
-PROV_ROLES="tech-lead dev writer spec-reviewer code-reviewer maintainer"
+etc/enroll-catalogue.sh --catalogue /chemin/vers/mon-catalogue --tofu-dir <recette-forge>
 ```
+
+Le script écrit les entrées de la recette forge (`roles.auto.tfvars.json`) et vous rend la ligne
+`PROV_ROLES` à poser avant la frappe des jetons. Vous pouvez aussi lire la liste seule :
+
+```bash
+mix lcars.catalogue.roles /chemin/vers/mon-catalogue
+```
+
+Ce que le script **n'écrit pas** : la recette elle-même. Ce qu'un compte a le droit d'être — créer
+une organisation, poser un hook serveur, les équipes — appartient au runtime. Votre catalogue nomme
+ses gens ; il ne décide pas de ce qu'être l'un d'eux permet.
 
 **Le catalogue de référence part quand même avec la boîte.** `LCARS_CATALOGUE_ROOT` décide de ce
 qui est **lu**, pas de ce qui est **livré**. Les deux coexistent dans l'image ; c'est la variable qui
