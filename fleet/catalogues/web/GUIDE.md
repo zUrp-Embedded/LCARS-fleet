@@ -322,8 +322,33 @@ Ce catalogue-ci reste écrit à la main, et c'est légitime : **un catalogue san
 est valide**, `verify` le dit. Le composeur est un outil, pas une obligation — mais il est là le
 jour où quatre copies deviennent huit.
 
-L'audit qui va avec refuse les trois désaccords : un rôle sans entrée **ni** prompt, une entrée pour
-un rôle absent, et une entrée **plus** un prompt écrit à la main (composer l'écraserait).
+**Passer un rôle du prompt à la main aux blocs, concrètement** — et il y a une marche, que l'outil
+vous met sous le nez plutôt que de vous l'écraser :
+
+```bash
+# 1. les blocs qui vous appartiennent (core/ vient du système, ne le recopiez pas)
+mkdir -p sp_builder/sp_blocks/role
+$EDITOR sp_builder/sp_blocks/role/dev.md
+cat > sp_builder/sp_blocks/sp-map.yaml <<'MAP'
+dev:
+  - core/runtime-contract
+  - core/producer-output
+  - role/dev
+MAP
+
+# 2. RETIRER le prompt écrit à la main de ce rôle — sinon l'outil REFUSE, pour ne pas l'écraser
+rm sp_builder/sp_drafts/agent-dev-base.md
+
+# 3. composer
+mix lcars.sp.gen --catalogue "$PWD"
+```
+
+Le `agent-dev-base.md` régénéré porte les deux blocs du **système** puis le vôtre, dans l'ordre de
+la liste. Vous n'avez écrit que la partie qui est de vous.
+
+L'audit refuse les trois désaccords : un rôle sans entrée **ni** prompt, une entrée pour un rôle que
+le catalogue ne porte pas, et une entrée **plus** un prompt écrit à la main — le refus de l'étape 2,
+et c'est la seule chose destructrice que cet outil pourrait faire.
 
 **Les comptes forge de vos rôles se dérivent, mais il faut le demander.** Vos rôles ont besoin d'un
 compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La liste ne se devine pas
