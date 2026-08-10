@@ -230,7 +230,9 @@ cat_declared() {
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CAT_ACTIVE" | grep -v '^$' || true
 }
 
-cat_is_active() { cat_declared | grep -qx "$1"; }
+# -F : le nom est une CHAINE, pas un motif. Sans lui, `my.cat` matche `my_cat` — un point est un
+# joker en BRE, et un nom de catalogue est une donnee de l'operateur.
+cat_is_active() { cat_declared | grep -qxF "$1"; }
 
 cmd_catalogue_list() {
   local installed=()
@@ -308,8 +310,25 @@ cmd_catalogue_enable() {
 cmd_catalogue_disable() {
   local name="${1:?catalogue disable: nom requis}"
   cat_is_active "$name" || die "catalogue disable: « $name » n'est pas actif"
-  local tmp; tmp="$(mktemp)"
-  grep -vx "[[:space:]]*$name[[:space:]]*" "$CAT_ACTIVE" > "$tmp" || true
+  # Le temporaire vit DANS le repertoire cible : `mv` y est un rename atomique garanti par le
+  # noyau, alors que depuis /tmp (souvent un autre systeme de fichiers) c'est une copie suivie
+  # d'un delete — une interruption au milieu laisse la declaration tronquee.
+  local tmp; tmp="$(mktemp "$(dirname "$CAT_ACTIVE")/.catalogues.active.XXXXXX")"
+
+  # -F et pas de motif bricole autour du nom. L'ancienne forme etait
+  # `grep -vx "[[:space:]]*$name[[:space:]]*"` et elle portait DEUX defauts : un nom contenant `.`
+  # supprimait ses voisins (BRE), et un nom formant un motif INVALIDE faisait sortir grep en 2 —
+  # que le `|| true` avalait, laissant `$tmp` vide et `mv` VIDER la declaration entiere. Desactiver
+  # un catalogue desactivait tout, en silence.
+  #
+  # Les trois codes de grep sont donc distingues : 0 = des lignes restent, 1 = plus aucune (legitime
+  # quand c'etait la seule), 2 = erreur — et celui-la refuse au lieu d'ecrire.
+  local rc=0
+  grep -Fxv "$name" "$CAT_ACTIVE" > "$tmp" || rc=$?
+  if [[ "$rc" -gt 1 ]]; then
+    rm -f "$tmp"
+    die "catalogue disable: lecture de $CAT_ACTIVE echouee (grep rc=$rc) — rien n'a ete ecrit"
+  fi
   mv "$tmp" "$CAT_ACTIVE"
   echo "catalogue disable: « $name » retire de $CAT_ACTIVE (rien n'est supprime du disque)" >&2
   echo "  « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2

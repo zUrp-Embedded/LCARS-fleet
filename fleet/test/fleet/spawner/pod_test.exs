@@ -43,11 +43,6 @@ defmodule Fleet.Spawner.PodTest do
     # adr-f: no vault. Creds come from the claudeDir bound by bwrap
     # (CLAUDE_DIR, config default); no vault setup in test.
 
-    sp_root = Path.join(tmp_dir, "cap-profiles")
-    File.mkdir_p!(sp_root)
-    File.write!(Path.join(sp_root, "engineer-role.md"), "# Engineer SP base")
-    Application.put_env(:fleet_sp_builder, :sp_role_root, sp_root)
-
     # mundo invocado #1: auth = single bind mode (token_arg removed). The credentials gate
     # (scope/plan) always reads the native creds → default creds fixture for the tests that do not
     # test the credentials gate; the credentials/fail-loud tests override :claude_dir per-test.
@@ -73,7 +68,6 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.clear()
       Application.delete_env(:fleet_spawner, :state_fs_root)
       Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_sp_builder, :sp_role_root)
       Application.delete_env(:fleet_spawner, :claude_dir)
     end)
 

@@ -360,7 +360,7 @@ defmodule Fleet.Catalogue do
   of any catalogue. Callers that attribute per catalogue must say so.
   """
   @spec roots() :: [Path.t()]
-  def roots, do: Enum.filter([to_string(root()), system_root()], &File.dir?/1)
+  def roots, do: Enum.filter(active_roots() ++ [system_root()], &File.dir?/1)
 
   @doc """
   First existing `name` on the search path — the BUSINESS path when it exists nowhere.
