@@ -31,14 +31,23 @@
 
 set -euo pipefail
 
-# A7: explicit env > runtime state written by fleet_v2 > fail-loud (never a guessed port).
+# A7: explicit env > runtime state written by fleet_v2 > vide. JAMAIS un port devine.
+#
+# ⚠ CE BLOC ETAIT FATAL, et il gardait une valeur que PERSONNE NE LIT : `spawn` passe par
+# `$API_SOCK` (l'AF_UNIX), `list` et `attach` par les socks tmux, et `$API_URL` n'apparait que dans
+# le texte d'aide. Le garde tuait donc tout le CLI quand la fleet n'avait jamais demarre — y compris
+# `list`, dont l'en-tete de ce fichier promet qu'il « marche meme avec l'API down », et surtout
+# `catalogue install|verify|enable`, qui sont precisement les gestes d'une boite NEUVE, avant le
+# premier `fleet_v2 start`. Mesure : sur un banc frais, `lcars catalogue list` sortait en 1.
+#
+# Chaque verbe garde donc ce dont IL a besoin, la ou il s'en sert — `cmd_spawn` echoue deja sur
+# `$API_SOCK` avec le bon message.
 if [[ -n "${LCARS_API_URL:-}" ]]; then
   API_URL="$LCARS_API_URL"
 elif [[ -r "$HOME/.lcars/run/api_url" ]]; then
   API_URL="$(cat "$HOME/.lcars/run/api_url")"
 else
-  echo "lcars: LCARS_API_URL absent et ~/.lcars/run/api_url introuvable — la fleet tourne-t-elle (fleet_v2 start) ?" >&2
-  exit 1
+  API_URL=""
 fi
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 # `spawn` (write) goes through the per-human AF_UNIX socket (ControlRouter), off the network the
