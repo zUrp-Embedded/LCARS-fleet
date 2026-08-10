@@ -1,0 +1,70 @@
+# =============================================================================
+#  CARTE : quick-fix — le chemin le plus court qui existe
+# =============================================================================
+#
+# Une carte decrit un PIPELINE : qui travaille, dans quel ordre, qui juge, et ce
+# qu'il faut pour fusionner. Un ticket choisit sa carte ; deux tickets du meme
+# projet peuvent en prendre deux differentes.
+#
+# C'EST ICI QUE VIT LE NIVEAU D'EXIGENCE. Le runtime n'a pas de reglage « strict »
+# ou « permissif » : il execute la carte qu'on lui donne. Changer d'exigence, c'est
+# changer de carte — pas toucher a une configuration.
+#
+# Lisez celle-ci en premier : c'est la plus petite carte valide. Puis `standard`,
+# qui est la meme chose avec les portes ajoutees.
+# -----------------------------------------------------------------------------
+
+kind: WorkflowMap
+
+metadata:
+  name: quick-fix
+
+  # `description` est pour vous, l'auteur du catalogue.
+  description: "Une seule etape : le dev livre, aucun juge, fusion directe."
+
+  # `presentation` est affichee a l'humain qui choisit une carte pour son projet.
+  # Ecrivez-la pour quelqu'un qui doit decider en dix secondes, pas pour vous.
+  presentation: "Le chemin court : un developpeur livre, personne ne relit, ca fusionne. Pour une faute de frappe, un libelle, une couleur — ce qu'on peut refaire sans regret. Ne l'utilisez pas parce que vous etes presse : utilisez-la parce que l'erreur ne coute rien."
+
+  # Les niveaux de criticite auxquels cette carte est proposee. C0 = jetable,
+  # C4 = un echec a des consequences reelles. Un projet declare son niveau ; les
+  # cartes qui ne le couvrent pas ne lui sont pas proposees.
+  applicable_intensity: [C0]
+
+spec:
+  # JURY VIDE, et c'est une DECISION, pas un oubli.
+  #
+  # Un jury protege un lecteur ABSENT : quelqu'un qui devra, plus tard, repondre
+  # « qu'est-ce qui a ete demande, juge, prouve ». Sur une correction triviale, ce
+  # lecteur n'existe pas — le cout de la relecture depasse le cout de l'erreur.
+  #
+  # Ce que le jury vide ne desactive PAS : les verifications mecaniques (identite
+  # de l'auteur, absence de secrets, la branche descend bien de sa base) tiennent
+  # quoi qu'il arrive. Une carte gouverne le JUGEMENT, jamais le plancher.
+  jury: []
+
+  # `ignore` : on ne demande pas l'avis de l'integration continue avant de
+  # fusionner. Coherent avec l'absence de jury — cette carte assume de ne rien
+  # opposer entre le livrable et la fusion.
+  # L'autre valeur est `required` : voir la carte `standard`.
+  ci: ignore
+
+  # Combien de fois un ticket peut repartir en correction avant qu'on arrete de
+  # boucler et qu'on remonte a un humain. Obligatoire sur toute carte, y compris
+  # sans jury : sans budget, un ticket qui ne converge pas tourne indefiniment.
+  max_rework_rounds: 2
+
+  steps:
+    # Le nom de l'etape (`build`) est libre : il vous sert a la referencer dans
+    # `needs`. C'est `role` qui designe qui travaille.
+    build:
+      role: dev
+
+      # `[]` : cette etape ne depend de rien, elle demarre le pipeline.
+      # Les etapes forment un graphe : chacune attend celles qu'elle nomme ici.
+      needs: []
+
+      # Ce qu'on remet a l'agent. `ticket.body` = le texte du ticket, qui devient
+      # le champ `brief` de sa tache.
+      inputs:
+        - ticket.body

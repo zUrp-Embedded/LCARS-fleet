@@ -1,0 +1,100 @@
+# =============================================================================
+#  ROLE : code-reviewer — celui qui relit le code livre
+# =============================================================================
+#
+# A LIRE APRES `dev.yaml`. Ce fichier est l'oppose du dev sur les quatre cles qui
+# comptent, et c'est le meilleur endroit pour comprendre ce que « juge » veut dire.
+#
+#                      dev                   code-reviewer
+#   brief_kind         worker                judge
+#   deliverable_mode   git_native            (absent -> payload)
+#   lifetime_scope     pipe                  one-shot
+#   git_ops_denied     [push]                [push, rebase, commit]
+#
+# Ces quatre lignes bougent ENSEMBLE, parce qu'elles disent la meme chose de quatre
+# cotes : ce role ne fabrique rien, il regarde ce qu'un autre a fabrique et rend un
+# avis. Il n'a donc rien a commiter, rien a garder en memoire d'un ticket a l'autre,
+# et un verdict qui se souvient du precedent n'est plus rendu sur piece.
+#
+# CE QUE CE FICHIER NE DIT PAS : ce que le juge regarde. Un juge peut relire ce
+# qu'on a DEMANDE (le ticket) ou ce qu'on a RENDU (la fusion proposee). Ce choix se
+# fait dans la carte (`judge_target: brief` ou `deliverable`), parce que le meme
+# role peut servir aux deux endroits. Voir `spec-reviewer.yaml`, qui est le meme
+# metier braque sur l'autre cible.
+# -----------------------------------------------------------------------------
+
+kind: CapabilityProfile
+
+metadata:
+  name: code-reviewer
+  containment: bwrap
+  role_index: 5
+
+spec:
+  # Aucune capacite structurelle : le runtime n'a jamais besoin de « trouver le
+  # relecteur ». Ce sont les cartes qui le nomment, dans leur liste `jury`.
+  # Une capacite sert a repondre a une question que le RUNTIME se pose ; declarer
+  # des capacites decoratives ne fait qu'ajouter des facons de casser le demarrage.
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      # Bash : le relecteur lance les tests et le build pour voir ce que le code
+      # fait vraiment, au lieu d'en juger a la lecture.
+      - Bash
+      - Monitor
+      - ToolSearch
+      # Write/Edit : uniquement pour rediger son rapport. Il n'a pas le droit de
+      # commiter (ci-dessous), donc il ne peut pas « corriger en passant » — un
+      # relecteur qui repare ce qu'il relit ne relit plus rien.
+      - Write
+      - Edit
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - WebSearch
+      - WebFetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Trois interdictions au lieu d'une : le juge ne pousse pas, ne reecrit pas
+    # l'historique, et ne commite pas. Son livrable est un avis, pas un correctif.
+    git_ops_denied: [push, rebase, commit]
+
+  knowledge:
+    skills: []
+    monk_registry: null
+    monk_instance: null
+
+  invocation:
+    # Un verdict se rend sur piece. Le juge nait, lit, tranche, meurt.
+    lifetime_scope: one-shot
+    model: opus
+    effort: high
+    boot_at_start: false
+    # Le travail est delegue a un sous-agent decrit dans
+    # subagent-templates/subagent-code-quality-reviewer.md.
+    # Interet : le sous-agent demarre avec un contexte propre, il ne voit que ce
+    # qu'on lui donne a juger. Contrainte : un sous-agent impose `one-shot`.
+    subagent_template: code-quality-reviewer
+    host_native: false
+    bridge_enabled: false
+
+  modop_set:
+    default: []
+    optional: []
+    incompatible: []
+
+  project: null
+
+  timeouts:
+    response_sec: 900
+
+  # `deliverable_mode` est ABSENT volontairement : la valeur par defaut (`payload`)
+  # est la bonne pour un juge, et l'ecrire n'ajouterait rien. Un fichier de
+  # catalogue n'a pas a repeter les defauts — il declare ce qui sort de l'ordinaire.
+  brief_kind: judge
+  interlocutor: fleet

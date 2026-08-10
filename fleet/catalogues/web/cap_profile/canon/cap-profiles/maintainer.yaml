@@ -1,0 +1,95 @@
+# =============================================================================
+#  ROLE : maintainer — celui qui signe la fusion
+# =============================================================================
+#
+# A LIRE APRES `code-reviewer.yaml`. C'est un juge de plus, mais il occupe une
+# place a part : il porte la capacite `exception_judge`, et le runtime la resout
+# pour savoir QUI a le droit de sceller une fusion.
+#
+# LA REGLE DE CARDINALITE : exactement UN role du catalogue porte
+# `exception_judge`. Zero, le demarrage refuse — personne ne peut fusionner. Deux,
+# le demarrage refuse aussi, et c'est le cas le plus interessant : « qui signe »
+# n'est pas une question a laquelle on repond au hasard. Si deux roles pouvaient
+# signer, la reponse dependrait de l'ordre de lecture des fichiers.
+#
+# CE QU'IL N'EST PAS. Ce n'est pas le chef, ce n'est pas le relecteur en dernier
+# recours, et il ne refait pas le travail du jury. Le jury juge la QUALITE ; le
+# maintainer intervient quand quelque chose sort du cadre normal — un blocage, un
+# desaccord epuise, une exception a trancher. Sur un ticket qui se passe bien, il
+# ne fait que sceller.
+#
+# Les verifications mecaniques — l'identite de l'auteur, l'absence de secrets, le
+# fait que la branche descende bien de sa base — ne sont PAS son travail et ne se
+# desactivent par aucune carte. Elles tiennent en dessous de lui, toujours. Une
+# carte gouverne le JUGEMENT, jamais le plancher.
+# -----------------------------------------------------------------------------
+
+kind: CapabilityProfile
+
+metadata:
+  name: maintainer
+  containment: bwrap
+  role_index: 6
+
+spec:
+  # `exception_judge` : le signataire de la fusion.
+  #
+  # `conflict_resolver` (l'arbitre d'un blocage epuise) est porte par `tech-lead`
+  # dans ce catalogue, PAS ici. Les deux capacites sont separees exprès : si elles
+  # etaient resolues par une seule cle, deplacer l'arbitre deplacerait le
+  # signataire sans qu'on l'ait demande. Les mettre sur le meme role est un choix
+  # legitime — les mettre sur la meme CLE serait une perte de reglage.
+  capabilities: [exception_judge]
+
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      # Bash : il inspecte l'etat reel du depot avant de sceller.
+      - Bash
+      - Monitor
+      - ToolSearch
+      - Write
+      - Edit
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - WebSearch
+      - WebFetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Il ne pousse pas non plus. La fusion elle-meme est faite par le SYSTEME, sur
+    # son verdict — pas par lui, a la main. Un signataire qui pourrait pousser
+    # pourrait aussi fusionner sans passer par les verifications qui precedent.
+    git_ops_denied: [push]
+
+  knowledge:
+    skills: []
+    monk_registry: null
+    monk_instance: null
+
+  invocation:
+    lifetime_scope: one-shot
+    model: opus
+    effort: high
+    boot_at_start: false
+    subagent_template: null
+    host_native: false
+    bridge_enabled: false
+
+  modop_set:
+    default: []
+    optional: []
+    incompatible: []
+
+  project: null
+
+  timeouts:
+    response_sec: 900
+
+  brief_kind: judge
+  interlocutor: fleet

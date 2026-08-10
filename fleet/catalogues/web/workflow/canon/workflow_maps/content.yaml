@@ -1,0 +1,104 @@
+# =============================================================================
+#  CARTE : content — l'atelier, ce qui ne sort pas du projet
+# =============================================================================
+#
+# ⚠ CETTE CARTE DEMANDE UNE VARIABLE D'ENVIRONNEMENT, et c'est la seule.
+#
+#     LCARS_WORKSHOP_CARD=content
+#
+# Pourquoi : tous les roles de ce catalogue se resolvent par CAPACITE — le runtime
+# cherche « qui produit », « qui signe », et trouve le role qui le declare. Les
+# noms sont donc libres. La carte d'atelier fait exception : elle se designe par
+# son NOM, et le nom par defaut est celui du catalogue de reference de LCARS
+# (`workshop-direct`).
+#
+# Sans cette variable, la flotte demarre quand meme — avec un avertissement qui
+# dit exactement ce qui manque — mais aucun ticket d'atelier ne peut atteindre
+# cette carte. Vous auriez alors une carte que rien n'appelle.
+#
+# L'autre solution serait d'appeler cette carte `workshop-direct`. On ne l'a pas
+# fait : un catalogue metier ne devrait pas porter le vocabulaire interne d'un
+# autre catalogue, et le probleme se verrait moins qu'il ne se voit ici.
+#
+# -----------------------------------------------------------------------------
+#  CE QUE L'ATELIER EST, ET LE CRITERE QUI LE DEFINIT
+# -----------------------------------------------------------------------------
+#
+# Un projet a DEUX mondes, et la question qui les separe n'est pas la nature du
+# fichier — c'est sa DESTINATION :
+#
+#   la production   ce qui part avec le produit. Code, mais aussi le guide
+#                   d'utilisation, les notes de version, la documentation d'API.
+#                   Ca passe par la branche principale, c'est juge, c'est scelle.
+#
+#   l'atelier       ce qui sert a fabriquer et ne part jamais. Brouillons, notes
+#                   d'exploration, plans, comparatifs, listes de choses a faire.
+#
+# LE CRITERE EST LA DESTINATION, JAMAIS LA NATURE DE L'ARTEFACT. Un guide
+# utilisateur est de la prose ET il part avec le produit : il prend la voie de
+# production et se fait juger comme le reste. Une note d'architecture qui restera
+# interne est de l'atelier, meme si elle est excellente.
+#
+# CE QUE CA RESOUD. Sans cette separation, les agents accumulent leurs brouillons
+# au milieu du code du projet : plans, rapports d'analyse, fichiers de travail.
+# L'atelier leur donne un endroit ou poser tout ca, qui n'est pas votre depot de
+# production.
+# -----------------------------------------------------------------------------
+
+kind: WorkflowMap
+
+metadata:
+  name: content
+  description: "Le redacteur travaille dans l'atelier, fusion directe, pas de jury : rien ne sort du projet."
+  presentation: "L'atelier : notes, brouillons, plans, comparatifs. Ce qui aide a fabriquer et ne part pas avec le produit. Pas de relecture — le lecteur, c'est vous. Un document destine aux utilisateurs, lui, n'est pas de l'atelier : c'est un livrable, il prend la voie normale."
+
+  # Toutes les criticites : l'atelier n'est pas un niveau d'exigence, c'est une
+  # DESTINATION. Un projet critique a autant besoin de brouillons qu'un jetable.
+  applicable_intensity: [C0, C1, C2, C3, C4]
+
+spec:
+  # JURY VIDE, et le motif n'est PAS celui de `quick-fix`.
+  #
+  # Sur `quick-fix`, on renonce a juger parce que l'erreur ne coute rien.
+  # Ici, RIEN NE SORT DU PROJET. Un jury protege un lecteur absent — un tiers, une
+  # reprise dans six mois, quelqu'un qui devra repondre de ce qui a ete livre. Sur
+  # une note interne, le lecteur est celui qui a demande la note : il est present,
+  # et il la relira lui-meme.
+  #
+  # Ce motif cesse d'etre vrai des qu'un document est destine aux utilisateurs.
+  # Ce n'est pas « la prose n'a pas besoin d'etre jugee » : c'est « ce qui ne sort
+  # pas n'a pas de lecteur absent a proteger ».
+  jury: []
+
+  # `ignore`, et ici la raison est MECANIQUE avant d'etre doctrinale : votre
+  # definition d'integration continue vit sur la branche de production. Une
+  # proposition de fusion basee sur l'atelier ne la porte pas, donc aucun executeur
+  # ne la sert. Sous `required`, chaque ticket d'atelier attendrait un resultat qui
+  # ne viendra jamais, puis remonterait en escalade.
+  ci: ignore
+
+  max_rework_rounds: 2
+
+  steps:
+    build:
+      role: writer
+
+      # LA CLE DE CETTE CARTE, et la seule de tout le catalogue qui la porte.
+      #
+      # `face` dit sur quel MONDE le producteur travaille :
+      #   code      la branche de production (valeur par defaut si absent)
+      #   workshop  l'atelier
+      #
+      # Elle est ici, dans la carte, et PAS dans le profil du role. C'est ce qui
+      # fait que `writer` n'est pas « le redacteur d'atelier » : c'est un
+      # redacteur, et cette carte-ci l'envoie travailler dans l'atelier. Une autre
+      # carte pourrait l'envoyer produire de la documentation destinee aux
+      # utilisateurs, sur la face code, avec un jury.
+      #
+      # Le producteur voit alors l'atelier en ECRITURE et le code en LECTURE
+      # SEULE : il documente ce qui existe sans pouvoir le modifier.
+      face: workshop
+
+      needs: []
+      inputs:
+        - ticket.body

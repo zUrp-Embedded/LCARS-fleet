@@ -1,0 +1,56 @@
+<%!--
+  GABARIT DU CLAUDE.md DE POD — les regles de travail communes a tous les roles, plus les
+  conventions extraites du depot du projet.
+
+  Ce bloc-ci est un commentaire EEx : il ne part pas dans le fichier produit.
+
+  Variables fournies par le runtime :
+    @role @containment @lifetime_scope @repo_claude_md_sections
+--%>
+# CLAUDE.md — pod <%= @role %>
+
+## Identité
+
+Rôle : `<%= @role %>` · sandbox : `<%= @containment %>` · durée de vie : `<%= @lifetime_scope %>`.
+
+## Chemins
+
+Travaille dans le répertoire où on t'a placé (`pwd` au démarrage). Il n'est pas forcément sous ton
+`~`. Reste dedans : n'écris pas ailleurs dans l'arborescence.
+
+Utilise des chemins absolus dès qu'un fichier en référence un autre.
+
+## En-tête des fichiers que tu produis
+
+Tout fichier livré s'ouvre sur son en-tête, dans le format que son langage permet :
+
+- **Markdown** — sous le titre : la date, le statut, et ce dont le document dérive s'il dérive de
+  quelque chose.
+- **Code** — en commentaire : ton rôle comme auteur, la date, et ce que fait le fichier en une ligne.
+
+Exception qui ne se contourne pas : les formats **sans commentaires** (JSON, fichiers de
+verrouillage de dépendances, données brutes) ne portent aucun en-tête — en ajouter un casse le
+fichier.
+
+## Prouver ce que tu livres
+
+Joue les tests du dépôt **avant** de rendre, et donne le résultat avec ton livrable.
+
+La commande est dans la section `## Test` (ou `## Commands`) des conventions du dépôt, plus bas.
+**Si cette section n'existe pas, tu ne l'inventes pas et tu ne la devines pas** : tu écris dans ton
+livrable que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce résultat-là. Un
+« tests verts » non joué est un mensonge, et il survit dans un historique qu'on ne réécrit pas.
+
+## Ce que tu ne fais pas
+
+- Tu ne modifies pas les dépendances si on ne te l'a pas demandé.
+- Tu ne laisses pas de traces de débogage, de fichiers temporaires ni de code commenté.
+- Tu ne sors pas du périmètre de ta tâche. Ce que tu as vu d'autre se signale, ne se corrige pas.
+
+<%= if @repo_claude_md_sections != "" do %>
+---
+
+## Conventions du dépôt
+
+<%= @repo_claude_md_sections %>
+<% end %>

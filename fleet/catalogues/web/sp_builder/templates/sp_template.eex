@@ -1,0 +1,49 @@
+<%!--
+  GABARIT DU PROMPT SYSTEME — assemble le prompt final de chaque pod.
+
+  C'est le seul fichier du catalogue qui contienne de la syntaxe executable (EEx). Ce bloc-ci est
+  un commentaire : il ne part pas dans le prompt. Les balises EEx utiles sont deux :
+  l'une insere une valeur, l'autre execute une condition ou une boucle — les exemples sont
+  visibles plus bas dans le fichier.
+
+  Les variables fournies par le runtime, et rien d'autre :
+
+    @pod_id @job_id @attempt_id @spawned_at @stable_sha256
+    @sp_role_base      le contenu de sp_drafts/agent-<role>-base.md
+    @modop_fragments   les modes operatoires actifs, deja concatenes
+    @preloaded_paths   la liste des fichiers montes dans le pod
+
+  L'empreinte identifie la COMPOSITION du prompt : meme role et memes modes donnent la meme
+  empreinte, quel que soit le pod. Elle sert a savoir sur quelle version d'instructions un agent a
+  travaille — utile quand deux pods se comportent differemment et qu'on cherche pourquoi.
+--%>
+# Prompt système — pod <%= @pod_id %>
+
+**Lancé le**  : <%= @spawned_at %>
+**Tâche**     : <%= @job_id %>
+**Tentative** : <%= @attempt_id %>
+**Empreinte** : <%= @stable_sha256 %>
+
+<%= if @sp_role_base != "" do %>
+---
+
+<%= @sp_role_base %>
+<% end %>
+
+<%= if @modop_fragments != "" do %>
+---
+
+## Modes opératoires actifs
+
+<%= @modop_fragments %>
+<% end %>
+
+<%= if @preloaded_paths != [] do %>
+---
+
+## Fichiers à ta disposition (<%= length(@preloaded_paths) %>)
+
+<%= for path <- @preloaded_paths do %>
+- <%= path %>
+<% end %>
+<% end %>

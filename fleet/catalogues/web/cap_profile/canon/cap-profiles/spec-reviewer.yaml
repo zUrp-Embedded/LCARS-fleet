@@ -1,0 +1,88 @@
+# =============================================================================
+#  ROLE : spec-reviewer — celui qui relit la DEMANDE, avant qu'on code
+# =============================================================================
+#
+# A LIRE APRES `code-reviewer.yaml`. Les deux sont des juges ; ils different par
+# ce qu'ils regardent, et cette difference n'est PAS dans ce fichier.
+#
+#   code-reviewer   appele par la carte avec `judge_target: deliverable`
+#   spec-reviewer   appele par la carte avec `judge_target: brief`
+#
+# Autrement dit : le meme moteur, la meme forme de fichier, la meme facon de rendre
+# un verdict — braques sur deux objets differents par la carte qui les convoque.
+#
+# POURQUOI CE ROLE EXISTE. C'est la porte la moins chere du pipeline. Un ticket
+# ambigu coute un aller-retour complet : le dev interprete, livre, le relecteur
+# refuse, on recommence. Le relire AVANT coute une minute. Quand le brief est
+# insuffisant, le ticket remonte a l'humain au lieu de partir en production
+# d'hypotheses.
+#
+# Si vous voulez un pipeline plus rapide et plus permissif, retirez simplement
+# l'etape `spec` de la carte `standard` : le role reste la, inutilise. Rien a
+# supprimer, rien a recompiler.
+# -----------------------------------------------------------------------------
+
+kind: CapabilityProfile
+
+metadata:
+  name: spec-reviewer
+  containment: bwrap
+  role_index: 4
+
+spec:
+  scope:
+    # Volontairement PLUS PAUVRE que le code-reviewer : ce juge lit un texte, il
+    # n'execute rien. Pas de Bash, pas de build. Chaque outil retire est une facon
+    # de moins pour un agent de partir dans une direction qu'on ne lui demande pas.
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Monitor
+      - ToolSearch
+      - Write
+      - Edit
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - WebSearch
+      - WebFetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    git_ops_denied: [push, rebase, commit]
+
+  knowledge:
+    skills: []
+    monk_registry: null
+    monk_instance: null
+
+  invocation:
+    lifetime_scope: one-shot
+    model: opus
+    # `medium` suffit : juger si une demande est claire et testable est une lecture,
+    # pas une enquete. Le code-reviewer, lui, doit tenir un raisonnement sur du code
+    # qu'il decouvre.
+    effort: medium
+    boot_at_start: false
+    # Pas de sous-agent : le brief est court, le juge le lit directement. Comparez
+    # avec `code-reviewer`, ou le sous-agent sert a isoler le contexte d'une revue
+    # longue.
+    subagent_template: null
+    host_native: false
+    bridge_enabled: false
+
+  modop_set:
+    default: []
+    optional: []
+    incompatible: []
+
+  project: null
+
+  timeouts:
+    response_sec: 600
+
+  brief_kind: judge
+  interlocutor: fleet

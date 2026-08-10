@@ -1,0 +1,9 @@
+# Surcharge VIDE, et c'est le cas normal.
+#
+# Un mode operatoire ne change pas les permissions d'un role : il change sa maniere
+# de travailler. Cet effet est porte par le texte, dans
+# `canon/modop-bundles/tdd/sp.md`, qui est ajoute au prompt du role.
+#
+# Ce fichier-ci existe pour DECLARER le mode. Il pourrait modifier le profil (par
+# exemple retirer un outil quand le mode est actif) ; ici il n'en a pas besoin.
+{}
