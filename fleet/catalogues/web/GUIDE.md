@@ -220,6 +220,24 @@ CapProfile.Image: role_index 0 claimed by starfleet, vitrine — a slot is a kil
 and two roles sharing one make `pkill` reach both.
 ```
 
+### Choisir un `role_index`
+
+Il en existe **seize, de 0 à 15, pour tout le déploiement** — pas seize par catalogue. Ce n'est pas
+un réglage : c'est la largeur du champ dans l'identifiant de session, celui qui rend
+`pkill -f 'claude.*1badcafe'` capable de viser une classe de pods sans en toucher une autre.
+
+Le catalogue système en occupe quelques-uns, celui de LCARS aussi si vous le laissez actif. **Ne
+recopiez pas ici la liste de ce qui est pris** — elle sera fausse le jour où un rôle bouge. Posez
+un numéro, démarrez, et lisez le refus : il **nomme les deux rôles et le slot**, ce qui est plus
+fiable qu'une liste dans un guide.
+
+Deux conséquences pratiques :
+
+- un rôle de plus dans votre catalogue, c'est un slot de moins pour tout le monde. Si vous visez
+  une grosse équipe, retirez le catalogue de LCARS de la déclaration (§3) — il en libère six ;
+- `role_index: 0` n'est pas un numéro comme les autres : il **signifie** « niveau flotte, jamais
+  moissonné ». C'est le seul endroit où un chiffre de votre catalogue a un sens fixé par le code.
+
 La nuance a un usage, et c'est la porte de sortie si vous voulez vraiment votre propre signataire :
 vous ne l'**ajoutez** pas, vous **remplacez** le sien. Un fichier nommé `gatekeeper.yaml` dans
 votre catalogue prend la place de celui du système — un seul porteur, un seul emplacement, ça
