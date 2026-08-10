@@ -31,11 +31,13 @@ defmodule Fleet.Project.Roles do
   # gate resolves a responsibility, never a magic name.
   @producer_capability :producer
   @gatekeeper_capability :exception_judge
-  # SEPARATE from `:exception_judge` on purpose, and the separation is the point. The tier-2
-  # conflict resolver and the merge signer happen to be the same role today; resolving both through
-  # ONE key would make "who resolves an exhausted conflict" and "who signs the merge" the same
-  # decision forever — so moving the first would silently move the second, and the seal's signatory
-  # is not something a remediation policy gets to change as a side effect.
+  # SEPARATE from `:exception_judge` on purpose, and the separation is the point. Whether one role
+  # or two carry them is the CATALOGUE's call — a small shop puts both on its lead, a larger one
+  # splits them. Resolving both through ONE key would take that call away and freeze it: "who
+  # resolves an exhausted conflict" and "who signs the merge" would become the same decision
+  # forever, so moving the first would silently move the second — and the seal's signatory is not
+  # something a remediation policy gets to change as a side effect. Two keys cost nothing when a
+  # catalogue puts them on the same role, and are the only way to ever put them on two.
   @conflict_resolver_capability :conflict_resolver
   @delegate_capability :project_delegate
 
