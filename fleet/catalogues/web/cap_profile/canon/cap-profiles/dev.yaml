@@ -31,12 +31,21 @@ metadata:
   # elle existe pour des tests du runtime, et la porte de spawn la refuse.
   containment: bwrap
 
-  # Un entier 0..15, UNIQUE dans le catalogue. Il sert d'identifiant de role dans
-  # l'identifiant de session, et il porte UNE semantique a connaitre :
-  #   0  = orchestrateur global, JAMAIS tue par le menage automatique.
+  # Un entier 0..15, UNIQUE sur tout le DEPLOIEMENT — pas seulement dans ce fichier,
+  # pas seulement dans ce catalogue. Il sert d'identifiant de role dans l'identifiant
+  # de session, et il porte UNE semantique a connaitre :
+  #   0  = orchestrateur de niveau flotte, JAMAIS tue par le menage automatique.
   #   1+ = role ordinaire.
-  # Ce catalogue n'a pas d'orchestrateur global permanent, donc 0 reste libre.
-  role_index: 2
+  #
+  # ⚠ « SUR TOUT LE DEPLOIEMENT » : votre catalogue tourne a cote du catalogue systeme,
+  # qui occupe deja 0 (starfleet), 1 (architect), 2 (gatekeeper) et 9 (chief). Prenez
+  # vos index AILLEURS. Deux roles sur le meme slot fabriquent la MEME UUID de session
+  # des qu'ils partagent aussi leur classe de cycle de vie — et un pod reprend alors la
+  # conversation d'un autre.
+  #
+  # Ce fichier portait 2 jusqu'au 2026-08-10, en collision avec `gatekeeper` : ca n'a
+  # tenu que parce que leurs classes differaient. De la chance, pas un invariant.
+  role_index: 6
 
 spec:
   # --- Les responsabilites structurelles ------------------------------------
