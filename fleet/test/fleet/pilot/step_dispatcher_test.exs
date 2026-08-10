@@ -1385,6 +1385,46 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:skipped, :ci_pending} = StepDispatcher.dispatch_review(pr, opts)
     end
 
+    test "…mais une carte `ci: ignore` ne doit PAS attendre la CI, meme sur ce chemin" do
+      # LA JOINTURE QUI MANQUAIT, mesuree de bout en bout sur un banc le 2026-08-10.
+      #
+      # `CiGate.decide/4` consulte la politique de la carte avant de gater. La RECONVERGENCE, elle,
+      # lisait `commit_ci_state` inconditionnellement et rendait `{:skipped, :ci_pending}` sur
+      # `:pending` — donc `wait/ci`. Deux sites, une seule question, un seul des deux ecoutait la
+      # reponse.
+      #
+      # Vecu : un catalogue dont la carte declare `ci: ignore`, un deploiement sans runner. Le
+      # producteur livre, la PR est mergeable, le jury est vide — donc on arrive ici — et le ticket
+      # prend `wait/ci` pour toujours, alors que sa carte promettait de ne pas dependre d'une CI.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          workflow_map_loader: fn _name ->
+            %{
+              "steps" => %{"build" => %{"role" => "engineer", "needs" => []}},
+              "max_rework_rounds" => 2,
+              "ci" => "ignore"
+            }
+          end,
+          forge_opts: [
+            _test_route: {:ok, {"g", "build"}},
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
+            _test_rerequested: [],
+            _test_ci: :pending
+          ]
+        )
+
+      refute match?({:skipped, :ci_pending}, StepDispatcher.dispatch_review(pr, opts)),
+             "une carte `ci: ignore` ne doit jamais produire wait/ci — la CI n'est pas ce qui bloque"
+    end
+
     # Les deux seams de conflit (`:conflict_diagnoser` / `:conflict_applier`) existaient sans qu'un
     # seul test ne les injecte — une indirection dont le benefice, l'hermetisme, n'etait jamais
     # consomme (BL-6-42.2). Et la mesure a montre pire que « une seam inutilisee » : `tier0_decision`

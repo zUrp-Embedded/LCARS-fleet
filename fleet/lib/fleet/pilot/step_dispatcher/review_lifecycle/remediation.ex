@@ -717,7 +717,27 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # pushes a new commit. So it routes to the producer, exactly like a REQUEST_CHANGES round, and the
   # rework budget bounds it — a CI that stays red does not loop forever, it ends up escalating with
   # the rounds spent, which is a true statement about what was tried.
+  # LA POLITIQUE DE LA CARTE VAUT ICI AUSSI, et elle n'y valait pas — mesure sur banc 2026-08-10.
+  #
+  # `CiGate.decide/4` consulte `issue_card_ci` avant de gater : une carte `ci: ignore` passe. Cette
+  # fonction-ci lisait `commit_ci_state` INCONDITIONNELLEMENT et rendait `{:skipped, :ci_pending}`
+  # sur `:pending` — donc `wait/ci`. Deux sites, une seule question, un seul des deux ecoutait la
+  # reponse.
+  #
+  # Ce que ca coutait, vecu de bout en bout : un catalogue dont la carte declare `ci: ignore` et un
+  # deploiement sans runner. Le producteur livre, la PR est mergeable, le jury est vide — donc on
+  # arrive ici — et le ticket prend `wait/ci` pour toujours. La carte promettait de ne pas dependre
+  # d'une CI ; la seule chose qui arrivait ensuite etait l'escalade a 45 minutes. Le sceau n'est
+  # tombe qu'apres avoir branche un runner, ce qui prouve la lecture.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
+    if Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(head, ctx) == :ignore do
+      reconverge_rerequest(pr_number, head, ctx)
+    else
+      reconverge_on_ci(pr_number, head, ctx)
+    end
+  end
+
+  defp reconverge_on_ci(pr_number, head, %Ctx{} = ctx) do
     case ctx.forge.commit_ci_state(ctx.repo, head_sha(head, pr_number, ctx), ctx.forge_opts) do
       {:ok, :failure} ->
         Logger.info(
