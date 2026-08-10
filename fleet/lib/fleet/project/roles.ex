@@ -41,6 +41,11 @@ defmodule Fleet.Project.Roles do
   @conflict_resolver_capability :conflict_resolver
   @delegate_capability :project_delegate
 
+  # Why each singleton is one, in the operator's terms. See `resolve_structural!/3`.
+  @gatekeeper_uniqueness "single writer of the signed merge"
+  @conflict_resolver_uniqueness "single addressee of a conflict the producer could not close"
+  @delegate_uniqueness "single addressee of a project escalation, ensured per repo and named by no card"
+
   @doc """
   Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
   `:fleet_pilot, :producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
@@ -91,31 +96,40 @@ defmodule Fleet.Project.Roles do
   def project_delegate_role(opts \\ []) do
     Keyword.get(opts, :project_delegate_role) ||
       Application.get_env(:fleet_pilot, :project_delegate_role) ||
-      resolve_structural!(@delegate_capability, "project delegate")
+      resolve_structural!(@delegate_capability, "project delegate", @delegate_uniqueness)
   end
 
   @doc """
-  Boot check of the two capabilities the fleet cannot work without. Called at rail boot
-  (`Fleet.Pilot.Application`), and the two demands DIFFER because the two concepts do:
+  Boot check of the capabilities the fleet cannot work without. Called at rail boot
+  (`Fleet.Pilot.Application`), and the demands DIFFER because the concepts do:
 
     * `producer` — **at least one**. Several is a legitimate catalogue (`eng_hw` + `eng_sw`): the
       card names which one it dispatches, per step. Refusing readiness for a specialised fleet would
       be the guard inventing a policy nobody asked for.
     * `exception_judge` — **exactly one**. `Fleet.Pilot.GatekeeperSeal` is the sole writer of the
       signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
+    * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
+    * `project_delegate` — **exactly one**, and it is the one this check was MISSING. Unlike the
+      producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. So a
+      catalogue carrying two of them booted green and broke at the first `create_project`
+      (`Fleet.Project.Architect`) or the first escalation (`Fleet.Pilot.ArchWake`) — hours after the
+      deploy, on the operator's first real run, which is exactly the distance this module exists to
+      remove.
 
-  Returns the gatekeeper (resolved) and the producers (the set) for the caller.
+  Returns the resolved singletons and the producer set for the caller.
   """
   @spec resolve_structural_roles!(keyword()) :: %{
           producers: [String.t()],
           gatekeeper: String.t(),
-          conflict_resolver: String.t()
+          conflict_resolver: String.t(),
+          project_delegate: String.t()
         }
   def resolve_structural_roles!(opts \\ []) do
     %{
       producers: producers!(),
       gatekeeper: gatekeeper_role(opts),
-      conflict_resolver: conflict_resolver_role(opts)
+      conflict_resolver: conflict_resolver_role(opts),
+      project_delegate: project_delegate_role(opts)
     }
   end
 
@@ -136,7 +150,12 @@ defmodule Fleet.Project.Roles do
     end
   end
 
-  defp resolve_structural!(capability, label) do
+  # The `why` is the SINGLETON's own reason, passed in by the caller rather than written once here:
+  # the three roles are unique for three different reasons, and a single sentence covering them
+  # could only be true of one. It said "single writer of the signed merge" for all three — accurate
+  # for the gatekeeper, false for the two others, and it is the sentence an operator reads when the
+  # boot refuses their catalogue.
+  defp resolve_structural!(capability, label, why) do
     case Fleet.CapProfile.roles_with_capability(capability) do
       {:ok, [role]} ->
         role
@@ -148,9 +167,9 @@ defmodule Fleet.Project.Roles do
 
       {:ok, roles} ->
         raise "Fleet.Project.Roles: #{length(roles)} catalogue roles declare the #{label} capability " <>
-                "(#{inspect(capability)}): #{inspect(roles)} — this one is unique BY DESIGN (single " <>
-                "writer of the signed merge), and picking one at random would be an arbitrary " <>
-                "fleet-wide policy. Fix the catalogue."
+                "(#{inspect(capability)}): #{inspect(roles)} — this one is unique BY DESIGN " <>
+                "(#{why}), and picking one at random would be an arbitrary fleet-wide policy. " <>
+                "Fix the catalogue."
 
       {:error, reason} ->
         raise "Fleet.Project.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
@@ -289,7 +308,7 @@ defmodule Fleet.Project.Roles do
   def gatekeeper_role(opts \\ []) do
     Keyword.get(opts, :gatekeeper_role) ||
       Application.get_env(:fleet_pilot, :gatekeeper_role) ||
-      resolve_structural!(@gatekeeper_capability, "gatekeeper")
+      resolve_structural!(@gatekeeper_capability, "gatekeeper", @gatekeeper_uniqueness)
   end
 
   @doc """
@@ -309,7 +328,11 @@ defmodule Fleet.Project.Roles do
   def conflict_resolver_role(opts \\ []) do
     Keyword.get(opts, :conflict_resolver_role) ||
       Application.get_env(:fleet_pilot, :conflict_resolver_role) ||
-      resolve_structural!(@conflict_resolver_capability, "conflict resolver")
+      resolve_structural!(
+        @conflict_resolver_capability,
+        "conflict resolver",
+        @conflict_resolver_uniqueness
+      )
   end
 
   # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was

@@ -79,9 +79,50 @@ defmodule Fleet.Project.RolesStructuralTest do
     # the tier-2 conflict today. They are two KEYS, so a catalogue may split them across two roles
     # without the seal noticing.
     write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
+    write_role!(dir, "arbitre", ["project_delegate"])
 
-    assert %{producers: ["eng-hw", "eng-sw"], gatekeeper: "sealer", conflict_resolver: "sealer"} =
-             Roles.resolve_structural_roles!()
+    assert %{
+             producers: ["eng-hw", "eng-sw"],
+             gatekeeper: "sealer",
+             conflict_resolver: "sealer",
+             project_delegate: "arbitre"
+           } = Roles.resolve_structural_roles!()
+  end
+
+  test "un catalogue SANS delegue est refuse au BOOT, plus au premier create_project", %{dir: dir} do
+    # La mesure qui justifie le geste : avant, ce catalogue bootait vert et cassait des heures plus
+    # tard, chez l'operateur, au premier `create_project` ou a la premiere escalade.
+    write_role!(dir, "eng", ["producer"])
+    write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
+
+    assert_raise RuntimeError,
+                 ~r/no catalogue role declares the project delegate capability/,
+                 fn ->
+                   Roles.resolve_structural_roles!()
+                 end
+  end
+
+  test "deux delegues : le boot refuse, et il les NOMME", %{dir: dir} do
+    write_role!(dir, "eng", ["producer"])
+    write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
+    write_role!(dir, "arch-hw", ["project_delegate"])
+    write_role!(dir, "arch-sw", ["project_delegate"])
+
+    assert_raise RuntimeError, ~r/"arch-hw".*"arch-sw"/, fn ->
+      Roles.resolve_structural_roles!()
+    end
+  end
+
+  test "le motif d'unicite est celui du role, pas celui du scelleur recopie", %{dir: dir} do
+    # Une phrase unique couvrant les trois singletons ne pouvait etre vraie que d'un seul : elle
+    # disait « single writer of the signed merge » pour le delegue aussi. C'est le message que
+    # l'operateur lit quand son catalogue est refuse.
+    write_role!(dir, "arch-hw", ["project_delegate"])
+    write_role!(dir, "arch-sw", ["project_delegate"])
+
+    assert_raise RuntimeError, ~r/single addressee of a project escalation/, fn ->
+      Roles.project_delegate_role()
+    end
   end
 
   test "…mais le repli de DERNIER RECOURS refuse de deviner lequel", %{dir: dir} do
