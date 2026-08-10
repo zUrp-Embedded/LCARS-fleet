@@ -195,17 +195,27 @@ defmodule Fleet.SPBuilder do
   @spec filter_skills(Fleet.CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
   def filter_skills(%Fleet.CapProfile{} = cap_profile, skills_root)
       when is_binary(skills_root) do
-    if File.dir?(skills_root) do
-      whitelist = get_in(cap_profile.spec, ["knowledge", "skills"]) || []
+    # BOTH roots, and this one was found the hard way: `starfleet` declares `card-revision`, the
+    # skill moved to the system catalogue with the role that needs it, and the permanent pod
+    # respawn-looped on `{:skills_missing, ["card-revision"]}`. A role and the material it declares
+    # must resolve from the same union — anything else means a catalogue can carry a role it cannot
+    # actually equip.
+    roots = with_system_root(skills_root, "skills/canon")
 
+    if roots == [] do
+      {:error, :skills_root_missing}
+    else
+      whitelist = get_in(cap_profile.spec, ["knowledge", "skills"]) || []
       plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
 
       case Enum.reject(plain, &Fleet.Slug.valid?/1) do
         [] ->
           {present, missing} =
             plain
-            |> Enum.map(&{&1, Path.join(skills_root, &1)})
-            |> Enum.split_with(fn {_name, path} -> File.exists?(path) end)
+            |> Enum.map(fn name ->
+              {name, Enum.find(Enum.map(roots, &Path.join(&1, name)), &File.exists?/1)}
+            end)
+            |> Enum.split_with(fn {_name, path} -> path != nil end)
 
           case missing do
             [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
@@ -215,8 +225,6 @@ defmodule Fleet.SPBuilder do
         unsafe ->
           {:error, {:skills_unsafe, unsafe}}
       end
-    else
-      {:error, :skills_root_missing}
     end
   end
 

@@ -949,6 +949,13 @@ defmodule Fleet.Spawner.PodTest do
 
       Fleet.TestEnv.put_env_restoring(:fleet_spawner, :skills_root, skills_root)
 
+      # La racine SYSTEME est neutralisee : elle porte un vrai `card-revision`, et la resolution
+      # la lit en premier. Sans ca ce test mesurerait le skill du systeme au lieu de la fixture
+      # qu'il vient d'ecrire — vert, sur le mauvais fichier.
+      Fleet.Test.CatalogueIsolation.isolate!(Path.join(tmp, "__cat"),
+        system: Path.join(tmp, "__no-system")
+      )
+
       profile = valid_profile()
 
       whitelisting = %{

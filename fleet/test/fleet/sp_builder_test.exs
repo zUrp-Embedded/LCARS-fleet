@@ -431,7 +431,24 @@ defmodule Fleet.SPBuilderTest do
       refute Enum.any?(paths, &String.contains?(&1, "otp-thinking"))
     end
 
-    test "returns :skills_root_missing when path absent" do
+    # Deux absences distinctes depuis le decoupage systeme/metier, et les confondre serait un
+    # mensonge dans les deux sens.
+    test "racine metier absente mais systeme presente → les skills manquent, pas la racine" do
+      # Le deploiement A un arbre de skills (celui du systeme) : repondre `:skills_root_missing`
+      # dirait qu'il n'y en a aucun, et enverrait l'operateur chercher un probleme de deploiement
+      # la ou il a simplement nomme des skills qui n'existent pas.
+      assert {:error, {:skills_missing, missing}} =
+               Fleet.SPBuilder.filter_skills(valid_cap_profile(), "/tmp/__no_such_dir")
+
+      assert missing != []
+    end
+
+    @tag :tmp_dir
+    test "AUCUNE des deux racines → :skills_root_missing (le vrai deploiement casse)", %{
+      tmp_dir: tmp
+    } do
+      Fleet.Test.CatalogueIsolation.isolate!(tmp, system: Path.join(tmp, "__absent"))
+
       assert {:error, :skills_root_missing} =
                Fleet.SPBuilder.filter_skills(valid_cap_profile(), "/tmp/__no_such_dir")
     end
