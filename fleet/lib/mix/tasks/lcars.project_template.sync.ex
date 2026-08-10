@@ -23,8 +23,24 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   @push_timeout_ms 60_000
 
   @impl true
-  def run(_args) do
+  def run(args) do
     Mix.Task.run("loadpaths")
+
+    # `--catalogue <root>`, and it exists because the obvious spelling SILENTLY does the wrong
+    # thing: `LCARS_CATALOGUE_ROOT` reaches `:fleet_catalogue, :root` through `config/runtime.exs`,
+    # which a mix task never evaluates (no `app.start`, by design here). Setting the variable and
+    # running this task therefore pushes the BUNDLED template and reports success — the deployment
+    # ends up with a scaffolding from a catalogue it does not run, and nothing says so.
+    # An explicit option cannot be set and ignored.
+    case OptionParser.parse(args, switches: [catalogue: :string]) do
+      {[catalogue: root], _, _} ->
+        File.dir?(root) || Mix.raise("--catalogue: #{root} is not a readable directory")
+        Application.put_env(:fleet_catalogue, :root, root)
+        Mix.shell().info("project-template: catalogue root = #{root}")
+
+      _ ->
+        :ok
+    end
     {:ok, _} = Application.ensure_all_started(:req)
     # The ForgeClient transport rides the app-supervised Finch pool — absent here (no
     # app.start, by design): start the SAME child spec under a task-local supervisor.
