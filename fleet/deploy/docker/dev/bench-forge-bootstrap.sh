@@ -187,6 +187,22 @@ if [[ -z "$TOFU_DIR" ]]; then
   say "recette tofu copiee dans $TOFU_DIR (tfstate hors de l'arbre)"
 fi
 
+# The roster is DERIVED from the catalogue, never taken from the recipe defaults. Those defaults are
+# a second writing of a fact `mix lcars.catalogue.roles --tfvars` already produces, and the two DID
+# drift: `chief` sat in `roles` and not in `writers`, so it got an account and a token and no write
+# right anywhere -- found by reading the org on a bench, not by any check. Deriving here removes the
+# second list from the bench's path instead of keeping it correct by hand.
+#
+# Fail-closed on purpose: this script already needs the source tree (it copies the recipe from it),
+# so it needs `mix` too. A bench provisioned from stale defaults would be a bench that does not
+# prove what it claims to prove.
+ROSTER_LINE="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
+                 --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
+                 --tofu-dir "$TOFU_DIR" \
+                 --repo "$REPO_ROOT/fleet" 2>/dev/null | grep '^PROV_ROLES=')" \
+  || die "derivation du roster en echec (enroll-catalogue.sh) -- recette non enrolee" 4
+say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
+
 SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
 
 (
