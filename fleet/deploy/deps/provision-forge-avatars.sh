@@ -42,6 +42,13 @@ CHECK_ONLY=0
 # charte ; lcars-system porte le favicon LCARS (identité système = la marque, pas un rôle métier).
 # L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
+#
+# ⚠ CETTE LISTE N'EST PAS UN ROSTER, et ne doit pas le devenir. Elle porte un mapping compte→IMAGE :
+# chaque entrée existe parce qu'un PNG de charte existe pour elle. La dériver du catalogue produirait
+# une boucle qui échoue sur chaque rôle tiers — un rôle qu'on n'a pas dessiné n'a pas d'avatar, et
+# c'est normal. C'est l'inverse qui devait bouger : un compte de CETTE liste absent de la forge visée
+# n'est plus un échec (mesuré sur le catalogue web — six 404 d'affilée, un provisionnement correct
+# rendu rouge par des comptes qui n'avaient aucune raison d'exister).
 declare -a ENTRIES=(
   "architect:architect.png"
   "engineer:engineer.png"
@@ -110,10 +117,27 @@ post_image() { # $1=url  $2=fichier_png  $3...=headers extra
 }
 
 fail=0
+skipped=0
+
+# Le compte existe-t-il sur CETTE forge ? Un catalogue metier different n'a pas les memes roles, et
+# poser un avatar sur un compte absent n'est pas un echec de provisionnement : c'est une entree de
+# charte sans destinataire. Le distinguer demande le code HTTP, pas le corps — un 404 rend du JSON
+# parfaitement lisible, donc `jq` seul ne verrait aucune difference.
+account_exists() { # $1=compte
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${AUTH[@]}" "$FORGE/api/v1/users/$1")"
+  [[ "$code" == "200" ]]
+}
 
 for entry in "${ENTRIES[@]}"; do
   account="${entry%%:*}"
   file="$AVATARS_DIR/${entry#*:}"
+
+  if ! account_exists "$account"; then
+    echo "IGNORE $account — compte absent de cette forge (autre catalogue metier) : rien a poser"
+    skipped=$((skipped + 1))
+    continue
+  fi
 
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
     url="$(curl -s -m 10 "${AUTH[@]}" "$FORGE/api/v1/users/$account" | jq -r '.avatar_url // ""')"
@@ -147,8 +171,13 @@ if [[ -n "$ORG" ]]; then
   fi
 fi
 
+# Le compte des ignores est DIT, jamais tu : un provisionnement qui couvre trois entrees sur dix doit
+# le montrer, sinon « tous les avatars poses » ment par omission sur ce qu'il a couvert.
+note=""
+[[ "$skipped" -gt 0 ]] && note=" ($skipped entree(s) de charte sans compte sur cette forge — ignorees)"
+
 if [[ "$fail" -ne 0 ]]; then
-  echo "provision-forge-avatars: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)" >&2
+  echo "provision-forge-avatars: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)$note" >&2
   exit 2
 fi
-echo "provision-forge-avatars: tous les avatars posés/valides sur $FORGE"
+echo "provision-forge-avatars: tous les avatars posés/valides sur $FORGE$note"

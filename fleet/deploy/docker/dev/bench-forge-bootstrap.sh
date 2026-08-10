@@ -312,10 +312,14 @@ fi
 if [[ -f "$TOFU_DIR/provision-forge-avatars.sh" ]]; then
   printf '%s\n' "$MASTER_TOKEN" > "$TOFU_DIR/.admin.token"
   chmod 600 "$TOFU_DIR/.admin.token"
-  ( cd "$TOFU_DIR" && ./provision-forge-avatars.sh --forge "$FORGE_URL" \
-      --admin-token-file "$TOFU_DIR/.admin.token" >/dev/null 2>&1 ) \
-    && say "avatars de charte poses" \
-    || say "avatars NON poses (non bloquant — les comptes gardent une tete vide)"
+  # La sortie du script est CAPTUREE, plus jetee. Elle etait envoyee a /dev/null derriere un
+  # "non bloquant" : la seule ligne qui dit CE QUI a ete pose, et combien d'entrees de charte
+  # n'avaient pas de compte sur cette forge, disparaissait. Un provisionnement qui couvre trois
+  # entrees sur dix doit le montrer.
+  avatar_out="$( cd "$TOFU_DIR" && ./provision-forge-avatars.sh --forge "$FORGE_URL" \
+      --admin-token-file "$TOFU_DIR/.admin.token" 2>&1 )" \
+    && say "avatars: ${avatar_out##*$'\n'}" \
+    || say "avatars NON poses, les comptes gardent une tete vide : ${avatar_out##*$'\n'}"
   rm -f "$TOFU_DIR/.admin.token"
 fi
 
