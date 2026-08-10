@@ -167,6 +167,21 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
+  The CATALOGUE roots, in precedence order — business first, then the system default.
+
+  `search/2` answers "where do I look for this TREE"; this answers "which catalogues am I made of".
+  The difference matters to a check that must attribute a fault to a catalogue rather than to a
+  directory: a role and its SP live in two different trees of the SAME catalogue, and pairing them
+  through `search/2` alone would compare tree i of one with tree i of another.
+
+  ⚠ A FINE override (`:fleet_cap_profile, :root_dir` and its siblings) moves one tree OUT of its
+  catalogue, and no pairing survives that by construction — the tree is then, deliberately, not part
+  of any catalogue. Callers that attribute per catalogue must say so.
+  """
+  @spec roots() :: [Path.t()]
+  def roots, do: Enum.filter([to_string(root()), system_root()], &File.dir?/1)
+
+  @doc """
   First existing `name` on the search path — the BUSINESS path when it exists nowhere.
 
   Returning the business path rather than `nil` is deliberate: the caller's own `:enoent` then names

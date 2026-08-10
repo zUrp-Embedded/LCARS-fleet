@@ -16,6 +16,8 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec publish!() :: :ok
   def publish! do
+    ensure_declared_roles_carry_an_sp!()
+
     image = %{
       modop_sp:
         read_dir_map!(modop_roots(), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
@@ -72,6 +74,75 @@ defmodule Fleet.SPBuilder.Image do
     )
 
     :ok
+  end
+
+  # DECLARING a role and SUPERSEDING its prompt are two different gestures, and the guard between
+  # them is ASYMMETRIC — which is the whole content of this function.
+  #
+  #   * a catalogue that DECLARES `<role>.yaml` must also carry its SP: `agent-<role>-base.md` in
+  #     its own drafts tree, or a `spec.systemPrompt` naming the role it reuses. A cap-profile grants
+  #     PERMISSIONS; the SP decides BEHAVIOUR. A role with neither behaves like whoever's prompt it
+  #     inherited, and its name lies.
+  #   * a catalogue that carries `agent-<role>-base.md` and NOT the yaml is superseding a role it
+  #     did not write. That is the child-theme gesture, it is the point, and it is silent here.
+  #
+  # PER CATALOGUE, and that is what a deployment-wide check cannot do. `canon spawn-proof` already
+  # refuses a role whose draft exists in NO root — but it reads the union, so a role declared by
+  # catalogue A and prompted by an unrelated catalogue B passes: A's role silently runs B's
+  # behaviour. With the two bundled roots that configuration is unreachable (the only names both
+  # sides carry are the four the system also DECLARES, which is the legal override). It becomes
+  # reachable the moment an operator stacks catalogues, which is what the search path was built for
+  # — so the guard lands WITH the mechanism rather than after the first accident.
+  #
+  # LIMIT, and it is structural: a FINE override moves one tree out of its catalogue, and nothing
+  # can then attribute a role to a catalogue. Such a tree is not visited rather than guessed at.
+  defp ensure_declared_roles_carry_an_sp! do
+    # Grouped by ROLE across the catalogues that declare it, never per catalogue in isolation. A
+    # business catalogue that copies `architect.yaml` to widen its tools and keeps the system's
+    # prompt declares a role whose SP it does not carry — and that is LEGAL, because the name means
+    # the same thing on both sides. The lie needs a name introduced by one catalogue and prompted by
+    # another that never heard of it.
+    carried =
+      Enum.reduce(Fleet.Catalogue.roots(), %{}, fn root, acc ->
+        cap_dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
+        drafts_dir = Path.join(root, Fleet.Catalogue.rel(:sp_drafts))
+
+        case Fleet.CapProfile.index_of(cap_dir) do
+          {:ok, index} ->
+            Enum.reduce(Map.keys(index), acc, fn role, acc ->
+              Map.update(
+                acc,
+                role,
+                sp_carried?(index, drafts_dir, role),
+                &(&1 or sp_carried?(index, drafts_dir, role))
+              )
+            end)
+
+          {:error, _} ->
+            acc
+        end
+      end)
+
+    orphans = carried |> Enum.reject(&elem(&1, 1)) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
+    unless orphans == [] do
+      raise "SPBuilder.Image: #{Enum.join(orphans, ", ")} — declared by a catalogue that carries " <>
+              "no SP for them. A catalogue that DECLARES a role owes its prompt: " <>
+              "`agent-<role>-base.md` in its own sp_drafts, or `spec.systemPrompt` naming the role " <>
+              "it reuses. Carrying the draft ALONE is the legal gesture (superseding a role you did " <>
+              "not write) and is never reported here. Proven-good image at boot, or do not boot."
+    end
+
+    :ok
+  end
+
+  # `systemPrompt` is honoured WITHOUT following it: whether the borrowed role resolves is
+  # `read_agent_draft/1`'s answer and the spawn proof's to enforce. This one asks only whether the
+  # catalogue SAID where the behaviour comes from — declaring the reuse IS carrying the SP.
+  defp sp_carried?(index, drafts_dir, role) do
+    borrowed = index |> Map.get(role, %{}) |> get_in(["spec", "systemPrompt"])
+
+    is_binary(borrowed) or File.regular?(Path.join(drafts_dir, "agent-#{role}-base.md"))
   end
 
   @doc """

@@ -103,17 +103,54 @@ defmodule Fleet.Application.CatalogueVerifyTest do
 
   test "a role that is schema-valid but not spawn-ready fails the canon spawn-proof stage",
        %{tmp_dir: tmp} do
-    # Delete a role's agent draft: the cap-profile still loads and passes the schema (the images
-    # publish), but `CanonProof` calls the spawn path, which reads the draft — so the break lands on
-    # the spawn-proof, the stage schema validation cannot reach. This is the check the card test
-    # could not exercise, and it proves the stage is wired through the shared `prove_canon!`.
+    # Delete a SUBAGENT TEMPLATE a role declares: the cap-profile still loads and passes the schema,
+    # both images still publish (the other templates satisfy their root), but `CanonProof` calls the
+    # spawn path, which composes — so the break lands on the spawn-proof, the stage schema validation
+    # cannot reach. This is the check the card test could not exercise, and it proves the stage is
+    # wired through the shared `prove_canon!`.
+    #
+    # It used to delete the role's DRAFT, and that stopped reaching this stage: the SP image now
+    # refuses a declared role whose catalogue carries no prompt for it, so the fault is named one
+    # tier earlier and more precisely. The break had to move to keep proving what this test is for.
+    copy = catalogue_copy(tmp)
+    File.rm!(Path.join(copy, "cap_profile/canon/subagent-templates/subagent-spec-reviewer.md"))
+
+    assert {:error, %{findings: findings}} = CatalogueVerify.verify(copy)
+
+    assert Enum.any?(findings, &(&1.stage == "canon spawn-proof")),
+           "a role missing its subagent template should fail the spawn-proof, got: #{inspect(findings)}"
+
+    refute Enum.any?(findings, &(&1.stage =~ "image")),
+           "the images were intact — they must not appear as findings"
+  end
+
+  test "a role DECLARED by a catalogue that carries no SP for it is refused at the image", %{
+    tmp_dir: tmp
+  } do
+    # The asymmetric half, and the earlier tier: declaring a role without its prompt. The message
+    # names the contract rather than the spawn symptom, because the author's fault is the missing
+    # file, not the pod that would have died on it.
     copy = catalogue_copy(tmp)
     File.rm!(Path.join(copy, "sp_builder/sp_drafts/agent-engineer-base.md"))
 
     assert {:error, %{findings: findings}} = CatalogueVerify.verify(copy)
 
-    assert Enum.any?(findings, &(&1.stage == "canon spawn-proof")),
-           "a role missing its draft should fail the spawn-proof, got: #{inspect(findings)}"
+    assert Enum.any?(findings, &(&1.stage == "sp-builder image" and &1.error =~ "engineer")),
+           "got: #{inspect(findings)}"
+  end
+
+  test "carrying a draft WITHOUT the role is a supersession, and stays silent", %{tmp_dir: tmp} do
+    # The other side of the asymmetry, and the one that must never be reported: a catalogue may
+    # rewrite the prompt of a role it did not write, by putting a file at the same relative path.
+    # `gatekeeper` is declared by the system catalogue alone — here only its SP is superseded.
+    copy = catalogue_copy(tmp)
+
+    File.write!(
+      Path.join(copy, "sp_builder/sp_drafts/agent-gatekeeper-base.md"),
+      "# Gatekeeper, in my own words\n"
+    )
+
+    assert {:ok, _} = CatalogueVerify.verify(copy)
   end
 
   test "a business catalogue overriding a SYSTEM role BY NAME passes", %{tmp_dir: tmp} do
