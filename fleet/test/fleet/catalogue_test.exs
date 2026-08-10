@@ -205,6 +205,66 @@ defmodule Fleet.CatalogueTest do
 
     defp declare(home, lines), do: File.write!(Path.join(home, "catalogues.active"), lines)
 
+    # A minimal, schema-valid card. One step, no jury, CI ignored — the shape `workshop-direct` and
+    # `quick-fix` already ship; enough for the loader to accept it and for the image to hold it.
+    defp install_card(dir, name) do
+      maps = Path.join(dir, Fleet.Catalogue.rel(:workflow_maps))
+      File.mkdir_p!(maps)
+
+      File.write!(Path.join(maps, "#{name}.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: #{name}
+        description: "carte de fixture"
+        applicable_intensity: [C0]
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: engineer
+            needs: []
+            inputs:
+              - ticket.body
+      """)
+
+      dir
+    end
+
+    test "publish_image! couvre CHAQUE catalogue actif — pas seulement le premier", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # LE DEFAUT QUE CE TEST EXISTE POUR EMPECHER DE REVENIR : `publish_image!/0` publiait depuis
+      # `workflow_maps_root([])`, c'est-a-dire la PREMIERE racine active. Les cartes de tout
+      # catalogue suivant existaient sur le disque et dans AUCUNE image — un projet servi par ce
+      # catalogue-la ne trouvait pas de carte du tout, et le decouvrait au premier dispatch.
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      premier = install_card(install(home, "premier"), "carte-une")
+      second = install_card(install(home, "second"), "carte-deux")
+      declare(home, "premier\nsecond\n")
+
+      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+      :ok = Fleet.Workflow.Loader.publish_image!()
+
+      # Chaque racine porte SON image, et elle ne contient que ses cartes : les catalogues ne
+      # fusionnent pas — une carte nomme des roles, et un role appartient au catalogue qui le declare.
+      for {dir, attendue, absente} <- [
+            {premier, "carte-une", "carte-deux"},
+            {second, "carte-deux", "carte-une"}
+          ] do
+        opts = [workflow_maps_root: Path.join(dir, Fleet.Catalogue.rel(:workflow_maps))]
+        assert Fleet.Workflow.Loader.canon_names!(opts) == [attendue]
+        # `load!` rend la carte APLATIE (metadata + spec fusionnes), pas l'arbre du YAML.
+        assert %{"name" => ^attendue, "steps" => %{"build" => _}} =
+                 Fleet.Workflow.Loader.load!(attendue, opts)
+
+        refute absente in Fleet.Workflow.Loader.canon_names!(opts),
+               "les cartes ne doivent pas fusionner entre catalogues"
+      end
+    end
+
     test "no file: the shipped business catalogue alone — today's behaviour untouched", %{
       tmp_dir: tmp
     } do

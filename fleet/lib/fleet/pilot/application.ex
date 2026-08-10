@@ -293,7 +293,7 @@ defmodule Fleet.Pilot.Application do
   @spec verify_cards_and_roles!(keyword()) :: :ok
   def verify_cards_and_roles!(opts \\ []) do
     Fleet.Workflow.Loader.publish_image!()
-    validate_card_juries!()
+    validate_card_juries!(opts)
     validate_card_steps!(opts)
     validate_structural_roles!()
     :ok
@@ -304,9 +304,19 @@ defmodule Fleet.Pilot.Application do
     :ok
   end
 
-  defp validate_card_juries! do
-    for map_name <- Fleet.Workflow.Loader.canon_names!(),
-        role <- Fleet.Workflow.Loader.load!(map_name)["jury"] do
+  # EVERY active catalogue is proved, not just the first. `canon_names!/1` with no opts reads the
+  # image of the FIRST active root, so a second catalogue's cards were validated by nobody and met
+  # their first reader at dispatch — far from the boot that could have refused them. Explicit opts
+  # still mean "this root and no other": that is the per-catalogue verifier naming its target.
+  defp card_scopes([]),
+    do: Enum.map(Fleet.Workflow.Loader.card_roots(), &[workflow_maps_root: &1])
+
+  defp card_scopes(opts), do: [opts]
+
+  defp validate_card_juries!(opts \\ []) do
+    for scope <- card_scopes(opts),
+        map_name <- Fleet.Workflow.Loader.canon_names!(scope),
+        role <- Fleet.Workflow.Loader.load!(map_name, scope)["jury"] do
       case Fleet.CapProfile.load(role) do
         {:ok, cp} ->
           kind = Fleet.CapProfile.brief_kind(cp)
@@ -394,8 +404,9 @@ defmodule Fleet.Pilot.Application do
   # load = a broken canon, fail-loud HERE. A step without a role (nil) is skipped: it is not a
   # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
   def validate_card_steps!(opts \\ []) do
-    for map_name <- Fleet.Workflow.Loader.canon_names!(opts),
-        card = Fleet.Workflow.Loader.load!(map_name, opts),
+    for scope <- card_scopes(opts),
+        map_name <- Fleet.Workflow.Loader.canon_names!(scope),
+        card = Fleet.Workflow.Loader.load!(map_name, scope),
         {step_name, spec} <- card["steps"] || %{},
         role = Map.get(spec, "role"),
         is_binary(role) do

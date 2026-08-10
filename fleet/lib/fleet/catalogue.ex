@@ -451,6 +451,12 @@ defmodule Fleet.Catalogue do
   def rel(:sp_blocks), do: @rel_sp_blocks
   def rel(:sp_templates), do: @rel_sp_templates
   def rel(:skills), do: @rel_skills
+  # The cards had no clause here while their constant existed, and the absence was the mechanism:
+  # `rel/1` is what a caller uses to address a tree under an ARBITRARY root, so a tree missing from
+  # it can only be addressed under `root/0` — the first active catalogue. Cards are still NOT a
+  # search path (they do not supersede), but they are now addressable per root, which is what
+  # publishing one image per catalogue requires.
+  def rel(:workflow_maps), do: @rel_workflow_maps
 
   @doc """
   SP blocks, BUSINESS root (`<root>/#{@rel_sp_blocks}`) — the search path is `search/2`.
@@ -489,6 +495,22 @@ defmodule Fleet.Catalogue do
   @doc "EEx templates giving every emitted prompt its shape (`<root>/#{@rel_sp_templates}`)."
   @spec sp_templates_root() :: Path.t()
   def sp_templates_root, do: Path.join(root(), @rel_sp_templates)
+
+  @doc """
+  The workflow-map directory of EVERY active catalogue, in declaration order.
+
+  Cards do not supersede across catalogues and never will: a card names roles, and a role belongs to
+  the catalogue that declares it — a card from one catalogue over the roles of another describes a
+  fleet nobody assembled. So this is a LIST of roots to publish one image each from, not a search
+  path to merge. The system root is absent on purpose: it carries the mechanism, no business card.
+  """
+  @spec workflow_maps_roots() :: [Path.t()]
+  def workflow_maps_roots do
+    active_roots()
+    |> Enum.map(&Path.join(&1, @rel_workflow_maps))
+    |> Enum.uniq()
+    |> Enum.filter(&File.dir?/1)
+  end
 
   @doc "Workflow-map YAMLs (`<root>/#{@rel_workflow_maps}`)."
   @spec workflow_maps_root() :: Path.t()

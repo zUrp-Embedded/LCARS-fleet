@@ -149,10 +149,20 @@ defmodule Fleet.Workflow.Loader do
   """
   @spec publish_image!() :: :ok
   def publish_image! do
-    root = workflow_maps_root([])
-    names = disk_canon_names!([])
-    image = Map.new(names, fn name -> {name, load_from_disk!(Fleet.Slug.cast!(name), [])} end)
-    :persistent_term.put(image_key(root), image)
+    # ONE image PER ACTIVE CATALOGUE, and the key was already per-root (`image_key/1`) — only the
+    # publication was single. It published from `workflow_maps_root([])`, i.e. the FIRST active
+    # root, so the cards of every catalogue after the first existed on disk and in no image. A
+    # project served by such a catalogue found no card at all.
+    #
+    # Not a search path: cards do not supersede across catalogues. A card names roles, and a role
+    # belongs to the catalogue declaring it — merging them would describe a fleet nobody assembled.
+    for dir <- card_roots() do
+      opts = [workflow_maps_root: dir]
+      names = disk_canon_names!(opts)
+      image = Map.new(names, fn name -> {name, load_from_disk!(Fleet.Slug.cast!(name), opts)} end)
+      :persistent_term.put(image_key(dir), image)
+    end
+
     :ok
   end
 
@@ -164,6 +174,26 @@ defmodule Fleet.Workflow.Loader do
     end
 
     :ok
+  end
+
+  @doc """
+  The card directories this deployment serves — ONE per active catalogue, in declaration order.
+
+  THE single authority, and it has to be: `publish_image!/0` publishes from this list and the boot
+  guards prove from it, so two derivations of "which roots" would be two answers the day one is
+  fixed. That is the same duplication this whole layer exists to remove.
+
+  The FINE override (`:fleet_workflow, :workflow_maps_root`) REPLACES the list rather than sitting in
+  front of it — same rule as `Fleet.Catalogue.search/1`, same reason: a fixture pointing that key at
+  its own canon is building an isolated catalogue, and leaving the shipped roots behind would make it
+  publish and prove cards nobody wrote.
+  """
+  @spec card_roots() :: [Path.t()]
+  def card_roots do
+    case Application.get_env(:fleet_workflow, :workflow_maps_root) do
+      nil -> Fleet.Catalogue.workflow_maps_roots()
+      dir -> [dir]
+    end
   end
 
   defp image_key(root), do: {__MODULE__, :image, root}
