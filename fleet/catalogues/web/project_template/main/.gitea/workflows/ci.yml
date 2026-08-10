@@ -2,25 +2,39 @@ name: CI
 
 # Le rail d'integration continue de tout projet cree avec ce catalogue.
 #
-# POURQUOI IL EXISTE, ET POURQUOI IL EST AUSSI PETIT
+# POURQUOI IL EXISTE
 #
 # La carte `standard` declare `ci: required` : elle attend un verdict avant de fusionner. Si aucun
 # workflow ne repond, chaque ticket attend un resultat qui ne viendra jamais, puis remonte en
-# escalade. Un depot cree sans ce fichier rend donc la carte `standard` inutilisable — et l'erreur
-# ne se voit qu'au premier ticket, une fois le travail deja fait.
+# escalade. Un depot cree sans ce fichier rend donc `standard` inutilisable — et l'erreur ne se voit
+# qu'au premier ticket, une fois le travail deja fait.
 #
-# Ce qu'il prouve est delibere : que la CHAINE existe. Un push atteint la forge, la forge
-# dispatche, un executeur tourne, un verdict revient. Rien de plus. Un projet neuf n'a ni
-# dependances ni suite de tests : un workflow qui en suppose echouerait sur un squelette vide, et
-# un rail qui nait rouge n'apprend rien a personne.
+# CE QU'IL PROUVE, ET C'EST DELIBEREMENT PEU : que la CHAINE existe. Un push atteint la forge, la
+# forge dispatche, un executeur tourne, un verdict revient. Rien de plus. Un projet neuf n'a ni
+# dependances ni suite de tests ; un workflow qui en suppose echoue sur un squelette vide, et un
+# rail qui nait rouge n'apprend rien a personne.
 #
 # CE QU'IL DEVIENT : vous le reecrivez des que le projet sait ce qu'il est — le lint, les tests, le
 # build. C'est un point de depart livre vert, pas un gabarit a respecter.
+#
+# ⚠ LES DEUX PIEGES DE L'EXECUTEUR MINIMAL, tous deux payes une fois avant d'etre ecrits ici :
+#
+#   1. `bash` N'EXISTE PAS. Le label `shell` pointe par defaut sur une image alpine, qui n'a que
+#      `sh`. Sans le `shell: sh` ci-dessous, chaque step meurt sur
+#      « exec: "bash": executable file not found in $PATH ».
+#
+#   2. IL N'Y A PAS DE COPIE DU DEPOT. Recuperer l'arbre demande `actions/checkout`, qui est du
+#      node, que l'image minimale ne porte pas. Donc un step qui lit un fichier du projet ne peut
+#      pas marcher ici. C'est pourquoi ce workflow ne lit RIEN : il constate que la chaine tourne.
 #
 # LE LABEL `shell` est une CLE, pas une image : l'operateur la fait pointer sur ce qu'il veut dans
 # la configuration de son executeur. Generique expres — un executeur sert des projets qui ne sont
 # pas les votres, et nommer ici une chaine d'outils precise ferait heriter chaque projet d'une
 # dependance qui ne le regarde pas.
+#
+# VOTRE PREMIER VRAI CONTROLE : choisissez une image qui porte ce dont vous avez besoin (node pour
+# `actions/checkout` et npm), ajoutez le checkout, puis vos commandes. A ce moment-la seulement les
+# deux pieges ci-dessus cessent de vous concerner.
 
 on:
   push:
@@ -30,21 +44,11 @@ on:
 jobs:
   verifier:
     runs-on: shell
+    defaults:
+      run:
+        shell: sh
     steps:
-      - name: Le depot est la
+      - name: Le rail repond
         run: |
-          set -eu
-          test -f index.html || { echo "index.html absent — le squelette n'a pas ete pose"; exit 1; }
-          echo "depot present"
-
-      # Les pages HTML s'ouvrent-elles ? Controle minimal et sans dependance : chaque .html porte
-      # une balise de fermeture. Remplacez-le par votre vrai controle des que vous en avez un.
-      - name: Les pages sont closes
-        run: |
-          set -eu
-          manquantes=0
-          for f in $(find . -name '*.html' -not -path './node_modules/*'); do
-            grep -qi '</html>' "$f" || { echo "non close : $f"; manquantes=1; }
-          done
-          [ "$manquantes" -eq 0 ] || exit 1
-          echo "toutes les pages sont closes"
+          echo "CI: le push a atteint la forge, la forge a dispatche, l executeur tourne."
+          echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
