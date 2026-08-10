@@ -193,6 +193,60 @@ defmodule Fleet.API.ControlRouterTest do
     end
   end
 
+  describe "POST /api/admin/spawn — the fleet-scope slot holds ONE pod" do
+    # A pod stand-in: `Fleet.Spawner.list_pods/0` selects the Registry and asks each pid for :info.
+    # Registering a process that answers is the whole fixture — no spawn, no launcher, no tmux.
+    defmodule FakePod do
+      use GenServer
+
+      def start_link({pod_id, role}),
+        do: GenServer.start_link(__MODULE__, {pod_id, role}, name: via(pod_id))
+
+      defp via(pod_id), do: {:via, Registry, {Fleet.Spawner.Registry, pod_id}}
+
+      @impl true
+      def init(state), do: {:ok, state}
+
+      @impl true
+      def handle_call(:info, _from, {pod_id, role} = state),
+        do: {:reply, %{pod_id: pod_id, role: role, phase: :monitoring}, state}
+    end
+
+    test "409 + NO broadcast when a fleet-scope role is already running, naming the holder" do
+      # Measured on the bench: `lcars spawn starfleet` next to the running permanent was ADMITTED.
+      # A second pod went up with a random UUID, nothing was ever addressed to it, and the wake rail
+      # escalated after twelve unanswered attempts — an incident that named the symptom (the agent
+      # never acked) and never the cause.
+      {:ok, _} = start_supervised({FakePod, {"permanent-starfleet", "starfleet"}})
+
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "starfleet"}))
+        |> put_req_header("content-type", "application/json")
+        |> ControlRouter.call(@opts)
+
+      assert conn.status == 409
+      body = Jason.decode!(conn.resp_body)
+      assert body["error"] =~ "permanent-starfleet"
+
+      # The operator typed the obvious command; the refusal owes them the one that works.
+      assert body["reason"] =~ "lcars attach permanent-starfleet"
+
+      refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
+    end
+
+    test "a NON fleet-scope role is unaffected by a live pod of the same role" do
+      # `engineer` is role_index 3: several are normal and the door must not invent a singleton.
+      {:ok, _} = start_supervised({FakePod, {"eng-already-running", "engineer"}})
+
+      conn =
+        conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer", brief: "fais X"}))
+        |> put_req_header("content-type", "application/json")
+        |> ControlRouter.call(@opts)
+
+      assert conn.status == 202
+    end
+  end
+
   describe "POST /api/admin/spawn — quiescence (drain shutdown)" do
     test "503 when the daemon quiesces (refuses new top-level pod)" do
       Fleet.Shutdown.Quiesce.refuse!()

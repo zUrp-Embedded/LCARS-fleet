@@ -25,9 +25,9 @@ defmodule Fleet.API.ControlRouter do
   ## Contract
 
   All the admission POLICY lives in `Fleet.API.SpawnAdmission.admit/1` (DTO allowlist, path-safe
-  pod_id, loadable cap-profile, host-native refused, one-shot brief required). This router only maps
-  each verdict to an HTTP status + JSON body. A refusal = NOTHING was broadcast (admission
-  precedes emission by construction). Quiescing (shutdown drain) → 503.
+  pod_id, loadable cap-profile, host-native refused, fleet-scope singleton free, one-shot brief
+  required). This router only maps each verdict to an HTTP status + JSON body. A refusal = NOTHING
+  was broadcast (admission precedes emission by construction). Quiescing (shutdown drain) → 503.
   """
 
   use Plug.Router
@@ -114,6 +114,20 @@ defmodule Fleet.API.ControlRouter do
             reason:
               "the role is declared in the catalogue as a ReservedSeat (kept identity, " <>
                 "closed box) — not spawnable until its full CapabilityProfile exists"
+          })
+        )
+
+      {:error, {:fleet_scope_occupied, name, pod_id}} ->
+        send_resp(
+          conn,
+          409,
+          Jason.encode!(%{
+            error: "fleet-scope role already running: #{name} (pod #{pod_id})",
+            reason:
+              "role_index 0 is the fleet-level slot and there is exactly one per fleet. " <>
+                "A second pod would be spawned, receive nothing, and escalate on a wake nobody " <>
+                "answers. Talk to the running one through its terminal (`lcars attach #{pod_id}`) " <>
+                "instead of spawning another."
           })
         )
 

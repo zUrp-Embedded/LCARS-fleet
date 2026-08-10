@@ -34,7 +34,14 @@ defmodule Fleet.API.SpawnAdmission do
        out-of-band path (`bin/host_launch.sh`, an off-fleet interactive session).
        Fail-closed — a defensive guard even though no canon profile is host-native
        since the 2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator).
-    5. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`
+    5. **Fleet-scope singleton already alive** — `role_index: 0` is the fleet-level slot: ONE per
+       fleet, by construction (the reaper spares it, its session UUID carries no project). The door
+       did not know, so `lcars spawn starfleet` next to a running permanent was ADMITTED: a second
+       pod, a random UUID, nothing ever addressed to it, twelve wake attempts and an incident whose
+       message says the agent never acked — the symptom, never the cause. Refused here, naming the
+       pod that holds the slot and the gesture that works, because the operator who typed the
+       obvious command has no way to learn it otherwise.
+    6. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`
        (`Fleet.Spawner.brief_guard`): a one-shot without `brief` would leave
        without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
        `Fleet.Spawner.brief_required?/1` IS the shared authority (no copied
@@ -49,7 +56,9 @@ defmodule Fleet.API.SpawnAdmission do
 
   @typedoc """
   Admission-refusal verdicts — each mapped onto ONE HTTP status by
-  `Fleet.API.ControlRouter` (400 for `:missing_cap_profile`, 422 for the rest).
+  `Fleet.API.ControlRouter`: 400 for `:missing_cap_profile` (the request is malformed), 409 for
+  `{:fleet_scope_occupied, …}` (the request is well-formed and the fleet's state says no — retrying
+  it later can succeed, which is exactly what 409 means and 422 does not), 422 for the rest.
   """
   @type refusal ::
           {:forbidden_fields, [String.t()]}
@@ -59,6 +68,7 @@ defmodule Fleet.API.SpawnAdmission do
           | {:cap_profile, String.t(), term()}
           | {:role_reserved, String.t()}
           | {:host_native_forbidden, String.t()}
+          | {:fleet_scope_occupied, String.t(), String.t()}
           | :brief_required
 
   @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id)
@@ -71,6 +81,7 @@ defmodule Fleet.API.SpawnAdmission do
   def admit(raw) do
     with {:ok, payload} <- parse_admin_spawn_dto(raw),
          {:ok, cap} <- validate_cap_profile(payload),
+         :ok <- check_fleet_scope_free(cap),
          :ok <- check_brief_required(payload, cap) do
       {:ok, payload}
     end
@@ -147,6 +158,22 @@ defmodule Fleet.API.SpawnAdmission do
 
   defp presence(v) when is_binary(v) and v != "", do: v
   defp presence(_), do: nil
+
+  # `catalogued?/1` first: `role_index/1` RAISES on a profile without a valid one, and an admission
+  # gate is the wrong place to discover that a catalogue is malformed — the image refuses that at
+  # boot. Here, no valid index simply means "not the fleet-scope slot".
+  defp check_fleet_scope_free(cap) do
+    name = Fleet.CapProfile.name(cap)
+
+    if Fleet.CapProfile.catalogued?(cap) and Fleet.CapProfile.role_index(cap) == 0 do
+      case Enum.find(Fleet.Spawner.list_pods(), &(&1.role == name)) do
+        nil -> :ok
+        %{pod_id: pod_id} -> {:error, {:fleet_scope_occupied, name, pod_id}}
+      end
+    else
+      :ok
+    end
+  end
 
   defp validate_cap_profile(payload) do
     case Fleet.CapProfile.name_from_request(payload) do
