@@ -70,6 +70,11 @@ if [[ -n "$IMAGE" ]]; then
 else
   SRC="depot $REPO"
   [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
+  # COMPILER D'ABORD, et le silence n'est pas de la coquetterie : sur un arbre froid, mix ecrit
+  # « Compiling N files » sur STDOUT — pas stderr — et ces lignes se melent au JSON de la tache.
+  # Constate au premier run. Le controle de validite plus bas l'a attrape, mais compter dessus
+  # reviendrait a laisser la premiere execution de la journee echouer par principe.
+  ( cd "$REPO" && mix compile ) >/dev/null 2>&1 || die "le depot $REPO ne compile pas" 2
   TFVARS="$(cd "$REPO" && mix lcars.catalogue.roles "$CATALOGUE" --tfvars 2>/dev/null)" \
     || die "mix ne rend pas le roster de $CATALOGUE" 2
 fi

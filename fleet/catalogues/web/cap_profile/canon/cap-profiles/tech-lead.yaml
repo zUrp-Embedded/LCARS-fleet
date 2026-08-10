@@ -32,7 +32,29 @@ kind: CapabilityProfile
 metadata:
   name: tech-lead
   containment: bwrap
-  role_index: 1
+
+  # ⚠ ZERO, ET CE N'EST PAS UN NUMERO LIBRE — c'est ce qui fait de ce role l'ACCUEIL.
+  #
+  # L'index 0 designe le role de niveau FLOTTE : il existe avant tout projet, et le menage
+  # automatique ne le tue jamais. Tous les autres index designent un role lie a un projet.
+  #
+  # Pourquoi ce role en a besoin, et on l'a decouvert en le cassant : c'est lui qui ACCUEILLE un
+  # projet. Avec un index ordinaire, son lancement exige l'identifiant d'un depot — celui du projet
+  # qu'il n'a pas encore cree. Le premier lancement echoue en disant exactement cela :
+  # « project-bound role tech-lead without repo_id ». Un role qui cree le premier projet ne peut
+  # pas etre lie a un projet.
+  #
+  # Regle a retenir si vous refaites ce catalogue : le role qui parle a l'humain et ouvre les
+  # projets porte l'index 0. Un seul role peut le porter.
+  role_index: 0
+
+  # Les deux arbres que l'accueil doit VOIR pour repondre a une question sur un projet existant,
+  # en LECTURE SEULE : il agit par les verbes du runtime, jamais en ecrivant directement.
+  mounts:
+    - path: /home/projects
+      mode: ro
+    - path: /home/projects.workshop
+      mode: ro
 
 spec:
   capabilities: [onboarder, project_delegate, conflict_resolver]
@@ -69,6 +91,19 @@ spec:
       - mcp__fleet__list_issues
       - mcp__fleet__comment_issue
       - mcp__fleet__list_escalations
+      # Les outils de PROJET. Ils vont avec la capacite `onboarder` declaree plus haut, et
+      # l'oubli est facile a faire : declarer la capacite sans donner les outils produit un role
+      # que le runtime designe comme accueillant, et qui n'a rien pour accueillir.
+      #
+      # C'est la seule paire du catalogue ou une capacite implique des outils. Les quatre autres
+      # capacites sont resolues par le runtime, qui agit lui-meme ; celle-ci designe un role qui
+      # doit AGIR, donc il lui faut la porte.
+      - mcp__fleet__list_workflow_cards   # les cartes disponibles — a montrer a l'humain AVANT de choisir
+      - mcp__fleet__create_project        # un projet neuf : depot + ses trois faces + la carte
+      - mcp__fleet__import_project        # le jumeau : adopter un depot qui existe deja
+      - mcp__fleet__open_project          # relancer un projet deja sur la machine
+      - mcp__fleet__revise_project_card   # changer la carte d'un projet (tickets futurs seulement)
+      - mcp__fleet__close_project         # garer un projet : la brique en cours finit, la suivante ne part pas
     disallowedTools:
       - web_search
       - web_fetch
