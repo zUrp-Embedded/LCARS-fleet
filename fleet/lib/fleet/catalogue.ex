@@ -166,6 +166,106 @@ defmodule Fleet.Catalogue do
     Enum.filter([business, Path.join(system_root(), rel)], &File.dir?/1)
   end
 
+  # The FINE overrides, gathered from the four domains that held them. Each moves EXACTLY its tree
+  # and nothing else, which is what "fine" means next to the big wheel (`LCARS_CATALOGUE_ROOT`,
+  # which moves a whole catalogue).
+  #
+  # ⚠ A fine override REPLACES the active list for its tree, it does not sit in front of it — and
+  # that is load-bearing rather than a detail of taste. `Fleet.Test.CatalogueIsolation` builds an
+  # isolated catalogue by pointing these keys at a fixture; if the shipped business root stayed
+  # behind, every such fixture would silently inherit roles nobody wrote and the suite would measure
+  # a deployment nobody assembled. The system root is never dropped either way: it is the contract,
+  # not a participant in precedence.
+  #
+  # Trees with no entry have no fine override, deliberately: `sp_templates` and `sp_blocks` are the
+  # shape and the substrate of the prompts, and nothing has ever needed to move one alone.
+  @fine_overrides %{
+    cap_profiles: {:fleet_cap_profile, :root_dir},
+    modops: {:fleet_sp_builder, :modop_root},
+    subagent_templates: {:fleet_sp_builder, :subagent_template_root},
+    sp_drafts: {:fleet_sp_builder, :sp_drafts_root}
+  }
+
+  @doc """
+  The ordered search path for one TREE, named by its atom — the N-root door.
+
+  Where `search/2` asks the caller for a business root, this resolves the whole precedence itself:
+  the fine override for that tree if one is set, otherwise every ACTIVE catalogue in order, and the
+  system default last. Absent directories drop out, so a catalogue that ships only what its roles
+  need costs nothing.
+
+  This is the form a domain should use. `search/2` remains for the callers that legitimately NAME
+  their root — the composer under `--catalogue`, and the spawn path whose skills root is its own
+  three-state knob — and there are exactly two of them.
+  """
+  @spec search(atom()) :: [Path.t()]
+  def search(tree) when is_atom(tree) do
+    rel = rel(tree)
+
+    case fine_override(tree) do
+      nil -> Enum.map(active_roots(), &Path.join(&1, rel))
+      dir -> [dir]
+    end
+    |> Kernel.++([Path.join(system_root(), rel)])
+    |> Enum.uniq()
+    |> Enum.filter(&File.dir?/1)
+  end
+
+  @doc """
+  First existing `name` on a TREE's search path; the FIRST ACTIVE path when it exists nowhere.
+
+  The fallback is computed from the active list and NOT from `search/1`, and the difference is the
+  whole point: `search/1` drops directories that do not exist, so when an author's own tree is
+  absent — precisely the case where they are about to create the file — the first surviving path is
+  the SYSTEM's. Answering with it would send them to edit a tree they do not own, to fix a file that
+  belongs in theirs.
+  """
+  @spec find(atom(), String.t()) :: Path.t()
+  def find(tree, name) when is_atom(tree) and is_binary(name) do
+    fallback =
+      case fine_override(tree) do
+        nil -> Path.join([List.first(active_roots()), rel(tree), name])
+        dir -> Path.join(dir, name)
+      end
+
+    tree
+    |> search()
+    |> Enum.map(&Path.join(&1, name))
+    |> Enum.find(fallback, &File.regular?/1)
+  end
+
+  @doc "Every path matching `pattern` on a TREE's search path, in precedence order."
+  @spec glob(atom(), String.t()) :: [Path.t()]
+  def glob(tree, pattern) when is_atom(tree) and is_binary(pattern) do
+    Enum.flat_map(search(tree), &Path.wildcard(Path.join(&1, pattern)))
+  end
+
+  @doc "`pattern` merged across a TREE's search path into `%{key => path}` — the FIRST root wins."
+  @spec merge(atom(), String.t(), (Path.t() -> term())) :: %{term() => Path.t()}
+  def merge(tree, pattern, key_fun) when is_atom(tree) and is_function(key_fun, 1) do
+    tree
+    |> glob(pattern)
+    |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
+  end
+
+  @doc """
+  The ACTIVE catalogues, in precedence order.
+
+  One today — the business root, big wheel included — so this changes nothing yet, and it is where
+  the operator's ordered `catalogues.active` will be read. It exists NOW because the SHAPE of the
+  door is what every call site binds to: widening it later would be a second migration of the same
+  sites, for no gain the first one did not already pay for.
+  """
+  @spec active_roots() :: [Path.t()]
+  def active_roots, do: [to_string(root())]
+
+  defp fine_override(tree) do
+    case Map.get(@fine_overrides, tree) do
+      nil -> nil
+      {app, key} -> Application.get_env(app, key)
+    end
+  end
+
   @doc """
   The CATALOGUE roots, in precedence order — business first, then the system default.
 

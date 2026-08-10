@@ -166,9 +166,13 @@ defmodule Fleet.API.SpawnAdmission do
     name = Fleet.CapProfile.name(cap)
 
     if Fleet.CapProfile.catalogued?(cap) and Fleet.CapProfile.role_index(cap) == 0 do
-      case Enum.find(Fleet.Spawner.list_pods(), &(&1.role == name)) do
+      # `Map.get`, never dot access: `list_pods/0` is specced `[map()]` and makes no promise about
+      # the keys. A pod whose `:info` lacks `:role` raised a KeyError THROUGH the router — the whole
+      # spawn door answering 500 because one unrelated pod answered a short map. A guard that can
+      # crash the door it guards is worse than the hole it closes.
+      case Enum.find(Fleet.Spawner.list_pods(), &(Map.get(&1, :role) == name)) do
         nil -> :ok
-        %{pod_id: pod_id} -> {:error, {:fleet_scope_occupied, name, pod_id}}
+        pod -> {:error, {:fleet_scope_occupied, name, Map.get(pod, :pod_id, "unknown")}}
       end
     else
       :ok

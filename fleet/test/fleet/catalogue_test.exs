@@ -100,6 +100,76 @@ defmodule Fleet.CatalogueTest do
     end
   end
 
+  describe "search/1 — the N-root door" do
+    test "orders the ACTIVE roots then the system default, dropping absent trees", %{tmp_dir: tmp} do
+      root = fake_root(tmp)
+      File.mkdir_p!(Path.join(root, Catalogue.rel(:cap_profiles)))
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      path = Catalogue.search(:cap_profiles)
+
+      assert List.first(path) == Path.join(root, Catalogue.rel(:cap_profiles))
+      assert List.last(path) == Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
+
+      # A tree the business root does not ship simply is not in the path — that is what lets the
+      # system catalogue carry only what its four roles need.
+      refute Path.join(root, Catalogue.rel(:subagent_templates)) in Catalogue.search(
+               :subagent_templates
+             )
+    end
+
+    test "a fine override REPLACES the active list for its tree, and only that tree", %{
+      tmp_dir: tmp
+    } do
+      # The property `Fleet.Test.CatalogueIsolation` rests on: a fixture must not inherit the
+      # shipped business roles from behind. Putting the override in FRONT instead of in PLACE would
+      # reopen exactly the false green that helper exists to close.
+      root = fake_root(tmp)
+      File.mkdir_p!(Path.join(root, Catalogue.rel(:cap_profiles)))
+      File.mkdir_p!(Path.join(root, Catalogue.rel(:sp_drafts)))
+      fine = Path.join(tmp, "just-the-profiles")
+      File.mkdir_p!(fine)
+
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, fine)
+
+      assert Catalogue.search(:cap_profiles) == [
+               fine,
+               Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
+             ]
+
+      refute Path.join(root, Catalogue.rel(:cap_profiles)) in Catalogue.search(:cap_profiles)
+
+      # Untouched tree, untouched path.
+      assert List.first(Catalogue.search(:sp_drafts)) ==
+               Path.join(root, Catalogue.rel(:sp_drafts))
+    end
+
+    test "the system root is never dropped by an override — it is the contract", %{tmp_dir: tmp} do
+      fine = Path.join(tmp, "only-mine")
+      File.mkdir_p!(fine)
+      Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, fine)
+
+      assert Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles)) in Catalogue.search(
+               :cap_profiles
+             )
+    end
+
+    test "find/2 answers the first existing file, then the first ACTIVE path", %{tmp_dir: tmp} do
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      # Shipped by the system alone (the two protocols moved there).
+      found = Catalogue.find(:sp_drafts, "protocole-user-worker.md")
+      assert File.regular?(found)
+      assert String.starts_with?(found, Catalogue.system_root())
+
+      # Nowhere: the answer names the file the AUTHOR would create, in their own tree.
+      absent = Catalogue.find(:sp_drafts, "agent-nobody-base.md")
+      assert absent == Path.join([root, Catalogue.rel(:sp_drafts), "agent-nobody-base.md"])
+    end
+  end
+
   describe "verify!" do
     test "the bundled catalogue passes and returns its manifest" do
       assert %{"api_version" => version} = Catalogue.verify!()
