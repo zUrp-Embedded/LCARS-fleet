@@ -34,8 +34,8 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     {opts, _rest, _bad} = OptionParser.parse(argv, strict: [catalogue: :string])
 
     case opts[:catalogue] do
-      nil -> compose()
-      root -> with_root(root, &compose/0)
+      nil -> compose(false)
+      root -> with_root(root, fn -> compose(true) end)
     end
   end
 
@@ -63,7 +63,10 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     end
   end
 
-  defp compose do
+  # `confined?` is what `--catalogue` MEANS: compose THAT catalogue, and write nothing outside it.
+  # Without the flag we are composing the bundled reference, whose map legitimately generates the
+  # two mechanism drafts that ship in the system catalogue.
+  defp compose(confined?) do
     blocks = Fleet.Catalogue.sp_blocks_root()
     map = read_map(blocks)
 
@@ -75,7 +78,11 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
           "every role carries its own draft."
       )
     else
-      roles = Fleet.SPBuilder.Blocks.generate!(blocks, Fleet.Catalogue.sp_drafts_root())
+      roles =
+        Fleet.SPBuilder.Blocks.generate!(blocks, Fleet.Catalogue.sp_drafts_root(),
+          confined?: confined?
+        )
+
       Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
     end
   end

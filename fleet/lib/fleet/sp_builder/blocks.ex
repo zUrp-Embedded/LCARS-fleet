@@ -122,25 +122,39 @@ defmodule Fleet.SPBuilder.Blocks do
   @doc """
   Generate ALL `agent-<role>-base.md` flats from the map, into `drafts_dir`. Returns the generated roles.
   """
-  @spec generate!(Path.t(), Path.t()) :: [String.t()]
-  def generate!(blocks_dir, drafts_dir) do
+  @spec generate!(Path.t(), Path.t(), keyword()) :: [String.t()]
+  def generate!(blocks_dir, drafts_dir, opts \\ []) do
+    confined? = Keyword.get(opts, :confined?, false)
+
     blocks_dir
     |> role_map()
     |> Enum.map(fn {role, blocks} ->
-      File.write!(draft_target(drafts_dir, role), compose!(role, blocks, blocks_dir))
+      target =
+        if confined?,
+          do: Path.join(drafts_dir, "agent-#{role}-base.md"),
+          else: draft_target(drafts_dir, role)
+
+      File.write!(target, compose!(role, blocks, blocks_dir))
       role
     end)
     |> Enum.sort()
   end
 
   # A draft is written NEXT TO THE ROLE IT SERVES: a mechanism role's in the system catalogue, a
-  # business role's in the business one. Writing every draft to one root would put a second
-  # `agent-gatekeeper-base.md` beside the system's, and two drafts for one name is a refusal at
-  # image publish — the generator would break the deployment it exists to keep in sync.
+  # business role's in the business one. This is what lets the system catalogue carry its OWN
+  # gatekeeper and chief drafts — proven on a bench by removing the business catalogue from the
+  # release and booting anyway — while the map that generates them lives with the reference.
   #
   # An EXISTING file decides, because the role's home is a fact on disk, not something to infer.
   # A role with no draft yet is new business material and lands in `drafts_dir`; adding a mechanism
   # role is a deliberate act that starts by creating its file where it belongs.
+  #
+  # ⚠ CONFINED (`--catalogue <root>`) TURNS THIS OFF, and it must. Measured 2026-08-10 by running
+  # the documented gesture: an operator composing THEIR catalogue with a `gatekeeper` entry in their
+  # map OVERWROTE the shipped system draft — the one file the target state calls never modifiable.
+  # Their `gatekeeper` is their OVERRIDE of it, and an override belongs in their own tree, where the
+  # search path makes it win. The rule read correctly is the same one: a draft goes where its MAP
+  # is, and an explicit root says which map is being composed.
   defp draft_target(drafts_dir, role) do
     file = "agent-#{role}-base.md"
     system = Path.join([Fleet.Catalogue.system_root(), "sp_builder/sp_drafts", file])

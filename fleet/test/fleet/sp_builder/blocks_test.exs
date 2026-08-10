@@ -92,6 +92,40 @@ defmodule Fleet.SPBuilder.BlocksTest do
     end
   end
 
+  describe "generate! confined — `--catalogue` writes nothing outside the catalogue it was given" do
+    @describetag :tmp_dir
+
+    test "an operator's own `gatekeeper` lands in THEIR tree, and the system's is untouched", %{
+      tmp_dir: tmp
+    } do
+      # Measured by running the documented gesture, not imagined: composing a third-party catalogue
+      # whose map named `gatekeeper` OVERWROTE the shipped system draft — the one file the target
+      # state calls never modifiable. `draft_target/2` routes a mechanism role's draft to the system
+      # catalogue, which is right for the bundled reference (it is how the system carries its own
+      # gatekeeper, proven on a bench) and wrong the moment someone else's map is the one composing.
+      system_draft =
+        Path.join([
+          Fleet.Catalogue.system_root(),
+          Fleet.Catalogue.rel(:sp_drafts),
+          "agent-gatekeeper-base.md"
+        ])
+
+      before = File.read!(system_draft)
+
+      blocks = Path.join([tmp, "cat", Fleet.Catalogue.rel(:sp_blocks)])
+      drafts = Path.join([tmp, "cat", Fleet.Catalogue.rel(:sp_drafts)])
+      File.mkdir_p!(Path.join(blocks, "role"))
+      File.mkdir_p!(drafts)
+      File.write!(Path.join(blocks, "role/mine.md"), "## Role — a moi\n")
+      File.write!(Path.join(blocks, "sp-map.yaml"), "gatekeeper:\n  - role/mine\n")
+
+      assert ["gatekeeper"] = Blocks.generate!(blocks, drafts, confined?: true)
+
+      assert File.read!(Path.join(drafts, "agent-gatekeeper-base.md")) =~ "Role — a moi"
+      assert File.read!(system_draft) == before, "the system catalogue must never be written to"
+    end
+  end
+
   test "fail-loud: a listed block absent from disk → raises (no-fallback)" do
     assert_raise RuntimeError, ~r/no-fallback/, fn ->
       Blocks.compose!("x", ["core/does-not-exist"], blocks_dir())
