@@ -87,7 +87,9 @@ USAGE
 
   $PROG catalogue install <source> [nom]
       Installe un catalogue depuis un depot git, une archive tar.gz ou un dossier
-      local. N'active RIEN : installe n'est pas actif.
+      local. Le NOM vient du catalogue (son « name: »), pas de la source ni de vous :
+      [nom] n'est qu'une assertion, et la pose echoue si le catalogue en dit un autre.
+      N'active RIEN : installe n'est pas actif.
 
   $PROG catalogue verify <nom>
       Joue sur ce catalogue exactement les controles que le boot joue. Code de
@@ -354,33 +356,61 @@ cmd_catalogue_remove() {
 }
 
 # Trois sources, zero scp : ce qui manque a une boite headless, c'est un transport qu'on ait deja.
+# Le nom DECLARE par un catalogue, lu a la racine de son manifeste. Cle de premier niveau, donc
+# ancree en colonne 0 : un `name:` indente appartient a autre chose. La charte est la meme que cote
+# runtime (kebab, pas de `_`), et un nom qui ne la respecte pas ne sort pas d'ici — le refus detaille
+# vient de `catalogue verify`, dont c'est le metier.
+cat_declared_name() { # $1=racine -> le nom, ou 1
+  local m="$1/catalogue.yaml" n
+  [[ -r "$m" ]] || return 1
+  n="$(sed -n 's/^name:[[:space:]]*\([a-z0-9][a-z0-9-]*\)[[:space:]]*$/\1/p' "$m" | head -1)"
+  [[ -n "$n" ]] || return 1
+  printf '%s' "$n"
+}
+
+# Le nom vient du CATALOGUE, plus de l'installateur. Il fallait donc deballer avant de savoir ou
+# ranger : on deballe dans un staging, on lit le nom, puis on renomme. L'argument [name] survit comme
+# une ASSERTION — l'operateur dit ce qu'il croit installer, et on refuse si le catalogue dit autre
+# chose — mais il ne baptise plus rien. Avant, sans argument, le nom valait le basename de la
+# source : deux boites pouvaient donc heberger le meme catalogue sous deux noms, ce qui ne coutait
+# rien tant que le nom etait une poignee locale, et devient faux des qu'il adresse une org de forge.
 cmd_catalogue_install() {
   local src="${1:?catalogue install: source requise (depot git, archive tar.gz, ou dossier)}"
-  local name="${2:-}"
-  [[ -n "$name" ]] || { name="$(basename "$src")"; name="${name%.git}"; name="${name%.tar.gz}"; name="${name%.tgz}"; }
-  [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue install: « $CAT_BUNDLED » est le nom reserve du catalogue livre — en choisir un autre"
-  local dest="$CAT_DIR/$name"
-  [[ -e "$dest" ]] && die "catalogue install: $dest existe deja — « $PROG catalogue remove $name » d'abord"
+  local claimed="${2:-}"
   mkdir -p "$CAT_DIR"
+  local staging; staging="$(mktemp -d "$CAT_DIR/.install.XXXXXX")" \
+    || die "catalogue install: staging impossible dans $CAT_DIR"
 
   case "$src" in
     *.git|git@*|*://*.git)
-      command -v git >/dev/null || die "catalogue install: git introuvable"
-      git clone --depth 1 "$src" "$dest" >&2 || die "catalogue install: clone echoue"
-      rm -rf "$dest/.git"
+      command -v git >/dev/null || { rm -rf "$staging"; die "catalogue install: git introuvable"; }
+      rmdir "$staging"
+      git clone --depth 1 "$src" "$staging" >&2 || { rm -rf "$staging"; die "catalogue install: clone echoue"; }
+      rm -rf "$staging/.git"
       ;;
     http://*|https://*)
-      command -v curl >/dev/null || die "catalogue install: curl introuvable"
-      command -v tar  >/dev/null || die "catalogue install: tar introuvable"
-      mkdir -p "$dest"
-      curl -fsSL "$src" | tar -xz -C "$dest" --strip-components=1 \
-        || { rm -rf "$dest"; die "catalogue install: telechargement ou extraction echoue"; }
+      command -v curl >/dev/null || { rm -rf "$staging"; die "catalogue install: curl introuvable"; }
+      command -v tar  >/dev/null || { rm -rf "$staging"; die "catalogue install: tar introuvable"; }
+      curl -fsSL "$src" | tar -xz -C "$staging" --strip-components=1 \
+        || { rm -rf "$staging"; die "catalogue install: telechargement ou extraction echoue"; }
       ;;
     *)
-      [[ -d "$src" ]] || die "catalogue install: « $src » n'est ni un depot git, ni une URL, ni un dossier"
-      cp -r "$src" "$dest"
+      [[ -d "$src" ]] || { rm -rf "$staging"; die "catalogue install: « $src » n'est ni un depot git, ni une URL, ni un dossier"; }
+      cp -r "$src/." "$staging/"
       ;;
   esac
+
+  local name
+  name="$(cat_declared_name "$staging")" || {
+    rm -rf "$staging"
+    die "catalogue install: la source ne declare pas de « name: » valide dans catalogue.yaml — un catalogue porte son nom, il ne le recoit pas de son dossier"
+  }
+  [[ -n "$claimed" && "$claimed" != "$name" ]] && { rm -rf "$staging"; die "catalogue install: la source se nomme « $name », pas « $claimed » — c'est le catalogue qui nomme"; }
+  [[ "$name" == "$CAT_BUNDLED" ]] && { rm -rf "$staging"; die "catalogue install: « $CAT_BUNDLED » est le nom du catalogue livre dans le release"; }
+
+  local dest="$CAT_DIR/$name"
+  [[ -e "$dest" ]] && { rm -rf "$staging"; die "catalogue install: $dest existe deja — « $PROG catalogue remove $name » d'abord"; }
+  mv "$staging" "$dest" || { rm -rf "$staging"; die "catalogue install: installation impossible dans $dest"; }
 
   echo "catalogue install: « $name » installe dans $dest — INACTIF" >&2
   echo "  « $PROG catalogue verify $name » puis « $PROG catalogue enable $name »" >&2

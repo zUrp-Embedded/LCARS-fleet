@@ -26,3 +26,12 @@
 # nothing else.
 
 api_version: 1
+
+# `name` is the catalogue's IDENTITY, and it is the catalogue that carries it — not the directory it
+# was unpacked into. It addresses the catalogue outside this box (the forge org that will carry its
+# projects), so a name assigned at install time would differ between two boxes holding this same
+# catalogue. Kebab-case, no `_`: the underscore separates the halves of a role login.
+#
+# `fleet` and not `lcars`: on the forge, `lcars` is taken by LCARS's own repository, and an org
+# `lcars` holding a repo `lcars` reads as a mistake. `fleet/lcars` is what the forge already shows.
+name: fleet

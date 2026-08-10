@@ -1,1 +1,4 @@
 api_version: 1
+
+# Le nom du catalogue — porte ici, pas par le dossier d'installation.
+name: web

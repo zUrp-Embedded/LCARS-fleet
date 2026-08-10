@@ -16,7 +16,10 @@ defmodule Fleet.CatalogueTest do
   defp fake_root(tmp, api_version \\ 1) do
     root = Path.join(tmp, "catalogue")
     File.mkdir_p!(root)
-    File.write!(Path.join(root, "catalogue.yaml"), "api_version: #{api_version}\n")
+
+    # The manifest carries a NAME as well as a generation: a catalogue that does not name itself is
+    # refused, so a fixture standing for "a valid catalogue" declares one.
+    File.write!(Path.join(root, "catalogue.yaml"), "api_version: #{api_version}\nname: fixture\n")
     root
   end
 
@@ -337,6 +340,36 @@ defmodule Fleet.CatalogueTest do
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
       assert err.message =~ "99"
       assert err.message =~ inspect(Catalogue.supported_api_versions())
+    end
+
+    test "a manifest with no NAME is refused — the name is the catalogue's, not its directory's",
+         %{
+           tmp_dir: tmp
+         } do
+      root = fake_root(tmp)
+      File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\n")
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
+      assert err.message =~ "declares no `name`"
+      # It must say WHY the directory cannot stand in — that is the whole point of the field.
+      assert err.message =~ "not of where it was installed"
+    end
+
+    test "a name carrying `_` is refused: it separates the halves of a role login", %{
+      tmp_dir: tmp
+    } do
+      # `Fleet.Slug` admits `_`; a catalogue name may not. `<catalogue>_<role>` is the forge account
+      # login, so `a_b_c` would split two ways. The refusal must NAME the underscore, or its author
+      # reads it as an arbitrary charset.
+      root = fake_root(tmp)
+      File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: my_cat\n")
+      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+
+      assert Fleet.Slug.valid?("my_cat"), "the premise of this test is that Slug ADMITS it"
+      err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
+      assert err.message =~ "my_cat"
+      assert err.message =~ "_"
     end
 
     test "a manifest with no api_version is refused like a foreign one", %{tmp_dir: tmp} do

@@ -59,8 +59,19 @@ defmodule Fleet.Catalogue do
 
   ## The manifest
 
-  `<root>/catalogue.yaml` declares the contract version the catalogue targets. `verify!/0` reads it
-  at boot, BEFORE the images freeze anything from the disk.
+  `<root>/catalogue.yaml` declares the contract version the catalogue targets, and its NAME.
+  `verify!/0` reads it at boot, BEFORE the images freeze anything from the disk.
+
+  The name is a property OF THE CATALOGUE, not of its installation. It used to be neither: the CLI
+  assigned it at `catalogue install` time (`[name]`, defaulting to the source basename), so the same
+  catalogue installed on two boxes could carry two names. That was harmless while the name was a
+  local handle for the declaration file and the verbs. It stops being harmless the moment the name
+  addresses something OUTSIDE the box — and it is about to: the forge org that carries a catalogue's
+  projects. A project created in org `web` is unopenable where the same catalogue answers to
+  `frontend`.
+
+  Kebab-case, and `_` is refused where `Fleet.Slug` allows it: the underscore is the separator of the
+  `<catalogue>_<role>` account login, so admitting it in either half would make the split ambiguous.
 
   This does NOT reopen per-file `apiVersion`: a cap-profile still carries none, and the schema that
   validates it is still chosen by the code. That rule answers "which schema validates THIS file"
@@ -84,6 +95,11 @@ defmodule Fleet.Catalogue do
   # Contract versions of the CATALOGUE this runtime can consume. A list, not a scalar: a runtime
   # able to read two generations is what makes an operator's upgrade ordered rather than atomic.
   @supported_api_versions [1]
+
+  # STRICTER than `Fleet.Slug` on purpose: no `_`. The underscore separates the two halves of a role
+  # account login (`<catalogue>_<role>`), so admitting it in a catalogue name would make `a_b_c`
+  # readable as two different splits. Slug stays as it is — it guards paths, a different job.
+  @name_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
 
   # ── the trees ─────────────────────────────────────────────────────────────
   # Root-relative, ONE literal each. These are the priv-relative paths in use today: the seam is
@@ -528,7 +544,8 @@ defmodule Fleet.Catalogue do
 
     case Map.get(manifest, "api_version") do
       version when version in @supported_api_versions ->
-        Logger.info("Catalogue: verified (root=#{root}, api_version=#{version})")
+        name = validate_name!(manifest, path)
+        Logger.info("Catalogue: verified (root=#{root}, name=#{name}, api_version=#{version})")
         manifest
 
       other ->
@@ -537,6 +554,37 @@ defmodule Fleet.Catalogue do
         #{inspect(@supported_api_versions)} — boot refused.
         The catalogue and the runtime are from incompatible generations; upgrade one of them.
         """
+    end
+  end
+
+  # The name is REQUIRED for the same reason the manifest itself was: it can be made required while
+  # the catalogues in existence are all in this repository. Optional would mean falling back to the
+  # directory name, which is precisely the defect — a name assigned by whoever installed, differing
+  # between two boxes holding the same catalogue.
+  defp validate_name!(manifest, path) do
+    case Map.get(manifest, "name") do
+      name when is_binary(name) ->
+        if Regex.match?(@name_rx, name) do
+          name
+        else
+          raise """
+          LCARS catalogue: #{path} declares name #{inspect(name)} — boot refused.
+          A catalogue name is kebab-case (#{inspect(Regex.source(@name_rx))}): lowercase, digits and \
+          dashes, starting on a letter or a digit. `_` is refused on purpose — it separates the two \
+          halves of a role account login (<catalogue>_<role>).
+          """
+        end
+
+      nil ->
+        raise """
+        LCARS catalogue: #{path} declares no `name` — boot refused.
+        The name is a property of the catalogue, not of where it was installed: it addresses the \
+        catalogue outside this box (the forge org carrying its projects), so it cannot be the \
+        directory someone happened to unpack it into.
+        """
+
+      other ->
+        raise "LCARS catalogue: #{path} declares a non-string name (#{inspect(other)}) — boot refused."
     end
   end
 
