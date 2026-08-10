@@ -41,6 +41,24 @@ if [[ "${1:-}" == "verify" ]]; then
     "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
 fi
 
+# `roles` / `roles-tfvars` : le ROSTER FORGE d'un catalogue — les comptes qu'un deploiement doit
+# creer avant que ce catalogue puisse travailler. Meme porte outil que `verify` ci-dessus (meme
+# eval, meme nobody, meme LCARS_TOOL_EVAL), et pour la meme raison : la question se pose a un
+# script de provisionnement, qui se tient DEHORS d'une fleet vivante.
+#   roles        un nom par ligne          -> PROV_ROLES (le mint des tokens)
+#   roles-tfvars le JSON des quatre listes -> roles.auto.tfvars.json (les comptes, cote tofu)
+# Le motif va sur stderr : capturer stdout sur un echec doit rendre la chaine VIDE, jamais un
+# message d'erreur qu'on creerait ensuite comme compte forge.
+if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
+  root="${2:?roles: chemin de racine catalogue requis}"
+  fun="Fleet.Application.CatalogueRoles.eval_main"
+  [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Application.CatalogueRoles.eval_tfvars"
+  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "${fun}(\"${root}\")"
+fi
+
 LCARS_HUMAN="${LCARS_HUMAN:-lcars}"
 LCARS_UID="${LCARS_UID:-1000}"
 PROVISION=/opt/lcars/fleet/deploy/provision

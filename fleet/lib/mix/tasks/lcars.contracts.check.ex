@@ -1260,10 +1260,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        {"forge.tf local.roles", tree_scope(Path.expand("deploy", root)),
-         read_list(tf_path, ~r/^\s*roles\s*=\s*\[([^\]]*)\]/m, :quoted),
-         "add/remove the role in local.roles (forge account) — the canon is the source: a role " <>
-           "only in forge.tf needs its cap-profile or a ReservedSeat, or loses its account"},
+        # `variable "roles"` since the enroll derivation (2026-08-10): the roster moved from a
+        # `local` to a VARIABLE so a deployment can supply the roster of the catalogue it brings.
+        # The DEFAULT is what this check measures, and that is the right target — it is the value
+        # a deployment gets when it supplies nothing, so it is the one that must equal the canon.
+        # Anchored on the variable NAME, not on a bare `default = [...]`: the recipe has other
+        # list variables now, and an unanchored pattern would lock the canon against whichever
+        # one happens to appear first.
+        {"forge.tf var.roles default", tree_scope(Path.expand("deploy", root)),
+         read_list(tf_path, ~r/variable\s+"roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s, :quoted),
+         "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
+           "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
+           "its account"},
         {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
          "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>

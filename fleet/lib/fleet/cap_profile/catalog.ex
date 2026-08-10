@@ -158,6 +158,64 @@ defmodule Fleet.CapProfile.Catalog do
   @spec spawnable?(map()) :: boolean()
   def spawnable?(raw) when is_map(raw), do: Map.get(raw, "kind") != "ReservedSeat"
 
+  @doc """
+  Role names this catalogue declares a FORGE IDENTITY for — the account-and-token roster, sorted.
+
+  ## Why this is NOT `list/1` filtered
+
+  `list/1` drops ReservedSeats because a seat has no SP draft and would break every enumerator that
+  spawns. **A seat still owns a forge account**: it is a name held so nobody else takes it, which is
+  only true if the account exists. So this enumeration keeps them, and `spawnable?/1` has no
+  business here. The two projections answer different questions — "who can be spawned" and "who owns
+  an account" — and conflating them is what makes a roster silently short by exactly the seats.
+
+  The inclusion is what `provisioning_locked` already measures ("seats included"); this function is
+  where that rule becomes readable at runtime instead of living only in a repo-time check.
+
+  `metadata.forge_identity: false` is the explicit opt-out — an orchestrator whose forge writes all
+  go through the system account. Absent = `true`.
+  """
+  @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def forge_identity_roles(dir \\ root_dir()) do
+    with {:ok, roster} <- forge_roster(dir), do: {:ok, Enum.map(roster, & &1.name)}
+  end
+
+  @doc """
+  The forge roster with the three facts a provisioning needs to place each role, sorted by name.
+
+  `%{name, seat?, judge?}` — `seat?` is `kind == "ReservedSeat"`, `judge?` is a role that only
+  judges: `brief_kind: judge` AND no structural capability. Everything else writes.
+
+  Why these three and not the whole profile: they are exactly what distinguishes an account that
+  holds a name (a seat), one that renders verdicts, and one that puts something in the repository.
+  A provisioning that knew more would start deciding with it.
+  """
+  @spec forge_roster(String.t()) ::
+          {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
+  def forge_roster(dir \\ root_dir()) do
+    if File.dir?(dir) do
+      with {:ok, index} <- name_index(dir) do
+        {:ok,
+         index
+         |> Enum.filter(fn {_name, raw} ->
+           get_in(raw, ["metadata", "forge_identity"]) != false
+         end)
+         |> Enum.map(fn {name, raw} ->
+           %{
+             name: name,
+             seat?: not spawnable?(raw),
+             judge?:
+               get_in(raw, ["spec", "brief_kind"]) == "judge" and
+                 (get_in(raw, ["spec", "capabilities"]) || []) == []
+           }
+         end)
+         |> Enum.sort_by(& &1.name)}
+      end
+    else
+      {:error, :enoent}
+    end
+  end
+
   # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
   # No `monks/` scan: the monks are FROZEN under `priv/catalogue/cap_profile/canon/_frozen-monks/`,
   # deliberately out of the boot loop (cf. `Fleet.SPBuilder.Monk`); the thaw that re-homes

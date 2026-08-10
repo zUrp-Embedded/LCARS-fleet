@@ -35,17 +35,29 @@ provider "gitea" {
 # Bots : ils s'authentifient par TOKEN (posé hors-TF) ; le password n'est qu'une
 # formalité exigée par l'API de création.
 
-locals {
-  # scoper (2026-07-31) : RENOMMAGE complet de consultant — l'inspection des SP a montré que
-  # consultant était le juge de brief EN ENTIER (la « dualité » était une seconde carte pointant
-  # sur lui, BL-6-11 fermé). scoper = juge natif (team judges) ; le nom consultant est LIBRE,
-  # le runtime l'a retiré ({:error, :not_found}) AVANT cette dépose — un compte sans cap-profile
-  # est inerte, l'ordre inverse ne l'est pas.
-  # scribe (2026-08-02, chantier face-projet) : le producteur DOCUMENTAIRE — meme mecanique de
-  # livraison que l'engineer (git-native, forge-blind), sur la face ops. Team writers, comme
-  # tout producteur. Lecon scoper (BL du 2026-08-02) : un role ajoute au catalogue SANS son compte
-  # forge boucle en role_token_unavailable — le compte nait ICI, avec le role.
-  roles = ["architect", "engineer", "scribe", "chief", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+# Le ROSTER — la liste des comptes de rôle à créer.
+#
+# ⚠ L'ORDRE COMPTE : un compte sans cap-profile est inerte, l'inverse ne l'est pas. Un rôle ajouté
+# au catalogue SANS son compte boucle en `role_token_unavailable` — le compte naît ICI, avec le
+# rôle. C'est la cause racine de BL-6-34, payée deux fois.
+#
+# VARIABLE et non plus `local` : le roster appartient au CATALOGUE en service, pas à cette recette.
+# Le défaut ci-dessous est celui du catalogue de référence, et il reste la valeur sans laquelle rien
+# ne change pour un déploiement qui n'apporte pas le sien.
+#
+# Un déploiement qui apporte un autre catalogue pose un `roles.auto.tfvars.json` DÉRIVÉ de ce
+# catalogue (`etc/enroll-catalogue.sh`) — tofu le lit nativement. Le roster cesse alors d'être tenu
+# à la main, ce qui est la cause racine connue de BL-6-34 : un rôle ajouté au catalogue sans son
+# compte boucle en `role_token_unavailable`, vécu deux fois (eng_doc, puis son rename scribe).
+#
+# Ce que la dérivation N'apporte PAS : les règles ci-dessous (pas de création d'org, pas de git-hook
+# serveur, pas d'import local, l'org et les teams). Un catalogue dit QUI existe ; cette recette dit
+# ce qu'exister permet. Une recette générée depuis un catalogue donnerait à un fichier remplaçable
+# l'autorité d'élargir ses propres droits.
+variable "roles" {
+  type        = list(string)
+  description = "Comptes de role a creer — derive du catalogue en service, defaut = catalogue de reference"
+  default     = ["architect", "engineer", "scribe", "chief", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
 }
 
 resource "gitea_user" "system" {
@@ -68,7 +80,7 @@ resource "gitea_user" "system" {
 # password or token »). Rotation réelle = API admin PATCH /admin/users/{u} (exige login_name
 # dans le body) puis re-mint A4 — jamais « tofu apply » seul.
 resource "gitea_user" "role" {
-  for_each             = toset(local.roles)
+  for_each             = toset(var.roles)
   username             = each.key
   login_name           = each.key
   email                = "${each.key}@lcars.local"
@@ -194,10 +206,30 @@ resource "gitea_team" "humans" {
 }
 
 # ── Memberships ────────────────────────────────────────────────────────────
-locals {
-  writers   = ["architect", "engineer", "scribe", "gatekeeper"]
-  judges    = ["qualifier", "reviewer", "scoper"]
-  externals = ["vulcan"]
+# Les trois placements, VARIABLES pour la meme raison que `roles` : qui est producteur et qui est
+# juge est une propriete du catalogue, pas de cette recette. Les defauts sont ceux du catalogue de
+# reference — un deploiement qui n'apporte rien ne change pas d'un pouce.
+#
+# La REGLE de placement, elle, reste ici et se derive (`Fleet.Application.CatalogueRoles.tfvars/1`) :
+# un siege reserve va en `externals`, un role qui ne fait que juger (`brief_kind: judge` sans
+# capacite) en `judges`, tout le reste en `writers`. Un role peut n'etre dans AUCUNE des trois et
+# garder son compte : `roles` est le roster des comptes, ces trois-ci sont des placements.
+variable "writers" {
+  type        = list(string)
+  description = "Roles qui ecrivent dans les depots — defaut = catalogue de reference"
+  default     = ["architect", "engineer", "scribe", "gatekeeper"]
+}
+
+variable "judges" {
+  type        = list(string)
+  description = "Roles qui ne rendent que des verdicts — defaut = catalogue de reference"
+  default     = ["qualifier", "reviewer", "scoper"]
+}
+
+variable "externals" {
+  type        = list(string)
+  description = "Sieges reserves — defaut = catalogue de reference"
+  default     = ["vulcan"]
 }
 
 resource "gitea_team_membership" "system" {
@@ -206,19 +238,19 @@ resource "gitea_team_membership" "system" {
 }
 
 resource "gitea_team_membership" "writers" {
-  for_each = toset(local.writers)
+  for_each = toset(var.writers)
   team_id  = gitea_team.writers.id
   username = gitea_user.role[each.key].username
 }
 
 resource "gitea_team_membership" "judges" {
-  for_each = toset(local.judges)
+  for_each = toset(var.judges)
   team_id  = gitea_team.judges.id
   username = gitea_user.role[each.key].username
 }
 
 resource "gitea_team_membership" "externals" {
-  for_each = toset(local.externals)
+  for_each = toset(var.externals)
   team_id  = gitea_team.externals.id
   username = gitea_user.role[each.key].username
 }

@@ -588,6 +588,25 @@ defmodule Fleet.CapProfile do
   defdelegate list(dir), to: Catalog
 
   @doc """
+  Role names this catalogue declares a forge identity for — the roster to provision, seats INCLUDED.
+
+  Distinct from `list/1`, which drops ReservedSeats: a seat cannot be spawned but still owns its
+  account. See `Fleet.CapProfile.Catalog.forge_identity_roles/1`.
+  """
+  @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  defdelegate forge_identity_roles(), to: Catalog
+  defdelegate forge_identity_roles(dir), to: Catalog
+
+  @doc """
+  The forge roster with the facts a provisioning needs to place each role — `%{name, seat?,
+  judge?}`. See `Fleet.CapProfile.Catalog.forge_roster/1`.
+  """
+  @spec forge_roster(String.t()) ::
+          {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
+  defdelegate forge_roster(), to: Catalog
+  defdelegate forge_roster(dir), to: Catalog
+
+  @doc """
   Returns sorted role names from the published image, or `{:error, :not_published}`.
   """
   @spec list_from_published() :: {:ok, [String.t()]} | {:error, :not_published}
