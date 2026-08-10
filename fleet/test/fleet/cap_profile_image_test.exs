@@ -109,6 +109,46 @@ defmodule Fleet.CapProfileImageTest do
     assert Image.published() == nil
   end
 
+  # Derives a second entry from the real engineer profile — schema-proof by construction, so the
+  # publish reaches the uniqueness pass instead of dying on the schema before it.
+  defp write_twin(tmp, name, role_index) do
+    body =
+      tmp
+      |> Path.join("engineer.yaml")
+      |> File.read!()
+      |> String.replace(~r/^  name: .*$/m, "  name: #{name}")
+      |> String.replace(~r/^  role_index: \d+$/m, "  role_index: #{role_index}")
+
+    File.write!(Path.join(tmp, "#{name}.yaml"), body)
+  end
+
+  test "two DIFFERENT names on one role_index: the boot refuses, and it names the slot", %{
+    tmp_dir: tmp
+  } do
+    # The slot is a kill class. `dev` and `gatekeeper` shipped on slot 2 together and the bench
+    # stayed green only because their kill_class happened to differ — the guard the schema (per
+    # file) and the contract check (per root) both structurally cannot hold, since neither sees
+    # the merged catalogue.
+    write_twin(tmp, "twin", 3)
+
+    assert_raise RuntimeError, ~r/role_index 3 claimed by engineer, twin/, fn ->
+      Image.publish!()
+    end
+
+    assert Image.published() == nil
+  end
+
+  test "superposing a SYSTEM entry by name is one entry, one slot — not a collision", %{
+    tmp_dir: tmp
+  } do
+    # The legitimate case the search path made free: a business catalogue overriding `architect`
+    # carries its slot 1 too. It must NOT read as two claims on 1, or the override would be
+    # unusable — which is precisely why the check reads the merged index and not the files.
+    write_twin(tmp, "architect", 1)
+
+    assert :ok = Image.publish!()
+  end
+
   test "the image is versioned (two different canons → two versions)", %{tmp_dir: tmp} do
     :ok = Image.publish!()
     %{version: v1} = Image.published()

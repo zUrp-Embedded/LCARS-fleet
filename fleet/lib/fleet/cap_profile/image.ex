@@ -70,6 +70,8 @@ defmodule Fleet.CapProfile.Image do
       end
     end)
 
+    ensure_role_indexes_unique!(index)
+
     overlays =
       case Catalog.snapshot_overlays() do
         {:ok, overlays} ->
@@ -97,6 +99,47 @@ defmodule Fleet.CapProfile.Image do
       "CapProfile.Image: published (#{map_size(index) - length(seats)} profiles, " <>
         "#{map_size(overlays)} overlays#{seats_note}, version=#{version})"
     )
+
+    :ok
+  end
+
+  # `role_index` is the role's slot in the hexspeak session UUID, so two entries sharing one slot
+  # make `pkill -f '<X>badcafe'` reach two kill classes at once. Nothing held that uniqueness where
+  # it now lives: the schema bounds the value per FILE (0..15), and the repo contract check proves
+  # it per catalogue ROOT — neither can see the union. Since the search path let a business
+  # catalogue superpose the system one, the perimeter of uniqueness became the MERGED index, and
+  # this function is the only place that holds it. Measured cost of its absence: `dev` and
+  # `gatekeeper` shipped on slot 2 together and the bench stayed green, because their `kill_class`
+  # happened to differ. Luck is not a guard.
+  #
+  # Seats included — a ReservedSeat CLAIMS its slot exactly like a spawnable role. Entries whose
+  # `role_index` is not an integer are skipped rather than refused: the schema above is the
+  # authority on presence, and duplicating its refusal here would report the wrong fault.
+  defp ensure_role_indexes_unique!(index) do
+    duplicates =
+      index
+      |> Enum.flat_map(fn {name, raw} ->
+        case get_in(raw, ["metadata", "role_index"]) do
+          slot when is_integer(slot) -> [{slot, name}]
+          _ -> []
+        end
+      end)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+      |> Enum.filter(fn {_slot, names} -> length(names) > 1 end)
+      |> Enum.sort()
+
+    unless duplicates == [] do
+      detail =
+        Enum.map_join(duplicates, "; ", fn {slot, names} ->
+          "role_index #{slot} claimed by #{Enum.join(Enum.sort(names), ", ")}"
+        end)
+
+      raise "CapProfile.Image: #{detail} — a slot is a kill class, and two roles sharing one " <>
+              "make `pkill` reach both. This is checked on the MERGED catalogue, so an entry " <>
+              "superposing a system one by NAME is fine (one entry, one slot); two DIFFERENT " <>
+              "names on one slot are not. Reassign one (0..15). Proven-good image at boot, or " <>
+              "do not boot."
+    end
 
     :ok
   end
