@@ -15,6 +15,9 @@ defmodule Fleet.Forge.Client.Jury do
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
+  # The read half of the role <-> forge-account frontier (the write half is `Client.request_review`).
+  alias Fleet.Credentials.RoleIdentity
+
   @doc """
   THE review-routing predicate — the SINGLE truth of "where does a jury stand", shared by the
   merge gate (`ReviewLifecycle.dispatch_by_verdicts`, fed the defensive UNION of jury sources)
@@ -103,8 +106,18 @@ defmodule Fleet.Forge.Client.Jury do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} <- paginated_reviews(config, repo, index) do
       decisive = decisive_by_reviewer(reviews, head_sha)
-      verdicts = Map.new(decisive, fn {login, r} -> {login, decisive_verdict(r["state"])} end)
-      reviewers = jury_reviewers(reviews)
+
+      # THE FORGE ANSWERS IN LOGINS, THE FLEET REASONS IN ROLES — translated here, at the frontier,
+      # so nothing above ever holds an account name. Left untranslated, every fleet judge came back
+      # as `fleet_qualifier` and got measured against a card that says `qualifier`: F-C061 filed the
+      # jury itself as `foreign`, and the verdicts it carried were dropped. A login belonging to no
+      # role stays verbatim — that is a HUMAN, and it must remain visibly foreign.
+      verdicts =
+        Map.new(decisive, fn {login, r} ->
+          {RoleIdentity.role_or_login(login), decisive_verdict(r["state"])}
+        end)
+
+      reviewers = reviews |> jury_reviewers() |> Enum.map(&RoleIdentity.role_or_login/1)
 
       {:ok,
        %{
@@ -171,7 +184,11 @@ defmodule Fleet.Forge.Client.Jury do
     decisive
     |> Enum.map(fn {login, r} ->
       %{
-        "login" => login,
+        # Fleet-side name, like `verdicts` and `reviewers` above: an account name never leaves this
+        # module. That is the invariant the whole fix rests on — one frontier, translated once — and
+        # it is also what a reader wants, since the rework brief built from these records names the
+        # judge to a pod whose world is made of roles.
+        "login" => RoleIdentity.role_or_login(login),
         "verdict" => Atom.to_string(decisive_verdict(r["state"])),
         "submitted_at" => r["submitted_at"],
         "body" => r["body"] || ""

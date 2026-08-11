@@ -342,8 +342,15 @@ defmodule Fleet.Pilot.StepDispatcher do
     head_sha = get_in(pr, ["head", "sha"])
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
 
-    # Stable review records are unioned with volatile requested reviewers.
-    requested_field = pr |> Map.get("requested_reviewers") |> List.wrap() |> Enum.map(&login_of/1)
+    # Stable review records are unioned with volatile requested reviewers. Read through the SAME
+    # frontier as the verdicts (`pr_review_state` translates its own): this list comes straight off
+    # the raw PR payload, so it carries forge ACCOUNTS, and the card it is measured against carries
+    # ROLES. Untranslated, a real judge landed in `foreign` and its verdict was thrown away.
+    requested_field =
+      pr
+      |> Map.get("requested_reviewers")
+      |> List.wrap()
+      |> Enum.map(&(&1 |> login_of() |> Fleet.Credentials.RoleIdentity.role_or_login()))
 
     # Forge listing owns PR human scoping.
     cond do

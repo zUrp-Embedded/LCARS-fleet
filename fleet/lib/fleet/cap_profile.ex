@@ -665,6 +665,115 @@ defmodule Fleet.CapProfile do
   defdelegate forge_identity_roles(dir), to: Catalog
 
   @doc """
+  The forge LOGIN a role writes under — `<tier>_<role>`, or `{:error, _}`.
+
+  THE RULE WAS ALREADY HERE, AND ONLY THE PROVISIONING SIDE COULD SEE IT. It lived private inside
+  `Fleet.Application.CatalogueRoles`, which emits the tofu roster, so the accounts got CREATED as
+  `fleet_qualifier` while the runtime kept addressing them as `qualifier`. Measured 2026-08-11: a
+  deliverable PR opened, `request_review` answered `404 User 'qualifier' not exist`, and the PR sat
+  with no judge — the review leg simply never started. The read half fails the same way and more
+  quietly: verdicts come back under LOGINS, get compared to the card's ROLES, and every real judge
+  is classified `foreign` by F-C061.
+
+  The prefix follows the TIER, never the file that wins the overlay: a business catalogue may ship
+  its own `architect.yaml` to widen its tools, and the account stays `system_architect`, because
+  `architect` is a system authority — the SAME one in every org. So membership of the SYSTEM roster
+  decides, and a role declared only by the business catalogue takes that catalogue's name.
+
+  Memoized per catalogue root: the poller resolves a jury on every tick and this reads YAML off
+  disk. The key carries the root, so a test or `CatalogueRoles` borrowing the catalogue gets its
+  own entry rather than a stale answer from the previous one.
+  """
+  @spec forge_login(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def forge_login(role) when is_binary(role) do
+    with {:ok, %{to_login: to_login}} <- login_maps() do
+      case Map.fetch(to_login, role) do
+        {:ok, login} -> {:ok, login}
+        :error -> {:error, {:role_not_in_roster, role}}
+      end
+    end
+  end
+
+  @doc """
+  The role behind a forge `login`, or `{:error, {:login_not_a_role, login}}`.
+
+  The inverse of `forge_login/1`, and the reason it returns an ERROR rather than the login itself:
+  a name that is not a fleet role is a HUMAN (or a stranger), and the two must stay
+  distinguishable. F-C061 shows the cost of blurring them — a foreign reviewer that silently reads
+  as a role would join the jury and could skew or block a verdict.
+  """
+  @spec role_of_forge_login(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def role_of_forge_login(login) when is_binary(login) do
+    with {:ok, %{to_role: to_role}} <- login_maps() do
+      case Map.fetch(to_role, String.downcase(login)) do
+        {:ok, role} -> {:ok, role}
+        :error -> {:error, {:login_not_a_role, login}}
+      end
+    end
+  end
+
+  # Gitea caps a username at 40 chars (measured) and resolves logins case-insensitively — hence the
+  # downcased inverse key. `_` separates the two halves, so a role carrying one would make the split
+  # ambiguous; the composition refuses it here rather than minting a login nobody can take apart.
+  @login_max 40
+  @role_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
+
+  defp login_maps do
+    key = {__MODULE__, :forge_logins, Fleet.Catalogue.root(), Fleet.Catalogue.system_root()}
+
+    case :persistent_term.get(key, :unset) do
+      %{} = maps ->
+        {:ok, maps}
+
+      :unset ->
+        with {:ok, maps} <- build_login_maps() do
+          :persistent_term.put(key, maps)
+          {:ok, maps}
+        end
+    end
+  end
+
+  defp build_login_maps do
+    system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
+
+    with {:ok, roster} <- forge_roster(),
+         {:ok, system_roster} <- forge_roster(system_dir),
+         name when is_binary(name) <- Fleet.Catalogue.name() do
+      system_names = MapSet.new(system_roster, & &1.name)
+
+      to_login =
+        Map.new(roster, fn r ->
+          prefix = if MapSet.member?(system_names, r.name), do: "system", else: name
+          {r.name, compose_login(prefix, r.name)}
+        end)
+
+      {:ok,
+       %{to_login: to_login, to_role: Map.new(to_login, fn {r, l} -> {String.downcase(l), r} end)}}
+    else
+      {:error, _} = err -> err
+      _ -> {:error, :catalogue_declares_no_name}
+    end
+  end
+
+  defp compose_login(prefix, role) do
+    unless Regex.match?(@role_rx, role) do
+      raise ArgumentError,
+            "CapProfile.forge_login: role #{inspect(role)} is not kebab-case — it becomes half of " <>
+              "a forge login (#{prefix}_#{role}) and `_` separates the two halves."
+    end
+
+    login = "#{prefix}_#{role}"
+
+    if byte_size(login) > @login_max do
+      raise ArgumentError,
+            "CapProfile.forge_login: login #{inspect(login)} is #{byte_size(login)} chars — Gitea " <>
+              "caps a username at #{@login_max} (measured)."
+    end
+
+    login
+  end
+
+  @doc """
   The raw role index of ONE root — the business half judged apart from what it inherits.
   See `Fleet.CapProfile.Catalog.index_of/1`.
   """

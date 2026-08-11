@@ -508,19 +508,46 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Requests native PR reviews from the supplied logins.
+  Requests native PR reviews from the supplied ROLES.
+
+  ROLES, not logins, and the distinction is the whole point. The fleet reasons in roles everywhere;
+  the account a role writes under is `<tier>_<role>` and only the forge side needs to know it. This
+  function used to forward whatever it was handed straight into the Gitea payload, so a jury of
+  `["qualifier", "reviewer"]` reached a forge whose accounts are `fleet_qualifier` /
+  `fleet_reviewer` and came back `404 User 'qualifier' not exist` — the deliverable PR then sat
+  open with no judge, forever, since a merge waits on approvals that nobody was ever asked for.
+
+  Same shape as `as_role/2`: the caller names a ROLE, the client resolves what the forge needs.
+
+  An unprojectable role FAILS the whole call rather than being dropped: a jury is a quorum, and
+  silently requesting two judges out of three turns a merge gate into a deadlock that looks like
+  patience.
   """
   @spec request_review(String.t(), integer(), [String.t()], Keyword.t()) ::
           :ok | {:error, term()}
-  def request_review(repo, index, reviewers, opts \\ [])
-      when is_binary(repo) and is_integer(index) and is_list(reviewers) do
-    with {:ok, config} <- resolve_config(opts) do
+  def request_review(repo, index, roles, opts \\ [])
+      when is_binary(repo) and is_integer(index) and is_list(roles) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, logins} <- forge_logins(roles) do
       case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/requested_reviewers", %{
-             reviewers: reviewers
+             reviewers: logins
            }) do
         {:ok, _} -> :ok
         {:error, _} = err -> err
       end
+    end
+  end
+
+  defp forge_logins(roles) do
+    Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
+      case Fleet.Credentials.RoleIdentity.login(role) do
+        {:ok, login} -> {:cont, {:ok, [login | acc]}}
+        {:error, reason} -> {:halt, {:error, {:role_login_unresolved, role, reason}}}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      err -> err
     end
   end
 

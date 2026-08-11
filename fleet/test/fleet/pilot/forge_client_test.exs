@@ -18,6 +18,16 @@ defmodule Fleet.Forge.ClientTest do
     def call(conn, handlers) do
       key = {conn.method, conn.request_path}
 
+      # The SENT PAYLOAD, mailed to the test. Req runs a `:plug` adapter in the CALLING process, so
+      # `self()` here is the test. Without this the harness could only assert what a handler answers,
+      # never what the client asked — and the defect this exists for lives entirely in the request:
+      # a jury sent under role names to a forge whose accounts are `<tier>_<role>`.
+      case Plug.Conn.read_body(conn) do
+        {:ok, "", _} -> :ok
+        {:ok, raw, _} -> send(self(), {:fake_forge_body, conn.method, conn.request_path, raw})
+        _ -> :ok
+      end
+
       case Map.fetch(handlers, key) do
         # Function handler (0-arity): response computed at call time → allows ORDERED responses on
         # a same path called multiple times (e.g. merge cascade FF→rebase, via a counter Agent).
@@ -490,6 +500,41 @@ defmodule Fleet.Forge.ClientTest do
       # Qualifier=APPROVED, Reviewer=REQUEST_CHANGES (COMMENT/REQUEST_REVIEW non-decisive, ignored).
       assert {:ok, %{"qualifier" => :approved, "reviewer" => :changes_requested}} =
                verdicts_of("fleet/lcars", 6, opts(handlers))
+    end
+
+    test "pr_review_state translates forge ACCOUNTS to roles, and leaves a human verbatim" do
+      # The read half of the same frontier as `request_review`. A real forge answers with the
+      # accounts provisioning created — `fleet_qualifier` — while the card names `qualifier`, so
+      # untranslated verdicts were measured against the wrong vocabulary: F-C061 filed the fleet's
+      # own jury as `foreign` and threw its verdicts away. A login belonging to no role is a HUMAN
+      # and stays exactly as it came, which is what keeps that filter able to see strangers.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "state" => "APPROVED",
+               "user" => %{"login" => "fleet_qualifier"},
+               "dismissed" => false
+             },
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "lordzurp"},
+               "dismissed" => false
+             }
+           ]}
+      }
+
+      assert {:ok, %{verdicts: verdicts, reviewers: reviewers, records: records}} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+
+      assert %{"qualifier" => :approved, "lordzurp" => :changes_requested} = verdicts
+      assert "qualifier" in reviewers
+      assert "lordzurp" in reviewers
+
+      # The audit records travel through the same door — an account name never leaves the client.
+      assert Enum.any?(records, &(&1["login"] == "qualifier"))
+      refute Enum.any?(records, &(&1["login"] == "fleet_qualifier"))
     end
 
     test "verdicts (pr_review_state): dismissed reviews ignored" do
@@ -1610,12 +1655,31 @@ defmodule Fleet.Forge.ClientTest do
   end
 
   describe "request_review/4 + post_review/5 (trigger + verdict home)" do
-    test "request_review → POST requested_reviewers, :ok" do
+    test "request_review takes ROLES and sends the forge ACCOUNTS — <tier>_<role>" do
+      # The defect this pins, measured on a bench 2026-08-11: the jury travelled as role names, the
+      # forge answered `404 User 'qualifier' not exist`, and the deliverable PR stayed open with no
+      # judge — a merge gate waiting on approvals nobody had been asked for. The old test asserted
+      # `:ok` on a handler that answers 201 to anything, so it could not see which name went out.
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers"} => {201, [%{"id" => 1}]}
       }
 
-      assert :ok = ForgeClient.request_review("fleet/proj", 9, ["Qualifier"], opts(handlers))
+      assert :ok = ForgeClient.request_review("fleet/proj", 9, ["qualifier"], opts(handlers))
+
+      assert_received {:fake_forge_body, "POST",
+                       "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers", raw}
+
+      # `fleet_qualifier`, not `qualifier`: the tier prefix follows where the role is DECLARED, so
+      # the same call on `architect` — a system authority — would send `system_architect`.
+      assert %{"reviewers" => ["fleet_qualifier"]} = JSON.decode!(raw)
+    end
+
+    test "request_review REFUSES a role the roster does not carry — a jury is a quorum" do
+      # Dropping the unresolvable one would request 1 judge out of 2 and leave the merge gate
+      # waiting forever on a verdict that was never solicited: a deadlock wearing the face of
+      # patience. No HTTP round-trip either — the refusal is decided before the wire.
+      assert {:error, {:role_login_unresolved, "ghost-role", _}} =
+               ForgeClient.request_review("fleet/proj", 9, ["qualifier", "ghost-role"], opts(%{}))
     end
 
     test "post_review :approve posts the verdict, :ok" do

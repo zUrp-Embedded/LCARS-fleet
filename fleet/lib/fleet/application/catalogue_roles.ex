@@ -125,20 +125,23 @@ defmodule Fleet.Application.CatalogueRoles do
   # Le souligne separe les deux moities, d'ou son interdiction des deux cotes : `Fleet.Catalogue`
   # refuse un nom de catalogue qui en porte, et le nom de role est verifie ici. Et Gitea plafonne un
   # login a 40 caracteres (mesure), donc la composition l'est aussi.
-  @role_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
-  @login_max 40
-
+  #
+  # THE RULE ITSELF NOW LIVES IN `Fleet.CapProfile.forge_login/1`, and moving it there was the fix
+  # for a real defect: held here, only the PROVISIONING side could read it. The accounts were
+  # created as `<tier>_<role>` while the runtime went on addressing roles by their bare name, so
+  # `request_review` asked the forge for a `qualifier` that does not exist and the PR got no judge.
+  # A projection that only the writer of a name can compute is a name the reader cannot use.
   defp login_projection do
-    system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
-
-    with {:ok, cat} <- catalogue_name(),
-         {:ok, system_roster} <- Fleet.CapProfile.forge_roster(system_dir) do
-      system_names = MapSet.new(system_roster, & &1.name)
-
+    with {:ok, _} <- catalogue_name() do
       {:ok,
        fn role ->
-         prefix = if MapSet.member?(system_names, role), do: "system", else: cat
-         compose!(prefix, role)
+         case Fleet.CapProfile.forge_login(role) do
+           {:ok, login} ->
+             login
+
+           {:error, reason} ->
+             raise "CatalogueRoles: no forge login for #{role}: #{inspect(reason)}"
+         end
        end}
     end
   end
@@ -148,23 +151,6 @@ defmodule Fleet.Application.CatalogueRoles do
       n when is_binary(n) -> {:ok, n}
       _ -> {:error, :catalogue_declares_no_name}
     end
-  end
-
-  defp compose!(prefix, role) do
-    unless Regex.match?(@role_rx, role) do
-      raise "CatalogueRoles: role name #{inspect(role)} is not kebab-case — it becomes half of a " <>
-              "forge login (#{prefix}_#{role}) and `_` separates the two halves, so admitting one " <>
-              "would make the split ambiguous."
-    end
-
-    login = "#{prefix}_#{role}"
-
-    if byte_size(login) > @login_max do
-      raise "CatalogueRoles: login #{inspect(login)} is #{byte_size(login)} chars — Gitea caps a " <>
-              "username at #{@login_max} (measured). Shorten the catalogue name or the role."
-    end
-
-    login
   end
 
   @doc """
