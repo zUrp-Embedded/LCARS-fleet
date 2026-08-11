@@ -661,6 +661,27 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
+    def deposit_candidates(human, opts) do
+      send(self(), {:deposit_candidates, human, opts})
+      {:ok, ["#{human}/mon-projet", "#{human}/chifoumi"]}
+    end
+
+    @impl true
+    def import_deposit(source, catalogue, opts) do
+      send(self(), {:import_deposit, source, catalogue, opts})
+      name = source |> String.split("/") |> List.last()
+
+      {:ok,
+       %{
+         repo: "#{catalogue}/#{name}",
+         project_dir: "/tmp/projects/#{name}",
+         work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.doc/#{name}",
+         from: source
+       }}
+    end
+
+    @impl true
     def adopt_project(name, opts) do
       send(self(), {:adopt_project, name, opts})
 
@@ -1589,6 +1610,11 @@ defmodule Fleet.MCP.PodToolsTest do
       {"adopt_project", %{"name" => "demo-proj"}},
       {"import_external_project",
        %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
+      # The deposit door and its discovery side: same head as every other onboarding verb, so the
+      # gate table is where they belong — a new door admitted by nobody's test is a door with a
+      # different admission.
+      {"list_deposits", %{}},
+      {"import_deposit", %{"source" => "lordzurp/demo-proj", "catalogue" => "fleet"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
@@ -1800,6 +1826,65 @@ defmodule Fleet.MCP.PodToolsTest do
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-arch"))),
                "tool=#{tool}: the architect is not an onboarder"
       end
+    end
+
+    # THE THIRD DOOR. `import/2` only takes repos already in a catalogue org; `import_external/3`
+    # demands https + an allowlisted host and would refuse our own forge on the SCHEME. What is
+    # left is a repo a human pushed to their personal space — a foreign PROVENANCE on a familiar
+    # host, which is a different question from a foreign host.
+    test "list_deposits takes the human from the fleet, never from the wire" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      # A login on the wire is not honoured — it would turn an import tool into an enumerator of
+      # other people's personal spaces. The seam receives the fleet's human either way.
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "list_deposits",
+                 %{"human" => "quelquun-dautre"},
+                 pod_state(uniq("pod-sf"))
+               )
+
+      assert_received {:deposit_candidates, human, _opts}
+      refute human == "quelquun-dautre"
+
+      decoded = Jason.decode!(txt)
+      assert decoded["human"] == human
+      assert decoded["candidates"] == ["#{human}/mon-projet", "#{human}/chifoumi"]
+    end
+
+    test "import_deposit threads source + destination catalogue, and echoes what it came from" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "import_deposit",
+                 %{"source" => "lordzurp/chifoumi", "catalogue" => "web"},
+                 pod_state(uniq("pod-sf"))
+               )
+
+      # The DESTINATION is a catalogue, not a hardcoded org: its org IS its name.
+      assert_received {:import_deposit, "lordzurp/chifoumi", "web", _opts}
+
+      decoded = Jason.decode!(txt)
+      assert decoded["repo"] == "web/chifoumi"
+      # `from` survives to the caller: the source is not consumed, so what it was stays sayable.
+      assert decoded["from"] == "lordzurp/chifoumi"
+    end
+
+    test "a source that is not `<login>/<name>` is REFUSED before the seam" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      for bad <- ["chifoumi", "a/b/c", "lordzurp/"] do
+        assert {:error, {:invalid_source, _}, _} =
+                 PodTools.handle_tool_call(
+                   "import_deposit",
+                   %{"source" => bad, "catalogue" => "fleet"},
+                   pod_state(uniq("pod-sf"))
+                 ),
+               "source=#{inspect(bad)} should not reach the seam"
+      end
+
+      refute_received {:import_deposit, _, _, _}
     end
   end
 

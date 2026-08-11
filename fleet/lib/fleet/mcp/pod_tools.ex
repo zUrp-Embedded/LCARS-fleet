@@ -294,6 +294,53 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "list_deposits" do
+    meta do
+      name("List Deposits")
+
+      description(
+        "What your human has PUSHED to their personal space on this forge and that the fleet does " <>
+          "not carry yet — the deposit candidates. There is no registry behind this: a repo " <>
+          "outside every catalogue org is a candidate, a repo inside one is enrolled, and the " <>
+          "LOCATION is the state. A candidate already carried under the same name by an org is " <>
+          "filtered out (importing takes a COPY and leaves the original with its owner, so " <>
+          "without that filter it would be offered again on every pass). " <>
+          "Takes NO argument: the human is the one this fleet runs for. " <>
+          "Returns {\"status\":\"listed\",\"human\":...,\"candidates\":[\"<login>/<name>\", ...]}. " <>
+          "An unreachable org makes this REFUSE rather than return a short list — a list missing " <>
+          "an org would offer to import what is already in."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}})
+  end
+
+  deftool "import_deposit" do
+    meta do
+      name("Import Deposit")
+
+      description(
+        "Adopt a repo your human DEPOSITED in their personal space (`<login>/<name>`, from " <>
+          "`list_deposits`) into a catalogue's org — the third import door, and the only one that " <>
+          "takes a repo from outside every org. `catalogue` names the destination (its org IS its " <>
+          "name). The full ADOPTION GATE runs on the way in: a foreign `.claude/` tree is refused " <>
+          "en bloc, every `CLAUDE.md` goes through the reception filter, and the default branch is " <>
+          "normalized to `main`. The source is NOT consumed — your human keeps their repo, the " <>
+          "fleet works on its copy. Use `import_project` instead for a repo ALREADY in an org. " <>
+          "Returns {\"status\":\"imported\",\"repo\":...,\"from\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "source" => %{"type" => "string"},
+        "catalogue" => %{"type" => "string"}
+      },
+      "required" => ["source", "catalogue"]
+    })
+  end
+
   deftool "adopt_project" do
     meta do
       name("Adopt Project")
@@ -851,6 +898,34 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("import_project", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # No wire parameter, by construction: the human is the one this fleet runs for. A login on the
+  # wire would turn an import tool into an enumerator of other people's personal spaces.
+  def handle_tool_call("list_deposits", _args, state) do
+    case Delegation.list_deposits(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("import_deposit", %{"source" => source, "catalogue" => catalogue}, state)
+      when is_binary(source) and is_binary(catalogue) and catalogue != "" do
+    if valid_repo_ref?(source) do
+      case Delegation.import_deposit(source, catalogue, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_source,
+        "`source` must be a `<login>/<name>` repo of a personal space (got #{inspect(source)})"},
+       state}
+    end
+  end
+
+  def handle_tool_call("import_deposit", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

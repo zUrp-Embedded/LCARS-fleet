@@ -539,6 +539,46 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  @doc """
+  A human's DEPOSIT CANDIDATES: the repos in their personal space that no catalogue org already
+  carries under the same name.
+
+  THE LOCATION IS THE STATE: a repo in a personal space is a candidate, a repo in a catalogue org is
+  enrolled. So there is no marker, no label and no registry to keep — "is this project in LCARS?"
+  is answered by an `ls` on the forge. Multiple catalogues REINFORCE that rather than weaken it:
+  whatever the number of orgs, *outside every org* stays one unambiguous location.
+
+  The filter is by NAME because the source repo is NOT consumed — importing takes a copy and leaves
+  the original with its owner — so without it every pass would propose the same repo again.
+  """
+  @spec deposit_candidates(String.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
+  def deposit_candidates(human, opts \\ []) when is_binary(human) do
+    repo = repo_mod(opts)
+    fc = fc_opts(opts)
+
+    with {:ok, mine} <- repo.list_user_repos(human, fc),
+         {:ok, enrolled} <- enrolled_names(repo, fc) do
+      {:ok,
+       mine
+       |> Enum.reject(&(Fleet.Layout.project_name(&1) in enrolled))
+       |> Enum.sort()}
+    end
+  end
+
+  # The names already carried by an ACTIVE catalogue org. Fail-loud: an unreachable org would make
+  # the candidate list too WIDE, i.e. offer to import what is already in.
+  defp enrolled_names(repo, fc) do
+    Enum.reduce_while(active_orgs(), {:ok, MapSet.new()}, fn org, {:ok, acc} ->
+      case repo.list_org_repos(org, fc) do
+        {:ok, names} ->
+          {:cont, {:ok, Enum.into(Enum.map(names, &Fleet.Layout.project_name/1), acc)}}
+
+        {:error, reason} ->
+          {:halt, {:error, {:enrolled_scan_failed, org, reason}}}
+      end
+    end)
+  end
+
   defp split_repo(full_name) do
     case String.split(full_name, "/") do
       [owner, name] when owner != "" and name != "" -> {:ok, owner, name}

@@ -257,6 +257,61 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Lists a human's DEPOSIT candidates — the repos they pushed to their personal space that no
+  catalogue org already carries.
+
+  The human's login is not a wire parameter: it comes from `Fleet.Credentials.Human.current/0`,
+  the same source that owns every issue this fleet creates. A login on the wire would let a caller
+  enumerate somebody else's personal space, which is a listing tool wearing an import tool's name.
+  """
+  @spec list_deposits(map()) :: {:ok, map()} | {:error, term()}
+  def list_deposits(state) do
+    with {:ok, _role} <- require_onboarder(state),
+         {:ok, onboard} <- conforming_onboard(),
+         {:ok, human} <- Fleet.Credentials.Human.current() do
+      case onboard.deposit_candidates(human, []) do
+        {:ok, candidates} ->
+          {:ok, %{"status" => "listed", "human" => human, "candidates" => candidates}}
+
+        {:error, reason} ->
+          {:error, {:deposit_scan_failed, inspect(reason)}}
+      end
+    end
+  end
+
+  @doc """
+  Adopts a DEPOSITED repo (`<login>/<name>`) into `catalogue`'s org — the third import door.
+
+  The gate lives INSIDE the seam call (foreign `.claude/` refused en bloc, every `CLAUDE.md`
+  through the reception filter, default branch normalized): this verb adds no filtering of its own,
+  it names the actor and the destination. The source is not consumed — the human keeps their repo.
+  """
+  @spec import_deposit(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def import_deposit(source, catalogue, state)
+      when is_binary(source) and is_binary(catalogue) do
+    with {:ok, _role} <- require_onboarder(state),
+         {:ok, onboard} <- conforming_onboard() do
+      case onboard.import_deposit(source, catalogue, []) do
+        {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
+          {:ok,
+           %{
+             "status" => "imported",
+             "repo" => repo,
+             "from" => source,
+             "project_dir" => pdir,
+             "work_dir" => wdir,
+             "doc_dir" => ddir,
+             "delegation_target" => repo
+           }
+           |> put_architect(result)}
+
+        {:error, reason} ->
+          {:error, {:deposit_import_failed, inspect(reason)}}
+      end
+    end
+  end
+
+  @doc """
   DELETES a project `full_name` (`"owner/name"`) — general teardown via the `:project_onboard` seam,
   in order: forge repo first, then the face dirs, then the architect pod (stopped LAST, and only once a
   dir is proven to BE `full_name` — a homonym owned by someone else is never touched). Onboarder gate

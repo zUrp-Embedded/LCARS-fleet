@@ -87,6 +87,40 @@ defmodule Fleet.Project.OnboardMigrateTest do
     ]
   end
 
+  defmodule TwoOrgs do
+    # `fleet` already carries `vitrine`; `web` is empty. The human has three personal repos.
+    def list_user_repos("lordzurp", _fc),
+      do: {:ok, ["lordzurp/vitrine", "lordzurp/mon-projet", "lordzurp/chifoumi"]}
+
+    def list_org_repos("fleet", _fc), do: {:ok, ["fleet/vitrine", "fleet/lcars"]}
+    def list_org_repos("web", _fc), do: {:ok, []}
+  end
+
+  defmodule OrgDown do
+    def list_user_repos(_l, _fc), do: {:ok, ["lordzurp/x"]}
+    def list_org_repos("fleet", _fc), do: {:ok, []}
+    def list_org_repos("web", _fc), do: {:error, {:transport, :econnrefused}}
+  end
+
+  describe "deposit_candidates — the LOCATION is the state" do
+    @tag :tmp_dir
+    test "a personal repo a catalogue org already carries is no longer a candidate" do
+      assert {:ok, candidats} =
+               ProjectOnboard.deposit_candidates("lordzurp", forge_repo: TwoOrgs)
+
+      # `vitrine` exists in the `fleet` org. Importing takes a COPY and leaves the original with
+      # its owner, so without this filter the same repo would be offered on every pass.
+      assert candidats == ["lordzurp/chifoumi", "lordzurp/mon-projet"]
+    end
+
+    @tag :tmp_dir
+    test "an unreachable org REFUSES instead of returning a list that is too wide" do
+      # A list too wide would offer to import what is already in — fail-loud, never fail-open.
+      assert {:error, {:enrolled_scan_failed, "web", _}} =
+               ProjectOnboard.deposit_candidates("lordzurp", forge_repo: OrgDown)
+    end
+  end
+
   describe "import_deposit : les refus d'admission, avant tout effet de bord" do
     @tag :tmp_dir
     test "un depot DEJA dans une org de catalogue n'est pas un depot", %{tmp: tmp} do

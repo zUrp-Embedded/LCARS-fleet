@@ -106,6 +106,25 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Every repository full name in a HUMAN's personal space (`<login>/<name>`).
+
+  The counterpart of `list_org_repos/2` for the other half of the model: a DEPOSITED project lives
+  in its author's personal space, an ENROLLED one lives in its catalogue's org, and the LOCATION is
+  the state. Listing the former is listing the candidates.
+
+  The system token suffices — measured 2026-08-11: it carries `read:user`, so `200`. A ROLE token
+  does not (`write:issue,write:repository`) and gets a `403` that NAMES the missing scope. Gitea
+  tokens REPLACE permissions instead of adding to them: the scope is the question, not the account.
+  """
+  @spec list_user_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list_user_repos(login, opts \\ []) when is_binary(login) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, body} <- paginate(config, "/users/#{encode_seg(login)}/repos", "") do
+      {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+    end
+  end
+
+  @doc """
   Returns the repository's default branch. Import callers currently require it to be `main`.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}

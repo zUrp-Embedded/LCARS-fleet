@@ -82,6 +82,8 @@ defmodule Fleet.MCP.EmergencyStopTest do
     def delete_project(_f, _o), do: {:error, :unused}
     def adopt_project(_n, _o), do: {:error, :unused}
     def import_external(_u, _n, _o), do: {:error, :unused}
+    def deposit_candidates(_h, _o), do: {:error, :unused}
+    def import_deposit(_s, _c, _o), do: {:error, :unused}
     def close_project(_f, _o), do: {:error, :unused}
     def revise_card(_f, _o), do: {:error, :unused}
   end
@@ -189,6 +191,8 @@ defmodule Fleet.MCP.EmergencyStopTest do
         def delete_project(_f, _o), do: {:error, :unused}
         def adopt_project(_n, _o), do: {:error, :unused}
         def import_external(_u, _n, _o), do: {:error, :unused}
+        def deposit_candidates(_h, _o), do: {:error, :unused}
+        def import_deposit(_s, _c, _o), do: {:error, :unused}
         def close_project(_f, _o), do: {:error, :unused}
         def revise_card(_f, _o), do: {:error, :unused}
       end

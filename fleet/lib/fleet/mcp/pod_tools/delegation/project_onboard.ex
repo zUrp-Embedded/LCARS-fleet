@@ -118,6 +118,35 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               | {:error, term()}
 
   @doc """
+  The DEPOSIT candidates of a human: the repos in their personal space that no catalogue org
+  already carries under the same name.
+
+  The counterpart of `import_deposit/3` on the discovery side, and it needs no registry because
+  THE LOCATION IS THE STATE: outside every catalogue org = a candidate, inside one = enrolled.
+  Fail-loud on an unreachable org — a candidate list that is too WIDE offers to import what is
+  already in.
+  """
+  @callback deposit_candidates(human :: String.t(), opts :: keyword()) ::
+              {:ok, [String.t()]} | {:error, term()}
+
+  @doc """
+  IMPORTS a repo DEPOSITED by a human in their personal space (`<login>/<name>`) into a catalogue
+  org — the third door, and the one the other two refuse by construction.
+
+  `import/2` only takes repos ALREADY in a catalogue org, so it filters nothing and does not need
+  to. `import_external/3` demands `https` plus a host from its allowlist, and our forge is `http`:
+  it would refuse on the SCHEME. That guard bounds "from which FOREIGN host do we clone", and a
+  personal repo on our own forge is not a foreign host — it is a foreign PROVENANCE.
+
+  So the adoption frontier is not "our forge / an external forge" but **"inside a catalogue org /
+  outside one"**: anything coming from a personal space goes through the gate, even deposited by a
+  trusted human on our own forge. The transport does not change the provenance. The source repo is
+  NOT consumed — the import takes a copy and leaves the original with its owner.
+  """
+  @callback import_deposit(source :: String.t(), catalogue :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+
+  @doc """
   CLOSES a project (BL-6-30) — stops the fleet ON it, disk and forge intact (≠ delete: nothing
   destroyed). The closed state is a forge object (open `[lcars-parked]` marker issue) the poller
   respects; the running brick finishes, the next one never starts; the architect stops
