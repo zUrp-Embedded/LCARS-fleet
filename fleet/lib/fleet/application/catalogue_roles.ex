@@ -77,6 +77,7 @@ defmodule Fleet.Application.CatalogueRoles do
 
     try do
       with {:ok, roster} <- Fleet.CapProfile.forge_roster(),
+           {:ok, cat} <- catalogue_name(),
            {:ok, login_of} <- login_projection() do
         names = Map.new(roster, fn r -> {login_of.(r.name), r.name} end)
 
@@ -92,7 +93,11 @@ defmodule Fleet.Application.CatalogueRoles do
            "externals" => roster |> Enum.filter(& &1.seat?) |> Enum.map(&login_of.(&1.name)),
            # login -> nom du ROLE, pour que la recette pose `full_name`. Le prefixe disparait alors
            # de l'UI (`[ui] DEFAULT_SHOW_FULL_NAME`), et ne subsiste que dans l'URL et l'API.
-           "role_names" => names
+           "role_names" => names,
+           # L'ORG qui portera les projets de ce catalogue, et c'est son NOM : « ou vit ce projet »
+           # repond alors a « quel catalogue le traite », interrogeable sans LCARS. La recette le
+           # recoit d'ici plutot que de le tenir en litteral — un litteral ne peut nommer qu'une org.
+           "org" => cat
          }}
       end
     after

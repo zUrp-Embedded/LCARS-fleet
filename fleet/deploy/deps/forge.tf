@@ -152,9 +152,26 @@ resource "gitea_user" "human" {
 }
 
 # ── Org + teams ────────────────────────────────────────────────────────────
+# L'ORG PORTE LE NOM DU CATALOGUE — c'est la reponse a « quel metier traite ce projet », gravee la
+# ou la verite vit deja. Elle etait le litteral `fleet` ; elle est desormais derivee, et le defaut
+# vaut le nom du catalogue de reference, donc rien ne bouge pour un deploiement qui n'apporte rien.
+#
+# `public` et non `private` (arbitrage user 2026-08-10) : la forge est INTERNE et locale, elle n'est
+# pas vouee a partir sur GitHub — c'est aussi pourquoi les deux sont separees. Mesure : en `private`,
+# un humain non-membre voit ZERO, meme un depot public (404 sur l'org, sur le depot, sur la creation
+# d'issue) ; en `public`, il voit et peut ouvrir une issue sans adherer a quoi que ce soit. C'est ce
+# qui permet a un collegue de travailler sur le projet d'un autre sans etre membre de son org.
+# L'ecriture n'est pas ouverte pour autant : un anonyme ne peut pas ouvrir d'issue, Gitea exige
+# l'auth en ecriture.
+variable "org" {
+  type        = string
+  description = "Org forge portant les projets de ce catalogue — c'est le nom du catalogue"
+  default     = "fleet"
+}
+
 resource "gitea_org" "fleet" {
-  name       = "fleet"
-  visibility = "private"
+  name       = var.org
+  visibility = "public"
 }
 
 # system : SEUL à créer des repos d'org (création réservée au système) + write dessus

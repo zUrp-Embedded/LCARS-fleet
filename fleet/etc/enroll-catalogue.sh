@@ -97,7 +97,14 @@ mv -f "$TMP" "$DEST" || die "ecriture impossible dans $TOFU_DIR" 3
 # d'origine.
 ROLES_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["roles"]))')"
 
+# L'ORG que ce catalogue porte — son nom. tofu la lit seul depuis roles.auto.tfvars.json (`var.org`) ;
+# cette ligne-ci est pour le SHELL, qui n'a pas de mecanisme equivalent : `50-forge.sh` sonde les
+# adhesions et publicise sur `$PROV_FORGE_ORG`, et pointer la mauvaise org rend des 404 muets.
+ORG_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("org",""))')"
+
 say "catalogue : $CATALOGUE (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"
+say "org       : ${ORG_LINE:-<non declaree>}"
 echo "PROV_ROLES=\"$ROLES_LINE\""
+[[ -n "$ORG_LINE" ]] && echo "PROV_FORGE_ORG=\"$ORG_LINE\""

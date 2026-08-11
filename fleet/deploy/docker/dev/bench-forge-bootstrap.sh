@@ -196,12 +196,19 @@ fi
 # Fail-closed on purpose: this script already needs the source tree (it copies the recipe from it),
 # so it needs `mix` too. A bench provisioned from stale defaults would be a bench that does not
 # prove what it claims to prove.
-ROSTER_LINE="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
-                 --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
-                 --tofu-dir "$TOFU_DIR" \
-                 --repo "$REPO_ROOT/fleet" 2>/dev/null | grep '^PROV_ROLES=')" \
+ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
+                --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
+                --tofu-dir "$TOFU_DIR" \
+                --repo "$REPO_ROOT/fleet" 2>/dev/null)" \
   || die "derivation du roster en echec (enroll-catalogue.sh) -- recette non enrolee" 4
+ROSTER_LINE="$(printf '%s\n' "$ENROLL_OUT" | grep '^PROV_ROLES=')"
+# L'ORG vient du CATALOGUE, comme le roster : elle porte son nom. tofu la lit seul dans
+# roles.auto.tfvars.json ; ici c'est le shell qui en a besoin — les sondes d'apres-apply tapent sur
+# une org nommee, et viser la mauvaise rend des 404 muets.
+ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
+ORG="${ORG:-fleet}"
 say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
+say "org du catalogue : $ORG"
 
 SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
 
@@ -352,7 +359,7 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
   else
     curl -s -m 10 -X POST -H "Authorization: token $SYS_TOKEN" -H "Content-Type: application/json" \
       -d '{"name":"lcars","description":"LCARS — la source de la boite","private":false,"auto_init":false}' \
-      "$(api)/orgs/fleet/repos" >/dev/null 2>&1 || true
+      "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
     LCARS_REMOTE="http://lcars-system:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
     git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
@@ -378,11 +385,11 @@ fi
 curl -sf -m 5 -u "$HUMAN:$HUMAN_PASSWORD" "$(api)/user" >/dev/null \
   || die "le login humain ne passe pas — la forge n'est PAS prete" 6
 
-MEMBERS="$(curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/fleet/members" \
+MEMBERS="$(curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/$ORG/members" \
            | python3 -c 'import json,sys; print(" ".join(sorted(u["login"] for u in json.load(sys.stdin))))')"
-say "membres de l'org fleet : $MEMBERS"
+say "membres de l'org $ORG : $MEMBERS"
 
-REPOS="$(curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/fleet/repos" \
+REPOS="$(curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/$ORG/repos" \
          | python3 -c 'import json,sys; print(" ".join(sorted(r["full_name"] for r in json.load(sys.stdin))))' 2>/dev/null || echo "(illisibles)")"
-say "repos de l'org fleet : $REPOS"
+say "repos de l'org $ORG : $REPOS"
 say "forge de banc PRETE — $FORGE_URL · humain $HUMAN / $HUMAN_PASSWORD"
