@@ -23,6 +23,28 @@ import Config
 # setting this and then `start`ing the daemon is a deliberate misuse, out of scope like R-no-root.
 tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 
+# HORS du garde `tool_mode?`, et c'est un correctif : ce bloc n'ouvre aucun port et ne demarre rien.
+# Il dit seulement OU vivent les catalogues declares — un fait de lecture dont TOUTE porte `eval` a
+# besoin. Enferme dans le garde, `LCARS_TOOL_EVAL=1` le sautait avec le reste, et un outil ne voyait
+# que le catalogue livre : `lcars project migrate <projet> web` refusait « web n'est pas actif » sur
+# une boite ou il l'etait, parce que la declaration lui etait invisible. Mesure du 2026-08-11 :
+# `active_names()` rendait ["fleet"] sous eval la ou le boot en voyait deux.
+#
+# L'ORDRE de `install_dirs` est l'ordre de recherche d'un NOM, pas une precedence entre catalogues
+# (celle-la est l'ordre des lignes du fichier) : le repertoire de l'operateur d'abord, pour qu'un
+# catalogue importe masque un livre du meme nom.
+#
+# Pas de variable d'env : la declaration est un FICHIER que l'operateur edite, et pointer dessus par
+# une variable mettrait la reponse a deux endroits. Fichier absent = le catalogue metier livre, seul.
+if config_env() != :test do
+  config :fleet_catalogue,
+    active_declaration: Fleet.Layout.active_catalogues_path(),
+    install_dirs: [
+      Fleet.Layout.catalogues_operator_dir(),
+      Fleet.Layout.catalogues_shipped_dir()
+    ]
+end
+
 if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
@@ -152,12 +174,6 @@ if config_env() != :test and not tool_mode? do
   #
   # No env var: the declaration is a FILE the operator edits, and adding a variable to point at it
   # would put the answer in two places. Absent file = the bundled business catalogue alone.
-  config :fleet_catalogue,
-    active_declaration: Fleet.Layout.active_catalogues_path(),
-    install_dirs: [
-      Fleet.Layout.catalogues_operator_dir(),
-      Fleet.Layout.catalogues_shipped_dir()
-    ]
 
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
