@@ -81,9 +81,19 @@ defmodule Fleet.Application.CatalogueRoles do
            {:ok, login_of} <- login_projection() do
         names = Map.new(roster, fn r -> {login_of.(r.name), r.name} end)
 
+        {system_logins, business_logins} =
+          roster
+          |> Enum.map(&login_of.(&1.name))
+          |> Enum.split_with(&String.starts_with?(&1, "system_"))
+
         {:ok,
          %{
-           "roles" => Enum.map(roster, &login_of.(&1.name)),
+           # DEUX listes, parce que les comptes n'ont pas la meme DUREE DE VIE. Les `system_*` sont
+           # une autorite d'INSTANCE — la meme dans toutes les orgs, creee une fois ; les metier
+           # appartiennent a ce catalogue-ci. Les fondre ferait tenter leur creation a chaque
+           # enrolement d'un catalogue, et Gitea rend « user already exists » (mesure).
+           "roles" => business_logins,
+           "system_roles" => system_logins,
            "writers" =>
              roster |> Enum.reject(&(&1.seat? or &1.judge?)) |> Enum.map(&login_of.(&1.name)),
            "judges" =>

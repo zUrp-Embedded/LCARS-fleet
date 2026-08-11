@@ -54,13 +54,20 @@ provider "gitea" {
 # serveur, pas d'import local, l'org et les teams). Un catalogue dit QUI existe ; cette recette dit
 # ce qu'exister permet. Une recette générée depuis un catalogue donnerait à un fichier remplaçable
 # l'autorité d'élargir ses propres droits.
+# DEUX listes, parce que les comptes n'ont pas la meme DUREE DE VIE. Les `system_*` sont une autorite
+# d'INSTANCE — la meme dans toutes les orgs, membre de chacune, creee une fois. Les metier
+# appartiennent au catalogue qui les declare. Les fondre ferait tenter la creation des comptes
+# systeme a chaque enrolement d'un catalogue, et Gitea rend « user already exists » (mesure).
 variable "roles" {
   type        = list(string)
-  description = "Comptes de role a creer, en LOGINS <catalogue>_<role> — derive du catalogue en service, defaut = catalogue de reference"
-  default = [
-    "system_architect", "system_chief", "system_gatekeeper",
-    "fleet_engineer", "fleet_scribe", "fleet_qualifier", "fleet_reviewer", "fleet_scoper", "fleet_vulcan",
-  ]
+  description = "Comptes de role METIER de ce catalogue, en LOGINS <catalogue>_<role> — derive"
+  default     = ["fleet_engineer", "fleet_scribe", "fleet_qualifier", "fleet_reviewer", "fleet_scoper", "fleet_vulcan"]
+}
+
+variable "system_roles" {
+  type        = list(string)
+  description = "Comptes de role SYSTEME, partages par tous les catalogues — derive"
+  default     = ["system_architect", "system_chief", "system_gatekeeper"]
 }
 
 variable "role_names" {
@@ -99,7 +106,7 @@ resource "gitea_user" "system" {
 # password or token »). Rotation réelle = API admin PATCH /admin/users/{u} (exige login_name
 # dans le body) puis re-mint A4 — jamais « tofu apply » seul.
 resource "gitea_user" "role" {
-  for_each             = toset(var.roles)
+  for_each             = toset(concat(var.roles, var.system_roles))
   username             = each.key
   login_name           = each.key
   # Le LOGIN porte le catalogue (`<catalogue>_<role>`), parce qu'un username Gitea est unique a

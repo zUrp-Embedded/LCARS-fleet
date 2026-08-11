@@ -1274,8 +1274,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # Anchored on the variable NAME, not on a bare `default = [...]`: the recipe has other
         # list variables now, and an unanchored pattern would lock the canon against whichever
         # one happens to appear first.
-        {"forge.tf var.roles default", tree_scope(Path.expand("deploy", root)),
-         read_list(tf_path, ~r/variable\s+"roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s, :quoted),
+        # L'UNION des deux listes : `roles` porte le metier de ce catalogue, `system_roles` l'autorite
+        # d'instance partagee. Le canon ne connait pas cette coupure — il connait les comptes — donc
+        # c'est ici qu'on recolle, sans quoi le verrou declarerait trois roles « manquants ».
+        {"forge.tf var.roles + var.system_roles defaults",
+         tree_scope(Path.expand("deploy", root)),
+         merge_lists(
+           read_list(tf_path, ~r/variable\s+"roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s, :quoted),
+           read_list(
+             tf_path,
+             ~r/variable\s+"system_roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s,
+             :quoted
+           )
+         ),
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
            "its account"},
@@ -1648,6 +1659,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Rendue muette quand le catalogue bundle n'est pas la (etape BUILD de l'image, fixture de test) :
   # meme regle que les listes de l'arbre frere — l'absence d'un arbre est hors-perimetre, jamais un
   # vert silencieux sur du terrain non mesure.
+  defp merge_lists(nil, _), do: nil
+  defp merge_lists(_, nil), do: nil
+  defp merge_lists(a, b), do: Enum.sort(a ++ b)
+
   defp check_placement_defaults(root, tf_path) do
     catalogue = Path.join(root, "priv/catalogue")
 
