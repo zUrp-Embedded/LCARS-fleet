@@ -337,12 +337,21 @@ function build(s) {
 
     // Les agents, GROUPES PAR PROJET. Le rattachement vient du montage reel du pod ; un pod sans
     // zone projet est fleet-level, il a son propre groupe au lieu d'etre range de force.
+    //
+    // FLEET EN TETE, ET SANS LE MOT « PROJET ». Le groupe fleet-level est FIXE — il existe a
+    // chaque boot, avant tout projet, et il n'en est pas un. Le trier alphabetiquement le faisait
+    // apparaitre au milieu des projets, a une place qui changeait avec eux ; l'appeler « projet
+    // fleet » le rangeait dans une categorie a laquelle il n'appartient pas.
+    const FLEET = 'Fleet';
     const byProject = {};
-    for (const p of h.pods) (byProject[p.project || '— fleet'] ||= []).push(p);
-    for (const proj of Object.keys(byProject).sort()) {
+    for (const p of h.pods) (byProject[p.project || FLEET] ||= []).push(p);
+    const groups = Object.keys(byProject).filter((k) => k !== FLEET).sort();
+    if (byProject[FLEET]) groups.unshift(FLEET);
+    for (const proj of groups) {
       let first = true;
       for (const p of byProject[proj].sort((a, b) => a.pod_id.localeCompare(b.pod_id))) {
-        add(first ? 'projet ' + proj : null, p.role, p.phase + ' · ' + p.pod_id,
+        add(first ? (proj === FLEET ? FLEET : 'projet ' + proj) : null,
+            p.role, p.phase + ' · ' + p.pod_id,
             { key: 'pod-' + p.pod_id, crumb: p.role.toUpperCase() + ' — ' + proj,
               hint: p.pod_id,
               url: `http://${HOST}:${h.ports.pod}?arg=${encodeURIComponent(p.pod_id)}` });
