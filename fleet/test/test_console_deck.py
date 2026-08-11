@@ -144,4 +144,26 @@ check(
     "eteinte et non-mesuree ne sont PAS le meme etat",
 )
 
+# ─── LE RATTACHEMENT PROJET ────────────────────────────────────────────────────────────────────
+# Le deck le derivait d'un montage `/home/projects.ops/` que `pod_mounts_env` a retire de tous les
+# pods de projet : le scan ne repondait plus que pour les architectes, et son repli AFFIRMAIT
+# « fleet-level » la ou il voulait dire « je ne sais pas ». Le slug vient desormais du runtime, qui
+# le sait. Ces deux cas etaient MUETS dans ce corpus — c'est ce silence qui a laisse la derive
+# vivre le temps qu'il a fallu pour la voir a l'oeil.
+pport, psrv = serve_pods([
+    {"pod_id": "p1", "role": "engineer", "phase": "ready", "project_slug": "vitrine"},
+    {"pod_id": "p2", "role": "starfleet", "phase": "ready"},
+])
+_, pods = deck.fleet_pods({"ports": {"deck": pport}})
+by_id = {p["pod_id"]: p for p in pods}
+check(
+    by_id["p1"].get("project_slug") == "vitrine",
+    "le slug publie par le runtime traverse la sonde (vu: %s)" % by_id["p1"].get("project_slug"),
+)
+check(
+    by_id["p2"].get("project_slug") is None,
+    "un pod fleet-level n'a pas de projet, et c'est une reponse du runtime",
+)
+psrv.shutdown()
+
 sys.exit(0 if ok else 1)

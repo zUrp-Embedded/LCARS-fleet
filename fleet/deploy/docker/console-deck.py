@@ -64,40 +64,6 @@ def humans():
     return sorted(out, key=lambda h: h["uid"])
 
 
-def pod_projects():
-    """
-    pod_id -> nom de projet, lu dans les MONTAGES REELS du pod (`/proc/<pid>/cmdline` du bwrap).
-
-    POURQUOI PAS LE NOM DU POD : `Fleet.Pilot.PodId` declare l'identifiant OPAQUE (« we don't
-    re-parse the id, we ANCHOR it by prefix ») et il a trois formes (worker, architecte,
-    permanent). Le montage `/home/projects.ops/<projet>`, lui, EST le rattachement — c'est le
-    projet que le pod peut lire, pas une chaine qui lui ressemble. Un pod sans ce montage n'a pas
-    de projet : il est fleet-level, et c'est une reponse, pas un manque.
-    """
-    found = {}
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as fh:
-                argv = fh.read().split(b"\0")
-        except OSError:
-            continue
-        pod_id = project = None
-        for i, a in enumerate(argv):
-            if a == b"--hostname" and i + 1 < len(argv):
-                v = argv[i + 1].decode("utf-8", "replace")
-                if v.startswith("lcars-pod-"):
-                    pod_id = v[len("lcars-pod-"):]
-            elif a.startswith(b"/home/projects.ops/"):
-                seg = a.decode("utf-8", "replace").split("/")
-                if len(seg) > 3 and seg[3]:
-                    project = seg[3]
-        if pod_id:
-            found[pod_id] = project
-    return found
-
-
 def fleet_pods(human):
     """
     Pods vivants d'un humain, vus par SA fleet (le deck d'observation, base+1).
@@ -133,7 +99,6 @@ def fleet_pods(human):
 
 
 def state():
-    projects = pod_projects()
     hs = []
     for h in humans():
         status, pods = fleet_pods(h)
@@ -148,7 +113,16 @@ def state():
                 "pod_id": pid,
                 "role": p.get("role") or "?",
                 "phase": p.get("phase") or "?",
-                "project": projects.get(pid),
+                # LE RATTACHEMENT VIENT DU RUNTIME, plus d'une inspection de /proc.
+                #
+                # Le deck derivait le projet des montages du pod, et `pod_mounts_env` a retire
+                # l'arbre ops de tous les pods de projet — deliberement. Le scan ne repondait donc
+                # plus que pour les architectes, et son repli AFFIRMAIT « fleet-level » la ou il
+                # voulait dire « je ne sais pas ». Trois couches d'accord sur une reponse fausse.
+                #
+                # `project_slug` absent = le pod n'appartient a aucun projet, et c'est le RUNTIME
+                # qui le dit. La meme absence deduite d'un montage manquant ne disait rien.
+                "project": p.get("project_slug"),
             })
         hs.append(h)
     return {"hostname": socket.gethostname(), "humans": hs}
@@ -335,8 +309,8 @@ function build(s) {
           hint: fleetHint(h),
           url: `http://${HOST}:${h.ports.deck}` });
 
-    // Les agents, GROUPES PAR PROJET. Le rattachement vient du montage reel du pod ; un pod sans
-    // zone projet est fleet-level, il a son propre groupe au lieu d'etre range de force.
+    // Les agents, GROUPES PAR PROJET. Le rattachement est celui que le RUNTIME publie ; un pod
+    // sans projet est fleet-level, il a son propre groupe au lieu d'etre range de force.
     //
     // FLEET EN TETE, ET SANS LE MOT « PROJET ». Le groupe fleet-level est FIXE — il existe a
     // chaque boot, avant tout projet, et il n'en est pas un. Le trier alphabetiquement le faisait
