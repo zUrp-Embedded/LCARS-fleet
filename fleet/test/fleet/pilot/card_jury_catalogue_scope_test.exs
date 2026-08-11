@@ -100,6 +100,29 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   end
 
   @tag :tmp_dir
+  test "le depot nomme son catalogue, et le rail y resout le role" do
+    # Le `owner` du depot EST le nom du catalogue (lot 4) : c'est ce qui rend la racine gratuite
+    # pour un rail qui tient deja le work item.
+    root = Fleet.Catalogue.root_for_repo("biz/vitrine")
+
+    assert root == Fleet.Catalogue.root_for("biz")
+    assert {:ok, _mode} = Fleet.Pilot.StepRunConsumer.default_deliverable_mode(@judge, root)
+
+    # Sans la racine, le MEME role est introuvable — le wedge que ce fil ferme : une etape d'un
+    # projet du second catalogue echouait fort sur un role qui existe.
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, :cap_profile_unloadable} =
+               Fleet.Pilot.StepRunConsumer.default_deliverable_mode(@judge)
+    end)
+  end
+
+  @tag :tmp_dir
+  test "un depot d'un catalogue INACTIF ne resout rien plutot que de resoudre a cote" do
+    assert Fleet.Catalogue.root_for_repo("grominet/vitrine") == nil
+    assert Fleet.Catalogue.root_for_repo(nil) == nil
+  end
+
+  @tag :tmp_dir
   test "le scope porte la racine du catalogue a cote du repertoire de cartes" do
     scopes = Fleet.Workflow.Loader.card_scopes()
     biz = Enum.find(scopes, &(&1.catalogue == "biz"))

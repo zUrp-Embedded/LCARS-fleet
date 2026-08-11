@@ -206,8 +206,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   defp dmode,
     do: fn
-      "engineer" -> {:ok, "git_native"}
-      _ -> {:ok, "payload"}
+      "engineer", _root -> {:ok, "git_native"}
+      _, _root -> {:ok, "payload"}
     end
 
   defp hc(opts \\ []) do
@@ -277,7 +277,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # pod ACTUALLY ran with (producer → opens the PR), never the drifted re-derivation (which would treat a
     # producer as a judge → the code deliverable would never open a PR).
     payload = Map.put(build_done("gated", %{"ok" => true}), "deliverable_mode", "git_native")
-    drifted = hc(deliverable_mode_fun: fn _role -> {:ok, "payload"} end)
+    drifted = hc(deliverable_mode_fun: fn _role, _root -> {:ok, "payload"} end)
 
     assert {:ok, :review_requested} = StepRunConsumer.maybe_complete(payload, drifted)
 

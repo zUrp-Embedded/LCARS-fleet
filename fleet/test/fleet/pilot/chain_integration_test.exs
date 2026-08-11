@@ -325,8 +325,8 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
   defp dmode,
     do: fn
-      "engineer" -> {:ok, "git_native"}
-      _ -> {:ok, "payload"}
+      "engineer", _root -> {:ok, "git_native"}
+      _, _root -> {:ok, "payload"}
     end
 
   defp wrap(pid), do: %{"issue" => Sim.get(pid)}

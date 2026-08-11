@@ -29,7 +29,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
     @type t :: %__MODULE__{
             loader: module() | (String.t() -> map()),
-            deliverable_mode_fun: (String.t() -> {:ok, String.t()} | {:error, term()}),
+            deliverable_mode_fun: (String.t(), Path.t() | nil ->
+                                     {:ok, String.t()} | {:error, term()}),
             repo: String.t() | nil,
             forge_opts: keyword(),
             forge_client: module() | nil,
@@ -78,21 +79,28 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   Classifies a producer from the effective deliverable mode. Falls back to role resolution only when
   the effective mode is absent. Resolution errors remain explicit. `DR-013`.
   """
-  @spec producer?(term(), (String.t() -> {:ok, String.t()} | {:error, term()}), String.t() | nil) ::
-          {:ok, boolean()} | {:error, term()}
-  def producer?(role, deliverable_mode_fun, effective_mode \\ nil)
+  # The seam takes the catalogue ROOT beside the role: a role only exists in the catalogue that
+  # declares it, and this rail serves every project of every active catalogue from ONE singleton
+  # consumer — so the root cannot be bound once at init, it arrives with the work item.
+  @spec producer?(
+          term(),
+          (String.t(), Path.t() | nil -> {:ok, String.t()} | {:error, term()}),
+          String.t() | nil,
+          Path.t() | nil
+        ) :: {:ok, boolean()} | {:error, term()}
+  def producer?(role, deliverable_mode_fun, effective_mode \\ nil, root \\ nil)
 
-  def producer?(_role, _deliverable_mode_fun, mode) when is_binary(mode),
+  def producer?(_role, _deliverable_mode_fun, mode, _root) when is_binary(mode),
     do: {:ok, mode == "git_native"}
 
-  def producer?(role, deliverable_mode_fun, _mode) when is_binary(role) do
-    case deliverable_mode_fun.(role) do
+  def producer?(role, deliverable_mode_fun, _mode, root) when is_binary(role) do
+    case deliverable_mode_fun.(role, root) do
       {:ok, mode} -> {:ok, mode == "git_native"}
       {:error, _} = err -> err
     end
   end
 
-  def producer?(_role, _deliverable_mode_fun, _mode), do: {:ok, false}
+  def producer?(_role, _deliverable_mode_fun, _mode, _root), do: {:ok, false}
 
   @doc """
   Advances in the workflow map. A terminal producer returns `:review`; a terminal judge returns
@@ -123,11 +131,22 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   end
 
   defp no_workflow_map_resolve(payload, seams) do
-    case producer?(payload["role"], seams.deliverable_mode_fun, payload["deliverable_mode"]) do
+    case producer?(
+           payload["role"],
+           seams.deliverable_mode_fun,
+           payload["deliverable_mode"],
+           catalogue_root(payload)
+         ) do
       {:ok, true} -> {:ok, :review, {nil, nil}}
       {:ok, false} -> {:ok, :reviewed, {nil, nil}}
       {:error, _} = err -> err
     end
+  end
+
+  # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
+  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues actifs.
+  defp catalogue_root(payload) do
+    Fleet.Catalogue.root_for_repo(get_in(payload, ["repository", "full_name"]) || payload["repo"])
   end
 
   defp judge_kind?(payload, spec) do
@@ -165,7 +184,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     else
       case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
         :pass ->
-          case producer?(payload["role"], seams.deliverable_mode_fun, payload["deliverable_mode"]) do
+          case producer?(
+                 payload["role"],
+                 seams.deliverable_mode_fun,
+                 payload["deliverable_mode"],
+                 catalogue_root(payload)
+               ) do
             {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
             {:error, _} = err -> err
           end

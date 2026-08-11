@@ -756,6 +756,42 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
+  Root of the active catalogue NAMED `name`, or `nil` — the pairing read by its other end.
+
+  It exists because the dispatch rail knows a project by its forge repo, and a project lives in the
+  org of its catalogue: the `owner` of `owner/name` IS the catalogue name (lot 4 of the org-par-
+  catalogue chantier). So a step run carries, for free, the catalogue that must resolve its roles —
+  and this is the function that spends it.
+
+  `nil` for a name no active catalogue answers to. That is not a defect to guard against: the poller
+  only discovers on the orgs of ACTIVE catalogues, so a work item for an inactive one does not
+  exist. Callers treat `nil` as "no catalogue named, resolve in the default image", which is what
+  every pre-catalogue caller already did.
+  """
+  @spec root_for(String.t() | nil) :: Path.t() | nil
+  def root_for(nil), do: nil
+
+  def root_for(name) when is_binary(name) do
+    case Enum.find(active_catalogues(), &(&1.name == name)) do
+      %{root: root} -> root
+      nil -> nil
+    end
+  end
+
+  @doc """
+  The same root, from a repo's `owner/name` — the form the dispatch rail actually holds.
+
+  It exists so the split is written ONCE. Three call sites derived it separately within an hour of
+  each other, which is how one fact acquires three answers and how they start to disagree.
+  """
+  @spec root_for_repo(String.t() | nil) :: Path.t() | nil
+  def root_for_repo(full_name) when is_binary(full_name) do
+    full_name |> String.split("/") |> List.first() |> root_for()
+  end
+
+  def root_for_repo(_), do: nil
+
+  @doc """
   The card a project of THIS catalogue gets when it declares none, or `nil` for a catalogue with no
   cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
   """

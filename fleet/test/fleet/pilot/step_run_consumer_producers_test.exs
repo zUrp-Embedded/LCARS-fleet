@@ -52,8 +52,8 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
   defp dmode,
     do: fn
-      "engineer" -> {:ok, "git_native"}
-      _ -> {:ok, "payload"}
+      "engineer", _root -> {:ok, "git_native"}
+      _, _root -> {:ok, "payload"}
     end
 
   defp state do
@@ -152,7 +152,10 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       # (a real producer, its code never pushed). DR-013 instead: {:error} → fail-loud + escalate to
       # the arch (freeze_to_arch: never bubble → the reaper would re-dispatch a broken profile
       # forever, G2 churn).
-      st = %{state() | deliverable_mode_fun: fn _role -> {:error, :cap_profile_unloadable} end}
+      st = %{
+        state()
+        | deliverable_mode_fun: fn _role, _root -> {:error, :cap_profile_unloadable} end
+      }
 
       payload = %{
         "issue_id" => "issue-77",
@@ -177,7 +180,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
       # The pod ran a RESOLVED profile whose deliverable_mode is carried in the pod.completed payload.
       # The completion consumes THAT — a since-vanished/edited base profile (the DR-013 trigger) is
       # irrelevant when the effective fact already travelled. The seam MUST NOT be called.
-      raising = fn _role ->
+      raising = fn _role, _root ->
         raise "deliverable_mode_fun must not be consulted when the payload carries the mode"
       end
 
@@ -188,13 +191,16 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
     test "producer?/3 with nil effective mode falls back to the seam (DR-013 fail-loud preserved)" do
       # Bare/legacy payload (no `deliverable_mode`) → re-derive from the base role via the seam, keeping
       # the DR-013 closed classification: {:ok, _} resolves, {:error, _} fails loud (never a silent judge).
-      assert {:ok, true} = GateEngine.producer?("engineer", fn _ -> {:ok, "git_native"} end, nil)
-      assert {:ok, false} = GateEngine.producer?("qualifier", fn _ -> {:ok, "payload"} end, nil)
+      assert {:ok, true} =
+               GateEngine.producer?("engineer", fn _, _ -> {:ok, "git_native"} end, nil)
+
+      assert {:ok, false} =
+               GateEngine.producer?("qualifier", fn _, _ -> {:ok, "payload"} end, nil)
 
       assert {:error, :cap_profile_unloadable} =
                GateEngine.producer?(
                  "engineer",
-                 fn _ -> {:error, :cap_profile_unloadable} end,
+                 fn _, _ -> {:error, :cap_profile_unloadable} end,
                  nil
                )
     end

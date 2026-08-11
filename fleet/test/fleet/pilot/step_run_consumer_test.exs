@@ -62,8 +62,8 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   # deliverable_mode seam: engineer = git_native (producer), everything else = payload (judge).
   defp dmode,
     do: fn
-      "engineer" -> {:ok, "git_native"}
-      _ -> {:ok, "payload"}
+      "engineer", _root -> {:ok, "git_native"}
+      _, _root -> {:ok, "payload"}
     end
 
   defp state(extra \\ %{}) do

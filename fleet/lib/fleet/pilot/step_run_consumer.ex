@@ -449,7 +449,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     role = payload["role"]
 
     # DR-013
-    case producer?(role, payload["deliverable_mode"], state) do
+    case producer?(role, payload, state) do
       {:error, reason} ->
         TerminalEscalation.escalate_terminal_error(reason, n, role, terminal_seams(state))
 
@@ -586,14 +586,32 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
   end
 
-  defp producer?(role, effective_mode, state),
-    do: GateEngine.producer?(role, state.deliverable_mode_fun, effective_mode)
+  defp producer?(role, payload, state),
+    do:
+      GateEngine.producer?(
+        role,
+        state.deliverable_mode_fun,
+        payload["deliverable_mode"],
+        catalogue_root(payload)
+      )
+
+  # A project lives in the org of ITS catalogue, so the repo names the catalogue (lot 4 of the
+  # org-par-catalogue chantier). This rail is a SINGLETON serving every project of every active
+  # catalogue: the root cannot be bound at init, and it does not need to be — the work item already
+  # carries the repo, so it carries the catalogue. The split itself lives in `Fleet.Catalogue`.
+  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   @doc false
-  @spec default_deliverable_mode(String.t()) ::
+  # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
+  # resolved every role in the FIRST active catalogue's image: a `dev` of `web` looked up among
+  # `fleet`'s roles, was not there, and the step failed loud on a role that exists — the wedge the
+  # boot validators cannot catch, because it only happens when a step of a second catalogue's
+  # project runs. `nil` keeps the default image, which is what a single-catalogue deployment and
+  # every test fixture want.
+  @spec default_deliverable_mode(String.t(), Path.t() | nil) ::
           {:ok, String.t()} | {:error, :cap_profile_unloadable}
-  def default_deliverable_mode(role) do
-    case Fleet.CapProfile.load(role) do
+  def default_deliverable_mode(role, root \\ nil) do
+    case Fleet.CapProfile.load(role, root) do
       {:ok, cap} ->
         {:ok, Fleet.CapProfile.deliverable_mode(cap)}
 
@@ -666,7 +684,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # a next step → `:advance`. A single source of truth for the terminal intent.
         # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
         # cap-profile fails-loud, never a blind terminal intent under an unknown property.
-        with {:ok, is_producer?} <- producer?(role, payload["deliverable_mode"], state),
+        with {:ok, is_producer?} <- producer?(role, payload, state),
              {:ok, intent, {next_assignee, next_step}} <-
                GateEngine.advance_intent(workflow_map, step, is_producer?) do
           complete_business_step_run(

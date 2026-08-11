@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
       repo: "fleet/demo",
       remote: "origin",
       role_emails: fn _role -> [] end,
-      deliverable_mode_fun: fn _role -> {:ok, "payload"} end,
+      deliverable_mode_fun: fn _role, _root -> {:ok, "payload"} end,
       forge_client: forge,
       forge_opts: []
     }
