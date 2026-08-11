@@ -76,13 +76,33 @@ Appelle le tool MCP **`mcp__fleet__create_issue`** avec :
   pinné est TOUJOURS le commit du système : tu n'écris pas dans le registre, donc aucun sha à toi
   ne peut y être cité.
 
-- `lot` : **quand la matière du ticket est des FICHIERS, pas des mots** — plusieurs documents, un
-  dossier, des images, une maquette. Tu les travailles dans ta face workshop (avec ton humain, au
-  terminal), tu les **committes** — et tu t'arrêtes là : **tu ne pousses pas**, tu n'en as ni le
-  droit ni le besoin. Tu nommes ton lot ici par un slug (`[a-z0-9][a-z0-9_-]*`, ex.
-  `morse-ui-v2`). La fleet publie tes commits en `lcars/lot-<slug>` et l'espace de travail du
-  producteur **part de là** : il reçoit les fichiers, pas leur description. Ton `brief` dit ce
-  qu'il faut EN FAIRE.
+- `lot` : **quand la matière du ticket est des FICHIERS, pas des mots** — et c'est le TROISIÈME
+  réflexe, pas le premier. Avant de fabriquer un lot, pose-toi la question dans cet ordre :
+
+  1. **C'est déjà sur `workshop` ?** → **un pointeur dans le brief**, rien d'autre. Le producteur
+     monte la face workshop du projet en lecture seule, en permanence : il lit
+     `/home/projects.workshop/<projet>/…` sans que tu transportes quoi que ce soit. Une datasheet,
+     une ancienne design-note, une spec de protocole : c'est de la RÉFÉRENCE, elle vit là et elle
+     sert tous les tickets, pas un seul.
+  2. **Ça devrait y être et ça n'y est pas ?** → **un ticket scribe pour l'y ranger**. Tu paies une
+     fois, tu gagnes à chaque ticket suivant. C'est le geste qui fait entrer de la matière dans le
+     projet.
+  3. **C'est propre à CE ticket ?** (une maquette qu'on vient de faire, un export ponctuel, un dump
+     à traiter) → **là, un lot.**
+
+  Le discriminant tient en une phrase : **le lot est pour la matière qui n'a pas encore de maison
+  dans le projet.** La même matière portée deux fois en lot est le signal qu'elle aurait dû être
+  rangée.
+
+  Comment : tu travailles tes fichiers dans ta face workshop (avec ton humain, au terminal), tu les
+  **committes** — et tu t'arrêtes là : **tu ne pousses pas**, tu n'en as ni le droit ni le besoin.
+  Tu nommes ton lot par un slug (`[a-z0-9][a-z0-9_-]*`, ex. `morse-ui-v2`). La fleet publie tes
+  commits en `lcars/lot-<slug>` et l'espace de travail du producteur **part de là** : il reçoit les
+  fichiers, pas leur description. Ton `brief` dit ce qu'il faut EN FAIRE.
+
+  ⚠ Le pointeur et le lot ne portent pas la même garantie, et c'est ce qui décide entre 1 et 3 :
+  la face montée est **vivante au lancement du pod** (elle ne bouge plus pour lui ensuite), le lot
+  est un **commit épinglé**. Ce contre quoi le livrable sera JUGÉ doit être épinglé.
   **Un lot impubliable REFUSE le ticket** (nom qui n'est pas un slug, rien de commité, secret
   détecté dans la matière) : un ticket qui nomme une matière qu'il ne peut pas porter enverrait un
   producteur travailler contre du matériau qu'il n'a jamais vu. Le message d'erreur dit lequel des
