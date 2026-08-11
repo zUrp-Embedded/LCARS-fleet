@@ -77,10 +77,11 @@ defmodule Fleet.Project.OnboardMigrateTest do
     test "les trois faces sortent pointees sur la nouvelle org", %{tmp: tmp} do
       dirs = Map.new(~w(code workshop ops), &{&1, face(tmp, &1)})
 
-      assert {:ok, %{repo: "web/vitrine", from: "fleet/vitrine", faces: faces}} =
+      assert {:ok, %{repo: "web/vitrine", from: "fleet/vitrine", faces: faces, absent: absent}} =
                ProjectOnboard.migrate("fleet/vitrine", "web", opts(tmp))
 
       assert length(faces) == 3
+      assert absent == []
 
       for {_kind, dir} <- dirs do
         assert origin(dir) == "http://forge.test/web/vitrine.git"
@@ -92,10 +93,17 @@ defmodule Fleet.Project.OnboardMigrateTest do
       # Only the code face exists: the two others were never opened on this box.
       code = face(tmp, "code")
 
-      assert {:ok, %{repo: "web/vitrine"}} =
+      assert {:ok, %{repo: "web/vitrine", faces: faces, absent: absent}} =
                ProjectOnboard.migrate("fleet/vitrine", "web", opts(tmp))
 
       assert origin(code) == "http://forge.test/web/vitrine.git"
+
+      # Le compte rendu dit ce qui a ETE fait, pas ce qui etait vise. Mesure sur banc le
+      # 2026-08-11 : la porte annoncait trois faces repointees sur une boite ou les trois etaient
+      # absentes — la moitie forge etait juste, et le rapport mentait.
+      assert faces == [code]
+      assert length(absent) == 2
+      refute code in absent
     end
   end
 end

@@ -305,12 +305,19 @@ defmodule Fleet.Project.Onboard do
          {:ok, new_full_name} <-
            repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
          {:ok, url} <- repo_url(new_full_name, opts),
-         :ok <- repoint_faces(dirs, url) do
+         {:ok, repointed} <- repoint_faces(dirs, url) do
       Logger.info(
-        "ProjectOnboard: #{full_name} MIGRE vers #{new_full_name} — trois faces repointees sur #{url}"
+        "ProjectOnboard: #{full_name} MIGRE vers #{new_full_name} — " <>
+          "#{length(repointed)}/#{map_size(dirs)} faces repointees sur #{url}"
       )
 
-      {:ok, %{repo: new_full_name, from: full_name, faces: Map.values(dirs)}}
+      {:ok,
+       %{
+         repo: new_full_name,
+         from: full_name,
+         faces: Enum.reverse(repointed),
+         absent: Enum.sort(Map.values(dirs) -- repointed)
+       }}
     end
   end
 
@@ -329,18 +336,22 @@ defmodule Fleet.Project.Onboard do
     if target in actives, do: :ok, else: {:error, {:catalogue_not_installed, target, actives}}
   end
 
+  # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
+  # cosmetique : sur un banc, ce geste a annonce « trois faces repointees » sur une boite ou les
+  # trois etaient absentes — la moitie forge etait juste, et le rapport mentait. Un appelant qui
+  # affiche la liste visee affirme un travail qu'il n'a pas fait.
   defp repoint_faces(dirs, url) do
-    Enum.reduce_while(Map.values(dirs), :ok, fn dir, :ok ->
+    Enum.reduce_while(Map.values(dirs), {:ok, []}, fn dir, {:ok, done} ->
       if File.dir?(Path.join(dir, ".git")) do
         case GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false) do
-          :ok -> {:cont, :ok}
+          :ok -> {:cont, {:ok, [dir | done]}}
           {:error, reason} -> {:halt, {:error, {:remote_repoint_failed, dir, reason}}}
         end
       else
         # Une face absente n'est pas un echec : un projet peut n'avoir jamais ete ouvert ICI. Le
         # transfert forge a deja eu lieu, et refuser maintenant laisserait les deux moities en
-        # desaccord.
-        {:cont, :ok}
+        # desaccord. Elle n'entre simplement pas dans le compte rendu.
+        {:cont, {:ok, done}}
       end
     end)
   end
@@ -363,9 +374,14 @@ defmodule Fleet.Project.Onboard do
     {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
 
     case migrate(full_name, target) do
-      {:ok, %{repo: new_name, faces: faces}} ->
+      {:ok, %{repo: new_name, faces: faces, absent: absent}} ->
         IO.puts("migre : #{full_name} -> #{new_name}")
         for d <- faces, do: IO.puts("  origin repointe : #{d}")
+
+        # Une face jamais ouverte ICI est normale, et le taire ferait lire « rien a repointer »
+        # comme « tout est repointe ». On dit ce qu'on n'a pas fait.
+        for d <- absent, do: IO.puts("  face absente (jamais ouverte ici) : #{d}")
+
         System.halt(0)
 
       {:error, {:catalogue_not_installed, cat, actives}} ->
