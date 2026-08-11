@@ -45,6 +45,30 @@ if config_env() != :test do
     ]
 end
 
+# HORS du garde pour la meme raison que le bloc ci-dessus, et le meme defaut l'a revele : lire trois
+# variables d'env n'ouvre rien et ne demarre rien. Resolue par `ForgeClient.resolve_config/1` a
+# l'appel, cette config est ce qui permet a une porte `eval` d'AGIR sur la forge — et c'est le
+# design : `bin/lcars` n'a aucun acces forge, lui en donner un ferait d'une commande locale un
+# acteur distant, donc c'est le release qui agit. Enfermee dans le garde, elle rendait
+# `lcars project migrate` structurellement incapable : mesure du 2026-08-11 sur banc,
+# `ECHEC : {:config, {:missing, :base_url}}` — le transfert echoue FERME, sans demi-etat, mais la
+# porte n'avait jamais pu fonctionner.
+forge_opts =
+  if config_env() != :test do
+    [
+      base_url: System.get_env("FORGE_BASE_URL"),
+      token: System.get_env("FORGE_TOKEN"),
+      token_file: System.get_env("FORGE_TOKEN_FILE")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  else
+    []
+  end
+
+if forge_opts != [] do
+  config :fleet_pilot, :forge, forge_opts
+end
+
 if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
@@ -469,22 +493,6 @@ if config_env() != :test and not tool_mode? do
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
     config :fleet_pilot,
       poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
-  end
-
-  # Forge config — resolved by Fleet.Pilot.ForgeClient.resolve_config/1
-  # at call time (merged with call opts). base_url mandatory;
-  # token either inline (FORGE_TOKEN) or via file (FORGE_TOKEN_FILE,
-  # default ~/.gitea_token).
-  forge_opts =
-    [
-      base_url: System.get_env("FORGE_BASE_URL"),
-      token: System.get_env("FORGE_TOKEN"),
-      token_file: System.get_env("FORGE_TOKEN_FILE")
-    ]
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-
-  if forge_opts != [] do
-    config :fleet_pilot, :forge, forge_opts
   end
 
   # Login of the SYSTEM account (owner of FORGE_TOKEN). The forge markers
