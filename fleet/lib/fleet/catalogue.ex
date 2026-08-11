@@ -726,6 +726,24 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
+  The declared name of EVERY active catalogue, in declaration order — the forge orgs this
+  deployment discovers on.
+
+  A catalogue that declares no name is skipped rather than defaulted: the name is required and
+  `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
+  """
+  @spec active_names() :: [String.t()]
+  def active_names do
+    Enum.flat_map(active_roots(), fn root ->
+      case YamlElixir.read_from_file(Path.join(root, @manifest_basename)) do
+        {:ok, %{"name" => n}} when is_binary(n) -> [n]
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  @doc """
   The card a project of THIS catalogue gets when it declares none, or `nil` for a catalogue with no
   cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
   """

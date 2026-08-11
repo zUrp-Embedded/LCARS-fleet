@@ -109,7 +109,11 @@ defmodule Fleet.Pilot.Poller do
     # The forge org = THE admission frontier: the poller discovers via `list_org_repos(org)`, every repo
     # of the org IS a fleet project. Default `fleet` (config `:fleet_pilot, :fleet_org`); MUST match the org of
     # create_project (`:fleet_mcp, :delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
-    :org,
+    # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE ACTIF, et l'org porte le nom du
+    # catalogue. C'etait un scalaire tant qu'il n'y avait qu'un metier ; un scalaire ne peut pas
+    # nommer N orgs, et le projet d'un catalogue vit dans la sienne. Seam de test : opt `:orgs`
+    # (ou `:org`, un singleton, pour les appelants qui en nommaient une).
+    :orgs,
     :forge_client_override,
     forge_opts: [],
     loader: nil,
@@ -202,7 +206,7 @@ defmodule Fleet.Pilot.Poller do
     # scope its issues via `assigned_by`).
     state = %__MODULE__{
       my_human: Keyword.get(opts, :human) || Fleet.Credentials.Human.current!(),
-      org: Keyword.get(opts, :org) || Application.get_env(:fleet_pilot, :fleet_org, "fleet"),
+      orgs: resolve_orgs(opts),
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       forge_client_override: Keyword.get(opts, :forge_client),
       forge_opts: Keyword.get(opts, :forge_opts, []),
@@ -230,7 +234,7 @@ defmodule Fleet.Pilot.Poller do
       end
 
     Logger.info(
-      "Poller: start mode=step MULTI-PROJECT org=#{state.org} human=#{state.my_human} " <>
+      "Poller: start mode=step MULTI-PROJECT orgs=#{Enum.join(state.orgs, ",")} human=#{state.my_human} " <>
         "interval=#{state.interval_ms}ms jitter=±10%"
     )
 
@@ -290,6 +294,10 @@ defmodule Fleet.Pilot.Poller do
   def handle_call(:stats, _from, state) do
     {:reply,
      %{
+       # Ce que ce poller SURVEILLE — une org par catalogue actif. Sans ca, « pourquoi ce projet
+       # n'est-il jamais pris » n'a pas de reponse observable : la ligne de demarrage le dit une
+       # fois, et un operateur qui arrive apres ne l'a plus.
+       orgs: state.orgs,
        poll_count: state.poll_count,
        kick_count: state.kick_count,
        error_count: state.error_count,
@@ -359,6 +367,27 @@ defmodule Fleet.Pilot.Poller do
   # `Reconciliation`): the cross-repo union of suspects cannot collide on the number
   # alone → a live pod #N/repoB CANNOT mask an orphan #N/repoA, and the 2-tick grace does not
   # contaminate across repos (no double-spawn). The key carries the identity.
+  defp discover(forge, state) do
+    Enum.reduce_while(state.orgs, {:ok, []}, fn org, {:ok, acc} ->
+      case forge.list_org_repos(org, state.forge_opts) do
+        {:ok, repos} -> {:cont, {:ok, acc ++ repos}}
+        {:error, reason} -> {:halt, {:error, {org, reason}}}
+      end
+    end)
+  end
+
+  # `:orgs` d'abord (la forme), `:org` ensuite (un singleton — les appelants qui en nommaient une),
+  # puis la config, puis les catalogues actifs : l'org EST le nom du catalogue, donc la liste se
+  # derive au lieu de se tenir.
+  defp resolve_orgs(opts) do
+    cond do
+      is_list(orgs = Keyword.get(opts, :orgs)) and orgs != [] -> orgs
+      is_binary(org = Keyword.get(opts, :org)) -> [org]
+      is_binary(org = Application.get_env(:fleet_pilot, :fleet_org)) -> [org]
+      true -> Fleet.Catalogue.active_names()
+    end
+  end
+
   defp do_poll(state, mode) do
     # `started` captured BEFORE the forge call: `list_org_repos` is precisely the SLOW call when
     # the forge degrades — capturing after it reported duration_ms≈0 on exactly the failure case
@@ -366,7 +395,10 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = step_forge_client(state)
 
-    case forge.list_org_repos(state.org, state.forge_opts) do
+    # DECOUVERTE FAIL-CLOSED SUR TOUTES LES ORGS : une org illisible fait echouer le tick entier au
+    # lieu de rendre une liste partielle. Une decouverte partielle ne se distingue pas de « pas de
+    # travail » pour les projets manquants — elle ne casse rien, elle rend muet, ce qui est pire.
+    case discover(forge, state) do
       {:ok, repos} ->
         # :kick does NOT touch poll_count: it is the UNIT of the tick-cadenced invariants
         # (arch re-kick throttle below, 2-tick grace in step_do_poll) — a webhook burst must not
@@ -435,7 +467,7 @@ defmodule Fleet.Pilot.Poller do
         :telemetry.execute(
           [:fleet_pilot, :poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: length(repos)},
-          %{status: :ok, mode: mode, org: state.org}
+          %{status: :ok, mode: mode, orgs: state.orgs}
         )
 
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
@@ -448,7 +480,7 @@ defmodule Fleet.Pilot.Poller do
         :telemetry.execute(
           [:fleet_pilot, :poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: 0},
-          %{status: :error, mode: mode, org: state.org}
+          %{status: :error, mode: mode, orgs: state.orgs}
         )
 
         handle_poll_error(state, {:discover_repos, reason}, started)
@@ -516,7 +548,7 @@ defmodule Fleet.Pilot.Poller do
 
       _ =
         try do
-          incident.("pod_enumeration", state.org, :spawner_unreachable,
+          incident.("pod_enumeration", hd(state.orgs), :spawner_unreachable,
             reason_detail: inspect(reason)
           )
         catch

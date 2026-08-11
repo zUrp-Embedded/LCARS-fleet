@@ -1493,6 +1493,32 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
+    test "DECOUVERTE MULTI-ORG : une org illisible fait echouer le tick, jamais une liste partielle" do
+      # L'org est le nom du catalogue, il y en a une par catalogue actif, et le poller les balaie
+      # TOUTES. Une decouverte partielle ne se distingue pas de « pas de travail » pour les projets
+      # de l'org manquante : elle ne casse rien, elle rend muet. D'ou le refus net.
+      defmodule DemiForge do
+        def list_org_repos("bonne", _opts), do: {:ok, [%{"full_name" => "bonne/p"}]}
+        def list_org_repos("cassee", _opts), do: {:error, :boom}
+        def list_open_issues(_r, _o), do: {:ok, []}
+        def list_open_pulls(_r, _o), do: {:ok, []}
+      end
+
+      {:ok, pid} =
+        Poller.start_link(
+          orgs: ["bonne", "cassee"],
+          human: "h",
+          interval_ms: 60_000,
+          forge_client: DemiForge,
+          loader: fn -> %{} end
+        )
+
+      send(pid, :poll)
+      stats = Poller.stats(pid)
+      assert stats.err_streak >= 1, "une org illisible doit compter comme un echec de tick"
+      assert stats.orgs == ["bonne", "cassee"]
+    end
+
     test "F-037: DISCOVERY failure (list_org_repos) → backoff (err_streak + error_count +1)" do
       # The forge is DOWN — the discovery itself fails. This is the ONLY case that backoffs
       # (handle_poll_error).
