@@ -1525,6 +1525,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @tag :tmp_dir
+
     test "an EMPTY catalogue is a tool error, never an empty offer", %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
 
@@ -1532,6 +1533,25 @@ defmodule Fleet.MCP.PodToolsTest do
                PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
 
       assert msg =~ "no *.yaml card"
+    end
+
+    test "le guichet rend un TABLEAU catalogue x carte — chaque carte nommee par son catalogue" do
+      # Sans surcharge fine, le guichet balaie les catalogues ACTIFS et chaque carte porte le sien.
+      # Ce n'etait pas une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux,
+      # `standard` peut exister des deux cotes et un nom seul ne designe plus rien.
+      TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
+      Application.delete_env(:fleet_workflow, :workflow_maps_root)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+
+      assert %{"cards" => [_ | _] = cards} = Jason.decode!(txt)
+
+      assert Enum.all?(cards, &is_binary(&1["catalogue"])),
+             "chaque carte doit nommer son catalogue"
+
+      assert "fleet" in Enum.map(cards, & &1["catalogue"]),
+             "le catalogue livre s'appelle `fleet` et ses cartes doivent le dire"
     end
   end
 

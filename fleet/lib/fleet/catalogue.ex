@@ -733,14 +733,26 @@ defmodule Fleet.Catalogue do
   `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
   """
   @spec active_names() :: [String.t()]
-  def active_names do
+  def active_names, do: active_catalogues() |> Enum.map(& &1.name) |> Enum.uniq()
+
+  @doc """
+  Every active catalogue as `%{name, root}`, in declaration order — THE pairing.
+
+  Three readers want it in three shapes (the poller wants the orgs, the card listing wants
+  name-plus-cards-dir, the enroller wants the root), and re-reading the manifest in each is how the
+  same fact acquires three answers. One authority, one read.
+
+  A root whose manifest declares no name is skipped rather than defaulted: the name is required and
+  `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
+  """
+  @spec active_catalogues() :: [%{name: String.t(), root: Path.t()}]
+  def active_catalogues do
     Enum.flat_map(active_roots(), fn root ->
       case YamlElixir.read_from_file(Path.join(root, @manifest_basename)) do
-        {:ok, %{"name" => n}} when is_binary(n) -> [n]
+        {:ok, %{"name" => n}} when is_binary(n) -> [%{name: n, root: root}]
         _ -> []
       end
     end)
-    |> Enum.uniq()
   end
 
   @doc """

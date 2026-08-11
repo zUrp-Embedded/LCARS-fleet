@@ -190,10 +190,28 @@ defmodule Fleet.Workflow.Loader do
   publish and prove cards nobody wrote.
   """
   @spec card_roots() :: [Path.t()]
-  def card_roots do
+  def card_roots, do: Enum.map(card_scopes(), & &1.dir)
+
+  @doc """
+  The same list, each directory paired with the CATALOGUE that owns it — `nil` under a fine
+  override, which points at a fixture belonging to no catalogue.
+
+  Two shapes, one read: a caller that only publishes wants the directories, a caller that PRESENTS
+  the offer needs to say which catalogue a card comes from — `standard` can exist in two of them,
+  and a name alone stops designating anything. Deriving the pairing beside this function is how the
+  same fact would acquire two answers, and it is exactly the mistake this layer keeps catching.
+  """
+  @spec card_scopes() :: [%{catalogue: String.t() | nil, dir: Path.t()}]
+  def card_scopes do
     case Application.get_env(:fleet_workflow, :workflow_maps_root) do
-      nil -> Fleet.Catalogue.workflow_maps_roots()
-      dir -> [dir]
+      nil ->
+        Enum.flat_map(Fleet.Catalogue.active_catalogues(), fn %{name: name, root: root} ->
+          dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+          if File.dir?(dir), do: [%{catalogue: name, dir: dir}], else: []
+        end)
+
+      dir ->
+        [%{catalogue: nil, dir: dir}]
     end
   end
 

@@ -389,13 +389,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
     with {:ok, _role} <- require_onboarder(state),
-         {:ok, names} <- catalogue_names() do
+         {:ok, pairs} <- catalogue_cards() do
       {cards, unreadable} =
-        Enum.reduce(names, {[], []}, fn name, {ok, bad} ->
-          case read_card(name) do
-            {:ok, %{"status" => "canon"} = card} -> {[card | ok], bad}
+        Enum.reduce(pairs, {[], []}, fn {cat, name, opts}, {ok, bad} ->
+          case read_card(name, opts) do
+            {:ok, %{"status" => "canon"} = card} -> {[put_catalogue(card, cat) | ok], bad}
             {:ok, _technical} -> {ok, bad}
-            :error -> {ok, ["#{name}.yaml" | bad]}
+            :error -> {ok, [if(cat, do: "#{cat}/#{name}.yaml", else: "#{name}.yaml") | bad]}
           end
         end)
 
@@ -408,14 +408,30 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  defp catalogue_names do
-    {:ok, Fleet.Workflow.Loader.canon_names!()}
+  # Le TABLEAU catalogue x carte : chaque carte nommee par le catalogue qui la porte. Ce n'etait pas
+  # une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux, `standard` peut exister
+  # des deux cotes et un nom seul ne designe plus rien. Le guichet presente donc l'offre ENTIERE en
+  # une fois — c'est deja ce que son commentaire d'outil promettait (« framing FIRST: the catalogue
+  # the human picks the card from »), sur un catalogue au lieu de N.
+  defp catalogue_cards do
+    pairs =
+      Enum.flat_map(Fleet.Workflow.Loader.card_scopes(), fn %{catalogue: cat, dir: dir} ->
+        opts = [workflow_maps_root: dir]
+        Enum.map(Fleet.Workflow.Loader.canon_names!(opts), &{cat, &1, opts})
+      end)
+
+    {:ok, pairs}
   rescue
     e in RuntimeError -> {:error, {:workflow_catalogue_unavailable, e.message}}
   end
 
-  defp read_card(name) do
-    card = Fleet.Workflow.Loader.load!(name)
+  # `nil` sous une surcharge fine : la fixture n'appartient a aucun catalogue, et lui en inventer un
+  # nom serait une reponse fabriquee a une question qui ne se pose pas la.
+  defp put_catalogue(card, nil), do: card
+  defp put_catalogue(card, cat), do: Map.put(card, "catalogue", cat)
+
+  defp read_card(name, opts) do
+    card = Fleet.Workflow.Loader.load!(name, opts)
 
     {:ok,
      %{
