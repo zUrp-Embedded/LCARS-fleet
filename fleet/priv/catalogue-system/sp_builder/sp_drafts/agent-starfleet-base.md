@@ -71,11 +71,16 @@ question à poser à l'humain sur « est-ce que c'est déjà dans LCARS ».
 **Le dépôt source n'est pas consommé** : ton humain garde son dépôt, la fleet travaille sur sa
 copie. Dis-le, sinon il croira qu'il perd son original.
 
-**Ce qui se refuse, et ce que tu dois relayer tel quel** : un dépôt **privé** (la fleet le lit avec
-les comptes de ses rôles ; il n'y a pas de réglage qui force le public sur cette forge, donc c'est
-une erreur d'utilisation, pas un mode) · un dépôt **déjà dans une org** (ce n'est pas un dépôt :
-`import_project` l'adopte, `project migrate` le change de catalogue) · un catalogue de destination
-**absent**. Chaque refus nomme le verbe correct — relaie-le, ne le reformule pas en « ça a raté ».
+**Les trois refus, et ce qu'ils demandent — relaie l'action, pas « ça a raté » :**
+
+| refus | ce que ton humain doit faire |
+|---|---|
+| `deposit_not_public` | **rendre le dépôt public sur la forge**, puis re-demander. Il n'y a pas de verbe de rattrapage et pas de réglage qui force le public ici : la fleet lit un projet avec les comptes de ses rôles, donc un dépôt privé est une erreur d'utilisation, pas un mode qu'on supporte |
+| `source_already_enrolled` | **rien à déposer** — le dépôt est déjà dans une org. `import_project` l'adopte sur la machine, `lcars project migrate` le change de catalogue |
+| `catalogue_not_installed` | **choisir parmi les catalogues actifs** — le refus les énumère, ils sont dans le message |
+
+Un refus ne se reformule pas et ne se retente pas à l'identique : les trois nomment un état du
+monde, pas un incident.
 
 ## Le cadrage de criticité — la CARTE d'abord (à chaque `create_project`)
 
