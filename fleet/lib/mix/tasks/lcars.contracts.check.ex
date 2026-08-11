@@ -1324,7 +1324,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # La comparaison consomme la DERIVATION, pas une seconde implementation de la regle de placement
     # (siege -> externals, juge sans capacite -> judges, le reste -> writers) : la redire ici serait
     # exactement la duplication que ce verrou existe pour interdire.
-    placement = check_placement_defaults(root, tf_path)
+    {placement, placement_note} = check_placement_defaults(root, tf_path)
     evidence = evidence ++ placement
 
     evidence =
@@ -1340,8 +1340,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [] and canon != [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "four-list STRICT equality (BL-6-45) + the THREE placement defaults against the " <>
-          "derivation: canon{forge_identity} PROJECTED into " <>
+        "four-list STRICT equality (BL-6-45)" <>
+          placement_note <>
+          ": canon{forge_identity} PROJECTED into " <>
           "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
           "ROLES == PROV_ROLES — any delta is a defect, named" <>
           skipped_note(skipped)
@@ -1663,6 +1664,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp merge_lists(_, nil), do: nil
   defp merge_lists(a, b), do: Enum.sort(a ++ b)
 
+  @placement_checked " + the THREE placement defaults against the derivation"
+
   defp check_placement_defaults(root, tf_path) do
     catalogue = Path.join(root, "priv/catalogue")
 
@@ -1674,27 +1677,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     if File.dir?(Path.expand("deploy", root)) and File.dir?(catalogue) do
       case Fleet.Application.CatalogueRoles.tfvars(catalogue) do
         {:ok, derived} ->
-          Enum.flat_map(~w(writers judges externals), fn key ->
-            rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
-            hard = read_list(tf_path, rx, :quoted)
-            want = Enum.sort(Map.get(derived, key, []))
+          ev =
+            Enum.flat_map(~w(writers judges externals), fn key ->
+              rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
+              hard = read_list(tf_path, rx, :quoted)
+              want = Enum.sort(Map.get(derived, key, []))
 
-            cond do
-              hard == nil ->
-                ["forge.tf var.#{key} default: not readable — fail-closed"]
+              cond do
+                hard == nil ->
+                  ["forge.tf var.#{key} default: not readable — fail-closed"]
 
-              Enum.sort(hard) == want ->
-                []
+                Enum.sort(hard) == want ->
+                  []
 
-              true ->
-                [
-                  "forge.tf var.#{key} default #{inspect(Enum.sort(hard))} != derivation #{inspect(want)}"
-                ]
-            end
-          end)
+                true ->
+                  [
+                    "forge.tf var.#{key} default #{inspect(Enum.sort(hard))} != derivation #{inspect(want)}"
+                  ]
+              end
+            end)
+
+          {ev, @placement_checked}
 
         {:error, reason} ->
-          ["placement derivation unreadable (#{inspect(reason)}) — fail-closed"]
+          {["placement derivation unreadable (#{inspect(reason)}) — fail-closed"],
+           @placement_checked}
       end
     else
       []
