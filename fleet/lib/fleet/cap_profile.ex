@@ -118,6 +118,17 @@ defmodule Fleet.CapProfile do
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
   def load(role) when is_binary(role), do: load(role, nil)
 
+  # WHICH CATALOGUE declares the role. `load/2` has carried the root since lot 4 and this resolver
+  # went on calling `load/1`, so a card of catalogue B naming ITS producer resolved that name in
+  # catalogue A and answered `:not_found` — the card was right, the role existed, and the lookup was
+  # in the wrong library. `nil` keeps the default root, and a loader exporting only `load/1` is a
+  # test stub answering for the single catalogue it fabricates.
+  defp load_in(loader, role, root) do
+    if root && function_exported?(loader, :load, 2),
+      do: loader.load(role, root),
+      else: loader.load(role)
+  end
+
   @doc """
   Le meme role, charge depuis le catalogue NOMME — et le profil rendu PORTE cette racine.
 
@@ -241,10 +252,11 @@ defmodule Fleet.CapProfile do
   no incompatible pair. The result records that set for `SPBuilder.compose/3`. A loader without
   `compose/2` returns its fixed base with the active set stamped, which supports test stubs.
   """
-  @spec resolve(module(), String.t(), [String.t()]) :: {:ok, t()} | {:error, term()}
-  def resolve(loader, role, extra_modops \\ [])
+  @spec resolve(module(), String.t(), [String.t()], Path.t() | nil) ::
+          {:ok, t()} | {:error, term()}
+  def resolve(loader, role, extra_modops \\ [], root \\ nil)
       when is_atom(loader) and is_binary(role) and is_list(extra_modops) do
-    with {:ok, base} <- loader.load(role),
+    with {:ok, base} <- load_in(loader, role, root),
          :ok <- validate_extra_modops(base, extra_modops) do
       active = default_modops(base) ++ extra_modops
 

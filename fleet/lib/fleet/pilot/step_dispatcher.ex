@@ -452,7 +452,13 @@ defmodule Fleet.Pilot.StepDispatcher do
          # step EXISTS in the map above.
          step_spec = get_in(workflow_map, ["steps", step]),
          step_modops = step_modops(step_spec),
-         {:ok, profile} <- Fleet.CapProfile.resolve(loader, role, step_modops) do
+         {:ok, profile} <-
+           Fleet.CapProfile.resolve(
+             loader,
+             role,
+             step_modops,
+             Fleet.Catalogue.root_for_repo(repo)
+           ) do
       {:ok, {role, profile, step_spec}}
     end
   end

@@ -142,6 +142,22 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   end
 
   @tag :tmp_dir
+  test "le ROLE d'une carte se resout dans le catalogue de cette carte" do
+    # Le dernier maillon, et il tombait apres les deux autres : la carte juste, la bonne racine, et
+    # `resolve/3` appelait `load/1`. `load/2` porte la racine depuis le lot 4 ; ce resolveur ne la
+    # passait pas, donc le producteur declare par la carte de `biz` etait cherche dans `fleet` et
+    # rendait `:not_found` — la carte etait bonne, le role existait, la bibliotheque etait fausse.
+    root = Fleet.Catalogue.root_for_repo("biz/boutique")
+    assert is_binary(root)
+
+    assert {:ok, %Fleet.CapProfile{}} =
+             Fleet.CapProfile.resolve(Fleet.CapProfile, "biz-dev", [], root)
+
+    # Sans la racine, le meme nom n'existe pas : c'est exactement ce que voyait le dispatcher.
+    assert {:error, _} = Fleet.CapProfile.resolve(Fleet.CapProfile, "biz-dev")
+  end
+
+  @tag :tmp_dir
   test "un role d'etape aussi" do
     assert :ok = Fleet.Pilot.Application.validate_card_steps!()
   end
