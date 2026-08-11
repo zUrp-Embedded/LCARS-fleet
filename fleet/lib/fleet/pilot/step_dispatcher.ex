@@ -178,10 +178,9 @@ defmodule Fleet.Pilot.StepDispatcher do
              face = Map.get(step_spec || %{}, "face", "code"),
              face_branch = Fleet.Layout.face_branch(face),
              # A ticket may carry a LOT: matter (docs, a directory, images) committed by the
-             # delegating role and published as `lcars/lot-<slug>`. It moves the CLONE base only —
-             # the producer starts from the matter instead of the head of its face — while the GATE
-             # base stays the face, so the deliverable is still judged against where it will land.
-             # The resolver pins the two separately already; this is the caller that needed it.
+             # delegating role and published as `lcars/lot-<slug>`. It moves the CLONE base — the
+             # producer starts from the matter instead of the head of its face — and, with it, the
+             # PR base, which on every other ticket is the same value and so was never named.
              {:ok, lot} <- lot_of_issue(issue),
              face_opts = lot_base_opts(opts, lot, face_branch),
              {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
@@ -537,9 +536,14 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp lot_base_opts(opts, nil, face_branch), do: Keyword.put(opts, :base_branch, face_branch)
 
-  defp lot_base_opts(opts, {ref, _sha}, face_branch) do
-    opts |> Keyword.put(:base_branch, ref) |> Keyword.put(:gate_base_branch, face_branch)
-  end
+  # `:gate_base_branch` is deliberately NOT set here, and the temptation to set it is the trap.
+  # `gate_base_sha` feeds the DELIVERABLE gate, whose question is "does `base..HEAD` contain the
+  # pod's work and nothing else" — so its base is where the pod STARTED, which with a lot is the
+  # lot. Pointing it at the face instead would (1) break ancestry the moment the face moved after
+  # the lot was published, and (2) run the identity and co-author checks over the MATTER commits,
+  # which the producer never made. Where the work LANDS is a different question, answered by
+  # `pr_base_branch` (`lot_pr_base/3`).
+  defp lot_base_opts(opts, {ref, _sha}, _face_branch), do: Keyword.put(opts, :base_branch, ref)
 
   # WHERE THE DELIVERABLE LANDS, when the clone base is a lot. The completer opens the PR on
   # `pr_base_branch || base_branch`, and with a lot `base_branch` is the lot itself — the producer's

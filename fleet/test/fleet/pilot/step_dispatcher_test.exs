@@ -606,11 +606,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:resolver_base, "main"}
     end
 
-    test "a ticket carrying a LOT clones from the lot and still gates against its FACE" do
-      # The lot is the MATTER (docs, a directory, images) published as `lcars/lot-<slug>`. It moves
-      # the CLONE base only: the producer starts from the matter instead of the head of its face,
-      # while the deliverable is still judged against where it will land. The resolver has pinned
-      # the two separately since F-PARALLEL-PR-CONFLICT — this is the caller that needed it.
+    test "a ticket carrying a LOT clones from the lot, and its PR still lands on the FACE" do
+      # The lot is the MATTER (docs, a directory, images) published as `lcars/lot-<slug>`. Two bases
+      # that coincide on every other ticket separate here, and only here: the pod CLONES the lot,
+      # and its PR LANDS on the face. The deliverable gate keeps the lot as its base — its question
+      # is "does base..HEAD hold the pod's work and nothing else", and the pod started at the lot.
       sha = String.duplicate("ab", 20)
       me = self()
 
@@ -630,7 +630,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       opts = dispatch_opts(project_resolver: capturing_resolver)
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
-      assert_received {:bases, "lcars/lot-morse-ui-v2", "main"}
+
+      # The clone base moves to the lot; the GATE base is left alone (it defaults to the clone
+      # base — pointing it at the face would run the identity and co-author checks over the
+      # MATTER commits, which the producer never made).
+      assert_received {:bases, "lcars/lot-morse-ui-v2", nil}
 
       # And the lot is a STARTING POINT, not a destination: the PR base is named explicitly,
       # otherwise the completer opens it on the clone base and the work merges into the matter.
