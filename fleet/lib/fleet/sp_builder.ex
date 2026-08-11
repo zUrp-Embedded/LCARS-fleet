@@ -311,12 +311,15 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  defp read_subagent_template(%Fleet.CapProfile{
-         spec: %{"invocation" => %{"subagent_template" => name}}
-       })
+  defp read_subagent_template(
+         %Fleet.CapProfile{spec: %{"invocation" => %{"subagent_template" => name}}} = cap
+       )
        when is_binary(name) and name != "" do
     if Fleet.Slug.valid?(name) do
-      case fetch_subagent_content(name) do
+      # La racine vient du PROFIL : le template de sous-agent d'un role est livre par le catalogue
+      # qui declare ce role. Le chercher dans l'image du premier catalogue rendait
+      # `subagent_template_missing` sur un fichier bien present, dans l'autre.
+      case fetch_subagent_content(name, cap.catalogue_root) do
         {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
         :error -> {:error, {:subagent_template_missing, name}}
       end
@@ -326,8 +329,6 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_subagent_template(_cap_profile), do: {:ok, ""}
-
-  defp fetch_subagent_content(name), do: fetch_subagent_content(name, nil)
 
   defp fetch_subagent_content(name, root) do
     case sp_image(root) do

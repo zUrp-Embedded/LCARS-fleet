@@ -311,8 +311,17 @@ defmodule Fleet.CapProfile.Catalog do
   Reads named modop fragments in order and validates their paths and schemas.
   """
   @spec read_modops([String.t()]) :: {:ok, [map()]} | {:error, term()}
-  def read_modops(modop_set) when is_list(modop_set) do
-    case Fleet.CapProfile.Image.published() do
+  def read_modops(modop_set) when is_list(modop_set), do: read_modops(modop_set, nil)
+
+  @doc """
+  Les memes overlays, dans l'image du catalogue NOMME — `nil` = le premier actif.
+
+  Un modop appartient au catalogue qui le livre : celui d'un role du second catalogue n'existe pas
+  dans l'image du premier, et le chercher la rendait `:modop_not_found` sur un fichier bien present.
+  """
+  @spec read_modops([String.t()], Path.t() | nil) :: {:ok, [map()]} | {:error, term()}
+  def read_modops(modop_set, root) when is_list(modop_set) do
+    case published_for(root) do
       %{overlays: overlays} ->
         Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
           case Map.fetch(overlays, name) do

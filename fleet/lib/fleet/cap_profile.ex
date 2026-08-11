@@ -143,7 +143,7 @@ defmodule Fleet.CapProfile do
   def compose(%__MODULE__{} = base, modop_set) when is_list(modop_set) do
     raw = %{"kind" => base.kind, "metadata" => base.metadata, "spec" => base.spec}
 
-    with {:ok, modops} <- Catalog.read_modops(modop_set),
+    with {:ok, modops} <- Catalog.read_modops(modop_set, base.catalogue_root),
          merged <- Enum.reduce(modops, raw, &deep_merge_last_wins(&2, &1)),
          :ok <- Schema.validate(merged, :cap_profile) do
       # La racine SURVIT a la composition : superposer des modops ne change pas de quel catalogue le
