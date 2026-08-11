@@ -35,3 +35,20 @@ api.anthropic.com
 # ⚠ Couper la telemetrie se fait par SON interrupteur (`LCARS_POD_DISABLE_TELEMETRY=1`), jamais en
 # retirant cette ligne — retirer la ligne produit le troisieme etat, pas le deuxieme.
 http-intake.logs.us5.datadoghq.com
+
+# ─── raw.githubusercontent.com ────────────────────────────────────────────────────────────────
+# Le CLI vendor le joint AU DEMARRAGE. Mesure au banc, et elle est sans appel : le premier pod ne
+# portant pas cet hote dans son allowlist a ete refuse a 19:50:29, n'a jamais acke son wake, et sa
+# session tmux etait morte 45 s plus tard. Le ticket est reste `lcars-in-flight`, la reconciliation
+# a re-briefe un cadavre a chaque tick, et le seul instrument qui disait vrai etait `lcars attach`
+# (« no sessions »).
+#
+# C'est la difference entre un mur et un baillon : refuser une sortie que le programme traite comme
+# facultative (la telemetrie) le degrade ; refuser celle qu'il joint pour DEMARRER le tue, et il
+# meurt sans le dire — le pod n'a pas de canal pour se plaindre d'un reseau qu'il croit casse.
+#
+# ⚠ Ce que ca autorise reste borne : un hote de CONTENU statique, joint par le CLI lui-meme. Ca ne
+# rend pas le web au pod — `WebFetch`/`WebSearch` restent denies cote outils, et rien d'autre ne
+# passe. Si un jour le CLI cesse d'en avoir besoin, cette ligne se retire par une mesure, pas par
+# une intuition : on la retire, on spawn un pod, on regarde s'il acke.
+raw.githubusercontent.com
