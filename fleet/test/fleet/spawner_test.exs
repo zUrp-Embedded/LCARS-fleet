@@ -683,4 +683,35 @@ defmodule Fleet.SpawnerTest do
       Fleet.Spawner.kill_pod(theirs_pod)
     end
   end
+
+  describe "project_guard — a fleet-level pod carries a label and no project" do
+    test "a NAMED pod without a project is refused… unless its label is the role alone" do
+      # The guard exists because a label was once parsed BACK into a project slug. A pod bound to a
+      # project must pass what its label was built from; a fleet-level one was built from nothing.
+      assert {:error, :project_required} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-x",
+                 pod_id: "pg-#{System.unique_integer([:positive])}",
+                 allow_no_brief: true,
+                 repo_id: @test_repo_id,
+                 rc_name: "tetris_engineer"
+               )
+    end
+
+    test "the permanent boot's own shape passes — it is what boots the fleet" do
+      # Measured on a bench: giving the permanents an `rc_name` made this refusal fire at boot,
+      # `permanent_pods=0`, and no test in the suite spawns a permanent so nothing went red.
+      pod =
+        Fleet.Spawner.PermanentBoot.pod_id_for("starfleet-#{System.unique_integer([:positive])}")
+
+      assert {:ok, _} =
+               Fleet.Spawner.spawn_pod(valid_profile(), "issue-x",
+                 pod_id: pod,
+                 allow_no_brief: true,
+                 repo_id: @test_repo_id,
+                 rc_name: Fleet.Layout.pod_label(nil, "starfleet", nil)
+               )
+
+      Fleet.Spawner.kill_pod(pod)
+    end
+  end
 end

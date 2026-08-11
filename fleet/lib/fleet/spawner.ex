@@ -344,6 +344,20 @@ defmodule Fleet.Spawner do
       not named? ->
         :ok
 
+      # A FLEET-LEVEL pod has no project, and asked through the authority that already recognises
+      # one — not by parsing its label, which is the very habit this guard exists to break.
+      #
+      # The guard demands "what the label was built FROM", and a permanent's label is built from no
+      # project on purpose. Demanding one refuses the pod that BOOTS the fleet: measured on a bench
+      # the day the permanents were given an `rc_name` — `spawn of permanent starfleet failed
+      # (:project_required)`, `permanent_pods=0`. Nothing in the suite spawns a permanent, so the
+      # gate stayed green through it.
+      match?(
+        {:ok, _},
+        Fleet.Spawner.PermanentBoot.parse_permanent(Keyword.get(opts, :pod_id, ""))
+      ) ->
+        :ok
+
       is_binary(project) and Fleet.Slug.valid?(project) ->
         :ok
 
