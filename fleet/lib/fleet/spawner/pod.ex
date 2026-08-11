@@ -924,6 +924,9 @@ defmodule Fleet.Spawner.Pod do
       :ok
   after
     McpProvision.release_pod_socket(data)
+    # The egress proxy dies with its pod: its socket is per-pod, and a listener outliving the pod
+    # it served is a hole nobody is watching.
+    _ = Fleet.Spawner.Pod.Egress.release(Map.get(data, :pod_id) || "")
   end
 
   defp issue_number_of("issue-" <> rest) do

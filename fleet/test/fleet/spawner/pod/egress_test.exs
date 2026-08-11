@@ -12,8 +12,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   """
   use ExUnit.Case, async: true
 
-  import ExUnit.Callbacks, only: [on_exit: 1]
-
   alias Fleet.Spawner.Pod.Egress
 
   @moduletag :tmp_dir
@@ -189,6 +187,95 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       assert offenders == [],
              "api.anthropic.com belongs in bin/claude_launch.egress alone, found in: " <>
                Enum.join(offenders, ", ")
+    end
+  end
+
+  defp profile(network, containment \\ "bwrap") do
+    %Fleet.CapProfile{
+      kind: "CapabilityProfile",
+      metadata: %{"name" => "r", "containment" => containment, "network" => network},
+      spec: %{}
+    }
+  end
+
+  describe "provision/3 — the proxy is STARTED, not merely startable" do
+    setup do
+      # Short base, same reason as the sockets above: `tmp_dir` carries the test NAME and AF_UNIX
+      # caps the path. The real base is `/run/lcars/egress`, which is short for this exact reason.
+      base = Path.join(System.tmp_dir!(), "lcars-egb")
+      File.mkdir_p!(base)
+      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :egress_sock_base, base)
+      on_exit(fn -> File.rm_rf(base) end)
+      :ok
+    end
+
+    test "a bwrap pod gets a live socket, and it answers", %{tmp_dir: tmp} do
+      # The gap this closes: the launcher supported egress, the proxy existed, and nothing started
+      # it — a door nobody takes. Found by a bench build, not by the gate.
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      pod = "p#{System.unique_integer([:positive])}"
+      assert {:ok, path} = Egress.provision(pod, profile("vendor-only"), launcher)
+      assert path =~ pod
+
+      c = connect(path)
+      :ok = :gen_tcp.send(c, "CONNECT nope.example:443 HTTP/1.1\r\n\r\n")
+      assert {:ok, answer} = :gen_tcp.recv(c, 0, 2_000)
+      assert answer =~ "403"
+
+      assert :ok = Egress.release(pod)
+      refute File.exists?(path)
+    end
+
+    test "a HOST-containment pod gets none — there is no namespace to seal", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      assert {:ok, nil} = Egress.provision("p-host", profile("vendor-only", "none"), launcher)
+    end
+
+    test "release/1 is idempotent — a pod that never had one is a no-op" do
+      assert :ok = Egress.release("never-provisioned")
+    end
+  end
+
+  describe "allowlist/2 — vendor-only is the floor, egress adds the role's own" do
+    test "vendor-only gets the vendor's hosts and nothing else", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      cap = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r"},
+        spec: %{"scope" => %{"egress_hosts" => ["docs.example.com"]}}
+      }
+
+      # The role DECLARES hosts but its profile does not say `egress`: they are not granted. A
+      # declaration is not a permission.
+      assert Egress.allowlist(cap, launcher) == ["api.vendor.test"]
+    end
+
+    test "egress adds them, vendor first, no duplicates", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      cap = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r", "network" => "egress"},
+        spec: %{"scope" => %{"egress_hosts" => ["docs.example.com", "api.vendor.test"]}}
+      }
+
+      assert Egress.allowlist(cap, launcher) == ["api.vendor.test", "docs.example.com"]
+    end
+
+    test "an `egress` role with NO declared host still gets the vendor's — never nothing" do
+      cap = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r", "network" => "egress"},
+        spec: %{}
+      }
+
+      hosts = Egress.allowlist(cap, Path.join(File.cwd!(), "bin/claude_launch.sh"))
+      assert "api.anthropic.com" in hosts
     end
   end
 end

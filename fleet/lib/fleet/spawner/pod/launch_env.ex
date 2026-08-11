@@ -29,6 +29,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   (no cycle).
   """
 
+  require Logger
+
   alias Fleet.Spawner.Pod.LaunchSpec
   alias Fleet.Spawner.Pod.McpProvision
 
@@ -134,6 +136,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # host → the var; bwrap → fallback `$HOME` (= /home/.pod = pod root).
           # CATALOGUE mounts (cap-profile-driven) → bwrap_launch binds them. Empty / host_launch = inert.
           # `system_mounts` prefixes the launchers' dir (install) → claude_launch.sh visible in the sandbox.
+          # THE POD'S ONLY WAY OUT, provisioned before the launcher reads it. Absent (host
+          # containment) leaves the variable empty, and `bwrap_launch.sh` then binds nothing and
+          # starts no relay — the launcher's own fail-closed branch.
+          |> Map.put("LCARS_POD_EGRESS_SOCK", egress_socket(state, claude_launch_path))
           |> Map.put(
             "LCARS_POD_MOUNTS",
             LaunchSpec.pod_mounts_env(
@@ -246,6 +252,29 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     case Fleet.Credentials.Shell.run(cmd, args, timeout_ms: @cmd_timeout_ms) do
       {:ok, {out, status}} -> {out, status}
       {:error, _} -> {"", 124}
+    end
+  end
+
+  # Provisioning, not env-building — and it lives on this path because the launcher needs the PATH,
+  # so a caller that computed one without starting the proxy would hand the pod a socket nobody
+  # serves. Host containment has no namespace to seal: `""`, and `bwrap_launch.sh` then binds
+  # nothing and starts no relay. A failure yields `""` too, and the launcher refuses to bind a
+  # missing dir — the pod fails at its own boundary rather than launching half-sealed.
+  defp egress_socket(state, claude_launch_path) do
+    case Fleet.Spawner.Pod.Egress.provision(state.pod_id, state.cap_profile, claude_launch_path) do
+      {:ok, nil} ->
+        ""
+
+      {:ok, path} ->
+        path
+
+      {:error, reason} ->
+        Logger.error(
+          "LaunchEnv: egress NOT provisioned for #{state.pod_id} (#{inspect(reason)}) — the " <>
+            "launcher will refuse rather than start a pod with no way to reach its vendor"
+        )
+
+        ""
     end
   end
 end

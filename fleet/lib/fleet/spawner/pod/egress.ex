@@ -48,10 +48,91 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   require Logger
 
+  alias Fleet.Spawner.Pod.Egress.Vendor
+
   @connect_re ~r/\ACONNECT ([A-Za-z0-9._-]+):(\d{1,5}) HTTP\/1\.[01]\r?\n/
   @accept "HTTP/1.1 200 Connection Established\r\n\r\n"
   @refuse "HTTP/1.1 403 Forbidden\r\n\r\nConnection blocked by the LCARS egress allowlist\r\n"
   @connect_timeout_ms 10_000
+
+  @doc """
+  Provisions this pod's egress: resolves the allowlist, starts the proxy, returns the socket path.
+
+  `{:ok, nil}` when the pod gets no proxy — a host-containment pod keeps the machine's own network
+  (there is no namespace to seal), and asking it to route through a socket would break it for
+  nothing.
+
+  The ALLOWLIST is composed here and nowhere else: the vendor's declared hosts, plus the role's own
+  only when its profile says `network: egress`. Fail-closed by construction — a profile that says
+  nothing gets the vendor's list, which is what a pod needs to work and nothing more.
+  """
+  @spec provision(String.t(), Fleet.CapProfile.t(), Path.t()) ::
+          {:ok, Path.t() | nil} | {:error, term()}
+  def provision(pod_id, cap_profile, launcher_path) do
+    if Fleet.CapProfile.bwrap?(cap_profile) do
+      path = socket_path(pod_id)
+
+      case start(path, allowlist(cap_profile, launcher_path), pod_id: pod_id) do
+        {:ok, listen} ->
+          :persistent_term.put({__MODULE__, pod_id}, listen)
+          {:ok, path}
+
+        {:error, _} = err ->
+          err
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  @doc """
+  Closes this pod's proxy and removes its socket. Idempotent: a pod that never had one is a no-op.
+  """
+  @spec release(String.t()) :: :ok
+  def release(pod_id) when is_binary(pod_id) do
+    case :persistent_term.get({__MODULE__, pod_id}, nil) do
+      nil ->
+        :ok
+
+      listen ->
+        _ = :gen_tcp.close(listen)
+        _ = :persistent_term.erase({__MODULE__, pod_id})
+        _ = File.rm(socket_path(pod_id))
+        _ = File.rmdir(Path.dirname(socket_path(pod_id)))
+        :ok
+    end
+  end
+
+  @doc """
+  The hosts this pod may reach: the vendor's, plus the role's own when it declares `network: egress`.
+  """
+  @spec allowlist(Fleet.CapProfile.t(), Path.t()) :: [String.t()]
+  def allowlist(cap_profile, launcher_path) do
+    vendor = Vendor.hosts(launcher_path)
+
+    case Fleet.CapProfile.network(cap_profile) do
+      "egress" -> Enum.uniq(vendor ++ role_hosts(cap_profile))
+      _vendor_only -> vendor
+    end
+  end
+
+  @doc """
+  This pod's socket path — the SAME shape as its MCP socket, and for the same reason: a per-pod dir
+  under a short base, so `sun_path` holds whatever the pod_id looks like. The base is never bound
+  into a sandbox; a sibling's socket is a sibling's allowlist.
+  """
+  @spec socket_path(String.t()) :: Path.t()
+  def socket_path(pod_id) when is_binary(pod_id) do
+    base = Application.get_env(:fleet_spawner, :egress_sock_base, "/run/lcars/egress")
+    Path.join([base, pod_id, "sock"])
+  end
+
+  defp role_hosts(%Fleet.CapProfile{spec: spec}) do
+    spec
+    |> get_in(["scope", "egress_hosts"])
+    |> List.wrap()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
 
   @doc """
   Decides one CONNECT line against an allowlist.
