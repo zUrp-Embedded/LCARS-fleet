@@ -91,7 +91,7 @@ defmodule Fleet.Project.RolesStructuralTest do
 
   test "un catalogue SANS delegue est refuse au BOOT, plus au premier create_project", %{dir: dir} do
     # La mesure qui justifie le geste : avant, ce catalogue bootait vert et cassait des heures plus
-    # tard, chez l'operateur, au premier `create_project` ou a la premiere escalade.
+    # tard, chez l'operateur, au premier `project_create` ou a la premiere escalade.
     write_role!(dir, "eng", ["producer"])
     write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
 

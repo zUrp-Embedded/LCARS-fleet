@@ -77,7 +77,7 @@ defmodule Fleet.Labels do
   def destination_workshop, do: @destination_workshop
 
   @doc """
-  The WIRE token of the workshop destination (`"workshop"`) — what an architect passes to `create_issue`,
+  The WIRE token of the workshop destination (`"workshop"`) — what an architect passes to `issue_create`,
   and the value the routing clause matches. Same literal as `destination_workshop/0`'s scope, on purpose: the
   token names the FACE the deliverable lands on, and a wire that offers a token the handler does
   not accept refuses every documentary ticket while looking perfectly documented.

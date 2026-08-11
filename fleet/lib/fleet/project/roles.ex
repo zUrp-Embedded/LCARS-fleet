@@ -111,7 +111,7 @@ defmodule Fleet.Project.Roles do
     * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
     * `project_delegate` — **exactly one**, and it is the one this check was MISSING. Unlike the
       producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. So a
-      catalogue carrying two of them booted green and broke at the first `create_project`
+      catalogue carrying two of them booted green and broke at the first `project_create`
       (`Fleet.Project.Architect`) or the first escalation (`Fleet.Pilot.ArchWake`) — hours after the
       deploy, on the operator's first real run, which is exactly the distance this module exists to
       remove.

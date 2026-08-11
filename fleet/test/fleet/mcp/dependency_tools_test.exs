@@ -79,7 +79,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
 
   describe "declaring the order" do
     test "the edge is written on the forge, in the pod's OWN repo" do
-      result = call("add_dependency", %{"number" => 9, "blocker" => 4}) |> decoded()
+      result = call("dependency_add", %{"number" => 9, "blocker" => 4}) |> decoded()
 
       assert_received {:added, "fleet/demo", 9, 4}
       assert result["edge"] == "added"
@@ -88,7 +88,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
     end
 
     test "the answer SAYS the edge does not stop a running ticket — only its closure" do
-      result = call("add_dependency", %{"number" => 9, "blocker" => 4}) |> decoded()
+      result = call("dependency_add", %{"number" => 9, "blocker" => 4}) |> decoded()
 
       assert result["portee"] =~ "DÉJÀ en vol"
       assert result["portee"] =~ "ne l'arrête pas"
@@ -96,7 +96,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
     end
 
     test "lifting says the other risk: the last blocker gone makes the ticket closable now" do
-      result = call("remove_dependency", %{"number" => 9, "blocker" => 4}) |> decoded()
+      result = call("dependency_remove", %{"number" => 9, "blocker" => 4}) |> decoded()
 
       assert_received {:removed, "fleet/demo", 9, 4}
       assert result["edge"] == "removed"
@@ -107,16 +107,16 @@ defmodule Fleet.MCP.DependencyToolsTest do
   describe "refusals" do
     test "a ticket cannot depend on itself — refused here, not discovered as an unclosable ticket" do
       assert {:error, {:self_dependency, 9}, _} =
-               call("add_dependency", %{"number" => 9, "blocker" => 9})
+               call("dependency_add", %{"number" => 9, "blocker" => 9})
 
       refute_received {:added, _, _, _}
     end
 
     test "non-integer or absent arguments are refused before any forge write" do
-      assert {:error, :invalid_arguments, _} = call("add_dependency", %{"number" => 9})
+      assert {:error, :invalid_arguments, _} = call("dependency_add", %{"number" => 9})
 
       assert {:error, :invalid_arguments, _} =
-               call("add_dependency", %{"number" => "9", "blocker" => 4})
+               call("dependency_add", %{"number" => "9", "blocker" => 4})
 
       refute_received {:added, _, _, _}
     end
@@ -127,7 +127,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
       end)
 
       assert {:error, :forbidden_not_architect, _} =
-               call("add_dependency", %{"number" => 9, "blocker" => 4})
+               call("dependency_add", %{"number" => 9, "blocker" => 4})
 
       refute_received {:added, _, _, _}
     end
@@ -136,7 +136,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
       Process.put(:write_result, {:error, {:http, 500, "boom"}})
 
       assert {:error, {:http, 500, _}, _} =
-               call("add_dependency", %{"number" => 9, "blocker" => 4})
+               call("dependency_add", %{"number" => 9, "blocker" => 4})
     end
   end
 end

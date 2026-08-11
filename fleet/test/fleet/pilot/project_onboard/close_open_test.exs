@@ -156,7 +156,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
     # Assignee = the human (the poller's assigned_by scoping must SEE the marker).
     assert [_human] = issue_opts[:assignees]
     # The body documents BOTH reopening paths (UI-close is a designed unpark).
-    assert body =~ "open_project"
+    assert body =~ "project_open"
     assert body =~ "fermer CE ticket"
 
     # Marker BEFORE stop: the kill signal arrives after the create (mailbox order).

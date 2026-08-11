@@ -72,7 +72,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @doc """
   ALL the PRs of the repo, open + closed/merged (raw Gitea API maps — Delegation reads
   `head.ref`/`head.sha`/`state`/`merged`/`number`). The full-state read is the point: the
-  review trail must survive the merge in `get_issue_status`.
+  review trail must survive the merge in `issue_status`.
   """
   @callback list_pulls(repo :: String.t(), opts :: keyword()) ::
               {:ok, [map()]} | {:error, term()}
@@ -131,7 +131,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   @doc """
   Closes an issue (state=closed). Delegation call site: the supersede retirement — the arch
-  NEVER closes anything itself (no close tool); it expresses `supersedes: N` on `create_issue`
+  NEVER closes anything itself (no close tool); it expresses `supersedes: N` on `issue_create`
   and the SYSTEM executes the retirement.
   """
   @callback close_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::

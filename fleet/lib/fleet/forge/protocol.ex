@@ -345,9 +345,9 @@ defmodule Fleet.Forge.Protocol do
   @doc """
   Title of the PARKED marker issue (BL-6-30) — an OPEN issue whose title carries the
   `[lcars-parked]` prefix IS the project's closed state ("the forge IS the state machine";
-  same protocol-object class as the in-flight lock label). Built by `close_project`,
+  same protocol-object class as the in-flight lock label). Built by `project_close`,
   recognized by `parked_issue_title?/1` on the PREFIX alone (suffix and body free — the body
-  documents the reopening paths to the human), closed by `open_project` (ALL of them:
+  documents the reopening paths to the human), closed by `project_open` (ALL of them:
   concurrent closes can legitimately leave two, the state holds while at least one is open).
   Trust model: same as the `stage/*` labels — a human mutating the marker mutates the state,
   deliberately (UI-close = legitimate unpark).

@@ -34,7 +34,7 @@ metadata:
   # is low. (An ordinary parametric pod: this wide RW mount is the only thing that sets its focal length.)
   # RO on both faces (user, 2026-08-05). The RW was declared for a "manual fix, an exceptional
   # intervention on the human's behalf" — a lever the nominal flow never uses: every portfolio
-  # gesture goes through an MCP tool executed RUNTIME-side (`ProjectOnboard`), `revise_project_card`
+  # gesture goes through an MCP tool executed RUNTIME-side (`ProjectOnboard`), `project_revise_card`
   # included. What it bought was an exception; what it cost was the widest write surface in the
   # fleet, on every project present and future, held by the ONLY role with `interlocutor: both` —
   # the most steerable pod carrying the broadest hand.
@@ -81,25 +81,25 @@ spec:
       # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
       # it does not do a project's métier). get_work_item/submit_result (universal) come from the launcher.
       - mcp__fleet__list_workflow_cards  # framing FIRST: the catalogue the human picks the card from
-      - mcp__fleet__create_project       # start a fresh project (repo + its three faces + card)
-      - mcp__fleet__import_project       # twin of create_project: ADOPTS an existing repo
-      - mcp__fleet__open_project         # third verb: RELAUNCH a project already on the machine
-      - mcp__fleet__revise_project_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
-      - mcp__fleet__close_project        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
-      - mcp__fleet__adopt_project        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
+      - mcp__fleet__project_create       # start a fresh project (repo + its three faces + card)
+      - mcp__fleet__project_install       # twin of create_project: ADOPTS an existing repo
+      - mcp__fleet__project_open         # third verb: RELAUNCH a project already on the machine
+      - mcp__fleet__project_revise_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
+      - mcp__fleet__project_close        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
+      - mcp__fleet__project_publish        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
       # LES DEUX VERBES DU DEPOT, et leur absence ici etait un piege actif : le SP de ce role decrit
       # le flux depuis le 2026-08-11, et un outil hors `allowedTools` sous `--permission-mode
       # default` ne se contente pas d'etre absent — il PROMPTE, et le pod GELE en attendant une
       # reponse que personne ne donne (mesure 2026-08-09, plus haut dans ce fichier). Une doctrine
       # qui decrit une surface non accordee ne rate pas : elle bloque.
-      - mcp__fleet__list_deposits        # ce que l'humain a pousse dans son espace perso et que la fleet ne porte pas
-      - mcp__fleet__import_deposit       # la TROISIEME porte : reprendre ce depot dans l'org d'un catalogue
+      - mcp__fleet__deposit_list        # ce que l'humain a pousse dans son espace perso et que la fleet ne porte pas
+      - mcp__fleet__deposit_import       # la TROISIEME porte : reprendre ce depot dans l'org d'un catalogue
       # LE PENDANT LECTURE des gestes projet ci-dessus, et il manquait : sans lui ce role repond
       # « quels projets ? » par ce qu'il devine, alors que l'outil rend la carte GRAVEE, le
       # `card_source` (declaree par un humain / jamais declaree / illisible) et le `state`. Un
       # projet qui n'a rien declare n'est pas un projet qui a choisi le defaut.
-      - mcp__fleet__list_projects        # BL : l'inventaire avec sa carte, sa source et son etat
-      - mcp__fleet__import_external_project  # BL-6-31: repatriate from GitHub/GitLab (adoption gate: foreign .claude refused, CLAUDE.md filtered)
+      - mcp__fleet__project_list        # BL : l'inventaire avec sa carte, sa source et son etat
+      - mcp__fleet__project_import  # BL-6-31: repatriate from GitHub/GitLab (adoption gate: foreign .claude refused, CLAUDE.md filtered)
     disallowedTools:
       - web_search
       - web_fetch

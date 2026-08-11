@@ -1,7 +1,7 @@
 # Fleet.MCP — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-18
+**Last revised**: 2026-08-11
 **Status**: active — pod-facing MCP server, per-pod AF_UNIX socket (vendor boundary)
 **Referenced by**: —
 
@@ -16,7 +16,7 @@ restated, only pointed at.
 ## Modules
 - `Fleet.MCP.PodTools` — pod-facing TOOL layer: the `deftool` schemas + `handle_tool_call/3` routing table (wrapped behind `use ExMCP.Server`); the domain entry point for the pod RPCs
   - `Fleet.MCP.PodTools.WorkItems` — work-item drive, every pod (`get_work_item` / `submit_result`)
-  - `Fleet.MCP.PodTools.Delegation` — forge delegation, architect only (`create_issue` / `create_project` / `import_project` / `get_issue_status` / `list_escalations` / `comment_issue`) + the `require_architect` gate
+  - `Fleet.MCP.PodTools.Delegation` — forge delegation, architect only (`issue_create` / `project_create` / `project_install` / `issue_status` / `list_escalations` / `issue_comment`) + the `require_architect` gate
   - `Fleet.MCP.PodTools.Delegation.ForgeClient` — behaviour = contract of the `:forge_client` runtime seam (up-seam to pilot)
   - `Fleet.MCP.PodTools.Delegation.ProjectOnboard` — behaviour = contract of the `:project_onboard` runtime seam (up-seam to pilot)
   - `Fleet.MCP.PodTools.Delegation.EscalationForge` — behaviour = contract of the escalation-read seam (`list_escalations` backend)

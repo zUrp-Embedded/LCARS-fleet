@@ -47,7 +47,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   ## Always-on in prod + `Process.whereis` fallback (hermetic in test)
 
   Supervised by `Fleet.Pilot.Application` (next to the ForgeFinch pool, for the SAME reason: MCP
-  `create_issue` materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node
+  `issue_create` materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node
   boots, not only in `:step_dispatch?` mode). When the process is up, every writer funnels through it.
   When it is NOT registered, `commit_object/4` falls back to a DIRECT `OpsObject` call: the LOCAL
   transaction is identical, only the cross-writer serialization is skipped. Not a masked failure — an

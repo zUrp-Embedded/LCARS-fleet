@@ -227,14 +227,14 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
     # starfleet = ONBOARDING head (portfolio).
     sf = tools.("starfleet")
-    assert "create_project" in sf and "import_project" in sf and "list_workflow_cards" in sf
-    refute "create_issue" in sf
+    assert "project_create" in sf and "project_install" in sf and "list_workflow_cards" in sf
+    refute "issue_create" in sf
 
     # architect = DELEGATION head (its project) — NOT onboarding.
     arch = tools.("architect")
-    assert "create_issue" in arch and "get_issue_status" in arch and "list_escalations" in arch
-    refute "create_project" in arch
-    refute "import_project" in arch
+    assert "issue_create" in arch and "issue_status" in arch and "list_escalations" in arch
+    refute "project_create" in arch
+    refute "project_install" in arch
   end
 
   test "F-05 (codex audit): no canon profile default-injects a modop whose SP contradicts its lifecycle" do

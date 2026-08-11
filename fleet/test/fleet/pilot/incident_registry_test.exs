@@ -442,7 +442,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       # Return = the issue's NUMBER (1, returned by the stub), not the reason: an `{:escalated, num}`
       # PROVES an issue really exists. (An honesty fix: the return used to carry the reason and came
       # out even when opening the issue failed — cf. the "forge DOWN" test below.)
-      # MECHANICS (fix F-RUN-2): `create_issue` receives the assignee but NO label (the Gitea POST
+      # MECHANICS (fix F-RUN-2): `issue_create` receives the assignee but NO label (the Gitea POST
       # requires integer IDs, not names → 422); the `error_system` label is set AFTERWARDS via
       # `add_label` by NAME. We verify BOTH calls.
       assert {:escalated, 1} =
@@ -666,7 +666,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
         )
 
-      # `create_issue` fails on BOTH attempts (with assignee, then label-only fallback) = forge down.
+      # `issue_create` fails on BOTH attempts (with assignee, then label-only fallback) = forge down.
       # The return must SAY the failure — never a reassuring `{:escalated, _}` while no sysadmin
       # issue was opened.
       assert {:escalation_failed, :forge_down} =

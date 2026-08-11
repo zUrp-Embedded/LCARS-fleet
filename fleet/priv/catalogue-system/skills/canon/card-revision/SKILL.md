@@ -29,7 +29,7 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
    pré-filtrer et conseiller — rubber-duck, jamais évaluateur.
 2. **Recueille le choix et le pourquoi.** Les deux, dans les mots de l'humain. Reformule le
    pourquoi en une phrase et fais-la valider : c'est elle qui part au commit.
-3. **Exécute** : `revise_project_card` avec `full_name`, `workflow_map` (la carte choisie),
+3. **Exécute** : `project_revise_card` avec `full_name`, `workflow_map` (la carte choisie),
    `justification` (la phrase validée), et `intensity_level` si l'humain en a déclaré un.
 4. **Relaie le résultat** : `outcome` `revised` (la protection de branche s'est re-taillée
    d'elle-même sur le jury de la nouvelle carte) ou `unchanged` (déclaration identique,

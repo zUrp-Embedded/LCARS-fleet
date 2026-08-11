@@ -130,7 +130,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp announce(_not_ok, _kind, _subject, _repo, _label, _opts), do: :ok
 
   defp create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label) do
-    # `create_issue` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
+    # `issue_create` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
     # established pattern (`PodTools.do_create_issue`): create the issue (with the assignee) THEN set the label by
     # NAME via `add_label` (name->id resolution + org-label auto-creation on the ForgeClient side). Passing
     # `labels: [name-string]` to the POST -> 422 Gitea "cannot unmarshal string into int64" — the

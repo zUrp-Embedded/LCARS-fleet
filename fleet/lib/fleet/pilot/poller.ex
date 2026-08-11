@@ -621,7 +621,7 @@ defmodule Fleet.Pilot.Poller do
     # never set up.
     #
     # Onboarding is a DELIBERATE gesture and the corpus says so by having four distinct human
-    # verbs for it (`create`, `import`, `open`, `adopt_project`). Auto-provisioning on discovery
+    # verbs for it (`create`, `import`, `open`, `project_publish`). Auto-provisioning on discovery
     # would make creating a repo in the org enough to trigger a clone — a policy nobody chose.
     # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
     # call, so an unserved repo also stops costing two API calls per tick.
@@ -789,7 +789,7 @@ defmodule Fleet.Pilot.Poller do
     # BL-6-48 step 3, PR half. Same gesture as the line above, and for the same reason: the PR path
     # holds PULLS, not issues — yet the `wait/*` lives on the ISSUE (it is the ticket a human reads,
     # and it outlives its successive PRs). Without this threading, writing from the pulls would cost
-    # a `get_issue` per skipped PR. The issues are already listed WITH their labels: the map is
+    # a `issue_get` per skipped PR. The issues are already listed WITH their labels: the map is
     # free, exactly like `awaits_arch_ids`.
     pulls_opts =
       opts

@@ -9,7 +9,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
     * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + its three faces).
     * `import_project/2` — ONBOARDING channel (variant): imports an EXISTING forge repo into
-      the machine (the three faces, `main` content intact — ≠ `create_project`).
+      the machine (the three faces, `main` content intact — ≠ `project_create`).
     * `open_project/2` — ONBOARDING channel (variant): relaunches a project ALREADY on the
       machine (the third portfolio verb — create / import / open; no forge/disk write, ensures
       the per-project architect — the path back to a project after a fleet restart).
@@ -26,12 +26,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   the socket acceptor — NOT a wire field), then asked for a CAPABILITY. Two heads, two capabilities,
   and neither gate knows a role name — which role carries which is the catalogue's business:
 
-    * **ONBOARDING gate** (`require_onboarder/1`) — `create_project` / `import_project` /
-      `open_project` / `close_project` / `delete_project` / `revise_project_card` /
+    * **ONBOARDING gate** (`require_onboarder/1`) — `project_create` / `project_install` /
+      `project_open` / `project_close` / `project_delete` / `project_revise_card` /
       `list_workflow_cards`: the PORTFOLIO head. Admits any role carrying `onboarder`.
       Refusal → `:forbidden_not_onboarder`.
-    * **DELEGATION gate** (`require_architect/1`) — `create_issue` / `issue_status` / `list_escalations` /
-      `list_issues` / `get_issue` / `comment_issue`: the per-project head. Admits the role carrying
+    * **DELEGATION gate** (`require_architect/1`) — `issue_create` / `issue_status` / `list_escalations` /
+      `issue_list` / `issue_get` / `issue_comment`: the per-project head. Admits the role carrying
       `project_delegate`, and additionally requires a repo binding — delegating outside a project is
       not a thing. Refusal → `:forbidden_not_architect`.
 
@@ -377,7 +377,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   @doc """
   Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
-  delegation stays reserved to the architect, consistent with `create_issue`/`create_project`).
+  delegation stays reserved to the architect, consistent with `issue_create`/`project_create`).
   Read-only (ForgeClient); the repo comes from the CHANNEL BINDING (`require_architect/1`),
   never from a wire argument.
 
@@ -414,7 +414,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # when there is nothing true to say, never null (cf. put_pr/2).
       # THE SIGNPOST TRAVELS IN THE ANSWER, not only in the catalogue read once at boot. Measured
       # on the bench: an architect complained that this status carried no timestamp, WITHOUT
-      # inventorying its own toolbox — while `get_issue`'s description names this tool by name to
+      # inventorying its own toolbox — while `issue_get`'s description names this tool by name to
       # orient the choice. That is the exact twin of the producer bias corrected the same night
       # (delivering costs less than refusing): complaining costs less than looking.
       #
@@ -484,7 +484,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   `Loader.canon_names!/0` (the configured maps root, never a hardcoded priv path) and
   `Loader.load!/1` (schema + graph validated — the listing can only offer what the engine can
   actually load). For each card: `name` (the LOADABLE id — the `workflow_map` value of
-  `create_project`), `declared_name` (the card's self-declared label, for reference — the two
+  `project_create`), `declared_name` (the card's self-declared label, for reference — the two
   identities are distinct, never collapsed), FR `presentation` (shown to the human VERBATIM —
   the card's own voice), `applicable_intensity` (level matrix), `jury` (PR judges) and `steps`.
   Architect gate (framing is the arch's job). A card that fails to load is SKIPPED loud and
@@ -981,7 +981,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   IMPORTS a repo from an EXTERNAL forge (BL-6-31) — onboarder gate. The mechanics live
   pilot-side (`import_external` seam callback: URL gate, scratch repatriation, adoption gate,
   branch normalization, org creation, standard import leg). The criticality declaration is
-  RELAYED like `create_project`'s. Typed errors pass through unflattened
+  RELAYED like `project_create`'s. Typed errors pass through unflattened
   (`{:unsupported_forge, _}`, `{:foreign_claude_dir, _}`, `{:hostile_material, _, _}`,
   `{:branch_collision, _}`, `{:already_on_machine, _}`, `{:repo_already_exists, _}` — each
   names a DIFFERENT operator action).
@@ -1451,7 +1451,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #
   # PUBLIC (@doc false), same reason as `retire_superseded/5`: the property under test is the SHAPE
   # OF THE DEGRADATION (the created issue survives a seam that cannot write edges), and reaching this
-  # through `create_issue` would need an arch pod, role credentials and a ops tree — a test that
+  # through `issue_create` would need an arch pod, role credentials and a ops tree — a test that
   # proves the fixture, not the guard.
   @doc false
   def attach_dependencies(_forge, _repo, result, nil), do: result
@@ -1543,7 +1543,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   resumes with fresh pods. Closing is what actually stops it: a closed ticket leaves the poller by
   construction (every inbox lists open only) and the reaper collects its pods on its own.
 
-  So this is `retire_issue` applied in bulk, with the same two gestures per ticket: the live PR
+  So this is `issue_retire` applied in bulk, with the same two gestures per ticket: the live PR
   closes first (the pulls rail is independent and would otherwise judge and merge into a dead
   ticket), then `closure: :retired` — the trace says nothing was delivered, because nothing was.
 

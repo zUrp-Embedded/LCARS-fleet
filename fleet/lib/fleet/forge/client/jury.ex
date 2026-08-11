@@ -74,7 +74,7 @@ defmodule Fleet.Forge.Client.Jury do
     * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓],
       records: [%{"login", "verdict", "submitted_at", "body"}], outcome:
       review_outcome(reviewers, verdicts)}}` — `outcome` is computed HERE (pilot-side)
-      and carried as DATA so a seam consumer (`get_issue_status`) renders the gate's own
+      and carried as DATA so a seam consumer (`issue_status`) renders the gate's own
       predicate without re-implementing it.
     * `{:error, term()}` — HTTP/transport/config
 

@@ -3,7 +3,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
   The one irreversible act in the tool surface is OFF by default.
 
   `force: true` already made the gesture deliberate, and deliberate is not the same as available.
-  `delete_project` destroys the forge repo AND both worktrees, its target is a free argument, and it
+  `project_delete` destroys the forge repo AND both worktrees, its target is a free argument, and it
   was permanently reachable by any onboarder pod. Nothing in the fleet's normal life needs it:
   end-of-life teardown is an operator decision.
 
@@ -52,7 +52,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
   defp delete(state \\ %{pod_id: "pod-sf"}),
     do:
       PodTools.handle_tool_call(
-        "delete_project",
+        "project_delete",
         %{"full_name" => "fleet/demo", "force" => true},
         state
       )

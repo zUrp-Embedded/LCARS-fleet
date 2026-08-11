@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.ArchFeed do
 
   Lines carry the issue TITLE (`#3 « Script chifoumi » LIVRÉE`) so the MESSAGE is self-sufficient
   — the arch relays a sentence, not a number to decode. The title is read from the FORGE at
-  render time (`get_issue`, best-effort): the forge stays the single source of truth — the feed
+  render time (`issue_get`, best-effort): the forge stays the single source of truth — the feed
   never stores or caches state (a fresh instance recovering does NOT read the feed, it re-reads
   the forge; the feed is a courtesy mirror, full stop). Title unreadable → line without it.
 

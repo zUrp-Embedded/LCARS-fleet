@@ -208,8 +208,8 @@ defmodule Fleet.Pilot.ArchWake do
       role: Fleet.Project.Roles.project_delegate_role(),
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
-          "`get_issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>
-          "(`comment_issue`) ou corrige+re-délègue (`create_issue` avec `supersedes: #{n}` — la " <>
+          "`issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>
+          "(`issue_comment`) ou corrige+re-délègue (`issue_create` avec `supersedes: #{n}` — la " <>
           "fleet retire l'ancien ticket elle-même ; sans ça il repart en dispatch après ton " <>
           "submit_result).\n\n⚠ CE QUI RÉSOUT L'ESCALADE EST `submit_result`, ET RIEN D'AUTRE. " <>
           "Commenter, c'est parler ; c'est `submit_result` sur CE work-item qui draine le label " <>

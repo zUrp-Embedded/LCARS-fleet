@@ -6,7 +6,7 @@ defmodule Fleet.MCP.PodToolsTest do
   PURE Elixir: calls `handle_tool_call/3` directly (no transport, no claude).
   The pod identity comes from the `state` (`%{pod_id: pod}`) — carried by the socket
   acceptor in prod (one pod = one socket, the identity IS the channel), NEVER from the
-  arguments. The privileged tools (`create_issue`/`create_project`/`get_issue_status`)
+  arguments. The privileged tools (`issue_create`/`project_create`/`issue_status`)
   resolve the ROLE from the pod_id via the `:pod_resolver` seam (models the Spawner registry).
   """
   use ExUnit.Case, async: false
@@ -24,7 +24,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "deftool descriptions match the real contract (agent-facing, read at call time)" do
     test "create_issue does NOT promise an ALWAYS-commit, and states the inline degradation" do
-      desc = tool_description("create_issue")
+      desc = tool_description("issue_create")
 
       # ensure_pointer/5 delivers the brief INLINE when physicalization cannot complete → the old
       # "ALWAYS commits" mis-guided the agent's mental model of where its brief lands.
@@ -34,7 +34,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "create_project does NOT tell the agent to pass a `project` param that no longer exists" do
-      desc = tool_description("create_project")
+      desc = tool_description("project_create")
 
       # `project` was removed from create_issue's schema+handler (the repo comes from the pod binding).
       refute desc =~ "project: <the returned repo>"
@@ -559,7 +559,7 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # Onboarding stub (`:project_onboard` seam): touches NEITHER forge NOR disk — returns a fictitious
-  # repo. Serves to prove that the architect gate lets `create_project` through without executing the
+  # repo. Serves to prove that the architect gate lets `project_create` through without executing the
   # real sequence.
   defmodule StubOnboard do
     @behaviour Fleet.MCP.PodTools.Delegation.ProjectOnboard
@@ -782,7 +782,7 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # Idempotency — a STATEFUL forge (state in the caller's process dict; the stub runs INLINE in
-  # the test process, like the others). `create_issue` records the numbered issue WITH its
+  # the test process, like the others). `issue_create` records the numbered issue WITH its
   # marker-bearing body; `list_open_issues` replays them. A second create with the SAME inputs must
   # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
   defmodule IdempotencyForge do
@@ -881,7 +881,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, {:seam_misconfigured, Enum, missing}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 1},
                  pod_state(pod)
                )
@@ -894,7 +894,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 42},
                  pod_state(pod)
                )
@@ -912,7 +912,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 42, "project" => "fleet/evil"},
                  pod_state(pod)
                )
@@ -928,7 +928,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 7},
                  pod_state(pod)
                )
@@ -950,7 +950,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 7},
                  pod_state(pod)
                )
@@ -967,7 +967,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 5},
                  pod_state(pod)
                )
@@ -989,7 +989,7 @@ defmodule Fleet.MCP.PodToolsTest do
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("get_issue_status", %{"number" => 5}, pod_state(pod))
+               PodTools.handle_tool_call("issue_status", %{"number" => 5}, pod_state(pod))
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["outcome"] == "merged"
@@ -1001,7 +1001,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 7},
                  pod_state(pod)
                )
@@ -1018,7 +1018,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
-                 "get_issue_status",
+                 "issue_status",
                  %{"number" => 42},
                  pod_state(pod)
                )
@@ -1053,7 +1053,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # the retirement the old ticket re-dispatches on the arch's submit_result, forever.
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{
                    "title" => "Brique v2",
                    "brief" => "brief re-cadré",
@@ -1087,7 +1087,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "Brique v2", "brief" => "x", "supersedes" => 5},
                  pod_state(uniq("pod-arch"))
                )
@@ -1106,7 +1106,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "Reprise", "brief" => "x", "supersedes" => 5},
                  pod_state(uniq("pod-arch"))
                )
@@ -1133,14 +1133,14 @@ defmodule Fleet.MCP.PodToolsTest do
       }
 
       assert {:ok, %{content: [%{"text" => t1}]}, _} =
-               PodTools.handle_tool_call("create_issue", args, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_create", args, pod_state(uniq("pod-arch")))
 
       assert {:ok, r1} = Jason.decode(t1)
       assert r1["issue"] == 100
       refute r1["idempotent"]
 
       assert {:ok, %{content: [%{"text" => t2}]}, _} =
-               PodTools.handle_tool_call("create_issue", args, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_create", args, pod_state(uniq("pod-arch")))
 
       assert {:ok, r2} = Jason.decode(t2)
       assert r2["issue"] == 100
@@ -1163,7 +1163,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{
                    "title" => "Un vrai ticket",
                    "brief" => long_brief,
@@ -1192,7 +1192,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "Sans résumé", "brief" => long_brief},
                  pod_state(uniq("pod-arch"))
                )
@@ -1215,7 +1215,7 @@ defmodule Fleet.MCP.PodToolsTest do
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, _, _} =
                    PodTools.handle_tool_call(
-                     "create_issue",
+                     "issue_create",
                      %{"title" => "T", "brief" => "tout le brief inline"},
                      pod_state(uniq("pod-arch"))
                    )
@@ -1235,7 +1235,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X"},
                  pod_state(pod)
                )
@@ -1270,7 +1270,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "doc", "brief" => "documente Y", "destination" => "workshop"},
                  pod_state(pod)
                )
@@ -1291,7 +1291,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/evil"},
                  pod_state(pod)
                )
@@ -1308,7 +1308,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X"},
                  pod_state(pod)
                )
@@ -1354,7 +1354,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "p1"}
                )
@@ -1373,7 +1373,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X"},
                  %{pod_id: "p-arch"}
                )
@@ -1391,7 +1391,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :pod_unknown, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
                  %{pod_id: "ghost"}
                )
@@ -1415,7 +1415,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :role_token_unavailable, _} =
                PodTools.handle_tool_call(
-                 "create_issue",
+                 "issue_create",
                  %{"title" => "T", "brief" => "fais X"},
                  %{pod_id: "p-arch2"}
                )
@@ -1568,7 +1568,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # dans l'offre au lieu de deviner.
       assert {:error, {:catalogue_not_active, "grominet", actives}, _} =
                PodTools.handle_tool_call(
-                 "create_project",
+                 "project_create",
                  %{"name" => "demo-proj", "catalogue" => "grominet"},
                  pod_state(uniq("pod-arch"))
                )
@@ -1601,31 +1601,30 @@ defmodule Fleet.MCP.PodToolsTest do
 
     # Privileged tools split along the two gates. VALID business args so ONLY the role decides.
     @onboarding_tools [
-      {"create_project", %{"name" => "demo-proj"}},
-      {"import_project", %{"full_name" => "fleet/demo-proj"}},
-      {"open_project", %{"full_name" => "fleet/demo-proj"}},
-      {"delete_project", %{"full_name" => "fleet/demo-proj"}},
-      {"revise_project_card",
+      {"project_create", %{"name" => "demo-proj"}},
+      {"project_install", %{"full_name" => "fleet/demo-proj"}},
+      {"project_open", %{"full_name" => "fleet/demo-proj"}},
+      {"project_delete", %{"full_name" => "fleet/demo-proj"}},
+      {"project_revise_card",
        %{
          "full_name" => "fleet/demo-proj",
          "workflow_map" => "workshop-direct",
          "justification" => "le poc est devenu serieux"
        }},
-      {"close_project", %{"full_name" => "fleet/demo-proj"}},
-      {"adopt_project", %{"name" => "demo-proj"}},
-      {"import_external_project",
-       %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
+      {"project_close", %{"full_name" => "fleet/demo-proj"}},
+      {"project_publish", %{"name" => "demo-proj"}},
+      {"project_import", %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
       # The deposit door and its discovery side: same head as every other onboarding verb, so the
       # gate table is where they belong — a new door admitted by nobody's test is a door with a
       # different admission.
-      {"list_deposits", %{}},
-      {"import_deposit", %{"source" => "lordzurp/demo-proj", "catalogue" => "fleet"}},
+      {"deposit_list", %{}},
+      {"deposit_import", %{"source" => "lordzurp/demo-proj", "catalogue" => "fleet"}},
       {"list_workflow_cards", %{}}
     ]
     @delegation_tools [
       # No `project` wire param (reorg 2026-07-19): the repo comes from the pod binding.
-      {"create_issue", %{"title" => "T", "brief" => "B"}},
-      {"get_issue_status", %{"number" => 1}}
+      {"issue_create", %{"title" => "T", "brief" => "B"}},
+      {"issue_status", %{"number" => 1}}
     ]
     @privileged_tools @onboarding_tools ++ @delegation_tools
 
@@ -1644,7 +1643,7 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
       TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, StubOnboard)
 
-      # `delete_project` is DISARMED by deployment (default false) and its switch is checked before
+      # `project_delete` is DISARMED by deployment (default false) and its switch is checked before
       # the gate. These tests are about the GATE, so they arm it: otherwise every delete case would
       # short-circuit on the switch and the role checks below would silently stop covering it —
       # green, and testing nothing. The disarmed behaviour has its own tests.
@@ -1712,16 +1711,16 @@ defmodule Fleet.MCP.PodToolsTest do
     # alone. A caller was told about two of the three trees the call had just created, so it could
     # not name the doc face at all. Nothing was red: no test asserted the emitted keys ANYWHERE.
     #
-    # The four verbs that CREATE or REATTACH faces are checked; `delete_project` is not — it
+    # The four verbs that CREATE or REATTACH faces are checked; `project_delete` is not — it
     # reports what it removed, a different shape with its own keys.
     test "the wire carries one dir per FACE — doc included, on every verb that lands faces" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "starfleet"}} end)
 
       for {tool, biz_args} <- [
-            {"create_project", %{"name" => "demo-proj"}},
-            {"import_project", %{"full_name" => "fleet/demo-proj"}},
-            {"open_project", %{"full_name" => "fleet/demo-proj"}},
-            {"adopt_project", %{"name" => "demo-proj"}}
+            {"project_create", %{"name" => "demo-proj"}},
+            {"project_install", %{"full_name" => "fleet/demo-proj"}},
+            {"project_open", %{"full_name" => "fleet/demo-proj"}},
+            {"project_publish", %{"name" => "demo-proj"}}
           ] do
         assert {:ok, %{content: [%{"text" => text}]}, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
@@ -1769,7 +1768,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "delete_project",
+                 "project_delete",
                  %{"full_name" => "fleet/demo-proj"},
                  pod_state(pod)
                )
@@ -1784,7 +1783,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "revise_project_card",
+                 "project_revise_card",
                  %{
                    "full_name" => "fleet/demo-proj",
                    "workflow_map" => "workshop-direct",
@@ -1844,7 +1843,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # other people's personal spaces. The seam receives the fleet's human either way.
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "list_deposits",
+                 "deposit_list",
                  %{"human" => "quelquun-dautre"},
                  pod_state(uniq("pod-sf"))
                )
@@ -1864,7 +1863,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "import_deposit",
+                 "deposit_import",
                  %{"source" => "lordzurp/chifoumi", "catalogue" => "web"},
                  pod_state(uniq("pod-sf"))
                )
@@ -1885,7 +1884,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "import_deposit",
+                 "deposit_import",
                  %{
                    "source" => "lordzurp/chifoumi",
                    "catalogue" => "fleet",
@@ -1910,7 +1909,7 @@ defmodule Fleet.MCP.PodToolsTest do
       for bad <- ["chifoumi", "a/b/c", "lordzurp/"] do
         assert {:error, {:invalid_source, _}, _} =
                  PodTools.handle_tool_call(
-                   "import_deposit",
+                   "deposit_import",
                    %{"source" => bad, "catalogue" => "fleet"},
                    pod_state(uniq("pod-sf"))
                  ),
@@ -2114,7 +2113,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "comment_issue: posts on the BOUND repo, IN THE NAME of the architect role (role token)" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "vu, je re-cadre le brief"},
                  pod_state(uniq("pod-arch"))
                )
@@ -2139,10 +2138,10 @@ defmodule Fleet.MCP.PodToolsTest do
       args = %{"number" => 4, "body" => "vu, je re-cadre le brief"}
 
       assert {:ok, %{content: [%{"text" => first}]}, _} =
-               PodTools.handle_tool_call("comment_issue", args, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_comment", args, pod_state(uniq("pod-arch")))
 
       assert {:ok, %{content: [%{"text" => second}]}, _} =
-               PodTools.handle_tool_call("comment_issue", args, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_comment", args, pod_state(uniq("pod-arch")))
 
       assert {:ok, %{"status" => "commented"} = one} = Jason.decode(first)
       refute Map.has_key?(one, "idempotent")
@@ -2162,14 +2161,14 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "premiere reponse"},
                  pod_state(pod)
                )
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "seconde reponse, differente"},
                  pod_state(pod)
                )
@@ -2186,7 +2185,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "la forge ne repond pas a la relecture"},
                  pod_state(uniq("pod-arch"))
                )
@@ -2201,7 +2200,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "x"},
                  pod_state(uniq("pod-rev"))
                )
@@ -2214,7 +2213,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
-                 "comment_issue",
+                 "issue_comment",
                  %{"number" => 4, "body" => "x"},
                  pod_state(uniq("pod-arch"))
                )
@@ -2346,7 +2345,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "list_issues: the FULL open board (escalations AND ordinary tickets), labels as names" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_list", %{}, pod_state(uniq("pod-arch")))
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["count"] == 2
@@ -2365,20 +2364,20 @@ defmodule Fleet.MCP.PodToolsTest do
       Process.put(:read_channel_board, {:error, :forge_down})
 
       assert {:error, {:issues_unreadable, "fleet/alpha", {:error, :forge_down}}, _} =
-               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("issue_list", %{}, pod_state(uniq("pod-arch")))
     end
 
     test "list_issues: architect gate (non-architect role → refused, no read)" do
       Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
-               PodTools.handle_tool_call("list_issues", %{}, pod_state(uniq("pod-eng")))
+               PodTools.handle_tool_call("issue_list", %{}, pod_state(uniq("pod-eng")))
     end
 
     test "get_issue: body + thread oldest first; author/created_at only when the forge says them" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue",
+                 "issue_get",
                  %{"number" => 5},
                  pod_state(uniq("pod-arch"))
                )
@@ -2410,7 +2409,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "get_issue",
+                 "issue_get",
                  %{"number" => 5},
                  pod_state(uniq("pod-arch"))
                )
@@ -2426,7 +2425,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "get_issue: unreadable ISSUE is a typed error, never an empty ticket" do
       assert {:error, {:issue_unreadable, 99, {:error, :not_found}}, _} =
                PodTools.handle_tool_call(
-                 "get_issue",
+                 "issue_get",
                  %{"number" => 99},
                  pod_state(uniq("pod-arch"))
                )
@@ -2434,7 +2433,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "get_issue: non-integer number → :invalid_arguments (guarded at the routing table)" do
       assert {:error, :invalid_arguments, _} =
-               PodTools.handle_tool_call("get_issue", %{"number" => "5"}, pod_state("p"))
+               PodTools.handle_tool_call("issue_get", %{"number" => "5"}, pod_state("p"))
     end
 
     test "get_issue: architect gate (non-architect role → refused, no read)" do
@@ -2442,7 +2441,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
-                 "get_issue",
+                 "issue_get",
                  %{"number" => 5},
                  pod_state(uniq("pod-rev"))
                )

@@ -2,7 +2,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @moduledoc """
   Behaviour of the project onboarding sequence — the CONTRACT of the
   `:project_onboard` runtime seam, consumed by `Fleet.MCP.PodTools.Delegation`
-  (ONBOARDING channel, tool `create_project`).
+  (ONBOARDING channel, tool `project_create`).
 
   ## Why a RUNTIME seam (and not a compile dep)
 

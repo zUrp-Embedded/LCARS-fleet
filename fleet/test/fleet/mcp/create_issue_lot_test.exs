@@ -118,7 +118,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
 
   defp create(args) do
     PodTools.handle_tool_call(
-      "create_issue",
+      "issue_create",
       Map.merge(%{"title" => "reprendre la doc du protocole", "brief" => "part du paquet"}, args),
       %{pod_id: "pod-arch-#{System.unique_integer([:positive])}"}
     )

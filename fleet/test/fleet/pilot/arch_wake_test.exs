@@ -65,10 +65,10 @@ defmodule Fleet.Pilot.ArchWakeTest do
 
     test "the mandate says WHAT RESOLVES — commenting is speaking, submit_result is deciding" do
       # Only `submit_result` on this work item drains `lcars-awaits-arch`
-      # (`StepRunConsumer.drain_awaits_arch/2`, keyed on the mandate's own metadata). `comment_issue`
+      # (`StepRunConsumer.drain_awaits_arch/2`, keyed on the mandate's own metadata). `issue_comment`
       # posts on the thread and changes NOTHING about the escalation state.
       #
-      # The mandate used to read "puis réponds (`comment_issue`)" — presenting a comment as THE
+      # The mandate used to read "puis réponds (`issue_comment`)" — presenting a comment as THE
       # answer. An arch that comments and stops has, from its own point of view, replied; the label
       # stays, and the poller re-kicks it about a ticket it believes it already handled. The fleet
       # then looks like it is not listening, which is the reading that costs the most.
@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.ArchWakeTest do
 
       assert brief =~ "`submit_result`"
       assert brief =~ "ET RIEN D'AUTRE"
-      refute brief =~ "réponds (`comment_issue`)"
+      refute brief =~ "réponds (`issue_comment`)"
     end
 
     test "refs fetched → the mandate NAMES them and tells the arch to look before arbitrating" do

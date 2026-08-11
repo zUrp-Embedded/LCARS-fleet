@@ -21,39 +21,39 @@ defmodule Fleet.MCP.PodTools do
         `work_item_id` MANDATORY (correlator).
     * `Fleet.MCP.PodTools.Delegation` — forge delegation (architect only, server-side
       `require_architect` gate):
-      - `create_issue`     : the arch delegates an implementation brick (forge issue).
-      - `create_project`   : the arch starts a fresh project (repo + three faces + scaffold).
-      - `import_project`   : the arch imports an EXISTING forge repo (three faces, main content
+      - `issue_create`     : the arch delegates an implementation brick (forge issue).
+      - `project_create`   : the arch starts a fresh project (repo + three faces + scaffold).
+      - `project_install`   : the arch imports an EXISTING forge repo (three faces, main content
         intact — ≠ create_project which starts a fresh one).
-      - `revise_project_card` : revises an existing project's validation card (BL-6-29 — the
+      - `project_revise_card` : revises an existing project's validation card (BL-6-29 — the
         engraved declaration gets a tracked revision path; future tickets only).
-      - `close_project`    : parks a project (BL-6-30 — marker issue holds the state, the
-        poller skips the repo; disk + forge intact, `open_project` reopens).
-      - `adopt_project`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
+      - `project_close`    : parks a project (BL-6-30 — marker issue holds the state, the
+        poller skips the repo; disk + forge intact, `project_open` reopens).
+      - `project_publish`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
         of import; local content never overwritten).
-      - `import_external_project` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
-      - `get_issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
+      - `project_import` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
+      - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
-      - `list_issues`      : the arch reads its project's open-ticket board (BL-6-28: the
+      - `issue_list`      : the arch reads its project's open-ticket board (BL-6-28: the
         write channel existed without its read half — a radio that transmits but not receives).
-      - `get_issue`        : the arch reads ONE ticket in full (body + comment thread).
-      - `comment_issue`    : the arch replies on an in-flight ticket (in the role's name).
-      - `add_dependency` / `remove_dependency` : the arch states the order between two tickets
+      - `issue_get`        : the arch reads ONE ticket in full (body + comment thread).
+      - `issue_comment`    : the arch replies on an in-flight ticket (in the role's name).
+      - `dependency_add` / `dependency_remove` : the arch states the order between two tickets
         AFTER creation. The result SAYS what it does not do — on a ticket already in flight the
         edge blocks the CLOSURE, it does not stop the run.
-      - `retire_issue`     : the arch abandons a ticket with NO replacement — the live PR is
+      - `issue_retire`     : the arch abandons a ticket with NO replacement — the live PR is
         closed, the dependents are told and RELEASED (a supersede carries its edges, a
         retirement lifts them), `stage/retired`.
-      - `list_projects`    : the READ half of the project surface — the onboarder could destroy a
+      - `project_list`    : the READ half of the project surface — the onboarder could destroy a
         project it had no way to enumerate.
       - `emergency_stop`   : the brake. Mass CLOSE of everything in flight, fleet-wide (never a
         kill: killing pods leaves the tickets open and the poller re-dispatches).
-      - `open_project`     : the inverse of `close_project` (the parking marker is lifted).
-      - `delete_project`   : destroys a project. Disarmed by deployment flag.
+      - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
+      - `project_delete`   : destroys a project. Disarmed by deployment flag.
       - `list_workflow_cards` : the validation cards a project can be onboarded against.
 
   ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
-  `retire_issue` was added). The authority is the `deftool` set itself, and the gate reads it from
+  `issue_retire` was added). The authority is the `deftool` set itself, and the gate reads it from
   the AST: `mcp.tools_gated` in `lcars.contracts.check` refuses any tool that is neither pod-scoped
   nor role-gated, and any dispatch clause with no schema. A tool absent from this prose is a stale
   comment; a tool absent from that check does not exist.
@@ -116,7 +116,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "create_issue" do
+  deftool "issue_create" do
     meta do
       name("Create Issue")
 
@@ -202,7 +202,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "create_project" do
+  deftool "project_create" do
     meta do
       name("Create Project")
 
@@ -225,8 +225,8 @@ defmodule Fleet.MCP.PodTools do
           "fabricated). If the human declares NOTHING (no card, no level), pass nothing: the project is " <>
           "recorded C0 undeclared on the default card. Optional: `nature` (domain hint, e.g. " <>
           "web-gui/hardware). " <>
-          "Returns {\"status\":\"onboarded\",\"repo\":...}; then use `create_issue` to deliver bricks " <>
-          "INTO this project — the repo comes from your pod's binding, `create_issue` takes NO " <>
+          "Returns {\"status\":\"onboarded\",\"repo\":...}; then use `issue_create` to deliver bricks " <>
+          "INTO this project — the repo comes from your pod's binding, `issue_create` takes NO " <>
           "`project` parameter."
       )
     end
@@ -247,7 +247,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "open_project" do
+  deftool "project_open" do
     meta do
       name("Open Project")
 
@@ -256,7 +256,7 @@ defmodule Fleet.MCP.PodTools do
           "up (idempotent — alive = no-op; dead/never — fleet restart, crash — = fresh spawn, its context " <>
           "comes back via its stable slot). Use it to RESUME working on an existing project (e.g. after " <>
           "the fleet was restarted). No forge/disk write. `full_name` = `owner/name`. Dirs absent → " <>
-          "error (that project needs `import_project`, or `create_project` if it does not exist). " <>
+          "error (that project needs `project_install`, or `project_create` if it does not exist). " <>
           "Returns {\"status\":\"opened\",\"repo\":...,\"architect\":{...}}."
       )
     end
@@ -270,7 +270,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "import_project" do
+  deftool "project_install" do
     meta do
       name("Import Project")
 
@@ -294,7 +294,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "list_deposits" do
+  deftool "deposit_list" do
     meta do
       name("List Deposits")
 
@@ -315,20 +315,20 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}})
   end
 
-  deftool "import_deposit" do
+  deftool "deposit_import" do
     meta do
       name("Import Deposit")
 
       description(
         "Adopt a repo your human DEPOSITED in their personal space (`<login>/<name>`, from " <>
-          "`list_deposits`) into a catalogue's org — the third import door, and the only one that " <>
+          "`deposit_list`) into a catalogue's org — the third import door, and the only one that " <>
           "takes a repo from outside every org. `catalogue` names the destination (its org IS its " <>
           "name). The full ADOPTION GATE runs on the way in: a foreign `.claude/` tree is refused " <>
           "en bloc, every `CLAUDE.md` goes through the reception filter, and the default branch is " <>
           "normalized to `main`. The source is NOT consumed — your human keeps their repo, the " <>
-          "fleet works on its copy. Use `import_project` instead for a repo ALREADY in an org. " <>
+          "fleet works on its copy. Use `project_install` instead for a repo ALREADY in an org. " <>
           "FRAME IT ON THE WAY IN: `workflow_map` + `intensity_level`/`intensity_justification` " <>
-          "declare the card and the criticality, exactly as on `create_project`. Undeclared is " <>
+          "declare the card and the criticality, exactly as on `project_create`. Undeclared is " <>
           "not forbidden — the project lands on the default card at C0 and the declaration says " <>
           "it was never declared, which is a readable state rather than a hole. " <>
           "Returns {\"status\":\"imported\",\"repo\":...,\"from\":...}."
@@ -349,7 +349,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "adopt_project" do
+  deftool "project_publish" do
     meta do
       name("Adopt Project")
 
@@ -381,7 +381,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "import_external_project" do
+  deftool "project_import" do
     meta do
       name("Import External Project")
 
@@ -416,7 +416,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "close_project" do
+  deftool "project_close" do
     meta do
       name("Close Project")
 
@@ -425,7 +425,7 @@ defmodule Fleet.MCP.PodTools do
           "nothing is destroyed, this is a pause, fully reversible). The running brick finishes; " <>
           "the NEXT ticket never starts. Mechanics: an OPEN marker issue (`[lcars-parked]` title) " <>
           "holds the closed state on the forge — visible in the UI, no hidden state. The " <>
-          "project's architect stops (it comes back at reopen). REOPEN: `open_project` (immediate " <>
+          "project's architect stops (it comes back at reopen). REOPEN: `project_open` (immediate " <>
           "full reopen, clears the marker), or a human closing the marker issue in the forge UI " <>
           "(the rail resumes; the architect self-respawns at the first pending escalation). " <>
           "`full_name` = `owner/name`. Returns {\"status\":\"closed\",\"outcome\":\"closed\"|" <>
@@ -442,7 +442,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "revise_project_card" do
+  deftool "project_revise_card" do
     meta do
       name("Revise Project Card")
 
@@ -478,7 +478,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "delete_project" do
+  deftool "project_delete" do
     meta do
       name("Delete Project")
 
@@ -487,7 +487,7 @@ defmodule Fleet.MCP.PodTools do
           "falls with it), and removes the 3 local face folders. IRREVERSIBLE, and it destroys " <>
           "WHATEVER `full_name` you pass → FAIL-CLOSED: it does NOTHING unless you pass `force: true` to " <>
           "confirm the destruction (there is no safe auto-detect — an imported repo has real content with " <>
-          "0 fleet issues/PRs). Use it to RETIRE a project, or to clean up a FAILED `create_project` " <>
+          "0 fleet issues/PRs). Use it to RETIRE a project, or to clean up a FAILED `project_create` " <>
           "(`force: true`) then re-create on clean ground. `full_name` = `owner/name`. Without force → " <>
           "error `force_required`. DISARMED BY DEFAULT on most deployments: if you get " <>
           "`delete_project_disabled`, the tool is switched off for this whole fleet — that is not " <>
@@ -506,7 +506,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "get_issue_status" do
+  deftool "issue_status" do
     meta do
       name("Get Issue Status")
 
@@ -550,8 +550,8 @@ defmodule Fleet.MCP.PodTools do
           "`lcars-awaits-arch`): a role (scoper/engineer/gatekeeper) hit `escalate_user` and " <>
           "handed the decision back to you. The wake (\"ton tour\") only signals THAT there is work; " <>
           "THIS reads WHAT. Returns each awaiting issue with `number`, `title` and `verdict` (the " <>
-          "worker's escalation comment — the reasoning). Then act: fix + re-`create_issue`, say your " <>
-          "decision on the thread with `comment_issue`, or bring it to your human. " <>
+          "worker's escalation comment — the reasoning). Then act: fix + re-`issue_create`, say your " <>
+          "decision on the thread with `issue_comment`, or bring it to your human. " <>
           "⚠ NONE OF THOSE RESOLVES THE ESCALATION. Only `submit_result` on this work item " <>
           "does: it is what drains the `lcars-awaits-arch` label and lets the poller serve the " <>
           "next step. Comment and stop, and the ticket stays in your inbox forever while the " <>
@@ -584,7 +584,7 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
   end
 
-  deftool "list_issues" do
+  deftool "issue_list" do
     meta do
       name("List Issues")
 
@@ -594,7 +594,7 @@ defmodule Fleet.MCP.PodTools do
           "everything in flight, including tickets a human opened without you). Each entry: " <>
           "`number`, `title`, `labels` (the `stage/*` and `genre/*` markers carry the pipeline " <>
           "state). Closed tickets do not appear — track a specific delegation with " <>
-          "`get_issue_status`, read a full thread with `get_issue`. No arguments — it is your " <>
+          "`issue_status`, read a full thread with `issue_get`. No arguments — it is your " <>
           "project's board."
       )
     end
@@ -602,14 +602,14 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
   end
 
-  deftool "get_issue" do
+  deftool "issue_get" do
     meta do
       name("Get Issue")
 
       description(
         "READ a ticket of YOUR project in full: body + comment thread, oldest first — the " <>
-          "CONVERSATION, where `get_issue_status` renders a tracking VERDICT. Use it before " <>
-          "replying with `comment_issue` (never answer a thread you have not read), and to read " <>
+          "CONVERSATION, where `issue_status` renders a tracking VERDICT. Use it before " <>
+          "replying with `issue_comment` (never answer a thread you have not read), and to read " <>
           "what a human or a worker wrote back to you. `number` = the issue number. Returns " <>
           "{\"issue\":N,\"title\",\"state\",\"body\",\"labels\",\"comments\":[{\"author\"," <>
           "\"body\",\"created_at\"}]}. If \"comments\" is ABSENT and \"comments_error\":" <>
@@ -627,7 +627,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "comment_issue" do
+  deftool "issue_comment" do
     meta do
       name("Comment Issue")
 
@@ -649,7 +649,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "add_dependency" do
+  deftool "dependency_add" do
     meta do
       name("Add Dependency")
 
@@ -661,7 +661,7 @@ defmodule Fleet.MCP.PodTools do
           "OF THE ANSWER: if `number` is ALREADY in flight, this edge does NOT stop it (the " <>
           "admission gate reads blockers when a step STARTS, and that reading already happened) — " <>
           "what it blocks is the CLOSURE of `number` until the blocker is resolved. To order work " <>
-          "that has not started, use `create_issue` with `depends_on`. Returns " <>
+          "that has not started, use `issue_create` with `depends_on`. Returns " <>
           "{\"issue\":N,\"blocker\":N,\"edge\":\"added\",\"portee\":\"...\"}."
       )
     end
@@ -676,13 +676,13 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "remove_dependency" do
+  deftool "dependency_remove" do
     meta do
       name("Remove Dependency")
 
       description(
         "LIFT a dependency between two tickets of YOUR project — the inverse of " <>
-          "`add_dependency`. `number` = the ticket that was waiting. `blocker` = what it waited " <>
+          "`dependency_add`. `number` = the ticket that was waiting. `blocker` = what it waited " <>
           "for. Lifting the LAST blocker makes `number` closable immediately: the forge holds " <>
           "nothing back any more. Use it when an order you declared turns out not to apply — not " <>
           "to unblock a ticket whose blocker is simply late (that one is still real work). " <>
@@ -713,7 +713,7 @@ defmodule Fleet.MCP.PodTools do
           "request closed then the ticket retired — the trace says nothing was delivered, because " <>
           "nothing was. `reason` = why you are pulling the brake; it is posted on every ticket and " <>
           "it is what a human will read tomorrow. WORK IN PROGRESS IS LOST — that is the trade: " <>
-          "you save the fleet, not the tickets. Projects closed with `close_project` are skipped. " <>
+          "you save the fleet, not the tickets. Projects closed with `project_close` are skipped. " <>
           "A ticket that resists does NOT stop the sweep: it is listed in `failures` and the rest " <>
           "still stops. Re-run to finish the job — what is already retired is not listed again. " <>
           "Returns {\"stopped\":N,\"failed\":N,\"projects\":[...],\"skipped_not_open\":[...]}."
@@ -727,7 +727,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "list_projects" do
+  deftool "project_list" do
     meta do
       name("List Projects")
 
@@ -738,7 +738,7 @@ defmodule Fleet.MCP.PodTools do
           "validation card was DECLARED by a human (`declared`), never declared (`undeclared` — " <>
           "the fleet default applies at burn time), or unreadable (`invalid`/`unreadable`): a " <>
           "project that declared nothing is NOT the same as one that chose the default. `state` " <>
-          "is `open`, `parked` (closed by `close_project`, reopen with `open_project`), or " <>
+          "is `open`, `parked` (closed by `project_close`, reopen with `project_open`), or " <>
           "`unknown` with `state_error` when the forge could not be read — an unknown state is " <>
           "never reported as open."
       )
@@ -747,7 +747,7 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}})
   end
 
-  deftool "retire_issue" do
+  deftool "issue_retire" do
     meta do
       name("Retire Issue")
 
@@ -755,7 +755,7 @@ defmodule Fleet.MCP.PodTools do
         "RETIRE a ticket of YOUR project WITHOUT replacing it: the work is abandoned, not moved. " <>
           "Use it when a ticket should never have existed, or no longer should — obsolete, " <>
           "duplicated, out of scope. To replace a ticket by a corrected one, use " <>
-          "`create_issue` with `supersedes` instead: that one CARRIES the dependencies onto the " <>
+          "`issue_create` with `supersedes` instead: that one CARRIES the dependencies onto the " <>
           "successor, this one LIFTS them. `number` = the issue number. `reason` = why, in one " <>
           "or two sentences — it is posted on the ticket and it is the only trace of your " <>
           "decision. What happens: the live pull request is closed, every ticket that depended " <>
@@ -825,7 +825,7 @@ defmodule Fleet.MCP.PodTools do
   # 2026-07-19 reorg there is NO `project` wire param on the delegation tools: the arch has "the
   # project", the system knows which — a param to refuse would itself leak that other repos exist.
 
-  def handle_tool_call("create_issue", %{"title" => title, "brief" => brief} = args, state)
+  def handle_tool_call("issue_create", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
     # Pointer args are a PAIR: one without the other, or an out-of-scheme value, is a
     # STRUCTURAL REFUSAL — never a ticket with a half-pointer.
@@ -858,22 +858,22 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("create_issue", _bad_args, state) do
+  def handle_tool_call("issue_create", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("create_project", %{"name" => name} = args, state) when is_binary(name) do
+  def handle_tool_call("project_create", %{"name" => name} = args, state) when is_binary(name) do
     case Delegation.create_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("create_project", _bad_args, state) do
+  def handle_tool_call("project_create", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("import_project", %{"full_name" => full_name}, state)
+  def handle_tool_call("project_install", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
       case Delegation.import_project(full_name, state) do
@@ -887,7 +887,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("open_project", %{"full_name" => full_name}, state)
+  def handle_tool_call("project_open", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
       case Delegation.open_project(full_name, state) do
@@ -901,17 +901,17 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("open_project", _bad_args, state) do
+  def handle_tool_call("project_open", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("import_project", _bad_args, state) do
+  def handle_tool_call("project_install", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
   # No wire parameter, by construction: the human is the one this fleet runs for. A login on the
   # wire would turn an import tool into an enumerator of other people's personal spaces.
-  def handle_tool_call("list_deposits", _args, state) do
+  def handle_tool_call("deposit_list", _args, state) do
     case Delegation.list_deposits(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -919,7 +919,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call(
-        "import_deposit",
+        "deposit_import",
         %{"source" => source, "catalogue" => catalogue} = args,
         state
       )
@@ -937,22 +937,22 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("import_deposit", _bad_args, state) do
+  def handle_tool_call("deposit_import", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("adopt_project", %{"name" => name} = args, state) when is_binary(name) do
+  def handle_tool_call("project_publish", %{"name" => name} = args, state) when is_binary(name) do
     case Delegation.adopt_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("adopt_project", _bad_args, state) do
+  def handle_tool_call("project_publish", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("import_external_project", %{"url" => url, "name" => name} = args, state)
+  def handle_tool_call("project_import", %{"url" => url, "name" => name} = args, state)
       when is_binary(url) and is_binary(name) and url != "" and name != "" do
     case Delegation.import_external_project(url, name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -960,11 +960,11 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("import_external_project", _bad_args, state) do
+  def handle_tool_call("project_import", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("close_project", %{"full_name" => full_name}, state)
+  def handle_tool_call("project_close", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
       case Delegation.close_project(full_name, state) do
@@ -978,11 +978,11 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("close_project", _bad_args, state) do
+  def handle_tool_call("project_close", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("revise_project_card", %{"full_name" => full_name} = args, state)
+  def handle_tool_call("project_revise_card", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
       case Delegation.revise_project_card(full_name, args, state) do
@@ -996,11 +996,11 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("revise_project_card", _bad_args, state) do
+  def handle_tool_call("project_revise_card", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("delete_project", %{"full_name" => full_name} = args, state)
+  def handle_tool_call("project_delete", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
       case Delegation.delete_project(full_name, args, state) do
@@ -1014,11 +1014,11 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("delete_project", _bad_args, state) do
+  def handle_tool_call("project_delete", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("get_issue_status", %{"number" => number}, state)
+  def handle_tool_call("issue_status", %{"number" => number}, state)
       when is_integer(number) do
     case Delegation.issue_status(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1026,7 +1026,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("get_issue_status", _bad, state) do
+  def handle_tool_call("issue_status", _bad, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -1040,21 +1040,21 @@ defmodule Fleet.MCP.PodTools do
 
   # Project board + full-thread read (BL-6-28): the arch's READ half — architect gate inside
   # Delegation, repo from the channel binding (never the wire), like every delegation tool.
-  def handle_tool_call("list_issues", _arguments, state) do
+  def handle_tool_call("issue_list", _arguments, state) do
     case Delegation.list_issues(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("get_issue", %{"number" => number}, state) when is_integer(number) do
+  def handle_tool_call("issue_get", %{"number" => number}, state) when is_integer(number) do
     case Delegation.get_issue(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("get_issue", _bad, state) do
+  def handle_tool_call("issue_get", _bad, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -1065,7 +1065,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("comment_issue", %{"number" => number, "body" => body}, state)
+  def handle_tool_call("issue_comment", %{"number" => number, "body" => body}, state)
       when is_integer(number) and is_binary(body) and body != "" do
     case Delegation.comment_issue(number, body, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1073,12 +1073,12 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("comment_issue", _bad_args, state) do
+  def handle_tool_call("issue_comment", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
   # Order between tickets, declared after creation (architect gate inside Delegation).
-  def handle_tool_call("add_dependency", %{"number" => n, "blocker" => b}, state)
+  def handle_tool_call("dependency_add", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
     case Delegation.add_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1086,11 +1086,11 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("add_dependency", _bad_args, state) do
+  def handle_tool_call("dependency_add", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("remove_dependency", %{"number" => n, "blocker" => b}, state)
+  def handle_tool_call("dependency_remove", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
     case Delegation.remove_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1098,7 +1098,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("remove_dependency", _bad_args, state) do
+  def handle_tool_call("dependency_remove", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -1116,7 +1116,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # The READ half of the project surface (onboarder gate inside Delegation).
-  def handle_tool_call("list_projects", _arguments, state) do
+  def handle_tool_call("project_list", _arguments, state) do
     case Delegation.list_projects(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -1124,7 +1124,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # Retirement without a replacement (architect gate inside Delegation, repo from the channel).
-  def handle_tool_call("retire_issue", %{"number" => number, "reason" => reason}, state)
+  def handle_tool_call("issue_retire", %{"number" => number, "reason" => reason}, state)
       when is_integer(number) and is_binary(reason) and reason != "" do
     case Delegation.retire_issue(number, reason, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1132,7 +1132,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("retire_issue", _bad_args, state) do
+  def handle_tool_call("issue_retire", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

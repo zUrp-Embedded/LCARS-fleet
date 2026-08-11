@@ -332,7 +332,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # that never existed as a whole, and had no way to say which one it read.
   #
   # Pinned by COPY at the face's head, into the pod's own directory, so the reference also survives
-  # its source: a face removed under a running pod (`delete_project`) used to leave a dangling bind
+  # its source: a face removed under a running pod (`project_delete`) used to leave a dangling bind
   # the pod read as an empty tree, silently. Nothing outside the pod is depended on after spawn.
   #
   # The MOUNT POINT does not move: the copy is bound at the canonical `<face_root>/<project>`, so a

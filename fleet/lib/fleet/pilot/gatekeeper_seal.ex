@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
-    # delivered brick's PR in `get_issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
+    # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
 
     # WHO ACTUALLY APPROVED — read, never asserted. The comment used to state "the judges APPROVED

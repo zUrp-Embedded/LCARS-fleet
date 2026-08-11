@@ -92,7 +92,7 @@ defmodule Fleet.MCP.RetireIssueTest do
   defp retire(number \\ 42, reason \\ "hors périmètre depuis la refonte"),
     do:
       PodTools.handle_tool_call(
-        "retire_issue",
+        "issue_retire",
         %{"number" => number, "reason" => reason},
         %{pod_id: "pod-arch-#{System.unique_integer([:positive])}"}
       )
@@ -232,7 +232,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     test "an empty reason is refused: the motive IS the only trace of the decision" do
       assert {:error, :invalid_arguments, _} =
                PodTools.handle_tool_call(
-                 "retire_issue",
+                 "issue_retire",
                  %{"number" => 42, "reason" => ""},
                  %{pod_id: "pod-arch"}
                )

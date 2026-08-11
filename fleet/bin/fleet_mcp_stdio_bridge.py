@@ -122,7 +122,7 @@ def central_call(method, params):
 # forwarded to central, the SINGLE source of the schemas (`deftool`) and of role filtering (derived from
 # the cap-profile, indexed on the per-pod socket = identity through the channel). That is what makes the
 # "pure transport shim" claim true: zero logic, zero list, and no Python↔Elixir drift (whose symptom was
-# `import_project` being invisible to the pods).
+# `project_install` being invisible to the pods).
 def main():
     if not SOCKET_PATH:
         log("FATAL: LCARS_FLEET_MCP_SOCKET unset — the bridge has no central socket to reach")

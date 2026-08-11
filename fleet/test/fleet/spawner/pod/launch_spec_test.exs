@@ -296,7 +296,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "the pinned reference SURVIVES its source being removed mid-flight", %{tmp_dir: tmp} do
-      # This is the whole point. `delete_project` nukes the faces without consulting running pods;
+      # This is the whole point. `project_delete` nukes the faces without consulting running pods;
       # a live `--ro-bind` then became a dangling mount the pod read as an empty tree, silently.
       src = face_repo(tmp)
       pod_dir = Path.join(tmp, "pod")

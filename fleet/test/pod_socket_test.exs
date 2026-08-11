@@ -11,7 +11,7 @@ defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
   # first invocation signals the coordinator and BLOCKS until released; a concurrent duplicate (the
   # retry that overran the stdio bridge timeout) must be deduped by `Fleet.MCP.Idempotency` and never
   # reach this handler a second time. `:idem_dup_count` counts the real invocations.
-  def handle_tool_call("create_issue", _args, _state) do
+  def handle_tool_call("issue_create", _args, _state) do
     if pid = Process.whereis(:idem_dup_listener), do: send(pid, {:handling, self()})
 
     receive do
@@ -121,7 +121,7 @@ defmodule Fleet.MCP.PodSocketTest do
   test "F-C138: tools/list served by the socket = base + threaded role tools (schemas from the deftools)" do
     # delegator role: the spawner threads create_issue + import_project (derived from canon allowedTools).
     pod = uniq("arch")
-    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["create_issue", "import_project"])
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create", "project_install"])
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
     assert %{"result" => %{"tools" => tools}} = rpc(path, 10, "tools/list")
@@ -130,8 +130,8 @@ defmodule Fleet.MCP.PodSocketTest do
     # universal base ALWAYS + the threaded role tools; schemas from the deftools (single source),
     # import_project INCLUDED (invisible before F-C138). A non-threaded tool (create_project) is NOT served.
     assert "get_work_item" in names and "submit_result" in names
-    assert "create_issue" in names and "import_project" in names
-    refute "create_project" in names
+    assert "issue_create" in names and "project_install" in names
+    refute "project_create" in names
 
     # real tool objects coming from the deftools (single source `PodTools.get_tools`) — not bare names.
     assert Enum.all?(tools, &(is_map(&1) and Map.has_key?(&1, "name")))
@@ -141,7 +141,7 @@ defmodule Fleet.MCP.PodSocketTest do
     # `input_schema` = claude does not parse the schema → tool REJECTED ("No such tool available").
     # F-C138 regression (forwarding the central catalogue instead of the bridge's local camelCase
     # catalogue), caught in e2e while the gate only covered the NAMES — locked HERE.
-    ci = Enum.find(tools, &(&1["name"] == "create_issue"))
+    ci = Enum.find(tools, &(&1["name"] == "issue_create"))
     assert Map.has_key?(ci, "inputSchema"), "tools/list wire MUST carry inputSchema (MCP camel)"
 
     refute Map.has_key?(ci, "input_schema"),
@@ -402,13 +402,13 @@ defmodule Fleet.MCP.PodSocketTest do
     )
 
     pod = uniq("idemdup")
-    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["create_issue"])
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
     args = %{"title" => "T", "brief" => "b"}
 
     # A: fires create_issue; its handler blocks in-flight (holds the single-flight claim).
-    ta = Task.async(fn -> call(path, 1, "create_issue", args) end)
+    ta = Task.async(fn -> call(path, 1, "issue_create", args) end)
 
     handler =
       receive do
@@ -418,7 +418,7 @@ defmodule Fleet.MCP.PodSocketTest do
       end
 
     # B: a concurrent duplicate (same args, same pod → same key). It must WAIT on A, not reach the handler.
-    tb = Task.async(fn -> call(path, 2, "create_issue", args) end)
+    tb = Task.async(fn -> call(path, 2, "issue_create", args) end)
     refute_receive {:handling, _}, 500
 
     # Release A → it completes; B then replays A's memoized result without a second run.

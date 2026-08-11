@@ -94,7 +94,7 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
 
   defp status do
     {:ok, %{content: [%{"text" => txt}]}, _} =
-      PodTools.handle_tool_call("get_issue_status", %{"number" => 42}, %{pod_id: "pod-arch"})
+      PodTools.handle_tool_call("issue_status", %{"number" => 42}, %{pod_id: "pod-arch"})
 
     Jason.decode!(txt)
   end

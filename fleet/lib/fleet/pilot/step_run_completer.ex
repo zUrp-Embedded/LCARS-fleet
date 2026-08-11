@@ -243,7 +243,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     body =
       "**Architecte** (auteur du brief) — " <>
         lead <>
-        "\n\nReprends ce brief : corrige-le puis re-soumets via `create_issue` avec " <>
+        "\n\nReprends ce brief : corrige-le puis re-soumets via `issue_create` avec " <>
         "`supersedes: <n° de CE ticket>` — la fleet retire alors l'ancien ticket elle-même " <>
         "(jamais deux tickets vivants pour la même brique). Ou tranche avec ton humain " <>
         "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>

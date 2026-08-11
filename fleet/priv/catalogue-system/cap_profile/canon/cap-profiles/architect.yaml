@@ -112,12 +112,12 @@ spec:
       # (create_project/import_project/list_workflow_cards) belongs to starfleet (fleet-master) since the
       # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.
       # get_work_item/submit_result (universal) come from the launcher.
-      - mcp__fleet__create_issue
-      - mcp__fleet__get_issue_status
+      - mcp__fleet__issue_create
+      - mcp__fleet__issue_status
       - mcp__fleet__list_escalations  # return channel: reads the awaits-arch escalations (worker verdict)
-      - mcp__fleet__list_issues       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
-      - mcp__fleet__get_issue         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
-      - mcp__fleet__comment_issue     # return channel: replies on an in-flight ticket (in the role's name)
+      - mcp__fleet__issue_list       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
+      - mcp__fleet__issue_get         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
+      - mcp__fleet__issue_comment     # return channel: replies on an in-flight ticket (in the role's name)
     disallowedTools:
       # snake_case: server-side API tools. Declared here, enforced by the vendor — cf. the
       # convention note above `allowedTools`.

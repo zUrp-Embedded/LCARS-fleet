@@ -31,7 +31,7 @@ defmodule Fleet.MCP.SeamContractTest do
     {Fleet.MCP.PodTools.Delegation.EscalationForge, Fleet.Forge.Client},
     # spawner → mcp: a pod spawn cannot provision its socket if this one drifts.
     {Fleet.Spawner.McpSocketProvisioner, Fleet.MCP.PodSocketSupervisor},
-    # mcp → pilot: the arch's `create_project` lands here.
+    # mcp → pilot: the arch's `project_create` lands here.
     {Fleet.MCP.PodTools.Delegation.ProjectOnboard, Fleet.Project.Onboard}
   ]
 

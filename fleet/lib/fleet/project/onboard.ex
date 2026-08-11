@@ -21,7 +21,7 @@ defmodule Fleet.Project.Onboard do
   criterion separating the workshop from it is the DESTINATION, never the nature of the artefact.
 
   It is a **mechanical rail** (structural compliance): starfleet (the fleet-master) *triggers* via the
-  MCP tool `create_project`, the SYSTEM *executes* this deterministic sequence — the caller never types
+  MCP tool `project_create`, the SYSTEM *executes* this deterministic sequence — the caller never types
   git. Reorg 2026-07-19: onboarding also spawns the project's per-project architect (`maybe_open_architect`).
 
   Sequence (FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
@@ -266,7 +266,7 @@ defmodule Fleet.Project.Onboard do
   # Le defaut des quatre portes, quand l'appelant ne nomme pas d'org. C'etait le litteral `"fleet"`
   # a cinq endroits — le nom d'UN catalogue, ecrit cinq fois. Il vaut desormais le premier catalogue
   # actif, donc `fleet` sur un deploiement qui n'apporte rien, et le sien sur un deploiement qui
-  # apporte le sien. `create_project` passe `:org` explicitement depuis le guichet ; ce defaut sert
+  # apporte le sien. `project_create` passe `:org` explicitement depuis le guichet ; ce defaut sert
   # les appels directs et les tests.
   defp default_org do
     case active_orgs() do
@@ -771,7 +771,7 @@ defmodule Fleet.Project.Onboard do
 
   Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
   the forge that was never cloned here is not something this box can act on, and a disk project not
-  yet published is precisely what `adopt_project` exists for.
+  yet published is precisely what `project_publish` exists for.
 
   Per project, three facts and no derivation:
 
@@ -781,7 +781,7 @@ defmodule Fleet.Project.Onboard do
       from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`
       records an INCIDENT on the invalid path — a listing must not have side effects.
     * the STATE, read from the forge: an open parked-marker issue is the state machine
-      (`close_project`'s own truth, not a second reading of it).
+      (`project_close`'s own truth, not a second reading of it).
     * `state: "unknown"` with `state_error` when that forge read fails. Never a silent "open" — an
       unreadable state and a running project must not look the same to the actor that can delete
       either one.
@@ -893,12 +893,12 @@ defmodule Fleet.Project.Onboard do
   CLOSES a project (BL-6-30) — the verb between `open` and `delete`: stops the fleet ON this
   project while disk and forge stay intact. The closed state is a FORGE OBJECT (the forge IS
   the state machine): an OPEN marker issue (`ForgeProtocol.parked_issue_title/0`, assignee =
-  the human — the same fixed point `create_issue` uses, and REQUIRED for the poller's
+  the human — the same fixed point `issue_create` uses, and REQUIRED for the poller's
   `assigned_by` scoping to see it). The poller reads it in the per-repo listing it already
   does and skips the whole step rail; the marker is posted BEFORE the architect stops, so a
   tick between the two gestures dispatches nothing. In-flight workers are NOT reaped — the
   running brick finishes, the skip stops the NEXT one (same philosophy as the lease). Reopen:
-  `open_project` (immediate, closes the marker(s) then ensures the architect), or the human
+  `project_open` (immediate, closes the marker(s) then ensures the architect), or the human
   closing the marker in the forge UI (a LEGITIMATE unpark — the rail resumes, and the
   architect self-respawns at the first pending escalation via the ArchWake net).
 
@@ -968,9 +968,9 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp parked_marker_body do
-    "Projet fermé par la fleet (`close_project`) — le rail ne dispatche plus de ticket ici.\n\n" <>
+    "Projet fermé par la fleet (`project_close`) — le rail ne dispatche plus de ticket ici.\n\n" <>
       "Réouverture : fermer CE ticket relance le rail (l'architecte revient de lui-même à la " <>
-      "première escalade) ; `open_project` fait la réouverture complète et immédiate."
+      "première escalade) ; `project_open` fait la réouverture complète et immédiate."
   end
 
   @doc """

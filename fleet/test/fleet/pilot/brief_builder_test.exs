@@ -13,7 +13,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
   alias Fleet.Pilot.BriefBuilder
 
-  # Minimal forge seam: `get_predecessor_result` (the DELIVERABLE) + `get_issue` (the CRITERION),
+  # Minimal forge seam: `get_predecessor_result` (the DELIVERABLE) + `issue_get` (the CRITERION),
   # driven by `forge_opts` (`:_pred`, `:_issue`) → a single stub serves the ok/error cases.
   defmodule StubForge do
     def get_predecessor_result(_repo, _n, opts),

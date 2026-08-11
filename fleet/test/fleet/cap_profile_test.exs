@@ -1307,8 +1307,8 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "extracts mcp__fleet__ entries from allowedTools, prefix stripped (order preserved)" do
-      cp = cp_scope(["Read", "mcp__fleet__create_issue", "Bash", "mcp__fleet__import_project"])
-      assert Fleet.CapProfile.mcp_fleet_tools(cp) == ["create_issue", "import_project"]
+      cp = cp_scope(["Read", "mcp__fleet__issue_create", "Bash", "mcp__fleet__project_install"])
+      assert Fleet.CapProfile.mcp_fleet_tools(cp) == ["issue_create", "project_install"]
     end
 
     test "no mcp__fleet__ (judge role: Read/Bash/… only) → []" do

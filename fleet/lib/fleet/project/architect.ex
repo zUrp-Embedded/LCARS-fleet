@@ -29,7 +29,7 @@ defmodule Fleet.Project.Architect do
       reporting it to the human. **Read-only, and the mode is the point**: it is the party being
       judged, and a judged party that can rewrite the tree it is judged on is not judged at all.
 
-  The in-flight work view (branches, PRs) is the FORGE via its MCP tools (`get_issue_status`),
+  The in-flight work view (branches, PRs) is the FORGE via its MCP tools (`issue_status`),
   never git — neither a frozen clone nor a mount shows branches born after spawn.
 
   ## Idempotent ensure (open = relaunch = crash-recovery)
@@ -37,7 +37,7 @@ defmodule Fleet.Project.Architect do
   `ensure/2` is the SINGLE entry for "this project must have its architect": deterministic
   `pod_id` (`<delegate-role>-<name>`) → alive = `{:already_started}` no-op; dead/never = fresh spawn
   (context back via the slot sidecar). Callers: `ProjectOnboard` (on-open, best-effort),
-  `ArchWake` (on-demand when an escalation arrives), the `open_project` tool (human-driven
+  `ArchWake` (on-demand when an escalation arrives), the `project_open` tool (human-driven
   relaunch). A project NOT on the machine (`/home/projects/<name>` absent) is REFUSED
   (`:not_onboarded`) — an architect without its project world would be an empty box.
 

@@ -345,7 +345,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.
-  @mutation_tools ~w(create_issue create_project import_project delete_project comment_issue)
+  # ⚠ MOTS NUS dans un sigil : cette liste ne ressemble a aucune autre occurrence d'un nom d'outil
+  # (ni chaine citee, ni `mcp__fleet__`, ni prose). Le renommage objet-d'abord du 2026-08-11 l'a
+  # donc manquee, et le gate l'a dit — le dedup single-flight cessait de reconnaitre les mutations.
+  # Une liste de noms d'outils qui ne s'ecrit pas comme les autres est une liste qu'un renommage
+  # rate en silence.
+  @mutation_tools ~w(issue_create project_create project_install project_delete issue_comment)
 
   # SOC-RES-001: tool crashes become MCP error results instead of dropped connections.
   defp safe_handle_tool_call(tool, tool_args, pod_id) do

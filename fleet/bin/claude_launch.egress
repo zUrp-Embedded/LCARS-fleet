@@ -15,3 +15,23 @@
 # naming `api.openai.com`. Adding a vendor is adding two files next to the others — never editing a
 # list inside the runtime, which is what would make the sanctuary itself vendor-aware.
 api.anthropic.com
+
+# ─── LA TELEMETRIE, ET POURQUOI ELLE EST ICI ──────────────────────────────────────────────────
+# Le CLI vendor y envoie sa telemetrie. Elle est dans l'allowlist parce que le dépôt a DEJA
+# arbitre la question ailleurs, et que la couper au reseau contredisait cet arbitrage en silence.
+#
+# `bwrap_launch.sh` l'ecrit : « telemetry OFF → l'agent retombe sur le kick `engage` (send-keys)
+# au lieu du MONITOR. Ruling: we PREFER the Monitor, so telemetry is ON by default. » Le couplage
+# telemetry→Monitor est du cote du relais Anthropic, pas notre choix.
+#
+# Donc trois etats, et le mauvais etait celui qu'on avait :
+#   - telemetry ON  + hote autorise  → le Monitor marche. C'est l'etat voulu, c'est celui-ci.
+#   - telemetry OFF (`LCARS_POD_DISABLE_TELEMETRY=1`) → pas de Monitor, fallback `engage` ASSUME,
+#     et le CLI ne reessaie pas. Mode vie privee, opt-in, coherent.
+#   - telemetry ON + hote refuse → le CLI reessaie en boucle, et la fleet CROIT avoir le Monitor
+#     alors que le relais ne recoit rien. Un mur qui coupe ce que la config declare actif ne
+#     protege pas : il fait mentir la config.
+#
+# ⚠ Couper la telemetrie se fait par SON interrupteur (`LCARS_POD_DISABLE_TELEMETRY=1`), jamais en
+# retirant cette ligne — retirer la ligne produit le troisieme etat, pas le deuxieme.
+http-intake.logs.us5.datadoghq.com

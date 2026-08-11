@@ -1520,7 +1520,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
-  # fleet started, and the first `create_project` died on `could not make directory (with -p)
+  # fleet started, and the first `project_create` died on `could not make directory (with -p)
   # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
   #
   # FAIL-CLOSED ON THE ANCHOR: if the `install -d` line cannot be found, this check FAILS instead of
@@ -2255,7 +2255,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The forge hands back whole objects. The code picks what it needs and the rest is dropped
   # silently — which is correct, right up until the dropped part is the answer to a question someone
   # is reconstructing from the outside. Measured that day: `submitted_at`, `merged_at`, `closed_at`
-  # and `html_url` arrived in payloads already fetched (`get_pull`, `get_issue`, `reviews`) and NO
+  # and `html_url` arrived in payloads already fetched (`get_pull`, `issue_get`, `reviews`) and NO
   # line of `lib/` touched them. That list was EXACTLY what the architect had spent three campaigns
   # rebuilding — and one command produced it, with no bench and no agent.
   #
@@ -2729,7 +2729,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # ── Forge mutations: which have a door, and for whom ─────────────────
   # PROBE N°4 of the pattern hunt — "a gesture with no door". The family that produced the tools of
-  # lot 1: `retire_issue`, `list_projects`, `emergency_stop` all existed as CAPABILITIES the runtime
+  # lot 1: `issue_retire`, `project_list`, `emergency_stop` all existed as CAPABILITIES the runtime
   # could already execute, and had to be disguised as something else (or were simply unreachable)
   # for want of a tool exposing them. An absence raises no error, which is why it survives: nothing
   # fails, the gesture is just performed sideways.
