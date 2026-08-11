@@ -73,13 +73,23 @@ defmodule Fleet.CapProfile.Catalog do
              | :catalogue_missing
              | :name_collision
              | {:role_reserved, String.t()}}
-  def read_role(role) do
+  def read_role(role), do: read_role(role, nil)
+
+  @doc """
+  Le meme role, lu dans l'image d'un catalogue NOMME — la porte per-catalogue.
+
+  `nil` garde le comportement du jour : l'image du PREMIER catalogue actif. C'est ce que veut un
+  appelant sans projet en main ; un appelant qui en a un passe la racine de SON catalogue, parce
+  qu'un role n'existe que dans le catalogue qui le declare.
+  """
+  @spec read_role(String.t(), Path.t() | nil) :: {:ok, map()} | {:error, term()}
+  def read_role(role, root) do
     # IMAGE-FIRST (proven-good image at boot): once `Fleet.CapProfile.Image.publish!/0` ran, the
     # image IS the catalogue — a closed world, one epoch for the whole deployment (a disk mutation
     # mid-life changes nothing until a restart republishes). A role absent from the image is
     # `:not_found`, whatever the disk now says. No image (tests' hermetic default, tooling) → the
     # live-disk path below, unchanged.
-    case Fleet.CapProfile.Image.published() do
+    case published_for(root) do
       %{index: index} ->
         case Map.fetch(index, role) do
           {:ok, raw} -> refuse_reserved(role, raw)
@@ -90,6 +100,9 @@ defmodule Fleet.CapProfile.Catalog do
         read_role_from_disk(role)
     end
   end
+
+  defp published_for(nil), do: Fleet.CapProfile.Image.published()
+  defp published_for(root) when is_binary(root), do: Fleet.CapProfile.Image.published(root)
 
   # A ReservedSeat found by NAME answers its own refusal, never `:not_found` (the seat exists,
   # the box is closed — BL-6-45) and never `:invalid_schema` (validating a seat against the

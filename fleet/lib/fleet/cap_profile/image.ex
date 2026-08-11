@@ -35,11 +35,18 @@ defmodule Fleet.CapProfile.Image do
     # en une seule image : un projet ne pouvait pas avoir « ses » roles, il avait ceux de tout le
     # monde. Les cartes ne se superposent pas et les cap-profiles si — c'est la difference que
     # `scopes/1` porte et que `search/1` aplatit.
-    for scope <- Fleet.Catalogue.scopes(:cap_profiles), do: publish_scope!(scope)
+    # Clee par la RACINE du catalogue, pas par le repertoire d'arbre : `SPBuilder.Image` clee ainsi,
+    # et un profil ne peut porter qu'UNE identite de catalogue. Deux espaces de cles pour un meme
+    # fait, c'est la duplication que ce chantier poursuit — introduite ici le temps d'un soir.
+    for root <- Fleet.Catalogue.active_roots(),
+        scope = Fleet.Catalogue.tree_scope(root, :cap_profiles),
+        scope != [],
+        do: publish_scope!(root, scope)
+
     :ok
   end
 
-  defp publish_scope!([business | _] = scope) do
+  defp publish_scope!(root, scope) do
     index =
       case Catalog.snapshot_roles(scope) do
         {:ok, index} ->
@@ -78,7 +85,7 @@ defmodule Fleet.CapProfile.Image do
       end
     end)
 
-    ensure_role_indexes_unique!(index, business)
+    ensure_role_indexes_unique!(index, root)
 
     overlays =
       case Catalog.snapshot_overlays(scope) do
@@ -92,7 +99,7 @@ defmodule Fleet.CapProfile.Image do
 
     version = version_of(index, overlays)
 
-    :persistent_term.put(image_key(business), %{
+    :persistent_term.put(image_key(root), %{
       index: index,
       overlays: overlays,
       version: version
@@ -109,7 +116,7 @@ defmodule Fleet.CapProfile.Image do
       end
 
     Logger.info(
-      "CapProfile.Image: published #{business} (#{map_size(index) - length(seats)} profiles, " <>
+      "CapProfile.Image: published #{root} (#{map_size(index) - length(seats)} profiles, " <>
         "#{map_size(overlays)} overlays#{seats_note}, version=#{version})"
     )
 
@@ -166,10 +173,8 @@ defmodule Fleet.CapProfile.Image do
   """
   @spec published() :: map() | nil
   def published do
-    case default_root() do
-      nil -> nil
-      root -> published(root)
-    end
+    # `active_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
+    published(default_root())
   end
 
   @spec published(Path.t()) :: map() | nil
@@ -190,10 +195,7 @@ defmodule Fleet.CapProfile.Image do
   # The cap-profile directory of the first active catalogue — the scope a caller without a project
   # resolves to. `nil` when nothing is readable at all, which `published/0` reports as "no image".
   defp default_root do
-    case Fleet.Catalogue.scopes(:cap_profiles) do
-      [[business | _] | _] -> business
-      _ -> nil
-    end
+    hd(Fleet.Catalogue.active_roots())
   end
 
   @doc """
@@ -206,11 +208,7 @@ defmodule Fleet.CapProfile.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    case default_root() do
-      nil -> :ok
-      root -> :persistent_term.put(image_key(root), image)
-    end
-
+    :persistent_term.put(image_key(default_root()), image)
     :ok
   end
 

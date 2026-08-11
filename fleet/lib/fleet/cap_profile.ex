@@ -84,13 +84,23 @@ defmodule Fleet.CapProfile do
   # `additionalProperties: false`), and the decision is not a catalogue field — two steps resolving the
   # same role legitimately differ. `nil` = never went through `resolve/3` (hand-built struct, fixture,
   # direct `compose/2`); readers must use `active_modops/1`, which falls back to the role's defaults.
-  defstruct [:kind, :metadata, :spec, :active_modops]
+  # `catalogue_root` : LE CATALOGUE D'OU CE PROFIL VIENT, porte par le profil lui-meme.
+  #
+  # Trois lecteurs en aval prennent deja un `%CapProfile{}` — la composition du SP, le draft d'agent,
+  # le protocole utilisateur — et lisaient tous l'image du PREMIER catalogue actif. Leur passer une
+  # racine en argument aurait ete transporter a cote du profil un fait qui EST du profil : son SP,
+  # son draft et ses modops viennent tous du catalogue qui le declare.
+  #
+  # `nil` = charge sans catalogue nomme, donc le premier actif. C'est le comportement du jour, et il
+  # reste juste tant qu'un appelant n'a pas de projet en main.
+  defstruct [:kind, :metadata, :spec, :active_modops, :catalogue_root]
 
   @type t :: %__MODULE__{
           kind: String.t(),
           metadata: map(),
           spec: map(),
-          active_modops: [String.t()] | nil
+          active_modops: [String.t()] | nil,
+          catalogue_root: Path.t() | nil
         }
 
   @default_containment "bwrap"
@@ -104,10 +114,19 @@ defmodule Fleet.CapProfile do
   """
   @impl Fleet.CapProfile.Loader
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
-  def load(role) when is_binary(role) do
-    with {:ok, raw} <- Catalog.read_role(role),
+  def load(role) when is_binary(role), do: load(role, nil)
+
+  @doc """
+  Le meme role, charge depuis le catalogue NOMME — et le profil rendu PORTE cette racine.
+
+  `nil` garde le comportement du jour (le premier catalogue actif). La racine voyage ensuite sur le
+  profil, ce qui evite de la threader dans les trois lecteurs qui le prennent deja.
+  """
+  @spec load(String.t(), Path.t() | nil) :: {:ok, t()} | {:error, term()}
+  def load(role, root) when is_binary(role) do
+    with {:ok, raw} <- Catalog.read_role(role, root),
          :ok <- Schema.validate(raw, :cap_profile) do
-      {:ok, to_struct(raw)}
+      {:ok, to_struct(raw, root)}
     end
   end
 
@@ -717,11 +736,14 @@ defmodule Fleet.CapProfile do
     |> Enum.uniq()
   end
 
-  defp to_struct(raw) when is_map(raw) do
+  defp to_struct(raw), do: to_struct(raw, nil)
+
+  defp to_struct(raw, root) when is_map(raw) do
     %__MODULE__{
       kind: Map.get(raw, "kind"),
       metadata: stringify_keys(Map.get(raw, "metadata", %{})),
-      spec: stringify_keys(Map.get(raw, "spec", %{}))
+      spec: stringify_keys(Map.get(raw, "spec", %{})),
+      catalogue_root: root
     }
   end
 

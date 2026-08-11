@@ -115,7 +115,8 @@ defmodule Fleet.SPBuilder do
   def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
     with :ok <- validate_compose_opts(opts),
-         {:ok, modop_fragments} <- read_modop_fragments(modop_bundles),
+         {:ok, modop_fragments} <-
+           read_modop_fragments(modop_bundles, cap_profile.catalogue_root),
          {:ok, subagent_fragment} <- read_subagent_template(cap_profile),
          {:ok, monk_inj} <- Monk.resolve_or_empty(cap_profile, opts) do
       preloaded_paths =
@@ -246,10 +247,16 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  defp read_modop_fragments([]), do: {:ok, []}
+  defp sp_image(nil), do: Fleet.SPBuilder.Image.published()
+  defp sp_image(root) when is_binary(root), do: Fleet.SPBuilder.Image.published(root)
 
-  defp read_modop_fragments(modop_bundles) do
-    case Fleet.SPBuilder.Image.published() do
+  defp read_modop_fragments([], _root), do: {:ok, []}
+
+  # La racine vient du PROFIL (`catalogue_root`), pas d'un argument transporte a cote : les fragments
+  # d'un role appartiennent au catalogue qui le declare. `nil` = le premier catalogue actif, ce que
+  # veut un appelant sans projet en main.
+  defp read_modop_fragments(modop_bundles, root) do
+    case sp_image(root) do
       %{modop_sp: fragments} ->
         Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
           case Map.fetch(fragments, name) do
@@ -317,8 +324,10 @@ defmodule Fleet.SPBuilder do
 
   defp read_subagent_template(_cap_profile), do: {:ok, ""}
 
-  defp fetch_subagent_content(name) do
-    case Fleet.SPBuilder.Image.published() do
+  defp fetch_subagent_content(name), do: fetch_subagent_content(name, nil)
+
+  defp fetch_subagent_content(name, root) do
+    case sp_image(root) do
       %{subagent: templates} ->
         Map.fetch(templates, name)
 
