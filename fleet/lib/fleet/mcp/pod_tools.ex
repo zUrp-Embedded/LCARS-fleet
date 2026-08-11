@@ -201,7 +201,10 @@ defmodule Fleet.MCP.PodTools do
           "the workshop your drafts live in) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
-          "catalogue first (`list_workflow_cards`) and pass the human's chosen card as `workflow_map` " <>
+          "catalogue first (`list_workflow_cards`, which names the CATALOGUE of every card) and pass " <>
+          "the human's chosen card as `workflow_map` plus its `catalogue` — the project lives in that " <>
+          "catalogue's forge org, and the binding is FIXED for its life; omit it and the project takes " <>
+          "the first active catalogue. " <>
           "(accepted even off-matrix — logged loud, the human has the last word). A declared level " <>
           "(`intensity_level` C0..C4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
           "verbatim when the human states one: you MAY ask the framing questions (mains voltage? cuts " <>
@@ -225,6 +228,7 @@ defmodule Fleet.MCP.PodTools do
         "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
         "intensity_justification" => %{"type" => "string"},
         "nature" => %{"type" => "string"},
+        "catalogue" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["name"]

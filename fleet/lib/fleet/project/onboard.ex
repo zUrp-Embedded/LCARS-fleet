@@ -252,6 +252,18 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
+  The forge orgs a project can be onboarded into — one per ACTIVE catalogue, and the org IS the
+  catalogue's name.
+
+  Lives here rather than being read from `Fleet.Catalogue` by every caller: "where can a project
+  live" is an onboarding question, and the MCP surface reaches this domain but not the catalogue —
+  the graph says so, and widening it to answer a project question would be widening it for the
+  wrong reason.
+  """
+  @spec active_orgs() :: [String.t()]
+  def active_orgs, do: Fleet.Catalogue.active_names()
+
+  @doc """
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call

@@ -677,6 +677,38 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est fixe pour sa vie : « ou vit ce projet »
+  # repond a « quel catalogue le traite ». Le choix se fait au guichet, la ou l'humain choisit deja sa
+  # carte — starfleet porte les deux verbes.
+  #
+  # Un catalogue INACTIF est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
+  # coller cette org a celle du poller : un projet onboarde dans une org que le poller ne scanne pas
+  # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
+  # orgs des catalogues ACTIFS, la condition se dit exactement ainsi.
+  #
+  # `:delegation_org` survit en surcharge explicite pour le cas rare ou l'onboarding doit viser une
+  # autre org que celles-la.
+  defp resolve_org(args) do
+    actives = Fleet.Project.Onboard.active_orgs()
+
+    case Map.get(args, "catalogue") do
+      cat when is_binary(cat) ->
+        if cat in actives,
+          do: {:ok, cat},
+          else: {:error, {:catalogue_not_active, cat, actives}}
+
+      nil ->
+        case Application.get_env(:fleet_mcp, :delegation_org) ||
+               Application.get_env(:fleet_pilot, :fleet_org) do
+          org when is_binary(org) -> {:ok, org}
+          nil -> first_active(actives)
+        end
+    end
+  end
+
+  defp first_active([org | _]), do: {:ok, org}
+  defp first_active([]), do: {:error, :no_active_catalogue}
+
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 
   # ============================================================
@@ -688,7 +720,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # behaviour Delegation.ProjectOnboard; default Fleet.Project.Onboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args, onboarder_role) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- conforming_onboard(),
+         {:ok, org} <- resolve_org(args) do
       # SAME config key as the poller's discovery org (`:fleet_pilot, :fleet_org`) — a project
       # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
       # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
@@ -696,10 +729,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # stays intact; the `:fleet_<dom>` atoms are legacy-valid, D-07) — the config IS the shared
       # authority here. `:delegation_org` survives as an explicit OVERRIDE for the rare case where
       # onboarding must target another org than the one being polled.
-      org =
-        Application.get_env(:fleet_mcp, :delegation_org) ||
-          Application.get_env(:fleet_pilot, :fleet_org, "fleet")
-
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
       # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
