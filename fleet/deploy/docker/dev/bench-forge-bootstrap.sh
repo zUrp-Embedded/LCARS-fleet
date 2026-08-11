@@ -242,6 +242,35 @@ say "comptes d'instance poses (systeme, starfleet, humain, roles system_*)"
 ) || die "tofu apply CATALOGUE en echec (rejoue-le a la main dans $TOFU_DIR pour voir sa sortie)" 4
 say "structure du catalogue posee (org $ORG, teams, comptes de role metier, adhesions)"
 
+# ─── 4-bis. le compte SYSTEME devient PROPRIETAIRE de l'org ──────────────────────────────────────
+# POURQUOI ICI ET PAS DANS TOFU : le provider n'expose ni data source `gitea_team` (donc l'id de la
+# team `Owners`, creee par Gitea avec l'org, est introuvable) ni champ proprietaire sur `gitea_org`
+# — le createur d'une org en est le proprietaire, point. Et pas dans `50-forge` non plus : ce module
+# n'ecrit qu'avec le jeton systeme ou en basic-auth machine, et le jeton systeme ne peut gerer une
+# team qu'une fois DEJA proprietaire. La seule identite de classe proprietaire est celle qui lance
+# l'apply — le master token, ici, et l'admin de l'operateur en production.
+#
+# POURQUOI C'EST NECESSAIRE, mesure le 2026-08-11 : `lcars project migrate` transfere un depot d'une
+# org a l'autre, et Gitea exige le PROPRIETAIRE de l'org SOURCE.
+#   token systeme membre+write                  -> 403 "user should be the owner of the repo"
+#   meme token, Owners de l'org SOURCE          -> 202
+#   Owners de la CIBLE seulement                -> 403   (seule la source compte)
+# Un projet peut quitter n'importe quelle org, donc chaque org que ce script pose accorde
+# l'adhesion. Le prix, mesure aussi : proprietaire, ce compte peut gerer les teams de son org.
+OWNERS_ID="$(curl -sf -m 10 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/$ORG/teams" \
+              | python3 -c 'import json,sys
+ts = json.load(sys.stdin)
+print(next((t["id"] for t in ts if t["name"] == "Owners"), ""))' 2>/dev/null || true)"
+if [[ -n "$OWNERS_ID" ]]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $MASTER_TOKEN" \
+            -X PUT "$(api)/teams/$OWNERS_ID/members/lcars-system" || true)"
+  [[ "$code" == "204" ]] \
+    && say "lcars-system PROPRIETAIRE de l'org $ORG (requis par « lcars project migrate »)" \
+    || die "lcars-system non ajoute aux Owners de $ORG (HTTP $code) — la migration de projet echouera en 403" 4
+else
+  die "team Owners de $ORG introuvable — la migration de projet echouera en 403" 4
+fi
+
 # ─── 5. le seed dans la boite — le handoff tofu → A4 ─────────────────────────────────────────────
 # Sans ce fichier, 50-forge ne peut pas minter les role-tokens et le DIT (drift) ; la fleet
 # demarre alors sans identite de role, et les producteurs echouent en role_token_unavailable au

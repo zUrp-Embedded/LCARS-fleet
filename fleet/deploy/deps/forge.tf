@@ -159,6 +159,30 @@ resource "gitea_org" "fleet" {
 # (push, topics de découverte, labels via le token système). PAS admin/owner : le moindre
 # privilège suffit à ce que cette recette doit faire. La branch-protection n'est PAS de son
 # ressort — elle se pose PAR DÉPÔT, au moment où le dépôt existe, donc hors provisioning.
+#
+# ⚠ CE CHOIX A UNE CONSÉQUENCE QU'IL N'AVAIT PAS QUAND IL A ÉTÉ ÉCRIT, et elle est mesurée
+# (2026-08-11) : `lcars project migrate` transfère un dépôt d'une org à l'autre, et Gitea exige pour
+# ça le PROPRIÉTAIRE de l'org SOURCE — pas l'admin, pas le write.
+#
+#   token système (membre, write)                    -> 403 "user should be the owner of the repo"
+#   même token, ajouté aux Owners de l'org SOURCE    -> 202
+#   Owners de la CIBLE seulement                     -> 403   (seule la source compte)
+#
+# Le moindre privilège ne suffit donc plus à ce que la fleet doit faire, et la recette ne peut pas
+# le corriger elle-même : `50-forge` n'écrit qu'avec le jeton système ou en basic-auth machine, et
+# le jeton système ne peut gérer une team qu'une fois DÉJÀ propriétaire. La seule identité de classe
+# propriétaire est celle qui lance cet apply. Le provider ne l'exprime pas non plus : ni data source
+# `gitea_team` (donc l'id de la team `Owners` est introuvable), ni champ propriétaire sur
+# `gitea_org` — le créateur d'une org en est le propriétaire, un point c'est tout.
+#
+# ⚖ TRANCHÉ (user, 2026-08-11) : c'est `lcars-system` qui possède les orgs — c'est déjà le seul
+# compte qui y crée des dépôts. L'adhésion se pose dans la FENÊTRE DU MASTER TOKEN, celle qui lance
+# cet apply : `bench-forge-bootstrap.sh` le fait juste après, et en production c'est le même geste,
+# avec l'admin de l'opérateur (`50-forge` l'instruit, il ne peut pas le faire lui-même).
+#
+# La team `system` ci-dessous reste donc au moindre privilège pour ce qu'elle sert (créer et pousser)
+# ; la propriété de l'org est un fait SÉPARÉ, posé ailleurs, et écrit ici pour qu'on ne relise pas
+# « PAS admin/owner » comme « ce compte n'a aucun pouvoir d'org ». Il en a un, et il est nommé.
 resource "gitea_team" "system" {
   name                     = "system"
   organisation             = gitea_org.fleet.name
