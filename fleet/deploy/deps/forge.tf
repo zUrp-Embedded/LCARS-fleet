@@ -64,10 +64,20 @@ variable "roles" {
   default     = ["fleet_engineer", "fleet_scribe", "fleet_qualifier", "fleet_reviewer", "fleet_scoper", "fleet_vulcan"]
 }
 
+# NON CREES ICI — le module `instance/` les possede. Ce module les NOMME, pour les placer dans ses
+# teams : une adhesion prend un login, pas une ressource. C'est la coupure qui permet a un second
+# catalogue de s'enroler sans retenter la creation des comptes partages (Gitea : « user already
+# exists », mesure).
 variable "system_roles" {
   type        = list(string)
-  description = "Comptes de role SYSTEME, partages par tous les catalogues — derive"
+  description = "Comptes de role SYSTEME, crees par le module instance/ — nommes ici pour les adhesions"
   default     = ["system_architect", "system_chief", "system_gatekeeper"]
+}
+
+variable "system_account" {
+  type        = string
+  default     = "lcars-system"
+  description = "Compte systeme, cree par le module instance/ — nomme ici pour ses adhesions"
 }
 
 variable "role_names" {
@@ -86,27 +96,13 @@ variable "role_names" {
   }
 }
 
-resource "gitea_user" "system" {
-  username             = "lcars-system"
-  login_name           = "lcars-system"
-  email                = "lcars-system@lcars.local"
-  password             = var.seed_password
-  must_change_password = false
-  admin                = false # PAS site-admin : org-power via la team `system`, blast-radius borné à l'org
-  # Hardening : lcars-system crée des repos DANS l'org (team can_create_repos), jamais de
-  # nouvelle org ; aucun git-hook serveur ni import local (vecteurs d'exécution sur l'hôte forge).
-  allow_create_organization = false
-  allow_git_hook            = false
-  allow_import_local        = false
-}
-
 # ⚠ PIÈGE provider (constaté 2026-07-30, drill docker) : le password n'est réellement posé
 # qu'à la CRÉATION. Un changement de `seed_password` sur des comptes existants rend un plan
 # « changed » VERT mais ne change PAS le password côté forge (basic-auth : « invalid username,
 # password or token »). Rotation réelle = API admin PATCH /admin/users/{u} (exige login_name
 # dans le body) puis re-mint A4 — jamais « tofu apply » seul.
 resource "gitea_user" "role" {
-  for_each             = toset(concat(var.roles, var.system_roles))
+  for_each             = toset(var.roles)
   username             = each.key
   login_name           = each.key
   # Le LOGIN porte le catalogue (`<catalogue>_<role>`), parce qu'un username Gitea est unique a
@@ -125,15 +121,6 @@ resource "gitea_user" "role" {
   allow_import_local        = false
 }
 
-resource "gitea_user" "starfleet" {
-  username             = "starfleet"
-  login_name           = "starfleet"
-  email                = "starfleet@lcars.local"
-  password             = var.seed_password
-  must_change_password = false
-  admin                = true # site-admin : l'identité d'ONBOARDING (créer des users = op site-admin)
-}
-
 # PAS de compte admin dans la recette — le premier admin est un PRÉREQUIS D'ENTRÉE, pas un
 # produit : une forge fonctionnelle a déjà son master-admin (le wizard d'install gitea le crée
 # chez l'opérateur ; une forge jetable headless le reçoit d'un `gitea admin user create`, compte
@@ -144,20 +131,6 @@ resource "gitea_user" "starfleet" {
 # site-admin Gitea passe outre toutes les permissions de team, donc un daily-admin rendrait
 # `humans` décoratif : il pourrait relabelliser `stage/*` et déclarer terminé un travail qui ne
 # l'est pas.
-resource "gitea_user" "human" {
-  username             = var.human_username
-  login_name           = var.human_username
-  email                = var.human_email
-  password             = var.seed_password
-  must_change_password = true  # daily : l'humain pose son propre secret au 1er login
-  admin                = false # NON site-admin : l'humain opère VIA la fleet, pas par gestes forge manuels
-  # Hardening : l'humain daily ne crée ni org, ni git-hook serveur, ni import local
-  # (le break-glass, c'est le compte admin de l'installeur, pas ce compte-ci).
-  allow_create_organization = false
-  allow_git_hook            = false
-  allow_import_local        = false
-}
-
 # ── Org + teams ────────────────────────────────────────────────────────────
 # L'ORG PORTE LE NOM DU CATALOGUE — c'est la reponse a « quel metier traite ce projet », gravee la
 # ou la verite vit deja. Elle etait le litteral `fleet` ; elle est desormais derivee, et le defaut
@@ -290,30 +263,33 @@ variable "externals" {
 
 resource "gitea_team_membership" "system" {
   team_id  = gitea_team.system.id
-  username = gitea_user.system.username
+  username = var.system_account
 }
 
 resource "gitea_team_membership" "writers" {
-  for_each = toset(var.writers)
-  team_id  = gitea_team.writers.id
-  username = gitea_user.role[each.key].username
+  for_each   = toset(var.writers)
+  team_id    = gitea_team.writers.id
+  username   = each.key
+  depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "judges" {
-  for_each = toset(var.judges)
-  team_id  = gitea_team.judges.id
-  username = gitea_user.role[each.key].username
+  for_each   = toset(var.judges)
+  team_id    = gitea_team.judges.id
+  username   = each.key
+  depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "externals" {
-  for_each = toset(var.externals)
-  team_id  = gitea_team.externals.id
-  username = gitea_user.role[each.key].username
+  for_each   = toset(var.externals)
+  team_id    = gitea_team.externals.id
+  username   = each.key
+  depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "human" {
   team_id  = gitea_team.humans.id
-  username = gitea_user.human.username
+  username = var.human_username
 }
 
 # lcars-system ∈ humans : le token système doit LIRE les membres de `humans` — c'est la
@@ -325,5 +301,5 @@ resource "gitea_team_membership" "human" {
 # Gitea) reste OUVERT dans BL-6-27 : il se règle par une identité, pas en élargissant `system`.
 resource "gitea_team_membership" "system_reads_humans" {
   team_id  = gitea_team.humans.id
-  username = gitea_user.system.username
+  username = var.system_account
 }

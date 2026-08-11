@@ -23,7 +23,10 @@
 #   1. attend que la forge reponde ;
 #   2. cree le compte admin de bootstrap s'il manque (mot de passe genere, jamais fixe) ;
 #   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
-#   4. joue `tofu apply` sur la recette de prod INCHANGEE (org, teams, 8 roles, systeme, humain) ;
+#   4. joue DEUX `tofu apply` sur la recette de prod : le module `instance/` (systeme, starfleet,
+#      humain, roles `system_*` — une fois par FORGE) puis le module catalogue (org, teams, comptes
+#      de role metier, adhesions — une fois par CATALOGUE). Deux etats distincts : meler les deux
+#      rendrait les comptes partages propriete du premier catalogue enrole ;
 #   5. pose le seed dans la boite pour que le mint A4 des role-tokens converge au prochain boot ;
 #   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
 #      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
@@ -178,7 +181,7 @@ if [[ -n "$TOFU_DIR" ]]; then
   chmod 600 "$TOFU_DIR/.master-token"
 fi
 
-# ─── 4. tofu apply — la recette de PROD, inchangee ───────────────────────────────────────────────
+# ─── 4. tofu apply — la recette de PROD, en DEUX modules (instance puis catalogue) ───────────────
 # Copie de travail par defaut : la recette est jouee hors de l'arbre suivi pour que son tfstate (qui
 # porte des valeurs sensibles) ne se retrouve jamais dans un `git status`.
 if [[ -z "$TOFU_DIR" ]]; then
@@ -186,6 +189,13 @@ if [[ -z "$TOFU_DIR" ]]; then
   cp -r "$REPO_ROOT/fleet/deploy/deps/." "$TOFU_DIR/"
   say "recette tofu copiee dans $TOFU_DIR (tfstate hors de l'arbre)"
 fi
+# Le module INSTANCE a son propre etat : ce qu'il possede (systeme, starfleet, humain, roles
+# `system_*`) vit une fois par FORGE, pas une fois par catalogue. Le meler a l'etat d'un catalogue
+# rendrait ces comptes propriete du premier enrole — les detruire en detruisant celui-la.
+INSTANCE_DIR="${TOFU_DIR%/}.instance"
+rm -rf "$TOFU_DIR/instance"
+mkdir -p "$INSTANCE_DIR"
+cp -r "$REPO_ROOT/fleet/deploy/deps/instance/." "$INSTANCE_DIR/"
 
 # The roster is DERIVED from the catalogue, never taken from the recipe defaults. Those defaults are
 # a second writing of a fact `mix lcars.catalogue.roles --tfvars` already produces, and the two DID
@@ -212,15 +222,25 @@ say "org du catalogue : $ORG"
 
 SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
 
+export TF_VAR_gitea_url="$FORGE_URL" TF_VAR_gitea_token="$MASTER_TOKEN" \
+       TF_VAR_seed_password="$SEED_PW" TF_VAR_human_username="$HUMAN" \
+       TF_VAR_human_email="$HUMAN_EMAIL"
+
+# INSTANCE d'abord, TOUJOURS : une adhesion peut nommer un compte qu'elle ne cree pas, mais pas un
+# compte qui n'existe pas. L'inversion echoue en 404 cote Gitea — bruyamment, jamais en silence.
 (
-  cd "$TOFU_DIR"
-  export TF_VAR_gitea_url="$FORGE_URL" TF_VAR_gitea_token="$MASTER_TOKEN" \
-         TF_VAR_seed_password="$SEED_PW" TF_VAR_human_username="$HUMAN" \
-         TF_VAR_human_email="$HUMAN_EMAIL"
+  cd "$INSTANCE_DIR"
   tofu init -no-color >/dev/null 2>&1 || exit 1
   tofu apply -auto-approve -no-color >/dev/null 2>&1 || exit 1
-) || die "tofu apply en echec (rejoue-le a la main dans $TOFU_DIR pour voir sa sortie)" 4
-say "structure forge posee (org, teams, comptes de role, systeme, humain)"
+) || die "tofu apply INSTANCE en echec (rejoue-le a la main dans $INSTANCE_DIR pour voir sa sortie)" 4
+say "comptes d'instance poses (systeme, starfleet, humain, roles system_*)"
+
+(
+  cd "$TOFU_DIR"
+  tofu init -no-color >/dev/null 2>&1 || exit 1
+  tofu apply -auto-approve -no-color >/dev/null 2>&1 || exit 1
+) || die "tofu apply CATALOGUE en echec (rejoue-le a la main dans $TOFU_DIR pour voir sa sortie)" 4
+say "structure du catalogue posee (org $ORG, teams, comptes de role metier, adhesions)"
 
 # ─── 5. le seed dans la boite — le handoff tofu → A4 ─────────────────────────────────────────────
 # Sans ce fichier, 50-forge ne peut pas minter les role-tokens et le DIT (drift) ; la fleet

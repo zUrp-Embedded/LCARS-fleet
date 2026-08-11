@@ -30,10 +30,14 @@
 resource "terraform_data" "avatars" {
   # Les comptes doivent EXISTER avant qu'on leur pose une image : `Sudo: <compte>` sur un compte
   # absent rend 404, et le script compterait l'entree en echec.
+  # Les comptes de ce module par RESSOURCE (l'arete porte l'ordre) ; ceux du module `instance/` par
+  # NOM, puisqu'ils vivent dans un autre etat. La pose reste correcte sans l'arete : le script
+  # re-asserte la charte a chaque passe et compte un compte absent comme hors-perimetre, pas comme
+  # un echec — un catalogue tiers n'a aucune raison d'avoir les comptes qu'on a dessines.
   triggers_replace = [
-    gitea_user.system.username,
-    gitea_user.starfleet.username,
     join(",", sort([for u in gitea_user.role : u.username])),
+    join(",", sort(var.system_roles)),
+    var.system_account,
   ]
 
   provisioner "local-exec" {
