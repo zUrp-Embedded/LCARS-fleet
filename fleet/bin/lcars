@@ -253,11 +253,18 @@ cat_declared() {
 # joker en BRE, et un nom de catalogue est une donnee de l'operateur.
 cat_is_active() { cat_declared | grep -qxF "$1"; }
 
+# La liste porte le CHEMIN de chaque entree, et dit laquelle MASQUE l'autre.
+#
+# Mesure sur un banc (2026-08-11) : apres `catalogue install` du catalogue `web`, la liste affichait
+# « web actif » DEUX FOIS, sans un mot de plus. Ce n'etait pas un doublon d'affichage — `web` existe
+# reellement des deux cotes, livre dans l'image et installe par l'operateur — et `cat_dir_of` fait
+# gagner l'operateur. Le masquage est une FONCTIONNALITE ; une liste qui montre deux lignes
+# identiques la rend indiscernable d'un bug, et l'operateur ne sait pas lequel des deux tourne.
 cmd_catalogue_list() {
   local installed=()
-  [[ -d "$CAT_DIR" ]] && while IFS= read -r d; do installed+=("$(basename "$d")"); done \
+  [[ -d "$CAT_DIR" ]] && while IFS= read -r d; do installed+=("operateur:$(basename "$d")"); done \
     < <(find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-  [[ -d "$CAT_SHIPPED" ]] && while IFS= read -r d; do installed+=("$(basename "$d")"); done \
+  [[ -d "$CAT_SHIPPED" ]] && while IFS= read -r d; do installed+=("livre:$(basename "$d")"); done \
     < <(find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d | sort)
 
   echo "ACTIFS (ordre = precedence, $CAT_ACTIVE)"
@@ -279,12 +286,35 @@ cmd_catalogue_list() {
 
   echo
   echo "INSTALLES"
-  if [[ ${#installed[@]} -eq 0 ]]; then
-    echo "  (aucun)"
+  # Le catalogue LIVRE DANS LE RELEASE n'est ni dans CAT_DIR ni dans CAT_SHIPPED — il vit dans le
+  # release. Il ne figurait donc nulle part, alors qu'il est le DEFAUT et qu'on peut l'activer par
+  # son nom : un operateur qui n'a active que le sien n'avait aucun moyen d'apprendre qu'il existe.
+  if cat_is_active "$CAT_BUNDLED"; then
+    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release)"
   else
-    local name
-    for name in "${installed[@]}"; do
-      if cat_is_active "$name"; then echo "  $name    actif"; else echo "  $name    inactif"; fi
+    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "inactif" "(dans le release — « $PROG catalogue enable $CAT_BUNDLED »)"
+  fi
+
+  if [[ ${#installed[@]} -eq 0 ]]; then
+    :
+  else
+    local entry origin name state note
+    for entry in "${installed[@]}"; do
+      origin="${entry%%:*}"; name="${entry#*:}"
+      state="inactif"; cat_is_active "$name" && state="actif"
+      note=""
+      # Un nom present des deux cotes : l'operateur GAGNE (cat_dir_of le resout ainsi). On le dit
+      # sur les deux lignes, sans quoi elles sont indiscernables.
+      if [[ "$origin" == "livre" && -d "$CAT_DIR/$name" ]]; then
+        note="(livre — MASQUE par celui de l'operateur)"
+      elif [[ "$origin" == "livre" ]]; then
+        note="(livre avec l'image)"
+      elif [[ -d "$CAT_SHIPPED/$name" ]]; then
+        note="(operateur — MASQUE le livre du meme nom)"
+      else
+        note="(operateur)"
+      fi
+      printf '  %-14s %-9s %s\n' "$name" "$state" "$note"
     done
   fi
 }
