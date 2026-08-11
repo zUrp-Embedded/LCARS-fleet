@@ -1,7 +1,7 @@
 # Fleet.Pilot — domain card
 
 **Date**: 2026-05-26
-**Last revised**: 2026-08-09
+**Last revised**: 2026-08-11
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
@@ -45,7 +45,8 @@ restated, only pointed at.
 
 **Primitives (single-authority utils)**
 - `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
-- `Fleet.Project.Roles` / `Opts` / `Offload` / `IssueId` / `PodId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
+- `Fleet.PodId` (FOUNDATION depuis le 2026-08-11 — le format des pod_id est lu par Spawner et Project, qui sont sous Pilot)
+- `Fleet.Project.Roles` / `Opts` / `Offload` / `IssueId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
 
 ## Config & deps
 

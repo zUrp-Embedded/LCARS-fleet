@@ -285,7 +285,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     with true <- producer != "",
          {:ok, profile} <- Fleet.CapProfile.load(producer),
          "instance" <- Fleet.CapProfile.slot_scope(profile) do
-      pod_id = Fleet.Pilot.PodId.for_issue(repo, issue_n, producer)
+      pod_id = Fleet.PodId.for_issue(repo, issue_n, producer)
 
       case spawner().kill_pod(pod_id) do
         :ok ->

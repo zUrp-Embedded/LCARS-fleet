@@ -75,6 +75,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.EnvParse" => "foundation",
     "Fleet.GitRef" => "foundation",
     "Fleet.Layout" => "foundation",
+    "Fleet.PodId" => "foundation",
     "Fleet.Catalogue" => "foundation",
     "Fleet.ReceptionFilter" => "foundation",
     "Fleet.DurableLog" => "foundation",

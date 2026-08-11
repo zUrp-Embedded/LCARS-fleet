@@ -18,7 +18,7 @@ defmodule Fleet.Pilot.PodReaper do
       precedent), because it does NOT know which roles were live on that ticket.
 
   **The registry is the source of truth, never an enumeration of roles.** We kill every live pod
-  whose id encodes THIS issue — `Fleet.Pilot.PodId.parse_ref/2`, the authority that BUILDS the
+  whose id encodes THIS issue — `Fleet.PodId.parse_ref/2`, the authority that BUILDS the
   format is the one that recognizes it. A project-scoped pod (`<repo>-<role>`, the architect)
   encodes no instance → `parse_ref` rejects it → it is never touched, which is the whole point:
   it outlives the tickets by design.
@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.PodReaper do
   @spec reap_issue(String.t(), pos_integer()) :: [String.t()]
   def reap_issue(repo, issue_n) when is_binary(repo) and is_integer(issue_n) do
     for pod_id <- live_pod_ids(),
-        {:ok, {:issue, ^issue_n}} <- [Fleet.Pilot.PodId.parse_ref(pod_id, repo)],
+        {:ok, {:issue, ^issue_n}} <- [Fleet.PodId.parse_ref(pod_id, repo)],
         reaped?(repo, issue_n, pod_id) do
       pod_id
     end

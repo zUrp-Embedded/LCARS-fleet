@@ -98,6 +98,7 @@ defmodule Fleet.Pilot do
   use Boundary,
     deps: [
       Fleet.Slug,
+      Fleet.PodId,
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Opts,

@@ -1,6 +1,17 @@
-defmodule Fleet.Pilot.PodId do
+defmodule Fleet.PodId do
+  use Boundary, deps: [], exports: []
+
   @moduledoc """
   Owns deterministic, repository-scoped and path-safe pod identifiers.
+
+  FOUNDATION, next to `Fleet.Layout` which owns the human-facing twin (`pod_label/3`): a naming
+  authority has to sit where every namer can reach it. This module lived inside `Fleet.Pilot` until
+  2026-08-11, which put the pod-id FORMAT above two of its consumers — `Fleet.Spawner`, which owns
+  the Registry these ids key, and `Fleet.Project`, which removes a project and must first find the
+  pods on it. Neither could reach it (`Fleet.Pilot` depends on `Fleet.Project`, so the reverse edge
+  is a cycle boundary refuses), and the only alternative was to re-derive `slug(repo) <> "-"` at the
+  call site — a second source for a format whose whole point is having one. It has zero runtime
+  dependency, so nothing about it belonged up there.
 
   Instance ids encode issue or PR number; project ids key a stable `(repo, role)` slot. Consumers may
   recover only the repo-anchored instance reference, keeping the rest of the identifier opaque.

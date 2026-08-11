@@ -60,7 +60,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   receives already-resolved modules.
 
   Dependencies (never `Fleet.Pilot.Poller` → no cycle): `Fleet.Labels` (single source of the
-  lock), `Fleet.Pilot.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id),
+  lock), `Fleet.PodId` (format of the pod_ids), `Fleet.Pilot.IssueId` (parse issue_id),
   `Fleet.Pilot.StepDispatcher.Spawn.safe_kill/2` (SINGLE kill authority — never forked) + the
   injected seams (spawner/task_queue/forge).
   """
@@ -381,7 +381,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # {repo, :issue, N}). Keeps the repo SCOPE: an eng of another repo does not own a ref of seams.repo.
   # function_exported?: a task_queue stub without the fn -> [] (conservative, masks nothing).
   defp project_pod_owned_refs(pod_id, repo, tq) do
-    with true <- String.starts_with?(pod_id, Fleet.Pilot.PodId.scope_prefix(repo)),
+    with true <- String.starts_with?(pod_id, Fleet.PodId.scope_prefix(repo)),
          true <- function_exported?(tq, :pod_active_issue_id, 1),
          {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
          {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
@@ -436,13 +436,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   defp pod_pulled?(_tq, _), do: false
 
   # Lock refs that an INSTANCE pod owns, deduced from its pod_id. The FORMAT (`issue|pr` + number)
-  # lives in `Fleet.Pilot.PodId.parse_ref/2` (the authority that builds it); here we only SCOPE to the
+  # lives in `Fleet.PodId.parse_ref/2` (the authority that builds it); here we only SCOPE to the
   # current repo and dress the ref. Effect of the scope: a pod of ANOTHER repo yields `:error` (its slug
   # differs) -> it does not "own" a ref of `seams.repo` -> end of the cross-repo masking (#N/repoB
   # masking the orphan #N/repoA). The ref yielded CARRIES the repo (`{repo, :issue|:pr, n}`) = the complete key
   # (the real identity of the lock).
   defp parse_pod_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do
-    case Fleet.Pilot.PodId.parse_ref(pod_id, repo) do
+    case Fleet.PodId.parse_ref(pod_id, repo) do
       {:ok, {phase, n}} -> [{repo, phase, n}]
       :error -> []
     end

@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
                 Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
 
               _ ->
-                Fleet.Pilot.PodId.for_pr(repo, pr_number, role)
+                Fleet.PodId.for_pr(repo, pr_number, role)
             end),
          # Scope DECISION (SAME rule as dispatch_issue): a project-scoped producer already alive
          # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and

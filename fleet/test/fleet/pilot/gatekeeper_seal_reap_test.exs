@@ -58,7 +58,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
              )
 
     # The id is the one the DISPATCHER builds — keyed on the issue, not the PR, not the repo.
-    expected = Fleet.Pilot.PodId.for_issue("fleet/myproj", 42, "engineer")
+    expected = Fleet.PodId.for_issue("fleet/myproj", 42, "engineer")
     assert_received {:killed, ^expected}
   end
 
@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
                producer: "engineer"
              )
 
-    expected = Fleet.Pilot.PodId.for_issue("fleet/myproj", 42, "engineer")
+    expected = Fleet.PodId.for_issue("fleet/myproj", 42, "engineer")
     assert_received {:killed, ^expected}
   end
 

@@ -1,10 +1,10 @@
-defmodule Fleet.Pilot.PodIdTest do
+defmodule Fleet.PodIdTest do
   @moduledoc """
   PodId helper (#25): repo-scoped (anti-collision), path-safe (F076), deterministic (BL-055 reuse).
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.PodId
+  alias Fleet.PodId
 
   test "for_issue / for_pr: repo-scoped, format <slug>-issue|pr-N-role" do
     assert PodId.for_issue("fleet/poc-8", 1, "engineer") == "fleet-poc-8-issue-1-engineer"

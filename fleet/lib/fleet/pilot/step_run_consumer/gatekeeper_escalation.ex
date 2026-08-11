@@ -45,7 +45,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
         ) :: {:ok, term()} | {:error, term()}
   def dispatch(workflow_map, step, outputs, payload, n, role, %Seams{} = seams) do
     gk_role = Fleet.Project.Roles.gatekeeper_role()
-    pod_id = Fleet.Pilot.PodId.for_issue(seams.repo, n, gk_role)
+    pod_id = Fleet.PodId.for_issue(seams.repo, n, gk_role)
 
     gate = get_in(workflow_map, ["steps", step, "gate"])
 

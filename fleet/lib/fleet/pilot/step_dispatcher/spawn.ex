@@ -615,10 +615,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   """
   @spec pod_id_for_scope(String.t(), String.t(), integer(), String.t()) :: String.t()
   def pod_id_for_scope("project", repo, _number, role),
-    do: Fleet.Pilot.PodId.for_repo(repo, role)
+    do: Fleet.PodId.for_repo(repo, role)
 
   def pod_id_for_scope("instance", repo, number, role),
-    do: Fleet.Pilot.PodId.for_issue(repo, number, role)
+    do: Fleet.PodId.for_issue(repo, number, role)
 
   @doc """
   Scope-serialization DECISION (split from the reprovision ACTION so the call sites

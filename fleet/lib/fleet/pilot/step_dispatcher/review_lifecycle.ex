@@ -330,7 +330,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # ANOTHER issue (shared project pod) = "kill the wrong eng" bug. To revisit ONLY if a
           # PIPE (long-lived) producer is reintroduced (targeted, non-naive cleanup needed then).
           _ =
-            Spawn.safe_kill(ctx.spawner, Fleet.Pilot.PodId.for_issue(ctx.repo, issue_n, producer))
+            Spawn.safe_kill(ctx.spawner, Fleet.PodId.for_issue(ctx.repo, issue_n, producer))
 
           # ISSUE lock — this poller-driven path must lift it ITSELF: the PR-lock lifts
           # via each judge's `StepRunCompleter.route(:reviewed)`, but the ISSUE-lock, started by the
