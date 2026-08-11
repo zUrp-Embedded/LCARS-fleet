@@ -348,6 +348,16 @@ if config_env() != :test and not tool_mode? do
     config :fleet_mcp, sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
   end
 
+  # EGRESS base — same override, same reason, same ONE source as the MCP socket above: `bin/fleet_v2`
+  # exports it, this reads it, and `bwrap_launch.sh` binds the per-pod dir at the same absolute path.
+  # Without this the code kept its `/run/lcars/egress` default while the fleet runs home-native, so
+  # the directory never existed and every pod launched with no way to reach its vendor. Found on a
+  # bench, not by the gate: nothing in the suite knows where a real fleet puts its sockets.
+  if egress_base = System.get_env("LCARS_FLEET_EGRESS_SOCK_BASE") do
+    config :fleet_spawner,
+      egress_sock_base: Fleet.EnvParse.path("LCARS_FLEET_EGRESS_SOCK_BASE", egress_base)
+  end
+
   # ============================================================
   # fleet_spawner — mcp_server_spec (config of the `.mcp-fleet.json`
   # written into each pod by pod.ex maybe_provision_mcp_config)

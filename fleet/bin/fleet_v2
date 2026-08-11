@@ -172,6 +172,14 @@ setup_env() {
   # same absolute path inside the sandbox: ONE source for both sides.
   export LCARS_FLEET_MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-$HOME/.lcars/run/mcp}"
 
+  # EGRESS: same shape and the same ONE-source reason as the MCP base above. runtime.exs reads it as
+  # the base where central creates the per-pod proxy socket, and bwrap_launch.sh reads it to bind
+  # that per-pod dir at the same absolute path inside the sandbox.
+  # Measured on a bench the day it was written: both defaults said /run/lcars/egress while the fleet
+  # actually runs home-native, so the dir simply never existed and every pod would have launched
+  # with no way out. The MCP socket had already learnt this exact lesson; this line is it applied.
+  export LCARS_FLEET_EGRESS_SOCK_BASE="${LCARS_FLEET_EGRESS_SOCK_BASE:-$HOME/.lcars/run/egress}"
+
   # CLI `lcars` -> per-human API. READS go through the TCP loopback port; the WRITE (spawn) goes
   # through a per-human AF_UNIX socket (ControlRouter) - off the network the pod shares. The file
   # lives under ~/.lcars/run/ (the real home is never bound into the pod).
@@ -204,7 +212,7 @@ setup_env() {
   # forces either a per-human node (`fleet_<user>`, when LCARS_FLEET_V2_ERL_NODE is set = debug) or
   # `RELEASE_DISTRIBUTION=none` (the normal case: no epmd, no collision). Per-human, like the ports.
 
-  mkdir -p "$LCARS_TMUX_SOCK_BASE" "$LCARS_FLEET_MCP_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
+  mkdir -p "$LCARS_TMUX_SOCK_BASE" "$LCARS_FLEET_MCP_SOCK_BASE" "$LCARS_FLEET_EGRESS_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
 
   # Persist the computed runtime env so the human can drive `lcars` afterwards (`source` this file).
   cat > "$HOME/.lcars/run/fleet_v2.runtime.env" <<RT
@@ -212,6 +220,7 @@ setup_env() {
 export LCARS_API_URL="$LCARS_API_URL"
 export LCARS_API_SOCK="$LCARS_API_SOCK"
 export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
+export LCARS_FLEET_EGRESS_SOCK_BASE="$LCARS_FLEET_EGRESS_SOCK_BASE"
 RT
 }
 
