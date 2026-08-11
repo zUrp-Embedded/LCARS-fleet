@@ -108,7 +108,8 @@ resource "gitea_user" "role" {
   # Le LOGIN porte le catalogue (`<catalogue>_<role>`), parce qu'un username Gitea est unique a
   # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte et un
   # jeton, avec ecriture sur les deux orgs. Le `full_name` porte le nom du role, et l'UI l'affiche a
-  # la place du login quand `[ui] DEFAULT_SHOW_FULL_NAME` est pose — le prefixe ne subsiste alors que
+  # la place du login sous `[ui] DEFAULT_SHOW_FULL_NAME` (cable dans forge-compose.yml pour la forge
+  # de banc ; geste d'operateur sur une forge preexistante) — le prefixe ne subsiste alors que
   # dans l'URL et l'API. Le defaut `each.key` vaut pour un deploiement qui n'apporte pas la table.
   full_name            = lookup(var.role_names, each.key, each.key)
   email                = "${each.key}@lcars.local"

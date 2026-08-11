@@ -52,6 +52,16 @@ services:
       # Le rail CI du triangle. Le runner, lui, est à l'opérateur : une forge de dév n'en a pas
       # besoin pour que LCARS soit développable.
       GITEA__actions__ENABLED: "true"
+      # L'UI affiche le `full_name` a la place du login. Les comptes de role sont
+      # `<catalogue>_<role>` — un username Gitea est unique a l'INSTANCE, donc sans prefixe deux
+      # catalogues nommant chacun un `dev` se partagent un compte. Le full_name porte le nom du role,
+      # et ce reglage fait que le prefixe ne subsiste que dans l'URL et l'API. Mesure sur une forge
+      # de preuve : la fiche de `system_architect` titre « architect », le login passe en secondaire.
+      #
+      # ⚠ C'est un reglage de l'INSTANCE Gitea, pas un objet d'API : la recette tofu ne peut pas le
+      # poser. Sur une forge PREEXISTANTE (le cas de la production), c'est un geste d'operateur dans
+      # son app.ini — ici, la forge est jetable et nous appartient, donc il est cable.
+      GITEA__ui__DEFAULT_SHOW_FULL_NAME: "true"
     ports:
       - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
     volumes:
