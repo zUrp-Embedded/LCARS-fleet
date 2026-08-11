@@ -200,18 +200,25 @@ defmodule Fleet.Workflow.Loader do
   the offer needs to say which catalogue a card comes from — `standard` can exist in two of them,
   and a name alone stops designating anything. Deriving the pairing beside this function is how the
   same fact would acquire two answers, and it is exactly the mistake this layer keeps catching.
+
+  `:root` is the catalogue ROOT, and it is here for the caller that must resolve something ELSE in
+  the same catalogue as the card — a jury role, a step role. The card's directory alone cannot serve
+  that: a name read in one catalogue and resolved in another is exactly how a card that is coherent
+  with itself fails to load.
   """
-  @spec card_scopes() :: [%{catalogue: String.t() | nil, dir: Path.t()}]
+  @spec card_scopes() :: [%{catalogue: String.t() | nil, dir: Path.t(), root: Path.t() | nil}]
   def card_scopes do
     case Application.get_env(:fleet_workflow, :workflow_maps_root) do
       nil ->
         Enum.flat_map(Fleet.Catalogue.active_catalogues(), fn %{name: name, root: root} ->
           dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
-          if File.dir?(dir), do: [%{catalogue: name, dir: dir}], else: []
+          if File.dir?(dir), do: [%{catalogue: name, dir: dir, root: root}], else: []
         end)
 
       dir ->
-        [%{catalogue: nil, dir: dir}]
+        # A fine override points at a fixture belonging to no catalogue: no name, and no root to
+        # resolve roles against — the caller falls back to the default image, as before.
+        [%{catalogue: nil, dir: dir, root: nil}]
     end
   end
 

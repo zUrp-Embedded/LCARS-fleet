@@ -308,16 +308,28 @@ defmodule Fleet.Pilot.Application do
   # image of the FIRST active root, so a second catalogue's cards were validated by nobody and met
   # their first reader at dispatch — far from the boot that could have refused them. Explicit opts
   # still mean "this root and no other": that is the per-catalogue verifier naming its target.
-  defp card_scopes([]),
-    do: Enum.map(Fleet.Workflow.Loader.card_roots(), &[workflow_maps_root: &1])
+  #
+  # Each scope carries its catalogue ROOT beside the card directory. The root is not decoration: a
+  # card names roles, and a role only exists in the catalogue that declares it. Validating `web`'s
+  # `standard` — jury `[code-reviewer]` — against the FIRST catalogue's image raised
+  # `:not_found` on a card that is perfectly coherent with itself, and killed the boot. The pair
+  # travels together or the reader resolves in the wrong world.
+  defp card_scopes([]) do
+    Enum.map(Fleet.Workflow.Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
+  end
 
-  defp card_scopes(opts), do: [opts]
+  # Explicit opts name ONE directory and no catalogue: roles resolve in the default image, which is
+  # what a fixture-driven test and the per-catalogue verifier both want.
+  defp card_scopes(opts), do: [{opts, nil}]
 
-  defp validate_card_juries!(opts \\ []) do
-    for scope <- card_scopes(opts),
+  @doc false
+  # Public like its two siblings, and for their reason: a boot validator has to be reachable from a
+  # test without booting the fleet.
+  def validate_card_juries!(opts \\ []) do
+    for {scope, root} <- card_scopes(opts),
         map_name <- Fleet.Workflow.Loader.canon_names!(scope),
         role <- Fleet.Workflow.Loader.load!(map_name, scope)["jury"] do
-      case Fleet.CapProfile.load(role) do
+      case Fleet.CapProfile.load(role, root) do
         {:ok, cp} ->
           kind = Fleet.CapProfile.brief_kind(cp)
 
@@ -347,7 +359,7 @@ defmodule Fleet.Pilot.Application do
   # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
   # can be wrong. A property cannot.
   def validate_workshop_card!(opts \\ []) do
-    for scope <- card_scopes(opts) do
+    for {scope, _root} <- card_scopes(opts) do
       if Fleet.Workflow.Loader.workshop_card_name(scope) == nil do
         Logger.warning(
           "fleet_pilot: no doc card in #{inspect(Keyword.get(scope, :workflow_maps_root))} — no " <>
@@ -368,13 +380,13 @@ defmodule Fleet.Pilot.Application do
   # load = a broken canon, fail-loud HERE. A step without a role (nil) is skipped: it is not a
   # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
   def validate_card_steps!(opts \\ []) do
-    for scope <- card_scopes(opts),
+    for {scope, root} <- card_scopes(opts),
         map_name <- Fleet.Workflow.Loader.canon_names!(scope),
         card = Fleet.Workflow.Loader.load!(map_name, scope),
         {step_name, spec} <- card["steps"] || %{},
         role = Map.get(spec, "role"),
         is_binary(role) do
-      case Fleet.CapProfile.load(role) do
+      case Fleet.CapProfile.load(role, root) do
         {:ok, cp} ->
           refute_self_judgement!(map_name, step_name, role, cp, card["jury"])
 
