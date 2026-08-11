@@ -1304,6 +1304,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         end
       end)
 
+    # LES TROIS LISTES DE PLACEMENT etaient hors du verrou, et c'est le meme defaut d'un cran plus
+    # bas : `writers`/`judges`/`externals` sont des defauts tenus A LA MAIN pendant que la derivation
+    # (`CatalogueRoles.tfvars/1`) produit deja la reponse. Rien ne les comparait, donc rien
+    # n'empechait la divergence qui a coute `chief` — present dans `roles`, absent de `writers`,
+    # compte sans droit d'ecriture, trouve a l'oeil sur une forge.
+    #
+    # La comparaison consomme la DERIVATION, pas une seconde implementation de la regle de placement
+    # (siege -> externals, juge sans capacite -> judges, le reste -> writers) : la redire ici serait
+    # exactement la duplication que ce verrou existe pour interdire.
+    placement = check_placement_defaults(root, tf_path)
+    evidence = evidence ++ placement
+
     evidence =
       if canon == [], do: ["canon catalogue empty/not found — fail-closed"], else: evidence
 
@@ -1317,7 +1329,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [] and canon != [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "four-list STRICT equality (BL-6-45): canon{forge_identity} PROJECTED into " <>
+        "four-list STRICT equality (BL-6-45) + the THREE placement defaults against the " <>
+          "derivation: canon{forge_identity} PROJECTED into " <>
           "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
           "ROLES == PROV_ROLES — any delta is a defect, named" <>
           skipped_note(skipped)
@@ -1632,6 +1645,42 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # kind, forge_identity (absent = true), role_index. Underscore basenames = overlay fragments
   # (the `_frozen-monks` convention), excluded like name_index does; undecodable yaml = entry
   # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
+  # Rendue muette quand le catalogue bundle n'est pas la (etape BUILD de l'image, fixture de test) :
+  # meme regle que les listes de l'arbre frere — l'absence d'un arbre est hors-perimetre, jamais un
+  # vert silencieux sur du terrain non mesure.
+  defp check_placement_defaults(root, tf_path) do
+    catalogue = Path.join(root, "priv/catalogue")
+
+    if File.dir?(catalogue) do
+      case Fleet.Application.CatalogueRoles.tfvars(catalogue) do
+        {:ok, derived} ->
+          Enum.flat_map(~w(writers judges externals), fn key ->
+            rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
+            hard = read_list(tf_path, rx, :quoted)
+            want = Enum.sort(Map.get(derived, key, []))
+
+            cond do
+              hard == nil ->
+                ["forge.tf var.#{key} default: not readable — fail-closed"]
+
+              Enum.sort(hard) == want ->
+                []
+
+              true ->
+                [
+                  "forge.tf var.#{key} default #{inspect(Enum.sort(hard))} != derivation #{inspect(want)}"
+                ]
+            end
+          end)
+
+        {:error, reason} ->
+          ["placement derivation unreadable (#{inspect(reason)}) — fail-closed"]
+      end
+    else
+      []
+    end
+  end
+
   defp role_login(root, role) do
     prefix =
       if MapSet.member?(system_role_names(root), role), do: "system", else: bundled_name(root)

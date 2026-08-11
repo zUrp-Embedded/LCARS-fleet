@@ -136,23 +136,6 @@ defmodule Fleet.Pilot.ApplicationTest do
       assert Fleet.Workflow.Loader.workshop_card_name(workflow_maps_root: tmp) == nil
     end
 
-    @tag :tmp_dir
-    test "DEUX cartes revendiquant le rail : le publish refuse, et il les NOMME", %{tmp_dir: tmp} do
-      # Ce qui rend la resolution totale. Sans ce garde, `Enum.find` rendrait la premiere par ordre
-      # alphabetique — un rail choisi par un tri, ce que personne n'a decide. Meme endroit et meme
-      # raison que deux roles sur un `role_index` : le garde va la ou l'objet fusionne est enfin
-      # visible.
-      File.write!(Path.join(tmp, "atelier-un.yaml"), card_yaml("atelier-un", "workshop"))
-      File.write!(Path.join(tmp, "atelier-deux.yaml"), card_yaml("atelier-deux", "workshop"))
-
-      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
-      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
-
-      err = assert_raise RuntimeError, fn -> Fleet.Workflow.Loader.publish_image!() end
-      assert err.message =~ "atelier-deux, atelier-un"
-      assert err.message =~ "One card per catalogue"
-    end
-
     defp card_yaml(name, face) do
       """
       kind: WorkflowMap

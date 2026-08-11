@@ -188,4 +188,44 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
       Fleet.Pilot.Application.step_children_for_test()
     end
   end
+
+  @tag :tmp_dir
+  test "DEUX cartes revendiquant le rail atelier : le publish refuse, et il les NOMME", %{
+    tmp_dir: tmp
+  } do
+    # Ici et pas dans application_test.exs : ce test pose `:fleet_workflow, :workflow_maps_root`,
+    # une cle GLOBALE, et ce fichier est `async: false` pour exactement cette raison. Pose dans un
+    # fichier async, il faisait tomber un voisin qui cherchait sa propre carte — mesure.
+    #
+    # Ce que le garde tient : le rail doc se resout par PROPRIETE (un producteur sur `face:
+    # workshop`), donc deux revendiquants n'ont pas de reponse. Sans lui, `Enum.find` rendrait la
+    # premiere par ordre alphabetique — un rail choisi par un tri, ce que personne n'a decide.
+    for name <- ~w(atelier-un atelier-deux) do
+      File.write!(Path.join(tmp, "#{name}.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: #{name}
+        description: "carte de fixture"
+        applicable_intensity: [C0]
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: engineer
+            face: workshop
+            needs: []
+            inputs:
+              - ticket.body
+      """)
+    end
+
+    Application.put_env(:fleet_workflow, :workflow_maps_root, tmp)
+    on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+
+    err = assert_raise RuntimeError, fn -> Fleet.Workflow.Loader.publish_image!() end
+    assert err.message =~ "atelier-deux, atelier-un"
+    assert err.message =~ "One card per catalogue"
+  end
 end
