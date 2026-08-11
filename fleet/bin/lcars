@@ -97,7 +97,9 @@ USAGE
 
   $PROG catalogue enable <nom> | disable <nom>
       Ajoute / retire une ligne de la declaration d'activite. REFUSE d'activer un
-      catalogue que verify ne passe pas.
+      catalogue que verify ne passe pas. NE PROVISIONNE PAS la forge : activer rend
+      un catalogue LU, ca ne cree ni son org ni ses comptes de role — enable nomme
+      le geste qui reste.
 
   $PROG catalogue remove <nom>
       Supprime un catalogue installe. Refuse s'il est actif.
@@ -316,6 +318,20 @@ cmd_catalogue_enable() {
   echo "  l'ordre des lignes EST la precedence — editer le fichier pour le remonter" >&2
   # Les images gelent au boot : pretendre agir a chaud serait un mensonge operationnel.
   echo "  la fleet tourne encore sur ses images gelees : « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2
+
+  # CE QUE L'ACTIVATION NE FAIT PAS, ET QU'ELLE TAISAIT. Activer un catalogue le rend LU par la
+  # fleet ; ca ne cree ni son org ni ses comptes sur la forge. Un redemarrage sur un catalogue non
+  # provisionne part chercher des jetons de role qui n'existent pas, et le premier dispatch boucle
+  # en `role_token_unavailable` — loin d'ici, sans que rien ne rappelle ce qui manquait.
+  #
+  # Ce verbe ne peut pas provisionner lui-meme : il n'a aucun acces forge, et lui en donner un
+  # ferait d'une commande locale un acteur distant. Il NOMME donc le geste, ce qui est la difference
+  # entre un outil qui se tait et un outil qui n'agit pas.
+  if [[ "$name" != "$CAT_BUNDLED" ]]; then
+    echo "  ⚠ la forge n'a NI l'org « $name » NI ses comptes de role — l'activation ne provisionne pas :" >&2
+    echo "      etc/enroll-catalogue.sh --catalogue <racine> --tofu-dir <copie de deploy/deps>" >&2
+    echo "      puis « tofu apply » dans ce dossier (le module deploy/deps/instance/ d'abord, une seule fois par forge)" >&2
+  fi
 }
 
 cmd_catalogue_disable() {
