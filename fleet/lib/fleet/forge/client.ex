@@ -390,6 +390,9 @@ defmodule Fleet.Forge.Client do
   @doc "Org repos (WS3 discovery, org-membership = admission). See `ForgeClient.Repo.list_org_repos/2`."
   def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
 
+  @doc "Transfere un depot vers une autre org. Cf. `Fleet.Forge.Client.Repo.transfer_repo/3`."
+  def transfer_repo(repo, new_owner, opts \\ []), do: Repo.transfer_repo(repo, new_owner, opts)
+
   @doc "Numeric forge id of the repo. See `Fleet.Forge.Client.Repo.repo_id/2`."
   def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
 

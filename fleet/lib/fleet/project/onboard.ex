@@ -276,6 +276,76 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
+  MIGRE un projet d'un catalogue vers un autre — le transfert forge ET le repointage local.
+
+  L'org d'un projet EST le nom de son catalogue : migrer, c'est donc transferer le depot dans l'org
+  du catalogue cible. Le transfert est un seul appel et tout survit (issues, PR, labels, protection,
+  attribution) ; ce qui NE suit pas est ce qu'on ne veut pas voir suivre — les droits se REDERIVENT
+  des teams de l'org d'arrivee, donc les roles de l'ancien catalogue perdent l'ecriture et leur
+  historique reste a leur nom, ce qui est la verite : ce travail-la a bien ete fait par ce catalogue.
+
+  Les trois faces locales sont clees par le NOM du projet, pas par l'org : elles survivent. Mais leur
+  `origin` pointe l'ancienne URL et ne vit plus que par la redirection `301` de Gitea — les repointer
+  fait partie du geste, sans quoi la migration laisse un projet qui marche par accident.
+
+  Ce que cette fonction NE fait pas, et ne peut pas faire : attendre la quiescence. Elle n'en a pas
+  besoin — un catalogue ne change pas sous un projet vivant (les images gelent au boot, et le boot
+  refuse une carte nommant un role absent). Ce qui reste est le cas ou l'operateur migre pendant
+  qu'un step-run est ouvert : la PR en vol a ete produite par un role que le nouveau catalogue ne
+  porte pas, et c'est a lui de le savoir.
+  """
+  @spec migrate(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def migrate(full_name, target_catalogue, opts \\ [])
+      when is_binary(full_name) and is_binary(target_catalogue) do
+    name = Fleet.Layout.project_name(full_name)
+    dirs = face_dirs(name, opts)
+
+    with :ok <- refute_same_catalogue(full_name, target_catalogue),
+         :ok <- require_target_installed(target_catalogue),
+         {:ok, new_full_name} <-
+           repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
+         {:ok, url} <- repo_url(new_full_name, opts),
+         :ok <- repoint_faces(dirs, url) do
+      Logger.info(
+        "ProjectOnboard: #{full_name} MIGRE vers #{new_full_name} — trois faces repointees sur #{url}"
+      )
+
+      {:ok, %{repo: new_full_name, from: full_name, faces: Map.values(dirs)}}
+    end
+  end
+
+  defp refute_same_catalogue(full_name, target) do
+    case String.split(full_name, "/") do
+      [^target | _] -> {:error, {:already_in_catalogue, target}}
+      _ -> :ok
+    end
+  end
+
+  # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que cette boite n'a
+  # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
+  # les orgs des catalogues ACTIFS, donc le projet deviendrait invisible, pas casse.
+  defp require_target_installed(target) do
+    actives = active_orgs()
+    if target in actives, do: :ok, else: {:error, {:catalogue_not_installed, target, actives}}
+  end
+
+  defp repoint_faces(dirs, url) do
+    Enum.reduce_while(Map.values(dirs), :ok, fn dir, :ok ->
+      if File.dir?(Path.join(dir, ".git")) do
+        case GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, {:remote_repoint_failed, dir, reason}}}
+        end
+      else
+        # Une face absente n'est pas un echec : un projet peut n'avoir jamais ete ouvert ICI. Le
+        # transfert forge a deja eu lieu, et refuser maintenant laisserait les deux moities en
+        # desaccord.
+        {:cont, :ok}
+      end
+    end)
+  end
+
+  @doc """
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call

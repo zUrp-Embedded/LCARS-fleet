@@ -157,4 +157,21 @@ defmodule Fleet.Project.OnboardPreflightTest do
              )
     end
   end
+
+  describe "migrate : le transfert forge ET le repointage local, ou rien" do
+    test "un catalogue cible absent est REFUSE avant tout transfert" do
+      # Meme refus que l'import, meme raison : le poller ne decouvre que sur les orgs des catalogues
+      # ACTIFS, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
+      # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
+      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+               Fleet.Project.Onboard.migrate("fleet/vitrine", "grominet")
+
+      assert "fleet" in actives
+    end
+
+    test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
+      assert {:error, {:already_in_catalogue, "fleet"}} =
+               Fleet.Project.Onboard.migrate("fleet/vitrine", "fleet")
+    end
+  end
 end

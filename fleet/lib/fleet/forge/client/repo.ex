@@ -293,6 +293,30 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Transfers `repo` (`"owner/name"`) to `new_owner`, and returns its new full name.
+
+  Mesure sur une forge de banc (Gitea 1.26) : `202`, et TOUT survit — issues, PR, labels,
+  protection de branche, attribution des commentaires ; l'ancienne URL rend un `301`. Ce qui ne
+  suit PAS est ce qu'on ne veut pas voir suivre : les droits ne se transferent pas, ils se
+  REDERIVENT des teams de l'org d'arrivee.
+
+  Le `202` est un ACCEPTE, pas un fait accompli : Gitea accepte aussi un transfert qui restera
+  PENDING si la cible doit l'approuver. Entre orgs dont on possede les deux, il est immediat — et
+  le lecteur qui compte dessus est le repointage local, qui suit dans le meme geste.
+  """
+  @spec transfer_repo(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def transfer_repo(repo, new_owner, opts \\ [])
+      when is_binary(repo) and is_binary(new_owner) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/transfer", %{new_owner: new_owner}) do
+        {:ok, %{"full_name" => full_name}} -> {:ok, full_name}
+        {:ok, _} -> {:ok, "#{new_owner}/#{Fleet.Layout.project_name(repo)}"}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Deletes a repository. A missing repository succeeds; callers own confirmation policy.
   """
   @spec delete_repo(String.t(), keyword()) :: :ok | {:error, term()}
