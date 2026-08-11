@@ -478,7 +478,17 @@ exec env -i "$BWRAP_BIN" \
          "$socat_bin" TCP-LISTEN:"$egress_port",bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:"$egress_sock" &
        fi
        "$tmux_bin" -S "$sock" new-session -d -s "$name" "$@"
-       exec sleep infinity
+       # THE HOLDER DIES WITH THE AGENT. It used to hold unconditionally, so a pod whose agent had
+       # exited kept its namespace, its Port, and therefore its LIVENESS. Measured 2026-08-11: the
+       # tmux server was gone, `lcars attach` said "no sessions", and the fleet re-briefed that pod
+       # at every tick because its Port was still open; the ticket stayed lcars-in-flight forever.
+       # Teardown was wired one way only (close the Port -> the sleep dies -> tmux and claude fall);
+       # this is the return leg. The Port closing lands on the rail that already exists —
+       # `Pod.handle_event({:exit_status, _})` -> `pod.failed` / `exited_before_result` -> incident
+       # -> reconciliation reclaims the lock -> a real re-dispatch, instead of a brief into a corpse.
+       # Poll rather than block: no tmux primitive waits on "this server exited", and 5s of latency
+       # on a death is nothing next to a pod that is never declared dead at all.
+       while "$tmux_bin" -S "$sock" has-session -t "$name" 2>/dev/null; do sleep 5; done
      ' sh "$SOCAT_BIN" "${LCARS_POD_EGRESS_SOCK:-}" "$EGRESS_PORT" "$TMUX_BIN" "$TMUX_SOCK" "$TMUX_SESSION_NAME" "${COMMAND[@]}"
 
 # bwrap does NOT return (holder sleep infinity): this process IS the live pod (the spawner's Port handle).

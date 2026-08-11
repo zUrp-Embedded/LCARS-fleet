@@ -339,7 +339,32 @@ fi
 #   The Desktop-visible readable name is a SEPARATE axis: --remote-control-session-name-prefix (auto suffix).
 # =============================================================
 
-if [[ "$POD_RESUME" == "1" ]]; then
+# A session that holds NO conversation turn is not resumable, and asking anyway is FATAL AND
+# SELF-SUSTAINING. Measured 2026-08-11: a pod died at its first start, leaving a 334-byte transcript
+# with only `mode` / `permission-mode` / `bridge-session` records; every later start passed --resume
+# on it and the binary answered "No conversation found with session ID: <uuid>" and exited at once.
+# The fleet then re-briefed a corpse forever, and the FIRST cause was unrecoverable — erased by the
+# trap it had set. So the predicate is positive: at least one `user` or `assistant` record. Those two
+# types are what a transcript is made of; the preamble records are not, and enumerating the preamble
+# instead would re-open the trap the day the vendor adds one.
+#
+# Not resumable -> the stub is REMOVED and we start fresh. It carries nothing by construction, and
+# deleting it is what makes the fallback unconditional: whether --session-id tolerates a pre-existing
+# transcript for the same UUID is a vendor behaviour we would be guessing at, and a wrong guess here
+# reinstates exactly the loop this fixes.
+resumable_session() {
+  local id=$1 f
+  f=$(find "$POD_DIR/.claude/projects" -maxdepth 2 -name "$id.jsonl" -print -quit 2>/dev/null)
+  [[ -n "$f" ]] || { dbg "step session: no transcript for $id"; return 1; }
+  if grep -qE '"type":"(user|assistant)"' "$f"; then
+    return 0
+  fi
+  dbg "step session: transcript $f has NO conversation turn (stub of a pod that died at start) — removing"
+  rm -f "$f"
+  return 1
+}
+
+if [[ "$POD_RESUME" == "1" ]] && resumable_session "$SESSION_ID"; then
   SESSION_FLAGS=(--resume "$SESSION_ID")
 else
   SESSION_FLAGS=(--session-id "$SESSION_ID")

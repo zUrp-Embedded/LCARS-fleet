@@ -288,11 +288,44 @@ EOF
   [[ "$output" != *"--resume"* ]]
 }
 
-@test "flags: recovery (LCARS_POD_RESUME=1) → --resume <UUID> (not --session-id)" {
+@test "flags: recovery (LCARS_POD_RESUME=1) on a REAL transcript → --resume <UUID> (not --session-id)" {
   export LCARS_POD_RESUME=1
+  mkdir -p "$POD_DIR/.claude/projects/-home--pod"
+  cat > "$POD_DIR/.claude/projects/-home--pod/test-session-uuid.jsonl" <<'EOF'
+{"type":"mode","mode":"normal","sessionId":"test-session-uuid"}
+{"type":"user","message":{"role":"user","content":"engage"},"sessionId":"test-session-uuid"}
+{"type":"assistant","message":{"role":"assistant","content":"ok"},"sessionId":"test-session-uuid"}
+EOF
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--resume test-session-uuid"* ]]
   [[ "$output" != *"--session-id"* ]]
+}
+
+@test "flags: recovery with NO transcript at all → --session-id, never --resume into the void" {
+  export LCARS_POD_RESUME=1
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$output" == *"--session-id test-session-uuid"* ]]
+  [[ "$output" != *"--resume"* ]]
+}
+
+@test "flags: recovery on a STUB transcript (no conversation turn) → --session-id, and the stub is REMOVED" {
+  # The trap measured 2026-08-11: a pod dies at its first start and leaves a transcript holding only
+  # `mode`/`permission-mode`/`bridge-session`. `--resume` on it is fatal ("No conversation found with
+  # session ID") and every retry dies the same way, so the fleet re-briefs a corpse forever and the
+  # ORIGINAL cause is gone. A transcript with no turn is not a session — start fresh, and take the
+  # stub with us so the fallback does not depend on how the vendor reacts to a pre-existing file.
+  export LCARS_POD_RESUME=1
+  STUB="$POD_DIR/.claude/projects/-home--pod/test-session-uuid.jsonl"
+  mkdir -p "$(dirname "$STUB")"
+  cat > "$STUB" <<'EOF'
+{"type":"mode","mode":"normal","sessionId":"test-session-uuid"}
+{"type":"permission-mode","permissionMode":"default","sessionId":"test-session-uuid"}
+{"type":"bridge-session","sessionId":"test-session-uuid","bridgeSessionId":"cse_01","lastSequenceNum":0}
+EOF
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$output" == *"--session-id test-session-uuid"* ]]
+  [[ "$output" != *"--resume"* ]]
+  [[ ! -f "$STUB" ]]
 }
 
 @test "flags: RC name = the human_role prefix (--remote-control's positional, NOT an auto suffix)" {

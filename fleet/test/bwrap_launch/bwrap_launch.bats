@@ -282,13 +282,19 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_POD_CWD="$POD_DIR/repo"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$output" == *"--chdir $POD_DIR/repo"* ]]
 }
-@test "asm: HOLDER = sh -c (tmux new-session -d + exec sleep infinity) — bwrap stays alive" {
+@test "asm: HOLDER = sh -c (tmux new-session -d + wait on the session) — alive WITH the agent, and only with it" {
   # The holder keeps bwrap-PID1 alive → the namespace and the tmux server survive. Without it, bwrap
-  # exits the moment new-session -d returns and kills the namespace. The -d daemonizes, the sleep holds.
+  # exits the moment new-session -d returns and kills the namespace. The -d daemonizes; the WAIT holds.
+  #
+  # And the wait is `has-session`, never `sleep infinity`: a holder that outlives its agent leaves a
+  # pod whose Port is open and whose tmux is gone — the fleet calls that alive and re-briefs it
+  # forever. The pod must die when the session does, so the Port closes and `exited_before_result`
+  # gets its chance to run.
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
   [[ "$output" == *"/bin/sh -c"* ]]
   [[ "$output" == *"new-session -d -s"* ]]
-  [[ "$output" == *"exec sleep infinity"* ]]
+  [[ "$output" == *"has-session"* ]]
+  [[ "$output" != *"sleep infinity"* ]]
 }
 @test "asm: session name + command passed as the holder's ARGS (argv preserved, lcars-pod-<id> + command)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
