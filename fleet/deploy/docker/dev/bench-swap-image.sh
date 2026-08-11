@@ -139,10 +139,26 @@ say "relance pour que 50-forge minte les role-tokens sur le seed EXISTANT"
 wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 
 # ─── 5. verdict MESURE ───────────────────────────────────────────────────────────────────────────
-ROLE_TOKENS="$("$DOCKER_BIN" exec "$BOX" bash -c 'ls /home/private/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
-[[ "$ROLE_TOKENS" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
-CREDS_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
-REVISION="$("$DOCKER_BIN" exec "$BOX" bash -c 'echo "${LCARS_IMAGE_REVISION:-inconnue}"' 2>/dev/null || echo inconnue)"
+# MESURE PAR `cp` ET `inspect`, JAMAIS PAR `exec`. Quand le daemon est joint a travers un proxy de
+# socket, `exec` LANCE la commande — les effets de bord ont lieu — mais ne rend ni sa sortie ni son
+# code : il rend 0 et zero octet. Une mesure batie sur `exec` y lit donc le vide et conclut
+# l'absence. Vecu : ce script a tue un swap avec « la boite ne voit pas le seed » sur une boite dont
+# les dix jetons etaient en place, et l'operateur a passe l'heure suivante a chercher une panne de
+# forge. `cp`, `logs` et `inspect` traversent, eux — donc la mesure passe par eux.
+ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/home/private" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
+[[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
+
+CREDS_TMP="$(mktemp)"
+if "$DOCKER_BIN" cp "$BOX:/home/$HUMAN/.claude/.credentials.json" "$CREDS_TMP" >/dev/null 2>&1 && [[ -s "$CREDS_TMP" ]]; then
+  CREDS_OK=oui
+else
+  CREDS_OK=non
+fi
+rm -f "$CREDS_TMP"
+
+REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$BOX" 2>/dev/null \
+            | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1)"
+REVISION="${REVISION:-inconnue}"
 
 say "─────────────────────────────────────────────────────────"
 say "boite remplacee"
