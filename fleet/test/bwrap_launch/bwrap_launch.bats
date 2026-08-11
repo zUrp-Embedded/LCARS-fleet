@@ -118,6 +118,42 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_GIT_MIRROR="/nonexistent/mirror"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"git mirror"* ]]
 }
+@test "mounts: mode+src binds in place (the ordinary form, unchanged)" {
+  mkdir -p "$TMP_BASE/plain"
+  export LCARS_POD_MOUNTS="ro:$TMP_BASE/plain"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $TMP_BASE/plain $TMP_BASE/plain"* ]]
+}
+
+@test "mounts: mode+src+dst binds the SOURCE at the DESTINATION (pinned reference face)" {
+  # The pinned reference lives in the pod dir so it survives its source, but it is bound at the
+  # canonical face path so a pointer written in a brief resolves unchanged. Source and destination
+  # differ HERE and nowhere else.
+  mkdir -p "$TMP_BASE/pinned"
+  export LCARS_POD_MOUNTS="ro:$TMP_BASE/pinned:/home/projects.workshop/demo"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $TMP_BASE/pinned /home/projects.workshop/demo"* ]]
+}
+
+@test "mounts: a RELATIVE destination is refused (the belt covers the target too)" {
+  mkdir -p "$TMP_BASE/pinned"
+  export LCARS_POD_MOUNTS="ro:$TMP_BASE/pinned:home/projects.workshop/demo"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"mount target is not absolute"* ]]
+}
+
+@test "mounts: a RW translation onto a system root is refused on the DESTINATION" {
+  # A translated mount could otherwise land a writable tree on /etc while its source looks innocent.
+  mkdir -p "$TMP_BASE/innocent"
+  export LCARS_POD_MOUNTS="rw:$TMP_BASE/innocent:/etc"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"RW forbidden on a system root"* ]]
+}
+
 @test "setup: exit 1 when pod_dir is missing" {
   run "$SCRIPT" engineer pod-1 "$TMP_BASE/nope" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"pod_dir"* ]]
 }

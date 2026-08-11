@@ -136,7 +136,12 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # `system_mounts` prefixes the launchers' dir (install) → claude_launch.sh visible in the sandbox.
           |> Map.put(
             "LCARS_POD_MOUNTS",
-            LaunchSpec.pod_mounts_env(state.cap_profile, state.opts, claude_launch_path)
+            LaunchSpec.pod_mounts_env(
+              state.cap_profile,
+              state.opts,
+              claude_launch_path,
+              state.pod_dir
+            )
           )
 
         {:ok, human, env}

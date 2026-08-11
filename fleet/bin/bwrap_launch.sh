@@ -320,17 +320,27 @@ CATALOG_BINDS=()
 if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
   while IFS= read -r _mount; do
     [[ -z "$_mount" ]] && continue
-    _mode="${_mount%%:*}"; _path="${_mount#*:}"
+    _mode="${_mount%%:*}"; _rest="${_mount#*:}"
+    # `mode:src` (the common form) or `mode:src:dst` — the pinned reference face is the only
+    # producer of the second form: its content lives in the pod dir so it survives its source, but
+    # it is bound at the canonical face path so a pointer written in a brief resolves unchanged.
+    # No `dst` => bind in place, exactly as before.
+    if [[ "$_rest" == *:* ]]; then _path="${_rest%%:*}"; _dst="${_rest#*:}"; else _path="$_rest"; _dst="$_rest"; fi
     [[ "$_path" == /* ]] || { echo "ERR: catalogue mount path is not absolute: '$_path'" >&2; exit 1; }
+    [[ "$_dst"  == /* ]] || { echo "ERR: catalogue mount target is not absolute: '$_dst'" >&2; exit 1; }
     [[ -e "$_path"   ]] || { echo "ERR: catalogue mount path missing host-side: '$_path'" >&2; exit 1; }
     case "$_mode" in
-      ro) CATALOG_BINDS+=(--ro-bind "$_path" "$_path") ;;
+      ro) CATALOG_BINDS+=(--ro-bind "$_path" "$_dst") ;;
       rw)
-        case "$_path" in
-          / | /etc | /etc/* | /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | /lib | /lib/* | /lib64 | /lib64/* | /boot | /boot/* | /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | /root | /root/*)
-            echo "ERR: catalogue mount RW forbidden on a system root: '$_path'" >&2; exit 1 ;;
-          *) CATALOG_BINDS+=(--bind "$_path" "$_path") ;;
-        esac ;;
+        # The system-root belt covers the DESTINATION too: a translated mount could otherwise land
+        # a writable tree on /etc while its source looks innocent.
+        for _p in "$_path" "$_dst"; do
+          case "$_p" in
+            / | /etc | /etc/* | /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | /lib | /lib/* | /lib64 | /lib64/* | /boot | /boot/* | /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | /root | /root/*)
+              echo "ERR: catalogue mount RW forbidden on a system root: '$_p'" >&2; exit 1 ;;
+          esac
+        done
+        CATALOG_BINDS+=(--bind "$_path" "$_dst") ;;
       *) echo "ERR: catalogue mount mode '$_mode' invalid (expected ro|rw) for '$_path'" >&2; exit 1 ;;
     esac
   done <<< "$LCARS_POD_MOUNTS"

@@ -312,22 +312,110 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   work is scored in is a hazard that buys nothing once the text is in its hands. The architect keeps
   the tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
   """
-  @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t()) :: String.t()
-  def pod_mounts_env(cap_profile, opts, claude_launch_path) do
+  @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
+  def pod_mounts_env(cap_profile, opts, claude_launch_path, pod_dir \\ nil) do
     (system_mounts(claude_launch_path) ++
        cap_profile_mounts(cap_profile) ++
        opts_mounts(opts) ++
-       other_face_reference_mount(opts, cap_profile))
+       other_face_reference_mount(opts, cap_profile, pod_dir))
     |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
     |> mounts_env()
   end
 
   defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])
 
-  defp other_face_reference_mount(opts, cap_profile) do
+  # THE REFERENCE FACE IS PINNED, and this is the only place in the pod's world where that was not
+  # already true. Its workspace is pinned (`pin_base_sha`), its order is pinned (`brief_sha`), its
+  # matter is pinned (the lot's commit), its deliverable is pinned (`livrable_sha`) — the reference
+  # was a LIVE `--ro-bind` of the host worktree, so it moved under a running pod every time the
+  # human wrote in it or `WorktreeSync` rebased it. A producer could then compose against a state
+  # that never existed as a whole, and had no way to say which one it read.
+  #
+  # Pinned by COPY at the face's head, into the pod's own directory, so the reference also survives
+  # its source: a face removed under a running pod (`delete_project`) used to leave a dangling bind
+  # the pod read as an empty tree, silently. Nothing outside the pod is depended on after spawn.
+  #
+  # The MOUNT POINT does not move: the copy is bound at the canonical `<face_root>/<project>`, so a
+  # pointer written in a brief resolves exactly as before. Source and destination differ here and
+  # nowhere else, which is why the mount protocol carries both.
+  #
+  # Missing something mid-run is not patched in place — the pod is nuked and relaunched on a
+  # completed face (⚖ arbitrage user 2026-08-11). A frozen world you replace beats a live one you
+  # cannot cite.
+  defp other_face_reference_mount(opts, cap_profile, pod_dir) do
+    with path when is_binary(path) <- other_face_reference_path(opts, cap_profile),
+         dir when is_binary(dir) <- pod_dir,
+         {:ok, pinned} <- pin_reference_face(path, dir) do
+      [%{"mode" => "ro", "path" => pinned, "dst" => path}]
+    else
+      # No pod_dir (a caller that only builds env, e.g. a test) → the live bind, as before. A
+      # materialisation failure is NOT fatal either: the reference is a convenience, and refusing
+      # to launch a producer because its doc face could not be copied would trade a soft loss for
+      # a hard one. It is logged loud.
+      nil -> []
+      _no_pod_dir_or_failed -> live_reference_mount(opts, cap_profile)
+    end
+  end
+
+  defp live_reference_mount(opts, cap_profile) do
     case other_face_reference_path(opts, cap_profile) do
       nil -> []
       path -> [%{"mode" => "ro", "path" => path}]
+    end
+  end
+
+  @doc """
+  Copies the reference face at its CURRENT head into `<pod_dir>/ref/<basename>` and returns that
+  path. `git archive` + `tar`, so the copy carries no `.git` and no back-reference to the source:
+  after this call the pod's reference depends on nothing outside the pod.
+  """
+  @spec pin_reference_face(Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  def pin_reference_face(source, pod_dir) do
+    dest = Path.join([pod_dir, "ref", Path.basename(source)])
+    tarball = Path.join(pod_dir, "ref-#{Path.basename(source)}.tar")
+
+    with :ok <- require_repo_toplevel(source),
+         {:ok, {_, 0}} <-
+           Fleet.Credentials.Shell.git(
+             ["-C", source, "archive", "--format=tar", "-o", tarball, "HEAD"],
+             env: []
+           ),
+         :ok <- File.mkdir_p(dest),
+         {:ok, {_, 0}} <- Fleet.Credentials.Shell.run("tar", ["-xf", tarball, "-C", dest]) do
+      _ = File.rm(tarball)
+      {:ok, dest}
+    else
+      other ->
+        _ = File.rm(tarball)
+        # One level of `{:error, _}`, whichever step failed: a caller matching on the CAUSE should
+        # not have to know how many `with` clauses it travelled through.
+        reason =
+          case other do
+            {:error, r} -> r
+            r -> r
+          end
+
+        Logger.warning(
+          "LaunchSpec: reference face #{source} NOT pinned (#{inspect(reason)}) — the pod falls " <>
+            "back to the live bind, which moves under it"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # `git -C <dir>` WALKS UP: pointed at a directory that is not itself a repository, it resolves the
+  # ENCLOSING one and archives that. Measured, and it is not theoretical — the test fixtures live
+  # under the LCARS checkout, so the first run copied the whole runtime into the pod instead of
+  # failing. A source that is not its own toplevel is refused rather than approximated.
+  defp require_repo_toplevel(source) do
+    case Fleet.Credentials.Shell.git(["-C", source, "rev-parse", "--show-toplevel"], env: []) do
+      {:ok, {out, 0}} ->
+        same? = Path.expand(String.trim(out)) == Path.expand(source)
+        if same?, do: :ok, else: {:error, {:not_a_face_repo, source, String.trim(out)}}
+
+      other ->
+        {:error, {:not_a_face_repo, source, other}}
     end
   end
 
@@ -392,13 +480,23 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     Enum.map_join(mounts, "\n", fn m ->
       mode = bound_mount_mode(Map.get(m, "mode") || Map.get(m, :mode))
       path = Map.get(m, "path") || Map.get(m, :path)
-      "#{mode}:#{path}"
+
+      # `mode:src:dst` only when the two differ — the pinned reference face is the sole case, and
+      # emitting a redundant third field everywhere would make every other mount look like it has
+      # a translation to check.
+      case Map.get(m, "dst") || Map.get(m, :dst) do
+        nil -> "#{mode}:#{path}"
+        dst -> "#{mode}:#{path}:#{dst}"
+      end
     end)
   end
 
   defp mount_has_newline?(m) do
+    # `dst` is a mount field like the other two: a field that reaches the env line without this
+    # check is a field the injection guard does not cover.
     has_newline?(Map.get(m, "mode") || Map.get(m, :mode)) or
-      has_newline?(Map.get(m, "path") || Map.get(m, :path))
+      has_newline?(Map.get(m, "path") || Map.get(m, :path)) or
+      has_newline?(Map.get(m, "dst") || Map.get(m, :dst))
   end
 
   defp has_newline?(v), do: is_binary(v) and String.contains?(v, ["\n", "\r"])

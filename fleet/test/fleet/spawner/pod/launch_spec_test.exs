@@ -264,4 +264,101 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert LaunchSpec.permission_mode(cap) == "default"
     end
   end
+
+  describe "pin_reference_face/2 — the reference stops moving under the pod" do
+    @describetag :tmp_dir
+
+    defp face_repo(tmp) do
+      src = Path.join(tmp, "workshop-face")
+      File.mkdir_p!(src)
+      {_, 0} = System.cmd("git", ["init", "-q", src], stderr_to_stdout: true)
+      {_, 0} = System.cmd("git", ["-C", src, "config", "user.email", "h@lcars.local"])
+      {_, 0} = System.cmd("git", ["-C", src, "config", "user.name", "H"])
+      File.mkdir_p!(Path.join(src, "refs"))
+      File.write!(Path.join([src, "refs", "ina219.txt"]), "0x40 shunt")
+      {_, 0} = System.cmd("git", ["-C", src, "add", "."], stderr_to_stdout: true)
+      {_, 0} = System.cmd("git", ["-C", src, "commit", "-q", "-m", "datasheet"])
+      src
+    end
+
+    test "the copy carries the content and NO back-reference to its source", %{tmp_dir: tmp} do
+      src = face_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, pinned} = LaunchSpec.pin_reference_face(src, pod_dir)
+      assert File.read!(Path.join([pinned, "refs", "ina219.txt"])) == "0x40 shunt"
+
+      # No `.git`: a pointer back into the source is exactly what must not survive the source.
+      refute File.exists?(Path.join(pinned, ".git"))
+      # And the tarball is not left behind in the pod's world.
+      assert Path.wildcard(Path.join(pod_dir, "*.tar")) == []
+    end
+
+    test "the pinned reference SURVIVES its source being removed mid-flight", %{tmp_dir: tmp} do
+      # This is the whole point. `delete_project` nukes the faces without consulting running pods;
+      # a live `--ro-bind` then became a dangling mount the pod read as an empty tree, silently.
+      src = face_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+      {:ok, pinned} = LaunchSpec.pin_reference_face(src, pod_dir)
+
+      File.rm_rf!(src)
+
+      assert File.read!(Path.join([pinned, "refs", "ina219.txt"])) == "0x40 shunt"
+    end
+
+    test "a write in the source AFTER the pin does not reach the pod", %{tmp_dir: tmp} do
+      # The human and the architect write in that face continuously, and `WorktreeSync` rebases it
+      # after each merge. Live, a producer could compose against a state that never existed whole.
+      src = face_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+      {:ok, pinned} = LaunchSpec.pin_reference_face(src, pod_dir)
+
+      File.write!(Path.join([src, "refs", "ina219.txt"]), "0x41 shunt")
+
+      assert File.read!(Path.join([pinned, "refs", "ina219.txt"])) == "0x40 shunt"
+    end
+
+    test "a source that is not its own repo REFUSES — `git -C` walks UP", %{tmp_dir: tmp} do
+      # Not a hypothetical: these fixtures live under the LCARS checkout, so without the toplevel
+      # check the first run archived the whole runtime into the pod and reported success.
+      plain = Path.join(tmp, "not-a-repo")
+      File.mkdir_p!(plain)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:error, {:not_a_face_repo, ^plain, _}} =
+               LaunchSpec.pin_reference_face(plain, pod_dir)
+
+      refute File.exists?(Path.join([pod_dir, "ref", "not-a-repo"]))
+    end
+  end
+
+  describe "mounts_env — the translated mount (`mode:src:dst`)" do
+    test "src and dst travel together when they differ, and the guard covers dst" do
+      cap =
+        cap_with_mounts([
+          %{"mode" => "ro", "path" => "/pod/ref/x", "dst" => "/home/projects.workshop/x"}
+        ])
+
+      env = LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
+      assert env =~ "ro:/pod/ref/x:/home/projects.workshop/x"
+
+      injecting =
+        cap_with_mounts([%{"mode" => "ro", "path" => "/ok", "dst" => "/x\nrw:/etc/shadow"}])
+
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL/, fn ->
+        LaunchSpec.pod_mounts_env(injecting, [], "/opt/claude_launch.sh")
+      end
+    end
+
+    test "an ordinary mount stays two fields — no translation to check where there is none" do
+      cap = cap_with_mounts([%{"mode" => "rw", "path" => "/home/project"}])
+      env = LaunchSpec.pod_mounts_env(cap, [], "/opt/claude_launch.sh")
+      assert env =~ "rw:/home/project"
+      refute env =~ "rw:/home/project:"
+    end
+  end
 end
