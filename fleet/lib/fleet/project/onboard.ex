@@ -384,6 +384,23 @@ defmodule Fleet.Project.Onboard do
         IO.puts(:stderr, "REFUSE : #{full_name} est deja dans le catalogue #{inspect(cat)}.")
         System.halt(1)
 
+      # Gitea demande le PROPRIETAIRE du depot pour un transfert — pas l'admin, mesure : un compte
+      # membre avec write recoit ce 403 mot pour mot. Le compte systeme n'est proprietaire d'aucune
+      # org, par construction : c'est une identite de service, pas une autorite d'onboarding. Nomme,
+      # parce qu'un tuple HTTP brut envoie l'operateur debugger la porte au lieu de lire la reponse.
+      {:error, {:http, 403, %{"message" => "user should be the owner of the repo"}}} ->
+        IO.puts(:stderr, "REFUSE : le compte de service n'est pas proprietaire de #{full_name}.")
+
+        IO.puts(
+          :stderr,
+          "  un transfert Gitea exige le PROPRIETAIRE du depot (pas l'admin) — le compte qui"
+        )
+
+        IO.puts(:stderr, "  fait tourner la fleet est membre, pas proprietaire.")
+        IO.puts(:stderr, "  il faut une identite de classe onboarding : c'est une decision de")
+        IO.puts(:stderr, "  deploiement, pas un reglage de cette commande.")
+        System.halt(1)
+
       {:error, reason} ->
         IO.puts(:stderr, "ECHEC : #{inspect(reason)}")
         System.halt(2)
