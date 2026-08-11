@@ -1666,7 +1666,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp check_placement_defaults(root, tf_path) do
     catalogue = Path.join(root, "priv/catalogue")
 
-    if File.dir?(catalogue) do
+    # HORS-PERIMETRE quand l'arbre `deploy/` n'est pas la — MEME regle que les listes de l'arbre
+    # frere juste au-dessus, et je l'avais oubliee. L'etage BUILD de l'image copie `fleet/` SANS
+    # `deploy/` (COPY explicite, par choix), donc la recette n'y est pas : les listes existantes se
+    # skippaient proprement pendant que celle-ci rendait « not readable — fail-closed ». Un gate vert
+    # sur l'hote et rouge dans l'image, sur un artefact qui n'a jamais fait partie du perimetre.
+    if File.dir?(Path.expand("deploy", root)) and File.dir?(catalogue) do
       case Fleet.Application.CatalogueRoles.tfvars(catalogue) do
         {:ok, derived} ->
           Enum.flat_map(~w(writers judges externals), fn key ->
