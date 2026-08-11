@@ -98,6 +98,27 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
+  # A forge answering in GITEA'S REAL SHAPE: the message a reader needs, plus the `url` pointer
+  # Gitea attaches to every error body. The distinction is the subject of its test.
+  defmodule GiteaShapedFailForge do
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    def open_pr(_r, _h, _b, _t, _o),
+      do:
+        {:error,
+         {:http, 403,
+          %{
+            "message" => "user must be a collaborator",
+            "url" => "http://forge:3000/api/swagger"
+          }}}
+
+    def post_comment(_r, n, body, opts) do
+      send(self(), {:comment, n, body, opts})
+      {:ok, %{"id" => 1}}
+    end
+  end
+
   defmodule PrFailForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
@@ -531,6 +552,38 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert body =~ Fleet.Forge.Protocol.pr_open_fail_marker(42, "deadbeef")
       assert body =~ "422"
       assert body =~ "feature/issue-42"
+
+      # The OPERATION tag survives — it names which gesture failed, and a reader needs that.
+      assert body =~ "open_pr"
+    end
+
+    @tag :tmp_dir
+    test "the pr-open-fail comment carries the forge's MESSAGE, never its swagger pointer",
+         %{tmp_dir: tmp} do
+      # This comment is read by a human and by the architect. It used to paste `inspect/1` of the
+      # raw reason, and Gitea puts a `"url" => ".../api/swagger"` in every error body — so the
+      # pointer shipped into the message. Measured 2026-08-11 on a stalled PR: the signal was
+      # `403 user must be a collaborator`, and the swagger URL was read as signal twice, once by a
+      # human asking which forge it named and once inside an architect's root-cause analysis.
+      # Noise that reaches a decision-maker is not neutral: it gets interpreted.
+      work_dir = Path.join(tmp, "lcars-test")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      opts = [
+        deliverable: StubDeliverable,
+        forge_client: GiteaShapedFailForge,
+        forge_opts: [],
+        ops_root: tmp
+      ]
+
+      assert {:error, {:open_pr, _}} = StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
+
+      assert_received {:comment, 42, body, _}
+      assert body =~ "HTTP 403"
+      assert body =~ "user must be a collaborator"
+      refute body =~ "swagger"
+      refute body =~ "api/swagger"
     end
 
     # BL-6-34 belt: a subject that is NOT a commit of the publish workspace is a proof from the

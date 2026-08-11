@@ -825,7 +825,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       marker = ForgeProtocol.publish_fail_marker(n, base)
 
       body =
-        "⚠ Publication du livrable REFUSÉE (`#{inspect(reason)}`) — le travail du pod n'a pas " <>
+        "⚠ Publication du livrable REFUSÉE (`#{Fleet.Forge.describe_error(reason)}`) — le travail du pod n'a pas " <>
           "atteint la forge. Compteur de frein : les échecs sur une même base s'accumulent, " <>
           "l'architecte est saisi au-delà du budget.\n\n" <> marker
 
@@ -866,7 +866,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
       body =
         "⚠ Livrable POUSSÉ (`#{branch}` @ `#{String.slice(sha, 0, 12)}`) mais la PR n'est PAS " <>
-          "née (`#{inspect(reason)}`) — rien n'est perdu, la branche survit sur la forge, mais " <>
+          "née (`#{Fleet.Forge.describe_error(reason)}`) — rien n'est perdu, la branche survit sur la forge, mais " <>
           "la brique reste verrouillée sans surface d'intégration. Intervention requise.\n\n" <>
           marker
 

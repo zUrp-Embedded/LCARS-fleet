@@ -130,4 +130,27 @@ defmodule Fleet.Forge do
       {:error, :repo_id_unsupported}
     end
   end
+
+  @doc """
+  Renders a forge error for a HUMAN — the form an operator-facing payload uses.
+
+  `inspect/1` on the raw reason is right in a LOG (a grep rail, where the whole payload is the
+  point) and wrong in a forge comment. Gitea puts a `"url" => ".../api/swagger"` pointer in every
+  error body, and pasting the tuple verbatim shipped that pointer into the message a human reads.
+  Measured 2026-08-11 on a stalled PR: the signal was `403 user must be a collaborator`, and the
+  swagger URL — meaningless to any reader of that comment — was taken for signal twice, once by a
+  human asking which forge it named and once inside an architect's root-cause analysis.
+
+  Noise that survives into a message read by a decision-maker is not neutral: it gets interpreted.
+  Operation tags are KEPT (`{:open_pr, _}` says which gesture failed) — only the vendor's
+  boilerplate is dropped.
+  """
+  @spec describe_error(term()) :: String.t()
+  def describe_error({:http, status, %{"message" => message}}) when is_binary(message),
+    do: "HTTP #{status} — #{message}"
+
+  def describe_error({tag, inner}) when is_atom(tag),
+    do: "#{tag} : #{describe_error(inner)}"
+
+  def describe_error(other), do: inspect(other)
 end
