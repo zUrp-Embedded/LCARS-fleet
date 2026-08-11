@@ -87,6 +87,30 @@ defmodule Fleet.Project.OnboardMigrateTest do
     ]
   end
 
+  describe "import_deposit : les refus d'admission, avant tout effet de bord" do
+    @tag :tmp_dir
+    test "un depot DEJA dans une org de catalogue n'est pas un depot", %{tmp: tmp} do
+      # Le reprendre par cette porte le clonerait puis le recreerait ailleurs, alors que les verbes
+      # justes existent : import/2 pour l'adopter, migrate/3 pour le changer de catalogue.
+      assert {:error, {:source_already_enrolled, "fleet/vitrine", "fleet"}} =
+               ProjectOnboard.import_deposit("fleet/vitrine", "web", opts(tmp))
+    end
+
+    @tag :tmp_dir
+    test "un catalogue de destination absent est refuse", %{tmp: tmp} do
+      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+               ProjectOnboard.import_deposit("lordzurp/mon-projet", "grominet", opts(tmp))
+
+      assert "web" in actives
+    end
+
+    @tag :tmp_dir
+    test "un nom qui n'est pas owner/nom est refuse avant tout le reste", %{tmp: tmp} do
+      assert {:error, {:not_a_repo_name, "pas-un-chemin"}} =
+               ProjectOnboard.import_deposit("pas-un-chemin", "web", opts(tmp))
+    end
+  end
+
   describe "import : l'org vient du DEPOT, pas du premier catalogue actif" do
     @tag :tmp_dir
     test "un depot du SECOND catalogue passe les gardes d'org", %{tmp: tmp} do

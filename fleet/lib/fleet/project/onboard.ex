@@ -474,6 +474,116 @@ defmodule Fleet.Project.Onboard do
   #
   # Le refus NOMME le catalogue manquant et le geste qui le pose, parce qu'un refus qui ne dit pas
   # quoi faire ne se distingue pas d'une panne.
+  @doc """
+  DEPOT : enrole un depot depuis l'espace PERSONNEL d'un humain vers l'org du catalogue choisi.
+
+  C'est la troisieme porte d'entree, et elle existe parce que les deux autres refusent ce cas par
+  construction, chacune pour sa bonne raison :
+
+    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_installed`)
+      et ne filtre donc rien — il n'a pas a le faire ;
+    * `import_external/3` exige `https` + un hote de son allowlist, et notre forge est en `http` :
+      elle serait refusee sur le SCHEMA. Cette garde borne « depuis quel hote ETRANGER on clone »,
+      et un depot personnel sur notre forge n'est pas un hote etranger — c'est une PROVENANCE
+      etrangere. Deux notions, deux gardes.
+
+  La frontiere d'adoption n'est donc pas « notre forge / forge externe » mais **« dans une org de
+  catalogue / hors org »** : tout ce qui vient d'un espace personnel passe le gate, meme depose par
+  un humain de confiance sur notre propre forge. Le transport ne change pas la provenance.
+
+  Le depot source n'est PAS consomme : il reste chez son proprietaire, c'est sa copie.
+  """
+  @spec import_deposit(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def import_deposit(source, catalogue, opts \\ [])
+      when is_binary(source) and is_binary(catalogue) do
+    with {:ok, owner, src_name} <- split_repo(source),
+         :ok <- refute_source_in_org(owner, source),
+         :ok <- require_destination_catalogue(catalogue) do
+      name = Keyword.get(opts, :name, src_name)
+      full_name = "#{catalogue}/#{name}"
+      dirs = face_dirs(name, opts)
+
+      with :ok <- validate_name(name),
+           :ok <- ensure_human_provisioned(catalogue, opts),
+           :ok <- require_machine_absent(full_name, dirs),
+           :ok <- require_forge_absent(full_name, opts),
+           {:ok, source_url} <- repo_url(source, opts) do
+        scratch = external_scratch_dir(name)
+
+        try do
+          with :ok <- clone_deposit(source_url, scratch, opts),
+               :ok <- adoption_gate(scratch),
+               :ok <- normalize_default_branch(scratch),
+               {:ok, forge_url} <- repo_url(full_name, opts),
+               {:ok, full_name} <- create_empty_repo(name, catalogue, opts) do
+            case finish_external(
+                   full_name,
+                   forge_url,
+                   scratch,
+                   dirs,
+                   name,
+                   Keyword.put(opts, :source_host, "depot:#{owner}")
+                 ) do
+              {:ok, result} ->
+                {:ok, Map.put(result, :from, source)}
+
+              {:error, reason} = err ->
+                compensate_external(full_name, dirs, reason, opts)
+                err
+            end
+          end
+        after
+          _ = File.rm_rf(scratch)
+        end
+      end
+    end
+  end
+
+  defp split_repo(full_name) do
+    case String.split(full_name, "/") do
+      [owner, name] when owner != "" and name != "" -> {:ok, owner, name}
+      _ -> {:error, {:not_a_repo_name, full_name}}
+    end
+  end
+
+  # Un depot deja dans une org de catalogue n'est pas un DEPOT : c'est un projet enrolle. Le
+  # reprendre par cette porte le clonerait puis le recreerait ailleurs, alors que les verbes justes
+  # existent — `import/2` pour l'adopter localement, `migrate/3` pour le changer de catalogue.
+  defp refute_source_in_org(owner, source) do
+    if owner in active_orgs(),
+      do: {:error, {:source_already_enrolled, source, owner}},
+      else: :ok
+  end
+
+  defp require_destination_catalogue(catalogue) do
+    actives = active_orgs()
+
+    if catalogue in actives,
+      do: :ok,
+      else: {:error, {:catalogue_not_installed, catalogue, actives}}
+  end
+
+  # SANS jeton : un depot personnel est PUBLIC par configuration de la forge, et c'est un choix
+  # ecrit (`[repository] DEFAULT_PRIVATE = public`). Un depot prive n'est donc pas un mode a
+  # supporter mais une erreur d'utilisation — le clone echoue, et le refus la NOMME au lieu de
+  # rendre une sortie de git brute.
+  defp clone_deposit(url, scratch, opts) do
+    timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
+
+    case Fleet.Credentials.Shell.git(["clone", "--no-recurse-submodules", url, scratch],
+           timeout_ms: timeout
+         ) do
+      {:ok, {_, 0}} ->
+        :ok
+
+      {:ok, {out, code}} ->
+        {:error, {:deposit_clone_failed, {code, String.slice(out, 0, 500)}}}
+
+      {:error, reason} ->
+        {:error, {:deposit_clone_failed, reason}}
+    end
+  end
+
   defp require_catalogue_installed(full_name) do
     cat = full_name |> String.split("/") |> List.first()
     actives = active_orgs()
