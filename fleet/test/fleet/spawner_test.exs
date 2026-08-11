@@ -714,4 +714,45 @@ defmodule Fleet.SpawnerTest do
       Fleet.Spawner.kill_pod(pod)
     end
   end
+
+  describe "pod_info — the project a pod belongs to is PUBLISHED, not inferred" do
+    test "a dispatched pod exposes its project_slug; `repo` stays nil and that is not a bug" do
+      # The dispatch threads `:repo_id` and NOT `:repo` (the owner/name string never enters the
+      # spawn opts), so a reader keyed on `repo` got nil for every producer and judge, then fell
+      # back to scanning /proc for an ops mount that had been deliberately removed. Three layers
+      # agreeing on a wrong answer. `:project_slug` was already threaded and simply not published.
+      pod_id = "pv-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Fleet.Spawner.spawn_pod(valid_profile(), "issue-1",
+          pod_id: pod_id,
+          allow_no_brief: true,
+          repo_id: @test_repo_id,
+          project_slug: "banc-egress",
+          rc_name: Fleet.Layout.pod_label("banc-egress", "engineer", 42)
+        )
+
+      assert {:ok, info} = Fleet.Spawner.pod_info(pod_id)
+      assert info.project_slug == "banc-egress"
+      assert info.repo == nil
+
+      Fleet.Spawner.kill_pod(pod_id)
+    end
+
+    test "a pod with no project says so with nil — an answer, not a gap" do
+      pod_id = "pv-none-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Fleet.Spawner.spawn_pod(valid_profile(), "issue-1",
+          pod_id: pod_id,
+          allow_no_brief: true,
+          repo_id: @test_repo_id
+        )
+
+      assert {:ok, info} = Fleet.Spawner.pod_info(pod_id)
+      assert info.project_slug == nil
+
+      Fleet.Spawner.kill_pod(pod_id)
+    end
+  end
 end

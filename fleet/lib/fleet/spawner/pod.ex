@@ -535,6 +535,16 @@ defmodule Fleet.Spawner.Pod do
       issue_id: data.issue_id,
       role: cap_profile_name(data.cap_profile),
       repo: Keyword.get(data.opts, :repo),
+      # THE PROJECT A POD BELONGS TO, and `:repo` is not it for a dispatched pod. The dispatch
+      # threads `:repo_id` and NOT `:repo` on purpose (`Fleet.Spawner`: the owner/name string never
+      # enters the spawn opts), so this map answered `nil` for every producer and every judge — and
+      # the only reader able to tell a project apart fell back to scanning `/proc` for an ops mount
+      # that `pod_mounts_env` had deliberately removed. Three layers agreeing on a wrong answer.
+      #
+      # `:project_slug` is already threaded by BOTH dispatch sites and by the architect's spawn; it
+      # was simply never published. Exposing it is the whole fix: no dispatcher change, and the
+      # `/proc` scan has nothing left to justify it.
+      project_slug: Keyword.get(data.opts, :project_slug),
       phase: state,
       conditions: MapSet.to_list(data.conditions),
       has_active_task: TaskProbe.pod_has_active_task?(data.pod_id),
