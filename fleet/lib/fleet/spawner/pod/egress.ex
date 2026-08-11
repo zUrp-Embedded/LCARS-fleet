@@ -42,8 +42,8 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   An empty allowlist refuses everything (a pod with no declared egress reaches nothing, rather than
   everything). A malformed request line is refused. A host that is not an exact match is refused —
-  no suffix matching, no wildcards. A rule that has to reason about where a domain ends is a rule
-  that will be wrong once, and the attacker only needs it to be wrong once.
+  the match is an exact name, or a `*.` SUBDOMAIN rule anchored on the right. Never a `contains`,
+  never a bare suffix: the anchor is what stops `sentry.io.attacker.net` from passing `*.sentry.io`.
   """
 
   require Logger
@@ -161,14 +161,33 @@ defmodule Fleet.Spawner.Pod.Egress do
   def decide(request_line, allowed) when is_binary(request_line) and is_list(allowed) do
     case Regex.run(@connect_re, request_line) do
       [_, host, port] ->
-        # EXACT match, downcased on both sides — a host is a name, not a pattern.
-        if String.downcase(host) in Enum.map(allowed, &String.downcase/1),
+        if allowed?(host, allowed),
           do: {:ok, host, String.to_integer(port)},
           else: {:refused, {:host_not_allowed, host}}
 
       nil ->
         {:refused, {:not_a_connect_request, String.slice(request_line, 0, 80)}}
     end
+  end
+
+  # Exact name, or a `*.` prefix that is a SUBDOMAIN rule anchored on the right — never a
+  # `contains`. The first version refused every pattern on the grounds that "a rule reasoning about
+  # where a domain ends will be wrong once"; true of a naive suffix test, and wrong as an argument
+  # against any pattern at all: the vendor's own error reporting needs `*.sentry.io` and
+  # `*.ingest.us.sentry.io`, so a matcher without subdomains cannot express the published list.
+  #
+  # `*.sentry.io` accepts `x.sentry.io`, and refuses `sentry.io.attacker.net` (the dot anchors the
+  # END of the candidate) as well as bare `sentry.io` (declare it too if it is wanted — a wildcard
+  # states "under this", not "this"). Pinned by mutation.
+  defp allowed?(host, allowed) do
+    h = String.downcase(host)
+
+    Enum.any?(allowed, fn rule ->
+      case String.downcase(rule) do
+        "*." <> parent -> String.ends_with?(h, "." <> parent)
+        exact -> h == exact
+      end
+    end)
   end
 
   @doc """

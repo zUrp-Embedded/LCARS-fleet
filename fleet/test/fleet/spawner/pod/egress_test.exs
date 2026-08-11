@@ -51,7 +51,42 @@ defmodule Fleet.Spawner.Pod.EgressTest do
                Egress.decide("CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n", [])
     end
 
-    test "matching is EXACT — no suffix, no wildcard" do
+    test "a `*.` rule accepts subdomains and REFUSES the right-hand impostor — the mutation" do
+      # The published list needs `*.sentry.io` and `*.ingest.us.sentry.io`; a matcher without
+      # subdomains cannot express it. The dot anchors the END of the candidate — drop it and
+      # `sentry.io.attacker.net` walks in, which is the whole reason the first version refused
+      # patterns outright.
+      allowed = ["*.sentry.io"]
+
+      assert {:ok, "o123.ingest.sentry.io", 443} =
+               Egress.decide("CONNECT o123.ingest.sentry.io:443 HTTP/1.1\r\n\r\n", allowed)
+
+      for host <- ["sentry.io.attacker.net", "evilsentry.io", "notsentry.io"] do
+        assert {:refused, {:host_not_allowed, ^host}} =
+                 Egress.decide("CONNECT #{host}:443 HTTP/1.1\r\n\r\n", allowed),
+               "#{host} must not pass `*.sentry.io`"
+      end
+
+      # A wildcard says "under this", not "this": the bare apex needs its own line.
+      assert {:refused, _} = Egress.decide("CONNECT sentry.io:443 HTTP/1.1\r\n\r\n", allowed)
+      assert {:ok, _, _} = Egress.decide("CONNECT sentry.io:443 HTTP/1.1\r\n\r\n", ["sentry.io"])
+    end
+
+    test "the shipped declaration carries the PUBLISHED list, not a reconstruction" do
+      # It was rebuilt host by host from a binary and from correlations, and shipped with ONE entry.
+      # Anthropic publishes what a sandboxed Claude Code needs; it is read, not inferred.
+      hosts =
+        Fleet.Spawner.Pod.Egress.Vendor.hosts(Path.join(File.cwd!(), "bin/claude_launch.sh"))
+
+      for required <- ["api.anthropic.com", "statsig.anthropic.com", "sentry.io", "*.sentry.io"] do
+        assert required in hosts, "#{required} is on the published list and must ship"
+      end
+
+      # Never added: it appears in no official list — only in a recipe for GRANTING GitHub access.
+      refute "raw.githubusercontent.com" in hosts
+    end
+
+    test "a plain name matches EXACTLY — a rule without `*.` is not a suffix rule" do
       allowed = ["api.anthropic.com"]
 
       # The three shapes a suffix rule gets wrong. A rule that has to reason about where a domain

@@ -14,41 +14,38 @@
 # A SECOND VENDOR BRINGS ITS OWN: `bin/codex_launch.sh` would sit beside a `bin/codex_launch.egress`
 # naming `api.openai.com`. Adding a vendor is adding two files next to the others — never editing a
 # list inside the runtime, which is what would make the sanctuary itself vendor-aware.
+#
+# ─── WHERE THIS LIST COMES FROM ───────────────────────────────────────────────────────────────
+# Anthropic PUBLISHES the one a sandboxed Claude Code expects (`sandbox-runtime`, the "sandbox
+# environments" doc, managed-settings). It is READ, never reconstructed host by host: the first
+# version of this file carried a single entry, and a pod that reaches neither statsig nor sentry has
+# no channel to say what it is missing — it fails silently, and the wall looks like a broken network.
+#
+# And the published list is not copied blind either. It is the starting point; the wall is the
+# present state, and the two are crossed — see Datadog below.
 api.anthropic.com
 
-# ─── LA TELEMETRIE, ET POURQUOI ELLE EST ICI ──────────────────────────────────────────────────
-# Le CLI vendor y envoie sa telemetrie. Elle est dans l'allowlist parce que le dépôt a DEJA
-# arbitre la question ailleurs, et que la couper au reseau contredisait cet arbitrage en silence.
-#
-# `bwrap_launch.sh` l'ecrit : « telemetry OFF → l'agent retombe sur le kick `engage` (send-keys)
-# au lieu du MONITOR. Ruling: we PREFER the Monitor, so telemetry is ON by default. » Le couplage
-# telemetry→Monitor est du cote du relais Anthropic, pas notre choix.
-#
-# Donc trois etats, et le mauvais etait celui qu'on avait :
-#   - telemetry ON  + hote autorise  → le Monitor marche. C'est l'etat voulu, c'est celui-ci.
-#   - telemetry OFF (`LCARS_POD_DISABLE_TELEMETRY=1`) → pas de Monitor, fallback `engage` ASSUME,
-#     et le CLI ne reessaie pas. Mode vie privee, opt-in, coherent.
-#   - telemetry ON + hote refuse → le CLI reessaie en boucle, et la fleet CROIT avoir le Monitor
-#     alors que le relais ne recoit rien. Un mur qui coupe ce que la config declare actif ne
-#     protege pas : il fait mentir la config.
-#
-# ⚠ Couper la telemetrie se fait par SON interrupteur (`LCARS_POD_DISABLE_TELEMETRY=1`), jamais en
-# retirant cette ligne — retirer la ligne produit le troisieme etat, pas le deuxieme.
+# TELEMETRY. Not optional here: `bwrap_launch.sh` rules on it — "telemetry OFF -> the agent falls
+# back to the `engage` kick instead of the MONITOR. We PREFER the Monitor, so telemetry is ON by
+# default." The telemetry->Monitor coupling lives on the Anthropic relay side.
+# WARNING: switch it off with ITS OWN knob (`LCARS_POD_DISABLE_TELEMETRY=1`), never by removing
+# these lines — removing them leaves the config declaring a rail the relay never receives.
+statsig.anthropic.com
+statsig.com
+# The address actually OBSERVED on this bench, which no doc carries: the relay moved.
 http-intake.logs.us5.datadoghq.com
 
-# ─── raw.githubusercontent.com ────────────────────────────────────────────────────────────────
-# Le CLI vendor le joint AU DEMARRAGE. Mesure au banc, et elle est sans appel : le premier pod ne
-# portant pas cet hote dans son allowlist a ete refuse a 19:50:29, n'a jamais acke son wake, et sa
-# session tmux etait morte 45 s plus tard. Le ticket est reste `lcars-in-flight`, la reconciliation
-# a re-briefe un cadavre a chaque tick, et le seul instrument qui disait vrai etait `lcars attach`
-# (« no sessions »).
+# ERROR REPORTING. The subdomains are required, and forgetting them in an enforced allowlist is a
+# known bug on their side (claude-code#66567).
+sentry.io
+*.sentry.io
+*.ingest.us.sentry.io
+
+# ─── WHAT IS DELIBERATELY ABSENT ──────────────────────────────────────────────────────────────
+# `registry.npmjs.org` — on the published list, but an LCARS pod installs no package: its vendor is
+# already laid down in its world. To be added the day a role needs it, not before.
 #
-# C'est la difference entre un mur et un baillon : refuser une sortie que le programme traite comme
-# facultative (la telemetrie) le degrade ; refuser celle qu'il joint pour DEMARRER le tue, et il
-# meurt sans le dire — le pod n'a pas de canal pour se plaindre d'un reseau qu'il croit casse.
-#
-# ⚠ Ce que ca autorise reste borne : un hote de CONTENU statique, joint par le CLI lui-meme. Ca ne
-# rend pas le web au pod — `WebFetch`/`WebSearch` restent denies cote outils, et rien d'autre ne
-# passe. Si un jour le CLI cesse d'en avoir besoin, cette ligne se retire par une mesure, pas par
-# une intuition : on la retire, on spawn un pod, on regarde s'il acke.
-raw.githubusercontent.com
+# `raw.githubusercontent.com` — the CLI binary names it for its CHANGELOG (and for playwright, never
+# invoked). It is on NO official list: it appears only in the "GitHub recipe", an example for
+# whoever wants to GRANT GitHub access. It was added here on a 0.7s correlation and then removed —
+# a changelog is not a reason to open an egress.
