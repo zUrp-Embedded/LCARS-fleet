@@ -323,12 +323,12 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
 
   test "a revision that does NOT shrink the jury says nothing about it", %{o: o} do
     # One meaning per shape: a suffix on every ordinary revision would be noise, and noise is what a
-    # reader learns to skip before the one time it matters. `c0-poc` and `workshop-direct` both carry an
+    # reader learns to skip before the one time it matters. `c0-poc` and `audit-only` both carry an
     # empty jury — a delta of zero is not a reduction.
     assert {:ok, %{jury_delta: 0}} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
-               revision_opts(o, workflow_map: "workshop-direct")
+               revision_opts(o, workflow_map: "audit-only")
              )
 
     msg = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%s", "main"])
@@ -340,26 +340,26 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert {:ok, result} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
-               revision_opts(o, workflow_map: "workshop-direct")
+               revision_opts(o, workflow_map: "audit-only")
              )
 
     assert %{
              repo: "fleet/tetris",
              outcome: :revised,
-             card: "workshop-direct",
+             card: "audit-only",
              previous_card: "c0-poc",
              protection: :restored
            } = result
 
     # The forge's main carries the NEW declaration, attributed to the revising role.
     raw = bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"])
-    assert raw =~ ~s("pipeline_default": "workshop-direct")
+    assert raw =~ ~s("pipeline_default": "audit-only")
     assert raw =~ ~s("declared_by": "starfleet")
 
     # The commit is the ledger entry: old -> new in the message, system account as author.
     log = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%an|%s", "main"])
     assert log =~ "lcars-system"
-    assert log =~ "card revision: c0-poc -> workshop-direct"
+    assert log =~ "card revision: c0-poc -> audit-only"
 
     # Lift FIRST (push door reduced to the system account), canonical restore AFTER (door
     # closed, jury re-sized on the card the showcase now declares).
@@ -377,18 +377,17 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert_received {:showcase_synced, "fleet/tetris"}
 
     assert File.read!(Path.join([o[:code_root], "tetris", "intensity.json"])) =~
-             "workshop-direct"
+             "audit-only"
   end
 
   test "identical re-declaration is an honest no-op — no lift, nothing pushed", %{o: o} do
-    ropts = revision_opts(o, workflow_map: "workshop-direct")
+    ropts = revision_opts(o, workflow_map: "audit-only")
     assert {:ok, %{outcome: :revised}} = ProjectOnboard.revise_card("fleet/tetris", ropts)
     flush_protects()
 
     sha_before = bare_git!(o, "fleet/tetris", ["rev-parse", "main"])
 
-    assert {:ok,
-            %{outcome: :unchanged, card: "workshop-direct", previous_card: "workshop-direct"}} =
+    assert {:ok, %{outcome: :unchanged, card: "audit-only", previous_card: "audit-only"}} =
              ProjectOnboard.revise_card("fleet/tetris", ropts)
 
     assert bare_git!(o, "fleet/tetris", ["rev-parse", "main"]) == sha_before
@@ -419,7 +418,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert {:error, {:card_push_failed, _}} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
-               revision_opts(o, workflow_map: "workshop-direct")
+               revision_opts(o, workflow_map: "audit-only")
              )
 
     assert bare_git!(o, "fleet/tetris", ["rev-parse", "main"]) == sha_before
@@ -432,12 +431,32 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     refute_received {:showcase_synced, _}
   end
 
+  test "a TICKET-scoped card is refused as a project declaration — loadable is not declarable", %{
+    o: o
+  } do
+    # `workshop-direct` loads perfectly and is chosen by an issue's genre. Declared for a PROJECT it
+    # would route every ticket through a jury-less direct seal, so the framing catalogue stopped
+    # offering it — and stopping to offer is not refusing. This is the refusal.
+    sha_before = bare_git!(o, "fleet/tetris", ["rev-parse", "main"])
+
+    assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
+             ProjectOnboard.revise_card(
+               "fleet/tetris",
+               revision_opts(o, workflow_map: "workshop-direct")
+             )
+
+    # Refused BEFORE any gesture: main untouched, and the protection never lifted.
+    assert bare_git!(o, "fleet/tetris", ["rev-parse", "main"]) == sha_before
+    refute_received {:protect_branch, "fleet/tetris", _}
+    refute_received {:showcase_synced, _}
+  end
+
   test "a revision without its WHY is refused — the untraced mutation this path exists to prevent",
        %{o: o} do
     assert {:error, :justification_required} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
-               o ++ [workflow_map: "workshop-direct", revised_by: "starfleet"]
+               o ++ [workflow_map: "audit-only", revised_by: "starfleet"]
              )
 
     refute_received {:protect_branch, _, _}
@@ -447,7 +466,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert {:error, {:not_on_machine, "fleet/ghost"}} =
              ProjectOnboard.revise_card(
                "fleet/ghost",
-               revision_opts(o, workflow_map: "workshop-direct")
+               revision_opts(o, workflow_map: "audit-only")
              )
 
     refute_received {:protect_branch, _, _}

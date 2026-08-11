@@ -1547,9 +1547,16 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # LOADABLE IS NOT THE SAME AS DECLARABLE HERE. A ticket-scoped card (`workshop-direct`, reached
+  # by an issue's genre) loads perfectly and would route EVERY ticket of the project through a
+  # jury-less direct seal. Removing it from `list_workflow_cards` hides the option; only this
+  # refuses it, and the difference is the one this repo already names about `allowedTools` — leaving
+  # something off a list closes nothing and reads exactly like closing it.
   defp require_loadable_card(card) when is_binary(card) and card != "" do
-    _ = Fleet.Workflow.Loader.load!(card)
-    :ok
+    case Fleet.Workflow.Loader.load!(card) do
+      %{"scope" => "project"} -> :ok
+      %{"scope" => scope} -> {:error, {:card_not_project_scoped, card, scope}}
+    end
   rescue
     _ -> {:error, {:unknown_card, card}}
   end

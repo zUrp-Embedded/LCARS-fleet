@@ -497,10 +497,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, pairs} <- catalogue_cards() do
       {cards, unreadable} =
         Enum.reduce(pairs, {[], []}, fn {cat, name, opts}, {ok, bad} ->
+          # TWO axes, and both must hold for a card to be OFFERED here. `status: canon` = it is a
+          # production card and not a smoke/demo fixture. `scope: project` = it is declarable for a
+          # WHOLE project, which is the only question this listing asks — the human is choosing a
+          # project's criticality. A ticket-scoped card (`workshop-direct`, reached by an issue's
+          # genre) was offered here and should never have been: presenting a choice that cannot be
+          # made at this scope invites exactly the declaration the rest of the rail then refuses.
           case read_card(name, opts) do
-            {:ok, %{"status" => "canon"} = card} -> {[put_catalogue(card, cat) | ok], bad}
-            {:ok, _technical} -> {ok, bad}
-            :error -> {ok, [if(cat, do: "#{cat}/#{name}.yaml", else: "#{name}.yaml") | bad]}
+            {:ok, %{"status" => "canon", "scope" => "project"} = card} ->
+              {[put_catalogue(card, cat) | ok], bad}
+
+            {:ok, _technical_or_ticket_scoped} ->
+              {ok, bad}
+
+            :error ->
+              {ok, [if(cat, do: "#{cat}/#{name}.yaml", else: "#{name}.yaml") | bad]}
           end
         end)
 
@@ -543,6 +554,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
        "name" => name,
        "declared_name" => card["name"],
        "status" => card["status"],
+       "scope" => card["scope"],
        "presentation" => card["presentation"] || card["description"],
        "applicable_intensity" => card["applicable_intensity"],
        "jury" => card["jury"],

@@ -86,7 +86,12 @@ defmodule Fleet.Workflow.Loader do
       "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],
       "description" => get_in(yaml, ["metadata", "description"]),
       "presentation" => get_in(yaml, ["metadata", "presentation"]),
-      "status" => get_in(yaml, ["metadata", "status"]) || "canon"
+      "status" => get_in(yaml, ["metadata", "status"]) || "canon",
+      # WHERE the card is declared — a different axis from `status`, which says what CLASS it is.
+      # A production card can still be unavailable at project scope: `workshop-direct` is chosen by
+      # an issue's genre and a project declaring it would route every ticket through a jury-less
+      # direct seal. Absent = `project`, the ordinary case.
+      "scope" => get_in(yaml, ["metadata", "scope"]) || "project"
     }
   end
 
