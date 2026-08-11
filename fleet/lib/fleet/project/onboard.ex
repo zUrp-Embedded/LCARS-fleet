@@ -356,6 +356,12 @@ defmodule Fleet.Project.Onboard do
   """
   @spec eval_migrate(String.t(), String.t()) :: no_return()
   def eval_migrate(full_name, target) when is_binary(full_name) and is_binary(target) do
+    # `eval` LOADS the app, it does not START it: the forge HTTP pool has no supervisor here, and
+    # the transfer died on `unknown registry: Fleet.Forge.Finch`. Started standalone, like the mix
+    # task that already does it — never `app.start`, because a second fleet must not boot from a
+    # tool. The door needs exactly this one process and starts exactly it.
+    {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
+
     case migrate(full_name, target) do
       {:ok, %{repo: new_name, faces: faces}} ->
         IO.puts("migre : #{full_name} -> #{new_name}")

@@ -44,7 +44,11 @@ defmodule Fleet.Forge do
       Fleet.EventRouter,
       # — external wire surface (lib fencing: every reference is declared) —
       Req,
-      Req.Response
+      Req.Response,
+      # The pool this domain sends through: its NAME lived here and its SHAPE in Pilot.Application,
+      # which split one fact across two domains and put the pool out of reach of a tool door that
+      # legitimately needs it. Name and shape now sit together, and this declaration is the cost.
+      Finch
     ],
     exports: [
       Client,
@@ -68,6 +72,23 @@ defmodule Fleet.Forge do
   """
   @spec finch_name() :: atom()
   def finch_name, do: @finch_name
+
+  @doc """
+  Child spec of that pool — SINGLE writer of its shape.
+
+  `conn_max_idle_time: 30_000` closes any connection left idle >30s BEFORE the forge closes it
+  server-side (Finch's `:infinity` default would keep it until it goes stale, and the next call then
+  hangs until `receive_timeout` — the suspected source of the ~30s cumulated on create_issue).
+
+  It lives beside the NAME because the two are one fact. While the shape lived in the pilot's
+  application module, anything that was not the pilot could name the pool but not START it: an
+  `eval` door acting on the forge died on `unknown registry: Fleet.Forge.Finch`, and its only ways
+  out were to depend on the pilot or to write the shape a second time. Out-of-app callers start it
+  standalone under their own supervisor (`mix lcars.project_template.sync`, the migrate door) — never
+  `app.start`, because a second fleet must not boot from a tool.
+  """
+  @spec finch_spec() :: {module(), keyword()}
+  def finch_spec, do: {Finch, name: @finch_name, pools: %{default: [conn_max_idle_time: 30_000]}}
 
   @doc """
   The repo's forge id, EXPLAINED: `{:ok, id}` | `{:error, reason}`.

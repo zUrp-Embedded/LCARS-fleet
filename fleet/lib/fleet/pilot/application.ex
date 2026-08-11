@@ -53,19 +53,14 @@ defmodule Fleet.Pilot.Application do
       else: []
   end
 
-  # HTTP pool dedicated to the ForgeClient. `conn_max_idle_time: 30_000` closes any connection left idle >30s
-  # BEFORE the forge closes it server-side (the Finch default `:infinity` would keep it until
-  # it goes stale → next call hangs until receive_timeout, suspected cause of the ~30s
-  # cumulated on create_issue). Simple HTTP/1 pool, lazy. `Req.request(finch: Fleet.Forge.finch_name())`
-  # on the ForgeClient side uses it.
   @doc """
-  The ForgeClient's Finch pool child spec — SINGLE writer of the pool shape, shared with
-  out-of-app tooling (`mix lcars.project_template.sync` starts it standalone under its own
-  supervisor: no `app.start`, a second fleet must never boot from a mix task).
+  The ForgeClient's Finch pool child spec.
+
+  The shape lives in `Fleet.Forge`, next to the pool's NAME: the pilot is where it was first
+  needed, not what it belongs to, and keeping it here made the pool unstartable by anything that
+  does not depend on the pilot.
   """
-  def forge_finch_spec do
-    {Finch, name: Fleet.Forge.finch_name(), pools: %{default: [conn_max_idle_time: 30_000]}}
-  end
+  defdelegate forge_finch_spec, to: Fleet.Forge, as: :finch_spec
 
   @doc """
   Liveness status of the forge-state-machine step rail, for readiness. fleet_pilot
