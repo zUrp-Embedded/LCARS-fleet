@@ -327,6 +327,10 @@ defmodule Fleet.MCP.PodTools do
           "en bloc, every `CLAUDE.md` goes through the reception filter, and the default branch is " <>
           "normalized to `main`. The source is NOT consumed — your human keeps their repo, the " <>
           "fleet works on its copy. Use `import_project` instead for a repo ALREADY in an org. " <>
+          "FRAME IT ON THE WAY IN: `workflow_map` + `intensity_level`/`intensity_justification` " <>
+          "declare the card and the criticality, exactly as on `create_project`. Undeclared is " <>
+          "not forbidden — the project lands on the default card at C0 and the declaration says " <>
+          "it was never declared, which is a readable state rather than a hole. " <>
           "Returns {\"status\":\"imported\",\"repo\":...,\"from\":...}."
       )
     end
@@ -335,7 +339,11 @@ defmodule Fleet.MCP.PodTools do
       "type" => "object",
       "properties" => %{
         "source" => %{"type" => "string"},
-        "catalogue" => %{"type" => "string"}
+        "catalogue" => %{"type" => "string"},
+        "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
+        "intensity_justification" => %{"type" => "string"},
+        "nature" => %{"type" => "string"},
+        "workflow_map" => %{"type" => "string"}
       },
       "required" => ["source", "catalogue"]
     })
@@ -910,10 +918,14 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("import_deposit", %{"source" => source, "catalogue" => catalogue}, state)
+  def handle_tool_call(
+        "import_deposit",
+        %{"source" => source, "catalogue" => catalogue} = args,
+        state
+      )
       when is_binary(source) and is_binary(catalogue) and catalogue != "" do
     if valid_repo_ref?(source) do
-      case Delegation.import_deposit(source, catalogue, state) do
+      case Delegation.import_deposit(source, catalogue, args, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end

@@ -1230,15 +1230,23 @@ defmodule Fleet.Project.Onboard do
   # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
   # existing local import leg for what it does (clone from OUR forge brings intensity.json
   # back down, so ITS lock_main reads the right jury).
+  defp intensity_commit_message(opts) do
+    door =
+      case Keyword.get(opts, :source_host, "") do
+        "depot:" <> _ -> "import-depot"
+        _ -> "import-externe"
+      end
+
+    "chore(#{door}): déclaration de criticité (intensity.json)"
+  end
+
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
-         :ok <-
-           ensure_intensity(
-             scratch,
-             opts,
-             "chore(import-externe): déclaration de criticité (intensity.json)"
-           ),
+         # The commit message names the ACTUAL door: this leg is shared by the external import and
+         # the deposit, and a deposit whose history says "import-externe" tells the project's own
+         # log something that did not happen.
+         :ok <- ensure_intensity(scratch, opts, intensity_commit_message(opts)),
          :ok <- set_origin(scratch, forge_url),
          :ok <- push(scratch, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),

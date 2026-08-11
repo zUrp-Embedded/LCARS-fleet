@@ -1863,12 +1863,38 @@ defmodule Fleet.MCP.PodToolsTest do
                )
 
       # The DESTINATION is a catalogue, not a hardcoded org: its org IS its name.
-      assert_received {:import_deposit, "lordzurp/chifoumi", "web", _opts}
+      assert_received {:import_deposit, "lordzurp/chifoumi", "web", opts}
+      # And the acting role travels with it, like on every other creation verb.
+      assert opts[:onboarded_by] == "starfleet"
 
       decoded = Jason.decode!(txt)
       assert decoded["repo"] == "web/chifoumi"
       # `from` survives to the caller: the source is not consumed, so what it was stays sayable.
       assert decoded["from"] == "lordzurp/chifoumi"
+    end
+
+    test "the FRAMING travels with the deposit — card and criticality, like every creation verb" do
+      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "import_deposit",
+                 %{
+                   "source" => "lordzurp/chifoumi",
+                   "catalogue" => "fleet",
+                   "workflow_map" => "workshop-direct",
+                   "intensity_level" => "C2",
+                   "intensity_justification" => "le poc part en prod",
+                   "nature" => "outil interne"
+                 },
+                 pod_state(uniq("pod-sf"))
+               )
+
+      assert_received {:import_deposit, _src, _cat, opts}
+      assert opts[:workflow_map] == "workshop-direct"
+      assert opts[:intensity_level] == "C2"
+      assert opts[:intensity_justification] == "le poc part en prod"
+      assert opts[:intensity_nature] == "outil interne"
     end
 
     test "a source that is not `<login>/<name>` is REFUSED before the seam" do

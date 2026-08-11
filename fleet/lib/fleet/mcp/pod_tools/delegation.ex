@@ -284,14 +284,28 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   The gate lives INSIDE the seam call (foreign `.claude/` refused en bloc, every `CLAUDE.md`
   through the reception filter, default branch normalized): this verb adds no filtering of its own,
-  it names the actor and the destination. The source is not consumed — the human keeps their repo.
+  it names the actor, the destination and the FRAMING. The source is not consumed — the human keeps
+  their repo.
+
+  The framing (`workflow_map` + criticality) travels like it does on every other creation verb, and
+  for the same reason: a project that lands without a declared card gets the default one at C0, and
+  the declaration says it was never declared. That is a readable state; a project with no card at
+  all is a hole.
   """
-  @spec import_deposit(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def import_deposit(source, catalogue, state)
-      when is_binary(source) and is_binary(catalogue) do
-    with {:ok, _role} <- require_onboarder(state),
+  @spec import_deposit(String.t(), String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def import_deposit(source, catalogue, args, state)
+      when is_binary(source) and is_binary(catalogue) and is_map(args) do
+    with {:ok, role} <- require_onboarder(state),
          {:ok, onboard} <- conforming_onboard() do
-      case onboard.import_deposit(source, catalogue, []) do
+      opts = [
+        intensity_level: Map.get(args, "intensity_level"),
+        intensity_justification: Map.get(args, "intensity_justification"),
+        intensity_nature: Map.get(args, "nature"),
+        workflow_map: Map.get(args, "workflow_map"),
+        onboarded_by: role
+      ]
+
+      case onboard.import_deposit(source, catalogue, opts) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{
