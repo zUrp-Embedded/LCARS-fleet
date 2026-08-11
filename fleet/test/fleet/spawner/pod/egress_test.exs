@@ -51,6 +51,16 @@ defmodule Fleet.Spawner.Pod.EgressTest do
                Egress.decide("CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n", [])
     end
 
+    test "a plain-HTTP proxy request is refused as the SANDBOX, not as the destination" do
+      # `HTTP(S)_PROXY` covers everything, and a plain `http://` origin makes the client send an
+      # absolute-URI GET instead of a tunnel request. Answering it "blocked by the allowlist" made
+      # an architect's `git fetch` on the forge read as the FORGE refusing: it wrote a diagnosis
+      # concluding the fleet account was not a collaborator, and the permissions were right.
+      line = "GET http://forge:3000/web/test2.git/info/refs HTTP/1.1\r\n\r\n"
+
+      assert {:refused, {:not_a_connect_request, _}} = Egress.decide(line, ["forge"])
+    end
+
     test "a `*.` rule accepts subdomains and REFUSES the right-hand impostor — the mutation" do
       # The published list needs `*.sentry.io` and `*.ingest.us.sentry.io`; a matcher without
       # subdomains cannot express it. The dot anchors the END of the candidate — drop it and

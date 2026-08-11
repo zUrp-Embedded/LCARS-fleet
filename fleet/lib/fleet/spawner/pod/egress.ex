@@ -53,6 +53,20 @@ defmodule Fleet.Spawner.Pod.Egress do
   @connect_re ~r/\ACONNECT ([A-Za-z0-9._-]+):(\d{1,5}) HTTP\/1\.[01]\r?\n/
   @accept "HTTP/1.1 200 Connection Established\r\n\r\n"
   @refuse "HTTP/1.1 403 Forbidden\r\n\r\nConnection blocked by the LCARS egress allowlist\r\n"
+
+  # A NON-CONNECT REQUEST IS NOT A BLOCKED HOST, AND ANSWERING BOTH WITH 403 COST A DIAGNOSIS.
+  # `HTTP(S)_PROXY` covers everything a pod emits, and a plain `http://` origin makes the client
+  # send an absolute-URI GET rather than a tunnel request. This proxy only tunnels, so that GET was
+  # answered "blocked by the allowlist" — measured 2026-08-11: an architect's `git fetch` on the
+  # forge got it, read it as the FORGE refusing, and wrote a diagnosis concluding the fleet account
+  # was not a collaborator of the repo. The permissions were right. The sandbox was talking.
+  #
+  # 501 says WHOSE refusal it is and that nothing left the box. Read it as an answer to "should a
+  # pod reach this over the network at all": its project arrives through its mounts, and the forge
+  # through its MCP tools.
+  @refuse_method "HTTP/1.1 501 Not Implemented\r\n\r\n" <>
+                   "The LCARS pod proxy tunnels CONNECT only — plain HTTP is not proxied.\r\n" <>
+                   "This is the SANDBOX refusing, not the destination: nothing was sent.\r\n"
   @connect_timeout_ms 10_000
 
   @doc """
@@ -170,6 +184,10 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
+  # Which refusal the client gets, and the two are not interchangeable — cf. `@refuse_method`.
+  defp refusal_for({:not_a_connect_request, _}), do: @refuse_method
+  defp refusal_for(_), do: @refuse
+
   # Exact name, or a `*.` prefix that is a SUBDOMAIN rule anchored on the right — never a
   # `contains`. The first version refused every pattern on the grounds that "a rule reasoning about
   # where a domain ends will be wrong once"; true of a naive suffix test, and wrong as an argument
@@ -274,7 +292,7 @@ defmodule Fleet.Spawner.Pod.Egress do
         # The refusal is LOGGED, always: a wall that blocks silently is indistinguishable from a
         # network that is merely broken, and the pod will report the second.
         Logger.warning("Egress[#{pod_id}]: REFUSED #{inspect(reason)}")
-        _ = :gen_tcp.send(client, @refuse)
+        _ = :gen_tcp.send(client, refusal_for(reason))
         :gen_tcp.close(client)
 
       {:error, reason} ->
