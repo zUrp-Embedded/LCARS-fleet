@@ -478,6 +478,24 @@ cmd_project_migrate() {
   [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
   local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
   [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
+
+  # L'ADRESSE de la forge vient de l'environnement de l'OPERATEUR : `~/.lcars/fleet_v2.env` est le
+  # fichier qu'il edite, et `bin/fleet_v2` le charge exactement ainsi. Le charger ici ne donne aucun
+  # acces forge a ce CLI — il ne fait toujours aucun appel : il TRANSMET sa configuration au release,
+  # qui agit. Sans ca la porte echoue sur `{:config, {:missing, :base_url}}` sur une boite ou tout est
+  # cable, parce que FORGE_BASE_URL ne vit que dans ce fichier (mesure du 2026-08-11 : `env` du login
+  # `lcars` ne porte aucun FORGE_*, et rien ne le source hors fleet_v2).
+  #
+  # Le fichier porte AUSSI des ports ; `LCARS_TOOL_EVAL=1` neutralise le bloc qui les ouvrirait, donc
+  # le charger reste sans effet de bord. C'est la meme frontiere que le garde, prise par l'autre bout.
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  if [[ -f "$env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  fi
+
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Project.Onboard.eval_migrate(\"$repo\", \"$cat\")"
 }
