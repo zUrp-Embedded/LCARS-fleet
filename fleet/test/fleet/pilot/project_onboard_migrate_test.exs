@@ -17,6 +17,21 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
   @old_url "http://forge.test/fleet/vitrine.git"
 
+  defmodule RefuseUsers do
+    # Refuse l'humain, et ENREGISTRE l'org sur laquelle on l'a interroge — c'est le fait mesure.
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def team_member?(org, _t, _u, _fc), do: {:ok, put_org(org)}
+
+    defp put_org(org),
+      do:
+        (
+          :persistent_term.put({__MODULE__, :org}, org)
+          false
+        )
+
+    def last_org, do: :persistent_term.get({__MODULE__, :org}, nil)
+  end
+
   defmodule TransferOk do
     # The seam stands where the network would be: `migrate` is called with the OLD name and must
     # thread the target catalogue as the new owner.
@@ -70,6 +85,33 @@ defmodule Fleet.Project.OnboardMigrateTest do
       workshop_root: Path.join(tmp, "workshop"),
       ops_root: Path.join(tmp, "ops")
     ]
+  end
+
+  describe "import : l'org vient du DEPOT, pas du premier catalogue actif" do
+    @tag :tmp_dir
+    test "un depot du SECOND catalogue passe les gardes d'org", %{tmp: tmp} do
+      # Avant : `org = opts[:org] || default_org()` rendait `fleet`, donc `web/vitrine` etait refuse
+      # en {:not_in_org, "web/vitrine", "fleet"} — un depot d'un catalogue actif, refuse parce qu'il
+      # n'etait pas dans le PREMIER. Et l'humain etait verifie contre l'org d'un autre catalogue.
+      #
+      # Ce test n'attend pas un succes : l'import va plus loin (forge, faces). Il epingle ce qui
+      # doit NE PLUS arriver.
+      result =
+        ProjectOnboard.import("web/vitrine",
+          forge_users: RefuseUsers,
+          base_url: "http://forge.test",
+          code_root: Path.join(tmp, "code"),
+          workshop_root: Path.join(tmp, "workshop"),
+          ops_root: Path.join(tmp, "ops")
+        )
+
+      refute match?({:error, {:not_in_org, _, _}}, result)
+      refute match?({:error, {:catalogue_not_installed, _, _}}, result)
+
+      # La garde suivante est l'admission humaine, et elle est interrogee sur l'org DU DEPOT.
+      assert {:error, {:human_not_provisioned, _, _}} = result
+      assert RefuseUsers.last_org() == "web"
+    end
   end
 
   describe "migrate : le transfert forge ET le repointage local, ou rien" do

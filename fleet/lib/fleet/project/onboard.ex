@@ -432,7 +432,11 @@ defmodule Fleet.Project.Onboard do
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
-    org = Keyword.get(opts, :org) || default_org()
+    # L'ORG VIENT DU DEPOT, pas d'une option ni d'un defaut. L'argument de ce verbe EST
+    # `owner/nom`, et un projet vit dans l'org de son catalogue : le proprietaire NOMME l'org, il
+    # n'y a rien a choisir. Avant, `opts[:org] || default_org()` rendait le PREMIER catalogue actif,
+    # et l'humain etait alors verifie contre l'org d'un autre catalogue que celui du depot.
+    org = full_name |> String.split("/") |> List.first()
     name = Fleet.Layout.project_name(full_name)
     dirs = face_dirs(name, opts)
 
@@ -440,7 +444,6 @@ defmodule Fleet.Project.Onboard do
          :ok <- require_catalogue_installed(full_name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
-         :ok <- require_org_membership(full_name, org),
          :ok <- require_default_branch_main(full_name, opts) do
       case finish_import(full_name, dirs, name, opts) do
         {:ok, result} ->
@@ -1663,11 +1666,12 @@ defmodule Fleet.Project.Onboard do
       else: {:error, {:not_on_machine, full_name}}
   end
 
-  defp require_org_membership(full_name, org) do
-    if String.starts_with?(full_name, "#{org}/"),
-      do: :ok,
-      else: {:error, {:not_in_org, full_name, org}}
-  end
+  # `require_org_membership/2` a ete RETIRE ici (2026-08-11). Il comparait le depot a UNE org —
+  # celle des opts ou le premier catalogue actif — et son seul comportement atteignable etait un
+  # refus faux : un proprietaire qui n'est pas un catalogue actif est deja arrete par
+  # `require_catalogue_installed`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
+  # PREMIER de la liste. Il ne pouvait donc mordre que le second catalogue, a tort. La question
+  # « ce depot est-il enrollable ici ? » a une seule autorite, et c'est le catalogue du proprietaire.
 
   defp require_default_branch_main(full_name, opts) do
     case repo_mod(opts).default_branch(full_name, fc_opts(opts)) do
