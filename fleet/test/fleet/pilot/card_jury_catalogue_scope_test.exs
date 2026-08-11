@@ -142,6 +142,27 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   end
 
   @tag :tmp_dir
+  test "le LOGIN d'un role prend le prefixe du catalogue qui le DECLARE" do
+    # La regle est "le prefixe suit le TIER", et le tier d'un role metier est LE CATALOGUE QUI LE
+    # DECLARE — pas "celui par defaut". La projection venait de `CatalogueRoles`, ou elle tournait
+    # avec UN catalogue emprunte dans `:fleet_catalogue, :root` : `Catalogue.name()` y etait le
+    # catalogue declarant, et l'interroger etait juste. Remontee dans un contexte global, ce nom
+    # n'est plus que le catalogue par defaut — mesure : `biz-dev` projetait `fleet_biz-dev` alors
+    # que son compte est `biz_biz-dev`. Une projection juste pour un catalogue et fausse en silence
+    # pour tous les autres, c'est le 404 que ce rail existe pour empecher, deplace d'un cran.
+    assert {:ok, "biz_biz-dev"} = Fleet.CapProfile.forge_login("biz-dev")
+    assert {:ok, "biz_" <> _} = Fleet.CapProfile.forge_login(@judge)
+
+    # Le catalogue par defaut garde le sien, et une autorite SYSTEME reste `system_*` meme si un
+    # catalogue metier livre son propre profil pour elargir ses outils.
+    assert {:ok, "fleet_scribe"} = Fleet.CapProfile.forge_login("scribe")
+    assert {:ok, "system_architect"} = Fleet.CapProfile.forge_login("architect")
+
+    # L'inverse suit, sinon les verdicts d'un juge `biz` reviendraient etrangers a son propre jury.
+    assert {:ok, "biz-dev"} = Fleet.CapProfile.role_of_forge_login("biz_biz-dev")
+  end
+
+  @tag :tmp_dir
   test "le ROLE d'une carte se resout dans le catalogue de cette carte" do
     # Le dernier maillon, et il tombait apres les deux autres : la carte juste, la bonne racine, et
     # `resolve/3` appelait `load/1`. `load/2` porte la racine depuis le lot 4 ; ce resolveur ne la

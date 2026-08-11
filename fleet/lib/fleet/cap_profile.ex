@@ -731,7 +731,13 @@ defmodule Fleet.CapProfile do
   @role_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
 
   defp login_maps do
-    key = {__MODULE__, :forge_logins, Fleet.Catalogue.root(), Fleet.Catalogue.system_root()}
+    # Keyed on THE ACTIVE SET, because that is what the map is derived from. Keyed on the default
+    # root alone it leaked across fixtures that swap the active declaration while the default root
+    # stays put: the second one read the first one's answer, and the projection was silently for
+    # someone else's catalogues. A memo whose key is narrower than its input is a wrong answer with
+    # a fast path.
+    key =
+      {__MODULE__, :forge_logins, Fleet.Catalogue.active_roots(), Fleet.Catalogue.system_root()}
 
     case :persistent_term.get(key, :unset) do
       %{} = maps ->
@@ -745,26 +751,47 @@ defmodule Fleet.CapProfile do
     end
   end
 
+  # ONE PASS PER ACTIVE CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
+  # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
+  # projection came from `Fleet.Application.CatalogueRoles`, where it ran with a single catalogue
+  # BORROWED into `:fleet_catalogue, :root`, so `Fleet.Catalogue.name()` was the declaring
+  # catalogue and asking it was correct. Lifted here it runs globally, where that name is only the
+  # DEFAULT catalogue: measured, a role declared by `biz` projected to `fleet_biz-dev` while its
+  # account is `biz_biz-dev`. A projection that is right for one catalogue and silently wrong for
+  # every other is worse than none — it is the 404 this whole rail was built to stop, relocated.
+  #
+  # Declaration ORDER decides (`put_new`), which is the same rule stated for the overlay: a business
+  # catalogue may ship its own `architect.yaml` and the account stays `system_architect`, because
+  # the system roster is consulted first for every name.
   defp build_login_maps do
     system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
 
-    with {:ok, roster} <- forge_roster(),
-         {:ok, system_roster} <- forge_roster(system_dir),
-         name when is_binary(name) <- Fleet.Catalogue.name() do
+    with {:ok, system_roster} <- forge_roster(system_dir) do
       system_names = MapSet.new(system_roster, & &1.name)
 
       to_login =
-        Map.new(roster, fn r ->
-          prefix = if MapSet.member?(system_names, r.name), do: "system", else: name
-          {r.name, compose_login(prefix, r.name)}
+        Fleet.Catalogue.active_catalogues()
+        |> Enum.reduce(%{}, fn %{name: cat, root: root}, acc ->
+          dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
+
+          case forge_roster(dir) do
+            {:ok, roster} -> Enum.reduce(roster, acc, &put_login(&2, &1.name, system_names, cat))
+            {:error, _} -> acc
+          end
+        end)
+        # The system roles themselves, for a deployment whose business catalogues declare none.
+        |> then(fn acc ->
+          Enum.reduce(system_roster, acc, &put_login(&2, &1.name, system_names, "system"))
         end)
 
       {:ok,
        %{to_login: to_login, to_role: Map.new(to_login, fn {r, l} -> {String.downcase(l), r} end)}}
-    else
-      {:error, _} = err -> err
-      _ -> {:error, :catalogue_declares_no_name}
     end
+  end
+
+  defp put_login(acc, role, system_names, catalogue) do
+    prefix = if MapSet.member?(system_names, role), do: "system", else: catalogue
+    Map.put_new(acc, role, compose_login(prefix, role))
   end
 
   defp compose_login(prefix, role) do
