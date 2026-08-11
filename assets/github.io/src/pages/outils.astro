@@ -1,0 +1,193 @@
+---
+// LES OUTILS, PAR PORTEUR — page DERIVEE. Aucun nom d'outil, aucun porteur, aucun gate n'est
+// ecrit ici : tout vient de `lib/tools.js`, qui lit les `deftool`, les cap-profiles, la table de
+// routage et les gates. Ce qui reste ecrit a la main est la prose qui explique le MODELE — un
+// `usage()` ne dit jamais pourquoi une liste n'est pas une autorisation.
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import { toolMap, roles, counts } from '../lib/tools.js';
+
+const tools = toolMap();
+const rs = roles();
+const n = counts();
+
+const byKind = (k) => tools.filter((t) => t.kind === k);
+const carriedBy = (role) => tools.filter((t) => t.carrier.includes(role));
+
+// Les roles qui PORTENT au moins un outil, dans l'ordre ou ils en portent le plus : la page se
+// lit alors du plus dote au moins dote, ce qui est aussi l'ordre d'autorite.
+const carriers = rs
+  .filter((r) => r.tools.length > 0)
+  .sort((a, b) => b.tools.length - a.tools.length);
+
+// Les muets : tout role sans outil fleet. Ils ne sont pas une note de bas de page — ils sont la
+// majorite, et leur silence est une decision de conception.
+const mutes = rs.filter((r) => r.tools.length === 0);
+
+const GATE_LABEL = { onboarder: 'onboarder', project_delegate: 'project_delegate' };
+const CARRIER_TINT = { starfleet: 'var(--amber)', architect: 'var(--blue)' };
+
+const sections = [
+  { id: 'etages', label: 'Trois étages' },
+  { id: 'universels', label: 'Tout pod' },
+  ...carriers.map((c) => ({ id: c.name, label: c.name })),
+  { id: 'muets', label: 'Les muets' },
+  { id: 'orphelins', label: 'Sans porteur' }
+];
+---
+<Site title="LCARS — Les outils de la fleet, par porteur" current="/outils/" sections={sections}>
+
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">Manuel · l'intérieur de la boîte</p>
+      <h1>{n.total} outils,<br><em>{carriers.length} porteurs</em></h1>
+      <p class="lede">À l'intérieur, un agent ne tape pas de commandes : il appelle des
+      <b>outils</b>. {n.universal} sont universels, {n.carried} appartiennent à un rôle,
+      et <b>{n.orphan} n'ont aujourd'hui aucun porteur</b>.</p>
+      <p class="lede">Ce qu'un agent peut appeler ne se lit pas dans une seule liste. Trois
+      mécanismes se superposent, et <em>un seul est une barrière</em>.</p>
+      <p class="sig">Le rôle d'un pod n'est jamais un argument d'appel : il est <b>déduit du
+      canal</b> par lequel l'appel arrive. Un pod ne peut pas prétendre en être un autre — la
+      question n'est pas arbitrée, elle est inexprimable.</p>
+    </div>
+  </header>
+
+  <section id="etages">
+    <SectionHead id="etages" title="Trois étages" cap="un seul refuse vraiment" />
+    <p class="intro">Confondre les trois est la meilleure façon de croire un outil protégé alors
+    qu'il ne l'est pas — ou de chercher pourquoi un agent se fige.</p>
+
+    <div class="stack">
+      <div class="layer" style="--k:var(--faint)">
+        <div class="r">1</div>
+        <div class="c"><b>Découverte</b>
+        <span>Ce que le pod <b>voit</b>. <b>Ce n'est pas de l'autorisation</b> — l'appel ne
+        revérifie pas cette liste. Un agent qui connaît un nom hors liste peut l'appeler.</span></div>
+      </div>
+      <div class="layer" style="--k:var(--yellow)">
+        <div class="r">2</div>
+        <div class="c"><b>Permission</b>
+        <span>Ce que le pod peut appeler <b>sans demander</b>. Un outil absent déclenche une
+        confirmation — et comme personne ne répond dans un pod, <b>l'agent se fige</b>. Ce n'est
+        pas un refus, c'est un blocage.</span></div>
+      </div>
+      <div class="layer base" style="--k:var(--green)">
+        <div class="r">∞</div>
+        <div class="c"><b>Le gate</b>
+        <span><b>La seule vraie barrière.</b> Chaque outil sensible vérifie une <b>capacité</b>,
+        jamais une liste de noms de rôles. L'invariant tient en une phrase : <em>tout outil est
+        soit gaté, soit limité au travail du pod qui appelle</em>.</span></div>
+      </div>
+    </div>
+    <p class="legend">↑ le premier ne protège rien — le dernier seul refuse</p>
+  </section>
+
+  <section id="universels">
+    <SectionHead id="universels" title="Tout pod" cap="le protocole de travail, universel" />
+    <p class="intro">Ces {n.universal} ne viennent d'aucun catalogue : le lanceur les ajoute à
+    chaque pod, quel que soit son rôle. Ils sont <b>limités au travail du pod qui appelle</b> —
+    pas de gate, parce qu'il n'y a rien à atteindre en dehors de soi.</p>
+
+    <div class="entries">
+      {byKind('universal').map((t) => (
+        <article class="entry" style="--k:var(--dim)">
+          <div class="syn"><b>{t.name}</b>{t.required.length > 0 && <i>{t.required.join(' · ')}</i>}</div>
+          <div class="bd">
+            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  {carriers.map((c) => (
+    <section id={c.name}>
+      <SectionHead id={c.name} title={c.name}
+        cap={`${c.capabilities.join(' · ') || 'aucune capacité'} — ${carriedBy(c.name).length} outils`} />
+      <div class="entries">
+        {carriedBy(c.name).map((t) => (
+          <article class="entry" style={`--k:${CARRIER_TINT[c.name] ?? 'var(--mauve)'}`}>
+            <div class="syn">
+              <b>{t.name}</b>
+              {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
+              {t.properties.length > t.required.length &&
+                <i>+ {t.properties.filter((p) => !t.required.includes(p)).join(' · ')}</i>}
+            </div>
+            <div class="bd">
+              <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
+              {t.gate && <dl class="kv"><dt>gate</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd></dl>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  ))}
+
+  <section id="muets">
+    <SectionHead id="muets" title="Les muets" cap={`${mutes.length} rôles, aucun outil de pilotage`} />
+    <p class="intro">Les producteurs et les juges — {mutes.map((m) => m.name).join(', ')} — n'ont
+    que les {n.universal} outils universels. Ils reçoivent un travail, ils rendent un résultat.</p>
+    <p class="intro">Ce n'est pas une restriction ajoutée après coup : <b>ils n'ont rien à
+    piloter</b>. Un juge qui pourrait ouvrir des tickets deviendrait le donneur d'ordre du travail
+    qu'il juge, et son verdict cesserait d'être un verdict.</p>
+
+    <div class="grid">
+      {mutes.map((m) => (
+        <div class="cell" style="--k:var(--green)">
+          <b>{m.name}</b>
+          <i>{m.capabilities.join(' · ') || 'aucune capacité'}</i>
+          <span>catalogue {m.origin}</span>
+        </div>
+      ))}
+    </div>
+    <p class="note">Une capacité n'implique pas un outil : celles qui n'en ouvrent aucune servent
+    au moteur — elles décident quand la mécanique appelle un agent.</p>
+  </section>
+
+  <section id="orphelins">
+    <SectionHead id="orphelins" title="Sans porteur" cap="implémentés, gatés, inatteignables" />
+    <p class="intro"><b>{n.orphan} outils</b> sont écrits, routés et gardés côté serveur — et ne
+    figurent dans <b>aucun cap-profile</b>. Aucun agent ne les voit, et un agent qui en connaîtrait
+    le nom se figerait en les appelant.</p>
+
+    <div class="entries">
+      {byKind('orphan').map((t) => (
+        <article class="entry off">
+          <div class="syn">
+            <b>{t.name}</b>
+            {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
+            <span class="flag">sans porteur</span>
+          </div>
+          <div class="bd">
+            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
+            {t.gate && <dl class="kv"><dt>gardé pour</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd></dl>}
+          </div>
+        </article>
+      ))}
+      {byKind('disarmed').map((t) => (
+        <article class="entry" style="--k:var(--yellow)">
+          <div class="syn"><b>{t.name}</b>
+            {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
+            <span class="flag q">désarmé</span></div>
+          <div class="bd">
+            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
+            <dl class="kv">
+              <dt>gardé pour</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd>
+              <dt>et en plus</dt><dd>désarmé par configuration — <b>même son porteur légitime est
+              refusé</b> tant que le réglage n'est pas posé. Ce n'est pas un oubli, c'est une
+              sûreté.</dd>
+            </dl>
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="warn"><b>Ce que ça veut dire.</b> Documenter ces outils comme utilisables serait
+    faux. Ils sont ici parce qu'un lecteur qui les trouve dans le code doit apprendre <b>pourquoi
+    ils ne répondent pas</b> — et parce que leur remise en service tient à une ligne dans un
+    cap-profile, pas à du développement.</div>
+  </section>
+
+</Site>

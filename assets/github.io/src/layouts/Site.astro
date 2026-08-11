@@ -3,12 +3,20 @@
 // courante), bascule de theme, et pied de provenance. Aucune page ne redefinit tout ca :
 // c'est la difference entre un site et cinq fichiers qui se ressemblent.
 const { title, pages, current, sections = [] } = Astro.props;
+// Deux groupes, et la separation encode ce qu'elle separe : au-dessus on presente, en dessous
+// on reference. Une page de manuel n'a pas le meme lecteur qu'une page de presentation — celui-ci
+// arrive avec une question precise, il ne se laisse pas derouler.
 const PAGES = [
   { href: '/',                 label: 'Ce que c’est' },
   { href: '/mecaniques/',      label: 'Comment ça marche' },
   { href: '/equipage/',        label: 'L’équipage' },
   { href: '/travailler-avec/', label: 'Travailler avec' },
   { href: '/mettre-en-route/', label: 'Mettre en route' }
+];
+const MANUAL = [
+  { href: '/manuel/',     label: 'La console' },
+  { href: '/outils/',     label: 'Les outils' },
+  { href: '/catalogues/', label: 'Les catalogues' }
 ];
 const nav = pages ?? PAGES;
 ---
@@ -32,6 +40,10 @@ const nav = pages ?? PAGES;
       <a class="brand" href="/">LCARS</a>
       <p class="grp">Le site</p>
       {nav.map((p) => (
+        <a href={p.href} aria-current={p.href === current ? 'page' : undefined}>{p.label}</a>
+      ))}
+      <p class="grp">Manuel</p>
+      {MANUAL.map((p) => (
         <a href={p.href} aria-current={p.href === current ? 'page' : undefined}>{p.label}</a>
       ))}
       {sections.length > 0 && <p class="grp">Cette page</p>}

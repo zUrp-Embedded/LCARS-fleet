@@ -81,6 +81,16 @@ defmodule Fleet.Observation.Deck do
       pod_id: info.pod_id,
       role: role_of(info, known),
       issue_id: Map.get(info, :issue_id),
+      # THE LAST LINK OF THE CHAIN, and publishing it in `pod_info` was not enough: this view is
+      # what `/api/pods` serves, and it whitelists its keys. The landing deck reads THIS endpoint —
+      # so as long as the key stopped here, the slug existed everywhere except where its only
+      # consumer could see it, and that consumer went on scanning `/proc` for a mount that was
+      # deliberately removed.
+      #
+      # `nil` is a real answer, not a gap: a fleet-level pod belongs to no project. It reads as
+      # "no project" ONLY because the runtime now states it — the same nil inferred from an absent
+      # mount meant "I could not tell", and the two were indistinguishable to the page.
+      project_slug: Map.get(info, :project_slug),
       phase: info.phase,
       conditions: Map.get(info, :conditions, []),
       session_id: Map.get(info, :session_id),
