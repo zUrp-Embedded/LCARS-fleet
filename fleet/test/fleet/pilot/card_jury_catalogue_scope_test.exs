@@ -124,6 +124,24 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   end
 
   @tag :tmp_dir
+  test "le rail DOC se resout dans le catalogue du projet, pas dans le premier actif" do
+    # Le rail doc se resout par une PROPRIETE (une carte portant un producteur `face: workshop`),
+    # et la propriete etait cherchee dans le catalogue par defaut quel que soit le projet. Mesure
+    # sur banc : un ticket `destination/workshop` de `web/test2` a grave `wfmap/workshop-direct` —
+    # la carte du catalogue `fleet` — dont le producteur est `scribe`, compte membre d'aucune equipe
+    # de `web`. Push et PR ont repondu `403 user must be a collaborator`, ce qui se lit comme un
+    # defaut de permission alors que les permissions etaient justes et la CARTE etrangere.
+    #
+    # `biz` ne livre aucune carte a producteur `face: workshop` : il n'a donc PAS de rail doc, et
+    # c'est la bonne reponse. Le dispatcher la refuse ensuite en nommant le fait (`refute_missing_rail`)
+    # au lieu de faire tourner un role qui n'existe pas dans cette org.
+    assert Fleet.Project.Roles.workshop_workflow_map(catalogue_root: "biz/boutique") == nil
+
+    # Et le catalogue par defaut garde le sien : la resolution est scopee, pas cassee.
+    assert Fleet.Project.Roles.workshop_workflow_map() == "workshop-direct"
+  end
+
+  @tag :tmp_dir
   test "un role d'etape aussi" do
     assert :ok = Fleet.Pilot.Application.validate_card_steps!()
   end

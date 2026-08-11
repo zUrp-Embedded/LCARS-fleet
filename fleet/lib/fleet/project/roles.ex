@@ -318,7 +318,20 @@ defmodule Fleet.Project.Roles do
   @spec workshop_workflow_map(keyword()) :: String.t() | nil
   def workshop_workflow_map(opts \\ []) do
     Keyword.get(opts, :workshop_workflow_map) ||
-      Fleet.Workflow.Loader.workshop_card_name(opts)
+      Fleet.Workflow.Loader.workshop_card_name(workshop_scope(opts))
+  end
+
+  # `catalogue_root: <repo>` is accepted as a REPO here and resolved to that project's cards. The
+  # doc rail is resolved by a PROPERTY (a card carrying a `face: workshop` producer), and the
+  # property was searched in the default catalogue whatever the project: a `web` ticket therefore
+  # burned the `fleet` catalogue's rail, whose producer is `scribe` — an account that is a member of
+  # no `web` team. The push and the PR both answered `403 user must be a collaborator`, which reads
+  # as a permissions defect and was a card coming from the wrong catalogue.
+  defp workshop_scope(opts) do
+    case Keyword.get(opts, :catalogue_root) do
+      repo when is_binary(repo) -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+      _ -> opts
+    end
   end
 
   @doc """

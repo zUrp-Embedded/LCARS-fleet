@@ -337,7 +337,11 @@ defmodule Fleet.Pilot.Poller.Lease do
   defp load_workflow_map_or_nil(workflow_map_name, seams) do
     # The rescue lives in the single authority (WorkflowMapNav.safe_load); THIS site keeps its
     # own semantics (nil = fail-closed lease + G6 escalation below).
-    case Fleet.Pilot.WorkflowMapNav.safe_load(seams.workflow_map_loader, workflow_map_name) do
+    case Fleet.Pilot.WorkflowMapNav.safe_load(
+           seams.workflow_map_loader,
+           workflow_map_name,
+           Fleet.Workflow.Loader.card_opts_for_repo(seams.repo)
+         ) do
       {:ok, map} ->
         map
 

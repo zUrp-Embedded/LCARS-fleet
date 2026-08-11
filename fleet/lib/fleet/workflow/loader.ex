@@ -198,6 +198,22 @@ defmodule Fleet.Workflow.Loader do
   def card_roots, do: Enum.map(card_scopes(), & &1.dir)
 
   @doc """
+  The load options that make a card read resolve in `repo`'s OWN catalogue — `[]` when no active
+  catalogue claims that org.
+
+  The form every reader wants, so that "which catalogue answers" is one call and not a join
+  re-derived at each site. `[]` is the pre-catalogue behaviour, unchanged, and it is the right
+  answer rather than a degraded one: an org no catalogue claims has no catalogue to prefer.
+  """
+  @spec card_opts_for_repo(String.t() | nil) :: keyword()
+  def card_opts_for_repo(repo) do
+    case card_root_for_repo(repo) do
+      nil -> []
+      dir -> [catalogue_root: dir]
+    end
+  end
+
+  @doc """
   The card directory serving the project `owner/name`, or `nil`.
 
   How a PROJECT finds its OWN cards. The repo-to-catalogue half is `Fleet.Catalogue.root_for_repo/1`

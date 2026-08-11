@@ -396,7 +396,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
            step when is_binary(step) <- meta["step"],
            role when is_binary(role) <- meta["resume_role"],
            n when is_integer(n) <- meta["resume_n"],
-           {:ok, workflow_map} <- load_workflow_map(state, workflow_map_name) do
+           {:ok, workflow_map} <- load_workflow_map(state, workflow_map_name, meta["repo"]) do
         {:ok, %{n: n, role: role, payload: rp, workflow_map: workflow_map, step: step}}
       else
         other ->
@@ -804,8 +804,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end)
   end
 
-  defp load_workflow_map(state, workflow_map_name),
-    do: Fleet.Pilot.WorkflowMapNav.safe_load(state.loader, workflow_map_name)
+  # The repo of the EVENT, falling back to the singleton's configured one: the card that answers an
+  # engraved name is the project's own, and this consumer serves every catalogue's projects.
+  defp load_workflow_map(state, workflow_map_name, repo),
+    do:
+      Fleet.Pilot.WorkflowMapNav.safe_load(
+        state.loader,
+        workflow_map_name,
+        Fleet.Workflow.Loader.card_opts_for_repo(repo || Map.get(state, :repo))
+      )
 
   defp project_payload?(p) do
     is_binary(p["workspace"]) and is_binary(p["base_sha"]) and p["base_sha"] != "" and

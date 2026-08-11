@@ -117,7 +117,9 @@ defmodule Fleet.Pilot.StepDispatcher do
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
 
     # Loader seam keeps route resolution hermetic in tests.
-    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
+    # ARITY 2: the seam carries WHICH CATALOGUE answers. A unary stub still works (WorkflowMapNav
+    # dispatches on arity) — a fixture answers for the one catalogue it fabricates.
+    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2)
 
     case decide(payload) do
       {:skip, reason} ->
@@ -152,7 +154,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                    # B-01: resolve the role with step modops.
                    loader,
                    workflow_map_loader,
-                   Keyword.get(opts, :prefetched_workflow_map)
+                   Keyword.get(opts, :prefetched_workflow_map),
+                   repo
                  ),
                  :role_resolution
                ),
@@ -418,23 +421,30 @@ defmodule Fleet.Pilot.StepDispatcher do
   @spec workflow_map_role(
           {String.t(), String.t()} | nil,
           (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
-          (String.t() -> map()),
-          map() | nil
+          (String.t() -> map()) | (String.t(), keyword() -> map()),
+          map() | nil,
+          String.t()
         ) :: {:ok, {String.t(), Fleet.CapProfile.t(), map()}} | {:error, term()}
   # Route nil = ANOMALY: the poller onboards every routeless one BEFORE dispatch (ensure_workflow_map_or_onboard)
   # → if we arrive here without a route, fail-loud, NEVER a silent eng fallback. The role ALWAYS comes from the
   # workflow_map position (written route).
-  defp workflow_map_role(nil, _loader, _workflow_map_loader, _prefetched_workflow_map),
+  defp workflow_map_role(nil, _loader, _workflow_map_loader, _prefetched_workflow_map, _repo),
     do: {:error, :unrouted}
 
   defp workflow_map_role(
          {workflow_map_name, step},
          loader,
          workflow_map_loader,
-         prefetched_workflow_map
+         prefetched_workflow_map,
+         repo
        ) do
     with {:ok, workflow_map} <-
-           workflow_map_or_load(prefetched_workflow_map, workflow_map_name, workflow_map_loader),
+           workflow_map_or_load(
+             prefetched_workflow_map,
+             workflow_map_name,
+             workflow_map_loader,
+             repo
+           ),
          {:ok, role} <- workflow_map_step_role(workflow_map, workflow_map_name, step),
          # STEP_SPEC read BEFORE the resolve: it carries `modops` (B-01 — the step's optional
          # modops, validated ⊆ the role's `optional` by `resolve`). `brief_kind`/`judge_target`
@@ -459,10 +469,10 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp step_modops(_), do: []
 
   # WorkflowMap pre-loaded (poller) → reused; else loaded via the seam.
-  defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader),
-    do: load_workflow_map(workflow_map_name, workflow_map_loader)
+  defp workflow_map_or_load(nil, workflow_map_name, workflow_map_loader, repo),
+    do: load_workflow_map(workflow_map_name, workflow_map_loader, repo)
 
-  defp workflow_map_or_load(workflow_map, _pipeline, _workflow_map_loader),
+  defp workflow_map_or_load(workflow_map, _pipeline, _workflow_map_loader, _repo),
     do: {:ok, workflow_map}
 
   # Route pre-read by the poller (classification) → reused here; absent → forge read.
@@ -510,14 +520,14 @@ defmodule Fleet.Pilot.StepDispatcher do
 
     workflow_map_name =
       if Fleet.Labels.destination_workshop() in labels,
-        do: Fleet.Project.Roles.workshop_workflow_map(),
+        do: Fleet.Project.Roles.workshop_workflow_map(catalogue_root: repo),
         else: Fleet.Project.Intensity.pipeline_default(repo)
 
     # `nil` = this catalogue ships no card with a `face: workshop` producer, so it has no doc rail.
     # A deployment is allowed not to have one; a doc ticket on it is not, and it says WHICH fact it
     # hit rather than dying inside a load on a name nobody chose.
     with {:ok, workflow_map_name} <- refute_missing_rail(workflow_map_name),
-         {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader),
+         {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader, repo),
          {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),
          {:ok, _} <- forge.post_route(repo, number, workflow_map_name, step, forge_opts) do
       {:onboarded, step}
@@ -582,8 +592,17 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
 
   # Delegated to the single authority (WorkflowMapNav.safe_load — same tag; the rescue lives there).
-  defp load_workflow_map(workflow_map_name, workflow_map_loader),
-    do: Fleet.Pilot.WorkflowMapNav.safe_load(workflow_map_loader, workflow_map_name)
+  # THE REPO NAMES THE CATALOGUE, and an engraved route is a bare name. Two catalogues may each
+  # declare a card called `standard`; the one that answers must be the project's own, or the fleet
+  # dispatches a role that does not exist in that org — measured, `403 user must be a collaborator`
+  # on a push whose permissions were never the problem.
+  defp load_workflow_map(workflow_map_name, workflow_map_loader, repo),
+    do:
+      Fleet.Pilot.WorkflowMapNav.safe_load(
+        workflow_map_loader,
+        workflow_map_name,
+        Fleet.Workflow.Loader.card_opts_for_repo(repo)
+      )
 
   defp workflow_map_step_role(workflow_map, workflow_map_name, step) do
     case Fleet.Pilot.WorkflowMapNav.step_role(workflow_map, step) do

@@ -666,7 +666,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with name when is_binary(name) and name != "" <- Map.get(step_run, :workflow_map),
          {:ok, %{"jury" => jury} = map} when is_list(jury) <-
-           Fleet.Pilot.WorkflowMapNav.safe_load(loader, name) do
+           Fleet.Pilot.WorkflowMapNav.safe_load(
+             loader,
+             name,
+             Fleet.Workflow.Loader.card_opts_for_repo(step_run.repo)
+           ) do
       Roles.jury(map, opts)
     else
       {:error, reason} ->

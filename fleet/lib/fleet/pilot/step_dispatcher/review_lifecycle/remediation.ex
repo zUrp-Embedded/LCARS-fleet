@@ -114,7 +114,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
              ctx.forge_opts
            ),
          {:ok, workflow_map} <-
-           Fleet.Pilot.WorkflowMapNav.safe_load(ctx.workflow_map_loader, map_name) do
+           Fleet.Pilot.WorkflowMapNav.safe_load(
+             ctx.workflow_map_loader,
+             map_name,
+             Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
+           ) do
       {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}
     else
       # The specs of route_for/4 (typed direct call) and safe_load cover every shape —

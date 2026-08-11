@@ -57,7 +57,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   def resolve_next(payload, n, %Seams{} = seams) do
     case {payload["workflow_map"], payload["step"]} do
       {workflow_map_name, step} when is_binary(workflow_map_name) and is_binary(step) ->
-        with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name) do
+        with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name, payload) do
           cond do
             lifecycle_stage?(workflow_map, step) ->
               no_workflow_map_resolve(payload, seams)
@@ -145,9 +145,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
   # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
   # liee au demarrage — ce moteur sert tous les projets de tous les catalogues actifs.
-  defp catalogue_root(payload) do
-    Fleet.Catalogue.root_for_repo(get_in(payload, ["repository", "full_name"]) || payload["repo"])
-  end
+  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
+
+  defp payload_repo(payload),
+    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
 
   defp judge_kind?(payload, spec) do
     case payload["brief_kind"] do
@@ -302,6 +303,13 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  defp load_workflow_map(seams, workflow_map_name),
-    do: Fleet.Pilot.WorkflowMapNav.safe_load(seams.loader, workflow_map_name)
+  # The CARD travels with the event too, and only the ROLES did. Same repo, same reason (lot 4):
+  # an engraved route is a bare name, and the card that answers must be the project's own.
+  defp load_workflow_map(seams, workflow_map_name, payload),
+    do:
+      Fleet.Pilot.WorkflowMapNav.safe_load(
+        seams.loader,
+        workflow_map_name,
+        Fleet.Workflow.Loader.card_opts_for_repo(payload_repo(payload))
+      )
 end

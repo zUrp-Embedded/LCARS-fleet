@@ -76,15 +76,43 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   defp role(spec), do: Map.get(spec, "role")
 
   @doc """
-  Loads through a module or unary function and normalizes exceptions into
+  Loads through a module or function and normalizes exceptions into
   `{:error, {:workflow_map_load_failed, name, message}}`.
+
+  `opts` carries WHICH CATALOGUE answers, and the arity of the seam is why it did not exist. An
+  engraved route is a bare NAME (`wfmap/standard`), and two catalogues may each declare a card by
+  that name — the card that must answer is the one of the project's own catalogue. Every reader
+  here went through a UNARY seam, so there was no room for the question: the name resolved in the
+  default image, always. Measured on the bench: `web/test2` got the doc rail of the `fleet`
+  catalogue, whose producer is `scribe`, whose forge account is a member of no `web` team — the
+  push and the PR both answered `403 user must be a collaborator`, and the diagnosis read as a
+  forge permission problem when the permissions were right and the CARD was foreign.
+
+  A unary seam still works and is left alone: that is every test stub, and a stub answers for the
+  one catalogue it fabricates.
   """
-  @spec safe_load(module() | (String.t() -> map()), String.t()) ::
-          {:ok, map()} | {:error, {:workflow_map_load_failed, String.t(), String.t()}}
-  def safe_load(loader, name) when is_binary(name) do
-    map = if is_function(loader, 1), do: loader.(name), else: loader.load!(name)
+  @spec safe_load(
+          module() | (String.t() -> map()) | (String.t(), keyword() -> map()),
+          String.t(),
+          keyword()
+        ) :: {:ok, map()} | {:error, {:workflow_map_load_failed, String.t(), String.t()}}
+  def safe_load(loader, name, opts \\ []) when is_binary(name) do
+    map =
+      cond do
+        is_function(loader, 2) -> loader.(name, opts)
+        is_function(loader, 1) -> loader.(name)
+        module_takes_opts?(loader) -> loader.load!(name, opts)
+        true -> loader.load!(name)
+      end
+
     {:ok, map}
   rescue
     e -> {:error, {:workflow_map_load_failed, name, Exception.message(e)}}
   end
+
+  # A module seam may export either arity, and the unary ones are the test stubs. Asking the module
+  # rather than assuming is what keeps a fixture from having to grow an option it has no use for —
+  # the same tolerance the function branches already give.
+  defp module_takes_opts?(mod),
+    do: Code.ensure_loaded?(mod) and function_exported?(mod, :load!, 2)
 end
