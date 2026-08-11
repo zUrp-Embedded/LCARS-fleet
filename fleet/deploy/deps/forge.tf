@@ -56,8 +56,27 @@ provider "gitea" {
 # l'autorité d'élargir ses propres droits.
 variable "roles" {
   type        = list(string)
-  description = "Comptes de role a creer — derive du catalogue en service, defaut = catalogue de reference"
-  default     = ["architect", "engineer", "scribe", "chief", "gatekeeper", "qualifier", "reviewer", "scoper", "vulcan"]
+  description = "Comptes de role a creer, en LOGINS <catalogue>_<role> — derive du catalogue en service, defaut = catalogue de reference"
+  default = [
+    "system_architect", "system_chief", "system_gatekeeper",
+    "fleet_engineer", "fleet_scribe", "fleet_qualifier", "fleet_reviewer", "fleet_scoper", "fleet_vulcan",
+  ]
+}
+
+variable "role_names" {
+  type        = map(string)
+  description = "login -> nom du role, pose en full_name (l'UI l'affiche a la place du login)"
+  default = {
+    system_architect  = "architect"
+    system_chief      = "chief"
+    system_gatekeeper = "gatekeeper"
+    fleet_engineer    = "engineer"
+    fleet_scribe      = "scribe"
+    fleet_qualifier   = "qualifier"
+    fleet_reviewer    = "reviewer"
+    fleet_scoper      = "scoper"
+    fleet_vulcan      = "vulcan"
+  }
 }
 
 resource "gitea_user" "system" {
@@ -83,6 +102,12 @@ resource "gitea_user" "role" {
   for_each             = toset(var.roles)
   username             = each.key
   login_name           = each.key
+  # Le LOGIN porte le catalogue (`<catalogue>_<role>`), parce qu'un username Gitea est unique a
+  # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte et un
+  # jeton, avec ecriture sur les deux orgs. Le `full_name` porte le nom du role, et l'UI l'affiche a
+  # la place du login quand `[ui] DEFAULT_SHOW_FULL_NAME` est pose — le prefixe ne subsiste alors que
+  # dans l'URL et l'API. Le defaut `each.key` vaut pour un deploiement qui n'apporte pas la table.
+  full_name            = lookup(var.role_names, each.key, each.key)
   email                = "${each.key}@lcars.local"
   password             = var.seed_password
   must_change_password = false
@@ -224,19 +249,19 @@ variable "writers" {
   # SECONDE ecriture d'un fait que la derivation produit deja (`mix lcars.catalogue.roles --tfvars`
   # rend `writers: architect chief engineer gatekeeper scribe`) : deux listes pour un fait derivent,
   # et c'est celle en dur qui servait.
-  default     = ["architect", "chief", "engineer", "scribe", "gatekeeper"]
+  default     = ["system_architect", "system_chief", "system_gatekeeper", "fleet_engineer", "fleet_scribe"]
 }
 
 variable "judges" {
   type        = list(string)
   description = "Roles qui ne rendent que des verdicts — defaut = catalogue de reference"
-  default     = ["qualifier", "reviewer", "scoper"]
+  default     = ["fleet_qualifier", "fleet_reviewer", "fleet_scoper"]
 }
 
 variable "externals" {
   type        = list(string)
   description = "Sieges reserves — defaut = catalogue de reference"
-  default     = ["vulcan"]
+  default     = ["fleet_vulcan"]
 }
 
 resource "gitea_team_membership" "system" {

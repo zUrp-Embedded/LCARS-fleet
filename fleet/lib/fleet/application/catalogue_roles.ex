@@ -76,19 +76,80 @@ defmodule Fleet.Application.CatalogueRoles do
     Application.put_env(:fleet_catalogue, :root, root)
 
     try do
-      with {:ok, roster} <- Fleet.CapProfile.forge_roster() do
+      with {:ok, roster} <- Fleet.CapProfile.forge_roster(),
+           {:ok, login_of} <- login_projection() do
+        names = Map.new(roster, fn r -> {login_of.(r.name), r.name} end)
+
         {:ok,
          %{
-           "roles" => Enum.map(roster, & &1.name),
-           "writers" => roster |> Enum.reject(&(&1.seat? or &1.judge?)) |> Enum.map(& &1.name),
+           "roles" => Enum.map(roster, &login_of.(&1.name)),
+           "writers" =>
+             roster |> Enum.reject(&(&1.seat? or &1.judge?)) |> Enum.map(&login_of.(&1.name)),
            "judges" =>
-             roster |> Enum.filter(&(&1.judge? and not &1.seat?)) |> Enum.map(& &1.name),
-           "externals" => roster |> Enum.filter(& &1.seat?) |> Enum.map(& &1.name)
+             roster
+             |> Enum.filter(&(&1.judge? and not &1.seat?))
+             |> Enum.map(&login_of.(&1.name)),
+           "externals" => roster |> Enum.filter(& &1.seat?) |> Enum.map(&login_of.(&1.name)),
+           # login -> nom du ROLE, pour que la recette pose `full_name`. Le prefixe disparait alors
+           # de l'UI (`[ui] DEFAULT_SHOW_FULL_NAME`), et ne subsiste que dans l'URL et l'API.
+           "role_names" => names
          }}
       end
     after
       restore(prev)
     end
+  end
+
+  # `<catalogue>_<role>`, et le prefixe suit le TIER, pas le fichier qui gagne. Un catalogue metier
+  # peut livrer son propre `architect.yaml` pour elargir ses outils — c'est legal — et ce profil
+  # supersede celui du systeme. Le compte reste `system_architect` pour autant : `architect` est une
+  # autorite systeme, la MEME dans toutes les orgs, et le rester est le sens du tier. Ce qui decide
+  # est donc ou le nom est DECLARE EN PREMIER, ce que `forge_roster/1` lit seul puisqu'il prend UN
+  # repertoire.
+  #
+  # Le souligne separe les deux moities, d'ou son interdiction des deux cotes : `Fleet.Catalogue`
+  # refuse un nom de catalogue qui en porte, et le nom de role est verifie ici. Et Gitea plafonne un
+  # login a 40 caracteres (mesure), donc la composition l'est aussi.
+  @role_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
+  @login_max 40
+
+  defp login_projection do
+    system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
+
+    with {:ok, cat} <- catalogue_name(),
+         {:ok, system_roster} <- Fleet.CapProfile.forge_roster(system_dir) do
+      system_names = MapSet.new(system_roster, & &1.name)
+
+      {:ok,
+       fn role ->
+         prefix = if MapSet.member?(system_names, role), do: "system", else: cat
+         compose!(prefix, role)
+       end}
+    end
+  end
+
+  defp catalogue_name do
+    case Fleet.Catalogue.name() do
+      n when is_binary(n) -> {:ok, n}
+      _ -> {:error, :catalogue_declares_no_name}
+    end
+  end
+
+  defp compose!(prefix, role) do
+    unless Regex.match?(@role_rx, role) do
+      raise "CatalogueRoles: role name #{inspect(role)} is not kebab-case — it becomes half of a " <>
+              "forge login (#{prefix}_#{role}) and `_` separates the two halves, so admitting one " <>
+              "would make the split ambiguous."
+    end
+
+    login = "#{prefix}_#{role}"
+
+    if byte_size(login) > @login_max do
+      raise "CatalogueRoles: login #{inspect(login)} is #{byte_size(login)} chars — Gitea caps a " <>
+              "username at #{@login_max} (measured). Shorten the catalogue name or the role."
+    end
+
+    login
   end
 
   @doc """

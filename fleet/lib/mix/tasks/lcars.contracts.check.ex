@@ -1236,10 +1236,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     catalogue = scan_catalogue_roles(root)
 
+    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent desormais. Le
+    # verrou ne change pas de nature — il reste l'egalite stricte des quatre — mais il compare les
+    # memes objets. Meme regle que la derivation runtime : le prefixe suit le TIER, donc ou le nom
+    # est declare en premier, et non le fichier qui gagne la superposition (un catalogue metier peut
+    # livrer son propre `architect.yaml` sans que le compte cesse d'etre `system_architect`).
     canon =
       catalogue
       |> Enum.filter(& &1.forge_identity)
-      |> Enum.map(& &1.name)
+      |> Enum.map(&role_login(root, &1.name))
       |> Enum.sort()
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
@@ -1312,8 +1317,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       status: if(evidence == [] and canon != [], do: :pass, else: :fail),
       evidence: evidence,
       note:
-        "four-list STRICT equality (BL-6-45): canon{forge_identity} (#{length(canon)} roles, " <>
-          "seats included) == forge.tf == ROLES == PROV_ROLES — any delta is a defect, named" <>
+        "four-list STRICT equality (BL-6-45): canon{forge_identity} PROJECTED into " <>
+          "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
+          "ROLES == PROV_ROLES — any delta is a defect, named" <>
           skipped_note(skipped)
     }
   end
@@ -1626,6 +1632,34 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # kind, forge_identity (absent = true), role_index. Underscore basenames = overlay fragments
   # (the `_frozen-monks` convention), excluded like name_index does; undecodable yaml = entry
   # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
+  defp role_login(root, role) do
+    prefix =
+      if MapSet.member?(system_role_names(root), role), do: "system", else: bundled_name(root)
+
+    "#{prefix}_#{role}"
+  end
+
+  defp system_role_names(root) do
+    root
+    |> Path.join("priv/catalogue-system/cap_profile/canon/cap-profiles/*.yaml")
+    |> Path.wildcard()
+    |> Enum.reject(&String.starts_with?(Path.basename(&1), "_"))
+    |> Enum.flat_map(fn path ->
+      case YamlElixir.read_from_file(path) do
+        {:ok, %{} = raw} -> [get_in(raw, ["metadata", "name"]) || Path.basename(path, ".yaml")]
+        _ -> []
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  defp bundled_name(root) do
+    case YamlElixir.read_from_file(Path.join(root, "priv/catalogue/catalogue.yaml")) do
+      {:ok, %{"name" => n}} when is_binary(n) -> n
+      _ -> "fleet"
+    end
+  end
+
   defp scan_catalogue_roles(root) do
     # BOTH catalogues. The provisioning lists cover the whole deployment — a mechanism role needs
     # its forge account exactly as much as a producer does — so scanning the business tree alone

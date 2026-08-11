@@ -712,6 +712,20 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
+  The catalogue's declared NAME. `verify!/0` validates it at boot; this is the reader.
+
+  It addresses the catalogue outside this box — the prefix of its role accounts
+  (`<catalogue>_<role>`), and the forge org that will carry its projects.
+  """
+  @spec name() :: String.t() | nil
+  def name do
+    case YamlElixir.read_from_file(manifest_path()) do
+      {:ok, %{"name" => n}} when is_binary(n) -> n
+      _ -> nil
+    end
+  end
+
+  @doc """
   The card a project of THIS catalogue gets when it declares none, or `nil` for a catalogue with no
   cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
   """

@@ -89,6 +89,27 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
 }
 
+@test "le compte est le LOGIN, le fichier reste le ROLE" {
+  # `<catalogue>_<role>` est la forme du compte forge, parce qu'un username Gitea est unique a
+  # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte et un
+  # jeton. Le FICHIER, lui, ne bouge pas — c'est la cle que le runtime connait (`as_role/2` indexe
+  # `<role>.gitea_token`, jamais le login). La projection est inversible par construction : `_` est
+  # interdit dans les deux moities, donc la premiere separe exactement.
+  printf 'tok-ok\n' > "$TOKDIR/engineer.gitea_token"
+  printf '200' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles fleet_engineer --check
+  [ "$status" -eq 0 ]
+  # Le rapport nomme les DEUX : le compte sonde et le fichier qui le porte.
+  [[ "$output" == *"OK    fleet_engineer"* ]]
+  [[ "$output" == *"engineer.gitea_token)"* ]]
+
+  # Un role compose garde son tiret : seul le PREMIER souligne separe.
+  printf 'tok-ok\n' > "$TOKDIR/code-reviewer.gitea_token"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles web_code-reviewer --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code-reviewer.gitea_token)"* ]]
+}
+
 @test "local readability is load-bearing: a token whose group != GROUP FAILS (unreadable by runtime)" {
   # Forge-valid but group-wrong = the runtime BEAM cannot read it. Announcing POSE + exit 0 there
   # hid a broken deploy behind a WARN. A group the runner cannot chgrp to → the stat verify FAILS

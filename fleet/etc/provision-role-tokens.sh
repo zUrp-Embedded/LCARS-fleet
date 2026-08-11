@@ -64,7 +64,7 @@ TOKENS_DIR="/home/private"
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
-ROLES="architect engineer scribe chief gatekeeper qualifier reviewer scoper vulcan"
+ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 GROUP="fleet"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
@@ -162,7 +162,10 @@ set_auth_for() { # $1=role
 # `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file (the system:
 # `lcars-system:system.gitea_token`). One mint mechanism for all of them.
 declare -a ENTRIES
-for role in $ROLES; do ENTRIES+=("$role:$role.gitea_token"); done
+# Le compte est le LOGIN (`<catalogue>_<role>`, unique a l'instance Gitea) et le FICHIER reste le
+# ROLE : c'est la cle que le runtime connait — `as_role/2` indexe `<role>.gitea_token`, jamais le
+# login. La projection est inversible PAR CONSTRUCTION, `_` etant interdit dans les deux moities.
+for login in $ROLES; do ENTRIES+=("$login:${login#*_}.gitea_token"); done
 ENTRIES+=("${EXTRA_ENTRIES[@]}")
 
 fail=0

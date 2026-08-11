@@ -50,14 +50,17 @@ CHECK_ONLY=0
 # n'est plus un échec (mesuré sur le catalogue web — six 404 d'affilée, un provisionnement correct
 # rendu rouge par des comptes qui n'avaient aucune raison d'exister).
 declare -a ENTRIES=(
-  "architect:architect.png"
-  "engineer:engineer.png"
-  "gatekeeper:gatekeeper.png"
-  "qualifier:qualifier.png"
-  "reviewer:reviewer.png"
-  "scoper:scoper.png"
-  "scribe:scribe.png"
-  "vulcan:vulcan.png"
+  "system_architect:architect.png"
+  "fleet_engineer:engineer.png"
+  "system_gatekeeper:gatekeeper.png"
+  "fleet_qualifier:qualifier.png"
+  "fleet_reviewer:reviewer.png"
+  "fleet_scoper:scoper.png"
+  "fleet_scribe:scribe.png"
+  "fleet_vulcan:vulcan.png"
+  # Cote COMPTE : le LOGIN (`<catalogue>_<role>`). Cote IMAGE : le ROLE — une charte pointe des
+  # FICHIERS, et un PNG ne se derive pas d'un nom. C'est pourquoi cette table reste tenue a la main
+  # la ou les trois autres listes de roles sont desormais derivees du catalogue.
   "starfleet:starfleet.png"
   "lcars-system:favicon.png"
 )
