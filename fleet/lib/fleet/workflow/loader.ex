@@ -198,6 +198,28 @@ defmodule Fleet.Workflow.Loader do
   def card_roots, do: Enum.map(card_scopes(), & &1.dir)
 
   @doc """
+  The card directory serving the project `owner/name`, or `nil`.
+
+  How a PROJECT finds its OWN cards. The repo-to-catalogue half is `Fleet.Catalogue.root_for_repo/1`
+  and stays there — its own doc records that three call sites re-derived that split within an hour
+  of each other, which is how one fact acquires three answers. This adds only the half that belongs
+  here: from that catalogue's root to the directory THIS loader serves, through `card_scopes/0`, so
+  a fine override still wins exactly as it does everywhere else.
+
+  `nil` for a repo no active catalogue claims, and the caller keeps the default root — the reading
+  `root_for_repo/1` already prescribes for its own `nil`.
+  """
+  @spec card_root_for_repo(String.t() | nil) :: Path.t() | nil
+  def card_root_for_repo(repo) do
+    with root when is_binary(root) <- Fleet.Catalogue.root_for_repo(repo),
+         %{dir: dir} <- Enum.find(card_scopes(), &(&1.root == root)) do
+      dir
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
   The same list, each directory paired with the CATALOGUE that owns it — `nil` under a fine
   override, which points at a fixture belonging to no catalogue.
 
@@ -274,40 +296,79 @@ defmodule Fleet.Workflow.Loader do
 
   defp image_key(root), do: {__MODULE__, :image, root}
 
-  # Explicit opts remain hermetic direct reads.
-  defp image_card(name, []) do
-    case published_image() do
-      nil ->
+  # THE IMAGE IS RESOLVED BY ROOT, like the publication that fills it. `publish_image!/0` was made
+  # per-catalogue and this reader was left single: it always answered from the FIRST active root, so
+  # a project served by any other catalogue asked for a card that had been published — under another
+  # key — and was told it is not in the image at all. Measured on a bench: `web/test2` declares
+  # `standard`, the `web` catalogue carries it, and every tick raised `declared_card_unloadable`.
+  #
+  # A root with NO published image still falls through to a direct disk read: that is a fixture
+  # pointing at its own canon, and it must stay hermetic. So naming a root never LOSES the boot
+  # proof — it gains it wherever one exists.
+  #
+  # Still not a search path: one root, one image, no superseding. A card names roles and a role
+  # belongs to the catalogue declaring it; merging images would describe a fleet nobody assembled.
+  defp image_card(name, opts) do
+    case image_root(opts) do
+      :hermetic ->
         :no_image
 
-      image ->
-        case Map.fetch(image, name) do
-          {:ok, card} -> {:ok, card}
-          :error -> :not_in_image
+      root ->
+        case published_image(root) do
+          nil ->
+            :no_image
+
+          image ->
+            case Map.fetch(image, name) do
+              {:ok, card} -> {:ok, card}
+              :error -> :not_in_image
+            end
         end
     end
   end
 
-  defp image_card(_name, _opts), do: :no_image
-
-  defp image_names([]) do
-    case published_image() do
-      nil -> nil
-      image -> image |> Map.keys() |> Enum.sort()
+  defp image_names(opts) do
+    with root when root != :hermetic <- image_root(opts),
+         image when not is_nil(image) <- published_image(root) do
+      image |> Map.keys() |> Enum.sort()
+    else
+      _ -> nil
     end
   end
 
-  defp image_names(_opts), do: nil
+  # WHICH image answers, and the two directory opts are NOT interchangeable — that is the whole
+  # reason there are two.
+  #
+  #   `:catalogue_root`      "serve THIS catalogue's boot-proven image" — what a project uses to
+  #                          reach its own cards.
+  #   `:workflow_maps_root`  "read THIS directory off disk, ignore every image" — the fixture door,
+  #                          hermetic by contract.
+  #   neither                the default root's image, as before.
+  #
+  # Folding them into one key was tried and it is wrong in both directions: a fixture that points at
+  # its own canon would start being answered by whatever image happens to share its path, and the
+  # per-catalogue read would have to give up the boot proof to get its directory honoured. One name
+  # cannot carry "trust the boot" and "trust nothing but this disk".
+  defp image_root(opts) do
+    cond do
+      is_binary(opts[:catalogue_root]) -> opts[:catalogue_root]
+      Keyword.has_key?(opts, :workflow_maps_root) -> :hermetic
+      true -> workflow_maps_root([])
+    end
+  end
 
-  defp published_image do
-    case :persistent_term.get(image_key(workflow_maps_root([])), @no_image) do
+  defp published_image(root) do
+    case :persistent_term.get(image_key(root), @no_image) do
       @no_image -> nil
       image -> image
     end
   end
 
+  # `:catalogue_root` also drives the DISK path, so a card missing from that catalogue's image is
+  # looked for in that catalogue's directory — never silently in another one's.
   defp workflow_maps_root(opts) do
     Keyword.get(opts, :workflow_maps_root) ||
+      Keyword.get(opts, :catalogue_root) ||
       Application.get_env(:fleet_workflow, :workflow_maps_root) ||
       Fleet.Catalogue.workflow_maps_root()
   end

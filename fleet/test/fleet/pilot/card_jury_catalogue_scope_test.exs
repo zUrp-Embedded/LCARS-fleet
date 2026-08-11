@@ -95,6 +95,35 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   end
 
   @tag :tmp_dir
+  test "un PROJET lit la carte de SON catalogue, pas celle du premier actif", %{tmp_dir: tmp} do
+    # La publication etait deja par catalogue ; la LECTURE ne l'etait pas. `published_image/0`
+    # repondait toujours depuis la premiere racine active, donc un projet servi par un autre
+    # catalogue reclamait une carte publiee sous une autre cle et s'entendait repondre qu'elle
+    # n'est pas dans l'image du tout. Mesure sur banc : `web/test2` declare `standard`, le
+    # catalogue `web` la porte, et la fleet levait `declared_card_unloadable` a chaque tick.
+    #
+    # `standard` n'existe que dans `biz` (le catalogue livre porte `standard-qa`), et son jury
+    # nomme un role qui n'existe que la : si la lecture se trompe de racine, il n'y a rien a
+    # trouver. Une carte presente des deux cotes ne prouverait rien.
+    code_root = Path.join(tmp, "projects")
+    File.mkdir_p!(Path.join(code_root, "boutique"))
+
+    File.write!(
+      Path.join([code_root, "boutique", "intensity.json"]),
+      Jason.encode!(%{
+        "pipeline_default" => "standard",
+        "level" => "C0",
+        "nature" => "fixture",
+        "justification" => "test",
+        "declared_by" => "test",
+        "declared_at" => "2026-08-12"
+      })
+    )
+
+    assert [@judge] = Fleet.Project.Roles.project_jury("biz/boutique", code_root: code_root)
+  end
+
+  @tag :tmp_dir
   test "un role d'etape aussi" do
     assert :ok = Fleet.Pilot.Application.validate_card_steps!()
   end

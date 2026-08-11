@@ -255,6 +255,22 @@ defmodule Fleet.Project.Roles do
     name = Fleet.Project.Intensity.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
+    # THE PROJECT'S OWN CATALOGUE, and it was never consulted. This read named the card and let the
+    # loader answer from the default root — the FIRST active catalogue — so a project belonging to
+    # any other one asked for a card the loader had published under another key and was told it does
+    # not exist. Measured: `web/test2` declares `standard`, the `web` catalogue carries it, and the
+    # fleet raised `declared_card_unloadable` on every tick while falling back to a card the human
+    # never chose. Falling back to another catalogue's default is worse than failing: the project
+    # runs, quietly, under a criticality nobody declared for it.
+    #
+    # The org names the catalogue (that is the point of naming it so), and an unclaimed org keeps
+    # the default — an explicit `:workflow_maps_root` still wins, it is the fixture's own door.
+    loader_opts =
+      case {loader_opts, Fleet.Workflow.Loader.card_root_for_repo(repo)} do
+        {[], dir} when is_binary(dir) -> [catalogue_root: dir]
+        {given, _} -> given
+      end
+
     try do
       Fleet.Workflow.Loader.load!(name, loader_opts)
     rescue
