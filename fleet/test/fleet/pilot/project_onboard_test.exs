@@ -52,10 +52,16 @@ defmodule Fleet.Project.OnboardTest do
 
     defmodule OkSpawner do
       def kill_pod(pod_id), do: send(self(), {:kill_pod, pod_id}) && :ok
+
+      def kill_project_pods(repo) do
+        send(self(), {:swept, repo})
+        {:ok, %{killed: 2, pod_ids: ["fleet-demo-issue-7-engineer", "fleet-demo-pr-3-reviewer"]}}
+      end
     end
 
     defmodule NoArchSpawner do
       def kill_pod(_pod_id), do: {:error, :not_found}
+      def kill_project_pods(_repo), do: {:ok, %{killed: 0, pod_ids: []}}
     end
 
     # Onboarded dirs are git repos whose `remote.origin.url` records the FULL identity (owner/name) —
@@ -101,6 +107,17 @@ defmodule Fleet.Project.OnboardTest do
           extra
         )
       )
+    end
+
+    @tag :tmp_dir
+    test "the project's WORKERS are swept BEFORE the faces go, and the count is reported", ctx do
+      # An engineer in flight used to outlive the removal of its own project: only the architect
+      # was stopped. Its workspace still existed so it did not even crash — it kept reading a
+      # reference that was gone. And a deletion that cost work in flight must not read as free.
+      assert {:ok, result} = del(ctx, force: true, forge_repo: OkRepo)
+
+      assert_received {:swept, "fleet/demo"}
+      assert result.workers_killed == 2
     end
 
     @tag :tmp_dir

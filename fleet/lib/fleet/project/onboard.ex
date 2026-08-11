@@ -1454,6 +1454,14 @@ defmodule Fleet.Project.Onboard do
     with :ok <- validate_name(name),
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- delete_forge(full_name, opts) do
+      # THE WORKERS DIE BEFORE THEIR WORLD DOES. Until now only the architect was stopped, so an
+      # engineer in flight outlived the removal of its own project: its workspace still existed, so
+      # it did not even crash — it kept reading a reference that was no longer there and carried on.
+      # Killed FIRST, before the faces go: a pod losing its world mid-read has nothing to say about
+      # it, whereas one killed outright is indistinguishable from a crash, which the reconciliation
+      # is built to handle.
+      pods = kill_project_workers(full_name, opts)
+
       proj = nuke_if_is(full_name, dirs.code, opts)
       ops = nuke_if_is(full_name, dirs.ops, opts)
       workshop = nuke_if_is(full_name, dirs.workshop, opts)
@@ -1465,7 +1473,7 @@ defmodule Fleet.Project.Onboard do
 
       Logger.info(
         "ProjectOnboard: DELETE #{full_name} — forge #{forge}, architect #{architect}, " <>
-          "project_dir #{proj}, ops_dir #{ops}, workshop_dir #{workshop}"
+          "workers #{pods.killed}, project_dir #{proj}, ops_dir #{ops}, workshop_dir #{workshop}"
       )
 
       {:ok,
@@ -1473,6 +1481,9 @@ defmodule Fleet.Project.Onboard do
          repo: full_name,
          forge: forge,
          architect: architect,
+         # REPORTED, because a deletion that cost work in flight must not read as free. The caller
+         # relays this to a human who may not know anything was running.
+         workers_killed: pods.killed,
          project_dir: dirs.code,
          work_dir: dirs.ops,
          doc_dir: dirs.workshop,
@@ -1831,6 +1842,24 @@ defmodule Fleet.Project.Onboard do
       {:ok, _branch} ->
         with :ok <- repo_mod.delete_repo(full_name, fc), do: {:ok, :deleted}
     end
+  end
+
+  # Best-effort like `stop_architect/2` below, and for the same reason: the faces are already
+  # committed to going. A sweep that failed must not turn a deletion into a half-state.
+  defp kill_project_workers(full_name, opts) do
+    spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
+
+    case spawner.kill_project_pods(full_name) do
+      {:ok, report} -> report
+      other -> %{killed: 0, pod_ids: [], error: other}
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "ProjectOnboard: delete could not sweep the workers of #{full_name}: #{inspect(e)}"
+      )
+
+      %{killed: 0, pod_ids: []}
   end
 
   defp stop_architect(full_name, opts) do

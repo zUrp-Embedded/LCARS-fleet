@@ -2,6 +2,7 @@ defmodule Fleet.Spawner do
   use Boundary,
     deps: [
       Fleet.Slug,
+      Fleet.PodId,
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Layout,
@@ -382,6 +383,49 @@ defmodule Fleet.Spawner do
       true ->
         :ok
     end
+  end
+
+  @doc """
+  Kills every WORKER pod of `repo` and returns how many died.
+
+  The verb behind two gestures. Refreshing a project's reference face: the pods in flight hold it
+  PINNED at their spawn, so new material reaches them only through a relaunch — kill them, the
+  reconciliation reclaims their orphaned locks after its grace, and the next tick re-dispatches.
+  And removing a project: its faces must not vanish under a pod still reading them.
+
+  IT ENUMERATES REGISTRY KEYS, never `list_pods/0`. That listing drops entries whose pod does not
+  answer, and its own contract says destructive decisions must not use it — a wedged pod would be
+  invisible to a sweep and survive the removal of everything it reads. A key is present or it is
+  not; nothing is lost.
+
+  WHO SURVIVES, and neither is an exclusion written here — both fall out of the id itself. The
+  permanents (`permanent-<role>`) and the per-project architect (`architect-<name>`) do not carry a
+  repository prefix, so the filter never sees them. That is deliberate: killing an architect costs
+  a live human conversation, and the human who just added the missing file is talking to it.
+
+  What is lost is what a killed worker was doing: the ticket's position lives on the FORGE (the
+  `stage/*` label), so the pod carries only its own context. Re-dispatchable, cost in tokens and
+  time.
+  """
+  @spec kill_project_pods(String.t()) ::
+          {:ok, %{killed: non_neg_integer(), pod_ids: [String.t()]}}
+  def kill_project_pods(repo) when is_binary(repo) do
+    prefix = Fleet.PodId.scope_prefix(repo)
+
+    killed =
+      Fleet.Spawner.Registry
+      |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+      |> Enum.filter(&String.starts_with?(&1, prefix))
+      |> Enum.filter(fn pod_id -> kill_pod(pod_id) == :ok end)
+      |> Enum.sort()
+
+    if killed != [] do
+      Logger.info(
+        "Spawner: killed #{length(killed)} worker pod(s) of #{repo} — #{Enum.join(killed, ", ")}"
+      )
+    end
+
+    {:ok, %{killed: length(killed), pod_ids: killed}}
   end
 
   @doc """

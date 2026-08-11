@@ -620,4 +620,67 @@ defmodule Fleet.SpawnerTest do
         :timeout
     end
   end
+
+  describe "kill_project_pods/1 — the sweep that spares what costs a conversation" do
+    test "kills the project's WORKERS, leaves the architect and the permanents standing" do
+      repo = "lordzurp/sweep-#{System.unique_integer([:positive])}"
+      prefix = Fleet.PodId.scope_prefix(repo)
+
+      worker = prefix <> "issue-7-engineer"
+      judge = prefix <> "pr-3-reviewer"
+      # Neither of these carries the repository prefix, and that is the whole exclusion: an
+      # architect id is `architect-<name>`, a permanent is `permanent-<role>`. Nothing is filtered
+      # out by name here — they are simply not in the set.
+      arch = "architect-sweep-#{System.unique_integer([:positive])}"
+      perm = "permanent-starfleet-#{System.unique_integer([:positive])}"
+
+      for id <- [worker, judge, arch, perm] do
+        {:ok, _} =
+          Fleet.Spawner.spawn_pod(valid_profile(), "issue-sweep",
+            pod_id: id,
+            allow_no_brief: true,
+            repo_id: @test_repo_id
+          )
+      end
+
+      assert {:ok, %{killed: 2, pod_ids: killed}} = Fleet.Spawner.kill_project_pods(repo)
+      assert killed == Enum.sort([worker, judge])
+
+      assert {:error, :not_found} = Fleet.Spawner.wake_pod(worker)
+      assert {:error, :not_found} = Fleet.Spawner.wake_pod(judge)
+      # Still addressable → still alive. Killing an architect costs the live conversation of the
+      # human who just fixed whatever the sweep was for.
+      refute match?({:error, :not_found}, Fleet.Spawner.wake_pod(arch))
+      refute match?({:error, :not_found}, Fleet.Spawner.wake_pod(perm))
+
+      Fleet.Spawner.kill_pod(arch)
+      Fleet.Spawner.kill_pod(perm)
+    end
+
+    test "a project with nothing in flight sweeps to zero, not to an error" do
+      assert {:ok, %{killed: 0, pod_ids: []}} =
+               Fleet.Spawner.kill_project_pods("lordzurp/never-dispatched")
+    end
+
+    test "another project's pods are untouched — the prefix is the whole scope" do
+      mine = "lordzurp/mine-#{System.unique_integer([:positive])}"
+      theirs = "lordzurp/theirs-#{System.unique_integer([:positive])}"
+      mine_pod = Fleet.PodId.for_issue(mine, 1, "engineer")
+      theirs_pod = Fleet.PodId.for_issue(theirs, 1, "engineer")
+
+      for id <- [mine_pod, theirs_pod] do
+        {:ok, _} =
+          Fleet.Spawner.spawn_pod(valid_profile(), "issue-sweep",
+            pod_id: id,
+            allow_no_brief: true,
+            repo_id: @test_repo_id
+          )
+      end
+
+      assert {:ok, %{killed: 1, pod_ids: [^mine_pod]}} = Fleet.Spawner.kill_project_pods(mine)
+      refute match?({:error, :not_found}, Fleet.Spawner.wake_pod(theirs_pod))
+
+      Fleet.Spawner.kill_pod(theirs_pod)
+    end
+  end
 end
