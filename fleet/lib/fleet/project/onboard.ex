@@ -346,6 +346,45 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
+  Porte RELEASE de la migration : rend un verdict sur stdout et sort par le CODE.
+
+      bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_migrate("fleet/vitrine", "web")'
+
+  Meme forme que `CatalogueVerify.eval_main/1`, et pour la meme raison : `bin/lcars` n'a aucun acces
+  forge, et lui en donner un ferait d'une commande locale un acteur distant. La boite, elle, porte
+  deja les jetons et la config.
+  """
+  @spec eval_migrate(String.t(), String.t()) :: no_return()
+  def eval_migrate(full_name, target) when is_binary(full_name) and is_binary(target) do
+    case migrate(full_name, target) do
+      {:ok, %{repo: new_name, faces: faces}} ->
+        IO.puts("migre : #{full_name} -> #{new_name}")
+        for d <- faces, do: IO.puts("  origin repointe : #{d}")
+        System.halt(0)
+
+      {:error, {:catalogue_not_installed, cat, actives}} ->
+        IO.puts(:stderr, "REFUSE : le catalogue #{inspect(cat)} n'est pas actif sur cette boite.")
+        IO.puts(:stderr, "  actifs : #{Enum.join(actives, ", ")}")
+
+        IO.puts(
+          :stderr,
+          "  un projet migre vers un catalogue absent devient INVISIBLE : le poller"
+        )
+
+        IO.puts(:stderr, "  ne decouvre que sur les orgs des catalogues actifs.")
+        System.halt(1)
+
+      {:error, {:already_in_catalogue, cat}} ->
+        IO.puts(:stderr, "REFUSE : #{full_name} est deja dans le catalogue #{inspect(cat)}.")
+        System.halt(1)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "ECHEC : #{inspect(reason)}")
+        System.halt(2)
+    end
+  end
+
+  @doc """
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call

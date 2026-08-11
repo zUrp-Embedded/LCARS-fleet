@@ -104,6 +104,12 @@ USAGE
   $PROG catalogue remove <nom>
       Supprime un catalogue installe. Refuse s'il est actif.
 
+  $PROG project migrate <owner/nom> <catalogue>
+      Migre un projet vers un autre catalogue : transfert du depot dans l'org de ce
+      catalogue, PUIS repointage de l'origin des trois faces locales. Les deux
+      moities, ou rien — un transfert seul laisse un projet qui marche par accident,
+      via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
+
   $PROG help
       Cette aide.
 
@@ -432,6 +438,28 @@ cmd_catalogue_install() {
   echo "  « $PROG catalogue verify $name » puis « $PROG catalogue enable $name »" >&2
 }
 
+# La migration vit au RUNTIME, pas ici : elle a besoin de la forge (transfert) ET des remotes locaux
+# (repointage), et ce CLI n'a aucun acces forge — lui en donner un ferait d'une commande locale un
+# acteur distant. Meme porte que `catalogue verify` : un `eval` sur la release, verdict au code de
+# sortie.
+cmd_project_migrate() {
+  local repo="${1:?project migrate: depot requis (owner/nom)}"
+  local cat="${2:?project migrate: catalogue cible requis}"
+  [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
+  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Project.Onboard.eval_migrate(\"$repo\", \"$cat\")"
+}
+
+cmd_project() {
+  case "${1:-}" in
+    migrate) shift; cmd_project_migrate "$@" ;;
+    "")      die "project: sous-commande requise (migrate)" ;;
+    *)       die "project: sous-commande inconnue « $1 » (migrate)" ;;
+  esac
+}
+
 cmd_catalogue() {
   case "${1:-list}" in
     list|ls)  shift; cmd_catalogue_list "$@" ;;
@@ -450,6 +478,8 @@ case "${1:-help}" in
   spawn)  shift; cmd_spawn "$@" ;;
   list|ls) shift; cmd_list "$@" ;;
   attach) shift; cmd_attach "$@" ;;
+  project)
+    shift; cmd_project "$@" ;;
   catalogue) shift; cmd_catalogue "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
