@@ -17,12 +17,17 @@ defmodule Fleet.CapProfileTest do
   # Fixtures
   # ============================================================
 
-  # Minimal in-memory profile carrying just role_index + lifetime_scope (for kill_class/1).
-  defp kc_prof(role_index, lifetime) do
+  # Minimal in-memory profile for kill_class/1. `slot` is optional: absent = the historical
+  # derivation from `lifetime`, which is what every profile that does not declare one still gets.
+  defp kc_prof(role_index, lifetime, slot \\ nil) do
+    invocation =
+      %{"lifetime_scope" => lifetime}
+      |> then(&if slot, do: Map.put(&1, "slot_scope", slot), else: &1)
+
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
       metadata: %{"name" => "r", "role_index" => role_index},
-      spec: %{"invocation" => %{"lifetime_scope" => lifetime}}
+      spec: %{"invocation" => invocation}
     }
   end
 
@@ -829,20 +834,45 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  describe "kill_class/1 — the <X> nibble (lifecycle/kill), derived (2026-07-19)" do
-    test "starfleet (role_index 0) → 0 (never killed), whatever the lifetime" do
+  describe "kill_class/1 — the <X> nibble: WHAT KILLING THIS PROCESS COSTS" do
+    test "role_index 0 → 0 (outside the fleet), whatever the lifetime" do
       assert Fleet.CapProfile.kill_class(kc_prof(0, "forever")) == 0
     end
 
-    test "one-shot judge (qualifier/reviewer/scoper) → 2 (spawn-dead, reaped)" do
-      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 2
-      assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot")) == 2
+    test "cold (one-shot) → 3 — costs nothing, meant to be swept" do
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 3
+      assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot")) == 3
     end
 
-    test "persistent non-starfleet (arch forever, gatekeeper/eng pipe) → 1 (kill-safe, resumable)" do
-      assert Fleet.CapProfile.kill_class(kc_prof(1, "forever")) == 1
-      assert Fleet.CapProfile.kill_class(kc_prof(2, "pipe")) == 1
-      assert Fleet.CapProfile.kill_class(kc_prof(3, "pipe")) == 1
+    test "context-long, one identity per TICKET → 2 — costs one re-dispatchable ticket" do
+      # The combination the 2026-08-03 override exists for: a producer must survive its rework
+      # rounds without outliving its ticket. It fell into "everything else" until this class.
+      assert Fleet.CapProfile.kill_class(kc_prof(3, "pipe", "instance")) == 2
+      assert Fleet.CapProfile.kill_class(kc_prof(7, "pipe", "instance")) == 2
+    end
+
+    test "context-long, one identity per PROJECT → 1 — costs a live human conversation" do
+      assert Fleet.CapProfile.kill_class(kc_prof(13, "forever")) == 1
+      assert Fleet.CapProfile.kill_class(kc_prof(13, "forever", "project")) == 1
+    end
+
+    test "the ORDER is the invariant: one-shot derives `instance`, so cold is tested FIRST" do
+      # Reversed, every judge would file under 2 — "costs a ticket" for a pod that carries none.
+      assert Fleet.CapProfile.slot_scope(kc_prof(4, "one-shot")) == "instance"
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 3
+    end
+
+    test "the four classes are DISTINCT — a sweep of one never takes another" do
+      classes =
+        [
+          kc_prof(0, "forever"),
+          kc_prof(13, "forever"),
+          kc_prof(3, "pipe", "instance"),
+          kc_prof(4, "one-shot")
+        ]
+        |> Enum.map(&Fleet.CapProfile.kill_class/1)
+
+      assert classes == [0, 1, 2, 3]
     end
   end
 

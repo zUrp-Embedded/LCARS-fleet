@@ -566,26 +566,42 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  The pod's KILL/LIFECYCLE class — the `<X>` nibble of the deterministic session_id
-  (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field):
+  The pod's KILL/HARVEST class — the `<X>` nibble of the deterministic session_id
+  (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field). It answers ONE
+  question, asked by an operator from a shell: **what does killing this process cost?**
 
-    * `0` = **starfleet** (`role_index == 0`) — the fleet-level global orchestrator, NEVER killed
-      (`pkill -f 'claude.*1badcafe'` / `'claude.*2badcafe'` spare it).
-    * `2` = **spawn-dead** (`lifetime_scope == "one-shot"` — the fan-out judges) — ephemeral, accumulate,
-      reaped by `pkill -f 'claude.*2badcafe'`.
-    * `1` = **persistent-resumable** (everything else: arch, gatekeeper, engineer) — kill-SAFE, they
-      resume their slot + context (Phase 0 slots). `pkill -f 'claude.*1badcafe'` restarts them without
-      loss. (Anchor on `claude.*` ALWAYS — a bare pattern reaps any concurrent `grep` carrying it in
-      its argv; cf. `SessionId` moduledoc.)
+    * `0` — costs nothing and is never asked: `role_index == 0`, outside the fleet's ordinary pod
+      management. Spared by every class-anchored pattern.
+    * `1` — costs a LIVE HUMAN CONVERSATION: context-long, one identity per project. Never in a
+      routine sweep; somebody is mid-sentence with it.
+    * `2` — costs the work in flight on ONE ticket, which is re-dispatchable: context-long, but one
+      identity per ticket.
+    * `3` — costs nothing: cold, independent, they accumulate and are meant to be swept.
 
-  Replaces the old `protected` bit as the `<X>` source: "protected" collapses into "class 0 = starfleet"
-  (the arch moves from protected(0) to persistent(1) — kill-safe because resumable).
+  NO ROLE IS NAMED HERE, deliberately. This doc listed them until 2026-08-11 and the list was FALSE:
+  it filed `gatekeeper` under 1 while its profile had carried `lifetime_scope: one-shot` for weeks.
+  A comment that inventories another artefact lies the day that artefact moves, in silence. The
+  criterion is stated; roles sort themselves into it.
+
+  IT READS BOTH AXES, and that is what the 2026-08-11 revision fixed. The rule was written when
+  `slot_scope` was purely derived from `lifetime_scope` — one axis, so three tiers matched three
+  lifetimes and "everything else" was exact. The 2026-08-03 override made `slot_scope` declarable
+  precisely because one combination could not be written (context-long AND one pod per ticket, which
+  is what a producer needs), and that new combination fell into "everything else". Class 1 then held
+  both the architects and the producers, so no sweep could take the producers without cutting every
+  human's conversation.
+
+  Reaping, and ALWAYS anchor on `claude.*`: a bare pattern reaps any concurrent `grep` carrying it in
+  its argv (cf. `SessionId` moduledoc).
   """
-  @spec kill_class(t()) :: 0..2
+  @spec kill_class(t()) :: 0..3
   def kill_class(%__MODULE__{} = profile) do
     cond do
       role_index(profile) == 0 -> 0
-      lifetime_scope(profile) == "one-shot" -> 2
+      # BEFORE the slot test, and the order carries the invariant: `one-shot` DERIVES
+      # `slot_scope: "instance"`, so testing the slot first would file every judge under 2.
+      lifetime_scope(profile) == "one-shot" -> 3
+      slot_scope(profile) == "instance" -> 2
       true -> 1
     end
   end

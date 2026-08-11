@@ -1,7 +1,9 @@
 defmodule Fleet.Spawner.SessionIdTest do
   @moduledoc """
   Deterministic hexspeak encoder (`Fleet.Spawner.SessionId.encode/5`) — pure, async.
-  Locks the v2 scheme `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>` (class + uid). The role→slot
+  Locks the v2 scheme `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>` (class + uid). This is a
+  PURE encoder: the class is an ARGUMENT, so these cases name a class, never a role — which role
+  carries which class is `CapProfile.kill_class/1`, and citing it here is how a title goes stale. The role→slot
   catalog + the kill-class derivation live in the cap-profile (tested in `Fleet.CapProfileTest`);
   here we test only the string arithmetic. A fixed `@uid` keeps the asserts deterministic.
   """
@@ -12,7 +14,7 @@ defmodule Fleet.Spawner.SessionIdTest do
   @uid 1017
 
   describe "encode/5 — deterministic hexspeak UUID (v2: class + uid)" do
-    test "arch (role 1, class 1 persistent, fleet repo 0) → 1badcafe-<uid>-…01" do
+    test "class 1 (costs a live conversation), role 1, fleet repo 0 → 1badcafe-<uid>-…01" do
       assert SessionId.encode(1, 1, @uid, 0) == "1badcafe-1017-4dad-babe-0000dec0de01"
     end
 
@@ -20,16 +22,16 @@ defmodule Fleet.Spawner.SessionIdTest do
       assert SessionId.encode(0, 0, @uid, 0) == "0badcafe-1017-4dad-babe-0000dec0de00"
     end
 
-    test "gatekeeper (role 2, class 1 persistent, fleet repo 0) → 1badcafe-<uid>-…02" do
+    test "role 2, class 1, fleet repo 0 → 1badcafe-<uid>-…02" do
       assert SessionId.encode(2, 1, @uid, 0) == "1badcafe-1017-4dad-babe-0000dec0de02"
     end
 
-    test "engineer (role 3, class 1, repo 47) → 1badcafe-<uid>-0047…03" do
-      assert SessionId.encode(3, 1, @uid, 47) == "1badcafe-1017-4dad-babe-0047dec0de03"
+    test "role 3, class 2 (a ticket resident), repo 47 → 2badcafe-<uid>-0047…03" do
+      assert SessionId.encode(3, 2, @uid, 47) == "2badcafe-1017-4dad-babe-0047dec0de03"
     end
 
-    test "spawn-dead judge (role 5 reviewer, class 2, repo 161) → 2badcafe-…05" do
-      assert SessionId.encode(5, 2, @uid, 161) == "2badcafe-1017-4dad-babe-0161dec0de05"
+    test "role 5, class 3 (cold, swept), repo 161 → 3badcafe-…05" do
+      assert SessionId.encode(5, 3, @uid, 161) == "3badcafe-1017-4dad-babe-0161dec0de05"
     end
 
     test "uid folded DECIMAL — distinguishes two humans on ONE OAuth (1017 vs 1000)" do

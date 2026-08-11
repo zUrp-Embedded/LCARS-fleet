@@ -9,12 +9,15 @@ defmodule Fleet.Spawner.SessionId do
 
   Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<X>`            kill/lifecycle CLASS (hex nibble): `0` = starfleet (never killed) · `1` =
-                      persistent-resumable (arch, gatekeeper, eng — kill-safe, they resume their slot) ·
-                      `2` = spawn-dead (one-shot judges — accumulate, reaped). `badcafe` = universal
-                      kill-marker → `pkill -f 'claude.*2badcafe'` reaps the judge cadavers,
-                      `pkill -f 'claude.*1badcafe'` the persistents, `0badcafe` (starfleet) always
-                      spared ; `pkill -f 'claude.*badcafe'` = all. ⚠ ALWAYS anchor on `claude.*`:
+    - `<X>`            kill/HARVEST class (hex nibble) — WHAT KILLING THIS PROCESS COSTS, and the
+                      authority is `CapProfile.kill_class/1`, which states the criterion and names no
+                      role (this doc listed them and the list went stale, filing `gatekeeper` under 1
+                      while its profile said one-shot). `0` = nothing, outside the fleet · `1` = a
+                      LIVE HUMAN CONVERSATION · `2` = the work in flight on ONE ticket, re-dispatchable
+                      · `3` = nothing, cold and meant to be swept. `badcafe` = universal kill-marker →
+                      `pkill -f 'claude.*3badcafe'` sweeps the cold ones, `'claude.*2badcafe'` the
+                      ticket residents, `0badcafe` always spared ; `pkill -f 'claude.*badcafe'` = all.
+                      ⚠ ALWAYS anchor on `claude.*`:
                       a bare `pkill -f 2badcafe` matches ANY cmdline carrying the pattern — a
                       concurrent `grep -r 2badcafe` (yours, an analysis agent's, a deck probe's)
                       carries it in its argv and gets reaped with the judges. Classic `pkill -f`
