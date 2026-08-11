@@ -21,4 +21,9 @@ lcars                      exec   link
 bwrap_launch.sh            exec
 host_launch.sh             exec
 claude_launch.sh           exec
+# La declaration d'endpoints du vendor, LUE A COTE de son launcher (Egress.Vendor derive le chemin
+# depuis celui du launcher). Absente de $PREFIX/bin, le proxy d'egress sert une allowlist VIDE et
+# le pod ne joint meme pas son modele — constate au banc : le mur refusait api.anthropic.com.
+# Un launcher de vendor et sa declaration s'installent ensemble ou pas du tout.
+claude_launch.egress       noexec
 fleet_mcp_stdio_bridge.py  noexec

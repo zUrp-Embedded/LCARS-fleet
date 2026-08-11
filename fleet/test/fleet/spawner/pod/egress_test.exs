@@ -170,6 +170,16 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       assert Vendor.hosts(Path.join(tmp, "ghost_launch.sh")) == []
     end
 
+    test "the declaration SHIPS with its launcher — the manifest lists both or neither" do
+      # Measured on a bench: `claude_launch.sh` was installed and `claude_launch.egress` was not,
+      # so `Vendor.hosts/1` read an absent file, the allowlist was EMPTY, and the wall refused the
+      # vendor's own API. A launcher without its declaration is a pod that reaches nothing.
+      manifest = File.read!(Path.join(File.cwd!(), "etc/install.manifest"))
+
+      assert manifest =~ ~r/^claude_launch\.sh\s/m
+      assert manifest =~ ~r/^claude_launch\.egress\s/m
+    end
+
     test "the shipped `claude` declaration names the vendor API and nothing else" do
       hosts = Vendor.hosts(Path.join(File.cwd!(), "bin/claude_launch.sh"))
       assert "api.anthropic.com" in hosts
