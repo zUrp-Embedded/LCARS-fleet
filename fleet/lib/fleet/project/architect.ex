@@ -78,6 +78,32 @@ defmodule Fleet.Project.Architect do
         "-" <> Fleet.Layout.project_name(repo_or_name)
 
   @doc """
+  Ensures the architect of `repo` is up, CHEAPLY when it already is — the form a periodic keeper
+  can afford to call on every project on every tick.
+
+  `ensure/2` is idempotent but not free: it reads the repo id off the forge and resolves the
+  cap-profile BEFORE discovering `{:already_started, _}` at the spawn. Paid once per project per
+  tick that is a real cost for an answer that is almost always "it is there". This asks the cheap
+  question first — does its tmux session exist — and only pays the rest when the answer is no.
+
+  WHY A KEEPER AT ALL, AND IT IS NOT AN OPTIMISATION. The architect declares `lifetime_scope:
+  forever`, and nothing enforced that: it was ensured on project-open and before an escalation
+  wake, so a fleet restart or a crash left the project with no architect until something happened
+  to need one. A human who opens their project's terminal in between finds nothing there — and
+  the human is the one interlocutor that cannot be scheduled. `forever` has to be someone's job.
+
+  The liveness read is the TMUX SESSION, not the Registry: a registered pod whose session is gone
+  is exactly the corpse that made the fleet re-brief nothing for an hour on 2026-08-11.
+  """
+  @spec ensure_alive(String.t(), keyword()) :: {:ok, String.t() | :alive} | {:error, term()}
+  def ensure_alive(repo, opts \\ []) when is_binary(repo) and is_list(opts) do
+    tmux = Keyword.get(opts, :pod_tmux, Fleet.Spawner.PodTmux)
+    pod_id = pod_id_for(repo)
+
+    if tmux.alive?(pod_id), do: {:ok, :alive}, else: ensure(repo, opts)
+  end
+
+  @doc """
   Ensures the per-project architect of `repo` (`owner/name`) is up — idempotent (alive → no-op).
   `{:ok, pod_id}` | `{:error, reason}`. Best-effort at every call site: a failure is logged and
   never fatal to the caller (the project exists; ensure can be retried on the next trigger).

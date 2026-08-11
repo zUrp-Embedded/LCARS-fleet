@@ -134,6 +134,9 @@ defmodule Fleet.Pilot.Poller do
     # Desired-state pass of the main branch-protection (default nil →
     # `ProjectOnboard.reconcile_main_protection/2`) — seam for tests (zero forge).
     protection_reconciler: nil,
+    # Keeper of the per-project architect (default nil → `Project.Architect.ensure_alive/2`) —
+    # seam for tests (zero forge, zero tmux).
+    architect_keeper: nil,
     # repo → monotonic ms of its last protection recheck (throttle; RAM loss on restart =
     # recheck at next boot, convergent by construction).
     protection_rechecked: %{},
@@ -216,7 +219,8 @@ defmodule Fleet.Pilot.Poller do
       task_queue: Keyword.get(opts, :task_queue),
       wake_recovery: Keyword.get(opts, :wake_recovery),
       incident_fun: Keyword.get(opts, :incident_fun),
-      protection_reconciler: Keyword.get(opts, :protection_reconciler)
+      protection_reconciler: Keyword.get(opts, :protection_reconciler),
+      architect_keeper: Keyword.get(opts, :architect_keeper)
     }
 
     _ =
@@ -632,6 +636,27 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
+  # THE ARCHITECT IS `lifetime_scope: forever` AND NOBODY HELD THAT PROMISE. It was ensured on
+  # project-open and just before an escalation wake — both EVENTS. Between them, a fleet restart or
+  # a crash left the project with no architect, and the state was invisible: no error, no
+  # escalation, just a project whose arbiter is not there. A human who opens their project's
+  # terminal in that window finds nothing, and the human is the one interlocutor that cannot be
+  # scheduled around. A permanent that nothing polls is a permanent in name.
+  #
+  # HERE, and precisely here: this is the point where the repo is known ONBOARDED (its ops face
+  # exists) and NOT PARKED (the marker was read in the listing this pass already made) — a parked
+  # project must not get an arbiter, and any earlier site would have to buy that fact with a forge
+  # call. Regular ticks only, like the other two fleet-wide passes: a webhook kick is a dispatch
+  # hint, and the arch's own wake produces those webhooks.
+  #
+  # Best-effort, and silent when it works: `ensure_alive` costs one `has-session` on the normal
+  # path. A failure is already logged, named, by `Architect.ensure` itself.
+  defp keep_architect(state) do
+    keeper = state.architect_keeper || (&Fleet.Project.Architect.ensure_alive/2)
+    _ = keeper.(state.repo, state.forge_opts)
+    :ok
+  end
+
   # Prior suspects REPO-SCOPED (the refs are repo-qualified precisely for this): the whole
   # cross-repo union let an error/kick branch resurrect suspects RESOLVED on other repos (grace
   # bypassed → reclaim in the registration window of a freshly re-spawned pod).
@@ -693,6 +718,7 @@ defmodule Fleet.Pilot.Poller do
         parked_skip(state, repo_prior)
       else
         Process.delete({__MODULE__, :parked_logged, state.repo})
+        if mode == :tick, do: keep_architect(state)
         step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods)
       end
     else

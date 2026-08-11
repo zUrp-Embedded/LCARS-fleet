@@ -683,6 +683,64 @@ defmodule Fleet.Pilot.PollerTest do
     {name, pid}
   end
 
+  describe "architect keeper — `forever` has to be someone's job" do
+    # The arch was ensured on project-open and before an escalation wake, both EVENTS. A fleet
+    # restart between them left the project with no arbiter and nothing said so — and the human,
+    # who cannot be scheduled around, is exactly who finds an empty terminal in that window.
+    test "a regular tick keeps the architect of a LIVE project" do
+      issues = [%{"number" => 7, "body" => "x", "labels" => [], "assignee" => %{"login" => "l"}}]
+      me = self()
+      {name, _pid} = start_keeper_poller(issues, fn repo, _o -> send(me, {:kept, repo}) end)
+
+      Poller.force_poll(name)
+      assert_receive {:kept, "lordzurp/lcars-test"}, 1_000
+    end
+
+    test "a PARKED project gets NO architect — a stopped fleet needs no arbiter" do
+      # And the site is chosen for it: here the marker has just been read in the listing this pass
+      # already made, so the fact costs nothing. Any earlier site would have to buy it with a call.
+      # Title built from the PROTOCOL's own prefix, never re-typed: a hand-copied marker still
+      # parks in this test the day the prefix moves, and the test would keep passing on a fleet
+      # that no longer parks at all.
+      parked = [
+        %{
+          "number" => 1,
+          "title" => Fleet.Forge.Protocol.parked_issue_title(),
+          "body" => "",
+          "labels" => [],
+          "assignee" => nil
+        }
+      ]
+
+      me = self()
+      {name, _pid} = start_keeper_poller(parked, fn repo, _o -> send(me, {:kept, repo}) end)
+
+      Poller.force_poll(name)
+      refute_receive {:kept, _}, 300
+    end
+  end
+
+  defp start_keeper_poller(issues, keeper) do
+    name = :"P_keep_#{System.unique_integer([:positive])}"
+
+    {:ok, pid} =
+      Poller.start_link(
+        name: name,
+        repo: "lordzurp/lcars-test",
+        human: "lordzurp",
+        start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
+        architect_keeper: keeper,
+        step_dispatch?: true,
+        forge_client: StepStubForge,
+        forge_opts: [_test_issues: {:ok, issues}, _test_pulls: {:ok, []}, _test_pid: self()],
+        loader: StepStubLoader,
+        spawner: StepStubSpawner
+      )
+
+    {name, pid}
+  end
+
   describe "admission — discovery is not admission" do
     # The gate is OFF in the hermetic baseline (`config/test.exs`): the suite drives fictional
     # repos that exist nowhere on disk. Here it is turned back ON, which is the only way this
