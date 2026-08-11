@@ -69,9 +69,27 @@ defmodule Fleet.Spawner.Pod.Egress do
   @spec provision(String.t(), Fleet.CapProfile.t(), Path.t()) ::
           {:ok, Path.t() | nil} | {:error, term()}
   def provision(pod_id, cap_profile, launcher_path) do
-    if Fleet.CapProfile.bwrap?(cap_profile) do
-      path = socket_path(pod_id)
+    path = socket_path(pod_id)
 
+    # THE BASE MUST EXIST AND BE OURS TO WRITE. `bin/fleet_v2` creates it at start; if it is not
+    # there, this fleet was not launched through its own launcher and there is nothing to
+    # provision into. Declining QUIETLY is the difference between "no egress here" and an error
+    # logged once per pod for a condition that is not a failure — a rail that shouts on a
+    # configuration it cannot see is a rail nobody reads.
+    cond do
+      not Fleet.CapProfile.bwrap?(cap_profile) ->
+        {:ok, nil}
+
+      not File.dir?(Path.dirname(Path.dirname(path))) ->
+        {:ok, nil}
+
+      true ->
+        provision_socket(pod_id, cap_profile, launcher_path, path)
+    end
+  end
+
+  defp provision_socket(pod_id, cap_profile, launcher_path, path) do
+    with :ok <- File.mkdir_p(Path.dirname(path)) do
       case start(path, allowlist(cap_profile, launcher_path), pod_id: pod_id) do
         {:ok, listen} ->
           :persistent_term.put({__MODULE__, pod_id}, listen)
@@ -80,8 +98,6 @@ defmodule Fleet.Spawner.Pod.Egress do
         {:error, _} = err ->
           err
       end
-    else
-      {:ok, nil}
     end
   end
 
@@ -179,7 +195,6 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   defp do_start(socket_path, allowed, opts) do
     _ = File.rm(socket_path)
-    _ = File.mkdir_p(Path.dirname(socket_path))
 
     case :gen_tcp.listen(0, [
            :binary,
@@ -190,7 +205,13 @@ defmodule Fleet.Spawner.Pod.Egress do
          ]) do
       {:ok, listen} ->
         pod_id = Keyword.get(opts, :pod_id, "?")
-        spawn_link(fn -> accept_loop(listen, allowed, pod_id) end)
+
+        # UNLINKED, deliberately. `spawn_link` from `provision/3` runs inside the POD's process, so
+        # an acceptor dying abnormally would take the pod down with it — a proxy failing is a pod
+        # that cannot reach its vendor, which is bad; a proxy failing that KILLS the pod is worse
+        # and looks like something else entirely. Nothing leaks either way: `release/1` closes the
+        # listener, and `accept_loop` ends on `{:error, :closed}`.
+        spawn(fn -> accept_loop(listen, allowed, pod_id) end)
         {:ok, listen}
 
       {:error, reason} ->
