@@ -554,8 +554,13 @@ defmodule Fleet.Project.Onboard do
 
   The filter is by NAME because the source repo is NOT consumed — importing takes a copy and leaves
   the original with its owner — so without it every pass would propose the same repo again.
+
+  Each candidate carries whether its NAME is admissible, and the rule when it is not. The name is
+  checked here rather than at import alone because the import is too late: the human has already
+  pushed everything by then, and learning the rule at that point is learning it after paying for
+  it. The listing is the first moment the fleet can say it.
   """
-  @spec deposit_candidates(String.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec deposit_candidates(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def deposit_candidates(human, opts \\ []) when is_binary(human) do
     repo = repo_mod(opts)
     fc = fc_opts(opts)
@@ -565,7 +570,30 @@ defmodule Fleet.Project.Onboard do
       {:ok,
        mine
        |> Enum.reject(&(Fleet.Layout.project_name(&1) in enrolled))
-       |> Enum.sort()}
+       |> Enum.sort()
+       |> Enum.map(&describe_candidate/1)}
+    end
+  end
+
+  # The name rule, rendered rather than merely applied: an agent that must PRESENT a candidate to a
+  # human needs to say what is wrong with it, and `{:error, {:invalid_name, _}}` at import time
+  # says it to the wrong reader at the wrong moment.
+  defp describe_candidate(full_name) do
+    name = Fleet.Layout.project_name(full_name)
+
+    case validate_name(name) do
+      :ok ->
+        %{"source" => full_name, "name" => name, "admissible" => true}
+
+      {:error, {:invalid_name, _}} ->
+        %{
+          "source" => full_name,
+          "name" => name,
+          "admissible" => false,
+          "reason" =>
+            "le nom doit être en kebab-case minuscule (`[a-z0-9]`, tirets internes) — " <>
+              "renomme le dépôt sur la forge, ou donne-lui son nom de destination à l'import"
+        }
     end
   end
 

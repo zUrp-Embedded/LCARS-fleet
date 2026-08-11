@@ -663,7 +663,12 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def deposit_candidates(human, opts) do
       send(self(), {:deposit_candidates, human, opts})
-      {:ok, ["#{human}/mon-projet", "#{human}/chifoumi"]}
+
+      {:ok,
+       [
+         %{"source" => "#{human}/mon-projet", "name" => "mon-projet", "admissible" => true},
+         %{"source" => "#{human}/chifoumi", "name" => "chifoumi", "admissible" => true}
+       ]}
     end
 
     @impl true
@@ -1849,7 +1854,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
       decoded = Jason.decode!(txt)
       assert decoded["human"] == human
-      assert decoded["candidates"] == ["#{human}/mon-projet", "#{human}/chifoumi"]
+
+      assert Enum.map(decoded["candidates"], & &1["source"]) ==
+               ["#{human}/mon-projet", "#{human}/chifoumi"]
     end
 
     test "import_deposit threads source + destination catalogue, and echoes what it came from" do

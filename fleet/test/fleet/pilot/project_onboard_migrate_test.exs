@@ -112,6 +112,11 @@ defmodule Fleet.Project.OnboardMigrateTest do
     def list_org_repos("web", _fc), do: {:error, {:transport, :econnrefused}}
   end
 
+  defmodule BadName do
+    def list_user_repos(_l, _fc), do: {:ok, ["lordzurp/Mon_Projet"]}
+    def list_org_repos(_o, _fc), do: {:ok, []}
+  end
+
   describe "deposit_candidates — the LOCATION is the state" do
     @tag :tmp_dir
     test "a personal repo a catalogue org already carries is no longer a candidate" do
@@ -120,7 +125,8 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
       # `vitrine` exists in the `fleet` org. Importing takes a COPY and leaves the original with
       # its owner, so without this filter the same repo would be offered on every pass.
-      assert candidats == ["lordzurp/chifoumi", "lordzurp/mon-projet"]
+      assert Enum.map(candidats, & &1["source"]) == ["lordzurp/chifoumi", "lordzurp/mon-projet"]
+      assert Enum.all?(candidats, & &1["admissible"])
     end
 
     @tag :tmp_dir
@@ -128,6 +134,19 @@ defmodule Fleet.Project.OnboardMigrateTest do
       # A list too wide would offer to import what is already in — fail-loud, never fail-open.
       assert {:error, {:enrolled_scan_failed, "web", _}} =
                ProjectOnboard.deposit_candidates("lordzurp", forge_repo: OrgDown)
+    end
+
+    @tag :tmp_dir
+    test "a name the import would refuse is LISTED with its reason, not silently dropped" do
+      # The import is too late to learn the rule: the human has already pushed everything. And
+      # dropping the candidate would be worse than refusing it — a repo that is simply absent from
+      # the list looks like a repo the fleet cannot see, which sends the human debugging the forge.
+      assert {:ok, [candidat]} =
+               ProjectOnboard.deposit_candidates("lordzurp", forge_repo: BadName)
+
+      assert candidat["source"] == "lordzurp/Mon_Projet"
+      refute candidat["admissible"]
+      assert candidat["reason"] =~ "kebab-case"
     end
   end
 
