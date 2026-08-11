@@ -1704,7 +1704,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
            @placement_checked}
       end
     else
-      []
+      # PAS un vert silencieux : la note le DIT. Une verification qui borne sa couverture sans le
+      # dire se lit comme une couverture complete — et c'est ainsi qu'un mur devient decoratif.
+      {[], " (placement defaults SKIPPED: no `deploy` tree)"}
     end
   end
 

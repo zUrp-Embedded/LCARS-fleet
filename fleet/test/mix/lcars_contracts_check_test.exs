@@ -224,4 +224,32 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert verdict(tmp).status == :pass
     end
   end
+
+  describe "roles.provisioning_locked hors de son perimetre" do
+    @tag :tmp_dir
+    test "un arbre SANS `deploy/` : pass, et la note DIT que les placements sont sautes", %{
+      tmp_dir: tmp
+    } do
+      # LE CHEMIN QUE LE GATE DE L'HOTE NE PEUT PAS PRENDRE. L'etage BUILD de l'image copie `fleet/`
+      # sans `deploy/` (COPY explicite), donc cette branche n'existe QUE la — et deux fois cette
+      # nuit c'est le build qui a attrape ce que l'hote ne pouvait pas voir : d'abord un
+      # `fail-closed` sur une recette hors perimetre, puis un `[]` nu la ou un tuple etait attendu.
+      # Ce test amene ce chemin sur l'hote.
+      root = Path.join(tmp, "sans-deploy")
+      File.mkdir_p!(Path.join(root, "priv/catalogue/cap_profile/canon/cap-profiles"))
+      File.mkdir_p!(Path.join(root, "priv/catalogue-system/cap_profile/canon/cap-profiles"))
+
+      File.write!(
+        Path.join(root, "priv/catalogue/catalogue.yaml"),
+        "api_version: 1\nname: fleet\n"
+      )
+
+      res = Mix.Tasks.Lcars.Contracts.Check.check_roles_provisioning_locked(root)
+
+      assert res.status in [:pass, :fail], "la verification doit RENDRE, pas exploser"
+
+      assert res.note =~ "placement defaults SKIPPED",
+             "une couverture bornee qui ne se dit pas se lit comme une couverture complete"
+    end
+  end
 end
