@@ -394,6 +394,10 @@ defmodule Fleet.Forge.Client do
   @spec list_user_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_user_repos(login, opts \\ []), do: Repo.list_user_repos(login, opts)
 
+  @doc "Whether a repo is PRIVATE on the forge (cf. `Repo.private?/2`)."
+  @spec private?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
+  def private?(repo, opts \\ []), do: Repo.private?(repo, opts)
+
   @doc "Transfere un depot vers une autre org. Cf. `Fleet.Forge.Client.Repo.transfer_repo/3`."
   def transfer_repo(repo, new_owner, opts \\ []), do: Repo.transfer_repo(repo, new_owner, opts)
 

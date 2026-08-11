@@ -62,6 +62,27 @@ services:
       # poser. Sur une forge PREEXISTANTE (le cas de la production), c'est un geste d'operateur dans
       # son app.ini — ici, la forge est jetable et nous appartient, donc il est cable.
       GITEA__ui__DEFAULT_SHOW_FULL_NAME: "true"
+      # ⚠ PAS de `DEFAULT_PRIVATE` ici, et c'est une mesure, pas un oubli : la clé n'existe PAS
+      # dans l'image qu'on fait tourner. Vérifié sur le binaire de `gitea/gitea:1.26.1-rootless`,
+      # avec un témoin — `DEFAULT_SHOW_FULL_NAME` (réglage voisin, câblé juste au-dessus) est
+      # présent, `DEFAULT_PRIVATE` est absent. La poser aurait produit une ligne de config qui ne
+      # vise rien, en silence, et un lecteur qui l'aurait crue.
+      # Conséquence, et elle rejoint l'arbitrage user : il n'y a pas de levier de config pour
+      # forcer le public, donc un dépôt privé n'est pas un mode qu'on supporte — c'est une erreur
+      # d'utilisation, refusée à la porte d'adoption avec son nom.
+      #
+      # L'UPLOAD WEB EST DISQUALIFIÉ, PAS LIMITÉ — et c'est une garde de SÉCURITÉ, pas d'hygiène.
+      # Le gate d'adoption cherche un ARBRE `.claude/` ; l'UI de la forge aplatit une arborescence
+      # déposée par drag&drop, donc `.claude/settings.json` arrive en `settings.json` à la racine.
+      # Plus de dossier, plus de détection : le transport contourne le gate tout seul, sans malice.
+      # Le canal d'un dépôt est `git push`, qui préserve l'arborescence et fait mordre le gate.
+      #
+      # ⚠ `_0x2E_` n'est pas une coquette : une section INI qui porte un point s'écrit comme ça en
+      # variable d'env, parce qu'une clé d'env ne peut contenir que `0-9A-Z_`. Mesuré dans le
+      # binaire de l'image (`gitea config edit-ini --apply-env`), pas deviné — écrit
+      # `GITEA__repository__upload__ENABLED`, le réglage ne vise AUCUNE section connue et ne fait
+      # rien, en silence.
+      GITEA__repository_0x2E_upload__ENABLED: "false"
     ports:
       - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
     volumes:

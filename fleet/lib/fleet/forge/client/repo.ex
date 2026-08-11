@@ -237,6 +237,22 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Whether a repository is PRIVATE on the forge.
+
+  Asked before adopting a deposit, and asked EXPLICITLY rather than inferred from a clone failing:
+  the system token can read a private repo, so a clone would succeed and quietly copy private
+  content into a public org repo. A visibility change nobody asked for is worse than a refusal,
+  and it is invisible at the moment it happens.
+  """
+  @spec private?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
+  def private?(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, body} when is_map(body) <- http_get(config, "/repos/#{encode_repo(repo)}") do
+      {:ok, Map.get(body, "private") == true}
+    end
+  end
+
+  @doc """
   Converges a forge-enforced branch-protection rule and reports `:created`, `:updated`, or
   `:unchanged`.
 

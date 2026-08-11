@@ -36,6 +36,16 @@ defmodule Fleet.Project.OnboardMigrateTest do
     # The seam stands where the network would be: `migrate` is called with the OLD name and must
     # thread the target catalogue as the new owner.
     def transfer_repo("fleet/vitrine", "web", _fc), do: {:ok, "web/vitrine"}
+    # A deposit is public unless a test says otherwise: the private case has its own stub below.
+    def private?(_repo, _fc), do: {:ok, false}
+  end
+
+  defmodule PrivateSource do
+    def private?("lordzurp/secret", _fc), do: {:ok, true}
+  end
+
+  defmodule VisibilityDown do
+    def private?(_repo, _fc), do: {:error, {:transport, :econnrefused}}
   end
 
   setup %{tmp_dir: tmp} do
@@ -142,6 +152,30 @@ defmodule Fleet.Project.OnboardMigrateTest do
     test "un nom qui n'est pas owner/nom est refuse avant tout le reste", %{tmp: tmp} do
       assert {:error, {:not_a_repo_name, "pas-un-chemin"}} =
                ProjectOnboard.import_deposit("pas-un-chemin", "web", opts(tmp))
+    end
+
+    @tag :tmp_dir
+    test "a PRIVATE deposit is refused by name, never cloned", %{tmp: tmp} do
+      # There is no config lever forcing public repos (`DEFAULT_PRIVATE` does not exist in the
+      # Gitea we run), so the door is the only place this can be stopped. And it must be ASKED:
+      # this runtime's git carries the system token, so the clone of a private source would
+      # SUCCEED and its content would land in a public org repo with nothing said.
+      assert {:error, {:deposit_not_public, "lordzurp/secret"}} =
+               ProjectOnboard.import_deposit(
+                 "lordzurp/secret",
+                 "web",
+                 Keyword.put(opts(tmp), :forge_repo, PrivateSource)
+               )
+    end
+
+    @tag :tmp_dir
+    test "an unreadable visibility REFUSES — fail-closed, never assumed public", %{tmp: tmp} do
+      assert {:error, {:deposit_visibility_unreadable, "lordzurp/mon-projet", _}} =
+               ProjectOnboard.import_deposit(
+                 "lordzurp/mon-projet",
+                 "web",
+                 Keyword.put(opts(tmp), :forge_repo, VisibilityDown)
+               )
     end
   end
 

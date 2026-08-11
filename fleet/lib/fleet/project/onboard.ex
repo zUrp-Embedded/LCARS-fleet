@@ -498,7 +498,11 @@ defmodule Fleet.Project.Onboard do
       when is_binary(source) and is_binary(catalogue) do
     with {:ok, owner, src_name} <- split_repo(source),
          :ok <- refute_source_in_org(owner, source),
-         :ok <- require_destination_catalogue(catalogue) do
+         :ok <- require_destination_catalogue(catalogue),
+         # LAST of the admission checks: the only one that costs a forge read. The three above
+         # answer from the catalogue alone, so a malformed name or an unknown destination is
+         # refused without touching the network.
+         :ok <- require_public_source(source, opts) do
       name = Keyword.get(opts, :name, src_name)
       full_name = "#{catalogue}/#{name}"
       dirs = face_dirs(name, opts)
@@ -603,10 +607,28 @@ defmodule Fleet.Project.Onboard do
       else: {:error, {:catalogue_not_installed, catalogue, actives}}
   end
 
-  # SANS jeton : un depot personnel est PUBLIC par configuration de la forge, et c'est un choix
-  # ecrit (`[repository] DEFAULT_PRIVATE = public`). Un depot prive n'est donc pas un mode a
-  # supporter mais une erreur d'utilisation — le clone echoue, et le refus la NOMME au lieu de
-  # rendre une sortie de git brute.
+  # A PRIVATE deposit is refused, and it is refused HERE rather than left to the clone.
+  #
+  # There is no config lever to force public repos on this forge: `[repository] DEFAULT_PRIVATE`
+  # does NOT exist in the Gitea we run (measured on the image's own binary, with a witness — the
+  # neighbouring `DEFAULT_SHOW_FULL_NAME` is there, this one is not). So a private repo stays
+  # creatable, and the only honest place to stop it is the door.
+  #
+  # Asking the forge is not the same as watching the clone fail: this runtime's git carries the
+  # system token, so a private source would clone WITHOUT error and its content would land in a
+  # public org repo. A visibility change nobody asked for is worse than a refusal, and it is
+  # invisible exactly when it happens.
+  defp require_public_source(source, opts) do
+    case repo_mod(opts).private?(source, fc_opts(opts)) do
+      {:ok, false} -> :ok
+      {:ok, true} -> {:error, {:deposit_not_public, source}}
+      {:error, reason} -> {:error, {:deposit_visibility_unreadable, source, reason}}
+    end
+  end
+
+  # Clones the deposit. The visibility question is settled BEFORE this, by `require_public_source/2`
+  # — not by letting the clone fail, because this call carries the system token and a private repo
+  # would clone just fine, copying private content into a public org repo with nothing said.
   defp clone_deposit(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
