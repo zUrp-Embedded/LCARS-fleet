@@ -87,6 +87,18 @@ spec:
       - mcp__fleet__revise_project_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
       - mcp__fleet__close_project        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
       - mcp__fleet__adopt_project        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
+      # LES DEUX VERBES DU DEPOT, et leur absence ici etait un piege actif : le SP de ce role decrit
+      # le flux depuis le 2026-08-11, et un outil hors `allowedTools` sous `--permission-mode
+      # default` ne se contente pas d'etre absent — il PROMPTE, et le pod GELE en attendant une
+      # reponse que personne ne donne (mesure 2026-08-09, plus haut dans ce fichier). Une doctrine
+      # qui decrit une surface non accordee ne rate pas : elle bloque.
+      - mcp__fleet__list_deposits        # ce que l'humain a pousse dans son espace perso et que la fleet ne porte pas
+      - mcp__fleet__import_deposit       # la TROISIEME porte : reprendre ce depot dans l'org d'un catalogue
+      # LE PENDANT LECTURE des gestes projet ci-dessus, et il manquait : sans lui ce role repond
+      # « quels projets ? » par ce qu'il devine, alors que l'outil rend la carte GRAVEE, le
+      # `card_source` (declaree par un humain / jamais declaree / illisible) et le `state`. Un
+      # projet qui n'a rien declare n'est pas un projet qui a choisi le defaut.
+      - mcp__fleet__list_projects        # BL : l'inventaire avec sa carte, sa source et son etat
       - mcp__fleet__import_external_project  # BL-6-31: repatriate from GitHub/GitLab (adoption gate: foreign .claude refused, CLAUDE.md filtered)
     disallowedTools:
       - web_search
