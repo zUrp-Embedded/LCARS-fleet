@@ -135,4 +135,26 @@ defmodule Fleet.Project.OnboardPreflightTest do
     assert {:error, {:human_not_provisioned, "ghost-human", _}} =
              ProjectOnboard.import("fleet/poc-f2", opts(tmp, NoAccountUsers))
   end
+
+  describe "import : le catalogue nomme par l'org doit etre INSTALLE" do
+    test "un catalogue absent est REFUSE, et le refus nomme l'offre reelle" do
+      # L'org d'un projet EST le nom de son catalogue, et le lien est fixe pour sa vie. Importer
+      # `web/vitrine` sur une boite qui n'a pas le catalogue `web` ne doit PAS retomber sur le
+      # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
+      # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
+      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+               Fleet.Project.Onboard.import("grominet/vitrine")
+
+      assert "fleet" in actives, "le refus doit nommer ce qui EST installe"
+    end
+
+    test "le catalogue livre passe ce refus — il ne bloque pas le cas nominal" do
+      # La porte suivante (`ensure_human_provisioned`) prend le relais : ce test prouve seulement
+      # que le troisieme refus laisse passer une org dont le catalogue est bien la.
+      refute match?(
+               {:error, {:catalogue_not_installed, _, _}},
+               Fleet.Project.Onboard.import("fleet/quelque-chose")
+             )
+    end
+  end
 end

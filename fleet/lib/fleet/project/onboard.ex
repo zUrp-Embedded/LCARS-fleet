@@ -112,7 +112,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
-    org = Keyword.get(opts, :org, "fleet")
+    org = Keyword.get(opts, :org) || default_org()
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
@@ -263,6 +263,18 @@ defmodule Fleet.Project.Onboard do
   @spec active_orgs() :: [String.t()]
   def active_orgs, do: Fleet.Catalogue.active_names()
 
+  # Le defaut des quatre portes, quand l'appelant ne nomme pas d'org. C'etait le litteral `"fleet"`
+  # a cinq endroits — le nom d'UN catalogue, ecrit cinq fois. Il vaut desormais le premier catalogue
+  # actif, donc `fleet` sur un deploiement qui n'apporte rien, et le sien sur un deploiement qui
+  # apporte le sien. `create_project` passe `:org` explicitement depuis le guichet ; ce defaut sert
+  # les appels directs et les tests.
+  defp default_org do
+    case active_orgs() do
+      [org | _] -> org
+      [] -> "fleet"
+    end
+  end
+
   @doc """
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
@@ -272,11 +284,12 @@ defmodule Fleet.Project.Onboard do
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
-    org = Keyword.get(opts, :org, "fleet")
+    org = Keyword.get(opts, :org) || default_org()
     name = Fleet.Layout.project_name(full_name)
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
+         :ok <- require_catalogue_installed(full_name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_org_membership(full_name, org),
@@ -299,6 +312,25 @@ defmodule Fleet.Project.Onboard do
     else
       {:already_satisfied, result} -> {:ok, result}
       {:error, _} = err -> err
+    end
+  end
+
+  # LE TROISIEME REFUS, et c'est celui qui empeche le mensonge silencieux. L'org d'un projet EST le
+  # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur une boite qui
+  # n'a pas le catalogue `web` ne doit PAS retomber sur le catalogue local. Le projet tournerait avec
+  # les roles, les cartes et les SP d'un autre metier, sans que rien ne le dise — c'est exactement
+  # l'etat que le lien fixe existe pour interdire.
+  #
+  # Le refus NOMME le catalogue manquant et le geste qui le pose, parce qu'un refus qui ne dit pas
+  # quoi faire ne se distingue pas d'une panne.
+  defp require_catalogue_installed(full_name) do
+    cat = full_name |> String.split("/") |> List.first()
+    actives = active_orgs()
+
+    if cat in actives do
+      :ok
+    else
+      {:error, {:catalogue_not_installed, cat, actives}}
     end
   end
 
@@ -454,7 +486,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp describe_project(name, root, opts) do
-    full_name = "#{Keyword.get(opts, :org, "fleet")}/#{name}"
+    full_name = "#{Keyword.get(opts, :org) || default_org()}/#{name}"
 
     %{"name" => name, "repo" => full_name}
     |> Map.merge(declared_intensity(Path.join(root, name)))
@@ -600,7 +632,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def adopt_project(name, opts \\ []) when is_binary(name) do
-    org = Keyword.get(opts, :org, "fleet")
+    org = Keyword.get(opts, :org) || default_org()
     full_name = "#{org}/#{name}"
     dirs = face_dirs(name, opts)
 
@@ -825,7 +857,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec import_external(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
-    org = Keyword.get(opts, :org, "fleet")
+    org = Keyword.get(opts, :org) || default_org()
     full_name = "#{org}/#{name}"
     dirs = face_dirs(name, opts)
     # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
