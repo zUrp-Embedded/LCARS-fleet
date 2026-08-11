@@ -92,12 +92,15 @@ defmodule Fleet.SPBuilder do
 
   @doc "Returns a published role draft, `:not_found`, or `:unpublished`."
   defdelegate image_draft(role), to: Fleet.SPBuilder.Image, as: :draft
+  defdelegate image_draft(role, root), to: Fleet.SPBuilder.Image, as: :draft
 
   @doc "Returns the published worker protocol or `:unpublished`."
   defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
+  defdelegate image_worker_protocol(root), to: Fleet.SPBuilder.Image, as: :worker_protocol
 
   @doc "Returns the published human protocol or `:unpublished`."
   defdelegate image_human_protocol(), to: Fleet.SPBuilder.Image, as: :human_protocol
+  defdelegate image_human_protocol(root), to: Fleet.SPBuilder.Image, as: :human_protocol
 
   @doc "Returns modified/vanished image sources, or `:unpublished`."
   defdelegate image_drift(), to: Fleet.SPBuilder.Image, as: :drift

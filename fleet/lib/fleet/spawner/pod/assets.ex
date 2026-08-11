@@ -106,7 +106,7 @@ defmodule Fleet.Spawner.Pod.Assets do
       end
 
     if Fleet.Slug.valid?(role) do
-      case Fleet.SPBuilder.image_draft(role) do
+      case Fleet.SPBuilder.image_draft(role, cap.catalogue_root) do
         {:ok, content} ->
           {:ok, content}
 
@@ -136,30 +136,35 @@ defmodule Fleet.Spawner.Pod.Assets do
   @spec read_protocole_user(Fleet.CapProfile.t()) ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
   def read_protocole_user(%Fleet.CapProfile{} = cap) do
+    # La racine vient du PROFIL : le protocole qu'un pod recoit appartient au catalogue qui declare
+    # son role. Sans ca, un role du second catalogue recevait le protocole du premier — un contrat de
+    # conversation ecrit pour d'autres gens.
+    root = cap.catalogue_root
+
     case Fleet.CapProfile.interlocutor(cap) do
       "human" ->
-        read_human_protocol()
+        read_human_protocol(root)
 
       "both" ->
-        with {:ok, machine} <- read_worker_protocol(),
-             {:ok, human} <- read_human_protocol() do
+        with {:ok, machine} <- read_worker_protocol(root),
+             {:ok, human} <- read_human_protocol(root) do
           {:ok, machine <> "\n---\n\n" <> human}
         end
 
       _ ->
-        read_worker_protocol()
+        read_worker_protocol(root)
     end
   end
 
-  defp read_worker_protocol do
-    case Fleet.SPBuilder.image_worker_protocol() do
+  defp read_worker_protocol(root) do
+    case Fleet.SPBuilder.image_worker_protocol(root) do
       {:ok, content} -> {:ok, content}
       :unpublished -> read_worker_protocol_from_disk()
     end
   end
 
-  defp read_human_protocol do
-    case Fleet.SPBuilder.image_human_protocol() do
+  defp read_human_protocol(root) do
+    case Fleet.SPBuilder.image_human_protocol(root) do
       {:ok, content} ->
         {:ok, content}
 

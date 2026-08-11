@@ -146,7 +146,10 @@ defmodule Fleet.CapProfile do
     with {:ok, modops} <- Catalog.read_modops(modop_set),
          merged <- Enum.reduce(modops, raw, &deep_merge_last_wins(&2, &1)),
          :ok <- Schema.validate(merged, :cap_profile) do
-      {:ok, to_struct(merged)}
+      # La racine SURVIT a la composition : superposer des modops ne change pas de quel catalogue le
+      # role vient. Sans ce report, composer effacait l'appartenance et les lecteurs d'aval
+      # retombaient sur le premier catalogue actif — le defaut meme que ce champ existe pour fermer.
+      {:ok, to_struct(merged, base.catalogue_root)}
     end
   end
 
@@ -636,8 +639,18 @@ defmodule Fleet.CapProfile do
   Returns sorted role names from the published image, or `{:error, :not_published}`.
   """
   @spec list_from_published() :: {:ok, [String.t()]} | {:error, :not_published}
-  def list_from_published do
-    case Fleet.CapProfile.Image.published() do
+  def list_from_published, do: list_from_published(nil)
+
+  @doc """
+  La meme liste, pour l'image d'un catalogue NOMME — `nil` = le premier actif.
+
+  Passe par la facade parce que `Fleet.CapProfile.Image` n'est pas exporte par cette boundary : un
+  appelant d'un autre domaine (la preuve de canon) demande « les roles de CE catalogue » sans
+  atteindre le sous-module.
+  """
+  @spec list_from_published(Path.t() | nil) :: {:ok, [String.t()]} | {:error, :not_published}
+  def list_from_published(root) do
+    case published_image(root) do
       %{index: index} ->
         # Same rule as `Catalog.list/1`, same trap (BL-6-45): filter the ENTRIES on the shared
         # predicate BEFORE projecting the keys — an unfiltered image index hands a ReservedSeat
@@ -735,6 +748,9 @@ defmodule Fleet.CapProfile do
     |> Enum.map(&String.replace_prefix(&1, "mcp__fleet__", ""))
     |> Enum.uniq()
   end
+
+  defp published_image(nil), do: Fleet.CapProfile.Image.published()
+  defp published_image(root) when is_binary(root), do: Fleet.CapProfile.Image.published(root)
 
   defp to_struct(raw), do: to_struct(raw, nil)
 

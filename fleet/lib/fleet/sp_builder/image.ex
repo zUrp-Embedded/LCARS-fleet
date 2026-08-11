@@ -245,8 +245,17 @@ defmodule Fleet.SPBuilder.Image do
   caller falls back to disk). Consulted by the spawner's Assets rail.
   """
   @spec draft(String.t()) :: {:ok, binary()} | :not_found | :unpublished
-  def draft(role) when is_binary(role) do
-    case published() do
+  def draft(role) when is_binary(role), do: draft(role, nil)
+
+  @doc """
+  Le meme draft, dans l'image du catalogue NOMME. `nil` = le premier actif (comportement du jour).
+
+  La racine vient du PROFIL (`%CapProfile{}.catalogue_root`) chez les appelants qui en ont un : le
+  draft d'un role appartient au catalogue qui le declare, pas au premier de la liste.
+  """
+  @spec draft(String.t(), Path.t() | nil) :: {:ok, binary()} | :not_found | :unpublished
+  def draft(role, root) when is_binary(role) do
+    case published_or_default(root) do
       %{drafts: drafts} ->
         case Map.fetch(drafts, role) do
           {:ok, content} -> {:ok, content}
@@ -265,8 +274,11 @@ defmodule Fleet.SPBuilder.Image do
   no longer changes the pods spawn by spawn — which is the whole promise.
   """
   @spec worker_protocol() :: {:ok, binary()} | :unpublished
-  def worker_protocol do
-    case published() do
+  def worker_protocol, do: worker_protocol(nil)
+
+  @spec worker_protocol(Path.t() | nil) :: {:ok, binary()} | :unpublished
+  def worker_protocol(root) do
+    case published_or_default(root) do
       %{worker_protocol: content} -> {:ok, content}
       nil -> :unpublished
     end
@@ -276,12 +288,18 @@ defmodule Fleet.SPBuilder.Image do
   The conversation contract added for a human interlocutor (`{:ok, content}`) or `:unpublished`.
   """
   @spec human_protocol() :: {:ok, binary()} | :unpublished
-  def human_protocol do
-    case published() do
+  def human_protocol, do: human_protocol(nil)
+
+  @spec human_protocol(Path.t() | nil) :: {:ok, binary()} | :unpublished
+  def human_protocol(root) do
+    case published_or_default(root) do
       %{human_protocol: content} -> {:ok, content}
       nil -> :unpublished
     end
   end
+
+  defp published_or_default(nil), do: published()
+  defp published_or_default(root) when is_binary(root), do: published(root)
 
   @doc """
   An EEx template SOURCE by file name (`"sp_template.eex"`): `{:ok, source}`, `:not_found`
