@@ -104,6 +104,8 @@ defmodule Fleet.CapProfile do
         }
 
   @default_containment "bwrap"
+  # FAIL-CLOSED: a profile that says nothing reaches its vendor and nothing else.
+  @default_network "vendor-only"
 
   @doc "Publishes the validated catalogue image, raising on an invalid artifact."
   defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
@@ -367,6 +369,33 @@ defmodule Fleet.CapProfile do
     do: Map.get(meta, "containment") || @default_containment
 
   def containment(%__MODULE__{}), do: @default_containment
+
+  @doc """
+  What the pod may REACH — `"vendor-only"` (default) or `"egress"`.
+
+  Absent means vendor-only, and the default is the fail-closed one on purpose: a role whose profile
+  forgets to say anything reaches its model and nothing else. The opposite default would make every
+  new role silently open until someone remembered to close it.
+
+  DECLARED, never derived. Deriving it from `lifetime_scope` or `slot_scope` would couple two
+  unrelated things: the day a producer legitimately needs to browse, one would have to change how
+  long it lives to give it a network. Which floor a pod sits on and what it may reach are different
+  questions about the same pod.
+
+  Note what this does NOT choose: whether the pod has a network namespace. It never does — every
+  pod is sealed and leaves through its own CONNECT proxy. The declaration picks the ALLOWLIST that
+  proxy serves, so `"egress"` is not "opened", it is "the vendor's hosts plus the ones this role
+  declares".
+  """
+  @spec network(t()) :: String.t()
+  def network(%__MODULE__{metadata: meta}) when is_map(meta),
+    do: Map.get(meta, "network") || @default_network
+
+  def network(%__MODULE__{}), do: @default_network
+
+  @doc "Returns the default network policy, `\"vendor-only\"` (fail-closed)."
+  @spec default_network() :: String.t()
+  def default_network, do: @default_network
 
   @doc "Returns the default containment mode, `\"bwrap\"`."
   @spec default_containment() :: String.t()

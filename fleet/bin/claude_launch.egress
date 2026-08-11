@@ -1,0 +1,17 @@
+# SOURCE: bin/claude_launch.egress
+# AUTHOR: DrDree
+# STARDATE: 2026-08-11
+# STATUS: the ONLY place `api.anthropic.com` is written in this repository
+#
+# Egress declaration of the `claude` vendor: the hosts its launcher needs to reach, one per line.
+# Read by `Fleet.Spawner.Pod.Egress.Vendor`, resolved FROM the launcher path so the two can never
+# name different vendors.
+#
+# A pod is sealed (`--unshare-all`, no `--share-net`) and leaves through a CONNECT proxy on a unix
+# socket. This list is that proxy's allowlist for every pod, whatever its role; a role that browses
+# adds its own hosts on top, and every other role gets exactly this.
+#
+# A SECOND VENDOR BRINGS ITS OWN: `bin/codex_launch.sh` would sit beside a `bin/codex_launch.egress`
+# naming `api.openai.com`. Adding a vendor is adding two files next to the others — never editing a
+# list inside the runtime, which is what would make the sanctuary itself vendor-aware.
+api.anthropic.com

@@ -158,6 +158,26 @@ TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
 MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-/run/lcars/mcp}"
 MCP_SOCK_DIR="$MCP_SOCK_BASE/$POD_ID"
 MCP_SOCK="$MCP_SOCK_DIR/sock"
+
+# Per-pod EGRESS socket — the pod's only way out. Same shape and same reasons as the MCP socket
+# above (per-pod dir, short filename, provisioned OUTSIDE by the BEAM before this launch, and the
+# BASE is never bound: a sibling's egress socket is a sibling's allowlist).
+#
+# WHY THE NETWORK LEAVES THROUGH THE FILESYSTEM. Without this the sandbox keeps `--share-net`, so a
+# pod shares the host's stack: `curl` reaches anything, and denying `WebFetch` only moves the gesture
+# from a traced tool to an untraced one. Filtering by host inside a netns wants CAP_NET_ADMIN, which
+# a fleet running under the human's UID does not have. So the namespace is dropped entirely and the
+# traffic goes out over a unix socket, where the proxy on the other end decides host by host.
+#
+# ⚠ `socat` IS LOAD-BEARING HERE: it is what turns `localhost:$EGRESS_PORT` inside the sandbox into
+# that socket. Absent, the pod is simply sealed — the vendor becomes unreachable and the pod cannot
+# work at all. That is why the assertion below is fatal rather than degraded: a silent fallback to
+# `--share-net` would turn a missing package into an open pod.
+EGRESS_SOCK_BASE="${LCARS_FLEET_EGRESS_SOCK_BASE:-/run/lcars/egress}"
+EGRESS_SOCK_DIR="$EGRESS_SOCK_BASE/$POD_ID"
+EGRESS_SOCK="$EGRESS_SOCK_DIR/sock"
+EGRESS_PORT="${LCARS_POD_EGRESS_PORT:-8118}"
+SOCAT_BIN="${LCARS_SOCAT_BIN:-/usr/bin/socat}"
 POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 
 # =============================================================
@@ -352,8 +372,22 @@ fi
 # unless bwrap itself starts empty. Everything the pod legitimately needs crosses explicitly
 # through --setenv below. Locked by `test/bwrap_launch/bwrap_launch.bats` (assembly + a secret
 # exported around the spawner must not reach the sandbox).
+# THE NETWORK DECISION, and it is the cap-profile's (`metadata.network`, threaded as
+# LCARS_POD_NETWORK). Absent = sealed, because the fail-closed default belongs at every layer that
+# can read the value: a launcher that opened when it was not told to would undo the profile's own
+# default. `egress` does not mean "shares the host stack" — it means the pod's proxy serves a wider
+# allowlist. NOBODY gets `--share-net` any more; the flag is gone from this file entirely.
+NET_ARGS=(--unshare-all)
+if [[ -n "${LCARS_POD_EGRESS_SOCK:-}" ]]; then
+  [[ -d "$EGRESS_SOCK_DIR" ]] || { echo "ERR: dir socket egress $EGRESS_SOCK_DIR missing (central must provision it before the launch)" >&2; exit 1; }
+  [[ -x "$SOCAT_BIN" ]] || { echo "ERR: socat missing ($SOCAT_BIN) — the pod would be sealed with no way to reach its vendor" >&2; exit 2; }
+  EGRESS_BINDS=(--bind "$EGRESS_SOCK_DIR" "$EGRESS_SOCK_DIR" --ro-bind "$SOCAT_BIN" "$SOCAT_BIN")
+else
+  EGRESS_BINDS=()
+fi
+
 exec env -i "$BWRAP_BIN" \
-  --unshare-all --share-net \
+  "${NET_ARGS[@]}" \
   --hostname "lcars-pod-$POD_ID" \
   `# uts is already unshared (--unshare-all) but the hostname was not rewritten, so the pod believed it` \
   `# was on the human's machine (host name leaking into the agent context + misleading logs). Role-agnostic.` \
@@ -394,6 +428,7 @@ exec env -i "$BWRAP_BIN" \
   --ro-bind "$VENDOR_SHARE" "$SANDBOX_HOME/.local/share/$VENDOR_NAME" \
   --bind "$POD_SOCK_DIR" "$POD_SOCK_DIR" \
   --bind "$MCP_SOCK_DIR" "$MCP_SOCK_DIR" \
+  "${EGRESS_BINDS[@]}" \
   ${PLUGIN_BINDS[@]+"${PLUGIN_BINDS[@]}"} \
   ${SKILL_BINDS[@]+"${SKILL_BINDS[@]}"} \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
@@ -404,6 +439,16 @@ exec env -i "$BWRAP_BIN" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
   --setenv LCARS_FLEET_MCP_SOCKET "$MCP_SOCK" \
+  `# The vendor CLI honours HTTP(S)_PROXY natively (undici). NO_PROXY is set EMPTY and not merely` \
+  `# left out: an inherited one would be a documented bypass of the only wall the pod has.` \
+  --setenv HTTP_PROXY "http://127.0.0.1:$EGRESS_PORT" \
+  --setenv HTTPS_PROXY "http://127.0.0.1:$EGRESS_PORT" \
+  --setenv http_proxy "http://127.0.0.1:$EGRESS_PORT" \
+  --setenv https_proxy "http://127.0.0.1:$EGRESS_PORT" \
+  --setenv NO_PROXY "" \
+  --setenv no_proxy "" \
+  --setenv LCARS_POD_EGRESS_SOCK "${LCARS_POD_EGRESS_SOCK:-}" \
+  --setenv LCARS_POD_EGRESS_PORT "$EGRESS_PORT" \
   --setenv LCARS_ROLE "$ROLE" \
   --setenv LCARS_POD_CWD "$WORKDIR" \
   --setenv LCARS_POD_HOME "$SANDBOX_HOME" \
@@ -422,10 +467,19 @@ exec env -i "$BWRAP_BIN" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
   ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
   -- /bin/sh -c '
-       tmux_bin=$1; sock=$2; name=$3; shift 3
+       socat_bin=$1; egress_sock=$2; egress_port=$3; tmux_bin=$4; sock=$5; name=$6; shift 6
+       # THE RELAY, started BEFORE the session and inside the namespace: the pod has no route to
+       # anywhere, so `localhost:$egress_port` only exists because socat listens on it and carries
+       # the bytes to the unix socket the proxy serves. Backgrounded as a child of the holder, so
+       # it dies with the pod exactly like tmux does — nothing to clean up separately.
+       # Empty socket = a pod launched with no egress at all (host containment, tests): the vendor
+       # is then unreachable, which is the honest consequence of not provisioning one.
+       if [ -n "$egress_sock" ]; then
+         "$socat_bin" TCP-LISTEN:"$egress_port",bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:"$egress_sock" &
+       fi
        "$tmux_bin" -S "$sock" new-session -d -s "$name" "$@"
        exec sleep infinity
-     ' sh "$TMUX_BIN" "$TMUX_SOCK" "$TMUX_SESSION_NAME" "${COMMAND[@]}"
+     ' sh "$SOCAT_BIN" "${LCARS_POD_EGRESS_SOCK:-}" "$EGRESS_PORT" "$TMUX_BIN" "$TMUX_SOCK" "$TMUX_SESSION_NAME" "${COMMAND[@]}"
 
 # bwrap does NOT return (holder sleep infinity): this process IS the live pod (the spawner's Port handle).
 # Validation is ASYNC, spawner-side: `tmux -S "$TMUX_SOCK" list-sessions` → is there a "lcars-pod-$POD_ID"

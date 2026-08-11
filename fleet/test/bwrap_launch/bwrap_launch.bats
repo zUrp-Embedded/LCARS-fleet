@@ -174,9 +174,65 @@ teardown() { rm -rf "$TMP_BASE"; }
 @test "asm: --die-with-parent (orphan-safe)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$output" == *"--die-with-parent"* ]]
 }
-@test "asm: --unshare-all --share-net" {
+@test "asm: the sandbox is SEALED — --unshare-all, and --share-net exists nowhere any more" {
+  # The pod has no route to anywhere. Its egress leaves through a unix socket and a CONNECT proxy
+  # that decides host by host; sharing the host stack would put the open web on the same pipe as
+  # the vendor API, and denying `WebFetch` while `Bash` has `curl` only moves the gesture from a
+  # traced tool to an untraced one.
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$output" == *"--unshare-all"* ]]; [[ "$output" == *"--share-net"* ]]
+  [[ "$output" == *"--unshare-all"* ]]
+  [[ "$output" != *"--share-net"* ]]
+}
+
+@test "egress: no socket provisioned -> no bind, no socat, and the pod is simply sealed" {
+  unset LCARS_POD_EGRESS_SOCK
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *"/run/lcars/egress"* ]]
+}
+
+@test "egress: a socket WITHOUT its provisioned dir is FATAL, never a silent open pod" {
+  export LCARS_FLEET_EGRESS_SOCK_BASE="$TMP_BASE/nonexistent-egress"
+  export LCARS_POD_EGRESS_SOCK="$TMP_BASE/nonexistent-egress/pod-1/sock"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"dir socket egress"* ]]
+}
+
+@test "egress: socat MISSING is exit 2 — a missing package must not degrade into an open pod" {
+  export LCARS_FLEET_EGRESS_SOCK_BASE="$TMP_BASE/egress"
+  mkdir -p "$TMP_BASE/egress/pod-1"
+  export LCARS_POD_EGRESS_SOCK="$TMP_BASE/egress/pod-1/sock"
+  export LCARS_SOCAT_BIN="/nonexistent/socat"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"socat missing"* ]]
+}
+
+@test "egress: provisioned -> the dir is bound, socat is bound RO, and the proxy env is set" {
+  export LCARS_FLEET_EGRESS_SOCK_BASE="$TMP_BASE/egress"
+  mkdir -p "$TMP_BASE/egress/pod-1"
+  export LCARS_POD_EGRESS_SOCK="$TMP_BASE/egress/pod-1/sock"
+  export LCARS_SOCAT_BIN="$TMP_BASE/fake-socat"; : > "$LCARS_SOCAT_BIN"; chmod +x "$LCARS_SOCAT_BIN"
+
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--bind $TMP_BASE/egress/pod-1 $TMP_BASE/egress/pod-1"* ]]
+  [[ "$output" == *"--ro-bind $LCARS_SOCAT_BIN $LCARS_SOCAT_BIN"* ]]
+  # The vendor CLI honours these natively (undici).
+  [[ "$output" == *"--setenv HTTPS_PROXY http://127.0.0.1:8118"* ]]
+  # NO_PROXY is set EMPTY on purpose: an inherited one is a documented bypass of the only wall.
+  [[ "$output" == *"--setenv NO_PROXY "* ]]
+}
+
+@test "egress: the BASE dir is never bound — a sibling's socket is a sibling's allowlist" {
+  export LCARS_FLEET_EGRESS_SOCK_BASE="$TMP_BASE/egress"
+  mkdir -p "$TMP_BASE/egress/pod-1"
+  export LCARS_POD_EGRESS_SOCK="$TMP_BASE/egress/pod-1/sock"
+  export LCARS_SOCAT_BIN="$TMP_BASE/fake-socat"; : > "$LCARS_SOCAT_BIN"; chmod +x "$LCARS_SOCAT_BIN"
+
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$output" != *"--bind $TMP_BASE/egress $TMP_BASE/egress "* ]]
 }
 @test "asm: bind pod_dir + creds (single-file .credentials.json) + git-mirror RO" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true

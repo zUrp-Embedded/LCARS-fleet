@@ -10,6 +10,11 @@ metadata:
   # Under bwrap, HOME=pod_dir -> claude reads pod_dir/.claude, never the human's ~/.claude,
   # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
   containment: bwrap
+  # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
+  # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
+  # `vendor-only` : leur matiere de reference arrive par leur brief, leur lot, ou la face montee.
+  # C'est une DECLARATION, pas une derivation : le jour ou un producteur en a besoin, il le dit.
+  network: egress
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
   # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la

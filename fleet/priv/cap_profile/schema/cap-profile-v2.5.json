@@ -28,6 +28,11 @@
         "containment": {
           "type": "string"
         },
+        "network": {
+          "type": "string",
+          "enum": ["vendor-only", "egress"],
+          "description": "Ce que le pod peut joindre. Absent = `vendor-only` (fail-closed) : la sortie passe par le proxy CONNECT du pod, dont l'allowlist est la declaration d'endpoints du vendor et rien d'autre. `egress` ajoute les hotes declares par le role. Un pod n'a JAMAIS de namespace reseau : le choix porte sur l'allowlist, pas sur l'ouverture."
+        },
         "role_index": {
           "type": "integer",
           "minimum": 0,

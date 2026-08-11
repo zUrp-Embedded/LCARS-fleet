@@ -12,6 +12,11 @@ kind: CapabilityProfile
 metadata:
   name: starfleet
   containment: bwrap
+  # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
+  # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
+  # `vendor-only` : leur matiere de reference arrive par leur brief, leur lot, ou la face montee.
+  # C'est une DECLARATION, pas une derivation : le jour ou un producteur en a besoin, il le dit.
+  network: egress
   # Role identity (the metadata IS the single source of the WHAT): role_index = role slot in the
   # UUID — and 0 IS starfleet, the ONLY fleet-scoped pod (repo 0000 in its UUID, kill_class 0 →
   # `pkill -f 1badcafe`/`2badcafe` never touch it). The old `protected`/`fleet_level` bits are GONE
