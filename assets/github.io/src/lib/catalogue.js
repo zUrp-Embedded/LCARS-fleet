@@ -67,3 +67,68 @@ export function verdicts() {
   const p = join(PRIV, 'workflow', 'schema', 'gate-decision-v1.json');
   return JSON.parse(readFileSync(p, 'utf8')).properties.decision.enum;
 }
+
+// ─── LE LAYOUT DU CATALOGUE — pour la page de manuel ────────────────────────
+// Les arbres, les versions supportees, les surcharges fines et les chemins d'installation
+// viennent des DEUX modules qui en sont l'autorite. Une liste recopiee dans une page perimerait
+// a la premiere addition d'arbre, et personne ne relit une page de manuel pour verifier.
+import { existsSync } from 'node:fs';
+
+const CATALOGUE_EX = join(here, '..', '..', '..', '..', 'fleet', 'lib', 'fleet', 'catalogue.ex');
+const LAYOUT_EX = join(here, '..', '..', '..', '..', 'fleet', 'lib', 'fleet', 'layout.ex');
+
+/** Les arbres d'un catalogue : leur nom d'atome et leur chemin relatif, dans l'ordre du module. */
+export function trees() {
+  const src = readFileSync(CATALOGUE_EX, 'utf8');
+  const out = [...src.matchAll(/^\s*@rel_([a-z_]+)\s+"([^"]+)"/gm)]
+    .map((m) => ({ key: m[1], path: m[2] }));
+  if (out.length === 0) throw new Error('catalogue.js: aucun arbre `@rel_*` lu');
+  return out;
+}
+
+/** Les generations de contrat que ce runtime sait consommer. */
+export function supportedApiVersions() {
+  const src = readFileSync(CATALOGUE_EX, 'utf8');
+  const m = src.match(/@supported_api_versions\s+\[([^\]]+)\]/);
+  if (!m) throw new Error('catalogue.js: `@supported_api_versions` illisible');
+  return m[1].split(',').map((v) => v.trim()).filter(Boolean);
+}
+
+/** Le nom reserve du catalogue metier livre dans le release. */
+export function bundledName() {
+  const src = readFileSync(CATALOGUE_EX, 'utf8');
+  const m = src.match(/@bundled_name\s+"([^"]+)"/);
+  if (!m) throw new Error('catalogue.js: `@bundled_name` illisible');
+  return m[1];
+}
+
+/** Les arbres qui portent une surcharge FINE — ceux qu'on peut deplacer seuls. */
+export function fineOverrides() {
+  const src = readFileSync(CATALOGUE_EX, 'utf8');
+  const block = src.match(/@fine_overrides\s+%\{([\s\S]*?)\n  \}/);
+  if (!block) throw new Error('catalogue.js: `@fine_overrides` illisible');
+  return [...block[1].matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]);
+}
+
+/** Ou vivent les catalogues, et ou se declare leur activite. */
+export function paths() {
+  const src = readFileSync(LAYOUT_EX, 'utf8');
+  const pick = (name) => {
+    const m = src.match(new RegExp(`@${name}\\s+"([^"]+)"`));
+    if (!m) throw new Error(`catalogue.js: @${name} illisible dans layout.ex`);
+    return m[1];
+  };
+  const dir = pick('catalogues_dirname');
+  return {
+    shipped: `${pick('platform_root')}/${dir}`,
+    operator: `~/.lcars/${dir}`,
+    active: `~/.lcars/${pick('active_catalogues_basename')}`
+  };
+}
+
+/** Combien de roles porte le catalogue SYSTEME — la mecanique, jamais le metier. */
+export function systemRoleCount() {
+  const dir = join(PRIV, 'catalogue-system', 'cap_profile', 'canon', 'cap-profiles');
+  if (!existsSync(dir)) throw new Error('catalogue.js: catalogue-system introuvable');
+  return readdirSync(dir).filter((f) => f.endsWith('.yaml')).length;
+}
