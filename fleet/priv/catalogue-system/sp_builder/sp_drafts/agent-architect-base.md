@@ -76,6 +76,18 @@ Appelle le tool MCP **`mcp__fleet__create_issue`** avec :
   pinné est TOUJOURS le commit du système : tu n'écris pas dans le registre, donc aucun sha à toi
   ne peut y être cité.
 
+- `lot` : **quand la matière du ticket est des FICHIERS, pas des mots** — plusieurs documents, un
+  dossier, des images, une maquette. Tu les travailles dans ta face workshop (avec ton humain, au
+  terminal), tu les **committes** — et tu t'arrêtes là : **tu ne pousses pas**, tu n'en as ni le
+  droit ni le besoin. Tu nommes ton lot ici par un slug (`[a-z0-9][a-z0-9_-]*`, ex.
+  `morse-ui-v2`). La fleet publie tes commits en `lcars/lot-<slug>` et l'espace de travail du
+  producteur **part de là** : il reçoit les fichiers, pas leur description. Ton `brief` dit ce
+  qu'il faut EN FAIRE.
+  **Un lot impubliable REFUSE le ticket** (nom qui n'est pas un slug, rien de commité, secret
+  détecté dans la matière) : un ticket qui nomme une matière qu'il ne peut pas porter enverrait un
+  producteur travailler contre du matériau qu'il n'a jamais vu. Le message d'erreur dit lequel des
+  trois — corrige et re-tire.
+
 **Si le dispatch échoue APRÈS avoir matérialisé le brief** (le tool rend une erreur mais le doc
 `briefs/…` est déjà commité, parfois déjà poussé) : c'est un dégradé PRÉVU — la matérialisation
 précède la création du ticket et ne se défait pas. Ce doc appartient au système, et tu ne pourrais

@@ -123,4 +123,80 @@ defmodule Fleet.Forge.ProtocolTest do
       assert ForgeProtocol.fleet_prs_by_issue([]) == []
     end
   end
+
+  describe "lot_branch/1 + valid_lot_branch?/1 (build+validate co-located)" do
+    test "a slug becomes the lot branch, unchanged" do
+      assert {:ok, "lcars/lot-morse-ui-v2"} = ForgeProtocol.lot_branch("morse-ui-v2")
+    end
+
+    test "a name that is not a slug is REFUSED, never silently renamed" do
+      # The transformation is the danger, not the refusal: a branch would land on the forge under
+      # a name the architect never chose, and the ticket would point at it.
+      assert {:error, {:invalid_slug, "Morse UI v2"}} = ForgeProtocol.lot_branch("Morse UI v2")
+
+      assert {:error, {:invalid_slug, "ecran/accueil"}} =
+               ForgeProtocol.lot_branch("ecran/accueil")
+    end
+
+    test "the validator accepts what the builder produces, and nothing that merely looks like it" do
+      {:ok, built} = ForgeProtocol.lot_branch("paquet-3")
+      assert ForgeProtocol.valid_lot_branch?(built)
+
+      # Each of these reaches the dispatch as a clone base if it passes.
+      refute ForgeProtocol.valid_lot_branch?("refs/heads/lcars/lot-paquet-3")
+      refute ForgeProtocol.valid_lot_branch?("lcars/issue-7-engineer")
+      refute ForgeProtocol.valid_lot_branch?("lcars/lot-")
+      refute ForgeProtocol.valid_lot_branch?("main")
+      refute ForgeProtocol.valid_lot_branch?("workshop")
+      refute ForgeProtocol.valid_lot_branch?(nil)
+    end
+  end
+
+  describe "lot_pointer_line/2 + parse_lot_pointer/1 (round-trip through a real ticket body)" do
+    @sha "0123456789abcdef0123456789abcdef01234567"
+
+    test "round-trip through a body that also carries a summary" do
+      {:ok, ref} = ForgeProtocol.lot_branch("paquet-3")
+
+      body = """
+      Reprendre la doc du protocole Morse a partir du paquet joint.
+
+      ---
+      #{ForgeProtocol.lot_pointer_line(ref, @sha)}
+      """
+
+      assert {:ok, {^ref, @sha}} = ForgeProtocol.parse_lot_pointer(body)
+    end
+
+    test "a ticket WITHOUT a lot is the ordinary case, not an error" do
+      assert :none = ForgeProtocol.parse_lot_pointer("Just a plain ticket body.")
+      assert :none = ForgeProtocol.parse_lot_pointer(nil)
+    end
+
+    test "the pointer SHAPE with an out-of-scheme ref is an ERROR, never :none" do
+      # THE property of this parser: `:none` here would turn a ticket that HAS matter into one
+      # that has none, and the producer would work against material it never saw.
+      body = "Lot: refs/heads/evil @ #{@sha}"
+
+      assert {:error, {:invalid_lot_ref, "refs/heads/evil"}} =
+               ForgeProtocol.parse_lot_pointer(body)
+    end
+
+    test "the two pointers do not read each other in a body that carries BOTH" do
+      {:ok, lot_ref} = ForgeProtocol.lot_branch("paquet-3")
+
+      body = """
+      Un resume.
+
+      #{Fleet.Layout.brief_pointer_line("briefs/issue-7-scribe.md", @sha)}
+      #{ForgeProtocol.lot_pointer_line(lot_ref, @sha)}
+      """
+
+      # A parser matching the other line would make the dispatch clone `briefs/x.md` as a branch.
+      assert {:ok, {^lot_ref, @sha}} = ForgeProtocol.parse_lot_pointer(body)
+
+      assert {:ok, {"briefs/issue-7-scribe.md", @sha}} =
+               Fleet.Layout.parse_brief_pointer(body)
+    end
+  end
 end

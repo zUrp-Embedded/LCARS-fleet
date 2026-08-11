@@ -606,6 +606,74 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:resolver_base, "main"}
     end
 
+    test "a ticket carrying a LOT clones from the lot and still gates against its FACE" do
+      # The lot is the MATTER (docs, a directory, images) published as `lcars/lot-<slug>`. It moves
+      # the CLONE base only: the producer starts from the matter instead of the head of its face,
+      # while the deliverable is still judged against where it will land. The resolver has pinned
+      # the two separately since F-PARALLEL-PR-CONFLICT — this is the caller that needed it.
+      sha = String.duplicate("ab", 20)
+      me = self()
+
+      payload =
+        eng_issue(%{
+          "body" => "traite le paquet\n\nLot: lcars/lot-morse-ui-v2 @ #{sha}"
+        })
+
+      capturing_resolver = fn _repo, r_opts ->
+        send(
+          me,
+          {:bases, Keyword.get(r_opts, :base_branch), Keyword.get(r_opts, :gate_base_branch)}
+        )
+
+        {:ok, %{"base_sha" => sha}}
+      end
+
+      opts = dispatch_opts(project_resolver: capturing_resolver)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
+      assert_received {:bases, "lcars/lot-morse-ui-v2", "main"}
+    end
+
+    test "an ordinary ticket names NO gate base — the lot rail costs the common path nothing" do
+      me = self()
+
+      capturing_resolver = fn _repo, r_opts ->
+        send(
+          me,
+          {:bases, Keyword.get(r_opts, :base_branch), Keyword.get(r_opts, :gate_base_branch)}
+        )
+
+        {:ok, nil}
+      end
+
+      opts = dispatch_opts(project_resolver: capturing_resolver)
+      assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(eng_issue(), opts)
+      assert_received {:bases, "main", nil}
+    end
+
+    test "a lot pointer with an out-of-scheme ref STOPS the dispatch, never falls back to the face" do
+      # The fallback is the failure worth preventing: a producer starting from the head of its face
+      # and working against matter it never saw, with nothing saying so.
+      payload = eng_issue(%{"body" => "Lot: refs/heads/evil @ #{String.duplicate("ab", 20)}"})
+
+      opts = dispatch_opts(project_resolver: fn _repo, _o -> {:ok, nil} end)
+
+      assert {:error, {:lot_pointer, {:invalid_lot_ref, "refs/heads/evil"}}} =
+               StepDispatcher.dispatch_issue(payload, opts)
+    end
+
+    test "a lot branch that MOVED since the ticket was written → refused, the pinned sha is an anchor" do
+      # Re-publishing under a lot name already used moves the branch. Without this comparison the
+      # older ticket would dispatch onto the newer matter, differing only by a sha nobody reads.
+      pinned = String.duplicate("ab", 20)
+      moved = String.duplicate("cd", 20)
+      payload = eng_issue(%{"body" => "Lot: lcars/lot-paquet-3 @ #{pinned}"})
+
+      opts = dispatch_opts(project_resolver: fn _repo, _o -> {:ok, %{"base_sha" => moved}} end)
+
+      assert {:error, {:lot_moved, {"lcars/lot-paquet-3", ^pinned, ^moved}}} =
+               StepDispatcher.dispatch_issue(payload, opts)
+    end
+
     test "resolved project → injected into spawn_opts (:project, F-03 pinned base_sha)" do
       payload = eng_issue()
 

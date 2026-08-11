@@ -125,7 +125,14 @@ spec:
       - tool_search_bash
     # Destructive patterns come from the universal baseline
     # (`baseline/git-denied.yaml`, intangible) — not duplicated here.
-    git_ops_denied: []
+    #
+    # `push` added here for the SAME reason as every other role: NO pod publishes its own
+    # work. The baseline denies only what is destructive and states that a plain push is
+    # legitimate outside it, so an empty list here granted the architect a `git push` its own
+    # face contract forbids (`Fleet.Project.Architect`: "nothing pushes this face on its own").
+    # Publication is a SYSTEM act — the world-side gate (`Fleet.Workflow.DeliverableGate`:
+    # base ancestry, commit identity, secret scan) can only bind what the system pushes.
+    git_ops_denied: [push]
   knowledge:
     # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that NEVER
     # existed on disk — with the skills root wired, a whitelist naming a ghost fails the spawn

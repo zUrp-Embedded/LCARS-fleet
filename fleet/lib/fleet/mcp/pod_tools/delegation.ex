@@ -96,13 +96,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Refusals (fail-closed, nothing is created): non-architect role / unknown pod (gate),
   `:role_token_unavailable` (the role account's token absent = provisioning hole —
   posting under the system account would mask traceability and bypass
-  least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge).
+  least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge),
+  `{:lot_unpublishable, name, reason}` (a lot was named and could not be published).
   """
   @spec create_issue(
           String.t(),
           String.t(),
           map(),
           {String.t(), String.t()} | nil,
+          String.t() | nil,
+          integer() | nil,
+          String.t() | nil,
+          [integer()] | nil,
           String.t() | nil
         ) ::
           {:ok, map()} | {:error, term()}
@@ -114,7 +119,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
         summary \\ nil,
         supersedes \\ nil,
         destination \\ nil,
-        depends_on \\ nil
+        depends_on \\ nil,
+        lot \\ nil
       )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
@@ -146,7 +152,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # supersede retirement still runs on the reuse path — it is itself idempotent via the preflight state
       # (an already-closed target is a no-op), so a first attempt that timed out AFTER the create but
       # BEFORE the retirement is completed by the retry.
-      marker = op_marker(title, brief, summary, supersedes, brief_pointer)
+      marker = op_marker(title, brief, summary, supersedes, brief_pointer, lot)
 
       case find_open_issue_with_marker(forge, repo, marker) do
         {:ok, existing} ->
@@ -154,34 +160,32 @@ defmodule Fleet.MCP.PodTools.Delegation do
            retire_superseded(forge, repo, supersedes, target_state, idempotent_result(existing))}
 
         :none ->
-          {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
+          # THE LOT FIRST, and its failure is a REFUSAL where the brief's is a degradation. The two
+          # are not the same object: a brief that cannot be materialized still travels, inline, so
+          # the producer has its order. A lot has no inline form — degrading would create a ticket
+          # that HAS matter into one that has none, and the producer would work against material it
+          # never saw. Published before the brief doc so a refusal costs no ops push either.
+          with {:ok, lot_pointer} <- publish_lot(repo, role, lot) do
+            {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
 
-          full_body =
-            body |> with_pointer(pointer) |> with_supersedes(supersedes) |> with_op_marker(marker)
+            full_body =
+              body
+              |> with_pointer(pointer)
+              |> with_lot(lot_pointer)
+              |> with_supersedes(supersedes)
+              |> with_op_marker(marker)
 
-          case do_create_issue(
-                 forge,
-                 repo,
-                 title,
-                 full_body,
-                 [token: identity.token],
-                 destination
-               ) do
-            {:ok, result} ->
-              # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge
-              # refuses to close a blocked ticket, and admission refuses to START one while a
-              # blocker is open (`wait/depends`). Without the edge the constraint lives only in the
-              # brief: it holds as long as an agent reads it, which is to say it does not.
-              #
-              # Best-effort ASSUMED, and it is the only asymmetry with the supersede: here the
-              # ticket is already created and correct — a missing edge degrades the ORDER, it makes
-              # nothing false. The supersede refuses to close when the carry-over fails, because
-              # closing RELEASES. Writing an edge < releasing one.
-              result = attach_dependencies(forge, repo, result, depends_on)
-              {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
-
-            err ->
-              err
+            create_and_finish(
+              forge,
+              repo,
+              title,
+              full_body,
+              identity,
+              destination,
+              depends_on,
+              supersedes,
+              target_state
+            )
           end
       end
     else
@@ -195,6 +199,38 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # Split out of `create_issue/9` so the lot's `with` stays readable: the creation and everything
+  # the forge owes the ticket afterwards (dependency edges, supersede retirement).
+  defp create_and_finish(
+         forge,
+         repo,
+         title,
+         full_body,
+         identity,
+         destination,
+         depends_on,
+         supersedes,
+         target_state
+       ) do
+    case do_create_issue(forge, repo, title, full_body, [token: identity.token], destination) do
+      {:ok, result} ->
+        # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge
+        # refuses to close a blocked ticket, and admission refuses to START one while a
+        # blocker is open (`wait/depends`). Without the edge the constraint lives only in the
+        # brief: it holds as long as an agent reads it, which is to say it does not.
+        #
+        # Best-effort ASSUMED, and it is the only asymmetry with the supersede: here the
+        # ticket is already created and correct — a missing edge degrades the ORDER, it makes
+        # nothing false. The supersede refuses to close when the carry-over fails, because
+        # closing RELEASES. Writing an edge < releasing one.
+        result = attach_dependencies(forge, repo, result, depends_on)
+        {:ok, retire_superseded(forge, repo, supersedes, target_state, result)}
+
+      err ->
+        err
     end
   end
 
@@ -1121,6 +1157,79 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp with_pointer(brief, {ref, sha}),
     do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
+  # ── the user LOT ───────────────────────────────────────────────────────────────────────────
+  # The brief is the TASK; the lot is the MATTER it works on — several docs, a directory, images,
+  # written by the human and the delegating role together on the workshop face. No text field
+  # carries that, and it does not have to: git already carries directories and binaries, so the
+  # lot travels as a COMMIT and the ticket names it. The producer's clone then starts FROM that
+  # commit instead of from the head of its face.
+  #
+  # THE POD DOES NOT PUSH IT. Same invariant as every deliverable: the producer commits, the
+  # SYSTEM publishes, through the one boundary that gates a push (base ancestry, commit identity,
+  # secret scan). Reusing `Deliverable` rather than pushing here is the whole point — a second
+  # push path would be content reaching the forge without that gate.
+
+  defp publish_lot(_repo, _role, nil), do: {:ok, nil}
+
+  defp publish_lot(repo, role, name) when is_binary(name) do
+    dir = lot_workspace(repo)
+    face = Fleet.Layout.workshop_branch()
+
+    with {:ok, ref} <- Fleet.Forge.Protocol.lot_branch(name),
+         {:ok, identity} <- Fleet.Credentials.ForgeIdentity.for_role(role),
+         :ok <- Fleet.Project.GitOps.run(["-C", dir, "fetch", "origin", face], auth: true),
+         {:ok, base_sha} <- Fleet.Project.GitOps.read(["-C", dir, "rev-parse", "FETCH_HEAD"]),
+         {:ok, %{commit_sha: sha}} <- publish_lot_commits(dir, ref, base_sha, identity) do
+      {:ok, {ref, sha}}
+    else
+      {:error, reason} ->
+        Logger.warning(
+          "Delegation: create_issue REFUSED: lot #{inspect(name)} unpublishable (#{inspect(reason)}) — " <>
+            "a ticket that names matter it cannot carry is worse than no ticket"
+        )
+
+        {:error, {:lot_unpublishable, name, reason}}
+    end
+  end
+
+  # `:coauthor_role` is deliberately ABSENT: the gate's trailer check exists to attest WHICH
+  # producer made a deliverable, and a lot has no producer — it is what the human and the
+  # delegating role wrote at a terminal. The identity check still binds (the commits must be
+  # authored by the human), and so do base ancestry and the secret scan.
+  defp publish_lot_commits(dir, ref, base_sha, identity) do
+    Fleet.Workflow.Deliverable.publish(%{
+      mode: :git_native,
+      workspace: dir,
+      base_sha: base_sha,
+      allowed_emails:
+        Fleet.Credentials.ForgeIdentity.allowed_emails(:git_native, identity.author_email),
+      remote: "origin",
+      target_branch: ref,
+      push?: true
+    })
+  end
+
+  # The lot is sourced from the WORKSHOP face — a layout fact, not a privilege of the calling role:
+  # `workshop` is where a project's drafting matter lives (`Fleet.Layout`), which is what a lot is
+  # made of. The root is overridable the same way the brief's ops root is, for tests that own a
+  # temporary clone.
+  defp lot_workspace(repo) do
+    root =
+      Application.get_env(:fleet_mcp, :lot_workshop_root) || Fleet.Layout.workshop_root()
+
+    Path.join(root, Fleet.Layout.project_name(repo))
+  end
+
+  defp with_lot(body, nil), do: body
+
+  defp with_lot(body, {ref, sha}) do
+    body <>
+      "\n\n---\n" <>
+      "_Le paquet ci-dessous est la **matière** de ce ticket : ton espace de travail part de ce " <>
+      "commit exact, tu n'as rien à cloner toi-même._\n" <>
+      Fleet.Forge.Protocol.lot_pointer_line(ref, sha)
+  end
+
   # Forge body carries supersession correlation across sessions.
   defp with_supersedes(body, nil), do: body
 
@@ -1128,11 +1237,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
   # Retry-stable marker in the raw, non-rendered issue body.
-  defp op_marker(title, brief, summary, supersedes, brief_pointer) do
+  defp op_marker(title, brief, summary, supersedes, brief_pointer, lot) do
     sig =
       :crypto.hash(
         :sha256,
-        :erlang.term_to_binary({title, brief, summary, supersedes, brief_pointer})
+        :erlang.term_to_binary({title, brief, summary, supersedes, brief_pointer, lot})
       )
       |> Base.encode16(case: :lower)
       |> binary_part(0, 16)

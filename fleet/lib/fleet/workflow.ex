@@ -44,6 +44,13 @@ defmodule Fleet.Workflow do
       # pilot (the review posted at completion, the merge report). The domain owns where a committed
       # object goes; the rule of what stays on the surface travels with it.
       Pinning,
+      # Deliverable exported: the publication boundary has a SECOND caller since the user lot
+      # (`Delegation.create_issue`, mcp — matter committed on the workshop face, published as a
+      # branch the producer clones from). Same hardened gate, same bounded system-owned push. The
+      # alternative was a second publication path for lot content, which is exactly the thing this
+      # module exists to make impossible: content reaching the forge without base ancestry, commit
+      # identity and secret scan.
+      Deliverable,
       # OpsObjectSync exported: the ops write serializer is SUPERVISED by Fleet.Pilot.Application
       # (always-on, next to the ForgeFinch pool — MCP briefs write outside the step rail). The domain
       # owns the engine (OpsObject, internal); pilot only starts the gate → the child spec must be

@@ -134,7 +134,7 @@ defmodule Fleet.MCP.PodTools do
           "`briefs/<slug>.md`) + `brief_sha` (introducing COMMIT sha) and `brief` then carries the " <>
           "human summary, unchanged. Inline `brief` → the SYSTEM owns the commit; `brief_ref`/" <>
           "`brief_sha` supplied → they name a doc ALREADY on the forge — this pointer is NEVER a " <>
-          "vehicle to get your local commits pushed. " <>
+          "vehicle to get your local commits pushed: to hand FILES to the producer, use `lot`. " <>
           "Returns {\"status\":\"issue_created\",\"issue\":N," <>
           "\"title\":<echoed as registered — confirm your number-to-title association on it>}. " <>
           "REWORK of a rejected/abandoned ticket: pass `supersedes: <old issue number>` — the " <>
@@ -158,6 +158,18 @@ defmodule Fleet.MCP.PodTools do
         "summary" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"},
+        "lot" => %{
+          "type" => "string",
+          "description" =>
+            "THE MATTER this ticket works on, when it is FILES rather than words: several " <>
+              "documents, a directory, images. Commit them on your workshop face (do not push — " <>
+              "you cannot, and you do not have to), then name the lot here with a slug " <>
+              "(`[a-z0-9][a-z0-9_-]*`, e.g. `morse-ui-v2`). The fleet publishes your commits as " <>
+              "`lcars/lot-<slug>` and the producer's workspace STARTS from them — it receives the " <>
+              "files, not a description of them. `brief` still says what to DO with the matter. " <>
+              "A lot that cannot be published REFUSES the ticket: a ticket naming matter it " <>
+              "cannot carry would send a producer to work against material it never saw."
+        },
         "supersedes" => %{"type" => "integer"},
         "depends_on" => %{
           "type" => "array",
@@ -777,7 +789,8 @@ defmodule Fleet.MCP.PodTools do
              summary,
              args["supersedes"],
              args["destination"],
-             args["depends_on"]
+             args["depends_on"],
+             args["lot"]
            ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}

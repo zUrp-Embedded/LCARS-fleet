@@ -79,6 +79,84 @@ defmodule Fleet.Forge.Protocol do
   # Builder/reader: `Fleet.Forge.Client.post_route`/`get_route`.)
 
   # ============================================================
+  # User-lot branch `lcars/lot-<slug>` + its ticket-body pointer `Lot: <ref> @ <sha>`.
+  # ============================================================
+
+  # WHAT A LOT IS, and why it is not a brief. The brief is the TASK: what the fleet asks, one
+  # markdown the system writes and seals. A lot is the MATTER the task works on — several docs, a
+  # directory, images — produced by the human and the architect together on the workshop face. Text
+  # cannot carry it, so the lot travels as what git already is: a commit. The ticket then names that
+  # commit, and the producer's clone starts FROM it instead of from the head of its face.
+  #
+  # The two pointers coexist in one body and must never read each other: `Brief:` addresses a path
+  # in ops (`Fleet.Layout`, which owns that shape), `Lot:` addresses a BRANCH — forge protocol, so
+  # it lives here, glued to the branch builder like every other format in this module.
+
+  # SINGLE-SOURCE literal: builder AND validator derive from it, same discipline as the
+  # feature-branch above — one `lcars/` namespace, minted in one file.
+  @lot_branch_prefix "lcars/lot-"
+  @lot_branch_rx Regex.compile!(
+                   "\\A" <> Regex.escape(@lot_branch_prefix) <> "[a-z0-9][a-z0-9_-]*\\z"
+                 )
+  @lot_pointer_re Regex.compile!("^Lot: (\\S+) @ ([0-9a-f]{40})$", "m")
+
+  @doc """
+  Builds the user-lot branch `lcars/lot-<slug>` from the name the architect gives its lot.
+
+  VALIDATES, never transforms (`Fleet.Slug.cast/1` — the platform's slug authority, whose whole
+  contract is "no transformation"). A lot name that is not a slug is refused: silently renaming an
+  architect's `Morse UI v2` into `morse-ui-v2` would put a branch on the forge under a name nobody
+  chose, and the architect is the one actor that can produce a slug on demand.
+  """
+  @spec lot_branch(String.t()) :: {:ok, String.t()} | {:error, {:invalid_slug, term()}}
+  def lot_branch(name) do
+    with {:ok, slug} <- Fleet.Slug.cast(name), do: {:ok, @lot_branch_prefix <> slug}
+  end
+
+  @doc """
+  The DEFENSIVE twin of `lot_branch/1`: a ref read back out of a ticket BODY, which anyone can edit.
+
+  Refuses everything that is not exactly a lot branch — `refs/heads/…` (a fully-qualified ref would
+  make the clone resolve something else), a feature branch, a bare face branch, the prefix with no
+  slug. A ref that reaches the dispatch decides where a producer clones FROM; it is never taken on
+  the strength of having the right shape around it.
+  """
+  @spec valid_lot_branch?(term()) :: boolean()
+  def valid_lot_branch?(ref) when is_binary(ref), do: Regex.match?(@lot_branch_rx, ref)
+  def valid_lot_branch?(_), do: false
+
+  @doc """
+  The pointer LINE (`Lot: <ref> @ <sha>`) posted in the ticket body — twin of
+  `Fleet.Layout.brief_pointer_line/2`, same shape, same per-line anchoring.
+  """
+  @spec lot_pointer_line(String.t(), String.t()) :: String.t()
+  def lot_pointer_line(ref, sha), do: "Lot: #{ref} @ #{sha}"
+
+  @doc """
+  Scans a ticket body for the lot pointer. `:none` when the ticket carries no lot — the ORDINARY
+  case, never an error. `{:error, {:invalid_lot_ref, ref}}` when a line has the full pointer shape
+  (40-hex commit) but an out-of-scheme ref.
+
+  That last clause is the one that matters: answering `:none` there would silently downgrade a
+  ticket that HAS matter into one that has none, and the producer would start from the head of its
+  face and work against material it never saw. A malformed address is an intent with a typo, not an
+  absence of intent.
+  """
+  @spec parse_lot_pointer(String.t() | nil) ::
+          {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_lot_ref, String.t()}}
+  def parse_lot_pointer(nil), do: :none
+
+  def parse_lot_pointer(body) when is_binary(body) do
+    case Regex.run(@lot_pointer_re, body) do
+      nil ->
+        :none
+
+      [_, ref, sha] ->
+        if valid_lot_branch?(ref), do: {:ok, {ref, sha}}, else: {:error, {:invalid_lot_ref, ref}}
+    end
+  end
+
+  # ============================================================
   # Signed STEP_RUN marker `[step_run:<role>:<sha>]` — forge-native anti-runaway counter.
   # ============================================================
 

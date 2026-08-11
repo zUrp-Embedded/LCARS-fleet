@@ -176,8 +176,16 @@ defmodule Fleet.Pilot.StepDispatcher do
              # the junction. `face_branch/1` raises on a value outside the schema enum — a card
              # that bypassed validation must not dispatch onto a guessed branch.
              face = Map.get(step_spec || %{}, "face", "code"),
-             face_opts = Keyword.put(opts, :base_branch, Fleet.Layout.face_branch(face)),
+             face_branch = Fleet.Layout.face_branch(face),
+             # A ticket may carry a LOT: matter (docs, a directory, images) committed by the
+             # delegating role and published as `lcars/lot-<slug>`. It moves the CLONE base only —
+             # the producer starts from the matter instead of the head of its face — while the GATE
+             # base stays the face, so the deliverable is still judged against where it will land.
+             # The resolver pins the two separately already; this is the caller that needed it.
+             {:ok, lot} <- lot_of_issue(issue),
+             face_opts = lot_base_opts(opts, lot, face_branch),
              {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
+             :ok <- refute_moved_lot(lot, project),
              :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
@@ -513,6 +521,39 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp refute_missing_rail(nil), do: {:error, :no_doc_rail_in_catalogue}
   defp refute_missing_rail(name) when is_binary(name), do: {:ok, name}
+
+  # ── the LOT of a ticket ────────────────────────────────────────────────────────────────────
+  # `:none` is the ordinary ticket. A malformed pointer STOPS the dispatch instead of falling back
+  # to the face: the fallback is exactly the failure mode worth preventing — a producer starting
+  # from the head of its face and working against matter it never saw, with nothing saying so.
+  defp lot_of_issue(issue) do
+    case Fleet.Forge.Protocol.parse_lot_pointer(issue["body"]) do
+      :none -> {:ok, nil}
+      {:ok, {_ref, _sha}} = ok -> ok
+      {:error, reason} -> {:error, {:lot_pointer, reason}}
+    end
+  end
+
+  defp lot_base_opts(opts, nil, face_branch), do: Keyword.put(opts, :base_branch, face_branch)
+
+  defp lot_base_opts(opts, {ref, _sha}, face_branch) do
+    opts |> Keyword.put(:base_branch, ref) |> Keyword.put(:gate_base_branch, face_branch)
+  end
+
+  # The ticket pins a COMMIT; the resolver hands back the branch HEAD. Re-publishing under a lot
+  # name already used moves that branch, and the two tickets then differ only by a sha nobody
+  # compares — the older one would silently dispatch onto the newer matter. Comparing here is what
+  # makes the pinned sha an anchor rather than a decoration.
+  defp refute_moved_lot(nil, _project), do: :ok
+
+  defp refute_moved_lot({ref, sha}, project) do
+    case project["base_sha"] do
+      ^sha -> :ok
+      # `{phase, reason}` like every other refusal of this `with` — the else clause logs and
+      # returns on that shape, and a 3-tuple would raise WithClauseError instead of skipping.
+      resolved -> {:error, {:lot_moved, {ref, sha, resolved}}}
+    end
+  end
 
   # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
 
