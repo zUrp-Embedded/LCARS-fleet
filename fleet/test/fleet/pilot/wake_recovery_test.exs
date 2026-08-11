@@ -88,7 +88,14 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       end)
 
     assert log =~ "NOT recorded"
-    refute log =~ "→ incident recorded"
+
+    # LE REFUTE NOMME SA PROPRE CIBLE. `capture_log/1` capture le DEVICE, pas le processus, et ce
+    # fichier est `async: true` : un voisin qui journalise « → incident recorded » pendant la
+    # fenetre faisait tomber un refute global — vert en isolation, rouge en suite complete. Mesure
+    # du 2026-08-11 : c'est `IncidentConsumer: pod.failed pod_1 → incident recorded` qui est passe.
+    # L'intention est « CE reveil n'a pas menti en disant l'ancre posee », et le message porte la
+    # cle du wake : le nommer suffit, sans dependre de qui d'autre ecrit au meme instant.
+    refute log =~ "wake:issue-N-engineer:dead → incident recorded"
   end
 
   test "fail + never seen + re-roll FAILS → escalation :reroll_failed + {:error,{:escalated,_}}" do
