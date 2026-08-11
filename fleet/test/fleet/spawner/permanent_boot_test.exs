@@ -194,8 +194,8 @@ defmodule Fleet.Spawner.PermanentBootTest do
          %{dir: dir} do
       parent = self()
 
-      spawner = fn %Fleet.CapProfile{metadata: %{"name" => n}}, tid, _o ->
-        send(parent, {:spawned, n, tid})
+      spawner = fn %Fleet.CapProfile{metadata: %{"name" => n}}, tid, o ->
+        send(parent, {:spawned, n, tid, o})
         {:ok, spawn(fn -> :ok end)}
       end
 
@@ -209,8 +209,12 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
       # BL-055: DETERMINISTIC permanent pod_id (no `-<os_time>`) → idempotent.
       assert pid_perm == "permanent-starfleet"
-      assert_received {:spawned, "starfleet", ^pid_perm}
-      refute_received {:spawned, "engineer", _}
+      assert_received {:spawned, "starfleet", ^pid_perm, opts}
+      refute_received {:spawned, "engineer", _, _}
+
+      # The pod_id ADDRESSES; `rc_name` is what a human reads in Desktop. This was the one spawn
+      # site passing none, so the fleet's most visible pod showed an internal key.
+      assert opts[:rc_name] == "starfleet"
       refute_received {:spawned, "host-native-probe", _}
     end
 

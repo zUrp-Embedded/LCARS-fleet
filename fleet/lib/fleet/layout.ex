@@ -253,8 +253,14 @@ defmodule Fleet.Layout do
   instead is what previously froze this format: adding `#42` to the name would have silently
   produced a pod with no cwd remap and no checkpoint seed.
   """
-  @spec pod_label(String.t(), String.t(), pos_integer() | nil) :: String.t()
+  @spec pod_label(String.t() | nil, String.t(), pos_integer() | nil) :: String.t()
   def pod_label(project, role, ticket \\ nil)
+
+  # FLEET-LEVEL pod (starfleet): no project to name, so the label IS the role. Handled by the
+  # builder rather than skipped around it — a caller that "has no project" is the exact shape that
+  # produces a fourth hand-rolled label, and the single starting point only holds if every case
+  # has a clause here.
+  def pod_label(nil, role, nil) when is_binary(role), do: role
 
   def pod_label(project, role, nil) when is_binary(project) and is_binary(role),
     do: "#{project}_#{role}"

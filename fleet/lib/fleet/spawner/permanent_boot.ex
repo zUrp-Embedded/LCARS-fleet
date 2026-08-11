@@ -30,9 +30,15 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   require Logger
 
-  # AUTHORITY of the permanent pod_id prefix ("permanent-<role>", deterministic id). Typed ONCE:
-  # PermanentWarden (detection of dead pods to respawn) and Shutdown (drain that EXCLUDES the
-  # residents) DERIVE from it.
+  # AUTHORITY of the permanent pod_id prefix ("permanent-<role>", deterministic id). Typed ONCE,
+  # parsed by `PermanentWarden` alone.
+  #
+  # WHAT THE PREFIX IS FOR, and it is not sorting: the kill/harvest tier already has a carrier, the
+  # `<X>` nibble of the session_id, greppable from a shell on a process cmdline. This prefix answers
+  # a different question in a different place — the warden receives a `pod.failed` EVENT whose
+  # payload carries the `pod_id` and nothing else, no cap-profile. Parsing it is how the ROLE
+  # survives into a respawn. The prefix is a carrier of information in a channel that transports no
+  # other, which is why it is not redundant with the nibble.
   @permanent_prefix "permanent-"
 
   @doc """
@@ -207,7 +213,11 @@ defmodule Fleet.Spawner.PermanentBoot do
     # No boot-from-base anymore (reorg 2026-07-19): the pod itself runs the UNIFIED seed decision
     # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured seed →
     # resume from it; else fresh). PermanentBoot only names the pod — one seed authority, in the pod.
-    case spawner.(cp, pod_id, pod_id: pod_id) do
+    # `rc_name` is what a HUMAN reads in Desktop, and this was the one spawn site that passed none
+    # — the default falls back to a technical string, so the fleet's most visible pod was the only
+    # one showing an internal key. The pod_id addresses, the session_id identifies to the vendor,
+    # the rc_name is read: three strings, three jobs, and only this one faces a person.
+    case spawner.(cp, pod_id, pod_id: pod_id, rc_name: Fleet.Layout.pod_label(nil, name, nil)) do
       {:ok, _pid} ->
         {:ok, pod_id}
 
