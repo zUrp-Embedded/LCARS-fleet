@@ -631,6 +631,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       opts = dispatch_opts(project_resolver: capturing_resolver)
       assert {:ok, {:spawned, _, "engineer"}} = StepDispatcher.dispatch_issue(payload, opts)
       assert_received {:bases, "lcars/lot-morse-ui-v2", "main"}
+
+      # And the lot is a STARTING POINT, not a destination: the PR base is named explicitly,
+      # otherwise the completer opens it on the clone base and the work merges into the matter.
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:project]["pr_base_branch"] == "main"
     end
 
     test "an ordinary ticket names NO gate base — the lot rail costs the common path nothing" do

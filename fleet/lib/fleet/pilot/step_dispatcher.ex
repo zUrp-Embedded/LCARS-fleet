@@ -186,6 +186,7 @@ defmodule Fleet.Pilot.StepDispatcher do
              face_opts = lot_base_opts(opts, lot, face_branch),
              {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
              :ok <- refute_moved_lot(lot, project),
+             project = lot_pr_base(project, lot, face_branch),
              :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
@@ -539,6 +540,18 @@ defmodule Fleet.Pilot.StepDispatcher do
   defp lot_base_opts(opts, {ref, _sha}, face_branch) do
     opts |> Keyword.put(:base_branch, ref) |> Keyword.put(:gate_base_branch, face_branch)
   end
+
+  # WHERE THE DELIVERABLE LANDS, when the clone base is a lot. The completer opens the PR on
+  # `pr_base_branch || base_branch`, and with a lot `base_branch` is the lot itself — the producer's
+  # work would merge INTO the matter it was given, on a branch nobody reads, and the face would
+  # never see it. Naming the PR base explicitly is what keeps the lot a starting point rather than
+  # a destination. Only set when there IS a lot: on the ordinary path the two coincide and a second
+  # key saying so would be a value to keep in sync for nothing.
+  defp lot_pr_base(project, nil, _face_branch), do: project
+  defp lot_pr_base(nil, _lot, _face_branch), do: nil
+
+  defp lot_pr_base(project, {_ref, _sha}, face_branch),
+    do: Map.put(project, "pr_base_branch", face_branch)
 
   # The ticket pins a COMMIT; the resolver hands back the branch HEAD. Re-publishing under a lot
   # name already used moves that branch, and the two tickets then differ only by a sha nobody
