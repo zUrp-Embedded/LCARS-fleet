@@ -382,11 +382,50 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp encode(map), do: Jason.encode!(map) <> "\n"
 
+  # `File.mkdir_p/1` DISCARDS the error of every intermediate level and reports only the LEAF: it
+  # recurses on the parent, drops that result, then calls make_dir on the child. A refusal two
+  # levels up therefore surfaces as a bare `:enoent` on the child — an errno that reads as "absent
+  # parent" while the parent is present and merely closed. MEASURED: mkdir_p("/run/lcars/mcp/pod_x")
+  # under a root-owned `/run` yields `:enoent`, not `:eacces`, and points the operator at a
+  # directory that was never the problem.
+  #
+  # So the errno alone cannot name the fault: carry the first component that does NOT exist plus
+  # the writability of its parent. That pair separates the two cases the bare errno merges — a
+  # level nobody created, versus a level we are not allowed to create under.
   defp ensure_parent_dir(path) do
-    case File.mkdir_p(Path.dirname(path)) do
+    dir = Path.dirname(path)
+
+    case File.mkdir_p(dir) do
       :ok -> :ok
-      {:error, reason} -> {:error, {:mkdir, reason}}
+      {:error, reason} -> {:error, {:mkdir, reason, blame(dir)}}
     end
+  end
+
+  defp blame(dir) do
+    parts = Path.split(dir)
+
+    missing =
+      1..length(parts)
+      |> Enum.map(&(parts |> Enum.take(&1) |> Path.join()))
+      |> Enum.find(&(not File.exists?(&1)))
+
+    case missing do
+      # Every level exists: the refusal is on `dir` itself (mode, read-only mount, quota).
+      nil ->
+        %{dir: dir, first_missing: nil, under: dir, under_writable?: writable?(dir)}
+
+      m ->
+        %{
+          dir: dir,
+          first_missing: m,
+          under: Path.dirname(m),
+          under_writable?: writable?(Path.dirname(m))
+        }
+    end
+  end
+
+  defp writable?(dir) do
+    match?({:ok, %File.Stat{access: access}} when access in [:write, :read_write], File.stat(dir))
   end
 
   defp rm_stale(path) do

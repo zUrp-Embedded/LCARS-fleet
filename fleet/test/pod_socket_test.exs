@@ -554,6 +554,27 @@ defmodule Fleet.MCP.PodSocketTest do
   # Decodes the JSON of the first text block of a tool result (the get_work_item/submit_result payload).
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
 
+  describe "socket dir refused (the errno alone accuses the wrong directory)" do
+    test "the failure names the missing level and whether its parent is writable", %{base: base} do
+      # `File.mkdir_p/1` drops the error of each intermediate level and reports only the leaf, so an
+      # unreachable base surfaces as a bare `:enoent` — which reads as "absent parent" while the
+      # parent is right there. A broken link reproduces it for any uid, root included.
+      broken = Path.join(base, "broken")
+      File.mkdir_p!(base)
+      File.ln_s!("/nowhere/absent", broken)
+      Fleet.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, Path.join(broken, "mcp"))
+
+      assert {:error, {:socket_init_failed, {:mkdir, :enoent, blame}}} =
+               PodSocketSupervisor.ensure_pod_socket(uniq("p"))
+
+      # What the bare errno could not say: WHICH level is missing, and that its parent is fine —
+      # so this is a broken path, not a permission we lack.
+      assert blame.first_missing == broken
+      assert blame.under == base
+      assert blame.under_writable?
+    end
+  end
+
   describe "sweep_stale_sockets/0 (cold-boot — kill -9 residue)" do
     test "erases a one-shot pod's residue → no more false deaf-pod degraded", %{base: base} do
       # Residue of a previous instance killed by kill -9 (terminate/3 skipped): the socket file
