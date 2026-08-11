@@ -92,9 +92,20 @@ resource "gitea_user" "human" {
   login_name           = var.human_username
   email                = var.human_email
   password             = var.seed_password
-  must_change_password = true  # daily : l'humain pose son propre secret au 1er login
-  admin                = false # NON site-admin : l'humain opère VIA la fleet, pas par gestes forge manuels
-  # Hardening : l'humain daily ne crée ni org, ni git-hook serveur, ni import local
+
+  # `false`, et c'est un CORRECTIF (⚖ arbitrage user 2026-08-11). Ce compte portait
+  # `must_change_password = true` au motif que « l'humain pose son propre secret au 1er login ».
+  #
+  # CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
+  # créer À SON INSTALLATION — celui que l'opérateur pose quand il prépare la forge qu'on lui
+  # demande. Les vraies personnes ont des comptes à leur nom, et elles n'existent pas encore
+  # (chantier enrollment). Le réglage attendait donc un premier login que personne ne fait, et il
+  # n'est pas inerte : il ferme le compte en attendant. Les DEUX chemins le contredisaient — le banc
+  # le levait à chaque nuke, une installation réelle l'aurait simplement oublié.
+  must_change_password = false
+
+  admin                = false # NON site-admin : ce compte opère VIA la fleet, pas par gestes forge manuels
+  # Hardening : il ne crée ni org, ni git-hook serveur, ni import local
   # (le break-glass, c'est le compte admin de l'installeur, pas ce compte-ci).
   allow_create_organization = false
   allow_git_hook            = false

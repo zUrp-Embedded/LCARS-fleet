@@ -24,8 +24,10 @@
 #      tokens dans le MÊME cycle — plus aucun geste.
 #   3. converge la VISIBILITÉ des adhésions d'org des comptes machine (BL-6-46 : une adhésion
 #      créée par API est PRIVÉE par défaut — on se cachait sans l'avoir décidé). Le provider
-#      n'expose pas cette visibilité → recette, pas tofu. L'humain est sondé + instruit,
-#      jamais convergé (son password lui appartient).
+#      n'expose pas cette visibilité → recette, pas tofu. Le compte operateur est sondé + instruit,
+#      jamais convergé : son mot de passe n'est dans aucun fichier de la recette (le passwords-file
+#      ne porte que les comptes machine), donc il n'y a rien avec quoi converger. Le motif ecrit ici
+#      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
 #
 # Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_SEED_FILE (défaut
 # <tokens-dir>/forge-seed.pass, 0600 root, posé par le geste bootstrap) · PROV_PASSWORDS_FILE

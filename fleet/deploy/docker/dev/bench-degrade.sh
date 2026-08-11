@@ -5,11 +5,11 @@
 # STATUS: geste de BANC — ouvre l'UI de la forge jetable et declare le client OAuth du deck
 #
 # ─── POURQUOI CE SCRIPT EXISTE ──────────────────────────────────────────────────────────────────
-# La recette cree l'humain SANS mot de passe connu et avec `must_change_password` : c'est le bon
-# defaut (l'humain pose son propre secret au premier login) et il rend l'UI de la forge fermee
-# tant que personne n'a fait ce geste. Sur un banc qu'on nuke plusieurs fois par heure, refaire
-# la bascule a la main a chaque tour, c'est la garantie de l'oublier une fois et de croire que
-# l'auth est cassee.
+# La recette cree le compte operateur avec le seed et SANS mot de passe connu de qui lance le banc.
+# (Elle posait aussi `must_change_password` au motif que l'humain poserait son secret au premier
+# login : corrige le 2026-08-11 — personne ne s'appelle `lcars`, c'est l'identite de service du
+# produit.) Sur un banc qu'on nuke plusieurs fois par heure, aller chercher ce mot de passe a chaque
+# tour, c'est la garantie de l'oublier une fois et de croire que l'auth est cassee.
 #
 # Ce script fait donc DEUX choses, et rien d'autre :
 #   1. il DEGRADE le compte humain (mot de passe connu, drapeau retire) — la faille est le but ;

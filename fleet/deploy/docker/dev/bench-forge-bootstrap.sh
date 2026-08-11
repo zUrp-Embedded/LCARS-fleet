@@ -37,16 +37,16 @@
 #      boite qui ne peut ni se mettre a jour ni onboarder un projet — mesure au drill du soir ;
 #   9. rend un verdict MESURE : login humain, comptes de l'org, repos semes.
 #
-# ─── LE MOT DE PASSE HUMAIN DE BANC, ET POURQUOI IL N'EST PAS UNE FAIBLESSE ─────────────────────
-# La recette de PRODUCTION (`fleet/deploy/deps/forge.tf`) donne a l'humain le seed avec
-# `must_change_password = true` : il pose son propre secret au premier login. C'est correct et ce
-# script n'y touche PAS — il agit APRES l'apply, sur la forge jetable seulement.
-# Sur un banc, ce contrat coute une friction a chaque nuke (plusieurs par jour) pour proteger un
-# compte qui vit deux heures sur une forge en loopback qu'on detruit ensuite. Le banc pose donc un
-# mot de passe CONNU et leve le changement force. C'est une propriete du BANC, jamais un chemin de
-# production : rien dans `provisioning/` ni dans le runtime ne lit cette valeur.
-# La vraie sortie est l'onboarding humain (BL-6-25) ; d'ici la, la convention est ECRITE plutot que
-# retenue.
+# ─── LE MOT DE PASSE DE BANC DU COMPTE OPERATEUR ────────────────────────────────────────────────
+# Ce bloc disait que la recette pose `must_change_password = true` et que « c'est correct ». Ca ne
+# l'etait pas : ce compte n'est pas une personne. Il tient ICI la place du compte admin que Gitea
+# fait creer a son INSTALLATION — celui que l'operateur pose quand il prepare la forge. Le reglage
+# attendait donc un premier login que personne ne fait, et il fermait le compte en attendant. La
+# recette pose desormais `false` (arbitrage user 2026-08-11), donc ce script ne se bat plus contre
+# elle.
+# Ce qui reste, et qui EST une propriete du banc : un mot de passe CONNU, pour qu'on puisse ouvrir
+# l'UI d'une forge jetable sans aller le chercher. Rien dans `provisioning/` ni dans le runtime ne
+# lit cette valeur.
 #
 # ─── LE TOKEN OPERATEUR ET LE CABLAGE ENV — MEME NATURE, MEME RAISON ────────────────────────────
 # Corollaire du mot de passe : en PRODUCTION la forge preexiste et Gitea regle l'identite de
@@ -260,7 +260,7 @@ else
 fi
 
 # ─── 6. le mot de passe de banc de l'humain ──────────────────────────────────────────────────────
-# APRES l'apply (tofu vient de (re)poser le seed + must_change_password=true sur ce compte).
+# APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
 #
 # MEME PRECONDITION QUE 2-3, et pour la meme raison : fabriquer l'identite d'un humain suppose
 # ADMINISTRER la forge. En production Gitea la regle a son propre onboarding, et `70-human` la SONDE
