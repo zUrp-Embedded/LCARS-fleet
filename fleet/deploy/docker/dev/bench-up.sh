@@ -311,10 +311,13 @@ if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="NON demarre (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
 elif [[ -z "$RUNNER_LABELS" ]]; then
   RUNNER_STATE="ABSENT — pas d'image lcars-build:${IMAGE##*:} pour le label elixir (CI indisponible).
+  ⚠ CE N'EST PAS UNE DEGRADATION, C'EST UN BLOCAGE : la carte canon declare `ci: required`, donc
+  le gate attend un statut sur chaque PR, 45 min, puis ESCALADE. Aucun jury n'est convoque
+  entre-temps — rien ne sera livre sur ce banc tant qu'aucun runner ne sert le label.
               Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f fleet/deploy/docker/Dockerfile .
               puis rejouer bench-runner.sh, ou --runner-labels pour choisir soi-meme"
 elif [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
-  RUNNER_STATE="ABSENT — pas de master token persiste (CI indisponible sur ce banc)"
+  RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : `ci: required` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
        --forge-api "$FORGE_URL/api/v1" \

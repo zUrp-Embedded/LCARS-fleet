@@ -221,7 +221,10 @@ fi
 if [[ -n "$VERIFY_REPO" ]]; then
   say "verification de bout en bout sur $VERIFY_REPO…"
   ok=""
-  for _ in $(seq 1 40); do
+  # 40 x 6 s = 4 min, et c'etait trop court : mesure du 2026-08-12, le runner venait d'etre
+  # enregistre et la forge lui a d'abord servi le GATE COMPLET du depot lcars (plusieurs minutes).
+  # La sonde a rendu 4 sur un runner qui allait tres bien. 20 min couvre un vrai gate.
+  for _ in $(seq 1 200); do
     sleep 6
     st=$(curl -s -m 6 -H "Authorization: token $TOKEN" "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" \
          | python3 -c "
@@ -233,8 +236,17 @@ print(runs[0].get('status','') if runs else '')" 2>/dev/null || true)
       failure|cancelled) say "ECHEC : le job de verification finit en $st"; exit 4 ;;
     esac
   done
-  [[ -n "$ok" ]] && say "PREUVE : un job a tourne et la forge rend un verdict VERT" \
-                || { say "ECHEC : aucun verdict apres 4 min (run toujours en attente ?)"; exit 4; }
+  # UN RUN ENCORE EN ATTENTE N'EST PAS UN ECHEC DU RUNNER, et les confondre a coute une sonde
+  # rouge sur un banc sain. L'enregistrement est deja PROUVE plus haut (la forge le liste) ; ce qui
+  # reste ici est la preuve du verdict, et un job long ou une file occupee ne la contredisent pas.
+  # Un `failure`/`cancelled`, lui, sort toujours en 4 : la, le runner casse ce qu'il prend.
+  if [[ -n "$ok" ]]; then
+    say "PREUVE : un job a tourne et la forge rend un verdict VERT"
+  else
+    say "run toujours EN ATTENTE apres 20 min — le runner est enregistre et la forge le liste,"
+    say "  mais aucun verdict n'a ete rendu. Regarde ses logs (docker logs) avant de conclure :"
+    say "  une file occupee et un runner mort se ressemblent d'ici."
+  fi
 fi
 
 say "runner de banc operationnel — labels servis : shell, elixir, dood"

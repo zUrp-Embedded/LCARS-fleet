@@ -143,6 +143,22 @@ if [[ -z "$SERVED" ]]; then
   say "  les listes avant le mint (un role sans token bloque au premier dispatch, pas a l'enrolement)."
 fi
 
+# ─── LES TROIS PIEGES, ET ILS NE VIVENT PLUS DANS UN TRANSCRIPT ─────────────────────────────────
+# Enroler `web` sur un banc qui servait deja `fleet` (2026-08-12) a coute trois passes, et aucune
+# des trois causes n'etait ecrite nulle part. Elles le sont ici, au moment ou l'operateur en a
+# besoin, et pas dans un README qu'il lira apres.
+if [[ -d "$TOFU_DIR/instance" ]]; then
+  say "⚠ PIEGE 1 — le module instance/ est present dans $TOFU_DIR. Il cree les comptes system_* et il se"
+  say "  joue UNE FOIS PAR FORGE. Sur une forge deja provisionnee (un banc bootstrappe, une"
+  say "  instance existante), le rejouer rend « user already exists » et fait echouer l'apply."
+  say "  Retire-le du dossier de travail si la forge porte deja ses comptes systeme."
+fi
+say '⚠ PIEGE 2 — le mot de passe. tofu cree les comptes avec UN seul seed_password ; la boite,' 
+say "  elle, tient une carte PAR ROLE (/home/private/forge-role-passwords.json). Les deux ne se"
+say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des jetons rend"
+say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
+say ""
+
 say "catalogue : $CATALOGUE (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"
