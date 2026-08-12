@@ -11,12 +11,25 @@
 # mecanisme : il mint les tokens sur UNE forge et les ecrit dans UN dossier (un jeu par forge, cf.
 # FORGE_ROLE_TOKENS_DIR cote runtime), rejouable a volonte.
 #
-# DROIT DE MINT (POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC AUTH de ce
-# compte (`--passwords-file`). Gitea REFUSE la creation de token par header token — meme un token
-# site-admin, meme sur soi-meme (`POST /users/{u}/tokens` rend "auth required"). Il n'existe donc PAS de
-# voie « admin-token » equivalente : un operateur qui n'a que le token admin doit d'abord poser un
-# password (`PATCH /admin/users/{u}`) PUIS basic-auth — hors scope de ce script (surface, et non
-# idempotent). Le password est un SCALPEL (fichier operateur-only) : ce script se lance UNE fois par
+# DROIT DE MINT (POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC AUTH
+# (`--passwords-file`). Gitea REFUSE la creation de token par header token — meme un token
+# site-admin, meme sur soi-meme (`POST /users/{u}/tokens` rend "auth required"). Le discriminant est
+# donc la METHODE d'authentification, pas le privilege.
+#
+# ⚠ MAIS IL EXISTE UNE VOIE ADMIN, et cette ligne affirmait le contraire jusqu'au 2026-08-12.
+# Matrice re-mesuree cellule par cellule sur une forge vierge (Gitea 1.26.1) :
+#   jeton systeme (non-admin), sans Sudo  -> 403 "doer should be the site admin or be same as the contextUser"
+#   jeton systeme (non-admin), avec Sudo  -> 403 "Only administrators allowed to sudo"
+#   jeton SITE-ADMIN, avec Sudo           -> 401 "auth required"        (l'auth par jeton ne passe jamais)
+#   BASIC AUTH site-admin + `Sudo: <u>`   -> 201, LE TOKEN EST CREE     pour <u>, sans son password
+# Ce qu'il faut donc, ce n'est PAS le password de la cible : c'est celui d'un SITE-ADMIN. Le detour
+# « poser un password sur la cible puis basic-auth » n'a jamais ete necessaire ; il etait la
+# consequence d'une matrice mesuree a moitie.
+#
+# CE SCRIPT NE PREND PAS CETTE VOIE, et c'est un choix : il minte des comptes de ROLE qu'il a lui-meme
+# fait creer, dont il detient donc legitimement les passwords. Emprunter le rail site-admin
+# exigerait qu'un credential capable de devenir n'importe qui vive la ou tourne ce script.
+# Le password est un SCALPEL (fichier operateur-only) : ce script se lance UNE fois par
 # quelqu'un qui a ce droit ; le runtime, lui, ne lit que les fichiers poses (0640, groupe fleet). Le
 # script n'invente aucun droit : il echoue proprement s'il n'a pas le sien.
 #
