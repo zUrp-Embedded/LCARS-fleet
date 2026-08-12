@@ -171,7 +171,7 @@ fi
 
 # ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
-LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="http://forge:3000/" \
+LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="${FORGE_URL}/" \
   "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
   || die "la forge ne monte pas" 2
 
@@ -192,6 +192,8 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
+    FORGE_PUBLIC_URL="$FORGE_URL" \
+    LCARS_DECK_ORIGINS="http://${BIND}:20999" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3

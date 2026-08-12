@@ -133,6 +133,50 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   done
 }
 
+# ─── L'UID EST DURABLE, ET RIEN NE LE GARANTISSAIT ──────────────────────────────────────────────
+# Mesure du 2026-08-12, premier boot a froid : `/etc/passwd` meurt avec le conteneur, `/home` survit
+# dans un volume. Les users etaient donc recrees dans l'ordre ou la team les rend — pas l'ordre de
+# creation initial — et `useradd` redistribuait les uid libres. Resultat : zoe 1001 -> 1002, guest1
+# 1002 -> 1001, et chacune proprietaire du home de l'AUTRE. Pas un desagrement : un `~/.lcars` 0700
+# et un `.claude/.credentials.json` lisibles par la mauvaise personne.
+
+@test "un home existant IMPOSE son uid — le chemin fait foi, pas l'ordre d'iteration" {
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
+    source '$SUT'
+    uid_of_home zoe"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+}
+
+@test "pas de home = pas de contrainte : l'OS choisit (premiere venue)" {
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT\"
+    source '$SUT'
+    echo \"[\$(uid_of_home jamaisvue)]\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "l'uid revendique est-il deja pris par QUELQU'UN D'AUTRE ?" {
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE'
+    source '$SUT'
+    echo \"lcars-sur-1000=[\$(uid_taken_by 1000 autre)]\"
+    echo \"lui-meme=[\$(uid_taken_by 1000 lcars)]\"
+    echo \"libre=[\$(uid_taken_by 4242 qui)]\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lcars-sur-1000=[lcars]"* ]]
+  # Un uid porte par le login LUI-MEME n'est pas un conflit : c'est la convergence deja faite.
+  [[ "$output" == *"lui-meme=[]"* ]]
+  [[ "$output" == *"libre=[]"* ]]
+}
+
 # ─── fail-closed a l'execution ──────────────────────────────────────────────────────────────────
 
 @test "sans FORGE_BASE_URL : exit 2 et un message, jamais une boucle muette" {

@@ -39,10 +39,16 @@ services:
     image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
     hostname: devforge
     environment:
-      # ROOT_URL sert aux liens que Gitea FABRIQUE (clone_url, redirections). Le consommateur
-      # principal d'une forge de dév est la fleet, qui l'atteint par le réseau docker sous le nom
-      # de service — pas l'humain depuis son navigateur. Le défaut vise donc l'intérieur ; passe
-      # LCARS_DEVFORGE_ROOT_URL si tu veux des liens cliquables depuis l'hôte.
+      # ROOT_URL sert aux liens que Gitea FABRIQUE (clone_url, redirections). Le défaut visait
+      # l'INTÉRIEUR, au motif que « le consommateur principal d'une forge de dév est la fleet, pas
+      # l'humain depuis son navigateur ». CE MOTIF EST TOMBÉ : le deck de la boîte s'identifie
+      # désormais par OpenID sur cette forge, donc un navigateur DOIT l'atteindre, et un lien en
+      # `forge:3000` ne résout sur aucune machine. Le défaut vise l'extérieur ; `bench-up.sh` passe
+      # l'adresse publiée.
+      # Ce que ça NE casse pas, et c'est vérifié plutôt que supposé : aucune ligne du runtime ne lit
+      # une URL fabriquée par la forge — `lcars.contracts.check` porte déjà le mur, où `html_url`
+      # est inscrit « no reader today » avec ce motif exact (le conteneur joint `forge:3000` là où
+      # un navigateur joint un port publié). La fleet, elle, adresse `FORGE_BASE_URL`, jamais ceci.
       GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://forge:3000/}"
       GITEA__server__HTTP_PORT: "3000"
       # Démarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le
@@ -52,6 +58,17 @@ services:
       # Le rail CI du triangle. Le runner, lui, est à l'opérateur : une forge de dév n'en a pas
       # besoin pour que LCARS soit développable.
       GITEA__actions__ENABLED: "true"
+      # L'INSCRIPTION EST LIBRE, ET C'EST LE MODÈLE, pas un oubli : un compte tout seul est INERTE,
+      # et l'unique acte d'enrollment est l'ajout à l'équipe `humans` par un propriétaire d'org.
+      # Ajouter une validation admin à l'inscription ajouterait un geste qui ne trie rien.
+      GITEA__service__DISABLE_REGISTRATION: "false"
+      # Ceinture, et elle ne protège RIEN aujourd'hui — le dire franchement vaut mieux que de la
+      # présenter comme une sécurité. Mesuré le 2026-08-12 : sur un dépôt PUBLIC, un compte
+      # restricted, un compte ordinaire et un ANONYME reçoivent le même 200. `restricted` ne masque
+      # que du privé, et il n'y en a pas. Elle est là pour le jour où un dépôt le deviendra, et elle
+      # ne coûte aucun geste : mesuré aussi, un membre restricted de `humans` traverse la porte
+      # OpenID du deck normalement (claim `groups` intacte, session ouverte, bloc servi).
+      GITEA__service__DEFAULT_USER_IS_RESTRICTED: "true"
       # L'UI affiche le `full_name` a la place du login. Les comptes de role sont
       # `<catalogue>_<role>` — un username Gitea est unique a l'INSTANCE, donc sans prefixe deux
       # catalogues nommant chacun un `dev` se partagent un compte. Le full_name porte le nom du role,

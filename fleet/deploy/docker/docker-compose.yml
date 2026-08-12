@@ -57,6 +57,17 @@ services:
       # les modules forge passent en instruct-only et le doctor le DIT (drift, pas panne).
       # Depuis un conteneur, l'hôte se joint par `host.docker.internal` (mesuré vivant).
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # LA MEME FORGE, VUE D'UN NAVIGATEUR. `FORGE_BASE_URL` est l'adresse que le SERVEUR compose ;
+      # dans un conteneur c'est le nom du service, que la machine d'une personne ne résout pas. La
+      # porte du deck envoie le navigateur ICI pour s'identifier, donc une valeur interne rend
+      # l'identification impossible depuis n'importe quel autre poste. Vide = on retombe sur
+      # l'interne, et `55-deck-oidc` le DIT en drift plutôt que de poser une porte qui ne s'ouvre pas.
+      FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
+      # Les adresses par lesquelles on entre VRAIMENT sur le deck (séparées par des virgules).
+      # OAuth2 compare le `redirect_uri` EXACTEMENT : une entrée non déclarée échoue au RETOUR,
+      # après l'identification, là où c'est le plus déroutant. La loopback est toujours incluse
+      # par le module ; ce qui se déclare ici, c'est le reste (l'adresse de bind, le nom d'hôte).
+      LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
     ports:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.

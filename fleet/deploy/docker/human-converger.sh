@@ -54,6 +54,7 @@ INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 GROUP="${LCARS_FLEET_GROUP:-fleet}"
+HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -95,6 +96,28 @@ valid_login() { # valid_login <login> -> 0 si utilisable tel quel comme user Lin
   [[ "$login" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]] || return 1
   [[ "$login" != *".."* ]] || return 1
   return 0
+}
+
+# L'UID EST UNE PROPRIETE DURABLE, ET RIEN NE LE GARANTISSAIT. Mesure du 2026-08-12, au premier
+# boot a froid : `/etc/passwd` meurt avec le conteneur, `/home` survit dans un volume. Le convergeur
+# recreait donc les users dans l'ordre ou la team les rend — qui n'est PAS l'ordre de creation
+# initial — et `useradd` distribuait les uid libres dans ce nouvel ordre. Resultat mesure : zoe est
+# passee de 1001 a 1002, guest1 de 1002 a 1001, et chacune s'est retrouvee proprietaire du home de
+# l'AUTRE : `mkdir /home/zoe/.lcars` en Permission denied, et surtout un `.claude/.credentials.json`
+# et un `~/.lcars` 0700 lisibles par la mauvaise personne.
+#
+# Le home PORTE deja l'uid d'origine : c'est son proprietaire. On le relit au lieu de laisser l'OS
+# redistribuer. Le chemin fait foi — `/home/<login>` est le home de <login>, quel que soit le nom
+# auquel son uid numerique resout aujourd'hui.
+uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou vide
+  local h="$HOME_ROOT/$1"
+  [[ -d "$h" ]] || return 0
+  stat -c %u "$h" 2>/dev/null || true
+}
+
+# Qui porte deja cet uid, s'il est pris par quelqu'un d'AUTRE que <login>.
+uid_taken_by() { # uid_taken_by <uid> <login>
+  awk -F: -v u="$1" -v me="$2" '$3==u && $1!=me {print $1; exit}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
 already_refused() { grep -q "^$1	" "$REFUSED_FILE" 2>/dev/null; }
@@ -164,12 +187,28 @@ converge_once() {
         mark_refused "$login" "ce login ne peut pas devenir un compte Unix : il faut 1 a 32 caracteres, commencant ET finissant par une lettre ou un chiffre, sans '..'"; }
       continue
     fi
+    # Un home deja la impose SON uid : sinon la personne ne peut pas ecrire chez elle, et pire,
+    # elle ecrit chez quelqu'un d'autre.
+    local want_uid holder uid_args=()
+    want_uid="$(uid_of_home "$login")"
+    if [[ -n "$want_uid" ]]; then
+      holder="$(uid_taken_by "$want_uid" "$login")"
+      if [[ -n "$holder" ]]; then
+        # Deux logins revendiquent le meme uid : c'est un croisement deja installe, et le reparer
+        # a l'aveugle deplacerait des fichiers d'humain. On refuse, en nommant les deux cotes.
+        already_refused "$login" || {
+          err "REFUS $login — son home appartient a l'uid $want_uid, deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
+          mark_refused "$login" "le repertoire /home/$login appartient a un identifiant deja pris par un autre compte ($holder) — un humain doit demeler"; }
+        continue
+      fi
+      uid_args=(-u "$want_uid")
+    fi
     # `--` ferme la liste d'options : meme si un jour un login commencait par `-`, il arriverait
     # ici comme un NOM et pas comme un drapeau. La validation l'interdit deja ; ceci est la
     # ceinture qui ne coute rien.
-    if useradd -m -s "$SHELL_" -- "$login" 2>/dev/null; then
+    if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
       getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
-      say "user $login cree (membre de $ORG/$TEAM)"
+      say "user $login cree (membre de $ORG/$TEAM${want_uid:+, uid $want_uid repris de son home})"
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.

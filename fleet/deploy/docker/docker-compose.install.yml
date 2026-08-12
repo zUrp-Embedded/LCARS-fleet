@@ -93,6 +93,18 @@ services:
       # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
       # jamais pour une boite deja seedee.
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # LA MEME FORGE, VUE D'UN NAVIGATEUR — et ce n'est pas la meme valeur. Celle du dessus est
+      # celle que le SERVEUR compose ; dans un conteneur c'est un nom de service, qu'aucune machine
+      # ne resout depuis l'exterieur. La porte du deck envoie le navigateur ICI pour s'identifier,
+      # donc une valeur interne rend l'identification impossible depuis tout autre poste. Vide = on
+      # retombe sur l'interne, et `55-deck-oidc` le DIT en drift plutot que de poser une porte qui
+      # ne s'ouvre pas.
+      FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
+      # Les adresses par lesquelles on entre VRAIMENT sur le deck (separees par des virgules).
+      # OAuth2 compare le `redirect_uri` EXACTEMENT : une entree non declaree echoue au RETOUR,
+      # apres l'identification, la ou c'est le plus deroutant. La loopback est toujours incluse par
+      # le module ; ce qui se declare ici, c'est le reste (l'adresse de bind, le nom d'hote).
+      LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`./docker.sh source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une

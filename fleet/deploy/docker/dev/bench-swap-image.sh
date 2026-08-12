@@ -103,6 +103,8 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
+    FORGE_PUBLIC_URL="http://${BIND}:${FORGE_PORT}" \
+    LCARS_DECK_ORIGINS="http://${BIND}:20999" \
     "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
   || die "la boite ne se cree pas" 3
 
