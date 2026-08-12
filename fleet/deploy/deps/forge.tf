@@ -324,6 +324,16 @@ resource "gitea_team_membership" "human" {
 # nouveau : la team est `read` et `system` (write, can_create_repos) la domine déjà — seule la
 # visibilité de la liste des membres est acquise. Le volet delete_project (repo-admin exigé par
 # Gitea) reste OUVERT dans BL-6-27 : il se règle par une identité, pas en élargissant `system`.
+#
+# ⚠ CE MEMBERSHIP A L'AIR REDONDANT SUR UN BANC, ET IL NE L'EST PAS SUR LA RECETTE. Mesuré le
+# 2026-08-12 : en le RETIRANT, `GET /teams/<humans>/members` au token système rend toujours 200.
+# La raison est ailleurs — sur un banc, `bench-forge-bootstrap.sh` ajoute AUSSI lcars-system aux
+# `Owners` de l'org (geste hors Terraform : le provider ne sait pas référencer la team `Owners`
+# auto-créée par Gitea), et un propriétaire d'org lit tout. Une forge montée par CETTE RECETTE
+# SEULE n'a pas cette propriété : le membership ci-dessous y est la seule chose qui rend la
+# lecture possible.
+# Conséquence pratique : ne pas conclure « inutile » d'une mesure faite sur un banc. Le retirer
+# rendrait l'admission de l'onboard non vérifiable exactement là où personne ne teste — en recette.
 resource "gitea_team_membership" "system_reads_humans" {
   team_id  = gitea_team.humans.id
   username = var.system_account
