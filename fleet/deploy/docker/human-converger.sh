@@ -17,24 +17,40 @@
 # boucle ne fait que CONVERGER cette decision vers la boite. Elle n'ajoute personne a la team, elle
 # n'en retire personne, et elle ne supprime JAMAIS un user Linux.
 #
-# ⚠ CE QUI RESTE APRES UNE REVOCATION N'EST PAS « DES DONNEES ». Cette ligne le disait, et c'etait
-# faux — mesure du 2026-08-12, compte forge PURGE (204, re-lu 404), user Linux intact :
-#   · il reste dans le groupe `fleet`, donc il LIT /home/private/system.gitea_token ;
-#   · ce jeton REPOND `lcars-system` sur /api/v1/user, c'est-a-dire PROPRIETAIRE D'ORG ;
-#   · les 10 jetons de role lui sont lisibles ;
-#   · `console.sh --all` lui relance une console ttyd ECRIVABLE (elle ne lit que /etc/passwd, jamais
-#     la forge), qui repond 200 depuis l'hote SANS aucune authentification ;
-#   · ~/.lcars, ~/pods et `fleet_v2` sont la : il peut demarrer une fleet.
-# Autrement dit une personne revoquee garde un SHELL sur la boite et de quoi agir comme le compte
-# systeme. La revocation retire son identite PROPRE ; elle ne touche pas aux credentials PARTAGES,
-# et la fleet ne signe jamais en son nom — elle signe `lcars-system`.
+# ─── LA REVOCATION, ET POURQUOI ELLE TUE DES PROCESS ────────────────────────────────────────────
+# Sortir de la team retire l'identite PROPRE de la personne. Ca ne suffisait pas : mesure du
+# 2026-08-12, compte forge PURGE (204, re-lu 404), user Linux intact, elle gardait le groupe
+# `fleet` — donc /home/private/system.gitea_token, donc un jeton qui REPOND `lcars-system` sur
+# /api/v1/user, c'est-a-dire PROPRIETAIRE D'ORG — plus une console ttyd ECRIVABLE que
+# `console.sh --all` lui relance (elle ne lit que /etc/passwd, jamais la forge) et qui repond 200
+# sans aucune authentification.
 #
-# CE QUI LA RENDRAIT VRAIE tient en trois lignes : le miroir exact de l'entree. Cette boucle AJOUTE
-# au groupe `fleet` (c'est ce groupe qui ouvre /home/private/*) ; l'en retirer couperait l'acces aux
-# credentials partages SANS rien supprimer — ni compte, ni home, ni donnees. Ce n'est pas pose ici
-# parce que ca change le contrat de cette boucle (add-only -> add-and-revoke) et que ca peut frapper
-# quelqu'un en plein travail : c'est un arbitrage, pas du travail derivable. En attendant, ce
-# commentaire dit l'etat REEL plutot qu'une garantie qui n'existe pas.
+# ⚠ RETIRER DU GROUPE NE MORD PAS SUR CE QUI TOURNE DEJA. Un process porte ses groupes
+# supplementaires depuis son login ; `/etc/group` ne le rattrape jamais. Mesure du 2026-08-12 :
+#   gpasswd -d theo fleet      -> `id theo` : groups=theo          (retire, cote base)
+#   shell ouvert AVANT         -> groups=theo,fleet + jeton LU     (apres la revocation)
+#   serveur tmux ne AVANT, nouvelle fenetre APRES -> groups=theo,fleet + jeton LU
+# Un serveur tmux distribue son jeu de groupes a TOUS les shells qu'il fork ensuite, et il ne meurt
+# jamais tout seul : il survit a ttyd, au navigateur ferme, a tout sauf un kill. Retirer du groupe
+# sans tuer, c'est fermer la porte d'entree en laissant la maison allumee a l'interieur.
+#
+# D'ou les trois gestes, dans CET ordre :
+#   1. `gpasswd -d` — plus de credentials partages pour tout NOUVEAU process ;
+#   2. `pkill -u`   — les process qui portent encore l'ancien jeu de groupes meurent. Il n'existe
+#      pas de version douce : c'est le meme process qui porte le travail et les credentials, donc
+#      revoquer INTERROMPT. C'est le prix, il est assume, il n'est pas contournable ;
+#   3. `usermod -s nologin` — la porte ne se rouvre pas. Sans ce troisieme geste, le prochain
+#      `console.sh --all` relance la console : elle ne lit que /etc/passwd, et `console-humans.sh`
+#      (source UNIQUE de l'eligibilite, lue aussi par la landing) ecarte deja `shell nologin`.
+# `usermod` APRES le kill : il refuse de toucher un compte dont des process tournent encore.
+#
+# RIEN N'EST SUPPRIME : ni compte, ni home, ni donnees, ni uid. La revocation ferme des acces, elle
+# n'efface pas une personne — et re-entrer dans la team RESTAURE l'entree (cf. `restore_human`),
+# sans quoi la revocation serait un piege a sens unique.
+#
+# LE GARDE QUI COMPTE : on ne revoque JAMAIS sur une liste non prouvee. Forge injoignable, team
+# introuvable ou liste vide -> `converge_once` sort AVANT la passe de revocation. Un hoquet reseau
+# lu comme « plus personne dans la team » revoquerait toute la boite d'un coup.
 #
 # ─── FAIL-CLOSED SUR LE LOGIN, ET CE N'EST PAS DE LA PRUDENCE ───────────────────────────────────
 # Les deux alphabets ne coincident pas, MESURE le 2026-08-12 sur cette image et cette forge :
@@ -82,8 +98,16 @@ RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
 PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
+# Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
+# la console a la source, pour ses deux consommateurs a la fois.
+NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
 GROUP="${LCARS_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
+# L'HUMAIN DE BOOTSTRAP N'EST PAS CONVERGE, ET NE SE REVOQUE DONC PAS. L'entrypoint le cree
+# lui-meme (`LCARS_HUMAN`, defaut `lcars`) qu'il soit dans la team ou non : c'est le compte d'entree
+# de la boite. Le passer a la revocation reviendrait a fermer la boite sur elle-meme au premier tour
+# ou personne ne l'a ajoute a la team.
+BOOTSTRAP="${LCARS_HUMAN:-lcars}"
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -166,7 +190,55 @@ mark_refused() { # mark_refused <login> <raison lisible>
   chmod 0644 "$REFUSED_FILE" 2>/dev/null || true
 }
 
-# Sourcer ce fichier donne l'admission ci-dessus et RIEN d'autre : ni preflight, ni boucle.
+# Meme idiome de sonde que `PASSWD_FILE` plus haut : un fichier injectable pour les tests, la base
+# reelle sinon. Sans ca, la selection des revoques ne serait epinglee par rien — et c'est la partie
+# qui, en se trompant, ferme la porte a quelqu'un qui travaille.
+group_members() { # group_members -> un login par ligne
+  if [[ -n "${GROUP_FILE:-}" ]]; then
+    awk -F: -v g="$GROUP" '$1==g {print $4}' "$GROUP_FILE"
+  else
+    getent group "$GROUP" 2>/dev/null | cut -d: -f4
+  fi | tr ',' '\n' | grep -v '^$' || true
+}
+
+in_group() { group_members | grep -qxF -- "$1"; }
+
+login_shell_of() { # login_shell_of <login>
+  awk -F: -v n="$1" '$1==n {print $7}' "${PASSWD_FILE:-/etc/passwd}"
+}
+
+# Les humains que CETTE boite a converges : membres du groupe fleet, uid >= UID_MIN. C'est la seule
+# trace qu'un enrollment a eu lieu, et elle se CALCULE — aucune liste tenue a la main ne resterait
+# vraie. L'humain de bootstrap en est ecarte : il n'est pas venu de la team.
+converged_humans() {
+  local min login; min="$(uid_min)"; min="${min:-1000}"
+  while IFS= read -r login; do
+    [[ -n "$login" && "$login" != "$BOOTSTRAP" ]] || continue
+    awk -F: -v n="$login" -v m="$min" '$1==n && $3>=m {print n}' "${PASSWD_FILE:-/etc/passwd}"
+  done < <(group_members)
+}
+
+# LA DECISION, SEPAREE DU GESTE. Qui n'est plus dans la team ? C'est la seule partie qui, en se
+# trompant, coupe quelqu'un — donc elle est pure, elle n'ecrit rien, et elle est epinglee par les
+# tests comme `reserved` et `valid_login`.
+#
+# SANS ARGUMENT, ELLE NE DESIGNE PERSONNE. L'appelant garde deja contre une liste non prouvee ; ce
+# second verrou est ici parce que les deux fautes qui menent au meme desastre — une team vide et une
+# forge muette — se ressemblent trop pour ne compter que sur un seul garde.
+absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par ligne
+  [[ "$#" -gt 0 ]] || return 0
+  local login
+  while IFS= read -r login; do
+    printf '%s\n' "$@" | grep -qxF -- "$login" && continue
+    printf '%s\n' "$login"
+  done < <(converged_humans)
+  return 0
+}
+
+# Sourcer ce fichier donne l'ADMISSION et la SELECTION des revoques ci-dessus, et RIEN d'autre :
+# ni preflight, ni boucle, et surtout aucun geste. Ce sont les deux decisions qui, en se trompant,
+# creent un compte que personne ne voulait ou coupent quelqu'un qui travaille — elles sont donc
+# lisibles et testables sans lancer la boucle.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 command -v curl >/dev/null || { err "curl absent de l'image"; exit 1; }
@@ -210,6 +282,50 @@ converge_human() { # converge_human <login>
   "$PROVISION" apply --substrate docker --human "$login" "${only[@]}" >/dev/null 2>&1
 }
 
+# LES TROIS GESTES DE LA REVOCATION, dans l'ordre qui les rend vrais (cf. l'en-tete). Chacun est
+# tolerant a l'echec de l'etape precedente : une revocation partielle vaut mieux qu'une revocation
+# abandonnee au milieu, et le tour suivant reprendra ce qui manque.
+revoke_human() { # revoke_human <login>
+  local login=$1
+  gpasswd -d "$login" "$GROUP" >/dev/null 2>&1 || true
+  # TERM puis KILL : le serveur tmux, ttyd, le BEAM et les pods vivent sur des sockets tmux
+  # DIFFERENTS (`~/.lcars/run/fleet_v2.sock`, `~/.lcars/run/tmux-sock/<pod>/pod.sock`), donc aucun
+  # `tmux kill-server` ne les atteint tous. Le seul predicat qui les couvre est l'uid.
+  pkill -u "$login" 2>/dev/null || true
+  sleep 1
+  pkill -KILL -u "$login" 2>/dev/null || true
+  usermod -s "$NOLOGIN" -- "$login" 2>/dev/null \
+    || err "$login : revoque, mais son shell n'a pas pu passer a $NOLOGIN — sa console peut redemarrer"
+  say "REVOQUE $login — retire de $GROUP, process tues, shell $NOLOGIN (compte, home et donnees intacts)"
+}
+
+# LE CHEMIN DE RETOUR. Sans lui, re-ajouter quelqu'un a la team ne le ferait PAS revenir : la boucle
+# le verrait exister (`id` repond) et passerait son tour, en le laissant hors du groupe avec un shell
+# nologin. Une revocation qu'on ne peut pas annuler n'est pas une revocation, c'est une suppression
+# deguisee.
+restore_human() { # restore_human <login>
+  local login=$1
+  usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
+  usermod -s "$SHELL_" -- "$login" 2>/dev/null || true
+  say "REINTEGRE $login — remis dans $GROUP, shell $SHELL_"
+  if [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]]; then
+    "$CONSOLE" --human "$login" >/dev/null 2>&1 \
+      || err "$login : reintegre mais sa console n'a pas redemarre ($CONSOLE --human $login)"
+  fi
+}
+
+# LE GESTE, sur la decision ci-dessus. Appelee UNIQUEMENT avec une liste de membres prouvee non
+# vide — le garde est chez l'appelant, et il y est parce qu'ici on ne saurait pas distinguer « la
+# team est vide » de « la forge n'a pas repondu ».
+revoke_absent() { # revoke_absent <membres…>
+  local login
+  while IFS= read -r login; do
+    [[ -n "$login" ]] || continue
+    revoke_human "$login"
+  done < <(absent_humans "$@")
+  return 0
+}
+
 # LA PASSE LENTE : l'etat des humains DEJA presents. Sans elle, tout ce qui est pose « a la
 # creation » n'atteint jamais quelqu'un qui existe deja.
 reconcile_humans() { # reconcile_humans <login…>
@@ -235,7 +351,16 @@ converge_once() {
 
   while IFS= read -r login; do
     [[ -n "$login" ]] || continue
-    id "$login" >/dev/null 2>&1 && continue          # deja converge : rien a dire
+    if id "$login" >/dev/null 2>&1; then
+      # « EXISTE » NE DIT PAS « A SES ACCES ». Quelqu'un revoque puis re-ajoute a la team arrive
+      # exactement ici : `id` repond, et la boucle passait son tour en le laissant hors du groupe,
+      # en nologin, sans console. C'est le seul endroit ou le chemin de retour peut etre pris.
+      if [[ "$login" != "$BOOTSTRAP" ]] &&
+           { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
+        restore_human "$login"
+      fi
+      continue
+    fi
     if reserved "$login"; then
       already_refused "$login" || {
         err "REFUS $login — nom reserve (compte systeme ou compte de service de la fleet) ; AUCUN user cree"
@@ -305,16 +430,22 @@ converge_once() {
   done <<< "$members"
   [[ "$created" -gt 0 ]] && say "$created humain(s) converge(s)"
 
-  # LA PASSE LENTE, sur les membres DEJA presents. `id <login> && continue` plus haut dit que l'user
-  # EXISTE — pas que son etat est converge, et le commentaire disait « deja converge : rien a dire ».
+  # Un TABLEAU, pas un decoupage par espaces. Un login valide n'en contient pas — mais s'appuyer
+  # sur la validation d'un autre bout du script pour se permettre un `$(...)` nu est exactement
+  # le genre de dette qui survit a la regle qui la rendait sure.
+  local -a roster; mapfile -t roster <<< "$members"
+
+  # LA REVOCATION, a chaque tour. On n'arrive ici qu'avec une liste de membres PROUVEE (team
+  # trouvee, reponse non vide) : les deux sorties precedentes de cette fonction sont ce qui empeche
+  # un hoquet reseau de revoquer toute la boite.
+  revoke_absent "${roster[@]}"
+
+  # LA PASSE LENTE, sur les membres DEJA presents. `id <login>` plus haut dit que l'user EXISTE —
+  # pas que son etat est converge, et le commentaire disait « deja converge : rien a dire ».
   # C'etait faux : tout ce qui est pose a la creation n'atteignait jamais un humain deja la.
   local now; now="$(date +%s)"
   if [[ $((now - LAST_RECONCILE)) -ge "$RECONCILE_EVERY" ]]; then
     LAST_RECONCILE="$now"
-    # Un TABLEAU, pas un decoupage par espaces. Un login valide n'en contient pas — mais s'appuyer
-    # sur la validation d'un autre bout du script pour se permettre un `$(...)` nu est exactement
-    # le genre de dette qui survit a la regle qui la rendait sure.
-    local -a roster; mapfile -t roster <<< "$members"
     reconcile_humans "${roster[@]}"
   fi
   return 0
