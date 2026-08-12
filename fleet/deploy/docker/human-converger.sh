@@ -69,6 +69,16 @@ TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/system.gitea_token}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-lcars-system}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
+# CADENCE DE RECONCILIATION DE L'ETAT DES HUMAINS DEJA LA. La boucle rapide ci-dessus ne cree que
+# les MANQUANTS ; sans cette seconde passe, tout ce qui est pose « a la creation » n'atteint jamais
+# quelqu'un qui existe deja — c'est le piege que le Dockerfile nomme pour `/etc/skel` (« le squelette
+# n'est copie qu'a la CREATION de l'humain, jamais ensuite : une boite deja installee ne le verrait
+# jamais »), et le convergeur y etait tombe : un module per-humain ajoute apres coup, ou une graine
+# `claude` mise a jour, n'auraient atteint personne.
+# Meme forme que la passe desired-state du poller (`@protection_recheck_ms`) : cadence LENTE, et la
+# PREMIERE passe apres le boot verifie tout le monde — la reconciliation au demarrage est la
+# fonctionnalite, pas une rafale a raboter.
+RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
 PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
@@ -77,6 +87,9 @@ HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
+# 0 = la PREMIERE passe reconcilie tout le monde. C'est deliberé : la reconciliation au demarrage
+# est la fonctionnalite (meme choix que le poller), pas une rafale a raboter.
+LAST_RECONCILE=0
 
 say() { echo "[lcars-converger] $*"; }
 err() { echo "[lcars-converger] $*" >&2; }
@@ -181,6 +194,35 @@ team_id() {
     | head -n1
 }
 
+# L'ETAT PER-HUMAIN, convergé — appelé A LA CREATION *et* a chaque reconciliation.
+# La liste des modules se CALCULE : le provisioning DECLARE lesquels sont per-humain
+# (`# NEEDS: human`), on lit cette declaration au lieu de la recopier. Une liste en dur redevient
+# fausse au prochain module ajoute — c'est arrive deux fois (la console, puis le binaire `claude`).
+converge_human() { # converge_human <login>
+  local login=$1
+  [[ -x "$PROVISION" ]] || return 1
+  local -a only=(); local m
+  while IFS= read -r m; do only+=(--only "$(basename "$m" .sh)"); done < <(
+    grep -l '^# NEEDS: human' "$(dirname "$PROVISION")/modules.d"/*.sh 2>/dev/null | sort)
+  # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot que
+  # de ne rien converger en silence.
+  [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
+  "$PROVISION" apply --substrate docker --human "$login" "${only[@]}" >/dev/null 2>&1
+}
+
+# LA PASSE LENTE : l'etat des humains DEJA presents. Sans elle, tout ce qui est pose « a la
+# creation » n'atteint jamais quelqu'un qui existe deja.
+reconcile_humans() { # reconcile_humans <login…>
+  local login n=0
+  for login in "$@"; do
+    id "$login" >/dev/null 2>&1 || continue
+    converge_human "$login" || { err "$login : reconciliation per-humain en echec — diagnose : $PROVISION doctor --human $login"; continue; }
+    n=$((n + 1))
+  done
+  [[ "$n" -gt 0 ]] && say "$n humain(s) reconcilie(s) (passe lente, toutes les ${RECONCILE_EVERY}s)"
+  return 0
+}
+
 converge_once() {
   local tid members login created=0
   tid="$(team_id)"
@@ -242,13 +284,7 @@ converge_once() {
         # DECLARE deja lesquels le sont (`# NEEDS: human`) : on lit cette declaration au lieu de la
         # recopier. Meme discipline que la denylist des noms reserves, qui se calcule depuis
         # /etc/passwd plutot que d'etre inscrite quelque part.
-        local -a only=(); local m
-        while IFS= read -r m; do only+=(--only "$(basename "$m" .sh)"); done < <(
-          grep -l '^# NEEDS: human' "$(dirname "$PROVISION")/modules.d"/*.sh 2>/dev/null | sort)
-        # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot
-        # que de ne rien converger en silence.
-        [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
-        "$PROVISION" apply --substrate docker --human "$login" "${only[@]}" >/dev/null 2>&1 \
+        converge_human "$login" \
           || err "$login : user cree mais le provisioning per-humain a echoue — diagnose : $PROVISION doctor --human $login"
       else
         err "$login : user cree mais $PROVISION introuvable — son ~/.lcars n'est PAS pose"
@@ -268,6 +304,19 @@ converge_once() {
     fi
   done <<< "$members"
   [[ "$created" -gt 0 ]] && say "$created humain(s) converge(s)"
+
+  # LA PASSE LENTE, sur les membres DEJA presents. `id <login> && continue` plus haut dit que l'user
+  # EXISTE — pas que son etat est converge, et le commentaire disait « deja converge : rien a dire ».
+  # C'etait faux : tout ce qui est pose a la creation n'atteignait jamais un humain deja la.
+  local now; now="$(date +%s)"
+  if [[ $((now - LAST_RECONCILE)) -ge "$RECONCILE_EVERY" ]]; then
+    LAST_RECONCILE="$now"
+    # Un TABLEAU, pas un decoupage par espaces. Un login valide n'en contient pas — mais s'appuyer
+    # sur la validation d'un autre bout du script pour se permettre un `$(...)` nu est exactement
+    # le genre de dette qui survit a la regle qui la rendait sure.
+    local -a roster; mapfile -t roster <<< "$members"
+    reconcile_humans "${roster[@]}"
+  fi
   return 0
 }
 
