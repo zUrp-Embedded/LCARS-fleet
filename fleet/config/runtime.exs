@@ -418,6 +418,16 @@ if config_env() != :test and not tool_mode? do
   # activates quiescence). Outside `:test` (this file is guarded) →
   # tests keep the `NoOpDispatcher` default (hermeticity). User decision:
   # no Fleet.Dispatcher god-module, the seam IS the abstraction.
+  # LA MEME VALEUR QUE `bin/fleet_v2` LIT POUR SA MARGE D'ATTENTE (BL-6-52). Un seul nombre, deux
+  # lecteurs : le BEAM draine pendant ce delai, le launcher attend ce delai PLUS une marge avant de
+  # conclure. Sans ca, les deux derivaient — 45 s cote BEAM, 90 s en dur cote shell.
+  config :fleet_starfleet,
+         :shutdown_grace_ms,
+         Fleet.EnvParse.positive_ms(
+           "LCARS_SHUTDOWN_GRACE_MS",
+           System.get_env("LCARS_SHUTDOWN_GRACE_MS") || "45000"
+         )
+
   config :fleet_starfleet,
          :shutdown_dispatcher,
          Fleet.Starfleet.Shutdown.AggregateDispatcher
