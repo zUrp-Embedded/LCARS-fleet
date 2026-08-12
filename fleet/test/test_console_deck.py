@@ -270,6 +270,26 @@ check(why is not None and "client_secret" in why,
       "un champ manquant est NOMME (vu: %s)" % why)
 deck.OIDC_CONFIG = cfg_path
 
+# (1-bis) L'ENTREE NON DECLAREE, REFUSEE ICI ET PAS PAR LA FORGE. OAuth2 compare le `redirect_uri`
+# a une liste enregistree ; une entree absente donne une 400 de Gitea au titre generique qui ne
+# nomme meme pas `redirect_uri` (mesure 2026-08-12), APRES l'identification, sur une page qui n'est
+# pas la notre. On a la liste : on tranche avant d'y envoyer quelqu'un.
+with open(cfg_path, "w") as fh:
+    json.dump({"client_id": "cid", "client_secret": "csec",
+               "public_url": FORGE, "internal_url": FORGE,
+               "redirect_uris": ["http://declaree:20999/auth/callback"]}, fh)
+code, body, _ = fetch(dport, "/auth/login")
+check(code == 409 and "CETTE ENTREE N'EST PAS DECLAREE" in body,
+      "une entree hors liste est refusee AVANT la forge (vu: %d)" % code)
+check("declaree:20999" in body, "et le refus ENUMERE les entrees declarees")
+check("LCARS_DECK_ORIGINS" in body, "et nomme le reglage qui l'ajouterait")
+# Une config d'avant cette version n'a pas la liste : on n'invente aucun refus, la forge tranche.
+with open(cfg_path, "w") as fh:
+    json.dump({"client_id": "cid", "client_secret": "csec",
+               "public_url": FORGE, "internal_url": FORGE}, fh)
+check(fetch(dport, "/auth/login")[0] == 302,
+      "sans liste dans la config, on laisse passer — l'absence n'accuse rien")
+
 # (2) PAS DE SESSION : la page invite, l'API refuse. Les deux, pas l'une des deux.
 code, body, _ = fetch(dport, "/")
 check(code == 200 and "identifier sur la forge" in body,

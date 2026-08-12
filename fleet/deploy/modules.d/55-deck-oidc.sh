@@ -145,9 +145,16 @@ apply() {
 
   install -d -m 0755 "$(dirname "$PROV_DECK_OIDC_FILE")"
   local tmp; tmp="$(mktemp "${PROV_DECK_OIDC_FILE}.XXXXXX")"
+  # LES URI ENREGISTREES VOYAGENT AVEC LA CONFIG, et ce n'est pas de la redondance. Le deck derive
+  # son `redirect_uri` du `Host` de la requete ; si la personne arrive par une entree qui n'est PAS
+  # dans cette liste, OAuth2 refuse — et ce refus est une page 400 de Gitea au titre generique, qui
+  # ne mentionne meme pas `redirect_uri` (mesure du 2026-08-12). Cul-de-sac parfait : apres
+  # l'identification, sur une page qui n'est pas la notre. En les lui donnant, le deck compare AVANT
+  # d'envoyer quelqu'un et sert son propre refus, qui nomme l'entree manquante.
   jq -n --arg ci "$cid" --arg cs "$csec" \
-        --arg pub "${PROV_FORGE_PUBLIC_URL%/}" --arg int "${PROV_FORGE_URL%/}" \
-        '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int}' > "$tmp"
+        --arg pub "${PROV_FORGE_PUBLIC_URL%/}" --arg int "${PROV_FORGE_URL%/}" --arg uris "$uris" \
+        '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,
+          redirect_uris:($uris|split(" "))}' > "$tmp"
   chmod 0640 "$tmp"
   chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $PROV_DECK_OIDC_FILE restera illisible par le deck (il tourne en nobody)"
   mv -f "$tmp" "$PROV_DECK_OIDC_FILE"

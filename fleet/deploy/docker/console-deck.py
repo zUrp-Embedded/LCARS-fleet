@@ -380,6 +380,24 @@ def page_refused(login, reason):
     }
 
 
+def page_unknown_entrance(uri, known):
+    return SHELL % {
+        "title": "entree non declaree",
+        "body": (
+            "<h1>CETTE ENTREE N'EST PAS DECLAREE</h1>"
+            "<p>Tu es arrive par <code>" + html.escape(uri) + "</code>. La forge n'accepte de te "
+            "renvoyer que vers des adresses <b>enregistrees a l'avance</b>, et celle-ci n'y est pas.</p>"
+            "<p>Je m'arrete ici volontairement. Si je t'envoyais quand meme, tu t'identifierais "
+            "normalement puis tu tomberais sur une erreur 400 de la forge qui ne dit pas pourquoi "
+            "&mdash; apres coup, sur une page qui n'est pas la notre.</p>"
+            '<p class="dim">Entrees declarees : <code>' +
+            html.escape(", ".join(known) if known else "(aucune)") + "</code><br>"
+            "Ce qu'il faut faire : passer par l'une d'elles, ou ajouter celle-ci a "
+            "<code>LCARS_DECK_ORIGINS</code> et rejouer le provisioning.</p>"
+        ),
+    }
+
+
 def page_unconfigured(why):
     return SHELL % {
         "title": "non configure",
@@ -701,6 +719,16 @@ class Deck(BaseHTTPRequestHandler):
     def _auth_login(self, cfg):
         st = secrets.token_urlsafe(24)
         redirect = self._callback_uri()
+        # REFUSER ICI PLUTOT QUE DE LAISSER LA FORGE LE FAIRE APRES COUP. OAuth2 compare le
+        # `redirect_uri` a une liste enregistree ; une entree absente donne une 400 de Gitea au titre
+        # generique, qui ne nomme meme pas `redirect_uri` (mesure) — et elle tombe APRES
+        # l'identification, sur une page qui n'est pas la notre. On a la liste, on tranche avant.
+        # Absente de la config (fichier d'avant cette version) = on ne sait pas, donc on n'invente
+        # aucun refus : la forge reste l'autorite.
+        known = cfg.get("redirect_uris")
+        if known and redirect not in known:
+            self._send(409, page_unknown_entrance(redirect, known), "text/html; charset=utf-8")
+            return
         now = time.time()
         with _lock:
             _sweep(now)
