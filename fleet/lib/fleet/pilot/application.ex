@@ -200,6 +200,7 @@ defmodule Fleet.Pilot.Application do
     validate_card_steps!()
     validate_structural_roles!()
     validate_workshop_card!()
+    validate_default_card_matrix!()
 
     # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
     # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
@@ -361,6 +362,53 @@ defmodule Fleet.Pilot.Application do
             "card there carries a `face: workshop` producer, so this catalogue serves NO " <>
             "`destination/workshop` ticket. Ship one, or route those tickets elsewhere."
         )
+      end
+    end
+
+    :ok
+  end
+
+  # This guard needs the catalogue's MANIFEST as well as its cards, and `card_scopes/1` drops the
+  # root for the explicit-opts form — a fixture could name a directory of cards but never the
+  # catalogue that declares a default among them. `:catalogue_root` closes that: one key, and the
+  # guard is drivable from a test instead of only from a boot.
+  defp default_card_scopes([]),
+    do: Enum.map(Fleet.Workflow.Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
+
+  defp default_card_scopes(opts), do: [{opts, Keyword.get(opts, :catalogue_root)}]
+
+  @doc false
+  # THE DEFAULT CARD MUST BE ABLE TO SERVE THE DEFAULT CASE, and the bundled catalogue did not hold
+  # that: `default_card: brief-gate` with `applicable_intensity: [C1, C2, C3, C4]`, while a project
+  # declaring nothing took `C0` — the card said itself it did not cover the only situation it is
+  # ever reached in. Nothing caught it. `Fleet.Catalogue.verify!/0` checks the default card EXISTS among
+  # the cards, not that it APPLIES; and the off-matrix warning watched explicit overrides only, so
+  # the one provenance nobody chose was the one nobody was told about.
+  #
+  # What it cost, end to end (bench 2026-08-12): a repo imported from GitHub, deliverable a single
+  # `.md`, took `brief-gate` hence `ci: required` — and an imported repo ships no
+  # `.gitea/workflows/`. The CI gate waited its 45 minutes and escalated, correctly, asking whether
+  # a runner served the label. Every part downstream behaved; the card was never the right one.
+  #
+  # RAISE and not warn: a catalogue whose default cannot serve its default level mis-routes every
+  # undeclared project it ever receives, silently, and the level is the one thing a human is
+  # entitled not to declare. `undeclared_level/0` is read from its owner — restating the level here
+  # would be the second copy of a default, which is how one fact acquires two answers.
+  def validate_default_card_matrix!(opts \\ []) do
+    level = Fleet.Project.Intensity.undeclared_level()
+
+    for {scope, root} <- default_card_scopes(opts),
+        is_binary(root),
+        card_name = Fleet.Catalogue.default_card(root),
+        is_binary(card_name) do
+      levels = Fleet.Workflow.Loader.load!(card_name, scope)["applicable_intensity"] || []
+
+      unless levels == [] or level in levels do
+        raise "fleet_pilot: catalogue #{inspect(root)} declares default_card " <>
+                "#{inspect(card_name)}, whose applicable_intensity is #{inspect(levels)} and does " <>
+                "NOT cover #{level} — the level a project takes when the human declares none. " <>
+                "Every undeclared project of this catalogue would run on a card that states it " <>
+                "does not apply to it. Name a default that covers #{level}, or widen that card."
       end
     end
 

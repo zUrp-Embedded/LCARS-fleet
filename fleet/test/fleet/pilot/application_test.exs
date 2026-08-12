@@ -113,6 +113,82 @@ defmodule Fleet.Pilot.ApplicationTest do
   # Two of the three regimes that function guarded existed only because a NAME can be wrong (dead
   # name, name pointing at an all-code card). A property cannot be wrong — it can only be absent, or
   # claimed twice, and those are the two tests below.
+  describe "validate_default_card_matrix!/1 — le defaut doit savoir servir le cas par defaut" do
+    test "le catalogue livre passe" do
+      assert :ok = Application.validate_default_card_matrix!()
+    end
+
+    @tag :tmp_dir
+    test "un default_card hors matrice du niveau non-declare REFUSE le boot", %{tmp_dir: tmp} do
+      # Le defaut du catalogue et le niveau qu'un projet prend quand personne ne declare sont, mis
+      # ensemble, ce qu'un projet non declare RECOIT. Ils se contredisaient par ecrit — carte
+      # `[C1..C4]`, niveau `C0` — et rien ne le disait : l'avertissement off-matrix ne regardait que
+      # les surcharges explicites, et le controle de boot verifiait que la carte EXISTE, pas qu'elle
+      # s'applique. Chaque projet non declare tournait sur une carte affirmant ne pas le couvrir.
+      level = Fleet.Project.Intensity.undeclared_level()
+      other = if level == "C0", do: "C4", else: "C0"
+
+      File.write!(Path.join(tmp, "etroite.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: etroite
+        description: "une carte qui ne couvre pas le niveau non-declare"
+        applicable_intensity: [#{other}]
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: engineer
+            needs: []
+      """)
+
+      File.write!(
+        Path.join(tmp, "catalogue.yaml"),
+        "api_version: 1\nname: etroit\ndefault_card: etroite\n"
+      )
+
+      assert_raise RuntimeError, ~r/does NOT cover #{level}/, fn ->
+        Application.validate_default_card_matrix!(workflow_maps_root: tmp, catalogue_root: tmp)
+      end
+    end
+
+    @tag :tmp_dir
+    test "une carte qui couvre le niveau passe — la garde borne, elle n'interdit pas", %{
+      tmp_dir: tmp
+    } do
+      level = Fleet.Project.Intensity.undeclared_level()
+
+      File.write!(Path.join(tmp, "large.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: large
+        description: "une carte qui couvre le niveau non-declare"
+        applicable_intensity: [#{level}]
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: engineer
+            needs: []
+      """)
+
+      File.write!(
+        Path.join(tmp, "catalogue.yaml"),
+        "api_version: 1\nname: large\ndefault_card: large\n"
+      )
+
+      assert :ok =
+               Application.validate_default_card_matrix!(
+                 workflow_maps_root: tmp,
+                 catalogue_root: tmp
+               )
+    end
+  end
+
   describe "le rail doc se resout par PROPRIETE, plus par un nom configure" do
     test "le canon livre resout son rail sans configuration" do
       assert Fleet.Workflow.Loader.workshop_card_name() == "workshop-direct"

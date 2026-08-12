@@ -30,6 +30,31 @@ defmodule Fleet.Project.Intensity do
   require Logger
 
   @file_name "intensity.json"
+
+  # THE LEVEL A PROJECT GETS WHEN NOBODY DECLARED ONE, and it was `C0` — the bottom of the scale,
+  # which is a CLAIM: C0 is the disposable posture, and nobody said the work was disposable. The
+  # rule this module states two paragraphs up is "absence is recorded, never fabricated into
+  # facts"; writing "posture PoC" over silence fabricated one.
+  #
+  # `C1` is what silence actually buys (user ruling 2026-08-12): we do not know, therefore we
+  # judge. It is also the only reading under which the catalogue holds together — `default_card:
+  # brief-gate` declares `applicable_intensity: [C1, C2, C3, C4]`, so with `C0` the default card
+  # stated itself inapplicable to the only situation it is ever reached in, and nothing said so:
+  # the off-matrix warning watched explicit overrides only, and the boot check verified the default
+  # card EXISTS, not that it APPLIES.
+  #
+  # It was a bare literal at its single write site, so nothing else could ask the question — and
+  # the boot guard that compares the catalogue's default card against it has to.
+  @undeclared_level "C1"
+
+  @doc """
+  The level an undeclared project takes — the posture the system records for work nobody qualified.
+
+  Public because the boot guard that checks a catalogue's `default_card` against it must read it
+  HERE rather than restate it: two copies of a default are two answers the day one moves.
+  """
+  @spec undeclared_level() :: String.t()
+  def undeclared_level, do: @undeclared_level
   # The intensity schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
   @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
@@ -155,7 +180,7 @@ defmodule Fleet.Project.Intensity do
       cond do
         is_binary(level) -> Map.put(base, "level", level)
         is_binary(card) -> base
-        true -> Map.put(base, "level", "C0")
+        true -> Map.put(base, "level", @undeclared_level)
       end
 
     base =
@@ -182,7 +207,8 @@ defmodule Fleet.Project.Intensity do
         "Niveau non déclaré — carte choisie explicitement par l'humain : #{card}."
 
       true ->
-        "NON DÉCLARÉ — défaut système (posture PoC C0). L'humain n'a pas déclaré la criticité."
+        "NON DÉCLARÉ — défaut système (niveau #{@undeclared_level} : on ne sait pas, donc on " <>
+          "juge). L'humain n'a pas déclaré la criticité."
     end
   end
 
@@ -193,16 +219,28 @@ defmodule Fleet.Project.Intensity do
     end
   end
 
+  # IT WATCHED ONLY THE EXPLICIT OVERRIDE, and the `@moduledoc` promises otherwise: "off-matrix is
+  # logged LOUD and the disagreement stays visible in the committed file". A card arriving from the
+  # catalogue's `default_card` never passed here — so the one provenance NOBODY chose was also the
+  # one nobody was told about. Measured: every undeclared project ran on a card whose own matrix
+  # excluded it, in silence, for as long as the two defaults disagreed.
+  #
+  # The wording still separates the two provenances, because the reader's next gesture differs: an
+  # override is the human's last word and stands; a DEFAULT landing off-matrix is a catalogue that
+  # does not hold together, and it gets repaired there.
   defp warn_off_matrix(declaration, opts) do
+    card = declaration["pipeline_default"]
+    override = Keyword.get(opts, :workflow_map)
+
     with level when is_binary(level) <- declaration["level"],
-         override when is_binary(override) <- Keyword.get(opts, :workflow_map),
-         %{"applicable_intensity" => levels} when levels != [] <-
-           safe_load_card(override),
+         name when is_binary(name) <- card,
+         %{"applicable_intensity" => levels} when levels != [] <- safe_load_card(name, opts),
          false <- level in levels do
+      provenance = if override == name, do: "explicit override", else: "catalogue default"
+
       Logger.warning(
-        "ProjectIntensity: explicit card override #{inspect(override)} is OFF-MATRIX for " <>
-          "declared level #{declaration["level"]} (card claims #{inspect(levels)}) — " <>
-          "accepted (the human has the last word), traced in the committed declaration"
+        "ProjectIntensity: card #{inspect(name)} (#{provenance}) is OFF-MATRIX for level " <>
+          "#{level} (card claims #{inspect(levels)}) — traced in the committed declaration"
       )
 
       :ok
@@ -211,8 +249,12 @@ defmodule Fleet.Project.Intensity do
     end
   end
 
-  defp safe_load_card(name) do
-    Fleet.Workflow.Loader.load!(name)
+  # Scoped to the PROJECT's catalogue: a card name is unique only inside one, and read with no root
+  # this resolved in the default catalogue's image — the same defect the rest of the read side
+  # carried. `:repo` absent (a caller with no project in hand) keeps the default root.
+  defp safe_load_card(name, opts) do
+    repo = Keyword.get(opts, :repo)
+    Fleet.Workflow.Loader.load!(name, Fleet.Workflow.Loader.card_opts_for_repo(repo))
   rescue
     e ->
       Logger.warning(

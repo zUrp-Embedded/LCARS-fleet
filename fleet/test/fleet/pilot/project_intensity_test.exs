@@ -46,14 +46,26 @@ defmodule Fleet.Project.IntensityTest do
            "a role name was fabricated for a declaration nobody claimed"
   end
 
-  test "undeclared: an HONEST C0 default, explicitly marked — absence recorded, never fabricated",
+  test "undeclared: the level silence buys, explicitly marked — absence recorded, never fabricated",
        %{tmp_dir: tmp} do
+    # It was C0, the BOTTOM of the scale, and that is a claim: C0 is the disposable posture and
+    # nobody said the work was disposable. Silence buys "we do not know, therefore we judge" — and
+    # it is also the only reading under which the catalogue holds together, since its `default_card`
+    # declares a matrix that starts at C1.
+    #
+    # Read from its owner rather than restated: a test that spells the constant is a test that
+    # keeps asserting yesterday's default.
     assert :ok = ProjectIntensity.write(tmp, [])
 
     d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == "C0"
+    assert d["level"] == ProjectIntensity.undeclared_level()
     assert d["declared_by"] == "system-default"
     assert d["justification"] =~ "NON DÉCLARÉ"
+
+    # And it is ON-MATRIX for the card an undeclared project actually receives — the pairing the
+    # boot guard now refuses to let drift.
+    card = Fleet.Workflow.Loader.load!(d["pipeline_default"])
+    assert ProjectIntensity.undeclared_level() in card["applicable_intensity"]
   end
 
   test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declarer recorded, NO off-matrix noise",

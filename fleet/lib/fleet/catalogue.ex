@@ -796,8 +796,15 @@ defmodule Fleet.Catalogue do
   cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
   """
   @spec default_card() :: String.t() | nil
-  def default_card do
-    case YamlElixir.read_from_file(manifest_path()) do
+  def default_card, do: default_card(root())
+
+  @doc """
+  The same card, for ONE catalogue root — every ACTIVE catalogue has its own, and a guard that
+  checks them has to ask each in turn rather than the default one N times.
+  """
+  @spec default_card(Path.t()) :: String.t() | nil
+  def default_card(root) when is_binary(root) do
+    case YamlElixir.read_from_file(Path.join(root, @manifest_basename)) do
       {:ok, %{"default_card" => card}} when is_binary(card) -> card
       _ -> nil
     end
