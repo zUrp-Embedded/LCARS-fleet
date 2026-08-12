@@ -403,3 +403,66 @@ STUB
   grep -q "^# SOURCE:" "$SCRIPT"; grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"; grep -q "^# STATUS:" "$SCRIPT"
 }
+
+# ============================ fleet.feed : le journal est RO pour le pod ============================
+#
+# `fleet.feed` est ce que le RUNTIME raconte au pod. Le pod_dir etant monte en ecriture, le pod
+# pouvait l'editer — et `PodFeed.append/2` RELIT le fichier avant de le reecrire, donc une ligne
+# posee par l'agent revient signee par le runtime. Ces tests tiennent les trois proprietes dont
+# depend le montage : le fichier EXISTE au spawn (bwrap bind strictement), il n'est PAS tronque
+# (le pod_dir survit au respawn), et le ro-bind vient APRES le bind du dossier (bwrap applique
+# dans l'ordre : avant, il serait annule).
+
+@test "feed: le fichier est CREE au spawn — sinon bwrap n'a rien a binder" {
+  rm -f "$POD_DIR/fleet.feed"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ -f "$POD_DIR/fleet.feed" ]]
+}
+
+@test "feed: un journal DEJA ECRIT n'est jamais tronque par un respawn" {
+  printf '10:15 jalon precedent\n' > "$POD_DIR/fleet.feed"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  run cat "$POD_DIR/fleet.feed"
+  [[ "$output" == *"jalon precedent"* ]]
+}
+
+@test "feed: monte en LECTURE SEULE dans le home du pod" {
+  export LCARS_POD_HOME="/home/.pod"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+}
+
+@test "feed: le ro-bind vient APRES le bind du pod_dir (sinon il est recouvert)" {
+  export LCARS_POD_HOME="/home/.pod"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  dir_bind="${output%%--ro-bind $POD_DIR/fleet.feed*}"
+  [[ "$dir_bind" == *"--bind $POD_DIR /home/.pod"* ]]
+}
+
+@test "feed: un pod dont le cwd RE-MONTE le pod_dir le voit RO sous SES DEUX chemins" {
+  # L'arch : /home/.pod et /home/<projet> sont la meme source. Un seul monte RO laisserait
+  # l'autre ecrivable, ce qui revient a n'en monter aucun.
+  export LCARS_POD_HOME="/home/.pod"
+  export LCARS_POD_CWD="/home/chifoumi"
+  export LCARS_POD_CWD_SRC="$POD_DIR"
+  run "$SCRIPT" architect pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/chifoumi/fleet.feed"* ]]
+}
+
+@test "feed: un pod dont le cwd est un CLONE ne recoit que le montage du home" {
+  # Le producteur travaille dans un clone : il n'y a pas de feed a cet endroit-la, et en binder un
+  # y planterait un fichier que le depot ne connait pas.
+  export LCARS_POD_HOME="/home/.pod"
+  export LCARS_POD_CWD="/home/projet"
+  export LCARS_POD_CWD_SRC="$POD_DIR/projet"; mkdir -p "$LCARS_POD_CWD_SRC"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+  [[ "$output" != *"/home/projet/fleet.feed"* ]]
+}

@@ -214,6 +214,38 @@ MIRROR_BIND_ARGS=()
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
 
+# ─── LE JOURNAL DU POD EST EN LECTURE SEULE POUR LUI ────────────────────────────────────────────
+# `fleet.feed` est le recit que le RUNTIME fait au pod de ce qui s'est passe (ArchFeed, FleetFeed).
+# Le pod_dir est monte en ecriture, donc le pod pouvait l'editer — et ce n'est pas « salir son
+# journal » : `PodFeed.append/2` RELIT le fichier avant de le reecrire, donc une ligne posee par
+# l'agent est reprise et re-emise sous la signature du runtime. Un agent pouvait blanchir des lignes
+# dans le registre de la fleet, sur l'objet meme dont la fonction est de lui dire ce qui s'est
+# REELLEMENT passe.
+#
+# DEUX CONTRAINTES, ET ELLES SONT LA RAISON DE CES DEUX LIGNES-CI :
+#   1. bwrap bind STRICTEMENT — une source absente n'est pas un montage vide, c'est un launcher qui
+#      meurt. Or le feed n'existe qu'au PREMIER jalon (`PodFeed` le cree a l'append), donc il est
+#      absent au spawn : mesure du 2026-08-12, un arch qui se reveille ne le trouve pas alors que son
+#      SP lui promet qu'il est la. On le cree ICI, vide, a cote du bind qui en depend — un `touch`
+#      pose ailleurs deriverait du bind un jour ou l'autre. Un fichier vide se lit ; une absence, elle,
+#      fabrique une croyance.
+#   2. le writer doit garder le MEME inode. `File.write` tronque en place, donc le montage suit. Le
+#      jour ou quelqu'un « ameliore » ca en ecriture-temporaire-puis-`rename`, la vue du pod se fige
+#      sur l'ancien inode SANS RIEN DIRE : le pod lirait un journal mort en le croyant vivant.
+# `touch`, JAMAIS `: >` : le pod_dir survit au respawn (l'arch est `forever`), donc une troncature
+# ici effacerait le journal a chaque relance — l'inverse exact de ce qu'on protege.
+touch "$POD_DIR/fleet.feed" 2>/dev/null || true
+FEED_BIND_ARGS=()
+if [[ -f "$POD_DIR/fleet.feed" ]]; then
+  FEED_BIND_ARGS=(--ro-bind "$POD_DIR/fleet.feed" "$SANDBOX_HOME/fleet.feed")
+  # Le pod dont le cwd RE-MONTE le pod_dir (l'arch : /home/.pod et /home/<projet> sont la meme
+  # source) voit le feed sous DEUX chemins. Un seul monte RO laisserait l'autre ecrivable, ce qui
+  # revient a n'en monter aucun.
+  if [[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" == "$POD_DIR" && "$WORKDIR" != "$SANDBOX_HOME" ]]; then
+    FEED_BIND_ARGS+=(--ro-bind "$POD_DIR/fleet.feed" "$WORKDIR/fleet.feed")
+  fi
+fi
+
 # The per-pod MCP socket dir MUST pre-exist: central creates the socket file BEFORE this launch (unlike
 # the tmux socket dir above, which tmux fills INSIDE the sandbox). We MOUNT it, we do not create it — its
 # absence means the provisioning contract was broken, and a clear failure at the boundary beats binding a
@@ -422,6 +454,9 @@ exec env -i "$BWRAP_BIN" \
   --dev /dev --proc /proc \
   --bind "$POD_DIR" "$SANDBOX_HOME" \
   ${CWD_BIND_ARGS[@]+"${CWD_BIND_ARGS[@]}"} \
+  `# APRES les deux binds du pod_dir, delibere : bwrap applique dans l'ordre, donc ce ro-bind` \
+  `# RECOUVRE le fichier deja projete en ecriture. Avant, il serait annule par le bind du dossier.` \
+  ${FEED_BIND_ARGS[@]+"${FEED_BIND_ARGS[@]}"} \
   ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   ${MIRROR_BIND_ARGS[@]+"${MIRROR_BIND_ARGS[@]}"} \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \

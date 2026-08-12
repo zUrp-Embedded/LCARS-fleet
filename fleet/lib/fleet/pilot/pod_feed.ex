@@ -32,6 +32,17 @@ defmodule Fleet.Pilot.PodFeed do
 
   Never raises: any failure comes back as `{:error, term()}` so a courtesy mirror can never break
   the act it mirrors.
+
+  ⚠ WRITE IN PLACE, NEVER temp-file-then-rename. The pod sees this file through a `--ro-bind` on
+  the FILE (bwrap_launch), so its view follows the INODE, not the path. `File.write/2` truncates
+  the existing inode and the bind keeps up; a rename would swap the inode underneath and freeze the
+  pod's view on the old one — silently. The agent would read a dead journal believing it live, and
+  nothing in the runtime would notice: the writes keep succeeding, on a file nobody reads.
+
+  The read-back below is why that bind exists. This function re-reads the file before rewriting it,
+  so anything the pod could append would come back RE-EMITTED under the runtime's own signature —
+  an agent laundering lines into the fleet's record, on the one object whose job is to tell it what
+  actually happened. The RO mount, not this code, is what makes the read-back safe.
   """
   @spec append(String.t(), String.t()) :: :ok | {:error, term()}
   def append(pod_dir, line) when is_binary(pod_dir) and is_binary(line) do
