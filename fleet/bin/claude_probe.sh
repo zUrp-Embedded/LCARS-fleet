@@ -63,6 +63,12 @@ REQUIRED=(
   --session-id              # l'identite de session, base du resume
   --resume
   --remote-control          # visibilite Desktop
+  --disable-slash-commands  # coupe la surface vendor (`/init` et les skills) pour un pod qui a un
+                            # depot au cwd. LOAD-BEARING : cette surface est COMPILEE dans le
+                            # binaire (mesure 2026-08-12), donc aucun montage ne la borne — ce
+                            # drapeau est le seul levier. Sa disparition rendrait `/init` a des
+                            # pods dont il ecraserait le CLAUDE.md du depot dans un format que
+                            # l'extracteur de la fleet ne lit pas.
 )
 
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 \
