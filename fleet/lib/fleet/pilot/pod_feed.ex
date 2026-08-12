@@ -47,8 +47,18 @@ defmodule Fleet.Pilot.PodFeed do
   @spec append(String.t(), String.t()) :: :ok | {:error, term()}
   def append(pod_dir, line) when is_binary(pod_dir) and is_binary(line) do
     path = Path.join(pod_dir, @feed_file)
-    {{_y, _m, _d}, {h, mi, _s}} = :calendar.local_time()
-    stamp = :io_lib.format("~2..0B:~2..0B", [h, mi]) |> IO.iodata_to_binary()
+    # LA DATE, ET C'EST LE CORRECTIF D'UN COMPORTEMENT, PAS UNE COQUETTERIE. L'estampille etait
+    # `HH:MM` seule sur un fichier borne a 200 lignes — qui couvre donc plusieurs JOURS sur un
+    # projet calme. Un `09:14` y apparait trois fois sans qu'on puisse dire lequel est
+    # d'aujourd'hui, et le lecteur ne peut pas repondre a « ou on en est » sans compter les
+    # lignes. Mesure 2026-08-12, sur plusieurs architectes reels : faute de voir l'etat d'un coup
+    # d'oeil ici, ils le recopiaient a la main dans le backlog de leur atelier, sous une section
+    # « ## en vol » qu'ils inventaient — dans un fichier qui est une FILE d'attente, pas un
+    # registre. Le defaut n'etait pas un fichier manquant chez eux, il etait dans cette ligne.
+    {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
+
+    stamp =
+      :io_lib.format("~2..0B-~2..0B ~2..0B:~2..0B", [mo, d, h, mi]) |> IO.iodata_to_binary()
 
     existing =
       case File.read(path) do

@@ -59,7 +59,9 @@ defmodule Fleet.Pilot.ArchFeedTest do
     :sys.get_state(pid)
 
     assert feed(tmp) =~ "pod fleet-x-engineer a fini son run (#issue-4)"
-    assert feed(tmp) =~ ~r/^\d{2}:\d{2} /
+    # L estampille porte la DATE : le feed est borne a 200 lignes et couvre plusieurs jours,
+    # donc un `09:14` seul ne dit pas lequel est d aujourd hui (cf. pod_feed.ex).
+    assert feed(tmp) =~ ~r/^\d{2}-\d{2} \d{2}:\d{2} /
     refute_received {:notified, _, _}
   end
 

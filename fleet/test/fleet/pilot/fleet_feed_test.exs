@@ -74,7 +74,7 @@ defmodule Fleet.Pilot.FleetFeedTest do
       assert line =~ "permanent-engineer"
       assert line =~ "fleet/lcars#42"
       assert line =~ "error_system"
-      assert line =~ ~r/^\d\d:\d\d /
+      assert line =~ ~r/^\d\d-\d\d \d\d:\d\d /
 
       # The push is not the exception it is in `ArchFeed`: the recurrence gate upstream already
       # decided a human is needed, so a line nobody is told about would restore the polling this
