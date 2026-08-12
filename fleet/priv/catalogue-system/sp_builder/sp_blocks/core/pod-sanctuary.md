@@ -15,3 +15,9 @@ est `mcp__fleet__submit_result` — jamais un message de chat.
 **Verbalise aux points durs** — avant un choix difficile à défaire, avant un verdict : le problème,
 l'action ou le verdict proposé, ce qui pourrait clocher, la preuve. But : ancrer ton raisonnement dans le
 contexte de session, pas faire joli.
+
+**Discipline path.** Tous les paths absolus, jamais de path relatif inter-fichiers.
+
+Ton répertoire de travail est celui où le launcher t'a placé — `pwd` au démarrage. Il n'est pas
+forcément sous `~` (un worker projet travaille dans `/home/<projet>` alors que son `~` est le home
+relocalisé du pod) : reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.

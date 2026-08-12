@@ -72,7 +72,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   clones the repo into `<pod_dir>/workspace/` + checkout of the feature branch; the REPL's cwd
   points at this workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) → the agent codes INSIDE its
   branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
-  workspace (with cwd=workspace it must be INSIDE the cwd). Absent (`repo_path` nil) → no-op.
+  workspace ONLY when the repo does not track one of its own — a tracked `CLAUDE.md` is both the
+  producer's INPUT and a legitimate deliverable, so it stays untouched and stageable. Absent
+  (`repo_path` nil) → no-op.
 
   The OTHER production face is NOT cloned here: it reaches the pod as an RO BIND
   (`LaunchSpec.other_face_reference_path/3`). A second mechanism cloning it into `<pod_dir>/work`
@@ -115,28 +117,46 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # section through Fleet.ReceptionFilter — hostile sections are dropped loud there),
           # overwrite the pod_dir copy. Best-effort LOUD: a failure degrades to the
           # identity-only CLAUDE.md of :projecting, never a HALT.
-          maybe_enrich_claude_md(state, workspace)
+          repo_doc = maybe_enrich_claude_md(state, workspace)
 
           # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
           # the agent pops into an already-documented project. The :projecting state writes it at the
           # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
           # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD,
           # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
-          case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
-            :ok ->
-              # Anti-leak, UNTRACKED case (measured live on the scribe bench: `?? CLAUDE.md` in
-              # git status): on a repo that does not track a root CLAUDE.md, OUR composed copy is
-              # stageable — a pod's `git add -A` would ship pod-identity material in its
-              # deliverable, and the gate's path wall deliberately allows the ROOT CLAUDE.md.
-              # `.git/info/exclude` hides it from add/status, is clone-local, and never ships.
-              # (The TRACKED case is covered by the sanitizer's skip-worktree.)
-              exclude_composed_claude_md(workspace)
+          # ⚠ ON N'ECRASE PLUS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
+          # tout producteur (ses sept sections voyagent dans le prompt compose) et il doit rester
+          # LIVRABLE : c'est par la que ses conventions se mettent a jour quand la pile change.
+          # L'ecraser obligeait a le masquer (`skip-worktree`), donc a rendre `git status` propre et
+          # `git diff` vide EN AYANT TORT — un producteur qui applique la discipline de preuve
+          # obtenait un faux negatif et declarait le critere tenu de bonne foi. Mesure 2026-08-12.
+          #
+          # Ce que la copie apportait est parti la ou ca vit : l'identite arrive par
+          # `--system-prompt-file` (remplacante et fiable, claude_launch.sh), et la doctrine de
+          # sortie/preuve/path est dans les blocs SP (le bloc du monde projete, `evidence`,
+          # `producer-output`). Il ne restait dans le fichier compose que l'identite dupliquee et
+          # les sections du depot — que l'agent lit desormais a leur source.
+          if repo_doc == :tracked do
+            Logger.info(
+              "pod #{state.pod_id} workspace CLAUDE.md: celui du DEPOT, intact et livrable " <>
+                "(la doctrine du pod arrive par le system-prompt, plus par ce fichier)"
+            )
+          else
+            case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
+              :ok ->
+                # Anti-leak, UNTRACKED case (measured live on the scribe bench: `?? CLAUDE.md` in
+                # git status): on a repo that does not track a root CLAUDE.md, OUR composed copy is
+                # stageable — a pod's `git add -A` would ship pod-identity material in its
+                # deliverable, and the gate's path wall deliberately allows the ROOT CLAUDE.md.
+                # `.git/info/exclude` hides it from add/status, is clone-local, and never ships.
+                exclude_composed_claude_md(workspace)
 
-            {:error, reason} ->
-              Logger.warning(
-                "pod #{state.pod_id} CLAUDE.md → workspace copy FAILED (#{inspect(reason)}) — " <>
-                  "the agent's cwd lacks its codebase-doc (pod-identity + repo conventions)"
-              )
+              {:error, reason} ->
+                Logger.warning(
+                  "pod #{state.pod_id} CLAUDE.md → workspace copy FAILED (#{inspect(reason)}) — " <>
+                    "the agent's cwd lacks its codebase-doc (pod identity)"
+                )
+            end
           end
 
           Logger.info(
@@ -218,10 +238,13 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   # the :projecting composition stands. Any failure past that point degrades LOUD to the
   # identity-only CLAUDE.md — a pod without repo conventions beats no pod, and beats a pod
   # whose repo doc bypassed the reception filter.
+  # Rend `:tracked` quand le depot porte une racine `CLAUDE.md` A HEAD (`git show HEAD:CLAUDE.md` —
+  # c'est exactement le predicat « ce fichier est versionne », pas « il existe sur le disque »), et
+  # `:absent` sinon. L'appelant s'en sert pour NE PAS ecraser un fichier livrable.
   defp maybe_enrich_claude_md(state, workspace) do
     case Fleet.ProjectBootstrap.Phase.Clone.read_original_claude_md(workspace) do
       :absent ->
-        :ok
+        :absent
 
       {:ok, original} ->
         repo_source = Path.join(state.pod_dir, "CLAUDE.md.repo-source")
@@ -229,7 +252,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
         with :ok <- File.write(repo_source, original),
              {:ok, md} <- Fleet.SPBuilder.compose_claude_md(state.cap_profile, repo_source),
              :ok <- File.write(Path.join(state.pod_dir, "CLAUDE.md"), md) do
-          :ok
+          :tracked
         else
           {:error, reason} ->
             Logger.warning(
@@ -237,7 +260,11 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                 "the pod launches on the identity-only CLAUDE.md (no repo conventions)"
             )
 
-            :ok
+            # `:tracked` MEME EN ECHEC : le depot porte bien ce fichier (on vient de le lire a HEAD),
+            # seule la composition de la copie pod_dir a rate. Rendre `:absent` ici ferait ecraser un
+            # fichier livrable par une copie degradee — l'echec d'un confort deviendrait la perte
+            # d'une entree.
+            :tracked
         end
     end
   end

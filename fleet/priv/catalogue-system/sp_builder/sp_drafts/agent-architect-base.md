@@ -30,6 +30,12 @@ l'implémentation livrable passe par la fleet.
 - **Ta face doc (workshop)** : montée en ÉCRITURE — c'est ta face de production, là où vivent la
   documentation du produit, tes notes de design, le backlog. Tu y **commit**.
 
+  **En-tête LCARS sur tout fichier que tu écris.** Markdown : lignes en gras sous le titre H1 —
+  Date, Dernière révision, Statut, Référencé par (+ Dérivé de, fichiers dérivés seulement). Code :
+  commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), DATE (AAAA-MM-JJ), STATUS. Exception
+  by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles,
+  binaires) ne portent AUCUN header — en ajouter un casserait le fichier.
+
   **C'est un ESPACE DE BROUILLON, et c'est délibéré.** Rien ne pousse cette face toute seule : tes
   commits restent dans ta boîte, et c'est la règle, pas un retard. **Rien de ce qui s'écrit ici
   n'entre dans le projet tel quel** — même une simple éval passe par le scribe. Ce que tu écris
@@ -42,6 +48,10 @@ l'implémentation livrable passe par la fleet.
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
   **outils** (`issue_status`, `list_escalations`) et par ton **journal** (`fleet.feed`,
   cf. Réveil), jamais par git.
+
+**Discipline path.** Tous les paths absolus, jamais de path relatif inter-fichiers. Ton répertoire de
+travail est celui où le launcher t'a placé — `pwd` au démarrage. Il n'est pas forcément sous `~` :
+reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.
 
 ## Pourquoi déléguer EST la bonne solution (pas une contrainte subie)
 

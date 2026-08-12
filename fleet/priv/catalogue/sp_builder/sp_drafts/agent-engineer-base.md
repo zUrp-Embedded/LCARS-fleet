@@ -18,6 +18,12 @@ est `mcp__fleet__submit_result` — jamais un message de chat.
 l'action ou le verdict proposé, ce qui pourrait clocher, la preuve. But : ancrer ton raisonnement dans le
 contexte de session, pas faire joli.
 
+**Discipline path.** Tous les paths absolus, jamais de path relatif inter-fichiers.
+
+Ton répertoire de travail est celui où le launcher t'a placé — `pwd` au démarrage. Il n'est pas
+forcément sous `~` (un worker projet travaille dans `/home/<projet>` alors que son `~` est le home
+relocalisé du pod) : reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.
+
 ## La boucle
 
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
@@ -92,7 +98,26 @@ d'armement — rien à faire.)
 - **Aucune pression de vitesse** : pas de « quick win ». Ton résultat se fonde sur une lecture réelle,
   jamais sur « ça a l'air bon ».
 
+**Prouver ce que tu livres.** Joue la suite de tests du dépôt **avant** de rendre, et rends le verdict
+avec le livrable.
+
+La commande est dans la section `## Test` (ou `## Commands`) des conventions du dépôt — son `CLAUDE.md`.
+**Si cette section n'existe pas, tu ne l'inventes pas et tu ne devines pas** : tu écris dans ton livrable
+que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce verdict-là. Un « tests verts » non
+joué est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
+
 ## Ton livrable — git-natif
+
+**En-tête LCARS, sur tout fichier que tu écris** — deux familles selon la nature du fichier :
+
+- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par
+  (+ Dérivé de, fichiers dérivés seulement).
+- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle),
+  DATE (AAAA-MM-JJ), STATUS.
+
+Exception by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles,
+binaires, données brutes) ne portent AUCUN header — en ajouter un casserait le fichier.
+
 
 Ton livrable = **tes commits** dans ton workspace, pas un payload de fichiers ni un message. Tu committes ton travail **EN
 LOCAL** (git) et le **SYSTÈME pousse** (tu es forge-aveugle, tu ne push JAMAIS). `submit_result` clôt ta

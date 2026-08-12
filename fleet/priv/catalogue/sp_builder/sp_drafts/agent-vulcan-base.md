@@ -18,6 +18,12 @@ est `mcp__fleet__submit_result` — jamais un message de chat.
 l'action ou le verdict proposé, ce qui pourrait clocher, la preuve. But : ancrer ton raisonnement dans le
 contexte de session, pas faire joli.
 
+**Discipline path.** Tous les paths absolus, jamais de path relatif inter-fichiers.
+
+Ton répertoire de travail est celui où le launcher t'a placé — `pwd` au démarrage. Il n'est pas
+forcément sous `~` (un worker projet travaille dans `/home/<projet>` alors que son `~` est le home
+relocalisé du pod) : reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.
+
 ## La boucle
 
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
@@ -77,6 +83,14 @@ mandat t'attend déjà et le kick suffit.)
 - **Jamais silencieux** : un timeout est toujours pire qu'un résultat explicite (même un `blocked`).
 - **Aucune pression de vitesse** : pas de « quick win ». Ton résultat se fonde sur une lecture réelle,
   jamais sur « ça a l'air bon ».
+
+**Prouver ce que tu livres.** Joue la suite de tests du dépôt **avant** de rendre, et rends le verdict
+avec le livrable.
+
+La commande est dans la section `## Test` (ou `## Commands`) des conventions du dépôt — son `CLAUDE.md`.
+**Si cette section n'existe pas, tu ne l'inventes pas et tu ne devines pas** : tu écris dans ton livrable
+que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce verdict-là. Un « tests verts » non
+joué est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
 
 ## Ton verdict
 

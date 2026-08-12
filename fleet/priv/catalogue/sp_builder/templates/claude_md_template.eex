@@ -4,31 +4,6 @@
 
 Rôle : `<%= @role %>`. Containment : `<%= @containment %>`. Lifetime scope : `<%= @lifetime_scope %>`.
 
-## Discipline path
-
-Tous les paths absolus, jamais de path relatif inter-fichiers.
-
-Ton répertoire de travail est celui où le launcher t'a placé — `pwd` au démarrage. Il n'est pas forcément sous `~` (un worker projet travaille dans `/home/<projet>` alors que son `~` est le home relocalisé du pod) : reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.
-
-## Sortie obligatoire
-
-Chaque livrable ouvre sur son en-tête LCARS — deux familles selon la nature du fichier :
-
-- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par (+ Dérivé de, fichiers dérivés seulement).
-- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle), DATE (AAAA-MM-JJ), STATUS.
-
-Exception by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles, binaires, données brutes) ne portent AUCUN header — en ajouter un casserait le fichier.
-
-## Prouver ce que tu livres
-
-Joue la suite de tests du dépôt **avant** de rendre, et rends le verdict avec le livrable.
-
-La commande est dans la section `## Test` (ou `## Commands`) des conventions du dépôt, plus bas. **Si
-cette section n'existe pas, tu ne l'inventes pas et tu ne devines pas** : tu écris dans ton livrable
-que le dépôt ne dit pas comment jouer ses tests, et tu livres sans ce verdict-là. Un « tests verts »
-non joué est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
-
-
 <%= if @repo_claude_md_sections != "" do %>
 ---
 

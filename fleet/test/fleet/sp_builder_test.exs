@@ -300,14 +300,37 @@ defmodule Fleet.SPBuilderTest do
     # the second by naming it, so the absence gets REPORTED instead of papered over with "tests
     # green". Rule P2(b): the obligation, not the observation.
     test "the pod is told to prove its deliverable, and what to do when the repo does not say how" do
-      assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
+      # ⚠ CETTE DOCTRINE A DEMENAGE, ET LE DEMENAGEMENT EST LE SUJET DU TEST. Elle vivait dans le
+      # `CLAUDE.md` compose — un fichier ECRIT PAR-DESSUS celui du depot, qu'il fallait ensuite
+      # masquer (`skip-worktree`) pour qu'il ne parte pas dans le livrable. Ce masquage rendait le
+      # `CLAUDE.md` du projet INLIVRABLE : un producteur qui l'editait voyait `git status` propre.
+      # La doctrine est donc partie dans les blocs SP, qui arrivent par `--system-prompt-file`
+      # (remplacant et fiable), et le fichier du depot est redevenu celui du depot.
+      #
+      # Le test tient les DEUX bouts : la doctrine existe toujours pour l'agent, et elle n'est plus
+      # dans le fichier qui doit rester livrable. Sans la seconde assertion, la reintroduire dans le
+      # template rouvrirait le piege sans qu'aucun test ne bronche.
+      # Le MEME resolveur que le compositeur (`Blocks`), jamais un chemin rebati : les blocs vivent
+      # dans le catalogue systeme, la carte dans le catalogue metier, et un chemin en dur ici
+      # mesurerait un fichier que la fleet ne lit pas.
+      block =
+        Fleet.Catalogue.find(
+          Fleet.Catalogue.root(),
+          Fleet.Catalogue.rel(:sp_blocks),
+          "core/evidence.md"
+        )
+        |> File.read!()
 
-      assert claude_md =~ "## Prouver ce que tu livres"
+      assert block =~ "## Preuve avant action"
+      assert block =~ "Prouver ce que tu livres"
 
       # WHERE to look — the exact heading the extraction carries over, not a vague "the repo doc".
-      assert claude_md =~ "## Test"
+      assert block =~ "## Test"
       # And the clause that makes a missing runner visible rather than silently assumed.
-      assert claude_md =~ "mensonge opérationnel"
+      assert block =~ "mensonge opérationnel"
+
+      assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
+      refute claude_md =~ "Prouver ce que tu livres"
 
       # The containment doctrine it replaced: a constat that named the interdictions to the very
       # agent they confine, and told it nothing it could act on. N8/A8 — same family as the launch

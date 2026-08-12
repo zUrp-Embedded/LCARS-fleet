@@ -366,9 +366,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
     repo (the parking-lot USB) and would be read as DIRECTIVES by the CLI (cwd = workspace;
     the root `CLAUDE.md` is covered separately — the composed one overwrites it, Scaffold).
 
-    Tracked victims (and a tracked root `CLAUDE.md`, which the overwrite would dirty) are
-    flagged `git update-index --skip-worktree` BEFORE removal, so the pod's `git add .` never
-    stages our deletions nor our composed file into its deliverable — the gate's
+    Tracked victims are flagged `git update-index --skip-worktree` BEFORE removal, so the pod's
+    `git add .` never stages our deletions into its deliverable — the gate's
     forbidden-path check is the independent second line. Called by BOTH workspace producers
     (`clone_or_skip` at spawn, `reset_in_place` at every slot-freeze re-brief — `reset --hard`
     erases the skip-worktree bits and restores tracked victims). Neutralized paths are logged
@@ -379,7 +378,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
     def sanitize_workspace(ws) do
       victims = claude_dirs(ws) ++ nested_claude_mds(ws)
 
-      with :ok <- skip_worktree_tracked(ws, victims ++ [Path.join(ws, "CLAUDE.md")]),
+      # ⚠ LA RACINE `CLAUDE.md` N'EST PLUS FLAGUEE, ET C'EST LE CORRECTIF, PAS UN OUBLI. Elle
+      # l'etait parce qu'on ECRASAIT ce fichier avec le CLAUDE.md compose du pod : le flag empechait
+      # notre copie de partir dans le livrable. Effet de bord mesure le 2026-08-12 : sur un depot qui
+      # TRACKE sa racine `CLAUDE.md` — c'est-a-dire tout projet cree par la fleet, le template en pose
+      # un — un producteur ne pouvait plus livrer ce fichier. Son edition n'etait jamais stagee,
+      # `git status` restait propre et `git diff` vide EN AYANT TORT, donc un producteur appliquant la
+      # discipline de preuve obtenait un faux negatif et declarait le critere tenu de bonne foi.
+      # L'environnement neutralisait l'instrument de preuve qu'il exige par ailleurs.
+      # Le Scaffold n'ecrase plus un `CLAUDE.md` tracke (il n'y a donc plus rien a masquer), et le
+      # cas non-tracke reste couvert par `.git/info/exclude`, qui lui ne ment a personne.
+      with :ok <- skip_worktree_tracked(ws, victims),
            :ok <- remove_all(victims) do
         if victims != [] do
           rels = Enum.map(victims, &Path.relative_to(&1, ws))
