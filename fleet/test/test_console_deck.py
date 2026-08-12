@@ -316,6 +316,31 @@ check(code == 200 and "PAS ENCORE DE BLOC" in body,
 check(fetch(dport, "/api/state", cookie)[0] == 409,
       "et l'API porte le meme etat, distinct d'un 401")
 
+# (5-bis) MEMBRE, ET LE CONVERGEUR A REFUSE SON LOGIN. Etat DIFFERENT du precedent, et c'est tout
+# l'objet de ce cas : Gitea accepte des logins qui ne peuvent PAS devenir un compte Unix (33
+# caracteres, par exemple), donc une personne peut etre enrolee et ne converger JAMAIS. Dire
+# « ca converge tout seul » a celle-la est un mensonge que personne ne revient verifier.
+refused_path = os.path.join(HERE, "..", "tmp-deck-refused-%d" % os.getpid())
+with open(refused_path, "w") as fh:
+    fh.write("zoe\tce login ne peut pas devenir un compte Unix : il faut 1 a 32 caracteres\n")
+deck.REFUSED_FILE = refused_path
+code, body, _ = fetch(dport, "/", cookie)
+check(code == 200 and "CE LOGIN NE PEUT PAS ABOUTIR" in body,
+      "refus publie par le convergeur -> une page qui le DIT (vu: %d)" % code)
+check("1 a 32 caracteres" in body,
+      "et elle porte la RAISON du convergeur, pas un refus generique")
+check("converge tout seul" not in body,
+      "elle ne promet SURTOUT pas que ca se debloquera seul")
+check(fetch(dport, "/api/state", cookie)[0] == 422,
+      "et l'API distingue 422 (n'aboutira jamais) de 409 (pas encore converge)")
+deck.REFUSED_FILE = refused_path + ".absent"
+check(fetch(dport, "/api/state", cookie)[0] == 409,
+      "sans fichier de refus, on retombe sur « pas encore converge » — l'absence n'accuse rien")
+try:
+    os.unlink(refused_path)
+except OSError:
+    pass
+
 # (6) LE FILTRE EST A LA SOURCE. Deux humains sur la boite, une seule ligne servie.
 deck.humans = lambda: [
     {"human": "zoe", "uid": 1001, "home": "/home/zoe", "ports": deck.block(1001)},
@@ -329,6 +354,40 @@ check(code == 200 and len(served) == 1 and served[0]["human"] == "zoe",
 check("autre" not in body, "le voisin n'apparait nulle part dans la charge")
 check(len(deck.state()["humans"]) == 2,
       "et le filtre est un ARGUMENT, pas une amputation : state() sans filtre voit les deux")
+
+# (6-bis) P5 — CE QUE L'ENROLLMENT NE PEUT PAS FABRIQUER. Un humain converge n'a AUCUNE capacite a
+# spawner tant qu'il n'a pas fait son `claude /login`, et rien dans la chaine ne le lui disait : il
+# le rencontrait sous forme de pod mort. Trois etats, et « absent » est une AFFIRMATION qu'on ne
+# prononce que si on a pu regarder.
+import tempfile
+hbase = tempfile.mkdtemp(prefix="deck-homes-")
+h_ok = os.path.join(hbase, "avec"); h_no = os.path.join(hbase, "sans"); h_blind = os.path.join(hbase, "aveugle")
+os.makedirs(os.path.join(h_ok, ".claude")); os.makedirs(h_no); os.makedirs(h_blind)
+open(os.path.join(h_ok, ".claude", ".credentials.json"), "w").write("{}")
+check(deck.claude_credentials(h_ok) == "present",
+      "credentials posees -> 'present' (vu: %s)" % deck.claude_credentials(h_ok))
+check(deck.claude_credentials(h_no) == "absent",
+      "home traversable et rien dedans -> 'absent' : on a REGARDE (vu: %s)" % deck.claude_credentials(h_no))
+os.chmod(h_blind, 0o000)
+# root TRAVERSE tout : sous uid 0 ce cas n'est pas mesurable, et le cocher quand meme serait un
+# vert creux. On le DIT plutot que de le faire passer.
+if os.geteuid() == 0:
+    print("SKIP: home non traversable — non mesurable sous root (root ignore les permissions)")
+else:
+    check(deck.claude_credentials(h_blind) == "unknown",
+          "home non traversable -> 'unknown', JAMAIS 'absent' (vu: %s)" % deck.claude_credentials(h_blind))
+os.chmod(h_blind, 0o755)
+check(deck.claude_credentials(None) == "unknown", "pas de home -> 'unknown'")
+check(deck.claude_credentials(os.path.join(hbase, "inexistant")) == "unknown",
+      "home inexistant -> 'unknown' : une absence de home n'est pas une absence de credentials")
+# Le contenu n'est JAMAIS lu — la validite se tranche au spawn, pas ici.
+open(os.path.join(h_ok, ".claude", ".credentials.json"), "w").write("")
+check(deck.claude_credentials(h_ok) == "present",
+      "un fichier VIDE reste 'present' : cette sonde ne juge pas la validite, elle constate")
+deck.humans = lambda: [{"human": "zoe", "uid": 1001, "home": h_no, "ports": deck.block(1001)}]
+code, body, _ = fetch(dport, "/api/state", cookie)
+check(code == 200 and json.loads(body)["humans"][0]["claude"] == "absent",
+      "l'etat claude voyage dans /api/state (vu: %s)" % body[:80])
 
 # (7) SORTIR. La session meurt cote serveur, pas seulement dans le navigateur.
 code, _, hdrs = fetch(dport, "/auth/logout", cookie)

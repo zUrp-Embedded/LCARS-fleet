@@ -257,6 +257,7 @@ COPY fleet/deploy/docker/console-status.sh  /opt/lcars/console-status.sh
 COPY fleet/deploy/docker/console-landing.sh /opt/lcars/console-landing.sh
 COPY fleet/deploy/docker/console-deck.py    /opt/lcars/console-deck.py
 COPY fleet/deploy/docker/console-pod.sh     /opt/lcars/console-pod.sh
+COPY fleet/deploy/docker/human-converger.sh /opt/lcars/human-converger.sh
 COPY fleet/deploy/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
@@ -313,6 +314,7 @@ RUN printf '%s\n' \
 RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console-humans.sh \
                /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
+               /opt/lcars/human-converger.sh \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh

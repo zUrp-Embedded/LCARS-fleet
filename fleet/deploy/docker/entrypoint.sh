@@ -230,6 +230,24 @@ else
   say "provision apply : AU MOINS UN ÉCHEC (rc=$?) — la boîte démarre quand même ; diagnose : $PROVISION doctor"
 fi
 
+# ─── 3ter. Convergence CONTINUE des humains (forge `humans` → users Linux) ───────────────────────
+# L'étape 3 converge un état FIGÉ, au boot. Enrôler quelqu'un demandait donc un redémarrage — ce qui
+# était défendable en 1976. Cette boucle poursuit le même état-cible pendant toute la vie de la
+# boîte : elle lit la team `humans` au token système et crée les users manquants. Elle tourne en
+# root parce que root tourne DÉJÀ ici en permanence (sshd juste dessous) — pas de `sudo` à
+# installer, pas de droit à accorder à quiconque.
+# Elle ne SUPPRIME jamais : la révocation est un retrait côté forge, et ce qui reste sur la machine
+# est de la donnée, pas un accès (sans compte forge, ni console ni fleet ne s'ouvrent).
+if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x /opt/lcars/human-converger.sh ]]; then
+  # Détaché du shell de l'entrypoint : celui-ci finit sur `exec sshd`, ce qui remplace le process.
+  # Un enfant simplement mis en arrière-plan survit à l'exec (même PID 1 tini le récolte), mais
+  # setsid le détache aussi du terminal, donc un signal de session ne l'emporte pas avec elle.
+  setsid /opt/lcars/human-converger.sh </dev/null >>/var/log/lcars-converger.log 2>&1 &
+  say "convergence des humains ACTIVE (pid $!) — un ajout à la team « humans » suffit, sans redémarrage"
+else
+  say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
+fi
+
 # ─── 3bis. La console web (ttyd sous l'humain, port dérivé de son UID) ───────────────────────────
 # Lancée APRÈS la convergence (elle a besoin de l'humain et de son home) et AVANT sshd (qui prend
 # le premier plan). Son échec n'est pas fatal — même règle que la convergence : la boîte doit

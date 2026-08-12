@@ -56,6 +56,12 @@ HUMANS_TEAM = os.environ.get("LCARS_DECK_TEAM", "fleet:humans")
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
 PENDING_TTL = 600
+# WHERE THE CONVERGER PUBLISHES ITS REFUSALS, and reading it is what stops this page from lying.
+# Gitea accepts logins that can never become a Unix account (a 33-character name, for one), so a
+# person CAN be enrolled into the team and never converge. This page used to tell them "it
+# converges on its own, nothing to do on your side" -- for a convergence that will never happen.
+# The converger is the only component that knows why; it writes the reason here, we read it.
+REFUSED_FILE = os.environ.get("LCARS_CONVERGER_REFUSED", "/run/lcars-converger.refused")
 
 _lock = threading.Lock()
 _sessions = {}
@@ -107,6 +113,19 @@ def _sweep(now):
     for store, key in ((_sessions, "exp"), (_pending, "exp")):
         for k in [k for k, v in store.items() if v[key] <= now]:
             store.pop(k, None)
+
+
+def refusal_for(login):
+    """The converger's stated reason for refusing `login`, or None if it never refused it."""
+    try:
+        with open(REFUSED_FILE) as fh:
+            for line in fh:
+                name, _, reason = line.rstrip("\n").partition("\t")
+                if name == login:
+                    return reason or "raison non precisee par le convergeur"
+    except OSError:
+        pass
+    return None
 
 
 def session_of(cookie_header):
@@ -196,6 +215,39 @@ def fleet_pods(human):
         return "unknown", []
 
 
+def claude_credentials(home):
+    """
+    Whether this human has done their `claude /login` yet: "present" | "absent" | "unknown".
+
+    P5, SAID IN THE ENROLLMENT GESTURE RATHER THAN DISCOVERED AT THE FIRST FAILED SPAWN. A freshly
+    converged human has a system account, a forge account, and ZERO ability to spawn a pod: what
+    they lack is `~/.claude/.credentials.json`, obtained by an interactive `claude /login` nobody
+    can perform for them. Nothing in the chain could tell them, so they met it as a spawn failure.
+
+    PRESENT, NEVER "VALID", and the distinction is not caution. Measured on 2026-08-09: a file
+    complete in shape -- scopes, subscriptionType, a future refreshTokenExpiresAt -- whose two
+    tokens were both zero bytes. Announcing "wizard done" on that made every spawn die in
+    `credentials_invalid`. The authority is the runtime's credentials gate, at spawn; this only
+    reports that the file is there.
+
+    We can see this as `nobody` because the home and `.claude` are traversable while the file
+    itself stays 0600 -- presence is observable, content is not, which is exactly the right amount.
+    A human who tightens their home gets "unknown", and an unknown is never rendered as an absence.
+    """
+    if not home:
+        return "unknown"
+    try:
+        if os.path.exists(os.path.join(home, ".claude", ".credentials.json")):
+            return "present"
+        # Distinguish "looked and found nothing" from "could not look": a home we cannot traverse
+        # tells us nothing, and saying "absent" there would invent a verdict.
+        if os.path.isdir(home) and os.access(home, os.X_OK):
+            return "absent"
+    except OSError:
+        pass
+    return "unknown"
+
+
 def state(only=None):
     """
     The box's state, RESTRICTED to `only` when a session names a human.
@@ -211,7 +263,8 @@ def state(only=None):
         status, pods = fleet_pods(h)
         # `fleet` reste le booleen « vivante », pour les consommateurs qui ne posent que cette
         # question ; `fleet_status` porte la distinction que le booleen ne peut pas porter.
-        h = dict(h, fleet=(status == "live"), fleet_status=status, pods=[])
+        h = dict(h, fleet=(status == "live"), fleet_status=status,
+                 claude=claude_credentials(h.get("home")), pods=[])
         for p in pods or []:
             pid = p.get("pod_id", "")
             if not POD_ID_RE.match(pid):
@@ -304,6 +357,24 @@ def page_no_block(login):
             "convergeur qui pose cet utilisateur, et il ne l'a pas encore fait.</p>"
             '<p class="dim">Rien a faire de ton cote : ca converge tout seul. Si ca dure, c\'est '
             "le convergeur qu'il faut regarder, pas ton compte.</p>"
+            '<p><a class="go" href="/auth/logout">Se deconnecter</a></p>'
+        ),
+    }
+
+
+def page_refused(login, reason):
+    return SHELL % {
+        "title": "login inutilisable",
+        "body": (
+            "<h1>CE LOGIN NE PEUT PAS ABOUTIR</h1>"
+            "<p>Tu es <code>" + html.escape(login) + "</code>, membre de <code>" +
+            html.escape(HUMANS_TEAM) + "</code> : l'enrollment est fait, et il ne suffira pas.</p>"
+            "<p><b>" + html.escape(reason) + "</b></p>"
+            "<p>Ce n'est pas une attente : cette boite a REFUSE de creer ton utilisateur systeme, "
+            "et elle le refusera a chaque passage. Rien ne se debloquera tout seul.</p>"
+            '<p class="dim">Ce qu\'il faut faire : changer de login sur la forge (ou en creer un '
+            "autre), puis se faire ajouter a l'equipe. Tant que ce login reste celui-la, cette page "
+            "ne changera pas.</p>"
             '<p><a class="go" href="/auth/logout">Se deconnecter</a></p>'
         ),
     }
@@ -462,18 +533,39 @@ function fleetHint(h) {
   }
 }
 
+// CE QUE L'ENROLLMENT NE PEUT PAS FABRIQUER, DIT ICI ET PAS AU PREMIER SPAWN QUI ECHOUE. Un humain
+// tout juste convergé a un compte systeme, un compte forge, et AUCUNE capacite a spawner : il lui
+// manque son `claude /login`, que personne ne peut faire a sa place. Rien dans la chaine ne le lui
+// disait — il le rencontrait sous forme de pod mort.
+// « posees », jamais « valides » : la validite se tranche au spawn, dans le runtime.
+function claudeLabel(h) {
+  switch (h.claude) {
+    case 'present': return 'credentials claude posees (leur validite se tranche au spawn)';
+    case 'absent':  return 'AUCUNE credential claude — aucun pod ne peut naitre';
+    default:        return 'credentials claude NON MESUREES (home non traversable)';
+  }
+}
+
 function statusPanel(s) {
   const wrap = el('div');
   const t = el('table');
   const rows = [['hostname', s.hostname]];
   for (const h of s.humans) {
-    rows.push([`humain ${h.human} (uid ${h.uid})`,
-      fleetLabel(h)]);
+    rows.push([`humain ${h.human} (uid ${h.uid})`, fleetLabel(h)]);
+    rows.push(['  acces claude', claudeLabel(h)]);
   }
   for (const [k, v] of rows) {
     const tr = el('tr'); tr.appendChild(el('th', null, k)); tr.appendChild(el('td', null, v)); t.appendChild(tr);
   }
   wrap.appendChild(t);
+  if (s.humans.some(h => h.claude === 'absent')) {
+    const g = el('div', 'note');
+    g.innerHTML = "Il te reste <b>un geste, et un seul</b>, que personne ne peut faire a ta place : " +
+      "ouvre ta console, tape <b>claude</b>, puis <b>/login</b>, dis bonjour, <b>/exit</b>. " +
+      "Tant qu'il n'est pas fait, ta fleet demarre mais <b>aucun agent ne peut naitre</b> — " +
+      "ce n'est pas une panne, c'est ton identite chez le fournisseur, et elle t'appartient.";
+    wrap.appendChild(g);
+  }
   const n = el('div', 'note');
   n.innerHTML = "Cette page ne <b>pilote</b> rien : elle lit et elle montre. " +
     "La liste des agents est relue toutes les 10 s — un pod qui nait ou meurt apparait ou disparait ici sans rechargement.";
@@ -547,7 +639,10 @@ async function tick() {
     // recharge et c'est le serveur qui dit ce qu'on a le droit de voir.
     if (!r.ok) { location.reload(); return; }
     const s = await r.json();
-    const sig = JSON.stringify(s.humans.map(h => [h.human, h.fleet_status, h.pods.map(p => [p.pod_id, p.role, p.phase, p.project])]));
+    // `claude` fait partie de la signature : le jour ou la personne finit son `/login`, la page
+    // doit cesser de lui reclamer sans qu'elle ait a recharger — sinon elle croit que ca n'a pas
+    // marche et le refait.
+    const sig = JSON.stringify(s.humans.map(h => [h.human, h.fleet_status, h.claude, h.pods.map(p => [p.pod_id, p.role, p.phase, p.project])]));
     if (sig !== window.__sig) { window.__sig = sig; build(s); }
   } catch (e) { /* la page survit a une sonde ratee : elle garde son dernier etat vrai */ }
 }
@@ -701,10 +796,20 @@ class Deck(BaseHTTPRequestHandler):
                 self._send(200, page_login(), "text/html; charset=utf-8")
             return
 
-        # Enrolled on the forge, no system user here yet: the converger has not run. Saying so
-        # precisely is the difference between a person who waits and a person who opens a ticket.
+        # Enrolled on the forge, no system user here. TWO STATES, AND THEY MUST NOT BE SAID ALIKE:
+        # either the converger has not got to it yet (wait), or the converger REFUSED this login
+        # and always will (act). Collapsing them into "it converges on its own" is a lie to the
+        # second person, and it is the kind of lie nobody ever comes back to check.
         if not any(h["human"] == sess["login"] for h in humans()):
-            if path == "/api/state":
+            refused = refusal_for(sess["login"])
+            if refused is not None:
+                if path == "/api/state":
+                    self._send(422, json.dumps({"error": "login_refused", "login": sess["login"],
+                                                "reason": refused}),
+                               "application/json; charset=utf-8")
+                else:
+                    self._send(200, page_refused(sess["login"], refused), "text/html; charset=utf-8")
+            elif path == "/api/state":
                 self._send(409, json.dumps({"error": "no_local_block", "login": sess["login"]}),
                            "application/json; charset=utf-8")
             else:
