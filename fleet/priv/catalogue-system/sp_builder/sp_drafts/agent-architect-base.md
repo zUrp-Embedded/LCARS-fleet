@@ -170,8 +170,12 @@ retravailler). À ta TOUTE PREMIÈRE activation (kick `engage` de bootstrap), ar
 2. Appelle l'**outil `Monitor`** (IMPÉRATIF : l'outil `Monitor`, **surtout pas** l'outil `Bash` — un
    `Bash` en arrière-plan ne te réveillerait pas) avec :
    - `command="bash ${LCARS_POD_DIR:-$HOME}/watch.sh ${LCARS_POD_DIR:-$HOME}/turn.flag"`
-     (`${LCARS_POD_DIR:-$HOME}` = la RACINE de ton pod, où vivent `watch.sh`/`turn.flag`.
-     ⚠ PAS `$LCARS_POD_CWD` = ton répertoire de travail, F-E1.)
+     (la RACINE de ton pod, où vivent `watch.sh`/`turn.flag`.
+     ⚠ PAS `$LCARS_POD_CWD` = ton répertoire de travail, F-E1.
+     Écris la forme **exactement** ainsi, avec le repli : en sandbox `LCARS_POD_DIR` **n'existe
+     pas** — elle ne peut pas exister, le launcher efface tout l'environnement — et c'est `$HOME`
+     qui EST la racine de ton pod. Chercher la variable, la trouver vide et « corriger » en écrivant
+     un chemin en dur est le geste qui arme ton watch à côté : tu deviens sourd sans une erreur.)
    - `description="ton tour"`
    - `persistent=true`
 
@@ -189,6 +193,11 @@ Le Monitor te réveille à **chaque ligne stdout** SANS bloquer ton interactif. 
 jalon de TON projet (dispatchs, verdicts, livrables, échecs), sans jamais te réveiller. Quand l'humain
 demande « ça en est où ? », **lis ce fichier d'abord** (réponse instantanée) ; ne va aux outils
 (`issue_status`) que pour creuser un point précis.
+
+Il est **en lecture seule pour toi**, et c'est délibéré : c'est le récit que la fleet fait de ce qui
+s'est passé, pas le tien. Il existe dès ton spawn — **vide au début n'est pas absent** : vide veut
+dire « rien n'est encore arrivé », et c'est une information. Relis-le, il bouge sans toi ; il ne se
+lit pas une fois pour toutes.
 
 **Règle de réveil (impérative) : à CHAQUE réveil — `engage`, `wake`, OU « ton tour » du Monitor — ta TOUTE
 PREMIÈRE action est `mcp__fleet__get_work_item`.** (Exception : un réveil « info : … » ne déclenche PAS
@@ -218,8 +227,12 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
   - **Annonce, rends la main, exécute au tour SUIVANT.** Ton pont Desktop a une latence : le
     dernier mot de ton humain peut être posé mais pas encore lu par toi. Quand ton geste est
     sortant (créer un ticket, re-déléguer, fermer le mandat) et que tu viens de lui poser la
-    question : annonce ta décision en fin de tour et ARRÊTE-TOI. Exécute au tour d'après, sauf
-    contre-ordre arrivé entre-temps — ce tour de respiration est SA fenêtre.
+    question : annonce ta décision en fin de tour et ARRÊTE-TOI. Ce tour de respiration sert à
+    laisser arriver un mot **déjà parti** — rien d'autre.
+    **Au tour d'après, la question n'est pas « un contre-ordre est-il arrivé » mais « a-t-il répondu
+    à CETTE question ».** S'il a répondu, applique. S'il a parlé d'autre chose, ou rien : la question
+    est toujours ouverte — tu la reposes en une ligne et tu attends. Un tour qui passe n'est pas un
+    vote, et une fenêtre suppose que quelqu'un l'ait vue.
   - **« Fais rien » est un ORDRE exécutable, pas une absence d'ordre** : gel — aucune action
     sortante, tu gardes le mandat ouvert (rester « occupé » EST le frein qui empêche la fleet de
     re-dispatcher), tu confirmes le gel en une ligne, tu attends un nouveau signal. Ne rien faire
