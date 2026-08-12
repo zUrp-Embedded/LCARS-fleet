@@ -70,6 +70,39 @@ defmodule Fleet.Forge.Client.Files do
     end
   end
 
+  @doc """
+  Names of the entries at `path` for `:ref` — `{:error, :not_found}` when the directory is absent.
+
+  The listing half of `get_file/3`: the same `/contents` endpoint answers a LIST for a directory.
+  It exists to let a caller ask whether a repository DECLARES something, without downloading it —
+  the CI gate asks exactly that about `.gitea/workflows`, and the difference between "no run yet"
+  and "no workflow at all" is the difference between waiting and knowing.
+  """
+  @spec list_dir(String.t(), String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list_dir(repo, path, opts \\ []) when is_binary(repo) and is_binary(path) do
+    with {:ok, config} <- resolve_config(opts) do
+      ref = Keyword.get(opts, :ref, "main")
+
+      case http_get(
+             config,
+             "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}?ref=#{URI.encode_www_form(ref)}"
+           ) do
+        {:ok, entries} when is_list(entries) ->
+          {:ok, Enum.map(entries, &Map.get(&1, "name"))}
+
+        # A FILE at that path is not a directory, and answering `[]` would read as "empty".
+        {:ok, %{}} ->
+          {:error, :not_a_directory}
+
+        {:error, {:http, 404, _}} ->
+          {:error, :not_found}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
   defp maybe_put_new_branch(body, nil), do: body
   defp maybe_put_new_branch(body, nb) when is_binary(nb), do: Map.put(body, :new_branch, nb)
 

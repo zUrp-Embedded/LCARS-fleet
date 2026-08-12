@@ -56,6 +56,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   defp decide(forge_opts, policy \\ :required, forge \\ Forge),
     do: CiGate.decide(42, "lcars/issue-7-engineer", ctx(forge, forge_opts), fn -> policy end)
 
+  # The workflow probe is a SEAM on `ctx.opts`, like every other injected read on this rail: the
+  # gate must be drivable without a forge, and "does this repo declare a workflow" is exactly the
+  # kind of fact a test states rather than fetches.
+  defp decide_with_lister(forge_opts, lister) do
+    c = %{ctx(Forge, forge_opts) | opts: [list_dir_fun: lister]}
+    CiGate.decide(42, "lcars/issue-7-engineer", c, fn -> :required end)
+  end
+
   describe "the card governs" do
     test ":ignore short-circuits before touching the forge" do
       assert {:proceed, nil} = decide([], :ignore, ForbiddenForge)
@@ -97,6 +105,58 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       stale = Forge.iso_ago(CiGate.pending_deadline_sec() + 60)
 
       assert {:escalate, {:ci_stalled, :none}, _} = decide(_ci: {:ok, :none}, _updated_at: stale)
+    end
+
+    test "AUCUN workflow dans le depot → impasse nommee AU PREMIER TICK, pas au bout de 45 min" do
+      # `:none` a deux causes et elles ne meritent pas la meme patience. « pas encore de statut »
+      # est une course qui n'a pas rendu ; « aucun workflow ici » est un statut qui ne viendra
+      # jamais. Mesure 2026-08-12 : un depot importe de GitHub, carte `ci: required`, trois quarts
+      # d'heure d'attente avant de demander si un runner servait le label. Le runner allait bien.
+      # Il n'y avait rien a executer, et c'etait lisible en une lecture.
+      lister = fn "fleet/demo", _dir, _opts -> {:error, :not_found} end
+
+      assert {:escalate, {:ci_impossible, :no_workflow}, msg} =
+               decide_with_lister([_ci: {:ok, :none}], lister)
+
+      # Le message dit les DEUX sorties, parce qu'aucune n'est evidente pour qui lit le ticket.
+      assert msg =~ "AUCUN WORKFLOW"
+      assert msg =~ ".gitea/workflows"
+      assert msg =~ "ignore"
+    end
+
+    test "un workflow declare → l'attente bornee reprend ses droits (rien ne change)" do
+      lister = fn
+        "fleet/demo", ".gitea/workflows", _ -> {:ok, ["ci.yml"]}
+        "fleet/demo", _, _ -> {:error, :not_found}
+      end
+
+      assert {:wait, :ci_pending} = decide_with_lister([_ci: {:ok, :none}], lister)
+    end
+
+    test "`.github/workflows` compte aussi — Gitea sert les deux" do
+      lister = fn
+        "fleet/demo", ".github/workflows", _ -> {:ok, ["build.yaml"]}
+        "fleet/demo", _, _ -> {:error, :not_found}
+      end
+
+      assert {:wait, :ci_pending} = decide_with_lister([_ci: {:ok, :none}], lister)
+    end
+
+    test "un repertoire sans fichier de workflow n'est pas un rail" do
+      # Le dossier existe et ne porte que du bruit : declarer l'emplacement n'est pas declarer un
+      # workflow, et rien ne s'executera.
+      lister = fn "fleet/demo", _dir, _ -> {:ok, ["README.md", ".keep"]} end
+
+      assert {:escalate, {:ci_impossible, :no_workflow}, _} =
+               decide_with_lister([_ci: {:ok, :none}], lister)
+    end
+
+    test "listing ILLISIBLE → on attend : inconnu n'est pas absent" do
+      # Meme posture que partout ailleurs sur ce rail : une forge muette differe, elle ne fabrique
+      # jamais un verdict. Escalader ici transformerait une panne reseau en impasse declaree.
+      lister = fn "fleet/demo", _dir, _ -> {:error, {:http, 500, "boom"}} end
+
+      assert {:wait, :ci_pending} = decide_with_lister([_ci: {:ok, :none}], lister)
     end
 
     test "just under the deadline still waits — the bound is a threshold, not a mood" do

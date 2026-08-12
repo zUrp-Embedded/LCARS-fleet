@@ -46,6 +46,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # bench), short enough that a dead rail is named the same hour.
   @pending_deadline_sec 45 * 60
 
+  # Where a repository DECLARES its workflows. Both, because Gitea serves both, and because being
+  # wrong in this direction only costs the bounded wait we already had — while missing one would
+  # escalate a repo that does have a rail.
+  @workflow_dirs [".gitea/workflows", ".github/workflows"]
+
   # The wait shapes are SPELLED OUT, not summarised as `:ci_pending`: the caller pattern-matches
   # each one to keep it visible to the BL-6-48 reverse wall, and a spec that hid them made dialyzer
   # declare those clauses unreachable — a typespec that lies turns a wall into a false alarm.
@@ -55,7 +60,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
           {:proceed, ci_fact :: map() | nil}
           | {:refuse, :ci_red, String.t()}
           | {:wait, wait_reason()}
-          | {:escalate, {:ci_stalled, atom()}, String.t()}
+          | {:escalate, {:ci_stalled, atom()} | {:ci_impossible, :no_workflow}, String.t()}
 
   @doc """
   Decides whether the jury may be summoned for `pr_number` at `head`.
@@ -94,8 +99,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
          "CI ROUGE sur #{String.slice(sha, 0, 8)} — aucun juge n'est convoqué sur du rouge. " <>
            "Le rail machine a rendu son verdict avant le jury : corrige, pousse, la CI se relance."}
 
-      {:ok, state} when state in [:pending, :none] ->
-        stalled_or_wait(state, sha, committed_at, pr_number)
+      {:ok, :pending} ->
+        stalled_or_wait(:pending, sha, committed_at, pr_number)
+
+      {:ok, :none} ->
+        no_status_yet_or_never(sha, committed_at, pr_number, ctx)
 
       # Unreadable status = unknown, and unknown is not green. Deferring costs one tick; assuming
       # green costs a jury spent on unmeasured code.
@@ -103,6 +111,57 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
         {:wait, {:ci_unreadable, reason}}
     end
   end
+
+  # `:none` HAS TWO CAUSES AND THEY DO NOT DESERVE THE SAME PATIENCE. "No status yet" is a run that
+  # has not reported — wait. "No workflow in this repository" is a status that will NEVER come, and
+  # waiting 45 minutes for it is waiting for something structurally impossible.
+  #
+  # Measured 2026-08-12: a repo imported from GitHub ships no `.gitea/workflows/`, its card declares
+  # `ci: required`, and the gate spent three quarters of an hour before asking whether a runner
+  # served the label. The runner was fine. There was nothing to run. The question was answerable at
+  # the first tick, for one read.
+  #
+  # UNREADABLE IS NOT ABSENT. A listing we could not fetch says nothing about what the repo
+  # declares, so it keeps the bounded wait — the same stance the rest of this gate takes on every
+  # unknown: defer, never fabricate a verdict.
+  defp no_status_yet_or_never(sha, committed_at, pr_number, %Ctx{} = ctx) do
+    case declares_workflow?(sha, ctx) do
+      :no ->
+        {:escalate, {:ci_impossible, :no_workflow},
+         "AUCUN WORKFLOW dans ce depot (#{Enum.join(@workflow_dirs, " ni ")}) au sha " <>
+           "#{String.slice(sha, 0, 8)} (PR ##{pr_number}), et la carte de ce projet exige la CI. " <>
+           "Aucun statut ne viendra jamais : ce n'est pas une attente, c'est une impasse. " <>
+           "Ajoute un workflow, ou declare une carte dont `ci` vaut `ignore`."}
+
+      _yes_or_unknown ->
+        stalled_or_wait(:none, sha, committed_at, pr_number)
+    end
+  end
+
+  defp declares_workflow?(ref, %Ctx{} = ctx) do
+    lister = Keyword.get(ctx.opts, :list_dir_fun, &Fleet.Forge.Client.Files.list_dir/3)
+    opts = Keyword.put(ctx.forge_opts, :ref, ref)
+
+    Enum.reduce_while(@workflow_dirs, :no, fn dir, acc ->
+      case lister.(ctx.repo, dir, opts) do
+        {:ok, names} ->
+          if Enum.any?(names, &workflow_file?/1), do: {:halt, :yes}, else: {:cont, acc}
+
+        # The directory is absent — that is an ANSWER, and it is "not here".
+        {:error, :not_found} ->
+          {:cont, acc}
+
+        # Anything else is a forge we could not read. Unknown, and unknown is not absent.
+        {:error, _} ->
+          {:cont, :unknown}
+      end
+    end)
+  end
+
+  defp workflow_file?(name) when is_binary(name),
+    do: String.ends_with?(name, ".yml") or String.ends_with?(name, ".yaml")
+
+  defp workflow_file?(_), do: false
 
   defp stalled_or_wait(state, sha, committed_at, pr_number) do
     if age_sec(committed_at) > @pending_deadline_sec do
