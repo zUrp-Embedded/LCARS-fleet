@@ -33,6 +33,26 @@ defmodule Fleet.MCP.PodToolsTest do
       assert desc =~ "INLINE"
     end
 
+    test "scratch se decrit comme un REFLEXE et nomme le critere qui evite le jugement" do
+      desc = tool_description("scratch")
+
+      # Le critere est la NATURE de l'echange, jamais l'importance percue : un jugement
+      # d'importance, en fin de contexte, repond toujours « pas assez » — c'est le meme biais que
+      # « il ne reste rien ». La description doit le dire, parce que c'est ce que l'agent lit au
+      # moment ou il hesite a garer une note.
+      assert desc =~ "REFLEX"
+      assert desc =~ "NATURE"
+      assert desc =~ "never how important it feels"
+
+      # Et elle doit dire POURQUOI, sinon le geste est une corvee sans cause : le L0 est mange par
+      # la compaction et la memoire du vendor est coupee sur tous les pods.
+      assert desc =~ "compaction"
+      assert desc =~ "OFF for every pod"
+
+      # Le tool n'ajoute QUE — le menage est un geste separe, delibere, a la main.
+      assert desc =~ "only ADDS"
+    end
+
     test "create_project does NOT tell the agent to pass a `project` param that no longer exists" do
       desc = tool_description("project_create")
 

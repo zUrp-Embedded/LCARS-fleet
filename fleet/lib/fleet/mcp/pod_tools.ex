@@ -541,6 +541,36 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
+  deftool "scratch" do
+    meta do
+      name("Scratch")
+
+      description(
+        "Park a thought in your workshop scratchpad — ONE line, no ceremony, and the system " <>
+          "commits and pushes it for you. USE IT AS A REFLEX, not as a decision: the moment a " <>
+          "point stabilises in a conversation (a conclusion, an arbitration, a constat, a " <>
+          "reasoned refusal), drop it here and go on with the next point. The criterion is the " <>
+          "NATURE of the exchange, never how important it feels — an importance judgement, late " <>
+          "in a context, always answers 'not enough'. " <>
+          "WHY IT EXISTS: your session level is ephemeral by definition and a compaction eats it " <>
+          "whole; the vendor's own memory is OFF for every pod here. What you did not write is " <>
+          "gone, and you will not know it is gone. " <>
+          "This tool only ADDS — that is what makes the file trustworthy while the flow runs. " <>
+          "Cleaning it is a separate, deliberate act: at triage you open the file yourself and " <>
+          "cut, sending what remains to be done to `backlog.md`, what is specified to `plans/`. " <>
+          "Notes belong to THIS project's workshop; there is no other place to aim."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "note" => %{"type" => "string"}
+      },
+      "required" => ["note"]
+    })
+  end
+
   deftool "list_escalations" do
     meta do
       name("List Escalations")
@@ -1031,6 +1061,17 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
+  def handle_tool_call("scratch", %{"note" => note}, state) when is_binary(note) do
+    case Delegation.scratch(state, note) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("scratch", _bad, state) do
+    {:error, {:invalid_arguments, "scratch attend `note` (string non vide)"}, state}
+  end
+
   def handle_tool_call("list_escalations", _arguments, state) do
     case Delegation.list_escalations(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}

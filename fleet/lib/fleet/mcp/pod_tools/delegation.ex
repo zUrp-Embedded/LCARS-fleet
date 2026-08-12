@@ -76,6 +76,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
+  alias Fleet.Project.GitOps
+
+  @scratch_file "scratchpad.md"
+  @scratch_nudge_at 150
+
   alias Fleet.MCP.PodTools.Delegation.{
     DependencyForge,
     EscalationForge,
@@ -579,6 +584,134 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, forge} <- conforming_escalation_forge(),
          {:ok, escalations} <- collect_awaits_arch(forge, repo, escalation_human()) do
       {:ok, %{"count" => length(escalations), "escalations" => escalations}}
+    end
+  end
+
+  @doc """
+  Appends one stamped note to the project's workshop scratchpad, commits and pushes it.
+
+  THE REFLEX IS THE FEATURE. A pod's L0 — session-level, ephemeral, alive — is exactly what a
+  compaction eats, and LCARS turned the vendor's own memory OFF for every pod
+  (`autoMemoryEnabled: false`: siloed, useless to the fleet, doctrine pollution). What replaces it
+  has to cost nothing at the moment of the thought: ONE argument, no path, no format, no decision
+  about where things live. An architect who must choose a file at the instant it has an idea does
+  not park the idea — measured on real architects, it writes its in-flight state into `backlog.md`
+  under a `## en vol` section it invents, because that file is the only one that LOOKS like it
+  accepts what happened.
+
+  APPEND-ONLY IS A PROPERTY OF THE DOOR, NOT A PROMISE. This tool only knows how to add, so the
+  discipline holds during the whole flow without anyone maintaining it. Cleaning is a separate,
+  deliberate act: the architect has the face mounted RW and edits the file by hand at triage time.
+  An absolute ban would end in a 50k-line file nobody can exploit, which is the same uselessness
+  by the other door.
+
+  THE NUDGE RIDES ON THE RETURN VALUE, and that is the whole mechanism. Past `#{@scratch_nudge_at}`
+  lines the answer stops being a receipt and asks for a triage. An agent cannot NOT read what the
+  tool it just called gave back — this is the only place in the system where a rule reaches it AT
+  THE MOMENT OF THE GESTURE, instead of a spawn-time instruction that a compaction removes first.
+
+  It PUSHES, and that is a change of contract for this face: `workshop` was declared "nothing
+  pushes it on its own". Pushing an orphan branch that is never merged publishes nothing into the
+  product — it makes the notes survive the box, which is the point of writing them.
+  """
+  @spec scratch(map(), String.t()) :: {:ok, map()} | {:error, term()}
+  def scratch(state, note) when is_binary(note) do
+    # LA PORTE EST ICI, DANS CE CORPS, et pas un cran plus bas : le contrat `mcp.tools_gated` lit
+    # l'AST et exige que la fonction de delegation appelee par le tool porte elle-meme son gate —
+    # un tool dont la porte vit dans un helper prive est, pour lui, un tool sans porte. C'est la
+    # bonne exigence : elle empeche qu'un refactor deplace la garde hors de vue sans que rien ne
+    # le dise. Et autoriser AVANT de valider la charge utile est l'ordre juste de toute facon.
+    with {:ok, %{repo: repo}} <- require_architect(state) do
+      case String.trim(note) do
+        "" -> {:error, :note_empty}
+        trimmed -> scratch_write(repo, trimmed)
+      end
+    end
+  end
+
+  defp scratch_write(repo, note) do
+    dir = Path.join(Fleet.Layout.workshop_root(), Fleet.Layout.project_name(repo))
+    path = Path.join(dir, @scratch_file)
+
+    if File.dir?(dir) do
+      case File.write(path, scratch_line(note), [:append]) do
+        :ok ->
+          _ = scratch_publish(dir, repo)
+          {:ok, scratch_receipt(path)}
+
+        {:error, reason} ->
+          {:error, {:scratch_write_failed, reason}}
+      end
+    else
+      {:error, {:no_workshop_face, dir}}
+    end
+  end
+
+  # Une seule ligne par note, meme si la note en compte plusieurs : le fichier se relit en
+  # diagonale au tri, et une entree qui s'etale sur dix lignes rend le tri illisible. Les retours
+  # a la ligne deviennent des ` / ` — on garde le texte, on perd la mise en page, c'est le bon
+  # arbitrage pour un bloc-notes.
+  defp scratch_line(note) do
+    {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
+    stamp = :io_lib.format("~2..0B-~2..0B ~2..0B:~2..0B", [mo, d, h, mi]) |> IO.iodata_to_binary()
+    "#{stamp} #{note |> String.split(~r/\s*\n+\s*/) |> Enum.join(" / ")}\n"
+  end
+
+  # Best-effort DELIBERE : une note ecrite mais non poussee est une note ecrite. Faire echouer le
+  # tool sur un push rate apprendrait a l'agent que le geste est cher, et un geste cher n'est plus
+  # un reflexe — c'est exactement la propriete qu'on achete ici.
+  defp scratch_publish(dir, repo) do
+    branch = Fleet.Layout.workshop_branch()
+
+    with :ok <- GitOps.run(["-C", dir, "add", "--", @scratch_file], auth: false),
+         :ok <-
+           GitOps.run(
+             [
+               "-C",
+               dir,
+               "-c",
+               "user.name=lcars-system",
+               "-c",
+               "user.email=lcars-system@lcars.local",
+               "commit",
+               "-q",
+               "-m",
+               "chore(scratch): note d'atelier"
+             ],
+             auth: false
+           ) do
+      GitOps.run(["-C", dir, "push", "origin", "HEAD:" <> branch], auth: true)
+    else
+      other ->
+        Logger.warning(
+          "Delegation: scratch note ECRITE mais non publiee (#{repo}) — #{inspect(other)} ; " <>
+            "elle vit dans la face atelier locale et partira au prochain geste qui pousse"
+        )
+
+        other
+    end
+  end
+
+  defp scratch_receipt(path) do
+    lines =
+      case File.read(path) do
+        {:ok, c} -> c |> String.split("\n", trim: true) |> length()
+        _ -> 0
+      end
+
+    base = %{"ok" => true, "lines" => lines}
+
+    if lines >= @scratch_nudge_at do
+      Map.put(
+        base,
+        "next",
+        "Le scratchpad passe #{lines} lignes. Propose un tri a ton humain : ce qui reste a faire " <>
+          "part au backlog, ce qui est specifie part en plans/, ce qui attend son jour de neige " <>
+          "reste nomme, le reste se jette. Puis vide ce qui a ete range — l'append-only vaut pour " <>
+          "l'ecriture au fil de l'eau, pas contre le menage."
+      )
+    else
+      base
     end
   end
 
