@@ -326,7 +326,18 @@ if [[ "$ONCE" -eq 1 ]]; then
 fi
 
 say "convergence des humains : $FORGE org=$ORG team=$TEAM toutes les ${INTERVAL}s"
+
+# `set -e` EST UN CONTRAT DE DEMARRAGE, PAS UN CONTRAT DE BOUCLE — et les confondre a fait mourir
+# celle-ci. Mesure du 2026-08-12 : un signal TRAPPE delivre au groupe de process tue le `sleep`
+# enfant sans tuer bash ; `sleep` rend alors non-zero, `errexit` s'applique, et la boucle eternelle
+# s'arrete au premier tour. Corps du delit : un journal qui s'arrete a « tour 1 » et plus jamais un
+# humain converge — sans une erreur, sans une trace.
+# Un preflight DOIT mourir au premier imprevu : c'est ce que `set -euo pipefail` achete plus haut, et
+# il le garde. Une boucle eternelle a le contrat INVERSE — ne jamais mourir — donc `errexit` est
+# retire ICI et seulement ici. Ce n'est pas un relachement : chaque echec qui compte est deja
+# explicitement gere (`converge_once || true`, et `err` pour ce qui merite d'etre dit).
+set +e
 while true; do
-  converge_once || true
+  converge_once
   sleep "$INTERVAL"
 done
