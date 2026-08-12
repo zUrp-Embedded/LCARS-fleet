@@ -43,6 +43,31 @@ ACCOUNTS="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
 
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
 
+# L'INSCRIPTION LIBRE EST UNE PRÉCONDITION DU MODÈLE D'ENROLLMENT, ET RIEN NE LA VÉRIFIAIT.
+# Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`. Sur
+# une forge PRÉEXISTANTE — le cas de la production — l'opérateur a pu fermer l'inscription dans son
+# `app.ini`, et alors le rail entier ne marche plus : personne ne peut créer son compte, et aucun
+# message nulle part ne dit pourquoi. C'est un réglage d'INSTANCE, donc ni tofu ni ce module ne
+# peuvent le poser : on le SONDE et on l'annonce, jamais on ne le mute.
+#
+# ⚠ LE CODE HTTP NE DISCRIMINE RIEN — mesuré le 2026-08-12 sur Gitea 1.26.1, les deux états rendent
+# `GET /user/sign_up` -> 200. La page, elle, diffère : ouverte, elle porte le FORMULAIRE ; fermée,
+# elle porte « Registration is disabled ». On teste donc la présence du champ `user_name`, et pas le
+# texte : un marqueur structurel survit à la locale de l'instance, un message traduit non.
+# (Le POST discrimine aussi — 303 contre 403 — mais il CRÉE un compte quand ça marche : une sonde
+# ne laisse pas de trace derrière elle.)
+probe_registration() {
+  local page
+  page="$(curl -fsS -m 10 "$PROV_FORGE_URL/user/sign_up" 2>/dev/null || true)"
+  if [[ -z "$page" ]]; then
+    p_warn "page d'inscription non lisible ($PROV_FORGE_URL/user/sign_up) — l'ouverture de l'inscription N'EST PAS mesurée"
+  elif [[ "$page" == *'name="user_name"'* ]]; then
+    p_ok "inscription OUVERTE — une personne peut créer son compte, puis un propriétaire d'org l'ajoute à « humans »"
+  else
+    p_drift "inscription FERMÉE sur cette forge — l'enrollment ne peut pas fonctionner : personne ne peut créer son compte. C'est un réglage d'instance (DISABLE_REGISTRATION dans app.ini), à ouvrir par l'opérateur de la forge"
+  fi
+}
+
 account_exists() { # $1=login — endpoint public en lecture (pas besoin d'admin pour SONDER)
   curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/users/$1" 2>/dev/null
 }
@@ -194,6 +219,7 @@ check() {
     verdict_check
   fi
   p_ok "forge joignable ($PROV_FORGE_URL)"
+  probe_registration
 
   local miss acct
   miss="$(missing_accounts)"
