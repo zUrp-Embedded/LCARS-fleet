@@ -2,12 +2,20 @@
 
 **Date** : ${YEAR}-${MONTH}-${DAY}
 **Dernière révision** : ${YEAR}-${MONTH}-${DAY}
-**Statut** : squelette d'onboarding — les sections ci-dessous sont à remplir
+**Statut** : actif — conventions de ce dépôt, lues par la fleet à chaque spawn
 **Référencé par** : les pods de la fleet (extraction sélective, voir plus bas)
 
 > ${REPO_DESCRIPTION}
 
 ## Ce fichier est lu par une machine, et voilà laquelle
+
+**Les sections ci-dessous naissent vides et sont à remplir** — c'est une consigne au lecteur, pas
+un état du fichier. Elle vivait dans le `**Statut**`, où elle devenait FAUSSE le jour où quelqu'un
+faisait le travail : mesuré le 2026-08-12, un dépôt dont les sept sections étaient remplies par un
+producteur annonçait encore « squelette d'onboarding, à remplir » dans son en-tête. Un statut décrit
+un état durable ; une instruction s'adresse à celui qui lit. Qui remplit une section met aussi à
+jour la **Dernière révision** — c'est la seule ligne de l'en-tête qui a le droit de bouger.
+
 
 À chaque spawn, la fleet lit ce fichier et recopie dans le `CLAUDE.md` du pod **sept sections de
 niveau 2, et sept seulement** :

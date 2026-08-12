@@ -30,7 +30,8 @@ defmodule Fleet.Project.Onboard do
 
     1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
     2. `git clone --branch main` → `/home/projects/<name>`
-    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, docs/spec.md, CI)
+    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, CI) — PAS de spec : la matiere de
+       cadrage vit sur `workshop`, la seule face dont l architecte ait la plume avant la 1re livraison
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
     5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
        `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
