@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
   defp project(root, name, intensity \\ nil) do
     dir = Path.join(root, name)
     File.mkdir_p!(dir)
-    if intensity, do: File.write!(Path.join(dir, ".intensity.json"), intensity)
+    if intensity, do: File.write!(Path.join(dir, ".lcars.json"), intensity)
     dir
   end
 

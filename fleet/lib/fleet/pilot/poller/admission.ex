@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.Poller.Admission do
 
   The item this closes, in one sentence: the counter was per project and the knob was per box, so
   `--max-fan 1` to watch one pipeline end to end serialized every other project in the fleet —
-  a brake laid on unrelated work. The declaration lives in `<project>/.intensity.json` (see
+  a brake laid on unrelated work. The declaration lives in `<project>/.lcars.json` (see
   `ProjectIntensity`) because a project can route its tickets through several cards, and a
   per-card ceiling cannot bound something that spans them.
 

@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       File.mkdir_p!(dir)
 
       File.write!(
-        Path.join(dir, ".intensity.json"),
+        Path.join(dir, ".lcars.json"),
         Jason.encode!(
           Map.merge(
             %{

@@ -1,6 +1,6 @@
 defmodule Fleet.Project.Intensity do
   @moduledoc """
-  Single owner of the per-project criticality declaration (`<project>/.intensity.json`,
+  Single owner of the per-project criticality declaration (`<project>/.lcars.json`,
   schema `intensity-v1`) — writes it at onboarding, reads it at the workflow-map burn.
 
   **The level is the HUMAN's declaration** (elicited by the framing interview — what
@@ -29,7 +29,19 @@ defmodule Fleet.Project.Intensity do
 
   require Logger
 
-  @file_name ".intensity.json"
+  # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Il s'appelait `intensity.json`, en
+  # clair, a la racine du depot — y compris sur un projet ADOPTE, ou la fleet ecrit alors dans
+  # l'arbre de quelqu'un d'autre. Un fichier de configuration d'outil porte le point que portent
+  # tous les autres (`.gitignore`, `.editorconfig`), et son nom nomme son PROPRIETAIRE : un lecteur
+  # qui ouvre un depot inconnu doit pouvoir dire « ca, c'est a l'outil » sans lire le contenu.
+  #
+  # ⚠ L'EXTENSION N'EST PAS POUR LE LECTEUR — `Jason.decode` ne la regarde pas et aucun glob
+  # `*.json` ne ramasse ce fichier. Elle est ce qui evite une COLLISION : `.lcars` tout court est
+  # deja, 24 fois dans ce depot, le repertoire d'etat per-humain (`~/.lcars`) et celui du pod
+  # (`<pod_dir>/.lcars/system-prompt.md`). Un fichier `.lcars` a la racine d'un workspace, a cote
+  # d'un repertoire `.lcars/` dans le home du meme pod, ce sont deux natures sous une chaine — la
+  # faute exacte qui a coute le chantier `CLAUDE.md` du 2026-08-12.
+  @file_name ".lcars.json"
 
   # THE LEVEL A PROJECT GETS WHEN NOBODY DECLARED ONE, and it was `C0` — the bottom of the scale,
   # which is a CLAIM: C0 is the disposable posture, and nobody said the work was disposable. The
@@ -60,7 +72,7 @@ defmodule Fleet.Project.Intensity do
   @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
 
   @doc """
-  Composes, validates and writes `<proj_dir>/.intensity.json` from the onboarding opts
+  Composes, validates and writes `<proj_dir>/.lcars.json` from the onboarding opts
   (`:intensity_level`, `:intensity_justification`, `:intensity_nature`, `:workflow_map` —
   all optional: nothing declared → the honest C0 default, marked undeclared).
 

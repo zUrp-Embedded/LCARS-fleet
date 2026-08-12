@@ -17,7 +17,7 @@
 
 Brainstorm est OBLIGATOIRE dès que l'intensité déclarée dépasse le jetable (**C1+**). Le bypass **C0**
 (PoC jetable) est le SEUL cas autorisé et doit être justifié par la déclaration d'intensité du projet
-(`.intensity.json`). **"Simple projects skip design"** reste **FORBIDDEN à C1+**.
+(`.lcars.json`). **"Simple projects skip design"** reste **FORBIDDEN à C1+**.
 
 Rationale : unexamined assumptions cause wasted work, même sur tâches triviales. Un brainstorm de 5 minutes économise des heures de re-work.
 
@@ -129,7 +129,7 @@ Stage `brainstorm` du pipeline `standard-qa` :
 
 Le workflow des cartes n'a pas de stage brainstorm formalisé — l'architect propose direct. Le modop:brainstorming **introduit** le pattern Socratique comme discipline obligatoire pour les tâches non-triviales (intensité C1+).
 
-Pour un projet déclaré C0 (PoC jetable), brainstorm est skipped (cf. .intensity.json).
+Pour un projet déclaré C0 (PoC jetable), brainstorm est skipped (cf. .lcars.json).
 
 ## Announce
 

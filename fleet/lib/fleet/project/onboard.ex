@@ -776,7 +776,7 @@ defmodule Fleet.Project.Onboard do
 
   Per project, three facts and no derivation:
 
-    * the DECLARED card and level (`.intensity.json`), reported as declared or NOT. An undeclared
+    * the DECLARED card and level (`.lcars.json`), reported as declared or NOT. An undeclared
       project falls back to the fleet default at burn time, and that fallback is deliberately NOT
       applied here: reporting the effective card would make an undeclared project indistinguishable
       from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`
@@ -847,7 +847,7 @@ defmodule Fleet.Project.Onboard do
 
   # What the project DECLARES, never what it would fall back to.
   defp declared_intensity(proj_dir) do
-    case File.read(Path.join(proj_dir, ".intensity.json")) do
+    case File.read(Path.join(proj_dir, ".lcars.json")) do
       {:ok, raw} ->
         case Jason.decode(raw) do
           {:ok, %{"pipeline_default" => card} = decl} when is_binary(card) ->
@@ -1125,9 +1125,9 @@ defmodule Fleet.Project.Onboard do
   defp ensure_intensity(
          proj_dir,
          opts,
-         msg \\ "chore(adopt): déclaration de criticité (.intensity.json)"
+         msg \\ "chore(adopt): déclaration de criticité (.lcars.json)"
        ) do
-    if File.exists?(Path.join(proj_dir, ".intensity.json")) do
+    if File.exists?(Path.join(proj_dir, ".lcars.json")) do
       :ok
     else
       with :ok <- Fleet.Project.Intensity.write(proj_dir, opts) do
@@ -1198,7 +1198,7 @@ defmodule Fleet.Project.Onboard do
        default ≠ main while a remote `main` EXISTS → `{:branch_collision, _}` (half-migrated
        repos are common; we never guess which is the real one).
     5. Empty org repo + protocol labels + intensity committed IN the scratch BEFORE the push
-       (the push must CARRY .intensity.json or every later jury read falls back in silence) →
+       (the push must CARRY .lcars.json or every later jury read falls back in silence) →
        push main (full history) → the local `finish_import` leg (clone from OUR forge,
        ops, protection — its `lock_main` reads the now-present local intensity).
 
@@ -1257,7 +1257,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
-  # existing local import leg for what it does (clone from OUR forge brings .intensity.json
+  # existing local import leg for what it does (clone from OUR forge brings .lcars.json
   # back down, so ITS lock_main reads the right jury).
   defp intensity_commit_message(opts) do
     door =
@@ -1266,7 +1266,7 @@ defmodule Fleet.Project.Onboard do
         _ -> "import-externe"
       end
 
-    "chore(#{door}): déclaration de criticité (.intensity.json)"
+    "chore(#{door}): déclaration de criticité (.lcars.json)"
   end
 
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
@@ -1565,7 +1565,7 @@ defmodule Fleet.Project.Onboard do
   defp require_loadable_card(_absent), do: {:error, :workflow_map_required}
 
   defp declared_card(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, ".intensity.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, ".lcars.json")),
          {:ok, %{"pipeline_default" => card}} when is_binary(card) <- Jason.decode(raw) do
       card
     else
@@ -1610,7 +1610,7 @@ defmodule Fleet.Project.Onboard do
   # then carries nothing forward, which is exactly the old behaviour for a project that never had a
   # declaration to lose.
   defp current_declaration(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, ".intensity.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, ".lcars.json")),
          {:ok, %{} = decl} <- Jason.decode(raw) do
       decl
     else
@@ -2217,7 +2217,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp onboard_commit_msg(:generated),
-    do: "chore(onboard): déclaration de criticité (.intensity.json)"
+    do: "chore(onboard): déclaration de criticité (.lcars.json)"
 
   defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 

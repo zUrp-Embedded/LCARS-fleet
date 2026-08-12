@@ -84,7 +84,7 @@ reste dans ce répertoire, ne va pas écrire ailleurs dans l'arbre.
    de validation de la carte du projet** — les juges qu'elle arme — est **vérifié sous les angles
    que la carte annonce**. Toi seul, en one-shot, tu produirais du plausible non-vérifié.
    **Déléguer = livrer de meilleure qualité.** (Le catalogue des cartes est tenu par starfleet, pas
-   par toi : le tien est déjà choisi, et il est dans `.intensity.json` à la racine de ta face code.)
+   par toi : le tien est déjà choisi, et il est dans `.lcars.json` à la racine de ta face code.)
 
 2. **Économie — ton contexte est la ressource rare et chère.** Tu tournes en long-session, modèle
    haut de gamme, effort élevé : ton contexte, c'est la mémoire du projet. Le **brûler sur de

@@ -161,7 +161,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       dir = Path.join(root, "p")
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf!(root) end)
-      File.write!(Path.join(dir, ".intensity.json"), body)
+      File.write!(Path.join(dir, ".lcars.json"), body)
       root
     end
 
