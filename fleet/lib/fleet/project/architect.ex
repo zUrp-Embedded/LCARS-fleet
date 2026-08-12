@@ -94,14 +94,55 @@ defmodule Fleet.Project.Architect do
 
   The liveness read is the TMUX SESSION, not the Registry: a registered pod whose session is gone
   is exactly the corpse that made the fleet re-brief nothing for an hour on 2026-08-11.
+
+  ## It KEEPS, it never CREATES — and that distinction is the whole point
+
+  A keeper that also creates is not a keeper, it is a second onboarding path with no human in it.
+  Its only caller is the poller, which iterates the ORG SCAN: every repo of the fleet org, whether
+  or not the human running this fleet ever asked for it. Measured on a bench with two humans
+  (2026-08-12): `lcars` made ONE call in his whole session, `project_create tetris`, and his fleet
+  was running an `architect-tetris-v2` — a project created by someone else, that he never opened.
+  Four architects for two projects, two of them wanted by nobody.
+
+  The org scan cannot answer "did MY human ask for this". Nothing on the forge records the asker,
+  and the ops directory that gated this call is SHARED (`/home/projects.ops/<name>`) — so its
+  presence proves *someone* onboarded, never *this* human. The test was only ever valid one way:
+  absence proves nobody asked, presence proves nothing.
+
+  So the record consulted here is the one the box already keeps, per human, on disk: the pod
+  snapshot written at spawn, under the running human's own home. It exists because `ensure/2` ran
+  for THIS human — which happens on the four deliberate verbs (`create`, `import`, `open`,
+  `project_publish`) and nowhere else. A fleet restart or a crash leaves it in place, which is
+  exactly the case this keeper exists for; a deliberate kill clears it, and then not resurrecting
+  is the correct answer.
   """
-  @spec ensure_alive(String.t(), keyword()) :: {:ok, String.t() | :alive} | {:error, term()}
+  @spec ensure_alive(String.t(), keyword()) ::
+          {:ok, String.t() | :alive | :not_ours} | {:error, term()}
   def ensure_alive(repo, opts \\ []) when is_binary(repo) and is_list(opts) do
     tmux = Keyword.get(opts, :pod_tmux, Fleet.Spawner.PodTmux)
+    recorded? = Keyword.get(opts, :on_record, &on_record?/2)
     pod_id = pod_id_for(repo)
 
-    if tmux.alive?(pod_id), do: {:ok, :alive}, else: ensure(repo, opts)
+    cond do
+      # The cheapest question, and the one that decides whether this fleet has any business here:
+      # one `File.dir?` on a local path, before any tmux call and long before any forge call.
+      not recorded?.(repo, opts) -> {:ok, :not_ours}
+      tmux.alive?(pod_id) -> {:ok, :alive}
+      true -> ensure(repo, opts)
+    end
   end
+
+  @doc """
+  Whether THIS box holds an architect on record for `repo` — the durable pod snapshot the spawner
+  writes under the running human's home. Per-human by construction: the BEAM runs as the human, so
+  the state root resolves in their own `~/.lcars`, and no other human's record is reachable from it.
+
+  Silent `false` on an unreadable root: a keeper that resurrects on a failed read would spawn
+  exactly the pods this predicate exists to refuse.
+  """
+  @spec on_record?(String.t(), keyword()) :: boolean()
+  def on_record?(repo, opts \\ []) when is_binary(repo) and is_list(opts),
+    do: Fleet.Spawner.snapshot_on_record?(pod_id_for(repo), opts)
 
   @doc """
   Ensures the per-project architect of `repo` (`owner/name`) is up — idempotent (alive → no-op).

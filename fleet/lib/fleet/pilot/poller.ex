@@ -649,8 +649,18 @@ defmodule Fleet.Pilot.Poller do
   # call. Regular ticks only, like the other two fleet-wide passes: a webhook kick is a dispatch
   # hint, and the arch's own wake produces those webhooks.
   #
-  # Best-effort, and silent when it works: `ensure_alive` costs one `has-session` on the normal
-  # path. A failure is already logged, named, by `Architect.ensure` itself.
+  # ⚠ AND THIS LOOP CANNOT SAY WHOSE PROJECT IT IS. It walks the ORG SCAN — every repo of the fleet
+  # org, including the ones another human onboarded. The gate above proves the project is set up on
+  # this MACHINE, never that the human running this fleet asked for it: `/home/projects.ops` is
+  # SHARED, so its presence is someone's gesture, not necessarily ours. Measured 2026-08-12 on a
+  # two-human bench: a fleet whose human had made a single `project_create` call was running an
+  # architect for a project created by the other human and never opened here.
+  # The "is it ours" question is therefore answered where the record lives — `ensure_alive` keeps
+  # what this box has ON RECORD and creates nothing (`{:ok, :not_ours}` otherwise). Creation stays
+  # with the four deliberate verbs, which is where a human is actually present.
+  #
+  # Best-effort, and silent when it works: `ensure_alive` costs one `File.dir?` then one
+  # `has-session` on the normal path. A failure is already logged, named, by `Architect.ensure`.
   defp keep_architect(state) do
     keeper = state.architect_keeper || (&Fleet.Project.Architect.ensure_alive/2)
     _ = keeper.(state.repo, state.forge_opts)

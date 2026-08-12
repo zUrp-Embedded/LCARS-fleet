@@ -200,6 +200,83 @@ defmodule Fleet.Project.ArchitectTest do
     end
   end
 
+  describe "ensure_alive/2 — the KEEPER keeps, it never creates" do
+    @describetag :tmp_dir
+
+    # The keeper's only caller is the poller, which walks the ORG SCAN: every repo of the fleet
+    # org, including the ones another human onboarded. Measured 2026-08-12 on a two-human bench —
+    # a fleet whose human had made a single `project_create` call was running an architect for a
+    # project created by the other human and never opened here. The shared ops directory that
+    # gated the call proves *someone* onboarded, never *this* human.
+    defmodule AliveTmux do
+      def alive?(_pod_id), do: true
+    end
+
+    defmodule DeadTmux do
+      def alive?(_pod_id), do: false
+    end
+
+    test "NOT on record: no spawn, no liveness call, nothing — this fleet was never asked" do
+      assert {:ok, :not_ours} =
+               ProjectArchitect.ensure_alive("fleet/demo",
+                 on_record: fn _repo, _opts -> false end,
+                 pod_tmux: DeadTmux,
+                 spawner: CaptureSpawner,
+                 forge_client: StubForge
+               )
+
+      refute_received {:spawn_pod, _, _, _}
+    end
+
+    test "on record and alive: the cheap answer, still no spawn" do
+      assert {:ok, :alive} =
+               ProjectArchitect.ensure_alive("fleet/demo",
+                 on_record: fn _repo, _opts -> true end,
+                 pod_tmux: AliveTmux,
+                 spawner: CaptureSpawner,
+                 forge_client: StubForge
+               )
+
+      refute_received {:spawn_pod, _, _, _}
+    end
+
+    test "on record and dead: THAT is what a keeper is for — it respawns", %{tmp_dir: tmp} do
+      {_proj, _work, _doc, roots} = mk_dirs(tmp)
+
+      assert {:ok, "architect-demo"} =
+               ProjectArchitect.ensure_alive(
+                 "fleet/demo",
+                 [
+                   on_record: fn _repo, _opts -> true end,
+                   pod_tmux: DeadTmux,
+                   spawner: CaptureSpawner,
+                   forge_client: StubForge
+                 ] ++ roots
+               )
+
+      assert_received {:spawn_pod, _cap, "architect-demo", _opts}
+    end
+
+    test "on_record?/2 reads the DURABLE snapshot, not liveness", %{tmp_dir: tmp} do
+      # The record is written at spawn and cleared on a terminal phase: a crash or a fleet restart
+      # leaves it (the case the keeper exists for), a deliberate kill removes it (not resurrecting
+      # is then the correct answer).
+      refute ProjectArchitect.on_record?("fleet/demo", state_fs_root: tmp)
+
+      File.mkdir_p!(Path.join([tmp, "pods", "architect-demo"]))
+      refute ProjectArchitect.on_record?("fleet/demo", state_fs_root: tmp)
+
+      File.write!(Path.join([tmp, "pods", "architect-demo", "state.json"]), "{}")
+      assert ProjectArchitect.on_record?("fleet/demo", state_fs_root: tmp)
+    end
+
+    test "an unreadable state root answers NO — a failed read must never authorise a spawn" do
+      refute ProjectArchitect.on_record?("fleet/demo",
+               state_fs_root: "/nonexistent/#{System.unique_integer([:positive])}"
+             )
+    end
+  end
+
   test "the prefix is the DELEGATE'S ROLE, not the word architect" do
     # The defect this closes: a catalogue naming its delegate `tech-lead` resolved the role
     # correctly and still spawned a pod called `architect-vitrine`, whose own CLAUDE.md and SP both

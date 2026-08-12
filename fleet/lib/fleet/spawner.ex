@@ -538,6 +538,36 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Whether a durable snapshot exists on disk for `pod_id` — "this box has this pod ON RECORD",
+  independently of whether it is running right now.
+
+  This is NOT liveness (`list_pods/0`, `pod_info/2` answer that, and only for what is up). It is
+  the question a keeper asks: something that should be alive was spawned HERE at some point, so
+  resurrecting it is legitimate. The snapshot is written at spawn and removed when the pod reaches
+  a terminal phase, so the record follows the intent: a crash or a fleet restart leaves it, a
+  deliberate kill clears it.
+
+  Scope-agnostic on purpose: the caller knows a pod id, not the `lifetime_scope` that decides which
+  subdirectory of the state root holds it. Hardcoding "pods" here would duplicate that mapping in a
+  second place, and the day a role changes scope the copy would answer for the wrong directory.
+
+  Unreadable root ⟹ `false`. The consumers of this predicate SPAWN on a true answer; a failed read
+  read as "yes" would create exactly what the predicate exists to prevent.
+  """
+  @spec snapshot_on_record?(String.t(), keyword()) :: boolean()
+  def snapshot_on_record?(pod_id, opts \\ []) when is_binary(pod_id) and is_list(opts) do
+    root = Fleet.Spawner.Pod.Paths.state_fs_root_for(opts)
+
+    case File.ls(root) do
+      {:ok, scopes} ->
+        Enum.any?(scopes, &File.regular?(Path.join([root, &1, pod_id, "state.json"])))
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  @doc """
   Enumerates reachable live pods for observability without exposing the Registry.
 
   Absent and unreachable entries are both omitted; destructive decisions use `pod_info/2`.
