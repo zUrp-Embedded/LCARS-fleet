@@ -142,7 +142,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       }
     end
 
-    # #8.E: brief-gate workflow_map — root step brief-review (the consultant JUDGES the BRIEF,
+    # #8.E: brief-gate workflow_map — root step brief-review (the scoper JUDGES the BRIEF,
     # pre-PR) -> build.
     def load!("mandgate") do
       %{
@@ -150,7 +150,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         "max_rework_rounds" => 2,
         "steps" => %{
           "brief-review" => %{
-            "role" => "consultant",
+            "role" => "scoper",
             "needs" => [],
             "brief_kind" => "judge",
             "judge_target" => "brief"
@@ -167,7 +167,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
         "name" => "mandnodeclare",
         "max_rework_rounds" => 2,
         "steps" => %{
-          "brief-review" => %{"role" => "consultant", "needs" => []},
+          "brief-review" => %{"role" => "scoper", "needs" => []},
           "build" => %{"role" => "engineer", "needs" => ["brief-review"]}
         }
       }
@@ -772,18 +772,18 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:merge, _}
   end
 
-  # ── #8.E: verdict of a BRIEF judge (brief-review/consultant) via pod.completed ──────────
-  # SAME apply_verdict as the gatekeeper (factored); the consultant is PRE-PR → ISSUE-LEVEL advance
-  # (records the route, no PR) and trace attributed to the CONSULTANT (not "gatekeeper").
+  # ── #8.E: verdict of a BRIEF judge (brief-review/scoper) via pod.completed ──────────
+  # SAME apply_verdict as the gatekeeper (factored); the scoper is PRE-PR → ISSUE-LEVEL advance
+  # (records the route, no PR) and trace attributed to the SCOPER (not "gatekeeper").
 
-  # pod.completed of the brief-review step (consultant) that just returned its verdict.
+  # pod.completed of the brief-review step (scoper) that just returned its verdict.
   defp brief_done(result),
     do: %{
       "issue_id" => "issue-1",
       "workspace" => "/ws",
       "base_sha" => "cafe",
       "base_branch" => "main",
-      "role" => "consultant",
+      "role" => "scoper",
       "workflow_map" => "mandgate",
       "step" => "brief-review",
       "result" => result
@@ -796,18 +796,18 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                hc()
              )
 
-    # ISSUE-LEVEL advance: records the route to build; NO PR opened (the consultant judges pre-PR).
+    # ISSUE-LEVEL advance: records the route to build; NO PR opened (the scoper judges pre-PR).
     assert_received {:route, "mandgate", "build"}
     refute_received {:open_pr, _, _, _}
     refute_received {:assignee, _}
     assert_received :unlocked
-    # trace attributed to the CONSULTANT (honest), not the gatekeeper.
+    # trace attributed to the SCOPER (honest), not the gatekeeper.
     assert_received {:comment, body}
-    assert body =~ "consultant"
+    assert body =~ "scoper"
     assert body =~ "continue"
   end
 
-  test "#8.E brief-review escalate_user -> await_arch (arch); CONSULTANT trace, not gatekeeper" do
+  test "#8.E brief-review escalate_user -> await_arch (arch); SCOPER trace, not gatekeeper" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.maybe_complete(
                brief_done(%{"decision" => "escalate_user", "reason" => "ambiguous brief"}),
@@ -819,7 +819,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:assignee, _}
     refute_received {:closed, _}
     assert_received {:comment, body}
-    assert body =~ "consultant"
+    assert body =~ "scoper"
     refute body =~ "gatekeeper"
   end
 

@@ -16,8 +16,8 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   setup %{tmp_dir: tmp} do
     # Resolvable gatekeeper role token → `seal_and_merge` must sign merge AND comment with it.
-    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "GK-TOKEN")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
 
     :ok
   end

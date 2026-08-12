@@ -15,7 +15,7 @@ defmodule Fleet.Credentials.RoleTokenTest do
   end
 
   test "token present → returned (trimmed)", %{dir: dir} do
-    File.write!(Path.join(dir, "reviewer.gitea_token"), "  tok-abc  \n")
+    Fleet.TestEnv.put_role_token!("reviewer", "  tok-abc  \n")
     assert RoleToken.token("reviewer") == "tok-abc"
   end
 
@@ -30,7 +30,7 @@ defmodule Fleet.Credentials.RoleTokenTest do
   end
 
   test "F-029: empty token → nil + Logger.warning", %{dir: dir} do
-    File.write!(Path.join(dir, "qualifier.gitea_token"), "   \n")
+    Fleet.TestEnv.put_role_token!("qualifier", "   \n")
     log = capture_log(fn -> assert RoleToken.token("qualifier") == nil end)
     assert log =~ "empty"
     assert log =~ "qualifier"

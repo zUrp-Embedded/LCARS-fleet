@@ -26,8 +26,8 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     # (soft-default #3: no system fallback). We place a resolvable gatekeeper token in a hermetic tmp
     # (never the runner's real `/home/private`) → the seal proceeds; this test verifies the worktree
     # projection, not the token.
-    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
 
     :ok
   end

@@ -15,8 +15,8 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    File.write!(Path.join(tmp, "engineer.gitea_token"), "ENG-TOKEN")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_role_token!("engineer", "ENG-TOKEN")
     :ok
   end
 

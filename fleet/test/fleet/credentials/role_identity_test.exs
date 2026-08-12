@@ -13,7 +13,7 @@ defmodule Fleet.Credentials.RoleIdentityTest do
   end
 
   test "token present → {:ok, %RoleIdentity{}} with the verified token", %{dir: dir} do
-    File.write!(Path.join(dir, "gatekeeper.gitea_token"), "  tok-gk  \n")
+    Fleet.TestEnv.put_role_token!("gatekeeper", "  tok-gk  \n")
 
     assert {:ok, %RoleIdentity{role: "gatekeeper", token: "tok-gk"}} =
              RoleIdentity.for_role("gatekeeper")
@@ -24,7 +24,7 @@ defmodule Fleet.Credentials.RoleIdentityTest do
   end
 
   test "EMPTY token → {:error} (fail-closed)", %{dir: dir} do
-    File.write!(Path.join(dir, "reviewer.gitea_token"), "   \n")
+    Fleet.TestEnv.put_role_token!("reviewer", "   \n")
 
     assert capture_log(fn ->
              assert {:error, :role_token_unavailable} = RoleIdentity.for_role("reviewer")

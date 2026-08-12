@@ -165,7 +165,17 @@ declare -a ENTRIES
 # Le compte est le LOGIN (`<catalogue>_<role>`, unique a l'instance Gitea) et le FICHIER reste le
 # ROLE : c'est la cle que le runtime connait — `as_role/2` indexe `<role>.gitea_token`, jamais le
 # login. La projection est inversible PAR CONSTRUCTION, `_` etant interdit dans les deux moities.
-for login in $ROLES; do ENTRIES+=("$login:${login#*_}.gitea_token"); done
+# LE FICHIER PORTE LE LOGIN, PAS LE ROLE. Il portait `${login#*_}` — le login ampute de son tier —
+# donc `fleet_writer` et `web_writer` ecrivaient le MEME `writer.gitea_token` : le catalogue
+# provisionne en second prenait en silence l'identite du premier, et rien ne pouvait le signaler,
+# puisque le fichier existe et que son contenu est un jeton valide. Le COMPTE etait deja prefixe
+# pour cette raison exacte ; le fichier ne l'etait pas. Un jeton appartient a un COMPTE, et un nom
+# de role n'est unique que dans son propre catalogue.
+#
+# Le runtime lit par la MEME projection (`Fleet.Credentials.RoleIdentity.token_path/1`) : les deux
+# moities de ce contrat se rencontrent sur ce nom de fichier, et il n'existe plus qu'un endroit ou
+# il se compose de chaque cote.
+for login in $ROLES; do ENTRIES+=("$login:$login.gitea_token"); done
 ENTRIES+=("${EXTRA_ENTRIES[@]}")
 
 fail=0

@@ -48,13 +48,13 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
       repo: "fleet/poc",
       base_branch: "main",
       issue_number: 1,
-      role: "consultant",
+      role: "scoper",
       deliverable_opts: nil,
       step_run_sha: "brief-verdict",
       next_assignee: "build",
       workflow_map: "poc",
       next_step: "build",
-      comment_body: "Verdict du consultant — continue"
+      comment_body: "Verdict du scoper — continue"
     }
 
     # `:sleeper` seam → we do NOT actually sleep, we capture the requested duration (deterministic).
@@ -78,11 +78,11 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
       repo: "fleet/poc",
       base_branch: "main",
       issue_number: 1,
-      role: "consultant",
+      role: "scoper",
       deliverable_opts: nil,
       step_run_sha: "brief-verdict",
       next_assignee: nil,
-      comment_body: "Verdict du consultant — abandon"
+      comment_body: "Verdict du scoper — abandon"
     }
 
     sleeper = fn ms -> send(self(), {:call, {:slept, ms}}) end
@@ -102,7 +102,7 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
   # F-QoL — producer flow: the FULL NOTE (issue) must be POSTED BEFORE the stage transition
   # (mutex `stage/build`→`stage/review`) — same "comment THEN stage" doctrine, same gap, as
-  # `complete/2` (consultant). Without it: the order observed on the forge dashboard was INVERTED
+  # `complete/2` (scoper). Without it: the order observed on the forge dashboard was INVERTED
   # (stage set before the comment, even though the code already posted the comment logically first
   # — same-second tie).
   defmodule ProducerSeqForge do

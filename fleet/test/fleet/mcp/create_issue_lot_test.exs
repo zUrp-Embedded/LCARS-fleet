@@ -103,11 +103,12 @@ defmodule Fleet.MCP.CreateIssueLotTest do
 
     tokens = Path.join(tmp, "tokens")
     File.mkdir_p!(tokens)
-    File.write!(Path.join(tokens, "architect.gitea_token"), "tok-arch")
 
     TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Forge)
     TestEnv.put_env_restoring(:fleet_mcp, :lot_workshop_root, Path.join(tmp, "workshop"))
+    # The DIRECTORY before the token: the path is derived from it (`RoleIdentity.token_path/1`).
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tokens)
+    Fleet.TestEnv.put_role_token!("architect", "tok-arch")
 
     TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
       {:ok, %{role: "architect", repo: @repo}}

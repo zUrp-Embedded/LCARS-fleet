@@ -1043,7 +1043,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end)
 
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+      TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
     end
@@ -1333,7 +1333,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # `architect` token on disk (legitimate case). Tests that want to prove a REFUSAL do it on the
       # ROLE (resolver ≠ architect or unknown pod), BEFORE the token even comes into play.
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+      TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
     end
@@ -1402,12 +1402,10 @@ defmodule Fleet.MCP.PodToolsTest do
     test "pod proven architect but token absent on disk → REFUSAL :role_token_unavailable (fail-closed)" do
       # The role is architect (authorized) but its account has no provisioned token. We REFUSE rather
       # than post as system. We erase the architect token set by the setup for this case.
-      File.rm(
-        Path.join(
-          Application.get_env(:fleet_credentials, :role_tokens_dir),
-          "architect.gitea_token"
-        )
-      )
+      # Erased through the SAME projection that wrote it: a test that spells the file name is a
+      # test that keeps erasing a path production stopped using.
+      {:ok, path} = Fleet.Credentials.RoleIdentity.token_path("architect")
+      File.rm(path)
 
       Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
@@ -1653,7 +1651,7 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
 
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+      TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
     end
@@ -2072,7 +2070,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end)
 
       TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
-      File.write!(Path.join(tmp, "architect.gitea_token"), "ARCH_TOKEN\n")
+      TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
       :ok
     end
 

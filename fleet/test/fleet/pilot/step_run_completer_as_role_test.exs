@@ -47,17 +47,20 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   end
 
   setup %{tmp_dir: tmp} do
-    # resolvable consultant role token → `as_role("consultant")` must inject it.
-    File.write!(Path.join(tmp, "consultant.gitea_token"), "tok-consultant")
-    File.write!(Path.join(tmp, "reviewer.gitea_token"), "tok-reviewer")
-    File.write!(Path.join(tmp, "engineer.gitea_token"), "tok-engineer")
-    # B-04: a non-engineer producer (documentalist card) needs its own resolvable token.
-    File.write!(Path.join(tmp, "documentalist.gitea_token"), "tok-documentalist")
+    # The DIRECTORY first: the fixture no longer spells the file name, it asks for the path the
+    # runtime reads (`RoleIdentity.token_path/1`, keyed by the ACCOUNT), and that path is rooted here.
+    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+
+    # resolvable scoper role token → `as_role("scoper")` must inject it.
+    Fleet.TestEnv.put_role_token!("scoper", "tok-scoper")
+    Fleet.TestEnv.put_role_token!("reviewer", "tok-reviewer")
+    Fleet.TestEnv.put_role_token!("engineer", "tok-engineer")
+    # B-04: a non-engineer producer (the doc rail's scribe) needs its own resolvable token.
+    Fleet.TestEnv.put_role_token!("scribe", "tok-scribe")
 
     # :promote goes through `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) →
     # gatekeeper token required.
-    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
-    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
 
     :ok
   end
@@ -67,9 +70,9 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
       repo: "fleet/poc",
       base_branch: "main",
       issue_number: 3,
-      role: "consultant",
+      role: "scoper",
       decision: "redirect",
-      comment_body: "Verdict du consultant — redirect"
+      comment_body: "Verdict du scoper — redirect"
     }
 
     assert {:ok, :awaiting_arch} =
@@ -79,7 +82,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
              )
 
     # the base system token is OVERWRITTEN by the role token → forge author = Consultant (anti-masking).
-    assert_received {:comment_token, "tok-consultant"}
+    assert_received {:comment_token, "tok-scoper"}
   end
 
   test "complete: the step_run's signed comment is IN THE NAME OF THE finishing ROLE" do
@@ -87,11 +90,11 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
       repo: "fleet/poc",
       base_branch: "main",
       issue_number: 1,
-      role: "consultant",
+      role: "scoper",
       deliverable_opts: nil,
       step_run_sha: "brief-verdict",
       next_assignee: nil,
-      comment_body: "Verdict du consultant — continue"
+      comment_body: "Verdict du scoper — continue"
     }
 
     assert {:ok, :completed} =
@@ -100,7 +103,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    assert_received {:comment_token, "tok-consultant"}
+    assert_received {:comment_token, "tok-scoper"}
   end
 
   test "judge :promote (terminal) → PR stopwatch stop signed JUDGE, ISSUE stopwatch stop signed PRODUCER" do
@@ -133,12 +136,12 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   end
 
   # B-04 (catalogue chantier 2026-07-20): the producer is whoever the CARD dispatched — read from the
-  # feature branch, NOT the `Roles.producer_role` config global (a fixed "engineer"). A `documentalist`
+  # feature branch, NOT the `Roles.producer_role` config global (a fixed "engineer"). A `scribe`
   # card (docs into ops, not code into main) is the motivating case: pre-B-04 the ISSUE stopwatch
   # stop was signed "engineer" (config) → Gitea per-user refuses the mis-signed stop → the
-  # documentalist's watch leaks forever. This is the SAME branch source the poller-driven promote
+  # scribe's watch leaks forever. This is the SAME branch source the poller-driven promote
   # already reads (`ReviewLifecycle.promote_pr` — "no fork"); this test locks the workflow_map path onto it.
-  test "judge :promote → ISSUE stopwatch stop signed by the CARD's producer (documentalist), not the config default" do
+  test "judge :promote → ISSUE stopwatch stop signed by the CARD's producer (scribe), not the config default" do
     step_run = %{
       repo: "fleet/docs-proj",
       base_branch: "main",
@@ -147,7 +150,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
       pr_role: :judge,
       intent: :promote,
       next_assignee: nil,
-      producer_branch: "lcars/issue-99-documentalist"
+      producer_branch: "lcars/issue-99-scribe"
     }
 
     assert {:ok, :promoted} =
@@ -158,7 +161,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
 
     # The ISSUE stopwatch (99) is stopped as DOCUMENTALIST — the producer the branch names — even
     # though `Roles.producer_role` defaults to "engineer". Pre-B-04 this asserted "tok-engineer".
-    assert_received {:stop_stopwatch, 99, "tok-documentalist"}
+    assert_received {:stop_stopwatch, 99, "tok-scribe"}
   end
 
   # BL-6-34 — the measured bench signature: a producer role whose forge account/token does NOT
@@ -166,7 +169,16 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   # role_token_unavailable). The deliverable is pushed, then the PR is refused FAIL-CLOSED between
   # push and PR-open — and the stall must be named ON the issue, posted with the SYSTEM token:
   # the missing ROLE token is exactly what the marker has to survive, or the ticket goes mute.
-  test "producer WITHOUT role token → PR refused fail-closed, pr-open-fail marker under the SYSTEM token" do
+  test "producer WITHOUT role token → PR refused fail-closed, pr-open-fail marker under the SYSTEM token",
+       %{tmp_dir: tmp} do
+    # The setup provisions this producer, so the ABSENCE is staged here rather than by naming a role
+    # nobody declares: a token directory that holds nothing. Naming a phantom role would prove the
+    # wrong thing now — an unknown role has no ACCOUNT, so its refusal comes from the roster and not
+    # from the missing credential this test is about.
+    empty = Path.join(tmp, "no-tokens")
+    File.mkdir_p!(empty)
+    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, empty)
+
     defmodule PushOnlyDeliverable do
       def publish(_opts), do: {:ok, %{commit_sha: "deadbeef", pushed?: true, mode: :git_native}}
     end

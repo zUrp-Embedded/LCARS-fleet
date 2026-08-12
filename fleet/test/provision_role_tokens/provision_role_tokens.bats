@@ -89,25 +89,37 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
 }
 
-@test "le compte est le LOGIN, le fichier reste le ROLE" {
+@test "le compte est le LOGIN, et le FICHIER aussi" {
   # `<catalogue>_<role>` est la forme du compte forge, parce qu'un username Gitea est unique a
-  # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte et un
-  # jeton. Le FICHIER, lui, ne bouge pas — c'est la cle que le runtime connait (`as_role/2` indexe
-  # `<role>.gitea_token`, jamais le login). La projection est inversible par construction : `_` est
-  # interdit dans les deux moities, donc la premiere separe exactement.
-  printf 'tok-ok\n' > "$TOKDIR/engineer.gitea_token"
+  # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte.
+  # LE FICHIER SUIT, et il ne suivait pas. Il portait le role seul, donc `fleet_writer` et
+  # `web_writer` ecrivaient le MEME `writer.gitea_token` : le catalogue provisionne en second
+  # prenait en silence l'identite du premier, et rien ne pouvait le dire — le fichier existe et son
+  # contenu est un jeton valide. Le motif de l'ancienne forme (« c'est la cle que le runtime
+  # connait ») etait vrai tant que le runtime ne savait pas projeter ; il la projette desormais
+  # (`RoleIdentity.token_path/1`), et les deux moities se rencontrent sur ce nom.
+  printf 'tok-ok\n' > "$TOKDIR/fleet_engineer.gitea_token"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles fleet_engineer --check
   [ "$status" -eq 0 ]
-  # Le rapport nomme les DEUX : le compte sonde et le fichier qui le porte.
   [[ "$output" == *"OK    fleet_engineer"* ]]
-  [[ "$output" == *"engineer.gitea_token)"* ]]
+  [[ "$output" == *"fleet_engineer.gitea_token)"* ]]
 
-  # Un role compose garde son tiret : seul le PREMIER souligne separe.
-  printf 'tok-ok\n' > "$TOKDIR/code-reviewer.gitea_token"
+  # Deux catalogues nommant le meme role tiennent DEUX fichiers distincts — la propriete perdue.
+  printf 'tok-a\n' > "$TOKDIR/fleet_dev.gitea_token"
+  printf 'tok-b\n' > "$TOKDIR/web_dev.gitea_token"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles "fleet_dev web_dev" --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fleet_dev.gitea_token)"* ]]
+  [[ "$output" == *"web_dev.gitea_token)"* ]]
+  [ "$(cat "$TOKDIR/fleet_dev.gitea_token")" = "tok-a" ]
+  [ "$(cat "$TOKDIR/web_dev.gitea_token")" = "tok-b" ]
+
+  # Un role compose garde son tiret : le souligne ne separe que les deux moities du compte.
+  printf 'tok-ok\n' > "$TOKDIR/web_code-reviewer.gitea_token"
   run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles web_code-reviewer --check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"code-reviewer.gitea_token)"* ]]
+  [[ "$output" == *"web_code-reviewer.gitea_token)"* ]]
 }
 
 @test "local readability is load-bearing: a token whose group != GROUP FAILS (unreadable by runtime)" {

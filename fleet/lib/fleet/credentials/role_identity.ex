@@ -28,6 +28,16 @@ defmodule Fleet.Credentials.RoleIdentity do
   def for_role(_), do: {:error, :role_token_unavailable}
 
   @doc """
+  Where `role`'s forge token lives — `<dir>/<login>.gitea_token`, or `:error`.
+
+  The third face of the same identity, beside the token and the account: a credential FILE is named
+  after the account that owns it. Exposed here because this module is the domain's door on "who a
+  role is on the forge", and `RoleToken` is internal to it.
+  """
+  @spec token_path(String.t()) :: {:ok, Path.t()} | :error
+  defdelegate token_path(role), to: RoleToken, as: :path_for
+
+  @doc """
   The forge LOGIN `role` writes under, or `{:error, _}`.
 
   THE SECOND HALF OF THE IDENTITY, and it was missing. This module's whole subject is "who a role

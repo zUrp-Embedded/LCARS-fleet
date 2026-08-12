@@ -1,8 +1,10 @@
 defmodule Fleet.TestEnv do
   # Own boundary (same pattern as `Fleet.CapProfileFixture`): a support module used from every
-  # domain's tests is not the property of any one domain. No deps — it only touches
-  # `Application` and `ExUnit.Callbacks`.
-  use Boundary, deps: [], exports: []
+  # domain's tests is not the property of any one domain. It touches `Application` and
+  # `ExUnit.Callbacks` — plus `Fleet.Credentials`, for the ONE fixture that must not spell a path
+  # the runtime owns: a role token's file name is derived (`RoleIdentity.token_path/1`), and a fixture
+  # writing it by hand is a fixture that keeps passing on a scheme production has left.
+  use Boundary, deps: [Fleet.Credentials], exports: []
 
   @moduledoc """
   Application-env helper for the whole suite's tests (B6 harness dedup).
@@ -23,6 +25,31 @@ defmodule Fleet.TestEnv do
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
+
+  @doc """
+  Writes `content` as `role`'s forge token, AT THE PATH THE RUNTIME READS.
+
+  A fixture that spells `<dir>/<role>.gitea_token` itself is a fixture that keeps passing on a
+  scheme the runtime no longer uses — and this scheme moved: the file is keyed by the ACCOUNT
+  (`<tier>_<role>`), because a role name is only unique inside its own catalogue. Asking
+  `RoleIdentity.token_path/1` is what makes a fixture follow.
+
+  It also RAISES on a role no catalogue declares, and that is the point rather than a nuisance: the
+  flat namespace let a fixture invent a role and be handed a credential for it. Two of them did.
+  """
+  def put_role_token!(role, content) do
+    case Fleet.Credentials.RoleIdentity.token_path(role) do
+      {:ok, path} ->
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, content)
+        path
+
+      :error ->
+        raise "TestEnv.put_role_token!: no forge login for #{inspect(role)} — the catalogue in " <>
+                "scope declares no such role, so no account and no token can exist for it. " <>
+                "Name a role the fixture's catalogue actually carries."
+    end
+  end
 
   @doc """
   Sets `value` under `{app, key}` and registers restoration of the PREVIOUS value

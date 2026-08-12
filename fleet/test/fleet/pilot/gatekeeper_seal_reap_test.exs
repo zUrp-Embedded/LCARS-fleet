@@ -44,8 +44,8 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
 
   setup %{tmp_dir: tmp} do
     TestEnv.put_env_restoring(:fleet_pilot, :worktree_sync, SpySync)
-    File.write!(Path.join(tmp, "gatekeeper.gitea_token"), "tok-gatekeeper")
     TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
     :ok
   end
 
