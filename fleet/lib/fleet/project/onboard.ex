@@ -2054,6 +2054,27 @@ defmodule Fleet.Project.Onboard do
                {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
             end
 
+          # L'ORG DU CATALOGUE N'EXISTE PAS SUR CETTE FORGE — et c'est le cas NOMINAL d'un catalogue
+          # qu'on vient d'activer. `lcars catalogue enable` le dit deja (« la forge n'a NI l'org ni
+          # ses comptes de role — l'activation ne provisionne pas »), mais l'echec, lui, tombait deux
+          # gestes plus tard et dans le vocabulaire de Gitea : « user redirect does not exist
+          # [name: web] / GetOrgByName ». Personne ne remonte de cette phrase-la jusqu'a « le
+          # catalogue est actif ici et n'a jamais ete enrole sur la forge ».
+          # Un 404 ici a exactement deux causes, et on les separe avec l'appel qui les distingue au
+          # lieu de deviner sur un message : soit l'org manque (diagnostiquable, geste nomme), soit
+          # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
+          # Meme discipline que le deck refusant lui-meme une entree non declaree plutot que de
+          # laisser la forge le faire illisiblement.
+          {:error, {:http, 404, _}} = err ->
+            case users.user_exists?(org, fc) do
+              {:ok, false} ->
+                {:error,
+                 {:catalogue_not_enrolled, org, provisioning_gestures(:catalogue, human, org)}}
+
+              _ ->
+                {:error, {:forge_preflight_failed, elem(err, 1)}}
+            end
+
           {:error, reason} ->
             {:error, {:forge_preflight_failed, reason}}
         end
@@ -2081,6 +2102,16 @@ defmodule Fleet.Project.Onboard do
       "2) prove the membership by adding '#{human}' to 'humans' (cf. the :team gesture); " <>
       "3) onboard in EXPLICIT DEGRADED MODE with `allow_unverifiable_human_team?: true` (human " <>
       "admission will NOT be proven — downstream create_issue remains the net)."
+  end
+
+  defp provisioning_gestures(:catalogue, _human, org) do
+    "the catalogue '#{org}' is ACTIVE on this box but its org does NOT exist on the forge — " <>
+      "activating a catalogue makes it READ by the fleet, it never provisions anything. Nothing " <>
+      "can be onboarded into it until the forge carries the org and its role accounts: " <>
+      "`etc/enroll-catalogue.sh --catalogue <root> --tofu-dir <copy of deploy/deps>` then " <>
+      "`tofu apply` in that folder (the deploy/deps/instance/ module first, once per forge). " <>
+      "Until then, target an enrolled catalogue (`lcars catalogue list` shows what is active here, " <>
+      "which is NOT the same question as what the forge carries)."
   end
 
   defp validate_name(name) do
