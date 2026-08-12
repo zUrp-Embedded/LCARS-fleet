@@ -35,7 +35,7 @@
 #     INTERFACE
 #         Ring:    0 (gate)
 #         Input:   repo path (default: current or LCARS dev clone), hook sources
-#         Output:  symlinks in .git/hooks/ (pre-commit, pre-push, post-commit)
+#         Output:  symlinks in .git/hooks/ (pre-commit, pre-push)
 #
 #     EXIT CODES
 #         0    Hooks installed
@@ -56,7 +56,7 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR"
-HOOKS=("pre-commit" "post-commit" "pre-push" "hook-config.sh")
+HOOKS=("pre-commit" "pre-push" "hook-config.sh")
 
 install_hooks_to() {
     local repo="$1"

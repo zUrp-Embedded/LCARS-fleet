@@ -38,22 +38,27 @@ spec:
 
     # --- Step 1: audit ---
     #
-    # ⚠ CETTE CARTE DISPATCHE UN JUGE DE BRIEF POUR FAIRE UN AUDIT, et elle échouera.
+    # ⚠ CETTE CARTE A DISPATCHÉ UN JUGE POUR FAIRE UN TRAVAIL DE PRODUCTEUR, et elle ne pouvait pas
+    # aboutir. Le `scoper` est un juge de brief : son SP dit « ton input est le brief, PAS du code —
+    # tu ne codes pas et tu ne modifies rien », contre la gate ci-dessous qui exige un document
+    # PRODUIT et non vide. Un juge ne produit pas ; c'était la contradiction, et elle datait du
+    # split `consultant`→`scoper` (état d'avant, renommé).
     #
-    # Ce n'est PAS une régression du split `consultant`→`scoper` : c'est l'état d'avant, renommé.
-    # Le rôle d'AUDITEUR que cette carte appelle n'a jamais été construit. Son mode d'exécution
-    # (`fire-mode`) a été retiré du modop_set le 2026-07-19 (codex F-05), et le profil qu'elle
-    # dispatchait ne composait QUE des blocs SP de juge de brief (`method/brief-review` : « ton
-    # input est le brief, PAS du code — tu ne codes pas et tu ne modifies rien »), contre la gate
-    # ci-dessous qui exige un document d'audit non vide. La carte se contredit.
+    # LE CORRECTIF N'EST PAS UN RÔLE NEUF, et c'est le piège dans lequel l'analyse est tombée deux
+    # fois : un nom de rôle est une ÉTIQUETTE qui distingue des workers, pas un pari sur leur
+    # compétence — c'est le même modèle sous tous. La question n'est donc jamais « quelle compétence
+    # nous manque » mais « quel siège existant a le bon livrable et les bons montages ».
     #
-    # Le nom `consultant` a été essayé ici comme échec explicite (dispatch mort sur `:not_found`) :
-    # refusé par `validate_card_steps!/1`, qui valide AU BOOT que chaque rôle de carte canon résout
-    # — un rôle inconnu ne casse pas un ticket, il empêche la fleet de démarrer. La carte doit donc
-    # nommer un rôle réel, et `scoper` est le seul qui existe. Ce commentaire est ce qui reste
-    # d'honnête : ce champ attend un auditeur, pas ce juge.
+    # Ici : produire un document qui part sur la face atelier, c'est le scope EXACT du scribe — le
+    # producteur documentaire, dont la mécanique de livraison est identique à celle de l'engineer
+    # (commits locaux, le système pousse) et qui monte la face code en lecture seule pour lire ce
+    # qu'il audite.
     audit:
-      role: scoper
+      role: scribe
+      # PAS de `face:` ici, et le gate l'a prouvé : la face est ce qui ÉLIT la carte du rail doc
+      # (`Loader.workshop_card_name/1` refuse deux prétendants). La déclarer ferait de cette carte
+      # d'audit une seconde candidate au rail documentaire du projet — elle produit un document,
+      # elle n'est pas LE rail des documents.
       needs: []  # racine DAG
       inputs:
         - ticket.body
@@ -61,7 +66,7 @@ spec:
       outputs:
         # DOCUMENTAIRE : rien ne lit ce champ (cf. la description du schema v2.5), et `{date}`
         # n'est resolu par personne. Il dit a un humain ce que l'etape doit produire.
-        - audits/scoper-{date}.json
+        - audits/scribe-{date}.json
       gate:
         # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
         # (le chemin terminal-string ne les évaluait pas), avoués tels quels. L'escalade gatekeeper vient
