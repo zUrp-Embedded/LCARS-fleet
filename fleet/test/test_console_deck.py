@@ -166,4 +166,187 @@ check(
 )
 psrv.shutdown()
 
+
+
+# ─── LA PORTE ──────────────────────────────────────────────────────────────────────────────────
+# Le deck servait l'annuaire COMPLET des humains a qui l'ouvrait. La fleet etait deja cloisonnee
+# par uid (un bloc de ports chacun) : identifier ne cree donc pas la separation, ca rend l'INDEX
+# personnel. Ce qui est epingle ici, c'est exactement ce qu'une relecture ne verifie pas a l'oeil :
+#
+#  1. sans configuration, le deck ne sert RIEN — pas d'annuaire de repli qui rendrait l'absence
+#     de configuration invisible ;
+#  2. `/api/state` est filtre A LA SOURCE — un index qui n'affiche qu'un humain pendant que l'API
+#     les sert tous n'a rien rendu personnel, il a cache une liste a un fetch de distance ;
+#  3. un `state` inconnu au retour est REFUSE — sans ca, un tiers pose sa session dans le
+#     navigateur de quelqu'un d'autre ;
+#  4. un compte forge hors de l'equipe est reconnu ET refuse, et les deux se disent ;
+#  5. membre de l'equipe SANS utilisateur systeme = le convergeur n'est pas passe, et ca se dit
+#     autrement qu'un refus.
+#
+# La forge est simulee : le sujet du test est la porte, pas Gitea (dont le comportement est mesure
+# sur banc, pas devine ici).
+import urllib.error
+import urllib.request
+
+FAKE = {"login": "zoe", "groups": ["fleet", "fleet:humans"]}
+
+
+def fake_forge():
+    class H(BaseHTTPRequestHandler):
+        def _json(self, code, obj):
+            b = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            self._json(200, {"access_token": "at-probe", "token_type": "bearer",
+                             "expires_in": 3600, "refresh_token": "rt-probe"})
+
+        def do_GET(self):
+            self._json(200, {"sub": "1", "preferred_username": FAKE["login"],
+                             "groups": FAKE["groups"]})
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv.server_address[1], srv
+
+
+def start_deck():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), deck.Deck)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv.server_address[1], srv
+
+
+def fetch(port, path, cookie=None):
+    """Rend (code, corps, headers) SANS suivre les redirections — la redirection EST la mesure."""
+
+    class NoRedir(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a):
+            return None
+
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path))
+    if cookie:
+        req.add_header("Cookie", cookie)
+    try:
+        with urllib.request.build_opener(NoRedir).open(req, timeout=5) as r:
+            return r.getcode(), r.read().decode("utf-8", "replace"), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
+
+
+forge_port, forge_srv = fake_forge()
+FORGE = "http://127.0.0.1:%d" % forge_port
+cfg_path = os.path.join(HERE, "..", "tmp-deck-oidc-%d.json" % os.getpid())
+
+# (1) NON CONFIGURE : aucun repli, et le refus nomme ce qui manque.
+deck.OIDC_CONFIG = cfg_path + ".absent"
+dport, dsrv = start_deck()
+code, body, _ = fetch(dport, "/")
+check(code == 503, "sans client OAuth2 pose, le deck refuse de servir (vu: %d)" % code)
+check("NON CONFIGURE" in body and "absent" in body,
+      "le refus NOMME le fichier manquant, il ne dit pas seulement non")
+check(fetch(dport, "/health")[0] == 200,
+      "/health repond AVANT la porte — la sonde du conteneur n'a pas de session")
+
+with open(cfg_path, "w") as fh:
+    json.dump({"client_id": "cid", "client_secret": "csec",
+               "public_url": FORGE, "internal_url": FORGE}, fh)
+deck.OIDC_CONFIG = cfg_path
+
+cfg, why = deck.oidc_config()
+check(cfg is not None and why is None, "une config complete se charge (why: %s)" % why)
+with open(cfg_path + ".partial", "w") as fh:
+    json.dump({"client_id": "cid", "public_url": FORGE}, fh)
+deck.OIDC_CONFIG = cfg_path + ".partial"
+_, why = deck.oidc_config()
+check(why is not None and "client_secret" in why,
+      "un champ manquant est NOMME (vu: %s)" % why)
+deck.OIDC_CONFIG = cfg_path
+
+# (2) PAS DE SESSION : la page invite, l'API refuse. Les deux, pas l'une des deux.
+code, body, _ = fetch(dport, "/")
+check(code == 200 and "identifier sur la forge" in body,
+      "sans session, la page propose la forge (vu: %d)" % code)
+check(fetch(dport, "/api/state")[0] == 401,
+      "sans session, /api/state refuse — la porte n'est pas qu'un habillage de page")
+
+# (3) LE RETOUR NON SOLLICITE. Un `state` qu'on n'a pas emis n'ouvre pas de session.
+code, _, hdrs = fetch(dport, "/auth/callback?state=jamais-emis&code=x")
+check(code == 400, "un `state` inconnu au retour est REFUSE (vu: %d)" % code)
+check("Set-Cookie" not in hdrs, "et il ne pose AUCUN cookie")
+
+# Le depart : une redirection vers la forge qui emporte un `state` et demande `groups`.
+code, _, hdrs = fetch(dport, "/auth/login")
+loc = hdrs.get("Location", "")
+check(code == 302 and loc.startswith(FORGE + "/login/oauth/authorize"),
+      "/auth/login redirige vers la forge PUBLIQUE (vu: %d %s)" % (code, loc[:60]))
+qs = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+check("groups" in (qs.get("scope") or [""])[0],
+      "le scope demande `groups` — c'est lui qui porte l'appartenance a l'equipe")
+issued = (qs.get("state") or [""])[0]
+check(bool(issued), "un `state` est emis")
+
+# (4) RECONNU, PAS MEMBRE. Le compte existe et fonctionne ; il n'ouvre rien ici.
+FAKE["groups"] = ["fleet"]
+code, body, hdrs = fetch(dport, "/auth/callback?state=%s&code=abc" % issued)
+check(code == 403, "hors de l'equipe humans -> refuse (vu: %d)" % code)
+check("COMPTE RECONNU" in body,
+      "et le refus dit que le compte EXISTE — c'est un enrollment qui manque, pas une panne")
+check("Set-Cookie" not in hdrs, "aucune session n'est ouverte pour un non-membre")
+
+# (5) MEMBRE, MAIS AUCUN UTILISATEUR SYSTEME : le convergeur n'est pas passe.
+FAKE["groups"] = ["fleet", "fleet:humans"]
+deck.humans = lambda: []
+code, _, hdrs = fetch(dport, "/auth/login")
+issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
+code, body, hdrs = fetch(dport, "/auth/callback?state=%s&code=abc" % issued)
+check(code == 302, "un membre de l'equipe OUVRE une session (vu: %d)" % code)
+cookie = hdrs.get("Set-Cookie", "").split(";")[0]
+check(cookie.startswith(deck.SESSION_COOKIE + "="), "et recoit son cookie de session")
+code, body, _ = fetch(dport, "/", cookie)
+check(code == 200 and "PAS ENCORE DE BLOC" in body,
+      "membre sans utilisateur systeme : on le DIT, on ne refuse pas (vu: %d)" % code)
+check(fetch(dport, "/api/state", cookie)[0] == 409,
+      "et l'API porte le meme etat, distinct d'un 401")
+
+# (6) LE FILTRE EST A LA SOURCE. Deux humains sur la boite, une seule ligne servie.
+deck.humans = lambda: [
+    {"human": "zoe", "uid": 1001, "home": "/home/zoe", "ports": deck.block(1001)},
+    {"human": "autre", "uid": 1002, "home": "/home/autre", "ports": deck.block(1002)},
+]
+code, body, _ = fetch(dport, "/api/state", cookie)
+served = json.loads(body)["humans"]
+check(code == 200 and len(served) == 1 and served[0]["human"] == "zoe",
+      "/api/state ne sert QUE l'humain de la session (vu: %s)"
+      % [h["human"] for h in served])
+check("autre" not in body, "le voisin n'apparait nulle part dans la charge")
+check(len(deck.state()["humans"]) == 2,
+      "et le filtre est un ARGUMENT, pas une amputation : state() sans filtre voit les deux")
+
+# (7) SORTIR. La session meurt cote serveur, pas seulement dans le navigateur.
+code, _, hdrs = fetch(dport, "/auth/logout", cookie)
+check(code == 302, "/auth/logout redirige (vu: %d)" % code)
+check(fetch(dport, "/api/state", cookie)[0] == 401,
+      "et le MEME cookie ne vaut plus rien — la session est tuee au serveur")
+
+# (8) L'EXPIRATION EST LUE, PAS PLANIFIEE. Une session perimee ne survit pas a sa relecture.
+deck._sessions["perime"] = {"login": "zoe", "groups": [], "exp": time.time() - 1}
+check(deck.session_of(deck.SESSION_COOKIE + "=perime") is None,
+      "une session expiree est refusee A LA LECTURE (aucun timer a rater)")
+
+dsrv.shutdown()
+forge_srv.shutdown()
+for f in (cfg_path, cfg_path + ".partial"):
+    try:
+        os.unlink(f)
+    except OSError:
+        pass
+
 sys.exit(0 if ok else 1)

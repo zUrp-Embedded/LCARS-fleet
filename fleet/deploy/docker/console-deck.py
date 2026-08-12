@@ -19,14 +19,112 @@ import html
 import json
 import os
 import re
+import secrets
 import socket
 import sys
+import threading
+import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
 HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh")
+
+# ── THE DOOR ────────────────────────────────────────────────────────────────────────────────────
+# WHAT THE AUTH IS FOR, AND IT IS NOT MAINLY SECURITY: this page is the box's front door and it
+# used to hand EVERY human's port block to whoever opened it. The fleet was already per-human --
+# one port block per uid, one observation deck each -- so authenticating does not create the
+# partition, it makes the INDEX personal: you arrive, you are recognised, you land on yours.
+#
+# GITEA IS THE MASTER OF HUMANS, so it answers "who are you" too. `preferred_username` falls
+# straight onto /etc/passwd (the login is the SAME on both sides by contract), which yields the uid
+# and therefore the port block. Routing and authorisation come out of one round trip.
+#
+# WE READ THE CLAIMS FROM `userinfo`, NOT FROM THE id_token. Both carry the same `groups` (measured
+# 2026-08-12), but validating an RS256 signature needs a crypto library this image does not carry,
+# and an UNVERIFIED id_token is an attacker-supplied blob. The userinfo endpoint is a direct
+# server-to-forge call authenticated by the access token we just obtained: nothing to verify,
+# because nothing untrusted carried it.
+OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC", "/etc/lcars/deck-oidc.json")
+# Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
+# registration is deliberate (an account is inert on its own); the single admin gesture that
+# enrolls somebody is adding them here. Measured: a member gets `["fleet", "fleet:humans"]`, a
+# self-registered guest gets NO `groups` claim at all.
+HUMANS_TEAM = os.environ.get("LCARS_DECK_TEAM", "fleet:humans")
+SESSION_COOKIE = "lcars_deck"
+SESSION_TTL = 12 * 3600
+PENDING_TTL = 600
+
+_lock = threading.Lock()
+_sessions = {}
+_pending = {}
+
+
+def oidc_config():
+    """
+    The registered OAuth2 client, or `(None, why)` -- never a silent degraded mode.
+
+    TWO FORGE URLS, AND CONFLATING THEM IS THE CLASSIC FIRST-TRY FAILURE. The browser is sent to
+    `public_url` (an address a person's machine can reach); the code-for-token exchange goes to
+    `internal_url` (which inside a container is the compose service name). One value cannot be
+    both: `http://forge:3000` resolves nowhere outside the network, and the host's address may not
+    resolve inside it.
+    """
+    try:
+        with open(OIDC_CONFIG) as fh:
+            cfg = json.load(fh)
+    except FileNotFoundError:
+        return None, f"{OIDC_CONFIG} absent"
+    except PermissionError:
+        return None, f"{OIDC_CONFIG} illisible par {os.geteuid()} (le deck tourne en nobody)"
+    except (OSError, ValueError) as e:
+        return None, f"{OIDC_CONFIG} illisible: {e}"
+    missing = [k for k in ("client_id", "client_secret", "public_url") if not cfg.get(k)]
+    if missing:
+        return None, f"{OIDC_CONFIG}: champ(s) manquant(s) {', '.join(missing)}"
+    cfg.setdefault("internal_url", cfg["public_url"])
+    return cfg, None
+
+
+def _post_form(url, fields):
+    body = urllib.parse.urlencode(fields).encode()
+    req = Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    with urlopen(req, timeout=10) as r:
+        return json.load(r)
+
+
+def _get_json(url, token):
+    req = Request(url)
+    req.add_header("Authorization", "Bearer " + token)
+    with urlopen(req, timeout=10) as r:
+        return json.load(r)
+
+
+def _sweep(now):
+    for store, key in ((_sessions, "exp"), (_pending, "exp")):
+        for k in [k for k, v in store.items() if v[key] <= now]:
+            store.pop(k, None)
+
+
+def session_of(cookie_header):
+    """The live session a request carries, or None. Expiry is checked on READ, never on a timer."""
+    if not cookie_header:
+        return None
+    sid = None
+    for part in cookie_header.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == SESSION_COOKIE:
+            sid = v
+    if not sid:
+        return None
+    now = time.time()
+    with _lock:
+        _sweep(now)
+        s = _sessions.get(sid)
+        return dict(s, sid=sid) if s else None
 
 # Le bloc de 10 ports par humain, MEME formule que bin/fleet_v2 et console.sh (`21000 + uid%500*10`).
 # Recopiee ici parce que ce serveur tourne AVANT toute fleet et ne peut rien lui demander ; les
@@ -98,9 +196,18 @@ def fleet_pods(human):
         return "unknown", []
 
 
-def state():
+def state(only=None):
+    """
+    The box's state, RESTRICTED to `only` when a session names a human.
+
+    The filter is applied at the SOURCE, not in the page: an index that renders one human while
+    `/api/state` still serves everybody has not made anything personal, it has hidden a list that
+    is still one fetch away.
+    """
     hs = []
     for h in humans():
+        if only is not None and h["human"] != only:
+            continue
         status, pods = fleet_pods(h)
         # `fleet` reste le booleen « vivante », pour les consommateurs qui ne posent que cette
         # question ; `fleet_status` porte la distinction que le booleen ne peut pas porter.
@@ -128,6 +235,96 @@ def state():
     return {"hostname": socket.gethostname(), "humans": hs}
 
 
+# ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
+# Each says ONE thing and offers exactly the gesture that unblocks it. A door that refuses without
+# naming what it wants sends the person to ask an admin what the deck already knows.
+SHELL = r"""<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LCARS &mdash; %(title)s</title>
+<style>
+  :root { --or:#FF9900; --am:#FFCC66; --bg:#000; --pan:#141414; --dim:#7a7a7a; --line:#262626 }
+  * { box-sizing:border-box }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--am);
+         font:15px/1.6 ui-monospace,"DejaVu Sans Mono",Menlo,monospace;
+         display:flex; align-items:center; justify-content:center; padding:24px }
+  .card { max-width:620px; width:100%%; background:var(--pan); border-left:4px solid var(--or); padding:26px 30px }
+  h1 { color:var(--or); font-size:15px; letter-spacing:.22em; margin:0 0 18px; font-weight:700 }
+  p { margin:0 0 14px }
+  .dim { color:var(--dim) }
+  code { color:var(--or); word-break:break-all }
+  a.go { display:inline-block; margin-top:10px; padding:9px 20px; background:var(--or); color:#000;
+         text-decoration:none; font-weight:700; letter-spacing:.08em }
+  a.go:hover { background:var(--am) }
+</style>
+<div class="card">%(body)s</div>
+"""
+
+
+def page_login():
+    return SHELL % {
+        "title": "identification",
+        "body": (
+            "<h1>LCARS</h1>"
+            "<p>Cette boite est desservie par la forge : elle sait qui tu es, on ne redemande pas.</p>"
+            '<p><a class="go" href="/auth/login">S\'identifier sur la forge</a></p>'
+            '<p class="dim">Pas encore de compte ? La forge accepte les inscriptions. Un compte '
+            "seul ne donne acces a rien ici : c'est l'ajout a l'equipe <code>" + html.escape(HUMANS_TEAM) +
+            "</code> qui fait de toi un humain de la fleet.</p>"
+        ),
+    }
+
+
+def page_denied(login, groups):
+    return SHELL % {
+        "title": "compte reconnu",
+        "body": (
+            "<h1>COMPTE RECONNU</h1>"
+            "<p>Tu es bien <code>" + html.escape(login or "?") + "</code> sur la forge, et c'est tout "
+            "ce qui manquait de verifiable : ton compte existe et il fonctionne.</p>"
+            "<p>Il n'est pas encore membre de <code>" + html.escape(HUMANS_TEAM) + "</code>. Tant "
+            "qu'il ne l'est pas, tu n'as pas de fleet sur cette boite &mdash; rien n'est casse, il "
+            "manque <b>un seul geste</b>, cote forge, par un proprietaire de l'organisation.</p>"
+            '<p class="dim">Vu de la forge, tu appartiens a : <code>' +
+            html.escape(", ".join(groups) if groups else "(aucune equipe)") + "</code></p>"
+            '<p><a class="go" href="/auth/logout">Se deconnecter</a></p>'
+        ),
+    }
+
+
+def page_no_block(login):
+    return SHELL % {
+        "title": "bloc absent",
+        "body": (
+            "<h1>PAS ENCORE DE BLOC</h1>"
+            "<p>Tu es <code>" + html.escape(login) + "</code>, membre de <code>" +
+            html.escape(HUMANS_TEAM) + "</code> &mdash; l'enrollment est fait cote forge.</p>"
+            "<p>Mais aucun utilisateur systeme <code>" + html.escape(login) + "</code> n'existe "
+            "encore sur cette boite, donc tu n'as ni bloc de ports ni fleet a montrer. C'est le "
+            "convergeur qui pose cet utilisateur, et il ne l'a pas encore fait.</p>"
+            '<p class="dim">Rien a faire de ton cote : ca converge tout seul. Si ca dure, c\'est '
+            "le convergeur qu'il faut regarder, pas ton compte.</p>"
+            '<p><a class="go" href="/auth/logout">Se deconnecter</a></p>'
+        ),
+    }
+
+
+def page_unconfigured(why):
+    return SHELL % {
+        "title": "non configure",
+        "body": (
+            "<h1>DECK NON CONFIGURE</h1>"
+            "<p>Ce deck exige l'identification par la forge, et son client OAuth2 n'est pas pose : "
+            "<code>" + html.escape(why) + "</code></p>"
+            "<p>Il ne sert donc RIEN &mdash; ni annuaire, ni liens. Un deck qui se rabattrait sur "
+            "la liste complete des humains rendrait l'absence de configuration invisible, et "
+            "personne n'irait la corriger.</p>"
+            '<p class="dim">C\'est le provisioning qui pose ce fichier (client_id, client_secret, '
+            "public_url, internal_url), lisible par l'utilisateur <code>nobody</code>.</p>"
+        ),
+    }
+
+
 PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -151,9 +348,11 @@ PAGE = r"""<!doctype html>
   header { flex:0 0 auto; padding:10px 18px; border-bottom:1px solid var(--line); color:var(--dim);
            font-size:12px; display:flex; gap:14px; align-items:baseline }
   header b { color:var(--or); font-weight:400; letter-spacing:.1em }
-  header a { color:var(--dim); margin-left:auto; text-decoration:none; border-bottom:1px dotted var(--dim) }
+  header a { color:var(--dim); text-decoration:none; border-bottom:1px dotted var(--dim) }
   header a:hover { color:var(--or); border-bottom-color:var(--or) }
+  header #pop { margin-left:auto }
   header #size { color:var(--dim); font-variant-numeric:tabular-nums }
+  header #who { color:var(--or); letter-spacing:.08em }
   /* FENETRE ETROITE : mon rail (236px) + celui de la page embarquee (110px) mangent 346px avant
      le moindre contenu. Sous 900px, le rail se reduit a une colonne d'icones-texte pour rendre
      la place a ce qu'on est venu regarder. */
@@ -183,7 +382,7 @@ PAGE = r"""<!doctype html>
   <div id="rail"></div>
 </nav>
 <main>
-  <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a></header>
+  <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a><span id="who">%(who)s</span><a href="/auth/logout">sortir</a></header>
   <div id="stage"><div id="panel"></div></div>
 </main>
 <script>
@@ -341,7 +540,13 @@ function build(s) {
 
 async function tick() {
   try {
-    const s = await (await fetch('/api/state', { cache: 'no-store' })).json();
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    // UNE SESSION MORTE NE SE GARDE PAS A L'ECRAN. Sans ce test, un 401 tombait dans le `catch`
+    // avec le reste et la page continuait d'afficher son dernier etat : un deck d'apparence
+    // vivante pour quelqu'un qui n'est plus identifie. La porte tranche, pas le cadre — on
+    // recharge et c'est le serveur qui dit ce qu'on a le droit de voir.
+    if (!r.ok) { location.reload(); return; }
+    const s = await r.json();
     const sig = JSON.stringify(s.humans.map(h => [h.human, h.fleet_status, h.pods.map(p => [p.pod_id, p.role, p.phase, p.project])]));
     if (sig !== window.__sig) { window.__sig = sig; build(s); }
   } catch (e) { /* la page survit a une sonde ratee : elle garde son dernier etat vrai */ }
@@ -364,23 +569,156 @@ tick(); setInterval(tick, 10000);
 class Deck(BaseHTTPRequestHandler):
     server_version = "lcars-deck"
 
-    def _send(self, code, body, ctype):
+    def _send(self, code, body, ctype, cookie=None):
         raw = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(raw)
 
+    def _redirect(self, where, cookie=None):
+        self.send_response(302)
+        self.send_header("Location", where)
+        self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _callback_uri(self):
+        """
+        Where the forge sends the person back -- DERIVED FROM THE REQUEST, not from config.
+
+        The same deck is reached as `127.0.0.1:20999` from the box's own host and as
+        `<lan-addr>:20999` from anyone else's machine, and OAuth2 matches the redirect URI
+        EXACTLY against the registered list. Echoing the Host we were actually asked on is the
+        only value that can be right for both; the registration must carry every entrance in use,
+        and a missing one fails here, on the way back, with the URI printed below.
+        """
+        host = self.headers.get("Host") or f"127.0.0.1:{PORT}"
+        return f"http://{host}/auth/callback"
+
+    # ── the door ────────────────────────────────────────────────────────────────────────────────
+    def _auth_login(self, cfg):
+        st = secrets.token_urlsafe(24)
+        redirect = self._callback_uri()
+        now = time.time()
+        with _lock:
+            _sweep(now)
+            _pending[st] = {"redirect": redirect, "exp": now + PENDING_TTL}
+        q = urllib.parse.urlencode({
+            "client_id": cfg["client_id"],
+            "redirect_uri": redirect,
+            "response_type": "code",
+            # `groups` is the whole point: it carries the team membership that decides the gate.
+            "scope": "openid profile email groups",
+            "state": st,
+        })
+        self._redirect(f"{cfg['public_url'].rstrip('/')}/login/oauth/authorize?{q}")
+
+    def _auth_callback(self, cfg, query):
+        args = urllib.parse.parse_qs(query)
+        st = (args.get("state") or [""])[0]
+        code = (args.get("code") or [""])[0]
+        with _lock:
+            pending = _pending.pop(st, None)
+        # An unknown `state` is a callback we never started: a forged one, or one that outlived its
+        # ten minutes. Refusing it is what stops a third party from planting their session here.
+        if not pending or not code:
+            self._send(400, page_login(), "text/html; charset=utf-8")
+            return
+        try:
+            tokens = _post_form(f"{cfg['internal_url'].rstrip('/')}/login/oauth/access_token", {
+                "grant_type": "authorization_code",
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "redirect_uri": pending["redirect"],
+                "code": code,
+            })
+            info = _get_json(
+                f"{cfg['internal_url'].rstrip('/')}/login/oauth/userinfo", tokens["access_token"]
+            )
+        except (HTTPError, URLError, TimeoutError, socket.timeout, KeyError, ValueError) as e:
+            self._send(502, page_unconfigured(f"echange OAuth2 refuse par la forge: {e}"),
+                       "text/html; charset=utf-8")
+            return
+
+        login = info.get("preferred_username") or ""
+        groups = info.get("groups") or []
+        if HUMANS_TEAM not in groups:
+            self._send(403, page_denied(login, groups), "text/html; charset=utf-8")
+            return
+
+        sid = secrets.token_urlsafe(32)
+        with _lock:
+            _sessions[sid] = {"login": login, "groups": groups, "exp": time.time() + SESSION_TTL}
+        # No `Secure`: the deck serves plain HTTP on a LAN port by design (there is no TLS to opt
+        # into here). `HttpOnly` + `SameSite=Lax` still hold -- they cost nothing and remove the
+        # two ways a page in another tab could reach this cookie.
+        self._redirect("/", f"{SESSION_COOKIE}={sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
+
+    def _auth_logout(self):
+        sess = session_of(self.headers.get("Cookie"))
+        if sess:
+            with _lock:
+                _sessions.pop(sess["sid"], None)
+        self._redirect("/", f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
-        if path == "/api/state":
-            self._send(200, json.dumps(state()), "application/json; charset=utf-8")
-        elif path in ("/", "/index.html"):
-            self._send(200, PAGE % {"host": html.escape(socket.gethostname())}, "text/html; charset=utf-8")
-        elif path == "/health":
+        path, _, query = self.path.partition("?")
+
+        # `/health` answers BEFORE the door: it reports that this process is up, which is true
+        # whether or not anyone is logged in, and the container's healthcheck has no session.
+        if path == "/health":
             self._send(200, "ok\n", "text/plain; charset=utf-8")
+            return
+
+        cfg, why = oidc_config()
+        if not cfg:
+            self._send(503, page_unconfigured(why), "text/html; charset=utf-8")
+            return
+
+        if path == "/auth/login":
+            self._auth_login(cfg)
+            return
+        if path == "/auth/callback":
+            self._auth_callback(cfg, query)
+            return
+        if path == "/auth/logout":
+            self._auth_logout()
+            return
+
+        sess = session_of(self.headers.get("Cookie"))
+        if not sess:
+            if path == "/api/state":
+                self._send(401, json.dumps({"error": "unauthenticated"}),
+                           "application/json; charset=utf-8")
+            else:
+                self._send(200, page_login(), "text/html; charset=utf-8")
+            return
+
+        # Enrolled on the forge, no system user here yet: the converger has not run. Saying so
+        # precisely is the difference between a person who waits and a person who opens a ticket.
+        if not any(h["human"] == sess["login"] for h in humans()):
+            if path == "/api/state":
+                self._send(409, json.dumps({"error": "no_local_block", "login": sess["login"]}),
+                           "application/json; charset=utf-8")
+            else:
+                self._send(200, page_no_block(sess["login"]), "text/html; charset=utf-8")
+            return
+
+        if path == "/api/state":
+            self._send(200, json.dumps(state(only=sess["login"])),
+                       "application/json; charset=utf-8")
+        elif path in ("/", "/index.html"):
+            self._send(200, PAGE % {
+                "host": html.escape(socket.gethostname()),
+                "who": html.escape(sess["login"]),
+            }, "text/html; charset=utf-8")
         else:
             self._send(404, "not found\n", "text/plain; charset=utf-8")
 

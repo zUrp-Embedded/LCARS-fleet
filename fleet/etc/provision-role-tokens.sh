@@ -72,14 +72,22 @@ SCOPES="write:repository,write:issue"
 # requires write:organization (measured: without it the token is valid but the creation 403s; with it,
 # 201). Roles NEVER create an org repo, so they stay at the minimal scope — least privilege: a hijacked
 # role token must not be able to administer the org.
-# `read:user` is reserved for the SYSTEM account: only `forge_bot_login` (GET /user, resolving the bot
-# login to check the bot-authored markers on route/step_run/result) needs it, and it alone — ROLE tokens
-# are NEVER used for that GET. Roles WRITE through `as_role` (posts/reviews/merge); forge READS,
-# forge_bot_login included, ALWAYS go through the system token, never a role.
-# A role with `write:user` (the old scope) could edit its own account profile — useless to its job, and
-# kept only because the old token_valid probe demanded it (cf. token_valid below).
+# The user scope is the SYSTEM account's alone: only `forge_bot_login` (GET /user, resolving the bot
+# login to check the bot-authored markers on route/step_run/result) reads it, and it alone — ROLE
+# tokens are NEVER used for that GET. Roles WRITE through `as_role` (posts/reviews/merge); forge
+# READS, forge_bot_login included, ALWAYS go through the system token, never a role. A role holding
+# it could edit its own account profile, which is useless to its job.
+# IT IS `write:user` AND NOT `read:user` BECAUSE THE SYSTEM ACCOUNT OWNS THE DECK'S OAUTH2 CLIENT,
+# and registering one is a `/user/` WRITE. Measured 2026-08-12: `POST /user/applications/oauth2`
+# answers `required=[write:user]` on a token without it, 201 with it — a refusal about the SCOPE,
+# not the auth method, unlike minting a token which Gitea only accepts over basic auth. So
+# provisioning can register the client with a token and no password; without the scope the box has
+# no front door at all, since the deck refuses to serve anything unauthenticated.
+# Listing both would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
+# `write:user` alone. Measured on the widened token, `GET /user` still answers 200 — the write
+# scope subsumes the read, and the forge_bot_login rail is intact.
 SYSTEM_ACCOUNT="lcars-system"
-SYSTEM_SCOPES="$SCOPES,write:organization,read:user"
+SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
 CHECK_ONLY=0
 # Non-role tokens whose account is not the filename (the mapping is DATA, not a special case): the

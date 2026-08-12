@@ -49,6 +49,19 @@ PROVISION_LIB_LOADED=1
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
+# LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
+# le SERVEUR compose (dans un conteneur, le nom du service : `http://forge:3000`) ; celle-ci est
+# celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `forge:3000`
+# ne résout nulle part hors du réseau docker, et l'adresse de l'hôte peut ne pas résoudre dedans.
+# Le défaut égale l'interne : sur une boîte où les deux coïncident, il n'y a rien à poser.
+: "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$PROV_FORGE_URL}}"
+# Le deck de la BOÎTE (porte d'entrée, hors de l'espace des blocs humains) et son client OAuth2.
+# Les ORIGINES sont les adresses par lesquelles on entre vraiment : OAuth2 compare le `redirect_uri`
+# EXACTEMENT, donc une entrée non déclarée échoue au RETOUR, après l'identification, là où c'est le
+# plus déroutant. La loopback est toujours incluse ; le reste se déclare.
+: "${PROV_DECK_PORT:=20999}"
+: "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
+: "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 # Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
 # PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage
 # F-E1 de fleet-update v1 : vérifier le remote APRÈS le pull était une inversion de chaîne payée).

@@ -14,10 +14,14 @@
 #   - ~/.lcars/fleet_v2.env : SEED-ONCE depuis le template du prefix, FORGE_BASE_URL injecté si
 #     connu — puis PLUS JAMAIS touché (c'est le fichier de l'humain, pas le nôtre : un re-run qui
 #     l'écraserait détruirait ses réglages — la leçon anti-« ALL OR NOTHING » de mail-in-a-box) ;
-#   - les CREDENTIALS sont sondés, JAMAIS posés : le wizard claude (`claude` puis /login) et le
-#     token forge opérateur (~/.gitea_token) sont des gestes d'IDENTITÉ de l'humain. La v1
-#     enchâssait le wizard interactif DANS le provisioning (read /dev/tty, sudo -iu … claude) :
-#     non-automatisable et faux-idempotent. Ici : un verdict + la consigne exacte.
+#   - le credential CLAUDE est sondé, JAMAIS posé : le wizard (`claude` puis /login) est un geste
+#     d'IDENTITÉ de la personne, et lui seul. La v1 enchâssait le wizard interactif DANS le
+#     provisioning (read /dev/tty, sudo -iu … claude) : non-automatisable et faux-idempotent.
+#     Ici : un verdict + la consigne exacte.
+#   - le credential FORGE, lui, n'est PAS un geste de la personne : la fleet signe avec le jeton
+#     SYSTÈME, câblé plus bas (cas D4). Ce module réclamait en plus un `~/.gitea_token` minté à la
+#     main — un fichier que le runtime n'ouvre qu'à défaut de ce câblage, donc jamais. La sonde
+#     porte désormais sur ce qui est réellement lu, et ne demande plus rien à personne.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -48,21 +52,31 @@ probe_identity() {
   else
     p_warn "credentials claude absentes — l'humain lance « claude », /login, bonjour, /exit (geste d'identité, jamais automatisé)"
   fi
-  if [[ -r "$HOME_DIR/.gitea_token" ]]; then
-    local tok code
-    tok="$(tr -d '[:space:]' < "$HOME_DIR/.gitea_token")"
-    if [[ -n "$PROV_FORGE_URL" && -n "$tok" ]]; then
-      code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" "$PROV_FORGE_URL/api/v1/user" 2>/dev/null || echo 000)"
-      if [[ "$code" == "200" ]]; then
-        p_ok "token forge opérateur valide ($HOME_DIR/.gitea_token)"
-      else
-        p_warn "$HOME_DIR/.gitea_token présent mais la forge répond $code — token mort ? (mint : Settings→Applications sur $PROV_FORGE_URL)"
-      fi
-    else
-      p_ok "$HOME_DIR/.gitea_token présent (forge non sondable : URL absente)"
-    fi
+  # ON NE DEMANDE PLUS DE JETON FORGE À LA PERSONNE, PARCE QUE RIEN NE LE LISAIT. Cette sonde
+  # l'envoyait dans Settings→Applications minter un `~/.gitea_token` — alors que ce module CÂBLE
+  # `FORGE_TOKEN_FILE` sur le jeton système dans son propre `fleet_v2.env` (cas D4 plus bas), et que
+  # le runtime ne descend sur `~/.gitea_token` qu'en dernier recours, faute de ce câblage. Une
+  # consigne pour un fichier que la fleet n'ouvre jamais : le geste demandé était du travail mort.
+  #
+  # La question qui compte, et qui n'était posée nulle part, est celle-ci : la fleet de cette
+  # personne a-t-elle un credential forge CÂBLÉ et VIVANT ? On la pose donc sur ce qui est
+  # réellement lu.
+  local tokfile tok code
+  tokfile="$(sed -n 's/^FORGE_TOKEN_FILE=//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+  if [[ -z "$tokfile" ]]; then
+    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (50-forge puis re-apply)"
+  elif [[ ! -r "$tokfile" ]]; then
+    p_warn "FORGE_TOKEN_FILE=$tokfile illisible par $PROV_HUMAN — la fleet ne pourra pas parler à la forge (groupe $PROV_FLEET_GROUP ?)"
+  elif [[ -z "$PROV_FORGE_URL" ]]; then
+    p_ok "credential forge de la fleet câblé et lisible ($tokfile ; forge non sondable : URL absente)"
   else
-    p_warn "$HOME_DIR/.gitea_token absent — token du compte OPÉRATEUR de $PROV_HUMAN sur la forge (Settings→Applications), contrat FORGE_TOKEN_FILE"
+    tok="$(tr -d '[:space:]' < "$tokfile")"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" "$PROV_FORGE_URL/api/v1/user" 2>/dev/null || echo 000)"
+    if [[ "$code" == "200" ]]; then
+      p_ok "credential forge de la fleet valide ($tokfile)"
+    else
+      p_warn "$tokfile présent mais la forge répond $code — token mort ; re-mint par 50-forge (jamais un geste de $PROV_HUMAN)"
+    fi
   fi
 }
 

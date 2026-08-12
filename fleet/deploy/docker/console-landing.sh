@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/docker/console-landing.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
-# STATUS: lance le DECK de la boite (page unique, onglets verticaux, etat sonde) — sans auth
+# STATUS: lance le DECK de la boite (page unique, onglets verticaux, etat sonde) — identifie par la forge
 #
 # ─── POURQUOI PAS `ttyd -I` ─────────────────────────────────────────────────────────────────────
 # La prospection proposait de servir cette page via le flag `-I/--index` de ttyd. C'est FAUX et je
@@ -26,6 +26,11 @@
 # raison de lui donner plus. La lecture des `cmdline` des pods reste possible sous `nobody` (elles
 # sont world-readable) et ne porte aucun credential : uniquement des chemins de montage, qui sont
 # precisement le rattachement projet que le deck affiche.
+#
+# CONSEQUENCE POUR SON CLIENT OAUTH2 : le fichier que le deck lit pour s'identifier aupres de la
+# forge doit etre lisible par `nobody` — c'est `55-deck-oidc.sh` qui le pose, en 0640 root:nogroup.
+# Sans lui le deck ne sert RIEN (503 qui nomme le fichier manquant), deliberement : un deck qui se
+# rabattrait sur l'annuaire complet rendrait l'absence de configuration invisible.
 #
 # USAGE : console-landing.sh [--foreground]
 # EXIT  : 0 lance · 1 dependance absente
