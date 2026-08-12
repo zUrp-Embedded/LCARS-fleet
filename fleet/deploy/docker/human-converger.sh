@@ -15,8 +15,26 @@
 # On ne DECIDE rien ici. L'inscription est libre et un compte seul est inerte ; l'unique acte
 # d'enrollment est l'ajout a la team `humans`, cote forge, par un proprietaire de l'org. Cette
 # boucle ne fait que CONVERGER cette decision vers la boite. Elle n'ajoute personne a la team, elle
-# n'en retire personne, et elle ne supprime JAMAIS un user Linux : ce qui reste sur la machine
-# apres un retrait, c'est des DONNEES, et les detruire est un geste humain.
+# n'en retire personne, et elle ne supprime JAMAIS un user Linux.
+#
+# ⚠ CE QUI RESTE APRES UNE REVOCATION N'EST PAS « DES DONNEES ». Cette ligne le disait, et c'etait
+# faux — mesure du 2026-08-12, compte forge PURGE (204, re-lu 404), user Linux intact :
+#   · il reste dans le groupe `fleet`, donc il LIT /home/private/system.gitea_token ;
+#   · ce jeton REPOND `lcars-system` sur /api/v1/user, c'est-a-dire PROPRIETAIRE D'ORG ;
+#   · les 10 jetons de role lui sont lisibles ;
+#   · `console.sh --all` lui relance une console ttyd ECRIVABLE (elle ne lit que /etc/passwd, jamais
+#     la forge), qui repond 200 depuis l'hote SANS aucune authentification ;
+#   · ~/.lcars, ~/pods et `fleet_v2` sont la : il peut demarrer une fleet.
+# Autrement dit une personne revoquee garde un SHELL sur la boite et de quoi agir comme le compte
+# systeme. La revocation retire son identite PROPRE ; elle ne touche pas aux credentials PARTAGES,
+# et la fleet ne signe jamais en son nom — elle signe `lcars-system`.
+#
+# CE QUI LA RENDRAIT VRAIE tient en trois lignes : le miroir exact de l'entree. Cette boucle AJOUTE
+# au groupe `fleet` (c'est ce groupe qui ouvre /home/private/*) ; l'en retirer couperait l'acces aux
+# credentials partages SANS rien supprimer — ni compte, ni home, ni donnees. Ce n'est pas pose ici
+# parce que ca change le contrat de cette boucle (add-only -> add-and-revoke) et que ca peut frapper
+# quelqu'un en plein travail : c'est un arbitrage, pas du travail derivable. En attendant, ce
+# commentaire dit l'etat REEL plutot qu'une garantie qui n'existe pas.
 #
 # ─── FAIL-CLOSED SUR LE LOGIN, ET CE N'EST PAS DE LA PRUDENCE ───────────────────────────────────
 # Les deux alphabets ne coincident pas, MESURE le 2026-08-12 sur cette image et cette forge :
