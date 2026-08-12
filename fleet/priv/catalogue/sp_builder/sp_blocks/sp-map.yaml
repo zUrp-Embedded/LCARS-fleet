@@ -1,3 +1,11 @@
+# ⚠ DEUX ROLES NE SONT PAS DANS CETTE CARTE, ET CE N'EST PAS UN OUBLI : `architect` et `starfleet`
+# ont un SP ECRIT A LA MAIN (`sp_drafts/agent-architect-base.md`, `agent-starfleet-base.md`), ils ne
+# composent AUCUN bloc. Consequence a ne pas decouvrir apres coup : une regle ajoutee a un
+# `core/*` ci-dessous NE LES ATTEINT PAS. Mesure du 2026-08-12 — en deplacant la doctrine de sortie
+# du `CLAUDE.md` compose vers `core/pod-sanctuary` et `core/evidence`, les huit roles composes l'ont
+# recue et ces deux-la l'auraient perdue en silence ; il a fallu la leur porter a la main.
+# Qui touche un bloc core verifie ces deux fichiers dans le meme geste.
+
 # Role → SP block map. List order = assembly order; `role/*` always last.
 # The generator (`mix lcars.sp.gen`) composes these blocks → `<catalogue>/sp_builder/sp_drafts/agent-<role>-base.md`.
 # Block names resolve on the SEARCH PATH: `core/*` comes from the system catalogue unless a file of
