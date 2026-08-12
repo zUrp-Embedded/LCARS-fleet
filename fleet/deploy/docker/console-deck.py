@@ -314,7 +314,7 @@ SHELL = r"""<!doctype html>
 """
 
 
-def page_login():
+def page_login(forge=None):
     return SHELL % {
         "title": "identification",
         "body": (
@@ -324,6 +324,11 @@ def page_login():
             '<p class="dim">Pas encore de compte ? La forge accepte les inscriptions. Un compte '
             "seul ne donne acces a rien ici : c'est l'ajout a l'equipe <code>" + html.escape(HUMANS_TEAM) +
             "</code> qui fait de toi un humain de la fleet.</p>"
+            # LE LIEN VERS LA FORGE FERME UNE BOUCLE. Sans lui, quelqu'un qui veut changer de compte
+            # n'a nulle part ou aller : notre porte le renvoie a la forge sans jamais en donner
+            # l'adresse, et la forge le reconnait en silence. Une porte doit montrer ou elle mene.
+            '<p class="dim">La forge : <a href="' + html.escape(forge or "#") + '">' +
+            html.escape(forge or "(adresse non configuree)") + "</a></p>"
         ),
     }
 
@@ -752,7 +757,7 @@ class Deck(BaseHTTPRequestHandler):
         # An unknown `state` is a callback we never started: a forged one, or one that outlived its
         # ten minutes. Refusing it is what stops a third party from planting their session here.
         if not pending or not code:
-            self._send(400, page_login(), "text/html; charset=utf-8")
+            self._send(400, page_login(cfg.get("public_url")), "text/html; charset=utf-8")
             return
         try:
             tokens = _post_form(f"{cfg['internal_url'].rstrip('/')}/login/oauth/access_token", {
@@ -784,12 +789,31 @@ class Deck(BaseHTTPRequestHandler):
         # two ways a page in another tab could reach this cookie.
         self._redirect("/", f"{SESSION_COOKIE}={sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}")
 
-    def _auth_logout(self):
+    def _auth_logout(self, cfg):
+        """
+        SE DECONNECTER DOIT DECONNECTER, et ne le faisait pas.
+
+        On ne fermait que NOTRE session. La session de la forge, elle, survivait — et comme
+        l'application est deja autorisee, le `/auth/login` suivant traverse sans une seule question
+        et remet la personne dedans. Vu du dehors ce n'est pas une deconnexion, c'est un aller-retour
+        avec des etapes en plus. Pire, la boucle se referme : le deck ne montrait aucun lien vers la
+        forge, donc sans connaitre son URL on ne pouvait meme pas aller s'y deconnecter.
+
+        Gitea n'expose PAS d'`end_session_endpoint` (verifie dans sa decouverte OIDC), donc pas de
+        deconnexion RP-initiee standard. Mais `GET /user/logout` marche comme un simple lien et tue
+        bien la session — mesure : `/user/settings` passe de 200 a 303 apres l'appel. Il ignore
+        `redirect_to`, donc la personne atterrit sur l'accueil de la forge : c'est le comportement de
+        la forge, pas le notre, et ca la laisse a un endroit ou elle voit qu'elle est deconnectee.
+
+        Ce qu'on ne peut pas promettre : que la deconnexion cote forge ait REUSSI. C'est le
+        navigateur qui la fait, pas nous. Notre session, elle, est morte avant la redirection.
+        """
         sess = session_of(self.headers.get("Cookie"))
         if sess:
             with _lock:
                 _sessions.pop(sess["sid"], None)
-        self._redirect("/", f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+        where = f"{cfg['public_url'].rstrip('/')}/user/logout" if cfg else "/"
+        self._redirect(where, f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -812,7 +836,7 @@ class Deck(BaseHTTPRequestHandler):
             self._auth_callback(cfg, query)
             return
         if path == "/auth/logout":
-            self._auth_logout()
+            self._auth_logout(cfg)
             return
 
         sess = session_of(self.headers.get("Cookie"))
@@ -821,7 +845,7 @@ class Deck(BaseHTTPRequestHandler):
                 self._send(401, json.dumps({"error": "unauthenticated"}),
                            "application/json; charset=utf-8")
             else:
-                self._send(200, page_login(), "text/html; charset=utf-8")
+                self._send(200, page_login(cfg.get("public_url")), "text/html; charset=utf-8")
             return
 
         # Enrolled on the forge, no system user here. TWO STATES, AND THEY MUST NOT BE SAID ALIKE:

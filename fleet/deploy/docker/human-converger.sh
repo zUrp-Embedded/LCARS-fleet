@@ -70,6 +70,7 @@ SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-lcars-system}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
+CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 GROUP="${LCARS_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
@@ -231,10 +232,36 @@ converge_once() {
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.
       if [[ -x "$PROVISION" ]]; then
-        "$PROVISION" apply --substrate docker --human "$login" --only 70-human >/dev/null 2>&1 \
-          || err "$login : user cree mais 70-human a echoue — diagnose : $PROVISION doctor --human $login"
+        # TOUS les modules per-humain, et la liste se CALCULE. Elle etait `--only 70-human`, en dur —
+        # et c'est ce littéral qui a produit le defaut : `40-claude-bin` (qui pose ~/.local/bin/claude)
+        # ne tournait jamais pour un humain converge, donc la personne recevait un home, un substrat,
+        # et AUCUN binaire `claude`. Or `claude /login` est le seul geste qui lui reste a faire : sans
+        # le binaire, le rail d'enrollment s'arrete a son dernier pas, et le message d'accueil lui
+        # demande de lancer une commande qui n'existe pas.
+        # Une liste en dur redevient fausse au prochain module per-humain ajoute. Le provisioning
+        # DECLARE deja lesquels le sont (`# NEEDS: human`) : on lit cette declaration au lieu de la
+        # recopier. Meme discipline que la denylist des noms reserves, qui se calcule depuis
+        # /etc/passwd plutot que d'etre inscrite quelque part.
+        local -a only=(); local m
+        while IFS= read -r m; do only+=(--only "$(basename "$m" .sh)"); done < <(
+          grep -l '^# NEEDS: human' "$(dirname "$PROVISION")/modules.d"/*.sh 2>/dev/null | sort)
+        # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot
+        # que de ne rien converger en silence.
+        [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
+        "$PROVISION" apply --substrate docker --human "$login" "${only[@]}" >/dev/null 2>&1 \
+          || err "$login : user cree mais le provisioning per-humain a echoue — diagnose : $PROVISION doctor --human $login"
       else
         err "$login : user cree mais $PROVISION introuvable — son ~/.lcars n'est PAS pose"
+      fi
+      # SA CONSOLE, MAINTENANT — parce que personne d'autre ne la lancera. `console.sh --all` n'est
+      # appele QUE par l'entrypoint, au boot. Un humain converge APRES le boot recevait donc un user,
+      # un home et un substrat, et le deck lui affichait fierement l'adresse d'une console que rien
+      # n'avait demarree : « cette page ne fonctionne pas ». Le convergeur est le seul a savoir qu'un
+      # humain vient d'apparaitre ; c'est donc a lui de completer le geste.
+      # Meme interrupteur que l'entrypoint : qui coupe les consoles les coupe pour tout le monde.
+      if [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]]; then
+        "$CONSOLE" --human "$login" >/dev/null 2>&1 \
+          || err "$login : user cree mais sa console n'a pas demarre — ssh reste la porte ($CONSOLE --human $login)"
       fi
     else
       err "$login : useradd a echoue — AUCUN user cree (relance au prochain tour)"

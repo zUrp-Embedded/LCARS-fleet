@@ -297,6 +297,13 @@ check(code == 200 and "identifier sur la forge" in body,
 check(fetch(dport, "/api/state")[0] == 401,
       "sans session, /api/state refuse — la porte n'est pas qu'un habillage de page")
 
+# (2-bis) LA DECONNEXION DOIT DECONNECTER, et le lien vers la forge ferme la boucle. On ne fermait
+# que NOTRE session ; celle de la forge survivait, et comme l'app est deja autorisee le login suivant
+# traverse sans une question. Vu du dehors : un aller-retour avec des etapes en plus. Et le deck ne
+# montrait aucun lien vers la forge — donc sans connaitre son URL, impossible d'aller s'y deconnecter.
+code, body, _ = fetch(dport, "/")
+check(FORGE in body, "la page d'invite PORTE l'adresse de la forge (sortie de boucle)")
+
 # (3) LE RETOUR NON SOLLICITE. Un `state` qu'on n'a pas emis n'ouvre pas de session.
 code, _, hdrs = fetch(dport, "/auth/callback?state=jamais-emis&code=x")
 check(code == 400, "un `state` inconnu au retour est REFUSE (vu: %d)" % code)
@@ -414,6 +421,9 @@ code, _, hdrs = fetch(dport, "/auth/logout", cookie)
 check(code == 302, "/auth/logout redirige (vu: %d)" % code)
 check(fetch(dport, "/api/state", cookie)[0] == 401,
       "et le MEME cookie ne vaut plus rien — la session est tuee au serveur")
+_, _, lo = fetch(dport, "/auth/logout", cookie)
+check(lo.get("Location", "").endswith("/user/logout"),
+      "et la deconnexion PROPAGE a la forge (vu: %s)" % lo.get("Location"))
 
 # (8) L'EXPIRATION EST LUE, PAS PLANIFIEE. Une session perimee ne survit pas a sa relecture.
 deck._sessions["perime"] = {"login": "zoe", "groups": [], "exp": time.time() - 1}
