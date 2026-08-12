@@ -59,10 +59,32 @@ forge_api() { # forge_api <METHOD> <path> [json-body]
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
 
 # The app id currently registered under our name, or empty.
-app_id() {
+# L'app QUI EST LA NOTRE — et le nom ne suffit pas a le prouver. Mesure du 2026-08-12 : Gitea
+# accepte DEUX applications du meme nom sous le meme compte (201). Or le compte systeme est partage
+# par toutes les boites qui parlent a une meme forge : chercher « lcars-deck » y rend une app
+# arbitraire. Un `head -n1` sur ce nom, suivi du DELETE ci-dessous, ferait detruire a chaque boite la
+# porte d'une autre — et comme chacune re-creerait la sienne au passage suivant, les deux se
+# demoliraient en boucle sans qu'aucune ne le dise.
+# Le discriminant est donc le RETOUR : nos `redirect_uris` sont, par construction, l'adresse de
+# CETTE boite. On ne reconnait comme notre qu'une app qui porte exactement les notres.
+app_id() { # app_id <uris-attendues, separees par espace>
   forge_api GET "/user/applications/oauth2" \
-    | jq -r --arg n "$APP_NAME" 'if type=="array" then (.[] | select(.name==$n) | .id) else empty end' 2>/dev/null \
+    | jq -r --arg n "$APP_NAME" --arg u "$1" \
+        'if type=="array" then (.[]
+           | select(.name==$n)
+           | select((.redirect_uris|sort) == ($u|split(" ")|sort))
+           | .id) else empty end' 2>/dev/null \
     | head -n1
+}
+
+# Les homonymes qui ne sont PAS a nous — a NOMMER, jamais a toucher.
+foreign_apps() { # foreign_apps <uris-attendues>
+  forge_api GET "/user/applications/oauth2" \
+    | jq -r --arg n "$APP_NAME" --arg u "$1" \
+        'if type=="array" then (.[]
+           | select(.name==$n)
+           | select((.redirect_uris|sort) != ($u|split(" ")|sort))
+           | "\(.id):\(.redirect_uris|join(","))") else empty end' 2>/dev/null
 }
 
 # The config file is USABLE when it names a client the forge still knows. Checking only that the
@@ -118,19 +140,27 @@ apply() {
     verdict_apply
   fi
 
-  # THE SECRET IS RETURNED ONCE, AT CREATION. If an application already carries our name while the
-  # config file is missing or stale, its secret is unrecoverable — so we drop it and register a new
-  # one. Leaving it would accumulate dead clients under the system account, each looking like the
-  # live one.
-  local id; id="$(app_id)"
+  local uris body resp cid csec
+  uris="$(callback_uris)"
+
+  # THE SECRET IS RETURNED ONCE, AT CREATION. If an application carrying our name AND our exact
+  # return addresses exists while the config file is missing or stale, its secret is unrecoverable —
+  # so we drop it and register a new one. Leaving it would accumulate dead clients under the system
+  # account, each looking like the live one.
+  local id; id="$(app_id "$uris")"
   if [[ -n "$id" ]]; then
     forge_api DELETE "/user/applications/oauth2/$id" >/dev/null
     p_chg "ancien client OAuth2 « $APP_NAME » (id $id) retiré — son secret n'était plus récupérable"
     PROV_CHANGED=$((PROV_CHANGED + 1))
   fi
-
-  local uris body resp cid csec
-  uris="$(callback_uris)"
+  # Une app homonyme qui vise d'AUTRES retours appartient a une autre boite sur la meme forge. On la
+  # NOMME et on n'y touche pas : la supprimer casserait sa porte, et elle re-creerait la sienne au
+  # passage suivant — deux boites a se demolir en boucle, en silence.
+  local foreign
+  foreign="$(foreign_apps "$uris")"
+  if [[ -n "$foreign" ]]; then
+    p_warn "app(s) OAuth2 homonyme(s) sur cette forge, visant d'autres retours — INTACTES (une autre boîte les possède) : $(echo "$foreign" | tr '\n' ' ')"
+  fi
   body="$(jq -nc --arg n "$APP_NAME" --arg u "$uris" \
             '{name:$n, redirect_uris:($u|split(" ")), confidential_client:true}')"
   resp="$(forge_api POST "/user/applications/oauth2" "$body")"
