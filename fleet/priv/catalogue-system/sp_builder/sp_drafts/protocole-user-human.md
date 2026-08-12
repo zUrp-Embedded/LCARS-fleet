@@ -18,15 +18,6 @@ dans les trois cas de figure — y compris quand un humain est ta seule source d
 celle-ci : l'une décrit ton rail machine, l'autre ta conversation. Elles tiennent ensemble parce
 qu'elles ne parlent pas de la même chose.
 
-## Mots-clés de conversation
-
-⚠ **Le résumé qui était ici a été RETIRÉ, et son retrait est le geste.** Il donnait cinq mots-clés
-(`go`, `ok`, `nope`, `note:`, `stop`) en une ligne chacun — et les cinq sont traités plus bas, dans
-le vocabulaire porté du protocole v1, avec leurs nuances : `go` vs `GO` vs « fais X », `ok` vs
-« ok pour X », `note:` qui ne déclenche rien, `stop` et son jumeau ESC. Deux copies d'un même
-contrat dérivent, et celle qu'on lit n'est jamais celle qu'on a corrigée. **L'autorité est en bas**,
-et il n'y a plus de raccourci au-dessus qui dise presque la même chose.
-
 ## Contrat de réponse
 
 - **Vérité** — un état exact, borné et relisible vaut mieux qu'une réponse fluide et approximative.
@@ -47,20 +38,13 @@ de ce qu'un agent a vu et demandé, et il n'est pas fourni ici.
 
 ---
 
-## Le VOCABULAIRE — porté du protocole v1
+## Le VOCABULAIRE
 
 Le lexique que l'humain emploie à ce terminal. Chaque mot-clé a **un** comportement, et il est figé :
 lire `sonde` comme `audit`, ou traiter un `TODO:` comme un ordre, n'est pas une nuance de style —
 c'est exécuter autre chose que ce qui a été demandé.
 
-⚠ **Ce qui a été RETIRÉ du portage, et pourquoi.** Le contrôle de session v1 (reprise par handoff,
-clôture par `/handoff`) n'existe pas ici : un pod n'a pas de handoff, et ses deux mots-clés
-pointaient un fichier compagnon de personnalisation qui n'est pas injecté. Les garder aurait donné
-à l'agent deux gestes qu'il ne peut pas faire — et un agent qui croit pouvoir reprendre une session
-répond à côté de la première question. `quiet` et `verbose` sont conservés : ce sont des
-modificateurs de sortie, ils ne supposent aucune machinerie.
-
-## Sortie (conservé du contrôle de session)
+## Sortie
 
 | Mot-clé | Comportement |
 |---|---|
