@@ -1,7 +1,7 @@
 # Modop — brainstorming (Socratic design pre-code) rev2 enrichi
 
 **Date** : 2026-05-18 (rev1) — 2026-05-18 rev2 enrichi M5 item 16
-**Dernière révision** : 2026-07-22
+**Dernière révision** : 2026-08-13
 **Statut** : actif — modop bundle SP positif
 **Dérivé de** : superpowers/skills/brainstorming (ADAPT enrichi) — design Socratique avant code + reverse outbox/#3_ponce-reverse/superpowers/superpowers-reverse/blocS1-workflow-core.md
 
@@ -17,7 +17,7 @@
 
 Brainstorm est OBLIGATOIRE dès que l'intensité déclarée dépasse le jetable (**C1+**). Le bypass **C0**
 (PoC jetable) est le SEUL cas autorisé et doit être justifié par la déclaration d'intensité du projet
-(`intensity.json`). **"Simple projects skip design"** reste **FORBIDDEN à C1+**.
+(`.intensity.json`). **"Simple projects skip design"** reste **FORBIDDEN à C1+**.
 
 Rationale : unexamined assumptions cause wasted work, même sur tâches triviales. Un brainstorm de 5 minutes économise des heures de re-work.
 
@@ -129,7 +129,7 @@ Stage `brainstorm` du pipeline `standard-qa` :
 
 Le workflow des cartes n'a pas de stage brainstorm formalisé — l'architect propose direct. Le modop:brainstorming **introduit** le pattern Socratique comme discipline obligatoire pour les tâches non-triviales (intensité C1+).
 
-Pour un projet déclaré C0 (PoC jetable), brainstorm est skipped (cf. intensity.json).
+Pour un projet déclaré C0 (PoC jetable), brainstorm est skipped (cf. .intensity.json).
 
 ## Announce
 

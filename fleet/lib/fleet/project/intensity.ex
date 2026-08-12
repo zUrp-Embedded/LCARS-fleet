@@ -1,6 +1,6 @@
 defmodule Fleet.Project.Intensity do
   @moduledoc """
-  Single owner of the per-project criticality declaration (`<project>/intensity.json`,
+  Single owner of the per-project criticality declaration (`<project>/.intensity.json`,
   schema `intensity-v1`) — writes it at onboarding, reads it at the workflow-map burn.
 
   **The level is the HUMAN's declaration** (elicited by the framing interview — what
@@ -29,7 +29,7 @@ defmodule Fleet.Project.Intensity do
 
   require Logger
 
-  @file_name "intensity.json"
+  @file_name ".intensity.json"
 
   # THE LEVEL A PROJECT GETS WHEN NOBODY DECLARED ONE, and it was `C0` — the bottom of the scale,
   # which is a CLAIM: C0 is the disposable posture, and nobody said the work was disposable. The
@@ -60,7 +60,7 @@ defmodule Fleet.Project.Intensity do
   @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
 
   @doc """
-  Composes, validates and writes `<proj_dir>/intensity.json` from the onboarding opts
+  Composes, validates and writes `<proj_dir>/.intensity.json` from the onboarding opts
   (`:intensity_level`, `:intensity_justification`, `:intensity_nature`, `:workflow_map` —
   all optional: nothing declared → the honest C0 default, marked undeclared).
 

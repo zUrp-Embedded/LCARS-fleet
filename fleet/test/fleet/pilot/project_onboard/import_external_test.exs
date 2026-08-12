@@ -145,7 +145,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     # declaration committed BEFORE the push (v2-1: pushed after, every jury read would fall
     # back in silence).
     assert bare_git!(o, "fleet/pong", ["show", "main:app.py"]) =~ "external history"
-    assert bare_git!(o, "fleet/pong", ["show", "main:intensity.json"]) =~ "pipeline_default"
+    assert bare_git!(o, "fleet/pong", ["show", "main:.intensity.json"]) =~ "pipeline_default"
     assert_received {:labels_seeded, "fleet/pong"}
     assert_received {:protect_branch, "fleet/pong", _rule}
 

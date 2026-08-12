@@ -109,7 +109,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     File.mkdir_p!(Path.join(code_root, "boutique"))
 
     File.write!(
-      Path.join([code_root, "boutique", "intensity.json"]),
+      Path.join([code_root, "boutique", ".intensity.json"]),
       Jason.encode!(%{
         "pipeline_default" => "standard",
         "level" => "C0",

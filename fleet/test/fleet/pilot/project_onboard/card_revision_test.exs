@@ -198,7 +198,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "c1-light")
              )
 
-    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.intensity.json"]))
 
     # What the revision DID say moves.
     assert landed["pipeline_default"] == "c1-light"
@@ -253,7 +253,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "c1-light", intensity_level: "C1")
              )
 
-    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.intensity.json"]))
     assert landed["level"] == "C1"
   end
 
@@ -296,10 +296,10 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # reassuring number on the exact case where a wall may have moved unseen.
     #
     # Reachable: a project declares a card, the operator's catalogue drops it, the project keeps
-    # naming it in `intensity.json` until the next revision. The NEW card is guarded
+    # naming it in `.intensity.json` until the next revision. The NEW card is guarded
     # (`require_loadable_card`); the previous one never was.
     proj = Path.join([o[:code_root], "tetris"])
-    intensity = Path.join(proj, "intensity.json")
+    intensity = Path.join(proj, ".intensity.json")
 
     File.write!(
       intensity,
@@ -352,7 +352,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
            } = result
 
     # The forge's main carries the NEW declaration, attributed to the revising role.
-    raw = bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"])
+    raw = bare_git!(o, "fleet/tetris", ["show", "main:.intensity.json"])
     assert raw =~ ~s("pipeline_default": "audit-only")
     assert raw =~ ~s("declared_by": "starfleet")
 
@@ -376,7 +376,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # The showcase moved: the next burn reads the NEW card.
     assert_received {:showcase_synced, "fleet/tetris"}
 
-    assert File.read!(Path.join([o[:code_root], "tetris", "intensity.json"])) =~
+    assert File.read!(Path.join([o[:code_root], "tetris", ".intensity.json"])) =~
              "audit-only"
   end
 

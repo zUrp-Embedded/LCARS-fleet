@@ -128,7 +128,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     # The forge main IS the local content (never scaffolded over) + the intensity declaration
     # this call committed (absent locally → written + committed before the single push).
     assert bare_git!(o, "fleet/garage", ["show", "main:code.txt"]) =~ "the user's real content"
-    assert bare_git!(o, "fleet/garage", ["show", "main:intensity.json"]) =~ "pipeline_default"
+    assert bare_git!(o, "fleet/garage", ["show", "main:.intensity.json"]) =~ "pipeline_default"
 
     # The bare-create lesson (BL-6-33) applies to adopt too.
     assert_received {:labels_seeded, "fleet/garage"}

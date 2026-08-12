@@ -12,7 +12,7 @@ defmodule Fleet.Project.IntensityTest do
 
   @moduletag :tmp_dir
 
-  test "declared: writes a schema-valid intensity.json relaying the human's level", %{
+  test "declared: writes a schema-valid .intensity.json relaying the human's level", %{
     tmp_dir: tmp
   } do
     assert :ok =
@@ -23,7 +23,7 @@ defmodule Fleet.Project.IntensityTest do
                onboarded_by: "architect"
              )
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".intensity.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == "C3"
     assert d["declared_by"] == "architect"
     assert d["nature"] == "web-gui"
@@ -38,7 +38,7 @@ defmodule Fleet.Project.IntensityTest do
     # attribution, the same one `GatekeeperSeal` refuses when it declines the system token.
     assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".intensity.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == "C3"
     assert d["declared_by"] == "unknown"
 
@@ -57,7 +57,7 @@ defmodule Fleet.Project.IntensityTest do
     # keeps asserting yesterday's default.
     assert :ok = ProjectIntensity.write(tmp, [])
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".intensity.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == ProjectIntensity.undeclared_level()
     assert d["declared_by"] == "system-default"
     assert d["justification"] =~ "NON DÉCLARÉ"
@@ -84,7 +84,7 @@ defmodule Fleet.Project.IntensityTest do
 
     refute log =~ "OFF-MATRIX"
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".intensity.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
     # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
     # 2026-07-19 reorg, and this field ships in the project's repo for good.
@@ -133,7 +133,7 @@ defmodule Fleet.Project.IntensityTest do
       end)
 
     assert log =~ "OFF-MATRIX"
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".intensity.json") |> File.read!() |> Jason.decode!()
     assert d["pipeline_default"] == "brief-gate"
   end
 
@@ -157,7 +157,7 @@ defmodule Fleet.Project.IntensityTest do
     # invalid file → default + LOUD warning
     broken = Path.join(tmp, "broken")
     File.mkdir_p!(broken)
-    File.write!(Path.join(broken, "intensity.json"), "{not json")
+    File.write!(Path.join(broken, ".intensity.json"), "{not json")
 
     log =
       capture_log(fn ->
@@ -176,7 +176,7 @@ defmodule Fleet.Project.IntensityTest do
     # (recurrence → sysadmin issue), not a whisper in a log nobody tails.
     broken = Path.join(tmp, "broken")
     File.mkdir_p!(broken)
-    File.write!(Path.join(broken, "intensity.json"), "{not json")
+    File.write!(Path.join(broken, ".intensity.json"), "{not json")
 
     me = self()
 
@@ -193,7 +193,7 @@ defmodule Fleet.Project.IntensityTest do
       end)
 
     assert_received {:incident, "intensity", "fleet/broken", :declaration_invalid, iopts}
-    assert iopts[:reason_detail] =~ "intensity.json"
+    assert iopts[:reason_detail] =~ ".intensity.json"
     assert log =~ "unreadable/invalid"
   end
 end

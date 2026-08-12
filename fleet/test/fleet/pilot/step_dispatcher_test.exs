@@ -341,7 +341,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         loader: StubLoader,
         spawner: StubSpawner,
         task_queue: StubTaskQueue,
-        # Hermetic root for `Roles.project_jury` (never created): no intensity.json →
+        # Hermetic root for `Roles.project_jury` (never created): no .intensity.json →
         # the delegation default card, regardless of the REAL filesystem's state.
         code_root: Path.join(System.tmp_dir!(), "lcars-void-projects"),
         # default stub resolver: no project (ordering tests clone nothing).

@@ -516,10 +516,10 @@ defmodule Fleet.Pilot.StepDispatcher do
        ) do
     # The GENRE gate first (chantier face-projet): a `genre/doc` label on the routeless issue
     # burns the DOC card — the documentary path is a base function of every project, whatever its
-    # declared card, so it never transits intensity.json. It said "the OPS card" until the third
+    # declared card, so it never transits .intensity.json. It said "the OPS card" until the third
     # tree existed: the deliverable lands on `workshop`, and `ops` is the record the runtime
     # keeps, which no producer writes. Read ONCE, here: the engraved `wfmap/*`
-    # stays the only route afterwards. Otherwise: THE PROJECT'S declared card (intensity.json,
+    # stays the only route afterwards. Otherwise: THE PROJECT'S declared card (.intensity.json,
     # F-29 chain) — legacy/undeclared project → the delegation default card. The criticality
     # mechanic IS the card choice.
     labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
