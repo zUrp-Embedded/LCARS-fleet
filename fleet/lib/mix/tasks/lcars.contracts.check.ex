@@ -91,6 +91,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
+        check_gitea_template_expansion(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
         check_mcp_wire_inputschema(root),
@@ -1169,6 +1170,66 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           note: "cf. Z3 (D-19) comment above"
         }
     end
+  end
+
+  # DEUX MECANISMES D'EXPANSION POUR LE MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN.
+  # La face `main` d'un projet est generee par GITEA depuis le repo-modele : l'expansion des
+  # `${VAR}` y est pilotee par le fichier de controle `.gitea/template`, une LISTE de chemins. Les
+  # faces `ops`/`workshop`, elles, sont ecrites par `Onboard.Scaffold`, qui expanse TOUT ce qu'il
+  # copie. Ajouter un placeholder a un fichier de `main` sans l'ajouter a cette liste ne casse rien
+  # ici : ca casse dans le projet livre, des mois plus tard.
+  #
+  # Mesure du 2026-08-12 sur `fleet/chifoumi` : `README.md` (liste) portait « # chifoumi », et
+  # `CLAUDE.md` (hors liste) portait « # ${REPO_NAME} » — dans le fichier meme que la fleet relit a
+  # chaque spawn de producteur, avec une date qui n'est pas une date et un en-tete LCARS malforme.
+  # Tous les projets crees par la fleet le portaient.
+  #
+  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN ${...} ». `ci.yml` contient
+  # `${GITHUB_REF}`, `${GITHUB_REPOSITORY}`, `${GITHUB_SHA}` — des variables du JOB CI, pas les
+  # notres. Les inscrire ici confierait a Gitea des noms qu'il ne connait pas, et le jour ou il
+  # expanserait l'inconnu en vide, le script CI partirait en morceaux. La liste des cinq variables
+  # est celle de `Onboard.Scaffold` : une seule autorite, des deux cotes.
+  defp check_gitea_template_expansion(root) do
+    face = Path.join([root, "priv", "catalogue", "project_template", "main"])
+    control = Path.join([face, ".gitea", "template"])
+    vars = ~w(REPO_NAME REPO_DESCRIPTION YEAR MONTH DAY)
+    re = ~r/\$\{(#{Enum.join(vars, "|")})\}/
+
+    listed =
+      case File.read(control) do
+        {:ok, c} ->
+          c |> String.split("\n", trim: true) |> Enum.map(&String.trim/1) |> MapSet.new()
+
+        _ ->
+          MapSet.new()
+      end
+
+    bearing =
+      face
+      |> Path.join("**")
+      |> Path.wildcard(match_dot: true)
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.filter(&Regex.match?(re, File.read!(&1)))
+      |> Enum.map(&Path.relative_to(&1, face))
+      |> MapSet.new()
+
+    missing = MapSet.difference(bearing, listed) |> Enum.sort()
+    extra = MapSet.difference(listed, bearing) |> Enum.sort()
+
+    %{
+      id: "template.gitea_expansion",
+      status: if(missing == [] and extra == [], do: :pass, else: :fail),
+      remediation:
+        "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
+          "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
+          "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
+      evidence:
+        Enum.map(missing, &"porteur NON liste: #{&1}") ++
+          Enum.map(extra, &"liste mais sans variable: #{&1}"),
+      note:
+        "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
+          "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
+    }
   end
 
   # Jumeau du precedent, et meme raison d'exister : un ORDRE dans `start/2` que le compilateur ne
