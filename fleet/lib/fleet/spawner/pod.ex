@@ -1068,7 +1068,9 @@ defmodule Fleet.Spawner.Pod do
             if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
               # Same-epoch crash recovery creates a fresh session.
               phase = Recovery.phase_from_string(phase_str) || :launching
-              Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
+              # `sid` is matched above to validate the snapshot's SHAPE, and goes no further: a
+              # same-epoch recovery does not resume, so the persisted identity has no say here.
+              Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
             else
               # Previous-epoch snapshots use the normal live/seed/fresh decision.
               Logger.info(
