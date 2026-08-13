@@ -23,13 +23,7 @@ defmodule Fleet.Credentials.ForgeAuth do
       %{url_prefix: prefix, token: token}
       when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
         if safe_prefix?(prefix) do
-          {:ok,
-           [
-             @git_no_prompt,
-             {"GIT_CONFIG_COUNT", "1"},
-             {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
-             {"GIT_CONFIG_VALUE_0", "Authorization: token #{token}"}
-           ]}
+          {:ok, extraheader_env(prefix, "token #{token}")}
         else
           # A newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
           # (never `inspect` the value — it sits next to the token). LOUD, and typed as malformed.
@@ -70,7 +64,41 @@ defmodule Fleet.Credentials.ForgeAuth do
     end
   end
 
-  # `url_prefix` is interpolated into the git-config key `http.<prefix>.extraheader`: a control char
-  # (esp. newline) would inject a parasite config line. NOT the full URL authority — a guardrail.
-  defp safe_prefix?(prefix), do: not String.match?(prefix, ~r/[\x00-\x1F\x7F]/)
+  @doc """
+  Env carrying an HTTP `Authorization` header to git, for one url prefix — **never argv**.
+
+  L'UNIQUE FACON DONT CE DEPOT DONNE UN SECRET A GIT, et le point est la surface : `GIT_CONFIG_*`
+  passe par l'environnement du processus, lisible par le seul propriétaire via `/proc/<pid>/environ`,
+  alors qu'un token pose en argv (userinfo d'URL comprise) est visible de tout le monde dans `ps`
+  pendant toute la duree de l'operation — et ressort dans les messages d'erreur de git, qui citent
+  l'URL.
+
+  Extraite ici parce qu'elle avait DEUX utilisateurs et une seule implementation : la forge interne
+  (`git_env_result/0`, juste au-dessus) et l'import d'un depot externe prive
+  (`Fleet.Project.Onboard`), qui lui posait le token en userinfo. Un mecanisme de credential
+  duplique est un mecanisme dont une copie finit par diverger.
+
+  `credential` est la valeur d'en-tete complete (`"token abc"`, `"Basic <b64>"`) : cette fonction ne
+  choisit pas le schema d'authentification, elle choisit le CANAL.
+  """
+  @spec extraheader_env(String.t(), String.t()) :: [{String.t(), String.t()}]
+  def extraheader_env(prefix, credential) when is_binary(prefix) and is_binary(credential) do
+    [
+      @git_no_prompt,
+      {"GIT_CONFIG_COUNT", "1"},
+      {"GIT_CONFIG_KEY_0", "http.#{prefix}.extraheader"},
+      {"GIT_CONFIG_VALUE_0", "Authorization: #{credential}"}
+    ]
+  end
+
+  @doc """
+  `url_prefix` guardrail, exported with the env builder it protects.
+
+  Un caractere de controle (surtout un saut de ligne) interpole dans la cle git-config
+  `http.<prefix>.extraheader` injecterait une ligne de config parasite. Ce n'est PAS l'autorite
+  complete de l'URL — c'est un garde-fou, et il voyage avec la fonction qu'il garde : un appelant qui
+  construit son prefixe depuis une URL d'operateur doit pouvoir le poser sans le reecrire.
+  """
+  @spec safe_prefix?(String.t()) :: boolean()
+  def safe_prefix?(prefix), do: not String.match?(prefix, ~r/[\x00-\x1F\x7F]/)
 end
