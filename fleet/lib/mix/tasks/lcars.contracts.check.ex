@@ -1019,17 +1019,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Enum.flat_map(opts.files, fn rel ->
         abs = Path.join(root, rel)
 
-        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; on an ABSENT file
-        # `grep_lines` returns `[]` (0 residue) → `:pass` FOREVER, even though the target moved/was
-        # deleted and the contract is no longer verified. An absent residue target is therefore a
-        # FAILURE, not a silent green — the check must be told its file vanished.
-        if File.exists?(abs) do
-          abs
-          |> grep_lines(opts.pattern)
-          |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
-          |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
-        else
-          ["#{rel}:MISSING — residue-check target absent (hollow-green guard, R0-EVT-012)"]
+        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; a file it cannot
+        # read yields 0 residue → `:pass` FOREVER, even though the target moved/was deleted and the
+        # contract is no longer verified. A residue target the check cannot read is therefore a
+        # FAILURE, not a silent green.
+        #
+        # ONE read, and it decides both. `File.exists?/1` answered only the ABSENT half: it is TRUE
+        # for a file present and unreadable (permissions, I/O error, a path that became a
+        # directory), which sent the flow into the reading branch where the swallowed error became
+        # zero lines, i.e. compliance. The half that was guarded is the half a moved file trips; the
+        # half that was not is the one a chmod trips, and nothing in the output told them apart.
+        # Reading once also removes the window between the test and the read.
+        case File.read(abs) do
+          {:ok, content} ->
+            content
+            |> grep_content(opts.pattern)
+            |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+            |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+
+          {:error, reason} ->
+            [
+              "#{rel}:MISSING(#{reason}) — residue-check target unreadable " <>
+                "(hollow-green guard, R0-EVT-012)"
+            ]
         end
       end)
 
@@ -1097,18 +1109,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # file Y" that rules `pass` on `evidence == []` therefore ALWAYS passes if Y
   # has been deleted. For a RESIDUE check, grep a glob of real files
   # (`Path.wildcard`), not a single potentially dead file path.
+  #
+  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` used to answer both.
+  # Absence is a state every caller models: a presence-prover reports the missing proof and fails,
+  # a residue check reads the file itself and turns it into evidence. Unreadability is not a state
+  # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
+  # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
+  # a path that became a directory, on a permission the runner lost; never in nominal operation,
+  # which is exactly why it was never noticed swallowing three absence-of-violation walls
+  # (`coord.backend.wired_or_pure`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
+  # which globs REAL files and would have reported compliance about one it could not open.
   defp grep_lines(path, regex) do
     case File.read(path) do
       {:ok, content} ->
-        content
-        |> String.split("\n")
-        |> Enum.with_index(1)
-        |> Enum.filter(fn {line, _} -> Regex.match?(regex, line) end)
-        |> Enum.map(fn {line, ln} -> {ln, line} end)
+        grep_content(content, regex)
 
-      _ ->
+      {:error, :enoent} ->
         []
+
+      {:error, reason} ->
+        raise "INSTRUMENT BROKEN — #{path}: #{:file.format_error(reason)} " <>
+                "(#{inspect(reason)}). A contract wall cannot report on a file it could not read; " <>
+                "refusing to answer rather than answering `no violation found`."
     end
+  end
+
+  defp grep_content(content, regex) do
+    content
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _} -> Regex.match?(regex, line) end)
+    |> Enum.map(fn {line, ln} -> {ln, line} end)
   end
 
   # Z3: single-app project — the task always runs at the project root (Mix sets the cwd

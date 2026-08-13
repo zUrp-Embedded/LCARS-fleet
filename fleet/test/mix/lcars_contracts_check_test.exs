@@ -7,8 +7,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   contract regression breaks this test. The doc-immune `code_match?/4` (BND-111) is locked by the
   dedicated describe below.
 
-  NB: testing the fail-on-absent PATHS directly (fixture without events.yaml, malformed seam) would
-  require a root-injectable `run_checks(root)` — a separate test-infra refactor, not done here.
+  NB: testing the fail-on-absent paths through `run_checks/0` would require it to take a root — a
+  test-infra refactor, not done here. It is NOT what stands between this suite and those paths:
+  every check is a `check_*(root)` of its own, so a fixture tree reaches them one by one, and the
+  describes below do exactly that. The sentence that used to sit here said the refactor was
+  required, and that reading is what kept the fail-on-absent branches untested for as long as it
+  stood.
   """
   use ExUnit.Case, async: true
 
@@ -58,6 +62,91 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert result.status == :pass
       assert result.note =~ "1 shell file(s) scanned"
+    end
+  end
+
+  # JG-088 — L'ABSENCE ETAIT UNE PREUVE NOMMEE, L'ILLISIBILITE UN VERT. `residue_check/2` gardait
+  # `File.exists?/1`, vrai pour un fichier PRESENT ET ILLISIBLE : le flux partait alors dans la
+  # branche de lecture, ou l'erreur avalee devenait zero ligne, donc zero residu, donc `:pass`. Le
+  # contrat declarait l'absence de residu sur un fichier qu'il n'avait pas pu ouvrir.
+  #
+  # Le cas d'illisibilite est joue avec un REPERTOIRE a la place du fichier (`:eisdir`) et non un
+  # `chmod 000` : l'erreur ne depend alors ni de l'uid qui lance la suite (root lit un 000) ni du
+  # umask du runner. Le premier test est le temoin — sans lui, on ne saurait pas que le second
+  # echoue pour la bonne raison plutot que parce que le contrat echoue toujours.
+  describe "residue_check — un mur ne rend pas compte d'un fichier qu'il n'a pas lu" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "jg088-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet"]))
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root, target: Path.join([root, "lib", "fleet", "sp_builder.ex"])}
+    end
+
+    test "cible ABSENTE → fail nomme (temoin : la garde d'origine tient toujours)", %{root: root} do
+      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "MISSING(enoent)"))
+    end
+
+    test "cible ILLISIBLE → fail, pas un vert", %{root: root, target: target} do
+      File.mkdir_p!(target)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+
+      assert result.status == :fail,
+             "un contrat a declare l'absence de residu sur un fichier qu'il n'a pas pu lire " <>
+               "(rendu #{result.status})"
+
+      assert Enum.any?(result.evidence, &(&1 =~ "MISSING(eisdir)"))
+    end
+
+    test "cible LISIBLE et sans residu → pass (la garde n'a pas rendu le contrat impossible)", %{
+      root: root,
+      target: target
+    } do
+      File.write!(target, """
+      defmodule Fleet.SPBuilder do
+        def compose_claude_md(cap_profile) do
+          get_in(cap_profile.spec, ["invocation", "lifetime_scope"])
+        end
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    # Le meme defaut vivait dans `grep_lines/2`, donc sous TOUS ses appelants — dont trois murs
+    # d'absence-de-violation qui globbent des fichiers REELS (`coord.backend.wired_or_pure`,
+    # `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`). Un fichier illisible y produisait zero
+    # preuve, c'est-a-dire la conformite. Il n'y a pas de reponse vraie a donner sur un fichier
+    # qu'on n'a pas ouvert : l'instrument s'arrete. `code_match?/4` est la porte publique qui passe
+    # par `grep_lines/2`.
+    test "grep_lines : illisible ≠ zero ligne — l'instrument refuse de repondre", %{
+      root: root,
+      target: target
+    } do
+      File.mkdir_p!(target)
+
+      assert_raise RuntimeError, ~r/INSTRUMENT BROKEN/, fn ->
+        Mix.Tasks.Lcars.Contracts.Check.code_match?(
+          root,
+          "lib/fleet/sp_builder.ex",
+          ~r/anything/
+        )
+      end
+    end
+
+    test "grep_lines : ABSENT rend toujours [] — l'appelant modelise ce cas lui-meme", %{
+      root: root
+    } do
+      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+               root,
+               "lib/fleet/nowhere.ex",
+               ~r/anything/
+             )
     end
   end
 
