@@ -33,7 +33,7 @@ defmodule Fleet.MCP.ServerTest do
   test "boot_environment/1: opts > app env > default" do
     assert Server.boot_environment(boot_environment: :pod) == :pod
 
-    Fleet.TestEnv.put_env_restoring(:fleet_mcp, :boot_environment, :ci)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_boot_environment, :ci)
     assert Server.boot_environment([]) == :ci
     assert Server.boot_environment(boot_environment: :host) == :host
   end
@@ -43,13 +43,13 @@ defmodule Fleet.MCP.ServerTest do
     # (config drift) started the system MCP server. Fail-closed: the ABSENCE of declaration → `:pod`
     # (refuses). The host declares itself POSITIVELY (runtime.exs on the daemon, config/test.exs in test);
     # a boot that does not is refused, never started by omission.
-    saved = Application.fetch_env(:fleet_mcp, :boot_environment)
-    Application.delete_env(:fleet_mcp, :boot_environment)
+    saved = Application.fetch_env(:lcars_fleet, :mcp_boot_environment)
+    Application.delete_env(:lcars_fleet, :mcp_boot_environment)
 
     on_exit(fn ->
       case saved do
-        {:ok, v} -> Application.put_env(:fleet_mcp, :boot_environment, v)
-        :error -> Application.delete_env(:fleet_mcp, :boot_environment)
+        {:ok, v} -> Application.put_env(:lcars_fleet, :mcp_boot_environment, v)
+        :error -> Application.delete_env(:lcars_fleet, :mcp_boot_environment)
       end
     end)
 

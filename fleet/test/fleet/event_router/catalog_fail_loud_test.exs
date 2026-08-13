@@ -7,8 +7,8 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
 
   setup do
     # Tests set :load_event_registry / :events_yaml_path themselves; capture-restore only.
-    TestEnv.restore_env_on_exit(:fleet_event_router, :load_event_registry)
-    TestEnv.restore_env_on_exit(:fleet_event_router, :events_yaml_path)
+    TestEnv.restore_env_on_exit(:lcars_fleet, :event_router_load_event_registry)
+    TestEnv.restore_env_on_exit(:lcars_fleet, :event_router_events_yaml_path)
     :ok
   end
 
@@ -17,8 +17,13 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
   # validation (green deploy, dead registry). `do_load` is only reached with
   # `load_event_registry: true` (prod/dev).
   test "events.yaml absent + registry wanted (prod) → raise (no silent ACK)" do
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    Application.put_env(:fleet_event_router, :events_yaml_path, "/nonexistent/events-xyz.yaml")
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+
+    Application.put_env(
+      :lcars_fleet,
+      :event_router_events_yaml_path,
+      "/nonexistent/events-xyz.yaml"
+    )
 
     assert_raise RuntimeError, ~r/events\.yaml absent or invalid/, fn ->
       Catalog.load!()
@@ -26,7 +31,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
   end
 
   test "load_event_registry=false (test/maintenance) → no-op :ok (no raise)" do
-    Application.put_env(:fleet_event_router, :load_event_registry, false)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, false)
     assert :ok = Catalog.load!()
   end
 
@@ -40,8 +45,8 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     path = Path.join(tmp_dir, "events.yaml")
     File.write!(path, "events: {}\n")
 
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    Application.put_env(:fleet_event_router, :events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    Application.put_env(:lcars_fleet, :event_router_events_yaml_path, path)
 
     assert_raise RuntimeError, ~r/events\.yaml EMPTY/, fn ->
       Catalog.load!()
@@ -57,7 +62,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     path = Path.join(tmp_dir, "events.yaml")
     File.write!(path, "events: {}\n")
 
-    Application.put_env(:fleet_event_router, :events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_events_yaml_path, path)
 
     assert [] = Catalog.event_type_strings()
   end

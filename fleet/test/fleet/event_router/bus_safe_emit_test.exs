@@ -126,11 +126,11 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
   describe "delivery error (CI-09) — Phoenix.PubSub.broadcast {:error, reason}" do
     setup do
       # Force the rare delivery failure via the broadcast seam (default = the real PubSub).
-      Application.put_env(:fleet_event_router, :broadcast_fun, fn _name, _topic, _event ->
+      Application.put_env(:lcars_fleet, :event_router_broadcast_fun, fn _name, _topic, _event ->
         {:error, :no_such_topic}
       end)
 
-      on_exit(fn -> Application.delete_env(:fleet_event_router, :broadcast_fun) end)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :event_router_broadcast_fun) end)
       :ok
     end
 
@@ -157,8 +157,8 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
       # replaces the bus with an arbitrary function, read hot on every broadcast, with no
       # environment guard — a function that delivers THEN errors makes that assumption false and
       # duplicates downstream work on the honest re-submit.
-      Application.put_env(:fleet_event_router, :broadcast_fun, fn _n, _t, _e -> :ok end)
-      on_exit(fn -> Application.delete_env(:fleet_event_router, :broadcast_fun) end)
+      Application.put_env(:lcars_fleet, :event_router_broadcast_fun, fn _n, _t, _e -> :ok end)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :event_router_broadcast_fun) end)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -173,7 +173,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
       # The check exists for the form DECLARED in a config file. The single test that legitimately
       # uses the seam sets it after boot, so a boot that never sees it must not cry — a warning
       # nobody can act on trains an operator to filter the rail out.
-      Application.delete_env(:fleet_event_router, :broadcast_fun)
+      Application.delete_env(:lcars_fleet, :event_router_broadcast_fun)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->

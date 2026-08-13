@@ -174,7 +174,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   defp claude_dir_for(human) do
-    Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
+    Application.get_env(:lcars_fleet, :spawner_claude_dir) || claude_dir_from_passwd(human)
   end
 
   defp claude_dir_from_passwd(human) do

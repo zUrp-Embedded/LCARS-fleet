@@ -2,7 +2,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   @moduledoc """
   Resolution des roles STRUCTURELS par capability, et son refus des deux cotes.
 
-  `async: false` — DELIBERE et load-bearing. Ces tests repointent `:fleet_cap_profile, :root_dir` et
+  `async: false` — DELIBERE et load-bearing. Ces tests repointent `:lcars_fleet, :cap_profile_root_dir` et
   depublient l'image : deux etats GLOBAUX. En async ils ont fait tomber trois suites voisines
   (StepDispatcher, StepRunCompleter, StepRunConsumerGate) qui resolvent le producteur pendant ce
   temps-la. C'est la raison pour laquelle ce fichier est separe de `roles_test.exs`, qui reste async

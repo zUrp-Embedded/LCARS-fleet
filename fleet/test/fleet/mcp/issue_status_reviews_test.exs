@@ -83,9 +83,9 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
   end
 
   setup do
-    TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Forge)
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, Forge)
 
-    TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
       {:ok, %{role: "architect", repo: "fleet/demo"}}
     end)
 

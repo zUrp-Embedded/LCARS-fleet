@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.StepRunCompleterTest do
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: one test here flips the GLOBAL `:fleet_spawner, :debug_visibility`, which
+  # SYNC on purpose: one test here flips the GLOBAL `:lcars_fleet, :spawner_debug_visibility`, which
   # every pod launch reads through `LaunchSpec.remote_control?/1`. Async peers would see the flip
   # mid-flight and decide a different visibility than they assert. Same lesson as the
   # `:require_onboarded` flake: restore-on-exit makes the value right AFTER the test and wrong
@@ -496,7 +496,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # The whole point of the stamp: an auditor reading this file must be able to tell that a
       # human could reach the pod's REPL while it worked. Asserting it end-to-end (and not only on
       # `statement/1`) is what pins the WIRING — the completer reading the mode at all.
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :debug_visibility, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_debug_visibility, true)
 
       work_dir = Path.join(tmp, "lcars-test")
       File.mkdir_p!(work_dir)

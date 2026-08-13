@@ -94,6 +94,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_gitea_template_expansion(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
+        check_no_legacy_config_namespace(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
         check_capabilities_exercisable(root),
@@ -1477,6 +1478,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     lib/fleet/spawner/pod/launch_spec.ex
     lib/mix/tasks/lcars.contracts.check.ex
   )
+
+  @doc false
+  # BL-6-05 — LE MUR D'EXHAUSTIVITE DE LA MIGRATION DE NAMESPACE, et il est ne AVANT elle.
+  #
+  # Les 15 atoms `:fleet_<dom>` etaient LEGACY-VALIDES (D-07) : ils fonctionnaient, la config ETS
+  # etant keyee par atom. Ce qu'ils coutaient etait a l'ENTREE — dix messages de Mix a chaque
+  # `mix test`, disant a qui decouvre le depot que sa configuration est fausse.
+  #
+  # ⚠ CE CHECK EXISTE PARCE QUE LE MODE DE DEFAILLANCE EST SILENCIEUX. Un site oublie appelle
+  # `Application.get_env(:fleet_x, :k)` sur un namespace desormais vide : il recoit le DEFAUT, pas
+  # une erreur. La config cesse de s'appliquer sans que rien ne le dise, et un test qui n'exerce pas
+  # ce knob reste vert. Une migration de 535 sites ne peut pas se verifier a la relecture.
+  #
+  # Deux classes ont echappe au balayage textuel de la migration, et elles sont la raison d'etre de
+  # ce mur : la forme PIPE (`:fleet_pilot |> Application.get_env(:max_fan, …)`, ou l'atome precede
+  # l'appel) et les cles DYNAMIQUES (une variable, un attribut de module). La premiere est attrapee
+  # ici ; la seconde ne peut l'etre par personne — d'ou la regle posee au meme moment : une cle de
+  # config se lit EN TOUTES LETTRES a son point d'usage, jamais assemblee.
+  def check_no_legacy_config_namespace(root) do
+    scanned =
+      ["lib", "test", "config"]
+      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs}"])) end)
+      |> Enum.reject(&(&1 =~ ~r{/(_build|tmp)/}))
+
+    offenders =
+      scanned
+      |> Enum.filter(fn f ->
+        rel = Path.relative_to(f, root)
+
+        rel != "lib/mix/tasks/lcars.contracts.check.ex" and
+          match?({:ok, c} when is_binary(c), File.read(f)) and
+          File.read!(f) =~
+            ~r/:fleet_(api|cap_profile|catalogue|coord|credentials|event_router|mcp|observation|pilot|project|sp_builder|spawner|starfleet|task_queue|workflow)\b/
+      end)
+      |> Enum.map(&Path.relative_to(&1, root))
+
+    if measured_nothing?(scanned) do
+      broken_result("config.no_legacy_config_namespace", "source under lib/, test/ or config/")
+    else
+      %{
+        id: "config.no_legacy_namespace",
+        remediation:
+          "un atome de config `:fleet_<domaine>` subsiste. La config vit sous `:lcars_fleet` avec " <>
+            "la cle prefixee par son domaine (`:fleet_api, :http_port` => `:lcars_fleet, " <>
+            ":api_http_port`) — le prefixe n'est pas cosmetique : `http_port` et `start_listener` " <>
+            "COLLISIONNENT entre `api` et `observation`, une fusion a plat ferait ecouter un " <>
+            "service sur le port d'un autre, sans un mot",
+        status: if(offenders == [], do: :pass, else: :fail),
+        evidence: offenders,
+        note: "les 15 namespaces `:fleet_*` sont morts avec la migration (BL-6-05, D-07 executee)"
+      }
+    end
+  end
 
   @doc false
   def check_sanctuary_contained(root) do

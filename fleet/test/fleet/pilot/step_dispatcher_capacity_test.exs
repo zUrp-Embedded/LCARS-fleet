@@ -9,7 +9,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
   """
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: a describe here flips the GLOBAL `:fleet_pilot, :require_onboarded`, which
+  # SYNC on purpose: a describe here flips the GLOBAL `:lcars_fleet, :pilot_require_onboarded`, which
   # every dispatch path reads. Async peers running in that window were refused with
   # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
   # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
@@ -134,7 +134,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     setup do
       # The gate the hermetic baseline keeps open (fictional repos have no ops on disk). Same
       # single lever as the poller's admission gate: one policy, two depths.
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
       :ok
     end
 
@@ -189,7 +189,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # It needed a SEAM: `materialize/3` had `:ops_root`, but the dispatcher never threaded it, so
     # the real hardcoded global root was the only reachable one. Same seam, same reason, as
     # `StepRunCompleter`'s.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
     File.mkdir_p!(work_dir)
@@ -253,7 +253,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     #
     # This is what makes the committed doc the single source in fact and not only in intent: there
     # is no second place for the text to be.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
     File.mkdir_p!(work_dir)
@@ -297,7 +297,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # `maybe_spawn` does not respawn a live pod. On an engineer crossing three rework rounds the
     # file held order v1 while the pointer moved from sha to sha, and its content depended on the
     # pod's LIVENESS rather than on the ticket's state.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
     File.mkdir_p!(work_dir)
@@ -336,7 +336,7 @@ defmodule Fleet.Pilot.StepDispatcherCapacityTest do
     # Fail-closed is not fail-always. With no work_dir there is no committed doc, so nothing can
     # replace the text; dropping it here would leave the pod's file saying it was asked nothing,
     # and the drift this fix targets does not exist on this rail — nothing moves beside the file.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, false)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, false)
 
     order = "Ordre inline, rail degrade."
 

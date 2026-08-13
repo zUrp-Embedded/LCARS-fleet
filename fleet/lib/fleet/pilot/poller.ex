@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.Poller do
     * **Jitter ±10%** on the interval — anti thundering-herd (N daemons that restart together).
     * **Exponential backoff** on API errors (capped at 5 min) — a forge that is down does not flood the logs.
     * **`try/rescue` safety-net** on `do_poll/1` — a bug in the dispatch path does not crash the poller.
-    * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms, dispatched, skipped, errors).
+    * **Telemetry** `[:lcars_fleet, :pilot_poller, :poll]` (duration_ms, dispatched, skipped, errors).
 
   ## Sub-modules
 
@@ -107,8 +107,8 @@ defmodule Fleet.Pilot.Poller do
     # ONLY its issues (otherwise Alice's poller spawns for Bob). Test seam: opt `:human`.
     :my_human,
     # The forge org = THE admission frontier: the poller discovers via `list_org_repos(org)`, every repo
-    # of the org IS a fleet project. Default `fleet` (config `:fleet_pilot, :fleet_org`); MUST match the org of
-    # create_project (`:fleet_mcp, :delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
+    # of the org IS a fleet project. Default `fleet` (config `:lcars_fleet, :pilot_fleet_org`); MUST match the org of
+    # create_project (`:lcars_fleet, :mcp_delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
     # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE ACTIF, et l'org porte le nom du
     # catalogue. C'etait un scalaire tant qu'il n'y avait qu'un metier ; un scalaire ne peut pas
     # nommer N orgs, et le projet d'un catalogue vit dans la sienne. Seam de test : opt `:orgs`
@@ -387,7 +387,7 @@ defmodule Fleet.Pilot.Poller do
     cond do
       is_list(orgs = Keyword.get(opts, :orgs)) and orgs != [] -> orgs
       is_binary(org = Keyword.get(opts, :org)) -> [org]
-      is_binary(org = Application.get_env(:fleet_pilot, :fleet_org)) -> [org]
+      is_binary(org = Application.get_env(:lcars_fleet, :pilot_fleet_org)) -> [org]
       true -> Fleet.Catalogue.active_names()
     end
   end
@@ -469,7 +469,7 @@ defmodule Fleet.Pilot.Poller do
         # pass does: discovery, the pod snapshot, the SERIAL fold of the R repos, and the two
         # fleet-global passes (arch net, protection recheck). Not just its visible part.
         :telemetry.execute(
-          [:fleet_pilot, :poller, :cycle],
+          [:lcars_fleet, :pilot_poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: length(repos)},
           %{status: :ok, mode: mode, orgs: state.orgs}
         )
@@ -482,7 +482,7 @@ defmodule Fleet.Pilot.Poller do
         # blindness that capturing `started` after the slow call already avoided. `repos: 0` is not
         # filler: no repo was folded.
         :telemetry.execute(
-          [:fleet_pilot, :poller, :cycle],
+          [:lcars_fleet, :pilot_poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: 0},
           %{status: :error, mode: mode, orgs: state.orgs}
         )
@@ -588,7 +588,7 @@ defmodule Fleet.Pilot.Poller do
     )
 
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: elapsed_ms(started)},
       %{
         status: :error,
@@ -682,7 +682,7 @@ defmodule Fleet.Pilot.Poller do
   # test turns it back on to pin the behaviour. In prod it is absent ⟹ true, and nothing in
   # `etc/fleet_v2.env.template` offers it — a door that only the hermetic baseline opens.
   defp onboarded?(repo) do
-    if Application.get_env(:fleet_pilot, :require_onboarded, true),
+    if Application.get_env(:lcars_fleet, :pilot_require_onboarded, true),
       do: File.dir?(project_work_dir(repo)),
       else: true
   end
@@ -846,7 +846,7 @@ defmodule Fleet.Pilot.Poller do
     # poll failures are logged (handle_poll_error) and each per-item dispatch traces at its own
     # level. We log when it breaks, not when it runs.
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: duration_ms},
       Map.merge(tally, %{status: :ok, mode: :step, repo: state.repo})
     )
@@ -869,7 +869,7 @@ defmodule Fleet.Pilot.Poller do
     )
 
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: elapsed_ms(started)},
       %{
         status: :error,

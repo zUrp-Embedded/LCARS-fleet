@@ -274,8 +274,8 @@ defmodule Fleet.Workflow.DeliverableGate do
     # Shell kills the git process group at the deadline; timeout remains distinct from git failure.
     runner =
       Application.get_env(
-        :fleet_workflow,
-        :deliverable_gate_git_runner,
+        :lcars_fleet,
+        :workflow_deliverable_gate_git_runner,
         &Fleet.Credentials.Shell.git/2
       )
 

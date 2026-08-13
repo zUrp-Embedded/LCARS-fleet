@@ -30,7 +30,7 @@ defmodule Fleet.EventRouter.Application do
   # A warning and not a refusal: the seam is legitimate machinery, and a node that will not boot
   # because someone left a debug hook is a worse failure than one that says so loudly.
   defp warn_if_broadcast_seam_declared do
-    case Application.get_env(:fleet_event_router, :broadcast_fun) do
+    case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
       nil ->
         :ok
 
@@ -111,8 +111,8 @@ defmodule Fleet.EventRouter.Application do
   The listener binds to loopback unless `LCARS_WEBHOOK_BIND_HOST` overrides it.
   """
   def webhook_children do
-    if Application.get_env(:fleet_event_router, :start_webhooks, false) do
-      port = Application.get_env(:fleet_event_router, :webhook_port, 8081)
+    if Application.get_env(:lcars_fleet, :event_router_start_webhooks, false) do
+      port = Application.get_env(:lcars_fleet, :event_router_webhook_port, 8081)
 
       [
         Fleet.EventRouter.Listener.cowboy_child(
@@ -127,7 +127,7 @@ defmodule Fleet.EventRouter.Application do
   end
 
   defp signals_children do
-    if Application.get_env(:fleet_event_router, :start_signals, false) do
+    if Application.get_env(:lcars_fleet, :event_router_start_signals, false) do
       [Fleet.EventRouter.SignalsOS]
     else
       []

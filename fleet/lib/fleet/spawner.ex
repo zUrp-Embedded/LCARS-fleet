@@ -154,7 +154,7 @@ defmodule Fleet.Spawner do
       * `:pod_id` (default `UUID.uuid4()`) — must be **path-safe** (`[A-Za-z0-9._-]`, no `..`),
         since interpolated into FS paths (`~/pods/pod_<id>`, sock, state recovery);
         otherwise `{:error, :invalid_pod_id}`.
-      * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
+      * `:state_fs_root` (override, default config `:lcars_fleet, :spawner_state_fs_root`)
       * `:brief` — the pod's work as a FILE copy (string). The live order reaches the pod through
         the task queue; this is the copy written into its home.
       * `:brief_ref` — the address of the brief materialized in the project's ops. A dispatch
@@ -588,7 +588,7 @@ defmodule Fleet.Spawner do
 
   @doc """
   Is the fleet running in DEBUG VISIBILITY mode (`fleet_v2 start --debug`)? — the SINGLE reader of
-  `:fleet_spawner, :debug_visibility`.
+  `:lcars_fleet, :spawner_debug_visibility`.
 
   One value for a whole fleet life, fixed at start: nothing toggles it, nothing persists it,
   nothing reconciles it mid-run. Two consumers, in two domains, which is why the read lives on the
@@ -599,11 +599,11 @@ defmodule Fleet.Spawner do
   """
   @spec debug_visibility?() :: boolean()
   def debug_visibility? do
-    Application.get_env(:fleet_spawner, :debug_visibility, false) == true
+    Application.get_env(:lcars_fleet, :spawner_debug_visibility, false) == true
   end
 
   @doc """
-  Is output compression allowed FLEET-WIDE? (`:fleet_spawner, :output_compression`, absent = `true`.)
+  Is output compression allowed FLEET-WIDE? (`:lcars_fleet, :spawner_output_compression`, absent = `true`.)
 
   Same shape as `debug_visibility?/0` — one value for a whole fleet life, fixed at start, read on
   the facade so no second site derives it — and the OPPOSITE polarity. Debug can only OPEN a window;
@@ -616,7 +616,7 @@ defmodule Fleet.Spawner do
   """
   @spec output_compression_allowed?() :: boolean()
   def output_compression_allowed? do
-    Application.get_env(:fleet_spawner, :output_compression, true) == true
+    Application.get_env(:lcars_fleet, :spawner_output_compression, true) == true
   end
 
   @doc """
@@ -629,7 +629,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  The FUSE: how many pods may live at once, fleet-wide — `:fleet_spawner, :max_pods`, default 128,
+  The FUSE: how many pods may live at once, fleet-wide — `:lcars_fleet, :spawner_max_pods`, default 128,
   enforced by the DynamicSupervisor as `max_children`.
 
   It is NOT a policy and nothing consults it to decide anything. What shapes the queue is
@@ -652,7 +652,7 @@ defmodule Fleet.Spawner do
   from the per-project ones. An operator on a small machine lowers it deliberately.
   """
   @spec max_pods() :: pos_integer()
-  def max_pods, do: Application.get_env(:fleet_spawner, :max_pods, 128)
+  def max_pods, do: Application.get_env(:lcars_fleet, :spawner_max_pods, 128)
 
   @doc """
   Is there a free pool SEAT for this `(role, repo)`? — the per-role twin of `has_capacity?/0`,

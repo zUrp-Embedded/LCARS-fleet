@@ -4,7 +4,7 @@ defmodule Fleet.EventRouter.Bus do
   main topic. Events are broadcast as structs and checked against the registry loaded
   from `events.yaml`; an unregistered type raises once that registry is populated.
 
-  An empty registry follows `:fleet_event_router, :permit_when_registry_empty`: `true`
+  An empty registry follows `:lcars_fleet, :event_router_permit_when_registry_empty`: `true`
   by default permits the initialization window, while `false` refuses every event.
 
   `safe_emit/4` is reserved for lossy observability. It logs construction and delivery
@@ -34,7 +34,7 @@ defmodule Fleet.EventRouter.Bus do
 
   # Injection seam for delivery-error tests; production defaults to Phoenix.PubSub.
   defp pubsub_broadcast(topic, event) do
-    case Application.get_env(:fleet_event_router, :broadcast_fun) do
+    case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
       fun when is_function(fun, 3) -> fun.(@pubsub_name, topic, event)
       _ -> Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
     end
@@ -164,7 +164,11 @@ defmodule Fleet.EventRouter.Bus do
   end
 
   defp permit_when_registry_empty? do
-    Application.get_env(:fleet_event_router, :permit_when_registry_empty, @permit_empty_default)
+    Application.get_env(
+      :lcars_fleet,
+      :event_router_permit_when_registry_empty,
+      @permit_empty_default
+    )
   end
 
   @doc "Subscribes the caller to a topic; defaults to `main_topic/0`."

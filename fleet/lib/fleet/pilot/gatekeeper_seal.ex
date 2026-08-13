@@ -360,11 +360,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
-    do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Project.WorktreeSync)
+    do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
 
   # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
   defp spawner,
-    do: Application.get_env(:fleet_pilot, :spawner, Fleet.Spawner)
+    do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
 
   # ── Provenance wall (Phase 2) ────────────────────────────────────────────
   # Deterministic triplet check on the brick being sealed. SKIP paths (all LOUD, never

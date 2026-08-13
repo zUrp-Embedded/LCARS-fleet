@@ -13,7 +13,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   ## Configuration
 
-  Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:fleet_pilot, :forge)`:
+  Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:lcars_fleet, :pilot_forge)`:
 
     * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://10.42.0.118"` (forge NAS).
     * `:token` — Gitea token. Read from `:token_file` if absent.
@@ -33,7 +33,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   @doc false
   def resolve_config(opts) do
-    env = Application.get_env(:fleet_pilot, :forge, [])
+    env = Application.get_env(:lcars_fleet, :pilot_forge, [])
     merged = Keyword.merge(env, opts)
 
     with {:ok, base_url} <- fetch_required(merged, :base_url),
@@ -89,7 +89,7 @@ defmodule Fleet.Forge.Client.Transport do
   @doc false
   def forge_bot_login(config, opts) do
     case Keyword.get(opts, :forge_bot_login) ||
-           Application.get_env(:fleet_pilot, :forge_bot_login) do
+           Application.get_env(:lcars_fleet, :pilot_forge_bot_login) do
       login when is_binary(login) and login != "" -> {:ok, login}
       {:error, _} = err -> err
       _ -> derive_bot_login(config)

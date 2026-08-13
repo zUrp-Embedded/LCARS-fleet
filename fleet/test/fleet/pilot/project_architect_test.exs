@@ -281,7 +281,7 @@ defmodule Fleet.Project.ArchitectTest do
     # The defect this closes: a catalogue naming its delegate `tech-lead` resolved the role
     # correctly and still spawned a pod called `architect-vitrine`, whose own CLAUDE.md and SP both
     # said `tech-lead`. The name the operator reads was the last literal left.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :project_delegate_role, "tech-lead")
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_project_delegate_role, "tech-lead")
 
     assert ProjectArchitect.pod_id_for("fleet/vitrine") == "tech-lead-vitrine"
   end

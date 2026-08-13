@@ -18,9 +18,9 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   ## Configuration
 
-    * `:fleet_event_router, :webhook_secret_path` — secret path
+    * `:lcars_fleet, :event_router_webhook_secret_path` — secret path
       (default `/etc/fleet/webhook-secret`)
-    * `:fleet_event_router, :webhook_port` — HTTP port (default 8081)
+    * `:lcars_fleet, :event_router_webhook_port` — HTTP port (default 8081)
   """
 
   use Plug.Router
@@ -58,8 +58,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
           emit_fun =
             Application.get_env(
-              :fleet_event_router,
-              :webhook_emit_fun,
+              :lcars_fleet,
+              :event_router_webhook_emit_fun,
               &Fleet.EventRouter.Bus.emit/3
             )
 
@@ -127,7 +127,11 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
     secret_path =
-      Application.get_env(:fleet_event_router, :webhook_secret_path, "/etc/fleet/webhook-secret")
+      Application.get_env(
+        :lcars_fleet,
+        :event_router_webhook_secret_path,
+        "/etc/fleet/webhook-secret"
+      )
 
     case File.read(secret_path) do
       {:ok, secret} ->

@@ -20,7 +20,7 @@ defmodule Fleet.CapProfile.Schema do
   app). `Fleet.CapProfile.load/1` and `compose/2` call `validate/2`;
   `read_modops/2` (core side) calls `validate_modop_keys/1` then `validate/2`.
 
-  I/O: reads the schema files from the FS (`:fleet_cap_profile, :schema_dir` override;
+  I/O: reads the schema files from the FS (`:lcars_fleet, :cap_profile_schema_dir` override;
   default = the bundled `priv/cap_profile/schema`). The read+decode+resolve is cached in
   `:persistent_term` (keyed by the RESOLVED path → test overrides get their own entry),
   lazy, errors not cached.
@@ -136,7 +136,7 @@ defmodule Fleet.CapProfile.Schema do
   end
 
   defp schema_dir do
-    case Application.get_env(:fleet_cap_profile, :schema_dir) do
+    case Application.get_env(:lcars_fleet, :cap_profile_schema_dir) do
       nil -> Path.join(to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/schema")
       dir -> dir
     end

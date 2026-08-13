@@ -22,8 +22,8 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
 
   test "the CANON events.yaml loads: the 10 routed entries land in Bus.event_routing with their data" do
     # Real canon, real loader path (config points the loader at the bundled priv by default).
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert :ok = Fleet.EventRouter.Catalog.load!()
     routing = Bus.event_routing()
@@ -58,9 +58,9 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
         cat5_source: ghost_tag
     """)
 
-    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/audit_cat5_ghost_tag.*NOT a\s+registered/s, fn ->
       Fleet.EventRouter.Catalog.load!()
@@ -78,9 +78,9 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
         action: coord_decision
     """)
 
-    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/not a canonical source/, fn ->
       Fleet.EventRouter.Catalog.load!()
@@ -99,9 +99,9 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
         cat5_source: orphan_tag
     """)
 
-    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/carries cat5_source/, fn ->
       Fleet.EventRouter.Catalog.load!()
@@ -119,9 +119,9 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
         action: teleport
     """)
 
-    Fleet.TestEnv.put_env_restoring(:fleet_event_router, :events_yaml_path, path)
-    Application.put_env(:fleet_event_router, :load_event_registry, true)
-    on_exit(fn -> Application.put_env(:fleet_event_router, :load_event_registry, false) end)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_events_yaml_path, path)
+    Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/INVALID against events-v1/, fn ->
       Fleet.EventRouter.Catalog.load!()

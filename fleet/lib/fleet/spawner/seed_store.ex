@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.SeedStore do
   (which the dying `Pod` discards) and the teardown proceeds. What is lost is only the
   session-memory bonus — the work's durable truth lives on the forge, not in the seed.
 
-  - `seed_root`: `:fleet_spawner, :seed_store_root` (default `~/.lcars/seeds` =
+  - `seed_root`: `:lcars_fleet, :spawner_seed_store_root` (default `~/.lcars/seeds` =
     `Fleet.Layout.state_dir()/seeds`; operator override `LCARS_SEED_STORE_ROOT`, cf. `runtime.exs`).
   - The seed map's `uuid` = the DETERMINISTIC BUILDER of the Desktop slot (the `session_id`
     pre-allocated at spawn, passed as an argument): it is the SINGLE SOURCE of the pod's identity. It is
@@ -345,8 +345,8 @@ defmodule Fleet.Spawner.SeedStore do
   defp root,
     do:
       Application.get_env(
-        :fleet_spawner,
-        :seed_store_root,
+        :lcars_fleet,
+        :spawner_seed_store_root,
         Path.join(Fleet.Layout.state_dir(), "seeds")
       )
 end

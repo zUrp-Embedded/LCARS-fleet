@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # one is auto-resolved and pushed by the runtime (the jury re-judges the new head, so a wrong
   # resolution is caught downstream); anything else — and any probe/apply failure — falls through to
   # the legacy producer conflict-rework. The gain only ever SHORTENS a path, never breaks one.
-  # Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are injectable seams
+  # Enabled by `:lcars_fleet, :pilot_conflict_diagnosis?`; diagnoser/applier are injectable seams
   # (`:conflict_diagnoser` / `:conflict_applier`).
   #
   # The ladder in one line: tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch (the
@@ -347,7 +347,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
+  defp diagnosis_enabled?,
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnosis?, false)
 
   # The FACE of the conflict (chantier face-projet, inventory #7/#8): the probe/apply helpers used
   # to be called with `[]` and fall back to their `origin/main` default IN the code-face worktree —
@@ -375,10 +376,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   defp diagnoser,
-    do: Application.get_env(:fleet_pilot, :conflict_diagnoser, Fleet.Pilot.ConflictProbe)
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnoser, Fleet.Pilot.ConflictProbe)
 
   defp applier,
-    do: Application.get_env(:fleet_pilot, :conflict_applier, Fleet.Pilot.ConflictApply)
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_applier, Fleet.Pilot.ConflictApply)
 
   # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
   # the OUTSIDER a single inference pass before immobilizing a human (tier-3). Flag off, or that pass

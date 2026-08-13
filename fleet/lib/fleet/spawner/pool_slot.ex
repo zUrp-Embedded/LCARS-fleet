@@ -51,14 +51,14 @@ defmodule Fleet.Spawner.PoolSlot do
   @default_max_per_role @format_capacity
 
   @doc """
-  Max concurrent pods for ONE `(role, repo)` — config `:fleet_spawner, :max_pods_per_role`,
+  Max concurrent pods for ONE `(role, repo)` — config `:lcars_fleet, :spawner_max_pods_per_role`,
   default 15. Clamped to the format's capacity: the nibble cannot hold more, whatever the config
   says (a config that promises 20 would promise a crash).
   """
   @spec max_per_role() :: pos_integer()
   def max_per_role do
-    :fleet_spawner
-    |> Application.get_env(:max_pods_per_role, @default_max_per_role)
+    :lcars_fleet
+    |> Application.get_env(:spawner_max_pods_per_role, @default_max_per_role)
     |> min(@format_capacity)
     |> max(1)
   end

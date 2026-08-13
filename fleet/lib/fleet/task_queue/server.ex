@@ -115,13 +115,17 @@ defmodule Fleet.TaskQueue.Server do
       retention_terminal_max:
         Keyword.get(opts, :retention_terminal_max) ||
           Application.get_env(
-            :fleet_task_queue,
-            :retention_terminal_max,
+            :lcars_fleet,
+            :task_queue_retention_terminal_max,
             @default_retention_terminal
           ),
       poll_retention_ms:
         Keyword.get(opts, :poll_retention_ms) ||
-          Application.get_env(:fleet_task_queue, :poll_retention_ms, @default_poll_retention_ms)
+          Application.get_env(
+            :lcars_fleet,
+            :task_queue_poll_retention_ms,
+            @default_poll_retention_ms
+          )
     }
 
     case load_state(state_path, persist?) do

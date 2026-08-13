@@ -101,5 +101,5 @@ defmodule Fleet.Pilot.PodReaper do
   end
 
   # Seam (test): the pod supervisor. Default = the prod module.
-  defp spawner, do: Application.get_env(:fleet_pilot, :spawner, Fleet.Spawner)
+  defp spawner, do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
 end

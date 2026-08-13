@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.Application do
 
   The boot of permanent pods (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`)
   is orchestrated **only** by `Fleet.Starfleet.BootOrchestrator` (post-readiness,
-  guarded by `:fleet_starfleet, :start_boot_orchestrator`). This app does **NOT**
+  guarded by `:lcars_fleet, :starfleet_start_boot_orchestrator`). This app does **NOT**
   boot the permanent pods: a second boot path here (an auto-invoke hook guarded
   by `:boot_permanent_at_start`) would double-boot — if `:boot_permanent_at_start`
   were enabled in prod (the documented path), it would boot the permanent pods IN
@@ -34,7 +34,7 @@ defmodule Fleet.Spawner.Application do
     :ok = Fleet.Spawner.BootEpoch.init()
 
     # Prove every canon role spawn-ready before readiness.
-    if Application.get_env(:fleet_spawner, :prove_canon_at_boot, true) do
+    if Application.get_env(:lcars_fleet, :spawner_prove_canon_at_boot, true) do
       :ok = Fleet.Spawner.CanonProof.prove_all!()
     end
 
@@ -44,21 +44,21 @@ defmodule Fleet.Spawner.Application do
     ]
 
     publish =
-      if Application.get_env(:fleet_spawner, :start_publish_consumer, true) do
+      if Application.get_env(:lcars_fleet, :spawner_start_publish_consumer, true) do
         [Fleet.Spawner.PublishConsumer]
       else
         []
       end
 
     reaper =
-      if Application.get_env(:fleet_spawner, :start_pod_warden, true) do
+      if Application.get_env(:lcars_fleet, :spawner_start_pod_warden, true) do
         [Fleet.Spawner.PodWarden]
       else
         []
       end
 
     permanent_warden =
-      if Application.get_env(:fleet_spawner, :start_permanent_warden, true) do
+      if Application.get_env(:lcars_fleet, :spawner_start_permanent_warden, true) do
         [Fleet.Spawner.PermanentWarden]
       else
         []

@@ -22,13 +22,13 @@ defmodule Fleet.CapProfile.MonksFrozenTest do
              |> Path.expand()
 
   setup do
-    prev = Application.get_env(:fleet_cap_profile, :root_dir)
-    Application.put_env(:fleet_cap_profile, :root_dir, @canon_dir)
+    prev = Application.get_env(:lcars_fleet, :cap_profile_root_dir)
+    Application.put_env(:lcars_fleet, :cap_profile_root_dir, @canon_dir)
 
     on_exit(fn ->
       if prev,
-        do: Application.put_env(:fleet_cap_profile, :root_dir, prev),
-        else: Application.delete_env(:fleet_cap_profile, :root_dir)
+        do: Application.put_env(:lcars_fleet, :cap_profile_root_dir, prev),
+        else: Application.delete_env(:lcars_fleet, :cap_profile_root_dir)
     end)
 
     :ok

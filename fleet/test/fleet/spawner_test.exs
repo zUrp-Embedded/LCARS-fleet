@@ -35,9 +35,9 @@ defmodule Fleet.SpawnerTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
-    Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
-    Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
+    Application.put_env(:lcars_fleet, :spawner_state_fs_root, Path.join(tmp_dir, "state"))
+    Application.put_env(:lcars_fleet, :spawner_pod_dir_root, Path.join(tmp_dir, "pods"))
+    Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
     # adr-f: no vault anymore (creds via claudeDir bwrap bind).
 
     # auth = single bind mode (token_arg removed); the credentials gate still reads the native
@@ -59,18 +59,18 @@ defmodule Fleet.SpawnerTest do
       })
     )
 
-    Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
+    Application.put_env(:lcars_fleet, :spawner_claude_dir, setup_claude)
 
     StubBackend.set_reply({:ok, %{}})
 
     on_exit(fn ->
       StubBackend.clear()
-      Application.delete_env(:fleet_spawner, :state_fs_root)
-      Application.delete_env(:fleet_spawner, :pod_dir_root)
+      Application.delete_env(:lcars_fleet, :spawner_state_fs_root)
+      Application.delete_env(:lcars_fleet, :spawner_pod_dir_root)
       # B5 #576: do NOT delete :launch_backend — leave the hermetic
       # config/test.exs baseline (StubBackend) in place, otherwise the
       # REAL code-default LauncherPortBackend is reached under async race.
-      Application.delete_env(:fleet_spawner, :claude_dir)
+      Application.delete_env(:lcars_fleet, :spawner_claude_dir)
     end)
 
     :ok

@@ -10,12 +10,12 @@ defmodule Fleet.Spawner.PodWardenGCTest do
   setup %{tmp_dir: tmp} do
     state_root = Path.join(tmp, "state")
     pod_root = Path.join(tmp, "pods")
-    Application.put_env(:fleet_spawner, :state_fs_root, state_root)
-    Application.put_env(:fleet_spawner, :pod_dir_root, pod_root)
+    Application.put_env(:lcars_fleet, :spawner_state_fs_root, state_root)
+    Application.put_env(:lcars_fleet, :spawner_pod_dir_root, pod_root)
 
     on_exit(fn ->
-      Application.delete_env(:fleet_spawner, :state_fs_root)
-      Application.delete_env(:fleet_spawner, :pod_dir_root)
+      Application.delete_env(:lcars_fleet, :spawner_state_fs_root)
+      Application.delete_env(:lcars_fleet, :spawner_pod_dir_root)
     end)
 
     %{state_root: state_root, pod_root: pod_root}

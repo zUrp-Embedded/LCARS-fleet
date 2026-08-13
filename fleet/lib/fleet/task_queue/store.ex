@@ -17,8 +17,8 @@ defmodule Fleet.TaskQueue.Store do
   @spec default_path() :: Path.t()
   def default_path do
     Application.get_env(
-      :fleet_task_queue,
-      :state_path,
+      :lcars_fleet,
+      :task_queue_state_path,
       Path.join(System.user_home!(), ".lcars/task-queue/state.json")
     )
   end

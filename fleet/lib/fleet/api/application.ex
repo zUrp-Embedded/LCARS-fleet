@@ -47,8 +47,8 @@ defmodule Fleet.API.Application do
   listener startup is disabled.
   """
   def listener_children do
-    if Application.get_env(:fleet_api, :start_listener, true) do
-      port = Application.fetch_env!(:fleet_api, :http_port)
+    if Application.get_env(:lcars_fleet, :api_start_listener, true) do
+      port = Application.fetch_env!(:lcars_fleet, :api_http_port)
 
       dispatch = [
         {:_,
@@ -72,7 +72,7 @@ defmodule Fleet.API.Application do
   end
 
   defp control_socket_child do
-    case Application.get_env(:fleet_api, :control_socket) do
+    case Application.get_env(:lcars_fleet, :api_control_socket) do
       sock when is_binary(sock) and sock != "" -> [Fleet.API.ControlRouter.child_spec(sock)]
       _ -> []
     end

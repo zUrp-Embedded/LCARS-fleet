@@ -8,11 +8,11 @@ defmodule Fleet.Workflow.DeliverableGateTimeoutTest do
   setup do
     # Inject a Shell TIMEOUT for every git call → the bounded git/2 synthesizes its rc124 timeout code.
     # A real Shell.git timeout is impractical to induce deterministically; the seam makes rc124 provable.
-    Application.put_env(:fleet_workflow, :deliverable_gate_git_runner, fn _args, _opts ->
+    Application.put_env(:lcars_fleet, :workflow_deliverable_gate_git_runner, fn _args, _opts ->
       {:error, {:timeout, 15_000}}
     end)
 
-    on_exit(fn -> Application.delete_env(:fleet_workflow, :deliverable_gate_git_runner) end)
+    on_exit(fn -> Application.delete_env(:lcars_fleet, :workflow_deliverable_gate_git_runner) end)
     :ok
   end
 
@@ -31,7 +31,7 @@ defmodule Fleet.Workflow.DeliverableGateTimeoutTest do
     # unmatched member raised CaseClauseError in the gate's OWNER — the guard killed the OS
     # process and then crashed the BEAM process that owed the verdict. Total matching maps
     # it to the exec-error rc: a typed failure the caller classifies, never a crash.
-    Application.put_env(:fleet_workflow, :deliverable_gate_git_runner, fn _args, _opts ->
+    Application.put_env(:lcars_fleet, :workflow_deliverable_gate_git_runner, fn _args, _opts ->
       {:error, {:output_overflow, 9_999_999, 4_194_304}}
     end)
 

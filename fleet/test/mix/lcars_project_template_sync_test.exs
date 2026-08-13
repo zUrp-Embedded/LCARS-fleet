@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.SyncTest do
 
     on_exit(fn ->
       Application.delete_env(:lcars_fleet, :template_sync_git_runner)
-      Application.delete_env(:fleet_credentials, :forge_auth)
+      Application.delete_env(:lcars_fleet, :credentials_forge_auth)
     end)
 
     assert :ok =

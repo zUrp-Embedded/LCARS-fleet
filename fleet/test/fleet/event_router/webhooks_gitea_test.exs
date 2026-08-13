@@ -11,8 +11,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     File.write!(secret_path, "supersecret\n")
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_event_router,
-      :webhook_secret_path,
+      :lcars_fleet,
+      :event_router_webhook_secret_path,
       secret_path
     )
 
@@ -61,8 +61,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # it delivered, never replays → forge event silently lost. The return is matched: `{:error}` →
       # 422 (retry/alert).
       Fleet.TestEnv.put_env_restoring(
-        :fleet_event_router,
-        :webhook_emit_fun,
+        :lcars_fleet,
+        :event_router_webhook_emit_fun,
         fn _source, _type, _opts -> {:error, :pubsub_down} end
       )
 
@@ -256,7 +256,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     end
 
     test "missing secret → 401" do
-      Application.put_env(:fleet_event_router, :webhook_secret_path, "/nonexistent")
+      Application.put_env(:lcars_fleet, :event_router_webhook_secret_path, "/nonexistent")
 
       body = Jason.encode!(%{"action" => "opened"})
 
@@ -279,7 +279,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # COMPUTED-ON-EMPTY-KEY signature (what the attacker would send) is REFUSED.
       empty_secret = Path.join(tmp_dir, "empty-secret")
       File.write!(empty_secret, "   \n  \t\n")
-      Application.put_env(:fleet_event_router, :webhook_secret_path, empty_secret)
+      Application.put_env(:lcars_fleet, :event_router_webhook_secret_path, empty_secret)
 
       body = Jason.encode!(%{"action" => "opened"})
       forged_sig = WebhooksGitea.compute_hmac("", body)

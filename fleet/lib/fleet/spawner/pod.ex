@@ -344,7 +344,7 @@ defmodule Fleet.Spawner.Pod do
     #   * key = a binary (LCARS_SKILLS_ROOT fine override) → that path.
     # Do not "simplify" the sentinel to nil: the two nil meanings would collapse.
     skills_root =
-      case Application.get_env(:fleet_spawner, :skills_root, :catalogue) do
+      case Application.get_env(:lcars_fleet, :spawner_skills_root, :catalogue) do
         :catalogue -> Fleet.Catalogue.skills_root()
         other -> other
       end
@@ -1292,12 +1292,12 @@ defmodule Fleet.Spawner.Pod do
   defp cancel_capture_action, do: {{:timeout, :capture_slot}, :infinity, {:attempt, 0}}
 
   defp capture_slot_first_delay_ms,
-    do: Application.get_env(:fleet_spawner, :capture_slot_first_delay_ms, 5_000)
+    do: Application.get_env(:lcars_fleet, :spawner_capture_slot_first_delay_ms, 5_000)
 
   defp capture_slot_retry_ms,
-    do: Application.get_env(:fleet_spawner, :capture_slot_retry_ms, 5_000)
+    do: Application.get_env(:lcars_fleet, :spawner_capture_slot_retry_ms, 5_000)
 
-  defp capture_slot_max, do: Application.get_env(:fleet_spawner, :capture_slot_max, 20)
+  defp capture_slot_max, do: Application.get_env(:lcars_fleet, :spawner_capture_slot_max, 20)
 
   defp safe_resolve_disallowed(cap_profile) do
     {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}

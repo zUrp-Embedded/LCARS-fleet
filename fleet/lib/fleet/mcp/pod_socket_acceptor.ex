@@ -48,13 +48,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   ]
 
   # Mute connections eventually release shared Task capacity (D-07 config namespace).
-  @idle_timeout_ms Application.compile_env(:fleet_mcp, :socket_idle_timeout_ms, 300_000)
+  @idle_timeout_ms Application.compile_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, 300_000)
 
   # Connection service is isolated from the accept loop.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
   # Per-pod ceiling protects the fleet-wide connection pool.
-  @max_conns_per_pod Application.compile_env(:fleet_mcp, :max_conns_per_pod, 8)
+  @max_conns_per_pod Application.compile_env(:lcars_fleet, :mcp_max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -369,7 +369,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # Injectable seam exercises the SOC-RES-001 crash boundary.
-  defp tool_handler, do: Application.get_env(:fleet_mcp, :tool_handler, PodTools)
+  defp tool_handler, do: Application.get_env(:lcars_fleet, :mcp_tool_handler, PodTools)
 
   defp error_text(reason), do: inspect(reason)
 

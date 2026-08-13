@@ -49,7 +49,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
   describe "call timeout — read-only readback confirms a landed transaction (no retry, no race)" do
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_call_timeout, 30)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :workflow_ops_sync_call_timeout, 30)
       :ok
     end
 
@@ -100,10 +100,10 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
   describe "drain-confirm — a negative immediate readback is never the last word" do
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_call_timeout, 30)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :workflow_ops_sync_call_timeout, 30)
 
       # The drain must outlive the injected 80ms engine (its own knob; prod default = a full call budget).
-      Fleet.TestEnv.put_env_restoring(:fleet_workflow, :ops_sync_drain_timeout, 1_000)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :workflow_ops_sync_drain_timeout, 1_000)
       :ok
     end
 
@@ -335,7 +335,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   test "the PROD-config bypass is LOUD: serializer absent while config starts it → warning per call" do
     # The optional-layer posture is documented; what could not stand is the SILENT bypass in
     # a booted daemon (restart window / crash loop): the gate's absence must be visible.
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :start_ops_object_sync, true)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_start_ops_object_sync, true)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -353,7 +353,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   end
 
   test "the deliberate no-serializer mode (config off) stays QUIET" do
-    Fleet.TestEnv.put_env_restoring(:fleet_pilot, :start_ops_object_sync, false)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_start_ops_object_sync, false)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->

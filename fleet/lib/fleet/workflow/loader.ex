@@ -130,7 +130,7 @@ defmodule Fleet.Workflow.Loader do
 
     unless File.dir?(root) do
       raise "Fleet.Workflow.Loader: workflow maps root #{inspect(root)} does not exist — " <>
-              "broken deploy or misconfiguration (config :fleet_workflow, :workflow_maps_root / " <>
+              "broken deploy or misconfiguration (config :lcars_fleet, :workflow_workflow_maps_root / " <>
               "LCARS_WORKFLOW_MAPS_ROOT), fail-loud"
     end
 
@@ -189,7 +189,7 @@ defmodule Fleet.Workflow.Loader do
   guards prove from it, so two derivations of "which roots" would be two answers the day one is
   fixed. That is the same duplication this whole layer exists to remove.
 
-  The FINE override (`:fleet_workflow, :workflow_maps_root`) REPLACES the list rather than sitting in
+  The FINE override (`:lcars_fleet, :workflow_workflow_maps_root`) REPLACES the list rather than sitting in
   front of it — same rule as `Fleet.Catalogue.search/1`, same reason: a fixture pointing that key at
   its own canon is building an isolated catalogue, and leaving the shipped roots behind would make it
   publish and prove cards nobody wrote.
@@ -251,7 +251,7 @@ defmodule Fleet.Workflow.Loader do
   """
   @spec card_scopes() :: [%{catalogue: String.t() | nil, dir: Path.t(), root: Path.t() | nil}]
   def card_scopes do
-    case Application.get_env(:fleet_workflow, :workflow_maps_root) do
+    case Application.get_env(:lcars_fleet, :workflow_workflow_maps_root) do
       nil ->
         Enum.flat_map(Fleet.Catalogue.active_catalogues(), fn %{name: name, root: root} ->
           dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
@@ -269,7 +269,7 @@ defmodule Fleet.Workflow.Loader do
   The card carrying this catalogue's WORKSHOP producer, or `nil` — the doc rail, resolved by what a
   card IS rather than by a name someone configured.
 
-  It was a global config knob (`:fleet_pilot, :workshop_workflow_map`, defaulting to
+  It was a global config knob (`:lcars_fleet, :pilot_workshop_workflow_map`, defaulting to
   `"workshop-direct"` — the name of ONE catalogue's card). One knob cannot name N cards, and the
   catalogue serving a project is not the one that named the default. Same shape as
   `Roles.gatekeeper_role/1`, which resolves by capability rather than by a configured name.
@@ -385,7 +385,7 @@ defmodule Fleet.Workflow.Loader do
   defp workflow_maps_root(opts) do
     Keyword.get(opts, :workflow_maps_root) ||
       Keyword.get(opts, :catalogue_root) ||
-      Application.get_env(:fleet_workflow, :workflow_maps_root) ||
+      Application.get_env(:lcars_fleet, :workflow_workflow_maps_root) ||
       Fleet.Catalogue.workflow_maps_root()
   end
 
@@ -396,7 +396,7 @@ defmodule Fleet.Workflow.Loader do
   end
 
   defp schema_path(opts) do
-    Keyword.get(opts, :schema_path) || Application.get_env(:fleet_workflow, :schema_path) ||
+    Keyword.get(opts, :schema_path) || Application.get_env(:lcars_fleet, :workflow_schema_path) ||
       :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{@schema_file}")
   end
 end

@@ -26,7 +26,7 @@ defmodule Fleet.Starfleet.Application do
 
   ## Configuration
 
-  One boolean `:start_*` knob per child (all under `:fleet_starfleet`):
+  One boolean `:starfleet_start_*` knob per child (all under `:lcars_fleet`):
   `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
   `:start_mcp_monitor` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
@@ -59,20 +59,20 @@ defmodule Fleet.Starfleet.Application do
     # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++
-        if(boot_enabled?(:start_drift_monitor, true),
+        if(boot_enabled?(:starfleet_start_drift_monitor, true),
           do: [Fleet.Starfleet.DriftMonitor],
           else: []
         ) ++
-        if boot_enabled?(:start_shutdown, true) do
+        if boot_enabled?(:starfleet_start_shutdown, true) do
           [Fleet.Starfleet.Shutdown]
         else
           []
         end ++
-        if(boot_enabled?(:start_audit_consumer, true),
+        if(boot_enabled?(:starfleet_start_audit_consumer, true),
           do: [Fleet.Starfleet.AuditConsumer],
           else: []
         ) ++
-        if(boot_enabled?(:start_mcp_monitor, true),
+        if(boot_enabled?(:starfleet_start_mcp_monitor, true),
           do: [Fleet.Starfleet.MCPMonitor],
           else: []
         )
@@ -89,7 +89,7 @@ defmodule Fleet.Starfleet.Application do
   @doc false
   @spec boot_enabled?(atom(), boolean()) :: boolean()
   def boot_enabled?(key, default) when is_atom(key) and is_boolean(default) do
-    case Application.get_env(:fleet_starfleet, key, default) do
+    case Application.get_env(:lcars_fleet, key, default) do
       v when is_boolean(v) ->
         v
 

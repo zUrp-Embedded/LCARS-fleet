@@ -190,9 +190,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @default_onboard Fleet.Project.Onboard
 
   @doc """
-  Resolved onboarding sequence: config `:fleet_mcp, :project_onboard` otherwise the
+  Resolved onboarding sequence: config `:lcars_fleet, :mcp_project_onboard` otherwise the
   canonical default `Fleet.Project.Onboard`. SINGLE SOURCE of the default.
   """
   @spec resolved() :: module()
-  def resolved, do: Application.get_env(:fleet_mcp, :project_onboard, @default_onboard)
+  def resolved, do: Application.get_env(:lcars_fleet, :mcp_project_onboard, @default_onboard)
 end

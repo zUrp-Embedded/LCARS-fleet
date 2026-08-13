@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   @max_max_fan 15
 
   @doc """
-  The FLEET default ceiling on workflow_runs in flight — `:fleet_pilot, :max_fan`, default
+  The FLEET default ceiling on workflow_runs in flight — `:lcars_fleet, :pilot_max_fan`, default
   #{@default_max_fan}, clamped to `1..#{@max_max_fan}`. A project that declares its own throughput
   overrides it: `max_fan/2` is what a dispatch decision reads.
 
@@ -80,8 +80,8 @@ defmodule Fleet.Pilot.Poller.Admission do
   """
   @spec max_fan() :: pos_integer()
   def max_fan do
-    :fleet_pilot
-    |> Application.get_env(:max_fan, @default_max_fan)
+    :lcars_fleet
+    |> Application.get_env(:pilot_max_fan, @default_max_fan)
     |> case do
       n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
       _ -> @default_max_fan

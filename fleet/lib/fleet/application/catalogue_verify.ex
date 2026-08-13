@@ -51,7 +51,7 @@ defmodule Fleet.Application.CatalogueVerify do
   end
 
   @doc """
-  Verifies the catalogue at `root`. Sets `:fleet_catalogue, :root` to it for the duration, restores
+  Verifies the catalogue at `root`. Sets `:lcars_fleet, :catalogue_root` to it for the duration, restores
   the previous value on the way out. Collects findings instead of raising on the first — an operator
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
   manifest is a precondition (nothing downstream is meaningful without it), and the images are a
@@ -61,8 +61,8 @@ defmodule Fleet.Application.CatalogueVerify do
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do
-    prev = Application.fetch_env(:fleet_catalogue, :root)
-    Application.put_env(:fleet_catalogue, :root, root)
+    prev = Application.fetch_env(:lcars_fleet, :catalogue_root)
+    Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     assumptions = [
       "root read: #{root}",
@@ -188,6 +188,6 @@ defmodule Fleet.Application.CatalogueVerify do
     kind, reason -> [%{stage: stage, error: "#{kind}: #{inspect(reason)}"}]
   end
 
-  defp restore(:error), do: Application.delete_env(:fleet_catalogue, :root)
-  defp restore({:ok, value}), do: Application.put_env(:fleet_catalogue, :root, value)
+  defp restore(:error), do: Application.delete_env(:lcars_fleet, :catalogue_root)
+  defp restore({:ok, value}), do: Application.put_env(:lcars_fleet, :catalogue_root, value)
 end

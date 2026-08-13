@@ -10,7 +10,7 @@ defmodule Fleet.SPBuilder.Image do
   @doc """
   Builds and publishes the SP image from the live roots. Raises on any unreadable root —
   the artifacts are load-bearing prompt material, a hole is a broken deploy. Gated by the
-  caller (`:fleet_sp_builder, :publish_image`).
+  caller (`:lcars_fleet, :sp_builder_publish_image`).
   """
   @spec publish!() :: :ok
   def publish! do
@@ -384,7 +384,7 @@ defmodule Fleet.SPBuilder.Image do
   # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative was a second
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
-    Application.get_env(:fleet_spawner, :protocole_user_path) ||
+    Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
       Fleet.Catalogue.find_in(
         Fleet.Catalogue.tree_scope(root, :sp_drafts),
         "protocole-user-worker.md"

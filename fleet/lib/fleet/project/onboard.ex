@@ -98,7 +98,7 @@ defmodule Fleet.Project.Onboard do
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
     * `:code_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
       `/home/projects`, `/home/projects.ops`, `/home/projects.workshop`)
-    * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
+    * `:base_url` / `:token` — forge override (otherwise config `:lcars_fleet, :pilot_forge`)
 
   Returns `{:ok, %{repo, project_dir, work_dir, doc_dir}}` or `{:error, term()}` (fail-fast) —
   one key per face. On an error return AND on an exception the sequence compensates automatically:
@@ -2227,7 +2227,7 @@ defmodule Fleet.Project.Onboard do
   @spec project_template(keyword()) :: String.t()
   def project_template(opts \\ []) do
     Keyword.get(opts, :project_template) ||
-      Application.get_env(:fleet_pilot, :project_template, "fleet/project-template")
+      Application.get_env(:lcars_fleet, :pilot_project_template, "fleet/project-template")
   end
 
   @doc false
@@ -2247,7 +2247,8 @@ defmodule Fleet.Project.Onboard do
 
   defp repo_url(full_name, opts) do
     base =
-      Keyword.get(opts, :base_url) || Application.get_env(:fleet_pilot, :forge, [])[:base_url]
+      Keyword.get(opts, :base_url) ||
+        Application.get_env(:lcars_fleet, :pilot_forge, [])[:base_url]
 
     case base do
       b when is_binary(b) and b != "" ->

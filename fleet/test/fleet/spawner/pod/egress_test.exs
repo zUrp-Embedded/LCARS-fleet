@@ -259,7 +259,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       # caps the path. The real base is `/run/lcars/egress`, which is short for this exact reason.
       base = Path.join(System.tmp_dir!(), "lcars-egb")
       File.mkdir_p!(base)
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :egress_sock_base, base)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_egress_sock_base, base)
       on_exit(fn -> File.rm_rf(base) end)
       :ok
     end

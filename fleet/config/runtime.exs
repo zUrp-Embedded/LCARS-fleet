@@ -6,7 +6,7 @@
 # The `config_env() != :test` guard is MANDATORY: this file is boot
 # config (it reads env vars of the human run `~/.lcars/fleet_v2.env`,
 # nonexistent in test) and it is evaluated AFTER `config/test.exs`. Without the
-# guard, `config :fleet_api, start_listener: true` (below) overrides the
+# guard, `config :lcars_fleet, api_start_listener: true` (below) overrides the
 # hermetic `start_listener: false` of test.exs → fleet_api starts the
 # Cowboy listener in test → boot crash → dead daemon boot. Any runtime
 # config added STAYS INSIDE the guard (hermetic discipline: runtime config ≠ tests).
@@ -37,9 +37,9 @@ tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 # Pas de variable d'env : la declaration est un FICHIER que l'operateur edite, et pointer dessus par
 # une variable mettrait la reponse a deux endroits. Fichier absent = le catalogue metier livre, seul.
 if config_env() != :test do
-  config :fleet_catalogue,
-    active_declaration: Fleet.Layout.active_catalogues_path(),
-    install_dirs: [
+  config :lcars_fleet,
+    catalogue_active_declaration: Fleet.Layout.active_catalogues_path(),
+    catalogue_install_dirs: [
       Fleet.Layout.catalogues_operator_dir(),
       Fleet.Layout.catalogues_shipped_dir()
     ]
@@ -66,7 +66,7 @@ forge_opts =
   end
 
 if forge_opts != [] do
-  config :fleet_pilot, :forge, forge_opts
+  config :lcars_fleet, :pilot_forge, forge_opts
 end
 
 if config_env() != :test and not tool_mode? do
@@ -109,8 +109,8 @@ if config_env() != :test and not tool_mode? do
   # `iex -S mix` starting the whole app — must now say so: `LCARS_HOST_BOOT=1 iex -S mix`. That is
   # the point rather than a side effect; the alternative is a declaration that declares nothing.
   # (`mix test` is unaffected: `config/test.exs` declares `:host` on its own.)
-  config :fleet_mcp,
-    boot_environment: if(System.get_env("LCARS_HOST_BOOT") == "1", do: :host, else: :pod)
+  config :lcars_fleet,
+    mcp_boot_environment: if(System.get_env("LCARS_HOST_BOOT") == "1", do: :host, else: :pod)
 
   # `delete_project` — the ONE irreversible act of the tool surface (forge repo + both worktrees),
   # aimed by a free argument, reachable by any onboarder pod. Off unless this deployment says
@@ -118,8 +118,8 @@ if config_env() != :test and not tool_mode? do
   # and the two are different questions. Cost of arming it, written where the switch is: every
   # onboarder pod regains a destructive verb for the whole life of the daemon.
   # The code reads `=== true`, so a non-boolean here does not arm it.
-  config :fleet_mcp,
-         :allow_delete_project,
+  config :lcars_fleet,
+         :mcp_allow_delete_project,
          Fleet.EnvParse.bool(
            "LCARS_ALLOW_DELETE_PROJECT",
            System.get_env("LCARS_ALLOW_DELETE_PROJECT"),
@@ -183,7 +183,7 @@ if config_env() != :test and not tool_mode? do
   # (`Fleet.Catalogue`, SSoT of the layout). Unset = the bundled priv, which is what the current
   # instance runs. The per-tree keys below stay as FINE overrides and keep precedence over this one.
   if path = System.get_env("LCARS_CATALOGUE_ROOT") do
-    config :fleet_catalogue, root: Fleet.EnvParse.path("LCARS_CATALOGUE_ROOT", path)
+    config :lcars_fleet, catalogue_root: Fleet.EnvParse.path("LCARS_CATALOGUE_ROOT", path)
   end
 
   # WHICH catalogues run, and WHERE they are installed — the ordered declaration of section 9.3.
@@ -208,21 +208,21 @@ if config_env() != :test and not tool_mode? do
   # ETS and ignore LCARS_CATALOGUE_ROOT, silently mounting the bundled skills under a custom
   # catalogue). An unconditional default here would also clobber every earlier layer (F6).
   if path = System.get_env("LCARS_SKILLS_ROOT") do
-    config :fleet_spawner, skills_root: Fleet.EnvParse.path("LCARS_SKILLS_ROOT", path)
+    config :lcars_fleet, spawner_skills_root: Fleet.EnvParse.path("LCARS_SKILLS_ROOT", path)
   end
 
   if path = System.get_env("LCARS_CAPPROFILES_ROOT") do
     path = Fleet.EnvParse.path("LCARS_CAPPROFILES_ROOT", path)
     # Key `:root_dir` (not `:capprofiles_root`) — what
     # Fleet.CapProfile.root_dir/0 actually reads.
-    config :fleet_cap_profile, root_dir: path
+    config :lcars_fleet, cap_profile_root_dir: path
     # Fleet.Spawner.PermanentBoot.cap_profiles_dir/0
-    # reads `:fleet_spawner, :cap_profiles_dir` (a config separate from the
+    # reads `:lcars_fleet, :spawner_cap_profiles_dir` (a config separate from the
     # loader). Same env source → same shared canonical path.
-    config :fleet_spawner, cap_profiles_dir: path
+    config :lcars_fleet, spawner_cap_profiles_dir: path
 
     # ⚠ SCOPE of this override: it moves the cap-profile YAMLs ONLY. The SP overlay artifacts the
-    # profiles reference — modop bundles (`:fleet_sp_builder, :modop_root`) and subagent templates —
+    # profiles reference — modop bundles (`:lcars_fleet, :sp_builder_modop_root`) and subagent templates —
     # stay resolved from the catalogue root (or their own config keys). An operator overriding the
     # profiles WITHOUT the matching SP roots runs overridden profiles over the catalogue's SP
     # fragments: a coherent-looking skew. That narrowness is now a CHOICE, not the only option —
@@ -243,8 +243,8 @@ if config_env() != :test and not tool_mode? do
   # fleet_event_router — Gitea webhook + OS signals
   # ============================================================
   if path = System.get_env("FLEET_WEBHOOK_SECRET_PATH") do
-    config :fleet_event_router,
-      webhook_secret_path: Fleet.EnvParse.path("FLEET_WEBHOOK_SECRET_PATH", path)
+    config :lcars_fleet,
+      event_router_webhook_secret_path: Fleet.EnvParse.path("FLEET_WEBHOOK_SECRET_PATH", path)
   end
 
   # ON-SWITCH of the Gitea webhook listener (:8081 HMAC). Without it, `:start_webhooks` stays
@@ -258,11 +258,11 @@ if config_env() != :test and not tool_mode? do
   # the agents' reaction is measured in MINUTES. The cost/risk/benefit ratio does not justify it.
   # Do NOT turn it back on "for latency" without re-asking the human this question.
   if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
-    config :fleet_event_router, start_webhooks: true
+    config :lcars_fleet, event_router_start_webhooks: true
 
     if port = System.get_env("LCARS_FLEET_WEBHOOK_PORT") do
-      config :fleet_event_router,
-        webhook_port: Fleet.EnvParse.port("LCARS_FLEET_WEBHOOK_PORT", port)
+      config :lcars_fleet,
+        event_router_webhook_port: Fleet.EnvParse.port("LCARS_FLEET_WEBHOOK_PORT", port)
     end
   end
 
@@ -286,8 +286,8 @@ if config_env() != :test and not tool_mode? do
   # STRICT parse (bool!): this is a reduction-of-effects switch — the warn-and-default
   # of `bool/3` would turn a typo'd `false` into a FULL boot (permanent pods spawned,
   # real spend). An unrecognized value refuses the boot instead.
-  config :fleet_spawner,
-    boot_permanent_at_start:
+  config :lcars_fleet,
+    spawner_boot_permanent_at_start:
       Fleet.EnvParse.bool!(
         "LCARS_BOOT_PERMANENT_AT_START",
         System.get_env("LCARS_BOOT_PERMANENT_AT_START"),
@@ -304,8 +304,8 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # STRICT parse (bool!): the flag exists to make something VISIBLE, so a typo'd value that
   # silently kept the fleet closed would be the exact failure the operator typed it to avoid.
-  config :fleet_spawner,
-    debug_visibility:
+  config :lcars_fleet,
+    spawner_debug_visibility:
       Fleet.EnvParse.bool!(
         "LCARS_DEBUG_VISIBILITY",
         System.get_env("LCARS_DEBUG_VISIBILITY"),
@@ -316,7 +316,7 @@ if config_env() != :test and not tool_mode? do
   # fleet_spawner pod_dir: PER-HUMAN, derived from the runtime process HOME (pod.ex `pod_dir_for` →
   # `~/pods/pod_<id>`). User decision: no `LCARS_PODS_ROOT` env knob (it would override the
   # per-human derivation). The human = the user who launches the
-  # runtime, period. Any override = `config :fleet_spawner, pod_dir_root: …` directly (tests).
+  # runtime, period. Any override = `config :lcars_fleet, spawner_pod_dir_root: …` directly (tests).
   # ============================================================
 
   # tmux sock-dir base — the Elixir-side default is home-relative `~/.lcars/run/tmux-sock`
@@ -325,7 +325,8 @@ if config_env() != :test and not tool_mode? do
   # path. Sets both the runtime side (`:tmux_sock_base`) and, via do_launch, the
   # `LCARS_TMUX_SOCK_BASE` env the launchers read.
   if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
-    config :fleet_spawner, tmux_sock_base: Fleet.EnvParse.path("LCARS_TMUX_SOCK_BASE", sock_base)
+    config :lcars_fleet,
+      spawner_tmux_sock_base: Fleet.EnvParse.path("LCARS_TMUX_SOCK_BASE", sock_base)
   end
 
   # ============================================================
@@ -345,7 +346,8 @@ if config_env() != :test and not tool_mode? do
   # as `LCARS_TMUX_SOCK_BASE` does for the pod tmux socket. The socket is bound at the SAME
   # absolute path inside the bwrap sandbox (`--bind X X`) → host == namespace (no path remap).
   if sock_base = System.get_env("LCARS_FLEET_MCP_SOCK_BASE") do
-    config :fleet_mcp, sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
+    config :lcars_fleet,
+      mcp_sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
   end
 
   # EGRESS base — same override, same reason, same ONE source as the MCP socket above: `bin/fleet_v2`
@@ -354,8 +356,8 @@ if config_env() != :test and not tool_mode? do
   # the directory never existed and every pod launched with no way to reach its vendor. Found on a
   # bench, not by the gate: nothing in the suite knows where a real fleet puts its sockets.
   if egress_base = System.get_env("LCARS_FLEET_EGRESS_SOCK_BASE") do
-    config :fleet_spawner,
-      egress_sock_base: Fleet.EnvParse.path("LCARS_FLEET_EGRESS_SOCK_BASE", egress_base)
+    config :lcars_fleet,
+      spawner_egress_sock_base: Fleet.EnvParse.path("LCARS_FLEET_EGRESS_SOCK_BASE", egress_base)
   end
 
   # ============================================================
@@ -377,7 +379,7 @@ if config_env() != :test and not tool_mode? do
   # Gate on `bridge_path` ALONE (the bridge must be copyable): the comm target is not a URL but
   # the per-pod socket, resolved at runtime pod-side, not a static boot config.
   if bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH") do
-    config :fleet_spawner, :mcp_server_spec, %{
+    config :lcars_fleet, :spawner_mcp_server_spec, %{
       # HOST path of the bridge, copied per-pod by pod.ex (not launched in place).
       "bridge_source" => Fleet.EnvParse.path("LCARS_FLEET_MCP_BRIDGE_PATH", bridge_path),
       "command" => "bash",
@@ -397,12 +399,12 @@ if config_env() != :test and not tool_mode? do
   # fleet_workflow — workflow-map YAML catalogue root
   # ============================================================
   if path = System.get_env("LCARS_WORKFLOW_MAPS_ROOT") do
-    config :fleet_workflow,
-      workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
+    config :lcars_fleet,
+      workflow_workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
   end
 
-  # TOMBSTONE: the `LCARS_WORKSPACES_ROOT` knob (→ `:fleet_workflow,
-  # :workspaces_root`, root of the pipeline scratch git workspaces) is RETIRED — it has
+  # TOMBSTONE: the `LCARS_WORKSPACES_ROOT` knob (→ what would today be
+  # `:lcars_fleet, :workflow_workspaces_root`, root of the pipeline scratch git workspaces) is RETIRED — it has
   # NO reader. Do not reintroduce: current workspaces are per-pod (pod_dir), not a
   # shared pipeline git scratch.
 
@@ -410,8 +412,8 @@ if config_env() != :test and not tool_mode? do
   # fleet_starfleet — Cat 5 audit log
   # ============================================================
   if path = System.get_env("LCARS_STARFLEET_AUDIT_LOG") do
-    config :fleet_starfleet,
-      audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
+    config :lcars_fleet,
+      starfleet_audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
   end
 
   # Shutdown drain: real backend (aggregates the TaskQueue active work + the completion offloads and
@@ -421,22 +423,22 @@ if config_env() != :test and not tool_mode? do
   # LA MEME VALEUR QUE `bin/fleet_v2` LIT POUR SA MARGE D'ATTENTE (BL-6-52). Un seul nombre, deux
   # lecteurs : le BEAM draine pendant ce delai, le launcher attend ce delai PLUS une marge avant de
   # conclure. Sans ca, les deux derivaient — 45 s cote BEAM, 90 s en dur cote shell.
-  config :fleet_starfleet,
-         :shutdown_grace_ms,
+  config :lcars_fleet,
+         :starfleet_shutdown_grace_ms,
          Fleet.EnvParse.positive_ms(
            "LCARS_SHUTDOWN_GRACE_MS",
            System.get_env("LCARS_SHUTDOWN_GRACE_MS") || "45000"
          )
 
-  config :fleet_starfleet,
-         :shutdown_dispatcher,
+  config :lcars_fleet,
+         :starfleet_shutdown_dispatcher,
          Fleet.Starfleet.Shutdown.AggregateDispatcher
 
   # CI-02 — in-flight COMPLETION offloads for the drain. Starfleet must NOT reference Pilot at compile
   # time (no boundary dep); this runtime fun crosses the boundary as a value (cf. AggregateDispatcher
   # ## Boundary). Absent in `:test` → the seam default `fn -> 0 end` (no completion Tasks to drain there).
-  config :fleet_starfleet,
-         :completion_inflight_fun,
+  config :lcars_fleet,
+         :starfleet_completion_inflight_fun,
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
   # The project-lifecycle domain sits BELOW the rail that drives projects, so its two card-fallback
@@ -444,17 +446,18 @@ if config_env() != :test and not tool_mode? do
   # as `:coord_backend`: the module crosses the boundary as a VALUE. Unwired, the fallback still
   # runs and warns — what is lost is the durable trace, and `Project.Incidents` says so loudly
   # rather than swallowing it.
-  config :fleet_project,
-         :incident_rail,
+  config :lcars_fleet,
+         :project_incident_rail,
          {Fleet.Pilot.IncidentRegistry, :record_or_escalate}
 
   # ============================================================
   # fleet_coord — wired Fleet.Coord backend for starfleet
   # ============================================================
-  config :fleet_starfleet, :coord_backend, Fleet.Coord
+  config :lcars_fleet, :starfleet_coord_backend, Fleet.Coord
 
   if path = System.get_env("LCARS_COORD_POLICIES_PATH") do
-    config :fleet_coord, policies_path: Fleet.EnvParse.path("LCARS_COORD_POLICIES_PATH", path)
+    config :lcars_fleet,
+      coord_policies_path: Fleet.EnvParse.path("LCARS_COORD_POLICIES_PATH", path)
   end
 
   # ============================================================
@@ -473,14 +476,14 @@ if config_env() != :test and not tool_mode? do
         Fleet.EnvParse.port("FLEET_API_PORT", str)
     end
 
-  config :fleet_api, http_port: http_port
-  config :fleet_api, start_listener: true
+  config :lcars_fleet, api_http_port: http_port
+  config :lcars_fleet, api_start_listener: true
 
   # AF_UNIX control socket for the write door (POST /api/admin/spawn, ControlRouter) —
   # off the network the pod shares. Default: ~/.lcars/run/api.sock (per-human, real
   # home never bound into the pod → unreachable). Override LCARS_API_SOCK (set by bin/fleet_v2).
-  config :fleet_api,
-    control_socket:
+  config :lcars_fleet,
+    api_control_socket:
       System.get_env("LCARS_API_SOCK") ||
         Path.join([System.fetch_env!("HOME"), ".lcars", "run", "api.sock"])
 
@@ -499,8 +502,8 @@ if config_env() != :test and not tool_mode? do
         Fleet.EnvParse.port("LCARS_OBSERVATION_PORT", str)
     end
 
-  config :fleet_observation, http_port: obs_port
-  config :fleet_observation, start_listener: true
+  config :lcars_fleet, observation_http_port: obs_port
+  config :lcars_fleet, observation_start_listener: true
 
   # ============================================================
   # fleet_pilot — only the forge-state-machine rail exists (config `LCARS_PILOT_STEP`). There is no
@@ -511,8 +514,8 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
 
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
-    config :fleet_pilot,
-      poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
+    config :lcars_fleet,
+      pilot_poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end
 
   # Login of the SYSTEM account (owner of FORGE_TOKEN). The forge markers
@@ -521,7 +524,7 @@ if config_env() != :test and not tool_mode? do
   # via `GET /user` (the token's authenticated user) and caches it. Overriding it here avoids that
   # round-trip and removes any ambiguity in deployment (shared token, mirror, etc.).
   if bot_login = System.get_env("FORGE_BOT_LOGIN") do
-    config :fleet_pilot, forge_bot_login: bot_login
+    config :lcars_fleet, pilot_forge_bot_login: bot_login
   end
 
   # Multi-forge by config (one forge per boot, chosen by env profile). The ROLE tokens
@@ -532,8 +535,8 @@ if config_env() != :test and not tool_mode? do
   # FORGE_TOKEN_FILE. Absent = default (strict backward-compat). No SIMULTANEOUS multi-forge
   # (per-project registry/routing): out-of-scope, that would be another model.
   if role_tokens_dir = System.get_env("FORGE_ROLE_TOKENS_DIR") do
-    config :fleet_credentials,
-      role_tokens_dir: Fleet.EnvParse.path("FORGE_ROLE_TOKENS_DIR", role_tokens_dir)
+    config :lcars_fleet,
+      credentials_role_tokens_dir: Fleet.EnvParse.path("FORGE_ROLE_TOKENS_DIR", role_tokens_dir)
   end
 
   # ============================================================
@@ -544,7 +547,7 @@ if config_env() != :test and not tool_mode? do
   # single fail-loud guard of the step boot (org-membership project discovery + per-step-run push).
   # No fixed-repo knob: the Poller discovers by org-membership, not a configured repo.
   if Fleet.EnvParse.bool("LCARS_PILOT_STEP", System.get_env("LCARS_PILOT_STEP"), false) do
-    config :fleet_pilot, step_dispatch?: true
+    config :lcars_fleet, pilot_step_dispatch?: true
   end
 
   # ============================================================
@@ -558,8 +561,8 @@ if config_env() != :test and not tool_mode? do
   # `max_fan` that silently falls back would run a fleet at a fan the operator never asked for,
   # and the symptom -- tickets waiting -- looks like a busy fleet, not like a misconfiguration.
   if raw = System.get_env("LCARS_MAX_FAN") do
-    config :fleet_pilot,
-      max_fan:
+    config :lcars_fleet,
+      pilot_max_fan:
         Fleet.EnvParse.bounded(
           "LCARS_MAX_FAN",
           raw,
@@ -575,8 +578,8 @@ if config_env() != :test and not tool_mode? do
   # deployment surface: without it, an operator RPC was the sole way to set it, and it
   # evaporated at every reboot.
   if ms = System.get_env("LCARS_FORGE_WRITE_SPACING_MS") do
-    config :fleet_pilot,
-      forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
+    config :lcars_fleet,
+      pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
   end
 
   # DR-018 degraded admission (the E-02 knob, read by MCP delegation at create_project):
@@ -584,8 +587,8 @@ if config_env() != :test and not tool_mode? do
   # system token is deliberately a plain org member). The runtime still logs LOUD on every
   # degraded admission. Default false (fail-closed). This is THE deployment surface the
   # knob never had — the boot ritual used to re-pose it by RPC after every restart.
-  config :fleet_pilot,
-    allow_unverifiable_human_team?:
+  config :lcars_fleet,
+    pilot_allow_unverifiable_human_team?:
       Fleet.EnvParse.bool(
         "LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM",
         System.get_env("LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM"),
@@ -629,7 +632,10 @@ if config_env() != :test and not tool_mode? do
       end
 
   if is_binary(forge_base) and is_binary(forge_push_token) and forge_push_token != "" do
-    config :fleet_credentials, :forge_auth, %{url_prefix: forge_base, token: forge_push_token}
+    config :lcars_fleet, :credentials_forge_auth, %{
+      url_prefix: forge_base,
+      token: forge_push_token
+    }
   end
 
   # NB catalogue trees: covered by `LCARS_CATALOGUE_ROOT` (coarse, all of them) and the three fine
@@ -642,14 +648,14 @@ if config_env() != :test and not tool_mode? do
   # task-queue state (default home-relative `~/.lcars/task-queue/state.json`; unresolvable HOME =
   # deliberate fail-loud, raise — cf. task_queue/store.ex `default_path/0`; no fallback).
   if path = System.get_env("LCARS_STATE_PATH") do
-    config :fleet_task_queue, state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
+    config :lcars_fleet, task_queue_state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
   end
 
   # Pod FS state (session_id/phase, recovery). Default `~/.lcars/state` (fleet under the human
   # — cf. pod.ex `default_state_fs_root`). Explicit override for a non-standard deployment;
   # otherwise the state follows the home of the human launching the fleet.
   if path = System.get_env("LCARS_STATE_FS_ROOT") do
-    config :fleet_spawner, state_fs_root: Fleet.EnvParse.path("LCARS_STATE_FS_ROOT", path)
+    config :lcars_fleet, spawner_state_fs_root: Fleet.EnvParse.path("LCARS_STATE_FS_ROOT", path)
   end
 
   # Pod launchers (N0/N1): absolute path read by the spawner (default `/usr/local/bin`, pod.ex). The
@@ -658,20 +664,20 @@ if config_env() != :test and not tool_mode? do
   # derived from `claude_launch_path`). An install param → a future rename touches no code.
   if path = System.get_env("LCARS_BWRAP_LAUNCH_PATH"),
     do:
-      config(:fleet_spawner,
-        bwrap_launch_path: Fleet.EnvParse.path("LCARS_BWRAP_LAUNCH_PATH", path)
+      config(:lcars_fleet,
+        spawner_bwrap_launch_path: Fleet.EnvParse.path("LCARS_BWRAP_LAUNCH_PATH", path)
       )
 
   if path = System.get_env("LCARS_HOST_LAUNCH_PATH"),
     do:
-      config(:fleet_spawner,
-        host_launch_path: Fleet.EnvParse.path("LCARS_HOST_LAUNCH_PATH", path)
+      config(:lcars_fleet,
+        spawner_host_launch_path: Fleet.EnvParse.path("LCARS_HOST_LAUNCH_PATH", path)
       )
 
   if path = System.get_env("LCARS_CLAUDE_LAUNCH_PATH"),
     do:
-      config(:fleet_spawner,
-        claude_launch_path: Fleet.EnvParse.path("LCARS_CLAUDE_LAUNCH_PATH", path)
+      config(:lcars_fleet,
+        spawner_claude_launch_path: Fleet.EnvParse.path("LCARS_CLAUDE_LAUNCH_PATH", path)
       )
 
   # Seed store (pod round-1 — a resume optimization, NEVER required; empty = self-populating, the pod
@@ -685,7 +691,7 @@ if config_env() != :test and not tool_mode? do
       p -> Fleet.EnvParse.path("LCARS_SEED_STORE_ROOT", p)
     end
 
-  config :fleet_spawner, seed_store_root: seed_store_root
+  config :lcars_fleet, spawner_seed_store_root: seed_store_root
 
   # Pod onboarding kick (the `engage` nudge → claude calls get_work_item). The default window
   # (first 2s + 12×2.5s ≈ 32s) is too short against the claude cold-start in bwrap on a deployed
@@ -693,17 +699,19 @@ if config_env() != :test and not tool_mode? do
   # brief. Widen in deploy. Integers via env.
   if v = System.get_env("LCARS_KICK_FIRST_DELAY_MS"),
     do:
-      config(:fleet_spawner,
-        kick_first_delay_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_FIRST_DELAY_MS", v)
+      config(:lcars_fleet,
+        spawner_kick_first_delay_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_FIRST_DELAY_MS", v)
       )
 
   if v = System.get_env("LCARS_KICK_RETRY_MS"),
     do:
-      config(:fleet_spawner, kick_retry_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_RETRY_MS", v))
+      config(:lcars_fleet,
+        spawner_kick_retry_ms: Fleet.EnvParse.positive_ms("LCARS_KICK_RETRY_MS", v)
+      )
 
   if v = System.get_env("LCARS_KICK_MAX_ATTEMPTS"),
     do:
-      config(:fleet_spawner,
-        kick_max_attempts: Fleet.EnvParse.count("LCARS_KICK_MAX_ATTEMPTS", v)
+      config(:lcars_fleet,
+        spawner_kick_max_attempts: Fleet.EnvParse.count("LCARS_KICK_MAX_ATTEMPTS", v)
       )
 end

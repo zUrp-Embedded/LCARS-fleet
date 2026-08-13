@@ -104,7 +104,7 @@ defmodule Fleet.Credentials.RoleToken do
     end
   end
 
-  @doc "Root of the role tokens (`:fleet_credentials, :role_tokens_dir`, default `/home/private`)."
+  @doc "Root of the role tokens (`:lcars_fleet, :credentials_role_tokens_dir`, default `/home/private`)."
   @spec dir() :: String.t()
-  def dir, do: Application.get_env(:fleet_credentials, :role_tokens_dir) || @default_dir
+  def dir, do: Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || @default_dir
 end

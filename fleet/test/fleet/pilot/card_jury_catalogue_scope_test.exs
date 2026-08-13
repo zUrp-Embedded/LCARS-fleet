@@ -72,12 +72,12 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     File.write!(Path.join(home, "catalogues.active"), "fleet\nbiz\n")
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_catalogue,
-      :active_declaration,
+      :lcars_fleet,
+      :catalogue_active_declaration,
       Path.join(home, "catalogues.active")
     )
 
-    Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :install_dirs, [
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
       Path.join(home, "catalogues")
     ])
 
@@ -145,7 +145,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   test "le LOGIN d'un role prend le prefixe du catalogue qui le DECLARE" do
     # La regle est "le prefixe suit le TIER", et le tier d'un role metier est LE CATALOGUE QUI LE
     # DECLARE — pas "celui par defaut". La projection venait de `CatalogueRoles`, ou elle tournait
-    # avec UN catalogue emprunte dans `:fleet_catalogue, :root` : `Catalogue.name()` y etait le
+    # avec UN catalogue emprunte dans `:lcars_fleet, :catalogue_root` : `Catalogue.name()` y etait le
     # catalogue declarant, et l'interroger etait juste. Remontee dans un contexte global, ce nom
     # n'est plus que le catalogue par defaut — mesure : `biz-dev` projetait `fleet_biz-dev` alors
     # que son compte est `biz_biz-dev`. Une projection juste pour un catalogue et fausse en silence

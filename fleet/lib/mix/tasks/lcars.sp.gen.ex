@@ -50,15 +50,15 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
       Mix.raise("--catalogue #{root} is not a directory")
     end
 
-    previous = Application.fetch_env(:fleet_catalogue, :root)
-    Application.put_env(:fleet_catalogue, :root, root)
+    previous = Application.fetch_env(:lcars_fleet, :catalogue_root)
+    Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     try do
       fun.()
     after
       case previous do
-        {:ok, value} -> Application.put_env(:fleet_catalogue, :root, value)
-        :error -> Application.delete_env(:fleet_catalogue, :root)
+        {:ok, value} -> Application.put_env(:lcars_fleet, :catalogue_root, value)
+        :error -> Application.delete_env(:lcars_fleet, :catalogue_root)
       end
     end
   end

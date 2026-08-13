@@ -5,9 +5,9 @@
 # - NO global `exclude: [:r1_seam]`: the exclusion was LOCAL to fleet_api (its red-by-design WS R1
 #   test now carries its own `@moduletag skip:`) — event_router's :r1_seam tests run and must keep
 #   running.
-# - `ensure_all_started(:fleet_workflow)` (ex-workflow helper): covered by the single-app boot in
+# - `ensure_all_started` of the ex-workflow OTP app (helper of the umbrella era): covered by the single-app boot in
 #   test env — nothing left to start by hand.
-Application.put_env(:fleet_api, :start_listener, false)
+Application.put_env(:lcars_fleet, :api_start_listener, false)
 
 # The in-tree `tmp/` @tmp_dir root is SHARED across runners of the
 # `fleet` group (multi-human box). A test interrupted (kill -9) or run by another UID could leave a

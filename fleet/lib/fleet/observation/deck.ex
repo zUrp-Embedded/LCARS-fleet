@@ -47,7 +47,7 @@ defmodule Fleet.Observation.Deck do
     |> json(200, %{
       status: "ok",
       deck: "fleet_observation",
-      port: Application.get_env(:fleet_observation, :http_port)
+      port: Application.get_env(:lcars_fleet, :observation_http_port)
     })
   end
 

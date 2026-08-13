@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
     Mix.Task.run("loadpaths")
 
     # `--catalogue <root>`, and it exists because the obvious spelling SILENTLY does the wrong
-    # thing: `LCARS_CATALOGUE_ROOT` reaches `:fleet_catalogue, :root` through `config/runtime.exs`,
+    # thing: `LCARS_CATALOGUE_ROOT` reaches `:lcars_fleet, :catalogue_root` through `config/runtime.exs`,
     # which a mix task never evaluates (no `app.start`, by design here). Setting the variable and
     # running this task therefore pushes the BUNDLED template and reports success — the deployment
     # ends up with a scaffolding from a catalogue it does not run, and nothing says so.
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
     case OptionParser.parse(args, switches: [catalogue: :string]) do
       {[catalogue: root], _, _} ->
         File.dir?(root) || Mix.raise("--catalogue: #{root} is not a readable directory")
-        Application.put_env(:fleet_catalogue, :root, root)
+        Application.put_env(:lcars_fleet, :catalogue_root, root)
         Mix.shell().info("project-template: catalogue root = #{root}")
 
       _ ->
@@ -105,7 +105,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
     # :forge_auth config config/runtime.exs sets at boot, from the env this task already read.
     base_prefix = String.trim_trailing(Keyword.fetch!(fc, :base_url), "/")
 
-    Application.put_env(:fleet_credentials, :forge_auth, %{
+    Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
       url_prefix: base_prefix,
       token: Keyword.fetch!(fc, :token)
     })

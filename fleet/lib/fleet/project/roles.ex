@@ -48,7 +48,7 @@ defmodule Fleet.Project.Roles do
 
   @doc """
   Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
-  `:fleet_pilot, :producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
+  `:lcars_fleet, :pilot_producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
 
   ⚠ **This is NOT who produces.** The CARD names its producer per step (`steps.<name>.role`,
   schema-required), and the run carries it in the feature branch `lcars/issue-N-<producer>`. This
@@ -63,7 +63,7 @@ defmodule Fleet.Project.Roles do
   @spec producer_role(keyword()) :: String.t()
   def producer_role(opts \\ []) do
     Keyword.get(opts, :producer_role) ||
-      Application.get_env(:fleet_pilot, :producer_role) ||
+      Application.get_env(:lcars_fleet, :pilot_producer_role) ||
       resolve_producer!()
   end
 
@@ -81,7 +81,7 @@ defmodule Fleet.Project.Roles do
                 "(#{inspect(roles)}), and this is the LAST-RESORT path — the card names the producer " <>
                 "per step, the run carries it in the feature branch, and both were unavailable here. " <>
                 "On a catalogue with several producers there is no fleet-wide default to fall back " <>
-                "on; set `:fleet_pilot, :producer_role` if this deployment has one."
+                "on; set `:lcars_fleet, :pilot_producer_role` if this deployment has one."
 
       {:error, reason} ->
         raise "Fleet.Project.Roles: cap-profile catalogue not enumerable (#{inspect(reason)}) while " <>
@@ -95,7 +95,7 @@ defmodule Fleet.Project.Roles do
   @spec project_delegate_role(keyword()) :: String.t()
   def project_delegate_role(opts \\ []) do
     Keyword.get(opts, :project_delegate_role) ||
-      Application.get_env(:fleet_pilot, :project_delegate_role) ||
+      Application.get_env(:lcars_fleet, :pilot_project_delegate_role) ||
       resolve_structural!(@delegate_capability, "project delegate", @delegate_uniqueness)
   end
 
@@ -340,14 +340,14 @@ defmodule Fleet.Project.Roles do
   @spec gatekeeper_role(keyword()) :: String.t()
   def gatekeeper_role(opts \\ []) do
     Keyword.get(opts, :gatekeeper_role) ||
-      Application.get_env(:fleet_pilot, :gatekeeper_role) ||
+      Application.get_env(:lcars_fleet, :pilot_gatekeeper_role) ||
       resolve_structural!(@gatekeeper_capability, "gatekeeper", @gatekeeper_uniqueness)
   end
 
   @doc """
   TIER-2 CONFLICT RESOLVER — the role handed an unresolved merge conflict once the producer has
   spent its rework budget. Override by the opt `:conflict_resolver_role` (project/test), then config
-  `:fleet_pilot, :conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
+  `:lcars_fleet, :pilot_conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
   `conflict_resolver` capability. Raises on zero and on several, like every structural role.
 
   Its own capability, NOT `exception_judge`. The two responsibilities sit on the same role today,
@@ -360,7 +360,7 @@ defmodule Fleet.Project.Roles do
   @spec conflict_resolver_role(keyword()) :: String.t()
   def conflict_resolver_role(opts \\ []) do
     Keyword.get(opts, :conflict_resolver_role) ||
-      Application.get_env(:fleet_pilot, :conflict_resolver_role) ||
+      Application.get_env(:lcars_fleet, :pilot_conflict_resolver_role) ||
       resolve_structural!(
         @conflict_resolver_capability,
         "conflict resolver",

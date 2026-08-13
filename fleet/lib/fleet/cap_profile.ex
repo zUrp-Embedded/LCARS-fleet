@@ -754,7 +754,7 @@ defmodule Fleet.CapProfile do
   # ONE PASS PER ACTIVE CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
   # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
   # projection came from `Fleet.Application.CatalogueRoles`, where it ran with a single catalogue
-  # BORROWED into `:fleet_catalogue, :root`, so `Fleet.Catalogue.name()` was the declaring
+  # BORROWED into `:lcars_fleet, :catalogue_root`, so `Fleet.Catalogue.name()` was the declaring
   # catalogue and asking it was correct. Lifted here it runs globally, where that name is only the
   # DEFAULT catalogue: measured, a role declared by `biz` projected to `fleet_biz-dev` while its
   # account is `biz_biz-dev`. A projection that is right for one catalogue and silently wrong for

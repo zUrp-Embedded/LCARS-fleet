@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.PodReaperTest do
   end
 
   setup do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, FleetSpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, FleetSpawner)
     :ok
   end
 
@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.PodReaperTest do
   end
 
   test "a pod already dead is not reported as reaped (idempotent on replay)" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, AlreadyDeadSpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, AlreadyDeadSpawner)
     assert [] == PodReaper.reap_issue("fleet/myproj", 42)
   end
 
@@ -91,7 +91,7 @@ defmodule Fleet.Pilot.PodReaperTest do
 
   describe "le seam d'enumeration" do
     test "une forme inattendue (ids nus, la forme d'avant) leve, au lieu de moissonner zero pod" do
-      TestEnv.put_env_restoring(:fleet_pilot, :spawner, LegacyShapeSpawner)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, LegacyShapeSpawner)
 
       assert_raise ArgumentError, ~r/expected a map carrying :pod_id/, fn ->
         PodReaper.reap_issue("fleet/myproj", 42)
@@ -99,7 +99,7 @@ defmodule Fleet.Pilot.PodReaperTest do
     end
 
     test "une entree de registre sans pod_id est SAUTEE, et elle le dit" do
-      TestEnv.put_env_restoring(:fleet_pilot, :spawner, PartialInfoSpawner)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, PartialInfoSpawner)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->

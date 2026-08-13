@@ -318,7 +318,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  defp require_onboarded?, do: Application.get_env(:fleet_pilot, :require_onboarded, true)
+  defp require_onboarded?, do: Application.get_env(:lcars_fleet, :pilot_require_onboarded, true)
 
   defp refuse_order(repo, issue_number, role, cause) do
     Logger.error(

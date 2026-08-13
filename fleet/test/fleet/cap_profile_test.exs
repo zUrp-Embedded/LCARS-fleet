@@ -196,16 +196,21 @@ defmodule Fleet.CapProfileTest do
 
       empty_schema_dir = Path.join(tmp_dir, "empty-schemas")
       File.mkdir_p!(empty_schema_dir)
-      prev = Application.get_env(:fleet_cap_profile, :schema_dir)
-      Application.put_env(:fleet_cap_profile, :schema_dir, empty_schema_dir)
-      on_exit(fn -> Application.put_env(:fleet_cap_profile, :schema_dir, prev) end)
+      prev = Application.get_env(:lcars_fleet, :cap_profile_schema_dir)
+      Application.put_env(:lcars_fleet, :cap_profile_schema_dir, empty_schema_dir)
+      on_exit(fn -> Application.put_env(:lcars_fleet, :cap_profile_schema_dir, prev) end)
 
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
     end
 
     test "R0-CAP-007: catalogue dir ABSENT → :catalogue_missing (≠ :not_found which masks a broken config)",
          %{tmp_dir: tmp_dir} do
-      Application.put_env(:fleet_cap_profile, :root_dir, Path.join(tmp_dir, "does-not-exist"))
+      Application.put_env(
+        :lcars_fleet,
+        :cap_profile_root_dir,
+        Path.join(tmp_dir, "does-not-exist")
+      )
+
       assert {:error, :catalogue_missing} = Fleet.CapProfile.load("engineer")
     end
 

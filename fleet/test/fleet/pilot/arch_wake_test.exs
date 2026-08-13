@@ -46,7 +46,7 @@ defmodule Fleet.Pilot.ArchWakeTest do
     # Nothing in its mandate told it the deliverable was out of reach, so it filled the gap. These
     # three cases are three different sentences, and collapsing any two re-opens the defect.
     defp mandate(fetch_result) do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :arch_deliverable_fetch, fn _repo, _n ->
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_arch_deliverable_fetch, fn _repo, _n ->
         fetch_result
       end)
 

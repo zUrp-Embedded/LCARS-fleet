@@ -1,7 +1,7 @@
 defmodule Fleet.API.ControlRouter do
   @moduledoc """
   The human operator's WRITE door — `POST /api/admin/spawn`, served ONLY on the local AF_UNIX
-  control socket (`:fleet_api, :control_socket`, `~/.lcars/run/api.sock`), never over TCP.
+  control socket (`:lcars_fleet, :api_control_socket`, `~/.lcars/run/api.sock`), never over TCP.
 
   ## Why a UNIX socket, not TCP loopback
 
@@ -167,8 +167,8 @@ defmodule Fleet.API.ControlRouter do
 
   defp dispatch_status_fun do
     Application.get_env(
-      :fleet_api,
-      :spawn_dispatch_status_fun,
+      :lcars_fleet,
+      :api_spawn_dispatch_status_fun,
       &Fleet.Spawner.Application.spawn_dispatch_status/0
     )
   end
@@ -232,7 +232,7 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
-  @doc "Child spec for the control-socket listener (`:fleet_api, :control_socket`)."
+  @doc "Child spec for the control-socket listener (`:lcars_fleet, :api_control_socket`)."
   @spec child_spec(Path.t()) :: Supervisor.child_spec()
   def child_spec(sock) do
     %{

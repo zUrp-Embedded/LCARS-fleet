@@ -6,7 +6,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   post-ready spawn.
   """
   # async: false — proves against the REAL priv catalogue through the global env
-  # (other suites swap :fleet_cap_profile, :root_dir globally).
+  # (other suites swap :lcars_fleet, :cap_profile_root_dir globally).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog

@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.PollerTest do
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: a describe here flips the GLOBAL `:fleet_pilot, :require_onboarded`, which
+  # SYNC on purpose: a describe here flips the GLOBAL `:lcars_fleet, :pilot_require_onboarded`, which
   # every dispatch path reads. Async peers running in that window were refused with
   # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
   # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
@@ -746,7 +746,7 @@ defmodule Fleet.Pilot.PollerTest do
     # repos that exist nowhere on disk. Here it is turned back ON, which is the only way this
     # behaviour is pinned rather than assumed.
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
       :ok
     end
 
@@ -1711,7 +1711,7 @@ defmodule Fleet.Pilot.PollerTest do
     # would be reading a serialization story on a fan-out fleet — five reddened here saying exactly
     # that, which is the item working, not the item breaking.
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
       :ok
     end
 

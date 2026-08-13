@@ -43,13 +43,16 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Forge.Client.create_issue/4)
     add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Forge.Client.add_label/4)
     list_fun = Keyword.get(opts, :list_issues_fun, &Fleet.Forge.Client.list_open_issues/2)
-    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo) || ops_repo()
+
+    repo =
+      opts[:repo] || Application.get_env(:lcars_fleet, :pilot_system_issue_repo) || ops_repo()
 
     label =
-      opts[:label] || Application.get_env(:fleet_pilot, :system_issue_label, "error_system")
+      opts[:label] || Application.get_env(:lcars_fleet, :pilot_system_issue_label, "error_system")
 
     assignee =
-      opts[:assignee] || Application.get_env(:fleet_pilot, :system_issue_assignee, "starfleet")
+      opts[:assignee] ||
+        Application.get_env(:lcars_fleet, :pilot_system_issue_assignee, "starfleet")
 
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
@@ -187,7 +190,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   end
 
   @doc """
-  The fleet's OPS repo — SINGLE authority (`:fleet_pilot, :ops_repo`, default `"fleet/lcars"`).
+  The fleet's OPS repo — SINGLE authority (`:lcars_fleet, :pilot_ops_repo`, default `"fleet/lcars"`).
 
   Two things land there and must never drift apart: the incident REGISTRY file (branch `ops`,
   `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
@@ -195,7 +198,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   specific knobs (`:incident_registry_repo` / `:system_issue_repo`) remain as explicit overrides.
   """
   @spec ops_repo() :: String.t()
-  def ops_repo, do: Application.get_env(:fleet_pilot, :ops_repo, "fleet/lcars")
+  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
 
   # F-C075 — BOUNDED retry of the DISCOVERY label (`error_system`): a transient forge blip (name→id
   # resolution / org-label auto-create / HTTP 500) self-heals; a persistent failure is SURFACED by

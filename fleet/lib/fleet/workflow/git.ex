@@ -455,7 +455,8 @@ defmodule Fleet.Workflow.Git do
 
   # Push/readback seam supports timeout-outcome tests.
   defp git_runner,
-    do: Application.get_env(:fleet_workflow, :git_push_runner, &Fleet.Credentials.Shell.git/2)
+    do:
+      Application.get_env(:lcars_fleet, :workflow_git_push_runner, &Fleet.Credentials.Shell.git/2)
 
   # Retry only explicit history divergence, never generic rejection or server policy refusal.
   defp non_fast_forward?(out) do
@@ -466,12 +467,12 @@ defmodule Fleet.Workflow.Git do
 
   # Configurable network push bound.
   defp push_timeout_ms do
-    Application.get_env(:fleet_workflow, :git_push_timeout_ms, 30_000)
+    Application.get_env(:lcars_fleet, :workflow_git_push_timeout_ms, 30_000)
   end
 
   # Configurable local git-operation bound.
   defp git_local_timeout_ms do
-    Application.get_env(:fleet_workflow, :git_local_timeout_ms, 30_000)
+    Application.get_env(:lcars_fleet, :workflow_git_local_timeout_ms, 30_000)
   end
 
   # Forge auth comes from ForgeAuth environment only.

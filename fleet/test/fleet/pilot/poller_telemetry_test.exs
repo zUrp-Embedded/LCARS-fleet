@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  BL-6-40 Phase 0 — the poller emitted `[:fleet_pilot, :poller, :poll]` from three sites and
+  BL-6-40 Phase 0 — the poller emitted `[:lcars_fleet, :pilot_poller, :poll]` from three sites and
   nothing in `lib/` ever attached: every measurement computed, then dropped.
 
   What these tests pin is not "the numbers are right" but the three properties that make the
@@ -15,7 +15,7 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
 
   alias Fleet.Pilot.PollerTelemetry
 
-  @event [:fleet_pilot, :poller, :poll]
+  @event [:lcars_fleet, :pilot_poller, :poll]
 
   setup do
     start_supervised!({PollerTelemetry, slow_tick_ms: 500})
@@ -123,7 +123,7 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
     # Ce bloc existe parce que la confusion a REELLEMENT eu lieu : `[:poller, :poll]` est emis par
     # DEPOT, la clef de readiness qui l'exposait s'appelait `tick`, et une mesure a ete lue comme
     # une duree de passage. Ces tests tombent si les deux echelles se remelangent.
-    @cycle [:fleet_pilot, :poller, :cycle]
+    @cycle [:lcars_fleet, :pilot_poller, :cycle]
 
     defp emit_cycle(duration_ms, repos, meta \\ %{status: :ok, mode: :tick}) do
       :telemetry.execute(@cycle, %{duration_ms: duration_ms, repos: repos}, meta)

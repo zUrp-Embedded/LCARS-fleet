@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
   setup %{tmp_dir: tmp} do
     root = Path.join(tmp, "seedroot")
-    Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
     %{tmp: tmp, root: root}
   end

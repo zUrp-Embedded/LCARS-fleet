@@ -167,14 +167,14 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  @doc "Returns `:fleet_spawner, :boot_permanent_at_start`, defaulting to `true`."
+  @doc "Returns `:lcars_fleet, :spawner_boot_permanent_at_start`, defaulting to `true`."
   @spec auto_boot_enabled?() :: boolean()
   def auto_boot_enabled? do
-    Application.get_env(:fleet_spawner, :boot_permanent_at_start, true) == true
+    Application.get_env(:lcars_fleet, :spawner_boot_permanent_at_start, true) == true
   end
 
   defp cap_profiles_dir do
-    Application.get_env(:fleet_spawner, :cap_profiles_dir) || Fleet.CapProfile.root_dir()
+    Application.get_env(:lcars_fleet, :spawner_cap_profiles_dir) || Fleet.CapProfile.root_dir()
   end
 
   defp list_roles(dir) do

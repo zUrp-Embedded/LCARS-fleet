@@ -61,12 +61,12 @@ defmodule Fleet.Project.OnboardMigrateTest do
     File.write!(Path.join(home, "catalogues.active"), "fleet\nweb\n")
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_catalogue,
-      :active_declaration,
+      :lcars_fleet,
+      :catalogue_active_declaration,
       Path.join(home, "catalogues.active")
     )
 
-    Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :install_dirs, [
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
       Path.join(home, "catalogues")
     ])
 

@@ -13,7 +13,7 @@ defmodule Fleet.EventRouter.Catalog do
   """
   @spec load!() :: :ok
   def load! do
-    if Application.get_env(:fleet_event_router, :load_event_registry, true) do
+    if Application.get_env(:lcars_fleet, :event_router_load_event_registry, true) do
       do_load()
     else
       :ok
@@ -155,8 +155,8 @@ defmodule Fleet.EventRouter.Catalog do
   @doc "Returns the configured registry path or its default under `priv/`."
   def events_yaml_path do
     Application.get_env(
-      :fleet_event_router,
-      :events_yaml_path,
+      :lcars_fleet,
+      :event_router_events_yaml_path,
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/events.yaml")
     )
   end

@@ -1,7 +1,7 @@
 # Fleet.Credentials — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-07-21
+**Last revised**: 2026-08-13
 **Status**: active — domain card
 **Referenced by**: —
 
@@ -31,7 +31,7 @@ credential precedence, the `NEVER` invariants) is canonical in the doc lineage
 Pure library domain — no supervisor.
 
 ## Config & deps
-- Knob `:fleet_credentials, :forge_auth` (`%{url_prefix, token}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env.
-- Knob `:fleet_credentials, :role_tokens_dir` — read by `RoleToken` (default `/home/private`), set by `runtime.exs` from `FORGE_ROLE_TOKENS_DIR`.
-- Knob `:fleet_credentials, :forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
+- Knob `:lcars_fleet, :credentials_forge_auth` (`%{url_prefix, token}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env.
+- Knob `:lcars_fleet, :credentials_role_tokens_dir` — read by `RoleToken` (default `/home/private`), set by `runtime.exs` from `FORGE_ROLE_TOKENS_DIR`.
+- Knob `:lcars_fleet, :credentials_forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/credentials.ex`).

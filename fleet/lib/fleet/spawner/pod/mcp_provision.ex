@@ -27,7 +27,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   - `mcp_channel_env/2` — the pod process's MCP env vars to merge into the launch env (state `:launching`).
   - `release_pod_socket/1` — the `after` of `terminate/3` (self-protected, NEVER raises).
 
-  The MCP server spec is read from config (`:fleet_spawner, :mcp_server_spec`); the resolved backend
+  The MCP server spec is read from config (`:lcars_fleet, :spawner_mcp_server_spec`); the resolved backend
   is passed by the Pod (single source `Fleet.Spawner.LaunchBackend.resolved/0`).
   """
 
@@ -95,7 +95,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   def release_pod_socket(_state), do: :ok
 
-  defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
+  defp mcp_server_spec, do: Application.get_env(:lcars_fleet, :spawner_mcp_server_spec)
 
   @doc "Returns whether the Fleet MCP server specification is configured."
   @spec server_spec_present?() :: boolean()

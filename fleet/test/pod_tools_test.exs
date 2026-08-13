@@ -757,12 +757,12 @@ defmodule Fleet.MCP.PodToolsTest do
       # `stage/merged`, no longer `closed` alone. Default [] → a closed issue WITHOUT merge proof =
       # not delivered.
       labels =
-        Application.get_env(:fleet_mcp, :test_issue_labels, [])
+        Application.get_env(:lcars_fleet, :mcp_test_issue_labels, [])
         |> Enum.map(&%{"name" => &1})
 
       {:ok,
        %{
-         "state" => Application.get_env(:fleet_mcp, :test_issue_state, "open"),
+         "state" => Application.get_env(:lcars_fleet, :mcp_test_issue_state, "open"),
          "labels" => labels,
          "title" => "Brique de test"
        }}
@@ -878,17 +878,17 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "get_issue_status (arch tracking — repo from the POD BINDING, no wire param)" do
     setup do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, RecordingForge)
 
       # Tracking an issue is an ARCHITECT act; since the 2026-07-19 reorg the arch is PROJECT-BOUND:
       # the resolver engraves role AND repo (the spawn binding) on the channel's pod.
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/bound"}}
       end)
 
       # :test_issue_state / :test_issue_labels are set by some tests (RecordingForge) — restore only.
-      TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_state)
-      TestEnv.restore_env_on_exit(:fleet_mcp, :test_issue_labels)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_test_issue_state)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_test_issue_labels)
 
       :ok
     end
@@ -896,7 +896,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "R2-05: MISCONFIGURED forge_client → {:error, {:seam_misconfigured, _, _}} (no apply/3 crash)" do
       # Enum exports NO forge callback → the conforming_forge guard detects it instead of letting
       # `apply(forge, :get_issue, …)` raise an UndefinedFunctionError. Duck-typed seam = 0 compiler check.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Enum)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, Enum)
       pod = uniq("pod-arch")
 
       assert {:error, {:seam_misconfigured, Enum, missing}, _} =
@@ -942,8 +942,8 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "F-C047: `outcome: merged` when the issue is closed AND carries `stage/merged` (merge proof)" do
-      Application.put_env(:fleet_mcp, :test_issue_state, "closed")
-      Application.put_env(:fleet_mcp, :test_issue_labels, ["stage/merged"])
+      Application.put_env(:lcars_fleet, :mcp_test_issue_state, "closed")
+      Application.put_env(:lcars_fleet, :mcp_test_issue_labels, ["stage/merged"])
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -964,8 +964,8 @@ defmodule Fleet.MCP.PodToolsTest do
       # The heart of the finding: `closed` alone conflated delivery-by-merge and close-without-delivery
       # (onboarding marker / manual close) → a false delivery signal → the arch chained N+1 on an
       # ABANDONED brick. Closed but without merge proof = NOT delivered (the arch waits, safe direction).
-      Application.put_env(:fleet_mcp, :test_issue_state, "closed")
-      Application.put_env(:fleet_mcp, :test_issue_labels, ["lcars-onboarded"])
+      Application.put_env(:lcars_fleet, :mcp_test_issue_state, "closed")
+      Application.put_env(:lcars_fleet, :mcp_test_issue_labels, ["lcars-onboarded"])
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -982,7 +982,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "delivered brick, branch DELETED (head.ref rewritten by Gitea) → pr resolved via the [merge:pr-N] marker" do
       # The live 2026-07-19 falsification: Gitea 1.26.4 rewrites a merged PR's head.ref to
       # `refs/pull/N/head` — the branch scan yields nothing; the seal marker carries the link.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, MergedMarkerForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, MergedMarkerForge)
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -1005,7 +1005,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # The seal's `stage/merged` projection can be lost (transient forge failure). Pre-CI-06 this read as
       # `closed_without_merge` → the arch waited FOREVER on a delivered brick. Now the merged PR ITSELF
       # proves delivery, label or not (never a false-positive: a merged fleet PR IS a delivery).
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, MergedNoStageLabelForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, MergedNoStageLabelForge)
       pod = uniq("pod-arch")
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -1033,7 +1033,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default)" do
       # Stale spawn path / forged state: the delegation gate refuses rather than guessing a project.
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+
       pod = uniq("pod-arch")
 
       assert {:error, :repo_unbound, _} =
@@ -1051,18 +1052,18 @@ defmodule Fleet.MCP.PodToolsTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, StubForge)
 
       # Delegating is an ARCHITECT act: the `:pod_resolver` must return the `architect` role (otherwise
       # `require_architect` refuses `:forbidden_not_architect`) AND the repo BINDING (reorg 2026-07-19:
       # the arch is project-bound — the system resolves "the project" from the channel, no wire param).
       # The architect account's token must also be on disk, otherwise create_issue REFUSES
       # (`:role_token_unavailable`, fail-closed).
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
-      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
       TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
@@ -1103,7 +1104,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # PR. Retirer un ticket sans sa PR la laissait sur un rail INDEPENDANT, jugee puis mergee
       # dans un ticket mort. L'intention d'un retrait (arreter la machine, borner le cout) ne
       # depend pas de l'existence d'une PR : on complete le geste au lieu de l'interdire.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, InFlightSupersedeForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, InFlightSupersedeForge)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -1122,7 +1123,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "supersedes: target already CLOSED → filiation only, NO retirement write (re-take of an abandoned brick)" do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, ClosedTargetForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, ClosedTargetForge)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -1141,7 +1142,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # The stdio bridge times out a mutation at 30s while the forge write completes; the agent then
       # re-emits the SAME tool call. The readback on the content-derived `lcars-op` marker must find the
       # first issue and REUSE it — one issue across two identical calls, not two.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, IdempotencyForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, IdempotencyForge)
 
       # A pointer (brief_ref + 40-hex brief_sha) short-circuits physicalize — the marker is derived from
       # the stable inputs, so both calls compute the SAME marker.
@@ -1177,7 +1178,7 @@ defmodule Fleet.MCP.PodToolsTest do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
 
       long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1} du brief complet")
 
@@ -1206,7 +1207,7 @@ defmodule Fleet.MCP.PodToolsTest do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
 
       long_brief = Enum.map_join(1..20, "\n", &"ligne #{&1}")
 
@@ -1229,7 +1230,7 @@ defmodule Fleet.MCP.PodToolsTest do
     } do
       # ops_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
       # (The binding repo is fleet/demo but tmp/demo was NOT created in this test → degraded path.)
-      TestEnv.put_env_restoring(:fleet_mcp, :brief_ops_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -1323,7 +1324,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default routing)" do
       # Stale spawn path / forged state: the gate refuses rather than guessing a project.
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+
       pod = uniq("pod-arch")
 
       assert {:error, :repo_unbound, _} =
@@ -1345,14 +1347,14 @@ defmodule Fleet.MCP.PodToolsTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, StubForge)
 
       # :pod_resolver is set BY EACH TEST (it is the binding under test) — restore only.
-      TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_pod_resolver)
 
       # `architect` token on disk (legitimate case). Tests that want to prove a REFUSAL do it on the
       # ROLE (resolver ≠ architect or unknown pod), BEFORE the token even comes into play.
-      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
       TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
@@ -1364,7 +1366,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # wire field). Delegating is reserved to the architect → REFUSAL, NO issue.
       test_pid = self()
 
-      Application.put_env(:fleet_mcp, :pod_resolver, fn pod_id ->
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn pod_id ->
         send(test_pid, {:resolved_from, pod_id})
 
         if pod_id == "p1",
@@ -1387,7 +1389,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "the spawn says architect (+ repo binding) → delegation accepted, ARCHITECT token (spawn role)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
@@ -1407,7 +1409,9 @@ defmodule Fleet.MCP.PodToolsTest do
       # An unknown pod must NEVER post under the system account. Architect token PRESENT on disk:
       # if the code fell back to system, it would create the issue. The pod is unresolvable → clean
       # REFUSAL, NO issue.
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:error, :pod_unknown} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+        {:error, :pod_unknown}
+      end)
 
       assert {:error, :pod_unknown, _} =
                PodTools.handle_tool_call(
@@ -1427,7 +1431,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {:ok, path} = Fleet.Credentials.RoleIdentity.token_path("architect")
       File.rm(path)
 
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
@@ -1454,7 +1458,7 @@ defmodule Fleet.MCP.PodToolsTest do
     setup do
       # starfleet, not the architect: framing the choice of a card is part of ENROLLING a project,
       # which happens from outside any project.
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "starfleet"}}
       end)
 
@@ -1514,7 +1518,7 @@ defmodule Fleet.MCP.PodToolsTest do
             role: noop
       """)
 
-      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
@@ -1550,7 +1554,7 @@ defmodule Fleet.MCP.PodToolsTest do
       spec: {}
       """)
 
-      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -1571,7 +1575,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @tag :tmp_dir
 
     test "an EMPTY catalogue is a tool error, never an empty offer", %{tmp_dir: tmp} do
-      TestEnv.put_env_restoring(:fleet_workflow, :workflow_maps_root, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
 
       assert {:error, {:workflow_catalogue_unavailable, msg}, _} =
                PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
@@ -1598,8 +1602,8 @@ defmodule Fleet.MCP.PodToolsTest do
       # Sans surcharge fine, le guichet balaie les catalogues ACTIFS et chaque carte porte le sien.
       # Ce n'etait pas une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux,
       # `standard` peut exister des deux cotes et un nom seul ne designe plus rien.
-      TestEnv.restore_env_on_exit(:fleet_workflow, :workflow_maps_root)
-      Application.delete_env(:fleet_workflow, :workflow_maps_root)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :workflow_workflow_maps_root)
+      Application.delete_env(:lcars_fleet, :workflow_workflow_maps_root)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
@@ -1658,19 +1662,19 @@ defmodule Fleet.MCP.PodToolsTest do
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
 
     setup %{tmp_dir: tmp} do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, StubForge)
-      TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, StubOnboard)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, StubForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, StubOnboard)
 
       # `project_delete` is DISARMED by deployment (default false) and its switch is checked before
       # the gate. These tests are about the GATE, so they arm it: otherwise every delete case would
       # short-circuit on the switch and the role checks below would silently stop covering it —
       # green, and testing nothing. The disarmed behaviour has its own tests.
-      TestEnv.put_env_restoring(:fleet_mcp, :allow_delete_project, true)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_allow_delete_project, true)
 
       # :pod_resolver is set BY EACH TEST (role under test) — restore only.
-      TestEnv.restore_env_on_exit(:fleet_mcp, :pod_resolver)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_pod_resolver)
 
-      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
       TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
 
       :ok
@@ -1678,7 +1682,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "onboarding tools: non-onboarder roles REFUSED → :forbidden_not_onboarder" do
       for role <- @non_onboarder_roles do
-        Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
+        Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+          {:ok, %{role: role}}
+        end)
 
         for {tool, biz_args} <- @onboarding_tools do
           pod = uniq("pod-#{role || "nil"}")
@@ -1692,7 +1698,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "delegation tools: non-architect roles (incl. starfleet) REFUSED → :forbidden_not_architect" do
       for role <- @non_architect_roles do
-        Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: role}} end)
+        Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+          {:ok, %{role: role}}
+        end)
 
         for {tool, biz_args} <- @delegation_tools do
           pod = uniq("pod-#{role || "nil"}")
@@ -1707,7 +1715,9 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "starfleet (fleet-master): ADMITTED on onboarding, REFUSED on delegation (the head split)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+        {:ok, %{role: "starfleet"}}
+      end)
 
       for {tool, biz_args} <- @onboarding_tools do
         result = PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
@@ -1732,7 +1742,9 @@ defmodule Fleet.MCP.PodToolsTest do
     # The four verbs that CREATE or REATTACH faces are checked; `project_delete` is not — it
     # reports what it removed, a different shape with its own keys.
     test "the wire carries one dir per FACE — doc included, on every verb that lands faces" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+        {:ok, %{role: "starfleet"}}
+      end)
 
       for {tool, biz_args} <- [
             {"project_create", %{"name" => "demo-proj"}},
@@ -1756,7 +1768,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "unknown pod (resolver → :pod_unknown) REFUSED on the privileged tools (unresolved identity)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:error, :pod_unknown} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:error, :pod_unknown} end)
 
       for {tool, biz_args} <- @privileged_tools do
         pod = uniq("ghost")
@@ -1778,7 +1790,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "DPF-04: delete_project response carries local-dir verdicts — never dropped" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "starfleet"}}
       end)
 
@@ -1797,7 +1809,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "revise_project_card: threads the human declaration + the ACTING role, renders the note" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -1828,7 +1840,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "architect: ADMITTED on delegation, REFUSED on onboarding (the mirror of starfleet)" do
       # The arch is project-bound (reorg 2026-07-19): the resolver carries its repo binding.
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _pod_id ->
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 
@@ -1855,7 +1867,7 @@ defmodule Fleet.MCP.PodToolsTest do
     # left is a repo a human pushed to their personal space — a foreign PROVENANCE on a familiar
     # host, which is a different question from a foreign host.
     test "list_deposits takes the human from the fleet, never from the wire" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       # A login on the wire is not honoured — it would turn an import tool into an enumerator of
       # other people's personal spaces. The seam receives the fleet's human either way.
@@ -1877,7 +1889,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "import_deposit threads source + destination catalogue, and echoes what it came from" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -1898,7 +1910,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "the FRAMING travels with the deposit — card and criticality, like every creation verb" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
@@ -1922,7 +1934,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "a source that is not `<login>/<name>` is REFUSED before the seam" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       for bad <- ["chifoumi", "a/b/c", "lordzurp/"] do
         assert {:error, {:invalid_source, _}, _} =
@@ -2082,14 +2094,14 @@ defmodule Fleet.MCP.PodToolsTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, EscalationForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, EscalationForge)
 
       # The arch is BOUND to fleet/alpha (reorg 2026-07-19): its inbox and replies are that repo's.
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "architect", repo: "fleet/alpha"}}
       end)
 
-      TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+      TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
       TestEnv.put_role_token!("architect", "ARCH_TOKEN\n")
       :ok
     end
@@ -2115,14 +2127,14 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "list_escalations: unreadable inbox surfaces an error, never a silent empty inbox" do
-      Application.put_env(:fleet_mcp, :forge_client, EscalationForgeUnreadable)
+      Application.put_env(:lcars_fleet, :mcp_forge_client, EscalationForgeUnreadable)
 
       assert {:error, {:inbox_unreadable, "fleet/alpha", {:error, :forge_down}}, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
     end
 
     test "list_escalations: architect gate (non-architect role → refused, no read)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-eng")))
@@ -2152,7 +2164,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # ticket in flight. The in-memory memoize cannot cover it — it is volatile (a runner dying
       # after the POST releases its key) and time-boxed. The marker lives IN the artifact, so the
       # readback answers the only durable question: did this act already land?
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingEscalationForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, RecordingEscalationForge)
       args = %{"number" => 4, "body" => "vu, je re-cadre le brief"}
 
       assert {:ok, %{content: [%{"text" => first}]}, _} =
@@ -2174,7 +2186,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "comment_issue: a DIFFERENT reply still posts — convergence must not swallow a second act" do
       # The adverse half. A dedup keyed on the act must let a genuinely new act through; if it did
       # not, the arch would be silenced on the ticket after its first word.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingEscalationForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, RecordingEscalationForge)
       pod = uniq("pod-arch")
 
       assert {:ok, _, _} =
@@ -2199,7 +2211,7 @@ defmodule Fleet.MCP.PodToolsTest do
     test "comment_issue: an unreadable readback POSTS anyway (fail-safe, never a swallowed reply)" do
       # A transient forge blip must not turn into a silently dropped answer on a ticket in flight:
       # a rare duplicate beats a reply that never lands. Same posture as create_issue's readback.
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, RecordingForgeBlindReadback)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, RecordingForgeBlindReadback)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
@@ -2214,7 +2226,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "comment_issue: architect gate (non-architect role → refused, nothing posted)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
@@ -2227,7 +2239,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "comment_issue: arch WITHOUT a repo binding → :repo_unbound (fail-closed)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
 
       assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
@@ -2347,9 +2359,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "arch read channel (BL-6-28 — list_issues board / get_issue thread)" do
     setup do
-      TestEnv.put_env_restoring(:fleet_mcp, :forge_client, ReadChannelForge)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, ReadChannelForge)
 
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "architect", repo: "fleet/alpha"}}
       end)
 
@@ -2386,7 +2398,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "list_issues: architect gate (non-architect role → refused, no read)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call("issue_list", %{}, pod_state(uniq("pod-eng")))
@@ -2455,7 +2467,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "get_issue: architect gate (non-architect role → refused, no read)" do
-      Application.put_env(:fleet_mcp, :pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "reviewer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(

@@ -16,7 +16,7 @@ defmodule Fleet.Credentials.ForgeAuth do
   """
   @spec git_env_result() :: {:ok, [{String.t(), String.t()}]} | {:error, :forge_auth_malformed}
   def git_env_result do
-    case Application.get_env(:fleet_credentials, :forge_auth) do
+    case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
       nil ->
         {:ok, [@git_no_prompt]}
 

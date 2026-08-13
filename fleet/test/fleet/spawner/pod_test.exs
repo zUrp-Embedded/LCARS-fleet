@@ -30,16 +30,16 @@ defmodule Fleet.Spawner.PodTest do
   # Fails the FIRST broadcast then delegates to the real Bus (state shared via an Agent in app-env).
   defmodule FlakyBus do
     def broadcast(topic, ev) do
-      agent = Application.fetch_env!(:fleet_spawner, :flaky_agent)
+      agent = Application.fetch_env!(:lcars_fleet, :spawner_flaky_agent)
       n = Agent.get_and_update(agent, fn n -> {n, n + 1} end)
       if n == 0, do: {:error, :transient}, else: Fleet.EventRouter.Bus.broadcast(topic, ev)
     end
   end
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
-    Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
-    Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
+    Application.put_env(:lcars_fleet, :spawner_state_fs_root, Path.join(tmp_dir, "state"))
+    Application.put_env(:lcars_fleet, :spawner_pod_dir_root, Path.join(tmp_dir, "pods"))
+    Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
     # adr-f: no vault. Creds come from the claudeDir bound by bwrap
     # (CLAUDE_DIR, config default); no vault setup in test.
 
@@ -62,13 +62,13 @@ defmodule Fleet.Spawner.PodTest do
       })
     )
 
-    Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
+    Application.put_env(:lcars_fleet, :spawner_claude_dir, setup_claude)
 
     on_exit(fn ->
       StubBackend.clear()
-      Application.delete_env(:fleet_spawner, :state_fs_root)
-      Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_spawner, :claude_dir)
+      Application.delete_env(:lcars_fleet, :spawner_state_fs_root)
+      Application.delete_env(:lcars_fleet, :spawner_pod_dir_root)
+      Application.delete_env(:lcars_fleet, :spawner_claude_dir)
     end)
 
     {:ok, tmp_dir: tmp_dir}
@@ -210,7 +210,7 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   defp state_fs_path(pod_id, scope_dir \\ "pods") do
-    root = Application.get_env(:fleet_spawner, :state_fs_root)
+    root = Application.get_env(:lcars_fleet, :spawner_state_fs_root)
     Path.join([root, scope_dir, pod_id, "state.json"])
   end
 
@@ -297,8 +297,8 @@ defmodule Fleet.Spawner.PodTest do
     # :normal EXIT.
     test "MA-04: failing pod.completed broadcast → pod NOT released/killed (stays alive), fail-loud" do
       Process.flag(:trap_exit, true)
-      Application.put_env(:fleet_spawner, :event_bus, RaiseBus)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :event_bus) end)
+      Application.put_env(:lcars_fleet, :spawner_event_bus, RaiseBus)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_event_bus) end)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-ma04-#{System.unique_integer([:positive])}"
@@ -324,12 +324,12 @@ defmodule Fleet.Spawner.PodTest do
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      Application.put_env(:fleet_spawner, :flaky_agent, agent)
-      Application.put_env(:fleet_spawner, :event_bus, FlakyBus)
+      Application.put_env(:lcars_fleet, :spawner_flaky_agent, agent)
+      Application.put_env(:lcars_fleet, :spawner_event_bus, FlakyBus)
 
       on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :event_bus)
-        Application.delete_env(:fleet_spawner, :flaky_agent)
+        Application.delete_env(:lcars_fleet, :spawner_event_bus)
+        Application.delete_env(:lcars_fleet, :spawner_flaky_agent)
       end)
 
       StubBackend.set_reply(interactive_reply())
@@ -767,8 +767,8 @@ defmodule Fleet.Spawner.PodTest do
         Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # The identity's seed sits in the seed store (captured by a previous life).
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -796,8 +796,8 @@ defmodule Fleet.Spawner.PodTest do
 
     test "seed decision: NO sidecar, NO live jsonl → fresh create (resume 0)", %{tmp_dir: tmp_dir} do
       pod_id = "pod-noseed-#{System.unique_integer([:positive])}"
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
 
       {:ok, _pid} = spawn_via_supervisor(gatekeeper_args(pod_id, uid: 4242, repo_id: 7))
       assert_receive {:launch_called, _largs, env}, 2_000
@@ -831,8 +831,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # The identity's seed exists.
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -870,8 +870,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # Even WITH a seed present, a same-life crash NEVER resumes (fresh-reroll).
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -940,7 +940,7 @@ defmodule Fleet.Spawner.PodTest do
         "---\nname: card-revision\n---\n"
       )
 
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :skills_root, skills_root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_skills_root, skills_root)
 
       # PAS d'isolation de la racine systeme : depuis que la precedence est METIER D'ABORD, la
       # fixture ecrite juste au-dessus gagne sur le `card-revision` du systeme sans qu'on ait a
@@ -1100,7 +1100,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
       root = Path.join(System.tmp_dir!(), "seedroot-to-#{System.unique_integer([:positive])}")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 
       pod_id = "pod-timeout-seed-#{System.unique_integer([:positive])}"
@@ -1343,7 +1343,7 @@ defmodule Fleet.Spawner.PodTest do
     defp write_creds(dir, oauth) do
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, ".credentials.json"), Jason.encode!(%{"claudeAiOauth" => oauth}))
-      Application.put_env(:fleet_spawner, :claude_dir, dir)
+      Application.put_env(:lcars_fleet, :spawner_claude_dir, dir)
     end
 
     test "free plan + minimal scopes still LAUNCHES (login is enough — vendor enforces scope/plan)",
@@ -1417,7 +1417,7 @@ defmodule Fleet.Spawner.PodTest do
       # kept it — the inverse of what is useful: it is the suffered death you want to resume from.
       Process.flag(:trap_exit, true)
       root = Path.join(System.tmp_dir!(), "seedroot-#{System.unique_integer([:positive])}")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 
       fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
@@ -2050,16 +2050,16 @@ defmodule Fleet.Spawner.PodTest do
       # at do_project (maybe_provision_mcp_config) BEFORE any launch. We do NOT actually
       # launch bwrap (the failure is at provisioning).
       Application.put_env(
-        :fleet_spawner,
-        :launch_backend,
+        :lcars_fleet,
+        :spawner_launch_backend,
         Fleet.Spawner.LaunchBackend.LauncherPortBackend
       )
 
-      Application.delete_env(:fleet_spawner, :mcp_server_spec)
+      Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
 
       on_exit(fn ->
-        Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
-        Application.delete_env(:fleet_spawner, :mcp_server_spec)
+        Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
+        Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
       end)
 
       Process.flag(:trap_exit, true)
@@ -2083,12 +2083,12 @@ defmodule Fleet.Spawner.PodTest do
       # containment bwrap → sandbox_home = /home/.pod. No static "env" key in the spec: the per-pod
       # socket (LCARS_FLEET_MCP_SOCKET) is injected PER-POD by pod.ex (build_fleet_mcp_entry) from
       # the socket provisioner (stub in test).
-      Application.put_env(:fleet_spawner, :mcp_server_spec, %{
+      Application.put_env(:lcars_fleet, :spawner_mcp_server_spec, %{
         "command" => "bash",
         "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"]
       })
 
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec) end)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-mcp-ns-#{System.unique_integer([:positive])}"
@@ -2137,8 +2137,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # claude_dir override → Fleet.Credentials.Gate.validate reads this claudeDir (scope/plan validation). Mode = bind.
-      Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
+      Application.put_env(:lcars_fleet, :spawner_claude_dir, fake_claude)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_claude_dir) end)
 
       # source repo with a code branch (main) + a doc branch (ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
@@ -2515,7 +2515,7 @@ defmodule Fleet.Spawner.PodTest do
     @tag :tmp_dir
     test "un pod TUE grave sa graine avant le teardown", %{tmp_dir: tmp} do
       root = Path.join(tmp, "seedroot")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-kill-seed-#{System.unique_integer([:positive])}"
@@ -2560,7 +2560,7 @@ defmodule Fleet.Spawner.PodTest do
     test "un pod qui TERMINE grave sa graine avant le teardown", %{tmp_dir: tmp} do
       Process.flag(:trap_exit, true)
       root = Path.join(tmp, "seedroot-release")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-release-seed-#{System.unique_integer([:positive])}"

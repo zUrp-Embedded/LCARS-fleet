@@ -1,7 +1,7 @@
 # Fleet.Observation — domain card
 
 **Date**: 2026-06-10
-**Last revised**: 2026-07-18
+**Last revised**: 2026-08-13
 **Status**: active — read-only observation deck (surface)
 **Referenced by**: —
 
@@ -22,7 +22,7 @@ restated, only pointed at.
 
 ## Config & deps
 
-- Knob `:fleet_observation, :http_port` — read by `Application`, set by `runtime.exs` from `LCARS_OBSERVATION_PORT` (per-human, `bin/fleet_v2`).
+- Knob `:lcars_fleet, :observation_http_port` — read by `Application`, set by `runtime.exs` from `LCARS_OBSERVATION_PORT` (per-human, `bin/fleet_v2`).
 - Knobs `:start_listener` / `:start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, like `fleet_api`).
 - Deps (see `use Boundary`): `fleet_spawner` (`list_pods/0`), `fleet_cap_profile` (role catalogue), `fleet_event_router` (Bus + listener), + `plug`/`plug_cowboy`/`jason`.

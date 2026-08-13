@@ -1,6 +1,6 @@
 defmodule Fleet.MCP.PodSocketTest.RaisingTools do
   @moduledoc false
-  # Tool handler that CRASHES — injected via `:fleet_mcp, :tool_handler` to prove the SOC-RES-001
+  # Tool handler that CRASHES — injected via `:lcars_fleet, :mcp_tool_handler` to prove the SOC-RES-001
   # rescue (a raising tool → isError result, NOT a dropped connection).
   def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
 end
@@ -52,7 +52,7 @@ defmodule Fleet.MCP.PodSocketTest do
   setup do
     base = Path.join(System.tmp_dir!(), "lcars-mcp-sock-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(base) end)
-    Fleet.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, base)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, base)
 
     %{base: base}
   end
@@ -372,8 +372,8 @@ defmodule Fleet.MCP.PodSocketTest do
     # socket closed → the `call` below would see recv `{:error, :closed}` (the pod would wait out its
     # timeout).
     Fleet.TestEnv.put_env_restoring(
-      :fleet_mcp,
-      :tool_handler,
+      :lcars_fleet,
+      :mcp_tool_handler,
       Fleet.MCP.PodSocketTest.RaisingTools
     )
 
@@ -396,8 +396,8 @@ defmodule Fleet.MCP.PodSocketTest do
     on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_mcp,
-      :tool_handler,
+      :lcars_fleet,
+      :mcp_tool_handler,
       Fleet.MCP.PodSocketTest.RecordingMutationTools
     )
 
@@ -562,7 +562,7 @@ defmodule Fleet.MCP.PodSocketTest do
       broken = Path.join(base, "broken")
       File.mkdir_p!(base)
       File.ln_s!("/nowhere/absent", broken)
-      Fleet.TestEnv.put_env_restoring(:fleet_mcp, :sock_base, Path.join(broken, "mcp"))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, Path.join(broken, "mcp"))
 
       assert {:error, {:socket_init_failed, {:mkdir, :enoent, blame}}} =
                PodSocketSupervisor.ensure_pod_socket(uniq("p"))

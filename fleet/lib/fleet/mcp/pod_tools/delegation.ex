@@ -48,7 +48,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Every function takes the MCP `state` as its last argument and reads ONLY `pod_id` from it (the gate) —
   never an identity from the wire arguments.
 
-  ## Seams (app-env `:fleet_mcp`)
+  ## Seams (app-env `:lcars_fleet`, keys prefixed `mcp_*`)
 
     * `:forge_client` (default `Fleet.Forge.Client`) — forge client, runtime
       dispatch (no compile-time dep on fleet_pilot). TWO declared behaviours over the SAME seam module
@@ -60,7 +60,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
       of the pod's role.
     * `:delegation_org` — forge org of onboarded projects. OPTIONAL override: by default the org
-      is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
+      is the one the poller DISCOVERS on (`:lcars_fleet, :pilot_fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
   """
 
@@ -350,7 +350,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # next to its switch. Off, the refusal is NAMED (`:delete_project_disabled`) rather than looking
   # like a missing tool — an agent told "disabled" asks its human, an agent told nothing invents a
   # workaround.
-  @delete_flag :allow_delete_project
+  @delete_flag :mcp_allow_delete_project
 
   @spec delete_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, args, state) when is_binary(full_name) and is_map(args) do
@@ -358,7 +358,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       not delete_armed?() ->
         Logger.warning(
           "Delegation: delete_project(#{full_name}) REFUSED — disarmed by deployment " <>
-            "(config :fleet_mcp, #{inspect(@delete_flag)} is not true)"
+            "(config :lcars_fleet, #{inspect(@delete_flag)} is not true)"
         )
 
         {:error, :delete_project_disabled}
@@ -373,7 +373,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # `=== true`, not truthiness: a flag set to a string, a 1 or an accidental non-nil value must NOT
   # arm an irreversible gesture. Only the boolean says yes.
-  defp delete_armed?, do: Application.get_env(:fleet_mcp, @delete_flag, false) === true
+  defp delete_armed?, do: Application.get_env(:lcars_fleet, @delete_flag, false) === true
 
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
   # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
@@ -948,8 +948,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
           else: {:error, {:catalogue_not_active, cat, actives}}
 
       nil ->
-        case Application.get_env(:fleet_mcp, :delegation_org) ||
-               Application.get_env(:fleet_pilot, :fleet_org) do
+        case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||
+               Application.get_env(:lcars_fleet, :pilot_fleet_org) do
           org when is_binary(org) -> {:ok, org}
           nil -> first_active(actives)
         end
@@ -972,11 +972,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp do_create_project(name, args, onboarder_role) do
     with {:ok, onboard} <- conforming_onboard(),
          {:ok, org} <- resolve_org(args) do
-      # SAME config key as the poller's discovery org (`:fleet_pilot, :fleet_org`) — a project
+      # SAME config key as the poller's discovery org (`:lcars_fleet, :pilot_fleet_org`) — a project
       # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
       # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
       # gate to catch it. Reading another domain's config ATOM creates no module edge (the boundary
-      # stays intact; the `:fleet_<dom>` atoms are legacy-valid, D-07) — the config IS the shared
+      # stays intact; the config lives under `:lcars_fleet` with a `mcp_` prefix, BL-6-05) — the config IS the shared
       # authority here. `:delegation_org` survives as an explicit OVERRIDE for the rare case where
       # onboarding must target another org than the one being polled.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
@@ -984,8 +984,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
       # membership (403 on the team read) — a load-bearing admission unproven ≠ verified. A deployment whose
       # service token is deliberately a plain org member (not org-admin) opts into the degraded mode as an
-      # EXPLICIT, deployment-visible config property (`:fleet_pilot, :allow_unverifiable_human_team?`),
-      # never a silent per-call default. Same `:fleet_<dom>` config-atom read as `:fleet_org` above (D-07).
+      # EXPLICIT, deployment-visible config property (`:lcars_fleet, :pilot_allow_unverifiable_human_team?`),
+      # never a silent per-call default. Same `:lcars_fleet` config read as `:mcp_org` above (BL-6-05).
       opts = [
         org: org,
         description: Map.get(args, "description", pitch),
@@ -999,7 +999,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role,
         allow_unverifiable_human_team?:
-          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
       ]
 
       case onboard.onboard(name, opts) do
@@ -1028,7 +1028,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # degrade only under the explicit deployment-visible config knob.
       opts = [
         allow_unverifiable_human_team?:
-          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
       ]
 
       case onboard.import(full_name, opts) do
@@ -1337,7 +1337,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp ensure_pointer(repo, title, brief, nil, summary) do
     opts =
-      case Application.get_env(:fleet_mcp, :brief_ops_root) do
+      case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
         nil ->
           [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :ops]
 
@@ -1429,7 +1429,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # temporary clone.
   defp lot_workspace(repo) do
     root =
-      Application.get_env(:fleet_mcp, :lot_workshop_root) || Fleet.Layout.workshop_root()
+      Application.get_env(:lcars_fleet, :mcp_lot_workshop_root) || Fleet.Layout.workshop_root()
 
     Path.join(root, Fleet.Layout.project_name(repo))
   end
@@ -2243,7 +2243,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Spawn-bound identity comes from Spawner; unknown identity fails closed.
   defp resolve_identity(pod_id) when is_binary(pod_id) do
-    resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
+    resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver, &default_pod_resolver/1)
 
     case resolver.(pod_id) do
       {:ok, %{role: role} = identity} -> {:ok, %{role: role, repo: Map.get(identity, :repo)}}
@@ -2262,5 +2262,5 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a
   # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
   @default_pod_reaper Fleet.Pilot.PodReaper
-  defp pod_reaper, do: Application.get_env(:fleet_mcp, :pod_reaper, @default_pod_reaper)
+  defp pod_reaper, do: Application.get_env(:lcars_fleet, :mcp_pod_reaper, @default_pod_reaper)
 end

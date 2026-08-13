@@ -15,7 +15,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     Fleet.TestEnv.put_role_token!("engineer", "ENG-TOKEN")
     :ok
   end

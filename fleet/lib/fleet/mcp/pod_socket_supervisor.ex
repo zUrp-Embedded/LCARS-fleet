@@ -114,7 +114,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   Configured base directory for per-pod sockets.
   """
   @spec base_dir() :: Path.t()
-  def base_dir, do: Application.get_env(:fleet_mcp, :sock_base, @default_base)
+  def base_dir, do: Application.get_env(:lcars_fleet, :mcp_sock_base, @default_base)
 
   @doc """
   Pod ids with a live registered acceptor.

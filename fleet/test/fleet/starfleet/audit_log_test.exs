@@ -6,10 +6,10 @@ defmodule Fleet.Starfleet.AuditLogTest do
 
   setup %{tmp_dir: tmp_dir} do
     log_path = Path.join(tmp_dir, "test-starfleet.jsonl")
-    Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
+    Application.put_env(:lcars_fleet, :starfleet_audit_log_path, log_path)
 
     on_exit(fn ->
-      Application.delete_env(:fleet_starfleet, :audit_log_path)
+      Application.delete_env(:lcars_fleet, :starfleet_audit_log_path)
     end)
 
     {:ok, log_path: log_path}
@@ -42,7 +42,7 @@ defmodule Fleet.Starfleet.AuditLogTest do
       # SOC-EFF-004: an absent-but-creatable parent must not yield {:error, :enoent} (audit entry
       # LOST). The write must create the parent (mkdir_p) and persist the entry.
       nested = Path.join([tmp_dir, "does", "not", "exist", "audit.jsonl"])
-      Application.put_env(:fleet_starfleet, :audit_log_path, nested)
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_path, nested)
 
       assert :ok = AuditLog.write(%{"source" => "test", "k" => "v"})
       assert File.read!(nested) =~ ~s("k":"v")
@@ -57,7 +57,7 @@ defmodule Fleet.Starfleet.AuditLogTest do
       blocker = Path.join(tmp_dir, "blocker")
       File.write!(blocker, "I am a file, not a dir")
       bad_path = Path.join([blocker, "log.jsonl"])
-      Application.put_env(:fleet_starfleet, :audit_log_path, bad_path)
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_path, bad_path)
 
       assert {:error, _reason} = AuditLog.write(%{"k" => "v"})
     end
@@ -92,8 +92,8 @@ defmodule Fleet.Starfleet.AuditLogTest do
          %{log_path: log_path} do
       # Threshold > one line but low → rotation triggers after a few writes.
       threshold = 300
-      Application.put_env(:fleet_starfleet, :audit_log_max_bytes, threshold)
-      on_exit(fn -> Application.delete_env(:fleet_starfleet, :audit_log_max_bytes) end)
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_max_bytes, threshold)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :starfleet_audit_log_max_bytes) end)
 
       # Write until the .1 backup first appears (large anti-loop cap): stopping at the FIRST
       # rotation guarantees exactly one happened → the test does not depend on bytes-per-line
@@ -129,8 +129,8 @@ defmodule Fleet.Starfleet.AuditLogTest do
       # defect. `File.rename/2` overwrites its destination without a word, so the FAILURE to rotate
       # was loud (an `error`) while the SUCCESS — which is what actually destroys a generation —
       # was mute. Retention stays at one generation; what is pinned here is that losing it speaks.
-      Application.put_env(:fleet_starfleet, :audit_log_max_bytes, 300)
-      on_exit(fn -> Application.delete_env(:fleet_starfleet, :audit_log_max_bytes) end)
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_max_bytes, 300)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :starfleet_audit_log_max_bytes) end)
 
       rotate_until = fn stop? ->
         Enum.reduce_while(1..2000, :never, fn n, _ ->

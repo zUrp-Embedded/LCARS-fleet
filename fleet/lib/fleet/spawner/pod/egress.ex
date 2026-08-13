@@ -153,7 +153,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   """
   @spec socket_path(String.t()) :: Path.t()
   def socket_path(pod_id) when is_binary(pod_id) do
-    base = Application.get_env(:fleet_spawner, :egress_sock_base, "/run/lcars/egress")
+    base = Application.get_env(:lcars_fleet, :spawner_egress_sock_base, "/run/lcars/egress")
     Path.join([base, pod_id, "sock"])
   end
 

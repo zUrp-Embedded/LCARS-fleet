@@ -381,7 +381,8 @@ defmodule Fleet.SPBuilder do
   """
   @spec sp_drafts_root() :: String.t()
   def sp_drafts_root do
-    Application.get_env(:fleet_sp_builder, :sp_drafts_root) || Fleet.Catalogue.sp_drafts_root()
+    Application.get_env(:lcars_fleet, :sp_builder_sp_drafts_root) ||
+      Fleet.Catalogue.sp_drafts_root()
   end
 
   @doc """

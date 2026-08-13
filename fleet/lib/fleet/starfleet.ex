@@ -82,7 +82,7 @@ defmodule Fleet.Starfleet do
   """
   @spec boot_orchestrate() :: :ok
   def boot_orchestrate do
-    if Fleet.Starfleet.Application.boot_enabled?(:start_boot_orchestrator, true) do
+    if Fleet.Starfleet.Application.boot_enabled?(:starfleet_start_boot_orchestrator, true) do
       {:ok, _task} = Task.start(Fleet.Starfleet.BootOrchestrator, :run, [[]])
       :ok
     else

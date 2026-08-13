@@ -189,5 +189,5 @@ defmodule Fleet.Spawner.PodWarden do
   end
 
   defp interval_ms,
-    do: Application.get_env(:fleet_spawner, :pod_warden_interval_ms, @default_interval_ms)
+    do: Application.get_env(:lcars_fleet, :spawner_pod_warden_interval_ms, @default_interval_ms)
 end

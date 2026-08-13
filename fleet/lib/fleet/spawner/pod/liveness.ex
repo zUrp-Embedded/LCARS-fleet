@@ -28,7 +28,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   The module holds NO state of its own, arms NO timer, writes NOTHING: the `Pod` passes it its
   `state` (map) as argument; the functions read `state.pod_dir`/`.session_id`/`.port`/`.cap_profile`/
-  `.opts` + the `:fleet_spawner` config + `File`/`Port`. The per-pod opts (`:liveness_tick_ms`,
+  `.opts` + the `:lcars_fleet` config (`spawner_*` keys) + `File`/`Port`. The per-pod opts (`:liveness_tick_ms`,
   `:liveness_probe_fun`) are read via `keyword_opt/2` → a test injects probe and cadence WITHOUT
   global config (async-safe). Depends on `Fleet.CapProfile` (the `%Fleet.CapProfile{spec: spec}`
   pattern of `default_response_timeout_sec`), already a dep of the app, and on `Pod.SessionFiles`
@@ -57,13 +57,13 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   @doc """
   Cadence (ms) of the liveness tick: per-pod opt `:liveness_tick_ms` (async-safe test) otherwise
-  the `:fleet_spawner, :liveness_tick_ms` config, default 30_000. Called by `liveness_tick_action`
+  the `:lcars_fleet, :spawner_liveness_tick_ms` config, default 30_000. Called by `liveness_tick_action`
   (which STAYS in `Pod`: it builds the `{:timeout, :liveness}` generic timeout ACTION).
   """
   @spec liveness_tick_ms(map()) :: non_neg_integer()
   def liveness_tick_ms(state) do
     keyword_opt(state, :liveness_tick_ms) ||
-      Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
+      Application.get_env(:lcars_fleet, :spawner_liveness_tick_ms, 30_000)
   end
 
   defp keyword_opt(state, key) do
@@ -80,7 +80,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   @spec liveness_sample(map()) :: term()
   def liveness_sample(state) do
     case keyword_opt(state, :liveness_probe_fun) ||
-           Application.get_env(:fleet_spawner, :liveness_probe_fun) do
+           Application.get_env(:lcars_fleet, :spawner_liveness_probe_fun) do
       fun when is_function(fun, 1) ->
         fun.(state)
 

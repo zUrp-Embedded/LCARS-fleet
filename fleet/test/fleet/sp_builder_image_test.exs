@@ -33,15 +33,25 @@ defmodule Fleet.SPBuilderImageTest do
 
   setup %{tmp_dir: tmp} do
     write_sp_canon(tmp)
-    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :modop_root, Path.join(tmp, "bundles"))
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_sp_builder,
-      :subagent_template_root,
+      :lcars_fleet,
+      :sp_builder_modop_root,
+      Path.join(tmp, "bundles")
+    )
+
+    Fleet.TestEnv.put_env_restoring(
+      :lcars_fleet,
+      :sp_builder_subagent_template_root,
       Path.join(tmp, "templates")
     )
 
-    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :sp_drafts_root, Path.join(tmp, "drafts"))
+    Fleet.TestEnv.put_env_restoring(
+      :lcars_fleet,
+      :sp_builder_sp_drafts_root,
+      Path.join(tmp, "drafts")
+    )
+
     on_exit(fn -> Image.unpublish() end)
     :ok
   end
@@ -85,7 +95,7 @@ defmodule Fleet.SPBuilderImageTest do
     # DOES show, which is what makes the frozen assertion above evidence rather than coincidence.
     custom = Path.join(tmp, "custom-protocole.md")
     File.write!(custom, "# custom proto\n")
-    Fleet.TestEnv.put_env_restoring(:fleet_spawner, :protocole_user_path, custom)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_protocole_user_path, custom)
 
     :ok = Image.publish!()
     File.write!(custom, "# custom MUTATED\n")
@@ -147,7 +157,7 @@ defmodule Fleet.SPBuilderImageTest do
     # fixture rather than the property.
     drafts = Path.join(tmp, "drafts")
     File.mkdir_p!(drafts)
-    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :sp_drafts_root, drafts)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :sp_builder_sp_drafts_root, drafts)
     :ok = Image.publish!()
 
     profile = %Fleet.CapProfile{

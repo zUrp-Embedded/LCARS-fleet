@@ -108,7 +108,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
   defp forge_base_url(forge_opts) do
     Keyword.get(forge_opts, :base_url) ||
-      get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
+      get_in(Application.get_env(:lcars_fleet, :pilot_forge, []), [:base_url])
   end
 
   # Bounded, authenticated runtime-side remote read.

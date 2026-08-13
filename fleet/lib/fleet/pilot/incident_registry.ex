@@ -354,7 +354,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # (default 500 — well above nominal; the bound targets the anomaly). Applied to the upsert AND the
   # forge merge (both growth paths).
   defp prune(registry) do
-    max = Application.get_env(:fleet_pilot, :incident_registry_max_entries, 500)
+    max = Application.get_env(:lcars_fleet, :pilot_incident_registry_max_entries, 500)
 
     if map_size(registry) <= max do
       registry
@@ -628,7 +628,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp cooldown_ms(opts) do
     opts[:escalation_cooldown_ms] ||
-      Application.get_env(:fleet_pilot, :incident_escalation_cooldown_ms, @escalation_cooldown_ms)
+      Application.get_env(
+        :lcars_fleet,
+        :pilot_incident_escalation_cooldown_ms,
+        @escalation_cooldown_ms
+      )
   end
 
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
@@ -641,22 +645,26 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # survives as an explicit override for the rare split.
   defp repo(opts),
     do:
-      opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo) ||
+      opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
         Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
   defp branch(opts),
-    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "ops")
+    do: opts[:branch] || Application.get_env(:lcars_fleet, :pilot_incident_registry_branch, "ops")
 
   defp path(opts),
     do:
       opts[:path] ||
-        Application.get_env(:fleet_pilot, :incident_registry_path, "work/system-incidents.json")
+        Application.get_env(
+          :lcars_fleet,
+          :pilot_incident_registry_path,
+          "work/system-incidents.json"
+        )
 
   # HOME unresolvable = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
   # path: the .lcars state must not silently scatter (e.g. orphaned under /tmp).
   defp wal_path(opts),
     do:
-      opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
+      opts[:wal_path] || Application.get_env(:lcars_fleet, :pilot_incident_registry_wal_path) ||
         Path.join(Fleet.Layout.state_dir(), "system-incidents.json")
 
   # The registry sync is a commit the RUNTIME makes: no human initiated it, no pod produced it, and
@@ -672,8 +680,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
     do:
       opts[:author] ||
         Application.get_env(
-          :fleet_pilot,
-          :incident_registry_author,
+          :lcars_fleet,
+          :pilot_incident_registry_author,
           Fleet.Credentials.ForgeIdentity.system_identity()
         )
 

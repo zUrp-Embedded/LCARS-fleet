@@ -1,7 +1,7 @@
 # Fleet.MCP — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-11
+**Last revised**: 2026-08-13
 **Status**: active — pod-facing MCP server, per-pod AF_UNIX socket (vendor boundary)
 **Referenced by**: —
 
@@ -27,7 +27,7 @@ restated, only pointed at.
 - `Fleet.MCP.Supervisor` — domain supervision (`:one_for_one`); also starts the inline `PodSocketRegistry` (Registry) + `ConnectionTaskSupervisor` (Task.Supervisor); `pod_facing_status/0` = LIVE readiness probe consumed by `Fleet.API.Readiness`
 
 ## Config & deps
-- Knob `:fleet_mcp, :sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.
-- Knob `:fleet_mcp, :boot_environment` — read by `Server` (`:pod` → boot refusal).
-- Knobs `:fleet_mcp, :pod_resolver` / `:forge_client` / `:project_onboard` / `:delegation_org` — read by `PodTools.Delegation` (runtime-dispatch seams + onboarded forge org).
+- Knob `:lcars_fleet, :mcp_sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.
+- Knob `:lcars_fleet, :mcp_boot_environment` — read by `Server` (`:pod` → boot refusal).
+- Knobs `:lcars_fleet, :mcp_pod_resolver` / `:forge_client` / `:project_onboard` / `:delegation_org` — read by `PodTools.Delegation` (runtime-dispatch seams + onboarded forge org).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/mcp.ex`).

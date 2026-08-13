@@ -1629,8 +1629,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # la face ops vers `projects_root` laissait les 2451 tests verts (mesure 2026-08-08). Une
       # cicatrice ecrite en commentaire et non gardee se fait retirer par le prochain refactor, qui
       # lit un `case` a trois branches identiques a deux details pres et « simplifie ».
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, DirCapturingProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, DirCapturingProbe)
 
       name = Fleet.Layout.project_name("lordzurp/lcars-test")
 
@@ -1649,8 +1649,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "tier-0 : un conflit TOUT-SEMANTIQUE saute le producteur, et sans chief il atteint l'arch" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllSemanticProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllSemanticProbe)
 
       # Le gain de tier-0 RACCOURCIT un chemin, il n'en casse aucun : un conflit dont rien n'est
       # trivial ne deviendra pas resoluble en y envoyant un producteur trois fois.
@@ -1668,9 +1668,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "tier-0 : un conflit TOUT-ECRIVABLE est resolu par le runtime, sans pod" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
 
       # C'est ICI que la seam `:conflict_applier` gagne sa vie : sans injection, ce chemin exige un
       # vrai worktree git et ne serait jamais exerce.
@@ -1688,9 +1688,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     test "flag OFF : le diagnoser n'est meme pas consulte (le defaut reste le chemin legacy)" do
       # `conflict_diagnosis?` est false par defaut ; ce test epingle que le defaut ne traverse pas
       # tier-0 — sinon les trois tests ci-dessus prouveraient un chemin que la prod n'emprunte pas.
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, false)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, false)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
 
       refute match?(
                {:ok, {:auto_resolved, 6}},

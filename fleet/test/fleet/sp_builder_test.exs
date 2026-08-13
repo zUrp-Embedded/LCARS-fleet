@@ -14,9 +14,9 @@ defmodule Fleet.SPBuilderTest do
     modop_root = Path.join(tmp_dir, "modop")
     File.mkdir_p!(modop_root)
 
-    prev_mod = Application.get_env(:fleet_sp_builder, :modop_root)
-    Application.put_env(:fleet_sp_builder, :modop_root, modop_root)
-    on_exit(fn -> Application.put_env(:fleet_sp_builder, :modop_root, prev_mod) end)
+    prev_mod = Application.get_env(:lcars_fleet, :sp_builder_modop_root)
+    Application.put_env(:lcars_fleet, :sp_builder_modop_root, modop_root)
+    on_exit(fn -> Application.put_env(:lcars_fleet, :sp_builder_modop_root, prev_mod) end)
 
     {:ok, modop_root: modop_root}
   end
@@ -137,7 +137,7 @@ defmodule Fleet.SPBuilderTest do
       # any step-selected optional modop on the way (see the KNOWN GAP note on the B-01 guard in
       # `Fleet.CapProfile`). "The root resolves" and "the overlay reaches the pod" are two claims;
       # only the first is tested here.
-      Application.delete_env(:fleet_sp_builder, :modop_root)
+      Application.delete_env(:lcars_fleet, :sp_builder_modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
       assert {:ok, %{sp_md: sp_md, metadata: %{modop_bundles_used: ["fire-mode"]}}} =

@@ -101,11 +101,11 @@ defmodule Fleet.Starfleet.AuditLog do
   end
 
   defp max_bytes do
-    Application.get_env(:fleet_starfleet, :audit_log_max_bytes, @default_max_bytes)
+    Application.get_env(:lcars_fleet, :starfleet_audit_log_max_bytes, @default_max_bytes)
   end
 
   defp audit_log_path do
-    Application.get_env(:fleet_starfleet, :audit_log_path, default_audit_path())
+    Application.get_env(:lcars_fleet, :starfleet_audit_log_path, default_audit_path())
   end
 
   defp default_audit_path do

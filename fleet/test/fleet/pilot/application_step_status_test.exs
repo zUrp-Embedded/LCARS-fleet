@@ -6,7 +6,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
 
   setup do
     # Tests set :step_dispatch? themselves; capture-and-restore only.
-    Fleet.TestEnv.restore_env_on_exit(:fleet_pilot, :step_dispatch?)
+    Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :pilot_step_dispatch?)
     :ok
   end
 
@@ -42,12 +42,12 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
   # death would pass as hollow-green. Now: inactive (off) / operational (alive) / degraded.
 
   test "inactive when :step_dispatch? off" do
-    Application.put_env(:fleet_pilot, :step_dispatch?, false)
+    Application.put_env(:lcars_fleet, :pilot_step_dispatch?, false)
     assert {:inactive, _} = PilotApp.step_status()
   end
 
   test "operational only when EVERY rail process is alive (not just two names)" do
-    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
     for {_key, name} <- PilotApp.step_rail_processes(), do: spawn_named(name)
 
     assert {:operational, detail} = PilotApp.step_status()
@@ -57,7 +57,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
   end
 
   test "degraded when step on but ANY rail process is dead (hollow-green caught)" do
-    Application.put_env(:fleet_pilot, :step_dispatch?, true)
+    Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
 
     # Start the whole rail EXCEPT WorktreeSync — probing only two names, this read :operational (unprobed).
     for {key, name} <- PilotApp.step_rail_processes(),

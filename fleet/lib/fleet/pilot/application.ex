@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer SEPARATE from the pod FAILURE
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
-    * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:fleet_pilot, :poller, :poll]`. First child
+    * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:lcars_fleet, :pilot_poller, :poll]`. First child
       of the rail because it measures the rail: the poller emitted those three sites since it was
       written and nothing ever attached, so every duration was computed and dropped (BL-6-40 Ph. 0).
   """
@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.Application do
 
   # Work/ops write serializer (CI-11) — always-on in prod, OFF in test (hermeticity, cf. init).
   defp ops_object_sync_child do
-    if Application.get_env(:fleet_pilot, :start_ops_object_sync, true),
+    if Application.get_env(:lcars_fleet, :pilot_start_ops_object_sync, true),
       do: [Fleet.Workflow.OpsObjectSync],
       else: []
   end
@@ -74,7 +74,7 @@ defmodule Fleet.Pilot.Application do
   """
   @spec step_status() :: {:inactive | :operational | :degraded, map()}
   def step_status do
-    if Application.get_env(:fleet_pilot, :step_dispatch?, false) do
+    if Application.get_env(:lcars_fleet, :pilot_step_dispatch?, false) do
       detail =
         Map.new(step_rail_processes(), fn {key, name} ->
           {key, is_pid(Process.whereis(name))}
@@ -89,7 +89,7 @@ defmodule Fleet.Pilot.Application do
       # first and kept quiet about the second.
       #
       # ⚠ The key is called `repo_poll` and NOT `tick`, because the telemetry measures ONE REPO, not
-      # a cycle. `[:fleet_pilot, :poller, :poll]` is emitted once PER REPO (every emission carries
+      # a cycle. `[:lcars_fleet, :pilot_poller, :poll]` is emitted once PER REPO (every emission carries
       # `repo:`), so a distribution over this key describes what one repo costs, never what a full
       # pass costs. Measured 2026-08-03: 12 repos, 30 s interval, and the counter advanced by 12 per
       # cycle. The key was first called `tick` — a name asserting a scope the mechanism does not
@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.Application do
   # crash, zero log). The operator ASKED for step mode → incomplete config = broken deploy →
   # fail-loud at boot.
   defp step_children do
-    if Application.get_env(:fleet_pilot, :step_dispatch?, false) do
+    if Application.get_env(:lcars_fleet, :pilot_step_dispatch?, false) do
       step_children!()
     else
       []
@@ -185,7 +185,7 @@ defmodule Fleet.Pilot.Application do
   # fail-loud guard, aimed at the real thing.
   defp step_children! do
     unless forge_base_url() do
-      raise "fleet_pilot: :step_dispatch? enabled but the forge base_url is absent (config :fleet_pilot, " <>
+      raise "pilot: :pilot_step_dispatch? enabled but the forge base_url is absent (config :lcars_fleet, " <>
               ":forge[:base_url] / FORGE_BASE_URL) — the Poller cannot DISCOVER its projects " <>
               "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
@@ -208,7 +208,7 @@ defmodule Fleet.Pilot.Application do
     # first verdict.
     Fleet.Pilot.StepRunConsumer.Verdict.load_schema!()
 
-    interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
+    interval = Application.get_env(:lcars_fleet, :pilot_poll_interval_ms, 30_000)
 
     [
       # The poller's telemetry, ATTACHED (BL-6-40 Phase 0). Started BEFORE the Poller so no tick is
@@ -351,7 +351,7 @@ defmodule Fleet.Pilot.Application do
   # when a catalogue simply has no rail. That is a legitimate deployment, not a defect: refusing the
   # boot there would be a policy this check has no mandate to set.
   #
-  # It used to guard a knob (`:fleet_pilot, :workshop_workflow_map`, default `"workshop-direct"` —
+  # It used to guard a knob (`:lcars_fleet, :pilot_workshop_workflow_map`, default `"workshop-direct"` —
   # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
   # can be wrong. A property cannot.
   def validate_workshop_card!(opts \\ []) do
@@ -470,7 +470,7 @@ defmodule Fleet.Pilot.Application do
   # Resolved forge base_url (app config `:forge`). `nil` if absent/empty. Source of the fail-loud guard
   # above (the multi-project step rail needs it to discover AND to derive the per-step-run remotes).
   defp forge_base_url do
-    case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
+    case Keyword.get(Application.get_env(:lcars_fleet, :pilot_forge, []), :base_url) do
       base when is_binary(base) and base != "" -> base
       _ -> nil
     end

@@ -30,7 +30,7 @@ defmodule Fleet.Coord.Policies do
   """
   @spec init_policies!() :: :ok
   def init_policies! do
-    path = Application.get_env(:fleet_coord, :policies_path, default_policies_path())
+    path = Application.get_env(:lcars_fleet, :coord_policies_path, default_policies_path())
 
     policies =
       case YamlElixir.read_from_file(path) do

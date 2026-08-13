@@ -46,15 +46,15 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
     on_exit(fn -> Bus.set_event_routing(prior_routing) end)
     log_path = Path.join(tmp_dir, "drift-monitor-test.jsonl")
-    Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
+    Application.put_env(:lcars_fleet, :starfleet_audit_log_path, log_path)
 
     Application.put_env(
-      :fleet_starfleet,
-      :coord_backend,
+      :lcars_fleet,
+      :starfleet_coord_backend,
       Fleet.Starfleet.CoordBackendStub
     )
 
-    Application.put_env(:fleet_starfleet, :coord_invocations, [])
+    Application.put_env(:lcars_fleet, :starfleet_coord_invocations, [])
 
     # No app-booted instance (start_drift_monitor: false in test — suite hermeticity). This
     # INTEGRATION test starts its own, with a REAL subscribe (input goes through the Bus, that is
@@ -64,9 +64,9 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
     Bus.subscribe()
 
     on_exit(fn ->
-      Application.delete_env(:fleet_starfleet, :audit_log_path)
-      Application.delete_env(:fleet_starfleet, :coord_backend)
-      Application.delete_env(:fleet_starfleet, :coord_invocations)
+      Application.delete_env(:lcars_fleet, :starfleet_audit_log_path)
+      Application.delete_env(:lcars_fleet, :starfleet_coord_backend)
+      Application.delete_env(:lcars_fleet, :starfleet_coord_invocations)
     end)
 
     %{monitor: monitor}
@@ -96,7 +96,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
   end
 
   defp coord_invocations do
-    Application.get_env(:fleet_starfleet, :coord_invocations, [])
+    Application.get_env(:lcars_fleet, :starfleet_coord_invocations, [])
   end
 
   # `source` defaults to `:event_router`. Every routed type requires its source (the routing
@@ -252,7 +252,12 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
       # Le backend LEVE ici, comme dans le test d'ordre de `Cat5Escalator` : c'est le seul montage
       # qui distingue « ecrit » de « ecrit AVANT ». Avec un stub qui rend `:ok`, l'ordre est
       # inobservable et le test passerait dans les deux sens.
-      Application.put_env(:fleet_starfleet, :coord_backend, Fleet.Starfleet.CoordBackendRaising)
+      Application.put_env(
+        :lcars_fleet,
+        :starfleet_coord_backend,
+        Fleet.Starfleet.CoordBackendRaising
+      )
+
       json = ~s|{"decision":"halt","reason":"gatekeeper-said","details":{}}|
 
       # Le DriftMonitor est un GenServer : le backend qui leve le TUE. C'est le mode de panne

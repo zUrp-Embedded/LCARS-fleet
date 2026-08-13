@@ -45,9 +45,9 @@ defmodule Fleet.Application.CatalogueVerifyTest do
   end
 
   test "it restores the previous root on the way out", %{tmp_dir: tmp} do
-    Application.delete_env(:fleet_catalogue, :root)
+    Application.delete_env(:lcars_fleet, :catalogue_root)
     _ = CatalogueVerify.verify(catalogue_copy(tmp))
-    assert Application.fetch_env(:fleet_catalogue, :root) == :error
+    assert Application.fetch_env(:lcars_fleet, :catalogue_root) == :error
   end
 
   test "an absent manifest is refused at the precondition, nothing downstream runs", %{

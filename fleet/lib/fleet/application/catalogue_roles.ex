@@ -35,14 +35,14 @@ defmodule Fleet.Application.CatalogueRoles do
   @doc """
   Forge-identity role names of the catalogue at `root`, sorted.
 
-  Swaps `:fleet_catalogue, :root` for the duration and restores it — the same borrow-and-return as
+  Swaps `:lcars_fleet, :catalogue_root` for the duration and restores it — the same borrow-and-return as
   `Fleet.Application.CatalogueVerify.verify/1`, so a caller inside a live node cannot leave the
   fleet pointed somewhere else.
   """
   @spec list(Path.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list(root) when is_binary(root) do
-    prev = Application.fetch_env(:fleet_catalogue, :root)
-    Application.put_env(:fleet_catalogue, :root, root)
+    prev = Application.fetch_env(:lcars_fleet, :catalogue_root)
+    Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     try do
       Fleet.CapProfile.forge_identity_roles()
@@ -72,8 +72,8 @@ defmodule Fleet.Application.CatalogueRoles do
   """
   @spec tfvars(Path.t()) :: {:ok, map()} | {:error, term()}
   def tfvars(root) when is_binary(root) do
-    prev = Application.fetch_env(:fleet_catalogue, :root)
-    Application.put_env(:fleet_catalogue, :root, root)
+    prev = Application.fetch_env(:lcars_fleet, :catalogue_root)
+    Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     try do
       with {:ok, roster} <- Fleet.CapProfile.forge_roster(),
@@ -211,6 +211,6 @@ defmodule Fleet.Application.CatalogueRoles do
     end
   end
 
-  defp restore(:error), do: Application.delete_env(:fleet_catalogue, :root)
-  defp restore({:ok, value}), do: Application.put_env(:fleet_catalogue, :root, value)
+  defp restore(:error), do: Application.delete_env(:lcars_fleet, :catalogue_root)
+  defp restore({:ok, value}), do: Application.put_env(:lcars_fleet, :catalogue_root, value)
 end

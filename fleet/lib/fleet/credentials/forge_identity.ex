@@ -27,7 +27,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
 
   No file read, no knob to provision, no fail-loud "human absent from the
   catalogue": an OS user ⇒ always an identity. (Test seam: `opts[:identity]`
-  or `config :fleet_credentials, :forge_identity_override` — `git config` varies per runner.)
+  or `config :lcars_fleet, :credentials_forge_identity_override` — `git config` varies per runner.)
 
   **Nominal deployment prerequisite**: the human has `git config --global user.email` configured.
   Otherwise the `<login>@<hostname>` fallback is NOT stable — the email is resolved
@@ -181,7 +181,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   # vary per runner). An explicit `:identity` (forge_identity_test) disables
   # the override to test the REAL assembly. Otherwise: human (`id -un`) → OS identity.
   defp resolve_identity(opts) do
-    override = Application.get_env(:fleet_credentials, :forge_identity_override)
+    override = Application.get_env(:lcars_fleet, :credentials_forge_identity_override)
     explicit_identity? = Keyword.has_key?(opts, :identity)
 
     case override do

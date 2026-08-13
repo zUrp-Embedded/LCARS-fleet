@@ -70,11 +70,11 @@ defmodule Fleet.Workflow.OpsObjectSync do
 
   # Test-configurable timeout budget.
   defp call_timeout,
-    do: Application.get_env(:fleet_workflow, :ops_sync_call_timeout, @default_call_timeout)
+    do: Application.get_env(:lcars_fleet, :workflow_ops_sync_call_timeout, @default_call_timeout)
 
   # Test-configurable ordered drain-confirm budget.
   defp drain_timeout,
-    do: Application.get_env(:fleet_workflow, :ops_sync_drain_timeout, call_timeout())
+    do: Application.get_env(:lcars_fleet, :workflow_ops_sync_drain_timeout, call_timeout())
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -102,7 +102,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
     case resolve(server) do
       nil ->
         # A configured-but-missing serializer is visible; explicit direct modes stay quiet.
-        if Application.get_env(:fleet_pilot, :start_ops_object_sync, true) do
+        if Application.get_env(:lcars_fleet, :pilot_start_ops_object_sync, true) do
           Logger.warning(
             "OpsObjectSync: serializer NOT registered — direct OpsObject write " <>
               "(cross-writer serialization skipped; restart window or crash loop)"

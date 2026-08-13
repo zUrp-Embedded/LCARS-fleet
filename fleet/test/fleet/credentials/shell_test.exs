@@ -1,5 +1,5 @@
 defmodule Fleet.Credentials.ShellTest do
-  # async: false — the `git/2` describe mutates the GLOBAL application env `:fleet_credentials,
+  # async: false — the `git/2` describe mutates the GLOBAL application env `:lcars_fleet,
   # :forge_auth` (read by git_env/0), shared with `ForgeAuthTest`; serializing avoids the
   # put/delete race on GIT_CONFIG_* that would make a `git config --get` reading the env
   # mid-mutation fail.
@@ -199,12 +199,12 @@ defmodule Fleet.Credentials.ShellTest do
     end
   end
 
-  # async: false — this describe mutates the global application env `:fleet_credentials,
+  # async: false — this describe mutates the global application env `:lcars_fleet,
   # :forge_auth` (read by git_env/0); restored in on_exit. Keeps the global side effect separate
   # from the async-safe describe above.
   describe "git/2 — injects git_env/0 by default (anti-prompt MA-22)" do
     setup do
-      Fleet.TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
+      Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
       :ok
     end
 
@@ -213,7 +213,7 @@ defmodule Fleet.Credentials.ShellTest do
       # (which receives NO -c on the argv) returns the extraheader → it read it from GIT_CONFIG_*
       # (env) set by git_env(). Same F087 mechanism as `forge_auth_test`, but through `Shell.git/2`.
       # git_env() ALSO carries GIT_TERMINAL_PROMPT=0 (anti-prompt MA-22), covered by forge_auth_test.
-      Application.put_env(:fleet_credentials, :forge_auth, %{
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET-shell"
       })

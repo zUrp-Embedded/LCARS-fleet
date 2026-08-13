@@ -33,22 +33,22 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
     on_exit(fn -> Bus.set_event_routing(prior_routing) end)
 
     log_path = Path.join(tmp_dir, "test-starfleet.jsonl")
-    Application.put_env(:fleet_starfleet, :audit_log_path, log_path)
+    Application.put_env(:lcars_fleet, :starfleet_audit_log_path, log_path)
 
     Application.put_env(
-      :fleet_starfleet,
-      :coord_backend,
+      :lcars_fleet,
+      :starfleet_coord_backend,
       Fleet.Starfleet.CoordBackendStub
     )
 
-    Application.put_env(:fleet_starfleet, :coord_invocations, [])
+    Application.put_env(:lcars_fleet, :starfleet_coord_invocations, [])
 
     Bus.subscribe()
 
     on_exit(fn ->
-      Application.delete_env(:fleet_starfleet, :audit_log_path)
-      Application.delete_env(:fleet_starfleet, :coord_backend)
-      Application.delete_env(:fleet_starfleet, :coord_invocations)
+      Application.delete_env(:lcars_fleet, :starfleet_audit_log_path)
+      Application.delete_env(:lcars_fleet, :starfleet_coord_backend)
+      Application.delete_env(:lcars_fleet, :starfleet_coord_invocations)
     end)
 
     {:ok, log_path: log_path}
@@ -75,7 +75,7 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert bcast_payload["pod_id"] == "p1"
 
       [{:escalation, :pod_drift, ctx, ^cid}] =
-        Application.get_env(:fleet_starfleet, :coord_invocations)
+        Application.get_env(:lcars_fleet, :starfleet_coord_invocations)
 
       assert ctx["chain"] == ["starfleet.cat5.pod_drift"]
 
@@ -133,8 +133,13 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
     # routage » : mesure du 2026-08-08, inverser les deux lignes laissait les 2438 tests verts.
     # Seul un backend qui LEVE distingue les deux mondes — avec un backend qui rend `:ok`, l'ordre
     # est inobservable et le test passerait dans les deux sens.
-    Application.put_env(:fleet_starfleet, :coord_backend, Fleet.Starfleet.CoordBackendRaising)
-    log_path = Application.get_env(:fleet_starfleet, :audit_log_path)
+    Application.put_env(
+      :lcars_fleet,
+      :starfleet_coord_backend,
+      Fleet.Starfleet.CoordBackendRaising
+    )
+
+    log_path = Application.get_env(:lcars_fleet, :starfleet_audit_log_path)
 
     assert_raise RuntimeError, "coord backend down", fn ->
       Cat5Escalator.escalate(:pod_drift, %{"drift_count" => 9}, "corr-order")

@@ -158,5 +158,5 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   @doc "Returns the configured forge client or the canonical Pilot implementation."
   @spec resolved() :: module()
-  def resolved, do: Application.get_env(:fleet_mcp, :forge_client, @default_client)
+  def resolved, do: Application.get_env(:lcars_fleet, :mcp_forge_client, @default_client)
 end

@@ -4,20 +4,21 @@ defmodule Fleet.Forge.WriteSpacing do
   matters. Events produced by one forge call remain inseparable by construction.
 
   It lives in the FORGE domain and not the pilot's, because that is what it is about: the pilot
-  called it only where it writes to the forge. The config key stays `:fleet_pilot,
-  :forge_write_spacing_ms` — the `:fleet_<dom>` atoms are legacy-and-valid, and renaming one at the
+  called it only where it writes to the forge. The config key is `:lcars_fleet,
+  :pilot_forge_write_spacing_ms` — the per-domain PREFIX is what the 15 legacy `:fleet_<dom>` atoms
+  became (BL-6-05), and renaming one at the
   edge of a move is how an operator's env file silently stops being read.
   """
 
   @doc """
-  Inserts the configured gap (`:fleet_pilot, :forge_write_spacing_ms`, default 2000ms; 0 in test → no-op,
+  Inserts the configured gap (`:lcars_fleet, :pilot_forge_write_spacing_ms`, default 2000ms; 0 in test → no-op,
   cf. `config/test.exs`). `:sleeper` seam in `opts` (test — captures the requested duration, does not actually
   sleep). NB: briefly blocks the caller (assumed: already on the synchronous HTTP writes
   path — 2s buys an honest chronology, user decision).
   """
   @spec gap(keyword()) :: :ok
   def gap(opts \\ []) do
-    case Application.get_env(:fleet_pilot, :forge_write_spacing_ms, 2000) do
+    case Application.get_env(:lcars_fleet, :pilot_forge_write_spacing_ms, 2000) do
       ms when is_integer(ms) and ms > 0 -> (opts[:sleeper] || (&Process.sleep/1)).(ms)
       _ -> :ok
     end

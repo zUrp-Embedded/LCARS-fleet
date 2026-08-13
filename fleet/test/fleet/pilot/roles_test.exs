@@ -3,7 +3,7 @@ defmodule Fleet.Project.RolesTest do
   Locks the single AUTHORITY for workshop roles (`Fleet.Project.Roles`): capability RESOLUTION +
   opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
   """
-  # `async: false` : ce fichier tient `:fleet_pilot, :producer_role` — une clé GLOBALE que le code de
+  # `async: false` : ce fichier tient `:lcars_fleet, :pilot_producer_role` — une clé GLOBALE que le code de
   # production lit — pendant la durée d'un test. Il la nettoie bien (`on_exit` + `delete_env`), donc
   # il ne fuit pas ; mais tant qu'il la tient, `Roles.producer_role()` REND « engineer » au lieu de
   # LEVER, et n'importe quel test async concurrent qui traverse ce chemin voit l'autre réponse.
@@ -24,13 +24,13 @@ defmodule Fleet.Project.RolesTest do
     err = assert_raise RuntimeError, fn -> Roles.producer_role() end
     assert err.message =~ "scribe"
     assert err.message =~ "engineer"
-    assert err.message =~ ":producer_role"
+    assert err.message =~ ":pilot_producer_role"
 
     # Les deux echappatoires designees, dans l'ordre de priorite : l'opt, puis la config deploy.
     assert "designer" == Roles.producer_role(producer_role: "designer")
 
-    Application.put_env(:fleet_pilot, :producer_role, "engineer")
-    on_exit(fn -> Application.delete_env(:fleet_pilot, :producer_role) end)
+    Application.put_env(:lcars_fleet, :pilot_producer_role, "engineer")
+    on_exit(fn -> Application.delete_env(:lcars_fleet, :pilot_producer_role) end)
     assert "engineer" == Roles.producer_role()
   end
 

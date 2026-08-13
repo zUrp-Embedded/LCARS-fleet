@@ -37,8 +37,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   ## Configuration
 
-    * `:fleet_starfleet, :mcp_monitor_check_interval_ms` — default `60_000` (1 min)
-    * `:fleet_starfleet, :mcp_monitor_target` — target (default
+    * `:lcars_fleet, :starfleet_mcp_monitor_check_interval_ms` — default `60_000` (1 min)
+    * `:lcars_fleet, :starfleet_mcp_monitor_target` — target (default
       `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
       atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
   """
@@ -139,10 +139,14 @@ defmodule Fleet.Starfleet.MCPMonitor do
   end
 
   defp config_interval_ms do
-    Application.get_env(:fleet_starfleet, :mcp_monitor_check_interval_ms, @default_interval_ms)
+    Application.get_env(
+      :lcars_fleet,
+      :starfleet_mcp_monitor_check_interval_ms,
+      @default_interval_ms
+    )
   end
 
   defp config_target do
-    Application.get_env(:fleet_starfleet, :mcp_monitor_target, @default_target)
+    Application.get_env(:lcars_fleet, :starfleet_mcp_monitor_target, @default_target)
   end
 end

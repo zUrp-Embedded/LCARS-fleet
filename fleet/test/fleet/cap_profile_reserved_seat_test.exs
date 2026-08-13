@@ -39,7 +39,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
   end
 
   setup %{tmp_dir: tmp} do
-    Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, write_canon(tmp))
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, write_canon(tmp))
     on_exit(fn -> Image.unpublish() end)
     :ok
   end

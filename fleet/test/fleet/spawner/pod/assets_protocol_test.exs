@@ -26,11 +26,11 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
     # publish! requires at least one role draft under the root (proven-good or do not boot).
     File.write!(Path.join(drafts, "agent-probe-base.md"), "# probe\n")
 
-    Fleet.TestEnv.put_env_restoring(:fleet_sp_builder, :sp_drafts_root, drafts)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :sp_builder_sp_drafts_root, drafts)
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_spawner,
-      :protocole_user_path,
+      :lcars_fleet,
+      :spawner_protocole_user_path,
       Path.join(drafts, "protocole-user-worker.md")
     )
 

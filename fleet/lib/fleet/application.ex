@@ -112,10 +112,10 @@ defmodule Fleet.Application do
     # legitimately rewrites (project maps, briefs, ops docs) — data the pods act ON, never the
     # prompt material they are BUILT from. Adding a prompt input without adding it here re-widens the
     # promise past the mechanism; the boot log's version covers exactly the list above.
-    if Application.get_env(:fleet_cap_profile, :publish_image, true),
+    if Application.get_env(:lcars_fleet, :cap_profile_publish_image, true),
       do: Fleet.CapProfile.publish_image!()
 
-    if Application.get_env(:fleet_sp_builder, :publish_image, true),
+    if Application.get_env(:lcars_fleet, :sp_builder_publish_image, true),
       do: Fleet.SPBuilder.publish_image!()
 
     children = [
