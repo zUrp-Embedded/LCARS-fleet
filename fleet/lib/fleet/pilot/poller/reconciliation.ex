@@ -226,7 +226,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
           to_act
           |> Enum.filter(fn
             {_repo, :pod, pod_id} ->
-              reap_pod(seams, pod_id)
+              # `_ =` EXPLICITE, et ce n'est pas un reflexe de style : depuis JG-120 le reap rend un
+              # verdict classe, donc l'ignorer est un CHOIX qui doit se voir (dialyzer le dit sous
+              # `unmatched_return`). Le choix est celui du paragraphe ci-dessus — un reap rate ne
+              # devient pas un suspect retenu, il se repare par re-suspicion au tick suivant — et
+              # son echec est deja TRACE dans `reap_pod/2`. Ce qui serait faux, c'est de le jeter
+              # en silence maintenant qu'il existe.
+              _ = reap_pod(seams, pod_id)
               false
 
             {_repo, _type, n} ->
@@ -288,13 +294,40 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # "ends itself", cf. quiesced_brick_pods) → `info`, not warning (≠ reclaim_lock, which flags an
   # ANOMALY). Kill via the SINGLE authority `Spawn.safe_kill/2` (no fork of the kill wrapper);
   # a kill that fails is swallowed there — the next tick re-suspects, self-healing.
+  # ⚠ LA LIGNE ANNONCAIT « reaped » AU PASSE, AVANT L'APPEL. Elle etait donc vraie de l'INTENTION et
+  # jamais du fait : `safe_kill/2` avale par conception, et le seul lecteur de cette flotte — un
+  # operateur qui grep `reaped` — lisait un kill accompli la ou il n'y avait qu'un kill tente.
+  #
+  # L'avalement RESTE (le tick suivant re-suspecte et retente, c'est l'arbitrage du site appelant).
+  # Ce qui change, c'est que la trace suit l'acte au lieu de le preceder, et qu'elle dit lequel des
+  # trois etats a eu lieu. `{:error, :not_found}` n'est PAS un echec : le pod n'est plus la, le
+  # devoir est accompli — le confondre avec un kill rate ferait crier la trace sur le cas nominal
+  # d'une course benigne.
   defp reap_pod(%Seams{spawner: spawner, repo: repo}, pod_id) do
-    Logger.info(
-      "Poller: reconciliation : pod #{pod_id} QUIESCED on #{repo} " <>
-        "(brick unlocked, no active task) → reaped (a re-dispatch re-spawns fresh)"
-    )
+    outcome = Fleet.Pilot.StepDispatcher.Spawn.safe_kill(spawner, pod_id)
 
-    Fleet.Pilot.StepDispatcher.Spawn.safe_kill(spawner, pod_id)
+    case outcome do
+      :ok ->
+        Logger.info(
+          "Poller: reconciliation : pod #{pod_id} QUIESCED on #{repo} " <>
+            "(brick unlocked, no active task) → REAPED (a re-dispatch re-spawns fresh)"
+        )
+
+      {:error, :not_found} ->
+        Logger.info(
+          "Poller: reconciliation : pod #{pod_id} QUIESCED on #{repo} — already gone when the " <>
+            "kill landed (nothing to do, the duty is satisfied)"
+        )
+
+      other ->
+        Logger.warning(
+          "Poller: reconciliation : pod #{pod_id} QUIESCED on #{repo} but the kill did NOT " <>
+            "land (#{inspect(other)}) — NOT reaped; the next tick re-suspects and retries " <>
+            "(self-healing, nothing is blocked)"
+        )
+    end
+
+    outcome
   end
 
   # Refs `{repo, :issue|:pr, n}` that a pod is REALLY working, derived from the deterministic STABLE pod_ids

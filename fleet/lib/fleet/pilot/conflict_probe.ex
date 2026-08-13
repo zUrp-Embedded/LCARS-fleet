@@ -5,6 +5,12 @@ defmodule Fleet.Pilot.ConflictProbe do
   and returns an error on any uncertainty so remediation can fall back safely.
   """
 
+  require Logger
+
+  # `git merge-file` rend le NOMBRE de conflits, borne a 127 par le contrat de git ; au-dela c'est
+  # une erreur de l'outil. La constante nomme la frontiere entre « une reponse » et « une panne ».
+  @merge_file_max_conflicts 127
+
   alias Fleet.Conflict
   alias Fleet.Conflict.Report
   alias Fleet.Credentials.Shell
@@ -140,8 +146,27 @@ defmodule Fleet.Pilot.ConflictProbe do
     end
   end
 
-  # 3-way `git merge-file` on temp blobs -> diff3-marked content. Keeps stdout on the non-zero
-  # (conflict-count) exit; hard failure -> `:error` (the caller treats it as a residual, never as clean).
+  # 3-way `git merge-file` on temp blobs -> diff3-marked content.
+  #
+  # ⚠ LA PHRASE « hard failure -> `:error` » NE TENAIT PAS : le motif `{:ok, {out, _code}}` acceptait
+  # TOUS les codes retour, echecs compris. Le commentaire decrivait l'intention, pas la clause.
+  #
+  # Le contrat de `git merge-file` fait la difference que le `_code` effacait : **0** = fusion
+  # propre, **1..127** = NOMBRE de conflits — deux REPONSES — et **au-dela** (typiquement 255) une
+  # ERREUR de l'outil. Ce sont trois choses, et deux seulement sont du contenu.
+  #
+  # ⚠ AGGRAVANT, ET C'EST LUI QUI REND LE DEFAUT CONCRET : `Shell.git/2` fusionne stderr dans stdout
+  # (« `output` = stdout+stderr merged, like every git site in the codebase »). Sur `rc=255`, `out`
+  # ne contient donc pas un merge rate — il contient le TEXTE D'ERREUR DE GIT, qui part au
+  # classifieur comme s'il etait le contenu fusionne. Sans marqueur de conflit dedans, `Conflict`
+  # rend un rapport a ZERO hunk : une panne de l'outil de merge se lit « fichier sans conflit »,
+  # et les totaux de routage tier-0 comptent un fichier propre qui n'a jamais ete fusionne.
+  #
+  # La soeur `show/3`, douze lignes plus haut, filtre pourtant `{:ok, {out, 0}}` — le meme fichier
+  # portait deja la bonne posture sur l'autre lecture.
+  #
+  # `:error` mene a `add_delete_report/0` (residuel conservateur, jamais « propre ») : l'appelant
+  # sait deja quoi en faire, seule la clause qui y menait etait inatteignable.
   defp merge_file(base, ours, theirs) do
     tmp = Path.join(System.tmp_dir!(), "lcars-cprobe-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -155,8 +180,18 @@ defmodule Fleet.Pilot.ConflictProbe do
       File.write!(pt, theirs)
 
       case Shell.git(["merge-file", "-p", "--diff3", po, pb, pt], env: []) do
-        {:ok, {out, _code}} -> {:ok, out}
-        _ -> :error
+        {:ok, {out, code}} when code >= 0 and code <= @merge_file_max_conflicts ->
+          {:ok, out}
+
+        other ->
+          Logger.warning(
+            "ConflictProbe: `git merge-file` FAILED (#{inspect(other)}) — traite en residuel " <>
+              "conservateur, jamais comme un fichier propre (sa sortie est stdout+stderr fusionnes, " <>
+              "donc la lire comme du contenu fusionne comptait une panne d'outil pour un merge sans " <>
+              "conflit)"
+          )
+
+          :error
       end
     after
       File.rm_rf(tmp)

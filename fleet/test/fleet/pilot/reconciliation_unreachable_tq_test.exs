@@ -130,6 +130,64 @@ defmodule ReconciliationUnreachableTqTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════
+  # JG-120 — LA LIGNE ANNONCAIT « reaped » AU PASSE, AVANT L'APPEL. Elle etait vraie de l'INTENTION
+  # et jamais du fait : `safe_kill/2` avale par conception, et un operateur qui grep `reaped` lisait
+  # un kill accompli la ou il n'y avait qu'un kill tente. L'avalement reste (le tick suivant
+  # re-suspecte) ; c'est la TRACE qui suit desormais l'acte.
+  describe "JG-120 — la trace du reap suit l'acte au lieu de le preceder" do
+    defmodule KillFails do
+      def list_pods, do: [%{pod_id: "o-r-issue-7-engineer"}]
+      def kill_pod(_pod_id), do: {:error, :boom}
+    end
+
+    defmodule KillRaises do
+      def list_pods, do: [%{pod_id: "o-r-issue-7-engineer"}]
+      def kill_pod(_pod_id), do: raise("le backend de kill est casse")
+    end
+
+    defp reap_with(spawner) do
+      seams = %Seams{
+        forge: Forge,
+        spawner: spawner,
+        task_queue: TqIdle,
+        repo: @repo,
+        forge_opts: []
+      }
+
+      prior = MapSet.new([{@repo, :pod, @pod_id}])
+      pods = Reconciliation.snapshot_pods(spawner)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        _ = Reconciliation.reconcile([], [], MapSet.new(), prior, seams, pods)
+      end)
+    end
+
+    test "un kill qui ECHOUE ne s'annonce plus comme accompli" do
+      log = reap_with(KillFails)
+
+      refute log =~ "→ REAPED",
+             "la trace annonce un reap accompli alors que le kill a rendu une erreur"
+
+      assert log =~ "did NOT land", "l'echec du kill n'apparait nulle part"
+      assert log =~ "re-suspects and retries", "la trace ne dit pas que rien n'est bloque"
+    end
+
+    test "un kill qui LEVE non plus — `safe_kill/2` ne fabrique plus un `:ok`" do
+      log = reap_with(KillRaises)
+
+      refute log =~ "→ REAPED"
+      assert log =~ "kill_raised", "l'exception est repliee sur un succes quelque part"
+    end
+
+    test "TEMOIN — un kill qui REUSSIT s'annonce bien, sinon le test d'a cote ne prouve rien" do
+      log = reap_with(KillSpy)
+
+      assert log =~ "→ REAPED"
+      refute log =~ "did NOT land"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
   # JG-083 — LE MEME SILENCE, SUR L'AUTRE DEVOIR, ET LE FIX DE JG-074 NE LE COUVRAIT PAS.
   #
   # JG-074 a fait rendre `:unknown` a `pod_task_state/2` — mais cette fonction ne sert que le devoir

@@ -421,7 +421,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:error, _} = err ->
         # A POST-lock step failed → compensation (removal of the lock, else stuck forever).
         # Kill ONLY if fresh spawn (a re-brief NEVER kills the living eng + its context).
-        if not alive_before?, do: safe_kill(spawner, pod_id)
+        #
+        # `_ =` EXPLICITE : depuis JG-120, `safe_kill/2` rend un verdict classe, donc l'ignorer est
+        # un CHOIX. Il est ASSUME ici — la compensation qui compte est le retrait du VERROU, juste
+        # en dessous, et son verdict est capture (CI-10). Un pod qui survit a son kill de
+        # compensation est ramasse par la reconciliation du poller au tick suivant ; un verrou qui
+        # survit, lui, bloque la brique pour toujours. Les deux echecs n'ont pas le meme poids, et
+        # c'est pour ca qu'un seul est propage.
+        _ = if not alive_before?, do: safe_kill(spawner, pod_id)
 
         # CI-10 (audit integrite 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
         # return + a flat "lock removed" log LIED when the removal failed (the issue stays in-flight while
@@ -536,11 +543,29 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   PUBLIC because shared with the core: `spawn_step/9` (compensation) AND `ReviewLifecycle.promote_pr`
   (die-on-promote of the eng). One copy, no fork.
   """
-  @spec safe_kill(module(), String.t()) :: any()
+  # LE SILENCE RESTE, LE FAIT CESSE D'ETRE FABRIQUE. Cette fonction avale toujours l'echec — c'est
+  # l'arbitrage, ecrit chez ses trois appelants : un kill rate ne bloque rien, le tick suivant
+  # re-suspecte et retente. Mais elle rendait `:ok` dans QUATRE situations differentes : kill
+  # reussi, pod deja absent, `kill_pod/1` non exporte (doublure de test), et exception. Un appelant
+  # qui voulait dire ce qui s'est passe ne le pouvait pas — et l'un d'eux annoncait « reaped » sur
+  # cette base (JG-120).
+  #
+  # Le retour devient donc classe, et c'est PUREMENT ADDITIF : les trois sites l'ignorent
+  # aujourd'hui (`@spec … :: any()` disait deja qu'il n'etait pas defini). Personne ne branche
+  # dessus ; ce qui change, c'est qu'on PEUT.
+  @spec safe_kill(module(), String.t()) :: :ok | :unsupported | {:error, term()}
   def safe_kill(spawner, pod_id) do
-    if function_exported?(spawner, :kill_pod, 1), do: spawner.kill_pod(pod_id), else: :ok
+    if function_exported?(spawner, :kill_pod, 1) do
+      case spawner.kill_pod(pod_id) do
+        :ok -> :ok
+        {:error, _} = err -> err
+        other -> {:error, {:unexpected_kill_result, other}}
+      end
+    else
+      :unsupported
+    end
   rescue
-    _ -> :ok
+    e -> {:error, {:kill_raised, Exception.message(e)}}
   end
 
   # `as_role`, unless the role DECLARES it has no forge identity — in which case there is nothing to
