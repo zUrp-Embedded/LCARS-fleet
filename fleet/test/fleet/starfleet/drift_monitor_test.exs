@@ -37,11 +37,6 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
         cat5_source: :workflow_map_failed,
         threshold: nil
       },
-      {:credentials, :"oauth.refresh.failed"} => %{
-        action: :cat5,
-        cat5_source: :oauth_refresh_failed,
-        threshold: nil
-      },
       {:workflow, :"audit.verdict"} => %{
         action: :coord_decision,
         cat5_source: nil,
@@ -106,8 +101,7 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
   # `source` defaults to `:event_router`. Every routed type requires its source (the routing
   # table is keyed on the {source, type} PAIR — anti-spoof is structural): workflow_map.failed /
-  # audit.verdict → `:workflow`; pod.drift → `:spawner` (F-C043); oauth.refresh.failed →
-  # `:credentials` (declared for the dormant signal — its future producer must match).
+  # audit.verdict → `:workflow`; pod.drift → `:spawner` (F-C043).
   defp emit_canon(type, payload, opts \\ []) do
     Bus.broadcast(
       "fleet.events",
@@ -240,34 +234,6 @@ defmodule Fleet.Starfleet.DriftMonitorTest do
 
       refute Enum.any?(coord_invocations(), fn
                {:escalation, :workflow_map_failed, _, _} -> true
-               _ -> false
-             end)
-    end
-  end
-
-  describe "oauth.refresh.failed event" do
-    test "broadcast → Cat5 escalation oauth_refresh_failed" do
-      :ok =
-        emit_canon(
-          :"oauth.refresh.failed",
-          %{
-            "account" => "u@x.com",
-            "lead_time_min" => 30
-          },
-          source: :credentials
-        )
-
-      wait_drift_monitor_drain()
-
-      assert_receive %Fleet.Event{
-                       source: :starfleet,
-                       type: :"starfleet.audit_cat5_oauth_refresh_failed",
-                       payload: %{"account" => "u@x.com"}
-                     },
-                     500
-
-      assert Enum.any?(coord_invocations(), fn
-               {:escalation, :oauth_refresh_failed, _, _} -> true
                _ -> false
              end)
     end

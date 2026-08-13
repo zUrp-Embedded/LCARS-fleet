@@ -23,9 +23,9 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
         cat5_source: :workflow_map_failed,
         threshold: nil
       },
-      {:credentials, :"oauth.refresh.failed"} => %{
-        action: :cat5,
-        cat5_source: :oauth_refresh_failed,
+      {:workflow, :"audit.verdict"} => %{
+        action: :coord_decision,
+        cat5_source: nil,
         threshold: nil
       }
     })
@@ -98,19 +98,22 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert chain == ["pod.refuse", "ipc_filter.drift", "starfleet.cat5.workflow_map_failed"]
     end
 
-    test "oauth_refresh_failed: source serialized as string" do
-      :ok = Cat5Escalator.escalate(:oauth_refresh_failed, %{"reason" => "401"}, nil)
+    # The property is the SERIALIZATION (an atom source lands as a string in the payload), not the
+    # source that carries it — this case rode on `oauth_refresh_failed` until that key was cut
+    # (BL-6-43) and moved to `pod_drift` unchanged.
+    test "source serialized as string" do
+      :ok = Cat5Escalator.escalate(:pod_drift, %{"reason" => "401"}, nil)
 
       assert_receive %Fleet.Event{
                        source: :starfleet,
-                       type: :"starfleet.audit_cat5_oauth_refresh_failed",
-                       payload: %{"source" => "oauth_refresh_failed"}
+                       type: :"starfleet.audit_cat5_pod_drift",
+                       payload: %{"source" => "pod_drift"}
                      },
                      500
     end
 
     test "R2-15: source OUTSIDE the Cat 5 enum → loud REFUSAL (error) + :ok, NO broadcast/effect" do
-      # `:bogus_cat5_src` is not one of the 3 wired sources (DriftMonitor + events.yaml). R2-15 bounds
+      # `:bogus_cat5_src` is not one of the 2 wired sources (DriftMonitor + events.yaml). R2-15 bounds
       # `escalate` to the source-enum: an unknown atom must not proceed to broadcasting an unregistered
       # `audit_cat5_<src>` (event-construction bug, loud only at broadcast level). Refusal happens AT
       # THE EDGE (no bogus side effect: no AuditLog.write, no broadcast, no coord). `escalate/3` stays

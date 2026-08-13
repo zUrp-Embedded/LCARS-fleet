@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (A-06)
 
-  `starfleet.audit_cat5_<pod_drift|workflow_map_failed|oauth_refresh_failed>` — the max-severity
+  `starfleet.audit_cat5_<pod_drift|workflow_map_failed>` — the max-severity
   rail (`Cat5Escalator`). Without this route it would only leave a LOCAL NDJSON line + two lossy
   Bus broadcasts: the LOW-severity incident rail opens a durable forge issue while the
   MAX-severity one evaporates if nobody tails the file (severity/durability inversion). Routed

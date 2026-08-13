@@ -38,10 +38,6 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     assert %{action: :cat5, cat5_source: :workflow_map_failed, threshold: nil} =
              routing[{:workflow, :"workflow_map.failed"}]
 
-    # Anti-spoof COMPLETED for the dormant signal: its source is declared (future producer must match).
-    assert %{action: :cat5, cat5_source: :oauth_refresh_failed} =
-             routing[{:credentials, :"oauth.refresh.failed"}]
-
     assert %{action: :coord_decision} = routing[{:workflow, :"audit.verdict"}]
   end
 

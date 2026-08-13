@@ -41,6 +41,17 @@ events:
   # emits it (codex audit F-08 2026-07-19: the claimed F-C043 producer in Fleet.Spawner.PermanentBoot
   # does NOT exist, and the "corrupt versioned base seed" it was meant to detect vanished with the
   # boot-from-base nuke / unified graine flow). Consumers stay ready; do NOT count as live coverage.
+  #
+  # CONDITION OF END (BL-6-43, written 2026-08-13 — "consumers ready" with no end reads as "any day
+  # now", forever): this key is kept because its object can COME BACK — a pod that diverges from
+  # what the fleet believes it is running is a detection someone may want again. It is NOT kept
+  # because a producer is being written. Two triggers close it either way:
+  #   * a drift detector IS designed → it declares its own payload and threshold. If they differ
+  #     from `drift_count >= 3`, this entry is a GUESS, not a head start: replace it, do not fit
+  #     the detector to it.
+  #   * the Cat 5 rail acquires a second live source → this key stops being the routed type the
+  #     escalator tests exercise, and nothing holds it any more: cut it, as `oauth.refresh.failed`
+  #     was cut below.
   pod.drift:
     source: spawner
     action: cat5
@@ -49,9 +60,16 @@ events:
   # CAT-5 CHAIN (partially wired, Q2 2026-07-09): `workflow_map.failed` and `audit.verdict` now have a
   # DRAFT producer (`Pilot.StepRunConsumer`, source `:workflow`) → the DriftMonitor→Cat5Escalator/
   # CoordBackend→coord rail BLINKS end-to-end on a real signal (draft, not the final signal — see the
-  # per-key comments). STILL DORMANT (consumers wired + tested, NO producer, not live coverage):
-  # `oauth.refresh.failed` (never implemented launcher/credentials side) and `pod.drift`
-  # (F-08: claimed producer absent). Keys kept: consumers wired + tested, ready.
+  # per-key comments). ONE key stays DORMANT — `pod.drift`, and its condition is above.
+  #
+  # `oauth.refresh.failed` WAS the second, and it is GONE (BL-6-43, 2026-08-13). Its removal is the
+  # answer to a question this file could not previously ask: a dormant key was declared "consumers
+  # ready" with no condition of end, so "not yet" and "never" read identically. Measured: the OAuth
+  # refresh is the VENDOR's, native, on a `.credentials.json` the launcher binds RW
+  # (`bin/bwrap_launch.sh` — proactive, reactive on 401, lockfile). LCARS does not perform it, so it
+  # cannot observe its failure. The key did not lack a producer, it presupposed an ARCHITECTURE we
+  # refused: injecting a token in argv with no refresh. What LCARS can actually see when auth dies
+  # is a pod that never acks (`wake.failed`) or one that dies (`pod.failed`) — both live.
   # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N
   # attempts (agent never acked) — payload `pod_id`/`reason` (stable category string, JSON-safe;
   # keys the IncidentRegistry dedup signature)/`reason_detail`/`pane`. Consumed by
@@ -85,14 +103,6 @@ events:
     source: spawner
     action: incident
     incident: {op: spawn, subject: cap_profile_name}
-
-  # --- Credentials ---
-  # source `credentials` DECLARED for the dormant signal (anti-spoof completed): its future
-  # producer (launcher/credentials side) MUST emit with source :credentials or the chain ignores it.
-  oauth.refresh.failed:
-    source: credentials
-    action: cat5
-    cat5_source: oauth_refresh_failed
 
   # --- Audit gatekeeper / forge tickets / tick ---
   # `audit.verdict` (2 segments) — consumed by DriftMonitor (`%Fleet.Event{source: :workflow,
@@ -180,19 +190,17 @@ events:
   # the raze. To re-add WITH a producer AND a consumer if git publication becomes observable again.
 
   # --- Cat 5 broadcasts (Cat5Escalator, source :starfleet) ---
-  # TRANSITIVELY DORMANT, two of the three: `Cat5Escalator.escalate/3` is called ONLY by the
+  # TRANSITIVELY DORMANT, one of the two: `Cat5Escalator.escalate/3` is called ONLY by the
   # DriftMonitor, one call per upstream type. So a Cat 5 broadcast can only fire if its TRIGGER can.
-  # `pod.drift` and `oauth.refresh.failed` are both marked dormant above (no producer) — therefore
-  # `audit_cat5_pod_drift` and `audit_cat5_oauth_refresh_failed` cannot be emitted either, however
-  # wired their consumers are. Only `audit_cat5_workflow_map_failed` has a live path (draft producer,
-  # see the CAT-5 CHAIN note above). The three keys read symmetrically; their reachability does not.
+  # `pod.drift` is dormant above (no producer) — therefore `audit_cat5_pod_drift` cannot be emitted
+  # either, however wired its consumer is. Only `audit_cat5_workflow_map_failed` has a live path
+  # (draft producer, see the CAT-5 CHAIN note above). The two keys read symmetrically; their
+  # reachability does not. `audit_cat5_oauth_refresh_failed` was the third and went with its trigger
+  # (BL-6-43): a transitively-dormant key outlives the reason anyone could name for it.
   starfleet.audit_cat5_pod_drift:
     source: starfleet
     action: incident_cat5
   starfleet.audit_cat5_workflow_map_failed:
-    source: starfleet
-    action: incident_cat5
-  starfleet.audit_cat5_oauth_refresh_failed:
     source: starfleet
     action: incident_cat5
 

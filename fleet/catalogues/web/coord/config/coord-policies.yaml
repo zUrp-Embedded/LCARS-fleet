@@ -55,7 +55,3 @@ mappings:
   # Les identifiants d'acces ne se renouvellent plus. Plus rien ne fonctionnera
   # d'ici peu : c'est l'archetype de l'evenement qui merite de reveiller
   # quelqu'un.
-  "escalate.oauth_refresh_failed":
-    action: escalate_human
-    escalation_path:
-      - starfleet_alert

@@ -1,7 +1,7 @@
 # Fleet.Starfleet — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-21
+**Last revised**: 2026-08-13
 **Status**: active — system-side audit/validation, N0
 **Referenced by**: —
 
@@ -18,7 +18,7 @@ restated, only pointed at.
 - `Fleet.Starfleet.Application` — `:one_for_one` supervisor (3/60); boot fail-fast schema load + compile-time event-atom pre-registration + five `:start_*`-gated children (BootOrchestrator is NOT one: triggered post-boot by the root via `Fleet.Starfleet.boot_orchestrate/0`)
 - `Fleet.Starfleet.Gatekeeper` — pure decision-JSON validation against the frozen `decision-v1.json` schema (boot-loaded into the foundation `Fleet.SchemaCache`)
 - `Fleet.Decision` — the validated `{decision, reason, details, chain}` output struct (foundation: moved out of Starfleet — Coord cannot name a Starfleet type without a cycle)
-- `Fleet.Starfleet.DriftMonitor` — Bus subscriber routing 4 event types to Cat 5 / coord (`audit.verdict`, `workflow_map.failed` have live/draft producers; `pod.drift` and `oauth.refresh.failed` are dormant — handler wired + tested, no producer emits)
+- `Fleet.Starfleet.DriftMonitor` — Bus subscriber routing 3 event types to Cat 5 / coord (`audit.verdict`, `workflow_map.failed` have live/draft producers; `pod.drift` is dormant — handler wired + tested, no producer emits, condition of end written in `events.yaml`)
 - `Fleet.Starfleet.Cat5Escalator` — pure functions: audit-log write + canonical `starfleet.audit_cat5_<source>` broadcast + coord delegation
 - `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail (lifecycle + security, log-only)
 - `Fleet.Starfleet.AuditLog` — fail-safe NDJSON writer with threshold rotation
