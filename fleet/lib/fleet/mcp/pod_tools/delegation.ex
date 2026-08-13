@@ -1457,6 +1457,34 @@ defmodule Fleet.MCP.PodTools.Delegation do
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
   # Retry-stable marker in the raw, non-rendered issue body.
+  # CE MARQUEUR EST UN IDENTIFIANT DURABLE, ET C'EST CE QUI LE REND DELICAT. Il n'est pas calcule
+  # puis jete : il est ECRIT DANS LE CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR
+  # — potentiellement apres une montee d'OTP. Sa stabilite depend donc de
+  # `:erlang.term_to_binary/1`, c'est-a-dire du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
+  # l'implementation, hors du depot. Aucun test d'ici ne peut surveiller cette propriete — il
+  # faudrait deux executions sur deux VM.
+  #
+  # ⚠ LE DECLENCHEUR ANNONCE PAR L'AUDIT (« ordre interne d'une map ») EST MESURE FAUX SUR CET OTP :
+  # `term_to_binary` rend le MEME binaire pour `%{b: 1, a: 2}` et `%{a: 2, b: 1}` — cles atomes ou
+  # binaires, petites maps comme grandes (40 cles). Et il ne pourrait pas s'appliquer ici de toute
+  # facon : aucun champ hache n'est une map (`title`/`brief` binaires, `summary` binaire|nil,
+  # `supersedes` entier|nil, `brief_pointer` `{ref, sha}`|nil, `lot` binaire|nil).
+  #
+  # ⚠ UN ENCODEUR CANONIQUE EXPLICITE A ETE ECRIT ICI, PUIS ANNULE. Il rendait chaque champ en
+  # `TAG <> TAILLE <> ":" <> charge` pour que l'invariant vive dans ce module au lieu d'etre emprunte
+  # a un format tiers. MESURE PAR MUTATION : il n'achete AUCUNE propriete observable que
+  # `term_to_binary` n'ait deja sur cet OTP — desambiguisation binaire/entier, decoupage des champs,
+  # `nil` distinct de `""`, ordre des maps : les cinq tests ecrits pour lui restaient VERTS avec
+  # l'ancien encodeur. Et il n'etait pas gratuit : changer l'entree du digest ORPHELINE les marqueurs
+  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
+  #
+  # LA LIGNE A RELIRE : si la flotte change de version MAJEURE d'OTP, verifier que ce digest est
+  # stable avant de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
+  # acte. C'est le seul evenement qui rend le defaut reel.
+  #
+  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee par `String.contains?` dans les
+  # issues OUVERTES d'UN depot — quelques milliers de marqueurs au plus, soit une collision de
+  # l'ordre de 1e-11. L'elargir couterait la lisibilite du corps de ticket pour le mauvais risque.
   defp op_marker(title, brief, summary, supersedes, brief_pointer, lot) do
     sig =
       :crypto.hash(
