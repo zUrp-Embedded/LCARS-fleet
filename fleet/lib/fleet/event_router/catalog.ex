@@ -51,13 +51,35 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   @doc """
-  Returns the registry's event type strings, or `[]` when it cannot be parsed.
+  Returns the registry's event type strings. An empty registry yields `[]`; an UNPARSEABLE one
+  raises, exactly like `load!/0` on the same fault.
+
+  THE TWO READERS OF `events.yaml` NOW TREAT THE SAME FAULT THE SAME WAY. They did not: `load!/0`
+  raised on an absent or invalid file while this one returned `[]` in silence — and `[]` was also
+  what a legitimately empty registry returns, so the two were indistinguishable at the output.
+
+  The silence was harmless on the nominal path (`load!/0` raises one line later, so the boot dies
+  anyway) and NOT harmless where the registry is deliberately off
+  (`event_router_load_event_registry: false`, the hermetic test baseline and any maintenance run):
+  there `load!/0` is a no-op, this function is the ONLY source of pre-registered event atoms, and an
+  unparseable file left the fleet with none. Every later `String.to_existing_atom/1` on a binary
+  event type — `Bus.coerce_type/1`, the gitea webhook — then raises an ArgumentError naming the
+  type, pointing at the consumer instead of at the file that could not be read.
+
+  An EMPTY registry is a different fact and keeps its `[]`: there is genuinely nothing to
+  pre-register, and `load!/0` is the one that decides whether emptiness is fatal.
   """
   @spec event_type_strings() :: [String.t()]
   def event_type_strings do
     case parse_events() do
-      {:ok, events} -> Map.keys(events)
-      :error -> []
+      {:ok, events} ->
+        Map.keys(events)
+
+      :error ->
+        raise "Catalog: events.yaml absent or invalid at #{events_yaml_path()} — no event atom " <>
+                "could be pre-registered. Fail-loud here, same as load!/0 on the same fault: with " <>
+                "the registry disabled nothing else would say it, and the fault would surface " <>
+                "later as an ArgumentError on String.to_existing_atom/1 at a consumer."
     end
   end
 
