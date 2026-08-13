@@ -11,14 +11,13 @@ defmodule Fleet.Pilot.Poller.Lease do
   rien, cinq workflow_runs peuvent voler ensemble. Corrige le 2026-08-13 (BL-6-75) — le nom du module
   garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet est un plafond.
 
-  ⚠ **ET LE PLAFOND EST PER-HUMAIN, ce que rien ne disait.** Le compte se fait sur la liste que le
-  poller a obtenue avec `assigned_by=<son humain>` — donc deux humains sur un meme depot tiennent
-  DEUX compteurs disjoints, et le depot peut porter jusqu'a 2 x max_fan runs. Jamais observe (aucun
-  banc n'a fait travailler deux humains sur le meme depot en mode step), et sans consequence connue
-  sur la correction : les branches sont `lcars/issue-<n>-<role>`, donc sans collision, et le merge
-  est un rebase qui absorbe deja l'avance de `main` sous PR paralleles. Ce qui est en jeu est le
-  debit et la linearite, pas l'integrite. Le fond — la serialisation par depot a-t-elle encore un
-  sens a deux humains, et le bail doit-il vivre SUR LA FORGE — est [BL-6-75], gele.
+  **Le plafond est PER HUMAIN, et c'est le modele — pas une fuite du filtre.** Le compte se fait sur
+  la liste obtenue avec `assigned_by=<mon humain>`, donc deux humains sur un depot tiennent deux
+  budgets. Toute la fleet est per-humain (architect cape par uid, pods, feed, scoping) et une config
+  centrale qui accorde un quota PAR UTILISATEUR est la forme ordinaire de la chose ; l'endroit ou la
+  valeur est declaree ne dit rien de qui elle borne. `Admission.max_fan/0` porte le raisonnement.
+  Ce qui borne le DEPOT est ailleurs : les sieges de pool par `(role, repo)`, et le fusible
+  `Spawner.max_pods` en dernier ressort.
 
   ## The decision (business core)
 

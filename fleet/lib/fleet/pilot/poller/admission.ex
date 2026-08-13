@@ -64,9 +64,21 @@ defmodule Fleet.Pilot.Poller.Admission do
   @max_max_fan 15
 
   @doc """
-  The FLEET default ceiling on workflow_runs in flight — `:lcars_fleet, :pilot_max_fan`, default
-  #{@default_max_fan}, clamped to `1..#{@max_max_fan}`. A project that declares its own throughput
-  overrides it: `max_fan/2` is what a dispatch decision reads.
+  The FLEET default ceiling on workflow_runs in flight **PER HUMAN** — `:lcars_fleet,
+  :pilot_max_fan`, default #{@default_max_fan}, clamped to `1..#{@max_max_fan}`. A project that
+  declares its own throughput overrides it: `max_fan/2` is what a dispatch decision reads.
+
+  **PER HUMAN, BY DESIGN — et ce n'est pas une fuite du filtre.** Le compte se fait sur la liste que
+  le poller a obtenue avec `assigned_by=<son humain>`, donc deux humains sur un depot tiennent deux
+  budgets. C'est le modele de la fleet, entier : un architect est un agent DE l'humain, cape par
+  uid ; les pods, le feed, le scoping le sont aussi. Une config centrale qui accorde un quota PAR
+  UTILISATEUR est la forme ordinaire de la chose (quotas disque, rate-limit par cle), et l'endroit
+  ou la valeur est DECLAREE ne dit rien de QUI elle borne.
+
+  ⚠ Ecrit ici parce que l'intuition inverse — « c'est declare dans le fichier du projet, donc ca
+  borne le projet » — a ete tiree deux fois, dont une le 2026-08-13 au point d'ouvrir un chantier
+  pour un defaut qui n'existe pas. Ce qui borne le DEPOT est ailleurs et se nomme : les sieges de
+  pool par `(role, repo)`, et le fusible `Spawner.max_pods` (128) en dernier ressort.
 
   **Serial is this ceiling at 1**, not another mechanism. The boolean it replaces
   (`:repo_serialized_lease`) and this counter were the same parameter at two resolutions, which is
