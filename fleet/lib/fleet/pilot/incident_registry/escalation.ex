@@ -266,6 +266,13 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp correlation_block(_), do: ""
 
+  defp kind_describe(:ops_root_missing),
+    do:
+      {"racine des faces absente",
+       "La racine `ops` a disparu (demontage, permissions) — le rail d'etapes est saute pour TOUS " <>
+         "les depots, pas un seul. La flotte tourne a vide et la telemetrie rapporte des comptes " <>
+         "nuls, indistinguables d'une flotte au repos."}
+
   defp kind_describe(:recurrence),
     do: {"récurrence", "Déjà vu (registre `ops`) — pattern, pas random → ROOT-CAUSE requis."}
 

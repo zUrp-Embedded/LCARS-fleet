@@ -1825,6 +1825,51 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
+    # JG-087 — GITEA REND `405` POUR DEUX FAITS OPPOSES, et rien de STRUCTURE ne les separe dans la
+    # reponse recue : seul le libelle anglais le fait, `"try again later"`. La detection textuelle
+    # reste faute d'autre chose, mais elle ne peut plus degrader EN SILENCE — le jour ou Gitea
+    # reformule ce message, tout `405` devient « definitif », les merges echouent, et seule la
+    # branche RECONNUE ecrivait au journal. Le corps entier est journalise : diagnostic du jour, et
+    # matiere du jour ou un champ structure apparaitra.
+    test "JG-087 : un 405 NON reconnu comme transitoire est journalise avec son corps" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([{405, %{"message" => "Veuillez reessayer plus tard"}}])
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 405, _}} =
+                   ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+        end)
+
+      assert log =~ "NOT recognised as transient"
+      assert log =~ "Veuillez reessayer plus tard", "le corps n'est pas dans la trace"
+      assert log =~ "reworded"
+    end
+
+    test "JG-087 : un transitoire RECONNU mais epuise a sa propre phrase (deux silences, pas un)" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}}
+          ])
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 405, _}} =
+                   ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+        end)
+
+      assert log =~ "still computing after"
+
+      refute log =~ "NOT recognised as transient",
+             "un transitoire epuise a ete rapporte comme un libelle non reconnu"
+    end
+
     test "opts[:method] forces the style (e.g. fast-forward-only)" do
       handlers =
         Map.merge(post_merge_handlers(), %{

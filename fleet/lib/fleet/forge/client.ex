@@ -651,6 +651,33 @@ defmodule Fleet.Forge.Client do
           Process.sleep(delay)
           do_merge(config, repo, index, method, delay, attempts_left - 1)
         else
+          # DEUX SILENCES DANS UN SEUL `else`, et le premier est le plus cher.
+          #
+          # Gitea rend `405` pour deux faits opposes : « la mergeabilite est encore en cours de
+          # calcul » (transitoire, il faut reessayer) et « cette PR n'est pas fusionnable »
+          # (definitif : conflits, controles en echec). Rien de STRUCTURE ne les separe dans la
+          # reponse recue — seul le libelle anglais le fait, `"try again later"`. La detection
+          # textuelle reste donc, faute d'autre chose, mais elle ne peut plus DEGRADER EN SILENCE :
+          # le jour ou Gitea reformule ce message, tout `405` devient « definitif », les merges
+          # echouent, et rien ne disait pourquoi — seule la branche RECONNUE ecrivait au journal.
+          #
+          # Le corps entier est journalise, et c'est delibere : il est a la fois le diagnostic du
+          # jour et la matiere du jour ou un champ structure apparaitra. On ne peut pas affirmer
+          # qu'il n'en existe pas — on peut faire en sorte de le voir arriver.
+          _ =
+            if merge_checking?(body) do
+              Logger.warning(
+                "ForgeClient: merge_pr ##{index} — mergeability still computing after " <>
+                  "#{@merge_checking_retries} attempts, giving up: #{inspect(body)}"
+              )
+            else
+              Logger.warning(
+                "ForgeClient: merge_pr ##{index} — HTTP 405 NOT recognised as transient " <>
+                  "(no \"try again later\" in the message) → treated as DEFINITIVE. If Gitea " <>
+                  "reworded it, this line is the only thing that says so: #{inspect(body)}"
+              )
+            end
+
           err
         end
 

@@ -127,6 +127,15 @@ defmodule Fleet.Pilot.Poller do
     # G6 seam: escalation of an unreadable workflow_map (default nil → `IncidentRegistry.record_or_escalate/4`).
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
+    # Escalade du SUBSTRAT (JG-059) — la racine des faces absente n'est pas une propriete d'un depot
+    # mais une panne de la boite. Meme forme de seam que `incident_fun` : nil → `escalate_gated/5`.
+    escalate_fun: nil,
+    # Presence du SUBSTRAT (JG-059). `Fleet.Layout.ops_root/0` est un litteral — c'est voulu, un
+    # fait une source — donc un test ne peut pas le deplacer, et il ne doit pas ecrire dans `/home`.
+    # Ce seam est la seule facon d'exercer le GARDE PAR DEPOT sur une machine qui n'a pas la racine :
+    # sans lui, les cas « ce depot n'est pas onboarde » et « le sol a disparu » ne sont pas
+    # separables en test. Defaut nil → `File.dir?/1` sur la vraie racine.
+    substrate_present_fun: nil,
     # Pod enumeration healthy? Carried to speak at the TRANSITION only (BL-6-47.3): a failed
     # enumeration is a correct fail-safe AND a potentially durable outage, and saying it every tick
     # would drown the trace it exists to raise. Starts `true` — the first failure IS a transition.
@@ -219,6 +228,8 @@ defmodule Fleet.Pilot.Poller do
       task_queue: Keyword.get(opts, :task_queue),
       wake_recovery: Keyword.get(opts, :wake_recovery),
       incident_fun: Keyword.get(opts, :incident_fun),
+      escalate_fun: Keyword.get(opts, :escalate_fun),
+      substrate_present_fun: Keyword.get(opts, :substrate_present_fun),
       protection_reconciler: Keyword.get(opts, :protection_reconciler),
       architect_keeper: Keyword.get(opts, :architect_keeper)
     }
@@ -695,18 +706,68 @@ defmodule Fleet.Pilot.Poller do
   # memory in the Poller singleton) — a ~30s cron must not cry every tick, and an onboarding is
   # exactly the kind of thing that gets done minutes after the log.
   defp not_onboarded_skip(state, repo_prior) do
-    unless Process.get({__MODULE__, :not_onboarded_logged, state.repo}) do
-      Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
+    # « JAMAIS ONBOARDE » ET « LE SUBSTRAT A DISPARU » RENDAIENT LA MEME PHRASE, et le second est une
+    # panne de la boite. Un projet absent sous une racine PRESENTE est un fait ordinaire : il n'a pas
+    # ete onboarde, un humain le fera. La RACINE elle-meme absente ou illisible — un montage tombe,
+    # une permission perdue — saute le rail d'etapes pour TOUS les depots a la fois : la flotte
+    # tourne alors a vide, les cycles se succedent, la telemetrie rapporte des comptes nuls, et rien
+    # ne distingue « aucun travail a faire » de « le sol a disparu ».
+    #
+    # Le discriminant est la racine, pas le projet : `File.dir?` sur `ops_root()` separe exactement
+    # les deux mondes, et il ne coute rien puisqu'on est deja sur le chemin du skip.
+    present? = state.substrate_present_fun || fn -> File.dir?(Fleet.Layout.ops_root()) end
 
-      Logger.warning(
-        "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no ops at " <>
-          "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
-          "and dispatch without provenance or project doctrine. Onboard it " <>
-          "(create / import / open / adopt) to bring it in."
-      )
+    if present?.() do
+      unless Process.get({__MODULE__, :not_onboarded_logged, state.repo}) do
+        Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
+
+        Logger.warning(
+          "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no ops at " <>
+            "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
+            "and dispatch without provenance or project doctrine. Onboard it " <>
+            "(create / import / open / adopt) to bring it in."
+        )
+      end
+    else
+      substrate_gone(state)
     end
 
     {Lease.zero_tally(), repo_prior, MapSet.new()}
+  end
+
+  # LA RACINE DES FACES A DISPARU. Escalade en incident plutot qu'un warning de plus : c'est une
+  # panne de substrat, pas une propriete d'un depot, et elle est INVISIBLE dans la telemetrie — des
+  # comptes nuls y sont indistinguables d'une flotte au repos. Un `warning` par depot et par vie du
+  # process ne survit pas a la nuit ; un incident est une issue durable (doctrine D1).
+  #
+  # Memorise par PROCESS, pas par depot : la racine est UNE, et crier une fois par depot ferait de
+  # la panne un bruit proportionnel au nombre de projets.
+  defp substrate_gone(state) do
+    unless Process.get({__MODULE__, :substrate_gone_logged}) do
+      Process.put({__MODULE__, :substrate_gone_logged}, true)
+
+      root = Fleet.Layout.ops_root()
+
+      Logger.error(
+        "Poller: the ops root #{root} is ABSENT or unreadable — the step rail is skipped for " <>
+          "EVERY repo, not just #{state.repo}. This is not an un-onboarded project: the substrate " <>
+          "itself is gone (unmounted, permissions), and the fleet is running empty while the " <>
+          "telemetry reports zero counts."
+      )
+
+      escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+      _ =
+        escalate.(
+          :ops_root_missing,
+          root,
+          {:ops_root_absent, root},
+          "ops_root_missing:#{root}",
+          state.forge_opts || []
+        )
+    end
+
+    :ok
   end
 
   defp step_do_poll_onboarded(state, mode, pods, started, forge) do
