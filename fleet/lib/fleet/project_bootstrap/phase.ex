@@ -255,7 +255,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
+                   env: []
+                 ),
                :ok <- install_trailer_hook(ws, cap_profile),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
@@ -322,9 +324,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on hostile
           # material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
-               {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
+               {:ok, {_, 0}} <-
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature],
+                   env: []
+                 ),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
@@ -499,7 +504,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
     def read_original_claude_md(ws) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"],
+             env: []
+           ) do
         {:ok, {content, 0}} -> {:ok, content}
         _ -> :absent
       end
@@ -531,7 +538,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # propagated as-is to the `with` → `{:clone_failed, ...}`.
           case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", sha]) do
             {:ok, {_, 0}} ->
-              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha], env: [])
+              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha],
+                env: []
+              )
 
             other ->
               other
