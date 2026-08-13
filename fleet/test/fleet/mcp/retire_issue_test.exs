@@ -46,7 +46,9 @@ defmodule Fleet.MCP.RetireIssueTest do
     @impl true
     def post_comment(_repo, n, body, _opts) do
       send(self(), {:comment, n, body})
-      {:ok, :posted}
+      # Reglable comme `:lift_result` : l'annonce aux dependants passe par ici, et son echec est
+      # desormais un cas de contrat (abandon AVANT le point de non-retour).
+      Process.get(:comment_result, {:ok, :posted})
     end
 
     @impl true
@@ -154,7 +156,8 @@ defmodule Fleet.MCP.RetireIssueTest do
       # CE TEST PORTAIT LE NOM DE L'ORDRE ET NE TESTAIT QUE LA PRESENCE. `assert_received` balaie la
       # boite aux lettres pour CHAQUE motif independamment : sur deux motifs disjoints
       # (`{:comment, 8, _}` et `{:lift, 8, 42}`) il reussit quel que soit l'ordre d'arrivee. Mesure
-      # du 2026-08-08 : intervertir les deux appels dans `release_dependents/4` laissait la suite
+      # du 2026-08-08 : intervertir les deux appels (alors dans `release_dependents/4`, morte depuis
+      # JG-046) laissait la suite
       # entiere verte — 2440 tests — alors que le contrat d'ordre de `retire_issue/3` nomme le
       # defaut correspondant : « l'ordre inverse debloquerait silencieusement un ticket sans rien
       # dire ».
@@ -183,9 +186,19 @@ defmodule Fleet.MCP.RetireIssueTest do
       assert result["released"] == [8, 9]
     end
 
-    test "every edge is lifted BEFORE the close — closing RELEASES, so the order is the contract" do
-      # Meme correction que ci-dessus, meme raison : la sequence se lit sur des POSITIONS, pas sur
-      # une suite d'`assert_received` que l'ordre d'arrivee n'engage pas.
+    # ⚠ CE TEST EPINGLAIT `lift < close` — L'ORDRE INVERSE, et avec une raison qui n'etait juste
+    # qu'a moitie (JG-046). Il gardait la fenetre « ferme mais rien dit », vraie ; il laissait
+    # ouverte celle que le `@doc` de `retire_issue/3` declare pire que tout : « Any failure ABORTS
+    # before the close: closing RELEASES, so a half-executed retirement is worse than none » — or
+    # lever les aretes AVANT le close, c'est LIBERER avant le point de non-retour. Un echec du
+    # commentaire ou de la fermeture laissait les dependants liberes et le bloqueur ouvert, sans
+    # limite de duree.
+    #
+    # MESURE QUI TRANCHE : `Lease.open_blockers/2` filtre `state == "open"`. Le CLOSE libere ; la
+    # levee d'arete ne fait que dire la verite au read-model. Le deblocage silencieux est donc
+    # ferme par l'ANNONCE, pas par la levee — et l'annonce peut, elle, passer avant le close sans
+    # rien liberer.
+    test "personne n'est LIBERE avant d'avoir ete prevenu, et rien n'est libere avant le close" do
       retire()
       trace = drain_mailbox()
 
@@ -193,22 +206,50 @@ defmodule Fleet.MCP.RetireIssueTest do
       assert is_integer(close), "le ticket retire doit etre ferme"
 
       for dep <- [8, 9] do
+        told = Enum.find_index(trace, &match?({:comment, ^dep, _}, &1))
         lift = Enum.find_index(trace, &match?({:lift, ^dep, 42}, &1))
 
-        assert is_integer(lift) and lift < close,
-               "arete du dependant #{dep} levee APRES la fermeture : fermer RELEASE, donc la " <>
-                 "fenetre entre les deux debloque sans rien dire"
+        assert is_integer(told) and told < close,
+               "dependant #{dep} : le close LIBERE, et il n'avait pas ete prevenu — c'est le " <>
+                 "deblocage silencieux que cet ordre existe pour empecher"
+
+        assert is_integer(lift) and lift > close,
+               "dependant #{dep} : arete levee AVANT le close, donc AVANT le point de non-retour — " <>
+                 "un abandon a cet instant laisse un dependant libere sous un bloqueur vivant"
       end
 
       own = Enum.find_index(trace, &match?({:comment, 42, _}, &1))
       assert is_integer(own) and own < close, "le motif se poste avant la fermeture"
     end
 
-    test "an edge that cannot be lifted ABORTS — a dependent left hanging is worse than no retirement" do
+    test "l'ANNONCE qui echoue ABANDONNE : rien n'est ferme, rien n'est leve, rien n'est libere" do
+      # Avant le point de non-retour, l'abandon est gratuit — l'etat est exactement celui d'avant.
+      Process.put(:comment_result, {:error, {:http, 500, "boom"}})
+
+      assert {:error, {:retire_aborted, 42, {:dependent_not_announced, 8, _}}, _} = retire()
+      refute_received {:close_issue, 42, _}
+      refute_received {:lift, _, _}
+    end
+
+    test "une levee qui echoue APRES le close est SIGNALEE, pas transformee en abandon" do
+      # Le ticket EST ferme et les dependants SONT liberes (l'admission ne compte que les bloqueurs
+      # ouverts) et annonces. Rendre `{:error, :retire_aborted}` ici serait un mensonge : le retrait
+      # a eu lieu. Ce qui reste est une arete perimee vers un ticket ferme, et elle se DIT.
       Process.put(:lift_result, {:error, {:http, 500, "boom"}})
 
-      assert {:error, {:retire_aborted, 42, {:dependent_not_released, 8, _}}, _} = retire()
-      refute_received {:close_issue, 42, _}
+      result = retire() |> decoded()
+
+      assert_received {:close_issue, 42, :retired}
+      assert result["retired"] == true
+      assert result["released"] == []
+      assert result["edges_not_lifted"] == [8, 9]
+    end
+
+    test "TEMOIN — une levee qui REUSSIT ne porte aucune trace d'incomplet" do
+      # Sans ce temoin, poser `edges_not_lifted` en permanence passerait le test ci-dessus.
+      result = retire() |> decoded()
+      refute Map.has_key?(result, "edges_not_lifted")
+      assert result["released"] == [8, 9]
     end
 
     test "a dependent with no addressable number HALTS — an edge we cannot address we cannot lift" do

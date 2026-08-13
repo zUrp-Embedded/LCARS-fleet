@@ -1911,16 +1911,40 @@ defmodule Fleet.MCP.PodTools.Delegation do
   closed blocker counts as satisfied on the forge, so every dependent would silently become closable
   as if the work had landed, while nothing was delivered.
 
-  Order is the contract, twice over:
+  Order is the contract, three times over:
 
     * the live PR dies FIRST. The pulls rail is INDEPENDENT of the issues rail (`dispatch_review`
       polls pulls outside the lease and never reads the issue state), so a PR left open on a retired
       ticket goes on being judged and merged.
-    * on each dependent, the COMMENT lands before the edge is lifted. If the lift then fails, a
-      still-blocked ticket carries a comment about a retirement — noisy, and a human sees it. The
-      reverse order would silently unblock a ticket with nothing said.
+    * every dependent is TOLD before anything releases it. A silent unblock is the defect this
+      order exists to prevent, and the announcement is what prevents it — not the lifting of the
+      edge.
+    * the edges are lifted AFTER the close, because the CLOSE is the point of no return.
 
-  Any failure ABORTS before the close: closing RELEASES, so a half-executed retirement is worse than
+  ⚠ **CE PARAGRAPHE ENONÇAIT LA REGLE QUE L'ORDRE VIOLAIT.** Il disait — et il dit toujours, deux
+  lignes plus bas — « Any failure ABORTS before the close: closing RELEASES, so a half-executed
+  retirement is worse than none ». Or `release_dependents/4` levait les aretes AVANT ce close. Un
+  echec du commentaire ou de la fermeture abandonnait donc la sequence avec les dependants DEJA
+  liberes et le bloqueur TOUJOURS OUVERT — l'etat exact que cette phrase declare pire que rien,
+  produit un cran plus tot que la ou elle regardait.
+
+  MESURE QUI DECIDE DE L'ORDRE : `Lease.open_blockers/2` filtre `state == "open"`. Une arete
+  residuelle vers un ticket FERME ne bloque donc rien — c'est le CLOSE qui libere, la levee d'arete
+  ne fait que dire la verite au read-model (la brique ne sera jamais livree). Les deux gestes n'ont
+  pas le meme poids, et l'ordre suit ce poids :
+
+    * echec AVANT le close → rien n'est libere, le bloqueur reste ouvert, les aretes sont intactes.
+      Coherent, et reparable par un simple re-emission.
+    * echec de la levee APRES le close → les dependants sont liberes (par le close) et TOUS
+      annonces ; il reste une arete perimee vers un ticket ferme, que l'admission ignore. Le retrait
+      est SIGNALE incomplet dans son resultat, jamais avale.
+
+  L'annonce prealable est ce qui rend cet ordre acceptable : au moment ou le close libere, chaque
+  dependant porte deja le commentaire qui le lui dit. Un dependant dont le numero n'est pas
+  adressable HALTE avant tout ecrit — une arete qu'on ne sait pas adresser est une arete qu'on ne
+  saura pas lever, et on ne ferme pas un bloqueur en la laissant derriere soi.
+
+  Any failure before the close ABORTS: closing RELEASES, so a half-executed retirement is worse than
   none. An already-closed target is a no-op success, not an error — the stdio bridge times out a
   mutation at 30s while the forge call continues, and the agent re-emits.
   """
@@ -1951,51 +1975,82 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     with :ok <- close_live_pr(forge, repo, pr),
          {:ok, dependents} <- forge.issue_blocks(repo, n, []),
-         {:ok, released} <- release_dependents(forge, repo, n, dependents),
+         {:ok, numbers} <- addressable_dependents(dependents),
+         :ok <- announce_release(forge, repo, n, numbers),
          {:ok, _} <- forge.post_comment(repo, n, retire_comment(reason), []),
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
+      # ══ POINT DE NON-RETOUR FRANCHI ══ Le close a LIBERE les dependants (`open_blockers/2` ne
+      # compte que les bloqueurs ouverts) et chacun porte deja son annonce. La levee des aretes qui
+      # suit dit la verite au read-model ; son echec laisse une arete perimee vers un ticket ferme,
+      # que l'admission ignore. Ce n'est plus un motif d'abandon — le ticket EST ferme — mais ce
+      # n'est pas non plus un silence : ca voyage dans le resultat.
+      {released, unlifted} = lift_edges(forge, repo, n, numbers)
+
       # A retired ticket is a DEAD ticket: its pods die with it, same arbitrage and same seam as the
       # supersede path.
       _ = pod_reaper().reap_issue(repo, n)
 
-      {:ok, %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}}
+      result = %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}
+
+      {:ok, with_unlifted(result, unlifted)}
     else
       {:error, reason} ->
         Logger.error(
           "Delegation: retirement of #{repo}##{n} ABORTED (#{inspect(reason)}) — " <>
-            "the ticket is still OPEN, which is the safe half of the failure"
+            "the ticket is still OPEN and NOTHING was released: nothing to repair, re-emit"
         )
 
         {:error, {:retire_aborted, n, reason}}
     end
   end
 
-  # Lifts the edges pointing AT the retired ticket, one dependent at a time, and says so on each.
-  # A dependent whose number is not an integer HALTS: an edge we cannot address is an edge we cannot
-  # lift, and skipping it would close the blocker with that dependent still hanging off it.
-  defp release_dependents(_forge, _repo, _n, []), do: {:ok, []}
-
-  defp release_dependents(forge, repo, n, dependents) do
+  # Une arete qu'on ne sait pas ADRESSER est une arete qu'on ne saura pas lever. On l'apprend AVANT
+  # le premier ecrit, parce qu'apres le close il serait trop tard pour renoncer.
+  defp addressable_dependents(dependents) do
     Enum.reduce_while(dependents, {:ok, []}, fn dep, {:ok, acc} ->
       case Map.get(dep, "number") do
-        d when is_integer(d) ->
-          # Comment BEFORE lift — see the order contract in `retire_issue/3`.
-          with {:ok, _} <- forge.post_comment(repo, d, released_comment(n), []),
-               {:ok, _} <- forge.remove_issue_dependency(repo, d, n, []) do
-            {:cont, {:ok, [d | acc]}}
-          else
-            {:error, err} -> {:halt, {:error, {:dependent_not_released, d, err}}}
-          end
-
-        _ ->
-          {:halt, {:error, {:edge_without_number, dep}}}
+        d when is_integer(d) -> {:cont, {:ok, acc ++ [d]}}
+        _ -> {:halt, {:error, {:edge_without_number, dep}}}
       end
     end)
-    |> case do
-      {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      err -> err
-    end
   end
+
+  # L'ANNONCE PRECEDE LA LIBERATION, et c'est elle qui rend l'ordre acceptable. Au moment ou le
+  # close libere, chaque dependant porte deja le commentaire qui le lui dit — le « deblocage
+  # silencieux » que cet ordre existe pour empecher est ferme ICI, pas par la levee de l'arete.
+  # Un echec ABANDONNE : rien n'est encore libere, le bloqueur est ouvert, les aretes sont intactes.
+  defp announce_release(forge, repo, n, numbers) do
+    Enum.reduce_while(numbers, :ok, fn d, :ok ->
+      case forge.post_comment(repo, d, released_comment(n), []) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, err} -> {:halt, {:error, {:dependent_not_announced, d, err}}}
+      end
+    end)
+  end
+
+  # Apres le point de non-retour : on leve ce qu'on peut et on RAPPORTE ce qu'on n'a pas pu. Pas de
+  # `reduce_while` ici — s'arreter au premier echec laisserait des aretes levables en place sans
+  # raison, et le ticket est deja ferme.
+  defp lift_edges(forge, repo, n, numbers) do
+    Enum.reduce(numbers, {[], []}, fn d, {ok, ko} ->
+      case forge.remove_issue_dependency(repo, d, n, []) do
+        {:ok, _} ->
+          {ok ++ [d], ko}
+
+        {:error, err} ->
+          Logger.error(
+            "Delegation: #{repo}##{n} RETIRE et ferme, mais l'arete du dependant ##{d} n'a pas pu " <>
+              "etre levee (#{inspect(err)}) — ##{d} est DEBLOQUE (l'admission ne compte que les " <>
+              "bloqueurs ouverts) et il a ete annonce ; l'arete perimee reste a nettoyer a la main"
+          )
+
+          {ok, ko ++ [d]}
+      end
+    end)
+  end
+
+  defp with_unlifted(result, []), do: result
+  defp with_unlifted(result, unlifted), do: Map.put(result, "edges_not_lifted", unlifted)
 
   defp retire_comment(reason) do
     "Ticket retiré par l'architecte — aucun remplaçant, rien n'a été livré.\n\nMotif : #{reason}"
