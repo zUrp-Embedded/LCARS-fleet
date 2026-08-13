@@ -119,6 +119,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :task_queue,
     :spawner,
     :wake_recovery,
+    # Seam d'escalade — meme forme que `:wake_recovery` : injecte par un test pour observer
+    # l'incident sans ouvrir d'issue, resolu vers `IncidentRegistry.escalate_gated/5` en prod.
+    :escalate_fun,
     gate_evals: %{},
     gate_eval_ttl_ms: nil,
     gate_eval_sweep_ms: nil,
@@ -183,6 +186,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
+      escalate_fun:
+        Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5),
       gate_evals: %{},
       gate_eval_ttl_ms: Keyword.get(opts, :gate_eval_ttl_ms, @gate_eval_ttl_ms),
       gate_eval_sweep_ms: Keyword.get(opts, :gate_eval_sweep_ms, @gate_eval_sweep_ms),
@@ -372,17 +377,50 @@ defmodule Fleet.Pilot.StepRunConsumer do
           )
 
         {:error, reason} ->
-          Logger.warning(
-            "StepRunConsumer: awaits-arch NOT drained on #{repo}##{number} (#{inspect(reason)}) — " <>
-              "poller may re-offer (no loss)"
-          )
+          # « poller may re-offer (no loss) » — CE QUI ETAIT ECRIT ICI, ET LE CODE LE CONTREDIT.
+          # L'etiquette reste posee, et `StepDispatcher.decide/1` SAUTE toute issue qui la porte :
+          # le poller ne re-offre rien, il passe. Le ticket quitte le pipeline pour de bon.
+          drain_failed(repo, number, {:remove_label_failed, reason}, state)
       end
     else
-      Logger.warning(
-        "StepRunConsumer: arch escalation resolved but metadata lacks repo/number " <>
-          "(#{inspect(meta)}) — label not drained"
-      )
+      # Meme sortie, autre cause : on ne sait meme pas QUELLE issue deverrouiller. Rien ici ne peut
+      # nommer un numero, donc rien ne peut agir sur la forge — l'incident est le seul canal qui
+      # n'exige pas de connaitre la cible.
+      drain_failed(repo, number, {:metadata_incomplete, meta}, state)
     end
+
+    :ok
+  end
+
+  # UN TICKET QUI SORT DU PIPELINE NE SORT PLUS EN SILENCE. Les deux branches d'echec du drain
+  # laissent `lcars-awaits-arch` en place, et `StepDispatcher.decide/1` saute toute issue qui la
+  # porte (`{:skip, :awaits_arch}`) : le ticket est retire du pipeline DEFINITIVEMENT, et seule une
+  # intervention humaine le debloque. Un `Logger.warning` ne survit pas a la nuit ; un incident est
+  # une issue durable sur la forge, ce que la doctrine D1 exige pour tout ce qui est load-bearing.
+  #
+  # `escalate_gated/5` plutot que `escalate/5` : la signature porte le repo et le numero quand on
+  # les a, donc une resolution qui echoue en boucle sur le meme ticket ouvre UNE issue, pas une par
+  # occurrence. Sur la branche sans metadonnees, la signature retombe sur la cause seule — c'est le
+  # mieux qu'on puisse nommer, et c'est deja mieux que rien.
+  defp drain_failed(repo, number, cause, state) do
+    target = if is_binary(repo) and is_integer(number), do: "#{repo}##{number}", else: "unknown"
+
+    Logger.error(
+      "StepRunConsumer: awaits-arch NOT drained on #{target} (#{inspect(cause)}) — the label " <>
+        "STAYS and the dispatcher skips every issue that carries it: this ticket has left the " <>
+        "pipeline and no tick will re-offer it"
+    )
+
+    escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+    _ =
+      escalate.(
+        :awaits_arch_stuck,
+        target,
+        cause,
+        "awaits_arch_stuck:#{target}",
+        state.forge_opts
+      )
 
     :ok
   end
