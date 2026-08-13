@@ -10,6 +10,29 @@
 # hermetic `start_listener: false` of test.exs → fleet_api starts the
 # Cowboy listener in test → boot crash → dead daemon boot. Any runtime
 # config added STAYS INSIDE the guard (hermetic discipline: runtime config ≠ tests).
+#
+# ─── THIS FILE CROSSES EVERY BOUNDARY, AND `boundary` CANNOT SEE IT ────────────────────────────
+# `config/` is not in `elixirc_paths` — it is never compiled, so the compiled guardian of the
+# architecture has no opinion about anything below. **The boundary map is therefore not the map of
+# real couplings**, and this file is the gap: it calls application modules directly, across domains
+# that `mix compile` would refuse to let call each other.
+#
+# It is deliberate, and the alternatives are worse. `Fleet.EnvParse` holds the env parsing because
+# an inline lambda in a file wrapped `config_env() != :test` would never be tested. `Fleet.Layout`
+# holds the platform paths because it is the authority on them, and inverting the call would add a
+# dep to the one module whose layer name is mechanically checkable (`foundation ≡ deps: []`). The
+# module *references* posted as values — the shutdown dispatcher, the coord backend, the incident
+# rail, the completion-inflight fun — are seams: they cross as data so the domains stay uncoupled
+# at compile time.
+#
+# THE COST, since it is not free: a failure inside one of those modules surfaces here as a
+# CONFIGURATION error, with the diagnostic that comes with it, rather than as what it is. And no
+# tool will tell you when a new call is added — this paragraph is the only place that says the
+# blind spot exists. Every release start evaluates this file, so an unloadable module fails loud
+# immediately; that is what the constraint is verified BY, and it is a boot, not a wall.
+#
+# If you add a call here, add it to the list above. A blind spot nobody wrote down stops being a
+# known cost and becomes a surprise.
 
 import Config
 

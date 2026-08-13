@@ -887,9 +887,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Verifies that the anti-root self-check exists in the boot path
-  # (config/runtime.exs). Red if it disappears. The runtime boot guard lives in
-  # runtime.exs (:prod block); this check guards its presence. Post-strip confirmation
-  # looser than the grep (`root` alone): the long marker may live partly
+  # (config/runtime.exs). Red if it disappears; this check guards its PRESENCE, not its shape —
+  # the guard is unconditional on environment, and this wall stays green either way. Post-strip
+  # confirmation looser than the grep (`root` alone): the long marker may live partly
   # in a comment on the line, only `root` needs to survive in the code.
   @doc false
   def check_no_root_runtime_guard(root) do
