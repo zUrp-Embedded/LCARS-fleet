@@ -39,6 +39,28 @@ defmodule Fleet.Spawner.Pod.SessionMint do
     # depend on the runner's uid); prod resolves it from `id -u` (fail-loud).
     uid = Keyword.get(opts, :uid) || Fleet.Credentials.Human.current_uid!()
 
+    # THE <UID> BOUND IS REFUSED HERE, exactly like its twin <REPO4> ten lines below (DR-020). Both
+    # are four decimal digits of the same identity, both are hard-guarded in `SessionId.encode/5`,
+    # and only one of them had a diagnosed refusal on the caller side. The other produced a bare
+    # `FunctionClauseError` — and not on an exotic path: `encode/5` is reached by EVERY catalogued
+    # role, fleet-scope included, so on a host whose human sits above 9999 NO POD CAN BE CREATED AT
+    # ALL, with an error naming neither the uid nor the bound.
+    #
+    # 0..9999 is a DEPLOYMENT assumption and the moduledoc of `SessionId` says so: desktop uids fit,
+    # container userns/subuid ranges live at 100000+, and `deploy/docker` is precisely where it can
+    # stop holding. Refusing beats folding, for the reason already arbitrated for <REPO4>: a `rem`
+    # would give two humans one deterministic identity, and a pod would resume the other one's
+    # conversation.
+    unless is_integer(uid) and uid in 0..9999 do
+      raise ArgumentError,
+            "SessionMint.mint: runtime human uid #{inspect(uid)} is outside the <UID> " <>
+              "deterministic-id bound (0..9999) for role " <>
+              "#{Fleet.CapProfile.name(cap_profile)} — refused (no silent modulo collision: two " <>
+              "humans folded onto one identity would resume each other's conversation). The bound " <>
+              "is a DEPLOYMENT assumption of the hexspeak format: run the fleet under a uid below " <>
+              "10000, or widen the format."
+    end
+
     cond do
       not Fleet.CapProfile.catalogued?(cap_profile) ->
         UUID.uuid4()

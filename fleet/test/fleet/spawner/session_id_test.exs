@@ -101,4 +101,64 @@ defmodule Fleet.Spawner.SessionIdTest do
       end
     end
   end
+
+  # JG-032 (`S2`) — LE JUMEAU ETAIT GARDE, CELUI-CI NON. `<UID>` et `<REPO4>` sont les deux champs
+  # de quatre chiffres decimaux de la MEME identite, tous deux durs-gardes dans `encode/5`, et seul
+  # `<REPO4>` avait un refus DIAGNOSTIQUE cote appelant (DR-020). L'autre rendait une
+  # `FunctionClauseError` nue — et pas sur un chemin exotique : `encode/5` est atteint par TOUT role
+  # catalogue, fleet-scope compris, donc sur un hote dont l'humain siege au-dessus de 9999 AUCUN POD
+  # NE PEUT ETRE CREE, avec une erreur qui ne nomme ni l'uid ni la borne.
+  #
+  # 0..9999 est une hypothese de DEPLOIEMENT, pas une propriete : les uid de bureau y tiennent, les
+  # plages userns/subuid des conteneurs vivent a 100000+. Refuser plutot que replier, pour la raison
+  # deja arbitree sur `<REPO4>` : un `rem` donnerait a deux humains une seule identite deterministe,
+  # et un pod reprendrait la conversation de l'autre.
+  describe "JG-032 — un uid hors borne est refuse en le NOMMANT, jamais par clause de fonction" do
+    defp cap(name),
+      do: %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => name, "role_index" => 1, "kill_class" => 2},
+        spec: %{}
+      }
+
+    test "uid 9999 → nominal, l'identite est encodee" do
+      id = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 9999, repo_id: 7)
+      assert id =~ ~r/^[0-9a-f]badcafe-9999-4dad-babe-0007dec0de/
+    end
+
+    test "uid 10000 → ArgumentError qui NOMME l'uid et la borne" do
+      assert_raise ArgumentError, ~r/uid 10000 is outside the <UID>.*0\.\.9999/s, fn ->
+        Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 10_000, repo_id: 7)
+      end
+    end
+
+    test "uid 65534 (nobody) → meme refus nomme" do
+      assert_raise ArgumentError, ~r/uid 65534 is outside/, fn ->
+        Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 65_534, repo_id: 7)
+      end
+    end
+
+    # Le role fleet-scope (role_index 0) empruntait une AUTRE branche du `cond` et n'etait donc pas
+    # epargne : il atteint `encode/5` avec le meme uid. Le refus doit le couvrir aussi.
+    test "fleet-scope (role_index 0) est couvert par le meme refus" do
+      fleet = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "starfleet", "role_index" => 0, "kill_class" => 0},
+        spec: %{}
+      }
+
+      assert_raise ArgumentError, ~r/uid 100000 is outside/, fn ->
+        Fleet.Spawner.Pod.SessionMint.mint(fleet, uid: 100_000)
+      end
+    end
+
+    # DEUX HUMAINS DISTINCTS NE COLLISIONNENT PAS — la seconde moitie de la preuve de sortie. Elle
+    # tient parce qu'on REFUSE au lieu de replier : il n'existe aucun couple d'uid distincts rendant
+    # la meme identite.
+    test "deux uid valides distincts donnent deux identites distinctes" do
+      a = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 1000, repo_id: 7)
+      b = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 9000, repo_id: 7)
+      refute a == b
+    end
+  end
 end

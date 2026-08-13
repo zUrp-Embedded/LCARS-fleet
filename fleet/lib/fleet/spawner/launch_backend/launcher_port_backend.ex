@@ -62,7 +62,23 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
              is_binary(launcher) and is_binary(claude) do
-    argv = [role, pod_id, pod_dir, claude, role, pod_id, pod_dir]
+    # THE CONTRACT, WRITTEN ON THIS SIDE. The seven positions used to be a bare list whose meaning
+    # existed only in the receiving shell: `bwrap_launch.sh` and `host_launch.sh` both read
+    # `ROLE="$1"; POD_ID="$2"; POD_DIR="$3"; shift 3`, then `exec` the command in `"$@"` — which is
+    # `claude_launch.sh` re-reading `$1/$2/$3` for itself. Two flattened contracts, no separator,
+    # and a permutation here produces neither a compile error nor a type error: the launcher would
+    # take a pod_dir where it expects a role, and act on the filesystem with it.
+    #
+    # The repetition is not a mistake and that is exactly why it needs saying: the FIRST triplet is
+    # consumed by the sandbox launcher, the SECOND is the argv of the vendor launcher it execs. Same
+    # three values, two different readers.
+    #
+    # Named here rather than in a struct: the vector must stay a flat list of binaries for
+    # `Port.open/2`, and any wrapper would be unwrapped one line later. What was missing was not a
+    # type — it was the sentence.
+    sandbox_args = [role, pod_id, pod_dir]
+    vendor_argv = [claude, role, pod_id, pod_dir]
+    argv = sandbox_args ++ vendor_argv
     {:ok, launcher, argv}
   end
 
