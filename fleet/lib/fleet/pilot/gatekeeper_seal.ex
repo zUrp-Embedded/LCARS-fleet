@@ -81,6 +81,13 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           {:error, {:provenance_incoherent, reason}} ->
             {:error, {:provenance_incoherent, reason}}
 
+          # Une preuve qui atteste un AUTRE commit que celui qu'on scelle est « presente et
+          # incoherente » au sens du contrat de ce mur (BL-6-43) : elle bloque, comme sa voisine.
+          # Elle a son propre tuple parce que la remediation differe — l'incoherence dit que le
+          # statement MENT, celle-ci dit que la TETE a bouge apres la gravure.
+          {:error, {:provenance_stale, reason}} ->
+            {:error, {:provenance_stale, reason}}
+
           wall ->
             # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
             # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
@@ -372,6 +379,34 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # read hiccup, no local clone, ABSENT statement (best-effort emission, DR-010). The
   # ONLY blocking outcome is a PRESENT-but-INCOHERENT statement — then NO merge, and a
   # user-facing comment (FR) cites the exact failure on the PR.
+  #
+  # ⚠ « ABSENT » SE DIT DE DEUX CHOSES, ET LA RECHERCHE PAR NOM NE LES DISTINGUE PAS (BL-6-43).
+  # Le ref est CALCULE — `provenance/issue-<n>-<7 premiers du head COURANT>.json` — donc il suffit
+  # que la tete bouge apres la gravure pour qu'aucun fichier ne porte ce nom, alors qu'un statement
+  # existe a cote, dans le meme repertoire, attestant un AUTRE sha. Deux routes y menent et les deux
+  # sont atteignables : une poussee directe sur `lcars/*` (seule `main` porte une protection) et un
+  # round de rework dont la gravure best-effort n'a pas eu lieu.
+  #
+  # Un statement qui atteste autre chose que ce qu'on scelle EST « present et incoherent » au sens de
+  # la regle ci-dessus — c'est le contrat de ce mur qui le dit. La lecture par nom le faisait lire
+  # comme une absence, donc passer. On distingue donc les deux AVANT de conclure : un frere pour
+  # cette issue, sans le sha scelle, BLOQUE.
+  # Discrimine les deux « absences » que la recherche par nom confondait : RIEN pour ce ticket
+  # (best-effort qui n'a pas grave, DR-010 — on passe), ou quelque chose pour ce ticket mais pas pour
+  # le sha scelle (la tete a bouge apres la gravure — on bloque). Le glob porte sur le NUMERO
+  # d'issue, la partie du nom que la derive de la tete ne touche pas.
+  defp absent_or_stale(work_dir, issue_n, expected_ref) do
+    # Le repertoire vient du ref DEJA calcule par `Layout`, jamais d'un litteral : `provenance_ref/1`
+    # SANITISE son argument, donc y passer un glob rend un nom ou l'etoile a ete mangee — le premier
+    # jet de ce code le faisait, et le test est reste vert en cherchant un fichier qui n'existait pas.
+    pattern = Path.join([work_dir, Path.dirname(expected_ref), "issue-#{issue_n}-*.json"])
+
+    case Path.wildcard(pattern) |> Enum.map(&Path.basename/1) |> Enum.sort() do
+      [] -> {:skip, {:no_statement, expected_ref}}
+      siblings -> {:stale, %{expected: Path.basename(expected_ref), siblings: siblings}}
+    end
+  end
+
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
     head_branch = Keyword.get(opts, :head_branch)
     # Roots injectable (tests) — defaults = the container layout authority.
@@ -401,7 +436,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
              auth: true
            ),
          ref = Fleet.Layout.provenance_ref("issue-#{issue_n}-#{String.slice(head_sha, 0, 7)}"),
-         true <- File.exists?(Path.join(work_dir, ref)) || {:skip, {:no_statement, ref}} do
+         true <- File.exists?(Path.join(work_dir, ref)) || absent_or_stale(work_dir, issue_n, ref) do
       case Fleet.Workflow.Provenance.Verifier.verify(ref,
              work_dir: work_dir,
              project_dir: project_dir
@@ -430,6 +465,30 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           {:error, {:provenance_incoherent, reason}}
       end
     else
+      {:stale, %{expected: expected, siblings: siblings}} ->
+        reason = {:provenance_stale, %{expected: expected, siblings: siblings}}
+
+        Logger.error(
+          "GatekeeperSeal: #{repo}##{issue_n} provenance STALE — no statement for the sealed head " <>
+            "(#{expected}), but #{length(siblings)} for this issue (#{Enum.join(siblings, ", ")}) — " <>
+            "merge REFUSED (a proof about another commit is not a missing proof)"
+        )
+
+        _ =
+          comment(
+            forge,
+            repo,
+            pr_number,
+            "⛔ **Provenance périmée** — merge refusé par le mur déterministe.\n\n" <>
+              "Aucun statement n'atteste la tête scellée (`#{expected}`), mais #{length(siblings)} " <>
+              "existe(nt) pour ce ticket : `#{Enum.join(siblings, "`, `")}`.\n" <>
+              "La tête a donc bougé après la gravure — une preuve qui parle d'un autre commit " <>
+              "n'est pas une preuve manquante.",
+            Keyword.put(forge_opts, :dedup_signature, "[provenance-stale:pr-#{pr_number}]")
+          )
+
+        {:error, reason}
+
       {:skip, why} ->
         Logger.warning(
           "GatekeeperSeal: #{repo}##{issue_n} provenance wall SKIPPED (#{inspect(why)}) — " <>

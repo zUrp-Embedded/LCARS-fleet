@@ -404,6 +404,38 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert_received {:merge, 4}
   end
 
+  test "provenance wall: un statement pour un AUTRE sha n'est pas une absence — merge REFUSÉ (BL-6-43)",
+       %{tmp_dir: tmp} do
+    # LE CAS 4 : la tête a bougé APRÈS la gravure. On grave pour `alien` (un commit réel, mais pas
+    # celui qu'on scelle), et on scelle `head`. Le fichier attendu — dérivé du head COURANT — n'existe
+    # donc pas, et la recherche par NOM lisait ça comme « rien n'a été gravé », donc passait.
+    #
+    # Deux routes y mènent en production et les deux sont atteignables : une poussée directe sur
+    # `lcars/*` (seule `main` porte une protection de branche) et un round de rework dont la gravure
+    # best-effort n'a pas eu lieu. Dans les deux cas une preuve EXISTE, à côté, sur un autre commit.
+    %{head: head, base: base, alien: alien} = wall_harness(tmp)
+    :ok = wall_statement(tmp, 9, alien, base)
+
+    assert {:error, {:provenance_stale, %{siblings: siblings}}} =
+             GatekeeperSeal.seal_and_merge(
+               WallForge,
+               "fleet/demo",
+               4,
+               9,
+               "engineer",
+               wall_opts(tmp, head),
+               Keyword.put(wall_opts(tmp, head), :base_branch, "main")
+             )
+
+    # Le frère est nommé : sans ça le refus dit « périmé » sans dire par rapport à quoi.
+    assert siblings == ["issue-9-#{String.slice(alien, 0, 7)}.json"]
+
+    refute_received {:merge, _}
+    assert_received {:comment, 4, body, "[provenance-stale:pr-4]"}
+    assert body =~ "Provenance périmée"
+    assert body =~ String.slice(alien, 0, 7)
+  end
+
   test "provenance wall SAUTÉ : le merge passe, ET la PR le DIT (BL-6-47.4)", %{tmp_dir: tmp} do
     # L'asymétrie fermée ici : les deux branches voisines loguaient, une seule écrivait SUR LA
     # FORGE. Une PR mergée avait donc exactement la même apparence, que le mur l'ait vérifiée ou
