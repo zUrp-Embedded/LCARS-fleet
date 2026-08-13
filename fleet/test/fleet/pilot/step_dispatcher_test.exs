@@ -1225,6 +1225,49 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute log =~ "eng killed, issue lock released"
     end
 
+    # JG-063 — « warden/manual cleanup » DESIGNAIT UN RAIL QUI N'EXISTE PAS. Verifie : les deux
+    # `warden` du depot portent sur les PODS, aucun ne retire d'etiquette de forge ; et le poller ne
+    # lit que `list_open_issues/2`, donc cette issue FERMEE n'est plus jamais vue. La phrase
+    # promettait un rattrapage automatique imaginaire, et « manual » suppose qu'un humain lise ce
+    # log — ce que la doctrine D1 refuse pour tout ce qui est load-bearing.
+    #
+    # Le residu n'est pas benin : l'etiquette suggere un travail en cours qui n'existe pas, et le
+    # chronometre fausse definitivement les metriques de duree de ce ticket.
+    test "JG-063: un verrou residuel ouvre un INCIDENT durable, et le log ne promet plus de rail" do
+      test = self()
+
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          escalate_fun: fn kind, subject, cause, sig, _o ->
+            send(test, {:escalated, kind, subject, cause, sig})
+            {:ok, 1}
+          end,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_remove_label: {:error, :forge_down}
+          ]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
+        end)
+
+      assert_received {:escalated, :issue_lock_residual, _subject, {:unlock_failed, _}, _sig},
+                      "le verrou residuel n'a laisse qu'un log : rien de durable ne le dit"
+
+      refute log =~ "warden/manual cleanup",
+             "le log promet toujours un rail de rattrapage qui n'existe pas"
+
+      assert log =~ "the cleanup is MANUAL: no rail reclaims it"
+    end
+
     test "F-C061: a NON-jury login (human) among the reviewers is filtered (does not starve the jury) + LOUD" do
       # A human (`Lordzurp`) reviews/is-requested on the PR (read suffices — verified live, the
       # forge does NOT prevent it). WITHOUT the filter: they have no verdict → `hd(pending)` =

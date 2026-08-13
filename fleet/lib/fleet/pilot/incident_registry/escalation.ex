@@ -266,6 +266,14 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp correlation_block(_), do: ""
 
+  defp kind_describe(:issue_lock_residual),
+    do:
+      {"verrou residuel sur une issue FERMEE",
+       "Le merge a reussi, l'issue est close, mais `lcars-in-flight` est reste pose et le " <>
+         "chronometre court encore. Aucun rail ne le rattrape : le poller ne lit que les issues " <>
+         "OUVERTES, et les wardens portent sur les pods. Retrait manuel de l'etiquette + arret du " <>
+         "chronometre ; les metriques de duree de ce ticket sont faussees d'ici la."}
+
   defp kind_describe(:ops_root_missing),
     do:
       {"racine des faces absente",
