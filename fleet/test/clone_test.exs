@@ -83,6 +83,45 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       refute File.exists?(Path.join(ws, "scratch.txt"))
     end
 
+    # JG-061 (S1, trouvee par les DEUX auditeurs) — l'evasion de confinement, et elle ne passe pas
+    # par le pod : c'est le DAEMON qui execute le hook, hors bwrap, sous l'UID de l'humain, avec
+    # portee sur `~/.claude/.credentials.json`, les jetons de role et le catalogue.
+    #
+    # Le pod n'a besoin que d'ecrire un fichier et de le rendre executable — plusieurs profils canon
+    # portent Write ET Bash. `git clean -fdx` ne touche pas `.git/`, donc le hook survit a l'etape
+    # qui precede le checkout, et `checkout -B` le declenche.
+    test "un hook depose par le pod n'est PAS execute cote monde au re-brief", %{
+      ws: ws,
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      hooks = Path.join([ws, ".git", "hooks"])
+      File.mkdir_p!(hooks)
+
+      # Le temoin va dans `/tmp` et NON sous `pod_dir` : ExUnit derive son tmp_dir du nom du test,
+      # qui contient une apostrophe, et le hook mourait alors sur `Unterminated quoted string`.
+      # Il echouait donc AVANT de creer le temoin — le test aurait ete rouge sans le fix, mais pour
+      # la mauvaise raison. Chemin sans apostrophe + quoting dans le hook : ce qui est mesure est
+      # bien « le hook a-t-il TOURNE », pas « a-t-il su parser son propre chemin ».
+      temoin = Path.join(System.tmp_dir!(), "lcars-jg061-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(temoin) end)
+
+      hook = Path.join(hooks, "post-checkout")
+      File.write!(hook, "#!/bin/sh\ntouch '#{temoin}'\n")
+      File.chmod!(hook, 0o755)
+
+      assert {:ok, ^ws, "feature/issue-2"} =
+               Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+
+      refute File.exists?(temoin),
+             "le hook du pod a tourne cote monde — evasion de bwrap sous l'UID humain"
+
+      # NEUTRALISE, PAS EFFACE, et la distinction est le test : si le hook avait disparu on ne
+      # saurait pas si c'est `core.hooksPath` qui l'a rendu inerte ou un nettoyage qui l'a emporte.
+      # Sa presence prouve que c'est bien la neutralisation qui tient.
+      assert File.exists?(hook)
+    end
+
     test "the previous ticket's COMMITS are gone — the branch is recreated from the base", %{
       ws: ws,
       pod_dir: pod_dir,
