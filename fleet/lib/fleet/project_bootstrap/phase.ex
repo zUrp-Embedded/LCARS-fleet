@@ -34,6 +34,19 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     require Logger
 
+    # EVERY git op below runs SYSTEM-SIDE — in the daemon, under the human's UID, OUTSIDE bwrap —
+    # on a workspace the pod co-writes. Without this prefix, a `post-checkout` the pod dropped in
+    # `<ws>/.git/hooks/` executes THERE at the next re-brief: not a pod escaping its sandbox, but
+    # the daemon running the pod's code for it, with reach over `~/.claude/.credentials.json`, the
+    # role tokens and the whole catalogue. `git clean -fdx` does not remove `.git/`, so the hook
+    # outlives the step that precedes the checkout.
+    #
+    # Composed, never recopied: `Fleet.Credentials.Shell` holds the single definition of what
+    # "system-side git neutralized" means (hooks, fsmonitor, sshCommand, diff.external, global
+    # attributesFile) and says why for each flag. A site that rebuilds the list by hand is a site
+    # that will miss the next flag added to it.
+    @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
+
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
     def clone_or_skip(pod_dir, %Fleet.CapProfile{} = cap_profile, opts) do
@@ -229,7 +242,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # anomalous case it was written for.
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
-                   ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
+                   @hooks_off ++
+                     ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
                    git_opts
                  ),
                # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
@@ -241,7 +255,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature], env: []),
                :ok <- install_trailer_hook(ws, cap_profile),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
@@ -308,9 +322,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on hostile
           # material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
-               {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
+               {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-B", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature], env: []),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
@@ -428,7 +442,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # (bounded twice total, never per-path). A directory victim contributes every tracked file
     # under its prefix (skip-worktree is a per-FILE index bit).
     defp skip_worktree_tracked(ws, paths) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "ls-files", "-z"], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "ls-files", "-z"], env: []) do
         {:ok, {out, 0}} ->
           tracked = out |> String.split(<<0>>, trim: true) |> MapSet.new()
 
@@ -453,7 +467,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     defp flag_skip_worktree(ws, targets) do
       case Fleet.Credentials.Shell.git(
-             ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
+             @hooks_off ++ ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
              env: []
            ) do
         {:ok, {_, 0}} ->
@@ -485,7 +499,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
     def read_original_claude_md(ws) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "show", "HEAD:CLAUDE.md"], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"], env: []) do
         {:ok, {content, 0}} -> {:ok, content}
         _ -> :absent
       end
@@ -507,7 +521,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {:ok, {"", 0}}
 
     defp pin_base_sha(ws, sha) when is_binary(sha) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha], env: []) do
         {:ok, {_, 0}} = ok ->
           ok
 
@@ -515,9 +529,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # The local `reset` failed (`sha` absent locally) → targeted NETWORK fetch (forge auth + anti-prompt
           # bound via `git_env/0`), then local re-reset. Fetch failure (incl. timeout/exit) →
           # propagated as-is to the `with` → `{:clone_failed, ...}`.
-          case Fleet.Credentials.Shell.git(["-C", ws, "fetch", "origin", sha]) do
+          case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", sha]) do
             {:ok, {_, 0}} ->
-              Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: [])
+              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha], env: [])
 
             other ->
               other
