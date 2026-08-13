@@ -150,6 +150,122 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # JG-090 — LA POPULATION S'ARRETAIT A DEUX ESPACES. `~r/^  def\s+…/` decrit exactement
+  # l'indentation d'un `def` pose directement sous un `defmodule` de premier niveau. Un module
+  # IMBRIQUE indente de quatre : ses fonctions publiques n'etaient pas jugees non documentees,
+  # elles n'etaient jamais regardees. Mesure avant/apres sur l'arbre reel : 5 clauses `def` sur 2
+  # fichiers, dont `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — le point d'entree git
+  # system-side, c'est-a-dire le module qui portait l'echappement de sandbox.
+  #
+  # Elargir seul ne suffisait pas. L'accumulateur est indexe par NOM de fonction pour tout le
+  # fichier : des l'instant ou l'imbrication entre dans la population, un homonyme documente dans le
+  # module parent couvre celui du module imbrique. Ce test-la EST la cloture — sans lui, la fiche
+  # serait fermee par un contrat qui voit la fonction et lui attribue la doc d'une autre.
+  describe "docs.public_functions_documented — les modules imbriques sont dans la population" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "jg090-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet"]))
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root, src: Path.join([root, "lib", "fleet", "nested.ex"])}
+    end
+
+    test "fonction publique NON documentee dans un module imbrique → fail nomme", %{
+      root: root,
+      src: src
+    } do
+      File.write!(src, """
+      defmodule Fleet.Outer do
+        @moduledoc "outer"
+
+        defmodule Inner do
+          @moduledoc "inner"
+
+          def undocumented_here(x), do: x
+        end
+
+        @doc "documented"
+        def top_level(x), do: x
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+
+      assert result.status == :fail
+      assert result.evidence == ["lib/fleet/nested.ex: Inner.undocumented_here"]
+    end
+
+    # L'HOMONYME. `Outer.same_name` est documente, `Inner.same_name` ne l'est pas. Avec une cle par
+    # NOM les deux se confondent et le fichier ressort vert : le contrat aurait vu la fonction et
+    # rendu le verdict d'une autre.
+    test "un homonyme documente dans le module parent ne couvre pas celui du module imbrique", %{
+      root: root,
+      src: src
+    } do
+      File.write!(src, """
+      defmodule Fleet.Outer do
+        @moduledoc "outer"
+
+        defmodule Inner do
+          @moduledoc "inner"
+
+          def same_name(x), do: x
+        end
+
+        @doc "documented"
+        def same_name(x), do: x
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+
+      assert result.status == :fail,
+             "la doc du parent a couvert l'homonyme imbrique (rendu #{result.status})"
+
+      assert result.evidence == ["lib/fleet/nested.ex: Inner.same_name"]
+    end
+
+    # Le temoin : sans lui, elargir la population puis tout accuser rendrait les deux tests
+    # ci-dessus verts pour rien. Un `@doc` pose dans le module imbrique compte, et un `@doc` pose
+    # avant le `defmodule` imbrique ne DESCEND PAS dedans.
+    test "documentee dans le module imbrique → pass ; un @doc ne franchit pas un defmodule", %{
+      root: root,
+      src: src
+    } do
+      File.write!(src, """
+      defmodule Fleet.Outer do
+        @moduledoc "outer"
+
+        defmodule Inner do
+          @moduledoc "inner"
+
+          @doc "the nested contract"
+          def documented_here(x), do: x
+        end
+      end
+      """)
+
+      assert Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root).status ==
+               :pass
+
+      File.write!(src, """
+      defmodule Fleet.Outer do
+        @moduledoc "outer"
+
+        @doc "this belongs to nothing below a defmodule"
+        defmodule Inner do
+          @moduledoc "inner"
+
+          def leaked(x), do: x
+        end
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      assert result.status == :fail
+      assert result.evidence == ["lib/fleet/nested.ex: Inner.leaked"]
+    end
+  end
+
   test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 

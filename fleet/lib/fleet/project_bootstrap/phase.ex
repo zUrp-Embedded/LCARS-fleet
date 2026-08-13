@@ -47,6 +47,31 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # that will miss the next flag added to it.
     @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
+    @doc """
+    Provides the pod's workspace and returns `{:ok, workspace, branch}` — `branch` is `nil` when
+    there was nothing to clone.
+
+    TWO OUTCOMES, ONE SHAPE. With a `spec.project.repo_path`, the project's `base_branch` is cloned
+    (single-branch, full history) and `feature/<slug>` is CUT from it — that new branch is what the
+    third element names, never the base. Without a repo (permanent pod), the workspace is an empty
+    directory and the branch is `nil`. The caller reads the same tuple either way and never has to
+    know which world it is in.
+
+    THE GUARD IS THE FIRST THING, and it refuses rather than sanitizes: a `pod_dir` that is not an
+    absolute path yields `{:error, {:unsafe_pod_dir, pod_dir}}` before any git runs. Everything
+    below this line executes SYSTEM-SIDE — in the daemon, under the human's UID, outside bwrap — so
+    a relative path resolved against the daemon's cwd would put a pod's workspace anywhere.
+
+    Re-dispatchable onto a workspace a dead predecessor left behind: the pod_id is deterministic, so
+    the re-dispatch lands on the same directory. The residual is MOVED to `<workspace>.morgue` (one
+    generation kept) and the clone is redone from scratch — a fresh clone is always correct, and
+    uncommitted work is never shredded on the way.
+
+    Errors are typed and only two escape the `clone_failed` wrapper, because they are not failures
+    OF the clone: `{:unsafe_pod_dir, _}` from the guard above, and `{:sanitize_failed, _}` from the
+    workspace scrub that runs after it. Everything else — git exit code, timeout, malformed base or
+    feature ref — arrives as `{:error, {:clone_failed, reason}}`.
+    """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
     def clone_or_skip(pod_dir, %Fleet.CapProfile{} = cap_profile, opts) do

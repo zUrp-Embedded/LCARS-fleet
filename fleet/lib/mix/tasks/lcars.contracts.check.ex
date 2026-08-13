@@ -2645,6 +2645,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
+  # NESTING IS THE POPULATION, NOT A DETAIL OF IT. These matched `^  def` — EXACTLY two spaces, the
+  # indentation of a `def` sitting directly under a top-level `defmodule`. A nested module indents
+  # its functions by four, so its public functions were not judged undocumented: they were never
+  # looked at. The blind spot measured five `def` clauses over two files, and one of them is
+  # `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — the system-side git entry point, i.e. the
+  # module that carried the sandbox escape this repo fixed by composing `git_safe_config_args/0`.
+  # A wall that starts green because its subject is out of frame is the failure class this whole
+  # file exists to prevent, one level up: not a hollow green over an empty tree, a hollow green over
+  # a tree it declined to enter.
+  @def_re ~r/^(\s+)def\s+([a-z_][a-zA-Z0-9_?!]*)/
+  @defp_re ~r/^\s+defp?\s/
+  @defmodule_re ~r/^(\s*)defmodule\s+([A-Z][A-Za-z0-9_.]*)/
+
   # `@doc false` COUNTS AS DOCUMENTED, deliberately: it is an explicit statement that the function is
   # public for a mechanical reason and not as an API. Treating it as a miss would push its authors to
   # write a hollow `@doc` instead, which is worse — a sentence nobody meant, in the place a reader
@@ -2653,44 +2666,83 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     otp =
       ~w(start_link init child_spec handle_call handle_cast handle_info terminate code_change handle_continue)
 
-    {public, documented, impls} =
+    state =
       src
       |> String.split("\n")
-      |> Enum.reduce({MapSet.new(), MapSet.new(), MapSet.new(), false, false}, fn line, acc ->
-        {pub, doc, imp, pending_doc, pending_impl} = acc
-        trimmed = String.trim_leading(line)
+      |> Enum.reduce(
+        %{
+          public: MapSet.new(),
+          documented: MapSet.new(),
+          impls: MapSet.new(),
+          mods: [],
+          doc?: false,
+          impl?: false
+        },
+        fn line, st ->
+          trimmed = String.trim_leading(line)
 
-        cond do
-          String.starts_with?(trimmed, "@doc") ->
-            {pub, doc, imp, true, pending_impl}
+          cond do
+            String.starts_with?(trimmed, "@doc") ->
+              %{st | doc?: true}
 
-          String.starts_with?(trimmed, "@impl") ->
-            {pub, doc, imp, pending_doc, true}
+            String.starts_with?(trimmed, "@impl") ->
+              %{st | impl?: true}
 
-          String.starts_with?(trimmed, "@spec") ->
-            acc
+            String.starts_with?(trimmed, "@spec") ->
+              st
 
-          match?([_, _], Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)) ->
-            [_, name] = Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)
-            imp = if pending_impl, do: MapSet.put(imp, name), else: imp
+            match?([_, _, _], Regex.run(@defmodule_re, line)) ->
+              [_, indent, mod] = Regex.run(@defmodule_re, line)
+              depth = String.length(indent)
+              # A pending `@doc` does not cross a `defmodule`: it belonged to whatever was being
+              # written before, and letting it through would credit the nested module's first
+              # function with someone else's documentation.
+              %{st | mods: [{depth, mod} | pop_to(st.mods, depth)], doc?: false, impl?: false}
 
-            if name in otp do
-              {pub, doc, imp, false, false}
-            else
-              doc = if pending_doc, do: MapSet.put(doc, name), else: doc
-              {MapSet.put(pub, name), doc, imp, false, false}
-            end
+            match?([_, _, _], Regex.run(@def_re, line)) ->
+              [_, indent, name] = Regex.run(@def_re, line)
+              key = {enclosing_module(st.mods, String.length(indent)), name}
+              st = if st.impl?, do: %{st | impls: MapSet.put(st.impls, key)}, else: st
 
-          Regex.match?(~r/^  defp?\s/, line) ->
-            {pub, doc, imp, false, false}
+              if name in otp do
+                %{st | doc?: false, impl?: false}
+              else
+                st = if st.doc?, do: %{st | documented: MapSet.put(st.documented, key)}, else: st
+                %{st | public: MapSet.put(st.public, key), doc?: false, impl?: false}
+              end
 
-          true ->
-            acc
+            Regex.match?(@defp_re, line) ->
+              %{st | doc?: false, impl?: false}
+
+            true ->
+              st
+          end
         end
-      end)
-      |> then(fn {pub, doc, imp, _, _} -> {pub, doc, imp} end)
+      )
 
-    public |> MapSet.difference(documented) |> MapSet.difference(impls) |> Enum.sort()
+    state.public
+    |> MapSet.difference(state.documented)
+    |> MapSet.difference(state.impls)
+    |> Enum.sort()
+    |> Enum.map(fn
+      {nil, name} -> name
+      {mod, name} -> "#{mod}.#{name}"
+    end)
+  end
+
+  # The enclosing module of a `def` = the innermost one indented LESS than it. Closing `end`s are
+  # never parsed: popping by indentation does it, because a sibling that follows a nested module is
+  # written back at the shallower depth. `nil` for the file's outermost module, so its functions
+  # keep printing as bare names — a qualified name means "this one is nested", which is precisely
+  # what a reader needs to find it.
+  defp pop_to(mods, depth), do: Enum.drop_while(mods, fn {d, _} -> d >= depth end)
+
+  defp enclosing_module(mods, indent) do
+    case pop_to(mods, indent) do
+      [{_, _} | []] -> nil
+      [{_, mod} | _] -> mod
+      [] -> nil
+    end
   end
 
   @doc false
