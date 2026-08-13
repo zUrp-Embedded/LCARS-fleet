@@ -1595,37 +1595,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       :required ->
-        offenders =
+        # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
+        # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
+        # alone. The population is a different question: these are TWO roots, only one of them is
+        # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
+        # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`
+        # and a `:pass` that had not opened a single file — indistinguishable, in the output, from a
+        # green earned on eleven conforming sourcers.
+        #
+        # The comment above this function already named the risk: "a green that checked nothing".
+        # It guarded the scope and not the population, which is exactly the half that was missing.
+        sourcers =
           [
             Path.join(dir, "modules.d"),
             Path.join(root, "etc")
           ]
           |> Enum.flat_map(fn d -> Path.wildcard(Path.join(d, "*.sh")) end)
-          |> Enum.filter(fn f ->
-            # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
-            # whole contracts run, turning a shell-hygiene check into a gate outage.
-            case File.read(f) do
-              {:ok, content} ->
-                String.contains?(content, "provision-lib.sh") and
-                  not Regex.match?(~r/^set -[a-z]*u[a-z]*\b/m, content)
 
-              {:error, _} ->
-                false
-            end
-          end)
-
-        %{
-          id: "shell.sourcers_set_strict",
-          remediation:
-            "a script sourcing provision-lib.sh must `set -u` (`set -euo pipefail`): the library " <>
-              "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
-              "expands to \"\" and the recipe provisions the wrong thing in silence",
-          status: if(offenders == [], do: :pass, else: :fail),
-          evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
-          note:
-            "every sourcer of provision-lib.sh sets -u (BL-6-36: bash's silent-coercion class)"
-        }
+        if measured_nothing?(sourcers) do
+          broken_result("shell.sourcers_set_strict", "sourcer scripts")
+        else
+          do_check_sourcers(sourcers, root)
+        end
     end
+  end
+
+  defp do_check_sourcers(sourcers, root) do
+    offenders =
+      sourcers
+      |> Enum.filter(fn f ->
+        # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
+        # whole contracts run, turning a shell-hygiene check into a gate outage.
+        case File.read(f) do
+          {:ok, content} ->
+            String.contains?(content, "provision-lib.sh") and
+              not Regex.match?(~r/^set -[a-z]*u[a-z]*\b/m, content)
+
+          {:error, _} ->
+            false
+        end
+      end)
+
+    %{
+      id: "shell.sourcers_set_strict",
+      remediation:
+        "a script sourcing provision-lib.sh must `set -u` (`set -euo pipefail`): the library " <>
+          "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
+          "expands to \"\" and the recipe provisions the wrong thing in silence",
+      status: if(offenders == [], do: :pass, else: :fail),
+      evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
+      note:
+        "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
+          "(BL-6-36: bash's silent-coercion class)"
+    }
   end
 
   # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime

@@ -12,6 +12,55 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   """
   use ExUnit.Case, async: true
 
+  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « fleet/deploy
+  # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
+  # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
+  # absent rend `[]` en silence : un `deploy/` present avec un `modules.d/` vide ou deplace donnait
+  # `offenders == []` donc `:pass`, sans avoir ouvert un seul fichier — indistinguable en sortie
+  # d'un vert gagne sur onze sourcers conformes.
+  #
+  # Le commentaire de la fonction nommait deja le risque (« a green that checked nothing ») et le
+  # depot porte deja la parade (`measured_nothing?/1` + `broken_result/2`, BL-6-70) ; ce contrat ne
+  # l'utilisait pas.
+  #
+  # Les deux tests vont par paire : sans le second, supprimer la mesure suffirait a rendre le
+  # premier vert.
+  describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
+    defp fixture_root!(ctx) do
+      root = Path.join(System.tmp_dir!(), "jg097-#{ctx}-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      File.mkdir_p!(Path.join(root, "etc"))
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    test "aucun fichier lu → INSTRUMENT BROKEN, jamais un vert" do
+      root = fixture_root!("vide")
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+
+      assert result.status == :fail,
+             "un contrat qui n'a ouvert aucun fichier a rendu #{result.status}"
+
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+
+    test "population NON vide et conforme → pass (le garde n'a pas rendu le contrat impossible)" do
+      root = fixture_root!("conforme")
+
+      File.write!(Path.join([root, "deploy", "modules.d", "10-x.sh"]), """
+      #!/usr/bin/env bash
+      set -euo pipefail
+      . "$(dirname "$0")/../lib/provision-lib.sh"
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+
+      assert result.status == :pass
+      assert result.note =~ "1 shell file(s) scanned"
+    end
+  end
+
   test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 
