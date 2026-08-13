@@ -369,7 +369,13 @@ defmodule Fleet.Pilot.StepDispatcher do
         {:skipped, :awaits_arch}
 
       true ->
-        # Verdicts are scoped to current head SHA.
+        # Verdicts are scoped to the current head SHA — and a MISSING sha is now a refusal, not a
+        # wider read. `get_in(pr, ["head", "sha"])` yields `nil` on a forge answer whose PR object
+        # omits the field, and that `nil` used to mean "count every review ever placed on this PR":
+        # a verdict given on an earlier commit promoted a PR whose current commit no judge had seen.
+        # `pr_review_state/3` now answers `{:error, {:head_sha_required, nil}}`, which lands in the
+        # error branch below and stops the routing — fail-closed at the only place where the
+        # alternative was merging unjudged code.
         verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
         case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do

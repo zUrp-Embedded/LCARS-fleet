@@ -101,8 +101,28 @@ defmodule Fleet.Forge.Client.Jury do
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    head_sha = Keyword.get(opts, :head_sha)
+    # NO IMPLICIT UNSCOPED MODE. `head_sha` used to be a `Keyword.get/2`, so an ABSENT key and a
+    # `nil` VALUE both landed on "count every review ever placed on this PR" — and `nil` is exactly
+    # what the production caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR
+    # object omits `head.sha` (a lighter listing shape, a Gitea version, a partial response).
+    #
+    # WHAT THAT COST, and it is the whole severity of the finding: a PR approved on commit A and
+    # then completed by commit B reads as still approved, `review_outcome/2` yields `:approved`,
+    # the routing promotes, and `GatekeeperSeal` merges. Code no judge ever saw lands on the main
+    # branch, under a seal that attests the opposite.
+    #
+    # The unscoped mode still exists — some callers legitimately want every review — but it is now
+    # ASKED FOR (`head_sha: :unscoped`), never inherited from a missing key. That is the whole
+    # difference between a default and a decision.
+    case Keyword.fetch(opts, :head_sha) do
+      {:ok, :unscoped} -> do_review_state(repo, index, opts, nil)
+      {:ok, sha} when is_binary(sha) and sha != "" -> do_review_state(repo, index, opts, sha)
+      {:ok, other} -> {:error, {:head_sha_required, other}}
+      :error -> {:error, {:head_sha_required, :absent}}
+    end
+  end
 
+  defp do_review_state(repo, index, opts, head_sha) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, reviews} <- paginated_reviews(config, repo, index) do
       decisive = decisive_by_reviewer(reviews, head_sha)

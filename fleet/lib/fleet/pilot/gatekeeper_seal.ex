@@ -628,8 +628,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # Best-effort by construction: this runs AFTER a real merge, and a forge hiccup here must not
   # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims
   # nothing about judges that may exist. Under-claiming is the only safe direction for a trace.
+  #
+  # UNSCOPED, AND NOW IT IS ASKED FOR. This read used to pass no `:head_sha` at all, which the jury
+  # silently took as "every review counts". Since that implicit mode is gone, the choice has to be
+  # stated: `head_sha: :unscoped`. It is defensible HERE and nowhere else on this rail — this runs
+  # AFTER a real merge and feeds a sentence, not a decision, and its only failure direction is
+  # under-claiming.
+  #
+  # ⚠ RESIDUAL, on record: unscoped means an approval placed on an EARLIER commit can be listed
+  # among the approvers of the merged one. The sentence over-claims by exactly that much. Scoping it
+  # properly needs the merged sha threaded down through `seal_and_merge/8` → `do_seal/9`, or a
+  # second forge read on a best-effort post-merge path; neither is this fiche's subject, and the
+  # decision path it protects is `step_dispatcher`, which is now fail-closed.
   defp approving_judges(forge, repo, pr_number, forge_opts) do
-    case forge.pr_review_state(repo, pr_number, forge_opts) do
+    case forge.pr_review_state(repo, pr_number, Keyword.put(forge_opts, :head_sha, :unscoped)) do
       {:ok, %{verdicts: verdicts}} when is_map(verdicts) ->
         verdicts
         |> Enum.filter(fn {_login, verdict} -> verdict == :approved end)

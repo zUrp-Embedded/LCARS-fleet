@@ -66,8 +66,15 @@ defmodule Fleet.Forge.ClientTest do
   # nuked with its last production caller (get_issue_status now consumes the full state); these
   # tests keep exercising the same derivation (last-decisive, dismissed, commit-scoping) through
   # the surviving read.
+  # `head_sha: :unscoped` EXPLICITE — JG-065. Ces cas exercent l'arithmetique du jury (derniere
+  # revue decisive par relecteur, traduction login→role, revues rejetees) et non le scoping par
+  # commit : ils veulent bien « toutes les revues ». Depuis JG-065 ce mode se DEMANDE au lieu de
+  # s'heriter d'une cle absente — c'est exactement la clause de la fiche (« reserver explicitement le
+  # mode non scope aux seuls appelants historiques qui le demandent »), et l'effet secondaire utile
+  # est qu'un test dit desormais quel mode il exerce.
   defp verdicts_of(repo, index, opts) do
-    with {:ok, %{verdicts: verdicts}} <- ForgeClient.pr_review_state(repo, index, opts),
+    with {:ok, %{verdicts: verdicts}} <-
+           ForgeClient.pr_review_state(repo, index, Keyword.put(opts, :head_sha, :unscoped)),
          do: {:ok, verdicts}
   end
 
@@ -526,7 +533,11 @@ defmodule Fleet.Forge.ClientTest do
       }
 
       assert {:ok, %{verdicts: verdicts, reviewers: reviewers, records: records}} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(handlers), :head_sha, :unscoped)
+               )
 
       assert %{"qualifier" => :approved, "lordzurp" => :changes_requested} = verdicts
       assert "qualifier" in reviewers
@@ -710,7 +721,11 @@ defmodule Fleet.Forge.ClientTest do
       handlers: handlers
     } do
       assert {:error, {:unexpected_review_shape, _path, _body}} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(handlers), :head_sha, :unscoped)
+               )
     end
 
     test "change_request_feedback: non-list 2xx → {:error, {:unexpected_review_shape, _, _}}",
@@ -2099,6 +2114,79 @@ defmodule Fleet.Forge.ClientTest do
       %{path: path} = Agent.get(agent, & &1)
 
       refute path =~ ~r{/\.\.(/|$)}
+    end
+  end
+
+  # JG-065 (`S2`) — SANS `head_sha`, LES APPROBATIONS PERIMEES ETAIENT RETENUES.
+  #
+  # `head_sha` etait lu par `Keyword.get/2`, donc une cle ABSENTE et une valeur `nil` tombaient
+  # toutes deux sur « compte toutes les revues jamais posees sur cette PR ». Or `nil` est exactement
+  # ce que produit l'appelant de production : `get_in(pr, ["head", "sha"])` sur une reponse de forge
+  # dont l'objet PR n'expose pas `head.sha` (forme allegee d'un listage, version de Gitea, reponse
+  # partielle).
+  #
+  # Ce que ca coutait : une PR approuvee sur le commit A puis completee par un commit B se lisait
+  # toujours approuvee, `review_outcome/2` rendait `:approved`, le routage promouvait, et le sceau
+  # fusionnait. Du code qu'aucun juge n'a vu atterrissait sur la branche principale, sous un
+  # scellement qui atteste le contraire.
+  describe "JG-065 — le mode non scope se DEMANDE, il ne s'herite plus d'une cle absente" do
+    defp one_approval_handlers do
+      %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "user" => %{"login" => "Qualifier"},
+               "state" => "APPROVED",
+               "commit_id" => "AAA",
+               "dismissed" => false
+             }
+           ]}
+      }
+    end
+
+    test "cle ABSENTE → {:error, {:head_sha_required, :absent}}, jamais une lecture elargie" do
+      assert {:error, {:head_sha_required, :absent}} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(one_approval_handlers()))
+    end
+
+    test "head_sha nil (ce que rend get_in sur une PR sans head.sha) → refus type" do
+      assert {:error, {:head_sha_required, nil}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, nil)
+               )
+    end
+
+    test "head_sha du commit COURANT → la revue de l'ancien commit ne compte pas" do
+      assert {:ok, %{verdicts: verdicts}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, "BBB")
+               )
+
+      assert verdicts == %{},
+             "une approbation posee sur un commit anterieur a ete retenue pour le commit courant"
+    end
+
+    test "TEMOIN — head_sha du commit JUGE → la revue compte" do
+      assert {:ok, %{verdicts: %{"qualifier" => :approved}}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, "AAA")
+               )
+    end
+
+    test "TEMOIN — :unscoped explicite → l'ancien comportement, mais demande" do
+      assert {:ok, %{verdicts: %{"qualifier" => :approved}}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, :unscoped)
+               )
     end
   end
 end
