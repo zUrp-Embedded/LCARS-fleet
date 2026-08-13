@@ -183,6 +183,17 @@ defmodule Fleet.Workflow.Provenance do
     end
   end
 
+  @doc """
+  Renders the in-toto Statement of `attrs` as JSON, WITHOUT writing anything.
+
+  The publication path needs the content before it has a place to put it: the attestation now rides
+  the same `git push` as the brick it attests (BL-6-43), so it is built here and written as a git
+  object by the publisher — not committed to a second face afterwards.
+  """
+  @spec statement_json(attrs()) :: {:ok, String.t()} | {:error, term()}
+  def statement_json(%{livrable_sha: sha} = attrs) when is_binary(sha) and sha != "",
+    do: encode(statement(attrs))
+
   defp encode(statement) do
     {:ok, Jason.encode!(statement, pretty: true) <> "\n"}
   rescue

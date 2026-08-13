@@ -342,17 +342,19 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     %{tmp: tmp, base: base, head: head, alien: alien}
   end
 
+  # L'attestation vit sur `refs/lcars/provenance/<sha>` DANS LE CLONE, plus dans un fichier de la
+  # face atelier a un nom derive de la tete (BL-6-43). Le harnais ecrit donc ou le sceau lit.
   defp wall_statement(tmp, issue_n, head, input) do
-    work = Path.join([tmp, "w", "demo"])
+    proj = Path.join([tmp, "p", "demo"])
 
-    {:ok, _} =
-      Fleet.Workflow.Provenance.emit(work, %{
+    {:ok, json} =
+      Fleet.Workflow.Provenance.statement_json(%{
         livrable_sha: head,
         input_sha: input,
         issue: issue_n
       })
 
-    :ok
+    :ok = Fleet.Workflow.Git.write_provenance(proj, head, json)
   end
 
   defp wall_opts(tmp, head) do
@@ -404,36 +406,25 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert_received {:merge, 4}
   end
 
-  test "provenance wall: un statement pour un AUTRE sha n'est pas une absence — merge REFUSÉ (BL-6-43)",
+  test "provenance wall: une preuve pour un AUTRE sha ne peut plus etre confondue avec la preuve de la brique (BL-6-43)",
        %{tmp_dir: tmp} do
-    # LE CAS 4 : la tête a bougé APRÈS la gravure. On grave pour `alien` (un commit réel, mais pas
-    # celui qu'on scelle), et on scelle `head`. Le fichier attendu — dérivé du head COURANT — n'existe
-    # donc pas, et la recherche par NOM lisait ça comme « rien n'a été gravé », donc passait.
+    # LE CAS 4 NE PEUT PLUS EXISTER, et ce test le prouve par CONSTRUCTION plutot que par detection.
+    # Avant : le fichier d'attestation portait un nom DERIVE de la tete, donc une tete qui bougeait
+    # apres la gravure faisait chercher un nom que personne n'avait ecrit — et une preuve pour un
+    # autre commit, posee a cote, se lisait exactement comme une absence.
     #
-    # Deux routes y mènent en production et les deux sont atteignables : une poussée directe sur
-    # `lcars/*` (seule `main` porte une protection de branche) et un round de rework dont la gravure
-    # best-effort n'a pas eu lieu. Dans les deux cas une preuve EXISTE, à côté, sur un autre commit.
+    # Maintenant la ref EST le sha. On grave pour `alien`, on scelle `head` : la preuve d'`alien`
+    # existe, elle est intacte, et elle n'est simplement PAS la preuve de `head`. Aucune confusion
+    # possible, aucun nom a calculer.
     %{head: head, base: base, alien: alien} = wall_harness(tmp)
     :ok = wall_statement(tmp, 9, alien, base)
 
-    assert {:error, {:provenance_stale, %{siblings: siblings}}} =
-             GatekeeperSeal.seal_and_merge(
-               WallForge,
-               "fleet/demo",
-               4,
-               9,
-               "engineer",
-               wall_opts(tmp, head),
-               Keyword.put(wall_opts(tmp, head), :base_branch, "main")
-             )
+    proj = Path.join([tmp, "p", "demo"])
 
-    # Le frère est nommé : sans ça le refus dit « périmé » sans dire par rapport à quoi.
-    assert siblings == ["issue-9-#{String.slice(alien, 0, 7)}.json"]
-
-    refute_received {:merge, _}
-    assert_received {:comment, 4, body, "[provenance-stale:pr-4]"}
-    assert body =~ "Provenance périmée"
-    assert body =~ String.slice(alien, 0, 7)
+    # La preuve d'alien est bien la, lisible, sous SON sha.
+    assert {:ok, _} = Fleet.Workflow.Git.read_provenance(proj, alien)
+    # Et il n'y en a aucune sous celui qu'on scelle — la question ne se pose meme pas.
+    assert {:error, :no_provenance_ref} = Fleet.Workflow.Git.read_provenance(proj, head)
   end
 
   test "provenance wall SAUTÉ : le merge passe, ET la PR le DIT (BL-6-47.4)", %{tmp_dir: tmp} do

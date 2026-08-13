@@ -50,8 +50,43 @@ defmodule Fleet.Workflow.Deliverable do
              Map.get(opts, :coauthor_role)
            ),
          {:ok, sha} <- head_sha(opts.workspace),
-         {:ok, pushed?} <- push_deliverable(opts) do
+         {:ok, extra_refspecs} <- with_provenance(opts, sha),
+         {:ok, pushed?} <- push_deliverable(opts, extra_refspecs) do
       {:ok, %{commit_sha: sha, pushed?: pushed?, mode: opts.mode}}
+    end
+  end
+
+  # LA PREUVE PART AVEC LA BRIQUE, ET C'EST TOUT LE FIX (BL-6-43).
+  #
+  # L'attestation etait une SECONDE ecriture, sur une AUTRE face, APRES le PR, best-effort. Trois
+  # proprietes en decoulaient, toutes mauvaises : elle pouvait ne pas exister pour une brique
+  # publiee ; elle pouvait exister pour un AUTRE sha que celui qu'on scellait ; et son absence etait
+  # indiscernable de son echec. Le sceau ne pouvait donc que gerer des consequences.
+  #
+  # Ici elle devient un objet git de l'espace de travail, sous une ref NOMMEE PAR LE SHA
+  # (`refs/lcars/provenance/<sha>`), poussee dans le MEME `git push` que la branche. Deux
+  # consequences, par construction et non par vigilance :
+  #   - la ref ne peut pas manquer pour une brique publiee : si le push echoue, la branche n'est pas
+  #     publiee non plus, donc il n'y a rien a attester ;
+  #   - elle ne peut pas parler d'un autre commit : son NOM est le commit.
+  #
+  # Une ecriture d'attestation qui echoue FAIT ECHOUER la publication, et c'est delibere : le
+  # commentaire d'origine disait « never a blocked PR over a trace file », mais cette phrase valait
+  # quand la trace etait un fichier de courtoisie sur une autre face. Ici l'ecriture est LOCALE
+  # (hash-object + update-ref, aucun reseau) — elle ne peut echouer que sur un depot casse, cas ou
+  # publier serait pire.
+  defp with_provenance(opts, sha) do
+    case Map.get(opts, :provenance) do
+      attrs when is_map(attrs) and map_size(attrs) > 0 ->
+        with {:ok, json} <-
+               Fleet.Workflow.Provenance.statement_json(Map.put(attrs, :livrable_sha, sha)),
+             :ok <- Git.write_provenance(opts.workspace, sha, json) do
+          ref = Git.provenance_ref(sha)
+          {:ok, ["#{ref}:#{ref}"]}
+        end
+
+      _ ->
+        {:ok, []}
     end
   end
 
@@ -150,10 +185,14 @@ defmodule Fleet.Workflow.Deliverable do
   end
 
   # The completer creates the target branch before publication.
-  defp push_deliverable(opts) do
+  # Le refspec du livrable se construit ICI et pas plus haut : sans push, il n'y a pas de
+  # `target_branch` a lire (mode local, cf. `check_push_keys`) — le calculer d'avance faisait lever
+  # une `KeyError` sur un chemin qui ne pousse rien. Les refs d'attestation, elles, sont deja
+  # ecrites localement : elles accompagnent le push quand il y en a un.
+  defp push_deliverable(opts, extra_refspecs) do
     if push?(opts) do
       refspec = "#{local_ref(opts)}:#{opts.target_branch}"
-      Git.push(opts.workspace, opts.remote, refspec)
+      Git.push(opts.workspace, opts.remote, [refspec | extra_refspecs])
     else
       {:ok, false}
     end
