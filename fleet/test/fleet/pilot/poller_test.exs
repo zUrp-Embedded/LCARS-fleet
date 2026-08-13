@@ -144,6 +144,61 @@ defmodule Fleet.Pilot.PollerTest do
     # throttle tick, + R lines each claiming "throttle". The hoist into do_poll (cross-repo union,
     # decision ONCE) makes the trace honest. This case was NOT covered (the wiring test only
     # exercises ONE repo → the multiplication was invisible).
+    # JG-067 — UN DEPOT QUI LEVE EMPORTAIT TOUS CEUX QUI LE SUIVAIENT. `safe_poll/2` capture bien,
+    # mais AU-DESSUS du fold des depots : les depots situes apres celui qui a leve n'etaient pas
+    # traites du tout pendant ce cycle. Et la cause est deterministe — le meme PR, le meme fichier,
+    # le meme conflit pathologique — donc elle se represente a chaque tick : un seul depot malade
+    # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
+    #
+    # Le filet descend d'un cran, par depot. Il ne remplace pas celui du dessus : une levee HORS du
+    # fold reste un echec de tick avec son `err_streak` et son repli.
+    defmodule RaisingForge do
+      # Depot du milieu : il leve. Les deux autres se comportent normalement.
+      def list_open_issues("fleet/repo-b", _opts), do: raise("conflit pathologique sur repo-b")
+
+      def list_open_issues(repo, opts) do
+        send(Keyword.get(opts, :_test_pid, self()), {:served, repo})
+        Keyword.fetch!(opts, :_test_issues)
+      end
+
+      defdelegate list_open_pulls(repo, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate list_org_repos(org, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate issue_dependencies(repo, n, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate get_pull(repo, n, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate commit_ci_state(repo, sha, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+    end
+
+    test "JG-067 : un depot qui leve ne prive plus de service ceux qui le SUIVENT" do
+      test = self()
+
+      {name, pid} =
+        start_entry_poller({:ok, []}, %{},
+          forge_client: RaisingForge,
+          escalate_fun: fn kind, subject, cause, sig, _o ->
+            send(test, {:escalated, kind, subject, cause, sig})
+            {:ok, 1}
+          end,
+          forge_opts: [
+            _test_issues: {:ok, []},
+            _test_pid: self(),
+            _test_repos: ["fleet/repo-a", "fleet/repo-b", "fleet/repo-c"]
+          ]
+        )
+
+      _ = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert_received {:served, "fleet/repo-a"}
+
+      assert_received {:served, "fleet/repo-c"},
+                      "le depot qui SUIT celui qui a leve n'a pas ete servi — une seule PR " <>
+                        "pathologique prive de service tout le reste de l'ordre d'iteration"
+
+      assert_received {:escalated, :repo_poll_crash, "fleet/repo-b", {:poll_raised, _}, _sig},
+                      "le depot en panne est saute EN SILENCE"
+
+      GenServer.stop(pid)
+    end
+
     test "A-10: 2 awaits-arch repos → EXACTLY 1 re-kick per throttle tick (not 1 per repo)" do
       issue = %{
         "number" => 42,

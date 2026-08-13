@@ -448,12 +448,35 @@ defmodule Fleet.Pilot.Poller do
 
         base = note_pods_snapshot(base, pods)
 
+        # UN DEPOT QUI LEVE N'EMPORTE PLUS CEUX QUI LE SUIVENT. `safe_poll/2` capture bien, mais
+        # AU-DESSUS de ce fold : les depots situes apres celui qui a leve n'etaient pas traites du
+        # tout pendant ce cycle. Et comme la cause est deterministe — la meme PR, le meme fichier,
+        # le meme conflit pathologique — elle se reproduit a chaque tick : un seul depot malade
+        # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
+        #
+        # Le filet est donc DESCENDU d'un cran, par depot, et il ne remplace pas celui du dessus :
+        # `safe_poll/2` garde son role (une levee hors du fold — construction de `base`, snapshot
+        # des pods, filet arch — reste un echec de tick, avec son `err_streak` et son repli).
+        #
+        # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL. `acc_s` est l'union des suspects, et le laisser
+        # inchange PERDRAIT les suspects de ce depot — c'est-a-dire remettrait a zero la grace de
+        # deux ticks qui protege ses verrous. On reporte donc ses suspects anterieurs, exactement ce
+        # que font les chemins de skip volontaire (`not_onboarded_skip`, `parked_skip`) : un depot
+        # non traite n'est pas un depot sans suspects.
         {tally, suspects, awaits} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
                                                                                   {acc_t, acc_s,
-                                                                                   acc_a} ->
-            {t, s, a} = step_do_poll(%{base | repo: repo}, mode, pods)
-            {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
+                                                                                   acc_a} = acc ->
+            repo_state = %{base | repo: repo}
+
+            try do
+              {t, s, a} = step_do_poll(repo_state, mode, pods)
+              {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
+            rescue
+              e -> repo_poll_crash(repo_state, e, acc)
+            catch
+              kind, reason -> repo_poll_crash(repo_state, {kind, reason}, acc)
+            end
           end)
 
         # Arch net — FLEET-GLOBAL action on the UNIQUE arch pod, decided ONCE per tick on the
@@ -686,6 +709,31 @@ defmodule Fleet.Pilot.Poller do
   # Prior suspects REPO-SCOPED (the refs are repo-qualified precisely for this): the whole
   # cross-repo union let an error/kick branch resurrect suspects RESOLVED on other repos (grace
   # bypassed → reclaim in the registration window of a freshly re-spawned pod).
+  # Le depot a leve : on le saute, on le DIT, et on garde ses suspects. L'incident est ouvert parce
+  # que la cause est deterministe — un conflit pathologique se represente a chaque tick — et qu'un
+  # depot definitivement non servi est exactement le genre de panne qu'une telemetrie de comptes ne
+  # montre pas : les autres depots continuent, le total reste plausible.
+  defp repo_poll_crash(state, reason, {acc_t, acc_s, acc_a}) do
+    Logger.error(
+      "Poller: repo=#{state.repo} RAISED during its poll (#{inspect(reason)}) — this repo is " <>
+        "skipped for this tick, the others are NOT. The cause is usually deterministic (the same " <>
+        "PR, the same file), so it will repeat until someone looks."
+    )
+
+    escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+    _ =
+      escalate.(
+        :repo_poll_crash,
+        state.repo,
+        {:poll_raised, reason},
+        "repo_poll_crash:#{state.repo}",
+        state.forge_opts || []
+      )
+
+    {acc_t, MapSet.union(acc_s, repo_scoped_suspects(state)), acc_a}
+  end
+
   defp repo_scoped_suspects(state),
     do: MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
 

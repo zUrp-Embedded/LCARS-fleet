@@ -266,6 +266,13 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp correlation_block(_), do: ""
 
+  defp kind_describe(:repo_poll_crash),
+    do:
+      {"depot qui leve a chaque poll",
+       "Le cycle de ce depot a leve une exception. Les autres depots sont servis, lui non — et la " <>
+         "cause est le plus souvent deterministe (la meme PR, le meme fichier), donc elle se " <>
+         "represente a chaque tick. Ce depot est hors service tant que personne ne regarde."}
+
   defp kind_describe(:issue_lock_residual),
     do:
       {"verrou residuel sur une issue FERMEE",
