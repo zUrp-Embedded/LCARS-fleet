@@ -41,7 +41,12 @@ defmodule Fleet.Project.Intensity do
   # (`<pod_dir>/.lcars/system-prompt.md`). Un fichier `.lcars` a la racine d'un workspace, a cote
   # d'un repertoire `.lcars/` dans le home du meme pod, ce sont deux natures sous une chaine — la
   # faute exacte qui a coute le chantier `CLAUDE.md` du 2026-08-12.
-  @file_name ".lcars.json"
+  # ⚠ LE NOM VIT DANS `Fleet.Layout`, PAS ICI, depuis 2026-08-13. Il a acquis un SECOND lecteur dans
+  # un autre domaine : `Workflow.DeliverableGate` refuse une chaine de livraison qui touche ce
+  # fichier (un producteur ne modifie pas la declaration qui choisit son jury), et `Workflow` ne
+  # depend pas de `Project` — donc un literal la-bas aurait fait deux sources pour un nom. Layout est
+  # l'autorite du rangement et les deux domaines en dependent deja.
+  @file_name Fleet.Layout.project_declaration_file()
 
   # THE LEVEL A PROJECT GETS WHEN NOBODY DECLARED ONE, and it was `C0` — the bottom of the scale,
   # which is a CLAIM: C0 is the disposable posture, and nobody said the work was disposable. The

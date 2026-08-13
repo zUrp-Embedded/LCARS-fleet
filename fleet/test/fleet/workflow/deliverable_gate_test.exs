@@ -353,6 +353,28 @@ defmodule Fleet.Workflow.DeliverableGateTest do
              Gate.verify(dir, base, @role_emails)
   end
 
+  test "un producteur ne peut pas commiter la DECLARATION DU PROJET (.lcars.json)", %{
+    tmp_dir: tmp
+  } do
+    # Elle porte `pipeline_default` — quelle carte route le ticket, donc quel jury et quelles portes.
+    # Sans ce refus, un producteur bascule la declaration vers une carte `jury: []` / `ci: ignore`,
+    # et les juges du ticket SUIVANT tombent. La seule chose qui restait entre l'agent et ce
+    # resultat etait qu'un relecteur remarque le diff.
+    {dir, base} = setup_repo(Path.join(tmp, "decl"))
+    commit_file(dir, ".lcars.json", ~s({"pipeline_default":"c0-poc"}), "downgrade my own jury")
+
+    assert {:error, {:forbidden_path_in_diff, ".lcars.json"}} =
+             Gate.verify(dir, base, @role_emails)
+
+    # Plus profond : PERSONNE ne le lit, donc rien a interdire — une regle qui borne un chemin sans
+    # lecteur est une regle que le prochain lecteur ne saura pas justifier.
+    {dir2, base2} = setup_repo(Path.join(tmp, "decl-nested"))
+    File.mkdir_p!(Path.join(dir2, "fixtures"))
+    commit_file(dir2, "fixtures/.lcars.json", ~s({"pipeline_default":"c0-poc"}), "a fixture")
+
+    assert {:ok, :verified} = Gate.verify(dir2, base2, @role_emails)
+  end
+
   test "a NON-root CLAUDE.md in the chain is REFUSED; the ROOT one stays legitimate",
        %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "nested-md"))

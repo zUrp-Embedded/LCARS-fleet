@@ -335,6 +335,18 @@ defmodule Fleet.Layout do
     Path.join(subdir, sanitize_artifact_name(name) <> ".md")
   end
 
+  @doc """
+  The project's own declaration, at the ROOT of its code face: `.lcars.json`.
+
+  It carries `pipeline_default` — WHICH CARD routes the project's tickets, hence which jury, which
+  gates, which CI. Two domains need the name and neither may own it: `Fleet.Project.Intensity`
+  reads the file, and `Fleet.Workflow.DeliverableGate` REFUSES a deliverable chain that touches it
+  (a producer does not edit the declaration that picks its judges). `Workflow` does not depend on
+  `Project`, so a literal on either side would be two sources for one name.
+  """
+  @spec project_declaration_file() :: String.t()
+  def project_declaration_file, do: ".lcars.json"
+
   @doc "ops-relative ref of a provenance statement: `provenance/<name>.json` (sanitized)."
   @spec provenance_ref(String.t()) :: String.t()
   def provenance_ref(name),
