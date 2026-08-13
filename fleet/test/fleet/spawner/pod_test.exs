@@ -2282,6 +2282,45 @@ defmodule Fleet.Spawner.PodTest do
       refute File.exists?(Path.join(pod_dir, "workspace_marker")),
              "le pod_dir rance survit au spawn : le pod repart sur l'etat d'un cycle mort"
     end
+
+    # LE JUMEAU DU TEST CI-DESSUS, POUR LE CHEMIN D'ECHEC. L'effacement pouvait ECHOUER et le spawn
+    # partait quand meme : `clear_terminal_snapshot/3` loggait puis rendait `:ok`, et l'appelant
+    # jetait meme ce `:ok`. Le pod demarrait, lisait la pierre tombale survivante, se classait
+    # `:release` et s'arretait apres teardown — `spawn_pod` avait rendu `{:ok, pid}` et rien n'avait
+    # ete produit. Un faux succes coute plus cher qu'un refus : le poller reboucle dessus.
+    test "un effacement INCOMPLET refuse le spawn — aucun child, aucun faux succes", %{
+      tmp_dir: tmp
+    } do
+      pod_id = "issue-2-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      _pod_dir = seed_pod_dir!(tmp, pod_id)
+
+      # On rend le parent du pod_dir non-inscriptible : `rm_rf` ne peut plus delier l'entree, donc
+      # l'effacement est PARTIEL (le state_dir part, le pod_dir reste) — exactement le cas que
+      # `rm_terminal_artifacts/3` remonte en `{:error, _}`.
+      pods_root = Path.join(tmp, "pods")
+      File.chmod!(pods_root, 0o500)
+      on_exit(fn -> File.chmod(pods_root, 0o700) end)
+
+      StubBackend.set_reply(interactive_reply())
+      StubBackend.set_parent(self())
+
+      profile =
+        put_in(valid_profile().spec, Map.put(valid_profile().spec, "interlocutor", "machine"))
+
+      assert {:error, :terminal_tombstone_not_cleared} =
+               Fleet.Spawner.spawn_pod(profile, "issue-2",
+                 repo_id: @test_repo_id,
+                 pod_id: pod_id,
+                 brief: "fais X"
+               )
+
+      refute_receive {:launch_called, _args, _env},
+                     300,
+                     "un child a ete lance alors que la pierre tombale survit"
+
+      refute File.exists?(snap), "le state_dir, lui, a bien ete efface (effacement PARTIEL)"
+    end
   end
 
   describe "clear_terminal_snapshot/3 (anti-tombstone)" do

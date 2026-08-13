@@ -195,38 +195,22 @@ defmodule Fleet.Spawner do
         # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
         # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
         # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
-        _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
+        # AND THE RESULT IS READ. An incomplete erase means the tombstone SURVIVES, so the pod we
+        # are about to start would read it, class `:release`, and stop right after teardown: a
+        # spawn that returns `{:ok, pid}` and produces nothing, then loops poller-side on the next
+        # tick. Refusing here is the only outcome that does not lie — the caller gets a stable
+        # error it can defer on, instead of a success it has to discover was empty.
+        case Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts) do
+          {:error, _reasons} ->
+            Logger.error(
+              "Spawner: spawn_pod refused for #{pod_id} — a terminal tombstone survives its erase " <>
+                "(see errors above). Starting would produce a pod that releases without working."
+            )
 
-        # POOL SLOT — we name WHAT to allocate here and let the CHILD allocate it. The index has to
-        # be known at registration (it travels in the Registry value, cf. `Pod.name/2`), and
-        # deciding it in this process would make read-then-write racy: `spawn_pod/3` runs in
-        # whoever called it, so two callers of the same (role, repo) would both read the same
-        # lowest free index. Done in `Pod.start_link/1` it inherits the serialization of
-        # `DynamicSupervisor.start_child/2` for free. `{:error, :role_at_capacity}` comes back
-        # through the child's start: a role at capacity is a DEFERRAL — the caller turns it into a
-        # skip, the ticket stacks and retries — and it never reaches `SessionId.encode/5`, whose
-        # `pool in 0..0xF` guard would have met a format ceiling as a FunctionClauseError.
-        #
-        # `:repo_id` and NOT `:repo`: the dispatch never puts the `owner/name` string in the
-        # spawn_opts, so keying on it would put every producer and judge of every project in one
-        # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
-        # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
-        # session_id encodes: bucket and identity then designate the same object.
-        args = %{
-          cap_profile: cap_profile,
-          issue_id: issue_id,
-          pod_id: pod_id,
-          slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
-          opts: opts
-        }
+            {:error, :terminal_tombstone_not_cleared}
 
-        spec = pod_child_spec(args)
-
-        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-          {:ok, pid} -> {:ok, pid}
-          {:ok, pid, _info} -> {:ok, pid}
-          :ignore -> {:error, :pod_init_ignored}
-          {:error, _} = err -> err
+          :ok ->
+            spawn_pod_child(cap_profile, issue_id, pod_id, opts)
         end
       else
         {:error, :invalid_pod_id}
@@ -250,6 +234,44 @@ defmodule Fleet.Spawner do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  # The start itself, reached ONLY once the pod_id is path-safe and no terminal tombstone survives.
+  # Extracted so those two refusals read as refusals at the call site instead of as an `if` around
+  # forty lines.
+  #
+  # POOL SLOT — we name WHAT to allocate here and let the CHILD allocate it. The index has to
+  # be known at registration (it travels in the Registry value, cf. `Pod.name/2`), and
+  # deciding it in this process would make read-then-write racy: `spawn_pod/3` runs in
+  # whoever called it, so two callers of the same (role, repo) would both read the same
+  # lowest free index. Done in `Pod.start_link/1` it inherits the serialization of
+  # `DynamicSupervisor.start_child/2` for free. `{:error, :role_at_capacity}` comes back
+  # through the child's start: a role at capacity is a DEFERRAL — the caller turns it into a
+  # skip, the ticket stacks and retries — and it never reaches `SessionId.encode/5`, whose
+  # `pool in 0..0xF` guard would have met a format ceiling as a FunctionClauseError.
+  #
+  # `:repo_id` and NOT `:repo`: the dispatch never puts the `owner/name` string in the
+  # spawn_opts, so keying on it would put every producer and judge of every project in one
+  # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
+  # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
+  # session_id encodes: bucket and identity then designate the same object.
+  defp spawn_pod_child(cap_profile, issue_id, pod_id, opts) do
+    args = %{
+      cap_profile: cap_profile,
+      issue_id: issue_id,
+      pod_id: pod_id,
+      slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
+      opts: opts
+    }
+
+    spec = pod_child_spec(args)
+
+    case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:ok, pid, _info} -> {:ok, pid}
+      :ignore -> {:error, :pod_init_ignored}
+      {:error, _} = err -> err
     end
   end
 
