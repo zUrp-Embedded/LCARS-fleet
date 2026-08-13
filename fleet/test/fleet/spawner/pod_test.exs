@@ -2104,6 +2104,14 @@ defmodule Fleet.Spawner.PodTest do
       # NEVER the host pod_dir (invisible in-sandbox → that was THE bug).
       refute cmd =~ pod_dir
 
+      # SHELL-QUOTED. The substitution lands inside a `bash -c` string (the spec needs a shell for
+      # its `2>>` redirect), so an unquoted path with a space breaks the command and one with `;`
+      # or `$( )` executes what it carries. `/home/.pod` is literal under bwrap and safe by luck;
+      # a HOST pod substitutes the real pod_dir, derived from the human's home. Pinned here rather
+      # than left to the safe path: the day a host pod runs this, nothing else would catch it.
+      assert cmd =~ "'/home/.pod/.lcars/fleet_mcp_bridge.py'"
+      assert cmd =~ "'/home/.pod/.lcars/fleet_mcp_bridge.log'"
+
       # R9 — the MCP server env carries ONLY the per-pod socket (host path returned by the stub
       # provisioner, contains the pod_id) as `LCARS_FLEET_MCP_SOCKET`: identity = the channel/the
       # socket, not a secret on the wire → no `LCARS_POD_ID` (removed, the bridge does not read

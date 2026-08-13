@@ -444,6 +444,8 @@ if config_env() != :test and not tool_mode? do
         # {{BRIDGE}}/{{BRIDGE_LOG}} are resolved by `McpProvision` onto the IN-NAMESPACE path
         # (`sandbox_home/.lcars/`) — what claude executes in the sandbox, not where the spawner
         # wrote the file. A host path substituted here is invisible from inside bwrap.
+        # The substituted values arrive SHELL-QUOTED: do not wrap the placeholders in quotes of
+        # your own. They land in a `bash -c` string, and a host pod puts a real home in them.
         "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"
       ]
       # No static "env" key. `McpProvision.build_fleet_mcp_entry/5` injects exactly one variable
