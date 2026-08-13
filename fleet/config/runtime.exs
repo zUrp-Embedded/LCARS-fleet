@@ -242,9 +242,9 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_event_router — Gitea webhook + OS signals
   # ============================================================
-  if path = System.get_env("FLEET_WEBHOOK_SECRET_PATH") do
+  if path = System.get_env("LCARS_WEBHOOK_SECRET_PATH") do
     config :lcars_fleet,
-      event_router_webhook_secret_path: Fleet.EnvParse.path("FLEET_WEBHOOK_SECRET_PATH", path)
+      event_router_webhook_secret_path: Fleet.EnvParse.path("LCARS_WEBHOOK_SECRET_PATH", path)
   end
 
   # ON-SWITCH of the Gitea webhook listener (:8081 HMAC). Without it, `:start_webhooks` stays
@@ -467,13 +467,13 @@ if config_env() != :test and not tool_mode? do
   # static default is NEVER the real port and would diverge from the rest of the fleet.
   # Absent = boot outside bin/fleet_v2 → fail-loud (same rule as LCARS_FLEET_MCP_BRIDGE_PATH).
   http_port =
-    case System.get_env("FLEET_API_PORT") do
+    case System.get_env("LCARS_API_PORT") do
       nil ->
-        raise "FLEET_API_PORT missing — ports are set by bin/fleet_v2 (per-human block). " <>
+        raise "LCARS_API_PORT missing — ports are set by bin/fleet_v2 (per-human block). " <>
                 "Launch via fleet_v2 start, or set the var explicitly."
 
       str ->
-        Fleet.EnvParse.port("FLEET_API_PORT", str)
+        Fleet.EnvParse.port("LCARS_API_PORT", str)
     end
 
   config :lcars_fleet, api_http_port: http_port
