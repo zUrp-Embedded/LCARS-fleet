@@ -45,8 +45,11 @@ defmodule ReconciliationUnreachableTqTest do
   end
 
   setup do
+    # `start_link` LIE l'agent au processus de test : il meurt avec lui. Le `on_exit` qui faisait
+    # `whereis` puis `Agent.stop` courait donc derriere un processus deja condamne — `whereis` rendait
+    # un pid, l'agent mourait, `stop` levait `no process`. Une course que j'ai introduite en ajoutant
+    # un second `describe` avec son propre `setup` : rien a arreter, le lien suffit.
     {:ok, _} = Agent.start_link(fn -> [] end, name: :jg074_kills)
-    on_exit(fn -> if Process.whereis(:jg074_kills), do: Agent.stop(:jg074_kills) end)
     :ok
   end
 
@@ -111,8 +114,8 @@ defmodule ReconciliationUnreachableTqTest do
     end
 
     setup do
+      # Meme raison qu'au setup du module : l'agent est lie, il n'y a rien a arreter.
       {:ok, _} = Agent.start_link(fn -> [] end, name: :jg083_reclaims)
-      on_exit(fn -> if Process.whereis(:jg083_reclaims), do: Agent.stop(:jg083_reclaims) end)
       :ok
     end
 
