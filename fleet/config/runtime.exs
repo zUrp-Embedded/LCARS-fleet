@@ -641,6 +641,18 @@ if config_env() != :test and not tool_mode? do
   # Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
   # OUTSIDE argv AND OUTSIDE .git/config). System token (lcars-system, write:repository).
   # FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
+  #
+  # ⚠ THE TOKEN LIVES IN THE APPLICATION ENV, IN CLEAR, FOR THE WHOLE LIFE OF THE NODE. That is a
+  # DECISION, not an oversight: `ForgeAuth` reads it from there on every auth-required git op, and
+  # a vault would move the secret without removing the moment it is in memory. It is written here
+  # because a secret whose exposure is undocumented gets re-exposed by the next well-meaning patch.
+  #
+  # WHAT MAKES IT ACCEPTABLE IS A PROPERTY OF THE SURFACE, AND THAT PROPERTY MUST BE PRESERVED:
+  # nothing in the runtime reads the application env WHOLESALE, and the pod-facing MCP surface is a
+  # closed list of business verbs — no pod can ask for configuration. Adding a config-dump door
+  # (an "/api/config" route, a doctor that prints the env, a crash reporter that inspects it)
+  # publishes this token, and the door will not look like a credentials change when it is written.
+  # Never `inspect` this value: `ForgeAuth` says the same at its own site, for the same reason.
   forge_base = System.get_env("FORGE_BASE_URL")
 
   # The push token must come from the SAME source as the poller token: var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
