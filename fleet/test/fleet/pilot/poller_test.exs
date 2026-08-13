@@ -825,6 +825,37 @@ defmodule Fleet.Pilot.PollerTest do
     # absente — un montage tombe, une permission perdue — saute le rail d'etapes pour TOUS les
     # depots : la flotte tourne a vide, les cycles se succedent, la telemetrie rapporte des comptes
     # nuls, et rien ne distingue « aucun travail a faire » de « le substrat n'est plus la ».
+    # JG-060 — LE JUMEAU ETAIT EFFACE, CELUI-CI NON. `:parked_logged` est supprime des qu'un depot
+    # sort du parking ; `:not_onboarded_logged` ne l'etait NULLE PART. Une memoire d'affichage — « ne
+    # crie qu'une fois » — devenait donc une memoire DEFINITIVE : un depot qui repassait en « non
+    # onboarde » apres en etre sorti se taisait pour toute la vie du process, et la seconde
+    # disparition de son arborescence ne laissait aucune trace.
+    #
+    # Le scenario de la fiche est « disparaitre, reapparaitre, redisparaitre ». Il se joue ici sur
+    # `:pilot_require_onboarded` plutot que sur le systeme de fichiers : la racine est un litteral et
+    # un test n'ecrit pas dans `/home`. Le fait exerce est le meme — le depot sort du garde, puis y
+    # revient.
+    test "JG-060 : un depot qui repasse en « non onboarde » est journalise A NOUVEAU" do
+      {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      assert first =~ "NOT ONBOARDED"
+
+      # Il sort du garde : le drapeau doit tomber avec lui.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, false)
+      _ = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      # Il y revient.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
+      third = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert third =~ "NOT ONBOARDED",
+             "la seconde disparition de l'arborescence est muette — la memoire d'affichage est " <>
+               "devenue une memoire definitive"
+
+      GenServer.stop(pid)
+    end
+
     test "JG-059 : racine ABSENTE → message de SUBSTRAT + incident, jamais « NOT ONBOARDED »" do
       test = self()
 

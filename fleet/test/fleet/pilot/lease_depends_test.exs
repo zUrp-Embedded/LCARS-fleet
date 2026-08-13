@@ -66,15 +66,43 @@ defmodule Fleet.Pilot.Poller.LeaseDependsTest do
       assert_received {:dispatched, 3}
     end
 
-    test "an unreadable forge dispatches: the close-side wall still holds, a network hiccup must not stop the fleet" do
+    # JG-058 — CE TEST EPINGLAIT L'INVERSE, ET SON ARGUMENT SE REFUTAIT DIX LIGNES PLUS HAUT.
+    # Il tenait ainsi : « la forge REFUSERA la fermeture si un bloqueur est ouvert, donc le mur tient
+    # de toute facon ». C'est exactement le raisonnement que cette lecture existe pour rejeter — le
+    # commentaire du site de dispatch dit que sans elle « le producteur travaille, livre, et le mur
+    # ne se revele qu'au merge : deux rails paralleles qui ne se rencontrent qu'au moment le plus
+    # cher ». Se rabattre dessus en cas d'echec de lecture, c'est retablir l'etat que la lecture
+    # supprime.
+    #
+    # L'AUTRE MOITIE DE SON TITRE ETAIT JUSTE ET RESTE EPINGLEE, un test plus bas : refuser n'est pas
+    # bloquer. `Admission.refuse` marque CE ticket en attente et passe au suivant ; le tick d'apres
+    # relit. La fleet ne s'arrete pas — c'est la distinction que l'ancien test confondait.
+    test "JG-058 : une forge illisible NE dispatche PAS — illisible n'est pas « aucun bloqueur »" do
       run([issue(4)])
-      assert_received {:dispatched, 4}
+
+      refute_received {:dispatched, 4},
+                      "un ticket a ete depeche sur une lecture d'aretes ratee : le producteur part " <>
+                        "sur une brique dont la precondition n'est peut-etre pas livree"
+    end
+
+    test "JG-058 : et la fleet n'est PAS arretee — les autres tickets partent au meme tick" do
+      run([issue(4), issue(3)])
+
+      refute_received {:dispatched, 4}
+      assert_received {:dispatched, 3}, "un hoquet sur UN ticket a arrete les autres"
     end
   end
 
   describe "the refusal is NAMED" do
     test "a held ticket carries the `wait/depends` vocabulary, never a silence" do
       assert Fleet.Labels.wait_for({:depends, 7}) == "wait/depends"
+    end
+
+    # Meme etiquette que son voisin, et pour la meme raison que la porte CI : du cote du ticket c'est
+    # le MEME fait — il est arrete a cette porte, personne ne travaille dessus. La distinction vit
+    # dans la raison du skip, ou elle est actionnable.
+    test "JG-058 : une lecture ratee porte la meme etiquette de porte, pas une taxonomie de plus" do
+      assert Fleet.Labels.wait_for({:depends_unreadable, :timeout}) == "wait/depends"
     end
   end
 end

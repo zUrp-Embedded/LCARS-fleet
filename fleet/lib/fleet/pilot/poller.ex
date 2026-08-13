@@ -641,6 +641,11 @@ defmodule Fleet.Pilot.Poller do
     # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
     # call, so an unserved repo also stops costing two API calls per tick.
     if onboarded?(state.repo) do
+      # LE DRAPEAU EST EFFACE ICI, exactement comme son jumeau `:parked_logged` l'est a la sortie du
+      # parking. Il ne l'etait NULLE PART : un depot qui repassait en « non onboarde » apres en etre
+      # sorti se taisait pour toute la vie du process — la memoire d'affichage devenait une memoire
+      # DEFINITIVE, et la seconde disparition de l'arborescence ne laissait aucune trace.
+      Process.delete({__MODULE__, :not_onboarded_logged, state.repo})
       step_do_poll_onboarded(state, mode, pods, started, forge)
     else
       not_onboarded_skip(state, repo_scoped_suspects(state))
