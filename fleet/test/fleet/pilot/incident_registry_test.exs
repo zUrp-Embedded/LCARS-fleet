@@ -155,6 +155,29 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.seen_before?("wake:p:dead", server: name)
     end
 
+    # JG-123 — LE MOTIF TRI-ETAT EXISTAIT DANS LE MEME FICHIER, quarante lignes plus haut, et le
+    # site du tampon de cooldown ne l'avait pas : `_ = write_wal(...)` jetait le seul fait qui
+    # distingue « tampon grave » de « tampon perdu », et la reponse etait `:ok` DANS LES DEUX CAS.
+    # Aucun appelant ne pouvait donc le savoir, meme en le voulant.
+    #
+    # ⚠ Le retour public de `record_or_escalate/4` NE CHANGE PAS, et c'est mesure : ici un WAL perdu
+    # coute une issue REDONDANTE a la recurrence suivante (borne, auto-reparant), la ou le voisin
+    # perdait l'INCIDENT lui-meme (la chronologie ment). Ce qui manquait n'etait pas un verdict,
+    # c'etait que le fait EXISTE.
+    test "JG-123: le tampon de cooldown perdu rend un echec type, plus un `:ok` menteur", %{
+      tmp_dir: tmp
+    } do
+      name = start_reg_wal_broken(tmp)
+
+      assert {:error, {:wal_write_failed, _}} =
+               GenServer.call(name, {:mark_escalated, "jg123:sig", 4242, "2026-06-20T12:00:00Z"}),
+             "le tampon n'a pas ete grave et la reponse dit `:ok` — le fait n'existe nulle part"
+
+      # TEMOIN : la memoire, elle, EST a jour. L'echec porte sur la durabilite, pas sur la
+      # transaction — sans ce temoin, rendre l'erreur sans muter passerait le test ci-dessus.
+      assert Reg.seen_before?("jg123:sig", server: name)
+    end
+
     test "record_or_escalate: 1st occurrence + WAL write FAILS → {:recorded_volatile, _} (not :recorded)",
          %{tmp_dir: tmp} do
       name = start_reg_wal_broken(tmp)

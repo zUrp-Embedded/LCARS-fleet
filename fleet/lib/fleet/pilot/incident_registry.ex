@@ -83,7 +83,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         # next recurrence retries the escalation.
         case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
           {:ok, num} ->
-            _ = mark_escalated(sig, num, opts)
+            warn_if_stamp_lost(mark_escalated(sig, num, opts), sig, num)
             {:escalated, num}
 
           {:error, e} ->
@@ -123,6 +123,22 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, :registry_unavailable}
   end
 
+  # `{:escalated, num}` RESTE VRAI — l'issue existe, son numero le prouve, et c'est ce que
+  # l'appelant a besoin de savoir. Ce qui se disait nulle part, c'est que la GARDE de recurrence,
+  # elle, n'est pas durable : `write_wal` journalise bien son echec, mais sous un libelle generique
+  # qui ne dit pas ce qu'il coute ICI. Une ligne le dit, la ou la consequence se produira.
+  defp warn_if_stamp_lost(:ok, _sig, _num), do: :ok
+
+  defp warn_if_stamp_lost({:error, why}, sig, num) do
+    Logger.error(
+      "IncidentRegistry: issue ##{num} OPENED for #{sig} but the cooldown stamp is NOT durable " <>
+        "(#{inspect(why)}) — the escalation HAPPENED; on a restart before the async forge sync " <>
+        "the next recurrence may open a redundant issue"
+    )
+
+    :ok
+  end
+
   @doc """
   Cat-5 facade: escalates through the registry's cooldown gate while PRESERVING
   "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
@@ -156,7 +172,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       _first_or_should_escalate ->
         case escalate(kind, subject, reason, sig, opts) do
           {:ok, num} ->
-            _ = mark_escalated(sig, num, opts)
+            warn_if_stamp_lost(mark_escalated(sig, num, opts), sig, num)
             {:ok, num}
 
           {:error, e} ->
@@ -293,8 +309,22 @@ defmodule Fleet.Pilot.IncidentRegistry do
         end
       )
 
-    _ = write_wal(state.wal_path, registry)
-    {:reply, :ok, schedule_sync(%{state | registry: registry})}
+    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` QUARANTE LIGNES PLUS HAUT, et il manquait ICI.
+    # `_ = write_wal(...)` jetait le seul fait qui distingue « tampon grave » de « tampon perdu »,
+    # donc AUCUN appelant ne pouvait le savoir : la reponse etait `:ok` dans les deux cas.
+    #
+    # ⚠ La consequence n'est PAS celle du voisin, et c'est pour ca que le retour public de
+    # `record_or_escalate/4` ne bouge pas : la-bas un WAL perdu perd l'INCIDENT (la chronologie
+    # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
+    # recurrence suivante — borne, et qui se repare tout seul. Ce qui manquait n'etait pas un
+    # nouveau verdict, c'etait que le fait EXISTE quelque part.
+    reply =
+      case write_wal(state.wal_path, registry) do
+        :ok -> :ok
+        {:error, e} -> {:error, {:wal_write_failed, e}}
+      end
+
+    {:reply, reply, schedule_sync(%{state | registry: registry})}
   end
 
   @impl true
