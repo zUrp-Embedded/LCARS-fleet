@@ -73,19 +73,43 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
   # ============================================================
-  # The fleet daemon NEVER runs as root (the BEAM runs under the human's UID; this
-  # self-check catches dev/manual launches as root, where ~/.gitea_token would
-  # resolve to /root/.gitea_token = the admin token). starfleet/
-  # sysadmin is OUT-of-fleet (invoked outside the daemon) → no exception here. Hygiene,
-  # not an anti-adversary defense (cooperative threat model). `== :prod` guard: bothers
-  # neither dev nor `mix lcars.contracts.check` (which runs in :dev).
-  if config_env() == :prod do
-    {uid, 0} = System.cmd("id", ["-u"])
+  # The fleet daemon NEVER runs as root (the BEAM runs under the human's UID; this self-check
+  # catches dev/manual launches as root, where `~/.gitea_token` resolves to `/root/.gitea_token` =
+  # the admin token). starfleet/sysadmin is OUT-of-fleet (invoked outside the daemon) → no
+  # exception here. Hygiene, not an anti-adversary defense (cooperative threat model).
+  #
+  # NO ENVIRONMENT CONDITION, and that is the point: the danger it names — a daemon writing
+  # root-owned state into `~/.lcars`, then unreachable to the human UID that owns the next boot —
+  # belongs to the MANUAL launches, which are `:dev` ones. Gating it on `:prod` armed the guard
+  # exactly where nobody launches by hand and disarmed it where everybody does. `:test` never
+  # reaches here (the whole file is guarded out).
+  #
+  # EVERY failure to READ the uid answers with the same refusal. `id` can be absent from a minimal
+  # image, non-executable, or exit non-zero, and `System.cmd/3` raises `:enoent` of its own — a
+  # strict match turned a security refusal into a filtering exception, so the operator got a stack
+  # trace instead of the sentence that says what to do. A guard that cannot measure must not let
+  # the boot through.
+  uid_reading =
+    try do
+      case System.cmd("id", ["-u"]) do
+        {out, 0} -> String.trim(out)
+        {out, code} -> {:unreadable, "`id -u` exited #{code}: #{String.trim(out)}"}
+      end
+    rescue
+      e -> {:unreadable, Exception.message(e)}
+    end
 
-    if String.trim(uid) == "0" do
+  case uid_reading do
+    "0" ->
       raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
               "(launch under your human UID via bin/fleet_v2, never as root)"
-    end
+
+    {:unreadable, why} ->
+      raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
+              "guard refuses a boot it cannot verify (launch via bin/fleet_v2)"
+
+    _other ->
+      :ok
   end
 
   # ============================================================
