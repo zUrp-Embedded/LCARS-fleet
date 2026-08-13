@@ -182,6 +182,25 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   @doc """
   Verifies the raw body's SHA256 HMAC against `x-gitea-signature`.
+
+  THE SECRET IS READ FROM DISK ON EVERY REQUEST, AND THAT IS THE CHOICE — not an oversight. The file
+  is provisioned and ROTATED by the operator outside the BEAM (`/etc/fleet/webhook-secret`, root
+  owned, mode 600), and a rotation must take effect on the next webhook rather than at the next
+  fleet restart. Caching it would make the running node the authority on a secret whose authority is
+  the filesystem, and the operator would have no way to tell whether the value in memory is the one
+  they just wrote.
+
+  WHAT IT COSTS, NAMED so nobody has to rediscover it: one `File.read/1` per request on the
+  authentication path, and a hard dependency of the endpoint's availability on the file's. A secret
+  momentarily unreadable — a mount, a permission, a non-atomic rotation (write-in-place rather than
+  write-then-rename) — yields 401 on LEGITIMATE webhooks, which the forge will replay. The mitigation
+  is on the writer's side, not here: rotate by `rename(2)`, which is atomic, and the reader either
+  sees the old file whole or the new one whole.
+
+  The bound that makes the cost acceptable: this endpoint is OFF by default
+  (`event_router_start_webhooks`), the forge is local, and the webhook is an ACCELERATOR of the poll
+  rail — never a source of truth. A read per request on a path that is not the durable one is a
+  trade this fleet can make; the same read on the poll rail would not be.
   """
   @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
