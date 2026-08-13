@@ -27,6 +27,13 @@ defmodule Fleet.Pilot.Application do
 
   use Supervisor
 
+  # A BLACKOUT, not a bad figure: the verdict only falls when the WHOLE observed window failed, and
+  # the window holds at least this many samples. Deliberately small — at one cycle per poll interval
+  # three consecutive total failures is already a rail that has not advanced for a minute and a half
+  # — but never one: readiness is what an operator consults when things go wrong, and a probe that
+  # flickers on a single transient 500 is one they learn to ignore.
+  @poll_blackout_window 3
+
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -69,8 +76,26 @@ defmodule Fleet.Pilot.Application do
 
     * `{:inactive, _}`    — `:step_dispatch?` off (rail deliberately absent, expected outside prod-step).
     * `{:operational, _}` — Poller + StepRunConsumer alive.
-    * `{:degraded, _}`    — step enabled but ≥1 singleton dead → **hollow-green caught** (the daemon
-      runs but the forge rail no longer advances).
+    * `{:degraded, _}`    — step enabled and EITHER ≥1 singleton dead, OR every poll of the observed
+      window failed → **hollow-green caught** (the daemon runs but the forge rail no longer
+      advances).
+
+  ## What this verdict catches, and what it deliberately does not
+
+  The two health keys used to travel in the detail and were EXPLICITLY excluded from the predicate,
+  so no state of the polls could ever move the verdict. A forge unreachable, a dead DNS, an expired
+  token — every cause that fails 100 % of the polls WITHOUT killing a process — read `operational`
+  while not one ticket advanced. The probe built to reveal that gap contained it in a field.
+
+  It is a BLACKOUT that flips the verdict, not a bad figure: the whole observed window failed, over
+  at least #{@poll_blackout_window} samples. Anything narrower would make readiness — the instrument an operator
+  consults when things go wrong — flicker on one transient 500.
+
+  Consequently it still says `operational` for: polls that are SLOW but succeed (the figures are in
+  the detail, and no defensible threshold exists for a fleet whose repo count is unknown here); a
+  PARTIAL failure, even a large one (one repo of twelve permanently broken is a repo-level fact, not
+  a rail-level one); and `:no_data`, which cannot be told apart from a fleet that has just booted —
+  a poller alive that never polls at all is NOT caught here.
   """
   @spec step_status() :: {:inactive | :operational | :degraded, map()}
   def step_status do
@@ -111,13 +136,63 @@ defmodule Fleet.Pilot.Application do
         |> Map.put(:repo_poll, repo_poll_health())
         |> Map.put(:poll_cycle, poll_cycle_health())
 
-      if Enum.all?(detail, fn {key, up?} -> key in [:repo_poll, :poll_cycle] or up? end),
+      if rail_healthy?(detail),
         do: {:operational, detail},
         else: {:degraded, detail}
     else
       {:inactive, %{note: "step_dispatch? off"}}
     end
   end
+
+  # THE PREDICATE OF THE VERDICT — it used to be an inline `Enum.all?` carrying an EXCLUSION LIST,
+  # and the exclusion was the defect: `key in [:repo_poll, :poll_cycle] or up?` let the two health
+  # keys through unconditionally. Note that DELETING the list would have changed nothing — every
+  # value they can take (a map, `:no_data`, `:unavailable`) is truthy — so the fix is a real
+  # classification, not the removal of a guard.
+  defp rail_healthy?(detail), do: Enum.all?(detail, &key_healthy?/1)
+
+  # A process key is a boolean: alive or the rail is degraded. Unchanged, and it still wins — a dead
+  # singleton is degraded whatever the polls say.
+  defp key_healthy?({key, health}) when key in [:repo_poll, :poll_cycle],
+    do: polls_healthy?(health)
+
+  defp key_healthy?({_key, up?}), do: up?
+
+  @doc false
+  # Verdict on ONE health summary. Public for its test: the shapes it must classify come from
+  # `PollerTelemetry`, and building the real ones through `step_status/0` would need the whole rail
+  # up plus a saturated telemeter — the fixture would stop discriminating (same verdict both sides).
+  # Same motive as `step_rail_processes/0` right below.
+  #
+  #   * `:no_data`     — healthy. Before the first poll there is nothing to judge, and this shape is
+  #     INDISTINGUISHABLE from a poller that never polls: no timestamp here says which. Written
+  #     limit, not an oversight.
+  #   * `:unavailable` — healthy. The telemeter did not answer within the call timeout. Readiness
+  #     must not fall because of its OWN instrument (same reason as the two `catch` clauses below),
+  #     and the case where that instrument is DEAD is already carried by its own process key
+  #     `poller_telemetry` — falling here would judge the rail on a timeout of the gauge.
+  #   * a summary   — degraded only on a BLACKOUT: every sample of the window in error, window at
+  #     least `@poll_blackout_window`. `stats/0` tallies errors by scope (a map), `cycle_stats/0`
+  #     as a count (an integer); both are compared against the SAME window they came from.
+  def polls_healthy?(:no_data), do: true
+  def polls_healthy?(:unavailable), do: true
+
+  def polls_healthy?(%{errors: errors, window: window}),
+    do: not blackout?(error_count(errors), window)
+
+  # Any shape this module does not know is not a verdict. Readiness stays readable rather than
+  # calling a rail degraded on a summary it failed to read.
+  def polls_healthy?(_other), do: true
+
+  defp error_count(errors) when is_map(errors), do: errors |> Map.values() |> Enum.sum()
+  defp error_count(errors) when is_integer(errors), do: errors
+  defp error_count(_), do: 0
+
+  defp blackout?(errors, window)
+       when is_integer(window) and window >= @poll_blackout_window and errors >= window,
+       do: true
+
+  defp blackout?(_errors, _window), do: false
 
   # Health summary of the PER-REPO polls, or `:no_data` before the first one. TOTAL by obligation:
   # readiness is what an operator consults when things go wrong, so it must never fall because of
