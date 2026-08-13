@@ -202,6 +202,45 @@ defmodule Fleet.MCP.PodSocketTest do
            "socket mode 0#{Integer.to_string(perms, 8)} — group and other must not reach a pod's MCP channel"
   end
 
+  # JG-042 — LE `0600` DE LA SOCKET ARRIVE UN SYSCALL TROP TARD. `:gen_tcp.listen` cree le noeud au
+  # UMASK (mesure sur cette flotte : `0002` -> `0775`, bit d'ecriture groupe donc `connect(2)`
+  # autorise), et `restrict/2` ne le referme qu'ensuite. Une connexion etablie dans cette fenetre
+  # RESTE ouverte apres le chmod : les droits d'une socket Unix ne sont verifies qu'a la connexion.
+  #
+  # Le BEAM ne sait pas creer un noeud AF_UNIX avec un mode. Ce qui se ferme, c'est la TRAVERSEE :
+  # le parent en `0700` rend le chemin inatteignable pour un autre compte pendant toute la fenetre.
+  # C'est le mode que son jumeau tmux a deja (`bin/bwrap_launch.sh` : `install -d -m 0700`).
+  test "le repertoire du pod est 0700 — la fenetre du listen n'est traversable par personne" do
+    pod = uniq("dirperms")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    %File.Stat{mode: mode} = File.stat!(Path.dirname(path))
+    perms = Bitwise.band(mode, 0o777)
+
+    assert perms == 0o700,
+           "repertoire du pod en 0#{Integer.to_string(perms, 8)} — un autre compte peut le " <>
+             "traverser pendant que la socket porte encore les droits de l'umask"
+  end
+
+  test "un repertoire pre-existant TROP OUVERT est referme, pas accepte tel quel" do
+    # Le cas reel : `~/.lcars/run/mcp` mesure a `drwxrwxr-x` sur cette machine. Un `mkdir_p` sur un
+    # repertoire existant ne change aucun mode — sans le chmod, la fenetre restait ouverte sur toute
+    # boite deja en service.
+    pod = uniq("preopen")
+    path = PodSocketSupervisor.socket_path(pod)
+    File.mkdir_p!(Path.dirname(path))
+    File.chmod!(Path.dirname(path), 0o777)
+
+    {:ok, ^path} = PodSocketSupervisor.ensure_pod_socket(pod)
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    %File.Stat{mode: mode} = File.stat!(Path.dirname(path))
+
+    assert Bitwise.band(mode, 0o777) == 0o700,
+           "le repertoire pre-existant a garde ses droits larges — `mkdir_p` ne referme rien"
+  end
+
   test "release surfaces a socket-file removal failure (structured verdict, not a silent :ok)" do
     pod = uniq("stuck")
     path = PodSocketSupervisor.socket_path(pod)

@@ -407,12 +407,66 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # So the errno alone cannot name the fault: carry the first component that does NOT exist plus
   # the writability of its parent. That pair separates the two cases the bare errno merges — a
   # level nobody created, versus a level we are not allowed to create under.
+  # LE REPERTOIRE EST LA SERRURE QUE LA SOCKET N'A PAS ENCORE. `:gen_tcp.listen` cree le noeud
+  # AF_UNIX au UMASK du processus et `restrict/2` le referme ensuite : entre les deux, le noeud
+  # existe avec les droits de l'umask. Sous l'umask MESURE de cette flotte (`0002`) cela fait
+  # `0775` — le bit d'ecriture groupe, donc `connect(2)` autorise — et une connexion etablie dans
+  # cette fenetre RESTE ouverte apres le chmod : les droits d'une socket Unix ne sont verifies qu'a
+  # la connexion. L'auteur tient alors le canal d'outils du pod sans etre ce pod.
+  #
+  # ⚠ La fenetre ne se ferme pas la ou on la voit. Le BEAM ne sait pas creer un noeud AF_UNIX avec
+  # un mode ; il n'y a pas de `listen` atomique en `0600`. Ce qui se ferme, c'est la TRAVERSEE : un
+  # parent en `0700` rend `<base>/<pod_id>/sock` inatteignable pour tout autre compte, quel que soit
+  # le mode transitoire du noeud. Le `0600` final reste la seconde serrure, pas la premiere.
+  #
+  # LE JUMEAU EXISTE ET IL EST ATOMIQUE : `bin/bwrap_launch.sh` cree le sock-dir TMUX par
+  # `install -d -m 0700`. Le meme launcher documente la divergence — « UNLIKE tmux: the socket file
+  # (and its dir) is created OUTSIDE the sandbox by the BEAM BEFORE this launch … no `install -d` »
+  # — sans voir que ce cote-ci n'a jamais pose de mode du tout. C'est le mode du jumeau qui arrive
+  # ici, pas une regle nouvelle.
+  #
+  # `mkdir_p` + `chmod` n'est pas atomique non plus, mais son residu ne porte plus l'effet de la
+  # fiche : dans cette fenetre-la, la socket n'existe pas encore. Ce qui reste est VERIFIE plutot
+  # que suppose — on relit le mode avant de servir, et un repertoire qu'on n'a pas pu fermer ne
+  # devient pas une porte ouverte : il devient un refus de demarrage.
   defp ensure_parent_dir(path) do
     dir = Path.dirname(path)
 
+    with :ok <- mkdir_private(dir),
+         :ok <- close_dir(dir) do
+      verify_private(dir)
+    end
+  end
+
+  defp mkdir_private(dir) do
     case File.mkdir_p(dir) do
       :ok -> :ok
       {:error, reason} -> {:error, {:mkdir, reason, blame(dir)}}
+    end
+  end
+
+  # Fail-closed, comme `restrict/2` sur la socket : un `chmod` refuse signifie que le repertoire ne
+  # nous appartient pas, et c'est deja la reponse.
+  defp close_dir(dir) do
+    case File.chmod(dir, 0o700) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:chmod_dir, reason, blame(dir)}}
+    end
+  end
+
+  # On RELIT ce qu'on vient de poser. Un repertoire pre-existant appartenant a un autre compte fait
+  # echouer le `chmod` au-dessus ; celui-ci attrape ce que le premier ne voit pas — un mode qui n'est
+  # pas celui demande, quelle qu'en soit la cause.
+  defp verify_private(dir) do
+    case File.stat(dir) do
+      {:ok, %File.Stat{mode: mode}} ->
+        case Bitwise.band(mode, 0o777) do
+          0o700 -> :ok
+          other -> {:error, {:dir_not_private, other, blame(dir)}}
+        end
+
+      {:error, reason} ->
+        {:error, {:stat_dir, reason, blame(dir)}}
     end
   end
 
