@@ -1707,9 +1707,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime
-  # cannot create it: the fleet runs as the human, `/home` belongs to root. The creator is the
-  # container entrypoint, and its `install -d` line is a hand-written mirror of
-  # `Fleet.Layout.face_root/1` in another language — the exact shape that drifts without a word.
+  # cannot create it: the fleet runs as the human, `/home` belongs to root. Two creators write it,
+  # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
+  # that drifts without a word.
+  #
+  # THE WALL HELD ONE OF THE TWO, and the one it held is the narrower. Until 2026-08-13 it read the
+  # docker entrypoint alone, so it was green on a rail that recognises THREE substrates
+  # (`docker`, `wsl`, `linux`) while creating the zones on one. On `wsl` they existed "by history of
+  # the substrate" — by hand, one day, on the author's machine — and on a native `linux`, not at
+  # all. Same failure as the `doc` face below, on the path the check did not cover.
   #
   # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
@@ -1722,6 +1728,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   def check_face_roots_provisioned(root) do
     entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
+    module = Path.expand("deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
@@ -1740,8 +1747,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       :required ->
-        case {expected, read_install_zone_paths(entrypoint)} do
-          {nil, _} ->
+        case {expected, read_install_zone_paths(entrypoint), read_provision_zone_paths(module)} do
+          {nil, _, _} ->
             %{
               id: "layout.face_roots_provisioned",
               remediation: remediation,
@@ -1750,7 +1757,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               note: "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"
             }
 
-          {_, nil} ->
+          {_, nil, _} ->
             %{
               id: "layout.face_roots_provisioned",
               remediation: remediation,
@@ -1759,8 +1766,24 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               note: "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"
             }
 
-          {expected, provisioned} ->
-            missing = expected -- provisioned
+          {_, _, nil} ->
+            %{
+              id: "layout.face_roots_provisioned",
+              remediation: remediation,
+              status: :fail,
+              evidence: [Path.relative_to(module, root)],
+              note:
+                "the provision module's `2775` zone table is unreadable — guard fail-closed " <>
+                  "(this is the creator on every substrate; the entrypoint only covers docker)"
+            }
+
+          {expected, at_boot, on_every_substrate} ->
+            missing =
+              Enum.map(expected -- at_boot, &"#{&1}: absent de l'entrypoint docker") ++
+                Enum.map(
+                  expected -- on_every_substrate,
+                  &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
+                )
 
             %{
               id: "layout.face_roots_provisioned",
@@ -1768,8 +1791,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               status: if(missing == [], do: :pass, else: :fail),
               evidence: missing,
               note:
-                "every Fleet.Layout face root is created by the entrypoint " <>
-                  "(#{length(expected)} face(s): #{Enum.join(expected, ", ")})"
+                "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
+                  "miroirs — le module provision (tout substrat) et l'entrypoint docker (l'ordre " <>
+                  "de boot l'exige avant `provision apply`) : #{Enum.join(expected, ", ")}"
             }
         end
     end
@@ -1825,6 +1849,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       tail |> String.split() |> Enum.filter(&String.starts_with?(&1, "/"))
     else
       _ -> nil
+    end
+  end
+
+  # The face zones of the PROVISION module — the substrate-agnostic creator. Read from its table
+  # (`"<path> <mode> <owner>"`, one entry per line), and only the `2775` rows: the module also
+  # provisions `/local` and the token dir, which are not faces.
+  #
+  # WHY THERE ARE TWO MIRRORS AND WHY BOTH ARE HELD HERE. The docker entrypoint creates these zones
+  # too, and that is not a forgotten duplicate: it clones the source into `/home/projects/LCARS`
+  # long BEFORE it calls `provision apply`, so the zones must exist earlier than the module runs.
+  # Boot ordering is the reason for the second mirror. What must never happen is the two drifting
+  # from `Fleet.Layout`, or from each other — so the check compares BOTH against the code, and its
+  # evidence says which mirror is short. A wall that held one of two mirrors was green on a fleet
+  # whose `wsl` and `linux` substrates created no zone at all.
+  defp read_provision_zone_paths(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        case Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
+          [] -> nil
+          rows -> rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
+        end
+
+      _ ->
+        nil
     end
   end
 

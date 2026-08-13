@@ -336,6 +336,97 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # JG-070 — LE MUR TENAIT UN MIROIR SUR DEUX, ET C'ETAIT LE PLUS ETROIT. Les racines de face sont
+  # ecrites a la main dans DEUX langages hors d'Elixir, et le contrat n'en lisait qu'un :
+  # l'entrypoint docker. Or `provision` reconnait TROIS substrats (`docker`, `wsl`, `linux`) et le
+  # module `25-directories` — le createur commun a tous — ne les posait pas. Sur `wsl` elles
+  # existaient « par histoire du substrat », c'est-a-dire a la main un jour sur la machine de
+  # l'auteur ; sur un `linux` natif, pas du tout. Le runtime tourne sous l'humain et `/home`
+  # appartient a root : creer la zone n'est pas un geste qu'il peut rattraper.
+  #
+  # Preuve d'integration jouee sur le banc, pas seulement ici : zone supprimee → `provision doctor
+  # --only 25` la NOMME en drift → `apply` la repose en `2775 root:fleet` → `list --substrate
+  # {docker,wsl,linux}` montre le module selectionne sur les trois.
+  describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "jg070-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet"]))
+      File.mkdir_p!(Path.join([root, "deploy", "docker"]))
+      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+
+      File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
+      defmodule Fleet.Layout do
+        @code_root "/home/projects"
+        @ops_root "/home/projects.ops"
+        def face_root("code"), do: @code_root
+        def face_root("ops"), do: @ops_root
+      end
+      """)
+
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root}
+    end
+
+    defp write_mirrors!(root, entrypoint_zones, module_zones) do
+      File.write!(
+        Path.join([root, "deploy", "docker", "entrypoint.sh"]),
+        "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
+      )
+
+      rows = Enum.map_join(module_zones, " \\\n", &~s(    "#{&1} 2775 root:$PROV_FLEET_GROUP"))
+
+      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), """
+      prov_dirs() {
+        printf '%s\\n' \\
+          "/local 0755 root:root" \\
+      #{rows}
+      }
+      """)
+    end
+
+    test "les deux miroirs complets → pass", %{root: root} do
+      zones = ["/home/projects", "/home/projects.ops"]
+      write_mirrors!(root, zones, zones)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "face absente du MODULE provision → fail nommant wsl et linux", %{root: root} do
+      write_mirrors!(root, ["/home/projects", "/home/projects.ops"], ["/home/projects"])
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+
+      assert result.status == :fail,
+             "une face absente du seul createur commun aux trois substrats est passee au vert"
+
+      assert result.evidence == [
+               "/home/projects.ops: absent du module provision (donc absent sur wsl et linux)"
+             ]
+    end
+
+    test "face absente de l'ENTRYPOINT → fail, l'ancien mur tient toujours", %{root: root} do
+      write_mirrors!(root, ["/home/projects"], ["/home/projects", "/home/projects.ops"])
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+      assert result.evidence == ["/home/projects.ops: absent de l'entrypoint docker"]
+    end
+
+    test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do
+      write_mirrors!(root, ["/home/projects", "/home/projects.ops"], [])
+      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+      assert result.note =~ "unreadable"
+      assert result.note =~ "the entrypoint only covers docker"
+    end
+  end
+
   test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 
