@@ -63,6 +63,17 @@ defmodule Fleet.SPBuilder.Image do
     # the divergence is the defect, and the doctrine is explicit — active suspicion of silent failure.
     sources = source_fingerprints(root)
 
+    # MEME TAMPON, MEME DIMENSIONNEMENT QUE `CapProfile.Image.version_of/2` — 48 bits pour
+    # distinguer deux epoques dans une trace, jamais pour identifier durablement quoi que ce soit.
+    # Il ne quitte pas la VM (calcule ici, range en `persistent_term`, relu par le meme noeud) et
+    # `lib/` ne le compare nulle part.
+    #
+    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, et c'est le point sur lequel
+    # une revue a soupconne un aggravant : l'ordre de parcours d'une map ne serait pas stable entre
+    # executions. MESURE, et c'est FAUX sur cet OTP : `term_to_binary` rend le meme binaire pour
+    # deux maps construites dans des ordres opposes — 3 cles ou 60, cles binaires, et imbriquees
+    # comprises. Pas de tri ajoute : il n'achete rien d'observable ici, et un geste qui n'achete
+    # rien sur un tampon n'est pas neutre (il change toutes les versions deja tracees).
     version =
       :crypto.hash(:sha256, :erlang.term_to_binary(image))
       |> Base.encode16(case: :lower)

@@ -223,6 +223,23 @@ defmodule Fleet.CapProfile.Image do
   end
 
   # Deterministic content stamp: the image is versioned so two epochs are distinguishable in logs.
+  #
+  # ⚠ 12 HEX = 48 BITS, ET C'EST DIMENSIONNE POUR CE QUE CE TAMPON FAIT, pas pour ce qu'un
+  # identifiant fait en general. Il ne quitte JAMAIS la VM : calcule au publish, range en
+  # `persistent_term`, relu par le meme noeud. Il ne voyage sur aucun fil, ne se stocke nulle part,
+  # et `lib/` ne le COMPARE nulle part — son seul consommateur de production est le `Logger.info`
+  # de publication. Distinguer deux epoques dans une trace demande de ne pas collisionner sur les
+  # quelques images qu'une flotte publie ; 48 bits donnent une chance sur deux vers 2^24 epoques.
+  #
+  # C'est la difference avec un marqueur DURABLE (cf. `PodTools.Delegation`, JG-044) : celui-la est
+  # ecrit dans un ticket de forge et relu par un noeud ulterieur, potentiellement sous un autre OTP,
+  # donc sa stabilite dependait d'un format qu'on ne controle pas. Ici la question ne se pose pas —
+  # le producteur et le lecteur sont le meme processus, dans le meme boot.
+  #
+  # ⚠ L'ENTREE EST DEJA CANONIQUE, deux fois plutot qu'une : `Enum.sort/1` sur les deux termes, et
+  # MESURE — `:erlang.term_to_binary/1` ordonne les maps sur cet OTP (cles atomes ou binaires,
+  # petites comme grandes, imbriquees comprises). Le tri reste : il dit l'intention, et il ne
+  # depend pas d'une propriete du runtime.
   defp version_of(index, overlays) do
     :crypto.hash(:sha256, :erlang.term_to_binary({Enum.sort(index), Enum.sort(overlays)}))
     |> Base.encode16(case: :lower)

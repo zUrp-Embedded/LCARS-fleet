@@ -142,6 +142,67 @@ defmodule Fleet.Project.RolesStructuralTest do
     assert_raise RuntimeError, ~r/unique BY DESIGN/, fn -> Roles.gatekeeper_role() end
   end
 
+  # JG-025 — LES DEUX BRANCHES DE `roles_with_capability/1` NE FILTRAIENT PAS PAREIL. Sans image
+  # publiee elle passe par `Catalog.list/1`, qui ecarte les `ReservedSeat` (BL-6-45) ; avec image,
+  # elle balayait l'index brut sans ce filtre.
+  #
+  # ⚠ MESURE QUI CHANGE LA CONCLUSION : la divergence est INATTEIGNABLE aujourd'hui, et ce n'est pas
+  # `roles_with_capability/1` qui la ferme. Le schema `reserved-seat-v1.json` est
+  # `additionalProperties: false` et ne declare AUCUN `spec` — un siege ne peut donc pas porter de
+  # capability, et un fichier qui essaierait ne validerait pas. `Image.publish!/0` LEVE sur un
+  # profil invalide (« proven-good image at boot, or do not boot »), donc un tel siege n'entre meme
+  # pas dans l'index.
+  #
+  # Le filtre ajoute cote image ne repare donc pas un bug OBSERVABLE : il rend l'accord des deux
+  # branches LOCAL au lieu de l'emprunter a un schema voisin. Ces deux tests epinglent les deux
+  # moities de ce raisonnement — l'accord, et l'invariant qui le rendait deja vrai.
+  test "JG-025: les deux regimes rendent la MEME reponse sur un catalogue portant un siege", %{
+    dir: dir
+  } do
+    write_role!(dir, "alpha", ["exception_judge"])
+
+    File.write!(
+      Path.join(dir, "seat.yaml"),
+      "kind: ReservedSeat\nmetadata:\n  name: vulcan\n  role_index: 8\n"
+    )
+
+    # Regime DISQUE (le setup a depublie l'image).
+    disque = Fleet.CapProfile.roles_with_capability(:exception_judge)
+    assert {:ok, ["alpha"]} == disque
+
+    # Regime IMAGE — le siege est INDEXE (pas de pourriture derriere l'exclusion), donc c'est bien
+    # la branche qui le voit passer.
+    Fleet.CapProfile.Image.publish!()
+    on_exit(fn -> Fleet.CapProfile.Image.unpublish() end)
+
+    assert %{index: index} = Fleet.CapProfile.Image.published()
+
+    assert Map.has_key?(index, "vulcan"),
+           "le siege doit etre dans l'index, sinon on ne teste rien"
+
+    assert disque == Fleet.CapProfile.roles_with_capability(:exception_judge),
+           "les deux branches de la meme fonction rendent deux reponses selon qu'une image est " <>
+             "publiee ou non"
+  end
+
+  test "JG-025: L'INVARIANT QUI FERMAIT DEJA LA DIVERGENCE — un siege ne peut pas porter de spec",
+       %{
+         dir: dir
+       } do
+    # C'est CE refus qui rend la divergence inatteignable, et il vit dans un autre fichier que la
+    # fiche ne cite pas. S'il tombe, le filtre ajoute cote image devient load-bearing.
+    seat_with_spec = %{
+      "kind" => "ReservedSeat",
+      "metadata" => %{"name" => "vulcan", "role_index" => 8},
+      "spec" => %{"capabilities" => ["exception_judge"]}
+    }
+
+    assert {:error, :invalid_schema} =
+             Fleet.CapProfile.Schema.validate(seat_with_spec, :reserved_seat)
+
+    _ = dir
+  end
+
   test "une capability legitimement multiple n'est PAS une erreur", %{dir: dir} do
     # L'unicite est une propriete du concept APPELANT (le role structurel), pas du catalogue.
     # `onboarder` n'a pas d'appelant qui resout : c'est un PREDICAT sur un pod (`require_onboarder`

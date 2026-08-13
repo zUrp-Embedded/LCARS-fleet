@@ -194,17 +194,38 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Returns the sorted catalogue roles that explicitly declare `cap`.
-  Uses the published image when available and otherwise reads the catalogue. Profiles that
-  fail to load are omitted; uniqueness, when required, belongs to the caller.
+  Returns the sorted **spawnable** catalogue roles that explicitly declare `cap`.
+
+  Uses the published image when available and otherwise reads the catalogue — **les deux branches
+  rendent la meme chose**, sieges reserves exclus des deux cotes (BL-6-45). Profiles that fail to
+  load are omitted; uniqueness, when required, belongs to the caller.
   """
   @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def roles_with_capability(cap) do
     case Fleet.CapProfile.Image.published() do
       %{index: index} ->
+        # LES DEUX BRANCHES DOIVENT RENDRE LA MEME CHOSE, ET ELLES NE LE FAISAIENT PAS. La branche
+        # sans image passe par `Catalog.list/1`, qui filtre les `ReservedSeat` (`spawnable?/1`,
+        # BL-6-45) ; celle-ci les laissait passer. Un meme catalogue rendait donc deux reponses
+        # selon qu'une image etait publiee ou non.
+        #
+        # ⚠ ET LA DIVERGENCE EST INATTEIGNABLE AUJOURD'HUI — ce filtre ne repare pas un bug
+        # observable, il rend l'accord LOCAL au lieu de l'emprunter. Mesure : le schema
+        # `reserved-seat-v1.json` est `additionalProperties: false` et ne declare AUCUN `spec`,
+        # donc un siege ne peut pas porter de capability ; un fichier qui essaierait ne validerait
+        # pas, et `Image.publish!/0` LEVE sur un profil invalide. Ce qui ferme la divergence vit
+        # donc dans un schema voisin, pas ici.
+        #
+        # On la ferme quand meme, et le cout est un predicat : les appelants sont TOUS des
+        # resolveurs structurels qui exigent EXACTEMENT un role et LEVENT sur 0 ou plusieurs, donc
+        # le jour ou ce schema gagne un `spec`, la divergence deviendrait « N roles declare … —
+        # fix the catalogue » au boot, sur un catalogue sain, avec un message qui accuse
+        # l'operateur. Un siege est un nom qu'on garde, pas un role qu'on convoque.
         {:ok,
          index
-         |> Enum.filter(fn {_role, raw} -> raw_has_capability?(raw, cap) end)
+         |> Enum.filter(fn {_role, raw} ->
+           Fleet.CapProfile.Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
+         end)
          |> Enum.map(&elem(&1, 0))
          |> Enum.sort()}
 

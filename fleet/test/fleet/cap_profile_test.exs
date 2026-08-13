@@ -149,6 +149,31 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
     end
 
+    # JG-022 — LE VERDICT REMONTAIT, LE DIAGNOSTIC RESTAIT SUR PLACE. `ExJsonSchema` rend la liste
+    # des violations avec leur pointeur JSON ; elle etait remplacee par un atome unique, et
+    # l'operateur apprenait que son profil est non conforme sans apprendre OU. L'atome de retour est
+    # le contrat gele des appelants et ne bouge pas : ce qui manquait etait une TRACE.
+    test "JG-022: le REFUS nomme les violations — pointeur JSON compris", %{tmp_dir: tmp_dir} do
+      write_role(
+        tmp_dir,
+        "incomplete2",
+        "kind: CapabilityProfile\nmetadata:\n  name: incomplete2\n"
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete2")
+        end)
+
+      assert log =~ "CapProfile.Schema: cap_profile REFUSED",
+             "un refus de schema ne laisse aucune trace : le detail est perdu sur place"
+
+      assert log =~ "violation(s)"
+
+      assert log =~ ~r/#\/\w+|#: /,
+             "la trace ne porte aucun pointeur JSON — elle ne dit pas OU corriger"
+    end
+
     test "#27: metadata.name collision → {:error, :name_collision}, NOT a CaseClauseError",
          %{tmp_dir: tmp_dir} do
       # Two catalogue files carrying the SAME metadata.name = broken deploy artifact.
@@ -201,6 +226,70 @@ defmodule Fleet.CapProfileTest do
       on_exit(fn -> Application.put_env(:lcars_fleet, :cap_profile_schema_dir, prev) end)
 
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
+    end
+
+    # JG-023 — LE REESSAI EST L'ARBITRAGE, L'INONDATION ETAIT L'ACCIDENT. Ne pas memoriser l'echec
+    # est delibere (un schema redevenu lisible est repris sans redemarrage, cf. la relecture du
+    # secret HMAC). Mais chaque validation reecrivait la MEME ligne : une indisponibilite durable
+    # devenait proportionnelle au trafic, et la trace ou on l'aurait vue etait la premiere noyee.
+    test "JG-023: un schema durablement illisible parle UNE fois, pas une fois par validation", %{
+      tmp_dir: tmp_dir
+    } do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+
+      empty = Path.join(tmp_dir, "empty-schemas-jg023")
+      File.mkdir_p!(empty)
+      prev = Application.get_env(:lcars_fleet, :cap_profile_schema_dir)
+      Application.put_env(:lcars_fleet, :cap_profile_schema_dir, empty)
+
+      on_exit(fn ->
+        Application.put_env(:lcars_fleet, :cap_profile_schema_dir, prev)
+
+        :persistent_term.erase(
+          {Fleet.CapProfile.Schema, :schema_error_logged,
+           Path.join(empty, "cap-profile-v2.5.json")}
+        )
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          for _ <- 1..5, do: {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
+        end)
+
+      lines = log |> String.split("\n") |> Enum.filter(&(&1 =~ "schema unavailable"))
+
+      assert length(lines) == 1,
+             "#{length(lines)} lignes pour 5 validations — l'indisponibilite est proportionnelle " <>
+               "au trafic, et la trace ou on l'aurait vue est la premiere noyee"
+    end
+
+    test "JG-023: le RETOUR se dit — sinon « repare » et « mort et silencieux » se ressemblent",
+         %{
+           tmp_dir: tmp_dir
+         } do
+      write_role(tmp_dir, "engineer", valid_profile_yaml())
+
+      empty = Path.join(tmp_dir, "empty-then-filled")
+      File.mkdir_p!(empty)
+      prev = Application.get_env(:lcars_fleet, :cap_profile_schema_dir)
+      Application.put_env(:lcars_fleet, :cap_profile_schema_dir, empty)
+      on_exit(fn -> Application.put_env(:lcars_fleet, :cap_profile_schema_dir, prev) end)
+
+      assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
+
+      # Le schema redevient lisible : c'est CE cas que le non-memorisation de l'echec protege.
+      for name <- ~w(cap-profile-v2.5.json modop-profile.json reserved-seat-v1.json) do
+        src = Path.join([to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/schema", name])
+        if File.exists?(src), do: File.cp!(src, Path.join(empty, name))
+      end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %Fleet.CapProfile{}} = Fleet.CapProfile.load("engineer")
+        end)
+
+      assert log =~ "is readable again",
+             "la reprise est muette : le silence ne prouve que l'arret de la journalisation"
     end
 
     test "R0-CAP-007: catalogue dir ABSENT → :catalogue_missing (≠ :not_found which masks a broken config)",
