@@ -114,6 +114,18 @@ defmodule Fleet.Spawner.SeedStore do
       :none ->
         :none
 
+      # UNREADABLE IS NOT "NOT YET". Both used to arrive as `:none`, and a checkpoint that skips on
+      # `:none` skips quietly — the pod's transcript is lost and the operator reads the same silence
+      # as for a pod that had simply not spoken. Named here so the loss has a cause attached to it.
+      {:error, reason} = err ->
+        Logger.error(
+          "SeedStore: checkpoint #{project}/#{role} — sessions directory unreadable " <>
+            "(#{inspect(reason)}), NOTHING captured. This is not an empty pod: the seed of this " <>
+            "run is lost and a recall will start cold."
+        )
+
+        err
+
       {:ok, jsonl} ->
         # The stored uuid = the DETERMINISTIC BUILDER (`session_id` pre-allocated at spawn), the SINGLE
         # source of the Desktop slot's identity. We do NOT derive it from `Path.basename(jsonl)`: a `/clear`
@@ -346,10 +358,24 @@ defmodule Fleet.Spawner.SeedStore do
     end)
   end
 
+  # ABSENT AND UNREADABLE ARE NOT THE SAME FACT, and this function is on a WRITE path — which is why
+  # collapsing them costs data rather than a wrong reading. Its single caller does
+  # `Map.merge(existing_seed_records(...), live)` then WRITES the result over the sidecar: a `%{}`
+  # returned for a file that exists but could not be parsed does not mean "nothing was there", it
+  # silently TRUNCATES the sidecar down to `live`. The register's fiche describes the opposite
+  # consequence — a pod restarting cold — because it read this as a resume-path reader; measured, it
+  # has exactly one caller and it is the slot-bridge CAPTURE.
+  #
+  # Absent stays `%{}`: there is genuinely nothing to merge, and the caller is creating the file.
+  # Unreadable raises, so the write never happens and the existing sidecar survives intact —
+  # `capture_slot_bridge/2` already rescues into `{:error, _}`, which its callers retry. Losing a
+  # capture is recoverable; overwriting a good sidecar with a truncated one is not.
   defp existing_seed_records(path) do
-    if File.exists?(path), do: seed_records(path), else: %{}
-  rescue
-    _ -> %{}
+    if File.exists?(path) do
+      seed_records(path)
+    else
+      %{}
+    end
   end
 
   defp rc_registered?(records),

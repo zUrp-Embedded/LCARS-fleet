@@ -566,4 +566,84 @@ defmodule Fleet.Spawner.SeedStoreTest do
       assert Fleet.Slug.link_free_under?(dest, pod_dir)
     end
   end
+
+  # JG-075 / JG-080 — DEUX SILENCES SUR LA MEME ARBORESCENCE, ET LES DEUX FICHES SE TROMPENT SUR
+  # LEURS APPELANTS. Mesure au walker independant : `latest_jsonl/1` a DEUX appelants (les deux dans
+  # ce module), pas quatre — `liveness` et `scaffold` appellent la soeur `jsonl_paths/2` et ne
+  # recoivent jamais `:none`. Et `existing_seed_records/1` a UN seul appelant, sur le chemin
+  # d'ECRITURE (capture du sidecar de slot), pas de reprise : sa consequence reelle est l'INVERSE de
+  # celle ecrite — un sidecar illisible etait silencieusement TRONQUE a `live`, perte de donnees, pas
+  # lecture a vide.
+  describe "JG-075 / JG-080 — illisible n'est pas vide, ni en lecture ni en ecriture" do
+    test "JG-075 : repertoire de sessions ILLISIBLE → {:error, _}, pas :none", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      projects = Path.join([pod_dir, ".claude", "projects"])
+      File.mkdir_p!(projects)
+      File.chmod!(projects, 0o000)
+      on_exit(fn -> File.chmod(projects, 0o755) end)
+
+      result = Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir)
+
+      # Sous un uid qui ignore les permissions (root), le repertoire reste listable : le cas ne se
+      # joue pas et le test ne doit pas mentir a ce sujet. La suite tourne en `builder` en CI.
+      case File.ls(projects) do
+        {:error, _} ->
+          assert {:error, {:sessions_unreadable, _}} = result
+
+        {:ok, _} ->
+          assert result == :none
+      end
+    end
+
+    test "JG-075 TEMOIN : repertoire ABSENT → :none (le nominal avant le premier tour)", %{
+      tmp: tmp
+    } do
+      assert :none = Fleet.Spawner.Pod.SessionFiles.latest_jsonl(Path.join(tmp, "pod-vierge"))
+    end
+
+    # ⚠ CE TEST A D'ABORD ETE ECRIT VACUOUS, et la contre-epreuve l'a dit : avec un sidecar en
+    # `0o000`, l'ECRITURE echoue aussi, donc le resultat est `{:error, _}` avec ou sans le fix — le
+    # fixture ne distinguait rien. Le mode qui separe les deux est **write-only** (`0o200`) : la
+    # lecture est refusee, l'ecriture passe. Sans le fix, `existing_seed_records/1` ravale l'echec en
+    # `%{}`, le merge ne garde que `live`, et `File.write!` TRONQUE le sidecar avec succes. Avec le
+    # fix, la lecture leve, l'ecriture n'a pas lieu, et le contenu precieux survit.
+    #
+    # L'observable est donc le CONTENU du fichier, jamais le code de retour.
+    test "JG-080 : un sidecar ILLISIBLE mais inscriptible n'est PAS tronque", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+      uuid = "3badcafe-1017-4dad-babe-000000000001"
+
+      make_jsonl(pod_dir, "slug", uuid, ~s({"type":"bridge-session","id":"live"}\n))
+
+      slot = Path.join([root, "_slots", "#{uuid}.jsonl"])
+      precious = ~s({"type":"mode","v":"PRECIEUX"}\n)
+      File.mkdir_p!(Path.dirname(slot))
+      File.write!(slot, precious)
+      File.chmod!(slot, 0o200)
+      on_exit(fn -> File.chmod(slot, 0o644) end)
+
+      _ = SeedStore.capture_slot_bridge(pod_dir, uuid)
+
+      File.chmod!(slot, 0o644)
+
+      # Sous un uid qui ignore les permissions (root), la lecture reussit : le cas ne se joue pas et
+      # le test ne doit pas mentir a ce sujet. La suite tourne en `builder` en CI.
+      if File.stat!(slot).size > 0 and match?({:ok, _}, File.read(slot)) do
+        assert File.read!(slot) =~ "PRECIEUX",
+               "le sidecar a ete TRONQUE : un fichier illisible a ete lu comme vide, puis ecrase"
+      end
+    end
+
+    test "JG-080 TEMOIN : sidecar ABSENT → la capture ecrit normalement", %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      uuid = "3badcafe-1017-4dad-babe-000000000002"
+      make_jsonl(pod_dir, "slug", uuid, ~s({"type":"bridge-session","id":"live"}\n))
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, uuid)
+      assert File.exists?(Path.join([root, "_slots", "#{uuid}.jsonl"]))
+    end
+  end
 end

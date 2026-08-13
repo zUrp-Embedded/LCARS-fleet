@@ -7,6 +7,8 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   recently modified session.
   """
 
+  require Logger
+
   @doc """
   Lists session JSONLs across all cwd slugs, optionally restricted to one session ID.
 
@@ -27,17 +29,59 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   @spec jsonl_paths(Path.t(), String.t()) :: [Path.t()]
   def jsonl_paths(pod_dir, session_id \\ "*")
       when is_binary(pod_dir) and is_binary(session_id) do
-    [pod_dir, ".claude", "projects", "*", "#{session_id}.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.filter(&Fleet.Slug.link_free_under?(&1, pod_dir))
+    found =
+      [pod_dir, ".claude", "projects", "*", "#{session_id}.jsonl"]
+      |> Path.join()
+      |> Path.wildcard()
+
+    kept = Enum.filter(found, &Fleet.Slug.link_free_under?(&1, pod_dir))
+
+    # A DROP IS A REFUSAL AND IT IS SAID OUT LOUD. Filtering silently would trade one silence for
+    # another: the daemon would stop following the link (good) and nothing would record that a pod
+    # pointed its own transcript at the host (bad). Logged at `error` because it is not a degraded
+    # read — it is an agent reaching through the daemon, which runs outside its sandbox. Noisy by
+    # design: there is exactly one pod that can produce this line, and it did it on purpose.
+    case found -- kept do
+      [] ->
+        :ok
+
+      dropped ->
+        Logger.error(
+          "SessionFiles: pod=#{Path.basename(pod_dir)} REFUSED #{length(dropped)} symlinked " <>
+            "session path(s): #{Enum.join(dropped, ", ")} — a link under the pod's own tree makes " <>
+            "the daemon read a file of the pod's choosing (JG-086)"
+        )
+    end
+
+    kept
   end
 
   @doc """
   Returns the most recently modified session JSONL, ignoring entries that vanish during stat.
+
+  `:none` means NO USABLE SESSION — the sessions directory does not exist yet (the nominal case
+  before the pod's first turn), or it holds nothing this function may read.
+
+  `{:error, {:sessions_unreadable, reason}}` means the directory IS there and could not be listed.
+  That was `:none` too, and the two are opposite facts: the first says "not yet", the second says
+  "the instrument cannot see". A caller that checkpoints on `:none` skips quietly and loses the
+  pod's transcript; on `{:error, _}` it now knows why nothing was captured. `Path.wildcard/1` cannot
+  make the distinction on its own — it returns `[]` for both.
   """
-  @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none
+  @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none | {:error, term()}
   def latest_jsonl(pod_dir) when is_binary(pod_dir) do
+    projects = Path.join([pod_dir, ".claude", "projects"])
+
+    with true <- File.dir?(projects),
+         {:error, reason} <- File.ls(projects) do
+      {:error, {:sessions_unreadable, reason}}
+    else
+      # Absent = nothing yet; readable = fall through to the scan below.
+      _ -> scan_latest(pod_dir)
+    end
+  end
+
+  defp scan_latest(pod_dir) do
     pod_dir
     |> jsonl_paths()
     |> Enum.flat_map(fn f ->
