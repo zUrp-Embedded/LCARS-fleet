@@ -157,8 +157,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
 
     case launch_env do
       {:ok, human, env} ->
-        with {:ok, env} <- maybe_put_auth_token(env, human),
-             {:ok, env} <- maybe_put_git_identity(env, human, role),
+        with {:ok, env} <- maybe_put_git_identity(put_auth_mode(env), human, role),
              :ok <- Fleet.Credentials.Gate.validate(claude_dir_for(human)) do
           {:ok, env}
         else
@@ -199,9 +198,16 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  defp maybe_put_auth_token(env, _human) do
-    {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
-  end
+  # NO TOKEN IS PUT ANYWHERE, and the old name said otherwise. `maybe_put_auth_token/2` ignored its
+  # `human` argument, wrapped a single unconditional `Map.put` in `{:ok, _}`, and sat in a `with`
+  # chain — a shape that announces a failure it cannot have. A reader auditing how a pod receives
+  # its credentials followed that name and found nothing, because the answer is elsewhere: the
+  # authentication is the BIND of the human's `.claude` directory (`CLAUDE_DIR` above), and `bind`
+  # is the single value naming it — `bwrap_launch.sh` refuses any other.
+  #
+  # Total, unconditional, single-valued: a plain map transform, called inline. The `with` keeps
+  # exactly the steps that can actually fail.
+  defp put_auth_mode(env), do: Map.put(env, "LCARS_AUTH_MODE", "bind")
 
   defp maybe_put_vendor_bin(env, human) do
     case claude_bin_in_home(human) do
