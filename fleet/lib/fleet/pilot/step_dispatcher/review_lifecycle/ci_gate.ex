@@ -54,7 +54,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # The wait shapes are SPELLED OUT, not summarised as `:ci_pending`: the caller pattern-matches
   # each one to keep it visible to the BL-6-48 reverse wall, and a spec that hid them made dialyzer
   # declare those clauses unreachable — a typespec that lies turns a wall into a false alarm.
-  @type wait_reason :: :ci_pending | {:ci_head_unreadable, term()} | {:ci_unreadable, term()}
+  @type wait_reason ::
+          :ci_pending
+          | {:ci_head_unreadable, term()}
+          | {:ci_unreadable, term()}
+          # LE COMMENTAIRE AU-DESSUS ETAIT DEJA LA CICATRICE, ET J'AI REJOUE LA MEME : ajouter un
+          # motif d'attente sans l'ajouter ICI fait declarer par dialyzer que la clause de l'appelant
+          # (`ReviewLifecycle.gate_then_dispatch/4`) ne peut jamais matcher. Le code etait juste ; la
+          # DECLARATION mentait, et c'est elle qui fait autorite pour un appelant.
+          | {:ci_deadline_unreachable, term()}
 
   @type decision ::
           {:proceed, ci_fact :: map() | nil}
@@ -163,6 +171,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   defp workflow_file?(_), do: false
 
+  # « ON ATTEND » ET « ON ATTEND DEPUIS TOUJOURS » NE RENDENT PLUS LE MEME MOTIF. Sans date, le
+  # calcul d'age vaut 0, donc `0 > 2700` est faux A JAMAIS : le ticket n'escalade pas, ne progresse
+  # pas, et son motif d'attente etait le meme que celui d'une CI qui tourne depuis dix secondes.
+  #
+  # Le motif est desormais distinct, et il porte l'ETIQUETTE DE SA PORTE — `wait/ci`, comme ses deux
+  # voisins `{:ci_head_unreadable, _}` et `{:ci_unreadable, _}` : du cote du ticket c'est le meme
+  # fait (il est arrete a la porte CI), et la distinction vit dans la RAISON du skip, ou elle est
+  # actionnable. Rien n'est bloque : escalader ici poserait `lcars-awaits-arch` et parquerait le
+  # ticket, ce que l'arbitrage d'origine refuse explicitement.
+  defp stalled_or_wait(_state, _sha, nil, _pr_number),
+    do: {:wait, {:ci_deadline_unreachable, :no_pull_date}}
+
   defp stalled_or_wait(state, sha, committed_at, pr_number) do
     if age_sec(committed_at) > @pending_deadline_sec do
       {:escalate, {:ci_stalled, state},
@@ -176,8 +196,20 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   # The head sha AND the date the gate measures its patience against. Both come from the same read:
   # the PR object carries the head sha, and the commit carries its own date. `head` (the branch ref)
-  # is the fallback for the sha only — a ref Gitea also resolves — while an unreadable date makes
-  # the wait UNBOUNDED, which is exactly what this gate refuses, so it counts as unreadable.
+  # is the fallback for the sha only — a ref Gitea also resolves.
+  #
+  # ⚠ CETTE PHRASE DISAIT L'INVERSE DU CODE, douze lignes au-dessus de lui : « an unreadable date
+  # makes the wait UNBOUNDED, which is exactly what this gate refuses, SO IT COUNTS AS UNREADABLE ».
+  # Seul le SHA illisible rend une erreur ; la date, elle, tombe a `nil` et le voisin juste en
+  # dessous assume ce choix (« treated as just now, we wait rather than escalate on a date we could
+  # not read »). Deux commentaires opposes dans le meme fichier, et c'est celui qui promettait le
+  # refus qu'un lecteur croyait.
+  #
+  # L'attente reste NON BORNEE — la borner exigerait un `first_seen_at` persiste, et les seuls
+  # porteurs sont l'outbox durable (arbitrage ouvert) ou un commentaire-marqueur ecrit a CHAQUE tick
+  # d'une branche defensive. `commit_ci_state/3` jetterait la date des statuts, donc l'horloge
+  # per-sha bon marche n'existe pas non plus. Ce qui est ferme ici, c'est le SILENCE : le motif
+  # d'attente dit maintenant que l'echeance est hors d'atteinte.
   defp head_commit(pr_number, head, %Ctx{} = ctx) do
     case ctx.forge.get_pull(ctx.repo, pr_number, ctx.forge_opts) do
       {:ok, %{"head" => %{"sha" => sha}} = pull} when is_binary(sha) ->
@@ -203,7 +235,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  defp age_sec(nil), do: 0
+  # ⚠ `age_sec(nil), do: 0` ETAIT LE MECANISME ENTIER DU DEFAUT : sans date, l'age valait 0, donc
+  # `0 > @pending_deadline_sec` etait faux a jamais. La clause `nil` est morte maintenant que
+  # `stalled_or_wait/4` intercepte l'absence de date AVANT le calcul — dialyzer l'a dit, et la
+  # laisser en place remettrait le zero a portee du prochain appelant.
   defp age_sec(%DateTime{} = dt), do: DateTime.diff(DateTime.utc_now(), dt, :second)
 
   @doc "The deadline, exposed so a test names the same number the code uses."

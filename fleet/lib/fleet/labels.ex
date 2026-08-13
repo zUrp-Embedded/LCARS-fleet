@@ -214,6 +214,12 @@ defmodule Fleet.Labels do
   def wait_for({:ci_unreadable, _why}), do: @wait_prefix <> "ci"
   def wait_for({:ci_red_marker_unreadable, _why}), do: @wait_prefix <> "ci"
 
+  # La porte CI attend sur une echeance qu'elle ne peut pas atteindre (date de PR illisible → l'age
+  # vaut 0, donc le delai n'est jamais franchi). Meme etiquette que ses voisins, meme raison : du
+  # cote du ticket c'est le meme fait — arrete a la porte CI. La distinction vit dans la raison du
+  # skip, ou un operateur peut agir dessus.
+  def wait_for({:ci_deadline_unreachable, _why}), do: @wait_prefix <> "ci"
+
   # ─── Already carried by an existing label: a second one would be a second truth ────────────────
   # The one you read is never the one somebody corrected.
   def wait_for(:in_flight), do: nil

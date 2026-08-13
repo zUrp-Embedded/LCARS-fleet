@@ -191,6 +191,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       {:wait, {:ci_unreadable, why}} ->
         {:skipped, {:ci_unreadable, why}}
 
+      {:wait, {:ci_deadline_unreachable, why}} ->
+        {:skipped, {:ci_deadline_unreachable, why}}
+
       {:escalate, class, message} ->
         Remediation.ci_stalled(pr_number, head, class, message, ctx)
     end
