@@ -152,16 +152,56 @@ defmodule Fleet.Pilot.StepRunCompleter do
     if File.dir?(dir), do: dir
   end
 
+  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE, et elle l'etait (BL-6-43). Ce garde rendait `:ok` sur un
+  # `else` fourre-tout : une brique pouvait etre publiee, mergee et scellee sans qu'une seule ligne
+  # n'ait jamais dit que sa preuve n'avait pas ete ECRITE. Vu du sceau, ce silence est indiscernable
+  # d'une gravure ratee (qui, elle, loggue) — donc la seule question qu'on pouvait poser en aval
+  # etait « faut-il bloquer une brique sans preuve ? », alors que la vraie etait « pourquoi n'y en
+  # a-t-il pas ? » et que personne ne pouvait y repondre.
+  #
+  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se nomment :
+  #   - pas de `deliverable_opts` ICI est une ANOMALIE, pas le cas nominal : cette fonction n'est
+  #     appelee que depuis `open_deliverable_pr`, le point de publication d'un livrable producteur.
+  #     Le chemin verdict-seul (`complete/2`) ne passe pas par la.
+  #   - pas d'ops = le projet n'a pas de face atelier. Meme fait que le `{:work_dir_missing, _}` de
+  #     `BriefArtifact`, qui le dit LOUD et le declare PERMANENT jusqu'a l'onboard — ici il ne
+  #     disait rien.
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
+    repo = Map.get(step_run, :repo)
 
-    with %{} = dopts <- Map.get(step_run, :deliverable_opts),
-         repo when is_binary(repo) <- Map.get(step_run, :repo),
-         work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo)),
-         true <- File.dir?(work_dir) do
-      emit_provenance(work_dir, step_run, dopts, livrable_sha)
-    else
-      _ -> :ok
+    case {Map.get(step_run, :deliverable_opts), repo} do
+      {%{} = dopts, repo} when is_binary(repo) ->
+        work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
+
+        if File.dir?(work_dir) do
+          emit_provenance(work_dir, step_run, dopts, livrable_sha)
+        else
+          Logger.warning(
+            "StepRunCompleter: provenance NOT engraved (#{repo}): {:work_dir_missing, " <>
+              "#{inspect(work_dir)}} — the project has no ops face. PERMANENT until it is " <>
+              "onboarded; the brick #{String.slice(livrable_sha, 0, 7)} carries NO attestation"
+          )
+
+          :ok
+        end
+
+      {nil, repo} ->
+        Logger.error(
+          "StepRunCompleter: provenance NOT engraved (#{inspect(repo)}): no :deliverable_opts on " <>
+            "the publication path — a producer deliverable reached open_deliverable_pr without the " <>
+            "shape that names its base. Brick #{String.slice(livrable_sha, 0, 7)} unattested"
+        )
+
+        :ok
+
+      {_dopts, other} ->
+        Logger.error(
+          "StepRunCompleter: provenance NOT engraved: repo is #{inspect(other)}, not a binary — " <>
+            "brick #{String.slice(livrable_sha, 0, 7)} unattested"
+        )
+
+        :ok
     end
   end
 
