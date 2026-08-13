@@ -85,6 +85,58 @@ defmodule Fleet.Slug do
   end
 
   @doc """
+  Returns whether `dest` lies under `root` with NO SYMLINK on the way — the non-lexical twin of
+  `under_root?/2`, and the one to reach for whenever the tree between the two is writable by
+  something other than the caller.
+
+  `under_root?/2` compares STRINGS. That is the right check against a `..` in a name, and it is no
+  check at all against a link: `<root>/.claude/projects` pointing at `/home/<human>/.ssh` leaves
+  every path under it textually confined while every read and write lands elsewhere. The two
+  functions answer different questions and the lexical one reads like the strong one, which is why
+  they live side by side here.
+
+  Walks each component from `root` down and refuses on the first `:symlink`. A component that does
+  not exist yet is not a refusal — the caller is usually about to create it.
+
+  ⚠ CHECK-THEN-ACT, and the window is real: nothing stops the tree from changing between this call
+  and the operation it guards. The BEAM exposes no `O_NOFOLLOW`, so the race cannot be closed from
+  Elixir; it can only be narrowed and then DETECTED, by re-verifying after the operation and
+  discarding the result. A caller that guards a read of untrusted-writable ground owes itself that
+  second call.
+
+  ## Examples
+
+      iex> Fleet.Slug.link_free_under?("/srv/store/sub", "/srv/store")
+      true
+
+      iex> Fleet.Slug.link_free_under?("/srv/store-evil", "/srv/store")
+      false
+  """
+  @spec link_free_under?(Path.t(), Path.t()) :: boolean()
+  def link_free_under?(dest, root) when is_binary(dest) and is_binary(root) do
+    expanded_root = Path.expand(root)
+    expanded_dest = Path.expand(dest)
+
+    if under_root?(expanded_dest, expanded_root) do
+      expanded_dest
+      |> Path.relative_to(expanded_root)
+      |> Path.split()
+      |> Enum.reject(&(&1 == "."))
+      |> Enum.reduce_while(expanded_root, fn segment, acc ->
+        path = Path.join(acc, segment)
+
+        case File.lstat(path) do
+          {:ok, %File.Stat{type: :symlink}} -> {:halt, false}
+          _ -> {:cont, path}
+        end
+      end)
+      |> is_binary()
+    else
+      false
+    end
+  end
+
+  @doc """
   Validates `name`, joins it below `root`, and verifies lexical confinement.
 
   ## Examples

@@ -486,4 +486,84 @@ defmodule Fleet.Spawner.SeedStoreTest do
       assert byte_size(seed) < byte_size(huge)
     end
   end
+
+  # JG-086 (`S1`) — LE POD POSSEDE LES INODES DE SON ARBRE, ET LE DAEMON LES SUIVAIT.
+  # `<pod_dir>` est bind-monte READ-WRITE dans le sandbox (`bwrap_launch.sh`). Un lien pose par
+  # l'agent — sur la feuille `.jsonl` ou sur n'importe quel repertoire au-dessus — faisait lire au
+  # daemon, qui tourne SOUS L'HUMAIN et HORS du sandbox, un fichier de son choix ; le contenu
+  # partait dans la graine et revenait dans le pod suivant. La LECTURE est l'exfiltration.
+  #
+  # `Fleet.Slug.under_root?/2` ne voit rien de tout cela : il compare des chaines. C'est le bon
+  # controle contre un `..` dans un nom et aucun controle contre un lien — d'ou son jumeau
+  # non-lexical `link_free_under?/2`, pose a cote de lui pour que la difference se voie.
+  describe "JG-086 — un lien dans le pod_dir ne fait plus lire ni ecrire le daemon ailleurs" do
+    test "LECTURE : un .jsonl symlinke vers un fichier de l'hote est IGNORE", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+      secret = Path.join(tmp, "host-secret.env")
+      File.write!(secret, ~s({"type":"user","message":{"content":"TOKEN=deadbeef"}}\n))
+
+      dir = Path.join([pod_dir, ".claude", "projects", "slug"])
+      File.mkdir_p!(dir)
+      File.ln_s!(secret, Path.join(dir, "aaaa-bbbb.jsonl"))
+
+      assert :none = SeedStore.checkpoint(pod_dir, "proj", "engineer", "aaaa-bbbb", nil)
+      refute File.exists?(Path.join([root, "proj", "pods"]))
+    end
+
+    test "LECTURE : un REPERTOIRE intermediaire symlinke est ignore aussi (le lien n'est pas que sur la feuille)",
+         %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      elsewhere = Path.join(tmp, "elsewhere")
+      File.mkdir_p!(Path.join(elsewhere, "slug"))
+      File.write!(Path.join([elsewhere, "slug", "cccc-dddd.jsonl"]), ~s({"type":"user"}\n))
+
+      File.mkdir_p!(Path.join(pod_dir, ".claude"))
+      File.ln_s!(elsewhere, Path.join([pod_dir, ".claude", "projects"]))
+
+      assert :none = SeedStore.checkpoint(pod_dir, "proj", "engineer", "cccc-dddd", nil)
+      refute File.exists?(Path.join([root, "proj", "pods"]))
+    end
+
+    test "TEMOIN : un fichier REGULIER au meme endroit est bien capture", %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      make_jsonl(pod_dir, "slug", "eeee-ffff", ~s({"type":"user","message":{"content":"hi"}}\n))
+
+      assert :ok = SeedStore.checkpoint(pod_dir, "proj", "engineer", "eeee-ffff", nil)
+      assert File.exists?(Path.join([root, "proj", "pods", "engineer.jsonl"]))
+    end
+
+    test "ECRITURE : un slug destination symlinke fait REFUSER le restore, rien n'est ecrit dehors",
+         %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      outside = Path.join(tmp, "outside")
+      File.mkdir_p!(outside)
+
+      seed = Path.join(tmp, "seed.jsonl")
+      File.write!(seed, ~s({"type":"user","sessionId":"old"}\n))
+
+      cwd = "/home/projects/demo"
+      dir = Path.join([pod_dir, ".claude", "projects"])
+      File.mkdir_p!(dir)
+      File.ln_s!(outside, Path.join(dir, SeedStore.slugify(cwd)))
+
+      assert_raise ArgumentError, ~r/symlink stands between/, fn ->
+        SeedStore.restore(seed, pod_dir, cwd, "1111-2222")
+      end
+
+      assert File.ls!(outside) == [], "le daemon a ecrit hors du monde projete"
+    end
+
+    test "TEMOIN ECRITURE : sans lien, le restore ecrit bien au bon endroit", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      seed = Path.join(tmp, "seed.jsonl")
+      File.write!(seed, ~s({"type":"user","sessionId":"old"}\n))
+
+      assert {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/projects/demo", "3333-4444")
+      assert File.exists?(dest)
+      assert Fleet.Slug.link_free_under?(dest, pod_dir)
+    end
+  end
 end

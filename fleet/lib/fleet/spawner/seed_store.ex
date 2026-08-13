@@ -127,7 +127,23 @@ defmodule Fleet.Spawner.SeedStore do
         # We keep ONLY the FIRST ROUND (minimal resumable seed = the pod's initial setup/brief),
         # NOT the whole session — the work re-derives from the forge (single-source axiom).
         # This subset `--resume`s correctly with only the round-1 context.
-        File.write!(Path.join(dest_dir, "#{base}.jsonl"), first_round(jsonl))
+        content = first_round(jsonl)
+
+        # READ, THEN RE-VERIFY. `SessionFiles.jsonl_paths/2` filtered the symlinks out before this
+        # read; between that filter and `File.stream!` the pod could have swapped the path for a
+        # link to a host file — it owns the inodes under `<pod_dir>` (RW bind). The BEAM exposes no
+        # `O_NOFOLLOW`, so the window cannot be closed; it can be DETECTED, and a capture whose
+        # source changed shape mid-read is dropped rather than engraved into a seed that a later pod
+        # will resume. Detection is worth more here than anywhere else in the chain: this is the
+        # step that turns a file the daemon can read into a file the NEXT pod receives.
+        unless Fleet.Slug.link_free_under?(jsonl, pod_dir) do
+          raise ArgumentError,
+                "SeedStore.checkpoint: #{inspect(jsonl)} became a symlink while being read — " <>
+                  "capture DROPPED (a pod that swaps its own transcript for a host file is " <>
+                  "reaching through the daemon, which runs outside its sandbox)"
+        end
+
+        File.write!(Path.join(dest_dir, "#{base}.jsonl"), content)
 
         # Sidecar descriptor. `read_map/3` reads ONLY `uuid` and `slug`; the rest is there for a
         # human opening the seed store by hand. Nothing parses them, which is why adding `issue`
@@ -206,13 +222,30 @@ defmodule Fleet.Spawner.SeedStore do
   def restore(seed_jsonl, pod_dir, cwd, uuid)
       when is_binary(seed_jsonl) and is_binary(pod_dir) and is_binary(cwd) and is_binary(uuid) do
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
-    File.mkdir_p!(dir)
     dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))
 
     unless Fleet.Slug.under_root?(dest, pod_dir) do
       raise ArgumentError,
             "SeedStore.restore: unconfined uuid (#{inspect(uuid)}) — escape refused"
     end
+
+    # THE LEXICAL CHECK ABOVE IS NOT THE CONFINEMENT IT READS LIKE, and this is the write side of
+    # the same escape. `under_root?/2` compares strings: it refuses a `..` in the uuid and sees
+    # nothing at all if `<pod_dir>/.claude/projects` — or the slug directory — is a SYMLINK. The pod
+    # owns those inodes (`<pod_dir>` is bind-mounted RW into the sandbox), so it can point them
+    # anywhere and the daemon's `mkdir_p!` + `cp!` then writes outside the projected world, as the
+    # human, with the human's rights.
+    #
+    # Checked BEFORE `mkdir_p!`: creating the tree first would walk through the link and the
+    # verification would come too late to matter.
+    unless Fleet.Slug.link_free_under?(dest, pod_dir) do
+      raise ArgumentError,
+            "SeedStore.restore: a symlink stands between #{inspect(pod_dir)} and " <>
+              "#{inspect(dest)} — restore REFUSED. The pod owns its tree; it does not get to " <>
+              "choose where the daemon writes."
+    end
+
+    File.mkdir_p!(dir)
 
     File.cp!(seed_jsonl, dest)
     # Shared base seeds may carry another human's capture-time sessionId.
