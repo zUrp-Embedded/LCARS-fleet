@@ -727,18 +727,25 @@ if config_env() != :test and not tool_mode? do
         spawner_claude_launch_path: Fleet.EnvParse.path("LCARS_CLAUDE_LAUNCH_PATH", path)
       )
 
-  # Seed store (pod round-1 — a resume optimization, NEVER required; empty = self-populating, the pod
-  # spawns fresh). Env override `LCARS_SEED_STORE_ROOT` of the code default (`~/.lcars/seeds`, aligned in
-  # seed_store.ex). The `/var/lib/lcars` fallback only serves if HOME is unresolvable AT BOOT:
-  # evaluating the config must not crash the node for an optional store (the code default, for
-  # its part, is rescued at use).
-  seed_store_root =
-    case System.get_env("LCARS_SEED_STORE_ROOT") do
-      nil -> Path.join(System.user_home() || "/var/lib/lcars", ".lcars/seeds")
-      p -> Fleet.EnvParse.path("LCARS_SEED_STORE_ROOT", p)
-    end
-
-  config :lcars_fleet, spawner_seed_store_root: seed_store_root
+  # Seed store (pod round-1 — a resume optimization, NEVER required; empty = self-populating, the
+  # pod spawns fresh). Env OVERRIDE only, same shape as every other knob in this file: the key is
+  # posted when the operator typed the variable, never otherwise. `SeedStore.root/0` holds the ONE
+  # definition of this path (`Fleet.Layout.state_dir()` + `seeds`).
+  #
+  # This block used to post an unconditional default — a SECOND definition, reached only when HOME
+  # is unresolvable, and disagreeing with the code's on exactly that case: it fabricated
+  # `/var/lib/lcars/.lcars/seeds`, a path no other component targets, where `Layout` raises. Two
+  # answers to one question, the divergence hidden in the case nobody exercises.
+  #
+  # A fabricated path is worse than a refusal here, and the repo says so wherever a home is derived
+  # (`Fleet.Layout`, `IncidentRegistry`, `PodTmux`): an unresolvable HOME is a broken runtime, and
+  # the answer is fail-loud, never an invented directory. Being optional buys the seed store the
+  # right to fail without taking the fleet down — it does not buy it a private idea of where the
+  # human's state lives.
+  if path = System.get_env("LCARS_SEED_STORE_ROOT") do
+    config :lcars_fleet,
+      spawner_seed_store_root: Fleet.EnvParse.path("LCARS_SEED_STORE_ROOT", path)
+  end
 
   # Pod onboarding kick (the `engage` nudge → claude calls get_work_item). The default window
   # (first 2s + 12×2.5s ≈ 32s) is too short against the claude cold-start in bwrap on a deployed

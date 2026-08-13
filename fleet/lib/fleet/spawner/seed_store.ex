@@ -342,11 +342,17 @@ defmodule Fleet.Spawner.SeedStore do
     File.write!(path, Regex.replace(~r/"sessionId":"[^"]*"/, content, ~s("sessionId":"#{uuid}")))
   end
 
-  defp root,
-    do:
-      Application.get_env(
-        :lcars_fleet,
-        :spawner_seed_store_root,
-        Path.join(Fleet.Layout.state_dir(), "seeds")
-      )
+  # THE one definition of the seed root. `config/runtime.exs` posts the key only when the operator
+  # set `LCARS_SEED_STORE_ROOT`; absent that, this is the answer, and there is no second one.
+  #
+  # `fetch_env/2`, never `get_env/3`: the third argument of `get_env/3` is an ordinary function
+  # argument, evaluated on EVERY call even when the key is set. `Layout.state_dir()` raises on an
+  # unresolvable HOME, so the eager form paid that raise on every `root()` — including in the
+  # deployments that configure the key precisely to avoid depending on the home.
+  defp root do
+    case Application.fetch_env(:lcars_fleet, :spawner_seed_store_root) do
+      {:ok, path} -> path
+      :error -> Path.join(Fleet.Layout.state_dir(), "seeds")
+    end
+  end
 end

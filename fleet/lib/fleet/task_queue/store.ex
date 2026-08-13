@@ -14,13 +14,17 @@ defmodule Fleet.TaskQueue.Store do
   @doc """
   Returns the configured state path or `~/.lcars/task-queue/state.json`.
   """
+  # `fetch_env/2` + explicit fallback, NOT `get_env/3`. The third argument of `get_env/3` is an
+  # ordinary function argument: it is evaluated on EVERY call, whether or not the key is set. With
+  # `System.user_home!()` in it, a deployment that configures `:task_queue_state_path` still pays
+  # the `!` — and an unresolvable HOME raises while building a default the caller will discard.
+  # A fallback that costs something must only run when it is the answer.
   @spec default_path() :: Path.t()
   def default_path do
-    Application.get_env(
-      :lcars_fleet,
-      :task_queue_state_path,
-      Path.join(System.user_home!(), ".lcars/task-queue/state.json")
-    )
+    case Application.fetch_env(:lcars_fleet, :task_queue_state_path) do
+      {:ok, path} -> path
+      :error -> Path.join(System.user_home!(), ".lcars/task-queue/state.json")
+    end
   end
 
   @doc """
