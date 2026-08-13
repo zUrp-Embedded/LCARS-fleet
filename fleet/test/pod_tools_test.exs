@@ -2206,6 +2206,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, decoded} = Jason.decode(txt)
       refute Map.has_key?(decoded, "idempotent")
       assert [_first, _second] = Process.get({:comments, 4})
+
+      # TEMOIN de JG-045 : ici la relecture a REUSSI (et n'a rien trouve). Sans ce refus, marquer
+      # toutes les creations passerait le test d'a cote et ne prouverait rien. Present = doute,
+      # absent = mesure.
+      refute Map.has_key?(decoded, "dedup_unverified"),
+             "une relecture reussie est marquee comme non verifiee — la marque ne distingue plus rien"
     end
 
     test "comment_issue: an unreadable readback POSTS anyway (fail-safe, never a swallowed reply)" do
@@ -2223,6 +2229,14 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{"status" => "commented"} = decoded} = Jason.decode(txt)
       refute Map.has_key?(decoded, "idempotent")
       assert_received {:post_comment, "fleet/alpha", 4, _body, _opts}
+
+      # JG-045 — LE DOUTE VOYAGE JUSQU'A L'APPELANT. Poster reste le bon geste, mais le retour
+      # etait rigoureusement le meme que celui d'une relecture REUSSIE ET VIDE : l'agent ne pouvait
+      # pas savoir que son doublon etait possible. Or c'est lui qui reessaie, et la relecture
+      # echoue precisement quand la forge va mal — c'est-a-dire au moment ou il va rejouer.
+      assert Map.has_key?(decoded, "dedup_unverified"),
+             "une relecture d'idempotence IMPOSSIBLE rend le meme resultat qu'une relecture " <>
+               "reussie et vide — « peut-etre un doublon » est indistinguable de « pas de doublon »"
     end
 
     test "comment_issue: architect gate (non-architect role → refused, nothing posted)" do

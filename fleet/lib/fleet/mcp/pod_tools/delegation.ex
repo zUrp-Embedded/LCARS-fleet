@@ -164,7 +164,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok,
            retire_superseded(forge, repo, supersedes, target_state, idempotent_result(existing))}
 
-        :none ->
+        dedup ->
           # THE LOT FIRST, and its failure is a REFUSAL where the brief's is a degradation. The two
           # are not the same object: a brief that cannot be materialized still travels, inline, so
           # the producer has its order. A lot has no inline form — degrading would create a ticket
@@ -180,17 +180,20 @@ defmodule Fleet.MCP.PodTools.Delegation do
               |> with_supersedes(supersedes)
               |> with_op_marker(marker)
 
-            create_and_finish(
-              forge,
-              repo,
-              title,
-              full_body,
-              identity,
-              destination,
-              depends_on,
-              supersedes,
-              target_state
-            )
+            with {:ok, created} <-
+                   create_and_finish(
+                     forge,
+                     repo,
+                     title,
+                     full_body,
+                     identity,
+                     destination,
+                     depends_on,
+                     supersedes,
+                     target_state
+                   ) do
+              {:ok, with_dedup_unverified(created, dedup)}
+            end
           end
       end
     else
@@ -823,12 +826,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
         {:ok, _already_landed} ->
           {:ok, %{"status" => "commented", "number" => number, "idempotent" => true}}
 
-        :none ->
+        dedup ->
           case forge.post_comment(repo, number, with_op_marker(body, marker),
                  token: identity.token
                ) do
-            {:ok, _} -> {:ok, %{"status" => "commented", "number" => number}}
-            {:error, reason} -> {:error, {:comment_failed, reason}}
+            {:ok, _} ->
+              {:ok, with_dedup_unverified(%{"status" => "commented", "number" => number}, dedup)}
+
+            {:error, reason} ->
+              {:error, {:comment_failed, reason}}
           end
       end
     else
@@ -1475,7 +1481,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     "<!-- lcars-op:#{sig} -->"
   end
 
-  # A failed readback falls through: posting beats silently dropping a reply.
+  # A failed readback falls through: posting beats silently dropping a reply. Mais L'APPELANT
+  # L'APPREND — cf. `find_open_issue_with_marker/3` juste au-dessus, meme arbitrage.
   defp find_comment_with_marker(forge, repo, number, marker) do
     case forge.list_comments(repo, number, []) do
       {:ok, comments} ->
@@ -1487,10 +1494,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
       err ->
         Logger.warning(
           "Delegation: comment_issue idempotency readback on #{repo}##{number} failed " <>
-            "(#{inspect(err)}) — proceeding to post (dedup is best-effort)"
+            "(#{inspect(err)}) — proceeding to post (dedup NOT verified, said in the result)"
         )
 
-        :none
+        {:unverified, err}
     end
   end
 
@@ -1508,12 +1515,28 @@ defmodule Fleet.MCP.PodTools.Delegation do
       err ->
         Logger.warning(
           "Delegation: create_issue idempotency readback on #{repo} failed (#{inspect(err)}) — " <>
-            "proceeding to create (dedup is best-effort)"
+            "proceeding to create (dedup NOT verified, said in the result)"
         )
 
-        :none
+        {:unverified, err}
     end
   end
+
+  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Les deux relectures
+  # rendaient `:none` dans les deux cas : marqueur absent d'un tableau LU, et tableau ILLISIBLE. La
+  # creation a lieu dans les deux cas — c'est le bon arbitrage, poster bat perdre la reponse —, mais
+  # le retour MCP etait identique, donc l'agent ne pouvait pas savoir que son doublon etait
+  # possible. Or c'est lui qui reessaie : la relecture echoue precisement quand la forge va mal,
+  # c'est-a-dire au moment ou il va rejouer l'appel.
+  #
+  # Le projet interdit « never two live tickets for one brick » (`pod_tools.ex`) et le marqueur
+  # existe pour ca. On ne refuse pas la creation pour autant : on la NOMME. Une reutilisation porte
+  # `"idempotent" => true` ; une creation dont la deduplication n'a pas pu etre verifiee porte
+  # desormais `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
+  defp with_dedup_unverified(result, {:unverified, why}),
+    do: Map.put(result, "dedup_unverified", inspect(why))
+
+  defp with_dedup_unverified(result, _), do: result
 
   # Reused issues expose their stored assignee and an explicit idempotency flag.
   defp idempotent_result(issue) do
