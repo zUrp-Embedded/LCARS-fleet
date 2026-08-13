@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   BEAM restart) reaped by the PodWarden — which removes the PROCESS but NOT the forge label — OR a
   PARKED pod: one spawned + locked + briefed whose wake never LANDED (`wake_unreached`, and the pod's
   ack-driven kick loop exhausted), so the agent never pulled its task. "Working" is proven by a
-  PULLED task (`pod_pulled?`), not merely an enqueued `:pending` one: a never-pulled admission owns
+  PULLED task (`pod_pull_state/2`), not merely an enqueued `:pending` one: a never-pulled admission owns
   no lock, else a parked pod (task active-but-`:pending`) would mask its lock forever — a silent
   wedge the reconciliation could not tell from real work. Broken symmetry → without repair the
   `dispatch_*` skips the `:in_flight` brick FOREVER (a single pod stall wedges the pipe). Repair:
@@ -74,7 +74,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   # The PULLED work-item states — the durable proof an executor ACTIVATED (get_work_item transitions
   # `:pending → :assigned` and records the in-band ACK). ONE source for both ownership reads
-  # (`pod_pulled?` and `gate_eval_owned_refs`): a `:pending` admission (enqueued, never pulled — the
+  # (`pod_pull_state/2` and `gate_eval_owned_refs/2`): a `:pending` admission (enqueued, never pulled — the
   # wake was lost) owns nothing, on either side.
   @pulled_states [:assigned]
 
@@ -316,21 +316,51 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # workflow_run + ghost verdict on return). The union is done INSIDE the try: a failure to enumerate the
   # evals makes `:error` → the fail-safe "reclaim nothing" covers both sources.
   defp live_owned_refs(%Seams{task_queue: tq, repo: repo}, pods) do
+    # IGNORANCE PROPAGATES, IT IS NOT FOLDED INTO ABSENCE. The outer `rescue _ -> :error` below is the
+    # fail-safe of this whole function — "a cycle that cannot see every pod declares no orphan" — and
+    # its two helpers used to intercept the exception BEFORE it could reach here: an `:exit` from the
+    # TaskQueue came back as `false` from `pod_pulled?/2` and as `[]` from `project_pod_owned_refs/3`.
+    # A TaskQueue restart therefore read as "this pod owns nothing", its lock entered `orphaned_now`,
+    # and the reconciliation reclaimed a lock held by a LIVE pod — then re-dispatched the ticket and
+    # killed the original. The guard existed, and the two innermost `rescue` cancelled it.
+    #
+    # ⚠ Making the helpers "return `:unknown`", as the register's fiche prescribes literally, does not
+    # work here: `owned_refs_for_pod/3` fed an `Enum.flat_map/2` (a non-list `:unknown` raises) and
+    # `pod_pulled?/2` fed an `Enum.filter/2` (where `:unknown` is TRUTHY — the indeterminate pod would
+    # count as OWNING, the opposite of the intent). The indeterminacy has to be carried by a shape the
+    # caller destructures, and short-circuited: one unknown pod, and the whole cycle is `:error`.
+    #
+    # Ownership requires a PULLED task, not merely an enqueued one. A task stuck at `:pending` (never
+    # pulled) is an admission whose wake never LANDED (`wake_unreached` — the pod is spawned + locked
+    # + briefed, but the send-keys was lost and the ack-driven kick loop exhausted): the pod is
+    # PARKED, not working. `:pending` is an "active" state, so counting it as ownership let a parked
+    # pod mask its lock FOREVER — a silent wedge. The PULL (get_work_item → `:assigned`) is the
+    # durable ACK that the wake landed, so a never-pulled lock is treated as an orphan (2-tick grace)
+    # and the next dispatch re-attempts the activation. The nominal enqueue→pull window (seconds) is
+    # absorbed by the ~60s grace.
     pod_refs =
-      pods
-      # Ownership requires a PULLED task (`pod_pulled?`), not merely an enqueued one. A task stuck at
-      # `:pending` (never pulled) is an admission whose wake never LANDED (`wake_unreached` — the pod is
-      # spawned + locked + briefed, but the send-keys was lost and the ack-driven kick loop exhausted):
-      # the pod is PARKED, not working. `:pending` is an "active" state, so counting it as ownership let
-      # a parked pod mask its lock FOREVER (the reconciliation could not tell parked from working) — a
-      # silent wedge. The PULL (get_work_item → `:assigned`) is the durable ACK that the wake landed, so
-      # a never-pulled lock is treated as an orphan (2-tick grace) and the next dispatch re-attempts the
-      # activation. The nominal enqueue→pull window (seconds) is absorbed by the ~60s grace.
-      |> Enum.filter(&pod_pulled?(tq, &1[:pod_id]))
-      |> Enum.flat_map(&owned_refs_for_pod(&1[:pod_id], repo, tq))
-      |> MapSet.new()
+      Enum.reduce_while(pods, MapSet.new(), fn pod, acc ->
+        pod_id = pod[:pod_id]
 
-    MapSet.union(pod_refs, gate_eval_owned_refs(tq, repo))
+        case pod_pull_state(tq, pod_id) do
+          :unknown ->
+            {:halt, :error}
+
+          :not_pulled ->
+            {:cont, acc}
+
+          :pulled ->
+            case owned_refs_for_pod(pod_id, repo, tq) do
+              :unknown -> {:halt, :error}
+              {:ok, refs} -> {:cont, MapSet.union(acc, MapSet.new(refs))}
+            end
+        end
+      end)
+
+    case pod_refs do
+      :error -> :error
+      %MapSet{} -> MapSet.union(pod_refs, gate_eval_owned_refs(tq, repo))
+    end
   rescue
     _ -> :error
   catch
@@ -340,7 +370,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # G1 — refs owned by the ACTIVE GATEKEEPER EVALS of the broker. The source of truth already exists:
   # the eval task metadata is self-describing: it carries `gate_eval: true` + `resume_n` (issue number)
   # + `resume_payload.repository.full_name` (repo — multi-project: an eval of repoB does NOT own a
-  # ref of repoA). PULLED states only (`@pulled_states`, same rule as `pod_pulled?`): an eval owns its
+  # ref of repoA). PULLED states only (`@pulled_states`, same rule as `pod_pull_state/2`): an eval owns its
   # ref only once the gatekeeper has PULLED it — an eval stuck `:pending` (enqueued, but the wake was
   # lost and the kick net exhausted) is an admission WITHOUT an executor, and counting it as ownership
   # preserved the lock forever in the name of an eval nobody runs (the exact wedge this duty repairs
@@ -375,26 +405,34 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   defp owned_refs_for_pod(pod_id, repo, tq) do
     case parse_pod_ref(pod_id, repo) do
       [] -> project_pod_owned_refs(pod_id, repo, tq)
-      refs -> refs
+      refs -> {:ok, refs}
     end
   end
 
   # A project-scoped pod of THIS repo (scope prefix) owns the ref of its active task (`issue-N` ->
   # {repo, :issue, N}). Keeps the repo SCOPE: an eng of another repo does not own a ref of seams.repo.
   # function_exported?: a task_queue stub without the fn -> [] (conservative, masks nothing).
+  # `{:ok, refs}` = a MEASURED answer, `[]` included — out of this repo's scope, no active issue, an
+  # unparseable issue_id: three facts, all of them "owns no ref here". `:unknown` = the TaskQueue
+  # could not be asked at all, which is not the same fact and must not wear its clothes.
+  #
+  # `function_exported?/3` returning false stays `{:ok, []}` and NOT `:unknown`: a task_queue module
+  # without that function is a CAPABILITY of the module, decided at compile time and identical on
+  # every tick — a test stub, never a runtime failure. Reading it as indeterminacy would make every
+  # cycle `:error` under such a stub, i.e. a reconciliation that never reclaims anything.
   defp project_pod_owned_refs(pod_id, repo, tq) do
     with true <- String.starts_with?(pod_id, Fleet.PodId.scope_prefix(repo)),
          true <- function_exported?(tq, :pod_active_issue_id, 1),
          {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
          {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
-      [{repo, :issue, n}]
+      {:ok, [{repo, :issue, n}]}
     else
-      _ -> []
+      _ -> {:ok, []}
     end
   rescue
-    _ -> []
+    _ -> :unknown
   catch
-    _, _ -> []
+    _, _ -> :unknown
   end
 
   # Does a pod have an ACTIVE task (owns its slot/lock)? The state of the pod's latest task (`pod_status`)
@@ -442,18 +480,25 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # `:cleared`) are not pulled either — same non-ownership as `pod_task_state/2` (F-C050). Used by
   # `live_owned_refs` (lock ownership); the quiesced-pod duty keeps `pod_task_state/2` so a
   # freshly-briefed `:pending` pod is re-dispatched (via the lock reclaim), never REAPED.
-  defp pod_pulled?(tq, pod_id) when is_binary(pod_id) do
+  # THREE ANSWERS, because there are three facts. `:pulled` / `:not_pulled` are both MEASURED; a
+  # broker that cannot answer is `:unknown`, and `live_owned_refs/2` turns that into `:error` for the
+  # whole cycle. The old boolean folded the third onto `false` — "this pod has not pulled" — which is
+  # precisely the reading that made a live pod's lock look orphaned during a TaskQueue restart.
+  #
+  # A non-binary pod_id stays `:not_pulled`: that is a malformed entry in the Spawner snapshot, a
+  # measured fact about the pod, not an unavailable broker.
+  defp pod_pull_state(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
-      {:ok, state} -> state in @pulled_states
-      _ -> false
+      {:ok, state} -> if state in @pulled_states, do: :pulled, else: :not_pulled
+      _ -> :not_pulled
     end
   rescue
-    _ -> false
+    _ -> :unknown
   catch
-    _, _ -> false
+    _, _ -> :unknown
   end
 
-  defp pod_pulled?(_tq, _), do: false
+  defp pod_pull_state(_tq, _), do: :not_pulled
 
   # Lock refs that an INSTANCE pod owns, deduced from its pod_id. The FORMAT (`issue|pr` + number)
   # lives in `Fleet.PodId.parse_ref/2` (the authority that builds it); here we only SCOPE to the
