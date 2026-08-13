@@ -86,6 +86,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Topology lock ──
         check_boot_order_f8(root),
         check_catalogue_before_freeze(root),
+        check_event_registry_loaded_before_children(root),
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
@@ -1304,6 +1305,61 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         status: if(v < c and v < sp, do: :pass, else: :fail),
         evidence: ["offsets in application.ex: verify=#{v} cap_profile=#{c} sp_builder=#{sp}"],
         note: "boot-order lock, twin of boot.order_f8"
+      }
+    end
+  end
+
+  # THIRD OF THE BOOT-ORDER FAMILY, and the one whose subject is a DEFAULT rather than a call.
+  # `Bus.assert_authorized!/1` permits every event while the registry is empty
+  # (`@permit_empty_default true`). That default is not laxity: it holds the window between the
+  # first line of boot and the moment `Catalog.load!/0` populates the registry, and `load!/0` RAISES
+  # on an absent, invalid or empty `events.yaml` — so a fleet that reaches its first broadcast has a
+  # loaded registry, always.
+  #
+  # THE GUARANTEE LIVES IN ANOTHER MODULE AT ANOTHER MOMENT, and nothing held it. `Catalog.load!/0`
+  # sits in `EventRouter.Application.init/1` above the children list by convention alone; moving it
+  # one line down, or into a child's `init`, widens the permissive window to the whole boot without
+  # a single test going red — the failure needs an unregistered event AND a real supervision tree,
+  # which the hermetic suite does not play (`event_router_load_event_registry: false` in test.exs).
+  #
+  # MEASURED, because the register's fiche asks for the opposite and the number decides: flipping
+  # `@permit_empty_default` to `false` yields **101 failures out of 2698**. The permissive default
+  # is load-bearing. What was missing was never the fail-closed posture — it was this lock.
+  @doc false
+  def check_event_registry_loaded_before_children(root) do
+    rel = "lib/fleet/event_router/application.ex"
+    src = File.read!(Path.join(root, rel))
+
+    positions = %{
+      load: :binary.match(src, "Fleet.EventRouter.Catalog.load!()"),
+      children: :binary.match(src, "children =")
+    }
+
+    remediation =
+      "keep `Fleet.EventRouter.Catalog.load!()` ABOVE the children list in " <>
+        "EventRouter.Application.init/1: it is what closes the window that " <>
+        "`Bus.@permit_empty_default true` deliberately leaves open, and it raises on an absent, " <>
+        "invalid or empty events.yaml"
+
+    if Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
+      %{
+        id: "boot.event_registry_before_children",
+        remediation: remediation,
+        status: :fail,
+        evidence: ["#{rel}: `Catalog.load!()` or the children list not found — fail-closed"],
+        note: "boot-order lock, third of the family (F8, catalogue_before_freeze)"
+      }
+    else
+      %{load: {l, _}, children: {c, _}} = positions
+
+      %{
+        id: "boot.event_registry_before_children",
+        remediation: remediation,
+        status: if(l < c, do: :pass, else: :fail),
+        evidence: ["offsets in #{rel}: Catalog.load!=#{l} children=#{c}"],
+        note:
+          "the permissive empty-registry default is safe only while this call precedes every " <>
+            "process that can broadcast"
       }
     end
   end

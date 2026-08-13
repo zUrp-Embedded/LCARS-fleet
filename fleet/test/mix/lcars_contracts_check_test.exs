@@ -427,6 +427,73 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # JG-009 — LE DEFAUT PERMISSIF EST PORTANT, ET SA SURETE N'ETAIT TENUE PAR RIEN.
+  # `Bus.@permit_empty_default true` autorise toute emission tant que le registre est vide. Mesure
+  # avant de juger : le passer a `false` fait echouer **101 tests sur 2698**, parce que la suite
+  # hermetique tourne registre coupe par conception. La preuve de sortie de la fiche — « un registre
+  # vide fait echouer toute emission » — coute donc cela.
+  #
+  # Ce qui manquait n'etait pas la posture fail-closed, c'etait le VERROU : `Catalog.load!/0` ferme
+  # cette fenetre, il leve sur un `events.yaml` absent/invalide/vide, et il tenait sa position dans
+  # `init/1` par convention seule. Le descendre d'une ligne elargissait la fenetre a tout le boot
+  # sans que rien ne rougisse — la panne exige un evenement non declare ET un arbre de supervision
+  # reel, ce qu'aucun test hermetique ne joue. Troisieme de la famille (F8, catalogue_before_freeze).
+  describe "boot.event_registry_before_children — l'ordre qui rend le defaut permissif sur" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "jg009-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet", "event_router"]))
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root, src: Path.join([root, "lib", "fleet", "event_router", "application.ex"])}
+    end
+
+    test "load!/0 AVANT la liste des enfants → pass", %{root: root, src: src} do
+      File.write!(src, """
+      def init(_arg) do
+        Fleet.EventRouter.Catalog.load!()
+        children = base_children()
+        Supervisor.init(children, strategy: :one_for_one)
+      end
+      """)
+
+      assert Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root).status ==
+               :pass
+    end
+
+    test "load!/0 APRES la liste des enfants → fail, avec les deux offsets", %{
+      root: root,
+      src: src
+    } do
+      File.write!(src, """
+      def init(_arg) do
+        children = base_children()
+        Fleet.EventRouter.Catalog.load!()
+        Supervisor.init(children, strategy: :one_for_one)
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+
+      assert result.status == :fail,
+             "la fenetre permissive a ete elargie a tout le boot sans que rien ne rougisse"
+
+      assert hd(result.evidence) =~ "Catalog.load!="
+    end
+
+    test "l'appel disparu → fail-closed, jamais un vert sur une absence", %{root: root, src: src} do
+      File.write!(src, """
+      def init(_arg) do
+        children = base_children()
+        Supervisor.init(children, strategy: :one_for_one)
+      end
+      """)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "fail-closed"
+    end
+  end
+
   test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 

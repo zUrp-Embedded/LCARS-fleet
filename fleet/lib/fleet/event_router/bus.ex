@@ -136,6 +136,22 @@ defmodule Fleet.EventRouter.Bus do
     :ok
   end
 
+  # PERMISSIVE ON PURPOSE, AND IT IS LOAD-BEARING. An empty registry means "the registry is not
+  # loaded YET", not "nothing is authorized": this default holds the window between the first line
+  # of boot and `Catalog.load!/0`. Measured on this tree — flipping it to `false` fails 101 of 2698
+  # tests, because the hermetic suite runs with the registry off by design
+  # (`event_router_load_event_registry: false`). A fail-closed default here does not harden the bus,
+  # it makes the boot and the whole suite unable to emit.
+  #
+  # WHAT MAKES IT SAFE IS NOT WRITTEN IN THIS MODULE, so read it here: `Catalog.load!/0` RAISES on
+  # an absent, invalid or empty `events.yaml`, and it runs in `EventRouter.Application.init/1`
+  # ABOVE the children list. A fleet that reaches its first broadcast therefore has a populated
+  # registry, and this branch is unreachable in a live fleet.
+  #
+  # That ordering was held by convention alone until the `boot.event_registry_before_children` lock
+  # in `mix lcars.contracts.check`: moving the `load!/0` call one line down would have widened this
+  # window to the whole boot with nothing going red — the failure needs an unregistered event AND a
+  # real supervision tree, which no hermetic test plays.
   @permit_empty_default true
 
   defp assert_authorized!(%Fleet.Event{type: type} = event) do
