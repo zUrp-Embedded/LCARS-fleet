@@ -48,12 +48,27 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   ]
 
   # Mute connections eventually release shared Task capacity (D-07 config namespace).
+  #
+  # ⚠ FIGE A LA COMPILATION, ET C'EST LE SEUL ENDROIT QUI LE DIT. `compile_env` grave la valeur dans
+  # le module : un `Application.put_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, …)` a l'execution
+  # est IGNORE, en silence. Tout le reste de ce sous-systeme lit par `get_env` (15 occurrences dans
+  # `lib/fleet/mcp/`), donc ces deux plafonds RESSEMBLENT a des molettes et n'en sont pas.
+  #
+  # L'ecart est defendu, pas subi : `compile_env` est ce qui autorise l'usage en ATTRIBUT DE MODULE
+  # (une garde de fonction ne peut pas appeler `get_env`), et une release refuse de demarrer si la
+  # config de boot diverge de celle de la compilation — une protection qu'un `get_env` n'a pas. Les
+  # basculer en `get_env` echangerait ces deux proprietes contre une molette que personne n'a
+  # demandee : MESURE, aucune de ces deux cles n'apparait dans `config/`, `bin/`, `deploy/` ni
+  # `test/`, et aucune variable d'environnement ne les expose.
   @idle_timeout_ms Application.compile_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, 300_000)
 
   # Connection service is isolated from the accept loop.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
   # Per-pod ceiling protects the fleet-wide connection pool.
+  # Meme nature figee que `@idle_timeout_ms` ci-dessus, et pour les memes raisons — ces deux-la sont
+  # les SEULS `compile_env` de tout `lib/`, ce qui rend leur exception d'autant plus facile a lire
+  # comme un oubli si personne ne l'ecrit.
   @max_conns_per_pod Application.compile_env(:lcars_fleet, :mcp_max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
