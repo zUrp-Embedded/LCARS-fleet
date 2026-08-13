@@ -75,6 +75,16 @@ defmodule Fleet.CapProfile.Image do
                     "proven-good image at boot, or do not boot"
         end
 
+      # SCHEMA ONLY, and that is a smaller promise than it looks: the schema types
+      # `scope.disallowedTools` as an array of strings and constrains NOTHING about its contents,
+      # so a profile that passes here can still violate the `g24_*` containment invariants — the
+      # ones that keep `web_search`, `code_execution` and friends away from every role.
+      #
+      # Those are checked on the COMPOSED profile (overlays merged, baseline denylist resolved),
+      # which does not exist yet at this point: `CanonProof.prove_all!/0` at boot, and
+      # `Pod.gate_cap_profile/1` in `:allocating` — the latter unconditional and on every launching
+      # pod's path. Publication is therefore deliberately the weakest of the three checks, and an
+      # over-provisioned profile fails at spawn rather than here.
       case Schema.validate(raw, schema_kind) do
         :ok ->
           :ok

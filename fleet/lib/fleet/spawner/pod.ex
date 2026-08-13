@@ -1308,6 +1308,23 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Runtime containment validation covers rules beyond the JSON schema.
+  #
+  # THIS IS THE UNCONDITIONAL LAYER, and saying so is the point. The `g24_*` invariants — no role
+  # gets `web_search`, `web_fetch`, `code_execution`, `bash_code_execution`, `text_editor` — live in
+  # `CapProfile.validate/1`, which the JSON schema does NOT enforce: it types `disallowedTools` as
+  # an array of strings and says nothing about its contents. So a schema-valid profile can violate
+  # g24, e.g. when a modop overlay REPLACES the list instead of merging it.
+  #
+  # Two layers answer that, and only one of them is always on:
+  #   * `CanonProof.prove_all!/0` at boot — early warning, knob `:spawner_prove_canon_at_boot`
+  #     (default TRUE, set false only in the hermetic test baseline, where CanonProof has its own
+  #     direct tests). It tells the operator BEFORE readiness.
+  #   * this gate — in `:allocating`, the FIRST phase every launching pod goes through
+  #     (`:allocating → :cleaning → :projecting → :launching`), before the pod dir is created and
+  #     before the resolved profile is written to disk. No knob, no path around it.
+  #
+  # An over-provisioned profile can therefore be PUBLISHED and can survive a boot with the proof
+  # switched off; it cannot reach a pod. The failure is late rather than early, never silent.
   defp gate_cap_profile(resolved) do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
