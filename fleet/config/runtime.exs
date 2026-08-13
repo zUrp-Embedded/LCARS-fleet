@@ -362,36 +362,47 @@ if config_env() != :test and not tool_mode? do
 
   # ============================================================
   # fleet_spawner — mcp_server_spec (config of the `.mcp-fleet.json`
-  # written into each pod by pod.ex maybe_provision_mcp_config)
+  # written into each pod by `Fleet.Spawner.Pod.McpProvision.maybe_provision_mcp_config/5`)
   # ============================================================
-  # The claude REPL pod starts bridge.py via this spec; the bridge talks to the central via the per-pod
-  # AF_UNIX socket whose path is injected PER-POD by pod.ex as `LCARS_FLEET_MCP_SOCKET`
-  # (build_fleet_mcp_entry) — no `LCARS_FLEET_MCP_URL` (no shared HTTP loopback transport
-  # exists). `LCARS_POD_ID` is also added per-pod by pod.ex.
+  # The claude REPL pod starts the bridge via this spec; the bridge reaches the central over the
+  # per-pod AF_UNIX socket, whose path is injected per-pod as `LCARS_FLEET_MCP_SOCKET`. No
+  # `LCARS_FLEET_MCP_URL`: no shared HTTP loopback transport exists.
   #
-  # The bridge CANNOT be launched via its host path
-  # (`/var/lib/lcars/bin/...`) — the bwrap sandbox does NOT mount `/var/lib/lcars`.
-  # So we provide `bridge_source` (HOST path to COPY); pod.ex projects it
-  # under `pod_dir/.lcars/` and resolves the `{{BRIDGE}}`/`{{BRIDGE_LOG}}` placeholders
-  # onto that pod-local path (pod_dir is the ONLY RW space mounted in the sandbox,
-  # at the same absolute path host+sandbox). Cf. pod.ex build_fleet_mcp_entry.
+  # IDENTITY IS THE CHANNEL, and nothing else. The central correlates a call to its pod FROM the
+  # socket it arrived on, so no pod identity travels in the spec or on the wire — a declared one
+  # would be forgeable, and the builder drops it rather than read it. Do not add one back here as
+  # a convenience: the entry would carry a claim the protocol refuses to trust.
+  #
+  # `bridge_source` is a HOST path to COPY, never a path to launch: under bwrap the sandbox mounts
+  # neither `/var/lib/lcars` nor the human's tree, so a host path does not exist in the namespace
+  # and `bash -c` dies on the log redirect before exec'ing python — no `mcp__fleet__*` tool, hence
+  # a pod that can neither pull its brief nor submit its result.
+  #
+  # ⚠ HOST PATH AND NAMESPACE PATH ARE TWO DIFFERENT PATHS. bwrap RELOCATES the pod_dir behind
+  # `LCARS_POD_HOME` (`/home/.pod`), set for every bwrap pod — which is every canon cap-profile.
+  # The copy goes to the host path, the `.mcp-fleet.json` references the in-namespace one. Identity
+  # between the two holds ONLY for host pods and tests, and assuming it here is the exact trap
+  # `McpProvision` documents. It is that module, not this file, that resolves the placeholders and
+  # owns the rule.
   #
   # Gate on `bridge_path` ALONE (the bridge must be copyable): the comm target is not a URL but
   # the per-pod socket, resolved at runtime pod-side, not a static boot config.
   if bridge_path = System.get_env("LCARS_FLEET_MCP_BRIDGE_PATH") do
     config :lcars_fleet, :spawner_mcp_server_spec, %{
-      # HOST path of the bridge, copied per-pod by pod.ex (not launched in place).
+      # HOST path of the bridge, copied per-pod by `McpProvision` (never launched in place).
       "bridge_source" => Fleet.EnvParse.path("LCARS_FLEET_MCP_BRIDGE_PATH", bridge_path),
       "command" => "bash",
       "args" => [
         "-c",
-        # {{BRIDGE}}/{{BRIDGE_LOG}} = POD-LOCAL paths resolved by pod.ex (under
-        # pod_dir/.lcars/, RW in the sandbox). NO host path here: invisible
-        # inside the bwrap sandbox.
+        # {{BRIDGE}}/{{BRIDGE_LOG}} are resolved by `McpProvision` onto the IN-NAMESPACE path
+        # (`sandbox_home/.lcars/`) — what claude executes in the sandbox, not where the spawner
+        # wrote the file. A host path substituted here is invisible from inside bwrap.
         "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"
       ]
-      # No static "env" key: `LCARS_FLEET_MCP_SOCKET` (per-pod socket) + `LCARS_POD_ID` are
-      # injected PER-POD by pod.ex (build_fleet_mcp_entry), not frozen here.
+      # No static "env" key. `McpProvision.build_fleet_mcp_entry/5` injects exactly one variable
+      # per pod, `LCARS_FLEET_MCP_SOCKET`, and MERGES it over whatever "env" the spec declares —
+      # so a key added here would survive into every pod. None is: the pod's identity is the
+      # socket it speaks on, and a declared identity would be forgeable.
     }
   end
 
