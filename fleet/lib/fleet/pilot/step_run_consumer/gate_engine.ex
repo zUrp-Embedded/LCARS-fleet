@@ -183,7 +183,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
       {:judge_verdict, decision, trace, ctx}
     else
-      case Fleet.Workflow.Gates.evaluate(spec, result, %{}) do
+      case Fleet.Workflow.Gates.evaluate(spec, system_over_declared(spec, result, payload), %{}) do
         :pass ->
           case producer?(
                  payload["role"],
@@ -232,6 +232,36 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
               {:error, {:gatekeeper_dispatch, reason}}
           end
       end
+    end
+  end
+
+  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. The gate used to read `outputs` that came
+  # entirely from the pod's own `result`, so the producer attested that its own deliverable existed
+  # and was not empty. `StepOutputs.derive/2` answers that from the card's declared `outputs`,
+  # checked in the workspace the RUNTIME created — and the merge order is what makes it a fact
+  # rather than an opinion: system LAST, so a `result` claiming `outputs_exist: true` is overridden,
+  # not honoured.
+  #
+  # THIS IS THE ONLY CALLER of `Gates.evaluate/3` in `lib/`. Deriving here rather than inside
+  # `Gates` keeps that module PURE (its contract, and what makes it testable without a filesystem);
+  # the cost is that a SECOND rail calling `Gates.evaluate` directly would silently go back to
+  # believing the pod. There is no second rail today, and adding one means passing through here.
+  defp system_over_declared(spec, result, payload) do
+    case Fleet.Workflow.StepOutputs.derive(spec, payload["workspace"]) do
+      empty when empty == %{} ->
+        result
+
+      system ->
+        claimed = Enum.filter(Fleet.Workflow.StepOutputs.system_keys(), &Map.has_key?(result, &1))
+
+        if claimed != [] do
+          Logger.info(
+            "StepRunConsumer: pod self-declared system-owned gate facts #{inspect(claimed)} " <>
+              "(role=#{payload["role"]}) — overridden by the workspace check"
+          )
+        end
+
+        Map.merge(result, system)
     end
   end
 

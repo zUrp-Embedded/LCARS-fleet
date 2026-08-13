@@ -162,13 +162,15 @@ defmodule Fleet.Workflow.LoaderV25Test do
     end
   end
 
-  test "every step field WITHOUT a runtime reader says so in the schema" do
-    # Le mur, et il tient en une phrase : un champ que personne ne lit doit le DIRE la ou un auteur
-    # de carte le rencontre. `outputs` portait la note depuis 2026-08-05, `inputs` ne l'avait pas —
-    # et une declaration sans lecteur qui ne dit pas qu'elle n'en a pas se lit comme un contrat.
+  test "un champ d'etape dit la VERITE sur l'existence de son lecteur runtime" do
+    # Le mur, et il tient en une phrase : ce qu'un auteur de carte lit sur un champ doit correspondre
+    # a ce que le moteur en fait. Un champ sans lecteur qui ne le dit pas se lit comme un contrat ;
+    # un champ QUI A un lecteur et qui se declare documentaire est pire — il invite a le remplir a
+    # cote de la verification qui le lit vraiment.
     #
-    # Ce test verrouille la paire mesuree ce jour-la. Il ne pretend pas decouvrir les futurs : c'est
-    # le RATISSAGE (lecteur/producteur par champ) qui trouve, ce test qui empeche de perdre.
+    # La paire est asymetrique depuis BL-6-59, et l'asymetrie est le point : `outputs` est verifiable
+    # dans le workspace du pod, `inputs` ne l'est pas (une source peut etre un ticket, une autre
+    # face, un depot distant).
     schema =
       Path.join([:code.priv_dir(:lcars_fleet), "workflow", "schema", "workflow-map-v2.5.json"])
       |> File.read!()
@@ -179,11 +181,25 @@ defmodule Fleet.Workflow.LoaderV25Test do
         "^[a-zA-Z0-9_-]+$"
       ]["properties"]
 
-    for field <- ~w(inputs outputs) do
-      assert step[field]["description"] =~ "DOCUMENTAIRE",
-             "#{field} n'a aucun lecteur runtime et le schema ne le dit pas — un auteur de carte " <>
-               "le lira comme un contrat"
-    end
+    assert step["inputs"]["description"] =~ "DOCUMENTAIRE",
+           "inputs n'a aucun lecteur runtime et le schema ne le dit pas — un auteur de carte " <>
+             "le lira comme un contrat"
+
+    # `outputs` : le lecteur est PROUVE ici, pas cite. On l'exerce — un champ declare produit des
+    # faits, un champ absent n'en produit aucun. Une assertion sur le seul texte du schema serait
+    # une seconde liste a tenir a la main, exactement ce que ce test existe pour eviter.
+    assert Fleet.Workflow.StepOutputs.derive(%{"outputs" => ["x/y.json"]}, nil) != %{},
+           "le schema va declarer outputs LU par le moteur — mais rien ne le lit"
+
+    assert Fleet.Workflow.StepOutputs.derive(%{}, nil) == %{}
+
+    refute step["outputs"]["description"] =~ "DOCUMENTAIRE",
+           "outputs A un lecteur runtime (Fleet.Workflow.StepOutputs) et le schema le declare " <>
+             "encore documentaire — un auteur de carte le remplira a cote de la porte qui le lit"
+
+    assert step["outputs"]["description"] =~ "StepOutputs",
+           "outputs est lu par le moteur : le schema doit NOMMER son lecteur, sinon l'auteur de " <>
+             "carte ne sait pas ce qui va verifier ce qu'il ecrit"
   end
 
   @tag :tmp_dir
