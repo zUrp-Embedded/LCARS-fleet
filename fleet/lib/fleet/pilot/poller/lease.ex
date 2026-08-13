@@ -1,8 +1,24 @@
 defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
-  Repo-serialized lease of the step rail: **at most ONE
-  active workflow_run per repo**. Classifies each issue of the tick (ENGAGED / QUEUED), then
-  dispatches under this lease — the feature-branches stay sequential → clean rebase merge (linear history; FF is NOT guaranteed, `main` advances under parallel PRs — cf. `ForgeClient.merge_pr` `Do: rebase`).
+  Repo-scoped ADMISSION of the step rail: at most `Admission.max_fan/2` active workflow_runs per
+  repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
+  Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
+
+  ⚠ **CE PARAGRAPHE DISAIT « at most ONE active workflow_run per repo », ET C'ETAIT FAUX AU DEFAUT
+  LIVRE.** Le booleen `:repo_serialized_lease` a ete remplace par un COMPTEUR (`Admission` le dit :
+  « Serial is this ceiling at 1, not another mechanism »), et cette phrase est restee. Un lecteur en
+  repartait avec un invariant de serialisation que le runtime n'a plus : sur un projet qui ne declare
+  rien, cinq workflow_runs peuvent voler ensemble. Corrige le 2026-08-13 (BL-6-75) — le nom du module
+  garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet est un plafond.
+
+  ⚠ **ET LE PLAFOND EST PER-HUMAIN, ce que rien ne disait.** Le compte se fait sur la liste que le
+  poller a obtenue avec `assigned_by=<son humain>` — donc deux humains sur un meme depot tiennent
+  DEUX compteurs disjoints, et le depot peut porter jusqu'a 2 x max_fan runs. Jamais observe (aucun
+  banc n'a fait travailler deux humains sur le meme depot en mode step), et sans consequence connue
+  sur la correction : les branches sont `lcars/issue-<n>-<role>`, donc sans collision, et le merge
+  est un rebase qui absorbe deja l'avance de `main` sous PR paralleles. Ce qui est en jeu est le
+  debit et la linearite, pas l'integrite. Le fond — la serialisation par depot a-t-elle encore un
+  sens a deux humains, et le bail doit-il vivre SUR LA FORGE — est [BL-6-75], gele.
 
   ## The decision (business core)
 
