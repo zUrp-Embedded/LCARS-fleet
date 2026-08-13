@@ -255,15 +255,25 @@ defmodule Fleet.MCP.PodSocketAcceptor do
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})
 
       # F-C138 — the pod socket serves `tools/list` (a bridge-side hard-coded catalogue would
-      # DRIFT from the deftools). Single
-      # source: the schemas come from `PodTools.get_tools/0` (the `deftool` authority), filtered to this
-      # pod's surface = base (universal) + the role-gated names threaded at spawn (derived from the
-      # cap-profile `allowedTools`). This list is DISCOVERY, NOT authorization: `tools/call` (above) does
-      # NOT re-check it, so a pod that knows an off-list tool name can still call it. The real barrier is
-      # AT the tool — delegation tools carry a server-side gate (`require_architect`/`require_onboarder`,
-      # `Delegation`), `get_work_item`/`submit_result` are scoped to the pod's OWN work item (pod_id from
-      # the channel, never a wire arg). INVARIANT: every tool MUST be gated or pod-scoped; one relying on
-      # this list alone would be callable off-list. The bridge forwards blindly.
+      # DRIFT from the deftools). Single source: the schemas come from `PodTools.get_tools/0` (the
+      # `deftool` authority), filtered to base (universal) plus whatever names were threaded at
+      # spawn.
+      #
+      # DISCOVERY, NOT AUTHORIZATION: `tools/call` (above) does not re-check this list, so a pod
+      # that knows an off-list name calls it anyway. The real barrier is AT the tool — the
+      # delegation tools carry a server-side role gate (`require_architect`/`require_onboarder`,
+      # `Delegation`) and `get_work_item`/`submit_result` derive their subject from the channel's
+      # pod_id, never from a wire argument. INVARIANT, held by `mcp.tools_gated` in
+      # `lcars.contracts.check`: every tool is role-gated or pod-scoped; one relying on this list
+      # alone would be callable off-list. The bridge forwards blindly.
+      #
+      # ⚠ AND THE THREADED HALF IS EMPTY IN EVERY PROFILE SHIPPED. The names come from
+      # `CapProfile.mcp_fleet_tools/1`, i.e. the `scope.allowedTools` entries prefixed
+      # `mcp__fleet__` — and not one canon cap-profile declares a single one, so every pod of every
+      # role is served exactly the two base tools while its SP names a dozen others by their full
+      # `mcp__fleet__…` name. Discovery and instruction disagree by design-in-fact: the agents work
+      # from the prompt, and this list is a filter over a knob nobody fills. Read it as the surface
+      # a profile MAY narrow to, never as the surface a role HAS.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 

@@ -1996,8 +1996,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # to an ungated body, and such a tool is callable by ANY pod with nothing said about it.
   #
   # Two admissible forms, and no third:
-  #   * POD-SCOPED — the clause head matches `%{pod_id: _}`. Identity is the CHANNEL (one pod, one
-  #     socket), never the wire.
+  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the tool's
+  #     subject comes from the socket (one pod, one socket) and never from the wire. Receiving
+  #     `%{pod_id: _}` is not the property: the acceptor hands that map to every tool alike.
   #   * ROLE-GATED — the body calls a `Delegation` function whose own body calls
   #     `require_architect`/`require_onboarder`, which resolve role AND repo from the spawn binding.
   # A clause whose body is a bare `{:error, _, state}` (bad arguments) is inert: it neither needs
@@ -2053,9 +2054,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "mcp.tools_gated",
       remediation:
-        "give the tool a gate: pattern-match %{pod_id: _} in its handle_tool_call head " <>
-          "(channel identity) or route it through a Delegation function guarded by " <>
-          "require_architect/require_onboarder — tools/call does not re-check tools/list",
+        "give the tool a gate: bind the channel identity in its handle_tool_call head " <>
+          "(%{pod_id: pod_id}) AND derive the tool's subject from it in the body, or route it " <>
+          "through a Delegation function guarded by require_architect/require_onboarder — " <>
+          "tools/call does not re-check tools/list, and receiving pod_id is not using it",
       status: if(is_nil(broken) and ungated == [] and undeclared == [], do: :pass, else: :fail),
       evidence:
         cond do
@@ -3126,7 +3128,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp clause_ok?(clause, gated_fns),
     do: pod_scoped?(clause) or role_gated?(clause, gated_fns) or inert?(clause)
 
-  defp pod_scoped?(%{state: state}), do: Macro.to_string(state) =~ ~r/\bpod_id:/
+  # POD-SCOPED = THE CLAUSE USES THE CHANNEL IDENTITY, not merely receives it. `PodSocketAcceptor`
+  # builds `%{pod_id: pod_id}` for EVERY `tools/call`, unconditionally and identically for every
+  # tool — so the presence of that key in a clause head says nothing about authorization. Matching
+  # `\bpod_id:` alone accepted `%{pod_id: _}`: a clause that pattern-matches the identity and throws
+  # it away, then acts globally, was reported as gated. The wall was one underscore wide.
+  #
+  # Two conditions now, and the second is the one that carries the meaning: the head must BIND the
+  # identity to a real variable (`_` and `_pod_id` are discards, and a discard is the tell), and the
+  # BODY must mention that variable — the tool's subject is then derived from the channel rather
+  # than from the wire, which is the whole property.
+  #
+  # MEASURED before tightening, because a wall may only be born green: 23 of the 25 tools are
+  # ROLE-gated (`require_architect`/`require_onboarder`), every mutator among them, and the only two
+  # admitted by this predicate are `get_work_item` and `submit_result` — both bind and both use.
+  # The hole was real and nothing was standing in it.
+  defp pod_scoped?(%{state: state, body: body}) do
+    case Regex.run(~r/pod_id:\s*([a-z][a-zA-Z0-9_]*)/, Macro.to_string(state)) do
+      [_, var] -> Macro.to_string(body) =~ ~r/\b#{Regex.escape(var)}\b/
+      nil -> false
+    end
+  end
 
   defp role_gated?(%{body: body}, gated_fns) do
     body
