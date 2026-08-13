@@ -34,7 +34,9 @@ defmodule ReconciliationUnreachableTqTest do
     # La file NE REPOND PAS — la forme exacte d'un `GenServer.call` vers un serveur mort.
     def list_active, do: []
     def pod_active_issue_id(_), do: {:ok, nil}
-    def pod_status(_), do: exit({:timeout, {GenServer, :call, [Fleet.TaskQueue.Server, :x, 5000]}})
+
+    def pod_status(_),
+      do: exit({:timeout, {GenServer, :call, [Fleet.TaskQueue.Server, :x, 5000]}})
   end
 
   defmodule Forge do
