@@ -1503,10 +1503,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # bounds its surface (BL-6-44).
   # The check's own file is on the list by NECESSITY: it must name the word in order to forbid it.
   # That is the one exemption needing no antibody — a lock does not trap itself.
+  #
+  # WHAT IT DOES NOT REACH, and the sentence above must not be read past it: THE SOURCE TREE ONLY.
+  # The word also lives in the SP corpus (`priv/catalogue*/sp_builder/**`), which is not scanned
+  # here — and that is the population where the prior does its work, since those texts are injected
+  # into the agents' own context. Measured 2026-08-13: the block `core/pod-sanctuary`, composed into
+  # SIX roles, opens on the heading "## Ton monde (sanctuaire)" with NO antibody anywhere in it.
+  # Extending the scan there is not a lint change but a change to authored prompt material, whose
+  # calibration belongs to its author — the finding is on record, the edit is not this wall's to
+  # make.
+  #
+  # A WHITELIST ENTRY THAT PROTECTS NOTHING IS A PRE-AUTHORIZED SLOT. `lib/fleet/spawner/pod/
+  # launch_spec.ex` sat here after the word had left it: the exemption survived its subject, and the
+  # day the word came back that file would have carried it exempt and unremarked. An allowlist is
+  # audited by re-measuring, never by reading it.
   @sanctuary_allowed ~w(
     bin/bwrap_launch.sh
     lib/fleet/cap_profile/invariants.ex
-    lib/fleet/spawner/pod/launch_spec.ex
     lib/mix/tasks/lcars.contracts.check.ex
   )
 
@@ -1565,9 +1578,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   @doc false
   def check_sanctuary_contained(root) do
+    # EVERY FILE OF THE THREE TREES, not the three source extensions. `**/*.{ex,exs,sh}` could not
+    # see `bin/claude_launch.egress`, which carried the word, in a scanned directory, with no
+    # antibody — a carrier that escaped by file extension alone. `bin/` holds `.sh`, `.py`,
+    # `.egress`, `.identity` and two extensionless launchers; a wall that names a directory and
+    # measures three suffixes of it says more than it checks. Non-text files (the `__pycache__`
+    # bytecode) drop out on `String.valid?/1` rather than on a suffix list that would have to be
+    # kept in step with them.
     scanned =
       ["lib", "bin", "etc"]
-      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs,sh}"])) end)
+      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**"])) end)
+      |> Enum.reject(&File.dir?/1)
 
     offenders =
       scanned
@@ -1576,6 +1597,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
         rel not in @sanctuary_allowed and
           match?({:ok, c} when is_binary(c), File.read(f)) and
+          String.valid?(File.read!(f)) and
           File.read!(f) =~ ~r/sanctuaire|sanctuary/i
       end)
       |> Enum.map(&Path.relative_to(&1, root))
@@ -1593,7 +1615,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         status: if(offenders == [], do: :pass, else: :fail),
         evidence: offenders,
         note:
-          "le mot reste borne aux #{length(@sanctuary_allowed)} fichiers qui portent son anticorps (BL-6-44)"
+          "#{length(scanned)} fichier(s) de lib/, bin/ et etc/ balayes — le mot y reste borne aux " <>
+            "#{length(@sanctuary_allowed)} qui portent son anticorps (BL-6-44). Le corpus SP " <>
+            "(priv/catalogue*/sp_builder/**) est HORS de ce perimetre : c'est de la matiere de " <>
+            "prompt, dont la calibration appartient a son auteur"
       }
     end
   end

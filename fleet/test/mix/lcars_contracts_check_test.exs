@@ -266,6 +266,76 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # JG-085 — LE MUR NOMMAIT TROIS REPERTOIRES ET N'EN MESURAIT QUE TROIS SUFFIXES. `**/*.{ex,exs,sh}`
+  # ne pouvait pas voir `bin/claude_launch.egress`, qui portait le mot, dans un repertoire balaye,
+  # sans anticorps : un porteur qui echappait par son extension. `bin/` contient `.sh`, `.py`,
+  # `.egress`, `.identity` et deux lanceurs sans extension. Mesure : 253 fichiers avant, 279 apres.
+  describe "vocab.sanctuary_contained — la population, c'est le repertoire, pas trois suffixes" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "jg085-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "bin"))
+      File.mkdir_p!(Path.join([root, "lib", "fleet"]))
+      File.mkdir_p!(Path.join(root, "etc"))
+
+      # Un fichier temoin sans le mot : la population n'est jamais vide, donc un `:fail` ne peut pas
+      # venir du garde INSTRUMENT BROKEN.
+      File.write!(Path.join([root, "lib", "fleet", "ok.ex"]), "defmodule Ok do\nend\n")
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root}
+    end
+
+    test "un porteur a extension non-source est vu — c'est le fichier qui compte, pas son suffixe",
+         %{root: root} do
+      File.write!(
+        Path.join([root, "bin", "launcher.egress"]),
+        "# the sanctuary is vendor-aware\n"
+      )
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+
+      assert result.status == :fail, "un porteur a echappe par son extension"
+      assert result.evidence == ["bin/launcher.egress"]
+    end
+
+    test "un lanceur SANS extension est vu aussi", %{root: root} do
+      File.write!(Path.join([root, "bin", "fleet_v2"]), "#!/bin/sh\n# le sanctuaire du pod\n")
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+
+      assert result.status == :fail
+      assert result.evidence == ["bin/fleet_v2"]
+    end
+
+    # Le pyc de `bin/__pycache__` est le cas reel : il vit dans un repertoire balaye et n'est pas de
+    # l'UTF-8. Sans le garde il fait exploser la regex ; avec une liste de suffixes il faudrait la
+    # tenir a jour a chaque outil ajoute.
+    test "un fichier non-texte ne fait ni echouer ni planter le mur", %{root: root} do
+      File.write!(Path.join([root, "bin", "bytecode.pyc"]), <<0xC3, 0x28, 0xA0, 0xA1, 0x00>>)
+
+      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "INVERSE TWIN — un fichier de la liste blanche reste silencieux", %{root: root} do
+      File.mkdir_p!(Path.join([root, "lib", "fleet", "cap_profile"]))
+
+      File.write!(
+        Path.join([root, "lib", "fleet", "cap_profile", "invariants.ex"]),
+        "# sanctuary, et l'anticorps juste a cote\n"
+      )
+
+      assert Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).status == :pass
+    end
+
+    test "la note dit COMBIEN de fichiers ont gagne le vert", %{root: root} do
+      note = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).note
+
+      assert note =~ "1 fichier(s) de lib/, bin/ et etc/ balayes"
+      assert note =~ "corpus SP"
+    end
+  end
+
   test "run_checks passes on the real repo + all checks green (hollow-green guards without false-red)" do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 
