@@ -110,7 +110,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # operator reads months later; one that names approvers who do not exist is worse than no
     # comment, and it sat under a line that said "nothing is faked".
     approvers = approving_judges(forge, repo, pr_number, forge_opts)
-    body = promote_comment(issue_n, pr_number, producer, approvers) <> "\n\n" <> signature
+
+    # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
+    # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
+    body = promote_comment(issue_n, pr_number, producer, approvers, wall) <> "\n\n" <> signature
 
     # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
     # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
@@ -484,7 +487,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   defp note_wall_not_run(_forge, _repo, _pr_number, :ok, _forge_opts), do: :ok
 
   defp note_wall_not_run(forge, repo, pr_number, {:skipped, why}, forge_opts) do
-    _ =
+    # LE RÉSULTAT N'EST PLUS JETÉ. La note est le SECOND porteur du fait (le premier est la ligne de
+    # validation ci-dessus, qui voyage maintenant avec `wall`) : si elle ne part pas, il en reste un,
+    # et c'est pourquoi cet échec ne bloque pas. Mais il ne se tait plus — la forge est le support
+    # d'audit qu'un humain relit, et une note absente y est indistinguable d'une note jamais due.
+    posted =
       comment(
         forge,
         repo,
@@ -497,7 +504,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         Keyword.put(forge_opts, :dedup_signature, "[provenance-wall-skipped:pr-#{pr_number}]")
       )
 
-    :ok
+    case posted do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "GatekeeperSeal: PR ##{pr_number} merged WITHOUT the provenance wall (#{inspect(why)}), " <>
+            "and the note saying so could NOT be posted (#{inspect(reason)}). The validation line " <>
+            "of the seal carries the fact, so the ticket is not silent — but this PR now lacks its " <>
+            "own dedicated mark on the forge."
+        )
+
+        :ok
+    end
   end
 
   defp comment(forge, repo, issue_n, body, opts) do
@@ -589,13 +609,14 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   sentences on purpose: an operator reading this comment months later must be able to tell a
   verdict from an absence of verdict without opening the PR.
   """
-  @spec promote_comment(integer(), integer(), String.t(), [String.t()]) :: String.t()
-  def promote_comment(issue_n, pr_number, producer, approvers \\ []) do
+  @spec promote_comment(integer(), integer(), String.t(), [String.t()], :ok | {:skipped, term()}) ::
+          String.t()
+  def promote_comment(issue_n, pr_number, producer, approvers \\ [], wall \\ :ok) do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
-    - #{validation_line(approvers)}
+    - #{validation_line(approvers, wall)}
     - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge **rebase** (historique linéaire) — ce ticket sera fermé juste après ce commentaire.
     #{interim_note(approvers)}
     """
@@ -604,12 +625,27 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # Judged path: name the accounts. Zero-judge path: say WHY there is no verdict, and on whose
   # authority the merge happened — the card. « Aucun juge n'a répondu » would describe a failure;
   # « la carte n'en pose pas » describes the design.
-  defp validation_line([]),
+  # « IL A ÉTÉ FRANCHI » ÉTAIT INCONDITIONNEL, et c'est la seule phrase de ce commentaire qui parlait
+  # du mur. Sur le chemin zéro-juge, elle est TOUT ce qui atteste la légitimité du merge — la carte
+  # ne pose aucun juge, donc le plancher mécanique est le dernier étage. Elle s'imprimait à
+  # l'identique que le mur ait tourné ou non.
+  #
+  # Le pire n'était même pas le silence : la note « Provenance NON vérifiée » posée juste après
+  # (BL-6-47.4) DIT le contraire, sur le même ticket. Un opérateur relisant six mois plus tard y
+  # trouvait deux phrases opposées et aucune raison de préférer l'une. Une contradiction lisible est
+  # plus coûteuse qu'une absence : elle fait douter de tout le reste du sceau.
+  defp validation_line([], :ok),
     do:
       "**Validée par** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
         "nominal) ; le mur de provenance reste le plancher mécanique, lui, et il a été franchi."
 
-  defp validation_line(approvers),
+  defp validation_line([], {:skipped, why}),
+    do:
+      "**Validée par** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
+        "nominal), et le mur de provenance **n'a PAS tourné** (`#{inspect(why)}`). Ce merge ne " <>
+        "repose donc sur AUCUN contrôle mécanique : ni jury, ni provenance."
+
+  defp validation_line(approvers, _wall),
     do:
       "**Validée par** : " <>
         Enum.map_join(approvers, ", ", &"`#{&1}`") <>
