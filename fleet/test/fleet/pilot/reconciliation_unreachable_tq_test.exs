@@ -80,6 +80,55 @@ defmodule ReconciliationUnreachableTqTest do
              "l'indisponibilite d'un tiers est devenue un verdict sur ce pod"
   end
 
+  # ⚠ CE TEST-CI EST LE SEUL DES TROIS QUI DISCRIMINE ENCORE, et c'est un balayage de mutation
+  # retro-actif qui l'a dit : annuler le correctif JG-074 laisse les deux tests ci-dessus VERTS.
+  #
+  # La raison n'est pas qu'ils etaient creux — c'est que la propriete a MIGRE D'UN CRAN. JG-083 a
+  # rendu `live_owned_refs/2` capable de dire `:error`, et `reconcile_with_pods/6` rend alors
+  # `prior_suspects` SANS RIEN FAIRE : sur une file franchement muette, la passe n'atteint plus
+  # jamais le devoir de reap. La garde de JG-074 est intacte, elle est simplement devenue
+  # INATTEIGNABLE par le scenario que ses deux tests mettent en scene — donc plus rien ne la
+  # verifie, et une regression du trois-etats vers le booleen ne rougirait nulle part.
+  #
+  # Ce qu'elle couvre encore, et que celui-ci met en scene : le TRANSITOIRE QUI TOMBE ENTRE LES DEUX
+  # LECTURES. `live_owned_refs/2` et `quiesced_brick_pods/4` interrogent la file a deux moments
+  # distincts ; une file qui repond au premier et meurt avant le second passe la garde de niveau
+  # passe et arrive au devoir de reap. C'est exactement la ou le pliage de l'inconnu sur `false`
+  # tuait un pod au travail.
+  describe "la garde de JG-074 couvre le transitoire qui tombe ENTRE les deux lectures" do
+    defmodule TqDiesBetweenReads do
+      # Repond a la lecture de PROPRIETE (la passe continue, pas de fail-safe global), puis meurt
+      # avant la lecture du devoir de REAP. Un compteur, parce que les deux lectures passent par le
+      # MEME `pod_status/1` : c'est le rang de l'appel qui les distingue, pas leur nom.
+      def list_active, do: []
+      def pod_active_issue_id(_), do: {:ok, nil}
+
+      def pod_status(_) do
+        n = Agent.get_and_update(:jg074_calls, &{&1 + 1, &1 + 1})
+
+        if n <= 1,
+          do: {:ok, nil},
+          else: exit({:timeout, {GenServer, :call, [Fleet.TaskQueue.Server, :x, 5000]}})
+      end
+    end
+
+    setup do
+      {:ok, _} = Agent.start_link(fn -> 0 end, name: :jg074_calls)
+      :ok
+    end
+
+    test "la file meurt entre les deux lectures : AUCUN reap" do
+      assert reconcile_with(TqDiesBetweenReads) == [],
+             "la file a repondu a la lecture de propriete puis est morte : le devoir de reap a " <>
+               "quand meme conclu « ce pod n'a pas de tache » et l'a tue"
+
+      # La mise en scene est verifiee, pas supposee : sans les DEUX lectures, le test ne prouve
+      # rien de ce que son titre annonce.
+      assert Agent.get(:jg074_calls, & &1) >= 2,
+             "la file n'a ete lue qu'une fois — le scenario « meurt entre les deux » n'a pas eu lieu"
+    end
+  end
+
   # ══════════════════════════════════════════════════════════════════════════════════════════════
   # JG-083 — LE MEME SILENCE, SUR L'AUTRE DEVOIR, ET LE FIX DE JG-074 NE LE COUVRAIT PAS.
   #
