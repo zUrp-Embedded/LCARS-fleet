@@ -95,8 +95,9 @@ defmodule Fleet.CapProfile.Schema do
   # DELIBERATE manual cache, NOT `Fleet.SchemaCache.cached/2` (even though that dep is
   # declared on the facade boundary): `cached/2` caches whatever the fun returns, so it
   # would freeze a soft `{:error, :schema_unavailable}` for the BEAM's lifetime — here
-  # the error tuple must stay RETRYABLE. `Fleet.SchemaCache`'s `cached/2` doc names this
-  # module as the manage-by-hand exception.
+  # the error tuple must stay RETRYABLE. That is the RULE `cached/2` states in its own
+  # `@doc` ("returned error tuples are ordinary values and are cached"), and this module
+  # is the site that falls on the other side of it.
   defp load_schema_file(name) do
     path = Path.join(schema_dir(), name)
     key = {__MODULE__, :schema, path}

@@ -47,6 +47,12 @@ defmodule Fleet.SchemaCache do
 
   Raised failures are not cached; returned error tuples are ordinary values and
   are cached.
+
+  THAT ASYMMETRY IS THE CHOICE CRITERION, so read it before reaching for this function: a soft
+  `{:error, _}` returned by `fun` is frozen for the BEAM's lifetime. A caller whose failure must
+  stay RETRYABLE — a schema that may be absent now and present after a redeploy — belongs outside
+  this function and must manage its own `:persistent_term` entry, storing the success only.
+  `Fleet.CapProfile.Schema` is that case and says so at its own cache.
   """
   @spec cached(term(), (-> term())) :: term()
   def cached(persistent_key, fun) when is_function(fun, 0) do

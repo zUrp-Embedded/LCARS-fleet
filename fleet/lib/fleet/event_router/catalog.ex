@@ -93,11 +93,20 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   defp validate_against_schema!(events) do
-    schema =
+    # THROUGH THE SHARED CACHE, like every other schema of the repo. This site inlined
+    # `File.read! |> Jason.decode! |> resolve()` — the exact body of
+    # `SchemaCache.resolve_json_schema!/2` — and was the ONLY one to do so without saying why.
+    # Measured: three sites in `lib/` call `ExJsonSchema.Schema.resolve/1` — the shared mechanism,
+    # ONE documented exception (`CapProfile.Schema`, whose `{:error, :schema_unavailable}` must stay
+    # retryable and therefore uncacheable), and this one.
+    #
+    # Safe to cache here and NOT there: the variable artifact of this module is `events.yaml`, which
+    # the tests rewrite under it; the SCHEMA is immutable `priv/` resolved through `:code.priv_dir`,
+    # with no knob and nothing to swap.
+    path =
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events-v1.json")
-      |> File.read!()
-      |> Jason.decode!()
-      |> ExJsonSchema.Schema.resolve()
+
+    schema = Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
 
     case ExJsonSchema.Validator.validate(schema, %{"events" => events}) do
       :ok ->
