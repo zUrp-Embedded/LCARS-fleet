@@ -176,7 +176,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         #      to the judge, not the producer) → judge never re-dispatched = WALL. The PR-lock churn
         #      during a REAL producer rework is minor and
         #      self-heals (serialize `:role_busy` prevents the double-spawn).
-        #  (2) `pod_has_active_task?` does not count `:completed` as owning: `:completed` is
+        #  (2) `pod_task_state/2` does not count `:completed` as active: `:completed` is
         #      TERMINAL (`WorkItem.active?/1`) — a delivered engineer's completion (push → open PR →
         #      unlock) is running-or-done, its lock is released at the END. Counting it as active would
         #      mask an orphaned ISSUE lock FOREVER when the completion is LOST before open_pr (permanent
@@ -243,7 +243,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # exempt, their lifecycle is elsewhere: slot-freeze for the resident eng, forever for the
   # permanents) whose brick no longer holds the `lcars-in-flight` lock (verdict consumed,
   # awaits-arch park, merge done, brick closed) AND which holds no active task (belt — same
-  # authority `pod_has_active_task?` as the lock duty: a gatekeeper mid-eval is never reaped).
+  # authority `pod_task_state/2` as the lock duty: a gatekeeper mid-eval is never reaped).
   #
   # Live case 2026-07-19: a brief judge (then named `consultant`, now `scoper`) idled INTERACTIVELY
   # for 16 min after its redirect verdict.
@@ -267,7 +267,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
             (phase == :issue and MapSet.member?(locked_issues, n)) or
               (phase == :pr and MapSet.member?(locked_prs, n))
 
-          if locked? or pod_has_active_task?(seams.task_queue, pod_id),
+          # Reap ONLY on an ESTABLISHED idle. `:unknown` (the queue did not answer) defers to the
+          # next tick — see `pod_task_state/2` for why an uncertain pod is never classed dead.
+          if locked? or pod_task_state(seams.task_queue, pod_id) != :idle,
             do: [],
             else: [{repo, :pod, pod_id}]
 
@@ -400,27 +402,45 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # `{:ok, nil}` (idle) and the TERMINAL states (`:completed`/`:failed`/`:cleared`) → `false`: a delivered
   # (`:completed`) pod no longer owns its lock (F-C050 — else a completion LOST before open_pr wedges the
   # lock forever). Tolerant (any anomaly → `false`: a pod whose activity cannot be established masks no orphan).
-  defp pod_has_active_task?(tq, pod_id) when is_binary(pod_id) do
+  # THREE STATES, because two of them used to be one and the difference is a reap.
+  #
+  # `{:ok, nil}` and the terminal states mean the queue ANSWERED and the pod owns nothing: an
+  # established idle, and the orphan this duty exists to collect. An `exit`/timeout means the queue
+  # did not answer AT ALL — `pod_status/1` is a `GenServer.call` with no explicit timeout (5 s) to
+  # a single server shared by every pod, so a restart or a load spike lands here. Folding both into
+  # `false` reaped a possibly-WORKING pod for a hiccup that was not its own.
+  #
+  # The repo already decided this exact question, one module over, and wrote the reasoning that was
+  # missing here — `spawn.ex`, F-C059: *"aliveness UNKNOWN: fail-CLOSED -> DEFER, NEVER :dead.
+  # Classing an uncertain pod dead -> reap of a maybe-LIVING pipe. A transient failure self-corrects
+  # next tick; a persistent one defers visibly rather than acting destructively."* Two answers to
+  # one question in one domain; this is the side that had the destructive path.
+  #
+  # Deferring costs a tick, and it does NOT mask an orphan: an established idle still reaps, and an
+  # unreachable queue means the fleet has a bigger problem than one uncollected pod.
+  @spec pod_task_state(module(), term()) :: :active | :idle | :unknown
+  defp pod_task_state(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
-      {:ok, state} -> Fleet.TaskQueue.WorkItem.active?(state)
-      _ -> false
+      {:ok, state} -> if Fleet.TaskQueue.WorkItem.active?(state), do: :active, else: :idle
+      # A seam that does not honour the `{:ok, _}` contract tells us nothing — not "idle".
+      _ -> :unknown
     end
   rescue
-    _ -> false
+    _ -> :unknown
   catch
-    _, _ -> false
+    _, _ -> :unknown
   end
 
-  defp pod_has_active_task?(_tq, _), do: false
+  defp pod_task_state(_tq, _), do: :unknown
 
   # Has the pod PULLED its latest task (state `:assigned`)? The PULL (`get_work_item`,
   # which transitions `:pending → :assigned` and records the in-band ACK) is the DURABLE proof that
   # the wake LANDED and the agent activated — the distinction the orphan-lock duty needs to tell a
   # PARKED admission (task enqueued but never pulled, `wake_unreached`) from a working pod. Stricter
-  # than `pod_has_active_task?` on ONE state: `:pending` is active (owns the slot at enqueue, anti
+  # than `pod_task_state/2` on ONE state: `:pending` is active (owns the slot at enqueue, anti
   # double-spawn) but NOT pulled (no activation proven). Terminal states (`:completed`/`:failed`/
-  # `:cleared`) are not pulled either — same non-ownership as `pod_has_active_task?` (F-C050). Used by
-  # `live_owned_refs` (lock ownership); the quiesced-pod duty keeps `pod_has_active_task?` so a
+  # `:cleared`) are not pulled either — same non-ownership as `pod_task_state/2` (F-C050). Used by
+  # `live_owned_refs` (lock ownership); the quiesced-pod duty keeps `pod_task_state/2` so a
   # freshly-briefed `:pending` pod is re-dispatched (via the lock reclaim), never REAPED.
   defp pod_pulled?(tq, pod_id) when is_binary(pod_id) do
     case tq.pod_status(pod_id) do
