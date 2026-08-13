@@ -32,8 +32,7 @@ defmodule Fleet.Observation.ReadModel do
     {"oauth.", :diagnostics},
     {"mcp.server_crashed", :diagnostics},
     {"sdk.upstream_alert", :diagnostics},
-    {"state.corrupt", :diagnostics},
-    {"os.signal", :diagnostics}
+    {"state.corrupt", :diagnostics}
   ]
 
   # ── Client ────────────────────────────────────────────────────────────────

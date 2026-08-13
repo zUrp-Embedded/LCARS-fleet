@@ -130,14 +130,6 @@ events:
   gitea.push: []
   gitea.unknown: []
 
-  # --- OS signals (SignalsOS, source :event_router) — DORMANT / UNEMITTED ---
-  # NOT currently emitted: `SignalsOS` is INERT (init/1 fail-loud raises; gated off by default,
-  # `:start_signals`=false). These keys are pre-registered so that IF/WHEN the real producer lands
-  # (F037 — a gen_event handler on `:erl_signal_server`) the broadcast is not a silent drop. No routed
-  # consumer either (the drain goes through ExecStop/Shutdown, not through a signal).
-  os.signal.sigusr1: []
-  os.signal.sigterm: []
-  os.signal.sighup: []
 
   # --- Admin spawn ---
   admin.spawn.request: []

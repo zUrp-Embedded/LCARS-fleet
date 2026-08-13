@@ -316,8 +316,10 @@ if config_env() != :test and not tool_mode? do
   # SignalsOS (:start_signals): NO on-switch — the module is a NON-IMPLEMENTED stub whose
   # `init/1` RAISES before any `:os.set_signal` (fail-loud boot: enabling it is a misconfiguration,
   # never a silent capture of SIGTERM/SIGHUP). The real fix, when the day comes = a gen_event
-  # handler on `:erl_signal_server` (OS signals do not reach a GenServer). Stays gated-off;
-  # the registry's os.signal.* = dormant meanwhile.
+  # handler on `:erl_signal_server` (OS signals do not reach a GenServer). Stays gated-off, and
+  # the registry declares NO `os.signal.*` type: keys for a producer that does not exist were three
+  # atoms created at every boot for a broadcast nothing could emit. Whoever lands the handler
+  # declares its types in the same gesture.
 
   # ============================================================
   # fleet_spawner — permanent pods

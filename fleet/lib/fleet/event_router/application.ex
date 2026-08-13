@@ -73,10 +73,13 @@ defmodule Fleet.EventRouter.Application do
   defp preregister_event_atoms do
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
-    signal_events = ~w(os.signal.sigusr1 os.signal.sigterm os.signal.sighup)
-
+    # NO hard-coded signal atoms here. `os.signal.*` used to be pre-registered for a producer that
+    # does not exist (`SignalsOS` is an inert tombstone) — three atoms created at every boot for a
+    # broadcast nothing could emit. Removed with their keys, BL-6-43: a transitively-dormant key
+    # outlives the reason anyone could name for it, and whoever lands the real producer adds its
+    # types in the same gesture — which is the only moment their presence means anything.
     Enum.each(
-      yaml_events ++ signal_events ++ gitea_event_types(),
+      yaml_events ++ gitea_event_types(),
       fn event_type ->
         _ = String.to_atom(event_type)
       end
