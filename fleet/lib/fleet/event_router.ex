@@ -17,7 +17,7 @@ defmodule Fleet.EventRouter do
       Plug.Router,
       Plug.Router.Utils
     ],
-    exports: [Bus, Listener]
+    exports: [Bus, Listener, UnixListener]
 
   @moduledoc """
   Event registry and PubSub-based event bus. Domains consume events through

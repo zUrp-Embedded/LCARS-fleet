@@ -1180,6 +1180,21 @@ class Deck(BaseHTTPRequestHandler):
     # calculer — ttyd repond le sien et on le recopie. Une route de plus dans la table de montage ne
     # demandera pas une ligne ici.
     def _relay(self, sess, target):
+        # ⚠ CE RELAIS TRANSPORTE UN UPGRADE, ET RIEN D'AUTRE — DIT PLUTOT QUE SOUS-ENTENDU. Apres le
+        # `101` il est un conduit d'octets, ce qui marche parce que plus personne ne compte les
+        # octets. Une reponse HTTP ORDINAIRE, elle, a un corps delimite par `Content-Length` ou par
+        # un decoupage en morceaux : recopier les en-tetes puis s'arreter la tronquerait la reponse
+        # EN SILENCE, et recopier jusqu'a la fermeture pendrait sur une connexion persistante.
+        #
+        # Aujourd'hui aucune cible n'emprunte ce chemin — le deck d'observation est CONSOMME comme
+        # une API par le serveur, pas relaye vers le navigateur. Le jour ou une cible systeme voudra
+        # de l'HTTP ordinaire, ce refus est ce qui l'obligera a ecrire le transport au lieu de
+        # decouvrir une troncature.
+        if (self.headers.get("Upgrade") or "").lower() != "websocket":
+            self._send(400, "ce relais ne transporte qu'un upgrade websocket\n",
+                       "text/plain; charset=utf-8")
+            return
+
         sock_path = socket_for(target)
         if not sock_path:
             self._send(400, "cible invalide\n", "text/plain; charset=utf-8")

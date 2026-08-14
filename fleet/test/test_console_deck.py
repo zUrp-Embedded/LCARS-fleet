@@ -649,6 +649,18 @@ check(deck.socket_for(("console", "../../etc", "/ws")) is None,
 check(deck.authorize({"login": "zoe"}, ("console", "zoe", "/ws")) is True,
       "TEMOIN : authorize dit OUI quand les deux logins sont le meme")
 
+# (9h-bis) LE RELAIS REFUSE CE QU'IL NE SAIT PAS TRANSPORTER, au lieu de le tronquer. Un GET
+# ordinaire recopierait les en-tetes d'amont puis s'arreterait : le corps, delimite par
+# `Content-Length` ou decoupe en morceaux, serait perdu SANS ERREUR. Le refus est ce qui obligera la
+# premiere cible systeme en HTTP ordinaire a ecrire son transport.
+code, body, _ = fetch(dport, "/console/zoe/ws", c_zoe)
+check(code == 400 and "upgrade websocket" in body,
+      "un GET ordinaire sur une cible de relais est REFUSE, pas tronque (vu: %d)" % code)
+seen_headers.clear()
+fetch(dport, "/console/zoe/ws", c_zoe)
+check(("zoe", "console.sock") not in seen_headers,
+      "et le refus a lieu AVANT de connecter l'amont")
+
 # (9i) LE JS DE LA PAGE N'EST PARSE PAR RIEN, ET C'EST UN ANGLE MORT ENTIER. Il vit dans une chaine
 # brute Python : `py_compile` la voit comme du texte, aucun test ne l'execute, et une parenthese
 # manquante donne une page qui s'affiche et ne FAIT rien — sans une erreur cote serveur. Le client
