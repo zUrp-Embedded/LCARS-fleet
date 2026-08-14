@@ -16,6 +16,7 @@
 # montre. Toute la conduite passe par les consoles (ttyd) ou l'API de la fleet.
 
 import html
+import http.client
 import json
 import os
 import re
@@ -102,6 +103,46 @@ SYSTEM_TARGETS = {}
 _lock = threading.Lock()
 _sessions = {}
 _pending = {}
+
+
+def deck_socket_for(login):
+    """Ou ecoute le deck d'observation de cet humain. Meme derivation que le runtime, pas une table."""
+    return os.path.join(CONSOLE_SOCK_ROOT, login, "deck.sock")
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """
+    `http.client` sur une socket AF_UNIX. LA STDLIB NE SAIT PAS LE FAIRE, et c'est le seul motif de
+    cette classe : `urlopen` ne connait que des URLs, or il n'y a plus d'URL — le deck n'a pas
+    d'adresse. Tout le reste (requete, en-tetes, decoupage de la reponse) reste celui de la stdlib ;
+    on ne remplace QUE l'etablissement de la connexion.
+    """
+
+    def __init__(self, sock_path, timeout):
+        super().__init__("localhost", timeout=timeout)
+        self._sock_path = sock_path
+
+    def connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(self.timeout)
+        # ⚠ LES ERREURS DE `connect` REMONTENT TELLES QUELLES, ET C'EST DELIBERE. `PermissionError`,
+        # `FileNotFoundError` et `ConnectionRefusedError` sont TROIS diagnostics differents que
+        # l'appelant traduit en trois etats differents. Les envelopper dans une exception maison
+        # ferait perdre exactement l'information qui distingue « la fleet est eteinte » de « je n'ai
+        # pas le droit de lui parler ».
+        s.connect(self._sock_path)
+        self.sock = s
+
+
+def unix_get(sock_path, path, timeout=2):
+    """Un GET sur une socket AF_UNIX. Rend `(code, corps)`; les erreurs de connexion remontent."""
+    conn = _UnixHTTPConnection(sock_path, timeout)
+    try:
+        conn.request("GET", path, headers={"Host": "lcars"})
+        r = conn.getresponse()
+        return r.status, r.read()
+    finally:
+        conn.close()
 
 
 def parse_target(path):
@@ -295,21 +336,70 @@ def fleet_pods(human):
     Le discriminant est la CAUSE, pas l'echec : connexion refusee = personne n'ecoute = eteinte
     (on a mesure) ; timeout, reset, DNS = on n'a pas mesure.
     """
-    url = f"http://127.0.0.1:{human['ports']['deck']}/api/pods"
+    sock = deck_socket_for(human["human"])
     try:
-        with urlopen(url, timeout=2) as r:
-            return "live", (json.load(r).get("pods") or [])
-    except HTTPError:
+        code, body = unix_get(sock, "/api/pods", timeout=2)
+    except PermissionError:
+        # ⚠ CAUSE NOUVELLE, SANS EQUIVALENT TCP, ET C'EST TOUT L'INTERET DE LA NOMMER. Le deck
+        # ECOUTE, on n'a simplement pas le droit d'ouvrir sa socket : le groupe supplementaire
+        # manque au landing, ou le repertoire de l'humain n'a pas le bon mode. Ranger ca dans
+        # « eteinte » serait exactement le mensonge que cette fonction a passe vingt lignes a
+        # fermer — une assertion d'extinction tiree d'un refus de permission. Et c'est le seul etat
+        # d'ici qui se repare par un geste PRECIS, donc le seul qu'il serait couteux de taire.
+        return "denied", []
+    except FileNotFoundError:
+        # Pas de socket = personne n'ecoute. C'est une MESURE, pas une absence de mesure : le
+        # listener retire son fichier en s'arretant, precisement pour que cet etat soit lisible.
+        return "off", []
+    except ConnectionRefusedError:
+        # Socket residuelle d'un BEAM tue : le fichier survit, plus personne n'accepte. Meme
+        # verdict qu'au-dessus, autre chemin.
+        return "off", []
+    except (TimeoutError, socket.timeout, OSError):
+        return "unknown", []
+
+    if code != 200:
         # Quelqu'un ecoute et repond autre chose que ce qu'on attend : mesure faite, etat anormal.
         return "deaf", []
-    except URLError as e:
-        if isinstance(e.reason, ConnectionRefusedError):
-            return "off", []
-        return "unknown", []
-    except (TimeoutError, socket.timeout):
-        return "unknown", []
-    except Exception:
-        return "unknown", []
+    try:
+        return "live", (json.loads(body).get("pods") or [])
+    except ValueError:
+        return "deaf", []
+
+
+def fleet_projection(human):
+    """
+    La projection du read-model de cet humain : `(status, projection)`.
+
+    ⚠ SECONDE SOURCE, ET ELLE MANQUAIT. Le deck d'observation alimente SIX de ses sept panneaux avec
+    `/api/projection` ; le landing n'appelait que `/api/pods`. Rendre l'onglet observation depuis les
+    seuls pods aurait perdu ces six panneaux en silence, tout en ayant l'air de l'avoir embarque.
+
+    ⚠ ET LA CICATRICE DE LA PAGE DU DECK SE GARDE : une projection `deaf`/`unavailable` est un FLUX
+    FIGE, pas une flotte calme. La rendre comme un tableau vide serait exactement le mensonge que
+    `fleet_pods` a passe vingt lignes a fermer, un etage plus haut. Le `_status` que le runtime pose
+    dans la charge est donc REMONTE tel quel, jamais aplati.
+    """
+    sock = deck_socket_for(human["human"])
+    try:
+        code, body = unix_get(sock, "/api/projection", timeout=2)
+    except PermissionError:
+        return "denied", {}
+    except (FileNotFoundError, ConnectionRefusedError):
+        return "off", {}
+    except (TimeoutError, socket.timeout, OSError):
+        return "unknown", {}
+
+    if code != 200:
+        return "deaf", {}
+    try:
+        proj = json.loads(body)
+    except ValueError:
+        return "deaf", {}
+
+    # Le runtime a son propre verdict sur la fraicheur de son flux, et il le publie. Le nôtre ne
+    # porte que sur le transport : quand les deux existent, c'est le sien qui tranche.
+    return (proj.get("_status") or "live"), proj
 
 
 def claude_credentials(home):
@@ -358,9 +448,20 @@ def state(only=None):
         if only is not None and h["human"] != only:
             continue
         status, pods = fleet_pods(h)
+
+        # LA PROJECTION N'EST TIREE QUE SI LE DECK REPOND. Sur une fleet eteinte, une seconde sonde
+        # ne rendrait qu'un second « off » — au prix d'un timeout de 2 s de plus par humain sur
+        # CHAQUE `/api/state`, c'est-a-dire toutes les 10 s. Le cout d'une sonde inutile se paie a
+        # la periode, pas une fois.
+        if status == "live":
+            proj_status, proj = fleet_projection(h)
+        else:
+            proj_status, proj = status, {}
+
         # `fleet` reste le booleen « vivante », pour les consommateurs qui ne posent que cette
         # question ; `fleet_status` porte la distinction que le booleen ne peut pas porter.
         h = dict(h, fleet=(status == "live"), fleet_status=status,
+                 projection_status=proj_status, projection=proj,
                  claude=claude_credentials(h.get("home")), pods=[])
         for p in pods or []:
             pid = p.get("pod_id", "")
@@ -557,10 +658,12 @@ PAGE = r"""<!doctype html>
     .tab { padding:6px 10px; font-size:12px }
     .tab .meta { display:none }
   }
-  /* LA SCENE : position:relative + panneaux en inset:0 absolu. Un iframe dimensionne par flex
-     herite d'une hauteur ambigue (les navigateurs lui donnent 150px par defaut si la chaine de
-     hauteurs casse) et la page embarquee, qui se dimensionne en 100vh/grille, se replie sur
-     quelques pixels. En absolu dans une scene qui a une taille, la question ne se pose plus. */
+  /* LA SCENE : position:relative + panneaux en inset:0 absolu. Le motif d'origine etait un piege
+     d'iframe (hauteur ambigue en flex, repli sur 150px) ; les iframes sont partis avec la seconde
+     origine, la forme reste, et pour une raison qui la remplace exactement : xterm.js MESURE son
+     conteneur pour calculer colonnes et lignes. Un panneau sans taille propre lui ferait proposer
+     une geometrie fausse, que le shell croirait. En absolu dans une scene qui a une taille, la
+     question ne se pose ni pour l'un ni pour l'autre. */
   #stage { flex:1; min-height:0; position:relative }
   .pane { position:absolute; inset:0; width:100%%; height:100%%; border:0; background:#000 }
   .pane[hidden] { display:none }
@@ -576,11 +679,16 @@ PAGE = r"""<!doctype html>
   <div id="rail"></div>
 </nav>
 <main>
-  <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><a id="pop" href="#" target="_blank" rel="noopener" hidden>ouvrir dans une fenetre &#8599;</a><span id="who">%(who)s</span><a href="/auth/logout">sortir</a></header>
+  <!-- « ouvrir dans une fenetre » A ETE RETIRE, pas cache : il n'y a plus d'URL a ouvrir. Chaque
+       cible vivait sur son propre port, donc chaque onglet avait une adresse — c'est exactement ce
+       que ce lot a supprime. Un lien qui pointerait encore quelque part serait la seconde origine
+       qu'on vient de fermer. -->
+  <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><span id="who">%(who)s</span><a href="/auth/logout">sortir</a></header>
   <div id="stage"><div id="panel"></div></div>
 </main>
 <script>
-const HOST = location.hostname;
+// `HOST` A ETE RETIRE : plus une seule cible n'a d'adresse. Il servait a fabriquer
+// `http://<hote>:<port>` pour chaque onglet — la seconde origine, en une ligne.
 let current = null;
 
 function el(t, cls, txt) { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
@@ -592,14 +700,13 @@ function show(tab) {
   document.getElementById('hint').textContent = tab.hint || '';
 
   const stage = document.getElementById('stage'), panel = document.getElementById('panel');
-  const pop = document.getElementById('pop');
 
-  // UN CADRE PAR ONGLET, CREE UNE FOIS ET JAMAIS RECHARGE. Reutiliser un seul cadre en
-  // reecrivant son `src` DECHARGE la page en place : ttyd pose un `beforeunload` (il protege un
-  // terminal connecte), donc changer d'onglet faisait surgir un « voulez-vous quitter ? ». Et le
-  // terminal se reconnectait a chaque retour, perdant son ecran. Montrer/cacher ne decharge rien :
-  // la question ne se pose plus, et les sessions gardent leur etat.
-  // On ne masque JAMAIS le cadre qu'on s'apprete a montrer. `hidden` vaut `display:none` : un
+  // UN PANNEAU PAR ONGLET, CREE UNE FOIS ET JAMAIS RECONSTRUIT. La raison a change de nature mais
+  // pas de forme : au temps des iframes, reecrire un `src` DECHARGEAIT la page et ttyd posait un
+  // `beforeunload` — changer d'onglet faisait surgir un « voulez-vous quitter ? », et le terminal se
+  // reconnectait en perdant son ecran. Aujourd'hui le terminal est un objet de CETTE page : le
+  // recreer fermerait sa socket et rouvrirait une session. Montrer/cacher ne detruit rien.
+  // On ne masque JAMAIS le panneau qu'on s'apprete a montrer. `hidden` vaut `display:none` : un
   // aller-retour, meme d'un seul tick, RETIRE le contenu de la chaine de focus et le demasquage ne
   // le rend pas. Or `build()` rejoue `show()` sur CHAQUE changement de signature (une transition de
   // phase d'un pod qu'on ne regarde meme pas suffit) — donc l'humain qui tapait dans un terminal
@@ -618,25 +725,9 @@ function show(tab) {
     // n'existe pas.
     t.fit.fit();
     t.term.focus();
-    // Rien a « ouvrir dans un onglet » : il n'y a plus d'URL a laquelle aller. C'est le point.
-    pop.hidden = true;
-  } else if (tab.url) {
-    panel.style.display = 'none';
-    let pane = stage.querySelector(`.pane[data-key="${CSS.escape(tab.key)}"]`);
-    if (!pane) {
-      pane = document.createElement('iframe');
-      pane.className = 'pane';
-      pane.dataset.key = tab.key;
-      pane.title = tab.crumb;
-      pane.src = tab.url;
-      stage.appendChild(pane);
-    }
-    pane.hidden = false;
-    pop.hidden = false; pop.href = tab.url;
   } else {
     panel.style.display = '';
     panel.innerHTML = ''; panel.appendChild(tab.render());
-    pop.hidden = true;
   }
 }
 
@@ -754,6 +845,9 @@ function fleetLabel(h) {
     case 'live':    return `fleet vivante — ${h.pods.length} pod(s)`;
     case 'off':     return 'fleet eteinte';
     case 'deaf':    return 'deck present, reponse illisible';
+    // Le deck ECOUTE ; c'est nous qui n'avons pas le droit d'ouvrir sa socket. Un etat a part, et
+    // le seul de cette liste qui se repare par un geste precis.
+    case 'denied':  return 'deck present, ACCES REFUSE a sa socket';
     default:        return 'fleet NON MESUREE (deck injoignable)';
   }
 }
@@ -763,6 +857,9 @@ function fleetHint(h) {
     case 'live':    return '';
     case 'off':     return '(la fleet de cet humain ne tourne pas)';
     case 'deaf':    return '(le deck repond, mais pas ce qu\'on attend)';
+    // L'indice DIT LE GESTE, parce que celui-la est reparable : il manque au landing le groupe
+    // supplementaire, ou le repertoire de socket de cet humain n'a pas le mode attendu.
+    case 'denied':  return '(socket presente, ouverture refusee — groupe du deck ou mode du repertoire)';
     default:        return '(pas de reponse en 2 s — on ne sait PAS si elle tourne)';
   }
 }
@@ -778,6 +875,69 @@ function claudeLabel(h) {
     case 'absent':  return 'AUCUNE credential claude — aucun pod ne peut naitre';
     default:        return 'credentials claude NON MESUREES (home non traversable)';
   }
+}
+
+// ─── L'OBSERVATION, RENDUE ICI ─────────────────────────────────────────────────────────────────
+// PAS DE CADRE, PAS DE SECONDE ORIGINE. Le deck d'observation n'a plus de port : ses deux routes
+// sont lues par le serveur sur la socket de l'humain, et cette fonction rend ce qu'elles disent.
+//
+// ⚠ IL FALLAIT LES DEUX ROUTES, ET C'EST LA TROUVAILLE QUI A CORRIGE LE DEVIS. `/api/pods` alimente
+// UN panneau ; les six autres viennent de `/api/projection`, que ce landing n'appelait pas. Rendre
+// depuis les seuls pods aurait perdu six panneaux en silence tout en ayant l'air d'avoir embarque
+// le deck.
+//
+// ⚠ ET LA CICATRICE DU DECK SE GARDE : une projection `deaf`/`unavailable` est un FLUX FIGE, pas
+// une flotte calme. Un read-model mort rend `total:0` et des listes vides — exactement ce que rend
+// une fleet paisible. Sans le bandeau ci-dessous, la page affirme le calme sur un aveuglement.
+function projectionBanner(h) {
+  switch (h.projection_status) {
+    case 'live':        return null;
+    case 'deaf':        return 'projection SOURDE — le read-model vit mais ne recoit plus rien : flux FIGE, PAS une flotte calme';
+    case 'unavailable': return 'projection INDISPONIBLE — le read-model est tombe : ce qui suit est vide par panne, pas par calme';
+    case 'denied':      return 'projection NON LUE — acces refuse a la socket du deck';
+    case 'off':         return 'fleet eteinte — rien a projeter';
+    default:            return 'projection NON MESUREE — on ne sait pas si ces panneaux sont a jour';
+  }
+}
+
+function observationPanel(h) {
+  const wrap = el('div');
+  const banner = projectionBanner(h);
+  if (banner) {
+    const b = el('div', 'note');
+    b.textContent = '⚠ ' + banner;
+    wrap.appendChild(b);
+  }
+
+  const proj = h.projection || {};
+  const t = el('table');
+  const rows = [['pods vivants', String((h.pods || []).length)],
+                ['evenements projetes', String(proj.total != null ? proj.total : '—')]];
+  for (const [k, v] of Object.entries(proj.counts || {})) rows.push(['  ' + k, String(v)]);
+  for (const [k, v] of rows) {
+    const tr = el('tr'); tr.appendChild(el('th', null, k)); tr.appendChild(el('td', null, v)); t.appendChild(tr);
+  }
+  wrap.appendChild(t);
+
+  // Les cinq listes du read-model, dans l'ordre ou le deck les presente. Une liste VIDE se dit
+  // « aucun », jamais rien : une section absente et une section vide se lisent pareil, et seule la
+  // seconde est une information.
+  for (const [key, label] of [['stream', 'flux'], ['workflow_runs', 'runs de workflow'],
+                              ['gatekeeper', 'gatekeeper'], ['coordination', 'coordination'],
+                              ['diagnostics', 'diagnostics']]) {
+    const items = proj[key] || [];
+    wrap.appendChild(el('div', 'grp', label));
+    if (!items.length) { wrap.appendChild(el('div', 'note', 'aucun')); continue; }
+    const ul = el('table');
+    for (const it of items.slice(0, 40)) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, typeof it === 'string' ? it : JSON.stringify(it)));
+      ul.appendChild(tr);
+    }
+    wrap.appendChild(ul);
+    if (items.length > 40) wrap.appendChild(el('div', 'note', `… ${items.length - 40} de plus`));
+  }
+  return wrap;
 }
 
 function statusPanel(s) {
@@ -832,10 +992,12 @@ function build(s) {
     add('humain ' + h.human, 'Console', 'shell ' + h.human,
         { key: 'console-' + h.human, crumb: 'CONSOLE — ' + h.human,
           term: `/console/${encodeURIComponent(h.human)}/ws` });
+    // RENDU LOCAL, PLUS UN CADRE : le deck d'observation n'a plus de port, ses deux routes sont
+    // lues par le serveur sur la socket de cet humain et arrivent deja dans `/api/state`.
     add(null, 'Deck d\'observation', fleetLabel(h),
         { key: 'deck-' + h.human, crumb: 'DECK — ' + h.human,
           hint: fleetHint(h),
-          url: `http://${HOST}:${h.ports.deck}` });
+          render: () => observationPanel(h) });
 
     // Les agents, GROUPES PAR PROJET. Le rattachement est celui que le RUNTIME publie ; un pod
     // sans projet est fleet-level, il a son propre groupe au lieu d'etre range de force.

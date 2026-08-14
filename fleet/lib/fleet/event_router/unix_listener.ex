@@ -2,14 +2,23 @@ defmodule Fleet.EventRouter.UnixListener do
   @moduledoc """
   Binds a Plug on an AF_UNIX socket and announces readiness only once the socket's mode is right.
 
-  ## Why this lives in EventRouter and not next to its caller
+  ## What this module adds, and what it deliberately does NOT
 
-  This domain already owns HTTP listener construction (`Fleet.EventRouter.Listener.cowboy_child/1`)
-  and it is the only one that declares `Plug.Cowboy`. The first draft of this listener was written
-  inside `Fleet.Observation`, and the compiler refused it — `forbidden reference to Plug.Cowboy`.
-  That refusal is the architecture speaking, not an obstacle: ONE place knows how to bind Cowboy, so
-  a second binding gesture cannot drift from the first. The fix was to move the code here, not to
-  widen the boundary.
+  It adds the LIFECYCLE an AF_UNIX listener needs and a TCP one does not: removing a stale socket
+  before binding, committing readiness only after the mode is right, and removing the file on the
+  way out. It does NOT build the child spec — `Fleet.EventRouter.Listener.cowboy_child/1` does, and
+  it is the single builder in this runtime.
+
+  That separation was not a choice, it was taught three times. A call to `Plug.Cowboy.child_spec/1`
+  from `Fleet.Observation`: `forbidden reference` (that domain does not declare Plug.Cowboy). The
+  same call from here: the same refusal, for the same reason. A hand-written Cowboy child-spec
+  tuple: refused by `mix lcars.contracts.check`, rail `listener.no_cowboy_bypass`, whose own
+  remediation says to route through the builder. The third refusal is the useful one — with two
+  builders, the second drifts, and the first is loopback-by-construction for a reason.
+
+  ⚠ The rail greps for the literal tuple opening and strips only `#` comments — a docstring is not
+  stripped. So this prose must DESCRIBE that tuple, never spell it, or the module documenting the
+  rail would be the one tripping it. The rail's own header carries the same warning about itself.
 
   ## Why an AF_UNIX listener exists at all
 
@@ -62,23 +71,21 @@ defmodule Fleet.EventRouter.UnixListener do
     # kernel reclaims the resource; with a file, nobody does — so a clean restart needs this.
     _ = File.rm(sock)
 
-    # ⚠ ON CONSTRUIT UNE SPEC, ON N'APPELLE PAS `Plug.Cowboy` — et c'est l'idiome de ce domaine, pas
-    # un detour. `Fleet.EventRouter` ne DECLARE pas `Plug.Cowboy` dans sa boundary : son
-    # `cowboy_child/1` rend lui aussi un tuple. Seul `Fleet.API` le declare, parce que
-    # `ControlRouter` l'appelle vraiment. La premiere version de ce module appelait
-    # `Plug.Cowboy.child_spec/1` et le compilateur a refuse deux fois de suite — d'abord depuis
-    # Observation, puis depuis ici. Le refus disait a chaque fois la meme chose : ce domaine n'a pas
-    # a connaitre le serveur, il a a decrire un enfant.
-    spec =
-      {Plug.Cowboy,
-       scheme: :http,
-       plug: plug,
-       # A unique ref isolates this start from a predecessor's asynchronous Ranch cleanup.
-       options: [
-         ip: {:local, sock},
-         port: 0,
-         ref: {__MODULE__, System.unique_integer([:positive])}
-       ]}
+    # ⚠ LA SPEC VIENT DU CONSTRUCTEUR UNIQUE, ET L'ARCHITECTURE A REFUSE TROIS FOIS AVANT. D'abord
+    # un appel a `Plug.Cowboy.child_spec/1` depuis `Fleet.Observation` (boundary : forbidden
+    # reference), puis le meme appel depuis ici (meme refus — ce domaine ne DECLARE pas Plug.Cowboy),
+    # puis un tuple `{Plug.Cowboy, ...}` ecrit a la main, refuse par le check de contrat
+    # `listener.no_cowboy_bypass` : `listener.ex` est le SEUL constructeur d'un child-spec Cowboy.
+    #
+    # Les trois refus disaient la meme chose sous trois formes, et la troisieme est la plus utile :
+    # avec deux constructeurs, le second derive. Le nom de ce module dit ce qu'il APPORTE — le
+    # cycle de vie (socket residuelle, chmod, retrait a l'arret) — pas la construction.
+
+    # `:ref` is unique per start ON PURPOSE: Ranch cleans a previous listener up asynchronously, so a
+    # restart that reused the name could collide with its own predecessor.
+    ref = {__MODULE__, System.unique_integer([:positive])}
+
+    spec = Fleet.EventRouter.Listener.cowboy_child(plug: plug, socket: sock, ref: ref)
 
     case Supervisor.start_link([spec], strategy: :one_for_one) do
       {:ok, pid} ->

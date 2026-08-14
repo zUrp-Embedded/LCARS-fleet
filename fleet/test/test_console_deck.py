@@ -21,7 +21,9 @@ import importlib.util
 import json
 import os
 import socket
+import socketserver
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -116,33 +118,174 @@ if not os.path.isfile(DECK):
 deck = load_deck()
 check(hasattr(deck, "fleet_pods"), "console-deck.py se charge et expose fleet_pods")
 
-live_port, srv = serve_pods([{"pod_id": "a"}, {"pod_id": "b"}])
-status, pods = deck.fleet_pods({"ports": {"deck": live_port}})
-check(status == "live", "un deck qui repond -> 'live' (vu: %s)" % status)
-check(len(pods) == 2, "les pods rendus sont ceux du deck (vu: %d)" % len(pods))
-srv.shutdown()
+# ─── LA SONDE PARLE A UNE SOCKET, PLUS A UN PORT — 6-072 ───────────────────────────────────────
+# CE BLOC EST REMPLACE, PAS COMPLETE. Il epinglait `{"ports": {"deck": <port>}}` : ce contrat
+# n'existe plus, le deck d'observation n'a plus d'adresse. Garder les deux formes aurait epingle un
+# transport que plus rien n'honore.
+#
+# CE QUI SURVIT INTACT, ET C'EST L'ESSENTIEL DE CE FICHIER : la discrimination par la CAUSE. Une
+# fleet eteinte est un etat NOMINAL ; un deck qu'on n'a pas pu joindre est une mesure RATEE. Les
+# causes changent de nature avec AF_UNIX, la regle non.
+#
+# ⚠ ET IL Y EN A UNE DE PLUS, SANS EQUIVALENT TCP : `EACCES`. Sur un port, ne pas avoir le droit de
+# se connecter n'existe pas ; sur une socket, c'est le mode du repertoire qui tranche. La ranger
+# dans « eteinte » aurait recree exactement le mensonge que ce fichier a ferme.
+sock_probe_root = tempfile.mkdtemp(dir="/tmp", prefix="lcp.")
+deck.CONSOLE_SOCK_ROOT = sock_probe_root
 
-status, pods = deck.fleet_pods({"ports": {"deck": closed_port()}})
-check(status == "off", "connexion REFUSEE -> 'off' : personne n'ecoute, et on l'a mesure (vu: %s)" % status)
+
+def serve_pods_unix(login, pods, projection=None):
+    """
+    Un vrai serveur HTTP sur la socket AF_UNIX de cet humain, servant LES DEUX routes du deck.
+
+    Les deux, parce que le landing en consomme deux : `/api/pods` alimente un panneau, la projection
+    les six autres. Une doublure qui n'aurait servi que les pods aurait laisse passer un rendu qui
+    perd six panneaux.
+    """
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/api/projection"):
+                payload = projection if projection is not None else {"_status": "live", "total": 0}
+            else:
+                payload = {"pods": pods}
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    class S(ThreadingHTTPServer):
+        address_family = socket.AF_UNIX
+
+        # `HTTPServer.server_bind` derive un nom d'hote de `server_address[:2]`, ce qui n'a aucun
+        # sens pour un chemin. On garde le bind de socketserver et on pose les deux champs a la main.
+        def server_bind(self):
+            socketserver.TCPServer.server_bind(self)
+            self.server_name = "lcars"
+            self.server_port = 0
+
+    d = os.path.join(sock_probe_root, login)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "deck.sock")
+    if os.path.exists(path):
+        os.unlink(path)
+    srv = S(path, H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+live_srv = serve_pods_unix("zoe", [{"pod_id": "a"}, {"pod_id": "b"}])
+status, pods = deck.fleet_pods({"human": "zoe"})
+check(status == "live", "un deck qui repond sur SA socket -> 'live' (vu: %s)" % status)
+check(len(pods) == 2, "les pods rendus sont ceux du deck (vu: %d)" % len(pods))
+live_srv.shutdown()
+live_srv.server_close()
+
+# PAS DE SOCKET = personne n'ecoute, et c'est une MESURE : le listener retire son fichier en
+# s'arretant, precisement pour rendre cet etat lisible.
+status, pods = deck.fleet_pods({"human": "absent"})
+check(status == "off", "socket ABSENTE -> 'off' : personne n'ecoute (vu: %s)" % status)
 check(pods == [], "'off' ne fabrique aucun pod")
 
-sport, ssock = silent_port()
-t0 = time.monotonic()
-status, pods = deck.fleet_pods({"ports": {"deck": sport}})
-elapsed = time.monotonic() - t0
-# LE test de ce fichier : ce cas rendait « fleet eteinte ».
-check(
-    status == "unknown",
-    "un socket qui accepte et se TAIT -> 'unknown', jamais 'off' (vu: %s)" % status,
-)
-check(elapsed < 10, "la sonde reste bornee par son timeout (%.1fs)" % elapsed)
-ssock.close()
+# SOCKET RESIDUELLE d'un BEAM tue : le fichier survit, plus personne n'accepte. Meme verdict, autre
+# chemin — et c'est le cas qui n'existait pas du tout avec un port, ou le noyau reclame la ressource.
+_d = os.path.join(sock_probe_root, "residu")
+os.makedirs(_d, exist_ok=True)
+_stale = socket.socket(socket.AF_UNIX)
+_stale.bind(os.path.join(_d, "deck.sock"))
+_stale.close()
+status, _ = deck.fleet_pods({"human": "residu"})
+check(status == "off", "socket RESIDUELLE (fichier sans ecoutant) -> 'off' (vu: %s)" % status)
 
-check(
-    deck.fleet_pods({"ports": {"deck": closed_port()}})[0]
-    != deck.fleet_pods({"ports": {"deck": silent_port()[0]}})[0],
-    "eteinte et non-mesuree ne sont PAS le meme etat",
-)
+# ⚠ L'ETAT NEUF. Le deck ecoute ; on n'a pas le droit d'ouvrir. Le repertoire en 0000 reproduit
+# exactement ce que produirait un landing sans son groupe supplementaire, ou un repertoire d'humain
+# au mauvais mode.
+_dn = os.path.join(sock_probe_root, "interdit")
+os.makedirs(_dn, exist_ok=True)
+_denied_srv = None
+try:
+    _denied_srv = serve_pods_unix("interdit", [])
+    os.chmod(_dn, 0o000)
+    status, pods = deck.fleet_pods({"human": "interdit"})
+    check(status == "denied",
+          "ouverture REFUSEE -> 'denied', jamais 'off' : le deck ecoute, c'est nous qui n'entrons "
+          "pas (vu: %s)" % status)
+    check(pods == [], "'denied' ne fabrique aucun pod")
+finally:
+    os.chmod(_dn, 0o755)
+    if _denied_srv:
+        _denied_srv.shutdown()
+        _denied_srv.server_close()
+
+# UN ECOUTANT QUI SE TAIT -> 'unknown', jamais 'off'. LE test de ce fichier : ce cas rendait
+# « fleet eteinte », c'est-a-dire une assertion d'extinction tiree d'une absence de reponse.
+_ds = os.path.join(sock_probe_root, "muet")
+os.makedirs(_ds, exist_ok=True)
+_silent = socket.socket(socket.AF_UNIX)
+_silent.bind(os.path.join(_ds, "deck.sock"))
+_silent.listen(1)
+threading.Thread(target=lambda: (_silent.accept(), time.sleep(30)), daemon=True).start()
+t0 = time.monotonic()
+status_muet, pods = deck.fleet_pods({"human": "muet"})
+elapsed = time.monotonic() - t0
+check(status_muet == "unknown",
+      "une socket qui accepte et se TAIT -> 'unknown', jamais 'off' (vu: %s)" % status_muet)
+check(elapsed < 10, "la sonde reste bornee par son timeout (%.1fs)" % elapsed)
+_silent.close()
+
+# LES ETATS SONT DISTINCTS, ET ON COMPARE LES VERDICTS DEJA RENDUS — pas de nouvelle sonde. Premiere
+# version de ce garde : il re-sondait « muet » APRES avoir ferme son ecoutant, ce qui rendait 'off'
+# et faisait echouer un test qui avait raison. Un temoin qui mesure autre chose que ce qu'il annonce
+# accuse le code a la place du harnais.
+_seen = {status_muet, deck.fleet_pods({"human": "absent"})[0]}
+check(len(_seen) == 2, "eteinte et non-mesuree ne sont PAS le meme etat (vu: %s)" % _seen)
+
+# ─── LA PROJECTION : LA SECONDE SOURCE, ET SA CICATRICE ────────────────────────────────────────
+# Six des sept panneaux du deck d'observation viennent de `/api/projection`, que ce landing
+# n'appelait pas. Ce qui est epingle ici n'est pas « on l'appelle » mais ce qui rend l'appel utile :
+# un read-model MORT rend `total:0` et des listes vides — exactement ce que rend une fleet paisible.
+# Sans le `_status`, la page affirme le calme sur un aveuglement.
+_ps = serve_pods_unix("proj_live", [], {"_status": "live", "total": 7, "stream": ["e1"]})
+st, proj = deck.fleet_projection({"human": "proj_live"})
+check(st == "live" and proj.get("total") == 7,
+      "une projection saine remonte avec son contenu (vu: %s, total=%s)" % (st, proj.get("total")))
+_ps.shutdown()
+_ps.server_close()
+
+_pd = serve_pods_unix("proj_deaf", [], {"_status": "deaf", "total": 0, "stream": []})
+st, proj = deck.fleet_projection({"human": "proj_deaf"})
+check(st == "deaf",
+      "un read-model SOURD est rendu 'deaf', PAS 'live' : flux fige, pas flotte calme (vu: %s)" % st)
+check(proj.get("total") == 0,
+      "et sa charge vide traverse quand meme — c'est le statut qui la qualifie, pas l'inverse")
+_pd.shutdown()
+_pd.server_close()
+
+st, _ = deck.fleet_projection({"human": "absent"})
+check(st == "off", "pas de socket -> 'off' pour la projection aussi (vu: %s)" % st)
+
+# `state()` EXPOSE LES DEUX STATUTS SEPAREMENT. Le transport peut etre bon et le flux fige : un seul
+# champ ne peut pas porter les deux, et les aplatir rendrait le cas sourd invisible depuis la page.
+_full = serve_pods_unix("zoe", [{"pod_id": "a"}], {"_status": "deaf", "total": 0})
+_real_humans = deck.humans
+deck.humans = lambda: [{"human": "zoe", "uid": 1001, "home": "/nonexistent", "ports": {}}]
+try:
+    st = deck.state(only="zoe")
+    h0 = st["humans"][0]
+    check(h0["fleet_status"] == "live",
+          "le transport est vivant (vu: %s)" % h0["fleet_status"])
+    check(h0["projection_status"] == "deaf",
+          "ET la projection est sourde — deux champs, deux verites (vu: %s)"
+          % h0["projection_status"])
+finally:
+    deck.humans = _real_humans
+    _full.shutdown()
+    _full.server_close()
 
 # ─── LE RATTACHEMENT PROJET ────────────────────────────────────────────────────────────────────
 # Le deck le derivait d'un montage `/home/projects.ops/` que `pod_mounts_env` a retire de tous les
@@ -150,11 +293,11 @@ check(
 # « fleet-level » la ou il voulait dire « je ne sais pas ». Le slug vient desormais du runtime, qui
 # le sait. Ces deux cas etaient MUETS dans ce corpus — c'est ce silence qui a laisse la derive
 # vivre le temps qu'il a fallu pour la voir a l'oeil.
-pport, psrv = serve_pods([
+psrv = serve_pods_unix("proj", [
     {"pod_id": "p1", "role": "engineer", "phase": "ready", "project_slug": "vitrine"},
     {"pod_id": "p2", "role": "starfleet", "phase": "ready"},
 ])
-_, pods = deck.fleet_pods({"ports": {"deck": pport}})
+_, pods = deck.fleet_pods({"human": "proj"})
 by_id = {p["pod_id"]: p for p in pods}
 check(
     by_id["p1"].get("project_slug") == "vitrine",
@@ -165,6 +308,7 @@ check(
     "un pod fleet-level n'a pas de projet, et c'est une reponse du runtime",
 )
 psrv.shutdown()
+psrv.server_close()
 
 
 
