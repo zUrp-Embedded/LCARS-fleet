@@ -18,6 +18,10 @@ FLAG="${1:?usage: watch.sh <flagfile>}"
 # post-armement. La ligne « watch arme » ci-dessous reste LA confirmation d'armement.
 last="$([[ -f "$FLAG" ]] && cat "$FLAG" 2>/dev/null || true)"
 echo "watch arme sur $FLAG"
+# Marqueur d'ARMEMENT : ".seen" existe dès que le Monitor est armé, AVANT tout wake. Le serveur lit son
+# existence pour arrêter l'engage de bootstrap — une fois le rail flag vivant, engage a fait son job
+# (l'agent l'arme comme première action ; ensuite les tours arrivent par le flag, plus par l'engage).
+printf '%s\n' "$last" > "$FLAG.seen" 2>/dev/null || true
 while :; do
   if [[ -f "$FLAG" ]]; then
     cur="$(cat "$FLAG" 2>/dev/null || true)"
@@ -29,6 +33,11 @@ while :; do
       else
         echo "$msg"
       fi
+      # Trace de LIVRAISON : on écrit le token qu'on vient d'émettre dans "<flag>.seen". Le serveur
+      # compare turn.flag à turn.flag.seen pour distinguer « Monitor a livré, l'agent est occupé » de
+      # « Monitor planté » — au lieu de keyer le wake sur get_work_item, que l'agent peut légitimement
+      # ne pas appeler (tour d'info, ou son propre jugement « rien à tirer »). Non-fatal.
+      printf '%s\n' "$cur" > "$FLAG.seen" 2>/dev/null || true
     fi
   fi
   sleep 1
