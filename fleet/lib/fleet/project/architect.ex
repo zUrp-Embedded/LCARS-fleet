@@ -112,7 +112,7 @@ defmodule Fleet.Project.Architect do
   So the record consulted here is the one the box already keeps, per human, on disk: the pod
   snapshot written at spawn, under the running human's own home. It exists because `ensure/2` ran
   for THIS human — which happens on the four deliberate verbs (`create`, `import`, `open`,
-  `project_publish`) and nowhere else. A fleet restart or a crash leaves it in place, which is
+  `project_adopt`) and nowhere else. A fleet restart or a crash leaves it in place, which is
   exactly the case this keeper exists for; a deliberate kill clears it, and then not resurrecting
   is the correct answer.
   """

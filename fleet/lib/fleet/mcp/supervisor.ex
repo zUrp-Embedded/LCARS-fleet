@@ -27,6 +27,10 @@ defmodule Fleet.MCP.Supervisor do
       {Registry, keys: :unique, name: Fleet.MCP.PodSocketRegistry},
       # Acceptors add temporary workers here; their own limit protects this fleet-wide ceiling.
       {Task.Supervisor, name: Fleet.MCP.ConnectionTaskSupervisor, max_children: 32},
+      # Off-turn `project_publish` workers (phase-2 publish rail): a long, host-side git+filter-repo
+      # job the tool call must not block on. A separate pool so a slow publish never starves the
+      # connection tasks above; the small cap bounds concurrent history rewrites.
+      {Task.Supervisor, name: Fleet.MCP.PublishTaskSupervisor, max_children: 4},
       Fleet.MCP.PodSocketSupervisor
     ]
 

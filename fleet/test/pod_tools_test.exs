@@ -1634,7 +1634,7 @@ defmodule Fleet.MCP.PodToolsTest do
          "justification" => "le poc est devenu serieux"
        }},
       {"project_close", %{"full_name" => "fleet/demo-proj"}},
-      {"project_publish", %{"name" => "demo-proj"}},
+      {"project_adopt", %{"name" => "demo-proj"}},
       {"project_import", %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
       # The deposit door and its discovery side: same head as every other onboarding verb, so the
       # gate table is where they belong — a new door admitted by nobody's test is a door with a
@@ -1750,7 +1750,7 @@ defmodule Fleet.MCP.PodToolsTest do
             {"project_create", %{"name" => "demo-proj"}},
             {"project_install", %{"full_name" => "fleet/demo-proj"}},
             {"project_open", %{"full_name" => "fleet/demo-proj"}},
-            {"project_publish", %{"name" => "demo-proj"}}
+            {"project_adopt", %{"name" => "demo-proj"}}
           ] do
         assert {:ok, %{content: [%{"text" => text}]}, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
@@ -1806,6 +1806,117 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "deleted"
       assert %{"project" => "removed", "work" => "removed"} = result["local"]
+    end
+
+    test "DPF-05: delete_project removes the project's publish binding (no orphan)" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      # System.user_home!/0 is VM-boot-fixed (HOME cannot be redirected at runtime), so the binding is
+      # written WHERE the code actually looks, under a UNIQUE name (no collision with a real binding),
+      # and removed on exit. The stub deletes any name it is handed.
+      full = "fleet/dpf05-#{System.unique_integer([:positive])}"
+      key = String.replace(full, "/", "__")
+      pub = Path.join([System.user_home!(), ".lcars", "publish"])
+      File.mkdir_p!(pub)
+      binding = Path.join(pub, "#{key}.json")
+
+      File.write!(
+        binding,
+        ~s({"host":"github","dest_host":"github.com","dest_repo":"me/Demo","base":"main"})
+      )
+
+      on_exit(fn -> File.rm(binding) end)
+
+      pod = uniq("pod-sf")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "project_delete",
+                 %{"full_name" => full},
+                 pod_state(pod)
+               )
+
+      assert {:ok, %{"status" => "deleted", "binding" => "removed"}} = Jason.decode(txt)
+      refute File.exists?(binding)
+    end
+
+    test "forge_list: onboarder lists the human's registered forges" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      name = "fl#{System.unique_integer([:positive])}"
+      dir = Path.join([System.user_home!(), ".lcars", "forges"])
+      File.mkdir_p!(dir)
+      f = Path.join(dir, "#{name}.json")
+      File.write!(f, ~s({"host":"github","dest_host":"github.com","owner":"alice"}))
+      on_exit(fn -> File.rm(f) end)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("forge_list", %{}, pod_state(uniq("pod-sf")))
+
+      assert {:ok, %{"status" => "listed", "forges" => forges}} = Jason.decode(txt)
+      assert Enum.any?(forges, &(&1["name"] == name and &1["owner"] == "alice"))
+    end
+
+    test "forge_list: a non-onboarder is refused by the gate" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :forbidden_not_onboarder, _} =
+               PodTools.handle_tool_call("forge_list", %{}, pod_state(uniq("pod-eng")))
+    end
+
+    test "publish_link: onboarder writes the binding (reversible intent, not a push)" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      fname = "pl#{System.unique_integer([:positive])}"
+      forges = Path.join([System.user_home!(), ".lcars", "forges"])
+      File.mkdir_p!(forges)
+      ff = Path.join(forges, "#{fname}.json")
+      File.write!(ff, ~s({"host":"github","dest_host":"github.com","owner":"alice"}))
+
+      repo = "fleet/pl#{System.unique_integer([:positive])}"
+      key = String.replace(repo, "/", "__")
+      binding = Path.join([System.user_home!(), ".lcars", "publish", "#{key}.json"])
+
+      on_exit(fn ->
+        File.rm(ff)
+        File.rm(binding)
+      end)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "publish_link",
+                 %{"repo" => repo, "forge" => fname, "as" => "MyRepo"},
+                 pod_state(uniq("pod-sf"))
+               )
+
+      assert {:ok, %{"status" => "linked", "dest" => "github.com/alice/MyRepo"}} =
+               Jason.decode(txt)
+
+      assert File.exists?(binding)
+    end
+
+    test "publish_link: unknown forge -> forge_unknown" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      ghost = "ghost#{System.unique_integer([:positive])}"
+
+      assert {:error, {:forge_unknown, _}, _} =
+               PodTools.handle_tool_call(
+                 "publish_link",
+                 %{"repo" => "fleet/x", "forge" => ghost, "as" => "Y"},
+                 pod_state(uniq("pod-sf"))
+               )
+    end
+
+    test "publish_link: a non-onboarder is refused by the gate" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :forbidden_not_onboarder, _} =
+               PodTools.handle_tool_call(
+                 "publish_link",
+                 %{"repo" => "fleet/x", "forge" => "any", "as" => "Y"},
+                 pod_state(uniq("pod-eng"))
+               )
     end
 
     test "revise_project_card: threads the human declaration + the ACTING role, renders the note" do

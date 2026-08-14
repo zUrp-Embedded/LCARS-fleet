@@ -29,9 +29,11 @@ defmodule Fleet.MCP.PodTools do
         engraved declaration gets a tracked revision path; future tickets only).
       - `project_close`    : parks a project (BL-6-30 — marker issue holds the state, the
         poller skips the repo; disk + forge intact, `project_open` reopens).
-      - `project_publish`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
+      - `project_adopt`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
         of import; local content never overwritten).
       - `project_import` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
+      - `project_publish`   : phase-2 publish of a project to its linked external forge as a rolling
+        PR/MR (ASYNC — returns queued, outcome on the bus; the token stays host-side).
       - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `issue_list`      : the arch reads its project's open-ticket board (BL-6-28: the
@@ -51,6 +53,9 @@ defmodule Fleet.MCP.PodTools do
       - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
       - `project_delete`   : destroys a project. Disarmed by deployment flag.
       - `list_workflow_cards` : the validation cards a project can be onboarded against.
+      - `forge_list`        : the human's registered external forges (the publish pool) — read-only.
+      - `publish_link`      : link a project to a forge (writes its publish binding) — reversible intent,
+        not a push (the human's `lcars approve` + PR merge stay the gates).
 
   ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
   `issue_retire` was added). The authority is the `deftool` set itself, and the gate reads it from
@@ -122,8 +127,9 @@ defmodule Fleet.MCP.PodTools do
     "project_install" => :mutation,
     "deposit_list" => :read,
     "deposit_import" => :mutation,
-    "project_publish" => :mutation,
+    "project_adopt" => :mutation,
     "project_import" => :mutation,
+    "project_publish" => :mutation,
     "project_close" => :mutation,
     "project_revise_card" => :mutation,
     "project_delete" => :mutation,
@@ -138,7 +144,9 @@ defmodule Fleet.MCP.PodTools do
     "dependency_remove" => :mutation,
     "emergency_stop" => :mutation,
     "project_list" => :read,
-    "issue_retire" => :mutation
+    "issue_retire" => :mutation,
+    "forge_list" => :read,
+    "publish_link" => :mutation
   }
 
   @doc """
@@ -388,6 +396,47 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}})
   end
 
+  deftool "forge_list" do
+    meta do
+      name("List Forges")
+
+      description(
+        "The human's registered EXTERNAL forges (the pool they built with `lcars forge add`) — where a " <>
+          "project could be published. Read-only; takes NO argument. Use it to PRESENT the forges before " <>
+          "proposing to link a project (`publish_link`). Whether each forge's CLI is authenticated is a " <>
+          "SEPARATE host check (`lcars forge status`), not this. Returns " <>
+          "{\"status\":\"listed\",\"forges\":[{\"name\",\"host\",\"dest_host\",\"owner\"}, ...]}."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}})
+  end
+
+  deftool "publish_link" do
+    meta do
+      name("Link Publish Target")
+
+      description(
+        "LINK a project to a registered forge — declare WHERE it publishes, the reversible intent. It " <>
+          "does NOT publish: nothing goes external until the human runs `lcars approve` (first populate, " <>
+          "the hard host gate) and merges the PR/MR. Use it after `project_create`/`project_import` to " <>
+          "capture the destination the human picked from `forge_list`. `repo` = the internal `owner/name`; " <>
+          "`forge` = a name from `forge_list`; `as` = the destination repo name (becomes " <>
+          "`<forge.owner>/<as>` on the forge). Returns {\"status\":\"linked\",\"repo\":...,\"dest\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "repo" => %{"type" => "string"},
+        "forge" => %{"type" => "string"},
+        "as" => %{"type" => "string"}
+      },
+      "required" => ["repo", "forge", "as"]
+    })
+  end
+
   deftool "deposit_import" do
     meta do
       name("Import Deposit")
@@ -422,7 +471,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "project_publish" do
+  deftool "project_adopt" do
     meta do
       name("Adopt Project")
 
@@ -468,8 +517,9 @@ defmodule Fleet.MCP.PodTools do
           "mechanical reception filter — on refusal NOTHING reaches the org; the human expurges " <>
           "at the source and retries. Default branch is normalized to `main` (a half-migrated " <>
           "repo with BOTH master and main is refused — the human settles which is real). " <>
-          "Private repos: the operator sets LCARS_EXTERNAL_GIT_TOKEN in the daemon env (never " <>
-          "ask for the token in chat). `url` = https repo URL; `name` = the kebab-case project " <>
+          "Private repos: auth is the operator's WIRED git credential helper (gh/glab auth login, " <>
+          "or their own helper) — the host clones with it, no token in chat, no env token. `url` = " <>
+          "https repo URL; `name` = the kebab-case project " <>
           "name in our org. The card/criticality declaration relays like create_project. " <>
           "Returns {\"status\":\"imported_external\",\"repo\":...}."
       )
@@ -486,6 +536,33 @@ defmodule Fleet.MCP.PodTools do
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["url", "name"]
+    })
+  end
+
+  deftool "project_publish" do
+    meta do
+      name("Publish to External Forge")
+
+      description(
+        "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab, both " <>
+          "first-class) as a rolling PR/MR. ASYNC: returns " <>
+          "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
+          "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
+          "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
+          "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>
+          "`lcars approve <repo> --forge <name> --as <dest>` — an unlinked repo returns queued " <>
+          "and then fails on the bus (no destination). Force-updates ONE rolling branch " <>
+          "(`lcars/publish`) and its single open PR/MR; the human merges it on the forge's web UI. " <>
+          "`repo` = the internal `owner/name`."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "repo" => %{"type" => "string"}
+      },
+      "required" => ["repo"]
     })
   end
 
@@ -1021,6 +1098,23 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
+  def handle_tool_call("forge_list", _args, state) do
+    case Delegation.list_forges(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("publish_link", %{"repo" => _, "forge" => _, "as" => _} = args, state) do
+    case Delegation.publish_link(args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("publish_link", _bad_args, state),
+    do: {:error, :invalid_arguments, state}
+
   def handle_tool_call(
         "deposit_import",
         %{"source" => source, "catalogue" => catalogue} = args,
@@ -1044,14 +1138,14 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("project_publish", %{"name" => name} = args, state) when is_binary(name) do
+  def handle_tool_call("project_adopt", %{"name" => name} = args, state) when is_binary(name) do
     case Delegation.adopt_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("project_publish", _bad_args, state) do
+  def handle_tool_call("project_adopt", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -1064,6 +1158,17 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("project_import", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("project_publish", %{"repo" => repo} = args, state) when is_binary(repo) do
+    case Delegation.project_publish(args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("project_publish", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

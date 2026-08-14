@@ -91,7 +91,8 @@ spec:
       - mcp__fleet__project_open         # third verb: RELAUNCH a project already on the machine
       - mcp__fleet__project_revise_card  # BL-6-29: revise an engraved card (human chooses, future tickets only)
       - mcp__fleet__project_close        # BL-6-30: park a project (marker issue; running brick finishes, next never starts)
-      - mcp__fleet__project_publish        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
+      - mcp__fleet__project_adopt        # BL-6-32: publish a disk-only project (inverse of import; local content never overwritten)
+      - mcp__fleet__project_publish      # phase-2: publish a LINKED project OUT to its external forge (gh/glab, rolling PR/MR, async). Onboarder-gated; starfleet emits the request, the token stays host-side, never in a pod. Was UNREACHABLE (tool existed, no grant) — this line is the fix.
       # LES DEUX VERBES DU DEPOT, et leur absence ici etait un piege actif : le SP de ce role decrit
       # le flux depuis le 2026-08-11, et un outil hors `allowedTools` sous `--permission-mode
       # default` ne se contente pas d'etre absent — il PROMPTE, et le pod GELE en attendant une
@@ -105,6 +106,8 @@ spec:
       # projet qui n'a rien declare n'est pas un projet qui a choisi le defaut.
       - mcp__fleet__project_list        # BL : l'inventaire avec sa carte, sa source et son etat
       - mcp__fleet__project_import  # BL-6-31: repatriate from GitHub/GitLab (adoption gate: foreign .claude refused, CLAUDE.md filtered)
+      - mcp__fleet__forge_list          # les forges externes du pool de l'humain (read-only) — pour proposer un lien de publish
+      - mcp__fleet__publish_link        # lie un projet a une forge (ecrit le binding) — intention reversible, PAS un push (approve + merge restent les gates)
     disallowedTools:
       - web_search
       - web_fetch

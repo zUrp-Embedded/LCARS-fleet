@@ -669,7 +669,7 @@ defmodule Fleet.Pilot.Poller do
     # never set up.
     #
     # Onboarding is a DELIBERATE gesture and the corpus says so by having four distinct human
-    # verbs for it (`create`, `import`, `open`, `project_publish`). Auto-provisioning on discovery
+    # verbs for it (`create`, `import`, `open`, `project_adopt`). Auto-provisioning on discovery
     # would make creating a repo in the org enough to trigger a clone — a policy nobody chose.
     # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
     # call, so an unserved repo also stops costing two API calls per tick.

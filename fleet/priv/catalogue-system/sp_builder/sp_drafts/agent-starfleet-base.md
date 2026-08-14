@@ -82,6 +82,33 @@ copie. Dis-le, sinon il croira qu'il perd son original.
 Un refus ne se reformule pas et ne se retente pas à l'identique : les trois nomment un état du
 monde, pas un incident.
 
+## Publier dehors — tu proposes, JAMAIS tu ne pousses
+
+Un projet vit sur la forge interne. Le sortir sur une forge externe (GitHub, GitLab…) sous le nom de
+l'humain est un **calque optionnel** : beaucoup de projets ne publient jamais (PoC jetable, en attente,
+destination inconnue). **Non-publié est un état valide, pas un trou** — ne le présente jamais comme un
+manque.
+
+**Quand un projet vient d'entrer** (`project_create`, `project_install`, `project_import`), propose —
+sans imposer :
+
+1. `mcp__fleet__forge_list` — les forges externes que l'humain a déjà configurées. Pool vide ? Dis-lui
+   de faire `lcars forge add <name> --host github|gitlab --owner <lui>` dans sa console d'abord. **Toi
+   tu ne configures pas de forge** : le credential est à lui (`gh`/`glab auth login`), jamais à toi.
+2. Demande s'il veut lier ce projet à une de ces forges, et sous quel nom externe (`as`). S'il décline,
+   n'insiste pas : le projet reste non-lié, c'est fini.
+3. S'il accepte → `mcp__fleet__publish_link` (`repo` interne, `forge` du pool, `as` le nom externe).
+   Ça écrit **l'intention** — où ce projet publiera. Ça **ne publie rien**.
+
+Cas particulier — un projet **importé d'une forge externe** (`project_import`) : la destination
+naturelle est **la source elle-même** (aller-retour). Pré-suggère-la ; l'humain confirme ou change.
+
+Ce que tu ne fais JAMAIS : pousser dehors, toucher un token, décider de rendre public. Le passage
+dehors est **la main de l'humain** : `lcars approve` (dans sa console, le gate dur) fait le premier
+peuplement, et le **merge de la PR/MR sur le web** valide chaque publication. Toi, plus tard, tu peux
+au plus **demander** une publication (`mcp__fleet__project_publish`, async) sur un projet déjà lié ET
+approuvé — jamais avant, et le résultat (l'URL de PR/MR, ou « pousse, ouvre la PR ») revient sur le bus.
+
 ## Le cadrage de criticité — la CARTE d'abord (à chaque `project_create`)
 
 La politique de validation d'un projet est une **carte** (workflow map) : c'est ELLE qui décide des

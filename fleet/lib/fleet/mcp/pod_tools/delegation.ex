@@ -76,6 +76,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
+  alias Fleet.EventRouter.Bus
+  alias Fleet.MCP.PodTools.ProjectPublish
   alias Fleet.Project.GitOps
 
   @scratch_file "scratchpad.md"
@@ -265,6 +267,65 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  ENQUEUES a phase-2 publish of `repo` to its linked external forge (chantier-publication-github).
+
+  Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
+  PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
+  a large repo, so blocking the pod's turn is not an option. Returns `{:ok, %{"status" => "queued"}}`
+  immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `project_publish.done` /
+  `project_publish.failed`. The external token never enters a pod — the rail reads it host-side.
+
+  A project with no publish binding (never `lcars approve`d) is not caught here: the Task resolves the
+  binding and emits `project_publish.failed` — the request is well-formed, the target simply is not set.
+  """
+  @spec project_publish(map(), map()) :: {:ok, map()} | {:error, term()}
+  def project_publish(%{"repo" => repo}, state) when is_binary(repo) do
+    case require_onboarder(state) do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, _role} ->
+        if valid_repo?(repo) do
+          # The requesting pod, carried to the worker so its outcome wakes it back (notify_pod via a
+          # Spawner-side consumer on project_publish.{done,failed}). nil for a caller without a pod_id.
+          requester = Map.get(state, :pod_id)
+
+          case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
+                 ProjectPublish.run(repo, requester)
+               end) do
+            {:ok, _pid} ->
+              Bus.safe_emit(
+                :mcp,
+                :"project_publish.started",
+                [payload: %{"repo" => repo, "requester_pod_id" => requester}],
+                context: "project_publish"
+              )
+
+              {:ok, %{"status" => "queued", "repo" => repo}}
+
+            {:error, reason} ->
+              {:error, {:publish_enqueue_failed, reason}}
+          end
+        else
+          {:error, :invalid_arguments}
+        end
+    end
+  end
+
+  def project_publish(_args, _state), do: {:error, :invalid_arguments}
+
+  # owner/name, exactly two non-empty segments, no path-traversal component.
+  defp valid_repo?(repo) do
+    case String.split(repo, "/") do
+      [owner, name] ->
+        owner != "" and name != "" and owner not in ~w(. ..) and name not in ~w(. ..)
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
   Lists a human's DEPOSIT candidates — the repos they pushed to their personal space that no
   catalogue org already carries.
 
@@ -284,6 +345,119 @@ defmodule Fleet.MCP.PodTools.Delegation do
         {:error, reason} ->
           {:error, {:deposit_scan_failed, inspect(reason)}}
       end
+    end
+  end
+
+  @doc """
+  Lists the human's registered EXTERNAL forges (the pool under `~/.lcars/forges/`, written by
+  `lcars forge add`) — onboarder gate, read-only. Lets starfleet PRESENT the forges before proposing a
+  publish link. Whether each forge's CLI is authenticated is a SEPARATE host check (`lcars forge
+  status`), not this. Returns `{"status":"listed","forges":[{"name","host","dest_host","owner"}, ...]}`.
+  """
+  @spec list_forges(map()) :: {:ok, map()} | {:error, term()}
+  def list_forges(state) do
+    with {:ok, _role} <- require_onboarder(state) do
+      dir = Path.join([System.user_home!(), ".lcars", "forges"])
+
+      forges =
+        case File.ls(dir) do
+          {:ok, files} ->
+            files
+            |> Enum.filter(&String.ends_with?(&1, ".json"))
+            |> Enum.sort()
+            |> Enum.flat_map(&read_forge_entry(dir, &1))
+
+          {:error, _} ->
+            []
+        end
+
+      {:ok, %{"status" => "listed", "forges" => forges}}
+    end
+  end
+
+  defp read_forge_entry(dir, file) do
+    with {:ok, raw} <- File.read(Path.join(dir, file)),
+         {:ok, m} when is_map(m) <- Jason.decode(raw) do
+      [
+        %{
+          "name" => String.replace_suffix(file, ".json", ""),
+          "host" => m["host"],
+          "dest_host" => m["dest_host"],
+          "owner" => m["owner"]
+        }
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
+  Links a project to a registered forge — writes its publish binding
+  (`~/.lcars/publish/<owner__name>.json`), onboarder gate. This is the REVERSIBLE intent ("this project
+  publishes HERE"), NOT the push: nothing goes external until the human's `lcars approve` (first
+  populate, the hard host gate) and the PR/MR merge. `repo` = internal `owner/name`; `forge` = a name
+  from `list_forges`; `as` = the destination repo name (it becomes `<forge.owner>/<as>` on the forge).
+  Fails if the forge is not in the pool. Returns `{"status":"linked","repo":...,"dest":...,"base":...}`.
+  """
+  @spec publish_link(map(), map()) :: {:ok, map()} | {:error, term()}
+  def publish_link(%{"repo" => repo, "forge" => forge_name, "as" => as}, state)
+      when is_binary(repo) and is_binary(forge_name) and is_binary(as) do
+    with {:ok, _role} <- require_onboarder(state),
+         true <- valid_repo?(repo),
+         {:ok, forge} <- read_forge(forge_name),
+         dest_repo = "#{forge["owner"]}/#{as}",
+         binding = %{
+           "host" => forge["host"],
+           "dest_host" => forge["dest_host"],
+           "dest_repo" => dest_repo,
+           "base" => "main"
+         },
+         :ok <- write_binding(repo, binding) do
+      {:ok,
+       %{
+         "status" => "linked",
+         "repo" => repo,
+         "dest" => "#{forge["dest_host"]}/#{dest_repo}",
+         "base" => "main"
+       }}
+    else
+      false -> {:error, :invalid_repo}
+      {:error, _} = err -> err
+    end
+  end
+
+  def publish_link(_bad, _state), do: {:error, :invalid_arguments}
+
+  # Forge names are filename components: reject traversal (same guard shape as `lcars forge add`).
+  defp read_forge(name) do
+    if name =~ ~r/^[a-z0-9][a-z0-9_-]*$/ do
+      path = Path.join([System.user_home!(), ".lcars", "forges", "#{name}.json"])
+
+      with {:ok, raw} <- File.read(path),
+           {:ok, m} when is_map(m) <- Jason.decode(raw),
+           true <- is_binary(m["host"]) and is_binary(m["dest_host"]) and is_binary(m["owner"]) do
+        {:ok, m}
+      else
+        _ -> {:error, {:forge_unknown, name}}
+      end
+    else
+      {:error, {:forge_name_invalid, name}}
+    end
+  end
+
+  # The binding key is `ProjectPublish.binding_key/1` — the single source of the org-qualified format
+  # the worker and `lcars approve` both use. Mode 600, no token in it (auth is the wired helper).
+  defp write_binding(repo, binding) do
+    dir = Path.join([System.user_home!(), ".lcars", "publish"])
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(repo)}.json")
+
+    with {:ok, json} <- Jason.encode(binding, pretty: true),
+         :ok <- File.write(path, json) do
+      File.chmod(path, 0o600)
+      :ok
+    else
+      {:error, reason} -> {:error, {:binding_write_failed, inspect(reason)}}
     end
   end
 
@@ -1058,12 +1232,43 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Delete sequence — same :project_onboard seam, callback :delete_project. `force` bypasses the
   # anti-work safety guard (deliberate end-of-life delete).
+  # A deleted project must not leave its publish binding behind: a future project of the SAME name
+  # would silently inherit a dead external destination. Host-side (`~/.lcars`, per-human — the BEAM
+  # runs as the human). Best-effort: an absent binding is the NOMINAL case (most projects never
+  # publish), and the delete has already succeeded, so a leftover binding is logged, not fatal. The key
+  # is `ProjectPublish.binding_key/1` — the single source of the org-qualified format the writer uses.
+  defp remove_publish_binding(full_name) do
+    path =
+      Path.join([
+        System.user_home!(),
+        ".lcars",
+        "publish",
+        "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(full_name)}.json"
+      ])
+
+    case File.rm(path) do
+      :ok ->
+        :removed
+
+      {:error, :enoent} ->
+        :absent
+
+      {:error, reason} ->
+        Logger.warning(
+          "Delegation: delete_project left the publish binding behind (#{path}): #{inspect(reason)}"
+        )
+
+        :absent
+    end
+  end
+
   defp do_delete_project(full_name, args) do
     with {:ok, onboard} <- conforming_onboard() do
       opts = [force: Map.get(args, "force", false) == true]
 
       case onboard.delete_project(full_name, opts) do
         {:ok, %{repo: repo} = result} ->
+          binding = remove_publish_binding(full_name)
           local = Map.get(result, :local, %{})
 
           {:ok,
@@ -1072,6 +1277,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
              "repo" => repo,
              "forge" => to_string(Map.get(result, :forge, "")),
              "architect" => to_string(Map.get(result, :architect, "")),
+             "binding" => to_string(binding),
              "local" => %{
                "project" => to_string(Map.get(local, :project, :absent)),
                "work" => to_string(Map.get(local, :work, :absent))

@@ -110,6 +110,32 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
 
+  $PROG forge add <name> --host github|gitlab --owner <owner> [--dest-host H]
+  $PROG forge list
+  $PROG forge status
+      Le POOL de forges de publication de CET humain (~/.lcars/forges). Une forge =
+      forge + compte + repo. L'AUTH n'est pas stockee ici : c'est le CLI officiel de la
+      forge (« gh auth login » / « glab auth login »), deja credential helper git.
+      GitLab est une forge de plein droit ; --dest-host pour Enterprise / self-hosted.
+      « status » = le doctor : chaque forge + si son CLI est authentifie ([ok]/[!!]).
+
+  $PROG approve <owner/nom-interne> --forge <name> --as <repo-dest> [--base main] [--public]
+  $PROG approve <owner/nom-interne> [--base main]
+      PHASE 1 — le gate manuel dur de la publication. Avec --forge/--as : CREE-OU-LIE le
+      projet a une forge du pool et POUSSE le peuplement initial. Tier 1 (gh/glab
+      authentifie) : cree le repo s'il n'existe pas (--public sinon prive). Tier 2 (repo
+      pre-cree dans l'UI) : le lie tel quel (refuse d'ecraser une base deja remplie).
+      Sans --forge : PUSH DIRECT de l'etat courant sur la base deja liee (garde
+      deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
+      L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
+      externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
+      phase 2 (PR/MR reguliere) est le tool « project_publish » cote pod, pas ce verbe.
+
+  $PROG publish status <owner/nom-interne>
+      Le doctor par PROJET : est-il pret a publier ? Non lie = etat valide, rapporte
+      calme (pas un trou). Lie : la chaine de readiness (CLI authentifie + base peuplee
+      cote forge). Chaque manque nomme le geste suivant.
+
   $PROG help
       Cette aide.
 
@@ -425,7 +451,7 @@ cmd_catalogue_disable() {
   un defaut ne se retire pas, il se REMPLACE : « $PROG catalogue enable <autre> » ecrit la
   declaration (et y garde « $name » en tete), puis « $PROG catalogue disable $name »."
   fi
-  # Le temporaire vit DANS le repertoire cible : `mv` y est un rename atomique garanti par le
+  # Le temporaire vit DANS le repertoire forge : `mv` y est un rename atomique garanti par le
   # noyau, alors que depuis /tmp (souvent un autre systeme de fichiers) c'est une copie suivie
   # d'un delete — une interruption au milieu laisse la declaration tronquee.
   local tmp; tmp="$(mktemp "$(dirname "$CAT_ACTIVE")/.catalogues.active.XXXXXX")"
@@ -526,7 +552,7 @@ cmd_catalogue_install() {
 # sortie.
 cmd_project_migrate() {
   local repo="${1:?project migrate: depot requis (owner/nom)}"
-  local cat="${2:?project migrate: catalogue cible requis}"
+  local cat="${2:?project migrate: catalogue forge requis}"
   [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
   local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
   [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
@@ -572,6 +598,267 @@ cmd_catalogue() {
   esac
 }
 
+# --- publish forges (pool) + approve (phase-1 gate) -----------------------
+# PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /home/private —
+# that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
+# its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
+# (mode 600), read host-side by this CLI (it runs as the human), and NEVER enter a pod.
+FORGES_DIR="$HOME/.lcars/forges"
+PUBLISH_DIR="$HOME/.lcars/publish"
+
+# Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
+_dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
+
+# The official CLI of a host — the Tier-1 credential helper AND repo-creator. OPTIONAL: absent, approve
+# falls to Tier 2 (link a pre-created repo, push via the operator's own wired helper). gh<->glab are
+# 1:1. We NEVER read or pass a token: auth is `gh/glab auth login` or the operator's helper, never ours.
+_dest_cli() { case "$1" in github) echo gh ;; gitlab) echo glab ;; *) die "host inconnu: $1 (github|gitlab)" ;; esac; }
+_json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
+
+# Tier-1 repo bootstrap via the CLI's own API — the create right comes WITH `gh/glab auth login`, no
+# expensive scope to grant by hand. _dest_repo_exists probes; _dest_repo_create makes it under the login.
+_dest_repo_exists() { case "$1" in gh) gh repo view "$2" ;; glab) glab repo view "$2" ;; esac >/dev/null 2>&1; }
+_dest_repo_create() {  # cli repo visibility(public|private)
+  case "$1" in
+    gh)   gh   repo create "$2" "--$3" ;;
+    glab) glab repo create "$2" "--$3" ;;
+  esac
+}
+
+cmd_forge() {
+  case "${1:-}" in
+    add)      shift; cmd_forge_add "$@" ;;
+    list|ls)  shift; cmd_forge_list "$@" ;;
+    status)   shift; cmd_forge_status "$@" ;;
+    "")       die "forge: sous-commande requise (add|list|status)" ;;
+    *)        die "forge: sous-commande inconnue « $1 » (add|list|status)" ;;
+  esac
+}
+
+cmd_forge_add() {
+  local name="" host="" owner="" dest_host=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --host) host="$2"; shift 2 ;;
+      --owner) owner="$2"; shift 2 ;;
+      --dest-host) dest_host="$2"; shift 2 ;;
+      -*) die "forge add: option inconnue $1" ;;
+      *) if [[ -z "$name" ]]; then name="$1"; shift; else die "forge add: argument en trop « $1 »"; fi ;;
+    esac
+  done
+  [[ -n "$name" && -n "$host" && -n "$owner" ]] || \
+    die "forge add: usage — forge add <name> --host github|gitlab --owner <owner> [--dest-host H]"
+  case "$host" in
+    github) [[ -n "$dest_host" ]] || dest_host="github.com" ;;
+    gitlab) [[ -n "$dest_host" ]] || dest_host="gitlab.com" ;;
+    *) die "forge add: --host inconnu « $host » (github|gitlab)" ;;
+  esac
+  # No token here: auth is `$(_dest_cli "$host") auth login`, the CLI's own credential store.
+  # `name` becomes a path component — refuse traversal (self-harm, but the slug guard has it too).
+  [[ "$name" != */* && "$name" != .* ]] || die "forge add: nom invalide « $name » (pas de '/' ni de '.' en tete)"
+  mkdir -p "$FORGES_DIR"; chmod 700 "$FORGES_DIR"
+  local out="$FORGES_DIR/$name.json"
+  python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4]},open(sys.argv[1],"w"),indent=2)' \
+    "$out" "$host" "$dest_host" "$owner"
+  chmod 600 "$out"
+  echo "forge « $name » enregistree ($host $owner @ $dest_host). Auth: $(_dest_cli "$host") auth login."
+}
+
+cmd_forge_list() {
+  local f found=0
+  if [[ -d "$FORGES_DIR" ]]; then
+    for f in "$FORGES_DIR"/*.json; do
+      [[ -e "$f" ]] || continue
+      found=1
+      python3 -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print("  %-16s %-7s %s/%s" % (os.path.basename(sys.argv[1])[:-5],d.get("host"),d.get("dest_host"),d.get("owner")))' "$f"
+    done
+  fi
+  [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
+}
+
+# Forge-level doctor: each forge in the pool + whether its official CLI is authenticated (reaches the
+# CLI, not the network). [ok] = ready ; [!!] = the operator's next gesture, named.
+cmd_forge_status() {
+  local f found=0
+  if [[ -d "$FORGES_DIR" ]]; then
+    for f in "$FORGES_DIR"/*.json; do
+      [[ -e "$f" ]] || continue
+      found=1
+      local name host owner dest_host cli
+      name="$(basename "$f" .json)"
+      host="$(_json_field "$f" host)"
+      owner="$(_json_field "$f" owner)"
+      dest_host="$(_json_field "$f" dest_host)"
+      cli="$(_dest_cli "$host")"
+      if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+        echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie"
+      else
+        echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »"
+      fi
+    done
+  fi
+  [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
+}
+
+cmd_publish() {
+  case "${1:-}" in
+    status) shift; cmd_publish_status "$@" ;;
+    "")     die "publish: sous-commande requise (status)" ;;
+    *)      die "publish: sous-commande inconnue « $1 » (status)" ;;
+  esac
+}
+
+# Project-level doctor: is THIS project ready to publish ? A non-linked project is a VALID terminal
+# state (most never publish), so it is reported CALM — never a red hole. Only a linked project runs
+# the readiness chain (CLI auth + base populated). The base check reaches the external forge.
+cmd_publish_status() {
+  local repo="${1:-}"
+  [[ -n "$repo" ]] || die "publish status: usage — publish status <owner/nom-interne>"
+  [[ "$repo" == */* ]] || die "publish status: « $repo » n'est pas un owner/nom (repo interne)"
+  local slug="${repo//\//__}"
+  local binding="$PUBLISH_DIR/$slug.json"
+  if [[ ! -r "$binding" ]]; then
+    echo "publish « $repo » : non lie (option) — aucun endpoint de publish configure."
+    echo "  Pour publier un jour : lcars approve $repo --forge <name> --as <repo-dest>"
+    return 0
+  fi
+  local host dest_host dest_repo base cli
+  host="$(_json_field "$binding" host)"
+  dest_host="$(_json_field "$binding" dest_host)"
+  dest_repo="$(_json_field "$binding" dest_repo)"
+  base="$(_json_field "$binding" base)"
+  cli="$(_dest_cli "$host")"
+  echo "publish « $repo » : lie a $dest_host/$dest_repo (base $base)"
+  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+    echo "  [ok] $cli authentifie"
+  else
+    echo "  [!!] $cli non authentifie — « $cli auth login » (ou cable un helper git)"
+  fi
+  export GIT_TERMINAL_PROMPT=0
+  local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
+  if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
+    echo "  [ok] base « $base » peuplee cote $dest_host (phase 1 faite)"
+  else
+    echo "  [!!] base « $base » absente/injoignable cote $dest_host — « lcars approve $repo » (phase 1)"
+  fi
+}
+
+cmd_approve() {
+  local repo="" forge="" as="" base="main" visibility="private"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --forge) forge="$2"; shift 2 ;;
+      --as) as="$2"; shift 2 ;;
+      --base) base="$2"; shift 2 ;;
+      --public) visibility="public"; shift ;;
+      --private) visibility="private"; shift ;;
+      -*) die "approve: option inconnue $1" ;;
+      *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "approve: argument en trop « $1 »"; fi ;;
+    esac
+  done
+  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--forge <name> --as <repo-dest>] [--base main] [--public]"
+  [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
+  # Org-qualified binding key (owner__name), NOT the name alone: two projects with the same name in
+  # two orgs must not collide on one binding. MUST match ProjectPublish.binding_key/1 (`owner/name`
+  # -> `owner__name`), or the host write and the worker read miss each other.
+  local slug="${repo//\//__}"
+  local binding="$PUBLISH_DIR/$slug.json"
+
+  # Resolve WHAT/WHERE first (mode + destination), so mode errors fire without any forge config.
+  local host dest_host dest_repo link_mode
+  if [[ -n "$forge" ]]; then
+    link_mode=1
+    local tfile="$FORGES_DIR/$forge.json"
+    [[ -r "$tfile" ]] || die "approve: forge « $forge » absente du pool (lcars forge list)"
+    [[ -n "$as" ]] || die "approve: --forge exige --as <nom-du-repo-destination>"
+    host="$(_json_field "$tfile" host)"
+    dest_host="$(_json_field "$tfile" dest_host)"
+    dest_repo="$(_json_field "$tfile" owner)/$as"
+  else
+    link_mode=0
+    [[ -r "$binding" ]] || die "approve: « $slug » pas encore lie — « approve $repo --forge <name> --as <repo> » d'abord"
+    host="$(_json_field "$binding" host)"
+    dest_host="$(_json_field "$binding" dest_host)"
+    dest_repo="$(_json_field "$binding" dest_repo)"
+    base="$(_json_field "$binding" base)"
+  fi
+
+  # The CLI (gh/glab) is OPTIONAL — it is only NEEDED to CREATE a repo that does not exist yet (Tier 1).
+  # Linking an existing repo + pushing only need a wired git credential helper (Tier 2: the operator's
+  # own creds — the homelab-GitLab case). We detect it here; we never hold a token. GIT_TERMINAL_PROMPT=0
+  # so a missing helper fails LOUD at push instead of hanging on a prompt (a headless BEAM can't answer).
+  local cli; cli="$(_dest_cli "$host")"
+  local have_cli=0
+  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then have_cli=1; fi
+  export GIT_TERMINAL_PROMPT=0
+
+  # Internal forge config — same source as cmd_project_migrate: ~/.lcars/fleet_v2.env, nowhere else.
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  # shellcheck disable=SC1090
+  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+  [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
+  [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] || die "approve: FORGE_TOKEN_FILE absent/illisible ($env_file)"
+
+  local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
+  mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
+
+  # Scratch clone, removed on ANY exit (die exits → EXIT trap fires; the CLI runs one verb then ends,
+  # so a single EXIT trap is safe). mktemp -d is 0700; no external secret ever lands in it.
+  local work_base; work_base="$(mktemp -d)"
+  trap 'rm -rf "$work_base"' EXIT
+  local work="$work_base/clone"
+
+  # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
+  "$(dirname "$(readlink -f "$0")")/publish-to-github.sh" \
+    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
+    || die "approve: production du clone certifie echouee (voir ci-dessus)"
+  cd "$work"
+
+  # git push/fetch/ls-remote to the dest carry no token — the wired helper supplies the credential.
+  if [[ "$link_mode" == 1 ]]; then
+    # CREATE-OR-LINK. Does the destination repo exist at all? Probe via the CLI when we have it
+    # (accurate), else via a bare ls-remote (Tier 2: the operator pre-created it, so it answers).
+    local repo_exists=0
+    if [[ "$have_cli" == 1 ]]; then
+      _dest_repo_exists "$cli" "$dest_repo" && repo_exists=1
+    else
+      git ls-remote "$dest_url" >/dev/null 2>&1 && repo_exists=1
+    fi
+    if [[ "$repo_exists" == 0 ]]; then
+      # Tier 1: auto-create under the login (free — no create-scope to grant by hand). Without the CLI
+      # we cannot create: tell the operator his two ways forward rather than push into the void.
+      [[ "$have_cli" == 1 ]] || die "approve: $dest_host/$dest_repo n'existe pas et $cli n'est pas authentifie.
+  Tier 1 : '$cli auth login' pour l'auto-creation.  Tier 2 : cree le repo vide dans l'UI web puis relance."
+      _dest_repo_create "$cli" "$dest_repo" "$visibility" \
+        || die "approve: creation de $dest_host/$dest_repo echouee ($cli repo create)"
+      echo "approve: $dest_host/$dest_repo cree ($visibility) sous ton login $cli."
+    fi
+    # LINK: never clobber a base the human populated by hand (a repo pre-created WITH content, Tier 2).
+    if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
+      die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
+    fi
+    git push -q "$dest_url" "HEAD:refs/heads/$base" \
+      || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
+    python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"base":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
+      "$binding" "$host" "$dest_host" "$dest_repo" "$base"
+    chmod 600 "$binding"
+    echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
+  else
+    # DIRECT push to an existing base: determinism gate (base must be an ancestor of the fresh clone).
+    git fetch -q "$dest_url" "$base" \
+      || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
+    if [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]; then
+      echo "approve: rien a pousser — $dest_host/$dest_repo $base deja a jour."
+    elif ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
+      die "approve: $base n'est PAS un ancetre du clone reecrit (reecriture non deterministe ou divergence) — rien pousse."
+    else
+      git push -q "$dest_url" "HEAD:refs/heads/$base" \
+        || die "approve: echec du push direct vers $dest_host/$dest_repo"
+      echo "approve: « $slug » pousse en direct vers $dest_host/$dest_repo $base."
+    fi
+  fi
+}
+
 # --- dispatch --------------------------------------------------------------
 
 case "${1:-help}" in
@@ -581,6 +868,9 @@ case "${1:-help}" in
   project)
     shift; cmd_project "$@" ;;
   catalogue) shift; cmd_catalogue "$@" ;;
+  forge) shift; cmd_forge "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
+  approve) shift; cmd_approve "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
 esac

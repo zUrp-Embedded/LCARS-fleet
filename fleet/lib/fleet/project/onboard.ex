@@ -845,7 +845,7 @@ defmodule Fleet.Project.Onboard do
 
   Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
   the forge that was never cloned here is not something this box can act on, and a disk project not
-  yet published is precisely what `project_publish` exists for.
+  yet published is precisely what `project_adopt` exists for.
 
   Per project, three facts and no derivation:
 
@@ -1259,10 +1259,10 @@ defmodule Fleet.Project.Onboard do
     1. URL gate — https + host ∈ #{inspect(@external_hosts)}; anything else refuses
        `{:unsupported_forge, _}`.
     2. System clone into a per-gesture SCRATCH (`--no-recurse-submodules` — a hostile submodule
-       is never repatriated silently), cleaned on EVERY exit. The forge auth extraheader is
-       PREFIX-scoped (ForgeAuth) so it never leaks to the external host; the optional external
-       credential rides `LCARS_EXTERNAL_GIT_TOKEN` (operator input at gesture time, never a
-       recipe product — public tokenless is the nominal path).
+       is never repatriated silently), cleaned on EVERY exit. Auth is the WIRED git credential
+       helper (gh/glab Tier 1, or the operator's own helper Tier 2), reached via the inherited HOME
+       under `GIT_TERMINAL_PROMPT=0` — the same tiered model as publish, no external token handled.
+       Public repos clone tokenless; a private one needs gh/glab authed (or a wired helper).
     3. ADOPTION GATE (the parking-lot USB, BL-6-16): a non-empty `.claude/` tree is refused EN
        BLOC (`{:foreign_claude_dir, _}` — we do not adopt someone else's hooks; org repos
        re-enter via `import/2`, never through this verb), and every `CLAUDE.md` must pass
@@ -1394,81 +1394,24 @@ defmodule Fleet.Project.Onboard do
   defp clone_external(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
-    with {:ok, env} <- external_auth_env(url) do
-      case Fleet.Credentials.Shell.git(
-             ["clone", "--no-recurse-submodules", url, scratch],
-             timeout_ms: timeout,
-             env: env
-           ) do
-        {:ok, {_, 0}} ->
-          :ok
+    # Auth is the WIRED git credential helper — gh/glab (Tier 1) or the operator's own helper (Tier 2),
+    # reached via the inherited HOME, the SAME tiered model as publish. No external token is read,
+    # stored, or passed: LCARS_EXTERNAL_GIT_TOKEN is retired. Shell.git's default env is
+    # ForgeAuth.git_env/0 — GIT_TERMINAL_PROMPT=0 (a missing helper fails LOUD, never hangs a headless
+    # clone) plus the INTERNAL forge extraheader, scoped to the internal host and so inert for an
+    # external clone (a private external repo needs gh/glab authed, or a wired helper — Tier 2).
+    case Fleet.Credentials.Shell.git(
+           ["clone", "--no-recurse-submodules", url, scratch],
+           timeout_ms: timeout
+         ) do
+      {:ok, {_, 0}} ->
+        :ok
 
-        {:ok, {out, code}} ->
-          {:error, {:external_clone_failed, {code, String.slice(out, 0, 500)}}}
+      {:ok, {out, code}} ->
+        {:error, {:external_clone_failed, {code, String.slice(out, 0, 500)}}}
 
-        {:error, reason} ->
-          {:error, {:external_clone_failed, reason}}
-      end
-    end
-  end
-
-  # LE TOKEN NE PASSE PLUS PAR LA LIGNE DE COMMANDE. Il etait injecte en USERINFO D'URL
-  # (`https://oauth2:<token>@host/…`) puis pose en ARGV de `git clone` — donc lisible par tout compte
-  # local dans `ps` pendant toute la duree du clone (jusqu'a 120 s), et ressorti tel quel dans les
-  # messages d'erreur de git, qui citent l'URL distante. Cette sortie remonte au pod appelant, sans
-  # redaction, via `{:external_clone_failed, {code, out}}`.
-  #
-  # LE CANAL SANS ARGV EXISTAIT DEJA DANS LE DEPOT, une porte a cote :
-  # `Fleet.Credentials.ForgeAuth.git_env_result/0` donne le credential de la forge INTERNE par
-  # `GIT_CONFIG_*` dans l'ENVIRONNEMENT — lisible par le seul proprietaire du processus. Il porte
-  # desormais les deux usages (`extraheader_env/2`), au lieu d'avoir une copie divergente ici.
-  #
-  # `Basic base64("oauth2:<token>")` reproduit exactement ce que l'userinfo transmettait sur le fil :
-  # GitHub comme GitLab acceptent cette paire. Le schema d'authentification ne change pas, seul le
-  # CANAL change — et l'URL redevient propre, donc les messages d'erreur de git le sont aussi.
-  #
-  # Un prefixe porteur d'un caractere de controle est REFUSE par le meme garde-fou que la forge
-  # interne : il serait interpole dans une cle git-config et y injecterait une ligne parasite. Une
-  # URL d'import vient d'un operateur, pas du depot.
-  @doc false
-  # Publique pour son test : la propriete achetee ici — le credential voyage par l'ENV et jamais par
-  # l'argv — ne se lit pas depuis `clone_external/3`, dont `Shell.git` est appele par litteral (pas
-  # de couture d'injection). Meme motif que les autres `@doc false` du depot.
-  def external_auth_env(url) do
-    case System.get_env("LCARS_EXTERNAL_GIT_TOKEN") do
-      token when is_binary(token) and token != "" ->
-        prefix = external_url_prefix(url)
-
-        if Fleet.Credentials.ForgeAuth.safe_prefix?(prefix) do
-          credential = "Basic " <> Base.encode64("oauth2:" <> token)
-          {:ok, Fleet.Credentials.ForgeAuth.extraheader_env(prefix, credential)}
-        else
-          # JAMAIS `inspect` ici : la valeur refusee est voisine du token.
-          Logger.error(
-            "Project.Onboard: external clone URL carries a control char in its authority — " <>
-              "REFUSED (a git-config key would be injected). Fix the import URL."
-          )
-
-          {:error, {:external_clone_failed, :url_malformed}}
-        end
-
-      _absent ->
-        {:ok, Fleet.Credentials.ForgeAuth.git_env()}
-    end
-  end
-
-  # `http.<prefix>.extraheader` s'applique a toute URL qui COMMENCE par le prefixe : on le borne a
-  # `scheme://host[:port]/` pour que l'en-tete ne parte pas vers un autre hote si l'URL est
-  # redirigee. Un `URI` sans hote rend une chaine vide, que le garde-fou laisse passer et que git
-  # ignore — l'echec se produit alors sur le clone lui-meme, avec son vrai message.
-  defp external_url_prefix(url) do
-    case URI.parse(url) do
-      %URI{scheme: s, host: h} = uri when is_binary(s) and is_binary(h) ->
-        port = if uri.port in [nil, 80, 443], do: "", else: ":#{uri.port}"
-        "#{s}://#{h}#{port}/"
-
-      _ ->
-        ""
+      {:error, reason} ->
+        {:error, {:external_clone_failed, reason}}
     end
   end
 
