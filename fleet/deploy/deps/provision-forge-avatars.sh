@@ -97,7 +97,28 @@ if [[ "$CHECK_ONLY" -eq 0 && -z "$ADMIN_TOKEN" ]]; then
   exit 1
 fi
 
-AUTH=(-H "Authorization: token $ADMIN_TOKEN")
+# ⚠ LE JETON ADMIN NE PASSE PLUS PAR argv, ET C'EST UNE PROPRIETE QUE L'APPELANT PAYAIT DEJA.
+# `avatars.tf` la declare noir sur blanc : « le master-token passe par l'ENVIRONNEMENT, jamais par la
+# ligne de commande : un argument est visible dans la table des processus ». Ce script la defaisait a
+# son premier `curl` — `AUTH=(-H "Authorization: token $ADMIN_TOKEN")` met le jeton dans
+# `/proc/<pid>/cmdline`, lisible par tout le monde pendant la requete. Et ce jeton-la est un
+# SITE-ADMIN : avec `Sudo:`, il agit au nom de n'importe quel compte.
+#
+# `curl -K -` lit sa configuration sur STDIN : ni argv, ni fichier a creer/chmoder/supprimer. Meme
+# geste que `etc/provision-role-tokens.sh` (6-141), applique ici a un credential plus puissant.
+# La valeur est ECHAPPEE, pas esperee propre : la config de curl est un format cite.
+curl_cfg_escape() { # $1=valeur
+  local v="$1"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  printf '%s' "$v"
+}
+
+AUTH_CFG="header = \"Authorization: token $(curl_cfg_escape "$ADMIN_TOKEN")\""
+
+# Un seul point de passage vers curl : l'auth arrive par stdin, les options par argv. Ecrire
+# `printf … | curl -K -` a chaque site laisserait la porte ouverte au prochain qui ajoute un appel.
+forge_curl() { printf '%s\n' "$AUTH_CFG" | curl -K - "$@"; }
 
 # Un avatar custom uploadé porte un hash long (SHA256, 64 hex) ; l'identicon par défaut porte un hash
 # court (32 hex). Heuristique de sonde (dépend de l'interne Gitea, mais stable en 1.26) : basename ≥ 40 hex.
@@ -113,7 +134,7 @@ post_image() { # $1=url  $2=fichier_png  $3...=headers extra
   local tmp; tmp="$(mktemp)"
   printf '{"image":"%s"}' "$(base64 -w0 "$png")" > "$tmp"
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "${AUTH[@]}" "$@" \
+  code="$(forge_curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "$@" \
     -H "Content-Type: application/json" --data-binary @"$tmp" "$url")"
   rm -f "$tmp"
   printf '%s' "$code"
@@ -128,7 +149,7 @@ skipped=0
 # parfaitement lisible, donc `jq` seul ne verrait aucune difference.
 account_exists() { # $1=compte
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${AUTH[@]}" "$FORGE/api/v1/users/$1")"
+  code="$(forge_curl -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE/api/v1/users/$1")"
   [[ "$code" == "200" ]]
 }
 
@@ -143,7 +164,7 @@ for entry in "${ENTRIES[@]}"; do
   fi
 
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
-    url="$(curl -s -m 10 "${AUTH[@]}" "$FORGE/api/v1/users/$account" | jq -r '.avatar_url // ""')"
+    url="$(forge_curl -s -m 10 "$FORGE/api/v1/users/$account" | jq -r '.avatar_url // ""')"
     if avatar_is_custom "$url"; then echo "OK    $account — avatar custom"; else
       echo "FAIL  $account — pas d'avatar custom (identicon/défaut)" >&2; fail=1; fi
     continue
@@ -162,7 +183,7 @@ done
 if [[ -n "$ORG" ]]; then
   org_file="$AVATARS_DIR/favicon.png"
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
-    url="$(curl -s -m 10 "${AUTH[@]}" "$FORGE/api/v1/orgs/$ORG" | jq -r '.avatar_url // ""')"
+    url="$(forge_curl -s -m 10 "$FORGE/api/v1/orgs/$ORG" | jq -r '.avatar_url // ""')"
     if avatar_is_custom "$url"; then echo "OK    org:$ORG — avatar custom"; else
       echo "FAIL  org:$ORG — pas d'avatar custom" >&2; fail=1; fi
   elif [[ -r "$org_file" ]]; then
@@ -179,8 +200,19 @@ fi
 note=""
 [[ "$skipped" -gt 0 ]] && note=" ($skipped entree(s) de charte sans compte sur cette forge — ignorees)"
 
+# ⚠ « TOUS LES AVATARS POSES » ETAIT UNE PHRASE PLUS LARGE QUE CE QU'ELLE COUVRAIT (6-115). Elle est
+# vraie de LA CHARTE — chaque entree de la table a ete posee — et un lecteur y entend « chaque compte
+# de la forge a une tete ». Ce sont deux populations differentes : `chief` a un compte et un jeton,
+# et aucune entree ici, donc aucun avatar, sous un verdict qui disait le contraire.
+#
+# La table N'EST PAS un roster et ne doit pas le devenir (voir son propre commentaire, plus haut :
+# la deriver echouerait sur chaque role tiers qu'on n'a pas dessine). Ce qui se corrige n'est donc
+# pas la table, c'est la PORTEE de la phrase : elle dit desormais SUR QUOI elle porte, et combien.
+# Un compte sans entree de charte reste invisible d'ici — mais plus personne ne lit « tous ».
+couvert="${#ENTRIES[@]}"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "provision-forge-avatars: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)$note" >&2
   exit 2
 fi
-echo "provision-forge-avatars: tous les avatars posés/valides sur $FORGE$note"
+echo "provision-forge-avatars: $couvert entrée(s) de charte posées/valides sur $FORGE$note (la charte est une table tenue à la main : un compte hors table n'a pas d'avatar et n'est pas compté ici)"
