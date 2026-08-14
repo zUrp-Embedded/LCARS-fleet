@@ -59,4 +59,33 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
 
       :ok
   end
+
+  @doc """
+  Has the in-pod Monitor DELIVERED the current turn to the agent?
+
+  True iff `turn.flag.seen` (written by `watch.sh` right after it emits the wake to stdout) matches the
+  live `turn.flag` token. This is the carrier's DELIVERY ack — distinct from the agent's RESPONSE
+  (`get_work_item`), which the agent may legitimately withhold (an info turn, or its own judgment that
+  there is nothing to pull). The wake fallback keys on THIS, not on the response: once the Monitor has
+  delivered, its job is done and typing `wake` would only spam a working rail.
+
+  A missing flag or `.seen`, or a mismatch, reads as NOT delivered — fail-open to the send-keys and
+  `wake.failed` rails, so a genuinely dead Monitor (`.seen` never catches up) still escalates.
+  """
+  @spec delivered?(Path.t()) :: boolean()
+  def delivered?(pod_dir) when is_binary(pod_dir) do
+    flag = Path.join(pod_dir, "turn.flag")
+    seen = Path.join(pod_dir, "turn.flag.seen")
+
+    case {File.read(flag), File.read(seen)} do
+      {{:ok, f}, {:ok, s}} ->
+        ft = String.trim(f)
+        ft != "" and ft == String.trim(s)
+
+      _ ->
+        false
+    end
+  end
+
+  def delivered?(_), do: false
 end

@@ -29,6 +29,11 @@ while :; do
       else
         echo "$msg"
       fi
+      # Trace de LIVRAISON : on écrit le token qu'on vient d'émettre dans "<flag>.seen". Le serveur
+      # compare turn.flag à turn.flag.seen pour distinguer « Monitor a livré, l'agent est occupé » de
+      # « Monitor planté » — au lieu de keyer le wake sur get_work_item, que l'agent peut légitimement
+      # ne pas appeler (tour d'info, ou son propre jugement « rien à tirer »). Non-fatal.
+      printf '%s\n' "$cur" > "$FLAG.seen" 2>/dev/null || true
     fi
   fi
   sleep 1

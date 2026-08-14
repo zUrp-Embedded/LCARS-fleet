@@ -78,7 +78,7 @@ defmodule Fleet.Spawner.PodKickTest do
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
 
     # get_for_pod = what the pod does via MCP get_work_item → the task goes :pending → :assigned
-    {:ok, _} = Fleet.TaskQueue.get_for_pod(pod)
+    _ = Fleet.TaskQueue.get_for_pod(pod)
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
@@ -115,5 +115,51 @@ defmodule Fleet.Spawner.PodKickTest do
     # n=3 > bootstrap cap (2) BUT < worker cap (9) → reschedule (worker path, tmux not up).
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 4}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
+  end
+
+  # WAKE-branch delivery gate: the fallback keys on the carrier DELIVERY (turn.flag == turn.flag.seen),
+  # not on the agent's get_work_item — which it may legitimately withhold. `polled` (empty poll records
+  # last_poll) but a NEW brief still `:pending` (not pulled) puts us on the wake branch, NOT acked.
+  @tag :tmp_dir
+  test "wake: Monitor DELIVERED (flag == seen) → stop (cancel), no send-keys", %{tmp_dir: dir} do
+    pod = fake_pod()
+    _ = Fleet.TaskQueue.get_for_pod(pod)
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
+    on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
+
+    Fleet.Spawner.Pod.TurnFlag.write(dir, nil)
+    File.write!(Path.join(dir, "turn.flag.seen"), File.read!(Path.join(dir, "turn.flag")))
+
+    data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
+
+    # PROVE the state reaches the DELIVERY branch (not acked): polled, not pulled, delivered.
+    assert Fleet.Spawner.Pod.TaskProbe.polled?(data)
+    refute Fleet.Spawner.Pod.TaskProbe.brief_pulled?(pod)
+    assert Fleet.Spawner.Pod.TurnFlag.delivered?(dir)
+
+    assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
+             Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
+  end
+
+  @tag :tmp_dir
+  test "wake: Monitor NOT delivered (flag != seen) → delivery branch skipped, loop continues", %{
+    tmp_dir: dir
+  } do
+    pod = fake_pod()
+    _ = Fleet.TaskQueue.get_for_pod(pod)
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
+    on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
+
+    # Flag written, but .seen absent (Monitor never emitted) → delivered? false.
+    Fleet.Spawner.Pod.TurnFlag.write(dir, nil)
+
+    data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
+
+    assert Fleet.Spawner.Pod.TaskProbe.polled?(data)
+    refute Fleet.Spawner.Pod.TurnFlag.delivered?(dir)
+
+    # Not delivered + fake pod (no REPL/tmux server) → falls through to the retry rail (reschedule n+1).
+    assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
+             Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end
 end

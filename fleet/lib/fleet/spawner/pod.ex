@@ -711,6 +711,21 @@ defmodule Fleet.Spawner.Pod do
 
         {:keep_state_and_data, [cancel_kick_action()]}
 
+      # WAKE branch only (a polled pod: the in-pod Monitor is armed). If the Monitor has DELIVERED this
+      # turn — turn.flag == turn.flag.seen, `watch.sh` recorded what it emitted — its one job is done:
+      # the agent HAS the turn, whatever it decides (pull, or legitimately not — an info judgment, or
+      # "already done"). Keying the fallback on get_work_item mistook that decision for a missed turn,
+      # so a busy or judging agent got a spurious `wake` typed in, then a false `wake.failed` at the cap.
+      # Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case (result deadline + drift/periodic
+      # monitors), not a delivery failure. The wake now fires ONLY on genuine non-delivery (a dead
+      # Monitor: `.seen` never catches up → this stays false → the send-keys/`wake.failed` rails below run).
+      polled and Fleet.Spawner.Pod.TurnFlag.delivered?(data.pod_dir) ->
+        Logger.debug(
+          "pod #{data.pod_id} wake: Monitor delivered (turn.flag == turn.flag.seen) → loop stopped, no send-keys"
+        )
+
+        {:keep_state_and_data, [cancel_kick_action()]}
+
       # Flag-only human terminals with no brief have no meaningful bootstrap action.
       bootstrap? and not Kick.profile_send_keys?(data) ->
         Logger.debug(
