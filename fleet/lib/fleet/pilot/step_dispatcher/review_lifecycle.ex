@@ -191,6 +191,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       {:wait, {:ci_unreadable, why}} ->
         {:skipped, {:ci_unreadable, why}}
 
+      {:wait, {:ci_deadline_unreachable, why}} ->
+        {:skipped, {:ci_deadline_unreachable, why}}
+
       {:escalate, class, message} ->
         Remediation.ci_stalled(pr_number, head, class, message, ctx)
     end
@@ -374,8 +377,35 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
               Logger.error(
                 "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} MERGED+SEALED+CLOSED " <>
                   "but issue lock NOT released (#{inspect(reason)}) — residual lcars-in-flight + running " <>
-                  "stopwatch on the CLOSED issue, NOT re-polled (open-issue poll skips it); warden/manual cleanup"
+                  "stopwatch on the CLOSED issue, NOT re-polled (open-issue poll skips it) — an incident is " <>
+                  "opened on the forge, and the cleanup is MANUAL: no rail reclaims it"
               )
+
+              # « warden/manual cleanup » DESIGNE UN RAIL QUI N'EXISTE PAS, verifie : les deux
+              # `warden` du depot portent sur les PODS, aucun ne retire d'etiquette de forge ; et le
+              # poller ne lit que `list_open_issues/2`, donc cette issue fermee n'est plus jamais vue.
+              # La phrase decrivait donc un rattrapage automatique imaginaire, et « manual » suppose
+              # qu'un humain lise ce log — ce que la doctrine D1 refuse pour tout ce qui est
+              # load-bearing.
+              #
+              # L'incident est le seul canal DURABLE qui existe aujourd'hui : une issue sur la forge,
+              # que l'operateur voit sans avoir a fouiller les journaux du BEAM. Il ne converge pas
+              # tout seul — c'est un appel a la main, et il le dit.
+              escalate =
+                Keyword.get(
+                  ctx.opts,
+                  :escalate_fun,
+                  &Fleet.Pilot.IncidentRegistry.escalate_gated/5
+                )
+
+              _ =
+                escalate.(
+                  :issue_lock_residual,
+                  "#{ctx.repo}##{issue_n}",
+                  {:unlock_failed, reason},
+                  "issue_lock_residual:#{ctx.repo}##{issue_n}",
+                  ctx.forge_opts
+                )
           end
 
           {:ok, {:merged, pr_number}}

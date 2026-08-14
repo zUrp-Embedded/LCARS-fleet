@@ -5,7 +5,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @moduledoc """
   The poller's telemetry, ATTACHED (BL-6-40 Phase 0).
 
-  `Fleet.Pilot.Poller` has emitted `[:fleet_pilot, :poller, :poll]` from three sites since it was
+  `Fleet.Pilot.Poller` has emitted `[:lcars_fleet, :pilot_poller, :poll]` from three sites since it was
   written — duration, dispatched/skipped/errors, per-repo status. Nothing anywhere in `lib/` ever
   called `:telemetry.attach`, so every one of those measurements was computed and dropped: nobody,
   human or agent, could state how long a poll actually took. The amplifiers that make polls slow
@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   the error tally by scope. Logs ONLY when a sample crosses `:poller_slow_tick_ms` (default 10 s)
   or reports an error status.
 
-  ⚠ **A sample is ONE REPO, not one cycle.** `[:fleet_pilot, :poller, :poll]` is emitted once per
+  ⚠ **A sample is ONE REPO, not one cycle.** `[:lcars_fleet, :pilot_poller, :poll]` is emitted once per
   repo — every emission carries `repo:` — so this distribution describes what a single repo costs
   to poll, never what a full pass costs. Measured on 2026-08-03: 12 repos at a 30 s interval made
   the counter advance by 12 per cycle. **The cost of a CYCLE is not measured here**, and no name in
@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
   not) — that is a different instrument, not an arithmetic on this one.
 
-  That different instrument is `[:fleet_pilot, :poller, :cycle]`, kept in a SECOND ring and read by
+  That different instrument is `[:lcars_fleet, :pilot_poller, :cycle]`, kept in a SECOND ring and read by
   `cycle_stats/0`: one sample per whole pass, carrying the repo count that produced it. Two rings
   rather than one field, because the two scales have different cardinalities (R against 1) — mixed
   in a single ring, the p50 would describe neither a repo nor a pass.
@@ -68,7 +68,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   without it, an operator cannot tell resolved from dead.
 
   ## Config
-    * `:fleet_pilot, :poller_slow_tick_ms` — warn threshold (default `10_000`).
+    * `:lcars_fleet, :pilot_poller_slow_tick_ms` — warn threshold (default `10_000`).
   """
 
   @window 100
@@ -83,11 +83,11 @@ defmodule Fleet.Pilot.PollerTelemetry do
   # stuck, not that the load is high.
   @mailbox_warn 10
   @default_slow_tick_ms 10_000
-  @event [:fleet_pilot, :poller, :poll]
+  @event [:lcars_fleet, :pilot_poller, :poll]
   # The cycle is a DISTINCT event, not one more field on `:poll`: the two have different scales (one
   # repo / one pass) and different cardinalities (R against 1). Mixed into a single ring, the p50
   # would describe neither a repo nor a pass.
-  @cycle_event [:fleet_pilot, :poller, :cycle]
+  @cycle_event [:lcars_fleet, :pilot_poller, :cycle]
   @handler_id "fleet-pilot-poller-telemetry"
 
   defstruct samples: [],
@@ -175,7 +175,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   def init(opts) do
     slow =
       Keyword.get(opts, :slow_tick_ms) ||
-        Application.get_env(:fleet_pilot, :poller_slow_tick_ms, @default_slow_tick_ms)
+        Application.get_env(:lcars_fleet, :pilot_poller_slow_tick_ms, @default_slow_tick_ms)
 
     # Attach here rather than at application boot: the handler's target is THIS process, so the
     # attachment must not outlive it. `:already_exists` is not an error — a supervisor restart

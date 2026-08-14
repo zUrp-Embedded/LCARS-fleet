@@ -83,6 +83,80 @@ defmodule Fleet.MCP.PodTools do
   @spec base_tool_names() :: [String.t()]
   def base_tool_names, do: @base_tool_names
 
+  # L'EFFET DE CHAQUE OUTIL SUR LE MONDE, DECLARE ICI ET NULLE PART AILLEURS (6-106).
+  #
+  # ⚠ Ce que ca remplace : une liste de CINQ mots nus dans un sigil, chez l'acceptor. Elle ne
+  # ressemblait a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
+  # `mcp__fleet__`, ni prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE
+  # et le dedup single-flight a cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas
+  # comme les autres est une liste qu'un renommage rate.
+  #
+  # Elle vit desormais A COTE des definitions — donc un renommage la traverse — et son exhaustivite
+  # est MECANIQUE : `mix lcars.contracts.check` lit les `deftool` par l'AST et refuse un outil sans
+  # effet declare, ou un effet declare pour un outil qui n'existe pas. C'est la seule forme qui
+  # empeche d'ajouter un mutateur et de l'oublier ; une liste, meme bien rangee, ne le peut pas.
+  #
+  # TROIS effets, parce qu'il y a trois natures et que les confondre est ce qui a coute la fiche :
+  #
+  #   * `:mutation` — l'appel change le MONDE (forge, disque, projets). Deux appels identiques
+  #     concurrents doivent s'effondrer en un : c'est le retry MCP, le double-clic logique, la
+  #     re-emission apres le timeout de 30 s du pont stdio.
+  #   * `:protocol` — le canal IN/OUT du pod (`get_work_item`, `submit_result`). Il mute bien la
+  #     FILE, mais sa re-emission est un comportement CONCU, pas un accident : le pull est l'ACK
+  #     durable du wake, et un re-submit rejoue honnetement tant que la diffusion n'a pas ete
+  #     confirmee (c'est ce qui repare une completion perdue). La `TaskQueue` est deja l'autorite de
+  #     ces semantiques ; poser un second arbitre devant donnerait deux proprietaires a un seul
+  #     mecanisme.
+  #   * `:read` — ne change rien ; rien a arbitrer.
+  #
+  # ⚠ Et le motif que l'action prescrite invoque pour tout idempotencer NE TIENT PAS sur ce
+  # mecanisme, verifie dans son code : `Fleet.MCP.Idempotency` est un single-flight, il ne met
+  # JAMAIS en cache un resultat abouti (`handle_cast({:publish, …})` supprime l'entree, et son
+  # moduledoc le dit : « completed results are never cached, so later intentions run against the
+  # current world »). Un resultat en echec promeut exactement un attendant, qui retente. Etendre
+  # cette protection ne supprime donc aucun rejeu — ce qui la borne est ci-dessus, pas un cache.
+  @tool_effects %{
+    "get_work_item" => :protocol,
+    "submit_result" => :protocol,
+    "issue_create" => :mutation,
+    "project_create" => :mutation,
+    "project_open" => :mutation,
+    "project_install" => :mutation,
+    "deposit_list" => :read,
+    "deposit_import" => :mutation,
+    "project_publish" => :mutation,
+    "project_import" => :mutation,
+    "github_publish" => :mutation,
+    "project_close" => :mutation,
+    "project_revise_card" => :mutation,
+    "project_delete" => :mutation,
+    "issue_status" => :read,
+    "scratch" => :mutation,
+    "list_escalations" => :read,
+    "list_workflow_cards" => :read,
+    "issue_list" => :read,
+    "issue_get" => :read,
+    "issue_comment" => :mutation,
+    "dependency_add" => :mutation,
+    "dependency_remove" => :mutation,
+    "emergency_stop" => :mutation,
+    "project_list" => :read,
+    "issue_retire" => :mutation
+  }
+
+  @doc """
+  The declared world-effect of each tool: `:mutation`, `:protocol` or `:read`.
+
+  `:unknown` for a name this module does not declare — the acceptor treats it as a mutation, which
+  is the safe direction, and `mix lcars.contracts.check` refuses the omission at the gate.
+  """
+  @spec tool_effect(String.t()) :: :mutation | :protocol | :read | :unknown
+  def tool_effect(tool) when is_binary(tool), do: Map.get(@tool_effects, tool, :unknown)
+
+  @doc false
+  @spec declared_tool_effects() :: %{String.t() => atom()}
+  def declared_tool_effects, do: @tool_effects
+
   deftool "get_work_item" do
     meta do
       name("Get Work Item")
@@ -567,6 +641,36 @@ defmodule Fleet.MCP.PodTools do
         "number" => %{"type" => "integer"}
       },
       "required" => ["number"]
+    })
+  end
+
+  deftool "scratch" do
+    meta do
+      name("Scratch")
+
+      description(
+        "Park a thought in your workshop scratchpad — ONE line, no ceremony, and the system " <>
+          "commits and pushes it for you. USE IT AS A REFLEX, not as a decision: the moment a " <>
+          "point stabilises in a conversation (a conclusion, an arbitration, a constat, a " <>
+          "reasoned refusal), drop it here and go on with the next point. The criterion is the " <>
+          "NATURE of the exchange, never how important it feels — an importance judgement, late " <>
+          "in a context, always answers 'not enough'. " <>
+          "WHY IT EXISTS: your session level is ephemeral by definition and a compaction eats it " <>
+          "whole; the vendor's own memory is OFF for every pod here. What you did not write is " <>
+          "gone, and you will not know it is gone. " <>
+          "This tool only ADDS — that is what makes the file trustworthy while the flow runs. " <>
+          "Cleaning it is a separate, deliberate act: at triage you open the file yourself and " <>
+          "cut, sending what remains to be done to `backlog.md`, what is specified to `plans/`. " <>
+          "Notes belong to THIS project's workshop; there is no other place to aim."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "note" => %{"type" => "string"}
+      },
+      "required" => ["note"]
     })
   end
 
@@ -1071,6 +1175,17 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
+  def handle_tool_call("scratch", %{"note" => note}, state) when is_binary(note) do
+    case Delegation.scratch(state, note) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("scratch", _bad, state) do
+    {:error, {:invalid_arguments, "scratch attend `note` (string non vide)"}, state}
+  end
+
   def handle_tool_call("list_escalations", _arguments, state) do
     case Delegation.list_escalations(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}

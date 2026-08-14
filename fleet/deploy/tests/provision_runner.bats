@@ -131,3 +131,99 @@ EOF
   [[ "$output" == *"APPLY-ON=wsl linux"* ]]
   [[ "$output" == *"CHECK-ON=any"* ]]
 }
+
+# 6-101 — LE COMPTEUR DE DRIFT N'ETAIT PAS LU, ET LE RESUME MENTAIT DEUX FOIS. Un module dont
+# l'`apply` constate une non-convergence (`p_drift`) puis rend son verdict sortait **0** : le runner
+# le comptait « convergé », et sa ligne de bilan affichait « drift: 0 » alors qu'une ligne DRIFT
+# venait d'etre imprimee.
+#
+# ⚠ CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort 1
+# sur drift, et le runner mappe tout non-zero d'un `apply:apply` en echec — ce chemin etait deja
+# juste, MESURE. Le defaut vit un cran a cote : dans les modules qui rendent un verdict d'APPLY,
+# c'est-a-dire `50-forge` et `55-deck-oidc`.
+
+# Un module qui utilise la VRAIE lib (p_drift/p_ok + les verdicts), pas un `exit` code en dur :
+# c'est la chaine module→lib→runner qui est sous test, pas une constante.
+#
+# ⚠ CHAQUE VERBE REND SON PROPRE VERDICT, et la premiere version de cette fixture appelait
+# `verdict_apply` dans les deux — ce qu'aucun module reel ne fait. Le temoin doctor rougissait alors
+# pour une raison de MISE EN SCENE : il mesurait une fixture, pas le runner.
+lib_module() {
+  local name="$1" body="$2"
+  cat > "$SANDBOX/modules.d/$name.sh" <<EOF
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+set -euo pipefail
+. "\${PROVISION_LIB:?}"
+probe() { $body; }
+echo "$name:\$1" >> "\$RUN_LOG"
+case "\$1" in
+  check) probe; verdict_check ;;
+  apply) probe; verdict_apply ;;
+esac
+EOF
+}
+
+@test "6-101: un DRIFT dans l'apply rend 2 — plus jamais « tout convergé »" {
+  lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"drift: 1"* ]]
+  [[ "$output" == *"ÉTAT-CIBLE N'EST PAS TENU"* ]]
+}
+
+@test "6-101: le bilan CESSE de compter ce module comme convergé" {
+  # La moitie la plus traitre : le code retour etait faux ET la ligne de bilan aussi. Un operateur
+  # qui lisait « conformes/convergés: 1 · drift: 0 » n'avait aucune raison d'aller chercher la ligne
+  # DRIFT au-dessus.
+  lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [[ "$output" == *"conformes/convergés: 0"* ]]
+  [[ "$output" != *"drift: 0"* ]]
+}
+
+@test "6-101: le drift residuel N'EST PAS un echec — 2 et 1 sont deux mots" {
+  # Confondre les deux serait l'autre facon de mentir : « j'ai casse » et « je n'ai pas pu
+  # converger » demandent des gestes opposes de l'operateur.
+  lib_module 50-forgestub 'p_drift "forge injoignable"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -ne 1 ]
+  [[ "$output" == *"échecs: 0"* ]]
+}
+
+@test "6-101: un p_fail rend toujours 1, le drift ne l'ecrase pas" {
+  lib_module 50-forgestub 'p_fail "chown refuse"; p_drift "et un drift par-dessus"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"échecs: 1"* ]]
+}
+
+@test "6-101: TEMOIN — un apply reellement convergé rend toujours 0" {
+  # Sans lui, un runner qui rendrait 2 en toutes circonstances passerait les tests ci-dessus, et
+  # chaque boot de conteneur annoncerait un drift qui n'existe pas.
+  lib_module 20-okstub 'p_ok "converge"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"conformes/convergés: 1"* ]]
+  [[ "$output" == *"drift: 0"* ]]
+}
+
+@test "6-101: TEMOIN — le doctor garde ses codes (0 conforme, 1 drift)" {
+  # Le verbe doctor n'est pas touche : son 1 signifie drift depuis toujours et des lecteurs en
+  # dependent. Le nouveau code ne vit que dans apply.
+  lib_module 20-okstub 'p_ok "conforme"'
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 0 ]
+
+  rm -f "$SANDBOX/modules.d"/*.sh
+  lib_module 50-forgestub 'p_drift "pas conforme"'
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 1 ]
+}

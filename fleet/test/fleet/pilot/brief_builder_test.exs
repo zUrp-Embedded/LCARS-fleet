@@ -69,6 +69,36 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} = build([], ci_fact: %{state: :failure, sha: "deadbeef00"})
       refute brief =~ "deadbeef"
     end
+
+    test "6-140 : le brief NOMME ce qui a tourne, et ne dit plus qu'une preuve a ete executee" do
+      # La phrase disait « le rail machine a EXECUTE la preuve ». Le rail livre avec le template
+      # execute deux `echo` — donc sur tout projet fraichement onboarde, le juge recevait « une
+      # preuve a ete executee » alors qu'aucune ne l'avait ete.
+      assert {:ok, brief, "judge"} =
+               build([],
+                 ci_fact: %{
+                   state: :success,
+                   sha: "cafebabe1234567890",
+                   contexts: ["CI / no-harness-yet (pull_request)"]
+                 }
+               )
+
+      refute brief =~ "EXECUTE la preuve"
+      assert brief =~ "CI / no-harness-yet (pull_request)"
+      # Et l'absence de harnais devient une constatation attendue, pas un fait invisible.
+      assert brief =~ "EST une constatation"
+    end
+
+    test "6-140 : des contextes illisibles se DISENT, ils ne se fabriquent pas" do
+      # Un seam qui n'expose pas la lecture des contextes degrade honnetement : le brief dit ce
+      # qu'il sait. Ecrire la phrase « ce qui a tourne » sur une liste vide laisserait croire a une
+      # verification qui n'a pas eu lieu.
+      assert {:ok, brief, "judge"} =
+               build([], ci_fact: %{state: :success, sha: "cafebabe1234567890", contexts: []})
+
+      assert brief =~ "n'ont pas pu etre lus"
+      refute brief =~ "Ce qui a tourne, exactement"
+    end
   end
 
   describe "build_brief — deliverable-judge, criterion read (F-C083)" do
@@ -328,8 +358,15 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       def change_request_feedback(_repo, _pr, _opts), do: {:ok, []}
     end
 
-    defp conflict_brief(voice) do
-      BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil, conflict: voice)
+    # JG-137 — `base_branch` est desormais REQUIS sur les deux voix conflit : la procedure donnee a
+    # l'agent nommait `main` en dur alors que la plomberie connaissait la vraie base depuis toujours
+    # (`:pr_base_branch`, posee depuis `pr.base.ref`, et c'est deja elle qui choisit le worktree de
+    # resolution). Sur une PR qui ne vise pas la face code, le brief etait INEXECUTABLE.
+    defp conflict_brief(voice, base \\ "main") do
+      BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil,
+        conflict: voice,
+        base_branch: base
+      )
     end
 
     test "the PRODUCER is told its own brief is unchanged (it is resuming approved work)" do
@@ -356,6 +393,39 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # And it must NEVER inherit the producer's framing.
       refute brief =~ "Ton brief est INCHANGÉ"
       refute brief =~ "TON brief"
+    end
+
+    # JG-137 — LA PROCEDURE DONNEE A L'AGENT NOMMAIT `main` EN DUR. La plomberie connaissait la vraie
+    # base depuis toujours : `:pr_base_branch` est posee par `dispatch_review` depuis `pr.base.ref`,
+    # et c'est deja elle qui choisit le worktree de resolution. Sur une PR qui ne vise pas la face
+    # code, le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un
+    # `fetch main`, il composait son livrable contre la mauvaise face.
+    # ⚠ 6-135 — ET LE NOM CORRIGE NE SUFFISAIT PAS. JG-137 a mis la VRAIE base dans la commande ;
+    # elle restait inexecutable, parce qu'un pod de review clone `--branch <head> --single-branch`
+    # et que `origin/<base>` n'est pas dans son clone. Le defaut avait seulement change de raison.
+    # La commande vise maintenant `lcars/base`, le ref rapatrie par le bootstrap ; la PROSE garde
+    # le nom de la face, qui est ce qui dit au producteur contre quoi il compose.
+    test "JG-137+6-135: les DEUX voix visent un ref qui EXISTE, et nomment la vraie base" do
+      for voice <- [:producer, :exception] do
+        brief = conflict_brief(voice, "workshop")
+
+        assert brief =~ "git merge lcars/base",
+               "voix #{voice} : la procedure vise un ref absent du clone d'un pod de review"
+
+        assert brief =~ "workshop",
+               "voix #{voice} : la procedure ne nomme plus la base reelle de la PR"
+
+        refute brief =~ "git merge origin/",
+               "voix #{voice} : une commande executable vise encore un `origin/<base>` inexistant"
+      end
+    end
+
+    test "TEMOIN JG-137 — la base SUIT la PR, elle n'a pas juste change de nom" do
+      # Sans ce temoin, un correctif qui remplacerait la base par n'importe quoi passerait le test
+      # ci-dessus. Le ref executable est le meme dans les deux cas — c'est le POINT, il est
+      # universel — donc le temoin porte la ou la difference doit se voir : la prose.
+      assert conflict_brief(:producer, "main") =~ "divergé de `main`"
+      assert conflict_brief(:producer, "workshop") =~ "divergé de `workshop`"
     end
 
     test "no conflict → no section at all (the default path is untouched)" do

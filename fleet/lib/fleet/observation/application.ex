@@ -26,7 +26,7 @@ defmodule Fleet.Observation.Application do
 
   # Tests start the sole Bus subscriber explicitly.
   defp readmodel_children do
-    if Application.get_env(:fleet_observation, :start_readmodel, true) do
+    if Application.get_env(:lcars_fleet, :observation_start_readmodel, true) do
       [Fleet.Observation.ReadModel]
     else
       []
@@ -38,8 +38,8 @@ defmodule Fleet.Observation.Application do
   is a contract — loopback by default). Returns `[]` if `:start_listener` is `false`.
   """
   def listener_children do
-    if Application.get_env(:fleet_observation, :start_listener, true) do
-      port = Application.fetch_env!(:fleet_observation, :http_port)
+    if Application.get_env(:lcars_fleet, :observation_start_listener, true) do
+      port = Application.fetch_env!(:lcars_fleet, :observation_http_port)
 
       [Fleet.EventRouter.Listener.cowboy_child(plug: Fleet.Observation.Deck, port: port)]
     else

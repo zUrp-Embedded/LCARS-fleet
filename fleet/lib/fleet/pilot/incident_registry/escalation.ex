@@ -43,13 +43,16 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     create_fun = Keyword.get(opts, :create_issue_fun, &Fleet.Forge.Client.create_issue/4)
     add_label_fun = Keyword.get(opts, :add_label_fun, &Fleet.Forge.Client.add_label/4)
     list_fun = Keyword.get(opts, :list_issues_fun, &Fleet.Forge.Client.list_open_issues/2)
-    repo = opts[:repo] || Application.get_env(:fleet_pilot, :system_issue_repo) || ops_repo()
+
+    repo =
+      opts[:repo] || Application.get_env(:lcars_fleet, :pilot_system_issue_repo) || ops_repo()
 
     label =
-      opts[:label] || Application.get_env(:fleet_pilot, :system_issue_label, "error_system")
+      opts[:label] || Application.get_env(:lcars_fleet, :pilot_system_issue_label, "error_system")
 
     assignee =
-      opts[:assignee] || Application.get_env(:fleet_pilot, :system_issue_assignee, "starfleet")
+      opts[:assignee] ||
+        Application.get_env(:lcars_fleet, :pilot_system_issue_assignee, "starfleet")
 
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
@@ -73,8 +76,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     #{marker}
     """
 
+    dedup = find_open_incident(list_fun, repo, marker)
+
     result =
-      case find_open_incident(list_fun, repo, marker) do
+      case dedup do
         {:ok, existing} ->
           # An open issue already carries this occurrence's marker — the create either landed and its
           # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
@@ -86,8 +91,25 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
           finalize_escalation(add_label_fun, repo, existing, label)
 
-        nil ->
+        :none ->
           create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label)
+
+        {:unverified, why} ->
+          Logger.warning(
+            "IncidentRegistry: dedup readback FAILED for #{inspect(sig)} (#{inspect(why)}) — " <>
+              "opening the issue anyway (a silent non-escalation is worse), and SAYING SO in its " <>
+              "body: a twin carrying the same marker may already be open"
+          )
+
+          create_and_label(
+            create_fun,
+            add_label_fun,
+            repo,
+            title,
+            body <> dedup_warning(dedup),
+            assignee,
+            label
+          )
       end
 
     _ = announce(result, kind, subject, repo, label, opts)
@@ -168,26 +190,49 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # the body text). The idempotency key of the create.
   defp incident_marker(sig), do: "<!-- lcars-incident:#{sig} -->"
 
-  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number;
-  # `nil` if none, OR if the listing is unreadable — a readback failure must NOT suppress an alarm,
-  # so we fall through to create (fail-closed toward having an issue, the duplicate risk is the lesser
-  # evil than a silent non-escalation). The `body` field is present on Gitea's issue-list payloads.
+  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number.
+  #
+  # L'ARBITRAGE NE CHANGE PAS — une relecture ratee ne doit PAS supprimer une alarme, donc on cree
+  # quand meme : le risque de doublon est le moindre mal devant une non-escalade silencieuse.
+  #
+  # ⚠ CE QUI CHANGE : `nil` disait DEUX choses. « Le tableau a ete LU et ne porte pas ce marqueur »
+  # et « le tableau est ILLISIBLE » menaient au meme geste, et surtout au meme RESULTAT — une issue
+  # sysadmin identique dans les deux cas. Le lecteur de cette issue est un humain devant le tableau
+  # ops : si un doublon apparait, rien dans l'issue ne lui dit POURQUOI, ni qu'il doit chercher sa
+  # jumelle. C'est la meme forme que JG-045 (creation conservee, doute nomme), sauf qu'ici le doute
+  # doit voyager jusqu'a l'HUMAIN, pas jusqu'a l'appelant.
   defp find_open_incident(list_fun, repo, marker) do
     case list_fun.(repo, []) do
       {:ok, issues} when is_list(issues) ->
-        Enum.find_value(issues, fn issue ->
+        Enum.find_value(issues, :none, fn issue ->
           body = Map.get(issue, "body") || ""
           num = Map.get(issue, "number")
           if is_integer(num) and String.contains?(body, marker), do: {:ok, num}
         end)
 
-      _ ->
-        nil
+      other ->
+        {:unverified, other}
     end
   end
 
+  # La phrase que le doublon eventuel portera, dans le CORPS de l'issue — pas seulement dans un log
+  # que personne ne relit en face d'un tableau ops.
+  #
+  # ⚠ UNE SEULE CLAUSE, ET C'EST DIALYZER QUI L'A DIT. J'avais ajoute un `dedup_warning(_none)`
+  # rendant `""` « au cas ou » : `pattern_match_cov`, il ne peut jamais matcher, cette fonction
+  # n'etant appelee que depuis la branche `{:unverified, _}`. Le « present = doute, absent =
+  # mesure » vit dans le CHOIX DE BRANCHE de l'appelant, pas dans un repli ici.
+  defp dedup_warning({:unverified, why}) do
+    """
+
+    > ⚠ **Déduplication NON vérifiée** : la relecture des issues ouvertes a échoué
+    > (`#{inspect(why)}`). Une issue portant le même marqueur peut déjà exister — cherchez-la avant
+    > d'agir. L'alarme a été ouverte quand même : une escalade silencieuse serait pire qu'un doublon.
+    """
+  end
+
   @doc """
-  The fleet's OPS repo — SINGLE authority (`:fleet_pilot, :ops_repo`, default `"fleet/lcars"`).
+  The fleet's OPS repo — SINGLE authority (`:lcars_fleet, :pilot_ops_repo`, default `"fleet/lcars"`).
 
   Two things land there and must never drift apart: the incident REGISTRY file (branch `ops`,
   `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
@@ -195,7 +240,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   specific knobs (`:incident_registry_repo` / `:system_issue_repo`) remain as explicit overrides.
   """
   @spec ops_repo() :: String.t()
-  def ops_repo, do: Application.get_env(:fleet_pilot, :ops_repo, "fleet/lcars")
+  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
 
   # F-C075 — BOUNDED retry of the DISCOVERY label (`error_system`): a transient forge blip (name→id
   # resolution / org-label auto-create / HTTP 500) self-heals; a persistent failure is SURFACED by
@@ -262,6 +307,28 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   end
 
   defp correlation_block(_), do: ""
+
+  defp kind_describe(:repo_poll_crash),
+    do:
+      {"depot qui leve a chaque poll",
+       "Le cycle de ce depot a leve une exception. Les autres depots sont servis, lui non — et la " <>
+         "cause est le plus souvent deterministe (la meme PR, le meme fichier), donc elle se " <>
+         "represente a chaque tick. Ce depot est hors service tant que personne ne regarde."}
+
+  defp kind_describe(:issue_lock_residual),
+    do:
+      {"verrou residuel sur une issue FERMEE",
+       "Le merge a reussi, l'issue est close, mais `lcars-in-flight` est reste pose et le " <>
+         "chronometre court encore. Aucun rail ne le rattrape : le poller ne lit que les issues " <>
+         "OUVERTES, et les wardens portent sur les pods. Retrait manuel de l'etiquette + arret du " <>
+         "chronometre ; les metriques de duree de ce ticket sont faussees d'ici la."}
+
+  defp kind_describe(:ops_root_missing),
+    do:
+      {"racine des faces absente",
+       "La racine `ops` a disparu (demontage, permissions) — le rail d'etapes est saute pour TOUS " <>
+         "les depots, pas un seul. La flotte tourne a vide et la telemetrie rapporte des comptes " <>
+         "nuls, indistinguables d'une flotte au repos."}
 
   defp kind_describe(:recurrence),
     do: {"récurrence", "Déjà vu (registre `ops`) — pattern, pas random → ROOT-CAUSE requis."}

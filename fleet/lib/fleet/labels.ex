@@ -199,6 +199,12 @@ defmodule Fleet.Labels do
   # Précondition NON satisfaite : un bloqueur déclaré sur la forge est encore ouvert. Le ticket
   # n'attend ni la fleet ni un juge — il attend un AUTRE ticket, et c'est ce que l'étiquette dit.
   def wait_for({:depends, _blocker}), do: @wait_prefix <> "depends"
+
+  # La porte des dépendances n'a pas pu LIRE les arêtes. Même étiquette que ci-dessus, et pour la
+  # même raison que la porte CI : du côté du ticket c'est le même fait — il est arrêté à cette porte
+  # et personne ne travaille dessus. La distinction vit dans la raison du skip, où elle est
+  # actionnable ; l'étiquette répond « que fait ce ticket », pas « quel appel a échoué ».
+  def wait_for({:depends_unreadable, _why}), do: @wait_prefix <> "depends"
   # The CI door defers on a read it could not make (PR object, status list, or the marker that
   # bounds the red loop). From the ticket's side these are ALL the same fact — it is stopped at the
   # CI gate, and nobody is working on it — so they share `wait/ci` rather than teaching a human
@@ -207,6 +213,12 @@ defmodule Fleet.Labels do
   def wait_for({:ci_head_unreadable, _why}), do: @wait_prefix <> "ci"
   def wait_for({:ci_unreadable, _why}), do: @wait_prefix <> "ci"
   def wait_for({:ci_red_marker_unreadable, _why}), do: @wait_prefix <> "ci"
+
+  # La porte CI attend sur une echeance qu'elle ne peut pas atteindre (date de PR illisible → l'age
+  # vaut 0, donc le delai n'est jamais franchi). Meme etiquette que ses voisins, meme raison : du
+  # cote du ticket c'est le meme fait — arrete a la porte CI. La distinction vit dans la raison du
+  # skip, ou un operateur peut agir dessus.
+  def wait_for({:ci_deadline_unreachable, _why}), do: @wait_prefix <> "ci"
 
   # ─── Already carried by an existing label: a second one would be a second truth ────────────────
   # The one you read is never the one somebody corrected.

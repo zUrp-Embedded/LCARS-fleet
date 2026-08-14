@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (A-06)
 
-  `starfleet.audit_cat5_<pod_drift|workflow_map_failed|oauth_refresh_failed>` — the max-severity
+  `starfleet.audit_cat5_<pod_drift|workflow_map_failed>` — the max-severity
   rail (`Cat5Escalator`). Without this route it would only leave a LOCAL NDJSON line + two lossy
   Bus broadcasts: the LOW-severity incident rail opens a durable forge issue while the
   MAX-severity one evaporates if nobody tails the file (severity/durability inversion). Routed
@@ -265,7 +265,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
   # silently absent brake, which is worse than no brake at all (you would believe you are covered).
   def default_brake(repo, number, reason) do
-    forge = Application.get_env(:fleet_pilot, :forge_client, Fleet.Forge.Client)
+    forge = Application.get_env(:lcars_fleet, :pilot_forge_client, Fleet.Forge.Client)
 
     case forge.add_label(repo, number, Fleet.Labels.awaits_arch(), []) do
       {:ok, _} ->

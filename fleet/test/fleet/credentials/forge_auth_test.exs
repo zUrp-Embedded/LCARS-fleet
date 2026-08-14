@@ -1,5 +1,5 @@
 defmodule Fleet.Credentials.ForgeAuthTest do
-  # async: false — mutates `:fleet_credentials, :forge_auth` (global application env).
+  # async: false — mutates `:lcars_fleet, :credentials_forge_auth` (global application env).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -9,7 +9,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
   setup do
     # Tests set/delete :forge_auth themselves; here we only capture the restoration.
-    TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
+    TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
     :ok
   end
 
@@ -19,7 +19,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     # configured". The invariant does not depend on forge_auth (a local repo without a token is
     # precisely the case that would prompt).
     test "unconfigured → anti-prompt bound only (GIT_TERMINAL_PROMPT=0)" do
-      Application.delete_env(:fleet_credentials, :forge_auth)
+      Application.delete_env(:lcars_fleet, :credentials_forge_auth)
       assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
     end
 
@@ -28,7 +28,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
       # unauthenticated and only fails at the remote with 403/404, masking the real cause).
       log1 =
         capture_log(fn ->
-          Application.put_env(:fleet_credentials, :forge_auth, %{
+          Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
             url_prefix: "https://f/",
             token: ""
           })
@@ -40,7 +40,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
       log2 =
         capture_log(fn ->
-          Application.put_env(:fleet_credentials, :forge_auth, %{token: "t"})
+          Application.put_env(:lcars_fleet, :credentials_forge_auth, %{token: "t"})
           assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
         end)
 
@@ -50,7 +50,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     test "R1-15: url_prefix with newline/control → header SKIPPED + LOUD (no git-config key injection)" do
       log =
         capture_log(fn ->
-          Application.put_env(:fleet_credentials, :forge_auth, %{
+          Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
             url_prefix: "https://f/\ninject",
             token: "t"
           })
@@ -62,7 +62,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
 
     test "configured → GIT_TERMINAL_PROMPT=0 + GIT_CONFIG_* (token IN the env, never on the argv — F087)" do
-      Application.put_env(:fleet_credentials, :forge_auth, %{
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET123"
       })
@@ -78,13 +78,13 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
   describe "git_env_result/0 (auth-required paths, fail-loud on malformed — DR-024)" do
     test "absent (nil) → {:ok, anti-prompt only} (the legit no-auth state)" do
-      Application.delete_env(:fleet_credentials, :forge_auth)
+      Application.delete_env(:lcars_fleet, :credentials_forge_auth)
       assert {:ok, [{"GIT_TERMINAL_PROMPT", "0"}]} = ForgeAuth.git_env_result()
     end
 
     test "PRESENT but malformed (empty token) → {:error, :forge_auth_malformed} (never a silent no-auth env)" do
       capture_log(fn ->
-        Application.put_env(:fleet_credentials, :forge_auth, %{
+        Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
           url_prefix: "https://f/",
           token: ""
         })
@@ -95,7 +95,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
     test "url_prefix with a control char → {:error, :forge_auth_malformed}" do
       capture_log(fn ->
-        Application.put_env(:fleet_credentials, :forge_auth, %{
+        Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
           url_prefix: "https://f/\ninject",
           token: "t"
         })
@@ -105,7 +105,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
 
     test "valid → {:ok, [anti-prompt + auth extraheader]}" do
-      Application.put_env(:fleet_credentials, :forge_auth, %{
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET123"
       })
@@ -117,7 +117,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
 
   describe "local proof: git honors git_env (F087 mechanism, no forge)" do
     test "git config --get reads the extraheader from the env, not the argv" do
-      Application.put_env(:fleet_credentials, :forge_auth, %{
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET123"
       })

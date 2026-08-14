@@ -70,6 +70,40 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
   end
 
+  # 6-140 — le meme forge, qui expose EN PLUS la lecture des contextes. Deux doublures et non une
+  # seule parce que la degradation est un contrat a part entiere : un seam qui ne connait que
+  # `commit_ci_state/3` doit continuer a marcher, et rendre une liste vide plutot que rien.
+  defmodule ForgeWithContexts do
+    defdelegate get_pull(repo, n, opts),
+      to: Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest.Forge
+
+    defdelegate iso_ago(age_sec), to: Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest.Forge
+    def commit_ci_state(_repo, _sha, opts), do: Keyword.get(opts, :_ci, {:ok, :none})
+
+    def commit_ci_report(_repo, _sha, opts) do
+      case Keyword.get(opts, :_ci, {:ok, :none}) do
+        {:ok, state} -> {:ok, {state, Keyword.get(opts, :_contexts, [])}}
+        other -> other
+      end
+    end
+  end
+
+  describe "6-140 — le vert ne dit pas QUI l'a produit" do
+    test "les contextes remontent dans le FAIT remis au juge" do
+      assert {:proceed, %{state: :success, contexts: ["CI / no-harness-yet (pull_request)"]}} =
+               decide(
+                 [_ci: {:ok, :success}, _contexts: ["CI / no-harness-yet (pull_request)"]],
+                 :required,
+                 ForgeWithContexts
+               )
+    end
+
+    test "un seam qui ignore la lecture des contextes garde son contrat, contextes VIDES" do
+      # Degradation honnete : le brief dira qu'il n'a pas pu les lire, jamais une liste inventee.
+      assert {:proceed, %{state: :success, contexts: []}} = decide(_ci: {:ok, :success})
+    end
+  end
+
   describe "the three states" do
     test "success -> proceed, and the FACT carries the sha the gate measured" do
       assert {:proceed, %{state: :success, sha: "cafebabe1234567890"}} =
@@ -165,7 +199,27 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "an unreadable date waits rather than escalating on a date it could not read" do
-      assert {:wait, :ci_pending} = decide(_ci: {:ok, :pending}, _updated_at: "pas-une-date")
+      # L'arbitrage d'origine tient et ce test le garde : une date illisible NE DOIT PAS escalader
+      # (`{:escalate, {:ci_stalled, _}, _}` poserait `lcars-awaits-arch` et parquerait le ticket sur
+      # une date qu'on n'a pas su lire). Ce qui a change, c'est le MOTIF : sans date, l'age vaut 0 et
+      # `0 > @pending_deadline_sec` est faux A JAMAIS — l'echeance n'est pas lointaine, elle est
+      # HORS D'ATTEINTE. Le motif le dit maintenant, au lieu de se confondre avec une CI qui tourne.
+      assert {:wait, {:ci_deadline_unreachable, :no_pull_date}} =
+               decide(_ci: {:ok, :pending}, _updated_at: "pas-une-date")
+    end
+
+    test "TEMOIN — une date LISIBLE et fraiche rend le motif ordinaire, pas celui-la" do
+      # Sans ce temoin, rendre `{:ci_deadline_unreachable, _}` inconditionnellement passerait le test
+      # ci-dessus : c'est lui qui prouve que les deux etats sont DISTINGUABLES.
+      fresh = Forge.iso_ago(60)
+      assert {:wait, :ci_pending} = decide(_ci: {:ok, :pending}, _updated_at: fresh)
+    end
+
+    test "le motif hors-d'atteinte porte l'etiquette de sa porte — il n'invente pas un mur" do
+      # Meme `wait/ci` que ses deux voisins : du cote du ticket c'est le meme fait (arrete a la porte
+      # CI). Un label neuf ferait croire a un nouveau mecanisme la ou il n'y a qu'un motif nomme.
+      assert Fleet.Labels.wait_for({:ci_deadline_unreachable, :no_pull_date}) ==
+               Fleet.Labels.wait_for({:ci_unreadable, :timeout})
     end
   end
 
@@ -289,13 +343,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       proj = Path.join(tmp, "demo")
       File.mkdir_p!(proj)
 
-      :ok =
-        Fleet.Project.Intensity.write(proj,
-          intensity_level: "C2",
-          intensity_justification: "x",
-          workflow_map: "gated"
-        )
-
+      # La carte EXISTE avant d'etre declaree, et la declaration dit ou elle vit : depuis 6-125 une
+      # `workflow_map` explicite que le loader ne sait pas resoudre est REFUSEE a l'ecriture. Le
+      # fixture posait sa carte apres coup — donc, a l'instant de la declaration, `gated` n'existait
+      # nulle part. L'ordre inverse n'etait pas gratuit, c'etait le trou que la fiche decrit.
       maps = Path.join(tmp, "maps")
       File.mkdir_p!(maps)
 
@@ -311,6 +362,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
           only:
             role: engineer
       """)
+
+      :ok =
+        Fleet.Project.Intensity.write(proj,
+          intensity_level: "C2",
+          intensity_justification: "x",
+          workflow_map: "gated",
+          workflow_maps_root: maps
+        )
 
       ctx = card_ctx(canon_loader(), code_root: tmp, workflow_maps_root: maps)
 

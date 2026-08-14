@@ -177,7 +177,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   @doc """
   REVISES an EXISTING project's validation-card declaration (BL-6-29) — commits the new
-  `intensity.json` on `main` through a scoped protection lift, protection re-sized on the new
+  `.lcars.json` on `main` through a scoped protection lift, protection re-sized on the new
   card's jury. `opts`: `:workflow_map` (required), `:justification` (required — the revision's
   WHY, committed), `:intensity_level`/`:nature` (optional), `:revised_by` (the acting role).
   Result carries `repo`/`card`/`previous_card`/`outcome` (`:revised` | `:unchanged`).
@@ -190,9 +190,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @default_onboard Fleet.Project.Onboard
 
   @doc """
-  Resolved onboarding sequence: config `:fleet_mcp, :project_onboard` otherwise the
+  Resolved onboarding sequence: config `:lcars_fleet, :mcp_project_onboard` otherwise the
   canonical default `Fleet.Project.Onboard`. SINGLE SOURCE of the default.
   """
   @spec resolved() :: module()
-  def resolved, do: Application.get_env(:fleet_mcp, :project_onboard, @default_onboard)
+  def resolved, do: Application.get_env(:lcars_fleet, :mcp_project_onboard, @default_onboard)
 end

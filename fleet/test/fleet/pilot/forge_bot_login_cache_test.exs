@@ -2,6 +2,7 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Forge.Client, as: ForgeClient
+  alias Fleet.Forge.Client.Transport
 
   # THE BOT LOGIN IS A PROPERTY OF THE TOKEN, NOT OF THE MODULE.
   #
@@ -92,5 +93,126 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
                forge_bot_login: "lcars-system",
                req_options: [plug: {Whoami, "ignored"}]
              )
+  end
+
+  # JG-066 — L'EMPREINTE DU JETON ETAIT DANS LA CLE, DONC CHAQUE ROTATION AJOUTAIT UNE ENTREE.
+  # L'ancienne n'etait jamais rendue : sur un noeud de longue duree, le nombre d'entrees
+  # `:persistent_term` croissait lineairement avec le nombre de jetons successifs, et chaque `put`
+  # declenche un GC global. Elle est desormais dans la VALEUR : une rotation ECRASE au lieu
+  # d'ajouter, et la propriete de correction (un login memorise pour un jeton n'est jamais servi
+  # pour un autre) tient par la meme comparaison, au meme moment.
+  test "JG-066 : N rotations de jeton ne font pas croitre le cache lineairement en N" do
+    # ⚠ LE COMPTEUR NE DOIT PAS CONNAITRE LA FORME DU FIX. Ecrit d'abord en
+    # `match?({{_, :bot_login, _}, _}, &1)` — une cle a TROIS elements, celle d'apres le correctif —
+    # il comptait ZERO sous la mutation, dont la cle en a quatre. Meme retour des deux cotes, test
+    # vacuous, mutation verte. On compte toute entree dont la cle porte `:bot_login`, quelle que soit
+    # son arite : c'est ce qui differe entre les deux mondes, et rien d'autre.
+    #
+    # Et on appelle `login_of/1` DIRECTEMENT, pas une lecture de haut niveau : c'est la fonction dont
+    # le cache est en cause, et une route qui ne la traverserait pas rendrait le compte nul des deux
+    # cotes — vacuous une seconde fois.
+    base = fn ->
+      Enum.count(:persistent_term.get(), fn {k, _} ->
+        is_tuple(k) and tuple_size(k) >= 2 and elem(k, 1) == :bot_login
+      end)
+    end
+
+    before = base.()
+
+    for i <- 1..8 do
+      expected = "login-#{i}"
+
+      assert {:ok, ^expected} =
+               Transport.login_of(config_from(comments_for(expected) ++ [token: "rot-#{i}"]))
+    end
+
+    grown = base.() - before
+
+    assert grown <= 1,
+           "le cache a gagne #{grown} entrees pour 8 rotations — l'empreinte du jeton est " <>
+             "redevenue une CLE au lieu d'une VALEUR"
+  end
+
+  test "TEMOIN JG-066 : apres rotation, c'est le NOUVEAU login qui est servi (pas le cache perime)" do
+    opts_a = comments_for("bot-a") ++ [token: "tok-a"]
+    opts_b = comments_for("bot-b") ++ [token: "tok-b"]
+
+    assert {:ok, "bot-a"} = Transport.login_of(config_from(opts_a))
+    assert {:ok, "bot-b"} = Transport.login_of(config_from(opts_b))
+    assert {:ok, "bot-a"} = Transport.login_of(config_from(opts_a))
+  end
+
+  defp config_from(opts) do
+    {:ok, config} = Transport.resolve_config(opts)
+    config
+  end
+
+  # JG-089 — LE DEPOT NE CONNAISSAIT PAS LE `429`. Recherche exhaustive, deux moyens independants :
+  # zero occurrence de `429`, `Retry-After` ou `too many` dans `lib/`. Le statut ressortait donc en
+  # `{:http, 429, body}`, indistinct d'un `500`, et un appelant qui abandonne sur erreur abandonnait
+  # une condition qui se serait levee seule. `name_permanent/4` nomme deja `412` et `423` comme
+  # PERMANENTS ; le `429` est leur exact symetrique et n'avait pas sa phrase.
+  describe "JG-089 — le 429 est nomme TRANSITOIRE, symetrique de 412/423" do
+    defmodule TooMany do
+      @moduledoc false
+      @behaviour Plug
+      @impl Plug
+      def init(body), do: body
+      @impl Plug
+      def call(conn, body) do
+        conn
+        |> Plug.Conn.put_resp_header("content-type", "application/json")
+        |> Plug.Conn.send_resp(429, JSON.encode!(body))
+      end
+    end
+
+    defp call_429(body) do
+      opts = [base_url: "http://fake.test", token: "t", req_options: [plug: {TooMany, body}]]
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http, 429, _}} =
+                 Transport.http_get(config_from(opts), "/user")
+      end)
+    end
+
+    test "429 avec Retry-After annonce → journalise TRANSITOIRE et le delai" do
+      log = call_429(%{"retry_after" => 30, "message" => "slow down"})
+
+      assert log =~ "TRANSITOIRE"
+      assert log =~ "reessai dans 30 s"
+      refute log =~ "PERMANENTE", "le 429 a ete classe comme definitif"
+    end
+
+    test "429 SANS Retry-After → transitoire quand meme, delai dit non annonce" do
+      log = call_429(%{"message" => "slow down"})
+
+      assert log =~ "TRANSITOIRE"
+      assert log =~ "delai non annonce"
+    end
+
+    test "TEMOIN — 423 reste PERMANENT (le symetrique n'a pas efface son jumeau)" do
+      defmodule Locked do
+        @moduledoc false
+        @behaviour Plug
+        @impl Plug
+        def init(o), do: o
+        @impl Plug
+        def call(conn, _) do
+          conn
+          |> Plug.Conn.put_resp_header("content-type", "application/json")
+          |> Plug.Conn.send_resp(423, JSON.encode!(%{"message" => "locked"}))
+        end
+      end
+
+      opts = [base_url: "http://fake.test", token: "t", req_options: [plug: {Locked, []}]]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 423, _}} =
+                   Transport.http_get(config_from(opts), "/user")
+        end)
+
+      assert log =~ "PERMANENTE"
+    end
   end
 end

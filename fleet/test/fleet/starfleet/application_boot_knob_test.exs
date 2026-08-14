@@ -13,14 +13,14 @@ defmodule Fleet.Starfleet.ApplicationBootKnobTest do
   alias Fleet.TestEnv
 
   test "explicit boolean value is honored" do
-    TestEnv.put_env_restoring(:fleet_starfleet, :start_mcp_monitor, false)
-    refute App.boot_enabled?(:start_mcp_monitor, true)
+    TestEnv.put_env_restoring(:lcars_fleet, :starfleet_start_mcp_monitor, false)
+    refute App.boot_enabled?(:starfleet_start_mcp_monitor, true)
 
     # Une clef ARBITRAIRE, pas un second knob reel : ce test porte sur `boot_enabled?`, pas sur
     # l'inventaire des enfants. L'epingler a un knob nomme l'a fait survivre au retrait de
     # MCPWatcher et casser un test qui ne parlait pas de lui.
-    TestEnv.put_env_restoring(:fleet_starfleet, :start_some_child, true)
-    assert App.boot_enabled?(:start_some_child, false)
+    TestEnv.put_env_restoring(:lcars_fleet, :starfleet_start_some_child, true)
+    assert App.boot_enabled?(:starfleet_start_some_child, false)
   end
 
   test "absent key → boolean default (no interpretation)" do
@@ -30,10 +30,10 @@ defmodule Fleet.Starfleet.ApplicationBootKnobTest do
 
   test "NON-boolean value → raise at boot (fail-closed, no silent topology drift)" do
     for bad <- ["false", "true", 0, 1, :off, nil] do
-      TestEnv.put_env_restoring(:fleet_starfleet, :start_mcp_monitor, bad)
+      TestEnv.put_env_restoring(:lcars_fleet, :starfleet_start_mcp_monitor, bad)
 
       assert_raise ArgumentError, ~r/must be a boolean/, fn ->
-        App.boot_enabled?(:start_mcp_monitor, true)
+        App.boot_enabled?(:starfleet_start_mcp_monitor, true)
       end
     end
   end

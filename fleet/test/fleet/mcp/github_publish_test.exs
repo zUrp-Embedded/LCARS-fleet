@@ -22,7 +22,7 @@ defmodule Fleet.MCP.GithubPublishTest do
     test "a non-onboarder role is refused by the gate" do
       # resolve_identity is stubbed to a role that is NOT the onboarder; role_has_capability? then
       # reads the real cap-profile canon and denies :onboarder to the delegate.
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "architect", repo: "fleet/demo"}}
       end)
 

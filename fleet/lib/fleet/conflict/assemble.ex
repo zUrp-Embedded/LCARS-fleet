@@ -43,10 +43,16 @@ defmodule Fleet.Conflict.Assemble do
     end
   end
 
+  # The merge was already performed to CLASSIFY this hunk, and its result travels on the hunk. The
+  # clause below is what happens when it does not: a hunk built by hand (a test, a future caller
+  # that skips the classifier) still gets a correct answer, at the price of the computation.
+  def resolve_lines(%Hunk{type: :non_overlapping, merged_lines: lines}) when is_list(lines),
+    do: {:ok, lines, "3-way LCS merge -- non-overlapping changes combined."}
+
   def resolve_lines(%Hunk{type: :non_overlapping} = h) do
     case Diff.merge_non_overlapping(h.base_lines, h.ours_lines, h.theirs_lines) do
-      nil -> :skip
-      lines -> {:ok, lines, "3-way LCS merge -- non-overlapping changes combined."}
+      {:ok, lines} -> {:ok, lines, "3-way LCS merge -- non-overlapping changes combined."}
+      {:error, _} -> :skip
     end
   end
 

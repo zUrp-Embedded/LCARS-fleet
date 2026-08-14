@@ -1,8 +1,23 @@
 defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
-  Repo-serialized lease of the step rail: **at most ONE
-  active workflow_run per repo**. Classifies each issue of the tick (ENGAGED / QUEUED), then
-  dispatches under this lease — the feature-branches stay sequential → clean rebase merge (linear history; FF is NOT guaranteed, `main` advances under parallel PRs — cf. `ForgeClient.merge_pr` `Do: rebase`).
+  Repo-scoped ADMISSION of the step rail: at most `Admission.max_fan/2` active workflow_runs per
+  repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
+  Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
+
+  ⚠ **CE PARAGRAPHE DISAIT « at most ONE active workflow_run per repo », ET C'ETAIT FAUX AU DEFAUT
+  LIVRE.** Le booleen `:repo_serialized_lease` a ete remplace par un COMPTEUR (`Admission` le dit :
+  « Serial is this ceiling at 1, not another mechanism »), et cette phrase est restee. Un lecteur en
+  repartait avec un invariant de serialisation que le runtime n'a plus : sur un projet qui ne declare
+  rien, cinq workflow_runs peuvent voler ensemble. Corrige le 2026-08-13 (BL-6-75) — le nom du module
+  garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet est un plafond.
+
+  **Le plafond est PER HUMAIN, et c'est le modele — pas une fuite du filtre.** Le compte se fait sur
+  la liste obtenue avec `assigned_by=<mon humain>`, donc deux humains sur un depot tiennent deux
+  budgets. Toute la fleet est per-humain (architect cape par uid, pods, feed, scoping) et une config
+  centrale qui accorde un quota PAR UTILISATEUR est la forme ordinaire de la chose ; l'endroit ou la
+  valeur est declaree ne dit rien de qui elle borne. `Admission.max_fan/0` porte le raisonnement.
+  Ce qui borne le DEPOT est ailleurs : les sieges de pool par `(role, repo)`, et le fusible
+  `Spawner.max_pods` en dernier ressort.
 
   ## The decision (business core)
 
@@ -208,13 +223,25 @@ defmodule Fleet.Pilot.Poller.Lease do
             # déjà passé au-dessus (clause précédente), et l'interrompre en vol le coincerait.
             true ->
               case open_blockers(issue, seams) do
-                [] ->
+                {:ok, []} ->
                   {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
                   {acc2, if(started?, do: fan + 1, else: fan)}
 
-                [blocker | _] ->
+                {:ok, [blocker | _]} ->
                   {acc2, _} =
                     Admission.refuse({:depends, blocker}, item_opts, issue["number"], wait, acc)
+
+                  {acc2, fan}
+
+                {:error, why} ->
+                  {acc2, _} =
+                    Admission.refuse(
+                      {:depends_unreadable, why},
+                      item_opts,
+                      issue["number"],
+                      wait,
+                      acc
+                    )
 
                   {acc2, fan}
               end
@@ -231,19 +258,33 @@ defmodule Fleet.Pilot.Poller.Lease do
   # refusé au plafond n'a pas besoin qu'on interroge la forge sur ses arêtes. Le coût est donc UN
   # GET par ticket réellement candidat au démarrage, pas par ticket vu.
   #
-  # Forge muette → `[]`, donc on dispatche. C'est le sens sûr : la forge REFUSERA la fermeture si un
-  # bloqueur est ouvert, donc le mur tient de toute façon ; l'inverse (bloquer sur une lecture ratée)
-  # arrêterait la fleet entière sur un hoquet réseau.
+  # FORGE MUETTE ≠ AUCUN BLOQUEUR, et l'argument qui disait le contraire se réfutait dans le
+  # paragraphe au-dessus. Il tenait ainsi : « la forge REFUSERA la fermeture si un bloqueur est
+  # ouvert, donc le mur tient de toute façon ». C'est exactement le raisonnement que la lecture
+  # ci-dessus existe pour rejeter — le commentaire du site de dispatch dit que sans elle « le
+  # producteur travaille, livre, et le mur ne se révèle qu'au merge : deux rails parallèles qui ne
+  # se rencontrent qu'au moment le plus cher ». Se rabattre dessus en cas d'échec de lecture, c'est
+  # rétablir précisément l'état que la lecture supprime.
+  #
+  # L'autre moitié de l'argument était juste et reste servie : bloquer la FLEET sur un hoquet réseau
+  # serait pire. Mais refuser n'est pas bloquer — `Admission.refuse` marque CE ticket en attente et
+  # passe au suivant ; le tick d'après relit. Rien d'autre ne s'arrête.
+  #
+  # La forme suit le précédent déjà en place sur la porte CI : `{:ci_unreadable, _}` et ses jumeaux
+  # partagent l'étiquette de leur porte, parce que du côté du ticket c'est le MÊME fait — il est
+  # arrêté là, personne ne travaille dessus. La distinction vit dans la raison du skip, où elle est
+  # actionnable.
   defp open_blockers(issue, %Seams{} = seams) do
     case seams.forge.issue_dependencies(seams.repo, Map.get(issue, "number"), seams.forge_opts) do
       {:ok, deps} when is_list(deps) ->
-        deps
-        |> Enum.filter(&(Map.get(&1, "state") == "open"))
-        |> Enum.map(&Map.get(&1, "number"))
-        |> Enum.reject(&is_nil/1)
+        {:ok,
+         deps
+         |> Enum.filter(&(Map.get(&1, "state") == "open"))
+         |> Enum.map(&Map.get(&1, "number"))
+         |> Enum.reject(&is_nil/1)}
 
-      _ ->
-        []
+      other ->
+        {:error, other}
     end
   end
 

@@ -25,15 +25,41 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   @spec verify(String.t(), keyword()) :: :ok | {:error, failure()}
   def verify(ref, opts) when is_binary(ref) and is_list(opts) do
     work_dir = Keyword.fetch!(opts, :work_dir)
-    project_dir = Keyword.get(opts, :project_dir, work_dir)
+    do_verify(parse(Path.join(work_dir, ref)), Keyword.put_new(opts, :project_dir, work_dir))
+  end
 
-    with {:ok, statement} <- parse(Path.join(work_dir, ref)),
-         {:ok, livrable} <- subject_sha(statement),
+  @doc """
+  Same verification, on a statement already IN HAND (the git object pushed with the brick).
+
+  The attestation no longer lives in a file whose name a reader must guess: it rides
+  `refs/lcars/provenance/<sha>`, pushed in the same `git push` as the deliverable (BL-6-43). The
+  caller has read it, so this takes the CONTENT — nothing here computes a path any more.
+  """
+  @spec verify_content(String.t(), keyword()) :: :ok | {:error, failure()}
+  def verify_content(json, opts) when is_binary(json) and is_list(opts) do
+    do_verify(decode_typed(json), opts)
+  end
+
+  defp do_verify({:error, _} = err, _opts), do: err
+
+  defp do_verify({:ok, statement}, opts) do
+    project_dir = Keyword.fetch!(opts, :project_dir)
+
+    with {:ok, livrable} <- subject_sha(statement),
          :ok <- commit_exists(project_dir, livrable, {:unknown_livrable, livrable}),
          :ok <- base_descends(project_dir, statement, livrable),
-         :ok <- brief_coherent(work_dir, statement, Keyword.get(opts, :expected_brief_sha)) do
+         :ok <-
+           brief_coherent(
+             Keyword.get(opts, :work_dir, project_dir),
+             statement,
+             Keyword.get(opts, :expected_brief_sha)
+           ) do
       :ok
     end
+  end
+
+  defp decode_typed(raw) do
+    with {:ok, json} <- decode(raw), :ok <- typed(json), do: {:ok, json}
   end
 
   defp parse(abs) do

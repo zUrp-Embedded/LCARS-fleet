@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.SeedStore do
   (which the dying `Pod` discards) and the teardown proceeds. What is lost is only the
   session-memory bonus — the work's durable truth lives on the forge, not in the seed.
 
-  - `seed_root`: `:fleet_spawner, :seed_store_root` (default `~/.lcars/seeds` =
+  - `seed_root`: `:lcars_fleet, :spawner_seed_store_root` (default `~/.lcars/seeds` =
     `Fleet.Layout.state_dir()/seeds`; operator override `LCARS_SEED_STORE_ROOT`, cf. `runtime.exs`).
   - The seed map's `uuid` = the DETERMINISTIC BUILDER of the Desktop slot (the `session_id`
     pre-allocated at spawn, passed as an argument): it is the SINGLE SOURCE of the pod's identity. It is
@@ -114,6 +114,18 @@ defmodule Fleet.Spawner.SeedStore do
       :none ->
         :none
 
+      # UNREADABLE IS NOT "NOT YET". Both used to arrive as `:none`, and a checkpoint that skips on
+      # `:none` skips quietly — the pod's transcript is lost and the operator reads the same silence
+      # as for a pod that had simply not spoken. Named here so the loss has a cause attached to it.
+      {:error, reason} = err ->
+        Logger.error(
+          "SeedStore: checkpoint #{project}/#{role} — sessions directory unreadable " <>
+            "(#{inspect(reason)}), NOTHING captured. This is not an empty pod: the seed of this " <>
+            "run is lost and a recall will start cold."
+        )
+
+        err
+
       {:ok, jsonl} ->
         # The stored uuid = the DETERMINISTIC BUILDER (`session_id` pre-allocated at spawn), the SINGLE
         # source of the Desktop slot's identity. We do NOT derive it from `Path.basename(jsonl)`: a `/clear`
@@ -127,7 +139,23 @@ defmodule Fleet.Spawner.SeedStore do
         # We keep ONLY the FIRST ROUND (minimal resumable seed = the pod's initial setup/brief),
         # NOT the whole session — the work re-derives from the forge (single-source axiom).
         # This subset `--resume`s correctly with only the round-1 context.
-        File.write!(Path.join(dest_dir, "#{base}.jsonl"), first_round(jsonl))
+        content = first_round(jsonl)
+
+        # READ, THEN RE-VERIFY. `SessionFiles.jsonl_paths/2` filtered the symlinks out before this
+        # read; between that filter and `File.stream!` the pod could have swapped the path for a
+        # link to a host file — it owns the inodes under `<pod_dir>` (RW bind). The BEAM exposes no
+        # `O_NOFOLLOW`, so the window cannot be closed; it can be DETECTED, and a capture whose
+        # source changed shape mid-read is dropped rather than engraved into a seed that a later pod
+        # will resume. Detection is worth more here than anywhere else in the chain: this is the
+        # step that turns a file the daemon can read into a file the NEXT pod receives.
+        unless Fleet.Slug.link_free_under?(jsonl, pod_dir) do
+          raise ArgumentError,
+                "SeedStore.checkpoint: #{inspect(jsonl)} became a symlink while being read — " <>
+                  "capture DROPPED (a pod that swaps its own transcript for a host file is " <>
+                  "reaching through the daemon, which runs outside its sandbox)"
+        end
+
+        File.write!(Path.join(dest_dir, "#{base}.jsonl"), content)
 
         # Sidecar descriptor. `read_map/3` reads ONLY `uuid` and `slug`; the rest is there for a
         # human opening the seed store by hand. Nothing parses them, which is why adding `issue`
@@ -206,13 +234,30 @@ defmodule Fleet.Spawner.SeedStore do
   def restore(seed_jsonl, pod_dir, cwd, uuid)
       when is_binary(seed_jsonl) and is_binary(pod_dir) and is_binary(cwd) and is_binary(uuid) do
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
-    File.mkdir_p!(dir)
     dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))
 
     unless Fleet.Slug.under_root?(dest, pod_dir) do
       raise ArgumentError,
             "SeedStore.restore: unconfined uuid (#{inspect(uuid)}) — escape refused"
     end
+
+    # THE LEXICAL CHECK ABOVE IS NOT THE CONFINEMENT IT READS LIKE, and this is the write side of
+    # the same escape. `under_root?/2` compares strings: it refuses a `..` in the uuid and sees
+    # nothing at all if `<pod_dir>/.claude/projects` — or the slug directory — is a SYMLINK. The pod
+    # owns those inodes (`<pod_dir>` is bind-mounted RW into the sandbox), so it can point them
+    # anywhere and the daemon's `mkdir_p!` + `cp!` then writes outside the projected world, as the
+    # human, with the human's rights.
+    #
+    # Checked BEFORE `mkdir_p!`: creating the tree first would walk through the link and the
+    # verification would come too late to matter.
+    unless Fleet.Slug.link_free_under?(dest, pod_dir) do
+      raise ArgumentError,
+            "SeedStore.restore: a symlink stands between #{inspect(pod_dir)} and " <>
+              "#{inspect(dest)} — restore REFUSED. The pod owns its tree; it does not get to " <>
+              "choose where the daemon writes."
+    end
+
+    File.mkdir_p!(dir)
 
     File.cp!(seed_jsonl, dest)
     # Shared base seeds may carry another human's capture-time sessionId.
@@ -313,10 +358,24 @@ defmodule Fleet.Spawner.SeedStore do
     end)
   end
 
+  # ABSENT AND UNREADABLE ARE NOT THE SAME FACT, and this function is on a WRITE path — which is why
+  # collapsing them costs data rather than a wrong reading. Its single caller does
+  # `Map.merge(existing_seed_records(...), live)` then WRITES the result over the sidecar: a `%{}`
+  # returned for a file that exists but could not be parsed does not mean "nothing was there", it
+  # silently TRUNCATES the sidecar down to `live`. The register's fiche describes the opposite
+  # consequence — a pod restarting cold — because it read this as a resume-path reader; measured, it
+  # has exactly one caller and it is the slot-bridge CAPTURE.
+  #
+  # Absent stays `%{}`: there is genuinely nothing to merge, and the caller is creating the file.
+  # Unreadable raises, so the write never happens and the existing sidecar survives intact —
+  # `capture_slot_bridge/2` already rescues into `{:error, _}`, which its callers retry. Losing a
+  # capture is recoverable; overwriting a good sidecar with a truncated one is not.
   defp existing_seed_records(path) do
-    if File.exists?(path), do: seed_records(path), else: %{}
-  rescue
-    _ -> %{}
+    if File.exists?(path) do
+      seed_records(path)
+    else
+      %{}
+    end
   end
 
   defp rc_registered?(records),
@@ -342,11 +401,17 @@ defmodule Fleet.Spawner.SeedStore do
     File.write!(path, Regex.replace(~r/"sessionId":"[^"]*"/, content, ~s("sessionId":"#{uuid}")))
   end
 
-  defp root,
-    do:
-      Application.get_env(
-        :fleet_spawner,
-        :seed_store_root,
-        Path.join(Fleet.Layout.state_dir(), "seeds")
-      )
+  # THE one definition of the seed root. `config/runtime.exs` posts the key only when the operator
+  # set `LCARS_SEED_STORE_ROOT`; absent that, this is the answer, and there is no second one.
+  #
+  # `fetch_env/2`, never `get_env/3`: the third argument of `get_env/3` is an ordinary function
+  # argument, evaluated on EVERY call even when the key is set. `Layout.state_dir()` raises on an
+  # unresolvable HOME, so the eager form paid that raise on every `root()` — including in the
+  # deployments that configure the key precisely to avoid depending on the home.
+  defp root do
+    case Application.fetch_env(:lcars_fleet, :spawner_seed_store_root) do
+      {:ok, path} -> path
+      :error -> Path.join(Fleet.Layout.state_dir(), "seeds")
+    end
+  end
 end

@@ -83,7 +83,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         # next recurrence retries the escalation.
         case escalate(Keyword.get(opts, :escalate_kind, :recurrence), subject, reason, sig, opts) do
           {:ok, num} ->
-            _ = mark_escalated(sig, num, opts)
+            warn_if_stamp_lost(mark_escalated(sig, num, opts), sig, num)
             {:escalated, num}
 
           {:error, e} ->
@@ -123,6 +123,22 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, :registry_unavailable}
   end
 
+  # `{:escalated, num}` RESTE VRAI — l'issue existe, son numero le prouve, et c'est ce que
+  # l'appelant a besoin de savoir. Ce qui se disait nulle part, c'est que la GARDE de recurrence,
+  # elle, n'est pas durable : `write_wal` journalise bien son echec, mais sous un libelle generique
+  # qui ne dit pas ce qu'il coute ICI. Une ligne le dit, la ou la consequence se produira.
+  defp warn_if_stamp_lost(:ok, _sig, _num), do: :ok
+
+  defp warn_if_stamp_lost({:error, why}, sig, num) do
+    Logger.error(
+      "IncidentRegistry: issue ##{num} OPENED for #{sig} but the cooldown stamp is NOT durable " <>
+        "(#{inspect(why)}) — the escalation HAPPENED; on a restart before the async forge sync " <>
+        "the next recurrence may open a redundant issue"
+    )
+
+    :ok
+  end
+
   @doc """
   Cat-5 facade: escalates through the registry's cooldown gate while PRESERVING
   "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
@@ -156,7 +172,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
       _first_or_should_escalate ->
         case escalate(kind, subject, reason, sig, opts) do
           {:ok, num} ->
-            _ = mark_escalated(sig, num, opts)
+            warn_if_stamp_lost(mark_escalated(sig, num, opts), sig, num)
             {:ok, num}
 
           {:error, e} ->
@@ -293,8 +309,22 @@ defmodule Fleet.Pilot.IncidentRegistry do
         end
       )
 
-    _ = write_wal(state.wal_path, registry)
-    {:reply, :ok, schedule_sync(%{state | registry: registry})}
+    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` QUARANTE LIGNES PLUS HAUT, et il manquait ICI.
+    # `_ = write_wal(...)` jetait le seul fait qui distingue « tampon grave » de « tampon perdu »,
+    # donc AUCUN appelant ne pouvait le savoir : la reponse etait `:ok` dans les deux cas.
+    #
+    # ⚠ La consequence n'est PAS celle du voisin, et c'est pour ca que le retour public de
+    # `record_or_escalate/4` ne bouge pas : la-bas un WAL perdu perd l'INCIDENT (la chronologie
+    # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
+    # recurrence suivante — borne, et qui se repare tout seul. Ce qui manquait n'etait pas un
+    # nouveau verdict, c'etait que le fait EXISTE quelque part.
+    reply =
+      case write_wal(state.wal_path, registry) do
+        :ok -> :ok
+        {:error, e} -> {:error, {:wal_write_failed, e}}
+      end
+
+    {:reply, reply, schedule_sync(%{state | registry: registry})}
   end
 
   @impl true
@@ -354,7 +384,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # (default 500 — well above nominal; the bound targets the anomaly). Applied to the upsert AND the
   # forge merge (both growth paths).
   defp prune(registry) do
-    max = Application.get_env(:fleet_pilot, :incident_registry_max_entries, 500)
+    max = Application.get_env(:lcars_fleet, :pilot_incident_registry_max_entries, 500)
 
     if map_size(registry) <= max do
       registry
@@ -380,7 +410,16 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
       {:ok, %{content: content, sha: sha}} ->
-        put_merged(registry, decode(content), sha, putter, opts)
+        case decode(content) do
+          {:ok, forge_reg} ->
+            put_merged(registry, forge_reg, sha, putter, opts)
+
+          # MEME BRANCHE QUE L'ILLISIBLE, ET POUR LA MEME RAISON : on ignore ce que la forge
+          # contient. Pousser notre vue locale par-dessus effacerait les incidents des autres
+          # machines — dont les recurrences redeviendraient des premieres occurrences.
+          :corrupt ->
+            {:error, {:forge_unreadable, :corrupt_file}}
+        end
 
       {:error, :not_found} ->
         put_merged(registry, %{}, nil, putter, opts)
@@ -499,25 +538,51 @@ defmodule Fleet.Pilot.IncidentRegistry do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
-      {:ok, %{content: content}} -> {:ok, decode(content)}
-      {:error, :not_found} -> :absent
-      {:error, reason} -> {:error, reason}
+      {:ok, %{content: content}} ->
+        case decode(content) do
+          {:ok, reg} -> {:ok, reg}
+          # Au BOOT aussi : un fichier corrompu n'est pas un registre vide. Le traiter comme vide
+          # ferait rejouer chaque recurrence connue des autres machines en premiere occurrence.
+          :corrupt -> {:error, :corrupt_file}
+        end
+
+      {:error, :not_found} ->
+        :absent
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  # ⚠ CETTE FONCTION RENDAIT `%{}` SUR UN FICHIER CORROMPU, ET SON PROPRE COMMENTAIRE LE DISAIT :
+  # « real amnesia, not an absence … cross-machine memory is lost until the file is overwritten by
+  # the next sync ». Elle nommait la perte et la faisait quand meme.
+  #
+  # Or `sync_forge/2` porte deja la discipline exacte qui l'interdit, cent-cinquante lignes plus
+  # haut : « an unreadable forge is NOT an empty one … pushing our LOCAL view would OVERWRITE
+  # cross-machine incidents we could not read (data loss). Fail-closed. » Un fichier CORROMPU est le
+  # meme fait qu'un fichier ILLISIBLE — dans les deux cas on ignore ce que la forge contient — et
+  # c'est le SHA du fichier corrompu qui partait ensuite en `sha:` du PUT, donc l'ecrasement
+  # reussissait. La garde existait, elle etait juste branchee sur la mauvaise moitie du probleme.
+  #
+  # ⚠ DEUX CORRUPTIONS, DEUX POIDS, et une seule devient fail-closed. Racine indecodable ou non-map
+  # → on ne sait RIEN, refus. Entrees individuelles non-map → le reste du fichier est authentique,
+  # et refuser bloquerait TOUTE synchronisation jusqu'a ce qu'un humain repare un fichier que
+  # personne ne regarde : la sync ne se repare pas toute seule, elle se coince. On garde donc le
+  # tri, deja bruyant (`drop_non_map_entries/2` loggue en `error` avec les signatures perdues).
   defp decode(content) do
     case Jason.decode(content) do
       {:ok, reg} when is_map(reg) ->
-        drop_non_map_entries(reg, "forge file")
+        {:ok, drop_non_map_entries(reg, "forge file")}
 
       _ ->
-        # The file EXISTED but its content is not a JSON map — real amnesia, not an absence.
         Logger.error(
-          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — treated as empty; " <>
-            "cross-machine memory is lost until the file is overwritten by the next sync"
+          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — REFUSED as a read. " <>
+            "We do not know what the forge holds, so we do not push over it: same fail-closed " <>
+            "posture as an unreadable forge. Repair the file; the sync retries."
         )
 
-        %{}
+        :corrupt
     end
   end
 
@@ -628,7 +693,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp cooldown_ms(opts) do
     opts[:escalation_cooldown_ms] ||
-      Application.get_env(:fleet_pilot, :incident_escalation_cooldown_ms, @escalation_cooldown_ms)
+      Application.get_env(
+        :lcars_fleet,
+        :pilot_incident_escalation_cooldown_ms,
+        @escalation_cooldown_ms
+      )
   end
 
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
@@ -641,22 +710,26 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # survives as an explicit override for the rare split.
   defp repo(opts),
     do:
-      opts[:repo] || Application.get_env(:fleet_pilot, :incident_registry_repo) ||
+      opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
         Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
   defp branch(opts),
-    do: opts[:branch] || Application.get_env(:fleet_pilot, :incident_registry_branch, "ops")
+    do: opts[:branch] || Application.get_env(:lcars_fleet, :pilot_incident_registry_branch, "ops")
 
   defp path(opts),
     do:
       opts[:path] ||
-        Application.get_env(:fleet_pilot, :incident_registry_path, "work/system-incidents.json")
+        Application.get_env(
+          :lcars_fleet,
+          :pilot_incident_registry_path,
+          "work/system-incidents.json"
+        )
 
   # HOME unresolvable = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
   # path: the .lcars state must not silently scatter (e.g. orphaned under /tmp).
   defp wal_path(opts),
     do:
-      opts[:wal_path] || Application.get_env(:fleet_pilot, :incident_registry_wal_path) ||
+      opts[:wal_path] || Application.get_env(:lcars_fleet, :pilot_incident_registry_wal_path) ||
         Path.join(Fleet.Layout.state_dir(), "system-incidents.json")
 
   # The registry sync is a commit the RUNTIME makes: no human initiated it, no pod produced it, and
@@ -672,8 +745,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
     do:
       opts[:author] ||
         Application.get_env(
-          :fleet_pilot,
-          :incident_registry_author,
+          :lcars_fleet,
+          :pilot_incident_registry_author,
           Fleet.Credentials.ForgeIdentity.system_identity()
         )
 

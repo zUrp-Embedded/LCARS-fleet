@@ -89,10 +89,10 @@ defmodule Fleet.MCP.EmergencyStopTest do
   end
 
   setup do
-    TestEnv.put_env_restoring(:fleet_mcp, :forge_client, Forge)
-    TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, Onboard)
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, Forge)
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, Onboard)
 
-    TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
       {:ok, %{role: "starfleet", repo: "fleet/demo"}}
     end)
 
@@ -197,7 +197,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
         def revise_card(_f, _o), do: {:error, :unused}
       end
 
-      TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, MuteOnboard)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, MuteOnboard)
 
       result = stop() |> decoded()
 
@@ -209,7 +209,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
 
   describe "refusals" do
     test "a non-onboarder pod is refused and nothing is closed" do
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "engineer", repo: "fleet/demo"}}
       end)
 

@@ -5,12 +5,12 @@ defmodule Fleet.Coord.PoliciesLoadFailloudTest do
   alias Fleet.Coord.Policies
 
   setup do
-    prev = Application.get_env(:fleet_coord, :policies_path)
+    prev = Application.get_env(:lcars_fleet, :coord_policies_path)
 
     on_exit(fn ->
       if prev,
-        do: Application.put_env(:fleet_coord, :policies_path, prev),
-        else: Application.delete_env(:fleet_coord, :policies_path)
+        do: Application.put_env(:lcars_fleet, :coord_policies_path, prev),
+        else: Application.delete_env(:lcars_fleet, :coord_policies_path)
     end)
 
     :ok
@@ -21,7 +21,11 @@ defmodule Fleet.Coord.PoliciesLoadFailloudTest do
   # deploy artifact → raise at boot. The raise precedes the `:persistent_term.put` → the state loaded
   # at boot stays intact (the following tests keep a valid table).
   test "F-051: missing policies → raise (no more DEGRADED empty table)" do
-    Application.put_env(:fleet_coord, :policies_path, "/nonexistent/coord-policies-xyz.yaml")
+    Application.put_env(
+      :lcars_fleet,
+      :coord_policies_path,
+      "/nonexistent/coord-policies-xyz.yaml"
+    )
 
     assert_raise RuntimeError, ~r/missing\/unreadable/, fn ->
       Policies.init_policies!()
@@ -33,7 +37,7 @@ defmodule Fleet.Coord.PoliciesLoadFailloudTest do
     File.write!(tmp, "- just\n- a\n- list\n")
     on_exit(fn -> File.rm(tmp) end)
 
-    Application.put_env(:fleet_coord, :policies_path, tmp)
+    Application.put_env(:lcars_fleet, :coord_policies_path, tmp)
 
     assert_raise RuntimeError, ~r/malformed/, fn ->
       Policies.init_policies!()
@@ -49,7 +53,7 @@ defmodule Fleet.Coord.PoliciesLoadFailloudTest do
     File.write!(tmp, "mappings:\n  \"audit.proven\":\n    escalation_path: []\n")
     on_exit(fn -> File.rm(tmp) end)
 
-    Application.put_env(:fleet_coord, :policies_path, tmp)
+    Application.put_env(:lcars_fleet, :coord_policies_path, tmp)
 
     assert_raise RuntimeError, ~r/INVALID vs coord-policies-v1\.json/, fn ->
       Policies.init_policies!()

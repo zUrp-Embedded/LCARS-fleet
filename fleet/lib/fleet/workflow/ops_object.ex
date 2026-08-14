@@ -56,16 +56,37 @@ defmodule Fleet.Workflow.OpsObject do
       not File.dir?(work_dir) ->
         {:error, {:work_dir_missing, work_dir}}
 
-      File.exists?(abs) and File.read!(abs) == content ->
-        # Same version already on disk → identity = the commit that introduced it. Empty sha
-        # (written but never committed — crash residue) → re-materialize to give it one.
+      # ⚠ `File.read/1` ET NON `File.read!/1` (6-081). Le couple `File.exists?` puis `File.read!`
+      # est un check-then-act : entre les deux, le fichier peut disparaitre ou devenir illisible, et
+      # la variante `!` LEVE — dans une expression booleenne ou l'echec de lecture voulait
+      # simplement dire « contenu different ». Ce code tourne dans le `handle_call` de
+      # `OpsObjectSync` : la levee tue le SERIALISEUR de `work/ops` et tous les appels en attente
+      # recoivent un `:exit`.
+      File.read(abs) == {:ok, content} ->
+        # ⚠ LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE (6-048). Cette branche rendait
+        # `Git.last_commit_sha/2` — le dernier commit ayant TOUCHE ce chemin — sans verifier que le
+        # contenu A CE COMMIT est celui qu'on annonce. Un fichier ecrit puis non commite (le commit
+        # a echoue, `materialize/5` laisse l'ecriture) suffit : le second appel empruntait le
+        # raccourci et rendait le sha d'une version PRECEDENTE.
         #
-        # No push is attempted on this path and none is claimed: the idempotent hit says nothing
-        # about where the object was published, and `:not_requested` is the honest answer to a
-        # question this branch never asked.
-        case Git.last_commit_sha(work_dir, ref) do
-          {:ok, sha} when sha != "" -> {:ok, sha, :not_requested}
-          _ -> materialize(work_dir, abs, ref, content, opts)
+        # Ce sha remonte jusqu'aux pointeurs d'epinglage — `Brief: <ref> @ <sha>` dans le corps du
+        # ticket, avec la phrase « ce qui fait foi est le doc ci-dessous, A CE COMMIT EXACT ». Un
+        # juge qui resout le pointeur lit alors autre chose que ce qu'on lui a promis, sans qu'aucune
+        # erreur ne se leve.
+        #
+        # `committed_sha/3`, douze lignes plus bas, fait exactement la bonne chose : il cherche dans
+        # l'historique un commit dont le contenu A CE CHEMIN vaut `content`. La parade existait deja
+        # dans ce module, en lecture seule, a cote de la branche qui s'en passait.
+        #
+        # `:not_committed` = residu de crash (ecrit, jamais commite) → on materialise pour lui
+        # donner une identite, ce que faisait deja l'ancien garde `sha != ""`.
+        #
+        # Aucun push n'est tente ici et aucun n'est revendique : le hit idempotent ne dit rien de
+        # l'endroit ou l'objet a ete publie, et `:not_requested` est la reponse honnete a une
+        # question que cette branche n'a jamais posee.
+        case committed_sha(work_dir, ref, content) do
+          {:ok, sha} -> {:ok, sha, :not_requested}
+          :not_committed -> materialize(work_dir, abs, ref, content, opts)
         end
 
       true ->
@@ -115,6 +136,12 @@ defmodule Fleet.Workflow.OpsObject do
   end
 
   # A racing identical write recovers its introducing commit.
+  #
+  # ⚠ LE MEME APPEL QU'AU RACCOURCI CORRIGE PLUS HAUT, ET ICI IL EST SAIN — ne pas « harmoniser »
+  # les deux. `:nothing_to_commit` PROUVE que l'arbre egale HEAD pour ce chemin ; le dernier commit
+  # touchant `ref` est donc celui qui l'a mis a sa valeur courante, et cette valeur est `content`.
+  # Le raccourci, lui, ne savait que l'ARBRE DE TRAVAIL, ce qui ne dit rien de HEAD : c'est toute la
+  # difference entre les deux sites, et elle tient a la garde, pas a l'appel.
   defp commit_or_recover(work_dir, ref, opts) do
     case Git.commit(commit_opts(work_dir, ref, opts)) do
       {:ok, sha} -> {:ok, sha}

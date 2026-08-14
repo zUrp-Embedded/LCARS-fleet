@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
   defp project(root, name, intensity \\ nil) do
     dir = Path.join(root, name)
     File.mkdir_p!(dir)
-    if intensity, do: File.write!(Path.join(dir, "intensity.json"), intensity)
+    if intensity, do: File.write!(Path.join(dir, ".lcars.json"), intensity)
     dir
   end
 
@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
 
   describe "the gate" do
     test "a pod without the onboarder capability is refused before anything is read" do
-      Fleet.TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "engineer", repo: "fleet/demo"}}
       end)
 

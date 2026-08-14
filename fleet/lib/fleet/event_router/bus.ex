@@ -4,7 +4,7 @@ defmodule Fleet.EventRouter.Bus do
   main topic. Events are broadcast as structs and checked against the registry loaded
   from `events.yaml`; an unregistered type raises once that registry is populated.
 
-  An empty registry follows `:fleet_event_router, :permit_when_registry_empty`: `true`
+  An empty registry follows `:lcars_fleet, :event_router_permit_when_registry_empty`: `true`
   by default permits the initialization window, while `false` refuses every event.
 
   `safe_emit/4` is reserved for lossy observability. It logs construction and delivery
@@ -25,16 +25,60 @@ defmodule Fleet.EventRouter.Bus do
   @spec main_topic() :: String.t()
   def main_topic, do: @main_topic
 
-  @doc "Broadcasts a registered `%Fleet.Event{}` directly on `topic`."
+  @doc """
+  Topic of ONE pod — `main_topic/0` plus the pod id.
+
+  A pod subscribes here and nowhere else, so it is woken only by what is addressed to it. Nothing
+  emits on this topic directly: `broadcast/2` fans out to it from the main topic, which is what
+  keeps the routing a property of the bus instead of a discipline each emitter must remember.
+  """
+  @spec pod_topic(String.t()) :: String.t()
+  def pod_topic(pod_id) when is_binary(pod_id), do: @main_topic <> ".pod." <> pod_id
+
+  @doc """
+  Broadcasts a registered `%Fleet.Event{}` directly on `topic`.
+
+  An event carrying a `pod_id` ALSO lands on that pod's own topic (6-041) — see `pod_topic/1`.
+  """
   @spec broadcast(String.t(), Fleet.Event.t()) :: :ok | {:error, term()}
   def broadcast(topic, %Fleet.Event{} = event) when is_binary(topic) do
     assert_authorized!(event)
-    pubsub_broadcast(topic, event)
+
+    case pubsub_broadcast(topic, event) do
+      :ok -> fan_out_to_pod(topic, event)
+      other -> other
+    end
   end
+
+  # 6-041 — LA COPIE VERS N BOITES ETAIT UN DEFAUT D'ADRESSAGE, PAS DE DEBIT. Chaque pod s'abonnait
+  # au sujet GLOBAL, donc tout evenement reveillait les N pods actifs (plafond 128) et N-1 le
+  # jetaient. Le pod ne consomme que des evenements qui portent SON `pod_id` : le bus peut donc les
+  # adresser au lieu de les diffuser.
+  #
+  # LA REPARTITION VIT ICI ET NULLE PART AILLEURS, et c'est le point. La faire faire aux emetteurs
+  # aurait mis un devoir de memoire a chaque site : celui qui oublie le sujet du pod ne casse rien
+  # de visible — le pod attend simplement un evenement qui ne viendra jamais, sans trace. Mesure du
+  # 2026-08-14 : `pubsub_broadcast/2` est le SEUL appel `Phoenix.PubSub.broadcast` de `lib/`, et
+  # aucun appelant ne passe de sujet autre que le principal. Un seul endroit tient l'invariant.
+  #
+  # Le sujet principal reste servi tel quel : les consommateurs transverses (read-model, audit,
+  # step-run) y sont, et ils doivent tout voir.
+  # ⚠ `broadcast_from` ET NON `broadcast`, ET CE N'EST PAS UN DETAIL. Un pod emet SES PROPRES
+  # evenements de cycle de vie (`pod.spawned`, `pod.failed`, `pod.completed`) avec son propre
+  # `pod_id` : une diffusion nue lui rendrait tout ce qu'il vient de dire. Ces evenements-la sont
+  # pour les OBSERVATEURS, jamais pour leur emetteur. L'exclusion par pid est exacte et ne demande
+  # aucune liste de types a tenir a jour — une liste qui derive rend le pod bavard sur lui-meme.
+  #
+  # Le sujet principal, lui, est diffuse normalement : un observateur doit tout voir, y compris ce
+  # qu'il a emis.
+  defp fan_out_to_pod(@main_topic, %Fleet.Event{pod_id: pod_id} = event) when is_binary(pod_id),
+    do: Phoenix.PubSub.broadcast_from(@pubsub_name, self(), pod_topic(pod_id), event)
+
+  defp fan_out_to_pod(_topic, _event), do: :ok
 
   # Injection seam for delivery-error tests; production defaults to Phoenix.PubSub.
   defp pubsub_broadcast(topic, event) do
-    case Application.get_env(:fleet_event_router, :broadcast_fun) do
+    case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
       fun when is_function(fun, 3) -> fun.(@pubsub_name, topic, event)
       _ -> Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
     end
@@ -136,6 +180,22 @@ defmodule Fleet.EventRouter.Bus do
     :ok
   end
 
+  # PERMISSIVE ON PURPOSE, AND IT IS LOAD-BEARING. An empty registry means "the registry is not
+  # loaded YET", not "nothing is authorized": this default holds the window between the first line
+  # of boot and `Catalog.load!/0`. Measured on this tree — flipping it to `false` fails 101 of 2698
+  # tests, because the hermetic suite runs with the registry off by design
+  # (`event_router_load_event_registry: false`). A fail-closed default here does not harden the bus,
+  # it makes the boot and the whole suite unable to emit.
+  #
+  # WHAT MAKES IT SAFE IS NOT WRITTEN IN THIS MODULE, so read it here: `Catalog.load!/0` RAISES on
+  # an absent, invalid or empty `events.yaml`, and it runs in `EventRouter.Application.init/1`
+  # ABOVE the children list. A fleet that reaches its first broadcast therefore has a populated
+  # registry, and this branch is unreachable in a live fleet.
+  #
+  # That ordering was held by convention alone until the `boot.event_registry_before_children` lock
+  # in `mix lcars.contracts.check`: moving the `load!/0` call one line down would have widened this
+  # window to the whole boot with nothing going red — the failure needs an unregistered event AND a
+  # real supervision tree, which no hermetic test plays.
   @permit_empty_default true
 
   defp assert_authorized!(%Fleet.Event{type: type} = event) do
@@ -164,7 +224,11 @@ defmodule Fleet.EventRouter.Bus do
   end
 
   defp permit_when_registry_empty? do
-    Application.get_env(:fleet_event_router, :permit_when_registry_empty, @permit_empty_default)
+    Application.get_env(
+      :lcars_fleet,
+      :event_router_permit_when_registry_empty,
+      @permit_empty_default
+    )
   end
 
   @doc "Subscribes the caller to a topic; defaults to `main_topic/0`."

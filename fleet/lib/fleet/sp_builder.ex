@@ -363,6 +363,23 @@ defmodule Fleet.SPBuilder do
   defp render_template(:sp, assigns), do: do_render("sp_template.eex", assigns)
   defp render_template(:claude_md, assigns), do: do_render("claude_md_template.eex", assigns)
 
+  # EEx EVALUATES ARBITRARY ELIXIR, HERE, IN THE DAEMON'S PROCESS -- with the whole fleet's rights,
+  # not a confined pod's. It is not a restricted template language, and the source is catalogue
+  # DATA. So the question this function has to answer is not "does it render" but "WHOSE BYTES".
+  #
+  #   * `{:ok, source}` -- the PUBLISHED image: bytes read and sha256-fingerprinted at boot, AFTER
+  #     `Catalogue.verify!()`, and served from `:persistent_term`. A closed world, one epoch per
+  #     deployment: mutating the catalogue mid-life changes nothing until a restart republishes.
+  #     This is the provenance check, and it happened long before this call.
+  #   * `:not_found` -- under a published image an absent template is a CLOSED-WORLD error, never a
+  #     silent fall back to disk.
+  #   * `:unpublished` -- NO image: live disk, re-read at every render, verified by nothing. A
+  #     declared regime (the suites' hermetic default, tooling -- same posture as its twin in
+  #     `CapProfile.Catalog.read_role/2`), NOT a production path: the boot publishes unless
+  #     `:sp_builder_publish_image` is turned off, which only `config/test.exs` does. The
+  #     `boot.proven_image_regime` contract holds that switch to the test config, because flipping
+  #     it elsewhere moves a production daemon onto evaluate-whatever-is-on-disk and nothing in the
+  #     code would look any different.
   defp do_render(name, assigns) do
     case Fleet.SPBuilder.Image.template(name) do
       {:ok, source} -> {:ok, EEx.eval_string(source, assigns: assigns)}
@@ -381,7 +398,8 @@ defmodule Fleet.SPBuilder do
   """
   @spec sp_drafts_root() :: String.t()
   def sp_drafts_root do
-    Application.get_env(:fleet_sp_builder, :sp_drafts_root) || Fleet.Catalogue.sp_drafts_root()
+    Application.get_env(:lcars_fleet, :sp_builder_sp_drafts_root) ||
+      Fleet.Catalogue.sp_drafts_root()
   end
 
   @doc """

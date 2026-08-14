@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.PollerTest do
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: a describe here flips the GLOBAL `:fleet_pilot, :require_onboarded`, which
+  # SYNC on purpose: a describe here flips the GLOBAL `:lcars_fleet, :pilot_require_onboarded`, which
   # every dispatch path reads. Async peers running in that window were refused with
   # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
   # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
@@ -144,6 +144,61 @@ defmodule Fleet.Pilot.PollerTest do
     # throttle tick, + R lines each claiming "throttle". The hoist into do_poll (cross-repo union,
     # decision ONCE) makes the trace honest. This case was NOT covered (the wiring test only
     # exercises ONE repo → the multiplication was invisible).
+    # JG-067 — UN DEPOT QUI LEVE EMPORTAIT TOUS CEUX QUI LE SUIVAIENT. `safe_poll/2` capture bien,
+    # mais AU-DESSUS du fold des depots : les depots situes apres celui qui a leve n'etaient pas
+    # traites du tout pendant ce cycle. Et la cause est deterministe — le meme PR, le meme fichier,
+    # le meme conflit pathologique — donc elle se represente a chaque tick : un seul depot malade
+    # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
+    #
+    # Le filet descend d'un cran, par depot. Il ne remplace pas celui du dessus : une levee HORS du
+    # fold reste un echec de tick avec son `err_streak` et son repli.
+    defmodule RaisingForge do
+      # Depot du milieu : il leve. Les deux autres se comportent normalement.
+      def list_open_issues("fleet/repo-b", _opts), do: raise("conflit pathologique sur repo-b")
+
+      def list_open_issues(repo, opts) do
+        send(Keyword.get(opts, :_test_pid, self()), {:served, repo})
+        Keyword.fetch!(opts, :_test_issues)
+      end
+
+      defdelegate list_open_pulls(repo, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate list_org_repos(org, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate issue_dependencies(repo, n, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate get_pull(repo, n, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+      defdelegate commit_ci_state(repo, sha, opts), to: Fleet.Pilot.PollerTest.StepStubForge
+    end
+
+    test "JG-067 : un depot qui leve ne prive plus de service ceux qui le SUIVENT" do
+      test = self()
+
+      {name, pid} =
+        start_entry_poller({:ok, []}, %{},
+          forge_client: RaisingForge,
+          escalate_fun: fn kind, subject, cause, sig, _o ->
+            send(test, {:escalated, kind, subject, cause, sig})
+            {:ok, 1}
+          end,
+          forge_opts: [
+            _test_issues: {:ok, []},
+            _test_pid: self(),
+            _test_repos: ["fleet/repo-a", "fleet/repo-b", "fleet/repo-c"]
+          ]
+        )
+
+      _ = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert_received {:served, "fleet/repo-a"}
+
+      assert_received {:served, "fleet/repo-c"},
+                      "le depot qui SUIT celui qui a leve n'a pas ete servi — une seule PR " <>
+                        "pathologique prive de service tout le reste de l'ordre d'iteration"
+
+      assert_received {:escalated, :repo_poll_crash, "fleet/repo-b", {:poll_raised, _}, _sig},
+                      "le depot en panne est saute EN SILENCE"
+
+      GenServer.stop(pid)
+    end
+
     test "A-10: 2 awaits-arch repos → EXACTLY 1 re-kick per throttle tick (not 1 per repo)" do
       issue = %{
         "number" => 42,
@@ -659,25 +714,27 @@ defmodule Fleet.Pilot.PollerTest do
       }
   end
 
-  defp start_step_poller(issues_response, pulls_response \\ {:ok, []}) do
+  defp start_step_poller(issues_response, pulls_response \\ {:ok, []}, extra \\ []) do
     name = :"P_step_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
       Poller.start_link(
-        name: name,
-        repo: "lordzurp/lcars-test",
-        human: "lordzurp",
-        start_tick?: false,
-        protection_reconciler: fn _repo, _opts -> :ok end,
-        step_dispatch?: true,
-        forge_client: StepStubForge,
-        forge_opts: [
-          _test_issues: issues_response,
-          _test_pulls: pulls_response,
-          _test_pid: self()
-        ],
-        loader: StepStubLoader,
-        spawner: StepStubSpawner
+        [
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          protection_reconciler: fn _repo, _opts -> :ok end,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [
+            _test_issues: issues_response,
+            _test_pulls: pulls_response,
+            _test_pid: self()
+          ],
+          loader: StepStubLoader,
+          spawner: StepStubSpawner
+        ] ++ extra
       )
 
     {name, pid}
@@ -746,9 +803,17 @@ defmodule Fleet.Pilot.PollerTest do
     # repos that exist nowhere on disk. Here it is turned back ON, which is the only way this
     # behaviour is pinned rather than assumed.
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :require_onboarded, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
       :ok
     end
+
+    # JG-059 — LE SUBSTRAT EST DECLARE PRESENT, et ce n'est pas une commodite de test. Ces cas
+    # pinent le garde PAR DEPOT (« ce projet-la n'est pas onboarde »), pas la disparition de la
+    # racine (« le sol a disparu, tous les depots sautent »). Les deux rendaient la meme phrase
+    # avant JG-059 ; les separer exige de dire lequel des deux on exerce. La racine `ops` est un
+    # LITTERAL de `Fleet.Layout` — un fait, une source — donc un test ne peut pas la deplacer et ne
+    # doit pas ecrire dans `/home` : le seam est la seule facon de le dire.
+    defp substrate_present, do: [substrate_present_fun: fn -> true end]
 
     test "a repo with no project directory is SKIPPED — and costs not one forge call" do
       # The check is local and runs BEFORE the listing, so an unserved repo also stops paying two
@@ -758,7 +823,7 @@ defmodule Fleet.Pilot.PollerTest do
         %{"number" => 7, "body" => "x", "labels" => [], "assignee" => %{"login" => "lordzurp"}}
       ]
 
-      {name, pid} = start_step_poller({:ok, issues})
+      {name, pid} = start_step_poller({:ok, issues}, {:ok, []}, substrate_present())
 
       log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
 
@@ -771,7 +836,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "the warning fires ONCE per repo, not once per tick" do
-      {name, pid} = start_step_poller({:ok, []})
+      {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
 
       first = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
       second = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
@@ -810,13 +875,91 @@ defmodule Fleet.Pilot.PollerTest do
       assert String.starts_with?(Fleet.Layout.ops_root(), "/home/projects")
     end
 
+    # JG-059 — « JAMAIS ONBOARDE » ET « LE SOL A DISPARU » RENDAIENT LA MEME PHRASE. Un projet absent
+    # sous une racine PRESENTE est un fait ordinaire, qu'un humain resoudra. La RACINE elle-meme
+    # absente — un montage tombe, une permission perdue — saute le rail d'etapes pour TOUS les
+    # depots : la flotte tourne a vide, les cycles se succedent, la telemetrie rapporte des comptes
+    # nuls, et rien ne distingue « aucun travail a faire » de « le substrat n'est plus la ».
+    # JG-060 — LE JUMEAU ETAIT EFFACE, CELUI-CI NON. `:parked_logged` est supprime des qu'un depot
+    # sort du parking ; `:not_onboarded_logged` ne l'etait NULLE PART. Une memoire d'affichage — « ne
+    # crie qu'une fois » — devenait donc une memoire DEFINITIVE : un depot qui repassait en « non
+    # onboarde » apres en etre sorti se taisait pour toute la vie du process, et la seconde
+    # disparition de son arborescence ne laissait aucune trace.
+    #
+    # Le scenario de la fiche est « disparaitre, reapparaitre, redisparaitre ». Il se joue ici sur
+    # `:pilot_require_onboarded` plutot que sur le systeme de fichiers : la racine est un litteral et
+    # un test n'ecrit pas dans `/home`. Le fait exerce est le meme — le depot sort du garde, puis y
+    # revient.
+    test "JG-060 : un depot qui repasse en « non onboarde » est journalise A NOUVEAU" do
+      {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      assert first =~ "NOT ONBOARDED"
+
+      # Il sort du garde : le drapeau doit tomber avec lui.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, false)
+      _ = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      # Il y revient.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
+      third = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert third =~ "NOT ONBOARDED",
+             "la seconde disparition de l'arborescence est muette — la memoire d'affichage est " <>
+               "devenue une memoire definitive"
+
+      GenServer.stop(pid)
+    end
+
+    test "JG-059 : racine ABSENTE → message de SUBSTRAT + incident, jamais « NOT ONBOARDED »" do
+      test = self()
+
+      {name, pid} =
+        start_step_poller({:ok, []}, {:ok, []},
+          substrate_present_fun: fn -> false end,
+          escalate_fun: fn kind, subject, cause, sig, _o ->
+            send(test, {:escalated, kind, subject, cause, sig})
+            {:ok, 1}
+          end
+        )
+
+      log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      refute log =~ "NOT ONBOARDED",
+             "la disparition du substrat a ete rapportee comme un projet non onboarde"
+
+      assert log =~ "ops root"
+      assert log =~ "EVERY repo"
+
+      assert_received {:escalated, :ops_root_missing, _root, {:ops_root_absent, _}, _sig},
+                      "le substrat a disparu et rien de durable ne le dit"
+
+      GenServer.stop(pid)
+    end
+
+    test "JG-059 : le message de substrat ne sort qu'UNE fois, pas une par depot" do
+      {name, pid} =
+        start_step_poller({:ok, []}, {:ok, []},
+          substrate_present_fun: fn -> false end,
+          escalate_fun: fn _k, _s, _c, _sig, _o -> {:ok, 1} end
+        )
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+      second = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
+
+      assert first =~ "ops root"
+      refute second =~ "ops root", "la panne de substrat crie a chaque tick"
+
+      GenServer.stop(pid)
+    end
+
     test "NOT ONBOARDED is the gate's own verdict, and it needs no filesystem to be proven" do
       # The negative case carries the behaviour: the directory is absent (no test creates it any
       # more), the gate refuses, and it says what to do about it. What is NOT covered here, and is
       # named rather than left to be discovered: the POSITIVE case — an existing directory letting
       # the repo through — is a runtime fact and is proven on the BENCH, where a project is really
       # onboarded and the poller really dispatches.
-      {name, pid} = start_step_poller({:ok, []})
+      {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
 
       log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
 
@@ -1711,7 +1854,7 @@ defmodule Fleet.Pilot.PollerTest do
     # would be reading a serialization story on a fan-out fleet — five reddened here saying exactly
     # that, which is the item working, not the item breaking.
     setup do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
       :ok
     end
 

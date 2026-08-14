@@ -108,7 +108,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
   defp forge_base_url(forge_opts) do
     Keyword.get(forge_opts, :base_url) ||
-      get_in(Application.get_env(:fleet_pilot, :forge, []), [:base_url])
+      get_in(Application.get_env(:lcars_fleet, :pilot_forge, []), [:base_url])
   end
 
   # Bounded, authenticated runtime-side remote read.
@@ -116,8 +116,26 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
     # DR-024: credentials fail before remote read; GitRef rejects option-like branch input.
     with :ok <- validate_branch(branch),
          {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
-      case Fleet.Credentials.Shell.git(["ls-remote", repo_url, branch],
+      # DEUX GARDES, ET ELLES NE COUVRENT PAS LE MEME VECTEUR — c'est pour ca qu'aucune des deux ne
+      # suffit. Sans `:cd`, le sous-processus herite du repertoire courant du noeud BEAM, et si
+      # celui-ci est lui-meme un depot git (cas courant : `mix run` depuis la racine du projet), la
+      # config LOCALE de ce depot s'applique : `url.<base>.insteadOf` redirige l'URL interrogee vers
+      # un autre hote, `http.proxy` la fait transiter par un tiers. Ce que `git_safe_config_args/0`
+      # neutralise, ce sont les vecteurs d'EXECUTION (hooks, fsmonitor, sshCommand, diff.external,
+      # attributesFile) — pas la redirection d'URL. L'inverse est vrai aussi : changer de repertoire
+      # ne desarme pas un `core.sshCommand` venu d'un `~/.gitconfig`.
+      #
+      # CE QUE CETTE LECTURE DECIDE : le SHA rendu ici est celui sur lequel TOUT le travail est
+      # ensuite epingle (`base_sha`, `gate_base_sha`). Une redirection ne produit pas d'erreur —
+      # elle produit une base, et personne ne la conteste ensuite.
+      #
+      # `tmp_dir` plutot qu'un chemin du depot : ce qu'on veut n'est pas « un autre repo », c'est
+      # « aucun repo », donc aucune config locale a heriter. `ls-remote` ne lit rien du disque.
+      case Fleet.Credentials.Shell.git(
+             Fleet.Credentials.Shell.git_safe_config_args() ++
+               ["ls-remote", repo_url, branch],
              timeout_ms: 15_000,
+             cd: System.tmp_dir!(),
              env: auth_env
            ) do
         {:ok, {out, 0}} ->

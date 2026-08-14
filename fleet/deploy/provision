@@ -27,8 +27,13 @@
 #   - pas de reprise-par-bashrc-trigger : après le reboot WSL (lockdown C:), l'humain RELANCE le
 #     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
 #
-# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde · apply 0=convergé 1=échec.
-# Codes retour runner : apply 0=tout convergé 1=au moins un échec · doctor 0=conforme 1=drift 2=erreur.
+# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde ·
+#                                 apply 0=convergé 1=échec 2=appliqué, drift résiduel.
+# Codes retour runner : apply 0=tout convergé 1=au moins un échec 2=appliqué, drift résiduel ·
+#                       doctor 0=conforme 1=drift 2=erreur.
+# Le 2 d'apply manquait, et son absence n'etait pas un trou de vocabulaire : un module qui constate
+# une non-convergence dans son apply rendait 0, donc « tout convergé », drift compris a zero dans le
+# bilan alors qu'une ligne DRIFT venait d'etre imprimee.
 #
 # USAGE :
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
@@ -107,13 +112,23 @@ if [[ "$CMD" == "update" ]]; then
 
   # 1. AUTORITÉ AVANT PULL (F-E1) : le remote doit matcher le repo déclaré. Pas de défaut :
   #    on refuse de deviner à qui on fait confiance.
-  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare le repo attendu (ex: PROV_EXPECTED_REPO=fleet/lcars) via --env ou l'environnement ; SANS lui, aucun pull"
+  # 6-109 — L'AUTORITÉ INCLUT L'HÔTE, et la comparaison est EXACTE. Elle était une SOUS-CHAÎNE :
+  # avec `fleet/lcars` attendu, `https://hote-attaquant/attaquant/fleet/lcars-malware.git` passait,
+  # et le runner exécutait ce code en root. Ni l'hôte, ni le propriétaire, ni la fin du nom n'étaient
+  # regardés.
+  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare l'autorité COMPLÈTE, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars) via --env ou l'environnement ; SANS elle, aucun pull"
+  case "$PROV_EXPECTED_REPO" in
+    */*/*) ;;
+    # La forme `owner/repo` était celle d'avant, et elle ne PEUT PAS être acceptée : sans hôte, elle
+    # autorise n'importe quelle forge. On refuse en disant quoi écrire, plutôt que de deviner un hôte.
+    *) die "update: PROV_EXPECTED_REPO=« $PROV_EXPECTED_REPO » n'a pas d'hôte — une autorité sans hôte autorise n'importe quelle forge. Écris « <hôte>/<owner>/<repo> » (ex: forge.example.org/fleet/lcars)" ;;
+  esac
   REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
   [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
-  case "$REMOTE_URL" in
-    *"$PROV_EXPECTED_REPO"*) ;;
-    *) die "update: remote « $REMOTE_URL » ne matche pas le repo attendu « $PROV_EXPECTED_REPO » — pull REFUSÉ (autorité)" ;;
-  esac
+  REMOTE_ID="$(prov_parse_remote "$REMOTE_URL")" \
+    || die "update: remote « $REMOTE_URL » non analysable (forme inconnue, userinfo, ou chemin qui n'est pas <owner>/<repo>) — pull REFUSÉ"
+  [[ "$REMOTE_ID" == "$PROV_EXPECTED_REPO" ]] \
+    || die "update: remote « $REMOTE_URL » → « $REMOTE_ID » ≠ autorité déclarée « $PROV_EXPECTED_REPO » — pull REFUSÉ"
 
   # 2. Le pull s'exécute comme l'OWNER du checkout (jamais root : des objets .git root dans le
   #    checkout d'un humain = le clobber qu'on a fui). Identité validée avant usage (IEC, v1:84).
@@ -123,7 +138,8 @@ if [[ "$CMD" == "update" ]]; then
 
   # Lock apply pris AVANT le pull (un converge concurrent pendant qu'on change le code sous lui
   # est exactement ce que le lock interdit) ; relâché avant le re-exec — le nouveau runner le reprend.
-  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  # Le chemin vient de `prov_lock_path` : dossier root-owned 0700, `TMPDIR` non honoré (6-130).
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply/update REFUSÉ"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
   runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
@@ -217,7 +233,10 @@ fi
 
 # ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
 if [[ "$CMD" == "apply" ]]; then
-  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  # 6-130 — le nom était `${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock`, donc sous `sudo`
+  # `/tmp/lcars-provision.0.lock` : FIXE, devinable, dans un dossier que tout le monde écrit. Et
+  # `exec 9>` suit les liens et TRONQUE avant que `flock` ne protège quoi que ce soit.
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply REFUSÉ"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
 fi
@@ -243,6 +262,11 @@ for i in "${!SELECTED[@]}"; do
     doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     doctor:check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    # 2 = « appliqué, drift résiduel » : le module a fait ce qu'il pouvait et l'état-cible n'est
+    # PAS tenu. Ce n'est pas un échec (rien n'est cassé) et surtout pas un OK — c'est le troisième
+    # mot, et son absence faisait compter ces modules comme convergés, ligne de bilan comprise.
+    # AVANT le fourre-tout : l'ordre des clauses EST ce qui distingue les deux.
+    apply:apply:2)  drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     apply:apply:*)  failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
@@ -263,7 +287,13 @@ else
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     echo "  → converger : sudo $SELF apply"
   fi
+  if [[ "$CMD" == "apply" && "$drift" -gt 0 ]]; then
+    echo "  → APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU sur $drift module(s) — voir les lignes"
+    echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
+  fi
 fi
 [[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
-[[ "$CMD" == "doctor" && "$drift" -gt 0 ]] && exit 1
+# Le drift résiduel a son propre code dans les DEUX verbes — en apply il valait 0, c'est-à-dire
+# « tout convergé », sur une machine dont un module venait d'imprimer DRIFT.
+[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 1 || echo 2)"
 exit 0

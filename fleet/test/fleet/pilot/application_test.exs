@@ -105,7 +105,7 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # THE KNOB IS GONE. `:fleet_pilot, :workshop_workflow_map` named the doc card globally, defaulting
+  # THE KNOB IS GONE. `:lcars_fleet, :pilot_workshop_workflow_map` named the doc card globally, defaulting
   # to `"workshop-direct"` — one catalogue's card. One name cannot serve N catalogues, and the
   # catalogue serving a project is not the one that named the default. The rail is now resolved by
   # what a card IS: it carries a producer step on `face: workshop`.

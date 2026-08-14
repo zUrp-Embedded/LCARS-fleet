@@ -10,7 +10,7 @@ defmodule Fleet.SPBuilder.Image do
   @doc """
   Builds and publishes the SP image from the live roots. Raises on any unreadable root —
   the artifacts are load-bearing prompt material, a hole is a broken deploy. Gated by the
-  caller (`:fleet_sp_builder, :publish_image`).
+  caller (`:lcars_fleet, :sp_builder_publish_image`).
   """
   @spec publish!() :: :ok
   def publish! do
@@ -63,6 +63,17 @@ defmodule Fleet.SPBuilder.Image do
     # the divergence is the defect, and the doctrine is explicit — active suspicion of silent failure.
     sources = source_fingerprints(root)
 
+    # MEME TAMPON, MEME DIMENSIONNEMENT QUE `CapProfile.Image.version_of/2` — 48 bits pour
+    # distinguer deux epoques dans une trace, jamais pour identifier durablement quoi que ce soit.
+    # Il ne quitte pas la VM (calcule ici, range en `persistent_term`, relu par le meme noeud) et
+    # `lib/` ne le compare nulle part.
+    #
+    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, et c'est le point sur lequel
+    # une revue a soupconne un aggravant : l'ordre de parcours d'une map ne serait pas stable entre
+    # executions. MESURE, et c'est FAUX sur cet OTP : `term_to_binary` rend le meme binaire pour
+    # deux maps construites dans des ordres opposes — 3 cles ou 60, cles binaires, et imbriquees
+    # comprises. Pas de tri ajoute : il n'achete rien d'observable ici, et un geste qui n'achete
+    # rien sur un tampon n'est pas neutre (il change toutes les versions deja tracees).
     version =
       :crypto.hash(:sha256, :erlang.term_to_binary(image))
       |> Base.encode16(case: :lower)
@@ -199,7 +210,34 @@ defmodule Fleet.SPBuilder.Image do
     end)
     |> Enum.concat([worker_protocol_path(root), human_protocol_path(root)])
     |> Enum.uniq()
-    |> Map.new(fn path -> {path, path |> File.read!() |> sha_of()} end)
+    |> Map.new(&{&1, &1 |> read_artifact!("fingerprinted source") |> sha_of()})
+  end
+
+  # 6-029 — LE REFUS ETAIT BON, SON MESSAGE NON, ET LE DEFAUT VIVAIT A TROIS ENDROITS.
+  #
+  # Chacun des trois lisait en `File.read!` un chemin obtenu d'un INSTANTANE : un `Path.wildcard`
+  # pour les deux lecteurs de repertoire, un `File.regular?` pour les protocoles. Entre l'instantane
+  # et la lecture, l'artefact peut disparaitre ou devenir illisible — et le lecteur rendait alors un
+  # `File.Error` brut, remonte par `publish!/0` jusqu'au refus de boot. La POSTURE est juste
+  # (proven-good ou pas de boot) ; ce qui manquait est le nom de la condition.
+  #
+  # L'asymetrie qui prouve que c'etait un defaut et non un choix : `read_dir_map/3` leve une erreur
+  # NOMMEE a la ligne suivante pour le fichier VIDE, et une erreur de bibliotheque pour le fichier
+  # illisible. Meme fonction, meme artefact, deux traitements — la parade etait litteralement en
+  # dessous. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas en
+  # `:vanished`. Ici on ne peut pas degrader (une epoque qui ne couvre pas la matiere qu'elle gele
+  # n'est pas une epoque), donc on leve — mais en nommant.
+  defp read_artifact!(path, what) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+
+      {:error, reason} ->
+        raise "SPBuilder.Image: #{what} #{path} was listed, then unreadable (#{inspect(reason)}) — " <>
+                "the prompt material moved DURING publication, so the epoch cannot cover what it " <>
+                "would serve. Republish against a tree at rest. Proven-good image at boot, or do " <>
+                "not boot."
+    end
   end
 
   defp sha_of(content), do: :crypto.hash(:sha256, content)
@@ -352,7 +390,7 @@ defmodule Fleet.SPBuilder.Image do
         if Map.has_key?(inner, key) do
           inner
         else
-          content = File.read!(path)
+          content = read_artifact!(path, "artifact")
 
           if content == "" do
             raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
@@ -369,7 +407,7 @@ defmodule Fleet.SPBuilder.Image do
     do: read_protocol!(worker_protocol_path(root), "worker protocol")
 
   defp read_protocol!(path, label) do
-    content = File.read!(path)
+    content = read_artifact!(path, label)
 
     if content == "" do
       raise "SPBuilder.Image: #{label} is empty — proven-good image requires non-empty artifacts"
@@ -384,7 +422,7 @@ defmodule Fleet.SPBuilder.Image do
   # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative was a second
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
-    Application.get_env(:fleet_spawner, :protocole_user_path) ||
+    Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
       Fleet.Catalogue.find_in(
         Fleet.Catalogue.tree_scope(root, :sp_drafts),
         "protocole-user-worker.md"

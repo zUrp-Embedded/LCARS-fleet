@@ -63,9 +63,23 @@ defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
     refute md =~ "IDENTITY-ONLY STUB"
     assert log =~ "section DROPPED"
 
-    # The workspace copy is the SAME enriched doc (cwd tier).
+    # LE FICHIER DU DEPOT RESTE CELUI DU DEPOT. Il etait ECRASE par la copie composee, et masque
+    # par `skip-worktree` pour que notre copie ne parte pas dans le livrable — au prix de rendre ce
+    # fichier INLIVRABLE : l'edition d'un producteur n'etait jamais stagee, `git status` restait
+    # propre et `git diff` vide en ayant tort. C'est l'entree de tout producteur (ses sections
+    # voyagent dans le prompt compose) ET la sortie par laquelle ses conventions se mettent a jour :
+    # les deux exigent qu'il reste intact et versionne.
     ws_md = File.read!(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
-    assert ws_md == md
+    assert ws_md =~ "--force"
+    refute ws_md =~ "pod engineer"
+
+    # Et il n'est PAS masque : un producteur peut le modifier et le livrer.
+    {out, 0} =
+      System.cmd("git", ["-C", Path.join(pod_dir, "workspace"), "ls-files", "-v", "CLAUDE.md"],
+        stderr_to_stdout: true
+      )
+
+    assert String.starts_with?(out, "H "), "attendu index normal (H), obtenu: #{inspect(out)}"
   end
 
   test "the UNTRACKED composed CLAUDE.md never reaches a pod commit-all (info/exclude)",

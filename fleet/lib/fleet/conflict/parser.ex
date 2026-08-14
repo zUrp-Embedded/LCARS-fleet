@@ -17,17 +17,37 @@ defmodule Fleet.Conflict.Parser do
           end_line: pos_integer()
         }
   @type segment :: {:text, [String.t()]} | {:conflict, raw_conflict()}
+  @type error :: {:unterminated_conflict, :ours | :base | :theirs, pos_integer()}
 
-  @doc "Splits conflict-marked `content` into ordered `:text` / `:conflict` segments."
-  @spec segments(String.t()) :: [segment()]
+  @doc """
+  Splits conflict-marked `content` into ordered `:text` / `:conflict` segments.
+
+  Fails with `{:error, {:unterminated_conflict, state, start_line}}` when the content ends while a
+  conflict is still open. THE SILENCE WAS THE DEFECT: the accumulated `ours`/`base`/`theirs` lines
+  only ever become a segment on the closing `>>>>>>>`, so an unterminated conflict used to be
+  dropped whole — and the caller received the segment list of a CLEAN file. Two ways that bit, and
+  the second is the expensive one:
+
+    * alone, it made `resolve/2` return a report byte-identical to a file with no conflict at all,
+      so a probe reported "clean" on a file it had failed to read;
+    * after a resolvable conflict, `all_resolved?` stayed true and `merged` was written back
+      MISSING the unterminated hunk's content — silent data loss on disk, not just a bad verdict.
+
+  A parser that cannot represent what it read must say so; guessing "nothing there" is the one
+  answer that is indistinguishable from success.
+  """
+  @spec segments(String.t()) :: {:ok, [segment()]} | {:error, error()}
   def segments(content) do
-    content
-    |> String.split("\n")
-    |> Enum.with_index(1)
-    |> Enum.reduce(new_state(), &step/2)
-    |> flush_text()
-    |> Map.fetch!(:segs)
-    |> Enum.reverse()
+    st =
+      content
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> Enum.reduce(new_state(), &step/2)
+
+    case st.mode do
+      :outside -> {:ok, st |> flush_text() |> Map.fetch!(:segs) |> Enum.reverse()}
+      open -> {:error, {:unterminated_conflict, open, st.start}}
+    end
   end
 
   @doc """

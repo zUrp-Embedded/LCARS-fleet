@@ -155,17 +155,45 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Reports whether a branch can be read. Any error returns `false`; subsequent creation remains the
-  forge's authority and cannot overwrite an existing branch.
+  Distingue une branche PROUVEE absente (`{:ok, false}`) d'une forge qu'on n'a pas su lire.
+
+  ⚠ **CETTE FONCTION RENDAIT `false` DANS LES DEUX CAS**, et son ancien `@doc` l'assumait (« Any
+  error returns `false` »). Or ses trois appelants en tirent trois decisions DIFFERENTES, et aucune
+  n'est sure sous cette confusion : une protection de branche silencieusement sautee, un import
+  declare satisfait, une face republiee par-dessus une existante.
+
+  **La reponse etait huit lignes plus bas** : `user_exists?/2` distingue deja un 404 PROUVE
+  (`{:ok, false}`) d'une panne (`{:error, _}`), et son `@doc` le dit. Meme module, fonction suivante.
+  Le 404 est une REPONSE de la forge ; tout le reste est une absence de reponse.
   """
-  @spec branch_exists?(String.t(), String.t(), Keyword.t()) :: boolean()
+  @spec branch_exists?(String.t(), String.t(), Keyword.t()) ::
+          {:ok, boolean()} | {:error, term()}
   def branch_exists?(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
-    with {:ok, config} <- resolve_config(opts),
-         {:ok, _} <-
-           http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
-      true
-    else
-      _ -> false
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+        {:ok, _} -> {:ok, true}
+        {:error, {:http, 404, _}} -> {:ok, false}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Deletes a branch, reporting `:deleted` or `:absent` — never conflating either with a failure.
+
+  A 404 SATISFIES a caller that asked for the branch to be gone, so it is a success and not an
+  error. Everything else is reported: this primitive exists to UNDO a mutation, and a compensation
+  that cannot prove it removed what it created must never be announced as clean.
+  """
+  @spec delete_branch(String.t(), String.t(), Keyword.t()) ::
+          {:ok, :deleted | :absent} | {:error, term()}
+  def delete_branch(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+        {:ok, _} -> {:ok, :deleted}
+        {:error, {:http, 404, _}} -> {:ok, :absent}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 

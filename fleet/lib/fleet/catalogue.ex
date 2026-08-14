@@ -118,7 +118,7 @@ defmodule Fleet.Catalogue do
   @rel_skills "skills/canon"
 
   @doc """
-  Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:fleet_catalogue, :root`) or `priv/catalogue`.
+  Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:lcars_fleet, :catalogue_root`) or `priv/catalogue`.
 
   The default is `:code.priv_dir`-derived, NOT CWD-relative: it must resolve in a release
   (`lib/lcars_fleet-<vsn>/priv`) exactly as in dev, with no environment at all.
@@ -146,7 +146,7 @@ defmodule Fleet.Catalogue do
   defp bundled_root do
     # An explicit nil (a cross-test config leak) must never reach Path.join — coalesced here, at the
     # boundary, the same guard `CapProfile.Catalog.root_dir/0` carries for its own key.
-    Application.get_env(:fleet_catalogue, :root) ||
+    Application.get_env(:lcars_fleet, :catalogue_root) ||
       Application.app_dir(:lcars_fleet, "priv/catalogue")
   end
 
@@ -181,7 +181,7 @@ defmodule Fleet.Catalogue do
     # set it. Without it no test could build an ISOLATED catalogue — every fixture root would
     # silently inherit the four mechanism roles and measure a deployment nobody assembled. A seam
     # a test can reach and an operator cannot is not the knob this module argues against.
-    Application.get_env(:fleet_catalogue, :system_root) ||
+    Application.get_env(:lcars_fleet, :catalogue_system_root) ||
       Application.app_dir(:lcars_fleet, "priv/catalogue-system")
   end
 
@@ -227,10 +227,10 @@ defmodule Fleet.Catalogue do
   # Trees with no entry have no fine override, deliberately: `sp_templates` and `sp_blocks` are the
   # shape and the substrate of the prompts, and nothing has ever needed to move one alone.
   @fine_overrides %{
-    cap_profiles: {:fleet_cap_profile, :root_dir},
-    modops: {:fleet_sp_builder, :modop_root},
-    subagent_templates: {:fleet_sp_builder, :subagent_template_root},
-    sp_drafts: {:fleet_sp_builder, :sp_drafts_root}
+    cap_profiles: {:lcars_fleet, :cap_profile_root_dir},
+    modops: {:lcars_fleet, :sp_builder_modop_root},
+    subagent_templates: {:lcars_fleet, :sp_builder_subagent_template_root},
+    sp_drafts: {:lcars_fleet, :sp_builder_sp_drafts_root}
   }
 
   @doc """
@@ -354,9 +354,9 @@ defmodule Fleet.Catalogue do
   # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed
   # 2026-08-10, `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
   # test moving HOME would silently measure the real `~/.lcars` of whoever ran the suite.
-  defp active_path, do: Application.get_env(:fleet_catalogue, :active_declaration)
+  defp active_path, do: Application.get_env(:lcars_fleet, :catalogue_active_declaration)
 
-  defp install_dirs, do: Application.get_env(:fleet_catalogue, :install_dirs, [])
+  defp install_dirs, do: Application.get_env(:lcars_fleet, :catalogue_install_dirs, [])
 
   defp declared_names do
     case active_path() && File.read(active_path()) do
@@ -404,7 +404,7 @@ defmodule Fleet.Catalogue do
   directory: a role and its SP live in two different trees of the SAME catalogue, and pairing them
   through `search/2` alone would compare tree i of one with tree i of another.
 
-  ⚠ A FINE override (`:fleet_cap_profile, :root_dir` and its siblings) moves one tree OUT of its
+  ⚠ A FINE override (`:lcars_fleet, :cap_profile_root_dir` and its siblings) moves one tree OUT of its
   catalogue, and no pairing survives that by construction — the tree is then, deliberately, not part
   of any catalogue. Callers that attribute per catalogue must say so.
   """
@@ -585,7 +585,7 @@ defmodule Fleet.Catalogue do
   @doc """
   Pod-mountable skills (`<root>/#{@rel_skills}/<name>/SKILL.md`) — filtered per cap-profile
   (`knowledge.skills` whitelist, `SPBuilder.filter_skills/2`) and bind-mounted RO into the pod's
-  `~/.claude/skills/` (BL-6-22). The fine override is `:fleet_spawner, :skills_root`
+  `~/.claude/skills/` (BL-6-22). The fine override is `:lcars_fleet, :spawner_skills_root`
   (`LCARS_SKILLS_ROOT`), resolved at SPAWN time — cf. the `:catalogue` sentinel in `Spawner.Pod`.
   """
   @spec skills_root() :: Path.t()

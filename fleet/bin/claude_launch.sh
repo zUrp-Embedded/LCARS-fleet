@@ -177,6 +177,52 @@ if [[ -z "$VER" ]]; then
   echo "WARN: claude --version in an unexpected format — falling back to lastOnboardingVersion 2.1.150" >&2
 fi
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
+
+# =============================================================
+# LA SURFACE VENDOR — elle n'est pas montee, elle est DANS LE BINAIRE
+# =============================================================
+# Mesure du 2026-08-12 : `~/.local` ne contient que `bin/claude` (308 Mo), et le prompt de `/init`
+# est compile dedans (`grep -c` sur l'executable : 2 occurrences). Aucun bind ne retire une commande
+# compilee — le mecanisme qui borne tout le reste ici (« les droits vivent dans le montage ») ne peut
+# structurellement pas atteindre ca. Le seul levier est un flag du vendor, et il existe :
+#   claude --help  ->  --disable-slash-commands   Disable all skills
+#
+# CE QUE `/init` FERAIT DANS UN POD PRODUCTEUR, ET POURQUOI CE N'EST PAS THEORIQUE. Son prompt dit
+# « analyze this codebase » (le cwd EST le depot : vrai chez un producteur), « if there's already a
+# CLAUDE.md, suggest improvements to it » (c'est le fichier d'entree de tous les producteurs) et
+# « be sure to prefix the file with `# CLAUDE.md / This file provides guidance…` » — un titre et une
+# forme que l'extracteur de la fleet ne reconnait pas. L'etalon vendor et l'etalon LCARS ecrivent
+# deux fichiers incompatibles sous le meme nom.
+#
+# LE PREDICAT EST « CE POD A UN DEPOT SOUS LA MAIN », PAS « IL NE DECLARE AUCUNE SKILL ». Les deux
+# coincident aujourd'hui — 9 roles canon sur 10 declarent `skills: []`, et le seul qui en declare une
+# (starfleet, `card-revision`) est justement celui qui n'entre dans aucun projet. Ce n'est pas une
+# coincidence, c'est le meme axe vu deux fois : une skill equipe un role pour ce qu'il fait, et le
+# role qui a besoin d'une skill n'a rien de monte a abimer. Mais coincider n'est pas causer :
+# equiper l'engineer d'une skill de catalogue est un geste legitime, et il rouvrirait `/init` sur le
+# role qui peut faire le plus de degats — en silence, sans que personne ne fasse le lien.
+# On teste donc la propriete elle-meme : un `.git` au cwd = un depot que ce pod peut casser.
+SKILL_FLAGS=()
+if [[ -d "$POD_CWD/.git" ]]; then
+  # LA COMBINAISON QUE LE FLAG NE PEUT PAS SERVIR — il coupe TOUT, catalogue compris. Un pod qui
+  # cumule un depot et une skill montee est un cas que ni « couper » ni « laisser » ne sert
+  # correctement, et le resoudre en silence reviendrait a sacrifier un des deux cotes sans le dire.
+  # L'ensemble est VIDE aujourd'hui : on le nomme avant qu'il n'arrive, comme W-11 refuse un
+  # catalogue qui declare un role qu'il ne peut pas equiper.
+  # `|| true` OBLIGATOIRE, meme raison que le `--version` plus haut : sous `set -euo pipefail`, un
+  # `ls` sur un repertoire absent — le cas NOMINAL, 9 roles sur 10 n'ont aucune skill — rend 2, et
+  # `pipefail` propage ce 2 a toute la substitution. Sans lui, le launcher mourait ICI, exit 2 opaque,
+  # sur le chemin le plus frequent.
+  MOUNTED_SKILLS="$(ls -1 "$POD_DIR/.claude/skills" 2>/dev/null | tr '\n' ' ' || true)"
+  if [[ -n "${MOUNTED_SKILLS// /}" ]]; then
+    echo "ERR: ce pod a un depot au cwd ($POD_CWD) ET des skills montees ($MOUNTED_SKILLS)." >&2
+    echo "     --disable-slash-commands coupe TOUTES les skills, catalogue compris : il ne peut pas" >&2
+    echo "     servir ce cas. Retirer les skills de ce role, ou lui retirer son workspace." >&2
+    exit 1
+  fi
+  SKILL_FLAGS=(--disable-slash-commands)
+  dbg "surface vendor coupee (--disable-slash-commands) : depot au cwd $POD_CWD"
+fi
 # Claude Desktop visibility — read HERE because it GATES remoteControlAtStartup in the .claude.json below.
 # `spec.invocation.remote_control: false` (qualifier/reviewer judges) means a pod INVISIBLE in Desktop.
 # There are TWO RC levers to keep consistent, or the judge shows up anyway: (1) the --remote-control flag
@@ -395,6 +441,7 @@ exec "$CLAUDE_BIN" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \
+    ${SKILL_FLAGS[@]+"${SKILL_FLAGS[@]}"} \
     "${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"}" \
     "${EFFORT_FLAGS[@]+"${EFFORT_FLAGS[@]}"}" \
     ${SETTINGS_FLAGS[@]+"${SETTINGS_FLAGS[@]}"} \

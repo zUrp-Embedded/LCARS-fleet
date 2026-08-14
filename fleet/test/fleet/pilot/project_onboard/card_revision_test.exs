@@ -53,18 +53,20 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
       :ok
     end
 
+    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
-      File.dir?(path) and
-        match?(
-          {_, 0},
-          System.cmd(
-            "git",
-            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-            stderr_to_stdout: true
-          )
-        )
+      {:ok,
+       File.dir?(path) and
+         match?(
+           {_, 0},
+           System.cmd(
+             "git",
+             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+             stderr_to_stdout: true
+           )
+         )}
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
@@ -198,7 +200,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "c1-light")
              )
 
-    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"]))
 
     # What the revision DID say moves.
     assert landed["pipeline_default"] == "c1-light"
@@ -253,7 +255,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "c1-light", intensity_level: "C1")
              )
 
-    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"]))
+    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"]))
     assert landed["level"] == "C1"
   end
 
@@ -296,10 +298,10 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # reassuring number on the exact case where a wall may have moved unseen.
     #
     # Reachable: a project declares a card, the operator's catalogue drops it, the project keeps
-    # naming it in `intensity.json` until the next revision. The NEW card is guarded
+    # naming it in `.lcars.json` until the next revision. The NEW card is guarded
     # (`require_loadable_card`); the previous one never was.
     proj = Path.join([o[:code_root], "tetris"])
-    intensity = Path.join(proj, "intensity.json")
+    intensity = Path.join(proj, ".lcars.json")
 
     File.write!(
       intensity,
@@ -352,7 +354,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
            } = result
 
     # The forge's main carries the NEW declaration, attributed to the revising role.
-    raw = bare_git!(o, "fleet/tetris", ["show", "main:intensity.json"])
+    raw = bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"])
     assert raw =~ ~s("pipeline_default": "audit-only")
     assert raw =~ ~s("declared_by": "starfleet")
 
@@ -376,7 +378,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # The showcase moved: the next burn reads the NEW card.
     assert_received {:showcase_synced, "fleet/tetris"}
 
-    assert File.read!(Path.join([o[:code_root], "tetris", "intensity.json"])) =~
+    assert File.read!(Path.join([o[:code_root], "tetris", ".lcars.json"])) =~
              "audit-only"
   end
 

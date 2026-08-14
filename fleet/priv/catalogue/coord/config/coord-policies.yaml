@@ -14,10 +14,6 @@ mappings:
     escalation_path:
       - dashboard
       - issue_comment
-  "escalate.oauth_refresh_failed":
-    action: escalate_human
-    escalation_path:
-      - starfleet_alert
   "escalate.audit_verdict":
     action: notify_dashboard
     escalation_path:

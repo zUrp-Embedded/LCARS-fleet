@@ -39,10 +39,10 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
   end
 
   setup do
-    TestEnv.put_env_restoring(:fleet_mcp, :project_onboard, Onboard)
-    TestEnv.restore_env_on_exit(:fleet_mcp, :allow_delete_project)
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, Onboard)
+    TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_allow_delete_project)
 
-    TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
       {:ok, %{role: "starfleet", repo: "fleet/demo"}}
     end)
 
@@ -59,14 +59,14 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
 
   describe "disarmed by default" do
     test "no flag at all → NAMED refusal, and nothing is destroyed" do
-      Application.delete_env(:fleet_mcp, :allow_delete_project)
+      Application.delete_env(:lcars_fleet, :mcp_allow_delete_project)
 
       assert {:error, :delete_project_disabled, _} = delete()
       refute_received {:deleted, _}
     end
 
     test "the refusal is named, not silence: an agent told 'disabled' asks its human" do
-      Application.delete_env(:fleet_mcp, :allow_delete_project)
+      Application.delete_env(:lcars_fleet, :mcp_allow_delete_project)
 
       assert {:error, reason, _} = delete()
       refute reason == :unknown_tool
@@ -74,7 +74,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
     end
 
     test "explicitly false is still disarmed" do
-      Application.put_env(:fleet_mcp, :allow_delete_project, false)
+      Application.put_env(:lcars_fleet, :mcp_allow_delete_project, false)
 
       assert {:error, :delete_project_disabled, _} = delete()
       refute_received {:deleted, _}
@@ -82,7 +82,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
 
     test "a TRUTHY non-boolean does NOT arm it — only the boolean says yes" do
       for value <- ["true", 1, :yes] do
-        Application.put_env(:fleet_mcp, :allow_delete_project, value)
+        Application.put_env(:lcars_fleet, :mcp_allow_delete_project, value)
 
         assert {:error, :delete_project_disabled, _} = delete(),
                "#{inspect(value)} must not arm an irreversible gesture"
@@ -94,9 +94,9 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
 
   describe "the switch comes before the gate" do
     test "a non-onboarder gets the DISABLED answer, never a hint about its own authorization" do
-      Application.delete_env(:fleet_mcp, :allow_delete_project)
+      Application.delete_env(:lcars_fleet, :mcp_allow_delete_project)
 
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "engineer", repo: "fleet/demo"}}
       end)
 
@@ -104,9 +104,9 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
     end
 
     test "ARMED, the gate is back in charge and refuses the same pod on its role" do
-      Application.put_env(:fleet_mcp, :allow_delete_project, true)
+      Application.put_env(:lcars_fleet, :mcp_allow_delete_project, true)
 
-      TestEnv.put_env_restoring(:fleet_mcp, :pod_resolver, fn _ ->
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
         {:ok, %{role: "engineer", repo: "fleet/demo"}}
       end)
 
@@ -117,7 +117,7 @@ defmodule Fleet.MCP.DeleteProjectDisarmedTest do
 
   describe "INVERSE TWIN — armed, the tool still works" do
     test "flag true + onboarder + force → the deletion happens" do
-      Application.put_env(:fleet_mcp, :allow_delete_project, true)
+      Application.put_env(:lcars_fleet, :mcp_allow_delete_project, true)
 
       assert {:ok, _, _} = delete()
       assert_received {:deleted, "fleet/demo"}

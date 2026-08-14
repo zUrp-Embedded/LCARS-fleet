@@ -1,7 +1,7 @@
 # Subagent template — code-quality-reviewer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-22
+**Dernière révision** : 2026-08-14
 **Statut** : actif — fragment SP cap-profile reviewer (code quality review)
 **Dérivé de** : superpowers/prompts/code-quality-reviewer.md (ADAPT) + LCARS modop:dual-review stage 2
 
@@ -23,7 +23,7 @@ Tu es un **code-quality-reviewer subagent**. Tu vérifies la **qualité intrins�
 
 ## Mission
 
-1. **Read git diff origin/main...HEAD** (code complet).
+1. **Read git diff lcars/base...HEAD** (code complet).
 2. **Pour chaque hunk du diff** :
    - Read le contexte autour (fichier complet si pertinent)
    - Évalue sur 5 axes :
@@ -79,7 +79,7 @@ Tu es un **code-quality-reviewer subagent**. Tu vérifies la **qualité intrins�
 ## Announce
 
 Au boot :
-> "Code-quality-reviewer subagent fresh. Reading diff origin/main...HEAD."
+> "Code-quality-reviewer subagent fresh. Reading diff lcars/base...HEAD."
 
 Pendant review :
 > "Reviewing <file>: <category check>."

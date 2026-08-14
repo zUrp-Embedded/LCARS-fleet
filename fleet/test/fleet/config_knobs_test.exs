@@ -16,7 +16,7 @@ defmodule Fleet.ConfigKnobsTest do
   checks the default value would pass through that regression untouched — so each test here sets a
   DISTINCTIVE value and requires it to come back.
 
-  Not covered, and named rather than left implied: `:fleet_workflow, :git_push_timeout_ms`. Its
+  Not covered, and named rather than left implied: `:lcars_fleet, :workflow_git_push_timeout_ms`. Its
   only reader is private (`Git.push_timeout_ms/0`) and reachable solely through a real `git push`,
   so exercising it means a network-bound test. It stays an untested promise, deliberately — the
   honest state, written here instead of inferred from a missing file.
@@ -25,28 +25,28 @@ defmodule Fleet.ConfigKnobsTest do
   alias Fleet.Pilot.IncidentRegistry
 
   describe "the knobs that bound a safety are actually READ" do
-    test ":fleet_spawner, :max_pods — the fleet-wide FUSE (not a policy)" do
+    test ":lcars_fleet, :spawner_max_pods — the fleet-wide FUSE (not a policy)" do
       # 128 is the documented default; 7 is a value nothing else could produce. The knob still has
       # to answer: an operator on a small machine lowers the fuse deliberately, and it is the one
       # ceiling nothing else can substitute for.
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :max_pods, 7)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods, 7)
       assert Fleet.Spawner.max_pods() == 7
     end
 
-    test ":fleet_spawner, :publish_deadline_ms — the fail-safe that lifts a DESTRUCTIVE reset" do
+    test ":lcars_fleet, :spawner_publish_deadline_ms — the fail-safe that lifts a DESTRUCTIVE reset" do
       # This one earns its place above the others: when the deadline fires, the flag is lifted
       # blind and the lift re-opens `reset --hard` + `clean -fdx`. An operator lengthening this
       # window is buying time against a destructive path, and must actually get it.
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :publish_deadline_ms, 4_242)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_publish_deadline_ms, 4_242)
       assert Fleet.Spawner.Pod.Publishing.publish_deadline_ms() == 4_242
     end
   end
 
-  describe ":fleet_pilot, :incident_registry_max_entries — bounds unbounded growth" do
+  describe ":lcars_fleet, :pilot_incident_registry_max_entries — bounds unbounded growth" do
     setup do
       # The knob's reader is private (`prune/1`), so it is exercised through BEHAVIOUR, which is
       # the stronger test anyway: it proves the bound holds, not merely that a value is read back.
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :incident_registry_max_entries, 3)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_incident_registry_max_entries, 3)
 
       tmp = Path.join(System.tmp_dir!(), "knobs-#{System.unique_integer([:positive])}")
       File.mkdir_p!(tmp)

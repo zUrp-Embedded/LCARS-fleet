@@ -30,7 +30,8 @@ defmodule Fleet.Project.Onboard do
 
     1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
     2. `git clone --branch main` → `/home/projects/<name>`
-    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, docs/spec.md, CI)
+    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, CI) — PAS de spec : la matiere de
+       cadrage vit sur `workshop`, la seule face dont l architecte ait la plume avant la 1re livraison
     4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
     5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
        `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
@@ -97,7 +98,7 @@ defmodule Fleet.Project.Onboard do
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
     * `:code_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
       `/home/projects`, `/home/projects.ops`, `/home/projects.workshop`)
-    * `:base_url` / `:token` — forge override (otherwise config `:fleet_pilot, :forge`)
+    * `:base_url` / `:token` — forge override (otherwise config `:lcars_fleet, :pilot_forge`)
 
   Returns `{:ok, %{repo, project_dir, work_dir, doc_dir}}` or `{:error, term()}` (fail-fast) —
   one key per face. On an error return AND on an exception the sequence compensates automatically:
@@ -116,6 +117,11 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
+         # MEME CRENEAU QUE LE PREFLIGHT HUMAIN, et pour la meme raison : le refus doit tomber
+         # AVANT que le depot existe. La regle, elle, est appliquee chez le seul ecrivain
+         # (`Intensity.write/2`) pour qu'aucune porte ne puisse la contourner ; ici on lui evite
+         # de refuser apres une creation, donc une compensation.
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card("#{org}/#{name}", opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
@@ -427,8 +433,15 @@ defmodule Fleet.Project.Onboard do
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call
-  creates the three local faces, creates or clones each writer branch, reapplies branch protection
-  and compensates only its local artifacts on failure. Existing writer branches are preserved.
+  creates the three local faces, creates or clones each writer branch and reapplies branch
+  protection.
+
+  On failure it compensates its local artifacts AND the writer branches this attempt pushed —
+  those alone: a branch it cloned belonged to the repository already, and a branch whose existence
+  it could not read is never written in the first place. When every removal succeeds the caller
+  keeps its clean retry and gets the original error unchanged; when one does not, the error becomes
+  `{:import_not_compensated, reason, left}`, because a repository that still carries this attempt's
+  branches must not be retried as if it were untouched.
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
@@ -454,8 +467,7 @@ defmodule Fleet.Project.Onboard do
             "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
               "project_dir #{inspect(compensate_dir(dirs.code))}, " <>
               "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-              "doc_dir #{inspect(compensate_dir(dirs.workshop))} (repo untouched — " <>
-              "pre-existing; a clean retry is possible)"
+              "doc_dir #{inspect(compensate_dir(dirs.workshop))} #{remote_state(reason)}"
           )
 
           err
@@ -465,6 +477,16 @@ defmodule Fleet.Project.Onboard do
       {:error, _} = err -> err
     end
   end
+
+  # Cette phrase etait AFFIRMEE, elle est desormais LUE. « repo untouched — pre-existing » n'etait
+  # vrai que tant que rien n'avait ete pousse, et `ensure_writer_faces` publie `ops` avant de tenter
+  # `workshop` : la ligne annoncait donc un depot intact au moment precis ou il ne l'etait plus.
+  defp remote_state({:import_not_compensated, _reason, left}),
+    do:
+      "(⚠ REPO MUTATED — branches pushed by this attempt SURVIVE: " <>
+        "#{inspect(Enum.map(left, &elem(&1, 0)))}; a retry is NOT clean)"
+
+  defp remote_state(_reason), do: "(repo untouched — pre-existing; a clean retry is possible)"
 
   # LE TROISIEME REFUS, et c'est celui qui empeche le mensonge silencieux. L'org d'un projet EST le
   # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur une boite qui
@@ -508,6 +530,7 @@ defmodule Fleet.Project.Onboard do
       dirs = face_dirs(name, opts)
 
       with :ok <- validate_name(name),
+           :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
            :ok <- ensure_human_provisioned(catalogue, opts),
            :ok <- require_machine_absent(full_name, dirs),
            :ok <- require_forge_absent(full_name, opts),
@@ -685,17 +708,68 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
+  # `adopt` et `import_external` CREENT le repo, donc leur compensation le supprime en entier.
+  # Ici il preexiste, on ne peut donc defaire QUE ce qu'on a soi-meme pousse — d'ou l'inventaire
+  # remonte par `ensure_writer_faces/5`.
   defp finish_import(full_name, dirs, name, opts) do
     with {:ok, url} <- repo_url(full_name, opts),
-         :ok <- clone_main(url, dirs.code),
-         :ok <- ensure_writer_faces(full_name, url, dirs, name, opts),
-         :ok <- lock_main(full_name, opts) do
-      Logger.info(
-        "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
-      )
+         :ok <- clone_main(url, dirs.code) do
+      case ensure_writer_faces(full_name, url, dirs, name, opts) do
+        {:ok, published} -> lock_and_announce(full_name, dirs, published, opts)
+        {:error, reason, published} -> undo_published(full_name, published, reason, opts)
+      end
+    end
+  end
 
-      {:ok, onboard_result(full_name, dirs, opts)}
+  defp lock_and_announce(full_name, dirs, published, opts) do
+    case lock_main(full_name, opts) do
+      :ok ->
+        Logger.info(
+          "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
+            "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
+        )
+
+        {:ok, onboard_result(full_name, dirs, opts)}
+
+      {:error, reason} ->
+        undo_published(full_name, published, reason, opts)
+    end
+  end
+
+  # LA COMPENSATION SE DIT DANS LE RETOUR, pas seulement dans un log — parce que l'appelant decide
+  # a partir du retour, et que ce qu'il en deduit ici est « je peux retenter proprement ». Tant que
+  # tout a ete retire, c'est vrai et l'erreur d'origine passe intacte. Des qu'une suppression
+  # echoue, elle devient fausse : le depot d'un tiers porte une branche que cette tentative y a
+  # laissee, et le retry la lira comme preexistante. Ce cas-la porte donc son propre nom.
+  #
+  # ⚠ On ne supprime QUE `published`. Une branche clonee etait deja la ; une branche dont la
+  # lecture a echoue n'a jamais ete touchee (`ensure_face` refuse desormais avant d'ecrire).
+  defp undo_published(_full_name, [], reason, _opts), do: {:error, reason}
+
+  defp undo_published(full_name, published, reason, opts) do
+    outcomes =
+      Enum.map(published, fn branch ->
+        {branch, repo_mod(opts).delete_branch(full_name, branch, fc_opts(opts))}
+      end)
+
+    case Enum.reject(outcomes, &match?({_b, {:ok, _}}, &1)) do
+      [] ->
+        Logger.warning(
+          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — forge compensated: " <>
+            "#{inspect(Enum.map(outcomes, fn {b, {:ok, o}} -> {b, o} end))}"
+        )
+
+        {:error, reason}
+
+      left ->
+        Logger.error(
+          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) and its forge " <>
+            "compensation did NOT complete — branches pushed by this attempt SURVIVE on a " <>
+            "third-party repo: #{inspect(left)}"
+        )
+
+        {:error, {:import_not_compensated, reason, left}}
     end
   end
 
@@ -775,7 +849,7 @@ defmodule Fleet.Project.Onboard do
 
   Per project, three facts and no derivation:
 
-    * the DECLARED card and level (`intensity.json`), reported as declared or NOT. An undeclared
+    * the DECLARED card and level (`.lcars.json`), reported as declared or NOT. An undeclared
       project falls back to the fleet default at burn time, and that fallback is deliberately NOT
       applied here: reporting the effective card would make an undeclared project indistinguishable
       from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`
@@ -846,7 +920,7 @@ defmodule Fleet.Project.Onboard do
 
   # What the project DECLARES, never what it would fall back to.
   defp declared_intensity(proj_dir) do
-    case File.read(Path.join(proj_dir, "intensity.json")) do
+    case File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       {:ok, raw} ->
         case Jason.decode(raw) do
           {:ok, %{"pipeline_default" => card} = decl} when is_binary(card) ->
@@ -988,6 +1062,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_local_main(dirs.code),
          :ok <- require_adoptable_origin(full_name, dirs.code, opts),
@@ -1124,9 +1199,9 @@ defmodule Fleet.Project.Onboard do
   defp ensure_intensity(
          proj_dir,
          opts,
-         msg \\ "chore(adopt): déclaration de criticité (intensity.json)"
+         msg \\ "chore(adopt): déclaration de criticité (.lcars.json)"
        ) do
-    if File.exists?(Path.join(proj_dir, "intensity.json")) do
+    if File.exists?(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       :ok
     else
       with :ok <- Fleet.Project.Intensity.write(proj_dir, opts) do
@@ -1197,7 +1272,7 @@ defmodule Fleet.Project.Onboard do
        default ≠ main while a remote `main` EXISTS → `{:branch_collision, _}` (half-migrated
        repos are common; we never guess which is the real one).
     5. Empty org repo + protocol labels + intensity committed IN the scratch BEFORE the push
-       (the push must CARRY intensity.json or every later jury read falls back in silence) →
+       (the push must CARRY .lcars.json or every later jury read falls back in silence) →
        push main (full history) → the local `finish_import` leg (clone from OUR forge,
        ops, protection — its `lock_main` reads the now-present local intensity).
 
@@ -1216,6 +1291,7 @@ defmodule Fleet.Project.Onboard do
 
     with :ok <- validate_name(name),
          :ok <- url_gate.(url),
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_machine_absent(full_name, dirs),
          :ok <- require_forge_absent(full_name, opts) do
@@ -1256,7 +1332,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
-  # existing local import leg for what it does (clone from OUR forge brings intensity.json
+  # existing local import leg for what it does (clone from OUR forge brings .lcars.json
   # back down, so ITS lock_main reads the right jury).
   defp intensity_commit_message(opts) do
     door =
@@ -1265,7 +1341,7 @@ defmodule Fleet.Project.Onboard do
         _ -> "import-externe"
       end
 
-    "chore(#{door}): déclaration de criticité (intensity.json)"
+    "chore(#{door}): déclaration de criticité (.lcars.json)"
   end
 
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
@@ -1318,24 +1394,81 @@ defmodule Fleet.Project.Onboard do
   defp clone_external(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
-    case Fleet.Credentials.Shell.git(
-           ["clone", "--no-recurse-submodules", with_external_token(url), scratch],
-           timeout_ms: timeout
-         ) do
-      {:ok, {_, 0}} -> :ok
-      {:ok, {out, code}} -> {:error, {:external_clone_failed, {code, String.slice(out, 0, 500)}}}
-      {:error, reason} -> {:error, {:external_clone_failed, reason}}
+    with {:ok, env} <- external_auth_env(url) do
+      case Fleet.Credentials.Shell.git(
+             ["clone", "--no-recurse-submodules", url, scratch],
+             timeout_ms: timeout,
+             env: env
+           ) do
+        {:ok, {_, 0}} ->
+          :ok
+
+        {:ok, {out, code}} ->
+          {:error, {:external_clone_failed, {code, String.slice(out, 0, 500)}}}
+
+        {:error, reason} ->
+          {:error, {:external_clone_failed, reason}}
+      end
     end
   end
 
-  # Operator credential for a PRIVATE external repo — env at gesture time, never a recipe
-  # product (first-admin doctrine). Injected as URL userinfo (both GH and GitLab accept an
-  # oauth2 basic pair); the effective URL is never logged.
-  defp with_external_token(url) do
+  # LE TOKEN NE PASSE PLUS PAR LA LIGNE DE COMMANDE. Il etait injecte en USERINFO D'URL
+  # (`https://oauth2:<token>@host/…`) puis pose en ARGV de `git clone` — donc lisible par tout compte
+  # local dans `ps` pendant toute la duree du clone (jusqu'a 120 s), et ressorti tel quel dans les
+  # messages d'erreur de git, qui citent l'URL distante. Cette sortie remonte au pod appelant, sans
+  # redaction, via `{:external_clone_failed, {code, out}}`.
+  #
+  # LE CANAL SANS ARGV EXISTAIT DEJA DANS LE DEPOT, une porte a cote :
+  # `Fleet.Credentials.ForgeAuth.git_env_result/0` donne le credential de la forge INTERNE par
+  # `GIT_CONFIG_*` dans l'ENVIRONNEMENT — lisible par le seul proprietaire du processus. Il porte
+  # desormais les deux usages (`extraheader_env/2`), au lieu d'avoir une copie divergente ici.
+  #
+  # `Basic base64("oauth2:<token>")` reproduit exactement ce que l'userinfo transmettait sur le fil :
+  # GitHub comme GitLab acceptent cette paire. Le schema d'authentification ne change pas, seul le
+  # CANAL change — et l'URL redevient propre, donc les messages d'erreur de git le sont aussi.
+  #
+  # Un prefixe porteur d'un caractere de controle est REFUSE par le meme garde-fou que la forge
+  # interne : il serait interpole dans une cle git-config et y injecterait une ligne parasite. Une
+  # URL d'import vient d'un operateur, pas du depot.
+  @doc false
+  # Publique pour son test : la propriete achetee ici — le credential voyage par l'ENV et jamais par
+  # l'argv — ne se lit pas depuis `clone_external/3`, dont `Shell.git` est appele par litteral (pas
+  # de couture d'injection). Meme motif que les autres `@doc false` du depot.
+  def external_auth_env(url) do
     case System.get_env("LCARS_EXTERNAL_GIT_TOKEN") do
-      nil -> url
-      "" -> url
-      token -> url |> URI.parse() |> struct!(userinfo: "oauth2:#{token}") |> URI.to_string()
+      token when is_binary(token) and token != "" ->
+        prefix = external_url_prefix(url)
+
+        if Fleet.Credentials.ForgeAuth.safe_prefix?(prefix) do
+          credential = "Basic " <> Base.encode64("oauth2:" <> token)
+          {:ok, Fleet.Credentials.ForgeAuth.extraheader_env(prefix, credential)}
+        else
+          # JAMAIS `inspect` ici : la valeur refusee est voisine du token.
+          Logger.error(
+            "Project.Onboard: external clone URL carries a control char in its authority — " <>
+              "REFUSED (a git-config key would be injected). Fix the import URL."
+          )
+
+          {:error, {:external_clone_failed, :url_malformed}}
+        end
+
+      _absent ->
+        {:ok, Fleet.Credentials.ForgeAuth.git_env()}
+    end
+  end
+
+  # `http.<prefix>.extraheader` s'applique a toute URL qui COMMENCE par le prefixe : on le borne a
+  # `scheme://host[:port]/` pour que l'en-tete ne parte pas vers un autre hote si l'URL est
+  # redirigee. Un `URI` sans hote rend une chaine vide, que le garde-fou laisse passer et que git
+  # ignore — l'echec se produit alors sur le clone lui-meme, avec son vrai message.
+  defp external_url_prefix(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, host: h} = uri when is_binary(s) and is_binary(h) ->
+        port = if uri.port in [nil, 80, 443], do: "", else: ":#{uri.port}"
+        "#{s}://#{h}#{port}/"
+
+      _ ->
+        ""
     end
   end
 
@@ -1509,7 +1642,7 @@ defmodule Fleet.Project.Onboard do
 
     with :ok <- require_on_machine(full_name, proj_dir),
          :ok <- require_justification(opts),
-         :ok <- require_loadable_card(card),
+         :ok <- require_loadable_card(card, full_name, opts),
          {:ok, url} <- repo_url(full_name, opts) do
       previous = declared_card(proj_dir)
       scratch = scratch_dir(name)
@@ -1547,24 +1680,20 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # LOADABLE IS NOT THE SAME AS DECLARABLE HERE. A ticket-scoped card (`workshop-direct`, reached
-  # by an issue's genre) loads perfectly and would route EVERY ticket of the project through a
-  # jury-less direct seal. Removing it from `list_workflow_cards` hides the option; only this
-  # refuses it, and the difference is the one this repo already names about `allowedTools` — leaving
-  # something off a list closes nothing and reads exactly like closing it.
-  defp require_loadable_card(card) when is_binary(card) and card != "" do
-    case Fleet.Workflow.Loader.load!(card) do
-      %{"scope" => "project"} -> :ok
-      %{"scope" => scope} -> {:error, {:card_not_project_scoped, card, scope}}
-    end
-  rescue
-    _ -> {:error, {:unknown_card, card}}
-  end
+  # LA REGLE A DEMENAGE CHEZ `Fleet.Project.Intensity` — l'ecrivain de la declaration — et elle ne
+  # gardait ici que la REVISION. Le verbe qui CHANGE la carte d'un projet refusait donc une faute
+  # de frappe pendant que les verbes qui la DECLARENT en acceptaient une, et rien ne disait que les
+  # deux portes repondaient differemment a la meme question (6-125).
+  #
+  # Ce qui reste ici est ce qui appartient a CE verbe : pour une revision la carte est REQUISE,
+  # alors qu'a la creation son absence vaut « le defaut du catalogue ».
+  defp require_loadable_card(card, repo, opts) when is_binary(card) and card != "",
+    do: Fleet.Project.Intensity.declarable_card(card, repo, opts)
 
-  defp require_loadable_card(_absent), do: {:error, :workflow_map_required}
+  defp require_loadable_card(_absent, _repo, _opts), do: {:error, :workflow_map_required}
 
   defp declared_card(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, "intensity.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())),
          {:ok, %{"pipeline_default" => card}} when is_binary(card) <- Jason.decode(raw) do
       card
     else
@@ -1609,7 +1738,7 @@ defmodule Fleet.Project.Onboard do
   # then carries nothing forward, which is exactly the old behaviour for a project that never had a
   # declaration to lose.
   defp current_declaration(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, "intensity.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())),
          {:ok, %{} = decl} <- Jason.decode(raw) do
       decl
     else
@@ -1925,27 +2054,27 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # L'INVENTAIRE SE CONSTRUIT EN AVANCANT, il ne se prend pas d'avance : une branche n'entre dans la
+  # liste que quand son push a REUSSI, donc chaque entree est une mutation prouvee de cette
+  # tentative. Un etat releve avant la boucle serait deja perime au premier push, et c'est
+  # exactement sur cet ecart qu'une compensation supprime ce qu'elle n'a pas cree.
+  #
+  # L'echec porte l'inventaire avec lui (`{:error, reason, published}`) parce que les faces sont
+  # posees EN SEQUENCE : `ops` peut etre publiee avant que `workshop` echoue, et c'est le cas exact
+  # que la fiche 6-124 decrit.
   defp ensure_writer_faces(full_name, url, dirs, name, opts) do
-    with :ok <-
-           ensure_face(
-             full_name,
-             url,
-             dirs.ops,
-             Fleet.Layout.ops_branch(),
-             "ops",
-             name,
-             opts
-           ) do
-      ensure_face(
-        full_name,
-        url,
-        dirs.workshop,
-        Fleet.Layout.workshop_branch(),
-        "workshop",
-        name,
-        opts
-      )
-    end
+    faces = [
+      {dirs.ops, Fleet.Layout.ops_branch(), "ops"},
+      {dirs.workshop, Fleet.Layout.workshop_branch(), "workshop"}
+    ]
+
+    Enum.reduce_while(faces, {:ok, []}, fn {dir, branch, template}, {:ok, published} ->
+      case ensure_face(full_name, url, dir, branch, template, name, opts) do
+        {:ok, :published} -> {:cont, {:ok, published ++ [branch]}}
+        {:ok, :cloned} -> {:cont, {:ok, published}}
+        {:error, reason} -> {:halt, {:error, reason, published}}
+      end
+    end)
   end
 
   defp lock_main(full_name, opts), do: protect_main(full_name, opts)
@@ -1961,12 +2090,27 @@ defmodule Fleet.Project.Onboard do
   def reconcile_main_protection(repo, forge_opts) when is_binary(repo) do
     opts = Keyword.put(forge_opts, :forge_opts, forge_opts)
 
-    if seeded_project?(repo, opts), do: protect_main(repo, opts), else: :ok
+    case seeded_project?(repo, opts) do
+      {:ok, true} -> protect_main(repo, opts)
+      {:ok, false} -> :ok
+      {:error, reason} -> {:error, {:seeded_unreadable, reason}}
+    end
   end
 
+  # ⚠ SITE 1 SUR 3 — ET C'EST CELUI OU LA CONFUSION NE PASSAIT MEME PAS PAR UN CHEMIN D'ERREUR.
+  # `branch_exists?` rendait `false` sur une forge illisible, donc `reconcile_main_protection/2`
+  # partait dans son `else` et rendait **`:ok`** : « rien a faire ici », mot pour mot ce que rend un
+  # depot legitimement non seede. Aucune trace, et le Poller horodatait le depot comme reconcilie.
+  # La protection de `main` n'etait jamais posee, et rien au monde ne le disait.
+  #
+  # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
+  # illisible (on ne sait pas — on le DIT et l'appelant retentera).
   defp seeded_project?(repo, opts) do
-    repo != project_template(opts) and
+    if repo == project_template(opts) do
+      {:ok, false}
+    else
       repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
+    end
   end
 
   defp protect_main(repo, opts) do
@@ -2054,6 +2198,27 @@ defmodule Fleet.Project.Onboard do
                {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
             end
 
+          # L'ORG DU CATALOGUE N'EXISTE PAS SUR CETTE FORGE — et c'est le cas NOMINAL d'un catalogue
+          # qu'on vient d'activer. `lcars catalogue enable` le dit deja (« la forge n'a NI l'org ni
+          # ses comptes de role — l'activation ne provisionne pas »), mais l'echec, lui, tombait deux
+          # gestes plus tard et dans le vocabulaire de Gitea : « user redirect does not exist
+          # [name: web] / GetOrgByName ». Personne ne remonte de cette phrase-la jusqu'a « le
+          # catalogue est actif ici et n'a jamais ete enrole sur la forge ».
+          # Un 404 ici a exactement deux causes, et on les separe avec l'appel qui les distingue au
+          # lieu de deviner sur un message : soit l'org manque (diagnostiquable, geste nomme), soit
+          # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
+          # Meme discipline que le deck refusant lui-meme une entree non declaree plutot que de
+          # laisser la forge le faire illisiblement.
+          {:error, {:http, 404, _}} = err ->
+            case users.user_exists?(org, fc) do
+              {:ok, false} ->
+                {:error,
+                 {:catalogue_not_enrolled, org, provisioning_gestures(:catalogue, human, org)}}
+
+              _ ->
+                {:error, {:forge_preflight_failed, elem(err, 1)}}
+            end
+
           {:error, reason} ->
             {:error, {:forge_preflight_failed, reason}}
         end
@@ -2083,8 +2248,30 @@ defmodule Fleet.Project.Onboard do
       "admission will NOT be proven — downstream create_issue remains the net)."
   end
 
+  defp provisioning_gestures(:catalogue, _human, org) do
+    "the catalogue '#{org}' is ACTIVE on this box but its org does NOT exist on the forge — " <>
+      "activating a catalogue makes it READ by the fleet, it never provisions anything. Nothing " <>
+      "can be onboarded into it until the forge carries the org and its role accounts: " <>
+      "`etc/enroll-catalogue.sh --catalogue <root> --tofu-dir <copy of deploy/deps>` then " <>
+      "`tofu apply` in that folder (the deploy/deps/instance/ module first, once per forge). " <>
+      "Until then, target an enrolled catalogue (`lcars catalogue list` shows what is active here, " <>
+      "which is NOT the same question as what the forge carries)."
+  end
+
+  # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
+  # projet sur disque repose sur elle : `Fleet.Layout.project_slug/1` n'est pas injective, et ce qui
+  # rend la collision inatteignable est que cette charte est STRICTEMENT INCLUSE dans ce que le slug
+  # preserve. `Fleet.LayoutTest` epinglait cette inclusion — contre SA PROPRE COPIE du motif, donc
+  # sans rien tenir : elargir la charte ici ne le faisait pas rougir, alors que son commentaire
+  # l'affirmait. Une source, lue des deux cotes.
+  @name_re ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+
+  @doc false
+  @spec name_charset() :: Regex.t()
+  def name_charset, do: @name_re
+
   defp validate_name(name) do
-    if Regex.match?(~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, name),
+    if Regex.match?(@name_re, name),
       do: :ok,
       else: {:error, {:invalid_name, name}}
   end
@@ -2123,9 +2310,14 @@ defmodule Fleet.Project.Onboard do
         origin_full_name(dir, opts) == {:ok, full_name}
       end)
 
+    # ⚠ SITE 2 SUR 3 — LA DIRECTION SURE EST L'INVERSE DE CELLE DES DEUX AUTRES, et c'est pour ca
+    # que la garde ne pouvait pas etre reparee « au seul site cite ». Ici un `{:error, _}` laisse
+    # tel quel serait TRUTHY : un import jamais fait passerait pour SATISFAIT et on sauterait le
+    # travail. Une forge illisible n'est pas une preuve de publication — elle vaut « pas satisfait »,
+    # ce qui coute au pire un re-import idempotent.
     published? =
       Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.workshop_branch()], fn branch ->
-        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts))
+        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) == {:ok, true}
       end)
 
     ours? and forge_repo_present?(full_name, opts) and published?
@@ -2185,7 +2377,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp onboard_commit_msg(:generated),
-    do: "chore(onboard): déclaration de criticité (intensity.json)"
+    do: "chore(onboard): déclaration de criticité (.lcars.json)"
 
   defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 
@@ -2195,7 +2387,7 @@ defmodule Fleet.Project.Onboard do
   @spec project_template(keyword()) :: String.t()
   def project_template(opts \\ []) do
     Keyword.get(opts, :project_template) ||
-      Application.get_env(:fleet_pilot, :project_template, "fleet/project-template")
+      Application.get_env(:lcars_fleet, :pilot_project_template, "fleet/project-template")
   end
 
   @doc false
@@ -2215,7 +2407,8 @@ defmodule Fleet.Project.Onboard do
 
   defp repo_url(full_name, opts) do
     base =
-      Keyword.get(opts, :base_url) || Application.get_env(:fleet_pilot, :forge, [])[:base_url]
+      Keyword.get(opts, :base_url) ||
+        Application.get_env(:lcars_fleet, :pilot_forge, [])[:base_url]
 
     case base do
       b when is_binary(b) and b != "" ->
@@ -2248,16 +2441,37 @@ defmodule Fleet.Project.Onboard do
   # Clone the face if the forge already carries the branch, otherwise build and publish it. Same
   # shape for both writer faces: the ONLY per-face inputs are the branch and the template subtree,
   # so a third one costs a call site and no new logic.
+  #
+  # ⚠ SITE 3 SUR 3 — ET C'EST LUI QUI ECRIT. Sur une forge illisible, l'ancien `false` envoyait dans
+  # le `else` : init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une
+  # face distante ECRASEE sur un simple timeout. L'inverse (traiter l'erreur comme « existe ») ferait
+  # cloner une branche peut-etre absente : moins destructeur, mais toujours une decision prise sans
+  # savoir. On ne devine pas : on REFUSE, et l'import s'arrete avec la raison — l'appelant garde son
+  # « repo untouched, a clean retry is possible ».
+  #
+  # Il rend `:cloned` ou `:published` et non `:ok`, parce que c'est la SEULE difference qui compte
+  # pour defaire : `:published` est une branche que CETTE tentative a mise sur la forge, `:cloned`
+  # une branche qui appartenait deja au depot. Confondre les deux, c'est soit laisser un residu,
+  # soit supprimer le travail de quelqu'un d'autre.
   defp ensure_face(full_name, url, dir, branch, template, name, opts) do
-    if repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
-      File.mkdir_p!(Path.dirname(dir))
-      GitOps.run(["clone", "--branch", branch, url, dir], auth: true)
-    else
-      with :ok <- init_face(dir, url, branch),
-           :ok <- Scaffold.face(dir, template, name, opts),
-           :ok <- commit(dir, "chore(import): init #{branch}") do
-        publish_face(dir, branch)
-      end
+    case repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
+      {:error, reason} ->
+        {:error, {:branch_unreadable, branch, reason}}
+
+      {:ok, true} ->
+        File.mkdir_p!(Path.dirname(dir))
+
+        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true) do
+          {:ok, :cloned}
+        end
+
+      {:ok, false} ->
+        with :ok <- init_face(dir, url, branch),
+             :ok <- Scaffold.face(dir, template, name, opts),
+             :ok <- commit(dir, "chore(import): init #{branch}"),
+             :ok <- publish_face(dir, branch) do
+          {:ok, :published}
+        end
     end
   end
 

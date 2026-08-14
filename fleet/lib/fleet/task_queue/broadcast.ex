@@ -10,6 +10,31 @@ defmodule Fleet.TaskQueue.Broadcast do
   Required-broadcast retries assume the current bus fails before delivering to
   any subscriber. A bus capable of partial delivery must provide a different
   replay contract.
+
+  ## What `required` buys, and what it does NOT
+
+  It is a ONE-WAY guarantee, and only the refusal side is proven: `{:error, _}` means NOBODY
+  received, so the caller may keep the item active and replay honestly. `:ok` means the BUS
+  ACCEPTED the message — not that a consumer existed, was alive, or handled it. Zero subscribers
+  is `:ok`. The name says "required" about the CALLER's obligation not to commit on failure, never
+  about delivery.
+
+  **And the probe that would close the gap cannot live here** — two measured reasons, both
+  structural:
+
+    * Every consumer of this fleet subscribes to ONE topic (`fleet.events`) and filters by event
+      type itself. "Does this topic have a subscriber?" is answered `true` by an open dashboard
+      websocket, so it would certify delivery of `work_item.completed` while its actual consumer is
+      dead. An exact answer to a neighbouring question is worse than none: it closes the matter.
+    * The precise question — "is THIS work item's pod alive and subscribed?" — belongs to the
+      SPAWNER, which is this domain's SOURCE and not its dependency (`Fleet.TaskQueue` declares no
+      `Fleet.Spawner`, and the edge would close a cycle boundary refuses). The broker distributes
+      and collects; it does not reach back to ask whether the source is still listening.
+
+  So an acknowledged delivery is an ARCHITECTURE decision — a per-event-type subscriber notion in
+  `Fleet.EventRouter` (which deliberately has "direct subscribers, no dispatch table"), or the
+  durable outbox this fleet does not have and whose single queue is `persist: false` by decision.
+  Until one is taken, the durable half of completion stays the forge reconciliation (F-C050).
   """
 
   require Logger
@@ -56,6 +81,9 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   @doc """
   Broadcasts a required lifecycle event, returning `:broadcast_failed` on failure.
+
+  `:ok` proves the bus accepted the message, NOT that a consumer received it — zero subscribers is
+  `:ok`. The moduledoc states why the probe that would prove delivery cannot live in this domain.
   """
   @spec required(module(), String.t(), Fleet.Event.t()) ::
           :ok | {:error, {:broadcast_failed, term()}}

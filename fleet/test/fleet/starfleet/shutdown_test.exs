@@ -28,9 +28,21 @@ defmodule Fleet.Starfleet.ShutdownTest do
     end
   end
 
+  # ⚠ DEUX COURSES DANS QUATRE LIGNES, et ce sont les deux formes du meme piege (cf. le `setup` de
+  # `reconciliation_unreachable_tq_test`, banc run 99) :
+  #
+  #   1. `start_link` NOMME depuis un helper appele par chaque test — le nom `@box` peut etre encore
+  #      pris par l'agent du test precedent, dont la mort par lien est ASYNCHRONE ;
+  #   2. `whereis` puis `Agent.stop` dans un `on_exit` — le pid rendu par `whereis` peut mourir
+  #      avant le `stop`, qui leve alors `:noproc`.
+  #
+  # `start_supervised!` ferme les deux : ExUnit arrete l'enfant ET ATTEND sa terminaison avant le
+  # test suivant, donc il n'y a plus rien a arreter a la main ni de nom qui traine.
   defp box(seq) do
-    {:ok, _} = Agent.start_link(fn -> %{seq: seq, refused: false} end, name: @box)
-    on_exit(fn -> if Process.whereis(@box), do: Agent.stop(@box) end)
+    start_supervised!(%{
+      id: @box,
+      start: {Agent, :start_link, [fn -> %{seq: seq, refused: false} end, [name: @box]]}
+    })
   end
 
   defp start_sd(opts) do

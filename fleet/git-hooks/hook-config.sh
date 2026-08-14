@@ -16,7 +16,7 @@
 #     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
 #     +-----------------------------------------------------------+
 #     | MODULE: HOOK-CONFIG       | SUBSYSTEM: GIT-HOOKS / CONFIG  |
-#     | LICENSE: AGPL-3           | STARDATE: 2026.090             |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.226             |
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  Context detection for git hooks. Sources by pre-commit   |
@@ -34,7 +34,7 @@
 #
 #     INTERFACE
 #         Ring:    0 (gate)
-#         Input:   git repo root (presence of fleet/fleet-env.sh)
+#         Input:   git repo root (fleet/mix.exs carrying `app: :lcars_fleet`)
 #         Output:  exported variables: HOOK_REPO_TYPE (lcars|project),
 #                  HOOK_DATE_FORMAT (stardate|iso), HOOK_DATE_FIELD,
 #                  HOOK_POST_PUSH (fleet-update|none)
@@ -46,8 +46,19 @@
 
 HOOK_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 
-# v7 #06: repo identity by fleet-env.sh presence
-if [ -f "$HOOK_REPO_ROOT/fleet/fleet-env.sh" ]; then
+# LA BRANCHE `lcars` ETAIT MORTE, ET RIEN NE LE DISAIT. Le marqueur teste etait
+# `fleet/fleet-env.sh` : ce fichier n'existe nulle part dans le depot et n'a aucun producteur. Toute
+# installation nominale des hooks DANS LCARS prenait donc la branche `project` — le tampon STARDATE
+# annonce par `pre-commit` ne s'executait jamais, et les variables de politique LCARS etaient
+# inatteignables. Un detecteur qui ne detecte rien ne leve pas : il repond l'autre branche.
+#
+# Le marqueur est desormais l'IDENTITE de l'app, versionnee et impossible a deplacer par accident :
+# `fleet/mix.exs` DOIT porter `app: :lcars_fleet`. Le test du contenu et pas seulement du chemin,
+# parce qu'un depot projet peut tres bien porter un `fleet/mix.exs` a lui.
+# `git-hooks/tests/repo_type.bats` tient la propriete, et l'un de ses cas lit le VRAI `mix.exs` du
+# depot : le jour ou l'app est renommee, c'est ce test qui le dit, pas un hook redevenu muet.
+if [ -f "$HOOK_REPO_ROOT/fleet/mix.exs" ] &&
+   grep -q 'app: :lcars_fleet' "$HOOK_REPO_ROOT/fleet/mix.exs"; then
     HOOK_REPO_TYPE="lcars"
     HOOK_DATE_FORMAT="stardate"
     HOOK_DATE_FIELD="STARDATE"

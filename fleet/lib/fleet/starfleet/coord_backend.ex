@@ -20,7 +20,7 @@ defmodule Fleet.Starfleet.CoordBackend do
   @doc "Returns the configured coord backend or `NotWiredYet`."
   @spec resolved() :: module()
   def resolved do
-    Application.get_env(:fleet_starfleet, :coord_backend, __MODULE__.NotWiredYet)
+    Application.get_env(:lcars_fleet, :starfleet_coord_backend, __MODULE__.NotWiredYet)
   end
 end
 

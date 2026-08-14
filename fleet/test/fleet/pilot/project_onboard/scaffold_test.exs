@@ -4,12 +4,29 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
 
   alias Fleet.Project.Onboard.Scaffold
 
-  test "main/3: writes README/.gitignore/.editorconfig/docs/spec.md → :ok", %{tmp_dir: dir} do
+  test "main/3: writes README/.gitignore/.editorconfig → :ok, and NO spec", %{tmp_dir: dir} do
     assert :ok = Scaffold.main(dir, "monprojet", pitch: "un pitch")
     assert File.read!(Path.join(dir, "README.md")) =~ "monprojet"
-    assert File.exists?(Path.join(dir, "docs/spec.md"))
     assert File.exists?(Path.join(dir, ".gitignore"))
     assert File.exists?(Path.join(dir, ".editorconfig"))
+
+    # LA SPEC N'EST PLUS ICI, et son absence est le correctif. Elle vivait dans `main/docs/`, vide,
+    # et personne ne pouvait l'ecrire : l'architecte produit sur la face `workshop`, et un
+    # producteur n'ecrit que ce qu'un brief demande — or c'est la spec qui rend un brief ecrivable.
+    # Mesure 2026-08-12 sur un projet reel : deux briefs renvoyes par le scoper faute de
+    # contraintes, et la spec ecrite par l'engineer A LA LIVRAISON, apres le brief qu'elle fondait.
+    refute File.exists?(Path.join(dir, "docs/spec.md"))
+  end
+
+  test "face/4 (workshop): la spec de cadrage est LA, expansee, la ou l architecte a la plume",
+       %{tmp_dir: dir} do
+    assert :ok =
+             Scaffold.face(dir, "workshop", "monprojet", pitch: "un pitch", today: "2026-07-18")
+
+    spec = File.read!(Path.join(dir, "spec.md"))
+    refute spec =~ "${"
+    assert spec =~ "monprojet"
+    assert spec =~ "2026-07-18"
   end
 
   test "main/3 mirrors the NATIVE template semantics: ${VAR} fully expanded, control file never copied",
@@ -17,12 +34,12 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     assert :ok = Scaffold.main(dir, "monprojet", pitch: "un pitch", today: "2026-07-18")
 
     readme = File.read!(Path.join(dir, "README.md"))
-    spec = File.read!(Path.join(dir, "docs/spec.md"))
+    claude = File.read!(Path.join(dir, "CLAUDE.md"))
     # every variable of the priv template is expanded — none leaks into the output
     refute readme =~ "${"
-    refute spec =~ "${"
+    refute claude =~ "${"
     assert readme =~ "un pitch"
-    assert spec =~ "2026-07-18"
+    assert claude =~ "monprojet"
     # `.gitea/template` is the template CONTROL file: never copied (native semantics)
     refute File.exists?(Path.join(dir, ".gitea/template"))
     # ...but `.gitea/` itself IS delivered — it carries the CI rail every project is born with.
@@ -34,6 +51,13 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     # local expansion (5 known vars) nor the forge's (`.gitea/template` lists README + spec only)
     # may touch them — a scaffold that emptied them would ship a rail that reports nothing.
     assert File.read!(workflow) =~ "${GITHUB_REPOSITORY}"
+
+    # 6-140 — LE NOM DU JOB EST UN CONTRAT, pas de la decoration. Gitea compose le contexte du
+    # statut en `<workflow> / <job> (<declencheur>)`, donc ce nom-la est ce que la fleet lit pour
+    # dire au juge que le vert vient du rail livre et non d'une suite. `ci` etait muet : un projet
+    # fraichement onboarde produisait un contexte indistinguable d'un harnais reel.
+    assert File.read!(workflow) =~ "no-harness-yet:"
+    refute File.read!(workflow) =~ ~r/^  ci:$/m
   end
 
   test "face/4 on the DOC template: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do
@@ -87,9 +111,9 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
   test "F-C087: generated files carry the onboard date (seam :today), not a hardcoded one",
        %{tmp_dir: dir} do
     assert :ok = Scaffold.main(dir, "monprojet", today: "2026-07-11")
-    spec = File.read!(Path.join(dir, "docs/spec.md"))
-    assert spec =~ "**Date** : 2026-07-11"
-    refute spec =~ "2026-06-14"
+    claude = File.read!(Path.join(dir, "CLAUDE.md"))
+    assert claude =~ "**Date** : 2026-07-11"
+    refute claude =~ "2026-06-14"
 
     assert :ok = Scaffold.face(dir, "workshop", "monprojet", today: "2026-07-11")
     assert File.read!(Path.join(dir, "backlog.md")) =~ "**Date** : 2026-07-11"
@@ -98,7 +122,7 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
   test "F-C087: without :today → current UTC date", %{tmp_dir: dir} do
     assert :ok = Scaffold.main(dir, "p", [])
     today = Date.to_iso8601(Date.utc_today())
-    assert File.read!(Path.join(dir, "docs/spec.md")) =~ "**Date** : #{today}"
+    assert File.read!(Path.join(dir, "CLAUDE.md")) =~ "**Date** : #{today}"
   end
 
   test "F-C086: mkdir failure (dir under a FILE) → {:error, {:scaffold_write}}, NO raise (honors the @spec)",

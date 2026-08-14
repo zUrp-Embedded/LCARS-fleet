@@ -183,10 +183,28 @@ POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 # =============================================================
 # Cleanup trap (P2 #7) — useful PRE-exec only: `exec` replaces the shell, so the EXIT trap fires ONLY if
 # we leave before `exec` (a failed assertion/setup). On success the pod is launched detached and
-# survives. state.json lives OUTSIDE $POD_DIR → never affected. Caller opt-out (spawner lifecycle).
+# survives. state.json lives OUTSIDE $POD_DIR -> never affected. Caller opt-out (spawner lifecycle).
+#
+# 6-069 — IL EMPORTAIT $POD_DIR, ET CE REPERTOIRE N'EST PAS A NOUS. Sous `set -euo pipefail` le
+# moindre echec declenche ERR, donc le `rm -rf`, et TOUTES les verifications de setup sont posees
+# APRES ce trap : bwrap/tmux absents, binaire vendor introuvable, claudeDir manquant, miroir git
+# demande mais absent, parent de socket absent. Or a cet instant $POD_DIR a deja ete entierement
+# projete par la fleet — espace de travail clone AVEC SON HISTORIQUE GIT, CLAUDE.md compose, prompt
+# systeme, protocole, brief, settings.json, watch.sh, hook de trailer. Un socat manquant faisait
+# donc recloner le depot au prochain essai.
+#
+# ⚠ LE SCRIPT DECLARE LUI-MEME LA PROPRIETE, QUATRE LIGNES PLUS BAS :
+# `ERR: pod_dir $POD_DIR missing (caller responsibility)`. Le proprietaire a un teardown a lui
+# (`Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/3`), avec une garde d'echappement de chemin, et
+# il ne l'exerce que sur un pod TERMINAL. « On n'a pas pu demarrer » n'est pas « ce pod est fini » :
+# le pod_dir est justement ce que la tentative suivante REUTILISE.
+#
+# Ce qui reste dans le trap est ce que ce script cree et possede : le repertoire de socket par pod.
+# `$POD_DIR/.local/bin` et `$POD_DIR/.claude`, crees plus bas, restent — inertes, idempotents, et
+# emportes par le teardown du proprietaire quand le pod meurt pour de bon.
 # =============================================================
 if [[ "${LCARS_BWRAP_NO_CLEANUP:-0}" != "1" ]]; then
-  trap 'rm -rf "$POD_DIR" "$POD_SOCK_DIR" 2>/dev/null || true' EXIT ERR
+  trap 'rm -rf "$POD_SOCK_DIR" 2>/dev/null || true' EXIT ERR
 fi
 
 # =============================================================
@@ -213,6 +231,38 @@ MIRROR_BIND_ARGS=()
 [[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (set by bin/fleet_v2 at start; override LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
+
+# ─── LE JOURNAL DU POD EST EN LECTURE SEULE POUR LUI ────────────────────────────────────────────
+# `fleet.feed` est le recit que le RUNTIME fait au pod de ce qui s'est passe (ArchFeed, FleetFeed).
+# Le pod_dir est monte en ecriture, donc le pod pouvait l'editer — et ce n'est pas « salir son
+# journal » : `PodFeed.append/2` RELIT le fichier avant de le reecrire, donc une ligne posee par
+# l'agent est reprise et re-emise sous la signature du runtime. Un agent pouvait blanchir des lignes
+# dans le registre de la fleet, sur l'objet meme dont la fonction est de lui dire ce qui s'est
+# REELLEMENT passe.
+#
+# DEUX CONTRAINTES, ET ELLES SONT LA RAISON DE CES DEUX LIGNES-CI :
+#   1. bwrap bind STRICTEMENT — une source absente n'est pas un montage vide, c'est un launcher qui
+#      meurt. Or le feed n'existe qu'au PREMIER jalon (`PodFeed` le cree a l'append), donc il est
+#      absent au spawn : mesure du 2026-08-12, un arch qui se reveille ne le trouve pas alors que son
+#      SP lui promet qu'il est la. On le cree ICI, vide, a cote du bind qui en depend — un `touch`
+#      pose ailleurs deriverait du bind un jour ou l'autre. Un fichier vide se lit ; une absence, elle,
+#      fabrique une croyance.
+#   2. le writer doit garder le MEME inode. `File.write` tronque en place, donc le montage suit. Le
+#      jour ou quelqu'un « ameliore » ca en ecriture-temporaire-puis-`rename`, la vue du pod se fige
+#      sur l'ancien inode SANS RIEN DIRE : le pod lirait un journal mort en le croyant vivant.
+# `touch`, JAMAIS `: >` : le pod_dir survit au respawn (l'arch est `forever`), donc une troncature
+# ici effacerait le journal a chaque relance — l'inverse exact de ce qu'on protege.
+touch "$POD_DIR/fleet.feed" 2>/dev/null || true
+FEED_BIND_ARGS=()
+if [[ -f "$POD_DIR/fleet.feed" ]]; then
+  FEED_BIND_ARGS=(--ro-bind "$POD_DIR/fleet.feed" "$SANDBOX_HOME/fleet.feed")
+  # Le pod dont le cwd RE-MONTE le pod_dir (l'arch : /home/.pod et /home/<projet> sont la meme
+  # source) voit le feed sous DEUX chemins. Un seul monte RO laisserait l'autre ecrivable, ce qui
+  # revient a n'en monter aucun.
+  if [[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" == "$POD_DIR" && "$WORKDIR" != "$SANDBOX_HOME" ]]; then
+    FEED_BIND_ARGS+=(--ro-bind "$POD_DIR/fleet.feed" "$WORKDIR/fleet.feed")
+  fi
+fi
 
 # The per-pod MCP socket dir MUST pre-exist: central creates the socket file BEFORE this launch (unlike
 # the tmux socket dir above, which tmux fills INSIDE the sandbox). We MOUNT it, we do not create it — its
@@ -422,6 +472,9 @@ exec env -i "$BWRAP_BIN" \
   --dev /dev --proc /proc \
   --bind "$POD_DIR" "$SANDBOX_HOME" \
   ${CWD_BIND_ARGS[@]+"${CWD_BIND_ARGS[@]}"} \
+  `# APRES les deux binds du pod_dir, delibere : bwrap applique dans l'ordre, donc ce ro-bind` \
+  `# RECOUVRE le fichier deja projete en ecriture. Avant, il serait annule par le bind du dossier.` \
+  ${FEED_BIND_ARGS[@]+"${FEED_BIND_ARGS[@]}"} \
   ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   ${MIRROR_BIND_ARGS[@]+"${MIRROR_BIND_ARGS[@]}"} \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \

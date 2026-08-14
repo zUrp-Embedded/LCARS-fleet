@@ -126,10 +126,11 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   end
 
   # publish-rail.sh is co-located with the launchers (moved to bin/, install manifest). The bin dir is
-  # the one already resolved for `claude_launch_path`; reading its config keeps a single source of the
-  # bin location without an MCP->Spawner call (config read, not a boundary edge).
+  # the one already resolved for the launcher; reading its config keeps a single source of the bin
+  # location without an MCP->Spawner call (config read, not a boundary edge). Namespace is the post-D-07
+  # `:lcars_fleet` app with a domain-prefixed key; the pre-migration spawner atom is dead.
   defp rail_path do
-    launcher = Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
+    launcher = Application.get_env(:lcars_fleet, :spawner_claude_launch_path, "/usr/local/bin/claude_launch.sh")
     Path.join(Path.dirname(launcher), "publish-rail.sh")
   end
 

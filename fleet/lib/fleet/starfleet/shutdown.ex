@@ -128,7 +128,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   defp task_queue_running?, do: is_pid(Process.whereis(Fleet.TaskQueue.Server))
 
   defp task_queue_mod,
-    do: Application.get_env(:fleet_starfleet, :task_queue_mod, @task_queue_default)
+    do: Application.get_env(:lcars_fleet, :starfleet_task_queue_mod, @task_queue_default)
 
   defp safe_count_active do
     {:ok, length(task_queue_mod().list_active())}
@@ -139,7 +139,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   end
 
   defp completion_phases do
-    case Application.get_env(:fleet_starfleet, :completion_inflight_fun, fn -> 0 end).() do
+    case Application.get_env(:lcars_fleet, :starfleet_completion_inflight_fun, fn -> 0 end).() do
       n when is_integer(n) and n >= 0 ->
         n
 
@@ -184,7 +184,19 @@ defmodule Fleet.Starfleet.Shutdown do
   use GenServer
   require Logger
 
+  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE, ET IL NE L'ETAIT PAS. `bin/fleet_v2` attend la
+  # disparition de la session tmux avec son propre litteral (`FLEET_V2_STOP_WAIT:-90`), pose la et
+  # jamais derive de CETTE deadline — son commentaire l'avoue et nomme BL-6-52. Deux nombres pour un
+  # seul fait : si le drain passe a 120 s, le launcher rend la main a 90 et l'operateur voit un stop
+  # « fini » sur une fleet qui draine encore.
+  # Le BEAM possede la deadline ; le shell la LIT (meme variable, meme defaut) et y ajoute sa marge.
   @default_grace_ms 45_000
+
+  @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet_v2`."
+  @spec grace_ms() :: pos_integer()
+  def grace_ms,
+    do: Application.get_env(:lcars_fleet, :starfleet_shutdown_grace_ms, @default_grace_ms)
+
   @default_poll_ms 500
 
   # CI-02 debounce: `in_flight` must read 0 on N CONSECUTIVE polls before concluding `:drained`. It
@@ -238,7 +250,7 @@ defmodule Fleet.Starfleet.Shutdown do
   end
 
   @doc """
-  Dispatcher backend resolved from config (`:fleet_starfleet, :shutdown_dispatcher`),
+  Dispatcher backend resolved from config (`:lcars_fleet, :starfleet_shutdown_dispatcher`),
   default `NoOpDispatcher`. SINGLE SOURCE of the default: this process reads it at `init` and
   readiness (the anti-hollow-green probe) reads it too — neither re-declares the default,
   so no drift between the real drain and what readiness believes is wired. (The test
@@ -246,18 +258,18 @@ defmodule Fleet.Starfleet.Shutdown do
   """
   @spec configured_dispatcher() :: module()
   def configured_dispatcher do
-    Application.get_env(:fleet_starfleet, :shutdown_dispatcher, @default_dispatcher)
+    Application.get_env(:lcars_fleet, :starfleet_shutdown_dispatcher, @default_dispatcher)
   end
 
   @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."
   def begin(opts \\ []) do
-    grace_ms = Keyword.get(opts, :grace_ms, @default_grace_ms)
+    grace_ms = Keyword.get(opts, :grace_ms, grace_ms())
     GenServer.call(server(opts), {:begin, grace_ms}, grace_ms + 5_000)
   end
 
   @doc "TEST-ONLY seam: same drain as `begin/1` WITHOUT the refuse step (exercise wait_drain in isolation). No prod caller."
   def drain_in_flight(opts \\ []) do
-    grace_ms = Keyword.get(opts, :grace_ms, @default_grace_ms)
+    grace_ms = Keyword.get(opts, :grace_ms, grace_ms())
     GenServer.call(server(opts), {:drain, grace_ms}, grace_ms + 5_000)
   end
 

@@ -38,6 +38,13 @@ defmodule Fleet.TaskQueue.Server do
   of `submit_result` (no more mute `:ok` that leaves the forge lock for life). The other events
   (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `lossy_broadcast` (observability, rescue).
 
+  ⚠ **`required` is about THIS server's obligation, not about delivery.** Its `:ok` proves the bus
+  accepted the message; zero subscriber is also `:ok`, so a completion CAN be committed terminal
+  with nobody left to advance the step_run. The broker cannot close that gap from here — the probe
+  would have to ask the SPAWNER whether this item's pod still listens, and the spawner is this
+  domain's source, not its dependency. `Fleet.TaskQueue.Broadcast` states the full reasoning; the
+  durable half of completion is the forge reconciliation (F-C050), never this ephemeral broker.
+
   ## Split — what was extracted, what stays (and why)
 
   Two concerns extracted into stateless modules (the GenServer state no longer traverses them):
@@ -90,7 +97,24 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def init(opts) do
     persist? = Keyword.get(opts, :persist, true)
-    state_path = Keyword.get(opts, :state_path, Store.default_path())
+
+    # 6-017 — `Keyword.get(opts, :state_path, Store.default_path())` PAYAIT LE DEFAUT TOUJOURS.
+    # Le troisieme argument de `Keyword.get/3` est un argument ordinaire : il est evalue a chaque
+    # appel, que la cle soit posee ou non. Or `Store.default_path/0` porte un `System.user_home!()`
+    # — c'est exactement la parade que son propre commentaire enonce (« un defaut qui coute quelque
+    # chose ne doit tourner que s'il EST la reponse »), et son unique appelant l'enfreignait.
+    #
+    # La consequence n'etait pas theorique : en production le broker tourne EPHEMERE
+    # (`{Server, persist: false}`, cf. `TaskQueue.Application`). Un HOME irresolvable levait donc au
+    # demarrage du serveur, pour un chemin que rien n'aurait lu.
+    #
+    # `nil` n'est pas une valeur nouvelle : `persist/1` et `load_state/2` la traitent deja, et un
+    # test la passe explicitement. On ne resout le defaut que lorsqu'il sert.
+    state_path =
+      case Keyword.fetch(opts, :state_path) do
+        {:ok, path} -> path
+        :error -> if persist?, do: Store.default_path(), else: nil
+      end
 
     base = %{
       work_items: %{},
@@ -115,13 +139,17 @@ defmodule Fleet.TaskQueue.Server do
       retention_terminal_max:
         Keyword.get(opts, :retention_terminal_max) ||
           Application.get_env(
-            :fleet_task_queue,
-            :retention_terminal_max,
+            :lcars_fleet,
+            :task_queue_retention_terminal_max,
             @default_retention_terminal
           ),
       poll_retention_ms:
         Keyword.get(opts, :poll_retention_ms) ||
-          Application.get_env(:fleet_task_queue, :poll_retention_ms, @default_poll_retention_ms)
+          Application.get_env(
+            :lcars_fleet,
+            :task_queue_poll_retention_ms,
+            @default_poll_retention_ms
+          )
     }
 
     case load_state(state_path, persist?) do
@@ -297,7 +325,12 @@ defmodule Fleet.TaskQueue.Server do
             # `:double_submit_ignored`/"already received" on an UNdelivered item. Pre-CI-03 the commit was done
             # first, so a lost broadcast left a terminal `:completed` + a false success at retry.
             #
-            # INVARIANT this rests on: `required_broadcast {:error} ⟺ ZERO subscriber delivered`. True on the
+            # ⚠ THE SYMBOL USED TO BE `⟺`, AND THAT BICONDITIONAL IS FALSE IN THE DIRECTION THAT
+            # MATTERS: zero subscriber yields `:ok`, not an error. What the discipline needs is only
+            # the implication below — a refusal proves nobody got it — and reading it as an
+            # equivalence turns "the bus accepted" into "a consumer received", which nothing here
+            # establishes (cf. `Broadcast.required`, which now states what `:ok` does not buy).
+            # INVARIANT this rests on: `required_broadcast {:error} ⟹ ZERO subscriber delivered`. True on the
             # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
             # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
             # dispatch — cf. `Broadcast.required`). So an item stays active only if NOBODY received → re-emission

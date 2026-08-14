@@ -92,4 +92,55 @@ defmodule Fleet.Spawner.PodWardenTest do
       assert MapSet.equal?(suspects, s(["new-done"]))
     end
   end
+
+  # JG-035 — LA JUMELLE DISAIT, CELLE-CI SE TAISAIT. `live_pod_ids/0` rend `:unavailable` sur
+  # exception et le tick entier est saute avec un warning motive ; `sock_pod_ids/0` rendait un
+  # MapSet VIDE sur tout echec de `File.ls`, donc `difference(socks, live)` etait vide, donc
+  # « aucun orphelin » — fail-safe (rien n'est tue a tort) et INDISCERNABLE du tick nominal. La
+  # branche voisine avait ete ecrite precisement pour rendre cette distinction visible.
+  #
+  # L'issue de reclaim est inchangee : aucun orphelin declare dans les deux cas. Ce qui change est
+  # que l'operateur voit POURQUOI il ne s'est rien passe.
+  describe "JG-035 — une base de sockets illisible n'est pas une base vide" do
+    @tag :tmp_dir
+    test "base ILLISIBLE → tick saute, horloges de grace gelees", %{tmp_dir: tmp} do
+      base = Path.join(tmp, "socks")
+      File.mkdir_p!(base)
+      File.chmod!(base, 0o000)
+      on_exit(fn -> File.chmod(base, 0o755) end)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_tmux_sock_base, base)
+
+      state = %{suspects: s(["p1"]), gc_suspects: s([])}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:noreply, ^state} = R.handle_info(:reap_tick, state)
+        end)
+
+      # Sous un uid qui ignore les permissions (root), la base reste listable : le cas ne se joue
+      # pas. La suite tourne en `builder` en CI.
+      case File.ls(base) do
+        {:error, _} -> assert log =~ "socket base unavailable"
+        {:ok, _} -> :ok
+      end
+    end
+
+    @tag :tmp_dir
+    test "TEMOIN — base LISIBLE et vide → le tick se deroule, aucun message d'indisponibilite", %{
+      tmp_dir: tmp
+    } do
+      base = Path.join(tmp, "socks")
+      File.mkdir_p!(base)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_tmux_sock_base, base)
+
+      state = %{suspects: s([]), gc_suspects: s([])}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:noreply, _} = R.handle_info(:reap_tick, state)
+        end)
+
+      refute log =~ "socket base unavailable"
+    end
+  end
 end

@@ -49,7 +49,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   setup %{tmp_dir: tmp} do
     # The DIRECTORY first: the fixture no longer spells the file name, it asks for the path the
     # runtime reads (`RoleIdentity.token_path/1`, keyed by the ACCOUNT), and that path is rooted here.
-    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
 
     # resolvable scoper role token → `as_role("scoper")` must inject it.
     Fleet.TestEnv.put_role_token!("scoper", "tok-scoper")
@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     # from the missing credential this test is about.
     empty = Path.join(tmp, "no-tokens")
     File.mkdir_p!(empty)
-    Fleet.TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, empty)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
 
     defmodule PushOnlyDeliverable do
       def publish(_opts), do: {:ok, %{commit_sha: "deadbeef", pushed?: true, mode: :git_native}}

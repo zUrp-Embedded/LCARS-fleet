@@ -8,9 +8,15 @@ defmodule Fleet.Starfleet.Application do
 
     1. Pre-loads the decision schema via
        `Fleet.Starfleet.Gatekeeper.init_schema!/0` (boot fail-fast)
-    2. Pre-registers the `starfleet.audit_cat5_*`, `audit.verdict`, `fleet.boot_*`,
-       `sdk.upstream_alert` and `mcp.server_crashed` event atoms (compile-time via a
-       module attribute, atom-leak DoS mitigation)
+    2. ⚠ NOTHING IS PRE-REGISTERED HERE, and this step used to claim it was. It read
+       "pre-registers … event atoms (compile-time via a module attribute, atom-leak DoS
+       mitigation)" — there is no such attribute in this module, nor anywhere under
+       `starfleet/`. The atoms come from `events.yaml` through
+       `Fleet.EventRouter.Catalog`, which says so itself: "this function is the ONLY
+       source of pre-registered event atoms". A reader chasing the atom-leak mitigation
+       here found a sentence instead of a mechanism.
+       (`sdk.upstream_alert` was also named in that list — removed 2026-08-14, cf. 6-016:
+       it was `MCPWatcher`'s declared half, and the module left on 2026-08-03.)
     3. Supervises five opt-in children, each gated by a `:start_*` config knob:
        * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
@@ -26,7 +32,7 @@ defmodule Fleet.Starfleet.Application do
 
   ## Configuration
 
-  One boolean `:start_*` knob per child (all under `:fleet_starfleet`):
+  One boolean `:starfleet_start_*` knob per child (all under `:lcars_fleet`):
   `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
   `:start_mcp_monitor` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
@@ -59,20 +65,20 @@ defmodule Fleet.Starfleet.Application do
     # zero network I/O, consistent with DriftMonitor/AuditConsumer).
     children =
       [] ++
-        if(boot_enabled?(:start_drift_monitor, true),
+        if(boot_enabled?(:starfleet_start_drift_monitor, true),
           do: [Fleet.Starfleet.DriftMonitor],
           else: []
         ) ++
-        if boot_enabled?(:start_shutdown, true) do
+        if boot_enabled?(:starfleet_start_shutdown, true) do
           [Fleet.Starfleet.Shutdown]
         else
           []
         end ++
-        if(boot_enabled?(:start_audit_consumer, true),
+        if(boot_enabled?(:starfleet_start_audit_consumer, true),
           do: [Fleet.Starfleet.AuditConsumer],
           else: []
         ) ++
-        if(boot_enabled?(:start_mcp_monitor, true),
+        if(boot_enabled?(:starfleet_start_mcp_monitor, true),
           do: [Fleet.Starfleet.MCPMonitor],
           else: []
         )
@@ -89,7 +95,7 @@ defmodule Fleet.Starfleet.Application do
   @doc false
   @spec boot_enabled?(atom(), boolean()) :: boolean()
   def boot_enabled?(key, default) when is_atom(key) and is_boolean(default) do
-    case Application.get_env(:fleet_starfleet, key, default) do
+    case Application.get_env(:lcars_fleet, key, default) do
       v when is_boolean(v) ->
         v
 

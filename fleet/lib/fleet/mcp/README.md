@@ -1,7 +1,7 @@
 # Fleet.MCP — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-11
+**Last revised**: 2026-08-14
 **Status**: active — pod-facing MCP server, per-pod AF_UNIX socket (vendor boundary)
 **Referenced by**: —
 
@@ -27,7 +27,8 @@ restated, only pointed at.
 - `Fleet.MCP.Supervisor` — domain supervision (`:one_for_one`); also starts the inline `PodSocketRegistry` (Registry) + `ConnectionTaskSupervisor` (Task.Supervisor); `pod_facing_status/0` = LIVE readiness probe consumed by `Fleet.API.Readiness`
 
 ## Config & deps
-- Knob `:fleet_mcp, :sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.
-- Knob `:fleet_mcp, :boot_environment` — read by `Server` (`:pod` → boot refusal).
-- Knobs `:fleet_mcp, :pod_resolver` / `:forge_client` / `:project_onboard` / `:delegation_org` — read by `PodTools.Delegation` (runtime-dispatch seams + onboarded forge org).
+- **COMPILE-TIME** `:lcars_fleet, :mcp_socket_idle_timeout_ms` (300_000) and `:mcp_max_conns_per_pod` (8) — the two protection ceilings of `PodSocketAcceptor`, and the ONLY `Application.compile_env` of the whole `lib/`. Frozen into the compiled module: a runtime `put_env` is ignored, silently. No env var exposes them. Listed here BECAUSE they look like the knobs below and are not — `compile_env` buys the module-attribute use and the release boot check, which is why they stay frozen.
+- Knob `:lcars_fleet, :mcp_sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.
+- Knob `:lcars_fleet, :mcp_boot_environment` — read by `Server` (`:pod` → boot refusal).
+- Knobs `:lcars_fleet, :mcp_pod_resolver` / `:forge_client` / `:project_onboard` / `:delegation_org` — read by `PodTools.Delegation` (runtime-dispatch seams + onboarded forge org).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/mcp.ex`).

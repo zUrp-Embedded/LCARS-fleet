@@ -11,8 +11,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     File.write!(secret_path, "supersecret\n")
 
     Fleet.TestEnv.put_env_restoring(
-      :fleet_event_router,
-      :webhook_secret_path,
+      :lcars_fleet,
+      :event_router_webhook_secret_path,
       secret_path
     )
 
@@ -61,8 +61,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # it delivered, never replays → forge event silently lost. The return is matched: `{:error}` →
       # 422 (retry/alert).
       Fleet.TestEnv.put_env_restoring(
-        :fleet_event_router,
-        :webhook_emit_fun,
+        :lcars_fleet,
+        :event_router_webhook_emit_fun,
         fn _source, _type, _opts -> {:error, :pubsub_down} end
       )
 
@@ -232,6 +232,50 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       end
     end
 
+    # JG-015 — LA PREUVE QUE RIEN N'EST DESERIALISE AVANT L'AUTHENTIFICATION, et elle tient au corps
+    # MALFORME. Un JSON invalide est le seul temoin qui distingue « le parseur n'a pas tourne » de
+    # « le parseur a tourne et n'a rien dit » : s'il tourne, il leve `Plug.Parsers.ParseError`.
+    #
+    # Avant : `plug(:match)` → `Plug.Parsers` → `:dispatch`, et `verify_hmac/1` n'etait appelee que
+    # DANS le handler. Un appelant anonyme obtenait donc une lecture jusqu'a 1 Mio ET un
+    # `Jason.decode!` complet par requete, sans aucun controle d'identite sur ce chemin.
+    #
+    # Le correctif n'est pas de deplacer la verification : le corps brut sur lequel porte le HMAC
+    # etait capture PAR `Plug.Parsers` (son `body_reader:`), donc verifier plus tot sans deplacer la
+    # LECTURE aurait donne `raw_body = nil` → `secure_compare` faux → 401 sur TOUT, legitime compris.
+    test "JG-015: corps JSON malforme + signature FAUSSE → 401, et AUCUN parsing", %{
+      secret: _secret
+    } do
+      malformed = "{\"action\": \"opened\", this is not json"
+
+      conn =
+        conn(:post, "/webhook/gitea", malformed)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-gitea-signature", String.duplicate("0", 64))
+        |> WebhooksGitea.call(WebhooksGitea.init([]))
+
+      assert conn.status == 401,
+             "un corps non authentifie a atteint le parseur (statut #{conn.status})"
+
+      assert Jason.decode!(conn.resp_body)["error"] == "hmac_mismatch"
+    end
+
+    # LE TEMOIN. Sans lui, le test ci-dessus serait vert si on avait simplement retire le parseur :
+    # avec une signature VALIDE, le corps malforme doit toujours faire lever le parseur.
+    test "JG-015 TEMOIN — corps malforme + signature VALIDE → le parseur tourne et refuse", %{
+      secret: secret
+    } do
+      malformed = "{\"action\": \"opened\", this is not json"
+      sig = WebhooksGitea.compute_hmac(secret, malformed)
+
+      assert_raise Plug.Parsers.ParseError, fn ->
+        conn(:post, "/webhook/gitea", malformed)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-gitea-signature", sig)
+        |> WebhooksGitea.call(WebhooksGitea.init([]))
+      end
+    end
+
     test "missing HMAC → 401", %{secret: _secret} do
       body = Jason.encode!(%{"action" => "opened"})
 
@@ -256,7 +300,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     end
 
     test "missing secret → 401" do
-      Application.put_env(:fleet_event_router, :webhook_secret_path, "/nonexistent")
+      Application.put_env(:lcars_fleet, :event_router_webhook_secret_path, "/nonexistent")
 
       body = Jason.encode!(%{"action" => "opened"})
 
@@ -279,7 +323,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       # COMPUTED-ON-EMPTY-KEY signature (what the attacker would send) is REFUSED.
       empty_secret = Path.join(tmp_dir, "empty-secret")
       File.write!(empty_secret, "   \n  \t\n")
-      Application.put_env(:fleet_event_router, :webhook_secret_path, empty_secret)
+      Application.put_env(:lcars_fleet, :event_router_webhook_secret_path, empty_secret)
 
       body = Jason.encode!(%{"action" => "opened"})
       forged_sig = WebhooksGitea.compute_hmac("", body)

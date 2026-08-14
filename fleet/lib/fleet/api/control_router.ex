@@ -1,22 +1,32 @@
 defmodule Fleet.API.ControlRouter do
   @moduledoc """
   The human operator's WRITE door — `POST /api/admin/spawn`, served ONLY on the local AF_UNIX
-  control socket (`:fleet_api, :control_socket`, `~/.lcars/run/api.sock`), never over TCP.
+  control socket (`:lcars_fleet, :api_control_socket`, `~/.lcars/run/api.sock`), never over TCP.
 
   ## Why a UNIX socket, not TCP loopback
 
   This is the SAME move the repo already made for the pod-facing MCP transport: a shared HTTP
   loopback was replaced by an AF_UNIX socket because "the identity IS the channel". Here the
   reasoning is the mirror image. `/api/admin/spawn` is the one remaining WRITE (it spawns pods);
-  its only legitimate client is `bin/lcars`, run host-side by the human. A pod runs under bwrap
-  with `--share-net`, so it SHARES the host network namespace: its `127.0.0.1` is the host's, and
-  it can reach any TCP loopback listener — including a no-auth admin endpoint. That is the confused
-  deputy: a compromised/injected pod re-obtains the "spawner" capability the MCP tool-gating denies
-  it, amplifying claude sessions on the human's subscription; bounded by `max_pods` but
-  self-refilling. A UNIX socket closes that BY CONSTRUCTION: the socket file lives under
-  `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not in the
-  pod's mount namespace. The boundary is the filesystem, not a firewall or an auth token. The
-  human's `lcars` runs host-side and reaches it via `curl --unix-socket`; the pod cannot.
+  its only legitimate client is `bin/lcars`, run host-side by the human. The risk it closes is the
+  confused deputy: a compromised/injected pod re-obtaining the "spawner" capability the MCP
+  tool-gating denies it, amplifying claude sessions on the human's subscription — bounded by
+  `max_pods` but self-refilling.
+
+  A UNIX socket closes that BY CONSTRUCTION, and the reason is the FILESYSTEM: the socket file
+  lives under `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not
+  in the pod's mount namespace. The human's `lcars` runs host-side and reaches it via
+  `curl --unix-socket`; the pod cannot.
+
+  ⚠ THIS PARAGRAPH USED TO REST ON A SECOND WALL THAT NO LONGER EXISTS, and the two must not be
+  confused. It said a pod runs `bwrap --share-net`, therefore shares the host network namespace,
+  therefore reaches any TCP loopback listener. That has been false since the per-pod CONNECT proxy
+  landed: `bwrap_launch.sh` passes `--unshare-all` and the flag is gone from the file entirely
+  (`Fleet.Spawner.Pod.Egress` states the current shape). So there are now TWO independent walls —
+  the mount namespace (this one) and the network namespace (that one). Writing the mount reason as
+  a consequence of the network one made a reader believe that restoring pod networking would reopen
+  this door. It would not; and the day someone changes one wall, the other must still be read on
+  its own terms.
 
   The READ surface (`/api/health`, `/api/version`, …) and the WS event stream stay on TCP
   (`Fleet.API.Rest` / `Fleet.API.WS`): they are low-risk (a browser dashboard needs TCP, and a
@@ -144,6 +154,22 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
+  # CE 202 EST ADOSSE A DEUX MECANISMES, ET NI L'UN NI L'AUTRE N'ETAIT NOMME ICI — un lecteur y
+  # voyait un « accepte » nu, sans moyen de savoir ce qui le rattrape.
+  #
+  #   1. AVANT la diffusion : `spawn_dispatch_status/0` refuse en 503 si le consommateur unique est
+  #      mort OU vivant-mais-non-abonne. C'est le cas « 202 dans le vide » (zero pod, zero alarme),
+  #      et il est ferme a la porte plutot que constate apres coup.
+  #   2. APRES : tout echec INTERNE du traitement (raise, exit/throw, nom absent, `spawn_pod` en
+  #      erreur) emet `spawn.failed`, route `action: incident` vers `Pilot.IncidentConsumer` — note
+  #      a la 1re occurrence, issue sysadmin a la recurrence. Le drop n'est donc pas silencieux.
+  #
+  # ⚠ CE QUI RESTE OUVERT, et c'est une seule chose : la COURSE entre la garde et le traitement. Le
+  # statut dit `:operational`, la diffusion part, et le consommateur meurt avant d'avoir traite ce
+  # message-la. Aucun evenement, aucune issue, et le 202 est deja parti. Fermer ca demande de
+  # PERSISTER la commande avant de repondre — un outbox durable, exactement le mecanisme absent que
+  # deux autres arbitrages attendent deja. En construire un tiers ici en ferait un demi-mecanisme de
+  # plus au lieu d'une decision.
   defp do_broadcast_spawn(conn, payload) do
     case dispatch_status_fun().() do
       {:degraded, info} ->
@@ -167,8 +193,8 @@ defmodule Fleet.API.ControlRouter do
 
   defp dispatch_status_fun do
     Application.get_env(
-      :fleet_api,
-      :spawn_dispatch_status_fun,
+      :lcars_fleet,
+      :api_spawn_dispatch_status_fun,
       &Fleet.Spawner.Application.spawn_dispatch_status/0
     )
   end
@@ -232,7 +258,7 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
-  @doc "Child spec for the control-socket listener (`:fleet_api, :control_socket`)."
+  @doc "Child spec for the control-socket listener (`:lcars_fleet, :api_control_socket`)."
   @spec child_spec(Path.t()) :: Supervisor.child_spec()
   def child_spec(sock) do
     %{

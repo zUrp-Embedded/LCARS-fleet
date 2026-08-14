@@ -73,8 +73,8 @@ defmodule Fleet.Starfleet.Gatekeeper do
   def init_schema! do
     schema_path =
       Application.get_env(
-        :fleet_starfleet,
-        :decision_schema_path,
+        :lcars_fleet,
+        :starfleet_decision_schema_path,
         default_schema_path()
       )
 

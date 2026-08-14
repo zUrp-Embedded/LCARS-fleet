@@ -98,7 +98,7 @@ defmodule Fleet.Spawner.PoolSlotTest do
     test "at the cap → TYPED refusal, never a raise (the ticket stacks and retries)", %{
       holders: h
     } do
-      TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 3)
+      TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 3)
       repo = uniq_repo()
       occupy(h, "engineer", repo, [1, 2, 3])
       assert {:error, :role_at_capacity} = PoolSlot.allocate("engineer", repo, "instance")
@@ -110,7 +110,7 @@ defmodule Fleet.Spawner.PoolSlotTest do
       repo = uniq_repo()
       # Even at capacity for the instance-keyed side, a project pod is unaffected: it does not
       # compete, it holds the seat nobody allocates.
-      TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 2)
+      TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 2)
       occupy(h, "architect", repo, [1, 2])
 
       assert {:ok, 0} = PoolSlot.allocate("architect", repo, "project")
@@ -118,7 +118,7 @@ defmodule Fleet.Spawner.PoolSlotTest do
     end
 
     test "a 0 in the bucket never eats an allocatable slot", %{holders: h} do
-      TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 2)
+      TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 2)
       repo = uniq_repo()
 
       # Seat 0 held, plus one of the two allocatable slots.
@@ -138,10 +138,10 @@ defmodule Fleet.Spawner.PoolSlotTest do
 
   describe "the format's own bounds" do
     test "the config cannot promise more than the nibble holds (15 allocatable, 0 reserved)" do
-      TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 99)
+      TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 99)
       assert PoolSlot.max_per_role() == 15
 
-      TestEnv.put_env_restoring(:fleet_spawner, :max_pods_per_role, 0)
+      TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 0)
       assert PoolSlot.max_per_role() == 1
     end
 

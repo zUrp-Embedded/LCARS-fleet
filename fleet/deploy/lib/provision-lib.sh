@@ -99,8 +99,22 @@ verdict_check() {
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 1
   exit 0
 }
+# ⚠ LE COMPTEUR DE DRIFT N'ETAIT PAS LU, ET LE RESUME MENTAIT DEUX FOIS. Un module dont l'`apply`
+# constate une non-convergence (`p_drift`) puis rend ce verdict sortait **0** : le runner le comptait
+# « convergé », et sa ligne de bilan affichait « drift: 0 » alors qu'une ligne DRIFT venait d'etre
+# imprimee. MESURE 2026-08-14 sur un module bac-a-sable : `EXIT 0`, « conformes/convergés: 1 ·
+# drift: 0 ». Deux modules vivants portent exactement cette forme (`50-forge`, `55-deck-oidc`).
+#
+# ⚠ ET CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort
+# 1 sur drift, et le runner mappe `apply:apply:*` non-zero en echec : ce chemin-la etait deja juste,
+# mesure. Le defaut vit un cran a cote, dans les modules qui rendent un verdict d'APPLY.
+#
+# Code **2** = « applique, drift residuel » : ni 0 (ce serait le mensonge qu'on retire) ni 1 (ce
+# serait confondre « je n'ai pas pu converger » avec « j'ai casse »). L'operateur a besoin des deux
+# mots, et l'entrypoint conteneur les distingue desormais dans son message.
 verdict_apply() {
   [[ "$PROV_FAILED" -gt 0 ]] && exit 1
+  [[ "$PROV_DRIFT" -gt 0 ]] && exit 2
   exit 0
 }
 
@@ -126,6 +140,176 @@ run_quiet() {
   return "$rc"
 }
 
+# ─── prov_parse_remote <url> — normalise un remote git en `host/owner/repo`, ou REFUSE ───────────
+#
+# CE QUE REMPLACE CETTE FONCTION (6-109), et c'etait une prise root en une ligne :
+#
+#     case "$REMOTE_URL" in *"$PROV_EXPECTED_REPO"*) ;; *) die ;; esac
+#
+# Une SOUS-CHAINE. Avec `PROV_EXPECTED_REPO=fleet/lcars`, l'URL
+# `https://host-de-l-attaquant/attaquant/fleet/lcars-malware.git` la contient — donc l'autorite est
+# satisfaite, `git pull --ff-only` tire, et `exec "$SELF" apply` execute ce code EN ROOT. Ni l'hote,
+# ni le proprietaire, ni la fin du nom du depot n'etaient regardes.
+#
+# Trois formes admises, ramenees au MEME triplet ; tout le reste est refuse :
+#   * `https://host[:port]/owner/repo[.git]`
+#   * `ssh://[user@]host[:port]/owner/repo[.git]`
+#   * `[user@]host:owner/repo[.git]`  (forme scp, celle que `git@` utilise)
+#
+# ⚠ USERINFO REFUSE sur les formes a schema : un remote qui embarque `user:token@` fait de
+# l'autorite de mise a jour un porteur de secret, et c'est aussi la ou se glisse la confusion
+# `https://fleet/lcars@ailleurs/...`. La forme scp garde son utilisateur NU (`git@host`) : c'est sa
+# syntaxe normale, pas un credential, et refuser la rendrait inutilisable.
+#
+# Le chemin doit avoir EXACTEMENT deux segments : `owner/repo`. Un segment de plus, c'est le
+# `attaquant/fleet/lcars` de l'attaque ; un de moins, ce n'est pas un depot.
+prov_parse_remote() {
+  local url="$1" rest host path owner repo
+
+  case "$url" in
+    *://*)
+      rest="${url#*://}"
+      ;;
+    *:*/*)
+      # scp : `[user@]host:owner/repo`. Le `:` separe l'hote du chemin ; on le remplace par `/`
+      # pour rejoindre la forme commune.
+      rest="${url%%:*}/${url#*:}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  # UNE SEULE REGLE POUR LES DEUX FORMES, et c'est la bonne : on refuse un userinfo qui porte un
+  # MOT DE PASSE (`user:token@`), on accepte l'utilisateur NU. `git@host` et `ssh://git@host` sont
+  # la syntaxe normale de SSH — les refuser rendrait tout remote SSH inutilisable, ce qui est un
+  # mur, pas une garde. Un remote qui embarque un secret, lui, fait de l'autorite de mise a jour un
+  # porteur de credential.
+  case "${rest%%/*}" in
+    *:*@*) return 1 ;;
+  esac
+  rest="${rest#*@}"
+
+  host="${rest%%/*}"
+  path="${rest#*/}"
+  host="${host%%:*}"       # port ignore : il ne change pas QUI l'on contacte
+  host="${host,,}"         # les hotes sont insensibles a la casse, les chemins non
+  path="${path%.git}"
+  path="${path%/}"
+
+  [[ -n "$host" && "$path" == */* ]] || return 1
+  owner="${path%%/*}"
+  repo="${path#*/}"
+  [[ -n "$owner" && -n "$repo" && "$repo" != */* ]] || return 1
+
+  printf '%s/%s/%s\n' "$host" "$owner" "$repo"
+}
+
+# ─── prov_lock_path — LE chemin du verrou apply/update, dans un dossier que personne d'autre ─────
+#     n'ecrit.
+#
+# CE QU'IL ETAIT, et pourquoi c'etait une prise root (6-130) : `${TMPDIR:-/tmp}/lcars-provision.$(id
+# -u).lock`. Sous `sudo`, `id -u` vaut 0, donc le nom est FIXE et devinable :
+# `/tmp/lcars-provision.0.lock`. `/tmp` est inscriptible par tout le monde, et `exec 9>"$LOCK"` SUIT
+# les liens et TRONQUE la cible — avant que `flock` n'ait protege quoi que ce soit. Un utilisateur
+# local pose ce nom en lien vers un fichier root et le prochain `sudo provision apply` le vide.
+#
+# Deux dossiers, un par identite, et aucun des deux n'est ecrivable par un tiers :
+#   * root      → `/run/lock/lcars`, cree root:root 0700. `/run/lock` est un tmpfs du systeme.
+#   * non-root  → `$XDG_RUNTIME_DIR/lcars` (0700 par construction, propriete de l'utilisateur), ou
+#                 `/run/user/<uid>/lcars` a defaut. `apply` peut tourner sans root quand aucun
+#                 module selectionne ne mute — ce cas a besoin d'un verrou lui aussi.
+#
+# ⚠ `TMPDIR` N'EST PLUS HONORE, et c'est la moitie de la fiche : une variable d'environnement
+# preservee a travers `sudo` deplacerait le verrou dans un dossier que l'appelant choisit. Un verrou
+# privilegie dont l'emplacement est un parametre de l'appelant n'est pas un verrou.
+#
+# ECHEC = ARRET. Se rabattre sur `/tmp` serait re-ecrire le bug avec un commentaire qui dit qu'on ne
+# le fait pas.
+prov_lock_path() {
+  local dir uid
+  uid="$(id -u)"
+
+  if [[ "$uid" -eq 0 ]]; then
+    dir=/run/lock/lcars
+  else
+    dir="${XDG_RUNTIME_DIR:-/run/user/$uid}/lcars"
+  fi
+
+  prov_refuse_symlink_path "$dir" || return 1
+
+  # LE PARENT DOIT DEJA EXISTER, on ne le fabrique pas. `/run/lock` et `/run/user/<uid>` sont
+  # poses par le systeme ; les creer nous-memes les creerait au umask courant — et `mkdir -p -m`
+  # n'applique son mode qu'au DERNIER composant (SC2174), donc le trou serait exactement celui
+  # qu'on vient de fermer, un cran plus haut. Absent = environnement anormal, on le DIT.
+  local parent="${dir%/*}"
+  [[ -d "$parent" ]] || { p_fail "verrou: $parent absent — pas d'emplacement sur pour un verrou"; return 1; }
+  mkdir -p "$dir" || { p_fail "verrou: dossier impossible: $dir"; return 1; }
+  chmod 0700 "$dir" || { p_fail "verrou: chmod 0700 refuse: $dir"; return 1; }
+
+  # Re-verifie APRES : un dossier deja la avec un autre proprietaire ou d'autres permissions
+  # passerait sinon sans que rien ne le dise.
+  local owner mode
+  owner="$(stat -c '%u' "$dir")" || { p_fail "verrou: stat impossible: $dir"; return 1; }
+  mode="$(stat -c '%a' "$dir")" || { p_fail "verrou: stat impossible: $dir"; return 1; }
+  [[ "$owner" == "$uid" ]] || { p_fail "verrou: $dir appartient a l'uid $owner, pas a $uid"; return 1; }
+  [[ "$mode" == "700" ]] || { p_fail "verrou: $dir est en $mode, attendu 700"; return 1; }
+
+  local lock="$dir/provision.lock"
+  # Le dossier est desormais prouve non-ecrivable par un tiers ; un lien A L'INTERIEUR ne peut donc
+  # venir que de nous-memes ou d'un root anterieur. On le refuse quand meme : cette verification-la
+  # coute un `[[ -L ]]` et c'est la seule qui reste entre `flock` et une troncature.
+  [[ -L "$lock" ]] && { p_fail "verrou: $lock est un symlink — REFUSE"; return 1; }
+
+  printf '%s\n' "$lock"
+}
+
+# ─── prov_refuse_symlink_path <chemin absolu> — LA garde des mutations privilegiees ──────────────
+#
+# CE QUI ARRIVE SANS ELLE, mesure sur 6-131 : `ensure_dir` tenait un symlink-vers-dossier pour un
+# dossier (`[[ -d ]]` suit les liens), puis `stat`/`chmod`/`chown` suivaient la cible. Le module WSL
+# applique ces helpers, EN ROOT, a `$HOME/.config` de l'humain — donc l'humain vise pose
+# `~/.config -> /etc` et le prochain `sudo provision apply` lui donne `/etc`. Meme forme pour
+# n'importe quel dossier root atteignable par un lien qu'il controle.
+#
+# ON REFUSE, ON NE RESOUT PAS. Un `readlink -f` suivi de l'operation serait le meme bug avec une
+# etape de plus : la resolution et la mutation ne sont pas atomiques, et c'est exactement ce que la
+# fiche interdit de faire passer pour un correctif. Refuser n'a pas de fenetre a gagner : il n'y a
+# rien a devancer, le chemin est declare inapte.
+#
+# ⚠ CE QUE CETTE GARDE NE FAIT PAS, et il faut le savoir en la lisant : elle ne supprime pas le
+# TOCTOU, elle le reduit a une COURSE. Pre-poser un lien et attendre le prochain `apply` ne marche
+# plus ; le glisser entre notre `lstat` et notre `chmod` marche encore, et fermer ca demanderait des
+# descripteurs `openat(O_NOFOLLOW)` que bash n'a pas. C'est la limite honnete de ce langage a cet
+# endroit, et la remonter voudrait dire sortir le provisioning de bash.
+#
+# Le chemin est parcouru COMPOSANT PAR COMPOSANT : un lien au milieu (`~/.config` -> ailleurs) est
+# aussi dangereux que le dernier, et c'est justement celui-la que l'attaque de la fiche utilise.
+prov_refuse_symlink_path() {
+  local path="$1" cur="" part
+  local -a parts
+
+  [[ "$path" == /* ]] || {
+    p_fail "mutation privilegiee REFUSEE — chemin relatif: $path"
+    return 1
+  }
+
+  # `read -ra` et non une boucle sur une expansion nue : un composant qui contiendrait `*` serait
+  # sinon globbe, donc le chemin verifie ne serait pas le chemin mute.
+  IFS='/' read -ra parts <<< "${path#/}"
+
+  for part in "${parts[@]}"; do
+    [[ -z "$part" ]] && continue
+    cur="$cur/$part"
+    if [[ -L "$cur" ]]; then
+      p_fail "mutation privilegiee REFUSEE — composant symlink: $cur -> $(readlink "$cur")"
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 # ─── write_atomic <dest> <mode> [owner:group] — LE primitif fichier ──────────────────────────────
 # Contenu lu sur stdin. tmp dans le MÊME dossier (mv intra-FS = rename atomique), mode/owner posés
 # sur le tmp AVANT le mv (le fichier n'existe jamais dans un état intermédiaire). Si le contenu,
@@ -133,6 +317,7 @@ run_quiet() {
 write_atomic() {
   local dest="$1" mode="$2" owner="${3:-}"
   local dir tmp
+  prov_refuse_symlink_path "$dest" || return 1
   dir="$(dirname "$dest")"
   [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }
   tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic: tmp impossible dans $dir"; return 1; }
@@ -156,6 +341,10 @@ write_atomic() {
 ensure_mode() {
   local path="$1" mode="$2" owner="${3:-}"
   local cur_mode cur_owner want_owner changed=0
+  # AVANT le test d'existence, pas apres : `[[ -e ]]` est faux sur un lien casse, donc un symlink
+  # pose comme piege serait rapporte « absent » — le bon diagnostic est « lien », et c'est celui-la
+  # qui dit a l'operateur ce qu'il regarde.
+  prov_refuse_symlink_path "$path" || return 1
   [[ -e "$path" ]] || { p_fail "ensure_mode: absent: $path"; return 1; }
   cur_mode="$(stat -c '%a' "$path")"
   # stat rend le mode SANS zéro de tête ; on normalise la cible pareil (0750 → 750).
@@ -182,6 +371,10 @@ ensure_mode() {
 # ─── ensure_dir <path> <mode> [owner:group] ──────────────────────────────────────────────────────
 ensure_dir() {
   local path="$1" mode="$2" owner="${3:-}"
+  # `[[ -d ]]` SUIT LES LIENS : sans cette garde, un symlink-vers-dossier passait pour un dossier
+  # convergé et `ensure_mode` chownait sa CIBLE (6-131). Un composant qui n'existe pas encore n'est
+  # pas un lien, donc la creation nominale traverse la garde sans la voir.
+  prov_refuse_symlink_path "$path" || return 1
   if [[ ! -d "$path" ]]; then
     mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "dir $path"
@@ -214,6 +407,10 @@ ensure_member() {
 # ─── ensure_symlink <link> <target> — convergent (remplace un lien faux, refuse d'écraser un vrai fichier) ─
 ensure_symlink() {
   local link="$1" target="$2"
+  # LA GARDE PORTE SUR LE PARENT, jamais sur `$link` : ce verbe CREE un lien, exiger que le dernier
+  # composant n'en soit pas un lui interdirait son propre travail. Ce qui doit rester vrai, c'est
+  # que le REPERTOIRE ou on le pose n'a pas ete deplace sous nous par un lien (6-131).
+  prov_refuse_symlink_path "$(dirname "$link")" || return 1
   if [[ -L "$link" ]]; then
     [[ "$(readlink "$link")" == "$target" ]] && return 0
   elif [[ -e "$link" ]]; then

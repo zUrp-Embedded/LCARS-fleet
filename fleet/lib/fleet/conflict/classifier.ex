@@ -36,7 +36,14 @@ defmodule Fleet.Conflict.Classifier do
   @doc "Classifies a raw conflict and wraps it as a `Hunk`, applying the zdiff3 adjustment."
   @spec to_hunk(Parser.raw_conflict()) :: Hunk.t()
   def to_hunk(raw) do
-    %{type: type, confidence: confidence, explanation: explanation, trace: trace} = classify(raw)
+    %{
+      type: type,
+      confidence: confidence,
+      explanation: explanation,
+      trace: trace,
+      merged_lines: merged_lines
+    } = classify(raw)
+
     zdiff3? = Parser.zdiff3?(raw)
 
     confidence =
@@ -59,6 +66,7 @@ defmodule Fleet.Conflict.Classifier do
       confidence: confidence,
       explanation: explanation,
       trace: trace,
+      merged_lines: merged_lines,
       zdiff3: zdiff3?
     }
   end
@@ -68,7 +76,8 @@ defmodule Fleet.Conflict.Classifier do
           type: atom(),
           confidence: Fleet.Conflict.ConfidenceScore.t(),
           explanation: String.t(),
-          trace: DecisionTrace.t()
+          trace: DecisionTrace.t(),
+          merged_lines: [String.t()] | nil
         }
   def classify(raw) do
     has_base = raw.base_lines != []
@@ -76,15 +85,30 @@ defmodule Fleet.Conflict.Classifier do
     eligible = Enum.filter(all_sorted, fn mod -> eligible?(mod, has_base) end)
 
     # Complex requires :both and detect?/1 = true, so it is always eligible and always matches last.
-    matched = Enum.find(eligible, fn mod -> mod.detect?(raw) end)
+    {matched, merged_lines} = Enum.find_value(eligible, fn mod -> detect(mod, raw) end)
 
     %{
       type: matched.type(),
       confidence: matched.confidence(raw),
       explanation: matched.explanation(raw),
-      trace: build_trace(raw, eligible, all_sorted, matched, has_base)
+      trace: build_trace(raw, eligible, all_sorted, matched, has_base),
+      merged_lines: merged_lines
     }
   end
+
+  # ONE pattern answers with a PAYLOAD and the behaviour has no room for it: `NonOverlapping`
+  # detects by performing the merge, so the boolean `detect?/1` threw away exactly what the
+  # assembler asked for next. It is special-cased HERE, visibly, rather than by widening the
+  # behaviour for nine patterns that have nothing to carry -- and the walk stays lazy, so a hunk
+  # settled by a higher-priority pattern still never pays for the merge.
+  defp detect(NonOverlapping, raw) do
+    case NonOverlapping.merge(raw) do
+      {:ok, lines} -> {NonOverlapping, lines}
+      {:error, _} -> nil
+    end
+  end
+
+  defp detect(mod, raw), do: if(mod.detect?(raw), do: {mod, nil})
 
   @spec eligible?(module(), boolean()) :: boolean()
   defp eligible?(mod, has_base) do

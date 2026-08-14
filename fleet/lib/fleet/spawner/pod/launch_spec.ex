@@ -214,6 +214,26 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   Read at LAUNCH, like its neighbour: a pod's compression is a property of its own launch, not a
   fleet-wide state that shifts under a pod already running.
+
+  ⚠ **AUCUN APPELANT EN PRODUCTION AUJOURD'HUI, ET LE VERDICT DE CETTE FONCTION N'ATTEINT AUCUN
+  LANCEMENT.** Vérifié par un walker indépendant : hors sa définition et son test, `output_compression?/1`
+  n'est appelée nulle part dans `lib/`, `bin/`, `etc/`, `deploy/` ni `config/`. La composition
+  ci-dessus est donc exacte et inerte.
+
+  **Ce qui manque n'est ni la brique ni le knob** — la brique `vendor/token_saver/` est dans l'image
+  (`COPY` présent au Dockerfile), testée par `shell_gate.sh`, et le champ est déclaré au schéma
+  cap-profile. **Ce qui manque est le VÉHICULE, et il n'a jamais existé** : la compression passe par
+  un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
+  monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
+  `.claude` humain est exclu À CAUSE de ses hooks. Le porteur v1 visait le tier `user`, que
+  `--setting-sources` exclut sans condition : il n'aurait jamais tiré non plus (mesuré 2026-08-07,
+  cf. `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
+
+  Conséquence pour un auteur de cap-profile : **déclarer `output_compression` ne change rien
+  aujourd'hui**, dans les deux sens. Le « brancher » ne serait pas restaurer un porteur perdu mais
+  **en inventer un** dans un monde projeté pour n'en monter aucun — une fonctionnalité avec une
+  décision de conception derrière, pas une correction. Ce paragraphe est ce qui empêche de lire
+  l'inertie comme un bug à réparer ici.
   """
   @spec output_compression?(Fleet.CapProfile.t() | term()) :: boolean()
   def output_compression?(cap_profile) do

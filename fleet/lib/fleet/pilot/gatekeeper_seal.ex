@@ -81,6 +81,13 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           {:error, {:provenance_incoherent, reason}} ->
             {:error, {:provenance_incoherent, reason}}
 
+          # ⚠ IL N'Y A PAS DE CLAUSE `:provenance_stale` ICI, ET C'EST LE RESULTAT DU FIX (BL-6-43).
+          # Elle a existe une heure : une preuve gravee pour un sha, puis une tete qui bouge, et le
+          # sceau cherchait un nom de fichier que personne n'avait ecrit. Depuis que l'attestation
+          # vit sur `refs/lcars/provenance/<sha>` et voyage dans le meme `git push` que la brique,
+          # « perimee » n'est plus un etat atteignable — le dialyzer l'a dit avant moi, en refusant
+          # la clause comme inatteignable. Un cas qui cesse d'exister ne se detecte plus.
+
           wall ->
             # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
             # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
@@ -103,7 +110,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # operator reads months later; one that names approvers who do not exist is worse than no
     # comment, and it sat under a line that said "nothing is faked".
     approvers = approving_judges(forge, repo, pr_number, forge_opts)
-    body = promote_comment(issue_n, pr_number, producer, approvers) <> "\n\n" <> signature
+
+    # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
+    # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
+    body = promote_comment(issue_n, pr_number, producer, approvers, wall) <> "\n\n" <> signature
 
     # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
     # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
@@ -360,18 +370,12 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
-    do: Application.get_env(:fleet_pilot, :worktree_sync, Fleet.Project.WorktreeSync)
+    do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
 
   # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
   defp spawner,
-    do: Application.get_env(:fleet_pilot, :spawner, Fleet.Spawner)
+    do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
 
-  # ── Provenance wall (Phase 2) ────────────────────────────────────────────
-  # Deterministic triplet check on the brick being sealed. SKIP paths (all LOUD, never
-  # blocking): seam without branch_head (test stubs), no head branch threaded, forge
-  # read hiccup, no local clone, ABSENT statement (best-effort emission, DR-010). The
-  # ONLY blocking outcome is a PRESENT-but-INCOHERENT statement — then NO merge, and a
-  # user-facing comment (FR) cites the exact failure on the PR.
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
     head_branch = Keyword.get(opts, :head_branch)
     # Roots injectable (tests) — defaults = the container layout authority.
@@ -394,15 +398,26 @@ defmodule Fleet.Pilot.GatekeeperSeal do
          {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
          true <- File.dir?(project_dir) || {:skip, :no_local_clone},
          true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
-         # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch
-         # the head branch so the deliverable objects are verifiable. Best-effort.
+         # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch the head
+         # branch AND the attestation ref of that exact head — both are objects the wall needs and
+         # neither is in the clone yet. Le ref d'attestation est NOMME PAR LE SHA (BL-6-43) : on ne
+         # calcule plus un nom de fichier depuis la tete, on demande la preuve DE cette tete.
+         prov_ref = Fleet.Workflow.Git.provenance_ref(head_sha),
          _ =
            Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
              auth: true
            ),
-         ref = Fleet.Layout.provenance_ref("issue-#{issue_n}-#{String.slice(head_sha, 0, 7)}"),
-         true <- File.exists?(Path.join(work_dir, ref)) || {:skip, {:no_statement, ref}} do
-      case Fleet.Workflow.Provenance.Verifier.verify(ref,
+         _ =
+           Fleet.Project.GitOps.run(
+             ["-C", project_dir, "fetch", "-q", "origin", "#{prov_ref}:#{prov_ref}"],
+             auth: true
+           ),
+         {:ok, statement} <-
+           (case Fleet.Workflow.Git.read_provenance(project_dir, head_sha) do
+              {:ok, json} -> {:ok, json}
+              {:error, _} -> {:skip, {:no_statement, prov_ref}}
+            end) do
+      case Fleet.Workflow.Provenance.Verifier.verify_content(statement,
              work_dir: work_dir,
              project_dir: project_dir
            ) do
@@ -422,7 +437,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
               repo,
               pr_number,
               "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
-                "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
+                "Le statement `#{prov_ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
                 "Rien n'est mergé tant que la traçabilité ment.",
               Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
             )
@@ -472,7 +487,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   defp note_wall_not_run(_forge, _repo, _pr_number, :ok, _forge_opts), do: :ok
 
   defp note_wall_not_run(forge, repo, pr_number, {:skipped, why}, forge_opts) do
-    _ =
+    # LE RÉSULTAT N'EST PLUS JETÉ. La note est le SECOND porteur du fait (le premier est la ligne de
+    # validation ci-dessus, qui voyage maintenant avec `wall`) : si elle ne part pas, il en reste un,
+    # et c'est pourquoi cet échec ne bloque pas. Mais il ne se tait plus — la forge est le support
+    # d'audit qu'un humain relit, et une note absente y est indistinguable d'une note jamais due.
+    posted =
       comment(
         forge,
         repo,
@@ -485,7 +504,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         Keyword.put(forge_opts, :dedup_signature, "[provenance-wall-skipped:pr-#{pr_number}]")
       )
 
-    :ok
+    case posted do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "GatekeeperSeal: PR ##{pr_number} merged WITHOUT the provenance wall (#{inspect(why)}), " <>
+            "and the note saying so could NOT be posted (#{inspect(reason)}). The validation line " <>
+            "of the seal carries the fact, so the ticket is not silent — but this PR now lacks its " <>
+            "own dedicated mark on the forge."
+        )
+
+        :ok
+    end
   end
 
   defp comment(forge, repo, issue_n, body, opts) do
@@ -577,13 +609,14 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   sentences on purpose: an operator reading this comment months later must be able to tell a
   verdict from an absence of verdict without opening the PR.
   """
-  @spec promote_comment(integer(), integer(), String.t(), [String.t()]) :: String.t()
-  def promote_comment(issue_n, pr_number, producer, approvers \\ []) do
+  @spec promote_comment(integer(), integer(), String.t(), [String.t()], :ok | {:skipped, term()}) ::
+          String.t()
+  def promote_comment(issue_n, pr_number, producer, approvers \\ [], wall \\ :ok) do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
-    - #{validation_line(approvers)}
+    - #{validation_line(approvers, wall)}
     - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge **rebase** (historique linéaire) — ce ticket sera fermé juste après ce commentaire.
     #{interim_note(approvers)}
     """
@@ -592,12 +625,27 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # Judged path: name the accounts. Zero-judge path: say WHY there is no verdict, and on whose
   # authority the merge happened — the card. « Aucun juge n'a répondu » would describe a failure;
   # « la carte n'en pose pas » describes the design.
-  defp validation_line([]),
+  # « IL A ÉTÉ FRANCHI » ÉTAIT INCONDITIONNEL, et c'est la seule phrase de ce commentaire qui parlait
+  # du mur. Sur le chemin zéro-juge, elle est TOUT ce qui atteste la légitimité du merge — la carte
+  # ne pose aucun juge, donc le plancher mécanique est le dernier étage. Elle s'imprimait à
+  # l'identique que le mur ait tourné ou non.
+  #
+  # Le pire n'était même pas le silence : la note « Provenance NON vérifiée » posée juste après
+  # (BL-6-47.4) DIT le contraire, sur le même ticket. Un opérateur relisant six mois plus tard y
+  # trouvait deux phrases opposées et aucune raison de préférer l'une. Une contradiction lisible est
+  # plus coûteuse qu'une absence : elle fait douter de tout le reste du sceau.
+  defp validation_line([], :ok),
     do:
       "**Validée par** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
         "nominal) ; le mur de provenance reste le plancher mécanique, lui, et il a été franchi."
 
-  defp validation_line(approvers),
+  defp validation_line([], {:skipped, why}),
+    do:
+      "**Validée par** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
+        "nominal), et le mur de provenance **n'a PAS tourné** (`#{inspect(why)}`). Ce merge ne " <>
+        "repose donc sur AUCUN contrôle mécanique : ni jury, ni provenance."
+
+  defp validation_line(approvers, _wall),
     do:
       "**Validée par** : " <>
         Enum.map_join(approvers, ", ", &"`#{&1}`") <>
@@ -616,8 +664,20 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   # Best-effort by construction: this runs AFTER a real merge, and a forge hiccup here must not
   # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims
   # nothing about judges that may exist. Under-claiming is the only safe direction for a trace.
+  #
+  # UNSCOPED, AND NOW IT IS ASKED FOR. This read used to pass no `:head_sha` at all, which the jury
+  # silently took as "every review counts". Since that implicit mode is gone, the choice has to be
+  # stated: `head_sha: :unscoped`. It is defensible HERE and nowhere else on this rail — this runs
+  # AFTER a real merge and feeds a sentence, not a decision, and its only failure direction is
+  # under-claiming.
+  #
+  # ⚠ RESIDUAL, on record: unscoped means an approval placed on an EARLIER commit can be listed
+  # among the approvers of the merged one. The sentence over-claims by exactly that much. Scoping it
+  # properly needs the merged sha threaded down through `seal_and_merge/8` → `do_seal/9`, or a
+  # second forge read on a best-effort post-merge path; neither is this fiche's subject, and the
+  # decision path it protects is `step_dispatcher`, which is now fail-closed.
   defp approving_judges(forge, repo, pr_number, forge_opts) do
-    case forge.pr_review_state(repo, pr_number, forge_opts) do
+    case forge.pr_review_state(repo, pr_number, Keyword.put(forge_opts, :head_sha, :unscoped)) do
       {:ok, %{verdicts: verdicts}} when is_map(verdicts) ->
         verdicts
         |> Enum.filter(fn {_login, verdict} -> verdict == :approved end)

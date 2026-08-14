@@ -170,7 +170,7 @@ defmodule Fleet.Forge.Client do
     sig = Keyword.get(opts, :dedup_signature)
 
     with {:ok, config} <- resolve_config(opts) do
-      if sig && comment_signed?(config, repo, issue_number, sig, opts) do
+      if sig && signed_or_warn(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
         case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
@@ -651,6 +651,33 @@ defmodule Fleet.Forge.Client do
           Process.sleep(delay)
           do_merge(config, repo, index, method, delay, attempts_left - 1)
         else
+          # DEUX SILENCES DANS UN SEUL `else`, et le premier est le plus cher.
+          #
+          # Gitea rend `405` pour deux faits opposes : « la mergeabilite est encore en cours de
+          # calcul » (transitoire, il faut reessayer) et « cette PR n'est pas fusionnable »
+          # (definitif : conflits, controles en echec). Rien de STRUCTURE ne les separe dans la
+          # reponse recue — seul le libelle anglais le fait, `"try again later"`. La detection
+          # textuelle reste donc, faute d'autre chose, mais elle ne peut plus DEGRADER EN SILENCE :
+          # le jour ou Gitea reformule ce message, tout `405` devient « definitif », les merges
+          # echouent, et rien ne disait pourquoi — seule la branche RECONNUE ecrivait au journal.
+          #
+          # Le corps entier est journalise, et c'est delibere : il est a la fois le diagnostic du
+          # jour et la matiere du jour ou un champ structure apparaitra. On ne peut pas affirmer
+          # qu'il n'en existe pas — on peut faire en sorte de le voir arriver.
+          _ =
+            if merge_checking?(body) do
+              Logger.warning(
+                "ForgeClient: merge_pr ##{index} — mergeability still computing after " <>
+                  "#{@merge_checking_retries} attempts, giving up: #{inspect(body)}"
+              )
+            else
+              Logger.warning(
+                "ForgeClient: merge_pr ##{index} — HTTP 405 NOT recognised as transient " <>
+                  "(no \"try again later\" in the message) → treated as DEFINITIVE. If Gitea " <>
+                  "reworded it, this line is the only thing that says so: #{inspect(body)}"
+              )
+            end
+
           err
         end
 
@@ -858,10 +885,34 @@ defmodule Fleet.Forge.Client do
   @spec commit_ci_state(String.t(), String.t(), Keyword.t()) ::
           {:ok, :success | :pending | :failure | :none} | {:error, term()}
   def commit_ci_state(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
+    with {:ok, {state, _contexts}} <- commit_ci_report(repo, sha, opts), do: {:ok, state}
+  end
+
+  @doc """
+  The same verdict, plus the CONTEXTS that produced it (sorted, deduplicated).
+
+  The paragraph above is right that the merge question is answered by the worst-of alone — and it
+  is the WHOLE answer only for a caller that decides. A caller that must TELL A HUMAN (or a judge)
+  what the machine did needs to say WHICH rail ran, because `:success` is silent about that and a
+  green from a placeholder rail is indistinguishable from a green from a real harness (6-140).
+
+  Additive on purpose: `commit_ci_state/3` keeps its contract and every seam that implements it
+  keeps working. A caller pays for the contexts only where it renders them.
+  """
+  @spec commit_ci_report(String.t(), String.t(), Keyword.t()) ::
+          {:ok, {:success | :pending | :failure | :none, [String.t()]}} | {:error, term()}
+  def commit_ci_report(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, statuses} <-
            paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
-      {:ok, statuses |> current_per_context() |> worst_ci_state()}
+      contexts =
+        statuses
+        |> Enum.map(& &1["context"])
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, {statuses |> current_per_context() |> worst_ci_state(), contexts}}
     end
   end
 
@@ -935,6 +986,32 @@ defmodule Fleet.Forge.Client do
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 
+  # Le doute ne change pas le GESTE (on poste), il change ce qu'on en SAIT. `false` ici veut dire
+  # « poste » dans les deux cas, mais un seul des deux est une mesure.
+  defp signed_or_warn(config, repo, issue_number, sig, opts) do
+    case comment_signed?(config, repo, issue_number, sig, opts) do
+      {:ok, signed?} ->
+        signed?
+
+      {:unverified, why} ->
+        Logger.warning(
+          "ForgeClient: dedup NOT verified on #{repo}##{issue_number} (#{inspect(why)}) — posting " <>
+            "anyway (refusing would drop a legitimate comment), but this marker may be a DUPLICATE. " <>
+            "These signatures are business-bearing (rounds budget, seal, escalation), so the cost " <>
+            "lands elsewhere and later: signature=#{inspect(sig)}"
+        )
+
+        false
+    end
+  end
+
+  # ⚠ `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menaient a
+  # poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
+  # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
+  # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
+  # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
+  # ailleurs, plus tard, et loin d'ici. Rendre le doute distinct est ce qui permet de le NOMMER au
+  # moment ou il naît ; c'est le seul endroit ou la correlation existe encore.
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
@@ -942,7 +1019,7 @@ defmodule Fleet.Forge.Client do
         trusted =
           cond do
             Keyword.get(opts, :dedup_any_author, false) ->
-              comments
+              {:ok, comments}
 
             true ->
               # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
@@ -952,17 +1029,27 @@ defmodule Fleet.Forge.Client do
               # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
               case trusted_logins(config, opts) do
                 {:ok, logins} ->
-                  Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)
+                  {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-                {:error, _} ->
-                  []
+                # LA LECTURE A REUSSI, LES IDENTITES NON. `[]` disait « aucun commentaire de
+                # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a
+                # ecrit quoi. Second pliage du meme genre que celui d'en dessous, une branche plus
+                # loin.
+                {:error, why} ->
+                  {:unverified, {:trusted_logins, why}}
               end
           end
 
-        Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)
+        case trusted do
+          {:unverified, _} = unverified ->
+            unverified
 
-      _ ->
-        false
+          {:ok, list} ->
+            {:ok, Enum.any?(list, &String.contains?(&1["body"] || "", sig))}
+        end
+
+      other ->
+        {:unverified, {:comments_unreadable, other}}
     end
   end
 

@@ -25,4 +25,4 @@ end
 # ON → `Remediation` routes trivial conflicts to auto-resolution (the jury still re-judges the
 # pushed head) and gives the gatekeeper one pass before the human. OFF → producer then arch,
 # unchanged. Seams: `:conflict_diagnoser`, `:conflict_applier`.
-config :fleet_pilot, conflict_diagnosis?: false
+config :lcars_fleet, pilot_conflict_diagnosis?: false

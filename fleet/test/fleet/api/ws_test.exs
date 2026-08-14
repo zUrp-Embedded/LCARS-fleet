@@ -3,6 +3,32 @@ defmodule Fleet.API.WSTest do
 
   alias Fleet.API.WS
 
+  # 6-056 — LE POINT DE TERMINAISON EST DEBRANCHE PAR DEFAUT, ET LE MODULE RESTE INTACT.
+  #
+  # Il projette le flux d'evenements COMPLET sans authentification : un client qui ne demande rien
+  # recoit tout, y compris une CAPTURE DE L'ECRAN tmux d'un pod (`wake.failed`). La posture gravee
+  # « api REST/WS no-auth by design » vaut pour de l'observabilite, pas pour ca.
+  #
+  # DEBRANCHE et non SUPPRIME, sur arbitrage user : « personne ne le consomme » est une mesure sur
+  # CE depot a CET instant (deux candidats ecartes un par un le 2026-08-14 — le deck Python lit
+  # `/api/pods` en HTTP, le deck Elixir n'a aucune WebSocket et son DESIGN dit la separation). Une
+  # coupure reversible dit la meme chose qu'une suppression et se rend en une ligne.
+  #
+  # Ces deux tests sont ce qui rend la coupure REVERSIBLE plutot qu'oubliee : le jour ou quelqu'un
+  # rallume le commutateur, le second prouve que la route revient telle quelle.
+  describe "6-056 — la route est un commutateur, pas une suppression" do
+    alias Fleet.API.Application, as: APIApp
+
+    test "par defaut : aucune route /ws dans le dispatch" do
+      assert APIApp.ws_route() == []
+    end
+
+    test "commutateur arme : la route revient, sur le meme handler" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :api_serve_ws, true)
+      assert [{"/ws", WS, []}] = APIApp.ws_route()
+    end
+  end
+
   describe "topic_matches?/2" do
     test "empty topics → match all" do
       assert WS.topic_matches?("anything", [])

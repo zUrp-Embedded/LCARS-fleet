@@ -86,15 +86,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Topology lock ──
         check_boot_order_f8(root),
         check_catalogue_before_freeze(root),
+        check_event_registry_loaded_before_children(root),
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
+        check_gitea_template_expansion(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
+        check_no_legacy_config_namespace(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
+        check_mcp_tool_effects(root),
+        check_cap_profile_project_keys(root),
+        check_modop_tools_granted(root),
+        check_proven_image_regime(root),
+        check_verifier_covers_rail(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
@@ -885,9 +893,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # Verifies that the anti-root self-check exists in the boot path
-  # (config/runtime.exs). Red if it disappears. The runtime boot guard lives in
-  # runtime.exs (:prod block); this check guards its presence. Post-strip confirmation
-  # looser than the grep (`root` alone): the long marker may live partly
+  # (config/runtime.exs). Red if it disappears; this check guards its PRESENCE, not its shape —
+  # the guard is unconditional on environment, and this wall stays green either way. Post-strip
+  # confirmation looser than the grep (`root` alone): the long marker may live partly
   # in a comment on the line, only `root` needs to survive in the code.
   @doc false
   def check_no_root_runtime_guard(root) do
@@ -1017,17 +1025,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Enum.flat_map(opts.files, fn rel ->
         abs = Path.join(root, rel)
 
-        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; on an ABSENT file
-        # `grep_lines` returns `[]` (0 residue) → `:pass` FOREVER, even though the target moved/was
-        # deleted and the contract is no longer verified. An absent residue target is therefore a
-        # FAILURE, not a silent green — the check must be told its file vanished.
-        if File.exists?(abs) do
-          abs
-          |> grep_lines(opts.pattern)
-          |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
-          |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
-        else
-          ["#{rel}:MISSING — residue-check target absent (hollow-green guard, R0-EVT-012)"]
+        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; a file it cannot
+        # read yields 0 residue → `:pass` FOREVER, even though the target moved/was deleted and the
+        # contract is no longer verified. A residue target the check cannot read is therefore a
+        # FAILURE, not a silent green.
+        #
+        # ONE read, and it decides both. `File.exists?/1` answered only the ABSENT half: it is TRUE
+        # for a file present and unreadable (permissions, I/O error, a path that became a
+        # directory), which sent the flow into the reading branch where the swallowed error became
+        # zero lines, i.e. compliance. The half that was guarded is the half a moved file trips; the
+        # half that was not is the one a chmod trips, and nothing in the output told them apart.
+        # Reading once also removes the window between the test and the read.
+        case File.read(abs) do
+          {:ok, content} ->
+            content
+            |> grep_content(opts.pattern)
+            |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+            |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+
+          {:error, reason} ->
+            [
+              "#{rel}:MISSING(#{reason}) — residue-check target unreadable " <>
+                "(hollow-green guard, R0-EVT-012)"
+            ]
         end
       end)
 
@@ -1095,18 +1115,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # file Y" that rules `pass` on `evidence == []` therefore ALWAYS passes if Y
   # has been deleted. For a RESIDUE check, grep a glob of real files
   # (`Path.wildcard`), not a single potentially dead file path.
+  #
+  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` used to answer both.
+  # Absence is a state every caller models: a presence-prover reports the missing proof and fails,
+  # a residue check reads the file itself and turns it into evidence. Unreadability is not a state
+  # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
+  # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
+  # a path that became a directory, on a permission the runner lost; never in nominal operation,
+  # which is exactly why it was never noticed swallowing three absence-of-violation walls
+  # (`coord.backend.wired_or_pure`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
+  # which globs REAL files and would have reported compliance about one it could not open.
   defp grep_lines(path, regex) do
     case File.read(path) do
       {:ok, content} ->
-        content
-        |> String.split("\n")
-        |> Enum.with_index(1)
-        |> Enum.filter(fn {line, _} -> Regex.match?(regex, line) end)
-        |> Enum.map(fn {line, ln} -> {ln, line} end)
+        grep_content(content, regex)
 
-      _ ->
+      {:error, :enoent} ->
         []
+
+      {:error, reason} ->
+        raise "INSTRUMENT BROKEN — #{path}: #{:file.format_error(reason)} " <>
+                "(#{inspect(reason)}). A contract wall cannot report on a file it could not read; " <>
+                "refusing to answer rather than answering `no violation found`."
     end
+  end
+
+  defp grep_content(content, regex) do
+    content
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _} -> Regex.match?(regex, line) end)
+    |> Enum.map(fn {line, ln} -> {ln, line} end)
   end
 
   # Z3: single-app project — the task always runs at the project root (Mix sets the cwd
@@ -1171,6 +1210,66 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
+  # DEUX MECANISMES D'EXPANSION POUR LE MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN.
+  # La face `main` d'un projet est generee par GITEA depuis le repo-modele : l'expansion des
+  # `${VAR}` y est pilotee par le fichier de controle `.gitea/template`, une LISTE de chemins. Les
+  # faces `ops`/`workshop`, elles, sont ecrites par `Onboard.Scaffold`, qui expanse TOUT ce qu'il
+  # copie. Ajouter un placeholder a un fichier de `main` sans l'ajouter a cette liste ne casse rien
+  # ici : ca casse dans le projet livre, des mois plus tard.
+  #
+  # Mesure du 2026-08-12 sur `fleet/chifoumi` : `README.md` (liste) portait « # chifoumi », et
+  # `CLAUDE.md` (hors liste) portait « # ${REPO_NAME} » — dans le fichier meme que la fleet relit a
+  # chaque spawn de producteur, avec une date qui n'est pas une date et un en-tete LCARS malforme.
+  # Tous les projets crees par la fleet le portaient.
+  #
+  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN ${...} ». `ci.yml` contient
+  # `${GITHUB_REF}`, `${GITHUB_REPOSITORY}`, `${GITHUB_SHA}` — des variables du JOB CI, pas les
+  # notres. Les inscrire ici confierait a Gitea des noms qu'il ne connait pas, et le jour ou il
+  # expanserait l'inconnu en vide, le script CI partirait en morceaux. La liste des cinq variables
+  # est celle de `Onboard.Scaffold` : une seule autorite, des deux cotes.
+  defp check_gitea_template_expansion(root) do
+    face = Path.join([root, "priv", "catalogue", "project_template", "main"])
+    control = Path.join([face, ".gitea", "template"])
+    vars = ~w(REPO_NAME REPO_DESCRIPTION YEAR MONTH DAY)
+    re = ~r/\$\{(#{Enum.join(vars, "|")})\}/
+
+    listed =
+      case File.read(control) do
+        {:ok, c} ->
+          c |> String.split("\n", trim: true) |> Enum.map(&String.trim/1) |> MapSet.new()
+
+        _ ->
+          MapSet.new()
+      end
+
+    bearing =
+      face
+      |> Path.join("**")
+      |> Path.wildcard(match_dot: true)
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.filter(&Regex.match?(re, File.read!(&1)))
+      |> Enum.map(&Path.relative_to(&1, face))
+      |> MapSet.new()
+
+    missing = MapSet.difference(bearing, listed) |> Enum.sort()
+    extra = MapSet.difference(listed, bearing) |> Enum.sort()
+
+    %{
+      id: "template.gitea_expansion",
+      status: if(missing == [] and extra == [], do: :pass, else: :fail),
+      remediation:
+        "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
+          "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
+          "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
+      evidence:
+        Enum.map(missing, &"porteur NON liste: #{&1}") ++
+          Enum.map(extra, &"liste mais sans variable: #{&1}"),
+      note:
+        "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
+          "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
+    }
+  end
+
   # Jumeau du precedent, et meme raison d'exister : un ORDRE dans `start/2` que le compilateur ne
   # voit pas. `application.ex` l'ecrit noir sur blanc — *« the images below FREEZE their snapshot
   # from this disk, and a snapshot taken from an unchecked root would carry the fault forward under
@@ -1211,6 +1310,201 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         status: if(v < c and v < sp, do: :pass, else: :fail),
         evidence: ["offsets in application.ex: verify=#{v} cap_profile=#{c} sp_builder=#{sp}"],
         note: "boot-order lock, twin of boot.order_f8"
+      }
+    end
+  end
+
+  # LE VERIFICATEUR AUTONOME AFFIRMAIT COUVRIR LE BOOT, ET L'EQUIVALENCE N'ETAIT TENUE PAR RIEN
+  # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
+  # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
+  # rail boot ». Mesure du 2026-08-14 : le boot en jouait SIX, le verificateur QUATRE —
+  # `validate_workshop_card!` et `validate_default_card_matrix!` manquaient. Un verificateur VERT
+  # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
+  #
+  # Les deux sequences sont lues A L'AST, pas au grep : une garde citee dans un commentaire ne doit
+  # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
+  # compare les APPELS de `validate_*!` dans les deux corps de fonction.
+  @doc false
+  def check_verifier_covers_rail(root) do
+    rel = "lib/fleet/pilot/application.ex"
+    ast = quoted!(root, rel)
+
+    boot = validate_calls(ast, :step_children!)
+    verifier = validate_calls(ast, :verify_cards_and_roles!)
+
+    manquantes = boot |> Enum.reject(&(&1 in verifier)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(boot) ->
+        broken_result("boot.verifier_covers_rail", "validate_*! call in step_children!/0")
+
+      measured_nothing?(verifier) ->
+        broken_result(
+          "boot.verifier_covers_rail",
+          "validate_*! call in verify_cards_and_roles!/1"
+        )
+
+      true ->
+        %{
+          id: "boot.verifier_covers_rail",
+          remediation:
+            "ajouter la garde au corps de `verify_cards_and_roles!/1` — le verificateur autonome " <>
+              "affirme jouer ce que le boot joue, et une garde presente au boot seul rend un vert " <>
+              "qui precede un boot rouge",
+          status: if(manquantes == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(manquantes, &"#{rel}: #{&1} au boot, absente du verificateur autonome"),
+          # Le sens de la couverture est ORIENTE : le verificateur doit contenir le boot, jamais
+          # l'inverse. Une garde qu'il joue en PLUS est conservatrice (un rouge de trop, jamais un
+          # vert menteur) — d'ou deux comptes affiches et pas une egalite.
+          note:
+            "boot: #{MapSet.size(boot)} gardes `validate_*!` · verificateur: " <>
+              "#{MapSet.size(verifier)} — le boot est couvert"
+        }
+    end
+  end
+
+  # Les `validate_<x>!(…)` appelees dans le corps de `fun` — a l'AST. Le nom de la fonction porte
+  # l'intention (`validate_` + `!`), et c'est ce qui permet de comparer deux sequences sans tenir
+  # une troisieme liste qui deriverait a son tour.
+  defp validate_calls(ast, fun) do
+    ast
+    |> collect(fn
+      {:def, _, [{^fun, _, _} | _] = body} -> [body]
+      {:defp, _, [{^fun, _, _} | _] = body} -> [body]
+      _ -> nil
+    end)
+    |> List.flatten()
+    |> collect(fn
+      {name, _, _args} when is_atom(name) ->
+        s = Atom.to_string(name)
+        if String.starts_with?(s, "validate_") and String.ends_with?(s, "!"), do: [s], else: nil
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
+  end
+
+  # WHAT THE PROVEN-IMAGE REGIME IS ACTUALLY WORTH, AND THE ONE SWITCH THAT VOIDS IT. `SPBuilder`
+  # renders its templates with `EEx.eval_string/2` — EEx evaluates arbitrary Elixir at render time,
+  # in the DAEMON's process, with the whole fleet's rights and not a confined pod's. Two regimes
+  # decide which bytes get evaluated:
+  #
+  #   * image PUBLISHED (the default, frozen at boot AFTER `Catalogue.verify!()`, sha256-fingerprinted,
+  #     served from `:persistent_term`) -- a mid-life disk mutation changes nothing until a restart;
+  #   * NO image -> live disk at every render, re-read each time, verified by nothing.
+  #
+  # The second regime exists on purpose (the suites' hermetic default, tooling) and its twin says so
+  # in `CapProfile.Catalog.read_role/2`. What has no legitimate reason to exist is that switch being
+  # flipped ANYWHERE ELSE than `config/test.exs`: it silently moves a production daemon onto
+  # evaluate-whatever-is-on-disk, and nothing in the code would look different.
+  @doc false
+  def check_proven_image_regime(root) do
+    files = Path.wildcard(Path.join(root, "config/*.exs"))
+
+    disabling =
+      for f <- files,
+          key <- disabled_image_keys(quoted!(root, Path.relative_to(f, root))),
+          do: {Path.basename(f), key}
+
+    offenders = disabling |> Enum.reject(fn {base, _} -> base == "test.exs" end) |> Enum.sort()
+
+    cond do
+      measured_nothing?(files) ->
+        broken_result("boot.proven_image_regime", "file under config/")
+
+      # `config/test.exs` disables BOTH images by design. Finding none means the reader stopped
+      # seeing the switch -- and a wall that cannot see its subject passes everything.
+      measured_nothing?(disabling) ->
+        broken_result("boot.proven_image_regime", "publish_image switch in config/")
+
+      true ->
+        %{
+          id: "boot.proven_image_regime",
+          remediation:
+            "keep `cap_profile_publish_image` / `sp_builder_publish_image` false in config/test.exs " <>
+              "ONLY: without a published image the SP templates are re-read from live disk at every " <>
+              "render and EEx-evaluated in the daemon, verified by nothing",
+          status: if(offenders == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(offenders, fn {file, key} ->
+              "config/#{file}: #{key} disabled outside the hermetic test config"
+            end),
+          note:
+            "#{length(disabling)} switch(es) off, all in test.exs — proven-image regime intact"
+        }
+    end
+  end
+
+  # `config :lcars_fleet, <key>: false` for either image key, read from the AST: a key named in a
+  # comment must not be able to redden this, and one hidden in a keyword list must not escape it.
+  defp disabled_image_keys(ast) do
+    ast
+    |> collect(fn
+      {:config, _, [:lcars_fleet, opts]} when is_list(opts) ->
+        for {k, false} <- opts,
+            k in [:cap_profile_publish_image, :sp_builder_publish_image],
+            do: k
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+  end
+
+  # THIRD OF THE BOOT-ORDER FAMILY, and the one whose subject is a DEFAULT rather than a call.
+  # `Bus.assert_authorized!/1` permits every event while the registry is empty
+  # (`@permit_empty_default true`). That default is not laxity: it holds the window between the
+  # first line of boot and the moment `Catalog.load!/0` populates the registry, and `load!/0` RAISES
+  # on an absent, invalid or empty `events.yaml` — so a fleet that reaches its first broadcast has a
+  # loaded registry, always.
+  #
+  # THE GUARANTEE LIVES IN ANOTHER MODULE AT ANOTHER MOMENT, and nothing held it. `Catalog.load!/0`
+  # sits in `EventRouter.Application.init/1` above the children list by convention alone; moving it
+  # one line down, or into a child's `init`, widens the permissive window to the whole boot without
+  # a single test going red — the failure needs an unregistered event AND a real supervision tree,
+  # which the hermetic suite does not play (`event_router_load_event_registry: false` in test.exs).
+  #
+  # MEASURED, because the register's fiche asks for the opposite and the number decides: flipping
+  # `@permit_empty_default` to `false` yields **101 failures out of 2698**. The permissive default
+  # is load-bearing. What was missing was never the fail-closed posture — it was this lock.
+  @doc false
+  def check_event_registry_loaded_before_children(root) do
+    rel = "lib/fleet/event_router/application.ex"
+    src = File.read!(Path.join(root, rel))
+
+    positions = %{
+      load: :binary.match(src, "Fleet.EventRouter.Catalog.load!()"),
+      children: :binary.match(src, "children =")
+    }
+
+    remediation =
+      "keep `Fleet.EventRouter.Catalog.load!()` ABOVE the children list in " <>
+        "EventRouter.Application.init/1: it is what closes the window that " <>
+        "`Bus.@permit_empty_default true` deliberately leaves open, and it raises on an absent, " <>
+        "invalid or empty events.yaml"
+
+    if Enum.any?(positions, fn {_, m} -> m == :nomatch end) do
+      %{
+        id: "boot.event_registry_before_children",
+        remediation: remediation,
+        status: :fail,
+        evidence: ["#{rel}: `Catalog.load!()` or the children list not found — fail-closed"],
+        note: "boot-order lock, third of the family (F8, catalogue_before_freeze)"
+      }
+    else
+      %{load: {l, _}, children: {c, _}} = positions
+
+      %{
+        id: "boot.event_registry_before_children",
+        remediation: remediation,
+        status: if(l < c, do: :pass, else: :fail),
+        evidence: ["offsets in #{rel}: Catalog.load!=#{l} children=#{c}"],
+        note:
+          "the permissive empty-registry default is safe only while this call precedes every " <>
+            "process that can broadcast"
       }
     end
   end
@@ -1410,18 +1704,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # bounds its surface (BL-6-44).
   # The check's own file is on the list by NECESSITY: it must name the word in order to forbid it.
   # That is the one exemption needing no antibody — a lock does not trap itself.
+  #
+  # WHAT IT DOES NOT REACH, and the sentence above must not be read past it: THE SOURCE TREE ONLY.
+  # The word also lives in the SP corpus (`priv/catalogue*/sp_builder/**`), which is not scanned
+  # here — and that is the population where the prior does its work, since those texts are injected
+  # into the agents' own context. Measured 2026-08-13: the block `core/pod-sanctuary`, composed into
+  # SIX roles, opens on the heading "## Ton monde (sanctuaire)" with NO antibody anywhere in it.
+  # Extending the scan there is not a lint change but a change to authored prompt material, whose
+  # calibration belongs to its author — the finding is on record, the edit is not this wall's to
+  # make.
+  #
+  # A WHITELIST ENTRY THAT PROTECTS NOTHING IS A PRE-AUTHORIZED SLOT. `lib/fleet/spawner/pod/
+  # launch_spec.ex` sat here after the word had left it: the exemption survived its subject, and the
+  # day the word came back that file would have carried it exempt and unremarked. An allowlist is
+  # audited by re-measuring, never by reading it.
   @sanctuary_allowed ~w(
     bin/bwrap_launch.sh
     lib/fleet/cap_profile/invariants.ex
-    lib/fleet/spawner/pod/launch_spec.ex
     lib/mix/tasks/lcars.contracts.check.ex
   )
 
   @doc false
+  # BL-6-05 — LE MUR D'EXHAUSTIVITE DE LA MIGRATION DE NAMESPACE, et il est ne AVANT elle.
+  #
+  # Les 15 atoms `:fleet_<dom>` etaient LEGACY-VALIDES (D-07) : ils fonctionnaient, la config ETS
+  # etant keyee par atom. Ce qu'ils coutaient etait a l'ENTREE — dix messages de Mix a chaque
+  # `mix test`, disant a qui decouvre le depot que sa configuration est fausse.
+  #
+  # ⚠ CE CHECK EXISTE PARCE QUE LE MODE DE DEFAILLANCE EST SILENCIEUX. Un site oublie appelle
+  # `Application.get_env(:fleet_x, :k)` sur un namespace desormais vide : il recoit le DEFAUT, pas
+  # une erreur. La config cesse de s'appliquer sans que rien ne le dise, et un test qui n'exerce pas
+  # ce knob reste vert. Une migration de 535 sites ne peut pas se verifier a la relecture.
+  #
+  # Deux classes ont echappe au balayage textuel de la migration, et elles sont la raison d'etre de
+  # ce mur : la forme PIPE (`:fleet_pilot |> Application.get_env(:max_fan, …)`, ou l'atome precede
+  # l'appel) et les cles DYNAMIQUES (une variable, un attribut de module). La premiere est attrapee
+  # ici ; la seconde ne peut l'etre par personne — d'ou la regle posee au meme moment : une cle de
+  # config se lit EN TOUTES LETTRES a son point d'usage, jamais assemblee.
+  def check_no_legacy_config_namespace(root) do
+    scanned =
+      ["lib", "test", "config"]
+      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs}"])) end)
+      |> Enum.reject(&(&1 =~ ~r{/(_build|tmp)/}))
+
+    offenders =
+      scanned
+      |> Enum.filter(fn f ->
+        rel = Path.relative_to(f, root)
+
+        rel != "lib/mix/tasks/lcars.contracts.check.ex" and
+          match?({:ok, c} when is_binary(c), File.read(f)) and
+          File.read!(f) =~
+            ~r/:fleet_(api|cap_profile|catalogue|coord|credentials|event_router|mcp|observation|pilot|project|sp_builder|spawner|starfleet|task_queue|workflow)\b/
+      end)
+      |> Enum.map(&Path.relative_to(&1, root))
+
+    if measured_nothing?(scanned) do
+      broken_result("config.no_legacy_config_namespace", "source under lib/, test/ or config/")
+    else
+      %{
+        id: "config.no_legacy_namespace",
+        remediation:
+          "un atome de config `:fleet_<domaine>` subsiste. La config vit sous `:lcars_fleet` avec " <>
+            "la cle prefixee par son domaine (`:fleet_api, :http_port` => `:lcars_fleet, " <>
+            ":api_http_port`) — le prefixe n'est pas cosmetique : `http_port` et `start_listener` " <>
+            "COLLISIONNENT entre `api` et `observation`, une fusion a plat ferait ecouter un " <>
+            "service sur le port d'un autre, sans un mot",
+        status: if(offenders == [], do: :pass, else: :fail),
+        evidence: offenders,
+        note: "les 15 namespaces `:fleet_*` sont morts avec la migration (BL-6-05, D-07 executee)"
+      }
+    end
+  end
+
+  @doc false
   def check_sanctuary_contained(root) do
+    # EVERY FILE OF THE THREE TREES, not the three source extensions. `**/*.{ex,exs,sh}` could not
+    # see `bin/claude_launch.egress`, which carried the word, in a scanned directory, with no
+    # antibody — a carrier that escaped by file extension alone. `bin/` holds `.sh`, `.py`,
+    # `.egress`, `.identity` and two extensionless launchers; a wall that names a directory and
+    # measures three suffixes of it says more than it checks. Non-text files (the `__pycache__`
+    # bytecode) drop out on `String.valid?/1` rather than on a suffix list that would have to be
+    # kept in step with them.
     scanned =
       ["lib", "bin", "etc"]
-      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs,sh}"])) end)
+      |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**"])) end)
+      |> Enum.reject(&File.dir?/1)
 
     offenders =
       scanned
@@ -1430,6 +1798,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
         rel not in @sanctuary_allowed and
           match?({:ok, c} when is_binary(c), File.read(f)) and
+          String.valid?(File.read!(f)) and
           File.read!(f) =~ ~r/sanctuaire|sanctuary/i
       end)
       |> Enum.map(&Path.relative_to(&1, root))
@@ -1447,7 +1816,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         status: if(offenders == [], do: :pass, else: :fail),
         evidence: offenders,
         note:
-          "le mot reste borne aux #{length(@sanctuary_allowed)} fichiers qui portent son anticorps (BL-6-44)"
+          "#{length(scanned)} fichier(s) de lib/, bin/ et etc/ balayes — le mot y reste borne aux " <>
+            "#{length(@sanctuary_allowed)} qui portent son anticorps (BL-6-44). Le corpus SP " <>
+            "(priv/catalogue*/sp_builder/**) est HORS de ce perimetre : c'est de la matiere de " <>
+            "prompt, dont la calibration appartient a son auteur"
       }
     end
   end
@@ -1480,43 +1852,71 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       :required ->
-        offenders =
+        # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
+        # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
+        # alone. The population is a different question: these are TWO roots, only one of them is
+        # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
+        # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`
+        # and a `:pass` that had not opened a single file — indistinguishable, in the output, from a
+        # green earned on eleven conforming sourcers.
+        #
+        # The comment above this function already named the risk: "a green that checked nothing".
+        # It guarded the scope and not the population, which is exactly the half that was missing.
+        sourcers =
           [
             Path.join(dir, "modules.d"),
             Path.join(root, "etc")
           ]
           |> Enum.flat_map(fn d -> Path.wildcard(Path.join(d, "*.sh")) end)
-          |> Enum.filter(fn f ->
-            # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
-            # whole contracts run, turning a shell-hygiene check into a gate outage.
-            case File.read(f) do
-              {:ok, content} ->
-                String.contains?(content, "provision-lib.sh") and
-                  not Regex.match?(~r/^set -[a-z]*u[a-z]*\b/m, content)
 
-              {:error, _} ->
-                false
-            end
-          end)
-
-        %{
-          id: "shell.sourcers_set_strict",
-          remediation:
-            "a script sourcing provision-lib.sh must `set -u` (`set -euo pipefail`): the library " <>
-              "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
-              "expands to \"\" and the recipe provisions the wrong thing in silence",
-          status: if(offenders == [], do: :pass, else: :fail),
-          evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
-          note:
-            "every sourcer of provision-lib.sh sets -u (BL-6-36: bash's silent-coercion class)"
-        }
+        if measured_nothing?(sourcers) do
+          broken_result("shell.sourcers_set_strict", "sourcer scripts")
+        else
+          do_check_sourcers(sourcers, root)
+        end
     end
   end
 
+  defp do_check_sourcers(sourcers, root) do
+    offenders =
+      sourcers
+      |> Enum.filter(fn f ->
+        # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
+        # whole contracts run, turning a shell-hygiene check into a gate outage.
+        case File.read(f) do
+          {:ok, content} ->
+            String.contains?(content, "provision-lib.sh") and
+              not Regex.match?(~r/^set -[a-z]*u[a-z]*\b/m, content)
+
+          {:error, _} ->
+            false
+        end
+      end)
+
+    %{
+      id: "shell.sourcers_set_strict",
+      remediation:
+        "a script sourcing provision-lib.sh must `set -u` (`set -euo pipefail`): the library " <>
+          "sets no flags of its own (correct for a sourced file), so an undefined variable " <>
+          "expands to \"\" and the recipe provisions the wrong thing in silence",
+      status: if(offenders == [], do: :pass, else: :fail),
+      evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
+      note:
+        "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
+          "(BL-6-36: bash's silent-coercion class)"
+    }
+  end
+
   # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime
-  # cannot create it: the fleet runs as the human, `/home` belongs to root. The creator is the
-  # container entrypoint, and its `install -d` line is a hand-written mirror of
-  # `Fleet.Layout.face_root/1` in another language — the exact shape that drifts without a word.
+  # cannot create it: the fleet runs as the human, `/home` belongs to root. Two creators write it,
+  # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
+  # that drifts without a word.
+  #
+  # THE WALL HELD ONE OF THE TWO, and the one it held is the narrower. Until 2026-08-13 it read the
+  # docker entrypoint alone, so it was green on a rail that recognises THREE substrates
+  # (`docker`, `wsl`, `linux`) while creating the zones on one. On `wsl` they existed "by history of
+  # the substrate" — by hand, one day, on the author's machine — and on a native `linux`, not at
+  # all. Same failure as the `doc` face below, on the path the check did not cover.
   #
   # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
@@ -1529,6 +1929,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   def check_face_roots_provisioned(root) do
     entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
+    module = Path.expand("deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
@@ -1547,8 +1948,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       :required ->
-        case {expected, read_install_zone_paths(entrypoint)} do
-          {nil, _} ->
+        case {expected, read_install_zone_paths(entrypoint), read_provision_zone_paths(module)} do
+          {nil, _, _} ->
             %{
               id: "layout.face_roots_provisioned",
               remediation: remediation,
@@ -1557,7 +1958,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               note: "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"
             }
 
-          {_, nil} ->
+          {_, nil, _} ->
             %{
               id: "layout.face_roots_provisioned",
               remediation: remediation,
@@ -1566,8 +1967,24 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               note: "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"
             }
 
-          {expected, provisioned} ->
-            missing = expected -- provisioned
+          {_, _, nil} ->
+            %{
+              id: "layout.face_roots_provisioned",
+              remediation: remediation,
+              status: :fail,
+              evidence: [Path.relative_to(module, root)],
+              note:
+                "the provision module's `2775` zone table is unreadable — guard fail-closed " <>
+                  "(this is the creator on every substrate; the entrypoint only covers docker)"
+            }
+
+          {expected, at_boot, on_every_substrate} ->
+            missing =
+              Enum.map(expected -- at_boot, &"#{&1}: absent de l'entrypoint docker") ++
+                Enum.map(
+                  expected -- on_every_substrate,
+                  &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
+                )
 
             %{
               id: "layout.face_roots_provisioned",
@@ -1575,8 +1992,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               status: if(missing == [], do: :pass, else: :fail),
               evidence: missing,
               note:
-                "every Fleet.Layout face root is created by the entrypoint " <>
-                  "(#{length(expected)} face(s): #{Enum.join(expected, ", ")})"
+                "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
+                  "miroirs — le module provision (tout substrat) et l'entrypoint docker (l'ordre " <>
+                  "de boot l'exige avant `provision apply`) : #{Enum.join(expected, ", ")}"
             }
         end
     end
@@ -1632,6 +2050,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       tail |> String.split() |> Enum.filter(&String.starts_with?(&1, "/"))
     else
       _ -> nil
+    end
+  end
+
+  # The face zones of the PROVISION module — the substrate-agnostic creator. Read from its table
+  # (`"<path> <mode> <owner>"`, one entry per line), and only the `2775` rows: the module also
+  # provisions `/local` and the token dir, which are not faces.
+  #
+  # WHY THERE ARE TWO MIRRORS AND WHY BOTH ARE HELD HERE. The docker entrypoint creates these zones
+  # too, and that is not a forgotten duplicate: it clones the source into `/home/projects/LCARS`
+  # long BEFORE it calls `provision apply`, so the zones must exist earlier than the module runs.
+  # Boot ordering is the reason for the second mirror. What must never happen is the two drifting
+  # from `Fleet.Layout`, or from each other — so the check compares BOTH against the code, and its
+  # evidence says which mirror is short. A wall that held one of two mirrors was green on a fleet
+  # whose `wsl` and `linux` substrates created no zone at all.
+  defp read_provision_zone_paths(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        case Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
+          [] -> nil
+          rows -> rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -1828,8 +2270,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # to an ungated body, and such a tool is callable by ANY pod with nothing said about it.
   #
   # Two admissible forms, and no third:
-  #   * POD-SCOPED — the clause head matches `%{pod_id: _}`. Identity is the CHANNEL (one pod, one
-  #     socket), never the wire.
+  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the tool's
+  #     subject comes from the socket (one pod, one socket) and never from the wire. Receiving
+  #     `%{pod_id: _}` is not the property: the acceptor hands that map to every tool alike.
   #   * ROLE-GATED — the body calls a `Delegation` function whose own body calls
   #     `require_architect`/`require_onboarder`, which resolve role AND repo from the spawn binding.
   # A clause whose body is a bare `{:error, _, state}` (bad arguments) is inert: it neither needs
@@ -1885,9 +2328,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     %{
       id: "mcp.tools_gated",
       remediation:
-        "give the tool a gate: pattern-match %{pod_id: _} in its handle_tool_call head " <>
-          "(channel identity) or route it through a Delegation function guarded by " <>
-          "require_architect/require_onboarder — tools/call does not re-check tools/list",
+        "give the tool a gate: bind the channel identity in its handle_tool_call head " <>
+          "(%{pod_id: pod_id}) AND derive the tool's subject from it in the body, or route it " <>
+          "through a Delegation function guarded by require_architect/require_onboarder — " <>
+          "tools/call does not re-check tools/list, and receiving pod_id is not using it",
       status: if(is_nil(broken) and ungated == [] and undeclared == [], do: :pass, else: :fail),
       evidence:
         cond do
@@ -1907,6 +2351,284 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
           "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
     }
+  end
+
+  # 6-106 — L'EXHAUSTIVITE DE LA CLASSIFICATION DES OUTILS, MECANIQUE OU RIEN.
+  #
+  # L'acceptor protegeait cinq outils sur ~17 contre le double effet, depuis une liste de mots nus
+  # posee LOIN des definitions. Deplacer cette liste a cote des `deftool` la rend traversable par un
+  # renommage — ce qui repare la panne du 2026-08-11 — mais ne repare PAS l'oubli : rien n'oblige
+  # celui qui ajoute un `deftool` a le classer.
+  #
+  # Ce check est ce qui l'oblige, et il porte dans les DEUX sens :
+  #   * un outil declare sans effet → le prochain mutateur ajoute est protege par defaut
+  #     (`:unknown` → single-flight) et le gate NOMME l'omission au lieu de la laisser dormir ;
+  #   * un effet declare pour un outil qui n'existe plus → le residu d'un renommage, exactement la
+  #     forme du bug d'origine, vue de l'autre cote.
+  #
+  # Meme posture d'instrument que son voisin : les findings sont des ABSENCES, et un parseur casse
+  # produit les memes. Le plancher attrape un instrument aveugle, il ne fige pas le nombre d'outils.
+  @doc false
+  def check_mcp_tool_effects(root) do
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+    classified = tool_effect_names(quoted!(root, tools_rel))
+
+    unclassified = declared |> Enum.reject(&(&1 in classified)) |> Enum.sort()
+    orphan = classified |> Enum.reject(&(&1 in declared)) |> Enum.sort()
+
+    broken =
+      cond do
+        MapSet.size(declared) < 12 ->
+          "only #{MapSet.size(declared)} deftool found (expected 12+)"
+
+        MapSet.size(classified) < 12 ->
+          "@tool_effects has #{MapSet.size(classified)} entries (12+)"
+
+        true ->
+          nil
+      end
+
+    %{
+      id: "mcp.tool_effects",
+      remediation:
+        "declare the tool's world-effect in `@tool_effects` of Fleet.MCP.PodTools, next to its " <>
+          "deftool: `:mutation` (changes the world → single-flight), `:protocol` (the pod's own " <>
+          "IN/OUT channel, whose re-emission is designed and owned by the TaskQueue) or `:read`",
+      status: if(is_nil(broken) and unclassified == [] and orphan == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["#{tools_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          unclassified != [] ->
+            ["#{tools_rel}: tools with no declared effect #{inspect(unclassified)}"]
+
+          orphan != [] ->
+            ["#{tools_rel}: @tool_effects names no tool declares #{inspect(orphan)}"]
+
+          true ->
+            []
+        end,
+      note: "#{MapSet.size(declared)} tools, each with a declared world-effect"
+    }
+  end
+
+  # 6-136 — UN MODOP QUI ORDONNE UN OUTIL QUE SON PORTEUR N'A PAS **GELE LE POD**, ET RIEN NE LE
+  # DISAIT NULLE PART.
+  #
+  # Ce n'est pas une gene de prompt. Mesure de banc du 2026-08-09, ecrite dans `architect.yaml` et
+  # dans `launch_env.ex` : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
+  # saute PAS, il PROMPTE (« Do you want to… 1. Yes 2. Yes, allow all 3. No ») — et un pod n'a
+  # personne pour repondre. Il reste vivant, tient son creneau et le verrou `lcars-in-flight` du
+  # ticket, et ne produit rien ; la chaine de reprise redispatche alors un pod qui se bloque au meme
+  # endroit. Le bundle `brainstorming` ordonnait un `TodoWrite` que ni `architect` ni `starfleet`
+  # ne declaraient, et les deux l'activent.
+  #
+  # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Le premier jet bornait
+  # le vocabulaire aux noms deja declares par un cap-profile — exact, sans faux positif… et MUET sur
+  # le defaut qui l'a motive : `TodoWrite` n'etait declare NULLE PART, donc rien ne le reconnaissait
+  # comme outil. Un mur qu'on desarme en retirant la derniere declaration ne protege rien.
+  #
+  # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
+  # porteurs, ou figurer ci-dessous avec sa raison. Le seul faux positif du corpus est mesure —
+  # `tdd/sp.md` cite `MailerTest`, un nom de module dans un test d'exemple, qu'aucun pod n'invoque.
+  # La liste se PURGE quand son sujet disparait (lecon 6-091 : une exemption qui ne correspond plus
+  # a rien n'exempte rien et masque la suivante).
+  @modop_not_tools %{
+    "MailerTest" => "module name in the tdd bundle's sample test — a pod never invokes it"
+  }
+
+  @doc false
+  def check_modop_tools_granted(root) do
+    profiles = catalogue_profiles(root)
+    bundles = catalogue_modop_bundles(root)
+
+    missing =
+      for {bundle, path, cited} <- bundles,
+          {rname, allowed, _denied, modops} <- profiles,
+          bundle in modops,
+          tool <- cited,
+          not Map.has_key?(@modop_not_tools, tool),
+          tool not in allowed,
+          do: "#{path}: orders #{tool}, which #{rname} (a carrier) does not grant"
+
+    cited_anywhere = bundles |> Enum.flat_map(fn {_b, _p, cited} -> cited end) |> MapSet.new()
+
+    dead_exemptions =
+      @modop_not_tools |> Map.keys() |> Enum.reject(&(&1 in cited_anywhere)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(profiles) ->
+        broken_result("cap_profile.modop_tools_granted", "cap-profile under the catalogue roots")
+
+      measured_nothing?(bundles) ->
+        broken_result("cap_profile.modop_tools_granted", "modop bundle under the catalogue roots")
+
+      measured_nothing?(cited_anywhere) ->
+        broken_result("cap_profile.modop_tools_granted", "tool-shaped name cited by any bundle")
+
+      true ->
+        %{
+          id: "cap_profile.modop_tools_granted",
+          remediation:
+            "add the tool to `allowedTools` of every role that activates the bundle (the list must " <>
+              "cover what a role may LEGITIMATELY reach for — leaving it out does not close it, it " <>
+              "wedges the pod on a prompt), stop ordering it in the bundle's sp.md, or declare it " <>
+              "in @modop_not_tools with the reason it is not a tool",
+          status: if(missing == [] and dead_exemptions == [], do: :pass, else: :fail),
+          evidence:
+            Enum.sort(missing) ++
+              for(
+                n <- dead_exemptions,
+                do: "@modop_not_tools: #{n} is cited by no bundle — purge it"
+              ),
+          note:
+            "#{length(bundles)} bundles x #{length(profiles)} profiles, " <>
+              "#{MapSet.size(cited_anywhere)} tool-shaped names cited, " <>
+              "#{map_size(@modop_not_tools)} declared non-tools"
+        }
+    end
+  end
+
+  @tool_cite_re ~r/\b(?:mcp__[a-z0-9_]+|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+)\b/
+
+  # `{name, allowedTools, disallowedTools, modops}` per cap-profile of EVERY active catalogue root.
+  defp catalogue_profiles(root) do
+    root
+    |> catalogue_roots()
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/cap-profiles/*.yaml")))
+    |> Enum.map(fn path ->
+      spec = path |> YamlElixir.read_from_file!() |> Map.get("spec", %{})
+      scope = Map.get(spec, "scope", %{})
+      ms = Map.get(spec, "modop_set", %{})
+
+      {Path.basename(path, ".yaml"), string_list(scope["allowedTools"]),
+       string_list(scope["disallowedTools"]),
+       string_list(Map.get(ms, "default")) ++ string_list(Map.get(ms, "optional"))}
+    end)
+  end
+
+  # `{bundle_name, relative_path, cited_names}` per modop bundle.
+  defp catalogue_modop_bundles(root) do
+    root
+    |> catalogue_roots()
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/modop-bundles/*/sp.md")))
+    |> Enum.map(fn path ->
+      cited = @tool_cite_re |> Regex.scan(File.read!(path)) |> List.flatten() |> Enum.uniq()
+      {path |> Path.dirname() |> Path.basename(), Path.relative_to(path, root), cited}
+    end)
+  end
+
+  # BOTH shipped catalogues, and the plural is the point: `brainstorming` lives in the SYSTEM one
+  # while the business roles live in the other, so a check reading a single root would have found
+  # the bundle and none of its carriers — or the reverse — and passed on an empty intersection.
+  defp catalogue_roots(root),
+    do: [Path.join(root, "priv/catalogue"), Path.join(root, "priv/catalogue-system")]
+
+  defp string_list(nil), do: []
+  defp string_list(list) when is_list(list), do: Enum.filter(list, &is_binary/1)
+  defp string_list(_), do: []
+
+  # `spec.project` CARRIES TWO POPULATIONS IN ONE SLOT and only one of them was ever written down.
+  # The catalogue schema declares four keys with `additionalProperties: false`; the pilot injects
+  # four MORE at dispatch (`repo`, `base_sha`, `gate_base_sha`, `pr_base_branch`), read by live code
+  # and validated by nothing. The contradiction was silent in both directions: a reader of the
+  # schema concluded a catalogue could not pin a base, a reader of the code concluded the schema
+  # allowed one.
+  #
+  # The two halves stay APART deliberately (a card that set `base_sha` would validate and then be
+  # overwritten at every dispatch — a knob that reads as configuration and does nothing). What must
+  # not happen is the two lists drifting, which is why this wall exists: every key the resolver
+  # WRITES must be declared on one side or the other, and no key may be on both.
+  @doc false
+  def check_cap_profile_project_keys(root) do
+    resolver_rel = "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
+    schema_rel = "priv/cap_profile/schema/cap-profile-v2.5.json"
+
+    schema_keys = schema_project_keys(root, schema_rel)
+    runtime_keys = MapSet.new(Fleet.CapProfile.runtime_project_keys())
+    written = resolver_project_keys(quoted!(root, resolver_rel))
+
+    undeclared = written |> Enum.reject(&(&1 in schema_keys or &1 in runtime_keys)) |> Enum.sort()
+    both = schema_keys |> Enum.filter(&(&1 in runtime_keys)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(schema_keys) ->
+        broken_result(
+          "cap_profile.project_keys_declared",
+          "property under spec.project in #{schema_rel}"
+        )
+
+      measured_nothing?(written) ->
+        broken_result("cap_profile.project_keys_declared", "key written into the project map")
+
+      true ->
+        %{
+          id: "cap_profile.project_keys_declared",
+          remediation:
+            "declare the new `spec.project` key in the catalogue schema (an operator may set it) " <>
+              "or in `Fleet.CapProfile.runtime_project_keys/0` (the pilot injects it) — never both, " <>
+              "never neither",
+          status: if(undeclared == [] and both == [], do: :pass, else: :fail),
+          evidence:
+            cond do
+              undeclared != [] ->
+                ["#{resolver_rel}: project keys declared nowhere #{inspect(undeclared)}"]
+
+              both != [] ->
+                ["#{schema_rel}: keys declared as BOTH catalogue and runtime #{inspect(both)}"]
+
+              true ->
+                []
+            end,
+          note:
+            "#{MapSet.size(schema_keys)} catalogue keys + #{MapSet.size(runtime_keys)} runtime-injected, disjoint"
+        }
+    end
+  end
+
+  defp schema_project_keys(root, rel) do
+    root
+    |> Path.join(rel)
+    |> File.read!()
+    |> Jason.decode!()
+    |> get_in(["properties", "spec", "properties", "project", "properties"])
+    |> Kernel.||(%{})
+    |> Map.keys()
+    |> MapSet.new()
+  end
+
+  # Keys of the map literal the resolver returns — from the AST, so a key named only in a comment
+  # cannot green this, and a key added to the map cannot hide from it.
+  defp resolver_project_keys(ast) do
+    ast
+    |> collect(fn
+      {:%{}, _, pairs} when is_list(pairs) ->
+        keys = for {k, _v} <- pairs, is_binary(k), do: k
+        if "repo_path" in keys, do: keys, else: nil
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
+  end
+
+  # Keys of the `@tool_effects` module attribute, read from the AST — never from a grep, for the
+  # same reason as `deftool_names/1`: a comment quoting a tool name must not be able to green this.
+  defp tool_effect_names(ast) do
+    ast
+    |> collect(fn
+      {:@, _, [{:tool_effects, _, [{:%{}, _, pairs}]}]} when is_list(pairs) ->
+        for {k, _v} <- pairs, is_binary(k), do: k
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   # ── Catalogue install paths: ONE fact, two languages ─────────────────────
@@ -2477,6 +3199,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
+  # NESTING IS THE POPULATION, NOT A DETAIL OF IT. These matched `^  def` — EXACTLY two spaces, the
+  # indentation of a `def` sitting directly under a top-level `defmodule`. A nested module indents
+  # its functions by four, so its public functions were not judged undocumented: they were never
+  # looked at. The blind spot measured five `def` clauses over two files, and one of them is
+  # `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — the system-side git entry point, i.e. the
+  # module that carried the sandbox escape this repo fixed by composing `git_safe_config_args/0`.
+  # A wall that starts green because its subject is out of frame is the failure class this whole
+  # file exists to prevent, one level up: not a hollow green over an empty tree, a hollow green over
+  # a tree it declined to enter.
+  @def_re ~r/^(\s+)def\s+([a-z_][a-zA-Z0-9_?!]*)/
+  @defp_re ~r/^\s+defp?\s/
+  @defmodule_re ~r/^(\s*)defmodule\s+([A-Z][A-Za-z0-9_.]*)/
+
   # `@doc false` COUNTS AS DOCUMENTED, deliberately: it is an explicit statement that the function is
   # public for a mechanical reason and not as an API. Treating it as a miss would push its authors to
   # write a hollow `@doc` instead, which is worse — a sentence nobody meant, in the place a reader
@@ -2485,44 +3220,83 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     otp =
       ~w(start_link init child_spec handle_call handle_cast handle_info terminate code_change handle_continue)
 
-    {public, documented, impls} =
+    state =
       src
       |> String.split("\n")
-      |> Enum.reduce({MapSet.new(), MapSet.new(), MapSet.new(), false, false}, fn line, acc ->
-        {pub, doc, imp, pending_doc, pending_impl} = acc
-        trimmed = String.trim_leading(line)
+      |> Enum.reduce(
+        %{
+          public: MapSet.new(),
+          documented: MapSet.new(),
+          impls: MapSet.new(),
+          mods: [],
+          doc?: false,
+          impl?: false
+        },
+        fn line, st ->
+          trimmed = String.trim_leading(line)
 
-        cond do
-          String.starts_with?(trimmed, "@doc") ->
-            {pub, doc, imp, true, pending_impl}
+          cond do
+            String.starts_with?(trimmed, "@doc") ->
+              %{st | doc?: true}
 
-          String.starts_with?(trimmed, "@impl") ->
-            {pub, doc, imp, pending_doc, true}
+            String.starts_with?(trimmed, "@impl") ->
+              %{st | impl?: true}
 
-          String.starts_with?(trimmed, "@spec") ->
-            acc
+            String.starts_with?(trimmed, "@spec") ->
+              st
 
-          match?([_, _], Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)) ->
-            [_, name] = Regex.run(~r/^  def\s+([a-z_][a-zA-Z0-9_?!]*)/, line)
-            imp = if pending_impl, do: MapSet.put(imp, name), else: imp
+            match?([_, _, _], Regex.run(@defmodule_re, line)) ->
+              [_, indent, mod] = Regex.run(@defmodule_re, line)
+              depth = String.length(indent)
+              # A pending `@doc` does not cross a `defmodule`: it belonged to whatever was being
+              # written before, and letting it through would credit the nested module's first
+              # function with someone else's documentation.
+              %{st | mods: [{depth, mod} | pop_to(st.mods, depth)], doc?: false, impl?: false}
 
-            if name in otp do
-              {pub, doc, imp, false, false}
-            else
-              doc = if pending_doc, do: MapSet.put(doc, name), else: doc
-              {MapSet.put(pub, name), doc, imp, false, false}
-            end
+            match?([_, _, _], Regex.run(@def_re, line)) ->
+              [_, indent, name] = Regex.run(@def_re, line)
+              key = {enclosing_module(st.mods, String.length(indent)), name}
+              st = if st.impl?, do: %{st | impls: MapSet.put(st.impls, key)}, else: st
 
-          Regex.match?(~r/^  defp?\s/, line) ->
-            {pub, doc, imp, false, false}
+              if name in otp do
+                %{st | doc?: false, impl?: false}
+              else
+                st = if st.doc?, do: %{st | documented: MapSet.put(st.documented, key)}, else: st
+                %{st | public: MapSet.put(st.public, key), doc?: false, impl?: false}
+              end
 
-          true ->
-            acc
+            Regex.match?(@defp_re, line) ->
+              %{st | doc?: false, impl?: false}
+
+            true ->
+              st
+          end
         end
-      end)
-      |> then(fn {pub, doc, imp, _, _} -> {pub, doc, imp} end)
+      )
 
-    public |> MapSet.difference(documented) |> MapSet.difference(impls) |> Enum.sort()
+    state.public
+    |> MapSet.difference(state.documented)
+    |> MapSet.difference(state.impls)
+    |> Enum.sort()
+    |> Enum.map(fn
+      {nil, name} -> name
+      {mod, name} -> "#{mod}.#{name}"
+    end)
+  end
+
+  # The enclosing module of a `def` = the innermost one indented LESS than it. Closing `end`s are
+  # never parsed: popping by indentation does it, because a sibling that follows a nested module is
+  # written back at the shallower depth. `nil` for the file's outermost module, so its functions
+  # keep printing as bare names — a qualified name means "this one is nested", which is precisely
+  # what a reader needs to find it.
+  defp pop_to(mods, depth), do: Enum.drop_while(mods, fn {d, _} -> d >= depth end)
+
+  defp enclosing_module(mods, indent) do
+    case pop_to(mods, indent) do
+      [{_, _} | []] -> nil
+      [{_, mod} | _] -> mod
+      [] -> nil
+    end
   end
 
   @doc false
@@ -2906,7 +3680,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp clause_ok?(clause, gated_fns),
     do: pod_scoped?(clause) or role_gated?(clause, gated_fns) or inert?(clause)
 
-  defp pod_scoped?(%{state: state}), do: Macro.to_string(state) =~ ~r/\bpod_id:/
+  # POD-SCOPED = THE CLAUSE USES THE CHANNEL IDENTITY, not merely receives it. `PodSocketAcceptor`
+  # builds `%{pod_id: pod_id}` for EVERY `tools/call`, unconditionally and identically for every
+  # tool — so the presence of that key in a clause head says nothing about authorization. Matching
+  # `\bpod_id:` alone accepted `%{pod_id: _}`: a clause that pattern-matches the identity and throws
+  # it away, then acts globally, was reported as gated. The wall was one underscore wide.
+  #
+  # Two conditions now, and the second is the one that carries the meaning: the head must BIND the
+  # identity to a real variable (`_` and `_pod_id` are discards, and a discard is the tell), and the
+  # BODY must mention that variable — the tool's subject is then derived from the channel rather
+  # than from the wire, which is the whole property.
+  #
+  # MEASURED before tightening, because a wall may only be born green: 23 of the 25 tools are
+  # ROLE-gated (`require_architect`/`require_onboarder`), every mutator among them, and the only two
+  # admitted by this predicate are `get_work_item` and `submit_result` — both bind and both use.
+  # The hole was real and nothing was standing in it.
+  defp pod_scoped?(%{state: state, body: body}) do
+    case Regex.run(~r/pod_id:\s*([a-z][a-zA-Z0-9_]*)/, Macro.to_string(state)) do
+      [_, var] -> Macro.to_string(body) =~ ~r/\b#{Regex.escape(var)}\b/
+      nil -> false
+    end
+  end
 
   defp role_gated?(%{body: body}, gated_fns) do
     body

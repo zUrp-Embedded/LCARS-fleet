@@ -7,9 +7,9 @@ defmodule Fleet.API.ReadinessTest do
   alias Fleet.API.Readiness
 
   @mutated [
-    {:fleet_starfleet, :coord_backend},
-    {:fleet_starfleet, :shutdown_dispatcher},
-    {:fleet_spawner, :launch_backend}
+    {:lcars_fleet, :starfleet_coord_backend},
+    {:lcars_fleet, :starfleet_shutdown_dispatcher},
+    {:lcars_fleet, :spawner_launch_backend}
   ]
 
   setup do
@@ -67,14 +67,14 @@ defmodule Fleet.API.ReadinessTest do
 
   describe "coord.backend" do
     test "operational when real backend wired" do
-      Application.put_env(:fleet_starfleet, :coord_backend, Fleet.Coord)
+      Application.put_env(:lcars_fleet, :starfleet_coord_backend, Fleet.Coord)
       assert %{state: :operational} = sub(Readiness.deep(), "coord.backend")
     end
 
     test "degraded when NotWiredYet" do
       Application.put_env(
-        :fleet_starfleet,
-        :coord_backend,
+        :lcars_fleet,
+        :starfleet_coord_backend,
         Fleet.Starfleet.CoordBackend.NotWiredYet
       )
 
@@ -85,8 +85,8 @@ defmodule Fleet.API.ReadinessTest do
   describe "shutdown.dispatcher" do
     test "degraded on NoOpDispatcher (Fleet.Dispatcher missing)" do
       Application.put_env(
-        :fleet_starfleet,
-        :shutdown_dispatcher,
+        :lcars_fleet,
+        :starfleet_shutdown_dispatcher,
         Fleet.Starfleet.Shutdown.NoOpDispatcher
       )
 
@@ -95,14 +95,14 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "operational when real backend wired" do
-      Application.put_env(:fleet_starfleet, :shutdown_dispatcher, Fleet.Coord)
+      Application.put_env(:lcars_fleet, :starfleet_shutdown_dispatcher, Fleet.Coord)
       assert %{state: :operational} = sub(Readiness.deep(), "shutdown.dispatcher")
     end
 
     # Drift-kill: key unset → readiness reads the OWNER's canonical default
     # (`Fleet.Starfleet.Shutdown.configured_dispatcher/0` → NoOpDispatcher), not a re-declared default.
     test "missing key → shared canonical default (NoOpDispatcher) → degraded" do
-      Application.delete_env(:fleet_starfleet, :shutdown_dispatcher)
+      Application.delete_env(:lcars_fleet, :starfleet_shutdown_dispatcher)
 
       assert %{state: :degraded, detail: %{backend: "NoOpDispatcher"}} =
                sub(Readiness.deep(), "shutdown.dispatcher")
@@ -115,8 +115,8 @@ defmodule Fleet.API.ReadinessTest do
   describe "launch.backend" do
     test "degraded on StubBackend (inert)" do
       Application.put_env(
-        :fleet_spawner,
-        :launch_backend,
+        :lcars_fleet,
+        :spawner_launch_backend,
         Fleet.Spawner.LaunchBackend.StubBackend
       )
 
@@ -126,8 +126,8 @@ defmodule Fleet.API.ReadinessTest do
 
     test "operational on real backend" do
       Application.put_env(
-        :fleet_spawner,
-        :launch_backend,
+        :lcars_fleet,
+        :spawner_launch_backend,
         Fleet.Spawner.LaunchBackend.LauncherPortBackend
       )
 
@@ -138,7 +138,7 @@ defmodule Fleet.API.ReadinessTest do
     # (`Fleet.Spawner.LaunchBackend.resolved/0` → LauncherPortBackend, which actually launches pods),
     # hence operational, NOT a phantom `:degraded` due to a `nil` or a stale re-copied default.
     test "missing key → shared canonical default (LauncherPortBackend) → operational" do
-      Application.delete_env(:fleet_spawner, :launch_backend)
+      Application.delete_env(:lcars_fleet, :spawner_launch_backend)
 
       assert %{state: :operational} = sub(Readiness.deep(), "launch.backend")
 
@@ -160,8 +160,8 @@ defmodule Fleet.API.ReadinessTest do
     # Per-pod socket substrate alive (booted host-side in the umbrella) + spec injected INTO pods present
     # → operational. We set the spec (absent in ambient) to isolate this case.
     test "operational when the socket substrate runs AND mcp_server_spec present" do
-      Application.put_env(:fleet_spawner, :mcp_server_spec, %{"some" => "spec"})
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
+      Application.put_env(:lcars_fleet, :spawner_mcp_server_spec, %{"some" => "spec"})
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec) end)
 
       assert %{state: :operational, detail: %{acceptor_supervisor: true}} =
                sub(Readiness.deep(), "mcp.pod_facing")
@@ -170,7 +170,7 @@ defmodule Fleet.API.ReadinessTest do
     # Test ambient: substrate alive BUT mcp_server_spec absent (pods not wired) → the probe degrades
     # (anti-hollow-green: the substrate runs but nothing is injected into the pods).
     test "degraded when substrate alive but mcp_server_spec absent (pods not wired)" do
-      Application.delete_env(:fleet_spawner, :mcp_server_spec)
+      Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
 
       assert %{state: :degraded, detail: detail} = sub(Readiness.deep(), "mcp.pod_facing")
       assert detail.mcp_server_spec == false

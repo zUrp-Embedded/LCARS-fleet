@@ -3,7 +3,7 @@ defmodule Fleet.Project.RolesTest do
   Locks the single AUTHORITY for workshop roles (`Fleet.Project.Roles`): capability RESOLUTION +
   opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
   """
-  # `async: false` : ce fichier tient `:fleet_pilot, :producer_role` — une clé GLOBALE que le code de
+  # `async: false` : ce fichier tient `:lcars_fleet, :pilot_producer_role` — une clé GLOBALE que le code de
   # production lit — pendant la durée d'un test. Il la nettoie bien (`on_exit` + `delete_env`), donc
   # il ne fuit pas ; mais tant qu'il la tient, `Roles.producer_role()` REND « engineer » au lieu de
   # LEVER, et n'importe quel test async concurrent qui traverse ce chemin voit l'autre réponse.
@@ -24,13 +24,13 @@ defmodule Fleet.Project.RolesTest do
     err = assert_raise RuntimeError, fn -> Roles.producer_role() end
     assert err.message =~ "scribe"
     assert err.message =~ "engineer"
-    assert err.message =~ ":producer_role"
+    assert err.message =~ ":pilot_producer_role"
 
     # Les deux echappatoires designees, dans l'ordre de priorite : l'opt, puis la config deploy.
     assert "designer" == Roles.producer_role(producer_role: "designer")
 
-    Application.put_env(:fleet_pilot, :producer_role, "engineer")
-    on_exit(fn -> Application.delete_env(:fleet_pilot, :producer_role) end)
+    Application.put_env(:lcars_fleet, :pilot_producer_role, "engineer")
+    on_exit(fn -> Application.delete_env(:lcars_fleet, :pilot_producer_role) end)
     assert "engineer" == Roles.producer_role()
   end
 
@@ -96,16 +96,32 @@ defmodule Fleet.Project.RolesTest do
       proj = Path.join(tmp, "broken")
       File.mkdir_p!(proj)
 
-      # The declaration writes even when the named card is unknown (creation is never walled
-      # on a card typo) — the fallback happens LOUD at read time, here.
-      capture_log(fn ->
-        :ok =
-          Fleet.Project.Intensity.write(proj,
-            intensity_level: "C1",
-            intensity_justification: "typo'd card",
-            workflow_map: "ghost-card"
-          )
-      end)
+      # ⚠ CE TEST ECRIVAIT UNE CARTE INCONNUE A LA DECLARATION, en enoncant la politique
+      # d'alors : « creation is never walled on a card typo — the fallback happens LOUD at read
+      # time ». Cette politique tenait a une condition qui n'etait vraie qu'a MOITIE : elle
+      # supposait que tout lecteur se rabat. `Roles` se rabat ; `StepDispatcher` charge en direct
+      # et refuse d'onboarder, donc une issue sans route echouait a chaque tick, indefiniment,
+      # sur un projet rendu `ready` (6-125). Un nom qu'on ne peut pas bruler est desormais REFUSE
+      # a la declaration, et le refus nomme les cartes disponibles.
+      #
+      # L'etat teste ici reste donc REEL, et c'est le seul qui subsiste : la carte chargeait quand
+      # elle a ete declaree, le catalogue l'a perdue depuis. On le fabrique en editant la
+      # declaration ecrite, ce qui la garde schema-valide par construction.
+      :ok =
+        Fleet.Project.Intensity.write(proj,
+          intensity_level: "C1",
+          intensity_justification: "card lost by the catalogue since",
+          workflow_map: "standard-qa"
+        )
+
+      declaration_path = Path.join(proj, Fleet.Layout.project_declaration_file())
+
+      declaration_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("pipeline_default", "ghost-card")
+      |> Jason.encode!()
+      |> then(&File.write!(declaration_path, &1))
 
       log =
         capture_log(fn ->

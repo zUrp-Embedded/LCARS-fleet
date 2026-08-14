@@ -2,7 +2,7 @@ defmodule Fleet.CatalogueTest do
   @moduledoc """
   The catalogue root: one knob brings one catalogue, and the boot refuses a root it cannot vouch for.
 
-  `async: false` — every test here moves `:fleet_catalogue, :root` (and the image tests write
+  `async: false` — every test here moves `:lcars_fleet, :catalogue_root` (and the image tests write
   `:persistent_term`), both process-global.
   """
   use ExUnit.Case, async: false
@@ -26,7 +26,7 @@ defmodule Fleet.CatalogueTest do
   describe "the layout" do
     test "every tree derives from the root — one knob moves them all", %{tmp_dir: tmp} do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       trees = [
         Catalogue.cap_profiles_root(),
@@ -74,7 +74,7 @@ defmodule Fleet.CatalogueTest do
     end
 
     test "a nil root (a cross-test config leak) never reaches Path.join" do
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, nil)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, nil)
       assert File.dir?(Catalogue.root())
     end
   end
@@ -85,8 +85,8 @@ defmodule Fleet.CatalogueTest do
       fine = Path.join(tmp, "just-the-profiles")
       File.mkdir_p!(fine)
 
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
-      Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, fine)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, fine)
 
       assert Fleet.CapProfile.root_dir() == fine
       # …and only that tree: panachage is allowed, silence about it is not.
@@ -96,7 +96,7 @@ defmodule Fleet.CatalogueTest do
 
     test "without a fine key, the domain resolvers read the catalogue root", %{tmp_dir: tmp} do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert Fleet.CapProfile.root_dir() == Catalogue.cap_profiles_root()
       assert Fleet.SPBuilder.sp_drafts_root() == Catalogue.sp_drafts_root()
@@ -107,7 +107,7 @@ defmodule Fleet.CatalogueTest do
     test "orders the ACTIVE roots then the system default, dropping absent trees", %{tmp_dir: tmp} do
       root = fake_root(tmp)
       File.mkdir_p!(Path.join(root, Catalogue.rel(:cap_profiles)))
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       path = Catalogue.search(:cap_profiles)
 
@@ -133,8 +133,8 @@ defmodule Fleet.CatalogueTest do
       fine = Path.join(tmp, "just-the-profiles")
       File.mkdir_p!(fine)
 
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
-      Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, fine)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, fine)
 
       assert Catalogue.search(:cap_profiles) == [
                fine,
@@ -151,7 +151,7 @@ defmodule Fleet.CatalogueTest do
     test "the system root is never dropped by an override — it is the contract", %{tmp_dir: tmp} do
       fine = Path.join(tmp, "only-mine")
       File.mkdir_p!(fine)
-      Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, fine)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, fine)
 
       assert Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles)) in Catalogue.search(
                :cap_profiles
@@ -160,7 +160,7 @@ defmodule Fleet.CatalogueTest do
 
     test "find/2 answers the first existing file, then the first ACTIVE path", %{tmp_dir: tmp} do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       # Shipped by the system alone (the two protocols moved there).
       found = Catalogue.find(:sp_drafts, "protocole-user-worker.md")
@@ -185,12 +185,12 @@ defmodule Fleet.CatalogueTest do
       File.mkdir_p!(Path.join(home, "catalogues"))
 
       Fleet.TestEnv.put_env_restoring(
-        :fleet_catalogue,
-        :active_declaration,
+        :lcars_fleet,
+        :catalogue_active_declaration,
         Path.join(home, "catalogues.active")
       )
 
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :install_dirs, [
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
         Path.join(home, "catalogues")
       ])
 
@@ -240,7 +240,7 @@ defmodule Fleet.CatalogueTest do
       # `workflow_maps_root([])`, c'est-a-dire la PREMIERE racine active. Les cartes de tout
       # catalogue suivant existaient sur le disque et dans AUCUNE image — un projet servi par ce
       # catalogue-la ne trouvait pas de carte du tout, et le decouvrait au premier dispatch.
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       premier = install_card(install(home, "premier"), "carte-une")
       second = install_card(install(home, "second"), "carte-deux")
       declare(home, "premier\nsecond\n")
@@ -269,14 +269,14 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp
     } do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert Catalogue.active_roots() == [root]
     end
 
     test "installed but NOT declared changes nothing", %{tmp_dir: tmp, home: home} do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "mobile")
 
       # The whole point of the target state, in one assertion: a catalogue sitting on disk is inert
@@ -289,7 +289,7 @@ defmodule Fleet.CatalogueTest do
       home: home
     } do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       mobile = install(home, "mobile")
       sp_en = install(home, "sp-en")
 
@@ -314,7 +314,7 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       mobile = install(home, "mobile")
       declare(home, "mobile\n")
 
@@ -330,7 +330,7 @@ defmodule Fleet.CatalogueTest do
       # project_template) lisent `root/0` en direct. Tant que `root/0` ignorait la declaration,
       # activer un catalogue donnait ses ROLES et les CARTES du catalogue livre — la fleet a refuse
       # au boot sur un jury nommant un role que le catalogue actif ne porte pas.
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       mobile = install(home, "mobile")
       declare(home, "mobile\n")
 
@@ -345,7 +345,7 @@ defmodule Fleet.CatalogueTest do
 
     test "sans declaration, la grosse molette reste la racine metier", %{tmp_dir: tmp} do
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert to_string(Catalogue.root()) == root
     end
@@ -364,7 +364,7 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, fake_root(tmp))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       install(home, "mobile")
       declare(home, "mobile\n")
 
@@ -380,7 +380,7 @@ defmodule Fleet.CatalogueTest do
     end
 
     test "an absent root is refused, naming the variable to fix", %{tmp_dir: tmp} do
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, Path.join(tmp, "nope"))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, Path.join(tmp, "nope"))
 
       assert_raise RuntimeError, ~r/LCARS_CATALOGUE_ROOT/, fn -> Catalogue.verify!() end
     end
@@ -388,14 +388,14 @@ defmodule Fleet.CatalogueTest do
     test "a directory without a manifest is not a catalogue", %{tmp_dir: tmp} do
       bare = Path.join(tmp, "bare")
       File.mkdir_p!(bare)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, bare)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, bare)
 
       assert_raise RuntimeError, ~r/catalogue\.yaml.*unreadable/s, fn -> Catalogue.verify!() end
     end
 
     test "a foreign generation is refused, naming BOTH sides", %{tmp_dir: tmp} do
       root = fake_root(tmp, 99)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
       assert err.message =~ "99"
@@ -413,7 +413,7 @@ defmodule Fleet.CatalogueTest do
       maps = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
       File.mkdir_p!(maps)
       File.write!(Path.join(maps, "la-mienne.yaml"), "kind: WorkflowMap\n")
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
       assert err.message =~ "declares no `default_card`"
@@ -436,7 +436,7 @@ defmodule Fleet.CatalogueTest do
          } do
       root = fake_root(tmp)
       File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\n")
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
       assert err.message =~ "declares no `name`"
@@ -452,7 +452,7 @@ defmodule Fleet.CatalogueTest do
       # reads it as an arbitrary charset.
       root = fake_root(tmp)
       File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: my_cat\n")
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert Fleet.Slug.valid?("my_cat"), "the premise of this test is that Slug ADMITS it"
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
@@ -463,7 +463,7 @@ defmodule Fleet.CatalogueTest do
     test "a manifest with no api_version is refused like a foreign one", %{tmp_dir: tmp} do
       root = fake_root(tmp)
       File.write!(Path.join(root, "catalogue.yaml"), "name: mine\n")
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert_raise RuntimeError, ~r/api_version nil/, fn -> Catalogue.verify!() end
     end
@@ -471,7 +471,7 @@ defmodule Fleet.CatalogueTest do
     test "a manifest that is not a mapping is refused", %{tmp_dir: tmp} do
       root = fake_root(tmp)
       File.write!(Path.join(root, "catalogue.yaml"), "- 1\n- 2\n")
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
       assert_raise RuntimeError, ~r/not a mapping/, fn -> Catalogue.verify!() end
     end
@@ -498,7 +498,7 @@ defmodule Fleet.CatalogueTest do
       # `dereference_symlinks` — the build's `priv` is a symlink to the source tree; without it the
       # copy would BE that symlink and the test would prove nothing.
       File.cp_r!(Catalogue.root(), copy, dereference_symlinks: true)
-      Fleet.TestEnv.put_env_restoring(:fleet_catalogue, :root, copy)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, copy)
 
       assert Catalogue.verify!()["api_version"] in Catalogue.supported_api_versions()
 

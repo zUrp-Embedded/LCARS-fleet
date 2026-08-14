@@ -12,7 +12,7 @@ defmodule Fleet.Project.IntensityTest do
 
   @moduletag :tmp_dir
 
-  test "declared: writes a schema-valid intensity.json relaying the human's level", %{
+  test "declared: writes a schema-valid .lcars.json relaying the human's level", %{
     tmp_dir: tmp
   } do
     assert :ok =
@@ -23,7 +23,7 @@ defmodule Fleet.Project.IntensityTest do
                onboarded_by: "architect"
              )
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == "C3"
     assert d["declared_by"] == "architect"
     assert d["nature"] == "web-gui"
@@ -38,7 +38,7 @@ defmodule Fleet.Project.IntensityTest do
     # attribution, the same one `GatekeeperSeal` refuses when it declines the system token.
     assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == "C3"
     assert d["declared_by"] == "unknown"
 
@@ -57,7 +57,7 @@ defmodule Fleet.Project.IntensityTest do
     # keeps asserting yesterday's default.
     assert :ok = ProjectIntensity.write(tmp, [])
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["level"] == ProjectIntensity.undeclared_level()
     assert d["declared_by"] == "system-default"
     assert d["justification"] =~ "NON DÉCLARÉ"
@@ -84,7 +84,7 @@ defmodule Fleet.Project.IntensityTest do
 
     refute log =~ "OFF-MATRIX"
 
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
     # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
     # 2026-07-19 reorg, and this field ships in the project's repo for good.
@@ -133,7 +133,55 @@ defmodule Fleet.Project.IntensityTest do
       end)
 
     assert log =~ "OFF-MATRIX"
-    d = tmp |> Path.join("intensity.json") |> File.read!() |> Jason.decode!()
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
+    assert d["pipeline_default"] == "brief-gate"
+  end
+
+  test "6-125: an override the loader cannot answer is REFUSED, and the refusal names the cards",
+       %{tmp_dir: tmp} do
+    # La distinction que le schema ne peut PAS faire : `pipeline_default` est une chaine libre, et
+    # un nom de carte n'est unique qu'a l'interieur d'un catalogue. Hors-matrice reste accepte —
+    # c'est un arbitrage humain contre ce que la carte dit d'elle-meme ; un nom qui ne CHARGE pas
+    # n'est pas un arbitrage, c'est une faute de frappe, et la declaration engraverait une route
+    # que personne ne peut bruler.
+    log =
+      capture_log(fn ->
+        assert {:error, {:unknown_card, "wfmap/ghost"}} =
+                 ProjectIntensity.write(tmp,
+                   intensity_level: "C2",
+                   intensity_justification: "x",
+                   workflow_map: "wfmap/ghost"
+                 )
+      end)
+
+    assert log =~ "REFUSED"
+    # Un refus qui ne dit pas quoi ecrire a la place renvoie l'operateur par le meme appel.
+    assert log =~ "brief-gate"
+    refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
+  end
+
+  test "6-125: a TICKET-scoped card is refused at declaration too — loadable is not declarable",
+       %{tmp_dir: tmp} do
+    # `workshop-direct` charge parfaitement : elle est atteinte par le GENRE d'un ticket, et un
+    # projet qui la declare routerait CHAQUE ticket par un sceau direct sans jury. La revision de
+    # carte refusait deja ce cas ; la declaration l'acceptait.
+    assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
+             ProjectIntensity.write(tmp,
+               intensity_level: "C2",
+               intensity_justification: "x",
+               workflow_map: "workshop-direct"
+             )
+
+    refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
+  end
+
+  test "6-125: no card declared at all → the catalogue default, never a refusal", %{tmp_dir: tmp} do
+    # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
+    # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur une boite dont le
+    # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
+    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C2", intensity_justification: "x")
+
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["pipeline_default"] == "brief-gate"
   end
 
@@ -157,7 +205,7 @@ defmodule Fleet.Project.IntensityTest do
     # invalid file → default + LOUD warning
     broken = Path.join(tmp, "broken")
     File.mkdir_p!(broken)
-    File.write!(Path.join(broken, "intensity.json"), "{not json")
+    File.write!(Path.join(broken, ".lcars.json"), "{not json")
 
     log =
       capture_log(fn ->
@@ -176,7 +224,7 @@ defmodule Fleet.Project.IntensityTest do
     # (recurrence → sysadmin issue), not a whisper in a log nobody tails.
     broken = Path.join(tmp, "broken")
     File.mkdir_p!(broken)
-    File.write!(Path.join(broken, "intensity.json"), "{not json")
+    File.write!(Path.join(broken, ".lcars.json"), "{not json")
 
     me = self()
 
@@ -193,7 +241,7 @@ defmodule Fleet.Project.IntensityTest do
       end)
 
     assert_received {:incident, "intensity", "fleet/broken", :declaration_invalid, iopts}
-    assert iopts[:reason_detail] =~ "intensity.json"
+    assert iopts[:reason_detail] =~ ".lcars.json"
     assert log =~ "unreadable/invalid"
   end
 end

@@ -126,5 +126,33 @@ defmodule Fleet.SchemaCacheTest do
       # The raise preceded the put: the next call does execute the fun.
       assert SchemaCache.cached(key, fn -> :recovered end) == :recovered
     end
+
+    # 6-002 — LE CHECK-THEN-ACT ECRIVAIT DEUX FOIS. Deux processus qui manquent la meme cle calculent
+    # tous les deux, puis ecrivaient tous les deux : un GC GLOBAL de plus (F-001) pour ranger une
+    # valeur deja presente, et le terme rendu aux lecteurs precedents remplace pour rien.
+    #
+    # LA COURSE EST JOUEE SANS CONCURRENCE, et c'est ce qui rend le test deterministe : le `fun`
+    # ECRIT LUI-MEME la cle avant de rendre sa valeur. C'est exactement l'etat que voit le perdant
+    # au moment de la relecture — quelqu'un a rempli la cle pendant mon calcul. Aucun `spawn`,
+    # aucun `sleep`, aucun ordonnancement a esperer.
+    test "6-002: la cle deja remplie pendant le calcul n'est pas ecrasee, et c'est SA valeur qui sort" do
+      key = unique_key(:cached_race)
+
+      perdant = fn ->
+        :persistent_term.put(key, :pose_par_le_gagnant)
+        :calcule_par_le_perdant
+      end
+
+      assert SchemaCache.cached(key, perdant) == :pose_par_le_gagnant
+      assert :persistent_term.get(key) == :pose_par_le_gagnant
+    end
+
+    # TEMOIN — sans lui, un `cached/2` qui ne ferait JAMAIS d'ecriture passerait le test ci-dessus.
+    test "6-002: TEMOIN — sur une cle vraiment absente, la valeur calculee EST ecrite" do
+      key = unique_key(:cached_write)
+
+      assert SchemaCache.cached(key, fn -> :calculee end) == :calculee
+      assert :persistent_term.get(key) == :calculee
+    end
   end
 end

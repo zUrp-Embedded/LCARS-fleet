@@ -19,13 +19,18 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   def detect?(%{base_lines: []} = h), do: detect_without_base(h)
 
   def detect?(h) do
-    ours_removals = lcs_removals(h.base_lines, h.ours_lines)
-    theirs_removals = lcs_removals(h.base_lines, h.theirs_lines)
-    ours_added = lcs_additions(h.base_lines, h.ours_lines)
-    theirs_added = lcs_additions(h.base_lines, h.theirs_lines)
-
-    ours_removals == [] and theirs_removals == [] and ours_added != [] and theirs_added != [] and
-      not overlap?(ours_added, theirs_added)
+    # This pattern reaches `Diff.lcs/2` DIRECTLY, so it carries the budget refusal itself -- the
+    # ceiling had to live in `lcs/2` rather than in the three-way merge, or this path would have
+    # stayed unbounded next to a neighbour that was fixed.
+    with {:ok, ours_removals} <- lcs_removals(h.base_lines, h.ours_lines),
+         {:ok, theirs_removals} <- lcs_removals(h.base_lines, h.theirs_lines),
+         {:ok, ours_added} <- lcs_additions(h.base_lines, h.ours_lines),
+         {:ok, theirs_added} <- lcs_additions(h.base_lines, h.theirs_lines) do
+      ours_removals == [] and theirs_removals == [] and ours_added != [] and theirs_added != [] and
+        not overlap?(ours_added, theirs_added)
+    else
+      {:error, :too_large} -> false
+    end
   end
 
   @impl true
@@ -70,23 +75,21 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
     do: lines |> Enum.map(&Utils.normalize_line/1) |> Enum.reject(&(&1 == "")) |> MapSet.new()
 
   # Lines of `modified` NOT in the LCS with `base` -> additions.
-  defp lcs_additions(base, modified) do
-    in_lcs = Diff.lcs(modified, base) |> Enum.map(fn {i, _j} -> i end) |> MapSet.new()
-
-    modified
-    |> Enum.with_index()
-    |> Enum.reject(fn {_l, i} -> MapSet.member?(in_lcs, i) end)
-    |> Enum.map(&elem(&1, 0))
-  end
+  defp lcs_additions(base, modified), do: outside_lcs(Diff.lcs(modified, base), modified)
 
   # Lines of `base` no longer in `modified` -> removals.
-  defp lcs_removals(base, modified) do
-    in_lcs = Diff.lcs(base, modified) |> Enum.map(fn {i, _j} -> i end) |> MapSet.new()
+  defp lcs_removals(base, modified), do: outside_lcs(Diff.lcs(base, modified), base)
 
-    base
+  defp outside_lcs({:error, :too_large} = err, _lines), do: err
+
+  defp outside_lcs({:ok, pairs}, lines) do
+    in_lcs = pairs |> Enum.map(fn {i, _j} -> i end) |> MapSet.new()
+
+    lines
     |> Enum.with_index()
     |> Enum.reject(fn {_l, i} -> MapSet.member?(in_lcs, i) end)
     |> Enum.map(&elem(&1, 0))
+    |> then(&{:ok, &1})
   end
 
   defp overlap?(a, b) do

@@ -71,7 +71,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       File.mkdir_p!(dir)
 
       File.write!(
-        Path.join(dir, "intensity.json"),
+        Path.join(dir, ".lcars.json"),
         Jason.encode!(
           Map.merge(
             %{
@@ -93,7 +93,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   defp issues, do: for(n <- [41, 42, 43], do: %{"number" => n, "labels" => []})
 
   test "max_fan = 1 IS serialization → ONE run starts, the rest waits" do
-    TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
 
     tally = Lease.process_issues(issues(), MapSet.new(), opts(), seams())
 
@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   test "a refused ticket carries wait/capacity — the ceiling is not silent" do
     # The lease branch never converged its wait label: a ticket held back was indistinguishable
     # from a forgotten one. It is the same refusal as the ceiling's, so it is the same label.
-    TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
 
     Lease.process_issues(issues(), MapSet.new(), opts(), seams())
 
@@ -114,7 +114,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   end
 
   test "max_fan = 3 → the three queued tickets start in the same tick" do
-    TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 3)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 3)
 
     tally = Lease.process_issues(issues(), MapSet.new(), opts(), seams())
 
@@ -125,7 +125,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   test "max_fan = 2 → two start, the third waits (the counter is not a boolean)" do
     # The shape the boolean could not express, and the reason for the item: "one" and "all" were
     # the only two answers it had.
-    TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
     tally = Lease.process_issues(issues(), MapSet.new(), opts(), seams())
 
@@ -136,7 +136,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   test "a ticket already in its JURY phase eats a seat" do
     # 5.1's repair, read through the ceiling: in-flight crosses both rails, so a jury ticket fills
     # the project as surely as a producer does.
-    TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
     # #41 carries an open fleet PR → skipped on this rail, but it counts.
     tally = Lease.process_issues(issues(), MapSet.new([41]), opts(), seams())
@@ -150,7 +150,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       # The listing carries no `sort`, so the order was the forge's default ("most recently
       # touched" under Gitea): the last seat went to whichever ticket someone had just commented
       # on. A rule nobody wrote, that changes when a human types.
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
 
       out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
 
@@ -166,7 +166,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       # Ascending id is stable across ticks, which is what makes a queue a queue: a ticket refused
       # today is not overtaken tomorrow by one that merely got touched. Two seats, so 7 and 12 go
       # and 30 waits — twice, identically.
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
       out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
 
@@ -182,8 +182,8 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
 
   describe "max_fan/0 — the reader clamps, it does not report" do
     test "absent → the default 5" do
-      TestEnv.restore_env_on_exit(:fleet_pilot, :max_fan)
-      Application.delete_env(:fleet_pilot, :max_fan)
+      TestEnv.restore_env_on_exit(:lcars_fleet, :pilot_max_fan)
+      Application.delete_env(:lcars_fleet, :pilot_max_fan)
 
       assert Admission.max_fan() == 5
     end
@@ -210,13 +210,13 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
       # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read
       # on every dispatch decision: a bad value must fail at a DOOR, once, not every thirty seconds.
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 0)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 0)
       assert Admission.max_fan() == 1
 
-      Application.put_env(:fleet_pilot, :max_fan, 999)
+      Application.put_env(:lcars_fleet, :pilot_max_fan, 999)
       assert Admission.max_fan() == Admission.max_fan_ceiling()
 
-      Application.put_env(:fleet_pilot, :max_fan, "trois")
+      Application.put_env(:lcars_fleet, :pilot_max_fan, "trois")
       assert Admission.max_fan() == 5
     end
   end
@@ -225,7 +225,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     test "a project that declares 1 serializes ALONE while the fleet default stays 3" do
       # The item, in one test. `--max-fan 1` to watch one pipeline end to end used to serialize
       # every other project in the fleet: a brake laid on unrelated work.
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 3)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 3)
       root = declare(%{"fleet/p" => %{"max_fan" => 1}})
 
       declared = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
@@ -247,7 +247,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     test "a declaration ABOVE the hard ceiling is clamped, never granted" do
       # 16 producers means a 16th pool seat, and seats are 1..15. A project cannot declare its way
       # into a slot that does not exist.
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 1)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
       root = declare(%{"fleet/p" => %{"max_fan" => 99}})
 
       tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
@@ -257,7 +257,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     end
 
     test "a project with a declaration that names no throughput falls back to the fleet default" do
-      TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 2)
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
       root = declare(%{"fleet/p" => %{}})
 
       tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())

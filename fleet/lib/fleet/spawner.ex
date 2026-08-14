@@ -154,7 +154,7 @@ defmodule Fleet.Spawner do
       * `:pod_id` (default `UUID.uuid4()`) — must be **path-safe** (`[A-Za-z0-9._-]`, no `..`),
         since interpolated into FS paths (`~/pods/pod_<id>`, sock, state recovery);
         otherwise `{:error, :invalid_pod_id}`.
-      * `:state_fs_root` (override, default config `:fleet_spawner, :state_fs_root`)
+      * `:state_fs_root` (override, default config `:lcars_fleet, :spawner_state_fs_root`)
       * `:brief` — the pod's work as a FILE copy (string). The live order reaches the pod through
         the task queue; this is the copy written into its home.
       * `:brief_ref` — the address of the brief materialized in the project's ops. A dispatch
@@ -195,38 +195,22 @@ defmodule Fleet.Spawner do
         # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
         # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
         # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
-        _ = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts)
+        # AND THE RESULT IS READ. An incomplete erase means the tombstone SURVIVES, so the pod we
+        # are about to start would read it, class `:release`, and stop right after teardown: a
+        # spawn that returns `{:ok, pid}` and produces nothing, then loops poller-side on the next
+        # tick. Refusing here is the only outcome that does not lie — the caller gets a stable
+        # error it can defer on, instead of a success it has to discover was empty.
+        case Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts) do
+          {:error, _reasons} ->
+            Logger.error(
+              "Spawner: spawn_pod refused for #{pod_id} — a terminal tombstone survives its erase " <>
+                "(see errors above). Starting would produce a pod that releases without working."
+            )
 
-        # POOL SLOT — we name WHAT to allocate here and let the CHILD allocate it. The index has to
-        # be known at registration (it travels in the Registry value, cf. `Pod.name/2`), and
-        # deciding it in this process would make read-then-write racy: `spawn_pod/3` runs in
-        # whoever called it, so two callers of the same (role, repo) would both read the same
-        # lowest free index. Done in `Pod.start_link/1` it inherits the serialization of
-        # `DynamicSupervisor.start_child/2` for free. `{:error, :role_at_capacity}` comes back
-        # through the child's start: a role at capacity is a DEFERRAL — the caller turns it into a
-        # skip, the ticket stacks and retries — and it never reaches `SessionId.encode/5`, whose
-        # `pool in 0..0xF` guard would have met a format ceiling as a FunctionClauseError.
-        #
-        # `:repo_id` and NOT `:repo`: the dispatch never puts the `owner/name` string in the
-        # spawn_opts, so keying on it would put every producer and judge of every project in one
-        # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
-        # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
-        # session_id encodes: bucket and identity then designate the same object.
-        args = %{
-          cap_profile: cap_profile,
-          issue_id: issue_id,
-          pod_id: pod_id,
-          slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
-          opts: opts
-        }
+            {:error, :terminal_tombstone_not_cleared}
 
-        spec = pod_child_spec(args)
-
-        case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
-          {:ok, pid} -> {:ok, pid}
-          {:ok, pid, _info} -> {:ok, pid}
-          :ignore -> {:error, :pod_init_ignored}
-          {:error, _} = err -> err
+          :ok ->
+            spawn_pod_child(cap_profile, issue_id, pod_id, opts)
         end
       else
         {:error, :invalid_pod_id}
@@ -250,6 +234,44 @@ defmodule Fleet.Spawner do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  # The start itself, reached ONLY once the pod_id is path-safe and no terminal tombstone survives.
+  # Extracted so those two refusals read as refusals at the call site instead of as an `if` around
+  # forty lines.
+  #
+  # POOL SLOT — we name WHAT to allocate here and let the CHILD allocate it. The index has to
+  # be known at registration (it travels in the Registry value, cf. `Pod.name/2`), and
+  # deciding it in this process would make read-then-write racy: `spawn_pod/3` runs in
+  # whoever called it, so two callers of the same (role, repo) would both read the same
+  # lowest free index. Done in `Pod.start_link/1` it inherits the serialization of
+  # `DynamicSupervisor.start_child/2` for free. `{:error, :role_at_capacity}` comes back
+  # through the child's start: a role at capacity is a DEFERRAL — the caller turns it into a
+  # skip, the ticket stacks and retries — and it never reaches `SessionId.encode/5`, whose
+  # `pool in 0..0xF` guard would have met a format ceiling as a FunctionClauseError.
+  #
+  # `:repo_id` and NOT `:repo`: the dispatch never puts the `owner/name` string in the
+  # spawn_opts, so keying on it would put every producer and judge of every project in one
+  # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
+  # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
+  # session_id encodes: bucket and identity then designate the same object.
+  defp spawn_pod_child(cap_profile, issue_id, pod_id, opts) do
+    args = %{
+      cap_profile: cap_profile,
+      issue_id: issue_id,
+      pod_id: pod_id,
+      slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
+      opts: opts
+    }
+
+    spec = pod_child_spec(args)
+
+    case DynamicSupervisor.start_child(Fleet.Spawner.Supervisor, spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:ok, pid, _info} -> {:ok, pid}
+      :ignore -> {:error, :pod_init_ignored}
+      {:error, _} = err -> err
     end
   end
 
@@ -538,6 +560,36 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
+  Whether a durable snapshot exists on disk for `pod_id` — "this box has this pod ON RECORD",
+  independently of whether it is running right now.
+
+  This is NOT liveness (`list_pods/0`, `pod_info/2` answer that, and only for what is up). It is
+  the question a keeper asks: something that should be alive was spawned HERE at some point, so
+  resurrecting it is legitimate. The snapshot is written at spawn and removed when the pod reaches
+  a terminal phase, so the record follows the intent: a crash or a fleet restart leaves it, a
+  deliberate kill clears it.
+
+  Scope-agnostic on purpose: the caller knows a pod id, not the `lifetime_scope` that decides which
+  subdirectory of the state root holds it. Hardcoding "pods" here would duplicate that mapping in a
+  second place, and the day a role changes scope the copy would answer for the wrong directory.
+
+  Unreadable root ⟹ `false`. The consumers of this predicate SPAWN on a true answer; a failed read
+  read as "yes" would create exactly what the predicate exists to prevent.
+  """
+  @spec snapshot_on_record?(String.t(), keyword()) :: boolean()
+  def snapshot_on_record?(pod_id, opts \\ []) when is_binary(pod_id) and is_list(opts) do
+    root = Fleet.Spawner.Pod.Paths.state_fs_root_for(opts)
+
+    case File.ls(root) do
+      {:ok, scopes} ->
+        Enum.any?(scopes, &File.regular?(Path.join([root, &1, pod_id, "state.json"])))
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  @doc """
   Enumerates reachable live pods for observability without exposing the Registry.
 
   Absent and unreachable entries are both omitted; destructive decisions use `pod_info/2`.
@@ -558,7 +610,7 @@ defmodule Fleet.Spawner do
 
   @doc """
   Is the fleet running in DEBUG VISIBILITY mode (`fleet_v2 start --debug`)? — the SINGLE reader of
-  `:fleet_spawner, :debug_visibility`.
+  `:lcars_fleet, :spawner_debug_visibility`.
 
   One value for a whole fleet life, fixed at start: nothing toggles it, nothing persists it,
   nothing reconciles it mid-run. Two consumers, in two domains, which is why the read lives on the
@@ -569,11 +621,11 @@ defmodule Fleet.Spawner do
   """
   @spec debug_visibility?() :: boolean()
   def debug_visibility? do
-    Application.get_env(:fleet_spawner, :debug_visibility, false) == true
+    Application.get_env(:lcars_fleet, :spawner_debug_visibility, false) == true
   end
 
   @doc """
-  Is output compression allowed FLEET-WIDE? (`:fleet_spawner, :output_compression`, absent = `true`.)
+  Is output compression allowed FLEET-WIDE? (`:lcars_fleet, :spawner_output_compression`, absent = `true`.)
 
   Same shape as `debug_visibility?/0` — one value for a whole fleet life, fixed at start, read on
   the facade so no second site derives it — and the OPPOSITE polarity. Debug can only OPEN a window;
@@ -586,7 +638,7 @@ defmodule Fleet.Spawner do
   """
   @spec output_compression_allowed?() :: boolean()
   def output_compression_allowed? do
-    Application.get_env(:fleet_spawner, :output_compression, true) == true
+    Application.get_env(:lcars_fleet, :spawner_output_compression, true) == true
   end
 
   @doc """
@@ -599,7 +651,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  The FUSE: how many pods may live at once, fleet-wide — `:fleet_spawner, :max_pods`, default 128,
+  The FUSE: how many pods may live at once, fleet-wide — `:lcars_fleet, :spawner_max_pods`, default 128,
   enforced by the DynamicSupervisor as `max_children`.
 
   It is NOT a policy and nothing consults it to decide anything. What shapes the queue is
@@ -622,7 +674,7 @@ defmodule Fleet.Spawner do
   from the per-project ones. An operator on a small machine lowers it deliberately.
   """
   @spec max_pods() :: pos_integer()
-  def max_pods, do: Application.get_env(:fleet_spawner, :max_pods, 128)
+  def max_pods, do: Application.get_env(:lcars_fleet, :spawner_max_pods, 128)
 
   @doc """
   Is there a free pool SEAT for this `(role, repo)`? — the per-role twin of `has_capacity?/0`,
@@ -700,13 +752,28 @@ defmodule Fleet.Spawner do
   Sends a best-effort informational wake through `turn.flag`.
 
   It carries the message but arms neither the mandate kick fallback nor its response deadline.
-  Unknown or unreachable pods are ignored.
+  An unknown or unreachable pod yields `{:error, reason}` and a warning — it is NOT delivered.
+
+  The `:ok` return used to be unconditional, and the `@spec` froze the caller's inability to know.
+  That is tolerable for a feed line and not for a TERMINAL escalation, which travels this same
+  function: the message vanished, the return said `:ok`, and no log said otherwise. This function
+  cannot know the stakes of its message, so it reports the fact at `warning` and hands the caller
+  the means to judge — `Fleet.Pilot.StepRunConsumer.TerminalEscalation` raises it to `error`.
   """
-  @spec notify_pod(String.t(), String.t()) :: :ok
+  @spec notify_pod(String.t(), String.t()) :: :ok | {:error, term()}
   def notify_pod(pod_id, message) when is_binary(pod_id) and is_binary(message) do
     case pod_info(pod_id) do
-      {:ok, info} -> Fleet.Spawner.Pod.TurnFlag.touch(info, message)
-      {:error, _} -> :ok
+      {:ok, info} ->
+        Fleet.Spawner.Pod.TurnFlag.touch(info, message)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Spawner: notify_pod #{pod_id} NOT delivered (#{inspect(reason)}) — the pod is not in " <>
+            "the registry (never started, restarting, or killed); the message is LOST, nothing " <>
+            "replays it"
+        )
+
+        {:error, reason}
     end
   end
 

@@ -9,13 +9,13 @@ defmodule Fleet.Observation.BindAddressTest do
   use ExUnit.Case, async: false
 
   setup do
-    prev = Application.get_env(:fleet_observation, :start_listener)
-    Application.put_env(:fleet_observation, :start_listener, true)
+    prev = Application.get_env(:lcars_fleet, :observation_start_listener)
+    Application.put_env(:lcars_fleet, :observation_start_listener, true)
 
     on_exit(fn ->
       case prev do
-        nil -> Application.delete_env(:fleet_observation, :start_listener)
-        v -> Application.put_env(:fleet_observation, :start_listener, v)
+        nil -> Application.delete_env(:lcars_fleet, :observation_start_listener)
+        v -> Application.put_env(:lcars_fleet, :observation_start_listener, v)
       end
 
       System.delete_env("LCARS_BIND_HOST")

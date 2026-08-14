@@ -108,6 +108,15 @@ spec:
       - WebSearch      # PascalCase: native Claude Code tool, allowed pod-side
       - ToolSearch     # PascalCase: loads the deferred tools (Monitor, mcp__fleet__*)
       - Monitor        # PascalCase: wake-by-flag (watch.sh) — wake without content send-keys
+      # 6-136 — ORDONNÉ PAR UN MODOP DE CE RÔLE, DONC IL DOIT ÊTRE DANS LA LISTE. Le bundle
+      # `brainstorming` (déclaré ici en `modop_set.optional`) écrit « You MUST create a TodoWrite
+      # task pour chaque item » ; l'outil n'était dans aucune des deux listes. C'est exactement le
+      # cas mesuré au-dessus le 2026-08-09 : sous `--permission-mode default`, un outil absent
+      # d'`allowedTools` ne se saute pas, il PROMPTE — et un pod n'a personne pour répondre. Un
+      # modop que le catalogue accepte pouvait donc GELER le pod qui l'active, verrou du ticket
+      # compris. La règle écrite trois lignes plus haut s'applique littéralement : la liste couvre
+      # ce que le rôle peut LÉGITIMEMENT atteindre, pas seulement ce qu'on veut qu'il fasse.
+      - TodoWrite
       # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
       # (create_project/import_project/list_workflow_cards) belongs to starfleet (fleet-master) since the
       # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.

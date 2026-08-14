@@ -24,8 +24,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
         incident: %{op: "spawn", subject: "cap_profile_name", escalate_kind: nil, forward: []}
       },
       {:starfleet, :"starfleet.audit_cat5_pod_drift"} => %{action: :incident_cat5},
-      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5},
-      {:starfleet, :"starfleet.audit_cat5_oauth_refresh_failed"} => %{action: :incident_cat5}
+      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5}
     }
   end
 
@@ -331,8 +330,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       ExUnit.CaptureLog.capture_log(fn ->
         send(
           pid,
-          Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_oauth_refresh_failed",
-            payload: %{"reason" => "refresh KO"}
+          Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_workflow_map_failed",
+            payload: %{"reason" => "map KO"}
           )
         )
 

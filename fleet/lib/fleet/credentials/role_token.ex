@@ -96,15 +96,32 @@ defmodule Fleet.Credentials.RoleToken do
       {:error, reason} ->
         Logger.warning(
           "RoleToken: role token #{inspect(role)} absent/unreadable (#{path} : " <>
-            "#{inspect(reason)}) → unavailable (caller policy in RoleIdentity: fail-closed, " <>
-            "no system-account fallback)"
+            "#{inspect(reason)})#{dir_hint()} → unavailable (caller policy in RoleIdentity: " <>
+            "fail-closed, no system-account fallback)"
         )
 
         nil
     end
   end
 
-  @doc "Root of the role tokens (`:fleet_credentials, :role_tokens_dir`, default `/home/private`)."
+  # 6-030 — LE MESSAGE NOMMAIT UN FICHIER QUAND LA CAUSE ETAIT LE REPERTOIRE. Un deploiement dont
+  # `FORGE_ROLE_TOKENS_DIR` pointe a cote, ou dont le provisionnement n'a pas tourne, produisait UNE
+  # ligne PAR ROLE, chacune exacte et aucune ne disant la seule chose utile : aucun role ne peut
+  # signer, et ce n'est pas un probleme de role.
+  #
+  # Le stat ne se paie que dans la branche d'echec — donc jamais sur le chemin nominal, et seulement
+  # quand on est deja degrade.
+  defp dir_hint do
+    d = dir()
+
+    if File.dir?(d),
+      do: "",
+      else:
+        " — NOTE: the tokens DIRECTORY #{d} is itself absent, so NO role can sign; " <>
+          "check FORGE_ROLE_TOKENS_DIR and provisioning (the deploy poses it 0750 root:fleet)"
+  end
+
+  @doc "Root of the role tokens (`:lcars_fleet, :credentials_role_tokens_dir`, default `/home/private`)."
   @spec dir() :: String.t()
-  def dir, do: Application.get_env(:fleet_credentials, :role_tokens_dir) || @default_dir
+  def dir, do: Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || @default_dir
 end

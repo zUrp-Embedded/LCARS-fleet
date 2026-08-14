@@ -24,14 +24,16 @@ defmodule Fleet.Spawner.Pod.Liveness do
     They are deliberately unequal and deliberately redundant: each covers a window where another
     reads as silence, and none of them alone is trusted enough to kill on.
   - **Response timeout**: derive the delay (ms) of the `:result_deadline` watchdog from the cap-profile
-    (override `spec.timeouts.response_sec`, otherwise a scope-coded default) and the tick cadence.
+    (override `spec.timeouts.response_sec`, otherwise `@default_response_sec`) and the tick cadence.
+    The `lifetime_scope` plays NO part here: a `forever` pod never reaches this module — `Pod`
+    arms `:infinity` for both watchdogs one level up.
 
   The module holds NO state of its own, arms NO timer, writes NOTHING: the `Pod` passes it its
   `state` (map) as argument; the functions read `state.pod_dir`/`.session_id`/`.port`/`.cap_profile`/
-  `.opts` + the `:fleet_spawner` config + `File`/`Port`. The per-pod opts (`:liveness_tick_ms`,
+  `.opts` + the `:lcars_fleet` config (`spawner_*` keys) + `File`/`Port`. The per-pod opts (`:liveness_tick_ms`,
   `:liveness_probe_fun`) are read via `keyword_opt/2` → a test injects probe and cadence WITHOUT
-  global config (async-safe). Depends on `Fleet.CapProfile` (the `%Fleet.CapProfile{spec: spec}`
-  pattern of `default_response_timeout_sec`), already a dep of the app, and on `Pod.SessionFiles`
+  global config (async-safe). Depends on `Fleet.CapProfile` (`monitor_timeout_ms/1` reads
+  `spec.timeouts.response_sec`), already a dep of the app, and on `Pod.SessionFiles`
   (shared glob of the session jsonl); no dependency toward `Fleet.Spawner.Pod` (no cycle).
 
   ## Contract (called by `Pod`)
@@ -45,11 +47,23 @@ defmodule Fleet.Spawner.Pod.Liveness do
   - `monitor_timeout_ms/1` (PUBLIC) — delay (ms) of the `:result_deadline` (called by
     `arm_result_deadline_actions`).
 
-  `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1`, `to_int/1` and
-  `default_response_timeout_sec/1` are internal (called ONLY by the functions above).
+  `keyword_opt/2`, `grew?/2`, `jsonl_size/1`, `proc_cpu_jiffies/1` and `to_int/1` are internal
+  (called ONLY by the functions above).
   """
 
   require Logger
+
+  # The response deadline when a cap-profile declares no `timeouts.response_sec`. ONE value, and
+  # the `lifetime_scope` has no say in it — the "forever" case is decided a level up, in
+  # `Pod.arm_result_deadline_actions/1`, which arms `:infinity` for both watchdogs and never
+  # reaches this module.
+  #
+  # It used to be a two-clause `case` on the scope with `"forever" -> 60`, and that clause was
+  # unreachable: `monitor_timeout_ms/1` is its only caller and sits in the `else` of
+  # `if lifetime_scope == "forever"`. Nothing broke — the harm was READING. Two fragments
+  # contradicted each other about whether a permanent pod has a 60 s deadline, and the one that
+  # governs is the one that says it has none.
+  @default_response_sec 300
 
   # ============================================================
   # Role 1 — liveness probe (has the pod MOVED?) + tick cadence
@@ -57,13 +71,13 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   @doc """
   Cadence (ms) of the liveness tick: per-pod opt `:liveness_tick_ms` (async-safe test) otherwise
-  the `:fleet_spawner, :liveness_tick_ms` config, default 30_000. Called by `liveness_tick_action`
+  the `:lcars_fleet, :spawner_liveness_tick_ms` config, default 30_000. Called by `liveness_tick_action`
   (which STAYS in `Pod`: it builds the `{:timeout, :liveness}` generic timeout ACTION).
   """
   @spec liveness_tick_ms(map()) :: non_neg_integer()
   def liveness_tick_ms(state) do
     keyword_opt(state, :liveness_tick_ms) ||
-      Application.get_env(:fleet_spawner, :liveness_tick_ms, 30_000)
+      Application.get_env(:lcars_fleet, :spawner_liveness_tick_ms, 30_000)
   end
 
   defp keyword_opt(state, key) do
@@ -80,7 +94,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   @spec liveness_sample(map()) :: term()
   def liveness_sample(state) do
     case keyword_opt(state, :liveness_probe_fun) ||
-           Application.get_env(:fleet_spawner, :liveness_probe_fun) do
+           Application.get_env(:lcars_fleet, :spawner_liveness_probe_fun) do
       fun when is_function(fun, 1) ->
         fun.(state)
 
@@ -248,20 +262,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
   def monitor_timeout_ms(state) do
     override = get_in(state.cap_profile.spec, ["timeouts", "response_sec"])
 
-    sec =
-      if is_number(override) and override > 0 do
-        override
-      else
-        default_response_timeout_sec(state.cap_profile)
-      end
+    sec = if is_number(override) and override > 0, do: override, else: @default_response_sec
 
     round(sec * 1000)
-  end
-
-  defp default_response_timeout_sec(%Fleet.CapProfile{spec: spec}) do
-    case get_in(spec, ["invocation", "lifetime_scope"]) do
-      "forever" -> 60
-      _other -> 300
-    end
   end
 end

@@ -155,6 +155,159 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.seen_before?("wake:p:dead", server: name)
     end
 
+    # JG-123 — LE MOTIF TRI-ETAT EXISTAIT DANS LE MEME FICHIER, quarante lignes plus haut, et le
+    # site du tampon de cooldown ne l'avait pas : `_ = write_wal(...)` jetait le seul fait qui
+    # distingue « tampon grave » de « tampon perdu », et la reponse etait `:ok` DANS LES DEUX CAS.
+    # Aucun appelant ne pouvait donc le savoir, meme en le voulant.
+    #
+    # ⚠ Le retour public de `record_or_escalate/4` NE CHANGE PAS, et c'est mesure : ici un WAL perdu
+    # coute une issue REDONDANTE a la recurrence suivante (borne, auto-reparant), la ou le voisin
+    # perdait l'INCIDENT lui-meme (la chronologie ment). Ce qui manquait n'etait pas un verdict,
+    # c'etait que le fait EXISTE.
+    # JG-122 — UN FICHIER CORROMPU N'EST PAS UN REGISTRE VIDE. `decode/1` rendait `%{}` et son propre
+    # commentaire disait la perte (« real amnesia, not an absence ») ; c'est ensuite le SHA du
+    # fichier CORROMPU qui partait en `sha:` du PUT, donc l'ecrasement reussissait. La discipline
+    # existait cent-cinquante lignes plus haut, sur l'autre moitie du probleme : « an unreadable
+    # forge is NOT an empty one … pushing our LOCAL view would OVERWRITE cross-machine incidents ».
+    # JG-113 — `nil` DISAIT DEUX CHOSES : « le tableau a ete LU et ne porte pas ce marqueur » et
+    # « le tableau est ILLISIBLE ». Les deux menaient au meme geste (creer, fail-closed vers l'alarme
+    # — l'arbitrage est ecrit et il ne change pas) ET au meme RESULTAT : une issue sysadmin
+    # identique. Or son lecteur est un humain devant le tableau ops : si un doublon apparait, rien
+    # dans l'issue ne lui dit pourquoi ni qu'il doit chercher sa jumelle.
+    test "JG-113: relecture de dedup ILLISIBLE → l'issue le DIT dans son corps", %{tmp_dir: tmp} do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        # Le tableau est ILLISIBLE — pas vide.
+        list_issues_fun: fn _r, _o -> {:error, {:http, 503, "down"}} end,
+        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 77} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :recorded = Reg.record_or_escalate("pod", "jg113", :launch_failed, opts)
+          assert {:escalated, 77} = Reg.record_or_escalate("pod", "jg113", :launch_failed, opts)
+        end)
+
+      assert_received {:body, body}
+
+      assert body =~ "Déduplication NON vérifiée",
+             "l'issue ne dit pas que son unicite n'a pas pu etre verifiee — un humain devant un " <>
+               "doublon n'a aucun moyen de savoir pourquoi"
+
+      assert body =~ "503", "le corps ne porte pas la raison de l'echec de relecture"
+      assert log =~ "dedup readback FAILED"
+    end
+
+    test "TEMOIN JG-113 — une relecture REUSSIE et vide n'ajoute aucun avertissement", %{
+      tmp_dir: tmp
+    } do
+      # Sans ce temoin, coller l'avertissement sur TOUTE issue passerait le test ci-dessus et
+      # rendrait la marque inutile : present = doute, absent = mesure.
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        list_issues_fun: fn _r, _o -> {:ok, []} end,
+        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 78} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      assert :recorded = Reg.record_or_escalate("pod", "jg113-ok", :launch_failed, opts)
+      assert {:escalated, 78} = Reg.record_or_escalate("pod", "jg113-ok", :launch_failed, opts)
+
+      assert_received {:body, body}
+      refute body =~ "Déduplication NON vérifiée"
+    end
+
+    test "JG-122: forge CORROMPUE → aucun PUT, meme branche que l'illisible", %{tmp_dir: tmp} do
+      name = :"reg_corrupt_#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join(tmp, "incidents.json"),
+           sync_debounce_ms: 5,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o ->
+             {:ok, %{content: "[1, 2, 3]", sha: "sha-du-fichier-corrompu"}}
+           end,
+           put_file_fun: fn _r, _p, _c, _o ->
+             send(test_pid, :PUT_APPELE)
+             {:ok, "c"}
+           end
+         ]}
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Reg.note("jg122:sig", :boom, server: name, now: "2026-06-20T10:00:00Z")
+          Process.sleep(120)
+        end)
+
+      refute_received :PUT_APPELE,
+                      "la vue locale a ete poussee PAR-DESSUS un fichier qu'on n'a pas su lire — " <>
+                        "les incidents des autres machines sont effaces"
+
+      assert log =~ "CORRUPT", "la corruption n'est pas tracee"
+    end
+
+    test "TEMOIN JG-122 — une forge LISIBLE est bien fusionnee et poussee", %{tmp_dir: tmp} do
+      # Sans ce temoin, couper le PUT en toutes circonstances passerait le test ci-dessus.
+      name = :"reg_ok_#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join(tmp, "incidents_ok.json"),
+           sync_debounce_ms: 5,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o -> {:ok, %{content: "{}", sha: "sha-valide"}} end,
+           put_file_fun: fn _r, _p, _c, _o ->
+             send(test_pid, :PUT_APPELE)
+             {:ok, "c"}
+           end
+         ]}
+      )
+
+      Reg.note("jg122:ok", :boom, server: name, now: "2026-06-20T10:00:00Z")
+      Process.sleep(120)
+
+      assert_received :PUT_APPELE
+    end
+
+    test "JG-123: le tampon de cooldown perdu rend un echec type, plus un `:ok` menteur", %{
+      tmp_dir: tmp
+    } do
+      name = start_reg_wal_broken(tmp)
+
+      assert {:error, {:wal_write_failed, _}} =
+               GenServer.call(name, {:mark_escalated, "jg123:sig", 4242, "2026-06-20T12:00:00Z"}),
+             "le tampon n'a pas ete grave et la reponse dit `:ok` — le fait n'existe nulle part"
+
+      # TEMOIN : la memoire, elle, EST a jour. L'echec porte sur la durabilite, pas sur la
+      # transaction — sans ce temoin, rendre l'erreur sans muter passerait le test ci-dessus.
+      assert Reg.seen_before?("jg123:sig", server: name)
+    end
+
     test "record_or_escalate: 1st occurrence + WAL write FAILS → {:recorded_volatile, _} (not :recorded)",
          %{tmp_dir: tmp} do
       name = start_reg_wal_broken(tmp)

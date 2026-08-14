@@ -38,14 +38,34 @@ defmodule Fleet.Starfleet.Cat5Escalator do
       |> Map.put("chain", chain)
       |> Map.put("source", Atom.to_string(source))
 
-    _ =
-      AuditLog.write(%{
-        "source" => Atom.to_string(source),
-        "chain" => chain,
-        "payload" => payload,
-        "action" => "cat5_escalate",
-        "correlation_id" => correlation_id
-      })
+    # ⚠ CETTE LIGNE ETAIT LA DERNIERE TRACE DURABLE D'UNE CAT-5, ET SON ECHEC ETAIT JETE. Tout ce qui
+    # suit est LOSSY par construction : `broadcast_canon/3` est un PubSub sans accuse (et
+    # `on_unregistered: :silent` par choix), et `CoordBackend.handle_escalation/3` ne fait qu'un
+    # second broadcast sur le meme bus — il ne grave rien. Si l'ecriture d'audit echoue AUSSI, il ne
+    # reste RIEN de l'escalade de severite maximale, et l'appelant recoit `:ok`.
+    #
+    # `AuditLog.write/1` loggue deja son propre echec, mais sous son identite a lui (« AuditLog:
+    # write failed ») : rien ne dit que la ligne perdue etait une CAT-5, ni que plus aucun rail ne
+    # la porte. La doctrine des niveaux est explicite — `error` = donnee NON gravee — et c'est ici
+    # que le fait devient terminal.
+    case AuditLog.write(%{
+           "source" => Atom.to_string(source),
+           "chain" => chain,
+           "payload" => payload,
+           "action" => "cat5_escalate",
+           "correlation_id" => correlation_id
+         }) do
+      :ok ->
+        :ok
+
+      {:error, why} ->
+        Logger.error(
+          "Cat5Escalator: CAT-5 #{source} has NO DURABLE TRACE (audit write failed: " <>
+            "#{inspect(why)}, correlation_id=#{inspect(correlation_id)}) — everything downstream " <>
+            "is lossy (PubSub without ack), so this escalation may exist NOWHERE. Human check " <>
+            "required; nothing will rebuild it."
+        )
+    end
 
     _ = broadcast_canon(source, enriched, correlation_id)
 

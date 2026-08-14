@@ -16,11 +16,17 @@ defmodule Fleet.Spawner.Pod.Recovery do
 
   @doc """
   Projects the recovery decision into fresh pod state.
-  """
-  @spec apply_recovery(map(), :recreate | :release, String.t() | nil, atom()) :: map()
-  def apply_recovery(base, :recreate, _sid, _phase), do: Map.put(base, :recovery, :recreate)
 
-  def apply_recovery(base, :release, _sid, phase) do
+  The snapshot's `session_id` is NOT a parameter, and its absence is the contract: recovery does
+  not resume, so the persisted identity has no say in the decision. It used to be passed and
+  ignored by both clauses — a signature claiming a say that the body never took, which reads as an
+  oversight rather than as the doctrine it is. The caller still matches on it to validate the
+  snapshot's shape; that is a different job.
+  """
+  @spec apply_recovery(map(), :recreate | :release, atom()) :: map()
+  def apply_recovery(base, :recreate, _phase), do: Map.put(base, :recovery, :recreate)
+
+  def apply_recovery(base, :release, phase) do
     base |> Map.put(:phase, phase) |> Map.put(:recovery, :release)
   end
 

@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # one is auto-resolved and pushed by the runtime (the jury re-judges the new head, so a wrong
   # resolution is caught downstream); anything else — and any probe/apply failure — falls through to
   # the legacy producer conflict-rework. The gain only ever SHORTENS a path, never breaks one.
-  # Enabled by `:fleet_pilot, :conflict_diagnosis?`; diagnoser/applier are injectable seams
+  # Enabled by `:lcars_fleet, :pilot_conflict_diagnosis?`; diagnoser/applier are injectable seams
   # (`:conflict_diagnoser` / `:conflict_applier`).
   #
   # The ladder in one line: tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch (the
@@ -347,7 +347,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  defp diagnosis_enabled?, do: Application.get_env(:fleet_pilot, :conflict_diagnosis?, false)
+  defp diagnosis_enabled?,
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnosis?, false)
 
   # The FACE of the conflict (chantier face-projet, inventory #7/#8): the probe/apply helpers used
   # to be called with `[]` and fall back to their `origin/main` default IN the code-face worktree —
@@ -364,21 +365,30 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     # it is resolved in the code worktree, which is right for a code-face stack and is the only
     # answer available — the base alone does not say which face the branch it forks from lives on.
     # Written out because as an `else` it also swallowed every future face.
+    # ⚠ CETTE ENUMERATION EN OUBLIAIT UNE, ET LA TROISIEME FACE EXISTE : `@face_branches` porte
+    # `code`, `workshop` et `ops`. Une PR basee sur `workshop` — precisement le cas « PR de face
+    # doc » — tombait donc sur un `case` sans clause : CaseClauseError, sur le chemin de
+    # remediation d'un conflit. Le commentaire ci-dessus disait « written out because as an `else`
+    # it also swallowed every future face » : l'intention etait juste, l'inventaire incomplet, et
+    # c'est exactement ce qu'une enumeration ecrite a la main coute.
+    #
+    # `Fleet.Layout.face_root/1` EST l'autorite, et son `@doc` le dit : « a consumer that knows
+    # which face it is on must never re-derive which directory that means ». On delegue ; la seule
+    # decision qui reste ici est celle du `nil`, qui n'est PAS une face et garde sa raison ecrite.
     dir =
       case Fleet.Layout.face_of(base) do
-        "ops" -> Path.join(Fleet.Layout.ops_root(), name)
-        "code" -> Path.join(Fleet.Layout.code_root(), name)
         nil -> Path.join(Fleet.Layout.code_root(), name)
+        face -> Path.join(Fleet.Layout.face_root(face), name)
       end
 
     [base_branch: "origin/" <> base, dir: dir]
   end
 
   defp diagnoser,
-    do: Application.get_env(:fleet_pilot, :conflict_diagnoser, Fleet.Pilot.ConflictProbe)
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnoser, Fleet.Pilot.ConflictProbe)
 
   defp applier,
-    do: Application.get_env(:fleet_pilot, :conflict_applier, Fleet.Pilot.ConflictApply)
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_applier, Fleet.Pilot.ConflictApply)
 
   # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
   # the OUTSIDER a single inference pass before immobilizing a human (tier-3). Flag off, or that pass
@@ -453,11 +463,16 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp dispatch_exception_rework(pr_number, head, %Ctx{} = ctx) do
     signature = "[conflict-chief:pr-#{pr_number}:round-1]"
 
+    # La BASE REELLE, pas `main` : ce commentaire est lu par un humain sur la PR, et il decrivait une
+    # commande inexecutable des que la PR ne visait pas la face code. Meme valeur validee que celle
+    # qui choisit le worktree vingt lignes plus haut.
+    base = Keyword.fetch!(ctx.opts, :pr_base_branch)
+
     body =
       "⚠ Conflit de merge non résolu par le producteur (budget de rework épuisé). Passe " <>
         "d'exception : le **chief** tente une dernière résolution avant escalade humaine — il " <>
-        "intègre `origin/main`, résout, et re-livre sur CETTE PR ; les juges re-jugeront le nouveau " <>
-        "head.\n\n" <> signature
+        "intègre `origin/#{base}`, résout, et re-livre sur CETTE PR ; les juges re-jugeront le " <>
+        "nouveau head.\n\n" <> signature
 
     comment_opts =
       ctx.forge_opts
@@ -542,10 +557,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp dispatch_conflict_rework(pr_number, head, round, budget, %Ctx{} = ctx) do
     signature = "[conflict-rework:pr-#{pr_number}:round-#{round}]"
 
+    base = Keyword.fetch!(ctx.opts, :pr_base_branch)
+
     body =
-      "⚠ Conflit de merge avec `main` (des briques sœurs ont atterri depuis la coupe de cette " <>
+      "⚠ Conflit de merge avec `#{base}` (des briques sœurs ont atterri depuis la coupe de cette " <>
         "branche). Rework automatique round #{round}/#{budget} : le producteur intègre " <>
-        "`origin/main`, résout, et re-livre sur CETTE PR — les juges re-jugeront le nouveau " <>
+        "`origin/#{base}`, résout, et re-livre sur CETTE PR — les juges re-jugeront le nouveau " <>
         "head.\n\n" <> signature
 
     comment_opts =

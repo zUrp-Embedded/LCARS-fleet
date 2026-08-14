@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:intensity-v1",
   "title": "LCARS Project Intensity v1",
-  "description": "Structural schema for a per-project intensity.json (template: priv/cap_profile/canon/config/intensity-template.json). The LEVEL is the HUMAN's declaration (elicited by the framing interview — stakes of failure, lifetime; an agent NEVER self-assesses criticality) relayed by the architect; justification carries the WHY in prose. pipeline_default names the validation card. Naming a card IS a declaration: a card chosen without a level records the level as ABSENT (optional here) — never fabricated, never inferred from the card's matrix (that would be the runtime self-assessing). Underscore-prefixed keys are informational and ignored by the runtime.",
+  "description": "Structural schema for a per-project .lcars.json (template: priv/cap_profile/canon/config/intensity-template.json). The LEVEL is the HUMAN's declaration (elicited by the framing interview — stakes of failure, lifetime; an agent NEVER self-assesses criticality) relayed by the architect; justification carries the WHY in prose. pipeline_default names the validation card. Naming a card IS a declaration: a card chosen without a level records the level as ABSENT (optional here) — never fabricated, never inferred from the card's matrix (that would be the runtime self-assessing). Underscore-prefixed keys are informational and ignored by the runtime.",
   "type": "object",
   "required": [
     "declared_at",

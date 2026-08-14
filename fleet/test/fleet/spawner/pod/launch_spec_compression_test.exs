@@ -19,12 +19,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpecCompressionTest do
   alias Fleet.Spawner.Pod.LaunchSpec
 
   setup do
-    previous = Application.get_env(:fleet_spawner, :output_compression)
+    previous = Application.get_env(:lcars_fleet, :spawner_output_compression)
 
     on_exit(fn ->
       case previous do
-        nil -> Application.delete_env(:fleet_spawner, :output_compression)
-        value -> Application.put_env(:fleet_spawner, :output_compression, value)
+        nil -> Application.delete_env(:lcars_fleet, :spawner_output_compression)
+        value -> Application.put_env(:lcars_fleet, :spawner_output_compression, value)
       end
     end)
 
@@ -41,7 +41,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpecCompressionTest do
     }
   end
 
-  defp fleet_knob(value), do: Application.put_env(:fleet_spawner, :output_compression, value)
+  defp fleet_knob(value),
+    do: Application.put_env(:lcars_fleet, :spawner_output_compression, value)
 
   describe "the nominal posture is ON, and absence declares it" do
     test "a profile that says nothing compresses" do
@@ -82,8 +83,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpecCompressionTest do
       # Pinned together on purpose: the two functions sit one above the other and differ by one
       # operator. A future reader "harmonising" them would silently make one of the two lie, and the
       # one that lies is the one that loses output nobody will notice missing.
-      Application.put_env(:fleet_spawner, :debug_visibility, true)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :debug_visibility) end)
+      Application.put_env(:lcars_fleet, :spawner_debug_visibility, true)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_debug_visibility) end)
 
       invisible = %Fleet.CapProfile{
         kind: "CapabilityProfile",

@@ -83,6 +83,45 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       refute File.exists?(Path.join(ws, "scratch.txt"))
     end
 
+    # JG-061 (S1, trouvee par les DEUX auditeurs) — l'evasion de confinement, et elle ne passe pas
+    # par le pod : c'est le DAEMON qui execute le hook, hors bwrap, sous l'UID de l'humain, avec
+    # portee sur `~/.claude/.credentials.json`, les jetons de role et le catalogue.
+    #
+    # Le pod n'a besoin que d'ecrire un fichier et de le rendre executable — plusieurs profils canon
+    # portent Write ET Bash. `git clean -fdx` ne touche pas `.git/`, donc le hook survit a l'etape
+    # qui precede le checkout, et `checkout -B` le declenche.
+    test "un hook depose par le pod n'est PAS execute cote monde au re-brief", %{
+      ws: ws,
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      hooks = Path.join([ws, ".git", "hooks"])
+      File.mkdir_p!(hooks)
+
+      # Le temoin va dans `/tmp` et NON sous `pod_dir` : ExUnit derive son tmp_dir du nom du test,
+      # qui contient une apostrophe, et le hook mourait alors sur `Unterminated quoted string`.
+      # Il echouait donc AVANT de creer le temoin — le test aurait ete rouge sans le fix, mais pour
+      # la mauvaise raison. Chemin sans apostrophe + quoting dans le hook : ce qui est mesure est
+      # bien « le hook a-t-il TOURNE », pas « a-t-il su parser son propre chemin ».
+      temoin = Path.join(System.tmp_dir!(), "lcars-jg061-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(temoin) end)
+
+      hook = Path.join(hooks, "post-checkout")
+      File.write!(hook, "#!/bin/sh\ntouch '#{temoin}'\n")
+      File.chmod!(hook, 0o755)
+
+      assert {:ok, ^ws, "feature/issue-2"} =
+               Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+
+      refute File.exists?(temoin),
+             "le hook du pod a tourne cote monde — evasion de bwrap sous l'UID humain"
+
+      # NEUTRALISE, PAS EFFACE, et la distinction est le test : si le hook avait disparu on ne
+      # saurait pas si c'est `core.hooksPath` qui l'a rendu inerte ou un nettoyage qui l'a emporte.
+      # Sa presence prouve que c'est bien la neutralisation qui tient.
+      assert File.exists?(hook)
+    end
+
     test "the previous ticket's COMMITS are gone — the branch is recreated from the base", %{
       ws: ws,
       pod_dir: pod_dir,
@@ -156,6 +195,46 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       profile = cap(%{"repo_path" => "x", "base_branch" => "main"})
       assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
     end
+
+    # JG-076 — `base_sha` ATTEIGNAIT LA LIGNE DE COMMANDE GIT SANS AUCUNE VERIFICATION, en DERNIERE
+    # position et sans `--`. Un argument qui commence par `-` est une OPTION pour git, pas une
+    # revision — et le second appel de `pin_base_sha/2` est celui qui porte les credentials de la
+    # forge et sort sur le reseau. Ses deux voisins immediats sur le meme `with` (`base_branch`,
+    # `feature`) passaient deja par `GitRef.valid?/1` : la parade etait a deux lignes.
+    for {label, hostile} <- [
+          {"une option longue", "--upload-pack=touch /tmp/pwned"},
+          {"une option courte", "-x"},
+          {"un espace", "abc def"}
+        ] do
+      test "JG-076 — un `base_sha` porteur d'#{label} est REFUSE avant git (reset)", %{
+        pod_dir: pod_dir,
+        profile: profile
+      } do
+        hostile = unquote(hostile)
+        p = cap(Map.put(profile.spec["project"], "base_sha", hostile))
+
+        assert {:error, {:reset_failed, {:invalid_base_sha, ^hostile}}} =
+                 Clone.reset_in_place(pod_dir, p, slug: "issue-2")
+      end
+    end
+
+    test "JG-076 — le refus est NOMME, pas habille en panne de git", %{
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      # Le `else` de ce `with` se termine par un fourre-tout `{:error, reason} -> {:git_exit, ...}`.
+      # Sans clause dediee, un refus de VALIDATION ressortait comme un echec de git qui n'a jamais
+      # tourne — et l'operateur cherchait une panne reseau.
+      p = cap(Map.put(profile.spec["project"], "base_sha", "-x"))
+      {:error, {:reset_failed, reason}} = Clone.reset_in_place(pod_dir, p, slug: "issue-2")
+      refute match?({:git_exit, _}, reason)
+    end
+
+    test "TEMOIN JG-076 — un vrai sha, lui, passe", %{pod_dir: pod_dir, profile: profile} do
+      # La garde doit se prouver sur ce qu'elle LAISSE PASSER : le `base_sha` du setup est un sha
+      # reel de 40 hex, et `reset_in_place` doit rester nominal.
+      assert {:ok, _ws, _f} = Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+    end
   end
 
   test "NON-absolute pod_dir → {:error, {:unsafe_pod_dir}} (guard: never mkdir/rm_rf relative to cwd)" do
@@ -184,6 +263,130 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert File.exists?(Path.join(ws, "src.txt"))
     assert feature =~ "feature/"
     refute File.exists?(Path.join(pod_dir, "work"))
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  # 6-135 — LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS.
+  #
+  # Le bloc SP commun aux juges ordonnait `git diff origin/main...HEAD` en expliquant que « le clone
+  # est mono-branche ». Au dispatch d'une review, `RoleDispatch` pose `base_branch: head` : le clone
+  # est donc `--branch <head> --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de
+  # preuve echouaient sur une revision inconnue, et un juge prive de son instrument improvise une
+  # comparaison non contractuelle — ou rend son verdict sur le seul brief, que la chaine compte
+  # ensuite comme un jugement du livrable.
+  describe "6-135 — `refs/lcars/base` : la base contre laquelle ce travail se juge" do
+    defp base_ref(ws) do
+      case git(["rev-parse", "--verify", "--quiet", "refs/lcars/base"], ws) do
+        {out, 0} -> {:ok, String.trim(out)}
+        {_, _} -> :absent
+      end
+    end
+
+    test "un pod PRODUCTEUR : le ref est pose sur sa base, sans reseau", %{tmp_dir: tmp} do
+      src = make_source_repo(Path.join(tmp, "src"))
+      {sha, 0} = git(["rev-parse", "main"], src)
+      pod_dir = Path.join(tmp, "pod-prod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, ws, _f} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{"repo_path" => src, "base_branch" => "main"}),
+                 []
+               )
+
+      assert {:ok, String.trim(sha)} == base_ref(ws)
+    end
+
+    test "un pod JUGE : sa base est celle de la PR, RAPATRIEE — elle n'est pas dans son clone", %{
+      tmp_dir: tmp
+    } do
+      src = make_source_repo(Path.join(tmp, "src"))
+      {main_sha, 0} = git(["rev-parse", "main"], src)
+
+      # Le head de la PR : une branche coupee de `main` qui porte le travail du producteur.
+      {_, 0} = git(["checkout", "-q", "-b", "lcars/issue-7-engineer", "main"], src)
+      File.write!(Path.join(src, "livrable.txt"), "le travail a juger")
+      {_, 0} = git(["add", "."], src)
+      {_, 0} = git(["commit", "-q", "-m", "livrable"], src)
+      {_, 0} = git(["checkout", "-q", "main"], src)
+
+      pod_dir = Path.join(tmp, "pod-juge")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, ws, _f} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{
+                   "repo_path" => src,
+                   "base_branch" => "lcars/issue-7-engineer",
+                   "pr_base_branch" => "main"
+                 }),
+                 []
+               )
+
+      # Le clone est bien mono-branche — c'est la premisse, et elle reste vraie.
+      {_, code} = git(["rev-parse", "--verify", "--quiet", "origin/main"], ws)
+
+      assert code != 0,
+             "origin/main n'a jamais ete dans le clone d'un juge — c'est tout le defaut"
+
+      # Et pourtant la base EST la, sous son nom, epinglee sur la base reelle de la PR.
+      assert {:ok, String.trim(main_sha)} == base_ref(ws)
+
+      # La commande que le prompt prescrit rend exactement le livrable, et rien d'autre.
+      {out, 0} = git(["diff", "--name-only", "lcars/base...HEAD"], ws)
+      assert String.trim(out) == "livrable.txt"
+    end
+
+    test "une base de PR introuvable ARRETE le spawn, nommee — jamais un juge aveugle", %{
+      tmp_dir: tmp
+    } do
+      # L'action prescrite dit « refuser le spawn si cette preuve ne peut etre materialisee », et
+      # c'est la bonne direction ici : un verdict rendu sans base est compte comme un jugement du
+      # livrable. Le refus est BORNE — il ne peut atteindre qu'un pod qui porte une base de PR — et
+      # il n'immobilise rien : le verrou n'est pas encore pose, le tick suivant retente.
+      src = make_source_repo(Path.join(tmp, "src"))
+      pod_dir = Path.join(tmp, "pod-base-morte")
+      File.mkdir_p!(pod_dir)
+
+      assert {:error, {:clone_failed, _}} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{
+                   "repo_path" => src,
+                   "base_branch" => "main",
+                   "pr_base_branch" => "branche-supprimee"
+                 }),
+                 []
+               )
+    end
+
+    test "le RE-BRIEF deplace le ref : le diff du ticket 2 ne contient pas le ticket 1", %{
+      tmp_dir: tmp
+    } do
+      # Sans cette mise a jour, un pod de pipe garderait le ref sur la base du ticket PRECEDENT —
+      # son diff contiendrait le travail de quelqu'un d'autre, ce qui est pire qu'un ref absent
+      # parce que ca ne leve pas.
+      src = make_source_repo(Path.join(tmp, "src"))
+      {sha1, 0} = git(["rev-parse", "main"], src)
+      pod_dir = Path.join(tmp, "pod-pipe")
+      File.mkdir_p!(pod_dir)
+
+      p1 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha1)})
+      assert {:ok, ws, _} = Clone.clone_or_skip(pod_dir, p1, slug: "issue-1")
+      assert {:ok, String.trim(sha1)} == base_ref(ws)
+
+      # La base avance entre les deux tickets, comme sur un depot vivant.
+      File.write!(Path.join(src, "ticket1.txt"), "livre par le ticket 1")
+      {_, 0} = git(["add", "."], src)
+      {_, 0} = git(["commit", "-q", "-m", "ticket 1 merged"], src)
+      {sha2, 0} = git(["rev-parse", "main"], src)
+
+      p2 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha2)})
+      assert {:ok, ^ws, _} = Clone.reset_in_place(pod_dir, p2, slug: "issue-2")
+      assert {:ok, String.trim(sha2)} == base_ref(ws)
+    end
   end
 
   test "the workspace clone brings ONE branch — a neighbour's is not one checkout away", %{

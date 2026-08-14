@@ -45,8 +45,8 @@ defmodule Fleet.Starfleet do
     * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
       validation (frozen `{decision, reason, details, chain}` schema)
     * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,
-      4 handlers: `workflow_map.failed` + `audit.verdict` (draft producers, live);
-      `pod.drift` + `oauth.refresh.failed` (wired but DORMANT — no producer)
+      3 routed types: `workflow_map.failed` + `audit.verdict` (draft producers, live);
+      `pod.drift` (wired but DORMANT — no producer; its condition of end is in `events.yaml`)
     * `Fleet.Starfleet.Cat5Escalator` — pure functions, Cat 5 escalation:
       canonical broadcast `starfleet.audit_cat5_<source>` + `CoordBackend` delegation
     * `Fleet.Starfleet.AuditLog` — pure functions, fail-safe non-bang `File.write`
@@ -82,7 +82,7 @@ defmodule Fleet.Starfleet do
   """
   @spec boot_orchestrate() :: :ok
   def boot_orchestrate do
-    if Fleet.Starfleet.Application.boot_enabled?(:start_boot_orchestrator, true) do
+    if Fleet.Starfleet.Application.boot_enabled?(:starfleet_start_boot_orchestrator, true) do
       {:ok, _task} = Task.start(Fleet.Starfleet.BootOrchestrator, :run, [[]])
       :ok
     else

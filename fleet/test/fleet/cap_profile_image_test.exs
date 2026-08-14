@@ -51,7 +51,7 @@ defmodule Fleet.CapProfileImageTest do
   defp role_index_of({:ok, %Fleet.CapProfile{metadata: md}}), do: md["role_index"]
 
   setup %{tmp_dir: tmp} do
-    Fleet.TestEnv.put_env_restoring(:fleet_cap_profile, :root_dir, write_canon(tmp))
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, write_canon(tmp))
     on_exit(fn -> Image.unpublish() end)
     :ok
   end

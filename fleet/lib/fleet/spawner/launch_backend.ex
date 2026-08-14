@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.LaunchBackend do
   @doc "Returns the configured backend or the canonical Port backend."
   @spec resolved() :: module()
   def resolved do
-    Application.get_env(:fleet_spawner, :launch_backend, @default_backend)
+    Application.get_env(:lcars_fleet, :spawner_launch_backend, @default_backend)
   end
 
   @doc """

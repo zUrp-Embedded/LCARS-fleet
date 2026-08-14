@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-10
+**Last revised**: 2026-08-14
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -22,31 +22,31 @@ there, not restated here.
 - `Fleet.SPBuilder.Composer` — the behaviour (test mock + future 2nd vendor)
 
 ## Config & deps
-- Knob `:fleet_sp_builder, :modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`).
-- Knob `:fleet_sp_builder, :monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
+- Knob `:lcars_fleet, :sp_builder_modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`).
+- Knob `:lcars_fleet, :sp_builder_monk_registry_root` — read by `Monk`; precedence + default in its `@moduledoc`.
 - None set in `config/*.exs` or via env var — inline defaults only (tests override via `put_env`/opt).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/sp_builder.ex`).
 
 ## Content filter posture (V2)
 
-`Fleet.SPBuilder.RepoSections` lifts repo `CLAUDE.md` sections into the pod `CLAUDE.md` by
-**name only** — a closed list of 6: `Stack`, `Build`, `Test`, `Conventions`, `Commands`,
-`Gotchas` (regex `@repo_section_re` in `repo_sections.ex:28`). Sections outside this list are
-silently dropped; a warning logs if none of the 6 matches.
+`Fleet.SPBuilder.RepoSections` lifts repo `CLAUDE.md` sections into the pod `CLAUDE.md` by name —
+a closed list of **7**: `Stack`, `Build`, `Test`, `Doc`, `Conventions`, `Commands`, `Gotchas`
+(`@repo_section_re`). Sections outside this list are silently dropped; a warning logs if none
+matches.
 
-**Content is not filtered.** Any text inside a matching section is forwarded verbatim into the
-pod `CLAUDE.md`. V1 applied a regex doctrinal filter (`ipc-reception-filter.md`); V2 does not —
-the NAME whitelist is the boundary, not content inspection.
+**Content IS filtered, and this section said the opposite.** Every kept section passes through
+`Fleet.ReceptionFilter.scan/1` (`admit_section?/2`, BL-6-16): a matching section is **dropped
+whole** and logged at `error` — the pod launches with LESS context, never with poison, and a spawn
+is never wedged over prose. The repo file is authored OUTSIDE the trust boundary, and this is the
+door where its content becomes pod DIRECTIVES.
 
-**This is a KNOWN HOLE, not an assumed posture.** An earlier revision of this file claimed the
-absence was deliberate ("the repo CLAUDE.md is operator-controlled"). That claim was never
-arbitrated by anyone, and the doctrine it contradicts is still ACTIVE: `ipc-reception-filter.md`
-carries status "doctrine active" in the corpus, and its threat vector V3 is verbatim "prompt
-injection via contenu projet". A filter mandated by live doctrine and absent from the code is a
-regression that was lost in the V1 -> V2 rewrite, not a decision.
+⚠ **CE PARAGRAPHE DÉCRIVAIT UN TROU OUVERT, ET IL EST FERMÉ.** Il disait « Content is not
+filtered », « **This is a KNOWN HOLE** », et argumentait sur une demi-page que la fermeture
+« belongs at repo adoption », pas ici. Un lecteur qui le croyait avait toutes les raisons de
+**retirer** `admit_section?/2` comme une redondance sans objet — la carte ne se contentait pas de
+taire la protection, elle **plaidait contre elle**. C'est le sens grave d'une prose fausse : elle
+ne fait pas perdre du temps, elle fait défaire.
 
-Arbitrated 2026-07-29: an externally cloned repo must be filtered and onboarded BEFORE its
-content can reach a pod — the trust boundary is the adoption of the repo, not the network it
-came from. Until that gate exists, the hole stands as stated here. The closure does NOT belong
-at this layer alone (a length cap and a raw `^#` rejection would only blunt the SP-hierarchy
-override, leaving a hostile instruction inside a section intact); it belongs at repo adoption.
+Ce qui reste vrai de l'ancien texte, et qui n'est pas cette couche : la porte d'adoption d'un dépôt
+cloné de l'extérieur. Le filtre ici lit un `CLAUDE.md` **section par section** ; il ne juge pas la
+légitimité du dépôt lui-même, et ne prétend pas le faire.

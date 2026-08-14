@@ -243,7 +243,11 @@ defmodule Fleet.Spawner.Pod do
     first_entry? = old_state != :extracting
 
     if first_entry? do
-      :ok = Bus.subscribe()
+      # 6-041 — SON sujet, pas le global. Le pod ne consomme que des evenements qui portent son
+      # `pod_id` ; s'abonner au sujet principal le faisait reveiller par tout ce qui traverse la
+      # fleet pour le jeter aussitot. Le bus adresse (cf. `Bus.pod_topic/1`), le pod ecoute son
+      # adresse. Consequence a lire avec : tout `%Fleet.Event{}` qui arrive ici EST pour ce pod.
+      :ok = Bus.subscribe(Bus.pod_topic(data.pod_id))
 
       # BL-6-06
       Events.lossy_broadcast("pod.spawned", %{
@@ -344,7 +348,7 @@ defmodule Fleet.Spawner.Pod do
     #   * key = a binary (LCARS_SKILLS_ROOT fine override) → that path.
     # Do not "simplify" the sentinel to nil: the two nil meanings would collapse.
     skills_root =
-      case Application.get_env(:fleet_spawner, :skills_root, :catalogue) do
+      case Application.get_env(:lcars_fleet, :spawner_skills_root, :catalogue) do
         :catalogue -> Fleet.Catalogue.skills_root()
         other -> other
       end
@@ -839,8 +843,9 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
-    do: :keep_state_and_data
+  # (6-041 — la clause miroir qui vivait ici absorbait `deliverable.published` d'un AUTRE pod. Sur
+  # le sujet par-pod ce cas n'arrive plus : elle etait devenue morte, et une clause morte se lit
+  # exactement comme une clause qui marche.)
 
   # BL-6-03: a witnessed publication-task death lifts the flag with a named cause.
   def handle_event(
@@ -862,8 +867,22 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  def handle_event(:info, %Fleet.Event{type: :"deliverable.publish_lost"}, _state, _data),
-    do: :keep_state_and_data
+  # (6-041 — meme raison que pour `deliverable.published` ci-dessus : la clause miroir n'absorbait
+  # que les evenements d'un autre pod, qui n'arrivent plus.)
+
+  # 6-041 — CE QUI RESTE NON TRAITE EST DESORMAIS ADRESSE A CE POD, DONC CA SE DIT. Le fourre-tout
+  # `handle_event(:info, _msg, …)` plus bas doit rester muet (ports, timers, DOWN, bruit divers) ;
+  # mais un `%Fleet.Event{}` qui arrive ici a franchi le routage par-pod — il est POUR nous, et
+  # qu'aucune clause ne le reconnaisse est un fait, pas du bruit. Avant, il se noyait dans les
+  # evenements des N-1 autres pods et se jeter etait la bonne reponse.
+  def handle_event(:info, %Fleet.Event{} = ev, state, data) do
+    Logger.warning(
+      "pod #{data.pod_id} received #{ev.type} on its own topic with no clause for it " <>
+        "(state=#{inspect(state)}) — addressed to this pod and dropped"
+    )
+
+    :keep_state_and_data
+  end
 
   # A Port exit is normal only after extraction; otherwise it fails and releases the active task.
   def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)
@@ -1066,9 +1085,44 @@ defmodule Fleet.Spawner.Pod do
         case Jason.decode(json) do
           {:ok, %{"session_id" => sid, "phase" => phase_str} = snap} when is_binary(sid) ->
             if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
-              # Same-epoch crash recovery creates a fresh session.
               phase = Recovery.phase_from_string(phase_str) || :launching
-              Recovery.apply_recovery(base, Recovery.recovery_action(phase), sid, phase)
+
+              # 6-108 — CE REROLL A UNE RAISON, ET ELLE N'ETAIT ECRITE NULLE PART.
+              #
+              # Ce qu'on voit d'abord ressemble a une incoherence : un pod mort dans l'epoque
+              # courante laisse son `<session_id>.jsonl` dans un pod_dir qui SURVIT
+              # (`safe_mkdir_p` le preserve en `:allocate`). Si son `state.json` a survecu aussi, on
+              # arrive ici et on reroll une session fraiche. S'il n'avait PAS survecu, le meme pod,
+              # avec le meme jsonl, tombait sur la branche `:enoent` et REPRENAIT — la survie d'un
+              # fichier de recuperation semblant decider du sort du travail accumule.
+              #
+              # ⚠ ET POURTANT LE REROLL EST LA BONNE REPONSE — j'ai commence par « corriger » cette
+              # branche vers `maybe_slot_resume`, et un test a refuse, titre compris. Il avait
+              # raison, et la raison n'etait ecrite NULLE PART :
+              #
+              # ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT. Ce qui l'a tue est, jusqu'a preuve
+              # du contraire, dans la session qu'on s'appreterait a reprendre — un tour qui fait
+              # exploser le backend, un transcript tronque, un etat que le vendor refuse. Reprendre,
+              # c'est RE-ENTRER DANS LE POISON, et la reprise etant automatique, ca boucle. Le
+              # `PermanentWarden` borne les degats (HALT a 5 echecs consecutifs) ; il ne les evite
+              # pas. On echange donc une perte BORNEE — le contexte d'une session — contre une perte
+              # NON BORNEE : un pod qui ne redemarre plus.
+              #
+              # Les deux autres branches ne sont donc pas incoherentes, elles repondent a une AUTRE
+              # question : « qu'est-ce qui accuse cette session ? ». Epoque precedente — rien, un
+              # `fleet_v2 stop` propre laisse le meme snapshot non terminal (cicatrice du
+              # 2026-07-19 : sans le discriminant d'epoque, tout redemarrage tombait en `:recreate`
+              # et le slot ne revenait jamais). `state.json` absent — rien non plus, aucun indice ne
+              # designe la session. Ici, et ici seulement, quelque chose l'accuse.
+              #
+              # `sid` est matche ci-dessus pour valider la FORME du snapshot et ne va pas plus loin ;
+              # un `session_id` non-binaire tombe dans la clause `_` (« PRESENT mais CORROMPU »).
+              #
+              # Le transcript n'est pas perdu par ce chemin : `teardown_backend/1` ne touche qu'au
+              # holder et au sock-dir, et le pod_dir est un bind HOTE (mesure du 2026-08-08, cf. la
+              # clause `:releasing`). Ce qui l'efface est le GC de `:cleaning`, delibere et motive —
+              # sans lui `--session-id` buterait sur « Session ID already in use ».
+              Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
             else
               # Previous-epoch snapshots use the normal live/seed/fresh decision.
               Logger.info(
@@ -1292,12 +1346,12 @@ defmodule Fleet.Spawner.Pod do
   defp cancel_capture_action, do: {{:timeout, :capture_slot}, :infinity, {:attempt, 0}}
 
   defp capture_slot_first_delay_ms,
-    do: Application.get_env(:fleet_spawner, :capture_slot_first_delay_ms, 5_000)
+    do: Application.get_env(:lcars_fleet, :spawner_capture_slot_first_delay_ms, 5_000)
 
   defp capture_slot_retry_ms,
-    do: Application.get_env(:fleet_spawner, :capture_slot_retry_ms, 5_000)
+    do: Application.get_env(:lcars_fleet, :spawner_capture_slot_retry_ms, 5_000)
 
-  defp capture_slot_max, do: Application.get_env(:fleet_spawner, :capture_slot_max, 20)
+  defp capture_slot_max, do: Application.get_env(:lcars_fleet, :spawner_capture_slot_max, 20)
 
   defp safe_resolve_disallowed(cap_profile) do
     {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}
@@ -1306,6 +1360,23 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Runtime containment validation covers rules beyond the JSON schema.
+  #
+  # THIS IS THE UNCONDITIONAL LAYER, and saying so is the point. The `g24_*` invariants — no role
+  # gets `web_search`, `web_fetch`, `code_execution`, `bash_code_execution`, `text_editor` — live in
+  # `CapProfile.validate/1`, which the JSON schema does NOT enforce: it types `disallowedTools` as
+  # an array of strings and says nothing about its contents. So a schema-valid profile can violate
+  # g24, e.g. when a modop overlay REPLACES the list instead of merging it.
+  #
+  # Two layers answer that, and only one of them is always on:
+  #   * `CanonProof.prove_all!/0` at boot — early warning, knob `:spawner_prove_canon_at_boot`
+  #     (default TRUE, set false only in the hermetic test baseline, where CanonProof has its own
+  #     direct tests). It tells the operator BEFORE readiness.
+  #   * this gate — in `:allocating`, the FIRST phase every launching pod goes through
+  #     (`:allocating → :cleaning → :projecting → :launching`), before the pod dir is created and
+  #     before the resolved profile is written to disk. No knob, no path around it.
+  #
+  # An over-provisioned profile can therefore be PUBLISHED and can survive a boot with the proof
+  # switched off; it cannot reach a pod. The failure is late rather than early, never silent.
   defp gate_cap_profile(resolved) do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
@@ -1314,6 +1385,20 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # Pods keep using the proven image; disk divergence remains operator-visible.
+  #
+  # COST, MEASURED AND ACCEPTED WITH ITS BOUND — the check re-reads and re-hashes every published
+  # prompt source on EVERY spawn, and the answer it seeks ("has the disk moved since publication?")
+  # does not depend on the pod being built. That is a real objection; the numbers are what settle
+  # it. On a running fleet, 26 sources / 195 KiB: **2.8 ms cold, 0.3 ms warm** per spawn.
+  #
+  # The bound is what makes this acceptable rather than merely small: the cost is LINEAR in the
+  # catalogue, and it sits on a path whose very next steps are a bwrap cold start of 20-40 s
+  # (`kick` handler, same file). A catalogue a hundred times larger — 2600 sources, 19 MiB — would
+  # cost ~30 ms here, still four orders of magnitude under the thing it precedes. Memoising would
+  # buy that 0.3 ms and owe a cache-invalidation question about the exact event the check exists to
+  # notice.
+  #
+  # Re-measure if the SP catalogue ever reaches the THOUSANDS of sources; below that, this is noise.
   defp warn_on_image_drift do
     case SPBuilder.image_drift() do
       {:ok, []} ->

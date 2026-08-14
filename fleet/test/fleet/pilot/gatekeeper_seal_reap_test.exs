@@ -43,14 +43,14 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   setup %{tmp_dir: tmp} do
-    TestEnv.put_env_restoring(:fleet_pilot, :worktree_sync, SpySync)
-    TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_worktree_sync, SpySync)
+    TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
     :ok
   end
 
   test "engineer (slot_scope: instance) → its ticket pod is reaped at the seal, keyed on the ISSUE" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
              GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   test "architect (slot_scope: project, derived) → NEVER reaped: it outlives the ticket by design" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
              GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "architect", [],
@@ -74,7 +74,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   test "already-dead pod → no-op, no error path (idempotent on replay)" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, DeadPodSpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, DeadPodSpawner)
 
     assert :ok =
              GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
@@ -85,7 +85,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   test "merge KO → NO reaping (nothing was sealed, the producer keeps working)" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert {:error, {:merge, _}} =
              GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/myproj", 7, 42, "engineer", [],
@@ -96,7 +96,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   test "merge HORS BANDE → moisson aussi : la fuite ne doit pas dépendre de QUI a mergé" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
              GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
@@ -109,7 +109,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   test "hors bande SANS producteur nommable → aucune moisson, jamais une identité devinée" do
-    TestEnv.put_env_restoring(:fleet_pilot, :spawner, SpySpawner)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
              GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],

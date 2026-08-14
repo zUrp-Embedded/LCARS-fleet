@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.SeedStoreTest do
 
   setup %{tmp_dir: tmp} do
     root = Path.join(tmp, "seedroot")
-    Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
     %{tmp: tmp, root: root}
   end
@@ -484,6 +484,166 @@ defmodule Fleet.Spawner.SeedStoreTest do
       seed = File.read!(Path.join([root, "poc-9", "pods", "engineer.jsonl"]))
       assert byte_size(seed) <= 8_000_000
       assert byte_size(seed) < byte_size(huge)
+    end
+  end
+
+  # JG-086 (`S1`) — LE POD POSSEDE LES INODES DE SON ARBRE, ET LE DAEMON LES SUIVAIT.
+  # `<pod_dir>` est bind-monte READ-WRITE dans le sandbox (`bwrap_launch.sh`). Un lien pose par
+  # l'agent — sur la feuille `.jsonl` ou sur n'importe quel repertoire au-dessus — faisait lire au
+  # daemon, qui tourne SOUS L'HUMAIN et HORS du sandbox, un fichier de son choix ; le contenu
+  # partait dans la graine et revenait dans le pod suivant. La LECTURE est l'exfiltration.
+  #
+  # `Fleet.Slug.under_root?/2` ne voit rien de tout cela : il compare des chaines. C'est le bon
+  # controle contre un `..` dans un nom et aucun controle contre un lien — d'ou son jumeau
+  # non-lexical `link_free_under?/2`, pose a cote de lui pour que la difference se voie.
+  describe "JG-086 — un lien dans le pod_dir ne fait plus lire ni ecrire le daemon ailleurs" do
+    test "LECTURE : un .jsonl symlinke vers un fichier de l'hote est IGNORE", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+      secret = Path.join(tmp, "host-secret.env")
+      File.write!(secret, ~s({"type":"user","message":{"content":"TOKEN=deadbeef"}}\n))
+
+      dir = Path.join([pod_dir, ".claude", "projects", "slug"])
+      File.mkdir_p!(dir)
+      File.ln_s!(secret, Path.join(dir, "aaaa-bbbb.jsonl"))
+
+      assert :none = SeedStore.checkpoint(pod_dir, "proj", "engineer", "aaaa-bbbb", nil)
+      refute File.exists?(Path.join([root, "proj", "pods"]))
+    end
+
+    test "LECTURE : un REPERTOIRE intermediaire symlinke est ignore aussi (le lien n'est pas que sur la feuille)",
+         %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      elsewhere = Path.join(tmp, "elsewhere")
+      File.mkdir_p!(Path.join(elsewhere, "slug"))
+      File.write!(Path.join([elsewhere, "slug", "cccc-dddd.jsonl"]), ~s({"type":"user"}\n))
+
+      File.mkdir_p!(Path.join(pod_dir, ".claude"))
+      File.ln_s!(elsewhere, Path.join([pod_dir, ".claude", "projects"]))
+
+      assert :none = SeedStore.checkpoint(pod_dir, "proj", "engineer", "cccc-dddd", nil)
+      refute File.exists?(Path.join([root, "proj", "pods"]))
+    end
+
+    test "TEMOIN : un fichier REGULIER au meme endroit est bien capture", %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      make_jsonl(pod_dir, "slug", "eeee-ffff", ~s({"type":"user","message":{"content":"hi"}}\n))
+
+      assert :ok = SeedStore.checkpoint(pod_dir, "proj", "engineer", "eeee-ffff", nil)
+      assert File.exists?(Path.join([root, "proj", "pods", "engineer.jsonl"]))
+    end
+
+    test "ECRITURE : un slug destination symlinke fait REFUSER le restore, rien n'est ecrit dehors",
+         %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      outside = Path.join(tmp, "outside")
+      File.mkdir_p!(outside)
+
+      seed = Path.join(tmp, "seed.jsonl")
+      File.write!(seed, ~s({"type":"user","sessionId":"old"}\n))
+
+      cwd = "/home/projects/demo"
+      dir = Path.join([pod_dir, ".claude", "projects"])
+      File.mkdir_p!(dir)
+      File.ln_s!(outside, Path.join(dir, SeedStore.slugify(cwd)))
+
+      assert_raise ArgumentError, ~r/symlink stands between/, fn ->
+        SeedStore.restore(seed, pod_dir, cwd, "1111-2222")
+      end
+
+      assert File.ls!(outside) == [], "le daemon a ecrit hors du monde projete"
+    end
+
+    test "TEMOIN ECRITURE : sans lien, le restore ecrit bien au bon endroit", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      seed = Path.join(tmp, "seed.jsonl")
+      File.write!(seed, ~s({"type":"user","sessionId":"old"}\n))
+
+      assert {:ok, dest} = SeedStore.restore(seed, pod_dir, "/home/projects/demo", "3333-4444")
+      assert File.exists?(dest)
+      assert Fleet.Slug.link_free_under?(dest, pod_dir)
+    end
+  end
+
+  # JG-075 / JG-080 — DEUX SILENCES SUR LA MEME ARBORESCENCE, ET LES DEUX FICHES SE TROMPENT SUR
+  # LEURS APPELANTS. Mesure au walker independant : `latest_jsonl/1` a DEUX appelants (les deux dans
+  # ce module), pas quatre — `liveness` et `scaffold` appellent la soeur `jsonl_paths/2` et ne
+  # recoivent jamais `:none`. Et `existing_seed_records/1` a UN seul appelant, sur le chemin
+  # d'ECRITURE (capture du sidecar de slot), pas de reprise : sa consequence reelle est l'INVERSE de
+  # celle ecrite — un sidecar illisible etait silencieusement TRONQUE a `live`, perte de donnees, pas
+  # lecture a vide.
+  describe "JG-075 / JG-080 — illisible n'est pas vide, ni en lecture ni en ecriture" do
+    test "JG-075 : repertoire de sessions ILLISIBLE → {:error, _}, pas :none", %{tmp: tmp} do
+      pod_dir = Path.join(tmp, "pod")
+      projects = Path.join([pod_dir, ".claude", "projects"])
+      File.mkdir_p!(projects)
+      File.chmod!(projects, 0o000)
+      on_exit(fn -> File.chmod(projects, 0o755) end)
+
+      result = Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir)
+
+      # Sous un uid qui ignore les permissions (root), le repertoire reste listable : le cas ne se
+      # joue pas et le test ne doit pas mentir a ce sujet. La suite tourne en `builder` en CI.
+      case File.ls(projects) do
+        {:error, _} ->
+          assert {:error, {:sessions_unreadable, _}} = result
+
+        {:ok, _} ->
+          assert result == :none
+      end
+    end
+
+    test "JG-075 TEMOIN : repertoire ABSENT → :none (le nominal avant le premier tour)", %{
+      tmp: tmp
+    } do
+      assert :none = Fleet.Spawner.Pod.SessionFiles.latest_jsonl(Path.join(tmp, "pod-vierge"))
+    end
+
+    # ⚠ CE TEST A D'ABORD ETE ECRIT VACUOUS, et la contre-epreuve l'a dit : avec un sidecar en
+    # `0o000`, l'ECRITURE echoue aussi, donc le resultat est `{:error, _}` avec ou sans le fix — le
+    # fixture ne distinguait rien. Le mode qui separe les deux est **write-only** (`0o200`) : la
+    # lecture est refusee, l'ecriture passe. Sans le fix, `existing_seed_records/1` ravale l'echec en
+    # `%{}`, le merge ne garde que `live`, et `File.write!` TRONQUE le sidecar avec succes. Avec le
+    # fix, la lecture leve, l'ecriture n'a pas lieu, et le contenu precieux survit.
+    #
+    # L'observable est donc le CONTENU du fichier, jamais le code de retour.
+    test "JG-080 : un sidecar ILLISIBLE mais inscriptible n'est PAS tronque", %{
+      tmp: tmp,
+      root: root
+    } do
+      pod_dir = Path.join(tmp, "pod")
+      uuid = "3badcafe-1017-4dad-babe-000000000001"
+
+      make_jsonl(pod_dir, "slug", uuid, ~s({"type":"bridge-session","id":"live"}\n))
+
+      slot = Path.join([root, "_slots", "#{uuid}.jsonl"])
+      precious = ~s({"type":"mode","v":"PRECIEUX"}\n)
+      File.mkdir_p!(Path.dirname(slot))
+      File.write!(slot, precious)
+      File.chmod!(slot, 0o200)
+      on_exit(fn -> File.chmod(slot, 0o644) end)
+
+      _ = SeedStore.capture_slot_bridge(pod_dir, uuid)
+
+      File.chmod!(slot, 0o644)
+
+      # Sous un uid qui ignore les permissions (root), la lecture reussit : le cas ne se joue pas et
+      # le test ne doit pas mentir a ce sujet. La suite tourne en `builder` en CI.
+      if File.stat!(slot).size > 0 and match?({:ok, _}, File.read(slot)) do
+        assert File.read!(slot) =~ "PRECIEUX",
+               "le sidecar a ete TRONQUE : un fichier illisible a ete lu comme vide, puis ecrase"
+      end
+    end
+
+    test "JG-080 TEMOIN : sidecar ABSENT → la capture ecrit normalement", %{tmp: tmp, root: root} do
+      pod_dir = Path.join(tmp, "pod")
+      uuid = "3badcafe-1017-4dad-babe-000000000002"
+      make_jsonl(pod_dir, "slug", uuid, ~s({"type":"bridge-session","id":"live"}\n))
+
+      assert :ok = SeedStore.capture_slot_bridge(pod_dir, uuid)
+      assert File.exists?(Path.join([root, "_slots", "#{uuid}.jsonl"]))
     end
   end
 end

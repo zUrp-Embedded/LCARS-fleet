@@ -1,7 +1,7 @@
 # Fleet.TaskQueue — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-18
+**Last revised**: 2026-08-13
 **Status**: active — get_work_item/submit_result work-item broker
 **Referenced by**: —
 
@@ -22,6 +22,6 @@ only pointed at.
 - `Fleet.TaskQueue.Application` — supervisor; boots the named `Server` with `persist: false` (the ephemeral prod mode)
 
 ## Config & deps
-- Knob `:fleet_task_queue, :retention_terminal_max` — read by `Server` (default 500; per-instance override via `Server.start_link/1`).
-- Knob `:fleet_task_queue, :state_path` — read by `Store`/`Server`, set by `runtime.exs` from `LCARS_STATE_PATH` (no effect while the broker boots `persist: false`).
+- Knob `:lcars_fleet, :task_queue_retention_terminal_max` — read by `Server` (default 500; per-instance override via `Server.start_link/1`).
+- Knob `:lcars_fleet, :task_queue_state_path` — read by `Store`/`Server`, set by `runtime.exs` from `LCARS_STATE_PATH` (no effect while the broker boots `persist: false`).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/task_queue.ex`).

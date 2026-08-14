@@ -12,14 +12,59 @@ defmodule Fleet.Conflict.Diff do
           source: :ours | :theirs
         }
 
-  @doc "LCS as ordered `{i, j}` index pairs where `a[i] == b[j]` (both strictly increasing)."
-  @spec lcs([String.t()], [String.t()]) :: [{non_neg_integer(), non_neg_integer()}]
+  # THE TABLE IS THE COST, AND NOTHING BOUNDED IT. `lcs/2` fills one persistent-map entry per
+  # `{i, j}` couple -- `n * m` entries in time AND in memory, for a hunk whose size no caller
+  # limited. MEASURED on this build (two sequences of n lines each, strings of ~50 chars):
+  #
+  #     n=100    10 000 cells     3.4 ms      ~1 MiB
+  #     n=200    40 000 cells    17.4 ms      ~7 MiB
+  #     n=500   250 000 cells   178.6 ms     ~21 MiB
+  #
+  # ~91 bytes and ~0.71 us per cell, quadratic in n. A 5 000-line hunk -- a lockfile, a generated
+  # file, a snapshot, i.e. EXACTLY what produces big conflicts -- is 25 million cells: ~2.2 GiB and
+  # ~18 s for ONE table, and a three-way merge builds TWO. The BEAM does not refuse it; it swaps and
+  # freezes the calling process, during CLASSIFICATION, before any decision to resolve was taken.
+  #
+  # The ceiling is set where an automatic merge stops being reasonable rather than where the machine
+  # stops coping: 500x500 costs 21 MiB and 179 ms per table, twice per hunk. A conflict block bigger
+  # than that is a human's, not the engine's.
+  @max_lcs_cells 250_000
+
+  @doc """
+  LCS as ordered `{i, j}` index pairs where `a[i] == b[j]` (both strictly increasing).
+
+  `{:error, :too_large}` when the DP table would exceed #{@max_lcs_cells} cells. It is a RETURN and
+  not a silent empty result because the two are indistinguishable downstream: an empty LCS means
+  "these sequences share nothing", which would make a bounded merge produce a confident WRONG diff.
+  Callers cannot forget to read it, which is the point -- a budget the caller must remember to check
+  is a budget the next caller will not check.
+  """
+  @spec lcs([String.t()], [String.t()]) ::
+          {:ok, [{non_neg_integer(), non_neg_integer()}]} | {:error, :too_large}
   def lcs(a, b) do
     av = List.to_tuple(a)
     bv = List.to_tuple(b)
     n = tuple_size(av)
     m = tuple_size(bv)
 
+    if n * m > @max_lcs_cells, do: {:error, :too_large}, else: {:ok, do_lcs(av, bv, n, m)}
+  end
+
+  @doc "The ceiling above which `lcs/2` declines, in DP cells."
+  @spec max_lcs_cells() :: pos_integer()
+  def max_lcs_cells, do: @max_lcs_cells
+
+  @doc """
+  Whether `lcs/2` would decline this pair -- O(1) on the two lengths.
+
+  It exists so a caller can NAME the refusal without paying for it. The decision trace records a
+  reason for every pattern it rejected; deriving that reason by re-running the merge would make the
+  trace, which is pure narration, the most expensive step of the classification.
+  """
+  @spec over_lcs_budget?([String.t()], [String.t()]) :: boolean()
+  def over_lcs_budget?(a, b), do: length(a) * length(b) > @max_lcs_cells
+
+  defp do_lcs(av, bv, n, m) do
     dp =
       Enum.reduce(1..n//1, %{}, fn i, dp ->
         Enum.reduce(1..m//1, dp, fn j, dp ->
@@ -54,9 +99,12 @@ defmodule Fleet.Conflict.Diff do
   end
 
   @doc "Diff of `base` against `branch` as an ordered list of keep/add/remove ops."
-  @spec compute_diff([String.t()], [String.t()]) :: [op()]
+  @spec compute_diff([String.t()], [String.t()]) :: {:ok, [op()]} | {:error, :too_large}
   def compute_diff(base, branch) do
-    common = lcs(base, branch)
+    with {:ok, common} <- lcs(base, branch), do: {:ok, do_compute_diff(base, branch, common)}
+  end
+
+  defp do_compute_diff(base, branch, common) do
     base_v = List.to_tuple(base)
     branch_v = List.to_tuple(branch)
 
@@ -172,22 +220,33 @@ defmodule Fleet.Conflict.Diff do
     end
   end
 
-  @doc "Merges non-overlapping ours/theirs edits over `base`; `nil` if any pair overlaps."
-  @spec merge_non_overlapping([String.t()], [String.t()], [String.t()]) :: [String.t()] | nil
+  @doc """
+  Merges non-overlapping ours/theirs edits over `base`.
+
+  `{:error, :overlap}` when a pair of edits touches the same base interval, `{:error, :too_large}`
+  when a side exceeds the LCS budget. The two are kept APART: both mean "the engine will not merge
+  this", but only the first is a statement about the CONTENT. Collapsing them onto one `nil` made
+  the decision trace say "both branches touched the same lines" about a block nobody had compared.
+  """
+  @spec merge_non_overlapping([String.t()], [String.t()], [String.t()]) ::
+          {:ok, [String.t()]} | {:error, :overlap | :too_large}
   def merge_non_overlapping(base, ours, theirs) do
-    ours_edits = extract_edits(compute_diff(base, ours), :ours)
-    theirs_edits = extract_edits(compute_diff(base, theirs), :theirs)
+    with {:ok, ours_diff} <- compute_diff(base, ours),
+         {:ok, theirs_diff} <- compute_diff(base, theirs) do
+      ours_edits = extract_edits(ours_diff, :ours)
+      theirs_edits = extract_edits(theirs_diff, :theirs)
 
-    overlap? =
-      Enum.any?(ours_edits, fn oe ->
-        Enum.any?(theirs_edits, fn te -> edits_overlap?(oe, te) end)
-      end)
+      overlap? =
+        Enum.any?(ours_edits, fn oe ->
+          Enum.any?(theirs_edits, fn te -> edits_overlap?(oe, te) end)
+        end)
 
-    if overlap? do
-      nil
-    else
-      all = Enum.sort_by(ours_edits ++ theirs_edits, fn e -> {e.base_start, e.base_end} end)
-      reconstruct(all, List.to_tuple(base), 0, [])
+      if overlap? do
+        {:error, :overlap}
+      else
+        all = Enum.sort_by(ours_edits ++ theirs_edits, fn e -> {e.base_start, e.base_end} end)
+        {:ok, reconstruct(all, List.to_tuple(base), 0, [])}
+      end
     end
   end
 

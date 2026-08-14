@@ -194,17 +194,38 @@ defmodule Fleet.CapProfile do
   end
 
   @doc """
-  Returns the sorted catalogue roles that explicitly declare `cap`.
-  Uses the published image when available and otherwise reads the catalogue. Profiles that
-  fail to load are omitted; uniqueness, when required, belongs to the caller.
+  Returns the sorted **spawnable** catalogue roles that explicitly declare `cap`.
+
+  Uses the published image when available and otherwise reads the catalogue — **les deux branches
+  rendent la meme chose**, sieges reserves exclus des deux cotes (BL-6-45). Profiles that fail to
+  load are omitted; uniqueness, when required, belongs to the caller.
   """
   @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def roles_with_capability(cap) do
     case Fleet.CapProfile.Image.published() do
       %{index: index} ->
+        # LES DEUX BRANCHES DOIVENT RENDRE LA MEME CHOSE, ET ELLES NE LE FAISAIENT PAS. La branche
+        # sans image passe par `Catalog.list/1`, qui filtre les `ReservedSeat` (`spawnable?/1`,
+        # BL-6-45) ; celle-ci les laissait passer. Un meme catalogue rendait donc deux reponses
+        # selon qu'une image etait publiee ou non.
+        #
+        # ⚠ ET LA DIVERGENCE EST INATTEIGNABLE AUJOURD'HUI — ce filtre ne repare pas un bug
+        # observable, il rend l'accord LOCAL au lieu de l'emprunter. Mesure : le schema
+        # `reserved-seat-v1.json` est `additionalProperties: false` et ne declare AUCUN `spec`,
+        # donc un siege ne peut pas porter de capability ; un fichier qui essaierait ne validerait
+        # pas, et `Image.publish!/0` LEVE sur un profil invalide. Ce qui ferme la divergence vit
+        # donc dans un schema voisin, pas ici.
+        #
+        # On la ferme quand meme, et le cout est un predicat : les appelants sont TOUS des
+        # resolveurs structurels qui exigent EXACTEMENT un role et LEVENT sur 0 ou plusieurs, donc
+        # le jour ou ce schema gagne un `spec`, la divergence deviendrait « N roles declare … —
+        # fix the catalogue » au boot, sur un catalogue sain, avec un message qui accuse
+        # l'operateur. Un siege est un nom qu'on garde, pas un role qu'on convoque.
         {:ok,
          index
-         |> Enum.filter(fn {_role, raw} -> raw_has_capability?(raw, cap) end)
+         |> Enum.filter(fn {_role, raw} ->
+           Fleet.CapProfile.Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
+         end)
          |> Enum.map(&elem(&1, 0))
          |> Enum.sort()}
 
@@ -366,8 +387,32 @@ defmodule Fleet.CapProfile do
   @spec baseline_git_ops_denied_patterns() :: [String.t()]
   defdelegate baseline_git_ops_denied_patterns(), to: DisallowedTools, as: :baseline_patterns
 
+  # `spec.project` CARRIES TWO POPULATIONS IN ONE SLOT, and the schema only ever described the
+  # first. A catalogue author declares `repo_path`, `base_branch`, `branch_isolation`,
+  # `reference_repo_path` -- validated, `additionalProperties: false`. The pilot then INJECTS the
+  # keys below at dispatch, through `with_project/2`, which does not re-validate.
+  #
+  # They are NOT added to the schema on purpose: a catalogue card that set `base_sha` would
+  # validate, then be overwritten at every dispatch -- a knob that reads as configuration and does
+  # nothing, which is the failure this list exists to prevent rather than create. The schema stays
+  # the CATALOGUE contract; this is the RUNTIME widening, and both are named at both ends.
+  @runtime_project_keys ~w(repo base_sha gate_base_sha pr_base_branch)
+
+  @doc """
+  The `spec.project` keys injected at runtime, absent from the catalogue schema BY DESIGN.
+
+  Single source: `mix lcars.contracts.check` refuses a project key that is in neither this list nor
+  the schema, so the day the pilot adds a fifth one it is declared here or the gate says so.
+  """
+  @spec runtime_project_keys() :: [String.t()]
+  def runtime_project_keys, do: @runtime_project_keys
+
   @doc """
   Replaces `spec.project` with an effective project whose keys are recursively stringified.
+
+  This is the boundary where the catalogue-validated project becomes the runtime one: the map
+  passed in carries `runtime_project_keys/0` on top of what the schema allows, and nothing
+  re-validates after this call.
   """
   @spec with_project(t(), map()) :: t()
   def with_project(%__MODULE__{spec: spec} = cap, project) when is_map(project),
@@ -754,7 +799,7 @@ defmodule Fleet.CapProfile do
   # ONE PASS PER ACTIVE CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
   # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
   # projection came from `Fleet.Application.CatalogueRoles`, where it ran with a single catalogue
-  # BORROWED into `:fleet_catalogue, :root`, so `Fleet.Catalogue.name()` was the declaring
+  # BORROWED into `:lcars_fleet, :catalogue_root`, so `Fleet.Catalogue.name()` was the declaring
   # catalogue and asking it was correct. Lifted here it runs globally, where that name is only the
   # DEFAULT catalogue: measured, a role declared by `biz` projected to `fleet_biz-dev` while its
   # account is `biz_biz-dev`. A projection that is right for one catalogue and silently wrong for

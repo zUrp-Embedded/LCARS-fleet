@@ -35,6 +35,16 @@ defmodule Fleet.Workflow do
       GateBrief,
       Loader,
       Gates,
+      # StepOutputs exported for ONE reason, and it is the reason `Gates` is not the caller:
+      # `Gates` is PURE by contract, and deriving these facts reads the filesystem. So the rail
+      # merges them in before evaluating, which makes this an API of the domain rather than an
+      # internal of the evaluator. cf. BL-6-59.
+      StepOutputs,
+      # Git exporte pour UNE raison : le sceau lit l'attestation d'une brique sur
+      # `refs/lcars/provenance/<sha>` (BL-6-43), une ref que ce domaine ecrit a la publication et
+      # que le rail pilot doit relire pour verifier. Nommer la ref des deux cotes serait deux
+      # sources pour un contrat — `provenance_ref/1` est la seule.
+      Git,
       GateDecision,
       BriefArtifact,
       Provenance,

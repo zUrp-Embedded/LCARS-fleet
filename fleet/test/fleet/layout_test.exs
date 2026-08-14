@@ -41,16 +41,27 @@ defmodule Fleet.LayoutTest do
     # uppercase — and `LaunchSpec` derives HOST paths (the ops mount, the code reference) from
     # the SLUG, which the plan first read as a live bug.
     #
-    # It is not one, and the reason is worth pinning rather than remembering: all SEVEN onboarding
-    # entry points go through `validate_name`, whose charset is `^[a-z0-9][a-z0-9-]*[a-z0-9]$` —
-    # strictly inside what the slug preserves. So every project that HAS a directory has a name
-    # where the two derivations agree, and since the poller now refuses a repo without one, no
-    # served project can reach the divergence.
+    # It is not one, and the reason is worth pinning rather than remembering: every entry point that
+    # INTRODUCES a project name goes through `validate_name`, whose charset is
+    # `^[a-z0-9][a-z0-9-]*[a-z0-9]$` — strictly inside what the slug preserves. So every project
+    # that HAS a directory has a name where the two derivations agree, and since the poller refuses
+    # a repo without one, no served project can reach the divergence.
+    #
+    # THE RULE, NOT A COUNT. This paragraph said "all SEVEN onboarding entry points" and the number
+    # had drifted — an inventory in a comment ages the moment someone adds a door. What holds is the
+    # property: a name enters through validation, or it does not enter. `migrate/3` is the one public
+    # function that skips `validate_name`, and it cannot introduce a name — it takes the full_name of
+    # a project that already exists, with its three local faces, and repoints them.
     #
     # That makes today's equality a property of the charset, not a contract. This test makes it a
     # contract: widen `validate_name` and it goes red at the exact place the two part company,
     # instead of a pod booting healthy on a directory that does not exist.
-    @onboardable_charset ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+    #
+    # ⚠ CETTE PHRASE ETAIT FAUSSE JUSQU'AU 6-079, et par un detail : le motif etait RECOPIE ici.
+    # Elargir la vraie charte ne faisait donc rien rougir — mesure du 2026-08-14, en la modifiant
+    # pour de bon. Un test qui epingle une inclusion contre sa propre copie de l'ensemble n'epingle
+    # rien du tout. On lit la source.
+    @onboardable_charset Fleet.Project.Onboard.name_charset()
 
     test "every name the onboarding admits derives IDENTICALLY through both" do
       for name <- ~w(tetris poc-8 a1 lcars-fleet x9y my-long-project-name 42 a-b-c-d) do
@@ -61,6 +72,26 @@ defmodule Fleet.LayoutTest do
 
         assert Layout.project_name(repo) == Layout.project_slug(repo),
                "onboardable name #{inspect(name)} derives to two different directories"
+      end
+    end
+
+    # JG-078 — CE QUE PERSONNE N'EPINGLAIT. Le test ci-dessus compare les deux DERIVATIONS entre
+    # elles ; il ne dit rien du VALIDATEUR. Or `Fleet.Slug` refuse la majuscule
+    # (`\A[a-z0-9][a-z0-9_-]*\z`) la ou `project_slug/1` la conserve (`[^A-Za-z0-9-]`), et c'est ce
+    # couple-la qui casse : un slug que le producteur rend et que le validateur refuse fait
+    # `{:error, :project_required}` au point d'etranglement du spawn — le projet n'est pas prive de
+    # sa reprise de session, il n'est pas dispatchable du tout.
+    #
+    # Inatteignable aujourd'hui, et c'est justement pourquoi ca se pin : rien ne le tient. Elargir
+    # `validate_name` d'une seule majuscule rend le defaut vivant, et il se manifesterait comme un
+    # refus de spawn sans rapport apparent avec le nom du depot.
+    test "tout nom onboardable produit un slug que le VALIDATEUR accepte" do
+      for name <- ~w(tetris poc-8 a1 lcars-fleet x9y my-long-project-name 42 a-b-c-d) do
+        slug = Layout.project_slug("fleet/#{name}")
+
+        assert Fleet.Slug.valid?(slug),
+               "project_slug/1 rend #{inspect(slug)}, que Fleet.Slug refuse — " <>
+                 "producteur et validateur ont diverge"
       end
     end
 

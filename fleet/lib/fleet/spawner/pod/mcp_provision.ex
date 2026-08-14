@@ -27,7 +27,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   - `mcp_channel_env/2` — the pod process's MCP env vars to merge into the launch env (state `:launching`).
   - `release_pod_socket/1` — the `after` of `terminate/3` (self-protected, NEVER raises).
 
-  The MCP server spec is read from config (`:fleet_spawner, :mcp_server_spec`); the resolved backend
+  The MCP server spec is read from config (`:lcars_fleet, :spawner_mcp_server_spec`); the resolved backend
   is passed by the Pod (single source `Fleet.Spawner.LaunchBackend.resolved/0`).
   """
 
@@ -95,7 +95,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   def release_pod_socket(_state), do: :ok
 
-  defp mcp_server_spec, do: Application.get_env(:fleet_spawner, :mcp_server_spec)
+  defp mcp_server_spec, do: Application.get_env(:lcars_fleet, :spawner_mcp_server_spec)
 
   @doc "Returns whether the Fleet MCP server specification is configured."
   @spec server_spec_present?() :: boolean()
@@ -188,12 +188,18 @@ defmodule Fleet.Spawner.Pod.McpProvision do
     ns_log = Path.join([sandbox_home, ".lcars", "fleet_mcp_bridge.log"])
 
     with :ok <- copy_bridge_into_pod(spec["bridge_source"], host_bridge) do
+      # SHELL-QUOTED, because the substitution lands inside a `bash -c` string. The spec's command
+      # needs a shell for its `2>>` redirect, so the path cannot simply become an argv element —
+      # which leaves quoting as the way to make it inert. Under bwrap `sandbox_home` is the literal
+      # `/home/.pod` and nothing can go wrong; a HOST pod puts the real pod_dir here, derived from
+      # the human's home, and a single space in it breaks the command while `;` or `$( )` would run
+      # what they contain, in the pod's context. Quoting costs nothing on the safe path.
       args =
         (spec["args"] || [])
         |> Enum.map(fn arg ->
           arg
-          |> String.replace("{{BRIDGE}}", ns_bridge)
-          |> String.replace("{{BRIDGE_LOG}}", ns_log)
+          |> String.replace("{{BRIDGE}}", sh_quote(ns_bridge))
+          |> String.replace("{{BRIDGE_LOG}}", sh_quote(ns_log))
         end)
 
       pod_env = %{
@@ -210,6 +216,12 @@ defmodule Fleet.Spawner.Pod.McpProvision do
       {:ok, entry}
     end
   end
+
+  # POSIX single-quoting: everything between `'` is literal to the shell, and the only character
+  # that cannot appear there is `'` itself — closed, escaped, reopened. No allow-list of "dangerous"
+  # characters, which is the form that ages badly: one forgotten metacharacter and the guard is a
+  # decoration.
+  defp sh_quote(s), do: "'" <> String.replace(s, "'", "'\\''") <> "'"
 
   defp copy_bridge_into_pod(nil, _dest), do: :ok
 

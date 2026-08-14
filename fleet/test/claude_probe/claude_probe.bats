@@ -43,7 +43,8 @@ ALL_FLAGS='  --system-prompt-file <path>
   --session-id <uuid>
   --resume
   --effort <level>
-  --remote-control'
+  --remote-control
+  --disable-slash-commands'
 
 @test "contrat tenu : tous les drapeaux presents -> exit 0" {
   fake_claude "$ALL_FLAGS"

@@ -30,16 +30,16 @@ defmodule Fleet.Spawner.PodTest do
   # Fails the FIRST broadcast then delegates to the real Bus (state shared via an Agent in app-env).
   defmodule FlakyBus do
     def broadcast(topic, ev) do
-      agent = Application.fetch_env!(:fleet_spawner, :flaky_agent)
+      agent = Application.fetch_env!(:lcars_fleet, :spawner_flaky_agent)
       n = Agent.get_and_update(agent, fn n -> {n, n + 1} end)
       if n == 0, do: {:error, :transient}, else: Fleet.EventRouter.Bus.broadcast(topic, ev)
     end
   end
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_spawner, :state_fs_root, Path.join(tmp_dir, "state"))
-    Application.put_env(:fleet_spawner, :pod_dir_root, Path.join(tmp_dir, "pods"))
-    Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
+    Application.put_env(:lcars_fleet, :spawner_state_fs_root, Path.join(tmp_dir, "state"))
+    Application.put_env(:lcars_fleet, :spawner_pod_dir_root, Path.join(tmp_dir, "pods"))
+    Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
     # adr-f: no vault. Creds come from the claudeDir bound by bwrap
     # (CLAUDE_DIR, config default); no vault setup in test.
 
@@ -62,13 +62,13 @@ defmodule Fleet.Spawner.PodTest do
       })
     )
 
-    Application.put_env(:fleet_spawner, :claude_dir, setup_claude)
+    Application.put_env(:lcars_fleet, :spawner_claude_dir, setup_claude)
 
     on_exit(fn ->
       StubBackend.clear()
-      Application.delete_env(:fleet_spawner, :state_fs_root)
-      Application.delete_env(:fleet_spawner, :pod_dir_root)
-      Application.delete_env(:fleet_spawner, :claude_dir)
+      Application.delete_env(:lcars_fleet, :spawner_state_fs_root)
+      Application.delete_env(:lcars_fleet, :spawner_pod_dir_root)
+      Application.delete_env(:lcars_fleet, :spawner_claude_dir)
     end)
 
     {:ok, tmp_dir: tmp_dir}
@@ -198,9 +198,11 @@ defmodule Fleet.Spawner.PodTest do
   # %Fleet.Event{work_item.completed} on fleet.events (= what happens when the agent calls
   # submit_result via fleet_mcp). The pod must be in :monitoring (subscribed) before the call.
   defp submit_result_event(pod_id, payload) do
-    Phoenix.PubSub.broadcast(
-      Fleet.PubSub,
-      "fleet.events",
+    # 6-041 — PAR LE BUS, PAS PAR PUBSUB EN DIRECT. Un pod ecoute son propre sujet
+    # (`Bus.pod_topic/1`) et c'est `Bus.broadcast/2` qui l'y adresse ; une diffusion posee a la main
+    # sur `fleet.events` ne l'atteint plus. Le contournement mesurait de toute facon le montage du
+    # test plutot que le rail — le remplacer fait passer ces tests par le chemin d'emission REEL.
+    Fleet.EventRouter.Bus.broadcast_main(
       Fleet.Event.new(:task_queue, :"work_item.completed",
         pod_id: pod_id,
         correlation_id: "test-corr-#{pod_id}",
@@ -210,7 +212,7 @@ defmodule Fleet.Spawner.PodTest do
   end
 
   defp state_fs_path(pod_id, scope_dir \\ "pods") do
-    root = Application.get_env(:fleet_spawner, :state_fs_root)
+    root = Application.get_env(:lcars_fleet, :spawner_state_fs_root)
     Path.join([root, scope_dir, pod_id, "state.json"])
   end
 
@@ -297,8 +299,8 @@ defmodule Fleet.Spawner.PodTest do
     # :normal EXIT.
     test "MA-04: failing pod.completed broadcast → pod NOT released/killed (stays alive), fail-loud" do
       Process.flag(:trap_exit, true)
-      Application.put_env(:fleet_spawner, :event_bus, RaiseBus)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :event_bus) end)
+      Application.put_env(:lcars_fleet, :spawner_event_bus, RaiseBus)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_event_bus) end)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-ma04-#{System.unique_integer([:positive])}"
@@ -324,12 +326,12 @@ defmodule Fleet.Spawner.PodTest do
       Process.flag(:trap_exit, true)
       Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")
       {:ok, agent} = Agent.start_link(fn -> 0 end)
-      Application.put_env(:fleet_spawner, :flaky_agent, agent)
-      Application.put_env(:fleet_spawner, :event_bus, FlakyBus)
+      Application.put_env(:lcars_fleet, :spawner_flaky_agent, agent)
+      Application.put_env(:lcars_fleet, :spawner_event_bus, FlakyBus)
 
       on_exit(fn ->
-        Application.delete_env(:fleet_spawner, :event_bus)
-        Application.delete_env(:fleet_spawner, :flaky_agent)
+        Application.delete_env(:lcars_fleet, :spawner_event_bus)
+        Application.delete_env(:lcars_fleet, :spawner_flaky_agent)
       end)
 
       StubBackend.set_reply(interactive_reply())
@@ -367,9 +369,8 @@ defmodule Fleet.Spawner.PodTest do
 
       # work_item.completed for brick issue-3 (re-brief), NOT the issue-4 spawn (issue_id in the payload,
       # like the real TaskQueue event which carries completed.issue_id).
-      Phoenix.PubSub.broadcast(
-        Fleet.PubSub,
-        "fleet.events",
+      # 6-041 — par le Bus (cf. `submit_result_event/2`) : le pod ecoute son propre sujet.
+      Fleet.EventRouter.Bus.broadcast_main(
         Fleet.Event.new(:task_queue, :"work_item.completed",
           pod_id: pod_id,
           correlation_id: "c-adopt",
@@ -767,8 +768,8 @@ defmodule Fleet.Spawner.PodTest do
         Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # The identity's seed sits in the seed store (captured by a previous life).
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -796,8 +797,8 @@ defmodule Fleet.Spawner.PodTest do
 
     test "seed decision: NO sidecar, NO live jsonl → fresh create (resume 0)", %{tmp_dir: tmp_dir} do
       pod_id = "pod-noseed-#{System.unique_integer([:positive])}"
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
 
       {:ok, _pid} = spawn_via_supervisor(gatekeeper_args(pod_id, uid: 4242, repo_id: 7))
       assert_receive {:launch_called, _largs, env}, 2_000
@@ -831,8 +832,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # The identity's seed exists.
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -845,6 +846,19 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_POD_RESUME"] == "1"
     end
 
+    # 6-108 — POURQUOI CE TEST EXISTE, ET IL A SERVI. Il epingle un comportement qui se lit comme un
+    # oubli : le pod d'a cote (epoque PRECEDENTE) reprend, celui-ci non, avec le meme jsonl. En
+    # instruisant 6-108 j'ai commence par « corriger » cette asymetrie ; ce test a refuse, et il
+    # avait raison.
+    #
+    # La raison, qui n'etait ecrite nulle part : ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT. Ce
+    # qui l'a tue est, jusqu'a preuve du contraire, dans la session qu'on reprendrait — reprendre,
+    # c'est re-entrer dans le poison, et la reprise etant automatique, ca BOUCLE. Le
+    # `PermanentWarden` borne les degats (HALT a 5 echecs) ; il ne les evite pas. Une perte BORNEE
+    # (le contexte d'une session) contre une perte NON BORNEE (un pod qui ne redemarre plus).
+    #
+    # Le seed present dans la mise en scene est load-bearing : sans lui, le vert ne dirait pas
+    # « refuse de reprendre », il dirait « n'avait rien a reprendre ».
     test "boot-epoch: a snapshot from THIS fleet life keeps the fresh-reroll recovery (resume 0)",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-epoch-same-#{System.unique_integer([:positive])}"
@@ -870,8 +884,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # Even WITH a seed present, a same-life crash NEVER resumes (fresh-reroll).
-      Application.put_env(:fleet_spawner, :seed_store_root, Path.join(tmp_dir, "seeds"))
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :seed_store_root) end)
+      Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_seed_store_root) end)
       File.mkdir_p!(Path.join([tmp_dir, "seeds", "_slots"]))
 
       File.write!(
@@ -940,7 +954,7 @@ defmodule Fleet.Spawner.PodTest do
         "---\nname: card-revision\n---\n"
       )
 
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :skills_root, skills_root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_skills_root, skills_root)
 
       # PAS d'isolation de la racine systeme : depuis que la precedence est METIER D'ABORD, la
       # fixture ecrite juste au-dessus gagne sur le `card-revision` du systeme sans qu'on ait a
@@ -1100,7 +1114,7 @@ defmodule Fleet.Spawner.PodTest do
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
       root = Path.join(System.tmp_dir!(), "seedroot-to-#{System.unique_integer([:positive])}")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 
       pod_id = "pod-timeout-seed-#{System.unique_integer([:positive])}"
@@ -1343,7 +1357,7 @@ defmodule Fleet.Spawner.PodTest do
     defp write_creds(dir, oauth) do
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, ".credentials.json"), Jason.encode!(%{"claudeAiOauth" => oauth}))
-      Application.put_env(:fleet_spawner, :claude_dir, dir)
+      Application.put_env(:lcars_fleet, :spawner_claude_dir, dir)
     end
 
     test "free plan + minimal scopes still LAUNCHES (login is enough — vendor enforces scope/plan)",
@@ -1417,7 +1431,7 @@ defmodule Fleet.Spawner.PodTest do
       # kept it — the inverse of what is useful: it is the suffered death you want to resume from.
       Process.flag(:trap_exit, true)
       root = Path.join(System.tmp_dir!(), "seedroot-#{System.unique_integer([:positive])}")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 
       fake_port = Port.open({:spawn, "/bin/sleep 60"}, [:binary, :exit_status])
@@ -1821,7 +1835,14 @@ defmodule Fleet.Spawner.PodTest do
       assert log =~ ":boom"
     end
 
-    test "deliverable.publish_lost of ANOTHER pod → ignored (no lift, no deadline touch)" do
+    # 6-041 — CE CAS N'ARRIVE PLUS PAR LE BUS, ET LE TEST LE DIT MAINTENANT. Le pod ecoute son
+    # PROPRE sujet : un `publish_lost` adresse a `pod-b` ne lui est plus livre du tout, et la clause
+    # miroir qui l'absorbait etait devenue morte. Ce que cet appel DIRECT mesure desormais est le
+    # cas anormal — un evenement d'un autre pod pose a la main dans la boite, donc un bug d'appelant.
+    # Il ne doit ni lever le drapeau ni toucher l'echeance, ET il ne doit plus etre avale en
+    # silence : un evenement arrive sur le sujet d'un pod est ADRESSE a ce pod, et qu'aucune clause
+    # ne le reconnaisse est un fait.
+    test "deliverable.publish_lost of ANOTHER pod (appel direct, hors bus) → aucun effet, mais NOMME" do
       data = %{conditions: MapSet.new([:publishing]), pod_id: "pod-a"}
 
       ev = %Fleet.Event{
@@ -1832,7 +1853,15 @@ defmodule Fleet.Spawner.PodTest do
         payload: %{}
       }
 
-      assert :keep_state_and_data = Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :keep_state_and_data =
+                   Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+        end)
+
+      assert log =~ "deliverable.publish_lost"
+      assert log =~ "no clause for it"
+      assert log =~ "pod-a"
     end
 
     # A payload pipe (no async push) does NOT arm :publishing — otherwise it would arm a 120s
@@ -2050,16 +2079,16 @@ defmodule Fleet.Spawner.PodTest do
       # at do_project (maybe_provision_mcp_config) BEFORE any launch. We do NOT actually
       # launch bwrap (the failure is at provisioning).
       Application.put_env(
-        :fleet_spawner,
-        :launch_backend,
+        :lcars_fleet,
+        :spawner_launch_backend,
         Fleet.Spawner.LaunchBackend.LauncherPortBackend
       )
 
-      Application.delete_env(:fleet_spawner, :mcp_server_spec)
+      Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
 
       on_exit(fn ->
-        Application.put_env(:fleet_spawner, :launch_backend, StubBackend)
-        Application.delete_env(:fleet_spawner, :mcp_server_spec)
+        Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
+        Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
       end)
 
       Process.flag(:trap_exit, true)
@@ -2083,12 +2112,12 @@ defmodule Fleet.Spawner.PodTest do
       # containment bwrap → sandbox_home = /home/.pod. No static "env" key in the spec: the per-pod
       # socket (LCARS_FLEET_MCP_SOCKET) is injected PER-POD by pod.ex (build_fleet_mcp_entry) from
       # the socket provisioner (stub in test).
-      Application.put_env(:fleet_spawner, :mcp_server_spec, %{
+      Application.put_env(:lcars_fleet, :spawner_mcp_server_spec, %{
         "command" => "bash",
         "args" => ["-c", "exec python3 {{BRIDGE}} 2>>{{BRIDGE_LOG}}"]
       })
 
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :mcp_server_spec) end)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec) end)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-mcp-ns-#{System.unique_integer([:positive])}"
@@ -2103,6 +2132,14 @@ defmodule Fleet.Spawner.PodTest do
       assert cmd =~ "/home/.pod/.lcars/fleet_mcp_bridge.log"
       # NEVER the host pod_dir (invisible in-sandbox → that was THE bug).
       refute cmd =~ pod_dir
+
+      # SHELL-QUOTED. The substitution lands inside a `bash -c` string (the spec needs a shell for
+      # its `2>>` redirect), so an unquoted path with a space breaks the command and one with `;`
+      # or `$( )` executes what it carries. `/home/.pod` is literal under bwrap and safe by luck;
+      # a HOST pod substitutes the real pod_dir, derived from the human's home. Pinned here rather
+      # than left to the safe path: the day a host pod runs this, nothing else would catch it.
+      assert cmd =~ "'/home/.pod/.lcars/fleet_mcp_bridge.py'"
+      assert cmd =~ "'/home/.pod/.lcars/fleet_mcp_bridge.log'"
 
       # R9 — the MCP server env carries ONLY the per-pod socket (host path returned by the stub
       # provisioner, contains the pod_id) as `LCARS_FLEET_MCP_SOCKET`: identity = the channel/the
@@ -2137,8 +2174,8 @@ defmodule Fleet.Spawner.PodTest do
       )
 
       # claude_dir override → Fleet.Credentials.Gate.validate reads this claudeDir (scope/plan validation). Mode = bind.
-      Application.put_env(:fleet_spawner, :claude_dir, fake_claude)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :claude_dir) end)
+      Application.put_env(:lcars_fleet, :spawner_claude_dir, fake_claude)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_claude_dir) end)
 
       # source repo with a code branch (main) + a doc branch (ops)
       src = source_repo_with_doc(Path.join(tmp_dir, "proj-src"))
@@ -2273,6 +2310,45 @@ defmodule Fleet.Spawner.PodTest do
 
       refute File.exists?(Path.join(pod_dir, "workspace_marker")),
              "le pod_dir rance survit au spawn : le pod repart sur l'etat d'un cycle mort"
+    end
+
+    # LE JUMEAU DU TEST CI-DESSUS, POUR LE CHEMIN D'ECHEC. L'effacement pouvait ECHOUER et le spawn
+    # partait quand meme : `clear_terminal_snapshot/3` loggait puis rendait `:ok`, et l'appelant
+    # jetait meme ce `:ok`. Le pod demarrait, lisait la pierre tombale survivante, se classait
+    # `:release` et s'arretait apres teardown — `spawn_pod` avait rendu `{:ok, pid}` et rien n'avait
+    # ete produit. Un faux succes coute plus cher qu'un refus : le poller reboucle dessus.
+    test "un effacement INCOMPLET refuse le spawn — aucun child, aucun faux succes", %{
+      tmp_dir: tmp
+    } do
+      pod_id = "issue-2-engineer"
+      snap = write_snapshot!(tmp, pod_id, "succeeded")
+      _pod_dir = seed_pod_dir!(tmp, pod_id)
+
+      # On rend le parent du pod_dir non-inscriptible : `rm_rf` ne peut plus delier l'entree, donc
+      # l'effacement est PARTIEL (le state_dir part, le pod_dir reste) — exactement le cas que
+      # `rm_terminal_artifacts/3` remonte en `{:error, _}`.
+      pods_root = Path.join(tmp, "pods")
+      File.chmod!(pods_root, 0o500)
+      on_exit(fn -> File.chmod(pods_root, 0o700) end)
+
+      StubBackend.set_reply(interactive_reply())
+      StubBackend.set_parent(self())
+
+      profile =
+        put_in(valid_profile().spec, Map.put(valid_profile().spec, "interlocutor", "machine"))
+
+      assert {:error, :terminal_tombstone_not_cleared} =
+               Fleet.Spawner.spawn_pod(profile, "issue-2",
+                 repo_id: @test_repo_id,
+                 pod_id: pod_id,
+                 brief: "fais X"
+               )
+
+      refute_receive {:launch_called, _args, _env},
+                     300,
+                     "un child a ete lance alors que la pierre tombale survit"
+
+      refute File.exists?(snap), "le state_dir, lui, a bien ete efface (effacement PARTIEL)"
     end
   end
 
@@ -2515,7 +2591,7 @@ defmodule Fleet.Spawner.PodTest do
     @tag :tmp_dir
     test "un pod TUE grave sa graine avant le teardown", %{tmp_dir: tmp} do
       root = Path.join(tmp, "seedroot")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-kill-seed-#{System.unique_integer([:positive])}"
@@ -2560,7 +2636,7 @@ defmodule Fleet.Spawner.PodTest do
     test "un pod qui TERMINE grave sa graine avant le teardown", %{tmp_dir: tmp} do
       Process.flag(:trap_exit, true)
       root = Path.join(tmp, "seedroot-release")
-      Fleet.TestEnv.put_env_restoring(:fleet_spawner, :seed_store_root, root)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
 
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-release-seed-#{System.unique_integer([:positive])}"

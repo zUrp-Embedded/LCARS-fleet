@@ -268,9 +268,30 @@ cat_declared() {
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CAT_ACTIVE" | grep -v '^$' || true
 }
 
+# L'ACTIVITE N'EST PAS LA DECLARATION, ET LES CONFONDRE FAISAIT MENTIR QUATRE COMMANDES.
+# La regle du runtime est dans `Fleet.Catalogue.active_roots/0` : *pas de declaration, ou une
+# declaration vide, signifie le catalogue livre dans le release SEUL*. C'est le cas par defaut d'une
+# boite neuve — aucun `catalogues.active` n'existe tant que personne n'a rien active.
+#
+# Ce predicat ne lisait que le fichier. Mesure du 2026-08-12 sur une boite sans declaration, dont
+# TOUT tournait sur `fleet` :
+#   lcars catalogue list  ->  « fleet   inactif   (« lcars catalogue enable fleet ») »
+# Deux lignes de la meme sortie se contredisaient — le bloc ACTIFS disait « le catalogue livre dans
+# le release, seul », et la ligne suivante nommait ce catalogue-la inactif. Celle qui ment est celle
+# qui nomme un etat et propose une commande, et un agent qui lit ca a un modele faux de sa boite.
+#
 # -F : le nom est une CHAINE, pas un motif. Sans lui, `my.cat` matche `my_cat` — un point est un
 # joker en BRE, et un nom de catalogue est une donnee de l'operateur.
-cat_is_active() { cat_declared | grep -qxF "$1"; }
+cat_is_active() {
+  local declared; declared="$(cat_declared)"
+  [[ -n "$declared" ]] || { [[ "$1" == "$CAT_BUNDLED" ]]; return; }
+  printf '%s\n' "$declared" | grep -qxF "$1"
+}
+
+# Actif SANS que personne ne l'ait declare — l'etat par defaut. Il se dit, parce qu'il ne se
+# desactive pas comme un autre (retirer une ligne d'un fichier vide redonne le defaut) et parce
+# qu'activer un AUTRE catalogue le fait sortir.
+cat_active_by_default() { [[ -z "$(cat_declared)" ]]; }
 
 # La liste porte le CHEMIN de chaque entree, et dit laquelle MASQUE l'autre.
 #
@@ -300,7 +321,9 @@ cmd_catalogue_list() {
       fi
     done < <(cat_declared)
   else
-    echo "  (aucune declaration : le catalogue livre dans le release, seul)"
+    # Le nommer, et pas seulement le decrire : « le catalogue livre dans le release » et la ligne
+    # « fleet » plus bas etaient le meme objet, et rien ne le disait.
+    echo "  1. $CAT_BUNDLED    (par defaut — aucune declaration, cf. « $CAT_ACTIVE »)"
   fi
 
   echo
@@ -308,7 +331,9 @@ cmd_catalogue_list() {
   # Le catalogue LIVRE DANS LE RELEASE n'est ni dans CAT_DIR ni dans CAT_SHIPPED — il vit dans le
   # release. Il ne figurait donc nulle part, alors qu'il est le DEFAUT et qu'on peut l'activer par
   # son nom : un operateur qui n'a active que le sien n'avait aucun moyen d'apprendre qu'il existe.
-  if cat_is_active "$CAT_BUNDLED"; then
+  if cat_active_by_default; then
+    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release — par defaut, aucune declaration)"
+  elif cat_is_active "$CAT_BUNDLED"; then
     printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release)"
   else
     printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "inactif" "(dans le release — « $PROG catalogue enable $CAT_BUNDLED »)"
@@ -368,6 +393,23 @@ cmd_catalogue_enable() {
   fi
 
   mkdir -p "$(dirname "$CAT_ACTIVE")"
+
+  # ⚠ ACTIVER LE PREMIER CATALOGUE EN DESACTIVAIT UN AUTRE, SANS UN MOT. Tant qu'aucune declaration
+  # n'existe, le catalogue livre tourne — c'est la regle du runtime, pas une commodite. Ecrire la
+  # premiere ligne rend le fichier NON VIDE, la regle du defaut cesse de s'appliquer, et le livre
+  # sort de la liste. Mesure du 2026-08-12 sur une boite neuve : « enable web » -> declaration
+  # « web » seule, et `fleet` — donc tous les projets de son org — devenu invisible au poller. Le
+  # message disait « ajoute en DERNIER », ce qui laissait croire a un ajout a ce qui tournait deja.
+  #
+  # On MATERIALISE donc le defaut implicite avant d'ajouter, dans cet ordre : ce que la boite faisait
+  # tourner reste en tete, le nouveau vient apres. Un operateur qui ne veut vraiment que le sien le
+  # retire ensuite — et ce `disable`-la marche, parce que la declaration existe maintenant.
+  if [[ "$name" != "$CAT_BUNDLED" ]] && cat_active_by_default; then
+    printf '%s\n' "$CAT_BUNDLED" >> "$CAT_ACTIVE"
+    echo "catalogue enable: « $CAT_BUNDLED » etait actif PAR DEFAUT — il est ecrit en tete pour le rester" >&2
+    echo "  (sans ca, cette premiere declaration l'aurait fait sortir : « $PROG catalogue disable $CAT_BUNDLED » pour ne garder que le tien)" >&2
+  fi
+
   printf '%s\n' "$name" >> "$CAT_ACTIVE"
   echo "catalogue enable: « $name » ajoute en DERNIER dans $CAT_ACTIVE" >&2
   echo "  l'ordre des lignes EST la precedence — editer le fichier pour le remonter" >&2
@@ -392,6 +434,16 @@ cmd_catalogue_enable() {
 cmd_catalogue_disable() {
   local name="${1:?catalogue disable: nom requis}"
   cat_is_active "$name" || die "catalogue disable: « $name » n'est pas actif"
+
+  # ON NE DESACTIVE PAS UN DEFAUT PAR SOUSTRACTION. Sans declaration, le catalogue livre tourne ;
+  # retirer sa ligne d'un fichier qui n'en a aucune laisse le fichier vide, et un fichier vide
+  # REDONNE le defaut. La commande aurait rendu 0 en ne changeant rien — le pire des deux mondes.
+  # Ce qu'il faut est de declarer ce qui tourne A SA PLACE, et c'est ce que dit le refus.
+  if cat_active_by_default; then
+    die "catalogue disable: « $name » est actif PAR DEFAUT (aucune declaration dans $CAT_ACTIVE) —
+  un defaut ne se retire pas, il se REMPLACE : « $PROG catalogue enable <autre> » ecrit la
+  declaration (et y garde « $name » en tete), puis « $PROG catalogue disable $name »."
+  fi
   # Le temporaire vit DANS le repertoire cible : `mv` y est un rename atomique garanti par le
   # noyau, alors que depuis /tmp (souvent un autre systeme de fichiers) c'est une copie suivie
   # d'un delete — une interruption au milieu laisse la declaration tronquee.

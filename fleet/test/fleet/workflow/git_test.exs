@@ -202,14 +202,14 @@ defmodule Fleet.GitTest do
     # simulates the timeout while the readback (rev-parse local + ls-remote) is answered by the same
     # stub. The SHA is the idempotency key: match → landed, mismatch → the timeout stands.
     setup do
-      on_exit(fn -> Application.delete_env(:fleet_workflow, :git_push_runner) end)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :workflow_git_push_runner) end)
       :ok
     end
 
     test "push TIMES OUT but the remote target holds our SHA → {:ok, true} (confirmed by readback)" do
       sha = "abcdef0123456789abcdef0123456789abcdef01"
 
-      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+      Application.put_env(:lcars_fleet, :workflow_git_push_runner, fn args, _opts ->
         cond do
           "push" in args -> {:error, {:timeout, 100}}
           "rev-parse" in args -> {:ok, {"#{sha}\n", 0}}
@@ -222,7 +222,7 @@ defmodule Fleet.GitTest do
     end
 
     test "push TIMES OUT and the remote holds a DIFFERENT SHA → the timeout stands" do
-      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+      Application.put_env(:lcars_fleet, :workflow_git_push_runner, fn args, _opts ->
         cond do
           "push" in args ->
             {:error, {:timeout, 100}}
@@ -243,7 +243,7 @@ defmodule Fleet.GitTest do
     end
 
     test "push TIMES OUT and the remote has NO such ref → the timeout stands (push did not land)" do
-      Application.put_env(:fleet_workflow, :git_push_runner, fn args, _opts ->
+      Application.put_env(:lcars_fleet, :workflow_git_push_runner, fn args, _opts ->
         cond do
           "push" in args -> {:error, {:timeout, 100}}
           "rev-parse" in args -> {:ok, {"aaaaaaa0000000000000000000000000000000000\n", 0}}

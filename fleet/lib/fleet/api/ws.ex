@@ -2,11 +2,37 @@ defmodule Fleet.API.WS do
   @moduledoc """
   WebSocket projection of `Fleet.EventRouter.Bus` at `/ws`.
 
+  ⚠ **NOT SERVED BY DEFAULT since 2026-08-14** — the route is behind `:api_serve_ws` (default
+  `false`, see `Fleet.API.Application.ws_route/0`). The module is intact and its tests run: the
+  switch is a REVERSIBLE cut, not a removal, because "nobody consumes it" is a measurement on this
+  repo at that instant. Flip the config to bring it back — and re-read the section below first.
+
   Clients subscribe with `{"action":"subscribe","topics":[...]}`. Empty
   topics match all events; patterns are exact or use a trailing `*` wildcard.
   The handler rejects non-string topics, bounds inbound frames to 64 KiB,
   keeps passive clients alive with control pings, and degrades non-JSON event
   payloads to an inspected `_raw` value.
+
+  ## WHAT THIS PUBLISHES, and it is not observability metadata
+
+  No authentication, by design (`fleet/CLAUDE.md`: *`api` REST/WS no-auth by design*) — the
+  security boundary is network isolation, and listeners bind loopback unless an operator says
+  otherwise. What that posture was written for is not what travels here. MEASURED contents of the
+  single `fleet.events` subject a client with `topics: []` receives IN FULL:
+
+    * `work_item.completed` — a pod's complete result payload;
+    * `pod.completed` — result, workspace paths, `base_sha`, repo and role;
+    * `wake.failed` — **a capture of the pod's tmux screen**.
+
+  A screen capture is not a metric: whatever a pod had on screen at that moment is in it. An
+  operator who sets `LCARS_BIND_HOST` is told they are exposing listeners; they are not told this
+  one republishes pod screens, which is why it is written here and at the knob.
+
+  ⚠ A pod CANNOT reach this endpoint, contrary to what an audit assumed: `bin/bwrap_launch.sh`
+  runs every canon pod under `--unshare-all` (its own network namespace, so the host's loopback is
+  not its loopback), egress is a per-pod CONNECT proxy on AF_UNIX with a hostname allowlist, and
+  `containment: none` is refused by `SpawnAdmission`. The reachable set is the host's local
+  processes — plus the network, if an operator exposed it.
   """
 
   @behaviour :cowboy_websocket

@@ -164,6 +164,65 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
     end
   end
 
+  # JG-134 — RECEVOIR L'IDENTITE N'EST PAS S'EN SERVIR. `PodSocketAcceptor` construit
+  # `%{pod_id: pod_id}` pour CHAQUE `tools/call`, a l'identique et sans condition : la presence de
+  # cette cle dans une tete de clause ne dit donc rien de l'autorisation. Le predicat cherchait
+  # `\bpod_id:` et acceptait `%{pod_id: _}` — une clause qui filtre l'identite, la jette, puis agit
+  # globalement etait rapportee comme gardee. Le mur faisait la largeur d'un underscore.
+  #
+  # Mesure avant de resserrer, parce qu'un mur ne peut naitre que vert : 23 des 25 outils sont
+  # ROLE-gardes (`require_architect`/`require_onboarder`), tous les mutateurs parmi eux, et les deux
+  # seuls admis par ce predicat sont `get_work_item` et `submit_result` — qui lient et qui
+  # utilisent. Le trou etait reel et personne ne se tenait dedans.
+  describe "pod-scoped — la clause doit LIER l'identite du canal et s'en servir" do
+    defp scoped_tool(head_state, body) do
+      check(
+        pod_tools(
+          "  deftool \"mine\" do\n    :schema\n  end\n",
+          """
+            def handle_tool_call("mine", _args, #{head_state}) do
+              #{body}
+            end
+          """
+        ),
+        delegation()
+      )
+    end
+
+    test "identite JETEE (`%{pod_id: _}`) → REFUSE : le motif est fourni a tous les outils" do
+      result = scoped_tool("%{pod_id: _}", "{:ok, :everything, %{}}")
+
+      assert result.status == :fail,
+             "une clause qui jette l'identite du canal a ete rapportee comme gardee"
+
+      assert hd(result.evidence) =~ "mine"
+    end
+
+    test "identite LIEE mais jamais utilisee → REFUSE : le sujet ne vient pas du canal" do
+      result = scoped_tool("%{pod_id: pod_id} = state", "{:ok, :everything, state}")
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "mine"
+    end
+
+    test "un discard nomme (`_pod_id`) ne passe pas non plus — c'est le meme aveu" do
+      result = scoped_tool("%{pod_id: _pod_id} = state", "{:ok, :everything, state}")
+
+      assert result.status == :fail
+      assert hd(result.evidence) =~ "mine"
+    end
+
+    test "INVERSE TWIN — liee ET utilisee, meme au fond du corps → pass" do
+      result =
+        scoped_tool(
+          "%{pod_id: pod_id} = state",
+          "with {:ok, item} <- WorkItems.fetch(pod_id), do: {:ok, item, state}"
+        )
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+  end
+
   describe "the inverse twin — dispatched without a catalogue entry" do
     test "a handle_tool_call with no deftool is REFUSED: absent from tools/list, live on tools/call" do
       result =

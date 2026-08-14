@@ -190,3 +190,93 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [ "$status" -eq 2 ]
   [[ "$output" == *"/nope/nothing"* ]]
 }
+
+# ─── la revocation : QUI, jamais COMMENT ────────────────────────────────────────────────────────
+#
+# Seule la DECISION est epinglee ici (`converged_humans`, `absent_humans`). Le geste
+# (`revoke_human`) touche gpasswd/pkill/usermod : il n'a rien a faire dans une suite de tests, et
+# c'est precisement pour ca que la selection en est separee. Ce qui coupe l'acces de quelqu'un doit
+# etre lisible sans lancer quoi que ce soit.
+
+# Un groupe fleet injectable, meme idiome que PASSWD_FILE.
+group_fixture() { # group_fixture <membres,separes,par,virgule>
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:%s\n' "$1" > "$GROUP_FILE"
+  printf 'sudo:x:27:root\n' >> "$GROUP_FILE"
+  export GROUP_FILE
+}
+
+# Un passwd ou tout le monde existe, avec des uid d'humains sauf `svc` (compte systeme infiltre).
+passwd_fixture() {
+  cat > "$PASSWD_FILE" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+svc:x:120:120::/nonexistent:/usr/sbin/nologin
+lcars:x:1000:1000::/home/lcars:/bin/bash
+alice:x:1001:1001::/home/alice:/bin/bash
+bob:x:1002:1002::/home/bob:/bin/bash
+carol:x:1003:1003::/home/carol:/usr/sbin/nologin
+EOF
+}
+
+converged() { # converged -> la liste calculee
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    source '$SUT'
+    converged_humans"
+}
+
+absent() { # absent <membres de la team…>
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    source '$SUT'
+    absent_humans $*"
+}
+
+@test "l'humain de BOOTSTRAP n'est jamais un converge — l'entrypoint le cree, pas la team" {
+  passwd_fixture; group_fixture "lcars,alice,bob"
+  converged
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"lcars"* ]]
+  [[ "$output" == *"alice"* ]]
+  [[ "$output" == *"bob"* ]]
+}
+
+@test "un compte SYSTEME infiltre dans le groupe n'est pas un humain converge (uid < UID_MIN)" {
+  passwd_fixture; group_fixture "alice,svc"
+  converged
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"svc"* ]]
+  [[ "$output" == *"alice"* ]]
+}
+
+@test "SANS ARGUMENT, absent_humans ne designe PERSONNE — une liste vide n'est pas une purge" {
+  passwd_fixture; group_fixture "alice,bob,carol"
+  absent
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "seuls les sortis de la team sont designes — ceux qui y sont restent intouches" {
+  passwd_fixture; group_fixture "alice,bob,carol"
+  absent alice
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"alice"* ]]
+  [[ "$output" == *"bob"* ]]
+  [[ "$output" == *"carol"* ]]
+}
+
+@test "toute la team encore la : rien a revoquer" {
+  passwd_fixture; group_fixture "alice,bob"
+  absent alice bob lcars-system
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "un membre de la team qui n'est PAS sur cette boite ne fait rien revoquer" {
+  passwd_fixture; group_fixture "alice"
+  absent alice dave erin
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

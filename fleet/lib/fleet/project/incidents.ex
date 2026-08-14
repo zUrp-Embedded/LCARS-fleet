@@ -26,7 +26,7 @@ defmodule Fleet.Project.Incidents do
   @doc "Records an incident through the configured rail, or says loudly that nothing was recorded."
   @spec record_or_escalate(String.t(), String.t(), atom(), keyword()) :: :ok
   def record_or_escalate(kind, subject, reason, opts \\ []) do
-    case Application.get_env(:fleet_project, :incident_rail) do
+    case Application.get_env(:lcars_fleet, :project_incident_rail) do
       {mod, fun} when is_atom(mod) and is_atom(fun) ->
         _ = apply(mod, fun, [kind, subject, reason, opts])
         :ok
@@ -34,7 +34,7 @@ defmodule Fleet.Project.Incidents do
       nil ->
         Logger.warning(
           "Project.Incidents: NOT WIRED — incident #{kind}/#{inspect(reason)} on #{subject} was " <>
-            "NOT recorded (config :fleet_project, :incident_rail). The caller's fallback still " <>
+            "NOT recorded (config :lcars_fleet, :project_incident_rail). The caller's fallback still " <>
             "ran; what is lost is the durable trace a human reads afterwards."
         )
 

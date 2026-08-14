@@ -28,14 +28,14 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   @default_provisioner Fleet.MCP.PodSocketSupervisor
 
   @doc """
-  Resolved provisioner: config `:fleet_spawner, :mcp_socket_provisioner` otherwise the
+  Resolved provisioner: config `:lcars_fleet, :spawner_mcp_socket_provisioner` otherwise the
   canonical default `Fleet.MCP.PodSocketSupervisor`. SINGLE SOURCE of the default (same
   pattern as `Fleet.Spawner.LaunchBackend.resolved/0`) — the only runtime reader
   is `Pod.McpProvision`, any future reader goes through here instead of re-declaring.
   """
   @spec resolved() :: module()
   def resolved do
-    Application.get_env(:fleet_spawner, :mcp_socket_provisioner, default())
+    Application.get_env(:lcars_fleet, :spawner_mcp_socket_provisioner, default())
   end
 
   @doc """

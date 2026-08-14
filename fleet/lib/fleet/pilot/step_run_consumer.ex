@@ -99,6 +99,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Opts
+  alias Fleet.Pilot.CompletionOutbox
 
   alias Fleet.Pilot.StepRunConsumer.Verdict
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
@@ -119,6 +120,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :task_queue,
     :spawner,
     :wake_recovery,
+    # Seam d'escalade — meme forme que `:wake_recovery` : injecte par un test pour observer
+    # l'incident sans ouvrir d'issue, resolu vers `IncidentRegistry.escalate_gated/5` en prod.
+    :escalate_fun,
     gate_evals: %{},
     gate_eval_ttl_ms: nil,
     gate_eval_sweep_ms: nil,
@@ -183,6 +187,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
+      escalate_fun:
+        Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5),
       gate_evals: %{},
       gate_eval_ttl_ms: Keyword.get(opts, :gate_eval_ttl_ms, @gate_eval_ttl_ms),
       gate_eval_sweep_ms: Keyword.get(opts, :gate_eval_sweep_ms, @gate_eval_sweep_ms),
@@ -195,7 +201,41 @@ defmodule Fleet.Pilot.StepRunConsumer do
     )
 
     Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
+
+    # 6-127 — LA REPRISE EST POSTEE, PAS FAITE DANS `init/1`. Une completion est une suite
+    # d'ecritures forge : la jouer ici bloquerait le demarrage du rail sur du reseau, et un
+    # superviseur qui attend son enfant est un rail qui ne demarre pas. On se l'envoie a soi-meme :
+    # le GenServer est vivant, la reprise s'execute comme n'importe quel message.
+    #
+    # ⚠ ELLE DOIT PRECEDER LA RECLAMATION DU POLLER, et c'est le cas : la reclamation d'un verrou
+    # orphelin attend une grace de 2 ticks (~60 s), la reprise part au premier message apres le
+    # boot. Si elle perdait la course, le pire est un re-dispatch — l'etat d'avant 6-127.
+    if Keyword.get(opts, :replay_outbox, true), do: send(self(), :replay_completion_outbox)
+
     {:ok, state}
+  end
+
+  # 6-127 — CE QUI RESTE DANS LE JOURNAL AU DEMARRAGE EST, PAR CONSTRUCTION, UNE COMPLETION DUE :
+  # l'entree est posee avant que la chaine ne tourne et retiree quand elle a fini. On la rejoue par
+  # le MEME chemin que la premiere fois (`maybe_complete/2`), ce qui est exactement ce que le
+  # `@moduledoc` de `StepRunCompleter` promet depuis toujours — « recovery replays the sequence,
+  # the done steps skip » — et que personne n'executait.
+  @impl GenServer
+  def handle_info(:replay_completion_outbox, state) do
+    case CompletionOutbox.pending() do
+      [] ->
+        {:noreply, state}
+
+      entries ->
+        Logger.info(
+          "StepRunConsumer: #{length(entries)} completion(s) DUE au demarrage — reprise " <>
+            "(chaine idempotente : les etapes deja faites sautent, aucun run d'agent)"
+        )
+
+        Enum.reduce(entries, {:noreply, state}, fn payload, {:noreply, acc} ->
+          handle_pod_completed(payload, acc)
+        end)
+    end
   end
 
   @impl GenServer
@@ -289,8 +329,51 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :ok
   end
 
+  # 6-127 — LE RESULTAT EST POSE AVANT QUE LA CHAINE NE TOURNE, ET RETIRE QUAND ELLE A FINI.
+  #
+  # `TaskQueue` a deja marque l'item `completed` quand on arrive ici : la charge utile est la SEULE
+  # copie du travail de l'agent. Une Task de completion qui meurt l'emportait, et le poller
+  # reclamait l'orphelin puis faisait REFAIRE le travail. Le journal la rend reprenable.
+  #
+  # ⚠ UNE ERREUR DE JOURNALISATION N'EST PAS FATALE, ET C'EST DELIBERE : la completion se deroule de
+  # toute facon, elle ne sera simplement pas reprenable — l'etat d'avant cette fiche. Refuser de
+  # completer parce qu'on n'a pas pu ecrire un fichier echangerait une degradation bornee contre un
+  # blocage.
   defp handle_pod_completed(p, state) do
-    case maybe_complete(p, state) do
+    _ =
+      case CompletionOutbox.put(p) do
+        {:ok, _key} ->
+          :ok
+
+        {:error, :no_work_item_id} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "StepRunConsumer: completion NON journalisee #{p["issue_id"]} (#{inspect(reason)}) — " <>
+              "elle se deroule, mais une mort de la Task la perdrait comme avant 6-127"
+          )
+      end
+
+    outcome = maybe_complete(p, state)
+
+    # RETRAIT SUR LES SEULS ETATS OU IL N'Y A PLUS RIEN A REPRENDRE. `{:error, _}` GARDE l'entree :
+    # c'est precisement le cas que la fiche vise (chaine interrompue), et la rejouer est sans effet
+    # sur les etapes deja faites.
+    #
+    # ⚠ `{:escalate, …}` RETIRE, et le trou est nomme plutot que comble a moitie : ce chemin range
+    # son contexte d'evaluation EN MEMOIRE (`state.gate_evals`), donc un redemarrage le perd de
+    # toute facon. Le rendre durable est un AUTRE mecanisme, et la preuve de sortie de 6-127 ne
+    # porte pas sur lui — ses trois points de mort (avant push, apres push avant PR, apres PR avant
+    # unlock) sont tous DANS la chaine, couverts ci-dessus.
+    case outcome do
+      {:ok, _} -> CompletionOutbox.delete(p)
+      {:skip, _} -> CompletionOutbox.delete(p)
+      {:escalate, _, _} -> CompletionOutbox.delete(p)
+      _ -> :ok
+    end
+
+    case outcome do
       {:ok, _outcome} ->
         {:noreply, state}
 
@@ -372,17 +455,50 @@ defmodule Fleet.Pilot.StepRunConsumer do
           )
 
         {:error, reason} ->
-          Logger.warning(
-            "StepRunConsumer: awaits-arch NOT drained on #{repo}##{number} (#{inspect(reason)}) — " <>
-              "poller may re-offer (no loss)"
-          )
+          # « poller may re-offer (no loss) » — CE QUI ETAIT ECRIT ICI, ET LE CODE LE CONTREDIT.
+          # L'etiquette reste posee, et `StepDispatcher.decide/1` SAUTE toute issue qui la porte :
+          # le poller ne re-offre rien, il passe. Le ticket quitte le pipeline pour de bon.
+          drain_failed(repo, number, {:remove_label_failed, reason}, state)
       end
     else
-      Logger.warning(
-        "StepRunConsumer: arch escalation resolved but metadata lacks repo/number " <>
-          "(#{inspect(meta)}) — label not drained"
-      )
+      # Meme sortie, autre cause : on ne sait meme pas QUELLE issue deverrouiller. Rien ici ne peut
+      # nommer un numero, donc rien ne peut agir sur la forge — l'incident est le seul canal qui
+      # n'exige pas de connaitre la cible.
+      drain_failed(repo, number, {:metadata_incomplete, meta}, state)
     end
+
+    :ok
+  end
+
+  # UN TICKET QUI SORT DU PIPELINE NE SORT PLUS EN SILENCE. Les deux branches d'echec du drain
+  # laissent `lcars-awaits-arch` en place, et `StepDispatcher.decide/1` saute toute issue qui la
+  # porte (`{:skip, :awaits_arch}`) : le ticket est retire du pipeline DEFINITIVEMENT, et seule une
+  # intervention humaine le debloque. Un `Logger.warning` ne survit pas a la nuit ; un incident est
+  # une issue durable sur la forge, ce que la doctrine D1 exige pour tout ce qui est load-bearing.
+  #
+  # `escalate_gated/5` plutot que `escalate/5` : la signature porte le repo et le numero quand on
+  # les a, donc une resolution qui echoue en boucle sur le meme ticket ouvre UNE issue, pas une par
+  # occurrence. Sur la branche sans metadonnees, la signature retombe sur la cause seule — c'est le
+  # mieux qu'on puisse nommer, et c'est deja mieux que rien.
+  defp drain_failed(repo, number, cause, state) do
+    target = if is_binary(repo) and is_integer(number), do: "#{repo}##{number}", else: "unknown"
+
+    Logger.error(
+      "StepRunConsumer: awaits-arch NOT drained on #{target} (#{inspect(cause)}) — the label " <>
+        "STAYS and the dispatcher skips every issue that carries it: this ticket has left the " <>
+        "pipeline and no tick will re-offer it"
+    )
+
+    escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+    _ =
+      escalate.(
+        :awaits_arch_stuck,
+        target,
+        cause,
+        "awaits_arch_stuck:#{target}",
+        state.forge_opts
+      )
 
     :ok
   end
@@ -520,6 +636,24 @@ defmodule Fleet.Pilot.StepRunConsumer do
     do: run_completion(state, label, %{}, fun)
 
   # BL-6-03 S2
+  #
+  # ⚠ CE POINT N'EST PAS UNE SAGA, ET LE RESULTAT DE L'AGENT EST DEJA CONSOMME QUAND ON Y ARRIVE.
+  # `TaskQueue` a persiste le work item `completed` AVANT que cette chaine ne tourne (F-037), et la
+  # chaine du completer est une suite de mutations forge (publier, ouvrir la PR, demander la revue,
+  # graver la route, deverrouiller). Une erreur transitoire APRES une mutation reussie laisse donc un
+  # etat partiel, et rien ici ne rejoue l'etape manquante a partir du resultat deja acquis : on
+  # journalise et on rend l'outcome.
+  #
+  # CE QUI RATTRAPE, ET CE QUI NE RATTRAPE PAS — la difference compte pour qui lit une de ces lignes :
+  #   * le VERROU n'est pas perdu : un step_run interrompu laisse une issue dont plus aucun pod ne
+  #     possede le ref, donc reclamation d'orphelin (grace 2 ticks) puis re-dispatch ;
+  #   * mais le RESULTAT, lui, est consomme : le re-dispatch refait travailler un agent, il ne
+  #     reprend pas la chaine ou elle s'est arretee. Degradation bornee (un run de plus), pas un
+  #     blocage — et c'est la seule promesse qu'on peut tenir sans etat durable.
+  #
+  # La rendre reprenable demande une saga persistee indexee par `work_item_id`, avec des points de
+  # controle idempotents. C'est le MEME mecanisme absent que quatre autres arbitrages reclament
+  # (outbox durable) : une seule question, et elle ne se tranche pas au detour d'un site.
   defp run_completion(state, label, meta, fun) do
     exec = fn ->
       outcome = fun.()

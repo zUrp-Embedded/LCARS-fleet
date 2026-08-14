@@ -13,7 +13,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   ## Configuration
 
-  Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:fleet_pilot, :forge)`:
+  Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:lcars_fleet, :pilot_forge)`:
 
     * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://10.42.0.118"` (forge NAS).
     * `:token` — Gitea token. Read from `:token_file` if absent.
@@ -33,7 +33,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   @doc false
   def resolve_config(opts) do
-    env = Application.get_env(:fleet_pilot, :forge, [])
+    env = Application.get_env(:lcars_fleet, :pilot_forge, [])
     merged = Keyword.merge(env, opts)
 
     with {:ok, base_url} <- fetch_required(merged, :base_url),
@@ -89,7 +89,7 @@ defmodule Fleet.Forge.Client.Transport do
   @doc false
   def forge_bot_login(config, opts) do
     case Keyword.get(opts, :forge_bot_login) ||
-           Application.get_env(:fleet_pilot, :forge_bot_login) do
+           Application.get_env(:lcars_fleet, :pilot_forge_bot_login) do
       login when is_binary(login) and login != "" -> {:ok, login}
       {:error, _} = err -> err
       _ -> derive_bot_login(config)
@@ -116,17 +116,28 @@ defmodule Fleet.Forge.Client.Transport do
   # le genre de reponse plausible et fausse qu'on cherche a supprimer.
   def login_of(config), do: derive_bot_login(config)
 
+  # L'EMPREINTE DU JETON EST UNE VALEUR, PLUS UNE CLE — et c'est tout le correctif. Elle etait DANS
+  # la cle, donc chaque rotation creait une entree de plus et l'ancienne n'etait jamais rendue : sur
+  # un noeud de longue duree, le nombre d'entrees `:persistent_term` croissait lineairement avec le
+  # nombre de jetons successifs, et chaque `put` declenche un GC global.
+  #
+  # UNE entree par `base_url`, dont la valeur porte l'empreinte : une rotation ECRASE la precedente
+  # au lieu de s'y ajouter. La propriete de correction est inchangee et c'est elle qui exigeait
+  # l'empreinte quelque part — un login memorise pour un jeton ne doit jamais etre servi pour un
+  # autre (le jeton du SYSTEME et celui d'un ROLE ne repondent pas le meme `/user`) : la comparaison
+  # se fait maintenant sur la valeur lue, ce qui est le meme test, au meme moment, sans accumuler.
   defp derive_bot_login(config) do
-    key = {__MODULE__, :bot_login, config.base_url, :crypto.hash(:sha256, config.token)}
+    key = {__MODULE__, :bot_login, config.base_url}
+    fingerprint = :crypto.hash(:sha256, config.token)
 
     case :persistent_term.get(key, :unset) do
-      login when is_binary(login) ->
+      {^fingerprint, login} when is_binary(login) ->
         {:ok, login}
 
-      :unset ->
+      _ ->
         case http_get(config, "/user") do
           {:ok, %{"login" => login}} when is_binary(login) and login != "" ->
-            :persistent_term.put(key, login)
+            :persistent_term.put(key, {fingerprint, login})
             {:ok, login}
 
           {:ok, _} ->
@@ -305,7 +316,29 @@ defmodule Fleet.Forge.Client.Transport do
     )
   end
 
+  # LE SYMETRIQUE, ET IL MANQUAIT. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai
+  # ne les levera. Le `429` est l'inverse exact — il dit « reessaie plus tard » — et le depot ne le
+  # connaissait pas : zero occurrence de `429`, `Retry-After` ou `too many` dans `lib/`, verifie par
+  # deux moyens independants. Il ressortait donc en `{:http, 429, body}` indistinct d'un `500`, et un
+  # appelant qui abandonne sur erreur abandonnait une condition qui se serait levee seule.
+  #
+  # La FORME du retour ne change pas, pour la meme raison que ci-dessus : vingt sites filtrent sur
+  # `{:http, ...}`. Ce qui manquait n'etait pas un type, c'etait de le DIRE — et de dire COMBIEN de
+  # temps, quand la forge le dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
+  # boucle de reessai metier est un geste d'appelant (le motif existe, `do_merge/6`), pas de ce
+  # transport, qui a `retry: false` par construction.
+  defp name_permanent(429, method, path, body) do
+    Logger.warning(
+      "Transport: #{method} #{path} -> HTTP 429 (limitation de debit) — condition TRANSITOIRE" <>
+        retry_after_note(body) <> " : #{inspect(body)}"
+    )
+  end
+
   defp name_permanent(_status, _method, _path, _body), do: :ok
+
+  # `Retry-After` n'arrive pas toujours, et son absence n'est pas zero : elle veut dire « non dit ».
+  defp retry_after_note(%{"retry_after" => v}) when is_integer(v), do: ", reessai dans #{v} s"
+  defp retry_after_note(_), do: ", delai non annonce"
 
   # Le total annonce, ou `nil` s'il ne l'est pas. `nil` n'est PAS zero : il veut dire « non dit »,
   # et la pagination retombe alors sur son heuristique en le sachant.

@@ -88,6 +88,68 @@ teardown() { rm -rf "$TMP_BASE"; }
 
 # ======================= Setup checks ========================
 
+# 6-069 — LE TRAP EMPORTAIT $POD_DIR SUR N'IMPORTE QUEL ECHEC DE SETUP, et toutes ces
+# verifications-la sont posees APRES lui. A cet instant le repertoire a deja ete entierement projete
+# par la fleet : clone AVEC son historique git, CLAUDE.md, prompt systeme, brief, settings.json,
+# watch.sh, hook de trailer. Un socat manquant faisait recloner le depot au prochain essai.
+#
+# Le script declare lui-meme `pod_dir … (caller responsibility)` quatre lignes plus bas, et le
+# proprietaire a son propre teardown garde, exerce sur un pod TERMINAL. « On n'a pas pu demarrer »
+# n'est pas « ce pod est fini ».
+#
+# On boucle sur les CINQ echecs de setup plutot que sur un seul : le trap est unique, mais les
+# chemins qui l'atteignent ne le sont pas, et c'est justement leur nombre qui fait le defaut.
+@test "6-069: un echec de setup ne detruit PAS le pod_dir deja projete" {
+  local temoin="$POD_DIR/clone/.git/HEAD"
+  mkdir -p "$(dirname "$temoin")"
+  echo "ref: refs/heads/main" > "$temoin"
+
+  run_setup_failure() {
+    run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+    [[ "$status" -ne 0 ]] || return 1
+    [[ -f "$temoin" ]] || return 2
+    [[ "$(cat "$temoin")" == "ref: refs/heads/main" ]] || return 3
+  }
+
+  # 1. bwrap absent
+  ( export LCARS_BWRAP_BIN="/nonexistent/bwrap"; run_setup_failure )
+  [[ -f "$temoin" ]]
+
+  # 2. tmux absent
+  ( export LCARS_TMUX_BIN="/nonexistent/tmux"; run_setup_failure )
+  [[ -f "$temoin" ]]
+
+  # 3. binaire vendor absent
+  ( export LCARS_VENDOR_BIN="/nonexistent/claude"; run_setup_failure )
+  [[ -f "$temoin" ]]
+
+  # 4. claudeDir absent
+  ( export CLAUDE_DIR="/nonexistent/claudedir"; run_setup_failure )
+  [[ -f "$temoin" ]]
+
+  # 5. miroir git demande mais absent
+  ( export LCARS_GIT_MIRROR="/nonexistent/mirror"; run_setup_failure )
+  [[ -f "$temoin" ]]
+
+  # Le contenu est intact, pas seulement le chemin.
+  [[ "$(cat "$temoin")" == "ref: refs/heads/main" ]]
+}
+
+# TEMOIN — sans lui, la preuve ci-dessus passerait aussi si le script n'echouait plus du tout, ou
+# s'il n'atteignait plus jamais le trap. Le repertoire de socket, LUI, est bien a ce script : il le
+# cree, donc il le nettoie.
+@test "6-069: TEMOIN — le repertoire de socket, lui, EST nettoye (c'est ce script qui le cree)" {
+  local sock_dir="$LCARS_TMUX_SOCK_BASE/pod-1"
+  mkdir -p "$sock_dir"
+
+  # Un echec APRES la creation du sock dir : le parent existe, mais socat/le vendor manquent.
+  export LCARS_VENDOR_BIN="/nonexistent/claude"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -ne 0 ]]
+
+  [[ ! -d "$sock_dir" ]]
+}
+
 @test "setup: exit 2 when bwrap is missing" {
   export LCARS_BWRAP_BIN="/nonexistent/bwrap"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 2 ]]; [[ "$output" == *"bwrap missing"* ]]
@@ -304,16 +366,26 @@ teardown() { rm -rf "$TMP_BASE"; }
 
 # ======================= Trap (pre-exec) =====================
 
-@test "trap: a setup error cleans up pod_dir (default)" {
+# 6-069 — CE TEST DISAIT L'INVERSE, et son titre annoncait le defaut comme une fonctionnalite :
+# « a setup error cleans up pod_dir (default) ». Il epinglait donc la destruction du travail deja
+# projete par la fleet. Remplace, pas contourne : la propriete tenue ici est celle du repertoire de
+# SOCKET, que ce script cree et possede vraiment.
+@test "trap: a setup error cleans up the pod SOCKET dir (what this script owns)" {
+  local sock_dir="$LCARS_TMUX_SOCK_BASE/pod-1"
+  mkdir -p "$sock_dir"
   export LCARS_GIT_MIRROR="/nonexistent/mirror"   # triggers a PRE-exec exit 1
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$status" -ne 0 ]]; [[ ! -d "$POD_DIR" ]]
+  [[ "$status" -ne 0 ]]; [[ ! -d "$sock_dir" ]]
+  # Et le pod_dir, lui, SURVIT — cf. le test 6-069 plus haut.
+  [[ -d "$POD_DIR" ]]
 }
-@test "trap: pod_dir preserved with LCARS_BWRAP_NO_CLEANUP=1" {
+@test "trap: everything preserved with LCARS_BWRAP_NO_CLEANUP=1" {
+  local sock_dir="$LCARS_TMUX_SOCK_BASE/pod-1"
+  mkdir -p "$sock_dir"
   export LCARS_BWRAP_NO_CLEANUP=1
   export LCARS_GIT_MIRROR="/nonexistent/mirror"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
-  [[ "$status" -ne 0 ]]; [[ -d "$POD_DIR" ]]
+  [[ "$status" -ne 0 ]]; [[ -d "$POD_DIR" ]]; [[ -d "$sock_dir" ]]
 }
 
 # ==================== N0/N1 frontier ========================
@@ -402,4 +474,67 @@ STUB
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   grep -q "^# SOURCE:" "$SCRIPT"; grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"; grep -q "^# STATUS:" "$SCRIPT"
+}
+
+# ============================ fleet.feed : le journal est RO pour le pod ============================
+#
+# `fleet.feed` est ce que le RUNTIME raconte au pod. Le pod_dir etant monte en ecriture, le pod
+# pouvait l'editer — et `PodFeed.append/2` RELIT le fichier avant de le reecrire, donc une ligne
+# posee par l'agent revient signee par le runtime. Ces tests tiennent les trois proprietes dont
+# depend le montage : le fichier EXISTE au spawn (bwrap bind strictement), il n'est PAS tronque
+# (le pod_dir survit au respawn), et le ro-bind vient APRES le bind du dossier (bwrap applique
+# dans l'ordre : avant, il serait annule).
+
+@test "feed: le fichier est CREE au spawn — sinon bwrap n'a rien a binder" {
+  rm -f "$POD_DIR/fleet.feed"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ -f "$POD_DIR/fleet.feed" ]]
+}
+
+@test "feed: un journal DEJA ECRIT n'est jamais tronque par un respawn" {
+  printf '10:15 jalon precedent\n' > "$POD_DIR/fleet.feed"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  run cat "$POD_DIR/fleet.feed"
+  [[ "$output" == *"jalon precedent"* ]]
+}
+
+@test "feed: monte en LECTURE SEULE dans le home du pod" {
+  export LCARS_POD_HOME="/home/.pod"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+}
+
+@test "feed: le ro-bind vient APRES le bind du pod_dir (sinon il est recouvert)" {
+  export LCARS_POD_HOME="/home/.pod"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  dir_bind="${output%%--ro-bind $POD_DIR/fleet.feed*}"
+  [[ "$dir_bind" == *"--bind $POD_DIR /home/.pod"* ]]
+}
+
+@test "feed: un pod dont le cwd RE-MONTE le pod_dir le voit RO sous SES DEUX chemins" {
+  # L'arch : /home/.pod et /home/<projet> sont la meme source. Un seul monte RO laisserait
+  # l'autre ecrivable, ce qui revient a n'en monter aucun.
+  export LCARS_POD_HOME="/home/.pod"
+  export LCARS_POD_CWD="/home/chifoumi"
+  export LCARS_POD_CWD_SRC="$POD_DIR"
+  run "$SCRIPT" architect pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/chifoumi/fleet.feed"* ]]
+}
+
+@test "feed: un pod dont le cwd est un CLONE ne recoit que le montage du home" {
+  # Le producteur travaille dans un clone : il n'y a pas de feed a cet endroit-la, et en binder un
+  # y planterait un fichier que le depot ne connait pas.
+  export LCARS_POD_HOME="/home/.pod"
+  export LCARS_POD_CWD="/home/projet"
+  export LCARS_POD_CWD_SRC="$POD_DIR/projet"; mkdir -p "$LCARS_POD_CWD_SRC"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/fleet.feed /home/.pod/fleet.feed"* ]]
+  [[ "$output" != *"/home/projet/fleet.feed"* ]]
 }

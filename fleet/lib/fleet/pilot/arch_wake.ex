@@ -162,7 +162,7 @@ defmodule Fleet.Pilot.ArchWake do
   # never into an exit that takes the escalation down with it. The rail that reports a problem is
   # the last one allowed to fail because of its own instrument.
   defp fetch_refs do
-    Application.get_env(:fleet_pilot, :arch_deliverable_fetch, &total_fetch/2)
+    Application.get_env(:lcars_fleet, :pilot_arch_deliverable_fetch, &total_fetch/2)
   end
 
   defp total_fetch(repo, n) do

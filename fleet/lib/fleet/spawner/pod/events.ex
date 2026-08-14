@@ -6,7 +6,7 @@ defmodule Fleet.Spawner.Pod.Events do
   always returns `:ok`. `required_broadcast/2` carries `pod.completed`; it returns a broadcast error
   so the pod remains in extraction and can retry instead of releasing an orphaned completion.
 
-  The `:fleet_spawner, :event_bus` seam applies only to the required path. Both paths correlate the
+  The `:lcars_fleet, :spawner_event_bus` seam applies only to the required path. Both paths correlate the
   lifecycle event with the issue identifier in the payload.
   """
 
@@ -66,7 +66,7 @@ defmodule Fleet.Spawner.Pod.Events do
       {:error, {:broadcast_failed, e}}
   end
 
-  defp event_bus, do: Application.get_env(:fleet_spawner, :event_bus, Bus)
+  defp event_bus, do: Application.get_env(:lcars_fleet, :spawner_event_bus, Bus)
 
   defp build_spawner_event(event_type, payload) do
     Fleet.Event.new(:spawner, String.to_existing_atom(event_type),

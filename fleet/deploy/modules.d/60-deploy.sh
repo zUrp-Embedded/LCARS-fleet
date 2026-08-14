@@ -138,8 +138,16 @@ apply() {
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
 
   # 3. L'autorité : build + pose (LONG — mix release ; sortie dumpée seulement en échec).
-  if ! run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"; then
-    p_fail "etc/install.sh en échec (verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
+  # ⚠ LE CODE 3 EST ATTENDU ICI, ET C'EST LE CAS NOMINAL. `install.sh` tourne EN TANT QU'HUMAIN
+  # (la carte l'exige : un build root polluerait le _build du checkout), et il pose ses symlinks
+  # dans `$PROV_LINK_DIR` — typiquement `/usr/local/bin`, où l'humain n'écrit pas. Depuis 6-110
+  # l'installeur REFUSE de dire « OK » sur des liens ratés et rend 3 ; c'est un FAIT (« release
+  # posée, câblage incomplet »), pas un verdict, et c'est l'étape 5 ci-dessous qui pose ces liens
+  # en root. Traiter 3 comme un échec casserait la provision sur toute machine normale.
+  run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
+  local install_rc=$?
+  if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
+    p_fail "etc/install.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply
   fi
   release_present || { p_fail "install.sh vert mais release absente ($PREFIX_REL) — incohérence, inspecte"; verdict_apply; }

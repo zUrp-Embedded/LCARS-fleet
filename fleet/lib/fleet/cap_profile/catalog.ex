@@ -34,7 +34,7 @@ defmodule Fleet.CapProfile.Catalog do
 
   ## Configuration
 
-  `root_dir/0` reads the env key `:fleet_cap_profile, :root_dir` (tests drive it via
+  `root_dir/0` reads the env key `:lcars_fleet, :cap_profile_root_dir` (tests drive it via
   `Application.put_env/3`) — the FINE override, which keeps precedence. Default =
   `Fleet.Catalogue.cap_profiles_root/0`: the bundled canon unless `LCARS_CATALOGUE_ROOT` brings
   another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
@@ -466,13 +466,14 @@ defmodule Fleet.CapProfile.Catalog do
   """
   @spec root_dir() :: String.t()
   def root_dir do
-    Application.get_env(:fleet_cap_profile, :root_dir) || Fleet.Catalogue.cap_profiles_root()
+    Application.get_env(:lcars_fleet, :cap_profile_root_dir) ||
+      Fleet.Catalogue.cap_profiles_root()
   end
 
   @doc """
   The cap-profile roots actually read: the SYSTEM one, then the business one.
 
-  The fine override (`:fleet_cap_profile, :root_dir`) moves the BUSINESS root only. The system root
+  The fine override (`:lcars_fleet, :cap_profile_root_dir`) moves the BUSINESS root only. The system root
   has no knob on purpose — an operator brings their business, they do not choose the mechanism, and
   an override that could drop the machinery would make "this deployment is complete" unanswerable.
 

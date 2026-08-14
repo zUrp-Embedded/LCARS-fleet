@@ -224,11 +224,16 @@ fi
 # ─── 3. Convergence de l'état — LE MÊME provision que le chemin WSL, substrat docker ─────────────
 # rc capturé, jamais fatal : le doctor dira la vérité, sshd doit démarrer pour permettre la
 # réparation. (Le détail des verdicts est dans les logs du conteneur.)
-if "$PROVISION" apply --substrate docker --human "$LCARS_HUMAN"; then
-  say "provision apply : convergé"
-else
-  say "provision apply : AU MOINS UN ÉCHEC (rc=$?) — la boîte démarre quand même ; diagnose : $PROVISION doctor"
-fi
+prov_rc=0
+"$PROVISION" apply --substrate docker --human "$LCARS_HUMAN" || prov_rc=$?
+case "$prov_rc" in
+  0) say "provision apply : convergé" ;;
+  # 2 = appliqué, état-cible non tenu. Confondu avec « AU MOINS UN ÉCHEC » jusqu'ici — et avant
+  # 6-101 il ne remontait pas du tout : le module rendait 0 et la boîte annonçait « convergé ».
+  2) say "provision apply : APPLIQUÉ, DRIFT RÉSIDUEL — rien n'est cassé, un geste manque (forge,
+credentials, réseau). Détail : $PROVISION doctor" ;;
+  *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
+esac
 
 # ─── 3ter. Convergence CONTINUE des humains (forge `humans` → users Linux) ───────────────────────
 # L'étape 3 converge un état FIGÉ, au boot. Enrôler quelqu'un demandait donc un redémarrage — ce qui

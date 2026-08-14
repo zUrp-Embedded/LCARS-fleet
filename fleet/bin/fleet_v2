@@ -72,7 +72,7 @@ compute_ports() {
   local uid base
   uid="$(id -u)"
   base=$(( 21000 + (uid % 500) * 10 ))
-  API_PORT="${FLEET_API_PORT:-$base}"
+  API_PORT="${LCARS_API_PORT:-$base}"
   OBS_PORT="${LCARS_OBSERVATION_PORT:-$(( base + 1 ))}"
   # base+2 is RESERVED (the pod-facing MCP HTTP port, removed): the MCP transport is no longer a shared
   # HTTP listener but one AF_UNIX socket per pod (cf. LCARS_FLEET_MCP_SOCK_BASE). The slot is left empty
@@ -123,7 +123,7 @@ setup_env() {
   compute_ports
 
   # Per-human ports (read by runtime.exs: fleet_api / fleet_observation / event_router).
-  export FLEET_API_PORT="$API_PORT"
+  export LCARS_API_PORT="$API_PORT"
   export LCARS_OBSERVATION_PORT="$OBS_PORT"
   export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
 
@@ -420,7 +420,14 @@ cmd_stop() {
     # costs pod state. Still a literal posed HERE rather than derived from the BEAM's own
     # deadline — that single source is BL-6-52. Under `set -e`, `((i++))` returns 0 (falsy) on
     # the first round and kills the script silently, hence the explicit form below.
-    local i=0 max_wait="${FLEET_V2_STOP_WAIT:-90}"
+    # DERIVE DE LA DEADLINE DU BEAM, plus un litteral pose ici (BL-6-52 ferme). `Shutdown.grace_ms/0`
+    # lit `LCARS_SHUTDOWN_GRACE_MS` (defaut 45000) : on lit la MEME variable, on la passe en
+    # secondes, et on ajoute la marge que le 90 encodait en dur (le drain, puis le temps que le
+    # superviseur tombe et que tmux ferme). Deux nombres pour un seul fait, c'etait la panne :
+    # un drain porte a 120 s laissait le launcher rendre la main a 90, et l'operateur lisait
+    # « stop fini » sur une fleet qui drainait encore.
+    local _grace_s=$(( ${LCARS_SHUTDOWN_GRACE_MS:-45000} / 1000 ))
+    local i=0 max_wait="${FLEET_V2_STOP_WAIT:-$(( _grace_s + 45 ))}"
     while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < max_wait )); do
       sleep 1
       i=$((i + 1))

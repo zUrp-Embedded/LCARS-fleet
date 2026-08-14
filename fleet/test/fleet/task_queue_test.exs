@@ -456,6 +456,47 @@ defmodule Fleet.TaskQueueTest do
     assert [] = TaskQueue.list_pending(q)
   end
 
+  # JG-020 — `nil` A UN SENS ICI : « pas d'echeance ». Une date ILLISIBLE n'est pas une absence
+  # d'echeance, c'est une echeance qu'on n'a pas su lire, et les plier l'une sur l'autre produisait
+  # un mandat que la file ne ferait JAMAIS expirer (`deadline_reached?/1` ne conclut rien sur `nil`),
+  # jusqu'a ce qu'un `enqueue` du meme pod le supersede. Meme traitement que `enqueued_at` depuis
+  # 6d : refus a la lecture, chemin `state.corrupt`, compte et bruyant.
+  test "6d-bis. une echeance ILLISIBLE invalide l'item — elle ne devient pas « pas d'echeance »" do
+    base = %{
+      "id" => "t1",
+      "pod_id" => "p1",
+      "enqueued_at" => "2026-06-02T00:00:00Z",
+      "state" => "assigned"
+    }
+
+    assert {:error, :invalid} =
+             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "deadline", "pas-une-date"))
+
+    # Les trois dates optionnelles partagent le defaut, donc les trois partagent le test.
+    assert {:error, :invalid} =
+             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "assigned_at", "pas-une-date"))
+
+    assert {:error, :invalid} =
+             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "completed_at", "pas-une-date"))
+
+    # Un type inattendu n'est pas une absence non plus.
+    assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "deadline", 42))
+  end
+
+  test "6d-ter. TEMOIN — une echeance ABSENTE reste legitime, elle rend bien `nil`" do
+    # Sans ce temoin, invalider tout item sans echeance passerait le test ci-dessus et casserait
+    # la forme nominale : la plupart des mandats n'ont pas d'echeance.
+    base = %{
+      "id" => "t1",
+      "pod_id" => "p1",
+      "enqueued_at" => "2026-06-02T00:00:00Z",
+      "state" => "pending"
+    }
+
+    assert {:ok, %Fleet.TaskQueue.WorkItem{deadline: nil, assigned_at: nil, completed_at: nil}} =
+             Fleet.TaskQueue.WorkItem.from_map(base)
+  end
+
   test "6d. invalid ISO enqueued_at → {:error,:invalid} (required field, no silent nil — after-9b3aea3d fix)" do
     bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "not-a-date", "state" => "pending"}
     assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)

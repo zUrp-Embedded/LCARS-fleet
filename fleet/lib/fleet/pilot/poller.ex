@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.Poller do
     * **Jitter ±10%** on the interval — anti thundering-herd (N daemons that restart together).
     * **Exponential backoff** on API errors (capped at 5 min) — a forge that is down does not flood the logs.
     * **`try/rescue` safety-net** on `do_poll/1` — a bug in the dispatch path does not crash the poller.
-    * **Telemetry** `[:fleet_pilot, :poller, :poll]` (duration_ms, dispatched, skipped, errors).
+    * **Telemetry** `[:lcars_fleet, :pilot_poller, :poll]` (duration_ms, dispatched, skipped, errors).
 
   ## Sub-modules
 
@@ -107,8 +107,8 @@ defmodule Fleet.Pilot.Poller do
     # ONLY its issues (otherwise Alice's poller spawns for Bob). Test seam: opt `:human`.
     :my_human,
     # The forge org = THE admission frontier: the poller discovers via `list_org_repos(org)`, every repo
-    # of the org IS a fleet project. Default `fleet` (config `:fleet_pilot, :fleet_org`); MUST match the org of
-    # create_project (`:fleet_mcp, :delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
+    # of the org IS a fleet project. Default `fleet` (config `:lcars_fleet, :pilot_fleet_org`); MUST match the org of
+    # create_project (`:lcars_fleet, :mcp_delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
     # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE ACTIF, et l'org porte le nom du
     # catalogue. C'etait un scalaire tant qu'il n'y avait qu'un metier ; un scalaire ne peut pas
     # nommer N orgs, et le projet d'un catalogue vit dans la sienne. Seam de test : opt `:orgs`
@@ -127,6 +127,15 @@ defmodule Fleet.Pilot.Poller do
     # G6 seam: escalation of an unreadable workflow_map (default nil → `IncidentRegistry.record_or_escalate/4`).
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
+    # Escalade du SUBSTRAT (JG-059) — la racine des faces absente n'est pas une propriete d'un depot
+    # mais une panne de la boite. Meme forme de seam que `incident_fun` : nil → `escalate_gated/5`.
+    escalate_fun: nil,
+    # Presence du SUBSTRAT (JG-059). `Fleet.Layout.ops_root/0` est un litteral — c'est voulu, un
+    # fait une source — donc un test ne peut pas le deplacer, et il ne doit pas ecrire dans `/home`.
+    # Ce seam est la seule facon d'exercer le GARDE PAR DEPOT sur une machine qui n'a pas la racine :
+    # sans lui, les cas « ce depot n'est pas onboarde » et « le sol a disparu » ne sont pas
+    # separables en test. Defaut nil → `File.dir?/1` sur la vraie racine.
+    substrate_present_fun: nil,
     # Pod enumeration healthy? Carried to speak at the TRANSITION only (BL-6-47.3): a failed
     # enumeration is a correct fail-safe AND a potentially durable outage, and saying it every tick
     # would drown the trace it exists to raise. Starts `true` — the first failure IS a transition.
@@ -219,6 +228,8 @@ defmodule Fleet.Pilot.Poller do
       task_queue: Keyword.get(opts, :task_queue),
       wake_recovery: Keyword.get(opts, :wake_recovery),
       incident_fun: Keyword.get(opts, :incident_fun),
+      escalate_fun: Keyword.get(opts, :escalate_fun),
+      substrate_present_fun: Keyword.get(opts, :substrate_present_fun),
       protection_reconciler: Keyword.get(opts, :protection_reconciler),
       architect_keeper: Keyword.get(opts, :architect_keeper)
     }
@@ -387,7 +398,7 @@ defmodule Fleet.Pilot.Poller do
     cond do
       is_list(orgs = Keyword.get(opts, :orgs)) and orgs != [] -> orgs
       is_binary(org = Keyword.get(opts, :org)) -> [org]
-      is_binary(org = Application.get_env(:fleet_pilot, :fleet_org)) -> [org]
+      is_binary(org = Application.get_env(:lcars_fleet, :pilot_fleet_org)) -> [org]
       true -> Fleet.Catalogue.active_names()
     end
   end
@@ -437,12 +448,35 @@ defmodule Fleet.Pilot.Poller do
 
         base = note_pods_snapshot(base, pods)
 
+        # UN DEPOT QUI LEVE N'EMPORTE PLUS CEUX QUI LE SUIVENT. `safe_poll/2` capture bien, mais
+        # AU-DESSUS de ce fold : les depots situes apres celui qui a leve n'etaient pas traites du
+        # tout pendant ce cycle. Et comme la cause est deterministe — la meme PR, le meme fichier,
+        # le meme conflit pathologique — elle se reproduit a chaque tick : un seul depot malade
+        # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
+        #
+        # Le filet est donc DESCENDU d'un cran, par depot, et il ne remplace pas celui du dessus :
+        # `safe_poll/2` garde son role (une levee hors du fold — construction de `base`, snapshot
+        # des pods, filet arch — reste un echec de tick, avec son `err_streak` et son repli).
+        #
+        # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL. `acc_s` est l'union des suspects, et le laisser
+        # inchange PERDRAIT les suspects de ce depot — c'est-a-dire remettrait a zero la grace de
+        # deux ticks qui protege ses verrous. On reporte donc ses suspects anterieurs, exactement ce
+        # que font les chemins de skip volontaire (`not_onboarded_skip`, `parked_skip`) : un depot
+        # non traite n'est pas un depot sans suspects.
         {tally, suspects, awaits} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
                                                                                   {acc_t, acc_s,
-                                                                                   acc_a} ->
-            {t, s, a} = step_do_poll(%{base | repo: repo}, mode, pods)
-            {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
+                                                                                   acc_a} = acc ->
+            repo_state = %{base | repo: repo}
+
+            try do
+              {t, s, a} = step_do_poll(repo_state, mode, pods)
+              {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
+            rescue
+              e -> repo_poll_crash(repo_state, e, acc)
+            catch
+              kind, reason -> repo_poll_crash(repo_state, {kind, reason}, acc)
+            end
           end)
 
         # Arch net — FLEET-GLOBAL action on the UNIQUE arch pod, decided ONCE per tick on the
@@ -469,7 +503,7 @@ defmodule Fleet.Pilot.Poller do
         # pass does: discovery, the pod snapshot, the SERIAL fold of the R repos, and the two
         # fleet-global passes (arch net, protection recheck). Not just its visible part.
         :telemetry.execute(
-          [:fleet_pilot, :poller, :cycle],
+          [:lcars_fleet, :pilot_poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: length(repos)},
           %{status: :ok, mode: mode, orgs: state.orgs}
         )
@@ -482,7 +516,7 @@ defmodule Fleet.Pilot.Poller do
         # blindness that capturing `started` after the slow call already avoided. `repos: 0` is not
         # filler: no repo was folded.
         :telemetry.execute(
-          [:fleet_pilot, :poller, :cycle],
+          [:lcars_fleet, :pilot_poller, :cycle],
           %{duration_ms: elapsed_ms(started), repos: 0},
           %{status: :error, mode: mode, orgs: state.orgs}
         )
@@ -508,22 +542,32 @@ defmodule Fleet.Pilot.Poller do
       state.protection_reconciler ||
         (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
-    Enum.each(due, fn repo ->
-      case reconciler.(repo, state.forge_opts) do
-        :ok ->
-          :ok
+    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Le tampon etait pose sur TOUS les `due`, echecs
+    # compris : un depot dont la reconciliation venait d'echouer repartait donc pour une periode
+    # entiere avant d'etre retente, alors que la seule chose qu'on savait de lui, c'est qu'on n'avait
+    # pas su le lire. Un echec n'est pas un travail fait, et le throttle existe pour espacer le
+    # travail — pas pour espacer les retentatives d'un travail qui n'a pas eu lieu.
+    reconciled =
+      Enum.filter(due, fn repo ->
+        case reconciler.(repo, state.forge_opts) do
+          :ok ->
+            true
 
-        {:error, reason} ->
-          Logger.warning(
-            "Poller: main-protection reconcile #{repo} FAILED (#{inspect(reason)}) — " <>
-              "retried next period (the rule may be out of line with the current jury)"
-          )
-      end
-    end)
+          {:error, reason} ->
+            Logger.warning(
+              "Poller: main-protection reconcile #{repo} FAILED (#{inspect(reason)}) — " <>
+                "NOT stamped, retried at the NEXT TICK (the rule may be out of line with the " <>
+                "current jury, or the forge was unreadable)"
+            )
+
+            false
+        end
+      end)
 
     %{
       state
-      | protection_rechecked: Enum.reduce(due, state.protection_rechecked, &Map.put(&2, &1, now))
+      | protection_rechecked:
+          Enum.reduce(reconciled, state.protection_rechecked, &Map.put(&2, &1, now))
     }
   end
 
@@ -588,7 +632,7 @@ defmodule Fleet.Pilot.Poller do
     )
 
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: elapsed_ms(started)},
       %{
         status: :error,
@@ -630,6 +674,11 @@ defmodule Fleet.Pilot.Poller do
     # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
     # call, so an unserved repo also stops costing two API calls per tick.
     if onboarded?(state.repo) do
+      # LE DRAPEAU EST EFFACE ICI, exactement comme son jumeau `:parked_logged` l'est a la sortie du
+      # parking. Il ne l'etait NULLE PART : un depot qui repassait en « non onboarde » apres en etre
+      # sorti se taisait pour toute la vie du process — la memoire d'affichage devenait une memoire
+      # DEFINITIVE, et la seconde disparition de l'arborescence ne laissait aucune trace.
+      Process.delete({__MODULE__, :not_onboarded_logged, state.repo})
       step_do_poll_onboarded(state, mode, pods, started, forge)
     else
       not_onboarded_skip(state, repo_scoped_suspects(state))
@@ -649,8 +698,18 @@ defmodule Fleet.Pilot.Poller do
   # call. Regular ticks only, like the other two fleet-wide passes: a webhook kick is a dispatch
   # hint, and the arch's own wake produces those webhooks.
   #
-  # Best-effort, and silent when it works: `ensure_alive` costs one `has-session` on the normal
-  # path. A failure is already logged, named, by `Architect.ensure` itself.
+  # ⚠ AND THIS LOOP CANNOT SAY WHOSE PROJECT IT IS. It walks the ORG SCAN — every repo of the fleet
+  # org, including the ones another human onboarded. The gate above proves the project is set up on
+  # this MACHINE, never that the human running this fleet asked for it: `/home/projects.ops` is
+  # SHARED, so its presence is someone's gesture, not necessarily ours. Measured 2026-08-12 on a
+  # two-human bench: a fleet whose human had made a single `project_create` call was running an
+  # architect for a project created by the other human and never opened here.
+  # The "is it ours" question is therefore answered where the record lives — `ensure_alive` keeps
+  # what this box has ON RECORD and creates nothing (`{:ok, :not_ours}` otherwise). Creation stays
+  # with the four deliberate verbs, which is where a human is actually present.
+  #
+  # Best-effort, and silent when it works: `ensure_alive` costs one `File.dir?` then one
+  # `has-session` on the normal path. A failure is already logged, named, by `Architect.ensure`.
   defp keep_architect(state) do
     keeper = state.architect_keeper || (&Fleet.Project.Architect.ensure_alive/2)
     _ = keeper.(state.repo, state.forge_opts)
@@ -660,6 +719,31 @@ defmodule Fleet.Pilot.Poller do
   # Prior suspects REPO-SCOPED (the refs are repo-qualified precisely for this): the whole
   # cross-repo union let an error/kick branch resurrect suspects RESOLVED on other repos (grace
   # bypassed → reclaim in the registration window of a freshly re-spawned pod).
+  # Le depot a leve : on le saute, on le DIT, et on garde ses suspects. L'incident est ouvert parce
+  # que la cause est deterministe — un conflit pathologique se represente a chaque tick — et qu'un
+  # depot definitivement non servi est exactement le genre de panne qu'une telemetrie de comptes ne
+  # montre pas : les autres depots continuent, le total reste plausible.
+  defp repo_poll_crash(state, reason, {acc_t, acc_s, acc_a}) do
+    Logger.error(
+      "Poller: repo=#{state.repo} RAISED during its poll (#{inspect(reason)}) — this repo is " <>
+        "skipped for this tick, the others are NOT. The cause is usually deterministic (the same " <>
+        "PR, the same file), so it will repeat until someone looks."
+    )
+
+    escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+    _ =
+      escalate.(
+        :repo_poll_crash,
+        state.repo,
+        {:poll_raised, reason},
+        "repo_poll_crash:#{state.repo}",
+        state.forge_opts || []
+      )
+
+    {acc_t, MapSet.union(acc_s, repo_scoped_suspects(state)), acc_a}
+  end
+
   defp repo_scoped_suspects(state),
     do: MapSet.filter(state.orphan_lock_suspects, fn {r, _type, _n} -> r == state.repo end)
 
@@ -672,7 +756,7 @@ defmodule Fleet.Pilot.Poller do
   # test turns it back on to pin the behaviour. In prod it is absent ⟹ true, and nothing in
   # `etc/fleet_v2.env.template` offers it — a door that only the hermetic baseline opens.
   defp onboarded?(repo) do
-    if Application.get_env(:fleet_pilot, :require_onboarded, true),
+    if Application.get_env(:lcars_fleet, :pilot_require_onboarded, true),
       do: File.dir?(project_work_dir(repo)),
       else: true
   end
@@ -685,18 +769,68 @@ defmodule Fleet.Pilot.Poller do
   # memory in the Poller singleton) — a ~30s cron must not cry every tick, and an onboarding is
   # exactly the kind of thing that gets done minutes after the log.
   defp not_onboarded_skip(state, repo_prior) do
-    unless Process.get({__MODULE__, :not_onboarded_logged, state.repo}) do
-      Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
+    # « JAMAIS ONBOARDE » ET « LE SUBSTRAT A DISPARU » RENDAIENT LA MEME PHRASE, et le second est une
+    # panne de la boite. Un projet absent sous une racine PRESENTE est un fait ordinaire : il n'a pas
+    # ete onboarde, un humain le fera. La RACINE elle-meme absente ou illisible — un montage tombe,
+    # une permission perdue — saute le rail d'etapes pour TOUS les depots a la fois : la flotte
+    # tourne alors a vide, les cycles se succedent, la telemetrie rapporte des comptes nuls, et rien
+    # ne distingue « aucun travail a faire » de « le sol a disparu ».
+    #
+    # Le discriminant est la racine, pas le projet : `File.dir?` sur `ops_root()` separe exactement
+    # les deux mondes, et il ne coute rien puisqu'on est deja sur le chemin du skip.
+    present? = state.substrate_present_fun || fn -> File.dir?(Fleet.Layout.ops_root()) end
 
-      Logger.warning(
-        "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no ops at " <>
-          "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
-          "and dispatch without provenance or project doctrine. Onboard it " <>
-          "(create / import / open / adopt) to bring it in."
-      )
+    if present?.() do
+      unless Process.get({__MODULE__, :not_onboarded_logged, state.repo}) do
+        Process.put({__MODULE__, :not_onboarded_logged, state.repo}, true)
+
+        Logger.warning(
+          "Poller: repo=#{state.repo} discovered in the org but NOT ONBOARDED (no ops at " <>
+            "#{project_work_dir(state.repo)}) — step rail skipped. Serving it would engrave routes " <>
+            "and dispatch without provenance or project doctrine. Onboard it " <>
+            "(create / import / open / adopt) to bring it in."
+        )
+      end
+    else
+      substrate_gone(state)
     end
 
     {Lease.zero_tally(), repo_prior, MapSet.new()}
+  end
+
+  # LA RACINE DES FACES A DISPARU. Escalade en incident plutot qu'un warning de plus : c'est une
+  # panne de substrat, pas une propriete d'un depot, et elle est INVISIBLE dans la telemetrie — des
+  # comptes nuls y sont indistinguables d'une flotte au repos. Un `warning` par depot et par vie du
+  # process ne survit pas a la nuit ; un incident est une issue durable (doctrine D1).
+  #
+  # Memorise par PROCESS, pas par depot : la racine est UNE, et crier une fois par depot ferait de
+  # la panne un bruit proportionnel au nombre de projets.
+  defp substrate_gone(state) do
+    unless Process.get({__MODULE__, :substrate_gone_logged}) do
+      Process.put({__MODULE__, :substrate_gone_logged}, true)
+
+      root = Fleet.Layout.ops_root()
+
+      Logger.error(
+        "Poller: the ops root #{root} is ABSENT or unreadable — the step rail is skipped for " <>
+          "EVERY repo, not just #{state.repo}. This is not an un-onboarded project: the substrate " <>
+          "itself is gone (unmounted, permissions), and the fleet is running empty while the " <>
+          "telemetry reports zero counts."
+      )
+
+      escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+      _ =
+        escalate.(
+          :ops_root_missing,
+          root,
+          {:ops_root_absent, root},
+          "ops_root_missing:#{root}",
+          state.forge_opts || []
+        )
+    end
+
+    :ok
   end
 
   defp step_do_poll_onboarded(state, mode, pods, started, forge) do
@@ -836,7 +970,7 @@ defmodule Fleet.Pilot.Poller do
     # poll failures are logged (handle_poll_error) and each per-item dispatch traces at its own
     # level. We log when it breaks, not when it runs.
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: duration_ms},
       Map.merge(tally, %{status: :ok, mode: :step, repo: state.repo})
     )
@@ -859,7 +993,7 @@ defmodule Fleet.Pilot.Poller do
     )
 
     :telemetry.execute(
-      [:fleet_pilot, :poller, :poll],
+      [:lcars_fleet, :pilot_poller, :poll],
       %{duration_ms: elapsed_ms(started)},
       %{
         status: :error,

@@ -5,9 +5,9 @@
 # - NO global `exclude: [:r1_seam]`: the exclusion was LOCAL to fleet_api (its red-by-design WS R1
 #   test now carries its own `@moduletag skip:`) — event_router's :r1_seam tests run and must keep
 #   running.
-# - `ensure_all_started(:fleet_workflow)` (ex-workflow helper): covered by the single-app boot in
+# - `ensure_all_started` of the ex-workflow OTP app (helper of the umbrella era): covered by the single-app boot in
 #   test env — nothing left to start by hand.
-Application.put_env(:fleet_api, :start_listener, false)
+Application.put_env(:lcars_fleet, :api_start_listener, false)
 
 # The in-tree `tmp/` @tmp_dir root is SHARED across runners of the
 # `fleet` group (multi-human box). A test interrupted (kill -9) or run by another UID could leave a
@@ -26,12 +26,20 @@ _ =
 # whose binary is missing must show up as excluded in the bilan, never print "SKIP" and count
 # as a green success (a hollow-green is a verdict about a machine, silently reported as a
 # verdict about the code).
-curl_excludes = if System.find_executable("curl"), do: [], else: [:requires_curl]
+#
+# The resolution belongs HERE and nowhere else. Branching inside a test module body (`if
+# System.find_executable(...) do <property> else <hollow test> end`) freezes the verdict at COMPILE
+# time on top of the hollow-green: install the binary afterwards and the differential STILL does not
+# exist, because nothing recompiles a test file whose source has not changed.
+missing_prerequisites =
+  for {binary, tag} <- [{"curl", :requires_curl}, {"git", :requires_git}],
+      is_nil(System.find_executable(binary)),
+      do: {binary, tag}
 
-if curl_excludes != [] do
+for {binary, tag} <- missing_prerequisites do
   IO.puts(
-    "test_helper: curl missing on this machine — :requires_curl tests are EXCLUDED (visible in the bilan)"
+    "test_helper: #{binary} missing on this machine — #{inspect(tag)} tests are EXCLUDED (visible in the bilan)"
   )
 end
 
-ExUnit.start(exclude: curl_excludes)
+ExUnit.start(exclude: Enum.map(missing_prerequisites, fn {_binary, tag} -> tag end))

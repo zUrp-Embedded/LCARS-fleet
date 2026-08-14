@@ -7,6 +7,8 @@ defmodule Fleet.Observation.Deck do
 
   use Plug.Router
 
+  require Logger
+
   alias Fleet.Observation.Deck.View
 
   plug(Plug.Static,
@@ -47,7 +49,7 @@ defmodule Fleet.Observation.Deck do
     |> json(200, %{
       status: "ok",
       deck: "fleet_observation",
-      port: Application.get_env(:fleet_observation, :http_port)
+      port: Application.get_env(:lcars_fleet, :observation_http_port)
     })
   end
 
@@ -76,10 +78,23 @@ defmodule Fleet.Observation.Deck do
   end
 
   # Exclude arbitrary runtime terms from the JSON view.
-  defp pod_view(info, known) do
+  #
+  # Public `@doc false` for the same reason as `roles_for_display/1` below: the whitelist is what
+  # `/api/pods` promises, and proving it through the route alone would need live pods. Same testable
+  # split, same file.
+  @doc false
+  def pod_view(info, known) do
     %{
       pod_id: info.pod_id,
-      role: role_of(info, known),
+      # 6-057 — LE ROLE EST LA VERITE, L'ICONE EST UNE QUESTION D'AFFICHAGE, et les deux etaient
+      # confondues : `role` ne sortait que si un `.svg` du meme nom existait. Un pod `chief` (le seul
+      # role du catalogue sans asset, mesure) etait donc servi `role: null` — indiscernable de « ce
+      # pod n'a pas de role », et c'est exactement ce que le commentaire de `project_slug` douze
+      # lignes plus bas interdit. Le repli generique existait DEJA cote vue
+      # (`favicon-minimal.svg`) : masquer le role etait le MOYEN d'y arriver, pas l'intention.
+      role: role_of(info),
+      # Ce que la vue doit savoir, dit separement : quel asset utiliser, `nil` = le generique.
+      role_icon: role_icon(Map.get(info, :role), known),
       issue_id: Map.get(info, :issue_id),
       # THE LAST LINK OF THE CHAIN, and publishing it in `pod_info` was not enough: this view is
       # what `/api/pods` serves, and it whitelists its keys. The landing deck reads THIS endpoint —
@@ -98,14 +113,26 @@ defmodule Fleet.Observation.Deck do
     }
   end
 
-  defp role_of(info, known) do
+  # The `is_binary` guard stays, and it is NOT the icon check: this view whitelists its keys to keep
+  # arbitrary runtime terms out of the JSON, so a role that is not a string is not a role we can
+  # serve. Absent or malformed -> `nil`, which here really does mean "no role".
+  defp role_of(info) do
     role = Map.get(info, :role)
-    if is_binary(role) and role in known, do: role, else: nil
+    if is_binary(role), do: role, else: nil
   end
+
+  # `nil` = no asset of that name, render the generic icon. The DISPLAY degrades; the datum does not.
+  defp role_icon(role, known) when is_binary(role) do
+    if role in known, do: role, else: nil
+  end
+
+  defp role_icon(_role, _known), do: nil
 
   # Role icons are derived from assets; missing assets degrade to the generic icon.
   defp display_roles do
-    case File.ls(Application.app_dir(:lcars_fleet, "priv/observation/static/assets")) do
+    dir = Application.app_dir(:lcars_fleet, "priv/observation/static/assets")
+
+    case File.ls(dir) do
       {:ok, files} ->
         for f <- files,
             String.ends_with?(f, ".svg"),
@@ -113,7 +140,16 @@ defmodule Fleet.Observation.Deck do
             not String.starts_with?(role, "favicon"),
             do: role
 
-      _ ->
+      {:error, reason} ->
+        # `[]` reste la reponse — chaque pod tombera sur l'icone generique, ce qui est une
+        # degradation d'AFFICHAGE legitime depuis que le role ne passe plus par ici. Mais elle cesse
+        # d'etre muette : c'est la meme regle que `roles_for_display/1` plus bas (F-C125, « un
+        # catalogue illisible n'est PAS `[]` »), a la severite pres — une icone n'est pas une donnee.
+        Logger.warning(
+          "Deck: role icons unreadable (#{dir} : #{inspect(reason)}) — every pod falls back to the " <>
+            "generic icon. Roles themselves are UNAFFECTED (served from the runtime, not from assets)."
+        )
+
         []
     end
   end

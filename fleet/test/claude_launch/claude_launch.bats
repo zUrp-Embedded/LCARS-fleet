@@ -511,3 +511,49 @@ EOF
   grep -q "^# STARDATE:" "$SCRIPT"
   grep -q "^# STATUS:" "$SCRIPT"
 }
+
+# =============================================================
+# Surface vendor — `/init` et les skills sont DANS LE BINAIRE, pas dans un montage
+# =============================================================
+#
+# Mesure du 2026-08-12 : `~/.local` ne porte que `bin/claude`, et le prompt de `/init` est compile
+# dans l'executable. Le mecanisme qui borne tout le reste ici — les droits vivent dans le montage —
+# ne peut structurellement pas l'atteindre ; le seul levier est `--disable-slash-commands`.
+#
+# Le predicat teste est « ce pod a un depot sous la main », PAS « il ne declare aucune skill ». Les
+# deux coincident aujourd'hui (9 roles canon sur 10 ont `skills: []`, et le seul qui en declare une
+# n'entre dans aucun projet), mais coincider n'est pas causer : equiper un producteur d'une skill de
+# catalogue est legitime et rouvrirait `/init` sur le role le plus dangereux, en silence.
+
+@test "vendor: un pod SANS depot au cwd garde sa surface (starfleet, l'arch)" {
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *"--disable-slash-commands"* ]]
+}
+
+@test "vendor: un depot au cwd coupe la surface — c'est la ou /init ferait des degats" {
+  mkdir -p "$POD_DIR/workspace/.git"
+  export LCARS_POD_CWD="$POD_DIR/workspace"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--disable-slash-commands"* ]]
+}
+
+@test "vendor: un cwd SANS .git ne coupe rien, meme si LCARS_POD_CWD est pose" {
+  # Le cas de l'arch : son cwd est son propre pod_dir remonte sous le nom du projet, il n'y a
+  # aucun depot dedans. `LCARS_POD_CWD` pose ne prouve donc pas qu'un depot est la.
+  mkdir -p "$POD_DIR/chifoumi"
+  export LCARS_POD_CWD="$POD_DIR/chifoumi"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" != *"--disable-slash-commands"* ]]
+}
+
+@test "vendor: depot ET skill montee = REFUS loud (le flag coupe tout, il ne sert pas ce cas)" {
+  mkdir -p "$POD_DIR/workspace/.git" "$POD_DIR/.claude/skills/card-revision"
+  export LCARS_POD_CWD="$POD_DIR/workspace"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"card-revision"* ]]
+  [[ "$output" == *"coupe TOUTES les skills"* ]]
+}

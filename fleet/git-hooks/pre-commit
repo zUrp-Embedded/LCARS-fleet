@@ -84,19 +84,62 @@ else
 fi
 
 # --- Pass 1: Date bookkeeping (metadata update, not a fix) ---
+#
+# ⚠ CE PASSAGE EMBARQUAIT LE TRAVAIL QUE L'HUMAIN AVAIT DELIBEREMENT LAISSE HORS DE L'INDEX.
+# Il faisait `sed -i` sur le fichier de l'ARBRE DE TRAVAIL puis `git add "$file"` — et `git add`
+# ne restage pas la ligne de date, il remplace l'entree d'index par TOUT le contenu courant. Un
+# fichier partiellement stage qui portait aussi des modifications non stagees voyait donc ces
+# modifications partir dans le commit, en silence. Le hook alterait la selection explicite de
+# l'humain : c'est publier du travail incomplet en croyant tamponner une date.
+#
+# ON TRANSFORME LE BLOB DE L'INDEX, jamais l'arbre de travail :
+#   `git show :<file>` → sed → `git hash-object -w` → `git update-index --cacheinfo`.
+# Le commit emporte exactement ce qui etait stage, plus la date. L'arbre de travail n'est touche
+# QUE s'il etait deja identique a l'index (cas nominal) — sinon il garde le travail en cours, avec
+# son ancienne date, qui se mettra a jour au prochain commit complet. Une date d'arbre de travail
+# en retard est un ecart visible ; du travail non stage publie ne l'est pas.
+#
+# ⚠ PAS DE `$(git show …)` : la substitution de commande MANGE les sauts de ligne finaux, donc
+# reecrire un blob par ce chemin tronquerait chaque fichier d'une ligne vide. On passe par des
+# fichiers temporaires, et `git hash-object -w <fichier>` rend un sha dont la substitution est sans
+# danger (40 caracteres, pas de fin de ligne signifiante).
+restage_dated_blob() {
+    local file="$1" expr="$2" tmp_old tmp_new sha mode wt_clean=0
+
+    tmp_old="$(mktemp)" || return 0
+    tmp_new="$(mktemp)" || { rm -f "$tmp_old"; return 0; }
+
+    if ! git show ":$file" > "$tmp_old" 2>/dev/null; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    sed "$expr" "$tmp_old" > "$tmp_new"
+    if cmp -s "$tmp_old" "$tmp_new"; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    # AVANT toute mutation : l'arbre de travail est-il deja celui de l'index ? Apres l'update-index
+    # la reponse serait fatalement « non », et on croirait a du travail non stage qui n'existe pas.
+    git diff --quiet -- "$file" && wt_clean=1
+
+    mode="$(git ls-files --stage -- "$file" | awk '{print $1}')"
+    if [[ -n "$mode" ]] && sha="$(git hash-object -w "$tmp_new")"; then
+        git update-index --cacheinfo "$mode,$sha,$file"
+        [[ "$wt_clean" -eq 1 ]] && cat "$tmp_new" > "$file"
+    fi
+
+    rm -f "$tmp_old" "$tmp_new"
+}
+
 if [[ "$HOOK_DATE_FORMAT" == "stardate" ]]; then
     STARDATE=$(date '+%Y.%j')
     STARDATE_PATTERN="STARDATE: [0-9][0-9][0-9][0-9]\.[0-9][0-9][0-9]"
     while IFS= read -r file; do
         [[ -z "$file" || ! -f "$file" ]] && continue
         is_evidence_dir "$file" && continue
-        if grep -q "$STARDATE_PATTERN" "$file"; then
-            CURRENT=$(grep -oE "STARDATE: [0-9]{4}\.[0-9]{3}" "$file" | head -1 | cut -d' ' -f2 || true)
-            if [[ "$CURRENT" != "$STARDATE" ]]; then
-                sed -i "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/" "$file"
-                git add "$file"
-            fi
-        fi
+        restage_dated_blob "$file" "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/"
     done <<< "$STAGED"
 else
     TODAY=$(date '+%Y-%m-%d')
@@ -106,19 +149,14 @@ else
         ext="${file##*.}"
         case "$ext" in
             md)
-                if grep -q '^\*\*Dernière révision\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Dernière révision\*\*' "$file" | sed 's/.*: //' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
-                    if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
-                        sed -i "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/" "$file"
-                        git add "$file"
-                    fi
-                elif grep -q '^\*\*Last revised\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Last revised\*\*' "$file" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
-                    if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
-                        sed -i "s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/" "$file"
-                        git add "$file"
-                    fi
-                fi
+                # Les deux en-tetes sont exclusifs dans les faits ; les appliquer tous deux est
+                # sans effet sur un fichier qui n'en porte qu'un, et le `cmp` decide. Le test
+                # « quelle date porte-t-il » a disparu : il lisait l'ARBRE DE TRAVAIL, donc un
+                # fichier dont l'index portait une vieille date mais l'arbre la bonne n'etait
+                # jamais mis a jour. La comparaison des BLOBS repond a la meme question, sur le
+                # bon objet.
+                restage_dated_blob "$file" \
+                    "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/; s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/"
                 ;;
         esac
     done <<< "$STAGED"
@@ -127,17 +165,21 @@ fi
 # --- Pass 2: GO-7 header check (block only — never auto-fix) ---
 FAILED=()
 
+# GO-7 exemptions. EVERY clause below must match at least one tracked file. A clause that matches
+# nothing does not exempt anything — it MISLEADS: it reads as covering a class that the wall in fact
+# refuses, and it rots without a sound, because nothing fails when its subject moves or disappears.
+# Two deaths, two remedies: the subject MOVED (correct the pattern — the two scars below), or the
+# subject was REMOVED (delete the clause; an exemption never outlives its subject).
+# For a tree that does not exist yet, the mechanism is the `.go7-exempt` MARKER above, which sits
+# next to what it exempts: a path list cannot be written ahead of the campaign it will exempt.
+# `tests/go7_exemptions_alive.bats` holds the property, and refuses an empty pattern set too.
 is_ipc_exception() {
     local base
     base=$(basename "$1")
     case "$base" in
-        *-handoff.md|to-*.md|*-notes.md|*-queue.md|MEMORY.md|scratchpad.md) return 0 ;;
-        mandat.md) return 0 ;;  # PoC_unitaire: internal structural contract replaces GO-7
+        *-handoff.md|scratchpad.md) return 0 ;;
     esac
-    [[ "$1" == *"#9_archives"* || "$1" == *"9_archives/"* ]] && return 0
-    [[ "$1" == *"directives/roles/"* ]] && return 0
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
-    [[ "$1" == *"tests/fixtures/"* ]] && return 0
     # Graines de projet genere, pas du lignage doc LCARS. Motif ELARGI le 2026-08-06 : il etait ecrit
     # `priv/project_template/` et l'arbre porte `priv/catalogue/project_template/` depuis le
     # demenagement du catalogue. L'exemption avait donc cesse de matcher EN SILENCE, et le mur
@@ -147,15 +189,15 @@ is_ipc_exception() {
     # du code ni de la sortie, c'est un package de configuration [...] il ne se traduit pas, il se
     # RE-ECRIT ». Un en-tete GO-7 y entrerait dans le contexte injecte a l'agent.
     #
-    # Meme peremption que ci-dessus, en pire : le motif visait `/system-prompt/`, et le package a
-    # quitte ce repertoire entierement — il vit desormais en `priv/sp_builder/` et
-    # `priv/catalogue/sp_builder/`. ~34 fichiers etaient refuses par un mur cense les exempter, et
-    # qui les edite n'avait le choix qu'entre poser un en-tete INTERDIT ou `--no-verify`.
+    # Meme peremption que ci-dessus, en pire : le motif visait `/system-prompt/` SEUL, et le gros du
+    # package a demenage sous `sp_builder/` — un mur cense les exempter les refusait, et qui les
+    # edite n'avait le choix qu'entre poser un en-tete INTERDIT ou `--no-verify`. Les DEUX motifs
+    # sont vivants : le repertoire d'origine n'a pas ete vide, il a ete allege. Cette ligne disait
+    # « le package a quitte ce repertoire entierement » — un motif qu'on croit mort se supprime.
     [[ "$1" == *"/system-prompt/"*.md ]] && return 0
     [[ "$1" == *"/sp_builder/"*.md ]] && return 0
     [[ "$1" == *"/subagent-templates/"*.md ]] && return 0
     [[ "$1" == *"/modop-bundles/"*"/sp.md" ]] && return 0
-    [[ "$1" == *"/PoC/"*"/README.md" ]] && return 0    # README under a PoC dir: local context
     return 1
 }
 

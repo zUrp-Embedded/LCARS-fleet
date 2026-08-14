@@ -5,12 +5,12 @@ defmodule Fleet.Spawner.Pod.McpProvisionTest do
   alias Fleet.Spawner.Pod.McpProvision
 
   setup do
-    prev = Application.get_env(:fleet_spawner, :mcp_socket_provisioner)
+    prev = Application.get_env(:lcars_fleet, :spawner_mcp_socket_provisioner)
 
     on_exit(fn ->
       if prev,
-        do: Application.put_env(:fleet_spawner, :mcp_socket_provisioner, prev),
-        else: Application.delete_env(:fleet_spawner, :mcp_socket_provisioner)
+        do: Application.put_env(:lcars_fleet, :spawner_mcp_socket_provisioner, prev),
+        else: Application.delete_env(:lcars_fleet, :spawner_mcp_socket_provisioner)
     end)
 
     :ok
@@ -20,7 +20,7 @@ defmodule Fleet.Spawner.Pod.McpProvisionTest do
     # `Enum` is a real module but does not export ensure_pod_socket/1. The seam being DUCK-TYPED, the
     # `function_exported?` guard detects it INSTEAD of letting `apply/3` raise an UndefinedFunctionError
     # that would crash the pod's gen_statem (class R1-21).
-    Application.put_env(:fleet_spawner, :mcp_socket_provisioner, Enum)
+    Application.put_env(:lcars_fleet, :spawner_mcp_socket_provisioner, Enum)
 
     assert {:error, {:mcp_provisioner_misconfigured, Enum}} = McpProvision.ensure_pod_socket("p1")
   end

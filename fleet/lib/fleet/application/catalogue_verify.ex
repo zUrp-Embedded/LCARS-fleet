@@ -33,7 +33,19 @@ defmodule Fleet.Application.CatalogueVerify do
     case verify(root) do
       {:ok, %{assumptions: assumptions}} ->
         print(assumptions)
-        IO.puts("catalogue OK — every check the boot runs passed.")
+        # ⚠ CETTE LIGNE DISAIT « every check the boot runs passed » (6-008), et rien ne tenait
+        # l'equivalence. Mesure du 2026-08-14 : le rail de boot jouait CINQ gardes `validate_*!`,
+        # ce verificateur en rejouait QUATRE. Un vert d'ici precedait donc un boot rouge — le
+        # contraire de son objet. Les deux sequences sont desormais tenues par le check
+        # `boot.verifier_covers_rail`, qui les lit a l'AST et refuse la divergence.
+        #
+        # La phrase nomme maintenant ce qui EST prouve. Le verificateur prouve UN REPERTOIRE avec
+        # les fonctions du boot ; il ne prouve ni les credentials de deploiement, ni les surcharges
+        # fines, ni l'ordre reel de demarrage — ce que la liste d'hypotheses au-dessus dit deja.
+        IO.puts(
+          "catalogue OK — les controles catalogue du boot passent (cf. hypotheses ci-dessus)."
+        )
+
         System.halt(0)
 
       {:error, %{findings: findings, assumptions: assumptions}} ->
@@ -51,7 +63,7 @@ defmodule Fleet.Application.CatalogueVerify do
   end
 
   @doc """
-  Verifies the catalogue at `root`. Sets `:fleet_catalogue, :root` to it for the duration, restores
+  Verifies the catalogue at `root`. Sets `:lcars_fleet, :catalogue_root` to it for the duration, restores
   the previous value on the way out. Collects findings instead of raising on the first — an operator
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
   manifest is a precondition (nothing downstream is meaningful without it), and the images are a
@@ -61,8 +73,8 @@ defmodule Fleet.Application.CatalogueVerify do
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do
-    prev = Application.fetch_env(:fleet_catalogue, :root)
-    Application.put_env(:fleet_catalogue, :root, root)
+    prev = Application.fetch_env(:lcars_fleet, :catalogue_root)
+    Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     assumptions = [
       "root read: #{root}",
@@ -188,6 +200,6 @@ defmodule Fleet.Application.CatalogueVerify do
     kind, reason -> [%{stage: stage, error: "#{kind}: #{inspect(reason)}"}]
   end
 
-  defp restore(:error), do: Application.delete_env(:fleet_catalogue, :root)
-  defp restore({:ok, value}), do: Application.put_env(:fleet_catalogue, :root, value)
+  defp restore(:error), do: Application.delete_env(:lcars_fleet, :catalogue_root)
+  defp restore({:ok, value}), do: Application.put_env(:lcars_fleet, :catalogue_root, value)
 end

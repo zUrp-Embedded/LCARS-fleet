@@ -81,7 +81,11 @@ defmodule Fleet.Observation.Deck.View do
     function tick(){var d=new Date();document.getElementById('clock').textContent=d.toTimeString().slice(0,8);}
     function esc(s){return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
     function podCard(p){
-      var icon = p.role ? '/static/assets/'+esc(p.role)+'.svg' : '/static/assets/favicon-minimal.svg';
+      // 6-057 — `role_icon`, PAS `role` : le role est la donnee (servie telle quelle depuis le
+      // runtime), `role_icon` est la reponse a « quel asset existe ». Avant, un role sans `.svg`
+      // etait mis a `null` cote API pour tomber ici sur le generique — le rendu etait bon et
+      // `/api/pods` mentait a tous ses autres consommateurs.
+      var icon = p.role_icon ? '/static/assets/'+esc(p.role_icon)+'.svg' : '/static/assets/favicon-minimal.svg';
       return '<div class="pod-card">'
         + '<div class="pc-head"><img class="pc-icon" src="'+icon+'" alt=""><span class="pc-id">'+esc(p.pod_id)+'</span></div>'
         + '<div class="pc-row"><span class="pc-k">phase</span><span class="glyph">'+esc(p.phase)+'</span></div>'

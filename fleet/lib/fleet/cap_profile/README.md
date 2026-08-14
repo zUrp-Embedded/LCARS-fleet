@@ -1,7 +1,7 @@
 # Fleet.CapProfile — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-01
+**Last revised**: 2026-08-13
 **Status**: active — cap-profile composer/loader/validator (substrate, schema v2.5)
 **Referenced by**: —
 
@@ -26,6 +26,6 @@ Related, NOT this domain: `Fleet.Slug` and `Fleet.Layout` (own foundation bounda
 `lib/fleet/slug.ex` / `lib/fleet/layout.ex`, reachable from any domain).
 
 ## Config & deps
-- Knob `:fleet_cap_profile, :root_dir` — read by `Catalog`; default = bundled `priv/catalogue/cap_profile/canon/cap-profiles`.
-- Knob `:fleet_cap_profile, :schema_dir` — read by `Schema`; default = bundled `priv/cap_profile/schema`.
+- Knob `:lcars_fleet, :cap_profile_root_dir` — read by `Catalog`; default = bundled `priv/catalogue/cap_profile/canon/cap-profiles`.
+- Knob `:lcars_fleet, :cap_profile_schema_dir` — read by `Schema`; default = bundled `priv/cap_profile/schema`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/cap_profile.ex`).

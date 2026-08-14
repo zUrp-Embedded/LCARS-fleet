@@ -181,7 +181,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   defp read_worker_protocol_from_disk do
-    case Application.get_env(:fleet_spawner, :protocole_user_path) do
+    case Application.get_env(:lcars_fleet, :spawner_protocole_user_path) do
       nil ->
         :sp_drafts
         |> Fleet.Catalogue.find("protocole-user-worker.md")

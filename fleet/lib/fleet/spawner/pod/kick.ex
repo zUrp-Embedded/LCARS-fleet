@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   ACKs (it reached out via get_work_item). This module carries the THREE stateless pieces of the tick:
 
   - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
-    `kick_bootstrap_max`, `kick_bootstrap_retry_ms`): `:fleet_spawner` config read on every tick;
+    `spawner_kick_bootstrap_max`, `spawner_kick_bootstrap_retry_ms`): `:lcars_fleet` config read on every tick;
   - **the PURE decisions** (`acked?/3`, `kick_keyword/2`): should the loop stop (ACK) and,
     otherwise, which keyword to send (`engage`/`wake`/nothing) — testable outside the process;
   - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
@@ -19,7 +19,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   already reduced to booleans to `acked?/3`.
 
   No state of its own, no timer armed here: `Pod` passes its `state` (map) as an argument (`kick_send`
-  reads `state.pod_id`); the `:fleet_spawner` config (bounds + knob `:wake_send_keys`) is read
+  reads `state.pod_id`); the `:lcars_fleet` config (bounds + knob `:spawner_wake_send_keys`) is read
   directly. Depends on `Fleet.Spawner.PodTmux` (the send-keys sending), already a dep of the app; no
   dependency on `Fleet.Spawner.Pod` (no cycle).
 
@@ -57,7 +57,8 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   @doc "Delay (ms) of the 1st kick tick at LAUNCH (bootstrap arming). Config `:kick_first_delay_ms`, default 2000 — the REPL warm-up needs an early first probe (often a no-op while tmux is not up)."
   @spec kick_first_delay_ms() :: non_neg_integer()
-  def kick_first_delay_ms, do: Application.get_env(:fleet_spawner, :kick_first_delay_ms, 2_000)
+  def kick_first_delay_ms,
+    do: Application.get_env(:lcars_fleet, :spawner_kick_first_delay_ms, 2_000)
 
   @doc """
   Delay (ms) of the 1st kick tick after a WAKE (`:arm_kick`, armed by `wake_pod`). Config
@@ -68,7 +69,8 @@ defmodule Fleet.Spawner.Pod.Kick do
   2026-07-19). A fallback that outruns its primary is not a net, it is a second gun.
   """
   @spec wake_first_delay_ms() :: non_neg_integer()
-  def wake_first_delay_ms, do: Application.get_env(:fleet_spawner, :wake_first_delay_ms, 15_000)
+  def wake_first_delay_ms,
+    do: Application.get_env(:lcars_fleet, :spawner_wake_first_delay_ms, 15_000)
 
   @doc """
   Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled —
@@ -82,15 +84,15 @@ defmodule Fleet.Spawner.Pod.Kick do
   have made the same duplicates rarer.
   """
   @spec kick_retry_ms() :: non_neg_integer()
-  def kick_retry_ms, do: Application.get_env(:fleet_spawner, :kick_retry_ms, 2_500)
+  def kick_retry_ms, do: Application.get_env(:lcars_fleet, :spawner_kick_retry_ms, 2_500)
 
   @doc "Retry cadence (ms) of the WAKE fallback on a RUNNING pod (already polled — keyword `wake`). Config `:wake_retry_ms`, default 10000 — same rationale as `wake_first_delay_ms/0`: the net paces itself BEHIND the carrier, never against it."
   @spec wake_retry_ms() :: non_neg_integer()
-  def wake_retry_ms, do: Application.get_env(:fleet_spawner, :wake_retry_ms, 10_000)
+  def wake_retry_ms, do: Application.get_env(:lcars_fleet, :spawner_wake_retry_ms, 10_000)
 
   @doc "Attempts cap of the WAKE branch — beyond it, escalation `wake.failed`. Config `:kick_max_attempts`, default 12."
   @spec kick_max_attempts() :: non_neg_integer()
-  def kick_max_attempts, do: Application.get_env(:fleet_spawner, :kick_max_attempts, 12)
+  def kick_max_attempts, do: Application.get_env(:lcars_fleet, :spawner_kick_max_attempts, 12)
 
   @doc """
   Attempts cap of the BOOTSTRAP branch (pod with no brief): BOUNDED + SPACED-OUT kicks until
@@ -101,12 +103,12 @@ defmodule Fleet.Spawner.Pod.Kick do
   acked, wake-by-flag takes over. Config `:kick_bootstrap_max`, default 30.
   """
   @spec kick_bootstrap_max() :: non_neg_integer()
-  def kick_bootstrap_max, do: Application.get_env(:fleet_spawner, :kick_bootstrap_max, 30)
+  def kick_bootstrap_max, do: Application.get_env(:lcars_fleet, :spawner_kick_bootstrap_max, 30)
 
   @doc "Retry cadence (ms) of the BOOTSTRAP branch (cf. `kick_bootstrap_max/0`). Config `:kick_bootstrap_retry_ms`, default 8000."
   @spec kick_bootstrap_retry_ms() :: non_neg_integer()
   def kick_bootstrap_retry_ms,
-    do: Application.get_env(:fleet_spawner, :kick_bootstrap_retry_ms, 8_000)
+    do: Application.get_env(:lcars_fleet, :spawner_kick_bootstrap_retry_ms, 8_000)
 
   @doc false
   # ACK (PURE decision, testable) = the agent reached out. This is THE control of the loop:
@@ -147,7 +149,7 @@ defmodule Fleet.Spawner.Pod.Kick do
     #  - GLOBAL (knob `:wake_send_keys`): gates the `wake` FALLBACK only (Monitor-rail
     #    validation in isolation) — NEVER the engage: muting the bootstrap globally would leave
     #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
-    fallback_on? = Application.get_env(:fleet_spawner, :wake_send_keys, true)
+    fallback_on? = Application.get_env(:lcars_fleet, :spawner_wake_send_keys, true)
 
     case kick_keyword(polled, fallback_on?, profile_send_keys?(state)) do
       nil -> :ok

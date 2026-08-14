@@ -101,6 +101,121 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     assert log =~ "push --force"
   end
 
+  # JG-028 — LE RETRAIT ETAIT SILENCIEUX DU COTE QUI COMPTE. La flotte loggue `error` ; le POD
+  # n'apprenait rien et lisait un doc de depot ampute de sa section la plus prescriptive.
+  #
+  # Les motifs du filtre sont LEXICAUX et ne distinguent pas une consigne d'une mention :
+  # `\brebase\b.*\bmain\b` matche « rebase sur main » comme « ne jamais rebaser sur main ». La
+  # section la plus susceptible de tomber est donc celle qui DOCUMENTE les interdits du depot —
+  # c'est-a-dire exactement ce a quoi servent `Conventions` et `Gotchas`. Le filtre produit alors
+  # l'inverse de son intention : « ne fais jamais X » disparait parce qu'il mentionne X.
+  #
+  # La liste de motifs n'est PAS touchee — son propre contrat dit EXTENSIBLE, NEVER REDUCIBLE, et
+  # lui apprendre a distinguer mention et ordre est la menace V4 que la doctrine met hors perimetre.
+  # Ce qui est repare est le SILENCE.
+  describe "JG-028 — une section ecartee est SIGNALEE au pod" do
+    test "le pod apprend QUE des sections manquent, et lesquelles", %{tmp_dir: dir} do
+      path = Path.join(dir, "CLAUDE.md")
+
+      File.write!(path, """
+      ## Build
+      mix compile
+
+      ## Conventions
+      Ne JAMAIS faire git push --force sur main. On merge, toujours.
+      """)
+
+      body =
+        capture_log(fn ->
+          assert {:ok, b} = RepoSections.read(path)
+          send(self(), {:body, b})
+        end)
+        |> then(fn _ -> receive do: ({:body, b} -> b) end)
+
+      assert body =~ "mix compile", "les sections propres passent toujours"
+      assert body =~ "Sections retenues", "le pod doit apprendre qu'on lui a retire quelque chose"
+      assert body =~ "`Conventions`", "et laquelle — sinon il ne peut rien en faire"
+    end
+
+    test "⚠ la notice NOMME la section et ne la CITE JAMAIS", %{tmp_dir: dir} do
+      # Porter l'extrait matche dans le message reinjecterait par la notice exactement ce que le
+      # filtre vient de refuser : la porte tient, et le panneau qui parle de la porte le fait entrer.
+      path = Path.join(dir, "CLAUDE.md")
+
+      File.write!(path, """
+      ## Conventions
+      Ne JAMAIS faire git push --force sur main. SECRET-CANARI.
+      """)
+
+      body =
+        capture_log(fn ->
+          assert {:ok, b} = RepoSections.read(path)
+          send(self(), {:body, b})
+        end)
+        |> then(fn _ -> receive do: ({:body, b} -> b) end)
+
+      refute body =~ "--force"
+      refute body =~ "SECRET-CANARI"
+    end
+
+    test "⚠ la notice elle-meme PASSE le filtre qu'elle decrit" do
+      # Elle entre dans l'etage directive du pod, donc elle est soumise a la meme regle que le
+      # contenu qu'elle remplace. Sa formulation contient un exemple d'interdit (« ne jamais
+      # rebaser sur main ») : c'est precisement le genre de phrase qui pourrait matcher, et rien
+      # d'autre que ce test ne le verifiera le jour ou quelqu'un la reformule.
+      path = Path.join(System.tmp_dir!(), "jg028_#{System.unique_integer([:positive])}.md")
+
+      File.write!(path, "## Conventions\nNe JAMAIS faire git push --force sur main.\n")
+      on_exit(fn -> File.rm(path) end)
+
+      body =
+        capture_log(fn ->
+          assert {:ok, b} = RepoSections.read(path)
+          send(self(), {:body, b})
+        end)
+        |> then(fn _ -> receive do: ({:body, b} -> b) end)
+
+      assert Fleet.ReceptionFilter.scan(body) == :clean
+      # TEMOIN : le filtre est bien arme, il ne rend pas `:clean` a tout.
+      assert {:match, _, _} = Fleet.ReceptionFilter.scan("rebase la branche sur main")
+    end
+
+    test "TEMOIN — un depot propre ne recoit AUCUNE notice", %{tmp_dir: dir} do
+      # Sans lui, une notice posee inconditionnellement passerait les tests ci-dessus, et chaque pod
+      # lirait un avertissement sur des sections qu'on ne lui a pas retirees.
+      path = Path.join(dir, "CLAUDE.md")
+      File.write!(path, "## Build\nmix compile\n")
+
+      assert {:ok, body} = RepoSections.read(path)
+      refute body =~ "Sections retenues"
+    end
+
+    test "TOUTES les sections ecartees : la notice reste, la zone n'est pas vide", %{tmp_dir: dir} do
+      # Le cas ou le silence etait total. Le gabarit ne rend la zone que si la chaine est non vide :
+      # sans la notice, un depot dont TOUT est filtre etait indistinguable d'un depot sans CLAUDE.md.
+      path = Path.join(dir, "CLAUDE.md")
+
+      File.write!(path, """
+      ## Conventions
+      Ne JAMAIS faire git push --force sur main.
+
+      ## Gotchas
+      Ne jamais faire git reset --hard sur main.
+      """)
+
+      body =
+        capture_log(fn ->
+          assert {:ok, b} = RepoSections.read(path)
+          send(self(), {:body, b})
+        end)
+        |> then(fn _ -> receive do: ({:body, b} -> b) end)
+
+      assert body != ""
+      assert body =~ "`Conventions`"
+      assert body =~ "`Gotchas`"
+    end
+  end
+
   test "extract/1 stays the pure structural half (unfiltered)" do
     content = "## Commands\ngit push --force origin main\n"
     assert RepoSections.extract(content) =~ "--force"

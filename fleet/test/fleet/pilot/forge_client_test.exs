@@ -66,8 +66,15 @@ defmodule Fleet.Forge.ClientTest do
   # nuked with its last production caller (get_issue_status now consumes the full state); these
   # tests keep exercising the same derivation (last-decisive, dismissed, commit-scoping) through
   # the surviving read.
+  # `head_sha: :unscoped` EXPLICITE — JG-065. Ces cas exercent l'arithmetique du jury (derniere
+  # revue decisive par relecteur, traduction login→role, revues rejetees) et non le scoping par
+  # commit : ils veulent bien « toutes les revues ». Depuis JG-065 ce mode se DEMANDE au lieu de
+  # s'heriter d'une cle absente — c'est exactement la clause de la fiche (« reserver explicitement le
+  # mode non scope aux seuls appelants historiques qui le demandent »), et l'effet secondaire utile
+  # est qu'un test dit desormais quel mode il exerce.
   defp verdicts_of(repo, index, opts) do
-    with {:ok, %{verdicts: verdicts}} <- ForgeClient.pr_review_state(repo, index, opts),
+    with {:ok, %{verdicts: verdicts}} <-
+           ForgeClient.pr_review_state(repo, index, Keyword.put(opts, :head_sha, :unscoped)),
          do: {:ok, verdicts}
   end
 
@@ -526,7 +533,11 @@ defmodule Fleet.Forge.ClientTest do
       }
 
       assert {:ok, %{verdicts: verdicts, reviewers: reviewers, records: records}} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(handlers), :head_sha, :unscoped)
+               )
 
       assert %{"qualifier" => :approved, "lordzurp" => :changes_requested} = verdicts
       assert "qualifier" in reviewers
@@ -710,7 +721,11 @@ defmodule Fleet.Forge.ClientTest do
       handlers: handlers
     } do
       assert {:error, {:unexpected_review_shape, _path, _body}} =
-               ForgeClient.pr_review_state("fleet/lcars", 6, opts(handlers))
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(handlers), :head_sha, :unscoped)
+               )
     end
 
     test "change_request_feedback: non-list 2xx → {:error, {:unexpected_review_shape, _, _}}",
@@ -872,6 +887,55 @@ defmodule Fleet.Forge.ClientTest do
                  "[step_run:engineer:abc] livrable",
                  dedup_opts(handlers, "[step_run:engineer:abc]")
                )
+    end
+
+    # JG-112 — `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux
+    # postaient, et c'est le bon arbitrage (le `@doc` l'ecrit : refuser supprimerait un commentaire
+    # legitime). Mais ces signatures sont METIER — budget de rounds, sceau, escalade — donc un
+    # doublon coute ailleurs et plus tard. Le moment ou le doute naît est le seul ou la correlation
+    # existe encore.
+    test "JG-112: historique ILLISIBLE → on poste, et on DIT que la dedup n'a pas ete verifiee" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {503, %{"message" => "down"}},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 1}}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :posted} =
+                   ForgeClient.post_comment(
+                     "fleet/lcars",
+                     42,
+                     "[step_run:engineer:abc] livrable",
+                     dedup_opts(handlers, "[step_run:engineer:abc]")
+                   )
+        end)
+
+      assert log =~ "dedup NOT verified",
+             "une relecture impossible produit le meme silence qu'une relecture reussie et vide"
+
+      assert log =~ "step_run:engineer:abc", "la trace ne porte pas la signature : pas correlable"
+    end
+
+    test "TEMOIN JG-112 — une relecture REUSSIE et vide ne dit rien" do
+      # Sans ce temoin, avertir a chaque post passerait le test ci-dessus.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {200, []},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 1}}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :posted} =
+                   ForgeClient.post_comment(
+                     "fleet/lcars",
+                     42,
+                     "[step_run:engineer:abc] livrable",
+                     dedup_opts(handlers, "[step_run:engineer:abc]")
+                   )
+        end)
+
+      refute log =~ "dedup NOT verified"
     end
 
     test "no-op when the signature already exists in a SYSTEM comment (idempotent replay)" do
@@ -1517,6 +1581,44 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
+  # JG-121/124 — `branch_exists?/3` rendait `false` sur une branche PROUVEE absente ET sur une forge
+  # qu'on n'a pas su lire. Ses trois appelants en tiraient trois decisions differentes, dont deux
+  # destructrices : une protection de `main` silencieusement sautee, et une face republiee PAR-DESSUS
+  # une existante sur un simple timeout. La reponse etait huit lignes plus bas dans le meme module —
+  # `user_exists?/2` distingue depuis toujours un 404 prouve d'une panne.
+  describe "branch_exists?/3 — un 404 est une REPONSE, le reste est une absence de reponse" do
+    test "branche presente → {:ok, true}" do
+      handlers = %{{"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {200, %{"name" => "ops"}}}
+      assert {:ok, true} = ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "404 — la forge a REPONDU que la branche n'existe pas → {:ok, false}" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {404, %{"message" => "no"}}
+      }
+
+      assert {:ok, false} = ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "503 — on n'a PAS su lire : {:error, _}, jamais `false`" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {503, %{"message" => "down"}}
+      }
+
+      assert {:error, {:http, 503, _}} =
+               ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "401 non plus — un jeton expire n'est pas une branche absente" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {401, %{"message" => "nope"}}
+      }
+
+      assert {:error, {:http, 401, _}} =
+               ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+  end
+
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
     test "protect_branch → POST branch_protections, {:ok, :created}" do
       handlers = %{
@@ -1810,6 +1912,51 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
+    # JG-087 — GITEA REND `405` POUR DEUX FAITS OPPOSES, et rien de STRUCTURE ne les separe dans la
+    # reponse recue : seul le libelle anglais le fait, `"try again later"`. La detection textuelle
+    # reste faute d'autre chose, mais elle ne peut plus degrader EN SILENCE — le jour ou Gitea
+    # reformule ce message, tout `405` devient « definitif », les merges echouent, et seule la
+    # branche RECONNUE ecrivait au journal. Le corps entier est journalise : diagnostic du jour, et
+    # matiere du jour ou un champ structure apparaitra.
+    test "JG-087 : un 405 NON reconnu comme transitoire est journalise avec son corps" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([{405, %{"message" => "Veuillez reessayer plus tard"}}])
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 405, _}} =
+                   ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+        end)
+
+      assert log =~ "NOT recognised as transient"
+      assert log =~ "Veuillez reessayer plus tard", "le corps n'est pas dans la trace"
+      assert log =~ "reworded"
+    end
+
+    test "JG-087 : un transitoire RECONNU mais epuise a sa propre phrase (deux silences, pas un)" do
+      handlers = %{
+        {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
+          seq_handler([
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}},
+            {405, %{"message" => "Please try again later"}}
+          ])
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:http, 405, _}} =
+                   ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+        end)
+
+      assert log =~ "still computing after"
+
+      refute log =~ "NOT recognised as transient",
+             "un transitoire epuise a ete rapporte comme un libelle non reconnu"
+    end
+
     test "opts[:method] forces the style (e.g. fast-forward-only)" do
       handlers =
         Map.merge(post_merge_handlers(), %{
@@ -2099,6 +2246,79 @@ defmodule Fleet.Forge.ClientTest do
       %{path: path} = Agent.get(agent, & &1)
 
       refute path =~ ~r{/\.\.(/|$)}
+    end
+  end
+
+  # JG-065 (`S2`) — SANS `head_sha`, LES APPROBATIONS PERIMEES ETAIENT RETENUES.
+  #
+  # `head_sha` etait lu par `Keyword.get/2`, donc une cle ABSENTE et une valeur `nil` tombaient
+  # toutes deux sur « compte toutes les revues jamais posees sur cette PR ». Or `nil` est exactement
+  # ce que produit l'appelant de production : `get_in(pr, ["head", "sha"])` sur une reponse de forge
+  # dont l'objet PR n'expose pas `head.sha` (forme allegee d'un listage, version de Gitea, reponse
+  # partielle).
+  #
+  # Ce que ca coutait : une PR approuvee sur le commit A puis completee par un commit B se lisait
+  # toujours approuvee, `review_outcome/2` rendait `:approved`, le routage promouvait, et le sceau
+  # fusionnait. Du code qu'aucun juge n'a vu atterrissait sur la branche principale, sous un
+  # scellement qui atteste le contraire.
+  describe "JG-065 — le mode non scope se DEMANDE, il ne s'herite plus d'une cle absente" do
+    defp one_approval_handlers do
+      %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "user" => %{"login" => "Qualifier"},
+               "state" => "APPROVED",
+               "commit_id" => "AAA",
+               "dismissed" => false
+             }
+           ]}
+      }
+    end
+
+    test "cle ABSENTE → {:error, {:head_sha_required, :absent}}, jamais une lecture elargie" do
+      assert {:error, {:head_sha_required, :absent}} =
+               ForgeClient.pr_review_state("fleet/lcars", 6, opts(one_approval_handlers()))
+    end
+
+    test "head_sha nil (ce que rend get_in sur une PR sans head.sha) → refus type" do
+      assert {:error, {:head_sha_required, nil}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, nil)
+               )
+    end
+
+    test "head_sha du commit COURANT → la revue de l'ancien commit ne compte pas" do
+      assert {:ok, %{verdicts: verdicts}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, "BBB")
+               )
+
+      assert verdicts == %{},
+             "une approbation posee sur un commit anterieur a ete retenue pour le commit courant"
+    end
+
+    test "TEMOIN — head_sha du commit JUGE → la revue compte" do
+      assert {:ok, %{verdicts: %{"qualifier" => :approved}}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, "AAA")
+               )
+    end
+
+    test "TEMOIN — :unscoped explicite → l'ancien comportement, mais demande" do
+      assert {:ok, %{verdicts: %{"qualifier" => :approved}}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 Keyword.put(opts(one_approval_handlers()), :head_sha, :unscoped)
+               )
     end
   end
 end

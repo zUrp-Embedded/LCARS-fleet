@@ -25,7 +25,7 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
     # No config gymnastics: `config/test.exs` deliberately pins nothing here, so the ambient value
     # IS the default. If someone starts pinning it, this assertion turns red rather than silent —
     # which is the correct reaction, since the fallback would then stop being observable.
-    assert Application.fetch_env(:fleet_starfleet, :coord_backend) == :error,
+    assert Application.fetch_env(:lcars_fleet, :starfleet_coord_backend) == :error,
            "un pin de :coord_backend en :test rendrait ce defaut inobservable — a traiter, pas a contourner"
 
     assert Fleet.Starfleet.CoordBackend.resolved() ==

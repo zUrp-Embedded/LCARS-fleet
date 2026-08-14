@@ -38,26 +38,37 @@ defmodule Fleet.Credentials.Shell do
   `after timeout_ms`. The total wall-clock is bounded whatever the cadence of the output.
   Verified: a process that emits continuously (drip) is killed at the wall deadline.
 
-  ## The process-group mechanism (setsid + PGID discovery)
+  ## The process-group mechanism — `setsid`, and TWO states to cover (6-031)
 
-  `setsid` places the command in a new session ⇒ it becomes the leader of its own process-group
-  (`PGID == its PID`), distinct from the BEAM's. We run `setsid -w <cmd> <args>`: the `-w` option
-  keeps the `setsid` wrapper ALIVE as parent (otherwise it fork-and-dies and the `os_pid` held by
-  `Port.open` points at an already-dead wrapper, with no link to the real group). The port's `os_pid`
-  is then `setsid`'s PID; the real process is its SOLE child, whose PGID we read via
-  `/proc/<child>/stat` (`pgrp` field, Linux — documented target). PGID discovery is done AT THE MOMENT
-  of the timeout (not right after the open: at that instant `setsid -w` has not necessarily forked the
-  real process yet → discovery would return `nil`). At the timeout: `kill -s KILL -- -<child_pgid>`
-  (whole group) then closing the port and `kill` of the `setsid` wrapper.
+  The command runs under `setsid -w`, which guarantees the real process is a session leader — so it
+  leads its own process-group and every descendant it forks inherits it. At the deadline we kill
+  that group: `kill -s KILL -- -<pgid>`.
 
-  ⚠ The `--` separator of `kill` is LOAD-BEARING: otherwise `/usr/bin/kill` (util-linux) reads the
-  `-<pgid>` (starts with `-`) as an OPTION and returns rc 0 WITHOUT killing the group. So we pass
-  the signal via `-s KILL` then `--` then the negative target.
+  ⚠ The `--` separator is LOAD-BEARING: otherwise `/usr/bin/kill` (util-linux) reads the `-<pgid>`
+  (it starts with `-`) as an OPTION and returns rc 0 WITHOUT killing the group. Signal via
+  `-s KILL`, then `--`, then the negative target.
 
-  If group discovery fails (rare race, /proc unavailable), we fall back to the wrapper's
-  `kill -KILL <os_pid>`: an honest degradation (the wrapper dies, a detached descendant CAN survive) —
-  but this is the edge case, not the nominal path, and it is implicitly logged by the absence of a
-  group.
+  ### Which pid is the leader depends on the environment, and BOTH cases are live here
+
+  `setsid` forks only if it is ALREADY a process-group leader. Measured on this fleet, 2026-08-14:
+
+    * **dev box (WSL)** — the port driver hands its child a fresh session, so `setsid` sees itself
+      as a group leader and FORKS. The real process is its only child, in yet another session:
+      `os_pid` is the wrapper, NOT the pgid to kill.
+    * **CI container** — the port child inherits the BEAM's group (`pgrp != pid`), so `setsid` does
+      NOT fork: it execs in place and `os_pid` IS the pgid.
+
+  `terminate/2` covers both without having to tell them apart: it kills the discovered child's group
+  when there is a child, and ALWAYS also kills `-os_pid`. In the fork case the second shot is a
+  no-op (ESRCH); in the non-fork case it IS the whole group. This is what closes the defect 6-031
+  named — the old code, finding no child, killed only `os_pid` and left the descendants orphaned
+  while the caller was told the operation had timed out and was over.
+
+  ⚠ **A previous fix dropped `setsid` entirely**, on the strength of the dev-box measurement alone
+  ("the port driver already opens a session, so `os_pid` is the pgid"). It was green locally and
+  RED in the container, where that premise is false and `-os_pid` would have named no group at all.
+  The lesson is in the shape of the measurement, not in the mechanism: a runtime behaviour measured
+  on ONE machine is a property of that machine until a second one agrees.
 
   ## Placement (compile cycle)
 
@@ -182,7 +193,7 @@ defmodule Fleet.Credentials.Shell do
 
   ## The bound KILLS the OS process-GROUP (not just the BEAM, not just the top-level)
 
-  Launched via `setsid` (new process-group) then `Port.open` to hold the `os_pid`. At the WALL
+  Launched via `setsid` (new session) then `Port.open` to hold the `os_pid`. At the WALL
   deadline (absolute deadline, not a re-armable idle-gap), we kill the **whole GROUP** (`SIGKILL` to
   `-<pgid>`) AND close the port → the command and ALL its descendants (git transport helpers,
   credential helpers, filters) are really dead. There is no path to call this module without a deadline.
@@ -199,15 +210,29 @@ defmodule Fleet.Credentials.Shell do
             {:error, {:exit, {:enoent, cmd}}}
 
           {_exe, nil} ->
-            # `setsid` is the precondition of the killed-by-construction process-group (Linux: always
-            # present via util-linux). Absent = we CANNOT guarantee the "whole group killed" invariant →
-            # fail-closed rather than a false sense of security with a bare `System.cmd`.
+            # `setsid` est la precondition du groupe tue par construction (Linux : toujours present
+            # via util-linux). Absent = on NE PEUT PAS garantir l'invariant « tout le groupe meurt »
+            # -> fail-closed, plutot qu'un faux sentiment de securite avec un `System.cmd` nu.
             {:error, {:exit, {:enoent, "setsid"}}}
 
           {exe, setsid} ->
-            # We run `setsid -w <exe> <args>`: `-w` keeps the wrapper ALIVE (parent of the real process),
-            # otherwise it fork-and-dies and the port's os_pid points at nothing useful. The port's
-            # executable is therefore `setsid`; its args = `["-w", exe | args]`.
+            # 6-031 — L'ENVELOPPE `setsid` RESTE, ET LA MESURE QUI VOULAIT LA RETIRER ETAIT LOCALE.
+            #
+            # `setsid` ne fork QUE s'il est deja chef de groupe. Il se trouve donc dans un des deux
+            # etats, et LES DEUX EXISTENT SUR CETTE FLOTTE — mesure du 2026-08-14 :
+            #
+            #   * poste de dev (WSL) : le port place son enfant dans une session neuve, `setsid` se
+            #     voit chef de groupe, FORKE — le vrai processus est son unique enfant, dans une
+            #     session encore autre. `os_pid` n'est PAS le PGID a tuer.
+            #   * conteneur de CI : l'enfant du port herite du groupe du BEAM (`pgrp` != `pid`),
+            #     `setsid` NE FORKE PAS, s'execute en place — `os_pid` EST le PGID.
+            #
+            # Retirer l'enveloppe marchait donc sur le poste et cassait dans la boite, ou tuer
+            # `-os_pid` n'aurait designe aucun groupe (ou pire, celui du BEAM si l'enfant n'avait pas
+            # ete isole). `terminate/2` couvre les deux etats sans avoir a les distinguer.
+            #
+            # `-w` garde l'enveloppe VIVANTE comme parent du vrai processus : sans lui elle
+            # fork-and-die et l'`os_pid` du port ne pointe plus sur rien d'utile.
             port_opts =
               [
                 :binary,
@@ -230,11 +255,10 @@ defmodule Fleet.Credentials.Shell do
                 os_pid = os_pid(port)
 
                 # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
-                # dripping output never pushes the deadline back (wall, not idle-gap). The PGID of the group to
-                # kill is discovered AT THE MOMENT of the timeout (in `terminate`), not here: right after
-                # `Port.open`, `setsid -w` has not necessarily forked the real process yet (race) → immediate
-                # discovery would return `nil`. By the deadline, the process has run for `timeout_ms` → it is
-                # there, fork included.
+                # dripping output never pushes the deadline back (wall, not idle-gap). The group to kill needs
+                # no discovery and therefore no timing: it IS `os_pid` (6-031). The race this comment used to
+                # describe — "wait for the timeout, the wrapper has forked by then" — was a property of the
+                # `setsid` wrapper, and it left with it.
                 deadline = System.monotonic_time(:millisecond) + timeout_ms
                 collect(port, os_pid, timeout_ms, deadline, [], 0, max_output_bytes)
             end
@@ -275,8 +299,8 @@ defmodule Fleet.Credentials.Shell do
 
   # `Port.open` can still raise (badarg on a malformed spec/opts that slipped past the parse) → keep the
   # `result()` contract intact rather than crash the caller.
-  defp safe_port_open(setsid, port_opts) do
-    {:ok, Port.open({:spawn_executable, setsid}, port_opts)}
+  defp safe_port_open(exe, port_opts) do
+    {:ok, Port.open({:spawn_executable, exe}, port_opts)}
   rescue
     e -> {:error, {:exit, {:port_open, Exception.message(e)}}}
   catch
@@ -290,12 +314,12 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # PGID of the process-group to kill = that of the SOLE child of `setsid` (the real process). `setsid
-  # -w` keeps the wrapper alive → the PPID link is stable for the duration of the discovery. We scan
-  # `/proc` for the process whose PPID = the wrapper's os_pid, then read its `pgrp` field (field 5 of
-  # `/proc/<pid>/stat`, after the `state` that follows the `(comm)` — comm may contain spaces/
-  # parentheses, hence the split AFTER the last `)`). Linux only (documented target); any anomaly → nil
-  # (the timeout falls back to `kill <os_pid>`, an honest degradation).
+  # PGID du groupe a tuer quand `setsid` A FORKE : celui de son unique enfant (le vrai processus).
+  # `-w` garde l'enveloppe vivante, donc le lien PPID est stable le temps de la recherche. On
+  # balaie `/proc` a la recherche du processus dont le PPID vaut l'os_pid de l'enveloppe, puis on
+  # lit son `pgrp`. `nil` = pas d'enfant, ce qui est le cas NORMAL quand `setsid` ne forke pas
+  # (`os_pid` est alors lui-meme le chef de groupe) et le cas degrade quand `/proc` est illisible.
+  # Les deux sont couverts par le tir sur `-os_pid` de `kill_scope/1` — voir son commentaire.
   defp child_pgid(nil), do: nil
 
   defp child_pgid(parent_os_pid) do
@@ -318,10 +342,6 @@ defmodule Fleet.Credentials.Shell do
 
   defp pid_dir?(entry), do: Regex.match?(~r/^\d+$/, entry)
 
-  # PPID = field 4 of /proc/<pid>/stat; pgrp = field 5. The format is:
-  #   pid (comm) state ppid pgrp ...
-  # `comm` may contain spaces and parentheses → we cut AFTER the LAST `)` then
-  # split on the space: [state, ppid, pgrp, ...].
   defp ppid_of(pid), do: stat_field(pid, 1)
 
   defp read_pgrp(pid) do
@@ -337,6 +357,10 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
+  # ppid = champ 4 et pgrp = champ 5 de /proc/<pid>/stat. Le format est `pid (comm) state ppid pgrp
+  # …` et `comm` peut contenir espaces et parentheses -> on coupe APRES le DERNIER `)` puis on
+  # decoupe sur l'espace : [state, ppid, pgrp, …]. Linux seul, qui est la cible documentee de tout
+  # ce qui lit `/proc` ici.
   defp stat_field(pid, index) do
     case File.read("/proc/#{pid}/stat") do
       {:ok, stat} ->
@@ -382,29 +406,42 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
-  # Kill at the deadline. The PGID of the group to kill = that of the REAL process (the child of
-  # `setsid -w`), discovered NOW: the process has run for `timeout_ms` (fork included) → the discovery
-  # is reliable, unlike right after the open where `setsid -w` has not necessarily forked yet. PREFERRED
-  # target = the whole process-GROUP: the top-level AND all its descendants (git transport helpers,
-  # filters) die together. Fallback if the PGID could not be discovered (process already gone / /proc
-  # unavailable): we kill the `setsid` wrapper (an honest degradation). `kill`'s result is discarded:
-  # its expected failure is ESRCH — the target died in the meantime — which IS the state we are
-  # driving toward, so the return carries nothing. Then port close. nil = nothing to kill.
+  # Kill at the deadline: the whole process-GROUP, so the top-level AND every descendant (git
+  # transport helpers, filters) die together. `kill`'s result is discarded — its expected failure is
+  # ESRCH, the target died in the meantime, which IS the state we are driving toward. Then port
+  # close. `nil` os_pid = the port closed before we could read it = nothing to kill.
   defp terminate(port, os_pid) do
+    _ = kill_scope(os_pid)
+    safe_close(port)
+  end
+
+  # 6-031 — LES DEUX ETATS DE `setsid` SONT COUVERTS SANS AVOIR A LES DISTINGUER, et c'est ce qui
+  # ferme le defaut de la fiche : plus aucune branche ne rend la main en laissant la descendance
+  # en vie.
+  #
+  #   * `setsid` A FORKE (poste de dev) : le vrai processus est son unique enfant. `child_pgid/1`
+  #     le trouve via `/proc` et on tue SON groupe ; l'enveloppe, elle, est dans une autre session
+  #     et se tue separement.
+  #   * `setsid` N'A PAS FORKE (conteneur de CI) : il s'est execute en place, donc `os_pid` EST le
+  #     chef du groupe — et `child_pgid/1` ne trouve rien, puisqu'il n'y a pas d'enfant. C'est
+  #     exactement ce cas que l'ancien code traitait en ne tuant QUE `os_pid`, laissant la
+  #     descendance orpheline.
+  #
+  # Le tir sur `-os_pid` est donc AJOUTE inconditionnellement, et il est sur dans les deux etats :
+  # `setsid` garantit que `os_pid` est chef de session (donc de groupe) OU que son enfant l'est.
+  # Jamais `os_pid` ne partage le groupe du BEAM apres `setsid` — sans quoi `-os_pid` ne designerait
+  # aucun groupe (ESRCH) plutot que le mauvais.
+  defp kill_scope(nil), do: :ok
+
+  defp kill_scope(os_pid) do
     _ =
       case child_pgid(os_pid) do
-        pgid when is_integer(pgid) ->
-          _ = kill_group(pgid)
-
-          # The setsid wrapper itself is the leader of ANOTHER session (the BEAM's) → not in the
-          # killed group; we finish it off separately so as not to leave the port half-alive.
-          kill_pid(os_pid)
-
-        nil ->
-          kill_pid(os_pid)
+        pgid when is_integer(pgid) -> kill_group(pgid)
+        nil -> :ok
       end
 
-    safe_close(port)
+    _ = kill_group(os_pid)
+    kill_pid(os_pid)
   end
 
   # SIGKILL to the whole process-GROUP (negative PID = the group in `kill(2)` semantics). We pass the
@@ -417,8 +454,8 @@ defmodule Fleet.Credentials.Shell do
     System.cmd("kill", ["-s", "KILL", "--", "-#{pgid}"], stderr_to_stdout: true)
   end
 
-  # SIGKILL to a single PID (the setsid wrapper). `--` to stay homogeneous (a positive PID is not
-  # ambiguous, but we keep the same defensive form).
+  # SIGKILL to a single PID — the belt behind the group kill, cf. `kill_scope/1`. `--` to stay
+  # homogeneous (a positive PID is not ambiguous, but we keep the same defensive form).
   defp kill_pid(nil), do: :ok
 
   defp kill_pid(pid) do

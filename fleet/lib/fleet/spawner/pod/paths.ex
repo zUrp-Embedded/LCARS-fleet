@@ -39,7 +39,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   @spec pod_dir_root(keyword()) :: String.t()
   def pod_dir_root(opts \\ []) do
     Keyword.get(opts, :pod_dir_root) ||
-      Application.get_env(:fleet_spawner, :pod_dir_root) ||
+      Application.get_env(:lcars_fleet, :spawner_pod_dir_root) ||
       Path.join(runtime_home(), "pods")
   end
 
@@ -65,7 +65,7 @@ defmodule Fleet.Spawner.Pod.Paths do
   """
   @spec state_fs_root() :: String.t()
   def state_fs_root,
-    do: Application.get_env(:fleet_spawner, :state_fs_root, default_state_fs_root())
+    do: Application.get_env(:lcars_fleet, :spawner_state_fs_root, default_state_fs_root())
 
   defp default_state_fs_root,
     do: Path.join(Fleet.Layout.state_dir(), "state")

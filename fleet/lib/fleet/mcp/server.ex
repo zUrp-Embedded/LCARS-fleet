@@ -7,7 +7,7 @@ defmodule Fleet.MCP.Server do
   carries the guard: `start_link/1` reads `:boot_environment` (priority opts > app env >
   default **`:pod`**, FAIL-CLOSED) and refuses (`{:error, :forbidden_in_pod}`) on `:pod` → the child
   fails → the supervisor fails → the app does not boot. The HOST declares itself POSITIVELY
-  (`config :fleet_mcp, boot_environment: :host` in `runtime.exs` on the daemon boot, and in
+  (`config :lcars_fleet, mcp_boot_environment: :host` in `runtime.exs` on the daemon boot, and in
   `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
   permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
   The wire-time residual is CLOSED (2026-08-05): `runtime.exs` no longer declares `:host`
@@ -47,7 +47,7 @@ defmodule Fleet.MCP.Server do
   @spec boot_environment(keyword()) :: atom()
   def boot_environment(opts \\ []) do
     Keyword.get(opts, :boot_environment) ||
-      Application.get_env(:fleet_mcp, :boot_environment, :pod)
+      Application.get_env(:lcars_fleet, :mcp_boot_environment, :pod)
   end
 
   @impl GenServer

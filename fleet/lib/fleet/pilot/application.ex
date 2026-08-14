@@ -20,12 +20,19 @@ defmodule Fleet.Pilot.Application do
     * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer SEPARATE from the pod FAILURE
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
-    * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:fleet_pilot, :poller, :poll]`. First child
+    * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:lcars_fleet, :pilot_poller, :poll]`. First child
       of the rail because it measures the rail: the poller emitted those three sites since it was
       written and nothing ever attached, so every duration was computed and dropped (BL-6-40 Ph. 0).
   """
 
   use Supervisor
+
+  # A BLACKOUT, not a bad figure: the verdict only falls when the WHOLE observed window failed, and
+  # the window holds at least this many samples. Deliberately small — at one cycle per poll interval
+  # three consecutive total failures is already a rail that has not advanced for a minute and a half
+  # — but never one: readiness is what an operator consults when things go wrong, and a probe that
+  # flickers on a single transient 500 is one they learn to ignore.
+  @poll_blackout_window 3
 
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
@@ -48,7 +55,7 @@ defmodule Fleet.Pilot.Application do
 
   # Work/ops write serializer (CI-11) — always-on in prod, OFF in test (hermeticity, cf. init).
   defp ops_object_sync_child do
-    if Application.get_env(:fleet_pilot, :start_ops_object_sync, true),
+    if Application.get_env(:lcars_fleet, :pilot_start_ops_object_sync, true),
       do: [Fleet.Workflow.OpsObjectSync],
       else: []
   end
@@ -69,12 +76,30 @@ defmodule Fleet.Pilot.Application do
 
     * `{:inactive, _}`    — `:step_dispatch?` off (rail deliberately absent, expected outside prod-step).
     * `{:operational, _}` — Poller + StepRunConsumer alive.
-    * `{:degraded, _}`    — step enabled but ≥1 singleton dead → **hollow-green caught** (the daemon
-      runs but the forge rail no longer advances).
+    * `{:degraded, _}`    — step enabled and EITHER ≥1 singleton dead, OR every poll of the observed
+      window failed → **hollow-green caught** (the daemon runs but the forge rail no longer
+      advances).
+
+  ## What this verdict catches, and what it deliberately does not
+
+  The two health keys used to travel in the detail and were EXPLICITLY excluded from the predicate,
+  so no state of the polls could ever move the verdict. A forge unreachable, a dead DNS, an expired
+  token — every cause that fails 100 % of the polls WITHOUT killing a process — read `operational`
+  while not one ticket advanced. The probe built to reveal that gap contained it in a field.
+
+  It is a BLACKOUT that flips the verdict, not a bad figure: the whole observed window failed, over
+  at least #{@poll_blackout_window} samples. Anything narrower would make readiness — the instrument an operator
+  consults when things go wrong — flicker on one transient 500.
+
+  Consequently it still says `operational` for: polls that are SLOW but succeed (the figures are in
+  the detail, and no defensible threshold exists for a fleet whose repo count is unknown here); a
+  PARTIAL failure, even a large one (one repo of twelve permanently broken is a repo-level fact, not
+  a rail-level one); and `:no_data`, which cannot be told apart from a fleet that has just booted —
+  a poller alive that never polls at all is NOT caught here.
   """
   @spec step_status() :: {:inactive | :operational | :degraded, map()}
   def step_status do
-    if Application.get_env(:fleet_pilot, :step_dispatch?, false) do
+    if Application.get_env(:lcars_fleet, :pilot_step_dispatch?, false) do
       detail =
         Map.new(step_rail_processes(), fn {key, name} ->
           {key, is_pid(Process.whereis(name))}
@@ -89,7 +114,7 @@ defmodule Fleet.Pilot.Application do
       # first and kept quiet about the second.
       #
       # ⚠ The key is called `repo_poll` and NOT `tick`, because the telemetry measures ONE REPO, not
-      # a cycle. `[:fleet_pilot, :poller, :poll]` is emitted once PER REPO (every emission carries
+      # a cycle. `[:lcars_fleet, :pilot_poller, :poll]` is emitted once PER REPO (every emission carries
       # `repo:`), so a distribution over this key describes what one repo costs, never what a full
       # pass costs. Measured 2026-08-03: 12 repos, 30 s interval, and the counter advanced by 12 per
       # cycle. The key was first called `tick` — a name asserting a scope the mechanism does not
@@ -111,13 +136,63 @@ defmodule Fleet.Pilot.Application do
         |> Map.put(:repo_poll, repo_poll_health())
         |> Map.put(:poll_cycle, poll_cycle_health())
 
-      if Enum.all?(detail, fn {key, up?} -> key in [:repo_poll, :poll_cycle] or up? end),
+      if rail_healthy?(detail),
         do: {:operational, detail},
         else: {:degraded, detail}
     else
       {:inactive, %{note: "step_dispatch? off"}}
     end
   end
+
+  # THE PREDICATE OF THE VERDICT — it used to be an inline `Enum.all?` carrying an EXCLUSION LIST,
+  # and the exclusion was the defect: `key in [:repo_poll, :poll_cycle] or up?` let the two health
+  # keys through unconditionally. Note that DELETING the list would have changed nothing — every
+  # value they can take (a map, `:no_data`, `:unavailable`) is truthy — so the fix is a real
+  # classification, not the removal of a guard.
+  defp rail_healthy?(detail), do: Enum.all?(detail, &key_healthy?/1)
+
+  # A process key is a boolean: alive or the rail is degraded. Unchanged, and it still wins — a dead
+  # singleton is degraded whatever the polls say.
+  defp key_healthy?({key, health}) when key in [:repo_poll, :poll_cycle],
+    do: polls_healthy?(health)
+
+  defp key_healthy?({_key, up?}), do: up?
+
+  @doc false
+  # Verdict on ONE health summary. Public for its test: the shapes it must classify come from
+  # `PollerTelemetry`, and building the real ones through `step_status/0` would need the whole rail
+  # up plus a saturated telemeter — the fixture would stop discriminating (same verdict both sides).
+  # Same motive as `step_rail_processes/0` right below.
+  #
+  #   * `:no_data`     — healthy. Before the first poll there is nothing to judge, and this shape is
+  #     INDISTINGUISHABLE from a poller that never polls: no timestamp here says which. Written
+  #     limit, not an oversight.
+  #   * `:unavailable` — healthy. The telemeter did not answer within the call timeout. Readiness
+  #     must not fall because of its OWN instrument (same reason as the two `catch` clauses below),
+  #     and the case where that instrument is DEAD is already carried by its own process key
+  #     `poller_telemetry` — falling here would judge the rail on a timeout of the gauge.
+  #   * a summary   — degraded only on a BLACKOUT: every sample of the window in error, window at
+  #     least `@poll_blackout_window`. `stats/0` tallies errors by scope (a map), `cycle_stats/0`
+  #     as a count (an integer); both are compared against the SAME window they came from.
+  def polls_healthy?(:no_data), do: true
+  def polls_healthy?(:unavailable), do: true
+
+  def polls_healthy?(%{errors: errors, window: window}),
+    do: not blackout?(error_count(errors), window)
+
+  # Any shape this module does not know is not a verdict. Readiness stays readable rather than
+  # calling a rail degraded on a summary it failed to read.
+  def polls_healthy?(_other), do: true
+
+  defp error_count(errors) when is_map(errors), do: errors |> Map.values() |> Enum.sum()
+  defp error_count(errors) when is_integer(errors), do: errors
+  defp error_count(_), do: 0
+
+  defp blackout?(errors, window)
+       when is_integer(window) and window >= @poll_blackout_window and errors >= window,
+       do: true
+
+  defp blackout?(_errors, _window), do: false
 
   # Health summary of the PER-REPO polls, or `:no_data` before the first one. TOTAL by obligation:
   # readiness is what an operator consults when things go wrong, so it must never fall because of
@@ -166,7 +241,7 @@ defmodule Fleet.Pilot.Application do
   # crash, zero log). The operator ASKED for step mode → incomplete config = broken deploy →
   # fail-loud at boot.
   defp step_children do
-    if Application.get_env(:fleet_pilot, :step_dispatch?, false) do
+    if Application.get_env(:lcars_fleet, :pilot_step_dispatch?, false) do
       step_children!()
     else
       []
@@ -185,7 +260,7 @@ defmodule Fleet.Pilot.Application do
   # fail-loud guard, aimed at the real thing.
   defp step_children! do
     unless forge_base_url() do
-      raise "fleet_pilot: :step_dispatch? enabled but the forge base_url is absent (config :fleet_pilot, " <>
+      raise "pilot: :pilot_step_dispatch? enabled but the forge base_url is absent (config :lcars_fleet, " <>
               ":forge[:base_url] / FORGE_BASE_URL) — the Poller cannot DISCOVER its projects " <>
               "(list_org_repos) nor can the StepRunConsumer derive the push remote. Deploy broken, fail-loud."
     end
@@ -208,7 +283,7 @@ defmodule Fleet.Pilot.Application do
     # first verdict.
     Fleet.Pilot.StepRunConsumer.Verdict.load_schema!()
 
-    interval = Application.get_env(:fleet_pilot, :poll_interval_ms, 30_000)
+    interval = Application.get_env(:lcars_fleet, :pilot_poll_interval_ms, 30_000)
 
     [
       # The poller's telemetry, ATTACHED (BL-6-40 Phase 0). Started BEFORE the Poller so no tick is
@@ -286,12 +361,24 @@ defmodule Fleet.Pilot.Application do
   Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
   the raise into a finding.
   """
+  # ⚠ DEUX GARDES MANQUAIENT ICI, ET LE `@doc` AU-DESSUS DISAIT « EXACTLY » (6-008). Le boot en
+  # joue SIX (`step_children!`, l. 272-278) ; cette fonction en jouait QUATRE :
+  # `validate_workshop_card!` et `validate_default_card_matrix!` n'y etaient pas. Un verificateur
+  # VERT pouvait donc preceder un boot ROUGE — le contraire exact de son objet, et sur les deux
+  # gardes qui refusent une carte d'atelier cassee et une matrice de carte par defaut incoherente.
+  #
+  # L'equivalence reste tenue A LA MAIN : rien dans le code ne lie les deux sequences. Ce qui la
+  # tient desormais est le check `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui
+  # lit les DEUX listes a l'AST et refuse la divergence. Ajouter une garde au boot sans l'ajouter
+  # ici fait maintenant rougir le gate, au lieu de rendre la phrase fausse en silence.
   @spec verify_cards_and_roles!(keyword()) :: :ok
   def verify_cards_and_roles!(opts \\ []) do
     Fleet.Workflow.Loader.publish_image!()
     validate_card_juries!(opts)
     validate_card_steps!(opts)
     validate_structural_roles!()
+    validate_workshop_card!(opts)
+    validate_default_card_matrix!(opts)
     :ok
   end
 
@@ -351,7 +438,7 @@ defmodule Fleet.Pilot.Application do
   # when a catalogue simply has no rail. That is a legitimate deployment, not a defect: refusing the
   # boot there would be a policy this check has no mandate to set.
   #
-  # It used to guard a knob (`:fleet_pilot, :workshop_workflow_map`, default `"workshop-direct"` —
+  # It used to guard a knob (`:lcars_fleet, :pilot_workshop_workflow_map`, default `"workshop-direct"` —
   # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
   # can be wrong. A property cannot.
   def validate_workshop_card!(opts \\ []) do
@@ -470,7 +557,7 @@ defmodule Fleet.Pilot.Application do
   # Resolved forge base_url (app config `:forge`). `nil` if absent/empty. Source of the fail-loud guard
   # above (the multi-project step rail needs it to discover AND to derive the per-step-run remotes).
   defp forge_base_url do
-    case Keyword.get(Application.get_env(:fleet_pilot, :forge, []), :base_url) do
+    case Keyword.get(Application.get_env(:lcars_fleet, :pilot_forge, []), :base_url) do
       base when is_binary(base) and base != "" -> base
       _ -> nil
     end

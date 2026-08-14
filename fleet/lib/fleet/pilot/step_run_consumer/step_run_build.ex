@@ -155,7 +155,20 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
       remote: seams.remote,
       target_branch: Fleet.Forge.Protocol.feature_branch(n, role),
       push?: true,
-      local_ref: "HEAD"
+      local_ref: "HEAD",
+      # LE TRIPLET SLSA VOYAGE AVEC LE LIVRABLE (BL-6-43). `livrable_sha` manque ici et c'est
+      # NORMAL : il n'existe pas encore — `Deliverable.publish/1` le calcule apres la porte, et
+      # l'ajoute. Tout le reste est connu au moment ou l'on decrit la publication, donc c'est ici
+      # qu'il se declare, pas dans un second geste apres coup.
+      provenance: %{
+        brief_sha: payload["brief_sha"],
+        brief_ref: payload["brief_ref"],
+        input_sha: payload["gate_base_sha"] || payload["base_sha"],
+        pod_id: payload["pod_id"],
+        role: role,
+        issue: n,
+        debug_visibility: Fleet.Spawner.debug_visibility?()
+      }
     }
   end
 

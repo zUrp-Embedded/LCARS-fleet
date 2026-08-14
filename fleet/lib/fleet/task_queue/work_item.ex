@@ -107,8 +107,20 @@ defmodule Fleet.TaskQueue.WorkItem do
   @doc """
   Deserializes a persisted work item.
 
-  Missing required fields, invalid typed fields, and unknown states return
-  `{:error, :invalid}`. Invalid optional timestamps degrade to `nil`.
+  Missing required fields, invalid typed fields, unknown states AND unreadable optional timestamps
+  return `{:error, :invalid}`.
+
+  ⚠ CETTE PHRASE DISAIT « Invalid optional timestamps degrade to nil », ET ELLE DOCUMENTAIT LE
+  DEFAUT. `nil` a un sens ici : *pas d'echeance*. Une date illisible n'est pas une absence
+  d'echeance — c'est une echeance qu'on n'a pas su lire, et les plier l'une sur l'autre produisait
+  un mandat que la file ne ferait JAMAIS expirer : `deadline_reached?/1` ne peut rien conclure sur
+  `nil`, donc l'item restait la jusqu'a ce qu'un `enqueue` du meme pod le supersede.
+
+  Un item illisible est desormais REFUSE a la lecture, comme `enqueued_at` l'etait deja : c'est le
+  chemin `{:corrupt, found}` du serveur, compte et bruyant. Perdre le mandat n'est pas grave et
+  l'axiome du module le dit — la forge est la verite du travail, le broker n'en est que le front
+  RAM, et un re-dispatch le reconstruit. Un mandat qui n'expire jamais, lui, ne se repare pas tout
+  seul.
   """
   @spec from_map(map()) :: {:ok, t()} | {:error, :invalid}
   def from_map(map) when is_map(map), do: rich_from_map(map)
@@ -161,6 +173,9 @@ defmodule Fleet.TaskQueue.WorkItem do
          {:ok, brief_ref} <- cast_brief_ref(m["brief_ref"], :brief_ref),
          {:ok, brief_sha} <- cast_brief_sha(m["brief_sha"], :brief_sha),
          {:ok, result} <- cast_result(m["result"], :result),
+         {:ok, deadline} <- cast_optional_dt(m["deadline"]),
+         {:ok, assigned_at} <- cast_optional_dt(m["assigned_at"]),
+         {:ok, completed_at} <- cast_optional_dt(m["completed_at"]),
          {:ok, metadata} <- cast_map(m["metadata"] || %{}, :metadata) do
       {:ok,
        %__MODULE__{
@@ -171,10 +186,10 @@ defmodule Fleet.TaskQueue.WorkItem do
          brief: brief,
          brief_ref: brief_ref,
          brief_sha: brief_sha,
-         deadline: parse(m["deadline"]),
+         deadline: deadline,
          enqueued_at: eat,
-         assigned_at: parse(m["assigned_at"]),
-         completed_at: parse(m["completed_at"]),
+         assigned_at: assigned_at,
+         completed_at: completed_at,
          state: st,
          result: result,
          metadata: metadata
@@ -259,12 +274,18 @@ defmodule Fleet.TaskQueue.WorkItem do
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
-  defp parse(nil), do: nil
+  # ABSENT et ILLISIBLE sont deux faits, et un seul est une absence d'echeance. Le champ manquant
+  # rend `{:ok, nil}` — c'est la forme nominale d'un item sans echeance ; une chaine qu'on ne sait
+  # pas lire rend `:error`, qui remonte au `with` et invalide l'item entier.
+  defp cast_optional_dt(nil), do: {:ok, nil}
 
-  defp parse(s) when is_binary(s) do
+  defp cast_optional_dt(s) when is_binary(s) do
     case DateTime.from_iso8601(s) do
-      {:ok, dt, _} -> dt
-      _ -> nil
+      {:ok, dt, _} -> {:ok, dt}
+      _ -> :error
     end
   end
+
+  # Un type qu'on n'attendait pas (nombre, map, liste) n'est pas une absence non plus.
+  defp cast_optional_dt(_), do: :error
 end

@@ -124,14 +124,59 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
-  # CODE face: `fetch` (network, forge token) then `reset --hard` — the worktree is a read-only
-  # showcase (the pods work in their ephemeral clones) → `reset --hard` overwrites nothing useful,
-  # and guarantees convergence even if something had diverged.
+  # CODE face: `fetch` (network, forge token) then `reset --hard` — convergence dure vers l'origine.
+  #
+  # ⚠ « THE WORKTREE IS A READ-ONLY SHOWCASE » N'ETAIT GARANTI PAR RIEN. La racine de cette face est
+  # `Fleet.Layout.code_root/0` = **`/home/projects`** — le repertoire de travail par defaut de
+  # l'humain, pas un dossier de la flotte. Les pods travaillent bien dans leurs clones ephemeres,
+  # mais rien n'empeche un humain (ou un agent lance a la main) d'y avoir un fichier modifie non
+  # commite. `reset --hard` le detruit sans copie, sans message, sans recuperation possible.
+  #
+  # La soeur `align_writer/2`, vingt lignes plus bas, tient deja la posture : sur une divergence,
+  # elle ABANDONNE et propage fort — « that divergence is a human's call ». Meme regle ici : un
+  # arbre SALE n'est pas aligne, il est REFUSE, bruyamment et avec la sortie de `status` pour que
+  # l'humain voie ce qui l'a bloque.
+  #
+  # ⚠ POURQUOI PAS `--autostash` COMME LA SOEUR : sur une face que personne ne relit, une pile de
+  # stashes s'accumulerait en silence — on aurait echange une destruction visible contre une perte
+  # differee que personne ne va chercher. Le refus, lui, se voit au tick suivant et la vitrine
+  # reste simplement perimee : elle n'est load-bearing pour rien (les pods clonent depuis la forge).
   defp align_code(dir) do
-    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", Fleet.Layout.code_branch()], auth: true) do
+    with :ok <-
+           GitOps.run(["-C", dir, "fetch", "origin", Fleet.Layout.code_branch()], auth: true),
+         :ok <- refuse_if_dirty(dir) do
       GitOps.run(["-C", dir, "reset", "--hard", "origin/" <> Fleet.Layout.code_branch()],
         auth: false
       )
+    end
+  end
+
+  # `status --porcelain` rend une sortie VIDE sur un arbre propre : c'est le seul etat ou un
+  # `reset --hard` ne peut rien detruire. Une lecture qui echoue n'est pas un arbre propre — on
+  # refuse aussi, plutot que de reset sur une ignorance.
+  defp refuse_if_dirty(dir) do
+    case GitOps.read(["-C", dir, "status", "--porcelain"], auth: false) do
+      {:ok, ""} ->
+        :ok
+
+      {:ok, dirty} ->
+        Logger.error(
+          "WorktreeSync: #{dir} has UNCOMMITTED changes — alignment REFUSED (a `reset --hard` " <>
+            "would destroy them with no copy and no recovery). This face is rooted at the human's " <>
+            "working directory, so what is here may exist NOWHERE else. Commit, stash or discard, " <>
+            "then the next tick aligns. Showcase stays stale meanwhile — nothing depends on it " <>
+            "(pods clone from the forge).\n#{dirty}"
+        )
+
+        {:error, {:worktree_dirty, dir}}
+
+      {:error, reason} ->
+        Logger.error(
+          "WorktreeSync: #{dir} — could not read `git status` (#{inspect(reason)}); alignment " <>
+            "REFUSED rather than resetting on an unknown state"
+        )
+
+        {:error, {:status_unreadable, dir, reason}}
     end
   end
 

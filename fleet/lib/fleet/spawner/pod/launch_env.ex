@@ -150,16 +150,23 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
             )
           )
 
-        {:ok, human, env}
+        {:ok, human, claude_dir, env}
       rescue
         e -> {:error, {:launch_env_unresolved, Exception.message(e)}}
       end
 
     case launch_env do
-      {:ok, human, env} ->
-        with {:ok, env} <- maybe_put_auth_token(env, human),
-             {:ok, env} <- maybe_put_git_identity(env, human, role),
-             :ok <- Fleet.Credentials.Gate.validate(claude_dir_for(human)) do
+      # `claude_dir` TRAVELS, it is not re-resolved. The gate below used to call `claude_dir_for/1`
+      # a second time, and that cost more than a duplicate `getent`: (1) the two reads are
+      # INDEPENDENT, so a directory service answering differently between them validates one path
+      # and launches with another; (2) the second call sits OUTSIDE the `try/rescue` above, so its
+      # raise — `passwd_home/1` is fail-loud by design — killed the `gen_statem` with no
+      # `transition_failed`, leaving an orphaned `:pending` task and a state.json frozen at the
+      # stale phase. That is exactly the hole the `try` was written to close, reopened one line
+      # below its `end`.
+      {:ok, human, claude_dir, env} ->
+        with {:ok, env} <- maybe_put_git_identity(put_auth_mode(env), human, role),
+             :ok <- Fleet.Credentials.Gate.validate(claude_dir) do
           {:ok, env}
         else
           {:error, {:credentials_invalid, _} = reason} -> {:error, reason}
@@ -174,7 +181,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   defp runtime_user, do: Fleet.Credentials.Human.current!()
 
   defp claude_dir_for(human) do
-    Application.get_env(:fleet_spawner, :claude_dir) || claude_dir_from_passwd(human)
+    Application.get_env(:lcars_fleet, :spawner_claude_dir) || claude_dir_from_passwd(human)
   end
 
   defp claude_dir_from_passwd(human) do
@@ -199,9 +206,16 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  defp maybe_put_auth_token(env, _human) do
-    {:ok, Map.put(env, "LCARS_AUTH_MODE", "bind")}
-  end
+  # NO TOKEN IS PUT ANYWHERE, and the old name said otherwise. `maybe_put_auth_token/2` ignored its
+  # `human` argument, wrapped a single unconditional `Map.put` in `{:ok, _}`, and sat in a `with`
+  # chain — a shape that announces a failure it cannot have. A reader auditing how a pod receives
+  # its credentials followed that name and found nothing, because the answer is elsewhere: the
+  # authentication is the BIND of the human's `.claude` directory (`CLAUDE_DIR` above), and `bind`
+  # is the single value naming it — `bwrap_launch.sh` refuses any other.
+  #
+  # Total, unconditional, single-valued: a plain map transform, called inline. The `with` keeps
+  # exactly the steps that can actually fail.
+  defp put_auth_mode(env), do: Map.put(env, "LCARS_AUTH_MODE", "bind")
 
   defp maybe_put_vendor_bin(env, human) do
     case claude_bin_in_home(human) do

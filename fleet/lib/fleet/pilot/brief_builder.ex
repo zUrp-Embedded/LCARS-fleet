@@ -62,32 +62,52 @@ defmodule Fleet.Pilot.BriefBuilder do
   defp conflict_section(opts) do
     case Keyword.get(opts, :conflict, false) do
       false -> ""
-      :exception -> exception_conflict_section()
-      _producer -> producer_conflict_section()
+      :exception -> exception_conflict_section(Keyword.fetch!(opts, :base_branch))
+      _producer -> producer_conflict_section(Keyword.fetch!(opts, :base_branch))
     end
   end
 
-  defp producer_conflict_section do
+  # ⚠ `main` ETAIT ECRIT EN DUR DANS UNE PROCEDURE DONNEE A UN AGENT. La plomberie, elle, connaît la
+  # vraie base depuis toujours (`:pr_base_branch`, pose par `dispatch_review` depuis `pr.base.ref`, et
+  # c'est deja elle qui choisit le worktree de resolution). Sur une PR qui ne vise pas la face code,
+  # le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un `fetch main`, il
+  # composait son livrable contre la mauvaise face.
+  #
+  # `fetch!` et non `get` : ce chemin n'existe que sous `dispatch_review`, qui pose toujours la base.
+  # Une absence serait un bypass, et un brief qui invente une branche coute plus cher qu'un refus.
+  #
+  # ⚠ ET LE NOM CORRIGE NE SUFFISAIT PAS (6-135). La procedure disait `git merge origin/<base>`, avec
+  # la BONNE base — mais `RoleDispatch` pose `base_branch: head` pour tout pod de review, donc son
+  # clone est `--branch <head> --single-branch` et `origin/<base>` n'y est PAS. La commande restait
+  # inexecutable ; seule la raison avait change. Elle vise desormais `lcars/base`, le ref que le
+  # bootstrap rapatrie sur la base REELLE de la PR — et son garde-fou dit maintenant l'ABSENCE
+  # (l'etat possible) et non la peremption (celui qu'on avait suppose).
+  #
+  # La prose garde le NOM de la face : c'est ce qui dit au producteur contre quoi il compose, et
+  # c'est aussi ce qui distingue une base qui suit la PR d'un ref renomme.
+  defp producer_conflict_section(base) do
     """
     ## Conflit de merge à résoudre (prioritaire)
 
-    Ta branche a divergé de `main` : des briques sœurs ont été mergées depuis ta coupe, et le
+    Ta branche a divergé de `#{base}` : des briques sœurs ont été mergées depuis ta coupe, et le
     merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
     déjà approuvé par les juges, seul le conflit bloque.
 
-    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
+       est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est
+       mono-branche, `origin/#{base}` n'y est pas.)
     2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
        des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
-    Si `origin/main` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
-    peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
-    JAMAIS le contenu d'une brique sœur.
+    Si `lcars/base` est absent, ou s'il ne contient PAS les briques sœurs (tu n'as pas le réseau
+    pour le rafraîchir), rends `blocked` en le disant : n'invente JAMAIS le contenu d'une brique
+    sœur, et ne bricole pas une autre base.
 
     """
   end
 
-  defp exception_conflict_section do
+  defp exception_conflict_section(base) do
     """
     ## Passe d'exception : conflit de merge non résolu par le producteur
 
@@ -95,17 +115,19 @@ defmodule Fleet.Pilot.BriefBuilder do
     budget de rework sur ce conflit ; tu interviens en dernière passe avant escalade humaine.
 
     Le contenu des deux côtés est déjà APPROUVÉ : les juges ont validé la branche, et les briques
-    sœurs sont mergées sur `main`. Il n'y a donc rien à arbitrer sur le fond — la seule question
+    sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le fond — la seule question
     est de composer les deux intentions sans en sacrifier une.
 
-    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
+       est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est
+       mono-branche, `origin/#{base}` n'y est pas.)
     2. Résous en PRÉSERVANT les deux apports. Tu n'as pas écrit ce code : tu ne connais pas les
        raisons derrière chaque ligne, donc tu ne choisis pas un camp — tu composes.
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
     Rends `blocked` en disant pourquoi dès que la composition demande une DÉCISION que le code ne
-    porte pas (deux intentions réellement incompatibles, ou un `origin/main` périmé que tu ne peux
-    pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
+    porte pas (deux intentions réellement incompatibles, ou un `lcars/base` absent ou périmé que tu
+    ne peux pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
     humaine existe pour ça, et une résolution devinée coûte plus cher qu'un refus motivé.
 
     """
@@ -358,24 +380,44 @@ defmodule Fleet.Pilot.BriefBuilder do
   # — coverage of the brief, hollow assertions, oracles that assert nothing. Naming the boundary in
   # the brief itself is what keeps a green CI from being read as a green review.
   #
+  # ⚠ ET LA PHRASE ELLE-MEME FRANCHISSAIT LA FRONTIERE QUE CE PARAGRAPHE POSE : elle disait « le
+  # rail machine a EXECUTE **la preuve** ». Le rail livre avec le template de projet execute deux
+  # `echo` — ni build, ni test, ni assertion, et il le dit dans son propre en-tete. Sur tout projet
+  # fraichement onboarde, le juge recevait donc « une preuve a ete executee » alors qu'aucune ne
+  # l'avait ete, et la seule chose que `success` etablit est qu'un runner a repondu vert (6-140).
+  #
+  # LES CONTEXTES SONT LA REPONSE HONNETE. Rien ne declare le harnais attendu d'un projet — le
+  # template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est — donc on ne peut
+  # pas verifier qu'il a tourne. On peut nommer ce qui A tourne, et laisser le juge conclure : un
+  # `CI / no-harness-yet` n'est plus indistinguable d'une suite.
+  #
   # Absent key = the card does not require the CI (`spec.ci: ignore`): we add NOTHING rather than
   # writing "CI: unknown", which a judge would rightly read as a fact about the code.
   defp with_ci(outputs, opts) do
     case Keyword.get(opts, :ci_fact) do
-      %{state: :success, sha: sha} when is_binary(sha) ->
-        Map.put(
-          outputs,
-          "ci",
-          "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a EXECUTE la preuve et elle " <>
-            "passe. Ce fait t'est FOURNI : ne le re-derive pas, ne le re-execute pas. Ton travail " <>
-            "commence apres lui — est-ce que cette preuve PROUVE ? (couverture du critere, " <>
-            "assertions creuses, oracles qui n'assertent rien, faux-verts.)"
-        )
+      %{state: :success, sha: sha} = fact when is_binary(sha) ->
+        Map.put(outputs, "ci", ci_line(sha, Map.get(fact, :contexts, [])))
 
       _ ->
         outputs
     end
   end
+
+  defp ci_line(sha, contexts) do
+    "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a rendu VERT. Ce fait t'est " <>
+      "FOURNI : ne le re-derive pas, ne le re-execute pas. #{ran_line(contexts)} " <>
+      "⚠ VERT ne veut pas dire PROUVE : il dit qu'un runner a repondu, pas que ce qu'il a " <>
+      "execute couvre le critere du brief. Ton travail commence exactement la — couverture du " <>
+      "critere, assertions creuses, oracles qui n'assertent rien, faux-verts. Et si ce qui a " <>
+      "tourne ne prouve rien du livrable, cette absence EST une constatation a rendre."
+  end
+
+  # On ne fabrique pas une liste : si le seam n'a pas su la donner, on le DIT plutot que d'ecrire
+  # une phrase qui laisserait croire a une verification qu'on n'a pas faite.
+  defp ran_line([]), do: "(les contextes executes n'ont pas pu etre lus.)"
+
+  defp ran_line(contexts),
+    do: "Ce qui a tourne, exactement : #{Enum.map_join(contexts, ", ", &"`#{&1}`")}."
 
   # F-C083 — READ-ERROR ≠ ABSENCE, applied to the PREDECESSOR read. The rule is stated 35 lines
   # below for the CRITERION read and was NOT applied here: a bare `_ -> nil` collapsed the seam's
@@ -401,13 +443,22 @@ defmodule Fleet.Pilot.BriefBuilder do
   # clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its workspace instead
   # of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges emptiness
   # → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
+  # ⚠ CINQUIEME PORTEUR DE LA MEME INSTRUCTION, et le seul qui vive dans `lib/` — les quatre autres
+  # sont le bloc SP et ses copies. Elle nommait `origin/main`, qui N'EST PAS dans le workspace d'un
+  # juge : `RoleDispatch` pose `base_branch: head`, donc le clone est `--branch <head>
+  # --single-branch`. Les deux commandes prescrites echouaient sur une revision inconnue (6-135).
+  # `refs/lcars/base` est pose par le bootstrap sur la base REELLE, et il est le meme nom pour tous
+  # les pods — c'est la condition pour qu'une instruction puisse le nommer sans dire « selon les cas ».
   defp git_native_outputs do
     %{
       "livrable" =>
         "git-native — le code à juger est checkout dans TON workspace. Le clone est mono-branche : " <>
-          "la base est `origin/main` (le ref local `main` N'EXISTE PAS). Le diff de la PR = " <>
-          "`git diff origin/main...HEAD` (trois points — point de divergence auto). `git log origin/main..HEAD` " <>
-          "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
+          "ni `main` ni la branche de base ne sont là sous leur nom. Ta base est le ref `lcars/base`, " <>
+          "posé par le runtime sur la base RÉELLE de ce travail. Le diff de la PR = " <>
+          "`git diff lcars/base...HEAD` (trois points — point de divergence auto). `git log lcars/base..HEAD` " <>
+          "pour les commits, `git show <sha>` pour le détail. Si `lcars/base` est absent, ne bricole PAS " <>
+          "une comparaison de remplacement : dis que la base n'est pas matérialisée et arrête-toi. " <>
+          "Juge ces changements contre le critère ci-dessous."
     }
   end
 

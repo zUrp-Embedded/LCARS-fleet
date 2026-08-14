@@ -48,13 +48,28 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   ]
 
   # Mute connections eventually release shared Task capacity (D-07 config namespace).
-  @idle_timeout_ms Application.compile_env(:fleet_mcp, :socket_idle_timeout_ms, 300_000)
+  #
+  # ⚠ FIGE A LA COMPILATION, ET C'EST LE SEUL ENDROIT QUI LE DIT. `compile_env` grave la valeur dans
+  # le module : un `Application.put_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, …)` a l'execution
+  # est IGNORE, en silence. Tout le reste de ce sous-systeme lit par `get_env` (15 occurrences dans
+  # `lib/fleet/mcp/`), donc ces deux plafonds RESSEMBLENT a des molettes et n'en sont pas.
+  #
+  # L'ecart est defendu, pas subi : `compile_env` est ce qui autorise l'usage en ATTRIBUT DE MODULE
+  # (une garde de fonction ne peut pas appeler `get_env`), et une release refuse de demarrer si la
+  # config de boot diverge de celle de la compilation — une protection qu'un `get_env` n'a pas. Les
+  # basculer en `get_env` echangerait ces deux proprietes contre une molette que personne n'a
+  # demandee : MESURE, aucune de ces deux cles n'apparait dans `config/`, `bin/`, `deploy/` ni
+  # `test/`, et aucune variable d'environnement ne les expose.
+  @idle_timeout_ms Application.compile_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, 300_000)
 
   # Connection service is isolated from the accept loop.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
   # Per-pod ceiling protects the fleet-wide connection pool.
-  @max_conns_per_pod Application.compile_env(:fleet_mcp, :max_conns_per_pod, 8)
+  # Meme nature figee que `@idle_timeout_ms` ci-dessus, et pour les memes raisons — ces deux-la sont
+  # les SEULS `compile_env` de tout `lib/`, ce qui rend leur exception d'autant plus facile a lire
+  # comme un oubli si personne ne l'ecrit.
+  @max_conns_per_pod Application.compile_env(:lcars_fleet, :mcp_max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -252,18 +267,34 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
-        encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})
+        encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id, tools)})
 
       # F-C138 — the pod socket serves `tools/list` (a bridge-side hard-coded catalogue would
-      # DRIFT from the deftools). Single
-      # source: the schemas come from `PodTools.get_tools/0` (the `deftool` authority), filtered to this
-      # pod's surface = base (universal) + the role-gated names threaded at spawn (derived from the
-      # cap-profile `allowedTools`). This list is DISCOVERY, NOT authorization: `tools/call` (above) does
-      # NOT re-check it, so a pod that knows an off-list tool name can still call it. The real barrier is
-      # AT the tool — delegation tools carry a server-side gate (`require_architect`/`require_onboarder`,
-      # `Delegation`), `get_work_item`/`submit_result` are scoped to the pod's OWN work item (pod_id from
-      # the channel, never a wire arg). INVARIANT: every tool MUST be gated or pod-scoped; one relying on
-      # this list alone would be callable off-list. The bridge forwards blindly.
+      # DRIFT from the deftools). Single source: the schemas come from `PodTools.get_tools/0` (the
+      # `deftool` authority), filtered to base (universal) plus whatever names were threaded at
+      # spawn.
+      #
+      # DISCOVERY *AND* AUTHORIZATION SINCE 6-099, and the same list serves both: `call_tool/3`
+      # refuses anything outside `base_tool_names() ++ threaded` before dispatch. This paragraph
+      # used to read "DISCOVERY, NOT AUTHORIZATION: `tools/call` does not re-check this list, so a
+      # pod that knows an off-list name calls it anyway" — exact, and it described the hole rather
+      # than closing it.
+      #
+      # The per-tool barrier stays FIRST and untouched: the delegation tools carry a server-side
+      # role gate (`require_architect`/`require_onboarder`, `Delegation`) and
+      # `get_work_item`/`submit_result` derive their subject from the channel's pod_id, never from a
+      # wire argument. INVARIANT, held by `mcp.tools_gated` in `lcars.contracts.check`: every tool is
+      # role-gated or pod-scoped. The list is now a SECOND barrier, not a replacement — it buys what
+      # the role gate cannot express, namely two variants of one role with different surfaces.
+      # The bridge still forwards blindly; the refusal happens here.
+      #
+      # ⚠ AND THE THREADED HALF IS EMPTY IN EVERY PROFILE SHIPPED. The names come from
+      # `CapProfile.mcp_fleet_tools/1`, i.e. the `scope.allowedTools` entries prefixed
+      # `mcp__fleet__` — and not one canon cap-profile declares a single one, so every pod of every
+      # role is served exactly the two base tools while its SP names a dozen others by their full
+      # `mcp__fleet__…` name. Discovery and instruction disagree by design-in-fact: the agents work
+      # from the prompt, and this list is a filter over a knob nobody fills. Read it as the surface
+      # a profile MAY narrow to, never as the surface a role HAS.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
@@ -296,10 +327,52 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Slow-call trace uses channel-owned identity, never a wire argument.
   @slow_tool_warn_ms 5_000
 
-  defp call_tool(params, pod_id) do
+  # THE LIST NOW AUTHORIZES, IT NO LONGER ONLY DISPLAYS (6-099). `tools/list` filtered the surface
+  # while `tools/call` dispatched anything: a pod that knew an off-list name called it, and the only
+  # real barrier was the per-tool role gate. Two consequences, and the second is the one that had no
+  # workaround: an omission in a profile hid a tool from discovery without preventing its use, and
+  # two variants of the SAME role could not be given different MCP surfaces at all.
+  #
+  # ⚠ CE N'EST PAS UN RENVERSEMENT DE LA SEMANTIQUE GRAVEE de `scope.allowedTools`. Celle-ci
+  # ("allowedTools is an INTENT, disallowedTools is a WALL") est MESUREE sur le CLI vendor, qui est
+  # l'autre consommateur du meme champ et dont on ne controle pas le comportement. Ici on parle du
+  # sous-ensemble `mcp__fleet__` servi par CETTE socket, qui est notre code : un champ, deux
+  # consommateurs, et c'est dit aux deux bouts plutot que laisse a deviner.
+  #
+  # MESURE AVANT D'ARMER (le mur se prouve sur ce qu'il doit LAISSER PASSER) : les 8 roles worker
+  # ne nomment dans leur SP que les deux outils de base ; `architect` et `starfleet` declarent
+  # chacun un SUR-ENSEMBLE STRICT de ce que leur SP nomme. Aucun role ne perd un outil qu'il
+  # utilise. Les gates de role (`require_architect`/`require_onboarder`) restent DEVANT, intacts :
+  # ce contrôle s'ajoute, il ne remplace rien.
+  defp call_tool(params, pod_id, threaded) do
     tool = params["name"]
     tool_args = params["arguments"] || %{}
 
+    if authorized?(tool, threaded) do
+      dispatch_tool(tool, tool_args, pod_id)
+    else
+      Logger.warning(
+        "PodSocketAcceptor: pod=#{pod_id} tools/call #{inspect(tool)} REFUSED — outside this " <>
+          "pod's declared MCP surface (base + scope.allowedTools)"
+      )
+
+      # Compte comme activite : un pod qui se fait refuser a AGI. Ne pas le compter ferait passer
+      # pour mort un pod qui frappe a une porte fermee.
+      mark_activity(pod_id)
+
+      %{
+        "content" => [%{"type" => "text", "text" => error_text({:tool_not_in_profile, tool})}],
+        "isError" => true
+      }
+    end
+  end
+
+  defp authorized?(tool, threaded) when is_binary(tool),
+    do: tool in PodTools.base_tool_names() or tool in threaded
+
+  defp authorized?(_tool, _threaded), do: false
+
+  defp dispatch_tool(tool, tool_args, pod_id) do
     {us, resp} =
       :timer.tc(fn -> safe_handle_tool_call(tool, tool_args, pod_id) end)
 
@@ -345,18 +418,27 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.
-  # ⚠ MOTS NUS dans un sigil : cette liste ne ressemble a aucune autre occurrence d'un nom d'outil
-  # (ni chaine citee, ni `mcp__fleet__`, ni prose). Le renommage objet-d'abord du 2026-08-11 l'a
-  # donc manquee, et le gate l'a dit — le dedup single-flight cessait de reconnaitre les mutations.
-  # Une liste de noms d'outils qui ne s'ecrit pas comme les autres est une liste qu'un renommage
-  # rate en silence.
-  @mutation_tools ~w(issue_create project_create project_install project_delete issue_comment)
+  #
+  # ⚠ CE SITE PORTAIT UNE LISTE DE CINQ MOTS NUS DANS UN SIGIL, pour ~17 mutateurs (6-106). Elle ne
+  # ressemblait a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
+  # prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE. Une liste qui ne
+  # s'ecrit pas comme les autres est une liste qu'un renommage rate — et elle vivait LOIN des
+  # definitions qu'elle pretendait couvrir, ce qui est l'autre moitie du probleme.
+  #
+  # L'effet vit desormais A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate.
+  # Ici on ne fait plus que LIRE une decision prise la-bas.
+  #
+  # `:unknown` (un outil que `PodTools` ne declare pas) est traite comme une MUTATION : c'est la
+  # direction sure — un mutateur non declare est protege en attendant que le gate le dise, plutot
+  # que dispatche nu. Le cout d'une erreur dans ce sens est une latence sur des appels concurrents
+  # identiques ; dans l'autre, c'est un effet forge duplique.
+  @single_flight_effects [:mutation, :unknown]
 
   # SOC-RES-001: tool crashes become MCP error results instead of dropped connections.
   defp safe_handle_tool_call(tool, tool_args, pod_id) do
     handle = fn -> tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end
 
-    if tool in @mutation_tools do
+    if Fleet.MCP.PodTools.tool_effect(tool) in @single_flight_effects do
       key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
       Fleet.MCP.Idempotency.run(key, handle, succeeded?: &match?({:ok, _, _}, &1))
     else
@@ -369,7 +451,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # Injectable seam exercises the SOC-RES-001 crash boundary.
-  defp tool_handler, do: Application.get_env(:fleet_mcp, :tool_handler, PodTools)
+  defp tool_handler, do: Application.get_env(:lcars_fleet, :mcp_tool_handler, PodTools)
 
   defp error_text(reason), do: inspect(reason)
 
@@ -397,12 +479,66 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # So the errno alone cannot name the fault: carry the first component that does NOT exist plus
   # the writability of its parent. That pair separates the two cases the bare errno merges — a
   # level nobody created, versus a level we are not allowed to create under.
+  # LE REPERTOIRE EST LA SERRURE QUE LA SOCKET N'A PAS ENCORE. `:gen_tcp.listen` cree le noeud
+  # AF_UNIX au UMASK du processus et `restrict/2` le referme ensuite : entre les deux, le noeud
+  # existe avec les droits de l'umask. Sous l'umask MESURE de cette flotte (`0002`) cela fait
+  # `0775` — le bit d'ecriture groupe, donc `connect(2)` autorise — et une connexion etablie dans
+  # cette fenetre RESTE ouverte apres le chmod : les droits d'une socket Unix ne sont verifies qu'a
+  # la connexion. L'auteur tient alors le canal d'outils du pod sans etre ce pod.
+  #
+  # ⚠ La fenetre ne se ferme pas la ou on la voit. Le BEAM ne sait pas creer un noeud AF_UNIX avec
+  # un mode ; il n'y a pas de `listen` atomique en `0600`. Ce qui se ferme, c'est la TRAVERSEE : un
+  # parent en `0700` rend `<base>/<pod_id>/sock` inatteignable pour tout autre compte, quel que soit
+  # le mode transitoire du noeud. Le `0600` final reste la seconde serrure, pas la premiere.
+  #
+  # LE JUMEAU EXISTE ET IL EST ATOMIQUE : `bin/bwrap_launch.sh` cree le sock-dir TMUX par
+  # `install -d -m 0700`. Le meme launcher documente la divergence — « UNLIKE tmux: the socket file
+  # (and its dir) is created OUTSIDE the sandbox by the BEAM BEFORE this launch … no `install -d` »
+  # — sans voir que ce cote-ci n'a jamais pose de mode du tout. C'est le mode du jumeau qui arrive
+  # ici, pas une regle nouvelle.
+  #
+  # `mkdir_p` + `chmod` n'est pas atomique non plus, mais son residu ne porte plus l'effet de la
+  # fiche : dans cette fenetre-la, la socket n'existe pas encore. Ce qui reste est VERIFIE plutot
+  # que suppose — on relit le mode avant de servir, et un repertoire qu'on n'a pas pu fermer ne
+  # devient pas une porte ouverte : il devient un refus de demarrage.
   defp ensure_parent_dir(path) do
     dir = Path.dirname(path)
 
+    with :ok <- mkdir_private(dir),
+         :ok <- close_dir(dir) do
+      verify_private(dir)
+    end
+  end
+
+  defp mkdir_private(dir) do
     case File.mkdir_p(dir) do
       :ok -> :ok
       {:error, reason} -> {:error, {:mkdir, reason, blame(dir)}}
+    end
+  end
+
+  # Fail-closed, comme `restrict/2` sur la socket : un `chmod` refuse signifie que le repertoire ne
+  # nous appartient pas, et c'est deja la reponse.
+  defp close_dir(dir) do
+    case File.chmod(dir, 0o700) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:chmod_dir, reason, blame(dir)}}
+    end
+  end
+
+  # On RELIT ce qu'on vient de poser. Un repertoire pre-existant appartenant a un autre compte fait
+  # echouer le `chmod` au-dessus ; celui-ci attrape ce que le premier ne voit pas — un mode qui n'est
+  # pas celui demande, quelle qu'en soit la cause.
+  defp verify_private(dir) do
+    case File.stat(dir) do
+      {:ok, %File.Stat{mode: mode}} ->
+        case Bitwise.band(mode, 0o777) do
+          0o700 -> :ok
+          other -> {:error, {:dir_not_private, other, blame(dir)}}
+        end
+
+      {:error, reason} ->
+        {:error, {:stat_dir, reason, blame(dir)}}
     end
   end
 

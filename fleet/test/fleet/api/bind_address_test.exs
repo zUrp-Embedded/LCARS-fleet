@@ -14,13 +14,13 @@ defmodule Fleet.API.BindAddressTest do
   # `listener_children/0` reads `:start_listener` (false in :test) → force it for
   # the duration of the test to materialize the real child-spec, then restore.
   setup do
-    prev = Application.get_env(:fleet_api, :start_listener)
-    Application.put_env(:fleet_api, :start_listener, true)
+    prev = Application.get_env(:lcars_fleet, :api_start_listener)
+    Application.put_env(:lcars_fleet, :api_start_listener, true)
 
     on_exit(fn ->
       case prev do
-        nil -> Application.delete_env(:fleet_api, :start_listener)
-        v -> Application.put_env(:fleet_api, :start_listener, v)
+        nil -> Application.delete_env(:lcars_fleet, :api_start_listener)
+        v -> Application.put_env(:lcars_fleet, :api_start_listener, v)
       end
 
       System.delete_env("LCARS_BIND_HOST")

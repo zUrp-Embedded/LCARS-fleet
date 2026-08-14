@@ -341,7 +341,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         loader: StubLoader,
         spawner: StubSpawner,
         task_queue: StubTaskQueue,
-        # Hermetic root for `Roles.project_jury` (never created): no intensity.json →
+        # Hermetic root for `Roles.project_jury` (never created): no .lcars.json →
         # the delegation default card, regardless of the REAL filesystem's state.
         code_root: Path.join(System.tmp_dir!(), "lcars-void-projects"),
         # default stub resolver: no project (ordering tests clone nothing).
@@ -917,6 +917,38 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
+    test "6-125: a DECLARED card the catalogue no longer serves → no route posted, and a DURABLE incident" do
+      # Le cas qui survit au refus d'onboarding (`Intensity.refute_unloadable_card/2`) : la carte
+      # etait chargeable a la declaration, le catalogue l'a perdue depuis. Ce site ne se rabat PAS
+      # — poser une route est durable, et une route sous une carte que personne n'a choisie fait
+      # tourner le projet sous une criticite que personne n'a declaree. Il refuse, mais son refus
+      # cesse d'etre muet : sans trace, l'issue echouait a chaque tick, indefiniment.
+      payload = eng_issue()
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: :none],
+          workflow_map_loader: fn _name ->
+            raise File.Error, reason: :enoent, action: "read file", path: "gone.yaml"
+          end,
+          incident_fun: fn op, subject, reason, o ->
+            send(self(), {:incident, op, subject, reason, o[:reason_detail]})
+            :recorded
+          end
+        )
+
+      assert {:error, {:onboard, {:error, {:workflow_map_load_failed, name, _}}}} =
+               StepDispatcher.dispatch_issue(payload, opts)
+
+      refute_received {:routed, _, _, _}
+      refute_received {:spawned, _, _}
+
+      assert_received {:incident, "card", _repo, :declared_card_unloadable, detail}
+      # Le NOM EFFECTIF est dans la trace : un incident qui ne dit pas quelle carte manque envoie
+      # l'operateur chercher dans tout le catalogue.
+      assert detail =~ name
+    end
+
     test "route read failure → {:error, {:route_resolution, _}}, NO lock nor spawn" do
       payload = eng_issue()
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
@@ -1110,10 +1142,15 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # Info-starvation fix (judge): empty predecessor (git-native) → the judge is POINTED at its
       # workspace AND receives the CRITERION (issue body, defused in context).
-      # The diff base is `origin/main` (single-branch clone: the local ref `main` does not exist —
-      # live morse bug: `git diff main..HEAD` → fatal unknown revision → intermittent
-      # halt_wait_input).
-      assert spawn_opts[:brief] =~ "git diff origin/main...HEAD"
+      #
+      # ⚠ CETTE ASSERTION EPINGLAIT `origin/main`, et son commentaire donnait la bonne moitie du
+      # raisonnement : « single-branch clone: the local ref `main` does not exist — live morse bug ».
+      # Il s'arretait un cran trop tot. Sur une review, `RoleDispatch` pose `base_branch: head`,
+      # donc le clone est `--branch <head>` et **`origin/main` n'y est pas non plus** ; la meme
+      # revision inconnue revenait par l'autre porte (6-135). La base est desormais `lcars/base`,
+      # posee par le bootstrap sur la base REELLE du travail, la meme pour tous les pods.
+      assert spawn_opts[:brief] =~ "git diff lcars/base...HEAD"
+      refute spawn_opts[:brief] =~ "origin/main"
       assert spawn_opts[:brief] =~ "implémente le décodeur morse"
 
       # enqueue targets the pr-... pod_id; issue_id = the issue
@@ -1223,6 +1260,49 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert log =~ "issue #42 unlock attempt 1/3 FAILED"
       # The old blanket lie must NOT appear on the failure path.
       refute log =~ "eng killed, issue lock released"
+    end
+
+    # JG-063 — « warden/manual cleanup » DESIGNAIT UN RAIL QUI N'EXISTE PAS. Verifie : les deux
+    # `warden` du depot portent sur les PODS, aucun ne retire d'etiquette de forge ; et le poller ne
+    # lit que `list_open_issues/2`, donc cette issue FERMEE n'est plus jamais vue. La phrase
+    # promettait un rattrapage automatique imaginaire, et « manual » suppose qu'un humain lise ce
+    # log — ce que la doctrine D1 refuse pour tout ce qui est load-bearing.
+    #
+    # Le residu n'est pas benin : l'etiquette suggere un travail en cours qui n'existe pas, et le
+    # chronometre fausse definitivement les metriques de duree de ce ticket.
+    test "JG-063: un verrou residuel ouvre un INCIDENT durable, et le log ne promet plus de rail" do
+      test = self()
+
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          escalate_fun: fn kind, subject, cause, sig, _o ->
+            send(test, {:escalated, kind, subject, cause, sig})
+            {:ok, 1}
+          end,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_remove_label: {:error, :forge_down}
+          ]
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
+        end)
+
+      assert_received {:escalated, :issue_lock_residual, _subject, {:unlock_failed, _}, _sig},
+                      "le verrou residuel n'a laisse qu'un log : rien de durable ne le dit"
+
+      refute log =~ "warden/manual cleanup",
+             "le log promet toujours un rail de rattrapage qui n'existe pas"
+
+      assert log =~ "the cleanup is MANUAL: no rail reclaims it"
     end
 
     test "F-C061: a NON-jury login (human) among the reviewers is filtered (does not starve the jury) + LOUD" do
@@ -1629,8 +1709,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # la face ops vers `projects_root` laissait les 2451 tests verts (mesure 2026-08-08). Une
       # cicatrice ecrite en commentaire et non gardee se fait retirer par le prochain refactor, qui
       # lit un `case` a trois branches identiques a deux details pres et « simplifie ».
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, DirCapturingProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, DirCapturingProbe)
 
       name = Fleet.Layout.project_name("lordzurp/lcars-test")
 
@@ -1649,8 +1729,8 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "tier-0 : un conflit TOUT-SEMANTIQUE saute le producteur, et sans chief il atteint l'arch" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllSemanticProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllSemanticProbe)
 
       # Le gain de tier-0 RACCOURCIT un chemin, il n'en casse aucun : un conflit dont rien n'est
       # trivial ne deviendra pas resoluble en y envoyant un producteur trois fois.
@@ -1668,9 +1748,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "tier-0 : un conflit TOUT-ECRIVABLE est resolu par le runtime, sans pod" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, true)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
 
       # C'est ICI que la seam `:conflict_applier` gagne sa vie : sans injection, ce chemin exige un
       # vrai worktree git et ne serait jamais exerce.
@@ -1688,9 +1768,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     test "flag OFF : le diagnoser n'est meme pas consulte (le defaut reste le chemin legacy)" do
       # `conflict_diagnosis?` est false par defaut ; ce test epingle que le defaut ne traverse pas
       # tier-0 — sinon les trois tests ci-dessus prouveraient un chemin que la prod n'emprunte pas.
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnosis?, false)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_diagnoser, AllWritableProbe)
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :conflict_applier, ResolvingApplier)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, false)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
 
       refute match?(
                {:ok, {:auto_resolved, 6}},

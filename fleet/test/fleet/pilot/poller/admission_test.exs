@@ -161,7 +161,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       dir = Path.join(root, "p")
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf!(root) end)
-      File.write!(Path.join(dir, "intensity.json"), body)
+      File.write!(Path.join(dir, ".lcars.json"), body)
       root
     end
 
@@ -177,7 +177,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
         })
 
     test "a declared value wins over the fleet flag" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 7)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 7)
       assert Admission.max_fan("fleet/p", code_root: root_with(decl(2))) == 2
     end
 
@@ -190,7 +190,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
     end
 
     test "no project directory at all → the fleet default, quietly (legacy projects are normal)" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 4)
       assert Admission.max_fan("fleet/nowhere", code_root: root_with(decl(2))) == 4
     end
 
@@ -198,12 +198,12 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       # `pipeline_default/2` alarms on a broken file because substituting a CARD changes the
       # judgment layer. Here the fallback changes a RATE, and a second alarm for the same file
       # would teach a reader that it means something new.
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 4)
       assert Admission.max_fan("fleet/p", code_root: root_with("{ not json")) == 4
     end
 
     test "a non-integer max_fan is refused rather than coerced" do
-      Fleet.TestEnv.put_env_restoring(:fleet_pilot, :max_fan, 4)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 4)
       body = decl(3) |> Jason.decode!() |> Map.put("max_fan", "beaucoup") |> Jason.encode!()
       assert Admission.max_fan("fleet/p", code_root: root_with(body)) == 4
     end

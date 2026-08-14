@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-project intensity.json template — copy to <project_root>/intensity.json and adapt. Schema: ../../schema/intensity-v1.json. THE LEVEL IS THE HUMAN'S DECLARATION: elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
+  "_comment": "Per-project .lcars.json template — copy to <project_root>/.lcars.json and adapt. Schema: ../../schema/intensity-v1.json. THE LEVEL IS THE HUMAN'S DECLARATION: elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
   "_schema": "lcars/intensity-v1",
   "level": "C0",
   "declared_at": "2026-07-18",

@@ -185,7 +185,26 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
     if function_exported?(spawner, :notify_pod, 2) do
-      _ = spawner.notify_pod(pod_id, message)
+      # ⚠ CETTE BRANCHE JETAIT LE RESULTAT, et le `@doc` juste au-dessus annonce « Failures are
+      # logged » — ce qui etait vrai de l'AUTRE branche seulement. C'est le chemin d'escalade
+      # TERMINALE : le moment ou un step_run a echoue definitivement et ou l'architecte du projet
+      # doit etre prevenu. Pod absent du registre -> message perdu, et rien ne le disait.
+      #
+      # `error` et non `warning` : `notify_pod/2` ne connait pas l'enjeu de son message et le
+      # signale au niveau du fait ; ICI on sait que ce qui vient d'etre perdu est le dernier
+      # avertissement d'un ticket mort. Doctrine des niveaux : perte reelle = `error`.
+      case spawner.notify_pod(pod_id, message) do
+        {:error, reason} ->
+          Logger.error(
+            "TerminalEscalation: architecte #{pod_id} (#{repo}) INJOIGNABLE (#{inspect(reason)}) " <>
+              "— le verdict terminal n'a PAS ete remis et rien ne le rejoue ; l'incident reste " <>
+              "dans le registre et l'issue forge, la notification est perdue"
+          )
+
+        _ ->
+          :ok
+      end
+
       :ok
     else
       case spawner.wake_pod(pod_id) do

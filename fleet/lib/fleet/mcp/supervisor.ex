@@ -45,7 +45,7 @@ defmodule Fleet.MCP.Supervisor do
 
   # Tests disable the runtime reaper and drive its seams explicitly.
   defp socket_warden_child do
-    if Application.get_env(:fleet_mcp, :start_socket_warden, true) do
+    if Application.get_env(:lcars_fleet, :mcp_start_socket_warden, true) do
       [Fleet.MCP.SocketWarden]
     else
       []

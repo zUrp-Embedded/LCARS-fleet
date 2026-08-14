@@ -18,21 +18,38 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   ## Configuration
 
-    * `:fleet_event_router, :webhook_secret_path` — secret path
+    * `:lcars_fleet, :event_router_webhook_secret_path` — secret path
       (default `/etc/fleet/webhook-secret`)
-    * `:fleet_event_router, :webhook_port` — HTTP port (default 8081)
+    * `:lcars_fleet, :event_router_webhook_port` — HTTP port (default 8081)
   """
 
   use Plug.Router
 
   require Logger
 
+  # ONE bound, ONE source. The read below and `Plug.Parsers` must agree on the cap or the two would
+  # disagree about what "too large" means — and the one that reads FIRST is the one that decides.
+  @max_body 1_048_576
+
   plug(:match)
+
+  # AUTHENTICATE BEFORE PARSING, and that means reading the body here rather than merely moving the
+  # check. The HMAC covers the RAW body, and that raw body used to be captured BY `Plug.Parsers`
+  # (its `body_reader:`) — so `verify_hmac/1` could not run any earlier than the handler without
+  # `raw_body` being nil, which would have made `secure_compare` false on every request, legitimate
+  # ones included. The fix is not to move the check up; it is to move the READ up and let the parser
+  # consume what this plug already holds.
+  #
+  # What it buys: a request with a bad signature is refused after a bounded read and BEFORE any JSON
+  # deserialization. Before, an anonymous caller obtained up to 1 MiB read AND a full
+  # `Jason.decode!` per request, with no identity check anywhere on that path — CPU and memory per
+  # connection, and the parser's own surface exposed to unauthenticated input.
+  plug(:authenticate_webhook)
 
   plug(Plug.Parsers,
     parsers: [:json],
     json_decoder: Jason,
-    length: 1_048_576,
+    length: @max_body,
     body_reader: {__MODULE__, :read_raw_body, []}
   )
 
@@ -43,63 +60,67 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   post "/webhook/gitea" do
-    case verify_hmac(conn) do
-      :ok ->
-        body = conn.body_params
-        action = body["action"]
-        action = if is_binary(action), do: action, else: nil
-        event_type = "gitea." <> (action || gitea_event_header(conn) || "unknown")
-        issue_id = extract_issue(body)
+    # PLUS DE SECONDE VERIFICATION ICI, et pas de clause defensive non plus. `:authenticate_webhook`
+    # est le seul chemin vers cette route et il a deja calcule le HMAC sur le corps brut ; le
+    # recalculer serait payer deux fois, et une branche 401 inatteignable serait du code mort — la
+    # classe que ce chantier retire ailleurs.
+    #
+    # Ce qui remplace la branche : un MATCH. Si le plug etait retire ou deplace apres `Plug.Parsers`,
+    # `conn.assigns` ne porterait pas la marque et cette ligne leve un MatchError — 500 bruyant au
+    # premier appel, jamais un 200 sur un corps non authentifie. L'ordre des plugs cesse d'etre une
+    # convention.
+    %{hmac_verified: true} = conn.assigns
 
-        try do
-          type_atom = String.to_existing_atom(event_type)
+    body = conn.body_params
+    action = body["action"]
+    action = if is_binary(action), do: action, else: nil
+    event_type = "gitea." <> (action || gitea_event_header(conn) || "unknown")
+    issue_id = extract_issue(body)
 
-          payload = Map.put(body, "issue_id", issue_id)
+    try do
+      type_atom = String.to_existing_atom(event_type)
 
-          emit_fun =
-            Application.get_env(
-              :fleet_event_router,
-              :webhook_emit_fun,
-              &Fleet.EventRouter.Bus.emit/3
-            )
+      payload = Map.put(body, "issue_id", issue_id)
 
-          case emit_fun.(:event_router, type_atom, payload: payload) do
-            :ok ->
-              send_resp(conn, 200, "ok")
+      emit_fun =
+        Application.get_env(
+          :lcars_fleet,
+          :event_router_webhook_emit_fun,
+          &Fleet.EventRouter.Bus.emit/3
+        )
 
-            {:error, reason} ->
-              Logger.warning(
-                "WebhooksGitea: broadcast FAILED #{inspect(reason)} for #{event_type} " <>
-                  "— DRIFT, 422 (never ACK a dropped event)"
-              )
+      case emit_fun.(:event_router, type_atom, payload: payload) do
+        :ok ->
+          send_resp(conn, 200, "ok")
 
-              send_resp(conn, 422, "broadcast failed")
-          end
-        rescue
-          ArgumentError ->
-            Logger.warning(
-              "WebhooksGitea: unknown event type #{inspect(event_type)} " <>
-                "— DRIFT (unknown atom), 422"
-            )
+        {:error, reason} ->
+          Logger.warning(
+            "WebhooksGitea: broadcast FAILED #{inspect(reason)} for #{event_type} " <>
+              "— DRIFT, 422 (never ACK a dropped event)"
+          )
 
-            send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
+          send_resp(conn, 422, "broadcast failed")
+      end
+    rescue
+      ArgumentError ->
+        Logger.warning(
+          "WebhooksGitea: unknown event type #{inspect(event_type)} " <>
+            "— DRIFT (unknown atom), 422"
+        )
 
-          _e in Fleet.Event.UnregisteredError ->
-            Logger.warning(
-              "WebhooksGitea: type #{inspect(event_type)} outside the events.yaml " <>
-                "registry — DROP/DRIFT, 422 (add the key if the action must be routed)"
-            )
+        send_resp(conn, 422, Jason.encode!(%{error: "unknown event type", type: event_type}))
 
-            send_resp(
-              conn,
-              422,
-              Jason.encode!(%{error: "event type not in registry", type: event_type})
-            )
-        end
+      _e in Fleet.Event.UnregisteredError ->
+        Logger.warning(
+          "WebhooksGitea: type #{inspect(event_type)} outside the events.yaml " <>
+            "registry — DROP/DRIFT, 422 (add the key if the action must be routed)"
+        )
 
-      {:error, reason} ->
-        Logger.warning("WebhooksGitea: webhook REFUSED 401 — HMAC verification: #{reason}")
-        send_resp(conn, 401, Jason.encode!(%{error: reason}))
+        send_resp(
+          conn,
+          422,
+          Jason.encode!(%{error: "event type not in registry", type: event_type})
+        )
     end
   end
 
@@ -109,25 +130,86 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   @doc false
   def read_raw_body(conn, opts) do
-    case Plug.Conn.read_body(conn, opts) do
-      {:ok, body, conn} ->
-        {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
+    # SERVES WHAT `authenticate_webhook/2` ALREADY READ. A body can only be read once: on the
+    # webhook route the authenticating plug has consumed it, so a second `read_body` here would
+    # yield `""` and the parser would decode an empty body on every authenticated request. The
+    # fallback below is not dead — it is the path of every OTHER route (health, the 404 catch-all),
+    # which is never authenticated and whose body nobody has touched.
+    case conn.assigns do
+      %{raw_body: body} ->
+        {:ok, body, conn}
 
-      {:more, partial, conn} ->
-        {:more, partial, conn}
-
-      {:error, _} = err ->
-        err
+      _ ->
+        case Plug.Conn.read_body(conn, opts) do
+          {:ok, body, conn} -> {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
+          {:more, partial, conn} -> {:more, partial, conn}
+          {:error, _} = err -> err
+        end
     end
   end
 
+  # Only the webhook route: `/health` carries no body and no signature, and the 404 fallback must
+  # stay a 404 rather than become a 401 about a route that does not exist.
+  defp authenticate_webhook(%Plug.Conn{method: "POST", path_info: ["webhook", "gitea"]} = conn, _) do
+    case Plug.Conn.read_body(conn, length: @max_body) do
+      {:ok, body, conn} ->
+        conn = Plug.Conn.assign(conn, :raw_body, body)
+
+        case verify_hmac(conn) do
+          :ok ->
+            Plug.Conn.assign(conn, :hmac_verified, true)
+
+          {:error, reason} ->
+            Logger.warning("WebhooksGitea: webhook REFUSED 401 — HMAC verification: #{reason}")
+
+            conn |> send_resp(401, Jason.encode!(%{error: reason})) |> halt()
+        end
+
+      # OVER THE CAP: refused with the SAME exception `Plug.Parsers` used to raise here, and for the
+      # same reason — an explicit bound beats a 401 computed on a truncated body, which would blame
+      # the signature for a size problem. The check never runs on a partial read.
+      {:more, _partial, _conn} ->
+        raise Plug.Parsers.RequestTooLargeError
+
+      {:error, reason} ->
+        Logger.warning("WebhooksGitea: unreadable request body (#{inspect(reason)}) → 400")
+
+        conn |> send_resp(400, "bad request") |> halt()
+    end
+  end
+
+  defp authenticate_webhook(conn, _opts), do: conn
+
   @doc """
   Verifies the raw body's SHA256 HMAC against `x-gitea-signature`.
+
+  THE SECRET IS READ FROM DISK ON EVERY REQUEST, AND THAT IS THE CHOICE — not an oversight. The file
+  is provisioned and ROTATED by the operator outside the BEAM (`/etc/fleet/webhook-secret`, root
+  owned, mode 600), and a rotation must take effect on the next webhook rather than at the next
+  fleet restart. Caching it would make the running node the authority on a secret whose authority is
+  the filesystem, and the operator would have no way to tell whether the value in memory is the one
+  they just wrote.
+
+  WHAT IT COSTS, NAMED so nobody has to rediscover it: one `File.read/1` per request on the
+  authentication path, and a hard dependency of the endpoint's availability on the file's. A secret
+  momentarily unreadable — a mount, a permission, a non-atomic rotation (write-in-place rather than
+  write-then-rename) — yields 401 on LEGITIMATE webhooks, which the forge will replay. The mitigation
+  is on the writer's side, not here: rotate by `rename(2)`, which is atomic, and the reader either
+  sees the old file whole or the new one whole.
+
+  The bound that makes the cost acceptable: this endpoint is OFF by default
+  (`event_router_start_webhooks`), the forge is local, and the webhook is an ACCELERATOR of the poll
+  rail — never a source of truth. A read per request on a path that is not the durable one is a
+  trade this fleet can make; the same read on the poll rail would not be.
   """
   @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
     secret_path =
-      Application.get_env(:fleet_event_router, :webhook_secret_path, "/etc/fleet/webhook-secret")
+      Application.get_env(
+        :lcars_fleet,
+        :event_router_webhook_secret_path,
+        "/etc/fleet/webhook-secret"
+      )
 
     case File.read(secret_path) do
       {:ok, secret} ->

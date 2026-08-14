@@ -23,18 +23,18 @@ defmodule Fleet.Spawner.PodKickTest do
   @state :monitoring
 
   setup do
-    Application.put_env(:fleet_spawner, :kick_retry_ms, 10)
-    Application.put_env(:fleet_spawner, :kick_max_attempts, 3)
+    Application.put_env(:lcars_fleet, :spawner_kick_retry_ms, 10)
+    Application.put_env(:lcars_fleet, :spawner_kick_max_attempts, 3)
     # fake_pods have no brief → BOOTSTRAP path (dedicated cap/retry). We override those too
     # to keep the tests fast + bounded.
-    Application.put_env(:fleet_spawner, :kick_bootstrap_retry_ms, 10)
-    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 3)
+    Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_retry_ms, 10)
+    Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_max, 3)
 
     on_exit(fn ->
-      Application.delete_env(:fleet_spawner, :kick_retry_ms)
-      Application.delete_env(:fleet_spawner, :kick_max_attempts)
-      Application.delete_env(:fleet_spawner, :kick_bootstrap_retry_ms)
-      Application.delete_env(:fleet_spawner, :kick_bootstrap_max)
+      Application.delete_env(:lcars_fleet, :spawner_kick_retry_ms)
+      Application.delete_env(:lcars_fleet, :spawner_kick_max_attempts)
+      Application.delete_env(:lcars_fleet, :spawner_kick_bootstrap_retry_ms)
+      Application.delete_env(:lcars_fleet, :spawner_kick_bootstrap_max)
     end)
 
     :ok
@@ -91,8 +91,8 @@ defmodule Fleet.Spawner.PodKickTest do
 
   test "pod WITHOUT brief → bootstrap mode: stop at the bootstrap cap, not the worker cap" do
     # bootstrap cap (2) < worker cap (9). fake_pod = no task → no_pending_brief? = true.
-    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
-    Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
+    Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_max, 2)
+    Application.put_env(:lcars_fleet, :spawner_kick_max_attempts, 9)
 
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
@@ -102,8 +102,8 @@ defmodule Fleet.Spawner.PodKickTest do
   end
 
   test "pod WITH pending brief → worker mode: continues beyond the bootstrap cap" do
-    Application.put_env(:fleet_spawner, :kick_bootstrap_max, 2)
-    Application.put_env(:fleet_spawner, :kick_max_attempts, 9)
+    Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_max, 2)
+    Application.put_env(:lcars_fleet, :spawner_kick_max_attempts, 9)
 
     pod = fake_pod()
 

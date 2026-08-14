@@ -5,10 +5,10 @@ defmodule Fleet.Workflow.LoaderTest do
   alias Fleet.Workflow.Loader
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:fleet_workflow, :workflow_maps_root, tmp_dir)
+    Application.put_env(:lcars_fleet, :workflow_workflow_maps_root, tmp_dir)
 
     on_exit(fn ->
-      Application.delete_env(:fleet_workflow, :workflow_maps_root)
+      Application.delete_env(:lcars_fleet, :workflow_workflow_maps_root)
     end)
 
     :ok

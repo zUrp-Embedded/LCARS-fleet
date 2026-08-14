@@ -1,7 +1,7 @@
 # Fleet.Coord — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-01
+**Last revised**: 2026-08-13
 **Status**: active — declarative verdict→action coordination
 **Referenced by**: —
 
@@ -21,6 +21,6 @@ only pointed at.
 
 ## Config & deps
 
-- Knob `:fleet_coord, :policies_path` — read by `Policies`, set by `runtime.exs` from `LCARS_COORD_POLICIES_PATH`.
+- Knob `:lcars_fleet, :coord_policies_path` — read by `Policies`, set by `runtime.exs` from `LCARS_COORD_POLICIES_PATH`.
 - Policies data: `priv/catalogue/coord/config/coord-policies.yaml` (format documented in `Fleet.Coord.Policies`).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/coord.ex`).

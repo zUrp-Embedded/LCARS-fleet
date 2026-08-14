@@ -98,13 +98,148 @@ defmodule Fleet.Conflict.PatternsTest do
   end
 
   describe "unit: Diff.merge_non_overlapping" do
-    test "overlapping edits -> nil" do
-      assert Diff.merge_non_overlapping(["a"], ["b"], ["c"]) == nil
+    test "overlapping edits -> {:error, :overlap}" do
+      assert Diff.merge_non_overlapping(["a"], ["b"], ["c"]) == {:error, :overlap}
     end
 
     test "disjoint edits -> merged" do
       assert Diff.merge_non_overlapping(["a", "b"], ["X", "a", "b"], ["a", "b", "Y"]) ==
-               ["X", "a", "b", "Y"]
+               {:ok, ["X", "a", "b", "Y"]}
+    end
+  end
+
+  # JG-050 — LA TABLE EST LE COUT, ET RIEN NE LA BORNAIT. `lcs/2` remplit une entree de map
+  # persistante par couple `{i, j}`. Mesure sur ce build : 250 000 cellules coutent 21 Mio et
+  # 179 ms, soit ~91 octets et ~0.71 us la cellule, en quadratique. Un hunk de 5 000 lignes de
+  # chaque cote — un lockfile, un fichier genere, un instantane, c'est-a-dire EXACTEMENT ce qui
+  # produit les gros conflits — fait 25 millions de cellules : ~2.2 Gio et ~18 s pour UNE table, et
+  # une fusion trois voies en construit DEUX. Le calcul a lieu pendant la CLASSIFICATION, avant
+  # toute decision de resoudre.
+  describe "JG-050 — le budget LCS borne la table" do
+    defp lines(n), do: for(i <- 1..n, do: "ligne #{i}")
+
+    test "la frontiere est exacte, et elle se lit en O(1) sur les longueurs" do
+      cap = Diff.max_lcs_cells()
+      refute Diff.over_lcs_budget?(lines(1), lines(cap))
+      assert Diff.over_lcs_budget?(lines(1), lines(cap + 1))
+    end
+
+    test "au-dela, `lcs/2` REFUSE au lieu de rendre une liste vide" do
+      # Une liste vide serait le pire retour possible : « ces sequences n'ont rien en commun » est
+      # une reponse plausible, indistinguable d'un refus, et elle ferait produire un diff FAUX avec
+      # confiance. Le refus est explicite pour que personne ne puisse le lire comme un resultat.
+      over = Diff.max_lcs_cells() + 1
+      assert Diff.lcs(lines(1), lines(over)) == {:error, :too_large}
+
+      assert Diff.merge_non_overlapping(lines(1), lines(over), lines(over)) ==
+               {:error, :too_large}
+    end
+
+    test "TEMOIN — sous le budget, la fusion se fait normalement" do
+      # La borne doit se prouver sur ce qu'elle LAISSE PASSER : sans ce temoin, un `lcs/2` qui
+      # refuserait tout passerait les deux tests ci-dessus.
+      assert {:ok, ["X", "a", "b", "Y"]} =
+               Diff.merge_non_overlapping(["a", "b"], ["X", "a", "b"], ["a", "b", "Y"])
+    end
+
+    test "un hunk hors budget est DECLINE, et la trace ne lui invente pas un chevauchement" do
+      big = Enum.map_join(1..600, "\n", &"ligne #{&1}")
+      ours = "OURS\n" <> big
+      theirs = big <> "\nTHEIRS"
+      content = "<<<<<<< ours\n#{ours}\n||||||| base\n#{big}\n=======\n#{theirs}\n>>>>>>> theirs"
+
+      {:ok, r} = Fleet.Conflict.resolve(content)
+
+      assert [%{type: type, trace: trace}] = r.hunks
+
+      refute type == :non_overlapping,
+             "hors budget, aucun merge n'a eu lieu : rien a classer ainsi"
+
+      step = Enum.find(trace.steps, &(&1.type == :non_overlapping))
+
+      assert step.reason =~ "too large",
+             "la trace disait « both branches touched the same lines » d'un bloc jamais compare — " <>
+               "un refus qui invente son motif est pire qu'un refus"
+    end
+  end
+
+  # JG-051 — `NonOverlapping.detect?/1` REPOND EN FUSIONNANT, et l'assembleur redemandait la meme
+  # fusion : le calcul le plus cher du sous-systeme tournait deux fois par hunk, le premier resultat
+  # jete. Compte par `:erlang.trace/3` — la fonction n'a pas de couture, et un compteur pose dans le
+  # code mesurerait le compteur.
+  describe "JG-051 — la fusion trois voies n'est calculee qu'une fois par hunk" do
+    # ⚠ LE TRAVAIL TOURNE DANS UN AUTRE PROCESSUS, ET CE N'EST PAS DU CONFORT : le processus
+    # TRACEUR est exclu du tracage. Tracer `self()` depuis `self()` rend `trace/3 -> 1` et
+    # `trace_pattern -> 1` — deux retours qui disent « arme » — puis ZERO message. Un instrument qui
+    # repond « rien » a l'identique d'un sujet qui ne fait rien.
+    defp count_merges(fun) do
+      {pid, ref} =
+        spawn_monitor(fn ->
+          receive do
+            :go -> fun.()
+          end
+        end)
+
+      # ⚠ `trace_pattern` REND 0 ET N'ARME RIEN SUR UN MODULE PAS ENCORE CHARGE, en silence. Un
+      # `alias` ne charge pas : les modules Elixir se chargent a la demande, et si rien n'a encore
+      # touche `Diff` a cet instant le motif ne matche AUCUNE fonction. Le compte serait alors 0 —
+      # exactement ce que rend un sujet qui n'appelle jamais la fusion.
+      Code.ensure_loaded!(Diff)
+
+      :erlang.trace(pid, true, [:call])
+
+      assert :erlang.trace_pattern({Diff, :merge_non_overlapping, 3}, true, [:local]) == 1,
+             "le motif de trace n'a arme aucune fonction — la mesure qui suit serait vide"
+
+      send(pid, :go)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 30_000
+      :erlang.trace_pattern({Diff, :merge_non_overlapping, 3}, false, [:local])
+      drain_traces(0)
+    end
+
+    # ⚠ LE DRAIN ATTEND, IL NE CUEILLE PAS. Il vidait la boite avec `after 0`, donc il courait apres
+    # les messages : le `:DOWN` du moniteur et les messages de trace n'ont pas le meme expediteur et
+    # rien n'ordonne les deux. Un message de trace encore en vol au moment du `:DOWN` etait compte
+    # ZERO — un rouge intermittent, et le test qui l'a subi le 2026-08-14 accusait le sujet.
+    # 200 ms sur le PREMIER message, puis 0 : la salve est deja la une fois le premier arrive.
+    defp drain_traces(n) do
+      receive do
+        {:trace, _pid, :call, {Diff, :merge_non_overlapping, _}} -> drain_traces(n + 1)
+        {:trace, _pid, _, _} -> drain_traces(n)
+      after
+        wait_for_traces(n) -> n
+      end
+    end
+
+    defp wait_for_traces(0), do: 200
+    defp wait_for_traces(_), do: 0
+
+    test "un hunk non-overlapping resolu ne fusionne qu'une fois" do
+      content = "<<<<<<< ours\nX\na\nb\n||||||| base\na\nb\n=======\na\nb\nY\n>>>>>>> theirs"
+
+      calls = count_merges(fn -> {:ok, _} = Fleet.Conflict.resolve(content) end)
+
+      assert calls == 1, "la fusion a tourne #{calls} fois pour un seul hunk"
+    end
+
+    test "TEMOIN — l'instrument compte bien, il ne rend pas 1 par construction" do
+      # Sans ce temoin, un `:erlang.trace` mal arme rendrait 1 (ou 0) quoi qu'il arrive, et le test
+      # ci-dessus serait vert sur une mesure morte.
+      calls =
+        count_merges(fn ->
+          Diff.merge_non_overlapping(["a"], ["b"], ["c"])
+          Diff.merge_non_overlapping(["a"], ["b"], ["c"])
+        end)
+
+      assert calls == 2
+    end
+
+    test "un hunk regle par un motif PRIORITAIRE ne paie jamais la fusion" do
+      # La capture reste PARESSEUSE : `same_change` gagne avant que `non_overlapping` soit atteint.
+      calls =
+        count_merges(fn -> {:ok, _} = Fleet.Conflict.resolve(diff3("b", "a", "b")) end)
+
+      assert calls == 0
     end
   end
 

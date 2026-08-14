@@ -106,17 +106,20 @@ defmodule Fleet.Spawner.Pod.Backend do
 
   @doc "Returns the configured bwrap launcher path."
   @spec bwrap_launch_path() :: String.t()
-  def bwrap_launch_path, do: launcher_path(:bwrap_launch_path, "bwrap_launch.sh")
+  def bwrap_launch_path, do: launcher_path(:spawner_bwrap_launch_path, "bwrap_launch.sh")
 
   @doc "Returns the configured host launcher path."
   @spec host_launch_path() :: String.t()
-  def host_launch_path, do: launcher_path(:host_launch_path, "host_launch.sh")
+  def host_launch_path, do: launcher_path(:spawner_host_launch_path, "host_launch.sh")
 
   @doc "Returns the configured vendor launcher path."
   @spec claude_launch_path() :: String.t()
-  def claude_launch_path, do: launcher_path(:claude_launch_path, "claude_launch.sh")
+  def claude_launch_path, do: launcher_path(:spawner_claude_launch_path, "claude_launch.sh")
 
+  # La cle arrive DEJA prefixee par domaine (`:spawner_*`) depuis les trois appelants ci-dessus, et
+  # c'est deliberе : une cle assemblee ici (`:"spawner_#{config_key}"`) serait invisible a tout grep
+  # et au mur `config.no_legacy_namespace`. Un knob doit se lire en toutes lettres a son point d'usage.
   defp launcher_path(config_key, default_basename) do
-    Application.get_env(:fleet_spawner, config_key, "/usr/local/bin/" <> default_basename)
+    Application.get_env(:lcars_fleet, config_key, "/usr/local/bin/" <> default_basename)
   end
 end

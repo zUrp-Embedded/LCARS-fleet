@@ -13,7 +13,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   alias Fleet.Shutdown.Quiesce
   alias Fleet.Starfleet.Shutdown.AggregateDispatcher
 
-  # Broker stubs injected via `:fleet_starfleet, :task_queue_mod`. The REAL broker IS present in the test
+  # Broker stubs injected via `:lcars_fleet, :starfleet_task_queue_mod`. The REAL broker IS present in the test
   # env (so `task_queue_running?` is true) — these induce specific `list_active` returns/failures.
   defmodule TwoActiveBroker do
     def list_active, do: [%{id: "a"}, %{id: "b"}]
@@ -37,10 +37,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   end
 
   defp inject_broker(mod),
-    do: Fleet.TestEnv.put_env_restoring(:fleet_starfleet, :task_queue_mod, mod)
+    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :starfleet_task_queue_mod, mod)
 
   defp inject_completion(fun),
-    do: Fleet.TestEnv.put_env_restoring(:fleet_starfleet, :completion_inflight_fun, fun)
+    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :starfleet_completion_inflight_fun, fun)
 
   test "refuse_new_jobs/1 activates quiescence" do
     Quiesce.resume!()

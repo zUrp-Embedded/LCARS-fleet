@@ -416,15 +416,15 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
 
     test "false only if :boot_permanent_at_start is explicitly set to false" do
-      Application.put_env(:fleet_spawner, :boot_permanent_at_start, false)
-      on_exit(fn -> Application.delete_env(:fleet_spawner, :boot_permanent_at_start) end)
+      Application.put_env(:lcars_fleet, :spawner_boot_permanent_at_start, false)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_boot_permanent_at_start) end)
       refute PermanentBoot.auto_boot_enabled?()
 
-      Application.put_env(:fleet_spawner, :boot_permanent_at_start, true)
+      Application.put_env(:lcars_fleet, :spawner_boot_permanent_at_start, true)
       assert PermanentBoot.auto_boot_enabled?()
 
       # Only the boolean `true` enables (not a "yes" string).
-      Application.put_env(:fleet_spawner, :boot_permanent_at_start, "yes")
+      Application.put_env(:lcars_fleet, :spawner_boot_permanent_at_start, "yes")
       refute PermanentBoot.auto_boot_enabled?()
     end
   end

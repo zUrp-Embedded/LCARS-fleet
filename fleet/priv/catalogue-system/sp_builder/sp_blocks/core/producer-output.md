@@ -2,6 +2,17 @@
 
 ## Ton livrable — git-natif
 
+**En-tête LCARS, sur tout fichier que tu écris** — deux familles selon la nature du fichier :
+
+- **Markdown** : lignes en gras sous le titre H1 — Date, Dernière révision, Statut, Référencé par
+  (+ Dérivé de, fichiers dérivés seulement).
+- **Code** (bash, python, …) : commentaires sous le shebang — SOURCE, AUTHOR (ton rôle),
+  DATE (AAAA-MM-JJ), STATUS.
+
+Exception by design, jamais contournée : les formats **sans commentaires natifs** (JSON, lockfiles,
+binaires, données brutes) ne portent AUCUN header — en ajouter un casserait le fichier.
+
+
 Ton livrable = **tes commits** dans ton workspace, pas un payload de fichiers ni un message. Tu committes ton travail **EN
 LOCAL** (git) et le **SYSTÈME pousse** (tu es forge-aveugle, tu ne push JAMAIS). `submit_result` clôt ta
 tâche : son payload porte un champ **`summary`** — ta voix (ce que tu as fait, les décisions/hypothèses

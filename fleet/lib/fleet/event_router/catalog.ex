@@ -13,7 +13,7 @@ defmodule Fleet.EventRouter.Catalog do
   """
   @spec load!() :: :ok
   def load! do
-    if Application.get_env(:fleet_event_router, :load_event_registry, true) do
+    if Application.get_env(:lcars_fleet, :event_router_load_event_registry, true) do
       do_load()
     else
       :ok
@@ -51,13 +51,35 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   @doc """
-  Returns the registry's event type strings, or `[]` when it cannot be parsed.
+  Returns the registry's event type strings. An empty registry yields `[]`; an UNPARSEABLE one
+  raises, exactly like `load!/0` on the same fault.
+
+  THE TWO READERS OF `events.yaml` NOW TREAT THE SAME FAULT THE SAME WAY. They did not: `load!/0`
+  raised on an absent or invalid file while this one returned `[]` in silence — and `[]` was also
+  what a legitimately empty registry returns, so the two were indistinguishable at the output.
+
+  The silence was harmless on the nominal path (`load!/0` raises one line later, so the boot dies
+  anyway) and NOT harmless where the registry is deliberately off
+  (`event_router_load_event_registry: false`, the hermetic test baseline and any maintenance run):
+  there `load!/0` is a no-op, this function is the ONLY source of pre-registered event atoms, and an
+  unparseable file left the fleet with none. Every later `String.to_existing_atom/1` on a binary
+  event type — `Bus.coerce_type/1`, the gitea webhook — then raises an ArgumentError naming the
+  type, pointing at the consumer instead of at the file that could not be read.
+
+  An EMPTY registry is a different fact and keeps its `[]`: there is genuinely nothing to
+  pre-register, and `load!/0` is the one that decides whether emptiness is fatal.
   """
   @spec event_type_strings() :: [String.t()]
   def event_type_strings do
     case parse_events() do
-      {:ok, events} -> Map.keys(events)
-      :error -> []
+      {:ok, events} ->
+        Map.keys(events)
+
+      :error ->
+        raise "Catalog: events.yaml absent or invalid at #{events_yaml_path()} — no event atom " <>
+                "could be pre-registered. Fail-loud here, same as load!/0 on the same fault: with " <>
+                "the registry disabled nothing else would say it, and the fault would surface " <>
+                "later as an ArgumentError on String.to_existing_atom/1 at a consumer."
     end
   end
 
@@ -71,11 +93,20 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   defp validate_against_schema!(events) do
-    schema =
+    # THROUGH THE SHARED CACHE, like every other schema of the repo. This site inlined
+    # `File.read! |> Jason.decode! |> resolve()` — the exact body of
+    # `SchemaCache.resolve_json_schema!/2` — and was the ONLY one to do so without saying why.
+    # Measured: three sites in `lib/` call `ExJsonSchema.Schema.resolve/1` — the shared mechanism,
+    # ONE documented exception (`CapProfile.Schema`, whose `{:error, :schema_unavailable}` must stay
+    # retryable and therefore uncacheable), and this one.
+    #
+    # Safe to cache here and NOT there: the variable artifact of this module is `events.yaml`, which
+    # the tests rewrite under it; the SCHEMA is immutable `priv/` resolved through `:code.priv_dir`,
+    # with no knob and nothing to swap.
+    path =
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events-v1.json")
-      |> File.read!()
-      |> Jason.decode!()
-      |> ExJsonSchema.Schema.resolve()
+
+    schema = Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
 
     case ExJsonSchema.Validator.validate(schema, %{"events" => events}) do
       :ok ->
@@ -105,6 +136,32 @@ defmodule Fleet.EventRouter.Catalog do
       if action == "incident" and not match?(%{"op" => _, "subject" => _}, route["incident"]) do
         raise "Catalog: routing for #{type} declares action=incident without a complete " <>
                 "incident block ({op, subject} required)"
+      end
+
+      # THE MIRROR OF THE `cat5` CHECK ABOVE, AND IT RUNS THE OTHER WAY. `cat5` SYNTHESIZES the type
+      # `starfleet.audit_cat5_<cat5_source>` and the check proves that key is registered.
+      # `incident_cat5` CONSUMES that same naming: `IncidentConsumer.cat5_tag/1` derives the
+      # incident tag by stripping the `starfleet.audit_cat5_` prefix off the type itself.
+      #
+      # `String.replace_prefix/3` IS A NO-OP WHEN THE PREFIX IS ABSENT, so a route that declares
+      # `action: incident_cat5` on any other type does not fail — it escalates at MAXIMUM SEVERITY
+      # under a tag that is the full type name, which no operator named and no dedup namespace
+      # expects. Silent, and at the one severity where silence costs the most.
+      #
+      # The rule was already written twice — in this registry's own JSON schema ("the tag derives
+      # from the starfleet.audit_cat5_<tag> type") and in `IncidentConsumer`'s moduledoc — and held
+      # by nothing. Two prose statements of a constraint are not a constraint.
+      #
+      # NOT the completeness block the register's fiche asks for: an `incident_cat5` route admits
+      # only `{source, action, threshold?}`. The schema is `additionalProperties: false` and the two
+      # inverse checks below refuse `cat5_source` and `incident` on it, so there is no required
+      # block left to omit. What CAN be malformed about such a route is its NAME.
+      if action == "incident_cat5" and not String.starts_with?(type, "starfleet.audit_cat5_") do
+        raise "Catalog: routing for #{type} declares action=incident_cat5, but the incident tag " <>
+                "is derived by stripping the `starfleet.audit_cat5_` prefix off the type — which " <>
+                "#{type} does not carry. It would escalate at maximum severity under the tag " <>
+                "#{inspect(type)}. Rename the event, or route it as action=incident with an " <>
+                "explicit incident block."
       end
 
       if cat5_source && action != "cat5" do
@@ -155,8 +212,8 @@ defmodule Fleet.EventRouter.Catalog do
   @doc "Returns the configured registry path or its default under `priv/`."
   def events_yaml_path do
     Application.get_env(
-      :fleet_event_router,
-      :events_yaml_path,
+      :lcars_fleet,
+      :event_router_events_yaml_path,
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/events.yaml")
     )
   end

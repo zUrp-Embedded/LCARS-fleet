@@ -286,16 +286,118 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
+  @provenance_ref_prefix "refs/lcars/provenance/"
+
   @doc """
-  Pushes a committed refspec through the bounded system publication path.
+  The ref that carries the attestation OF one commit: `refs/lcars/provenance/<sha>`.
+
+  KEYED ON THE SHA, and that is the whole design (BL-6-43). The attestation used to live in a file
+  whose NAME was derived from the head of the branch — so a head that moved after the engrave made
+  the reader compute a name nobody had written, and a proof about another commit read exactly like
+  no proof at all. A ref named after the commit cannot be looked up wrong: it exists for that commit
+  or it does not exist.
+
+  A fresh name per attested commit also removes the concurrency that a shared ref (a notes ref)
+  would have introduced on the publication path: two pods publishing at once write two DIFFERENT
+  refs, so neither can be a non-fast-forward, and nothing has to be forced or leased.
   """
-  @spec push(Path.t(), String.t(), String.t()) :: {:ok, true} | {:error, term()}
-  def push(workspace, remote, refspec) do
+  @spec provenance_ref(String.t()) :: String.t()
+  def provenance_ref(sha) when is_binary(sha) and sha != "", do: @provenance_ref_prefix <> sha
+
+  @doc """
+  Writes `json` as a git BLOB in `workspace` and points `provenance_ref(sha)` at it.
+
+  Local only — no network. The ref is pushed by the caller IN THE SAME `git push` as the deliverable
+  (cf. `push/3`), which is what makes the brick and its proof land together or not at all.
+  """
+  @spec write_provenance(Path.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def write_provenance(workspace, sha, json)
+      when is_binary(sha) and sha != "" and is_binary(json) do
+    with {:ok, blob} <- hash_object(workspace, json),
+         :ok <- update_ref(workspace, provenance_ref(sha), blob) do
+      :ok
+    end
+  end
+
+  @doc """
+  Reads back the attestation of `sha` from `dir`, or `{:error, :no_provenance_ref}`.
+
+  `dir` is a clone that has already fetched the ref. The read is `cat-file -p` on a blob: no
+  worktree, no checkout, nothing to leave behind.
+  """
+  @spec read_provenance(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def read_provenance(dir, sha) when is_binary(sha) and sha != "" do
+    case Fleet.Credentials.Shell.git(@hooks_off ++ ["cat-file", "-p", provenance_ref(sha)],
+           cd: dir,
+           timeout_ms: git_local_timeout_ms()
+         ) do
+      {:ok, {out, 0}} -> {:ok, out}
+      {:ok, {_out, _rc}} -> {:error, :no_provenance_ref}
+      {:error, {:timeout, ms}} -> {:error, {:git_cat_file_timeout, ms}}
+      {:error, reason} -> {:error, {:git_cat_file_failed, reason}}
+    end
+  end
+
+  # Le contenu transite par un fichier HORS du worktree, jamais par l'argv ni par le worktree
+  # lui-meme : l'autorite shell n'a pas de stdin (par construction — elle borne un groupe de
+  # processus, elle ne lui parle pas), et deposer le JSON dans l'espace de travail du producteur
+  # salirait l'arbre que la porte de livrable vient de verifier.
+  defp hash_object(workspace, json) do
+    tmp =
+      Path.join(System.tmp_dir!(), "lcars-provenance-#{System.unique_integer([:positive])}.json")
+
+    try do
+      with :ok <- File.write(tmp, json),
+           {:ok, {out, 0}} <-
+             Fleet.Credentials.Shell.git(@hooks_off ++ ["hash-object", "-w", tmp],
+               cd: workspace,
+               timeout_ms: git_local_timeout_ms()
+             ) do
+        {:ok, String.trim(out)}
+      else
+        other -> {:error, {:git_hash_object_failed, other}}
+      end
+    after
+      File.rm(tmp)
+    end
+  end
+
+  defp update_ref(workspace, ref, object) do
+    case Fleet.Credentials.Shell.git(@hooks_off ++ ["update-ref", ref, object],
+           cd: workspace,
+           timeout_ms: git_local_timeout_ms()
+         ) do
+      {:ok, {_out, 0}} -> :ok
+      other -> {:error, {:git_update_ref_failed, other}}
+    end
+  end
+
+  @doc """
+  Pushes one or SEVERAL refspecs through the bounded system publication path, in ONE `git push`.
+
+  ⚠ THE LIST IS THE POINT, NOT A CONVENIENCE (BL-6-43). A deliverable and the attestation that
+  proves it must land TOGETHER or not at all. Two successive pushes give two outcomes, so one can
+  succeed alone — and every failure mode of the provenance rail came from exactly that: a brick on
+  the forge whose proof was written elsewhere, later, best-effort. One `git push`, several refspecs,
+  one verdict: git updates the refs it can and returns non-zero if any was rejected, so a partial
+  landing is REPORTED instead of being a silent half-publication.
+  """
+  @spec push(Path.t(), String.t(), String.t() | [String.t()]) :: {:ok, true} | {:error, term()}
+  def push(workspace, remote, refspec) when is_binary(refspec),
+    do: push(workspace, remote, [refspec])
+
+  def push(workspace, remote, refspecs) when is_list(refspecs) and refspecs != [] do
     with :ok <- validate_cli_arg(remote, :invalid_remote),
-         :ok <- validate_cli_arg(refspec, :invalid_refspec),
+         :ok <-
+           Enum.reduce_while(refspecs, :ok, fn r, _ ->
+             case validate_cli_arg(r, :invalid_refspec) do
+               :ok -> {:cont, :ok}
+               err -> {:halt, err}
+             end
+           end),
          # DR-024: malformed forge credentials fail before a push attempt.
          {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
-      do_push(workspace, remote, refspec, auth_env)
+      do_push(workspace, remote, refspecs, auth_env)
     end
   end
 
@@ -306,20 +408,24 @@ defmodule Fleet.Workflow.Git do
 
   defp validate_cli_arg(_arg, err), do: {:error, err}
 
-  defp do_push(workspace, remote, refspec, auth_env) do
-    case run_push(workspace, remote, refspec, [], auth_env) do
+  defp do_push(workspace, remote, refspecs, auth_env) do
+    case run_push(workspace, remote, refspecs, [], auth_env) do
       {:ok, {_out, 0}} ->
         {:ok, true}
 
       {:ok, {out, rc}} ->
         # Explicit non-fast-forward alone may retry with a lease; never blind-force.
         if non_fast_forward?(out),
-          do: force_push(workspace, remote, refspec, auth_env),
+          do: force_push(workspace, remote, refspecs, auth_env),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
 
       {:error, {:timeout, _ms}} ->
         # A timed-out local process may have pushed; confirm remote SHA before retrying.
-        confirm_push_after_timeout(workspace, remote, refspec, auth_env)
+        # LE PREMIER refspec est celui du LIVRABLE, et c'est le seul dont la confirmation ait un
+        # sens : les suivants sont des refs NEUVES (une par sha atteste), donc sans historique a
+        # comparer et sans rejet possible. Si la branche a atterri, elles ont atterri avec elle —
+        # meme paquet, meme acte reseau.
+        confirm_push_after_timeout(workspace, remote, hd(refspecs), auth_env)
 
       {:error, {:exit, reason}} ->
         {:error, {:git_push_exit, reason}}
@@ -385,14 +491,18 @@ defmodule Fleet.Workflow.Git do
   end
 
   # A force retry requires our recorded remote-tracking SHA as lease basis.
-  defp force_push(workspace, remote, refspec, auth_env) do
+  # Meme raison qu'au-dessus : le bail porte sur la branche du livrable (le premier refspec), pas sur
+  # les refs d'attestation qui l'accompagnent — forcer une ref neuve n'aurait aucun sens, et un bail
+  # sur elle n'aurait rien a verrouiller.
+  defp force_push(workspace, remote, refspecs, auth_env) do
+    refspec = hd(refspecs)
     target = target_of_refspec(refspec)
 
     case read_remote_tracking_sha(workspace, remote, target) do
       {:ok, expected} ->
         lease = "--force-with-lease=#{target}:#{expected}"
 
-        case run_push(workspace, remote, refspec, [lease], auth_env) do
+        case run_push(workspace, remote, refspecs, [lease], auth_env) do
           {:ok, {_out, 0}} ->
             {:ok, true}
 
@@ -444,9 +554,9 @@ defmodule Fleet.Workflow.Git do
   end
 
   # Shell bounds the entire git process group, including transport helpers.
-  defp run_push(workspace, remote, refspec, extra, auth_env) do
+  defp run_push(workspace, remote, refspecs, extra, auth_env) do
     # Forge credentials stay in env, never argv.
-    git_runner().(@hooks_off ++ ["push"] ++ extra ++ [remote, refspec],
+    git_runner().(@hooks_off ++ ["push"] ++ extra ++ [remote | refspecs],
       cd: workspace,
       timeout_ms: push_timeout_ms(),
       env: auth_env
@@ -455,7 +565,8 @@ defmodule Fleet.Workflow.Git do
 
   # Push/readback seam supports timeout-outcome tests.
   defp git_runner,
-    do: Application.get_env(:fleet_workflow, :git_push_runner, &Fleet.Credentials.Shell.git/2)
+    do:
+      Application.get_env(:lcars_fleet, :workflow_git_push_runner, &Fleet.Credentials.Shell.git/2)
 
   # Retry only explicit history divergence, never generic rejection or server policy refusal.
   defp non_fast_forward?(out) do
@@ -466,12 +577,12 @@ defmodule Fleet.Workflow.Git do
 
   # Configurable network push bound.
   defp push_timeout_ms do
-    Application.get_env(:fleet_workflow, :git_push_timeout_ms, 30_000)
+    Application.get_env(:lcars_fleet, :workflow_git_push_timeout_ms, 30_000)
   end
 
   # Configurable local git-operation bound.
   defp git_local_timeout_ms do
-    Application.get_env(:fleet_workflow, :git_local_timeout_ms, 30_000)
+    Application.get_env(:lcars_fleet, :workflow_git_local_timeout_ms, 30_000)
   end
 
   # Forge auth comes from ForgeAuth environment only.

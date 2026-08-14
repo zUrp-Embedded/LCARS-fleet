@@ -1,5 +1,5 @@
 defmodule Fleet.Credentials.ShellTest do
-  # async: false — the `git/2` describe mutates the GLOBAL application env `:fleet_credentials,
+  # async: false — the `git/2` describe mutates the GLOBAL application env `:lcars_fleet,
   # :forge_auth` (read by git_env/0), shared with `ForgeAuthTest`; serializing avoids the
   # put/delete race on GIT_CONFIG_* that would make a `git config --get` reading the env
   # mid-mutation fail.
@@ -173,6 +173,100 @@ defmodule Fleet.Credentials.ShellTest do
       on_exit(fn -> System.cmd("kill", ["-KILL", desc_pid], stderr_to_stdout: true) end)
     end
 
+    # 6-031 — LE PGID ETAIT CHERCHE, ET L'ECHEC DE LA RECHERCHE LAISSAIT LA DESCENDANCE EN VIE.
+    # `terminate/2` ne tuait le groupe que si trois lectures de `/proc` avaient abouti ; sinon il
+    # tuait la seule enveloppe `setsid` et rendait la main. L'appelant recevait
+    # `{:error, {:timeout, _}}` et considerait l'operation terminee pendant que git continuait a
+    # ecrire et a parler au reseau. `/proc` absent ou partiel est l'ordinaire d'un conteneur durci.
+    #
+    # Le cas a disparu au lieu d'etre traite : le port place deja son enfant dans une session neuve,
+    # donc `os_pid` EST le PGID. Ces deux tests tiennent ce qui rend cela vrai — le premier
+    # l'identite elle-meme (detail d'implementation du driver, donc EPINGLE ici et pas seulement
+    # affirme en commentaire), le second l'absence de la dependance qui la cassait.
+    test "6-031: apres `setsid`, le chef de groupe est os_pid OU son unique enfant — jamais ni l'un ni l'autre" do
+      # ⚠ CE TEST A DEJA EXISTE SOUS UNE AUTRE FORME, ET IL AFFIRMAIT UNE CHOSE FAUSSE : que le pid
+      # du port est TOUJOURS son propre chef de groupe. C'est vrai sur le poste de dev et FAUX dans
+      # le conteneur de CI (mesure : `pgrp=558` pour `os_pid=7337`), ou l'enfant du port herite du
+      # groupe du BEAM. Le banc l'a dit, et ce test est ce qui l'a nomme.
+      #
+      # L'invariant PORTABLE, celui dont `kill_scope/1` depend, est la DISJONCTION : apres
+      # `setsid`, ou bien il ne forke pas et `os_pid` est chef de groupe, ou bien il forke et son
+      # unique enfant l'est. Ce qui doit etre impossible, c'est qu'aucun des deux ne le soit — la,
+      # `kill -- -<pgid>` ne designerait plus le groupe de la commande.
+      setsid = System.find_executable("setsid")
+      assert setsid, "setsid absent : la precondition de run/3 n'est pas tenue ici"
+
+      port =
+        Port.open({:spawn_executable, setsid}, [
+          :binary,
+          :exit_status,
+          :hide,
+          {:args, ["-w", "/bin/sleep", "2"]}
+        ])
+
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      Process.sleep(300)
+
+      stat = fn pid ->
+        case File.read("/proc/#{pid}/stat") do
+          {:ok, s} ->
+            [_, rest] = String.split(s, ")", parts: 2)
+            f = rest |> String.trim() |> String.split(" ")
+            %{ppid: Enum.at(f, 1), pgrp: Enum.at(f, 2)}
+
+          _ ->
+            nil
+        end
+      end
+
+      assert wrapper = stat.(os_pid), "test Linux-only, comme tout ce qui lit /proc ici"
+
+      enfants =
+        File.ls!("/proc")
+        |> Enum.filter(&Regex.match?(~r/^\d+$/, &1))
+        |> Enum.filter(fn p ->
+          case stat.(p) do
+            %{ppid: pp} -> pp == to_string(os_pid)
+            _ -> false
+          end
+        end)
+
+      enfant_chef? =
+        Enum.any?(enfants, fn p ->
+          case stat.(p) do
+            %{pgrp: pg} -> pg == p
+            _ -> false
+          end
+        end)
+
+      assert wrapper.pgrp == to_string(os_pid) or enfant_chef?,
+             "ni os_pid #{os_pid} (pgrp=#{wrapper.pgrp}) ni aucun de ses enfants #{inspect(enfants)} " <>
+               "n'est chef de groupe — `kill -- -<pgid>` ne designerait le groupe de personne et " <>
+               "une descendance survivrait a l'echeance"
+
+      Port.close(port)
+    end
+
+    test "6-031: `setsid` ABSENT du PATH → refus fail-closed, jamais un `System.cmd` nu" do
+      # L'enveloppe est la precondition ANNONCEE du kill de groupe : sans elle on ne peut pas
+      # garantir « tout le groupe meurt », et rendre la main quand meme donnerait une borne qui a
+      # l'air d'en etre une. Ce refus vaut mieux qu'une commande lancee sans filet.
+      tmp = Path.join(System.tmp_dir!(), "shell6031-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      File.ln_s!("/bin/echo", Path.join(tmp, "echo"))
+      on_exit(fn -> File.rm_rf(tmp) end)
+
+      prev = System.get_env("PATH")
+      System.put_env("PATH", tmp)
+      on_exit(fn -> System.put_env("PATH", prev) end)
+
+      refute System.find_executable("setsid"),
+             "la mise en scene doit vraiment retirer setsid du PATH"
+
+      assert {:error, {:exit, {:enoent, "setsid"}}} =
+               Shell.run("echo", ["6-031"], timeout_ms: 5_000)
+    end
+
     test "WALL DEADLINE: a process DRIPPING output is killed at the deadline (not re-armed)" do
       # INVARIANT C2 (wall deadline, not idle-gap). A network-hung git can DRIP output (one byte
       # just before each deadline); a `receive … after timeout_ms` loop RE-ARMED on every {:data}
@@ -199,12 +293,12 @@ defmodule Fleet.Credentials.ShellTest do
     end
   end
 
-  # async: false — this describe mutates the global application env `:fleet_credentials,
+  # async: false — this describe mutates the global application env `:lcars_fleet,
   # :forge_auth` (read by git_env/0); restored in on_exit. Keeps the global side effect separate
   # from the async-safe describe above.
   describe "git/2 — injects git_env/0 by default (anti-prompt MA-22)" do
     setup do
-      Fleet.TestEnv.restore_env_on_exit(:fleet_credentials, :forge_auth)
+      Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
       :ok
     end
 
@@ -213,7 +307,7 @@ defmodule Fleet.Credentials.ShellTest do
       # (which receives NO -c on the argv) returns the extraheader → it read it from GIT_CONFIG_*
       # (env) set by git_env(). Same F087 mechanism as `forge_auth_test`, but through `Shell.git/2`.
       # git_env() ALSO carries GIT_TERMINAL_PROMPT=0 (anti-prompt MA-22), covered by forge_auth_test.
-      Application.put_env(:fleet_credentials, :forge_auth, %{
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
         token: "SECRET-shell"
       })

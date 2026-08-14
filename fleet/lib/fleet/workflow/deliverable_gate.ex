@@ -2,17 +2,39 @@ defmodule Fleet.Workflow.DeliverableGate do
   @moduledoc """
   World-side gate before publication: base ancestry, commit identity/trailer, and
   per-commit secret scan. It trusts no pod assertion; any failure prevents push.
+
+  The first three checks are DECIDABLE -- an ancestry either holds or it does not. The secret scan
+  is not: it matches known credential shapes on added text (see `scan_secrets/2` for the scope and
+  what falls outside it). Passing it is the absence of a known shape, never a clean bill; the
+  credential rails, not this scan, are what keep the fleet's own tokens out of a workspace.
   """
 
   @git_timeout_ms 15_000
 
-  # High-signal patterns (low false-positive). The pod's OAuth token is a JWT `eyJ…`.
+  # WHAT THIS SCAN IS, AND WHAT IT IS NOT. It is a filter on credential shapes that ANNOUNCE
+  # themselves: a fixed prefix or header long enough that a match is a secret rather than a
+  # coincidence. It is NOT a proof that the diff carries no credential, and it must never be read
+  # as one -- `:ok` here means "no known shape was seen", not "clean".
+  #
+  # The line is drawn at the false-positive cost, and it is not adjustable by taste: this gate
+  # BLOCKS a push. A pattern that fires on legitimate content turns the publication path into a
+  # wall, and the pods have no way around it.
+  #
+  # ⚠ THE CREDENTIAL THIS FLEET ACTUALLY HANDLES IS THE ONE THAT CANNOT BE MATCHED. A Gitea token
+  # is 40 hex characters with no prefix -- the exact shape of every git SHA in every diff, so a
+  # pattern for it would refuse nearly every commit. It is held out of diffs by the credential
+  # rails (never in argv, never in a workspace file), not by this scan, and writing that down is
+  # the only honest thing to do about it. Same for a plaintext password or a connection string:
+  # shapeless, hence out of reach here.
   @secret_patterns [
     {~r/sk-ant-[A-Za-z0-9_\-]{8,}/, "anthropic_key"},
+    # The pod's OAuth token is a JWT `eyJ...`.
     {~r/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/, "jwt_token"},
     {~r/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "private_key"},
     {~r/AKIA[0-9A-Z]{16}/, "aws_access_key"},
-    {~r/ghp_[A-Za-z0-9]{36}/, "github_pat"}
+    {~r/ghp_[A-Za-z0-9]{36}/, "github_pat"},
+    {~r/xox[baprs]-[A-Za-z0-9\-]{10,}/, "slack_token"},
+    {~r/AIza[0-9A-Za-z_\-]{35}/, "google_api_key"}
   ]
 
   # Files forbidden in a diff (creds/secrets by name). Match on basename.
@@ -23,7 +45,8 @@ defmodule Fleet.Workflow.DeliverableGate do
           | {:bad_identity, [String.t()]}
           | {:missing_coauthor_trailer, String.t(), [String.t()]}
           | {:secret_detected, String.t(), String.t()}
-          # BL-6-16: an instruction-tier path (.claude/**, non-root CLAUDE.md) in the chain.
+          # A GOVERNANCE path in the chain: instruction-tier (BL-6-16 — `.claude/**`, non-root
+          # `CLAUDE.md`) or the project declaration (`.lcars.json` at the root).
           | {:forbidden_path_in_diff, String.t()}
           | {:git_error, term()}
           # Git timeout, distinct from the "not ancestor" diagnostic and from a hard git error.
@@ -191,6 +214,13 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc """
   Scans every commit's added content and filenames for secrets. Net-diff scanning
   would miss a secret committed then removed while publication still transfers it.
+
+  SCOPE, because `:ok` here authorizes a push: known credential SHAPES on lines the diff renders
+  as ADDED text, plus a blacklist of filenames. Three things are therefore outside it by
+  construction -- a credential with no distinctive shape (a Gitea token is 40 hex, like every SHA
+  in the diff; a password; a connection string), a secret inside a file git does not render as
+  text, and any content the diff does not present as an addition. `:ok` means no known shape was
+  seen; it never means the chain is clean.
   """
   @spec scan_secrets(Path.t(), String.t()) :: :ok | {:error, reason()}
   def scan_secrets(workspace, base_sha) do
@@ -212,12 +242,12 @@ defmodule Fleet.Workflow.DeliverableGate do
       {out, 0} ->
         files = String.split(out, "\n", trim: true)
 
-        # BL-6-16 second line (independent of the workspace sanitizer): instruction-tier paths
-        # are FORBIDDEN in a deliverable chain — a commit touching `.claude/**` or a NON-root
+        # BL-6-16 second line (independent of the workspace sanitizer): GOVERNANCE paths are
+        # FORBIDDEN in a deliverable chain — a commit touching `.claude/**` or a NON-root
         # `CLAUDE.md` would plant (or delete) directive material in the target repo at harvest.
         # Same per-commit listing as the secret scan below: zero extra git call. The ROOT
         # CLAUDE.md stays legitimate (a scribe may document the project).
-        case Enum.find(files, &forbidden_instruction_path?/1) do
+        case Enum.find(files, &forbidden_governance_path?/1) do
           nil ->
             case Enum.find(files, &Regex.match?(@secret_file_re, &1)) do
               nil -> :ok
@@ -233,9 +263,36 @@ defmodule Fleet.Workflow.DeliverableGate do
     end
   end
 
-  defp forbidden_instruction_path?(path) do
+  # LA REGLE EST « UN PRODUCTEUR NE MODIFIE PAS CE QUI LE GOUVERNE », et elle a deux objets.
+  #
+  # Le premier est l'etage INSTRUCTION (BL-6-16) : `.claude/**` et un `CLAUDE.md` NON-racine
+  # planteraient de la matiere directive dans le depot cible. Le `CLAUDE.md` RACINE reste legitime —
+  # un scribe documente son projet.
+  #
+  # Le second est la DECLARATION DU PROJET, `.lcars.json` a la racine, et il est arrive apres coup
+  # (2026-08-13) parce que personne n'avait mis les deux faits cote a cote : ce fichier porte
+  # `pipeline_default`, c'est-a-dire QUELLE CARTE route le ticket — donc quel jury, quelles portes,
+  # quel CI. Il est lu a chaud par `StepDispatcher` (`Intensity.pipeline_default/2`) depuis la face
+  # code, alignee sur `main` apres merge. Un producteur pouvait donc le reecrire dans son espace de
+  # travail, le commiter, et la porte laissait passer : elle verifie l'ancetre, l'identite, le
+  # trailer et les secrets, jamais ce chemin. Basculer la declaration vers une carte `jury: []` /
+  # `ci: ignore` faisait tomber les juges du ticket SUIVANT, et la seule chose qui restait entre
+  # l'agent et ce resultat etait qu'un relecteur remarque le diff — exactement la garantie qu'un
+  # plancher mecanique existe pour ne pas avoir a demander.
+  #
+  # ⚠ Uniquement A LA RACINE, et c'est deliberе : rien ne lit un `.lcars.json` plus profond, et
+  # interdire un chemin que personne ne lit est une regle que le prochain lecteur ne saura pas
+  # justifier. Symetrie inverse de `CLAUDE.md` (racine permise, profond interdit) parce que les deux
+  # fichiers sont load-bearing a des endroits opposes de l'arbre.
+  #
+  # L'HUMAIN, LUI, N'EST PAS BORNE PAR CETTE PORTE : il possede le depot et edite la declaration
+  # directement. Ce garde ne parle que d'une chaine de livraison produite par un pod.
+  defp forbidden_governance_path?(path) do
     segments = Path.split(path)
-    ".claude" in segments or (Path.basename(path) == "CLAUDE.md" and length(segments) > 1)
+
+    ".claude" in segments or
+      (Path.basename(path) == "CLAUDE.md" and length(segments) > 1) or
+      segments == [Fleet.Layout.project_declaration_file()]
   end
 
   defp scan_secret_content(workspace, base_sha) do
@@ -274,8 +331,8 @@ defmodule Fleet.Workflow.DeliverableGate do
     # Shell kills the git process group at the deadline; timeout remains distinct from git failure.
     runner =
       Application.get_env(
-        :fleet_workflow,
-        :deliverable_gate_git_runner,
+        :lcars_fleet,
+        :workflow_deliverable_gate_git_runner,
         &Fleet.Credentials.Shell.git/2
       )
 

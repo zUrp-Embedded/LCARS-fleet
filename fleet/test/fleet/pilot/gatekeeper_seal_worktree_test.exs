@@ -20,13 +20,13 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
   end
 
   setup %{tmp_dir: tmp} do
-    TestEnv.put_env_restoring(:fleet_pilot, :worktree_sync, SpySync)
+    TestEnv.put_env_restoring(:lcars_fleet, :pilot_worktree_sync, SpySync)
 
     # `seal_and_merge` signs INTERNALLY (`as_gatekeeper` → RoleToken) and is FAIL-CLOSED
     # (soft-default #3: no system fallback). We place a resolvable gatekeeper token in a hermetic tmp
     # (never the runner's real `/home/private`) → the seal proceeds; this test verifies the worktree
     # projection, not the token.
-    TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, tmp)
+    TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
 
     :ok
@@ -57,7 +57,7 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     # `forge_opts` unchanged = system token kept → merge as lcars-system.)
     empty = Path.join(System.tmp_dir!(), "no-gk-token-#{System.unique_integer([:positive])}")
     File.mkdir_p!(empty)
-    TestEnv.put_env_restoring(:fleet_credentials, :role_tokens_dir, empty)
+    TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
 
     assert {:error, :role_token_unavailable} =
              GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],

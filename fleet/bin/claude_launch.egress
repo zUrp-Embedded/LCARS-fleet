@@ -13,7 +13,7 @@
 #
 # A SECOND VENDOR BRINGS ITS OWN: `bin/codex_launch.sh` would sit beside a `bin/codex_launch.egress`
 # naming `api.openai.com`. Adding a vendor is adding two files next to the others — never editing a
-# list inside the runtime, which is what would make the sanctuary itself vendor-aware.
+# list inside the runtime, which is what would make the projected world itself vendor-aware.
 #
 # ─── WHERE THIS LIST COMES FROM ───────────────────────────────────────────────────────────────
 # Anthropic PUBLISHES the one a sandboxed Claude Code expects (`sandbox-runtime`, the "sandbox

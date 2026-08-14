@@ -22,6 +22,7 @@
 #
 # USAGE
 #   enroll-catalogue.sh --catalogue <root> --tofu-dir <dir> [--image <img>] [--repo <fleet-dir>]
+#                       [--served "<roles deja servis par cette boite>"]
 #
 #   Deux chemins de lecture, selon ce qu'on a sous la main :
 #     --repo <dir>     un arbre avec mix     -> mix lcars.catalogue.roles (dev, banc)
@@ -36,6 +37,7 @@ CATALOGUE=""
 TOFU_DIR=""
 IMAGE=""
 REPO=""
+SERVED=""
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 say() { echo "[enroll-catalogue] $*"; }
@@ -47,6 +49,10 @@ while [[ $# -gt 0 ]]; do
     --tofu-dir)  TOFU_DIR="${2:?}";  shift 2 ;;
     --image)     IMAGE="${2:?}";     shift 2 ;;
     --repo)      REPO="${2:?}";      shift 2 ;;
+    # Les roles DEJA servis par cette boite (sortie d'un enrolement precedent, ou le defaut de
+    # provision-lib). Sans eux, le PROV_ROLES rendu ici est complet pour CE catalogue et faux pour
+    # la boite : le mint ne verrait plus les autres.
+    --served)    SERVED="${2:?}";    shift 2 ;;
     -h|--help)   sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)           die "argument inconnu: $1" ;;
   esac
@@ -95,12 +101,63 @@ mv -f "$TMP" "$DEST" || die "ecriture impossible dans $TOFU_DIR" 3
 # PROV_ROLES est la liste qui GAGNE au mint (50-forge la passe en --roles). Elle doit etre le meme
 # roster que les comptes, sinon un role a un compte sans token — l'exact symetrique du defaut
 # d'origine.
-ROLES_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["roles"]))')"
+#
+# ⚠ CETTE LIGNE ETAIT UN FRAGMENT PRESENTE COMME UN EXPORT COMPLET, et ca casse en silence dans les
+# deux sens. Elle ne portait que les roles METIER du catalogue lu : la prendre verbatim retire du
+# mint (1) les comptes `system_*`, qui sont une autorite d'INSTANCE presente dans toutes les orgs,
+# et (2) les roles des autres catalogues deja servis par cette boite. Vecu le 2026-08-12 en enrolant
+# `web` sur un banc qui servait deja `fleet` : le mint ne voyait plus que quatre comptes.
+# Les `system_*` sont dans le tfvars, on les remet. Les autres catalogues, ce script ne les connait
+# pas — d'ou `--served`, et l'avertissement quand il est absent : mieux vaut dire qu'on ne sait pas
+# que rendre une ligne qui a l'air de tout savoir.
+ROLES_LINE="$(printf '%s' "$TFVARS" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+seen, out = set(), []
+for r in d.get("system_roles", []) + d.get("roles", []):
+    if r not in seen:
+        seen.add(r); out.append(r)
+print(" ".join(out))')"
+
+if [[ -n "$SERVED" ]]; then
+  ROLES_LINE="$(ROLES_LINE="$ROLES_LINE" SERVED="$SERVED" python3 -c '
+import os
+seen, out = set(), []
+for r in (os.environ["SERVED"] + " " + os.environ["ROLES_LINE"]).split():
+    if r not in seen:
+        seen.add(r); out.append(r)
+print(" ".join(out))')"
+fi
 
 # L'ORG que ce catalogue porte — son nom. tofu la lit seul depuis roles.auto.tfvars.json (`var.org`) ;
 # cette ligne-ci est pour le SHELL, qui n'a pas de mecanisme equivalent : `50-forge.sh` sonde les
 # adhesions et publicise sur `$PROV_FORGE_ORG`, et pointer la mauvaise org rend des 404 muets.
 ORG_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("org",""))')"
+
+# L'AVERTISSEMENT QUAND ON NE SAIT PAS. Sans `--served`, la ligne rendue est complete pour CE
+# catalogue et muette sur les autres — et c'est exactement la forme d'erreur qui ne se voit qu'au
+# premier dispatch d'un role dont le token n'a pas ete minte.
+if [[ -z "$SERVED" ]]; then
+  say "⚠ --served absent : PROV_ROLES ci-dessous couvre CE catalogue et les comptes systeme, PAS"
+  say "  les roles des autres catalogues deja servis par la boite. Si elle en sert d'autres, unir"
+  say "  les listes avant le mint (un role sans token bloque au premier dispatch, pas a l'enrolement)."
+fi
+
+# ─── LES TROIS PIEGES, ET ILS NE VIVENT PLUS DANS UN TRANSCRIPT ─────────────────────────────────
+# Enroler `web` sur un banc qui servait deja `fleet` (2026-08-12) a coute trois passes, et aucune
+# des trois causes n'etait ecrite nulle part. Elles le sont ici, au moment ou l'operateur en a
+# besoin, et pas dans un README qu'il lira apres.
+if [[ -d "$TOFU_DIR/instance" ]]; then
+  say "⚠ PIEGE 1 — le module instance/ est present dans $TOFU_DIR. Il cree les comptes system_* et il se"
+  say "  joue UNE FOIS PAR FORGE. Sur une forge deja provisionnee (un banc bootstrappe, une"
+  say "  instance existante), le rejouer rend « user already exists » et fait echouer l'apply."
+  say "  Retire-le du dossier de travail si la forge porte deja ses comptes systeme."
+fi
+say '⚠ PIEGE 2 — le mot de passe. tofu cree les comptes avec UN seul seed_password ; la boite,' 
+say "  elle, tient une carte PAR ROLE (/home/private/forge-role-passwords.json). Les deux ne se"
+say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des jetons rend"
+say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
+say ""
 
 say "catalogue : $CATALOGUE (lu via $SRC)"
 say "ecrit     : $DEST"

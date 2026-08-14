@@ -19,7 +19,7 @@ defmodule Fleet.SPBuilder.Monk do
   ## opts
 
     * `:monk_registry_root` — root resolving the registry's relative path
-      (test-seam; defaults to config `:fleet_sp_builder, :monk_registry_root`
+      (test-seam; defaults to config `:lcars_fleet, :sp_builder_monk_registry_root`
       then `Fleet.Catalogue.monk_registry_root/0`).
 
   The `monk_registry` field in the cap-profile = basename (e.g. `alpha.yaml`)
@@ -38,7 +38,7 @@ defmodule Fleet.SPBuilder.Monk do
     else
       root =
         Keyword.get(opts, :monk_registry_root) ||
-          Application.get_env(:fleet_sp_builder, :monk_registry_root) ||
+          Application.get_env(:lcars_fleet, :sp_builder_monk_registry_root) ||
           Fleet.Catalogue.monk_registry_root()
 
       path = Path.join(root, registry_rel)

@@ -11,6 +11,29 @@ defmodule Fleet.Starfleet.AuditConsumer do
     * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
       `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
 
+  ## HALF OF THIS SURVIVES A RESTART, AND IT IS NOT THE HALF YOU WOULD ASSUME
+
+  "Audit-grade" describes the CONTENT of these lines, never their durability. The split is by
+  Logger level, and `Fleet.DurableLog` writes `warning` and above:
+
+    * ANOMALIES are durable — `pod.failed`, `work_item.failed`, `state.corrupt`, `boot_partial`,
+      `boot_failed`.
+    * THE NOMINAL TIMELINE IS NOT — `work_item.enqueued` / `assigned` / `completed` / `cleared` and
+      `fleet.boot_complete` are `:info`, so they live in the daemon's console and die with it.
+
+  The consequence, stated because it bites exactly when it is needed: after a restart a durable
+  `pod.failed` cannot be tied back to the `work_item.assigned` that produced it. Anomalies are
+  reconstructible; the story that led to them is not.
+
+  Raising these to `warning` is NOT the fix and must not be done as one: `info` is the level this
+  codebase assigns to a lifecycle milestone, `warning` the level at which something DEGRADED, and
+  moving them would both lie about severity and bury the durable trace under routine passes — the
+  reason `DurableLog` names for excluding `info` in the first place.
+
+  A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not
+  in a level bump. `Fleet.Starfleet.AuditLog` is that shape and is reserved for Cat-5 by design, so
+  widening it is a DECISION with a schema behind it, not a patch.
+
   `:"pod.drift"` handler (type-only clause): DORMANT — NO producer emits it (the claimed
   PermanentBoot producer does not exist). Also consumed by
   DriftMonitor. Kept wired for the day a real drift signal is produced.
@@ -48,19 +71,12 @@ defmodule Fleet.Starfleet.AuditConsumer do
   end
 
   # V2 extensions (MCPMonitor).
-  def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert", payload: p},
-        state
-      ) do
-    Logger.warning(
-      "AUDIT starfleet.sdk.upstream_alert package=#{inspect(Map.get(p, "package"))} " <>
-        "current=#{inspect(Map.get(p, "current"))} " <>
-        "upstream=#{inspect(Map.get(p, "upstream"))}"
-    )
-
-    {:noreply, %{state | events_count: state.events_count + 1}}
-  end
-
+  #
+  # ⚠ UN HANDLER `sdk.upstream_alert` VIVAIT ICI SANS EMETTEUR (retire le 2026-08-14, 6-016). Il
+  # etait la moitie consommatrice de `MCPWatcher`, supprime le 2026-08-03 (BL-6-44) — la veille de
+  # derive du SDK est passee en CI. Le producteur est parti, la clause est restee : elle se lisait
+  # comme un rail d'audit vivant, et une clause qu'aucun evenement n'atteint ne se distingue pas
+  # d'une clause qui marche.
   def handle_info(
         %Fleet.Event{source: :starfleet, type: :"mcp.server_crashed", payload: p},
         state

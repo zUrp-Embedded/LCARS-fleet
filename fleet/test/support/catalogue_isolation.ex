@@ -5,7 +5,7 @@ defmodule Fleet.Test.CatalogueIsolation do
   ## Why a helper and not two `put_env` calls
 
   Since the mechanism moved to its own catalogue, a deployment resolves roles from the UNION of the
-  two roots. A suite that only swapped `:fleet_cap_profile, :root_dir` therefore no longer measured
+  two roots. A suite that only swapped `:lcars_fleet, :cap_profile_root_dir` therefore no longer measured
   its fixture: it measured the fixture PLUS the four mechanism roles, and the symptom was a
   cheerful "2 roles declare the gatekeeper capability" from a test that had written exactly one.
 
@@ -29,15 +29,15 @@ defmodule Fleet.Test.CatalogueIsolation do
   def isolate!(dir, opts \\ []) do
     system = Keyword.get(opts, :system, dir)
 
-    prev_business = Application.fetch_env(:fleet_cap_profile, :root_dir)
-    prev_system = Application.fetch_env(:fleet_catalogue, :system_root)
+    prev_business = Application.fetch_env(:lcars_fleet, :cap_profile_root_dir)
+    prev_system = Application.fetch_env(:lcars_fleet, :catalogue_system_root)
 
-    Application.put_env(:fleet_cap_profile, :root_dir, dir)
-    Application.put_env(:fleet_catalogue, :system_root, system)
+    Application.put_env(:lcars_fleet, :cap_profile_root_dir, dir)
+    Application.put_env(:lcars_fleet, :catalogue_system_root, system)
 
     ExUnit.Callbacks.on_exit(fn ->
-      restore(:fleet_cap_profile, :root_dir, prev_business)
-      restore(:fleet_catalogue, :system_root, prev_system)
+      restore(:lcars_fleet, :cap_profile_root_dir, prev_business)
+      restore(:lcars_fleet, :catalogue_system_root, prev_system)
     end)
 
     :ok

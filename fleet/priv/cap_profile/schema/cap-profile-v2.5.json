@@ -214,7 +214,7 @@
             },
             "output_compression": {
               "type": "boolean",
-              "description": "Compress this role's Bash output before it enters the agent's context (token-saver hook). Default (absent) = true. Set false where the FULL output is the work: a judge reading a diff, a debug run. Composed with the fleet knob by an AND — see LaunchSpec.output_compression?/1: the fleet may only CUT compression, never force it on a role that declared false, because compression LOSES information and the safe direction is toward less of it."
+              "description": "INERT TODAY — declaring this changes nothing, in either direction: the composed verdict (LaunchSpec.output_compression?/1) reaches no launch, because the token-saver hook rides a PreToolUse tier a pod CANNOT load — the sanctuary mounts only plugins/ and skills/, pod_settings_json/1 writes no hooks key, and the human .claude is excluded BECAUSE of its hooks. No carrier was ever lost: the v1 one targeted the user tier that --setting-sources excludes unconditionally, so it would never have fired either (measured 2026-08-07). The brick itself IS shipped and tested; wiring it means INVENTING a vehicle in a sanctuary designed to mount none — a feature with a design decision behind it, not a fix. See vendor/token_saver/VENDOR.md. INTENDED semantics, kept so the field means the same thing the day it is wired: compress this role's Bash output before it enters the agent's context. Default (absent) = true. Set false where the FULL output is the work: a judge reading a diff, a debug run. Composed with the fleet knob by an AND — the fleet may only CUT compression, never force it on a role that declared false, because compression LOSES information and the safe direction is toward less of it."
             }
           }
         },
@@ -281,6 +281,7 @@
             "object",
             "null"
           ],
+          "description": "THE CATALOGUE HALF ONLY, and the slot carries two populations. What a card may declare is listed here and validated (additionalProperties: false). The pilot then INJECTS repo, base_sha, gate_base_sha and pr_base_branch at dispatch through Fleet.CapProfile.with_project/2, which does not re-validate — they are read by live code and are absent here BY DESIGN, since a card that set base_sha would validate and then be overwritten at every dispatch, i.e. a knob that reads as configuration and does nothing. Single source of the runtime half: Fleet.CapProfile.runtime_project_keys/0, held against this list by mix lcars.contracts.check.",
           "additionalProperties": false,
           "properties": {
             "repo_path": {

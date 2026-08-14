@@ -25,6 +25,12 @@ defmodule Fleet.Conflict do
   and duplicate YAML keys at `:high`. Any residual (`:complex`, or a resolvable hunk below threshold) leaves `merged: nil`; the
   caller then routes to the producer conflict-rework / gatekeeper, never writing on a partial guess.
 
+  `resolve/2` returns `{:error, {:unterminated_conflict, state, line}}` when the markers do not
+  close. That case USED to come back as `{:ok, %Report{merged: nil, hunks: [], stats: %{total: 0}}}`
+  -- the exact report of a file with no conflict -- so "I could not read this" and "there is nothing
+  here" were the same answer. It is an error and not an empty report because the two demand opposite
+  moves from every caller: one aborts, the other proceeds.
+
   Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
   resolution is caught downstream -- the guard the standalone engine lacked.
   """
@@ -74,29 +80,35 @@ defmodule Fleet.Conflict do
   `:min_confidence` (default `:high`) is the floor below which a resolvable hunk is left as a
   residual rather than applied.
   """
-  @spec resolve(String.t(), [opt()]) :: {:ok, Report.t()}
+  @spec resolve(String.t(), [opt()]) :: {:ok, Report.t()} | {:error, Parser.error()}
   def resolve(content, opts \\ []) do
     min = Keyword.get(opts, :min_confidence, :high)
 
-    {output, hunks_rev, all_resolved?} =
-      content
-      |> Parser.segments()
-      |> Enum.reduce({[], [], true}, fn
-        {:text, lines}, {out, hs, ok} ->
-          {out ++ lines, hs, ok}
+    with {:ok, segments} <- Parser.segments(content) do
+      {output, hunks_rev, all_resolved?} =
+        Enum.reduce(segments, {[], [], true}, fn
+          {:text, lines}, {out, hs, ok} ->
+            {out ++ lines, hs, ok}
 
-        {:conflict, raw}, {out, hs, ok} ->
-          hunk = Classifier.to_hunk(raw)
+          {:conflict, raw}, {out, hs, ok} ->
+            hunk = Classifier.to_hunk(raw)
 
-          case try_resolve(hunk, min) do
-            {:ok, lines} -> {out ++ lines, [hunk | hs], ok}
-            :unresolved -> {out ++ restore_markers(hunk), [hunk | hs], false}
-          end
-      end)
+            case try_resolve(hunk, min) do
+              # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here on:
+              # nothing may be appended for this hunk. A `restore_markers/1` did rebuild the marker
+              # block into `out` and its result was provably never read -- the same branch that
+              # called it set `all_resolved?` to false. It also wrote FIXED labels (`<<<<<<< ours`)
+              # where git writes the branch or revision, so the day someone consumed it, partial
+              # merge would have shipped files whose markers lost the names a human resolves by.
+              {:ok, lines} -> {out ++ lines, [hunk | hs], ok}
+              :unresolved -> {out, [hunk | hs], false}
+            end
+        end)
 
-    hunks = Enum.reverse(hunks_rev)
-    merged = if all_resolved? and hunks != [], do: Enum.join(output, "\n"), else: nil
-    {:ok, %Report{merged: merged, hunks: hunks, stats: stats(hunks)}}
+      hunks = Enum.reverse(hunks_rev)
+      merged = if all_resolved? and hunks != [], do: Enum.join(output, "\n"), else: nil
+      {:ok, %Report{merged: merged, hunks: hunks, stats: stats(hunks)}}
+    end
   end
 
   defp try_resolve(hunk, min) do
@@ -111,14 +123,6 @@ defmodule Fleet.Conflict do
   end
 
   defp rank(label), do: Map.fetch!(@confidence_rank, label)
-
-  # Restore unresolved hunks in git's diff2/diff3 marker shape.
-  defp restore_markers(hunk) do
-    base = if hunk.base_lines != [], do: ["||||||| base" | hunk.base_lines], else: []
-
-    ["<<<<<<< ours" | hunk.ours_lines] ++
-      base ++ ["=======" | hunk.theirs_lines] ++ [">>>>>>> theirs"]
-  end
 
   # Trivial routes work; writable separately authorizes disk mutation.
   defp stats(hunks) do

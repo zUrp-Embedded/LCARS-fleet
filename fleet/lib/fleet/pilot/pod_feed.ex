@@ -32,12 +32,33 @@ defmodule Fleet.Pilot.PodFeed do
 
   Never raises: any failure comes back as `{:error, term()}` so a courtesy mirror can never break
   the act it mirrors.
+
+  ⚠ WRITE IN PLACE, NEVER temp-file-then-rename. The pod sees this file through a `--ro-bind` on
+  the FILE (bwrap_launch), so its view follows the INODE, not the path. `File.write/2` truncates
+  the existing inode and the bind keeps up; a rename would swap the inode underneath and freeze the
+  pod's view on the old one — silently. The agent would read a dead journal believing it live, and
+  nothing in the runtime would notice: the writes keep succeeding, on a file nobody reads.
+
+  The read-back below is why that bind exists. This function re-reads the file before rewriting it,
+  so anything the pod could append would come back RE-EMITTED under the runtime's own signature —
+  an agent laundering lines into the fleet's record, on the one object whose job is to tell it what
+  actually happened. The RO mount, not this code, is what makes the read-back safe.
   """
   @spec append(String.t(), String.t()) :: :ok | {:error, term()}
   def append(pod_dir, line) when is_binary(pod_dir) and is_binary(line) do
     path = Path.join(pod_dir, @feed_file)
-    {{_y, _m, _d}, {h, mi, _s}} = :calendar.local_time()
-    stamp = :io_lib.format("~2..0B:~2..0B", [h, mi]) |> IO.iodata_to_binary()
+    # LA DATE, ET C'EST LE CORRECTIF D'UN COMPORTEMENT, PAS UNE COQUETTERIE. L'estampille etait
+    # `HH:MM` seule sur un fichier borne a 200 lignes — qui couvre donc plusieurs JOURS sur un
+    # projet calme. Un `09:14` y apparait trois fois sans qu'on puisse dire lequel est
+    # d'aujourd'hui, et le lecteur ne peut pas repondre a « ou on en est » sans compter les
+    # lignes. Mesure 2026-08-12, sur plusieurs architectes reels : faute de voir l'etat d'un coup
+    # d'oeil ici, ils le recopiaient a la main dans le backlog de leur atelier, sous une section
+    # « ## en vol » qu'ils inventaient — dans un fichier qui est une FILE d'attente, pas un
+    # registre. Le defaut n'etait pas un fichier manquant chez eux, il etait dans cette ligne.
+    {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
+
+    stamp =
+      :io_lib.format("~2..0B-~2..0B ~2..0B:~2..0B", [mo, d, h, mi]) |> IO.iodata_to_binary()
 
     existing =
       case File.read(path) do

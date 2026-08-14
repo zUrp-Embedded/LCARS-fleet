@@ -19,8 +19,8 @@ defmodule Fleet.API.ControlRouterTest do
     # OPERATIONAL status by default — the routing tests below isolate the router from the consumer's
     # presence; the degraded path has its own test that overrides this seam.
     Fleet.TestEnv.put_env_restoring(
-      :fleet_api,
-      :spawn_dispatch_status_fun,
+      :lcars_fleet,
+      :api_spawn_dispatch_status_fun,
       fn -> {:operational, %{consumer: true, subscribed: true}} end
     )
 
@@ -166,8 +166,8 @@ defmodule Fleet.API.ControlRouterTest do
       # The 202 used to go out over the lossy Bus even with no subscriber — a lie: the operator
       # believed a pod was queued, nothing took it, and there is no forge net for this path.
       Fleet.TestEnv.put_env_restoring(
-        :fleet_api,
-        :spawn_dispatch_status_fun,
+        :lcars_fleet,
+        :api_spawn_dispatch_status_fun,
         fn -> {:degraded, %{consumer: false, note: "PublishConsumer not alive"}} end
       )
 

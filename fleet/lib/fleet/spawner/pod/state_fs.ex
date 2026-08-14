@@ -14,8 +14,15 @@ defmodule Fleet.Spawner.Pod.StateFs do
   @doc """
   Clears a succeeded, released or killed snapshot before deliberate respawn. Missing, unreadable and
   non-terminal snapshots are left untouched.
+
+  Returns `{:error, reasons}` when a terminal snapshot was found and its erasure did NOT complete.
+  That return is the whole point: a surviving `state.json` makes `recover_or_init/1` read the
+  tombstone, class it `:release`, and stop the fresh pod right after teardown — a spawn that
+  reports success and produces nothing. The failure used to be logged here and then flattened to
+  `:ok`, so the caller could not tell a cleared tombstone from a surviving one.
   """
-  @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) :: :ok
+  @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) ::
+          :ok | {:error, [term()]}
   def clear_terminal_snapshot(pod_id, %Fleet.CapProfile{} = cap_profile, opts \\ [])
       when is_binary(pod_id) and is_list(opts) do
     state_fs_path = Paths.state_fs_path_for(pod_id, cap_profile, opts)
@@ -34,15 +41,18 @@ defmodule Fleet.Spawner.Pod.StateFs do
             "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erased (FRESH re-spawn)"
           )
 
-        {:error, _} ->
-          Logger.warning(
-            "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erase INCOMPLETE (see errors " <>
-              "above) — a surviving state.json may loop the pod on :release"
-          )
-      end
+          :ok
 
-      :ok
+        {:error, reasons} ->
+          Logger.error(
+            "pod #{pod_id} clear_terminal_snapshot: tombstone :#{phase} erase INCOMPLETE (see errors " <>
+              "above) — a surviving state.json loops the pod on :release; spawn REFUSED"
+          )
+
+          {:error, reasons}
+      end
     else
+      # Missing, unreadable or non-terminal: nothing to clear, and that is not a failure.
       _ -> :ok
     end
   end

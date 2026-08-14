@@ -48,7 +48,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Every function takes the MCP `state` as its last argument and reads ONLY `pod_id` from it (the gate) —
   never an identity from the wire arguments.
 
-  ## Seams (app-env `:fleet_mcp`)
+  ## Seams (app-env `:lcars_fleet`, keys prefixed `mcp_*`)
 
     * `:forge_client` (default `Fleet.Forge.Client`) — forge client, runtime
       dispatch (no compile-time dep on fleet_pilot). TWO declared behaviours over the SAME seam module
@@ -60,7 +60,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
       of the pod's role.
     * `:delegation_org` — forge org of onboarded projects. OPTIONAL override: by default the org
-      is the one the poller DISCOVERS on (`:fleet_pilot, :fleet_org`, default `"fleet"`), because
+      is the one the poller DISCOVERS on (`:lcars_fleet, :pilot_fleet_org`, default `"fleet"`), because
       onboarding into an org nobody scans is a silently dead rail.
   """
 
@@ -78,6 +78,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
   alias Fleet.EventRouter.Bus
   alias Fleet.MCP.PodTools.GithubPublish
+  alias Fleet.Project.GitOps
+
+  @scratch_file "scratchpad.md"
+  @scratch_nudge_at 150
 
   alias Fleet.MCP.PodTools.Delegation.{
     DependencyForge,
@@ -162,7 +166,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok,
            retire_superseded(forge, repo, supersedes, target_state, idempotent_result(existing))}
 
-        :none ->
+        dedup ->
           # THE LOT FIRST, and its failure is a REFUSAL where the brief's is a degradation. The two
           # are not the same object: a brief that cannot be materialized still travels, inline, so
           # the producer has its order. A lot has no inline form — degrading would create a ticket
@@ -178,17 +182,20 @@ defmodule Fleet.MCP.PodTools.Delegation do
               |> with_supersedes(supersedes)
               |> with_op_marker(marker)
 
-            create_and_finish(
-              forge,
-              repo,
-              title,
-              full_body,
-              identity,
-              destination,
-              depends_on,
-              supersedes,
-              target_state
-            )
+            with {:ok, created} <-
+                   create_and_finish(
+                     forge,
+                     repo,
+                     title,
+                     full_body,
+                     identity,
+                     destination,
+                     depends_on,
+                     supersedes,
+                     target_state
+                   ) do
+              {:ok, with_dedup_unverified(created, dedup)}
+            end
           end
       end
     else
@@ -404,7 +411,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # next to its switch. Off, the refusal is NAMED (`:delete_project_disabled`) rather than looking
   # like a missing tool — an agent told "disabled" asks its human, an agent told nothing invents a
   # workaround.
-  @delete_flag :allow_delete_project
+  @delete_flag :mcp_allow_delete_project
 
   @spec delete_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, args, state) when is_binary(full_name) and is_map(args) do
@@ -412,7 +419,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       not delete_armed?() ->
         Logger.warning(
           "Delegation: delete_project(#{full_name}) REFUSED — disarmed by deployment " <>
-            "(config :fleet_mcp, #{inspect(@delete_flag)} is not true)"
+            "(config :lcars_fleet, #{inspect(@delete_flag)} is not true)"
         )
 
         {:error, :delete_project_disabled}
@@ -427,7 +434,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # `=== true`, not truthiness: a flag set to a string, a 1 or an accidental non-nil value must NOT
   # arm an irreversible gesture. Only the boolean says yes.
-  defp delete_armed?, do: Application.get_env(:fleet_mcp, @delete_flag, false) === true
+  defp delete_armed?, do: Application.get_env(:lcars_fleet, @delete_flag, false) === true
 
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
   # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
@@ -642,6 +649,134 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Appends one stamped note to the project's workshop scratchpad, commits and pushes it.
+
+  THE REFLEX IS THE FEATURE. A pod's L0 — session-level, ephemeral, alive — is exactly what a
+  compaction eats, and LCARS turned the vendor's own memory OFF for every pod
+  (`autoMemoryEnabled: false`: siloed, useless to the fleet, doctrine pollution). What replaces it
+  has to cost nothing at the moment of the thought: ONE argument, no path, no format, no decision
+  about where things live. An architect who must choose a file at the instant it has an idea does
+  not park the idea — measured on real architects, it writes its in-flight state into `backlog.md`
+  under a `## en vol` section it invents, because that file is the only one that LOOKS like it
+  accepts what happened.
+
+  APPEND-ONLY IS A PROPERTY OF THE DOOR, NOT A PROMISE. This tool only knows how to add, so the
+  discipline holds during the whole flow without anyone maintaining it. Cleaning is a separate,
+  deliberate act: the architect has the face mounted RW and edits the file by hand at triage time.
+  An absolute ban would end in a 50k-line file nobody can exploit, which is the same uselessness
+  by the other door.
+
+  THE NUDGE RIDES ON THE RETURN VALUE, and that is the whole mechanism. Past `#{@scratch_nudge_at}`
+  lines the answer stops being a receipt and asks for a triage. An agent cannot NOT read what the
+  tool it just called gave back — this is the only place in the system where a rule reaches it AT
+  THE MOMENT OF THE GESTURE, instead of a spawn-time instruction that a compaction removes first.
+
+  It PUSHES, and that is a change of contract for this face: `workshop` was declared "nothing
+  pushes it on its own". Pushing an orphan branch that is never merged publishes nothing into the
+  product — it makes the notes survive the box, which is the point of writing them.
+  """
+  @spec scratch(map(), String.t()) :: {:ok, map()} | {:error, term()}
+  def scratch(state, note) when is_binary(note) do
+    # LA PORTE EST ICI, DANS CE CORPS, et pas un cran plus bas : le contrat `mcp.tools_gated` lit
+    # l'AST et exige que la fonction de delegation appelee par le tool porte elle-meme son gate —
+    # un tool dont la porte vit dans un helper prive est, pour lui, un tool sans porte. C'est la
+    # bonne exigence : elle empeche qu'un refactor deplace la garde hors de vue sans que rien ne
+    # le dise. Et autoriser AVANT de valider la charge utile est l'ordre juste de toute facon.
+    with {:ok, %{repo: repo}} <- require_architect(state) do
+      case String.trim(note) do
+        "" -> {:error, :note_empty}
+        trimmed -> scratch_write(repo, trimmed)
+      end
+    end
+  end
+
+  defp scratch_write(repo, note) do
+    dir = Path.join(Fleet.Layout.workshop_root(), Fleet.Layout.project_name(repo))
+    path = Path.join(dir, @scratch_file)
+
+    if File.dir?(dir) do
+      case File.write(path, scratch_line(note), [:append]) do
+        :ok ->
+          _ = scratch_publish(dir, repo)
+          {:ok, scratch_receipt(path)}
+
+        {:error, reason} ->
+          {:error, {:scratch_write_failed, reason}}
+      end
+    else
+      {:error, {:no_workshop_face, dir}}
+    end
+  end
+
+  # Une seule ligne par note, meme si la note en compte plusieurs : le fichier se relit en
+  # diagonale au tri, et une entree qui s'etale sur dix lignes rend le tri illisible. Les retours
+  # a la ligne deviennent des ` / ` — on garde le texte, on perd la mise en page, c'est le bon
+  # arbitrage pour un bloc-notes.
+  defp scratch_line(note) do
+    {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
+    stamp = :io_lib.format("~2..0B-~2..0B ~2..0B:~2..0B", [mo, d, h, mi]) |> IO.iodata_to_binary()
+    "#{stamp} #{note |> String.split(~r/\s*\n+\s*/) |> Enum.join(" / ")}\n"
+  end
+
+  # Best-effort DELIBERE : une note ecrite mais non poussee est une note ecrite. Faire echouer le
+  # tool sur un push rate apprendrait a l'agent que le geste est cher, et un geste cher n'est plus
+  # un reflexe — c'est exactement la propriete qu'on achete ici.
+  defp scratch_publish(dir, repo) do
+    branch = Fleet.Layout.workshop_branch()
+
+    with :ok <- GitOps.run(["-C", dir, "add", "--", @scratch_file], auth: false),
+         :ok <-
+           GitOps.run(
+             [
+               "-C",
+               dir,
+               "-c",
+               "user.name=lcars-system",
+               "-c",
+               "user.email=lcars-system@lcars.local",
+               "commit",
+               "-q",
+               "-m",
+               "chore(scratch): note d'atelier"
+             ],
+             auth: false
+           ) do
+      GitOps.run(["-C", dir, "push", "origin", "HEAD:" <> branch], auth: true)
+    else
+      other ->
+        Logger.warning(
+          "Delegation: scratch note ECRITE mais non publiee (#{repo}) — #{inspect(other)} ; " <>
+            "elle vit dans la face atelier locale et partira au prochain geste qui pousse"
+        )
+
+        other
+    end
+  end
+
+  defp scratch_receipt(path) do
+    lines =
+      case File.read(path) do
+        {:ok, c} -> c |> String.split("\n", trim: true) |> length()
+        _ -> 0
+      end
+
+    base = %{"ok" => true, "lines" => lines}
+
+    if lines >= @scratch_nudge_at do
+      Map.put(
+        base,
+        "next",
+        "Le scratchpad passe #{lines} lignes. Propose un tri a ton humain : ce qui reste a faire " <>
+          "part au backlog, ce qui est specifie part en plans/, ce qui attend son jour de neige " <>
+          "reste nomme, le reste se jette. Puis vide ce qui a ete range — l'append-only vaut pour " <>
+          "l'ecriture au fil de l'eau, pas contre le menage."
+      )
+    else
+      base
+    end
+  end
+
+  @doc """
   Lists the current project's open issue board. An unreadable forge is an error, not an empty board.
   """
   @spec list_issues(map()) :: {:ok, map()} | {:error, term()}
@@ -749,12 +884,15 @@ defmodule Fleet.MCP.PodTools.Delegation do
         {:ok, _already_landed} ->
           {:ok, %{"status" => "commented", "number" => number, "idempotent" => true}}
 
-        :none ->
+        dedup ->
           case forge.post_comment(repo, number, with_op_marker(body, marker),
                  token: identity.token
                ) do
-            {:ok, _} -> {:ok, %{"status" => "commented", "number" => number}}
-            {:error, reason} -> {:error, {:comment_failed, reason}}
+            {:ok, _} ->
+              {:ok, with_dedup_unverified(%{"status" => "commented", "number" => number}, dedup)}
+
+            {:error, reason} ->
+              {:error, {:comment_failed, reason}}
           end
       end
     else
@@ -874,8 +1012,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
           else: {:error, {:catalogue_not_active, cat, actives}}
 
       nil ->
-        case Application.get_env(:fleet_mcp, :delegation_org) ||
-               Application.get_env(:fleet_pilot, :fleet_org) do
+        case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||
+               Application.get_env(:lcars_fleet, :pilot_fleet_org) do
           org when is_binary(org) -> {:ok, org}
           nil -> first_active(actives)
         end
@@ -898,11 +1036,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp do_create_project(name, args, onboarder_role) do
     with {:ok, onboard} <- conforming_onboard(),
          {:ok, org} <- resolve_org(args) do
-      # SAME config key as the poller's discovery org (`:fleet_pilot, :fleet_org`) — a project
+      # SAME config key as the poller's discovery org (`:lcars_fleet, :pilot_fleet_org`) — a project
       # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
       # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
       # gate to catch it. Reading another domain's config ATOM creates no module edge (the boundary
-      # stays intact; the `:fleet_<dom>` atoms are legacy-valid, D-07) — the config IS the shared
+      # stays intact; the config lives under `:lcars_fleet` with a `mcp_` prefix, BL-6-05) — the config IS the shared
       # authority here. `:delegation_org` survives as an explicit OVERRIDE for the rare case where
       # onboarding must target another org than the one being polled.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
@@ -910,8 +1048,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
       # membership (403 on the team read) — a load-bearing admission unproven ≠ verified. A deployment whose
       # service token is deliberately a plain org member (not org-admin) opts into the degraded mode as an
-      # EXPLICIT, deployment-visible config property (`:fleet_pilot, :allow_unverifiable_human_team?`),
-      # never a silent per-call default. Same `:fleet_<dom>` config-atom read as `:fleet_org` above (D-07).
+      # EXPLICIT, deployment-visible config property (`:lcars_fleet, :pilot_allow_unverifiable_human_team?`),
+      # never a silent per-call default. Same `:lcars_fleet` config read as `:mcp_org` above (BL-6-05).
       opts = [
         org: org,
         description: Map.get(args, "description", pitch),
@@ -925,7 +1063,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role,
         allow_unverifiable_human_team?:
-          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
       ]
 
       case onboard.onboard(name, opts) do
@@ -954,7 +1092,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # degrade only under the explicit deployment-visible config knob.
       opts = [
         allow_unverifiable_human_team?:
-          Application.get_env(:fleet_pilot, :allow_unverifiable_human_team?, false)
+          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
       ]
 
       case onboard.import(full_name, opts) do
@@ -1263,7 +1401,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp ensure_pointer(repo, title, brief, nil, summary) do
     opts =
-      case Application.get_env(:fleet_mcp, :brief_ops_root) do
+      case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
         nil ->
           [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :ops]
 
@@ -1355,7 +1493,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # temporary clone.
   defp lot_workspace(repo) do
     root =
-      Application.get_env(:fleet_mcp, :lot_workshop_root) || Fleet.Layout.workshop_root()
+      Application.get_env(:lcars_fleet, :mcp_lot_workshop_root) || Fleet.Layout.workshop_root()
 
     Path.join(root, Fleet.Layout.project_name(repo))
   end
@@ -1377,6 +1515,34 @@ defmodule Fleet.MCP.PodTools.Delegation do
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
   # Retry-stable marker in the raw, non-rendered issue body.
+  # CE MARQUEUR EST UN IDENTIFIANT DURABLE, ET C'EST CE QUI LE REND DELICAT. Il n'est pas calcule
+  # puis jete : il est ECRIT DANS LE CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR
+  # — potentiellement apres une montee d'OTP. Sa stabilite depend donc de
+  # `:erlang.term_to_binary/1`, c'est-a-dire du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
+  # l'implementation, hors du depot. Aucun test d'ici ne peut surveiller cette propriete — il
+  # faudrait deux executions sur deux VM.
+  #
+  # ⚠ LE DECLENCHEUR ANNONCE PAR L'AUDIT (« ordre interne d'une map ») EST MESURE FAUX SUR CET OTP :
+  # `term_to_binary` rend le MEME binaire pour `%{b: 1, a: 2}` et `%{a: 2, b: 1}` — cles atomes ou
+  # binaires, petites maps comme grandes (40 cles). Et il ne pourrait pas s'appliquer ici de toute
+  # facon : aucun champ hache n'est une map (`title`/`brief` binaires, `summary` binaire|nil,
+  # `supersedes` entier|nil, `brief_pointer` `{ref, sha}`|nil, `lot` binaire|nil).
+  #
+  # ⚠ UN ENCODEUR CANONIQUE EXPLICITE A ETE ECRIT ICI, PUIS ANNULE. Il rendait chaque champ en
+  # `TAG <> TAILLE <> ":" <> charge` pour que l'invariant vive dans ce module au lieu d'etre emprunte
+  # a un format tiers. MESURE PAR MUTATION : il n'achete AUCUNE propriete observable que
+  # `term_to_binary` n'ait deja sur cet OTP — desambiguisation binaire/entier, decoupage des champs,
+  # `nil` distinct de `""`, ordre des maps : les cinq tests ecrits pour lui restaient VERTS avec
+  # l'ancien encodeur. Et il n'etait pas gratuit : changer l'entree du digest ORPHELINE les marqueurs
+  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
+  #
+  # LA LIGNE A RELIRE : si la flotte change de version MAJEURE d'OTP, verifier que ce digest est
+  # stable avant de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
+  # acte. C'est le seul evenement qui rend le defaut reel.
+  #
+  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee par `String.contains?` dans les
+  # issues OUVERTES d'UN depot — quelques milliers de marqueurs au plus, soit une collision de
+  # l'ordre de 1e-11. L'elargir couterait la lisibilite du corps de ticket pour le mauvais risque.
   defp op_marker(title, brief, summary, supersedes, brief_pointer, lot) do
     sig =
       :crypto.hash(
@@ -1401,7 +1567,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     "<!-- lcars-op:#{sig} -->"
   end
 
-  # A failed readback falls through: posting beats silently dropping a reply.
+  # A failed readback falls through: posting beats silently dropping a reply. Mais L'APPELANT
+  # L'APPREND — cf. `find_open_issue_with_marker/3` juste au-dessus, meme arbitrage.
   defp find_comment_with_marker(forge, repo, number, marker) do
     case forge.list_comments(repo, number, []) do
       {:ok, comments} ->
@@ -1413,10 +1580,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
       err ->
         Logger.warning(
           "Delegation: comment_issue idempotency readback on #{repo}##{number} failed " <>
-            "(#{inspect(err)}) — proceeding to post (dedup is best-effort)"
+            "(#{inspect(err)}) — proceeding to post (dedup NOT verified, said in the result)"
         )
 
-        :none
+        {:unverified, err}
     end
   end
 
@@ -1434,12 +1601,28 @@ defmodule Fleet.MCP.PodTools.Delegation do
       err ->
         Logger.warning(
           "Delegation: create_issue idempotency readback on #{repo} failed (#{inspect(err)}) — " <>
-            "proceeding to create (dedup is best-effort)"
+            "proceeding to create (dedup NOT verified, said in the result)"
         )
 
-        :none
+        {:unverified, err}
     end
   end
+
+  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Les deux relectures
+  # rendaient `:none` dans les deux cas : marqueur absent d'un tableau LU, et tableau ILLISIBLE. La
+  # creation a lieu dans les deux cas — c'est le bon arbitrage, poster bat perdre la reponse —, mais
+  # le retour MCP etait identique, donc l'agent ne pouvait pas savoir que son doublon etait
+  # possible. Or c'est lui qui reessaie : la relecture echoue precisement quand la forge va mal,
+  # c'est-a-dire au moment ou il va rejouer l'appel.
+  #
+  # Le projet interdit « never two live tickets for one brick » (`pod_tools.ex`) et le marqueur
+  # existe pour ca. On ne refuse pas la creation pour autant : on la NOMME. Une reutilisation porte
+  # `"idempotent" => true` ; une creation dont la deduplication n'a pas pu etre verifiee porte
+  # desormais `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
+  defp with_dedup_unverified(result, {:unverified, why}),
+    do: Map.put(result, "dedup_unverified", inspect(why))
+
+  defp with_dedup_unverified(result, _), do: result
 
   # Reused issues expose their stored assignee and an explicit idempotency flag.
   defp idempotent_result(issue) do
@@ -1786,16 +1969,40 @@ defmodule Fleet.MCP.PodTools.Delegation do
   closed blocker counts as satisfied on the forge, so every dependent would silently become closable
   as if the work had landed, while nothing was delivered.
 
-  Order is the contract, twice over:
+  Order is the contract, three times over:
 
     * the live PR dies FIRST. The pulls rail is INDEPENDENT of the issues rail (`dispatch_review`
       polls pulls outside the lease and never reads the issue state), so a PR left open on a retired
       ticket goes on being judged and merged.
-    * on each dependent, the COMMENT lands before the edge is lifted. If the lift then fails, a
-      still-blocked ticket carries a comment about a retirement — noisy, and a human sees it. The
-      reverse order would silently unblock a ticket with nothing said.
+    * every dependent is TOLD before anything releases it. A silent unblock is the defect this
+      order exists to prevent, and the announcement is what prevents it — not the lifting of the
+      edge.
+    * the edges are lifted AFTER the close, because the CLOSE is the point of no return.
 
-  Any failure ABORTS before the close: closing RELEASES, so a half-executed retirement is worse than
+  ⚠ **CE PARAGRAPHE ENONÇAIT LA REGLE QUE L'ORDRE VIOLAIT.** Il disait — et il dit toujours, deux
+  lignes plus bas — « Any failure ABORTS before the close: closing RELEASES, so a half-executed
+  retirement is worse than none ». Or `release_dependents/4` levait les aretes AVANT ce close. Un
+  echec du commentaire ou de la fermeture abandonnait donc la sequence avec les dependants DEJA
+  liberes et le bloqueur TOUJOURS OUVERT — l'etat exact que cette phrase declare pire que rien,
+  produit un cran plus tot que la ou elle regardait.
+
+  MESURE QUI DECIDE DE L'ORDRE : `Lease.open_blockers/2` filtre `state == "open"`. Une arete
+  residuelle vers un ticket FERME ne bloque donc rien — c'est le CLOSE qui libere, la levee d'arete
+  ne fait que dire la verite au read-model (la brique ne sera jamais livree). Les deux gestes n'ont
+  pas le meme poids, et l'ordre suit ce poids :
+
+    * echec AVANT le close → rien n'est libere, le bloqueur reste ouvert, les aretes sont intactes.
+      Coherent, et reparable par un simple re-emission.
+    * echec de la levee APRES le close → les dependants sont liberes (par le close) et TOUS
+      annonces ; il reste une arete perimee vers un ticket ferme, que l'admission ignore. Le retrait
+      est SIGNALE incomplet dans son resultat, jamais avale.
+
+  L'annonce prealable est ce qui rend cet ordre acceptable : au moment ou le close libere, chaque
+  dependant porte deja le commentaire qui le lui dit. Un dependant dont le numero n'est pas
+  adressable HALTE avant tout ecrit — une arete qu'on ne sait pas adresser est une arete qu'on ne
+  saura pas lever, et on ne ferme pas un bloqueur en la laissant derriere soi.
+
+  Any failure before the close ABORTS: closing RELEASES, so a half-executed retirement is worse than
   none. An already-closed target is a no-op success, not an error — the stdio bridge times out a
   mutation at 30s while the forge call continues, and the agent re-emits.
   """
@@ -1826,51 +2033,82 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     with :ok <- close_live_pr(forge, repo, pr),
          {:ok, dependents} <- forge.issue_blocks(repo, n, []),
-         {:ok, released} <- release_dependents(forge, repo, n, dependents),
+         {:ok, numbers} <- addressable_dependents(dependents),
+         :ok <- announce_release(forge, repo, n, numbers),
          {:ok, _} <- forge.post_comment(repo, n, retire_comment(reason), []),
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
+      # ══ POINT DE NON-RETOUR FRANCHI ══ Le close a LIBERE les dependants (`open_blockers/2` ne
+      # compte que les bloqueurs ouverts) et chacun porte deja son annonce. La levee des aretes qui
+      # suit dit la verite au read-model ; son echec laisse une arete perimee vers un ticket ferme,
+      # que l'admission ignore. Ce n'est plus un motif d'abandon — le ticket EST ferme — mais ce
+      # n'est pas non plus un silence : ca voyage dans le resultat.
+      {released, unlifted} = lift_edges(forge, repo, n, numbers)
+
       # A retired ticket is a DEAD ticket: its pods die with it, same arbitrage and same seam as the
       # supersede path.
       _ = pod_reaper().reap_issue(repo, n)
 
-      {:ok, %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}}
+      result = %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}
+
+      {:ok, with_unlifted(result, unlifted)}
     else
       {:error, reason} ->
         Logger.error(
           "Delegation: retirement of #{repo}##{n} ABORTED (#{inspect(reason)}) — " <>
-            "the ticket is still OPEN, which is the safe half of the failure"
+            "the ticket is still OPEN and NOTHING was released: nothing to repair, re-emit"
         )
 
         {:error, {:retire_aborted, n, reason}}
     end
   end
 
-  # Lifts the edges pointing AT the retired ticket, one dependent at a time, and says so on each.
-  # A dependent whose number is not an integer HALTS: an edge we cannot address is an edge we cannot
-  # lift, and skipping it would close the blocker with that dependent still hanging off it.
-  defp release_dependents(_forge, _repo, _n, []), do: {:ok, []}
-
-  defp release_dependents(forge, repo, n, dependents) do
+  # Une arete qu'on ne sait pas ADRESSER est une arete qu'on ne saura pas lever. On l'apprend AVANT
+  # le premier ecrit, parce qu'apres le close il serait trop tard pour renoncer.
+  defp addressable_dependents(dependents) do
     Enum.reduce_while(dependents, {:ok, []}, fn dep, {:ok, acc} ->
       case Map.get(dep, "number") do
-        d when is_integer(d) ->
-          # Comment BEFORE lift — see the order contract in `retire_issue/3`.
-          with {:ok, _} <- forge.post_comment(repo, d, released_comment(n), []),
-               {:ok, _} <- forge.remove_issue_dependency(repo, d, n, []) do
-            {:cont, {:ok, [d | acc]}}
-          else
-            {:error, err} -> {:halt, {:error, {:dependent_not_released, d, err}}}
-          end
-
-        _ ->
-          {:halt, {:error, {:edge_without_number, dep}}}
+        d when is_integer(d) -> {:cont, {:ok, acc ++ [d]}}
+        _ -> {:halt, {:error, {:edge_without_number, dep}}}
       end
     end)
-    |> case do
-      {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      err -> err
-    end
   end
+
+  # L'ANNONCE PRECEDE LA LIBERATION, et c'est elle qui rend l'ordre acceptable. Au moment ou le
+  # close libere, chaque dependant porte deja le commentaire qui le lui dit — le « deblocage
+  # silencieux » que cet ordre existe pour empecher est ferme ICI, pas par la levee de l'arete.
+  # Un echec ABANDONNE : rien n'est encore libere, le bloqueur est ouvert, les aretes sont intactes.
+  defp announce_release(forge, repo, n, numbers) do
+    Enum.reduce_while(numbers, :ok, fn d, :ok ->
+      case forge.post_comment(repo, d, released_comment(n), []) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, err} -> {:halt, {:error, {:dependent_not_announced, d, err}}}
+      end
+    end)
+  end
+
+  # Apres le point de non-retour : on leve ce qu'on peut et on RAPPORTE ce qu'on n'a pas pu. Pas de
+  # `reduce_while` ici — s'arreter au premier echec laisserait des aretes levables en place sans
+  # raison, et le ticket est deja ferme.
+  defp lift_edges(forge, repo, n, numbers) do
+    Enum.reduce(numbers, {[], []}, fn d, {ok, ko} ->
+      case forge.remove_issue_dependency(repo, d, n, []) do
+        {:ok, _} ->
+          {ok ++ [d], ko}
+
+        {:error, err} ->
+          Logger.error(
+            "Delegation: #{repo}##{n} RETIRE et ferme, mais l'arete du dependant ##{d} n'a pas pu " <>
+              "etre levee (#{inspect(err)}) — ##{d} est DEBLOQUE (l'admission ne compte que les " <>
+              "bloqueurs ouverts) et il a ete annonce ; l'arete perimee reste a nettoyer a la main"
+          )
+
+          {ok, ko ++ [d]}
+      end
+    end)
+  end
+
+  defp with_unlifted(result, []), do: result
+  defp with_unlifted(result, unlifted), do: Map.put(result, "edges_not_lifted", unlifted)
 
   defp retire_comment(reason) do
     "Ticket retiré par l'architecte — aucun remplaçant, rien n'a été livré.\n\nMotif : #{reason}"
@@ -2169,7 +2407,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Spawn-bound identity comes from Spawner; unknown identity fails closed.
   defp resolve_identity(pod_id) when is_binary(pod_id) do
-    resolver = Application.get_env(:fleet_mcp, :pod_resolver, &default_pod_resolver/1)
+    resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver, &default_pod_resolver/1)
 
     case resolver.(pod_id) do
       {:ok, %{role: role} = identity} -> {:ok, %{role: role, repo: Map.get(identity, :repo)}}
@@ -2188,5 +2426,5 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a
   # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
   @default_pod_reaper Fleet.Pilot.PodReaper
-  defp pod_reaper, do: Application.get_env(:fleet_mcp, :pod_reaper, @default_pod_reaper)
+  defp pod_reaper, do: Application.get_env(:lcars_fleet, :mcp_pod_reaper, @default_pod_reaper)
 end

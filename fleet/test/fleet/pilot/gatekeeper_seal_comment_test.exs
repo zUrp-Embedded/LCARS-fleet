@@ -55,4 +55,46 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
       end
     end
   end
+
+  # JG-068 — « IL A ETE FRANCHI » ETAIT INCONDITIONNEL. Sur le chemin zero-juge, cette phrase est
+  # TOUT ce qui atteste la legitimite du merge : la carte ne pose aucun juge, donc le plancher
+  # mecanique est le dernier etage. Elle s'imprimait a l'identique que le mur ait tourne ou non.
+  #
+  # Le pire n'etait pas le silence mais la CONTRADICTION : la note « Provenance NON verifiee » posee
+  # juste apres (BL-6-47.4) dit l'inverse, sur le meme ticket. Un operateur y trouvait deux phrases
+  # opposees et aucune raison de preferer l'une.
+  describe "JG-068 — la ligne de validation dit ce que le mur a fait" do
+    test "mur SAUTE + zero juge → « n'a PAS tourne », jamais « franchi »" do
+      body =
+        GatekeeperSeal.promote_comment(4, 5, "scribe", [], {:skipped, {:no_statement, "ref"}})
+
+      refute body =~ "il a été franchi",
+             "le sceau atteste un mur qui n'a pas tourne — et la note posee juste apres dit le " <>
+               "contraire, sur le meme ticket"
+
+      assert body =~ "n'a PAS tourné"
+      assert body =~ "no_statement"
+      assert body =~ "AUCUN contrôle mécanique"
+    end
+
+    test "TEMOIN — mur FRANCHI + zero juge → la phrase d'origine, inchangee" do
+      body = GatekeeperSeal.promote_comment(4, 5, "scribe", [], :ok)
+
+      assert body =~ "il a été franchi"
+      refute body =~ "n'a PAS tourné"
+    end
+
+    test "TEMOIN — avec des juges, la ligne parle des juges quel que soit le mur" do
+      for wall <- [:ok, {:skipped, :no_local_clone}] do
+        body = GatekeeperSeal.promote_comment(7, 9, "engineer", ["qualifier"], wall)
+        assert body =~ "review(s) **APPROVED** natives"
+        refute body =~ "n'a PAS tourné"
+      end
+    end
+
+    test "le defaut reste `:ok` — les appelants a quatre arguments ne changent pas de sens" do
+      assert GatekeeperSeal.promote_comment(4, 5, "scribe", []) ==
+               GatekeeperSeal.promote_comment(4, 5, "scribe", [], :ok)
+    end
+  end
 end

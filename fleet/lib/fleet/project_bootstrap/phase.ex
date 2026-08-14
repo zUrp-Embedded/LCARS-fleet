@@ -34,6 +34,44 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     require Logger
 
+    # EVERY git op below runs SYSTEM-SIDE — in the daemon, under the human's UID, OUTSIDE bwrap —
+    # on a workspace the pod co-writes. Without this prefix, a `post-checkout` the pod dropped in
+    # `<ws>/.git/hooks/` executes THERE at the next re-brief: not a pod escaping its sandbox, but
+    # the daemon running the pod's code for it, with reach over `~/.claude/.credentials.json`, the
+    # role tokens and the whole catalogue. `git clean -fdx` does not remove `.git/`, so the hook
+    # outlives the step that precedes the checkout.
+    #
+    # Composed, never recopied: `Fleet.Credentials.Shell` holds the single definition of what
+    # "system-side git neutralized" means (hooks, fsmonitor, sshCommand, diff.external, global
+    # attributesFile) and says why for each flag. A site that rebuilds the list by hand is a site
+    # that will miss the next flag added to it.
+    @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
+
+    @doc """
+    Provides the pod's workspace and returns `{:ok, workspace, branch}` — `branch` is `nil` when
+    there was nothing to clone.
+
+    TWO OUTCOMES, ONE SHAPE. With a `spec.project.repo_path`, the project's `base_branch` is cloned
+    (single-branch, full history) and `feature/<slug>` is CUT from it — that new branch is what the
+    third element names, never the base. Without a repo (permanent pod), the workspace is an empty
+    directory and the branch is `nil`. The caller reads the same tuple either way and never has to
+    know which world it is in.
+
+    THE GUARD IS THE FIRST THING, and it refuses rather than sanitizes: a `pod_dir` that is not an
+    absolute path yields `{:error, {:unsafe_pod_dir, pod_dir}}` before any git runs. Everything
+    below this line executes SYSTEM-SIDE — in the daemon, under the human's UID, outside bwrap — so
+    a relative path resolved against the daemon's cwd would put a pod's workspace anywhere.
+
+    Re-dispatchable onto a workspace a dead predecessor left behind: the pod_id is deterministic, so
+    the re-dispatch lands on the same directory. The residual is MOVED to `<workspace>.morgue` (one
+    generation kept) and the clone is redone from scratch — a fresh clone is always correct, and
+    uncommitted work is never shredded on the way.
+
+    Errors are typed and only two escape the `clone_failed` wrapper, because they are not failures
+    OF the clone: `{:unsafe_pod_dir, _}` from the guard above, and `{:sanitize_failed, _}` from the
+    workspace scrub that runs after it. Everything else — git exit code, timeout, malformed base or
+    feature ref — arrives as `{:error, {:clone_failed, reason}}`.
+    """
     @spec clone_or_skip(Path.t(), Fleet.CapProfile.t(), keyword()) ::
             {:ok, Path.t(), String.t() | nil} | {:error, term()}
     def clone_or_skip(pod_dir, %Fleet.CapProfile{} = cap_profile, opts) do
@@ -229,7 +267,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # anomalous case it was written for.
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
-                   ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
+                   @hooks_off ++
+                     ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
                    git_opts
                  ),
                # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
@@ -237,17 +276,34 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # capture" (same-role race): `base..HEAD` will contain ONLY the pod's commits.
                # Axiom set AT the clone boundary (not verified "observable post-hoc").
                {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
+               # `refs/lcars/base` — LA BASE CONTRE LAQUELLE CE TRAVAIL SE JUGE, materialisee ICI
+               # parce que le pod ne peut pas la poser lui-meme (`update-ref` est dans sa denylist
+               # git) et parce que, pour un juge, elle n'est meme pas dans son clone.
+               {:ok, {_, 0}} <- pin_work_base(ws, project),
                # `checkout -b` is local (no network, does not prompt) but ALSO goes through the bounded
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-b", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
+                   env: []
+                 ),
                :ok <- install_trailer_hook(ws, cap_profile),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
             {:invalid_base_branch, b} ->
               {:error, {:clone_failed, {:invalid_base_branch, b}}}
+
+            # Named, and BEFORE the catch-all: the fall-through would have dressed them as
+            # `{:git_exit, ...}`, i.e. a refusal reported as a git failure that never happened. The
+            # two shapes differ (`{:invalid_base_sha, _}` bare, `{:error, {:invalid_pr_base_branch,
+            # _}}` wrapped) because their producers were written at different times -- which is
+            # exactly why they are matched explicitly rather than left to the union.
+            {:invalid_base_sha, s} ->
+              {:error, {:clone_failed, {:invalid_base_sha, s}}}
+
+            {:error, {:invalid_pr_base_branch, b}} ->
+              {:error, {:clone_failed, {:invalid_pr_base_branch, b}}}
 
             {:error, {:sanitize_failed, _}} = err ->
               err
@@ -308,18 +364,48 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on hostile
           # material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
-               {:ok, {_, 0}} <- Fleet.Credentials.Shell.git(["-C", ws, "clean", "-fdx"], env: []),
+               # 6-135 — LE RE-BRIEF DEPLACE LA BASE, donc le ref doit suivre. Sans cette ligne un
+               # pod de pipe garderait `refs/lcars/base` sur la base du ticket PRECEDENT : son diff
+               # contiendrait le travail de quelqu'un d'autre, ce qui est pire qu'un ref absent
+               # parce que ca ne leve pas.
+               {:ok, {_, 0}} <- pin_work_base(ws, project),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(["-C", ws, "checkout", "-B", feature], env: []),
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
+               {:ok, {_, 0}} <-
+                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature],
+                   env: []
+                 ),
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
-            {:error, {:sanitize_failed, _}} = err -> err
-            {:ok, {out, code}} -> {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
-            {:error, {:timeout, ms}} -> {:error, {:reset_failed, {:git_timeout, ms}}}
-            {:error, {:exit, reason}} -> {:error, {:reset_failed, {:git_exit, reason}}}
+            {:error, {:sanitize_failed, _}} = err ->
+              err
+
+            # Same refusal as at the clone site, named the same way. `no_base_sha` below answers
+            # "the field is missing"; this one answers "the field is there and is not a ref".
+            {:invalid_base_sha, s} ->
+              {:error, {:reset_failed, {:invalid_base_sha, s}}}
+
+            # ⚠ CELLE-CI EST UN `{:error, _}`, PAS UN TUPLE NU, et l'ordre des clauses est ce qui la
+            # rend visible : sous le fourre-tout elle ressortait en `{:git_exit, ...}`, un refus de
+            # validation deguise en panne de git. Deux formes de refus coexistent sur ce `with`
+            # parce que leurs producteurs ont ete ecrits a deux moments ; les melanger silencieusement
+            # est la faute que ce bloc evite.
+            {:error, {:invalid_pr_base_branch, b}} ->
+              {:error, {:reset_failed, {:invalid_pr_base_branch, b}}}
+
+            {:ok, {out, code}} ->
+              {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
+
+            {:error, {:timeout, ms}} ->
+              {:error, {:reset_failed, {:git_timeout, ms}}}
+
+            {:error, {:exit, reason}} ->
+              {:error, {:reset_failed, {:git_exit, reason}}}
+
             # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
-            {:error, reason} -> {:error, {:reset_failed, {:git_exit, reason}}}
+            {:error, reason} ->
+              {:error, {:reset_failed, {:git_exit, reason}}}
           end
 
         _ ->
@@ -366,9 +452,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
     repo (the parking-lot USB) and would be read as DIRECTIVES by the CLI (cwd = workspace;
     the root `CLAUDE.md` is covered separately — the composed one overwrites it, Scaffold).
 
-    Tracked victims (and a tracked root `CLAUDE.md`, which the overwrite would dirty) are
-    flagged `git update-index --skip-worktree` BEFORE removal, so the pod's `git add .` never
-    stages our deletions nor our composed file into its deliverable — the gate's
+    Tracked victims are flagged `git update-index --skip-worktree` BEFORE removal, so the pod's
+    `git add .` never stages our deletions into its deliverable — the gate's
     forbidden-path check is the independent second line. Called by BOTH workspace producers
     (`clone_or_skip` at spawn, `reset_in_place` at every slot-freeze re-brief — `reset --hard`
     erases the skip-worktree bits and restores tracked victims). Neutralized paths are logged
@@ -379,7 +464,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
     def sanitize_workspace(ws) do
       victims = claude_dirs(ws) ++ nested_claude_mds(ws)
 
-      with :ok <- skip_worktree_tracked(ws, victims ++ [Path.join(ws, "CLAUDE.md")]),
+      # ⚠ LA RACINE `CLAUDE.md` N'EST PLUS FLAGUEE, ET C'EST LE CORRECTIF, PAS UN OUBLI. Elle
+      # l'etait parce qu'on ECRASAIT ce fichier avec le CLAUDE.md compose du pod : le flag empechait
+      # notre copie de partir dans le livrable. Effet de bord mesure le 2026-08-12 : sur un depot qui
+      # TRACKE sa racine `CLAUDE.md` — c'est-a-dire tout projet cree par la fleet, le template en pose
+      # un — un producteur ne pouvait plus livrer ce fichier. Son edition n'etait jamais stagee,
+      # `git status` restait propre et `git diff` vide EN AYANT TORT, donc un producteur appliquant la
+      # discipline de preuve obtenait un faux negatif et declarait le critere tenu de bonne foi.
+      # L'environnement neutralisait l'instrument de preuve qu'il exige par ailleurs.
+      # Le Scaffold n'ecrase plus un `CLAUDE.md` tracke (il n'y a donc plus rien a masquer), et le
+      # cas non-tracke reste couvert par `.git/info/exclude`, qui lui ne ment a personne.
+      with :ok <- skip_worktree_tracked(ws, victims),
            :ok <- remove_all(victims) do
         if victims != [] do
           rels = Enum.map(victims, &Path.relative_to(&1, ws))
@@ -419,7 +514,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # (bounded twice total, never per-path). A directory victim contributes every tracked file
     # under its prefix (skip-worktree is a per-FILE index bit).
     defp skip_worktree_tracked(ws, paths) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "ls-files", "-z"], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "ls-files", "-z"], env: []) do
         {:ok, {out, 0}} ->
           tracked = out |> String.split(<<0>>, trim: true) |> MapSet.new()
 
@@ -444,7 +539,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     defp flag_skip_worktree(ws, targets) do
       case Fleet.Credentials.Shell.git(
-             ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
+             @hooks_off ++ ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
              env: []
            ) do
         {:ok, {_, 0}} ->
@@ -476,7 +571,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
     def read_original_claude_md(ws) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "show", "HEAD:CLAUDE.md"], env: []) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"],
+             env: []
+           ) do
         {:ok, {content, 0}} -> {:ok, content}
         _ -> :absent
       end
@@ -497,8 +594,24 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # `clone_or_skip`. nil/"" = no-op success.
     defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {:ok, {"", 0}}
 
+    # `sha` REACHED THE GIT COMMAND LINE UNVERIFIED, IN LAST POSITION AND WITHOUT `--`. An argument
+    # starting with `-` is an OPTION to git, not a revision -- and the second call here is the one
+    # that carries the forge credentials and touches the network. The sibling checks two lines up
+    # (`base`, `feature`) already went through `GitRef.valid?/1`; this argument was the one that did
+    # not, on the same `with`, in the same function.
+    #
+    # `GitRef.valid?/1` and not a hex-only test: this field legitimately holds a ref as well as a
+    # sha, and the validator is the one every other ref on this path uses. Measured against what it
+    # must REFUSE: `-x`, `--exec=id`, `--upload-pack=...`, `a b`, `""` -- and what it must LET
+    # THROUGH: `abc1234`, `refs/heads/main`, `HEAD`.
     defp pin_base_sha(ws, sha) when is_binary(sha) do
-      case Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: []) do
+      if Fleet.GitRef.valid?(sha), do: do_pin_base_sha(ws, sha), else: {:invalid_base_sha, sha}
+    end
+
+    defp do_pin_base_sha(ws, sha) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
+             env: []
+           ) do
         {:ok, {_, 0}} = ok ->
           ok
 
@@ -506,14 +619,72 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # The local `reset` failed (`sha` absent locally) → targeted NETWORK fetch (forge auth + anti-prompt
           # bound via `git_env/0`), then local re-reset. Fetch failure (incl. timeout/exit) →
           # propagated as-is to the `with` → `{:clone_failed, ...}`.
-          case Fleet.Credentials.Shell.git(["-C", ws, "fetch", "origin", sha]) do
+          case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", "--", sha]) do
             {:ok, {_, 0}} ->
-              Fleet.Credentials.Shell.git(["-C", ws, "reset", "--hard", sha], env: [])
+              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
+                env: []
+              )
 
             other ->
               other
           end
       end
+    end
+
+    # LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS (6-135), et le prompt disait lui-meme
+    # pourquoi : « le clone est mono-branche ». Il en tirait `origin/main`. Or au dispatch d'une
+    # review, `RoleDispatch` pose `base_branch: head` — le clone est donc `--branch <head>
+    # --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de preuve prescrites au juge
+    # (`git diff origin/main...HEAD`, `git log origin/main..HEAD`) echouaient sur une revision
+    # inconnue, et un agent prive de son instrument improvise ou juge sur le seul brief. Pour une PR
+    # de face atelier, la base metier n'est de toute facon pas `main`.
+    #
+    # UN SEUL NOM, POUR TOUS LES PODS, et c'est la condition pour qu'un prompt puisse le nommer : un
+    # ref conditionnel obligerait l'instruction a dire « selon les cas », ce qu'un agent ne sait pas
+    # resoudre depuis l'interieur du workspace.
+    #
+    #   * un pod qui porte la base d'une PR (`pr_base_branch` : juge, rework) → on la RAPATRIE, elle
+    #     n'est pas dans le clone ;
+    #   * tout autre pod → sa base est deja la (c'est celle qu'il a clonee), on pose juste le nom.
+    #
+    # `+refs/heads/<base>:refs/lcars/base` en une passe : le ref est cree deterministe, sans passer
+    # par `FETCH_HEAD` que la commande suivante ecraserait.
+    #
+    # UN ECHEC ICI ARRETE LE SPAWN, delibere et borne : il ne peut arriver qu'a un pod qui juge, et
+    # « la base a disparu » est exactement l'etat ou un verdict ne doit pas etre rendu. Le pod n'est
+    # pas pris : le verrou n'a pas ete pose, le tick suivant retente, et un echec durable remonte
+    # sous son propre nom au lieu de produire un juge aveugle.
+    defp pin_work_base(ws, project) do
+      case project["pr_base_branch"] do
+        base when is_binary(base) and base != "" ->
+          fetch_work_base(ws, base)
+
+        _ ->
+          local_work_base(ws)
+      end
+    end
+
+    defp fetch_work_base(ws, base) do
+      if Fleet.GitRef.valid?(base) do
+        Fleet.Credentials.Shell.git(
+          @hooks_off ++
+            ["-C", ws, "fetch", "--no-tags", "origin", "+refs/heads/#{base}:refs/lcars/base"]
+        )
+      else
+        {:error, {:invalid_pr_base_branch, base}}
+      end
+    end
+
+    # Aucun reseau, et `HEAD` plutot que le nom de la branche ou le sha : a cet instant precis HEAD
+    # EST la base — `pin_base_sha` vient de l'y poser et la branche de travail n'est pas encore
+    # coupee. Nommer `base_branch` ferait dependre le geste d'une subtilite de resolution de ref
+    # (mono-branche : le clone cree bien la branche locale, mais c'est un detail de `git clone` et
+    # pas un invariant qu'on veut porter ici) ; nommer `base_sha` echouerait quand il est absent.
+    defp local_work_base(ws) do
+      Fleet.Credentials.Shell.git(
+        @hooks_off ++ ["-C", ws, "update-ref", "refs/lcars/base", "HEAD"],
+        env: []
+      )
     end
 
     # pod_dir CONFINEMENT lives UPSTREAM: the spawner builds pod_dir as `<pod_dir_root>/pod_<pod_id>`

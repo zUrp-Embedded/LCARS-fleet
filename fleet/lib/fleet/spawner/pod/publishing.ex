@@ -9,7 +9,7 @@ defmodule Fleet.Spawner.Pod.Publishing do
   `Fleet.Spawner.Pod` owns the handlers. This module only transforms pod data and returns timer
   actions. A deadline is re-armed while `Fleet.Publish.InFlight` reports an active publish; otherwise
   it is the fail-safe that releases a lost confirmation. The delay is configured by
-  `:fleet_spawner, :publish_deadline_ms` and defaults to 120 seconds.
+  `:lcars_fleet, :spawner_publish_deadline_ms` and defaults to 120 seconds.
   """
 
   @doc """
@@ -51,7 +51,7 @@ defmodule Fleet.Spawner.Pod.Publishing do
   """
   @spec publish_deadline_ms() :: non_neg_integer()
   def publish_deadline_ms,
-    do: Application.get_env(:fleet_spawner, :publish_deadline_ms, 120_000)
+    do: Application.get_env(:lcars_fleet, :spawner_publish_deadline_ms, 120_000)
 
   defp put_flag(data),
     do: Map.update!(data, :conditions, &MapSet.put(&1, :publishing))

@@ -53,18 +53,20 @@ defmodule Fleet.Project.Onboard.AdoptTest do
       :ok
     end
 
+    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
-      File.dir?(path) and
-        match?(
-          {_, 0},
-          System.cmd(
-            "git",
-            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-            stderr_to_stdout: true
-          )
-        )
+      {:ok,
+       File.dir?(path) and
+         match?(
+           {_, 0},
+           System.cmd(
+             "git",
+             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+             stderr_to_stdout: true
+           )
+         )}
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
@@ -128,13 +130,15 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     # The forge main IS the local content (never scaffolded over) + the intensity declaration
     # this call committed (absent locally → written + committed before the single push).
     assert bare_git!(o, "fleet/garage", ["show", "main:code.txt"]) =~ "the user's real content"
-    assert bare_git!(o, "fleet/garage", ["show", "main:intensity.json"]) =~ "pipeline_default"
+    assert bare_git!(o, "fleet/garage", ["show", "main:.lcars.json"]) =~ "pipeline_default"
 
     # The bare-create lesson (BL-6-33) applies to adopt too.
     assert_received {:labels_seeded, "fleet/garage"}
 
     # The ops face exists on the forge; the protection landed; the arch is up.
-    assert AdoptForge.branch_exists?("fleet/garage", "ops", [])
+    # `== {:ok, true}` et non une simple verite : depuis JG-121 la fonction rend un triplet d'etats,
+    # et `assert` seul passerait aussi sur `{:ok, false}`.
+    assert AdoptForge.branch_exists?("fleet/garage", "ops", []) == {:ok, true}
     assert_received {:protect_branch, "fleet/garage", _rule}
     assert_received {:arch_ensured, "fleet/garage"}
   end

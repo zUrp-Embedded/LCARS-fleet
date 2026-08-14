@@ -318,7 +318,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  defp require_onboarded?, do: Application.get_env(:fleet_pilot, :require_onboarded, true)
+  defp require_onboarded?, do: Application.get_env(:lcars_fleet, :pilot_require_onboarded, true)
 
   defp refuse_order(repo, issue_number, role, cause) do
     Logger.error(
@@ -406,9 +406,29 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           {:ok, {:spawned, pod_id, role}}
 
         {:error, reason} ->
-          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight),
-          # brief kept, pod kept. Only the wake-up failed → honest tally + re-wake at the next tick
-          # (idempotent: alive_before? will be true, maybe_spawn no-op, re-wake retried).
+          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight), brief kept,
+          # pod kept. Only the wake-up failed → honest tally, and the work RESUMES — mais pas par le
+          # rail que cette phrase annoncait.
+          #
+          # ⚠ « RE-WAKE AT THE NEXT TICK » ETAIT FAUX, ET NOMMAIT UN MECANISME QUI N'EXISTE PAS. Le
+          # dispatcher ne repasse pas : `StepDispatcher.decide/1` rend `{:skip, :in_flight}` tant que
+          # `lcars-in-flight` est pose, et AUCUN des sites de wake n'est un rail periodique. Un
+          # lecteur en repartait avec l'idee qu'un tick reveille le pod ; personne ne le fait.
+          #
+          # LE VRAI RAIL EST LA RECONCILIATION DU POLLER, deux modules plus loin, et il est deja
+          # ecrit la-bas : la propriete d'un verrou se lit sur `@pulled_states [:assigned]`, donc un
+          # brief ENFILE MAIS JAMAIS TIRE (`:pending`) NE POSSEDE PAS son verrou. Le pull
+          # (`get_work_item`) est l'ACK durable que le wake a atterri — c'est exactement ce qui
+          # manque ici. La chaine de reprise, verifiee bout en bout :
+          #
+          #   wake rate -> item `:pending` -> `pod_pull_state` = `:not_pulled` -> le verrou n'est
+          #   possede par personne -> suspect, grace de 2 ticks (~60 s) -> `reclaim_lock` retire
+          #   `lcars-in-flight` -> `decide/1` ne skippe plus -> re-dispatch : `maybe_spawn` est un
+          #   no-op (le pod vit), l'enqueue supersede l'item `:pending` reste, et le wake est retente.
+          #
+          # C'est donc idempotent, mais par RECLAMATION D'ORPHELIN, pas par re-wake. La nuance
+          # compte : elle explique le delai (~60 s de grace, pas un tick) et elle dit ou regarder
+          # quand ca ne repart pas.
           Logger.warning(
             "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
               "BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on next tick ; " <>
@@ -421,7 +441,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:error, _} = err ->
         # A POST-lock step failed → compensation (removal of the lock, else stuck forever).
         # Kill ONLY if fresh spawn (a re-brief NEVER kills the living eng + its context).
-        if not alive_before?, do: safe_kill(spawner, pod_id)
+        #
+        # `_ =` EXPLICITE : depuis JG-120, `safe_kill/2` rend un verdict classe, donc l'ignorer est
+        # un CHOIX. Il est ASSUME ici — la compensation qui compte est le retrait du VERROU, juste
+        # en dessous, et son verdict est capture (CI-10). Un pod qui survit a son kill de
+        # compensation est ramasse par la reconciliation du poller au tick suivant ; un verrou qui
+        # survit, lui, bloque la brique pour toujours. Les deux echecs n'ont pas le meme poids, et
+        # c'est pour ca qu'un seul est propage.
+        _ = if not alive_before?, do: safe_kill(spawner, pod_id)
 
         # CI-10 (audit integrite 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
         # return + a flat "lock removed" log LIED when the removal failed (the issue stays in-flight while
@@ -536,11 +563,29 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   PUBLIC because shared with the core: `spawn_step/9` (compensation) AND `ReviewLifecycle.promote_pr`
   (die-on-promote of the eng). One copy, no fork.
   """
-  @spec safe_kill(module(), String.t()) :: any()
+  # LE SILENCE RESTE, LE FAIT CESSE D'ETRE FABRIQUE. Cette fonction avale toujours l'echec — c'est
+  # l'arbitrage, ecrit chez ses trois appelants : un kill rate ne bloque rien, le tick suivant
+  # re-suspecte et retente. Mais elle rendait `:ok` dans QUATRE situations differentes : kill
+  # reussi, pod deja absent, `kill_pod/1` non exporte (doublure de test), et exception. Un appelant
+  # qui voulait dire ce qui s'est passe ne le pouvait pas — et l'un d'eux annoncait « reaped » sur
+  # cette base (JG-120).
+  #
+  # Le retour devient donc classe, et c'est PUREMENT ADDITIF : les trois sites l'ignorent
+  # aujourd'hui (`@spec … :: any()` disait deja qu'il n'etait pas defini). Personne ne branche
+  # dessus ; ce qui change, c'est qu'on PEUT.
+  @spec safe_kill(module(), String.t()) :: :ok | :unsupported | {:error, term()}
   def safe_kill(spawner, pod_id) do
-    if function_exported?(spawner, :kill_pod, 1), do: spawner.kill_pod(pod_id), else: :ok
+    if function_exported?(spawner, :kill_pod, 1) do
+      case spawner.kill_pod(pod_id) do
+        :ok -> :ok
+        {:error, _} = err -> err
+        other -> {:error, {:unexpected_kill_result, other}}
+      end
+    else
+      :unsupported
+    end
   rescue
-    _ -> :ok
+    e -> {:error, {:kill_raised, Exception.message(e)}}
   end
 
   # `as_role`, unless the role DECLARES it has no forge identity — in which case there is nothing to
