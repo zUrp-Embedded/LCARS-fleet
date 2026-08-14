@@ -75,6 +75,17 @@ REFUSED_FILE = os.environ.get("LCARS_CONVERGER_REFUSED", "/run/lcars-converger.r
 # fait que ce relais ne parle jamais de terminal : apres le `101`, il ne comprend plus rien de ce
 # qu'il transporte, et c'est deliberé.
 CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/console")
+# Le client de terminal, pose par le Dockerfile et epingle par sha256 au meme rang que le binaire
+# ttyd. LA LISTE EST BLANCHE ET FERMEE : ce repertoire n'est pas « servi », ce sont TROIS fichiers
+# nommes qui le sont. Un serveur de statique generique dans un processus qui relaie des shells est
+# une surface qu'on n'a aucune raison d'ouvrir — et un `..` dans un nom de fichier n'est meme pas
+# une question qui se pose.
+DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
+STATIC_FILES = {
+    "xterm.js": "application/javascript; charset=utf-8",
+    "xterm.css": "text/css; charset=utf-8",
+    "addon-fit.js": "application/javascript; charset=utf-8",
+}
 # Le second nom dans une liste DEJA en main : la session porte `groups` depuis le callback OIDC, donc
 # le tier admin ne coute ni un appel ni un credential stocke. ⚠ Ce qui est gratuit est le MECANISME
 # (l'acheminement de l'identite, la route) — pas les POUVOIRS de l'admin, qui demandent chacun un
@@ -509,6 +520,9 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LCARS &mdash; %(host)s</title>
+<link rel="stylesheet" href="/static/xterm.css">
+<script src="/static/xterm.js"></script>
+<script src="/static/addon-fit.js"></script>
 <style>
   :root { --or:#FF9900; --am:#FFCC66; --bg:#000; --pan:#141414; --dim:#7a7a7a; --line:#262626 }
   * { box-sizing:border-box }
@@ -593,7 +607,20 @@ function show(tab) {
   // la cible n'est pas touchee, les autres sont masquees. Mesure: document.activeElement retombait
   // sur <body> a chaque update de la liste des workers.
   stage.querySelectorAll('.pane').forEach(f => { f.hidden = (f.dataset.key !== tab.key); });
-  if (tab.url) {
+  if (tab.term) {
+    panel.style.display = 'none';
+    let t = terms.get(tab.key);
+    if (!t) { t = termPane(tab); terms.set(tab.key, t); }
+    t.host.hidden = false;
+    // AJUSTER AU MOMENT OU ON MONTRE, ET PAS AVANT : un panneau cache a une taille CSS nulle, donc
+    // tout `fit()` fait pendant qu'il l'etait a mesure du vide. Sans ce rappel, un terminal ouvert
+    // en arriere-plan garde la geometrie qu'il avait a sa creation et le shell croit un ecran qui
+    // n'existe pas.
+    t.fit.fit();
+    t.term.focus();
+    // Rien a « ouvrir dans un onglet » : il n'y a plus d'URL a laquelle aller. C'est le point.
+    pop.hidden = true;
+  } else if (tab.url) {
     panel.style.display = 'none';
     let pane = stage.querySelector(`.pane[data-key="${CSS.escape(tab.key)}"]`);
     if (!pane) {
@@ -613,9 +640,107 @@ function show(tab) {
   }
 }
 
+// ─── LE TERMINAL, RENDU ICI, DANS CETTE PAGE ───────────────────────────────────────────────────
+// PLUS D'IFRAME, ET CE N'ETAIT PAS UN DEFAUT DE GOUT. Le cadre existait pour recoudre DEUX ORIGINES
+// — cette page d'un cote, un ttyd sur son propre port de l'autre — et c'est cette seconde origine
+// qui ne demandait rien a personne. Le meme geste supprime le cadre et le trou : il n'y a plus qu'un
+// serveur, celui qui a deja verifie la session, et le terminal vit dans SON dom.
+//
+// LE PROTOCOLE DE ttyd, MESURE DANS L'IMAGE SUR LE BINAIRE PINNE (1.7.7-40e79c7), pas recite :
+//   ouverture : WebSocket(url, ["tty"]) sur .../ws
+//   1re trame : JSON {AuthToken, columns, rows} ENCODE EN BINAIRE, sans prefixe
+//   client -> : '0' saisie · '1' redimensionnement {columns,rows} · '2' pause · '3' reprise
+//   -> client : '0' sortie · '1' titre de fenetre · '2' preferences
+//   trame     : prefixe = 1er octet, charge = le reste ; binaryType = "arraybuffer"
+//
+// `AuthToken` part VIDE et c'est correct : l'authentification a eu lieu a la porte, et le relais
+// pose l'identite dans un en-tete que le navigateur ne peut pas ecrire. Ce champ est celui d'un
+// ttyd qu'on aurait publie ; ici il n'y a rien a authentifier une seconde fois.
+const TERM_ENC = new TextEncoder();
+const TERM_DEC = new TextDecoder();
+
+function termPane(tab) {
+  const host = el('div', 'pane');
+  host.dataset.key = tab.key;
+
+  const term = new Terminal({
+    fontSize: 15, fontFamily: 'ui-monospace,"DejaVu Sans Mono",Menlo,monospace',
+    theme: { background: '#000000', foreground: '#FF9900' },
+    // Le scrollback du navigateur ne voit rien : tmux possede l'ecran. C'est xterm.js qui doit le
+    // porter, sinon ce qui defile est perdu.
+    scrollback: 10000, cursorBlink: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+
+  // OUVRIR AVANT DE MESURER. `fit()` lit les dimensions CSS du conteneur : appele avant que le
+  // noeud ne soit dans le document, il n'a rien a mesurer et le terminal s'ouvre a une taille
+  // arbitraire que le shell croit vraie.
+  stage.appendChild(host);
+  term.open(host);
+  fit.fit();
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const sock = new WebSocket(`${proto}//${location.host}${tab.term}`, ['tty']);
+  sock.binaryType = 'arraybuffer';
+
+  const sendResize = () => {
+    if (sock.readyState !== WebSocket.OPEN) return;
+    sock.send(TERM_ENC.encode('1' + JSON.stringify({ columns: term.cols, rows: term.rows })));
+  };
+
+  sock.onopen = () => {
+    sock.send(TERM_ENC.encode(JSON.stringify({
+      AuthToken: '', columns: term.cols, rows: term.rows,
+    })));
+    term.onData(d => {
+      if (sock.readyState === WebSocket.OPEN) sock.send(TERM_ENC.encode('0' + d));
+    });
+    term.onResize(sendResize);
+  };
+
+  sock.onmessage = (ev) => {
+    const buf = new Uint8Array(ev.data);
+    if (!buf.length) return;
+    switch (String.fromCharCode(buf[0])) {
+      case '0': term.write(buf.subarray(1)); break;
+      case '1': document.title = TERM_DEC.decode(buf.subarray(1)); break;
+      case '2': break;  // preferences : les notres sont deja posees a la construction
+    }
+  };
+
+  // UNE FERMETURE SE DIT, ELLE NE SE DEVINE PAS A UN ECRAN QUI NE REPOND PLUS. Un terminal mort et
+  // un terminal inactif sont indiscernables sans ca, et l'humain tape dans le vide.
+  sock.onclose = () => term.write('\r\n\x1b[33m[connexion fermee]\x1b[0m\r\n');
+  sock.onerror = () => term.write('\r\n\x1b[31m[connexion impossible]\x1b[0m\r\n');
+
+  // `ResizeObserver` plutot que l'evenement `resize` de la fenetre : le panneau change aussi de
+  // taille quand le rail se replie ou qu'un autre onglet s'ouvre, sans que la fenetre bouge.
+  const ro = new ResizeObserver(() => { if (!host.hidden) fit.fit(); });
+  ro.observe(host);
+
+  return { host, term, sock, ro, fit };
+}
+
+// Les terminaux vivants, par cle d'onglet. Ils SURVIVENT au changement d'onglet — c'est la meme
+// raison qu'avec les iframes : recreer le terminal a chaque retour perdrait l'ecran et rouvrirait
+// une session. Montrer/cacher ne decharge rien.
+const terms = new Map();
+
 // Un onglet dont l'agent est mort n'a plus de cible : son cadre se ferme avec lui, sinon la page
 // garderait des terminaux fantomes en memoire pour des pods qui n'existent plus.
+//
+// ⚠ UN TERMINAL SE FERME EN TROIS GESTES, ET EN OUBLIER UN LAISSE UNE FUITE MUETTE : la socket
+// (sinon le relais garde un conduit ouvert vers un ttyd, cote serveur, pour un onglet qui n'existe
+// plus), l'observateur de taille, et l'instance xterm. Retirer le seul noeud du DOM n'en fait aucun.
 function dropPanes(keys) {
+  for (const [key, t] of terms) {
+    if (keys.has(key)) continue;
+    try { t.sock.close(); } catch (e) {}
+    try { t.ro.disconnect(); } catch (e) {}
+    try { t.term.dispose(); } catch (e) {}
+    terms.delete(key);
+  }
   document.querySelectorAll('.pane').forEach(f => {
     if (!keys.has(f.dataset.key)) f.remove();
   });
@@ -701,9 +826,12 @@ function build(s) {
   add('boite', 'Statut', null, { key: 'status', crumb: 'STATUT', render: () => statusPanel(s) });
 
   for (const h of s.humans) {
+    // MEME ORIGINE, CHEMIN RELATIF : plus de `http://HOST:port`. La cible n'est plus une adresse
+    // qu'on pourrait taper ailleurs, c'est une route de CE serveur, derriere la session qu'il a
+    // deja verifiee. C'est toute la these du lot en une ligne.
     add('humain ' + h.human, 'Console', 'shell ' + h.human,
         { key: 'console-' + h.human, crumb: 'CONSOLE — ' + h.human,
-          url: `http://${HOST}:${h.ports.console}` });
+          term: `/console/${encodeURIComponent(h.human)}/ws` });
     add(null, 'Deck d\'observation', fleetLabel(h),
         { key: 'deck-' + h.human, crumb: 'DECK — ' + h.human,
           hint: fleetHint(h),
@@ -728,7 +856,11 @@ function build(s) {
             p.role, p.phase + ' · ' + p.pod_id,
             { key: 'pod-' + p.pod_id, crumb: p.role.toUpperCase() + ' — ' + proj,
               hint: p.pod_id,
-              url: `http://${HOST}:${h.ports.pod}?arg=${encodeURIComponent(p.pod_id)}` });
+              // `?arg=` reste : c'est `--url-arg` de ttyd, et `console-pod.sh` le valide encore
+              // (forme, unicite, socket existante). Ce qui a change, c'est qu'il ne suffit plus.
+              // La socket atteinte est celle de CET humain — l'appelant est etabli AVANT que
+              // l'argument n'arrive, ce qui est exactement ce qui manquait a 6-098.
+              term: `/pod/${encodeURIComponent(h.human)}/ws?arg=${encodeURIComponent(p.pod_id)}` });
         first = false;
       }
     }
@@ -984,8 +1116,42 @@ class Deck(BaseHTTPRequestHandler):
         # `fleet:humans`, et un bloc local converge. Une cible atteinte ici l'est donc par quelqu'un
         # que la forge a nomme — c'est la « seule auth » : on ne redemande rien parce qu'on ne peut
         # plus arriver par ailleurs.
+        # Le statique vit DERRIERE la porte, comme la page qui le charge : il n'a aucun usage pour
+        # qui n'est pas identifie, et le navigateur porte deja le cookie en le demandant.
+        if path.startswith("/static/"):
+            name = path[len("/static/"):]
+            ctype = STATIC_FILES.get(name)
+            if not ctype:
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            try:
+                with open(os.path.join(DECK_STATIC, name), "rb") as fh:
+                    raw = fh.read()
+            except OSError as e:
+                # LE MOTIF EST POUR L'OPERATEUR : un client de terminal absent donne une page qui
+                # s'ouvre sur un cadre noir, et rien a l'ecran ne dit que c'est le BUILD qui a rate.
+                print(f"[lcars-deck] statique absent : {name} ({e})", file=sys.stderr, flush=True)
+                self._send(503, "client de terminal absent de l'image\n",
+                           "text/plain; charset=utf-8")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+
         target = parse_target(path)
         if target:
+            # ⚠ LA QUERY EST RECOLLEE ICI, ET SON ABSENCE EST UNE PANNE MUETTE. `do_GET` a coupe sur
+            # `?` des la premiere ligne — donc sans ce recollage, `/pod/<login>/ws?arg=<pod_id>`
+            # arrivait a ttyd sans son argument. `--url-arg` est precisement ce qui laisse le client
+            # nommer le pod : l'onglet se serait ouvert sur un terminal sans cible, sans erreur.
+            # Elle ne participe PAS a l'autorisation : `authorize` ne regarde que la nature et le
+            # login, jamais ce que le client a mis apres le `?`.
+            if query:
+                target = (target[0], target[1], target[2] + "?" + query)
             if not authorize(sess, target):
                 # 404, PAS 403, ET C'EST DELIBERE : repondre « interdit » sur la console d'autrui
                 # confirme qu'elle existe et qui est connecte. Un humain n'a aucun usage de cette

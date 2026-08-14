@@ -282,6 +282,47 @@ RUN set -eu; \
     && rm -f /tmp/ttyd \
     && ttyd --version
 
+# ─── LE CLIENT DE TERMINAL, ET C'EST LA PREMIERE DEPENDANCE FRONTEND DE CE DEPOT ────────────────
+# ⚠ CA SE DIT, CA NE SE GLISSE PAS DANS UN COMMIT. Ce depot ne portait AUCUN JS tiers : tout le
+# statique tient en 80 Ko de CSS ecrit a la main et de SVG, et tout le JS est inline. Une premiere
+# occurrence est une doctrine, pas un detail — la seconde sera un detail.
+#
+# POURQUOI IL N'Y A PAS D'ALTERNATIVE SERIEUSE. Le deck rend desormais le terminal dans SON PROPRE
+# DOM (plus d'iframe, donc plus de seconde origine). Il lui faut donc un emulateur VT. Mesure du
+# 2026-08-14 sur le binaire pinne : ttyd ne livre RIEN a emprunter — client soude dans un binaire
+# statique de 1,36 Mo, une seule page de 730 Ko tout inline, 404 sur /xterm.js, /index.js, /main.js,
+# /bundle.js et /xterm.css. Les deux autres formes seraient l'iframe same-origin (qu'on vient de
+# retirer) ou l'ecriture d'un parseur VT, qui n'est pas serieuse.
+#
+# MEME RANG QUE ttyd, ET C'EST DELIBERE : recupere au BUILD et epingle par sha256, pas commite. Le
+# depot garde zero fichier JS tiers ; ce qu'il porte est une reference verifiee, exactement comme le
+# binaire au-dessus. Un blob minifie de 290 Ko dans l'historique serait illisible en revue et
+# indistinguable d'un blob modifie.
+#
+# Les trois pins ont ete calcules le 2026-08-14 sur ces URLs exactes. `Terminal` est le global
+# exporte par le bundle UMD (verifie en L'EXECUTANT, pas en le lisant) ; `FitAddon` est celui de
+# l'addon, dont l'UMD se lie a `self` — donc navigateur uniquement, ce qui est son emploi.
+ARG XTERM_VERSION=5.5.0
+ARG XTERM_FIT_VERSION=0.10.0
+ARG XTERM_JS_SHA256=1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495
+ARG XTERM_CSS_SHA256=ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6
+ARG XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089
+RUN set -eu; \
+    d=/opt/lcars/deck-static; install -d -m 0755 "$d"; \
+    fetch() { \
+      curl -fsSL --proto '=https' -m 120 -o "$d/$2" "$1" \
+        && echo "$3  $d/$2" | sha256sum -c - >/dev/null \
+        || { echo "deck-static: $2 non conforme au pin (URL: $1)" >&2; exit 1; }; \
+    }; \
+    fetch "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/lib/xterm.js" \
+          xterm.js "${XTERM_JS_SHA256}"; \
+    fetch "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/css/xterm.css" \
+          xterm.css "${XTERM_CSS_SHA256}"; \
+    fetch "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${XTERM_FIT_VERSION}/lib/addon-fit.js" \
+          addon-fit.js "${XTERM_FIT_SHA256}"; \
+    chmod 0644 "$d"/*; \
+    ls -l "$d"
+
 # Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
 # les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
 COPY fleet/deploy /opt/lcars/fleet/deploy

@@ -593,6 +593,17 @@ status, s = ws_get(dport, "/pod/zoe/ws", c_zoe)
 s.close()
 check("101" in status, "TEMOIN : zoe atteint SES pods (vu: %s)" % status)
 
+# LA QUERY DOIT SURVIVRE AU RELAIS, et son absence serait une panne MUETTE. `do_GET` coupe sur `?`
+# des sa premiere ligne ; sans recollage, `?arg=<pod_id>` n'atteint jamais ttyd, dont `--url-arg`
+# est justement ce qui laisse le client nommer le pod. L'onglet se serait ouvert sur un terminal
+# sans cible, sans une seule erreur nulle part. Trouve en relisant le code, pas en le voyant casser.
+seen_headers.clear()
+_, s = ws_get(dport, "/pod/zoe/ws?arg=pod_architect-x", c_zoe)
+s.close()
+line, _pairs = seen_headers[("zoe", "pod.sock")]
+check(line.startswith("GET /ws?arg=pod_architect-x "),
+      "la query traverse le relais jusqu'a ttyd (vu: %s)" % line)
+
 # (9f) ⚠ L'ARBITRAGE LE PLUS FACILE A TRAHIR — L'ADMIN N'ATTEINT PAS LES CONSOLES DES AUTRES.
 # *Ce serait un geste de panoptique, pas un geste d'admin.* La regle est ECRITE dans `authorize`,
 # elle n'est pas une clause oubliee — et ce test porte la phrase pour que personne ne la « repare ».
@@ -637,6 +648,37 @@ check(deck.socket_for(("console", "../../etc", "/ws")) is None,
       "un login non canonique ne produit AUCUN chemin de socket")
 check(deck.authorize({"login": "zoe"}, ("console", "zoe", "/ws")) is True,
       "TEMOIN : authorize dit OUI quand les deux logins sont le meme")
+
+# (9i) LE JS DE LA PAGE N'EST PARSE PAR RIEN, ET C'EST UN ANGLE MORT ENTIER. Il vit dans une chaine
+# brute Python : `py_compile` la voit comme du texte, aucun test ne l'execute, et une parenthese
+# manquante donne une page qui s'affiche et ne FAIT rien — sans une erreur cote serveur. Le client
+# de terminal a fait passer ce bloc de ~230 a ~320 lignes ; l'angle mort a cesse d'etre acceptable.
+#
+# ⚠ MODE DEGRADE ASSUME ET DIT : node n'est pas garanti dans l'image (c'est meme un geste d'admin de
+# l'y installer). Absent, on ne peut pas verifier — on l'ECRIT plutot que de compter un test vert
+# qui n'a rien mesure.
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
+
+_src = open(os.path.join(HERE, "..", "deploy", "docker", "console-deck.py")).read()
+_page = _re.search(r'PAGE = r"""(.*?)"""', _src, _re.S)
+check(_page is not None, "la page du deck est trouvable dans le source")
+_js = "\n".join(_re.findall(r"<script>(.*?)</script>", _page.group(1), _re.S)).replace("%%", "%")
+check(len(_js.splitlines()) > 100,
+      "le bloc JS extrait est bien le vrai (vu: %d lignes)" % len(_js.splitlines()))
+check("termPane" in _js and "new Terminal(" in _js,
+      "et il porte le client de terminal — sinon on validerait la syntaxe d'autre chose")
+
+if _shutil.which("node"):
+    _p = os.path.join(tempfile.mkdtemp(), "page.js")
+    with open(_p, "w") as fh:
+        fh.write(_js)
+    _r = _subprocess.run(["node", "--check", _p], capture_output=True, text=True)
+    check(_r.returncode == 0,
+          "le JS de la page PARSE (node --check) : %s" % (_r.stderr.strip().splitlines() or [""])[0])
+else:
+    print("SKIP: node absent — la syntaxe du JS de la page N'A PAS ete verifiee")
 
 deck.humans = _humans_real
 for _s in (t_zoe, t_zoe_pod, t_max, t_adm):
