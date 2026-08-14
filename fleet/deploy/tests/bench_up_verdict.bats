@@ -38,11 +38,15 @@ exit 0
 FAKE
   chmod 0755 "$DEV/bench-forge-bootstrap.sh"
 
+  # La doublure PARLE quand elle refuse — c'est la matiere du test « le refus remonte ». Un faux
+  # sous-script muet ne pourrait pas distinguer « bench-up relaie » de « bench-up invente ».
   RUNNER_RC="$BATS_TEST_TMPDIR/runner.rc"
   echo 0 > "$RUNNER_RC"
   cat > "$DEV/bench-runner.sh" <<FAKE
 #!/usr/bin/env bash
-exit "\$(cat "$RUNNER_RC")"
+rc="\$(cat "$RUNNER_RC")"
+[[ "\$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
+exit "\$rc"
 FAKE
   chmod 0755 "$DEV/bench-runner.sh"
 
@@ -55,6 +59,11 @@ FAKE
   # autre panne, avec un autre code, en croyant mesurer la sienne.
   BUILD_IMG_RC="$BATS_TEST_TMPDIR/build_img.rc"
   echo 0 > "$BUILD_IMG_RC"
+  # La REVISION que l'image porte dans son label OCI. L'etat nominal est une image estampillee ; les
+  # tests qui mesurent l'absence l'effacent. Sert la forme `image inspect -f <fmt> <image>`, qu'il
+  # faut distinguer du `image inspect <image>` d'existence — meme deux premiers mots, autre question.
+  IMAGE_REV_OUT="$BATS_TEST_TMPDIR/image_rev.out"
+  echo "deadbeef1" > "$IMAGE_REV_OUT"
   # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
   # boite en second argument (`exec <box> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
@@ -68,6 +77,7 @@ case "\$1 \$2" in
   "inspect -f")    echo healthy; exit 0 ;;
   "image inspect")
      case "\$3" in
+       -f)            cat "$IMAGE_REV_OUT"; exit 0 ;;
        lcars-build:*) exit "\$(cat "$BUILD_IMG_RC")" ;;
        *)             exit 0 ;;
      esac ;;
@@ -171,6 +181,55 @@ FAKE
   [ "$status" -eq 6 ]
   [[ "$output" == *"runner    :"* ]]
   [[ "$output" == *"destruire :"* ]]
+}
+
+# 2026-08-14 — LE SEUL ECHEC QUE CE SCRIPT NE SAVAIT PAS EXPLIQUER ETAIT CELUI QU'IL FAISAIT TAIRE.
+# L'appel a `bench-runner.sh` partait en `>/dev/null 2>&1`, donc le verdict se reduisait a « en echec
+# (rejouable : bench-runner.sh --help) ». Le sous-script, lui, avait dit exactement quoi reparer —
+# et le rejouer a la main demande de reconstruire ses six arguments, dont un token qui vit dans un
+# `mktemp` que rien ne documente. Le test epingle la PROPAGATION, pas la formulation du relais.
+@test "6-14: le refus de bench-runner.sh remonte MOT POUR MOT dans le verdict" {
+  echo 1 > "$RUNNER_RC"
+  run_bench
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"REFUS-TEMOIN"* ]]
+  [[ "$output" == *"alpine:3.20"* ]]
+}
+
+@test "6-14: TEMOIN — un runner qui REUSSIT ne deverse pas le journal du sous-script" {
+  # Sans ce temoin, un correctif qui imprimerait la sortie dans TOUS les cas passerait le test
+  # ci-dessus. Le silence au succes est la moitie du contrat : un banc vert n'a rien a raconter.
+  run_bench
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"REFUS-TEMOIN"* ]]
+}
+
+# 2026-08-14 — LE BANC DEPLOYAIT UNE IMAGE MUETTE SUR SON PROPRE CODE, ET NE LE VOYAIT PAS. Mesure :
+# une image batie a la main (docker build sans --build-arg GIT_SHA) a produit un banc entierement
+# vert dont `/api/version` rendait `sha: "unknown"`. Aucun verdict rendu par ce banc n'etait donc
+# attribuable a un commit — la seule chose qu'on lui demande. Le TAG ne prouve rien : c'est un nom,
+# il s'ecrit a la main, et c'est precisement ce que j'avais fait.
+@test "6-14: une image sans revision est ANNONCEE inconnue dans le bloc de verdict" {
+  : > "$IMAGE_REV_OUT"
+  run_bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"revision"* ]]
+  [[ "$output" == *"INCONNUE"* ]]
+}
+
+@test "6-14: le litteral « unknown » du Dockerfile compte comme absence, pas comme revision" {
+  # `ARG GIT_SHA=unknown` : une image non estampillee porte le mot, pas le vide. Un test qui ne
+  # verifierait que la chaine vide laisserait passer le cas REEL, qui est celui-la.
+  echo "unknown" > "$IMAGE_REV_OUT"
+  run_bench
+  [[ "$output" == *"INCONNUE"* ]]
+}
+
+@test "6-14: TEMOIN — une image estampillee montre SA revision, pas un avertissement" {
+  run_bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deadbeef1"* ]]
+  [[ "$output" != *"INCONNUE"* ]]
 }
 
 @test "6-133: --no-runner porte son PROPRE verdict, jamais celui du banc complet" {

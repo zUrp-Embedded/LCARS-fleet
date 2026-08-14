@@ -30,15 +30,19 @@ setup() {
   CALLS="$BATS_TEST_TMPDIR/docker.calls"
   : > "$CALLS"
 
-  # `PRESENT` is what `docker ps -a` answers — the discriminant this script uses to decide there is
-  # something to destroy. Each test sets it to the containers it wants to exist.
+  # `PRESENT` is what `docker ps -a` answers and `VOLUMES` what `docker volume ls` answers — together
+  # they are the RESIDUE this script looks for to decide there is something to destroy. Each test
+  # sets the leftovers it wants to exist. Volumes answer separately because they outlive containers:
+  # a bench whose containers are all gone still owns the forge's seeded state until `down -v` runs.
   export PRESENT="${PRESENT:-}"
+  export VOLUMES="${VOLUMES:-}"
 
   cat > "$BINDIR/dockerstub" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
 case "\$1 \$2" in
-  "ps -a") printf '%s\n' \$PRESENT ;;
+  "ps -a")     printf '%s\n' \$PRESENT ;;
+  "volume ls") printf '%s\n' \$VOLUMES ;;
 esac
 exit 0
 EOF
@@ -84,8 +88,33 @@ idx_of() {
   grep -q -- "-p bt-runner down -v" "$CALLS"
 }
 
+# 2026-08-14 — THE DISCRIMINANT GREW ONE MEMBER AT A TIME AND NEVER CLOSED THE CLASS. First the box,
+# then box-or-runner (the test above). The member it still missed showed up on a real teardown: when
+# bench-up dies BEFORE creating the box — its forge never answered — the only leftovers are
+# `<project>forge-forge-1` and two volumes, and this script answered "rien a detruire" on a bench
+# that still held the bind, the port and the project name. The next bench-up then mounted itself on
+# the previous one's remains.
+@test "only the FORGE survives (bench-up died before creating the box) → still destroyed" {
+  PRESENT="btforge-forge-1" run_down
+
+  [ "$status" -eq 0 ]
+  grep -q -- "-p btforge down -v" "$CALLS"
+}
+
+# Volumes alone are the harder half, and the one that matters most: they carry the STATE — the
+# seeded forge, the box's /home. `compose down -v` removes them even when no container mounts them,
+# so a guard that only reads `ps -a` refuses to clean exactly the residue that poisons the next run.
+@test "no container left but the volumes remain → still destroyed" {
+  PRESENT="someone-elses-box" VOLUMES="btforge_data btforge_config" run_down
+
+  [ "$status" -eq 0 ]
+  grep -q -- "-p btforge down -v" "$CALLS"
+}
+
 @test "nothing of this bench exists → exit 2, and NOT one destructive call" {
-  PRESENT="someone-elses-box" run_down
+  # TEMOIN of the two above: the residue test must still be able to say NO. A guard that answers
+  # "there is something" on an empty daemon would make the two tests above pass vacuously.
+  PRESENT="someone-elses-box" VOLUMES="someoneelses_data" run_down
 
   [ "$status" -eq 2 ]
   ! grep -q -- "down -v" "$CALLS"

@@ -46,6 +46,7 @@ FORGE_PROJECT="${PROJECT}forge"
 RUNNER_PROJECT="${PROJECT}-runner"
 BOX="${PROJECT}-lcars-1"
 RUNNER="${RUNNER_PROJECT}-runner-1"
+FORGE="${FORGE_PROJECT}-forge-1"
 
 # UN BANC A TROIS PROJETS COMPOSE, ET CELUI-CI N'EN VOYAIT QUE DEUX. `bench-up.sh` lance aussi un
 # runner (`bench-runner.sh --project "${PROJECT}-runner"`) ; il n'etait jamais detruit. Mesure du
@@ -55,11 +56,23 @@ RUNNER="${RUNNER_PROJECT}-runner-1"
 # contre une forge qui n'existe plus : le zombie que bench-runner decrit dans son propre en-tete,
 # sauf que la, personne ne le nettoie avant le banc SUIVANT.
 #
-# LE DISCRIMINANT COUVRE LES DEUX, et pas seulement la boite : un banc a moitie detruit (boite
-# partie, runner debout) etait impossible a finir — ce script sortait en 2 avant d'atteindre le
-# runner, et il fallait un `docker rm` a la main.
-"$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qxE "$BOX|$RUNNER" \
-  || { echo "bench-down: ni '$BOX' ni '$RUNNER' — rien a detruire" >&2; exit 2; }
+# ⚠ LE DISCRIMINANT PORTE SUR LE RESIDU, PLUS SUR UNE LISTE DE CONTENEURS ATTENDUS. Il a d'abord
+# regarde la boite seule, puis la boite OU le runner — a chaque fois un membre de plus, jamais la
+# classe. Le membre manquant s'est presente : `bench-up` meurt AVANT de creer la boite (forge qui
+# ne repond pas), il ne reste que `<projet>forge-forge-1` et ses deux volumes, et ce script
+# repondait « rien a detruire » sur un banc qui occupait le bind, le port et le nom du projet. Le
+# banc suivant se montait alors sur les restes du precedent.
+#
+# La question juste n'est pas « la boite est-elle la ? » mais « reste-t-il QUOI QUE CE SOIT de ce
+# banc ? » — donc les trois conteneurs ET les volumes des trois projets. Les volumes comptent
+# seuls : ce sont eux qui portent l'etat (la forge semee, le /home de la boite), et `down -v` les
+# emporte meme quand plus aucun conteneur ne les monte.
+RESIDU_C="$("$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -cxE "$BOX|$RUNNER|$FORGE" || true)"
+RESIDU_V="$("$DOCKER_BIN" volume ls --format '{{.Name}}' \
+  | grep -cE "^(${PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" || true)"
+
+[[ "$RESIDU_C" -gt 0 || "$RESIDU_V" -gt 0 ]] \
+  || { echo "bench-down: aucun conteneur ni volume de '$PROJECT' (ni $BOX, $RUNNER, $FORGE) — rien a detruire" >&2; exit 2; }
 
 # LE RUNNER D'ABORD, et l'ordre n'est pas cosmetique : il tient le reseau de la forge, donc le
 # detruire apres laisserait ce reseau debout. Valeurs factices comme dans le nettoyage de

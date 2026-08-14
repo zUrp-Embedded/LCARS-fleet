@@ -170,12 +170,18 @@ COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system
 # tierce, et on la cherche pendant une heure du mauvais côté.
 # LA REVISION DOIT TRAVERSER JUSQU'A LA RELEASE, PAS SEULEMENT JUSQU'AUX LABELS OCI.
 # Mesure du 2026-08-07, depuis l'interieur d'une boite de banc : `fleet_v2 status` rendait
-# « build unknown ref= (source=release) ». La chaine etait complete a un maillon pres — docker.sh
-# exporte LCARS_GIT_SHA, le compose le passe en `args`, et le Dockerfile le declarait UNIQUEMENT
-# dans le stage runtime, pour le LABEL. Or c'est ICI que la release est estampillee, et
-# `BuildInfo.write_release_file` interrogeait `git` — que ce stage n'a pas, deliberement (pas de
-# .git dans le contexte). Le SHA existait, voyageait, et s'arretait a l'etage d'a cote.
+# « build unknown ref= (source=release) ». Le SHA etait declare UNIQUEMENT dans le stage runtime,
+# pour le LABEL. Or c'est ICI que la release est estampillee, et `BuildInfo.write_release_file`
+# interrogeait `git` — que ce stage n'a pas, deliberement (pas de .git dans le contexte). Le SHA
+# voyageait, et s'arretait a l'etage d'a cote.
 # Un label OCI se lit du dehors ; l'operateur, lui, regarde depuis DEDANS.
+#
+# ⚠ CE `unknown` N'EST PAS UN DEFAUT DEFENSIF, C'EST L'ETAT NOMINAL TANT QUE L'APPELANT SE TAIT.
+# Il n'existe AUCUN producteur de LCARS_GIT_SHA dans ce depot (mesure 2026-08-14) : le compose le
+# lit en `${LCARS_GIT_SHA:-unknown}`, donc toute image construite sans le poser A LA MAIN sort
+# aveugle sur son propre code, et rien dans la chaine de build ne le signale. Le seul garde-fou
+# vit en aval — `bench-up.sh` lit le label `image.revision` et l'annonce dans son bloc de verdict.
+# Poser le SHA fait donc partie du geste de build, ce n'est pas une option de confort.
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 ENV LCARS_GIT_SHA=${GIT_SHA} LCARS_BUILD_DATE=${BUILD_DATE}

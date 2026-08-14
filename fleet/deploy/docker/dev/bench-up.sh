@@ -157,8 +157,32 @@ fi
   || die "aucun daemon docker joignable (DOCKER_HOST=${DOCKER_HOST:-<vide>}) — Docker Desktop lance ?" 1
 
 # La sonde : un aller-retour attache sur l'image qu'on s'apprete a deployer (locale, aucun pull).
+# ⚠ LE GESTE CITE ICI POINTAIT VERS `./docker.sh build` — UN SCRIPT QUI N'EXISTE PAS dans ce depot
+# (verifie le 2026-08-14 : aucun fichier de ce nom, et personne n'exporte LCARS_GIT_SHA). Un
+# operateur qui suit ce message ne construit rien ; un agent qui le suit invente sa propre commande,
+# et c'est exactement comme cette boite a fini par tourner sans savoir dire quel code elle portait.
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
-  || die "image absente localement: $IMAGE (LCARS_IMAGE=$IMAGE ./docker.sh build)" 1
+  || die "image absente localement: $IMAGE
+   Construire (le sha est OBLIGATOIRE, cf. le bloc revision plus bas) :
+     LCARS_IMAGE=$IMAGE LCARS_GIT_SHA=\$(git rev-parse --short HEAD) \\
+     LCARS_BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \\
+     docker compose -f fleet/deploy/docker/docker-compose.yml build" 1
+
+# LA BOITE DOIT POUVOIR DIRE QUEL CODE ELLE PORTE, ET LE BANC DOIT LE LIRE AVANT DE L'ANNONCER.
+# Mesure du 2026-08-14 : une image batie a la main (docker build nu, sans --build-arg) deployait un
+# banc entierement vert dont `/api/version` rendait `sha: "unknown"`. Rien ne l'avait remarque —
+# donc aucun verdict rendu par ce banc n'etait attribuable a un commit, ce qui est la seule chose
+# qu'on lui demande. Le tag de l'image ne prouve rien : c'est un nom, il s'ecrit a la main.
+#
+# Ce n'est PAS un refus : la boite fonctionne, elle est seulement muette sur son origine. On le dit
+# dans le bloc de verdict, a cote de `creds` et `admin`, la ou l'operateur lit l'etat du banc.
+IMAGE_REV="$("$DOCKER_BIN" image inspect \
+  -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE" 2>/dev/null || true)"
+if [[ -z "$IMAGE_REV" || "$IMAGE_REV" == "unknown" ]]; then
+  IMAGE_REV_STATE="INCONNUE — image batie sans GIT_SHA : ce banc ne pourra attribuer aucun verdict a un commit"
+else
+  IMAGE_REV_STATE="$IMAGE_REV"
+fi
 PROBE="$("$DOCKER_BIN" run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/dev/null | tr -d '[:space:]')"
 [[ "$PROBE" == "flux-ok" ]] || die \
   "le daemon repond mais un flux attache revient VIDE (recu: '${PROBE:-<rien>}') — DOCKER_HOST=$DOCKER_HOST
@@ -340,13 +364,24 @@ elif [[ -z "$RUNNER_LABELS" ]]; then
 elif [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
+  # ⚠ LA SORTIE DU SOUS-SCRIPT EST CAPTUREE, PLUS JETEE. Elle partait en `>/dev/null 2>&1`, donc le
+  # SEUL mode d'echec que ce script ne savait pas expliquer etait celui qu'il faisait taire
+  # lui-meme : le verdict se reduisait a « en echec (rejouable : bench-runner.sh --help) », et il
+  # fallait rejouer le sous-script a la main — en reconstruisant ses six arguments, dont un token
+  # qui vit dans un `mktemp` — pour lire une phrase que le banc avait deja eue sous les yeux.
+  # Mesure du 2026-08-14 : le refus etait « image(s) introuvable(s) sur ce daemon : alpine:3.20,
+  # docker:cli », diagnostic complet et actionnable, perdu par la redirection.
+  #
+  # Le silence reste la regle au SUCCES — un banc qui marche n'a pas a deverser le journal de ses
+  # sous-scripts. C'est l'echec qui parle, et il parle avec les mots du sous-script, pas les notres.
+  RUNNER_LOG="$TOFU_DIR/bench-runner.out"
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
        --forge-api "$FORGE_URL/api/v1" \
        --admin-token "$(cat "$MASTER_TOKEN_FILE")" \
        --instance-url "http://forge:3000" \
        --network "$FORGE_NET" \
        --project "${PROJECT}-runner" \
-       --labels "$RUNNER_LABELS" >/dev/null 2>&1; then
+       --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
     # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
     # silence que ce banc doit refuser.
     RUNNERS="$(curl -s -m 5 -H "Authorization: token $(cat "$MASTER_TOKEN_FILE")" \
@@ -364,7 +399,8 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
       RUNNER_STATE="demarre mais AUCUN runner vu par la forge — enregistrement rate"
     fi
   else
-    RUNNER_STATE="ABSENT — bench-runner.sh en echec (rejouable : bench-runner.sh --help)"
+    RUNNER_STATE="ABSENT — bench-runner.sh en echec, son refus mot pour mot :
+$(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)"
   fi
 fi
 
@@ -383,6 +419,8 @@ say "─────────────────────────
 say "$VERDICT"
 say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
 say "  boite     : $BOX   ssh ${BIND}:2222   deck ${BIND}:20999"
+say "  image     : $IMAGE"
+say "  revision  : $IMAGE_REV_STATE"
 say "  runner    : $RUNNER_STATE"
 say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
 say "  creds     : $CREDS_OK"
