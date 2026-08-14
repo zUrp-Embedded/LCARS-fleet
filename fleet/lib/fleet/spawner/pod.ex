@@ -298,6 +298,11 @@ defmodule Fleet.Spawner.Pod do
     # (resume=false) would hit `Session ID already in use` if a `<uuid>.jsonl` lingers. We delete it
     # → `--session-id` always creates fresh. (resume=true → `SeedStore.restore` overwrites the jsonl: no GC.)
     unless data.resume, do: Scaffold.gc_stale_session_jsonl(data)
+
+    # The flag rail is per-LIFE: clear any turn.flag/.seen surviving a prior life (the pod_dir persists
+    # a crash/restart) so the NEW Monitor's arming — not stale files — is what the bootstrap/wake gates
+    # read. Done for resume too: the pending work is re-dispatched via the TaskQueue, not a stale flag.
+    Fleet.Spawner.Pod.TurnFlag.reset(data.pod_dir)
     {:next_state, :projecting, data, [{:next_event, :internal, :proceed}]}
   end
 
@@ -719,9 +724,21 @@ defmodule Fleet.Spawner.Pod do
       # Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case (result deadline + drift/periodic
       # monitors), not a delivery failure. The wake now fires ONLY on genuine non-delivery (a dead
       # Monitor: `.seen` never catches up → this stays false → the send-keys/`wake.failed` rails below run).
-      polled and Fleet.Spawner.Pod.TurnFlag.delivered?(data.pod_dir) ->
+      polled and Fleet.Spawner.Pod.TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
         Logger.debug(
           "pod #{data.pod_id} wake: Monitor delivered (turn.flag == turn.flag.seen) → loop stopped, no send-keys"
+        )
+
+        {:keep_state_and_data, [cancel_kick_action()]}
+
+      # BOOTSTRAP branch (not polled): the Monitor is ARMED (`turn.flag.seen` exists) → the flag rail is
+      # LIVE, so engage's one job (get the agent to arm its rail) is done. Stop, whether the agent polls
+      # now or takes its brief via the rail ("Monitor event: ton tour"). A RESUMED pod self-arms and
+      # lands here with NO engage sent (`kick_keyword` gates it — a live session is never typed into);
+      # a FRESH pod lands here right after ÉTAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
+      not polled and Fleet.Spawner.Pod.TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
+        Logger.debug(
+          "pod #{data.pod_id} bootstrap: Monitor armed (turn.flag.seen) → loop stopped (rail is live)"
         )
 
         {:keep_state_and_data, [cancel_kick_action()]}

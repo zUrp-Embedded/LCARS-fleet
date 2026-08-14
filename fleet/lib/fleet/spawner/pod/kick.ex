@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
     `spawner_kick_bootstrap_max`, `spawner_kick_bootstrap_retry_ms`): `:lcars_fleet` config read on every tick;
-  - **the PURE decisions** (`acked?/3`, `kick_keyword/2`): should the loop stop (ACK) and,
+  - **the PURE decisions** (`acked?/3`, `kick_keyword/4`): should the loop stop (ACK) and,
     otherwise, which keyword to send (`engage`/`wake`/nothing) — testable outside the process;
   - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
 
@@ -32,8 +32,8 @@ defmodule Fleet.Spawner.Pod.Kick do
     `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `acked?/3` (PURE decision) — did the agent reach out? STOP of the loop (called by the handler;
     the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`).
-  - `kick_keyword/2` (PURE decision) — keyword according to the ACK (`engage`/`wake`/`nil`) (called by
-    `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/2`).
+  - `kick_keyword/4` (PURE decision) — keyword according to the ACK (`engage`/`wake`/`nil`) (called by
+    `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/4`).
   - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
@@ -151,7 +151,12 @@ defmodule Fleet.Spawner.Pod.Kick do
     #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
     fallback_on? = Application.get_env(:lcars_fleet, :spawner_wake_send_keys, true)
 
-    case kick_keyword(polled, fallback_on?, profile_send_keys?(state)) do
+    case kick_keyword(
+           polled,
+           fallback_on?,
+           profile_send_keys?(state),
+           Map.get(state, :resume, false)
+         ) do
       nil -> :ok
       key -> do_send_keys(state, key)
     end
@@ -165,10 +170,16 @@ defmodule Fleet.Spawner.Pod.Kick do
     do: Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
 
   @doc false
-  @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
-  def kick_keyword(polled, fallback_on?, profile_allows?) do
+  # `resume?` gates the BOOTSTRAP engage: a RESUMED pod is a LIVE session (its conversation is ongoing),
+  # so typing `engage` into it is a spurious turn in that session — the same class as a wake landing in
+  # a human terminal. A resumed pod self-continues and re-arms its Monitor on its own; the armed-stop in
+  # the handler then cancels the loop, and `repl_up?`+cap still escalates a resume that never comes up.
+  # A FRESH pod (`resume? == false`) is idle at its prompt — engage is the legitimate trigger.
+  @spec kick_keyword(boolean(), boolean(), boolean(), boolean()) :: String.t() | nil
+  def kick_keyword(polled, fallback_on?, profile_allows?, resume?) do
     cond do
       not profile_allows? -> nil
+      not polled and resume? -> nil
       not polled -> "engage"
       fallback_on? -> "wake"
       true -> nil

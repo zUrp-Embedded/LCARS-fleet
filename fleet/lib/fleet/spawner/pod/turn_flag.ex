@@ -88,4 +88,32 @@ defmodule Fleet.Spawner.Pod.TurnFlag do
   end
 
   def delivered?(_), do: false
+
+  @doc """
+  Is the in-pod Monitor ARMED? True iff `turn.flag.seen` exists — `watch.sh` creates it the MOMENT it
+  arms (baseline), before any wake. The BOOTSTRAP kick keys on this: `engage` exists only to get the
+  agent to arm its rail, so once the Monitor is up the flag rail carries every turn and engage is done.
+  Distinct from `delivered?/1` (a specific turn's delivery, for the WAKE branch). `reset/1` clears the
+  file at spawn so a resumed pod's STALE `.seen` cannot false-signal "armed" before its new Monitor.
+  """
+  @spec monitor_armed?(Path.t() | nil) :: boolean()
+  def monitor_armed?(pod_dir) when is_binary(pod_dir),
+    do: File.exists?(Path.join(pod_dir, "turn.flag.seen"))
+
+  def monitor_armed?(_), do: false
+
+  @doc """
+  Clears the flag-rail files (`turn.flag`, `turn.flag.seen`) at pod launch — the rail is per-LIFE, never
+  inherited. The pod_dir survives a crash/restart, so without this the surviving files would make
+  `monitor_armed?/1` / `delivered?/1` read a PRIOR life's state before the new Monitor is up (a resumed
+  pod would look "armed" instantly). Non-fatal.
+  """
+  @spec reset(Path.t() | nil) :: :ok
+  def reset(pod_dir) when is_binary(pod_dir) do
+    _ = File.rm(Path.join(pod_dir, "turn.flag"))
+    _ = File.rm(Path.join(pod_dir, "turn.flag.seen"))
+    :ok
+  end
+
+  def reset(_), do: :ok
 end

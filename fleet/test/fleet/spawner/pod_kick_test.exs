@@ -162,4 +162,25 @@ defmodule Fleet.Spawner.PodKickTest do
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end
+
+  # BOOTSTRAP-branch armed gate: once the agent has armed its Monitor (turn.flag.seen exists), the flag
+  # rail is live and `engage` is done. NOT polled (no get_for_pod) + a pending brief (worker/bootstrap).
+  @tag :tmp_dir
+  test "bootstrap: Monitor armed (turn.flag.seen exists) → stop (cancel), rail is live", %{
+    tmp_dir: dir
+  } do
+    pod = fake_pod()
+    {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
+    on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
+
+    File.write!(Path.join(dir, "turn.flag.seen"), "armed\n")
+
+    data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
+
+    refute Fleet.Spawner.Pod.TaskProbe.polled?(data)
+    assert Fleet.Spawner.Pod.TurnFlag.monitor_armed?(dir)
+
+    assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
+             Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
+  end
 end
