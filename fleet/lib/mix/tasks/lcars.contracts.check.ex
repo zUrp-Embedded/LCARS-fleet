@@ -100,6 +100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_tools_gated(root),
         check_mcp_tool_effects(root),
         check_cap_profile_project_keys(root),
+        check_modop_tools_granted(root),
         check_proven_image_regime(root),
         check_verifier_covers_rail(root),
         check_capabilities_exercisable(root),
@@ -2413,6 +2414,122 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       note: "#{MapSet.size(declared)} tools, each with a declared world-effect"
     }
   end
+
+  # 6-136 — UN MODOP QUI ORDONNE UN OUTIL QUE SON PORTEUR N'A PAS **GELE LE POD**, ET RIEN NE LE
+  # DISAIT NULLE PART.
+  #
+  # Ce n'est pas une gene de prompt. Mesure de banc du 2026-08-09, ecrite dans `architect.yaml` et
+  # dans `launch_env.ex` : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
+  # saute PAS, il PROMPTE (« Do you want to… 1. Yes 2. Yes, allow all 3. No ») — et un pod n'a
+  # personne pour repondre. Il reste vivant, tient son creneau et le verrou `lcars-in-flight` du
+  # ticket, et ne produit rien ; la chaine de reprise redispatche alors un pod qui se bloque au meme
+  # endroit. Le bundle `brainstorming` ordonnait un `TodoWrite` que ni `architect` ni `starfleet`
+  # ne declaraient, et les deux l'activent.
+  #
+  # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Le premier jet bornait
+  # le vocabulaire aux noms deja declares par un cap-profile — exact, sans faux positif… et MUET sur
+  # le defaut qui l'a motive : `TodoWrite` n'etait declare NULLE PART, donc rien ne le reconnaissait
+  # comme outil. Un mur qu'on desarme en retirant la derniere declaration ne protege rien.
+  #
+  # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
+  # porteurs, ou figurer ci-dessous avec sa raison. Le seul faux positif du corpus est mesure —
+  # `tdd/sp.md` cite `MailerTest`, un nom de module dans un test d'exemple, qu'aucun pod n'invoque.
+  # La liste se PURGE quand son sujet disparait (lecon 6-091 : une exemption qui ne correspond plus
+  # a rien n'exempte rien et masque la suivante).
+  @modop_not_tools %{
+    "MailerTest" => "module name in the tdd bundle's sample test — a pod never invokes it"
+  }
+
+  @doc false
+  def check_modop_tools_granted(root) do
+    profiles = catalogue_profiles(root)
+    bundles = catalogue_modop_bundles(root)
+
+    missing =
+      for {bundle, path, cited} <- bundles,
+          {rname, allowed, _denied, modops} <- profiles,
+          bundle in modops,
+          tool <- cited,
+          not Map.has_key?(@modop_not_tools, tool),
+          tool not in allowed,
+          do: "#{path}: orders #{tool}, which #{rname} (a carrier) does not grant"
+
+    cited_anywhere = bundles |> Enum.flat_map(fn {_b, _p, cited} -> cited end) |> MapSet.new()
+
+    dead_exemptions =
+      @modop_not_tools |> Map.keys() |> Enum.reject(&(&1 in cited_anywhere)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(profiles) ->
+        broken_result("cap_profile.modop_tools_granted", "cap-profile under the catalogue roots")
+
+      measured_nothing?(bundles) ->
+        broken_result("cap_profile.modop_tools_granted", "modop bundle under the catalogue roots")
+
+      measured_nothing?(cited_anywhere) ->
+        broken_result("cap_profile.modop_tools_granted", "tool-shaped name cited by any bundle")
+
+      true ->
+        %{
+          id: "cap_profile.modop_tools_granted",
+          remediation:
+            "add the tool to `allowedTools` of every role that activates the bundle (the list must " <>
+              "cover what a role may LEGITIMATELY reach for — leaving it out does not close it, it " <>
+              "wedges the pod on a prompt), stop ordering it in the bundle's sp.md, or declare it " <>
+              "in @modop_not_tools with the reason it is not a tool",
+          status: if(missing == [] and dead_exemptions == [], do: :pass, else: :fail),
+          evidence:
+            Enum.sort(missing) ++
+              for(
+                n <- dead_exemptions,
+                do: "@modop_not_tools: #{n} is cited by no bundle — purge it"
+              ),
+          note:
+            "#{length(bundles)} bundles x #{length(profiles)} profiles, " <>
+              "#{MapSet.size(cited_anywhere)} tool-shaped names cited, " <>
+              "#{map_size(@modop_not_tools)} declared non-tools"
+        }
+    end
+  end
+
+  @tool_cite_re ~r/\b(?:mcp__[a-z0-9_]+|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+)\b/
+
+  # `{name, allowedTools, disallowedTools, modops}` per cap-profile of EVERY active catalogue root.
+  defp catalogue_profiles(root) do
+    root
+    |> catalogue_roots()
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/cap-profiles/*.yaml")))
+    |> Enum.map(fn path ->
+      spec = path |> YamlElixir.read_from_file!() |> Map.get("spec", %{})
+      scope = Map.get(spec, "scope", %{})
+      ms = Map.get(spec, "modop_set", %{})
+
+      {Path.basename(path, ".yaml"), string_list(scope["allowedTools"]),
+       string_list(scope["disallowedTools"]),
+       string_list(Map.get(ms, "default")) ++ string_list(Map.get(ms, "optional"))}
+    end)
+  end
+
+  # `{bundle_name, relative_path, cited_names}` per modop bundle.
+  defp catalogue_modop_bundles(root) do
+    root
+    |> catalogue_roots()
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/modop-bundles/*/sp.md")))
+    |> Enum.map(fn path ->
+      cited = @tool_cite_re |> Regex.scan(File.read!(path)) |> List.flatten() |> Enum.uniq()
+      {path |> Path.dirname() |> Path.basename(), Path.relative_to(path, root), cited}
+    end)
+  end
+
+  # BOTH shipped catalogues, and the plural is the point: `brainstorming` lives in the SYSTEM one
+  # while the business roles live in the other, so a check reading a single root would have found
+  # the bundle and none of its carriers — or the reverse — and passed on an empty intersection.
+  defp catalogue_roots(root),
+    do: [Path.join(root, "priv/catalogue"), Path.join(root, "priv/catalogue-system")]
+
+  defp string_list(nil), do: []
+  defp string_list(list) when is_list(list), do: Enum.filter(list, &is_binary/1)
+  defp string_list(_), do: []
 
   # `spec.project` CARRIES TWO POPULATIONS IN ONE SLOT and only one of them was ever written down.
   # The catalogue schema declares four keys with `additionalProperties: false`; the pilot injects

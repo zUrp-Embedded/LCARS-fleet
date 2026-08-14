@@ -76,6 +76,11 @@ spec:
       - WebSearch
       - ToolSearch     # loads the deferred tools (Monitor, mcp__fleet__*)
       - Monitor        # wake-by-flag (watch.sh) — wake without content send-keys
+      # 6-136 — MÊME RAISON QUE POUR L'ARCHITECT, ET C'EST LE MÊME MODOP. `brainstorming` est en
+      # `modop_set.optional` ici aussi et ordonne un `TodoWrite` que ce rôle n'avait pas. Sous
+      # `--permission-mode default`, l'absence ne fait pas éviter l'outil : elle fait PROMPTER, et
+      # le pod gèle en tenant son créneau (mesuré sur banc le 2026-08-09, cf. architect.yaml).
+      - TodoWrite
       # Fleet MCP tools of the FLEET-MASTER: ONLY the portfolio head (create/adopt a project + card
       # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
       # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
