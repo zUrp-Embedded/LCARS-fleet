@@ -10,9 +10,14 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
   | `MCPSocketProvisioner` | `nil` | **2435 green** |
   | `LaunchBackend` | the test stub | 1 failure (held) |
 
-  What the first one costs is the point. `Fleet.API.Readiness` reports `coord.backend` as
-  **degraded** precisely by comparing the resolved module to `NotWiredYet` — and that comparison is
-  tested. But the FALLBACK it depends on is not: flip the default to a real backend and an unwired
+  What the first one costs is the point. ⚠ `Fleet.API.Readiness` — qui rapportait `coord.backend`
+  **degrade** en comparant le module resolu a `NotWiredYet` — A ETE SUPPRIMEE le 2026-08-14 avec la
+  surface TCP qu'elle servait : elle calculait un verdict que PERSONNE ne lisait (son unique
+  appelant etait l'endpoint `/api/readiness/deep`, lui-meme sans client). Une sonde dont personne ne
+  lit la sortie n'est pas un garde, c'est un commentaire qui coute un calcul.
+
+  CE QUI RESTE VRAI, ET C'EST TOUT LE SUJET DE CE FICHIER : le FALLBACK dont ce verdict dependait
+  n'est, lui, toujours pas teste ailleurs. Flip the default to a real backend and an unwired
   fleet reports `operational` while every escalation goes nowhere. The probe would not lie about
   what it measured; it would measure something that had quietly stopped being true.
 

@@ -7,8 +7,9 @@ defmodule Fleet.API.SpawnAdmission do
 
   ## Why a strict admission on a no-auth surface
 
-  `/api/admin/spawn` is no-auth (boundary = network isolation, cf. moduledoc
-  `Fleet.API.Rest` § Auth). The `PublishConsumer` THEN converts
+  `/api/admin/spawn` is no-auth (boundary = the AF_UNIX socket's `0600` mode and container
+  isolation, cf. `Fleet.API.ControlRouter` — la surface TCP qui portait cette doctrine a ete
+  supprimee le 2026-08-14). The `PublishConsumer` THEN converts
   `payload["opts"]` into internal spawner opts via `to_keyword/1` — without a
   filter, privileged opts (`pod_dir_root`, `state_fs_root`, `human`,
   `project` → clone of an attacker repo into the pod, `recall_seed_jsonl`,

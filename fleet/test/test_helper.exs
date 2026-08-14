@@ -7,7 +7,10 @@
 #   running.
 # - `ensure_all_started` of the ex-workflow OTP app (helper of the umbrella era): covered by the single-app boot in
 #   test env — nothing left to start by hand.
-Application.put_env(:lcars_fleet, :api_start_listener, false)
+# ⚠ `:api_start_listener` A DISPARU AVEC LA SURFACE TCP (2026-08-14). Il n'y a plus rien a eteindre
+# ici : le domaine API n'a qu'un listener, le socket de controle, et il ne demarre que si
+# `:api_control_socket` est pose — ce que la config de test ne fait pas. L'hermetisme vient d'une
+# ABSENCE, pas d'un drapeau qu'il faut penser a mettre a `false`.
 
 # The in-tree `tmp/` @tmp_dir root is SHARED across runners of the
 # `fleet` group (multi-human box). A test interrupted (kill -9) or run by another UID could leave a

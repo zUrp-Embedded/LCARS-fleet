@@ -283,28 +283,35 @@ def session_of(cookie_header):
         s = _sessions.get(sid)
         return dict(s, sid=sid) if s else None
 
-# Le bloc de 10 ports par humain, MEME formule que bin/fleet_v2 (`21000 + uid%500*10`). Recopiee ici
-# parce que ce serveur tourne AVANT toute fleet et ne peut rien lui demander.
+# ⚠ LA FORMULE DU BLOC A ETE RETIREE D'ICI, PAS COMMENTEE. Ce fichier recopiait
+# `21000 + (uid%500)*10` de `bin/fleet_v2` pour deriver les ports d'un humain. Il n'en derive plus
+# aucun : `base+1` (deck d'observation), `base+4` (console) et `base+5` (console de pod) sont passes
+# sur des sockets AF_UNIX le 2026-08-14, et `base+0` (API) a suivi le meme jour — sa surface TCP a
+# ete supprimee faute de capacite propre et d'appelant.
 #
-# ⚠ IL NE RESTE QU'UN OFFSET, ET LES TROIS AUTRES ONT ETE RETIRES PLUTOT QUE COMMENTES (6-072/6-098).
-# `base+1` le deck d'observation, `base+4` la console, `base+5` la console de pod ecoutent desormais
-# sur des sockets AF_UNIX sous `/run/lcars/console/<humain>/`. Les garder ici les aurait publies dans
-# `/api/state` : un consommateur y aurait lu des ports qui n'ecoutent plus, et une page qui affiche
-# une adresse morte est pire qu'une page qui n'en affiche aucune — elle envoie quelqu'un frapper a
-# une porte qui n'existe pas, puis conclure que le service est en panne.
-#
-# `base+3` (webhook) n'a jamais figure ici et n'y entre pas : ce serveur ne s'en sert pas.
-PORT_BASE, PORT_MOD, PORT_SPAN = 21000, 500, 10
-OFF_API = 0
+# Une constante qu'on garde « au cas ou » est une invitation a la reutiliser : le prochain qui
+# voudra un port trouvera la formule toute faite et republiera une origine. Elle vit encore dans
+# `bin/fleet_v2` (le webhook) et dans `console-humans.sh` (sa colonne de sortie) — c'est la qu'il
+# faut aller la lire, pas dans une copie qui ne s'en sert plus.
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def block(uid):
-    base = PORT_BASE + (uid % PORT_MOD) * PORT_SPAN
-    return {
-        "api": base + OFF_API,
-    }
+    """
+    ⚠ NE REND PLUS AUCUN PORT, ET C'EST UNE REPONSE, PAS UN MANQUE.
+
+    Cette fonction a rendu quatre ports (api, deck, console, pod), puis un seul, puis zero. Le
+    dernier — `api` — est parti le 2026-08-14 avec la surface TCP du domaine API : elle n'avait
+    aucune capacite propre et personne ne l'appelait. Publier son numero ici aurait envoye un
+    consommateur frapper a une porte supprimee le jour meme.
+
+    ELLE RESTE parce que `humans()` pose la cle `ports` dans `/api/state`, et qu'un champ qui
+    DISPARAIT d'une reponse est un changement de contrat plus brutal qu'un champ qui devient vide.
+    Mesure du 2026-08-14 : `h.ports` a ZERO occurrence dans le JS de cette page — plus personne ne
+    le lit. Le jour ou plus rien ne le lit non plus cote client, la cle part avec la fonction.
+    """
+    return {}
 
 
 def humans():

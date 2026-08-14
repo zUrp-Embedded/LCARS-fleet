@@ -87,7 +87,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     end
 
     test "le plancher de fenetre : un seul echec total ne fait pas basculer la sonde" do
-      # Readiness est ce qu'un operateur consulte quand ca va mal. Une sonde qui clignote sur un 500
+      # Une sonde de sante est ce qu'un operateur consulte quand ca va mal. Une sonde qui clignote sur un 500
       # passager est une sonde qu'il apprend a ignorer.
       assert PilotApp.polls_healthy?(%{errors: 1, window: 1}) == true
       assert PilotApp.polls_healthy?(%{errors: 3, window: 3}) == false

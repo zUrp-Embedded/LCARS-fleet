@@ -1,11 +1,27 @@
 defmodule Fleet.API.Application do
   @moduledoc """
-  Supervises the API domain's TCP read/WebSocket listener and optional AF_UNIX
-  control listener.
+  Supervises the API domain's AF_UNIX control listener — the ONLY listener this domain has.
 
-  `:http_port` is required when `:start_listener` is true. The TCP dispatch
-  sends `/ws` to `Fleet.API.WS` and all other requests to `Fleet.API.Rest`.
-  `:control_socket`, when set, adds the sole admin-write listener.
+  ## Il n'y a plus de surface TCP, et ce n'est pas un durcissement
+
+  Ce domaine servait aussi un listener TCP (`Fleet.API.Rest` + `/ws`). Il a ete retire le
+  2026-08-14 parce qu'il n'avait **aucune capacite propre**, et la mesure porte son lieu :
+
+    * les lectures d'etat (`pods`, `issues`, `workflow_runs`) rendaient **501** en renvoyant vers
+      `Fleet.Observation` — ce n'etait pas son autorite, et son message de renvoi nommait un port
+      (`deck :8091`) mort depuis que l'observation est passee sur socket ;
+    * `/ws` etait deja debranche (coupure reversible du 2026-08-14, meme journee) ;
+    * `health` / `readiness` / `version` ont un **jumeau CLI** — `fleet_v2 version` lit le MEME
+      fichier (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet eteinte ;
+    * les ecritures n'ont jamais transite par la : elles vivent sur le socket de controle ci-dessous.
+
+  Et **personne ne l'appelait** : ni `bin/lcars` (son propre commentaire dit que `$API_URL` n'est
+  lu nulle part), ni le BEAM, ni le healthcheck du conteneur (qui teste le port 22), et les tests
+  appelaient le plug directement, sans reseau.
+
+  ⚠ LE SOCKET DE CONTROLE N'EST PLUS DERRIERE UN DRAPEAU DE LISTENER TCP. Il etait imbrique dans
+  `if api_start_listener` : le chemin d'ECRITURE dependait donc d'un commutateur nomme d'apres une
+  surface de LECTURE. Il ne depend plus que de sa propre configuration — pose ou absent.
   """
 
   use Supervisor
@@ -42,58 +58,17 @@ defmodule Fleet.API.Application do
     )
   end
 
-  # `/ws` EST DEBRANCHE PAR DEFAUT DEPUIS LE 2026-08-14, ET LE MODULE EST INTACT (6-056).
-  #
-  # Pourquoi debranche : ce point de terminaison projette le flux d'evenements COMPLET, sans
-  # authentification — un client qui ne demande rien recoit tout, y compris une CAPTURE DE L'ECRAN
-  # tmux d'un pod (`wake.failed`). La posture gravee « api REST/WS no-auth by design » vaut pour de
-  # l'observabilite ; elle n'a pas ete ecrite pour ca.
-  #
-  # Pourquoi DEBRANCHE et non SUPPRIME : personne ne le consomme — mesure du 2026-08-14, deux
-  # candidats ecartes un par un. Le deck Python (`console-deck.py`, port landing) lit
-  # `/api/pods` en HTTP simple, zero `ws://` dans ses 892 lignes ; le deck Elixir
-  # (`Fleet.Observation`, base+1) n'a aucune WebSocket, et son propre DESIGN dit la separation :
-  # « Distinct de la question API-D1 (WS /ws) — ici c'est de la lecture pure ». Mais « personne ne
-  # le consomme » est une mesure sur CE depot a CET instant : une coupure REVERSIBLE dit la meme
-  # chose qu'une suppression et se rend en une ligne si un consommateur se revele.
-  #
-  # Pour le rallumer : `config :lcars_fleet, api_serve_ws: true`. Le jour ou un dashboard le
-  # demande, c'est ce commutateur qu'on bascule — et la question de ce qu'il publie se repose
-  # entiere, avec `Fleet.API.WS`'s `@moduledoc` pour la poser.
-  # Public (`@doc false`) parce que c'est la SEULE façon d'epingler le commutateur sans binder un
-  # port : `listener_children/0` rend `[]` en `:test` (hermetisme), donc le dispatch n'y est jamais
-  # construit. Un test qui allumerait le listener pour lire une route echangerait une propriete
-  # contre une socket.
-  @doc false
-  @spec ws_route() :: [{String.t(), module(), list()}]
-  def ws_route do
-    if Application.get_env(:lcars_fleet, :api_serve_ws, false),
-      do: [{"/ws", Fleet.API.WS, []}],
-      else: []
-  end
-
   @doc """
-  Returns the configured TCP and control listener child specs, or `[]` when
-  listener startup is disabled.
+  Child spec of the control listener, or `[]` when no control socket is configured.
+
+  ## L'absence de configuration EST l'interrupteur
+
+  Il n'y a plus de drapeau `:api_start_listener`. L'hermetisme des tests ne vient plus d'un
+  commutateur a poser mais du fait que `config/test.exs` ne declare aucun socket de controle : rien
+  a eteindre, donc rien a oublier d'eteindre. Un drapeau qui doit valoir `false` en test est une
+  chose de plus qui peut valoir `true` par accident.
   """
-  def listener_children do
-    if Application.get_env(:lcars_fleet, :api_start_listener, true) do
-      port = Application.fetch_env!(:lcars_fleet, :api_http_port)
-
-      dispatch = [{:_, ws_route() ++ [{:_, Plug.Cowboy.Handler, {Fleet.API.Rest, []}}]}]
-
-      tcp =
-        Fleet.EventRouter.Listener.cowboy_child(
-          plug: Fleet.API.Rest,
-          port: port,
-          dispatch: dispatch
-        )
-
-      [tcp | control_socket_child()]
-    else
-      []
-    end
-  end
+  def listener_children, do: control_socket_child()
 
   defp control_socket_child do
     case Application.get_env(:lcars_fleet, :api_control_socket) do

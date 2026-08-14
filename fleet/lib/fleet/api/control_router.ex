@@ -28,9 +28,11 @@ defmodule Fleet.API.ControlRouter do
   this door. It would not; and the day someone changes one wall, the other must still be read on
   its own terms.
 
-  The READ surface (`/api/health`, `/api/version`, …) and the WS event stream stay on TCP
-  (`Fleet.API.Rest` / `Fleet.API.WS`): they are low-risk (a browser dashboard needs TCP, and a
-  pod reading them is read-only information disclosure, not the spawn amplification described above).
+  ⚠ IL N'Y A PLUS DE SURFACE DE LECTURE A COTE (2026-08-14). Ce paragraphe disait que les lectures
+  (`/api/health`, `/api/version`, …) et le flux WS restaient sur TCP parce qu'ils etaient a faible
+  risque. Elles ont ete SUPPRIMEES, pour une autre raison : aucune capacite propre et aucun
+  appelant. Cette porte-ci est donc devenue **la seule surface du domaine**, et le raisonnement
+  ci-dessus n'a plus de contrepoint — il tient seul.
 
   ## Contract
 

@@ -22,36 +22,28 @@
 # bind-mounted host-side) as well as host pods (LAUNCH-Q).
 #
 # Config (env):
-#   LCARS_API_URL         the daemon's REST base (default: read from ~/.lcars/run/api_url, written by
-#                         fleet_v2 at start — the ports are per-human/UID, so no static default can be
-#                         right; fleet not started → a clear error, never a guessed port)
+#   LCARS_API_SOCK        the daemon's control socket (default ~/.lcars/run/api.sock, per-human).
+#                         C'est la SEULE voie vers la fleet : le domaine API n'a plus de surface
+#                         TCP, donc plus d'URL — `LCARS_API_URL` a ete retiree le 2026-08-14.
 #   LCARS_TMUX_SOCK_BASE  base of the per-pod socks (default ~/.lcars/run/tmux-sock; = the Elixir
 #                         default, c368f89d)
 #   LCARS_TMUX_BIN        tmux binary (default: tmux from the PATH)
 
 set -euo pipefail
 
-# A7: explicit env > runtime state written by fleet_v2 > vide. JAMAIS un port devine.
+# ⚠ `$API_URL` A DISPARU AVEC LA SURFACE QU'ELLE DESIGNAIT (2026-08-14). Ce fichier resolvait une
+# URL de lecture depuis `~/.lcars/run/api_url`, et son propre commentaire disait deja que PERSONNE
+# NE LA LIT : `spawn` passe par `$API_SOCK`, `list` et `attach` par les socks tmux, et `$API_URL`
+# n'apparaissait que dans le texte d'aide. Le domaine API n'a plus de listener TCP du tout, donc
+# la resolution ne pointait plus meme sur une possibilite.
 #
-# ⚠ CE BLOC ETAIT FATAL, et il gardait une valeur que PERSONNE NE LIT : `spawn` passe par
-# `$API_SOCK` (l'AF_UNIX), `list` et `attach` par les socks tmux, et `$API_URL` n'apparait que dans
-# le texte d'aide. Le garde tuait donc tout le CLI quand la fleet n'avait jamais demarre — y compris
-# `list`, dont l'en-tete de ce fichier promet qu'il « marche meme avec l'API down », et surtout
-# `catalogue install|verify|enable`, qui sont precisement les gestes d'une boite NEUVE, avant le
-# premier `fleet_v2 start`. Mesure : sur un banc frais, `lcars catalogue list` sortait en 1.
-#
-# Chaque verbe garde donc ce dont IL a besoin, la ou il s'en sert — `cmd_spawn` echoue deja sur
-# `$API_SOCK` avec le bon message.
-if [[ -n "${LCARS_API_URL:-}" ]]; then
-  API_URL="$LCARS_API_URL"
-elif [[ -r "$HOME/.lcars/run/api_url" ]]; then
-  API_URL="$(cat "$HOME/.lcars/run/api_url")"
-else
-  API_URL=""
-fi
+# La cicatrice qui reste vraie et qu'on garde : ce bloc a ete FATAL tant qu'il gardait cette valeur.
+# Il tuait tout le CLI quand la fleet n'avait jamais demarre — y compris `list`, dont l'en-tete
+# promet qu'il « marche meme avec l'API down », et `catalogue install|verify|enable`, precisement
+# les gestes d'une boite NEUVE. Chaque verbe garde ce dont IL a besoin, la ou il s'en sert.
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 # `spawn` (write) goes through the per-human AF_UNIX socket (ControlRouter), off the network the
-# pod shares. Reads stay on $API_URL (TCP loopback).
+# pod shares. C'est desormais la SEULE voie vers la fleet depuis ce CLI.
 API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
@@ -140,8 +132,7 @@ USAGE
       Cette aide.
 
 ENV
-  LCARS_API_URL=$API_URL       (lectures REST, TCP loopback)
-  LCARS_API_SOCK=$API_SOCK     (spawn, socket AF_UNIX host-only)
+  LCARS_API_SOCK=$API_SOCK     (la seule voie vers la fleet, socket AF_UNIX host-only)
   LCARS_TMUX_SOCK_BASE=$SOCK_BASE
 EOF
 }

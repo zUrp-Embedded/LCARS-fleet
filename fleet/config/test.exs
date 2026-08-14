@@ -1,11 +1,11 @@
 import Config
 
-# fleet_api : do not start Cowboy listener in tests (conflit de bind).
-# :http_port posé à 0 (éphémère) : plus AUCUN défaut statique dans le code (A7, fetch_env! fail-loud)
-# → les tests qui construisent le child-spec sans bind (listener_children) ont besoin d'une valeur.
-# Tests instantiate Plug.Cowboy/handlers directly via start_supervised.
-config :lcars_fleet, api_start_listener: false
-config :lcars_fleet, api_http_port: 0
+# fleet_api : PLUS RIEN À ÉTEINDRE. Le domaine n'a plus de listener TCP (surface retirée le
+# 2026-08-14, aucune capacité propre), et son unique listener — le socket de contrôle AF_UNIX — ne
+# démarre que si `:api_control_socket` est posé. Ce fichier ne le pose pas : l'hermétisme vient donc
+# d'une ABSENCE, pas d'un drapeau. Un drapeau qui doit valoir `false` en test est une chose de plus
+# qui peut valoir `true` par accident.
+# Les tests qui ont besoin d'un vrai listener l'instancient eux-mêmes via `start_supervised`.
 
 # fleet_mcp : boot guard fail-closed (soft-default #6). Le défaut code de `boot_environment` est `:pod`
 # (refuse par omission) ; en test la BEAM tourne HOST-side (le superviseur MCP doit démarrer) → on déclare
