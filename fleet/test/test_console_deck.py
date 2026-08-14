@@ -17,9 +17,11 @@
 # socket qui accepte et se tait — parce qu'un stub d'exception prouverait seulement que le `except`
 # est bien ecrit, pas que la bibliotheque leve ce qu'on croit.
 
+import atexit
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import socketserver
 import sys
@@ -387,7 +389,21 @@ def fetch(port, path, cookie=None):
 
 forge_port, forge_srv = fake_forge()
 FORGE = "http://127.0.0.1:%d" % forge_port
-cfg_path = os.path.join(HERE, "..", "tmp-deck-oidc-%d.json" % os.getpid())
+# ⚠ HORS DU DEPOT, ET NETTOYE PAR `atexit` — LES DEUX MOITIES COMPTENT. Ces fichiers etaient ecrits
+# dans la RACINE du depot (`HERE/..`) et effaces par un `os.unlink` en DERNIERE ligne du script.
+# Deux consequences composees : (1) un run qui meurt avant la fin — une assertion qui leve, un
+# module qui a perdu une fonction pendant une contre-epreuve — ne nettoie rien ; (2) le debris
+# atterrit dans `git status`, c'est-a-dire exactement dans ce qu'un `git add -A` emporte sans qu'on
+# l'ait regarde. Un test qui salit l'arbre de travail est un piege pour le commit suivant, pas une
+# nuisance esthetique.
+#
+# LES DEUX MOITIES NE FONT PAS LE MEME TRAVAIL, et la mesure le dit : sous `SIGKILL`, `atexit` NE
+# TOURNE PAS et le repertoire de /tmp reste — mais l'arbre du depot, lui, est propre. C'est donc
+# l'EMPLACEMENT qui porte la garantie ; `atexit` n'est que l'hygiene, sur les sorties qu'il peut
+# voir (fin normale et exception).
+_cfg_dir = tempfile.mkdtemp(prefix="lcars-deck-oidc.")
+atexit.register(shutil.rmtree, _cfg_dir, ignore_errors=True)
+cfg_path = os.path.join(_cfg_dir, "client.json")
 
 # (1) NON CONFIGURE : aucun repli, et le refus nomme ce qui manque.
 deck.OIDC_CONFIG = cfg_path + ".absent"
@@ -491,7 +507,10 @@ check(fetch(dport, "/api/state", cookie)[0] == 409,
 # l'objet de ce cas : Gitea accepte des logins qui ne peuvent PAS devenir un compte Unix (33
 # caracteres, par exemple), donc une personne peut etre enrolee et ne converger JAMAIS. Dire
 # « ca converge tout seul » a celle-la est un mensonge que personne ne revient verifier.
-refused_path = os.path.join(HERE, "..", "tmp-deck-refused-%d" % os.getpid())
+# Meme raison que `cfg_path` plus haut : hors du depot. Ce fichier-ci etait efface juste apres son
+# usage, donc il ne trainait que sur un run mort — c'est-a-dire exactement les runs d'une
+# contre-epreuve, ceux qu'on enchaine sans regarder l'arbre entre deux.
+refused_path = os.path.join(_cfg_dir, "refused")
 with open(refused_path, "w") as fh:
     fh.write("zoe\tce login ne peut pas devenir un compte Unix : il faut 1 a 32 caracteres\n")
 deck.REFUSED_FILE = refused_path
@@ -507,10 +526,7 @@ check(fetch(dport, "/api/state", cookie)[0] == 422,
 deck.REFUSED_FILE = refused_path + ".absent"
 check(fetch(dport, "/api/state", cookie)[0] == 409,
       "sans fichier de refus, on retombe sur « pas encore converge » — l'absence n'accuse rien")
-try:
-    os.unlink(refused_path)
-except OSError:
-    pass
+os.unlink(refused_path)   # il vit dans `_cfg_dir` : `atexit` ramasserait le reste de toute facon
 
 # (6) LE FILTRE EST A LA SOURCE. Deux humains sur la boite, une seule ligne servie.
 deck.humans = lambda: [
@@ -1080,10 +1096,7 @@ for _s in (t_zoe, t_zoe_pod, t_max, t_adm):
 
 dsrv.shutdown()
 forge_srv.shutdown()
-for f in (cfg_path, cfg_path + ".partial"):
-    try:
-        os.unlink(f)
-    except OSError:
-        pass
+# Le repertoire des configs OIDC part par `atexit` — y compris si ce script meurt avant d'arriver
+# ici, ce qui etait tout le probleme de la version precedente.
 
 sys.exit(0 if ok else 1)
