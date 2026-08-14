@@ -48,11 +48,15 @@ defmodule Fleet.MCP.GithubPublishTest do
 
       :ok = Bus.subscribe()
 
-      assert :ok = GithubPublish.run("fleet/unlinked-demo")
+      assert :ok = GithubPublish.run("fleet/unlinked-demo", "pod-req")
 
       assert_receive %Fleet.Event{
                        type: :"github_publish.failed",
-                       payload: %{"repo" => "fleet/unlinked-demo", "reason" => "not_linked"}
+                       payload: %{
+                         "repo" => "fleet/unlinked-demo",
+                         "reason" => "not_linked",
+                         "requester_pod_id" => "pod-req"
+                       }
                      },
                      2_000
     end

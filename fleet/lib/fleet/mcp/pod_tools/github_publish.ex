@@ -32,24 +32,35 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   failure path, including a raise, is turned into a `.failed` event, never a crash that the supervisor
   would restart into a re-publish.
   """
-  @spec run(String.t()) :: :ok
-  def run(repo) when is_binary(repo) do
+  @spec run(String.t(), String.t() | nil) :: :ok
+  def run(repo, requester \\ nil) when is_binary(repo) do
     case do_run(repo) do
       {:ok, url} ->
         Logger.info("GithubPublish: #{repo} -> #{if url == "", do: "nothing to publish", else: url}")
-        safe_emit(:"github_publish.done", %{"repo" => repo, "url" => url}, repo)
+        safe_emit(:"github_publish.done", %{"repo" => repo, "url" => url, "requester_pod_id" => requester}, repo)
 
       {:error, reason} ->
         {cat, detail} = Fleet.Event.reason_fields(reason)
         Logger.warning("GithubPublish: #{repo} FAILED — #{detail}")
-        safe_emit(:"github_publish.failed", %{"repo" => repo, "reason" => cat, "reason_detail" => detail}, repo)
+
+        safe_emit(
+          :"github_publish.failed",
+          %{"repo" => repo, "reason" => cat, "reason_detail" => detail, "requester_pod_id" => requester},
+          repo
+        )
     end
 
     :ok
   rescue
     e ->
       Logger.error("GithubPublish: #{repo} RAISED — #{Exception.message(e)}")
-      safe_emit(:"github_publish.failed", %{"repo" => repo, "reason" => "raised", "reason_detail" => Exception.message(e)}, repo)
+
+      safe_emit(
+        :"github_publish.failed",
+        %{"repo" => repo, "reason" => "raised", "reason_detail" => Exception.message(e), "requester_pod_id" => requester},
+        repo
+      )
+
       :ok
   end
 

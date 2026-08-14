@@ -22,6 +22,13 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
       {:ok, self()}
     end
+
+    # Same async-safe relay for the publish-outcome ping-back: notify_pod runs INSIDE the consumer,
+    # so it reaches the test only through a name-registered observer keyed by the target pod.
+    def notify_pod(pod, msg) do
+      if obs = Process.whereis(:"notify_probe_#{pod}"), do: send(obs, {:notified, pod, msg})
+      :ok
+    end
   end
 
   # Spawner that RAISES in `spawn_pod` → exercises the `handle_info` rescue (spawn dropped).
@@ -346,6 +353,57 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       assert PublishConsumer.to_keyword(["module", "fun"]) == []
       assert PublishConsumer.to_keyword([%{"pod_dir_root" => "/evil"}]) == []
       assert PublishConsumer.to_keyword([{"string_key", 1}]) == []
+    end
+  end
+
+  # The publish ping-back: an async github_publish outcome wakes the pod that asked for it.
+  describe "relaying a publish outcome to the requester" do
+    test "github_publish.done -> notify_pod the requester with the url" do
+      {pid, _} = start_consumer()
+      Process.register(self(), :"notify_probe_pod-req")
+
+      send(
+        pid,
+        Fleet.Event.new(:mcp, :"github_publish.done",
+          payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => "pod-req"}
+        )
+      )
+
+      assert_receive {:notified, "pod-req", msg}
+      assert msg =~ "fleet/demo"
+      assert msg =~ "https://forge/pr/1"
+    end
+
+    test "github_publish.failed -> notify_pod the requester with the reason" do
+      {pid, _} = start_consumer()
+      Process.register(self(), :"notify_probe_pod-req2")
+
+      send(
+        pid,
+        Fleet.Event.new(:mcp, :"github_publish.failed",
+          payload: %{"repo" => "fleet/demo", "reason" => "not_linked", "reason_detail" => "not_linked", "requester_pod_id" => "pod-req2"}
+        )
+      )
+
+      assert_receive {:notified, "pod-req2", msg}
+      assert msg =~ "ECHEC"
+      assert msg =~ "not_linked"
+    end
+
+    test "an outcome with no requester_pod_id -> no notify, consumer stays alive" do
+      {pid, _} = start_consumer()
+
+      send(
+        pid,
+        Fleet.Event.new(:mcp, :"github_publish.done",
+          payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => nil}
+        )
+      )
+
+      # FIFO barrier: the event is handled before we assert its absence of effect.
+      assert %{} = :sys.get_state(pid)
+      assert Process.alive?(pid)
+      refute_received {:notified, _, _}
     end
   end
 end

@@ -279,11 +279,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       {:ok, _role} ->
         if valid_repo?(repo) do
+          # The requesting pod, carried to the worker so its outcome wakes it back (notify_pod via a
+          # Spawner-side consumer on github_publish.{done,failed}). nil for a caller without a pod_id.
+          requester = Map.get(state, :pod_id)
+
           case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
-                 GithubPublish.run(repo)
+                 GithubPublish.run(repo, requester)
                end) do
             {:ok, _pid} ->
-              Bus.safe_emit(:mcp, :"github_publish.started", [payload: %{"repo" => repo}],
+              Bus.safe_emit(
+                :mcp,
+                :"github_publish.started",
+                [payload: %{"repo" => repo, "requester_pod_id" => requester}],
                 context: "github_publish"
               )
 
