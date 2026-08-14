@@ -115,6 +115,16 @@ defmodule Fleet.Workflow.Deliverable do
       not is_binary(opts.base_sha) ->
         {:error, {:bad_opt, {:base_sha, opts.base_sha}}}
 
+      # ⚠ TYPE N'EST PAS FORME, et ce champ part en INTERPOLATION dans quatre commandes git de la
+      # porte (`"#{base_sha}..HEAD"` — log, name-only, trailer, secrets) plus le `merge-base` de
+      # l'ancetre. Une valeur commencant par `-` y devient une OPTION de git, pas une revision. La
+      # valeur nominale vient du pinning hors-pod (`ProjectResolver`, sortie de `git ls-remote`),
+      # mais elle transite aussi par un payload de pod (`gate_base_sha` / `base_sha` du
+      # `step_run_build`), et un champ qui traverse le pod ne se valide pas par sa provenance.
+      # C'est ici le point de passage unique : cinq sites en aval, une seule porte.
+      not Fleet.GitRef.valid?(opts.base_sha) ->
+        {:error, {:bad_opt, {:base_sha, opts.base_sha}}}
+
       not (is_list(opts.allowed_emails) and Enum.all?(opts.allowed_emails, &is_binary/1)) ->
         {:error, {:bad_opt, {:allowed_emails, opts.allowed_emails}}}
 

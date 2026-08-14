@@ -99,6 +99,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
         check_mcp_tool_effects(root),
+        check_cap_profile_project_keys(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
@@ -2269,6 +2270,91 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         end,
       note: "#{MapSet.size(declared)} tools, each with a declared world-effect"
     }
+  end
+
+  # `spec.project` CARRIES TWO POPULATIONS IN ONE SLOT and only one of them was ever written down.
+  # The catalogue schema declares four keys with `additionalProperties: false`; the pilot injects
+  # four MORE at dispatch (`repo`, `base_sha`, `gate_base_sha`, `pr_base_branch`), read by live code
+  # and validated by nothing. The contradiction was silent in both directions: a reader of the
+  # schema concluded a catalogue could not pin a base, a reader of the code concluded the schema
+  # allowed one.
+  #
+  # The two halves stay APART deliberately (a card that set `base_sha` would validate and then be
+  # overwritten at every dispatch — a knob that reads as configuration and does nothing). What must
+  # not happen is the two lists drifting, which is why this wall exists: every key the resolver
+  # WRITES must be declared on one side or the other, and no key may be on both.
+  @doc false
+  def check_cap_profile_project_keys(root) do
+    resolver_rel = "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
+    schema_rel = "priv/cap_profile/schema/cap-profile-v2.5.json"
+
+    schema_keys = schema_project_keys(root, schema_rel)
+    runtime_keys = MapSet.new(Fleet.CapProfile.runtime_project_keys())
+    written = resolver_project_keys(quoted!(root, resolver_rel))
+
+    undeclared = written |> Enum.reject(&(&1 in schema_keys or &1 in runtime_keys)) |> Enum.sort()
+    both = schema_keys |> Enum.filter(&(&1 in runtime_keys)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(schema_keys) ->
+        broken_result(
+          "cap_profile.project_keys_declared",
+          "property under spec.project in #{schema_rel}"
+        )
+
+      measured_nothing?(written) ->
+        broken_result("cap_profile.project_keys_declared", "key written into the project map")
+
+      true ->
+        %{
+          id: "cap_profile.project_keys_declared",
+          remediation:
+            "declare the new `spec.project` key in the catalogue schema (an operator may set it) " <>
+              "or in `Fleet.CapProfile.runtime_project_keys/0` (the pilot injects it) — never both, " <>
+              "never neither",
+          status: if(undeclared == [] and both == [], do: :pass, else: :fail),
+          evidence:
+            cond do
+              undeclared != [] ->
+                ["#{resolver_rel}: project keys declared nowhere #{inspect(undeclared)}"]
+
+              both != [] ->
+                ["#{schema_rel}: keys declared as BOTH catalogue and runtime #{inspect(both)}"]
+
+              true ->
+                []
+            end,
+          note:
+            "#{MapSet.size(schema_keys)} catalogue keys + #{MapSet.size(runtime_keys)} runtime-injected, disjoint"
+        }
+    end
+  end
+
+  defp schema_project_keys(root, rel) do
+    root
+    |> Path.join(rel)
+    |> File.read!()
+    |> Jason.decode!()
+    |> get_in(["properties", "spec", "properties", "project", "properties"])
+    |> Kernel.||(%{})
+    |> Map.keys()
+    |> MapSet.new()
+  end
+
+  # Keys of the map literal the resolver returns — from the AST, so a key named only in a comment
+  # cannot green this, and a key added to the map cannot hide from it.
+  defp resolver_project_keys(ast) do
+    ast
+    |> collect(fn
+      {:%{}, _, pairs} when is_list(pairs) ->
+        keys = for {k, _v} <- pairs, is_binary(k), do: k
+        if "repo_path" in keys, do: keys, else: nil
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   # Keys of the `@tool_effects` module attribute, read from the AST — never from a grep, for the

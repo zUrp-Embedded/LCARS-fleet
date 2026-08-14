@@ -281,6 +281,7 @@
             "object",
             "null"
           ],
+          "description": "THE CATALOGUE HALF ONLY, and the slot carries two populations. What a card may declare is listed here and validated (additionalProperties: false). The pilot then INJECTS repo, base_sha, gate_base_sha and pr_base_branch at dispatch through Fleet.CapProfile.with_project/2, which does not re-validate — they are read by live code and are absent here BY DESIGN, since a card that set base_sha would validate and then be overwritten at every dispatch, i.e. a knob that reads as configuration and does nothing. Single source of the runtime half: Fleet.CapProfile.runtime_project_keys/0, held against this list by mix lcars.contracts.check.",
           "additionalProperties": false,
           "properties": {
             "repo_path": {

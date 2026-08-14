@@ -128,24 +128,33 @@ TRAVAIL-NON-STAGE"
 @test "6-116: le tampon STARDATE ne publie pas davantage le hors-index" {
   # La fiche note que le chemin ISO repete la sequence du chemin stardate. Les deux se mesurent.
   mkdir -p "$REPO/fleet"
-  # `hook-config.sh` decide du format de date par la PRESENCE de ce fichier. Il doit lui-meme
-  # passer la passe 2, sinon le commit de mise en scene echoue pour une autre raison que la sienne.
-  printf '#!/bin/bash\n# SOURCE: fleet/fleet-env.sh\n# AUTHOR: test\n# STARDATE: 2020.001\n# STATUS: actif\n' \
-    > "$REPO/fleet/fleet-env.sh"
-  git -C "$REPO" add fleet/fleet-env.sh
+  # ⚠ CETTE MISE EN SCENE POSAIT `fleet/fleet-env.sh`, un fichier qui N'EXISTE NULLE PART dans le
+  # depot reel et n'a aucun producteur (6-117). Le test exercait donc bien la branche stardate,
+  # mais par un monde qui ne se produit jamais — un vert sur une fixture impossible. Le marqueur
+  # est desormais l'IDENTITE de l'app, celle que `hook-config.sh` lit vraiment.
+  # Un `.exs` n'est pas soumis a l'en-tete de la passe 2 : rien a mettre en scene de ce cote.
+  printf 'def project do\n  [\n    app: :lcars_fleet\n  ]\nend\n' > "$REPO/fleet/mix.exs"
+  git -C "$REPO" add fleet/mix.exs
   git -C "$REPO" commit -q -m "repo lcars"
 
+  # ⚠ LA VIEILLE STARDATE PASSE PAR UNE VARIABLE, ET C'EST LOAD-BEARING. Ce fichier de test est
+  # lui-meme commite dans LCARS, et depuis 6-117 la branche stardate du hook est VIVANTE : ecrite en
+  # clair, une vieille stardate se faisait tamponner a la date du jour DANS LA FIXTURE. Le temoin
+  # devenait alors egal a l'attendu et le test passait sans rien mesurer. Le motif du hook exige des
+  # chiffres (`[0-9]{4}\.[0-9]{3}`), donc `%s` lui echappe — y compris dans ce commentaire, qu'un
+  # exemple ecrit en clair ferait reecrire au prochain commit.
+  local vieux="2020.001"
   mkdir -p "$REPO/bin"
-  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: 2020.001\n# STATUS: actif\necho stable\n' \
-    > "$REPO/bin/x.sh"
+  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: %s\n# STATUS: actif\necho stable\n' \
+    "$vieux" > "$REPO/bin/x.sh"
   git -C "$REPO" add bin/x.sh
   git -C "$REPO" commit -q -m base
 
-  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: 2020.001\n# STATUS: actif\necho stable\necho STAGE\n' \
-    > "$REPO/bin/x.sh"
+  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: %s\n# STATUS: actif\necho stable\necho STAGE\n' \
+    "$vieux" > "$REPO/bin/x.sh"
   git -C "$REPO" add bin/x.sh
-  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: 2020.001\n# STATUS: actif\necho stable\necho STAGE\necho NON-STAGE\n' \
-    > "$REPO/bin/x.sh"
+  printf '#!/bin/bash\n# SOURCE: bin/x.sh\n# STARDATE: %s\n# STATUS: actif\necho stable\necho STAGE\necho NON-STAGE\n' \
+    "$vieux" > "$REPO/bin/x.sh"
 
   run git -C "$REPO" commit -q -m "tampon"
   [ "$status" -eq 0 ]

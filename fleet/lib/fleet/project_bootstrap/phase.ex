@@ -294,6 +294,17 @@ defmodule Fleet.ProjectBootstrap.Phase do
             {:invalid_base_branch, b} ->
               {:error, {:clone_failed, {:invalid_base_branch, b}}}
 
+            # Named, and BEFORE the catch-all: the fall-through would have dressed them as
+            # `{:git_exit, ...}`, i.e. a refusal reported as a git failure that never happened. The
+            # two shapes differ (`{:invalid_base_sha, _}` bare, `{:error, {:invalid_pr_base_branch,
+            # _}}` wrapped) because their producers were written at different times -- which is
+            # exactly why they are matched explicitly rather than left to the union.
+            {:invalid_base_sha, s} ->
+              {:error, {:clone_failed, {:invalid_base_sha, s}}}
+
+            {:error, {:invalid_pr_base_branch, b}} ->
+              {:error, {:clone_failed, {:invalid_pr_base_branch, b}}}
+
             {:error, {:sanitize_failed, _}} = err ->
               err
 
@@ -367,12 +378,34 @@ defmodule Fleet.ProjectBootstrap.Phase do
                :ok <- sanitize_workspace(ws) do
             {:ok, ws, feature}
           else
-            {:error, {:sanitize_failed, _}} = err -> err
-            {:ok, {out, code}} -> {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
-            {:error, {:timeout, ms}} -> {:error, {:reset_failed, {:git_timeout, ms}}}
-            {:error, {:exit, reason}} -> {:error, {:reset_failed, {:git_exit, reason}}}
+            {:error, {:sanitize_failed, _}} = err ->
+              err
+
+            # Same refusal as at the clone site, named the same way. `no_base_sha` below answers
+            # "the field is missing"; this one answers "the field is there and is not a ref".
+            {:invalid_base_sha, s} ->
+              {:error, {:reset_failed, {:invalid_base_sha, s}}}
+
+            # ⚠ CELLE-CI EST UN `{:error, _}`, PAS UN TUPLE NU, et l'ordre des clauses est ce qui la
+            # rend visible : sous le fourre-tout elle ressortait en `{:git_exit, ...}`, un refus de
+            # validation deguise en panne de git. Deux formes de refus coexistent sur ce `with`
+            # parce que leurs producteurs ont ete ecrits a deux moments ; les melanger silencieusement
+            # est la faute que ce bloc evite.
+            {:error, {:invalid_pr_base_branch, b}} ->
+              {:error, {:reset_failed, {:invalid_pr_base_branch, b}}}
+
+            {:ok, {out, code}} ->
+              {:error, {:reset_failed, {code, String.slice(out, 0, 500)}}}
+
+            {:error, {:timeout, ms}} ->
+              {:error, {:reset_failed, {:git_timeout, ms}}}
+
+            {:error, {:exit, reason}} ->
+              {:error, {:reset_failed, {:git_exit, reason}}}
+
             # TOTAL over the Shell error union (output_overflow, bad_opt, future members).
-            {:error, reason} -> {:error, {:reset_failed, {:git_exit, reason}}}
+            {:error, reason} ->
+              {:error, {:reset_failed, {:git_exit, reason}}}
           end
 
         _ ->
@@ -561,8 +594,24 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # `clone_or_skip`. nil/"" = no-op success.
     defp pin_base_sha(_ws, sha) when sha in [nil, ""], do: {:ok, {"", 0}}
 
+    # `sha` REACHED THE GIT COMMAND LINE UNVERIFIED, IN LAST POSITION AND WITHOUT `--`. An argument
+    # starting with `-` is an OPTION to git, not a revision -- and the second call here is the one
+    # that carries the forge credentials and touches the network. The sibling checks two lines up
+    # (`base`, `feature`) already went through `GitRef.valid?/1`; this argument was the one that did
+    # not, on the same `with`, in the same function.
+    #
+    # `GitRef.valid?/1` and not a hex-only test: this field legitimately holds a ref as well as a
+    # sha, and the validator is the one every other ref on this path uses. Measured against what it
+    # must REFUSE: `-x`, `--exec=id`, `--upload-pack=...`, `a b`, `""` -- and what it must LET
+    # THROUGH: `abc1234`, `refs/heads/main`, `HEAD`.
     defp pin_base_sha(ws, sha) when is_binary(sha) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha], env: []) do
+      if Fleet.GitRef.valid?(sha), do: do_pin_base_sha(ws, sha), else: {:invalid_base_sha, sha}
+    end
+
+    defp do_pin_base_sha(ws, sha) do
+      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
+             env: []
+           ) do
         {:ok, {_, 0}} = ok ->
           ok
 
@@ -570,9 +619,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # The local `reset` failed (`sha` absent locally) → targeted NETWORK fetch (forge auth + anti-prompt
           # bound via `git_env/0`), then local re-reset. Fetch failure (incl. timeout/exit) →
           # propagated as-is to the `with` → `{:clone_failed, ...}`.
-          case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", sha]) do
+          case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", "--", sha]) do
             {:ok, {_, 0}} ->
-              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha],
+              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
                 env: []
               )
 

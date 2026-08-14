@@ -387,8 +387,32 @@ defmodule Fleet.CapProfile do
   @spec baseline_git_ops_denied_patterns() :: [String.t()]
   defdelegate baseline_git_ops_denied_patterns(), to: DisallowedTools, as: :baseline_patterns
 
+  # `spec.project` CARRIES TWO POPULATIONS IN ONE SLOT, and the schema only ever described the
+  # first. A catalogue author declares `repo_path`, `base_branch`, `branch_isolation`,
+  # `reference_repo_path` -- validated, `additionalProperties: false`. The pilot then INJECTS the
+  # keys below at dispatch, through `with_project/2`, which does not re-validate.
+  #
+  # They are NOT added to the schema on purpose: a catalogue card that set `base_sha` would
+  # validate, then be overwritten at every dispatch -- a knob that reads as configuration and does
+  # nothing, which is the failure this list exists to prevent rather than create. The schema stays
+  # the CATALOGUE contract; this is the RUNTIME widening, and both are named at both ends.
+  @runtime_project_keys ~w(repo base_sha gate_base_sha pr_base_branch)
+
+  @doc """
+  The `spec.project` keys injected at runtime, absent from the catalogue schema BY DESIGN.
+
+  Single source: `mix lcars.contracts.check` refuses a project key that is in neither this list nor
+  the schema, so the day the pilot adds a fifth one it is declared here or the gate says so.
+  """
+  @spec runtime_project_keys() :: [String.t()]
+  def runtime_project_keys, do: @runtime_project_keys
+
   @doc """
   Replaces `spec.project` with an effective project whose keys are recursively stringified.
+
+  This is the boundary where the catalogue-validated project becomes the runtime one: the map
+  passed in carries `runtime_project_keys/0` on top of what the schema allows, and nothing
+  re-validates after this call.
   """
   @spec with_project(t(), map()) :: t()
   def with_project(%__MODULE__{spec: spec} = cap, project) when is_map(project),

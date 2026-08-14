@@ -195,6 +195,46 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       profile = cap(%{"repo_path" => "x", "base_branch" => "main"})
       assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
     end
+
+    # JG-076 — `base_sha` ATTEIGNAIT LA LIGNE DE COMMANDE GIT SANS AUCUNE VERIFICATION, en DERNIERE
+    # position et sans `--`. Un argument qui commence par `-` est une OPTION pour git, pas une
+    # revision — et le second appel de `pin_base_sha/2` est celui qui porte les credentials de la
+    # forge et sort sur le reseau. Ses deux voisins immediats sur le meme `with` (`base_branch`,
+    # `feature`) passaient deja par `GitRef.valid?/1` : la parade etait a deux lignes.
+    for {label, hostile} <- [
+          {"une option longue", "--upload-pack=touch /tmp/pwned"},
+          {"une option courte", "-x"},
+          {"un espace", "abc def"}
+        ] do
+      test "JG-076 — un `base_sha` porteur d'#{label} est REFUSE avant git (reset)", %{
+        pod_dir: pod_dir,
+        profile: profile
+      } do
+        hostile = unquote(hostile)
+        p = cap(Map.put(profile.spec["project"], "base_sha", hostile))
+
+        assert {:error, {:reset_failed, {:invalid_base_sha, ^hostile}}} =
+                 Clone.reset_in_place(pod_dir, p, slug: "issue-2")
+      end
+    end
+
+    test "JG-076 — le refus est NOMME, pas habille en panne de git", %{
+      pod_dir: pod_dir,
+      profile: profile
+    } do
+      # Le `else` de ce `with` se termine par un fourre-tout `{:error, reason} -> {:git_exit, ...}`.
+      # Sans clause dediee, un refus de VALIDATION ressortait comme un echec de git qui n'a jamais
+      # tourne — et l'operateur cherchait une panne reseau.
+      p = cap(Map.put(profile.spec["project"], "base_sha", "-x"))
+      {:error, {:reset_failed, reason}} = Clone.reset_in_place(pod_dir, p, slug: "issue-2")
+      refute match?({:git_exit, _}, reason)
+    end
+
+    test "TEMOIN JG-076 — un vrai sha, lui, passe", %{pod_dir: pod_dir, profile: profile} do
+      # La garde doit se prouver sur ce qu'elle LAISSE PASSER : le `base_sha` du setup est un sha
+      # reel de 40 hex, et `reset_in_place` doit rester nominal.
+      assert {:ok, _ws, _f} = Clone.reset_in_place(pod_dir, profile, slug: "issue-2")
+    end
   end
 
   test "NON-absolute pod_dir → {:error, {:unsafe_pod_dir}} (guard: never mkdir/rm_rf relative to cwd)" do

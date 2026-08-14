@@ -101,6 +101,50 @@ defmodule Fleet.Workflow.DeliverableTest do
                Deliverable.publish(%{base | allowed_emails: [42]})
     end
 
+    test "JG-076 : un `base_sha` BIEN TYPE mais malforme est refuse — le type n'est pas la forme" do
+      # Ce champ part en INTERPOLATION dans quatre commandes git de la porte (`\#{base_sha}..HEAD` :
+      # log, name-only, trailer, secrets) plus le `merge-base` de l'ancetre. Une valeur commencant
+      # par `-` y devient une OPTION de git. `is_binary/1` la laissait passer, et c'est ici le point
+      # de passage unique : cinq sites en aval, une seule porte.
+      base = %{
+        mode: :payload,
+        workspace: "/tmp/ws",
+        base_sha: "abc",
+        allowed_emails: ["e@x"],
+        files: [],
+        identity: %{},
+        message: "m"
+      }
+
+      for hostile <- ["--upload-pack=touch /tmp/pwned", "-x", "a b", "..HEAD", ""] do
+        assert {:error, {:bad_opt, {:base_sha, ^hostile}}} =
+                 Deliverable.publish(%{base | base_sha: hostile}),
+               "#{inspect(hostile)} a franchi la porte de publication"
+      end
+    end
+
+    test "TEMOIN JG-076 : un sha et un ref valides passent la validation de forme" do
+      # Sans ce temoin, une garde qui refuserait TOUT passerait le test ci-dessus. On ne va pas
+      # jusqu'au push (pas de vrai workspace) : ce qui est mesure est que l'echec n'est PLUS
+      # `{:bad_opt, {:base_sha, _}}`.
+      base = %{
+        mode: :payload,
+        workspace: "/tmp/ws-inexistant-#{System.unique_integer([:positive])}",
+        allowed_emails: ["e@x"],
+        files: [],
+        identity: %{},
+        message: "m"
+      }
+
+      for ok <- ["abc1234", "0123456789abcdef0123456789abcdef01234567", "refs/heads/main", "HEAD"] do
+        refute match?(
+                 {:error, {:bad_opt, {:base_sha, _}}},
+                 Deliverable.publish(Map.put(base, :base_sha, ok))
+               ),
+               "#{inspect(ok)} est une base legitime et la porte l'a refusee sur sa forme"
+      end
+    end
+
     test "secret in the payload → gate BLOCKS, NO push", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "payload-secret")
       {before, 0} = g(bare, ["rev-parse", "main"])
