@@ -47,8 +47,11 @@
 # USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 3700] [--bind 127.0.0.5]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
 #                     [--claude-from ~/.local/bin/claude] [--no-claude-bin] [--no-human-admin]
-# EXIT  : 0 banc pret · 1 arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas
-#         4 amorcage forge · 5 creds · 6 le verdict final ne passe pas
+# EXIT  : 0 banc pret (verdict `banc PRET`, ou `banc PRET_SANS_CI` sous --no-runner) · 1
+#         arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas · 4 amorcage
+#         forge · 5 creds · 6 le verdict final ne passe pas — Y COMPRIS un runner DEMANDE qui ne
+#         sert pas (image, token, enregistrement ou visibilite). `--no-runner` est le seul mode
+#         degrade qui rende 0, et il porte son propre verdict.
 
 set -euo pipefail
 
@@ -299,6 +302,18 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/us
 RUNNER_STATE="non demarre"
 MASTER_TOKEN_FILE="$TOFU_DIR/.master-token"
 
+# ⚠ LE DIAGNOSTIC ETAIT DEJA JUSTE, ET LE VERDICT DISAIT LE CONTRAIRE (6-133). Les branches
+# ci-dessous ecrivent « ABSENT », « BLOCAGE, pas degradation », « enregistrement rate » — puis le
+# script imprimait `banc PRET` et rendait 0. Un appelant automatique acceptait donc un banc qui ne
+# peut jouer aucun workflow CI, et un test d'integration restait `pending` au lieu de reveler que
+# son harnais etait incomplet. Le detail textuel signalait l'absence ; le code de retour et le
+# verdict principal affirmaient l'inverse, et c'est le verdict qu'on lit.
+#
+# `RUNNER_SERT` porte la seule question qui compte : un runner sert-il le label demande, VU PAR LA
+# FORGE ? Elle ne se deduit pas de `RUNNER_STATE`, qui est une PHRASE — la deriver d'un texte serait
+# remettre le verdict a la merci d'une reformulation.
+RUNNER_SERT=0
+
 # Derivation MESUREE du label `elixir` : le stage `build` du meme tag, s'il existe sur ce daemon.
 if [[ -z "$RUNNER_LABELS" ]]; then
   BUILD_IMG="lcars-build:${IMAGE##*:}"
@@ -310,14 +325,20 @@ fi
 if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="NON demarre (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
 elif [[ -z "$RUNNER_LABELS" ]]; then
+  # ⚠ LES BACKTICKS SONT ECHAPPES, ET CE N'EST PAS DE LA COQUETTERIE. Dans une chaine a GUILLEMETS
+  # DOUBLES, `ci: required` est une SUBSTITUTION DE COMMANDE : bash executait `ci:`, ne le trouvait
+  # pas, et `set -euo pipefail` tuait le script — exit 127, pour seul message « ci:: command not
+  # found ». Cette branche et la suivante ne « remplissaient » donc pas RUNNER_STATE : elles
+  # mouraient AVANT de l'ecrire, sans diagnostic, ce que 6-133 ne voit pas. Mesure faite en
+  # atteignant la branche depuis un test.
   RUNNER_STATE="ABSENT — pas d'image lcars-build:${IMAGE##*:} pour le label elixir (CI indisponible).
-  ⚠ CE N'EST PAS UNE DEGRADATION, C'EST UN BLOCAGE : la carte canon declare `ci: required`, donc
+  ⚠ CE N'EST PAS UNE DEGRADATION, C'EST UN BLOCAGE : la carte canon declare \`ci: required\`, donc
   le gate attend un statut sur chaque PR, 45 min, puis ESCALADE. Aucun jury n'est convoque
   entre-temps — rien ne sera livre sur ce banc tant qu'aucun runner ne sert le label.
               Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f fleet/deploy/docker/Dockerfile .
               puis rejouer bench-runner.sh, ou --runner-labels pour choisir soi-meme"
 elif [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
-  RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : `ci: required` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
+  RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
        --forge-api "$FORGE_URL/api/v1" \
@@ -338,6 +359,7 @@ try:
 except Exception: print(0)' 2>/dev/null || echo 0)"
     if [[ "${RUNNERS:-0}" -gt 0 ]]; then
       RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)"
+      RUNNER_SERT=1
     else
       RUNNER_STATE="demarre mais AUCUN runner vu par la forge — enregistrement rate"
     fi
@@ -346,8 +368,19 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
   fi
 fi
 
+# TROIS VERDICTS, ET `--no-runner` EN PORTE SON PROPRE — jamais l'equivalent du banc complet. Un
+# mode degrade choisi et un mode degrade subi ne se disent pas du meme mot : celui qui lit un journal
+# doit pouvoir distinguer « je n'ai pas voulu de CI » de « la CI n'a pas pu se poser ».
+if [[ "$WITH_RUNNER" -eq 0 ]]; then
+  VERDICT="banc PRET_SANS_CI"
+elif [[ "$RUNNER_SERT" -eq 1 ]]; then
+  VERDICT="banc PRET"
+else
+  VERDICT="banc PAS PRET — le runner etait DEMANDE et ne sert pas"
+fi
+
 say "─────────────────────────────────────────────────────────"
-say "banc PRET"
+say "$VERDICT"
 say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
 say "  boite     : $BOX   ssh ${BIND}:2222   deck ${BIND}:20999"
 say "  runner    : $RUNNER_STATE"
@@ -356,3 +389,10 @@ say "  creds     : $CREDS_OK"
 say "  admin     : $HUMAN_ADMIN_STATE"
 say "  destruire : bench-down.sh --project $PROJECT"
 say "─────────────────────────────────────────────────────────"
+
+# LE BLOC EST IMPRIME AVANT LE REFUS, delibere : l'operateur a besoin des details POUR reparer, et
+# un `die` en tete les lui prendrait. Le code 6 est celui que ce script reserve deja au « verdict
+# final qui ne passe pas » — la nature est la meme, la cause est nouvelle.
+if [[ "$WITH_RUNNER" -eq 1 && "$RUNNER_SERT" -ne 1 ]]; then
+  die "runner DEMANDE et non servi ($RUNNER_STATE) — banc INCOMPLET. \`--no-runner\` pour un banc sans CI, assume et dit comme tel" 6
+fi
