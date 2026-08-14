@@ -76,8 +76,19 @@ SUBJECT = re.compile(r'^\s*case\s+"?\$\{?(1|cmd|command|subcmd|action)\b')
 # en « non instruite ». Un faux NEGATIF, la moitie chere de la question, et invisible sur le corpus
 # du jour ou les 3 occurrences sous `fleet/` sont toutes des flags `--…` deja ecartes.
 LABEL = re.compile(r"^\s*\(?([A-Za-z0-9_|\-\*\?\.]+)\)(?=\s|$)")
-FUNC_OPEN = re.compile(r"^\s*(?:function\s+)?[A-Za-z_][A-Za-z0-9_:-]*\s*\(\)\s*\{\s*$")
-FUNC_CLOSE = re.compile(r"^\}\s*$")
+# ⚠ UN COMMENTAIRE APRES L'ACCOLADE RENDAIT L'INSTRUMENT AVEUGLE A TOUTE LA FONCTION. `\{\s*$`
+# exigeait l'accolade suivie de RIEN — or `_dest_repo_create() {  # cli repo visibility(...)` est
+# une forme bash ordinaire, et la ligne ne matchait pas. La profondeur restait a 0, donc le `case
+# "$1" in` de la ligne SUIVANTE etait lu comme un dispatch de ligne de commande, et ses etiquettes
+# (`gh`, `glab`) ressortaient en « sous-commandes non instruites ». Un faux POSITIF, qui accuse un
+# fichier juste — et le pire des deux, parce qu'il envoie corriger ce qui va bien.
+#
+# Trouve le 2026-08-14 en fusionnant le lot de publication : le garde vivait dans `main`, la forme
+# est arrivee avec l'autre chantier. Aucun des deux n'avait tort.
+FUNC_OPEN = re.compile(r"^\s*(?:function\s+)?[A-Za-z_][A-Za-z0-9_:-]*\s*\(\)\s*\{\s*(?:#.*)?$")
+# Symetrique : `}  # fin de X` ferme aussi une fonction. Sans ca, la profondeur ne redescendrait
+# jamais et TOUT le reste du fichier serait ecarte — un faux NEGATIF, l'autre moitie chere.
+FUNC_CLOSE = re.compile(r"^\}\s*(?:#.*)?$")
 
 ok = True
 
