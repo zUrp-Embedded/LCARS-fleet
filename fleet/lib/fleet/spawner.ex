@@ -752,13 +752,28 @@ defmodule Fleet.Spawner do
   Sends a best-effort informational wake through `turn.flag`.
 
   It carries the message but arms neither the mandate kick fallback nor its response deadline.
-  Unknown or unreachable pods are ignored.
+  An unknown or unreachable pod yields `{:error, reason}` and a warning — it is NOT delivered.
+
+  The `:ok` return used to be unconditional, and the `@spec` froze the caller's inability to know.
+  That is tolerable for a feed line and not for a TERMINAL escalation, which travels this same
+  function: the message vanished, the return said `:ok`, and no log said otherwise. This function
+  cannot know the stakes of its message, so it reports the fact at `warning` and hands the caller
+  the means to judge — `Fleet.Pilot.StepRunConsumer.TerminalEscalation` raises it to `error`.
   """
-  @spec notify_pod(String.t(), String.t()) :: :ok
+  @spec notify_pod(String.t(), String.t()) :: :ok | {:error, term()}
   def notify_pod(pod_id, message) when is_binary(pod_id) and is_binary(message) do
     case pod_info(pod_id) do
-      {:ok, info} -> Fleet.Spawner.Pod.TurnFlag.touch(info, message)
-      {:error, _} -> :ok
+      {:ok, info} ->
+        Fleet.Spawner.Pod.TurnFlag.touch(info, message)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Spawner: notify_pod #{pod_id} NOT delivered (#{inspect(reason)}) — the pod is not in " <>
+            "the registry (never started, restarting, or killed); the message is LOST, nothing " <>
+            "replays it"
+        )
+
+        {:error, reason}
     end
   end
 

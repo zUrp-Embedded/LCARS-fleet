@@ -755,4 +755,51 @@ defmodule Fleet.SpawnerTest do
       Fleet.Spawner.kill_pod(pod_id)
     end
   end
+
+  # 6-084 — `notify_pod/2` ECRASAIT L'ABSENCE DU POD SANS UN MOT, et son `@spec :: :ok` figeait
+  # l'impossibilite pour l'appelant de l'apprendre. Aucun `Logger` dans la clause `{:error, _}`.
+  #
+  # Ce serait tolerable pour une ligne de feed. Ca ne l'est pas parce que le chemin d'ESCALADE
+  # TERMINALE passe par la meme fonction : le moment ou un step_run a echoue definitivement et ou
+  # l'architecte du projet doit etre prevenu. Pod hors du Registry — jamais demarre, en cours de
+  # redemarrage, tue — et le message disparaissait : rien dans les journaux, rien dans le retour.
+  describe "6-084 — l'absence du destinataire est dite, et rendue" do
+    test "pod hors du Registry -> {:error, _} ET un warning qui nomme la perte" do
+      absent = "pod-jamais-demarre-#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _reason} = Fleet.Spawner.notify_pod(absent, "verdict terminal")
+        end)
+
+      assert log =~ absent
+      assert log =~ "NOT delivered"
+
+      # La trace doit dire ce qui est PERDU et ce qui rattrape — sinon elle signale un evenement
+      # sans dire s'il faut agir. Ici rien ne rejoue : c'est ca, l'information.
+      assert log =~ "LOST"
+    end
+
+    test "TEMOIN — un pod VIVANT recoit toujours, et sans warning" do
+      # Sans ce temoin, un `notify_pod` qui echouerait toujours passerait le test precedent, et
+      # chaque feed de la flotte se mettrait a crier en silence.
+      pod_id = "pv-notify-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Fleet.Spawner.spawn_pod(valid_profile(), "issue-1",
+          pod_id: pod_id,
+          allow_no_brief: true,
+          repo_id: @test_repo_id
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          refute match?({:error, _}, Fleet.Spawner.notify_pod(pod_id, "info : rien de grave"))
+        end)
+
+      refute log =~ "NOT delivered"
+
+      Fleet.Spawner.kill_pod(pod_id)
+    end
+  end
 end

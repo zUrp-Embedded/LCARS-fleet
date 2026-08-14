@@ -87,4 +87,65 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
     refute_received {:wake, "architect-r"}
     refute_received {:spawned, "architect-r"}
   end
+
+  # 6-084 — LA BRANCHE `notify_pod` JETAIT SON RESULTAT, et le `@doc` de `kick_architect` annonce
+  # « Failures are logged » — ce qui n'etait vrai que de l'AUTRE branche. C'est le chemin d'escalade
+  # TERMINALE : le dernier avertissement d'un ticket mort. Pod de l'architecte absent du Registry,
+  # message perdu, et rien ne le disait — ni dans les journaux, ni dans le retour (`:ok` par
+  # contrat, et il le reste : ce chemin est non-bloquant par conception).
+  defmodule AbsentArchSpawner do
+    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
+    def notify_pod(pod_id, _msg), do: send(self(), {:notify, pod_id}) && {:error, :not_found}
+  end
+
+  defmodule LiveArchSpawner do
+    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
+    def notify_pod(pod_id, _msg), do: send(self(), {:notify, pod_id}) && :ok
+  end
+
+  describe "6-084 — un architecte injoignable ne se perd plus en silence" do
+    test "notify en echec -> `error` qui nomme le pod, le depot, et ce qui NE rattrape pas" do
+      log =
+        capture_log(fn ->
+          assert :ok = TerminalEscalation.kick_architect(AbsentArchSpawner, "o/r", "verdict")
+        end)
+
+      assert_received {:notify, "architect-r"}
+
+      assert log =~ "architect-r"
+      assert log =~ "o/r"
+      assert log =~ "INJOIGNABLE"
+
+      # `error` et non `warning` : doctrine des niveaux du depot — perte REELLE = `error`. Ce qui
+      # vient d'etre perdu est le dernier avertissement d'un ticket mort.
+      assert log =~ "[error]"
+
+      # Et la trace doit dire ce qui SURVIT, sinon elle transforme une perte bornee en panique :
+      # l'incident reste dans le registre et l'issue forge, seule la notification est perdue.
+      assert log =~ "registre"
+    end
+
+    test "TEMOIN — notify qui passe : aucun `error`, le chemin nominal reste muet" do
+      # Sans lui, un `Logger.error` inconditionnel passerait le test precedent et remplirait le
+      # journal d'une escalade reussie sur deux.
+      log =
+        capture_log(fn ->
+          assert :ok = TerminalEscalation.kick_architect(LiveArchSpawner, "o/r", "verdict")
+        end)
+
+      assert_received {:notify, "architect-r"}
+      refute log =~ "INJOIGNABLE"
+    end
+
+    test "le retour reste `:ok` — ce chemin est non-bloquant par contrat, et le reste" do
+      # Elever le fait au journal ne doit PAS transformer une escalade ratee en erreur remontante :
+      # le consommateur qui l'appelle est en train de clore un step_run mort, et le faire echouer
+      # la-dessus perdrait AUSSI le reste de la cloture.
+      capture_log(fn ->
+        assert :ok = TerminalEscalation.kick_architect(AbsentArchSpawner, "o/r", "verdict")
+      end)
+    end
+  end
 end
