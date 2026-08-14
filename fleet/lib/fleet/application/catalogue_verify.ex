@@ -33,7 +33,19 @@ defmodule Fleet.Application.CatalogueVerify do
     case verify(root) do
       {:ok, %{assumptions: assumptions}} ->
         print(assumptions)
-        IO.puts("catalogue OK — every check the boot runs passed.")
+        # ⚠ CETTE LIGNE DISAIT « every check the boot runs passed » (6-008), et rien ne tenait
+        # l'equivalence. Mesure du 2026-08-14 : le rail de boot jouait CINQ gardes `validate_*!`,
+        # ce verificateur en rejouait QUATRE. Un vert d'ici precedait donc un boot rouge — le
+        # contraire de son objet. Les deux sequences sont desormais tenues par le check
+        # `boot.verifier_covers_rail`, qui les lit a l'AST et refuse la divergence.
+        #
+        # La phrase nomme maintenant ce qui EST prouve. Le verificateur prouve UN REPERTOIRE avec
+        # les fonctions du boot ; il ne prouve ni les credentials de deploiement, ni les surcharges
+        # fines, ni l'ordre reel de demarrage — ce que la liste d'hypotheses au-dessus dit deja.
+        IO.puts(
+          "catalogue OK — les controles catalogue du boot passent (cf. hypotheses ci-dessus)."
+        )
+
         System.halt(0)
 
       {:error, %{findings: findings, assumptions: assumptions}} ->

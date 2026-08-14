@@ -361,12 +361,24 @@ defmodule Fleet.Pilot.Application do
   Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
   the raise into a finding.
   """
+  # ⚠ DEUX GARDES MANQUAIENT ICI, ET LE `@doc` AU-DESSUS DISAIT « EXACTLY » (6-008). Le boot en
+  # joue SIX (`step_children!`, l. 272-278) ; cette fonction en jouait QUATRE :
+  # `validate_workshop_card!` et `validate_default_card_matrix!` n'y etaient pas. Un verificateur
+  # VERT pouvait donc preceder un boot ROUGE — le contraire exact de son objet, et sur les deux
+  # gardes qui refusent une carte d'atelier cassee et une matrice de carte par defaut incoherente.
+  #
+  # L'equivalence reste tenue A LA MAIN : rien dans le code ne lie les deux sequences. Ce qui la
+  # tient desormais est le check `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui
+  # lit les DEUX listes a l'AST et refuse la divergence. Ajouter une garde au boot sans l'ajouter
+  # ici fait maintenant rougir le gate, au lieu de rendre la phrase fausse en silence.
   @spec verify_cards_and_roles!(keyword()) :: :ok
   def verify_cards_and_roles!(opts \\ []) do
     Fleet.Workflow.Loader.publish_image!()
     validate_card_juries!(opts)
     validate_card_steps!(opts)
     validate_structural_roles!()
+    validate_workshop_card!(opts)
+    validate_default_card_matrix!(opts)
     :ok
   end
 

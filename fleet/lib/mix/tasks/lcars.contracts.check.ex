@@ -101,6 +101,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_tool_effects(root),
         check_cap_profile_project_keys(root),
         check_proven_image_regime(root),
+        check_verifier_covers_rail(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
@@ -1310,6 +1311,79 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         note: "boot-order lock, twin of boot.order_f8"
       }
     end
+  end
+
+  # LE VERIFICATEUR AUTONOME AFFIRMAIT COUVRIR LE BOOT, ET L'EQUIVALENCE N'ETAIT TENUE PAR RIEN
+  # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
+  # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
+  # rail boot ». Mesure du 2026-08-14 : le boot en jouait SIX, le verificateur QUATRE —
+  # `validate_workshop_card!` et `validate_default_card_matrix!` manquaient. Un verificateur VERT
+  # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
+  #
+  # Les deux sequences sont lues A L'AST, pas au grep : une garde citee dans un commentaire ne doit
+  # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
+  # compare les APPELS de `validate_*!` dans les deux corps de fonction.
+  @doc false
+  def check_verifier_covers_rail(root) do
+    rel = "lib/fleet/pilot/application.ex"
+    ast = quoted!(root, rel)
+
+    boot = validate_calls(ast, :step_children!)
+    verifier = validate_calls(ast, :verify_cards_and_roles!)
+
+    manquantes = boot |> Enum.reject(&(&1 in verifier)) |> Enum.sort()
+
+    cond do
+      measured_nothing?(boot) ->
+        broken_result("boot.verifier_covers_rail", "validate_*! call in step_children!/0")
+
+      measured_nothing?(verifier) ->
+        broken_result(
+          "boot.verifier_covers_rail",
+          "validate_*! call in verify_cards_and_roles!/1"
+        )
+
+      true ->
+        %{
+          id: "boot.verifier_covers_rail",
+          remediation:
+            "ajouter la garde au corps de `verify_cards_and_roles!/1` — le verificateur autonome " <>
+              "affirme jouer ce que le boot joue, et une garde presente au boot seul rend un vert " <>
+              "qui precede un boot rouge",
+          status: if(manquantes == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(manquantes, &"#{rel}: #{&1} au boot, absente du verificateur autonome"),
+          # Le sens de la couverture est ORIENTE : le verificateur doit contenir le boot, jamais
+          # l'inverse. Une garde qu'il joue en PLUS est conservatrice (un rouge de trop, jamais un
+          # vert menteur) — d'ou deux comptes affiches et pas une egalite.
+          note:
+            "boot: #{MapSet.size(boot)} gardes `validate_*!` · verificateur: " <>
+              "#{MapSet.size(verifier)} — le boot est couvert"
+        }
+    end
+  end
+
+  # Les `validate_<x>!(…)` appelees dans le corps de `fun` — a l'AST. Le nom de la fonction porte
+  # l'intention (`validate_` + `!`), et c'est ce qui permet de comparer deux sequences sans tenir
+  # une troisieme liste qui deriverait a son tour.
+  defp validate_calls(ast, fun) do
+    ast
+    |> collect(fn
+      {:def, _, [{^fun, _, _} | _] = body} -> [body]
+      {:defp, _, [{^fun, _, _} | _] = body} -> [body]
+      _ -> nil
+    end)
+    |> List.flatten()
+    |> collect(fn
+      {name, _, _args} when is_atom(name) ->
+        s = Atom.to_string(name)
+        if String.starts_with?(s, "validate_") and String.ends_with?(s, "!"), do: [s], else: nil
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   # WHAT THE PROVEN-IMAGE REGIME IS ACTUALLY WORTH, AND THE ONE SWITCH THAT VOIDS IT. `SPBuilder`
