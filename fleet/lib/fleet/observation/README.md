@@ -22,7 +22,11 @@ restated, only pointed at.
 
 ## Config & deps
 
-- Knob `:lcars_fleet, :observation_http_port` — read by `Application`, set by `runtime.exs` from `LCARS_OBSERVATION_PORT` (per-human, `bin/fleet_v2`).
+- **Aucune molette de port** (6-072/6-098) : le deck n'a pas d'adresse. Il écoute sur
+  `/run/lcars/console/<humain>/deck.sock`, chemin **dérivé** de l'humain qui lance le BEAM
+  (`Application.deck_socket/0`) et jamais déclaré. `LCARS_OBSERVATION_PORT` et
+  `:observation_http_port` ont été **retirées**, pas rendues optionnelles : une variable obligatoire
+  dont la valeur ne sert à rien bloque un démarrage sans rien configurer.
 - Knobs `:start_listener` / `:start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, like `fleet_api`).
 - Deps (see `use Boundary`): `fleet_spawner` (`list_pods/0`), `fleet_cap_profile` (role catalogue), `fleet_event_router` (Bus + listener), + `plug`/`plug_cowboy`/`jason`.

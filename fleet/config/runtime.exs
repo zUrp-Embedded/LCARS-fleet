@@ -550,21 +550,20 @@ if config_env() != :test and not tool_mode? do
         Path.join([System.fetch_env!("HOME"), ".lcars", "run", "api.sock"])
 
   # ============================================================
-  # fleet_observation — read-only observation deck, per-human port
+  # fleet_observation — read-only observation deck, per-human SOCKET
   # ============================================================
   # Listener started in prod/dev (the hermetic `start_listener: false` of
   # test.exs is not reached here: runtime.exs is guarded out of :test).
-  obs_port =
-    case System.get_env("LCARS_OBSERVATION_PORT") do
-      nil ->
-        raise "LCARS_OBSERVATION_PORT missing — set by bin/fleet_v2 (per-human block). " <>
-                "Launch via fleet_v2 start, or set the var explicitly."
-
-      str ->
-        Fleet.EnvParse.port("LCARS_OBSERVATION_PORT", str)
-    end
-
-  config :lcars_fleet, observation_http_port: obs_port
+  #
+  # ⚠ `LCARS_OBSERVATION_PORT` A ETE RETIREE, PAS RENDUE OPTIONNELLE (6-072/6-098). Ce bloc LEVAIT
+  # quand elle manquait — une exigence dure pour une valeur que plus rien ne bind : le deck ecoute
+  # sur `/run/lcars/console/<humain>/deck.sock`. Une variable obligatoire dont la valeur ne sert a
+  # rien est le pire des deux mondes : elle bloque un demarrage ET elle ne configure rien.
+  #
+  # Le chemin de la socket ne se declare pas ici : il se DERIVE de l'humain qui lance le BEAM
+  # (`Fleet.Observation.Application.deck_socket/0`). Une molette ici permettrait de poser la socket
+  # d'un humain dans le repertoire d'un autre, que le mode de ce repertoire refuserait ensuite —
+  # un « deck injoignable » sans cause visible.
   config :lcars_fleet, observation_start_listener: true
 
   # ============================================================

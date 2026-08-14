@@ -44,12 +44,16 @@ defmodule Fleet.Observation.Deck do
     end
   end
 
+  # `socket`, not `port` (6-072/6-098): this deck has no address. Reporting a port here would have
+  # been the most convincing lie of the lot — a health endpoint answering `200` while naming a number
+  # nothing binds. Whoever probes health is looking for where to reach this thing; the answer is a
+  # path, and the caller reaching it over that very socket is what makes the field honest.
   get "/health" do
     conn
     |> json(200, %{
       status: "ok",
       deck: "fleet_observation",
-      port: Application.get_env(:lcars_fleet, :observation_http_port)
+      socket: Fleet.Observation.Application.deck_socket()
     })
   end
 

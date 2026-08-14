@@ -32,7 +32,10 @@ Trois dashboards préexistent et **restent en vie** (on coupe rien maintenant, m
 | `:8089` | `fleet_dashboard` (branche sœur `dashboard/observability-8089`) | squelette observation deck |
 | **`:8091`** | **`fleet_observation` (CE design)** | **nouveau — la prise propre BL-026** |
 
-→ knob `LCARS_OBSERVATION_PORT` (défaut `8091`), changeable sans recompile.
+→ ⚠ **PÉRIMÉ depuis 6-072/6-098** : ce deck n'a plus de port du tout, donc plus de molette. Il
+écoute sur `/run/lcars/console/<humain>/deck.sock`, et c'est le **mode du répertoire** qui garde
+l'accès — pas le choix d'une interface. Le tableau ci-dessus décrit l'état d'avant ; il est gardé
+parce qu'il explique le *pourquoi* de la prise, mais `:8091` n'est plus une adresse.
 
 ---
 
@@ -189,10 +192,14 @@ Ce sont des idées **fonctionnelles** du v1, pas du décor — je les porte.
    au final. Vocab aligné BL-026 (`Fleet.Observability`/`ReadModel`).
    - **Flag convergence** : à la fusion des branches, 2 « dashboards » natifs cohabiteront
      (`fleet_dashboard` :8089 et `fleet_observation` :8091). Décision de ménage = user, plus tard.
-2. **Port** : `:8091`, knob `LCARS_OBSERVATION_PORT`. Coexiste avec 8080/8089/8090.
+2. ~~**Port** : `:8091`, knob `LCARS_OBSERVATION_PORT`~~ → **PLUS DE PORT** (6-072/6-098) : socket
+   `/run/lcars/console/<humain>/deck.sock`, chemin dérivé, aucune molette.
 3. **Surface**, listener Cowboy dédié, **guardé `:test`** (`start_listener: false` en test — invariant
-   hermétique, sinon `mix test` bind le port).
-4. **Auth** : **aucune** sur le deck (read-only, GET-only, intra-release, ADR-C « 5-zéros »).
+   hermétique, sinon `mix test` bind la socket).
+4. **Auth** : **aucune sur le deck lui-même**, et c'est resté vrai en changeant de nature. Le motif
+   d'alors était « read-only, GET-only, intra-release » ; il est désormais **structurel** — on
+   n'authentifie pas à cette porte parce qu'on ne peut plus y arriver sans avoir passé celle du
+   landing, qui a vérifié la session Gitea. La garde est le mode du répertoire, pas une clause.
    Distinct de la question API-D1 (WS `/ws`) — ici c'est de la **lecture** pure, pas de mutation.
 5. **Frontière starfleet** : exclue (non-négo #2).
 6. **Read-model** : `ReadModel` GenServer + ETS (`:read_concurrency`), seul abonné au bus côté

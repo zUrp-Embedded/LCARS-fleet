@@ -32,7 +32,6 @@ config :lcars_fleet, mcp_start_socket_warden: false
 # fleet_observation : idem — pas de listener Cowboy :8091 en test (sinon bind
 # du port → crash boot du daemon, même invariant hermétique que fleet_api).
 config :lcars_fleet, observation_start_listener: false
-config :lcars_fleet, observation_http_port: 0
 # ReadModel OFF en test (abonné Bus global = consommateur parasite interdit en
 # async ; les tests le démarrent manuellement avec subscribe:false).
 config :lcars_fleet, observation_start_readmodel: false

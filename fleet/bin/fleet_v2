@@ -73,7 +73,10 @@ compute_ports() {
   uid="$(id -u)"
   base=$(( 21000 + (uid % 500) * 10 ))
   API_PORT="${LCARS_API_PORT:-$base}"
-  OBS_PORT="${LCARS_OBSERVATION_PORT:-$(( base + 1 ))}"
+  # base+1 EST LIBRE : le deck d'observation n'a plus de port (6-072/6-098). Il ecoute sur
+  # `/run/lcars/console/<humain>/deck.sock`, dont le repertoire garde l'acces — un port publie a
+  # cote du landing serait une seconde origine, et une seconde origine ne demande rien a personne.
+  # Ne pas re-attribuer ce slot sans lire pourquoi il a ete rendu.
   # base+2 is RESERVED (the pod-facing MCP HTTP port, removed): the MCP transport is no longer a shared
   # HTTP listener but one AF_UNIX socket per pod (cf. LCARS_FLEET_MCP_SOCK_BASE). The slot is left empty
   # so the webhook port below does not shift.
@@ -122,9 +125,10 @@ setup_env() {
 
   compute_ports
 
-  # Per-human ports (read by runtime.exs: fleet_api / fleet_observation / event_router).
+  # Per-human ports (read by runtime.exs: fleet_api + event_router's webhook). fleet_observation is
+  # NOT in this list any more and its variable is gone: its deck listens on a socket derived from
+  # the human who runs the BEAM, so there is nothing for a launcher to post.
   export LCARS_API_PORT="$API_PORT"
-  export LCARS_OBSERVATION_PORT="$OBS_PORT"
   export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
 
   # A7 (port agreement): THIS fleet's API URL, written into the runtime state — the `lcars` CLI (and
@@ -368,7 +372,7 @@ cmd_start() {
   fi
 
   echo "fleet_v2: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
-  echo "fleet_v2: ports — API $API_PORT · obs $OBS_PORT · webhook $WEBHOOK_PORT" >&2
+  echo "fleet_v2: ports — API $API_PORT · webhook $WEBHOOK_PORT (obs: socket, plus de port)" >&2
   echo "fleet_v2: scan multi-projet — tout depot de l'org (F-037, plus de repo fixe)" >&2
 
   # DEDICATED tmux socket (fresh server) → it captures the env exported above. The BEAM runs detached
