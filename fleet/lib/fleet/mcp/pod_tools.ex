@@ -32,6 +32,8 @@ defmodule Fleet.MCP.PodTools do
       - `project_publish`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
         of import; local content never overwritten).
       - `project_import` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
+      - `github_publish`   : phase-2 publish of a project to its linked external forge as a rolling
+        PR/MR (ASYNC — returns queued, outcome on the bus; the token stays host-side).
       - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
       - `issue_list`      : the arch reads its project's open-ticket board (BL-6-28: the
@@ -413,6 +415,33 @@ defmodule Fleet.MCP.PodTools do
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["url", "name"]
+    })
+  end
+
+  deftool "github_publish" do
+    meta do
+      name("Publish to External Forge")
+
+      description(
+        "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab; the " <>
+          "name says github but GitLab is first-class) as a rolling PR/MR. ASYNC: returns " <>
+          "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
+          "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
+          "(github_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
+          "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>
+          "`lcars approve <repo> --target <name> --as <dest>` — an unlinked repo returns queued " <>
+          "and then fails on the bus (no destination). Force-updates ONE rolling branch " <>
+          "(`lcars/publish`) and its single open PR/MR; the human merges it on the forge's web UI. " <>
+          "`repo` = the internal `owner/name`."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "repo" => %{"type" => "string"}
+      },
+      "required" => ["repo"]
     })
   end
 
@@ -961,6 +990,17 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("project_import", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("github_publish", %{"repo" => repo} = args, state) when is_binary(repo) do
+    case Delegation.github_publish(args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("github_publish", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

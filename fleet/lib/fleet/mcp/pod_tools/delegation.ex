@@ -76,6 +76,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
+  alias Fleet.EventRouter.Bus
+  alias Fleet.MCP.PodTools.GithubPublish
+
   alias Fleet.MCP.PodTools.Delegation.{
     DependencyForge,
     EscalationForge,
@@ -253,6 +256,55 @@ defmodule Fleet.MCP.PodTools.Delegation do
     case require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_import_project(full_name)
+    end
+  end
+
+  @doc """
+  ENQUEUES a phase-2 publish of `repo` to its linked external forge (chantier-publication-github).
+
+  Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
+  PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
+  a large repo, so blocking the pod's turn is not an option. Returns `{:ok, %{"status" => "queued"}}`
+  immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `github_publish.done` /
+  `github_publish.failed`. The external token never enters a pod — the rail reads it host-side.
+
+  A project with no publish binding (never `lcars approve`d) is not caught here: the Task resolves the
+  binding and emits `github_publish.failed` — the request is well-formed, the target simply is not set.
+  """
+  @spec github_publish(map(), map()) :: {:ok, map()} | {:error, term()}
+  def github_publish(%{"repo" => repo}, state) when is_binary(repo) do
+    case require_onboarder(state) do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, _role} ->
+        if valid_repo?(repo) do
+          case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
+                 GithubPublish.run(repo)
+               end) do
+            {:ok, _pid} ->
+              Bus.safe_emit(:mcp, :"github_publish.started", [payload: %{"repo" => repo}],
+                context: "github_publish"
+              )
+
+              {:ok, %{"status" => "queued", "repo" => repo}}
+
+            {:error, reason} ->
+              {:error, {:publish_enqueue_failed, reason}}
+          end
+        else
+          {:error, :invalid_arguments}
+        end
+    end
+  end
+
+  def github_publish(_args, _state), do: {:error, :invalid_arguments}
+
+  # owner/name, exactly two non-empty segments, no path-traversal component.
+  defp valid_repo?(repo) do
+    case String.split(repo, "/") do
+      [owner, name] -> owner != "" and name != "" and owner not in ~w(. ..) and name not in ~w(. ..)
+      _ -> false
     end
   end
 

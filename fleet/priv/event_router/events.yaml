@@ -132,6 +132,15 @@ events:
   # --- Admin spawn ---
   admin.spawn.request: []
 
+  # --- GitHub/GitLab publish (async, source :mcp) ---
+  # The `github_publish` MCP tool starts an OFF-turn Task (Task.Supervisor) that runs the host-side
+  # publish rail; these are the lossy observability signals of that Task (emitted via safe_emit, so a
+  # missing subscriber never crashes the producer). UNROUTED (`[]`): outcomes, not routing inputs. A
+  # deck/arch-feed consumer can subscribe to surface the PR/MR url to the human.
+  github_publish.started: []
+  github_publish.done: []
+  github_publish.failed: []
+
   # --- Boot lifecycle (BootOrchestrator) ---
   fleet.boot_complete: []
   fleet.boot_partial: []

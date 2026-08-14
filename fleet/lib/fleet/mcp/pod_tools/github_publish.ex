@@ -1,0 +1,145 @@
+defmodule Fleet.MCP.PodTools.GithubPublish do
+  @moduledoc """
+  ASYNC worker behind the `github_publish` tool (phase 2 of chantier-publication-github).
+
+  The tool call itself only ENQUEUES (a Task under `Fleet.MCP.PublishTaskSupervisor`) and returns
+  `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
+  so the pod's turn must not block on it. This module IS that Task's body.
+
+  It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<slug>.json`, written by
+  `lcars approve`), then runs the host-side rail `bin/publish-rail.sh` — which force-pushes a rolling
+  branch and opens/updates a PR/MR. THE EXTERNAL TOKEN STAYS HOST-SIDE: it lives in the human's own
+  file (referenced by the binding), is read by the rail in the BEAM's process, and NEVER enters a pod.
+
+  The outcome is emitted on the Bus (lossy/observability, `safe_emit` — a missing subscriber never
+  crashes the Task): `github_publish.done` with the PR/MR url, or `github_publish.failed` with the
+  reason. Not-linked / missing forge config / a non-zero rail / a raise all land as `.failed`, never a
+  crash.
+  """
+
+  require Logger
+  alias Fleet.EventRouter.Bus
+
+  # Generous wall deadline: the rail re-clones the internal repo and filter-repo rewrites its whole
+  # history on every run. Shell.run kills the whole process-group at the deadline.
+  @rail_timeout_ms 15 * 60 * 1000
+
+  @doc """
+  Runs one publish of `repo` (internal `owner/name`) to its linked external forge, start to finish.
+
+  Meant to be the body of a `Fleet.MCP.PublishTaskSupervisor` Task (the tool enqueues it). Always
+  returns `:ok` and reports the outcome ONLY on the Bus (`github_publish.done` / `.failed`) — every
+  failure path, including a raise, is turned into a `.failed` event, never a crash that the supervisor
+  would restart into a re-publish.
+  """
+  @spec run(String.t()) :: :ok
+  def run(repo) when is_binary(repo) do
+    case do_run(repo) do
+      {:ok, url} ->
+        Logger.info("GithubPublish: #{repo} -> #{if url == "", do: "nothing to publish", else: url}")
+        safe_emit(:"github_publish.done", %{"repo" => repo, "url" => url}, repo)
+
+      {:error, reason} ->
+        {cat, detail} = Fleet.Event.reason_fields(reason)
+        Logger.warning("GithubPublish: #{repo} FAILED — #{detail}")
+        safe_emit(:"github_publish.failed", %{"repo" => repo, "reason" => cat, "reason_detail" => detail}, repo)
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.error("GithubPublish: #{repo} RAISED — #{Exception.message(e)}")
+      safe_emit(:"github_publish.failed", %{"repo" => repo, "reason" => "raised", "reason_detail" => Exception.message(e)}, repo)
+      :ok
+  end
+
+  defp do_run(repo) do
+    slug = repo |> String.split("/") |> List.last()
+
+    with {:ok, b} <- read_binding(slug),
+         {:ok, forge_url} <- env("FORGE_BASE_URL"),
+         {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
+         args = rail_args(repo, b, forge_url, forge_tok, fresh_work(slug)),
+         {:ok, {out, 0}} <- Fleet.Credentials.Shell.run(rail_path(), args, timeout: @rail_timeout_ms) do
+      {:ok, parse_url(out)}
+    else
+      {:ok, {out, code}} -> {:error, {:rail_exit, code, last_line(out)}}
+      {:error, _} = err -> err
+    end
+  end
+
+  # The per-human binding is the source of truth for WHERE this project publishes (chantier §5bis).
+  defp read_binding(slug) do
+    path = Path.join([System.user_home!(), ".lcars", "publish", "#{slug}.json"])
+
+    with {:ok, raw} <- file_read(path, {:not_linked, slug}),
+         {:ok, map} when is_map(map) <- decode(raw, {:binding_invalid, path}),
+         :ok <- require_keys(map, ~w(host dest_host dest_repo token_file), path) do
+      {:ok, map}
+    end
+  end
+
+  defp file_read(path, err), do: (case File.read(path), do: ({:ok, r} -> {:ok, r}; {:error, _} -> {:error, err}))
+  defp decode(raw, err), do: (case Jason.decode(raw), do: ({:ok, m} -> {:ok, m}; {:error, _} -> {:error, err}))
+
+  defp require_keys(map, keys, path) do
+    missing = Enum.reject(keys, fn k -> is_binary(Map.get(map, k)) and Map.get(map, k) != "" end)
+    if missing == [], do: :ok, else: {:error, {:binding_incomplete, path, missing}}
+  end
+
+  defp env(var) do
+    case System.get_env(var) do
+      v when is_binary(v) and v != "" -> {:ok, v}
+      _ -> {:error, {:env_missing, var}}
+    end
+  end
+
+  defp rail_args(repo, b, forge_url, forge_tok, work) do
+    [
+      "--project", repo,
+      "--forge", forge_url,
+      "--forge-token-file", forge_tok,
+      "--host", b["host"],
+      "--dest-repo", b["dest_repo"],
+      "--dest-token-file", b["token_file"],
+      "--dest-host", b["dest_host"],
+      "--base", Map.get(b, "base") || "main",
+      "--work", work
+    ]
+  end
+
+  # publish-rail.sh is co-located with the launchers (moved to bin/, install manifest). The bin dir is
+  # the one already resolved for `claude_launch_path`; reading its config keeps a single source of the
+  # bin location without an MCP->Spawner call (config read, not a boundary edge).
+  defp rail_path do
+    launcher = Application.get_env(:fleet_spawner, :claude_launch_path, "/usr/local/bin/claude_launch.sh")
+    Path.join(Path.dirname(launcher), "publish-rail.sh")
+  end
+
+  # The rail REFUSES an existing --work; a unique fresh path per run satisfies that.
+  defp fresh_work(slug) do
+    Path.join(System.tmp_dir!(), "lcars-publish-#{slug}-#{System.unique_integer([:positive])}")
+  end
+
+  # The rail prints the url after `-> ` on success ("PR/MR ouverte -> <url>" / "actualisee ... -> <url>").
+  # "rien a publier" is a legitimate no-op success with no url.
+  defp parse_url(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.reverse()
+    |> Enum.find_value("", fn line ->
+      case Regex.run(~r{->\s*(https?://\S+)}, line) do
+        [_, url] -> url
+        _ -> false
+      end
+    end)
+  end
+
+  defp last_line(out) do
+    out |> String.split("\n", trim: true) |> List.last() |> Kernel.||("")
+  end
+
+  defp safe_emit(type, payload, repo) do
+    Bus.safe_emit(:mcp, type, [payload: payload], context: "GithubPublish: #{repo}")
+  end
+end
