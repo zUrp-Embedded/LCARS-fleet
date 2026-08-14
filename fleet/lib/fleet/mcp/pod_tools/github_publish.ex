@@ -8,14 +8,15 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
 
   It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<slug>.json`, written by
   `lcars approve`), then runs the host-side rail `bin/publish-rail.sh` — which force-pushes a rolling
-  branch and opens/updates a PR/MR. NO EXTERNAL TOKEN IS HANDLED here or by the rail: auth is the
-  forge's official CLI (`gh`/`glab`, the wired git credential helper), and nothing token-shaped ever
-  enters a pod, an argv, or a config we write.
+  branch and, if the forge CLI is present+authed (Tier 1), opens/updates the PR/MR; otherwise (Tier 2)
+  it hands back a ready-to-open compare/new-MR URL. NO EXTERNAL TOKEN IS HANDLED here or by the rail:
+  auth is the forge's official CLI (`gh`/`glab`, the wired git credential helper) or the operator's own
+  wired helper — nothing token-shaped ever enters a pod, an argv, or a config we write.
 
   The outcome is emitted on the Bus (lossy/observability, `safe_emit` — a missing subscriber never
-  crashes the Task): `github_publish.done` with the PR/MR url, or `github_publish.failed` with the
-  reason. Not-linked / missing forge config / a non-zero rail / a raise all land as `.failed`, never a
-  crash.
+  crashes the Task): `github_publish.done` with the url and a `manual` flag (true = Tier 2, the url is a
+  "PR/MR to open" link, not an opened request), or `github_publish.failed` with the reason. Not-linked /
+  missing forge config / a non-zero rail / a raise all land as `.failed`, never a crash.
   """
 
   require Logger
@@ -36,9 +37,14 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   @spec run(String.t(), String.t() | nil) :: :ok
   def run(repo, requester \\ nil) when is_binary(repo) do
     case do_run(repo) do
-      {:ok, url} ->
-        Logger.info("GithubPublish: #{repo} -> #{if url == "", do: "nothing to publish", else: url}")
-        safe_emit(:"github_publish.done", %{"repo" => repo, "url" => url, "requester_pod_id" => requester}, repo)
+      {:ok, {url, manual}} ->
+        Logger.info("GithubPublish: #{repo} -> #{outcome_log(url, manual)}")
+
+        safe_emit(
+          :"github_publish.done",
+          %{"repo" => repo, "url" => url, "manual" => manual, "requester_pod_id" => requester},
+          repo
+        )
 
       {:error, reason} ->
         {cat, detail} = Fleet.Event.reason_fields(reason)
@@ -73,7 +79,7 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
          {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
          args = rail_args(repo, b, forge_url, forge_tok, fresh_work(slug)),
          {:ok, {out, 0}} <- Fleet.Credentials.Shell.run(rail_path(), args, timeout: @rail_timeout_ms) do
-      {:ok, parse_url(out)}
+      {:ok, parse_result(out)}
     else
       {:ok, {out, code}} -> {:error, {:rail_exit, code, last_line(out)}}
       {:error, _} = err -> err
@@ -132,8 +138,17 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
     Path.join(System.tmp_dir!(), "lcars-publish-#{slug}-#{System.unique_integer([:positive])}")
   end
 
-  # The rail prints the url after `-> ` on success ("PR/MR ouverte -> <url>" / "actualisee ... -> <url>").
-  # "rien a publier" is a legitimate no-op success with no url.
+  # The rail prints the url after `-> ` on success. Two shapes:
+  #   Tier 1 auto: "PR/MR ouverte -> <pull/MR url>" / "actualisee ... -> <pull/MR url>"
+  #   Tier 2 degraded: "branche ... poussee -- ouvre la PR/MR ici -> <compare|merge_requests/new url>"
+  # "rien a publier" is a legitimate no-op success with no url. `manual` is inferred from the URL SHAPE
+  # (compare / new-MR forms), not from prose: the rail's Tier-2 outcome is a "one more click", relayed
+  # to the pod as such rather than as an opened request.
+  defp parse_result(out) do
+    url = parse_url(out)
+    {url, manual_url?(url)}
+  end
+
   defp parse_url(out) do
     out
     |> String.split("\n", trim: true)
@@ -145,6 +160,12 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
       end
     end)
   end
+
+  defp manual_url?(url), do: url =~ ~r{/compare/} or url =~ ~r{/merge_requests/new}
+
+  defp outcome_log(url, _manual) when url == "", do: "nothing to publish"
+  defp outcome_log(url, true), do: "pushed, PR/MR to open -> #{url}"
+  defp outcome_log(url, false), do: url
 
   defp last_line(out) do
     out |> String.split("\n", trim: true) |> List.last() |> Kernel.||("")

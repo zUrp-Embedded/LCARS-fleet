@@ -5,11 +5,12 @@
 # STATUS: bats tests for `lcars target` (pool) + `lcars approve` (phase-1 gate) fail-closed paths
 #
 # V2: auth is the forge CLI (gh/glab), so a target carries NO token — the pool is host+owner+repo and
-# the credential lives in the CLI's own store. Covered: the guards that fire BEFORE any clone/push —
-# pool validation, target/binding resolution, CLI-auth precondition, and the forge-config precondition.
-# HOME is redirected to a tmp so ~/.lcars/{targets,publish} is controlled; gh/glab are stubbed
-# (authenticated) so approve reaches the checks past its CLI gate. The real link + push are
-# operator-exercised.
+# the credential lives in the CLI's own store. V2.1: the CLI is OPTIONAL in approve — it is only NEEDED
+# to CREATE a repo that does not exist (Tier 1); linking a pre-created repo + pushing use the operator's
+# own wired helper (Tier 2). Covered: the guards that fire BEFORE any clone/push — pool validation,
+# target/binding resolution, that a logged-out CLI is NO LONGER a hard precondition, that --public
+# parses, and the forge-config precondition. HOME is redirected to a tmp so ~/.lcars/{targets,publish}
+# is controlled; gh/glab are stubbed. The real create/link/push are operator-exercised.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/lcars"
@@ -93,11 +94,22 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"exige --as"* ]]
 }
 
-@test "approve: resolved target but CLI not authenticated -> exit 1 (auth login)" {
+@test "approve: CLI not authenticated is NOT a hard precondition (falls to forge-config check)" {
+  # V2.1: the CLI is only NEEDED to CREATE a repo. Logged out, approve no longer dies at 'auth login';
+  # it falls through to the internal-forge config check (absent here) -> FORGE_BASE_URL absent, no push.
   "$SCRIPT" target add mine --host github --owner alice >/dev/null
   STUB_AUTHED=0 run "$SCRIPT" approve fleet/demo --target mine --as Demo
   [ "$status" -eq 1 ]
-  [[ "$output" == *"auth login"* ]]
+  [[ "$output" == *"FORGE_BASE_URL absent"* ]]
+  [[ "$output" != *"auth login"* ]]
+}
+
+@test "approve: --public is a recognized flag (reaches forge-config check, not 'option inconnue')" {
+  "$SCRIPT" target add mine --host github --owner alice >/dev/null
+  run "$SCRIPT" approve fleet/demo --target mine --as Demo --public
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FORGE_BASE_URL absent"* ]]
+  [[ "$output" != *"option inconnue"* ]]
 }
 
 @test "approve: authed target but no forge config -> exit 1 (FORGE_BASE_URL absent), nothing pushed" {

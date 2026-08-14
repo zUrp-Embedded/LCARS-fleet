@@ -69,7 +69,15 @@ defmodule Fleet.Spawner.PublishConsumer do
       when is_binary(pod) do
     repo = Map.get(p, "repo", "?")
     url = Map.get(p, "url", "")
-    msg = if url == "", do: "publish #{repo}: rien a publier (deja a jour)", else: "publish #{repo} -> #{url}"
+    manual = Map.get(p, "manual", false)
+
+    msg =
+      cond do
+        url == "" -> "publish #{repo}: rien a publier (deja a jour)"
+        manual -> "publish #{repo}: pousse, ouvre la PR/MR -> #{url}"
+        true -> "publish #{repo} -> #{url}"
+      end
+
     notify_requester(state, pod, msg)
     {:noreply, state}
   end

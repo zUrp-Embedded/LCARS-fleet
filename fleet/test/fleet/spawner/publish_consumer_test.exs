@@ -372,6 +372,28 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       assert_receive {:notified, "pod-req", msg}
       assert msg =~ "fleet/demo"
       assert msg =~ "https://forge/pr/1"
+      refute msg =~ "ouvre"
+    end
+
+    test "github_publish.done manual:true -> notify_pod says 'ouvre la PR/MR' (Tier 2, one more click)" do
+      {pid, _} = start_consumer()
+      Process.register(self(), :"notify_probe_pod-t2")
+
+      send(
+        pid,
+        Fleet.Event.new(:mcp, :"github_publish.done",
+          payload: %{
+            "repo" => "fleet/demo",
+            "url" => "https://forge/compare/main...lcars/publish?expand=1",
+            "manual" => true,
+            "requester_pod_id" => "pod-t2"
+          }
+        )
+      )
+
+      assert_receive {:notified, "pod-t2", msg}
+      assert msg =~ "ouvre la PR/MR"
+      assert msg =~ "https://forge/compare/main...lcars/publish?expand=1"
     end
 
     test "github_publish.failed -> notify_pod the requester with the reason" do

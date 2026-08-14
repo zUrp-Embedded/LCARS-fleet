@@ -117,15 +117,17 @@ USAGE
       forge (« gh auth login » / « glab auth login »), deja credential helper git.
       GitLab est une cible de plein droit ; --dest-host pour Enterprise / self-hosted.
 
-  $PROG approve <owner/nom-interne> --target <name> --as <repo-dest> [--base main]
+  $PROG approve <owner/nom-interne> --target <name> --as <repo-dest> [--base main] [--public]
   $PROG approve <owner/nom-interne> [--base main]
-      PHASE 1 — le gate manuel dur de la publication. Avec --target/--as : LIE le
-      projet a une cible du pool et POUSSE le peuplement initial (refuse d'ecraser une
-      base deja remplie). Sans : PUSH DIRECT de l'etat courant sur la base deja liee
-      (garde deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
+      PHASE 1 — le gate manuel dur de la publication. Avec --target/--as : CREE-OU-LIE le
+      projet a une cible du pool et POUSSE le peuplement initial. Tier 1 (gh/glab
+      authentifie) : cree le repo s'il n'existe pas (--public sinon prive). Tier 2 (repo
+      pre-cree dans l'UI) : le lie tel quel (refuse d'ecraser une base deja remplie).
+      Sans --target : PUSH DIRECT de l'etat courant sur la base deja liee (garde
+      deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
       L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
-      externe passe par gh/glab (aucun token manipule ici). La phase 2 (PR/MR reguliere)
-      est le tool « github_publish » cote pod, pas ce verbe.
+      externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
+      phase 2 (PR/MR reguliere) est le tool « github_publish » cote pod, pas ce verbe.
 
   $PROG help
       Cette aide.
@@ -548,11 +550,21 @@ PUBLISH_DIR="$HOME/.lcars/publish"
 # Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
-# The official CLI of a host — BOTH the git credential helper (for push/fetch) and, in approve's
-# nominal path, the only auth surface. gh<->glab are 1:1. We NEVER read or pass a token: the operator
-# authenticates with `gh auth login` / `glab auth login`, git push uses the wired helper.
+# The official CLI of a host — the Tier-1 credential helper AND repo-creator. OPTIONAL: absent, approve
+# falls to Tier 2 (link a pre-created repo, push via the operator's own wired helper). gh<->glab are
+# 1:1. We NEVER read or pass a token: auth is `gh/glab auth login` or the operator's helper, never ours.
 _dest_cli() { case "$1" in github) echo gh ;; gitlab) echo glab ;; *) die "host inconnu: $1 (github|gitlab)" ;; esac; }
 _json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
+
+# Tier-1 repo bootstrap via the CLI's own API — the create right comes WITH `gh/glab auth login`, no
+# expensive scope to grant by hand. _dest_repo_exists probes; _dest_repo_create makes it under the login.
+_dest_repo_exists() { case "$1" in gh) gh repo view "$2" ;; glab) glab repo view "$2" ;; esac >/dev/null 2>&1; }
+_dest_repo_create() {  # cli repo visibility(public|private)
+  case "$1" in
+    gh)   gh   repo create "$2" "--$3" ;;
+    glab) glab repo create "$2" "--$3" ;;
+  esac
+}
 
 cmd_target() {
   case "${1:-}" in
@@ -605,17 +617,19 @@ cmd_target_list() {
 }
 
 cmd_approve() {
-  local repo="" target="" as="" base="main"
+  local repo="" target="" as="" base="main" visibility="private"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --target) target="$2"; shift 2 ;;
       --as) as="$2"; shift 2 ;;
       --base) base="$2"; shift 2 ;;
+      --public) visibility="public"; shift ;;
+      --private) visibility="private"; shift ;;
       -*) die "approve: option inconnue $1" ;;
       *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "approve: argument en trop « $1 »"; fi ;;
     esac
   done
-  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--target <name> --as <repo-dest>] [--base main]"
+  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--target <name> --as <repo-dest>] [--base main] [--public]"
   [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
   local slug="${repo##*/}"
   local binding="$PUBLISH_DIR/$slug.json"
@@ -639,11 +653,13 @@ cmd_approve() {
     base="$(_json_field "$binding" base)"
   fi
 
-  # Auth is the official CLI's (gh/glab), wired as the git credential helper — never a token we hold.
-  # Refuse LOUD now if it is not logged in, rather than hang on a push prompt (GIT_TERMINAL_PROMPT=0).
+  # The CLI (gh/glab) is OPTIONAL — it is only NEEDED to CREATE a repo that does not exist yet (Tier 1).
+  # Linking an existing repo + pushing only need a wired git credential helper (Tier 2: the operator's
+  # own creds — the homelab-GitLab case). We detect it here; we never hold a token. GIT_TERMINAL_PROMPT=0
+  # so a missing helper fails LOUD at push instead of hanging on a prompt (a headless BEAM can't answer).
   local cli; cli="$(_dest_cli "$host")"
-  command -v "$cli" >/dev/null 2>&1 || die "approve: $cli absent — requis pour publier vers $host"
-  "$cli" auth status >/dev/null 2>&1 || die "approve: $cli non authentifie — fais '$cli auth login' d'abord"
+  local have_cli=0
+  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then have_cli=1; fi
   export GIT_TERMINAL_PROMPT=0
 
   # Internal forge config — same source as cmd_project_migrate: ~/.lcars/fleet_v2.env, nowhere else.
@@ -668,9 +684,26 @@ cmd_approve() {
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"
 
-  # git push/fetch/ls-remote to the dest carry no token — the wired CLI helper supplies the credential.
+  # git push/fetch/ls-remote to the dest carry no token — the wired helper supplies the credential.
   if [[ "$link_mode" == 1 ]]; then
-    # LINK: never clobber a base the human populated by hand.
+    # CREATE-OR-LINK. Does the destination repo exist at all? Probe via the CLI when we have it
+    # (accurate), else via a bare ls-remote (Tier 2: the operator pre-created it, so it answers).
+    local repo_exists=0
+    if [[ "$have_cli" == 1 ]]; then
+      _dest_repo_exists "$cli" "$dest_repo" && repo_exists=1
+    else
+      git ls-remote "$dest_url" >/dev/null 2>&1 && repo_exists=1
+    fi
+    if [[ "$repo_exists" == 0 ]]; then
+      # Tier 1: auto-create under the login (free — no create-scope to grant by hand). Without the CLI
+      # we cannot create: tell the operator his two ways forward rather than push into the void.
+      [[ "$have_cli" == 1 ]] || die "approve: $dest_host/$dest_repo n'existe pas et $cli n'est pas authentifie.
+  Tier 1 : '$cli auth login' pour l'auto-creation.  Tier 2 : cree le repo vide dans l'UI web puis relance."
+      _dest_repo_create "$cli" "$dest_repo" "$visibility" \
+        || die "approve: creation de $dest_host/$dest_repo echouee ($cli repo create)"
+      echo "approve: $dest_host/$dest_repo cree ($visibility) sous ton login $cli."
+    fi
+    # LINK: never clobber a base the human populated by hand (a repo pre-created WITH content, Tier 2).
     if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
       die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
     fi
