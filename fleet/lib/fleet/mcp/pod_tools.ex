@@ -497,13 +497,13 @@ defmodule Fleet.MCP.PodTools do
       name("Publish to External Forge")
 
       description(
-        "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab; the " <>
-          "name says github but GitLab is first-class) as a rolling PR/MR. ASYNC: returns " <>
+        "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab, both " <>
+          "first-class) as a rolling PR/MR. ASYNC: returns " <>
           "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
           "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
           "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
           "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>
-          "`lcars approve <repo> --target <name> --as <dest>` — an unlinked repo returns queued " <>
+          "`lcars approve <repo> --forge <name> --as <dest>` — an unlinked repo returns queued " <>
           "and then fails on the bus (no destination). Force-updates ONE rolling branch " <>
           "(`lcars/publish`) and its single open PR/MR; the human merges it on the forge's web UI. " <>
           "`repo` = the internal `owner/name`."

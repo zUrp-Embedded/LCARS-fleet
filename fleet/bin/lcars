@@ -110,20 +110,20 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
 
-  $PROG target add <name> --host github|gitlab --owner <owner> [--dest-host H]
-  $PROG target list
-      Le POOL de cibles de publication de CET humain (~/.lcars/targets). Une cible =
+  $PROG forge add <name> --host github|gitlab --owner <owner> [--dest-host H]
+  $PROG forge list
+      Le POOL de forges de publication de CET humain (~/.lcars/forges). Une forge =
       forge + compte + repo. L'AUTH n'est pas stockee ici : c'est le CLI officiel de la
       forge (« gh auth login » / « glab auth login »), deja credential helper git.
-      GitLab est une cible de plein droit ; --dest-host pour Enterprise / self-hosted.
+      GitLab est une forge de plein droit ; --dest-host pour Enterprise / self-hosted.
 
-  $PROG approve <owner/nom-interne> --target <name> --as <repo-dest> [--base main] [--public]
+  $PROG approve <owner/nom-interne> --forge <name> --as <repo-dest> [--base main] [--public]
   $PROG approve <owner/nom-interne> [--base main]
-      PHASE 1 — le gate manuel dur de la publication. Avec --target/--as : CREE-OU-LIE le
-      projet a une cible du pool et POUSSE le peuplement initial. Tier 1 (gh/glab
+      PHASE 1 — le gate manuel dur de la publication. Avec --forge/--as : CREE-OU-LIE le
+      projet a une forge du pool et POUSSE le peuplement initial. Tier 1 (gh/glab
       authentifie) : cree le repo s'il n'existe pas (--public sinon prive). Tier 2 (repo
       pre-cree dans l'UI) : le lie tel quel (refuse d'ecraser une base deja remplie).
-      Sans --target : PUSH DIRECT de l'etat courant sur la base deja liee (garde
+      Sans --forge : PUSH DIRECT de l'etat courant sur la base deja liee (garde
       deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
       L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
       externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
@@ -444,7 +444,7 @@ cmd_catalogue_disable() {
   un defaut ne se retire pas, il se REMPLACE : « $PROG catalogue enable <autre> » ecrit la
   declaration (et y garde « $name » en tete), puis « $PROG catalogue disable $name »."
   fi
-  # Le temporaire vit DANS le repertoire cible : `mv` y est un rename atomique garanti par le
+  # Le temporaire vit DANS le repertoire forge : `mv` y est un rename atomique garanti par le
   # noyau, alors que depuis /tmp (souvent un autre systeme de fichiers) c'est une copie suivie
   # d'un delete — une interruption au milieu laisse la declaration tronquee.
   local tmp; tmp="$(mktemp "$(dirname "$CAT_ACTIVE")/.catalogues.active.XXXXXX")"
@@ -545,7 +545,7 @@ cmd_catalogue_install() {
 # sortie.
 cmd_project_migrate() {
   local repo="${1:?project migrate: depot requis (owner/nom)}"
-  local cat="${2:?project migrate: catalogue cible requis}"
+  local cat="${2:?project migrate: catalogue forge requis}"
   [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
   local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
   [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
@@ -591,12 +591,12 @@ cmd_catalogue() {
   esac
 }
 
-# --- publish targets (pool) + approve (phase-1 gate) -----------------------
+# --- publish forges (pool) + approve (phase-1 gate) -----------------------
 # PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /home/private —
 # that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
 # its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
 # (mode 600), read host-side by this CLI (it runs as the human), and NEVER enter a pod.
-TARGETS_DIR="$HOME/.lcars/targets"
+FORGES_DIR="$HOME/.lcars/forges"
 PUBLISH_DIR="$HOME/.lcars/publish"
 
 # Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
@@ -618,61 +618,61 @@ _dest_repo_create() {  # cli repo visibility(public|private)
   esac
 }
 
-cmd_target() {
+cmd_forge() {
   case "${1:-}" in
-    add)     shift; cmd_target_add "$@" ;;
-    list|ls) shift; cmd_target_list "$@" ;;
-    "")      die "target: sous-commande requise (add|list)" ;;
-    *)       die "target: sous-commande inconnue « $1 » (add|list)" ;;
+    add)     shift; cmd_forge_add "$@" ;;
+    list|ls) shift; cmd_forge_list "$@" ;;
+    "")      die "forge: sous-commande requise (add|list)" ;;
+    *)       die "forge: sous-commande inconnue « $1 » (add|list)" ;;
   esac
 }
 
-cmd_target_add() {
+cmd_forge_add() {
   local name="" host="" owner="" dest_host=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host) host="$2"; shift 2 ;;
       --owner) owner="$2"; shift 2 ;;
       --dest-host) dest_host="$2"; shift 2 ;;
-      -*) die "target add: option inconnue $1" ;;
-      *) if [[ -z "$name" ]]; then name="$1"; shift; else die "target add: argument en trop « $1 »"; fi ;;
+      -*) die "forge add: option inconnue $1" ;;
+      *) if [[ -z "$name" ]]; then name="$1"; shift; else die "forge add: argument en trop « $1 »"; fi ;;
     esac
   done
   [[ -n "$name" && -n "$host" && -n "$owner" ]] || \
-    die "target add: usage — target add <name> --host github|gitlab --owner <owner> [--dest-host H]"
+    die "forge add: usage — forge add <name> --host github|gitlab --owner <owner> [--dest-host H]"
   case "$host" in
     github) [[ -n "$dest_host" ]] || dest_host="github.com" ;;
     gitlab) [[ -n "$dest_host" ]] || dest_host="gitlab.com" ;;
-    *) die "target add: --host inconnu « $host » (github|gitlab)" ;;
+    *) die "forge add: --host inconnu « $host » (github|gitlab)" ;;
   esac
   # No token here: auth is `$(_dest_cli "$host") auth login`, the CLI's own credential store.
   # `name` becomes a path component — refuse traversal (self-harm, but the slug guard has it too).
-  [[ "$name" != */* && "$name" != .* ]] || die "target add: nom invalide « $name » (pas de '/' ni de '.' en tete)"
-  mkdir -p "$TARGETS_DIR"; chmod 700 "$TARGETS_DIR"
-  local out="$TARGETS_DIR/$name.json"
+  [[ "$name" != */* && "$name" != .* ]] || die "forge add: nom invalide « $name » (pas de '/' ni de '.' en tete)"
+  mkdir -p "$FORGES_DIR"; chmod 700 "$FORGES_DIR"
+  local out="$FORGES_DIR/$name.json"
   python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4]},open(sys.argv[1],"w"),indent=2)' \
     "$out" "$host" "$dest_host" "$owner"
   chmod 600 "$out"
-  echo "target « $name » enregistree ($host $owner @ $dest_host). Auth: $(_dest_cli "$host") auth login."
+  echo "forge « $name » enregistree ($host $owner @ $dest_host). Auth: $(_dest_cli "$host") auth login."
 }
 
-cmd_target_list() {
+cmd_forge_list() {
   local f found=0
-  if [[ -d "$TARGETS_DIR" ]]; then
-    for f in "$TARGETS_DIR"/*.json; do
+  if [[ -d "$FORGES_DIR" ]]; then
+    for f in "$FORGES_DIR"/*.json; do
       [[ -e "$f" ]] || continue
       found=1
       python3 -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print("  %-16s %-7s %s/%s" % (os.path.basename(sys.argv[1])[:-5],d.get("host"),d.get("dest_host"),d.get("owner")))' "$f"
     done
   fi
-  [[ "$found" == 1 ]] || echo "aucune target (pool vide) — lcars target add <name> ..."
+  [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
 }
 
 cmd_approve() {
-  local repo="" target="" as="" base="main" visibility="private"
+  local repo="" forge="" as="" base="main" visibility="private"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --target) target="$2"; shift 2 ;;
+      --forge) forge="$2"; shift 2 ;;
       --as) as="$2"; shift 2 ;;
       --base) base="$2"; shift 2 ;;
       --public) visibility="public"; shift ;;
@@ -681,24 +681,24 @@ cmd_approve() {
       *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "approve: argument en trop « $1 »"; fi ;;
     esac
   done
-  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--target <name> --as <repo-dest>] [--base main] [--public]"
+  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--forge <name> --as <repo-dest>] [--base main] [--public]"
   [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
   local slug="${repo##*/}"
   local binding="$PUBLISH_DIR/$slug.json"
 
   # Resolve WHAT/WHERE first (mode + destination), so mode errors fire without any forge config.
   local host dest_host dest_repo link_mode
-  if [[ -n "$target" ]]; then
+  if [[ -n "$forge" ]]; then
     link_mode=1
-    local tfile="$TARGETS_DIR/$target.json"
-    [[ -r "$tfile" ]] || die "approve: target « $target » absente du pool (lcars target list)"
-    [[ -n "$as" ]] || die "approve: --target exige --as <nom-du-repo-destination>"
+    local tfile="$FORGES_DIR/$forge.json"
+    [[ -r "$tfile" ]] || die "approve: forge « $forge » absente du pool (lcars forge list)"
+    [[ -n "$as" ]] || die "approve: --forge exige --as <nom-du-repo-destination>"
     host="$(_json_field "$tfile" host)"
     dest_host="$(_json_field "$tfile" dest_host)"
     dest_repo="$(_json_field "$tfile" owner)/$as"
   else
     link_mode=0
-    [[ -r "$binding" ]] || die "approve: « $slug » pas encore lie — « approve $repo --target <name> --as <repo> » d'abord"
+    [[ -r "$binding" ]] || die "approve: « $slug » pas encore lie — « approve $repo --forge <name> --as <repo> » d'abord"
     host="$(_json_field "$binding" host)"
     dest_host="$(_json_field "$binding" dest_host)"
     dest_repo="$(_json_field "$binding" dest_repo)"
@@ -790,7 +790,7 @@ case "${1:-help}" in
   project)
     shift; cmd_project "$@" ;;
   catalogue) shift; cmd_catalogue "$@" ;;
-  target) shift; cmd_target "$@" ;;
+  forge) shift; cmd_forge "$@" ;;
   approve) shift; cmd_approve "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
