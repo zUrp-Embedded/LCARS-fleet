@@ -267,20 +267,26 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
-        encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id)})
+        encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id, tools)})
 
       # F-C138 — the pod socket serves `tools/list` (a bridge-side hard-coded catalogue would
       # DRIFT from the deftools). Single source: the schemas come from `PodTools.get_tools/0` (the
       # `deftool` authority), filtered to base (universal) plus whatever names were threaded at
       # spawn.
       #
-      # DISCOVERY, NOT AUTHORIZATION: `tools/call` (above) does not re-check this list, so a pod
-      # that knows an off-list name calls it anyway. The real barrier is AT the tool — the
-      # delegation tools carry a server-side role gate (`require_architect`/`require_onboarder`,
-      # `Delegation`) and `get_work_item`/`submit_result` derive their subject from the channel's
-      # pod_id, never from a wire argument. INVARIANT, held by `mcp.tools_gated` in
-      # `lcars.contracts.check`: every tool is role-gated or pod-scoped; one relying on this list
-      # alone would be callable off-list. The bridge forwards blindly.
+      # DISCOVERY *AND* AUTHORIZATION SINCE 6-099, and the same list serves both: `call_tool/3`
+      # refuses anything outside `base_tool_names() ++ threaded` before dispatch. This paragraph
+      # used to read "DISCOVERY, NOT AUTHORIZATION: `tools/call` does not re-check this list, so a
+      # pod that knows an off-list name calls it anyway" — exact, and it described the hole rather
+      # than closing it.
+      #
+      # The per-tool barrier stays FIRST and untouched: the delegation tools carry a server-side
+      # role gate (`require_architect`/`require_onboarder`, `Delegation`) and
+      # `get_work_item`/`submit_result` derive their subject from the channel's pod_id, never from a
+      # wire argument. INVARIANT, held by `mcp.tools_gated` in `lcars.contracts.check`: every tool is
+      # role-gated or pod-scoped. The list is now a SECOND barrier, not a replacement — it buys what
+      # the role gate cannot express, namely two variants of one role with different surfaces.
+      # The bridge still forwards blindly; the refusal happens here.
       #
       # ⚠ AND THE THREADED HALF IS EMPTY IN EVERY PROFILE SHIPPED. The names come from
       # `CapProfile.mcp_fleet_tools/1`, i.e. the `scope.allowedTools` entries prefixed
@@ -321,10 +327,52 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Slow-call trace uses channel-owned identity, never a wire argument.
   @slow_tool_warn_ms 5_000
 
-  defp call_tool(params, pod_id) do
+  # THE LIST NOW AUTHORIZES, IT NO LONGER ONLY DISPLAYS (6-099). `tools/list` filtered the surface
+  # while `tools/call` dispatched anything: a pod that knew an off-list name called it, and the only
+  # real barrier was the per-tool role gate. Two consequences, and the second is the one that had no
+  # workaround: an omission in a profile hid a tool from discovery without preventing its use, and
+  # two variants of the SAME role could not be given different MCP surfaces at all.
+  #
+  # ⚠ CE N'EST PAS UN RENVERSEMENT DE LA SEMANTIQUE GRAVEE de `scope.allowedTools`. Celle-ci
+  # ("allowedTools is an INTENT, disallowedTools is a WALL") est MESUREE sur le CLI vendor, qui est
+  # l'autre consommateur du meme champ et dont on ne controle pas le comportement. Ici on parle du
+  # sous-ensemble `mcp__fleet__` servi par CETTE socket, qui est notre code : un champ, deux
+  # consommateurs, et c'est dit aux deux bouts plutot que laisse a deviner.
+  #
+  # MESURE AVANT D'ARMER (le mur se prouve sur ce qu'il doit LAISSER PASSER) : les 8 roles worker
+  # ne nomment dans leur SP que les deux outils de base ; `architect` et `starfleet` declarent
+  # chacun un SUR-ENSEMBLE STRICT de ce que leur SP nomme. Aucun role ne perd un outil qu'il
+  # utilise. Les gates de role (`require_architect`/`require_onboarder`) restent DEVANT, intacts :
+  # ce contrôle s'ajoute, il ne remplace rien.
+  defp call_tool(params, pod_id, threaded) do
     tool = params["name"]
     tool_args = params["arguments"] || %{}
 
+    if authorized?(tool, threaded) do
+      dispatch_tool(tool, tool_args, pod_id)
+    else
+      Logger.warning(
+        "PodSocketAcceptor: pod=#{pod_id} tools/call #{inspect(tool)} REFUSED — outside this " <>
+          "pod's declared MCP surface (base + scope.allowedTools)"
+      )
+
+      # Compte comme activite : un pod qui se fait refuser a AGI. Ne pas le compter ferait passer
+      # pour mort un pod qui frappe a une porte fermee.
+      mark_activity(pod_id)
+
+      %{
+        "content" => [%{"type" => "text", "text" => error_text({:tool_not_in_profile, tool})}],
+        "isError" => true
+      }
+    end
+  end
+
+  defp authorized?(tool, threaded) when is_binary(tool),
+    do: tool in PodTools.base_tool_names() or tool in threaded
+
+  defp authorized?(_tool, _threaded), do: false
+
+  defp dispatch_tool(tool, tool_args, pod_id) do
     {us, resp} =
       :timer.tc(fn -> safe_handle_tool_call(tool, tool_args, pod_id) end)
 

@@ -162,6 +162,110 @@ defmodule Fleet.MCP.PodSocketTest do
     assert Enum.map(tools, & &1["name"]) |> Enum.sort() == ["get_work_item", "submit_result"]
   end
 
+  # JG-099 — LA PRESENTATION ET L'EXECUTION NE S'APPUYAIENT PAS SUR LA MEME AUTORITE. `tools/list`
+  # filtrait la surface, `tools/call` dispatchait n'importe quoi : un pod qui connaissait un nom
+  # hors liste l'appelait quand meme, et la seule barriere reelle etait le gate de role, PAR outil.
+  #
+  # Deux consequences, et la seconde n'avait aucun contournement : une omission dans un profil
+  # masquait un outil a la decouverte sans en empecher l'usage, et deux variantes du MEME role ne
+  # pouvaient pas avoir des surfaces MCP differentes — le gate de role ne sait pas les distinguer.
+  #
+  # MESURE FAITE AVANT D'ARMER, parce qu'un mur se prouve sur ce qu'il doit LAISSER PASSER : les 8
+  # roles worker ne nomment dans leur SP que les deux outils de base ; `architect` et `starfleet`
+  # declarent chacun un SUR-ENSEMBLE STRICT de ce que leur SP nomme. Aucun role ne perd un outil
+  # qu'il utilise.
+  describe "JG-099 — la liste AUTORISE, elle n'affiche plus seulement" do
+    test "un outil hors profil est refuse AVANT le handler" do
+      pod = uniq("worker")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 1, "issue_create", %{"repo" => "fleet/x", "title" => "t"})
+
+      assert text =~ "tool_not_in_profile",
+             "le refus doit nommer la SURFACE, pas se confondre avec une erreur du handler"
+    end
+
+    test "TEMOIN — DECLARE, le meme outil franchit la surface et atteint son gate de role" do
+      # C'est la moitie qui prouve que le mur discrimine. Sans elle, un refus systematique passerait
+      # le test precedent. Et c'est aussi la verification que la fiche demande separement : le gate
+      # `require_architect` reste DEVANT et refuse toujours — la surface s'ajoute, elle ne remplace
+      # rien.
+      pod = uniq("arch")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 1, "issue_create", %{"repo" => "fleet/x", "title" => "t"})
+
+      refute text =~ "tool_not_in_profile",
+             "declare, l'outil doit passer la surface et se faire juger PLUS LOIN"
+    end
+
+    test "TEMOIN — les deux outils universels marchent sans rien declarer" do
+      # La base ne se declare pas : un profil vide doit rester un pod fonctionnel, sinon le mur
+      # ferme la fleet entiere.
+      pod = uniq("base")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert {:ok, %{"done" => true}} = content(call(path, 1, "get_work_item", %{}))
+      assert %{"result" => %{"isError" => true}} = call(path, 2, "submit_result", %{})
+    end
+
+    test "un outil DECLARE ailleurs mais pas ici reste refuse — la surface est par pod" do
+      # Le cas que le gate de role ne sait pas exprimer : `project_install` existe, un autre profil
+      # le porte, celui-ci non.
+      pod = uniq("arch2")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 1, "project_install", %{})
+
+      assert text =~ "tool_not_in_profile"
+    end
+
+    test "un nom inconnu est refuse par la SURFACE, pas par le handler" do
+      # Avant, un nom inconnu descendait jusqu'au dispatch pour y mourir. Le refuser ici n'est pas
+      # cosmetique : c'est la difference entre « ce pod n'a pas le droit » et « cet outil n'existe
+      # pas », et seule la premiere est vraie du point de vue du pod.
+      pod = uniq("unk")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 1, "outil_qui_n_existe_pas", %{})
+
+      assert text =~ "tool_not_in_profile"
+    end
+
+    test "tools/list et tools/call disent maintenant LA MEME chose" do
+      # L'invariant que la fiche reclamait : ce qui est annonce est ce qui est appelable, et
+      # reciproquement. Les deux moities sont mesurees sur le MEME pod.
+      pod = uniq("iso")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"tools" => tools}} = rpc(path, 20, "tools/list")
+      annonces = tools |> Enum.map(& &1["name"]) |> MapSet.new()
+
+      for tool <- annonces do
+        %{"result" => %{"content" => [%{"text" => text}]}} = call(path, 21, tool, %{})
+
+        refute text =~ "tool_not_in_profile",
+               "#{tool} est annonce par tools/list et refuse par tools/call"
+      end
+
+      for tool <- ["project_install", "deposit_list"] do
+        refute tool in annonces
+        %{"result" => %{"content" => [%{"text" => text}]}} = call(path, 22, tool, %{})
+        assert text =~ "tool_not_in_profile", "#{tool} n'est pas annonce et doit etre refuse"
+      end
+    end
+  end
+
   test "ensure_pod_socket refuses a non-path-safe pod_id (mcp FS frontier), zero acceptor" do
     for bad <- ["../escape", "a/b", "..", ".", "z\0y", String.duplicate("q", 200)] do
       assert {:error, {:unsafe_pod_id, _}} = PodSocketSupervisor.ensure_pod_socket(bad),
