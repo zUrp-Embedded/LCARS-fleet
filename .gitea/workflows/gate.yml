@@ -65,5 +65,16 @@ jobs:
       # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien (mesure du
       # 2026-08-04). C'est exactement la ligne que joue `etc/install.sh` avant de poser la release :
       # le gate de la CI et le gate du build ne doivent pas etre deux gates.
+      #
+      # SANS BORNE, LE JUGE SE TAIT AU LIEU D'ECHOUER. Deux runs de banc ont cale A L'INTERIEUR de ce
+      # pas, a deux endroits differents — l'un apres la suite, l'autre pendant la compilation des
+      # deps : ce n'est pas un chemin de code, c'est la machine. Le second a garde l'unique runner
+      # plus de deux heures, file bloquee, sans verdict et sans rouge. Un gate sans fin ne rend pas
+      # un verdict tardif, il n'en rend aucun — et l'absence de rouge se lit comme du vert.
+      # La borne est en `timeout(1)`, PAS en `timeout-minutes:` du job : le shell est execute par le
+      # runner quoi qu'il arrive, tandis que la cle YAML dependrait de ce que cette version
+      # d'act_runner en fait — et une garde qu'on ne peut pas prouver ne garde rien. Exit 124 = mur.
+      # 20 min est mesure sur ce qu'elle doit LAISSER PASSER : 28 verts consecutifs, moyenne 5.9 min,
+      # pire cas 10.3 min. Le double du pire vert, jamais le tour de la mediane.
       - name: Gate (compile strict + suite + contracts.check)
-        run: MIX_ENV=test mix gate
+        run: MIX_ENV=test timeout --signal=TERM --kill-after=60s 20m mix gate
