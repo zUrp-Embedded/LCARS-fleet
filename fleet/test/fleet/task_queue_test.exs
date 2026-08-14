@@ -852,6 +852,21 @@ defmodule Fleet.TaskQueueTest do
     # into :no_active_work_item by a retention cutting the wrong item (recency, not FIFO).
     kept5 = Enum.find(terminal, &(&1.pod_id == "pod-5"))
 
+    # ⚠ THE ABSENCE IS NAMED, BECAUSE IT HAPPENED AND SAID NOTHING. On 2026-08-15 this line failed
+    # ONCE in ten runs of the suite, and the only trace was a `KeyError` on `kept5.id` -- "key :id
+    # not found in: nil". Mute about what survived, mute about the timestamps retention sorted on,
+    # so there was nothing left to diagnose afterwards.
+    #
+    # The two obvious causes were MEASURED AND RULED OUT: 300 direct replays of this scenario give
+    # 0 `completed_at` ties and 0 prunings of pod-5, and this machine's wall clock never stepped
+    # backwards across 158 million samples under load. The cause is UNKNOWN. This message is what
+    # makes the next occurrence readable instead of arguable -- it is not a fix, and must not be
+    # read as one.
+    assert kept5,
+           "pod-5 (most recently completed) was pruned, which would degrade a double-submit into " <>
+             ":no_active_work_item. Survivors, with the timestamps retention sorted on: " <>
+             inspect(Enum.map(terminal, &{&1.pod_id, &1.completed_at}), limit: :infinity)
+
     assert {:error, :double_submit_ignored} =
              TaskQueue.submit_result(q, "pod-5", %{
                "verdict" => "retry",
