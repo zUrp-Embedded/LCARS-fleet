@@ -171,6 +171,46 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
   stat -c %u "$h" 2>/dev/null || true
 }
 
+# ─── L'UID VIENT DE LA FORGE, PARCE QU'ELLE EST L'AUTORITE SUR LES PERSONNES ────────────────────
+#
+# `uid_of_home` ci-dessus repare un desordre APRES COUP : il relit l'uid sur le home qui a survecu.
+# C'est une bonne parade et elle reste — mais elle ne peut rien sur une boite NEUVE, ou aucun home
+# n'existe encore. La, `useradd` distribuait les uid libres dans l'ordre ou la team les rendait,
+# c'est-a-dire dans un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre.
+#
+# L'identifiant de la forge n'a pas ce defaut : il est attribue par un auto-increment SQL, donc
+# LINEAIRE, DENSE, et JAMAIS reutilise apres suppression. Deux boites reconstruites donnent le meme
+# siege a la meme personne, et l'uid d'un humain supprime ne retombe jamais sur quelqu'un d'autre —
+# le cas vicieux pour la propriete des fichiers.
+#
+# ⚠ L'ESPACE D'ID EST PARTAGE avec les comptes de role et les ORGANISATIONS (meme table Gitea).
+# Mesure du 2026-08-14 : sur une forge de banc avec UN humain, 14 identifiants sont deja consommes,
+# et l'org `fleet` porte l'id 8. Les uid sont donc CLAIRSEMES, pas contigus — ce qui est sans
+# consequence depuis qu'aucun port n'est derive d'un uid. Ca ne l'etait pas la veille.
+#
+# L'OFFSET N'EST PAS COSMETIQUE : `UID_MIN` vaut 1000 sur cette image, et un uid en dessous designe
+# un compte systeme. L'id 3 de la forge deviendrait `sync` ou `lp`.
+UID_OFFSET="${LCARS_UID_OFFSET:-1000}"
+
+# L'uid a demander pour <login>, et la REGLE DE PRIORITE tient en une phrase : un home existant
+# gagne toujours.
+#
+# ⚠ POURQUOI LE HOME GAGNE, ET CE N'EST PAS UN DETAIL : c'est un FAIT SUR LE DISQUE. Si la forge
+# dit 1003 et que le home appartient a 1001, prendre 1003 rend la personne incapable d'ecrire chez
+# elle — exactement le defaut du 2026-08-12, ou zoe et guest1 se sont retrouvees proprietaires du
+# home l'une de l'autre. La forge fait autorite sur QUI EST LA ; le disque fait autorite sur ce qui
+# est deja ecrit.
+uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
+  local from_home
+  from_home="$(uid_of_home "$1")"
+  if [[ -n "$from_home" ]]; then
+    printf '%s\n' "$from_home"
+    return 0
+  fi
+  [[ "$2" =~ ^[0-9]+$ ]] || return 0
+  printf '%s\n' "$(( $2 + UID_OFFSET ))"
+}
+
 # Qui porte deja cet uid, s'il est pris par quelqu'un d'AUTRE que <login>.
 uid_taken_by() { # uid_taken_by <uid> <login>
   awk -F: -v u="$1" -v me="$2" '$3==u && $1!=me {print $1; exit}' "${PASSWD_FILE:-/etc/passwd}"
@@ -346,10 +386,15 @@ converge_once() {
     err "team $ORG/$TEAM introuvable (ou forge injoignable) — rien converge ce tour"
     return 0
   fi
-  members="$(api "/teams/$tid/members" | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null || true)"
+  # ⚠ ON GARDE L'`id` DE LA FORGE, ET IL ETAIT DEJA DANS LA CHARGE. Cette ligne n'extrayait que
+  # `.login` et jetait le reste — dont l'identifiant que Gitea attribue a chaque compte. C'est lui
+  # qui donne un UID DURABLE (cf. `uid_wanted` plus bas) : linéaire, dense, JAMAIS reutilise apres
+  # suppression. On ne fait donc pas un appel de plus, on cesse d'en jeter la moitie.
+  members="$(api "/teams/$tid/members" \
+    | jq -r 'if type=="array" then .[] | "\(.id)\t\(.login)" else empty end' 2>/dev/null || true)"
   [[ -n "$members" ]] || return 0
 
-  while IFS= read -r login; do
+  while IFS=$'\t' read -r forge_id login; do
     [[ -n "$login" ]] || continue
     if id "$login" >/dev/null 2>&1; then
       # « EXISTE » NE DIT PAS « A SES ACCES ». Quelqu'un revoque puis re-ajoute a la team arrive
@@ -373,10 +418,16 @@ converge_once() {
         mark_refused "$login" "ce login ne peut pas devenir un compte Unix : il faut 1 a 32 caracteres, commencant ET finissant par une lettre ou un chiffre, sans '..'"; }
       continue
     fi
-    # Un home deja la impose SON uid : sinon la personne ne peut pas ecrire chez elle, et pire,
-    # elle ecrit chez quelqu'un d'autre.
-    local want_uid holder uid_args=()
-    want_uid="$(uid_of_home "$login")"
+    # L'uid vient de la FORGE (id + offset) sur une boite neuve, et du HOME des qu'il en existe un —
+    # un home deja la impose SON uid, sinon la personne ne peut pas ecrire chez elle, et pire, elle
+    # ecrit chez quelqu'un d'autre.
+    local want_uid holder uid_args=() uid_src=""
+    # ⚠ LA SOURCE SE CAPTURE ICI, PAS APRES : `useradd -m` cree le home, donc tester son existence
+    # plus bas repondrait « il a un home » pour TOUT LE MONDE. Premiere version de cette trace, et
+    # elle aurait dit « repris de son home » sur un uid pose par la forge — un mensonge qui n'aurait
+    # coute que le jour ou un uid surprend quelqu'un.
+    [[ -d "$HOME_ROOT/$login" ]] && uid_src="repris de son home" || uid_src="pose par la forge"
+    want_uid="$(uid_wanted "$login" "$forge_id")"
     if [[ -n "$want_uid" ]]; then
       holder="$(uid_taken_by "$want_uid" "$login")"
       if [[ -n "$holder" ]]; then
@@ -394,7 +445,9 @@ converge_once() {
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
       getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
-      say "user $login cree (membre de $ORG/$TEAM${want_uid:+, uid $want_uid repris de son home})"
+      # La TRACE DIT D'OU VIENT L'UID : « repris de son home » et « pose par la forge » sont deux
+      # histoires differentes le jour ou un uid surprend quelqu'un.
+      say "user $login cree (membre de $ORG/$TEAM${want_uid:+, uid $want_uid $uid_src})"
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.

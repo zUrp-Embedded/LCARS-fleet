@@ -151,7 +151,12 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [ -n "$output" ]
 }
 
-@test "pas de home = pas de contrainte : l'OS choisit (premiere venue)" {
+# ⚠ TITRE CORRIGE LE 2026-08-14. Il disait « pas de home = pas de contrainte : l'OS choisit ». Son
+# ASSERTION est restee vraie — `uid_of_home` rend bien le vide sur un home absent — mais sa
+# CONCLUSION est devenue fausse : l'appelant ne laisse plus l'OS choisir, il demande a la forge.
+# Un test dont le titre decrit une consequence disparue se lit comme un contrat, et c'est le titre
+# qu'on lit dans une sortie de suite, pas le corps.
+@test "sans home, uid_of_home ne rend RIEN — il ne devine pas" {
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
@@ -160,6 +165,70 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
     echo \"[\$(uid_of_home jamaisvue)]\""
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
+}
+
+# ─── L'UID VIENT DE LA FORGE SUR UNE BOITE NEUVE ──────────────────────
+# `uid_of_home` repare APRES COUP : il relit l'uid sur un home qui a survecu. Sur une boite neuve il
+# n'y a aucun home, et `useradd` distribuait alors les uid libres dans l'ordre ou la team les rend —
+# un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre. L'identifiant de la forge, lui,
+# est un auto-increment SQL : lineaire, dense, JAMAIS reutilise apres suppression.
+
+@test "6-surface: sans home, l'uid vient de la FORGE (id + offset)" {
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT\"
+    source '$SUT'
+    uid_wanted nouvelle 3"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1003" ]
+}
+
+@test "6-surface: un home existant GAGNE sur la forge — le disque fait foi sur ce qui est ecrit" {
+  # LA PRIORITE QUI COMPTE. Si la forge dit 1003 et que le home appartient a un autre uid, prendre
+  # celui de la forge rend la personne incapable d'ecrire chez elle : c'est le defaut du 2026-08-12,
+  # remis a l'endroit. La forge fait autorite sur QUI EST LA ; le disque sur ce qui est deja ecrit.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
+    source '$SUT'
+    home_uid=\$(uid_of_home zoe)
+    got=\$(uid_wanted zoe 999)
+    [ \"\$got\" = \"\$home_uid\" ] || { echo \"forge a gagne: \$got != \$home_uid\"; exit 1; }
+    echo ok"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "6-surface: sans home ET sans id de forge, on ne pose RIEN — l'OS choisit, et c'est dit" {
+  # Le mode degrade existe : une forge qui ne rend pas d'`id` (charge tronquee, version future).
+  # On ne fabrique pas un uid a partir de rien — on laisse `useradd` faire, comme avant, plutot que
+  # d'inventer un numero qui aurait l'air autoritaire.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT\"
+    source '$SUT'
+    echo \"[\$(uid_wanted sansid '')][\$(uid_wanted sansid 'abc')]\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "[][]" ]
+}
+
+@test "6-surface: l'offset n'est pas cosmetique — un id de forge brut serait un compte SYSTEME" {
+  # UID_MIN vaut 1000 : l'id 3 de la forge, pose tel quel, tomberait sur `sync` ou `lp`. L'offset
+  # est ce qui fait d'un identifiant de forge un siege d'humain.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    mkdir -p \"\$LCARS_HOME_ROOT\"
+    source '$SUT'
+    got=\$(uid_wanted quiconque 3)
+    min=\$(uid_min)
+    [ \"\$got\" -ge \"\$min\" ] || { echo \"uid \$got sous UID_MIN \$min\"; exit 1; }
+    echo ok"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "l'uid revendique est-il deja pris par QUELQU'UN D'AUTRE ?" {
