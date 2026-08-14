@@ -84,19 +84,62 @@ else
 fi
 
 # --- Pass 1: Date bookkeeping (metadata update, not a fix) ---
+#
+# ⚠ CE PASSAGE EMBARQUAIT LE TRAVAIL QUE L'HUMAIN AVAIT DELIBEREMENT LAISSE HORS DE L'INDEX.
+# Il faisait `sed -i` sur le fichier de l'ARBRE DE TRAVAIL puis `git add "$file"` — et `git add`
+# ne restage pas la ligne de date, il remplace l'entree d'index par TOUT le contenu courant. Un
+# fichier partiellement stage qui portait aussi des modifications non stagees voyait donc ces
+# modifications partir dans le commit, en silence. Le hook alterait la selection explicite de
+# l'humain : c'est publier du travail incomplet en croyant tamponner une date.
+#
+# ON TRANSFORME LE BLOB DE L'INDEX, jamais l'arbre de travail :
+#   `git show :<file>` → sed → `git hash-object -w` → `git update-index --cacheinfo`.
+# Le commit emporte exactement ce qui etait stage, plus la date. L'arbre de travail n'est touche
+# QUE s'il etait deja identique a l'index (cas nominal) — sinon il garde le travail en cours, avec
+# son ancienne date, qui se mettra a jour au prochain commit complet. Une date d'arbre de travail
+# en retard est un ecart visible ; du travail non stage publie ne l'est pas.
+#
+# ⚠ PAS DE `$(git show …)` : la substitution de commande MANGE les sauts de ligne finaux, donc
+# reecrire un blob par ce chemin tronquerait chaque fichier d'une ligne vide. On passe par des
+# fichiers temporaires, et `git hash-object -w <fichier>` rend un sha dont la substitution est sans
+# danger (40 caracteres, pas de fin de ligne signifiante).
+restage_dated_blob() {
+    local file="$1" expr="$2" tmp_old tmp_new sha mode wt_clean=0
+
+    tmp_old="$(mktemp)" || return 0
+    tmp_new="$(mktemp)" || { rm -f "$tmp_old"; return 0; }
+
+    if ! git show ":$file" > "$tmp_old" 2>/dev/null; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    sed "$expr" "$tmp_old" > "$tmp_new"
+    if cmp -s "$tmp_old" "$tmp_new"; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    # AVANT toute mutation : l'arbre de travail est-il deja celui de l'index ? Apres l'update-index
+    # la reponse serait fatalement « non », et on croirait a du travail non stage qui n'existe pas.
+    git diff --quiet -- "$file" && wt_clean=1
+
+    mode="$(git ls-files --stage -- "$file" | awk '{print $1}')"
+    if [[ -n "$mode" ]] && sha="$(git hash-object -w "$tmp_new")"; then
+        git update-index --cacheinfo "$mode,$sha,$file"
+        [[ "$wt_clean" -eq 1 ]] && cat "$tmp_new" > "$file"
+    fi
+
+    rm -f "$tmp_old" "$tmp_new"
+}
+
 if [[ "$HOOK_DATE_FORMAT" == "stardate" ]]; then
     STARDATE=$(date '+%Y.%j')
     STARDATE_PATTERN="STARDATE: [0-9][0-9][0-9][0-9]\.[0-9][0-9][0-9]"
     while IFS= read -r file; do
         [[ -z "$file" || ! -f "$file" ]] && continue
         is_evidence_dir "$file" && continue
-        if grep -q "$STARDATE_PATTERN" "$file"; then
-            CURRENT=$(grep -oE "STARDATE: [0-9]{4}\.[0-9]{3}" "$file" | head -1 | cut -d' ' -f2 || true)
-            if [[ "$CURRENT" != "$STARDATE" ]]; then
-                sed -i "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/" "$file"
-                git add "$file"
-            fi
-        fi
+        restage_dated_blob "$file" "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/"
     done <<< "$STAGED"
 else
     TODAY=$(date '+%Y-%m-%d')
@@ -106,19 +149,14 @@ else
         ext="${file##*.}"
         case "$ext" in
             md)
-                if grep -q '^\*\*Dernière révision\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Dernière révision\*\*' "$file" | sed 's/.*: //' | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
-                    if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
-                        sed -i "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/" "$file"
-                        git add "$file"
-                    fi
-                elif grep -q '^\*\*Last revised\*\*' "$file"; then
-                    CURRENT=$(grep '^\*\*Last revised\*\*' "$file" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
-                    if [[ -n "$CURRENT" && "$CURRENT" != "$TODAY" ]]; then
-                        sed -i "s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/" "$file"
-                        git add "$file"
-                    fi
-                fi
+                # Les deux en-tetes sont exclusifs dans les faits ; les appliquer tous deux est
+                # sans effet sur un fichier qui n'en porte qu'un, et le `cmp` decide. Le test
+                # « quelle date porte-t-il » a disparu : il lisait l'ARBRE DE TRAVAIL, donc un
+                # fichier dont l'index portait une vieille date mais l'arbre la bonne n'etait
+                # jamais mis a jour. La comparaison des BLOBS repond a la meme question, sur le
+                # bon objet.
+                restage_dated_blob "$file" \
+                    "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/; s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/"
                 ;;
         esac
     done <<< "$STAGED"
