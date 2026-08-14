@@ -67,6 +67,56 @@ defmodule Fleet.Observation.DeckTest do
     assert html =~ "&quot;"
   end
 
+  # 6-057 — `/api/pods` SERVAIT `role: null` POUR UN ROLE SANS ICONE. `role_of/2` filtrait sur la
+  # liste des `.svg` presents : un pod `chief` — le seul role du catalogue sans asset, mesure le
+  # 2026-08-14 — devenait indiscernable d'un pod sans role. Le point de terminaison est du JSON
+  # consomme par `console-deck.py` (qui affiche « ? ») et `console-agents.py`, pas une vue.
+  #
+  # Le repli generique existait DEJA cote page (`favicon-minimal.svg`) : masquer le role etait le
+  # MOYEN d'y arriver. Les deux questions sont maintenant separees, et c'est la doctrine que ce
+  # fichier enonce deja deux fois — le commentaire de `project_slug` (« nil est une reponse reelle,
+  # pas un trou ») et F-C125 juste au-dessus.
+  describe "6-057 — pod_view/2 : le role est la donnee, l'icone est l'affichage" do
+    test "role sans asset → le ROLE est servi, seule l'ICONE tombe au generique" do
+      view = Fleet.Observation.Deck.pod_view(pod("chief"), ~w(architect reviewer))
+
+      assert view.role == "chief"
+      assert view.role_icon == nil
+    end
+
+    test "role avec asset → les deux" do
+      view = Fleet.Observation.Deck.pod_view(pod("architect"), ~w(architect reviewer))
+
+      assert view.role == "architect"
+      assert view.role_icon == "architect"
+    end
+
+    # Le second bras du Declencheur de la fiche : repertoire d'icones illisible -> `display_roles/0`
+    # rend `[]`. Avant, TOUS les roles disparaissaient d'un coup ; maintenant seules les icones.
+    test "aucune icone lisible → AUCUN role masque", %{} do
+      for role <- ~w(chief architect reviewer) do
+        view = Fleet.Observation.Deck.pod_view(pod(role), [])
+        assert view.role == role, "un repertoire d'assets illisible ne doit masquer aucun role"
+        assert view.role_icon == nil
+      end
+    end
+
+    # TEMOIN — sans lui, rendre `Map.get(info, :role)` tel quel passerait les trois tests ci-dessus
+    # et laisserait des termes runtime arbitraires entrer dans le JSON, ce que cette vue existe pour
+    # empecher. `nil` ici veut vraiment dire « pas de role ».
+    test "TEMOIN — un role non-binaire reste exclu du JSON, aux deux champs" do
+      for bad <- [nil, :architect, 42] do
+        view = Fleet.Observation.Deck.pod_view(pod(bad), ~w(architect))
+        assert view.role == nil
+        assert view.role_icon == nil
+      end
+    end
+
+    defp pod(role) do
+      %{pod_id: "pod-6057", role: role, phase: "running"}
+    end
+  end
+
   test "GET /api/pods → 200 JSON {pods, count} (read-only, JSON-safe)" do
     conn = call(:get, "/api/pods")
     assert %Plug.Conn{status: 200} = conn

@@ -173,6 +173,75 @@ defmodule Fleet.Credentials.ShellTest do
       on_exit(fn -> System.cmd("kill", ["-KILL", desc_pid], stderr_to_stdout: true) end)
     end
 
+    # 6-031 — LE PGID ETAIT CHERCHE, ET L'ECHEC DE LA RECHERCHE LAISSAIT LA DESCENDANCE EN VIE.
+    # `terminate/2` ne tuait le groupe que si trois lectures de `/proc` avaient abouti ; sinon il
+    # tuait la seule enveloppe `setsid` et rendait la main. L'appelant recevait
+    # `{:error, {:timeout, _}}` et considerait l'operation terminee pendant que git continuait a
+    # ecrire et a parler au reseau. `/proc` absent ou partiel est l'ordinaire d'un conteneur durci.
+    #
+    # Le cas a disparu au lieu d'etre traite : le port place deja son enfant dans une session neuve,
+    # donc `os_pid` EST le PGID. Ces deux tests tiennent ce qui rend cela vrai — le premier
+    # l'identite elle-meme (detail d'implementation du driver, donc EPINGLE ici et pas seulement
+    # affirme en commentaire), le second l'absence de la dependance qui la cassait.
+    test "6-031: le pid du port EST son propre chef de groupe — la premisse, epinglee" do
+      # 400 ms suffisent : on lit /proc pendant que le processus tourne, on ne l'attend pas.
+      task = Task.async(fn -> Shell.run("/bin/sleep", ["2"], timeout_ms: 3_000) end)
+      Process.sleep(300)
+
+      # Le pid du `sleep` : le seul /proc dont le comm est `sleep` et dont le parent est un
+      # descendant du BEAM. Plus simple et plus sur — on relance nous-memes la meme forme de port
+      # et on lit SON os_pid, ce qui est exactement ce que `run/3` fait.
+      port =
+        Port.open({:spawn_executable, "/bin/sleep"}, [
+          :binary,
+          :exit_status,
+          :hide,
+          {:args, ["2"]}
+        ])
+
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+      assert {:ok, stat} = File.read("/proc/#{os_pid}/stat"),
+             "test Linux-only, comme tout ce qui lit /proc ici"
+
+      [_, rest] = String.split(stat, ")", parts: 2)
+      fields = rest |> String.trim() |> String.split(" ")
+      pgrp = Enum.at(fields, 2)
+      sid = Enum.at(fields, 3)
+
+      assert pgrp == to_string(os_pid),
+             "os_pid #{os_pid} n'est PAS chef de son groupe (pgrp=#{pgrp}) — `kill -- -os_pid` ne " <>
+               "designerait plus le groupe de la commande et une descendance survivrait a l'echeance"
+
+      assert sid == to_string(os_pid),
+             "os_pid #{os_pid} n'est pas chef de session (sid=#{sid}) — c'est ce que le driver de " <>
+               "port fournit, et c'est ce qui rend le groupe identifiable sans le chercher"
+
+      Port.close(port)
+      Task.await(task, 5_000)
+    end
+
+    test "6-031: `setsid` ABSENT du PATH ne casse plus rien" do
+      # Avant, `run/3` refusait fail-closed sans `setsid` (`{:error, {:exit, {:enoent, \"setsid\"}}}`)
+      # parce que l'enveloppe etait la precondition annoncee du kill de groupe. Elle ne l'est plus :
+      # la commande est lancee en direct. Ce test est aussi la contre-epreuve — sous l'ancien code il
+      # rougit, avec l'erreur exacte.
+      tmp = Path.join(System.tmp_dir!(), "shell6031-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      File.ln_s!("/bin/echo", Path.join(tmp, "echo"))
+      on_exit(fn -> File.rm_rf(tmp) end)
+
+      prev = System.get_env("PATH")
+      System.put_env("PATH", tmp)
+      on_exit(fn -> System.put_env("PATH", prev) end)
+
+      refute System.find_executable("setsid"),
+             "la mise en scene doit vraiment retirer setsid du PATH"
+
+      assert {:ok, {output, 0}} = Shell.run("echo", ["6-031"], timeout_ms: 5_000)
+      assert output =~ "6-031"
+    end
+
     test "WALL DEADLINE: a process DRIPPING output is killed at the deadline (not re-armed)" do
       # INVARIANT C2 (wall deadline, not idle-gap). A network-hung git can DRIP output (one byte
       # just before each deadline); a `receive … after timeout_ms` loop RE-ARMED on every {:data}

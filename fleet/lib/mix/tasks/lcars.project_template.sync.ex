@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
   # shipped in the template tree cannot execute code here. Same invariant as Fleet.Workflow.Git.
   @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
 
-  # WALL bounds (setsid + SIGKILL of the OS process-group at the deadline, via Shell.git). Local ops
+  # WALL bounds (SIGKILL of the OS process-group at the deadline, via Shell.git). Local ops
   # are sub-second; the NETWORK push is the one that could hang a deploy forever without a bound.
   @local_timeout_ms 30_000
   @push_timeout_ms 60_000
