@@ -214,6 +214,22 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   Read at LAUNCH, like its neighbour: a pod's compression is a property of its own launch, not a
   fleet-wide state that shifts under a pod already running.
+
+  ⚠ **AUCUN APPELANT EN PRODUCTION AUJOURD'HUI, ET LE VERDICT DE CETTE FONCTION N'ATTEINT AUCUN
+  LANCEMENT.** Vérifié par un walker indépendant : hors sa définition et son test, `output_compression?/1`
+  n'est appelée nulle part dans `lib/`, `bin/`, `etc/`, `deploy/` ni `config/`. La composition
+  ci-dessus est donc exacte et inerte.
+
+  **Ce qui manque n'est ni la brique ni le knob** — la brique `vendor/token_saver/` est dans l'image
+  (`COPY` présent au Dockerfile), testée par `shell_gate.sh`, et le champ est déclaré au schéma
+  cap-profile. **Ce qui manque est le VÉHICULE** : la compression passe par un hook `PreToolUse`
+  déployé dans `~/.claude/hooks/`, et un pod ne charge ni `hooks/` ni le tier user — le porteur que
+  `fleet/v1/hooks.yaml` assurait est parti avec la v1. `vendor/token_saver/VENDOR.md` porte le détail.
+
+  Conséquence pour un auteur de cap-profile : **déclarer `output_compression` ne change rien
+  aujourd'hui**, dans les deux sens. Le rebrancher demande un porteur de hooks côté pod — une
+  fonctionnalité, pas une correction — et ce paragraphe est ce qui empêche de lire l'inertie comme
+  un bug à réparer ici.
   """
   @spec output_compression?(Fleet.CapProfile.t() | term()) :: boolean()
   def output_compression?(cap_profile) do

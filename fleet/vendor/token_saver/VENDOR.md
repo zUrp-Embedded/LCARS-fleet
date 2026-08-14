@@ -1,7 +1,7 @@
 # token_saver — brique vendorée
 
 **Date** : 2026-08-04
-**Dernière révision** : 2026-08-09
+**Dernière révision** : 2026-08-14
 **Statut** : actif — contrat de vendoring de la brique token_saver
 **Référencé par** : `THIRD_PARTY_NOTICES.md`, `update_vendor.sh`
 
@@ -122,7 +122,20 @@ Le shim existe parce que les hooks sont déployés dans `~/.claude/hooks/` alors
 
 **Fail-open à chaque étage** : switch coupé, `python3` absent, brique introuvable, JSON invalide, moteur en erreur — la commande passe intacte. Une compression manquée coûte des tokens ; une commande bloquée coûte un pod.
 
-> ⚠ **Le Dockerfile ne copie pas encore `vendor/`.** La brique n'atterrit donc nulle part dans l'image : le shim ne la trouve pas et s'efface. C'est le cas nominal tant que le `COPY` n'est pas ajouté — à faire avec le déménagement d'arborescence (`beyond_#6/chantier-demenagement-arbo-2026-08-04`).
+> ⚠ **CETTE PHRASE DISAIT « le Dockerfile ne copie pas encore `vendor/` » ET C'EST FAUX DEPUIS.** Le
+> `COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver` **existe** (`deploy/docker/Dockerfile`),
+> avec sa propre cicatrice au-dessus. La brique EST dans l'image. Corrigé le 2026-08-14 : un lecteur
+> qui arrivait ici en repartait avec l'idée qu'il restait un `COPY` à ajouter — un travail déjà fait.
+>
+> ⚠ **CE QUI MANQUE N'EST PAS LE COPY, C'EST LE VÉHICULE**, et la section « Câblage » ci-dessus le dit
+> déjà : *un pod ne charge ni `hooks/` ni le tier user, l'hôte n'en câble aucun dans ses trois tiers,
+> et `fleet/v1/hooks.yaml` qui jouait ce rôle est parti avec la v1*. Donc la brique est présente,
+> testée (`lcars_tests`, jouée par `shell_gate.sh`), déclarée au schéma cap-profile
+> (`spec.invocation.output_compression`) — et **aucun chemin ne l'active**. Le fail-open fait le
+> reste : aucun symptôme, la compression annoncée ne tourne simplement jamais.
+>
+> **Tant qu'aucun tier de hooks n'atteint un pod, `output_compression` est un knob qui n'ouvre rien.**
+> Le rebrancher est une FONCTIONNALITÉ (il faut un porteur de hooks côté pod), pas une correction.
 
 ## Le switch
 
