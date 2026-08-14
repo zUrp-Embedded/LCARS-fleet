@@ -30,7 +30,14 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
         receive do
           {:DOWN, ^ref, :process, ^pid, _} -> :ok
         after
-          1_000 -> flunk("le processus #{inspect(name)} n'est pas mort — le nom reste pris")
+          # ⚠ 1 000 ms ETAIT TROP SERRE, ET SON ECHEC NE RESTE PAS CHEZ LUI. Mesure du 2026-08-14
+          # 02:11 : la boite swappait (plusieurs `mix gate` empiles), le `receive` a expire, le nom
+          # `Fleet.Pilot.ArchFeed` est reste ENREGISTRE — et c'est `ArchFeedTest`, un autre fichier,
+          # qui est tombe ensuite sur un `:sys.get_state` en timeout contre ma doublure zombie.
+          # Un nettoyage trop court ne casse pas seulement son propre test : il empoisonne un nom
+          # pour la suite du run. Sur une machine saine le `receive` rend la main immediatement,
+          # donc allonger ne coute rien et supprime la contamination.
+          5_000 -> flunk("le processus #{inspect(name)} n'est pas mort — le nom reste pris")
         end
       end
     end)

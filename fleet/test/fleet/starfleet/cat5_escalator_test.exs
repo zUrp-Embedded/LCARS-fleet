@@ -84,6 +84,48 @@ defmodule Fleet.Starfleet.Cat5EscalatorTest do
       assert content =~ "pod_drift"
     end
 
+    # JG-118 — L'ECRITURE D'AUDIT EST LA DERNIERE TRACE DURABLE D'UNE CAT-5, et son echec etait jete.
+    # Tout ce qui suit est LOSSY par construction : `broadcast_canon/3` est un PubSub sans accuse, et
+    # `CoordBackend.handle_escalation/3` ne fait qu'un second broadcast sur le meme bus. Si l'audit
+    # echoue AUSSI, l'escalade de severite maximale n'existe NULLE PART — et l'appelant recoit `:ok`.
+    #
+    # `AuditLog.write/1` loggue deja son echec, mais sous son identite a lui : rien ne disait que la
+    # ligne perdue etait une CAT-5, ni que plus aucun rail ne la portait.
+    test "JG-118: audit d'une CAT-5 non gravable → la perte est nommee comme terminale", %{
+      tmp_dir: tmp_dir
+    } do
+      # Le chemin d'audit devient un REPERTOIRE : `File.write` echoue (`:eisdir`), sans casser
+      # `File.mkdir_p` du parent.
+      broken = Path.join(tmp_dir, "audit-is-a-dir.jsonl")
+      File.mkdir_p!(broken)
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_path, broken)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = Cat5Escalator.escalate(:pod_drift, %{"pod_id" => "p9"}, "corr-jg118")
+        end)
+
+      assert log =~ "NO DURABLE TRACE",
+             "l'echec de la derniere trace durable d'une Cat-5 ne dit pas ce qu'il est"
+
+      assert log =~ "corr-jg118",
+             "la trace ne porte pas le correlation_id : elle n'est pas suivable"
+
+      assert log =~ "may exist NOWHERE",
+             "rien ne dit que tout l'aval est lossy — un lecteur croira qu'un rail rattrape"
+    end
+
+    test "TEMOIN JG-118 — un audit qui s'ecrit ne declenche aucune alarme", %{log_path: log_path} do
+      # Sans ce temoin, crier a chaque escalade passerait le test ci-dessus.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = Cat5Escalator.escalate(:pod_drift, %{"pod_id" => "p8"}, "corr-ok")
+        end)
+
+      refute log =~ "NO DURABLE TRACE"
+      assert File.read!(log_path) =~ "cat5_escalate"
+    end
+
     test "pre-existing chain is extended" do
       payload = %{"chain" => ["pod.refuse", "ipc_filter.drift"], "n" => 1}
       :ok = Cat5Escalator.escalate(:workflow_map_failed, payload, nil)

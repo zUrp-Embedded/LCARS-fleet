@@ -164,6 +164,71 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     # coute une issue REDONDANTE a la recurrence suivante (borne, auto-reparant), la ou le voisin
     # perdait l'INCIDENT lui-meme (la chronologie ment). Ce qui manquait n'etait pas un verdict,
     # c'etait que le fait EXISTE.
+    # JG-122 — UN FICHIER CORROMPU N'EST PAS UN REGISTRE VIDE. `decode/1` rendait `%{}` et son propre
+    # commentaire disait la perte (« real amnesia, not an absence ») ; c'est ensuite le SHA du
+    # fichier CORROMPU qui partait en `sha:` du PUT, donc l'ecrasement reussissait. La discipline
+    # existait cent-cinquante lignes plus haut, sur l'autre moitie du probleme : « an unreadable
+    # forge is NOT an empty one … pushing our LOCAL view would OVERWRITE cross-machine incidents ».
+    test "JG-122: forge CORROMPUE → aucun PUT, meme branche que l'illisible", %{tmp_dir: tmp} do
+      name = :"reg_corrupt_#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join(tmp, "incidents.json"),
+           sync_debounce_ms: 5,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o ->
+             {:ok, %{content: "[1, 2, 3]", sha: "sha-du-fichier-corrompu"}}
+           end,
+           put_file_fun: fn _r, _p, _c, _o ->
+             send(test_pid, :PUT_APPELE)
+             {:ok, "c"}
+           end
+         ]}
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Reg.note("jg122:sig", :boom, server: name, now: "2026-06-20T10:00:00Z")
+          Process.sleep(120)
+        end)
+
+      refute_received :PUT_APPELE,
+                      "la vue locale a ete poussee PAR-DESSUS un fichier qu'on n'a pas su lire — " <>
+                        "les incidents des autres machines sont effaces"
+
+      assert log =~ "CORRUPT", "la corruption n'est pas tracee"
+    end
+
+    test "TEMOIN JG-122 — une forge LISIBLE est bien fusionnee et poussee", %{tmp_dir: tmp} do
+      # Sans ce temoin, couper le PUT en toutes circonstances passerait le test ci-dessus.
+      name = :"reg_ok_#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join(tmp, "incidents_ok.json"),
+           sync_debounce_ms: 5,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o -> {:ok, %{content: "{}", sha: "sha-valide"}} end,
+           put_file_fun: fn _r, _p, _c, _o ->
+             send(test_pid, :PUT_APPELE)
+             {:ok, "c"}
+           end
+         ]}
+      )
+
+      Reg.note("jg122:ok", :boom, server: name, now: "2026-06-20T10:00:00Z")
+      Process.sleep(120)
+
+      assert_received :PUT_APPELE
+    end
+
     test "JG-123: le tampon de cooldown perdu rend un echec type, plus un `:ok` menteur", %{
       tmp_dir: tmp
     } do

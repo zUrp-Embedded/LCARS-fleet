@@ -410,7 +410,16 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
       {:ok, %{content: content, sha: sha}} ->
-        put_merged(registry, decode(content), sha, putter, opts)
+        case decode(content) do
+          {:ok, forge_reg} ->
+            put_merged(registry, forge_reg, sha, putter, opts)
+
+          # MEME BRANCHE QUE L'ILLISIBLE, ET POUR LA MEME RAISON : on ignore ce que la forge
+          # contient. Pousser notre vue locale par-dessus effacerait les incidents des autres
+          # machines — dont les recurrences redeviendraient des premieres occurrences.
+          :corrupt ->
+            {:error, {:forge_unreadable, :corrupt_file}}
+        end
 
       {:error, :not_found} ->
         put_merged(registry, %{}, nil, putter, opts)
@@ -529,25 +538,51 @@ defmodule Fleet.Pilot.IncidentRegistry do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
 
     case getter.(repo(opts), path(opts), ref: branch(opts)) do
-      {:ok, %{content: content}} -> {:ok, decode(content)}
-      {:error, :not_found} -> :absent
-      {:error, reason} -> {:error, reason}
+      {:ok, %{content: content}} ->
+        case decode(content) do
+          {:ok, reg} -> {:ok, reg}
+          # Au BOOT aussi : un fichier corrompu n'est pas un registre vide. Le traiter comme vide
+          # ferait rejouer chaque recurrence connue des autres machines en premiere occurrence.
+          :corrupt -> {:error, :corrupt_file}
+        end
+
+      {:error, :not_found} ->
+        :absent
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  # ⚠ CETTE FONCTION RENDAIT `%{}` SUR UN FICHIER CORROMPU, ET SON PROPRE COMMENTAIRE LE DISAIT :
+  # « real amnesia, not an absence … cross-machine memory is lost until the file is overwritten by
+  # the next sync ». Elle nommait la perte et la faisait quand meme.
+  #
+  # Or `sync_forge/2` porte deja la discipline exacte qui l'interdit, cent-cinquante lignes plus
+  # haut : « an unreadable forge is NOT an empty one … pushing our LOCAL view would OVERWRITE
+  # cross-machine incidents we could not read (data loss). Fail-closed. » Un fichier CORROMPU est le
+  # meme fait qu'un fichier ILLISIBLE — dans les deux cas on ignore ce que la forge contient — et
+  # c'est le SHA du fichier corrompu qui partait ensuite en `sha:` du PUT, donc l'ecrasement
+  # reussissait. La garde existait, elle etait juste branchee sur la mauvaise moitie du probleme.
+  #
+  # ⚠ DEUX CORRUPTIONS, DEUX POIDS, et une seule devient fail-closed. Racine indecodable ou non-map
+  # → on ne sait RIEN, refus. Entrees individuelles non-map → le reste du fichier est authentique,
+  # et refuser bloquerait TOUTE synchronisation jusqu'a ce qu'un humain repare un fichier que
+  # personne ne regarde : la sync ne se repare pas toute seule, elle se coince. On garde donc le
+  # tri, deja bruyant (`drop_non_map_entries/2` loggue en `error` avec les signatures perdues).
   defp decode(content) do
     case Jason.decode(content) do
       {:ok, reg} when is_map(reg) ->
-        drop_non_map_entries(reg, "forge file")
+        {:ok, drop_non_map_entries(reg, "forge file")}
 
       _ ->
-        # The file EXISTED but its content is not a JSON map — real amnesia, not an absence.
         Logger.error(
-          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — treated as empty; " <>
-            "cross-machine memory is lost until the file is overwritten by the next sync"
+          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — REFUSED as a read. " <>
+            "We do not know what the forge holds, so we do not push over it: same fail-closed " <>
+            "posture as an unreadable forge. Repair the file; the sync retries."
         )
 
-        %{}
+        :corrupt
     end
   end
 
