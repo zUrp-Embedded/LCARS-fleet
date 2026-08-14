@@ -294,12 +294,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
                  ProjectPublish.run(repo, requester)
                end) do
             {:ok, _pid} ->
-              Bus.safe_emit(
-                :mcp,
-                :"project_publish.started",
-                [payload: %{"repo" => repo, "requester_pod_id" => requester}],
-                context: "project_publish"
-              )
+              # `_ =` DELIBERE : le Bus est le rail LOSSY (doctrine D1), et cet evenement annonce un
+              # travail deja lance — le perdre ne change rien a ce qui se passe. `safe_emit` porte
+              # deja son propre log d'echec. Ce qui n'est PAS acceptable est de jeter le retour sans
+              # le dire : `_ =` est la difference entre « on a choisi » et « on n'a pas regarde ».
+              _ =
+                Bus.safe_emit(
+                  :mcp,
+                  :"project_publish.started",
+                  [payload: %{"repo" => repo, "requester_pod_id" => requester}],
+                  context: "project_publish"
+                )
 
               {:ok, %{"status" => "queued", "repo" => repo}}
 
@@ -452,12 +457,19 @@ defmodule Fleet.MCP.PodTools.Delegation do
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(repo)}.json")
 
+    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Il etait appele et son retour JETE : un fichier
+    # ecrit dont la serrure n'a pas pu etre posee ressortait `:ok`, et le binding restait lisible par
+    # tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le tient.
+    # Meme forme fail-closed que `PodSocketAcceptor.restrict/2` : on ne laisse pas derriere soi une
+    # porte sans verrou, on retire ce qu'on n'a pas su fermer.
     with {:ok, json} <- Jason.encode(binding, pretty: true),
-         :ok <- File.write(path, json) do
-      File.chmod(path, 0o600)
+         :ok <- File.write(path, json),
+         :ok <- File.chmod(path, 0o600) do
       :ok
     else
-      {:error, reason} -> {:error, {:binding_write_failed, inspect(reason)}}
+      {:error, reason} ->
+        _ = File.rm(path)
+        {:error, {:binding_write_failed, inspect(reason)}}
     end
   end
 

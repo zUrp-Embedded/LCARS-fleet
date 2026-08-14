@@ -217,7 +217,17 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     out |> String.split("\n", trim: true) |> List.last() |> Kernel.||("")
   end
 
+  # ⚠ REND `:ok` EXPLICITEMENT, ET C'EST CE QUI REND LE `@spec` DE `run/2` VRAI. `Bus.safe_emit/4`
+  # rend `:ok | {:error, _}` ; les branches de `run/2` se terminaient dessus, donc la fonction
+  # rendait ce type-la alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec
+  # absent : dialyzer l'a dit en `unmatched_return`, et le lecteur, lui, l'aurait cru.
+  #
+  # Le rejet est DELIBERE : le Bus est le rail lossy (doctrine D1), `run/2` rapporte son issue par
+  # evenement et ne doit JAMAIS crasher — un raise ici ferait redemarrer la Task, donc re-publier.
+  # `safe_emit` loggue deja ses propres echecs.
+  @spec safe_emit(atom(), map(), String.t()) :: :ok
   defp safe_emit(type, payload, repo) do
-    Bus.safe_emit(:mcp, type, [payload: payload], context: "ProjectPublish: #{repo}")
+    _ = Bus.safe_emit(:mcp, type, [payload: payload], context: "ProjectPublish: #{repo}")
+    :ok
   end
 end
