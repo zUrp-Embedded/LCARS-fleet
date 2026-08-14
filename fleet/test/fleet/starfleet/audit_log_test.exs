@@ -122,45 +122,91 @@ defmodule Fleet.Starfleet.AuditLogTest do
       assert ns == written
     end
 
-    test "a SECOND rotation destroys the previous .1 — and SAYS so, with what it took",
+    # 6-054 — CE TEST EPINGLAIT LA DESTRUCTION, il epingle maintenant son absence, et son ancien
+    # titre disait le defaut : « a SECOND rotation destroys the previous .1 — and SAYS so ».
+    # `File.rename/2` ecrasait sa cible sans un mot ; une passe anterieure avait rendu cette
+    # destruction AUDIBLE et laisse la retention a un cran, en l'ecrivant comme une decision.
+    #
+    # C'etait la bonne moitie. L'autre est que ce journal est la SEULE trace durable des escalades
+    # Cat-5 et des verdicts du gatekeeper — `Coord.Emitter` l'invoque nommement pour justifier
+    # qu'une notification puisse etre perdue. A la deuxieme rotation, soit ~20 Mio cumules, une
+    # enquete n'avait plus de quoi etre menee : le fait dont tout le reste depend etait parti.
+    test "6-054: N rotations, N generations — aucune ligne deja ecrite n'est perdue",
          %{log_path: log_path} do
-      # The test above stops at the first rotation and records the gap in its own words: it "never
-      # hits the (accepted) case where a 2nd cycle overwrites the .1". That case is the whole
-      # defect. `File.rename/2` overwrites its destination without a word, so the FAILURE to rotate
-      # was loud (an `error`) while the SUCCESS — which is what actually destroys a generation —
-      # was mute. Retention stays at one generation; what is pinned here is that losing it speaks.
       Application.put_env(:lcars_fleet, :starfleet_audit_log_max_bytes, 300)
       on_exit(fn -> Application.delete_env(:lcars_fleet, :starfleet_audit_log_max_bytes) end)
 
-      rotate_until = fn stop? ->
-        Enum.reduce_while(1..2000, :never, fn n, _ ->
-          :ok = AuditLog.write(%{"n" => n, "pad" => String.duplicate("x", 40)})
-          if stop?.(), do: {:halt, :ok}, else: {:cont, :never}
-        end)
-      end
-
-      first_log =
+      # Assez d'ecritures pour traverser PLUSIEURS rotations : le defaut ne se voyait qu'a partir
+      # de la deuxieme, et c'est exactement ce que le test precedent s'interdisait d'atteindre.
+      ecrites =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = rotate_until.(fn -> File.exists?(log_path <> ".1") end)
+          for n <- 1..600,
+              do: :ok = AuditLog.write(%{"n" => n, "pad" => String.duplicate("x", 40)})
         end)
+        |> then(fn _ -> Enum.to_list(1..600) end)
 
-      # First rotation destroys nothing: there was no previous generation to take.
-      refute first_log =~ "rotation dropped"
+      generations = Path.wildcard(log_path <> ".*")
 
-      gen1 = File.read!(log_path <> ".1")
-      assert byte_size(gen1) > 0
+      assert length(generations) >= 2,
+             "il faut au moins deux rotations pour que le defaut soit observable, #{length(generations)} obtenue(s)"
 
-      second_log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert :ok = rotate_until.(fn -> File.read!(log_path <> ".1") != gen1 end)
-        end)
+      # LA propriete de la fiche : l'union des generations et du fichier courant redonne EXACTEMENT
+      # ce qui a ete ecrit. Pas « a peu pres », pas « les dernieres » : toutes.
+      relues =
+        [log_path | generations]
+        |> Enum.filter(&File.exists?/1)
+        |> Enum.flat_map(fn p -> p |> File.read!() |> String.split("\n", trim: true) end)
+        |> Enum.map(&Jason.decode!(&1)["n"])
+        |> Enum.sort()
 
-      # The generation is really gone, and the line names its size — an operator who reads it knows
-      # how much history just left, not merely that something did.
-      assert second_log =~ "rotation dropped"
-      assert second_log =~ "#{byte_size(gen1)} bytes"
-      assert second_log =~ "retention is ONE generation"
-      refute File.read!(log_path <> ".1") == gen1
+      assert relues == ecrites
+    end
+
+    test "6-054: les generations portent des noms DISTINCTS et croissants", %{log_path: log_path} do
+      # Le mecanisme, pas seulement son effet : chaque rotation prend un nom neuf. Si deux
+      # rotations pouvaient choisir le meme, l'union ci-dessus resterait vraie par accident tant
+      # que la course ne se produit pas.
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_max_bytes, 300)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :starfleet_audit_log_max_bytes) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        for n <- 1..600, do: :ok = AuditLog.write(%{"n" => n, "pad" => String.duplicate("x", 40)})
+      end)
+
+      suffixes =
+        (log_path <> ".*")
+        |> Path.wildcard()
+        |> Enum.map(
+          &(&1
+            |> Path.basename()
+            |> String.split(".")
+            |> List.last()
+            |> String.to_integer())
+        )
+        |> Enum.sort()
+
+      assert suffixes == Enum.to_list(1..length(suffixes))
+      assert length(Enum.uniq(suffixes)) == length(suffixes)
+    end
+
+    test "6-054: une generation existante n'est JAMAIS ecrasee, meme si le nom est pris",
+         %{log_path: log_path} do
+      # ⚠ La garantie tient a `File.ln/2` et pas a `File.rename/2` : le lien dur ECHOUE en
+      # `:eexist` si la cible existe, le rename l'ecrase en silence. Deux processus ecrivent ce
+      # journal (`Cat5Escalator`, `DriftMonitor`), donc deux rotations peuvent viser le meme numero.
+      # Ici on plante un `.1` a la main : la rotation doit passer a cote, pas dessus.
+      Application.put_env(:lcars_fleet, :starfleet_audit_log_max_bytes, 300)
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :starfleet_audit_log_max_bytes) end)
+
+      temoin = "TEMOIN-A-NE-PAS-ECRASER"
+      File.write!(log_path <> ".1", temoin)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        for n <- 1..300, do: :ok = AuditLog.write(%{"n" => n, "pad" => String.duplicate("x", 40)})
+      end)
+
+      assert File.read!(log_path <> ".1") == temoin, "la generation posee a la main a ete ecrasee"
+      assert File.exists?(log_path <> ".2"), "la rotation devait prendre le nom suivant"
     end
   end
 end
