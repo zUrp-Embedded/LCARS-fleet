@@ -21,10 +21,15 @@ setup() {
   DEST_TOKEN_FILE="$TMP/dest.token"; echo "desttok" > "$DEST_TOKEN_FILE"
   FORGE_TOKEN_FILE="$TMP/forge.token"; echo "forgetok" > "$FORGE_TOKEN_FILE"
 
-  # git stub: ls-remote --exit-code succeeds only when STUB_BASE_PRESENT=1. Everything else no-ops 0.
+  # git stub: ls-remote --exit-code succeeds only when STUB_BASE_PRESENT=1. When STUB_REC is set it
+  # records the ls-remote argv + the GIT_CONFIG auth env — the token-handling regression probe.
   cat > "$BIN/git" <<'STUB'
 #!/usr/bin/env bash
 if [[ "$1" == "ls-remote" ]]; then
+  if [[ -n "${STUB_REC:-}" ]]; then
+    printf '%s\n' "$*" > "$STUB_REC/argv"
+    printf '%s\n' "${GIT_CONFIG_VALUE_0:-}" > "$STUB_REC/cfgval"
+  fi
   [[ "${STUB_BASE_PRESENT:-0}" == "1" ]] && exit 0 || exit 2
 fi
 exit 0
@@ -88,4 +93,16 @@ run_rail() {  # run_rail HOST [extra args...]
   STUB_BASE_PRESENT=0 run_rail gitlab
   [ "$status" -eq 4 ]
   [[ "$output" == *"phase 1"* ]]
+}
+
+@test "token rides in GIT_CONFIG env, never in the git argv (CRITIQUE regression)" {
+  local rec="$TMP/rec"; mkdir -p "$rec"
+  printf 'SECRETTOK' > "$DEST_TOKEN_FILE"          # a literal we can grep for
+  STUB_REC="$rec" STUB_BASE_PRESENT=0 run_rail github
+  [ "$status" -eq 4 ]                              # stopped at the precondition, before any transform
+  run cat "$rec/argv"
+  [[ "$output" != *"SECRETTOK"* ]]                 # the token is NOT in the git argv (no ps leak)
+  [[ "$output" == *"https://github.com/owner/Demo.git"* ]]   # git saw the PLAIN url
+  run cat "$rec/cfgval"
+  [[ "$output" == "Authorization: Basic "* ]]      # auth is carried by the extraheader env, not the url
 }

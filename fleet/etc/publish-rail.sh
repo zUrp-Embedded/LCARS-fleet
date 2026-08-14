@@ -107,10 +107,30 @@ DEST_TOKEN="$(cat "$DEST_TOKEN_FILE")"
 [[ -n "$DEST_TOKEN" ]] || { echo "publish-rail: dest-token vide ($DEST_TOKEN_FILE)" >&2; exit 1; }
 DEST_OWNER="${DEST_REPO%%/*}"
 
-# Token-carrying push URL — per-host username convention over https.
+# TOKEN HANDLING — the token NEVER lands in a URL, an argv, or an on-disk .git/config. Same discipline
+# as publish-to-github.sh (and Fleet.Credentials.ForgeAuth): git auth rides in an
+# `http.<host>.extraheader` passed through GIT_CONFIG_* ENV (not persisted to config, not in
+# /proc/<pid>/cmdline), and curl auth rides in a mode-600 `--config` file, shredded on exit. The push
+# URL is the PLAIN https URL — so the fresh clone left for inspection on exit 6 carries no secret.
+DEST_URL="https://${DEST_HOST}/${DEST_REPO}.git"
+
+# HTTP Basic in the header is the header form of `https://<user>:<token>@` and works for BOTH hosts:
+# github accepts `x-access-token:<token>`, gitlab accepts `oauth2:<token>`.
 case "$HOST" in
-  github) PUSH_URL="https://x-access-token:${DEST_TOKEN}@${DEST_HOST}/${DEST_REPO}.git" ;;
-  gitlab) PUSH_URL="https://oauth2:${DEST_TOKEN}@${DEST_HOST}/${DEST_REPO}.git" ;;
+  github) _GIT_BASIC_USER="x-access-token" ;;
+  gitlab) _GIT_BASIC_USER="oauth2" ;;
+esac
+_GIT_BASIC="$(printf '%s' "${_GIT_BASIC_USER}:${DEST_TOKEN}" | base64 | tr -d '\n')"
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="http.https://${DEST_HOST}/.extraheader"
+export GIT_CONFIG_VALUE_0="Authorization: Basic ${_GIT_BASIC}"
+
+# curl auth in a mode-600 config file (never argv), shredded on ANY exit — the token IS the payload.
+CURL_AUTH="$(mktemp)"; chmod 600 "$CURL_AUTH"
+trap 'rm -f "$CURL_AUTH"' EXIT
+case "$HOST" in
+  github) printf 'header = "Authorization: Bearer %s"\n' "$DEST_TOKEN" > "$CURL_AUTH" ;;
+  gitlab) printf 'header = "PRIVATE-TOKEN: %s"\n' "$DEST_TOKEN" > "$CURL_AUTH" ;;
 esac
 
 urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
@@ -120,42 +140,41 @@ json_first() { python3 -c 'import sys,json;a=json.load(sys.stdin);print(a[0].get
 # --- Per-host adapter: the ONLY host-specific surface -------------------------------------------
 # request_find  -> prints the URL of the existing open PR/MR for BRANCH->BASE, or empty
 # request_open  -> creates the PR/MR, prints its URL (or empty on failure)
+# Auth for both comes from --config "$CURL_AUTH" (token off argv).
 case "$HOST" in
   github)
     API="https://api.github.com/repos/${DEST_REPO}"
-    AUTH_HEADER="Authorization: Bearer ${DEST_TOKEN}"
     request_find() {
-      curl -sS -H "$AUTH_HEADER" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+      curl -sS --config "$CURL_AUTH" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
         "${API}/pulls?state=open&base=${BASE}&head=${DEST_OWNER}:${BRANCH}" | json_first html_url
     }
     request_open() {
       local body; body="$(python3 -c 'import json,sys;print(json.dumps({"title":sys.argv[1],"head":sys.argv[2],"base":sys.argv[3],"body":sys.argv[4]}))' \
         "$1" "$BRANCH" "$BASE" "$2")"
-      curl -sS -X POST -H "$AUTH_HEADER" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+      curl -sS -X POST --config "$CURL_AUTH" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
         -d "$body" "${API}/pulls" | json_get html_url
     }
     ;;
   gitlab)
-    # GitLab addresses a project by URL-encoded path; MRs use source_branch/target_branch; PAT auth
-    # is the PRIVATE-TOKEN header; the web URL field is web_url.
+    # GitLab addresses a project by URL-encoded path; MRs use source_branch/target_branch; the web
+    # URL field is web_url.
     PROJ_ENC="$(urlenc "$DEST_REPO")"
     API="https://${DEST_HOST}/api/v4/projects/${PROJ_ENC}"
-    AUTH_HEADER="PRIVATE-TOKEN: ${DEST_TOKEN}"
     request_find() {
-      curl -sS -H "$AUTH_HEADER" \
+      curl -sS --config "$CURL_AUTH" \
         "${API}/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=${BASE}" | json_first web_url
     }
     request_open() {
       local body; body="$(python3 -c 'import json,sys;print(json.dumps({"title":sys.argv[1],"source_branch":sys.argv[2],"target_branch":sys.argv[3],"description":sys.argv[4]}))' \
         "$1" "$BRANCH" "$BASE" "$2")"
-      curl -sS -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+      curl -sS -X POST --config "$CURL_AUTH" -H "Content-Type: application/json" \
         -d "$body" "${API}/merge_requests" | json_get web_url
     }
     ;;
 esac
 
 # --- Phase-2 precondition: the destination base must already exist (phase 1 populated it) ----------
-if ! git ls-remote --exit-code "$PUSH_URL" "refs/heads/$BASE" >/dev/null 2>&1; then
+if ! git ls-remote --exit-code "$DEST_URL" "refs/heads/$BASE" >/dev/null 2>&1; then
   echo "publish-rail: $DEST_HOST/$DEST_REPO n'a pas de branche '$BASE' — fais la phase 1 (lcars approve) d'abord." >&2
   echo "  Ce rail ne fait QUE des PR/MR ; il ne peuple jamais la base lui-meme." >&2
   exit 4
@@ -169,7 +188,7 @@ fi
 cd "$WORK"
 
 # --- Determinism gate: the destination base must be an ancestor of the fresh clone's head ----------
-git remote add dest "$PUSH_URL"
+git remote add dest "$DEST_URL"
 git fetch -q dest "$BASE"
 FRESH_HEAD="$(git rev-parse HEAD)"
 DEST_BASE_HEAD="$(git rev-parse "dest/$BASE")"

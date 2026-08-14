@@ -543,15 +543,27 @@ cmd_catalogue() {
 TARGETS_DIR="$HOME/.lcars/targets"
 PUBLISH_DIR="$HOME/.lcars/publish"
 
-# Token-carrying push URL, per-host username convention over https. (Proto: the token lands in the
-# git subprocess argv — a `ps` read on a per-human box exposes it to that human only; a credential
-# helper would remove even that, deferred.)
-_dest_push_url() {  # host dest_host repo token
-  case "$1" in
-    github) printf 'https://x-access-token:%s@%s/%s.git' "$4" "$2" "$3" ;;
-    gitlab) printf 'https://oauth2:%s@%s/%s.git' "$4" "$2" "$3" ;;
-    *) die "host inconnu: $1 (github|gitlab)" ;;
+# Plain destination URL — NEVER carries the token. Auth rides in an http.<host>.extraheader passed
+# via GIT_CONFIG_* env (not the URL, not the argv, not the on-disk .git/config), same discipline as
+# etc/publish-to-github.sh / Fleet.Credentials.ForgeAuth.
+_dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
+
+# Runs `git` against the destination with header auth. The Basic header is the header form of
+# https://<user>:<token>@ — github: x-access-token, gitlab: oauth2. The GIT_CONFIG_* env is inline
+# (not exported) so it never leaks past this one git call; the token stays off argv and off FETCH_HEAD.
+_dest_git() {  # host dest_host token -- <git args...>
+  local host="$1" dest_host="$2" token="$3"; shift 3
+  local user b64
+  case "$host" in
+    github) user="x-access-token" ;;
+    gitlab) user="oauth2" ;;
+    *) die "host inconnu: $host (github|gitlab)" ;;
   esac
+  b64="$(printf '%s' "${user}:${token}" | base64 | tr -d '\n')"
+  GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="http.https://${dest_host}/.extraheader" \
+    GIT_CONFIG_VALUE_0="Authorization: Basic ${b64}" \
+    git "$@"
 }
 _json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
 
@@ -584,6 +596,8 @@ cmd_target_add() {
     *) die "target add: --host inconnu « $host » (github|gitlab)" ;;
   esac
   [[ -r "$token_file" ]] || die "target add: token-file illisible: $token_file"
+  # `name` becomes a path component — refuse traversal (self-harm, but the slug guard has it too).
+  [[ "$name" != */* && "$name" != .* ]] || die "target add: nom invalide « $name » (pas de '/' ni de '.' en tete)"
   mkdir -p "$TARGETS_DIR"; chmod 700 "$TARGETS_DIR"
   local out="$TARGETS_DIR/$name.json"
   python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4],"token_file":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
@@ -651,11 +665,16 @@ cmd_approve() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
   [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] || die "approve: FORGE_TOKEN_FILE absent/illisible ($env_file)"
 
-  local push_url; push_url="$(_dest_push_url "$host" "$dest_host" "$dest_repo" "$dtok")"
+  local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
 
+  # Scratch clone, removed on ANY exit (die exits → EXIT trap fires; the CLI runs one verb then ends,
+  # so a single EXIT trap is safe). mktemp -d is 0700; with header auth nothing secret lands in it.
+  local work_base; work_base="$(mktemp -d)"
+  trap 'rm -rf "$work_base"' EXIT
+  local work="$work_base/clone"
+
   # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
-  local work; work="$(mktemp -d)/clone"
   "$(dirname "$0")/../etc/publish-to-github.sh" \
     --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
@@ -663,23 +682,26 @@ cmd_approve() {
 
   if [[ "$link_mode" == 1 ]]; then
     # LINK: never clobber a base the human populated by hand.
-    if git ls-remote --exit-code "$push_url" "refs/heads/$base" >/dev/null 2>&1; then
+    if _dest_git "$host" "$dest_host" "$dtok" ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
       die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
     fi
-    git push -q "$push_url" "HEAD:refs/heads/$base" || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
+    _dest_git "$host" "$dest_host" "$dtok" push -q "$dest_url" "HEAD:refs/heads/$base" \
+      || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
     python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"token_file":sys.argv[5],"base":sys.argv[6]},open(sys.argv[1],"w"),indent=2)' \
       "$binding" "$host" "$dest_host" "$dest_repo" "$token_file" "$base"
     chmod 600 "$binding"
     echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
   else
     # DIRECT push to an existing base: determinism gate (base must be an ancestor of the fresh clone).
-    git fetch -q "$push_url" "$base" || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
+    _dest_git "$host" "$dest_host" "$dtok" fetch -q "$dest_url" "$base" \
+      || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
     if [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]; then
       echo "approve: rien a pousser — $dest_host/$dest_repo $base deja a jour."
     elif ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
       die "approve: $base n'est PAS un ancetre du clone reecrit (reecriture non deterministe ou divergence) — rien pousse."
     else
-      git push -q "$push_url" "HEAD:refs/heads/$base" || die "approve: echec du push direct vers $dest_host/$dest_repo"
+      _dest_git "$host" "$dest_host" "$dtok" push -q "$dest_url" "HEAD:refs/heads/$base" \
+        || die "approve: echec du push direct vers $dest_host/$dest_repo"
       echo "approve: « $slug » pousse en direct vers $dest_host/$dest_repo $base."
     fi
   fi

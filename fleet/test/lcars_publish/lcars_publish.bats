@@ -31,6 +31,12 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"--host inconnu"* ]]
 }
 
+@test "target add: name with a slash -> exit 1 (no path traversal)" {
+  run "$SCRIPT" target add "../evil" --host github --owner alice --token-file "$DTOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nom invalide"* ]]
+}
+
 @test "target add then list: round-trip" {
   run "$SCRIPT" target add mine --host gitlab --owner alice --token-file "$DTOK"
   [ "$status" -eq 0 ]
