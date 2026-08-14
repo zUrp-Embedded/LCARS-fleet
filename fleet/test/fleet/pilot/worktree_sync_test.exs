@@ -65,6 +65,61 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert head(proj) == head(seed)
   end
 
+  # JG-119 — « THE WORKTREE IS A READ-ONLY SHOWCASE » N'ETAIT GARANTI PAR RIEN. La racine de la face
+  # code est `Fleet.Layout.code_root/0` = `/home/projects`, le repertoire de travail par defaut de
+  # l'humain. Les pods travaillent bien dans leurs clones ephemeres, mais rien n'empeche un fichier
+  # modifie non commite d'etre la — et `reset --hard` le detruisait sans copie ni message.
+  #
+  # La soeur `align_writer/2` tient deja la posture sur une divergence : elle ABANDONNE et propage
+  # fort (« that divergence is a human's call »).
+  test "JG-119: un arbre SALE n'est pas aligne — le travail non commite survit", %{
+    seed: seed,
+    proj: proj,
+    sync: sync
+  } do
+    commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
+
+    # Du travail humain non commite dans la vitrine : un fichier suivi, modifie.
+    precieux = Path.join(proj, "README.md")
+    File.write!(precieux, "TRAVAIL HUMAIN NON COMMITE\n")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:worktree_dirty, _}} =
+                 WorktreeSync.sync_now(sync, "fleet/myproj", "main")
+      end)
+
+    assert File.read!(precieux) == "TRAVAIL HUMAIN NON COMMITE\n",
+           "le `reset --hard` a detruit du travail qui n'existe nulle part ailleurs"
+
+    refute File.exists?(Path.join(proj, "hello.sh")),
+           "l'alignement a eu lieu quand meme — le refus n'en est pas un"
+
+    assert log =~ "UNCOMMITTED changes",
+           "le refus est muet : personne ne saura pourquoi la vitrine est perimee"
+
+    assert log =~ "README.md", "la trace ne dit pas CE QUI bloque"
+  end
+
+  test "TEMOIN JG-119 — l'arbre redevenu propre s'aligne au tick suivant", %{
+    seed: seed,
+    proj: proj,
+    sync: sync
+  } do
+    # Sans ce temoin, refuser TOUJOURS passerait le test ci-dessus et gelerait la vitrine pour de bon.
+    commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
+    File.write!(Path.join(proj, "README.md"), "sale\n")
+
+    assert {:error, {:worktree_dirty, _}} = WorktreeSync.sync_now(sync, "fleet/myproj", "main")
+
+    # L'humain range (ici : il jette).
+    git_in!(proj, ["checkout", "--", "README.md"])
+
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "main")
+    assert File.exists?(Path.join(proj, "hello.sh"))
+    assert head(proj) == head(seed)
+  end
+
   test "local clone absent → :ok (nothing to align: the clone is a MIRROR, the truth = main merged on the forge; skip logged debug)",
        %{sync: sync} do
     assert :ok = WorktreeSync.sync_now(sync, "fleet/jamais-clone", "main")
