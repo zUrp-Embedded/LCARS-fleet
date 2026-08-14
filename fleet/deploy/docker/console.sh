@@ -111,11 +111,11 @@ sock_dir_for() {
   # d'une version anterieure garderait son ancien mode en silence. On le reaffirme.
   chmod 2710 "$dir" && chown "$human:$CONSOLE_GROUP" "$dir" || return 1
 
-  # ⚠ UN CHEMIN AF_UNIX EST PLAFONNE, ET LE DEPASSEMENT EST MUET LA OU IL COMPTE. `sun_path` fait
-  # 108 octets NUL compris sur Linux : au-dela, le `bind()` echoue avec « path too long » et ttyd
-  # meurt une demi-seconde apres son lancement — indiscernable, dans les logs du conteneur, d'un
-  # ttyd qui n'a pas su demarrer. Trouve en ecrivant le test de ce script : le harnais posait sa
-  # racine dans un repertoire temporaire profond et la console ne se levait jamais.
+  # ⚠ UN CHEMIN AF_UNIX EST PLAFONNE, ET LE DEPASSEMENT EST MUET LA OU IL COMPTE. Mesure du
+  # 2026-08-14 DANS L'IMAGE, par `bind()` successifs : 106 OK, 107 OK, 108 « AF_UNIX path too long ».
+  # Au-dela, ttyd meurt une demi-seconde apres son lancement — indiscernable, dans les logs du
+  # conteneur, d'un ttyd qui n'a pas su demarrer. Trouve en ecrivant le test de ce script : le
+  # harnais posait sa racine dans un repertoire temporaire profond et la console ne se levait jamais.
   #
   # En production le chemin est court (`/run/lcars/console/<login>/console.sock`), donc ce garde ne
   # se declenchera pour ainsi dire jamais — c'est exactement pourquoi il doit exister : le jour ou

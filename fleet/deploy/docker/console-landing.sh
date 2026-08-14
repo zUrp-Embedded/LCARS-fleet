@@ -61,10 +61,17 @@ command -v python3 >/dev/null || { echo "console-landing.sh: python3 absent de l
 # d'ailleurs. Le reutiliser aurait ete plus rapide et aurait accorde tout le reste par la meme
 # occasion.
 #
-# ⚠ C'EST UN REMPLACEMENT DE `--init-groups`, PAS UN AJOUT — mesure du 2026-08-14 :
+# ⚠ C'EST UN REMPLACEMENT DE `--init-groups`, PAS UN AJOUT — mesure du 2026-08-14 DANS L'IMAGE
+# (`lcars-fleet`, util-linux 2.38.1, pas celui du poste de dev) :
 # `setpriv: mutually exclusive arguments: --clear-groups --keep-groups --init-groups --groups`.
-# Et le remplacement ne retire rien : dans cette image, `id nobody` rend `groups=65534(nogroup)` et
-# aucune ligne de `/etc/group` ne le cite en membre. `--init-groups` ne lui donnait donc rien.
+# Et le remplacement ne retire rien : dans cette meme image, `id nobody` rend `groups=65534(nogroup)`
+# et aucune ligne de `/etc/group` ne le cite en membre. `--init-groups` ne lui donnait donc rien.
+#
+# ⚠ LE LIEU D'UNE MESURE FAIT PARTIE DE LA MESURE. Cette ligne a d'abord ete verifiee sur le poste
+# de dev (util-linux 2.39.3) et ecrite « mesuree » : elle parlait d'un systeme qui n'est pas celui
+# qui execute ce script. Le verdict s'est trouve identique — c'est de la chance, pas de la methode.
+# Une version d'outil, une distribution ou un noyau different, et un commentaire « mesure » aurait
+# affirme un comportement que la boite n'a pas.
 CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
 getent group "$CONSOLE_GROUP" >/dev/null 2>&1 || {
   echo "console-landing.sh: groupe $CONSOLE_GROUP absent — le deck ne pourrait joindre aucune console" >&2

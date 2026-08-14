@@ -218,8 +218,9 @@ EOF
   # sayable in one sentence: traverse the consoles' socket directories.
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   ! grep -qE -- '--groups .*fleet' "$LANDING"
-  # And it REPLACES --init-groups: setpriv refuses both together (measured -- "mutually exclusive
-  # arguments"). Scoped to the setpriv INVOCATIONS: the comment above them explains the swap and
-  # names the flag, and a grep over the whole file would fail on the very prose that documents it.
+  # And it REPLACES --init-groups: setpriv refuses both together -- measured IN THE IMAGE
+  # (util-linux 2.38.1), not on a dev box, because a tool's argument handling is a property of the
+  # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
+  # and names the flag, and a grep over the whole file would fail on the prose that documents it.
   ! grep -E '^[^#]*setpriv' "$LANDING" | grep -q -- '--init-groups'
 }
