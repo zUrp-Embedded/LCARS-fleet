@@ -98,6 +98,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_no_legacy_config_namespace(root),
         check_mcp_wire_inputschema(root),
         check_mcp_tools_gated(root),
+        check_mcp_tool_effects(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
@@ -2206,6 +2207,83 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
           "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
     }
+  end
+
+  # 6-106 — L'EXHAUSTIVITE DE LA CLASSIFICATION DES OUTILS, MECANIQUE OU RIEN.
+  #
+  # L'acceptor protegeait cinq outils sur ~17 contre le double effet, depuis une liste de mots nus
+  # posee LOIN des definitions. Deplacer cette liste a cote des `deftool` la rend traversable par un
+  # renommage — ce qui repare la panne du 2026-08-11 — mais ne repare PAS l'oubli : rien n'oblige
+  # celui qui ajoute un `deftool` a le classer.
+  #
+  # Ce check est ce qui l'oblige, et il porte dans les DEUX sens :
+  #   * un outil declare sans effet → le prochain mutateur ajoute est protege par defaut
+  #     (`:unknown` → single-flight) et le gate NOMME l'omission au lieu de la laisser dormir ;
+  #   * un effet declare pour un outil qui n'existe plus → le residu d'un renommage, exactement la
+  #     forme du bug d'origine, vue de l'autre cote.
+  #
+  # Meme posture d'instrument que son voisin : les findings sont des ABSENCES, et un parseur casse
+  # produit les memes. Le plancher attrape un instrument aveugle, il ne fige pas le nombre d'outils.
+  @doc false
+  def check_mcp_tool_effects(root) do
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+    classified = tool_effect_names(quoted!(root, tools_rel))
+
+    unclassified = declared |> Enum.reject(&(&1 in classified)) |> Enum.sort()
+    orphan = classified |> Enum.reject(&(&1 in declared)) |> Enum.sort()
+
+    broken =
+      cond do
+        MapSet.size(declared) < 12 ->
+          "only #{MapSet.size(declared)} deftool found (expected 12+)"
+
+        MapSet.size(classified) < 12 ->
+          "@tool_effects has #{MapSet.size(classified)} entries (12+)"
+
+        true ->
+          nil
+      end
+
+    %{
+      id: "mcp.tool_effects",
+      remediation:
+        "declare the tool's world-effect in `@tool_effects` of Fleet.MCP.PodTools, next to its " <>
+          "deftool: `:mutation` (changes the world → single-flight), `:protocol` (the pod's own " <>
+          "IN/OUT channel, whose re-emission is designed and owned by the TaskQueue) or `:read`",
+      status: if(is_nil(broken) and unclassified == [] and orphan == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken ->
+            ["#{tools_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          unclassified != [] ->
+            ["#{tools_rel}: tools with no declared effect #{inspect(unclassified)}"]
+
+          orphan != [] ->
+            ["#{tools_rel}: @tool_effects names no tool declares #{inspect(orphan)}"]
+
+          true ->
+            []
+        end,
+      note: "#{MapSet.size(declared)} tools, each with a declared world-effect"
+    }
+  end
+
+  # Keys of the `@tool_effects` module attribute, read from the AST — never from a grep, for the
+  # same reason as `deftool_names/1`: a comment quoting a tool name must not be able to green this.
+  defp tool_effect_names(ast) do
+    ast
+    |> collect(fn
+      {:@, _, [{:tool_effects, _, [{:%{}, _, pairs}]}]} when is_list(pairs) ->
+        for {k, _v} <- pairs, is_binary(k), do: k
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   # ── Catalogue install paths: ONE fact, two languages ─────────────────────

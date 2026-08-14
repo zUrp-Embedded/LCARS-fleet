@@ -11,7 +11,10 @@ defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
   # first invocation signals the coordinator and BLOCKS until released; a concurrent duplicate (the
   # retry that overran the stdio bridge timeout) must be deduped by `Fleet.MCP.Idempotency` and never
   # reach this handler a second time. `:idem_dup_count` counts the real invocations.
-  def handle_tool_call("issue_create", _args, _state) do
+  # 6-106 — `issue_retire` REPOND ICI AUSSI, et c'est le point : il ne figurait pas dans la liste de
+  # cinq mots nus que ce site protegeait, alors qu'il ferme un ticket et sa PR. Le meme corps sert
+  # les deux outils pour que la seule difference mesuree soit la COUVERTURE, jamais le stub.
+  def handle_tool_call(tool, _args, _state) when tool in ["issue_create", "issue_retire"] do
     if pid = Process.whereis(:idem_dup_listener), do: send(pid, {:handling, self()})
 
     receive do
@@ -21,7 +24,7 @@ defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
     end
 
     Agent.update(:idem_dup_count, &(&1 + 1))
-    {:ok, %{"content" => [%{"type" => "text", "text" => "{\"status\":\"issue_created\"}"}]}, %{}}
+    {:ok, %{"content" => [%{"type" => "text", "text" => "{\"status\":\"#{tool}\"}"}]}, %{}}
   end
 
   def handle_tool_call(_tool, _args, state), do: {:error, :unexpected_tool, state}
@@ -467,6 +470,60 @@ defmodule Fleet.MCP.PodSocketTest do
 
     # Exactly ONE forge-facing invocation across the two concurrent calls.
     assert Agent.get(agent, & &1) == 1
+  end
+
+  test "6-106: un mutateur ABSENT de l'ancienne liste est desormais protege lui aussi" do
+    # `issue_retire` ferme un ticket ET sa PR vivante. Il n'etait pas dans les cinq mots nus que ce
+    # site protegeait : deux appels concurrents identiques le jouaient DEUX fois. Le test est le
+    # jumeau exact du precedent — meme stub, meme scenario — pour que la seule variable soit la
+    # couverture. La classification vit maintenant chez `PodTools` et le gate en prouve
+    # l'exhaustivite ; ceci prouve qu'elle est bien LUE ici.
+    Process.register(self(), :idem_dup_listener)
+    {:ok, agent} = Agent.start_link(fn -> 0 end, name: :idem_dup_count)
+    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    Fleet.TestEnv.put_env_restoring(
+      :lcars_fleet,
+      :mcp_tool_handler,
+      Fleet.MCP.PodSocketTest.RecordingMutationTools
+    )
+
+    pod = uniq("idemretire")
+    {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_retire"])
+    on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+    args = %{"number" => 7, "reason" => "doublon"}
+
+    ta = Task.async(fn -> call(path, 1, "issue_retire", args) end)
+
+    handler =
+      receive do
+        {:handling, pid} -> pid
+      after
+        3_000 -> flunk("le premier issue_retire n'a jamais atteint le handler")
+      end
+
+    tb = Task.async(fn -> call(path, 2, "issue_retire", args) end)
+    refute_receive {:handling, _}, 500
+
+    send(handler, :proceed)
+    assert %{"result" => %{"content" => _}} = Task.await(ta, 3_000)
+    assert %{"result" => %{"content" => _}} = Task.await(tb, 3_000)
+
+    assert Agent.get(agent, & &1) == 1
+  end
+
+  test "6-106: le canal IN/OUT du pod n'est PAS arbitre ici — sa re-emission est concue" do
+    # `submit_result` mute la FILE, et sa re-emission apres le timeout de 30 s du pont stdio est un
+    # comportement CONCU : un re-submit rejoue honnetement tant que la diffusion n'a pas ete
+    # confirmee, et c'est ce qui repare une completion perdue. La `TaskQueue` est deja l'autorite de
+    # ces semantiques — poser un second arbitre devant donnerait deux proprietaires a un mecanisme.
+    assert Fleet.MCP.PodTools.tool_effect("submit_result") == :protocol
+    assert Fleet.MCP.PodTools.tool_effect("get_work_item") == :protocol
+
+    # Et la direction sure pour ce qu'on ne connait pas : un outil non declare est traite comme une
+    # mutation, jamais dispatche nu.
+    assert Fleet.MCP.PodTools.tool_effect("outil_qui_n_existe_pas") == :unknown
   end
 
   test "SOC-EFF-005: readiness counts the `*/sock`, not the dirs — a stray dir does not fake 'orphaned'",

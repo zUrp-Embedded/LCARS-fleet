@@ -370,18 +370,27 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.
-  # ⚠ MOTS NUS dans un sigil : cette liste ne ressemble a aucune autre occurrence d'un nom d'outil
-  # (ni chaine citee, ni `mcp__fleet__`, ni prose). Le renommage objet-d'abord du 2026-08-11 l'a
-  # donc manquee, et le gate l'a dit — le dedup single-flight cessait de reconnaitre les mutations.
-  # Une liste de noms d'outils qui ne s'ecrit pas comme les autres est une liste qu'un renommage
-  # rate en silence.
-  @mutation_tools ~w(issue_create project_create project_install project_delete issue_comment)
+  #
+  # ⚠ CE SITE PORTAIT UNE LISTE DE CINQ MOTS NUS DANS UN SIGIL, pour ~17 mutateurs (6-106). Elle ne
+  # ressemblait a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
+  # prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE. Une liste qui ne
+  # s'ecrit pas comme les autres est une liste qu'un renommage rate — et elle vivait LOIN des
+  # definitions qu'elle pretendait couvrir, ce qui est l'autre moitie du probleme.
+  #
+  # L'effet vit desormais A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate.
+  # Ici on ne fait plus que LIRE une decision prise la-bas.
+  #
+  # `:unknown` (un outil que `PodTools` ne declare pas) est traite comme une MUTATION : c'est la
+  # direction sure — un mutateur non declare est protege en attendant que le gate le dise, plutot
+  # que dispatche nu. Le cout d'une erreur dans ce sens est une latence sur des appels concurrents
+  # identiques ; dans l'autre, c'est un effet forge duplique.
+  @single_flight_effects [:mutation, :unknown]
 
   # SOC-RES-001: tool crashes become MCP error results instead of dropped connections.
   defp safe_handle_tool_call(tool, tool_args, pod_id) do
     handle = fn -> tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end
 
-    if tool in @mutation_tools do
+    if Fleet.MCP.PodTools.tool_effect(tool) in @single_flight_effects do
       key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
       Fleet.MCP.Idempotency.run(key, handle, succeeded?: &match?({:ok, _, _}, &1))
     else
