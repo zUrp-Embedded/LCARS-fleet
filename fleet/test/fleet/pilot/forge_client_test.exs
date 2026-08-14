@@ -889,6 +889,55 @@ defmodule Fleet.Forge.ClientTest do
                )
     end
 
+    # JG-112 — `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux
+    # postaient, et c'est le bon arbitrage (le `@doc` l'ecrit : refuser supprimerait un commentaire
+    # legitime). Mais ces signatures sont METIER — budget de rounds, sceau, escalade — donc un
+    # doublon coute ailleurs et plus tard. Le moment ou le doute naît est le seul ou la correlation
+    # existe encore.
+    test "JG-112: historique ILLISIBLE → on poste, et on DIT que la dedup n'a pas ete verifiee" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {503, %{"message" => "down"}},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 1}}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :posted} =
+                   ForgeClient.post_comment(
+                     "fleet/lcars",
+                     42,
+                     "[step_run:engineer:abc] livrable",
+                     dedup_opts(handlers, "[step_run:engineer:abc]")
+                   )
+        end)
+
+      assert log =~ "dedup NOT verified",
+             "une relecture impossible produit le meme silence qu'une relecture reussie et vide"
+
+      assert log =~ "step_run:engineer:abc", "la trace ne porte pas la signature : pas correlable"
+    end
+
+    test "TEMOIN JG-112 — une relecture REUSSIE et vide ne dit rien" do
+      # Sans ce temoin, avertir a chaque post passerait le test ci-dessus.
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {200, []},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {201, %{"id" => 1}}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :posted} =
+                   ForgeClient.post_comment(
+                     "fleet/lcars",
+                     42,
+                     "[step_run:engineer:abc] livrable",
+                     dedup_opts(handlers, "[step_run:engineer:abc]")
+                   )
+        end)
+
+      refute log =~ "dedup NOT verified"
+    end
+
     test "no-op when the signature already exists in a SYSTEM comment (idempotent replay)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>

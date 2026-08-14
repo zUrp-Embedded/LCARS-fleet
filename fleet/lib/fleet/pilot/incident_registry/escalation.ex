@@ -76,8 +76,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     #{marker}
     """
 
+    dedup = find_open_incident(list_fun, repo, marker)
+
     result =
-      case find_open_incident(list_fun, repo, marker) do
+      case dedup do
         {:ok, existing} ->
           # An open issue already carries this occurrence's marker — the create either landed and its
           # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
@@ -89,8 +91,25 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
           finalize_escalation(add_label_fun, repo, existing, label)
 
-        nil ->
+        :none ->
           create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label)
+
+        {:unverified, why} ->
+          Logger.warning(
+            "IncidentRegistry: dedup readback FAILED for #{inspect(sig)} (#{inspect(why)}) — " <>
+              "opening the issue anyway (a silent non-escalation is worse), and SAYING SO in its " <>
+              "body: a twin carrying the same marker may already be open"
+          )
+
+          create_and_label(
+            create_fun,
+            add_label_fun,
+            repo,
+            title,
+            body <> dedup_warning(dedup),
+            assignee,
+            label
+          )
       end
 
     _ = announce(result, kind, subject, repo, label, opts)
@@ -171,22 +190,45 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # the body text). The idempotency key of the create.
   defp incident_marker(sig), do: "<!-- lcars-incident:#{sig} -->"
 
-  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number;
-  # `nil` if none, OR if the listing is unreadable — a readback failure must NOT suppress an alarm,
-  # so we fall through to create (fail-closed toward having an issue, the duplicate risk is the lesser
-  # evil than a silent non-escalation). The `body` field is present on Gitea's issue-list payloads.
+  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number.
+  #
+  # L'ARBITRAGE NE CHANGE PAS — une relecture ratee ne doit PAS supprimer une alarme, donc on cree
+  # quand meme : le risque de doublon est le moindre mal devant une non-escalade silencieuse.
+  #
+  # ⚠ CE QUI CHANGE : `nil` disait DEUX choses. « Le tableau a ete LU et ne porte pas ce marqueur »
+  # et « le tableau est ILLISIBLE » menaient au meme geste, et surtout au meme RESULTAT — une issue
+  # sysadmin identique dans les deux cas. Le lecteur de cette issue est un humain devant le tableau
+  # ops : si un doublon apparait, rien dans l'issue ne lui dit POURQUOI, ni qu'il doit chercher sa
+  # jumelle. C'est la meme forme que JG-045 (creation conservee, doute nomme), sauf qu'ici le doute
+  # doit voyager jusqu'a l'HUMAIN, pas jusqu'a l'appelant.
   defp find_open_incident(list_fun, repo, marker) do
     case list_fun.(repo, []) do
       {:ok, issues} when is_list(issues) ->
-        Enum.find_value(issues, fn issue ->
+        Enum.find_value(issues, :none, fn issue ->
           body = Map.get(issue, "body") || ""
           num = Map.get(issue, "number")
           if is_integer(num) and String.contains?(body, marker), do: {:ok, num}
         end)
 
-      _ ->
-        nil
+      other ->
+        {:unverified, other}
     end
+  end
+
+  # La phrase que le doublon eventuel portera, dans le CORPS de l'issue — pas seulement dans un log
+  # que personne ne relit en face d'un tableau ops.
+  #
+  # ⚠ UNE SEULE CLAUSE, ET C'EST DIALYZER QUI L'A DIT. J'avais ajoute un `dedup_warning(_none)`
+  # rendant `""` « au cas ou » : `pattern_match_cov`, il ne peut jamais matcher, cette fonction
+  # n'etant appelee que depuis la branche `{:unverified, _}`. Le « present = doute, absent =
+  # mesure » vit dans le CHOIX DE BRANCHE de l'appelant, pas dans un repli ici.
+  defp dedup_warning({:unverified, why}) do
+    """
+
+    > ⚠ **Déduplication NON vérifiée** : la relecture des issues ouvertes a échoué
+    > (`#{inspect(why)}`). Une issue portant le même marqueur peut déjà exister — cherchez-la avant
+    > d'agir. L'alarme a été ouverte quand même : une escalade silencieuse serait pire qu'un doublon.
+    """
   end
 
   @doc """

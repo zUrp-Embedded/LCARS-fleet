@@ -170,7 +170,7 @@ defmodule Fleet.Forge.Client do
     sig = Keyword.get(opts, :dedup_signature)
 
     with {:ok, config} <- resolve_config(opts) do
-      if sig && comment_signed?(config, repo, issue_number, sig, opts) do
+      if sig && signed_or_warn(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
         case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
@@ -962,6 +962,32 @@ defmodule Fleet.Forge.Client do
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 
+  # Le doute ne change pas le GESTE (on poste), il change ce qu'on en SAIT. `false` ici veut dire
+  # « poste » dans les deux cas, mais un seul des deux est une mesure.
+  defp signed_or_warn(config, repo, issue_number, sig, opts) do
+    case comment_signed?(config, repo, issue_number, sig, opts) do
+      {:ok, signed?} ->
+        signed?
+
+      {:unverified, why} ->
+        Logger.warning(
+          "ForgeClient: dedup NOT verified on #{repo}##{issue_number} (#{inspect(why)}) — posting " <>
+            "anyway (refusing would drop a legitimate comment), but this marker may be a DUPLICATE. " <>
+            "These signatures are business-bearing (rounds budget, seal, escalation), so the cost " <>
+            "lands elsewhere and later: signature=#{inspect(sig)}"
+        )
+
+        false
+    end
+  end
+
+  # ⚠ `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menaient a
+  # poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
+  # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
+  # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
+  # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
+  # ailleurs, plus tard, et loin d'ici. Rendre le doute distinct est ce qui permet de le NOMMER au
+  # moment ou il naît ; c'est le seul endroit ou la correlation existe encore.
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
@@ -969,7 +995,7 @@ defmodule Fleet.Forge.Client do
         trusted =
           cond do
             Keyword.get(opts, :dedup_any_author, false) ->
-              comments
+              {:ok, comments}
 
             true ->
               # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
@@ -979,17 +1005,27 @@ defmodule Fleet.Forge.Client do
               # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
               case trusted_logins(config, opts) do
                 {:ok, logins} ->
-                  Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)
+                  {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-                {:error, _} ->
-                  []
+                # LA LECTURE A REUSSI, LES IDENTITES NON. `[]` disait « aucun commentaire de
+                # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a
+                # ecrit quoi. Second pliage du meme genre que celui d'en dessous, une branche plus
+                # loin.
+                {:error, why} ->
+                  {:unverified, {:trusted_logins, why}}
               end
           end
 
-        Enum.any?(trusted, fn c -> String.contains?(c["body"] || "", sig) end)
+        case trusted do
+          {:unverified, _} = unverified ->
+            unverified
 
-      _ ->
-        false
+          {:ok, list} ->
+            {:ok, Enum.any?(list, &String.contains?(&1["body"] || "", sig))}
+        end
+
+      other ->
+        {:unverified, {:comments_unreadable, other}}
     end
   end
 

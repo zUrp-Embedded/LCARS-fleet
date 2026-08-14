@@ -169,6 +169,71 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     # fichier CORROMPU qui partait en `sha:` du PUT, donc l'ecrasement reussissait. La discipline
     # existait cent-cinquante lignes plus haut, sur l'autre moitie du probleme : « an unreadable
     # forge is NOT an empty one … pushing our LOCAL view would OVERWRITE cross-machine incidents ».
+    # JG-113 — `nil` DISAIT DEUX CHOSES : « le tableau a ete LU et ne porte pas ce marqueur » et
+    # « le tableau est ILLISIBLE ». Les deux menaient au meme geste (creer, fail-closed vers l'alarme
+    # — l'arbitrage est ecrit et il ne change pas) ET au meme RESULTAT : une issue sysadmin
+    # identique. Or son lecteur est un humain devant le tableau ops : si un doublon apparait, rien
+    # dans l'issue ne lui dit pourquoi ni qu'il doit chercher sa jumelle.
+    test "JG-113: relecture de dedup ILLISIBLE → l'issue le DIT dans son corps", %{tmp_dir: tmp} do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        # Le tableau est ILLISIBLE — pas vide.
+        list_issues_fun: fn _r, _o -> {:error, {:http, 503, "down"}} end,
+        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 77} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :recorded = Reg.record_or_escalate("pod", "jg113", :launch_failed, opts)
+          assert {:escalated, 77} = Reg.record_or_escalate("pod", "jg113", :launch_failed, opts)
+        end)
+
+      assert_received {:body, body}
+
+      assert body =~ "Déduplication NON vérifiée",
+             "l'issue ne dit pas que son unicite n'a pas pu etre verifiee — un humain devant un " <>
+               "doublon n'a aucun moyen de savoir pourquoi"
+
+      assert body =~ "503", "le corps ne porte pas la raison de l'echec de relecture"
+      assert log =~ "dedup readback FAILED"
+    end
+
+    test "TEMOIN JG-113 — une relecture REUSSIE et vide n'ajoute aucun avertissement", %{
+      tmp_dir: tmp
+    } do
+      # Sans ce temoin, coller l'avertissement sur TOUTE issue passerait le test ci-dessus et
+      # rendrait la marque inutile : present = doute, absent = mesure.
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+        )
+
+      opts = [
+        server: name,
+        list_issues_fun: fn _r, _o -> {:ok, []} end,
+        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 78} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      assert :recorded = Reg.record_or_escalate("pod", "jg113-ok", :launch_failed, opts)
+      assert {:escalated, 78} = Reg.record_or_escalate("pod", "jg113-ok", :launch_failed, opts)
+
+      assert_received {:body, body}
+      refute body =~ "Déduplication NON vérifiée"
+    end
+
     test "JG-122: forge CORROMPUE → aucun PUT, meme branche que l'illisible", %{tmp_dir: tmp} do
       name = :"reg_corrupt_#{System.unique_integer([:positive])}"
       test_pid = self()
