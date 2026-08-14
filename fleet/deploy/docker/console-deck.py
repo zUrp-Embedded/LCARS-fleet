@@ -696,6 +696,18 @@ PAGE = r"""<!doctype html>
 // `http://<hote>:<port>` pour chaque onglet — la seconde origine, en une ligne.
 let current = null;
 
+// ⚠ `stage` ET `panel` SONT AU SCOPE DU MODULE, ET C'ETAIT UN BUG FATAL DE LES AVOIR EU AILLEURS.
+// Ils etaient declares en `const` DANS `show()`. `termPane()`, defini au meme niveau que `show()`,
+// les utilise (`stage.appendChild(host)`) — et JavaScript resout les noms LEXICALEMENT, pas depuis
+// l'appelant : dans `termPane` le nom se resolvait au global, ou il n'existait pas.
+// `ReferenceError: stage is not defined` AU PREMIER CLIC sur un terminal, c'est-a-dire sur la
+// fonctionnalite entiere de ce lot.
+//
+// Et rien ne pouvait l'attraper : ce n'est pas une erreur de SYNTAXE, donc `node --check` la voit
+// passer, et aucun test n'executait ce client. C'est le cout exact de « jamais execute ».
+const stage = document.getElementById('stage');
+const panel = document.getElementById('panel');
+
 function el(t, cls, txt) { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
 
 function show(tab) {
@@ -703,8 +715,6 @@ function show(tab) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('here', b.dataset.key === tab.key));
   document.getElementById('crumb').textContent = tab.crumb;
   document.getElementById('hint').textContent = tab.hint || '';
-
-  const stage = document.getElementById('stage'), panel = document.getElementById('panel');
 
   // UN PANNEAU PAR ONGLET, CREE UNE FOIS ET JAMAIS RECONSTRUIT. La raison a change de nature mais
   // pas de forme : au temps des iframes, reecrire un `src` DECHARGEAIT la page et ttyd posait un

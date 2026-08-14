@@ -827,14 +827,95 @@ check("termPane" in _js and "new Terminal(" in _js,
       "et il porte le client de terminal — sinon on validerait la syntaxe d'autre chose")
 
 if _shutil.which("node"):
-    _p = os.path.join(tempfile.mkdtemp(), "page.js")
+    _dir = tempfile.mkdtemp()
+    _p = os.path.join(_dir, "page.js")
     with open(_p, "w") as fh:
         fh.write(_js)
     _r = _subprocess.run(["node", "--check", _p], capture_output=True, text=True)
     check(_r.returncode == 0,
           "le JS de la page PARSE (node --check) : %s" % (_r.stderr.strip().splitlines() or [""])[0])
+
+    # ─── (9j) LE CLIENT DE TERMINAL EST EXECUTE, PAS SEULEMENT PARSE ────────────────────────────
+    # ⚠ CE BLOC EXISTE PARCE QUE `node --check` A LAISSE PASSER UN BUG FATAL. `stage` etait declare
+    # en `const` DANS `show()`, et `termPane()` — defini au meme niveau — l'utilisait. JavaScript
+    # resout les noms LEXICALEMENT, pas depuis l'appelant : `ReferenceError: stage is not defined`
+    # au premier clic sur un terminal, c'est-a-dire sur la fonctionnalite entiere du lot. Une erreur
+    # d'EXECUTION ne se voit pas a la syntaxe ; le seul remede est de faire tourner le code.
+    #
+    # Le harnais est volontairement pauvre : des doublures minces pour le DOM, xterm, le WebSocket
+    # et l'observateur de taille. Il ne teste PAS le rendu (aucun navigateur ici) — il teste ce qui
+    # se casse en silence : la resolution des noms, et les OCTETS qui partent sur le fil.
+    _harness = r"""
+const sent = []; let wsUrl = null, wsProto = null, onmsg = null, onopen = null;
+const mkEl = () => ({ dataset: {}, style: {}, hidden: false, textContent: '', innerHTML: '',
+  classList: { toggle() {}, add() {}, remove() {} },
+  appendChild() {}, removeChild() {}, remove() {}, querySelectorAll: () => [],
+  addEventListener() {}, focus() {} });
+globalThis.document = { getElementById: () => mkEl(), createElement: () => mkEl(),
+  querySelectorAll: () => [], title: '' };
+globalThis.location = { protocol: 'http:', host: 'box:20999' };
+globalThis.CSS = { escape: (s) => s };
+globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+globalThis.addEventListener = () => {};
+globalThis.setInterval = () => 0;
+globalThis.fetch = () => new Promise(() => {});   // `tick()` ne doit rien resoudre ici
+globalThis.WebSocket = class {
+  constructor(url, proto) { wsUrl = url; wsProto = proto; this.readyState = 1;
+    WebSocket.OPEN = 1; setTimeout(() => {}, 0); }
+  send(b) { sent.push(b); }
+  close() {}
+  set onopen(f) { onopen = f; } set onmessage(f) { onmsg = f; }
+  set onclose(f) {} set onerror(f) {}
+};
+globalThis.WebSocket.OPEN = 1;
+let dataCb = null, resizeCb = null; const written = [];
+globalThis.Terminal = class {
+  constructor() { this.cols = 80; this.rows = 24; }
+  loadAddon() {} open() {} focus() {} dispose() {}
+  write(b) { written.push(b); }
+  onData(f) { dataCb = f; } onResize(f) { resizeCb = f; }
+};
+globalThis.FitAddon = { FitAddon: class { activate() {} fit() {} dispose() {} } };
+
+__PAGE__
+
+// LE GESTE MESURE : ouvrir un onglet terminal, exactement comme un clic.
+show({ key: 'console-zoe', crumb: 'X', term: '/console/zoe/ws' });
+onopen();
+const dec = new TextDecoder();
+const out = { url: wsUrl, proto: wsProto, init: dec.decode(sent[0]) };
+dataCb('ls');
+out.input = dec.decode(sent[1]);
+resizeCb();
+out.resize = dec.decode(sent[2]);
+onmsg({ data: new TextEncoder().encode('0bonjour').buffer });
+out.written = dec.decode(written[0]);
+console.log(JSON.stringify(out));
+"""
+    _drive = os.path.join(_dir, "drive.js")
+    with open(_drive, "w") as fh:
+        fh.write(_harness.replace("__PAGE__", _js))
+    _r = _subprocess.run(["node", _drive], capture_output=True, text=True)
+    check(_r.returncode == 0,
+          "le client de terminal S'EXECUTE (ouverture d'un onglet) : %s"
+          % (_r.stderr.strip().splitlines() or [""])[-1:] or "")
+    if _r.returncode == 0:
+        _o = json.loads(_r.stdout.strip().splitlines()[-1])
+        check(_o["url"] == "ws://box:20999/console/zoe/ws",
+              "le WS vise la MEME origine, chemin relatif (vu: %s)" % _o["url"])
+        check(_o["proto"] == ["tty"],
+              "et annonce le sous-protocole que ttyd attend (vu: %s)" % _o["proto"])
+        # La 1re trame est le JSON NON prefixe, encode en binaire — mesure sur le binaire pinne.
+        check(json.loads(_o["init"]).get("columns") == 80,
+              "la 1re trame est le JSON d'init de ttyd (vu: %s)" % _o["init"])
+        check(_o["input"] == "0ls",
+              "une saisie part prefixee '0' (vu: %r)" % _o["input"])
+        check(_o["resize"].startswith("1{") and '"columns"' in _o["resize"],
+              "un redimensionnement part prefixe '1' + JSON (vu: %r)" % _o["resize"])
+        check(_o["written"] == "bonjour",
+              "une sortie serveur '0' est ecrite SANS son prefixe (vu: %r)" % _o["written"])
 else:
-    print("SKIP: node absent — la syntaxe du JS de la page N'A PAS ete verifiee")
+    print("SKIP: node absent — le JS de la page N'A ete ni verifie ni EXECUTE")
 
 deck.humans = _humans_real
 for _s in (t_zoe, t_zoe_pod, t_max, t_adm):
