@@ -48,12 +48,35 @@ say() { echo "[lcars-landing] $*"; }
 command -v python3 >/dev/null || { echo "console-landing.sh: python3 absent de l'image" >&2; exit 1; }
 [[ -r "$DECK_PY" ]] || { echo "console-landing.sh: $DECK_PY introuvable" >&2; exit 1; }
 
+# ─── LE SEUL POUVOIR AJOUTE AU DECK, ET IL SE DIT EN UNE PHRASE ─────────────────────────────────
+# « Traverser les repertoires de socket des consoles. » Si on ne sait pas l'ecrire aussi court, c'est
+# qu'on accorde trop.
+#
+# Le deck RESTE `nobody` : il doit accepter et router TOUS les humains, donc il ne peut etre aucun
+# d'eux. Ce qu'il gagne est exactement un groupe supplementaire, qui ne donne que le `--x` sur
+# `/run/lcars/console/<human>/`. C'est STRICTEMENT MOINS que ce qu'il a deja — il lit
+# `/etc/lcars/deck-oidc.json`, qui porte le secret OIDC.
+#
+# ⚠ SURTOUT PAS le groupe `fleet` (gid 2000) : il porte deja la lecture de `/local/LCARS_v2` et
+# d'ailleurs. Le reutiliser aurait ete plus rapide et aurait accorde tout le reste par la meme
+# occasion.
+#
+# ⚠ C'EST UN REMPLACEMENT DE `--init-groups`, PAS UN AJOUT — mesure du 2026-08-14 :
+# `setpriv: mutually exclusive arguments: --clear-groups --keep-groups --init-groups --groups`.
+# Et le remplacement ne retire rien : dans cette image, `id nobody` rend `groups=65534(nogroup)` et
+# aucune ligne de `/etc/group` ne le cite en membre. `--init-groups` ne lui donnait donc rien.
+CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
+getent group "$CONSOLE_GROUP" >/dev/null 2>&1 || {
+  echo "console-landing.sh: groupe $CONSOLE_GROUP absent — le deck ne pourrait joindre aucune console" >&2
+  exit 1
+}
+
 export LCARS_LANDING_PORT="$PORT"
 SERVE=(python3 "$DECK_PY")
 say "deck sur le port $PORT (http://127.0.0.1:$PORT une fois publié)"
 
 if [[ "$FOREGROUND" -eq 1 ]]; then
-  exec setpriv --reuid nobody --regid nogroup --init-groups -- "${SERVE[@]}"
+  exec setpriv --reuid nobody --regid nogroup --groups "$CONSOLE_GROUP" -- "${SERVE[@]}"
 fi
-setpriv --reuid nobody --regid nogroup --init-groups -- "${SERVE[@]}" &
+setpriv --reuid nobody --regid nogroup --groups "$CONSOLE_GROUP" -- "${SERVE[@]}" &
 say "deck lancé (pid $!)"

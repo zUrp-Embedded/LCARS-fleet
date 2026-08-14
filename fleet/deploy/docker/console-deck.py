@@ -687,6 +687,19 @@ tick(); setInterval(tick, 10000);
 class Deck(BaseHTTPRequestHandler):
     server_version = "lcars-deck"
 
+    # HTTP/1.1 IS A PREREQUISITE, NOT A MODERNISATION. `BaseHTTPRequestHandler` defaults to
+    # HTTP/1.0, and a 1.0 responder CANNOT perform `101 Switching Protocols` -- so the deck could
+    # never terminate a WebSocket, and every terminal had to live on its own origin behind its own
+    # port. That second origin is what asks nobody for anything, and the iframe exists only to sew
+    # the two back together: one line here is what makes a single origin possible at all.
+    #
+    # SAFE BECAUSE EVERY RESPONSE PATH IS LENGTH-DELIMITED, and that was checked rather than
+    # assumed: 1.1 keeps the connection alive by default, so a reply with neither `Content-Length`
+    # nor chunked encoding leaves the client waiting for an end that never comes. This handler has
+    # exactly two response paths -- `_send` and `_redirect` -- and both set `Content-Length`; there
+    # is no `send_error` call. A third path added later MUST set it too.
+    protocol_version = "HTTP/1.1"
+
     def _send(self, code, body, ctype, cookie=None):
         raw = body.encode("utf-8")
         self.send_response(code)

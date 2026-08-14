@@ -231,6 +231,16 @@ RUN apt-get update -qq \
        less bash-completion \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
+    `# LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : traverser les repertoires de socket des consoles.` \
+    `# Il existe parce que le producteur (ttyd, sous l'humain) et le consommateur (le deck, sous` \
+    `# nobody) doivent se rencontrer SANS que ni l'un ni l'autre ne change d'identite. Le repertoire` \
+    `# de chaque humain est 2710 <human>:lcars-console : le setgid fait heriter ce groupe a la` \
+    `# socket que ttyd cree, et le --x du groupe donne la traversee sans le listage.` \
+    `#` \
+    `# ⚠ PAS le groupe fleet (gid 2000), ET C'EST LE PIEGE A EVITER : celui-la porte deja la lecture de` \
+    `# /local/LCARS_v2 et d'ailleurs. Le reutiliser aurait ete plus court et aurait accorde tout le` \
+    `# reste par la meme occasion. Un pouvoir qu'on ne sait pas dire en une phrase est trop large.` \
+    && groupadd -g 2001 lcars-console \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :
