@@ -49,6 +49,27 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   If the enumeration of live pods fails (`live_owned_refs/1 → :error`), we reclaim NOTHING and
   keep `prior_suspects` as is — NEVER unlock blindly.
 
+  ## Policy on `unknown`
+
+  Both duties act destructively (a lock reclaim re-dispatches, a reap kills), so an unreadable
+  ownership must never read as an absence of ownership. Stated once, here, because it used to be
+  assembled from four inline comments and two of them certified it as "safe" while the returns did
+  not carry that:
+
+    * A broker that CANNOT BE ASKED — `pod_status/1` exits or raises — is `:unknown`. Never `false`,
+      never `[]`. `pod_task_state/2` defers the reap; `pod_pull_state/2` makes `live_owned_refs/2`
+      answer `:error`, which the fail-safe above turns into "reclaim nothing this cycle".
+    * A broker that ANSWERED is a measured fact, `[]` and `{:ok, nil}` included: out of scope, no
+      active task, terminal state. Those DO release ownership — that is the orphan this duty exists
+      to collect.
+    * A seam MODULE that does not export the function is neither: it is a compile-time capability,
+      identical on every tick (a test stub), so it stays a measured empty and not indeterminacy.
+      Reading it as `:unknown` would make every cycle `:error` under such a stub, i.e. a
+      reconciliation that never reclaims anything.
+
+  The confirmation delay is the caller's ~60 s grace (`prior_suspects` must survive two cycles);
+  `unknown` does not consume it — the cycle simply declares no orphan.
+
   ## Boundary: explicit seams struct (not the whole `state`)
 
   The cluster reads only 5 seams of the poller (`forge`/`spawner`/`task_queue`/`repo`/`forge_opts`). We
@@ -414,8 +435,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # past the grace and its lock churns (reclaim → re-escalate, a harmless replay that clobbers the
   # pending eval with its own re-issue) — transient churn against a permanent silent wedge. The evals
   # are on ISSUES (the PR judges go through dispatch_review, without a gate) → refs `{repo, :issue, n}`.
-  # `function_exported?`: a task_queue stub without `list_active` → empty MapSet (conservative, same
-  # pattern as `pod_active_issue_id` — masks nothing it does not know).
+  # `function_exported?`: a task_queue stub without `list_active` → empty MapSet, which makes those
+  # locks RECLAIMABLE. That is not the safe direction, it is a decision, and its reason is the one
+  # `project_pod_owned_refs/3` states below: a missing function is a CAPABILITY of the module,
+  # decided at compile time and identical on every tick — a test stub, never a runtime failure.
   defp gate_eval_owned_refs(tq, repo) do
     if function_exported?(tq, :list_active, 0) do
       for %{metadata: meta, state: item_state} <- tq.list_active(),
@@ -444,7 +467,6 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   # A project-scoped pod of THIS repo (scope prefix) owns the ref of its active task (`issue-N` ->
   # {repo, :issue, N}). Keeps the repo SCOPE: an eng of another repo does not own a ref of seams.repo.
-  # function_exported?: a task_queue stub without the fn -> [] (conservative, masks nothing).
   # `{:ok, refs}` = a MEASURED answer, `[]` included — out of this repo's scope, no active issue, an
   # unparseable issue_id: three facts, all of them "owns no ref here". `:unknown` = the TaskQueue
   # could not be asked at all, which is not the same fact and must not wear its clothes.
@@ -472,7 +494,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # must be ACTIVE per the SINGLE AUTHORITY `WorkItem.active?/1` (`:pending`/`:assigned`).
   # `{:ok, nil}` (idle) and the TERMINAL states (`:completed`/`:failed`/`:cleared`) → `false`: a delivered
   # (`:completed`) pod no longer owns its lock (F-C050 — else a completion LOST before open_pr wedges the
-  # lock forever). Tolerant (any anomaly → `false`: a pod whose activity cannot be established masks no orphan).
+  # lock forever). An anomaly is NEVER `false` here — it is `:unknown`.
   # THREE STATES, because two of them used to be one and the difference is a reap.
   #
   # `{:ok, nil}` and the terminal states mean the queue ANSWERED and the pod owns nothing: an
