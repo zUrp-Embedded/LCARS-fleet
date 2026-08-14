@@ -365,7 +365,11 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       send(
         pid,
         Fleet.Event.new(:mcp, :"project_publish.done",
-          payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => "pod-req"}
+          payload: %{
+            "repo" => "fleet/demo",
+            "url" => "https://forge/pr/1",
+            "requester_pod_id" => "pod-req"
+          }
         )
       )
 
@@ -403,7 +407,12 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       send(
         pid,
         Fleet.Event.new(:mcp, :"project_publish.failed",
-          payload: %{"repo" => "fleet/demo", "reason" => "not_linked", "reason_detail" => "not_linked", "requester_pod_id" => "pod-req2"}
+          payload: %{
+            "repo" => "fleet/demo",
+            "reason" => "not_linked",
+            "reason_detail" => "not_linked",
+            "requester_pod_id" => "pod-req2"
+          }
         )
       )
 
@@ -418,7 +427,11 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       send(
         pid,
         Fleet.Event.new(:mcp, :"project_publish.done",
-          payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => nil}
+          payload: %{
+            "repo" => "fleet/demo",
+            "url" => "https://forge/pr/1",
+            "requester_pod_id" => nil
+          }
         )
       )
 

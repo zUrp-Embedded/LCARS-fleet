@@ -52,7 +52,12 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
         safe_emit(
           :"project_publish.failed",
-          %{"repo" => repo, "reason" => cat, "reason_detail" => detail, "requester_pod_id" => requester},
+          %{
+            "repo" => repo,
+            "reason" => cat,
+            "reason_detail" => detail,
+            "requester_pod_id" => requester
+          },
           repo
         )
     end
@@ -64,7 +69,12 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
       safe_emit(
         :"project_publish.failed",
-        %{"repo" => repo, "reason" => "raised", "reason_detail" => Exception.message(e), "requester_pod_id" => requester},
+        %{
+          "repo" => repo,
+          "reason" => "raised",
+          "reason_detail" => Exception.message(e),
+          "requester_pod_id" => requester
+        },
         repo
       )
 
@@ -87,7 +97,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
          {:ok, forge_url} <- env("FORGE_BASE_URL"),
          {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
          args = rail_args(repo, b, forge_url, forge_tok, fresh_work(slug)),
-         {:ok, {out, 0}} <- Fleet.Credentials.Shell.run(rail_path(), args, timeout: @rail_timeout_ms) do
+         {:ok, {out, 0}} <-
+           Fleet.Credentials.Shell.run(rail_path(), args, timeout: @rail_timeout_ms) do
       {:ok, parse_result(out)}
     else
       {:ok, {out, code}} -> {:error, {:rail_exit, code, last_line(out)}}
@@ -106,8 +117,19 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     end
   end
 
-  defp file_read(path, err), do: (case File.read(path), do: ({:ok, r} -> {:ok, r}; {:error, _} -> {:error, err}))
-  defp decode(raw, err), do: (case Jason.decode(raw), do: ({:ok, m} -> {:ok, m}; {:error, _} -> {:error, err}))
+  defp file_read(path, err) do
+    case File.read(path) do
+      {:ok, r} -> {:ok, r}
+      {:error, _} -> {:error, err}
+    end
+  end
+
+  defp decode(raw, err) do
+    case Jason.decode(raw) do
+      {:ok, m} -> {:ok, m}
+      {:error, _} -> {:error, err}
+    end
+  end
 
   defp require_keys(map, keys, path) do
     missing = Enum.reject(keys, fn k -> is_binary(Map.get(map, k)) and Map.get(map, k) != "" end)
@@ -123,14 +145,22 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   defp rail_args(repo, b, forge_url, forge_tok, work) do
     [
-      "--project", repo,
-      "--forge", forge_url,
-      "--forge-token-file", forge_tok,
-      "--host", b["host"],
-      "--dest-repo", b["dest_repo"],
-      "--dest-host", b["dest_host"],
-      "--base", Map.get(b, "base") || "main",
-      "--work", work
+      "--project",
+      repo,
+      "--forge",
+      forge_url,
+      "--forge-token-file",
+      forge_tok,
+      "--host",
+      b["host"],
+      "--dest-repo",
+      b["dest_repo"],
+      "--dest-host",
+      b["dest_host"],
+      "--base",
+      Map.get(b, "base") || "main",
+      "--work",
+      work
     ]
   end
 
@@ -139,7 +169,13 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   # location without an MCP->Spawner call (config read, not a boundary edge). Namespace is the post-D-07
   # `:lcars_fleet` app with a domain-prefixed key; the pre-migration spawner atom is dead.
   defp rail_path do
-    launcher = Application.get_env(:lcars_fleet, :spawner_claude_launch_path, "/usr/local/bin/claude_launch.sh")
+    launcher =
+      Application.get_env(
+        :lcars_fleet,
+        :spawner_claude_launch_path,
+        "/usr/local/bin/claude_launch.sh"
+      )
+
     Path.join(Path.dirname(launcher), "publish-rail.sh")
   end
 

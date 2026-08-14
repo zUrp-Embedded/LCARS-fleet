@@ -17,8 +17,10 @@ defmodule Fleet.MCP.ProjectPublishTest do
   describe "binding_key/1 — org-qualified, homonyms do not collide (defect #2)" do
     test "owner/name -> owner__name, and two orgs of the same name stay apart" do
       assert ProjectPublish.binding_key("fleet/demo") == "fleet__demo"
+
       # the name alone (`demo`) would collide across orgs; the org-qualified key keeps them separate.
-      assert ProjectPublish.binding_key("fleet/demo") != ProjectPublish.binding_key("archives/demo")
+      assert ProjectPublish.binding_key("fleet/demo") !=
+               ProjectPublish.binding_key("archives/demo")
     end
   end
 

@@ -317,8 +317,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # owner/name, exactly two non-empty segments, no path-traversal component.
   defp valid_repo?(repo) do
     case String.split(repo, "/") do
-      [owner, name] -> owner != "" and name != "" and owner not in ~w(. ..) and name not in ~w(. ..)
-      _ -> false
+      [owner, name] ->
+        owner != "" and name != "" and owner not in ~w(. ..) and name not in ~w(. ..)
+
+      _ ->
+        false
     end
   end
 
