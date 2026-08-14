@@ -2,7 +2,7 @@
 # SOURCE: test/publish_to_github/publish_to_github.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.202
-# STATUS: bats tests for etc/publish-to-github.sh post-transform certification
+# STATUS: bats tests for bin/publish-to-github.sh post-transform certification
 #
 # filter-repo's exit 0 means "the callback ran", not "no internal attribution survived". These drive
 # the extracted scan_forbidden_markers (source guard = no filter-repo needed) on a fixture git repo,
@@ -10,7 +10,7 @@
 # passes — the certification the script announces is actually checked, not trusted.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/publish-to-github.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-to-github.sh"
   source "$SCRIPT"
   TMP="$(mktemp -d)"
   cd "$TMP"

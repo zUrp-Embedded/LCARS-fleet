@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: etc/publish-rail.sh
+# SOURCE: bin/publish-rail.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-14
 # STATUS: PROTO-V1 — phase-2 publish rail: certified forge clone -> external rolling PR/MR

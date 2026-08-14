@@ -14,13 +14,19 @@
 #   link           the entry also gets a PATH symlink $LINK_DIR/<name> -> $PREFIX/bin/<name>
 #                  (pointer symlinks ONLY — copies are the dead D3 invention).
 #
-# bin/claude_launch.identity is absent on purpose: neither the pod nor the BEAM reads it;
-# only etc/publish-to-github.sh sources it, from the REPO (cf. etc/README.md).
+# bin/claude_launch.identity SHIPS now: the BEAM's `github_publish` MCP tool runs
+# bin/publish-to-github.sh host-side, which sources the co-located identity for co-author
+# attribution. It was repo-only while nothing but the operator ran the script; the BEAM
+# invocation makes it a runtime dependency (cf. etc/README.md). Same reason for the two
+# publish scripts, moved from etc/ to bin/ so the manifest can carry them.
 fleet_v2                   exec   link
 lcars                      exec   link
 bwrap_launch.sh            exec
 host_launch.sh             exec
 claude_launch.sh           exec
+publish-to-github.sh       exec
+publish-rail.sh            exec
+claude_launch.identity     noexec
 # La declaration d'endpoints du vendor, LUE A COTE de son launcher (Egress.Vendor derive le chemin
 # depuis celui du launcher). Absente de $PREFIX/bin, le proxy d'egress sert une allowlist VIDE et
 # le pod ne joint meme pas son modele — constate au banc : le mur refusait api.anthropic.com.

@@ -545,7 +545,7 @@ PUBLISH_DIR="$HOME/.lcars/publish"
 
 # Plain destination URL — NEVER carries the token. Auth rides in an http.<host>.extraheader passed
 # via GIT_CONFIG_* env (not the URL, not the argv, not the on-disk .git/config), same discipline as
-# etc/publish-to-github.sh / Fleet.Credentials.ForgeAuth.
+# bin/publish-to-github.sh / Fleet.Credentials.ForgeAuth.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
 # Runs `git` against the destination with header auth. The Basic header is the header form of
@@ -675,7 +675,7 @@ cmd_approve() {
   local work="$work_base/clone"
 
   # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
-  "$(dirname "$0")/../etc/publish-to-github.sh" \
+  "$(dirname "$(readlink -f "$0")")/publish-to-github.sh" \
     --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"

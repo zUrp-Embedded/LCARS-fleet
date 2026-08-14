@@ -2,7 +2,7 @@
 # SOURCE: test/publish_rail/publish_rail.bats
 # AUTHOR: consultant
 # STARDATE: 2026-08-14
-# STATUS: bats tests for etc/publish-rail.sh — the fail-closed preconditions + host selection
+# STATUS: bats tests for bin/publish-rail.sh — the fail-closed preconditions + host selection
 #
 # What is covered: the guards that run BEFORE the (destructive, remote-touching) work — argument
 # validation, unknown --host, token readability/emptiness, fresh --work, and the phase-2 precondition
@@ -14,7 +14,7 @@
 # is found by `command -v` (deps check passes) and its ls-remote result is driven by STUB_BASE_PRESENT.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/publish-rail.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-rail.sh"
   TMP="$(mktemp -d)"
   BIN="$TMP/bin"; mkdir -p "$BIN"
 

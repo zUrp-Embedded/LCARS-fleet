@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: etc/publish-to-github.sh
+# SOURCE: bin/publish-to-github.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-07
 # STATUS: PROTO-V1 — GitHub publish transform: rewrites a forge clone's history for a GitHub mirror
@@ -57,7 +57,7 @@ FORGE=""
 REPO=""
 TOKEN_FILE=""
 OUT_DIR=""
-VENDOR_IDENTITY="$SCRIPT_DIR/../bin/claude_launch.identity"
+VENDOR_IDENTITY="$SCRIPT_DIR/claude_launch.identity"
 FILTER_REPO_BIN="${FILTER_REPO_BIN:-git-filter-repo}"
 SYSTEM_EMAIL="lcars-system@lcars.local"
 

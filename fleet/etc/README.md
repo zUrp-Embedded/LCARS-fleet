@@ -66,10 +66,12 @@ flag `link`) — consommée par `etc/install.sh` (qui automatise cette procédur
 du provisioning (`60-deploy check`). Avant le manifest, la liste existait ici ET dans install.sh,
 et les deux copies avaient commencé à dériver.
 
-`bin/claude_launch.identity` n'est **pas** dans le manifest, et c'est voulu : son en-tête précise
-qu'il n'est lu ni par le pod ni par le BEAM. Seul `etc/publish-to-github.sh` le source, et il le
-lit **depuis le repo** (`$SCRIPT_DIR/../bin/`), jamais depuis l'install. Le copier ferait croire
-que le runtime en dépend.
+`bin/claude_launch.identity` **est** dans le manifest depuis que le BEAM publie : le tool MCP
+`github_publish` fait tourner `bin/publish-to-github.sh` côté hôte, et ce script source l'identité
+co-localisée (`$SCRIPT_DIR/claude_launch.identity`) pour l'attribution du co-auteur. Tant que seul
+l'opérateur lançait le script depuis le repo, l'identité n'avait pas à être livrée ; son invocation
+par le BEAM la rend nécessaire à l'install. `bin/publish-rail.sh` (le rail phase-2) et
+`bin/publish-to-github.sh` shippent pour la même raison.
 
 ## Tests intégration
 
