@@ -890,6 +890,32 @@ resizeCb();
 out.resize = dec.decode(sent[2]);
 onmsg({ data: new TextEncoder().encode('0bonjour').buffer });
 out.written = dec.decode(written[0]);
+
+// LES DEUX AUTRES NATURES D'ONGLET, parce que le bug de portee trouve dans `termPane` etait du
+// code de la MEME facture, ecrit dans la meme heure — et rien ne les avait executees non plus.
+// Un onglet `render:` construit son panneau dans le DOM local : c'est le chemin de l'observation.
+out.obs = {};
+try {
+  const h = { human: 'zoe', pods: [{ pod_id: 'p1' }],
+              projection_status: 'deaf',
+              projection: { total: 3, counts: { 'pod.failed': 2 }, stream: ['e1'],
+                            workflow_runs: [], gatekeeper: [], coordination: [], diagnostics: [] } };
+  show({ key: 'deck-zoe', crumb: 'D', render: () => observationPanel(h) });
+  out.obs.ok = true;
+  // La cicatrice qui doit survivre au demenagement : un flux FIGE ne se dit pas « calme ».
+  out.obs.banner = projectionBanner(h);
+  out.obs.live = projectionBanner({ projection_status: 'live' });
+  out.obs.denied = projectionBanner({ projection_status: 'denied' });
+  out.obs.label = fleetLabel({ fleet_status: 'denied', pods: [] });
+} catch (e) { out.obs.ok = false; out.obs.err = String(e); }
+
+// LA FERMETURE : trois gestes, et en oublier un fuit en silence (une socket ouverte cote serveur
+// pour un onglet qui n'existe plus). On rouvre un terminal puis on le laisse tomber.
+show({ key: 'console-zoe', crumb: 'X', term: '/console/zoe/ws' });
+out.closed = { before: terms.size };
+dropPanes(new Set(['autre-chose']));
+out.closed.after = terms.size;
+
 console.log(JSON.stringify(out));
 """
     _drive = os.path.join(_dir, "drive.js")
@@ -914,6 +940,30 @@ console.log(JSON.stringify(out));
               "un redimensionnement part prefixe '1' + JSON (vu: %r)" % _o["resize"])
         check(_o["written"] == "bonjour",
               "une sortie serveur '0' est ecrite SANS son prefixe (vu: %r)" % _o["written"])
+
+        # ── L'ONGLET D'OBSERVATION S'EXECUTE LUI AUSSI ──────────────────────────────────────────
+        check(_o["obs"].get("ok") is True,
+              "le panneau d'observation S'EXECUTE : %s" % _o["obs"].get("err", ""))
+        check(_o["obs"].get("live") is None,
+              "une projection saine n'affiche AUCUN bandeau (vu: %r)" % _o["obs"].get("live"))
+        check("FIG" in (_o["obs"].get("banner") or ""),
+              "une projection SOURDE dit « flux FIGE », pas un tableau vide (vu: %r)"
+              % _o["obs"].get("banner"))
+        # Insensible a la casse ET distincte des autres : ce qui compte n'est pas un mot precis
+        # mais qu'un refus d'acces ne se dise pas comme une fleet eteinte. La 1re version de cette
+        # assertion cherchait « REFUS » en capitales et accusait le code pour une casse.
+        check("refus" in (_o["obs"].get("denied") or "").lower()
+              and _o["obs"].get("denied") != _o["obs"].get("banner"),
+              "et l'acces refuse a sa propre phrase, distincte du flux fige (vu: %r)"
+              % _o["obs"].get("denied"))
+        check("REFUS" in (_o["obs"].get("label") or ""),
+              "le libelle de fleet connait 'denied' — sinon il tombe dans « NON MESUREE » (vu: %r)"
+              % _o["obs"].get("label"))
+
+        # ── LA FERMETURE LIBERE VRAIMENT ────────────────────────────────────────────────────────
+        check(_o["closed"]["before"] == 1 and _o["closed"]["after"] == 0,
+              "dropPanes ferme le terminal et le retire du registre (avant %s, apres %s)"
+              % (_o["closed"]["before"], _o["closed"]["after"]))
 else:
     print("SKIP: node absent — le JS de la page N'A ete ni verifie ni EXECUTE")
 
