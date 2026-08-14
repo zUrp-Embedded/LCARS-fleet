@@ -846,6 +846,19 @@ defmodule Fleet.Spawner.PodTest do
       assert env["LCARS_POD_RESUME"] == "1"
     end
 
+    # 6-108 — POURQUOI CE TEST EXISTE, ET IL A SERVI. Il epingle un comportement qui se lit comme un
+    # oubli : le pod d'a cote (epoque PRECEDENTE) reprend, celui-ci non, avec le meme jsonl. En
+    # instruisant 6-108 j'ai commence par « corriger » cette asymetrie ; ce test a refuse, et il
+    # avait raison.
+    #
+    # La raison, qui n'etait ecrite nulle part : ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT. Ce
+    # qui l'a tue est, jusqu'a preuve du contraire, dans la session qu'on reprendrait — reprendre,
+    # c'est re-entrer dans le poison, et la reprise etant automatique, ca BOUCLE. Le
+    # `PermanentWarden` borne les degats (HALT a 5 echecs) ; il ne les evite pas. Une perte BORNEE
+    # (le contexte d'une session) contre une perte NON BORNEE (un pod qui ne redemarre plus).
+    #
+    # Le seed present dans la mise en scene est load-bearing : sans lui, le vert ne dirait pas
+    # « refuse de reprendre », il dirait « n'avait rien a reprendre ».
     test "boot-epoch: a snapshot from THIS fleet life keeps the fresh-reroll recovery (resume 0)",
          %{tmp_dir: tmp_dir} do
       pod_id = "pod-epoch-same-#{System.unique_integer([:positive])}"

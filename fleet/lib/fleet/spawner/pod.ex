@@ -1085,10 +1085,43 @@ defmodule Fleet.Spawner.Pod do
         case Jason.decode(json) do
           {:ok, %{"session_id" => sid, "phase" => phase_str} = snap} when is_binary(sid) ->
             if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
-              # Same-epoch crash recovery creates a fresh session.
               phase = Recovery.phase_from_string(phase_str) || :launching
-              # `sid` is matched above to validate the snapshot's SHAPE, and goes no further: a
-              # same-epoch recovery does not resume, so the persisted identity has no say here.
+
+              # 6-108 — CE REROLL A UNE RAISON, ET ELLE N'ETAIT ECRITE NULLE PART.
+              #
+              # Ce qu'on voit d'abord ressemble a une incoherence : un pod mort dans l'epoque
+              # courante laisse son `<session_id>.jsonl` dans un pod_dir qui SURVIT
+              # (`safe_mkdir_p` le preserve en `:allocate`). Si son `state.json` a survecu aussi, on
+              # arrive ici et on reroll une session fraiche. S'il n'avait PAS survecu, le meme pod,
+              # avec le meme jsonl, tombait sur la branche `:enoent` et REPRENAIT — la survie d'un
+              # fichier de recuperation semblant decider du sort du travail accumule.
+              #
+              # ⚠ ET POURTANT LE REROLL EST LA BONNE REPONSE — j'ai commence par « corriger » cette
+              # branche vers `maybe_slot_resume`, et un test a refuse, titre compris. Il avait
+              # raison, et la raison n'etait ecrite NULLE PART :
+              #
+              # ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT. Ce qui l'a tue est, jusqu'a preuve
+              # du contraire, dans la session qu'on s'appreterait a reprendre — un tour qui fait
+              # exploser le backend, un transcript tronque, un etat que le vendor refuse. Reprendre,
+              # c'est RE-ENTRER DANS LE POISON, et la reprise etant automatique, ca boucle. Le
+              # `PermanentWarden` borne les degats (HALT a 5 echecs consecutifs) ; il ne les evite
+              # pas. On echange donc une perte BORNEE — le contexte d'une session — contre une perte
+              # NON BORNEE : un pod qui ne redemarre plus.
+              #
+              # Les deux autres branches ne sont donc pas incoherentes, elles repondent a une AUTRE
+              # question : « qu'est-ce qui accuse cette session ? ». Epoque precedente — rien, un
+              # `fleet_v2 stop` propre laisse le meme snapshot non terminal (cicatrice du
+              # 2026-07-19 : sans le discriminant d'epoque, tout redemarrage tombait en `:recreate`
+              # et le slot ne revenait jamais). `state.json` absent — rien non plus, aucun indice ne
+              # designe la session. Ici, et ici seulement, quelque chose l'accuse.
+              #
+              # `sid` est matche ci-dessus pour valider la FORME du snapshot et ne va pas plus loin ;
+              # un `session_id` non-binaire tombe dans la clause `_` (« PRESENT mais CORROMPU »).
+              #
+              # Le transcript n'est pas perdu par ce chemin : `teardown_backend/1` ne touche qu'au
+              # holder et au sock-dir, et le pod_dir est un bind HOTE (mesure du 2026-08-08, cf. la
+              # clause `:releasing`). Ce qui l'efface est le GC de `:cleaning`, delibere et motive —
+              # sans lui `--session-id` buterait sur « Session ID already in use ».
               Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
             else
               # Previous-epoch snapshots use the normal live/seed/fresh decision.
