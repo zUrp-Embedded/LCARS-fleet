@@ -179,6 +179,25 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Deletes a branch, reporting `:deleted` or `:absent` — never conflating either with a failure.
+
+  A 404 SATISFIES a caller that asked for the branch to be gone, so it is a success and not an
+  error. Everything else is reported: this primitive exists to UNDO a mutation, and a compensation
+  that cannot prove it removed what it created must never be announced as clean.
+  """
+  @spec delete_branch(String.t(), String.t(), Keyword.t()) ::
+          {:ok, :deleted | :absent} | {:error, term()}
+  def delete_branch(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+        {:ok, _} -> {:ok, :deleted}
+        {:error, {:http, 404, _}} -> {:ok, :absent}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
   Distinguishes a proven missing account (`{:ok, false}`) from a forge failure.
   """
   @spec user_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}

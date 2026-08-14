@@ -69,19 +69,47 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # non-fast-forward: a test whose verdict came from the clock. Answering truthfully also
     # exercises the `ops` idempotence `import/2` promises, instead of bypassing it.
     # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
+    # `:branch_exists_error` fait tomber la lecture d'UNE face nommee : c'est ainsi qu'on met
+    # `workshop` en echec APRES que `ops` a ete publiee, le scenario exact de 6-124.
     def branch_exists?(full_name, branch, _fc) do
-      path = bare_path(full_name)
+      if Process.get(:branch_exists_error) == branch do
+        {:error, {:http, 503, "down"}}
+      else
+        path = bare_path(full_name)
 
-      {:ok,
-       File.dir?(path) and
-         match?(
-           {_, 0},
-           System.cmd(
-             "git",
-             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-             stderr_to_stdout: true
-           )
-         )}
+        {:ok,
+         File.dir?(path) and
+           match?(
+             {_, 0},
+             System.cmd(
+               "git",
+               ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+               stderr_to_stdout: true
+             )
+           )}
+      end
+    end
+
+    # 6-124 — la suppression est REELLE sur le depot nu, pour que l'etat distant final soit
+    # observable et pas seulement declare. `:delete_branch_result` fait echouer la compensation
+    # elle-meme, qui est le seul cas ou l'appelant ne doit PAS croire a un retry propre.
+    def delete_branch(full_name, branch, _fc) do
+      case Process.get(:delete_branch_result) do
+        nil ->
+          {_, 0} =
+            System.cmd(
+              "git",
+              ["-C", bare_path(full_name), "update-ref", "-d", "refs/heads/#{branch}"],
+              stderr_to_stdout: true
+            )
+
+          send(self(), {:branch_deleted, full_name, branch})
+          {:ok, :deleted}
+
+        other ->
+          send(self(), {:branch_delete_refused, full_name, branch})
+          other
+      end
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
@@ -195,7 +223,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     assert File.dir?(Path.join(o[:workshop_root], "apollo"))
   end
 
-  test "a LATE import failure compensates the DIRS ONLY — the pre-existing repo is NEVER deleted",
+  test "a LATE import failure compensates the DIRS and the branches it pushed — the pre-existing repo is NEVER deleted",
        %{tmp_dir: tmp} do
     o = opts(tmp)
     # The repo pre-exists on the forge (created out-of-band, as an import target is).
@@ -210,16 +238,86 @@ defmodule Fleet.Project.OnboardCompensationTest do
     refute File.exists?(Path.join(o[:ops_root], "heritage"))
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
 
-    # `ops` was published BEFORE the late failure (ensure_work_ops precedes lock_main), so
-    # the forge holds it and the retry below must SEE it and skip the re-push. Pinned here
-    # because a forge lying `false` makes that retry depend on the wall clock, not on the code.
-    # `== {:ok, true}` et non une simple verite : depuis JG-121 la fonction rend un triplet d'etats,
-    # et `assert` seul passerait aussi sur `{:ok, false}`.
-    assert FileForge.branch_exists?("fleet/heritage", "ops", []) == {:ok, true}
+    # ⚠ 6-124 — CE TEST EPINGLAIT LE DEFAUT. Il assertait ici `ops` TOUJOURS SUR LA FORGE apres
+    # l'echec, en expliquant que le retry devait la voir et sauter le re-push. C'est precisement le
+    # residu que la fiche decrit : les deux faces ont ete poussees par CETTE tentative, sur un depot
+    # tiers, et l'appel a repondu « repo untouched ». Elles sont desormais retirees, et l'etat
+    # distant final egale l'etat initial : `main` seule, celle que le depot avait.
+    assert FileForge.branch_exists?("fleet/heritage", "ops", []) == {:ok, false}
+    assert FileForge.branch_exists?("fleet/heritage", "workshop", []) == {:ok, false}
+    assert FileForge.branch_exists?("fleet/heritage", "main", []) == {:ok, true}
+    assert_received {:branch_deleted, "fleet/heritage", "ops"}
+    assert_received {:branch_deleted, "fleet/heritage", "workshop"}
 
-    # Retry clean.
+    # Retry clean — sur une forge revenue a son etat initial, donc un vrai chemin de creation et
+    # non un re-push dont le succes dependrait de la seconde ou il tombe.
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/heritage"}} = ProjectOnboard.import("fleet/heritage", o)
+  end
+
+  test "6-124: ops pushed then workshop fails → ops is removed, and the return keeps its clean retry",
+       %{tmp_dir: tmp} do
+    # Le scenario LITTERAL de la fiche : les faces sont posees en sequence, donc `ops` est deja
+    # sur la forge quand `workshop` tombe. C'est le seul point du programme ou une mutation
+    # partielle d'un depot tiers existe.
+    o = opts(tmp)
+    {:ok, "fleet/legacy"} = FileForge.create_repo("legacy", [])
+    Process.put(:branch_exists_error, "workshop")
+
+    assert {:error, {:branch_unreadable, "workshop", {:http, 503, "down"}}} =
+             ProjectOnboard.import("fleet/legacy", o)
+
+    assert_received {:branch_deleted, "fleet/legacy", "ops"}
+    assert FileForge.branch_exists?("fleet/legacy", "ops", []) == {:ok, false}
+    assert FileForge.branch_exists?("fleet/legacy", "main", []) == {:ok, true}
+
+    # L'erreur passe INTACTE : la compensation a abouti, donc « a clean retry is possible » est
+    # redevenu vrai et il n'y a rien de plus a dire a l'appelant.
+    Process.delete(:branch_exists_error)
+    assert {:ok, %{repo: "fleet/legacy"}} = ProjectOnboard.import("fleet/legacy", o)
+  end
+
+  test "6-124: a writer branch that was ALREADY the repo's is never deleted", %{tmp_dir: tmp} do
+    # L'autre moitie de la preuve, et la plus chere a rater : une compensation qui supprime ce
+    # qu'elle n'a pas cree detruit le travail d'un tiers sur un chemin d'erreur.
+    o = opts(tmp)
+    {:ok, "fleet/tenant"} = FileForge.create_repo("tenant", [])
+    bare = Path.join([tmp, "forge", "fleet", "tenant.git"])
+    {_, 0} = System.cmd("git", ["-C", bare, "branch", "ops", "main"], stderr_to_stdout: true)
+
+    Process.put(:branch_exists_error, "workshop")
+
+    assert {:error, {:branch_unreadable, "workshop", _}} =
+             ProjectOnboard.import("fleet/tenant", o)
+
+    # `ops` a ete CLONEE, pas publiee — elle n'entre donc pas dans l'inventaire, et aucune
+    # suppression n'est meme tentee.
+    refute_received {:branch_deleted, _, _}
+    assert FileForge.branch_exists?("fleet/tenant", "ops", []) == {:ok, true}
+  end
+
+  test "6-124: a compensation that FAILS is named in the RETURN, not only in a log", %{
+    tmp_dir: tmp
+  } do
+    # La condition de la fiche : « si la compensation echoue, le signaler dans le resultat, pas
+    # seulement dans un log ». L'appelant deduit du RETOUR qu'il peut retenter proprement ; c'est
+    # cette deduction-la qui doit casser, pas une ligne qu'il ne lit pas.
+    o = opts(tmp)
+    {:ok, "fleet/stuck"} = FileForge.create_repo("stuck", [])
+    Process.put(:protect_result, {:error, {:http, 500, "boom"}})
+    Process.put(:delete_branch_result, {:error, {:http, 403, "protected"}})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:import_not_compensated, {:protect_main, _}, left}} =
+                 ProjectOnboard.import("fleet/stuck", o)
+
+        assert [{"ops", {:error, {:http, 403, "protected"}}} | _] = left
+      end)
+
+    assert log =~ "REPO MUTATED"
+    assert_received {:branch_delete_refused, "fleet/stuck", "ops"}
+    assert FileForge.branch_exists?("fleet/stuck", "ops", []) == {:ok, true}
   end
 
   describe "convergent re-emit — a mutation whose effect landed answers with it, never a refusal" do

@@ -428,8 +428,15 @@ defmodule Fleet.Project.Onboard do
   Imports an existing `owner/name` forge repository without changing its `main` content.
 
   The repository must belong to the configured org and use `main` as its default branch. The call
-  creates the three local faces, creates or clones each writer branch, reapplies branch protection
-  and compensates only its local artifacts on failure. Existing writer branches are preserved.
+  creates the three local faces, creates or clones each writer branch and reapplies branch
+  protection.
+
+  On failure it compensates its local artifacts AND the writer branches this attempt pushed —
+  those alone: a branch it cloned belonged to the repository already, and a branch whose existence
+  it could not read is never written in the first place. When every removal succeeds the caller
+  keeps its clean retry and gets the original error unchanged; when one does not, the error becomes
+  `{:import_not_compensated, reason, left}`, because a repository that still carries this attempt's
+  branches must not be retried as if it were untouched.
   """
   @spec import(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import(full_name, opts \\ []) when is_binary(full_name) do
@@ -455,8 +462,7 @@ defmodule Fleet.Project.Onboard do
             "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
               "project_dir #{inspect(compensate_dir(dirs.code))}, " <>
               "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-              "doc_dir #{inspect(compensate_dir(dirs.workshop))} (repo untouched — " <>
-              "pre-existing; a clean retry is possible)"
+              "doc_dir #{inspect(compensate_dir(dirs.workshop))} #{remote_state(reason)}"
           )
 
           err
@@ -466,6 +472,16 @@ defmodule Fleet.Project.Onboard do
       {:error, _} = err -> err
     end
   end
+
+  # Cette phrase etait AFFIRMEE, elle est desormais LUE. « repo untouched — pre-existing » n'etait
+  # vrai que tant que rien n'avait ete pousse, et `ensure_writer_faces` publie `ops` avant de tenter
+  # `workshop` : la ligne annoncait donc un depot intact au moment precis ou il ne l'etait plus.
+  defp remote_state({:import_not_compensated, _reason, left}),
+    do:
+      "(⚠ REPO MUTATED — branches pushed by this attempt SURVIVE: " <>
+        "#{inspect(Enum.map(left, &elem(&1, 0)))}; a retry is NOT clean)"
+
+  defp remote_state(_reason), do: "(repo untouched — pre-existing; a clean retry is possible)"
 
   # LE TROISIEME REFUS, et c'est celui qui empeche le mensonge silencieux. L'org d'un projet EST le
   # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur une boite qui
@@ -686,17 +702,68 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
+  # `adopt` et `import_external` CREENT le repo, donc leur compensation le supprime en entier.
+  # Ici il preexiste, on ne peut donc defaire QUE ce qu'on a soi-meme pousse — d'ou l'inventaire
+  # remonte par `ensure_writer_faces/5`.
   defp finish_import(full_name, dirs, name, opts) do
     with {:ok, url} <- repo_url(full_name, opts),
-         :ok <- clone_main(url, dirs.code),
-         :ok <- ensure_writer_faces(full_name, url, dirs, name, opts),
-         :ok <- lock_main(full_name, opts) do
-      Logger.info(
-        "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
-      )
+         :ok <- clone_main(url, dirs.code) do
+      case ensure_writer_faces(full_name, url, dirs, name, opts) do
+        {:ok, published} -> lock_and_announce(full_name, dirs, published, opts)
+        {:error, reason, published} -> undo_published(full_name, published, reason, opts)
+      end
+    end
+  end
 
-      {:ok, onboard_result(full_name, dirs, opts)}
+  defp lock_and_announce(full_name, dirs, published, opts) do
+    case lock_main(full_name, opts) do
+      :ok ->
+        Logger.info(
+          "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
+            "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
+        )
+
+        {:ok, onboard_result(full_name, dirs, opts)}
+
+      {:error, reason} ->
+        undo_published(full_name, published, reason, opts)
+    end
+  end
+
+  # LA COMPENSATION SE DIT DANS LE RETOUR, pas seulement dans un log — parce que l'appelant decide
+  # a partir du retour, et que ce qu'il en deduit ici est « je peux retenter proprement ». Tant que
+  # tout a ete retire, c'est vrai et l'erreur d'origine passe intacte. Des qu'une suppression
+  # echoue, elle devient fausse : le depot d'un tiers porte une branche que cette tentative y a
+  # laissee, et le retry la lira comme preexistante. Ce cas-la porte donc son propre nom.
+  #
+  # ⚠ On ne supprime QUE `published`. Une branche clonee etait deja la ; une branche dont la
+  # lecture a echoue n'a jamais ete touchee (`ensure_face` refuse desormais avant d'ecrire).
+  defp undo_published(_full_name, [], reason, _opts), do: {:error, reason}
+
+  defp undo_published(full_name, published, reason, opts) do
+    outcomes =
+      Enum.map(published, fn branch ->
+        {branch, repo_mod(opts).delete_branch(full_name, branch, fc_opts(opts))}
+      end)
+
+    case Enum.reject(outcomes, &match?({_b, {:ok, _}}, &1)) do
+      [] ->
+        Logger.warning(
+          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — forge compensated: " <>
+            "#{inspect(Enum.map(outcomes, fn {b, {:ok, o}} -> {b, o} end))}"
+        )
+
+        {:error, reason}
+
+      left ->
+        Logger.error(
+          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) and its forge " <>
+            "compensation did NOT complete — branches pushed by this attempt SURVIVE on a " <>
+            "third-party repo: #{inspect(left)}"
+        )
+
+        {:error, {:import_not_compensated, reason, left}}
     end
   end
 
@@ -1983,27 +2050,27 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # L'INVENTAIRE SE CONSTRUIT EN AVANCANT, il ne se prend pas d'avance : une branche n'entre dans la
+  # liste que quand son push a REUSSI, donc chaque entree est une mutation prouvee de cette
+  # tentative. Un etat releve avant la boucle serait deja perime au premier push, et c'est
+  # exactement sur cet ecart qu'une compensation supprime ce qu'elle n'a pas cree.
+  #
+  # L'echec porte l'inventaire avec lui (`{:error, reason, published}`) parce que les faces sont
+  # posees EN SEQUENCE : `ops` peut etre publiee avant que `workshop` echoue, et c'est le cas exact
+  # que la fiche 6-124 decrit.
   defp ensure_writer_faces(full_name, url, dirs, name, opts) do
-    with :ok <-
-           ensure_face(
-             full_name,
-             url,
-             dirs.ops,
-             Fleet.Layout.ops_branch(),
-             "ops",
-             name,
-             opts
-           ) do
-      ensure_face(
-        full_name,
-        url,
-        dirs.workshop,
-        Fleet.Layout.workshop_branch(),
-        "workshop",
-        name,
-        opts
-      )
-    end
+    faces = [
+      {dirs.ops, Fleet.Layout.ops_branch(), "ops"},
+      {dirs.workshop, Fleet.Layout.workshop_branch(), "workshop"}
+    ]
+
+    Enum.reduce_while(faces, {:ok, []}, fn {dir, branch, template}, {:ok, published} ->
+      case ensure_face(full_name, url, dir, branch, template, name, opts) do
+        {:ok, :published} -> {:cont, {:ok, published ++ [branch]}}
+        {:ok, :cloned} -> {:cont, {:ok, published}}
+        {:error, reason} -> {:halt, {:error, reason, published}}
+      end
+    end)
   end
 
   defp lock_main(full_name, opts), do: protect_main(full_name, opts)
@@ -2365,6 +2432,11 @@ defmodule Fleet.Project.Onboard do
   # cloner une branche peut-etre absente : moins destructeur, mais toujours une decision prise sans
   # savoir. On ne devine pas : on REFUSE, et l'import s'arrete avec la raison — l'appelant garde son
   # « repo untouched, a clean retry is possible ».
+  #
+  # Il rend `:cloned` ou `:published` et non `:ok`, parce que c'est la SEULE difference qui compte
+  # pour defaire : `:published` est une branche que CETTE tentative a mise sur la forge, `:cloned`
+  # une branche qui appartenait deja au depot. Confondre les deux, c'est soit laisser un residu,
+  # soit supprimer le travail de quelqu'un d'autre.
   defp ensure_face(full_name, url, dir, branch, template, name, opts) do
     case repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
       {:error, reason} ->
@@ -2372,13 +2444,17 @@ defmodule Fleet.Project.Onboard do
 
       {:ok, true} ->
         File.mkdir_p!(Path.dirname(dir))
-        GitOps.run(["clone", "--branch", branch, url, dir], auth: true)
+
+        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true) do
+          {:ok, :cloned}
+        end
 
       {:ok, false} ->
         with :ok <- init_face(dir, url, branch),
              :ok <- Scaffold.face(dir, template, name, opts),
-             :ok <- commit(dir, "chore(import): init #{branch}") do
-          publish_face(dir, branch)
+             :ok <- commit(dir, "chore(import): init #{branch}"),
+             :ok <- publish_face(dir, branch) do
+          {:ok, :published}
         end
     end
   end
