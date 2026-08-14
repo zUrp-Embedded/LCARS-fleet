@@ -56,7 +56,12 @@ defmodule Fleet.LayoutTest do
     # That makes today's equality a property of the charset, not a contract. This test makes it a
     # contract: widen `validate_name` and it goes red at the exact place the two part company,
     # instead of a pod booting healthy on a directory that does not exist.
-    @onboardable_charset ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+    #
+    # ⚠ CETTE PHRASE ETAIT FAUSSE JUSQU'AU 6-079, et par un detail : le motif etait RECOPIE ici.
+    # Elargir la vraie charte ne faisait donc rien rougir — mesure du 2026-08-14, en la modifiant
+    # pour de bon. Un test qui epingle une inclusion contre sa propre copie de l'ensemble n'epingle
+    # rien du tout. On lit la source.
+    @onboardable_charset Fleet.Project.Onboard.name_charset()
 
     test "every name the onboarding admits derives IDENTICALLY through both" do
       for name <- ~w(tetris poc-8 a1 lcars-fleet x9y my-long-project-name 42 a-b-c-d) do

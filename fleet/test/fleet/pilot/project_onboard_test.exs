@@ -421,4 +421,66 @@ defmodule Fleet.Project.OnboardTest do
       refute reconcile_with(:unchanged) =~ "fleet/proj main-protection"
     end
   end
+
+  # 6-079 — LA PORTE DONT DEPEND TOUTE LA NON-COLLISION N'ETAIT TENUE PAR RIEN.
+  #
+  # `Fleet.Layout.project_slug/1` n'est PAS injective : elle replie tout ce qui sort de
+  # `[A-Za-z0-9-]` sur un `-`, donc `mon.projet`, `mon_projet` et `Mon-Projet` rendent le meme
+  # `mon-projet`. La fiche en deduit que deux depots distincts partagent un espace de projet sur
+  # disque. **Mesure : c'est inatteignable**, et la chaine a QUATRE maillons :
+  #
+  #   1. le Poller ne sert un depot que si `<ops_root>/<project_name>` existe (`onboarded?/1`) ;
+  #   2. ce repertoire ne nait que d'un onboarding, dont la PREMIERE etape est `validate_name` ;
+  #   3. dans la charte `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, `project_name == project_slug` ;
+  #   4. donc deux projets SERVIS qui collisionnent auraient le meme nom.
+  #
+  # Le maillon 3 est epingle par `Fleet.LayoutTest` (avec son temoin anti-vacuite), et 6-078 en a
+  # ferme une moitie voisine. **Le maillon 2 ne l'etait pas** : huit sites appellent
+  # `validate_name`, et `{:invalid_name, _}` n'apparaissait dans AUCUN test. L'argument entier
+  # reposait sur une garde que rien n'obligeait a rester.
+  #
+  # Aucun reseau ici : `validate_name` est la premiere clause du `with` d'`onboard/2`, donc le refus
+  # tombe avant le moindre appel forge.
+  describe "6-079 — la charte des noms, la garde dont depend l'unicite de l'espace projet" do
+    test "un nom hors charte est REFUSE a la porte — les trois collisions de la fiche" do
+      # Les trois replient sur `mon-projet` par `project_slug/1`. Aucune n'entre.
+      #
+      # ⚠ `Mon-Projet` N'EST PAS dans cette liste, et la garde de fixture ci-dessous me l'a appris :
+      # `project_slug/1` replie `[^A-Za-z0-9-]`, donc elle CONSERVE la majuscule et `Mon-Projet` ne
+      # collisionne avec rien. La divergence sur la casse existe, mais c'est celle de 6-078 (le
+      # producteur rend un slug que `Fleet.Slug` refuse), pas celle-ci. Le nom part au test de bord.
+      for name <- ["mon.projet", "mon_projet", "mon projet", "mon@projet"] do
+        assert Fleet.Layout.project_slug("fleet/#{name}") == "mon-projet",
+               "fixture #{inspect(name)} ne collisionne pas — le test ne prouverait rien"
+
+        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name),
+               "#{inspect(name)} a franchi la porte : la collision de 6-079 devient atteignable"
+      end
+    end
+
+    test "les formes de bord de la charte sont refusees aussi" do
+      # Tiret en tete/queue, vide, majuscule seule, segment de chemin : la charte exige un
+      # alphanumerique aux DEUX bouts, et c'est ce qui interdit `../` et les noms d'un caractere
+      # non alphanumerique.
+      for name <- ["-x", "x-", "", "A", "Mon-Projet", "a/b", "../evil", "a b"] do
+        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name),
+               "#{inspect(name)} accepte a la porte"
+      end
+    end
+
+    # TEMOIN — sans lui, un `onboard/2` qui refuserait TOUT passerait les deux tests ci-dessus, et
+    # la garde qu'ils pretendent tenir serait vide. Un nom onboardable doit echouer PLUS LOIN
+    # (forge absente en test), jamais sur son nom.
+    test "TEMOIN — un nom dans la charte passe la porte et echoue ailleurs" do
+      for name <- ~w(mon-projet tetris a1 42) do
+        case ProjectOnboard.onboard(name) do
+          {:error, {:invalid_name, _}} ->
+            flunk("#{inspect(name)} est dans la charte et se fait refuser sur son nom")
+
+          _autre ->
+            :ok
+        end
+      end
+    end
+  end
 end

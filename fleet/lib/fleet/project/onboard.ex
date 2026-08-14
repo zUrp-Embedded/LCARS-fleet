@@ -2258,8 +2258,20 @@ defmodule Fleet.Project.Onboard do
       "which is NOT the same question as what the forge carries)."
   end
 
+  # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
+  # projet sur disque repose sur elle : `Fleet.Layout.project_slug/1` n'est pas injective, et ce qui
+  # rend la collision inatteignable est que cette charte est STRICTEMENT INCLUSE dans ce que le slug
+  # preserve. `Fleet.LayoutTest` epinglait cette inclusion — contre SA PROPRE COPIE du motif, donc
+  # sans rien tenir : elargir la charte ici ne le faisait pas rougir, alors que son commentaire
+  # l'affirmait. Une source, lue des deux cotes.
+  @name_re ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+
+  @doc false
+  @spec name_charset() :: Regex.t()
+  def name_charset, do: @name_re
+
   defp validate_name(name) do
-    if Regex.match?(~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, name),
+    if Regex.match?(@name_re, name),
       do: :ok,
       else: {:error, {:invalid_name, name}}
   end
