@@ -39,4 +39,35 @@ defmodule Fleet.Credentials.RoleTokenTest do
   test "invalid role (non path-safe) → nil (unchanged)", _ctx do
     assert RoleToken.token("../etc") == nil
   end
+
+  # 6-030 — LE DIAGNOSTIC NOMMAIT UN FICHIER QUAND LA CAUSE ETAIT LE REPERTOIRE. Un deploiement dont
+  # `FORGE_ROLE_TOKENS_DIR` pointe a cote — ou dont le provisionnement n'a pas tourne — rendait UNE
+  # ligne PAR ROLE, chacune exacte (« ce jeton-la est absent ») et aucune ne disant la seule chose
+  # qui oriente : aucun role ne peut signer, et ce n'est pas un probleme de role.
+  describe "6-030 — le repertoire absent se nomme lui-meme, une fois par role" do
+    test "repertoire absent → la ligne nomme le REPERTOIRE et l'action", %{dir: dir} do
+      File.rm_rf!(dir)
+
+      log = capture_log(fn -> assert RoleToken.token("reviewer") == nil end)
+
+      assert log =~ "the tokens DIRECTORY #{dir} is itself absent"
+      assert log =~ "NO role can sign"
+      assert log =~ "FORGE_ROLE_TOKENS_DIR"
+      # La ligne par-role reste : on AJOUTE la cause, on ne remplace pas le constat.
+      assert log =~ "absent/unreadable"
+      assert log =~ "reviewer"
+    end
+
+    # TEMOIN — sans lui, un indice inconditionnel passerait le test ci-dessus et accuserait le
+    # repertoire a chaque jeton manquant d'un repertoire parfaitement sain.
+    test "repertoire present, jeton absent → la ligne NE nomme PAS le repertoire", %{dir: dir} do
+      assert File.dir?(dir)
+
+      log = capture_log(fn -> assert RoleToken.token("reviewer") == nil end)
+
+      assert log =~ "absent/unreadable"
+      refute log =~ "is itself absent"
+      refute log =~ "NO role can sign"
+    end
+  end
 end

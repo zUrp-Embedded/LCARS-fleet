@@ -97,7 +97,24 @@ defmodule Fleet.TaskQueue.Server do
   @impl GenServer
   def init(opts) do
     persist? = Keyword.get(opts, :persist, true)
-    state_path = Keyword.get(opts, :state_path, Store.default_path())
+
+    # 6-017 — `Keyword.get(opts, :state_path, Store.default_path())` PAYAIT LE DEFAUT TOUJOURS.
+    # Le troisieme argument de `Keyword.get/3` est un argument ordinaire : il est evalue a chaque
+    # appel, que la cle soit posee ou non. Or `Store.default_path/0` porte un `System.user_home!()`
+    # — c'est exactement la parade que son propre commentaire enonce (« un defaut qui coute quelque
+    # chose ne doit tourner que s'il EST la reponse »), et son unique appelant l'enfreignait.
+    #
+    # La consequence n'etait pas theorique : en production le broker tourne EPHEMERE
+    # (`{Server, persist: false}`, cf. `TaskQueue.Application`). Un HOME irresolvable levait donc au
+    # demarrage du serveur, pour un chemin que rien n'aurait lu.
+    #
+    # `nil` n'est pas une valeur nouvelle : `persist/1` et `load_state/2` la traitent deja, et un
+    # test la passe explicitement. On ne resout le defaut que lorsqu'il sert.
+    state_path =
+      case Keyword.fetch(opts, :state_path) do
+        {:ok, path} -> path
+        :error -> if persist?, do: Store.default_path(), else: nil
+      end
 
     base = %{
       work_items: %{},

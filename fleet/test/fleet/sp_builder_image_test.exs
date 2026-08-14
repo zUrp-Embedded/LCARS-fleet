@@ -319,4 +319,56 @@ defmodule Fleet.SPBuilderImageTest do
     File.write!(Path.join(tmp, "bundles/tdd/sp.md"), "")
     assert_raise RuntimeError, ~r/empty/, fn -> Image.publish!() end
   end
+
+  # 6-029 — LE REFUS EXISTAIT, LE NOM MANQUAIT. Les chemins publies viennent d'un INSTANTANE
+  # (`Path.wildcard`, `File.regular?`) puis sont relus : entre les deux, un artefact peut disparaitre
+  # et le lecteur rendait un `File.Error` brut la ou la ligne d'a cote nomme deja le fichier VIDE.
+  # Meme fonction, meme artefact, deux traitements.
+  #
+  # ⚠ LA COURSE EST REPRODUITE, PAS SIMULEE : un SYMLINK CASSE est liste par `Path.wildcard` et
+  # rendu `{:error, :enoent}` par `File.read` — exactement l'etat « liste, puis illisible », sans
+  # aucune fenetre temporelle a gagner. `assert_raise RuntimeError` est aussi la CONTRE-EPREUVE :
+  # l'ancien code levait un `%File.Error{}`, qui est une autre exception et ferait rougir ces trois.
+  describe "6-029 — « liste puis illisible » se nomme, aux TROIS lecteurs" do
+    test "lecteur de repertoire (drafts)", %{tmp_dir: tmp} do
+      File.ln_s!("/nonexistent/gone", Path.join(tmp, "drafts/agent-ghost-base.md"))
+
+      assert_raise RuntimeError,
+                   ~r/artifact .*agent-ghost-base\.md was listed, then unreadable/,
+                   fn ->
+                     Image.publish!()
+                   end
+    end
+
+    test "lecteur de protocole (chemin resolu, pas glob)", %{tmp_dir: tmp} do
+      ghost = Path.join(tmp, "proto-fantome.md")
+      File.ln_s!("/nonexistent/gone", ghost)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_protocole_user_path, ghost)
+
+      assert_raise RuntimeError,
+                   ~r/worker protocol .*proto-fantome\.md was listed, then unreadable/,
+                   fn -> Image.publish!() end
+    end
+
+    # LE SITE QUE LA FICHE NOMME, et il faut un chemin que les lecteurs ci-dessus n'ont PAS lu pour
+    # l'atteindre. Il existe : `read_dir_map/3` s'arrete a la premiere racine qui porte une CLE
+    # (regle du child-theme), tandis que l'empreinte parcourt tous les CHEMINS. Un draft de la
+    # racine systeme masque par son homonyme business n'est donc jamais lu par l'image — et l'est
+    # par l'empreinte. Propriete voulue (l'empreinte doit voir ce qui peut bouger sous le daemon),
+    # et elle rend ce troisieme lecteur atteignable sans course a gagner.
+    test "empreinte de sources — un chemin MASQUE que l'image n'a pas lu", %{tmp_dir: tmp} do
+      sys = Path.join(tmp, "sysroot")
+      File.mkdir_p!(Path.join(sys, "sp_builder/sp_drafts"))
+      File.mkdir_p!(Path.join(sys, "sp_builder/templates"))
+      File.write!(Path.join(sys, "sp_builder/templates/probe.eex"), "x\n")
+
+      # MEME NOM que le draft business : masque a la lecture, present a l'empreinte.
+      File.ln_s!("/nonexistent/gone", Path.join(sys, "sp_builder/sp_drafts/agent-probe-base.md"))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_system_root, sys)
+
+      assert_raise RuntimeError,
+                   ~r/fingerprinted source .*sysroot.*agent-probe-base\.md was listed, then unreadable/,
+                   fn -> Image.publish!() end
+    end
+  end
 end

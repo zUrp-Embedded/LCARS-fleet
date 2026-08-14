@@ -210,7 +210,34 @@ defmodule Fleet.SPBuilder.Image do
     end)
     |> Enum.concat([worker_protocol_path(root), human_protocol_path(root)])
     |> Enum.uniq()
-    |> Map.new(fn path -> {path, path |> File.read!() |> sha_of()} end)
+    |> Map.new(&{&1, &1 |> read_artifact!("fingerprinted source") |> sha_of()})
+  end
+
+  # 6-029 — LE REFUS ETAIT BON, SON MESSAGE NON, ET LE DEFAUT VIVAIT A TROIS ENDROITS.
+  #
+  # Chacun des trois lisait en `File.read!` un chemin obtenu d'un INSTANTANE : un `Path.wildcard`
+  # pour les deux lecteurs de repertoire, un `File.regular?` pour les protocoles. Entre l'instantane
+  # et la lecture, l'artefact peut disparaitre ou devenir illisible — et le lecteur rendait alors un
+  # `File.Error` brut, remonte par `publish!/0` jusqu'au refus de boot. La POSTURE est juste
+  # (proven-good ou pas de boot) ; ce qui manquait est le nom de la condition.
+  #
+  # L'asymetrie qui prouve que c'etait un defaut et non un choix : `read_dir_map/3` leve une erreur
+  # NOMMEE a la ligne suivante pour le fichier VIDE, et une erreur de bibliotheque pour le fichier
+  # illisible. Meme fonction, meme artefact, deux traitements — la parade etait litteralement en
+  # dessous. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas en
+  # `:vanished`. Ici on ne peut pas degrader (une epoque qui ne couvre pas la matiere qu'elle gele
+  # n'est pas une epoque), donc on leve — mais en nommant.
+  defp read_artifact!(path, what) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+
+      {:error, reason} ->
+        raise "SPBuilder.Image: #{what} #{path} was listed, then unreadable (#{inspect(reason)}) — " <>
+                "the prompt material moved DURING publication, so the epoch cannot cover what it " <>
+                "would serve. Republish against a tree at rest. Proven-good image at boot, or do " <>
+                "not boot."
+    end
   end
 
   defp sha_of(content), do: :crypto.hash(:sha256, content)
@@ -363,7 +390,7 @@ defmodule Fleet.SPBuilder.Image do
         if Map.has_key?(inner, key) do
           inner
         else
-          content = File.read!(path)
+          content = read_artifact!(path, "artifact")
 
           if content == "" do
             raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
@@ -380,7 +407,7 @@ defmodule Fleet.SPBuilder.Image do
     do: read_protocol!(worker_protocol_path(root), "worker protocol")
 
   defp read_protocol!(path, label) do
-    content = File.read!(path)
+    content = read_artifact!(path, label)
 
     if content == "" do
       raise "SPBuilder.Image: #{label} is empty — proven-good image requires non-empty artifacts"
