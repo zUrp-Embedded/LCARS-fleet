@@ -41,6 +41,22 @@ import glob as globmod
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 
+# ⚠⚠ DEUX DES TROIS PORTS DERIVES ICI N'EXISTENT PLUS — LIRE AVANT DE CABLER CETTE PAGE.
+#
+# Ce fichier est une EXPLORATION, et rien ne le lance aujourd'hui (ni l'entrypoint, ni le
+# Dockerfile, ni un compose — verifie le 2026-08-14). Il n'est donc pas casse : il est PERIME sur un
+# point precis, et le decouvrir en le cablant coute une soiree.
+#
+# Le lot console 6-072/6-098 a retire leurs ports au deck d'observation (`base+1`) et a la console
+# de pod (`base+5`) : les deux ecoutent desormais sur des sockets AF_UNIX sous
+# `/run/lcars/console/<humain>/`, gardees par le mode du repertoire. `DECK_PORT` et
+# `POD_CONSOLE_PORT` ci-dessous calculent donc des adresses ou PERSONNE n'ecoute, et
+# `base+6` (le port de cette page) n'est plus publie par le compose non plus.
+#
+# CE QU'IL FAUDRA FAIRE, ET C'EST PEU : cette page devient une entree de la TABLE DE MONTAGE du
+# relais (`console-deck.py`, `PER_HUMAN_TARGETS` / `SYSTEM_TARGETS`) — une ligne, pas un chantier.
+# C'est exactement ce que le relais generique a ete ecrit pour rendre trivial : elle est servie par
+# la meme origine, derriere la meme session Gitea, et cesse d'avoir une adresse a elle.
 PORT = int(os.environ.get("LCARS_AGENTS_PORT", "0"))
 DECK_PORT = int(os.environ.get("LCARS_OBS_PORT", "0"))
 POD_CONSOLE_PORT = int(os.environ.get("LCARS_POD_CONSOLE_PORT", "0"))

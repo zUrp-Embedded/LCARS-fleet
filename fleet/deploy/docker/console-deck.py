@@ -283,11 +283,19 @@ def session_of(cookie_header):
         s = _sessions.get(sid)
         return dict(s, sid=sid) if s else None
 
-# Le bloc de 10 ports par humain, MEME formule que bin/fleet_v2 et console.sh (`21000 + uid%500*10`).
-# Recopiee ici parce que ce serveur tourne AVANT toute fleet et ne peut rien lui demander ; les
-# offsets, eux, sont le contrat de la boite.
+# Le bloc de 10 ports par humain, MEME formule que bin/fleet_v2 (`21000 + uid%500*10`). Recopiee ici
+# parce que ce serveur tourne AVANT toute fleet et ne peut rien lui demander.
+#
+# ⚠ IL NE RESTE QU'UN OFFSET, ET LES TROIS AUTRES ONT ETE RETIRES PLUTOT QUE COMMENTES (6-072/6-098).
+# `base+1` le deck d'observation, `base+4` la console, `base+5` la console de pod ecoutent desormais
+# sur des sockets AF_UNIX sous `/run/lcars/console/<humain>/`. Les garder ici les aurait publies dans
+# `/api/state` : un consommateur y aurait lu des ports qui n'ecoutent plus, et une page qui affiche
+# une adresse morte est pire qu'une page qui n'en affiche aucune — elle envoie quelqu'un frapper a
+# une porte qui n'existe pas, puis conclure que le service est en panne.
+#
+# `base+3` (webhook) n'a jamais figure ici et n'y entre pas : ce serveur ne s'en sert pas.
 PORT_BASE, PORT_MOD, PORT_SPAN = 21000, 500, 10
-OFF_API, OFF_DECK, OFF_CONSOLE, OFF_POD = 0, 1, 4, 5
+OFF_API = 0
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -296,9 +304,6 @@ def block(uid):
     base = PORT_BASE + (uid % PORT_MOD) * PORT_SPAN
     return {
         "api": base + OFF_API,
-        "deck": base + OFF_DECK,
-        "console": base + OFF_CONSOLE,
-        "pod": base + OFF_POD,
     }
 
 
