@@ -243,7 +243,11 @@ defmodule Fleet.Spawner.Pod do
     first_entry? = old_state != :extracting
 
     if first_entry? do
-      :ok = Bus.subscribe()
+      # 6-041 — SON sujet, pas le global. Le pod ne consomme que des evenements qui portent son
+      # `pod_id` ; s'abonner au sujet principal le faisait reveiller par tout ce qui traverse la
+      # fleet pour le jeter aussitot. Le bus adresse (cf. `Bus.pod_topic/1`), le pod ecoute son
+      # adresse. Consequence a lire avec : tout `%Fleet.Event{}` qui arrive ici EST pour ce pod.
+      :ok = Bus.subscribe(Bus.pod_topic(data.pod_id))
 
       # BL-6-06
       Events.lossy_broadcast("pod.spawned", %{
@@ -839,8 +843,9 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  def handle_event(:info, %Fleet.Event{type: :"deliverable.published"}, _state, _data),
-    do: :keep_state_and_data
+  # (6-041 — la clause miroir qui vivait ici absorbait `deliverable.published` d'un AUTRE pod. Sur
+  # le sujet par-pod ce cas n'arrive plus : elle etait devenue morte, et une clause morte se lit
+  # exactement comme une clause qui marche.)
 
   # BL-6-03: a witnessed publication-task death lifts the flag with a named cause.
   def handle_event(
@@ -862,8 +867,22 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  def handle_event(:info, %Fleet.Event{type: :"deliverable.publish_lost"}, _state, _data),
-    do: :keep_state_and_data
+  # (6-041 — meme raison que pour `deliverable.published` ci-dessus : la clause miroir n'absorbait
+  # que les evenements d'un autre pod, qui n'arrivent plus.)
+
+  # 6-041 — CE QUI RESTE NON TRAITE EST DESORMAIS ADRESSE A CE POD, DONC CA SE DIT. Le fourre-tout
+  # `handle_event(:info, _msg, …)` plus bas doit rester muet (ports, timers, DOWN, bruit divers) ;
+  # mais un `%Fleet.Event{}` qui arrive ici a franchi le routage par-pod — il est POUR nous, et
+  # qu'aucune clause ne le reconnaisse est un fait, pas du bruit. Avant, il se noyait dans les
+  # evenements des N-1 autres pods et se jeter etait la bonne reponse.
+  def handle_event(:info, %Fleet.Event{} = ev, state, data) do
+    Logger.warning(
+      "pod #{data.pod_id} received #{ev.type} on its own topic with no clause for it " <>
+        "(state=#{inspect(state)}) — addressed to this pod and dropped"
+    )
+
+    :keep_state_and_data
+  end
 
   # A Port exit is normal only after extraction; otherwise it fails and releases the active task.
   def handle_event(:info, {port, {:exit_status, exit_code}}, _state, %{port: port} = data)

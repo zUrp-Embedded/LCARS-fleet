@@ -198,9 +198,11 @@ defmodule Fleet.Spawner.PodTest do
   # %Fleet.Event{work_item.completed} on fleet.events (= what happens when the agent calls
   # submit_result via fleet_mcp). The pod must be in :monitoring (subscribed) before the call.
   defp submit_result_event(pod_id, payload) do
-    Phoenix.PubSub.broadcast(
-      Fleet.PubSub,
-      "fleet.events",
+    # 6-041 — PAR LE BUS, PAS PAR PUBSUB EN DIRECT. Un pod ecoute son propre sujet
+    # (`Bus.pod_topic/1`) et c'est `Bus.broadcast/2` qui l'y adresse ; une diffusion posee a la main
+    # sur `fleet.events` ne l'atteint plus. Le contournement mesurait de toute facon le montage du
+    # test plutot que le rail — le remplacer fait passer ces tests par le chemin d'emission REEL.
+    Fleet.EventRouter.Bus.broadcast_main(
       Fleet.Event.new(:task_queue, :"work_item.completed",
         pod_id: pod_id,
         correlation_id: "test-corr-#{pod_id}",
@@ -367,9 +369,8 @@ defmodule Fleet.Spawner.PodTest do
 
       # work_item.completed for brick issue-3 (re-brief), NOT the issue-4 spawn (issue_id in the payload,
       # like the real TaskQueue event which carries completed.issue_id).
-      Phoenix.PubSub.broadcast(
-        Fleet.PubSub,
-        "fleet.events",
+      # 6-041 — par le Bus (cf. `submit_result_event/2`) : le pod ecoute son propre sujet.
+      Fleet.EventRouter.Bus.broadcast_main(
         Fleet.Event.new(:task_queue, :"work_item.completed",
           pod_id: pod_id,
           correlation_id: "c-adopt",
@@ -1821,7 +1822,14 @@ defmodule Fleet.Spawner.PodTest do
       assert log =~ ":boom"
     end
 
-    test "deliverable.publish_lost of ANOTHER pod → ignored (no lift, no deadline touch)" do
+    # 6-041 — CE CAS N'ARRIVE PLUS PAR LE BUS, ET LE TEST LE DIT MAINTENANT. Le pod ecoute son
+    # PROPRE sujet : un `publish_lost` adresse a `pod-b` ne lui est plus livre du tout, et la clause
+    # miroir qui l'absorbait etait devenue morte. Ce que cet appel DIRECT mesure desormais est le
+    # cas anormal — un evenement d'un autre pod pose a la main dans la boite, donc un bug d'appelant.
+    # Il ne doit ni lever le drapeau ni toucher l'echeance, ET il ne doit plus etre avale en
+    # silence : un evenement arrive sur le sujet d'un pod est ADRESSE a ce pod, et qu'aucune clause
+    # ne le reconnaisse est un fait.
+    test "deliverable.publish_lost of ANOTHER pod (appel direct, hors bus) → aucun effet, mais NOMME" do
       data = %{conditions: MapSet.new([:publishing]), pod_id: "pod-a"}
 
       ev = %Fleet.Event{
@@ -1832,7 +1840,15 @@ defmodule Fleet.Spawner.PodTest do
         payload: %{}
       }
 
-      assert :keep_state_and_data = Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :keep_state_and_data =
+                   Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+        end)
+
+      assert log =~ "deliverable.publish_lost"
+      assert log =~ "no clause for it"
+      assert log =~ "pod-a"
     end
 
     # A payload pipe (no async push) does NOT arm :publishing — otherwise it would arm a 120s

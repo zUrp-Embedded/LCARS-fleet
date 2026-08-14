@@ -25,12 +25,56 @@ defmodule Fleet.EventRouter.Bus do
   @spec main_topic() :: String.t()
   def main_topic, do: @main_topic
 
-  @doc "Broadcasts a registered `%Fleet.Event{}` directly on `topic`."
+  @doc """
+  Topic of ONE pod — `main_topic/0` plus the pod id.
+
+  A pod subscribes here and nowhere else, so it is woken only by what is addressed to it. Nothing
+  emits on this topic directly: `broadcast/2` fans out to it from the main topic, which is what
+  keeps the routing a property of the bus instead of a discipline each emitter must remember.
+  """
+  @spec pod_topic(String.t()) :: String.t()
+  def pod_topic(pod_id) when is_binary(pod_id), do: @main_topic <> ".pod." <> pod_id
+
+  @doc """
+  Broadcasts a registered `%Fleet.Event{}` directly on `topic`.
+
+  An event carrying a `pod_id` ALSO lands on that pod's own topic (6-041) — see `pod_topic/1`.
+  """
   @spec broadcast(String.t(), Fleet.Event.t()) :: :ok | {:error, term()}
   def broadcast(topic, %Fleet.Event{} = event) when is_binary(topic) do
     assert_authorized!(event)
-    pubsub_broadcast(topic, event)
+
+    case pubsub_broadcast(topic, event) do
+      :ok -> fan_out_to_pod(topic, event)
+      other -> other
+    end
   end
+
+  # 6-041 — LA COPIE VERS N BOITES ETAIT UN DEFAUT D'ADRESSAGE, PAS DE DEBIT. Chaque pod s'abonnait
+  # au sujet GLOBAL, donc tout evenement reveillait les N pods actifs (plafond 128) et N-1 le
+  # jetaient. Le pod ne consomme que des evenements qui portent SON `pod_id` : le bus peut donc les
+  # adresser au lieu de les diffuser.
+  #
+  # LA REPARTITION VIT ICI ET NULLE PART AILLEURS, et c'est le point. La faire faire aux emetteurs
+  # aurait mis un devoir de memoire a chaque site : celui qui oublie le sujet du pod ne casse rien
+  # de visible — le pod attend simplement un evenement qui ne viendra jamais, sans trace. Mesure du
+  # 2026-08-14 : `pubsub_broadcast/2` est le SEUL appel `Phoenix.PubSub.broadcast` de `lib/`, et
+  # aucun appelant ne passe de sujet autre que le principal. Un seul endroit tient l'invariant.
+  #
+  # Le sujet principal reste servi tel quel : les consommateurs transverses (read-model, audit,
+  # step-run) y sont, et ils doivent tout voir.
+  # ⚠ `broadcast_from` ET NON `broadcast`, ET CE N'EST PAS UN DETAIL. Un pod emet SES PROPRES
+  # evenements de cycle de vie (`pod.spawned`, `pod.failed`, `pod.completed`) avec son propre
+  # `pod_id` : une diffusion nue lui rendrait tout ce qu'il vient de dire. Ces evenements-la sont
+  # pour les OBSERVATEURS, jamais pour leur emetteur. L'exclusion par pid est exacte et ne demande
+  # aucune liste de types a tenir a jour — une liste qui derive rend le pod bavard sur lui-meme.
+  #
+  # Le sujet principal, lui, est diffuse normalement : un observateur doit tout voir, y compris ce
+  # qu'il a emis.
+  defp fan_out_to_pod(@main_topic, %Fleet.Event{pod_id: pod_id} = event) when is_binary(pod_id),
+    do: Phoenix.PubSub.broadcast_from(@pubsub_name, self(), pod_topic(pod_id), event)
+
+  defp fan_out_to_pod(_topic, _event), do: :ok
 
   # Injection seam for delivery-error tests; production defaults to Phoenix.PubSub.
   defp pubsub_broadcast(topic, event) do
