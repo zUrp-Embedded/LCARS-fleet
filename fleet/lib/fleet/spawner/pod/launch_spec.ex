@@ -222,14 +222,18 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   **Ce qui manque n'est ni la brique ni le knob** — la brique `vendor/token_saver/` est dans l'image
   (`COPY` présent au Dockerfile), testée par `shell_gate.sh`, et le champ est déclaré au schéma
-  cap-profile. **Ce qui manque est le VÉHICULE** : la compression passe par un hook `PreToolUse`
-  déployé dans `~/.claude/hooks/`, et un pod ne charge ni `hooks/` ni le tier user — le porteur que
-  `fleet/v1/hooks.yaml` assurait est parti avec la v1. `vendor/token_saver/VENDOR.md` porte le détail.
+  cap-profile. **Ce qui manque est le VÉHICULE, et il n'a jamais existé** : la compression passe par
+  un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
+  monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
+  `.claude` humain est exclu À CAUSE de ses hooks. Le porteur v1 visait le tier `user`, que
+  `--setting-sources` exclut sans condition : il n'aurait jamais tiré non plus (mesuré 2026-08-07,
+  cf. `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
 
   Conséquence pour un auteur de cap-profile : **déclarer `output_compression` ne change rien
-  aujourd'hui**, dans les deux sens. Le rebrancher demande un porteur de hooks côté pod — une
-  fonctionnalité, pas une correction — et ce paragraphe est ce qui empêche de lire l'inertie comme
-  un bug à réparer ici.
+  aujourd'hui**, dans les deux sens. Le « brancher » ne serait pas restaurer un porteur perdu mais
+  **en inventer un** dans un monde projeté pour n'en monter aucun — une fonctionnalité avec une
+  décision de conception derrière, pas une correction. Ce paragraphe est ce qui empêche de lire
+  l'inertie comme un bug à réparer ici.
   """
   @spec output_compression?(Fleet.CapProfile.t() | term()) :: boolean()
   def output_compression?(cap_profile) do

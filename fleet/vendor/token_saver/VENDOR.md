@@ -127,15 +127,20 @@ Le shim existe parce que les hooks sont déployés dans `~/.claude/hooks/` alors
 > avec sa propre cicatrice au-dessus. La brique EST dans l'image. Corrigé le 2026-08-14 : un lecteur
 > qui arrivait ici en repartait avec l'idée qu'il restait un `COPY` à ajouter — un travail déjà fait.
 >
-> ⚠ **CE QUI MANQUE N'EST PAS LE COPY, C'EST LE VÉHICULE**, et la section « Câblage » ci-dessus le dit
-> déjà : *un pod ne charge ni `hooks/` ni le tier user, l'hôte n'en câble aucun dans ses trois tiers,
-> et `fleet/v1/hooks.yaml` qui jouait ce rôle est parti avec la v1*. Donc la brique est présente,
+> ⚠ **CE QUI MANQUE N'EST PAS LE COPY, C'EST LE VÉHICULE — ET IL N'A JAMAIS EXISTÉ.** La section
+> « Pourquoi `import` et non `recode` » plus haut est plus dure que « le porteur est parti avec la
+> v1 » : *un pod ne peut pas exécuter de hook*, le sanctuaire ne monte que `plugins/` et `skills/`,
+> `pod_settings_json/1` n'écrit aucune clé `hooks`, et le `.claude` humain est exclu **à cause** de
+> ses hooks. `fleet/v1/hooks.yaml` visait le tier `user`, que `--setting-sources` exclut sans
+> condition : **il n'aurait jamais tiré dans un pod** (mesuré 2026-08-07). Donc la brique est présente,
 > testée (`lcars_tests`, jouée par `shell_gate.sh`), déclarée au schéma cap-profile
 > (`spec.invocation.output_compression`) — et **aucun chemin ne l'active**. Le fail-open fait le
 > reste : aucun symptôme, la compression annoncée ne tourne simplement jamais.
 >
 > **Tant qu'aucun tier de hooks n'atteint un pod, `output_compression` est un knob qui n'ouvre rien.**
-> Le rebrancher est une FONCTIONNALITÉ (il faut un porteur de hooks côté pod), pas une correction.
+> Le « brancher » n'est donc pas restaurer un porteur perdu — c'est **en inventer un** dans un
+> sanctuaire conçu pour n'en monter aucun. Une FONCTIONNALITÉ, avec une décision de conception
+> derrière, pas une correction.
 
 ## Le switch
 
