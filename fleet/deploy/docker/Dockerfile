@@ -66,10 +66,26 @@ RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/s
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
     && install -d -o builder -g fleet /local /src /src/fleet /src/fleet \
-    && install -d -o builder -g fleet /home/projects.ops /home/projects.workshop
+    && install -d -o builder -g fleet /home/projects.ops /home/projects.workshop \
+    && install -d -m 0755 /run/user \
+    && install -d -m 0700 -o builder -g fleet /run/user/1000
 
 # HOME suit l'utilisateur — `USER` ne le change PAS (il resterait /root, et mix/hex écriraient
 # leurs caches dans un dossier interdit à builder).
+# LE DOSSIER RUNTIME PAR UTILISATEUR, ET IL EST LOAD-BEARING POUR LE GATE (6-130 / banc rouge du
+# 2026-08-14). `prov_lock_path` pose le verrou de `provision apply` dans un dossier 0700 possede par
+# l'appelant : `/run/lock/lcars` en root, `${XDG_RUNTIME_DIR:-/run/user/<uid>}/lcars` sinon. Il
+# EXIGE que le parent preexiste — le fabriquer au umask courant rouvrirait, un cran plus haut, le
+# trou que 6-130 vient de fermer. Sur une machine systemd, pam_systemd pose `/run/user/<uid>` a
+# l'ouverture de session ; dans une image il n'y a pas de session, donc personne ne le pose. Le
+# stage runtime tourne en root et trouve `/run/lock` (fourni par l'image de base) : LUI n'a jamais
+# rien vu. Ce stage-ci tourne en `builder` (uid 1000) — donc toute la famille `apply` de la suite
+# bats echouait ICI, et NULLE PART ailleurs.
+#
+# ⚠ C'est le meme defaut que `python3-pytest` vingt lignes plus haut, dans l'autre sens : la boite
+# de dev a `/run/user/<uid>`, l'image ne l'avait pas — et cette fois le gate en image etait ROUGE
+# sur du code sain, pendant que le gate local restait vert. Un ecart d'environnement ne se lit pas
+# dans le code qu'il fait rougir.
 ENV HOME=/home/builder
 USER builder
 
@@ -131,7 +147,20 @@ COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system
 # c'est une release). Les caches appartiennent à builder (uid/gid explicites : un cache root
 # serait illisible pour lui). Gate complet + warnings-as-errors : un build rouge NE produit PAS
 # d'image. Les symlinks PATH échouent ici (pas de droit sur /usr/local/bin) et c'est SANS gravité :
-# install.sh les rapporte non-fatalement, et le stage runtime les pose lui-même.
+# le stage runtime les pose lui-même.
+#
+# ⚠ « NON-FATALEMENT » A CESSÉ D'ÊTRE VRAI, ET CE COMMENTAIRE L'A SURVÉCU DE PLUSIEURS HEURES.
+# `install.sh` rendait 0 en annonçant `OK` alors que ses commandes PATH étaient absentes — ou pire,
+# pointaient encore sur la version précédente. 6-110 lui a donné le code **3** : *« RELEASE POSÉE,
+# LIENS PATH INCOMPLETS »*, un FAIT et non un verdict, que son en-tête dit explicitement
+# acceptable pour un appelant qui câble les liens lui-même. Il nommait `deploy/modules.d/60-deploy.sh`
+# comme cet appelant. **Ce stage-ci en est un SECOND, et il n'a pas été mis à jour** : le `&&` a
+# transformé un échec attendu et documenté ici même en build cassé, invisible tant que personne ne
+# reconstruisait l'image. Le `|| [ "$?" -eq 3 ]` accepte ce fait-là **et lui seul** — un 1 (échec
+# dur, rien d'utilisable) reste fatal.
+#
+# La leçon est plus large que la ligne : changer le code de sortie d'un script, c'est changer le
+# contrat de TOUS ses appelants, y compris ceux qui ne sont pas des scripts.
 # LES CACHES SONT SCOPÉS PAR ARCH, ET CE N'EST PAS DU CONFORT. Un cache BuildKit sans `id` est
 # partagé par TOUS les builds de ce Dockerfile — donc entre plateformes. Un `.mix`/`.hex` rempli
 # par un build amd64, remonté dans un build arm64, sert des artefacts et des binaires de la
@@ -155,7 +184,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
     mix local.hex --force && mix local.rebar --force \
-    && LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh
+    && { LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh || [ "$?" -eq 3 ]; }
 
 # ─── Stage 2 : runtime — slim, sshd = login-manager, tini = PID 1 ────────────────────────────────
 FROM ${RUNTIME_IMAGE} AS runtime
