@@ -304,9 +304,10 @@ defmodule Fleet.Project.OnboardTest do
     defmodule ProbeRepo do
       # `ops` is pushed AFTER `main` by both onboard and import, so its presence on the forge
       # PROVES the seed push already landed. Driven here by the repo name.
+      # JG-121 — trois etats : `{:ok, bool}` sur une lecture aboutie. Le cas illisible a son test.
       def branch_exists?(repo, branch, _opts) do
         send(self(), {:branch_exists?, repo, branch})
-        repo in ["fleet/onboarded", "fleet/project-template"]
+        {:ok, repo in ["fleet/onboarded", "fleet/project-template"]}
       end
 
       def protect_branch(repo, rule, _opts) do
@@ -346,11 +347,40 @@ defmodule Fleet.Project.OnboardTest do
       assert_received {:protect_branch, "fleet/onboarded",
                        %{rule_name: "main", enable_push: false}}
     end
+
+    # JG-121 — ET LE DEFAUT NE PASSAIT MEME PAS PAR UN CHEMIN D'ERREUR. `branch_exists?` rendait
+    # `false` sur une forge illisible, donc cette fonction partait dans son `else` et rendait `:ok` :
+    # « rien a faire ici », mot pour mot ce que rend un depot legitimement non seede. Le Poller
+    # horodatait alors le depot comme reconcilie, la protection de `main` n'etait jamais posee, et
+    # RIEN ne le disait — ni log, ni erreur, ni difference observable.
+    #
+    # La fonction voisine dans le meme module, `user_exists?/2`, distingue depuis toujours un 404
+    # prouve d'une panne. Huit lignes plus bas.
+    defmodule UnreadableRepo do
+      def branch_exists?(_repo, _branch, _opts), do: {:error, {:http, 503, "down"}}
+
+      def protect_branch(repo, rule, _opts) do
+        send(self(), {:protect_branch, repo, rule})
+        {:ok, :created}
+      end
+    end
+
+    test "JG-121: forge ILLISIBLE → erreur nommee, jamais un `:ok` qui vaut « rien a faire »" do
+      assert {:error, {:seeded_unreadable, {:http, 503, "down"}}} =
+               ProjectOnboard.reconcile_main_protection("fleet/unknowable",
+                 forge_repo: UnreadableRepo,
+                 project_template: "fleet/project-template",
+                 reviewer_roles: ["reviewer"]
+               )
+
+      refute_received {:protect_branch, _repo, _rule},
+                      "une regle a ete posee sur un depot dont on n'a pas su lire l'etat"
+    end
   end
 
   describe "main-protection announcement (a forge move is traceable, a no-op is silent)" do
     defmodule OutcomeRepo do
-      def branch_exists?(_repo, _branch, _opts), do: true
+      def branch_exists?(_repo, _branch, _opts), do: {:ok, true}
       def protect_branch(_repo, _rule, _opts), do: Process.get(:outcome)
     end
 

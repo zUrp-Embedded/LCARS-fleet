@@ -1581,6 +1581,44 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
+  # JG-121/124 — `branch_exists?/3` rendait `false` sur une branche PROUVEE absente ET sur une forge
+  # qu'on n'a pas su lire. Ses trois appelants en tiraient trois decisions differentes, dont deux
+  # destructrices : une protection de `main` silencieusement sautee, et une face republiee PAR-DESSUS
+  # une existante sur un simple timeout. La reponse etait huit lignes plus bas dans le meme module —
+  # `user_exists?/2` distingue depuis toujours un 404 prouve d'une panne.
+  describe "branch_exists?/3 — un 404 est une REPONSE, le reste est une absence de reponse" do
+    test "branche presente → {:ok, true}" do
+      handlers = %{{"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {200, %{"name" => "ops"}}}
+      assert {:ok, true} = ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "404 — la forge a REPONDU que la branche n'existe pas → {:ok, false}" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {404, %{"message" => "no"}}
+      }
+
+      assert {:ok, false} = ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "503 — on n'a PAS su lire : {:error, _}, jamais `false`" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {503, %{"message" => "down"}}
+      }
+
+      assert {:error, {:http, 503, _}} =
+               ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+
+    test "401 non plus — un jeton expire n'est pas une branche absente" do
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {401, %{"message" => "nope"}}
+      }
+
+      assert {:error, {:http, 401, _}} =
+               ForgeClient.Repo.branch_exists?("fleet/proj", "ops", opts(handlers))
+    end
+  end
+
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
     test "protect_branch → POST branch_protections, {:ok, :created}" do
       handlers = %{

@@ -542,22 +542,32 @@ defmodule Fleet.Pilot.Poller do
       state.protection_reconciler ||
         (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
-    Enum.each(due, fn repo ->
-      case reconciler.(repo, state.forge_opts) do
-        :ok ->
-          :ok
+    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Le tampon etait pose sur TOUS les `due`, echecs
+    # compris : un depot dont la reconciliation venait d'echouer repartait donc pour une periode
+    # entiere avant d'etre retente, alors que la seule chose qu'on savait de lui, c'est qu'on n'avait
+    # pas su le lire. Un echec n'est pas un travail fait, et le throttle existe pour espacer le
+    # travail — pas pour espacer les retentatives d'un travail qui n'a pas eu lieu.
+    reconciled =
+      Enum.filter(due, fn repo ->
+        case reconciler.(repo, state.forge_opts) do
+          :ok ->
+            true
 
-        {:error, reason} ->
-          Logger.warning(
-            "Poller: main-protection reconcile #{repo} FAILED (#{inspect(reason)}) — " <>
-              "retried next period (the rule may be out of line with the current jury)"
-          )
-      end
-    end)
+          {:error, reason} ->
+            Logger.warning(
+              "Poller: main-protection reconcile #{repo} FAILED (#{inspect(reason)}) — " <>
+                "NOT stamped, retried at the NEXT TICK (the rule may be out of line with the " <>
+                "current jury, or the forge was unreadable)"
+            )
+
+            false
+        end
+      end)
 
     %{
       state
-      | protection_rechecked: Enum.reduce(due, state.protection_rechecked, &Map.put(&2, &1, now))
+      | protection_rechecked:
+          Enum.reduce(reconciled, state.protection_rechecked, &Map.put(&2, &1, now))
     }
   end
 

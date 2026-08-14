@@ -53,18 +53,20 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
       :ok
     end
 
+    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
-      File.dir?(path) and
-        match?(
-          {_, 0},
-          System.cmd(
-            "git",
-            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-            stderr_to_stdout: true
-          )
-        )
+      {:ok,
+       File.dir?(path) and
+         match?(
+           {_, 0},
+           System.cmd(
+             "git",
+             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+             stderr_to_stdout: true
+           )
+         )}
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")

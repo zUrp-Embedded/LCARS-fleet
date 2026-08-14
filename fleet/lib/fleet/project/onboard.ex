@@ -2019,12 +2019,27 @@ defmodule Fleet.Project.Onboard do
   def reconcile_main_protection(repo, forge_opts) when is_binary(repo) do
     opts = Keyword.put(forge_opts, :forge_opts, forge_opts)
 
-    if seeded_project?(repo, opts), do: protect_main(repo, opts), else: :ok
+    case seeded_project?(repo, opts) do
+      {:ok, true} -> protect_main(repo, opts)
+      {:ok, false} -> :ok
+      {:error, reason} -> {:error, {:seeded_unreadable, reason}}
+    end
   end
 
+  # ⚠ SITE 1 SUR 3 — ET C'EST CELUI OU LA CONFUSION NE PASSAIT MEME PAS PAR UN CHEMIN D'ERREUR.
+  # `branch_exists?` rendait `false` sur une forge illisible, donc `reconcile_main_protection/2`
+  # partait dans son `else` et rendait **`:ok`** : « rien a faire ici », mot pour mot ce que rend un
+  # depot legitimement non seede. Aucune trace, et le Poller horodatait le depot comme reconcilie.
+  # La protection de `main` n'etait jamais posee, et rien au monde ne le disait.
+  #
+  # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
+  # illisible (on ne sait pas — on le DIT et l'appelant retentera).
   defp seeded_project?(repo, opts) do
-    repo != project_template(opts) and
+    if repo == project_template(opts) do
+      {:ok, false}
+    else
       repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
+    end
   end
 
   defp protect_main(repo, opts) do
@@ -2212,9 +2227,14 @@ defmodule Fleet.Project.Onboard do
         origin_full_name(dir, opts) == {:ok, full_name}
       end)
 
+    # ⚠ SITE 2 SUR 3 — LA DIRECTION SURE EST L'INVERSE DE CELLE DES DEUX AUTRES, et c'est pour ca
+    # que la garde ne pouvait pas etre reparee « au seul site cite ». Ici un `{:error, _}` laisse
+    # tel quel serait TRUTHY : un import jamais fait passerait pour SATISFAIT et on sauterait le
+    # travail. Une forge illisible n'est pas une preuve de publication — elle vaut « pas satisfait »,
+    # ce qui coute au pire un re-import idempotent.
     published? =
       Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.workshop_branch()], fn branch ->
-        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts))
+        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) == {:ok, true}
       end)
 
     ours? and forge_repo_present?(full_name, opts) and published?
@@ -2338,16 +2358,28 @@ defmodule Fleet.Project.Onboard do
   # Clone the face if the forge already carries the branch, otherwise build and publish it. Same
   # shape for both writer faces: the ONLY per-face inputs are the branch and the template subtree,
   # so a third one costs a call site and no new logic.
+  #
+  # ⚠ SITE 3 SUR 3 — ET C'EST LUI QUI ECRIT. Sur une forge illisible, l'ancien `false` envoyait dans
+  # le `else` : init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une
+  # face distante ECRASEE sur un simple timeout. L'inverse (traiter l'erreur comme « existe ») ferait
+  # cloner une branche peut-etre absente : moins destructeur, mais toujours une decision prise sans
+  # savoir. On ne devine pas : on REFUSE, et l'import s'arrete avec la raison — l'appelant garde son
+  # « repo untouched, a clean retry is possible ».
   defp ensure_face(full_name, url, dir, branch, template, name, opts) do
-    if repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
-      File.mkdir_p!(Path.dirname(dir))
-      GitOps.run(["clone", "--branch", branch, url, dir], auth: true)
-    else
-      with :ok <- init_face(dir, url, branch),
-           :ok <- Scaffold.face(dir, template, name, opts),
-           :ok <- commit(dir, "chore(import): init #{branch}") do
-        publish_face(dir, branch)
-      end
+    case repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
+      {:error, reason} ->
+        {:error, {:branch_unreadable, branch, reason}}
+
+      {:ok, true} ->
+        File.mkdir_p!(Path.dirname(dir))
+        GitOps.run(["clone", "--branch", branch, url, dir], auth: true)
+
+      {:ok, false} ->
+        with :ok <- init_face(dir, url, branch),
+             :ok <- Scaffold.face(dir, template, name, opts),
+             :ok <- commit(dir, "chore(import): init #{branch}") do
+          publish_face(dir, branch)
+        end
     end
   end
 

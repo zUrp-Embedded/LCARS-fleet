@@ -52,18 +52,20 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
       :ok
     end
 
+    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
-      File.dir?(path) and
-        match?(
-          {_, 0},
-          System.cmd(
-            "git",
-            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-            stderr_to_stdout: true
-          )
-        )
+      {:ok,
+       File.dir?(path) and
+         match?(
+           {_, 0},
+           System.cmd(
+             "git",
+             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+             stderr_to_stdout: true
+           )
+         )}
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
@@ -152,7 +154,10 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     # The local import leg ran: dual-dir present, ops on the forge.
     assert File.dir?(Path.join(o[:code_root], "pong"))
     assert File.dir?(Path.join(o[:ops_root], "pong"))
-    assert ExtForge.branch_exists?("fleet/pong", "ops", [])
+
+    # `== {:ok, true}` et non une simple verite : depuis JG-121 la fonction rend un triplet d'etats,
+    # et `assert` seul passerait aussi sur `{:ok, false}`.
+    assert ExtForge.branch_exists?("fleet/pong", "ops", []) == {:ok, true}
 
     # One-way: the local clone's origin is OUR forge, never the external URL.
     {origin, 0} =

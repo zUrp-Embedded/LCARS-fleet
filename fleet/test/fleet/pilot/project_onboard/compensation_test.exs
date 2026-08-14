@@ -68,18 +68,20 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # second-granular). Under load the second flips, the SHA differs, and the push is refused
     # non-fast-forward: a test whose verdict came from the clock. Answering truthfully also
     # exercises the `ops` idempotence `import/2` promises, instead of bypassing it.
+    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
-      File.dir?(path) and
-        match?(
-          {_, 0},
-          System.cmd(
-            "git",
-            ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
-            stderr_to_stdout: true
-          )
-        )
+      {:ok,
+       File.dir?(path) and
+         match?(
+           {_, 0},
+           System.cmd(
+             "git",
+             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}"],
+             stderr_to_stdout: true
+           )
+         )}
     end
 
     defp bare_path(full_name), do: Path.join(Process.get(:file_forge_root), "#{full_name}.git")
@@ -211,7 +213,9 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # `ops` was published BEFORE the late failure (ensure_work_ops precedes lock_main), so
     # the forge holds it and the retry below must SEE it and skip the re-push. Pinned here
     # because a forge lying `false` makes that retry depend on the wall clock, not on the code.
-    assert FileForge.branch_exists?("fleet/heritage", "ops", [])
+    # `== {:ok, true}` et non une simple verite : depuis JG-121 la fonction rend un triplet d'etats,
+    # et `assert` seul passerait aussi sur `{:ok, false}`.
+    assert FileForge.branch_exists?("fleet/heritage", "ops", []) == {:ok, true}
 
     # Retry clean.
     Process.put(:protect_result, {:ok, :created})
@@ -285,7 +289,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
       {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/ops"])
-      refute FileForge.branch_exists?("fleet/apollo", "ops", [])
+      assert FileForge.branch_exists?("fleet/apollo", "ops", []) == {:ok, false}
 
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
@@ -323,7 +327,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
       {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/workshop"])
-      refute FileForge.branch_exists?("fleet/apollo", "workshop", [])
+      assert FileForge.branch_exists?("fleet/apollo", "workshop", []) == {:ok, false}
 
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
