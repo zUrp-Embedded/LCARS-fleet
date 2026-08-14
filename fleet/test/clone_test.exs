@@ -225,6 +225,130 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(pod_dir, "work"))
   end
 
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  # 6-135 — LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS.
+  #
+  # Le bloc SP commun aux juges ordonnait `git diff origin/main...HEAD` en expliquant que « le clone
+  # est mono-branche ». Au dispatch d'une review, `RoleDispatch` pose `base_branch: head` : le clone
+  # est donc `--branch <head> --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de
+  # preuve echouaient sur une revision inconnue, et un juge prive de son instrument improvise une
+  # comparaison non contractuelle — ou rend son verdict sur le seul brief, que la chaine compte
+  # ensuite comme un jugement du livrable.
+  describe "6-135 — `refs/lcars/base` : la base contre laquelle ce travail se juge" do
+    defp base_ref(ws) do
+      case git(["rev-parse", "--verify", "--quiet", "refs/lcars/base"], ws) do
+        {out, 0} -> {:ok, String.trim(out)}
+        {_, _} -> :absent
+      end
+    end
+
+    test "un pod PRODUCTEUR : le ref est pose sur sa base, sans reseau", %{tmp_dir: tmp} do
+      src = make_source_repo(Path.join(tmp, "src"))
+      {sha, 0} = git(["rev-parse", "main"], src)
+      pod_dir = Path.join(tmp, "pod-prod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, ws, _f} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{"repo_path" => src, "base_branch" => "main"}),
+                 []
+               )
+
+      assert {:ok, String.trim(sha)} == base_ref(ws)
+    end
+
+    test "un pod JUGE : sa base est celle de la PR, RAPATRIEE — elle n'est pas dans son clone", %{
+      tmp_dir: tmp
+    } do
+      src = make_source_repo(Path.join(tmp, "src"))
+      {main_sha, 0} = git(["rev-parse", "main"], src)
+
+      # Le head de la PR : une branche coupee de `main` qui porte le travail du producteur.
+      {_, 0} = git(["checkout", "-q", "-b", "lcars/issue-7-engineer", "main"], src)
+      File.write!(Path.join(src, "livrable.txt"), "le travail a juger")
+      {_, 0} = git(["add", "."], src)
+      {_, 0} = git(["commit", "-q", "-m", "livrable"], src)
+      {_, 0} = git(["checkout", "-q", "main"], src)
+
+      pod_dir = Path.join(tmp, "pod-juge")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, ws, _f} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{
+                   "repo_path" => src,
+                   "base_branch" => "lcars/issue-7-engineer",
+                   "pr_base_branch" => "main"
+                 }),
+                 []
+               )
+
+      # Le clone est bien mono-branche — c'est la premisse, et elle reste vraie.
+      {_, code} = git(["rev-parse", "--verify", "--quiet", "origin/main"], ws)
+
+      assert code != 0,
+             "origin/main n'a jamais ete dans le clone d'un juge — c'est tout le defaut"
+
+      # Et pourtant la base EST la, sous son nom, epinglee sur la base reelle de la PR.
+      assert {:ok, String.trim(main_sha)} == base_ref(ws)
+
+      # La commande que le prompt prescrit rend exactement le livrable, et rien d'autre.
+      {out, 0} = git(["diff", "--name-only", "lcars/base...HEAD"], ws)
+      assert String.trim(out) == "livrable.txt"
+    end
+
+    test "une base de PR introuvable ARRETE le spawn, nommee — jamais un juge aveugle", %{
+      tmp_dir: tmp
+    } do
+      # L'action prescrite dit « refuser le spawn si cette preuve ne peut etre materialisee », et
+      # c'est la bonne direction ici : un verdict rendu sans base est compte comme un jugement du
+      # livrable. Le refus est BORNE — il ne peut atteindre qu'un pod qui porte une base de PR — et
+      # il n'immobilise rien : le verrou n'est pas encore pose, le tick suivant retente.
+      src = make_source_repo(Path.join(tmp, "src"))
+      pod_dir = Path.join(tmp, "pod-base-morte")
+      File.mkdir_p!(pod_dir)
+
+      assert {:error, {:clone_failed, _}} =
+               Clone.clone_or_skip(
+                 pod_dir,
+                 cap(%{
+                   "repo_path" => src,
+                   "base_branch" => "main",
+                   "pr_base_branch" => "branche-supprimee"
+                 }),
+                 []
+               )
+    end
+
+    test "le RE-BRIEF deplace le ref : le diff du ticket 2 ne contient pas le ticket 1", %{
+      tmp_dir: tmp
+    } do
+      # Sans cette mise a jour, un pod de pipe garderait le ref sur la base du ticket PRECEDENT —
+      # son diff contiendrait le travail de quelqu'un d'autre, ce qui est pire qu'un ref absent
+      # parce que ca ne leve pas.
+      src = make_source_repo(Path.join(tmp, "src"))
+      {sha1, 0} = git(["rev-parse", "main"], src)
+      pod_dir = Path.join(tmp, "pod-pipe")
+      File.mkdir_p!(pod_dir)
+
+      p1 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha1)})
+      assert {:ok, ws, _} = Clone.clone_or_skip(pod_dir, p1, slug: "issue-1")
+      assert {:ok, String.trim(sha1)} == base_ref(ws)
+
+      # La base avance entre les deux tickets, comme sur un depot vivant.
+      File.write!(Path.join(src, "ticket1.txt"), "livre par le ticket 1")
+      {_, 0} = git(["add", "."], src)
+      {_, 0} = git(["commit", "-q", "-m", "ticket 1 merged"], src)
+      {sha2, 0} = git(["rev-parse", "main"], src)
+
+      p2 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha2)})
+      assert {:ok, ^ws, _} = Clone.reset_in_place(pod_dir, p2, slug: "issue-2")
+      assert {:ok, String.trim(sha2)} == base_ref(ws)
+    end
+  end
+
   test "the workspace clone brings ONE branch — a neighbour's is not one checkout away", %{
     tmp_dir: tmp
   } do

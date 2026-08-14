@@ -75,6 +75,16 @@ defmodule Fleet.Pilot.BriefBuilder do
   #
   # `fetch!` et non `get` : ce chemin n'existe que sous `dispatch_review`, qui pose toujours la base.
   # Une absence serait un bypass, et un brief qui invente une branche coute plus cher qu'un refus.
+  #
+  # ⚠ ET LE NOM CORRIGE NE SUFFISAIT PAS (6-135). La procedure disait `git merge origin/<base>`, avec
+  # la BONNE base — mais `RoleDispatch` pose `base_branch: head` pour tout pod de review, donc son
+  # clone est `--branch <head> --single-branch` et `origin/<base>` n'y est PAS. La commande restait
+  # inexecutable ; seule la raison avait change. Elle vise desormais `lcars/base`, le ref que le
+  # bootstrap rapatrie sur la base REELLE de la PR — et son garde-fou dit maintenant l'ABSENCE
+  # (l'etat possible) et non la peremption (celui qu'on avait suppose).
+  #
+  # La prose garde le NOM de la face : c'est ce qui dit au producteur contre quoi il compose, et
+  # c'est aussi ce qui distingue une base qui suit la PR d'un ref renomme.
   defp producer_conflict_section(base) do
     """
     ## Conflit de merge à résoudre (prioritaire)
@@ -83,14 +93,16 @@ defmodule Fleet.Pilot.BriefBuilder do
     merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
     déjà approuvé par les juges, seul le conflit bloque.
 
-    1. Intègre l'état actuel de `#{base}` : `git merge origin/#{base}` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
+       est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est
+       mono-branche, `origin/#{base}` n'y est pas.)
     2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
        des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
-    Si `origin/#{base}` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
-    peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
-    JAMAIS le contenu d'une brique sœur.
+    Si `lcars/base` est absent, ou s'il ne contient PAS les briques sœurs (tu n'as pas le réseau
+    pour le rafraîchir), rends `blocked` en le disant : n'invente JAMAIS le contenu d'une brique
+    sœur, et ne bricole pas une autre base.
 
     """
   end
@@ -106,14 +118,16 @@ defmodule Fleet.Pilot.BriefBuilder do
     sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le fond — la seule question
     est de composer les deux intentions sans en sacrifier une.
 
-    1. Intègre l'état actuel de `#{base}` : `git merge origin/#{base}` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
+       est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est
+       mono-branche, `origin/#{base}` n'y est pas.)
     2. Résous en PRÉSERVANT les deux apports. Tu n'as pas écrit ce code : tu ne connais pas les
        raisons derrière chaque ligne, donc tu ne choisis pas un camp — tu composes.
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
     Rends `blocked` en disant pourquoi dès que la composition demande une DÉCISION que le code ne
-    porte pas (deux intentions réellement incompatibles, ou un `origin/#{base}` périmé que tu ne
-    peux pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
+    porte pas (deux intentions réellement incompatibles, ou un `lcars/base` absent ou périmé que tu
+    ne peux pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
     humaine existe pour ça, et une résolution devinée coûte plus cher qu'un refus motivé.
 
     """
@@ -429,13 +443,22 @@ defmodule Fleet.Pilot.BriefBuilder do
   # clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its workspace instead
   # of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges emptiness
   # → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
+  # ⚠ CINQUIEME PORTEUR DE LA MEME INSTRUCTION, et le seul qui vive dans `lib/` — les quatre autres
+  # sont le bloc SP et ses copies. Elle nommait `origin/main`, qui N'EST PAS dans le workspace d'un
+  # juge : `RoleDispatch` pose `base_branch: head`, donc le clone est `--branch <head>
+  # --single-branch`. Les deux commandes prescrites echouaient sur une revision inconnue (6-135).
+  # `refs/lcars/base` est pose par le bootstrap sur la base REELLE, et il est le meme nom pour tous
+  # les pods — c'est la condition pour qu'une instruction puisse le nommer sans dire « selon les cas ».
   defp git_native_outputs do
     %{
       "livrable" =>
         "git-native — le code à juger est checkout dans TON workspace. Le clone est mono-branche : " <>
-          "la base est `origin/main` (le ref local `main` N'EXISTE PAS). Le diff de la PR = " <>
-          "`git diff origin/main...HEAD` (trois points — point de divergence auto). `git log origin/main..HEAD` " <>
-          "pour les commits, `git show <sha>` pour le détail. Juge ces changements contre le critère ci-dessous."
+          "ni `main` ni la branche de base ne sont là sous leur nom. Ta base est le ref `lcars/base`, " <>
+          "posé par le runtime sur la base RÉELLE de ce travail. Le diff de la PR = " <>
+          "`git diff lcars/base...HEAD` (trois points — point de divergence auto). `git log lcars/base..HEAD` " <>
+          "pour les commits, `git show <sha>` pour le détail. Si `lcars/base` est absent, ne bricole PAS " <>
+          "une comparaison de remplacement : dis que la base n'est pas matérialisée et arrête-toi. " <>
+          "Juge ces changements contre le critère ci-dessous."
     }
   end
 

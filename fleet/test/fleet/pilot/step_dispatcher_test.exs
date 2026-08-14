@@ -1142,10 +1142,15 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       # Info-starvation fix (judge): empty predecessor (git-native) → the judge is POINTED at its
       # workspace AND receives the CRITERION (issue body, defused in context).
-      # The diff base is `origin/main` (single-branch clone: the local ref `main` does not exist —
-      # live morse bug: `git diff main..HEAD` → fatal unknown revision → intermittent
-      # halt_wait_input).
-      assert spawn_opts[:brief] =~ "git diff origin/main...HEAD"
+      #
+      # ⚠ CETTE ASSERTION EPINGLAIT `origin/main`, et son commentaire donnait la bonne moitie du
+      # raisonnement : « single-branch clone: the local ref `main` does not exist — live morse bug ».
+      # Il s'arretait un cran trop tot. Sur une review, `RoleDispatch` pose `base_branch: head`,
+      # donc le clone est `--branch <head>` et **`origin/main` n'y est pas non plus** ; la meme
+      # revision inconnue revenait par l'autre porte (6-135). La base est desormais `lcars/base`,
+      # posee par le bootstrap sur la base REELLE du travail, la meme pour tous les pods.
+      assert spawn_opts[:brief] =~ "git diff lcars/base...HEAD"
+      refute spawn_opts[:brief] =~ "origin/main"
       assert spawn_opts[:brief] =~ "implémente le décodeur morse"
 
       # enqueue targets the pr-... pod_id; issue_id = the issue

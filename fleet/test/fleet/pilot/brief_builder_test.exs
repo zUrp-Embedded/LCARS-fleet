@@ -400,23 +400,32 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     # et c'est deja elle qui choisit le worktree de resolution. Sur une PR qui ne vise pas la face
     # code, le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un
     # `fetch main`, il composait son livrable contre la mauvaise face.
-    test "JG-137: les DEUX voix parlent de la vraie base, jamais de `main` en dur" do
+    # ⚠ 6-135 — ET LE NOM CORRIGE NE SUFFISAIT PAS. JG-137 a mis la VRAIE base dans la commande ;
+    # elle restait inexecutable, parce qu'un pod de review clone `--branch <head> --single-branch`
+    # et que `origin/<base>` n'est pas dans son clone. Le defaut avait seulement change de raison.
+    # La commande vise maintenant `lcars/base`, le ref rapatrie par le bootstrap ; la PROSE garde
+    # le nom de la face, qui est ce qui dit au producteur contre quoi il compose.
+    test "JG-137+6-135: les DEUX voix visent un ref qui EXISTE, et nomment la vraie base" do
       for voice <- [:producer, :exception] do
         brief = conflict_brief(voice, "workshop")
 
-        assert brief =~ "git merge origin/workshop",
-               "voix #{voice} : la procedure ne nomme pas la base reelle de la PR"
+        assert brief =~ "git merge lcars/base",
+               "voix #{voice} : la procedure vise un ref absent du clone d'un pod de review"
 
-        refute brief =~ "origin/main",
-               "voix #{voice} : `main` est encore ecrit en dur dans une procedure executable"
+        assert brief =~ "workshop",
+               "voix #{voice} : la procedure ne nomme plus la base reelle de la PR"
+
+        refute brief =~ "git merge origin/",
+               "voix #{voice} : une commande executable vise encore un `origin/<base>` inexistant"
       end
     end
 
-    test "TEMOIN JG-137 — sur une PR de face code, la procedure dit bien `main`" do
-      # Sans ce temoin, un correctif qui remplacerait `main` par n'importe quoi passerait le test
-      # ci-dessus : ce qui est verifie, c'est que la base SUIT la PR, pas qu'elle a change de nom.
-      brief = conflict_brief(:producer, "main")
-      assert brief =~ "git merge origin/main"
+    test "TEMOIN JG-137 — la base SUIT la PR, elle n'a pas juste change de nom" do
+      # Sans ce temoin, un correctif qui remplacerait la base par n'importe quoi passerait le test
+      # ci-dessus. Le ref executable est le meme dans les deux cas — c'est le POINT, il est
+      # universel — donc le temoin porte la ou la difference doit se voir : la prose.
+      assert conflict_brief(:producer, "main") =~ "divergé de `main`"
+      assert conflict_brief(:producer, "workshop") =~ "divergé de `workshop`"
     end
 
     test "no conflict → no section at all (the default path is untouched)" do

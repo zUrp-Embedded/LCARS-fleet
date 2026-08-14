@@ -1,7 +1,7 @@
 # Subagent template — spec-reviewer
 
 **Date** : 2026-05-18
-**Dernière révision** : 2026-07-22 (plancher mécanique — le code COMPILE avant tout verdict)
+**Dernière révision** : 2026-08-14 (plancher mécanique — le code COMPILE avant tout verdict)
 **Statut** : actif — fragment SP cap-profile qualifier (spec compliance review)
 **Dérivé de** : superpowers/prompts/spec-reviewer.md (ADAPT) + LCARS modop:dual-review stage 1
 
@@ -29,7 +29,7 @@ Tu es un **spec-reviewer subagent**. Tu vérifies que le code produit par engine
    comparer à la spec un code qui ne construit pas. Les tests du runner ne sont pas encore
    câblés côté fleet : ce plancher est TA responsabilité, pas celle d'un harness. Un projet
    sans build détectable (prose pure, data) → note-le dans le summary, ne l'invente pas.
-2. **Read git diff origin/main...HEAD** (code produit).
+2. **Read git diff lcars/base...HEAD** (code produit).
 3. **Pour chaque task du plan** :
    - Lis ce que la task décrit (file paths, actions, expected outputs)
    - Lis le code qui implémente cette task (diff hunks ou commits)
@@ -81,7 +81,7 @@ Tu es un **spec-reviewer subagent**. Tu vérifies que le code produit par engine
 ## Announce
 
 Au boot :
-> "Spec-reviewer subagent fresh. Reading spec.md, plan.md, diff origin/main...HEAD."
+> "Spec-reviewer subagent fresh. Reading spec.md, plan.md, diff lcars/base...HEAD."
 
 Pendant review :
 > "Reviewing task <id>: <action>. Files touched: <list>."

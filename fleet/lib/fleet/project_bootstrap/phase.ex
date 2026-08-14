@@ -276,6 +276,10 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # capture" (same-role race): `base..HEAD` will contain ONLY the pod's commits.
                # Axiom set AT the clone boundary (not verified "observable post-hoc").
                {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
+               # `refs/lcars/base` — LA BASE CONTRE LAQUELLE CE TRAVAIL SE JUGE, materialisee ICI
+               # parce que le pod ne peut pas la poser lui-meme (`update-ref` est dans sa denylist
+               # git) et parce que, pour un juge, elle n'est meme pas dans son clone.
+               {:ok, {_, 0}} <- pin_work_base(ws, project),
                # `checkout -b` is local (no network, does not prompt) but ALSO goes through the bounded
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
@@ -349,6 +353,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # FAIL-HARD on sanitize failure: the re-brief is refused — never a pod on hostile
           # material; the wedge is visible (reprovision FAILED log), the poison is not.
           with {:ok, {_, 0}} <- pin_base_sha(ws, sha),
+               # 6-135 — LE RE-BRIEF DEPLACE LA BASE, donc le ref doit suivre. Sans cette ligne un
+               # pod de pipe garderait `refs/lcars/base` sur la base du ticket PRECEDENT : son diff
+               # contiendrait le travail de quelqu'un d'autre, ce qui est pire qu'un ref absent
+               # parce que ca ne leve pas.
+               {:ok, {_, 0}} <- pin_work_base(ws, project),
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
@@ -571,6 +580,62 @@ defmodule Fleet.ProjectBootstrap.Phase do
               other
           end
       end
+    end
+
+    # LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS (6-135), et le prompt disait lui-meme
+    # pourquoi : « le clone est mono-branche ». Il en tirait `origin/main`. Or au dispatch d'une
+    # review, `RoleDispatch` pose `base_branch: head` — le clone est donc `--branch <head>
+    # --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de preuve prescrites au juge
+    # (`git diff origin/main...HEAD`, `git log origin/main..HEAD`) echouaient sur une revision
+    # inconnue, et un agent prive de son instrument improvise ou juge sur le seul brief. Pour une PR
+    # de face atelier, la base metier n'est de toute facon pas `main`.
+    #
+    # UN SEUL NOM, POUR TOUS LES PODS, et c'est la condition pour qu'un prompt puisse le nommer : un
+    # ref conditionnel obligerait l'instruction a dire « selon les cas », ce qu'un agent ne sait pas
+    # resoudre depuis l'interieur du workspace.
+    #
+    #   * un pod qui porte la base d'une PR (`pr_base_branch` : juge, rework) → on la RAPATRIE, elle
+    #     n'est pas dans le clone ;
+    #   * tout autre pod → sa base est deja la (c'est celle qu'il a clonee), on pose juste le nom.
+    #
+    # `+refs/heads/<base>:refs/lcars/base` en une passe : le ref est cree deterministe, sans passer
+    # par `FETCH_HEAD` que la commande suivante ecraserait.
+    #
+    # UN ECHEC ICI ARRETE LE SPAWN, delibere et borne : il ne peut arriver qu'a un pod qui juge, et
+    # « la base a disparu » est exactement l'etat ou un verdict ne doit pas etre rendu. Le pod n'est
+    # pas pris : le verrou n'a pas ete pose, le tick suivant retente, et un echec durable remonte
+    # sous son propre nom au lieu de produire un juge aveugle.
+    defp pin_work_base(ws, project) do
+      case project["pr_base_branch"] do
+        base when is_binary(base) and base != "" ->
+          fetch_work_base(ws, base)
+
+        _ ->
+          local_work_base(ws)
+      end
+    end
+
+    defp fetch_work_base(ws, base) do
+      if Fleet.GitRef.valid?(base) do
+        Fleet.Credentials.Shell.git(
+          @hooks_off ++
+            ["-C", ws, "fetch", "--no-tags", "origin", "+refs/heads/#{base}:refs/lcars/base"]
+        )
+      else
+        {:error, {:invalid_pr_base_branch, base}}
+      end
+    end
+
+    # Aucun reseau, et `HEAD` plutot que le nom de la branche ou le sha : a cet instant precis HEAD
+    # EST la base — `pin_base_sha` vient de l'y poser et la branche de travail n'est pas encore
+    # coupee. Nommer `base_branch` ferait dependre le geste d'une subtilite de resolution de ref
+    # (mono-branche : le clone cree bien la branche locale, mais c'est un detail de `git clone` et
+    # pas un invariant qu'on veut porter ici) ; nommer `base_sha` echouerait quand il est absent.
+    defp local_work_base(ws) do
+      Fleet.Credentials.Shell.git(
+        @hooks_off ++ ["-C", ws, "update-ref", "refs/lcars/base", "HEAD"],
+        env: []
+      )
     end
 
     # pod_dir CONFINEMENT lives UPSTREAM: the spawner builds pod_dir as `<pod_dir_root>/pod_<pod_id>`
