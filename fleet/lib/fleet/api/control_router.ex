@@ -8,15 +8,25 @@ defmodule Fleet.API.ControlRouter do
   This is the SAME move the repo already made for the pod-facing MCP transport: a shared HTTP
   loopback was replaced by an AF_UNIX socket because "the identity IS the channel". Here the
   reasoning is the mirror image. `/api/admin/spawn` is the one remaining WRITE (it spawns pods);
-  its only legitimate client is `bin/lcars`, run host-side by the human. A pod runs under bwrap
-  with `--share-net`, so it SHARES the host network namespace: its `127.0.0.1` is the host's, and
-  it can reach any TCP loopback listener — including a no-auth admin endpoint. That is the confused
-  deputy: a compromised/injected pod re-obtains the "spawner" capability the MCP tool-gating denies
-  it, amplifying claude sessions on the human's subscription; bounded by `max_pods` but
-  self-refilling. A UNIX socket closes that BY CONSTRUCTION: the socket file lives under
-  `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not in the
-  pod's mount namespace. The boundary is the filesystem, not a firewall or an auth token. The
-  human's `lcars` runs host-side and reaches it via `curl --unix-socket`; the pod cannot.
+  its only legitimate client is `bin/lcars`, run host-side by the human. The risk it closes is the
+  confused deputy: a compromised/injected pod re-obtaining the "spawner" capability the MCP
+  tool-gating denies it, amplifying claude sessions on the human's subscription — bounded by
+  `max_pods` but self-refilling.
+
+  A UNIX socket closes that BY CONSTRUCTION, and the reason is the FILESYSTEM: the socket file
+  lives under `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not
+  in the pod's mount namespace. The human's `lcars` runs host-side and reaches it via
+  `curl --unix-socket`; the pod cannot.
+
+  ⚠ THIS PARAGRAPH USED TO REST ON A SECOND WALL THAT NO LONGER EXISTS, and the two must not be
+  confused. It said a pod runs `bwrap --share-net`, therefore shares the host network namespace,
+  therefore reaches any TCP loopback listener. That has been false since the per-pod CONNECT proxy
+  landed: `bwrap_launch.sh` passes `--unshare-all` and the flag is gone from the file entirely
+  (`Fleet.Spawner.Pod.Egress` states the current shape). So there are now TWO independent walls —
+  the mount namespace (this one) and the network namespace (that one). Writing the mount reason as
+  a consequence of the network one made a reader believe that restoring pod networking would reopen
+  this door. It would not; and the day someone changes one wall, the other must still be read on
+  its own terms.
 
   The READ surface (`/api/health`, `/api/version`, …) and the WS event stream stay on TCP
   (`Fleet.API.Rest` / `Fleet.API.WS`): they are low-risk (a browser dashboard needs TCP, and a

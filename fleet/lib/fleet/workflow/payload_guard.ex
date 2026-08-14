@@ -42,10 +42,18 @@ defmodule Fleet.Workflow.PayloadGuard do
       (`out -> /home/<human>/.claude`) passes the prefix check, but
       `File.write` FOLLOWS the symlink → write OUTSIDE the workspace. Refuse if
       an EXISTING component of the path is a symlink → `{:symlink_escape, path}`.
+      ⚠ **Checked TWICE, and the second time is the one that matters**: the pod
+      is still alive when this runs and its workspace is mounted RW, so a link
+      planted BETWEEN the validation and the write would be followed by a pass
+      that only trusted pass 1 (6-047). The write itself replaces rather than
+      writes through — `rename(2)` operates on the link, never on its target.
+      What remains open, bounded and stated at the write site: a link planted on
+      a PARENT directory inside that same window.
 
-  The single public entry (`apply_files/2`) chains validation then write:
+  The single public entry (`apply_files/3`) chains validation then write:
   writing without validating is impossible by construction (validation is not
-  an optional exposed step).
+  an optional exposed step). Its third argument carries the `:after_validate`
+  TEST seam only — production calls it with two.
   """
 
   @doc """
@@ -66,14 +74,26 @@ defmodule Fleet.Workflow.PayloadGuard do
       (files already written remain — no rollback; the caller stops on the
       error, so the partial state is never committed)
   """
-  @spec apply_files(Path.t(), term()) :: :ok | {:error, term()}
-  def apply_files(workspace, files) when is_list(files) and files != [] do
+  @spec apply_files(Path.t(), term(), keyword()) :: :ok | {:error, term()}
+  def apply_files(workspace, files, opts \\ [])
+
+  def apply_files(workspace, files, opts) when is_list(files) and files != [] do
     with :ok <- validate_files(workspace, files) do
+      # SEAM `:after_validate` — LE SEUL MOYEN DE PROUVER CE QUI SUIT. Le defaut de 6-047 est une
+      # COURSE entre les deux passes : dans un monde sans concurrence, le correctif est
+      # OBSERVATIONNELLEMENT IDENTIQUE a l'ancien code, donc intestable — et un test qui ne rougit
+      # pas sans le fix ne prouve rien (P-09). Ce point d'insertion laisse un test poser le lien
+      # exactement la ou le pod le poserait. Absent en production : `nil`, aucun appel.
+      case Keyword.get(opts, :after_validate) do
+        f when is_function(f, 0) -> f.()
+        _ -> :ok
+      end
+
       write_validated_files(workspace, files)
     end
   end
 
-  def apply_files(_workspace, _other), do: {:error, :no_files_in_payload}
+  def apply_files(_workspace, _other, _opts), do: {:error, :no_files_in_payload}
 
   defp validate_files(workspace, files) do
     expanded_ws = Path.expand(workspace)
@@ -136,17 +156,61 @@ defmodule Fleet.Workflow.PayloadGuard do
     end
   end
 
+  # ⚠ VALIDER PUIS ECRIRE EN DEUX PASSES LAISSE UNE FENETRE, et le pod y ecrit (6-047). La passe 1
+  # constate qu'aucun composant n'est un lien ; la passe 2 ecrit — entre les deux, le pod, qui tourne
+  # toujours et dont l'espace de travail est monte RW, pose le lien. `File.write` le SUIT, et
+  # l'ecriture reputee confinee atterrit ou le lien pointe.
+  #
+  # DEUX GESTES, ET ILS NE FERMENT PAS LA MEME CHOSE :
+  #
+  #   1. LA CHAINE EST RE-VERIFIEE JUSTE AVANT CHAQUE ECRITURE — tous les composants, le dernier
+  #      compris (`symlink_in_chain?`). Ca ne supprime pas la course, ca la reduit d'un « toute la
+  #      passe » a un « ce fichier-ci ».
+  #
+  #   2. ON N'ECRIT PLUS SUR LA CIBLE, ON LA REMPLACE. `rename(2)` opere sur le LIEN, jamais sur ce
+  #      qu'il designe : un lien pose au DERNIER composant est ECRASE par le fichier, et sa victime
+  #      n'est pas touchee. Mesure faite avant d'y adosser quoi que ce soit. C'est ce qui ferme
+  #      STRUCTURELLEMENT le residu que le point 1 laisse sur le dernier composant — entre son
+  #      `lstat` et l'ecriture.
+  #
+  # ⚠ CE QUI RESTE OUVERT, ET IL FAUT LE SAVOIR EN LISANT : un lien pose sur un REPERTOIRE PARENT
+  # entre la re-verification et le rename est toujours suivi, par `mkdir_p` comme par le rename.
+  # Rien dans ce langage ne permet un `openat(O_NOFOLLOW)` par composant — ni `File.write`, ni
+  # `:file.open`. La fenetre est bornee, pas supprimee ; la supprimer demanderait une NIF, donc une
+  # decision, pas un correctif.
+  #
+  # LA PASSE 1 RESTE, et elle n'est pas redondante : sa raison est ailleurs — un payload dont UN
+  # SEUL fichier est invalide n'ecrit RIEN. Supprimer la validation globale pour ne garder que le
+  # controle tardif echangerait une propriete prouvee contre une fenetre a peine plus courte.
   defp write_validated_files(workspace, files) do
     Enum.reduce_while(files, :ok, fn
       %{"path" => rel_path, "content" => content}, :ok ->
-        full_path = Path.join(workspace, rel_path)
-
-        with :ok <- File.mkdir_p(Path.dirname(full_path)),
-             :ok <- File.write(full_path, content) do
-          {:cont, :ok}
+        if symlink_in_chain?(workspace, rel_path) do
+          {:halt, {:error, {:symlink_escape, rel_path}}}
         else
-          {:error, reason} -> {:halt, {:error, {:file_write_failed, rel_path, reason}}}
+          case write_replacing(Path.join(workspace, rel_path), content) do
+            :ok -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, {:file_write_failed, rel_path, reason}}}
+          end
         end
     end)
+  end
+
+  # Le temporaire vit dans le MEME repertoire que la cible : `rename` n'est atomique qu'a
+  # l'interieur d'un systeme de fichiers, et un `/tmp` separe le rendrait silencieusement non
+  # atomique (copie + unlink), donc de nouveau interruptible.
+  defp write_replacing(full_path, content) do
+    dir = Path.dirname(full_path)
+    tmp = Path.join(dir, ".lcars-payload-#{:erlang.unique_integer([:positive])}")
+
+    with :ok <- File.mkdir_p(dir),
+         :ok <- File.write(tmp, content),
+         :ok <- File.rename(tmp, full_path) do
+      :ok
+    else
+      {:error, _} = err ->
+        _ = File.rm(tmp)
+        err
+    end
   end
 end
