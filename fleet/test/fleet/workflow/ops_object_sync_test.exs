@@ -369,4 +369,99 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
     refute log =~ "serializer NOT registered"
   end
+
+  # 6-048 — LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE. Le raccourci d'idempotence rendait
+  # `Git.last_commit_sha/2` — le dernier commit ayant TOUCHE ce chemin — sans verifier que le
+  # contenu A CE COMMIT est celui qu'on annonce. Un fichier ecrit puis non commite suffit.
+  #
+  # Ce sha remonte jusqu'aux pointeurs d'epinglage : `Brief: <ref> @ <sha>` dans le corps du ticket,
+  # avec la phrase « ce qui fait foi est le doc ci-dessous, A CE COMMIT EXACT ». Un juge qui resout
+  # le pointeur lit alors une version PRECEDENTE, sans qu'aucune erreur ne se leve.
+  describe "6-048 — le sha rendu porte le contenu annonce" do
+    alias Fleet.Workflow.OpsObject
+
+    test "fichier ecrit NON COMMITE : le sha d'une version precedente n'est pas rendu",
+         %{tmp_dir: tmp} do
+      git_init(tmp)
+
+      # v1 commitee — c'est ELLE que le raccourci rendait a tort.
+      assert {:ok, sha_v1, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v1\n", label: "t")
+
+      # v2 ecrite sur le disque et JAMAIS commitee : exactement l'etat que laisse un
+      # `materialize/5` dont le commit a echoue.
+      File.write!(Path.join(tmp, "briefs/x.md"), "v2\n")
+
+      assert {:ok, sha_v2, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v2\n", label: "t")
+
+      refute sha_v2 == sha_v1, "le sha de v1 a ete rendu pour le contenu v2"
+
+      # Et le sha rendu porte VRAIMENT v2 — c'est la propriete, pas « un autre sha ».
+      {contenu, 0} = System.cmd("git", ["show", "#{sha_v2}:briefs/x.md"], cd: tmp)
+      assert contenu == "v2\n"
+    end
+
+    test "TEMOIN — contenu deja commite : le raccourci rend bien SON commit, sans en creer",
+         %{tmp_dir: tmp} do
+      # Sans ce temoin, un correctif qui re-commiterait a chaque appel passerait le test precedent
+      # et ferait de l'idempotence une illusion — un commit par appel dans le journal de `work/ops`.
+      git_init(tmp)
+
+      assert {:ok, sha1, _} = OpsObject.commit_object(tmp, "briefs/x.md", "stable\n", label: "t")
+      avant = commit_count(tmp)
+
+      assert {:ok, sha2, _} = OpsObject.commit_object(tmp, "briefs/x.md", "stable\n", label: "t")
+
+      assert sha2 == sha1
+
+      assert commit_count(tmp) == avant,
+             "un commit a ete cree alors que le contenu etait identique"
+    end
+
+    test "une version ANCIENNE re-demandee retrouve SON commit, pas le dernier du chemin",
+         %{tmp_dir: tmp} do
+      # Le cas qui distingue « dernier commit du chemin » de « commit portant ce contenu » : trois
+      # versions, puis on redemande la premiere. `last_commit_sha` aurait rendu le commit de v3.
+      git_init(tmp)
+
+      assert {:ok, sha_v1, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v1\n", label: "t")
+      assert {:ok, _sha_v2, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v2\n", label: "t")
+      assert {:ok, sha_v3, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v3\n", label: "t")
+
+      # On remet v1 sur le disque, sans commiter, et on la redemande.
+      File.write!(Path.join(tmp, "briefs/x.md"), "v1\n")
+      assert {:ok, sha, _} = OpsObject.commit_object(tmp, "briefs/x.md", "v1\n", label: "t")
+
+      assert sha == sha_v1
+      refute sha == sha_v3
+
+      {contenu, 0} = System.cmd("git", ["show", "#{sha}:briefs/x.md"], cd: tmp)
+      assert contenu == "v1\n"
+    end
+  end
+
+  # 6-081 — `File.exists?/1` PUIS `File.read!/1` est un check-then-act, et la variante `!` LEVE
+  # dans une expression booleenne ou l'echec de lecture voulait dire « contenu different ». Ce code
+  # tourne dans le `handle_call` du serialiseur : la levee le TUE, et tous les appels en attente
+  # recoivent un `:exit`.
+  describe "6-081 — un fichier illisible ne tue pas le serialiseur de work/ops" do
+    test "chemin devenu un REPERTOIRE : materialise ou echoue, mais le serveur survit",
+         %{tmp_dir: tmp, server: srv, name: name} do
+      git_init(tmp)
+
+      # Un repertoire la ou un fichier est attendu : `File.exists?` rend true, `File.read!` LEVE
+      # (`:eisdir`). C'est la forme reproductible du disparait-entre-les-deux, et elle passe par le
+      # meme chemin de code.
+      File.mkdir_p!(Path.join(tmp, "briefs/x.md"))
+
+      _ = OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "content\n", label: "t")
+
+      # LA propriete : le serialiseur est toujours vivant et repond encore. Le sort de CET appel
+      # importe moins que le fait que les suivants ne recoivent pas un `:exit`.
+      assert Process.alive?(srv)
+      assert Process.whereis(name) == srv
+
+      assert {:ok, _sha, _} =
+               OpsObjectSync.commit_object(srv, tmp, "briefs/autre.md", "ok\n", label: "t")
+    end
+  end
 end
