@@ -4,7 +4,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   `Fleet.Spawner.spawn_pod/3`. Every post-202 dispatch failure emits
   `spawn.failed`; malformed or failed requests never crash the consumer.
 
-  It ALSO relays `github_publish.{done,failed}` back to the requesting pod (`requester_pod_id`
+  It ALSO relays `project_publish.{done,failed}` back to the requesting pod (`requester_pod_id`
   in the payload) via `notify_pod`: the wake channel is the only server->pod path (MCP is
   pull-only), and the pod that asked to publish gets its own answer. This lives here because
   `notify_pod` is a Spawner act; the MCP worker only emits the outcome on the bus. Best-effort by
@@ -63,7 +63,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   # Relay a finished publish back to the pod that asked for it. Only when `requester_pod_id` is a
   # real pod (a caller without one falls through to the ignore clause).
   def handle_info(
-        %Fleet.Event{type: :"github_publish.done", payload: %{"requester_pod_id" => pod} = p},
+        %Fleet.Event{type: :"project_publish.done", payload: %{"requester_pod_id" => pod} = p},
         state
       )
       when is_binary(pod) do
@@ -83,7 +83,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{type: :"github_publish.failed", payload: %{"requester_pod_id" => pod} = p},
+        %Fleet.Event{type: :"project_publish.failed", payload: %{"requester_pod_id" => pod} = p},
         state
       )
       when is_binary(pod) do

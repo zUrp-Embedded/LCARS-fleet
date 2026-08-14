@@ -29,10 +29,10 @@ defmodule Fleet.MCP.PodTools do
         engraved declaration gets a tracked revision path; future tickets only).
       - `project_close`    : parks a project (BL-6-30 — marker issue holds the state, the
         poller skips the repo; disk + forge intact, `project_open` reopens).
-      - `project_publish`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
+      - `project_adopt`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
         of import; local content never overwritten).
       - `project_import` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
-      - `github_publish`   : phase-2 publish of a project to its linked external forge as a rolling
+      - `project_publish`   : phase-2 publish of a project to its linked external forge as a rolling
         PR/MR (ASYNC — returns queued, outcome on the bus; the token stays host-side).
       - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
       - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
@@ -124,9 +124,9 @@ defmodule Fleet.MCP.PodTools do
     "project_install" => :mutation,
     "deposit_list" => :read,
     "deposit_import" => :mutation,
-    "project_publish" => :mutation,
+    "project_adopt" => :mutation,
     "project_import" => :mutation,
-    "github_publish" => :mutation,
+    "project_publish" => :mutation,
     "project_close" => :mutation,
     "project_revise_card" => :mutation,
     "project_delete" => :mutation,
@@ -425,7 +425,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "project_publish" do
+  deftool "project_adopt" do
     meta do
       name("Adopt Project")
 
@@ -492,7 +492,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "github_publish" do
+  deftool "project_publish" do
     meta do
       name("Publish to External Forge")
 
@@ -501,7 +501,7 @@ defmodule Fleet.MCP.PodTools do
           "name says github but GitLab is first-class) as a rolling PR/MR. ASYNC: returns " <>
           "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
           "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
-          "(github_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
+          "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
           "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>
           "`lcars approve <repo> --target <name> --as <dest>` — an unlinked repo returns queued " <>
           "and then fails on the bus (no destination). Force-updates ONE rolling branch " <>
@@ -1074,14 +1074,14 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("project_publish", %{"name" => name} = args, state) when is_binary(name) do
+  def handle_tool_call("project_adopt", %{"name" => name} = args, state) when is_binary(name) do
     case Delegation.adopt_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("project_publish", _bad_args, state) do
+  def handle_tool_call("project_adopt", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 
@@ -1097,14 +1097,14 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("github_publish", %{"repo" => repo} = args, state) when is_binary(repo) do
-    case Delegation.github_publish(args, state) do
+  def handle_tool_call("project_publish", %{"repo" => repo} = args, state) when is_binary(repo) do
+    case Delegation.project_publish(args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("github_publish", _bad_args, state) do
+  def handle_tool_call("project_publish", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

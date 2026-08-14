@@ -1634,7 +1634,7 @@ defmodule Fleet.MCP.PodToolsTest do
          "justification" => "le poc est devenu serieux"
        }},
       {"project_close", %{"full_name" => "fleet/demo-proj"}},
-      {"project_publish", %{"name" => "demo-proj"}},
+      {"project_adopt", %{"name" => "demo-proj"}},
       {"project_import", %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
       # The deposit door and its discovery side: same head as every other onboarding verb, so the
       # gate table is where they belong — a new door admitted by nobody's test is a door with a
@@ -1750,7 +1750,7 @@ defmodule Fleet.MCP.PodToolsTest do
             {"project_create", %{"name" => "demo-proj"}},
             {"project_install", %{"full_name" => "fleet/demo-proj"}},
             {"project_open", %{"full_name" => "fleet/demo-proj"}},
-            {"project_publish", %{"name" => "demo-proj"}}
+            {"project_adopt", %{"name" => "demo-proj"}}
           ] do
         assert {:ok, %{content: [%{"text" => text}]}, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))

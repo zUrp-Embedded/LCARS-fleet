@@ -845,7 +845,7 @@ defmodule Fleet.Project.Onboard do
 
   Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
   the forge that was never cloned here is not something this box can act on, and a disk project not
-  yet published is precisely what `project_publish` exists for.
+  yet published is precisely what `project_adopt` exists for.
 
   Per project, three facts and no derivation:
 

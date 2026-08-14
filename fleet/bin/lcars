@@ -127,7 +127,7 @@ USAGE
       deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
       L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
       externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
-      phase 2 (PR/MR reguliere) est le tool « github_publish » cote pod, pas ce verbe.
+      phase 2 (PR/MR reguliere) est le tool « project_publish » cote pod, pas ce verbe.
 
   $PROG help
       Cette aide.

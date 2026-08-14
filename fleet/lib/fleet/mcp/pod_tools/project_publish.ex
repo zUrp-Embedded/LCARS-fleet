@@ -1,6 +1,6 @@
-defmodule Fleet.MCP.PodTools.GithubPublish do
+defmodule Fleet.MCP.PodTools.ProjectPublish do
   @moduledoc """
-  ASYNC worker behind the `github_publish` tool (phase 2 of chantier-publication-github).
+  ASYNC worker behind the `project_publish` tool (phase 2 of chantier-publication-github).
 
   The tool call itself only ENQUEUES (a Task under `Fleet.MCP.PublishTaskSupervisor`) and returns
   `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
@@ -14,8 +14,8 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   wired helper — nothing token-shaped ever enters a pod, an argv, or a config we write.
 
   The outcome is emitted on the Bus (lossy/observability, `safe_emit` — a missing subscriber never
-  crashes the Task): `github_publish.done` with the url and a `manual` flag (true = Tier 2, the url is a
-  "PR/MR to open" link, not an opened request), or `github_publish.failed` with the reason. Not-linked /
+  crashes the Task): `project_publish.done` with the url and a `manual` flag (true = Tier 2, the url is a
+  "PR/MR to open" link, not an opened request), or `project_publish.failed` with the reason. Not-linked /
   missing forge config / a non-zero rail / a raise all land as `.failed`, never a crash.
   """
 
@@ -30,7 +30,7 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   Runs one publish of `repo` (internal `owner/name`) to its linked external forge, start to finish.
 
   Meant to be the body of a `Fleet.MCP.PublishTaskSupervisor` Task (the tool enqueues it). Always
-  returns `:ok` and reports the outcome ONLY on the Bus (`github_publish.done` / `.failed`) — every
+  returns `:ok` and reports the outcome ONLY on the Bus (`project_publish.done` / `.failed`) — every
   failure path, including a raise, is turned into a `.failed` event, never a crash that the supervisor
   would restart into a re-publish.
   """
@@ -38,20 +38,20 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   def run(repo, requester \\ nil) when is_binary(repo) do
     case do_run(repo) do
       {:ok, {url, manual}} ->
-        Logger.info("GithubPublish: #{repo} -> #{outcome_log(url, manual)}")
+        Logger.info("ProjectPublish: #{repo} -> #{outcome_log(url, manual)}")
 
         safe_emit(
-          :"github_publish.done",
+          :"project_publish.done",
           %{"repo" => repo, "url" => url, "manual" => manual, "requester_pod_id" => requester},
           repo
         )
 
       {:error, reason} ->
         {cat, detail} = Fleet.Event.reason_fields(reason)
-        Logger.warning("GithubPublish: #{repo} FAILED — #{detail}")
+        Logger.warning("ProjectPublish: #{repo} FAILED — #{detail}")
 
         safe_emit(
-          :"github_publish.failed",
+          :"project_publish.failed",
           %{"repo" => repo, "reason" => cat, "reason_detail" => detail, "requester_pod_id" => requester},
           repo
         )
@@ -60,10 +60,10 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
     :ok
   rescue
     e ->
-      Logger.error("GithubPublish: #{repo} RAISED — #{Exception.message(e)}")
+      Logger.error("ProjectPublish: #{repo} RAISED — #{Exception.message(e)}")
 
       safe_emit(
-        :"github_publish.failed",
+        :"project_publish.failed",
         %{"repo" => repo, "reason" => "raised", "reason_detail" => Exception.message(e), "requester_pod_id" => requester},
         repo
       )
@@ -173,6 +173,6 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
   end
 
   defp safe_emit(type, payload, repo) do
-    Bus.safe_emit(:mcp, type, [payload: payload], context: "GithubPublish: #{repo}")
+    Bus.safe_emit(:mcp, type, [payload: payload], context: "ProjectPublish: #{repo}")
   end
 end

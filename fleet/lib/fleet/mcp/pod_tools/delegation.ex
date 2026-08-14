@@ -77,7 +77,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
   alias Fleet.EventRouter.Bus
-  alias Fleet.MCP.PodTools.GithubPublish
+  alias Fleet.MCP.PodTools.ProjectPublish
   alias Fleet.Project.GitOps
 
   @scratch_file "scratchpad.md"
@@ -272,14 +272,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
   PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
   a large repo, so blocking the pod's turn is not an option. Returns `{:ok, %{"status" => "queued"}}`
-  immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `github_publish.done` /
-  `github_publish.failed`. The external token never enters a pod — the rail reads it host-side.
+  immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `project_publish.done` /
+  `project_publish.failed`. The external token never enters a pod — the rail reads it host-side.
 
   A project with no publish binding (never `lcars approve`d) is not caught here: the Task resolves the
-  binding and emits `github_publish.failed` — the request is well-formed, the target simply is not set.
+  binding and emits `project_publish.failed` — the request is well-formed, the target simply is not set.
   """
-  @spec github_publish(map(), map()) :: {:ok, map()} | {:error, term()}
-  def github_publish(%{"repo" => repo}, state) when is_binary(repo) do
+  @spec project_publish(map(), map()) :: {:ok, map()} | {:error, term()}
+  def project_publish(%{"repo" => repo}, state) when is_binary(repo) do
     case require_onboarder(state) do
       {:error, reason} ->
         {:error, reason}
@@ -287,18 +287,18 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {:ok, _role} ->
         if valid_repo?(repo) do
           # The requesting pod, carried to the worker so its outcome wakes it back (notify_pod via a
-          # Spawner-side consumer on github_publish.{done,failed}). nil for a caller without a pod_id.
+          # Spawner-side consumer on project_publish.{done,failed}). nil for a caller without a pod_id.
           requester = Map.get(state, :pod_id)
 
           case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
-                 GithubPublish.run(repo, requester)
+                 ProjectPublish.run(repo, requester)
                end) do
             {:ok, _pid} ->
               Bus.safe_emit(
                 :mcp,
-                :"github_publish.started",
+                :"project_publish.started",
                 [payload: %{"repo" => repo, "requester_pod_id" => requester}],
-                context: "github_publish"
+                context: "project_publish"
               )
 
               {:ok, %{"status" => "queued", "repo" => repo}}
@@ -312,7 +312,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  def github_publish(_args, _state), do: {:error, :invalid_arguments}
+  def project_publish(_args, _state), do: {:error, :invalid_arguments}
 
   # owner/name, exactly two non-empty segments, no path-traversal component.
   defp valid_repo?(repo) do

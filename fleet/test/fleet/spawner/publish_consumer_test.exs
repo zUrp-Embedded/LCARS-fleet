@@ -356,15 +356,15 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     end
   end
 
-  # The publish ping-back: an async github_publish outcome wakes the pod that asked for it.
+  # The publish ping-back: an async project_publish outcome wakes the pod that asked for it.
   describe "relaying a publish outcome to the requester" do
-    test "github_publish.done -> notify_pod the requester with the url" do
+    test "project_publish.done -> notify_pod the requester with the url" do
       {pid, _} = start_consumer()
       Process.register(self(), :"notify_probe_pod-req")
 
       send(
         pid,
-        Fleet.Event.new(:mcp, :"github_publish.done",
+        Fleet.Event.new(:mcp, :"project_publish.done",
           payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => "pod-req"}
         )
       )
@@ -375,13 +375,13 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       refute msg =~ "ouvre"
     end
 
-    test "github_publish.done manual:true -> notify_pod says 'ouvre la PR/MR' (Tier 2, one more click)" do
+    test "project_publish.done manual:true -> notify_pod says 'ouvre la PR/MR' (Tier 2, one more click)" do
       {pid, _} = start_consumer()
       Process.register(self(), :"notify_probe_pod-t2")
 
       send(
         pid,
-        Fleet.Event.new(:mcp, :"github_publish.done",
+        Fleet.Event.new(:mcp, :"project_publish.done",
           payload: %{
             "repo" => "fleet/demo",
             "url" => "https://forge/compare/main...lcars/publish?expand=1",
@@ -396,13 +396,13 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       assert msg =~ "https://forge/compare/main...lcars/publish?expand=1"
     end
 
-    test "github_publish.failed -> notify_pod the requester with the reason" do
+    test "project_publish.failed -> notify_pod the requester with the reason" do
       {pid, _} = start_consumer()
       Process.register(self(), :"notify_probe_pod-req2")
 
       send(
         pid,
-        Fleet.Event.new(:mcp, :"github_publish.failed",
+        Fleet.Event.new(:mcp, :"project_publish.failed",
           payload: %{"repo" => "fleet/demo", "reason" => "not_linked", "reason_detail" => "not_linked", "requester_pod_id" => "pod-req2"}
         )
       )
@@ -417,7 +417,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
       send(
         pid,
-        Fleet.Event.new(:mcp, :"github_publish.done",
+        Fleet.Event.new(:mcp, :"project_publish.done",
           payload: %{"repo" => "fleet/demo", "url" => "https://forge/pr/1", "requester_pod_id" => nil}
         )
       )
