@@ -118,18 +118,12 @@ services:
       LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
     ports:
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
-      # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER (6-072/6-098). La plage
-      # `21000-21029` publiait 30 ports pour six ecoutants possibles ; les trois manquants sont ceux
-      # que le lot console a tues (deck d'observation, console, console de pod), passes sur des
-      # sockets AF_UNIX gardees par le mode de leur repertoire. Le POURQUOI complet vit dans
-      # `docker-compose.yml`, a cote de la meme liste — il ne se recopie pas ici : deux copies d'une
-      # explication derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
-      - "${LCARS_BIND:-127.0.0.1}:21000:21000"
-      - "${LCARS_BIND:-127.0.0.1}:21003:21003"
-      - "${LCARS_BIND:-127.0.0.1}:21010:21010"
-      - "${LCARS_BIND:-127.0.0.1}:21013:21013"
-      - "${LCARS_BIND:-127.0.0.1}:21020:21020"
-      - "${LCARS_BIND:-127.0.0.1}:21023:21023"
+      # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER (6-072/6-098). Elle a publie
+      # une plage de 30, puis six ports enumeres, puis PLUS AUCUN port de bloc : mesure du
+      # 2026-08-14 dans la boite, trois ecoutants seulement et RIEN entre 21001 et 21030.
+      # Le POURQUOI complet vit dans `docker-compose.yml`, a cote de la meme liste — il ne se
+      # recopie pas ici : deux copies d'une explication derivent, et celle qu'on lit n'est jamais
+      # celle qu'on a corrigee.
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home

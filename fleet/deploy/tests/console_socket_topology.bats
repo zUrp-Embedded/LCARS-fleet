@@ -212,23 +212,24 @@ EOF
   ! grep -q "^ttyd" "$CALLS"
 }
 
-# ─── CE QUI EST PUBLIE EST CE QUI EST SERVI ────────────────────────────────────────────────────
-# The two composes published `21000-21029` — 30 ports for six possible listeners. The three missing
-# from the roll call are the ones this lot killed. A published port with no listener is a free
-# address inside a container that carries SYS_ADMIN: the first process to take it inherits a door
-# nobody guards. A RANGE makes that room available in silence; an enumeration makes opening it cost
-# a line somebody has to write.
+# ─── L'ESPACE DES BLOCS N'EST PLUS PUBLIE DU TOUT ──────────────────────────────────────────────
+# ⚠ CES TEMOINS ONT ETE REMPLACES, PAS RAPIECES. Ils epinglaient un contrat qui a tenu une demi-
+# journee : « ce qui a un ecoutant est publie », avec une liste de six ports vivants. Ce contrat est
+# mort quand la mesure a montre qu'AUCUN d'eux n'etait appele — la surface API a ete supprimee, le
+# webhook aussi. Garder l'ancienne forme aurait epingle une liste que plus rien n'honore.
+#
+# LE NOUVEAU CONTRAT EST PLUS SIMPLE ET PLUS FORT : rien de l'espace des blocs (21000..25999) n'est
+# publie. Il ne s'enumere pas, donc il ne perime pas a chaque service qui naît ou meurt — et il
+# survit a l'UID tire de la forge, qui rend les blocs NON CONTIGUS (`lcars` = id 3 -> uid 1003 ->
+# bloc 21030) et donc indevinables depuis un fichier qui ne connait pas les humains.
+#
+# Ce qui reste publie se dit en une ligne : ssh, et la porte de la boite.
+# ⚠ ON LIT LE PORT DE FIN DE LIGNE, PAS UN MOTIF `hote:port:port`. La forme reelle du compose est
+# `- "${VAR:-127.0.0.1:2222}:22"` : une accolade separe les deux nombres, donc tout motif
+# `:[0-9]+:[0-9]+` rate TOUTES les publications a variable — c'est-a-dire toutes. Premiere version de
+# cet extracteur, et il rendait une liste vide sur un compose qui publie deux ports.
 ports_of() {
-  grep -oE '"\$\{LCARS_BIND[^"]*\}:[0-9]+:[0-9]+"' "$1" | grep -oE ':[0-9]+"' | tr -d ':"' | sort -u
-}
-
-# ⚠ GARDE ANTI-VERT-CREUX, ET ELLE A ETE TROUVEE PAR LA CONTRE-EPREUVE. `ports_of` n'extrait que des
-# ports EXPLICITES : sur l'ancienne forme (`21000-21029:21000-21029`) elle rend une liste VIDE, donc
-# « aucun port mort n'est publie » devenait vrai en ne mesurant rien, et « les deux listes sont
-# identiques » aussi (vide == vide). Les deux assertions passaient sur le code qu'elles devaient
-# refuser. Une liste vide n'est donc plus une reponse : c'est un instrument casse.
-assert_measured() {
-  [ -n "$1" ] || { echo "ports_of n'a rien extrait — instrument casse ou plage revenue" >&2; return 1; }
+  grep -oE '^\s*- "[^"]+"' "$1" | grep -oE ':[0-9]+"$' | tr -d ':"' | sort -u
 }
 
 @test "6-072: neither compose publishes a RANGE of ports" {
@@ -237,26 +238,29 @@ assert_measured() {
   ! grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.install.yml"
 }
 
-@test "6-072: the ports the lot killed are published by NEITHER compose" {
-  local dir="$BATS_TEST_DIRNAME/../docker" pub
-  pub="$(ports_of "$dir/docker-compose.yml"; ports_of "$dir/docker-compose.install.yml")"
-  assert_measured "$pub"
-
-  # base+1 observation deck · base+4 console · base+5 pod console, for the three human blocks.
-  for dead in 21001 21004 21005 21011 21014 21015 21021 21024 21025; do
-    ! grep -qx "$dead" <<< "$pub"
+@test "6-072: NOTHING of the per-human block space is published, by either compose" {
+  # La propriete, pas la liste : un port publie sans ecoutant est une adresse libre dans un
+  # conteneur qui porte SYS_ADMIN, et les listeners bindent 0.0.0.0 a l'interieur — donc CE BLOC EST
+  # LA FRONTIERE. Enumerer les vivants obligerait a re-editer ce test a chaque service ; interdire
+  # l'espace entier tient tout seul.
+  local dir="$BATS_TEST_DIRNAME/../docker" p
+  for f in docker-compose.yml docker-compose.install.yml; do
+    for p in $(ports_of "$dir/$f"); do
+      [ "$p" -lt 21000 ] || [ "$p" -gt 25999 ] \
+        || { echo "$f publie $p, dans l'espace des blocs" >&2; return 1; }
+    done
   done
 }
 
-@test "6-072: TEMOIN — what still HAS a listener is still published" {
-  # Without this, deleting every port would pass the test above. base+0 is the API (out of this
-  # lot's scope, named) and base+3 the opt-in webhook.
+@test "6-072: TEMOIN — l'instrument voit encore les publications qui restent" {
+  # Sans lui, un `ports_of` casse rendrait une liste vide et le test ci-dessus passerait EN NE
+  # MESURANT RIEN. C'est exactement le vert creux qu'une contre-epreuve avait deja trouve ici le
+  # 2026-08-14, sur la forme en plage. Une liste vide n'est jamais une reponse.
   local dir="$BATS_TEST_DIRNAME/../docker" pub
   pub="$(ports_of "$dir/docker-compose.yml")"
-
-  for live in 21000 21003 21010 21013 21020 21023; do
-    grep -qx "$live" <<< "$pub"
-  done
+  [ -n "$pub" ]
+  grep -qx "20999" <<< "$pub"   # la porte de la boite
+  grep -qx "22"    <<< "$pub"   # ssh, la porte d'admin
 }
 
 @test "6-072: the two composes publish the SAME list — a drift would be silent" {
@@ -266,8 +270,7 @@ assert_measured() {
   local dir="$BATS_TEST_DIRNAME/../docker" a b
   a="$(ports_of "$dir/docker-compose.yml")"
   b="$(ports_of "$dir/docker-compose.install.yml")"
-  assert_measured "$a"
-  assert_measured "$b"
+  [ -n "$a" ] && [ -n "$b" ]
   [ "$a" = "$b" ]
 }
 

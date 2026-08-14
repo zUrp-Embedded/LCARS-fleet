@@ -93,35 +93,31 @@ services:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
-      # ⚠ CE QUI EST PUBLIÉ EST CE QUI EST SERVI, ET PLUS UNE PLAGE (6-072/6-098). Ces lignes
-      # publiaient `21000-21029` — 30 ports, 30 docker-proxy — pour trois blocs d'humains dont
-      # SIX ports seulement peuvent porter un écoutant. Les trois qui manquent à l'appel sont ceux
-      # que ce lot a tués : `base+1` le deck d'observation, `base+4` la console, `base+5` la console
-      # de pod. Les trois vivent désormais sur des sockets AF_UNIX sous
-      # `/run/lcars/console/<humain>/`, gardées par le mode du répertoire.
+      # ⚠ PLUS AUCUN PORT DE BLOC N'EST PUBLIÉ, ET C'EST LA FIN D'UN GESTE COMMENCÉ À MOITIÉ.
       #
-      # Publier un port pour un écoutant mort n'est pas neutre : c'est une adresse libre à
-      # l'intérieur d'un conteneur qui porte SYS_ADMIN, et le premier processus qui la prend hérite
-      # d'une porte que personne ne garde. Une plage rend cette place disponible en silence ; une
-      # énumération oblige à écrire une ligne pour l'ouvrir.
+      # Ces lignes ont publié `21000-21029` (30 ports, 30 docker-proxy), puis six ports énumérés,
+      # puis zéro. À chaque étape la mesure disait la même chose et on ne l'écoutait qu'à moitié :
+      # MESURE DU 2026-08-14, dans la boîte, en LISTEN — trois écoutants seulement (`22`, `20999`,
+      # `21000`), et RIEN entre 21001 et 21030. Cinq publications sur huit pointaient sur le vide,
+      # dont QUATRE réservées à des humains qui n'existaient pas : ce fichier ne peut pas découvrir
+      # les humains au boot, alors il pré-publiait des blocs au cas où.
       #
-      # CE QUI RESTE, ET POURQUOI (blocs des uid 1000/1001/1002, `21000 + (uid%500)*10`) :
-      #   `base+0` l'API — read-only PAR CONSTRUCTION (endpoints d'état en 501, spawn sur AF_UNIX
-      #            seulement), no-auth par design assumé, cf. CLAUDE.md. HORS du périmètre de ce
-      #            lot, et nommée comme telle : ce n'est pas à un chantier console de trancher son
-      #            sort ;
-      #   `base+3` le webhook — opt-in (`event_router_start_webhooks`, défaut false) ; publié pour
-      #            que l'activer ne demande pas d'éditer ce fichier.
-      # Élargir à un 4e humain = ajouter `21030` et `21033`, pas étendre une plage.
-      # LOOPBACK uniquement, et c'est désormais la SECONDE frontière, plus la seule.
-      - "${LCARS_BIND:-127.0.0.1}:21000:21000"
-      - "${LCARS_BIND:-127.0.0.1}:21003:21003"
-      - "${LCARS_BIND:-127.0.0.1}:21010:21010"
-      - "${LCARS_BIND:-127.0.0.1}:21013:21013"
-      - "${LCARS_BIND:-127.0.0.1}:21020:21020"
-      - "${LCARS_BIND:-127.0.0.1}:21023:21023"
-      # La HOME de la boîte (sidebar + statut). Hors de l'espace des blocs (21000..25999) parce
-      # qu'elle n'appartient à aucun humain : c'est la porte de la boîte, pas celle d'un compte.
+      # POURQUOI CE N'EST PAS NEUTRE : les listeners bindent `0.0.0.0` DANS le conteneur — c'est
+      # délibéré, la frontière réelle est la publication. Donc CE BLOC EST LA FRONTIÈRE, et un port
+      # publié en trop est une porte ouverte sur un service qui n'existe pas encore, dans un
+      # conteneur qui porte SYS_ADMIN.
+      #
+      # `base+3` (webhook) : mort — voir `bin/fleet_v2`, le slot est sorti de la formule.
+      # `base+0` (API) : la surface a été SUPPRIMÉE, pas dépubliée — elle n'avait aucune capacité
+      #                  propre (états servis par l'observation, WS coupé, diagnostics avec jumeau
+      #                  CLI, écritures sur AF_UNIX) et personne ne l'appelait.
+      #
+      # ⚠ PRÉ-REQUIS DE L'UID TIRÉ DE LA FORGE : tant qu'une plage était pré-publiée par bloc, un
+      # UID non contigu la manquait en silence. `lcars` = id forge 3 → uid 1003 → bloc 21030, hors
+      # de toute plage devinée ici. Ne PAS re-publier par bloc : ce fichier ne peut pas savoir.
+      #
+      # La HOME de la boîte, hors de l'espace des blocs parce qu'elle n'appartient à aucun humain :
+      # c'est la porte de la boîte, et désormais la SEULE avec ssh.
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home
