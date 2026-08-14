@@ -76,6 +76,28 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     }
 
     # Enqueue before spawn or wake.
+    #
+    # ⚠ CET ORDRE LAISSE UN BRIEF SANS JUGE SI LE SPAWN ECHOUE, ET RIEN ICI NE LE RATTRAPE — ni
+    # `clear`, ni retry, ni ecriture durable. La branche d'echec ci-dessous est honnete sur l'instant
+    # (« brief enqueued but judge-less ») et MUETTE sur la suite, ce qui se lit comme une impasse.
+    #
+    # CE N'EN EST PAS UNE : le rattrapage existe, chez la reconciliation du poller, et il est ecrit
+    # la-bas pour CE cas precis. Un eval enfile mais JAMAIS TIRE (`:pending`) est « an admission
+    # WITHOUT an executor » et NE POSSEDE PAS le verrou de son issue — la propriete se lit sur
+    # `@pulled_states [:assigned]`, le pull etant l'ACK durable qu'un executeur a active. Donc :
+    #
+    #   spawn rate -> eval `:pending`, aucun pod -> le verrou n'est possede par personne -> suspect
+    #   -> grace de 2 ticks (~60 s) -> `reclaim_lock` -> le re-dispatch RE-ESCALADE UN EVAL FRAIS,
+    #   dont l'enqueue supersede l'eval reste. Auto-repare, borne par le budget de rework.
+    #
+    # C'est la meme reprise que pour un wake perdu, et elle est epinglee : « a gate-eval stuck
+    # `:pending` (never pulled — no executor) does NOT hold the lock: reclaimed at the 2nd tick ».
+    #
+    # Ce qui suit du coup de l'action « prouver/spawn le pod AVANT l'enqueue » : elle deplacerait la
+    # fenetre sans la fermer (le pod peut mourir entre la preuve et l'enqueue) et couterait un spawn
+    # sur chaque eval, y compris ceux qu'un gatekeeper deja vivant aurait servis. L'outbox
+    # `gate_eval_pending`, elle, est le mecanisme absent que trois autres fiches attendent deja :
+    # une seule question, pas un quatrieme demi-mecanisme.
     case seams.task_queue.enqueue(pod_id, attrs) do
       {:ok, %{id: corr}} ->
         case spawn_gatekeeper(seams, pod_id, brief) do

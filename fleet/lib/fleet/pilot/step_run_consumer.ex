@@ -558,6 +558,24 @@ defmodule Fleet.Pilot.StepRunConsumer do
     do: run_completion(state, label, %{}, fun)
 
   # BL-6-03 S2
+  #
+  # ⚠ CE POINT N'EST PAS UNE SAGA, ET LE RESULTAT DE L'AGENT EST DEJA CONSOMME QUAND ON Y ARRIVE.
+  # `TaskQueue` a persiste le work item `completed` AVANT que cette chaine ne tourne (F-037), et la
+  # chaine du completer est une suite de mutations forge (publier, ouvrir la PR, demander la revue,
+  # graver la route, deverrouiller). Une erreur transitoire APRES une mutation reussie laisse donc un
+  # etat partiel, et rien ici ne rejoue l'etape manquante a partir du resultat deja acquis : on
+  # journalise et on rend l'outcome.
+  #
+  # CE QUI RATTRAPE, ET CE QUI NE RATTRAPE PAS — la difference compte pour qui lit une de ces lignes :
+  #   * le VERROU n'est pas perdu : un step_run interrompu laisse une issue dont plus aucun pod ne
+  #     possede le ref, donc reclamation d'orphelin (grace 2 ticks) puis re-dispatch ;
+  #   * mais le RESULTAT, lui, est consomme : le re-dispatch refait travailler un agent, il ne
+  #     reprend pas la chaine ou elle s'est arretee. Degradation bornee (un run de plus), pas un
+  #     blocage — et c'est la seule promesse qu'on peut tenir sans etat durable.
+  #
+  # La rendre reprenable demande une saga persistee indexee par `work_item_id`, avec des points de
+  # controle idempotents. C'est le MEME mecanisme absent que quatre autres arbitrages reclament
+  # (outbox durable) : une seule question, et elle ne se tranche pas au detour d'un site.
   defp run_completion(state, label, meta, fun) do
     exec = fn ->
       outcome = fun.()
