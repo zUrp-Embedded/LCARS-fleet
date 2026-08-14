@@ -304,6 +304,23 @@ if config_env() != :test and not tool_mode? do
   # get lost (the durable truth lives in the poll, doctrine D1), and (b) saving 30 s weighs nothing when
   # the agents' reaction is measured in MINUTES. The cost/risk/benefit ratio does not justify it.
   # Do NOT turn it back on "for latency" without re-asking the human this question.
+  #
+  # ⚖ LA QUESTION A ETE RE-POSEE ET TRANCHEE — 2026-08-14. *« C'etait pour short le poller, pour
+  # etre responsive et gagner des secondes de latence. Avec des agents en minutes, on s'en fiche
+  # completement. »* Donc : PAS pour la latence, jamais. Ce paragraphe garde sa question — elle a
+  # fait son travail, elle s'est fait relire au bon moment — et recoit desormais sa reponse.
+  #
+  # ⚠ ET UNE DEUXIEME RAISON, TROUVEE EN RELISANT : la forme etait FAUSSE. Le port etait derive du
+  # bloc par-humain (`base+3`, pose par `bin/fleet_v2`) — or le Poller sonde l'ORG, partagee, et ne
+  # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE : un port
+  # par humain demanderait a la forge de notifier N adresses du meme evenement. Le lanceur ne pose
+  # plus ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
+  #
+  # Mesure du meme jour : aucun code de ce depot ne DECLARE de webhook sur la forge (`POST /hooks`
+  # absent), et une forge de banc n'en portait aucun. Ce rail n'a jamais ete branche des deux bouts.
+  #
+  # SI IL REVIENT UN JOUR, pour une raison qui n'est PAS la latence : une seule URL, un port de
+  # boite, hors des blocs. Pas `base+3`.
   if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
     config :lcars_fleet, event_router_start_webhooks: true
 
@@ -523,23 +540,17 @@ if config_env() != :test and not tool_mode? do
   end
 
   # ============================================================
-  # fleet_api — HTTP port (no app auth, cf. rest.ex § Auth)
+  # fleet_api — plus de port : le domaine n'a que son socket de contrôle
   # ============================================================
-  # Port agreement: ports are per-human (UID block computed by bin/fleet_v2) — a
-  # static default is NEVER the real port and would diverge from the rest of the fleet.
-  # Absent = boot outside bin/fleet_v2 → fail-loud (same rule as LCARS_FLEET_MCP_BRIDGE_PATH).
-  http_port =
-    case System.get_env("LCARS_API_PORT") do
-      nil ->
-        raise "LCARS_API_PORT missing — ports are set by bin/fleet_v2 (per-human block). " <>
-                "Launch via fleet_v2 start, or set the var explicitly."
-
-      str ->
-        Fleet.EnvParse.port("LCARS_API_PORT", str)
-    end
-
-  config :lcars_fleet, api_http_port: http_port
-  config :lcars_fleet, api_start_listener: true
+  # ⚠ `LCARS_API_PORT` A ÉTÉ RETIRÉE, PAS RENDUE OPTIONNELLE (2026-08-14). Ce bloc LEVAIT quand elle
+  # manquait — une exigence dure pour un port que plus rien ne bind : la surface TCP de ce domaine a
+  # été supprimée faute de capacité propre (états servis par l'observation, `/ws` débranché,
+  # diagnostics avec un jumeau CLI, écritures déjà sur le socket ci-dessous), et personne ne
+  # l'appelait. Une variable OBLIGATOIRE dont la valeur ne configure rien bloque un démarrage sans
+  # rien régler.
+  #
+  # Il n'y a pas non plus de molette pour le chemin du socket au-delà de `LCARS_API_SOCK` : le
+  # per-humain vient du HOME de celui qui lance le BEAM, pas d'un numéro qu'on devine.
 
   # AF_UNIX control socket for the write door (POST /api/admin/spawn, ControlRouter) —
   # off the network the pod shares. Default: ~/.lcars/run/api.sock (per-human, real

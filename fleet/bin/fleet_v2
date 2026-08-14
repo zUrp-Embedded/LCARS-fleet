@@ -66,22 +66,27 @@ MAX_FAN_CEILING=15
 die() { echo "fleet_v2: $*" >&2; exit 1; }
 dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
 
-# Per-human port block (D2). Deterministic on the UID: a block of 10 ports from 21000 up.
-# (uid % 500) → up to 500 humans before two blocks collide; past that, override the ports explicitly.
-compute_ports() {
-  local uid base
-  uid="$(id -u)"
-  base=$(( 21000 + (uid % 500) * 10 ))
-  API_PORT="${LCARS_API_PORT:-$base}"
-  # base+1 EST LIBRE : le deck d'observation n'a plus de port (6-072/6-098). Il ecoute sur
-  # `/run/lcars/console/<humain>/deck.sock`, dont le repertoire garde l'acces — un port publie a
-  # cote du landing serait une seconde origine, et une seconde origine ne demande rien a personne.
-  # Ne pas re-attribuer ce slot sans lire pourquoi il a ete rendu.
-  # base+2 is RESERVED (the pod-facing MCP HTTP port, removed): the MCP transport is no longer a shared
-  # HTTP listener but one AF_UNIX socket per pod (cf. LCARS_FLEET_MCP_SOCK_BASE). The slot is left empty
-  # so the webhook port below does not shift.
-  WEBHOOK_PORT="${LCARS_FLEET_WEBHOOK_PORT:-$(( base + 3 ))}"
-}
+# ⚠ IL N'Y A PLUS DE BLOC DE PORTS PAR HUMAIN, ET `compute_ports` A DISPARU AVEC LUI (2026-08-14).
+#
+# Le bloc valait `21000 + (uid%500)*10`, dix ports par humain, et ce lanceur en posait quatre. Ils
+# sont tous partis, chacun pour sa raison, et aucune n'est un durcissement :
+#   base+0  l'API — surface TCP SUPPRIMEE : aucune capacite propre (etats servis par l'observation,
+#           `/ws` debranche, diagnostics avec un jumeau CLI) et aucun appelant, `$API_URL` comprise ;
+#   base+1  le deck d'observation — sur socket AF_UNIX, gardee par le mode de son repertoire ;
+#   base+2  deja vide (l'ancien MCP HTTP, remplace par une socket par pod) ;
+#   base+3  le webhook — le seul qui restait, et il etait sur le MAUVAIS AXE.
+#
+# POURQUOI base+3 EST UNE ERREUR DE MODELE ET PAS D'ALLOCATION : le Poller sonde l'ORG — partagee —
+# et ne filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE. Un
+# port par humain demanderait a la forge de notifier N adresses du meme fait. En le retirant d'ici,
+# le webhook retombe sur son defaut de code (8081) : un port de boite, une seule URL — l'axe juste.
+# Et il reste eteint par decision user : gagner 30 s quand les agents reagissent en minutes.
+#
+# ⚠ NE PAS RECREER CETTE FORMULE. Le prochain qui voudra un port trouvera l'idee seduisante — un
+# numero deterministe par UID, sans coordination. Elle a deux defauts que dix mois n'ont pas montres
+# parce que les slots restaient vides : elle publie sur l'axe humain des faits qui n'y vivent pas,
+# et elle oblige un fichier compose — qui ne peut pas connaitre les humains au boot — a DEVINER
+# quels blocs pre-publier. Avec l'UID tire de la forge, les blocs ne sont meme plus contigus.
 
 setup_env() {
   load_env
@@ -123,19 +128,18 @@ setup_env() {
   # names a mechanism the code dropped is read as current — it printed that claim at every start.
   : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour le scan des projets + le push}"
 
-  compute_ports
+  # ⚠ CE LANCEUR NE POSE PLUS AUCUN PORT. Il en posait quatre ; les quatre sont partis (cf. le bloc
+  # `IL N'Y A PLUS DE BLOC DE PORTS PAR HUMAIN` en tete de fichier). `LCARS_FLEET_WEBHOOK_PORT`
+  # n'est plus exportee : si un operateur rallume le webhook, il tombe sur le defaut de code —
+  # 8081, un port de BOITE, ce qui est l'axe juste pour un fait que la forge annonce une fois.
 
-  # Per-human ports (read by runtime.exs: fleet_api + event_router's webhook). fleet_observation is
-  # NOT in this list any more and its variable is gone: its deck listens on a socket derived from
-  # the human who runs the BEAM, so there is nothing for a launcher to post.
-  export LCARS_API_PORT="$API_PORT"
-  export LCARS_FLEET_WEBHOOK_PORT="$WEBHOOK_PORT"
-
-  # A7 (port agreement): THIS fleet's API URL, written into the runtime state — the `lcars` CLI (and
-  # any tool outside the fleet env) READS it instead of guessing a port. A static default like :8080
-  # could not be right for anyone: the ports are per-human, computed on the UID above.
+  # ⚠ `~/.lcars/run/api_url` N'EST PLUS ECRIT, et le rail entier etait mort DE BOUT EN BOUT. Il
+  # portait l'« accord de port » (A7) : le lanceur ecrivait l'URL, le CLI la lisait au lieu de
+  # deviner. Mesure du 2026-08-14 : personne ne s'en servait — `bin/lcars` le dit dans son propre
+  # commentaire (`spawn` passe par le socket, `list`/`attach` par les socks tmux, `$API_URL`
+  # n'apparaissait que dans le texte d'aide), et le BEAM ne lit ni l'un ni l'autre.
+  # Ecrire un fichier d'etat que personne ne lit, c'est promettre un contrat a qui le trouvera.
   mkdir -p "$HOME/.lcars/run"
-  printf 'http://localhost:%s\n' "$API_PORT" > "$HOME/.lcars/run/api_url"
 
   # MCP spec — path of the pod's stdio bridge (co-located with this launcher). The pod↔central
   # transport is no longer a shared loopback HTTP URL but a per-pod AF_UNIX socket (base set below,
@@ -184,10 +188,9 @@ setup_env() {
   # with no way out. The MCP socket had already learnt this exact lesson; this line is it applied.
   export LCARS_FLEET_EGRESS_SOCK_BASE="${LCARS_FLEET_EGRESS_SOCK_BASE:-$HOME/.lcars/run/egress}"
 
-  # CLI `lcars` -> per-human API. READS go through the TCP loopback port; the WRITE (spawn) goes
-  # through a per-human AF_UNIX socket (ControlRouter) - off the network the pod shares. The file
-  # lives under ~/.lcars/run/ (the real home is never bound into the pod).
-  export LCARS_API_URL="${LCARS_API_URL:-http://localhost:$API_PORT}"
+  # CLI `lcars` -> la fleet de CET humain. Il ne reste qu'une voie : le socket AF_UNIX de controle
+  # (ControlRouter), hors du reseau que le pod partage. `LCARS_API_URL` a disparu avec la surface
+  # TCP qu'elle designait — et personne ne la lisait, pas meme le CLI qui la recevait.
   export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
   # Clear a leftover socket from a previous instance (AF_UNIX is not removed on close; the daemon
   # rebinds it at boot). Rebinding at runtime after a crash is handled on the BEAM side.
@@ -221,7 +224,6 @@ setup_env() {
   # Persist the computed runtime env so the human can drive `lcars` afterwards (`source` this file).
   cat > "$HOME/.lcars/run/fleet_v2.runtime.env" <<RT
 # Genere par fleet_v2 start — \`source\` pour utiliser lcars (spawn/list/attach) hors de cette session.
-export LCARS_API_URL="$LCARS_API_URL"
 export LCARS_API_SOCK="$LCARS_API_SOCK"
 export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
 export LCARS_FLEET_EGRESS_SOCK_BASE="$LCARS_FLEET_EGRESS_SOCK_BASE"
@@ -372,7 +374,7 @@ cmd_start() {
   fi
 
   echo "fleet_v2: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
-  echo "fleet_v2: ports — API $API_PORT · webhook $WEBHOOK_PORT (obs: socket, plus de port)" >&2
+  echo "fleet_v2: aucun port — API et deck sur socket, webhook eteint (decision)" >&2
   echo "fleet_v2: scan multi-projet — tout depot de l'org (F-037, plus de repo fixe)" >&2
 
   # DEDICATED tmux socket (fresh server) → it captures the env exported above. The BEAM runs detached
