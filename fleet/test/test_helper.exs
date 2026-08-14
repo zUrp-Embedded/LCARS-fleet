@@ -26,12 +26,20 @@ _ =
 # whose binary is missing must show up as excluded in the bilan, never print "SKIP" and count
 # as a green success (a hollow-green is a verdict about a machine, silently reported as a
 # verdict about the code).
-curl_excludes = if System.find_executable("curl"), do: [], else: [:requires_curl]
+#
+# The resolution belongs HERE and nowhere else. Branching inside a test module body (`if
+# System.find_executable(...) do <property> else <hollow test> end`) freezes the verdict at COMPILE
+# time on top of the hollow-green: install the binary afterwards and the differential STILL does not
+# exist, because nothing recompiles a test file whose source has not changed.
+missing_prerequisites =
+  for {binary, tag} <- [{"curl", :requires_curl}, {"git", :requires_git}],
+      is_nil(System.find_executable(binary)),
+      do: {binary, tag}
 
-if curl_excludes != [] do
+for {binary, tag} <- missing_prerequisites do
   IO.puts(
-    "test_helper: curl missing on this machine — :requires_curl tests are EXCLUDED (visible in the bilan)"
+    "test_helper: #{binary} missing on this machine — #{inspect(tag)} tests are EXCLUDED (visible in the bilan)"
   )
 end
 
-ExUnit.start(exclude: curl_excludes)
+ExUnit.start(exclude: Enum.map(missing_prerequisites, fn {_binary, tag} -> tag end))

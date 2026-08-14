@@ -2,11 +2,22 @@
 
 **Date** : 2026-07-05
 **Dernière révision** : 2026-08-14
-**Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
-tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
-corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
-NE PAS s'en servir en l'état. Le nord voulu = un déployeur GÉNÉRIQUE catalogue-driven, pas ce code
-hardcodé LCARS. Décision + analyse + bugs : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
+**Statut** : **EN SERVICE**, et le nord voulu reste un déployeur GÉNÉRIQUE catalogue-driven plutôt que
+ce code hardcodé LCARS — c'est une direction de conception, pas une interdiction d'usage. Analyse et
+ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
+
+⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
+CHAQUE DÉMARRAGE** — `entrypoint.sh` lance `provision apply --substrate docker` au boot, et le banc
+entier repose dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
+contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
+FERMÉS et épinglés :
+- *verdict-sur-échec-apt* — `apt_ensure` propage l'échec (`|| return 1`) **et re-sonde chaque paquet
+  au `dpkg -s` après l'install**, `p_fail` sur tout absent ; `provision_lib.bats` B1 tient la
+  propriété sous le titre « the green lie is dead ».
+- *`runuser` absent en Docker* — le Dockerfile installe `util-linux-extra` en nommant la panne :
+  « sans ce paquet l'entrypoint casse au premier module humain ».
+
+Et `deploy/tests/*.bats` (13 suites) sont jouées par `shell_gate`, donc par `mix gate`.
 **Référencé par** : `install.sh` (racine), `docker.sh` (racine)
 
 Le provisioning du runtime v2 : amène une machine nue (WSL2, Docker, Linux natif) à l'état où

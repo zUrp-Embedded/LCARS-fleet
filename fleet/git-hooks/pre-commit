@@ -165,17 +165,21 @@ fi
 # --- Pass 2: GO-7 header check (block only — never auto-fix) ---
 FAILED=()
 
+# GO-7 exemptions. EVERY clause below must match at least one tracked file. A clause that matches
+# nothing does not exempt anything — it MISLEADS: it reads as covering a class that the wall in fact
+# refuses, and it rots without a sound, because nothing fails when its subject moves or disappears.
+# Two deaths, two remedies: the subject MOVED (correct the pattern — the two scars below), or the
+# subject was REMOVED (delete the clause; an exemption never outlives its subject).
+# For a tree that does not exist yet, the mechanism is the `.go7-exempt` MARKER above, which sits
+# next to what it exempts: a path list cannot be written ahead of the campaign it will exempt.
+# `tests/go7_exemptions_alive.bats` holds the property, and refuses an empty pattern set too.
 is_ipc_exception() {
     local base
     base=$(basename "$1")
     case "$base" in
-        *-handoff.md|to-*.md|*-notes.md|*-queue.md|MEMORY.md|scratchpad.md) return 0 ;;
-        mandat.md) return 0 ;;  # PoC_unitaire: internal structural contract replaces GO-7
+        *-handoff.md|scratchpad.md) return 0 ;;
     esac
-    [[ "$1" == *"#9_archives"* || "$1" == *"9_archives/"* ]] && return 0
-    [[ "$1" == *"directives/roles/"* ]] && return 0
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
-    [[ "$1" == *"tests/fixtures/"* ]] && return 0
     # Graines de projet genere, pas du lignage doc LCARS. Motif ELARGI le 2026-08-06 : il etait ecrit
     # `priv/project_template/` et l'arbre porte `priv/catalogue/project_template/` depuis le
     # demenagement du catalogue. L'exemption avait donc cesse de matcher EN SILENCE, et le mur
@@ -185,15 +189,15 @@ is_ipc_exception() {
     # du code ni de la sortie, c'est un package de configuration [...] il ne se traduit pas, il se
     # RE-ECRIT ». Un en-tete GO-7 y entrerait dans le contexte injecte a l'agent.
     #
-    # Meme peremption que ci-dessus, en pire : le motif visait `/system-prompt/`, et le package a
-    # quitte ce repertoire entierement — il vit desormais en `priv/sp_builder/` et
-    # `priv/catalogue/sp_builder/`. ~34 fichiers etaient refuses par un mur cense les exempter, et
-    # qui les edite n'avait le choix qu'entre poser un en-tete INTERDIT ou `--no-verify`.
+    # Meme peremption que ci-dessus, en pire : le motif visait `/system-prompt/` SEUL, et le gros du
+    # package a demenage sous `sp_builder/` — un mur cense les exempter les refusait, et qui les
+    # edite n'avait le choix qu'entre poser un en-tete INTERDIT ou `--no-verify`. Les DEUX motifs
+    # sont vivants : le repertoire d'origine n'a pas ete vide, il a ete allege. Cette ligne disait
+    # « le package a quitte ce repertoire entierement » — un motif qu'on croit mort se supprime.
     [[ "$1" == *"/system-prompt/"*.md ]] && return 0
     [[ "$1" == *"/sp_builder/"*.md ]] && return 0
     [[ "$1" == *"/subagent-templates/"*.md ]] && return 0
     [[ "$1" == *"/modop-bundles/"*"/sp.md" ]] && return 0
-    [[ "$1" == *"/PoC/"*"/README.md" ]] && return 0    # README under a PoC dir: local context
     return 1
 }
 

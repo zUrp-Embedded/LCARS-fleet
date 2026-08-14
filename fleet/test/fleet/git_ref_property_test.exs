@@ -110,27 +110,24 @@ defmodule Fleet.GitRefPropertyTest do
     assert GitRef.valid?("HEAD")
   end
 
-  if System.find_executable("git") do
-    # INVARIANT: valid?(ref) ⟹ `git check-ref-format --branch ref` exits 0.
-    # WHY: `valid?` CLAIMS to carry "the full git authority" (R2-06), not a "roughly
-    # aligned". Any ref we let through that git refuses is a `clone`/`push` failing deep
-    # down, far from the input point, with an opaque git message instead of the typed
-    # `{:invalid_ref, ref}` the callers know how to handle.
-    @tag :external
-    property "P1 DIFFERENTIAL — valid?(ref) ⟹ git check-ref-format --branch accepts it" do
-      check all(ref <- ref_gen(), max_runs: 300) do
-        if GitRef.valid?(ref) and ref not in @branch_oracle_exceptions do
-          assert git_accepts_branch?(ref),
-                 "valid?(#{inspect(ref)}) == true but git check-ref-format --branch REFUSES it " <>
-                   "— false-accept: the ref would reach a real clone/push"
-        end
+  # INVARIANT: valid?(ref) ⟹ `git check-ref-format --branch ref` exits 0.
+  # WHY: `valid?` CLAIMS to carry "the full git authority" (R2-06), not a "roughly
+  # aligned". Any ref we let through that git refuses is a `clone`/`push` failing deep
+  # down, far from the input point, with an opaque git message instead of the typed
+  # `{:invalid_ref, ref}` the callers know how to handle.
+  #
+  # The `git` prerequisite is resolved STRUCTURALLY (test_helper excludes :requires_git at run time
+  # when the binary is absent), never by a compile-time branch onto a hollow test: the machine's
+  # verdict belongs in the bilan's exclusions, not disguised as a green about the code.
+  @tag :external
+  @tag :requires_git
+  property "P1 DIFFERENTIAL — valid?(ref) ⟹ git check-ref-format --branch accepts it" do
+    check all(ref <- ref_gen(), max_runs: 300) do
+      if GitRef.valid?(ref) and ref not in @branch_oracle_exceptions do
+        assert git_accepts_branch?(ref),
+               "valid?(#{inspect(ref)}) == true but git check-ref-format --branch REFUSES it " <>
+                 "— false-accept: the ref would reach a real clone/push"
       end
-    end
-  else
-    @tag :external
-    @tag skip: "`git` binary absent from the environment — oracle unavailable"
-    test "P1 DIFFERENTIAL — git oracle" do
-      :ok
     end
   end
 
