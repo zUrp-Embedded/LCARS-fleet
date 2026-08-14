@@ -183,49 +183,74 @@ defmodule Fleet.Credentials.ShellTest do
     # donc `os_pid` EST le PGID. Ces deux tests tiennent ce qui rend cela vrai — le premier
     # l'identite elle-meme (detail d'implementation du driver, donc EPINGLE ici et pas seulement
     # affirme en commentaire), le second l'absence de la dependance qui la cassait.
-    test "6-031: le pid du port EST son propre chef de groupe — la premisse, epinglee" do
-      # 400 ms suffisent : on lit /proc pendant que le processus tourne, on ne l'attend pas.
-      task = Task.async(fn -> Shell.run("/bin/sleep", ["2"], timeout_ms: 3_000) end)
-      Process.sleep(300)
+    test "6-031: apres `setsid`, le chef de groupe est os_pid OU son unique enfant — jamais ni l'un ni l'autre" do
+      # ⚠ CE TEST A DEJA EXISTE SOUS UNE AUTRE FORME, ET IL AFFIRMAIT UNE CHOSE FAUSSE : que le pid
+      # du port est TOUJOURS son propre chef de groupe. C'est vrai sur le poste de dev et FAUX dans
+      # le conteneur de CI (mesure : `pgrp=558` pour `os_pid=7337`), ou l'enfant du port herite du
+      # groupe du BEAM. Le banc l'a dit, et ce test est ce qui l'a nomme.
+      #
+      # L'invariant PORTABLE, celui dont `kill_scope/1` depend, est la DISJONCTION : apres
+      # `setsid`, ou bien il ne forke pas et `os_pid` est chef de groupe, ou bien il forke et son
+      # unique enfant l'est. Ce qui doit etre impossible, c'est qu'aucun des deux ne le soit — la,
+      # `kill -- -<pgid>` ne designerait plus le groupe de la commande.
+      setsid = System.find_executable("setsid")
+      assert setsid, "setsid absent : la precondition de run/3 n'est pas tenue ici"
 
-      # Le pid du `sleep` : le seul /proc dont le comm est `sleep` et dont le parent est un
-      # descendant du BEAM. Plus simple et plus sur — on relance nous-memes la meme forme de port
-      # et on lit SON os_pid, ce qui est exactement ce que `run/3` fait.
       port =
-        Port.open({:spawn_executable, "/bin/sleep"}, [
+        Port.open({:spawn_executable, setsid}, [
           :binary,
           :exit_status,
           :hide,
-          {:args, ["2"]}
+          {:args, ["-w", "/bin/sleep", "2"]}
         ])
 
       {:os_pid, os_pid} = Port.info(port, :os_pid)
+      Process.sleep(300)
 
-      assert {:ok, stat} = File.read("/proc/#{os_pid}/stat"),
-             "test Linux-only, comme tout ce qui lit /proc ici"
+      stat = fn pid ->
+        case File.read("/proc/#{pid}/stat") do
+          {:ok, s} ->
+            [_, rest] = String.split(s, ")", parts: 2)
+            f = rest |> String.trim() |> String.split(" ")
+            %{ppid: Enum.at(f, 1), pgrp: Enum.at(f, 2)}
 
-      [_, rest] = String.split(stat, ")", parts: 2)
-      fields = rest |> String.trim() |> String.split(" ")
-      pgrp = Enum.at(fields, 2)
-      sid = Enum.at(fields, 3)
+          _ ->
+            nil
+        end
+      end
 
-      assert pgrp == to_string(os_pid),
-             "os_pid #{os_pid} n'est PAS chef de son groupe (pgrp=#{pgrp}) — `kill -- -os_pid` ne " <>
-               "designerait plus le groupe de la commande et une descendance survivrait a l'echeance"
+      assert wrapper = stat.(os_pid), "test Linux-only, comme tout ce qui lit /proc ici"
 
-      assert sid == to_string(os_pid),
-             "os_pid #{os_pid} n'est pas chef de session (sid=#{sid}) — c'est ce que le driver de " <>
-               "port fournit, et c'est ce qui rend le groupe identifiable sans le chercher"
+      enfants =
+        File.ls!("/proc")
+        |> Enum.filter(&Regex.match?(~r/^\d+$/, &1))
+        |> Enum.filter(fn p ->
+          case stat.(p) do
+            %{ppid: pp} -> pp == to_string(os_pid)
+            _ -> false
+          end
+        end)
+
+      enfant_chef? =
+        Enum.any?(enfants, fn p ->
+          case stat.(p) do
+            %{pgrp: pg} -> pg == p
+            _ -> false
+          end
+        end)
+
+      assert wrapper.pgrp == to_string(os_pid) or enfant_chef?,
+             "ni os_pid #{os_pid} (pgrp=#{wrapper.pgrp}) ni aucun de ses enfants #{inspect(enfants)} " <>
+               "n'est chef de groupe — `kill -- -<pgid>` ne designerait le groupe de personne et " <>
+               "une descendance survivrait a l'echeance"
 
       Port.close(port)
-      Task.await(task, 5_000)
     end
 
-    test "6-031: `setsid` ABSENT du PATH ne casse plus rien" do
-      # Avant, `run/3` refusait fail-closed sans `setsid` (`{:error, {:exit, {:enoent, \"setsid\"}}}`)
-      # parce que l'enveloppe etait la precondition annoncee du kill de groupe. Elle ne l'est plus :
-      # la commande est lancee en direct. Ce test est aussi la contre-epreuve — sous l'ancien code il
-      # rougit, avec l'erreur exacte.
+    test "6-031: `setsid` ABSENT du PATH → refus fail-closed, jamais un `System.cmd` nu" do
+      # L'enveloppe est la precondition ANNONCEE du kill de groupe : sans elle on ne peut pas
+      # garantir « tout le groupe meurt », et rendre la main quand meme donnerait une borne qui a
+      # l'air d'en etre une. Ce refus vaut mieux qu'une commande lancee sans filet.
       tmp = Path.join(System.tmp_dir!(), "shell6031-#{System.unique_integer([:positive])}")
       File.mkdir_p!(tmp)
       File.ln_s!("/bin/echo", Path.join(tmp, "echo"))
@@ -238,8 +263,8 @@ defmodule Fleet.Credentials.ShellTest do
       refute System.find_executable("setsid"),
              "la mise en scene doit vraiment retirer setsid du PATH"
 
-      assert {:ok, {output, 0}} = Shell.run("echo", ["6-031"], timeout_ms: 5_000)
-      assert output =~ "6-031"
+      assert {:error, {:exit, {:enoent, "setsid"}}} =
+               Shell.run("echo", ["6-031"], timeout_ms: 5_000)
     end
 
     test "WALL DEADLINE: a process DRIPPING output is killed at the deadline (not re-armed)" do

@@ -180,22 +180,39 @@ defmodule Fleet.Conflict.PatternsTest do
           end
         end)
 
+      # ⚠ `trace_pattern` REND 0 ET N'ARME RIEN SUR UN MODULE PAS ENCORE CHARGE, en silence. Un
+      # `alias` ne charge pas : les modules Elixir se chargent a la demande, et si rien n'a encore
+      # touche `Diff` a cet instant le motif ne matche AUCUNE fonction. Le compte serait alors 0 —
+      # exactement ce que rend un sujet qui n'appelle jamais la fusion.
+      Code.ensure_loaded!(Diff)
+
       :erlang.trace(pid, true, [:call])
-      :erlang.trace_pattern({Diff, :merge_non_overlapping, 3}, true, [:local])
+
+      assert :erlang.trace_pattern({Diff, :merge_non_overlapping, 3}, true, [:local]) == 1,
+             "le motif de trace n'a arme aucune fonction — la mesure qui suit serait vide"
+
       send(pid, :go)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 30_000
       :erlang.trace_pattern({Diff, :merge_non_overlapping, 3}, false, [:local])
       drain_traces(0)
     end
 
+    # ⚠ LE DRAIN ATTEND, IL NE CUEILLE PAS. Il vidait la boite avec `after 0`, donc il courait apres
+    # les messages : le `:DOWN` du moniteur et les messages de trace n'ont pas le meme expediteur et
+    # rien n'ordonne les deux. Un message de trace encore en vol au moment du `:DOWN` etait compte
+    # ZERO — un rouge intermittent, et le test qui l'a subi le 2026-08-14 accusait le sujet.
+    # 200 ms sur le PREMIER message, puis 0 : la salve est deja la une fois le premier arrive.
     defp drain_traces(n) do
       receive do
         {:trace, _pid, :call, {Diff, :merge_non_overlapping, _}} -> drain_traces(n + 1)
         {:trace, _pid, _, _} -> drain_traces(n)
       after
-        0 -> n
+        wait_for_traces(n) -> n
       end
     end
+
+    defp wait_for_traces(0), do: 200
+    defp wait_for_traces(_), do: 0
 
     test "un hunk non-overlapping resolu ne fusionne qu'une fois" do
       content = "<<<<<<< ours\nX\na\nb\n||||||| base\na\nb\n=======\na\nb\nY\n>>>>>>> theirs"
