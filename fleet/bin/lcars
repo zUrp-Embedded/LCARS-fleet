@@ -683,7 +683,10 @@ cmd_approve() {
   done
   [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--forge <name> --as <repo-dest>] [--base main] [--public]"
   [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
-  local slug="${repo##*/}"
+  # Org-qualified binding key (owner__name), NOT the name alone: two projects with the same name in
+  # two orgs must not collide on one binding. MUST match ProjectPublish.binding_key/1 (`owner/name`
+  # -> `owner__name`), or the host write and the worker read miss each other.
+  local slug="${repo//\//__}"
   local binding="$PUBLISH_DIR/$slug.json"
 
   # Resolve WHAT/WHERE first (mode + destination), so mode errors fire without any forge config.

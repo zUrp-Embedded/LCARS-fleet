@@ -14,6 +14,14 @@ defmodule Fleet.MCP.ProjectPublishTest do
 
   defp call(args, state), do: PodTools.handle_tool_call("project_publish", args, state)
 
+  describe "binding_key/1 — org-qualified, homonyms do not collide (defect #2)" do
+    test "owner/name -> owner__name, and two orgs of the same name stay apart" do
+      assert ProjectPublish.binding_key("fleet/demo") == "fleet__demo"
+      # the name alone (`demo`) would collide across orgs; the org-qualified key keeps them separate.
+      assert ProjectPublish.binding_key("fleet/demo") != ProjectPublish.binding_key("archives/demo")
+    end
+  end
+
   describe "the door: gate + argument shape" do
     test "missing repo -> invalid_arguments (no gate needed)" do
       assert {:error, :invalid_arguments, _} = call(%{}, %{pod_id: "x"})

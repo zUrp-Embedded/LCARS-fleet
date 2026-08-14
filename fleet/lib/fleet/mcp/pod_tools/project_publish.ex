@@ -6,7 +6,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
   so the pod's turn must not block on it. This module IS that Task's body.
 
-  It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<slug>.json`, written by
+  It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<org__name>.json`, written by
   `lcars approve`), then runs the host-side rail `bin/publish-rail.sh` — which force-pushes a rolling
   branch and, if the forge CLI is present+authed (Tier 1), opens/updates the PR/MR; otherwise (Tier 2)
   it hands back a ready-to-open compare/new-MR URL. NO EXTERNAL TOKEN IS HANDLED here or by the rail:
@@ -71,8 +71,17 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
       :ok
   end
 
+  @doc """
+  The per-human binding filename key for an internal `owner/name` repo: **org-qualified** (`owner__name`)
+  so two projects with the same name in different orgs (`fleet/demo`, `archives/demo`) do NOT collide on
+  one `~/.lcars/publish/<key>.json`. `bin/lcars` (`cmd_approve`) derives the SAME key (`${repo//\\//__}`);
+  the write and the read miss each other if the two ever diverge.
+  """
+  @spec binding_key(String.t()) :: String.t()
+  def binding_key(repo) when is_binary(repo), do: String.replace(repo, "/", "__")
+
   defp do_run(repo) do
-    slug = repo |> String.split("/") |> List.last()
+    slug = binding_key(repo)
 
     with {:ok, b} <- read_binding(slug),
          {:ok, forge_url} <- env("FORGE_BASE_URL"),
