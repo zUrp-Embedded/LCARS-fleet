@@ -144,6 +144,22 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
+  # CE 202 EST ADOSSE A DEUX MECANISMES, ET NI L'UN NI L'AUTRE N'ETAIT NOMME ICI — un lecteur y
+  # voyait un « accepte » nu, sans moyen de savoir ce qui le rattrape.
+  #
+  #   1. AVANT la diffusion : `spawn_dispatch_status/0` refuse en 503 si le consommateur unique est
+  #      mort OU vivant-mais-non-abonne. C'est le cas « 202 dans le vide » (zero pod, zero alarme),
+  #      et il est ferme a la porte plutot que constate apres coup.
+  #   2. APRES : tout echec INTERNE du traitement (raise, exit/throw, nom absent, `spawn_pod` en
+  #      erreur) emet `spawn.failed`, route `action: incident` vers `Pilot.IncidentConsumer` — note
+  #      a la 1re occurrence, issue sysadmin a la recurrence. Le drop n'est donc pas silencieux.
+  #
+  # ⚠ CE QUI RESTE OUVERT, et c'est une seule chose : la COURSE entre la garde et le traitement. Le
+  # statut dit `:operational`, la diffusion part, et le consommateur meurt avant d'avoir traite ce
+  # message-la. Aucun evenement, aucune issue, et le 202 est deja parti. Fermer ca demande de
+  # PERSISTER la commande avant de repondre — un outbox durable, exactement le mecanisme absent que
+  # deux autres arbitrages attendent deja. En construire un tiers ici en ferait un demi-mecanisme de
+  # plus au lieu d'une decision.
   defp do_broadcast_spawn(conn, payload) do
     case dispatch_status_fun().() do
       {:degraded, info} ->

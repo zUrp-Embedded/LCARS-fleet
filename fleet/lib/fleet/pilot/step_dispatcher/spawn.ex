@@ -406,9 +406,29 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           {:ok, {:spawned, pod_id, role}}
 
         {:error, reason} ->
-          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight),
-          # brief kept, pod kept. Only the wake-up failed → honest tally + re-wake at the next tick
-          # (idempotent: alive_before? will be true, maybe_spawn no-op, re-wake retried).
+          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight), brief kept,
+          # pod kept. Only the wake-up failed → honest tally, and the work RESUMES — mais pas par le
+          # rail que cette phrase annoncait.
+          #
+          # ⚠ « RE-WAKE AT THE NEXT TICK » ETAIT FAUX, ET NOMMAIT UN MECANISME QUI N'EXISTE PAS. Le
+          # dispatcher ne repasse pas : `StepDispatcher.decide/1` rend `{:skip, :in_flight}` tant que
+          # `lcars-in-flight` est pose, et AUCUN des sites de wake n'est un rail periodique. Un
+          # lecteur en repartait avec l'idee qu'un tick reveille le pod ; personne ne le fait.
+          #
+          # LE VRAI RAIL EST LA RECONCILIATION DU POLLER, deux modules plus loin, et il est deja
+          # ecrit la-bas : la propriete d'un verrou se lit sur `@pulled_states [:assigned]`, donc un
+          # brief ENFILE MAIS JAMAIS TIRE (`:pending`) NE POSSEDE PAS son verrou. Le pull
+          # (`get_work_item`) est l'ACK durable que le wake a atterri — c'est exactement ce qui
+          # manque ici. La chaine de reprise, verifiee bout en bout :
+          #
+          #   wake rate -> item `:pending` -> `pod_pull_state` = `:not_pulled` -> le verrou n'est
+          #   possede par personne -> suspect, grace de 2 ticks (~60 s) -> `reclaim_lock` retire
+          #   `lcars-in-flight` -> `decide/1` ne skippe plus -> re-dispatch : `maybe_spawn` est un
+          #   no-op (le pod vit), l'enqueue supersede l'item `:pending` reste, et le wake est retente.
+          #
+          # C'est donc idempotent, mais par RECLAMATION D'ORPHELIN, pas par re-wake. La nuance
+          # compte : elle explique le delai (~60 s de grace, pas un tick) et elle dit ou regarder
+          # quand ca ne repart pas.
           Logger.warning(
             "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
               "BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on next tick ; " <>
