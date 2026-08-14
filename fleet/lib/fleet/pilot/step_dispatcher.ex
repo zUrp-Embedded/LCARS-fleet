@@ -145,7 +145,8 @@ defmodule Fleet.Pilot.StepDispatcher do
                  route,
                  workflow_map_loader,
                  forge_opts,
-                 issue
+                 issue,
+                 opts
                ),
              {:ok, {role, profile, step_spec}} <-
                Opts.tag_err(
@@ -506,7 +507,8 @@ defmodule Fleet.Pilot.StepDispatcher do
          route,
          _workflow_map_loader,
          _forge_opts,
-         _issue
+         _issue,
+         _opts
        )
        when not is_nil(route),
        do: {:ok, route}
@@ -518,7 +520,8 @@ defmodule Fleet.Pilot.StepDispatcher do
          nil,
          workflow_map_loader,
          forge_opts,
-         issue
+         issue,
+         opts
        ) do
     # The GENRE gate first (chantier face-projet): a `genre/doc` label on the routeless issue
     # burns the DOC card — the documentary path is a base function of every project, whatever its
@@ -544,9 +547,49 @@ defmodule Fleet.Pilot.StepDispatcher do
          {:ok, _} <- forge.post_route(repo, number, workflow_map_name, step, forge_opts) do
       {:onboarded, step}
     else
-      err -> {:error, {:onboard, err}}
+      err -> {:error, {:onboard, record_unloadable_card(repo, err, opts)}}
     end
   end
+
+  # LE CAS QUI SURVIT au refus d'onboarding (`Intensity.refute_unloadable_card/2`) : une carte
+  # DECLAREE que le catalogue a perdue depuis. Ce site ne se rabat PAS, et c'est delibere — poser
+  # une route est DURABLE, et une route engravee sous une carte que personne n'a choisie fait
+  # tourner le projet sous une criticite que personne n'a declaree. `Roles.load_project_card/2`
+  # nomme deja cette substitution « pire qu'echouer » ; elle y est acceptable parce qu'elle LIT une
+  # politique, ici elle ECRIT la route. Les deux lecteurs de la meme declaration n'ont donc pas la
+  # meme direction sure, et c'est pourquoi un repli commun serait le mauvais partage.
+  #
+  # Ce qui manquait n'etait pas le repli, c'etait la TRACE : l'issue echouait a chaque tick,
+  # indefiniment, sous un warning que personne ne relit, pendant que le projet etait rendu `ready`.
+  defp record_unloadable_card(
+         repo,
+         {:error, {:workflow_map_load_failed, name, message}} = err,
+         opts
+       ) do
+    # LE REGISTRE EN DIRECT, et non `Fleet.Project.Incidents` : ce seam existe pour que les deux
+    # sites de `Fleet.Project` atteignent le registre VERS LE HAUT sans fermer une arete que
+    # boundary refuse. Ici on EST dans le domaine qui possede le registre — passer par le seam
+    # serait faire le tour de sa propre maison, et boundary l'a refuse (`Incidents` n'est pas
+    # exporte, precisement parce qu'il n'est pas la porte d'entree du dessus).
+    incident =
+      Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+    _ =
+      try do
+        incident.("card", repo, :declared_card_unloadable,
+          reason_detail: "#{inspect(name)}: #{message} (routeless issue NOT onboarded)"
+        )
+      catch
+        kind, why ->
+          Logger.warning(
+            "StepDispatcher: unloadable-card incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
+          )
+      end
+
+    err
+  end
+
+  defp record_unloadable_card(_repo, err, _opts), do: err
 
   defp refute_missing_rail(nil), do: {:error, :no_doc_rail_in_catalogue}
   defp refute_missing_rail(name) when is_binary(name), do: {:ok, name}

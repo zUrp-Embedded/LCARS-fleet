@@ -11,9 +11,12 @@ defmodule Fleet.Project.Intensity do
   (a blocked declaration teaches the human to lie to the arch).
 
   **The declaration names its card** (`pipeline_default`): the criticality mechanic IS the
-  card choice (user arbitration). An explicit `workflow_map` override is ALWAYS accepted —
-  off-matrix (level outside the card's `applicable_intensity`) it is logged LOUD and the
-  disagreement stays visible in the committed file; the human has the last word.
+  card choice (user arbitration). An explicit `workflow_map` override that the catalogue can
+  ANSWER is always accepted — off-matrix (level outside the card's `applicable_intensity`) it is
+  logged LOUD and the disagreement stays visible in the committed file; the human has the last
+  word. A name the loader cannot load is a different question and is REFUSED
+  (`refute_unloadable_card/2`): a disagreement with a card is a judgement, a name nobody can burn
+  is a typo, and the schema cannot tell them apart because `pipeline_default` is a free string.
 
   **The declaration also names its THROUGHPUT** (`max_fan`, optional): how many workflow_runs this
   project may hold in flight. It lives HERE and not on the workflow card, and the difference is not
@@ -89,12 +92,80 @@ defmodule Fleet.Project.Intensity do
   def write(proj_dir, opts) when is_binary(proj_dir) and is_list(opts) do
     declaration = compose(opts)
 
-    with :ok <- validate(declaration),
+    with :ok <- refute_unloadable_card(Keyword.get(opts, :repo), opts),
+         :ok <- validate(declaration),
          :ok <- warn_off_matrix(declaration, opts) do
       atomic_write(
         Path.join(proj_dir, @file_name),
         Jason.encode!(declaration, pretty: true) <> "\n"
       )
+    end
+  end
+
+  @doc """
+  Refuses an explicit `:workflow_map` a project cannot legitimately declare — absent option is `:ok`.
+
+  An OFF-MATRIX override stands, and that is a different question: it is the human's judgement
+  against the card's own claim about itself, and `write/2` traces the disagreement in the committed
+  file. A name that does not LOAD is not a judgement, it is a typo — and the schema cannot catch it
+  because `pipeline_default` is a free string, unique only inside one catalogue.
+
+  Enforced HERE, at the single writer, so no entry point can bypass it; the creation verbs call it
+  again as a preflight so the refusal lands BEFORE the repo exists, next to the human preflight
+  that is there for the same reason.
+  """
+  @spec refute_unloadable_card(String.t() | nil, keyword()) :: :ok | {:error, term()}
+  def refute_unloadable_card(repo, opts) when is_list(opts) do
+    case Keyword.get(opts, :workflow_map) do
+      name when is_binary(name) and name != "" -> declarable_card(name, repo, opts)
+      _ -> :ok
+    end
+  end
+
+  @doc """
+  The rule itself, for a card named EXPLICITLY — whatever verb names it.
+
+  ⚠ **LOADABLE IS NOT DECLARABLE.** A ticket-scoped card (`workshop-direct`, reached by an issue's
+  genre) loads perfectly and would route EVERY ticket of the project through a jury-less direct
+  seal. Leaving it off a listing closes nothing and reads exactly like closing it — only a refusal
+  refuses.
+
+  It lived as `Onboard.require_loadable_card/1`, private, and guarded the card REVISION alone: the
+  verb that changes a project's card refused a typo while the verbs that DECLARE it accepted one.
+  The refusal names the cards the project's catalogue ships, because one that does not say what to
+  write instead sends the operator back through the same call.
+  """
+  @spec declarable_card(String.t(), String.t() | nil, keyword()) :: :ok | {:error, term()}
+  def declarable_card(name, repo, opts \\ []) when is_binary(name) do
+    case Fleet.Workflow.Loader.load!(name, loader_opts(repo, opts)) do
+      %{"scope" => "project"} ->
+        :ok
+
+      %{"scope" => scope} ->
+        {:error, {:card_not_project_scoped, name, scope}}
+    end
+  rescue
+    _ ->
+      Logger.warning(
+        "ProjectIntensity: card #{inspect(name)} is not declarable by a project — REFUSED " <>
+          "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(loader_opts(repo, opts)), ", ")})"
+      )
+
+      {:error, {:unknown_card, name}}
+  end
+
+  # LA MEME RESOLUTION QUE LES LECTEURS, et c'est une condition de correction et non un detail :
+  # un CONTROLE plus strict que ce qu'il garde refuse des configurations que le lecteur accepte.
+  # Deux niveaux, dans cet ordre :
+  #   * l'override FIN `:workflow_maps_root` gagne — « the fixture's own door », dit le loader, et
+  #     `Roles.load_project_card/2` le respecte deja de la meme facon ;
+  #   * sinon le catalogue du PROJET, par son org. La version privee d'ou vient cette regle
+  #     chargeait sans options du tout, donc dans l'image du catalogue par DEFAUT : un projet d'une
+  #     autre org se voyait refuser une carte que son propre catalogue publie.
+  defp loader_opts(repo, opts) do
+    case Keyword.take(opts, [:workflow_maps_root]) do
+      [] -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+      given -> given
     end
   end
 
@@ -269,14 +340,23 @@ defmodule Fleet.Project.Intensity do
   # Scoped to the PROJECT's catalogue: a card name is unique only inside one, and read with no root
   # this resolved in the default catalogue's image — the same defect the rest of the read side
   # carried. `:repo` absent (a caller with no project in hand) keeps the default root.
+  # ⚠ CE MESSAGE PROMETTAIT UN REPLI QUI N'EXISTE QUE D'UN COTE. Il disait « the burn will fall
+  # back to the default card » : vrai pour `Roles.load_project_card/2`, qui rattrape et enregistre
+  # un incident, et FAUX pour `StepDispatcher`, qui charge en direct et refuse d'onboarder. Une
+  # issue sans route echouait donc a chaque tick, indefiniment, sous un log qui annoncait un repli.
+  #
+  # Depuis `refute_unloadable_card/2`, un override explicite n'arrive plus jusqu'ici : ce qui reste
+  # est une carte par DEFAUT du catalogue qui ne charge pas — un catalogue qui ne tient pas
+  # ensemble, et ca se repare la, pas dans une declaration de projet.
   defp safe_load_card(name, opts) do
     repo = Keyword.get(opts, :repo)
     Fleet.Workflow.Loader.load!(name, Fleet.Workflow.Loader.card_opts_for_repo(repo))
   rescue
     e ->
       Logger.warning(
-        "ProjectIntensity: override card #{inspect(name)} does not load (#{Exception.message(e)}) — " <>
-          "declaration written as-is; the burn will fall back to the default card"
+        "ProjectIntensity: catalogue default card #{inspect(name)} does not load " <>
+          "(#{Exception.message(e)}) — the off-matrix check is SKIPPED and the declaration is " <>
+          "written as-is; repair the catalogue, this project cannot be dispatched under that name"
       )
 
       %{}

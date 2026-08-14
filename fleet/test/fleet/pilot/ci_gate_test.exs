@@ -309,13 +309,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       proj = Path.join(tmp, "demo")
       File.mkdir_p!(proj)
 
-      :ok =
-        Fleet.Project.Intensity.write(proj,
-          intensity_level: "C2",
-          intensity_justification: "x",
-          workflow_map: "gated"
-        )
-
+      # La carte EXISTE avant d'etre declaree, et la declaration dit ou elle vit : depuis 6-125 une
+      # `workflow_map` explicite que le loader ne sait pas resoudre est REFUSEE a l'ecriture. Le
+      # fixture posait sa carte apres coup — donc, a l'instant de la declaration, `gated` n'existait
+      # nulle part. L'ordre inverse n'etait pas gratuit, c'etait le trou que la fiche decrit.
       maps = Path.join(tmp, "maps")
       File.mkdir_p!(maps)
 
@@ -331,6 +328,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
           only:
             role: engineer
       """)
+
+      :ok =
+        Fleet.Project.Intensity.write(proj,
+          intensity_level: "C2",
+          intensity_justification: "x",
+          workflow_map: "gated",
+          workflow_maps_root: maps
+        )
 
       ctx = card_ctx(canon_loader(), code_root: tmp, workflow_maps_root: maps)
 

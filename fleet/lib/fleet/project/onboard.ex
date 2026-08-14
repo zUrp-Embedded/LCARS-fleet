@@ -117,6 +117,11 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
+         # MEME CRENEAU QUE LE PREFLIGHT HUMAIN, et pour la meme raison : le refus doit tomber
+         # AVANT que le depot existe. La regle, elle, est appliquee chez le seul ecrivain
+         # (`Intensity.write/2`) pour qu'aucune porte ne puisse la contourner ; ici on lui evite
+         # de refuser apres une creation, donc une compensation.
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card("#{org}/#{name}", opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
@@ -525,6 +530,7 @@ defmodule Fleet.Project.Onboard do
       dirs = face_dirs(name, opts)
 
       with :ok <- validate_name(name),
+           :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
            :ok <- ensure_human_provisioned(catalogue, opts),
            :ok <- require_machine_absent(full_name, dirs),
            :ok <- require_forge_absent(full_name, opts),
@@ -914,7 +920,7 @@ defmodule Fleet.Project.Onboard do
 
   # What the project DECLARES, never what it would fall back to.
   defp declared_intensity(proj_dir) do
-    case File.read(Path.join(proj_dir, ".lcars.json")) do
+    case File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       {:ok, raw} ->
         case Jason.decode(raw) do
           {:ok, %{"pipeline_default" => card} = decl} when is_binary(card) ->
@@ -1056,6 +1062,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_local_main(dirs.code),
          :ok <- require_adoptable_origin(full_name, dirs.code, opts),
@@ -1194,7 +1201,7 @@ defmodule Fleet.Project.Onboard do
          opts,
          msg \\ "chore(adopt): déclaration de criticité (.lcars.json)"
        ) do
-    if File.exists?(Path.join(proj_dir, ".lcars.json")) do
+    if File.exists?(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       :ok
     else
       with :ok <- Fleet.Project.Intensity.write(proj_dir, opts) do
@@ -1284,6 +1291,7 @@ defmodule Fleet.Project.Onboard do
 
     with :ok <- validate_name(name),
          :ok <- url_gate.(url),
+         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_machine_absent(full_name, dirs),
          :ok <- require_forge_absent(full_name, opts) do
@@ -1634,7 +1642,7 @@ defmodule Fleet.Project.Onboard do
 
     with :ok <- require_on_machine(full_name, proj_dir),
          :ok <- require_justification(opts),
-         :ok <- require_loadable_card(card),
+         :ok <- require_loadable_card(card, full_name, opts),
          {:ok, url} <- repo_url(full_name, opts) do
       previous = declared_card(proj_dir)
       scratch = scratch_dir(name)
@@ -1672,24 +1680,20 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # LOADABLE IS NOT THE SAME AS DECLARABLE HERE. A ticket-scoped card (`workshop-direct`, reached
-  # by an issue's genre) loads perfectly and would route EVERY ticket of the project through a
-  # jury-less direct seal. Removing it from `list_workflow_cards` hides the option; only this
-  # refuses it, and the difference is the one this repo already names about `allowedTools` — leaving
-  # something off a list closes nothing and reads exactly like closing it.
-  defp require_loadable_card(card) when is_binary(card) and card != "" do
-    case Fleet.Workflow.Loader.load!(card) do
-      %{"scope" => "project"} -> :ok
-      %{"scope" => scope} -> {:error, {:card_not_project_scoped, card, scope}}
-    end
-  rescue
-    _ -> {:error, {:unknown_card, card}}
-  end
+  # LA REGLE A DEMENAGE CHEZ `Fleet.Project.Intensity` — l'ecrivain de la declaration — et elle ne
+  # gardait ici que la REVISION. Le verbe qui CHANGE la carte d'un projet refusait donc une faute
+  # de frappe pendant que les verbes qui la DECLARENT en acceptaient une, et rien ne disait que les
+  # deux portes repondaient differemment a la meme question (6-125).
+  #
+  # Ce qui reste ici est ce qui appartient a CE verbe : pour une revision la carte est REQUISE,
+  # alors qu'a la creation son absence vaut « le defaut du catalogue ».
+  defp require_loadable_card(card, repo, opts) when is_binary(card) and card != "",
+    do: Fleet.Project.Intensity.declarable_card(card, repo, opts)
 
-  defp require_loadable_card(_absent), do: {:error, :workflow_map_required}
+  defp require_loadable_card(_absent, _repo, _opts), do: {:error, :workflow_map_required}
 
   defp declared_card(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, ".lcars.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())),
          {:ok, %{"pipeline_default" => card}} when is_binary(card) <- Jason.decode(raw) do
       card
     else
@@ -1734,7 +1738,7 @@ defmodule Fleet.Project.Onboard do
   # then carries nothing forward, which is exactly the old behaviour for a project that never had a
   # declaration to lose.
   defp current_declaration(proj_dir) do
-    with {:ok, raw} <- File.read(Path.join(proj_dir, ".lcars.json")),
+    with {:ok, raw} <- File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())),
          {:ok, %{} = decl} <- Jason.decode(raw) do
       decl
     else

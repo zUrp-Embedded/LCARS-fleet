@@ -96,16 +96,32 @@ defmodule Fleet.Project.RolesTest do
       proj = Path.join(tmp, "broken")
       File.mkdir_p!(proj)
 
-      # The declaration writes even when the named card is unknown (creation is never walled
-      # on a card typo) — the fallback happens LOUD at read time, here.
-      capture_log(fn ->
-        :ok =
-          Fleet.Project.Intensity.write(proj,
-            intensity_level: "C1",
-            intensity_justification: "typo'd card",
-            workflow_map: "ghost-card"
-          )
-      end)
+      # ⚠ CE TEST ECRIVAIT UNE CARTE INCONNUE A LA DECLARATION, en enoncant la politique
+      # d'alors : « creation is never walled on a card typo — the fallback happens LOUD at read
+      # time ». Cette politique tenait a une condition qui n'etait vraie qu'a MOITIE : elle
+      # supposait que tout lecteur se rabat. `Roles` se rabat ; `StepDispatcher` charge en direct
+      # et refuse d'onboarder, donc une issue sans route echouait a chaque tick, indefiniment,
+      # sur un projet rendu `ready` (6-125). Un nom qu'on ne peut pas bruler est desormais REFUSE
+      # a la declaration, et le refus nomme les cartes disponibles.
+      #
+      # L'etat teste ici reste donc REEL, et c'est le seul qui subsiste : la carte chargeait quand
+      # elle a ete declaree, le catalogue l'a perdue depuis. On le fabrique en editant la
+      # declaration ecrite, ce qui la garde schema-valide par construction.
+      :ok =
+        Fleet.Project.Intensity.write(proj,
+          intensity_level: "C1",
+          intensity_justification: "card lost by the catalogue since",
+          workflow_map: "standard-qa"
+        )
+
+      declaration_path = Path.join(proj, Fleet.Layout.project_declaration_file())
+
+      declaration_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("pipeline_default", "ghost-card")
+      |> Jason.encode!()
+      |> then(&File.write!(declaration_path, &1))
 
       log =
         capture_log(fn ->

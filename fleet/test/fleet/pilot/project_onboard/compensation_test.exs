@@ -167,6 +167,24 @@ defmodule Fleet.Project.OnboardCompensationTest do
     refute File.exists?(Path.join(o[:workshop_root], "nolabel"))
   end
 
+  test "6-125: an unknown workflow_map refuses BEFORE anything is created — no forge, no dirs",
+       %{tmp_dir: tmp} do
+    # La preuve de sortie de la fiche : « creation avec nom inconnu ne mute ni disque ni Forge ».
+    # La regle est appliquee chez l'ecrivain (`Intensity.write/2`), donc aucune porte ne peut la
+    # contourner — mais elle y tomberait APRES la creation du depot, et il faudrait compenser.
+    # D'ou le meme preflight que le controle humain, dans le meme `with`, avant toute mutation.
+    o = opts(tmp)
+
+    assert {:error, {:unknown_card, "wfmap/ghost"}} =
+             ProjectOnboard.onboard("ghostcard", Keyword.put(o, :workflow_map, "wfmap/ghost"))
+
+    refute File.exists?(Path.join([tmp, "forge", "fleet", "ghostcard.git"]))
+    refute File.exists?(Path.join(o[:code_root], "ghostcard"))
+    refute File.exists?(Path.join(o[:ops_root], "ghostcard"))
+    refute File.exists?(Path.join(o[:workshop_root], "ghostcard"))
+    refute_received {:forge_deleted, _}
+  end
+
   test "a LATE onboard failure (protect_branch) compensates: forge repo deleted, dirs removed, retry possible",
        %{tmp_dir: tmp} do
     o = opts(tmp)

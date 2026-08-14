@@ -137,6 +137,54 @@ defmodule Fleet.Project.IntensityTest do
     assert d["pipeline_default"] == "brief-gate"
   end
 
+  test "6-125: an override the loader cannot answer is REFUSED, and the refusal names the cards",
+       %{tmp_dir: tmp} do
+    # La distinction que le schema ne peut PAS faire : `pipeline_default` est une chaine libre, et
+    # un nom de carte n'est unique qu'a l'interieur d'un catalogue. Hors-matrice reste accepte —
+    # c'est un arbitrage humain contre ce que la carte dit d'elle-meme ; un nom qui ne CHARGE pas
+    # n'est pas un arbitrage, c'est une faute de frappe, et la declaration engraverait une route
+    # que personne ne peut bruler.
+    log =
+      capture_log(fn ->
+        assert {:error, {:unknown_card, "wfmap/ghost"}} =
+                 ProjectIntensity.write(tmp,
+                   intensity_level: "C2",
+                   intensity_justification: "x",
+                   workflow_map: "wfmap/ghost"
+                 )
+      end)
+
+    assert log =~ "REFUSED"
+    # Un refus qui ne dit pas quoi ecrire a la place renvoie l'operateur par le meme appel.
+    assert log =~ "brief-gate"
+    refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
+  end
+
+  test "6-125: a TICKET-scoped card is refused at declaration too — loadable is not declarable",
+       %{tmp_dir: tmp} do
+    # `workshop-direct` charge parfaitement : elle est atteinte par le GENRE d'un ticket, et un
+    # projet qui la declare routerait CHAQUE ticket par un sceau direct sans jury. La revision de
+    # carte refusait deja ce cas ; la declaration l'acceptait.
+    assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
+             ProjectIntensity.write(tmp,
+               intensity_level: "C2",
+               intensity_justification: "x",
+               workflow_map: "workshop-direct"
+             )
+
+    refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
+  end
+
+  test "6-125: no card declared at all → the catalogue default, never a refusal", %{tmp_dir: tmp} do
+    # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
+    # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur une boite dont le
+    # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
+    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C2", intensity_justification: "x")
+
+    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
+    assert d["pipeline_default"] == "brief-gate"
+  end
+
   test "pipeline_default: declared card read back; absent → default card (quiet); invalid → default + LOUD",
        %{tmp_dir: tmp} do
     proj = Path.join(tmp, "demo")

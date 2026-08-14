@@ -917,6 +917,38 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       refute_received {:spawned, _, _}
     end
 
+    test "6-125: a DECLARED card the catalogue no longer serves → no route posted, and a DURABLE incident" do
+      # Le cas qui survit au refus d'onboarding (`Intensity.refute_unloadable_card/2`) : la carte
+      # etait chargeable a la declaration, le catalogue l'a perdue depuis. Ce site ne se rabat PAS
+      # — poser une route est durable, et une route sous une carte que personne n'a choisie fait
+      # tourner le projet sous une criticite que personne n'a declaree. Il refuse, mais son refus
+      # cesse d'etre muet : sans trace, l'issue echouait a chaque tick, indefiniment.
+      payload = eng_issue()
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: :none],
+          workflow_map_loader: fn _name ->
+            raise File.Error, reason: :enoent, action: "read file", path: "gone.yaml"
+          end,
+          incident_fun: fn op, subject, reason, o ->
+            send(self(), {:incident, op, subject, reason, o[:reason_detail]})
+            :recorded
+          end
+        )
+
+      assert {:error, {:onboard, {:error, {:workflow_map_load_failed, name, _}}}} =
+               StepDispatcher.dispatch_issue(payload, opts)
+
+      refute_received {:routed, _, _, _}
+      refute_received {:spawned, _, _}
+
+      assert_received {:incident, "card", _repo, :declared_card_unloadable, detail}
+      # Le NOM EFFECTIF est dans la trace : un incident qui ne dit pas quelle carte manque envoie
+      # l'operateur chercher dans tout le catalogue.
+      assert detail =~ name
+    end
+
     test "route read failure → {:error, {:route_resolution, _}}, NO lock nor spawn" do
       payload = eng_issue()
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
