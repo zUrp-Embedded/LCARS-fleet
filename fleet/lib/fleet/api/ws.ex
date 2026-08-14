@@ -2,6 +2,11 @@ defmodule Fleet.API.WS do
   @moduledoc """
   WebSocket projection of `Fleet.EventRouter.Bus` at `/ws`.
 
+  ⚠ **NOT SERVED BY DEFAULT since 2026-08-14** — the route is behind `:api_serve_ws` (default
+  `false`, see `Fleet.API.Application.ws_route/0`). The module is intact and its tests run: the
+  switch is a REVERSIBLE cut, not a removal, because "nobody consumes it" is a measurement on this
+  repo at that instant. Flip the config to bring it back — and re-read the section below first.
+
   Clients subscribe with `{"action":"subscribe","topics":[...]}`. Empty
   topics match all events; patterns are exact or use a trailing `*` wildcard.
   The handler rejects non-string topics, bounds inbound frames to 64 KiB,

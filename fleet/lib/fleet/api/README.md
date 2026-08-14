@@ -29,7 +29,8 @@ restated, only pointed at.**
 - `Fleet.API` — domain overview + vendor frontier (context module, no code)
 - `Fleet.API.Rest` — the read-only TCP HTTP surface
 - `Fleet.API.ControlRouter` — the admin write door, on the AF_UNIX socket
-- `Fleet.API.WS` — the `/ws` WebSocket surface onto the PubSub bus
+- `Fleet.API.WS` — the `/ws` WebSocket surface onto the PubSub bus. ⚠ **route OFF by default**
+  since 2026-08-14 (`:api_serve_ws`) — reversible cut, module intact, cf. its `@moduledoc`
 - `Fleet.API.SpawnAdmission` — the spawn-admission pipeline (pure functions)
 - `Fleet.API.Readiness` — live operational state (anti-hollow-green)
 - `Fleet.API.BuildInfo` — observable build stamp

@@ -42,6 +42,36 @@ defmodule Fleet.API.Application do
     )
   end
 
+  # `/ws` EST DEBRANCHE PAR DEFAUT DEPUIS LE 2026-08-14, ET LE MODULE EST INTACT (6-056).
+  #
+  # Pourquoi debranche : ce point de terminaison projette le flux d'evenements COMPLET, sans
+  # authentification — un client qui ne demande rien recoit tout, y compris une CAPTURE DE L'ECRAN
+  # tmux d'un pod (`wake.failed`). La posture gravee « api REST/WS no-auth by design » vaut pour de
+  # l'observabilite ; elle n'a pas ete ecrite pour ca.
+  #
+  # Pourquoi DEBRANCHE et non SUPPRIME : personne ne le consomme — mesure du 2026-08-14, deux
+  # candidats ecartes un par un. Le deck Python (`console-deck.py`, port landing) lit
+  # `/api/pods` en HTTP simple, zero `ws://` dans ses 892 lignes ; le deck Elixir
+  # (`Fleet.Observation`, base+1) n'a aucune WebSocket, et son propre DESIGN dit la separation :
+  # « Distinct de la question API-D1 (WS /ws) — ici c'est de la lecture pure ». Mais « personne ne
+  # le consomme » est une mesure sur CE depot a CET instant : une coupure REVERSIBLE dit la meme
+  # chose qu'une suppression et se rend en une ligne si un consommateur se revele.
+  #
+  # Pour le rallumer : `config :lcars_fleet, api_serve_ws: true`. Le jour ou un dashboard le
+  # demande, c'est ce commutateur qu'on bascule — et la question de ce qu'il publie se repose
+  # entiere, avec `Fleet.API.WS`'s `@moduledoc` pour la poser.
+  # Public (`@doc false`) parce que c'est la SEULE façon d'epingler le commutateur sans binder un
+  # port : `listener_children/0` rend `[]` en `:test` (hermetisme), donc le dispatch n'y est jamais
+  # construit. Un test qui allumerait le listener pour lire une route echangerait une propriete
+  # contre une socket.
+  @doc false
+  @spec ws_route() :: [{String.t(), module(), list()}]
+  def ws_route do
+    if Application.get_env(:lcars_fleet, :api_serve_ws, false),
+      do: [{"/ws", Fleet.API.WS, []}],
+      else: []
+  end
+
   @doc """
   Returns the configured TCP and control listener child specs, or `[]` when
   listener startup is disabled.
@@ -50,13 +80,7 @@ defmodule Fleet.API.Application do
     if Application.get_env(:lcars_fleet, :api_start_listener, true) do
       port = Application.fetch_env!(:lcars_fleet, :api_http_port)
 
-      dispatch = [
-        {:_,
-         [
-           {"/ws", Fleet.API.WS, []},
-           {:_, Plug.Cowboy.Handler, {Fleet.API.Rest, []}}
-         ]}
-      ]
+      dispatch = [{:_, ws_route() ++ [{:_, Plug.Cowboy.Handler, {Fleet.API.Rest, []}}]}]
 
       tcp =
         Fleet.EventRouter.Listener.cowboy_child(
