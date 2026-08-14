@@ -39,13 +39,24 @@ jobs:
         run: |
           set -eu
           git init -q .
+          # ON RECUPERE LE SHA, PAS LA BRANCHE. En fetchant `$GITHUB_REF`, un run qui a attendu son
+          # tour obtenait la tete COURANTE de la branche, constatait `HEAD != GITHUB_SHA` et se
+          # taisait — correctement, mais en se marquant `failure` sur la forge. Mesure du
+          # 2026-08-14 : neuf commits ainsi marques rouges en une seconde chacun apres un
+          # deblocage de file. Indistinguable au premier coup d'oeil d'un rouge de code, et c'est le
+          # signal sur lequel repose la lecture du juge.
+          #
+          # Le SHA est fetchable en direct sur cette forge (verifie : `fetch --depth 1 <url> <sha>`
+          # rend ce commit exact), donc chaque run juge SON arbre plutot que de renoncer. Le
+          # controle ci-dessous reste : il devient un invariant, et un commit retire de la branche
+          # par un force-push fera echouer le fetch — un vrai rouge, a sa vraie place.
           git -c http.extraheader="Authorization: Basic $(printf '%s:' "$GATE_TOKEN" | base64 -w0)" \
-              fetch --depth 1 "${GITHUB_SERVER_URL%/}/${GITHUB_REPOSITORY}.git" "$GITHUB_REF"
+              fetch --depth 1 "${GITHUB_SERVER_URL%/}/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
-          # La ref peut avoir bouge entre le declenchement et ce fetch : le gate doit dire SUR QUOI
-          # il rend son verdict, ou se taire. Un vert sur un autre arbre est pire qu'un rouge.
+          # Le gate doit dire SUR QUOI il rend son verdict, ou se taire. Un vert sur un autre arbre
+          # est pire qu'un rouge.
           got="$(git rev-parse HEAD)"
-          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA — la ref a bouge"; exit 1; }
+          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA — le serveur a rendu un autre objet"; exit 1; }
 
       - name: Toolchain (versions)
         run: |
