@@ -154,19 +154,39 @@ fi
 # revoked token → 401. So the correct probe is: {200,403} = alive; 401 — or anything else, 5xx /
 # timeout / connection failure — = invalid or undetermined → re-provision (fail-safe: never assume
 # valid on a doubt).
+# ─── curl auth OUT OF ARGV (6-141) ───────────────────────────────────────────────────────────────
+# `-u "$role:$pwd"` and `-H "Authorization: token $tok"` put the secret in the process COMMAND LINE,
+# which is world-readable through /proc/<pid>/cmdline for the whole duration of the request. A local
+# observer harvests every role password, every existing token, and every freshly minted one — and a
+# password re-mints tokens forever, so rotating the captured token repairs nothing.
+#
+# `curl -K -` reads its options from STDIN. Chosen over `--config <file>` deliberately: a file has to
+# be created, chmod'd, and deleted on every exit path including the ones we do not think of. Here the
+# secret touches neither argv nor the filesystem.
+#
+# curl's config parser takes `name = "value"` with backslash escapes, so the value is ESCAPED rather
+# than hoped to be free of quotes — a password is exactly the kind of string that carries them.
+curl_cfg_escape() { # $1=value
+  local v="$1"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  printf '%s' "$v"
+}
+
 token_valid() { # $1=token
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $1" "$FORGE/api/v1/user")"
+  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$1")" \
+    | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE/api/v1/user")"
   [[ "$code" == "200" || "$code" == "403" ]]
 }
 
-# ACTION auth on account $1: basic auth (the role's password). Writes the curl args into the global
-# CURL_AUTH array (no fragile string escaping). The key lookup is CASE-INSENSITIVE: Gitea resolves
-# accounts case-insensitively, so a password-file with `Architect` matches the `architect` role — we
-# align with the underlying system rather than imposing a stricter constraint than it does. The value is
-# either a bare string OR an object `{password: ...}`. `-u user:pass` basic auth is the only mint Gitea
-# accepts.
-declare -a CURL_AUTH
+# ACTION auth on account $1: basic auth (the role's password). Builds the curl CONFIG line into the
+# global CURL_AUTH_CFG — it used to build an argv array, which is exactly what put the password on
+# the command line (6-141). The key lookup is CASE-INSENSITIVE: Gitea resolves accounts
+# case-insensitively, so a password-file with `Architect` matches the `architect` role — we align
+# with the underlying system rather than imposing a stricter constraint than it does. The value is
+# either a bare string OR an object `{password: ...}`. Basic auth is the only mint Gitea accepts.
+CURL_AUTH_CFG=""
 set_auth_for() { # $1=role
   local role="$1" pwd
   pwd="$(jq -r --arg r "$role" '
@@ -176,7 +196,7 @@ set_auth_for() { # $1=role
     | select(. != null and . != "")
   ' "$PASSWORDS_FILE" | head -1)"
   [[ -n "$pwd" ]] || return 1
-  CURL_AUTH=(-u "$role:$pwd")
+  CURL_AUTH_CFG="user = \"$(curl_cfg_escape "$role"):$(curl_cfg_escape "$pwd")\""
 }
 
 # ONE entry to provision = one `account:file` pair (the mapping is DATA). Roles produce
@@ -233,13 +253,17 @@ for entry in "${ENTRIES[@]}"; do
 
   # Re-provision: delete any remote token of the same name (names are unique per account), then mint.
   # A 404/422 on the DELETE is normal (no token of that name) — only the POST is authoritative.
-  curl -s -o /dev/null -m 15 "${CURL_AUTH[@]}" -X DELETE \
-    "$FORGE/api/v1/users/$account/tokens/$TOKEN_NAME" || true
+  # `-K -` : l'auth arrive par STDIN, jamais par argv (6-141). `-d` porte un littéral, donc stdin
+  # est libre — c'est ce qui rend cette forme utilisable ici sans fichier temporaire.
+  printf '%s\n' "$CURL_AUTH_CFG" \
+    | curl -K - -s -o /dev/null -m 15 -X DELETE \
+      "$FORGE/api/v1/users/$account/tokens/$TOKEN_NAME" || true
 
-  resp="$(curl -s -m 15 "${CURL_AUTH[@]}" -X POST \
-    -H "Content-Type: application/json" \
-    -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[$(printf '"%s",' ${entry_scopes//,/ } | sed 's/,$//')]}" \
-    "$FORGE/api/v1/users/$account/tokens")"
+  resp="$(printf '%s\n' "$CURL_AUTH_CFG" \
+    | curl -K - -s -m 15 -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"name\":\"$TOKEN_NAME\",\"scopes\":[$(printf '"%s",' ${entry_scopes//,/ } | sed 's/,$//')]}" \
+      "$FORGE/api/v1/users/$account/tokens")"
   tok="$(printf '%s' "$resp" | jq -r '.sha1 // empty')"
 
   if [[ -z "$tok" ]]; then
