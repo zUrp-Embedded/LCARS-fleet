@@ -53,6 +53,9 @@ defmodule Fleet.MCP.PodTools do
       - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
       - `project_delete`   : destroys a project. Disarmed by deployment flag.
       - `list_workflow_cards` : the validation cards a project can be onboarded against.
+      - `forge_list`        : the human's registered external forges (the publish pool) — read-only.
+      - `publish_link`      : link a project to a forge (writes its publish binding) — reversible intent,
+        not a push (the human's `lcars approve` + PR merge stay the gates).
 
   ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
   `issue_retire` was added). The authority is the `deftool` set itself, and the gate reads it from
@@ -141,7 +144,9 @@ defmodule Fleet.MCP.PodTools do
     "dependency_remove" => :mutation,
     "emergency_stop" => :mutation,
     "project_list" => :read,
-    "issue_retire" => :mutation
+    "issue_retire" => :mutation,
+    "forge_list" => :read,
+    "publish_link" => :mutation
   }
 
   @doc """
@@ -389,6 +394,47 @@ defmodule Fleet.MCP.PodTools do
     end
 
     input_schema(%{"type" => "object", "properties" => %{}})
+  end
+
+  deftool "forge_list" do
+    meta do
+      name("List Forges")
+
+      description(
+        "The human's registered EXTERNAL forges (the pool they built with `lcars forge add`) — where a " <>
+          "project could be published. Read-only; takes NO argument. Use it to PRESENT the forges before " <>
+          "proposing to link a project (`publish_link`). Whether each forge's CLI is authenticated is a " <>
+          "SEPARATE host check (`lcars forge status`), not this. Returns " <>
+          "{\"status\":\"listed\",\"forges\":[{\"name\",\"host\",\"dest_host\",\"owner\"}, ...]}."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}})
+  end
+
+  deftool "publish_link" do
+    meta do
+      name("Link Publish Target")
+
+      description(
+        "LINK a project to a registered forge — declare WHERE it publishes, the reversible intent. It " <>
+          "does NOT publish: nothing goes external until the human runs `lcars approve` (first populate, " <>
+          "the hard host gate) and merges the PR/MR. Use it after `project_create`/`project_import` to " <>
+          "capture the destination the human picked from `forge_list`. `repo` = the internal `owner/name`; " <>
+          "`forge` = a name from `forge_list`; `as` = the destination repo name (becomes " <>
+          "`<forge.owner>/<as>` on the forge). Returns {\"status\":\"linked\",\"repo\":...,\"dest\":...}."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "repo" => %{"type" => "string"},
+        "forge" => %{"type" => "string"},
+        "as" => %{"type" => "string"}
+      },
+      "required" => ["repo", "forge", "as"]
+    })
   end
 
   deftool "deposit_import" do
@@ -1051,6 +1097,23 @@ defmodule Fleet.MCP.PodTools do
       {:error, reason} -> {:error, reason, state}
     end
   end
+
+  def handle_tool_call("forge_list", _args, state) do
+    case Delegation.list_forges(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("publish_link", %{"repo" => _, "forge" => _, "as" => _} = args, state) do
+    case Delegation.publish_link(args, state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("publish_link", _bad_args, state),
+    do: {:error, :invalid_arguments, state}
 
   def handle_tool_call(
         "deposit_import",

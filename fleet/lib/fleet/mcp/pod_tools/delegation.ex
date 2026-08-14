@@ -349,6 +349,119 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Lists the human's registered EXTERNAL forges (the pool under `~/.lcars/forges/`, written by
+  `lcars forge add`) — onboarder gate, read-only. Lets starfleet PRESENT the forges before proposing a
+  publish link. Whether each forge's CLI is authenticated is a SEPARATE host check (`lcars forge
+  status`), not this. Returns `{"status":"listed","forges":[{"name","host","dest_host","owner"}, ...]}`.
+  """
+  @spec list_forges(map()) :: {:ok, map()} | {:error, term()}
+  def list_forges(state) do
+    with {:ok, _role} <- require_onboarder(state) do
+      dir = Path.join([System.user_home!(), ".lcars", "forges"])
+
+      forges =
+        case File.ls(dir) do
+          {:ok, files} ->
+            files
+            |> Enum.filter(&String.ends_with?(&1, ".json"))
+            |> Enum.sort()
+            |> Enum.flat_map(&read_forge_entry(dir, &1))
+
+          {:error, _} ->
+            []
+        end
+
+      {:ok, %{"status" => "listed", "forges" => forges}}
+    end
+  end
+
+  defp read_forge_entry(dir, file) do
+    with {:ok, raw} <- File.read(Path.join(dir, file)),
+         {:ok, m} when is_map(m) <- Jason.decode(raw) do
+      [
+        %{
+          "name" => String.replace_suffix(file, ".json", ""),
+          "host" => m["host"],
+          "dest_host" => m["dest_host"],
+          "owner" => m["owner"]
+        }
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
+  Links a project to a registered forge — writes its publish binding
+  (`~/.lcars/publish/<owner__name>.json`), onboarder gate. This is the REVERSIBLE intent ("this project
+  publishes HERE"), NOT the push: nothing goes external until the human's `lcars approve` (first
+  populate, the hard host gate) and the PR/MR merge. `repo` = internal `owner/name`; `forge` = a name
+  from `list_forges`; `as` = the destination repo name (it becomes `<forge.owner>/<as>` on the forge).
+  Fails if the forge is not in the pool. Returns `{"status":"linked","repo":...,"dest":...,"base":...}`.
+  """
+  @spec publish_link(map(), map()) :: {:ok, map()} | {:error, term()}
+  def publish_link(%{"repo" => repo, "forge" => forge_name, "as" => as}, state)
+      when is_binary(repo) and is_binary(forge_name) and is_binary(as) do
+    with {:ok, _role} <- require_onboarder(state),
+         true <- valid_repo?(repo),
+         {:ok, forge} <- read_forge(forge_name),
+         dest_repo = "#{forge["owner"]}/#{as}",
+         binding = %{
+           "host" => forge["host"],
+           "dest_host" => forge["dest_host"],
+           "dest_repo" => dest_repo,
+           "base" => "main"
+         },
+         :ok <- write_binding(repo, binding) do
+      {:ok,
+       %{
+         "status" => "linked",
+         "repo" => repo,
+         "dest" => "#{forge["dest_host"]}/#{dest_repo}",
+         "base" => "main"
+       }}
+    else
+      false -> {:error, :invalid_repo}
+      {:error, _} = err -> err
+    end
+  end
+
+  def publish_link(_bad, _state), do: {:error, :invalid_arguments}
+
+  # Forge names are filename components: reject traversal (same guard shape as `lcars forge add`).
+  defp read_forge(name) do
+    if name =~ ~r/^[a-z0-9][a-z0-9_-]*$/ do
+      path = Path.join([System.user_home!(), ".lcars", "forges", "#{name}.json"])
+
+      with {:ok, raw} <- File.read(path),
+           {:ok, m} when is_map(m) <- Jason.decode(raw),
+           true <- is_binary(m["host"]) and is_binary(m["dest_host"]) and is_binary(m["owner"]) do
+        {:ok, m}
+      else
+        _ -> {:error, {:forge_unknown, name}}
+      end
+    else
+      {:error, {:forge_name_invalid, name}}
+    end
+  end
+
+  # The binding key is `ProjectPublish.binding_key/1` — the single source of the org-qualified format
+  # the worker and `lcars approve` both use. Mode 600, no token in it (auth is the wired helper).
+  defp write_binding(repo, binding) do
+    dir = Path.join([System.user_home!(), ".lcars", "publish"])
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(repo)}.json")
+
+    with {:ok, json} <- Jason.encode(binding, pretty: true),
+         :ok <- File.write(path, json) do
+      File.chmod(path, 0o600)
+      :ok
+    else
+      {:error, reason} -> {:error, {:binding_write_failed, inspect(reason)}}
+    end
+  end
+
+  @doc """
   Adopts a DEPOSITED repo (`<login>/<name>`) into `catalogue`'s org — the third import door.
 
   The gate lives INSIDE the seam call (foreign `.claude/` refused en bloc, every `CLAUDE.md`
