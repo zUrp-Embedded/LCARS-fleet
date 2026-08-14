@@ -212,6 +212,65 @@ EOF
   ! grep -q "^ttyd" "$CALLS"
 }
 
+# ─── CE QUI EST PUBLIE EST CE QUI EST SERVI ────────────────────────────────────────────────────
+# The two composes published `21000-21029` — 30 ports for six possible listeners. The three missing
+# from the roll call are the ones this lot killed. A published port with no listener is a free
+# address inside a container that carries SYS_ADMIN: the first process to take it inherits a door
+# nobody guards. A RANGE makes that room available in silence; an enumeration makes opening it cost
+# a line somebody has to write.
+ports_of() {
+  grep -oE '"\$\{LCARS_BIND[^"]*\}:[0-9]+:[0-9]+"' "$1" | grep -oE ':[0-9]+"' | tr -d ':"' | sort -u
+}
+
+# ⚠ GARDE ANTI-VERT-CREUX, ET ELLE A ETE TROUVEE PAR LA CONTRE-EPREUVE. `ports_of` n'extrait que des
+# ports EXPLICITES : sur l'ancienne forme (`21000-21029:21000-21029`) elle rend une liste VIDE, donc
+# « aucun port mort n'est publie » devenait vrai en ne mesurant rien, et « les deux listes sont
+# identiques » aussi (vide == vide). Les deux assertions passaient sur le code qu'elles devaient
+# refuser. Une liste vide n'est donc plus une reponse : c'est un instrument casse.
+assert_measured() {
+  [ -n "$1" ] || { echo "ports_of n'a rien extrait — instrument casse ou plage revenue" >&2; return 1; }
+}
+
+@test "6-072: neither compose publishes a RANGE of ports" {
+  local dir="$BATS_TEST_DIRNAME/../docker"
+  ! grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.yml"
+  ! grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.install.yml"
+}
+
+@test "6-072: the ports the lot killed are published by NEITHER compose" {
+  local dir="$BATS_TEST_DIRNAME/../docker" pub
+  pub="$(ports_of "$dir/docker-compose.yml"; ports_of "$dir/docker-compose.install.yml")"
+  assert_measured "$pub"
+
+  # base+1 observation deck · base+4 console · base+5 pod console, for the three human blocks.
+  for dead in 21001 21004 21005 21011 21014 21015 21021 21024 21025; do
+    ! grep -qx "$dead" <<< "$pub"
+  done
+}
+
+@test "6-072: TEMOIN — what still HAS a listener is still published" {
+  # Without this, deleting every port would pass the test above. base+0 is the API (out of this
+  # lot's scope, named) and base+3 the opt-in webhook.
+  local dir="$BATS_TEST_DIRNAME/../docker" pub
+  pub="$(ports_of "$dir/docker-compose.yml")"
+
+  for live in 21000 21003 21010 21013 21020 21023; do
+    grep -qx "$live" <<< "$pub"
+  done
+}
+
+@test "6-072: the two composes publish the SAME list — a drift would be silent" {
+  # One is the dev compose, the other the installed one. They already diverged once on a port
+  # variable (measured 2026-08-03, and the divergence WAS the trap). Nothing but this test makes
+  # the duplication safe.
+  local dir="$BATS_TEST_DIRNAME/../docker" a b
+  a="$(ports_of "$dir/docker-compose.yml")"
+  b="$(ports_of "$dir/docker-compose.install.yml")"
+  assert_measured "$a"
+  assert_measured "$b"
+  [ "$a" = "$b" ]
+}
+
 @test "the deck gains the console group and NOT fleet" {
   # `fleet` (gid 2000) already carries read access to /local/LCARS_v2 and elsewhere; reusing it would
   # have been shorter and would have granted all of that too. The power granted here has to be
