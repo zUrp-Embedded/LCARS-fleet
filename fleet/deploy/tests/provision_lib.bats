@@ -250,3 +250,94 @@ module_sh() {
   '
   [ "$status" -eq 0 ]
 }
+
+# ─── 6-109 — L AUTORITE DU SELF-UPDATE ROOT ETAIT UNE SOUS-CHAINE ────────────────────────────────
+#
+# `case "$REMOTE_URL" in *"$PROV_EXPECTED_REPO"*)`. Avec `fleet/lcars` attendu, l URL
+# `https://hote-attaquant/attaquant/fleet/lcars-malware.git` la CONTIENT — donc pull, puis
+# `exec "$SELF" apply` sur ce code, EN ROOT. Ni l hote, ni le proprietaire, ni la fin du nom.
+#
+# Aucun test ne couvrait `update` avant ceci.
+
+@test "6-109: l URL de l attaque de la fiche ne rend PAS l autorite attendue" {
+  module_sh '
+    got="$(prov_parse_remote "https://hote-attaquant/attaquant/fleet/lcars-malware.git")" || got=REFUS
+    [ "$got" != "forge.example.org/fleet/lcars" ]
+    # Et ce quon lit dit POURQUOI : trois segments de chemin, ce nest pas <owner>/<repo>.
+    [ "$got" = "REFUS" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: un suffixe sur le nom du depot ne passe plus" {
+  module_sh '
+    got="$(prov_parse_remote "https://forge.example.org/fleet/lcars-malware.git")"
+    [ "$got" = "forge.example.org/fleet/lcars-malware" ]
+    [ "$got" != "forge.example.org/fleet/lcars" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: le MEME depot sur un AUTRE hote est un autre triplet" {
+  module_sh '
+    a="$(prov_parse_remote "https://forge.example.org/fleet/lcars.git")"
+    b="$(prov_parse_remote "https://hote-attaquant/fleet/lcars.git")"
+    [ "$a" = "forge.example.org/fleet/lcars" ]
+    [ "$b" = "hote-attaquant/fleet/lcars" ]
+    [ "$a" != "$b" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: les trois formes admises rendent le MEME triplet" {
+  module_sh '
+    h="$(prov_parse_remote "https://forge.example.org/fleet/lcars.git")"
+    s="$(prov_parse_remote "ssh://git@forge.example.org:2222/fleet/lcars.git")"
+    p="$(prov_parse_remote "git@forge.example.org:fleet/lcars.git")"
+    [ "$h" = "forge.example.org/fleet/lcars" ]
+    [ "$s" = "forge.example.org/fleet/lcars" ]
+    [ "$p" = "forge.example.org/fleet/lcars" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: un remote qui porte un CREDENTIAL est refuse (l utilisateur nu, lui, passe)" {
+  # `user:token@` ferait de l autorite de mise a jour un porteur de secret. `git@`, en revanche,
+  # est la syntaxe normale de SSH : la refuser serait un mur, pas une garde.
+  module_sh '
+    prov_parse_remote "https://user:token@forge.example.org/fleet/lcars.git" && exit 1
+    prov_parse_remote "ssh://git@forge.example.org/fleet/lcars.git" >/dev/null || exit 1
+    exit 0
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: une URL qui MIME l autorite dans son userinfo rend l hote REEL" {
+  # `https://fleet/lcars@hote-attaquant/x/y.git` : la partie qui ressemble a l autorite attendue
+  # est AVANT le `@`, donc elle ne dit rien de qui sera contacte. Le parse rend l hote reel, et
+  # c est la comparaison exacte qui refuse — pas un filtre sur la forme.
+  module_sh '
+    got="$(prov_parse_remote "https://fleet/lcars@hote-attaquant/x/y.git")"
+    [ "$got" = "hote-attaquant/x/y" ]
+    [ "$got" != "forge.example.org/fleet/lcars" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: une forme inconnue est REFUSEE, jamais devinee" {
+  module_sh '
+    prov_parse_remote "/chemin/local/fleet/lcars" && exit 1
+    prov_parse_remote "fleet/lcars" && exit 1
+    prov_parse_remote "https://forge.example.org/juste-un-segment" && exit 1
+    exit 0
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-109: TEMOIN — l hote est insensible a la casse, le chemin NON" {
+  module_sh '
+    [ "$(prov_parse_remote "https://Forge.Example.ORG/fleet/lcars.git")" = "forge.example.org/fleet/lcars" ]
+    [ "$(prov_parse_remote "https://forge.example.org/Fleet/LCARS.git")" = "forge.example.org/Fleet/LCARS" ]
+  '
+  [ "$status" -eq 0 ]
+}

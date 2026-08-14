@@ -1,7 +1,7 @@
 # fleet/deploy — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-08
+**Dernière révision** : 2026-08-14
 **Statut** : **PROTO PARKÉ** (recadrage user 2026-07-06 : v1 est la brique qui marche, aucun client v2
 tant qu'on n'a rien à installer). ⚠ 3 revues hostiles 2026-07-06 ont trouvé des bugs RÉELS **non
 corrigés** — le code MENT vert sur certains échecs (verdict-sur-échec-apt, `runuser` absent en Docker).
@@ -38,8 +38,11 @@ sudo fleet/deploy/provision apply --only 60  # un seul module
 ```
 
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
-vérification d'autorité — le remote DOIT matcher `PROV_EXPECTED_REPO` (déclaré, jamais deviné ;
-sans lui, aucun pull). Puis re-exec du runner FRAÎCHEMENT pullé en `apply` complet (jamais de
+vérification d'autorité — le remote, normalisé en `host/owner/repo`, doit être **exactement égal** à
+`PROV_EXPECTED_REPO` (déclaré, jamais deviné ; sans lui, aucun pull). ⚠ **L'hôte fait partie de
+l'autorité et la forme `owner/repo` est REFUSÉE** : la comparaison était une sous-chaîne, donc
+`https://hôte-attaquant/attaquant/fleet/lcars-malware.git` satisfaisait `fleet/lcars` — et le runner
+exécutait ce code en root (6-109). Puis re-exec du runner FRAÎCHEMENT pullé en `apply` complet (jamais de
 `--only` : un update partiel est irreprésentable). Déjà à jour → re-converge quand même.
 Le rebuild/redeploy effectif est décidé par `60-deploy` (sha déployé vs HEAD).
 

@@ -126,6 +126,71 @@ run_quiet() {
   return "$rc"
 }
 
+# ─── prov_parse_remote <url> — normalise un remote git en `host/owner/repo`, ou REFUSE ───────────
+#
+# CE QUE REMPLACE CETTE FONCTION (6-109), et c'etait une prise root en une ligne :
+#
+#     case "$REMOTE_URL" in *"$PROV_EXPECTED_REPO"*) ;; *) die ;; esac
+#
+# Une SOUS-CHAINE. Avec `PROV_EXPECTED_REPO=fleet/lcars`, l'URL
+# `https://host-de-l-attaquant/attaquant/fleet/lcars-malware.git` la contient — donc l'autorite est
+# satisfaite, `git pull --ff-only` tire, et `exec "$SELF" apply` execute ce code EN ROOT. Ni l'hote,
+# ni le proprietaire, ni la fin du nom du depot n'etaient regardes.
+#
+# Trois formes admises, ramenees au MEME triplet ; tout le reste est refuse :
+#   * `https://host[:port]/owner/repo[.git]`
+#   * `ssh://[user@]host[:port]/owner/repo[.git]`
+#   * `[user@]host:owner/repo[.git]`  (forme scp, celle que `git@` utilise)
+#
+# ⚠ USERINFO REFUSE sur les formes a schema : un remote qui embarque `user:token@` fait de
+# l'autorite de mise a jour un porteur de secret, et c'est aussi la ou se glisse la confusion
+# `https://fleet/lcars@ailleurs/...`. La forme scp garde son utilisateur NU (`git@host`) : c'est sa
+# syntaxe normale, pas un credential, et refuser la rendrait inutilisable.
+#
+# Le chemin doit avoir EXACTEMENT deux segments : `owner/repo`. Un segment de plus, c'est le
+# `attaquant/fleet/lcars` de l'attaque ; un de moins, ce n'est pas un depot.
+prov_parse_remote() {
+  local url="$1" rest host path owner repo
+
+  case "$url" in
+    *://*)
+      rest="${url#*://}"
+      ;;
+    *:*/*)
+      # scp : `[user@]host:owner/repo`. Le `:` separe l'hote du chemin ; on le remplace par `/`
+      # pour rejoindre la forme commune.
+      rest="${url%%:*}/${url#*:}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  # UNE SEULE REGLE POUR LES DEUX FORMES, et c'est la bonne : on refuse un userinfo qui porte un
+  # MOT DE PASSE (`user:token@`), on accepte l'utilisateur NU. `git@host` et `ssh://git@host` sont
+  # la syntaxe normale de SSH — les refuser rendrait tout remote SSH inutilisable, ce qui est un
+  # mur, pas une garde. Un remote qui embarque un secret, lui, fait de l'autorite de mise a jour un
+  # porteur de credential.
+  case "${rest%%/*}" in
+    *:*@*) return 1 ;;
+  esac
+  rest="${rest#*@}"
+
+  host="${rest%%/*}"
+  path="${rest#*/}"
+  host="${host%%:*}"       # port ignore : il ne change pas QUI l'on contacte
+  host="${host,,}"         # les hotes sont insensibles a la casse, les chemins non
+  path="${path%.git}"
+  path="${path%/}"
+
+  [[ -n "$host" && "$path" == */* ]] || return 1
+  owner="${path%%/*}"
+  repo="${path#*/}"
+  [[ -n "$owner" && -n "$repo" && "$repo" != */* ]] || return 1
+
+  printf '%s/%s/%s\n' "$host" "$owner" "$repo"
+}
+
 # ─── prov_lock_path — LE chemin du verrou apply/update, dans un dossier que personne d'autre ─────
 #     n'ecrit.
 #

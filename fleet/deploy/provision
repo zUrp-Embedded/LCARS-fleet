@@ -107,13 +107,23 @@ if [[ "$CMD" == "update" ]]; then
 
   # 1. AUTORITÉ AVANT PULL (F-E1) : le remote doit matcher le repo déclaré. Pas de défaut :
   #    on refuse de deviner à qui on fait confiance.
-  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare le repo attendu (ex: PROV_EXPECTED_REPO=fleet/lcars) via --env ou l'environnement ; SANS lui, aucun pull"
+  # 6-109 — L'AUTORITÉ INCLUT L'HÔTE, et la comparaison est EXACTE. Elle était une SOUS-CHAÎNE :
+  # avec `fleet/lcars` attendu, `https://hote-attaquant/attaquant/fleet/lcars-malware.git` passait,
+  # et le runner exécutait ce code en root. Ni l'hôte, ni le propriétaire, ni la fin du nom n'étaient
+  # regardés.
+  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare l'autorité COMPLÈTE, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars) via --env ou l'environnement ; SANS elle, aucun pull"
+  case "$PROV_EXPECTED_REPO" in
+    */*/*) ;;
+    # La forme `owner/repo` était celle d'avant, et elle ne PEUT PAS être acceptée : sans hôte, elle
+    # autorise n'importe quelle forge. On refuse en disant quoi écrire, plutôt que de deviner un hôte.
+    *) die "update: PROV_EXPECTED_REPO=« $PROV_EXPECTED_REPO » n'a pas d'hôte — une autorité sans hôte autorise n'importe quelle forge. Écris « <hôte>/<owner>/<repo> » (ex: forge.example.org/fleet/lcars)" ;;
+  esac
   REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
   [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
-  case "$REMOTE_URL" in
-    *"$PROV_EXPECTED_REPO"*) ;;
-    *) die "update: remote « $REMOTE_URL » ne matche pas le repo attendu « $PROV_EXPECTED_REPO » — pull REFUSÉ (autorité)" ;;
-  esac
+  REMOTE_ID="$(prov_parse_remote "$REMOTE_URL")" \
+    || die "update: remote « $REMOTE_URL » non analysable (forme inconnue, userinfo, ou chemin qui n'est pas <owner>/<repo>) — pull REFUSÉ"
+  [[ "$REMOTE_ID" == "$PROV_EXPECTED_REPO" ]] \
+    || die "update: remote « $REMOTE_URL » → « $REMOTE_ID » ≠ autorité déclarée « $PROV_EXPECTED_REPO » — pull REFUSÉ"
 
   # 2. Le pull s'exécute comme l'OWNER du checkout (jamais root : des objets .git root dans le
   #    checkout d'un humain = le clobber qu'on a fui). Identité validée avant usage (IEC, v1:84).
