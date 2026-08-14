@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: test/install/install.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.202
+# STARDATE: 2026.226
 # STATUS: bats tests for etc/install.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
@@ -156,4 +156,78 @@ MIX
   [[ "$output" == *"non inscriptible"* ]]
   # And it must NOT send the reader back to sudo — that is the loop this pair exists to break.
   [[ "$output" == *"sudo"* ]]
+}
+
+# 6-110 — LE COMPTEUR ETAIT POSE ET JAMAIS LU. `link_fail=1` s'ecrivait dans la boucle, puis le
+# script annoncait `OK` inconditionnellement et rendait 0. Une install lancee sans droit sur
+# `$LINK_DIR` se declarait en place alors que ses commandes PATH sont ABSENTES — ou pire, pointent
+# encore sur une version precedente : le `ln -sf` echoue, l'ancien lien survit, et l'operateur lance
+# une release qu'il croit neuve.
+#
+# La boucle est extraite en fonction pour etre jouee SANS un `mix release` de trois minutes : le
+# defaut vit dans son verdict, jamais dans le build. Vrai systeme de fichiers de bout en bout.
+
+@test "6-110: un lien requis qui echoue rend NON-ZERO — le compteur est enfin lu" {
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/ro"
+  MF_FILES=(fleet_v2)
+  MF_LINKS=(1)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR"
+  chmod 500 "$LINK_DIR"
+
+  run wire_path_links
+  chmod 700 "$LINK_DIR"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink $LINK_DIR/fleet_v2 KO"* ]]
+}
+
+@test "6-110: TEMOIN — un lien qui passe rend ZERO et annonce les liens poses" {
+  # Sans ce temoin, une fonction qui echouerait toujours passerait le test precedent, et l'install
+  # ne dirait plus jamais OK.
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/bin"
+  MF_FILES=(fleet_v2)
+  MF_LINKS=(1)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR"
+
+  run wire_path_links
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"symlinks $LINK_DIR/{fleet_v2}"* ]]
+  [ -L "$LINK_DIR/fleet_v2" ]
+}
+
+@test "6-110: une entree NON-link ne compte pas — seul le cablage requis decide" {
+  # Le manifest distingue les fichiers livres des fichiers CABLES. Faire echouer l'install sur un
+  # fichier qu'on n'a jamais promis de lier serait un mur invente.
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/ro"
+  MF_FILES=(fleet_v2 pas_un_lien)
+  MF_LINKS=(0 0)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR"
+  chmod 500 "$LINK_DIR"
+
+  run wire_path_links
+  chmod 700 "$LINK_DIR"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "6-110: l'ANCIEN lien survit a l'echec — c'est le pire cas, pas un cas theorique" {
+  # `ln -sf` qui echoue ne detruit rien : le lien precedent reste en place et pointe sur l'ancienne
+  # release. Sans verdict, l'operateur lance une version qu'il croit remplacee. Le test epingle les
+  # deux moities : le lien ancien est toujours la, ET la fonction refuse.
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/ro"
+  MF_FILES=(fleet_v2)
+  MF_LINKS=(1)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR" "$TMP/ancienne/bin"
+  ln -s "$TMP/ancienne/bin/fleet_v2" "$LINK_DIR/fleet_v2"
+  chmod 500 "$LINK_DIR"
+
+  run wire_path_links
+  chmod 700 "$LINK_DIR"
+
+  [ "$status" -ne 0 ]
+  [ "$(readlink "$LINK_DIR/fleet_v2")" = "$TMP/ancienne/bin/fleet_v2" ]
 }

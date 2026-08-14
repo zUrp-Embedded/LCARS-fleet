@@ -113,10 +113,33 @@ defmodule LcarsFleet.MixProject do
         # STRICT Dialyzer INSIDE the gate — last in the chain: the longest cold
         # (PLT built once per _build); warm ~2s. Runs in MIX_ENV=test like the
         # rest (preferred_envs) — same env as the suite, a single _build analyzed.
-        "dialyzer"
+        "dialyzer",
+        # SOBELOW AU SEUIL `High`, ET LE SEUIL EST UNE MESURE, PAS UN GOUT. Etat du depot au
+        # 2026-08-14 : 158 signalements — 146 `Low`, 12 `Medium`, **0 `High`**. Codes de sortie
+        # verifies un par un : `--exit High` rend **0**, `--exit Medium` rend **1**, `--exit` (defaut
+        # `Low`) rend **1**. Entrer au seuil `Medium` aurait donc rougi la chaine des le premier
+        # commit et transforme un gate en obstacle a contourner ; entrer a `High` la laisse verte
+        # aujourd'hui ET refuse le jour ou une trouvaille de haute confiance apparait, ce qui est
+        # exactement ce qu'un plancher doit faire.
+        #
+        # Les 12 `Medium` ne sont pas absous : ils sont hors de ce plancher-ci, et les descendre
+        # demande de les instruire un par un — un chantier, pas une ligne d'alias.
+        "sobelow --exit High"
       ]
     ]
   end
+
+  # CE QUE `gate` NE COUVRE PAS, ET POURQUOI — parce qu'une dep presente et configuree se lit comme
+  # une promesse (6-139). `credo` est declaree, `.credo.exs` existe, et l'alias ne l'appelle pas :
+  # un lecteur en conclut raisonnablement qu'un `mix gate` vert prouve les regles Credo. Il ne les
+  # prouve pas.
+  #
+  # MESURE au 2026-08-14 : `mix credo` rend **exit 30** — 1 warning, 173 pistes de refactoring, 45
+  # points de lisibilite, 364 suggestions de conception, sur 509 fichiers. L'ajouter a la chaine la
+  # rendrait rouge en permanence ; la rendre verte demande de trier 583 signalements, c'est-a-dire un
+  # chantier avec ses arbitrages, pas une ligne d'alias. Credo reste donc un outil qu'on LANCE
+  # (`mix credo`), jamais un plancher que le gate tient — et c'est ecrit ici pour que personne n'ait
+  # a le deduire de son absence.
 
   # `mix gate` step: the ExUnit suite, as a SUBPROCESS so its failure halts the chain.
   #
@@ -232,7 +255,10 @@ defmodule LcarsFleet.MixProject do
       {:stream_data, "~> 1.2", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: [:dev], runtime: false}
+      # `:test` ajoute pour que `mix gate` puisse l'appeler : la chaine force `MIX_ENV=test`
+      # (preferred_envs), et une dep `only: :dev` y est absente — l'outil etait donc installe et
+      # inatteignable depuis le seul point d'entree qui compte.
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false}
     ]
   end
 

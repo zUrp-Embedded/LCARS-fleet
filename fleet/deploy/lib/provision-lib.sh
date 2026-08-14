@@ -99,8 +99,22 @@ verdict_check() {
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 1
   exit 0
 }
+# ⚠ LE COMPTEUR DE DRIFT N'ETAIT PAS LU, ET LE RESUME MENTAIT DEUX FOIS. Un module dont l'`apply`
+# constate une non-convergence (`p_drift`) puis rend ce verdict sortait **0** : le runner le comptait
+# « convergé », et sa ligne de bilan affichait « drift: 0 » alors qu'une ligne DRIFT venait d'etre
+# imprimee. MESURE 2026-08-14 sur un module bac-a-sable : `EXIT 0`, « conformes/convergés: 1 ·
+# drift: 0 ». Deux modules vivants portent exactement cette forme (`50-forge`, `55-deck-oidc`).
+#
+# ⚠ ET CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort
+# 1 sur drift, et le runner mappe `apply:apply:*` non-zero en echec : ce chemin-la etait deja juste,
+# mesure. Le defaut vit un cran a cote, dans les modules qui rendent un verdict d'APPLY.
+#
+# Code **2** = « applique, drift residuel » : ni 0 (ce serait le mensonge qu'on retire) ni 1 (ce
+# serait confondre « je n'ai pas pu converger » avec « j'ai casse »). L'operateur a besoin des deux
+# mots, et l'entrypoint conteneur les distingue desormais dans son message.
 verdict_apply() {
   [[ "$PROV_FAILED" -gt 0 ]] && exit 1
+  [[ "$PROV_DRIFT" -gt 0 ]] && exit 2
   exit 0
 }
 

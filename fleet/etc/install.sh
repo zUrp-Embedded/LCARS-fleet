@@ -13,6 +13,14 @@
 # TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
 #   LCARS_INSTALL_PREFIX    where everything is installed (default /local/LCARS_v2)
 #   LCARS_INSTALL_LINK_DIR  where the PATH symlinks go (default /usr/local/bin)
+#
+# EXIT CODES — 0 install complete · 1 hard failure (nothing usable posted) · 3 RELEASE POSTED, PATH
+# LINKS INCOMPLETE. The third exists because `link_fail` was set and never read: the script said
+# `OK` and returned 0 while its PATH commands were absent, or still pointed at a PREVIOUS version
+# (`ln -sf` failed, the old link survived, and the operator ran a release he believed was new).
+# It is a FACT, not a verdict — a caller that wires the links itself is right to accept it, and
+# `deploy/modules.d/60-deploy.sh` does exactly that: it runs this script AS THE HUMAN (who cannot
+# write /usr/local/bin) and re-posts the symlinks as root right after. Standalone, 3 is a refusal.
 # Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
 # app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
 # etc/install.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
@@ -117,8 +125,35 @@ require_prefix_writable() {
   [[ -w "$probe" ]] || die "prefix non inscriptible : $probe (destination $prefix). Lance-le sous le compte proprietaire, ou donne-toi le droit d'ecriture — ne relance PAS en sudo, cf. refuse_root"
 }
 
+# PATH symlinks — POINTERS, not copies; the manifest's `link` entries. Extracted as a function so
+# the VERDICT can be exercised without a three-minute `mix release`: the 6-110 defect lives in what
+# this loop returns, never in the build. Reads the globals the main body has already set
+# (`MF_FILES`, `MF_LINKS`, `PREFIX`, `LINK_DIR`); returns 1 as soon as one required link is missing.
+wire_path_links() {
+  local i f
+  link_fail=0
+  linked=""
+
+  for i in "${!MF_FILES[@]}"; do
+    [[ "${MF_LINKS[$i]}" -eq 1 ]] || continue
+    f="${MF_FILES[$i]}"
+
+    if ln -sf "$PREFIX/bin/$f" "$LINK_DIR/$f" 2>/dev/null; then
+      linked="$linked $f"
+    else
+      link_fail=1
+      say "symlink $LINK_DIR/$f KO (droits ?). Manuel : sudo ln -sf $PREFIX/bin/$f $LINK_DIR/"
+    fi
+  done
+
+  [[ "$link_fail" -eq 0 ]] &&
+    say "symlinks $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrees « link » du manifest)"
+
+  return "$link_fail"
+}
+
 # Source guard (standard idiom): sourcing loads the functions WITHOUT running the deploy — the bats
-# suite drives atomic_swap_dir / atomic_swap_file directly, without a mix build.
+# suite drives atomic_swap_dir / atomic_swap_file / wire_path_links directly, without a mix build.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 PREFIX="${LCARS_INSTALL_PREFIX:-/local/LCARS_v2}"
@@ -231,18 +266,24 @@ fi
 
 # --- 4. PATH symlinks (launch from anywhere) — POINTERS, not copies; `link` manifest entries ------
 LINK_DIR="${LCARS_INSTALL_LINK_DIR:-/usr/local/bin}"
-link_fail=0 linked=""
-for i in "${!MF_FILES[@]}"; do
-  [[ "${MF_LINKS[$i]}" -eq 1 ]] || continue
-  f="${MF_FILES[$i]}"
-  if ln -sf "$PREFIX/bin/$f" "$LINK_DIR/$f" 2>/dev/null; then
-    linked="$linked $f"
-  else
-    link_fail=1
-    say "symlink $LINK_DIR/$f KO (droits ?). Manuel : sudo ln -sf $PREFIX/bin/$f $LINK_DIR/"
-  fi
-done
-[[ "$link_fail" -eq 0 ]] && say "symlinks $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrees « link » du manifest)"
+wire_path_links || true
+
+# LE COMPTEUR ETAIT POSE ET JAMAIS LU. `link_fail=1` etait ecrit dans la boucle, puis le script
+# annoncait `OK` inconditionnellement et rendait 0. Une install lancee sans droit sur `$LINK_DIR`
+# se declarait donc en place alors que ses commandes PATH sont absentes — ou pire, pointent encore
+# sur une version precedente : le `ln -sf` echoue, l'ancien lien survit, et l'operateur lance une
+# release qu'il croit neuve.
+#
+# La release POSEE reste posee : elle est valide, c'est le cablage qui manque, et la detruire
+# punirait un build de trois minutes pour un probleme de droits. Ce qui change est le VERDICT —
+# code 3, distinct du 1 des echecs durs, et aucun message final « OK ».
+if [[ "$link_fail" -ne 0 ]]; then
+  say "INSTALL INCOMPLETE — la release est en place sous $PREFIX, mais au moins un symlink de"
+  say "  $LINK_DIR n'a pas pu etre pose (voir les lignes « symlink … KO » ci-dessus)."
+  say "  Les commandes PATH sont donc absentes, ou pointent encore sur une version PRECEDENTE."
+  say "  Reparer les liens ci-dessus, ou relancer avec les droits sur $LINK_DIR."
+  exit 3
+fi
 
 say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
 say "Lancer : fleet_v2 start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."

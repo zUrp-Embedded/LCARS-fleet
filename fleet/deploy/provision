@@ -27,8 +27,13 @@
 #   - pas de reprise-par-bashrc-trigger : après le reboot WSL (lockdown C:), l'humain RELANCE le
 #     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
 #
-# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde · apply 0=convergé 1=échec.
-# Codes retour runner : apply 0=tout convergé 1=au moins un échec · doctor 0=conforme 1=drift 2=erreur.
+# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde ·
+#                                 apply 0=convergé 1=échec 2=appliqué, drift résiduel.
+# Codes retour runner : apply 0=tout convergé 1=au moins un échec 2=appliqué, drift résiduel ·
+#                       doctor 0=conforme 1=drift 2=erreur.
+# Le 2 d'apply manquait, et son absence n'etait pas un trou de vocabulaire : un module qui constate
+# une non-convergence dans son apply rendait 0, donc « tout convergé », drift compris a zero dans le
+# bilan alors qu'une ligne DRIFT venait d'etre imprimee.
 #
 # USAGE :
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
@@ -257,6 +262,11 @@ for i in "${!SELECTED[@]}"; do
     doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     doctor:check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    # 2 = « appliqué, drift résiduel » : le module a fait ce qu'il pouvait et l'état-cible n'est
+    # PAS tenu. Ce n'est pas un échec (rien n'est cassé) et surtout pas un OK — c'est le troisième
+    # mot, et son absence faisait compter ces modules comme convergés, ligne de bilan comprise.
+    # AVANT le fourre-tout : l'ordre des clauses EST ce qui distingue les deux.
+    apply:apply:2)  drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     apply:apply:*)  failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
@@ -277,7 +287,13 @@ else
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     echo "  → converger : sudo $SELF apply"
   fi
+  if [[ "$CMD" == "apply" && "$drift" -gt 0 ]]; then
+    echo "  → APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU sur $drift module(s) — voir les lignes"
+    echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
+  fi
 fi
 [[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
-[[ "$CMD" == "doctor" && "$drift" -gt 0 ]] && exit 1
+# Le drift résiduel a son propre code dans les DEUX verbes — en apply il valait 0, c'est-à-dire
+# « tout convergé », sur une machine dont un module venait d'imprimer DRIFT.
+[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 1 || echo 2)"
 exit 0
