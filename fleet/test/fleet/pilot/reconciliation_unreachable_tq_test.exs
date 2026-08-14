@@ -45,11 +45,22 @@ defmodule ReconciliationUnreachableTqTest do
   end
 
   setup do
-    # `start_link` LIE l'agent au processus de test : il meurt avec lui. Le `on_exit` qui faisait
-    # `whereis` puis `Agent.stop` courait donc derriere un processus deja condamne — `whereis` rendait
-    # un pid, l'agent mourait, `stop` levait `no process`. Une course que j'ai introduite en ajoutant
-    # un second `describe` avec son propre `setup` : rien a arreter, le lien suffit.
-    {:ok, _} = Agent.start_link(fn -> [] end, name: :jg074_kills)
+    # ⚠ `start_link` NE SUFFISAIT PAS, ET LE BANC L'A DIT (run 99, 2026-08-14) :
+    # `{:error, {:already_started, #PID<…>}}` dans ce `setup`.
+    #
+    # Le lien tue bien l'agent avec le test, mais la mort est ASYNCHRONE : le test suivant peut
+    # entrer dans son `setup` avant que le nom `:jg074_kills` ne soit libere par le registre. Un
+    # `start_link` nomme depuis un `setup` est donc une course avec le test precedent — invisible
+    # ici, intermittente au banc, et elle accuse le sujet plutot que la mise en scene.
+    #
+    # `start_supervised!` la ferme par construction : ExUnit arrete ses enfants et ATTEND leur
+    # terminaison avant le test suivant. C'est la raison d'etre du superviseur de test, pas un
+    # confort.
+    start_supervised!(%{
+      id: :jg074_kills,
+      start: {Agent, :start_link, [fn -> [] end, [name: :jg074_kills]]}
+    })
+
     :ok
   end
 
@@ -113,7 +124,12 @@ defmodule ReconciliationUnreachableTqTest do
     end
 
     setup do
-      {:ok, _} = Agent.start_link(fn -> 0 end, name: :jg074_calls)
+      # Meme course que le `setup` du module — cf. son commentaire.
+      start_supervised!(%{
+        id: :jg074_calls,
+        start: {Agent, :start_link, [fn -> 0 end, [name: :jg074_calls]]}
+      })
+
       :ok
     end
 
@@ -221,8 +237,12 @@ defmodule ReconciliationUnreachableTqTest do
     end
 
     setup do
-      # Meme raison qu'au setup du module : l'agent est lie, il n'y a rien a arreter.
-      {:ok, _} = Agent.start_link(fn -> [] end, name: :jg083_reclaims)
+      # Meme course que le `setup` du module — cf. son commentaire.
+      start_supervised!(%{
+        id: :jg083_reclaims,
+        start: {Agent, :start_link, [fn -> [] end, [name: :jg083_reclaims]]}
+      })
+
       :ok
     end
 

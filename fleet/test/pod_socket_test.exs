@@ -538,8 +538,15 @@ defmodule Fleet.MCP.PodSocketTest do
     # replay its result, never invoking the handler twice.
     # self() carries the coordination; the registered name auto-clears when this test process ends.
     Process.register(self(), :idem_dup_listener)
-    {:ok, agent} = Agent.start_link(fn -> 0 end, name: :idem_dup_count)
-    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    # ⚠ MEME NOM DANS DEUX TESTS : `start_link` lie l'agent au test, mais sa mort est ASYNCHRONE,
+    # donc le second test peut trouver `:idem_dup_count` encore pris (banc run 99, autre fichier,
+    # meme piege). `start_supervised!` arrete ET ATTEND avant le test suivant — plus de course, et
+    # plus d'`on_exit` a ecrire.
+    start_supervised!(%{
+      id: :idem_dup_count,
+      start: {Agent, :start_link, [fn -> 0 end, [name: :idem_dup_count]]}
+    })
 
     Fleet.TestEnv.put_env_restoring(
       :lcars_fleet,
@@ -573,7 +580,7 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"result" => %{"content" => _}} = Task.await(tb, 3_000)
 
     # Exactly ONE forge-facing invocation across the two concurrent calls.
-    assert Agent.get(agent, & &1) == 1
+    assert Agent.get(:idem_dup_count, & &1) == 1
   end
 
   test "6-106: un mutateur ABSENT de l'ancienne liste est desormais protege lui aussi" do
@@ -583,8 +590,15 @@ defmodule Fleet.MCP.PodSocketTest do
     # couverture. La classification vit maintenant chez `PodTools` et le gate en prouve
     # l'exhaustivite ; ceci prouve qu'elle est bien LUE ici.
     Process.register(self(), :idem_dup_listener)
-    {:ok, agent} = Agent.start_link(fn -> 0 end, name: :idem_dup_count)
-    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    # ⚠ MEME NOM DANS DEUX TESTS : `start_link` lie l'agent au test, mais sa mort est ASYNCHRONE,
+    # donc le second test peut trouver `:idem_dup_count` encore pris (banc run 99, autre fichier,
+    # meme piege). `start_supervised!` arrete ET ATTEND avant le test suivant — plus de course, et
+    # plus d'`on_exit` a ecrire.
+    start_supervised!(%{
+      id: :idem_dup_count,
+      start: {Agent, :start_link, [fn -> 0 end, [name: :idem_dup_count]]}
+    })
 
     Fleet.TestEnv.put_env_restoring(
       :lcars_fleet,
@@ -614,7 +628,7 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"result" => %{"content" => _}} = Task.await(ta, 3_000)
     assert %{"result" => %{"content" => _}} = Task.await(tb, 3_000)
 
-    assert Agent.get(agent, & &1) == 1
+    assert Agent.get(:idem_dup_count, & &1) == 1
   end
 
   test "6-106: le canal IN/OUT du pod n'est PAS arbitre ici — sa re-emission est concue" do
