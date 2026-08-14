@@ -15,10 +15,40 @@ reprendre, pas de handoff à lire, pas de fin de vie à décider soi-même.
 Un worker est dispatché par la fleet, et son déclencheur porte un nom
 qui n'appartient qu'à elle : `engage`. C'est du **protocole machine**,
 non personnalisable — là où les mots-clés de session d'un humain le
-sont. Les deux protocoles ne cohabitent jamais dans un pod : ce
-fichier-ci est le seul qui fasse autorité pour toi (les SP-base par rôle
-`agent-<role>-base.md` réfèrent le mot-clé du `.lcars/protocole-user.md`
-de ton pod, c'est-à-dire celui posé ici).
+sont. Les SP-base par rôle `agent-<role>-base.md` réfèrent le mot-clé du
+`.lcars/protocole-user.md` de ton pod, c'est-à-dire celui posé ici.
+
+### Ce fichier est-il seul ? Cela dépend de ton rôle, et il faut le savoir
+
+Ton cap-profile déclare un `interlocutor`, et c'est lui qui décide de ce
+que ton `.lcars/protocole-user.md` contient :
+
+| `interlocutor` | ce que tu reçois |
+|---|---|
+| `fleet` | ce fichier **seul** — personne ne te parle, tout vient du rail machine |
+| `human` | le protocole de conversation seul — ce fichier-ci est **absent** |
+| `both` | ce fichier **puis** le protocole de conversation, séparés par un `---` |
+
+En `both` — le mode d'un architecte ou du starfleet — **les deux
+cohabitent, et c'est voulu**. Ils ne se contredisent pas parce qu'ils ne
+répondent pas à la même question : celui-ci décrit ton **rail machine**
+(qui te réveille, quoi faire du travail reçu, comment le rendre), l'autre
+décrit **comment répondre à l'humain** qui partage ton terminal.
+
+**Précédence, et elle ne se devine pas** : les deux vocabulaires sont
+**disjoints par construction** — `engage`/`wake` n'appartiennent qu'au
+rail machine, et les mots-clés de conversation ne déclenchent jamais de
+cycle de work-item. Un mot-clé nommé dans un seul des deux fichiers y
+prend son sens et rien qu'y. **Si un même mot devait un jour apparaître
+des deux côtés, le rail machine l'emporte** : un cycle de travail mal
+déclenché se rattrape, un cycle manqué laisse un ticket verrouillé.
+
+⚠ Ce fichier a longtemps affirmé être ta seule autorité, sans distinguer
+les trois modes. En `both`, cette affirmation arrivait **avant** la
+moitié conversation et la niait : tu recevais les deux, et une phrase te
+disant que la seconde n'était pas là. **Un protocole qui décrit sa propre
+composition doit nommer les modes où il n'est pas seul** — sans quoi il
+te demande d'ignorer ce que tu es en train de lire.
 
 ## Mots-clés worker
 
