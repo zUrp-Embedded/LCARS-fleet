@@ -62,32 +62,40 @@ defmodule Fleet.Pilot.BriefBuilder do
   defp conflict_section(opts) do
     case Keyword.get(opts, :conflict, false) do
       false -> ""
-      :exception -> exception_conflict_section()
-      _producer -> producer_conflict_section()
+      :exception -> exception_conflict_section(Keyword.fetch!(opts, :base_branch))
+      _producer -> producer_conflict_section(Keyword.fetch!(opts, :base_branch))
     end
   end
 
-  defp producer_conflict_section do
+  # ⚠ `main` ETAIT ECRIT EN DUR DANS UNE PROCEDURE DONNEE A UN AGENT. La plomberie, elle, connaît la
+  # vraie base depuis toujours (`:pr_base_branch`, pose par `dispatch_review` depuis `pr.base.ref`, et
+  # c'est deja elle qui choisit le worktree de resolution). Sur une PR qui ne vise pas la face code,
+  # le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un `fetch main`, il
+  # composait son livrable contre la mauvaise face.
+  #
+  # `fetch!` et non `get` : ce chemin n'existe que sous `dispatch_review`, qui pose toujours la base.
+  # Une absence serait un bypass, et un brief qui invente une branche coute plus cher qu'un refus.
+  defp producer_conflict_section(base) do
     """
     ## Conflit de merge à résoudre (prioritaire)
 
-    Ta branche a divergé de `main` : des briques sœurs ont été mergées depuis ta coupe, et le
+    Ta branche a divergé de `#{base}` : des briques sœurs ont été mergées depuis ta coupe, et le
     merge automatique de ta PR est impossible. Ton brief est INCHANGÉ — le travail livré est
     déjà approuvé par les juges, seul le conflit bloque.
 
-    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge origin/#{base}` dans ton workspace.
     2. Résous les conflits en préservant l'intention de TON brief ET le contenu déjà mergé
        des briques sœurs (leur travail est livré : tu composes avec, tu n'écrases pas).
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
-    Si `origin/main` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
+    Si `origin/#{base}` de ton workspace ne contient PAS les briques sœurs (réf périmée que tu ne
     peux pas rafraîchir — tu n'as pas le réseau), rends `blocked` en le disant : n'invente
     JAMAIS le contenu d'une brique sœur.
 
     """
   end
 
-  defp exception_conflict_section do
+  defp exception_conflict_section(base) do
     """
     ## Passe d'exception : conflit de merge non résolu par le producteur
 
@@ -95,17 +103,17 @@ defmodule Fleet.Pilot.BriefBuilder do
     budget de rework sur ce conflit ; tu interviens en dernière passe avant escalade humaine.
 
     Le contenu des deux côtés est déjà APPROUVÉ : les juges ont validé la branche, et les briques
-    sœurs sont mergées sur `main`. Il n'y a donc rien à arbitrer sur le fond — la seule question
+    sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le fond — la seule question
     est de composer les deux intentions sans en sacrifier une.
 
-    1. Intègre l'état actuel de main : `git merge origin/main` dans ton workspace.
+    1. Intègre l'état actuel de `#{base}` : `git merge origin/#{base}` dans ton workspace.
     2. Résous en PRÉSERVANT les deux apports. Tu n'as pas écrit ce code : tu ne connais pas les
        raisons derrière chaque ligne, donc tu ne choisis pas un camp — tu composes.
     3. Commite la résolution — le système pousse, les juges re-jugeront le nouveau head.
 
     Rends `blocked` en disant pourquoi dès que la composition demande une DÉCISION que le code ne
-    porte pas (deux intentions réellement incompatibles, ou un `origin/main` périmé que tu ne peux
-    pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
+    porte pas (deux intentions réellement incompatibles, ou un `origin/#{base}` périmé que tu ne
+    peux pas rafraîchir). C'est le résultat attendu d'une passe d'exception qui bute : l'escalade
     humaine existe pour ça, et une résolution devinée coûte plus cher qu'un refus motivé.
 
     """

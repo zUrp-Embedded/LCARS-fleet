@@ -328,8 +328,15 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       def change_request_feedback(_repo, _pr, _opts), do: {:ok, []}
     end
 
-    defp conflict_brief(voice) do
-      BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil, conflict: voice)
+    # JG-137 — `base_branch` est desormais REQUIS sur les deux voix conflit : la procedure donnee a
+    # l'agent nommait `main` en dur alors que la plomberie connaissait la vraie base depuis toujours
+    # (`:pr_base_branch`, posee depuis `pr.base.ref`, et c'est deja elle qui choisit le worktree de
+    # resolution). Sur une PR qui ne vise pas la face code, le brief etait INEXECUTABLE.
+    defp conflict_brief(voice, base \\ "main") do
+      BriefBuilder.rework_brief("engineer", ConflictForge, "fleet/x", 7, [], nil,
+        conflict: voice,
+        base_branch: base
+      )
     end
 
     test "the PRODUCER is told its own brief is unchanged (it is resuming approved work)" do
@@ -356,6 +363,30 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # And it must NEVER inherit the producer's framing.
       refute brief =~ "Ton brief est INCHANGÉ"
       refute brief =~ "TON brief"
+    end
+
+    # JG-137 — LA PROCEDURE DONNEE A L'AGENT NOMMAIT `main` EN DUR. La plomberie connaissait la vraie
+    # base depuis toujours : `:pr_base_branch` est posee par `dispatch_review` depuis `pr.base.ref`,
+    # et c'est deja elle qui choisit le worktree de resolution. Sur une PR qui ne vise pas la face
+    # code, le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un
+    # `fetch main`, il composait son livrable contre la mauvaise face.
+    test "JG-137: les DEUX voix parlent de la vraie base, jamais de `main` en dur" do
+      for voice <- [:producer, :exception] do
+        brief = conflict_brief(voice, "workshop")
+
+        assert brief =~ "git merge origin/workshop",
+               "voix #{voice} : la procedure ne nomme pas la base reelle de la PR"
+
+        refute brief =~ "origin/main",
+               "voix #{voice} : `main` est encore ecrit en dur dans une procedure executable"
+      end
+    end
+
+    test "TEMOIN JG-137 — sur une PR de face code, la procedure dit bien `main`" do
+      # Sans ce temoin, un correctif qui remplacerait `main` par n'importe quoi passerait le test
+      # ci-dessus : ce qui est verifie, c'est que la base SUIT la PR, pas qu'elle a change de nom.
+      brief = conflict_brief(:producer, "main")
+      assert brief =~ "git merge origin/main"
     end
 
     test "no conflict → no section at all (the default path is untouched)" do

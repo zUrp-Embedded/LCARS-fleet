@@ -335,12 +335,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          forge_opts,
          route,
          pr,
-         _opts
+         opts
        ),
        do:
          {:ok,
-          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route, conflict: :producer),
-          "worker"}
+          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
+            conflict: :producer,
+            base_branch: Keyword.fetch!(opts, :pr_base_branch)
+          ), "worker"}
 
   # Conflict-rework EXCEPTION pass (tier 2 — Remediation.dispatch_exception_rework): same dispatch,
   # outsider voice. It is not resuming its own work and has no brief of its own to preserve.
@@ -354,11 +356,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          forge_opts,
          route,
          pr,
-         _opts
+         opts
        ),
        do:
          {:ok,
           BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
-            conflict: :exception
+            conflict: :exception,
+            base_branch: Keyword.fetch!(opts, :pr_base_branch)
           ), "worker"}
 end
