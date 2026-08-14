@@ -110,6 +110,21 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
 
+  $PROG target add <name> --host github|gitlab --owner <owner> --token-file <path> [--dest-host H]
+  $PROG target list
+      Le POOL de cibles de publication de CET humain (~/.lcars/targets). Une cible =
+      un couple forge + compte + token. GitLab est une cible de plein droit ;
+      --dest-host pour un GitHub Enterprise / GitLab self-hosted.
+
+  $PROG approve <owner/nom-interne> --target <name> --as <repo-dest> [--base main]
+  $PROG approve <owner/nom-interne> [--base main]
+      PHASE 1 — le gate manuel dur de la publication. Avec --target/--as : LIE le
+      projet a une cible du pool et POUSSE le peuplement initial (refuse d'ecraser une
+      base deja remplie). Sans : PUSH DIRECT de l'etat courant sur la base deja liee
+      (garde deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
+      L'attribution est reecrite (author=humain) avant tout push. La phase 2 (PR/MR
+      reguliere) est le tool « github_publish » cote pod, pas ce verbe.
+
   $PROG help
       Cette aide.
 
@@ -520,6 +535,156 @@ cmd_catalogue() {
   esac
 }
 
+# --- publish targets (pool) + approve (phase-1 gate) -----------------------
+# PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /home/private —
+# that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
+# its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
+# (mode 600), read host-side by this CLI (it runs as the human), and NEVER enter a pod.
+TARGETS_DIR="$HOME/.lcars/targets"
+PUBLISH_DIR="$HOME/.lcars/publish"
+
+# Token-carrying push URL, per-host username convention over https. (Proto: the token lands in the
+# git subprocess argv — a `ps` read on a per-human box exposes it to that human only; a credential
+# helper would remove even that, deferred.)
+_dest_push_url() {  # host dest_host repo token
+  case "$1" in
+    github) printf 'https://x-access-token:%s@%s/%s.git' "$4" "$2" "$3" ;;
+    gitlab) printf 'https://oauth2:%s@%s/%s.git' "$4" "$2" "$3" ;;
+    *) die "host inconnu: $1 (github|gitlab)" ;;
+  esac
+}
+_json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
+
+cmd_target() {
+  case "${1:-}" in
+    add)     shift; cmd_target_add "$@" ;;
+    list|ls) shift; cmd_target_list "$@" ;;
+    "")      die "target: sous-commande requise (add|list)" ;;
+    *)       die "target: sous-commande inconnue « $1 » (add|list)" ;;
+  esac
+}
+
+cmd_target_add() {
+  local name="" host="" owner="" token_file="" dest_host=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --host) host="$2"; shift 2 ;;
+      --owner) owner="$2"; shift 2 ;;
+      --token-file) token_file="$2"; shift 2 ;;
+      --dest-host) dest_host="$2"; shift 2 ;;
+      -*) die "target add: option inconnue $1" ;;
+      *) if [[ -z "$name" ]]; then name="$1"; shift; else die "target add: argument en trop « $1 »"; fi ;;
+    esac
+  done
+  [[ -n "$name" && -n "$host" && -n "$owner" && -n "$token_file" ]] || \
+    die "target add: usage — target add <name> --host github|gitlab --owner <owner> --token-file <path> [--dest-host H]"
+  case "$host" in
+    github) [[ -n "$dest_host" ]] || dest_host="github.com" ;;
+    gitlab) [[ -n "$dest_host" ]] || dest_host="gitlab.com" ;;
+    *) die "target add: --host inconnu « $host » (github|gitlab)" ;;
+  esac
+  [[ -r "$token_file" ]] || die "target add: token-file illisible: $token_file"
+  mkdir -p "$TARGETS_DIR"; chmod 700 "$TARGETS_DIR"
+  local out="$TARGETS_DIR/$name.json"
+  python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4],"token_file":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
+    "$out" "$host" "$dest_host" "$owner" "$token_file"
+  chmod 600 "$out"
+  echo "target « $name » enregistree ($host $owner @ $dest_host)."
+}
+
+cmd_target_list() {
+  local f found=0
+  if [[ -d "$TARGETS_DIR" ]]; then
+    for f in "$TARGETS_DIR"/*.json; do
+      [[ -e "$f" ]] || continue
+      found=1
+      python3 -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print("  %-16s %-7s %s/%s" % (os.path.basename(sys.argv[1])[:-5],d.get("host"),d.get("dest_host"),d.get("owner")))' "$f"
+    done
+  fi
+  [[ "$found" == 1 ]] || echo "aucune target (pool vide) — lcars target add <name> ..."
+}
+
+cmd_approve() {
+  local repo="" target="" as="" base="main"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target) target="$2"; shift 2 ;;
+      --as) as="$2"; shift 2 ;;
+      --base) base="$2"; shift 2 ;;
+      -*) die "approve: option inconnue $1" ;;
+      *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "approve: argument en trop « $1 »"; fi ;;
+    esac
+  done
+  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--target <name> --as <repo-dest>] [--base main]"
+  [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
+  local slug="${repo##*/}"
+  local binding="$PUBLISH_DIR/$slug.json"
+
+  # Resolve WHAT/WHERE first (mode + destination), so mode errors fire without any forge config.
+  local host dest_host dest_repo token_file link_mode
+  if [[ -n "$target" ]]; then
+    link_mode=1
+    local tfile="$TARGETS_DIR/$target.json"
+    [[ -r "$tfile" ]] || die "approve: target « $target » absente du pool (lcars target list)"
+    [[ -n "$as" ]] || die "approve: --target exige --as <nom-du-repo-destination>"
+    host="$(_json_field "$tfile" host)"
+    dest_host="$(_json_field "$tfile" dest_host)"
+    token_file="$(_json_field "$tfile" token_file)"
+    dest_repo="$(_json_field "$tfile" owner)/$as"
+  else
+    link_mode=0
+    [[ -r "$binding" ]] || die "approve: « $slug » pas encore lie — « approve $repo --target <name> --as <repo> » d'abord"
+    host="$(_json_field "$binding" host)"
+    dest_host="$(_json_field "$binding" dest_host)"
+    dest_repo="$(_json_field "$binding" dest_repo)"
+    token_file="$(_json_field "$binding" token_file)"
+    base="$(_json_field "$binding" base)"
+  fi
+  [[ -r "$token_file" ]] || die "approve: token de destination illisible: $token_file"
+  local dtok; dtok="$(cat "$token_file")"
+  [[ -n "$dtok" ]] || die "approve: token de destination vide: $token_file"
+
+  # Internal forge config — same source as cmd_project_migrate: ~/.lcars/fleet_v2.env, nowhere else.
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  # shellcheck disable=SC1090
+  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+  [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
+  [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] || die "approve: FORGE_TOKEN_FILE absent/illisible ($env_file)"
+
+  local push_url; push_url="$(_dest_push_url "$host" "$dest_host" "$dest_repo" "$dtok")"
+  mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
+
+  # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
+  local work; work="$(mktemp -d)/clone"
+  "$(dirname "$0")/../etc/publish-to-github.sh" \
+    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
+    || die "approve: production du clone certifie echouee (voir ci-dessus)"
+  cd "$work"
+
+  if [[ "$link_mode" == 1 ]]; then
+    # LINK: never clobber a base the human populated by hand.
+    if git ls-remote --exit-code "$push_url" "refs/heads/$base" >/dev/null 2>&1; then
+      die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
+    fi
+    git push -q "$push_url" "HEAD:refs/heads/$base" || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
+    python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"token_file":sys.argv[5],"base":sys.argv[6]},open(sys.argv[1],"w"),indent=2)' \
+      "$binding" "$host" "$dest_host" "$dest_repo" "$token_file" "$base"
+    chmod 600 "$binding"
+    echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
+  else
+    # DIRECT push to an existing base: determinism gate (base must be an ancestor of the fresh clone).
+    git fetch -q "$push_url" "$base" || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
+    if [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]; then
+      echo "approve: rien a pousser — $dest_host/$dest_repo $base deja a jour."
+    elif ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
+      die "approve: $base n'est PAS un ancetre du clone reecrit (reecriture non deterministe ou divergence) — rien pousse."
+    else
+      git push -q "$push_url" "HEAD:refs/heads/$base" || die "approve: echec du push direct vers $dest_host/$dest_repo"
+      echo "approve: « $slug » pousse en direct vers $dest_host/$dest_repo $base."
+    fi
+  fi
+}
+
 # --- dispatch --------------------------------------------------------------
 
 case "${1:-help}" in
@@ -529,6 +694,8 @@ case "${1:-help}" in
   project)
     shift; cmd_project "$@" ;;
   catalogue) shift; cmd_catalogue "$@" ;;
+  target) shift; cmd_target "$@" ;;
+  approve) shift; cmd_approve "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
 esac
