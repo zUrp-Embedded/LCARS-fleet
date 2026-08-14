@@ -148,3 +148,105 @@ module_sh() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"dossier absent"* ]]
 }
+
+# ─── 6-131 — LA GARDE SYMLINK DES MUTATIONS PRIVILEGIEES ─────────────────────────────────────────
+#
+# L'attaque que ces tests epinglent : `ensure_dir` tenait un symlink-vers-dossier pour un dossier
+# (`[[ -d ]]` suit les liens), puis `ensure_mode` chownait sa CIBLE. Le module WSL applique ces
+# helpers EN ROOT a `$HOME/.config` de l'humain — donc `~/.config -> /etc`, et `sudo provision
+# apply` donne `/etc` a cet humain.
+#
+# Ils tournent sans privileges : ce qui est mesure est le REFUS, pas l'effet root. Un test qui
+# aurait besoin de root pour prouver une garde ne serait joue nulle part.
+
+@test "6-131: ensure_dir REFUSE un symlink-vers-dossier au lieu de converger sa cible" {
+  module_sh '
+    victime="$BATS_TEST_TMPDIR/victime"; mkdir -p "$victime"; chmod 0755 "$victime"
+    ln -s "$victime" "$BATS_TEST_TMPDIR/piege"
+    ensure_dir "$BATS_TEST_TMPDIR/piege" 0700 || true
+    [ "$PROV_FAILED" -ge 1 ]
+    # LA cible n_a PAS bouge : c est tout l enjeu, pas le code de retour.
+    [ "$(stat -c %a "$victime")" = "755" ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"composant symlink"* ]]
+}
+
+@test "6-131: un symlink AU MILIEU du chemin est refuse aussi — c est celui de l attaque" {
+  module_sh '
+    victime="$BATS_TEST_TMPDIR/etc"; mkdir -p "$victime/systemd"; chmod 0755 "$victime/systemd"
+    ln -s "$victime" "$BATS_TEST_TMPDIR/config"
+    ensure_dir "$BATS_TEST_TMPDIR/config/systemd" 0700 || true
+    [ "$PROV_FAILED" -ge 1 ]
+    [ "$(stat -c %a "$victime/systemd")" = "755" ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"composant symlink"* ]]
+}
+
+@test "6-131: ensure_mode dit LIEN et non « absent » sur un lien casse" {
+  # `[[ -e ]]` est faux sur un lien casse : diagnostique « absent », le piege reste invisible.
+  module_sh '
+    ln -s "$BATS_TEST_TMPDIR/nulle-part" "$BATS_TEST_TMPDIR/casse"
+    ensure_mode "$BATS_TEST_TMPDIR/casse" 0600 || true
+    [ "$PROV_FAILED" -ge 1 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"composant symlink"* ]]
+  [[ "$output" != *"ensure_mode: absent"* ]]
+}
+
+@test "6-131: write_atomic refuse d ecrire a travers un parent symlink" {
+  module_sh '
+    reel="$BATS_TEST_TMPDIR/reel"; mkdir -p "$reel"
+    ln -s "$reel" "$BATS_TEST_TMPDIR/lien"
+    write_atomic "$BATS_TEST_TMPDIR/lien/f" 0644 <<< "x" || true
+    [ "$PROV_FAILED" -ge 1 ]
+    [ ! -e "$reel/f" ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"composant symlink"* ]]
+}
+
+@test "6-131: TEMOIN — un chemin sans lien converge normalement (la garde ne mure rien)" {
+  # Sans ce temoin, une garde qui refuserait TOUT passerait les quatre tests ci-dessus.
+  module_sh '
+    ensure_dir "$BATS_TEST_TMPDIR/vrai/imbrique" 0700
+    [ "$PROV_FAILED" -eq 0 ]
+    [ "$(stat -c %a "$BATS_TEST_TMPDIR/vrai/imbrique")" = "700" ]
+    write_atomic "$BATS_TEST_TMPDIR/vrai/imbrique/f" 0600 <<< "contenu"
+    [ "$PROV_FAILED" -eq 0 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/vrai/imbrique/f")" = "contenu" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-131: ensure_symlink garde son droit de POSER un lien (la garde vise le parent)" {
+  module_sh '
+    ensure_symlink "$BATS_TEST_TMPDIR/lien-legitime" /dev/null
+    [ "$PROV_FAILED" -eq 0 ]
+    [ "$(readlink "$BATS_TEST_TMPDIR/lien-legitime")" = "/dev/null" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+# ─── 6-130 — LE VERROU PRIVILEGIE N EST PLUS DANS UN DOSSIER PARTAGE ─────────────────────────────
+
+@test "6-130: prov_lock_path ignore TMPDIR — un verrou dont l appelant choisit l emplacement n en est pas un" {
+  module_sh '
+    export TMPDIR="$BATS_TEST_TMPDIR/pirate"; mkdir -p "$TMPDIR"
+    lock="$(prov_lock_path)" || true
+    [[ "$lock" != "$TMPDIR"* ]]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "6-130: le verrou vit dans un dossier 0700 possede par l appelant" {
+  module_sh '
+    lock="$(prov_lock_path)"
+    dir="$(dirname "$lock")"
+    [ "$(stat -c %a "$dir")" = "700" ]
+    [ "$(stat -c %u "$dir")" = "$(id -u)" ]
+  '
+  [ "$status" -eq 0 ]
+}

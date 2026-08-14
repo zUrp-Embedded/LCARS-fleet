@@ -123,7 +123,8 @@ if [[ "$CMD" == "update" ]]; then
 
   # Lock apply pris AVANT le pull (un converge concurrent pendant qu'on change le code sous lui
   # est exactement ce que le lock interdit) ; relâché avant le re-exec — le nouveau runner le reprend.
-  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  # Le chemin vient de `prov_lock_path` : dossier root-owned 0700, `TMPDIR` non honoré (6-130).
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply/update REFUSÉ"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
   runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
@@ -217,7 +218,10 @@ fi
 
 # ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
 if [[ "$CMD" == "apply" ]]; then
-  LOCK="${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock"
+  # 6-130 — le nom était `${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock`, donc sous `sudo`
+  # `/tmp/lcars-provision.0.lock` : FIXE, devinable, dans un dossier que tout le monde écrit. Et
+  # `exec 9>` suit les liens et TRONQUE avant que `flock` ne protège quoi que ce soit.
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply REFUSÉ"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
 fi
