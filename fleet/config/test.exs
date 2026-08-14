@@ -16,6 +16,14 @@ config :lcars_fleet, mcp_boot_environment: :host
 # même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
 config :lcars_fleet, mcp_sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test")
 
+# 6-127 — MÊME HERMÉTISME, MÊME RAISON. Le journal des completions dues vit par défaut sous
+# `~/.lcars/completion-outbox`, c'est-à-dire dans l'état d'une fleet VIVANTE sur cette machine.
+# Sans cet override, `mix test` y écrirait ses charges utiles et, pire, le `StepRunConsumer`
+# démarré par un cas rejouerait au boot les completions RÉELLES qu'il y trouverait — des écritures
+# forge déclenchées par une suite de tests. On l'isole sous un tmp.
+config :lcars_fleet,
+  pilot_completion_outbox_root: Path.join(System.tmp_dir!(), "lcars-completion-outbox-test")
+
 # Hermétisme : le SocketWarden réconcilie les sockets contre les pods VIVANTS du spawner — en test
 # il verrait les sockets posées à la main par les cases (aucun pod réel derrière) et les réclamerait
 # sous le nez des tests. Un test qui en a besoin le démarre avec des seams explicites.

@@ -732,6 +732,15 @@ if config_env() != :test and not tool_mode? do
     config :lcars_fleet, spawner_state_fs_root: Fleet.EnvParse.path("LCARS_STATE_FS_ROOT", path)
   end
 
+  # 6-127 — Journal des completions DUES (`Fleet.Pilot.CompletionOutbox`). Défaut
+  # `~/.lcars/completion-outbox`, même logique que l'état des pods juste au-dessus : il suit le home
+  # de l'humain qui lance la fleet. Une entrée est un résultat d'agent déjà produit dont la trace
+  # forge est incomplète — le déplacer, c'est déplacer ce qui sera rejoué au prochain démarrage.
+  if path = System.get_env("LCARS_COMPLETION_OUTBOX_ROOT") do
+    config :lcars_fleet,
+      pilot_completion_outbox_root: Fleet.EnvParse.path("LCARS_COMPLETION_OUTBOX_ROOT", path)
+  end
+
   # Pod launchers (N0/N1): absolute path read by the spawner (default `/usr/local/bin`, pod.ex). The
   # `fleet_v2` launcher sets them from `$INSTALL_DIR/bin` (everything under the install, nothing
   # scattered). The parent dir is bind-mounted RO in the sandbox (pod.ex `system_mounts`,

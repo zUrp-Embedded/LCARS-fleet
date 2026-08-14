@@ -99,6 +99,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Opts
+  alias Fleet.Pilot.CompletionOutbox
 
   alias Fleet.Pilot.StepRunConsumer.Verdict
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
@@ -200,7 +201,41 @@ defmodule Fleet.Pilot.StepRunConsumer do
     )
 
     Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
+
+    # 6-127 — LA REPRISE EST POSTEE, PAS FAITE DANS `init/1`. Une completion est une suite
+    # d'ecritures forge : la jouer ici bloquerait le demarrage du rail sur du reseau, et un
+    # superviseur qui attend son enfant est un rail qui ne demarre pas. On se l'envoie a soi-meme :
+    # le GenServer est vivant, la reprise s'execute comme n'importe quel message.
+    #
+    # ⚠ ELLE DOIT PRECEDER LA RECLAMATION DU POLLER, et c'est le cas : la reclamation d'un verrou
+    # orphelin attend une grace de 2 ticks (~60 s), la reprise part au premier message apres le
+    # boot. Si elle perdait la course, le pire est un re-dispatch — l'etat d'avant 6-127.
+    if Keyword.get(opts, :replay_outbox, true), do: send(self(), :replay_completion_outbox)
+
     {:ok, state}
+  end
+
+  # 6-127 — CE QUI RESTE DANS LE JOURNAL AU DEMARRAGE EST, PAR CONSTRUCTION, UNE COMPLETION DUE :
+  # l'entree est posee avant que la chaine ne tourne et retiree quand elle a fini. On la rejoue par
+  # le MEME chemin que la premiere fois (`maybe_complete/2`), ce qui est exactement ce que le
+  # `@moduledoc` de `StepRunCompleter` promet depuis toujours — « recovery replays the sequence,
+  # the done steps skip » — et que personne n'executait.
+  @impl GenServer
+  def handle_info(:replay_completion_outbox, state) do
+    case CompletionOutbox.pending() do
+      [] ->
+        {:noreply, state}
+
+      entries ->
+        Logger.info(
+          "StepRunConsumer: #{length(entries)} completion(s) DUE au demarrage — reprise " <>
+            "(chaine idempotente : les etapes deja faites sautent, aucun run d'agent)"
+        )
+
+        Enum.reduce(entries, {:noreply, state}, fn payload, {:noreply, acc} ->
+          handle_pod_completed(payload, acc)
+        end)
+    end
   end
 
   @impl GenServer
@@ -294,8 +329,51 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :ok
   end
 
+  # 6-127 — LE RESULTAT EST POSE AVANT QUE LA CHAINE NE TOURNE, ET RETIRE QUAND ELLE A FINI.
+  #
+  # `TaskQueue` a deja marque l'item `completed` quand on arrive ici : la charge utile est la SEULE
+  # copie du travail de l'agent. Une Task de completion qui meurt l'emportait, et le poller
+  # reclamait l'orphelin puis faisait REFAIRE le travail. Le journal la rend reprenable.
+  #
+  # ⚠ UNE ERREUR DE JOURNALISATION N'EST PAS FATALE, ET C'EST DELIBERE : la completion se deroule de
+  # toute facon, elle ne sera simplement pas reprenable — l'etat d'avant cette fiche. Refuser de
+  # completer parce qu'on n'a pas pu ecrire un fichier echangerait une degradation bornee contre un
+  # blocage.
   defp handle_pod_completed(p, state) do
-    case maybe_complete(p, state) do
+    _ =
+      case CompletionOutbox.put(p) do
+        {:ok, _key} ->
+          :ok
+
+        {:error, :no_work_item_id} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "StepRunConsumer: completion NON journalisee #{p["issue_id"]} (#{inspect(reason)}) — " <>
+              "elle se deroule, mais une mort de la Task la perdrait comme avant 6-127"
+          )
+      end
+
+    outcome = maybe_complete(p, state)
+
+    # RETRAIT SUR LES SEULS ETATS OU IL N'Y A PLUS RIEN A REPRENDRE. `{:error, _}` GARDE l'entree :
+    # c'est precisement le cas que la fiche vise (chaine interrompue), et la rejouer est sans effet
+    # sur les etapes deja faites.
+    #
+    # ⚠ `{:escalate, …}` RETIRE, et le trou est nomme plutot que comble a moitie : ce chemin range
+    # son contexte d'evaluation EN MEMOIRE (`state.gate_evals`), donc un redemarrage le perd de
+    # toute facon. Le rendre durable est un AUTRE mecanisme, et la preuve de sortie de 6-127 ne
+    # porte pas sur lui — ses trois points de mort (avant push, apres push avant PR, apres PR avant
+    # unlock) sont tous DANS la chaine, couverts ci-dessus.
+    case outcome do
+      {:ok, _} -> CompletionOutbox.delete(p)
+      {:skip, _} -> CompletionOutbox.delete(p)
+      {:escalate, _, _} -> CompletionOutbox.delete(p)
+      _ -> :ok
+    end
+
+    case outcome do
       {:ok, _outcome} ->
         {:noreply, state}
 
