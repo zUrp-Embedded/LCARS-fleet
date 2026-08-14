@@ -471,8 +471,9 @@ defmodule Fleet.MCP.PodTools do
           "mechanical reception filter — on refusal NOTHING reaches the org; the human expurges " <>
           "at the source and retries. Default branch is normalized to `main` (a half-migrated " <>
           "repo with BOTH master and main is refused — the human settles which is real). " <>
-          "Private repos: the operator sets LCARS_EXTERNAL_GIT_TOKEN in the daemon env (never " <>
-          "ask for the token in chat). `url` = https repo URL; `name` = the kebab-case project " <>
+          "Private repos: auth is the operator's WIRED git credential helper (gh/glab auth login, " <>
+          "or their own helper) — the host clones with it, no token in chat, no env token. `url` = " <>
+          "https repo URL; `name` = the kebab-case project " <>
           "name in our org. The card/criticality declaration relays like create_project. " <>
           "Returns {\"status\":\"imported_external\",\"repo\":...}."
       )
