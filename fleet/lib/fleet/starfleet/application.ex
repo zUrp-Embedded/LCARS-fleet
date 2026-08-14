@@ -8,9 +8,15 @@ defmodule Fleet.Starfleet.Application do
 
     1. Pre-loads the decision schema via
        `Fleet.Starfleet.Gatekeeper.init_schema!/0` (boot fail-fast)
-    2. Pre-registers the `starfleet.audit_cat5_*`, `audit.verdict`, `fleet.boot_*`,
-       `sdk.upstream_alert` and `mcp.server_crashed` event atoms (compile-time via a
-       module attribute, atom-leak DoS mitigation)
+    2. ⚠ NOTHING IS PRE-REGISTERED HERE, and this step used to claim it was. It read
+       "pre-registers … event atoms (compile-time via a module attribute, atom-leak DoS
+       mitigation)" — there is no such attribute in this module, nor anywhere under
+       `starfleet/`. The atoms come from `events.yaml` through
+       `Fleet.EventRouter.Catalog`, which says so itself: "this function is the ONLY
+       source of pre-registered event atoms". A reader chasing the atom-leak mitigation
+       here found a sentence instead of a mechanism.
+       (`sdk.upstream_alert` was also named in that list — removed 2026-08-14, cf. 6-016:
+       it was `MCPWatcher`'s declared half, and the module left on 2026-08-03.)
     3. Supervises five opt-in children, each gated by a `:start_*` config knob:
        * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by

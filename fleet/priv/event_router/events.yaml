@@ -204,8 +204,14 @@ events:
   work_item.failed: []
   state.corrupt: []
 
-  # --- V2 extensions (MCPWatcher / MCPMonitor) ---
-  sdk.upstream_alert: []
+  # --- V2 extensions (MCPMonitor) ---
+  # `sdk.upstream_alert` RETIRE le 2026-08-14 (6-016) : il etait la moitie declaree de `MCPWatcher`,
+  # supprime le 2026-08-03 (BL-6-44) parce que sonder un registre de paquets n'est pas le travail
+  # d'un plan de controle — la veille de derive du SDK vit desormais en CI
+  # (`.gitea/workflows/deps-upstream.yml`). Son producteur est parti avec le module ; restaient un
+  # type autorise, un handler dans `AuditConsumer` et une regle de routage dans `ReadModel`, tous
+  # trois inatteignables. Un type declare sans producteur n'est pas neutre : il se lit comme un rail
+  # vivant, et le prochain lecteur cherche l'emetteur qui n'existe pas.
   mcp.server_crashed: []
 
   # --- Pilot step transitions (source :pilot) — every lock release is a step crossed,

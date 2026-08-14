@@ -71,19 +71,12 @@ defmodule Fleet.Starfleet.AuditConsumer do
   end
 
   # V2 extensions (MCPMonitor).
-  def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"sdk.upstream_alert", payload: p},
-        state
-      ) do
-    Logger.warning(
-      "AUDIT starfleet.sdk.upstream_alert package=#{inspect(Map.get(p, "package"))} " <>
-        "current=#{inspect(Map.get(p, "current"))} " <>
-        "upstream=#{inspect(Map.get(p, "upstream"))}"
-    )
-
-    {:noreply, %{state | events_count: state.events_count + 1}}
-  end
-
+  #
+  # ⚠ UN HANDLER `sdk.upstream_alert` VIVAIT ICI SANS EMETTEUR (retire le 2026-08-14, 6-016). Il
+  # etait la moitie consommatrice de `MCPWatcher`, supprime le 2026-08-03 (BL-6-44) — la veille de
+  # derive du SDK est passee en CI. Le producteur est parti, la clause est restee : elle se lisait
+  # comme un rail d'audit vivant, et une clause qu'aucun evenement n'atteint ne se distingue pas
+  # d'une clause qui marche.
   def handle_info(
         %Fleet.Event{source: :starfleet, type: :"mcp.server_crashed", payload: p},
         state
