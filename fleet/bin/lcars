@@ -112,10 +112,12 @@ USAGE
 
   $PROG forge add <name> --host github|gitlab --owner <owner> [--dest-host H]
   $PROG forge list
+  $PROG forge status
       Le POOL de forges de publication de CET humain (~/.lcars/forges). Une forge =
       forge + compte + repo. L'AUTH n'est pas stockee ici : c'est le CLI officiel de la
       forge (« gh auth login » / « glab auth login »), deja credential helper git.
       GitLab est une forge de plein droit ; --dest-host pour Enterprise / self-hosted.
+      « status » = le doctor : chaque forge + si son CLI est authentifie ([ok]/[!!]).
 
   $PROG approve <owner/nom-interne> --forge <name> --as <repo-dest> [--base main] [--public]
   $PROG approve <owner/nom-interne> [--base main]
@@ -128,6 +130,11 @@ USAGE
       L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
       externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
       phase 2 (PR/MR reguliere) est le tool « project_publish » cote pod, pas ce verbe.
+
+  $PROG publish status <owner/nom-interne>
+      Le doctor par PROJET : est-il pret a publier ? Non lie = etat valide, rapporte
+      calme (pas un trou). Lie : la chaine de readiness (CLI authentifie + base peuplee
+      cote forge). Chaque manque nomme le geste suivant.
 
   $PROG help
       Cette aide.
@@ -620,10 +627,11 @@ _dest_repo_create() {  # cli repo visibility(public|private)
 
 cmd_forge() {
   case "${1:-}" in
-    add)     shift; cmd_forge_add "$@" ;;
-    list|ls) shift; cmd_forge_list "$@" ;;
-    "")      die "forge: sous-commande requise (add|list)" ;;
-    *)       die "forge: sous-commande inconnue « $1 » (add|list)" ;;
+    add)      shift; cmd_forge_add "$@" ;;
+    list|ls)  shift; cmd_forge_list "$@" ;;
+    status)   shift; cmd_forge_status "$@" ;;
+    "")       die "forge: sous-commande requise (add|list|status)" ;;
+    *)        die "forge: sous-commande inconnue « $1 » (add|list|status)" ;;
   esac
 }
 
@@ -666,6 +674,73 @@ cmd_forge_list() {
     done
   fi
   [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
+}
+
+# Forge-level doctor: each forge in the pool + whether its official CLI is authenticated (reaches the
+# CLI, not the network). [ok] = ready ; [!!] = the operator's next gesture, named.
+cmd_forge_status() {
+  local f found=0
+  if [[ -d "$FORGES_DIR" ]]; then
+    for f in "$FORGES_DIR"/*.json; do
+      [[ -e "$f" ]] || continue
+      found=1
+      local name host owner dest_host cli
+      name="$(basename "$f" .json)"
+      host="$(_json_field "$f" host)"
+      owner="$(_json_field "$f" owner)"
+      dest_host="$(_json_field "$f" dest_host)"
+      cli="$(_dest_cli "$host")"
+      if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+        echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie"
+      else
+        echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »"
+      fi
+    done
+  fi
+  [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
+}
+
+cmd_publish() {
+  case "${1:-}" in
+    status) shift; cmd_publish_status "$@" ;;
+    "")     die "publish: sous-commande requise (status)" ;;
+    *)      die "publish: sous-commande inconnue « $1 » (status)" ;;
+  esac
+}
+
+# Project-level doctor: is THIS project ready to publish ? A non-linked project is a VALID terminal
+# state (most never publish), so it is reported CALM — never a red hole. Only a linked project runs
+# the readiness chain (CLI auth + base populated). The base check reaches the external forge.
+cmd_publish_status() {
+  local repo="${1:-}"
+  [[ -n "$repo" ]] || die "publish status: usage — publish status <owner/nom-interne>"
+  [[ "$repo" == */* ]] || die "publish status: « $repo » n'est pas un owner/nom (repo interne)"
+  local slug="${repo//\//__}"
+  local binding="$PUBLISH_DIR/$slug.json"
+  if [[ ! -r "$binding" ]]; then
+    echo "publish « $repo » : non lie (option) — aucun endpoint de publish configure."
+    echo "  Pour publier un jour : lcars approve $repo --forge <name> --as <repo-dest>"
+    return 0
+  fi
+  local host dest_host dest_repo base cli
+  host="$(_json_field "$binding" host)"
+  dest_host="$(_json_field "$binding" dest_host)"
+  dest_repo="$(_json_field "$binding" dest_repo)"
+  base="$(_json_field "$binding" base)"
+  cli="$(_dest_cli "$host")"
+  echo "publish « $repo » : lie a $dest_host/$dest_repo (base $base)"
+  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+    echo "  [ok] $cli authentifie"
+  else
+    echo "  [!!] $cli non authentifie — « $cli auth login » (ou cable un helper git)"
+  fi
+  export GIT_TERMINAL_PROMPT=0
+  local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
+  if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
+    echo "  [ok] base « $base » peuplee cote $dest_host (phase 1 faite)"
+  else
+    echo "  [!!] base « $base » absente/injoignable cote $dest_host — « lcars approve $repo » (phase 1)"
+  fi
 }
 
 cmd_approve() {
@@ -794,6 +869,7 @@ case "${1:-help}" in
     shift; cmd_project "$@" ;;
   catalogue) shift; cmd_catalogue "$@" ;;
   forge) shift; cmd_forge "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
   approve) shift; cmd_approve "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;

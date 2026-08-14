@@ -29,6 +29,17 @@ exit 0
 STUB
     chmod +x "$BIN/$cli"
   done
+
+  # git stub: `ls-remote` succeeds iff STUB_BASE_PRESENT=1 (the publish-status base-populated probe).
+  # No other test invokes git (approve refuses at the forge-config check, before any clone).
+  cat > "$BIN/git" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "ls-remote" ]]; then
+  [[ "${STUB_BASE_PRESENT:-1}" == "1" ]] && exit 0 || exit 2
+fi
+exit 0
+STUB
+  chmod +x "$BIN/git"
   export PATH="$BIN:$PATH"
 }
 
@@ -118,4 +129,42 @@ teardown() { rm -rf "$TMP"; }
   run "$SCRIPT" approve fleet/demo --forge mine --as Demo
   [ "$status" -eq 1 ]
   [[ "$output" == *"FORGE_BASE_URL absent"* ]]
+}
+
+# --- doctors: forge status + publish status (Lot 3b) -------------------------------------------------
+
+@test "forge status: authenticated forge -> [ok]" {
+  "$SCRIPT" forge add mine --host github --owner alice >/dev/null
+  run "$SCRIPT" forge status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[ok]"* ]]
+  [[ "$output" == *"mine"* ]]
+}
+
+@test "forge status: not authenticated -> [!!] (auth login)" {
+  "$SCRIPT" forge add mine --host github --owner alice >/dev/null
+  STUB_AUTHED=0 run "$SCRIPT" forge status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[!!]"* ]]
+  [[ "$output" == *"auth login"* ]]
+}
+
+@test "publish status: unbound project -> calm (non lie, option), no nag" {
+  run "$SCRIPT" publish status fleet/demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"non lie (option)"* ]]
+  [[ "$output" != *"[!!]"* ]]
+}
+
+@test "publish status: linked + authed + base present -> readiness all [ok]" {
+  mkdir -p "$HOME/.lcars/publish"
+  cat > "$HOME/.lcars/publish/fleet__demo.json" <<'J'
+{"host":"github","dest_host":"github.com","dest_repo":"alice/Demo","base":"main"}
+J
+  STUB_BASE_PRESENT=1 run "$SCRIPT" publish status fleet/demo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lie a github.com/alice/Demo"* ]]
+  [[ "$output" == *"[ok] gh authentifie"* ]]
+  [[ "$output" == *"phase 1 faite"* ]]
+  [[ "$output" != *"[!!]"* ]]
 }
