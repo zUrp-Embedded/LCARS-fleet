@@ -920,7 +920,10 @@ const mkEl = () => ({ dataset: {}, style: {}, hidden: false, textContent: '', in
   classList: { toggle() {}, add() {}, remove() {} },
   appendChild() {}, removeChild() {}, remove() {}, querySelectorAll: () => [],
   addEventListener() {}, focus() {} });
+// `createTextNode` MANQUAIT, et son absence est un constat : `build()` n'avait jamais tourne ici —
+// c'est la premiere chose qu'il appelle pour poser le libelle d'un onglet.
 globalThis.document = { getElementById: () => mkEl(), createElement: () => mkEl(),
+  createTextNode: (t) => ({ nodeValue: String(t) }),
   querySelectorAll: () => [], title: '' };
 globalThis.location = { protocol: 'http:', host: 'box:20999' };
 globalThis.CSS = { escape: (s) => s };
@@ -978,6 +981,28 @@ try {
   out.obs.label = fleetLabel({ fleet_status: 'denied', pods: [] });
 } catch (e) { out.obs.ok = false; out.obs.err = String(e); }
 
+// L'ONGLET ADMIN, ET ON LE CLIQUE. `build()` decide s'il existe, `adminPanel()` le remplit —
+// et RIEN dans cette suite n'executait ni l'une ni l'autre. C'est exactement la facture du
+// `ReferenceError` ci-dessus : du code neuf, parse, gate, jamais lance. Le rail enregistre donc ce
+// qu'on lui pose, et on declenche le `onclick` que build a cable, au lieu d'appeler `adminPanel`
+// en direct — appeler la fonction a la main sauterait la moitie qui la relie a la page.
+out.adm = {};
+try {
+  const railKids = [];
+  const rail = mkEl(); rail.appendChild = (c) => { railKids.push(c); };
+  document.getElementById = (id) => (id === 'rail' ? rail : mkEl());
+
+  build({ hostname: 'box', admin: true, humans: [] });
+  const tab = railKids.find((k) => k.dataset && k.dataset.key === 'admin');
+  out.adm.present = Boolean(tab);
+  if (tab) { tab.onclick(); out.adm.clicked = true; }
+
+  railKids.length = 0;
+  build({ hostname: 'box', admin: false, humans: [] });
+  out.adm.absent = !railKids.some((k) => k.dataset && k.dataset.key === 'admin');
+  out.adm.ok = true;
+} catch (e) { out.adm.ok = false; out.adm.err = String(e); }
+
 // LA FERMETURE : trois gestes, et en oublier un fuit en silence (une socket ouverte cote serveur
 // pour un onglet qui n'existe plus). On rouvre un terminal puis on le laisse tomber.
 show({ key: 'console-zoe', crumb: 'X', term: '/console/zoe/ws' });
@@ -1009,6 +1034,19 @@ console.log(JSON.stringify(out));
               "un redimensionnement part prefixe '1' + JSON (vu: %r)" % _o["resize"])
         check(_o["written"] == "bonjour",
               "une sortie serveur '0' est ecrite SANS son prefixe (vu: %r)" % _o["written"])
+
+        # ── L'ONGLET ADMIN S'EXECUTE, ET SA BRANCHE SE PREND DANS LES DEUX SENS ─────────────────
+        check(_o["adm"].get("ok") is True,
+              "l'onglet admin S'EXECUTE (build + clic) : %s" % _o["adm"].get("err", ""))
+        check(_o["adm"].get("present") is True,
+              "un admin voit l'onglet — build a bien pose la branche (vu: %r)"
+              % _o["adm"].get("present"))
+        check(_o["adm"].get("clicked") is True,
+              "et le CLIC rend le panneau : c'est le seul geste qui execute adminPanel()")
+        # ⚠ LE TEMOIN NEGATIF, SANS LEQUEL LE PRECEDENT PASSERAIT SUR UN ONGLET TOUJOURS LA. Ce
+        # qu'on mesure n'est pas « l'onglet existe » mais « il depend de `s.admin` ».
+        check(_o["adm"].get("absent") is True,
+              "et un NON-admin ne l'a pas — l'onglet suit s.admin, il n'est pas decoratif")
 
         # ── L'ONGLET D'OBSERVATION S'EXECUTE LUI AUSSI ──────────────────────────────────────────
         check(_o["obs"].get("ok") is True,
