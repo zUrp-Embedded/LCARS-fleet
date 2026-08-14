@@ -265,6 +265,18 @@ converged_humans() {
 # SANS ARGUMENT, ELLE NE DESIGNE PERSONNE. L'appelant garde deja contre une liste non prouvee ; ce
 # second verrou est ici parce que les deux fautes qui menent au meme desastre — une team vide et une
 # forge muette — se ressemblent trop pour ne compter que sur un seul garde.
+# LA CHARGE DE LA FORGE PORTE DEUX CHAMPS, LES DEUX CONSOMMATEURS EN VEULENT UN SEUL. `/teams/<id>/
+# members` est lu une fois en `id<TAB>login` — l'id sert a poser l'UID a la creation, et lui seul.
+# `absent_humans` (qui coupe des acces) et `reconcile_humans` (qui appelle `id <login>`) attendent
+# des logins NUS ; leur donner la charge brute a fait osciller un humain entre `nologin` et `bash`
+# toutes les 30 s, process tues a chaque tour, pendant que la passe lente echouait sans un mot.
+#
+# Cette fonction existe pour que la conversion soit EPINGLABLE. Recopier `cut -f2` dans un test
+# aurait valide une copie : ce qui doit rester vrai, c'est ce que l'appelant reel calcule.
+roster_of() { # roster_of <charge id<TAB>login, une par ligne> -> les logins, un par ligne
+  cut -f2
+}
+
 absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par ligne
   [[ "$#" -gt 0 ]] || return 0
   local login
@@ -486,7 +498,9 @@ converge_once() {
   # Un TABLEAU, pas un decoupage par espaces. Un login valide n'en contient pas — mais s'appuyer
   # sur la validation d'un autre bout du script pour se permettre un `$(...)` nu est exactement
   # le genre de dette qui survit a la regle qui la rendait sure.
-  local -a roster; mapfile -t roster <<< "$members"
+  #
+  # LES LOGINS SEULS — le pourquoi est sur `roster_of`, qui est aussi ce que les tests epinglent.
+  local -a roster; mapfile -t roster < <(roster_of <<< "$members")
 
   # LA REVOCATION, a chaque tour. On n'arrive ici qu'avec une liste de membres PROUVEE (team
   # trouvee, reponse non vide) : les deux sorties precedentes de cette fonction sont ce qui empeche

@@ -343,6 +343,52 @@ absent() { # absent <membres de la team…>
   [ -z "$output" ]
 }
 
+# ⚠ CES DEUX-LA COUVRENT LE RACCORD, PAS LA FONCTION. Tous les tests ci-dessus appellent
+# `absent_humans` avec des logins deja nus — ils restaient verts pendant qu'un humain etait revoque
+# puis reintegre toutes les 30 s sur le banc, parce que l'APPELANT lui passait la charge brute de la
+# forge. Un test qui fabrique lui-meme la bonne forme d'entree ne peut pas voir une entree mal
+# formee. Ce qui se mesure ici est donc la conversion REELLE, `roster_of`, et ce qu'elle donne a
+# manger a la decision.
+
+@test "6-surface: roster_of ne rend que les logins — la charge de la forge porte l'id devant" {
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    source '$SUT'
+    printf '15\talice\n3\tbob\n' | roster_of"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "alice" ]
+  [ "${lines[1]}" = "bob" ]
+}
+
+@test "6-surface: la charge de la forge traverse jusqu'a la revocation SANS designer personne" {
+  passwd_fixture; group_fixture "alice,bob"
+  # alice et bob sont dans le groupe ET dans la team. Personne ne doit etre coupe. Avec la charge
+  # brute en roster, `absent_humans` ne retrouvait aucun login et les designait TOUS LES DEUX.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    source '$SUT'
+    mapfile -t roster < <(printf '1001\talice\n1002\tbob\n' | roster_of)
+    absent_humans \"\${roster[@]}\""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "6-surface: et un sorti de la team reste designe — le raccord n'aveugle pas la revocation" {
+  passwd_fixture; group_fixture "alice,bob,carol"
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    source '$SUT'
+    mapfile -t roster < <(printf '1001\talice\n' | roster_of)
+    absent_humans \"\${roster[@]}\""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"alice"* ]]
+  [[ "$output" == *"bob"* ]]
+  [[ "$output" == *"carol"* ]]
+}
+
 @test "un membre de la team qui n'est PAS sur cette boite ne fait rien revoquer" {
   passwd_fixture; group_fixture "alice"
   absent alice dave erin
