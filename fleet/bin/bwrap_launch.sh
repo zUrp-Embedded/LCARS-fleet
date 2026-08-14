@@ -183,10 +183,28 @@ POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 # =============================================================
 # Cleanup trap (P2 #7) — useful PRE-exec only: `exec` replaces the shell, so the EXIT trap fires ONLY if
 # we leave before `exec` (a failed assertion/setup). On success the pod is launched detached and
-# survives. state.json lives OUTSIDE $POD_DIR → never affected. Caller opt-out (spawner lifecycle).
+# survives. state.json lives OUTSIDE $POD_DIR -> never affected. Caller opt-out (spawner lifecycle).
+#
+# 6-069 — IL EMPORTAIT $POD_DIR, ET CE REPERTOIRE N'EST PAS A NOUS. Sous `set -euo pipefail` le
+# moindre echec declenche ERR, donc le `rm -rf`, et TOUTES les verifications de setup sont posees
+# APRES ce trap : bwrap/tmux absents, binaire vendor introuvable, claudeDir manquant, miroir git
+# demande mais absent, parent de socket absent. Or a cet instant $POD_DIR a deja ete entierement
+# projete par la fleet — espace de travail clone AVEC SON HISTORIQUE GIT, CLAUDE.md compose, prompt
+# systeme, protocole, brief, settings.json, watch.sh, hook de trailer. Un socat manquant faisait
+# donc recloner le depot au prochain essai.
+#
+# ⚠ LE SCRIPT DECLARE LUI-MEME LA PROPRIETE, QUATRE LIGNES PLUS BAS :
+# `ERR: pod_dir $POD_DIR missing (caller responsibility)`. Le proprietaire a un teardown a lui
+# (`Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/3`), avec une garde d'echappement de chemin, et
+# il ne l'exerce que sur un pod TERMINAL. « On n'a pas pu demarrer » n'est pas « ce pod est fini » :
+# le pod_dir est justement ce que la tentative suivante REUTILISE.
+#
+# Ce qui reste dans le trap est ce que ce script cree et possede : le repertoire de socket par pod.
+# `$POD_DIR/.local/bin` et `$POD_DIR/.claude`, crees plus bas, restent — inertes, idempotents, et
+# emportes par le teardown du proprietaire quand le pod meurt pour de bon.
 # =============================================================
 if [[ "${LCARS_BWRAP_NO_CLEANUP:-0}" != "1" ]]; then
-  trap 'rm -rf "$POD_DIR" "$POD_SOCK_DIR" 2>/dev/null || true' EXIT ERR
+  trap 'rm -rf "$POD_SOCK_DIR" 2>/dev/null || true' EXIT ERR
 fi
 
 # =============================================================
