@@ -33,7 +33,18 @@ on:
   pull_request:
 
 jobs:
-  ci:
+  # LE NOM DU JOB EST LU PAR LA FLEET, ET C'EST LA RAISON POUR LAQUELLE IL N'EST PAS `ci`.
+  #
+  # Gitea compose le contexte du statut ainsi : `<workflow> / <job> (<déclencheur>)`. Ce job
+  # produit donc `CI / no-harness-yet (pull_request)`, ce qui reste sous le glob `CI / *` de la
+  # protection de `main` — le rail est vert, la première PR d'un projet neuf passe, rien n'est
+  # bloqué. Ce qui change est que le vert n'est plus MUET : le brief remis au juge nomme les
+  # contextes qui ont tourné, donc « aucun harnais ici » devient une constatation qu'il peut
+  # rendre au lieu d'un fait invisible.
+  #
+  # Le renommer `ci` (ou n'importe quoi d'autre) est exactement ce qu'un projet FAIT quand il pose
+  # sa vraie suite : la disparition de ce nom est le signal, et elle est gratuite.
+  no-harness-yet:
     runs-on: shell
     # `alpine` n'a pas bash — les steps ci-dessous sont POSIX, comme le job qui les exécute.
     defaults:
@@ -47,3 +58,5 @@ jobs:
         run: |
           echo "CI: le push a atteint la forge, la forge a dispatché, le runner exécute."
           echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          echo "⚠ Ce vert ne prouve RIEN du code : ce projet n'a pas encore de harnais."
+          echo "   Réécris ce fichier — le nom du job 'no-harness-yet' est ce qui le signale."

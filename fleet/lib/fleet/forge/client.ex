@@ -885,10 +885,34 @@ defmodule Fleet.Forge.Client do
   @spec commit_ci_state(String.t(), String.t(), Keyword.t()) ::
           {:ok, :success | :pending | :failure | :none} | {:error, term()}
   def commit_ci_state(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
+    with {:ok, {state, _contexts}} <- commit_ci_report(repo, sha, opts), do: {:ok, state}
+  end
+
+  @doc """
+  The same verdict, plus the CONTEXTS that produced it (sorted, deduplicated).
+
+  The paragraph above is right that the merge question is answered by the worst-of alone — and it
+  is the WHOLE answer only for a caller that decides. A caller that must TELL A HUMAN (or a judge)
+  what the machine did needs to say WHICH rail ran, because `:success` is silent about that and a
+  green from a placeholder rail is indistinguishable from a green from a real harness (6-140).
+
+  Additive on purpose: `commit_ci_state/3` keeps its contract and every seam that implements it
+  keeps working. A caller pays for the contexts only where it renders them.
+  """
+  @spec commit_ci_report(String.t(), String.t(), Keyword.t()) ::
+          {:ok, {:success | :pending | :failure | :none, [String.t()]}} | {:error, term()}
+  def commit_ci_report(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, statuses} <-
            paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
-      {:ok, statuses |> current_per_context() |> worst_ci_state()}
+      contexts =
+        statuses
+        |> Enum.map(& &1["context"])
+        |> Enum.filter(&is_binary/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, {statuses |> current_per_context() |> worst_ci_state(), contexts}}
     end
   end
 

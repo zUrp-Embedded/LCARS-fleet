@@ -97,26 +97,52 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
+  # LES CONTEXTES VOYAGENT AVEC LE VERT, et c'est tout ce que 6-140 pouvait fermer honnetement. Le
+  # gate ne peut pas savoir ce qu'il FAUDRAIT avoir execute : rien ne declare le harnais d'un projet
+  # (le template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est). Il peut en
+  # revanche dire ce qui a REELLEMENT tourne, et laisser le juge en tirer la conclusion — un vert
+  # produit par le rail placeholder livre avec le template n'est plus indistinguable d'un vert
+  # produit par une suite.
   defp classify(sha, committed_at, pr_number, %Ctx{} = ctx) do
-    case ctx.forge.commit_ci_state(ctx.repo, sha, ctx.forge_opts) do
-      {:ok, :success} ->
-        {:proceed, %{state: :success, sha: sha}}
+    case ci_report(sha, ctx) do
+      {:ok, :success, contexts} ->
+        {:proceed, %{state: :success, sha: sha, contexts: contexts}}
 
-      {:ok, :failure} ->
+      {:ok, :failure, _} ->
         {:refuse, :ci_red,
          "CI ROUGE sur #{String.slice(sha, 0, 8)} — aucun juge n'est convoqué sur du rouge. " <>
            "Le rail machine a rendu son verdict avant le jury : corrige, pousse, la CI se relance."}
 
-      {:ok, :pending} ->
+      {:ok, :pending, _} ->
         stalled_or_wait(:pending, sha, committed_at, pr_number)
 
-      {:ok, :none} ->
+      {:ok, :none, _} ->
         no_status_yet_or_never(sha, committed_at, pr_number, ctx)
 
       # Unreadable status = unknown, and unknown is not green. Deferring costs one tick; assuming
       # green costs a jury spent on unmeasured code.
       {:error, reason} ->
         {:wait, {:ci_unreadable, reason}}
+    end
+  end
+
+  # UNE DOUBLURE QUI NE CONNAIT QUE `commit_ci_state/3` RESTE VALIDE, et c'est deliberé : la lecture
+  # des contextes est un AJOUT, pas un changement de contrat. Un seam qui ne l'expose pas rend un
+  # verdict sans contextes — le brief dira alors ce qu'il sait, et rien de plus.
+  defp ci_report(sha, %Ctx{} = ctx) do
+    # `Code.ensure_loaded?` DEVANT, comme partout ailleurs dans ce depot : sous chargement paresseux
+    # `function_exported?` seul rend `false` sur un module simplement pas encore charge — et celui
+    # qui passe ici en production est justement le vrai client forge.
+    if Code.ensure_loaded?(ctx.forge) and function_exported?(ctx.forge, :commit_ci_report, 3) do
+      case ctx.forge.commit_ci_report(ctx.repo, sha, ctx.forge_opts) do
+        {:ok, {state, contexts}} -> {:ok, state, contexts}
+        {:error, _} = err -> err
+      end
+    else
+      case ctx.forge.commit_ci_state(ctx.repo, sha, ctx.forge_opts) do
+        {:ok, state} -> {:ok, state, []}
+        {:error, _} = err -> err
+      end
     end
   end
 

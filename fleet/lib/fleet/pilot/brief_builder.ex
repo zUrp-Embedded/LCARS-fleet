@@ -366,24 +366,44 @@ defmodule Fleet.Pilot.BriefBuilder do
   # — coverage of the brief, hollow assertions, oracles that assert nothing. Naming the boundary in
   # the brief itself is what keeps a green CI from being read as a green review.
   #
+  # ⚠ ET LA PHRASE ELLE-MEME FRANCHISSAIT LA FRONTIERE QUE CE PARAGRAPHE POSE : elle disait « le
+  # rail machine a EXECUTE **la preuve** ». Le rail livre avec le template de projet execute deux
+  # `echo` — ni build, ni test, ni assertion, et il le dit dans son propre en-tete. Sur tout projet
+  # fraichement onboarde, le juge recevait donc « une preuve a ete executee » alors qu'aucune ne
+  # l'avait ete, et la seule chose que `success` etablit est qu'un runner a repondu vert (6-140).
+  #
+  # LES CONTEXTES SONT LA REPONSE HONNETE. Rien ne declare le harnais attendu d'un projet — le
+  # template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est — donc on ne peut
+  # pas verifier qu'il a tourne. On peut nommer ce qui A tourne, et laisser le juge conclure : un
+  # `CI / no-harness-yet` n'est plus indistinguable d'une suite.
+  #
   # Absent key = the card does not require the CI (`spec.ci: ignore`): we add NOTHING rather than
   # writing "CI: unknown", which a judge would rightly read as a fact about the code.
   defp with_ci(outputs, opts) do
     case Keyword.get(opts, :ci_fact) do
-      %{state: :success, sha: sha} when is_binary(sha) ->
-        Map.put(
-          outputs,
-          "ci",
-          "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a EXECUTE la preuve et elle " <>
-            "passe. Ce fait t'est FOURNI : ne le re-derive pas, ne le re-execute pas. Ton travail " <>
-            "commence apres lui — est-ce que cette preuve PROUVE ? (couverture du critere, " <>
-            "assertions creuses, oracles qui n'assertent rien, faux-verts.)"
-        )
+      %{state: :success, sha: sha} = fact when is_binary(sha) ->
+        Map.put(outputs, "ci", ci_line(sha, Map.get(fact, :contexts, [])))
 
       _ ->
         outputs
     end
   end
+
+  defp ci_line(sha, contexts) do
+    "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a rendu VERT. Ce fait t'est " <>
+      "FOURNI : ne le re-derive pas, ne le re-execute pas. #{ran_line(contexts)} " <>
+      "⚠ VERT ne veut pas dire PROUVE : il dit qu'un runner a repondu, pas que ce qu'il a " <>
+      "execute couvre le critere du brief. Ton travail commence exactement la — couverture du " <>
+      "critere, assertions creuses, oracles qui n'assertent rien, faux-verts. Et si ce qui a " <>
+      "tourne ne prouve rien du livrable, cette absence EST une constatation a rendre."
+  end
+
+  # On ne fabrique pas une liste : si le seam n'a pas su la donner, on le DIT plutot que d'ecrire
+  # une phrase qui laisserait croire a une verification qu'on n'a pas faite.
+  defp ran_line([]), do: "(les contextes executes n'ont pas pu etre lus.)"
+
+  defp ran_line(contexts),
+    do: "Ce qui a tourne, exactement : #{Enum.map_join(contexts, ", ", &"`#{&1}`")}."
 
   # F-C083 — READ-ERROR ≠ ABSENCE, applied to the PREDECESSOR read. The rule is stated 35 lines
   # below for the CRITERION read and was NOT applied here: a bare `_ -> nil` collapsed the seam's

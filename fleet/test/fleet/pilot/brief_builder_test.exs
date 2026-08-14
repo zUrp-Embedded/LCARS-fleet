@@ -69,6 +69,36 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} = build([], ci_fact: %{state: :failure, sha: "deadbeef00"})
       refute brief =~ "deadbeef"
     end
+
+    test "6-140 : le brief NOMME ce qui a tourne, et ne dit plus qu'une preuve a ete executee" do
+      # La phrase disait « le rail machine a EXECUTE la preuve ». Le rail livre avec le template
+      # execute deux `echo` — donc sur tout projet fraichement onboarde, le juge recevait « une
+      # preuve a ete executee » alors qu'aucune ne l'avait ete.
+      assert {:ok, brief, "judge"} =
+               build([],
+                 ci_fact: %{
+                   state: :success,
+                   sha: "cafebabe1234567890",
+                   contexts: ["CI / no-harness-yet (pull_request)"]
+                 }
+               )
+
+      refute brief =~ "EXECUTE la preuve"
+      assert brief =~ "CI / no-harness-yet (pull_request)"
+      # Et l'absence de harnais devient une constatation attendue, pas un fait invisible.
+      assert brief =~ "EST une constatation"
+    end
+
+    test "6-140 : des contextes illisibles se DISENT, ils ne se fabriquent pas" do
+      # Un seam qui n'expose pas la lecture des contextes degrade honnetement : le brief dit ce
+      # qu'il sait. Ecrire la phrase « ce qui a tourne » sur une liste vide laisserait croire a une
+      # verification qui n'a pas eu lieu.
+      assert {:ok, brief, "judge"} =
+               build([], ci_fact: %{state: :success, sha: "cafebabe1234567890", contexts: []})
+
+      assert brief =~ "n'ont pas pu etre lus"
+      refute brief =~ "Ce qui a tourne, exactement"
+    end
   end
 
   describe "build_brief — deliverable-judge, criterion read (F-C083)" do

@@ -51,6 +51,13 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     # local expansion (5 known vars) nor the forge's (`.gitea/template` lists README + spec only)
     # may touch them — a scaffold that emptied them would ship a rail that reports nothing.
     assert File.read!(workflow) =~ "${GITHUB_REPOSITORY}"
+
+    # 6-140 — LE NOM DU JOB EST UN CONTRAT, pas de la decoration. Gitea compose le contexte du
+    # statut en `<workflow> / <job> (<declencheur>)`, donc ce nom-la est ce que la fleet lit pour
+    # dire au juge que le vert vient du rail livre et non d'une suite. `ci` etait muet : un projet
+    # fraichement onboarde produisait un contexte indistinguable d'un harnais reel.
+    assert File.read!(workflow) =~ "no-harness-yet:"
+    refute File.read!(workflow) =~ ~r/^  ci:$/m
   end
 
   test "face/4 on the DOC template: writes backlog/scratchpad/plans → :ok", %{tmp_dir: dir} do

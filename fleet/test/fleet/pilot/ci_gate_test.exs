@@ -70,6 +70,40 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
   end
 
+  # 6-140 — le meme forge, qui expose EN PLUS la lecture des contextes. Deux doublures et non une
+  # seule parce que la degradation est un contrat a part entiere : un seam qui ne connait que
+  # `commit_ci_state/3` doit continuer a marcher, et rendre une liste vide plutot que rien.
+  defmodule ForgeWithContexts do
+    defdelegate get_pull(repo, n, opts),
+      to: Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest.Forge
+
+    defdelegate iso_ago(age_sec), to: Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest.Forge
+    def commit_ci_state(_repo, _sha, opts), do: Keyword.get(opts, :_ci, {:ok, :none})
+
+    def commit_ci_report(_repo, _sha, opts) do
+      case Keyword.get(opts, :_ci, {:ok, :none}) do
+        {:ok, state} -> {:ok, {state, Keyword.get(opts, :_contexts, [])}}
+        other -> other
+      end
+    end
+  end
+
+  describe "6-140 — le vert ne dit pas QUI l'a produit" do
+    test "les contextes remontent dans le FAIT remis au juge" do
+      assert {:proceed, %{state: :success, contexts: ["CI / no-harness-yet (pull_request)"]}} =
+               decide(
+                 [_ci: {:ok, :success}, _contexts: ["CI / no-harness-yet (pull_request)"]],
+                 :required,
+                 ForgeWithContexts
+               )
+    end
+
+    test "un seam qui ignore la lecture des contextes garde son contrat, contextes VIDES" do
+      # Degradation honnete : le brief dira qu'il n'a pas pu les lire, jamais une liste inventee.
+      assert {:proceed, %{state: :success, contexts: []}} = decide(_ci: {:ok, :success})
+    end
+  end
+
   describe "the three states" do
     test "success -> proceed, and the FACT carries the sha the gate measured" do
       assert {:proceed, %{state: :success, sha: "cafebabe1234567890"}} =

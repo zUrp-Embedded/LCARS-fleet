@@ -43,6 +43,46 @@ defmodule Fleet.Forge.ClientCiStateTest do
     ForgeClient.commit_ci_state("fleet/p", "deadbeef", opts)
   end
 
+  defp ci_report(items) do
+    opts = [
+      base_url: "http://fake.test",
+      token: "t",
+      req_options: [plug: {Statuses, items}]
+    ]
+
+    ForgeClient.commit_ci_report("fleet/p", "deadbeef", opts)
+  end
+
+  describe "6-140 — le verdict ne dit pas QUI l'a produit, et c'est ce qui manquait au juge" do
+    test "les contextes voyagent avec le verdict, dedupliques et tries" do
+      items = [
+        st(2, "CI / test (pull_request)", "success"),
+        st(1, "CI / test (push)", "success"),
+        st(3, "CI / test (pull_request)", "success")
+      ]
+
+      assert {:ok, {:success, ["CI / test (pull_request)", "CI / test (push)"]}} =
+               ci_report(items)
+    end
+
+    test "le rail placeholder du template est VERT, et desormais NOMME" do
+      # C'est le defaut exact de la fiche : sur un projet fraichement onboarde, ce vert-la est le
+      # seul qui existe, et rien ne le distinguait d'une suite reelle.
+      assert {:ok, {:success, ["CI / no-harness-yet (pull_request)"]}} =
+               ci_report([st(1, "CI / no-harness-yet (pull_request)", "success")])
+    end
+
+    test "aucun statut : verdict `:none` et AUCUN contexte fabrique" do
+      assert {:ok, {:none, []}} = ci_report([])
+    end
+
+    test "`commit_ci_state/3` garde son contrat exactement — l'ajout n'est pas un changement" do
+      items = [st(1, "ci/build", "success"), st(2, "ci/build", "failure")]
+      assert {:ok, :failure} = ci_state(items)
+      assert {:ok, {:failure, ["ci/build"]}} = ci_report(items)
+    end
+  end
+
   test "a context that went green THEN red is red — the case that made the gate lie" do
     assert {:ok, :failure} =
              ci_state([st(1, "ci/build", "success"), st(2, "ci/build", "failure")])
