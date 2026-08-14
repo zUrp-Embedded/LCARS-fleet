@@ -1119,12 +1119,43 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Delete sequence — same :project_onboard seam, callback :delete_project. `force` bypasses the
   # anti-work safety guard (deliberate end-of-life delete).
+  # A deleted project must not leave its publish binding behind: a future project of the SAME name
+  # would silently inherit a dead external destination. Host-side (`~/.lcars`, per-human — the BEAM
+  # runs as the human). Best-effort: an absent binding is the NOMINAL case (most projects never
+  # publish), and the delete has already succeeded, so a leftover binding is logged, not fatal. The key
+  # is `ProjectPublish.binding_key/1` — the single source of the org-qualified format the writer uses.
+  defp remove_publish_binding(full_name) do
+    path =
+      Path.join([
+        System.user_home!(),
+        ".lcars",
+        "publish",
+        "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(full_name)}.json"
+      ])
+
+    case File.rm(path) do
+      :ok ->
+        :removed
+
+      {:error, :enoent} ->
+        :absent
+
+      {:error, reason} ->
+        Logger.warning(
+          "Delegation: delete_project left the publish binding behind (#{path}): #{inspect(reason)}"
+        )
+
+        :absent
+    end
+  end
+
   defp do_delete_project(full_name, args) do
     with {:ok, onboard} <- conforming_onboard() do
       opts = [force: Map.get(args, "force", false) == true]
 
       case onboard.delete_project(full_name, opts) do
         {:ok, %{repo: repo} = result} ->
+          binding = remove_publish_binding(full_name)
           local = Map.get(result, :local, %{})
 
           {:ok,
@@ -1133,6 +1164,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
              "repo" => repo,
              "forge" => to_string(Map.get(result, :forge, "")),
              "architect" => to_string(Map.get(result, :architect, "")),
+             "binding" => to_string(binding),
              "local" => %{
                "project" => to_string(Map.get(local, :project, :absent)),
                "work" => to_string(Map.get(local, :work, :absent))

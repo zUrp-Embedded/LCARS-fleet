@@ -1808,6 +1808,38 @@ defmodule Fleet.MCP.PodToolsTest do
       assert %{"project" => "removed", "work" => "removed"} = result["local"]
     end
 
+    test "DPF-05: delete_project removes the project's publish binding (no orphan)" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      # System.user_home!/0 is VM-boot-fixed (HOME cannot be redirected at runtime), so the binding is
+      # written WHERE the code actually looks, under a UNIQUE name (no collision with a real binding),
+      # and removed on exit. The stub deletes any name it is handed.
+      full = "fleet/dpf05-#{System.unique_integer([:positive])}"
+      key = String.replace(full, "/", "__")
+      pub = Path.join([System.user_home!(), ".lcars", "publish"])
+      File.mkdir_p!(pub)
+      binding = Path.join(pub, "#{key}.json")
+
+      File.write!(
+        binding,
+        ~s({"host":"github","dest_host":"github.com","dest_repo":"me/Demo","base":"main"})
+      )
+
+      on_exit(fn -> File.rm(binding) end)
+
+      pod = uniq("pod-sf")
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "project_delete",
+                 %{"full_name" => full},
+                 pod_state(pod)
+               )
+
+      assert {:ok, %{"status" => "deleted", "binding" => "removed"}} = Jason.decode(txt)
+      refute File.exists?(binding)
+    end
+
     test "revise_project_card: threads the human declaration + the ACTING role, renders the note" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
