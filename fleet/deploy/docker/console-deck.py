@@ -32,7 +32,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
-HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh")
+# ⚠ PAS DE `HUMANS_SH` ICI, ET SON ABSENCE EST UN CONSTAT A GARDER. Ce fichier a porte un pointeur
+# vers `console-humans.sh` que RIEN n'appelait : `humans()` relit `/etc/passwd` en direct, avec ses
+# propres bornes. Le pointeur donnait donc a lire « la liste vient de la source unique » alors que
+# ce fichier en tient une SECONDE. La constante morte est partie ; la divergence, elle, est reelle
+# et se voit maintenant qu'on ne l'habille plus.
 
 # ── THE DOOR ────────────────────────────────────────────────────────────────────────────────────
 # WHAT THE AUTH IS FOR, AND IT IS NOT MAINLY SECURITY: this page is the box's front door and it
@@ -318,9 +322,13 @@ def session_of(cookie_header):
 # ete supprimee faute de capacite propre et d'appelant.
 #
 # Une constante qu'on garde « au cas ou » est une invitation a la reutiliser : le prochain qui
-# voudra un port trouvera la formule toute faite et republiera une origine. Elle vit encore dans
-# `bin/fleet_v2` (le webhook) et dans `console-humans.sh` (sa colonne de sortie) — c'est la qu'il
-# faut aller la lire, pas dans une copie qui ne s'en sert plus.
+# voudra un port trouvera la formule toute faite et republiera une origine.
+#
+# ⚠ ET CE COMMENTAIRE RENVOYAIT A DEUX ENDROITS OU LA LIRE — `bin/fleet_v2` et `console-humans.sh`.
+# Les deux l'ont perdue dans les jours qui ont suivi, et le pointeur a menti en silence. C'est la
+# faute que la doctrine nomme : decrire l'ETAT D'UN AUTRE FICHIER se perime tout seul, souvent dans
+# le meme lot. La formule n'existe plus nulle part dans la boite, et c'est tout ce qu'il y a a
+# savoir ici.
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
