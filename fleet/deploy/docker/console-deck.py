@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import select
 import socket
 import sys
 import threading
@@ -63,9 +64,94 @@ PENDING_TTL = 600
 # The converger is the only component that knows why; it writes the reason here, we read it.
 REFUSED_FILE = os.environ.get("LCARS_CONVERGER_REFUSED", "/run/lcars-converger.refused")
 
+# ─── LA TABLE DE MONTAGE ────────────────────────────────────────────────────────────────────────
+# LE RELAIS EST GENERIQUE, ET C'EST CE QUI REND LA SUITE TRIVIALE. Il n'y a pas de route « console »
+# ni de route « pod » : il y a des CIBLES, de deux natures.
+#
+#   par-humain : /console/<login>/…  /pod/<login>/…   -> la socket de CET humain
+#   systeme    : /admin/…                             -> un backend unique, sans <login>
+#
+# La page de configuration des cartes sera UNE LIGNE ici, pas un chantier. C'est la meme raison qui
+# fait que ce relais ne parle jamais de terminal : apres le `101`, il ne comprend plus rien de ce
+# qu'il transporte, et c'est deliberé.
+CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/console")
+# Le second nom dans une liste DEJA en main : la session porte `groups` depuis le callback OIDC, donc
+# le tier admin ne coute ni un appel ni un credential stocke. ⚠ Ce qui est gratuit est le MECANISME
+# (l'acheminement de l'identite, la route) — pas les POUVOIRS de l'admin, qui demandent chacun un
+# endpoint systeme qui n'existe pas encore.
+ADMINS_TEAM = os.environ.get("LCARS_DECK_ADMIN_TEAM", "fleet:admins")
+
+# Nature d'une cible par-humain -> nom de la socket dans son repertoire.
+PER_HUMAN_TARGETS = {"console": "console.sock", "pod": "pod.sock"}
+# Nature d'une cible systeme -> chemin de socket absolu. VIDE, ET C'EST HONNETE : le mecanisme
+# d'autorisation admin existe et est teste ; aucun backend systeme n'est encore ecrit. Une entree
+# ici suffira a en publier un, sans toucher a `authorize`.
+SYSTEM_TARGETS = {}
+
 _lock = threading.Lock()
 _sessions = {}
 _pending = {}
+
+
+def parse_target(path):
+    """
+    `/console/alice/ws` -> ("console", "alice", "/ws") · `/admin/x` -> ("admin", None, "/x").
+
+    Rend `None` pour tout le reste. LE DECOUPAGE EST STRICT PAR CONSTRUCTION : le segment de login
+    est pris tel quel et compare ENSUITE a la session — il ne sert jamais a fabriquer un chemin
+    avant d'avoir ete autorise (cf. `socket_for`, qui refuse tout login non canonique).
+    """
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "":
+        return None
+    kind = parts[1]
+    if kind in PER_HUMAN_TARGETS:
+        if len(parts) < 4:
+            return None
+        return (kind, parts[2], "/" + "/".join(parts[3:]))
+    if kind in SYSTEM_TARGETS:
+        return (kind, None, "/" + "/".join(parts[2:]))
+    return None
+
+
+def authorize(sess, target):
+    """
+    LA REGLE S'ECRIT EN POSITIF, ET C'EST UN ARBITRAGE, PAS UN OUBLI.
+
+        cible par-humain -> cible.login == sess.login, et RIEN D'AUTRE
+        cible systeme    -> sess est admin
+
+    ⚠ L'ADMIN N'ATTEINT PAS LA CONSOLE D'UN AUTRE HUMAIN — choix tranche : *ce serait un geste de
+    panoptique, pas un geste d'admin*. Son perimetre est le SYSTEME (faire tourner la boite, ajouter
+    des catalogues, purger des depots morts), jamais les cibles par-humain d'autrui.
+
+    C'est pour ca que la premiere branche ne consulte PAS `groups` : une clause absente se relit
+    comme un oubli et se fait combler par le premier qui trouve ca pratique. Ici il n'y a rien a
+    combler — il faudrait retirer une egalite ecrite noir sur blanc, et le test qui la tient porte
+    la phrase.
+    """
+    kind, login, _rest = target
+    if kind in PER_HUMAN_TARGETS:
+        return login == sess.get("login")
+    if kind in SYSTEM_TARGETS:
+        return ADMINS_TEAM in (sess.get("groups") or [])
+    return False
+
+
+def socket_for(target):
+    """Chemin de socket d'une cible AUTORISEE, ou `None` si la forme du login l'interdit."""
+    kind, login, _rest = target
+    if kind in SYSTEM_TARGETS:
+        return SYSTEM_TARGETS[kind]
+
+    # DEUXIEME GARDE, APRES L'AUTORISATION, ET ELLE N'EST PAS REDONDANTE. `authorize` a deja exige
+    # `login == sess.login` — mais c'est la session qui devient alors la source du chemin, et une
+    # session ne vaut que ce que vaut le login que la forge a rendu. Gitea accepte des logins que ce
+    # decoupage n'attend pas ; on refuse tout ce qui n'est pas un nom simple plutot que de laisser un
+    # `..` ou un `/` fabriquer un chemin hors de la racine.
+    if not login or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", login):
+        return None
+    return os.path.join(CONSOLE_SOCK_ROOT, login, PER_HUMAN_TARGETS[kind])
 
 
 def oidc_config():
@@ -700,6 +786,18 @@ class Deck(BaseHTTPRequestHandler):
     # is no `send_error` call. A third path added later MUST set it too.
     protocol_version = "HTTP/1.1"
 
+    # ⚠ `rbufsize = 0` EST UNE CONDITION DU RELAIS, PAS UN REGLAGE DE PERFORMANCE. Par defaut
+    # `StreamRequestHandler` enveloppe la connexion dans un `BufferedReader` : la lecture des
+    # en-tetes peut alors tirer PLUS d'octets que la requete, et ces octets restent dans un tampon
+    # que `_pump` — qui lit la socket brute — ne verra jamais. Ils seraient perdus, silencieusement,
+    # et seulement quand le client parle en premier : la panne la plus difficile a attribuer qui
+    # soit. Sans tampon, tout ce qui est arrive est encore dans la socket.
+    #
+    # LE PRIX EST REEL ET ASSUME : `readline()` sur un flux non tamponne lit octet par octet, donc un
+    # appel systeme par caractere d'en-tete. Ce deck sert une poignee de requetes par session humaine
+    # — une page, un JSON d'etat, un upgrade — et jamais du trafic de masse.
+    rbufsize = 0
+
     def _send(self, code, body, ctype, cookie=None):
         raw = body.encode("utf-8")
         self.send_response(code)
@@ -881,6 +979,23 @@ class Deck(BaseHTTPRequestHandler):
                 self._send(200, page_no_block(sess["login"]), "text/html; charset=utf-8")
             return
 
+        # LE RELAIS EST DERRIERE LA PORTE, ET SON ORDRE DANS CETTE FONCTION EST LE CONTRAT. Tout ce
+        # qui precede a deja etabli trois choses : une session Gitea valide, l'appartenance a
+        # `fleet:humans`, et un bloc local converge. Une cible atteinte ici l'est donc par quelqu'un
+        # que la forge a nomme — c'est la « seule auth » : on ne redemande rien parce qu'on ne peut
+        # plus arriver par ailleurs.
+        target = parse_target(path)
+        if target:
+            if not authorize(sess, target):
+                # 404, PAS 403, ET C'EST DELIBERE : repondre « interdit » sur la console d'autrui
+                # confirme qu'elle existe et qui est connecte. Un humain n'a aucun usage de cette
+                # information, et l'operateur a le motif dans le log ci-dessous.
+                print(f"[lcars-deck] refus : {sess['login']} -> {path}", file=sys.stderr, flush=True)
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            self._relay(sess, target)
+            return
+
         if path == "/api/state":
             self._send(200, json.dumps(state(only=sess["login"])),
                        "application/json; charset=utf-8")
@@ -891,6 +1006,111 @@ class Deck(BaseHTTPRequestHandler):
             }, "text/html; charset=utf-8")
         else:
             self._send(404, "not found\n", "text/plain; charset=utf-8")
+
+    # ─── LE RELAIS ──────────────────────────────────────────────────────────────────────────────
+    # APRES LE `101`, CE RELAIS NE COMPREND PLUS RIEN A CE QU'IL TRANSPORTE, ET C'EST LE POINT. Les
+    # deux cotes parlent le meme protocole ; le relais n'est qu'un conduit d'octets. Il n'y a donc
+    # aucune trame WebSocket a decoder, aucun masque a appliquer, aucun `Sec-WebSocket-Accept` a
+    # calculer — ttyd repond le sien et on le recopie. Une route de plus dans la table de montage ne
+    # demandera pas une ligne ici.
+    def _relay(self, sess, target):
+        sock_path = socket_for(target)
+        if not sock_path:
+            self._send(400, "cible invalide\n", "text/plain; charset=utf-8")
+            return
+
+        try:
+            upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            upstream.settimeout(5)
+            upstream.connect(sock_path)
+            upstream.settimeout(None)
+        except OSError as e:
+            # LE MOTIF EST POUR L'OPERATEUR, PAS POUR LE CLIENT : « la console de <login> ne tourne
+            # pas » et « le deck n'a pas le droit de traverser son repertoire » sont deux pannes
+            # opposees, et celui qui repare a besoin de les distinguer. Le navigateur, lui, n'a
+            # besoin que de savoir que ce n'est pas de son fait.
+            print(f"[lcars-deck] relais {target[0]} -> {sock_path} : {e}",
+                  file=sys.stderr, flush=True)
+            self._send(502, "console injoignable\n", "text/plain; charset=utf-8")
+            return
+
+        try:
+            self._pump(sess, target, upstream)
+        finally:
+            try:
+                upstream.close()
+            except OSError:
+                pass
+
+    def _pump(self, sess, target, upstream):
+        _kind, _login, rest = target
+
+        # ⚠ L'EN-TETE D'IDENTITE EST POSEE PAR NOUS, ET TOUTE VERSION VENANT DU CLIENT EST JETEE.
+        # ttyd verifie la PRESENCE de `X-LCARS-Human` (mesure dans l'image : 407 sans, 200 avec) —
+        # jamais sa valeur, ni qui l'envoie. Recopier les en-tetes du client en bloc rendrait donc la
+        # garde inutile : n'importe qui pourrait la fournir lui-meme. On reconstruit une liste
+        # BLANCHE, et l'identite vient de la session, seule chose que la forge a authentifiee.
+        forwarded = []
+        for name, value in self.headers.items():
+            low = name.lower()
+            if low in ("host", "connection", "upgrade", "sec-websocket-key",
+                       "sec-websocket-version", "sec-websocket-protocol",
+                       "sec-websocket-extensions"):
+                forwarded.append((name, value))
+            # Tout le reste tombe : cookies (la session est deja resolue, ttyd n'en a que faire),
+            # `x-lcars-*` (forge), `authorization` (rien a lui transmettre).
+
+        req = [f"GET {rest} HTTP/1.1"]
+        req += [f"{n}: {v}" for n, v in forwarded]
+        req.append(f"X-LCARS-Human: {sess['login']}")
+        raw = ("\r\n".join(req) + "\r\n\r\n").encode("latin-1")
+
+        client = self.connection
+        try:
+            upstream.sendall(raw)
+        except OSError:
+            return
+
+        # La reponse d'amont est recopiee TELLE QUELLE, en-tetes compris : c'est ttyd qui calcule le
+        # `Sec-WebSocket-Accept`, et un relais qui le recalculerait pourrait diverger de lui.
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = upstream.recv(4096)
+            if not chunk:
+                return
+            head += chunk
+            if len(head) > 65536:
+                return
+
+        try:
+            client.sendall(head)
+        except OSError:
+            return
+
+        # Un amont qui ne bascule pas (407, 404, 500) a deja ete recopie au client : il n'y a rien a
+        # pomper derriere, et rester dans la boucle laisserait la connexion ouverte pour rien.
+        if not head.startswith(b"HTTP/1.1 101") and not head.startswith(b"HTTP/1.0 101"):
+            self.close_connection = True
+            return
+
+        self.close_connection = True
+        pair = {client: upstream, upstream: client}
+        while True:
+            try:
+                ready, _, _ = select.select([client, upstream], [], [])
+            except (OSError, ValueError):
+                return
+            for src in ready:
+                try:
+                    data = src.recv(65536)
+                except OSError:
+                    return
+                if not data:
+                    return
+                try:
+                    pair[src].sendall(data)
+                except OSError:
+                    return
 
     def log_message(self, fmt, *args):  # une page consultee n'est pas un evenement
         pass

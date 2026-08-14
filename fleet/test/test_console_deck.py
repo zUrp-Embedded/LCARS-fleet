@@ -430,6 +430,218 @@ deck._sessions["perime"] = {"login": "zoe", "groups": [], "exp": time.time() - 1
 check(deck.session_of(deck.SESSION_COOKIE + "=perime") is None,
       "une session expiree est refusee A LA LECTURE (aucun timer a rater)")
 
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+# (9) LE RELAIS — 6-072 / 6-098
+#
+# CE QUI EST PROUVE ICI : les DECISIONS du relais (qui atteint quoi, ce qui est transmis en amont)
+# et le fait qu'il transporte bien des octets apres le `101`.
+#
+# CE QUI NE PEUT PAS L'ETRE ICI, ET QUI EST MESURE AILLEURS : que le noyau refuse un `connect(2)` a
+# un repertoire qu'on ne peut pas traverser, et que ttyd rende 407 sans l'en-tete. Les deux ont ete
+# mesures DANS L'IMAGE le 2026-08-14 (C-09 : le lieu fait partie de la mesure). L'amont simule
+# ci-dessous n'a aucune autorite sur ces deux points — il n'en a pas besoin : ce qu'on lui demande,
+# c'est de RAPPORTER ce que le relais lui a envoye.
+sock_root = tempfile.mkdtemp(dir="/tmp", prefix="lcd.")
+deck.CONSOLE_SOCK_ROOT = sock_root
+seen_headers = {}
+
+
+def fake_ttyd(login, name="console.sock"):
+    """Un faux amont sur AF_UNIX : il enregistre les en-tetes recus, bascule en 101, puis renvoie."""
+    d = os.path.join(sock_root, login)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(path)
+    srv.listen(4)
+
+    def serve():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            head = b""
+            while b"\r\n\r\n" not in head:
+                c = conn.recv(4096)
+                if not c:
+                    conn.close()
+                    break
+                head += c
+            else:
+                lines = head.decode("latin-1").split("\r\n")
+                # ⚠ UNE LISTE, PAS UN DICT, ET LA PREMIERE VERSION DE CETTE DOUBLURE ETAIT UN DICT.
+                # Avec un dict, un en-tete envoye DEUX fois s'ecrase et seule la derniere valeur
+                # subsiste : le test lisait alors la semantique de la doublure au lieu de la garantie
+                # du relais. Prouve par mutation — en laissant `x-lcars-human` passer depuis le
+                # client, l'amont recevait DEUX lignes, le dict n'en gardait qu'une (la notre), et
+                # toutes les assertions restaient vertes. Un vrai serveur peut retenir la PREMIERE.
+                pairs = []
+                for ln in lines[1:]:
+                    if ": " in ln:
+                        k, v = ln.split(": ", 1)
+                        pairs.append((k.lower(), v))
+                seen_headers[(login, name)] = (lines[0], pairs)
+                conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\n"
+                             b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                             b"Sec-WebSocket-Accept: probe\r\n\r\n")
+                # Echo : c'est ce qui prouve que les octets circulent DANS LES DEUX SENS apres le
+                # basculement. Un relais qui n'aurait branche qu'un seul sens passerait tout test
+                # qui se contente de lire la ligne de statut.
+                while True:
+                    b = conn.recv(4096)
+                    if not b:
+                        break
+                    conn.sendall(b"<" + b)
+                conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return srv
+
+
+def ws_get(port, path, cookie=None, extra=None):
+    """Un GET d'upgrade a la main : urllib ne sait pas basculer. Rend (ligne de statut, socket)."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=5)
+    req = ["GET %s HTTP/1.1" % path, "Host: 127.0.0.1", "Upgrade: websocket",
+           "Connection: Upgrade", "Sec-WebSocket-Key: cHJvYmVwcm9iZXByb2JlMTI=",
+           "Sec-WebSocket-Version: 13"]
+    if cookie:
+        req.append("Cookie: " + cookie)
+    for k, v in (extra or {}).items():
+        req.append("%s: %s" % (k, v))
+    s.sendall(("\r\n".join(req) + "\r\n\r\n").encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        c = s.recv(4096)
+        if not c:
+            break
+        head += c
+    return head.split(b"\r\n")[0].decode("latin-1", "replace"), s
+
+
+t_zoe = fake_ttyd("zoe")
+t_zoe_pod = fake_ttyd("zoe", "pod.sock")
+t_max = fake_ttyd("max")
+
+deck._sessions["s-zoe"] = {"login": "zoe", "groups": ["fleet", "fleet:humans"],
+                           "exp": time.time() + 600}
+deck._sessions["s-max"] = {"login": "max", "groups": ["fleet", "fleet:humans"],
+                           "exp": time.time() + 600}
+deck._sessions["s-adm"] = {"login": "adm", "groups": ["fleet", "fleet:humans", "fleet:admins"],
+                           "exp": time.time() + 600}
+c_zoe = deck.SESSION_COOKIE + "=s-zoe"
+c_max = deck.SESSION_COOKIE + "=s-max"
+c_adm = deck.SESSION_COOKIE + "=s-adm"
+
+# Le relais vit DERRIERE la porte : il faut aussi que le bloc local existe, sinon on mesure le
+# refus du convergeur au lieu de mesurer l'autorisation.
+_humans_real = deck.humans
+deck.humans = lambda: [{"human": "zoe"}, {"human": "max"}, {"human": "adm"}]
+
+# (9a) SANS SESSION, RIEN NE PART EN AMONT. Le code seul ne suffirait pas comme preuve : la page de
+# login rend 200. Ce qui tranche, c'est que l'amont n'a VU personne.
+seen_headers.clear()
+status, s = ws_get(dport, "/console/zoe/ws")
+s.close()
+check(("zoe", "console.sock") not in seen_headers,
+      "sans session, le relais ne touche meme pas la socket amont (vu: %s)" % status)
+
+# (9b) LE CHEMIN NOMINAL — sans lui, un relais qui refuserait TOUT passerait tous les refus.
+seen_headers.clear()
+status, s = ws_get(dport, "/console/zoe/ws", c_zoe)
+check("101" in status, "zoe atteint SA console et le relais bascule (vu: %s)" % status)
+s.sendall(b"ping")
+echoed = s.recv(64)
+s.close()
+check(echoed == b"<ping",
+      "et les octets circulent dans les DEUX sens apres le 101 (vu: %r)" % echoed)
+
+# (9c) L'IDENTITE EST POSEE PAR LE RELAIS, ET UNE VERSION CLIENTE EST ECRASEE. ttyd ne verifie que
+# la PRESENCE de l'en-tete (mesure dans l'image) : s'il suffisait de l'envoyer soi-meme, la garde ne
+# vaudrait rien. C'est le test le plus important du fichier.
+seen_headers.clear()
+_, s = ws_get(dport, "/console/zoe/ws", c_zoe, {"X-LCARS-Human": "max"})
+s.close()
+line, pairs = seen_headers[("zoe", "console.sock")]
+ident = [v for k, v in pairs if k == "x-lcars-human"]
+# LA PROPRIETE N'EST PAS « LA VALEUR EST BONNE », C'EST « L'EN-TETE EST LA UNE SEULE FOIS ». Deux
+# occurrences laissent le choix au serveur d'amont, et ce choix n'est pas le notre : rien ne dit
+# qu'il retient la derniere. Compter est la seule assertion qui ne depende d'aucun amont.
+check(ident == ["zoe"],
+      "l'en-tete d'identite est present UNE SEULE FOIS et vient de la session, "
+      "l'en-tete forge par le client est JETE (vu: %r)" % ident)
+check(line.startswith("GET /ws "),
+      "et le prefixe de montage est retire avant l'amont (vu: %s)" % line)
+check(not [k for k, _ in pairs if k == "cookie"],
+      "le cookie de session ne part PAS en amont — il n'a rien a y faire")
+
+# (9d) 6-098 : LA CONSOLE D'UN AUTRE HUMAIN N'EST PAS ATTEIGNABLE.
+seen_headers.clear()
+status, s = ws_get(dport, "/console/max/ws", c_zoe)
+s.close()
+check("404" in status, "zoe n'atteint pas la console de max (vu: %s)" % status)
+check(("max", "console.sock") not in seen_headers,
+      "et le refus a lieu AVANT toute connexion a la socket de max")
+
+# (9e) 6-098 : idem pour la console de POD, qui est la cible que la fiche nomme.
+seen_headers.clear()
+status, s = ws_get(dport, "/pod/max/ws", c_zoe)
+s.close()
+check("404" in status, "zoe n'atteint pas les pods de max (vu: %s)" % status)
+check(("max", "pod.sock") not in seen_headers, "et rien n'a touche la socket de pod de max")
+status, s = ws_get(dport, "/pod/zoe/ws", c_zoe)
+s.close()
+check("101" in status, "TEMOIN : zoe atteint SES pods (vu: %s)" % status)
+
+# (9f) ⚠ L'ARBITRAGE LE PLUS FACILE A TRAHIR — L'ADMIN N'ATTEINT PAS LES CONSOLES DES AUTRES.
+# *Ce serait un geste de panoptique, pas un geste d'admin.* La regle est ECRITE dans `authorize`,
+# elle n'est pas une clause oubliee — et ce test porte la phrase pour que personne ne la « repare ».
+seen_headers.clear()
+status, s = ws_get(dport, "/console/zoe/ws", c_adm)
+s.close()
+check("404" in status,
+      "un ADMIN n'atteint PAS la console d'un autre humain — panoptique, pas admin (vu: %s)" % status)
+check(("zoe", "console.sock") not in seen_headers, "et rien n'a touche la socket de zoe")
+# ⚠ TEMOIN INDISPENSABLE, ET LA PREMIERE VERSION DE CE TEST ETAIT FAUSSE. Sans lui, le 404 ci-dessus
+# passerait aussi sur une regle qui bloquerait les admins PARTOUT — ce qui serait un autre bug, et
+# l'arbitrage dit exactement le contraire. Un admin est un humain comme les autres : il atteint SA
+# console. Ce qui lui est refuse, c'est celle d'AUTRUI, et rien de plus.
+t_adm = fake_ttyd("adm")
+status, s = ws_get(dport, "/console/adm/ws", c_adm)
+s.close()
+check("101" in status,
+      "TEMOIN : l'admin atteint SA PROPRE console — le refus porte sur autrui, pas sur son role "
+      "(vu: %s)" % status)
+
+# (9g) LE TIER ADMIN EXISTE POURTANT, et il s'exerce sur les cibles SYSTEME. La table est vide en
+# livraison — le mecanisme est ecrit et teste, aucun backend systeme n'existe encore. On en publie
+# un le temps du test : c'est exactement le geste que demandera la page de configuration.
+sys_srv = fake_ttyd("admin-backend")
+deck.SYSTEM_TARGETS["admin"] = os.path.join(sock_root, "admin-backend", "console.sock")
+try:
+    status, s = ws_get(dport, "/admin/ws", c_adm)
+    s.close()
+    check("101" in status, "un admin atteint une cible SYSTEME (vu: %s)" % status)
+    status, s = ws_get(dport, "/admin/ws", c_zoe)
+    s.close()
+    check("404" in status, "un humain non-admin ne l'atteint pas (vu: %s)" % status)
+finally:
+    deck.SYSTEM_TARGETS.pop("admin", None)
+    sys_srv.close()
+
+# (9h) UN LOGIN QUI N'EST PAS UN NOM SIMPLE NE FABRIQUE PAS DE CHEMIN. La session est deja la source
+# du chemin apres `authorize` — donc la forme du login est la derniere chose entre nous et un `..`.
+deck._sessions["s-bad"] = {"login": "../../etc", "groups": ["fleet:humans"],
+                           "exp": time.time() + 600}
+check(deck.socket_for(("console", "../../etc", "/ws")) is None,
+      "un login non canonique ne produit AUCUN chemin de socket")
+check(deck.authorize({"login": "zoe"}, ("console", "zoe", "/ws")) is True,
+      "TEMOIN : authorize dit OUI quand les deux logins sont le meme")
+
+deck.humans = _humans_real
+for _s in (t_zoe, t_zoe_pod, t_max, t_adm):
+    _s.close()
+
 dsrv.shutdown()
 forge_srv.shutdown()
 for f in (cfg_path, cfg_path + ".partial"):
