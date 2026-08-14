@@ -52,6 +52,7 @@ defmodule Fleet.Conflict.Hunk do
           confidence: ConfidenceScore.t(),
           explanation: String.t(),
           trace: DecisionTrace.t(),
+          merged_lines: [String.t()] | nil,
           zdiff3: boolean()
         }
   @enforce_keys [
@@ -73,6 +74,11 @@ defmodule Fleet.Conflict.Hunk do
     :confidence,
     :explanation,
     :trace,
+    # Result of the three-way merge, CARRIED rather than recomputed. `NonOverlapping.detect?/1`
+    # answers by performing the merge; the assembler then asked for the same merge again, so the
+    # most expensive computation of the subsystem (two quadratic LCS tables) ran TWICE per hunk and
+    # the first result was thrown away. `nil` for every other type, and for a hunk built by hand.
+    :merged_lines,
     zdiff3: false
   ]
 end

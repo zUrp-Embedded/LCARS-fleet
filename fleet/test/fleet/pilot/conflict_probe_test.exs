@@ -34,6 +34,32 @@ defmodule Fleet.Pilot.ConflictProbeTest do
     end
   end
 
+  describe "JG-053 — un conflit non referme atterrit sur le rail conservateur" do
+    test "marqueur orphelin -> un residuel, et l'operateur est prevenu" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          diag = ConflictProbe.diagnose(%{"f.ex" => "<<<<<<< ours\nrien ne referme\n"})
+
+          assert diag.totals.total == 1 and diag.totals.complex == 1,
+                 "un fichier que le parseur n'a pas su lire ne se compte pas comme sans conflit"
+
+          assert diag.totals.writable == 0
+          refute diag.totals.all_trivial?
+        end)
+
+      # La trace n'est pas decorative : le rapport conservateur est indistinguable d'un vrai
+      # add/delete, et seul le log dit LEQUEL des trois faits a produit ce verdict.
+      assert log =~ "NON REFERMES"
+    end
+
+    test "TEMOIN — un fichier reellement propre reste a zero" do
+      # Sans lui, le rail conservateur pourrait tout attraper et le test ci-dessus serait vert sur
+      # un probe qui declare un residuel pour n'importe quel contenu.
+      diag = ConflictProbe.diagnose(%{"f.ex" => "aucun marqueur ici\n"})
+      assert diag.totals.total == 0
+    end
+  end
+
   describe "diagnose (pure)" do
     test "mixes trivial and complex into totals + routing predicates" do
       diag = ConflictProbe.diagnose(%{"t.txt" => trivial_content(), "c.txt" => complex_content()})

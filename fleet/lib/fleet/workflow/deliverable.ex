@@ -37,6 +37,13 @@ defmodule Fleet.Workflow.Deliverable do
 
   @doc """
   Publishes content through gate then push; gate failure prevents publication.
+
+  ⚠ THE GATE IS A FLOOR, NOT A CLEARANCE, and this is the site where the difference matters: what
+  passes here gets pushed to a repository. Its ancestry, identity and trailer checks are decidable;
+  its secret scan matches known credential SHAPES on added text and cannot see a shapeless one --
+  a Gitea token is 40 hex, indistinguishable from a SHA (scope on
+  `Fleet.Workflow.DeliverableGate.scan_secrets/2`). Reading `{:ok, :verified}` as "no secret in
+  this chain" is the one mistake this door invites, because it is the only door there is.
   """
   @spec publish(opts()) :: {:ok, result()} | {:error, term()}
   def publish(opts) when is_map(opts) do

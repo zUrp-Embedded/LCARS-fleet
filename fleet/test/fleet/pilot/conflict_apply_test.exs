@@ -104,4 +104,39 @@ defmodule Fleet.Pilot.ConflictApplyTest do
 
     refute main_is_ancestor_of_feature?(clone)
   end
+
+  @tag :tmp_dir
+  test "un marqueur ORPHELIN dans le contenu abandonne le merge — il ne pousse pas un fichier ampute",
+       %{tmp_dir: base} do
+    # C'EST LE FIXTURE DU CAS HEUREUX, PLUS UNE LIGNE DE CONTENU LEGITIME. Le conflit reel est le
+    # meme `non_overlapping` que le premier test resout et pousse ; s'y ajoute une ligne commencant
+    # par `<<<<<<< `, qui est du CONTENU (la doc de git en contient, les fixtures de merge aussi).
+    #
+    # Le parseur ne fermait ce second marqueur nulle part et jetait ce qu'il avait accumule. Le
+    # premier hunk restait resolu, `all_resolved?` restait vrai, donc `merged` etait un binaire :
+    # `File.write/2` ecrivait le fichier AMPUTE de la ligne orpheline et de tout ce qui la suit, puis
+    # `git add` + push l'envoyaient sur la forge. Une auto-resolution qui SUPPRIME du contenu, sans
+    # un mot, sur la branche d'un humain.
+    doc = "<<<<<<< exemple tire de la doc git\ncinq\n"
+
+    clone =
+      setup_remote(
+        base,
+        "un\ndeux\ntrois\nquatre\n" <> doc,
+        "un\nDEUX-feature\ntrois\nquatre\n" <> doc,
+        "un\ndeux\nTROIS-main\nquatre\n" <> doc
+      )
+
+    assert {:error, _} =
+             ConflictApply.apply_in(clone, "feature", base_branch: "origin/main", auth: false)
+
+    refute main_is_ancestor_of_feature?(clone)
+
+    # Et la preuve de ce qui etait en jeu : la branche distante porte toujours les lignes que le
+    # merge ampute aurait effacees.
+    sh(clone, ["fetch", "-q", "origin"])
+    {blob, 0} = sh(clone, ["show", "origin/feature:f.txt"])
+    assert blob =~ "exemple tire de la doc git"
+    assert blob =~ "cinq"
+  end
 end

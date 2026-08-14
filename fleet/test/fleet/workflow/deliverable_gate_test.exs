@@ -54,6 +54,37 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:secret_detected, "anthropic_key", _}} = Gate.scan_secrets(dir, base)
   end
 
+  # JG-049 — LA PORTEE DU BALAYAGE EST DESORMAIS ECRITE, ET CES TESTS L'EPINGLENT DES DEUX COTES.
+  # Deux familles a signal fort ont ete ajoutees (meme barre que les cinq d'origine : un prefixe
+  # fixe, assez long pour qu'un match soit un secret et non une coincidence).
+  test "JG-049 — jeton Slack dans le diff → BLOQUE", %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "leak-slack"))
+    commit_file(dir, "hook.txt", "SLACK=xoxb-1234567890-abcdefghijkl", "hook")
+
+    assert {:error, {:secret_detected, "slack_token", _}} = Gate.scan_secrets(dir, base)
+  end
+
+  test "JG-049 — cle d'API Google dans le diff → BLOQUE", %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "leak-google"))
+    commit_file(dir, "maps.txt", "KEY=AIzaSyA1234567890abcdefghijklmnopqrstuvw", "maps")
+
+    assert {:error, {:secret_detected, "google_api_key", _}} = Gate.scan_secrets(dir, base)
+  end
+
+  test "JG-049 — CE QUE LA PORTE NE VOIT PAS, mesure plutot que suppose", %{tmp_dir: tmp} do
+    # ⚠ Ce test EPINGLE UNE LIMITE, il ne demande pas de la corriger. Un jeton Gitea est 40 hex
+    # sans prefixe — la forme exacte de tout SHA git present dans un diff. Un motif pour lui
+    # refuserait quasiment chaque commit : la porte BLOQUE le push, un faux positif ici est un mur
+    # que les pods ne peuvent pas contourner. Ce credential est tenu hors des diffs par les rails
+    # de credentials, jamais par ce balayage, et c'est ce que la prose dit maintenant aux deux
+    # bouts. Le jour ou quelqu'un lit `:ok` comme « aucun secret », ce test lui montre le contraire.
+    {dir, base} = setup_repo(Path.join(tmp, "leak-gitea"))
+    commit_file(dir, "t.txt", "TOKEN=a3f9c1e8b7d2054613fa8c9e0b1d2f3a4c5e6d70", "gitea-shaped")
+
+    assert :ok = Gate.scan_secrets(dir, base),
+           "un jeton sans forme distinctive passe : `:ok` veut dire « aucune forme connue vue »"
+  end
+
   test "F-02 — blacklisted file (.credentials.json) → BLOCKED by name", %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "leak-file"))
     commit_file(dir, ".credentials.json", "{}", "creds")

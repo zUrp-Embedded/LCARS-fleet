@@ -129,12 +129,12 @@ defmodule Fleet.Pilot.ConflictProbe do
       {{:ok, b}, {:ok, o}, {:ok, t}} ->
         case merge_file(b, o, t) do
           {:ok, content} -> resolve(content)
-          :error -> add_delete_report()
+          :error -> residual_report()
         end
 
       # One side is missing the file -> add/delete conflict: a residual, not trivially resolvable.
       _ ->
-        add_delete_report()
+        residual_report()
     end
   end
 
@@ -165,7 +165,7 @@ defmodule Fleet.Pilot.ConflictProbe do
   # La soeur `show/3`, douze lignes plus haut, filtre pourtant `{:ok, {out, 0}}` — le meme fichier
   # portait deja la bonne posture sur l'autre lecture.
   #
-  # `:error` mene a `add_delete_report/0` (residuel conservateur, jamais « propre ») : l'appelant
+  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant
   # sait deja quoi en faire, seule la clause qui y menait etait inatteignable.
   defp merge_file(base, ours, theirs) do
     tmp = Path.join(System.tmp_dir!(), "lcars-cprobe-#{:erlang.unique_integer([:positive])}")
@@ -199,11 +199,28 @@ defmodule Fleet.Pilot.ConflictProbe do
   end
 
   defp resolve(content) do
-    {:ok, report} = Conflict.resolve(content)
-    report
+    case Conflict.resolve(content) do
+      {:ok, report} ->
+        report
+
+      {:error, reason} ->
+        Logger.warning(
+          "ConflictProbe: marqueurs de conflit NON REFERMES (#{inspect(reason)}) — traite en " <>
+            "residuel conservateur, jamais comme un fichier propre (le parseur rendait pour ce cas " <>
+            "un rapport identique a celui d'un fichier sans conflit)"
+        )
+
+        residual_report()
+    end
   end
 
-  defp add_delete_report,
+  # The conservative verdict: one residual hunk, nothing writable. Reached by three DIFFERENT
+  # facts that share one consequence -- a genuine add/delete conflict, a `git merge-file` tool
+  # failure, and content whose markers do not close. None of them is trivially resolvable, and
+  # none may be reported as a clean file; the caller reads the shape, not the cause. It was named
+  # `add_delete_report` while already serving the tool failure, so the name asserted a cause that
+  # was wrong at two of its call sites.
+  defp residual_report,
     do: %Report{merged: nil, hunks: [], stats: %{trivial: 0, complex: 1, total: 1}}
 
   defp sanitize(ref), do: String.replace(ref, ~r/[^A-Za-z0-9._-]/, "_")
