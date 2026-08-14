@@ -110,11 +110,12 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
 
-  $PROG target add <name> --host github|gitlab --owner <owner> --token-file <path> [--dest-host H]
+  $PROG target add <name> --host github|gitlab --owner <owner> [--dest-host H]
   $PROG target list
       Le POOL de cibles de publication de CET humain (~/.lcars/targets). Une cible =
-      un couple forge + compte + token. GitLab est une cible de plein droit ;
-      --dest-host pour un GitHub Enterprise / GitLab self-hosted.
+      forge + compte + repo. L'AUTH n'est pas stockee ici : c'est le CLI officiel de la
+      forge (« gh auth login » / « glab auth login »), deja credential helper git.
+      GitLab est une cible de plein droit ; --dest-host pour Enterprise / self-hosted.
 
   $PROG approve <owner/nom-interne> --target <name> --as <repo-dest> [--base main]
   $PROG approve <owner/nom-interne> [--base main]
@@ -122,8 +123,9 @@ USAGE
       projet a une cible du pool et POUSSE le peuplement initial (refuse d'ecraser une
       base deja remplie). Sans : PUSH DIRECT de l'etat courant sur la base deja liee
       (garde deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
-      L'attribution est reecrite (author=humain) avant tout push. La phase 2 (PR/MR
-      reguliere) est le tool « github_publish » cote pod, pas ce verbe.
+      L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
+      externe passe par gh/glab (aucun token manipule ici). La phase 2 (PR/MR reguliere)
+      est le tool « github_publish » cote pod, pas ce verbe.
 
   $PROG help
       Cette aide.
@@ -543,28 +545,13 @@ cmd_catalogue() {
 TARGETS_DIR="$HOME/.lcars/targets"
 PUBLISH_DIR="$HOME/.lcars/publish"
 
-# Plain destination URL — NEVER carries the token. Auth rides in an http.<host>.extraheader passed
-# via GIT_CONFIG_* env (not the URL, not the argv, not the on-disk .git/config), same discipline as
-# bin/publish-to-github.sh / Fleet.Credentials.ForgeAuth.
+# Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
-# Runs `git` against the destination with header auth. The Basic header is the header form of
-# https://<user>:<token>@ — github: x-access-token, gitlab: oauth2. The GIT_CONFIG_* env is inline
-# (not exported) so it never leaks past this one git call; the token stays off argv and off FETCH_HEAD.
-_dest_git() {  # host dest_host token -- <git args...>
-  local host="$1" dest_host="$2" token="$3"; shift 3
-  local user b64
-  case "$host" in
-    github) user="x-access-token" ;;
-    gitlab) user="oauth2" ;;
-    *) die "host inconnu: $host (github|gitlab)" ;;
-  esac
-  b64="$(printf '%s' "${user}:${token}" | base64 | tr -d '\n')"
-  GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="http.https://${dest_host}/.extraheader" \
-    GIT_CONFIG_VALUE_0="Authorization: Basic ${b64}" \
-    git "$@"
-}
+# The official CLI of a host — BOTH the git credential helper (for push/fetch) and, in approve's
+# nominal path, the only auth surface. gh<->glab are 1:1. We NEVER read or pass a token: the operator
+# authenticates with `gh auth login` / `glab auth login`, git push uses the wired helper.
+_dest_cli() { case "$1" in github) echo gh ;; gitlab) echo glab ;; *) die "host inconnu: $1 (github|gitlab)" ;; esac; }
 _json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
 
 cmd_target() {
@@ -577,33 +564,32 @@ cmd_target() {
 }
 
 cmd_target_add() {
-  local name="" host="" owner="" token_file="" dest_host=""
+  local name="" host="" owner="" dest_host=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host) host="$2"; shift 2 ;;
       --owner) owner="$2"; shift 2 ;;
-      --token-file) token_file="$2"; shift 2 ;;
       --dest-host) dest_host="$2"; shift 2 ;;
       -*) die "target add: option inconnue $1" ;;
       *) if [[ -z "$name" ]]; then name="$1"; shift; else die "target add: argument en trop « $1 »"; fi ;;
     esac
   done
-  [[ -n "$name" && -n "$host" && -n "$owner" && -n "$token_file" ]] || \
-    die "target add: usage — target add <name> --host github|gitlab --owner <owner> --token-file <path> [--dest-host H]"
+  [[ -n "$name" && -n "$host" && -n "$owner" ]] || \
+    die "target add: usage — target add <name> --host github|gitlab --owner <owner> [--dest-host H]"
   case "$host" in
     github) [[ -n "$dest_host" ]] || dest_host="github.com" ;;
     gitlab) [[ -n "$dest_host" ]] || dest_host="gitlab.com" ;;
     *) die "target add: --host inconnu « $host » (github|gitlab)" ;;
   esac
-  [[ -r "$token_file" ]] || die "target add: token-file illisible: $token_file"
+  # No token here: auth is `$(_dest_cli "$host") auth login`, the CLI's own credential store.
   # `name` becomes a path component — refuse traversal (self-harm, but the slug guard has it too).
   [[ "$name" != */* && "$name" != .* ]] || die "target add: nom invalide « $name » (pas de '/' ni de '.' en tete)"
   mkdir -p "$TARGETS_DIR"; chmod 700 "$TARGETS_DIR"
   local out="$TARGETS_DIR/$name.json"
-  python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4],"token_file":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
-    "$out" "$host" "$dest_host" "$owner" "$token_file"
+  python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"owner":sys.argv[4]},open(sys.argv[1],"w"),indent=2)' \
+    "$out" "$host" "$dest_host" "$owner"
   chmod 600 "$out"
-  echo "target « $name » enregistree ($host $owner @ $dest_host)."
+  echo "target « $name » enregistree ($host $owner @ $dest_host). Auth: $(_dest_cli "$host") auth login."
 }
 
 cmd_target_list() {
@@ -635,7 +621,7 @@ cmd_approve() {
   local binding="$PUBLISH_DIR/$slug.json"
 
   # Resolve WHAT/WHERE first (mode + destination), so mode errors fire without any forge config.
-  local host dest_host dest_repo token_file link_mode
+  local host dest_host dest_repo link_mode
   if [[ -n "$target" ]]; then
     link_mode=1
     local tfile="$TARGETS_DIR/$target.json"
@@ -643,7 +629,6 @@ cmd_approve() {
     [[ -n "$as" ]] || die "approve: --target exige --as <nom-du-repo-destination>"
     host="$(_json_field "$tfile" host)"
     dest_host="$(_json_field "$tfile" dest_host)"
-    token_file="$(_json_field "$tfile" token_file)"
     dest_repo="$(_json_field "$tfile" owner)/$as"
   else
     link_mode=0
@@ -651,12 +636,15 @@ cmd_approve() {
     host="$(_json_field "$binding" host)"
     dest_host="$(_json_field "$binding" dest_host)"
     dest_repo="$(_json_field "$binding" dest_repo)"
-    token_file="$(_json_field "$binding" token_file)"
     base="$(_json_field "$binding" base)"
   fi
-  [[ -r "$token_file" ]] || die "approve: token de destination illisible: $token_file"
-  local dtok; dtok="$(cat "$token_file")"
-  [[ -n "$dtok" ]] || die "approve: token de destination vide: $token_file"
+
+  # Auth is the official CLI's (gh/glab), wired as the git credential helper — never a token we hold.
+  # Refuse LOUD now if it is not logged in, rather than hang on a push prompt (GIT_TERMINAL_PROMPT=0).
+  local cli; cli="$(_dest_cli "$host")"
+  command -v "$cli" >/dev/null 2>&1 || die "approve: $cli absent — requis pour publier vers $host"
+  "$cli" auth status >/dev/null 2>&1 || die "approve: $cli non authentifie — fais '$cli auth login' d'abord"
+  export GIT_TERMINAL_PROMPT=0
 
   # Internal forge config — same source as cmd_project_migrate: ~/.lcars/fleet_v2.env, nowhere else.
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
@@ -669,7 +657,7 @@ cmd_approve() {
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
 
   # Scratch clone, removed on ANY exit (die exits → EXIT trap fires; the CLI runs one verb then ends,
-  # so a single EXIT trap is safe). mktemp -d is 0700; with header auth nothing secret lands in it.
+  # so a single EXIT trap is safe). mktemp -d is 0700; no external secret ever lands in it.
   local work_base; work_base="$(mktemp -d)"
   trap 'rm -rf "$work_base"' EXIT
   local work="$work_base/clone"
@@ -680,27 +668,28 @@ cmd_approve() {
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"
 
+  # git push/fetch/ls-remote to the dest carry no token — the wired CLI helper supplies the credential.
   if [[ "$link_mode" == 1 ]]; then
     # LINK: never clobber a base the human populated by hand.
-    if _dest_git "$host" "$dest_host" "$dtok" ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
+    if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
       die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
     fi
-    _dest_git "$host" "$dest_host" "$dtok" push -q "$dest_url" "HEAD:refs/heads/$base" \
+    git push -q "$dest_url" "HEAD:refs/heads/$base" \
       || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
-    python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"token_file":sys.argv[5],"base":sys.argv[6]},open(sys.argv[1],"w"),indent=2)' \
-      "$binding" "$host" "$dest_host" "$dest_repo" "$token_file" "$base"
+    python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"base":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
+      "$binding" "$host" "$dest_host" "$dest_repo" "$base"
     chmod 600 "$binding"
     echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
   else
     # DIRECT push to an existing base: determinism gate (base must be an ancestor of the fresh clone).
-    _dest_git "$host" "$dest_host" "$dtok" fetch -q "$dest_url" "$base" \
+    git fetch -q "$dest_url" "$base" \
       || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
     if [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]; then
       echo "approve: rien a pousser — $dest_host/$dest_repo $base deja a jour."
     elif ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
       die "approve: $base n'est PAS un ancetre du clone reecrit (reecriture non deterministe ou divergence) — rien pousse."
     else
-      _dest_git "$host" "$dest_host" "$dtok" push -q "$dest_url" "HEAD:refs/heads/$base" \
+      git push -q "$dest_url" "HEAD:refs/heads/$base" \
         || die "approve: echec du push direct vers $dest_host/$dest_repo"
       echo "approve: « $slug » pousse en direct vers $dest_host/$dest_repo $base."
     fi

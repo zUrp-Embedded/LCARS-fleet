@@ -8,8 +8,9 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
 
   It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<slug>.json`, written by
   `lcars approve`), then runs the host-side rail `bin/publish-rail.sh` — which force-pushes a rolling
-  branch and opens/updates a PR/MR. THE EXTERNAL TOKEN STAYS HOST-SIDE: it lives in the human's own
-  file (referenced by the binding), is read by the rail in the BEAM's process, and NEVER enters a pod.
+  branch and opens/updates a PR/MR. NO EXTERNAL TOKEN IS HANDLED here or by the rail: auth is the
+  forge's official CLI (`gh`/`glab`, the wired git credential helper), and nothing token-shaped ever
+  enters a pod, an argv, or a config we write.
 
   The outcome is emitted on the Bus (lossy/observability, `safe_emit` — a missing subscriber never
   crashes the Task): `github_publish.done` with the PR/MR url, or `github_publish.failed` with the
@@ -85,7 +86,7 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
 
     with {:ok, raw} <- file_read(path, {:not_linked, slug}),
          {:ok, map} when is_map(map) <- decode(raw, {:binding_invalid, path}),
-         :ok <- require_keys(map, ~w(host dest_host dest_repo token_file), path) do
+         :ok <- require_keys(map, ~w(host dest_host dest_repo), path) do
       {:ok, map}
     end
   end
@@ -112,7 +113,6 @@ defmodule Fleet.MCP.PodTools.GithubPublish do
       "--forge-token-file", forge_tok,
       "--host", b["host"],
       "--dest-repo", b["dest_repo"],
-      "--dest-token-file", b["token_file"],
       "--dest-host", b["dest_host"],
       "--base", Map.get(b, "base") || "main",
       "--work", work

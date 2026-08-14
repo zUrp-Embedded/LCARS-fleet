@@ -2,38 +2,41 @@
 # SOURCE: test/publish_rail/publish_rail.bats
 # AUTHOR: consultant
 # STARDATE: 2026-08-14
-# STATUS: bats tests for bin/publish-rail.sh — the fail-closed preconditions + host selection
+# STATUS: bats tests for bin/publish-rail.sh — the fail-closed preconditions (gh/glab auth model)
 #
-# What is covered: the guards that run BEFORE the (destructive, remote-touching) work — argument
-# validation, unknown --host, token readability/emptiness, fresh --work, and the phase-2 precondition
-# "destination base must already exist" (exit 4), for BOTH github and gitlab. These are the safety
-# net: every one refuses without pushing anything. The real push + PR/MR + the determinism gate
-# (exit 6) need a live destination + git-filter-repo and are exercised by the operator, not here.
+# V2 hands auth to the forge CLIs (gh/glab) — so there is NO token for this rail to leak, and the old
+# token-off-argv regression is MOOT (deleted with the token layer). What remains to pin: the guards
+# that refuse BEFORE the destructive work — usage, unknown --host, CLI-not-authenticated, non-fresh
+# --work, and "base absent -> exit 4, nothing pushed", for both hosts. The push + PR/MR need a live,
+# authenticated CLI + git-filter-repo and are operator-exercised.
 #
-# `git` is stubbed on PATH so the ls-remote precondition is controllable without a network. The stub
-# is found by `command -v` (deps check passes) and its ls-remote result is driven by STUB_BASE_PRESENT.
+# git + gh + glab are stubbed on PATH: `command -v` finds them, `auth status` is driven by
+# STUB_AUTHED, and git ls-remote by STUB_BASE_PRESENT — the preconditions become checkable offline.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-rail.sh"
   TMP="$(mktemp -d)"
   BIN="$TMP/bin"; mkdir -p "$BIN"
-
-  DEST_TOKEN_FILE="$TMP/dest.token"; echo "desttok" > "$DEST_TOKEN_FILE"
   FORGE_TOKEN_FILE="$TMP/forge.token"; echo "forgetok" > "$FORGE_TOKEN_FILE"
 
-  # git stub: ls-remote --exit-code succeeds only when STUB_BASE_PRESENT=1. When STUB_REC is set it
-  # records the ls-remote argv + the GIT_CONFIG auth env — the token-handling regression probe.
   cat > "$BIN/git" <<'STUB'
 #!/usr/bin/env bash
 if [[ "$1" == "ls-remote" ]]; then
-  if [[ -n "${STUB_REC:-}" ]]; then
-    printf '%s\n' "$*" > "$STUB_REC/argv"
-    printf '%s\n' "${GIT_CONFIG_VALUE_0:-}" > "$STUB_REC/cfgval"
-  fi
   [[ "${STUB_BASE_PRESENT:-0}" == "1" ]] && exit 0 || exit 2
 fi
 exit 0
 STUB
+  # gh/glab: `auth status` succeeds unless STUB_AUTHED=0. Nothing else is reached in these tests.
+  for cli in gh glab; do
+    cat > "$BIN/$cli" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "auth" && "$2" == "status" ]]; then
+  [[ "${STUB_AUTHED:-1}" == "1" ]] && exit 0 || exit 1
+fi
+exit 0
+STUB
+    chmod +x "$BIN/$cli"
+  done
   chmod +x "$BIN/git"
   export PATH="$BIN:$PATH"
 }
@@ -44,7 +47,7 @@ run_rail() {  # run_rail HOST [extra args...]
   local host="$1"; shift
   run "$SCRIPT" \
     --project fleet/demo --forge http://forge --forge-token-file "$FORGE_TOKEN_FILE" \
-    --host "$host" --dest-repo owner/Demo --dest-token-file "$DEST_TOKEN_FILE" --work "$TMP/work" "$@"
+    --host "$host" --dest-repo owner/Demo --work "$TMP/work" "$@"
 }
 
 @test "missing required arg -> usage (exit 1)" {
@@ -56,24 +59,15 @@ run_rail() {  # run_rail HOST [extra args...]
 @test "unknown --host -> exit 1" {
   run "$SCRIPT" \
     --project fleet/demo --forge http://forge --forge-token-file "$FORGE_TOKEN_FILE" \
-    --host bitbucket --dest-repo owner/Demo --dest-token-file "$DEST_TOKEN_FILE" --work "$TMP/work"
+    --host bitbucket --dest-repo owner/Demo --work "$TMP/work"
   [ "$status" -eq 1 ]
   [[ "$output" == *"--host inconnu"* ]]
 }
 
-@test "unreadable dest-token-file -> exit 1" {
-  run "$SCRIPT" \
-    --project fleet/demo --forge http://forge --forge-token-file "$FORGE_TOKEN_FILE" \
-    --host github --dest-repo owner/Demo --dest-token-file "$TMP/nope.token" --work "$TMP/work"
+@test "CLI not authenticated -> exit 1 (auth login), nothing done" {
+  STUB_AUTHED=0 run_rail github
   [ "$status" -eq 1 ]
-  [[ "$output" == *"dest-token-file illisible"* ]]
-}
-
-@test "empty dest-token -> exit 1" {
-  : > "$DEST_TOKEN_FILE"
-  run_rail github
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"dest-token vide"* ]]
+  [[ "$output" == *"auth login"* ]]
 }
 
 @test "existing --work path -> exit 1 (transform needs a fresh clone)" {
@@ -93,16 +87,4 @@ run_rail() {  # run_rail HOST [extra args...]
   STUB_BASE_PRESENT=0 run_rail gitlab
   [ "$status" -eq 4 ]
   [[ "$output" == *"phase 1"* ]]
-}
-
-@test "token rides in GIT_CONFIG env, never in the git argv (CRITIQUE regression)" {
-  local rec="$TMP/rec"; mkdir -p "$rec"
-  printf 'SECRETTOK' > "$DEST_TOKEN_FILE"          # a literal we can grep for
-  STUB_REC="$rec" STUB_BASE_PRESENT=0 run_rail github
-  [ "$status" -eq 4 ]                              # stopped at the precondition, before any transform
-  run cat "$rec/argv"
-  [[ "$output" != *"SECRETTOK"* ]]                 # the token is NOT in the git argv (no ps leak)
-  [[ "$output" == *"https://github.com/owner/Demo.git"* ]]   # git saw the PLAIN url
-  run cat "$rec/cfgval"
-  [[ "$output" == "Authorization: Basic "* ]]      # auth is carried by the extraheader env, not the url
 }
