@@ -87,11 +87,18 @@ STATIC_FILES = {
     "xterm.css": "text/css; charset=utf-8",
     "addon-fit.js": "application/javascript; charset=utf-8",
 }
-# Le second nom dans une liste DEJA en main : la session porte `groups` depuis le callback OIDC, donc
-# le tier admin ne coute ni un appel ni un credential stocke. ⚠ Ce qui est gratuit est le MECANISME
-# (l'acheminement de l'identite, la route) — pas les POUVOIRS de l'admin, qui demandent chacun un
-# endpoint systeme qui n'existe pas encore.
-ADMINS_TEAM = os.environ.get("LCARS_DECK_ADMIN_TEAM", "fleet:admins")
+# L'ADMINITE EST UNE NOTION DE LA FORGE, ET ELLE N'EN A QU'UNE. Ce tier a d'abord ete une equipe
+# (`fleet:admins`) lue dans les `groups` deja en main : gratuit, mais c'etait une SECONDE source de
+# verite pour un fait que la forge sait dire elle-meme. Deux sources sur le meme fait ne restent
+# d'accord que tant que personne ne touche a l'une des deux, et celle qui derive est toujours celle
+# qu'on ne relit pas.
+#
+# Le cout de la source unique est UN appel, et il est paye la ou il est le moins cher : au callback
+# OIDC, ou le jeton d'acces est deja en main pour l'appel `userinfo` qui le precede. Rien de plus
+# n'est stocke — ni le jeton, ni un credential de service : seul le booleen entre en session.
+#
+# ⚠ Ce qui existe ici est le MECANISME (l'acheminement de l'identite, la route, l'onglet) — pas les
+# POUVOIRS de l'admin, qui demandent chacun un endpoint systeme qui n'existe pas encore.
 
 # Nature d'une cible par-humain -> nom de la socket dans son repertoire.
 PER_HUMAN_TARGETS = {"console": "console.sock", "pod": "pod.sock"}
@@ -186,7 +193,10 @@ def authorize(sess, target):
     if kind in PER_HUMAN_TARGETS:
         return login == sess.get("login")
     if kind in SYSTEM_TARGETS:
-        return ADMINS_TEAM in (sess.get("groups") or [])
+        # `.get`, PAS un index : une session ecrite avant ce champ (ou par un test qui n'en parle
+        # pas) doit valoir « pas admin », jamais une KeyError qui rendrait 500 sur une question
+        # d'autorisation. L'absence de reponse est un refus.
+        return bool(sess.get("admin"))
     return False
 
 
@@ -245,6 +255,24 @@ def _get_json(url, token):
     req.add_header("Authorization", "Bearer " + token)
     with urlopen(req, timeout=10) as r:
         return json.load(r)
+
+
+def forge_is_admin(cfg, token):
+    """
+    Is the freshly authenticated user a forge admin? False when the forge does not say so.
+
+    FAIL-CLOSED, AND THE FAILURE IS LOGGED. `userinfo` has already answered by the time this runs,
+    so a failure here is not "the forge is down" -- it is this one endpoint refusing, and the only
+    safe reading of "no answer" on an authority question is "no". A degraded mode that granted admin
+    on a timeout would hand the tier to whoever can make the call time out.
+    """
+    try:
+        return bool(_get_json(
+            f"{cfg['internal_url'].rstrip('/')}/api/v1/user", token
+        ).get("is_admin"))
+    except (HTTPError, URLError, TimeoutError, socket.timeout, ValueError) as e:
+        print(f"[lcars-deck] adminite non lue, session ordinaire : {e}", file=sys.stderr, flush=True)
+        return False
 
 
 def _sweep(now):
@@ -447,13 +475,17 @@ def claude_credentials(home):
     return "unknown"
 
 
-def state(only=None):
+def state(only=None, admin=False):
     """
     The box's state, RESTRICTED to `only` when a session names a human.
 
     The filter is applied at the SOURCE, not in the page: an index that renders one human while
     `/api/state` still serves everybody has not made anything personal, it has hidden a list that
     is still one fetch away.
+
+    `admin` travels with the payload for ONE reason: to let the page draw a tab. It is a
+    projection of the session, never an authorization -- what the tier actually opens is decided
+    by `authorize`, server-side, on the session and not on anything the browser sends back.
     """
     hs = []
     for h in humans():
@@ -495,7 +527,7 @@ def state(only=None):
                 "project": p.get("project_slug"),
             })
         hs.append(h)
-    return {"hostname": socket.gethostname(), "humans": hs}
+    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin)}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -989,6 +1021,25 @@ function statusPanel(s) {
   return wrap;
 }
 
+// L'ONGLET QUI DIT CE QU'IL N'EST PAS ENCORE. Une page vide sous un onglet nomme se lit comme une
+// panne ; celle-ci enonce qu'elle est un emplacement, et ce qui viendra s'y poser. Le jour ou le
+// premier pouvoir arrive, c'est ce texte qu'on remplace — pas un onglet qu'on ajoute.
+function adminPanel() {
+  const wrap = el('div');
+  const n = el('div', 'note');
+  n.innerHTML = "Cet onglet n'est visible que des <b>administrateurs de la forge</b> — " +
+    "la forge repond <b>is_admin</b>, le deck le lit a ta connexion, et il n'existe " +
+    "<b>aucune autre liste</b> a tenir a jour ici. Un second administrateur, c'est un compte " +
+    "marque admin sur la forge : rien a poser sur la boite.<br><br>" +
+    "Il est <b>vide, et c'est exact</b> : le chemin d'autorisation existe et il est teste, " +
+    "aucun pouvoir ne s'y branche encore. Le premier prevu est l'<b>edition des cartes</b>. " +
+    "Ce que la forge affirme ne franchit d'ailleurs pas tout : elle fait autorite sur les " +
+    "<b>personnes</b>, pas sur la machine — installer, monter un volume, parler a docker " +
+    "reste <b>ssh</b> et <b>root</b>.";
+  wrap.appendChild(n);
+  return wrap;
+}
+
 function build(s) {
   const rail = document.getElementById('rail');
   const tabs = [];
@@ -1006,6 +1057,13 @@ function build(s) {
   };
 
   add('boite', 'Statut', null, { key: 'status', crumb: 'STATUT', render: () => statusPanel(s) });
+  // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
+  // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
+  // ouvre. Un rail qui se dessine sur une reponse du serveur est un confort de lecture ; s'il etait
+  // AUSSI la barriere, la barriere vivrait chez le visiteur.
+  if (s.admin) {
+    add(null, 'Admin', 'forge', { key: 'admin', crumb: 'ADMIN', render: () => adminPanel() });
+  }
 
   for (const h of s.humans) {
     // MEME ORIGINE, CHEMIN RELATIF : plus de `http://HOST:port`. La cible n'est plus une adresse
@@ -1208,9 +1266,15 @@ class Deck(BaseHTTPRequestHandler):
             self._send(403, page_denied(login, groups), "text/html; charset=utf-8")
             return
 
+        # LU ICI, ET NULLE PART AILLEURS : c'est le seul endroit du deck ou un jeton d'acces existe.
+        # Le lire plus tard couterait un credential de service stocke sur la boite — exactement ce
+        # que ce lot passe son temps a retirer.
+        admin = forge_is_admin(cfg, tokens["access_token"])
+
         sid = secrets.token_urlsafe(32)
         with _lock:
-            _sessions[sid] = {"login": login, "groups": groups, "exp": time.time() + SESSION_TTL}
+            _sessions[sid] = {"login": login, "groups": groups, "admin": admin,
+                              "exp": time.time() + SESSION_TTL}
         # No `Secure`: the deck serves plain HTTP on a LAN port by design (there is no TLS to opt
         # into here). `HttpOnly` + `SameSite=Lax` still hold -- they cost nothing and remove the
         # two ways a page in another tab could reach this cookie.
@@ -1347,7 +1411,7 @@ class Deck(BaseHTTPRequestHandler):
             return
 
         if path == "/api/state":
-            self._send(200, json.dumps(state(only=sess["login"])),
+            self._send(200, json.dumps(state(only=sess["login"], admin=sess.get("admin"))),
                        "application/json; charset=utf-8")
         elif path in ("/", "/index.html"):
             self._send(200, PAGE % {

@@ -671,7 +671,11 @@ deck._sessions["s-zoe"] = {"login": "zoe", "groups": ["fleet", "fleet:humans"],
                            "exp": time.time() + 600}
 deck._sessions["s-max"] = {"login": "max", "groups": ["fleet", "fleet:humans"],
                            "exp": time.time() + 600}
-deck._sessions["s-adm"] = {"login": "adm", "groups": ["fleet", "fleet:humans", "fleet:admins"],
+# L'ADMINITE EST UN CHAMP DE SESSION, pose au callback depuis `is_admin` de la forge — plus une
+# equipe lue dans `groups`. Les groupes de cette session sont donc ceux de n'importe quel humain :
+# si un jour ce test repassait au vert en remettant `fleet:admins` ici, c'est que la seconde source
+# de verite serait revenue.
+deck._sessions["s-adm"] = {"login": "adm", "groups": ["fleet", "fleet:humans"], "admin": True,
                            "exp": time.time() + 600}
 c_zoe = deck.SESSION_COOKIE + "=s-zoe"
 c_max = deck.SESSION_COOKIE + "=s-max"
@@ -780,9 +784,74 @@ try:
     status, s = ws_get(dport, "/admin/ws", c_zoe)
     s.close()
     check("404" in status, "un humain non-admin ne l'atteint pas (vu: %s)" % status)
+
+    # ⚠ ET L'ADMINITE NE SE DEDUIT PLUS D'UN GROUPE. Le tier a ete une equipe (`fleet:admins`) avant
+    # d'etre `is_admin` : une session qui porte le groupe SANS le champ doit etre refusee, sinon les
+    # deux sources de verite coexistent encore et personne ne s'en apercoit.
+    #
+    # ⚠ ET IL LUI FAUT SON BLOC LOCAL, comme au relais plus haut : la porte du convergeur est AVANT
+    # l'autorisation. Sans cette ligne le refus arrive quand meme, mais c'est celui du bloc absent
+    # (200, page « pas de bloc ») — un vert qui aurait repondu a une autre question que la sienne.
+    deck._sessions["s-grp"] = {"login": "grp", "groups": ["fleet:humans", "fleet:admins"],
+                               "exp": time.time() + 600}
+    deck.humans = lambda: [{"human": "zoe"}, {"human": "max"}, {"human": "adm"}, {"human": "grp"}]
+    status, s = ws_get(dport, "/admin/ws", deck.SESSION_COOKIE + "=s-grp")
+    s.close()
+    check("404" in status,
+          "le GROUPE fleet:admins n'ouvre plus rien — seule la forge dit qui est admin (vu: %s)"
+          % status)
+    check(deck.authorize({"login": "grp", "groups": ["fleet:admins"]}, ("admin", "", "/ws")) is False,
+          "une session SANS le champ admin vaut « pas admin » — l'absence de reponse est un refus")
 finally:
+    deck._sessions.pop("s-grp", None)
+    deck.humans = lambda: [{"human": "zoe"}, {"human": "max"}, {"human": "adm"}]
     deck.SYSTEM_TARGETS.pop("admin", None)
     sys_srv.close()
+
+# (9g-bis) D'OU VIENT LE CHAMP : `is_admin`, rendu par la forge, lu au callback avec le jeton deja en
+# main. Les trois cas qui comptent sont la forge qui dit oui, la forge qui dit non, et la forge qui ne
+# repond pas — ce dernier est le seul ou un defaut permissif se serait vu trop tard.
+_cfg = {"internal_url": "http://forge:3000/"}
+_get_json_real = deck._get_json
+try:
+    deck._get_json = lambda url, tok: {"login": "adm", "is_admin": True}
+    check(deck.forge_is_admin(_cfg, "tok") is True, "la forge dit is_admin -> la session est admin")
+    deck._get_json = lambda url, tok: {"login": "zoe", "is_admin": False}
+    check(deck.forge_is_admin(_cfg, "tok") is False, "la forge dit non -> session ordinaire")
+    deck._get_json = lambda url, tok: {"login": "zoe"}
+    check(deck.forge_is_admin(_cfg, "tok") is False,
+          "un champ ABSENT n'est pas un oui — on ne promeut pas sur un silence")
+
+    # ⚠ FAIL-CLOSED. Une panne de cet appel ne doit pas ouvrir le tier : sinon il se prend en faisant
+    # tomber l'endpoint, ce qui est plus facile que de devenir admin sur la forge.
+    def _boom(url, tok):
+        raise TimeoutError("forge muette")
+    deck._get_json = _boom
+    check(deck.forge_is_admin(_cfg, "tok") is False,
+          "forge muette -> PAS admin : une panne ne promeut personne")
+
+    # L'URL tapee est l'INTERNE, celle que le conteneur peut joindre. La publique est une adresse de
+    # navigateur ; la confondre ici rend un appel qui echoue, donc — fail-closed oblige — un admin
+    # silencieusement degrade en humain ordinaire.
+    _seen = []
+    deck._get_json = lambda url, tok: (_seen.append((url, tok)), {"is_admin": True})[1]
+    deck.forge_is_admin(_cfg, "jeton")
+    check(_seen == [("http://forge:3000/api/v1/user", "jeton")],
+          "l'appel part sur l'URL INTERNE, avec le jeton du callback (vu: %s)" % _seen)
+finally:
+    deck._get_json = _get_json_real
+
+# (9g-ter) L'ADMINITE DESCEND JUSQU'A LA PAGE, et par la session — pas par une seconde lecture de la
+# forge a chaque tick. Sans ce champ dans `/api/state`, l'onglet ne peut pas se dessiner.
+_humans_saved = deck.humans
+deck.humans = lambda: []
+try:
+    check(deck.state(only="adm", admin=True)["admin"] is True,
+          "/api/state porte l'adminite de la session")
+    check(deck.state(only="zoe")["admin"] is False,
+          "et son defaut est FAUX — un appelant qui ne la passe pas ne promeut pas son lecteur")
+finally:
+    deck.humans = _humans_saved
 
 # (9h) UN LOGIN QUI N'EST PAS UN NOM SIMPLE NE FABRIQUE PAS DE CHEMIN. La session est deja la source
 # du chemin apres `authorize` — donc la forme du login est la derniere chose entre nous et un `..`.
