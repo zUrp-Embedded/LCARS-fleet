@@ -9,10 +9,10 @@ defmodule Fleet.Spawner.SessionId do
 
   Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<X>`            kill/HARVEST class (hex nibble) — WHAT KILLING THIS PROCESS COSTS, and the
-                      authority is `CapProfile.kill_class/1`, which states the criterion and names no
-                      role (this doc listed them and the list went stale, filing `gatekeeper` under 1
-                      while its profile said one-shot). `0` = nothing, outside the fleet · `1` = a
+    - `<X>`            kill/HARVEST class (hex nibble) — WHAT KILLING THIS PROCESS COSTS. L'AUTORITE EST
+                      `CapProfile.kill_class/1`, qui enonce le critere et NE NOMME AUCUN ROLE : un
+                      inventaire de roles ecrit ici perime en silence, puisque rien ne le relie a la
+                      source. `0` = nothing, outside the fleet · `1` = a
                       LIVE HUMAN CONVERSATION · `2` = the work in flight on ONE ticket, re-dispatchable
                       · `3` = nothing, cold and meant to be swept. `badcafe` = universal kill-marker →
                       `pkill -f 'claude.*3badcafe'` sweeps the cold ones, `'claude.*2badcafe'` the
@@ -27,18 +27,16 @@ defmodule Fleet.Spawner.SessionId do
                       account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999
                       — a DEPLOYMENT assumption, not a property: desktop UIDs fit; container
                       userns/subuid ranges live at 100000+. Today bwrap pods run under the human's
-                      UID so the bound holds; the deploy/docker work is exactly where it
-                      can stop holding. The refusal is LOUD (function-clause — the right failure),
-                      and that collision is a NAMED dossier (BACKLOG, provisioning list), not a
-                      surprise to rediscover.
+                      UID so the bound holds; a deployment that changes that is exactly where it
+                      stops holding. The refusal is LOUD (function-clause — the right failure).
     - `4dad-babe`     fixed hexspeak filler (`4` of `4dad` = UUID version nibble ; `b` of `babe` =
                       valid RFC4122 variant nibble → the string IS a legal UUID, accepted by `--session-id`).
                       ⚠ VENDOR EXPOSURE, named: the whole scheme rests on the vendor accepting any
-                      well-formed v4 UUID as `--session-id`. Server-side validation someday (vendor-
-                      issued ids, entropy checks) breaks the deterministic identity wholesale — loudly
-                      (resume fails), and the non-deterministic fallback already exists (`UUID.uuid4()`
-                      is the default outside pods). Same exposure class as the ToS surface: theirs to
-                      redefine, ours to detect.
+                      well-formed v4 UUID as `--session-id`. Une validation cote serveur (ids emis par
+                      le vendor, controle d'entropie) casserait l'identite deterministe en bloc — mais
+                      BRUYAMMENT (le resume echoue), et le repli non deterministe existe deja
+                      (`UUID.uuid4()` est le defaut hors pod). C'est une dependance a un comportement
+                      qu'on ne controle pas : detectable, jamais garantie.
     - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
                       <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
                       `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/5` REFUSES a
@@ -46,28 +44,23 @@ defmodule Fleet.Spawner.SessionId do
                       it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
                       stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
                       hand two projects one deterministic identity). Widening `<REPO4>` = a format redesign.
-                      ⚠ THE WRAP IS ARBITRATED (user, 2026-08-02): when the stop fires, do NOT "cut and
-                      restart from 0000" — that is the same modulo done by policy instead of by `rem`
-                      (two projects, one identity; a pod resumes the OTHER project's conversation and the
-                      recall can restore its seed — silent cross-project context bleed, the one failure
-                      family this repo forbids everywhere). Worse than uniform: survivor bias concentrates
-                      recycled low ids onto the OLDEST, most load-bearing repos (fleet/lcars is id 2), and
-                      `0000` is the reserved fleet-level sentinel a restart would impersonate. The decision
-                      is DEFERRED to the first break ("on attend de casser pour décider") — the material
-                      for that day, ready: (a) a GENERATION WORD in the filler, `dec0de` → `decade` →
-                      `defaced` (still hexspeak, still legal hex, the aesthetics are a project invariant —
-                      a bare counter nibble was refused on those grounds); (b) belt-and-suspenders, a
-                      repo-match guard at the mint/slot (a seed already exists for this UUID and names
-                      another repo → loud refusal). Neither is built until the stop fires.
+                      ⚠ ET LE REBOUCLAGE EST INTERDIT, PAS SEULEMENT LE `rem` : quand la borne tombe,
+                      « on repart de 0000 » est le MEME modulo, fait par decision au lieu d'être fait
+                      par l'operateur. Deux projets recoivent une identite, un pod reprend la
+                      conversation de l'AUTRE et le recall peut restaurer sa graine — fuite de contexte
+                      inter-projet, la seule famille de panne que ce depot refuse partout. Le biais de
+                      survie l'aggrave : les ids bas recycles retombent sur les depots les plus anciens
+                      et les plus porteurs, et `0000` est la sentinelle fleet-level qu'un redemarrage
+                      usurperait.
     - `dec0de`        filler.
     - `<P><R>`        pool (high nibble, `0` = sequential) + role index (low nibble) — **HEX** (R=0-F).
                       `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a
                       local catalogue: the role → slot mapping lives on the cap-profile side.
 
   The WHAT (role/class/project) is DECLARED by the cap-profile ; the WHO (the human's OS UID) runs on
-  the OS axis AND is folded into the `<UID>` field (v2 2026-07-19) — NOT redundant: the Desktop slot
-  (OAuth + local-uuid) does NOT see the OS axis, so two humans sharing ONE OAuth need the UID IN the
-  UUID to be distinguishable. PURE module (zero process, zero IO, zero catalogue): a TOTAL encoder over
+  the OS axis AND is folded into the `<UID>` field — NOT redundant: the Desktop slot (OAuth +
+  local-uuid) does NOT see the OS axis, so two humans sharing ONE OAuth need the UID IN the UUID to
+  be distinguishable. PURE module (zero process, zero IO, zero catalogue): a TOTAL encoder over
   valid inputs — no role refusal (those decisions live at the spawn level, not here), no `{:error, _}`.
   An out-of-bounds input = caller bug → function-clause/raise.
   """
