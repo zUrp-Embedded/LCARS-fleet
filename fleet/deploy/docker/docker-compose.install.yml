@@ -125,7 +125,10 @@ services:
     cap_add:
       - SYS_ADMIN
     security_opt:
-      - seccomp=unconfined
+      # 6-071 — mesuré : ce profil suffit à bwrap, le défaut docker non. L'arbitrage complet (les
+      # quatre runs, et pourquoi `apparmor=unconfined` reste faute d'hôte pour le mesurer) vit dans
+      # l'en-tête de `docker-compose.yml`, source unique.
+      - seccomp=./lcars-hardened-seccomp.json
       - apparmor=unconfined
     logging:
       driver: json-file

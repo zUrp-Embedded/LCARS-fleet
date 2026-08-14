@@ -19,11 +19,32 @@
 # path-rot du nid v1 qui avait tué la chaîne d'avant ; le .dockerignore racine s'applique).
 #
 # bwrap DANS le conteneur : les pods exigent unshare/mount/pivot_root/setns (userns + mountns).
-# Le profil seccomp Docker par défaut les bloque → cap SYS_ADMIN + seccomp/apparmor unconfined
-# sur CE service. Trade assumé et documenté : la frontière de containment des PODS est bwrap
-# À L'INTÉRIEUR (l'octogone) ; la frontière du conteneur, elle, est volontairement perméable aux
-# syscalls de namespaces — le durcissement fin (profil seccomp custom additif) est un chantier
-# de ship, pas un défaut silencieux. PAS de `privileged: true` (surface bien plus large).
+# Le profil seccomp Docker par défaut les bloque → cap SYS_ADMIN sur CE service. Trade assumé et
+# documenté : la frontière de containment des PODS est bwrap À L'INTÉRIEUR (l'octogone) ; la
+# frontière du conteneur, elle, est perméable aux syscalls de namespaces. PAS de
+# `privileged: true` (surface bien plus large).
+#
+# 6-071 — L'ARBITRAGE EST MESURÉ, PLUS SUPPOSÉ, et le `seccomp=unconfined` est TOMBÉ. Quatre runs
+# sur l'image du banc, `bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true` :
+#
+#   1. seccomp=unconfined + SYS_ADMIN ........ OK  (l'état d'avant)
+#   2. seccomp=lcars-hardened + SYS_ADMIN .... OK  ← ce que ce fichier pose désormais
+#   3. seccomp=lcars-hardened SANS SYS_ADMIN . KO  « No permissions to create new namespace »
+#   4. seccomp DÉFAUT docker + SYS_ADMIN ..... KO  « pivot_root: Operation not permitted »
+#
+# Donc : le profil durci (défaut docker + les syscalls de namespace, `defaultAction: ERRNO`) suffit,
+# et `SYS_ADMIN` n'est PAS retirable — mesuré, pas déduit. Le run 4 confirme au passage la prémisse
+# de ce commentaire, qui n'avait jamais été vérifiée.
+#
+# ⚠ `apparmor=unconfined` RESTE, et ce qui manque est une MESURE, pas une décision : AppArmor n'est
+# pas actif sur la boîte de dev (`docker info` → SecurityOptions sans `name=apparmor`), donc tout run
+# vert y est muet sur lui. Le retirer sur cette foi-là serait répondre à une question voisine. Ce qui
+# tranchera : rejouer les quatre runs sur un hôte où `docker info` annonce AppArmor — le profil
+# `docker-default` refuse `mount`, donc l'attente est un KO, et c'est justement ce qu'il faut voir
+# avant d'y toucher.
+#
+# Le chemin du profil est RELATIF au fichier compose, pas au cwd de l'appelant — vérifié par un
+# contrôle : profil retiré d'à côté du compose, docker nomme le chemin absolu qu'il a tenté.
 
 name: lcars
 
@@ -96,7 +117,8 @@ services:
     cap_add:
       - SYS_ADMIN
     security_opt:
-      - seccomp=unconfined
+      # 6-071 — mesuré : ce profil suffit à bwrap, le défaut docker non (cf. l'en-tête).
+      - seccomp=./lcars-hardened-seccomp.json
       - apparmor=unconfined
     # Les logs d'une boite qui tourne 24/7 grossissent SANS FIN par defaut : `docker inspect`
     # rend `json-file` avec ZERO option (mesure du 2026-07-31). L'entrypoint, ttyd, le provision
