@@ -100,6 +100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_tools_gated(root),
         check_mcp_tool_effects(root),
         check_cap_profile_project_keys(root),
+        check_proven_image_regime(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
         check_mcp_seam_surface(root),
@@ -1309,6 +1310,73 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         note: "boot-order lock, twin of boot.order_f8"
       }
     end
+  end
+
+  # WHAT THE PROVEN-IMAGE REGIME IS ACTUALLY WORTH, AND THE ONE SWITCH THAT VOIDS IT. `SPBuilder`
+  # renders its templates with `EEx.eval_string/2` — EEx evaluates arbitrary Elixir at render time,
+  # in the DAEMON's process, with the whole fleet's rights and not a confined pod's. Two regimes
+  # decide which bytes get evaluated:
+  #
+  #   * image PUBLISHED (the default, frozen at boot AFTER `Catalogue.verify!()`, sha256-fingerprinted,
+  #     served from `:persistent_term`) -- a mid-life disk mutation changes nothing until a restart;
+  #   * NO image -> live disk at every render, re-read each time, verified by nothing.
+  #
+  # The second regime exists on purpose (the suites' hermetic default, tooling) and its twin says so
+  # in `CapProfile.Catalog.read_role/2`. What has no legitimate reason to exist is that switch being
+  # flipped ANYWHERE ELSE than `config/test.exs`: it silently moves a production daemon onto
+  # evaluate-whatever-is-on-disk, and nothing in the code would look different.
+  @doc false
+  def check_proven_image_regime(root) do
+    files = Path.wildcard(Path.join(root, "config/*.exs"))
+
+    disabling =
+      for f <- files,
+          key <- disabled_image_keys(quoted!(root, Path.relative_to(f, root))),
+          do: {Path.basename(f), key}
+
+    offenders = disabling |> Enum.reject(fn {base, _} -> base == "test.exs" end) |> Enum.sort()
+
+    cond do
+      measured_nothing?(files) ->
+        broken_result("boot.proven_image_regime", "file under config/")
+
+      # `config/test.exs` disables BOTH images by design. Finding none means the reader stopped
+      # seeing the switch -- and a wall that cannot see its subject passes everything.
+      measured_nothing?(disabling) ->
+        broken_result("boot.proven_image_regime", "publish_image switch in config/")
+
+      true ->
+        %{
+          id: "boot.proven_image_regime",
+          remediation:
+            "keep `cap_profile_publish_image` / `sp_builder_publish_image` false in config/test.exs " <>
+              "ONLY: without a published image the SP templates are re-read from live disk at every " <>
+              "render and EEx-evaluated in the daemon, verified by nothing",
+          status: if(offenders == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(offenders, fn {file, key} ->
+              "config/#{file}: #{key} disabled outside the hermetic test config"
+            end),
+          note:
+            "#{length(disabling)} switch(es) off, all in test.exs — proven-image regime intact"
+        }
+    end
+  end
+
+  # `config :lcars_fleet, <key>: false` for either image key, read from the AST: a key named in a
+  # comment must not be able to redden this, and one hidden in a keyword list must not escape it.
+  defp disabled_image_keys(ast) do
+    ast
+    |> collect(fn
+      {:config, _, [:lcars_fleet, opts]} when is_list(opts) ->
+        for {k, false} <- opts,
+            k in [:cap_profile_publish_image, :sp_builder_publish_image],
+            do: k
+
+      _ ->
+        nil
+    end)
+    |> List.flatten()
   end
 
   # THIRD OF THE BOOT-ORDER FAMILY, and the one whose subject is a DEFAULT rather than a call.

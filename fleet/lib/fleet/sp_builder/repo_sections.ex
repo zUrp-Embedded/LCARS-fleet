@@ -64,13 +64,13 @@ defmodule Fleet.SPBuilder.RepoSections do
   def read(path) when is_binary(path) do
     case File.read(path) do
       {:ok, content} ->
-        kept =
+        {kept, withheld} =
           content
           |> named_sections()
-          |> Enum.filter(&admit_section?(&1, path))
-          |> Enum.join("\n\n")
+          |> Enum.reduce({[], []}, &admit_or_withhold(&1, &2, path))
 
-        {:ok, warn_if_no_section(kept, path)}
+        body = kept |> Enum.reverse() |> Enum.join("\n\n")
+        {:ok, warn_if_no_section(body, path) <> withheld_notice(Enum.reverse(withheld))}
 
       {:error, reason} ->
         {:error, {:repo_claude_md_unreadable, path, reason}}
@@ -78,10 +78,10 @@ defmodule Fleet.SPBuilder.RepoSections do
   end
 
   # The reception filter at the admission door (never a cleanup: the WHOLE section goes).
-  defp admit_section?(section, path) do
+  defp admit_or_withhold(section, {kept, withheld}, path) do
     case Fleet.ReceptionFilter.scan(section) do
       :clean ->
-        true
+        {[section | kept], withheld}
 
       {:match, label, excerpt} ->
         Logger.error(
@@ -90,8 +90,54 @@ defmodule Fleet.SPBuilder.RepoSections do
             "directives (BL-6-16)"
         )
 
-        false
+        {kept, [section_name(section) | withheld]}
     end
+  end
+
+  defp section_name(section) do
+    case Regex.run(~r/^##\s+(\S+)/, section) do
+      [_, name] -> name
+      _ -> "?"
+    end
+  end
+
+  # THE DROP WAS SILENT ON THE SIDE THAT MATTERS. The fleet logged `error`; the POD was told
+  # nothing, and read a repo doc whose most prescriptive section had vanished. The filter's patterns
+  # are LEXICAL and do not tell an instruction from a mention — `\brebase\b.*\bmain\b` matches
+  # "rebase onto main" and "never rebase onto main" alike. So the section most likely to be dropped
+  # is the one that DOCUMENTS the repo's prohibitions, i.e. exactly what `Conventions` and `Gotchas`
+  # are for. The filter then produces the reverse of its intent: "never do X" is removed because it
+  # mentions X, and the agent proceeds not knowing X is forbidden.
+  #
+  # The pattern list stays untouched — its own contract says EXTENSIBLE, NEVER REDUCIBLE, and
+  # teaching it to tell a mention from an order is the V4 threat the doctrine puts out of scope.
+  # What is fixed is the SILENCE: the pod now learns that constraints exist which it was not given.
+  #
+  # ⚠ THE NOTICE NAMES THE SECTIONS AND NEVER QUOTES THEM. Carrying the matched excerpt would
+  # re-inject through the message exactly what the filter just refused — the door held, and the
+  # notice about the door would walk it in.
+  defp withheld_notice([]), do: ""
+
+  defp withheld_notice(names) do
+    liste = names |> Enum.uniq() |> Enum.map_join(", ", &"`#{&1}`")
+
+    """
+
+
+    ## ⚠ Sections retenues à la réception
+
+    Le `CLAUDE.md` de ce dépôt porte ces sections, et elles ne t'ont PAS été transmises : #{liste}.
+
+    Un filtre mécanique les a écartées : leur texte contient le motif d'une opération destructrice.
+    Ce filtre ne distingue pas une consigne d'une mention — une section qui DOCUMENTE un interdit
+    (« ne jamais rebaser sur main ») est écartée pour la même raison qu'une section qui l'ordonnerait.
+
+    Ce que ça change pour toi : ce dépôt a des conventions écrites que tu n'as pas sous les yeux.
+    Ne conclus pas de leur absence qu'il n'y en a pas. Sur un geste git destructeur ou irréversible,
+    demande plutôt que de supposer.
+    """
+    |> String.replace(~r/^    /m, "")
+    |> String.trim_trailing()
   end
 
   # THIRD state, previously folded into the first. This module already separates "no path supplied"
