@@ -303,13 +303,31 @@ absent() { # absent <membres de la team…>
     absent_humans $*"
 }
 
-@test "l'humain de BOOTSTRAP n'est jamais un converge — l'entrypoint le cree, pas la team" {
+@test "GUARD A : l'uid 1000 (admiral/sysadmin) n'est jamais un converge — garde dur keye sur l'UID, pas le login" {
+  # lcars est a l'uid 1000 dans la fixture -> exclu par le garde uid (jamais candidat a revocation).
   passwd_fixture; group_fixture "lcars,alice,bob"
   converged
   [ "$status" -eq 0 ]
   [[ "$output" != *"lcars"* ]]
   [[ "$output" == *"alice"* ]]
   [[ "$output" == *"bob"* ]]
+}
+
+@test "GUARD A : le garde protege l'UID 1000 quel que soit le login, et n'epargne plus un login par son nom" {
+  # uid 1000 = admiral (PAS lcars) -> exclu (le garde keye sur l'uid). Un login 'lcars' a l'uid 1005
+  # n'est PLUS specialement protege : il converge comme un worker ordinaire. Preuve : uid-based, pas login-based.
+  cat > "$PASSWD_FILE" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+admiral:x:1000:1000::/home/admiral:/bin/bash
+lcars:x:1005:1005::/home/lcars:/bin/bash
+alice:x:1001:1001::/home/alice:/bin/bash
+EOF
+  group_fixture "admiral,lcars,alice"
+  converged
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"admiral"* ]]
+  [[ "$output" == *"lcars"* ]]
+  [[ "$output" == *"alice"* ]]
 }
 
 @test "un compte SYSTEME infiltre dans le groupe n'est pas un humain converge (uid < UID_MIN)" {

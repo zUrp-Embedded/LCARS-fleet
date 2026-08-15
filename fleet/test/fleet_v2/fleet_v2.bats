@@ -79,6 +79,24 @@ NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { e
   [ "$status" -ne 0 ]
 }
 
+# --- cmd_start: GUARD B (no fleet under the sysadmin uid) ---
+# Le BEAM herite de l'uid du lanceur et ses pods avec : lancer sous l'uid reserve du sysadmin
+# (admiral, 1000) donnerait des pods root. Le garde est EN TETE de cmd_start, avant tout le reste.
+# On simule l'uid via `LCARS_SYSADMIN_UID` (la valeur de comparaison), pas en changeant d'uid reel.
+
+@test "GUARD B: start REFUSE sous l'uid du sysadmin (admiral) et nomme le plan" {
+  run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  [[ "$output" == *"admiral/sysadmin"* ]]
+  [ "$status" -ne 0 ]
+}
+
+@test "GUARD B: sous un uid worker (!= sysadmin) le garde laisse passer — on atteint la porte suivante" {
+  run bash -c "export LCARS_SYSADMIN_UID=\$(( \$(id -u) + 1 )); source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" != *"admiral/sysadmin"* ]]
+  [[ "$output" == *"credentials claude absentes"* ]]
+  [ "$status" -ne 0 ]
+}
+
 # --- option parsing ---
 # Until 2026-08-03 this script dispatched sub-commands and NOTHING read `$@` past that: `cmd_start`
 # took its arguments and ignored them, so every flag was silently swallowed. A door that accepts
