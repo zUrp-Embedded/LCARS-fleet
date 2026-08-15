@@ -64,6 +64,11 @@ FAKE
   # faut distinguer du `image inspect <image>` d'existence — meme deux premiers mots, autre question.
   IMAGE_REV_OUT="$BATS_TEST_TMPDIR/image_rev.out"
   echo "deadbeef1" > "$IMAGE_REV_OUT"
+  # Le token OPERATEUR (`~/.gitea_token` du worker), exige par le verdict depuis 2026-08-15 : il peut
+  # etre saute par les DEUX passes d'amorcage sans que rien ne le dise, donc le verdict le mesure.
+  # Etat nominal « oui » ; le temoin de son absence l'ecrase.
+  OP_TOKEN_OUT="$BATS_TEST_TMPDIR/op_token.out"
+  echo "oui" > "$OP_TOKEN_OUT"
   # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
   # boite en second argument (`exec <box> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
@@ -85,6 +90,10 @@ esac
 case "\$argv" in
   *system.gitea_token*)   echo TOKEN-SYSTEME ;;
   *"*.gitea_token"*)      echo 9 ;;
+  # Le token OPERATEUR, dans le home du worker — distinct du glob /home/private ci-dessus, qui vise
+  # les tokens de ROLE. Deux fichiers homonymes, deux rails : celui-ci est la voie de la boite vers
+  # la forge, et `bench-up.sh` l'EXIGE depuis 2026-08-15 (il pouvait etre saute par les deux passes).
+  *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;
   *credentials.json*)     echo oui ;;
 esac
 exit 0
@@ -121,6 +130,23 @@ run_bench() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRET"* ]]
   [[ "$output" != *"PAS PRET"* ]]
+}
+
+@test "token operateur absent apres DEUX passes → refus, exit 6, et la CAUSE est nommee" {
+  # Le geste que ce temoin garde : `bench-forge-bootstrap` ne peut pas poser `~/.gitea_token` a la
+  # passe 1 — le worker vient de la FORGE et n'existe en unix qu'apres la relance que cette passe
+  # demande. Il saute donc, en le disant, et la passe 2 pose. Mesure du 2026-08-15 : avant ce
+  # saut, la passe 1 MOURAIT sur « unable to find user lcars » et le banc ne montait pas.
+  #
+  # Ce qui rend ce saut sur n'est PAS son message, c'est cette exigence : deux passes qui sautent
+  # toutes les deux donneraient un banc vert dont la boite ne parle pas a la forge, sans un mot.
+  # Le refus doit nommer la CAUSE (le worker manque) et pas seulement le symptome (le fichier manque).
+  echo "non" > "$OP_TOKEN_OUT"
+  run_bench
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"token operateur absent"* ]]
+  [[ "$output" == *"convergeur"* ]]
+  [[ "$output" != *"banc PRET"* ]]
 }
 
 @test "6-133: pas d'image pour le label elixir → PAS PRET, exit 6" {

@@ -366,9 +366,21 @@ except Exception: print("")' 2>/dev/null || true)"
   [[ -n "$HUMAN_TOKEN" ]] \
     || die "la forge a refuse le token operateur ($OP_TOKEN_NAME) — HTTP $OP_CODE : ${OP_BODY:-<corps vide>}" 6
 
-  printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
-      'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
-    || die "token operateur minte mais NON pose dans $BOX — la boite ne pourra pas parler a la forge" 6
+  # LE WORKER N'EXISTE PAS ENCORE A LA PASSE 1, ET CE N'EST PAS UNE PANNE. Depuis identite-v2
+  # l'entrypoint materialise `admiral` (uid 1000) et RIEN d'autre : `$HUMAN` vient de la FORGE, et le
+  # convergeur ne le fabrique qu'au boot SUIVANT le seed — precisement la relance que cette passe
+  # demande deux lignes plus haut. Un `die` ici tuait l'amorcage sur un ordre qui ne peut pas etre
+  # autre : mesure du 2026-08-15, `unable to find user lcars` en sortie de passe 1.
+  # Meme forme que le semis : on saute en le DISANT, la passe 2 pose. Ce qui garde l'oubli impossible
+  # n'est pas ce message, c'est le verdict de `bench-up.sh`, qui EXIGE ce fichier apres deux passes.
+  if ! "$DOCKER_BIN" exec "$BOX" id -u "$HUMAN" >/dev/null 2>&1; then
+    say "token operateur minte, pas encore pose : le worker '$HUMAN' n'existe pas dans $BOX (il vient
+   de la forge, materialise par le convergeur a la relance). La passe 2 le posera."
+  else
+    printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+        'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
+      || die "token operateur minte mais NON pose dans $BOX — la boite ne pourra pas parler a la forge" 6
+  fi
   say "token operateur pose dans $BOX:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
 
   # Les DEUX lignes que 70-human instruit (cas D4) : le runtime doit ecrire sur la forge avec le

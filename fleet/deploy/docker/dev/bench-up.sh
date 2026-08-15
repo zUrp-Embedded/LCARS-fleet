@@ -270,16 +270,16 @@ printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec
   && say "mot de passe de banc pose sur admiral (ssh/sudo)" \
   || say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
 
-# ─── 3. les creds anthropic (piege 3) ────────────────────────────────────────────────────────────
-if [[ "$WITH_CREDS" -eq 1 ]]; then
-  [[ -r "$CREDS_FROM" ]] || die "creds illisibles: $CREDS_FROM (--no-creds pour un banc sans pods)" 5
-  "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
-      'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
-    < "$CREDS_FROM" || die "creds non posees dans la boite" 5
-  say "creds anthropic posees chez $HUMAN (le spawn-boundary passera)"
-else
-  say "creds NON posees (--no-creds) — aucun pod ne pourra demarrer, par choix"
-fi
+# ─── 3. les creds anthropic : DEPLACEES APRES LA RELANCE (piege 3) ───────────────────────────────
+# Elles vivaient ICI, et depuis identite-v2 c'etait trop tot. L'entrypoint ne fabrique plus le
+# worker : il materialise `admiral` (uid 1000, sysadmin) et RIEN d'autre. `$HUMAN` (lcars) vient de
+# la FORGE — seme par l'amorcage en 4, materialise par le convergeur au boot de la relance en 5.
+# A cet endroit-ci il n'existe donc pas encore, et `docker exec -u lcars` meurt sur
+# « unable to find user lcars: no matching entries in passwd file ».
+# Mesure du 2026-08-15, premiere execution du chemin admiral : `/etc/passwd` de la boite healthy ne
+# porte QUE `admiral`. Le geste est en 5bis, la ou l'utilisateur existe — meme instant que le bloc de
+# verdict, qui lit deja les creds avec `-u "$HUMAN"` sans jamais avoir eu de probleme.
+[[ "$WITH_CREDS" -eq 1 ]] || say "creds NON posees (--no-creds) — aucun pod ne pourra demarrer, par choix"
 
 # ─── 4. amorcage de la forge, passe 1 : structure ────────────────────────────────────────────────
 # LE TFSTATE DOIT SURVIVRE ENTRE LES DEUX PASSES. Laisse a lui-meme, bootstrap se copie la recette
@@ -306,6 +306,23 @@ done
 [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] \
   || die "la boite ne redevient pas healthy apres relance" 3
 
+# ─── 5bis. les creds anthropic (piege 3) — ICI, parce que le worker existe MAINTENANT ────────────
+# Cette relance est le boot ou le convergeur lit le roster de la forge et materialise `$HUMAN` en
+# utilisateur unix (uid >= 1001). Avant elle, la boite ne porte qu'`admiral` : cf. le bloc 3.
+if [[ "$WITH_CREDS" -eq 1 ]]; then
+  [[ -r "$CREDS_FROM" ]] || die "creds illisibles: $CREDS_FROM (--no-creds pour un banc sans pods)" 5
+  # L'existence est VERIFIEE avant l'exec, sinon l'echec parle docker et pas fleet : « unable to find
+  # user » n'apprend a personne que le worker vient de la forge et pas de la boite.
+  "$DOCKER_BIN" exec "$BOX" id -u "$HUMAN" >/dev/null 2>&1 \
+    || die "le worker '$HUMAN' n'existe pas dans la boite apres la relance — le convergeur ne l'a pas
+   materialise. Il vient de la FORGE (team fleet:humans), pas de l'entrypoint : verifier que
+   l'amorcage passe 1 l'a bien seme, et les logs du convergeur ('docker logs $BOX')" 5
+  "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+      'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
+    < "$CREDS_FROM" || die "creds non posees dans la boite" 5
+  say "creds anthropic posees chez $HUMAN (le spawn-boundary passera)"
+fi
+
 # ─── 6. amorcage passe 2 : le semis ──────────────────────────────────────────────────────────────
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
@@ -319,6 +336,15 @@ SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat /home/private/system.gitea_token 2>/d
 
 ROLE_TOKENS="$("$DOCKER_BIN" exec "$BOX" bash -c 'ls /home/private/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
 CREDS_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
+# LE TOKEN OPERATEUR EST EXIGE ICI, ET C'EST CE QUI REND LE SAUT DE LA PASSE 1 SUR. `bench-forge-bootstrap`
+# ne peut pas le poser a la passe 1 (le worker vient de la forge et n'existe qu'apres la relance), il le
+# saute donc en le disant. Sans cette ligne, un banc dont les DEUX passes l'auraient saute monterait vert
+# et muet — la boite ne parlerait pas a la forge, et rien ne l'aurait dit. Le message nomme la cause,
+# pas le symptome : c'est l'existence du worker qui manque, pas le fichier.
+OP_TOKEN_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.gitea_token ] && echo oui || echo non' 2>/dev/null || echo non)"
+[[ "$OP_TOKEN_OK" == "oui" ]] || die "token operateur absent chez $HUMAN apres DEUX passes — la boite ne
+   pourra pas parler a la forge. Cause probable : le convergeur n'a jamais materialise '$HUMAN' (il vient
+   de la team forge fleet:humans, pas de l'entrypoint) — 'docker exec $BOX id $HUMAN' et 'docker logs $BOX'" 6
 # Le verdict RESONDE la promotion plutot que de repeter le flag : ce qui est affiche est ce que la
 # forge repond, pas ce qu'on lui a demande.
 HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/user" \
@@ -433,6 +459,7 @@ say "  image     : $IMAGE"
 say "  revision  : $IMAGE_REV_STATE"
 say "  runner    : $RUNNER_STATE"
 say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
+say "  op-token  : $OP_TOKEN_OK (~/.gitea_token de $HUMAN — la voie de la boite vers la forge)"
 say "  creds     : $CREDS_OK"
 say "  admin     : $HUMAN_ADMIN_STATE"
 say "  destruire : bench-down.sh --project $PROJECT"
