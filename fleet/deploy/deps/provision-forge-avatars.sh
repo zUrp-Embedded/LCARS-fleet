@@ -51,9 +51,18 @@ CHECK_ONLY=0
 # c'est normal. C'est l'inverse qui devait bouger : un compte de CETTE liste absent de la forge visée
 # n'est plus un échec (mesuré sur le catalogue web — six 404 d'affilée, un provisionnement correct
 # rendu rouge par des comptes qui n'avaient aucune raison d'exister).
+#
+# DEUX PAIRES, ET ELLES SE LISENT DANS LES COULEURS. Une paire partage sa couleur et RIEN d'autre :
+# le glyphe reste propre a chaque role, parce que c'est lui qui dit la fonction.
+#   · producer  — `engineer` (engrenage) ↔ `scribe` (document)        : orange #FF9900
+#   · system    — `chief` (confluence de merge) ↔ `gatekeeper` (portail) : cyan   #33BBCC
+# Deux entrees de meme teinte ne sont donc PAS un doublon a corriger. C'est aussi pourquoi `chief`
+# a rejoint cette table (2026-08-15) : il avait un compte et un jeton depuis toujours, aucun dessin,
+# donc aucun avatar — le trou que le verdict de ce script nommait deja (6-115).
 declare -a ENTRIES=(
   "system_architect:architect.png"
   "fleet_engineer:engineer.png"
+  "system_chief:chief.png"
   "system_gatekeeper:gatekeeper.png"
   "fleet_qualifier:qualifier.png"
   "fleet_reviewer:reviewer.png"
