@@ -23,6 +23,7 @@ import re
 import secrets
 import select
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -32,11 +33,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
-# ⚠ PAS DE `HUMANS_SH` ICI, ET SON ABSENCE EST UN CONSTAT A GARDER. Ce fichier a porte un pointeur
-# vers `console-humans.sh` que RIEN n'appelait : `humans()` relit `/etc/passwd` en direct, avec ses
-# propres bornes. Le pointeur donnait donc a lire « la liste vient de la source unique » alors que
-# ce fichier en tient une SECONDE. La constante morte est partie ; la divergence, elle, est reelle
-# et se voit maintenant qu'on ne l'habille plus.
+# `console-humans.sh` EST la regle, ce fichier la LIT. Ce pointeur a passe des semaines sans un seul
+# appelant pendant que `humans()` refaisait le filtre a cote, avec des bornes differentes — un
+# cablage commence et jamais fini, qui donnait a lire « la liste vient de la source unique » en
+# tenant une seconde source. Il est maintenant appele.
+HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh")
 
 # ── THE DOOR ────────────────────────────────────────────────────────────────────────────────────
 # WHAT THE AUTH IS FOR, AND IT IS NOT MAINLY SECURITY: this page is the box's front door and it
@@ -351,19 +352,44 @@ def block(uid):
 
 
 def humans():
-    """Humains de la boite : uid >= 1000, shell reel — la meme population que console.sh sert."""
+    """
+    Les humains servis par cette boite, DEMANDES a `console-humans.sh`.
+
+    ⚠ CETTE FONCTION PORTAIT SA PROPRE REGLE, ET C'ETAIT UNE SECONDE AUTORITE. Elle filtrait
+    `/etc/passwd` sur `uid >= 1000 and uid < 65000` + un shell en `bash|sh|zsh`, en affirmant dans
+    son docstring servir « la meme population que console.sh ». C'etait faux sur trois bornes, et
+    l'ecart qui mordait est le home : le script REFUSE un compte sans home (« une console sans home
+    s'ouvre sur / et ment »), cette fonction l'acceptait. Le deck listait donc un siege dont
+    `console.sh --all` n'avait jamais demarre la console, et la page rendait « cette console ne
+    fonctionne pas » a quelqu'un dont le compte allait tres bien.
+
+    La liste des humains est portee par la FORGE et derivee par le convergeur ; `console-humans.sh`
+    derive a son tour qui peut recevoir une console ici. Ce fichier est un LECTEUR : il ne refait
+    pas la derivation, il la demande.
+
+    Leve `OSError` si le script ne peut pas repondre — voir `door_humans/1` pour pourquoi cette
+    panne ne doit pas se dire « tu n'as pas de siege ».
+    """
     out = []
-    try:
-        with open("/etc/passwd") as fh:
-            for line in fh:
-                f = line.rstrip("\n").split(":")
-                if len(f) < 7:
-                    continue
-                name, uid, home, shell = f[0], int(f[2]), f[5], f[6]
-                if uid >= 1000 and uid < 65000 and shell.endswith(("bash", "sh", "zsh")):
-                    out.append({"human": name, "uid": uid, "home": home, "ports": block(uid)})
-    except OSError:
-        pass
+
+    proc = subprocess.run(
+        [HUMANS_SH], capture_output=True, text=True, timeout=10, check=False
+    )
+
+    if proc.returncode != 0:
+        raise OSError(
+            "%s exited %d: %s" % (HUMANS_SH, proc.returncode, (proc.stderr or "").strip()[:200])
+        )
+
+    for line in proc.stdout.splitlines():
+        f = line.split()
+        if len(f) != 3:
+            continue
+        name, uid, home = f[0], f[1], f[2]
+        if not uid.isdigit():
+            continue
+        out.append({"human": name, "uid": int(uid), "home": home, "ports": block(int(uid))})
+
     return sorted(out, key=lambda h: h["uid"])
 
 
@@ -483,7 +509,7 @@ def claude_credentials(home):
     return "unknown"
 
 
-def state(only=None, admin=False):
+def state(only=None, admin=False, people=None):
     """
     The box's state, RESTRICTED to `only` when a session names a human.
 
@@ -495,8 +521,12 @@ def state(only=None, admin=False):
     projection of the session, never an authorization -- what the tier actually opens is decided
     by `authorize`, server-side, on the session and not on anything the browser sends back.
     """
+    # `people` EVITE UN SECOND APPEL, il n'ouvre pas une seconde source. La porte vient d'appeler
+    # `humans()` pour decider si ce visiteur a un siege ; relancer le script ici le ferait tourner
+    # deux fois par requete, donc deux fois toutes les 10 s et par session. Quand personne ne
+    # transmet la liste (les tests, un appel direct), on la redemande — jamais on ne la reconstruit.
     hs = []
-    for h in humans():
+    for h in people if people is not None else humans():
         if only is not None and h["human"] != only:
             continue
         status, pods = fleet_pods(h)
@@ -1351,7 +1381,26 @@ class Deck(BaseHTTPRequestHandler):
         # either the converger has not got to it yet (wait), or the converger REFUSED this login
         # and always will (act). Collapsing them into "it converges on its own" is a lie to the
         # second person, and it is the kind of lie nobody ever comes back to check.
-        if not any(h["human"] == sess["login"] for h in humans()):
+        # ⚠ « JE N'AI PAS PU LIRE LA LISTE » N'EST PAS « TU N'AS PAS DE SIEGE ». Les deux etats
+        # ci-dessous accusent le convergeur — l'un dit « pas encore », l'autre « jamais ». Les
+        # servir sur une panne de lecture ferait accuser le convergeur d'un tort qui n'est pas le
+        # sien, a quelqu'un qui n'a rien a corriger. Un refus qui nomme le mauvais coupable coute
+        # plus cher qu'un refus qui dit « je ne sais pas ».
+        try:
+            people = humans()
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            print(f"[lcars-deck] liste des humains ILLISIBLE : {e}", file=sys.stderr, flush=True)
+            if path == "/api/state":
+                self._send(503, json.dumps({"error": "humans_unreadable"}),
+                           "application/json; charset=utf-8")
+            else:
+                self._send(503, page_unconfigured(
+                    "la liste des humains de cette boite est illisible (console-humans.sh) — "
+                    "ce n'est PAS un refus te concernant, et rien ne se debloquera en rechargeant"
+                ), "text/html; charset=utf-8")
+            return
+
+        if not any(h["human"] == sess["login"] for h in people):
             refused = refusal_for(sess["login"])
             if refused is not None:
                 if path == "/api/state":
@@ -1419,7 +1468,9 @@ class Deck(BaseHTTPRequestHandler):
             return
 
         if path == "/api/state":
-            self._send(200, json.dumps(state(only=sess["login"], admin=sess.get("admin"))),
+            self._send(200,
+                       json.dumps(state(only=sess["login"], admin=sess.get("admin"),
+                                        people=people)),
                        "application/json; charset=utf-8")
         elif path in ("/", "/index.html"):
             self._send(200, PAGE % {

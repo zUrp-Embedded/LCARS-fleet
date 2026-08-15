@@ -21,7 +21,19 @@
 # nominal. Convention Debian : < 1000 = systeme. Et 65534 (`nobody`) est au-dessus mais n'est pas
 # un humain non plus, d'ou le plafond.
 #
-# USAGE  : console-humans.sh            → une ligne par humain : « login uid »
+# ─── ET CE FICHIER N'EST PAS LA SOURCE : IL EN EST LA DERIVATION ────────────────────────────────
+# La liste des humains est portee par LA FORGE (la team `humans` de l'org), et `human-converger.sh`
+# en derive les comptes Unix. Ce script ne decide donc pas QUI est un humain : il repond « lesquels
+# de ces comptes peuvent recevoir une console sur CETTE boite », ce qui est une question de siege,
+# pas d'identite. Un compte que la forge ne connait plus est deja revoque quand on arrive ici
+# (retire du groupe, shell `nologin`), et le filtre ci-dessous le rejette pour cette raison-la.
+#
+# Il reste la source UNIQUE de cette regle-ci, et c'est ce que ses consommateurs doivent appeler
+# plutot que de refaire un filtre sur `/etc/passwd`. Le deck en portait un second, avec des bornes
+# differentes : il listait un humain SANS home, donc un siege dont aucune console n'avait jamais ete
+# demarree — exactement la page « cette console ne fonctionne pas » que le convergeur documente.
+#
+# USAGE  : console-humans.sh            → une ligne par humain : « login uid home »
 #          console-humans.sh --verbose  → + les rejets sur stderr, avec leur motif
 # EXIT   : 0 toujours (une liste vide est un resultat, pas une erreur)
 
@@ -65,12 +77,18 @@ while IFS=: read -r login _ uid _ _ home shell; do
       continue ;;
   esac
 
-  # DEUX COLONNES, ET LA TROISIEME EST PARTIE AVEC CE QU'ELLE DECRIVAIT. Elle portait
-  # `21000 + (uid % 500) * 10` — le bloc de ports de cet humain. Son unique lecteur le jetait deja
-  # (`console.sh` le lisait en `_base`), et la formule a ete supprimee de la boite le 2026-08-14 :
-  # continuer a l'imprimer aurait annonce a qui lit cette sortie qu'un bloc de ports existe.
-  printf '%s %s\n' "$login" "$uid"
-done < <(getent passwd)
+  # LA TROISIEME COLONNE A CHANGE DE NATURE, elle n'a pas ete « remise ». Elle portait
+  # `21000 + (uid % 500) * 10` — le bloc de ports de cet humain, dont le seul lecteur le jetait, et
+  # dont la formule a quitte la boite le 2026-08-14. Elle porte maintenant le HOME, c'est-a-dire
+  # exactement ce que la garde du dessus vient de verifier. Emettre un fait deja etabli evite au
+  # consommateur de le re-deriver, et c'est cette re-derivation qui avait fabrique une seconde
+  # regle dans le deck.
+  printf '%s %s %s\n' "$login" "$uid" "$home"
+  # MEME SEAM QUE `human-converger.sh` (`PASSWD_FILE`), ET POUR LA MEME RAISON : cette regle decide
+  # qui recoit une console, donc elle doit etre epinglable sans fabriquer des comptes Unix sur la
+  # machine qui fait tourner les tests. `getent` reste le defaut — il couvre NSS, la ou un `cat`
+  # de /etc/passwd ne verrait que les comptes locaux.
+done < <(if [[ -n "${LCARS_CONSOLE_PASSWD:-}" ]]; then cat "$LCARS_CONSOLE_PASSWD"; else getent passwd; fi)
 
 # Une ligne, pas dix-neuf : le compte des rejets attendus prouve que la garde a tourne, sans
 # noyer le seul rejet qui meriterait qu'on le lise.

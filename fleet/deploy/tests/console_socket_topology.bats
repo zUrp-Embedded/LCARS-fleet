@@ -286,3 +286,55 @@ ports_of() {
   # and names the flag, and a grep over the whole file would fail on the prose that documents it.
   ! grep -E '^[^#]*setpriv' "$LANDING" | grep -q -- '--init-groups'
 }
+
+# ─── `console-humans.sh` EST LA REGLE, ET SA SORTIE EST UN CONTRAT ────────────────────────────────
+#
+# Ce script n'avait AUCUN test, et sa sortie vient de changer : la 3e colonne portait un bloc de
+# ports (supprime avec la formule), elle porte maintenant le HOME. Le deck l'appelle desormais au
+# lieu de refaire son propre filtre sur /etc/passwd — c'est ce qui met fin a la seconde autorite. Un
+# contrat que deux programmes lisent et que rien n'epingle est un contrat en sursis.
+
+humans_sh() { # humans_sh <passwd-file> [--verbose]
+  local pw="$1"; shift
+  LCARS_CONSOLE_PASSWD="$pw" run bash "$BATS_TEST_DIRNAME/../docker/console-humans.sh" "$@"
+}
+
+@test "6-surface: console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe"
+  printf 'root:x:0:0::/root:/bin/bash\n' > "$pw"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
+
+  humans_sh "$pw"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "zoe 1015 $home/zoe" ]
+}
+
+@test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
+  printf 'max:x:1016:1016::%s/absent:/bin/bash\n' "$home" >> "$pw"
+
+  # ⚠ C'EST L'ECART QUI MORDAIT. Le deck acceptait `max` (il ne regardait pas le home) et affichait
+  # son siege ; `console.sh --all` ne lui demarrait jamais de console. La page rendait donc « cette
+  # console ne fonctionne pas » a quelqu'un dont le compte allait parfaitement bien.
+  humans_sh "$pw"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" != *"max"* ]]
+}
+
+@test "6-surface: un revoque (nologin) et un compte systeme sont hors de la liste" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe" "$home/gone" "$home/svc"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
+  printf 'gone:x:1016:1016::%s/gone:/usr/sbin/nologin\n' "$home" >> "$pw"
+  printf 'svc:x:120:120::%s/svc:/bin/bash\n' "$home" >> "$pw"
+
+  humans_sh "$pw"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" != *"gone"* ]]
+  [[ "$output" != *"svc"* ]]
+}

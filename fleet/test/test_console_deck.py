@@ -274,6 +274,52 @@ check(st == "off", "pas de socket -> 'off' pour la projection aussi (vu: %s)" % 
 # `state()` EXPOSE LES DEUX STATUTS SEPAREMENT. Le transport peut etre bon et le flux fige : un seul
 # champ ne peut pas porter les deux, et les aplatir rendrait le cas sourd invisible depuis la page.
 _full = serve_pods_unix("zoe", [{"pod_id": "a"}], {"_status": "deaf", "total": 0})
+# ─── `humans()` DEMANDE LA LISTE, IL NE LA RECONSTRUIT PLUS ──────────────────────────────────────
+# Ce bloc execute le VRAI chemin. La fonction portait sa propre regle (`/etc/passwd`, uid < 65000,
+# shell en bash|sh|zsh) en affirmant servir « la meme population que console.sh » — faux sur trois
+# bornes, dont celle qui mordait : un compte SANS home etait liste ici et refuse par le script, donc
+# le deck affichait un siege dont aucune console n'avait jamais ete demarree.
+#
+# ⚠ ET RIEN N'EXECUTAIT CE CHEMIN : les 14 sites de test remplacent `deck.humans`. Une fonction que
+# toute la suite stube est une fonction que la suite ne verifie pas — c'est l'onglet admin de ce
+# matin, dans un autre fichier.
+_hdir = tempfile.mkdtemp(prefix="lcars-humans.")
+atexit.register(shutil.rmtree, _hdir, ignore_errors=True)
+
+
+def _fake_humans_sh(name, body):
+    p = os.path.join(_hdir, name)
+    with open(p, "w") as fh:
+        fh.write("#!/usr/bin/env bash\n" + body)
+    os.chmod(p, 0o755)
+    return p
+
+
+_humans_sh_saved = deck.HUMANS_SH
+deck.HUMANS_SH = _fake_humans_sh("ok.sh", "printf 'zoe 1015 /home/zoe\\nmax 1016 /home/max\\n'\n")
+_parsed = deck.humans()
+check([h["human"] for h in _parsed] == ["zoe", "max"],
+      "humans() rend ce que le SCRIPT dit, dans l'ordre des uid (vu: %s)"
+      % [h["human"] for h in _parsed])
+check(_parsed[0]["uid"] == 1015 and _parsed[0]["home"] == "/home/zoe",
+      "et il en prend l'uid ET le home — le home est deja VALIDE par le script, on ne le re-derive pas")
+
+# ⚠ LA DISTINCTION QUI PORTE TOUT : un script qui echoue n'est pas une boite sans humains. Repondre
+# `[]` ferait dire a la porte « tu n'as pas de siege » a tout le monde, ce qui accuse le convergeur
+# d'un tort qui n'est pas le sien, aupres de gens qui n'ont rien a corriger.
+deck.HUMANS_SH = _fake_humans_sh("bad.sh", "echo boom >&2\nexit 3\n")
+try:
+    deck.humans()
+    check(False, "un script en ECHEC doit lever, pas rendre une liste vide")
+except OSError as _e:
+    check("exited 3" in str(_e), "un script en ECHEC leve et NOMME son code de sortie (vu: %s)" % _e)
+
+deck.HUMANS_SH = _fake_humans_sh("junk.sh", "printf 'pas-un-uid abc /home/x\\nzoe 1015 /home/zoe\\n'\n")
+check([h["human"] for h in deck.humans()] == ["zoe"],
+      "une ligne qui n'a pas la forme attendue est IGNOREE, elle ne fabrique pas un humain")
+
+deck.HUMANS_SH = _humans_sh_saved
+
 _real_humans = deck.humans
 deck.humans = lambda: [{"human": "zoe", "uid": 1001, "home": "/nonexistent", "ports": {}}]
 try:

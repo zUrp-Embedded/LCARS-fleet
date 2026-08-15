@@ -275,7 +275,7 @@ if [[ "$ALL" -eq 1 ]]; then
   n=0
   # `--verbose` : les rejets partent sur stderr → visibles dans `docker logs`. Un humain qui n'a PAS
   # eu sa console doit laisser une trace avec son motif ; un silence ferait croire a un oubli.
-  while read -r login _uid; do
+  while read -r login _uid _home; do
     [[ -n "$login" ]] || continue
     launch_one "$login" && n=$(( n + 1 )) || say "console de $login NON lancee"
   done < <("$HUMANS_SH" --verbose)
