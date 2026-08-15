@@ -176,7 +176,11 @@ defmodule Fleet.Pilot.Poller do
     # or one in the process of dying). Webhook kick-polls (:kick) pass this set through UNCHANGED —
     # counting kicks as ticks would compress the ~60s grace to ~2s under the forge traffic generated
     # by the completion sequence itself (reclaim mid-publication → double dispatch).
-    orphan_lock_suspects: MapSet.new()
+    orphan_lock_suspects: MapSet.new(),
+    # Orgs PROVEN absent from the forge (404) at the last discovery, so the drop is announced ONCE
+    # per transition instead of every tick. An operator who enabled a catalogue nobody enrolled must
+    # read the sentence; the same sentence repeated every 30s is one they learn to scroll past.
+    absent_orgs: MapSet.new()
   ]
 
   # No `@type t` on purpose: the commented defstruct above IS the state contract — a type list
@@ -382,13 +386,53 @@ defmodule Fleet.Pilot.Poller do
   # `Reconciliation`): the cross-repo union of suspects cannot collide on the number
   # alone → a live pod #N/repoB CANNOT mask an orphan #N/repoA, and the 2-tick grace does not
   # contaminate across repos (no double-spawn). The key carries the identity.
+  # ⚠ UNE ORG ABSENTE N'EST PAS UNE ORG ILLISIBLE, et confondre les deux a coute une flotte entiere.
+  # Mesure du 2026-08-15 au banc : `lcars catalogue enable web` sur une forge qui n'a jamais porte
+  # l'org `web` rendait 404 ici, le `{:halt, …}` jetait l'accumulateur — `fleet` INCLUS, deja liste —
+  # et la passe entiere tombait. Pas seulement le dispatch : tout le corps de `do_poll` (snapshot des
+  # pods, fold des repos, filet arch, recheck des protections) pour TOUS les projets de TOUTES les
+  # orgs saines. Le backoff saturait ensuite a 300 s sans jamais redescendre, puisque `err_streak` ne
+  # retombe que sur une decouverte reussie.
+  #
+  # LE FAIL-CLOSED RESTE, sa raison n'a pas bouge : « une decouverte partielle ne se distingue pas de
+  # "pas de travail" ». Mais cette raison ne s'applique PAS a un 404, et c'est la nuance qui compte —
+  # une org qui N'EXISTE PAS ne porte AUCUN depot, donc la retirer ne cache rien par construction.
+  # Il n'y a pas de travail a rendre muet. Un 5xx, un timeout, un 403 : la, des depots existent
+  # peut-etre et on ne les a pas lus → la passe echoue, comme avant.
+  #
+  # Les orgs absentes remontent avec les depots plutot que d'etre logguees ici : le site qui sait si
+  # l'absence est NOUVELLE est celui qui tient l'etat, et repeter la phrase a chaque tick la rend
+  # invisible aussi surement que se taire.
   defp discover(forge, state) do
-    Enum.reduce_while(state.orgs, {:ok, []}, fn org, {:ok, acc} ->
+    Enum.reduce_while(state.orgs, {:ok, [], []}, fn org, {:ok, acc, absent} ->
       case forge.list_org_repos(org, state.forge_opts) do
-        {:ok, repos} -> {:cont, {:ok, acc ++ repos}}
+        {:ok, repos} -> {:cont, {:ok, acc ++ repos, absent}}
+        {:error, {:http, 404, _}} -> {:cont, {:ok, acc, [org | absent]}}
         {:error, reason} -> {:halt, {:error, {org, reason}}}
       end
     end)
+  end
+
+  # Announce a PROVEN-absent org once per transition, and name the two gestures that end it. The
+  # message is the only place the operator learns that a catalogue they enabled is inert here: the
+  # forge never carried its org, so `enable` made the fleet READ a business nobody provisioned.
+  defp note_absent_orgs(state, absent) do
+    now = MapSet.new(absent)
+
+    for org <- MapSet.difference(now, state.absent_orgs) do
+      Logger.warning(
+        "Poller: catalogue #{inspect(org)} is ACTIVE on this box but its org does NOT exist on the " <>
+          "forge (404) — DROPPED from discovery. Nothing is hidden by the drop: an org that does " <>
+          "not exist carries no repository. Enroll it (`etc/enroll-catalogue.sh` then `tofu apply`) " <>
+          "or `lcars catalogue disable #{org}`."
+      )
+    end
+
+    for org <- MapSet.difference(state.absent_orgs, now) do
+      Logger.info("Poller: org #{inspect(org)} now exists on the forge — discovery resumes on it")
+    end
+
+    %{state | absent_orgs: now}
   end
 
   # `:orgs` d'abord (la forme), `:org` ensuite (un singleton — les appelants qui en nommaient une),
@@ -410,11 +454,15 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = step_forge_client(state)
 
-    # DECOUVERTE FAIL-CLOSED SUR TOUTES LES ORGS : une org illisible fait echouer le tick entier au
+    # DECOUVERTE FAIL-CLOSED SUR TOUTES LES ORGS : une org ILLISIBLE fait echouer le tick entier au
     # lieu de rendre une liste partielle. Une decouverte partielle ne se distingue pas de « pas de
     # travail » pour les projets manquants — elle ne casse rien, elle rend muet, ce qui est pire.
+    # Une org ABSENTE (404) est l'autre cas, et il sort ici en `absent` sans faire tomber la passe :
+    # elle ne porte aucun depot, donc rien n'est rendu muet (cf. `discover/2`).
     case discover(forge, state) do
-      {:ok, repos} ->
+      {:ok, repos, absent} ->
+        state = note_absent_orgs(state, absent)
+
         # :kick does NOT touch poll_count: it is the UNIT of the tick-cadenced invariants
         # (arch re-kick throttle below, 2-tick grace in step_do_poll) — a webhook burst must not
         # consume those clocks (the kick is a hint, the regular tick is the truth).
