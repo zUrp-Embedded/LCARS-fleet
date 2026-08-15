@@ -30,7 +30,7 @@ variable "human_email" {
 variable "admiral_username" {
   type        = string
   default     = ""
-  description = "Login forge du MASTER (le sysadmin de la boîte : `admiral` au banc, le login de l'installeur en prod). Sert UNIQUEMENT à lui poser le badge de charte — il reçoit celui de l'ex-compte `starfleet`, supprimé le 2026-08-15. Vide = aucun avatar posé sur un compte humain, ce qui est le défaut VOULU : la charte ne décide pas de la tête d'une personne (cf. `provision-forge-avatars.sh`, en-tête de la table). Ce module ne CRÉE pas ce compte — il existe avant lui (installateur, ou `bench-forge-bootstrap.sh` au banc)."
+  description = "Login forge du MASTER (le sysadmin de la boîte : `admiral` au banc, le login de l'installeur en prod). Sert à lui poser sa CHARTE : le badge de l'ex-compte `starfleet` (supprimé le 2026-08-15) et le nom de son siège en `full_name`. Vide = on ne touche à aucun compte, et c'est le défaut VOULU — ce module ne CRÉE pas ce compte, il existe avant lui (installateur en prod, `bench-forge-bootstrap.sh` au banc), donc on n'écrit dessus que si le déploiement le NOMME."
 
   # Le login part dans une ligne de commande shell (`local-exec`). Un login Gitea est alphanumérique
   # + `.`, `-`, `_`, et commence par un alphanumérique : on le VÉRIFIE ici plutôt que de l'espérer,

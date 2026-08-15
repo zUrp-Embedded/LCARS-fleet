@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="geometricPrecision">
-  <rect width="256" height="256" rx="32" fill="#0a0a0a"/>
-  <path d="M 32 16 L 96 16 L 96 40 L 56 40 L 56 72 L 32 72 Z" fill="#FFCC33"/>
-  <rect x="208" y="16" width="32" height="24" rx="12" fill="#FFCC33"/>
-  <rect x="32" y="88" width="192" height="140" rx="16" fill="#FFCC33"/>
-  <!-- Glyph: Starfleet delta (arrowhead inside oval) -->
-  <ellipse cx="128" cy="158" rx="68" ry="60" fill="#0a0a0a"/>
-  <!-- Delta: symmetric arrowhead with concave base (Starfleet insignia) -->
-  <path d="M 128 108
-           L 80 216
-           Q 128 188 176 216
-           Z"
-        fill="#FFCC33"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="geometricPrecision"><rect width="256" height="256" rx="32" fill="#0a0a0a"/><path d="M 32 16 L 96 16 L 96 40 L 56 40 L 56 72 L 32 72 Z" fill="#FFCC33"/><rect x="208" y="16" width="32" height="24" rx="12" fill="#FFCC33"/><rect x="32" y="88" width="192" height="140" rx="16" fill="#FFCC33"/><g fill="#0a0a0a"><path d="M 128 96 L 160 150 L 128 133 L 96 150 Z"/><path d="M 88 150 L 116 196 L 88 181 L 60 196 Z"/><path d="M 168 150 L 196 196 L 168 181 L 140 196 Z"/></g></svg>

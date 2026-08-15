@@ -1,4 +1,4 @@
-# SOURCE: fleet/provisioning_v2/deps/avatars.tf
+# SOURCE: fleet/deploy/deps/charte.tf
 # AUTHOR: consultant
 # STARDATE: 2026-08-01
 # STATUS: la charte graphique posee PAR `tofu apply` — un appel, pas une declaration
@@ -14,7 +14,7 @@
 # Le gain est ergonomique — un geste au lieu de deux au stand-up d'une forge. Ce qu'il n'apporte
 # PAS, et qu'il ne faut pas croire qu'il apporte :
 #   - aucune detection de derive : si quelqu'un change un avatar a la main, `tofu plan` ne verra
-#     RIEN. Seul `provision-forge-avatars.sh --check` sonde l'etat reel.
+#     RIEN. Seul `provision-forge-charte.sh --check` sonde l'etat reel.
 #   - aucune idempotence declarative : le script est idempotent PAR REASSERTION (il re-poste
 #     l'image a chaque run), ce qui n'est pas la meme chose qu'un plan vide.
 #   - l'execution est LOCALE : le script et les PNG doivent exister sur la machine qui applique.
@@ -27,7 +27,7 @@
 # Elle ne se re-pose pas a chaque apply — un upload de neuf images pour rien, a chaque run, serait
 # du bruit sans lecteur.
 
-resource "terraform_data" "avatars" {
+resource "terraform_data" "charte" {
   # Les comptes doivent EXISTER avant qu'on leur pose une image : `Sudo: <compte>` sur un compte
   # absent rend 404, et le script compterait l'entree en echec.
   # Les comptes de ce module par RESSOURCE (l'arete porte l'ordre) ; ceux du module `instance/` par
@@ -53,7 +53,7 @@ resource "terraform_data" "avatars" {
     # compte humain par principe (« il pose son propre avatar, on ne le decide pas pour lui ») ; le
     # master est l'exception, et elle doit etre DEMANDEE. Sans la variable, ce chemin se comporte
     # exactement comme avant. Le login est valide au plan (cf. `variables.tf`), pas espere propre.
-    command = "${path.module}/provision-forge-avatars.sh --forge ${var.gitea_url}${var.admiral_username == "" ? "" : " --admiral ${var.admiral_username}"}"
+    command = "${path.module}/provision-forge-charte.sh --forge ${var.gitea_url}${var.admiral_username == "" ? "" : " --admiral ${var.admiral_username}"}"
 
     # Le master-token passe par l'ENVIRONNEMENT, jamais par la ligne de commande : un argument est
     # visible dans la table des processus de la machine, une variable d'environnement ne l'est que

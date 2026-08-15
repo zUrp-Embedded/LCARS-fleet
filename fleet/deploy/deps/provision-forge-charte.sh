@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/provisioning_v2/deps/provision-forge-avatars.sh
+# SOURCE: fleet/deploy/deps/provision-forge-charte.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-06
-# STATUS: PROTO-V2 — pose des avatars de charte sur les comptes + l'org forge (frère cosmétique de forge.tf)
+# STATUS: PROTO-V2 — pose la CHARTE sur la forge : avatars des comptes + org, et le nom du siège master
+#         (frère cosmétique de forge.tf). Il s'appelait `provision-forge-charte.sh` ; le nom est devenu
+#         faux le jour où il a aussi posé un `full_name`, et un nom faux se corrige (cf. le release
+#         `fleet_umbrella`, renommé pour cette raison exacte).
 #
 # POURQUOI CE SCRIPT (et pas du .tf) : le provider go-gitea/gitea n'expose AUCUN attribut avatar
 # settable (juste org.avatar_url en lecture). L'avatar n'est pas de l'état convergent qu'on déclare —
@@ -22,9 +25,9 @@
 # (hash long), FAIL s'il est resté sur l'identicon par défaut.
 #
 # USAGE :
-#   FORGE_BASE_URL=http://localhost:3000 FORGE_ADMIN_TOKEN=<tok> provision-forge-avatars.sh
-#   provision-forge-avatars.sh --forge URL --admin-token-file /root/forge/test/admin.token
-#   provision-forge-avatars.sh --forge URL --admin-token-file … --check      # sonde seule
+#   FORGE_BASE_URL=http://localhost:3000 FORGE_ADMIN_TOKEN=<tok> provision-forge-charte.sh
+#   provision-forge-charte.sh --forge URL --admin-token-file /root/forge/test/admin.token
+#   provision-forge-charte.sh --forge URL --admin-token-file … --check      # sonde seule
 # Options : --avatars-dir DIR (défaut : <dir du script>/avatars) · --org NAME (défaut fleet ; --org "" pour
 #           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le badge de
 #           starfleet, dont le compte n'existe plus. Absent = aucun avatar posé sur un compte humain).
@@ -74,6 +77,14 @@ declare -a ENTRIES=(
   # la ou les trois autres listes de roles sont desormais derivees du catalogue.
   "lcars-system:favicon.png"
 )
+# ⚠ `starfleet.png` EXISTE DANS `avatars/` ET N'EST PAS ICI — ce n'est pas un oubli. Le role
+# `starfleet` porte son insigne (l'escadre, trois deltas) parce qu'il vit au canon ; il n'a PAS de
+# compte forge (`forge_identity: false`, toutes ses ecritures passent par le systeme), donc il n'y a
+# aucun compte a qui le poser. Un dessin appartient au ROLE, une entree de cette table a un COMPTE :
+# les deux ensembles ne se recouvrent pas, et vouloir les aligner ajouterait ici une ligne vers un
+# compte inexistant — 404 a chaque passe, pour rien.
+# (Le delta simple, l'ancien insigne de starfleet, est devenu `admiral.png` : le siege garde le
+# delta, le role prend l'escadre.)
 
 # ⚠ `starfleet:starfleet.png` A QUITTE CETTE TABLE (2026-08-15) — le compte forge `starfleet` est
 # supprime (cf. `instance/accounts.tf`). Le badge, lui, passe au MASTER : c'est lui qui tient
@@ -103,7 +114,7 @@ while [[ $# -gt 0 ]]; do
     --admiral) ADMIRAL="$2"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "provision-forge-avatars: option inconnue: $1" >&2; usage >&2; exit 1 ;;
+    *) echo "provision-forge-charte: option inconnue: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
@@ -111,26 +122,26 @@ done
 # parsing (l'option peut arriver dans n'importe quel ordre) et avant tout usage d'ENTRIES.
 [[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:admiral.png")
 
-command -v curl >/dev/null || { echo "provision-forge-avatars: curl requis" >&2; exit 1; }
-command -v jq   >/dev/null || { echo "provision-forge-avatars: jq requis" >&2; exit 1; }
-command -v base64 >/dev/null || { echo "provision-forge-avatars: base64 requis" >&2; exit 1; }
-[[ -n "$FORGE" ]] || { echo "provision-forge-avatars: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
+command -v curl >/dev/null || { echo "provision-forge-charte: curl requis" >&2; exit 1; }
+command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; exit 1; }
+command -v base64 >/dev/null || { echo "provision-forge-charte: base64 requis" >&2; exit 1; }
+[[ -n "$FORGE" ]] || { echo "provision-forge-charte: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
 FORGE="${FORGE%/}"
 [[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$(cd "$(dirname "$0")" && pwd)/avatars"
-[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-avatars: dossier avatars introuvable: $AVATARS_DIR" >&2; exit 1; }
+[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR" >&2; exit 1; }
 
 # Le master-token n'est requis qu'en mode POSE (le --check lit des champs publics).
 if [[ -n "$ADMIN_TOKEN_FILE" ]]; then
-  [[ -r "$ADMIN_TOKEN_FILE" ]] || { echo "provision-forge-avatars: admin-token-file illisible: $ADMIN_TOKEN_FILE" >&2; exit 1; }
+  [[ -r "$ADMIN_TOKEN_FILE" ]] || { echo "provision-forge-charte: admin-token-file illisible: $ADMIN_TOKEN_FILE" >&2; exit 1; }
   ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
 fi
 if [[ "$CHECK_ONLY" -eq 0 && -z "$ADMIN_TOKEN" ]]; then
-  echo "provision-forge-avatars: mode pose sans autorité — FORGE_ADMIN_TOKEN ou --admin-token-file requis" >&2
+  echo "provision-forge-charte: mode pose sans autorité — FORGE_ADMIN_TOKEN ou --admin-token-file requis" >&2
   exit 1
 fi
 
 # ⚠ LE JETON ADMIN NE PASSE PLUS PAR argv, ET C'EST UNE PROPRIETE QUE L'APPELANT PAYAIT DEJA.
-# `avatars.tf` la declare noir sur blanc : « le master-token passe par l'ENVIRONNEMENT, jamais par la
+# `charte.tf` la declare noir sur blanc : « le master-token passe par l'ENVIRONNEMENT, jamais par la
 # ligne de commande : un argument est visible dans la table des processus ». Ce script la defaisait a
 # son premier `curl` — `AUTH=(-H "Authorization: token $ADMIN_TOKEN")` met le jeton dans
 # `/proc/<pid>/cmdline`, lisible par tout le monde pendant la requete. Et ce jeton-la est un
@@ -211,6 +222,63 @@ for entry in "${ENTRIES[@]}"; do
   fi
 done
 
+# ─── LE NOM DU SIEGE MASTER ──────────────────────────────────────────────────────────────────────
+# Le master porte le nom de son SIEGE dans l'UI, pas celui d'une personne. `full_name` est ce que
+# Gitea affiche a la place du login (`[ui] DEFAULT_SHOW_FULL_NAME`), et c'est DEJA ce que font les
+# comptes de role : `fleet_engineer` s'affiche « engineer » (cf. `instance/accounts.tf`).
+#
+# CE COMPTE N'EST PAS UNE IDENTITE DE TRAVAIL, et c'est ce qui rend le geste sans victime. Personne
+# ne travaille sous root ; l'administrateur se fait un compte a lui pour le quotidien. La boite dit
+# la meme chose a tous les etages : Guard B refuse de lancer une fleet sous l'uid 1000,
+# `console-humans` exclut admiral des consoles worker, et le deck ne lui ouvre qu'une porte admin
+# distincte de la porte worker. Il n'y a donc aucun nom de personne a ecraser ici — c'est un siege,
+# et on ecrit le nom du siege dessus.
+#
+# RESOLUTION : `--admiral` d'abord (le deploiement qui NOMME son master fait autorite), sinon l'id 1
+# — le premier compte cree par Gitea, site-admin par construction, celui que l'operateur pose en
+# preparant sa forge. L'ancre evite d'exiger une variable de plus ; le login resolu est TOUJOURS
+# imprime, donc ce chemin ne pose jamais rien en silence sur un compte qu'on n'a pas annonce.
+#
+# ⚠ PATCH, et `login_name` + `source_id` sont OBLIGATOIRES dans le corps meme si on ne les change
+# pas — meme exigence que la rotation de mot de passe documentee dans `instance/accounts.tf`. Sans
+# eux Gitea rend 422, et le message n'aide pas.
+master="$ADMIRAL"
+master_src="nomme (--admiral)"
+# La resolution par id=1 passe par `/admin/users`, qui EXIGE l'autorite : elle n'a donc lieu qu'en
+# mode POSE. En `--check` sans `--admiral`, on ne sait pas qui est le master et on le DIT — une sonde
+# qui devinerait ici rendrait un verdict sur un compte qu'elle a choisi elle-meme.
+if [[ -z "$master" && "$CHECK_ONLY" -eq 0 ]]; then
+  master="$(forge_curl -s -m 10 "$FORGE/api/v1/admin/users?limit=50" \
+    | jq -r 'map(select(.id == 1)) | .[0].login // ""' 2>/dev/null || true)"
+  master_src="resolu par id=1 (premier compte de la forge)"
+fi
+
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  # SONDE : `full_name` est un champ PUBLIC (`/users/<login>`), donc lisible sans master-token —
+  # c'est ce qui permet au banc de verifier ce que la recette a pose, sans pouvoir le reposer.
+  if [[ -z "$master" ]]; then
+    echo "IGNORE nom du siege — aucun master nomme (--admiral) : rien a sonder"
+  else
+    fn="$(forge_curl -s -m 10 "$FORGE/api/v1/users/$master" | jq -r '.full_name // ""' 2>/dev/null || true)"
+    if [[ "$fn" == "admiral" ]]; then echo "OK    $master — nom du siege « admiral »"; else
+      echo "FAIL  $master — nom du siege absent ou autre (vu: ${fn:-<vide>})" >&2; fail=1; fi
+  fi
+else
+  if [[ -z "$master" ]]; then
+    echo "IGNORE nom du siege — aucun master nomme et aucun compte id=1 lisible : rien a ecrire"
+  else
+    code="$(forge_curl -s -o /dev/null -w '%{http_code}' -m 10 -X PATCH \
+      -H "Content-Type: application/json" \
+      --data-binary "{\"login_name\":\"$master\",\"source_id\":0,\"full_name\":\"admiral\"}" \
+      "$FORGE/api/v1/admin/users/$master")"
+    if [[ "$code" == "200" ]]; then
+      echo "POSÉ  $master — nom du siege « admiral » ($master_src)"
+    else
+      echo "FAIL  $master — PATCH full_name -> HTTP $code ($master_src)" >&2; fail=1
+    fi
+  fi
+fi
+
 # L'ORG (endpoint distinct, sans Sudo — l'admin édite l'org). --org "" pour sauter.
 if [[ -n "$ORG" ]]; then
   org_file="$AVATARS_DIR/favicon.png"
@@ -244,7 +312,7 @@ note=""
 couvert="${#ENTRIES[@]}"
 
 if [[ "$fail" -ne 0 ]]; then
-  echo "provision-forge-avatars: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)$note" >&2
+  echo "provision-forge-charte: AU MOINS UNE ENTRÉE EN ÉCHEC (forge $FORGE)$note" >&2
   exit 2
 fi
-echo "provision-forge-avatars: $couvert entrée(s) de charte posées/valides sur $FORGE$note (la charte est une table tenue à la main : un compte hors table n'a pas d'avatar et n'est pas compté ici)"
+echo "provision-forge-charte: $couvert entrée(s) de charte posées/valides sur $FORGE$note (la charte est une table tenue à la main : un compte hors table n'a pas d'avatar et n'est pas compté ici)"

@@ -105,7 +105,7 @@ resource "gitea_user" "system_role" {
 # le compte admin de la forge et le master-token que tofu consomme. Le break-glass est le compte de
 # l'installeur — `gitea_user "human"` ci-dessous le dit deja dans son propre commentaire.
 #
-# Son BADGE, lui, ne disparait pas : `provision-forge-avatars.sh` le pose sur le master (option
+# Son BADGE, lui, ne disparait pas : `provision-forge-charte.sh` le pose sur le master (option
 # `--admiral`). Le nom quitte la forge, la charte reste.
 
 resource "gitea_user" "human" {

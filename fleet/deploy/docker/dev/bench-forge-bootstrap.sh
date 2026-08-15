@@ -31,7 +31,7 @@
 #   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
 #      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
 #      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
-#   7. pose les avatars de charte (le scribe en a un depuis le 2026-08-02) ;
+#   7. pose la CHARTE : avatars des comptes, et le nom du siege master en full_name ;
 #   8. SEME la forge : `fleet/lcars` (la source que la boite clone) + `fleet/project-template`
 #      (le modele que create_project genere). Une forge vierge sans ces deux repos donne une
 #      boite qui ne peut ni se mettre a jour ni onboarder un projet — mesure au drill du soir ;
@@ -239,12 +239,24 @@ export TF_VAR_gitea_url="$FORGE_URL" TF_VAR_gitea_token="$MASTER_TOKEN" \
 ) || die "tofu apply INSTANCE en echec (rejoue-le a la main dans $INSTANCE_DIR pour voir sa sortie)" 4
 say "comptes d'instance poses (systeme, starfleet, humain, roles system_*)"
 
+# ⚠ LA SORTIE DE CET APPLY EST INUTILISABLE POUR LIRE LA CHARTE, et c'est structurel — mesure le
+# 2026-08-15 en essayant precisement de la capturer. `charte.tf` y execute `provision-forge-charte.sh`
+# avec `environment = { FORGE_ADMIN_TOKEN = var.gitea_token }` ; cette variable est `sensitive`, donc
+# OpenTofu remplace CHAQUE ligne du provisioner par :
+#     terraform_data.charte (local-exec): (output suppressed due to sensitive value in config)
+# Ce n'est pas une question de redirection : le verdict n'existe pas dans cette sortie, il est
+# supprime a la source. La capturer donnait un flux propre et VIDE de ce qu'on venait y chercher.
 (
   cd "$TOFU_DIR"
   tofu init -no-color >/dev/null 2>&1 || exit 1
   tofu apply -auto-approve -no-color >/dev/null 2>&1 || exit 1
 ) || die "tofu apply CATALOGUE en echec (rejoue-le a la main dans $TOFU_DIR pour voir sa sortie)" 4
 say "structure du catalogue posee (org $ORG, teams, comptes de role metier, adhesions)"
+# Le verdict de la charte et les gestes qui ont echoue. `|| true` : un apply reussi dont la charte
+# n'aurait rien dit ne doit pas tuer le script sous `set -e` (grep sans correspondance rend 1).
+printf '%s\n' "$CATALOGUE_OUT" \
+  | grep -aE "provision-forge-charte:|^ *(POSÉ|FAIL|IGNORE) " \
+  | sed 's/^ *//' | while IFS= read -r l; do say "charte: $l"; done || true
 
 # ─── 4-bis. le compte SYSTEME devient PROPRIETAIRE de l'org ──────────────────────────────────────
 # POURQUOI ICI ET PAS DANS TOFU : le provider n'expose ni data source `gitea_team` (donc l'id de la
@@ -393,25 +405,34 @@ except Exception: print("")' 2>/dev/null || true)"
     || say "fleet_v2.env NON cable — la creation de projet echouera (cf. l'en-tete)"
 fi
 
-# ─── 7. avatars de charte ────────────────────────────────────────────────────────────────────────
-# Le mapping compte→fichier vit dans le script de la recette (DONNEE, pas cas special) — un role
-# ajoute au catalogue sans sa ligne la garde une tete vide sur la forge (mesure : le scribe, le
-# 2026-08-02, apres son rename).
-if [[ -f "$TOFU_DIR/provision-forge-avatars.sh" ]]; then
-  printf '%s\n' "$MASTER_TOKEN" > "$TOFU_DIR/.admin.token"
-  chmod 600 "$TOFU_DIR/.admin.token"
-  # La sortie du script est CAPTUREE, plus jetee. Elle etait envoyee a /dev/null derriere un
-  # "non bloquant" : la seule ligne qui dit CE QUI a ete pose, et combien d'entrees de charte
-  # n'avaient pas de compte sur cette forge, disparaissait. Un provisionnement qui couvre trois
-  # entrees sur dix doit le montrer.
-  # `--admiral` : le master de CE banc recoit le badge de starfleet, dont le compte forge n'existe
-  # plus (cf. instance/accounts.tf). Le login est passe parce qu'il est VARIABLE — `admiral` ici,
-  # celui de l'installeur en prod ; la table des avatars ne peut pas le deviner.
-  avatar_out="$( cd "$TOFU_DIR" && ./provision-forge-avatars.sh --forge "$FORGE_URL" \
-      --admin-token-file "$TOFU_DIR/.admin.token" --admiral "$ADMIN" 2>&1 )" \
-    && say "avatars: ${avatar_out##*$'\n'}" \
-    || say "avatars NON poses, les comptes gardent une tete vide : ${avatar_out##*$'\n'}"
-  rm -f "$TOFU_DIR/.admin.token"
+# ─── 7. la charte : RETIREE D'ICI, elle appartient a la recette generique ────────────────────────
+# Ce bloc rejouait `provision-forge-charte.sh` a la main, avec son propre fichier de jeton et son
+# propre `--admiral`. C'etait un DOUBLON : `charte.tf` porte deja ce geste dans la recette, donc
+# l'`apply` du catalogue (etape 4) l'avait execute quelques secondes plus tot, sur les memes
+# comptes, avec le meme master-token.
+#
+# CE QUE LE BANC DOIT FABRIQUER SE REDUIT A CE QU'IL EST SEUL A AVOIR : une forge jetable et son
+# premier compte. L'HABILLAGE, lui, est le meme pour tout le monde — un banc qui se pose sa charte
+# par un chemin a lui ne prouve rien de celui que la prod empruntera. C'etait deja vrai avant que ce
+# doublon existe ; c'est ce doublon qui le cachait.
+#
+# ⚠ CE QUI A DU BOUGER AVEC, et c'est la cicatrice de ce bloc — sa sortie etait CAPTUREE justement
+# parce qu'elle avait ete jetee une fois : « la seule ligne qui dit CE QUI a ete pose, et combien
+# d'entrees de charte n'avaient pas de compte sur cette forge, disparaissait ». Le retirer sans rien
+# mettre a la place aurait recree ce defaut a l'identique.
+#
+# ET LA REMONTER DEPUIS L'APPLY EST IMPOSSIBLE : le provisioner recoit une variable `sensitive`, donc
+# OpenTofu supprime toutes ses lignes (cf. le bloc de l'etape 4). Le verdict de POSE n'est lisible
+# nulle part par un appelant.
+#
+# D'OU LA SONDE. Le generique POSE, le banc VERIFIE — c'est la bonne repartition, et pas un repli :
+# prouver est le metier du banc, poser est celui de la recette. `--check` ne porte aucune autorite
+# (il lit des champs publics, sans master-token) et ne peut donc rien reposer par megarde ; il rend
+# les memes lignes de verdict, sur l'etat REEL de la forge plutot que sur l'intention du script.
+if [[ -x "$TOFU_DIR/provision-forge-charte.sh" ]]; then
+  charte_out="$( cd "$TOFU_DIR" && ./provision-forge-charte.sh --forge "$FORGE_URL" \
+      --admiral "$ADMIN" --check 2>&1 )" || true
+  printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 fi
 
 # ─── 8. le semis : la source et le modele ────────────────────────────────────────────────────────

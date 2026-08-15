@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/forge_avatars.bats
+# SOURCE: fleet/deploy/tests/forge_charte.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
-# STATUS: bats tests for deps/provision-forge-avatars.sh — 6-115 + la fuite argv jumelle
+# STATUS: bats tests for deps/provision-forge-charte.sh — 6-115 + la fuite argv jumelle
 #
 # CE SCRIPT N'AVAIT AUCUN TEST, et il porte le jeton SITE-ADMIN de la forge — celui qui, avec un
 # header `Sudo:`, agit au nom de n'importe quel compte.
 #
-# ⚠ LA FUITE ETAIT UNE PROPRIETE QUE L'APPELANT PAYAIT DEJA. `avatars.tf` ecrit noir sur blanc :
+# ⚠ LA FUITE ETAIT UNE PROPRIETE QUE L'APPELANT PAYAIT DEJA. `charte.tf` ecrit noir sur blanc :
 # « le master-token passe par l'ENVIRONNEMENT, jamais par la ligne de commande : un argument est
 # visible dans la table des processus ». Le script la defaisait a son premier curl. Le commentaire
 # et le code se contredisaient de part et d'autre d'une frontiere de fichier — et aucun des deux
@@ -18,7 +18,7 @@
 # pas dans argv » est satisfait par un correctif qui supprimerait l'auth.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../deps/provision-forge-avatars.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../deps/provision-forge-charte.sh"
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
@@ -145,4 +145,68 @@ run_avatars() {
   [ "$output" = "0" ]
   # ...et le badge est bien parti vers le master, sinon ce test passerait sur un script muet.
   grep -q "Sudo: admiral" "$ARGV_LOG"
+}
+
+# ─── LE NOM DU SIEGE MASTER (2026-08-15) ─────────────────────────────────────────────────────────
+# Le master porte le nom de son SIEGE en `full_name`, pas celui d'une personne : ce compte n'est pas
+# une identite de travail (personne ne travaille sous root), et la boite le barre a tous les etages
+# — Guard B, `console-humans`, la porte admin du deck. Resolution : `--admiral` d'abord, sinon l'id 1
+# (le premier compte cree par Gitea, site-admin par construction).
+
+@test "siege: --admiral l'emporte, et le PATCH porte les champs que Gitea EXIGE" {
+  run_avatars --admiral chef-de-banc
+  [ "$status" -eq 0 ]
+  grep -q "admin/users/chef-de-banc" "$ARGV_LOG"
+  # `login_name` et `source_id` sont obligatoires dans le corps meme sans les changer : sans eux
+  # Gitea rend 422. Le temoin les epingle, sinon la regression revient en silence.
+  grep -q -- '-X PATCH' "$ARGV_LOG"
+  grep -q '"login_name":"chef-de-banc"' "$ARGV_LOG"
+  grep -q '"source_id":0' "$ARGV_LOG"
+  grep -q '"full_name":"admiral"' "$ARGV_LOG"
+}
+
+@test "siege: SANS --admiral, la resolution passe par l'id 1 et n'invente rien" {
+  # Le stub `jq` rend '' : aucun master resolu, donc AUCUN patch. C'est le contre-temoin du
+  # precedent — un script qui ecrirait sur un login code en dur passerait le test ci-dessus.
+  run_avatars
+  [ "$status" -eq 0 ]
+  run grep -c -- '-X PATCH' "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "siege: un master introuvable est DIT, jamais silencieux" {
+  run_avatars
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IGNORE nom du siege"* ]]
+}
+
+@test "siege: --check ne touche a rien — il sonde, il n'ecrit pas" {
+  run_avatars --admiral chef-de-banc --check
+  run grep -c -- '-X PATCH' "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+# ─── LA SONDE DU NOM DE SIEGE (2026-08-15) ───────────────────────────────────────────────────────
+# Le generique POSE (charte.tf, avec le master-token), le banc VERIFIE. Cette repartition n'est pas
+# un choix de style : `charte.tf` passe une variable `sensitive` au provisioner, donc OpenTofu
+# SUPPRIME toutes ses lignes de sortie (« output suppressed due to sensitive value in config »,
+# mesure du 2026-08-15). Le verdict de pose n'est lisible par aucun appelant — la sonde est le seul
+# moyen de savoir ce qui est REELLEMENT sur la forge.
+
+@test "sonde: --check verifie le nom du siege sans aucune autorite" {
+  run_avatars --admiral chef-de-banc --check
+  # Le champ est PUBLIC (`/users/<login>`), donc la sonde n'a pas besoin du master-token : elle
+  # interroge le compte, jamais l'endpoint d'admin.
+  grep -q "users/chef-de-banc" "$ARGV_LOG"
+  run grep -c "admin/users" "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "sonde: sans --admiral, --check ne DEVINE pas le master — il le dit" {
+  # La resolution par id=1 passe par `/admin/users`, qui exige l'autorite : une sonde qui la
+  # tenterait rendrait un verdict sur un compte qu'elle a choisi elle-meme.
+  run_avatars --check
+  [[ "$output" == *"IGNORE nom du siege"* ]]
+  run grep -c "admin/users" "$ARGV_LOG"
+  [ "$output" = "0" ]
 }
