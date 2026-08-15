@@ -68,37 +68,34 @@ probe_shell_tools() {
     "Ne dit rien de la fleet. Un outil absent = une mesure que je ne pourrai PAS prendre, pas une panne."
 }
 
-# ── Fleet endpoints ───────────────────────────────────────────────────────────────────────────────
-# The URL's ORIGIN is part of the evidence. Derived from the UID, it is a guess that holds only
-# while the pod inherits the human's UID; declared by env, it is a fact. A reader must be able to
-# tell which, because a wrong guess probes the NEIGHBOUR's fleet and reports it as ours — a lie that
-# looks perfectly healthy.
+# ── Fleet endpoint ────────────────────────────────────────────────────────────────────────────────
+# Whether MY instrument can reach the deck at all — an inventory of blind spots, NOT a fleet verdict
+# (that belongs to the fleet plane). The fleet is socket-only: there is a single per-human deck
+# socket, so the old api-vs-obs pair AND the "wrong neighbour's port" caveat are gone. A name
+# resolves to one path; the only provenance left worth noting is the socket's origin (env override
+# vs default), kept in the evidence.
 probe_endpoints() {
-  local api obs origin
-  api="$(sotf_api_url)"; obs="$(sotf_obs_url)"; origin="$(sotf_url_origin)"
-
-  local u name
-  for name in api obs; do
-    [[ "$name" == api ]] && u="$api/api/health" || u="$obs/health"
-    sotf_skip_no_fleet "instruments.endpoint_$name" "$PLANE" "endpoint non interroge" && continue
-    if ! http_probe "$u" 3; then
-      emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
-        "curl $u" "curl absent" \
-        "Aveugle sur cet endpoint : je ne peux pas distinguer une fleet morte d'une sonde sans outil."
-      continue
-    fi
-    case "$SOTF_HTTP_CODE" in
-      2*) emit "instruments.endpoint_$name" "$PLANE" "operational" "hote-http" \
-            "curl $u" "HTTP $SOTF_HTTP_CODE · url $origin" \
-            "Prouve qu'un serveur repond a cette adresse. Ne prouve PAS que c'est MA fleet si l'url est derivee." ;;
-      000) emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
-            "curl $u" "aucune reponse ($(trim "$SOTF_HTTP_BODY" 200)) · url $origin" \
-            "Angle mort, PAS un constat sur la fleet : cette sonde mesure si mon instrument atteint l'endpoint, pas si le daemon va bien. Le verdict sur la fleet est celui du plan fleet." ;;
-      *) emit "instruments.endpoint_$name" "$PLANE" "unreachable" "hote-http" \
-            "curl $u" "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200) · url $origin" \
-            "Un code non-2xx sur health peut venir d'un autre service ecoutant sur ce port. Angle mort de l'instrument, pas verdict sur la fleet." ;;
-    esac
-  done
+  local sock origin u
+  sock="$(sotf_obs_sock)"; origin="$(sotf_url_origin)"
+  u="http://localhost/health"
+  sotf_skip_no_fleet "instruments.endpoint_deck" "$PLANE" "endpoint non interroge" && return
+  if ! http_probe "$u" 3 "$sock"; then
+    emit "instruments.endpoint_deck" "$PLANE" "unreachable" "hote-socket" \
+      "curl --unix-socket $sock $u" "curl absent" \
+      "Aveugle sur cet endpoint : je ne peux pas distinguer une fleet morte d'une sonde sans outil."
+    return
+  fi
+  case "$SOTF_HTTP_CODE" in
+    2*) emit "instruments.endpoint_deck" "$PLANE" "operational" "hote-socket" \
+          "curl --unix-socket $sock $u" "HTTP $SOTF_HTTP_CODE · socket $origin" \
+          "Prouve qu'un serveur repond sur CE socket. Ne prouve PAS que son cablage interne va bien : c'est le plan fleet qui tranche." ;;
+    000) emit "instruments.endpoint_deck" "$PLANE" "unreachable" "hote-socket" \
+          "curl --unix-socket $sock $u" "aucune reponse ($(trim "$SOTF_HTTP_BODY" 200)) · socket $origin" \
+          "Angle mort, PAS un constat sur la fleet : cette sonde mesure si mon instrument atteint le socket, pas si le daemon va bien. Le verdict sur la fleet est celui du plan fleet." ;;
+    *) emit "instruments.endpoint_deck" "$PLANE" "unreachable" "hote-socket" \
+          "curl --unix-socket $sock $u" "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200) · socket $origin" \
+          "Un code non-2xx sur health : angle mort de l'instrument, pas verdict sur la fleet." ;;
+  esac
 }
 
 # ── MCP socket ────────────────────────────────────────────────────────────────────────────────────

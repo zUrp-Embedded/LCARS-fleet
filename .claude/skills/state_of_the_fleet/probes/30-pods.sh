@@ -4,13 +4,10 @@
 # DATE: 2026-07-31
 # STATUS: actif — sonde 30 : qui tourne, et ce que la fleet a vu passer
 #
-# THE PORT MATTERS, and getting it wrong is a lie rather than an error. `/api/pods` exists on BOTH
-# surfaces: on the API port it answers a deliberate 501, because the code refuses to serve an empty
-# 200 that would be "INDISTINGUISHABLE from 'no pods' — a false success on a PUBLIC surface". The
-# live snapshot lives on the OBSERVATION port. A probe reading the API port and rendering "aucun
-# pod" would be exactly the failure the runtime took the trouble to prevent.
-#
-# We ask the observation port, and we treat a 501 as a probe bug — ours — not as an absence.
+# The fleet is socket-only: the live snapshot is served by the observation deck over its per-human
+# AF_UNIX socket at `/api/pods`. There is no longer a second TCP surface to confuse it with, so the
+# old API-port 501 "port-guard" — which existed ONLY to prove we were not reading the wrong port —
+# has nothing left to guard and is gone. Reaching the deck socket is reaching the one surface.
 #
 # SCOPE, per starfleet's position: pods are CONTAINERS. Who runs, which role, which project, since
 # when. Never what the pod is doing inside its workspace — that belongs to the project's architect.
@@ -20,50 +17,26 @@ SOTF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SOTF_DIR/lib.sh"
 
 PLANE="pods"
-OBS="$(sotf_obs_url)"
-API="$(sotf_api_url)"
-
-# ── Le piege, encode : le port API ment par 501 ───────────────────────────────────────────────────
-# Emitted as a REAL probe rather than left as a comment: if the runtime ever starts serving pods on
-# the API port, or stops returning 501, the day it changes is the day this line changes with it.
-probe_wrong_port_guard() {
-  sotf_skip_no_fleet "pods.port_guard" "$PLANE" "sonde sans objet" && return
-  if ! http_probe "$API/api/pods" 4; then
-    emit "pods.port_guard" "$PLANE" "unreachable" "hote-http" "curl $API/api/pods" \
-      "curl absent" "Aveugle : je ne peux pas verifier que le port API refuse toujours de servir les pods."
-    return
-  fi
-  case "$SOTF_HTTP_CODE" in
-    501) emit "pods.port_guard" "$PLANE" "operational" "hote-http" "curl $API/api/pods" \
-           "HTTP 501 sur le port API — refus delibere, l'instantane vit sur le port observation" \
-           "Confirme le contrat de la surface API. Ne dit rien du nombre de pods." ;;
-    2*)  emit "pods.port_guard" "$PLANE" "degraded" "hote-http" "curl $API/api/pods" \
-           "HTTP $SOTF_HTTP_CODE — le port API sert des pods, contrairement au contrat 501" \
-           "Signale un changement de contrat cote runtime : NE PAS lire cette reponse comme la liste de reference." ;;
-    *)   emit "pods.port_guard" "$PLANE" "unknown" "hote-http" "curl $API/api/pods" \
-           "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
-           "Ni 501 ni 2xx : contrat de surface indetermine, ne pas en tirer de conclusion sur les pods." ;;
-  esac
-}
+SOCK="$(sotf_obs_sock)"
 
 # ── L'instantane vivant ───────────────────────────────────────────────────────────────────────────
 # `Spawner.list_pods/0` behind the endpoint — a LIVE snapshot, not an event replay, because `pod.*`
 # only emits terminals (completed/failed/drift) and would never describe a pod that is merely alive.
 probe_live() {
   sotf_skip_no_fleet "pods.live" "$PLANE" "sonde sans objet" && return
-  if ! http_probe "$OBS/api/pods" 6; then
-    emit "pods.live" "$PLANE" "unreachable" "hote-http" "curl $OBS/api/pods" \
+  if ! http_probe "http://localhost/api/pods" 6 "$SOCK"; then
+    emit "pods.live" "$PLANE" "unreachable" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
       "curl absent" "Aveugle sur les pods : aucune conclusion possible, ni presence ni absence."
     return
   fi
   if [[ "$SOTF_HTTP_CODE" != 2* ]]; then
-    emit "pods.live" "$PLANE" "degraded" "hote-http" "curl $OBS/api/pods" \
+    emit "pods.live" "$PLANE" "degraded" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
       "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
       "Un endpoint muet n'est PAS zero pod : je ne sais pas combien tournent."
     return
   fi
   if [[ -z "${SOTF_HAS_JQ:-}" ]]; then
-    emit "pods.live" "$PLANE" "unknown" "hote-http" "curl $OBS/api/pods" \
+    emit "pods.live" "$PLANE" "unknown" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
       "$(trim "$SOTF_HTTP_BODY" 300)" "Sans jq je ne sais pas compter ni detailler : la reponse est la, non lue."
     return
   fi
@@ -71,7 +44,7 @@ probe_live() {
   local n
   n="$(printf '%s' "$SOTF_HTTP_BODY" | jq -r '(.pods // .) | if type=="array" then length else "?" end' 2>/dev/null)"
   if [[ "$n" == "?" || -z "$n" ]]; then
-    emit "pods.live" "$PLANE" "unknown" "hote-http" "curl $OBS/api/pods" \
+    emit "pods.live" "$PLANE" "unknown" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
       "forme inattendue : $(trim "$SOTF_HTTP_BODY" 200)" \
       "Reponse non decoupable : ZERO pod extrait n'est pas zero pod qui tourne."
     return
@@ -79,7 +52,7 @@ probe_live() {
 
   # Zero pods is a legitimate state (an idle fleet), NOT a fault — hence `operational` with the count
   # in the evidence. Calling it `degraded` would make an idle box permanently red.
-  emit "pods.live" "$PLANE" "operational" "hote-http" "curl $OBS/api/pods" \
+  emit "pods.live" "$PLANE" "operational" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
     "$n pod(s) vivant(s)" \
     "Un pod VIVANT n'est pas un pod qui travaille : cette sonde ne mesure pas le progres, seulement la presence."
 
@@ -87,7 +60,7 @@ probe_live() {
   local id role project state
   while IFS=$'\t' read -r id role project state; do
     [[ -z "$id" ]] && continue
-    emit "pods.pod.$id" "$PLANE" "operational" "hote-http" "curl $OBS/api/pods" \
+    emit "pods.pod.$id" "$PLANE" "operational" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
       "role=${role:-?} projet=${project:-aucun} etat=${state:-?}" \
       "Presence et identite declarees par la fleet. Ni l'avancement de son travail, ni sa sante interne."
   done < <(printf '%s' "$SOTF_HTTP_BODY" \
@@ -99,19 +72,19 @@ probe_live() {
 # gatekeeper decided belongs to its project, not to the front desk.
 probe_events() {
   sotf_skip_no_fleet "pods.events" "$PLANE" "sonde sans objet" && return
-  if ! http_probe "$OBS/api/projection" 6; then
-    emit "pods.events" "$PLANE" "unreachable" "hote-http" "curl $OBS/api/projection" \
+  if ! http_probe "http://localhost/api/projection" 6 "$SOCK"; then
+    emit "pods.events" "$PLANE" "unreachable" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/projection" \
       "curl absent" "Aveugle sur le flux d'evenements."
     return
   fi
   if [[ "$SOTF_HTTP_CODE" != 2* ]]; then
-    emit "pods.events" "$PLANE" "degraded" "hote-http" "curl $OBS/api/projection" \
+    emit "pods.events" "$PLANE" "degraded" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/projection" \
       "HTTP $SOTF_HTTP_CODE · $(trim "$SOTF_HTTP_BODY" 200)" \
       "Sans projection je ne sais pas si la fleet a vu passer quoi que ce soit."
     return
   fi
   if [[ -z "${SOTF_HAS_JQ:-}" ]]; then
-    emit "pods.events" "$PLANE" "unknown" "hote-http" "curl $OBS/api/projection" \
+    emit "pods.events" "$PLANE" "unknown" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/projection" \
       "$(trim "$SOTF_HTTP_BODY" 200)" "Sans jq, projection non decoupee."
     return
   fi
@@ -127,7 +100,7 @@ probe_events() {
 
   # A projection that is empty since boot is NOT a fault: the bus is a stream, not a store, and the
   # decks start empty. Saying `degraded` on a freshly booted fleet would be a false alarm every time.
-  emit "pods.events" "$PLANE" "operational" "hote-http" "curl $OBS/api/projection" \
+  emit "pods.events" "$PLANE" "operational" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/projection" \
     "total=$total · $decks" \
     "Compte ce que la fleet a DIFFUSE depuis son boot. Le bus est lossy par doctrine : un compteur bas ne prouve pas l'inaction."
 
@@ -136,8 +109,8 @@ probe_events() {
   local diag_n
   diag_n="$(printf '%s' "$SOTF_HTTP_BODY" | jq -r '.diagnostics // [] | length' 2>/dev/null)"
   if [[ "${diag_n:-0}" -gt 0 ]]; then
-    emit "pods.diagnostics_deck" "$PLANE" "unknown" "hote-http" \
-      "curl $OBS/api/projection | jq .diagnostics" \
+    emit "pods.diagnostics_deck" "$PLANE" "unknown" "hote-socket" \
+      "curl --unix-socket $SOCK http://localhost/api/projection | jq .diagnostics" \
       "$diag_n evenement(s) sur le deck diagnostics (boot/oauth/mcp/sdk/signal/git)" \
       "Un evenement de diagnostic n'est pas une panne : c'est un endroit ou regarder. Leur CONTENU se lit avec 'diag'."
   fi
@@ -145,7 +118,6 @@ probe_events() {
 
 # ── Runner ────────────────────────────────────────────────────────────────────────────────────────
 sotf_init
-probe_wrong_port_guard
 probe_live
 probe_events
 exit "$(sotf_exit_code)"

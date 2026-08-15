@@ -166,31 +166,23 @@ puis rien — 404' "limite"
   [ "$(sotf_exit_code)" -eq 0 ]
 }
 
-# ── Port derivation ───────────────────────────────────────────────────────────────────────────────
+# ── Socket obs (fleet socket-only) ────────────────────────────────────────────────────────────────
 
-@test "url : trois sources, dans cet ordre — env > fichier de la fleet > derivation uid" {
-  # Each branch is isolated with LCARS_RUN_DIR, otherwise the test measures whatever the DEVELOPER's
-  # box happens to have — which is exactly the "the machine is not the reference" trap.
-  local expected=$(( 21000 + ($(id -u) % 500) * 10 ))
+@test "socket obs : chemin par humain par defaut, override par LCARS_OBS_SOCK" {
+  # La fleet est socket-only : il n'y a plus de port TCP a deriver. Le deck ecoute un socket AF_UNIX
+  # par humain sous <console_root>/<humain>/deck.sock — chacun n'atteint QUE le sien, ce qui fait
+  # disparaitre l'ancienne ambiguite « mauvais daemon / fleet du voisin ».
+  #
+  # 2. defaut : ni override, racine deplacable pour le test via SOTF_CONSOLE_ROOT
+  run env -u LCARS_OBS_SOCK SOTF_CONSOLE_ROOT="$TMP/console" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_obs_sock)|$(sotf_url_origin)"'
+  [[ "$output" == "$TMP/console/$(id -un)/deck.sock|"* ]]
+  [[ "$output" == *"|socket par defaut"* ]]
 
-  # 3. derivation : ni env, ni fichier
-  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/vide" bash -c \
-    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
-  [[ "$output" == "http://127.0.0.1:$expected|"* ]]
-  [[ "$output" == *"|http://127.0.0.1:$(( expected + 1 ))|"* ]]
-  [[ "$output" == *"|derive de"*"$(id -u)" ]]
-
-  # 2. le fichier que `bin/fleet_v2` ecrit lui-meme — il bat la derivation, parce qu'il est la
-  #    reponse de la fleet a "ou j'ecoute" et non une hypothese sur l'uid du lecteur.
-  mkdir -p "$TMP/run"; echo "http://ailleurs:9990" > "$TMP/run/api_url"
-  run env -u LCARS_API_URL -u LCARS_OBS_URL LCARS_RUN_DIR="$TMP/run" bash -c \
-    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_obs_url)|$(sotf_url_origin)"'
-  [[ "$output" == "http://ailleurs:9990|http://ailleurs:9991|annonce par la fleet"* ]]
-
-  # 1. l'env de l'operateur bat tout
-  run env LCARS_API_URL="http://explicite:1234/" LCARS_RUN_DIR="$TMP/run" bash -c \
-    '. '"$PROBES"'/lib.sh; echo "$(sotf_api_url)|$(sotf_url_origin)"'
-  [[ "$output" == "http://explicite:1234|env" ]]
+  # 1. l'override operateur bat le chemin par defaut
+  run env LCARS_OBS_SOCK="$TMP/custom.sock" bash -c \
+    '. '"$PROBES"'/lib.sh; echo "$(sotf_obs_sock)|$(sotf_url_origin)"'
+  [[ "$output" == "$TMP/custom.sock|override LCARS_OBS_SOCK" ]]
 }
 
 @test "la garde « rien a atteindre » : pas de run dir → inactive, jamais degraded ni unreachable" {
@@ -253,6 +245,12 @@ SH
   run bash -c '. '"$PROBES"'/lib.sh; http_probe "http://127.0.0.1:1/x" 2; echo "rc=$? code=$SOTF_HTTP_CODE"'
   [[ "$output" == *"rc=0"* ]]
   [[ "$output" == *"code=000"* ]]
+
+  # Le 3e argument bascule le transport sur un socket AF_UNIX (la fleet est socket-only). Un socket
+  # inexistant fait echouer la CONNEXION, pas l'outil : rc=0 et code=000, comme un TCP refuse.
+  run bash -c '. '"$PROBES"'/lib.sh; http_probe "http://localhost/x" 2 "'"$TMP"'/absent.sock"; echo "rc=$? code=$SOTF_HTTP_CODE"'
+  [[ "$output" == *"rc=0"* ]]
+  [[ "$output" == *"code=000"* ]]
 }
 
 # ── 10-instruments, bout en bout ──────────────────────────────────────────────────────────────────
@@ -286,7 +284,7 @@ SH
   run env PATH="$fake" LCARS_RUN_DIR="$TMP/run" "$PROBES/10-instruments.sh"
   [ "$status" -eq 2 ]
   assert_verdict instruments.shell_tools degraded
-  assert_verdict instruments.endpoint_api unreachable
+  assert_verdict instruments.endpoint_deck unreachable
 }
 
 @test "bridge MCP : un interpreteur declare mais absent est nomme (le cas A-1)" {
@@ -411,43 +409,62 @@ PY
 }
 stub_stop() { [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null || true; }
 
-@test "30-pods : un 501 sur le port API est le CONTRAT, pas une panne" {
-  local d="$TMP/stub"; mkdir -p "$d"
-  printf '501\nnot implemented' > "$d/api_pods"
-  printf '200\n{"pods":[]}'     > "$d/api_pods_obs"
-  stub_server "$d"
-  mkdir -p "$TMP/run"
-  run env LCARS_RUN_DIR="$TMP/run" \
-    LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
-    "$PROBES/30-pods.sh"
-  stub_stop
-  assert_verdict pods.port_guard operational
+# The socket twin of stub_server: the fleet is socket-only, so the pod probes now dial an AF_UNIX
+# socket (`curl --unix-socket`). Serves the same file-per-route corpus over a UnixStreamServer, so
+# the REAL curl path is exercised. BaseHTTPRequestHandler wants a (host, port) client_address tuple
+# that a unix socket does not provide, hence the get_request override.
+stub_unix_server() {
+  local dir="$1" sock="$2"
+  python3 - "$dir" "$sock" <<'PY' &
+import http.server, socketserver, sys, os
+d, sockpath = sys.argv[1], sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        route = self.path.split('?')[0]
+        f = os.path.join(d, route.strip('/').replace('/', '_') or 'root')
+        if os.path.exists(f):
+            code, body = open(f).read().split('\n', 1)
+            self.send_response(int(code)); self.end_headers(); self.wfile.write(body.encode())
+        else:
+            self.send_response(404); self.end_headers(); self.wfile.write(b'{"message":"nope"}')
+class S(socketserver.UnixStreamServer):
+    def get_request(self):
+        req, _ = super().get_request()
+        return req, ("localhost", 0)
+if os.path.exists(sockpath): os.remove(sockpath)
+with S(sockpath, H) as s:
+    open(os.path.join(d, ".ready"), "w").write("1")
+    s.serve_forever()
+PY
+  STUB_PID=$!
+  for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.05; done
 }
 
-@test "30-pods : si le port API se met a SERVIR des pods, le changement de contrat est signale" {
-  # The day the runtime changes, this line changes with it — instead of a probe silently reading the
-  # wrong surface as the reference list.
-  local d="$TMP/stub2"; mkdir -p "$d"
-  printf '200\n{"pods":[]}' > "$d/api_pods"
-  stub_server "$d"
-  mkdir -p "$TMP/run"
-  run env LCARS_RUN_DIR="$TMP/run" \
-    LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
-    "$PROBES/30-pods.sh"
-  stub_stop
-  assert_verdict pods.port_guard degraded
-}
-
-@test "30-pods : zero pod est un etat legitime, jamais un drift" {
-  # An idle fleet must not be permanently red.
+@test "30-pods : zero pod vivant est un etat legitime (operational), jamais un drift" {
+  # An idle fleet must not be permanently red — un 200 avec liste vide se lit operational, avec le
+  # compte dans l'evidence.
   local d="$TMP/stub3"; mkdir -p "$d"
-  printf '501\nx'           > "$d/api_pods"
-  printf '200\n{"total":0}' > "$d/api_projection"
-  stub_server "$d"
-  run env LCARS_API_URL="http://127.0.0.1:$STUB_PORT" LCARS_OBS_URL="http://127.0.0.1:$STUB_PORT" \
-    "$PROBES/30-pods.sh"
+  printf '200\n{"pods":[]}' > "$d/api_pods"
+  local sock="$TMP/deck3.sock"
+  stub_unix_server "$d" "$sock"
+  mkdir -p "$TMP/run"
+  run env LCARS_RUN_DIR="$TMP/run" LCARS_OBS_SOCK="$sock" "$PROBES/30-pods.sh"
   stub_stop
-  # `/api/pods` on the obs side is absent from the stub → 404 → degraded, never a silent "0 pod".
+  assert_verdict pods.live operational
+  assert_field_contains pods.live evidence '0 pod'
+}
+
+@test "30-pods : un endpoint pods muet n'est PAS zero pod — il degrade" {
+  # La regression a ne pas rouvrir : un endpoint absent (404) ne doit jamais se rendre en silence
+  # « 0 pod ». Le stub ne sert rien pour /api/pods → 404 → degraded, sans faux compte.
+  local d="$TMP/stub3b"; mkdir -p "$d"
+  local sock="$TMP/deck3b.sock"
+  stub_unix_server "$d" "$sock"
+  mkdir -p "$TMP/run"
+  run env LCARS_RUN_DIR="$TMP/run" LCARS_OBS_SOCK="$sock" "$PROBES/30-pods.sh"
+  stub_stop
+  assert_verdict pods.live degraded
   refute_field_contains pods.live evidence '0 pod'
 }
 

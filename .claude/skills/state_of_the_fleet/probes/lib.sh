@@ -87,21 +87,11 @@ trim() {
   fi
 }
 
-# ── Port resolution ───────────────────────────────────────────────────────────────────────────────
-# `bin/fleet_v2` derives a per-human port block from the UID: base = 21000 + (uid % 500) * 10, then
-# API = base, observation = base+1. We re-derive it rather than hardcode, because two humans on one
-# box get two blocks and a hardcoded 21000 would silently probe the neighbour's fleet.
-#
-# LCARS_API_URL / LCARS_OBS_URL WIN when set. They are not injected into a pod today (measured on a
-# live starfleet: neither var is in its env) — the day the launcher passes them, this function stops
-# guessing without a line changing here. Guessing from the UID is correct only while the pod
-# inherits the human's UID, which is the current spawn model, not a law.
+# ── sotf_uid — the UID this toolkit runs as ───────────────────────────────────────────────────────
+# Kept as CONTEXT evidence only (which UID took the measurement). It no longer drives any endpoint:
+# the fleet is socket-only and the deck socket is addressed by the human's NAME, not a UID-derived
+# TCP port (see sotf_obs_sock).
 sotf_uid() { id -u; }
-
-sotf_port_base() {
-  local uid; uid="$(sotf_uid)"
-  echo $(( 21000 + (uid % 500) * 10 ))
-}
 
 # The runtime dir a started fleet leaves behind. Its EXISTENCE is the discriminator between "no
 # fleet was ever started here" and "a fleet is started and unwell" — measured on two specimens: a
@@ -111,43 +101,45 @@ sotf_port_base() {
 sotf_run_dir() { echo "${LCARS_RUN_DIR:-$HOME/.lcars/run}"; }
 sotf_fleet_ever_started() { [[ -d "$(sotf_run_dir)" ]]; }
 
-# `bin/fleet_v2` WRITES the API url it computed into `~/.lcars/run/api_url` (line 125). That file is
-# the fleet's own answer to "where am I listening", and it beats deriving from the UID: the
-# derivation only holds while the reader shares the launcher's UID, which a pod does today and is
-# not a law. Order: env (explicit operator override) > the fleet's own file > derivation.
-sotf_api_url() {
-  if [[ -n "${LCARS_API_URL:-}" ]]; then echo "${LCARS_API_URL%/}"; return; fi
-  local f; f="$(sotf_run_dir)/api_url"
-  if [[ -r "$f" ]]; then local u; u="$(head -1 "$f" 2>/dev/null)"; [[ -n "$u" ]] && { echo "${u%/}"; return; }; fi
-  echo "http://127.0.0.1:$(sotf_port_base)"
+# ── sotf_obs_sock — the observation deck socket this operator reaches ──────────────────────────────
+# The fleet is socket-only: there is NO TCP HTTP listener anymore. The observation deck
+# (`Fleet.Observation.Deck`) binds an AF_UNIX socket at `<console_root>/<human>/deck.sock`, ONE per
+# human. That per-human split is why the old "wrong daemon / neighbour's fleet" ambiguity is gone: a
+# name resolves to a path, and this operator can only dial their OWN deck.sock, never a neighbour's.
+# Order: operator override (LCARS_OBS_SOCK) > default layout, whose root can be moved for tests via
+# SOTF_CONSOLE_ROOT (same default root as Fleet.Observation.Application.deck_socket, /run/lcars/console).
+sotf_obs_sock() {
+  if [[ -n "${LCARS_OBS_SOCK:-}" ]]; then echo "$LCARS_OBS_SOCK"; return; fi
+  echo "${SOTF_CONSOLE_ROOT:-/run/lcars/console}/$(id -un)/deck.sock"
 }
 
-# No `obs_url` file is written by the launcher today, so the observation port is derived from the
-# API one when that came from a file (base+1, the launcher's own block layout), else from the UID.
-sotf_obs_url() {
-  if [[ -n "${LCARS_OBS_URL:-}" ]]; then echo "${LCARS_OBS_URL%/}"; return; fi
-  local api port; api="$(sotf_api_url)"; port="${api##*:}"
-  if [[ "$port" =~ ^[0-9]+$ ]]; then echo "${api%:*}:$(( port + 1 ))"; else echo "http://127.0.0.1:$(( $(sotf_port_base) + 1 ))"; fi
-}
-
-# How the URL was obtained — a reader must be able to tell a declared endpoint from a guessed one,
-# because a wrong guess probes the NEIGHBOUR's fleet and reports it as ours.
+# How the socket path was obtained. With a per-human socket there is no port to derive and no way to
+# land on someone else's fleet, so the old declared-vs-guessed warning collapses to one benign
+# distinction: operator override vs the default layout path. Still reported so a reader sees WHERE
+# the measurement was aimed.
 sotf_url_origin() {
-  if [[ -n "${LCARS_API_URL:-}" || -n "${LCARS_OBS_URL:-}" ]]; then echo "env"
-  elif [[ -r "$(sotf_run_dir)/api_url" ]]; then echo "annonce par la fleet (~/.lcars/run/api_url)"
-  else echo "derive de l'uid $(sotf_uid)"; fi
+  if [[ -n "${LCARS_OBS_SOCK:-}" ]]; then echo "override LCARS_OBS_SOCK"
+  else echo "socket par defaut ($(sotf_obs_sock))"; fi
 }
 
-# ── http_probe <url> — sets SOTF_HTTP_CODE and SOTF_HTTP_BODY ─────────────────────────────────────
+# ── http_probe <url> [timeout] [unix_sock] — sets SOTF_HTTP_CODE and SOTF_HTTP_BODY ───────────────
 # Returns 0 if curl ran (whatever the HTTP code), 1 if curl could not run at all. The caller
 # distinguishes "the server answered 500" (a finding) from "I have no curl" (a blind spot) — that
 # distinction IS the unreachable/degraded split.
+#
+# A non-empty `unix_sock` switches the transport to that AF_UNIX socket (`--unix-socket`). The fleet
+# is socket-only, so callers pass the deck socket and a placeholder URL like
+# `http://localhost/api/...`: the host in the URL is never resolved, curl dials the socket and the
+# path/Host are what the deck routes on. Args are built in an array so the socket flag can be added
+# without a second curl invocation and without word-splitting the socket path.
 http_probe() {
-  local url="$1" timeout="${2:-4}"
+  local url="$1" timeout="${2:-4}" unix_sock="${3:-}"
   SOTF_HTTP_CODE="" SOTF_HTTP_BODY=""
   have curl || return 1
+  local args=(-sS --max-time "$timeout" -w $'\n%{http_code}')
+  [[ -n "$unix_sock" ]] && args+=(--unix-socket "$unix_sock")
   local out
-  out="$(curl -sS --max-time "$timeout" -w $'\n%{http_code}' "$url" 2>&1)" || {
+  out="$(curl "${args[@]}" "$url" 2>&1)" || {
     # curl itself failed (no route, refused, timeout). `-w` still appended its `000`; strip it so the
     # evidence carries curl's REASON and not a duplicate of the code we are already reporting.
     SOTF_HTTP_CODE="000"
