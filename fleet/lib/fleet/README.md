@@ -25,9 +25,9 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 
 | Layer | Domain | H |
 |-------|--------|---|
-| OTP root | `Fleet.Application` | 11 |
-| surface | `Fleet.Observation` | 5 |
+| OTP root | `Fleet.Application` | 12 |
 | surface | `Fleet.API` | 10 |
+| surface | `Fleet.Observation` | 11 |
 | steering | `Fleet.Pilot` | 8 |
 | steering | `Fleet.Starfleet` | 9 |
 | work | `Fleet.Workflow` | 5 |
