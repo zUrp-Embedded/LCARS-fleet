@@ -60,7 +60,16 @@ teardown() {
 # ⚠ The stub must ANSWER `has-session` NEGATIVELY. A blanket `dtmux() { :; }` reports a live
 # session, cmd_start takes its already-up early return, and every test below passes without ever
 # reaching the guard — green, and measuring nothing.
-NEUTRALISED_START='dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { echo reached-launch; }; cmd_start'
+#
+# ⚠ GUARD B IS NEUTRALISED HERE TOO, AND ITS ABSENCE COST A RED IMAGE. `cmd_start` opens with the
+# sysadmin-uid guard, BEFORE the credentials door these tests aim at. Left to the runner's REAL uid,
+# every test below measures the machine it runs on: green on a host whose human is uid 1017, red in
+# the image `build` stage, which runs as `builder` — uid 1000, the reserved sysadmin uid — where the
+# guard fires first and the door under test is never reached. Measured 2026-08-15: 4 tests red in
+# the image, 0 on the host, same tree, same commit. So the comparison value is pinned OFF the
+# runner's uid, exactly as the two GUARD B tests below pin it ON — a test that reads `id -u` without
+# saying so is a test about the machine.
+NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "$1" != has-session ]]; }; fleet_up_notice() { echo reached-launch; }; cmd_start'
 
 @test "start REFUSES without claude credentials, and names the identity gesture" {
   run bash -c "source '$SCRIPT'; $NEUTRALISED_START"
