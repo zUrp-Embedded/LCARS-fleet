@@ -1018,11 +1018,17 @@ globalThis.WebSocket = class {
 };
 globalThis.WebSocket.OPEN = 1;
 let dataCb = null, resizeCb = null; const written = [];
+// `onSelectionChange` + `getSelection` : le rail du copier-auto. Le stub les porte parce que le
+// client les APPELLE — un stub qui ignore une methode fait passer un client qui ne l'appelle plus.
+let selCb = null, selText = '';
+const copies = [];
+globalThis.document.execCommand = (cmd) => { copies.push(cmd); return true; };
 globalThis.Terminal = class {
   constructor() { this.cols = 80; this.rows = 24; }
   loadAddon() {} open() {} focus() {} dispose() {}
   write(b) { written.push(b); }
   onData(f) { dataCb = f; } onResize(f) { resizeCb = f; }
+  onSelectionChange(f) { selCb = f; } getSelection() { return selText; }
 };
 globalThis.FitAddon = { FitAddon: class { activate() {} fit() {} dispose() {} } };
 
@@ -1039,6 +1045,15 @@ resizeCb();
 out.resize = dec.decode(sent[2]);
 onmsg({ data: new TextEncoder().encode('0bonjour').buffer });
 out.written = dec.decode(written[0]);
+
+// LE COPIER AUTOMATIQUE SUR SELECTION — regression du lot console, retrouvee le 2026-08-15.
+// Le comportement venait du frontend applicatif de ttyd, pas de xterm.js : en remplacant l'iframe
+// par ce client on a porte le protocole et pas le comportement. Les deux sens sont pris — une
+// selection VIDE ne doit rien copier, sinon chaque clic ecraserait le presse-papier.
+out.copy = {};
+selText = ''; if (selCb) selCb(); out.copy.onEmpty = copies.length;
+selText = 'du texte selectionne'; if (selCb) selCb(); out.copy.onText = copies.slice();
+out.copy.wired = Boolean(selCb);
 
 // LES DEUX AUTRES NATURES D'ONGLET, parce que le bug de portee trouve dans `termPane` etait du
 // code de la MEME facture, ecrit dans la meme heure — et rien ne les avait executees non plus.
@@ -1111,6 +1126,18 @@ console.log(JSON.stringify(out));
               "un redimensionnement part prefixe '1' + JSON (vu: %r)" % _o["resize"])
         check(_o["written"] == "bonjour",
               "une sortie serveur '0' est ecrite SANS son prefixe (vu: %r)" % _o["written"])
+
+        # ── LE COPIER AUTOMATIQUE SUR SELECTION (regression 2026-08-15) ─────────────────────────
+        # Perdu en remplacant l'iframe ttyd par ce client : le handler etait du code APPLICATIF de
+        # ttyd, pas de xterm.js. Le terminal selectionnait toujours, donc rien n'avait l'air casse —
+        # sauf que la selection n'arrivait plus dans le presse-papier. Aucun temoin ne l'a vu partir.
+        check(_o["copy"].get("wired") is True,
+              "le client CABLE onSelectionChange (sans lui, shift+glisser selectionne sans copier)")
+        check(_o["copy"].get("onText") == ["copy"],
+              "une selection NON VIDE declenche la copie (vu: %r)" % (_o["copy"].get("onText"),))
+        check(_o["copy"].get("onEmpty") == 0,
+              "une selection VIDE ne copie RIEN — sinon un simple clic ecrase le presse-papier "
+              "(vu: %r)" % (_o["copy"].get("onEmpty"),))
 
         # ── L'ONGLET ADMIN S'EXECUTE, ET SA BRANCHE SE PREND DANS LES DEUX SENS ─────────────────
         check(_o["adm"].get("ok") is True,

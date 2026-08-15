@@ -863,6 +863,30 @@ function termPane(tab) {
   term.open(host);
   fit.fit();
 
+  // LE COPIER AUTOMATIQUE SUR SELECTION — perdu au passage de l'iframe au client maison.
+  //
+  // Ce comportement n'a JAMAIS ete celui de xterm.js : il vivait dans le frontend applicatif de
+  // ttyd, celui que l'iframe servait. Mesure du 2026-08-15 sur le ttyd 1.7.7 pinne de l'image
+  // (frontend recupere sur sa socket, il est gzippe dans le binaire et invisible a un `strings`) :
+  //   term.onSelectionChange(() => { if (getSelection() !== '') { execCommand('copy'); overlay('✂') } })
+  // En remplacant l'iframe par ce client, on a reporte le protocole ttyd (trames '0'/'1'/'2', init,
+  // sous-protocole) et pas son comportement. Le terminal SELECTIONNE toujours ; c'est la copie qui
+  // etait partie, donc le geste echouait a la derniere marche et rien ne le disait.
+  //
+  // POURQUOI SHIFT EST DANS LE GESTE (cf. console.tmux.conf) : `mouse on` donne le drag a tmux, et
+  // relacher efface la selection. Shift contourne la capture — xterm.js reprend la souris et fait sa
+  // propre selection. C'est CETTE selection que le handler ci-dessous copie.
+  //
+  // `execCommand('copy')` et pas `navigator.clipboard.writeText(term.getSelection())` : c'est la
+  // forme MESUREE comme fonctionnelle dans ce deploiement. xterm.js pose sa selection dans son
+  // textarea cache et cable un `copyHandler` sur l'evenement `copy` (verifie present dans le
+  // xterm.js servi par le deck) — l'API moderne exige en plus un contexte sur et une activation
+  // utilisateur que cet evenement ne garantit pas. Deprecie, mais c'est celle qui marche ici.
+  term.onSelectionChange(() => {
+    if (!term.getSelection()) return;
+    try { document.execCommand('copy'); } catch (e) { /* pas de presse-papier : la selection reste */ }
+  });
+
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const sock = new WebSocket(`${proto}//${location.host}${tab.term}`, ['tty']);
   sock.binaryType = 'arraybuffer';
