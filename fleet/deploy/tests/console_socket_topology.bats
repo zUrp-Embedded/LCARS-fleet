@@ -316,17 +316,18 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   [ "${lines[0]}" = "zoe 1015 $home/zoe" ]
 }
 
-@test "identite-v2: un compte eligible HORS du groupe fleet est rejete (admiral/sysadmin)" {
+@test "identite-v2: un compte eligible HORS du groupe fleet est rejete (derive de l'autorite, pas de l'uid)" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
-  mkdir -p "$home/zoe" "$home/admiral"
-  # admiral : uid 1000, home, /bin/bash -> eligible sur TOUS les criteres SAUF le groupe fleet.
-  printf 'admiral:x:1000:1000::%s/admiral:/bin/bash\n' "$home" > "$pw"
+  mkdir -p "$home/zoe" "$home/ghost"
+  # ghost : uid valide, home, /bin/bash -> eligible sur TOUS les criteres SAUF le groupe fleet.
+  # (admiral, lui, EST dans le groupe fleet — c'est ainsi qu'il a sa console ; cf. entrypoint/20-groups.)
+  printf 'ghost:x:1044:1044::%s/ghost:/bin/bash\n' "$home" > "$pw"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
 
   humans_sh "$pw" "zoe"   # seul zoe est membre du groupe fleet
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
-  [[ "$output" != *"admiral"* ]]
+  [[ "$output" != *"ghost"* ]]
 }
 
 @test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
