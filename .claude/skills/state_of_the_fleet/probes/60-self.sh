@@ -43,25 +43,21 @@ CTX="$(sotf_self_context)"
 # Chacun recoit la valeur DECLAREE en $1 et rend `verdict|evidence`. Ils sont du CODE et doivent le
 # rester : ce sont des mecanismes de lecture, pas des attentes. L'attente vient du cap-profile.
 
-# `claude_launch.dbg` est la trace de ce que le launcher a REELLEMENT passe au binaire vendor.
-# Confronter la liste du cap-profile a celle-la, c'est la divergence A-8 rendue mecanique.
-obs_launcher_tools() {
-  local declared="$1" dbg="$POD_HOME/claude_launch.dbg"
-  [[ -r "$dbg" ]] || { echo "unreachable|claude_launch.dbg absent ($dbg)"; return; }
-  # Format de la trace, MESURE et pas suppose : `step jq tools OK allowed='a,b,c' disallowed=...`
-  # (et non la forme `--allowedTools` de la ligne de commande). Une sonde qui devine le format de
-  # sa source rend `unknown` sur une source parfaitement lisible.
-  local line; line="$(grep -oE "allowed='[^']*'" "$dbg" 2>/dev/null | head -1 | sed "s/allowed='//; s/'$//")"
-  [[ -n "$line" ]] || { echo "unknown|aucune ligne --allowedTools trouvee dans $dbg"; return; }
-  local missing="" extra="" t
-  for t in ${declared//,/ }; do [[ ",$line," == *",$t,"* ]] || missing="$missing $t"; done
-  for t in ${line//,/ };     do [[ ",${declared//,/,}," == *",$t,"* ]] || extra="$extra $t"; done
-  if [[ -z "$missing" && -z "$extra" ]]; then
-    echo "operational|cap-profile et launcher declarent la meme liste ($(echo ${declared//,/ } | wc -w) outils)"
-  else
-    echo "degraded|DIVERGENCE — au launcher seul :${extra:- aucun} · au cap-profile seul :${missing:- aucun}"
-  fi
-}
+# ⚠ `obs_launcher_tools` A ETE RETIRE — et son absence est une DECISION, pas un oubli.
+#
+# Il confrontait `.spec.scope.allowedTools` a la liste que `claude_launch.dbg` disait avoir passee au
+# binaire vendor : la divergence A-8 rendue mecanique. Sa source a disparu — le launcher n'ecrit plus
+# aucune trace dans le pod, parce qu'il tourne DANS le bwrap et que tout ce qu'il ecrit, l'agent
+# confine le lit. Une trace de boot lui tendait la recette de sa propre boite.
+#
+# Le pod est donc AVEUGLE sur ce point, exprès : il ne verifie plus l'accord entre sa liste declaree
+# et celle qui a ete posee. Une empreinte (sha de la liste triee) aurait rendu la detection sans
+# reveler le contenu ; ecartee — arbitrage user 2026-08-15 : on ne laisse pas au pod la recette de sa
+# boite, et une remediation exige de toute facon de toucher la source et de rebuilder, ce n'est pas
+# un flag a remettre.
+#
+# Ne pas le "reparer" en re-introduisant une trace cote pod. La divergence declaration/launcher se
+# mesure depuis l'HOTE, ou pas du tout.
 
 # `knowledge.skills` declare, `~/.claude/skills/` observe. C'est la classe A-11.
 obs_skills_installed() {
@@ -144,7 +140,6 @@ obs_mounts() {
 # Ajouter une verification = ajouter UNE ligne et un observateur. Aucune attente n'est ecrite ici :
 # la colonne 2 dit ou la lire.
 BINDINGS=(
-"self.tools¤.spec.scope.allowedTools¤obs_launcher_tools¤Compare deux DECLARATIONS (catalogue et launcher), pas ce que le binaire vendor a effectivement charge — cette derniere ligne, seul le modele peut la remplir."
 "self.skills¤.spec.knowledge.skills¤obs_skills_installed¤Presence sur disque seulement. Un skill present n'est pas un skill monte dans la session, ni un skill valide."
 "self.protocol¤.spec.interlocutor¤obs_protocol_injected¤Identifie le contrat par ses marqueurs. Ne dit pas si l'agent le SUIT, ni si un autre contrat contradictoire est injecte ailleurs (issues/, system-prompt)."
 "self.effort¤.spec.invocation.effort¤obs_effort_env¤L'env porte ce que le launcher a pose. Ne prouve pas que le binaire vendor l'honore."

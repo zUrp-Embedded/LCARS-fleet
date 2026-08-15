@@ -152,6 +152,34 @@ teardown() {
 }
 
 # =============================================================
+# No trace in the pod — user arbitration 2026-08-15.
+#
+# This launcher runs INSIDE bwrap: every path it can write is a path the confined agent can read.
+# A boot trace therefore handed the agent the recipe of its own box (permission mode and flags,
+# model, effort, setting-sources, the vendor surface that was cut, whether creds are present).
+# Redacting it field by field was tried and is the wrong shape — one forgotten field re-opens it
+# silently. The witness is written on the DIRECTORY, not on a filename: a trace under a new name
+# is the same defect, and asserting `! -f claude_launch.dbg` would miss it.
+# =============================================================
+
+@test "no trace: a full run leaves NO new readable file in the pod home" {
+  local before after
+  before="$(find "$POD_DIR" -maxdepth 1 -type f | sort)"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$status" -eq 0 ]]
+  after="$(find "$POD_DIR" -maxdepth 1 -type f | sort)"
+  # .claude.json is provisioned by design (onboarding/trust skip, documented at its site).
+  [[ "$(comm -13 <(echo "$before") <(echo "$after") | grep -v '/\.claude\.json$' || true)" == "" ]]
+}
+
+@test "no trace: the launcher source carries no writer into POD_DIR" {
+  # Belt to the braces above: the run-time witness only sees what a stubbed run produces, and the
+  # exposing lines sat on paths a stub never reaches (jq failures, MCP absent, version fallback).
+  ! grep -qE '>>?[[:space:]]*"?\$\{?POD_DIR' "$SCRIPT"
+  ! grep -q 'claude_launch\.dbg' "$SCRIPT"
+}
+
+# =============================================================
 # Setting-sources guard — 'user' is FORBIDDEN in ANY source list (the human's settings must
 # never bleed into the pod); the env override is validated, not trusted.
 # =============================================================

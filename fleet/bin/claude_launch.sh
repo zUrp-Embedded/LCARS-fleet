@@ -107,55 +107,55 @@ case ",${SETTING_SOURCES}," in
 esac
 
 # =============================================================
-# Debug trace #585 — appends to POD_DIR/claude_launch.dbg (bwrap RW bind → survives host-side for a
-# post-mortem). Pinpoints a silent exit point (sf #585 diagnosis).
+# NO LAUNCH TRACE IN THE POD — deliberate, and it is not a gap to fill.
+#
+# This script runs INSIDE bwrap (cf. bwrap_launch.sh, ADR-G): everything it can write, the confined
+# agent can read. A boot trace therefore handed the agent the recipe of its own box — permission
+# mode and flags, model, effort, setting-sources, the vendor surface that was cut, whether its
+# credentials are present. Redacting it field by field was tried (the tool lists became counts) and
+# it is the wrong shape: the file stays a channel that must be curated forever, and one forgotten
+# field re-opens the whole thing silently.
+#
+# There is no "write it host-side instead" either: no path outside the sandbox is reachable from in
+# here without a bind, and a bind is exactly what the agent reads.
+#
+# Diagnosing a launch failure means touching this source and rebuilding anyway — it was never a flag
+# to flip — so a permanent always-on trace bought a standing exposure against a debugging convenience
+# that does not survive its own use case. Failures speak on **stderr**, which the operator collects
+# outside and the agent does not read back.
+#
+# If you are here to re-add a trace: the answer is stderr, or a rebuild with a temporary local patch.
+# Not a file under $POD_DIR.
 # =============================================================
-dbg() { echo "[$(date -u +%H:%M:%S.%3N)] $*" >> "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true; }
-: > "${POD_DIR:-/tmp}/claude_launch.dbg" 2>/dev/null || true
-# Entries in a comma-joined list, 0 on empty — so a trace can report a SIZE where printing the
-# content would tell the agent what it is allowed and denied.
-_count_csv() { [[ -z "$1" ]] && echo 0 || { local IFS=','; local -a a=($1); echo "${#a[@]}"; }; }
-dbg "start ROLE=$ROLE POD_ID=$POD_ID POD_DIR=$POD_DIR session=$SESSION_ID resume=$POD_RESUME prefix=$SESSION_NAME_PREFIX PWD=$(pwd) HOME=${HOME:-} USER=$(id -un 2>/dev/null||echo ?)"
-dbg "auth claudeDir bind: $([ -f "$HOME/.claude/.credentials.json" ] && echo 'creds present' || echo 'MISSING')"
 
 if [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]]; then
-  dbg "EXIT: empty role/pod_id/pod_dir args"
   echo "ERR: role, pod_id and pod_dir must be non-empty" >&2
   exit 1
 fi
 if [[ ! -s "$SP_FILE" ]]; then
-  dbg "EXIT: SP file missing/empty: $SP_FILE"
   echo "ERR: SP file $SP_FILE missing or empty (written by Fleet.Spawner do_project)" >&2
   exit 1
 fi
-dbg "step SP_FILE OK ($SP_FILE, $(wc -c < "$SP_FILE" 2>/dev/null) o)"
-dbg "step args-non-empty OK"
 
 # =============================================================
 # Setup checks
 # =============================================================
 
 if [[ ! -x "$CLAUDE_BIN" ]]; then
-  dbg "EXIT: CLAUDE_BIN missing/not-x: $CLAUDE_BIN ls=$(ls -la "$CLAUDE_BIN" 2>&1)"
   echo "ERR: claude binary missing or not executable: $CLAUDE_BIN" >&2
   exit 1
 fi
-dbg "step CLAUDE_BIN OK ($CLAUDE_BIN)"
 
 if [[ ! -x "$JQ_BIN" ]]; then
-  dbg "EXIT: JQ_BIN missing/not-x: $JQ_BIN"
   echo "ERR: jq binary missing or not executable: $JQ_BIN (parsing cap-profile JSON)" >&2
   exit 1
 fi
-dbg "step JQ_BIN OK ($JQ_BIN)"
 
 CAP_PROFILE_JSON="$POD_DIR/.cap-profile.json"
 if [[ ! -f "$CAP_PROFILE_JSON" ]]; then
-  dbg "EXIT: cap-profile missing: $CAP_PROFILE_JSON ls_pod=$(ls -la "$POD_DIR" 2>&1)"
   echo "ERR: cap-profile $CAP_PROFILE_JSON missing (Fleet.Spawner ALLOCATE chantier 6)" >&2
   exit 1
 fi
-dbg "step CAP_PROFILE OK"
 
 # =============================================================
 # Onboarding/trust skip (interactive): without it claude blocks on the first-run dialog. A minimal
@@ -170,10 +170,9 @@ dbg "step CAP_PROFILE OK"
 # `|| true` is MANDATORY: under `set -euo pipefail`, a `--version` in an unexpected format (grep with no
 # match, rc=1) killed the launcher HERE with an opaque exit 1, BEFORE the ${VER:-2.1.150} fallback below
 # could ever be reached → EVERY pod dead on a mere vendor format change. Non-fatal by construction: an
-# empty VER lets the fallback play and we trace it (dbg + stderr) instead of dying.
+# empty VER lets the fallback play and we say so on stderr instead of dying.
 VER="$("$CLAUDE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 if [[ -z "$VER" ]]; then
-  dbg "WARN: vendor version undetectable ('$CLAUDE_BIN --version' with no x.y.z match) — falling back to lastOnboardingVersion 2.1.150"
   echo "WARN: claude --version in an unexpected format — falling back to lastOnboardingVersion 2.1.150" >&2
 fi
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
@@ -221,7 +220,6 @@ if [[ -d "$POD_CWD/.git" ]]; then
     exit 1
   fi
   SKILL_FLAGS=(--disable-slash-commands)
-  dbg "surface vendor coupee (--disable-slash-commands) : depot au cwd $POD_CWD"
 fi
 # Claude Desktop visibility — read HERE because it GATES remoteControlAtStartup in the .claude.json below.
 # `spec.invocation.remote_control: false` (qualifier/reviewer judges) means a pod INVISIBLE in Desktop.
@@ -274,27 +272,18 @@ cat > "$POD_DIR/.claude.json" <<JSONEOF
   "remoteControlAtStartup": $RC_STARTUP, "hasUsedRemoteControl": true, "remoteDialogSeen": true,
   "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF
-dbg "step claude.json provisioned (VER=${VER:-?}, remoteControlAtStartup=$RC_STARTUP)"
 
 # =============================================================
 # Tools from the resolved cap-profile JSON (string-keyed, consistent with fleet_cap_profile L100).
 # =============================================================
 
-ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq allowedTools fail rc=$? out=$ALLOWED_TOOLS"; exit 1; }
-DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { dbg "EXIT: jq disallowedTools fail rc=$? out=$DISALLOWED_TOOLS"; exit 1; }
+ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { echo "ERR: jq allowedTools failed on $CAP_PROFILE_JSON: $ALLOWED_TOOLS" >&2; exit 1; }
+DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { echo "ERR: jq disallowedTools failed on $CAP_PROFILE_JSON: $DISALLOWED_TOOLS" >&2; exit 1; }
 # #kill-yolo: the fleet MCP protocol is UNIVERSAL (every pod does get_work_item/submit_result) → appended
 # to the allowlist. Under --permission-mode default an unlisted MCP tool PROMPTS ("Do you want to
 # proceed?") → headless hang. Role-specific MCP tools (the arch's create_*/get_issue_status) stay in the
 # cap-profile.
 ALLOWED_TOOLS="${ALLOWED_TOOLS:+$ALLOWED_TOOLS,}mcp__fleet__get_work_item,mcp__fleet__submit_result"
-# COUNTS, NEVER THE LISTS. This trace lives inside the sandbox — `claude_launch.sh` is exec'd by
-# bwrap, so every path it can write is a path the agent can read, and there is no "somewhere else"
-# to move the file to. What the file may NOT do is hand the confined agent the enumeration of its
-# own confinement: an agent that reads its allow/deny table stops guessing what it may do and
-# starts reading what it may not, which is the one thing nobody asked it to think about.
-# The diagnostic value is preserved — "did jq read them, are they non-empty" is what a silent-exit
-# post-mortem asks, and a count answers it.
-dbg "step jq tools OK ($(_count_csv "$ALLOWED_TOOLS") allowed, $(_count_csv "$DISALLOWED_TOOLS") disallowed)"
 
 # Permission mode (#kill-yolo): env override (host), else `cap-profile.spec.invocation.permission_mode`,
 # default "default" (→ `--permission-mode default`, lists ENFORCED; no more --dangerously-skip bypassing
@@ -306,7 +295,6 @@ dbg "step jq tools OK ($(_count_csv "$ALLOWED_TOOLS") allowed, $(_count_csv "$DI
 PERM_MODE="${PERM_ENV_OVERRIDE:-$("$JQ_BIN" -r '.spec.invocation.permission_mode // "default"' "$CAP_PROFILE_JSON" 2>/dev/null)}"
 [[ -z "$PERM_MODE" ]] && PERM_MODE="default"
 PERM_FLAGS=(--permission-mode "$PERM_MODE")
-dbg "step perm mode=$PERM_MODE (env_override='${PERM_ENV_OVERRIDE}')"
 
 # Model + effort from the catalogue (spec.invocation) → claude flags. Absent/null ⇒ the flag is omitted
 # (claude keeps its binary default; the 7 canon cap-profiles set them, so the flag is always emitted in
@@ -316,7 +304,6 @@ MODEL=$("$JQ_BIN" -r '.spec.invocation.model // empty' "$CAP_PROFILE_JSON" 2>/de
 EFFORT=$("$JQ_BIN" -r '.spec.invocation.effort // empty' "$CAP_PROFILE_JSON" 2>/dev/null)
 MODEL_FLAGS=();  [[ -n "$MODEL"  ]] && MODEL_FLAGS=(--model "$MODEL")
 EFFORT_FLAGS=(); [[ -n "$EFFORT" ]] && EFFORT_FLAGS=(--effort "$EFFORT")
-dbg "step jq invocation model='$MODEL' effort='$EFFORT'"
 
 # --remote-control flag: OMITTED when remote_control:false (a judge) → the pod still runs INTERACTIVE
 # under the tmux PTY (MCP/wake intact) but stays INVISIBLE in Desktop. REMOTE_CONTROL was read above (it
@@ -329,7 +316,6 @@ RC_FLAGS=()
 # (Fleet.Layout.pod_label/3) and passed through verbatim: nothing here composes or parses it.
 [[ "$REMOTE_CONTROL" != "false" ]] &&
   RC_FLAGS=(--remote-control "$SESSION_NAME_PREFIX")
-dbg "step jq remote_control='$REMOTE_CONTROL' (RC=${#RC_FLAGS[@]} flags)"
 
 # =============================================================
 # Pod settings: CONSUMED, never composed (BL-6-07). $POD_DIR/.lcars/settings.json is written
@@ -353,9 +339,6 @@ POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
 SETTINGS_FLAGS=(--setting-sources "$SETTING_SOURCES")
 if [[ -f "$POD_SETTINGS_FILE" ]]; then
   SETTINGS_FLAGS+=(--settings "$POD_SETTINGS_FILE")
-  dbg "step pod settings found ($POD_SETTINGS_FILE) + --setting-sources $SETTING_SOURCES"
-else
-  dbg "step no pod settings ($POD_SETTINGS_FILE absent); --setting-sources $SETTING_SOURCES alone"
 fi
 
 # =============================================================
@@ -370,12 +353,11 @@ MCP_CONFIG="$POD_DIR/.mcp-fleet.json"
 MCP_FLAGS=()
 if [[ -f "$MCP_CONFIG" ]]; then
   MCP_FLAGS=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
-  dbg "step MCP config found ($MCP_CONFIG) → --strict-mcp-config"
 else
   # IRON LAW: MCP is the ONE communication channel. A real pod WITHOUT .mcp-fleet.json is an upstream
   # config bug — the emitter must always provision it. The launcher stays content-agnostic (it does not
-  # fail-fast), but this is abnormal.
-  dbg "WARN: no MCP config ($MCP_CONFIG absent) — ABNORMAL for a real pod (upstream provisioning missing)"
+  # fail-fast), but this is abnormal, and it says so where the operator collects it: stderr.
+  echo "WARN: no MCP config ($MCP_CONFIG absent) — ABNORMAL for a real pod (upstream provisioning missing)" >&2
 fi
 
 # =============================================================
@@ -401,11 +383,12 @@ fi
 resumable_session() {
   local id=$1 f
   f=$(find "$POD_DIR/.claude/projects" -maxdepth 2 -name "$id.jsonl" -print -quit 2>/dev/null)
-  [[ -n "$f" ]] || { dbg "step session: no transcript for $id"; return 1; }
+  [[ -n "$f" ]] || return 1
   if grep -qE '"type":"(user|assistant)"' "$f"; then
     return 0
   fi
-  dbg "step session: transcript $f has NO conversation turn (stub of a pod that died at start) — removing"
+  # No conversation turn: the stub of a pod that died at start. Removing it makes the session
+  # non-resumable, which is the correct verdict — resuming an empty transcript loops the pod.
   rm -f "$f"
   return 1
 }
@@ -415,7 +398,6 @@ if [[ "$POD_RESUME" == "1" ]] && resumable_session "$SESSION_ID"; then
 else
   SESSION_FLAGS=(--session-id "$SESSION_ID")
 fi
-dbg "step session flags: ${SESSION_FLAGS[*]}"
 
 # =============================================================
 # exec INTERACTIVE claude, PTY-puppet (ADR-G). NO -p, NO stream-json, NO budget, NO positional prompt —
@@ -433,7 +415,6 @@ dbg "step session flags: ${SESSION_FLAGS[*]}"
 # long-lived pod life, and it diverges from the vendor default on a compat knob. The
 # arming discipline lives in the SPs (imperative STEP 0), not in a launcher env.
 
-dbg "step pre-exec claude (RC=${#RC_FLAGS[@]} flags perm=${PERM_FLAGS[*]} bin=$CLAUDE_BIN sp_file=$SP_FILE)"
 exec "$CLAUDE_BIN" \
     "${RC_FLAGS[@]}" \
     "${SESSION_FLAGS[@]}" \

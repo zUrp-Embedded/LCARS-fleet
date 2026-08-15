@@ -518,10 +518,16 @@ PY
   assert_verdict self.cap_profile inactive
 }
 
-@test "60-self : une divergence cap-profile ↔ launcher est NOMMEE des deux cotes" {
-  # Le format de `claude_launch.dbg` est MESURE (`allowed='a,b,c'`), pas suppose : la premiere
-  # version cherchait `--allowedTools`, une forme inventee, et rendait `unknown` sur une trace
-  # parfaitement lisible.
+@test "60-self : le pod NE LIT PAS une trace de launcher, meme posee sous son nez" {
+  # Garde de non-regression de l'arbitrage 2026-08-15 : le launcher n'ecrit plus de trace dans le
+  # pod (il tourne dans le bwrap, donc tout ce qu'il ecrit, l'agent confine le lit), et la sonde a
+  # perdu `obs_launcher_tools` avec sa source. Le pod est AVEUGLE sur la divergence A-8, expres.
+  #
+  # Ce temoin est ecrit a l'envers des deux qu'il remplace : ils fabriquaient une trace et
+  # verifiaient qu'elle etait LUE. Celui-ci en fabrique une — au format exact que l'ancienne sonde
+  # cherchait, pour que le temoin echoue si quelqu'un recable le lecteur — et exige qu'il ne s'en
+  # serve de rien. Une trace qui reapparaitrait sans lecteur reste un defaut, mais c'est le defaut
+  # du launcher, tenu par ses propres bats.
   local h="$TMP/pod"; mkdir -p "$h"
   cat > "$h/.cap-profile.json" <<'JSON'
 {"kind":"CapabilityProfile","metadata":{"name":"probe","containment":"bwrap"},
@@ -529,19 +535,12 @@ PY
 JSON
   echo "[00:00:00] step jq tools OK allowed='Read,Bash,mcp__fleet__submit_result' disallowed='x'" > "$h/claude_launch.dbg"
   run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  assert_verdict self.tools degraded
-  assert_field_contains self.tools evidence 'submit_result'
-}
-
-@test "60-self : listes identiques → operational, sans reparer quoi que ce soit" {
-  local h="$TMP/pod2"; mkdir -p "$h"
-  cat > "$h/.cap-profile.json" <<'JSON'
-{"kind":"CapabilityProfile","metadata":{"name":"p","containment":"bwrap"},
- "spec":{"scope":{"allowedTools":["Read","Bash"]}}}
-JSON
-  echo "step jq tools OK allowed='Read,Bash' disallowed='x'" > "$h/claude_launch.dbg"
-  run env -u LCARS_POD_ID LCARS_POD_HOME="$h" "$PROBES/60-self.sh"
-  assert_verdict self.tools operational
+  # Aucune liaison `self.tools` n'est emise, et rien de la trace ne ressort dans le rapport.
+  [[ "$output" != *"self.tools"* ]]
+  [[ "$output" != *"submit_result"* ]]
+  # Et l'angle mort est DECLARE, pas silencieux : `self.coverage` nomme le champ qui n'est plus
+  # regarde. C'est ce qui separe « on a decide de ne pas voir » de « on a oublie de voir ».
+  assert_field_contains self.coverage evidence 'spec.scope.allowedTools'
 }
 
 @test "60-self : un champ tableau est APLATI, pas rendu en JSON brut" {
