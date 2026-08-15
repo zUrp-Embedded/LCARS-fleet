@@ -2152,8 +2152,15 @@ defmodule Fleet.Project.Onboard do
           # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
           # Meme discipline que le deck refusant lui-meme une entree non declaree plutot que de
           # laisser la forge le faire illisiblement.
+          #
+          # ⚠ C'EST `org_exists?/2` QUI POSE LA QUESTION, et l'endpoint n'est pas interchangeable.
+          # La question est « l'org existe-t-elle », or dans Gitea une org est une ligne de la MEME
+          # table `user` : un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
+          # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test
+          # rendait alors `true` et le diagnostic exact (`catalogue_not_enrolled`) retombait en
+          # erreur brute — degradation silencieuse du seul message qui nomme le geste manquant.
           {:error, {:http, 404, _}} = err ->
-            case users.user_exists?(org, fc) do
+            case users.org_exists?(org, fc) do
               {:ok, false} ->
                 {:error,
                  {:catalogue_not_enrolled, org, provisioning_gestures(:catalogue, human, org)}}

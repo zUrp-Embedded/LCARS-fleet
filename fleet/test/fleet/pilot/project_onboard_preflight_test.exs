@@ -40,6 +40,26 @@ defmodule Fleet.Project.OnboardPreflightTest do
       do: {:error, {:http, 403, %{"message" => "Forbidden"}}}
   end
 
+  defmodule UnenrolledCatalogueUsers do
+    # Le catalogue est ACTIF sur la boite et son org n'a jamais ete provisionnee : `/orgs/<org>/teams`
+    # rend le 404 de Gitea (`GetOrgByName`), et l'org est PROUVEE absente.
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def org_exists?(_o, _fc), do: {:ok, false}
+
+    def team_member?(_org, "humans", _u, _fc),
+      do: {:error, {:http, 404, %{"message" => "user redirect does not exist [name: web]"}}}
+  end
+
+  defmodule OrgPresent404Users do
+    # L'org EXISTE : le 404 vient d'ailleurs (une equipe absente, une route qui a bouge). On ne doit
+    # PAS l'habiller du diagnostic d'enrolement.
+    def user_exists?(_u, _fc), do: {:ok, true}
+    def org_exists?(_o, _fc), do: {:ok, true}
+
+    def team_member?(_org, "humans", _u, _fc),
+      do: {:error, {:http, 404, %{"message" => "team does not exist"}}}
+  end
+
   defp opts(tmp, users),
     do: [
       human: "ghost-human",
@@ -172,6 +192,35 @@ defmodule Fleet.Project.OnboardPreflightTest do
     test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
       assert {:error, {:already_in_catalogue, "fleet"}} =
                Fleet.Project.Onboard.migrate("fleet/vitrine", "fleet")
+    end
+  end
+
+  # CE DIAGNOSTIC N'AVAIT AUCUN TEMOIN, et c'est precisement celui qu'un operateur rencontre apres
+  # `lcars catalogue enable <cat>` : le catalogue est actif ici, personne ne l'a enrole sur la forge.
+  # Sans temoin, la seule preuve qu'il fonctionne etait de le rencontrer en vrai — mesure du
+  # 2026-08-15 au banc, ou le 404 brut de Gitea (`GetOrgByName`) a coute une session de diagnostic.
+  # Le second temoin tient la DISCRIMINATION, qui est tout l'interet : sans lui, rendre le diagnostic
+  # d'enrolement sur n'importe quel 404 passerait au vert et enverrait l'operateur provisionner une
+  # org qui existe deja.
+  describe "org du catalogue absente de la forge : le refus NOMME le geste manquant" do
+    @tag :tmp_dir
+    test "org PROUVEE absente → catalogue_not_enrolled + le geste d'enrolement", %{tmp_dir: tmp} do
+      assert {:error, {:catalogue_not_enrolled, org, gestures}} =
+               ProjectOnboard.onboard("poc-unenrolled", opts(tmp, UnenrolledCatalogueUsers))
+
+      assert is_binary(org)
+      assert gestures =~ "enroll-catalogue.sh"
+      assert gestures =~ "never provisions"
+      # Le refus tombe au preflight : rien n'a ete cree avant de se raviser.
+      refute File.exists?(Path.join([tmp, "projects", "poc-unenrolled"]))
+    end
+
+    @tag :tmp_dir
+    test "org PRESENTE et 404 quand meme → erreur brute, jamais un diagnostic invente", %{
+      tmp_dir: tmp
+    } do
+      assert {:error, {:forge_preflight_failed, {:http, 404, _}}} =
+               ProjectOnboard.onboard("poc-other-404", opts(tmp, OrgPresent404Users))
     end
   end
 end
