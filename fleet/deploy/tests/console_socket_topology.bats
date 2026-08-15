@@ -294,9 +294,15 @@ ports_of() {
 # lieu de refaire son propre filtre sur /etc/passwd — c'est ce qui met fin a la seconde autorite. Un
 # contrat que deux programmes lisent et que rien n'epingle est un contrat en sursis.
 
-humans_sh() { # humans_sh <passwd-file> [--verbose]
+humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
+  # identite-v2 : l'eligibilite derive du groupe `fleet`. Le 2e arg = les membres (csv) que le test
+  # declare dans le groupe ; un compte absent de cette liste est rejete meme s'il est valide par ailleurs.
   local pw="$1"; shift
-  LCARS_CONSOLE_PASSWD="$pw" run bash "$BATS_TEST_DIRNAME/../docker/console-humans.sh" "$@"
+  local members="${1:-}"; [[ $# -gt 0 ]] && shift
+  local grp="$BATS_TEST_TMPDIR/group.humans_sh"
+  printf 'fleet:x:2000:%s\n' "$members" > "$grp"
+  LCARS_CONSOLE_PASSWD="$pw" LCARS_CONSOLE_GROUP_FILE="$grp" \
+    run bash "$BATS_TEST_DIRNAME/../docker/console-humans.sh" "$@"
 }
 
 @test "6-surface: console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {
@@ -305,9 +311,22 @@ humans_sh() { # humans_sh <passwd-file> [--verbose]
   printf 'root:x:0:0::/root:/bin/bash\n' > "$pw"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
 
-  humans_sh "$pw"
+  humans_sh "$pw" "zoe"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "zoe 1015 $home/zoe" ]
+}
+
+@test "identite-v2: un compte eligible HORS du groupe fleet est rejete (admiral/sysadmin)" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe" "$home/admiral"
+  # admiral : uid 1000, home, /bin/bash -> eligible sur TOUS les criteres SAUF le groupe fleet.
+  printf 'admiral:x:1000:1000::%s/admiral:/bin/bash\n' "$home" > "$pw"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
+
+  humans_sh "$pw" "zoe"   # seul zoe est membre du groupe fleet
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" != *"admiral"* ]]
 }
 
 @test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
@@ -319,7 +338,7 @@ humans_sh() { # humans_sh <passwd-file> [--verbose]
   # ⚠ C'EST L'ECART QUI MORDAIT. Le deck acceptait `max` (il ne regardait pas le home) et affichait
   # son siege ; `console.sh --all` ne lui demarrait jamais de console. La page rendait donc « cette
   # console ne fonctionne pas » a quelqu'un dont le compte allait parfaitement bien.
-  humans_sh "$pw"
+  humans_sh "$pw" "zoe,max"
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
   [[ "$output" != *"max"* ]]
@@ -332,7 +351,7 @@ humans_sh() { # humans_sh <passwd-file> [--verbose]
   printf 'gone:x:1016:1016::%s/gone:/usr/sbin/nologin\n' "$home" >> "$pw"
   printf 'svc:x:120:120::%s/svc:/bin/bash\n' "$home" >> "$pw"
 
-  humans_sh "$pw"
+  humans_sh "$pw" "zoe,gone,svc"
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
   [[ "$output" != *"gone"* ]]
