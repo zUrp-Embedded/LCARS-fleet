@@ -5,6 +5,7 @@
 *
 !fleet
 !fleet/deploy
+!catalogues
 !LICENSE
 
 # Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et

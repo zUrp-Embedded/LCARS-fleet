@@ -33,7 +33,7 @@ defmodule Fleet.Layout do
   @state_dirname ".lcars"
   # WHERE CATALOGUES ARE INSTALLED, and the two directories are not symmetric.
   #
-  # `/opt/lcars` is the IMAGE's own tree — the Dockerfile already copies `fleet/catalogues` there,
+  # `/opt/lcars` is the IMAGE's own tree — the Dockerfile already copies `catalogues` there,
   # and it is rewritten by every update. It holds what SHIPS: read-only to the operator, in the
   # `php.ini-production` sense — a reference you copy from, never edit.
   #
