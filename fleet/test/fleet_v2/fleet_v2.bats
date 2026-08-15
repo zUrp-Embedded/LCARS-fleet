@@ -106,6 +106,44 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   [ "$status" -ne 0 ]
 }
 
+# --- GUARD B, second volet : le PLANCHER systeme (root compris) ---
+# Le garde a laisse passer root pendant une journee : il testait une EGALITE avec l'uid du sysadmin,
+# vraie pour admiral et fausse pour uid 0. Mesure du 2026-08-15 sur banc — `sudo su` puis
+# `fleet_v2 start` franchissait le garde ; ce qui arretait root etait l'ABSENCE de son fleet_v2.env,
+# un accident de provisioning, pas une regle. La frontiere systeme/humain n'est pas a inventer :
+# `/etc/login.defs` la declare et `human-converger.sh` la lit deja. On la simule par `PASSWD_DEFS`,
+# le meme seam que le convergeur, sans changer d'uid reel.
+
+@test "GUARD B: un uid SOUS le plancher systeme est refuse — c'est le trou par lequel root passait" {
+  local defs="$BATS_TEST_TMPDIR/login.defs"
+  echo "UID_MIN			 65000" > "$defs"          # tout uid reel est desormais « systeme »
+  run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"compte SYSTEME"* ]]
+  [[ "$output" == *"UID_MIN=65000"* ]]     # le refus NOMME sa source, il ne dit pas juste non
+  [[ "$output" != *"reached-launch"* ]]
+}
+
+@test "GUARD B: le plancher est ARITHMETIQUE — une comparaison de chaines refuserait a tort" {
+  # Temoin du MECANISME, pas du resultat. Avec UID_MIN=999 et un uid reel a quatre chiffres,
+  # `[[ "1017" < "999" ]]` est VRAI en lexicographique (le '1' precede le '9') : un garde ecrit en
+  # chaines refuserait ici. En arithmetique 1017 < 999 est faux, donc on passe. Ce temoin devient
+  # rouge le jour ou quelqu'un reecrit la condition avec `<` dans un `[[ ]]`.
+  local defs="$BATS_TEST_TMPDIR/login.defs"
+  echo "UID_MIN			 999" > "$defs"
+  run bash -c "export PASSWD_DEFS='$defs'; export LCARS_SYSADMIN_UID=\$(( \$(id -u) + 1 )); source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" != *"compte SYSTEME"* ]]
+  [[ "$output" == *"credentials claude absentes"* ]]   # on a bien atteint la porte suivante
+}
+
+@test "GUARD B: un login.defs illisible retombe sur 1000, il ne desarme pas le garde" {
+  # Fail-closed : `awk` sur un fichier absent rend une chaine vide, et `(( _uid < "" ))` aurait
+  # laisse passer tout le monde en silence. Le defaut est repose explicitement.
+  run bash -c "export PASSWD_DEFS='/nulle/part/login.defs'; export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  [[ "$output" == *"admiral/sysadmin"* ]]
+  [ "$status" -ne 0 ]
+}
+
 # --- option parsing ---
 # Until 2026-08-03 this script dispatched sub-commands and NOTHING read `$@` past that: `cmd_start`
 # took its arguments and ignored them, so every flag was silently swallowed. A door that accepts

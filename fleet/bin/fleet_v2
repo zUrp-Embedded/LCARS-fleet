@@ -313,12 +313,43 @@ cmd_start() {
   parse_start_opts "$@"
   set -- "${START_ARGS[@]}"
 
-  # GUARD B — une fleet ne se lance JAMAIS sous l'uid reserve du sysadmin (admiral). Le BEAM herite
-  # de l'uid du lanceur, et ses pods avec : demarrer en root/sysadmin donnerait des pods root, l'exact
-  # inverse de la sandbox. La fleet tourne sous un humain worker (uid >= 1001). `fleet_v2 status`
-  # reste ouvert au sysadmin ; c'est le LANCEMENT qu'on refuse, pas la lecture d'etat.
-  if [[ "$(id -u)" == "${LCARS_SYSADMIN_UID:-1000}" ]]; then
-    die "refus de lancer une fleet sous l'uid ${LCARS_SYSADMIN_UID:-1000} (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= 1001)."
+  # GUARD B — une fleet ne se lance QUE sous un humain worker. Le BEAM herite de l'uid du lanceur, et
+  # ses pods avec : demarrer en root ou sous le sysadmin donnerait des pods root, l'exact inverse de
+  # la sandbox. `fleet_v2 status` reste ouvert a tous ; c'est le LANCEMENT qu'on refuse.
+  #
+  # ⚠ CE GARDE A LAISSE PASSER ROOT PENDANT UNE JOURNEE, et la faute est instructive. Il testait
+  # `id -u == 1000` : une EGALITE, donc vraie pour admiral et fausse pour uid 0. Le commentaire, lui,
+  # disait deja « root/sysadmin ». Mesure du 2026-08-15 sur un banc : `sudo su` puis `fleet_v2 start`
+  # passait le garde — ce qui a arrete root n'etait pas une regle, c'etait l'ABSENCE de
+  # `/root/.lcars/fleet_v2.env`, un accident de provisioning. Et admiral porte `sudo` : le garde
+  # fermait le siege en laissant ouverte l'escalade que ce meme siege accorde.
+  #
+  # DEUX CONDITIONS, PARCE QU'IL Y A DEUX REGLES, ET UNE SEULE EST A NOUS :
+  #  1. `uid < UID_MIN` — la frontiere systeme/humain. Elle n'est pas a inventer : `/etc/login.defs`
+  #     la declare, `useradd` la lit, et ce depot la lit DEJA en deux endroits (human-converger.sh
+  #     `uid_min()`, console-humans.sh). Un `1000` ecrit a la main ici etait le troisieme exemplaire
+  #     d'un nombre dont le systeme est la source.
+  #  2. `uid == SYSADMIN_UID` — la reservation du siege, que `login.defs` ne peut PAS exprimer :
+  #     UID_MIN vaut 1000 et admiral EST 1000, donc le systeme le classe utilisateur regulier. Cette
+  #     regle-la est a LCARS, elle reste ici.
+  # Deplacer UID_MIN a 1001 aurait fusionne les deux — ecarte : `human-converger.sh` calcule un
+  # OFFSET d'uid a partir de UID_MIN, donc le bouger decale l'attribution des uid des workers.
+  #
+  # ⚠ ARITHMETIQUE, jamais des chaines : en comparaison lexicographique `"999" < "1000"` est FAUX,
+  # et un compte systeme a uid 999 passerait le garde.
+  local _uid _uid_min
+  _uid="$(id -u)"
+  # ⚠ `|| true` LOAD-BEARING : sous `set -euo pipefail`, un `login.defs` absent fait echouer `awk`,
+  # donc la substitution, donc le script — qui MEURT SANS UN MOT avant meme d'avoir garde quoi que ce
+  # soit. Mesure : le temoin « login.defs illisible » rendait zero ligne de sortie. Un garde qui
+  # s'evanouit sur une lecture ratee est pire que pas de garde : il a l'air present.
+  _uid_min="$(awk '/^UID_MIN/ {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
+  [[ "$_uid_min" =~ ^[0-9]+$ ]] || _uid_min=1000
+  if (( _uid < _uid_min )); then
+    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte SYSTEME (uid < UID_MIN=$_uid_min, declare dans ${PASSWD_DEFS:-/etc/login.defs}). Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
+  fi
+  if (( _uid == ${LCARS_SYSADMIN_UID:-1000} )); then
+    die "refus de lancer une fleet sous l'uid $_uid (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= $(( ${LCARS_SYSADMIN_UID:-1000} + 1 )))."
   fi
 
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
