@@ -62,9 +62,14 @@ defmodule Fleet.MCP.Supervisor do
       sockets = active_sockets()
 
       # Socket files without acceptors witness deaf pods after an acceptor cascade.
-      case socket_files_on_disk() do
-        {:ok, files} ->
-          orphaned = max(files - sockets, 0)
+      #
+      # LE STATUT ET L'INCIDENT LISENT LA MEME SOUSTRACTION. `deaf_pods/0` NOMME les sourds ; ce
+      # statut n'en garde que le compte. Recalculer ici `fichiers - enfants_du_superviseur` donnerait
+      # un second resultat, et un statut qui contredit l'incident qu'il accompagne est pire que pas
+      # de statut : c'est celui qu'on croit parce qu'il est plus facile a lire.
+      case deaf_pods() do
+        {:ok, deaf} ->
+          orphaned = length(deaf)
 
           if orphaned > 0 do
             {:degraded,
@@ -72,6 +77,7 @@ defmodule Fleet.MCP.Supervisor do
                acceptor_supervisor: true,
                sockets: sockets,
                socket_files: sockets + orphaned,
+               deaf_pods: Enum.sort(deaf),
                note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
              }}
           else
@@ -91,11 +97,46 @@ defmodule Fleet.MCP.Supervisor do
     end
   end
 
-  # Count exact socket files, not per-pod directories; scan failure remains explicit.
-  defp socket_files_on_disk do
+  @doc """
+  Pod ids holding a socket file with NO acceptor behind it — deaf pods.
+
+  A pod reaches its socket through a path, not through a process: when its acceptor dies (a
+  `:one_for_one` cascade, a crash storm hitting `max_restarts`), the file stays and the pod keeps
+  writing into it. Nothing on the pod's side reports an error, so this is the failure mode that
+  looks exactly like silence.
+
+  `{:error, reason}` when the scan itself could not run — an unreadable directory is NOT an empty
+  one, and answering `[]` there would clear pods this function cannot see.
+  """
+  @spec deaf_pods() :: {:ok, [String.t()]} | {:error, term()}
+  def deaf_pods do
+    with {:ok, on_disk} <- socket_dirs_on_disk() do
+      {:ok, MapSet.to_list(MapSet.difference(on_disk, MapSet.new(live_acceptor_ids())))}
+    end
+  end
+
+  defp live_acceptor_ids do
+    Fleet.MCP.PodSocketSupervisor.live_pod_ids()
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  # Le repertoire porte le pod_id — c'est `PodSocketSupervisor.socket_path/1` qui le pose. On rend
+  # donc les NOMS et non un compte : un compte dit qu'il y a des sourds, il ne dit pas lesquels, et
+  # un incident sans sujet n'est pas actionnable.
+  defp socket_dirs_on_disk do
     base = Fleet.MCP.PodSocketSupervisor.base_dir()
 
-    {:ok, base |> Path.join("*/sock") |> Path.wildcard() |> length()}
+    ids =
+      base
+      |> Path.join("*/sock")
+      |> Path.wildcard()
+      |> Enum.map(&(&1 |> Path.dirname() |> Path.basename()))
+      |> MapSet.new()
+
+    {:ok, ids}
   rescue
     e ->
       Logger.warning(

@@ -37,6 +37,19 @@ events:
     source: spawner
     action: incident
     incident: {op: pod, subject: pod_id}
+  # pod.deaf: PRODUCER Fleet.MCP.SocketWarden (tick, two-tick grace), CONSUMER the incident rail
+  # (action: incident -> note on first occurrence, sysadmin issue on recurrence). Both real: this
+  # key is not registered "ready for a producer".
+  #
+  # WHY IT EXISTS AS ITS OWN TYPE, and not as a `pod.failed` variant: a deaf pod has NOT failed. It
+  # is alive, its process is healthy, it keeps writing into a socket file whose acceptor died in a
+  # cascade — and it reports nothing, because from the pod's side there is nothing to report. Routing
+  # it as a failure would put it in front of consumers that respawn (PermanentWarden) a pod that is
+  # not dead. What it needs is a human, which is exactly what `action: incident` fetches.
+  pod.deaf:
+    source: mcp
+    action: incident
+    incident: {op: pod, subject: pod_id}
   # pod.drift: consumed by DriftMonitor + AuditConsumer (wired + tested), but DORMANT — NO producer
   # emits it (codex audit F-08 2026-07-19: the claimed F-C043 producer in Fleet.Spawner.PermanentBoot
   # does NOT exist, and the "corrupt versioned base seed" it was meant to detect vanished with the
