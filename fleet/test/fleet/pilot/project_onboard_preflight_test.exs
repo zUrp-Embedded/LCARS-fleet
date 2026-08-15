@@ -156,23 +156,23 @@ defmodule Fleet.Project.OnboardPreflightTest do
              ProjectOnboard.import("fleet/poc-f2", opts(tmp, NoAccountUsers))
   end
 
-  describe "import : le catalogue nomme par l'org doit etre INSTALLE" do
+  describe "import : le catalogue nomme par l'org doit etre ACTIF" do
     test "un catalogue absent est REFUSE, et le refus nomme l'offre reelle" do
       # L'org d'un projet EST le nom de son catalogue, et le lien est fixe pour sa vie. Importer
       # `web/vitrine` sur une boite qui n'a pas le catalogue `web` ne doit PAS retomber sur le
       # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
       # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
-      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+      assert {:error, {:catalogue_not_active, "grominet", actives}} =
                Fleet.Project.Onboard.import("grominet/vitrine")
 
-      assert "fleet" in actives, "le refus doit nommer ce qui EST installe"
+      assert "fleet" in actives, "le refus doit nommer ce qui EST actif"
     end
 
     test "le catalogue livre passe ce refus — il ne bloque pas le cas nominal" do
       # La porte suivante (`ensure_human_provisioned`) prend le relais : ce test prouve seulement
       # que le troisieme refus laisse passer une org dont le catalogue est bien la.
       refute match?(
-               {:error, {:catalogue_not_installed, _, _}},
+               {:error, {:catalogue_not_active, _, _}},
                Fleet.Project.Onboard.import("fleet/quelque-chose")
              )
     end
@@ -183,7 +183,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # Meme refus que l'import, meme raison : le poller ne decouvre que sur les orgs des catalogues
       # ACTIFS, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
       # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
-      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+      assert {:error, {:catalogue_not_active, "grominet", actives}} =
                Fleet.Project.Onboard.migrate("fleet/vitrine", "grominet")
 
       assert "fleet" in actives
@@ -204,8 +204,8 @@ defmodule Fleet.Project.OnboardPreflightTest do
   # org qui existe deja.
   describe "org du catalogue absente de la forge : le refus NOMME le geste manquant" do
     @tag :tmp_dir
-    test "org PROUVEE absente → catalogue_not_enrolled + le geste d'enrolement", %{tmp_dir: tmp} do
-      assert {:error, {:catalogue_not_enrolled, org, gestures}} =
+    test "org PROUVEE absente → catalogue_not_installed + le geste d'enrolement", %{tmp_dir: tmp} do
+      assert {:error, {:catalogue_not_installed, org, gestures}} =
                ProjectOnboard.onboard("poc-unenrolled", opts(tmp, UnenrolledCatalogueUsers))
 
       assert is_binary(org)

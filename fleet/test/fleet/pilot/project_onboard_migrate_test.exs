@@ -161,7 +161,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "un catalogue de destination absent est refuse", %{tmp: tmp} do
-      assert {:error, {:catalogue_not_installed, "grominet", actives}} =
+      assert {:error, {:catalogue_not_active, "grominet", actives}} =
                ProjectOnboard.import_deposit("lordzurp/mon-projet", "grominet", opts(tmp))
 
       assert "web" in actives
@@ -217,7 +217,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
         )
 
       refute match?({:error, {:not_in_org, _, _}}, result)
-      refute match?({:error, {:catalogue_not_installed, _, _}}, result)
+      refute match?({:error, {:catalogue_not_active, _, _}}, result)
 
       # La garde suivante est l'admission humaine, et elle est interrogee sur l'org DU DEPOT.
       assert {:error, {:human_not_provisioned, _, _}} = result
