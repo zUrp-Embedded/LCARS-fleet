@@ -2078,7 +2078,12 @@ defmodule Fleet.Pilot.PollerTest do
       log1 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
       assert log1 =~ "Poller: pod enumeration FAILED"
       assert log1 =~ "an orphaned lock outlives its pod"
-      assert_received {:incident, "pod_enumeration", _org, :spawner_unreachable}
+
+      # LE SUJET EST STABLE, ET CE N'EST PAS UNE ORG. Il etait `hd(state.orgs)` — arbitraire — alors
+      # qu'il entre dans la cle de recurrence : activer ou reordonner un catalogue changeait la
+      # signature d'une panne identique (cooldown remis a zero, re-escalade comme neuve). Le joker
+      # `_org` qui tenait cette place ne pouvait pas le voir.
+      assert_received {:incident, "pod_enumeration", "spawner", :spawner_unreachable}
 
       # Deuxieme tick EN PANNE : silence. Repeter le meme fait toutes les 30 s noierait la trace
       # qu'il existe pour lever — meme discipline que la jauge de mailbox.

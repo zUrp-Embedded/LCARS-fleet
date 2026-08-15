@@ -644,7 +644,15 @@ defmodule Fleet.Pilot.Poller do
 
       _ =
         try do
-          incident.("pod_enumeration", hd(state.orgs), :spawner_unreachable,
+          # ⚠ LE SUJET N'EST PAS UNE ORG, et en nommer une rendait la CLE DE RECURRENCE instable.
+          # C'etait `hd(state.orgs)` — la premiere org de la liste, arbitraire : le spawner
+          # injoignable est une panne de la BOITE, aucune org n'y est pour rien. Or le sujet entre
+          # dans `signature(op, subject, reason)`, donc activer, desactiver ou reordonner un
+          # catalogue changeait la signature d'une panne identique : cooldown remis a zero, meme
+          # incident re-escalade comme neuf, et un titre qui accusait un catalogue au hasard.
+          # Le sujet ne ROUTE rien (le depot vient de `:pilot_system_issue_repo`) — il nomme, et il
+          # doit donc nommer ce qui est reellement en panne.
+          incident.("pod_enumeration", "spawner", :spawner_unreachable,
             reason_detail: inspect(reason)
           )
         catch
