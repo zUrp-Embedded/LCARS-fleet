@@ -13,8 +13,8 @@
 # réparée (fail-loud dans les logs, pas fail-dead) — sshd démarre quoi qu'il arrive.
 #
 # Env d'entrée (compose/docker run) :
-#   LCARS_HUMAN     login de l'humain (défaut : lcars) — créé s'il n'existe pas, home persistant
-#   LCARS_UID       uid de l'humain (défaut : 1000) — stable = ownership du volume stable
+#   LCARS_ADMIRAL   login du master/sysadmin (bench: admiral, prod: login installeur) — uid 1000, sudo root, ssh
+#   LCARS_UID       uid du sysadmin (défaut : 1000, réservé) — stable = ownership du volume stable
 #   LCARS_SSH_AUTHORIZED_KEYS  contenu authorized_keys (sinon : accès par `docker exec` seulement)
 #   FORGE_BASE_URL  forge cible (avec le profil compose `forge` : http://forge:3000)
 
@@ -59,7 +59,10 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(\"${root}\")"
 fi
 
-LCARS_HUMAN="${LCARS_HUMAN:-lcars}"
+# admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
+# l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
+# fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
+LCARS_ADMIRAL="${LCARS_ADMIRAL:-admiral}"
 LCARS_UID="${LCARS_UID:-1000}"
 PROVISION=/opt/lcars/fleet/deploy/provision
 HOST_KEYS_DIR=/home/.lcars-container/ssh
@@ -67,22 +70,26 @@ HOST_KEYS_DIR=/home/.lcars-container/ssh
 say() { echo "[lcars-entrypoint] $*"; }
 
 # ─── 1. L'humain (idempotent — le home vit dans le volume, le user est recréé à l'identique) ─────
-if ! getent passwd "$LCARS_HUMAN" >/dev/null; then
-  useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_HUMAN"
-  say "humain $LCARS_HUMAN créé (uid $LCARS_UID)"
+if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then
+  useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_ADMIRAL"
+  say "sysadmin $LCARS_ADMIRAL cree (uid $LCARS_UID)"
 fi
+# root du sysadmin : membre du groupe sudo (le paquet sudo pose la regle %sudo par defaut). Idempotent.
+# Le mot de passe est POSE HORS d'ici (bench: fixe, pour tester ; prod: l'installeur) — l'entrypoint
+# cree le siege, il ne choisit pas le secret.
+getent group sudo >/dev/null 2>&1 && usermod -aG sudo "$LCARS_ADMIRAL" || true
 
 if [[ -n "${LCARS_SSH_AUTHORIZED_KEYS:-}" ]]; then
-  HOME_DIR="$(getent passwd "$LCARS_HUMAN" | cut -d: -f6)"
-  install -d -m 0700 -o "$LCARS_HUMAN" -g "$LCARS_HUMAN" "$HOME_DIR/.ssh"
+  HOME_DIR="$(getent passwd "$LCARS_ADMIRAL" | cut -d: -f6)"
+  install -d -m 0700 -o "$LCARS_ADMIRAL" -g "$LCARS_ADMIRAL" "$HOME_DIR/.ssh"
   # Écriture atomique tmp+mv (doctrine lib) — un crash ne laisse pas un authorized_keys tronqué.
   tmp="$(mktemp "$HOME_DIR/.ssh/.authk.XXXXXX")"
   printf '%s\n' "$LCARS_SSH_AUTHORIZED_KEYS" > "$tmp"
-  chmod 0600 "$tmp" && chown "$LCARS_HUMAN:$LCARS_HUMAN" "$tmp"
+  chmod 0600 "$tmp" && chown "$LCARS_ADMIRAL:$LCARS_ADMIRAL" "$tmp"
   mv -f "$tmp" "$HOME_DIR/.ssh/authorized_keys"
-  say "authorized_keys posé pour $LCARS_HUMAN"
+  say "authorized_keys posé pour $LCARS_ADMIRAL"
 else
-  say "pas de LCARS_SSH_AUTHORIZED_KEYS — accès par « docker exec -it -u $LCARS_HUMAN <ctr> bash » seulement"
+  say "pas de LCARS_SSH_AUTHORIZED_KEYS — accès par « docker exec -it -u $LCARS_ADMIRAL <ctr> bash » seulement"
 fi
 
 # ─── 1bis. Les zones de FACE : une racine par face, groupe fleet ─────────────────────────────────
@@ -134,7 +141,7 @@ if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
      && mv "${LCARS_SOURCE_DIR}.part" "$LCARS_SOURCE_DIR"; then
     # Le clone est fait par root ; la source appartient à l'humain qui travaillera dedans. Le
     # groupe `fleet` parce que c'est celui des zones catalogue posées juste au-dessus.
-    chown -R "$LCARS_HUMAN:fleet" "$LCARS_SOURCE_DIR"
+    chown -R "$LCARS_ADMIRAL:fleet" "$LCARS_SOURCE_DIR"
     say "source clonée"
   else
     rm -rf "${LCARS_SOURCE_DIR}.part"
@@ -154,7 +161,7 @@ if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
     rm -rf "${LCARS_WORK_DIR}.part"
     if git clone --depth 1 --branch ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
        && mv "${LCARS_WORK_DIR}.part" "$LCARS_WORK_DIR"; then
-      chown -R "$LCARS_HUMAN:fleet" "$LCARS_WORK_DIR"
+      chown -R "$LCARS_ADMIRAL:fleet" "$LCARS_WORK_DIR"
       say "corpus ops posé"
     else
       rm -rf "${LCARS_WORK_DIR}.part"
@@ -169,14 +176,14 @@ fi
 # `<user>@<hostname>` et la forge ne peut mapper le commit sur AUCUN compte (l'attribution
 # auteur-humain devient un fantôme sans avatar). L'email doit être CELUI du compte forge de
 # l'humain ; il arrive par l'environnement d'install. Absent = dit, jamais inventé.
-if [[ -n "${LCARS_HUMAN_EMAIL:-}" ]]; then
-  HOME_DIR="$(getent passwd "$LCARS_HUMAN" | cut -d: -f6)"
-  if ! su - "$LCARS_HUMAN" -c 'git config --global user.email' >/dev/null 2>&1; then
-    su - "$LCARS_HUMAN" -c "git config --global user.name '$LCARS_HUMAN' && git config --global user.email '$LCARS_HUMAN_EMAIL'"
-    say "identité git seedée : $LCARS_HUMAN <$LCARS_HUMAN_EMAIL> (à l'humain ensuite)"
+if [[ -n "${LCARS_ADMIRAL_EMAIL:-}" ]]; then
+  HOME_DIR="$(getent passwd "$LCARS_ADMIRAL" | cut -d: -f6)"
+  if ! su - "$LCARS_ADMIRAL" -c 'git config --global user.email' >/dev/null 2>&1; then
+    su - "$LCARS_ADMIRAL" -c "git config --global user.name '$LCARS_ADMIRAL' && git config --global user.email '$LCARS_ADMIRAL_EMAIL'"
+    say "identité git seedée : $LCARS_ADMIRAL <$LCARS_ADMIRAL_EMAIL> (à l'humain ensuite)"
   fi
 else
-  say "LCARS_HUMAN_EMAIL non posé — les commits de l'humain signeront <user>@<hostname>, la forge ne les mappera pas"
+  say "LCARS_ADMIRAL_EMAIL non posé — les commits de l'humain signeront <user>@<hostname>, la forge ne les mappera pas"
 fi
 
 if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
@@ -225,7 +232,7 @@ fi
 # rc capturé, jamais fatal : le doctor dira la vérité, sshd doit démarrer pour permettre la
 # réparation. (Le détail des verdicts est dans les logs du conteneur.)
 prov_rc=0
-"$PROVISION" apply --substrate docker --human "$LCARS_HUMAN" || prov_rc=$?
+"$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
 case "$prov_rc" in
   0) say "provision apply : convergé" ;;
   # 2 = appliqué, état-cible non tenu. Confondu avec « AU MOINS UN ÉCHEC » jusqu'ici — et avant
@@ -282,5 +289,5 @@ else
 fi
 
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
-say "sshd prêt — ssh $LCARS_HUMAN@<hôte> -p <port mappé> puis « fleet_v2 start »"
+say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> puis « fleet_v2 start »"
 exec /usr/sbin/sshd -D -e

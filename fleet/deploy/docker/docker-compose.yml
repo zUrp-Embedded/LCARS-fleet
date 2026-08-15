@@ -71,7 +71,7 @@ services:
     # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
     hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:
-      LCARS_HUMAN: "${LCARS_HUMAN:-lcars}"
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"
       LCARS_UID: "${LCARS_UID:-1000}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # La forge de l'opérateur. Pas de défaut vers un sidecar qui n'existe plus : vide =
