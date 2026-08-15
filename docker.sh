@@ -13,7 +13,7 @@
 #   up               démarre le conteneur fleet (détaché). La forge est à TOI : LCARS ne la
 #                    fabrique pas, il la consomme (FORGE_BASE_URL + un token master)
 #   doctor           sonde l'état DANS le conteneur (le même doctor que le chemin WSL)
-#   shell            shell dans le conteneur, en tant que l'humain (LCARS_HUMAN)
+#   shell            shell dans le conteneur, en tant qu'un WORKER (LCARS_HUMAN, defaut lcars)
 #   logs             logs du conteneur (suivi)
 #   down             arrête et retire lcars (les volumes restent)
 #   reset            détruit lcars : conteneur + image + volume /home. La forge n'est PAS
@@ -30,7 +30,8 @@
 #
 # ENV (tous optionnels) :
 #   LCARS_PROJECT              projet compose visé (défaut lcars) — équivalent de -p
-#   LCARS_HUMAN                login de l'humain dans le conteneur (défaut lcars)
+#   LCARS_HUMAN                login WORKER cible par shell/doctor/hint (defaut lcars) — PAS le
+#                              sysadmin de la boite (celui-la est `admiral`, cf. LCARS_ADMIRAL, entrypoint)
 #   LCARS_UID                  uid de l'humain (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
 #   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)

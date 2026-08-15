@@ -14,6 +14,10 @@
 #
 # Env d'entrée (compose/docker run) :
 #   LCARS_ADMIRAL   login du master/sysadmin (bench: admiral, prod: login installeur) — uid 1000, sudo root, ssh
+#                   ⚠ DOIT etre EXACTEMENT le login forge du master (le `preferred_username` OIDC) : le
+#                   deck admet admiral par is_admin, puis mappe sa console sur `sess.login`. Si les deux
+#                   different, admiral entre mais ne trouve pas sa console (page « pas de bloc »). Pas de
+#                   check runtime possible (la forge n'est pas jointe au moment du useradd) — contrainte d'install.
 #   LCARS_UID       uid du sysadmin (défaut : 1000, réservé) — stable = ownership du volume stable
 #   LCARS_SSH_AUTHORIZED_KEYS  contenu authorized_keys (sinon : accès par `docker exec` seulement)
 #   FORGE_BASE_URL  forge cible (avec le profil compose `forge` : http://forge:3000)
