@@ -29,8 +29,9 @@ livrent les catalogues est une question ouverte, traitée séparément.
 ## Prendre celui-ci et en faire le sien
 
 ```bash
-cp -r fleet/catalogues/web /chemin/vers/mon-catalogue
-# éditez, puis :
+# depuis la RACINE du dépôt :
+cp -r catalogues/web /chemin/vers/mon-catalogue
+# éditez, puis — depuis `fleet/`, la racine Mix :
 mix lcars.catalogue.verify /chemin/vers/mon-catalogue
 ```
 

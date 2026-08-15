@@ -212,6 +212,31 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Whether the ORGANISATION exists — the forge-side signature that a catalogue is INSTALLED.
+
+  Same proven-absence/error distinction as `user_exists?/2`, and the distinction is the point: an
+  org that is PROVEN missing (`{:ok, false}`) is a catalogue nobody provisioned, while a forge that
+  is merely unreachable (`{:error, _}`) says nothing about it. Collapsing the two would either
+  refuse a legitimate catalogue during an outage, or admit an unprovisioned one when the forge
+  coughs.
+
+  ⚠ `/orgs/{name}` and NOT `/users/{name}`, though Gitea would answer both. An org is a row of the
+  same `user` table (`type = Organization`), so a PERSONAL account named `web` makes
+  `/users/web` return 200 while no org `web` exists — and it is the org that carries a catalogue's
+  projects and role accounts. Asking the wrong endpoint would sign an installation that is not one.
+  """
+  @spec org_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
+  def org_exists?(org, opts \\ []) when is_binary(org) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/orgs/#{encode_seg(org)}") do
+        {:ok, _} -> {:ok, true}
+        {:error, {:http, 404, _}} -> {:ok, false}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Checks team membership with the same proven-absence/error distinction as `user_exists?/2`.
 
   A missing team is a proven negative membership result. Team discovery is fully paginated.

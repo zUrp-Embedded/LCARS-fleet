@@ -1677,6 +1677,42 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
+  # L'org EST la signature forge d'un catalogue INSTALLE (chantier catalogues-lifecycle) : la fleet
+  # ne demande pas a un fichier local si un catalogue est provisionne, elle demande a la forge. D'ou
+  # la meme discipline que `branch_exists?/3` ci-dessus — un 404 est une REPONSE (personne n'a
+  # provisionne), une panne n'en est pas une (on ne sait pas), et confondre les deux ferait soit
+  # refuser un catalogue sain pendant une coupure, soit en admettre un mort quand la forge tousse.
+  describe "org_exists?/2 — la signature d'un catalogue installe" do
+    test "org presente → {:ok, true}" do
+      handlers = %{{"GET", "/api/v1/orgs/fleet"} => {200, %{"username" => "fleet"}}}
+      assert {:ok, true} = ForgeClient.Repo.org_exists?("fleet", opts(handlers))
+    end
+
+    test "404 — la forge a REPONDU que l'org n'existe pas → {:ok, false}" do
+      handlers = %{{"GET", "/api/v1/orgs/web"} => {404, %{"message" => "GetOrgByName"}}}
+      assert {:ok, false} = ForgeClient.Repo.org_exists?("web", opts(handlers))
+    end
+
+    test "503 — on n'a PAS su lire : {:error, _}, jamais `false`" do
+      handlers = %{{"GET", "/api/v1/orgs/web"} => {503, %{"message" => "down"}}}
+      assert {:error, {:http, 503, _}} = ForgeClient.Repo.org_exists?("web", opts(handlers))
+    end
+
+    # TEMOIN DU MECANISME, pas du resultat : dans Gitea une org est une ligne de la MEME table
+    # `user` (`type = Organization`), donc `/users/web` repond 200 pour un compte PERSONNEL nomme
+    # `web` alors qu'aucune org `web` n'existe. Un predicat ecrit sur `/users` signerait donc une
+    # installation qui n'en est pas une. Ce temoin devient rouge le jour ou quelqu'un reecrit
+    # `org_exists?/2` sur l'endpoint des comptes : seule la route `/orgs/...` est servie ici.
+    test "un COMPTE du meme nom ne signe pas une org — c'est /orgs qui est interroge" do
+      handlers = %{
+        {"GET", "/api/v1/users/web"} => {200, %{"login" => "web"}},
+        {"GET", "/api/v1/orgs/web"} => {404, %{"message" => "GetOrgByName"}}
+      }
+
+      assert {:ok, false} = ForgeClient.Repo.org_exists?("web", opts(handlers))
+    end
+  end
+
   describe "protect_branch/3 (onboarding: forge-enforced gate)" do
     test "protect_branch → POST branch_protections, {:ok, :created}" do
       handlers = %{

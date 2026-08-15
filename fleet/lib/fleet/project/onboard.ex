@@ -307,7 +307,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- refute_same_catalogue(full_name, target_catalogue),
-         :ok <- require_target_installed(target_catalogue),
+         :ok <- require_target_active(target_catalogue),
          {:ok, new_full_name} <-
            repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
          {:ok, url} <- repo_url(new_full_name, opts),
@@ -337,9 +337,19 @@ defmodule Fleet.Project.Onboard do
   # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que cette boite n'a
   # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
   # les orgs des catalogues ACTIFS, donc le projet deviendrait invisible, pas casse.
-  defp require_target_installed(target) do
+  #
+  # ⚠ TROIS ETATS, ET DEUX D'ENTRE EUX PORTAIENT LE MEME NOM. Ce refus s'appelait
+  # `catalogue_not_installed` alors qu'il ne teste RIEN d'installe : il lit la declaration locale
+  # `catalogues.active`. Le vocabulaire est desormais tenu, et chaque etat a UNE source de verite :
+  #   * available — le materiel est la (graine de l'image, ou import) ;
+  #   * installed — LA FORGE SIGNE : l'org du catalogue existe (`catalogue_not_installed`, plus bas,
+  #     dans le preflight) ;
+  #   * active    — l'humain l'a choisi dans `catalogues.active` (CE refus).
+  # Un catalogue peut etre actif sans etre installe, et c'est precisement l'etat qui a tue une flotte
+  # entiere au banc le 2026-08-15 : le poller derive ses orgs des catalogues ACTIFS.
+  defp require_target_active(target) do
     actives = active_orgs()
-    if target in actives, do: :ok, else: {:error, {:catalogue_not_installed, target, actives}}
+    if target in actives, do: :ok, else: {:error, {:catalogue_not_active, target, actives}}
   end
 
   # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
@@ -390,7 +400,7 @@ defmodule Fleet.Project.Onboard do
 
         System.halt(0)
 
-      {:error, {:catalogue_not_installed, cat, actives}} ->
+      {:error, {:catalogue_not_active, cat, actives}} ->
         IO.puts(:stderr, "REFUSE : le catalogue #{inspect(cat)} n'est pas actif sur cette boite.")
         IO.puts(:stderr, "  actifs : #{Enum.join(actives, ", ")}")
 
@@ -454,7 +464,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
-         :ok <- require_catalogue_installed(full_name),
+         :ok <- require_catalogue_active(full_name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
@@ -502,7 +512,7 @@ defmodule Fleet.Project.Onboard do
   C'est la troisieme porte d'entree, et elle existe parce que les deux autres refusent ce cas par
   construction, chacune pour sa bonne raison :
 
-    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_installed`)
+    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_active`)
       et ne filtre donc rien — il n'a pas a le faire ;
     * `import_external/3` exige `https` + un hote de son allowlist, et notre forge est en `http` :
       elle serait refusee sur le SCHEMA. Cette garde borne « depuis quel hote ETRANGER on clone »,
@@ -655,7 +665,7 @@ defmodule Fleet.Project.Onboard do
 
     if catalogue in actives,
       do: :ok,
-      else: {:error, {:catalogue_not_installed, catalogue, actives}}
+      else: {:error, {:catalogue_not_active, catalogue, actives}}
   end
 
   # A PRIVATE deposit is refused, and it is refused HERE rather than left to the clone.
@@ -697,14 +707,14 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  defp require_catalogue_installed(full_name) do
+  defp require_catalogue_active(full_name) do
     cat = full_name |> String.split("/") |> List.first()
     actives = active_orgs()
 
     if cat in actives do
       :ok
     else
-      {:error, {:catalogue_not_installed, cat, actives}}
+      {:error, {:catalogue_not_active, cat, actives}}
     end
   end
 
@@ -1985,7 +1995,7 @@ defmodule Fleet.Project.Onboard do
   # `require_org_membership/2` a ete RETIRE ici (2026-08-11). Il comparait le depot a UNE org —
   # celle des opts ou le premier catalogue actif — et son seul comportement atteignable etait un
   # refus faux : un proprietaire qui n'est pas un catalogue actif est deja arrete par
-  # `require_catalogue_installed`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
+  # `require_catalogue_active`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
   # PREMIER de la liste. Il ne pouvait donc mordre que le second catalogue, a tort. La question
   # « ce depot est-il enrollable ici ? » a une seule autorite, et c'est le catalogue du proprietaire.
 
@@ -2152,11 +2162,24 @@ defmodule Fleet.Project.Onboard do
           # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
           # Meme discipline que le deck refusant lui-meme une entree non declaree plutot que de
           # laisser la forge le faire illisiblement.
+          #
+          # ⚠ C'EST `org_exists?/2` QUI POSE LA QUESTION, et l'endpoint n'est pas interchangeable.
+          # La question est « l'org existe-t-elle », or dans Gitea une org est une ligne de la MEME
+          # table `user` : un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
+          # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test
+          # rendait alors `true` et le diagnostic exact (`catalogue_not_installed`) retombait en
+          # erreur brute — degradation silencieuse du seul message qui nomme le geste manquant.
           {:error, {:http, 404, _}} = err ->
-            case users.user_exists?(org, fc) do
+            case users.org_exists?(org, fc) do
               {:ok, false} ->
-                {:error,
-                 {:catalogue_not_enrolled, org, provisioning_gestures(:catalogue, human, org)}}
+                {
+                  :error,
+                  # INSTALLED = LA FORGE SIGNE (l'org existe), le pendant de `catalogue_not_active`
+                  # plus haut, qui lui ne lit que la declaration locale. Ce refus-ci s'appelait
+                  # `catalogue_not_enrolled` : un troisieme mot pour une notion qui en avait deja
+                  # deux, dont une qui mentait.
+                  {:catalogue_not_installed, org, provisioning_gestures(:catalogue, human, org)}
+                }
 
               _ ->
                 {:error, {:forge_preflight_failed, elem(err, 1)}}

@@ -1720,6 +1720,57 @@ defmodule Fleet.Pilot.PollerTest do
       assert stats.orgs == ["bonne", "cassee"]
     end
 
+    # LE JUMEAU DU TEMOIN CI-DESSUS, et la difference EST le sujet. Une org illisible cache
+    # peut-etre des depots ; une org qui n'existe pas n'en porte aucun, donc la retirer ne rend rien
+    # muet — la raison du fail-closed ne s'applique pas au 404. Mesure du 2026-08-15 au banc :
+    # `enable web` sur une forge sans org `web` faisait tomber `fleet` AVEC lui (dispatch, filet
+    # arch et recheck des protections compris), puis le backoff saturait a 300 s pour toujours.
+    defmodule ForgeSansWeb do
+      def list_org_repos("fleet", _opts), do: {:ok, ["fleet/p"]}
+      def list_org_repos("web", _opts), do: {:error, {:http, 404, %{"message" => "GetOrgByName"}}}
+      def list_open_issues(_r, _o), do: {:ok, []}
+      def list_open_pulls(_r, _o), do: {:ok, []}
+    end
+
+    defp poller_sans_web do
+      Poller.start_link(
+        orgs: ["fleet", "web"],
+        human: "h",
+        interval_ms: 60_000,
+        forge_client: ForgeSansWeb,
+        loader: fn -> %{} end
+      )
+    end
+
+    test "une org ABSENTE (404) est retiree et la passe REUSSIT — l'org saine n'est pas emportee" do
+      {:ok, pid} = poller_sans_web()
+
+      _ = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      stats = Poller.stats(pid)
+
+      # `poll_count` est la preuve que le CORPS de la passe a tourne : la branche d'erreur ne
+      # l'incremente pas. Sans lui, `err_streak == 0` passerait au vert sur une passe qui n'a rien
+      # fait — l'assertion mesurerait son propre point de depart.
+      assert stats.poll_count == 1, "la passe doit aller au bout malgre l'org absente"
+      assert stats.err_streak == 0, "une org absente n'est pas un echec de tick"
+      assert stats.error_count == 0
+    end
+
+    test "l'absence est dite UNE FOIS, pas a chaque tick" do
+      {:ok, pid} = poller_sans_web()
+
+      premier = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      second = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+
+      assert premier =~ "does NOT exist on the forge"
+
+      assert premier =~ "catalogue disable web",
+             "le refus doit nommer les deux gestes qui le levent"
+
+      refute second =~ "does NOT exist on the forge",
+             "repeter la phrase a chaque tick la rend invisible aussi surement que se taire"
+    end
+
     test "F-037: DISCOVERY failure (list_org_repos) → backoff (err_streak + error_count +1)" do
       # The forge is DOWN — the discovery itself fails. This is the ONLY case that backoffs
       # (handle_poll_error).
@@ -2027,7 +2078,12 @@ defmodule Fleet.Pilot.PollerTest do
       log1 = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
       assert log1 =~ "Poller: pod enumeration FAILED"
       assert log1 =~ "an orphaned lock outlives its pod"
-      assert_received {:incident, "pod_enumeration", _org, :spawner_unreachable}
+
+      # LE SUJET EST STABLE, ET CE N'EST PAS UNE ORG. Il etait `hd(state.orgs)` — arbitraire — alors
+      # qu'il entre dans la cle de recurrence : activer ou reordonner un catalogue changeait la
+      # signature d'une panne identique (cooldown remis a zero, re-escalade comme neuve). Le joker
+      # `_org` qui tenait cette place ne pouvait pas le voir.
+      assert_received {:incident, "pod_enumeration", "spawner", :spawner_unreachable}
 
       # Deuxieme tick EN PANNE : silence. Repeter le meme fait toutes les 30 s noierait la trace
       # qu'il existe pour lever — meme discipline que la jauge de mailbox.
