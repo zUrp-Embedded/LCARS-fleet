@@ -228,7 +228,7 @@ SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
 
 export TF_VAR_gitea_url="$FORGE_URL" TF_VAR_gitea_token="$MASTER_TOKEN" \
        TF_VAR_seed_password="$SEED_PW" TF_VAR_human_username="$HUMAN" \
-       TF_VAR_human_email="$HUMAN_EMAIL"
+       TF_VAR_human_email="$HUMAN_EMAIL" TF_VAR_admiral_username="$ADMIN"
 
 # INSTANCE d'abord, TOUJOURS : une adhesion peut nommer un compte qu'elle ne cree pas, mais pas un
 # compte qui n'existe pas. L'inversion echoue en 404 cote Gitea — bruyamment, jamais en silence.
