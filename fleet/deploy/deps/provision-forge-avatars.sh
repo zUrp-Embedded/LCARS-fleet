@@ -40,8 +40,8 @@ AVATARS_DIR=""
 ORG="fleet"
 CHECK_ONLY=0
 
-# Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles + starfleet portent leur avatar de
-# charte ; lcars-system porte le favicon LCARS (identité système = la marque, pas un rôle métier).
+# Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles portent leur avatar de charte ;
+# lcars-system porte le favicon LCARS (identité système = la marque, pas un rôle métier).
 # L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 #
@@ -68,11 +68,14 @@ declare -a ENTRIES=(
 
 # ⚠ `starfleet:starfleet.png` A QUITTE CETTE TABLE (2026-08-15) — le compte forge `starfleet` est
 # supprime (cf. `instance/accounts.tf`). Le badge, lui, passe au MASTER : c'est lui qui tient
-# desormais le siege admin de la forge, et la charte ne perd pas son dessin.
+# desormais le siege admin de la forge, et la charte ne perd pas son dessin. L'IMAGE suit son
+# porteur et s'appelle `admiral.png` : cette table nomme ses fichiers par ce qu'ils DESSINENT, et
+# ce delta est desormais celui de l'amiral. (Le ROLE `starfleet` existe toujours — chef de
+# portefeuille — et garde sa couleur de charte cote site : `assets/avatars/starfleet.svg`.)
 #
 # PARAMETRE, ET PAS ECRIT EN DUR, pour deux raisons qui se cumulent :
 #   1. le login du master est VARIABLE — `admiral` au banc, le login de l'installeur en prod. Une
-#      entree `admiral:starfleet.png` en dur ne poserait rien chez qui n'a pas ce login-la, en
+#      entree `admiral:admiral.png` en dur ne poserait rien chez qui n'a pas ce login-la, en
 #      silence (un compte de cette table absent de la forge est tolere depuis la mesure du
 #      catalogue `web`) ;
 #   2. la regle juste au-dessus dit « l'humain n'est PAS liste : il pose son propre avatar, on ne
@@ -97,7 +100,7 @@ done
 
 # Le badge de starfleet rejoint la table SEULEMENT si l'appelant a nomme son master. Pose apres le
 # parsing (l'option peut arriver dans n'importe quel ordre) et avant tout usage d'ENTRIES.
-[[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:starfleet.png")
+[[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:admiral.png")
 
 command -v curl >/dev/null || { echo "provision-forge-avatars: curl requis" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "provision-forge-avatars: jq requis" >&2; exit 1; }

@@ -137,7 +137,7 @@ run_avatars() {
 }
 
 @test "badge: le compte starfleet n'est plus servi — son avatar ne part que vers le master" {
-  # La regression que ce temoin garde : re-ajouter `starfleet:starfleet.png` a la table ferait
+  # La regression que ce temoin garde : re-ajouter `starfleet:admiral.png` a la table ferait
   # reapparaitre un POST vers un compte que la forge ne porte plus, et le verdict compterait une
   # entree de charte de plus pour rien.
   run_avatars --admiral admiral
