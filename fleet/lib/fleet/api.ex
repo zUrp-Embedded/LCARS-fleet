@@ -26,7 +26,7 @@ defmodule Fleet.API do
       Plug.Static,
       Plug.Cowboy
     ],
-    exports: [Application]
+    exports: [Application, Readiness, BuildInfo]
 
   @moduledoc """
   Boundary for the client-agnostic REST, WebSocket and AF_UNIX control

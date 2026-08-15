@@ -35,6 +35,23 @@ defmodule Fleet.Observation.DeckTest do
     assert %{"status" => "ok", "deck" => "fleet_observation"} = Jason.decode!(conn.resp_body)
   end
 
+  # The read-diagnostic plane re-homed off the deleted `fleet_api` TCP listener: the aggregator stays
+  # in `Fleet.API.{Readiness,BuildInfo}` (they hold the cross-domain deps) and the read socket serves
+  # it. The operator's `state_of_the_fleet` skill curls these at `$OBS` — their absence left it blind.
+  test "GET /api/readiness/deep → 200 JSON, global verdict + per-subsystem list" do
+    conn = call(:get, "/api/readiness/deep")
+    assert %Plug.Conn{status: 200} = conn
+    body = Jason.decode!(conn.resp_body)
+    assert Map.has_key?(body, "status")
+    assert Map.has_key?(body, "subsystems")
+  end
+
+  test "GET /api/version → 200 JSON build info (read-socket twin of `fleet_v2 version`)" do
+    conn = call(:get, "/api/version")
+    assert %Plug.Conn{status: 200} = conn
+    assert is_map(Jason.decode!(conn.resp_body))
+  end
+
   test "GET / → 200 LCARS shell (the 7 decks, no-auth)" do
     conn = call(:get, "/")
     assert %Plug.Conn{status: 200} = conn

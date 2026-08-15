@@ -77,6 +77,20 @@ defmodule Fleet.Observation.Deck do
     |> send_resp(200, body)
   end
 
+  # THE READ-DIAGNOSTIC PLANE LIVES ON THE READ SOCKET. `fleet_api` used to serve these two over a
+  # TCP listener that is gone (socket-only fleet); the aggregator modules stay in `Fleet.API` (they
+  # already hold the cross-domain deps), and the read plane — `Fleet.Observation`, already an
+  # AF_UNIX plug the operator's `state_of_the_fleet` skill curls at `$OBS/api/pods` — reads them.
+  # Deleting the endpoints without re-homing them left that skill blind on `readiness/deep`
+  # ("red -> do not undertake work"), which is why they are back here and not gone.
+  get "/api/readiness/deep" do
+    json(conn, 200, Fleet.API.Readiness.deep())
+  end
+
+  get "/api/version" do
+    json(conn, 200, Fleet.API.BuildInfo.current())
+  end
+
   match _ do
     json(conn, 404, %{error: "deck route not found"})
   end

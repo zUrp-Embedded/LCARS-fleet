@@ -15,6 +15,11 @@ defmodule Fleet.Observation do
       Fleet.Spawner,
       Fleet.CapProfile,
       Fleet.EventRouter,
+      # Read-diagnostic aggregator only: the deck serves `/api/readiness/deep` + `/api/version` by
+      # CALLING `Fleet.API.{Readiness,BuildInfo}`, which already carry the cross-domain deps the
+      # verdict needs (Pilot/Spawner/MCP/Starfleet/EventRouter). One edge here beats replicating five
+      # on this read-only boundary. API exports exactly those two + Application — nothing writable.
+      Fleet.API,
       Plug,
       Plug.Builder,
       Plug.Conn,
