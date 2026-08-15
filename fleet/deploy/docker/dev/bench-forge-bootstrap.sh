@@ -22,7 +22,7 @@
 # Ce que le script fait, dans l'ordre :
 #   1. attend que la forge reponde ;
 #   2. cree le compte admiral (master forge + sysadmin) s'il manque (mot de passe de bench fixe) ;
-#   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
+#   3. minte le master token EPHEMERE d'admiral (celui que tofu consomme, jete apres la passe) ;
 #   4. joue DEUX `tofu apply` sur la recette de prod : le module `instance/` (systeme, starfleet,
 #      humain, roles `system_*` — une fois par FORGE) puis le module catalogue (org, teams, comptes
 #      de role metier, adhesions — une fois par CATALOGUE). Deux etats distincts : meler les deux
