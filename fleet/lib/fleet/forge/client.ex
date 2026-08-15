@@ -270,6 +270,7 @@ defmodule Fleet.Forge.Client do
              state: "closed"
            }) do
       stamp_closure(repo, issue_number, kind, opts)
+      lift_in_flight_on_retire(repo, issue_number, kind, opts)
       {:ok, :closed}
     end
   end
@@ -286,6 +287,32 @@ defmodule Fleet.Forge.Client do
             "ne dit pas si elle LIVRE ou si elle RETIRE laisse tout l'aval deviner"}}
     end
   end
+
+  # A `:retired` closure LIFTS the flat `lcars-in-flight` lock. It CANNOT ride on the stamp: the stamp
+  # is a SCOPED label (`stage/retired`) and the lock is FLAT — disjoint families, so Gitea's per-scope
+  # mutex evicts nothing. Every lifecycle path reaches `close_issue` with the lock already lifted
+  # (`StepRunCompleter.unlock/6` removes it before a `:delivered` seal), so this is scoped to the ONE
+  # closure that had no other place to lift it: the supersede/retire gesture (`Delegation.do_retire*`)
+  # closes a ticket that may still be IN FLIGHT — a live pod is reaped in the same act — and left the
+  # lock behind on the now-closed ticket. Best-effort like the stamp: the close is authoritative, and a
+  # stale lock on a CLOSED ticket is a warning, never a rollback. Idempotent (`remove_label` no-ops when
+  # the label is absent), so it is safe on a retire target that never carried it.
+  defp lift_in_flight_on_retire(repo, n, :retired, opts) do
+    case remove_label(repo, n, Fleet.Labels.in_flight(), opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ForgeClient: #{repo}##{n} retired but `#{Fleet.Labels.in_flight()}` NOT lifted " <>
+            "(#{inspect(reason)}) — stale lock left on a closed ticket"
+        )
+
+        :ok
+    end
+  end
+
+  defp lift_in_flight_on_retire(_repo, _n, _kind, _opts), do: :ok
 
   defp stamp_closure(_repo, _n, :marker, _opts), do: :ok
 

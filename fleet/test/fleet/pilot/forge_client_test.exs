@@ -1078,6 +1078,64 @@ defmodule Fleet.Forge.ClientTest do
       assert {:error, {:closure_kind_required, _}} =
                ForgeClient.close_issue("fleet/lcars", 42, opts(%{}))
     end
+
+    test "close_issue(:retired): LIFTS the flat lcars-in-flight lock (no scoped stamp can evict it)" do
+      # The retire/supersede path closes a ticket that may still be IN FLIGHT; `stage/retired` is
+      # SCOPED and cannot evict the FLAT lock, so the closure must lift it itself. The DELETE proves it.
+      test_pid = self()
+
+      handlers = %{
+        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {200, %{"state" => "closed"}},
+        # id 9 comes from the ATTACHED labels — read by BOTH the stamp (short-circuit) and the lift.
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
+        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+          {200, [%{"id" => 7, "name" => "stage/retired"}]},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, %{}},
+        {"DELETE", "/api/v1/repos/fleet/lcars/issues/42/labels/9"} => fn ->
+          send(test_pid, :in_flight_lifted)
+          {204, %{}}
+        end
+      }
+
+      assert {:ok, :closed} =
+               ForgeClient.close_issue(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :closure, :retired)
+               )
+
+      assert_receive :in_flight_lifted
+    end
+
+    test "close_issue(:delivered): does NOT lift in-flight — the seal path already did (hot path untouched)" do
+      # Scope guard for the fix above: the lift is retire-only. A `:delivered` seal reaches here with
+      # the lock ALREADY removed by `StepRunCompleter.unlock/6`; re-removing it would add a round-trip
+      # to the hottest path for a no-op. If a delivered close tried to DELETE, this handler would fire.
+      test_pid = self()
+
+      handlers = %{
+        {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {200, %{"state" => "closed"}},
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"id" => 9, "name" => "lcars-in-flight"}]},
+        {"GET", "/api/v1/repos/fleet/lcars/labels"} =>
+          {200, [%{"id" => 3, "name" => "stage/merged"}]},
+        {"POST", "/api/v1/repos/fleet/lcars/issues/42/labels"} => {200, %{}},
+        {"DELETE", "/api/v1/repos/fleet/lcars/issues/42/labels/9"} => fn ->
+          send(test_pid, :in_flight_lifted)
+          {204, %{}}
+        end
+      }
+
+      assert {:ok, :closed} =
+               ForgeClient.close_issue(
+                 "fleet/lcars",
+                 42,
+                 Keyword.put(opts(handlers), :closure, :delivered)
+               )
+
+      refute_receive :in_flight_lifted
+    end
   end
 
   # Gitea-native time-tracking (stopwatch) — global mechanics wired at the same points as the
