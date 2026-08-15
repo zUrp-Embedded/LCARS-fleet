@@ -212,8 +212,10 @@ say "forge up"
 # ─── 2. la boite — create, brancher, PUIS demarrer (piege 1) ─────────────────────────────────────
 say "boite : projet $PROJECT, image $IMAGE, bind $BIND"
 env LCARS_IMAGE="$IMAGE" \
-    LCARS_HUMAN="$HUMAN" \
-    LCARS_HUMAN_EMAIL="${HUMAN}@lcars.local" \
+    `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
+    `# n'est PAS cree par le box — il vient de la forge (team fleet:humans) via le convergeur.` \
+    LCARS_ADMIRAL="admiral" \
+    LCARS_ADMIRAL_EMAIL="admiral@lcars.local" \
     FORGE_BASE_URL="http://forge:3000" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
@@ -259,6 +261,14 @@ done
 [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] \
   || die "la boite ne devient pas healthy (docker logs $BOX)" 3
 say "boite healthy"
+
+# ─── 2ter. mot de passe de banc d'admiral (ssh + sudo) ───────────────────────────────────────────
+# admiral (uid 1000, sysadmin) est cree par l'entrypoint sans secret — l'entrypoint pose le siege,
+# pas le mot de passe. On lui donne ici un secret de BANC CONNU (meme convention jetable que la forge,
+# `LCARS_BENCH_ADMIRAL_PW`), pour pouvoir ssh/sudo sans aller le chercher. Jamais lu par la prod.
+printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null \
+  && say "mot de passe de banc pose sur admiral (ssh/sudo)" \
+  || say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
 
 # ─── 3. les creds anthropic (piege 3) ────────────────────────────────────────────────────────────
 if [[ "$WITH_CREDS" -eq 1 ]]; then
