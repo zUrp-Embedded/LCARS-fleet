@@ -103,11 +103,11 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
 GROUP="${LCARS_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
-# L'HUMAIN DE BOOTSTRAP N'EST PAS CONVERGE, ET NE SE REVOQUE DONC PAS. L'entrypoint le cree
-# lui-meme (`LCARS_HUMAN`, defaut `lcars`) qu'il soit dans la team ou non : c'est le compte d'entree
-# de la boite. Le passer a la revocation reviendrait a fermer la boite sur elle-meme au premier tour
-# ou personne ne l'a ajoute a la team.
-BOOTSTRAP="${LCARS_HUMAN:-lcars}"
+# GUARD A — L'UID RESERVE DU SYSADMIN (admiral) N'EST JAMAIS CONVERGE NI REVOQUE. Garde DUR keye sur
+# l'UID (1000), PAS sur un login : en prod le login d'admiral est celui de l'installeur (variable),
+# son uid est le 1000 reserve (fixe). Le revoquer poserait `nologin` sur root et fermerait la boite
+# sur son propre sysadmin — l'enfermement dehors. Keyer sur l'uid survit a un rename du compte.
+SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -243,6 +243,9 @@ group_members() { # group_members -> un login par ligne
 
 in_group() { group_members | grep -qxF -- "$1"; }
 
+# uid_of <login> -> son uid dans PASSWD_FILE (vide si absent). Sert au garde sysadmin (uid 1000).
+uid_of() { awk -F: -v n="$1" '$1==n {print $3; exit}' "${PASSWD_FILE:-/etc/passwd}"; }
+
 login_shell_of() { # login_shell_of <login>
   awk -F: -v n="$1" '$1==n {print $7}' "${PASSWD_FILE:-/etc/passwd}"
 }
@@ -253,8 +256,11 @@ login_shell_of() { # login_shell_of <login>
 converged_humans() {
   local min login; min="$(uid_min)"; min="${min:-1000}"
   while IFS= read -r login; do
-    [[ -n "$login" && "$login" != "$BOOTSTRAP" ]] || continue
-    awk -F: -v n="$login" -v m="$min" '$1==n && $3>=m {print n}' "${PASSWD_FILE:-/etc/passwd}"
+    [[ -n "$login" ]] || continue
+    # GUARD A : `$3 != s` exclut l'uid reserve du sysadmin (admiral) — jamais candidat a revocation,
+    # meme s'il se retrouvait dans le groupe fleet local.
+    awk -F: -v n="$login" -v m="$min" -v s="$SYSADMIN_UID" \
+      '$1==n && $3>=m && $3!=s {print n}' "${PASSWD_FILE:-/etc/passwd}"
   done < <(group_members)
 }
 
@@ -412,7 +418,8 @@ converge_once() {
       # « EXISTE » NE DIT PAS « A SES ACCES ». Quelqu'un revoque puis re-ajoute a la team arrive
       # exactement ici : `id` repond, et la boucle passait son tour en le laissant hors du groupe,
       # en nologin, sans console. C'est le seul endroit ou le chemin de retour peut etre pris.
-      if [[ "$login" != "$BOOTSTRAP" ]] &&
+      # GUARD A : jamais restaurer (ni toucher) l'uid reserve du sysadmin (admiral).
+      if [[ "$(uid_of "$login")" != "$SYSADMIN_UID" ]] &&
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
         restore_human "$login"
       fi

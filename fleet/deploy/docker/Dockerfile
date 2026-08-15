@@ -224,6 +224,11 @@ ENV LANG=C.UTF-8 LCARS_DOCKER=1
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra python3 \
+       `# sudo = le root du sysadmin (admiral, uid 1000). Modele identite-v2 : la forge fait autorite` \
+       `# sur les personnes, le proprietaire de la boite (le master, materialise en admiral) a root sur` \
+       `# SA machine via le groupe sudo. Threat model homelab/LAN sur : on protege la fleet, pas la` \
+       `# machine contre son proprietaire. Absent jusqu'ici (aucun humain n'avait de sudo).` \
+       sudo \
        `# socat = le relais d'egress du pod. Le sanctuaire n'a AUCUN namespace reseau : socat est ce` \
        `# qui transforme localhost:<port> dans le bac en la socket unix que le proxy CONNECT sert.` \
        `# Absent, un pod est scelle et ne joint meme pas son vendor — bwrap_launch refuse (exit 2).` \

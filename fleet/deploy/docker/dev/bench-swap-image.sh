@@ -96,8 +96,10 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 
 # ─── 2. create → connect → start (piege 1) ───────────────────────────────────────────────────────
 env LCARS_IMAGE="$IMAGE" \
-    LCARS_HUMAN="$HUMAN" \
-    LCARS_HUMAN_EMAIL="${HUMAN}@lcars.local" \
+    `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
+    `# vient de la forge (fleet:humans) via le convergeur, pas du box. Miroir de bench-up.sh.` \
+    LCARS_ADMIRAL="admiral" \
+    LCARS_ADMIRAL_EMAIL="admiral@lcars.local" \
     FORGE_BASE_URL="http://forge:3000" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
@@ -124,6 +126,12 @@ wait_healthy() {
 }
 wait_healthy || die "la boite ne devient pas healthy (docker logs $BOX)" 3
 say "boite healthy"
+
+# Mot de passe de banc d'admiral (ssh + sudo) — miroir de bench-up.sh "2ter". L'entrypoint cree le
+# siege (uid 1000) sans secret ; on le pose ici pour pouvoir ssh/sudo apres un swap. Jamais lu par la prod.
+printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null \
+  && say "mot de passe de banc pose sur admiral (ssh/sudo)" \
+  || say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
 
 # ─── 3. les creds repartent avec l'ancien conteneur (piege 2) ────────────────────────────────────
 if [[ "$WITH_CREDS" -eq 1 ]]; then

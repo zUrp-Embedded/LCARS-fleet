@@ -21,8 +21,8 @@
 #
 # Ce que le script fait, dans l'ordre :
 #   1. attend que la forge reponde ;
-#   2. cree le compte admin de bootstrap s'il manque (mot de passe genere, jamais fixe) ;
-#   3. minte le master token EPHEMERE du bootstrap (celui que tofu consomme) ;
+#   2. cree le compte admiral (master forge + sysadmin) s'il manque (mot de passe de bench fixe) ;
+#   3. minte le master token EPHEMERE d'admiral (celui que tofu consomme, jete apres la passe) ;
 #   4. joue DEUX `tofu apply` sur la recette de prod : le module `instance/` (systeme, starfleet,
 #      humain, roles `system_*` — une fois par FORGE) puis le module catalogue (org, teams, comptes
 #      de role metier, adhesions — une fois par CATALOGUE). Deux etats distincts : meler les deux
@@ -66,7 +66,7 @@
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <copie de fleet/deploy/deps>] [--no-box] [--no-seed-repos]
 #                                  [--human-admin] [--admin-token TOK]
-# EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 bootstrap admin/token
+# EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 admiral admin/token
 #         4 tofu · 5 la boite (seed) · 6 le verdict final ne passe pas · 7 semis des repos
 
 set -euo pipefail
@@ -93,7 +93,7 @@ SEED_REPOS=1
 # Propriete de BANC, jamais de prod — la raison, son cout et sa sortie sont a l'etape 6-bis.
 HUMAN_ADMIN=0
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-ADMIN="bootstrap"
+ADMIN="admiral"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -132,11 +132,15 @@ for _ in $(seq 1 60); do
 done
 curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $FORGE_URL" 2
 
-# ─── 2-3. admin de bootstrap + master token EPHEMERE ─────────────────────────────────────────────
-# Le mot de passe admin est GENERE : personne n'a besoin de s'en souvenir (le compte est un outil
-# de provisioning, pas un siege d'operateur), et un mot de passe admin fixe dans un fichier suivi
-# serait la seule faiblesse reelle que ce script pourrait introduire.
-ADMIN_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+# ─── 2-3. admiral (master forge + sysadmin) + master token EPHEMERE ──────────────────────────────
+# ⚠ CE COMMENTAIRE DISAIT L'INVERSE, ET SA PREMISSE A CHANGE (identite-v2). Le mot de passe etait
+# GENERE parce que ce compte etait « un outil de provisioning, pas un siege d'operateur ». Or admiral
+# EST desormais un siege d'operateur : le master se logue au deck/forge, et il est materialise en
+# sysadmin root cote box (uid 1000). Il lui faut donc un mot de passe CONNU — exactement comme
+# l'humain worker (HUMAN_PASSWORD, deja fixe dans ce script). Bench : fixe (`toto1234`), pour tester,
+# dans un banc JETABLE sur LAN sur ; prod : l'installeur choisit. Ce qui ne doit jamais persister
+# dans un fichier suivi, c'est le MASTER TOKEN qu'admiral minte pour tofu — lui reste EPHEMERE.
+ADMIN_PW="${LCARS_BENCH_ADMIRAL_PW:-toto1234}"
 
 # LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES
 # etapes qui exigent un `docker exec` DANS la forge. Contre une forge de production — ailleurs, pas
@@ -147,13 +151,13 @@ if [[ -n "$ADMIN_TOKEN" ]]; then
     || die "le jeton d'admin fourni ne s'authentifie pas sur $FORGE_URL" 3
   say "admin fourni (--admin-token) — creation et mint SAUTES, la forge preexiste"
 elif ! curl -sf -m 5 "$(api)/users/$ADMIN" >/dev/null 2>&1; then
-  say "creation du compte admin de bootstrap ($ADMIN)"
+  say "creation du compte admiral (master forge, $ADMIN)"
   "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user create \
-      --username "$ADMIN" --password "$ADMIN_PW" --email "b@local.test" \
+      --username "$ADMIN" --password "$ADMIN_PW" --email "admiral@lcars.local" \
       --admin --must-change-password=false >/dev/null 2>&1 \
-    || die "creation de l'admin de bootstrap impossible" 3
+    || die "creation du compte admiral impossible" 3
 else
-  say "admin de bootstrap deja present — rotation de son mot de passe pour cette passe"
+  say "compte admiral deja present — rotation de son mot de passe pour cette passe"
   "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user change-password \
       --username "$ADMIN" --password "$ADMIN_PW" --must-change-password=false >/dev/null 2>&1 \
     || die "rotation du mot de passe admin impossible" 3

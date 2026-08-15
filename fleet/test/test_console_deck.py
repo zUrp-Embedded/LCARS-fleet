@@ -399,8 +399,10 @@ def fake_forge():
                              "expires_in": 3600, "refresh_token": "rt-probe"})
 
         def do_GET(self):
+            # Sert l'userinfo OIDC ET le /api/v1/user que forge_is_admin lit. `is_admin` defaut False
+            # -> les tests qui ne le posent pas voient une session ordinaire (comportement d'avant).
             self._json(200, {"sub": "1", "preferred_username": FAKE["login"],
-                             "groups": FAKE["groups"]})
+                             "groups": FAKE["groups"], "is_admin": FAKE.get("is_admin", False)})
 
         def log_message(self, *a):
             pass
@@ -533,6 +535,19 @@ check(code == 403, "hors de l'equipe humans -> refuse (vu: %d)" % code)
 check("COMPTE RECONNU" in body,
       "et le refus dit que le compte EXISTE — c'est un enrollment qui manque, pas une panne")
 check("Set-Cookie" not in hdrs, "aucune session n'est ouverte pour un non-membre")
+
+# (4-bis) ADMIRAL : hors de l'equipe humans MAIS site-admin (is_admin) -> il ENTRE par la porte ADMIN.
+# admiral est le master/sysadmin : il n'est pas un worker (pas dans fleet:humans), mais il a sa
+# console web (root via sudo une fois dedans, Guard B lui interdisant de lancer une fleet).
+FAKE["groups"] = ["fleet"]        # PAS fleet:humans
+FAKE["is_admin"] = True
+code, _, hdrs = fetch(dport, "/auth/login")
+issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
+code, body, hdrs = fetch(dport, "/auth/callback?state=%s&code=abc" % issued)
+check(code == 302, "admiral (site-admin hors fleet:humans) ENTRE par is_admin (vu: %d)" % code)
+check(hdrs.get("Set-Cookie", "").startswith(deck.SESSION_COOKIE + "="),
+      "et recoit sa session (la porte admin s'ouvre)")
+FAKE["is_admin"] = False   # reset : les cas suivants sont des workers ordinaires
 
 # (5) MEMBRE, MAIS AUCUN UTILISATEUR SYSTEME : le convergeur n'est pas passe.
 FAKE["groups"] = ["fleet", "fleet:humans"]

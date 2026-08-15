@@ -38,7 +38,9 @@
 
 set -euo pipefail
 
-HUMAN="${LCARS_HUMAN:-lcars}"
+# Pas de defaut : identite-v2 a retire « l'humain » unique (`LCARS_HUMAN`). Une console vise un login
+# EXPLICITE (`--human`) ou toute la liste (`--all`) ; une invocation nue se refuse au lieu de deviner.
+HUMAN=""
 FOREGROUND=0
 ALL=0
 
@@ -285,4 +287,5 @@ if [[ "$ALL" -eq 1 ]]; then
   exit 0
 fi
 
+[[ -n "$HUMAN" ]] || { echo "console.sh: --human <login> ou --all requis" >&2; exit 1; }
 launch_one "$HUMAN"

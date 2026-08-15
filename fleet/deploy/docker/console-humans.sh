@@ -45,6 +45,15 @@ VERBOSE=0
 UID_MIN="${LCARS_CONSOLE_UID_MIN:-1000}"
 UID_MAX="${LCARS_CONSOLE_UID_MAX:-59999}"
 
+# L'ELIGIBILITE DERIVE DE L'AUTORITE : membre du groupe `fleet`. La liste des humains est portee par
+# la forge (team `humans`) et materialisee par le convergeur, qui ajoute chaque worker au groupe
+# `fleet` (`usermod -aG fleet`). Filtrer sur le groupe, c'est lire ce que le convergeur a converge,
+# au lieu de re-deviner par uid+home+shell (identite-v2). Effet de bord voulu : le sysadmin `admiral`
+# (uid 1000, groupe `sudo`, PAS `fleet`) est exclu des consoles worker — il passe par ssh. Seam de
+# test `LCARS_CONSOLE_GROUP_FILE`, meme idiome que `LCARS_CONSOLE_PASSWD`.
+CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-fleet}"
+FLEET_MEMBERS=",$(if [[ -n "${LCARS_CONSOLE_GROUP_FILE:-}" ]]; then awk -F: -v g="$CONSOLE_GROUP" '$1==g {print $4}' "$LCARS_CONSOLE_GROUP_FILE"; else getent group "$CONSOLE_GROUP" 2>/dev/null | cut -d: -f4; fi),"
+
 # Deux classes de rejet, et elles ne meritent PAS le meme bruit :
 #   - hors plage d'uid (root, daemon, www-data, nobody…) : ATTENDU a chaque boot. Detailler 19
 #     lignes de comptes systeme, c'est apprendre a l'humain a ne plus lire ses logs. → un compte.
@@ -76,6 +85,12 @@ while IFS=: read -r login _ uid _ _ home shell; do
       reject_odd "$login" "shell $shell — le compte n'est pas fait pour ouvrir un shell"
       continue ;;
   esac
+  # Membre du groupe fleet ? Sinon ce n'est pas un humain de la fleet (sysadmin admiral, compte
+  # hors-fleet) : pas de console worker. C'est la garde qui derive de l'autorite, pas de l'uid seul.
+  if [[ "$FLEET_MEMBERS" != *",$login,"* ]]; then
+    reject_odd "$login" "hors du groupe $CONSOLE_GROUP — pas un humain converge de la fleet"
+    continue
+  fi
 
   # LA TROISIEME COLONNE A CHANGE DE NATURE, elle n'a pas ete « remise ». Elle portait
   # `21000 + (uid % 500) * 10` — le bloc de ports de cet humain, dont le seul lecteur le jetait, et

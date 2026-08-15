@@ -1300,14 +1300,17 @@ class Deck(BaseHTTPRequestHandler):
 
         login = info.get("preferred_username") or ""
         groups = info.get("groups") or []
-        if HUMANS_TEAM not in groups:
-            self._send(403, page_denied(login, groups), "text/html; charset=utf-8")
-            return
-
         # LU ICI, ET NULLE PART AILLEURS : c'est le seul endroit du deck ou un jeton d'acces existe.
         # Le lire plus tard couterait un credential de service stocke sur la boite — exactement ce
-        # que ce lot passe son temps a retirer.
+        # que ce lot passe son temps a retirer. Lu AVANT la porte : admiral (le master/sysadmin) est
+        # site-admin mais PAS dans fleet:humans — il entre par la porte ADMIN (is_admin), distincte
+        # de la porte worker. Une fois entre, tout est transparent : sa console tourne sous lui (uid
+        # 1000, sudo -> root ; le deck ne fait que relayer un shell), Guard B lui interdit de lancer
+        # une fleet, et is_admin lui donne l'onglet admin.
         admin = forge_is_admin(cfg, tokens["access_token"])
+        if HUMANS_TEAM not in groups and not admin:
+            self._send(403, page_denied(login, groups), "text/html; charset=utf-8")
+            return
 
         sid = secrets.token_urlsafe(32)
         with _lock:

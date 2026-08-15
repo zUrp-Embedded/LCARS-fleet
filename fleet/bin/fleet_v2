@@ -313,6 +313,14 @@ cmd_start() {
   parse_start_opts "$@"
   set -- "${START_ARGS[@]}"
 
+  # GUARD B — une fleet ne se lance JAMAIS sous l'uid reserve du sysadmin (admiral). Le BEAM herite
+  # de l'uid du lanceur, et ses pods avec : demarrer en root/sysadmin donnerait des pods root, l'exact
+  # inverse de la sandbox. La fleet tourne sous un humain worker (uid >= 1001). `fleet_v2 status`
+  # reste ouvert au sysadmin ; c'est le LANCEMENT qu'on refuse, pas la lecture d'etat.
+  if [[ "$(id -u)" == "${LCARS_SYSADMIN_UID:-1000}" ]]; then
+    die "refus de lancer une fleet sous l'uid ${LCARS_SYSADMIN_UID:-1000} (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= 1001)."
+  fi
+
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     # Fleet ALREADY up: re-source the runtime env (to match the live fleet) and just report.
