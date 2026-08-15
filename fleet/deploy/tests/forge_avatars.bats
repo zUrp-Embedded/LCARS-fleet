@@ -30,6 +30,12 @@ setup() {
   while IFS= read -r png; do
     : > "$AVATARS/$png"
   done < <(sed -n 's/^  "[^"]*:\([^"]*\.png\)".*/\1/p' "$SCRIPT")
+  # Le badge du master (`--admiral`) n'est PAS dans la table : il s'y ajoute au parsing. Son PNG se
+  # derive donc de la ligne qui l'ajoute, pour la meme raison que ci-dessus — l'ecrire en dur ici
+  # ferait echouer ces tests sur « asset introuvable » le jour ou la charte change de fichier.
+  while IFS= read -r png; do
+    : > "$AVATARS/$png"
+  done < <(sed -n 's/.*ENTRIES+=(.*:\([^"]*\.png\)".*/\1/p' "$SCRIPT")
 
   ARGV_LOG="$BATS_TEST_TMPDIR/argv.log"
   STDIN_LOG="$BATS_TEST_TMPDIR/stdin.log"
@@ -100,4 +106,43 @@ run_avatars() {
   run_avatars
   [[ "$output" =~ ([0-9]+)\ entrée\(s\)\ de\ charte ]]
   [ "${BASH_REMATCH[1]}" -ge 8 ]
+}
+
+# ─── LE BADGE DU MASTER (2026-08-15) ─────────────────────────────────────────────────────────────
+# Le compte forge `starfleet` est supprime (instance/accounts.tf) : le canon declarait « no forge
+# account » pendant que le provisionnement en creait un, en site-admin. Son BADGE passe au master.
+#
+# Il est PARAMETRE et pas ecrit en dur : le login du master est `admiral` au banc et celui de
+# l'installeur en prod. Une entree fixe ne poserait rien ailleurs qu'au banc, EN SILENCE — un compte
+# de la table absent de la forge est tolere depuis la mesure du catalogue `web`. Le defaut sans
+# option est donc « rien », ce qui preserve aussi la regle ecrite dans la table : « l'humain n'est
+# pas liste, il pose son propre avatar ».
+
+@test "badge: --admiral pose le badge de starfleet sur le login nomme" {
+  # Gitea n'a pas d'endpoint par-compte : c'est POST /user/avatar + un en-tete `Sudo: <compte>`,
+  # l'admin agissant AU NOM du compte. Le login vit donc dans l'en-tete, jamais dans l'URL — une
+  # assertion sur `users/<login>/avatar` mesurerait une route qui n'existe pas.
+  run_avatars --admiral chef-de-banc
+  [ "$status" -eq 0 ]
+  grep -q "Sudo: chef-de-banc" "$ARGV_LOG"
+}
+
+@test "badge: SANS --admiral, aucun avatar n'est pose sur un compte humain" {
+  # Le temoin qui rend le precedent falsifiable : sans lui, un script qui poserait le badge sur un
+  # login code en dur passerait le test ci-dessus des que ce login serait `chef-de-banc`.
+  run_avatars
+  [ "$status" -eq 0 ]
+  run grep -c "chef-de-banc" "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "badge: le compte starfleet n'est plus servi — son avatar ne part que vers le master" {
+  # La regression que ce temoin garde : re-ajouter `starfleet:starfleet.png` a la table ferait
+  # reapparaitre un POST vers un compte que la forge ne porte plus, et le verdict compterait une
+  # entree de charte de plus pour rien.
+  run_avatars --admiral admiral
+  run grep -c "Sudo: starfleet" "$ARGV_LOG"
+  [ "$output" = "0" ]
+  # ...et le badge est bien parti vers le master, sinon ce test passerait sur un script muet.
+  grep -q "Sudo: admiral" "$ARGV_LOG"
 }

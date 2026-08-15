@@ -26,7 +26,9 @@
 #   provision-forge-avatars.sh --forge URL --admin-token-file /root/forge/test/admin.token
 #   provision-forge-avatars.sh --forge URL --admin-token-file … --check      # sonde seule
 # Options : --avatars-dir DIR (défaut : <dir du script>/avatars) · --org NAME (défaut fleet ; --org "" pour
-#           sauter l'org). Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
+#           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le badge de
+#           starfleet, dont le compte n'existe plus. Absent = aucun avatar posé sur un compte humain).
+#           Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
 # EXIT : 0 = tout posé/valide · 1 = usage/dépendance · 2 = au moins une entrée en échec.
 
 set -euo pipefail
@@ -61,9 +63,22 @@ declare -a ENTRIES=(
   # Cote COMPTE : le LOGIN (`<catalogue>_<role>`). Cote IMAGE : le ROLE — une charte pointe des
   # FICHIERS, et un PNG ne se derive pas d'un nom. C'est pourquoi cette table reste tenue a la main
   # la ou les trois autres listes de roles sont desormais derivees du catalogue.
-  "starfleet:starfleet.png"
   "lcars-system:favicon.png"
 )
+
+# ⚠ `starfleet:starfleet.png` A QUITTE CETTE TABLE (2026-08-15) — le compte forge `starfleet` est
+# supprime (cf. `instance/accounts.tf`). Le badge, lui, passe au MASTER : c'est lui qui tient
+# desormais le siege admin de la forge, et la charte ne perd pas son dessin.
+#
+# PARAMETRE, ET PAS ECRIT EN DUR, pour deux raisons qui se cumulent :
+#   1. le login du master est VARIABLE — `admiral` au banc, le login de l'installeur en prod. Une
+#      entree `admiral:starfleet.png` en dur ne poserait rien chez qui n'a pas ce login-la, en
+#      silence (un compte de cette table absent de la forge est tolere depuis la mesure du
+#      catalogue `web`) ;
+#   2. la regle juste au-dessus dit « l'humain n'est PAS liste : il pose son propre avatar, on ne
+#      le decide pas pour lui ». Le master EST un compte humain. Ne rien poser par defaut la
+#      preserve : le badge n'arrive que si le deploiement NOMME son master, donc le demande.
+ADMIRAL=""
 
 usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -73,11 +88,16 @@ while [[ $# -gt 0 ]]; do
     --admin-token-file) ADMIN_TOKEN_FILE="$2"; shift 2 ;;
     --avatars-dir) AVATARS_DIR="$2"; shift 2 ;;
     --org) ORG="$2"; shift 2 ;;
+    --admiral) ADMIRAL="$2"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "provision-forge-avatars: option inconnue: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
+
+# Le badge de starfleet rejoint la table SEULEMENT si l'appelant a nomme son master. Pose apres le
+# parsing (l'option peut arriver dans n'importe quel ordre) et avant tout usage d'ENTRIES.
+[[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:starfleet.png")
 
 command -v curl >/dev/null || { echo "provision-forge-avatars: curl requis" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "provision-forge-avatars: jq requis" >&2; exit 1; }

@@ -2,7 +2,7 @@
 # LCARS Fleet — empreinte forge (structure déclarative)
 #
 # Provisionne la STRUCTURE d'une forge Gitea vierge pour accueillir une fleet :
-# comptes (système + rôles + humain + starfleet), org `fleet`, teams + memberships.
+# comptes (système + rôles + humain), org `fleet`, teams + memberships.
 #
 # HORS de ce fichier, par choix :
 #   · les tokens runtime      → bin/provision-role-tokens.sh (le provider ne minte

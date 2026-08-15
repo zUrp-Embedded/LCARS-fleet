@@ -2,8 +2,8 @@
 # LCARS Fleet — empreinte forge, module INSTANCE
 #
 # Ce que ce module possede : les comptes qui ne dependent d'AUCUN catalogue et
-# vivent une fois par forge — le systeme, starfleet, l'humain, et les roles de
-# MECANIQUE (`system_*`), la meme autorite dans toutes les orgs.
+# vivent une fois par forge — le systeme, l'humain, et les roles de MECANIQUE
+# (`system_*`), la meme autorite dans toutes les orgs.
 #
 # POURQUOI IL EXISTE, ET C'EST UNE MESURE. Un apply = un DOSSIER, et
 # `enroll-catalogue --tofu-dir` ecrit un tfvars par catalogue : le modele est
@@ -78,14 +78,35 @@ resource "gitea_user" "system_role" {
   allow_import_local        = false
 }
 
-resource "gitea_user" "starfleet" {
-  username             = "starfleet"
-  login_name           = "starfleet"
-  email                = "starfleet@lcars.local"
-  password             = var.seed_password
-  must_change_password = false
-  admin                = true # site-admin : l'identité d'ONBOARDING (créer des users = op site-admin)
-}
+# ⚠ LE COMPTE `starfleet` A ETE RETIRE (2026-08-15), et son absence est une DECISION.
+#
+# Il datait de l'epoque ou starfleet etait le role sysadmin et recevait les tickets systeme. Depuis
+# le reorg du 2026-07-19 il est chef de PORTEFEUILLE : il ne met jamais la main dans un projet, et
+# surtout pas en ecriture. Le canon le declarait deja — `cap-profiles/starfleet.yaml` :
+# « NO forge identity : starfleet holds no forge account and no role token — every forge write it
+# causes goes through the SYSTEM ». Cette ressource creait donc, en SITE-ADMIN, le compte que la
+# donnee disait ne pas exister.
+#
+# MESURE DU 2026-08-15 (banc), avant retrait : zero site `as_role("starfleet")` dans tout `fleet/`
+# (marcheur independant, pas un grep) · aucun `starfleet.gitea_token` dans `/home/private` (dix
+# tokens, aucun pour lui) · absent du `forge-role-passwords.json` · absent de la liste `ROLES` de
+# `provision-role-tokens.sh` · aucune org, aucun depot. Aucun secret ne vivait nulle part pour ce
+# compte : rien ne pouvait s'authentifier sous lui, et il etait site-admin.
+#
+# POURQUOI IL A SURVECU SI LONGTEMPS. Le verrou a quatre listes (`roles.provisioning_locked`) impose
+# l'egalite canon == forge.tf == ROLES == PROV_ROLES, et il EXCLUT starfleet sur `forge_identity`
+# — l'asymetrie vit dans la donnee, volontairement. Mais cette ressource-ci etait AUTONOME, hors de
+# la boucle des roles, comme `system` et `human` : elle echappait donc au verrou. Le canon pouvait
+# dire « pas de compte forge » pendant que le provisionnement en creait un, indefiniment, sans
+# qu'aucun gate ne les confronte.
+#
+# Son motif ecrit etait « site-admin : l'identite d'ONBOARDING (creer des users = op site-admin) ».
+# Ce role appartient desormais au MASTER (l'installeur, materialise en `admiral` au banc), qui porte
+# le compte admin de la forge et le master-token que tofu consomme. Le break-glass est le compte de
+# l'installeur — `gitea_user "human"` ci-dessous le dit deja dans son propre commentaire.
+#
+# Son BADGE, lui, ne disparait pas : `provision-forge-avatars.sh` le pose sur le master (option
+# `--admiral`). Le nom quitte la forge, la charte reste.
 
 resource "gitea_user" "human" {
   username             = var.human_username

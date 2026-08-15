@@ -404,8 +404,11 @@ if [[ -f "$TOFU_DIR/provision-forge-avatars.sh" ]]; then
   # "non bloquant" : la seule ligne qui dit CE QUI a ete pose, et combien d'entrees de charte
   # n'avaient pas de compte sur cette forge, disparaissait. Un provisionnement qui couvre trois
   # entrees sur dix doit le montrer.
+  # `--admiral` : le master de CE banc recoit le badge de starfleet, dont le compte forge n'existe
+  # plus (cf. instance/accounts.tf). Le login est passe parce qu'il est VARIABLE — `admiral` ici,
+  # celui de l'installeur en prod ; la table des avatars ne peut pas le deviner.
   avatar_out="$( cd "$TOFU_DIR" && ./provision-forge-avatars.sh --forge "$FORGE_URL" \
-      --admin-token-file "$TOFU_DIR/.admin.token" 2>&1 )" \
+      --admin-token-file "$TOFU_DIR/.admin.token" --admiral "$ADMIN" 2>&1 )" \
     && say "avatars: ${avatar_out##*$'\n'}" \
     || say "avatars NON poses, les comptes gardent une tete vide : ${avatar_out##*$'\n'}"
   rm -f "$TOFU_DIR/.admin.token"
