@@ -158,18 +158,19 @@ defmodule Fleet.CatalogueTest do
              )
     end
 
-    test "find/2 answers the first existing file, then the first ACTIVE path", %{tmp_dir: tmp} do
+    test "find_in/2 sur un tree_scope : le fichier du systeme, puis nil — jamais un voisin", %{
+      tmp_dir: tmp
+    } do
+      # La porte qui a REMPLACE `find/2` (l'aplatie, tuee avec la dette `search/1`) : un scope
+      # explicite d'UN catalogue + le systeme, et rien d'autre n'y entre par construction.
       root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      scope = Catalogue.tree_scope(root, :sp_drafts)
 
-      # Shipped by the system alone (the two protocols moved there).
-      found = Catalogue.find(:sp_drafts, "protocole-user-worker.md")
-      assert File.regular?(found)
+      found = Catalogue.find_in(scope, "protocole-user-worker.md")
+      assert found && File.regular?(found)
       assert String.starts_with?(found, Catalogue.system_root())
 
-      # Nowhere: the answer names the file the AUTHOR would create, in their own tree.
-      absent = Catalogue.find(:sp_drafts, "agent-nobody-base.md")
-      assert absent == Path.join([root, Catalogue.rel(:sp_drafts), "agent-nobody-base.md"])
+      assert Catalogue.find_in(scope, "agent-nobody-base.md") == nil
     end
   end
 

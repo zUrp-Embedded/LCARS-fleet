@@ -260,42 +260,13 @@ defmodule Fleet.Catalogue do
     |> Enum.filter(&File.dir?/1)
   end
 
-  @doc """
-  First existing `name` on a TREE's search path; the FIRST ACTIVE path when it exists nowhere.
-
-  The fallback is computed from the active list and NOT from `search/1`, and the difference is the
-  whole point: `search/1` drops directories that do not exist, so when an author's own tree is
-  absent — precisely the case where they are about to create the file — the first surviving path is
-  the SYSTEM's. Answering with it would send them to edit a tree they do not own, to fix a file that
-  belongs in theirs.
-  """
-  @spec find(atom(), String.t()) :: Path.t()
-  def find(tree, name) when is_atom(tree) and is_binary(name) do
-    fallback =
-      case fine_override(tree) do
-        nil -> Path.join([List.first(installed_roots()), rel(tree), name])
-        dir -> Path.join(dir, name)
-      end
-
-    tree
-    |> search()
-    |> Enum.map(&Path.join(&1, name))
-    |> Enum.find(fallback, &File.regular?/1)
-  end
-
-  @doc "Every path matching `pattern` on a TREE's search path, in precedence order."
-  @spec glob(atom(), String.t()) :: [Path.t()]
-  def glob(tree, pattern) when is_atom(tree) and is_binary(pattern) do
-    Enum.flat_map(search(tree), &Path.wildcard(Path.join(&1, pattern)))
-  end
-
-  @doc "`pattern` merged across a TREE's search path into `%{key => path}` — the FIRST root wins."
-  @spec merge(atom(), String.t(), (Path.t() -> term())) :: %{term() => Path.t()}
-  def merge(tree, pattern, key_fun) when is_atom(tree) and is_function(key_fun, 1) do
-    tree
-    |> glob(pattern)
-    |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
-  end
+  # ⚠ `find/2` ET `glob/2` (les portes par ARBRE, aplaties sur tous les installes) ONT ETE TUEES
+  # ICI, et l'absence est le point : elles resolvaient un nom au premier catalogue qui l'avait,
+  # TOUS catalogues confondus — la dette `search/1` des trois audits. Leur dernier appelant (les
+  # protocoles de pod) resout desormais par `tree_scope/2` + `find_in/2`, le scope d'UN catalogue
+  # plus le systeme. Un nouveau lecteur qui croit avoir besoin d'une recherche tous-catalogues a en
+  # main un appelant qui ne sait pas a quel catalogue il appartient — c'est CE probleme-la qu'il
+  # faut resoudre, pas celui du chemin. `merge/3` (meme famille, zero appelant) est parti avec.
 
   # The name of the business catalogue shipped inside the release. `fleet` and not `lcars`: the
   # name is destined to become an identifier OUTSIDE this code (the forge org that carries a

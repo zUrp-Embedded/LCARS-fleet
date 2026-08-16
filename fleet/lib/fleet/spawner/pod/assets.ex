@@ -117,7 +117,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
         :unpublished ->
           read_tagged(
-            Fleet.SPBuilder.sp_draft_path(role),
+            Fleet.SPBuilder.sp_draft_path(role, cap.catalogue_root),
             :agent_draft_missing
           )
       end
@@ -159,7 +159,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   defp read_worker_protocol(root) do
     case Fleet.SPBuilder.image_worker_protocol(root) do
       {:ok, content} -> {:ok, content}
-      :unpublished -> read_worker_protocol_from_disk()
+      :unpublished -> read_worker_protocol_from_disk(root)
     end
   end
 
@@ -169,27 +169,41 @@ defmodule Fleet.Spawner.Pod.Assets do
         {:ok, content}
 
       :unpublished ->
-        # THE search path, like the drafts beside it: the human protocol follows the roles that
-        # need it, and after the split the only `interlocutor: both` roles live in the system
-        # catalogue. Reading the business root alone demanded this file from catalogues whose every
-        # role is `interlocutor: fleet` (W-13) — the image regime raised, the disk regime here
-        # would have returned :enoent on a file its author had no reason to write.
-        :sp_drafts
-        |> Fleet.Catalogue.find("protocole-user-human.md")
-        |> read_tagged(:protocole_user_human_missing)
+        # The SCOPE, not the search path — the pod's own catalogue plus the system one, the same
+        # pair its image is frozen from. The scope is a pair and never the business root alone: the
+        # human protocol follows the roles that need it, and the only `interlocutor: both` roles
+        # live in the system catalogue — reading one root demanded this file from catalogues whose
+        # every role is `interlocutor: fleet` (W-13). And never the FLATTENED path either
+        # (`find(:sp_drafts, …)` walked every installed catalogue): a `mobile` pod would have read
+        # `web-demo`'s protocol on disk while its image raised — a conversation contract written
+        # for other people, served on exactly the regime hermetic tests measure.
+        protocol_from_disk(root, "protocole-user-human.md", :protocole_user_human_missing)
     end
   end
 
-  defp read_worker_protocol_from_disk do
+  defp read_worker_protocol_from_disk(root) do
     case Application.get_env(:lcars_fleet, :spawner_protocole_user_path) do
       nil ->
-        :sp_drafts
-        |> Fleet.Catalogue.find("protocole-user-worker.md")
-        |> read_tagged(:protocole_user_worker_missing)
+        protocol_from_disk(root, "protocole-user-worker.md", :protocole_user_worker_missing)
 
       path when is_binary(path) ->
         read_tagged(path, :protocole_user_missing)
     end
+  end
+
+  # `root` is nil for a profile loaded without a named catalogue: the FIRST installed one, because
+  # that is what the image regime answers for the same caller. The not-found error names a path in
+  # the scope's OWN tree, never a foreign one — the same rule `Catalogue.find/2` states for its
+  # fallback: send the author to the tree they own.
+  defp protocol_from_disk(root, name, error_tag) do
+    scope_root = root || List.first(Fleet.Catalogue.installed_roots())
+    scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
+
+    path =
+      Fleet.Catalogue.find_in(scope, name) ||
+        Path.join([scope_root, Fleet.Catalogue.rel(:sp_drafts), name])
+
+    read_tagged(path, error_tag)
   end
 
   defp read_tagged(path, error_tag) do

@@ -336,12 +336,17 @@ defmodule Fleet.SPBuilder do
         Map.fetch(templates, name)
 
       nil ->
-        :subagent_templates
-        |> Fleet.Catalogue.find("subagent-#{name}.md")
-        |> File.read()
+        # Le SCOPE du catalogue du pod (le sien + le systeme), plus jamais la porte aplatie
+        # `find/2` : elle resolvait au premier catalogue installe qui portait le template, tous
+        # confondus — le regime image d'a cote etait deja per-catalogue, et deux regimes qui
+        # repondent differemment est LE defaut (dette `search/1`, fermee 2026-08-16).
+        scope_root = root || hd(Fleet.Catalogue.installed_roots())
+
+        Fleet.Catalogue.tree_scope(scope_root, :subagent_templates)
+        |> Fleet.Catalogue.find_in("subagent-#{name}.md")
         |> case do
-          {:ok, content} -> {:ok, content}
-          {:error, _} -> :error
+          nil -> :error
+          path -> with {:error, _} <- File.read(path), do: :error
         end
     end
   end
@@ -403,15 +408,31 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Path of a role's SP draft, looked up in the SYSTEM catalogue then the business one — the
-  unpublished disk fallback's half of what the image does at publish time.
+  Path of a role's SP draft on DISK, in the scope of `root` — the unpublished fallback's half of
+  what the image does at publish time, and the same pair the image is frozen from: the named
+  catalogue, then the system one. `nil` = the first installed catalogue, because that is what the
+  image regime answers for the same caller.
 
-  Returns the business path when the role has no draft anywhere, so the caller's `:enoent` names
-  the file an author would have to create. The two protocol files are NOT resolved this way: they
-  are the operator's conversation contract, and only the business catalogue carries them.
+  It rode the flattened `find/2` until 2026-08-16 (the `search/1` debt): a role declared by two
+  catalogues took its DRAFT from whichever installed first, while the image regime resolved in the
+  pod's own — two regimes answering differently, the defect itself.
+
+  Returns the scope's OWN path when the role has no draft anywhere, so the caller's `:enoent`
+  names the file an author would have to create — in their tree, never a foreign one.
   """
-  @spec sp_draft_path(String.t()) :: Path.t()
-  def sp_draft_path(role) when is_binary(role) do
-    Fleet.Catalogue.find(:sp_drafts, "agent-#{role}-base.md")
+  @spec sp_draft_path(String.t(), Path.t() | nil) :: Path.t()
+  def sp_draft_path(role, root \\ nil) when is_binary(role) do
+    # `hd/1` et pas `List.first/1` : `installed_roots/0` rend TOUJOURS au moins le catalogue
+    # livre, et `List.first` ajoute un `nil` fantome au typage que le spec `Path.t()` ne couvre
+    # pas — dialyzer `missing_range`, mesure.
+    scope_root = root || hd(Fleet.Catalogue.installed_roots())
+    name = "agent-#{role}-base.md"
+
+    scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
+
+    case Fleet.Catalogue.find_in(scope, name) do
+      nil -> Path.join([scope_root, Fleet.Catalogue.rel(:sp_drafts), name])
+      path -> path
+    end
   end
 end
