@@ -5,7 +5,7 @@ defmodule Fleet.Application.CatalogueDepositsTest do
 
   # Les doublures portent le contrat EXACT des modules reels : `search_repos/1` rend des maps a cles
   # STRING (le JSON de la forge, non atomise), `get_file/3` rend `%{content:, sha:}` ou
-  # `{:error, :not_found}`, `branch_sha/3` rend un sha. Une doublure qui atomiserait les cles ferait
+  # `{:error, :not_found}`, `branch_head/3` rend un sha. Une doublure qui atomiserait les cles ferait
   # passer ces temoins sur une forme que la forge ne produit jamais.
   defmodule FakeRepo do
     def search_repos(opts) do
@@ -15,7 +15,7 @@ defmodule Fleet.Application.CatalogueDepositsTest do
       end
     end
 
-    def branch_sha(full, branch, opts) do
+    def branch_head(full, branch, opts) do
       case Keyword.get(opts, :shas, %{}) |> Map.fetch({full, branch}) do
         {:ok, sha} -> {:ok, sha}
         :error -> {:error, :not_found}

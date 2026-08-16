@@ -571,12 +571,23 @@ prov_roles() {
   local bin="${PROV_RELEASE_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
   local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
 
-  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]]; then
+  # ⚠ `roles-tfvars` ET NON `roles`, ET LES DEUX PORTES NE RENDENT PAS LA MEME CHOSE. `roles` rend
+  # des noms de ROLE (`dev`, `writer`) ; `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`).
+  # Mesure sur banc du 2026-08-16 : la derivation branchee sur `roles` faisait entrer `dev`,
+  # `writer`, `architect` dans le roster — le mint aurait cree des comptes forge portant le nom nu
+  # d'un role, a cote des vrais. Le commentaire de l'entrypoint annoncait `roles -> PROV_ROLES`, et
+  # c'est ce qui m'a fait prendre la mauvaise porte : il est corrige la-bas.
+  #
+  # `.roles` porte les comptes du catalogue, `.system_roles` ceux du substrat partage. Le canon ne
+  # connait pas cette coupure — il connait des comptes — donc on recolle ici, comme le fait deja le
+  # verrou d'egalite des listes.
+  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
     for root in "$PROV_CATALOGUES_DIR"/*/; do
       [[ -f "${root}catalogue.yaml" ]] || continue
       # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
       # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
-      out="$out $("$entry" roles "${root%/}" 2>/dev/null | tr '\n' ' ' || true)"
+      out="$out $("$entry" roles-tfvars "${root%/}" 2>/dev/null \
+                  | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     done
   fi
 

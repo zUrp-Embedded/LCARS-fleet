@@ -107,7 +107,7 @@ defmodule Fleet.Application.CatalogueDeposits do
     with {:ok, %{content: yaml}} <-
            files_mod.get_file(full, @manifest, Keyword.put(opts, :ref, branch)),
          {:ok, name} <- manifest_name(yaml),
-         {:ok, sha} <- repo_mod.branch_sha(full, branch, opts) do
+         {:ok, sha} <- repo_mod.branch_head(full, branch, opts) do
       [%{name: name, repo: full, owner: owner_of(full), branch: branch, sha: sha}]
     else
       # Not a catalogue. The overwhelmingly common case, and silent by design: every project repo

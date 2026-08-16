@@ -49,8 +49,15 @@ fi
 # creer avant que ce catalogue puisse travailler. Meme porte outil que `verify` ci-dessus (meme
 # eval, meme nobody, meme LCARS_TOOL_EVAL), et pour la meme raison : la question se pose a un
 # script de provisionnement, qui se tient DEHORS d'une fleet vivante.
-#   roles        un nom par ligne          -> PROV_ROLES (le mint des tokens)
+#   roles        un nom de ROLE par ligne  -> lecture humaine, inventaire d'un catalogue
 #   roles-tfvars le JSON des quatre listes -> roles.auto.tfvars.json (les comptes, cote tofu)
+#                                             ET la derivation de PROV_ROLES (`prov_roles`)
+#
+# ⚠ LES DEUX NE RENDENT PAS LA MEME CHOSE, et cette ligne a affirme le contraire jusqu'au
+# 2026-08-16 : elle donnait `roles` comme la source de `PROV_ROLES`. `roles` rend des noms de ROLE
+# (`dev`, `writer`) ; `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`). Branchee dessus, la
+# derivation faisait entrer `dev` et `writer` dans le roster a minter — des comptes forge portant le
+# nom nu d'un role, a cote des vrais. Le compte est `<org>_<role>`, et seul `roles-tfvars` le sait.
 # Le motif va sur stderr : capturer stdout sur un echec doit rendre la chaine VIDE, jamais un
 # message d'erreur qu'on creerait ensuite comme compte forge.
 if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then

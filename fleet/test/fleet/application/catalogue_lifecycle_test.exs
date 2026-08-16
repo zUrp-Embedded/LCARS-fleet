@@ -11,11 +11,25 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       end
     end
 
-    def branch_sha(full, branch, opts) do
+    def branch_head(full, branch, opts) do
+      with {:ok, %{sha: sha}} <- branch_commit(full, branch, opts), do: {:ok, sha}
+    end
+
+    # LE MESSAGE FAIT PARTIE DE LA REPONSE, et la doublure le porte : c'est lui qui dit quelle
+    # source le store projette. Une doublure qui ne rendrait que le sha ferait passer tous les
+    # temoins d'`updatable` sur une comparaison que le vrai code ne fait plus.
+    def branch_commit(full, branch, opts) do
       case Keyword.get(opts, :shas, %{}) |> Map.fetch({full, branch}) do
-        {:ok, :unreadable} -> {:error, {:http, 500, "boom"}}
-        {:ok, sha} -> {:ok, sha}
-        :error -> {:error, :not_found}
+        {:ok, :unreadable} ->
+          {:error, {:http, 500, "boom"}}
+
+        {:ok, sha} ->
+          src = Keyword.get(opts, :sources, %{}) |> Map.get(full)
+          msg = if src, do: "projection\n\nSource-Commit: #{src}", else: "projection"
+          {:ok, %{sha: sha, message: msg}}
+
+        :error ->
+          {:error, :not_found}
       end
     end
   end
@@ -42,45 +56,76 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     }
   end
 
-  defp states(repos, manifests \\ %{}, shas \\ %{}) do
+  defp states(repos, manifests \\ %{}, shas \\ %{}, sources \\ %{}) do
     CatalogueLifecycle.states(
       forge_repo: FakeRepo,
       forge_files: FakeFiles,
       repos: repos,
       manifests: manifests,
-      shas: shas
+      shas: shas,
+      sources: sources
     )
   end
 
   test "un depot SANS store est AVAILABLE — deposer n'installe pas" do
     assert {:ok, s} =
              states([repo("alice/web")], %{"alice/web" => "name: web\n"}, %{
-               {"alice/web", "main"} => "d1"
+               {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"
              })
 
     assert %{state: :available, updatable?: nil, store: nil} = s["web"]
   end
 
-  test "store + depot au MEME sha : installe, et PAS updatable" do
+  test "le store PROJETTE le depot courant : installe, et PAS updatable" do
+    # ⚠ LES DEUX SHA DE COMMIT SONT DIFFERENTS ICI, ET C'EST LE POINT. Le store est un commit FRAIS
+    # qui reflete l'arbre du depot ; deux commits de contenu identique ne partagent jamais de sha.
+    # La premiere version comparait ces deux tetes et repondait donc « updatable » TOUJOURS —
+    # mesure sur banc du 2026-08-16, `web-demo` installe trente secondes plus tot s'affichait
+    # « MAJ DISPO ». Ce qui les relie est le trailer que la projection porte.
     assert {:ok, s} =
              states(
                [repo("alice/web"), repo("web/catalogue")],
                %{"alice/web" => "name: web\n"},
-               %{{"alice/web", "main"} => "meme", {"web/catalogue", "main"} => "meme"}
+               %{
+                 {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+               },
+               %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
              )
 
     assert %{state: :installed, updatable?: false} = s["web"]
   end
 
-  test "store + depot au sha DIFFERENT : installe ET updatable" do
+  test "le depot a BOUGE depuis la projection : installe ET updatable" do
     assert {:ok, s} =
              states(
                [repo("alice/web"), repo("web/catalogue")],
                %{"alice/web" => "name: web\n"},
-               %{{"alice/web", "main"} => "neuf", {"web/catalogue", "main"} => "vieux"}
+               %{
+                 {"alice/web", "main"} => "e2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+               },
+               %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
              )
 
     assert %{state: :installed, updatable?: true} = s["web"]
+  end
+
+  test "un store SANS trailer de source : installe, fraicheur INCONNUE — jamais `false`" do
+    # Un store pousse par une version anterieure du geste. On ne peut pas comparer, donc on ne dit
+    # pas « a jour » : ce serait annoncer frais un catalogue dont on ignore l'etat.
+    assert {:ok, s} =
+             states(
+               [repo("alice/web"), repo("web/catalogue")],
+               %{"alice/web" => "name: web\n"},
+               %{
+                 {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+               }
+             )
+
+    assert %{state: :installed, updatable?: nil} = s["web"]
+    refute s["web"].updatable? == false
   end
 
   test "store SANS depot : installe, et la fraicheur est INCONNUE — jamais `false`" do
@@ -138,7 +183,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       # la forge elle-meme, pas un second rendu du meme fait.
       assert {:ok, s} =
                states([repo("bob/mob")], %{"bob/mob" => "name: mobile\n"}, %{
-                 {"bob/mob", "main"} => "d1"
+                 {"bob/mob", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"
                })
 
       assert "AVAILABLE mobile bob/mob" in CatalogueLifecycle.lines(s)
@@ -152,7 +197,11 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
                states(
                  [repo("alice/web"), repo("web/catalogue")],
                  %{"alice/web" => "name: web\n"},
-                 %{{"alice/web", "main"} => "meme", {"web/catalogue", "main"} => "meme"}
+                 %{
+                   {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                   {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                 },
+                 %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
                )
 
       assert "INSTALLED web -" in CatalogueLifecycle.lines(s)
@@ -164,10 +213,62 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
                states(
                  [repo("alice/web"), repo("web/catalogue")],
                  %{"alice/web" => "name: web\n"},
-                 %{{"alice/web", "main"} => "neuf", {"web/catalogue", "main"} => "vieux"}
+                 %{
+                   {"alice/web", "main"} => "e2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                   {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                 },
+                 %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
                )
 
       assert "UPDATABLE web alice/web" in CatalogueLifecycle.lines(s)
+    end
+  end
+
+  describe "les portes eval — ce que les doublures ne pouvaient pas voir" do
+    test "les fonctions que les DOUBLURES remplacent existent sur le vrai module" do
+      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A EU LIEU LE 2026-08-16 : `branch_sha/3` a ete
+      # supprime de `Fleet.Forge.Client.Repo` (c'etait un doublon de `branch_head/3`, ajoute sans
+      # avoir cherche s'il existait deja). Le compilateur n'a rien dit — l'appel passe par une
+      # VARIABLE (`repo_mod.branch_sha(...)`), donc il est invisible a l'analyse — et toute la
+      # suite restait verte, parce que les doublures, elles, definissaient encore le nom.
+      #
+      # Une doublure ne prouve rien sur le module qu'elle remplace. Celui-ci le verifie.
+      for {m, f, a} <- [
+            {Fleet.Forge.Client.Repo, :search_repos, 1},
+            {Fleet.Forge.Client.Repo, :branch_head, 3},
+            {Fleet.Forge.Client.Repo, :branch_commit, 3},
+            {Fleet.Forge.Client.Files, :get_file, 3}
+          ] do
+        Code.ensure_loaded!(m)
+
+        assert function_exported?(m, f, a),
+               "#{inspect(m)}.#{f}/#{a} n'existe plus — les doublures d'ici le cachent"
+      end
+    end
+
+    test "les deux portes demarrent le transport avant d'appeler la forge" do
+      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE MESURE SUR BANC LE 2026-08-16 :
+      # `lcars catalogue list` rendait `** (ArgumentError) unknown registry: Fleet.Forge.Finch`
+      # sous la ligne « la forge n'a pas repondu ». Une porte `eval` saute le corps de config de
+      # deploiement (c'est le but de `LCARS_TOOL_EVAL`), donc l'app n'est pas demarree et le pool
+      # Finch de `Fleet.Forge` n'existe pas.
+      #
+      # AUCUN TEMOIN NE POUVAIT L'ATTRAPER : tous ceux d'au-dessus injectent `forge_repo` et
+      # `forge_files`, donc le chemin qui a besoin du pool n'etait pris par personne. Celui-ci lit
+      # la SOURCE et exige l'appel — la seule facon de tenir un demarrage depuis un test qui tourne
+      # deja dans une VM ou tout est demarre.
+      src = File.read!("lib/fleet/application/catalogue_lifecycle.ex")
+
+      assert src =~ "defp with_transport",
+             "le demarrage du transport a disparu — les portes eval rendront une ArgumentError"
+
+      for porte <- ["def eval_main do", "def eval_source(name) when is_binary(name) do"] do
+        [_, corps] = String.split(src, porte, parts: 2)
+        entete = String.slice(corps, 0, 200)
+
+        assert entete =~ "with_transport",
+               "#{porte} appelle la forge sans demarrer le transport"
+      end
     end
   end
 end

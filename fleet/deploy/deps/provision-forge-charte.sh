@@ -244,7 +244,19 @@ for entry in "${ENTRIES[@]}"; do
   # de la recette. Les deux formes coexistent parce que les deux sources coexistent, l'une tenue a
   # la main et l'autre derivee.
   file="${entry#*:}"
-  [[ "$file" == /* ]] || file="$AVATARS_DIR/$file"
+  # UN NOM SE RESOUT DANS `--avatars-dir` ; UN CHEMIN NE SE RESOUT PAS. Le discriminant est le `/`,
+  # pas le `/` INITIAL — et cette nuance a coute une passe complete au banc du 2026-08-16. La
+  # recette passe `--catalogue-avatars ${path.module}/catalogue-avatars`, et `path.module` vaut `.`
+  # dans le dossier du module : les entrees derivees portaient donc `./catalogue-avatars/dev.png`,
+  # un chemin RELATIF, re-prefixe en `<avatars-dir>/./catalogue-avatars/dev.png` — introuvable, et
+  # quatre comptes declares en echec pour une raison qui ne les concernait pas.
+  #
+  # La table tenue a la main ne porte que des NOMS de fichier (`dev.png`), sans separateur. Toute
+  # entree derivee porte un chemin. Le test tient les deux sans avoir a savoir laquelle est laquelle.
+  case "${entry#*:}" in
+    */*) file="${entry#*:}" ;;
+    *) file="$AVATARS_DIR/${entry#*:}" ;;
+  esac
 
   if ! account_exists "$account"; then
     echo "IGNORE $account — compte absent de cette forge (autre catalogue metier) : rien a poser"

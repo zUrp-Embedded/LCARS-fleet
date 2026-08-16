@@ -271,6 +271,42 @@ FAKE
 setup_install() {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  printf 'SYS\n' > "$PRIV/system.gitea_token"
+}
+
+@test "install: la LECTURE de la source va sous le jeton SYSTEME, jamais le master" {
+  # ⚠ MESURE SUR BANC, 2026-08-16 : l'install mourait sur
+  # `UNREACHABLE {:config, {:token_file, …, :eacces}}`. La porte `catalogue-source` tourne en
+  # `nobody:fleet` parce que c'est une lecture ; le jeton master est `0600 root`, donc illisible
+  # pour elle. Le refus de permission ressortait en « pas de source installable » — le mauvais
+  # diagnostic pour le mauvais probleme, sur le geste central du chantier.
+  setup_install
+  cat > "$BIN/entrypoint" <<FAKE
+#!/usr/bin/env bash
+printf '%s TOKFILE=%s\n' "\$*" "\${FORGE_TOKEN_FILE:-}" >> "$ENTRY_LOG"
+case "\$1" in
+  catalogue-source) echo "alice/cat main deadbeef" ;;
+  roles-tfvars)     echo '{"org":"cat","roles":["cat_dev"]}' ;;
+esac
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  grep -q "catalogue-source cat TOKFILE=$PRIV/system.gitea_token" "$ENTRY_LOG"
+  ! grep -q "catalogue-source .*forge-master.token" "$ENTRY_LOG"
+}
+
+@test "install: sans jeton systeme, il REFUSE en le NOMMANT (pas un echec de lecture opaque)" {
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  rm -f "$PRIV/system.gitea_token"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"system.gitea_token"* ]]
+  [[ "$output" == *"provision apply"* ]]
+  [ ! -s "$ENTRY_LOG" ]
 }
 
 @test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
@@ -326,7 +362,25 @@ setup_install() {
   [[ "$output" == *"materiel pose"* ]]
 }
 
-@test "install: materiel local en echec — la forge GARDE l'installation, et on le DIT" {
+@test "install: le modele de projet est synchronise APRES le materiel, jamais avant" {
+  # ⚠ MESURE SUR BANC, 2026-08-16. `TemplateSync` decide `<name>/project-template` ou le repli en
+  # LISANT le materiel local. Joue avant que le materiel soit pose, il ne trouvait rien et repliait
+  # TOUJOURS : l'install de `web-demo` annoncait « fleet/project-template synced » pour un
+  # catalogue qui livre treize fichiers a lui. Un repli correct au sens du code, faux au sens du
+  # fait — et invisible, puisqu'il s'annonce comme un succes.
+  setup_install
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+
+  # L'ORDRE, LU DANS LA TRACE : le clone du materiel precede l'appel `template-sync`.
+  clone_line="$(grep -n 'clone .*cat/catalogue.git' "$GIT_LOG" | tail -1 | cut -d: -f1)"
+  [ -n "$clone_line" ]
+  grep -q 'template-sync cat' "$ENTRY_LOG"
+  # Le materiel est la AVANT que la porte soit appelee — sinon la porte replierait.
+  [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
+}
+
+@test "install: materiel local en echec — ni modele pose, ni promesse de l'avoir fait" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
   # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
   setup_install
@@ -338,6 +392,50 @@ setup_install() {
   [[ "$output" == *"INSTALLE sur la forge"* ]]
   [[ "$output" == *"redemarrage"* ]]
   grep -q 'push .*cat/catalogue' "$GIT_LOG"
+  # SANS MATERIEL, PAS DE SYNCHRO DE MODELE : la porte replierait, et son message de succes
+  # annoncerait un modele pose pour un catalogue dont on ne sait rien.
+  ! grep -q 'template-sync' "$ENTRY_LOG"
+  [[ "$output" == *"modele de reference"* ]]
+}
+
+@test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {
+  # ⚠ MESURE SUR BANC, 2026-08-16. `apply` joue la recette DANS `$RECIPE_DIR` et y laisse le
+  # `terraform.tfstate` du catalogue de reference ; le `cp -r` de l'install l'emportait — 26 Ko
+  # d'etat de `fleet` recopies a l'identique dans la recette de `web-demo`.
+  #
+  # LE DANGER N'EST PAS L'ERREUR QU'ON A VUE (`user not found with id 12`), C'EST CELLE QU'ON N'A
+  # PAS VUE : un etat portant les comptes de `fleet`, applique avec les variables de `web-demo`,
+  # decrit ces comptes comme « plus dans la configuration ». Le plan suivant les DETRUIT.
+  setup_install
+  printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
+  printf 'backup\n' > "$RECIPE/terraform.tfstate.backup"
+  mkdir -p "$RECIPE/.terraform" "$RECIPE/instance/.terraform"
+  printf 'etat instance\n' > "$RECIPE/instance/terraform.tfstate"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate" ]
+  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate.backup" ]
+  [ ! -e "$LCARS_CATALOGUE_WORK/cat/.terraform" ]
+  [ ! -e "$LCARS_CATALOGUE_WORK/cat/instance/terraform.tfstate" ]
+  # TEMOIN DE NON-VACUITE : la recette ELLE-MEME est bien arrivee.
+  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+}
+
+@test "install: l'etat DE CE CATALOGUE-CI survit au rejeu — sinon tout se re-importe a chaque fois" {
+  # La symetrique du temoin ci-dessus, et sans elle le remede tuait ce qu'il protegeait : `cp -r`
+  # ecrase l'etat de `web-demo` avec celui de `fleet`, et le nettoyage effacait alors les deux. Le
+  # rejeu repartait de zero — ca converge, l'etat est jetable par construction, mais ca ne tient pas
+  # la promesse affichee par la CLI : « rien n'a bouge -> il ne touche rien ».
+  setup_install
+  printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
+  mkdir -p "$LCARS_CATALOGUE_WORK/cat"
+  printf 'ETAT-DE-CAT\n' > "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  run cat "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+  [ "$output" = "ETAT-DE-CAT" ]
 }
 
 @test "install: UN DOSSIER DE RECETTE PAR CATALOGUE — le roster n'ecrase pas celui d'un autre" {

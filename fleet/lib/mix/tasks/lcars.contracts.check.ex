@@ -105,6 +105,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_verifier_covers_rail(root),
         check_capabilities_exercisable(root),
         check_catalogue_paths_locked(root),
+        check_eval_doors_start_transport(root),
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
@@ -2629,6 +2630,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end)
     |> List.flatten()
     |> MapSet.new()
+  end
+
+  # ── An `eval` door that reaches the forge must START its transport ───────
+  # `LCARS_TOOL_EVAL=1` skips the whole deployment-config body of `config/runtime.exs` — that is
+  # what the flag is FOR — so a release `eval` LOADS the app without STARTING it. `Fleet.Forge`'s
+  # Finch pool is supervised by the app, so it does not exist, and the first forge call dies on
+  # `** (ArgumentError) unknown registry: Fleet.Forge.Finch`.
+  #
+  # ⚠ THIS HAS NOW BEEN FOUND TWICE, ON TWO DIFFERENT DOORS, WITH THE SAME MESSAGE. `eval_migrate`
+  # carries the scar and its fix inline; `CatalogueLifecycle`'s two doors were written afterwards
+  # and reintroduced it, measured on a bench 2026-08-16 — `lcars catalogue list` printed the
+  # ArgumentError under its own "the forge did not answer" line, i.e. a network diagnostic for a
+  # startup failure. Unit tests cannot catch it: they inject forge doubles, so the path that needs
+  # the pool is taken by nobody.
+  #
+  # THE RULE IS FILE-LEVEL AND THAT IS DELIBERATE. Deciding per function whether a door "reaches"
+  # the forge means following calls across modules — fragile, and wrong the day an indirection is
+  # added. A file that defines an `eval` door AND names `Fleet.Forge` is a file whose door can
+  # reach the forge; it owes the start. The false positive (a door that names Forge without
+  # calling it) costs three lines; the false negative costs a bench session.
+  @doc false
+  def check_eval_doors_start_transport(root) do
+    files =
+      Path.wildcard(Path.join(root, "lib/**/*.ex"))
+      |> Enum.filter(fn f ->
+        src = File.read!(f)
+        src =~ ~r/^\s*def eval_/m and src =~ "Fleet.Forge"
+      end)
+
+    missing =
+      for f <- files,
+          src = File.read!(f),
+          not (src =~ "finch_spec"),
+          do: Path.relative_to(f, root)
+
+    %{
+      id: "eval_doors.transport_started",
+      remediation:
+        "start the Finch pool in the eval door (`Supervisor.start_link([Fleet.Forge.finch_spec()], " <>
+          "strategy: :one_for_one)`) — a release `eval` loads the app without starting it, so the " <>
+          "first forge call dies on `unknown registry: Fleet.Forge.Finch`, under whatever error " <>
+          "line the door prints for a forge that did not answer",
+      status: if(files != [] and missing == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          files == [] ->
+            ["INSTRUMENT BROKEN — no file defines an `eval` door AND names Fleet.Forge"]
+
+          true ->
+            Enum.sort(missing)
+        end,
+      note: "#{length(files)} forge-reaching `eval` door file(s), each starting its own transport"
+    }
   end
 
   # ── Catalogue install paths: ONE fact, THREE languages ───────────────────

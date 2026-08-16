@@ -289,8 +289,22 @@ cmd_install() {
 
   # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
   #    avec son code — on ne traduit pas, on relaie.
+  #    ⚠ PAS LE JETON MASTER, ET CE N'EST PAS UNE PREFERENCE. La porte tourne en `nobody:fleet`
+  #    (`setpriv --reuid 65534 --regid 2000`) parce que c'est une LECTURE ; le jeton master est
+  #    `0600 root`, donc illisible pour elle. Mesure sur banc du 2026-08-16 : l'install mourait sur
+  #    `UNREACHABLE {:config, {:token_file, …, :eacces}}` — un refus de permission presente comme
+  #    « pas de source installable », c'est-a-dire le mauvais diagnostic pour le mauvais probleme.
+  #
+  #    `system.gitea_token` est `0640 root:fleet`, donc lisible par la porte, et c'est l'identite
+  #    juste : `lcars-system` est le compte avec lequel la boite lit sa forge. Un depot de catalogue
+  #    est public par construction, donc ce jeton suffit — donner le site-admin a une lecture serait
+  #    lui accorder un pouvoir dont elle n'a aucun usage.
+  local sys_token="$PRIVATE_DIR/system.gitea_token"
+  [[ -r "$sys_token" ]] \
+    || die "install: $sys_token illisible — la boite n'a pas encore de jeton systeme (« provision apply » le minte)"
+
   local src rc=0
-  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$MASTER_TOKEN_FILE" \
+  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$sys_token" \
          "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$src" >&2
@@ -303,6 +317,15 @@ cmd_install() {
   # 2. Le materiel, clone dans un jetable. Le jeton voyage par l'ENVIRON de git (extraheader),
   #    jamais dans l'URL : `/proc/<pid>/cmdline` est lisible par tout le monde, `environ` non.
   local work; work="$(mktemp -d)"
+  # ⚠ `mktemp -d` REND 0700, ET LES PORTES QUI LISENT CE CLONE TOURNENT EN `nobody`. `verify` et
+  # `roles-tfvars` sont des LECTURES, donc jouees en `setpriv --reuid 65534` — elles ne peuvent pas
+  # traverser un repertoire que seul root ouvre. Mesure sur banc du 2026-08-16 : le verify rendait
+  # « root "/tmp/tmp.XXXX/src" is not a readable directory », c'est-a-dire un refus de catalogue
+  # pour un probleme de permission, sur un catalogue parfaitement valide.
+  #
+  # Rien de secret n'atterrit ici : le materiel d'un catalogue est public par construction, et le
+  # jeton voyage par l'ENVIRON de git, jamais dans le `.git/config` du clone.
+  chmod 0755 "$work"
   # shellcheck disable=SC2064 -- on veut la valeur d'ICI
   trap "rm -rf '$work'" EXIT
   GIT_TERMINAL_PROMPT=0 \
@@ -320,7 +343,42 @@ cmd_install() {
   # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
   local dir="$CATALOGUE_WORK/$name"
   mkdir -p "$dir"
+
+  # L'ETAT DE CE CATALOGUE-CI SURVIT A LA COPIE, celui du voisin non. `cp -r` ecraserait le premier
+  # avec le second : le dossier de recette de reference porte l'etat de `fleet`, et le copier par
+  # dessus celui de `web-demo` revient a jeter le sien A CHAQUE passe. Le rejeu re-importerait alors
+  # tout depuis zero — ca converge (l'etat est jetable par construction, chantier « tofu dedans »),
+  # mais ca ne tient pas la promesse que la CLI affiche : « rien n'a bouge -> il ne touche rien ».
+  local keep; keep="$(mktemp -d)"
+  for f in terraform.tfstate terraform.tfstate.backup; do
+    [[ -f "$dir/$f" ]] && cp "$dir/$f" "$keep/$f"
+  done
+
   cp -r "$RECIPE_DIR/." "$dir/"
+
+  # ⚠ L'ETAT DE TOFU NE SE COPIE PAS D'UN CATALOGUE A L'AUTRE, ET LA COPIE LE FAISAIT.
+  # `cmd_apply` joue la recette DANS `$RECIPE_DIR`, donc y laisse un `terraform.tfstate` — celui du
+  # catalogue de reference. Le `cp -r` ci-dessus l'emportait tel quel : mesure sur banc du
+  # 2026-08-16, 26 Ko d'etat de `fleet` recopies a l'identique dans la recette de `web-demo`, et
+  # l'apply partait en `Error: user not found with id 12` sur `gitea_user.role["fleet_engineer"]` —
+  # un compte qui n'est dans NI le roster ni le catalogue qu'on installe.
+  #
+  # LE DANGER N'EST PAS L'ERREUR, C'EST CE QUI SERAIT ARRIVE SANS ELLE : un etat portant les
+  # comptes de `fleet`, applique avec les variables de `web-demo`, decrit ces comptes comme « plus
+  # dans la configuration ». Le plan suivant les DETRUIT. Installer un catalogue aurait desinstalle
+  # le voisin.
+  #
+  # Partir d'un etat VIDE est le design, pas un pis-aller : la recette reconstruit ce qui existe
+  # par ses blocs `import` (chantier « deploy avec tofu dedans »), donc l'etat est jetable par
+  # construction. En apporter un etranger, c'est precisement lui mentir sur ce qu'il gouverne.
+  rm -rf "$dir/.terraform" "$dir/instance/.terraform"
+  rm -f "$dir"/terraform.tfstate* "$dir"/instance/terraform.tfstate*
+
+  # …puis on REND a ce catalogue le sien, s'il en avait un.
+  for f in terraform.tfstate terraform.tfstate.backup; do
+    [[ -f "$keep/$f" ]] && mv "$keep/$f" "$dir/$f"
+  done
+  rmdir "$keep" 2>/dev/null || true
   # LES AVATARS DU CATALOGUE, a cote de la recette qui va les poser. Ils vivent dans l'arbre du
   # catalogue (`<catalogue>/avatars/<role>.png`) et sont nommes par le ROLE : la recette n'a donc
   # aucune table a tenir pour un catalogue tiers, le compte se derive en `<org>_<role>`.
@@ -341,17 +399,7 @@ cmd_install() {
   # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
   #    sans sa source est un install interrompu, et aucune boite ne peut servir un catalogue dont le
   #    materiel n'est nulle part.
-  push_store "$name" "$work/src" "$tok"
-
-  # 6b. LE MODELE DE PROJET DU CATALOGUE. Sans lui, `Onboard` resout `<name>/project-template`,
-  #     ne le trouve pas, et retombe sur celui du catalogue de reference — un repli legitime, mais
-  #     qui ne devrait pas etre le sort d'un catalogue qui livre le sien. La porte ne pose rien
-  #     quand le catalogue n'en apporte pas : c'est l'absence du depot qui rend le repli visible.
-  local tf; tf="$(umask 077; mktemp)"
-  printf '%s\n' "$tok" > "$tf"
-  FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync "$name" \
-    || echo "forge-gestures: modele de projet de $name NON pose — ses projets partiront du modele de reference" >&2
-  rm -f "$tf"
+  push_store "$name" "$work/src" "$tok" "$sha"
 
   # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Il n'est pas l'installation — celle-ci est le depot
   #    `$name/catalogue` pousse juste au-dessus — et `45-catalogues` le reposerait de toute facon au
@@ -361,11 +409,32 @@ cmd_install() {
   #
   #    Un echec ici n'annule RIEN : la forge porte l'org et la source, l'installation a eu lieu. Le
   #    dire, et laisser le boot suivant rattraper, est plus honnete que de defaire ce qui est bon.
-  if install_material "$name" "$work/src"; then
+  local materiel=1
+  install_material "$name" "$work/src" && materiel=0
+
+  # 8. LE MODELE DE PROJET DU CATALOGUE, ET IL VIENT APRES LE MATERIEL — L'ORDRE EST LE POINT.
+  #    `TemplateSync` decide `<name>/project-template` ou le repli en LISANT le materiel local :
+  #    un catalogue dont l'arbre `project_template` est sur le disque a le sien. Joue avant l'etape
+  #    7, il ne trouvait rien et repliait TOUJOURS — mesure sur banc du 2026-08-16, l'install de
+  #    `web-demo` annoncait « fleet/project-template synced » alors que le catalogue livre treize
+  #    fichiers a lui. Le repli etait correct au sens du code, et faux au sens du fait.
+  #
+  #    Un echec ici n'annule rien : la forge porte l'org et la source. Il coute un repli sur le
+  #    modele de reference, ce qui est degrade et pas casse — et ca se dit.
+  if [[ "$materiel" -eq 0 ]]; then
+    local tf; tf="$(umask 077; mktemp)"
+    printf '%s\n' "$tok" > "$tf"
+    FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync "$name" \
+      || echo "forge-gestures: modele de projet de $name NON pose — ses projets partiront du modele de reference" >&2
+    rm -f "$tf"
+  fi
+
+  if [[ "$materiel" -eq 0 ]]; then
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/catalogue, materiel pose)"
   else
     echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
     echo "  la boite ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
+    echo "  son modele de projet n'est donc pas pose non plus : ses projets partiront du modele de reference" >&2
   fi
 }
 
@@ -386,8 +455,16 @@ install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite
 
 # Projection, pas fusion : la copie sur la forge REFLETE le depot, un commit frais a chaque fois.
 # L'historique du store n'est pas porteur — celui du depot l'est, et il reste chez son proprietaire.
-push_store() { # $1=catalogue  $2=arbre  $3=jeton
-  local name="$1" tree="$2" tok="$3"
+#
+# ⚠ LA PROJECTION PORTE SA SOURCE, ET SANS CA « updatable » EST TOUJOURS VRAI. Un commit frais ne
+# partage jamais son sha avec celui qu'il projette : comparer les deux tetes repond « commit
+# different », ce qui est vrai par construction. Mesure sur banc du 2026-08-16 : `web-demo`,
+# installe trente secondes plus tot, s'affichait « MAJ DISPO », et le seul geste offert etait de le
+# reinstaller pour rien. La forge ne donne pas de hash de CONTENU exploitable non plus (mesure sur
+# Gitea 1.26.1 : `/git/trees/{sha}` renvoie le sha qu'on lui passe). Le trailer est donc le lien, et
+# `Fleet.Forge.Client.Repo.branch_commit/3` est ce qui le relit.
+push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
+  local name="$1" tree="$2" tok="$3" src_sha="${4:-}"
   local url="${FORGE_BASE_URL%/}/${name}/catalogue.git"
 
   printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -403,6 +480,7 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton
     && git add -A \
     && git -c user.name=lcars-system -c user.email=lcars-system@lcars.local \
          commit -q -m "chore(catalogue): projection de $name depuis son depot" \
+                   -m "Source-Commit: $src_sha" \
     && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
        GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
        GIT_CONFIG_VALUE_0="Authorization: token $tok" \

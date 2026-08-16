@@ -44,8 +44,16 @@ resource "terraform_data" "charte" {
     join(",", sort([for u in gitea_user.role : u.username])),
     join(",", sort(var.system_roles)),
     var.system_account,
-    # L'ORG : changer de catalogue change les comptes a badger ET le dossier d'avatars lu.
-    var.org,
+    # L'ORG, PAR SA RESSOURCE ET NON PAR `var.org`, ET LA DIFFERENCE EST UNE ARETE DE GRAPHE.
+    # Les deux valeurs sont identiques — `gitea_org.fleet.name = var.org` — mais une VARIABLE ne
+    # cree aucune dependance, alors qu'un attribut de ressource en cree une. Avec `var.org`, la
+    # charte pouvait tourner AVANT que l'org existe : mesure sur banc du 2026-08-16,
+    # `FAIL org:web-demo — POST avatar -> HTTP 404` sur un apply par ailleurs reussi, l'org etant
+    # creee dans la meme passe, plus tard.
+    #
+    # Meme piege que `data "gitea_teams"` lu au PLAN avant l'existence de l'org : dans cette
+    # recette, tout ce qui nomme l'org sans passer par sa ressource est un ordre qu'on espere.
+    gitea_org.fleet.name,
   ]
 
   provisioner "local-exec" {

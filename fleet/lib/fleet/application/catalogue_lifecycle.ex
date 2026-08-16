@@ -100,7 +100,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   """
   @spec eval_main() :: no_return()
   def eval_main do
-    case states([]) do
+    case with_transport(fn -> states([]) end) do
       {:ok, entries} ->
         Enum.each(lines(entries), &IO.puts/1)
         System.halt(0)
@@ -115,6 +115,27 @@ defmodule Fleet.Application.CatalogueLifecycle do
       {:error, reason} ->
         IO.puts(:stderr, "UNREACHABLE #{inspect(reason)}")
         System.halt(2)
+    end
+  end
+
+  # ON NE COMPARE PAS DEUX SHA DE COMMIT DE PART ET D'AUTRE D'UNE PROJECTION, ET C'EST CE QUE FAISAIT
+  # LA PREMIERE VERSION. Le store est un commit FRAIS qui reflete l'arbre du depot : deux commits de
+  # contenu identique ne partagent jamais de sha, donc la comparaison repondait « commit different »,
+  # ce qui est toujours vrai. Mesure sur banc du 2026-08-16 : `web-demo`, installe trente secondes
+  # plus tot, sortait UPDATABLE — et le seul geste offert etait de le reinstaller pour rien.
+  #
+  # La projection porte donc SA SOURCE (`Source-Commit:`, ecrit par `push_store`), et c'est elle
+  # qu'on compare. Pas de trailer = `nil`, « on ne peut pas savoir » : un store pousse par une
+  # version anterieure du geste ne doit pas etre annonce a jour, ni updatable, sur une comparaison
+  # qu'on n'a pas pu faire.
+  @source_rx ~r/^Source-Commit:\s*([0-9a-f]{7,40})\s*$/m
+
+  defp updatable?(nil, _head), do: nil
+
+  defp updatable?(deposit, %{message: message}) do
+    case Regex.run(@source_rx, message || "") do
+      [_, source] -> not String.starts_with?(deposit.sha, source)
+      _ -> nil
     end
   end
 
@@ -151,7 +172,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # un prive aurait ete une annotation pour taire un outil. La forme a deux clauses dit la meme
   # chose sans rien annoter.
   def eval_source(name) when is_binary(name) do
-    case Fleet.Application.CatalogueDeposits.list([]) do
+    case with_transport(fn -> Fleet.Application.CatalogueDeposits.list([]) end) do
       {:ok, deposits} ->
         case Map.fetch(deposits, name) do
           {:ok, d} ->
@@ -173,6 +194,28 @@ defmodule Fleet.Application.CatalogueLifecycle do
       {:error, reason} ->
         IO.puts(:stderr, "UNREACHABLE #{inspect(reason)}")
         System.halt(1)
+    end
+  end
+
+  # LE TRANSPORT N'EST PAS DEMARRE SOUS `LCARS_TOOL_EVAL=1`, ET AUCUN TEMOIN NE POUVAIT LE VOIR.
+  # Une porte `eval` saute tout le corps de config de deploiement — c'est le but du drapeau — donc
+  # l'app n'est pas demarree et le pool Finch de `Fleet.Forge` n'existe pas. Les deux portes d'ici
+  # appellent la forge : mesure du 2026-08-16 sur banc, `lcars catalogue list` rendait
+  # `** (ArgumentError) unknown registry: Fleet.Forge.Finch` sous la ligne « la forge n'a pas
+  # repondu », c'est-a-dire un diagnostic de reseau pour une panne de demarrage.
+  #
+  # Les temoins ne pouvaient pas l'attraper parce qu'ils injectent des doublures de `forge_repo` et
+  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne. `TemplateSync` porte
+  # deja ce demarrage et dit pourquoi — c'est la meme raison, a la meme frontiere.
+  #
+  # `Application.ensure_all_started(:req)` puis le superviseur local : le pool est DECLARE par
+  # `Fleet.Forge.finch_spec/0`, sa propre autorite, jamais recompose ici.
+  defp with_transport(fun) do
+    with {:ok, _} <- Application.ensure_all_started(:req),
+         {:ok, _} <- Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one) do
+      fun.()
+    else
+      {:error, reason} -> {:error, {:transport, reason}}
     end
   end
 
@@ -207,14 +250,14 @@ defmodule Fleet.Application.CatalogueLifecycle do
     full = store["full_name"]
     branch = store["default_branch"] || "main"
 
-    case repo_mod.branch_sha(full, branch, opts) do
-      {:ok, sha} ->
+    case repo_mod.branch_commit(full, branch, opts) do
+      {:ok, head} ->
         %{
           name: name,
           state: :installed,
           # `nil` when there is nothing to compare against — cf. the moduledoc: not knowing is not
           # the same answer as being current.
-          updatable?: deposit && deposit.sha != sha,
+          updatable?: updatable?(deposit, head),
           deposit: deposit,
           store: full
         }

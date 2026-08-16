@@ -188,8 +188,12 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
   seed_local "web"
   cat > "$BATS_TEST_TMPDIR/bin/entrypoint" <<'SH'
 #!/usr/bin/env bash
-[[ "$1" == "roles" ]] || exit 1
-printf 'web_dev\nweb_writer\nfleet_engineer\n'
+# ⚠ LA PORTE EST `roles-tfvars`, PAS `roles`. La premiere rend des COMPTES (`web_dev`), la seconde
+# des noms de ROLE (`dev`) — et `PROV_ROLES` est une liste de comptes. La doublure REFUSE `roles`
+# pour que le temoin tombe si la derivation y revenait : mesure sur banc du 2026-08-16, branchee sur
+# `roles`, elle faisait entrer `dev` et `writer` dans le roster a minter.
+[[ "$1" == "roles-tfvars" ]] || exit 1
+printf '{"roles":["web_dev","web_writer","fleet_engineer"],"system_roles":["system_architect"]}\n'
 SH
   chmod +x "$BATS_TEST_TMPDIR/bin/entrypoint"
   : > "$BATS_TEST_TMPDIR/bin/release"; chmod +x "$BATS_TEST_TMPDIR/bin/release"

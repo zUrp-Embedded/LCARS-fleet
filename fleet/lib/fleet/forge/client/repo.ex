@@ -159,19 +159,47 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  The HEAD sha of a branch — what says whether a source has moved since it was installed.
+  The HEAD of a branch as `%{sha, message}` — the sha, plus what the commit SAYS about itself.
 
-  The sha and NOT a version declared in a manifest: a number written by hand is a second truth, and
-  it lies the day someone forgets to bump it. The tree either changed or it did not.
+  ## `branch_head/3` already answers the sha, and this does not replace it
+
+  It exists next to it because two callers ask two different questions of the same endpoint: the
+  seal wants the tip of a branch it is about to merge, this wants to know whether a catalogue's
+  source has moved. Merging them would make the seal carry a message it never reads.
+
+  ## Why the message is load-bearing here, and a sha alone is not
+
+  A catalogue's store (`<name>/catalogue`) is a PROJECTION of its deposit: a fresh single commit
+  reflecting the deposit's tree. Two commits of identical content therefore never share a sha, so
+  comparing the two HEADs answers "different commit", which is always true, rather than "the source
+  moved", which is the question. Measured on a bench 2026-08-16: a catalogue installed thirty
+  seconds earlier reported UPDATABLE.
+
+  Nor does the forge hand out a content hash to compare instead. Gitea's `/git/trees/{sha}` echoes
+  back the sha it was given rather than resolving the tree object, and `/git/commits/{sha}` reports
+  `commit.tree.sha` equal to the commit sha — both measured on 1.26.1.
+
+  So the projection CARRIES what it projects: `push_store` writes a `Source-Commit:` trailer, and
+  this is what reads it back. Coupling to a message format is a real cost, and it is bounded — the
+  message is ours, written by our gesture, read by our code, and a missing trailer answers "unknown"
+  rather than "current".
   """
-  @spec branch_sha(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
-  def branch_sha(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+  @spec branch_commit(String.t(), String.t(), Keyword.t()) ::
+          {:ok, %{sha: String.t(), message: String.t()}} | {:error, term()}
+  def branch_commit(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
     with {:ok, config} <- resolve_config(opts) do
       case http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
-        {:ok, %{"commit" => %{"id" => sha}}} when is_binary(sha) -> {:ok, sha}
-        {:ok, _} -> {:error, :no_branch_sha}
-        {:error, {:http, 404, _}} -> {:error, :not_found}
-        {:error, _} = err -> err
+        {:ok, %{"commit" => %{"id" => sha} = c}} when is_binary(sha) ->
+          {:ok, %{sha: sha, message: Map.get(c, "message", "")}}
+
+        {:ok, _} ->
+          {:error, :no_branch_sha}
+
+        {:error, {:http, 404, _}} ->
+          {:error, :not_found}
+
+        {:error, _} = err ->
+          err
       end
     end
   end

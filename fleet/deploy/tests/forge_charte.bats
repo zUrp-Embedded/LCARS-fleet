@@ -195,6 +195,28 @@ FAKE
   [[ "$output" != *"rien-ici"* ]]
 }
 
+@test "catalogue: un chemin RELATIF non plus — le discriminant est le `/`, pas le `/` INITIAL" {
+  # ⚠ MESURE SUR BANC, 2026-08-16, ET LE TEMOIN D'A COTE NE L'ATTRAPAIT PAS. La recette passe
+  # `--catalogue-avatars ${path.module}/catalogue-avatars`, et `path.module` vaut `.` dans le
+  # dossier du module : les entrees derivees portaient `./catalogue-avatars/dev.png`, donc un
+  # chemin RELATIF. Il etait re-prefixe en `<avatars-dir>/./catalogue-avatars/dev.png`, et QUATRE
+  # comptes du catalogue sont sortis en echec pour une raison qui ne les concernait pas.
+  #
+  # Le temoin voisin ne testait que la forme ABSOLUE — la seule a laquelle j'avais pense en
+  # ecrivant le code, donc la seule que le code traitait.
+  cd "$BATS_TEST_TMPDIR"
+  mkdir -p rel-avatars
+  : > rel-avatars/dev.png
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars ./rel-avatars
+  [ "$status" -eq 0 ]
+  # Ni re-prefixe, ni declare introuvable.
+  [[ "$output" != *"asset introuvable"* ]]
+  run grep -c "$AVATARS/./rel-avatars" "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "catalogue: le chemin ABSOLU d'un avatar de catalogue n'est pas re-prefixe" {
   # Les entrees de la table portent un NOM DE FICHIER, resolu dans `--avatars-dir` ; celles d'un
   # catalogue portent un chemin ABSOLU, parce qu'elles vivent dans l'arbre du catalogue. Les
