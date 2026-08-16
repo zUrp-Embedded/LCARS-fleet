@@ -102,6 +102,64 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
+  @doc """
+  `eval` door for `catalogue install` — resolves ONE name to the deposit that carries it.
+
+  Prints `<repo> <branch> <sha>` on stdout, and nothing else: the caller feeds it to `git clone`,
+  so a line of politeness would become part of a URL.
+
+  The three refusals it owes the caller, each with its own exit code, because they call for three
+  different gestures:
+
+    * `2` — nobody deposited that name. Push it to your own space on the forge first.
+    * `3` — TWO deposits claim it. ⚖ user: we do not guess. Both owners are named; they settle it.
+    * `4` — it is already the STORE of an installed catalogue, not a deposit. Nothing to install
+      from itself.
+
+  `#{"fleet"}` is refused too, and not because it is precious: it ships INSIDE the release, so
+  there is no deposit to install from and no version to move to. Installing it would be a gesture
+  with no object.
+  """
+  @spec eval_source(String.t()) :: no_return()
+  def eval_source(@bundled) do
+    IO.puts(
+      :stderr,
+      "BUNDLED #{@bundled} — carried by the release, there is nothing to install from"
+    )
+
+    System.halt(4)
+  end
+
+  # ⚠ DEUX CLAUSES, PAS UN `cond` AVEC UN HELPER PRIVE. Dialyzer refusait le second : toutes ses
+  # branches appellent `System.halt`, donc il n'a pas de retour local, et un `@spec no_return()` sur
+  # un prive aurait ete une annotation pour taire un outil. La forme a deux clauses dit la meme
+  # chose sans rien annoter.
+  def eval_source(name) when is_binary(name) do
+    case Fleet.Application.CatalogueDeposits.list([]) do
+      {:ok, deposits} ->
+        case Map.fetch(deposits, name) do
+          {:ok, d} ->
+            IO.puts("#{d.repo} #{d.branch} #{d.sha}")
+            System.halt(0)
+
+          :error ->
+            IO.puts(:stderr, "ABSENT #{name} — no visible deposit declares this catalogue")
+            System.halt(2)
+        end
+
+      {:error, {:duplicate_catalogues, dups}} ->
+        Enum.each(dups, fn {n, repos} ->
+          IO.puts(:stderr, "DUPLICATE #{n} #{Enum.join(Enum.sort(repos), " ")}")
+        end)
+
+        System.halt(3)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "UNREACHABLE #{inspect(reason)}")
+        System.halt(1)
+    end
+  end
+
   defp line(name, %{state: :installed, updatable?: true, deposit: d}),
     do: "UPDATABLE #{name} #{d.repo}"
 

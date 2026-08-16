@@ -63,6 +63,22 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(\"${root}\")"
 fi
 
+# `catalogue-source <nom>` : resout UN nom vers le depot qui le porte, et n'imprime que
+# `<repo> <branche> <sha>`. Le geste d'install le donne a `git clone`, donc une ligne de politesse
+# deviendrait un morceau d'URL.
+#
+# Meme porte `nobody` que `roles` : c'est une LECTURE. Les codes de sortie distinguent trois refus
+# qui appellent trois gestes differents — 2 personne n'a depose, 3 deux depots revendiquent le meme
+# nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
+if [[ "${1:-}" == "catalogue-source" ]]; then
+  name="${2:?catalogue-source: nom de catalogue requis}"
+  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+    FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
+fi
+
 # `template-sync` : POSE le depot modele que `create_project` genere. Meme porte outil que `roles`
 # et `verify`, et pour la meme raison — la question se pose a un script de provisionnement, dehors
 # d'une fleet vivante.

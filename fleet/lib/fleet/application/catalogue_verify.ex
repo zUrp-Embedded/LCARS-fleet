@@ -122,6 +122,12 @@ defmodule Fleet.Application.CatalogueVerify do
           {"canon spawn-proof", fn -> Fleet.Spawner.prove_canon!() end},
           {"cards + structural roles",
            fn -> Fleet.Pilot.Application.verify_cards_and_roles!() end},
+          # L'ARETE ENTRE LES DEUX IMAGES : chaque carte nomme-t-elle des roles qui existent ?
+          # Elle est jouee au boot, et elle DOIT l'etre ici — `catalogue install` appelle cette
+          # porte avant de toucher la forge, et une porte qui ne couvre pas le boot rendrait un vert
+          # suivi d'un boot rouge. C'est le defaut que ce fichier a deja paye une fois (6-008,
+          # « cinq gardes au boot, quatre ici »).
+          {"cards -> roles", fn -> Fleet.Workflow.CardRoles.verify!(root) end},
           {"business catalogue advice", fn -> advise_business!(root) end},
           {"escalation policies", fn -> Fleet.Coord.init_policies!() end}
         ]

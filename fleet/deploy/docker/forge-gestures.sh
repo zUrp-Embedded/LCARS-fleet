@@ -27,11 +27,16 @@
 #   config-seed    lit le seed sur STDIN et le pose en 0600 root (handoff tofu -> mint A4).
 #   apply          joue la recette : module instance/, module catalogue, puis le depot modele.
 #                  Ne prend RIEN — il lit ce que la boite detient. Un jeton sur STDIN l'emporte.
+#   install <nom>  installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte :
+#                  resolution du depot, clone, MEME verification que le boot, roster derive, recette
+#                  (org + comptes + teams), puis la source poussee dans <nom>/catalogue. Jamais
+#                  declenche par le boot.
 #   runner-token   minte un jeton d'ENREGISTREMENT de runner et l'imprime. Sortie unique, sur
 #                  stdout : c'est un credential a usage unique, il ne se pose nulle part.
 #
-# EXIT : 0 · 1 donnee manquante ou geste en echec · 2 la boite n'a pas de FORGE_BASE_URL
-#        3 le jeton ne s'authentifie pas
+# EXIT : 0 · 1 donnee manquante ou geste en echec · 2 la boite n'a pas de FORGE_BASE_URL (et, pour
+#        `install`, aucun depot ne porte ce nom) · 3 le jeton ne s'authentifie pas (et, pour
+#        `install`, DEUX depots revendiquent le nom) · 4 `install` d'un catalogue livre dans le release
 
 set -euo pipefail
 
@@ -42,7 +47,10 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
-TEMPLATE_SYNC="${LCARS_TEMPLATE_SYNC:-/opt/lcars/entrypoint.sh}"
+# L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
+# `catalogue-source`, `template-sync`). Il s'appelait `TEMPLATE_SYNC` quand il n'en servait
+# qu'une : un nom qui decrit un seul usage devient faux au deuxieme.
+ENTRYPOINT="${LCARS_ENTRYPOINT:-${LCARS_TEMPLATE_SYNC:-/opt/lcars/entrypoint.sh}}"
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
@@ -169,7 +177,7 @@ cmd_apply() {
   printf '%s\n' "$tok" > "$tf"
   # shellcheck disable=SC2064 -- on veut la valeur d'ICI, pas celle du moment du trap
   trap "rm -f '$tf'" EXIT
-  FORGE_TOKEN_FILE="$tf" "$TEMPLATE_SYNC" template-sync \
+  FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync \
     || echo "forge-gestures: depot modele NON pose — l'onboard degradera en bare-create (dit a chaque projet)" >&2
 }
 
@@ -194,10 +202,116 @@ cmd_runner_token() {
   printf '%s\n' "$reg"
 }
 
+# ─── INSTALLER UN CATALOGUE ─────────────────────────────────────────────────────────────────────
+# Un seul verbe, et il MET A JOUR quand le catalogue est deja la (⚖ user 2026-08-16). Rien n'existe
+# -> il cree ; la source a bouge -> il reconverge ; rien n'a bouge -> il ne touche rien. Jamais
+# declenche par le boot : une mise a jour automatique changerait le metier sous les pieds d'une
+# flotte qui tourne.
+#
+# LE GATE ADMIN N'EST PAS UN DRAPEAU QU'ON INVENTE. Installer exige de lire le jeton master
+# (0600 root) et d'ecrire l'etat de tofu : la capacite EST la permission. Un worker qui tente le
+# geste est refuse par le systeme de fichiers, pas par un booleen qu'on pourrait oublier de poser.
+#
+# ⚠ UN DOSSIER DE RECETTE PAR CATALOGUE. La recette lit `roles.auto.tfvars.json` dans son propre
+# dossier, et ce fichier porte l'org ET le roster : deux catalogues dans le meme dossier, c'est le
+# dernier installe qui decide de ce que le suivant applique. L'etat etant jetable (il se reconstruit
+# par import), un dossier par catalogue ne coute qu'une copie et supprime la question.
+CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
+
+cmd_install() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "install: nom de catalogue requis"
+  need_forge_url
+
+  local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
+  local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
+  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> ./docker.sh config »"
+
+  # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
+  #    avec son code — on ne traduit pas, on relaie.
+  local src rc=0
+  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$MASTER_TOKEN_FILE" \
+         "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    printf '%s\n' "$src" >&2
+    die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
+  fi
+  local repo branch sha
+  read -r repo branch sha <<< "$src"
+  echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
+
+  # 2. Le materiel, clone dans un jetable. Le jeton voyage par l'ENVIRON de git (extraheader),
+  #    jamais dans l'URL : `/proc/<pid>/cmdline` est lisible par tout le monde, `environ` non.
+  local work; work="$(mktemp -d)"
+  # shellcheck disable=SC2064 -- on veut la valeur d'ICI
+  trap "rm -rf '$work'" EXIT
+  GIT_TERMINAL_PROMPT=0 \
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
+  GIT_CONFIG_VALUE_0="Authorization: token $tok" \
+    git clone --quiet --depth 1 --branch "$branch" "${FORGE_BASE_URL%/}/${repo}.git" "$work/src" \
+    || die "install: clone de $repo impossible"
+
+  # 3. LE MEME CONTROLE QUE LE BOOT, avant de toucher la forge. Un catalogue incoherent refuse ici
+  #    coute un message ; installe, il coute un boot qui refuse ou un dispatch qui boucle, loin de
+  #    sa cause.
+  "$ENTRYPOINT" verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
+
+  # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
+  local dir="$CATALOGUE_WORK/$name"
+  mkdir -p "$dir"
+  cp -r "$RECIPE_DIR/." "$dir/"
+  "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
+    || die "install: roster non derive depuis $name"
+
+  # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une
+  #    reecriture — `var.org` porte le nom du catalogue depuis le premier jour.
+  export TF_VAR_gitea_url="$FORGE_BASE_URL" TF_VAR_gitea_token="$tok" TF_VAR_seed_password="$seed"
+  export TF_VAR_human_username="${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}"
+  export TF_VAR_human_email="${LCARS_HUMAN_EMAIL:-${TF_VAR_human_username}@lcars.local}"
+  ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
+    || die "install: apply de la structure de $name en echec"
+
+  # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
+  #    sans sa source est un install interrompu, et aucune boite ne peut servir un catalogue dont le
+  #    materiel n'est nulle part.
+  push_store "$name" "$work/src" "$tok"
+  echo "forge-gestures: $name installe (org, comptes, teams, et sa source dans $name/catalogue)"
+}
+
+# Projection, pas fusion : la copie sur la forge REFLETE le depot, un commit frais a chaque fois.
+# L'historique du store n'est pas porteur — celui du depot l'est, et il reste chez son proprietaire.
+push_store() { # $1=catalogue  $2=arbre  $3=jeton
+  local name="$1" tree="$2" tok="$3"
+  local url="${FORGE_BASE_URL%/}/${name}/catalogue.git"
+
+  printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
+      -d "{\"name\":\"catalogue\",\"private\":false,\"auto_init\":false}" \
+      "${FORGE_BASE_URL%/}/api/v1/orgs/${name}/repos" || true
+
+  local stage; stage="$(mktemp -d)"
+  cp -r "$tree/." "$stage/"
+  rm -rf "$stage/.git"
+  ( cd "$stage" \
+    && git init -q -b main \
+    && git add -A \
+    && git -c user.name=lcars-system -c user.email=lcars-system@lcars.local \
+         commit -q -m "chore(catalogue): projection de $name depuis son depot" \
+    && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
+       GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
+       GIT_CONFIG_VALUE_0="Authorization: token $tok" \
+       git push -q --force "$url" main ) \
+    || { rm -rf "$stage"; die "install: source NON poussee dans $name/catalogue — l'org est posee mais le catalogue n'est PAS installe"; }
+  rm -rf "$stage"
+}
+
 case "${1:-}" in
   config-token) cmd_config_token ;;
   config-seed)  cmd_config_seed ;;
   apply)        with_apply_lock cmd_apply ;;
+  install)      shift; with_apply_lock cmd_install "$@" ;;
   runner-token) cmd_runner_token ;;
-  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|runner-token)" >&2; exit 1 ;;
+  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token)" >&2; exit 1 ;;
 esac

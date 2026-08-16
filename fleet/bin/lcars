@@ -77,11 +77,17 @@ USAGE
   $PROG catalogue list
       Les catalogues installes, et lesquels sont ACTIFS, dans l'ordre de precedence.
 
-  $PROG catalogue install <source> [nom]
-      Installe un catalogue depuis un depot git, une archive tar.gz ou un dossier
-      local. Le NOM vient du catalogue (son « name: »), pas de la source ni de vous :
-      [nom] n'est qu'une assertion, et la pose echoue si le catalogue en dit un autre.
-      N'active RIEN : installe n'est pas actif.
+  $PROG catalogue install <nom>
+      Installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte.
+      ADMIN SEULEMENT : le geste lit le jeton master de la boite (0600 root).
+
+      La source arrive par la FORGE : un humain pousse son catalogue dans son espace
+      personnel depuis son disque, et n'importe qui peut le faire. L'installer est un
+      autre geste, et c'est celui-la qui est garde. Le NOM vient du manifeste du depot,
+      jamais du nom du depot ni de vous.
+
+      Rejouable : rien n'existe -> il cree ; la source a bouge -> il reconverge ; rien
+      n'a bouge -> il ne touche rien. JAMAIS declenche par le boot.
 
   $PROG catalogue verify <nom>
       Joue sur ce catalogue exactement les controles que le boot joue. Code de
@@ -495,52 +501,33 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # chose — mais il ne baptise plus rien. Avant, sans argument, le nom valait le basename de la
 # source : deux boites pouvaient donc heberger le meme catalogue sous deux noms, ce qui ne coutait
 # rien tant que le nom etait une poignee locale, et devient faux des qu'il adresse une org de forge.
+# ⚖ UN SEUL VERBE (user, 2026-08-16), et il MET A JOUR quand le catalogue est deja la. Il ne copie
+# plus de materiel localement : la source arrive par la FORGE — un humain pousse son catalogue dans
+# son espace personnel, un admin l'installe. Le materiel local devient un cache derive.
+#
+# LE GATE EST LA CAPACITE, PAS UN DRAPEAU. Installer exige de lire le jeton master (0600 root) et
+# d'ecrire l'etat de tofu : un worker est refuse par le systeme de fichiers, jamais par un booleen
+# qu'on pourrait oublier de poser. Cette commande NE LE CONTOURNE PAS — elle NOMME le geste quand
+# elle n'a pas le droit, au lieu d'echouer sur une permission qui n'apprend rien.
 cmd_catalogue_install() {
-  local src="${1:?catalogue install: source requise (depot git, archive tar.gz, ou dossier)}"
-  local claimed="${2:-}"
-  mkdir -p "$CAT_DIR"
-  local staging; staging="$(mktemp -d "$CAT_DIR/.install.XXXXXX")" \
-    || die "catalogue install: staging impossible dans $CAT_DIR"
+  local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
+  local gestures="${LCARS_FORGE_GESTURES:-/opt/lcars/forge-gestures.sh}"
 
-  case "$src" in
-    *.git|git@*|*://*.git)
-      command -v git >/dev/null || { rm -rf "$staging"; die "catalogue install: git introuvable"; }
-      rmdir "$staging"
-      git clone --depth 1 "$src" "$staging" >&2 || { rm -rf "$staging"; die "catalogue install: clone echoue"; }
-      rm -rf "$staging/.git"
-      ;;
-    http://*|https://*)
-      command -v curl >/dev/null || { rm -rf "$staging"; die "catalogue install: curl introuvable"; }
-      command -v tar  >/dev/null || { rm -rf "$staging"; die "catalogue install: tar introuvable"; }
-      curl -fsSL "$src" | tar -xz -C "$staging" --strip-components=1 \
-        || { rm -rf "$staging"; die "catalogue install: telechargement ou extraction echoue"; }
-      ;;
-    *)
-      [[ -d "$src" ]] || { rm -rf "$staging"; die "catalogue install: « $src » n'est ni un depot git, ni une URL, ni un dossier"; }
-      cp -r "$src/." "$staging/"
-      ;;
-  esac
+  [[ "$name" == "$CAT_BUNDLED" ]] \
+    && die "catalogue install: « $CAT_BUNDLED » est livre DANS le release — il n'y a pas de depot d'ou l'installer, et rien a mettre a jour"
 
-  local name
-  name="$(cat_declared_name "$staging")" || {
-    rm -rf "$staging"
-    die "catalogue install: la source ne declare pas de « name: » valide dans catalogue.yaml — un catalogue porte son nom, il ne le recoit pas de son dossier"
-  }
-  [[ -n "$claimed" && "$claimed" != "$name" ]] && { rm -rf "$staging"; die "catalogue install: la source se nomme « $name », pas « $claimed » — c'est le catalogue qui nomme"; }
-  [[ "$name" == "$CAT_BUNDLED" ]] && { rm -rf "$staging"; die "catalogue install: « $CAT_BUNDLED » est le nom du catalogue livre dans le release"; }
+  [[ -x "$gestures" ]] \
+    || die "catalogue install: gestes forge introuvables ($gestures) — cette commande ne s'execute que DANS la boite"
 
-  local dest="$CAT_DIR/$name"
-  [[ -e "$dest" ]] && { rm -rf "$staging"; die "catalogue install: $dest existe deja — « $PROG catalogue remove $name » d'abord"; }
-  mv "$staging" "$dest" || { rm -rf "$staging"; die "catalogue install: installation impossible dans $dest"; }
+  if [[ "$(id -u)" -ne 0 ]]; then
+    die "catalogue install: installer exige l'autorite de la boite (le jeton master est 0600 root).
+  Rejoue en root : « sudo $gestures install $name »
+  — et si tu n'as pas sudo ici, c'est la reponse : seul un admin installe un catalogue."
+  fi
 
-  echo "catalogue install: « $name » installe dans $dest — INACTIF" >&2
-  echo "  « $PROG catalogue verify $name » puis « $PROG catalogue enable $name »" >&2
+  "$gestures" install "$name"
 }
 
-# La migration vit au RUNTIME, pas ici : elle a besoin de la forge (transfert) ET des remotes locaux
-# (repointage), et ce CLI n'a aucun acces forge — lui en donner un ferait d'une commande locale un
-# acteur distant. Meme porte que `catalogue verify` : un `eval` sur la release, verdict au code de
-# sortie.
 cmd_project_migrate() {
   local repo="${1:?project migrate: depot requis (owner/nom)}"
   local cat="${2:?project migrate: catalogue forge requis}"

@@ -53,25 +53,53 @@ body="$(cat)"
 FAKE
   chmod +x "$BIN/jq"
 
-  # La porte du depot modele : une doublure qui journalise, pour prouver qu'elle est appelee APRES
-  # les deux applys et avec un FICHIER de jeton (jamais le jeton en argv).
-  TPL_LOG="$BATS_TEST_TMPDIR/tpl.log"
-  cat > "$BIN/tplsync" <<FAKE
-#!/usr/bin/env bash
-{ printf 'argv=%s\n' "\$*"; printf 'tokfile=%s\n' "\${FORGE_TOKEN_FILE:-}"; } >> "$TPL_LOG"
-exit "\$(cat "$BATS_TEST_TMPDIR/tpl.rc" 2>/dev/null || echo 0)"
-FAKE
-  chmod +x "$BIN/tplsync"
-
   export ARGV_LOG STDIN_LOG TOFU_LOG
   export PATH="$BIN:$PATH"
   export LCARS_PRIVATE_DIR="$PRIV"
   export LCARS_RECIPE_DIR="$RECIPE"
-  export LCARS_TEMPLATE_SYNC="$BIN/tplsync"
   export FORGE_BASE_URL="http://forge.test"
   # Le verrou d'apply vit dans le tmpdir du test : `/run/lock` n'est pas ecrivable par le temoin,
   # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
   export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
+  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu"
+
+  # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
+  TPL_LOG="$BATS_TEST_TMPDIR/tpl.log"
+  ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
+  cat > "$BIN/entrypoint" <<FAKE
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$ENTRY_LOG"
+case "\$1" in
+  catalogue-source)
+    rc="\$(cat "$BATS_TEST_TMPDIR/src.rc" 2>/dev/null || echo 0)"
+    [[ "\$rc" -eq 0 ]] || { echo "ABSENT \$2" >&2; exit "\$rc"; }
+    cat "$BATS_TEST_TMPDIR/src.out" 2>/dev/null || echo "alice/cat main deadbeef"
+    ;;
+  verify)       exit "\$(cat "$BATS_TEST_TMPDIR/verify.rc" 2>/dev/null || echo 0)" ;;
+  roles-tfvars) echo '{"org":"cat","roles":["cat_dev"]}' ;;
+  template-sync)
+    { printf 'argv=%s\n' "\$*"; printf 'tokfile=%s\n' "\${FORGE_TOKEN_FILE:-}"; } >> "$TPL_LOG"
+    exit "\$(cat "$BATS_TEST_TMPDIR/tpl.rc" 2>/dev/null || echo 0)"
+    ;;
+esac
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+  export LCARS_ENTRYPOINT="$BIN/entrypoint"
+  export ENTRY_LOG
+
+  # `git` double : il journalise, et ne touche pas au reseau.
+  GIT_LOG="$BATS_TEST_TMPDIR/git.log"
+  cat > "$BIN/git" <<FAKE
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$GIT_LOG"
+case "\$1" in
+  clone) d="\${@: -1}"; mkdir -p "\$d"; printf 'name: cat\n' > "\$d/catalogue.yaml" ;;
+esac
+exit 0
+FAKE
+  chmod +x "$BIN/git"
+  export GIT_LOG
 }
 
 @test "config-token: le jeton n'apparait JAMAIS dans argv" {
@@ -230,6 +258,88 @@ FAKE
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
   [ -s "$TOFU_LOG" ]
+}
+
+# ─── install ────────────────────────────────────────────────────────────────────────────────────
+
+setup_install() {
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+}
+
+@test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"docker.sh config"* ]]
+  [ ! -s "$ENTRY_LOG" ]
+}
+
+@test "install: un catalogue SANS depot remonte le refus de la porte, il ne le traduit pas" {
+  # Les codes de la porte distinguent trois refus qui appellent trois gestes differents. Les aplatir
+  # en « echec » perdrait l'information a l'endroit exact ou elle sert.
+  setup_install
+  echo 2 > "$BATS_TEST_TMPDIR/src.rc"
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ABSENT"* ]]
+  [ ! -s "$TOFU_LOG" ]
+}
+
+@test "install: un catalogue qui ne passe pas la VERIFICATION ne pose RIEN" {
+  # Le meme controle que le boot, joue AVANT la forge. Refuse ici, il coute un message ; installe,
+  # il coute un boot qui refuse ou un dispatch qui boucle, loin de sa cause.
+  setup_install
+  echo 1 > "$BATS_TEST_TMPDIR/verify.rc"
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ne passe pas la verification"* ]]
+  [ ! -s "$TOFU_LOG" ]
+  grep -q '^verify ' "$ENTRY_LOG"
+}
+
+@test "install: l'ordre est source -> verify -> roster -> tofu -> store" {
+  setup_install
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
+  [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
+  [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
+  grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
+  grep -q 'push .*cat/catalogue' "$GIT_LOG"
+}
+
+@test "install: UN DOSSIER DE RECETTE PAR CATALOGUE — le roster n'ecrase pas celui d'un autre" {
+  # La recette lit `roles.auto.tfvars.json` dans SON dossier, et ce fichier porte l'org ET le
+  # roster : deux catalogues dans un meme dossier, c'est le dernier installe qui decide de ce que
+  # le suivant applique.
+  setup_install
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+  [ ! -f "$RECIPE/roles.auto.tfvars.json" ]
+}
+
+@test "install: le jeton n'apparait JAMAIS dans l'argv de git" {
+  # `/proc/<pid>/cmdline` est lisible par tout le monde ; l'environ ne l'est que par le processus.
+  setup_install
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  run grep -c 'TOK' "$GIT_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "install: TEMOIN — le jeton EST fourni a git, par l'environnement" {
+  # Sans lui, un correctif qui supprimerait l'auth passerait le test ci-dessus.
+  setup_install
+  cat > "$BIN/git" <<FAKE
+#!/usr/bin/env bash
+printf '%s|%s\n' "\$*" "\${GIT_CONFIG_VALUE_0:-}" >> "$GIT_LOG"
+case "\$1" in clone) d="\${@: -1}"; mkdir -p "\$d";; esac
+exit 0
+FAKE
+  chmod +x "$BIN/git"
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  grep -q 'Authorization: token TOK' "$GIT_LOG"
 }
 
 @test "runner-token: imprime le jeton et RIEN d'autre sur stdout" {
