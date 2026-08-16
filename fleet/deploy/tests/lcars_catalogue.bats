@@ -90,6 +90,43 @@ FAKE
   [[ "$output" == *"Aucun des deux n'est choisi"* ]]
 }
 
+@test "list: la porte CHARGE fleet_v2.env — l'adresse forge ne vit que la (D3)" {
+  # ⚠ Mesure du 2026-08-11, payee une premiere fois par `project migrate` : l'environ d'un login
+  # humain ne porte AUCUN FORGE_*, et rien ne source ce fichier hors fleet_v2. Sans ce chargement,
+  # la porte rendait `{:config, {:missing, :base_url}}` sous « la forge n'a pas repondu » — une
+  # panne de config habillee en panne reseau, sur la commande qu'un operateur lit en premier.
+  bin="$BATS_TEST_TMPDIR/fake_env_release"
+  cat > "$bin" <<'FAKE'
+#!/usr/bin/env bash
+printf 'INSTALLED fleet -
+'
+printf 'ENV %s
+' "${FORGE_BASE_URL:-ABSENTE}" >> "${ENV_PROBE:?}"
+FAKE
+  chmod +x "$bin"
+
+  printf 'FORGE_BASE_URL=http://forge-du-fichier:3000
+' > "$BATS_TEST_TMPDIR/fleet_v2.env"
+
+  run env LCARS_FLEET_BIN="$bin" ENV_PROBE="$BATS_TEST_TMPDIR/env.probe"     LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/fleet_v2.env" "$SUT" catalogue list
+  [ "$status" -eq 0 ]
+  grep -q 'ENV http://forge-du-fichier:3000' "$BATS_TEST_TMPDIR/env.probe"
+}
+
+@test "list: SANS fichier env, la porte part quand meme — le fichier est un apport, pas un prerequis" {
+  # Une boite dont l'env est deja cable (le conteneur exporte FORGE_BASE_URL) n'a pas ce fichier
+  # sous ce HOME ; la porte ne doit pas refuser pour autant.
+  bin="$BATS_TEST_TMPDIR/fake_noenv_release"
+  printf '#!/usr/bin/env bash
+printf "INSTALLED fleet -\n"
+' > "$bin"
+  chmod +x "$bin"
+
+  run env LCARS_FLEET_BIN="$bin" LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/inexistant.env"     "$SUT" catalogue list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fleet"*"installe"* ]]
+}
+
 @test "les verbes d'ACTIVITE n'existent plus, et le refus enumere ce qui reste" {
   # ⚖ user, 2026-08-16 : UN SEUL VERBE. Un `enable` survivant ecrirait une declaration que plus
   # rien ne lit — la pire des sorties : code 0, message de succes, aucun effet.

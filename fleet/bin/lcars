@@ -277,6 +277,24 @@ cat_dir_of() {
 cat_states() {
   local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
   [[ -x "$bin" ]] || return 127
+
+  # ⚠ L'ADRESSE de la forge vient de `~/.lcars/fleet_v2.env`, et cette porte ne la chargeait pas —
+  # D3 de l'audit independant (2026-08-16). Mesure du 2026-08-11, deja payee par `project migrate` :
+  # l'environ d'un login humain ne porte AUCUN FORGE_*, rien ne source ce fichier hors fleet_v2.
+  # Sans lui, la porte rendait `{:config, {:missing, :base_url}}` — une liste inutilisable sur toute
+  # boite dont l'env n'est pas cable a la main, sous un message qui accuse la forge.
+  #
+  # Meme frontiere que `cmd_project_migrate`, prise par le meme bout : charger le fichier ne donne
+  # aucun acces forge a ce CLI — il TRANSMET sa configuration au release, qui agit. Les ports que le
+  # fichier porte aussi sont neutralises par `LCARS_TOOL_EVAL=1`.
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  if [[ -f "$env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  fi
+
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Application.CatalogueLifecycle.eval_main()"
 }
