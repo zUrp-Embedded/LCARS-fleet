@@ -2651,6 +2651,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # The env overrides (`LCARS_CATALOGUES_*`, `PROV_CATALOGUES_DIR`) are deliberately not checked: an
   # operator pointing them elsewhere is answering for both halves themselves. What must agree is
   # what happens when nobody sets anything, which is every deployment.
+  #
+  # ⚠ THE PROVISIONING HALF IS A SIBLING TREE, AND ONE LEGITIMATE CONTEXT DOES NOT CARRY IT: the
+  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured 2026-08-16 — adding
+  # the third source turned the image build red on a file it cannot have. Absence is read at the
+  # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
+  # NAMED in the note; tree present and the default gone = the real defect, FAIL.
   @doc false
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
@@ -2683,7 +2689,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `${VAR:=default}` in the lib, `${VAR:-default}` in the CLI — two different shell operators for
     # the same fact. `shell_default/2` reads both, because the difference is about who ASSIGNS, not
     # about what the default IS.
-    sources = [{cli, cli_src, expected || %{}}, {lib, lib_src, lib_expected(expected)}]
+    deploy? = File.dir?(Path.expand("deploy", root))
+
+    sources =
+      [{cli, cli_src, expected || %{}}] ++
+        if deploy?, do: [{lib, lib_src, lib_expected(expected)}], else: []
 
     mismatches =
       for {file, src, wanted} <- sources,
@@ -2723,7 +2733,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           true ->
             Enum.sort(mismatches)
         end,
-      note: "3 catalogue paths, one fact each, agreed between #{layout}, #{cli} and #{lib}"
+      note:
+        "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}" <>
+          if(deploy?,
+            do: " and #{lib}",
+            else:
+              " · #{lib} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
+          )
     }
   end
 
