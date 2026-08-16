@@ -174,17 +174,10 @@ resource "gitea_org" "fleet" {
 # propriétaire est celle qui lance cet apply. Le provider n'a pas de champ propriétaire sur
 # `gitea_org` — le créateur d'une org en est le propriétaire, un point c'est tout.
 #
-# ⚠ LE SECOND MOTIF ÉCRIT ICI EST TOMBÉ AVEC LA MONTÉE DU PROVIDER (2026-08-16). Il disait « ni data
-# source `gitea_team`, donc l'id de la team `Owners` est introuvable » : `data.gitea_team` EXISTE en
-# 0.8, et la recette détient déjà le master token. Rien n'empêche donc plus la recette de poser
-# cette adhésion elle-même — c'est un geste à rapatrier, pas une impossibilité. Il n'est PAS fait
-# ici pour l'instant : il reste à l'étape 4-bis du banc, et son déménagement appartient au lot 4 du
-# chantier « deploy avec tofu dedans ».
-#
 # ⚖ TRANCHÉ (user, 2026-08-11) : c'est `lcars-system` qui possède les orgs — c'est déjà le seul
 # compte qui y crée des dépôts. L'adhésion se pose dans la FENÊTRE DU MASTER TOKEN, celle qui lance
-# cet apply : `bench-forge-bootstrap.sh` le fait juste après, et en production c'est le même geste,
-# avec l'admin de l'opérateur (`50-forge` l'instruit, il ne peut pas le faire lui-même).
+# cet apply. Elle EST posée par cette recette depuis le 2026-08-16 (`gitea_team_membership.owner`,
+# plus bas) : elle vivait à l'étape 4-bis du banc, et n'existait donc PAS en production.
 #
 # La team `system` ci-dessous reste donc au moindre privilège pour ce qu'elle sert (créer et pousser)
 # ; la propriété de l'org est un fait SÉPARÉ, posé ailleurs, et écrit ici pour qu'on ne relise pas
@@ -326,5 +319,34 @@ resource "gitea_team_membership" "human" {
 # rendrait l'admission de l'onboard non vérifiable exactement là où personne ne teste — en recette.
 resource "gitea_team_membership" "system_reads_humans" {
   team_id  = gitea_team.this["humans"].id
+  username = var.system_account
+}
+
+# ─── LA PROPRIÉTÉ DE L'ORG — rapatriée du banc le 2026-08-16 ─────────────────────────────────────
+# CE GESTE N'EXISTAIT QU'AU BANC, donc PAS en production. Il vivait à l'étape 4-bis de
+# `bench-forge-bootstrap.sh`, dont le commentaire annonçait « et l'admin de l'opérateur en
+# production » — sans qu'aucun code ne le fasse jamais nulle part ailleurs. Une forge d'opérateur
+# rendait donc 403 au premier `lcars project migrate`, avec « user should be the owner of the repo »
+# et rien pour dire pourquoi.
+#
+# CE QUI L'EMPÊCHAIT EST TOMBÉ AVEC LE PROVIDER 0.8 : la team `Owners` est créée par Gitea avec
+# l'org, la recette ne la déclare pas, et son id était introuvable. `data.gitea_teams` (0.8) rend
+# la liste des teams d'une org — c'est par là qu'on retrouve son id, et par nulle part ailleurs :
+# `data.gitea_team` prend un id NUMÉRIQUE en entrée, il ne cherche pas par nom (mesuré, il rend
+# « The argument "id" is required »).
+#
+# `depends_on` EST LOAD-BEARING. `organisation` se calcule depuis une variable, donc sans lui la
+# source serait lue au PLAN — c'est-à-dire avant que l'org existe, et l'apply mourrait sur une
+# forge vierge. Avec, la lecture est différée à l'apply, après la création.
+data "gitea_teams" "org" {
+  organisation = gitea_org.fleet.name
+  depends_on   = [gitea_org.fleet]
+}
+
+resource "gitea_team_membership" "owner" {
+  # `one()` et pas `[0]` : si Gitea cessait un jour de créer `Owners`, `[0]` prendrait la première
+  # team venue et donnerait la propriété de l'org à un compte au petit bonheur. `one()` sur un
+  # ensemble vide rend `null`, et le membership échoue en le disant.
+  team_id  = one([for t in data.gitea_teams.org.teams : t.id if t.name == "Owners"])
   username = var.system_account
 }
