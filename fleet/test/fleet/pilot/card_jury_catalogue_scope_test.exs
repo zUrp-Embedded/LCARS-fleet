@@ -69,14 +69,6 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
       "api_version: 1\nname: biz\ndefault_card: standard\n"
     )
 
-    File.write!(Path.join(home, "catalogues.active"), "fleet\nbiz\n")
-
-    Fleet.TestEnv.put_env_restoring(
-      :lcars_fleet,
-      :catalogue_active_declaration,
-      Path.join(home, "catalogues.active")
-    )
-
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
       Path.join(home, "catalogues")
     ])

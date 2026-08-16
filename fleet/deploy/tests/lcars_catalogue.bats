@@ -2,35 +2,30 @@
 # SOURCE: fleet/deploy/tests/lcars_catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for bin/lcars — l'ACTIVITE d'un catalogue, et le defaut implicite
+# STATUS: bats tests for bin/lcars — l'etat d'un catalogue vient de la FORGE, et de nulle part ailleurs
 #
-# CE QUI EST EPINGLE, ET POURQUOI. La regle du runtime vit dans `Fleet.Catalogue.active_roots/0` :
-# *pas de declaration, ou une declaration vide, signifie le catalogue livre dans le release SEUL*.
-# C'est l'etat de TOUTE boite neuve — le fichier `catalogues.active` n'existe pas tant que personne
-# n'a rien active. La CLI, elle, ne lisait que le fichier, et cet ecart faisait mentir quatre
-# commandes a la fois. Mesure du 2026-08-12 sur une boite dont tout tournait sur `fleet` :
+# CE QUI EST EPINGLE, ET POURQUOI. Il y avait TROIS etats et il en reste DEUX. Un catalogue etait
+# `available` (le materiel quelque part), `installed` (la forge porte son org) et `active` (une ligne
+# dans `~/.lcars/catalogues.active`, tenue a la main). Le troisieme est mort le 2026-08-16, avec les
+# verbes qui l'ecrivaient — et ce fichier a perdu cinq temoins d'un coup.
 #
-#   lcars catalogue list      ->  « fleet   inactif »   alors que c'est CE QUI TOURNE
-#   lcars catalogue enable web ->  declaration « web » SEULE : fleet vient de sortir, sans un mot,
-#                                  et avec lui tous les projets de son org (le poller scanne les
-#                                  orgs des catalogues ACTIFS)
-#   lcars catalogue disable fleet -> « n'est pas actif », le troisieme sens du meme modele faux
+# Ce qui les rendait necessaires est ce qui condamne l'objet qu'ils gardaient : quatre commandes ont
+# menti EN MEME TEMPS parce que la CLI lisait le fichier pendant que le runtime appliquait « pas de
+# declaration = le catalogue livre, seul ». Mesure du 2026-08-12 sur une boite dont tout tournait
+# sur `fleet` : `list` l'affichait « inactif », `enable web` le faisait sortir sans un mot, et
+# `disable fleet` repondait « n'est pas actif ». Trois sens du meme modele faux.
 #
-# Ces tests tiennent la regle du cote CLI. Ils n'invoquent aucun sous-verbe qui parle a la forge ou
-# au release : `enable` d'un catalogue non-livre exige un `verify` qui charge le runtime, donc les
-# cas testes ici sont ceux qui n'en ont pas besoin — le predicat, la liste, le refus de `disable`,
-# et la materialisation du defaut par un `enable` du catalogue livre lui-meme.
+# Un fait tenu a deux endroits derive ; la reparation n'est pas de synchroniser les deux copies,
+# c'est d'en supprimer une. Ce que ces temoins tiennent maintenant : la CLI n'a AUCUN etat de
+# catalogue a elle, elle relaie celui du release, et sans release elle le DIT.
 
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../bin/lcars"
   [ -x "$SUT" ]
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
-  export LCARS_CATALOGUES_ACTIVE="$BATS_TEST_TMPDIR/catalogues.active"
   export LCARS_CATALOGUES_SHIPPED="$BATS_TEST_TMPDIR/shipped"
   mkdir -p "$LCARS_CATALOGUES_DIR" "$LCARS_CATALOGUES_SHIPPED/web"
 }
-
-# ─── le predicat ────────────────────────────────────────────────────────────────────────────────
 
 # ─── `list` : l'etat vient de la FORGE, et sans release on le DIT ───────────────────────────────
 # Les quatre temoins qui vivaient ici epinglaient l'ACTIVITE (« fleet actif », le bloc ACTIFS, la
@@ -95,44 +90,19 @@ FAKE
   [[ "$output" == *"Aucun des deux n'est choisi"* ]]
 }
 
-@test "disable du livre SANS declaration : refuse, et dit qu'un defaut se REMPLACE" {
-  run "$SUT" catalogue disable fleet
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"PAR DEFAUT"* ]]
-  [[ "$output" == *"REMPLACE"* ]]
-  # Rien n'a ete ecrit : le refus ne laisse pas de declaration a moitie posee.
-  [ ! -f "$LCARS_CATALOGUES_ACTIVE" ]
+@test "les verbes d'ACTIVITE n'existent plus, et le refus enumere ce qui reste" {
+  # ⚖ user, 2026-08-16 : UN SEUL VERBE. Un `enable` survivant ecrirait une declaration que plus
+  # rien ne lit — la pire des sorties : code 0, message de succes, aucun effet.
+  for verbe in enable disable remove; do
+    run "$SUT" catalogue "$verbe" fleet
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"list|install|verify"* ]]
+  done
 }
 
-@test "disable d'un catalogue qui n'est actif nulle part : refuse comme avant" {
-  printf 'web\n' > "$LCARS_CATALOGUES_ACTIVE"
-  run "$SUT" catalogue disable fleet
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"n'est pas actif"* ]]
-}
-
-@test "disable du livre AVEC declaration : passe, et ne vide pas le reste" {
-  printf 'fleet\nweb\n' > "$LCARS_CATALOGUES_ACTIVE"
-  run "$SUT" catalogue disable fleet
-  [ "$status" -eq 0 ]
-  run cat "$LCARS_CATALOGUES_ACTIVE"
-  [ "$output" = "web" ]
-}
-
-# ─── la premiere declaration ne doit pas eteindre ce qui tournait ───────────────────────────────
-
-@test "enable du livre SANS declaration : deja actif, rien d'ecrit" {
-  run "$SUT" catalogue enable fleet
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"deja actif"* ]]
-  [ ! -f "$LCARS_CATALOGUES_ACTIVE" ]
-}
-
-@test "enable du livre APRES qu'une declaration l'a exclu : il revient" {
-  printf 'web\n' > "$LCARS_CATALOGUES_ACTIVE"
-  run "$SUT" catalogue enable fleet
-  [ "$status" -eq 0 ]
-  run cat "$LCARS_CATALOGUES_ACTIVE"
-  [[ "$output" == *"web"* ]]
-  [[ "$output" == *"fleet"* ]]
+@test "aucune declaration d'activite n'est ecrite, par aucun verbe" {
+  # Le fichier a disparu du modele ; ce temoin tient qu'il ne revient pas par la porte de service.
+  run "$SUT" catalogue list
+  [ ! -e "$HOME/.lcars/catalogues.active" ]
+  [ ! -e "$BATS_TEST_TMPDIR/catalogues.active" ]
 }

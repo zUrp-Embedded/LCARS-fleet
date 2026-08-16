@@ -2631,26 +2631,34 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     |> MapSet.new()
   end
 
-  # ── Catalogue install paths: ONE fact, two languages ─────────────────────
-  # `Fleet.Layout` says where catalogues are installed and where the activity declaration lives.
-  # `bin/lcars` writes that declaration, and it cannot call Elixir — so the three paths exist twice,
-  # in two languages that have no way to agree by construction.
+  # ── Catalogue install paths: ONE fact, THREE languages ───────────────────
+  # `Fleet.Layout` says where the installed catalogues sit and where the image's seeds sit.
+  # `bin/lcars` reads both and `deploy/lib/provision-lib.sh` WRITES one of them, and neither can
+  # call Elixir — so the same paths exist three times, in languages that have no way to agree by
+  # construction.
   #
-  # What a divergence costs is worse than a crash: the CLI writes a file the runtime does not read.
-  # `catalogue enable` reports success, `catalogue list` shows the line, the fleet restarts, and it
-  # runs the OLD roster. Nothing errors, nothing is logged, and the operator has every reason to
-  # believe it worked. Same family as the four provisioning lists locked above, and the same fix —
-  # the shell's DEFAULTS are read out of the script and compared to what the module derives.
+  # What a divergence costs is worse than a crash, and the provisioning half is the expensive one:
+  # `45-catalogues` would converge a directory the runtime never reads. Every boot would clone the
+  # installed catalogues, report them converged, and the fleet would run on the bundled one alone
+  # while announcing three. Nothing errors and nothing is logged. The CLI half is milder but hits
+  # at the worst moment — degraded `catalogue list` (no release reachable) prints the material of a
+  # cache nobody runs on, which is exactly when the operator has no second source to check it
+  # against.
   #
-  # The env overrides (`LCARS_CATALOGUES_*`) are deliberately not checked: an operator pointing them
-  # elsewhere is answering for both halves themselves. What must agree is what happens when nobody
-  # sets anything, which is every deployment.
+  # Same family as the four provisioning lists locked above, and the same fix — the shells' DEFAULTS
+  # are read out of the scripts and compared to what the module derives.
+  #
+  # The env overrides (`LCARS_CATALOGUES_*`, `PROV_CATALOGUES_DIR`) are deliberately not checked: an
+  # operator pointing them elsewhere is answering for both halves themselves. What must agree is
+  # what happens when nobody sets anything, which is every deployment.
   @doc false
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
+    lib = "deploy/lib/provision-lib.sh"
     layout_src = read_or_empty(root, layout)
     cli_src = read_or_empty(root, cli)
+    lib_src = read_or_empty(root, lib)
 
     # Read from the SOURCE, not by calling the module: this check is classified into
     # `Fleet.Application`, which may not reference foundation's `Fleet.Layout` — and a boundary is
@@ -2658,7 +2666,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # the fact under test is what the two SOURCES say, and a runtime value could agree with neither.
     attrs =
       Map.new(
-        ~w(platform_root catalogues_dirname active_catalogues_basename state_dirname),
+        ~w(platform_root catalogues_dirname installed_catalogues_root),
         &{&1, module_attribute(layout_src, &1)}
       )
 
@@ -2667,28 +2675,35 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         nil
       else
         %{
-          "LCARS_CATALOGUES_DIR" =>
-            "$HOME/#{attrs["state_dirname"]}/#{attrs["catalogues_dirname"]}",
-          "LCARS_CATALOGUES_ACTIVE" =>
-            "$HOME/#{attrs["state_dirname"]}/#{attrs["active_catalogues_basename"]}",
+          "LCARS_CATALOGUES_DIR" => attrs["installed_catalogues_root"],
           "LCARS_CATALOGUES_SHIPPED" => "#{attrs["platform_root"]}/#{attrs["catalogues_dirname"]}"
         }
       end
 
-    mismatches =
-      for {var, want} <- expected || %{},
-          got = shell_default(cli_src, var),
-          got != want,
-          do: "#{var}: #{cli} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
+    # `${VAR:=default}` in the lib, `${VAR:-default}` in the CLI — two different shell operators for
+    # the same fact. `shell_default/2` reads both, because the difference is about who ASSIGNS, not
+    # about what the default IS.
+    sources = [{cli, cli_src, expected || %{}}, {lib, lib_src, lib_expected(expected)}]
 
-    missing = for {var, _} <- expected || %{}, is_nil(shell_default(cli_src, var)), do: var
+    mismatches =
+      for {file, src, wanted} <- sources,
+          {var, want} <- wanted,
+          got = shell_default(src, var),
+          got != want,
+          do: "#{var}: #{file} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
+
+    missing =
+      for {file, src, wanted} <- sources,
+          {var, _} <- wanted,
+          is_nil(shell_default(src, var)),
+          do: "#{var} (#{file})"
 
     %{
       id: "catalogue.install_paths_locked",
       remediation:
-        "make bin/lcars' default agree with Fleet.Layout (@platform_root, @catalogues_dirname, " <>
-          "@active_catalogues_basename, @state_dirname) — a CLI writing a declaration the runtime " <>
-          "does not read reports success and changes nothing",
+        "make bin/lcars and deploy/lib/provision-lib.sh agree with Fleet.Layout (@platform_root, " <>
+          "@catalogues_dirname, @installed_catalogues_root) — provisioning that converges a " <>
+          "directory the runtime does not read reports every catalogue installed and serves none",
       status:
         if(not is_nil(expected) and mismatches == [] and missing == [], do: :pass, else: :fail),
       evidence:
@@ -2701,16 +2716,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
           missing != [] ->
             [
-              "#{cli}: no `${VAR:-default}` for #{inspect(Enum.sort(missing))} — the CLI stopped " <>
-                "carrying the path"
+              "no shell default for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
+                "the path"
             ]
 
           true ->
             Enum.sort(mismatches)
         end,
-      note: "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}"
+      note: "3 catalogue paths, one fact each, agreed between #{layout}, #{cli} and #{lib}"
     }
   end
+
+  # The provisioning lib carries ONE of the two paths — the installed cache, which `45-catalogues`
+  # writes. It has no business with the image's seeds: it never reads them.
+  defp lib_expected(nil), do: %{}
+  defp lib_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
 
   defp read_or_empty(root, rel) do
     path = Path.join(root, rel)
@@ -2729,7 +2749,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # elsewhere is answering for both halves themselves; what must agree is what happens when nobody
   # sets anything, which is every deployment.
   defp shell_default(source, var) do
-    case Regex.run(~r/\$\{#{var}:-([^}]*)\}/, source) do
+    case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
       [_, default] -> default
       nil -> nil
     end

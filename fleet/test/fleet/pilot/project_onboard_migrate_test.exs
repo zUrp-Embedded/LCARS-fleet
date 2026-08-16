@@ -58,14 +58,6 @@ defmodule Fleet.Project.OnboardMigrateTest do
     File.mkdir_p!(Path.join(web, Fleet.Catalogue.rel(:cap_profiles)))
     File.write!(Path.join(web, "catalogue.yaml"), "api_version: 1\nname: web\n")
 
-    File.write!(Path.join(home, "catalogues.active"), "fleet\nweb\n")
-
-    Fleet.TestEnv.put_env_restoring(
-      :lcars_fleet,
-      :catalogue_active_declaration,
-      Path.join(home, "catalogues.active")
-    )
-
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
       Path.join(home, "catalogues")
     ])
@@ -161,10 +153,10 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "un catalogue de destination absent est refuse", %{tmp: tmp} do
-      assert {:error, {:catalogue_not_active, "grominet", actives}} =
+      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
                ProjectOnboard.import_deposit("lordzurp/mon-projet", "grominet", opts(tmp))
 
-      assert "web" in actives
+      assert "web" in installed
     end
 
     @tag :tmp_dir
@@ -198,11 +190,11 @@ defmodule Fleet.Project.OnboardMigrateTest do
     end
   end
 
-  describe "import : l'org vient du DEPOT, pas du premier catalogue actif" do
+  describe "import : l'org vient du DEPOT, pas du premier catalogue installe" do
     @tag :tmp_dir
     test "un depot du SECOND catalogue passe les gardes d'org", %{tmp: tmp} do
       # Avant : `org = opts[:org] || default_org()` rendait `fleet`, donc `web/vitrine` etait refuse
-      # en {:not_in_org, "web/vitrine", "fleet"} — un depot d'un catalogue actif, refuse parce qu'il
+      # en {:not_in_org, "web/vitrine", "fleet"} — un depot d'un catalogue installe, refuse parce qu'il
       # n'etait pas dans le PREMIER. Et l'humain etait verifie contre l'org d'un autre catalogue.
       #
       # Ce test n'attend pas un succes : l'import va plus loin (forge, faces). Il epingle ce qui
@@ -217,7 +209,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
         )
 
       refute match?({:error, {:not_in_org, _, _}}, result)
-      refute match?({:error, {:catalogue_not_active, _, _}}, result)
+      refute match?({:error, {:catalogue_not_installed, _, _}}, result)
 
       # La garde suivante est l'admission humaine, et elle est interrogee sur l'org DU DEPOT.
       assert {:error, {:human_not_provisioned, _, _}} = result

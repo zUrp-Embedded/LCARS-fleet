@@ -30,7 +30,7 @@ defmodule Fleet.CapProfile.Image do
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE ACTIF, chacune batie sur SON scope — le catalogue par-dessus le
+    # UNE image PAR CATALOGUE INSTALLE, chacune batie sur SON scope — le catalogue par-dessus le
     # systeme, jamais par-dessus ses voisins. La cle etait scalaire, donc les catalogues fusionnaient
     # en une seule image : un projet ne pouvait pas avoir « ses » roles, il avait ceux de tout le
     # monde. Les cartes ne se superposent pas et les cap-profiles si — c'est la difference que
@@ -38,7 +38,7 @@ defmodule Fleet.CapProfile.Image do
     # Clee par la RACINE du catalogue, pas par le repertoire d'arbre : `SPBuilder.Image` clee ainsi,
     # et un profil ne peut porter qu'UNE identite de catalogue. Deux espaces de cles pour un meme
     # fait, c'est la duplication que ce chantier poursuit — introduite ici le temps d'un soir.
-    for root <- Fleet.Catalogue.active_roots(),
+    for root <- Fleet.Catalogue.installed_roots(),
         scope = Fleet.Catalogue.tree_scope(root, :cap_profiles),
         scope != [],
         do: publish_scope!(root, scope)
@@ -178,12 +178,12 @@ defmodule Fleet.CapProfile.Image do
   @doc """
   The published image of a catalogue (`%{index, overlays, version}`), or nil (fallback-to-disk).
 
-  No argument = the FIRST active catalogue, which is what a caller with no project in hand gets.
+  No argument = the FIRST installed catalogue, which is what a caller with no project in hand gets.
   The per-project door is `published/1`, named by that project's catalogue root.
   """
   @spec published() :: map() | nil
   def published do
-    # `active_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
+    # `installed_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
     published(default_root())
   end
 
@@ -202,10 +202,10 @@ defmodule Fleet.CapProfile.Image do
 
   defp image_key(root), do: {__MODULE__, :image, root}
 
-  # The cap-profile directory of the first active catalogue — the scope a caller without a project
+  # The cap-profile directory of the first installed catalogue — the scope a caller without a project
   # resolves to. `nil` when nothing is readable at all, which `published/0` reports as "no image".
   defp default_root do
-    hd(Fleet.Catalogue.active_roots())
+    hd(Fleet.Catalogue.installed_roots())
   end
 
   @doc """

@@ -121,9 +121,9 @@ defmodule Fleet.Workflow.CardRolesTest do
   end
 
   test "verify!/1 passe sur le catalogue REEL — un faux positif empecherait la boite de booter" do
-    # Le controle est joue au boot sur `active_roots/0`. Ce temoin le joue sur le meme objet : si
+    # Le controle est joue au boot sur `installed_roots/0`. Ce temoin le joue sur le meme objet : si
     # la lecture se durcissait au point de refuser le catalogue livre, la boite ne demarrerait plus.
-    for root <- Fleet.Catalogue.active_roots() do
+    for root <- Fleet.Catalogue.installed_roots() do
       assert :ok = CardRoles.verify!(root)
     end
   end

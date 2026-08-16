@@ -51,6 +51,11 @@ PROVISION_LIB_LOADED=1
 # role_token_unavailable (la cause racine de BL-6-34 — vécu deux fois : eng_doc, puis son rename scribe). Le verrou
 # d'égalité des listes est BL-6-45 ; d'ici sa dérivation, cette ligne se tient à la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
+# LE MATERIEL DES CATALOGUES INSTALLES — miroir shell de `Fleet.Layout.catalogues_installed_dir/0`,
+# verrouille par `catalogue.install_paths_locked` de `mix lcars.contracts.check`. Diverger d'avec le
+# runtime ne casse rien : `45-catalogues` converge un repertoire que personne ne lit, et la boite
+# tourne sur le catalogue livre en annonçant qu'elle en sert trois.
+: "${PROV_CATALOGUES_DIR:=/home/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
@@ -539,3 +544,41 @@ human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 # Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de
 # la lib (fleet/deploy/lib/ → ../../..), jamais re-devinée par heuristique dans un module.
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
+
+# ─── prov_roles — LE ROSTER FORGE, DERIVE DU MATERIEL ─────────────────────────────────────────────
+#
+# LA QUATRIEME LISTE DE ROLES TENUE A LA MAIN EST MORTE ICI. `PROV_ROLES` enumerait neuf comptes
+# `<catalogue>_<role>` en dur, a cote de trois autres inventaires du meme fait (forge.tf,
+# provision-role-tokens.sh, les cap-profiles du catalogue) — et c'est ELLE qui gagnait, puisque
+# `50-forge` la passe au mint. Un producteur absent de cette ligne = pas de jeton sur une fleet
+# fraiche = rail ops en `role_token_unavailable` (BL-6-34, vecu deux fois : eng_doc, puis son rename
+# scribe). Une liste ecrite a la main pour un ensemble qui grandit avec chaque catalogue installe ne
+# pouvait que rester en retard.
+#
+# Elle se derive maintenant de ce que les catalogues DECLARENT : le release lit leurs cap-profiles
+# (`entrypoint roles <racine>`), la meme porte que la recette tofu emprunte pour son roster. Un
+# catalogue installe apporte donc ses comptes sans qu'aucun fichier de deploiement ne le sache.
+#
+# LA LISTE EN DUR SURVIT COMME PLANCHER, et pas par prudence : les comptes `system_*` vivent dans le
+# catalogue SYSTEME, qui n'est pas installe — il est le substrat. Et une boite dont le release n'est
+# pas encore pose (chemin WSL, avant `60-deploy`) doit quand meme minter de quoi demarrer.
+#
+# ⚠ LE MINT NE PERD JAMAIS UN COMPTE QU'IL A DEJA CREE : l'union est cumulative, jamais un
+# remplacement. Un catalogue desinstalle laisse ses comptes derriere lui — c'est deliberé, ses
+# projets existent encore et leurs commits portent ces signatures.
+prov_roles() {
+  local out="$PROV_ROLES" root
+  local bin="${PROV_RELEASE_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
+
+  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]]; then
+    for root in "$PROV_CATALOGUES_DIR"/*/; do
+      [[ -f "${root}catalogue.yaml" ]] || continue
+      # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
+      # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
+      out="$out $("$entry" roles "${root%/}" 2>/dev/null | tr '\n' ' ' || true)"
+    done
+  fi
+
+  printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
+}

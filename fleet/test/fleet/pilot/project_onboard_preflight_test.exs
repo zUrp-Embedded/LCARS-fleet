@@ -41,7 +41,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
   end
 
   defmodule UnenrolledCatalogueUsers do
-    # Le catalogue est ACTIF sur la boite et son org n'a jamais ete provisionnee : `/orgs/<org>/teams`
+    # Le materiel du catalogue est ICI et son org n'a jamais ete provisionnee : `/orgs/<org>/teams`
     # rend le 404 de Gitea (`GetOrgByName`), et l'org est PROUVEE absente.
     def user_exists?(_u, _fc), do: {:ok, true}
     def org_exists?(_o, _fc), do: {:ok, false}
@@ -156,23 +156,23 @@ defmodule Fleet.Project.OnboardPreflightTest do
              ProjectOnboard.import("fleet/poc-f2", opts(tmp, NoAccountUsers))
   end
 
-  describe "import : le catalogue nomme par l'org doit etre ACTIF" do
+  describe "import : le catalogue nomme par l'org doit etre INSTALLE" do
     test "un catalogue absent est REFUSE, et le refus nomme l'offre reelle" do
       # L'org d'un projet EST le nom de son catalogue, et le lien est fixe pour sa vie. Importer
       # `web/vitrine` sur une boite qui n'a pas le catalogue `web` ne doit PAS retomber sur le
       # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
       # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
-      assert {:error, {:catalogue_not_active, "grominet", actives}} =
+      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
                Fleet.Project.Onboard.import("grominet/vitrine")
 
-      assert "fleet" in actives, "le refus doit nommer ce qui EST actif"
+      assert "fleet" in installed, "le refus doit nommer ce qui EST installe"
     end
 
     test "le catalogue livre passe ce refus — il ne bloque pas le cas nominal" do
       # La porte suivante (`ensure_human_provisioned`) prend le relais : ce test prouve seulement
       # que le troisieme refus laisse passer une org dont le catalogue est bien la.
       refute match?(
-               {:error, {:catalogue_not_active, _, _}},
+               {:error, {:catalogue_not_installed, _, _}},
                Fleet.Project.Onboard.import("fleet/quelque-chose")
              )
     end
@@ -181,12 +181,12 @@ defmodule Fleet.Project.OnboardPreflightTest do
   describe "migrate : le transfert forge ET le repointage local, ou rien" do
     test "un catalogue cible absent est REFUSE avant tout transfert" do
       # Meme refus que l'import, meme raison : le poller ne decouvre que sur les orgs des catalogues
-      # ACTIFS, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
+      # INSTALLES, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
       # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
-      assert {:error, {:catalogue_not_active, "grominet", actives}} =
+      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
                Fleet.Project.Onboard.migrate("fleet/vitrine", "grominet")
 
-      assert "fleet" in actives
+      assert "fleet" in installed
     end
 
     test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
@@ -195,22 +195,26 @@ defmodule Fleet.Project.OnboardPreflightTest do
     end
   end
 
-  # CE DIAGNOSTIC N'AVAIT AUCUN TEMOIN, et c'est precisement celui qu'un operateur rencontre apres
-  # `lcars catalogue enable <cat>` : le catalogue est actif ici, personne ne l'a enrole sur la forge.
-  # Sans temoin, la seule preuve qu'il fonctionne etait de le rencontrer en vrai — mesure du
+  # CE DIAGNOSTIC N'AVAIT AUCUN TEMOIN, et c'est precisement celui qu'un operateur rencontre quand
+  # le materiel est ici et que la forge ne porte pas son org — un install interrompu entre ses deux
+  # moities. Sans temoin, la seule preuve qu'il fonctionne etait de le rencontrer en vrai — mesure du
   # 2026-08-15 au banc, ou le 404 brut de Gitea (`GetOrgByName`) a coute une session de diagnostic.
   # Le second temoin tient la DISCRIMINATION, qui est tout l'interet : sans lui, rendre le diagnostic
   # d'enrolement sur n'importe quel 404 passerait au vert et enverrait l'operateur provisionner une
   # org qui existe deja.
   describe "org du catalogue absente de la forge : le refus NOMME le geste manquant" do
     @tag :tmp_dir
-    test "org PROUVEE absente → catalogue_not_installed + le geste d'enrolement", %{tmp_dir: tmp} do
-      assert {:error, {:catalogue_not_installed, org, gestures}} =
+    test "org PROUVEE absente → catalogue_org_absent + le geste d'enrolement", %{tmp_dir: tmp} do
+      assert {:error, {:catalogue_org_absent, org, gestures}} =
                ProjectOnboard.onboard("poc-unenrolled", opts(tmp, UnenrolledCatalogueUsers))
 
       assert is_binary(org)
-      assert gestures =~ "enroll-catalogue.sh"
-      assert gestures =~ "never provisions"
+      # LE GESTE NOMME EST CELUI QUI REPARE, ET C'EST LE MEME QUI A POSE. Ce refus renvoyait vers
+      # `etc/enroll-catalogue.sh` + un `tofu apply` a la main : trois pas, dont deux hors de la
+      # boite, pour un etat qu'un seul verbe convergent retablit.
+      assert gestures =~ "lcars catalogue install"
+      assert gestures =~ "convergent"
+      refute gestures =~ "enroll-catalogue.sh"
       # Le refus tombe au preflight : rien n'a ete cree avant de se raviser.
       refute File.exists?(Path.join([tmp, "projects", "poc-unenrolled"]))
     end

@@ -47,7 +47,16 @@ set -euo pipefail
 
 : "${PROV_PASSWORDS_FILE:=$PROV_TOKENS_DIR/forge-role-passwords.json}"
 A4_SCRIPT="$(repo_root)/fleet/etc/provision-role-tokens.sh"
-ACCOUNTS="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
+# LE ROSTER EST DERIVE, PAS DECLARE — `prov_roles` (provision-lib) lit ce que les catalogues
+# INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
+# deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
+# deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
+#
+# ⚠ `45-catalogues` TOURNE AVANT CE MODULE, et c'est ce qui rend la derivation vraie du premier
+# coup : le materiel est deja la quand cette ligne s'evalue. Inverser l'ordre ferait minter le
+# roster du cycle PRECEDENT — un catalogue installe passerait son premier boot sans jetons.
+ROLES="$(prov_roles)"
+ACCOUNTS="$ROLES $PROV_SYSTEM_ACCOUNT"
 
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
 
@@ -93,8 +102,8 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
 # ─── L'AUTORITÉ QUE LA BOÎTE DÉTIENT (⚖ user 2026-08-16 : « on pose le token, IL RESTE ») ────────
 # `p_warn` et PAS `p_drift`, et la nuance est le fond du sujet : une boîte sans ce jeton FONCTIONNE
 # — l'apply de structure converge en lisant la forge, le runtime tourne sur les jetons de rôle. Ce
-# qu'elle perd est la capacité d'un geste STRUCTUREL autonome : `lcars catalogue enable` crée un
-# compte par rôle, et sans autorité de création il redevient un geste manuel de l'opérateur.
+# qu'elle perd est la capacité d'un geste STRUCTUREL autonome : `lcars catalogue install` crée une
+# org et un compte par rôle, et sans autorité de création il redevient un geste manuel de l'opérateur.
 # Un drift dirait « l'état-cible n'est pas tenu », ce qui serait crier au loup sur une boîte saine.
 check_master_authority() {
   if [[ -r "$PROV_MASTER_TOKEN_FILE" ]]; then
@@ -107,7 +116,7 @@ check_master_authority() {
 # La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-    --roles "$PROV_ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token" --check >/dev/null 2>&1
+    --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token" --check >/dev/null 2>&1
 }
 
 # Le handoff tofu→A4, convergent PAR ENTRÉE : chaque compte de $ACCOUNTS a son entrée dans le
@@ -353,7 +362,7 @@ apply() {
   ensure_passwords_entries || verdict_apply
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
-      --roles "$PROV_ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token"; then
+      --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "tokens A4 posés ($PROV_TOKENS_DIR)"
   else

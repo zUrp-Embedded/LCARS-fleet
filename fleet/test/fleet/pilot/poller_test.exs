@@ -1764,8 +1764,8 @@ defmodule Fleet.Pilot.PollerTest do
 
       assert premier =~ "does NOT exist on the forge"
 
-      assert premier =~ "catalogue disable web",
-             "le refus doit nommer les deux gestes qui le levent"
+      assert premier =~ "lcars catalogue install web",
+             "le refus doit nommer le geste qui le leve"
 
       refute second =~ "does NOT exist on the forge",
              "repeter la phrase a chaque tick la rend invisible aussi surement que se taire"

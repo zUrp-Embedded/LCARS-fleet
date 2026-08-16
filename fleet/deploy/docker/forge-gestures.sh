@@ -342,7 +342,36 @@ cmd_install() {
   #    sans sa source est un install interrompu, et aucune boite ne peut servir un catalogue dont le
   #    materiel n'est nulle part.
   push_store "$name" "$work/src" "$tok"
-  echo "forge-gestures: $name installe (org, comptes, teams, et sa source dans $name/catalogue)"
+
+  # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Il n'est pas l'installation — celle-ci est le depot
+  #    `$name/catalogue` pousse juste au-dessus — et `45-catalogues` le reposerait de toute facon au
+  #    prochain boot. Mais « au prochain boot » veut dire que la commande rend la main sur une boite
+  #    qui ne sert pas encore le catalogue qu'elle vient d'installer, et l'admin n'a aucun moyen de
+  #    savoir qu'il doit redemarrer. On converge donc ici le meme cache, par le meme geste.
+  #
+  #    Un echec ici n'annule RIEN : la forge porte l'org et la source, l'installation a eu lieu. Le
+  #    dire, et laisser le boot suivant rattraper, est plus honnete que de defaire ce qui est bon.
+  if install_material "$name" "$work/src"; then
+    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/catalogue, materiel pose)"
+  else
+    echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
+    echo "  la boite ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
+  fi
+}
+
+# Le CACHE local, clone depuis le store qu'on vient de pousser — jamais copie depuis `$work/src`.
+# La difference n'est pas cosmetique : `45-catalogues` compare le sha local au sha du store, et un
+# repertoire copie n'a pas de `.git`, donc pas de sha. Il serait re-clone au premier boot, ce qui
+# marche mais fait mentir le premier `check` (« materiel absent ») sur une boite qui vient
+# d'installer. Cloner depuis la meme autorite met les deux d'accord immediatement.
+install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
+  local name="$1" dir="${LCARS_CATALOGUES_DIR:-/home/catalogues}/$name"
+  mkdir -p "$(dirname "$dir")"
+  rm -rf "$dir.tmp"
+  GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \
+    "${FORGE_BASE_URL%/}/${name}/catalogue.git" "$dir.tmp" || { rm -rf "$dir.tmp"; return 1; }
+  rm -rf "$dir"
+  mv "$dir.tmp" "$dir"
 }
 
 # Projection, pas fusion : la copie sur la forge REFLETE le depot, un commit frais a chaque fois.

@@ -47,25 +47,21 @@ import Config
 tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 
 # HORS du garde `tool_mode?`, et c'est un correctif : ce bloc n'ouvre aucun port et ne demarre rien.
-# Il dit seulement OU vivent les catalogues declares — un fait de lecture dont TOUTE porte `eval` a
-# besoin. Enferme dans le garde, `LCARS_TOOL_EVAL=1` le sautait avec le reste, et un outil ne voyait
-# que le catalogue livre : `lcars project migrate <projet> web` refusait « web n'est pas actif » sur
-# une boite ou il l'etait, parce que la declaration lui etait invisible. Mesure du 2026-08-11 :
-# `active_names()` rendait ["fleet"] sous eval la ou le boot en voyait deux.
+# Il dit seulement OU vit le materiel des catalogues installes — un fait de lecture dont TOUTE porte
+# `eval` a besoin. Enferme dans le garde, `LCARS_TOOL_EVAL=1` le sautait avec le reste, et un outil
+# ne voyait que le catalogue livre : `lcars project migrate <projet> web` refusait « web inconnu »
+# sur une boite ou il tournait. Mesure du 2026-08-11 : `installed_names()` rendait ["fleet"] sous
+# eval la ou le boot en voyait deux.
 #
-# L'ORDRE de `install_dirs` est l'ordre de recherche d'un NOM, pas une precedence entre catalogues
-# (celle-la est l'ordre des lignes du fichier) : le repertoire de l'operateur d'abord, pour qu'un
-# catalogue importe masque un livre du meme nom.
+# UN SEUL REPERTOIRE, et le second n'est pas parti par simplification. `catalogues_shipped_dir/0`
+# porte les GRAINES de l'image — deposees sur la forge a chaque apply, installees par personne. L'y
+# lister faisait de `web-demo` un catalogue installe du seul fait que l'image le transportait, ce
+# qui contredit exactement ce qu'il existe pour demontrer.
 #
-# Pas de variable d'env : la declaration est un FICHIER que l'operateur edite, et pointer dessus par
-# une variable mettrait la reponse a deux endroits. Fichier absent = le catalogue metier livre, seul.
+# Pas de variable d'env : ce qui tourne est ce que la forge porte, et un chemin de cache ne se
+# choisit pas. Repertoire absent ou vide = le catalogue metier livre dans le release, seul.
 if config_env() != :test do
-  config :lcars_fleet,
-    catalogue_active_declaration: Fleet.Layout.active_catalogues_path(),
-    catalogue_install_dirs: [
-      Fleet.Layout.catalogues_operator_dir(),
-      Fleet.Layout.catalogues_shipped_dir()
-    ]
+  config :lcars_fleet, catalogue_install_dirs: [Fleet.Layout.catalogues_installed_dir()]
 end
 
 # HORS du garde pour la meme raison que le bloc ci-dessus, et le meme defaut l'a revele : lire trois
@@ -233,18 +229,8 @@ if config_env() != :test and not tool_mode? do
     config :lcars_fleet, catalogue_root: Fleet.EnvParse.path("LCARS_CATALOGUE_ROOT", path)
   end
 
-  # WHICH catalogues run, and WHERE they are installed — the ordered declaration of section 9.3.
-  # These are platform paths, so `Fleet.Layout` is their authority; they arrive HERE rather than
-  # being called from `Fleet.Catalogue` so that module keeps `deps: []`, which is the one layer
-  # name the topology can check instead of assert.
-  #
-  # The ORDER of `install_dirs` is the lookup order for a NAME, not a precedence between
-  # catalogues (that one is the order of the lines in the file): the operator's own directory
-  # first, so an imported catalogue shadows a shipped one of the same name — the `php.ini` over the
-  # `php.ini-production`, the same rule as everywhere else here.
-  #
-  # No env var: the declaration is a FILE the operator edits, and adding a variable to point at it
-  # would put the answer in two places. Absent file = the bundled business catalogue alone.
+  # WHERE the installed catalogues sit is wired at the TOP of this file, outside the `tool_mode?`
+  # guard — a reading fact every `eval` door needs. It is not repeated here.
 
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root

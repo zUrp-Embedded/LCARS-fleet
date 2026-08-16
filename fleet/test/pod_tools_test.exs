@@ -1583,23 +1583,23 @@ defmodule Fleet.MCP.PodToolsTest do
       assert msg =~ "no *.yaml card"
     end
 
-    test "create_project REFUSE un catalogue qui n'est pas actif — un rail mort est silencieux" do
+    test "create_project REFUSE un catalogue qui n'est pas installe — un rail mort est silencieux" do
       # L'org du projet est celle de son catalogue, et le poller ne decouvre que sur les orgs des
-      # catalogues ACTIFS. Onboarder ailleurs produit donc un projet que rien ne dispatchera jamais :
-      # ca ne casse pas, ca ne dit rien. Le refus nomme ce qui EST actif, pour que l'humain choisisse
+      # catalogues INSTALLES. Onboarder ailleurs produit donc un projet que rien ne dispatchera jamais :
+      # ca ne casse pas, ca ne dit rien. Le refus nomme ce qui EST installe, pour que l'humain choisisse
       # dans l'offre au lieu de deviner.
-      assert {:error, {:catalogue_not_active, "grominet", actives}, _} =
+      assert {:error, {:catalogue_not_installed, "grominet", installed}, _} =
                PodTools.handle_tool_call(
                  "project_create",
                  %{"name" => "demo-proj", "catalogue" => "grominet"},
                  pod_state(uniq("pod-arch"))
                )
 
-      assert "fleet" in actives, "le refus doit nommer l'offre reelle"
+      assert "fleet" in installed, "le refus doit nommer l'offre reelle"
     end
 
     test "le guichet rend un TABLEAU catalogue x carte — chaque carte nommee par son catalogue" do
-      # Sans surcharge fine, le guichet balaie les catalogues ACTIFS et chaque carte porte le sien.
+      # Sans surcharge fine, le guichet balaie les catalogues INSTALLES et chaque carte porte le sien.
       # Ce n'etait pas une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux,
       # `standard` peut exister des deux cotes et un nom seul ne designe plus rien.
       TestEnv.restore_env_on_exit(:lcars_fleet, :workflow_workflow_maps_root)

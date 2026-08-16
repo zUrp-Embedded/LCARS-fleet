@@ -65,6 +65,9 @@ FAKE
   # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
   export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
   export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu"
+  # Le CACHE local du materiel. Pointe dans le tmpdir : sans ca le temoin ecrirait dans
+  # `/home/catalogues`, c'est-a-dire dans la boite de celui qui lance la suite.
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
   TPL_LOG="$BATS_TEST_TMPDIR/tpl.log"
@@ -308,6 +311,32 @@ setup_install() {
   [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
   [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
   grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
+  grep -q 'push .*cat/catalogue' "$GIT_LOG"
+}
+
+@test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
+  # Sans ca, la commande rend la main sur une boite qui n'a pas encore le catalogue qu'elle vient
+  # d'installer, et rien ne dit a l'admin qu'il doit redemarrer. Le clone vient du STORE et non de
+  # l'arbre en main : le convergeur compare des shas, et une copie sans `.git` n'en a pas.
+  setup_install
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
+  grep -q "clone .*http://forge.test/cat/catalogue.git" "$GIT_LOG"
+  [[ "$output" == *"materiel pose"* ]]
+}
+
+@test "install: materiel local en echec — la forge GARDE l'installation, et on le DIT" {
+  # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
+  # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
+  setup_install
+  # Un cache impossible a ecrire : le parent est un FICHIER.
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/pas-un-dossier/sub"
+  : > "$BATS_TEST_TMPDIR/pas-un-dossier"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [[ "$output" == *"INSTALLE sur la forge"* ]]
+  [[ "$output" == *"redemarrage"* ]]
   grep -q 'push .*cat/catalogue' "$GIT_LOG"
 }
 

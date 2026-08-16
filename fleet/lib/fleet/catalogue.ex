@@ -6,7 +6,7 @@ defmodule Fleet.Catalogue do
   tree.
 
   It said "one root" until 2026-08-10 and that was the whole design at the time. There are now
-  several: the ACTIVE catalogues in precedence order, then the system default last, and a reader
+  several: the INSTALLED catalogues, then the system default last, and a reader
   asks for a TREE (`search(:modops)`) rather than naming a root. `search/2` and its siblings remain
   for the two callers that legitimately name their own — the composer under `--catalogue`, and the
   spawn path whose skills root is its own three-state knob.
@@ -131,12 +131,7 @@ defmodule Fleet.Catalogue do
   (`lib/lcars_fleet-<vsn>/priv`) exactly as in dev, with no environment at all.
   """
   @spec root() :: Path.t()
-  def root do
-    case declared_roots() do
-      [first | _] -> first
-      [] -> bundled_root()
-    end
-  end
+  def root, do: bundled_root()
 
   # THE BUSINESS ROOT IS THE FIRST ACTIVE CATALOGUE, and it took a bench to see why that matters.
   #
@@ -257,7 +252,7 @@ defmodule Fleet.Catalogue do
     rel = rel(tree)
 
     case fine_override(tree) do
-      nil -> Enum.map(active_roots(), &Path.join(&1, rel))
+      nil -> Enum.map(installed_roots(), &Path.join(&1, rel))
       dir -> [dir]
     end
     |> Kernel.++([Path.join(system_root(), rel)])
@@ -278,7 +273,7 @@ defmodule Fleet.Catalogue do
   def find(tree, name) when is_atom(tree) and is_binary(name) do
     fallback =
       case fine_override(tree) do
-        nil -> Path.join([List.first(active_roots()), rel(tree), name])
+        nil -> Path.join([List.first(installed_roots()), rel(tree), name])
         dir -> Path.join(dir, name)
       end
 
@@ -310,44 +305,52 @@ defmodule Fleet.Catalogue do
   @bundled_name "fleet"
 
   @doc """
-  The ACTIVE catalogues, in precedence order — read from `Fleet.Layout.active_catalogues_path/0`.
+  The INSTALLED catalogues, as roots — `#{@bundled_name}` first, then the material present on this
+  box, by name.
 
-  One NAME per line, first wins, `#` comments and blank lines ignored. Names, not paths: the
-  declaration is written in the operator's vocabulary, and where a catalogue was installed is not
-  their business to restate. `#{@bundled_name}` is reserved for the business catalogue that ships
-  inside the release (the one `LCARS_CATALOGUE_ROOT` moves) — it is a name like any other in the
-  list, so an operator who no longer wants it deletes its line.
+  ## Installed is a PRESENCE, not a declaration
 
-  **No file, or an empty one, means the shipped business catalogue alone** — today's behaviour
-  exactly, which is what lets this land without changing a running deployment.
+  There used to be a second fact next to this one: an ACTIVITY declaration, one name per line in a
+  file the operator edited, which decided WHICH of the installed catalogues actually ran. It is
+  gone, and its absence is the point of this function's current shape.
 
-  A name that resolves NOWHERE raises. A declared catalogue is load-bearing by definition: a fleet
-  that silently skipped one would run a roster nobody assembled and refuse work at the first
-  dispatch, far from the line that asked for it. Same rule as everywhere else here — what a
-  declaration names, its absence refuses.
+  Two facts that can disagree about the same question will disagree, and the failure has a
+  measured cost: a catalogue can be declared active while the forge carries neither its org nor its
+  role accounts, and the fleet then boots on a roster nobody assembled and loops at the first
+  dispatch on tokens that were never minted — far from the line that asked for it. The reverse
+  skew is quieter still: a catalogue installed on the forge and absent from the declaration is
+  polled by nobody, so its projects simply never move, and no message says why.
 
-  The system catalogue is NOT in this list and cannot be: it is always last, implicitly, and it is
-  a contract rather than a participant in precedence.
+  One fact answers it now. The material is HERE, or it is not.
+
+  ## What makes the material appear
+
+  `lcars catalogue install <name>`, played by an admin — the single verb. It lays the org and the
+  role accounts on the forge, pushes the catalogue's source into `<name>/catalogue`, and drops the
+  material here. Convergent provisioning replays the second half at every container boot, so this
+  directory is a CACHE of what the forge carries rather than a state anyone maintains by hand.
+  Deleting a directory here does not uninstall anything; the next boot puts it back.
+
+  ## Why the bundled one is first and unconditional
+
+  `#{@bundled_name}` ships inside the release, so it is installed by construction and cannot be
+  removed — deliberately, so that ONE valid catalogue is always present. That is an AVAILABILITY
+  guarantee and not an authority: it is a peer, and a role or a card of another catalogue never
+  resolves in it.
+
+  It comes first because a caller with no project in hand has to resolve SOMEWHERE, and the
+  complete catalogue that always works is the honest default. The order below it is the name order
+  — deterministic, and belonging to nobody.
+
+  The system catalogue is not in this list and cannot be: it is always last, implicitly, and it is
+  a contract rather than a participant.
   """
-  @spec active_roots() :: [Path.t()]
-  def active_roots do
-    case declared_roots() do
-      [] -> [to_string(bundled_root())]
-      roots -> roots
-    end
+  @spec installed_roots() :: [Path.t()]
+  def installed_roots do
+    [to_string(bundled_root()) | installed_dirs()]
   end
 
-  # Split out of `active_roots/0` so `root/0` can ask the same question without recursing through
-  # it: the reserved name resolves to the BUNDLED root, never to `root/0`, which is now derived
-  # from this list.
-  defp declared_roots do
-    case declared_names() do
-      [] -> []
-      names -> Enum.map(names, &resolve_installed!/1)
-    end
-  end
-
-  # WHERE those two things sit on the box arrives by CONFIG, and this module stays `deps: []`.
+  # WHERE the material sits arrives by CONFIG, and this module stays `deps: []`.
   #
   # It is a platform fact, so its authority is `Fleet.Layout` — but calling it from here would add a
   # dep to the module whose layer name is the one mechanically checkable thing in the topology
@@ -355,45 +358,27 @@ defmodule Fleet.Catalogue do
   # fact into one the map asserts by hand. `config/runtime.exs` passes the paths instead, which is
   # where every other deployment fact already enters.
   #
-  # Unset — the whole of `:test`, and any deployment that never wired it — means NO declaration to
-  # read, hence the shipped catalogue alone: today's behaviour, out of the box.
+  # Unset — the whole of `:test`, and any deployment that never wired it — means the shipped
+  # catalogue alone.
   #
   # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed
   # 2026-08-10, `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
   # test moving HOME would silently measure the real `~/.lcars` of whoever ran the suite.
-  defp active_path, do: Application.get_env(:lcars_fleet, :catalogue_active_declaration)
-
   defp install_dirs, do: Application.get_env(:lcars_fleet, :catalogue_install_dirs, [])
 
-  defp declared_names do
-    case active_path() && File.read(active_path()) do
-      {:ok, content} ->
-        content
-        |> String.split("\n")
-        |> Enum.map(&(&1 |> String.split("#") |> List.first() |> String.trim()))
-        |> Enum.reject(&(&1 == ""))
-        |> Enum.uniq()
-
-      _ ->
-        []
-    end
-  end
-
-  defp resolve_installed!(@bundled_name), do: to_string(bundled_root())
-
-  defp resolve_installed!(name) do
-    dirs = install_dirs()
-
-    case Enum.find(dirs, &File.dir?(Path.join(&1, name))) do
-      nil ->
-        raise "Fleet.Catalogue: #{active_path()} declares the catalogue " <>
-                "#{inspect(name)} and it is installed nowhere (looked in #{Enum.join(dirs, ", ")}). " <>
-                "Install it, or remove its line — a fleet that skipped it would run a roster " <>
-                "nobody assembled."
-
-      dir ->
-        Path.join(dir, name)
-    end
+  # A directory counts as a catalogue when it carries a MANIFEST, not merely because it exists.
+  # Half a `git clone`, an editor's backup directory or a stray `lost+found` would otherwise enter
+  # the roster and take down the boot on a verify nobody asked for.
+  #
+  # `@bundled_name` is excluded rather than shadowed: it is already first, and a second entry under
+  # the same name would publish two images for one catalogue.
+  defp installed_dirs do
+    install_dirs()
+    |> Enum.flat_map(fn dir -> Path.wildcard(Path.join(dir, "*/#{@manifest_basename}")) end)
+    |> Enum.map(&Path.dirname/1)
+    |> Enum.reject(&(Path.basename(&1) == @bundled_name))
+    |> Enum.uniq_by(&Path.basename/1)
+    |> Enum.sort_by(&Path.basename/1)
   end
 
   defp fine_override(tree) do
@@ -416,7 +401,7 @@ defmodule Fleet.Catalogue do
   of any catalogue. Callers that attribute per catalogue must say so.
   """
   @spec roots() :: [Path.t()]
-  def roots, do: Enum.filter(active_roots() ++ [system_root()], &File.dir?/1)
+  def roots, do: Enum.filter(installed_roots() ++ [system_root()], &File.dir?/1)
 
   @doc """
   First existing `name` on the search path — the BUSINESS path when it exists nowhere.
@@ -522,7 +507,7 @@ defmodule Fleet.Catalogue do
     sys = Path.join(system_root(), rel)
 
     case fine_override(tree) do
-      nil -> Enum.map(active_roots(), &Path.join(&1, rel))
+      nil -> Enum.map(installed_roots(), &Path.join(&1, rel))
       dir -> [dir]
     end
     |> Enum.uniq()
@@ -568,7 +553,7 @@ defmodule Fleet.Catalogue do
   """
   @spec workflow_maps_roots() :: [Path.t()]
   def workflow_maps_roots do
-    active_roots()
+    installed_roots()
     |> Enum.map(&Path.join(&1, @rel_workflow_maps))
     |> Enum.uniq()
     |> Enum.filter(&File.dir?/1)
@@ -740,8 +725,8 @@ defmodule Fleet.Catalogue do
   A catalogue that declares no name is skipped rather than defaulted: the name is required and
   `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
   """
-  @spec active_names() :: [String.t()]
-  def active_names, do: active_catalogues() |> Enum.map(& &1.name) |> Enum.uniq()
+  @spec installed_names() :: [String.t()]
+  def installed_names, do: installed_catalogues() |> Enum.map(& &1.name) |> Enum.uniq()
 
   @doc """
   Every active catalogue as `%{name, root}`, in declaration order — THE pairing.
@@ -753,9 +738,9 @@ defmodule Fleet.Catalogue do
   A root whose manifest declares no name is skipped rather than defaulted: the name is required and
   `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
   """
-  @spec active_catalogues() :: [%{name: String.t(), root: Path.t()}]
-  def active_catalogues do
-    Enum.flat_map(active_roots(), fn root ->
+  @spec installed_catalogues() :: [%{name: String.t(), root: Path.t()}]
+  def installed_catalogues do
+    Enum.flat_map(installed_roots(), fn root ->
       case YamlElixir.read_from_file(Path.join(root, @manifest_basename)) do
         {:ok, %{"name" => n}} when is_binary(n) -> [%{name: n, root: root}]
         _ -> []
@@ -780,7 +765,7 @@ defmodule Fleet.Catalogue do
   def root_for(nil), do: nil
 
   def root_for(name) when is_binary(name) do
-    case Enum.find(active_catalogues(), &(&1.name == name)) do
+    case Enum.find(installed_catalogues(), &(&1.name == name)) do
       %{root: root} -> root
       nil -> nil
     end

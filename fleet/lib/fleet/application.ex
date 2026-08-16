@@ -141,7 +141,7 @@ defmodule Fleet.Application do
     # fonction que joue `catalogue install` avant de toucher la forge — une seule verite, deux
     # moments, pour qu'un catalogue ne puisse pas etre coherent a l'install et casse au boot.
     if Application.get_env(:lcars_fleet, :workflow_verify_card_roles, true),
-      do: Enum.each(Fleet.Catalogue.active_roots(), &Fleet.Workflow.CardRoles.verify!/1)
+      do: Enum.each(Fleet.Catalogue.installed_roots(), &Fleet.Workflow.CardRoles.verify!/1)
 
     children = [
       Fleet.EventRouter.Application,

@@ -173,9 +173,10 @@ cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 # ─── CE QUE L'OPÉRATEUR FOURNIT, ET QUI RESTE ───────────────────────────────────────────────────
 # ⚖ ARBITRAGE (user, 2026-08-16) : « on pose le token, IL RESTE ». Le motif est structurel et pas
 # une commodité — l'autorité de création n'est PAS un besoin de bootstrap. La structure d'une forge
-# change pendant toute la vie du système : enrôler un catalogue crée un compte par rôle. Au jour 400,
-# `lcars catalogue enable` a exactement le même besoin qu'au premier jour, et un credential qu'il
-# faudrait re-fournir rendrait chacun de ces gestes manuel — ce que ce chantier existe pour tuer.
+# change pendant toute la vie du système : installer un catalogue crée son org et un compte par rôle.
+# Au jour 400, `lcars catalogue install` a exactement le même besoin qu'au premier jour, et un
+# credential qu'il faudrait re-fournir rendrait chacun de ces gestes manuel — ce que ce chantier
+# existe pour tuer.
 #
 # CE QUE ÇA POSE, ÉCRIT POUR QUE CE SOIT SU ET NON DÉCOUVERT : la boîte détient durablement un
 # credential qui peut tout créer et tout détruire sur la forge. C'est le prix de gestes structurels

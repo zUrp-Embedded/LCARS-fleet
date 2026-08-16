@@ -55,6 +55,7 @@ prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
     "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
+    "$PROV_CATALOGUES_DIR 0755 root:root" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"
