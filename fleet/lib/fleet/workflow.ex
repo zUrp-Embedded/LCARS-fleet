@@ -35,6 +35,10 @@ defmodule Fleet.Workflow do
       GateBrief,
       Loader,
       Gates,
+      # L'arete carte->role : verifiee par le BOOT (les deux gels d'images se rencontrent la) et par
+      # `catalogue install` avant de toucher la forge. Une seule fonction, deux appelants hors du
+      # domaine — donc une surface, declaree.
+      CardRoles,
       # StepOutputs exported for ONE reason, and it is the reason `Gates` is not the caller:
       # `Gates` is PURE by contract, and deriving these facts reads the filesystem. So the rail
       # merges them in before evaluating, which makes this an API of the domain rather than an

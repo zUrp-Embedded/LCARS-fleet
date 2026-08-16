@@ -21,6 +21,10 @@ defmodule Fleet.Application do
       # The catalogue is verified before either image freezes from it (cf. start/2) — a boot
       # concern for the same reason, on the foundation that resolves it.
       Fleet.Catalogue,
+      # L'arete carte->role est verifiee au boot (cf. `start/2`) : la carte appartient a Workflow,
+      # le role a CapProfile, et le lien entre les deux n'avait pas de proprietaire. Le boot est
+      # l'endroit ou les deux plans se rencontrent, comme pour les deux gels d'images.
+      Fleet.Workflow,
       # DELIBERATE WIDENING, and it must be declared rather than left implicit: the catalogue
       # lifecycle became a FORGE fact — `available` is "the forge carries a deposit", `installed`
       # is "the forge signs an org". `CatalogueDeposits` reads it.
@@ -126,6 +130,18 @@ defmodule Fleet.Application do
 
     if Application.get_env(:lcars_fleet, :sp_builder_publish_image, true),
       do: Fleet.SPBuilder.publish_image!()
+
+    # L'ARETE ENTRE LES DEUX GELS, que ni l'un ni l'autre ne regardait. Chacun verifie SON arbre —
+    # les profils sont valides, et « un catalogue qui DECLARE un role lui doit son prompt ». Aucun
+    # ne resout `steps[].role` ni `jury[]` contre les profils : un catalogue dont la carte dit `dev`
+    # pendant que ses profils declarent `developer` passe les deux, boote, et meurt au PREMIER
+    # dispatch, sur un message qui accuse le runtime (mesure du 2026-08-16).
+    #
+    # Meme posture que les gels : on ne boote pas sur un catalogue incoherent. Et c'est la MEME
+    # fonction que joue `catalogue install` avant de toucher la forge — une seule verite, deux
+    # moments, pour qu'un catalogue ne puisse pas etre coherent a l'install et casse au boot.
+    if Application.get_env(:lcars_fleet, :workflow_verify_card_roles, true),
+      do: Enum.each(Fleet.Catalogue.active_roots(), &Fleet.Workflow.CardRoles.verify!/1)
 
     children = [
       Fleet.EventRouter.Application,
