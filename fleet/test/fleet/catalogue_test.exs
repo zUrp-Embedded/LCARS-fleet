@@ -173,22 +173,15 @@ defmodule Fleet.CatalogueTest do
     end
   end
 
-  describe "catalogues.active — installed is not active" do
-    # The declaration lives under the operator's `~/.lcars`, so these tests move HOME rather than
-    # a config key: there is no knob, deliberately — changing what runs must not need a rebuild,
-    # and it must not need an env var an image could bake either.
-    # `HOME` is NOT the seam, and trying it is how this was found: `System.user_home!/0` is cached
-    # by the VM and keeps answering the boot-time value, so a test moving HOME would silently
-    # measure the real `~/.lcars` of whoever ran the suite.
+  describe "installed — the material is here, or it is not" do
+    # The cache lives under the operator's `~/.lcars`, so these tests point the config key at a
+    # temporary directory rather than moving HOME. `HOME` is NOT the seam, and trying it is how
+    # this was found: `System.user_home!/0` is cached by the VM and keeps answering the boot-time
+    # value, so a test moving HOME would silently measure the real `~/.lcars` of whoever ran the
+    # suite.
     setup %{tmp_dir: tmp} do
       home = Path.join(tmp, "operator")
       File.mkdir_p!(Path.join(home, "catalogues"))
-
-      Fleet.TestEnv.put_env_restoring(
-        :lcars_fleet,
-        :catalogue_active_declaration,
-        Path.join(home, "catalogues.active")
-      )
 
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
         Path.join(home, "catalogues")
@@ -197,13 +190,17 @@ defmodule Fleet.CatalogueTest do
       {:ok, home: home}
     end
 
-    defp install(home, name) do
+    # A catalogue is material PLUS a manifest. `install/3` writes both, because that pairing is
+    # exactly what `installed_roots/0` tests for.
+    defp install(home, name, manifest? \\ true) do
       dir = Path.join([home, "catalogues", name])
       File.mkdir_p!(Path.join(dir, Catalogue.rel(:cap_profiles)))
+
+      if manifest?,
+        do: File.write!(Path.join(dir, "catalogue.yaml"), "api_version: 1\nname: #{name}\n")
+
       dir
     end
-
-    defp declare(home, lines), do: File.write!(Path.join(home, "catalogues.active"), lines)
 
     # A minimal, schema-valid card. One step, no jury, CI ignored — the shape `workshop-direct` and
     # `quick-fix` already ship; enough for the loader to accept it and for the image to hold it.
@@ -232,18 +229,17 @@ defmodule Fleet.CatalogueTest do
       dir
     end
 
-    test "publish_image! couvre CHAQUE catalogue actif — pas seulement le premier", %{
+    test "publish_image! couvre CHAQUE catalogue installe — pas seulement le premier", %{
       tmp_dir: tmp,
       home: home
     } do
       # LE DEFAUT QUE CE TEST EXISTE POUR EMPECHER DE REVENIR : `publish_image!/0` publiait depuis
-      # `workflow_maps_root([])`, c'est-a-dire la PREMIERE racine active. Les cartes de tout
-      # catalogue suivant existaient sur le disque et dans AUCUNE image — un projet servi par ce
+      # `workflow_maps_root([])`, c'est-a-dire la PREMIERE racine. Les cartes de tout catalogue
+      # suivant existaient sur le disque et dans AUCUNE image — un projet servi par ce
       # catalogue-la ne trouvait pas de carte du tout, et le decouvrait au premier dispatch.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       premier = install_card(install(home, "premier"), "carte-une")
       second = install_card(install(home, "second"), "carte-deux")
-      declare(home, "premier\nsecond\n")
 
       on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
       :ok = Fleet.Workflow.Loader.publish_image!()
@@ -265,99 +261,94 @@ defmodule Fleet.CatalogueTest do
       end
     end
 
-    test "no file: the shipped business catalogue alone — today's behaviour untouched", %{
-      tmp_dir: tmp
-    } do
+    test "cache vide : le catalogue livre dans le release, seul", %{tmp_dir: tmp} do
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
 
-      assert Catalogue.active_roots() == [root]
+      assert Catalogue.installed_roots() == [root]
     end
 
-    test "installed but NOT declared changes nothing", %{tmp_dir: tmp, home: home} do
+    test "LE MATERIEL EST LA, DONC IL EST INSTALLE — plus aucune declaration a tenir", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # L'INVERSION QUE CE LOT PORTE, EN UNE ASSERTION. Ce meme test affirmait le contraire jusqu'au
+      # 2026-08-16 : « un catalogue pose sur le disque est inerte tant qu'une ligne ne le nomme
+      # pas ». Cette ligne-la etait un second etat que quelqu'un tenait a la main a cote du premier,
+      # et l'ecart entre les deux a tue une flotte au banc — declaree active, jamais installee.
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      mobile = install(home, "mobile")
+
+      assert Catalogue.installed_roots() == [root, mobile]
+    end
+
+    test "un repertoire SANS manifeste n'est pas un catalogue", %{tmp_dir: tmp, home: home} do
+      # Un `git clone` interrompu, un `lost+found`, le repertoire de sauvegarde d'un editeur : sans
+      # ce filtre ils entrent dans le roster et font tomber le boot sur une verification que
+      # personne n'a demandee.
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      install(home, "moitie-de-clone", false)
+
+      assert Catalogue.installed_roots() == [root]
+    end
+
+    test "`fleet` est TOUJOURS present et TOUJOURS en tete", %{tmp_dir: tmp, home: home} do
+      # ⚖ user, 2026-08-16 : il est insupprimable PAR CHOIX, pour garantir qu'un catalogue valide
+      # existe toujours. C'est une garantie de DISPONIBILITE, pas une autorite — il reste un pair.
+      # En tete parce qu'un appelant sans projet en main doit resoudre quelque part, et que le
+      # catalogue complet qui marche toujours est le defaut honnete.
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      install(home, "aaa-avant-tout-alphabetiquement")
+
+      assert hd(Catalogue.installed_roots()) == root
+    end
+
+    test "l'ordre sous le livre est celui des NOMS — il n'appartient a personne", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # Il n'y a plus de precedence a arbitrer : chaque catalogue porte SON image, un role et une
+      # carte se resolvent dans le leur. Ce qui reste a decider est l'ordre de la liste, et un ordre
+      # de systeme de fichiers ferait dependre le defaut d'un appelant sans projet de l'ordre
+      # d'installation.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
+      zoulou = install(home, "zoulou")
+      mobile = install(home, "mobile")
+
+      assert tl(Catalogue.installed_roots()) == [mobile, zoulou]
+    end
+
+    test "un repertoire nomme `fleet` dans le cache ne DOUBLE pas le catalogue livre", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # Deux entrees sous un meme nom publieraient deux images pour un catalogue, et un lecteur
+      # tomberait sur l'une ou l'autre selon la porte empruntee.
+      root = fake_root(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
+      install(home, "fleet")
+
+      assert Catalogue.installed_roots() == [root]
+    end
+
+    test "la grosse molette EST la racine metier, quoi qu'il y ait dans le cache", %{
+      tmp_dir: tmp,
+      home: home
+    } do
+      # `root/0` repond a « quel est le catalogue livre », pas a « lequel gagne » : il n'y a plus de
+      # gagnant. Les arbres purement metier (cartes, brief templates, project_template) le lisent en
+      # direct, et un projet resout dans le sien par sa racine, jamais par ce defaut.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "mobile")
 
-      # The whole point of the target state, in one assertion: a catalogue sitting on disk is inert
-      # until a line names it.
-      assert Catalogue.active_roots() == [root]
-    end
-
-    test "the ORDER of the lines IS the precedence, and `fleet` names the shipped one", %{
-      tmp_dir: tmp,
-      home: home
-    } do
-      root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
-      mobile = install(home, "mobile")
-      sp_en = install(home, "sp-en")
-
-      declare(home, """
-      # l'ordre est la precedence
-      sp-en     # les SP en anglais, devant tout
-      mobile
-      fleet     # le metier livre — retire cette ligne s'il ne sert plus
-      """)
-
-      assert Catalogue.active_roots() == [sp_en, mobile, root]
-
-      # And the tree door inherits the order without knowing the list exists.
-      assert Catalogue.search(:cap_profiles) == [
-               Path.join(sp_en, Catalogue.rel(:cap_profiles)),
-               Path.join(mobile, Catalogue.rel(:cap_profiles)),
-               Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
-             ]
-    end
-
-    test "dropping the `fleet` line removes the shipped business catalogue", %{
-      tmp_dir: tmp,
-      home: home
-    } do
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
-      mobile = install(home, "mobile")
-      declare(home, "mobile\n")
-
-      assert Catalogue.active_roots() == [mobile]
-    end
-
-    test "the BUSINESS root follows the declaration — sinon les cartes et les roles divergent", %{
-      tmp_dir: tmp,
-      home: home
-    } do
-      # Trouve sur le banc lcars-d1, et c'est le defaut que ce test existe pour empecher de revenir.
-      # `search/1` couvre les arbres PARTAGES ; les arbres purement metier (cartes, brief templates,
-      # project_template) lisent `root/0` en direct. Tant que `root/0` ignorait la declaration,
-      # activer un catalogue donnait ses ROLES et les CARTES du catalogue livre — la fleet a refuse
-      # au boot sur un jury nommant un role que le catalogue actif ne porte pas.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
-      mobile = install(home, "mobile")
-      declare(home, "mobile\n")
-
-      assert to_string(Catalogue.root()) == mobile
-
-      # Les arbres PUREMENT metier suivent, et ce sont eux qui divergeaient : ils n'ont pas de
-      # defaut systeme, donc pas de `rel/1` ni de chemin de recherche — ils derivent de `root/0`.
-      assert String.starts_with?(Catalogue.workflow_maps_root(), mobile <> "/")
-      assert String.starts_with?(Catalogue.brief_templates_root(), mobile <> "/")
-      assert String.starts_with?(Catalogue.project_template_root(), mobile <> "/")
-    end
-
-    test "sans declaration, la grosse molette reste la racine metier", %{tmp_dir: tmp} do
-      root = fake_root(tmp)
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
-
       assert to_string(Catalogue.root()) == root
-    end
-
-    test "a DECLARED catalogue installed nowhere RAISES, naming it and where it looked", %{
-      home: home
-    } do
-      declare(home, "ghost\n")
-
-      assert_raise RuntimeError, ~r/"ghost" and it is installed nowhere/, fn ->
-        Catalogue.active_roots()
-      end
+      assert String.starts_with?(Catalogue.workflow_maps_root(), root <> "/")
+      assert String.starts_with?(Catalogue.brief_templates_root(), root <> "/")
+      assert String.starts_with?(Catalogue.project_template_root(), root <> "/")
     end
 
     test "the system catalogue is never in the list, and never dropped", %{
@@ -366,7 +357,8 @@ defmodule Fleet.CatalogueTest do
     } do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       install(home, "mobile")
-      declare(home, "mobile\n")
+
+      refute Catalogue.system_root() in Catalogue.installed_roots()
 
       assert List.last(Catalogue.search(:cap_profiles)) ==
                Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))

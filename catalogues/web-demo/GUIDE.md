@@ -1,8 +1,8 @@
 # Faire tourner ce catalogue, et en faire le vôtre
 
 **Date** : 2026-08-10
-**Dernière révision** : 2026-08-10
-**Statut** : actif — guide d'accompagnement du catalogue web
+**Dernière révision** : 2026-08-16
+**Statut** : actif — guide d'accompagnement du catalogue `web-demo`
 **Référencé par** : `catalogues/README.md`
 
 Vous savez utiliser git et vous avez déjà travaillé avec un agent. Vous n'avez pas besoin de
@@ -75,36 +75,48 @@ besoin aujourd'hui.)
 
 ## 3. Le faire tourner
 
-Ce catalogue est **livré avec la boîte, et inactif**. C'est délibéré, et c'est la démonstration du
-mécanisme : installé ne veut pas dire actif. Il est là, lisible, copiable, et il ne fait rien tant
-que personne ne le nomme.
+Ce catalogue est **livré avec l'image et installé par personne**. C'est délibéré, et c'est la
+démonstration du mécanisme : ce que l'image transporte est une **graine**, pas une installation.
+Le déploiement la dépose sur la forge, dans l'espace personnel du compte master, où elle devient
+`available` — exactement comme un catalogue qu'un humain aurait poussé depuis son portable.
 
 ```bash
-lcars catalogue list                 # ce qui est installé, et ce qui tourne
-lcars catalogue verify web           # les contrôles du démarrage, sans démarrer
-lcars catalogue enable web           # ajoute une ligne à la déclaration
+lcars catalogue list                 # ce que la forge porte : installés, disponibles, à jour ou non
+lcars catalogue verify web-demo      # les contrôles du démarrage, sans démarrer
+sudo lcars catalogue install web-demo  # ADMIN : crée son org, ses comptes, et installe sa source
 ```
 
-`enable` **refuse** un catalogue que `verify` ne passe pas — c'est ce qui fait de la vérification
-une condition d'activation plutôt qu'un outil qu'on peut sauter. Et il ne prétend pas agir à chaud :
-la flotte gèle ses images au démarrage, donc il vous rend le geste qui applique
-(`fleet_v2 stop && fleet_v2 start`).
+**Un seul verbe.** Installer, c'est aussi mettre à jour : rejouez la commande et le catalogue
+reconverge depuis sa source. Il n'y a pas d'activation à côté — installé veut dire servi, pour tout
+le monde. Et il n'y a **jamais de mise à jour automatique** : rien ne bouge sans cette commande.
 
-La déclaration est un fichier ordinaire, et l'**ordre des lignes EST la précédence** :
+`install` est réservé aux **admins**, et la porte est une capacité, pas un drapeau : le geste lit le
+jeton master de la boîte (`0600 root`). Déposer un catalogue, en revanche, n'est réservé à personne
+— c'est un `git push` vers votre espace personnel sur la forge.
 
-```
-# ~/.lcars/catalogues.active
-web        # le vôtre, devant
-lcars      # le métier livré avec la boîte — retirez la ligne s'il ne sert plus
-```
+`install` **refuse** un catalogue que `verify` ne passe pas, et il refuse **avant** de toucher la
+forge : rien n'est posé à moitié.
 
-Le premier qui porte un fichier gagne. C'est la règle du thème enfant, appliquée à des catalogues
-entiers : vous n'avez pas à tout réécrire pour changer une partie.
+### Le vôtre, à partir de celui-ci
 
-**Pour l'essayer sans rien activer**, une variable suffit et n'engage rien :
+⚠ **Ce dépôt est reposé par le déploiement à chaque apply.** Ne l'éditez pas sur la forge : forkez.
 
 ```bash
-LCARS_CATALOGUE_ROOT=/opt/lcars/catalogues/web
+git clone <forge>/<master>/web-demo && cd web-demo
+sed -i 's/^name: web-demo/name: mon-metier/' catalogue.yaml
+git remote set-url origin <forge>/<vous>/mon-metier && git push -u origin main
+```
+
+Puis demandez à un admin de l'installer. Si vous ne le voyez pas dans `list`, votre dépôt est
+**privé** : LCARS ne poll que sa propre forge et ne voit que ce qui est visible. Repassez-le public.
+
+Et si deux personnes déposent un catalogue portant le même `name`, la liste **refuse et nomme les
+deux** plutôt que d'en choisir un : personne ne peut deviner lequel est le bon.
+
+**Pour l'essayer sans rien installer**, une variable suffit et n'engage rien :
+
+```bash
+LCARS_CATALOGUE_ROOT=/opt/lcars/catalogues/web-demo
 ```
 
 Elle apporte le catalogue entier — chaque arbre en dérive son chemin. C'est la grosse molette : un
@@ -226,7 +238,7 @@ Il en existe **seize, de 0 à 15, pour tout le déploiement** — pas seize par 
 un réglage : c'est la largeur du champ dans l'identifiant de session, celui qui rend
 `pkill -f 'claude.*1badcafe'` capable de viser une classe de pods sans en toucher une autre.
 
-Le catalogue système en occupe quelques-uns, celui de LCARS aussi si vous le laissez actif. **Ne
+Le catalogue système en occupe quelques-uns, celui de LCARS aussi — il est toujours là. **Ne
 recopiez pas ici la liste de ce qui est pris** — elle sera fausse le jour où un rôle bouge. Posez
 un numéro, démarrez, et lisez le refus : il **nomme les deux rôles et le slot**, ce qui est plus
 fiable qu'une liste dans un guide.

@@ -14,10 +14,10 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE ACTIF. La cle etait scalaire et les quatre arbres se resolvaient par
+    # UNE image PAR CATALOGUE INSTALLE. La cle etait scalaire et les quatre arbres se resolvaient par
     # `search/1`, donc les catalogues fusionnaient : le SP d'un role venait de n'importe lequel
     # d'entre eux. Un pod de catalogue k doit recevoir le materiel de k, pas celui de son voisin.
-    for root <- Fleet.Catalogue.active_roots(), do: publish_scope!(root)
+    for root <- Fleet.Catalogue.installed_roots(), do: publish_scope!(root)
     :ok
   end
 
@@ -242,11 +242,11 @@ defmodule Fleet.SPBuilder.Image do
 
   defp sha_of(content), do: :crypto.hash(:sha256, content)
 
-  @doc "The published image of a catalogue, or nil. No argument = the FIRST active catalogue."
+  @doc "The published image of a catalogue, or nil. No argument = the FIRST installed catalogue."
   @spec published() :: map() | nil
   def published do
-    # `active_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
-    Fleet.Catalogue.active_roots() |> hd() |> published()
+    # `installed_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
+    Fleet.Catalogue.installed_roots() |> hd() |> published()
   end
 
   @spec published(Path.t()) :: map() | nil
@@ -263,7 +263,7 @@ defmodule Fleet.SPBuilder.Image do
   end
 
   @doc """
-  Restores an image for the FIRST active catalogue — TESTS ONLY, symmetric of `unpublish/0`.
+  Restores an image for the FIRST installed catalogue — TESTS ONLY, symmetric of `unpublish/0`.
 
   Exists so a test never writes the persistent_term key itself: the key carries the catalogue root
   now, and a test that composes it by hand pins a private representation instead of the contract —
@@ -271,7 +271,7 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    :persistent_term.put(image_key(hd(Fleet.Catalogue.active_roots())), image)
+    :persistent_term.put(image_key(hd(Fleet.Catalogue.installed_roots())), image)
     :ok
   end
 
@@ -286,7 +286,7 @@ defmodule Fleet.SPBuilder.Image do
   def draft(role) when is_binary(role), do: draft(role, nil)
 
   @doc """
-  Le meme draft, dans l'image du catalogue NOMME. `nil` = le premier actif (comportement du jour).
+  Le meme draft, dans l'image du catalogue NOMME. `nil` = le premier installe (comportement du jour).
 
   La racine vient du PROFIL (`%CapProfile{}.catalogue_root`) chez les appelants qui en ont un : le
   draft d'un role appartient au catalogue qui le declare, pas au premier de la liste.

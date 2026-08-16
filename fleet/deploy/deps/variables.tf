@@ -6,7 +6,11 @@ variable "gitea_url" {
 variable "gitea_token" {
   type        = string
   sensitive   = true
-  description = "Master/admin-token du bootstrap. ÉPHÉMÈRE : révoqué après apply. Passé via TF_VAR_gitea_token (jamais sur disque/git)."
+  # Le qualificatif « ÉPHÉMÈRE : révoqué après apply » vivait ici et il est FAUX depuis l'arbitrage
+  # du 2026-08-16 : toute évolution de structure — un catalogue de plus, un rôle de plus — a besoin
+  # de cette même autorité, au jour 400 comme au premier jour. Rien ne le POSE durablement encore ;
+  # cette ligne dit donc ce qu'il est, pas une durée de vie que personne ne tient.
+  description = "Master/admin-token site-admin : la seule autorité qui CRÉE. Passé via TF_VAR_gitea_token (jamais sur disque/git)."
 }
 
 variable "seed_password" {
@@ -27,16 +31,8 @@ variable "human_email" {
   description = "Email du compte forge de l'humain — celui qui mappe ses commits (LCARS_HUMAN_EMAIL côté boîte doit porter le même)."
 }
 
-variable "admiral_username" {
-  type        = string
-  default     = ""
-  description = "Login forge du MASTER (le sysadmin de la boîte : `admiral` au banc, le login de l'installeur en prod). Sert à lui poser sa CHARTE : le badge de l'ex-compte `starfleet` (supprimé le 2026-08-15) et le nom de son siège en `full_name`. Vide = on ne touche à aucun compte, et c'est le défaut VOULU — ce module ne CRÉE pas ce compte, il existe avant lui (installateur en prod, `bench-forge-bootstrap.sh` au banc), donc on n'écrit dessus que si le déploiement le NOMME."
-
-  # Le login part dans une ligne de commande shell (`local-exec`). Un login Gitea est alphanumérique
-  # + `.`, `-`, `_`, et commence par un alphanumérique : on le VÉRIFIE ici plutôt que de l'espérer,
-  # sinon un login exotique casse la commande ou y injecte. Vide reste valide — c'est le défaut.
-  validation {
-    condition     = var.admiral_username == "" || can(regex("^[a-zA-Z0-9][a-zA-Z0-9._-]*$", var.admiral_username))
-    error_message = "admiral_username: login forge invalide (alphanumérique, puis . - _ ; ou vide pour ne poser aucun badge)."
-  }
-}
+# ⚠ `admiral_username` A ETE RETIREE (2026-08-16), et son absence est l'arbitrage : le login du
+# master ne se parametre pas, il se DERIVE. Une instance Gitea a toujours un premier compte,
+# `id = 1`, site-admin par construction — `provision-forge-charte.sh` le resout lui-meme, pour son
+# badge ET pour le nom de son siege, d'une seule resolution. Une variable pour une donnee derivable
+# est une occasion de la contredire.

@@ -39,7 +39,7 @@ set -euo pipefail
 #
 # La cicatrice qui reste vraie et qu'on garde : ce bloc a ete FATAL tant qu'il gardait cette valeur.
 # Il tuait tout le CLI quand la fleet n'avait jamais demarre — y compris `list`, dont l'en-tete
-# promet qu'il « marche meme avec l'API down », et `catalogue install|verify|enable`, precisement
+# promet qu'il « marche meme avec l'API down », et `catalogue install|verify`, precisement
 # les gestes d'une boite NEUVE. Chaque verbe garde ce dont IL a besoin, la ou il s'en sert.
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 # `spawn` (write) goes through the per-human AF_UNIX socket (ControlRouter), off the network the
@@ -75,26 +75,24 @@ USAGE
       tuer le pod).
 
   $PROG catalogue list
-      Les catalogues installes, et lesquels sont ACTIFS, dans l'ordre de precedence.
+      Ce que la FORGE porte : installes, disponibles, et ceux dont la source a bouge.
 
-  $PROG catalogue install <source> [nom]
-      Installe un catalogue depuis un depot git, une archive tar.gz ou un dossier
-      local. Le NOM vient du catalogue (son « name: »), pas de la source ni de vous :
-      [nom] n'est qu'une assertion, et la pose echoue si le catalogue en dit un autre.
-      N'active RIEN : installe n'est pas actif.
+  $PROG catalogue install <nom>
+      Installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte.
+      ADMIN SEULEMENT : le geste lit le jeton master de la boite (0600 root).
+
+      La source arrive par la FORGE : un humain pousse son catalogue dans son espace
+      personnel depuis son disque, et n'importe qui peut le faire. L'installer est un
+      autre geste, et c'est celui-la qui est garde. Le NOM vient du manifeste du depot,
+      jamais du nom du depot ni de vous.
+
+      Rejouable : rien n'existe -> il cree ; la source a bouge -> il reconverge ; rien
+      n'a bouge -> il ne touche rien. JAMAIS declenche par le boot.
 
   $PROG catalogue verify <nom>
       Joue sur ce catalogue exactement les controles que le boot joue. Code de
       sortie = verdict.
 
-  $PROG catalogue enable <nom> | disable <nom>
-      Ajoute / retire une ligne de la declaration d'activite. REFUSE d'activer un
-      catalogue que verify ne passe pas. NE PROVISIONNE PAS la forge : activer rend
-      un catalogue LU, ca ne cree ni son org ni ses comptes de role — enable nomme
-      le geste qui reste.
-
-  $PROG catalogue remove <nom>
-      Supprime un catalogue installe. Refuse s'il est actif.
 
   $PROG project migrate <owner/nom> <catalogue>
       Migre un projet vers un autre catalogue : transfert du depot dans l'org de ce
@@ -238,16 +236,16 @@ cmd_attach() {
 
 # --- catalogue -------------------------------------------------------------
 #
-# LES TROIS CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout` : catalogues_operator_dir/0,
-# catalogues_shipped_dir/0, active_catalogues_path/0). C'est un fait ecrit deux fois, dans deux
-# langages qui ne peuvent pas s'appeler — la meme forme que les listes de roles verrouillees par
-# `mix lcars.contracts.check`. Un changement ici sans l'autre cote donne un CLI qui ecrit une
-# declaration que le runtime ne lit pas : rien ne casse, rien ne s'active, et personne ne le voit.
-CAT_DIR="${LCARS_CATALOGUES_DIR:-$HOME/.lcars/catalogues}"
-CAT_ACTIVE="${LCARS_CATALOGUES_ACTIVE:-$HOME/.lcars/catalogues.active}"
+# LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout` : catalogues_installed_dir/0,
+# catalogues_shipped_dir/0). C'est un fait ecrit deux fois, dans deux langages qui ne peuvent pas
+# s'appeler — la meme forme que les listes de roles verrouillees par `mix lcars.contracts.check`.
+# Un changement ici sans l'autre cote donne une CLI qui lit un cache sur lequel rien ne tourne, et
+# c'est en mode degrade (release injoignable) qu'elle l'affiche — le seul moment ou l'operateur n'a
+# aucune seconde source pour le recouper.
+CAT_DIR="${LCARS_CATALOGUES_DIR:-/home/catalogues}"
 CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
-# il s'active et se desactive, mais ne s'installe ni ne se supprime.
+# rien ne l'installe et rien ne le supprime — il est la, toujours.
 CAT_BUNDLED="fleet"
 
 # Ou vit <nom> : l'operateur d'abord, le livre ensuite — MEME ORDRE que `install_dirs` cote runtime,
@@ -259,38 +257,6 @@ cat_dir_of() {
   else return 1; fi
 }
 
-# Les noms declares, dans l'ordre, commentaires et lignes vides retires. MEME lecture que
-# `Fleet.Catalogue.declared_names/0` : un `#` coupe la ligne, on trim, on jette le vide.
-cat_declared() {
-  [[ -r "$CAT_ACTIVE" ]] || return 0
-  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CAT_ACTIVE" | grep -v '^$' || true
-}
-
-# L'ACTIVITE N'EST PAS LA DECLARATION, ET LES CONFONDRE FAISAIT MENTIR QUATRE COMMANDES.
-# La regle du runtime est dans `Fleet.Catalogue.active_roots/0` : *pas de declaration, ou une
-# declaration vide, signifie le catalogue livre dans le release SEUL*. C'est le cas par defaut d'une
-# boite neuve — aucun `catalogues.active` n'existe tant que personne n'a rien active.
-#
-# Ce predicat ne lisait que le fichier. Mesure du 2026-08-12 sur une boite sans declaration, dont
-# TOUT tournait sur `fleet` :
-#   lcars catalogue list  ->  « fleet   inactif   (« lcars catalogue enable fleet ») »
-# Deux lignes de la meme sortie se contredisaient — le bloc ACTIFS disait « le catalogue livre dans
-# le release, seul », et la ligne suivante nommait ce catalogue-la inactif. Celle qui ment est celle
-# qui nomme un etat et propose une commande, et un agent qui lit ca a un modele faux de sa boite.
-#
-# -F : le nom est une CHAINE, pas un motif. Sans lui, `my.cat` matche `my_cat` — un point est un
-# joker en BRE, et un nom de catalogue est une donnee de l'operateur.
-cat_is_active() {
-  local declared; declared="$(cat_declared)"
-  [[ -n "$declared" ]] || { [[ "$1" == "$CAT_BUNDLED" ]]; return; }
-  printf '%s\n' "$declared" | grep -qxF "$1"
-}
-
-# Actif SANS que personne ne l'ait declare — l'etat par defaut. Il se dit, parce qu'il ne se
-# desactive pas comme un autre (retirer une ligne d'un fichier vide redonne le defaut) et parce
-# qu'activer un AUTRE catalogue le fait sortir.
-cat_active_by_default() { [[ -z "$(cat_declared)" ]]; }
-
 # La liste porte le CHEMIN de chaque entree, et dit laquelle MASQUE l'autre.
 #
 # Mesure sur un banc (2026-08-11) : apres `catalogue install` du catalogue `web`, la liste affichait
@@ -298,67 +264,85 @@ cat_active_by_default() { [[ -z "$(cat_declared)" ]]; }
 # reellement des deux cotes, livre dans l'image et installe par l'operateur — et `cat_dir_of` fait
 # gagner l'operateur. Le masquage est une FONCTIONNALITE ; une liste qui montre deux lignes
 # identiques la rend indiscernable d'un bug, et l'operateur ne sait pas lequel des deux tourne.
+# LA LISTE NE PEUT PAS REPONDRE SEULE, ET ELLE NE FAIT PLUS SEMBLANT.
+#
+# Elle imprimait « installe » pour tout ce qui avait un dossier — c'est exactement comme ca qu'un
+# banc a affiche `web` installe pendant que la forge n'avait jamais porte d'org `web`. « Installe »
+# est un fait de FORGE (l'org porte sa source), et `bin/lcars` n'a aucun acces forge, par design :
+# donner a une commande locale un acteur distant est precisement ce que cette regle evite.
+#
+# Elle demande donc au release, par la meme porte `eval` que `catalogue verify`. La porte parle en
+# MOTS (`INSTALLED`, `AVAILABLE`, `UPDATABLE`), pas en tableau formate : une colonne ajoutee un jour
+# ne doit pas avoir a se mettre d'accord entre deux langages.
+cat_states() {
+  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  [[ -x "$bin" ]] || return 127
+
+  # ⚠ L'ADRESSE de la forge vient de `~/.lcars/fleet_v2.env`, et cette porte ne la chargeait pas —
+  # D3 de l'audit independant (2026-08-16). Mesure du 2026-08-11, deja payee par `project migrate` :
+  # l'environ d'un login humain ne porte AUCUN FORGE_*, rien ne source ce fichier hors fleet_v2.
+  # Sans lui, la porte rendait `{:config, {:missing, :base_url}}` — une liste inutilisable sur toute
+  # boite dont l'env n'est pas cable a la main, sous un message qui accuse la forge.
+  #
+  # Meme frontiere que `cmd_project_migrate`, prise par le meme bout : charger le fichier ne donne
+  # aucun acces forge a ce CLI — il TRANSMET sa configuration au release, qui agit. Les ports que le
+  # fichier porte aussi sont neutralises par `LCARS_TOOL_EVAL=1`.
+  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  if [[ -f "$env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  fi
+
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Application.CatalogueLifecycle.eval_main()"
+}
+
 cmd_catalogue_list() {
-  local installed=()
-  [[ -d "$CAT_DIR" ]] && while IFS= read -r d; do installed+=("operateur:$(basename "$d")"); done \
-    < <(find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-  [[ -d "$CAT_SHIPPED" ]] && while IFS= read -r d; do installed+=("livre:$(basename "$d")"); done \
-    < <(find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d | sort)
+  # ⚠ `out="$(...)"; rc=$?` NE MARCHE PAS SOUS `set -e` : une substitution de commande qui echoue
+  # dans une affectation tue le script AVANT la ligne suivante — donc `rc` n'etait jamais lu et
+  # aucun des refus ci-dessous n'etait atteint. Le `||` fait de l'affectation une condition, ce qui
+  # est exactement l'exception que `set -e` prevoit.
+  local out rc=0
+  out="$(cat_states 2>&1)" || rc=$?
 
-  echo "ACTIFS (ordre = precedence, $CAT_ACTIVE)"
-  if [[ -s "$CAT_ACTIVE" ]] && [[ -n "$(cat_declared)" ]]; then
-    local n=0
-    while IFS= read -r name; do
-      n=$((n + 1))
-      if [[ "$name" == "$CAT_BUNDLED" ]]; then
-        echo "  $n. $name    (livre dans le release)"
-      elif cat_dir_of "$name" >/dev/null; then
-        echo "  $n. $name    $(cat_dir_of "$name")"
-      else
-        echo "  $n. $name    INSTALLE NULLE PART — le boot refusera" >&2
-      fi
-    done < <(cat_declared)
-  else
-    # Le nommer, et pas seulement le decrire : « le catalogue livre dans le release » et la ligne
-    # « fleet » plus bas etaient le meme objet, et rien ne le disait.
-    echo "  1. $CAT_BUNDLED    (par defaut — aucune declaration, cf. « $CAT_ACTIVE »)"
-  fi
-
-  echo
-  echo "INSTALLES"
-  # Le catalogue LIVRE DANS LE RELEASE n'est ni dans CAT_DIR ni dans CAT_SHIPPED — il vit dans le
-  # release. Il ne figurait donc nulle part, alors qu'il est le DEFAUT et qu'on peut l'activer par
-  # son nom : un operateur qui n'a active que le sien n'avait aucun moyen d'apprendre qu'il existe.
-  if cat_active_by_default; then
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release — par defaut, aucune declaration)"
-  elif cat_is_active "$CAT_BUNDLED"; then
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release)"
-  else
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "inactif" "(dans le release — « $PROG catalogue enable $CAT_BUNDLED »)"
-  fi
-
-  if [[ ${#installed[@]} -eq 0 ]]; then
-    :
-  else
-    local entry origin name state note
-    for entry in "${installed[@]}"; do
-      origin="${entry%%:*}"; name="${entry#*:}"
-      state="inactif"; cat_is_active "$name" && state="actif"
-      note=""
-      # Un nom present des deux cotes : l'operateur GAGNE (cat_dir_of le resout ainsi). On le dit
-      # sur les deux lignes, sans quoi elles sont indiscernables.
-      if [[ "$origin" == "livre" && -d "$CAT_DIR/$name" ]]; then
-        note="(livre — MASQUE par celui de l'operateur)"
-      elif [[ "$origin" == "livre" ]]; then
-        note="(livre avec l'image)"
-      elif [[ -d "$CAT_SHIPPED/$name" ]]; then
-        note="(operateur — MASQUE le livre du meme nom)"
-      else
-        note="(operateur)"
-      fi
-      printf '  %-14s %-9s %s\n' "$name" "$state" "$note"
-    done
-  fi
+  case "$rc" in
+    0)
+      printf '  %-16s %-11s %s\n' "CATALOGUE" "ETAT" "DEPOT"
+      while read -r state name src; do
+        case "$state" in
+          INSTALLED) printf '  %-16s %-11s %s\n' "$name" "installe" "$src" ;;
+          UPDATABLE) printf '  %-16s %-11s %s\n' "$name" "MAJ DISPO" "$src  → « $PROG catalogue install $name » met a jour" ;;
+          AVAILABLE) printf '  %-16s %-11s %s\n' "$name" "disponible" "$src  → « $PROG catalogue install $name » (admin forge)" ;;
+        esac
+      done <<< "$out"
+      ;;
+    3)
+      # Le doublon : on NE CHOISIT PAS. Les deux proprietaires sont nommes, et c'est a eux de
+      # trancher — devenir arbitre ici, ce serait rendre une reponse a celui qui perd sans qu'il
+      # puisse savoir pourquoi.
+      echo "catalogue list: DEUX depots declarent le meme catalogue — refus." >&2
+      printf '%s\n' "$out" | sed 's/^DUPLICATE /  /' >&2
+      echo "  Aucun des deux n'est choisi. Supprimez-en un (ou renommez-le dans son manifeste)." >&2
+      return 3
+      ;;
+    127)
+      # SANS RELEASE ON DIT QU'ON NE SAIT PAS. Deviner rendrait le mensonge qu'on vient de retirer,
+      # a l'endroit qu'un operateur lit en premier.
+      echo "catalogue list: pas de release joignable (LCARS_FLEET_BIN) — l'etat des catalogues est" >&2
+      echo "  un fait de FORGE, et cette commande n'y a pas acces. Le materiel present ici :" >&2
+      [[ -d "$CAT_DIR" ]] && find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d -printf '    %f  (installe)\n' 2>/dev/null | sort >&2
+      [[ -d "$CAT_SHIPPED" ]] && find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d -printf '    %f  (graine de l image)\n' 2>/dev/null | sort >&2
+      echo "    $CAT_BUNDLED  (dans le release)" >&2
+      return 127
+      ;;
+    *)
+      echo "catalogue list: la forge n'a pas repondu — rien n'est conclu." >&2
+      printf '%s\n' "$out" | sed 's/^/  /' >&2
+      return "$rc"
+      ;;
+  esac
 }
 
 # Le binaire de release joue les memes controles que le boot. Dans la boite il est a l'install ;
@@ -376,104 +360,6 @@ cmd_catalogue_verify() {
   [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue verify: « $CAT_BUNDLED » est le catalogue livre dans le release — le boot le verifie a chaque demarrage"
   local root; root="$(cat_dir_of "$name")" || die "catalogue verify: « $name » n'est installe nulle part (cf. « $PROG catalogue list »)"
   cat_verify_root "$root"
-}
-
-cmd_catalogue_enable() {
-  local name="${1:?catalogue enable: nom requis}"
-  cat_is_active "$name" && { echo "catalogue enable: « $name » est deja actif" >&2; return 0; }
-
-  if [[ "$name" != "$CAT_BUNDLED" ]]; then
-    local root; root="$(cat_dir_of "$name")" || die "catalogue enable: « $name » n'est installe nulle part"
-    # LE REFUS QUI REND `verify` UTILE : sans lui c'est un outil qu'on peut sauter, avec lui c'est
-    # la condition d'activation. Un catalogue casse active est un boot qui refuse, decouvert au
-    # redemarrage suivant par quelqu'un qui ne fera pas le lien.
-    cat_verify_root "$root" || die "catalogue enable: « $name » ne passe pas verify — non active"
-  fi
-
-  mkdir -p "$(dirname "$CAT_ACTIVE")"
-
-  # ⚠ ACTIVER LE PREMIER CATALOGUE EN DESACTIVAIT UN AUTRE, SANS UN MOT. Tant qu'aucune declaration
-  # n'existe, le catalogue livre tourne — c'est la regle du runtime, pas une commodite. Ecrire la
-  # premiere ligne rend le fichier NON VIDE, la regle du defaut cesse de s'appliquer, et le livre
-  # sort de la liste. Mesure du 2026-08-12 sur une boite neuve : « enable web » -> declaration
-  # « web » seule, et `fleet` — donc tous les projets de son org — devenu invisible au poller. Le
-  # message disait « ajoute en DERNIER », ce qui laissait croire a un ajout a ce qui tournait deja.
-  #
-  # On MATERIALISE donc le defaut implicite avant d'ajouter, dans cet ordre : ce que la boite faisait
-  # tourner reste en tete, le nouveau vient apres. Un operateur qui ne veut vraiment que le sien le
-  # retire ensuite — et ce `disable`-la marche, parce que la declaration existe maintenant.
-  if [[ "$name" != "$CAT_BUNDLED" ]] && cat_active_by_default; then
-    printf '%s\n' "$CAT_BUNDLED" >> "$CAT_ACTIVE"
-    echo "catalogue enable: « $CAT_BUNDLED » etait actif PAR DEFAUT — il est ecrit en tete pour le rester" >&2
-    echo "  (sans ca, cette premiere declaration l'aurait fait sortir : « $PROG catalogue disable $CAT_BUNDLED » pour ne garder que le tien)" >&2
-  fi
-
-  printf '%s\n' "$name" >> "$CAT_ACTIVE"
-  echo "catalogue enable: « $name » ajoute en DERNIER dans $CAT_ACTIVE" >&2
-  echo "  l'ordre des lignes EST la precedence — editer le fichier pour le remonter" >&2
-  # Les images gelent au boot : pretendre agir a chaud serait un mensonge operationnel.
-  echo "  la fleet tourne encore sur ses images gelees : « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2
-
-  # CE QUE L'ACTIVATION NE FAIT PAS, ET QU'ELLE TAISAIT. Activer un catalogue le rend LU par la
-  # fleet ; ca ne cree ni son org ni ses comptes sur la forge. Un redemarrage sur un catalogue non
-  # provisionne part chercher des jetons de role qui n'existent pas, et le premier dispatch boucle
-  # en `role_token_unavailable` — loin d'ici, sans que rien ne rappelle ce qui manquait.
-  #
-  # Ce verbe ne peut pas provisionner lui-meme : il n'a aucun acces forge, et lui en donner un
-  # ferait d'une commande locale un acteur distant. Il NOMME donc le geste, ce qui est la difference
-  # entre un outil qui se tait et un outil qui n'agit pas.
-  if [[ "$name" != "$CAT_BUNDLED" ]]; then
-    echo "  ⚠ la forge n'a NI l'org « $name » NI ses comptes de role — l'activation ne provisionne pas :" >&2
-    echo "      etc/enroll-catalogue.sh --catalogue <racine> --tofu-dir <copie de deploy/deps>" >&2
-    echo "      puis « tofu apply » dans ce dossier (le module deploy/deps/instance/ d'abord, une seule fois par forge)" >&2
-  fi
-}
-
-cmd_catalogue_disable() {
-  local name="${1:?catalogue disable: nom requis}"
-  cat_is_active "$name" || die "catalogue disable: « $name » n'est pas actif"
-
-  # ON NE DESACTIVE PAS UN DEFAUT PAR SOUSTRACTION. Sans declaration, le catalogue livre tourne ;
-  # retirer sa ligne d'un fichier qui n'en a aucune laisse le fichier vide, et un fichier vide
-  # REDONNE le defaut. La commande aurait rendu 0 en ne changeant rien — le pire des deux mondes.
-  # Ce qu'il faut est de declarer ce qui tourne A SA PLACE, et c'est ce que dit le refus.
-  if cat_active_by_default; then
-    die "catalogue disable: « $name » est actif PAR DEFAUT (aucune declaration dans $CAT_ACTIVE) —
-  un defaut ne se retire pas, il se REMPLACE : « $PROG catalogue enable <autre> » ecrit la
-  declaration (et y garde « $name » en tete), puis « $PROG catalogue disable $name »."
-  fi
-  # Le temporaire vit DANS le repertoire forge : `mv` y est un rename atomique garanti par le
-  # noyau, alors que depuis /tmp (souvent un autre systeme de fichiers) c'est une copie suivie
-  # d'un delete — une interruption au milieu laisse la declaration tronquee.
-  local tmp; tmp="$(mktemp "$(dirname "$CAT_ACTIVE")/.catalogues.active.XXXXXX")"
-
-  # -F et pas de motif bricole autour du nom. L'ancienne forme etait
-  # `grep -vx "[[:space:]]*$name[[:space:]]*"` et elle portait DEUX defauts : un nom contenant `.`
-  # supprimait ses voisins (BRE), et un nom formant un motif INVALIDE faisait sortir grep en 2 —
-  # que le `|| true` avalait, laissant `$tmp` vide et `mv` VIDER la declaration entiere. Desactiver
-  # un catalogue desactivait tout, en silence.
-  #
-  # Les trois codes de grep sont donc distingues : 0 = des lignes restent, 1 = plus aucune (legitime
-  # quand c'etait la seule), 2 = erreur — et celui-la refuse au lieu d'ecrire.
-  local rc=0
-  grep -Fxv "$name" "$CAT_ACTIVE" > "$tmp" || rc=$?
-  if [[ "$rc" -gt 1 ]]; then
-    rm -f "$tmp"
-    die "catalogue disable: lecture de $CAT_ACTIVE echouee (grep rc=$rc) — rien n'a ete ecrit"
-  fi
-  mv "$tmp" "$CAT_ACTIVE"
-  echo "catalogue disable: « $name » retire de $CAT_ACTIVE (rien n'est supprime du disque)" >&2
-  echo "  « fleet_v2 stop && fleet_v2 start » pour appliquer" >&2
-}
-
-cmd_catalogue_remove() {
-  local name="${1:?catalogue remove: nom requis}"
-  [[ "$name" == "$CAT_BUNDLED" ]] && die "catalogue remove: « $CAT_BUNDLED » vit dans le release — « $PROG catalogue disable $CAT_BUNDLED » pour cesser de l'utiliser"
-  cat_is_active "$name" && die "catalogue remove: « $name » est ACTIF — le desactiver d'abord"
-  local dir="$CAT_DIR/$name"
-  [[ -d "$dir" ]] || die "catalogue remove: « $name » n'est pas dans $CAT_DIR (les catalogues livres sous $CAT_SHIPPED ne se suppriment pas : ils reviennent au prochain update)"
-  rm -rf "$dir"
-  echo "catalogue remove: $dir supprime" >&2
 }
 
 # Trois sources, zero scp : ce qui manque a une boite headless, c'est un transport qu'on ait deja.
@@ -495,52 +381,33 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # chose — mais il ne baptise plus rien. Avant, sans argument, le nom valait le basename de la
 # source : deux boites pouvaient donc heberger le meme catalogue sous deux noms, ce qui ne coutait
 # rien tant que le nom etait une poignee locale, et devient faux des qu'il adresse une org de forge.
+# ⚖ UN SEUL VERBE (user, 2026-08-16), et il MET A JOUR quand le catalogue est deja la. Il ne copie
+# plus de materiel localement : la source arrive par la FORGE — un humain pousse son catalogue dans
+# son espace personnel, un admin l'installe. Le materiel local devient un cache derive.
+#
+# LE GATE EST LA CAPACITE, PAS UN DRAPEAU. Installer exige de lire le jeton master (0600 root) et
+# d'ecrire l'etat de tofu : un worker est refuse par le systeme de fichiers, jamais par un booleen
+# qu'on pourrait oublier de poser. Cette commande NE LE CONTOURNE PAS — elle NOMME le geste quand
+# elle n'a pas le droit, au lieu d'echouer sur une permission qui n'apprend rien.
 cmd_catalogue_install() {
-  local src="${1:?catalogue install: source requise (depot git, archive tar.gz, ou dossier)}"
-  local claimed="${2:-}"
-  mkdir -p "$CAT_DIR"
-  local staging; staging="$(mktemp -d "$CAT_DIR/.install.XXXXXX")" \
-    || die "catalogue install: staging impossible dans $CAT_DIR"
+  local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
+  local gestures="${LCARS_FORGE_GESTURES:-/opt/lcars/forge-gestures.sh}"
 
-  case "$src" in
-    *.git|git@*|*://*.git)
-      command -v git >/dev/null || { rm -rf "$staging"; die "catalogue install: git introuvable"; }
-      rmdir "$staging"
-      git clone --depth 1 "$src" "$staging" >&2 || { rm -rf "$staging"; die "catalogue install: clone echoue"; }
-      rm -rf "$staging/.git"
-      ;;
-    http://*|https://*)
-      command -v curl >/dev/null || { rm -rf "$staging"; die "catalogue install: curl introuvable"; }
-      command -v tar  >/dev/null || { rm -rf "$staging"; die "catalogue install: tar introuvable"; }
-      curl -fsSL "$src" | tar -xz -C "$staging" --strip-components=1 \
-        || { rm -rf "$staging"; die "catalogue install: telechargement ou extraction echoue"; }
-      ;;
-    *)
-      [[ -d "$src" ]] || { rm -rf "$staging"; die "catalogue install: « $src » n'est ni un depot git, ni une URL, ni un dossier"; }
-      cp -r "$src/." "$staging/"
-      ;;
-  esac
+  [[ "$name" == "$CAT_BUNDLED" ]] \
+    && die "catalogue install: « $CAT_BUNDLED » est livre DANS le release — il n'y a pas de depot d'ou l'installer, et rien a mettre a jour"
 
-  local name
-  name="$(cat_declared_name "$staging")" || {
-    rm -rf "$staging"
-    die "catalogue install: la source ne declare pas de « name: » valide dans catalogue.yaml — un catalogue porte son nom, il ne le recoit pas de son dossier"
-  }
-  [[ -n "$claimed" && "$claimed" != "$name" ]] && { rm -rf "$staging"; die "catalogue install: la source se nomme « $name », pas « $claimed » — c'est le catalogue qui nomme"; }
-  [[ "$name" == "$CAT_BUNDLED" ]] && { rm -rf "$staging"; die "catalogue install: « $CAT_BUNDLED » est le nom du catalogue livre dans le release"; }
+  [[ -x "$gestures" ]] \
+    || die "catalogue install: gestes forge introuvables ($gestures) — cette commande ne s'execute que DANS la boite"
 
-  local dest="$CAT_DIR/$name"
-  [[ -e "$dest" ]] && { rm -rf "$staging"; die "catalogue install: $dest existe deja — « $PROG catalogue remove $name » d'abord"; }
-  mv "$staging" "$dest" || { rm -rf "$staging"; die "catalogue install: installation impossible dans $dest"; }
+  if [[ "$(id -u)" -ne 0 ]]; then
+    die "catalogue install: installer exige l'autorite de la boite (le jeton master est 0600 root).
+  Rejoue en root : « sudo $gestures install $name »
+  — et si tu n'as pas sudo ici, c'est la reponse : seul un admin installe un catalogue."
+  fi
 
-  echo "catalogue install: « $name » installe dans $dest — INACTIF" >&2
-  echo "  « $PROG catalogue verify $name » puis « $PROG catalogue enable $name »" >&2
+  "$gestures" install "$name"
 }
 
-# La migration vit au RUNTIME, pas ici : elle a besoin de la forge (transfert) ET des remotes locaux
-# (repointage), et ce CLI n'a aucun acces forge — lui en donner un ferait d'une commande locale un
-# acteur distant. Meme porte que `catalogue verify` : un `eval` sur la release, verdict au code de
-# sortie.
 cmd_project_migrate() {
   local repo="${1:?project migrate: depot requis (owner/nom)}"
   local cat="${2:?project migrate: catalogue forge requis}"
@@ -582,10 +449,7 @@ cmd_catalogue() {
     list|ls)  shift; cmd_catalogue_list "$@" ;;
     install)  shift; cmd_catalogue_install "$@" ;;
     verify)   shift; cmd_catalogue_verify "$@" ;;
-    enable)   shift; cmd_catalogue_enable "$@" ;;
-    disable)  shift; cmd_catalogue_disable "$@" ;;
-    remove)   shift; cmd_catalogue_remove "$@" ;;
-    *) die "catalogue: sous-commande inconnue '${1}' (list|install|verify|enable|disable|remove)" ;;
+    *) die "catalogue: sous-commande inconnue '${1}' (list|install|verify)" ;;
   esac
 }
 

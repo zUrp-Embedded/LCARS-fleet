@@ -17,7 +17,8 @@ defmodule Fleet.Forge.Client.Repo do
       http_post: 3,
       http_patch: 3,
       http_delete: 2,
-      paginate: 3
+      paginate: 3,
+      paginate: 4
     ]
 
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
@@ -121,6 +122,85 @@ defmodule Fleet.Forge.Client.Repo do
     with {:ok, config} <- resolve_config(opts),
          {:ok, body} <- paginate(config, "/users/#{encode_seg(login)}/repos", "") do
       {:ok, body |> Enum.map(&Map.get(&1, "full_name")) |> Enum.reject(&is_nil/1)}
+    end
+  end
+
+  @doc """
+  EVERY repository this token can SEE, across the whole forge — orgs and personal spaces alike.
+
+  ## Why `/repos/search` and not `/user/repos`
+
+  Measured 2026-08-16 on Gitea 1.26, with the SYSTEM token, against a deposit sitting in the
+  master's personal space:
+
+      /user/repos     -> fleet/lcars fleet/project-template fleet/ticket-drill
+      /repos/search   -> fleet/lcars fleet/project-template admiral/sonde-depot fleet/ticket-drill
+
+  `/user/repos` answers "what this account owns or has access to", which is the wrong question: a
+  deposit in someone ELSE's personal space is neither. `/repos/search` answers "what is visible",
+  which is the one that matches the model — a deposited catalogue lives in its author's space and
+  the LOCATION is the state.
+
+  ## What a PRIVATE deposit costs us: nothing
+
+  Same measurement, after flipping that repo to private: it vanishes from `/repos/search`. Gitea
+  enforces the rule on its own, so there is no visibility code here and none is wanted — an
+  invisible deposit is invisible, and its absence from the list IS the message to its owner.
+
+  The page arrives in an envelope (`%{"ok" => true, "data" => [...]}`), unlike every other list
+  endpoint; the pagination is the shared one, told which key to take.
+  """
+  @spec search_repos(Keyword.t()) :: {:ok, [map()]} | {:error, term()}
+  def search_repos(opts \\ []) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, body} <- paginate(config, "/repos/search", "", "data") do
+      {:ok, Enum.filter(body, &is_map/1)}
+    end
+  end
+
+  @doc """
+  The HEAD of a branch as `%{sha, message}` — the sha, plus what the commit SAYS about itself.
+
+  ## `branch_head/3` already answers the sha, and this does not replace it
+
+  It exists next to it because two callers ask two different questions of the same endpoint: the
+  seal wants the tip of a branch it is about to merge, this wants to know whether a catalogue's
+  source has moved. Merging them would make the seal carry a message it never reads.
+
+  ## Why the message is load-bearing here, and a sha alone is not
+
+  A catalogue's store (`<name>/catalogue`) is a PROJECTION of its deposit: a fresh single commit
+  reflecting the deposit's tree. Two commits of identical content therefore never share a sha, so
+  comparing the two HEADs answers "different commit", which is always true, rather than "the source
+  moved", which is the question. Measured on a bench 2026-08-16: a catalogue installed thirty
+  seconds earlier reported UPDATABLE.
+
+  Nor does the forge hand out a content hash to compare instead. Gitea's `/git/trees/{sha}` echoes
+  back the sha it was given rather than resolving the tree object, and `/git/commits/{sha}` reports
+  `commit.tree.sha` equal to the commit sha — both measured on 1.26.1.
+
+  So the projection CARRIES what it projects: `push_store` writes a `Source-Commit:` trailer, and
+  this is what reads it back. Coupling to a message format is a real cost, and it is bounded — the
+  message is ours, written by our gesture, read by our code, and a missing trailer answers "unknown"
+  rather than "current".
+  """
+  @spec branch_commit(String.t(), String.t(), Keyword.t()) ::
+          {:ok, %{sha: String.t(), message: String.t()}} | {:error, term()}
+  def branch_commit(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
+        {:ok, %{"commit" => %{"id" => sha} = c}} when is_binary(sha) ->
+          {:ok, %{sha: sha, message: Map.get(c, "message", "")}}
+
+        {:ok, _} ->
+          {:error, :no_branch_sha}
+
+        {:error, {:http, 404, _}} ->
+          {:error, :not_found}
+
+        {:error, _} = err ->
+          err
+      end
     end
   end
 

@@ -282,18 +282,15 @@ printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec
 [[ "$WITH_CREDS" -eq 1 ]] || say "creds NON posees (--no-creds) — aucun pod ne pourra demarrer, par choix"
 
 # ─── 4. amorcage de la forge, passe 1 : structure ────────────────────────────────────────────────
-# LE TFSTATE DOIT SURVIVRE ENTRE LES DEUX PASSES. Laisse a lui-meme, bootstrap se copie la recette
-# dans un mktemp NEUF a chaque appel, donc avec un etat VIDE : la passe 2 croit devoir creer une org
-# et dix comptes deja poses et meurt en 409. Un script idempotent compose deux fois ne l'est plus
-# des que son etat vit dans un temporaire qu'il recree — mesure du 2026-08-03, premiere execution.
-TOFU_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-tofu-${PROJECT}.XXXXXX")"
-cp -r "$REPO_ROOT/fleet/deploy/deps/." "$TOFU_DIR/"
-say "recette tofu dans $TOFU_DIR (etat PARTAGE par les deux passes)"
-
+# ⚠ CE BLOC ORGANISAIT LA SURVIE D'UN TFSTATE ENTRE LES DEUX PASSES, et il n'existait que parce que
+# la recette n'etait pas rejouable : etat vide sur forge peuplee -> 409, mesure du 2026-08-03. La
+# recette IMPORTE desormais ce que la forge porte deja (2026-08-16), donc l'etat est jetable et il
+# n'y a plus rien a faire survivre. Le dossier partage, la copie de la recette et le `--tofu-dir`
+# sont partis avec le defaut qui les avait fait naitre.
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    --tofu-dir "$TOFU_DIR" ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
+    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 1 en echec" 4
 
 # ─── 5. relance de la boite : 50-forge minte les role-tokens sur le seed (piege 2) ───────────────
@@ -327,7 +324,7 @@ fi
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    --tofu-dir "$TOFU_DIR" ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
+    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 2 en echec" 4
 
 # ─── 7. verdict MESURE ───────────────────────────────────────────────────────────────────────────
@@ -360,7 +357,10 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/us
 # la copie par `docker cp` parce qu'un bind depuis cette distro WSL est invisible au daemon.
 # Reecrire tout ca ici aurait produit un runner qui s'enregistre et ne sert rien.
 RUNNER_STATE="non demarre"
-MASTER_TOKEN_FILE="$TOFU_DIR/.master-token"
+# L'AUTORITE SE LIT DANS LA BOITE, plus dans un fichier que ce banc aurait persiste. Elle y est
+# posee par le geste generique (`forge-gestures.sh config-token`), 0600 root, et elle y RESTE —
+# c'est l'arbitrage du 2026-08-16. Le banc n'a donc plus de credential a lui a faire survivre.
+MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /home/private/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
 
 # ⚠ LE DIAGNOSTIC ETAIT DEJA JUSTE, ET LE VERDICT DISAIT LE CONTRAIRE (6-133). Les branches
 # ci-dessous ecrivent « ABSENT », « BLOCAGE, pas degradation », « enregistrement rate » — puis le
@@ -397,7 +397,7 @@ elif [[ -z "$RUNNER_LABELS" ]]; then
   entre-temps — rien ne sera livre sur ce banc tant qu'aucun runner ne sert le label.
               Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f fleet/deploy/docker/Dockerfile .
               puis rejouer bench-runner.sh, ou --runner-labels pour choisir soi-meme"
-elif [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
+elif [[ -z "$MASTER_TOKEN" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
   # ⚠ LA SORTIE DU SOUS-SCRIPT EST CAPTUREE, PLUS JETEE. Elle partait en `>/dev/null 2>&1`, donc le
@@ -410,17 +410,23 @@ else
   #
   # Le silence reste la regle au SUCCES — un banc qui marche n'a pas a deverser le journal de ses
   # sous-scripts. C'est l'echec qui parle, et il parle avec les mots du sous-script, pas les notres.
-  RUNNER_LOG="$TOFU_DIR/bench-runner.out"
+  RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/bench-runner-${PROJECT}.XXXXXX")"
+  # LE JETON D'ENREGISTREMENT VIENT DE LA PORTE GENERIQUE (`forge-gestures.sh runner-token`), pas
+  # d'un appel API refait ici : c'est le meme geste que l'operateur jouera pour SON runner, par
+  # `./docker.sh runner-token`. `bench-runner.sh` garde son `--reg-token`, qui existait deja pour
+  # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
+  REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
        --forge-api "$FORGE_URL/api/v1" \
-       --admin-token "$(cat "$MASTER_TOKEN_FILE")" \
+       --admin-token "$MASTER_TOKEN" \
+       ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
        --instance-url "http://forge:3000" \
        --network "$FORGE_NET" \
        --project "${PROJECT}-runner" \
        --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
     # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
     # silence que ce banc doit refuser.
-    RUNNERS="$(curl -s -m 5 -H "Authorization: token $(cat "$MASTER_TOKEN_FILE")" \
+    RUNNERS="$(curl -s -m 5 -H "Authorization: token $MASTER_TOKEN" \
         "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null \
       | python3 -c 'import json,sys
 try:

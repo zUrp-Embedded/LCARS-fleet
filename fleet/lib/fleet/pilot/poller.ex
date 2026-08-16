@@ -109,7 +109,7 @@ defmodule Fleet.Pilot.Poller do
     # The forge org = THE admission frontier: the poller discovers via `list_org_repos(org)`, every repo
     # of the org IS a fleet project. Default `fleet` (config `:lcars_fleet, :pilot_fleet_org`); MUST match the org of
     # create_project (`:lcars_fleet, :mcp_delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
-    # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE ACTIF, et l'org porte le nom du
+    # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE INSTALLE, et l'org porte le nom du
     # catalogue. C'etait un scalaire tant qu'il n'y avait qu'un metier ; un scalaire ne peut pas
     # nommer N orgs, et le projet d'un catalogue vit dans la sienne. Seam de test : opt `:orgs`
     # (ou `:org`, un singleton, pour les appelants qui en nommaient une).
@@ -313,7 +313,7 @@ defmodule Fleet.Pilot.Poller do
   def handle_call(:stats, _from, state) do
     {:reply,
      %{
-       # Ce que ce poller SURVEILLE — une org par catalogue actif. Sans ca, « pourquoi ce projet
+       # Ce que ce poller SURVEILLE — une org par catalogue installe. Sans ca, « pourquoi ce projet
        # n'est-il jamais pris » n'a pas de reponse observable : la ligne de demarrage le dit une
        # fois, et un operateur qui arrive apres ne l'a plus.
        orgs: state.orgs,
@@ -387,7 +387,7 @@ defmodule Fleet.Pilot.Poller do
   # alone → a live pod #N/repoB CANNOT mask an orphan #N/repoA, and the 2-tick grace does not
   # contaminate across repos (no double-spawn). The key carries the identity.
   # ⚠ UNE ORG ABSENTE N'EST PAS UNE ORG ILLISIBLE, et confondre les deux a coute une flotte entiere.
-  # Mesure du 2026-08-15 au banc : `lcars catalogue enable web` sur une forge qui n'a jamais porte
+  # Mesure du 2026-08-15 au banc : le catalogue `web` servi ici sur une forge qui n'a jamais porte
   # l'org `web` rendait 404 ici, le `{:halt, …}` jetait l'accumulateur — `fleet` INCLUS, deja liste —
   # et la passe entiere tombait. Pas seulement le dispatch : tout le corps de `do_poll` (snapshot des
   # pods, fold des repos, filet arch, recheck des protections) pour TOUS les projets de TOUTES les
@@ -413,18 +413,19 @@ defmodule Fleet.Pilot.Poller do
     end)
   end
 
-  # Announce a PROVEN-absent org once per transition, and name the two gestures that end it. The
-  # message is the only place the operator learns that a catalogue they enabled is inert here: the
-  # forge never carried its org, so `enable` made the fleet READ a business nobody provisioned.
+  # Announce a PROVEN-absent org once per transition, and name the gesture that ends it. The message
+  # is the only place the operator learns that a catalogue this box serves is inert: the material is
+  # here and the forge never carried its org — half an install, and the half that is missing is the
+  # one that mints the accounts every dispatch needs.
   defp note_absent_orgs(state, absent) do
     now = MapSet.new(absent)
 
     for org <- MapSet.difference(now, state.absent_orgs) do
       Logger.warning(
-        "Poller: catalogue #{inspect(org)} is ACTIVE on this box but its org does NOT exist on the " <>
-          "forge (404) — DROPPED from discovery. Nothing is hidden by the drop: an org that does " <>
-          "not exist carries no repository. Enroll it (`etc/enroll-catalogue.sh` then `tofu apply`) " <>
-          "or `lcars catalogue disable #{org}`."
+        "Poller: catalogue #{inspect(org)} has its material on this box but its org does NOT " <>
+          "exist on the forge (404) — DROPPED from discovery. Nothing is hidden by the drop: an " <>
+          "org that does not exist carries no repository. Replay `lcars catalogue install " <>
+          "#{org}` (admin, inside the box) — it is convergent and it lays both halves."
       )
     end
 
@@ -436,14 +437,14 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # `:orgs` d'abord (la forme), `:org` ensuite (un singleton — les appelants qui en nommaient une),
-  # puis la config, puis les catalogues actifs : l'org EST le nom du catalogue, donc la liste se
+  # puis la config, puis les catalogues installes : l'org EST le nom du catalogue, donc la liste se
   # derive au lieu de se tenir.
   defp resolve_orgs(opts) do
     cond do
       is_list(orgs = Keyword.get(opts, :orgs)) and orgs != [] -> orgs
       is_binary(org = Keyword.get(opts, :org)) -> [org]
       is_binary(org = Application.get_env(:lcars_fleet, :pilot_fleet_org)) -> [org]
-      true -> Fleet.Catalogue.active_names()
+      true -> Fleet.Catalogue.installed_names()
     end
   end
 

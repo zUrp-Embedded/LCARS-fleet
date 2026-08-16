@@ -27,13 +27,12 @@ setup() {
   : > "$ROOT/fleet/deploy/deps/.keep"
   printf '#!/usr/bin/env bash\nPROV_CLAUDE_SEED=/local/claude\n' > "$ROOT/fleet/deploy/lib/provision-lib.sh"
 
-  # L'amorçage forge : il REUSSIT et pose le master token la ou le script ira le chercher, parce que
-  # c'est l'etat nominal — ce que ces tests font varier est le RUNNER, rien d'autre.
+  # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
+  # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par
+  # `forge-gestures.sh config-token`), et `bench-up` l'y lit. Cette doublure ecrivait dans le
+  # `--tofu-dir` que le banc n'a plus.
   cat > "$DEV/bench-forge-bootstrap.sh" <<'FAKE'
 #!/usr/bin/env bash
-while [[ $# -gt 0 ]]; do
-  case "$1" in --tofu-dir) printf 'MASTER\n' > "$2/.master-token"; shift 2 ;; *) shift ;; esac
-done
 exit 0
 FAKE
   chmod 0755 "$DEV/bench-forge-bootstrap.sh"
@@ -69,6 +68,9 @@ FAKE
   # Etat nominal « oui » ; le temoin de son absence l'ecrase.
   OP_TOKEN_OUT="$BATS_TEST_TMPDIR/op_token.out"
   echo "oui" > "$OP_TOKEN_OUT"
+  # Le MASTER token, desormais lu dans la boite et plus sur l'hote. Nominal : present.
+  MASTER_TOKEN_OUT="$BATS_TEST_TMPDIR/master_token.out"
+  echo "MASTER" > "$MASTER_TOKEN_OUT"
   # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
   # boite en second argument (`exec <box> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
@@ -88,6 +90,10 @@ case "\$1 \$2" in
      esac ;;
 esac
 case "\$argv" in
+  # L'AUTORITE, LUE DANS LA BOITE. Etat nominal : elle y est. Le temoin de son absence l'efface —
+  # c'est ce que le verdict « pas de master token » mesure desormais.
+  *forge-master.token*)   cat "$MASTER_TOKEN_OUT" ;;
+  *forge-gestures.sh\ runner-token*) echo REG-TOKEN-TEMOIN ;;
   *system.gitea_token*)   echo TOKEN-SYSTEME ;;
   *"*.gitea_token"*)      echo 9 ;;
   # Le token OPERATEUR, dans le home du worker — distinct du glob /home/private ci-dessus, qui vise
@@ -188,12 +194,13 @@ run_bench() {
 
 @test "6-133bis: la branche « pas de master token » non plus" {
   # Meme defaut, meme ligne, deuxieme occurrence : la corriger a un seul endroit l'aurait laissee.
-  rm -f "$DEV/bench-forge-bootstrap.sh"
-  cat > "$DEV/bench-forge-bootstrap.sh" <<'FAKE'
-#!/usr/bin/env bash
-exit 0
-FAKE
-  chmod 0755 "$DEV/bench-forge-bootstrap.sh"
+  #
+  # ⚠ LA FACON DE PROVOQUER L'ABSENCE A CHANGE AVEC LA SOURCE. Ce test vidait le sous-script
+  # d'amorcage, parce que c'etait LUI qui persistait le master token sur l'hote. Depuis le
+  # 2026-08-16 l'autorite vit dans la boite : ce qu'il faut vider est la reponse de la doublure
+  # docker, pas le sous-script. Un test qui aurait garde l'ancien geste serait passe au VERT sur un
+  # banc dont le token est bien la — il aurait mesure un chemin que plus personne ne prend.
+  : > "$MASTER_TOKEN_OUT"
 
   run_bench
   [ "$status" -ne 127 ]

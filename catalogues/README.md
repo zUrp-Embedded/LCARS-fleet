@@ -1,6 +1,7 @@
 # catalogues/ — les catalogues métier
 
 **Date** : 2026-08-10
+**Dernière révision** : 2026-08-16
 **Statut** : actif
 **Référencé par** : `fleet/deploy/docker/Dockerfile` (copie dans l'image)
 
@@ -20,17 +21,32 @@ Une variable, un catalogue entier. Chaque arbre en dérive son sous-chemin.
 
 | Dossier | Ce que c'est |
 |---|---|
-| `web/` | Catalogue **dev web** — six rôles, trois pipelines. Écrit pour être lu et repris : chaque fichier explique ses choix. Point de départ pour se faire le sien. |
+| `web-demo/` | Catalogue **dev web** de démonstration — quatre rôles, trois pipelines, ses avatars. Écrit pour être lu et repris : chaque fichier explique ses choix. |
+
+Il s'appelle `web-demo` et non `web` parce que le déploiement le **repose à chaque apply** dans
+l'espace personnel du compte master, et que `web` est le nom qu'un vrai catalogue métier voudra
+prendre. Un nom qui dit « démonstration » pousse au fork plutôt qu'à l'installation.
 
 Le catalogue **de référence** de LCARS n'est pas ici : il vit dans `priv/catalogue/`, parce qu'il
-est celui que le release embarque par défaut. Cette asymétrie est connue — où vivent et comment se
-livrent les catalogues est une question ouverte, traitée séparément.
+est celui que le release embarque. C'est ce qui le rend insupprimable, et c'est un choix — garantir
+qu'un catalogue valide existe toujours. Une garantie de disponibilité, pas une autorité : il reste
+un pair, et un rôle ou une carte d'un autre catalogue ne s'y résout jamais.
+
+## Ce dossier est une GRAINE, pas une installation
+
+Ce que l'image transporte ici est déposé sur la forge à chaque apply et **installé par personne**.
+Un catalogue devient installé quand un admin joue `lcars catalogue install <nom>` : le geste crée
+son org et ses comptes de rôle, et pousse sa source dans `<nom>/catalogue`. **C'est ce dépôt-là qui
+signe l'installation** — le matériel présent sur une boîte n'en est qu'un cache, reconvergé à chaque
+démarrage.
+
+Un seul verbe : réinstaller, c'est mettre à jour. Et jamais de mise à jour automatique.
 
 ## Prendre celui-ci et en faire le sien
 
 ```bash
 # depuis la RACINE du dépôt :
-cp -r catalogues/web /chemin/vers/mon-catalogue
+cp -r catalogues/web-demo /chemin/vers/mon-catalogue
 # éditez, puis — depuis `fleet/`, la racine Mix :
 mix lcars.catalogue.verify /chemin/vers/mon-catalogue
 ```

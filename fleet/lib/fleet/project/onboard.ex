@@ -266,16 +266,17 @@ defmodule Fleet.Project.Onboard do
   the graph says so, and widening it to answer a project question would be widening it for the
   wrong reason.
   """
-  @spec active_orgs() :: [String.t()]
-  def active_orgs, do: Fleet.Catalogue.active_names()
+  @spec installed_orgs() :: [String.t()]
+  def installed_orgs, do: Fleet.Catalogue.installed_names()
 
   # Le defaut des quatre portes, quand l'appelant ne nomme pas d'org. C'etait le litteral `"fleet"`
   # a cinq endroits — le nom d'UN catalogue, ecrit cinq fois. Il vaut desormais le premier catalogue
-  # actif, donc `fleet` sur un deploiement qui n'apporte rien, et le sien sur un deploiement qui
-  # apporte le sien. `project_create` passe `:org` explicitement depuis le guichet ; ce defaut sert
-  # les appels directs et les tests.
+  # installe, et ce premier-la est TOUJOURS `fleet` : il vit dans le release, donc il est installe
+  # par construction et il est en tete. Un deploiement qui apporte le sien nomme son org au guichet,
+  # ce qui est le geste qu'on veut — un defaut ne devine pas quel metier l'appelant visait.
+  # `project_create` passe `:org` explicitement ; ce defaut sert les appels directs et les tests.
   defp default_org do
-    case active_orgs() do
+    case installed_orgs() do
       [org | _] -> org
       [] -> "fleet"
     end
@@ -307,7 +308,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- refute_same_catalogue(full_name, target_catalogue),
-         :ok <- require_target_active(target_catalogue),
+         :ok <- require_target_installed(target_catalogue),
          {:ok, new_full_name} <-
            repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
          {:ok, url} <- repo_url(new_full_name, opts),
@@ -336,20 +337,53 @@ defmodule Fleet.Project.Onboard do
 
   # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que cette boite n'a
   # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
-  # les orgs des catalogues ACTIFS, donc le projet deviendrait invisible, pas casse.
+  # les orgs des catalogues INSTALLES, donc le projet deviendrait invisible, pas casse.
   #
-  # ⚠ TROIS ETATS, ET DEUX D'ENTRE EUX PORTAIENT LE MEME NOM. Ce refus s'appelait
-  # `catalogue_not_installed` alors qu'il ne teste RIEN d'installe : il lit la declaration locale
-  # `catalogues.active`. Le vocabulaire est desormais tenu, et chaque etat a UNE source de verite :
-  #   * available — le materiel est la (graine de l'image, ou import) ;
-  #   * installed — LA FORGE SIGNE : l'org du catalogue existe (`catalogue_not_installed`, plus bas,
-  #     dans le preflight) ;
-  #   * active    — l'humain l'a choisi dans `catalogues.active` (CE refus).
-  # Un catalogue peut etre actif sans etre installe, et c'est precisement l'etat qui a tue une flotte
-  # entiere au banc le 2026-08-15 : le poller derive ses orgs des catalogues ACTIFS.
-  defp require_target_active(target) do
-    actives = active_orgs()
-    if target in actives, do: :ok, else: {:error, {:catalogue_not_active, target, actives}}
+  # ⚠ IL Y AVAIT TROIS ETATS ; IL EN RESTE DEUX, ET C'EST LE POINT. Ce refus s'appelait
+  # `catalogue_not_active` et lisait une declaration locale d'ACTIVITE — un troisieme etat, entre
+  # « le materiel est la » et « la forge le porte », que quelqu'un tenait a la main. Deux etats qui
+  # repondent a la meme question finissent par se contredire, et l'ecart a tue une flotte entiere au
+  # banc le 2026-08-15 : declare actif, jamais installe, le poller derivait ses orgs de la
+  # declaration et cherchait des jetons de role que personne n'avait frappes.
+  #
+  # Ce qui reste tient en une phrase : le materiel est ICI ou il n'y est pas, et il n'y arrive que
+  # par la forge. Le pendant forge (le preflight, plus bas) n'est PAS un
+  # troisieme etat — c'est le meme fait mesure a sa source, pour le cas ou l'install a ete
+  # interrompu entre l'org et le materiel.
+  defp require_target_installed(target), do: require_installed(target)
+
+  @doc """
+  The single not-installed refusal — ONE atom, ONE payload shape, for every caller inside and
+  outside this module.
+
+  ## Why the payload is a SENTENCE and not the installed list
+
+  Until 2026-08-16 two sites answered the same atom with different third elements: a LIST of
+  installed names from the local guards, a gestures STRING from the forge preflight
+  (ex-`catalogue_org_absent`). A caller holding `{:catalogue_not_installed, name, x}` could not
+  know which it had — the same ambiguity as the two atoms before, moved down one level instead of
+  removed. ⚖ Concession recorded in the cross-audit: the ACTION is identical in both cases (a
+  forge admin installs it), and an inventory is only worth printing inside a sentence that says
+  what to do with it. The sentence carries the inventory.
+
+  Public so the MCP delegation door cannot grow a second wording of it: two phrasings of one
+  refusal is how the vocabulary split in the first place.
+  """
+  @spec catalogue_not_installed(String.t()) ::
+          {:error, {:catalogue_not_installed, String.t(), String.t()}}
+  def catalogue_not_installed(name) do
+    installed = installed_orgs()
+
+    {:error,
+     {:catalogue_not_installed, name,
+      "the catalogue '#{name}' is not installed on this box (installed: " <>
+        "#{Enum.join(installed, ", ")}). A project outside an installed catalogue is INVISIBLE — " <>
+        "the poller only discovers on installed orgs. An admin installs it, inside the box: " <>
+        "`lcars catalogue install #{name}`."}}
+  end
+
+  defp require_installed(name) do
+    if name in installed_orgs(), do: :ok, else: catalogue_not_installed(name)
   end
 
   # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
@@ -400,16 +434,13 @@ defmodule Fleet.Project.Onboard do
 
         System.halt(0)
 
-      {:error, {:catalogue_not_active, cat, actives}} ->
-        IO.puts(:stderr, "REFUSE : le catalogue #{inspect(cat)} n'est pas actif sur cette boite.")
-        IO.puts(:stderr, "  actifs : #{Enum.join(actives, ", ")}")
-
+      {:error, {:catalogue_not_installed, cat, gestures}} ->
         IO.puts(
           :stderr,
-          "  un projet migre vers un catalogue absent devient INVISIBLE : le poller"
+          "REFUSE : le catalogue #{inspect(cat)} n'est pas installe sur cette boite."
         )
 
-        IO.puts(:stderr, "  ne decouvre que sur les orgs des catalogues actifs.")
+        IO.puts(:stderr, "  #{gestures}")
         System.halt(1)
 
       {:error, {:already_in_catalogue, cat}} ->
@@ -464,7 +495,7 @@ defmodule Fleet.Project.Onboard do
     dirs = face_dirs(name, opts)
 
     with :ok <- validate_name(name),
-         :ok <- require_catalogue_active(full_name),
+         :ok <- require_catalogue_installed(full_name),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
@@ -512,7 +543,7 @@ defmodule Fleet.Project.Onboard do
   C'est la troisieme porte d'entree, et elle existe parce que les deux autres refusent ce cas par
   construction, chacune pour sa bonne raison :
 
-    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_active`)
+    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_installed`)
       et ne filtre donc rien — il n'a pas a le faire ;
     * `import_external/3` exige `https` + un hote de son allowlist, et notre forge est en `http` :
       elle serait refusee sur le SCHEMA. Cette garde borne « depuis quel hote ETRANGER on clone »,
@@ -633,7 +664,7 @@ defmodule Fleet.Project.Onboard do
   # The names already carried by an ACTIVE catalogue org. Fail-loud: an unreachable org would make
   # the candidate list too WIDE, i.e. offer to import what is already in.
   defp enrolled_names(repo, fc) do
-    Enum.reduce_while(active_orgs(), {:ok, MapSet.new()}, fn org, {:ok, acc} ->
+    Enum.reduce_while(installed_orgs(), {:ok, MapSet.new()}, fn org, {:ok, acc} ->
       case repo.list_org_repos(org, fc) do
         {:ok, names} ->
           {:cont, {:ok, Enum.into(Enum.map(names, &Fleet.Layout.project_name/1), acc)}}
@@ -655,18 +686,12 @@ defmodule Fleet.Project.Onboard do
   # reprendre par cette porte le clonerait puis le recreerait ailleurs, alors que les verbes justes
   # existent — `import/2` pour l'adopter localement, `migrate/3` pour le changer de catalogue.
   defp refute_source_in_org(owner, source) do
-    if owner in active_orgs(),
+    if owner in installed_orgs(),
       do: {:error, {:source_already_enrolled, source, owner}},
       else: :ok
   end
 
-  defp require_destination_catalogue(catalogue) do
-    actives = active_orgs()
-
-    if catalogue in actives,
-      do: :ok,
-      else: {:error, {:catalogue_not_active, catalogue, actives}}
-  end
+  defp require_destination_catalogue(catalogue), do: require_installed(catalogue)
 
   # A PRIVATE deposit is refused, and it is refused HERE rather than left to the clone.
   #
@@ -707,15 +732,8 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  defp require_catalogue_active(full_name) do
-    cat = full_name |> String.split("/") |> List.first()
-    actives = active_orgs()
-
-    if cat in actives do
-      :ok
-    else
-      {:error, {:catalogue_not_active, cat, actives}}
-    end
+  defp require_catalogue_installed(full_name) do
+    full_name |> String.split("/") |> List.first() |> require_installed()
   end
 
   # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
@@ -1993,9 +2011,9 @@ defmodule Fleet.Project.Onboard do
   end
 
   # `require_org_membership/2` a ete RETIRE ici (2026-08-11). Il comparait le depot a UNE org —
-  # celle des opts ou le premier catalogue actif — et son seul comportement atteignable etait un
-  # refus faux : un proprietaire qui n'est pas un catalogue actif est deja arrete par
-  # `require_catalogue_active`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
+  # celle des opts ou le premier catalogue installe — et son seul comportement atteignable etait un
+  # refus faux : un proprietaire qui n'est pas un catalogue installe est deja arrete par
+  # `require_catalogue_installed`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
   # PREMIER de la liste. Il ne pouvait donc mordre que le second catalogue, a tort. La question
   # « ce depot est-il enrollable ici ? » a une seule autorite, et c'est le catalogue du proprietaire.
 
@@ -2059,7 +2077,13 @@ defmodule Fleet.Project.Onboard do
   # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
   # illisible (on ne sait pas — on le DIT et l'appelant retentera).
   defp seeded_project?(repo, opts) do
-    if repo == project_template(opts) do
+    # LE TEMPLATE DE SON CATALOGUE, PAS « le » template. `repo` est `<catalogue>/<nom>`, donc le
+    # proprietaire EST le catalogue : comparer a un template global ferait passer le template d'un
+    # catalogue metier pour un projet ordinaire, et la reconciliation lui poserait une protection de
+    # `main` dimensionnee sur un jury qui ne le concerne pas.
+    cat = repo |> String.split("/") |> List.first()
+
+    if repo == project_template(Keyword.put(opts, :org, cat)) do
       {:ok, false}
     else
       repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
@@ -2151,12 +2175,11 @@ defmodule Fleet.Project.Onboard do
                {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
             end
 
-          # L'ORG DU CATALOGUE N'EXISTE PAS SUR CETTE FORGE — et c'est le cas NOMINAL d'un catalogue
-          # qu'on vient d'activer. `lcars catalogue enable` le dit deja (« la forge n'a NI l'org ni
-          # ses comptes de role — l'activation ne provisionne pas »), mais l'echec, lui, tombait deux
-          # gestes plus tard et dans le vocabulaire de Gitea : « user redirect does not exist
-          # [name: web] / GetOrgByName ». Personne ne remonte de cette phrase-la jusqu'a « le
-          # catalogue est actif ici et n'a jamais ete enrole sur la forge ».
+          # L'ORG DU CATALOGUE N'EXISTE PAS SUR CETTE FORGE — un install interrompu entre ses deux
+          # moities, ou un materiel pose a la main. L'echec, lui, tombait deux gestes plus tard et
+          # dans le vocabulaire de Gitea : « user redirect does not exist [name: web] /
+          # GetOrgByName ». Personne ne remonte de cette phrase-la jusqu'a « le materiel est ici et
+          # la forge ne porte pas son org ».
           # Un 404 ici a exactement deux causes, et on les separe avec l'appel qui les distingue au
           # lieu de deviner sur un message : soit l'org manque (diagnostiquable, geste nomme), soit
           # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
@@ -2167,17 +2190,21 @@ defmodule Fleet.Project.Onboard do
           # La question est « l'org existe-t-elle », or dans Gitea une org est une ligne de la MEME
           # table `user` : un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
           # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test
-          # rendait alors `true` et le diagnostic exact (`catalogue_not_installed`) retombait en
+          # rendait alors `true` et le diagnostic exact (l'org absente) retombait en
           # erreur brute — degradation silencieuse du seul message qui nomme le geste manquant.
           {:error, {:http, 404, _}} = err ->
             case users.org_exists?(org, fc) do
               {:ok, false} ->
                 {
                   :error,
-                  # INSTALLED = LA FORGE SIGNE (l'org existe), le pendant de `catalogue_not_active`
-                  # plus haut, qui lui ne lit que la declaration locale. Ce refus-ci s'appelait
-                  # `catalogue_not_enrolled` : un troisieme mot pour une notion qui en avait deja
-                  # deux, dont une qui mentait.
+                  # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus plus
+                  # haut lit le materiel present ici ; celui-ci demande a la forge si l'org existe.
+                  # Les deux ne peuvent diverger qu'entre les deux moities d'un install interrompu,
+                  # et c'est precisement ce cas-la qu'il faut nommer : sans lui l'appelant recevrait
+                  # un 404 brut la ou le geste manquant est connu.
+                  # SAME ATOM as the local guards since the payload unification — what differs is
+                  # the sentence, because what was MEASURED differs: here the material is on the
+                  # box and the forge lacks the org, half an install.
                   {:catalogue_not_installed, org, provisioning_gestures(:catalogue, human, org)}
                 }
 
@@ -2215,13 +2242,11 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp provisioning_gestures(:catalogue, _human, org) do
-    "the catalogue '#{org}' is ACTIVE on this box but its org does NOT exist on the forge — " <>
-      "activating a catalogue makes it READ by the fleet, it never provisions anything. Nothing " <>
-      "can be onboarded into it until the forge carries the org and its role accounts: " <>
-      "`etc/enroll-catalogue.sh --catalogue <root> --tofu-dir <copy of deploy/deps>` then " <>
-      "`tofu apply` in that folder (the deploy/deps/instance/ module first, once per forge). " <>
-      "Until then, target an enrolled catalogue (`lcars catalogue list` shows what is active here, " <>
-      "which is NOT the same question as what the forge carries)."
+    "the catalogue '#{org}' has its material on this box but its org does NOT exist on the forge — " <>
+      "half an install. Nothing can be onboarded into it until the forge carries the org and its " <>
+      "role accounts, and ONE gesture lays both: `lcars catalogue install #{org}`, played by an " <>
+      "admin inside the box. Replaying it is the fix — it is convergent, and it is also how the " <>
+      "material got here. `lcars catalogue list` shows what the forge actually carries."
   end
 
   # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
@@ -2295,7 +2320,16 @@ defmodule Fleet.Project.Onboard do
 
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-    template = project_template(opts)
+    {template, origin} = resolve_template(Keyword.put(opts, :org, org))
+
+    if origin == :fallback and org != "fleet" do
+      Logger.info(
+        "ProjectOnboard: #{org}/#{name} scaffolded from #{template} — the catalogue #{inspect(org)} " <>
+          "carries no project_template tree of its own. Legitimate (a starting tree names nothing " <>
+          "and is named by nothing), and said because a catalogue silently built from a neighbour's " <>
+          "material is the defect this resolution exists to close."
+      )
+    end
 
     case repo_mod(opts).generate_repo(
            template,
@@ -2347,14 +2381,68 @@ defmodule Fleet.Project.Onboard do
 
   defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 
+  # The repo NAME is fixed and the OWNER is the catalogue: `<catalogue>/project-template`. Fixing the
+  # name is what lets the resolution be local — no forge lookup to find out what a catalogue called
+  # its template.
+  @template_repo_name "project-template"
+  @bundled_template "fleet/#{@template_repo_name}"
+
   @doc """
-  Returns the configured forge template repository, defaulting to `"fleet/project-template"`.
+  The forge template repository a project of `opts[:org]` is generated from.
+
+  ## Per catalogue, and it was not
+
+  It answered the literal `"fleet/project-template"` for every project on the box until 2026-08-16 —
+  measured, and the effect was silent: a `web-demo/*` project was scaffolded from the REFERENCE
+  catalogue's template while `web-demo` shipped thirteen files of its own that nothing ever read. A
+  tree present in the catalogue and unreachable by any caller is not a feature waiting to be wired,
+  it is dead weight that looks wired.
+
+  The repo is `<catalogue>/#{@template_repo_name}`, the same derivation the org-per-catalogue model
+  applies everywhere else, and the LOCAL material decides: a catalogue that carries a
+  `#{"project_template"}` tree has its own repo, because `catalogue install` pushes the two together.
+  Asking the forge instead would be a network call on a path that already knows the answer.
+
+  ## The fallback, and why it is said out loud
+
+  ⚖ user, 2026-08-16: *"the template, we can take fleet's default if there is none, that changes
+  nothing"*. It is the ONE tree that may fall back, and the reason is structural: everything else in
+  a catalogue is named BY NAME — a card names a role, a role names its profile, a profile names its
+  SP — so falling back would resolve a name in a catalogue that never declared it. A project
+  template names nothing and is named by nothing; it is a starting tree.
+
+  It is still SAID at the moment it happens. A catalogue silently scaffolding from a neighbour's
+  template is the exact shape of the defect above, one layer down.
+
+  The two explicit overrides keep precedence: `opts[:project_template]` for a caller that names its
+  own, `:pilot_project_template` for a deployment that pins one for everybody.
   """
   @spec project_template(keyword()) :: String.t()
-  def project_template(opts \\ []) do
-    Keyword.get(opts, :project_template) ||
-      Application.get_env(:lcars_fleet, :pilot_project_template, "fleet/project-template")
+  def project_template(opts \\ []), do: elem(resolve_template(opts), 0)
+
+  # `{repo, :named | :pinned | :own | :fallback}` — the ORIGIN travels with the answer so the one
+  # caller whose decision has a consequence can say what happened, and the one that only compares
+  # (`seeded_project?/2`, run per repo per poll) stays silent. Logging inside the resolution would
+  # repeat the same sentence every tick, which is how a real signal becomes scrollback.
+  defp resolve_template(opts) do
+    cond do
+      repo = Keyword.get(opts, :project_template) -> {repo, :named}
+      repo = Application.get_env(:lcars_fleet, :pilot_project_template) -> {repo, :pinned}
+      true -> catalogue_template(Keyword.get(opts, :org))
+    end
   end
+
+  defp catalogue_template(cat) when is_binary(cat) do
+    root = Fleet.Catalogue.root_for(cat)
+
+    if root && File.dir?(Path.join(root, Fleet.Catalogue.rel(:project_template))) do
+      {"#{cat}/#{@template_repo_name}", :own}
+    else
+      {@bundled_template, :fallback}
+    end
+  end
+
+  defp catalogue_template(_), do: {@bundled_template, :fallback}
 
   @doc false
   # F-C084

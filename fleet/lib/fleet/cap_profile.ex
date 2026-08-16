@@ -91,7 +91,7 @@ defmodule Fleet.CapProfile do
   # racine en argument aurait ete transporter a cote du profil un fait qui EST du profil : son SP,
   # son draft et ses modops viennent tous du catalogue qui le declare.
   #
-  # `nil` = charge sans catalogue nomme, donc le premier actif. C'est le comportement du jour, et il
+  # `nil` = charge sans catalogue nomme, donc le premier installe. C'est le comportement du jour, et il
   # reste juste tant qu'un appelant n'a pas de projet en main.
   defstruct [:kind, :metadata, :spec, :active_modops, :catalogue_root]
 
@@ -132,7 +132,7 @@ defmodule Fleet.CapProfile do
   @doc """
   Le meme role, charge depuis le catalogue NOMME — et le profil rendu PORTE cette racine.
 
-  `nil` garde le comportement du jour (le premier catalogue actif). La racine voyage ensuite sur le
+  `nil` garde le comportement du jour (le premier catalogue installe). La racine voyage ensuite sur le
   profil, ce qui evite de la threader dans les trois lecteurs qui le prennent deja.
   """
   @spec load(String.t(), Path.t() | nil) :: {:ok, t()} | {:error, term()}
@@ -161,7 +161,7 @@ defmodule Fleet.CapProfile do
          :ok <- Schema.validate(merged, :cap_profile) do
       # La racine SURVIT a la composition : superposer des modops ne change pas de quel catalogue le
       # role vient. Sans ce report, composer effacait l'appartenance et les lecteurs d'aval
-      # retombaient sur le premier catalogue actif — le defaut meme que ce champ existe pour fermer.
+      # retombaient sur le premier catalogue installe — le defaut meme que ce champ existe pour fermer.
       {:ok, to_struct(merged, base.catalogue_root)}
     end
   end
@@ -782,7 +782,8 @@ defmodule Fleet.CapProfile do
     # someone else's catalogues. A memo whose key is narrower than its input is a wrong answer with
     # a fast path.
     key =
-      {__MODULE__, :forge_logins, Fleet.Catalogue.active_roots(), Fleet.Catalogue.system_root()}
+      {__MODULE__, :forge_logins, Fleet.Catalogue.installed_roots(),
+       Fleet.Catalogue.system_root()}
 
     case :persistent_term.get(key, :unset) do
       %{} = maps ->
@@ -815,7 +816,7 @@ defmodule Fleet.CapProfile do
       system_names = MapSet.new(system_roster, & &1.name)
 
       to_login =
-        Fleet.Catalogue.active_catalogues()
+        Fleet.Catalogue.installed_catalogues()
         |> Enum.reduce(%{}, fn %{name: cat, root: root}, acc ->
           dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
 
@@ -880,7 +881,7 @@ defmodule Fleet.CapProfile do
   def list_from_published, do: list_from_published(nil)
 
   @doc """
-  La meme liste, pour l'image d'un catalogue NOMME — `nil` = le premier actif.
+  La meme liste, pour l'image d'un catalogue NOMME — `nil` = le premier installe.
 
   Passe par la facade parce que `Fleet.CapProfile.Image` n'est pas exporte par cette boundary : un
   appelant d'un autre domaine (la preuve de canon) demande « les roles de CE catalogue » sans

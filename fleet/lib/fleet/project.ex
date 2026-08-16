@@ -66,5 +66,14 @@ defmodule Fleet.Project do
       Fleet.ReceptionFilter,
       Fleet.Conflict
     ],
-    exports: [Onboard, Onboard.Scaffold, Roles, Intensity, Architect, WorktreeSync, GitOps]
+    exports: [
+      Onboard,
+      Onboard.Scaffold,
+      Roles,
+      Intensity,
+      Architect,
+      WorktreeSync,
+      GitOps,
+      TemplateSync
+    ]
 end

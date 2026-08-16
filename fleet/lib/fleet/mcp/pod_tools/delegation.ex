@@ -1123,33 +1123,35 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # repond a « quel catalogue le traite ». Le choix se fait au guichet, la ou l'humain choisit deja sa
   # carte — starfleet porte les deux verbes.
   #
-  # Un catalogue INACTIF est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
+  # Un catalogue NON INSTALLE est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
   # coller cette org a celle du poller : un projet onboarde dans une org que le poller ne scanne pas
   # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
-  # orgs des catalogues ACTIFS, la condition se dit exactement ainsi.
+  # orgs des catalogues INSTALLES, la condition se dit exactement ainsi.
   #
   # `:delegation_org` survit en surcharge explicite pour le cas rare ou l'onboarding doit viser une
   # autre org que celles-la.
   defp resolve_org(args) do
-    actives = Fleet.Project.Onboard.active_orgs()
+    installed = Fleet.Project.Onboard.installed_orgs()
 
     case Map.get(args, "catalogue") do
       cat when is_binary(cat) ->
-        if cat in actives,
+        # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
+        # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
+        if cat in installed,
           do: {:ok, cat},
-          else: {:error, {:catalogue_not_active, cat, actives}}
+          else: Fleet.Project.Onboard.catalogue_not_installed(cat)
 
       nil ->
         case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||
                Application.get_env(:lcars_fleet, :pilot_fleet_org) do
           org when is_binary(org) -> {:ok, org}
-          nil -> first_active(actives)
+          nil -> first_installed(installed)
         end
     end
   end
 
-  defp first_active([org | _]), do: {:ok, org}
-  defp first_active([]), do: {:error, :no_active_catalogue}
+  defp first_installed([org | _]), do: {:ok, org}
+  defp first_installed([]), do: {:error, :no_installed_catalogue}
 
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 

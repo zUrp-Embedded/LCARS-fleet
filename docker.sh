@@ -20,7 +20,13 @@
 #                    dans ce projet : aucune commande d'ici ne peut l'atteindre
 #   source-push [DIR] copie TON clone LCARS dans la boîte (/home/projects/LCARS) — la jambe
 #                     source du triangle, sans laquelle la fleet ne peut pas se maintenir
+#   config           pose DURABLEMENT dans la boîte le token master de ta forge et le seed des
+#                    comptes. Une fois. Ils y restent — un geste structurel (un catalogue de plus)
+#                    en a besoin au jour 400 comme au premier
 #   forge-check      le contrat que TA forge doit tenir + les gestes pour l'y amener
+#   forge-apply      pose la structure sur TA forge (OpenTofu tourne DANS la boîte — rien à
+#                    installer chez toi). Rejouable : un second passage importe ce qui existe
+#   runner-token     imprime un jeton d'enregistrement pour TON runner CI (usage unique)
 #   help             cette aide
 #
 # -p <projet> (ou LCARS_PROJECT) : QUEL déploiement on vise. Défaut « lcars ». Un poste de dev en
@@ -39,6 +45,11 @@
 #   LCARS_HOSTNAME             hostname du conteneur (défaut bridge)
 #   FORGE_BASE_URL             URL de TA forge (ex http://host.docker.internal:3300) — vide =
 #                              modules forge en instruct-only, le doctor le dit
+#   FORGE_ADMIN_TOKEN          token master site-admin — lu par `config` (qui le POSE) et par
+#                              `forge-apply` (qui l'utilise sans le poser). Transmis par stdin :
+#                              jamais argv, jamais l'env du client docker
+#   FORGE_SEED_PASSWORD        mot de passe posé sur les comptes À LEUR CRÉATION — `config` seul
+#   LCARS_HUMAN_EMAIL          email du compte forge de l'humain (défaut <human>@lcars.local)
 #
 # EXIT : 0 succès · 1 erreur/commande inconnue
 
@@ -158,6 +169,112 @@ cmd_doctor() {
 }
 
 cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
+
+# ─── CE QUE L'OPÉRATEUR FOURNIT, ET QUI RESTE ───────────────────────────────────────────────────
+# ⚖ ARBITRAGE (user, 2026-08-16) : « on pose le token, IL RESTE ». Le motif est structurel et pas
+# une commodité — l'autorité de création n'est PAS un besoin de bootstrap. La structure d'une forge
+# change pendant toute la vie du système : installer un catalogue crée son org et un compte par rôle.
+# Au jour 400, `lcars catalogue install` a exactement le même besoin qu'au premier jour, et un
+# credential qu'il faudrait re-fournir rendrait chacun de ces gestes manuel — ce que ce chantier
+# existe pour tuer.
+#
+# CE QUE ÇA POSE, ÉCRIT POUR QUE CE SOIT SU ET NON DÉCOUVERT : la boîte détient durablement un
+# credential qui peut tout créer et tout détruire sur la forge. C'est le prix de gestes structurels
+# autonomes, et il est assumé. La contrepartie est tenue par la recette : le boot nominal n'en a PAS
+# besoin — l'apply converge en lisant la forge — donc l'usage de ce pouvoir reste borné aux gestes
+# qui changent la structure.
+#
+# L'URL N'EST PAS DOUBLÉE ICI. Elle arrive déjà par `FORGE_BASE_URL` (compose → env de la boîte →
+# PROV_FORGE_URL) : la réécrire dans un fichier ferait deux vérités pour un fait, et c'est toujours
+# la mauvaise qu'on lit. Cette commande la LIT dans la boîte et refuse d'écrire si elle manque.
+#
+# LE NOM DU FICHIER NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des
+# jetons de RÔLE (`<login>.gitea_token`, contrat FORGE_ROLE_TOKENS_DIR). Aucun lecteur ne globbe ce
+# répertoire aujourd'hui — le premier qui le fera ne doit pas ramasser un site-admin.
+# Les deux chemins vivent DANS la boîte, et c'est `forge-gestures.sh` qui les connaît
+# (`LCARS_MASTER_TOKEN_FILE`, `LCARS_FORGE_SEED_FILE`). Ce script est côté hôte : il ne lit pas le
+# système de fichiers du conteneur, donc il n'a rien à en nommer. Deux variables les redisaient
+# ici, sans un seul lecteur — un second exemplaire d'un chemin, qui ne sert qu'à diverger.
+
+# Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans la boîte.
+# LE GESTE LUI-MÊME VIT DANS L'IMAGE (`/opt/lcars/forge-gestures.sh`), et pas ici : le banc ne peut
+# pas appeler ce script — sa boîte vient d'un autre couple de fichiers compose, et la garde
+# `assert_project_ours` refuse, à raison, d'agir sur un projet que ce compose n'a pas créé. Porter
+# les gestes ici aurait donc obligé le banc à en tenir une seconde copie, et deux copies d'un même
+# contrat dérivent. Ce fichier est une PORTE ; la recette est dans la boîte, avec ce qu'elle joue.
+gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
+  compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"
+}
+
+cmd_config() {
+  local token="${FORGE_ADMIN_TOKEN:-}" seed="${FORGE_SEED_PASSWORD:-}"
+  if [[ -z "$token" && -z "$seed" ]]; then
+    { echo "docker.sh config: pose DURABLEMENT dans la boîte ce que LCARS ne peut pas deviner."
+      echo ""
+      echo "  FORGE_ADMIN_TOKEN=<token master site-admin>   l'autorité qui CRÉE sur ta forge."
+      echo "     Dans Gitea : Settings → Applications → Generate New Token, scope « all »."
+      echo "     Il RESTE : enrôler un catalogue crée des comptes, au jour 400 comme au premier."
+      echo "  FORGE_SEED_PASSWORD=<mot de passe>            posé sur les comptes À LEUR CRÉATION."
+      echo "     Il RESTE aussi : c'est lui que la boîte relit pour minter les tokens de rôle, et"
+      echo "     tofu ne le remplace PAS sur un compte existant. Le changer ne changerait rien"
+      echo "     sur la forge — et casserait le mint."
+      echo ""
+      echo "  FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… ./docker.sh config"
+      echo "  (l'un des deux suffit : ce qui n'est pas donné n'est pas touché)"
+      echo "  Puis :  ./docker.sh forge-apply    # sans plus rien fournir"
+    } >&2
+    exit 1
+  fi
+  [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
+  [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
+  echo ""
+  echo "docker.sh config: posé. La boîte tient son autorité — « ./docker.sh forge-apply » n'a plus"
+  echo "                  besoin d'aucune variable."
+}
+
+# ─── L'APPLY DE LA STRUCTURE, DANS LA BOÎTE ─────────────────────────────────────────────────────
+# CE QUE CETTE COMMANDE FERME. `forge-check` imprimait `cd fleet/deploy/deps && tofu init && …`,
+# une commande que l'opérateur ne pouvait PAS exécuter : tofu n'était installé nulle part — ni chez
+# lui, ni dans l'image, ni par un module de provision, ni par install.sh. Il vit désormais dans
+# l'image avec ses providers vendorés, donc l'apply se joue ICI, et rien ne s'installe sur la
+# machine de l'opérateur.
+#
+# EN ROOT, et ce n'est pas un confort : `/opt/lcars/fleet/deploy/deps` est root:root, donc l'humain
+# de la boîte ne peut pas y écrire le tfstate. Cet état est jetable (la recette importe ce que la
+# forge porte déjà), il n'a donc rien à faire ailleurs — il meurt avec le conteneur, comme il doit.
+#
+# LE JETON N'EST NI DANS argv NI DANS L'ENVIRONNEMENT DE `docker` : il passe par STDIN. `-e
+# TF_VAR_gitea_token=…` l'aurait mis dans la ligne de commande du client docker, lisible dans
+# `/proc` de tout l'hôte pendant l'appel — la leçon payée deux fois par 6-141 et 6-141bis, sur des
+# credentials moins puissants que celui-ci.
+#
+# ⚠ CE DÉCLENCHEMENT RESTE À LA MAIN, et la raison a changé — celle écrite ici disait « il manque
+# l'endroit où le jeton vit durablement », ce que `docker.sh config` a posé depuis. Ce qui manque
+# désormais est une DÉCISION, pas une pièce : à quel moment de la séquence de boot l'apply
+# s'accroche, et ce que ça veut dire qu'un démarrage mute la forge de l'opérateur tout seul.
+#
+# IL NE PREND PLUS RIEN EN ENTRÉE, et c'est tout l'intérêt : la boîte DÉTIENT son autorité et son
+# seed (`./docker.sh config`), et l'URL vient de son environnement. Un `FORGE_ADMIN_TOKEN` ou un
+# `FORGE_SEED_PASSWORD` dans l'environnement l'emporte quand même — c'est le chemin d'un opérateur
+# qui veut jouer un apply avec une autre autorité sans toucher à ce que la boîte garde.
+cmd_forge_apply() {
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
+    -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
+    -e LCARS_HUMAN_EMAIL="${LCARS_HUMAN_EMAIL:-}" \
+    lcars /opt/lcars/forge-gestures.sh apply \
+    || { echo "docker.sh forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
+  echo ""
+  echo "docker.sh forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
+  echo "  ./docker.sh doctor    # ce que la boîte voit de sa forge maintenant"
+}
+
+# Le jeton d'ENREGISTREMENT d'un runner CI. Il s'imprime et ne se pose nulle part : c'est un
+# credential a usage unique — act_runner range les siens dans son volume apres le premier appairage.
+# L'operateur le donne a SON compose de runner, qui vit avec sa forge, en amont de LCARS.
+cmd_runner_token() {
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | gesture runner-token
+}
+
 cmd_logs()  { compose logs -f "$@"; }
 cmd_down() {
   assert_project_ours down
@@ -237,25 +354,32 @@ CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
   1. SON URL           → FORGE_BASE_URL=http://<hôte-ou-service>:<port> ./docker.sh up
      Depuis le conteneur, ta machine hôte se joint par « host.docker.internal ».
 
-  2. UN TOKEN MASTER (site-admin), ÉPHÉMÈRE — il sert au bootstrap, puis tu le révoques.
-     Dans Gitea : Settings → Applications → Generate New Token, scope « all ».
-     Il sert à deux choses, une fois :
-       a) poser la STRUCTURE (comptes de rôle, org, teams, hardening) :
-            cd fleet/deploy/deps && tofu init && \\
-            TF_VAR_gitea_url=<url> TF_VAR_gitea_token=<token-master> \\
-            TF_VAR_seed_password=<seed> TF_VAR_human_username=<ton-login-DANS-la-boite> \\
-            TF_VAR_human_email=<ton-email> tofu apply
-       b) (re)poser les passwords des comptes de rôle après un nuke, quand le seed d'origine
-          n'est plus là — la rotation par tofu est un NO-OP silencieux (le provider ne pose le
-          password qu'à la création, mesuré) :
-            curl -X PATCH -H "Authorization: token <token-master>" -H 'Content-Type: application/json' \\
-              -d '{"login_name":"<compte>","source_id":0,"password":"<seed>","must_change_password":false}' \\
-              <url>/api/v1/admin/users/<compte>
+  2. UN TOKEN MASTER (site-admin) ET UN SEED. Dans Gitea : Settings → Applications →
+     Generate New Token, scope « all ». Le seed est le mot de passe que les comptes de rôle
+     recevront à leur création. Tu les poses UNE FOIS, ils restent dans la boîte :
 
-  Puis le seed dans la boîte (une fois) — il permet à l'apply de minter les tokens de rôle
-  tout seul, à chaque boot, sans plus aucun geste :
-      printf '%s' '<le-même-seed>' | ./docker.sh shell -c 'cat > /home/private/forge-seed.pass'
-      (ou docker cp, puis chmod 600 root:root)
+         FORGE_ADMIN_TOKEN=<token-master> FORGE_SEED_PASSWORD=<seed> ./docker.sh config
+
+     Puis, sans plus rien fournir — RIEN N'EST INSTALLÉ SUR TA MACHINE, OpenTofu, ses
+     providers et la recette sont DANS l'image. L'apply est REJOUABLE : il importe ce que
+     ta forge porte déjà au lieu de mourir en « user already exists ».
+
+         ./docker.sh forge-apply
+
+     POURQUOI LE TOKEN RESTE : la structure d'une forge change pendant toute la vie du
+     système — enrôler un catalogue crée un compte par rôle. Au jour 400, ce geste a le même
+     besoin qu'au premier jour. Un credential à re-fournir rendrait chacun d'eux manuel.
+     Le prix, dit et non découvert : la boîte détient de quoi tout créer et tout détruire
+     sur ta forge. Le boot nominal, lui, n'en a pas besoin — l'apply converge en lisant.
+
+     POURQUOI LE SEED RESTE : c'est lui que la boîte relit pour minter les tokens de rôle,
+     et tofu ne le REMPLACE PAS sur un compte existant (mesuré). En changer casserait le
+     mint sans rien changer sur la forge.
+
+     Rotation réelle d'un password de rôle — le seul chemin qui marche :
+         curl -X PATCH -H "Authorization: token <token-master>" -H 'Content-Type: application/json' \\
+           -d '{"login_name":"<compte>","source_id":0,"password":"<seed>","must_change_password":false}' \\
+           <url>/api/v1/admin/users/<compte>
 
 CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
       ./docker.sh doctor      → forge joignable ? org présente ? comptes de rôle ? tokens
@@ -269,7 +393,11 @@ BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
 EOF
 }
 
-usage() { sed -n '6,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+# ⚠ UNE SECONDE DEFINITION DE `usage()` VIVAIT ICI, ET C'ETAIT ELLE QUI SERVAIT — la derniere
+# definition gagne en bash. Elle decoupait l'aide par NUMEROS DE LIGNE (`sed -n '6,35p'`), la forme
+# que le commentaire de la premiere declare cassee : elle tronque en silence des qu'on insere une
+# ligne dans l'en-tete, et une aide amputee ne se signale jamais. L'ancrage sur le texte, plus haut,
+# est le seul survivant.
 
 # Défauts visibles dans les messages (accès SSH, consigne bootstrap).
 : "${LCARS_SSH_PORT:=127.0.0.1:2222}"
@@ -284,7 +412,10 @@ case "${1:-help}" in
   down)   shift; cmd_down "$@" ;;
   reset)  shift; cmd_reset "$@" ;;
   source-push) shift; cmd_source_push "$@" ;;
+  config)      cmd_config ;;
   forge-check) cmd_forge_check ;;
+  forge-apply) cmd_forge_apply ;;
+  runner-token) cmd_runner_token ;;
   help|-h|--help) usage ;;
   *) echo "docker.sh: commande inconnue: $1 (./docker.sh help)" >&2; exit 1 ;;
 esac

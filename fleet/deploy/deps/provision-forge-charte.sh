@@ -102,6 +102,10 @@ declare -a ENTRIES=(
 #      le decide pas pour lui ». Le master EST un compte humain. Ne rien poser par defaut la
 #      preserve : le badge n'arrive que si le deploiement NOMME son master, donc le demande.
 ADMIRAL=""
+# Le dossier d'avatars D'UN CATALOGUE, nommes par le ROLE. La table ci-dessus est celle du catalogue
+# de REFERENCE, tenue a la main et par COMPTE ; elle ne peut pas connaitre les roles d'un catalogue
+# tiers. Un catalogue apporte les siens, `<role>.png`, et le compte se derive : `<org>_<role>`.
+CAT_AVATARS=""
 
 usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -112,15 +116,28 @@ while [[ $# -gt 0 ]]; do
     --avatars-dir) AVATARS_DIR="$2"; shift 2 ;;
     --org) ORG="$2"; shift 2 ;;
     --admiral) ADMIRAL="$2"; shift 2 ;;
+    --catalogue-avatars) CAT_AVATARS="$2"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "provision-forge-charte: option inconnue: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
-# Le badge de starfleet rejoint la table SEULEMENT si l'appelant a nomme son master. Pose apres le
-# parsing (l'option peut arriver dans n'importe quel ordre) et avant tout usage d'ENTRIES.
-[[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:admiral.png")
+
+# LES ENTREES D'UN CATALOGUE, DERIVEES DE SES FICHIERS. Aucun index a tenir : le nom du fichier
+# EST le role, et le compte est `<org>_<role>` — la meme derivation que `forge.tf` applique au
+# roster. Un dossier absent ou vide n'ajoute rien et ne dit rien : l'avatar est facultatif
+# (⚖ user 2026-08-16), et un catalogue qui n'en livre pas ne doit produire aucun bruit.
+if [[ -n "$CAT_AVATARS" && -d "$CAT_AVATARS" ]]; then
+  # Le compte se derive de `--org`, qui EST le nom du catalogue (`forge.tf` : « l'org porte le nom
+  # du catalogue »). Pas de garde sur son absence : il a un defaut, donc une garde ne se
+  # declencherait jamais — et une garde qui ne peut pas mordre est pire qu'aucune, elle rassure.
+  for _png in "$CAT_AVATARS"/*.png; do
+    [[ -e "$_png" ]] || continue
+    _role="$(basename "$_png" .png)"
+    ENTRIES+=("${ORG}_${_role}:${_png}")
+  done
+fi
 
 command -v curl >/dev/null || { echo "provision-forge-charte: curl requis" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; exit 1; }
@@ -163,6 +180,30 @@ AUTH_CFG="header = \"Authorization: token $(curl_cfg_escape "$ADMIN_TOKEN")\""
 # `printf … | curl -K -` a chaque site laisserait la porte ouverte au prochain qui ajoute un appel.
 forge_curl() { printf '%s\n' "$AUTH_CFG" | curl -K - "$@"; }
 
+# ─── QUI EST LE MASTER — RESOLU UNE FOIS, POUR LES DEUX FAITS QU'IL PORTE ────────────────────────
+# ⚠ CETTE RESOLUTION ETAIT FAITE DEUX FOIS, DE DEUX FACONS, ET LE BADGE PERDAIT. Le nom du siege se
+# repliait sur `id=1` quand `--admiral` manquait ; le BADGE, lui, entrait dans la table au PARSING,
+# donc seulement si l'option etait la. Le jour ou l'appelant a cesse de nommer le master — parce que
+# ce login se DERIVE et ne se parametre pas (arbitrage 2026-08-16) — le siege a garde son nom et
+# l'avatar du master a disparu, EN SILENCE. La sonde du banc l'a dit : « FAIL admiral — pas d'avatar
+# custom » a cote de « OK admiral — nom du siege ». Un fait, une resolution.
+#
+# `/admin/users` EXIGE l'autorite : en `--check` (aucun jeton d'admin garanti) on ne resout pas, on
+# se contente de ce que l'appelant a nomme. Une sonde qui devinerait le master rendrait un verdict
+# sur un compte qu'elle a choisi elle-meme.
+master="$ADMIRAL"
+master_src="nomme (--admiral)"
+if [[ -z "$master" && "$CHECK_ONLY" -eq 0 ]]; then
+  master="$(forge_curl -s -m 10 "$FORGE/api/v1/admin/users?limit=50" \
+    | jq -r 'map(select(.id == 1)) | .[0].login // ""' 2>/dev/null || true)"
+  master_src="resolu par id=1 (premier compte de la forge)"
+fi
+
+# Le badge du master rejoint la table une fois qu'on sait QUI il est — jamais avant. La table nomme
+# ses fichiers par ce qu'ils dessinent, et une entree `admiral:admiral.png` en dur ne poserait rien
+# chez qui n'a pas ce login-la.
+[[ -n "$master" ]] && ENTRIES+=("${master}:admiral.png")
+
 # Un avatar custom uploadé porte un hash long (SHA256, 64 hex) ; l'identicon par défaut porte un hash
 # court (32 hex). Heuristique de sonde (dépend de l'interne Gitea, mais stable en 1.26) : basename ≥ 40 hex.
 avatar_is_custom() { # $1=avatar_url
@@ -198,7 +239,24 @@ account_exists() { # $1=compte
 
 for entry in "${ENTRIES[@]}"; do
   account="${entry%%:*}"
-  file="$AVATARS_DIR/${entry#*:}"
+  # Une entree porte soit un NOM DE FICHIER — la table de reference, resolue dans `--avatars-dir` —
+  # soit un chemin ABSOLU : les avatars d'un catalogue, qui vivent dans SON arbre et pas dans celui
+  # de la recette. Les deux formes coexistent parce que les deux sources coexistent, l'une tenue a
+  # la main et l'autre derivee.
+  file="${entry#*:}"
+  # UN NOM SE RESOUT DANS `--avatars-dir` ; UN CHEMIN NE SE RESOUT PAS. Le discriminant est le `/`,
+  # pas le `/` INITIAL — et cette nuance a coute une passe complete au banc du 2026-08-16. La
+  # recette passe `--catalogue-avatars ${path.module}/catalogue-avatars`, et `path.module` vaut `.`
+  # dans le dossier du module : les entrees derivees portaient donc `./catalogue-avatars/dev.png`,
+  # un chemin RELATIF, re-prefixe en `<avatars-dir>/./catalogue-avatars/dev.png` — introuvable, et
+  # quatre comptes declares en echec pour une raison qui ne les concernait pas.
+  #
+  # La table tenue a la main ne porte que des NOMS de fichier (`dev.png`), sans separateur. Toute
+  # entree derivee porte un chemin. Le test tient les deux sans avoir a savoir laquelle est laquelle.
+  case "${entry#*:}" in
+    */*) file="${entry#*:}" ;;
+    *) file="$AVATARS_DIR/${entry#*:}" ;;
+  esac
 
   if ! account_exists "$account"; then
     echo "IGNORE $account — compte absent de cette forge (autre catalogue metier) : rien a poser"
@@ -242,17 +300,6 @@ done
 # ⚠ PATCH, et `login_name` + `source_id` sont OBLIGATOIRES dans le corps meme si on ne les change
 # pas — meme exigence que la rotation de mot de passe documentee dans `instance/accounts.tf`. Sans
 # eux Gitea rend 422, et le message n'aide pas.
-master="$ADMIRAL"
-master_src="nomme (--admiral)"
-# La resolution par id=1 passe par `/admin/users`, qui EXIGE l'autorite : elle n'a donc lieu qu'en
-# mode POSE. En `--check` sans `--admiral`, on ne sait pas qui est le master et on le DIT — une sonde
-# qui devinerait ici rendrait un verdict sur un compte qu'elle a choisi elle-meme.
-if [[ -z "$master" && "$CHECK_ONLY" -eq 0 ]]; then
-  master="$(forge_curl -s -m 10 "$FORGE/api/v1/admin/users?limit=50" \
-    | jq -r 'map(select(.id == 1)) | .[0].login // ""' 2>/dev/null || true)"
-  master_src="resolu par id=1 (premier compte de la forge)"
-fi
-
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
   # SONDE : `full_name` est un champ PUBLIC (`/users/<login>`), donc lisible sans master-token —
   # c'est ce qui permet au banc de verifier ce que la recette a pose, sans pouvoir le reposer.

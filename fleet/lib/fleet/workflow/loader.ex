@@ -183,7 +183,7 @@ defmodule Fleet.Workflow.Loader do
   end
 
   @doc """
-  The card directories this deployment serves — ONE per active catalogue, in declaration order.
+  The card directories this deployment serves — ONE per installed catalogue, in declaration order.
 
   THE single authority, and it has to be: `publish_image!/0` publishes from this list and the boot
   guards prove from it, so two derivations of "which roots" would be two answers the day one is
@@ -198,7 +198,7 @@ defmodule Fleet.Workflow.Loader do
   def card_roots, do: Enum.map(card_scopes(), & &1.dir)
 
   @doc """
-  The load options that make a card read resolve in `repo`'s OWN catalogue — `[]` when no active
+  The load options that make a card read resolve in `repo`'s OWN catalogue — `[]` when no installed
   catalogue claims that org.
 
   The form every reader wants, so that "which catalogue answers" is one call and not a join
@@ -222,7 +222,7 @@ defmodule Fleet.Workflow.Loader do
   here: from that catalogue's root to the directory THIS loader serves, through `card_scopes/0`, so
   a fine override still wins exactly as it does everywhere else.
 
-  `nil` for a repo no active catalogue claims, and the caller keeps the default root — the reading
+  `nil` for a repo no installed catalogue claims, and the caller keeps the default root — the reading
   `root_for_repo/1` already prescribes for its own `nil`.
   """
   @spec card_root_for_repo(String.t() | nil) :: Path.t() | nil
@@ -253,7 +253,7 @@ defmodule Fleet.Workflow.Loader do
   def card_scopes do
     case Application.get_env(:lcars_fleet, :workflow_workflow_maps_root) do
       nil ->
-        Enum.flat_map(Fleet.Catalogue.active_catalogues(), fn %{name: name, root: root} ->
+        Enum.flat_map(Fleet.Catalogue.installed_catalogues(), fn %{name: name, root: root} ->
           dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
           if File.dir?(dir), do: [%{catalogue: name, dir: dir, root: root}], else: []
         end)
@@ -313,7 +313,7 @@ defmodule Fleet.Workflow.Loader do
   defp image_key(root), do: {__MODULE__, :image, root}
 
   # THE IMAGE IS RESOLVED BY ROOT, like the publication that fills it. `publish_image!/0` was made
-  # per-catalogue and this reader was left single: it always answered from the FIRST active root, so
+  # per-catalogue and this reader was left single: it always answered from the FIRST installed root, so
   # a project served by any other catalogue asked for a card that had been published — under another
   # key — and was told it is not in the image at all. Measured on a bench: `web/test2` declares
   # `standard`, the `web` catalogue carries it, and every tick raised `declared_card_unloadable`.

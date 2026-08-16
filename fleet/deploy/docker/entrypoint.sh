@@ -49,8 +49,15 @@ fi
 # creer avant que ce catalogue puisse travailler. Meme porte outil que `verify` ci-dessus (meme
 # eval, meme nobody, meme LCARS_TOOL_EVAL), et pour la meme raison : la question se pose a un
 # script de provisionnement, qui se tient DEHORS d'une fleet vivante.
-#   roles        un nom par ligne          -> PROV_ROLES (le mint des tokens)
+#   roles        un nom de ROLE par ligne  -> lecture humaine, inventaire d'un catalogue
 #   roles-tfvars le JSON des quatre listes -> roles.auto.tfvars.json (les comptes, cote tofu)
+#                                             ET la derivation de PROV_ROLES (`prov_roles`)
+#
+# ⚠ LES DEUX NE RENDENT PAS LA MEME CHOSE, et cette ligne a affirme le contraire jusqu'au
+# 2026-08-16 : elle donnait `roles` comme la source de `PROV_ROLES`. `roles` rend des noms de ROLE
+# (`dev`, `writer`) ; `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`). Branchee dessus, la
+# derivation faisait entrer `dev` et `writer` dans le roster a minter — des comptes forge portant le
+# nom nu d'un role, a cote des vrais. Le compte est `<org>_<role>`, et seul `roles-tfvars` le sait.
 # Le motif va sur stderr : capturer stdout sur un echec doit rendre la chaine VIDE, jamais un
 # message d'erreur qu'on creerait ensuite comme compte forge.
 if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
@@ -61,6 +68,48 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "${fun}(\"${root}\")"
+fi
+
+# `catalogue-source <nom>` : resout UN nom vers le depot qui le porte, et n'imprime que
+# `<repo> <branche> <sha>`. Le geste d'install le donne a `git clone`, donc une ligne de politesse
+# deviendrait un morceau d'URL.
+#
+# Meme porte `nobody` que `roles` : c'est une LECTURE. Les codes de sortie distinguent trois refus
+# qui appellent trois gestes differents — 2 personne n'a depose, 3 deux depots revendiquent le meme
+# nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
+if [[ "${1:-}" == "catalogue-source" ]]; then
+  name="${2:?catalogue-source: nom de catalogue requis}"
+  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+    FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
+fi
+
+# `template-sync` : POSE le depot modele que `create_project` genere. Meme porte outil que `roles`
+# et `verify`, et pour la meme raison — la question se pose a un script de provisionnement, dehors
+# d'une fleet vivante.
+#
+# ⚠ CE GESTE N'EXISTAIT QUE SUR LE BANC, et il n'y avait aucun moyen de le jouer ailleurs : son
+# seul poseur etait une tache MIX, et `mix` n'est pas dans cette image (15-toolchain : build only).
+# Une forge de production n'avait donc pas de `project-template`, et `Onboard` degradait en
+# bare-create sur chaque projet, en silence. Le corps a demenage dans `Fleet.Project.TemplateSync`.
+#
+# PAS `nobody` ICI, contrairement aux trois portes au-dessus, et c'est structurel : celles-la LISENT
+# le catalogue, celle-ci ECRIT sur la forge. Elle a besoin de lire le jeton (`FORGE_TOKEN_FILE`,
+# 0640 root:fleet ou 0600 root) et d'un tmp pour les deux faces qu'elle pousse. L'appelant choisit
+# l'identite ; ce qu'il ne choisit pas, c'est la forge : les deux variables sont EXIGEES, un defaut
+# serait la mauvaise forge le jour ou ca compte.
+# L'ARGUMENT NOMME LE CATALOGUE, et son absence n'est pas un defaut : chaque catalogue a le sien,
+# `<catalogue>/project-template`, et sans argument c'est celui du catalogue livre qui est pose. Un
+# catalogue qui n'apporte pas d'arbre `project_template` n'en fait poser AUCUN — c'est l'absence du
+# depot qui rend le repli visible, et le pousser quand meme le rendrait invisible.
+if [[ "${1:-}" == "template-sync" ]]; then
+  arg=""
+  [[ -n "${2:-}" ]] && arg="\"${2}\""
+  exec env RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "Fleet.Project.TemplateSync.eval_main(${arg})"
 fi
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que

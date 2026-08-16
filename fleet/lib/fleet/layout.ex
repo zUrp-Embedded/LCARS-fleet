@@ -31,22 +31,27 @@ defmodule Fleet.Layout do
   # under the parent repo, which a pod mounting the parent RO could then not commit into.
   @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
-  # WHERE CATALOGUES ARE INSTALLED, and the two directories are not symmetric.
+  # TWO CATALOGUE DIRECTORIES, AND THEY HOLD TWO DIFFERENT KINDS OF THING — not one editable copy
+  # of the other. Reading them as a `php.ini` / `php.ini-production` pair is what made a shipped
+  # demonstration look installed.
   #
-  # `/opt/lcars` is the IMAGE's own tree — the Dockerfile already copies `catalogues` there,
-  # and it is rewritten by every update. It holds what SHIPS: read-only to the operator, in the
-  # `php.ini-production` sense — a reference you copy from, never edit.
+  # `/opt/lcars/catalogues` is the IMAGE's tree: SEEDS. What lives there is deposited on the forge
+  # at each apply and installed by nobody. It is rewritten by every update, which costs nothing —
+  # a seed is a projection of the image, not a state.
   #
-  # `~/.lcars/catalogues` holds what the operator IMPORTS, and no update touches it. It is the
-  # `php.ini`. The activity declaration lives beside it for the same reason: changing which
-  # catalogue runs must not require rebuilding an image.
+  # `/home/catalogues` holds what is INSTALLED, and it is a cache: `lcars catalogue install` drops
+  # the material and provisioning restores it from the forge at every boot. The authority is
+  # `<name>/catalogue` on the forge; this is a local read-through of it.
   #
   # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
   # layout INSIDE a catalogue. The split is the same one this module already draws for the project
   # faces: where things sit on the box is one authority, what is inside them is another.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  @active_catalogues_basename "catalogues.active"
+  # The INSTALLED cache — a sibling of the project faces and of `/home/private`, on the volume the
+  # image does not rewrite. Not under `@platform_root`: that tree IS the image, and mixing runtime
+  # state into it makes an update look like an uninstall.
+  @installed_catalogues_root "/home/catalogues"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
   @mcp_activity_marker "last_tool_call"
@@ -278,29 +283,50 @@ defmodule Fleet.Layout do
   def state_dir, do: Path.join(System.user_home!(), @state_dirname)
 
   @doc """
-  Catalogues that SHIP with the image (`#{@platform_root}/#{@catalogues_dirname}`) — read-only.
+  Catalogue SEEDS that ship with the image (`#{@platform_root}/#{@catalogues_dirname}`) —
+  read-only, and installed by nobody.
 
-  Rewritten by every update, so an operator who edits one loses the edit at the next deploy. They
-  copy it into `catalogues_operator_dir/0` instead, which is the only half an update never touches.
+  A seed is not an installation. What lives here is pushed to the forge as a DEPOSIT at each apply,
+  where it becomes `available` like any catalogue a human deposited from their laptop, and it only
+  runs once an admin plays `lcars catalogue install` on it. That is the whole demonstration
+  `web-demo` exists for, and it would be a lie if the box ran it merely because the image carried
+  the files.
+
+  Rewritten by every update, so an operator who edits one loses the edit at the next deploy — and
+  editing one is not how a catalogue is made anyway: it is forked, renamed in its manifest, and
+  deposited under its author's own account.
   """
   @spec catalogues_shipped_dir() :: Path.t()
   def catalogues_shipped_dir, do: Path.join(@platform_root, @catalogues_dirname)
 
   @doc """
-  Catalogues the operator IMPORTED (`~/.lcars/#{@catalogues_dirname}`) — theirs, never updated over.
-  """
-  @spec catalogues_operator_dir() :: Path.t()
-  def catalogues_operator_dir, do: Path.join(state_dir(), @catalogues_dirname)
+  The INSTALLED catalogues (`#{@installed_catalogues_root}`) — a CACHE of what the forge carries.
 
-  @doc """
-  The ACTIVITY declaration (`~/.lcars/#{@active_catalogues_basename}`): which catalogues run, in
-  precedence order.
+  Nothing here is authored, and nothing here is worth backing up: `lcars catalogue install` drops
+  the material, and convergent provisioning restores it at every container boot from
+  `<name>/catalogue` on the forge. Deleting a directory here uninstalls nothing; the next boot puts
+  it back.
 
-  Operator-side, deliberately: changing what runs must not require rebuilding an image. Installed
-  and active are two different facts, and this file is the only one that carries the second.
+  ## Why it is a BOX path and not `~/.lcars/catalogues`
+
+  It was per-human until 2026-08-16, on the grounds that everything else under `state_dir/0` is.
+  Three things make that the wrong family:
+
+  Which catalogues run is a property of the FORGE, and the forge is shared. Two humans on one box
+  cannot legitimately serve different ones, so a per-human copy is N copies of one fact — and N
+  places for it to drift.
+
+  Installing is a ROOT act (it reads a 0600 master token and writes the forge). Root dropping
+  material into one human's home has to pick which human, and a box has several.
+
+  Convergence has to run BEFORE the role tokens are minted, so the roster can be derived from the
+  installed catalogues rather than held by hand. The humans are enrolled after that, so at the
+  moment the material is needed no home exists yet.
+
+  Root-owned and world-readable: an admin installs, everyone reads.
   """
-  @spec active_catalogues_path() :: Path.t()
-  def active_catalogues_path, do: Path.join(state_dir(), @active_catalogues_basename)
+  @spec catalogues_installed_dir() :: Path.t()
+  def catalogues_installed_dir, do: @installed_catalogues_root
 
   @doc """
   Absolute path of a pod's MCP ACTIVITY marker, derived from that pod's socket path.

@@ -11,30 +11,33 @@
 # l'humain ne pouvait plus se loguer, parce que le mot de passe de banc n'etait ecrit nulle part.
 # Une recette qu'on retient de tete est une recette qu'on perd au prochain nuke. Celle-ci est ici.
 #
-# ⚠ IDEMPOTENT A UNE CONDITION, ET ELLE N'ETAIT PAS ECRITE (mesure du 2026-08-03, en composant ce
-# script deux fois de suite depuis bench-up.sh) : sans `--tofu-dir`, l'etape 4 se copie la recette
-# dans un mktemp NEUF a chaque passe, donc avec un tfstate VIDE — tofu croit devoir creer une org,
-# des teams et dix comptes qui existent deja, et l'apply meurt en 409. Chaque etape prise seule est
-# idempotente ; l'ENCHAINEMENT ne l'est que si l'etat de tofu survit d'une passe a l'autre. Donner
-# un `--tofu-dir` stable est donc obligatoire des qu'on joue ce script plus d'une fois sur la meme
-# forge. Le defaut mktemp reste correct pour l'usage d'origine : UNE passe sur une forge NEUVE.
+# ⚠ CE FICHIER A PORTE UNE CONDITION D'IDEMPOTENCE PENDANT DEUX SEMAINES, ET ELLE A DISPARU.
+# Elle disait : sans `--tofu-dir` stable, chaque passe repart d'un tfstate VIDE, tofu croit devoir
+# creer une org et dix comptes qui existent deja, et l'apply meurt en 409 (mesure du 2026-08-03).
+# C'etait vrai, et c'etait le symptome d'un defaut de la RECETTE, pas de ce script : l'apply n'etait
+# rejouable qu'a condition de garder son etat. Depuis le 2026-08-16 la recette IMPORTE ce que la
+# forge porte deja — l'etat est jetable, et l'enchainement est idempotent sans qu'on l'organise.
 #
 # Ce que le script fait, dans l'ordre :
 #   1. attend que la forge reponde ;
 #   2. cree le compte admiral (master forge + sysadmin) s'il manque (mot de passe de bench fixe) ;
-#   3. minte le master token EPHEMERE d'admiral (celui que tofu consomme, jete apres la passe) ;
-#   4. joue DEUX `tofu apply` sur la recette de prod : le module `instance/` (systeme, starfleet,
-#      humain, roles `system_*` — une fois par FORGE) puis le module catalogue (org, teams, comptes
-#      de role metier, adhesions — une fois par CATALOGUE). Deux etats distincts : meler les deux
-#      rendrait les comptes partages propriete du premier catalogue enrole ;
-#   5. pose le seed dans la boite pour que le mint A4 des role-tokens converge au prochain boot ;
+#   3. minte le master token d'admiral et le CONFIE A LA BOITE (`forge-gestures.sh config-token`),
+#      ou il RESTE — cf. l'arbitrage du 2026-08-16 : tout geste structurel (un catalogue de plus,
+#      un role de plus) a besoin de cette meme autorite, au jour 400 comme au premier ;
+#   4-5. DEPOSE le roster derive dans la recette de la boite, puis passe la main aux GESTES DE
+#      L'IMAGE (`/opt/lcars/forge-gestures.sh`) : les deux secrets par stdin, puis l'apply — module
+#      `instance/`, module catalogue, et le depot modele. Ce script ne joue plus tofu lui-meme, et
+#      n'exige plus de binaire tofu sur l'hote : il entre par la MEME porte que `docker.sh`, donc
+#      ce qu'il exerce est ce que l'admin jouera ;
 #   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
 #      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
 #      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
 #   7. pose la CHARTE : avatars des comptes, et le nom du siege master en full_name ;
-#   8. SEME la forge : `fleet/lcars` (la source que la boite clone) + `fleet/project-template`
-#      (le modele que create_project genere). Une forge vierge sans ces deux repos donne une
-#      boite qui ne peut ni se mettre a jour ni onboarder un projet — mesure au drill du soir ;
+#   8. SEME `fleet/lcars` — la source que la boite clone, poussee depuis CE clone. C'est un geste
+#      de banc par nature : le contenu vient d'un arbre local, pas d'une recette. (Le depot modele,
+#      lui, a quitte cette etape : l'apply le pose desormais.) ⚠ La recette ne CREE PAS un
+#      `fleet/lcars` vide : `git clone` d'un depot vide rend 0 et laisse un arbre sans contenu, que
+#      la regle de non-ecrasement de l'entrypoint protegerait ensuite a chaque boot ;
 #   9. rend un verdict MESURE : login humain, comptes de l'org, repos semes.
 #
 # ─── LE MOT DE PASSE DE BANC DU COMPTE OPERATEUR ────────────────────────────────────────────────
@@ -64,10 +67,11 @@
 #
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
-#                                  [--tofu-dir <copie de fleet/deploy/deps>] [--no-box] [--no-seed-repos]
+#                                  [--tofu-dir <ignore>] [--no-seed-repos]
 #                                  [--human-admin] [--admin-token TOK]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 admiral admin/token
-#         4 tofu · 5 la boite (seed) · 6 le verdict final ne passe pas · 7 semis des repos
+#         4 la structure (gestes de la boite) · 5 le seed · 6 le verdict final ne passe pas
+#         7 semis des repos
 
 set -euo pipefail
 
@@ -87,7 +91,6 @@ HUMAN="lcars"
 HUMAN_EMAIL="lcars@lcars.local"
 # Convention de banc — cf. le bloc d'en-tete. Jamais lue par la prod.
 HUMAN_PASSWORD="toto32toto32"
-TOFU_DIR=""
 WITH_BOX=1
 SEED_REPOS=1
 # Propriete de BANC, jamais de prod — la raison, son cout et sa sortie sont a l'etape 6-bis.
@@ -104,7 +107,9 @@ while [[ $# -gt 0 ]]; do
     --human)          HUMAN="${2:?}"; shift 2 ;;
     --human-email)    HUMAN_EMAIL="${2:?}"; shift 2 ;;
     --human-password) HUMAN_PASSWORD="${2:?}"; shift 2 ;;
-    --tofu-dir)       TOFU_DIR="${2:?}"; shift 2 ;;
+    # Accepte et SANS EFFET depuis que l'apply vit dans la boite : la recette et son etat sont dans
+    # l'image. Le refuser ferait echouer un appelant qui passe une option devenue inutile.
+    --tofu-dir)       shift 2 ;;
     --no-box)         WITH_BOX=0; shift ;;
     --no-seed-repos)  SEED_REPOS=0; shift ;;
     --human-admin)    HUMAN_ADMIN=1; shift ;;
@@ -121,7 +126,8 @@ die()  { printf '[bench-forge] %s\n' "$*" >&2; exit "${2:-1}"; }
 api()  { printf '%s/api/v1' "$FORGE_URL"; }
 
 command -v curl >/dev/null || die "curl requis"
-command -v tofu >/dev/null || die "tofu requis"
+# `tofu` N'EST PLUS UNE DEPENDANCE DE L'HOTE : il vit dans l'image, avec la recette et les gestes.
+# C'etait la premiere bidouille de ce banc — exiger d'un poste ce que le produit n'installe nulle part.
 command -v python3 >/dev/null || die "python3 requis (lecture des reponses JSON)"
 
 # ─── 1. la forge repond ──────────────────────────────────────────────────────────────────────────
@@ -132,14 +138,15 @@ for _ in $(seq 1 60); do
 done
 curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $FORGE_URL" 2
 
-# ─── 2-3. admiral (master forge + sysadmin) + master token EPHEMERE ──────────────────────────────
+# ─── 2-3. admiral (master forge + sysadmin) + son master token ───────────────────────────────────
 # ⚠ CE COMMENTAIRE DISAIT L'INVERSE, ET SA PREMISSE A CHANGE (identite-v2). Le mot de passe etait
 # GENERE parce que ce compte etait « un outil de provisioning, pas un siege d'operateur ». Or admiral
 # EST desormais un siege d'operateur : le master se logue au deck/forge, et il est materialise en
 # sysadmin root cote box (uid 1000). Il lui faut donc un mot de passe CONNU — exactement comme
 # l'humain worker (HUMAN_PASSWORD, deja fixe dans ce script). Bench : fixe (`toto1234`), pour tester,
 # dans un banc JETABLE sur LAN sur ; prod : l'installeur choisit. Ce qui ne doit jamais persister
-# dans un fichier suivi, c'est le MASTER TOKEN qu'admiral minte pour tofu — lui reste EPHEMERE.
+# dans un fichier SUIVI, c'est le MASTER TOKEN qu'admiral minte. Il ne disparait pas pour autant :
+# il est confie a la boite plus bas, en 0600 root dans /home/private, et il y RESTE.
 ADMIN_PW="${LCARS_BENCH_ADMIRAL_PW:-toto1234}"
 
 # LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES
@@ -175,134 +182,62 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
   say "master token minte ($TOKEN_NAME)"
 fi
 
-# LE MASTER TOKEN SURVIT A CE SCRIPT, et il n'a nulle part d'autre ou vivre. `bench-up.sh` en a
-# besoin APRES nous, pour minter le jeton d'enregistrement du runner — un geste qui exige un
-# site-admin et qui ne peut pas se faire avant que la forge existe. Il est ecrit dans le tofu-dir
-# parce que c'est deja le seul endroit hors de l'arbre suivi ou l'etat de cette passe survit (le
-# tfstate y vit pour la meme raison), et en 0600 parce que c'en est un.
-if [[ -n "$TOFU_DIR" ]]; then
-  printf '%s\n' "$MASTER_TOKEN" > "$TOFU_DIR/.master-token"
-  chmod 600 "$TOFU_DIR/.master-token"
-fi
-
-# ─── 4. tofu apply — la recette de PROD, en DEUX modules (instance puis catalogue) ───────────────
-# Copie de travail par defaut : la recette est jouee hors de l'arbre suivi pour que son tfstate (qui
-# porte des valeurs sensibles) ne se retrouve jamais dans un `git status`.
-if [[ -z "$TOFU_DIR" ]]; then
-  TOFU_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-tofu.XXXXXX")"
-  cp -r "$REPO_ROOT/fleet/deploy/deps/." "$TOFU_DIR/"
-  say "recette tofu copiee dans $TOFU_DIR (tfstate hors de l'arbre)"
-fi
-# Le module INSTANCE a son propre etat : ce qu'il possede (systeme, starfleet, humain, roles
-# `system_*`) vit une fois par FORGE, pas une fois par catalogue. Le meler a l'etat d'un catalogue
-# rendrait ces comptes propriete du premier enrole — les detruire en detruisant celui-la.
-INSTANCE_DIR="${TOFU_DIR%/}.instance"
-rm -rf "$TOFU_DIR/instance"
-mkdir -p "$INSTANCE_DIR"
-cp -r "$REPO_ROOT/fleet/deploy/deps/instance/." "$INSTANCE_DIR/"
-
-# The roster is DERIVED from the catalogue, never taken from the recipe defaults. Those defaults are
-# a second writing of a fact `mix lcars.catalogue.roles --tfvars` already produces, and the two DID
-# drift: `chief` sat in `roles` and not in `writers`, so it got an account and a token and no write
-# right anywhere -- found by reading the org on a bench, not by any check. Deriving here removes the
-# second list from the bench's path instead of keeping it correct by hand.
+# ─── 4-5. LA STRUCTURE ET LES SECRETS : joues PAR LA BOITE, plus par ce script ───────────────────
+# CE BLOC FAISAIT TOURNER TOFU SUR L'HOTE, et c'etait la plus grosse bidouille de ce banc : il
+# copiait la recette dans un mktemp, gerait deux dossiers d'etat, exigeait un binaire `tofu` que
+# RIEN n'installe, et posait le seed par un `docker exec` a la main. L'admin, lui, n'avait aucune
+# de ces choses — donc tout ce qui se verifiait ici ne se verifiait que sur un banc.
 #
-# Fail-closed on purpose: this script already needs the source tree (it copies the recipe from it),
-# so it needs `mix` too. A bench provisioned from stale defaults would be a bench that does not
-# prove what it claims to prove.
+# La boite porte desormais tofu, ses providers, la recette et les gestes (`/opt/lcars/
+# forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `docker.sh`, et
+# ce qu'il exerce est ce que l'admin jouera.
+[[ "$WITH_BOX" -eq 1 ]] || die "--no-box n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
+
+# LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (mesure
+# 2026-08-16 sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
+# correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
+# manque. On relit celui que la boite garde ; on n'en fabrique un que s'il n'y en a pas.
+SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /home/private/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
+if [[ -z "$SEED_PW" ]]; then
+  SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+  say "seed de banc genere (aucun dans $BOX)"
+else
+  say "seed relu depuis $BOX (celui des comptes existants)"
+fi
+
+# Le ROSTER reste DERIVE ici, et c'est une propriete de banc assumee : la derivation passe par
+# `mix lcars.catalogue.roles`, qui vit dans l'arbre source. La boite, elle, sait aussi la produire
+# (`entrypoint.sh roles-tfvars`), mais QUEL catalogue elle doit deriver est la question du chantier
+# catalogues, pas de celui-ci. On derive donc ici et on DEPOSE le resultat dans la recette de la
+# boite — un fichier, pas un geste de plus.
+ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
 ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
                 --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
-                --tofu-dir "$TOFU_DIR" \
+                --tofu-dir "$ENROLL_DIR" \
                 --repo "$REPO_ROOT/fleet" 2>/dev/null)" \
   || die "derivation du roster en echec (enroll-catalogue.sh) -- recette non enrolee" 4
 ROSTER_LINE="$(printf '%s\n' "$ENROLL_OUT" | grep '^PROV_ROLES=')"
-# L'ORG vient du CATALOGUE, comme le roster : elle porte son nom. tofu la lit seul dans
-# roles.auto.tfvars.json ; ici c'est le shell qui en a besoin — les sondes d'apres-apply tapent sur
-# une org nommee, et viser la mauvaise rend des 404 muets.
 ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
 ORG="${ORG:-fleet}"
 say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
 say "org du catalogue : $ORG"
+"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/fleet/deploy/deps/roles.auto.tfvars.json" \
+  || die "roster non depose dans la recette de $BOX" 4
+rm -rf "$ENROLL_DIR"
 
-SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+# Les deux secrets, par STDIN, exactement comme `docker.sh config`.
+printf '%s' "$MASTER_TOKEN" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-token \
+  || die "jeton master refuse par la boite" 4
+printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-seed \
+  || die "seed non pose dans la boite" 5
 
-export TF_VAR_gitea_url="$FORGE_URL" TF_VAR_gitea_token="$MASTER_TOKEN" \
-       TF_VAR_seed_password="$SEED_PW" TF_VAR_human_username="$HUMAN" \
-       TF_VAR_human_email="$HUMAN_EMAIL" TF_VAR_admiral_username="$ADMIN"
-
-# INSTANCE d'abord, TOUJOURS : une adhesion peut nommer un compte qu'elle ne cree pas, mais pas un
-# compte qui n'existe pas. L'inversion echoue en 404 cote Gitea — bruyamment, jamais en silence.
-(
-  cd "$INSTANCE_DIR"
-  tofu init -no-color >/dev/null 2>&1 || exit 1
-  tofu apply -auto-approve -no-color >/dev/null 2>&1 || exit 1
-) || die "tofu apply INSTANCE en echec (rejoue-le a la main dans $INSTANCE_DIR pour voir sa sortie)" 4
-say "comptes d'instance poses (systeme, starfleet, humain, roles system_*)"
-
-# ⚠ LA SORTIE DE CET APPLY EST INUTILISABLE POUR LIRE LA CHARTE, et c'est structurel — mesure le
-# 2026-08-15 en essayant precisement de la capturer. `charte.tf` y execute `provision-forge-charte.sh`
-# avec `environment = { FORGE_ADMIN_TOKEN = var.gitea_token }` ; cette variable est `sensitive`, donc
-# OpenTofu remplace CHAQUE ligne du provisioner par :
-#     terraform_data.charte (local-exec): (output suppressed due to sensitive value in config)
-# Ce n'est pas une question de redirection : le verdict n'existe pas dans cette sortie, il est
-# supprime a la source. La capturer donnait un flux propre et VIDE de ce qu'on venait y chercher.
-(
-  cd "$TOFU_DIR"
-  tofu init -no-color >/dev/null 2>&1 || exit 1
-  tofu apply -auto-approve -no-color >/dev/null 2>&1 || exit 1
-) || die "tofu apply CATALOGUE en echec (rejoue-le a la main dans $TOFU_DIR pour voir sa sortie)" 4
-say "structure du catalogue posee (org $ORG, teams, comptes de role metier, adhesions)"
-# Le verdict de la charte et les gestes qui ont echoue. `|| true` : un apply reussi dont la charte
-# n'aurait rien dit ne doit pas tuer le script sous `set -e` (grep sans correspondance rend 1).
-printf '%s\n' "$CATALOGUE_OUT" \
-  | grep -aE "provision-forge-charte:|^ *(POSÉ|FAIL|IGNORE) " \
-  | sed 's/^ *//' | while IFS= read -r l; do say "charte: $l"; done || true
-
-# ─── 4-bis. le compte SYSTEME devient PROPRIETAIRE de l'org ──────────────────────────────────────
-# POURQUOI ICI ET PAS DANS TOFU : le provider n'expose ni data source `gitea_team` (donc l'id de la
-# team `Owners`, creee par Gitea avec l'org, est introuvable) ni champ proprietaire sur `gitea_org`
-# — le createur d'une org en est le proprietaire, point. Et pas dans `50-forge` non plus : ce module
-# n'ecrit qu'avec le jeton systeme ou en basic-auth machine, et le jeton systeme ne peut gerer une
-# team qu'une fois DEJA proprietaire. La seule identite de classe proprietaire est celle qui lance
-# l'apply — le master token, ici, et l'admin de l'operateur en production.
-#
-# POURQUOI C'EST NECESSAIRE, mesure le 2026-08-11 : `lcars project migrate` transfere un depot d'une
-# org a l'autre, et Gitea exige le PROPRIETAIRE de l'org SOURCE.
-#   token systeme membre+write                  -> 403 "user should be the owner of the repo"
-#   meme token, Owners de l'org SOURCE          -> 202
-#   Owners de la CIBLE seulement                -> 403   (seule la source compte)
-# Un projet peut quitter n'importe quelle org, donc chaque org que ce script pose accorde
-# l'adhesion. Le prix, mesure aussi : proprietaire, ce compte peut gerer les teams de son org.
-OWNERS_ID="$(curl -sf -m 10 -H "Authorization: token $MASTER_TOKEN" "$(api)/orgs/$ORG/teams" \
-              | python3 -c 'import json,sys
-ts = json.load(sys.stdin)
-print(next((t["id"] for t in ts if t["name"] == "Owners"), ""))' 2>/dev/null || true)"
-if [[ -n "$OWNERS_ID" ]]; then
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $MASTER_TOKEN" \
-            -X PUT "$(api)/teams/$OWNERS_ID/members/lcars-system" || true)"
-  [[ "$code" == "204" ]] \
-    && say "lcars-system PROPRIETAIRE de l'org $ORG (requis par « lcars project migrate »)" \
-    || die "lcars-system non ajoute aux Owners de $ORG (HTTP $code) — la migration de projet echouera en 403" 4
-else
-  die "team Owners de $ORG introuvable — la migration de projet echouera en 403" 4
-fi
-
-# ─── 5. le seed dans la boite — le handoff tofu → A4 ─────────────────────────────────────────────
-# Sans ce fichier, 50-forge ne peut pas minter les role-tokens et le DIT (drift) ; la fleet
-# demarre alors sans identite de role, et les producteurs echouent en role_token_unavailable au
-# moment de publier — la classe BL-6-34, vecue deux fois.
-if [[ "$WITH_BOX" -eq 1 ]]; then
-  printf '%s\n' "$SEED_PW" | "$DOCKER_BIN" exec -i "$BOX" bash -c \
-      'mkdir -p /home/private && cat > /home/private/forge-seed.pass \
-       && chmod 600 /home/private/forge-seed.pass && chown root:root /home/private/forge-seed.pass' \
-    || die "seed non pose dans la boite ($BOX)" 5
-  say "seed pose dans $BOX:/home/private/forge-seed.pass"
-  say "→ relance la boite (docker restart $BOX) pour que 50-forge minte les role-tokens"
-else
-  printf '%s\n' "$SEED_PW" > "$HERE/.bench-seed.pass"
-  chmod 600 "$HERE/.bench-seed.pass"
-  say "boite non touchee (--no-box) — seed ecrit dans $HERE/.bench-seed.pass"
-fi
+# L'apply : les deux modules ET le depot modele, dans la boite.
+"$DOCKER_BIN" exec -i -u root \
+    -e LCARS_FORGE_HUMAN="$HUMAN" -e LCARS_HUMAN_EMAIL="$HUMAN_EMAIL" \
+    "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
+  || die "apply de la structure en echec dans $BOX (rejoue-le : docker exec -u root $BOX /opt/lcars/forge-gestures.sh apply)" 4
+say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"
+say "→ relance la boite (docker restart $BOX) pour que 50-forge minte les role-tokens"
 
 # ─── 6. le mot de passe de banc de l'humain ──────────────────────────────────────────────────────
 # APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
@@ -395,14 +330,9 @@ except Exception: print("")' 2>/dev/null || true)"
   fi
   say "token operateur pose dans $BOX:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
 
-  # Les DEUX lignes que 70-human instruit (cas D4) : le runtime doit ecrire sur la forge avec le
-  # compte SYSTEME, jamais avec celui de l'humain. Ajoutees seulement si absentes — apres le seed,
-  # ce fichier appartient a l'humain.
-  "$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c \
-      'grep -q "^FORGE_TOKEN_FILE=" ~/.lcars/fleet_v2.env \
-       || printf "FORGE_TOKEN_FILE=/home/private/system.gitea_token\nFORGE_BOT_LOGIN=lcars-system\n" >> ~/.lcars/fleet_v2.env' \
-    && say "fleet_v2.env : token systeme cable (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN)" \
-    || say "fleet_v2.env NON cable — la creation de projet echouera (cf. l'en-tete)"
+  # LE CABLAGE ENV N'EST PLUS ICI : `70-human` le CONVERGE (une cle absente n'est pas un choix).
+  # Ce bloc l'ajoutait a la main parce que le module se contentait de l'instruire — donc le banc
+  # avait le cablage et la production ne l'avait pas.
 fi
 
 # ─── 7. la charte : RETIREE D'ICI, elle appartient a la recette generique ────────────────────────
@@ -429,11 +359,10 @@ fi
 # prouver est le metier du banc, poser est celui de la recette. `--check` ne porte aucune autorite
 # (il lit des champs publics, sans master-token) et ne peut donc rien reposer par megarde ; il rend
 # les memes lignes de verdict, sur l'etat REEL de la forge plutot que sur l'intention du script.
-if [[ -x "$TOFU_DIR/provision-forge-charte.sh" ]]; then
-  charte_out="$( cd "$TOFU_DIR" && ./provision-forge-charte.sh --forge "$FORGE_URL" \
-      --admiral "$ADMIN" --check 2>&1 )" || true
-  printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
-fi
+# La sonde vit DANS la boite avec le reste de la recette (l'hote n'en a plus de copie).
+charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
+    'cd /opt/lcars/fleet/deploy/deps && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
+printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
 # ─── 8. le semis : la source et le modele ────────────────────────────────────────────────────────
 # `fleet/lcars` = la source que la boite clone au boot (LCARS_SOURCE_REMOTE, la jambe runtime du
@@ -458,15 +387,9 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
       && say "fleet/lcars : ops pousse" || say "fleet/lcars : ops NON pousse" ; }
 
-    # Le modele passe par SA tache mix (contenu + flag template + labels protocole) — jamais un
-    # push a la main : le contenu vient du catalogue, la tache est la seule a savoir l'assembler.
-    printf '%s\n' "$SYS_TOKEN" > "$HERE/.bench-system.token"
-    chmod 600 "$HERE/.bench-system.token"
-    ( cd "$REPO_ROOT/fleet" && FORGE_BASE_URL="$FORGE_URL" \
-        FORGE_TOKEN_FILE="$HERE/.bench-system.token" mix lcars.project_template.sync >/dev/null 2>&1 ) \
-      && say "fleet/project-template : synchronise (contenu + flag + labels)" \
-      || say "fleet/project-template : sync EN ECHEC (onboard degradera en bare-create)"
-    rm -f "$HERE/.bench-system.token"
+    # `fleet/project-template` N'EST PLUS POSE ICI : `forge-gestures.sh apply` le fait, dans la
+    # boite, avec le jeton master — donc sur toute forge que le chemin standard touche, et plus
+    # seulement sur un banc. Ce bloc le poussait par `mix`, qui n'existe pas dans une image.
   fi
 fi
 

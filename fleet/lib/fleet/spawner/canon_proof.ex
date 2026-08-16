@@ -14,11 +14,11 @@ defmodule Fleet.Spawner.CanonProof do
   """
   @spec prove_all!() :: :ok
   def prove_all! do
-    # UNE PREUVE PAR CATALOGUE ACTIF. `CapProfile.list/0` enumere en FUSIONNE pendant que la
+    # UNE PREUVE PAR CATALOGUE INSTALLE. `CapProfile.list/0` enumere en FUSIONNE pendant que la
     # resolution lit l'image d'UN catalogue : avec un seul les deux coincidaient, avec deux ils
     # divergent et la preuve accusait un role introuvable (W-34). Chaque catalogue se prouve donc
     # contre SON image — ce qu'il declare, il doit pouvoir le spawner.
-    roots = Fleet.Catalogue.active_roots()
+    roots = Fleet.Catalogue.installed_roots()
 
     proven =
       Enum.reduce(roots, 0, fn root, acc ->

@@ -136,6 +136,26 @@ run_avatars() {
   [ "$output" = "0" ]
 }
 
+@test "badge: SANS --admiral, le badge suit la resolution par id=1 — MEME resolution que le siege" {
+  # ⚠ LA REGRESSION QUE CE TEMOIN GARDE, ET ELLE A EU LIEU (2026-08-16, attrapee par la sonde du
+  # banc). Le nom du siege se repliait sur `id=1`, le BADGE entrait dans la table au PARSING : le
+  # jour ou l'appelant a cesse de nommer le master — parce que ce login se DERIVE — le siege a garde
+  # son nom et l'avatar du master a disparu, en silence. Deux resolutions pour un fait, et c'est
+  # celle qu'on ne teste pas qui casse.
+  cat > "$BIN/jq" <<'FAKE'
+#!/usr/bin/env bash
+cat >/dev/null
+# La seule question posee a jq avant la table : « qui porte l'id 1 ? »
+case "$*" in *'.id == 1'*) printf 'le-master\n' ;; *) printf '' ;; esac
+FAKE
+  chmod +x "$BIN/jq"
+  : > "$AVATARS/admiral.png"
+
+  run_avatars
+  [ "$status" -eq 0 ]
+  grep -q "Sudo: le-master" "$ARGV_LOG"
+}
+
 @test "badge: le compte starfleet n'est plus servi — son avatar ne part que vers le master" {
   # La regression que ce temoin garde : re-ajouter `starfleet:admiral.png` a la table ferait
   # reapparaitre un POST vers un compte que la forge ne porte plus, et le verdict compterait une
@@ -145,6 +165,79 @@ run_avatars() {
   [ "$output" = "0" ]
   # ...et le badge est bien parti vers le master, sinon ce test passerait sur un script muet.
   grep -q "Sudo: admiral" "$ARGV_LOG"
+}
+
+# ─── LES AVATARS D'UN CATALOGUE (2026-08-16) ─────────────────────────────────────────────────────
+# La table `ENTRIES` est celle du catalogue de REFERENCE, tenue a la main et indexee par COMPTE :
+# elle ne peut pas connaitre les roles d'un catalogue tiers. Un catalogue apporte les siens sous
+# `avatars/<role>.png`, et le compte se derive — `<org>_<role>`, la meme derivation que le roster.
+
+@test "catalogue: les avatars d'un catalogue sont poses sur <org>_<role>" {
+  cat_dir="$BATS_TEST_TMPDIR/cat-avatars"
+  mkdir -p "$cat_dir"
+  : > "$cat_dir/dev.png"
+  : > "$cat_dir/writer.png"
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$cat_dir"
+  [ "$status" -eq 0 ]
+  grep -q "Sudo: web-demo_dev" "$ARGV_LOG"
+  grep -q "Sudo: web-demo_writer" "$ARGV_LOG"
+}
+
+@test "catalogue: un dossier d'avatars ABSENT ne dit rien et ne casse rien" {
+  # ⚖ user 2026-08-16 : « on refuse pas un catalogue parce qu'il n'a pas d'avatar pour chaque
+  # worker ». Un catalogue qui n'en livre pas doit produire ZERO bruit — pas un avertissement, pas
+  # une entree comptee.
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$BATS_TEST_TMPDIR/rien-ici"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"rien-ici"* ]]
+
+  # LA FORME QUI MORD : l'absence d'APPEL, pas seulement l'absence de sortie. Un temoin qui ne lit
+  # que $output resterait vert si le script postait quand meme des avatars derives en silence —
+  # c'est le defaut de la classe « sonde morte » releve par l'audit croise chez le consultant (son
+  # temoin etait vert dans les deux mondes). Aucun POST ne doit viser un compte `web-demo_*`.
+  run grep -c 'web-demo_' "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "catalogue: un chemin RELATIF non plus — le discriminant est le `/`, pas le `/` INITIAL" {
+  # ⚠ MESURE SUR BANC, 2026-08-16, ET LE TEMOIN D'A COTE NE L'ATTRAPAIT PAS. La recette passe
+  # `--catalogue-avatars ${path.module}/catalogue-avatars`, et `path.module` vaut `.` dans le
+  # dossier du module : les entrees derivees portaient `./catalogue-avatars/dev.png`, donc un
+  # chemin RELATIF. Il etait re-prefixe en `<avatars-dir>/./catalogue-avatars/dev.png`, et QUATRE
+  # comptes du catalogue sont sortis en echec pour une raison qui ne les concernait pas.
+  #
+  # Le temoin voisin ne testait que la forme ABSOLUE — la seule a laquelle j'avais pense en
+  # ecrivant le code, donc la seule que le code traitait.
+  cd "$BATS_TEST_TMPDIR"
+  mkdir -p rel-avatars
+  : > rel-avatars/dev.png
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars ./rel-avatars
+  [ "$status" -eq 0 ]
+  # Ni re-prefixe, ni declare introuvable.
+  [[ "$output" != *"asset introuvable"* ]]
+  run grep -c "$AVATARS/./rel-avatars" "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "catalogue: le chemin ABSOLU d'un avatar de catalogue n'est pas re-prefixe" {
+  # Les entrees de la table portent un NOM DE FICHIER, resolu dans `--avatars-dir` ; celles d'un
+  # catalogue portent un chemin ABSOLU, parce qu'elles vivent dans l'arbre du catalogue. Les
+  # confondre produirait `<avatars-dir>//chemin/absolu` — un fichier introuvable, et un compte
+  # compte en echec pour une raison qui ne le concerne pas.
+  cat_dir="$BATS_TEST_TMPDIR/abs-avatars"
+  mkdir -p "$cat_dir"
+  : > "$cat_dir/dev.png"
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$cat_dir"
+  [ "$status" -eq 0 ]
+  run grep -c "$AVATARS/$cat_dir" "$ARGV_LOG"
+  [ "$output" = "0" ]
 }
 
 # ─── LE NOM DU SIEGE MASTER (2026-08-15) ─────────────────────────────────────────────────────────
