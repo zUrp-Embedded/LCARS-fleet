@@ -34,18 +34,46 @@ set -euo pipefail
 
 # ─── ce que la FORGE signe ────────────────────────────────────────────────────────────────────────
 #
-# UN DEPOT `catalogue` DANS UNE ORG = CE CATALOGUE EST INSTALLE. La question se pose en une requete
-# anonyme, et `q=catalogue` est un match de SOUS-CHAINE cote Gitea : `mon-catalogue-perso` remonte
-# aussi. Le filtre exact est donc fait ici, sur `.name`, jamais laisse au serveur.
+# UN DEPOT `catalogue` DANS UNE ORG = CE CATALOGUE EST INSTALLE. Trois filtres, chacun paye :
 #
-# ⚠ `.owner.login` ET PAS le premier segment de `.full_name` : les deux coincident aujourd'hui, mais
-# le second est une chaine qu'on redecoupe alors que le premier est le champ que la forge remplit.
-forge_installed() { # -> lignes « <nom> <clone-url> »
-  local page
-  page="$(curl -fsS -m 20 "$PROV_FORGE_URL/api/v1/repos/search?q=catalogue&limit=100" 2>/dev/null)" || return 1
-  printf '%s' "$page" \
+#   * le NOM, exact — `q=catalogue` est un match de SOUS-CHAINE cote Gitea, `mon-catalogue-perso`
+#     remonte aussi ; le filtre est fait ici, sur `.name`, jamais laisse au serveur ;
+#   * le TYPE DU PROPRIETAIRE — ⚠ D1 de l'audit independant (2026-08-16) : orgs et comptes perso
+#     partagent l'espace de noms, et sans ce filtre un user non-admin qui pousse un depot public
+#     `catalogue` chez lui faisait apparaitre son login comme catalogue INSTALLE — clone de son
+#     materiel, roster derive pour le mint, « seul un admin installe » contourne par un push.
+#     L'objet `owner` de la recherche ne porte AUCUN champ discriminant (mesure 1.26.1) ; la
+#     question se pose a `/orgs/<owner>` — 200 = org, 404 = espace perso prouve, le reste est une
+#     ABSENCE de reponse et ne conclut rien (sortie HOLD : ni converge, ni supprime) ;
+#   * la TRONCATURE — D4 : le serveur borne la page a SA limite, et une liste partielle lue comme
+#     entiere ferait SUPPRIMER le materiel des catalogues au-dela de la borne. `X-Total-Count`
+#     (mesure : le header existe) est compare au nombre recu ; ecart = refus, jamais une
+#     convergence sur une liste partielle.
+#
+# Sorties : « OK <nom> <url> » / « HOLD <nom> » ; rc=1 forge muette, rc=3 liste tronquee.
+forge_installed() {
+  local hdr body total count
+  hdr="$(mktemp)"
+  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=catalogue&limit=50" 2>/dev/null)" \
+    || { rm -f "$hdr"; return 1; }
+  total="$(tr -d '\r' < "$hdr" | awk -F': ' 'tolower($1)=="x-total-count"{print $2}')"
+  rm -f "$hdr"
+
+  count="$(printf '%s' "$body" | jq -r '.data | length')"
+  [[ -n "$total" && "$count" -lt "$total" ]] && return 3
+
+  local name url code
+  while read -r name url; do
+    [[ -n "$name" ]] || continue
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
+    case "$code" in
+      200) printf 'OK %s %s\n' "$name" "$url" ;;
+      404) : ;;
+      *)   printf 'HOLD %s\n' "$name" ;;
+    esac
+  done <<< "$(printf '%s' "$body" \
     | jq -r '.data[]? | select(.name == "catalogue") | select(.empty != true)
-             | "\(.owner.login) \(.clone_url)"'
+             | "\(.owner.login) \(.clone_url)"')"
 }
 
 # ─── ce que la BOITE porte ────────────────────────────────────────────────────────────────────────
@@ -74,9 +102,12 @@ check() {
     verdict_check
   fi
 
-  local signed name url rc=0
+  local signed status name url rc=0
   signed="$(forge_installed)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
+  if [[ "$rc" -eq 3 ]]; then
+    p_drift "liste des catalogues TRONQUEE par la forge — rien n'est conclu sur une liste partielle"
+    verdict_check
+  elif [[ "$rc" -ne 0 ]]; then
     # ON NE CONCLUT PAS QUE RIEN N'EST INSTALLE. Une forge injoignable rendrait la liste vide, et
     # l'apply supprimerait alors TOUT le materiel local en croyant converger.
     p_drift "forge injoignable ($PROV_FORGE_URL) — l'etat installe des catalogues n'a pas pu etre lu"
@@ -84,9 +115,14 @@ check() {
   fi
 
   local seen=" "
-  while read -r name url; do
+  while read -r status name url; do
     [[ -n "$name" ]] || continue
     seen="$seen$name "
+    if [[ "$status" == "HOLD" ]]; then
+      p_drift "catalogue $name : type du proprietaire illisible sur la forge — rien n'est conclu"
+      continue
+    fi
+
     local dir="$PROV_CATALOGUES_DIR/$name"
     if [[ ! -d "$dir/.git" ]]; then
       p_drift "catalogue $name installe sur la forge, materiel absent ici ($dir)"
@@ -111,7 +147,10 @@ apply() {
 
   local signed rc=0
   signed="$(forge_installed)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
+  if [[ "$rc" -eq 3 ]]; then
+    p_drift "liste des catalogues TRONQUEE par la forge — materiel laisse EN L'ETAT, rien n'est supprime"
+    verdict_apply
+  elif [[ "$rc" -ne 0 ]]; then
     p_drift "forge injoignable ($PROV_FORGE_URL) — materiel laisse EN L'ETAT, rien n'est supprime"
     verdict_apply
   fi
@@ -121,10 +160,17 @@ apply() {
   # par ne plus etre d'accord. Ici on garantit seulement qu'il existe avant d'y ecrire.
   mkdir -p "$PROV_CATALOGUES_DIR"
 
-  local name url dir seen=" "
-  while read -r name url; do
+  local status name url dir seen=" "
+  while read -r status name url; do
     [[ -n "$name" ]] || continue
+    # HOLD entre dans `seen` et nulle part ailleurs : son materiel survit au balayage (on n'a pas pu
+    # lire le type du proprietaire, on ne conclut rien), et rien n'est clone sous un nom non signe.
     seen="$seen$name "
+    if [[ "$status" == "HOLD" ]]; then
+      p_drift "catalogue $name : type du proprietaire illisible — materiel laisse EN L'ETAT"
+      continue
+    fi
+
     dir="$PROV_CATALOGUES_DIR/$name"
 
     if [[ -d "$dir/.git" ]]; then

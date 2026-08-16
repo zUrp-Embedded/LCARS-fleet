@@ -25,16 +25,45 @@ setup() {
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
-# La forge repond ce qu'on lui dit de repondre. `$1` = corps JSON ; sans argument, elle est DOWN
-# (curl sort non-zero, ce que `-fsS` fait sur un echec reseau comme sur un 5xx).
+# La forge repond ce qu'on lui dit de repondre — DEUX endpoints depuis D1 : la recherche (corps
+# JSON + header X-Total-Count vers le fichier -D) et la sonde d'org (`-w %{http_code}`). Fixtures :
+#   $1            corps JSON de la recherche ; sans argument, la forge est DOWN
+#   FAKE_ORGS     les noms qui repondent 200 sur /orgs/<nom> (des orgs)
+#   FAKE_ORG_MUTE les noms dont la sonde d'org echoue (000) — ni org, ni perso : illisible
+#   FAKE_TOTAL    X-Total-Count force (defaut : la taille reelle de .data — pas de troncature)
+# Tout autre nom sonde repond 404 : espace perso prouve.
 fake_forge() {
   if [[ $# -eq 0 ]]; then
     printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
-  else
-    { printf '#!/usr/bin/env bash\ncat <<'"'"'JSON'"'"'\n'; printf '%s\n' "$1"; printf 'JSON\n'; } \
-      > "$BATS_TEST_TMPDIR/bin/curl"
+    chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+    return
   fi
+  printf '%s' "$1" > "$BATS_TEST_TMPDIR/search.json"
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'SH'
+#!/usr/bin/env bash
+hdr="" url=""
+args=("$@")
+for ((i=0; i<$#; i++)); do
+  case "${args[i]}" in
+    -D) hdr="${args[i+1]}" ;;
+    http*) url="${args[i]}" ;;
+  esac
+done
+if [[ "$url" == */api/v1/orgs/* ]]; then
+  name="${url##*/}"
+  for o in ${FAKE_ORG_MUTE:-}; do [[ "$o" == "$name" ]] && { echo 000; exit 0; }; done
+  for o in ${FAKE_ORGS:-};     do [[ "$o" == "$name" ]] && { echo 200; exit 0; }; done
+  echo 404; exit 0
+fi
+body="$(cat "$FAKE_BODY_FILE")"
+if [[ -n "$hdr" ]]; then
+  t="${FAKE_TOTAL:-$(printf '%s' "$body" | jq -r '.data | length')}"
+  printf 'X-Total-Count: %s\r\n' "$t" > "$hdr"
+fi
+printf '%s' "$body"
+SH
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  export FAKE_BODY_FILE="$BATS_TEST_TMPDIR/search.json"
 }
 
 # `git` qui trace ce qu'on lui demande sans rien faire. `clone` cree la cible pour que la suite du
@@ -138,6 +167,7 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
   # Le staging est ce qui empeche un clone interrompu de laisser un demi-catalogue SOUS son nom
   # definitif — le boot suivant le verifierait comme s'il etait entier.
   fake_forge "$(json_one web)"
+  export FAKE_ORGS="web"
   fake_git
 
   run bash "$MOD" apply
@@ -151,6 +181,7 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
   # Le cache n'a pas d'historique a preserver. Un `pull` sur un depot reecrit par son proprietaire
   # s'arrete sur un conflit de merge que personne ne viendra resoudre dans un provisionnement.
   fake_forge "$(json_one web)"
+  export FAKE_ORGS="web"
   fake_git
   seed_local "web"
 
@@ -163,12 +194,63 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
 
 @test "check : materiel en retard sur sa source = DRIFT nomme" {
   fake_forge "$(json_one web)"
+  export FAKE_ORGS="web"
   fake_git   # ls-remote rend deadbeef…, rev-parse rend 0000… : deux shas differents
   seed_local "web"
 
   run bash "$MOD" check
   [ "$status" -ne 0 ]
   [[ "$output" == *"web en retard sur sa source"* ]]
+}
+
+# ─── D1 : le nom reserve vaut aussi pour les STORES ─────────────────────────────────────────────
+
+@test "D1: un depot catalogue dans un espace PERSO ne signe rien — le gate admin ne se pousse pas" {
+  # ⚠ LE TROU DU TROISIEME REGARD : orgs et comptes perso partagent l'espace de noms, et rien ne
+  # verifiait le type du proprietaire. `alice` poussait un depot public `catalogue` chez elle ->
+  # clone de son materiel dans /home/catalogues, roster derive pour le mint. La sonde /orgs/alice
+  # rend 404 (espace perso prouve) : rien n'est clone, et un materiel local sous ce nom est retire
+  # comme tout catalogue que la forge n'installe plus.
+  fake_forge "$(json_one alice)"
+  export FAKE_ORGS=""
+  fake_git
+  seed_local "alice"
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  [ ! -d "$PROV_CATALOGUES_DIR/alice" ]
+}
+
+@test "D1: type du proprietaire ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
+  # `{:error}` n'est pas « pas une org » : conclure de l'absence de reponse retrograderait un
+  # catalogue installe sur un hoquet — ou, dans l'autre sens, clonerait un depot non signe.
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="" FAKE_ORG_MUTE="web"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"type du proprietaire illisible"* ]]
+  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+}
+
+@test "D4: une liste TRONQUEE refuse — jamais une convergence sur une liste partielle" {
+  # Le serveur borne la page a SA limite. Une page lue comme la totalite ferait SUPPRIMER le
+  # materiel des catalogues au-dela de la borne — la meme classe que la forge muette, en pire :
+  # la reponse a l'air entiere.
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="web" FAKE_TOTAL=7
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"TRONQUEE"* ]]
+  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
 
 # ─── LE ROSTER DERIVE ───────────────────────────────────────────────────────────────────────────

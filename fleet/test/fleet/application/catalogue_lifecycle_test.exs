@@ -15,6 +15,22 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       with {:ok, %{sha: sha}} <- branch_commit(full, branch, opts), do: {:ok, sha}
     end
 
+    # Par defaut TOUT proprietaire est une org : les temoins anterieurs a D1 decrivent des stores
+    # legitimes, et les faire tous declarer une carte d'orgs noierait ce qu'ils tiennent. Le temoin
+    # D1 passe `orgs:` explicitement.
+    def org_exists?(owner, opts) do
+      case Keyword.get(opts, :orgs, :all) do
+        :all ->
+          {:ok, true}
+
+        %{} = m ->
+          case Map.get(m, owner, false) do
+            :unreachable -> {:error, {:transport, :econnrefused}}
+            b -> {:ok, b}
+          end
+      end
+    end
+
     # LE MESSAGE FAIT PARTIE DE LA REPONSE, et la doublure le porte : c'est lui qui dit quelle
     # source le store projette. Une doublure qui ne rendrait que le sha ferait passer tous les
     # temoins d'`updatable` sur une comparaison que le vrai code ne fait plus.
@@ -56,14 +72,15 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     }
   end
 
-  defp states(repos, manifests \\ %{}, shas \\ %{}, sources \\ %{}) do
+  defp states(repos, manifests \\ %{}, shas \\ %{}, sources \\ %{}, orgs \\ :all) do
     CatalogueLifecycle.states(
       forge_repo: FakeRepo,
       forge_files: FakeFiles,
       repos: repos,
       manifests: manifests,
       shas: shas,
-      sources: sources
+      sources: sources,
+      orgs: orgs
     )
   end
 
@@ -175,6 +192,43 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     assert %{state: :installed, deposit: nil} = s["web"]
   end
 
+  describe "D1 — le nom reserve vaut aussi pour les STORES" do
+    test "un depot `catalogue` dans un espace PERSO ne signe RIEN" do
+      # ⚠ LE TROU QUE LE TROISIEME REGARD A TROUVE, apres que deux auto-audits l'ont rate : orgs et
+      # comptes perso partagent l'espace de noms Gitea, et rien ne verifiait le TYPE du
+      # proprietaire. `alice` poussait un depot public `catalogue` chez elle -> `alice` sortait
+      # INSTALLE, le convergeur clonait son materiel, le mint derivait son roster. Le gate admin
+      # contourne par un push.
+      assert {:ok, s} = states([repo("alice/catalogue")], %{}, %{}, %{}, %{"alice" => false})
+
+      refute Map.has_key?(s, "alice")
+
+      # Et il ne redevient pas un DEPOT par la bande : le nom `catalogue` est reserve des deux cotes.
+      assert Map.keys(s) == ["fleet"]
+    end
+
+    test "TEMOIN de non-vacuite : le meme depot sous une ORG signe, comme avant" do
+      assert {:ok, s} =
+               states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => "s"}, %{}, %{
+                 "web" => true
+               })
+
+      assert %{state: :installed} = s["web"]
+    end
+
+    test "type de proprietaire ILLISIBLE : le store est GARDE — on ne retrograde pas sur un hoquet" do
+      # `{:error, _}` n'est pas « pas une org ». L'autre lecture retrograderait un catalogue
+      # installe en disponible pendant une panne — le mensonge inverse de D1, plus cher que le cout
+      # transitoire accepte (un depot perso frais annonce installe le temps du hoquet).
+      assert {:ok, s} =
+               states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => "s"}, %{}, %{
+                 "web" => :unreachable
+               })
+
+      assert %{state: :installed, updatable?: nil} = s["web"]
+    end
+  end
+
   describe "lines/1 — ce que `lcars catalogue list` imprime" do
     test "AVAILABLE porte le DEPOT, donc son proprietaire en premier segment" do
       # ⚖ user, 2026-08-16 : « il peut afficher de quel user vient les catalogues available ? ».
@@ -237,6 +291,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
             {Fleet.Forge.Client.Repo, :search_repos, 1},
             {Fleet.Forge.Client.Repo, :branch_head, 3},
             {Fleet.Forge.Client.Repo, :branch_commit, 3},
+            {Fleet.Forge.Client.Repo, :org_exists?, 2},
             {Fleet.Forge.Client.Files, :get_file, 3}
           ] do
         Code.ensure_loaded!(m)
