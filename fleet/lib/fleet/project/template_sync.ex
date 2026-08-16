@@ -45,32 +45,63 @@ defmodule Fleet.Project.TemplateSync do
   Starts the transport this needs, then syncs. For callers with no running app — a Mix task, a
   release `eval`. Returns `{:ok, repo}` or `{:error, reason}`.
   """
-  @spec standalone_sync(keyword()) :: {:ok, String.t()} | {:error, term()}
-  def standalone_sync(fc) do
+  @spec standalone_sync(keyword(), String.t() | nil) ::
+          {:ok, String.t()} | {:ok, :no_template} | {:error, term()}
+  def standalone_sync(fc, catalogue \\ nil) do
     with {:ok, _} <- Application.ensure_all_started(:req),
          {:ok, _} <-
            Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one) do
-      sync(fc)
+      sync(fc, catalogue)
     else
       {:error, reason} -> {:error, {:transport, reason}}
     end
   end
 
   @doc """
-  Syncs the template repo. Requires `base_url:` and `token:`, and a transport already up.
-  """
-  @spec sync(keyword()) :: {:ok, String.t()} | {:error, term()}
-  def sync(fc) do
-    repo = Fleet.Project.Onboard.project_template()
-    [org, name] = String.split(repo, "/", parts: 2)
+  Syncs the template repo of `catalogue` (`nil` = the bundled one). Requires `base_url:` and
+  `token:`, and a transport already up.
 
-    with :ok <- ensure_repo(org, name, repo, fc),
-         :ok <- push_template(repo, fc),
-         :ok <- Fleet.Forge.Client.Repo.set_template(repo, true, fc),
-         :ok <- Fleet.Forge.Client.ensure_protocol_labels(repo, fc) do
-      {:ok, repo}
+  ## `{:ok, :no_template}` is a SUCCESS, and it is the common case
+
+  A catalogue carrying no `project_template` tree has nothing to project, and that is legitimate:
+  the template is the one tree allowed to fall back on the reference catalogue's, because it names
+  nothing and is named by nothing. Returning an error there would make `catalogue install` report a
+  failure for a catalogue that installed perfectly.
+
+  What it must NOT do is push the BUNDLED tree into that catalogue's org: the forge would then
+  carry a `<catalogue>/project-template` that `Onboard` resolves to — so the fallback would stop
+  being visible, and a catalogue would silently serve a neighbour's material under its own name.
+  The absence of the repo IS what makes the fallback observable.
+  """
+  @spec sync(keyword(), String.t() | nil) ::
+          {:ok, String.t()} | {:ok, :no_template} | {:error, term()}
+  def sync(fc, catalogue \\ nil) do
+    root = catalogue_root(catalogue)
+    src = Path.join(root, Fleet.Catalogue.rel(:project_template))
+
+    if File.dir?(src) do
+      repo = Fleet.Project.Onboard.project_template(org: catalogue)
+      [org, name] = String.split(repo, "/", parts: 2)
+
+      with :ok <- ensure_repo(org, name, repo, fc),
+           :ok <- push_template(repo, src, fc),
+           :ok <- Fleet.Forge.Client.Repo.set_template(repo, true, fc),
+           :ok <- Fleet.Forge.Client.ensure_protocol_labels(repo, fc) do
+        {:ok, repo}
+      end
+    else
+      {:ok, :no_template}
     end
   end
+
+  # `root_for/1` answers `nil` for a catalogue this box does not serve, and the bundled root is the
+  # right answer then: the only caller passing a name is `catalogue install`, which has just laid
+  # the material — if it is not there, the name is not one of ours and there is nothing of its own
+  # to project.
+  defp catalogue_root(nil), do: Fleet.Catalogue.root()
+
+  defp catalogue_root(name) when is_binary(name),
+    do: Fleet.Catalogue.root_for(name) || Fleet.Catalogue.root()
 
   @doc """
   Credentials from the environment: `FORGE_BASE_URL` + `FORGE_TOKEN_FILE`. Both must be named —
@@ -94,11 +125,26 @@ defmodule Fleet.Project.TemplateSync do
   `Fleet.Application.CatalogueRoles.eval_main/1` — the motive goes to stderr so a caller capturing
   stdout gets an empty string on failure, never a message it might mistake for a repo name.
   """
+  # DEUX SPECS, parce qu'un defaut engendre DEUX fonctions. `eval_main/0` et `eval_main/1` sont
+  # deux arites reelles pour Dialyzer, et n'en declarer qu'une laisse l'autre sans `no_return` —
+  # donc signalee « n'a pas de retour local » alors que c'est exactement ce qu'elle promet.
   @spec eval_main() :: no_return()
-  def eval_main do
+  @spec eval_main(String.t() | nil) :: no_return()
+  def eval_main(catalogue \\ nil) do
     case forge_opts_from_env() do
       {:ok, fc} ->
-        case standalone_sync(fc) do
+        case standalone_sync(fc, catalogue) do
+          {:ok, :no_template} ->
+            # SAID, and it exits 0. A catalogue with no template of its own is legitimate, but the
+            # operator must be able to tell it apart from a sync that ran — otherwise the fallback
+            # is discovered later, in the scaffold of a project nobody expected to look foreign.
+            IO.puts(
+              "project-template: #{catalogue || "(bundled)"} carries no project_template tree — " <>
+                "its projects will be scaffolded from the reference catalogue's"
+            )
+
+            System.halt(0)
+
           {:ok, repo} ->
             IO.puts("project-template: #{repo} synced (content + template flag + labels)")
             System.halt(0)
@@ -137,7 +183,7 @@ defmodule Fleet.Project.TemplateSync do
   # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
   # forge are the honest blueprint, expansion happens at write time).
   @doc false
-  def push_template(repo, fc) do
+  def push_template(repo, src_root, fc) do
     # The token rides the git ENVIRON (extraheader via GIT_CONFIG_*), NEVER the argv/URL:
     # /proc/<pid>/cmdline is world-readable (another human's `ps` would read a token-in-URL), the
     # environ is owner-only. We reuse the runtime's SINGLE SOURCE (Fleet.Credentials.ForgeAuth) rather
@@ -154,8 +200,8 @@ defmodule Fleet.Project.TemplateSync do
     url = base_prefix <> "/" <> repo <> ".git"
 
     with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result(),
-         :ok <- push_face(url, auth_env, "main", "main") do
-      push_face(url, auth_env, "ops", "ops")
+         :ok <- push_face(url, auth_env, src_root, "main", "main") do
+      push_face(url, auth_env, src_root, "ops", "ops")
     end
   end
 
@@ -163,8 +209,8 @@ defmodule Fleet.Project.TemplateSync do
   # (ops is orphan by construction, exactly like the runtime's add_work_ops). Force-push is the
   # projection semantic (overwrite the forge copy, never merge — L13); a lease would need a
   # remote-tracking ref this fresh `git init` never had, so the blind force is correct HERE.
-  defp push_face(url, auth_env, face, branch) do
-    src = Path.join(Fleet.Catalogue.project_template_root(), face)
+  defp push_face(url, auth_env, src_root, face, branch) do
+    src = Path.join(src_root, face)
     tmp = Path.join(System.tmp_dir!(), "lcars-tpl-#{face}-#{System.unique_integer([:positive])}")
 
     try do

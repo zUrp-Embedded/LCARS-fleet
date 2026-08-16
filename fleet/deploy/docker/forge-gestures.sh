@@ -343,6 +343,16 @@ cmd_install() {
   #    materiel n'est nulle part.
   push_store "$name" "$work/src" "$tok"
 
+  # 6b. LE MODELE DE PROJET DU CATALOGUE. Sans lui, `Onboard` resout `<name>/project-template`,
+  #     ne le trouve pas, et retombe sur celui du catalogue de reference — un repli legitime, mais
+  #     qui ne devrait pas etre le sort d'un catalogue qui livre le sien. La porte ne pose rien
+  #     quand le catalogue n'en apporte pas : c'est l'absence du depot qui rend le repli visible.
+  local tf; tf="$(umask 077; mktemp)"
+  printf '%s\n' "$tok" > "$tf"
+  FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync "$name" \
+    || echo "forge-gestures: modele de projet de $name NON pose — ses projets partiront du modele de reference" >&2
+  rm -f "$tf"
+
   # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Il n'est pas l'installation — celle-ci est le depot
   #    `$name/catalogue` pousse juste au-dessus — et `45-catalogues` le reposerait de toute facon au
   #    prochain boot. Mais « au prochain boot » veut dire que la commande rend la main sur une boite

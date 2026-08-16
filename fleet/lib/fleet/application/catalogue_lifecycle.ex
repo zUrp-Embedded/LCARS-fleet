@@ -76,17 +76,33 @@ defmodule Fleet.Application.CatalogueLifecycle do
   end
 
   @doc """
-  `eval` door for `lcars catalogue list` — one `<STATE> <name> <detail>` line per catalogue.
+  `eval` door for `lcars catalogue list` — one `<STATE> <name> <deposit>` line per catalogue.
 
   The CLI has NO forge access by design, and every one of these states is a forge fact. It asks the
   release through the same door `catalogue verify` already uses. The door speaks WORDS, not a
   formatted table: a column added later must not have to agree across two languages.
+
+  ## The third field is the DEPOSIT, and it is deliberately empty for an installed catalogue
+
+  ⚖ user, 2026-08-16: *"can `catalogue list` show which user an available catalogue comes from?
+  Once installed, its origin does not matter — at install time it is useful."*
+
+  It is the `<owner>/<repo>` of the deposit, so the owner is its first segment — the forge's own
+  convention, not a second rendering of the same fact. That is exactly the question an admin has
+  before installing: WHOSE material am I about to serve to everyone.
+
+  Once installed it is dropped, and not only because nobody reads it. What the box follows from
+  then on is `<name>/catalogue`, the store — printing the deposit there names something that is no
+  longer the source, in the column an operator reads AS the source.
+
+  `UPDATABLE` keeps it, and that is the same rule rather than an exception: the deposit is once
+  again what the next `install` would pull from.
   """
   @spec eval_main() :: no_return()
   def eval_main do
     case states([]) do
       {:ok, entries} ->
-        Enum.each(entries, fn {name, e} -> IO.puts(line(name, e)) end)
+        Enum.each(lines(entries), &IO.puts/1)
         System.halt(0)
 
       {:error, {:duplicate_catalogues, dups}} ->
@@ -160,14 +176,21 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
+  @doc """
+  The `eval_main/0` output, as a list of lines — the same rendering, without the exit.
+
+  It exists to be witnessed. `eval_main/0` ends in `System.halt/1`, so nothing can assert on what it
+  printed from inside the VM that runs the assertion; a private formatter would then be covered only
+  by a bench run, which is where the deposit-of-an-installed-catalogue defect lived until an
+  operator read the column.
+  """
+  @spec lines(%{String.t() => entry()}) :: [String.t()]
+  def lines(entries), do: Enum.map(entries, fn {name, e} -> line(name, e) end)
+
   defp line(name, %{state: :installed, updatable?: true, deposit: d}),
     do: "UPDATABLE #{name} #{d.repo}"
 
-  defp line(name, %{state: :installed, updatable?: nil}),
-    do: "INSTALLED #{name} -"
-
-  defp line(name, %{state: :installed, deposit: d}),
-    do: "INSTALLED #{name} #{(d && d.repo) || "-"}"
+  defp line(name, %{state: :installed}), do: "INSTALLED #{name} -"
 
   defp line(name, %{state: :available, deposit: d}),
     do: "AVAILABLE #{name} #{d.repo}"

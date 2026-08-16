@@ -93,10 +93,16 @@ fi
 # 0640 root:fleet ou 0600 root) et d'un tmp pour les deux faces qu'elle pousse. L'appelant choisit
 # l'identite ; ce qu'il ne choisit pas, c'est la forge : les deux variables sont EXIGEES, un defaut
 # serait la mauvaise forge le jour ou ca compte.
+# L'ARGUMENT NOMME LE CATALOGUE, et son absence n'est pas un defaut : chaque catalogue a le sien,
+# `<catalogue>/project-template`, et sans argument c'est celui du catalogue livre qui est pose. Un
+# catalogue qui n'apporte pas d'arbre `project_template` n'en fait poser AUCUN — c'est l'absence du
+# depot qui rend le repli visible, et le pousser quand meme le rendrait invisible.
 if [[ "${1:-}" == "template-sync" ]]; then
+  arg=""
+  [[ -n "${2:-}" ]] && arg="\"${2}\""
   exec env RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
-    "Fleet.Project.TemplateSync.eval_main()"
+    "Fleet.Project.TemplateSync.eval_main(${arg})"
 fi
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que

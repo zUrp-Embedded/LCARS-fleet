@@ -450,6 +450,18 @@ defmodule Fleet.Catalogue do
   # search path (they do not supersede), but they are now addressable per root, which is what
   # publishing one image per catalogue requires.
   def rel(:workflow_maps), do: @rel_workflow_maps
+  # Same mechanism, same consequence, found the same way (2026-08-16): with no clause here, the
+  # project template could only be addressed under `root/0`, so EVERY project on the box was
+  # scaffolded from the reference catalogue while `web-demo` shipped thirteen files of its own that
+  # nothing read. It is not a search path either — a template does not supersede another, it is the
+  # tree a new project starts from — but it is now addressable per root, which is what per-catalogue
+  # resolution requires.
+  #
+  # ⚠ TWO TREES ARE STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
+  # (read by `Workflow.BriefTemplate`) and `coord_policies` (read by `Coord.Policies`). Both carry
+  # the same latent skew — a catalogue's own would never be read — and neither is closed here
+  # because neither has a caller holding the catalogue in hand today.
+  def rel(:project_template), do: @rel_project_template
 
   @doc """
   SP blocks, BUSINESS root (`<root>/#{@rel_sp_blocks}`) — the search path is `search/2`.

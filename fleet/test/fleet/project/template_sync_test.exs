@@ -24,7 +24,9 @@ defmodule Fleet.Project.TemplateSyncTest do
     end)
 
     assert :ok =
-             Sync.push_template("fleet/project-template",
+             Sync.push_template(
+               "fleet/project-template",
+               Fleet.Catalogue.project_template_root(),
                base_url: "https://forge.test",
                token: @token
              )
@@ -61,6 +63,78 @@ defmodule Fleet.Project.TemplateSyncTest do
       {:git, args, opts} -> drain_git_calls([{args, opts} | acc])
     after
       0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "le modele de projet est celui DU CATALOGUE" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "tpl-#{System.unique_integer([:positive])}")
+      cache = Path.join(tmp, "catalogues")
+      File.mkdir_p!(cache)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [cache])
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      {:ok, cache: cache}
+    end
+
+    defp catalogue(cache, name, template?) do
+      dir = Path.join(cache, name)
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "catalogue.yaml"), "api_version: 1\nname: #{name}\n")
+
+      if template? do
+        for face <- ~w(main ops) do
+          File.mkdir_p!(Path.join([dir, "project_template", face]))
+        end
+      end
+
+      dir
+    end
+
+    test "un catalogue qui livre un `project_template` a le SIEN", %{cache: cache} do
+      # LE DEFAUT QUE CE TEMOIN GARDE, ET IL A VECU : `project_template/1` rendait le litteral
+      # `fleet/project-template` pour TOUT projet de la boite. `web-demo` livrait treize fichiers
+      # que rien ne lisait, et ses projets partaient du catalogue de reference — sans un mot.
+      catalogue(cache, "web-demo", true)
+
+      assert Fleet.Project.Onboard.project_template(org: "web-demo") ==
+               "web-demo/project-template"
+    end
+
+    test "un catalogue SANS `project_template` retombe sur celui de reference", %{cache: cache} do
+      # ⚖ user, 2026-08-16 : c'est le SEUL arbre qui a le droit de replier. Tout le reste d'un
+      # catalogue est nomme PAR NOM — une carte nomme un role, un role nomme son profil — donc
+      # replier resoudrait un nom dans un catalogue qui ne l'a jamais declare. Un modele de projet
+      # ne nomme rien et n'est nomme par rien.
+      catalogue(cache, "minimal", false)
+      assert Fleet.Project.Onboard.project_template(org: "minimal") == "fleet/project-template"
+    end
+
+    test "un catalogue INCONNU de cette boite retombe aussi, sans lever", %{cache: _} do
+      assert Fleet.Project.Onboard.project_template(org: "jamais-installe") ==
+               "fleet/project-template"
+    end
+
+    test "sans org nomme, c'est le modele de reference — le comportement d'avant" do
+      assert Fleet.Project.Onboard.project_template() == "fleet/project-template"
+    end
+
+    test "sync/2 ne pousse RIEN pour un catalogue sans arbre — l'absence rend le repli visible",
+         %{
+           cache: cache
+         } do
+      # ⚠ POUSSER LE MODELE LIVRE DANS L'ORG DU CATALOGUE SERAIT PIRE QUE DE NE RIEN FAIRE : la
+      # forge porterait alors `<catalogue>/project-template`, `Onboard` s'y resoudrait, et le repli
+      # cesserait d'etre observable. Un catalogue servirait le materiel d'un voisin sous son nom.
+      catalogue(cache, "minimal", false)
+
+      Application.put_env(:lcars_fleet, :template_sync_git_runner, fn _args, _opts ->
+        flunk("aucun git ne doit etre lance pour un catalogue sans project_template")
+      end)
+
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :template_sync_git_runner) end)
+
+      assert {:ok, :no_template} =
+               Sync.sync([base_url: "https://forge.test", token: @token], "minimal")
     end
   end
 end

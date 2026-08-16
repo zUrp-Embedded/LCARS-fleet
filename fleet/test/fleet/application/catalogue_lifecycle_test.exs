@@ -129,4 +129,45 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
     assert %{state: :installed, deposit: nil} = s["web"]
   end
+
+  describe "lines/1 — ce que `lcars catalogue list` imprime" do
+    test "AVAILABLE porte le DEPOT, donc son proprietaire en premier segment" do
+      # ⚖ user, 2026-08-16 : « il peut afficher de quel user vient les catalogues available ? ».
+      # C'est LA question d'un admin avant d'installer : le materiel de QUI est-ce que je m'apprete
+      # a servir a tout le monde. L'owner est le premier segment du `full_name` — la convention de
+      # la forge elle-meme, pas un second rendu du meme fait.
+      assert {:ok, s} =
+               states([repo("bob/mob")], %{"bob/mob" => "name: mobile\n"}, %{
+                 {"bob/mob", "main"} => "d1"
+               })
+
+      assert "AVAILABLE mobile bob/mob" in CatalogueLifecycle.lines(s)
+    end
+
+    test "INSTALLED ne porte PAS le depot — ce n'est plus la source que la boite suit" do
+      # ⚖ user : « une fois installe, osef de l'origine ». Et ce n'est pas qu'une question de bruit :
+      # ce que la boite suit desormais est `<nom>/catalogue`, le store. Imprimer le depot la nomme
+      # quelque chose qui n'est plus la source, dans la colonne qu'un operateur lit COMME la source.
+      assert {:ok, s} =
+               states(
+                 [repo("alice/web"), repo("web/catalogue")],
+                 %{"alice/web" => "name: web\n"},
+                 %{{"alice/web", "main"} => "meme", {"web/catalogue", "main"} => "meme"}
+               )
+
+      assert "INSTALLED web -" in CatalogueLifecycle.lines(s)
+    end
+
+    test "UPDATABLE le REPREND — c'est de la que la mise a jour viendrait" do
+      # Meme regle, pas une exception : le depot redevient ce que le prochain `install` tirerait.
+      assert {:ok, s} =
+               states(
+                 [repo("alice/web"), repo("web/catalogue")],
+                 %{"alice/web" => "name: web\n"},
+                 %{{"alice/web", "main"} => "neuf", {"web/catalogue", "main"} => "vieux"}
+               )
+
+      assert "UPDATABLE web alice/web" in CatalogueLifecycle.lines(s)
+    end
+  end
 end

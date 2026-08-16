@@ -2070,7 +2070,13 @@ defmodule Fleet.Project.Onboard do
   # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
   # illisible (on ne sait pas — on le DIT et l'appelant retentera).
   defp seeded_project?(repo, opts) do
-    if repo == project_template(opts) do
+    # LE TEMPLATE DE SON CATALOGUE, PAS « le » template. `repo` est `<catalogue>/<nom>`, donc le
+    # proprietaire EST le catalogue : comparer a un template global ferait passer le template d'un
+    # catalogue metier pour un projet ordinaire, et la reconciliation lui poserait une protection de
+    # `main` dimensionnee sur un jury qui ne le concerne pas.
+    cat = repo |> String.split("/") |> List.first()
+
+    if repo == project_template(Keyword.put(opts, :org, cat)) do
       {:ok, false}
     else
       repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
@@ -2304,7 +2310,16 @@ defmodule Fleet.Project.Onboard do
 
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-    template = project_template(opts)
+    {template, origin} = resolve_template(Keyword.put(opts, :org, org))
+
+    if origin == :fallback and org != "fleet" do
+      Logger.info(
+        "ProjectOnboard: #{org}/#{name} scaffolded from #{template} — the catalogue #{inspect(org)} " <>
+          "carries no project_template tree of its own. Legitimate (a starting tree names nothing " <>
+          "and is named by nothing), and said because a catalogue silently built from a neighbour's " <>
+          "material is the defect this resolution exists to close."
+      )
+    end
 
     case repo_mod(opts).generate_repo(
            template,
@@ -2356,14 +2371,68 @@ defmodule Fleet.Project.Onboard do
 
   defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
 
+  # The repo NAME is fixed and the OWNER is the catalogue: `<catalogue>/project-template`. Fixing the
+  # name is what lets the resolution be local — no forge lookup to find out what a catalogue called
+  # its template.
+  @template_repo_name "project-template"
+  @bundled_template "fleet/#{@template_repo_name}"
+
   @doc """
-  Returns the configured forge template repository, defaulting to `"fleet/project-template"`.
+  The forge template repository a project of `opts[:org]` is generated from.
+
+  ## Per catalogue, and it was not
+
+  It answered the literal `"fleet/project-template"` for every project on the box until 2026-08-16 —
+  measured, and the effect was silent: a `web-demo/*` project was scaffolded from the REFERENCE
+  catalogue's template while `web-demo` shipped thirteen files of its own that nothing ever read. A
+  tree present in the catalogue and unreachable by any caller is not a feature waiting to be wired,
+  it is dead weight that looks wired.
+
+  The repo is `<catalogue>/#{@template_repo_name}`, the same derivation the org-per-catalogue model
+  applies everywhere else, and the LOCAL material decides: a catalogue that carries a
+  `#{"project_template"}` tree has its own repo, because `catalogue install` pushes the two together.
+  Asking the forge instead would be a network call on a path that already knows the answer.
+
+  ## The fallback, and why it is said out loud
+
+  ⚖ user, 2026-08-16: *"the template, we can take fleet's default if there is none, that changes
+  nothing"*. It is the ONE tree that may fall back, and the reason is structural: everything else in
+  a catalogue is named BY NAME — a card names a role, a role names its profile, a profile names its
+  SP — so falling back would resolve a name in a catalogue that never declared it. A project
+  template names nothing and is named by nothing; it is a starting tree.
+
+  It is still SAID at the moment it happens. A catalogue silently scaffolding from a neighbour's
+  template is the exact shape of the defect above, one layer down.
+
+  The two explicit overrides keep precedence: `opts[:project_template]` for a caller that names its
+  own, `:pilot_project_template` for a deployment that pins one for everybody.
   """
   @spec project_template(keyword()) :: String.t()
-  def project_template(opts \\ []) do
-    Keyword.get(opts, :project_template) ||
-      Application.get_env(:lcars_fleet, :pilot_project_template, "fleet/project-template")
+  def project_template(opts \\ []), do: elem(resolve_template(opts), 0)
+
+  # `{repo, :named | :pinned | :own | :fallback}` — the ORIGIN travels with the answer so the one
+  # caller whose decision has a consequence can say what happened, and the one that only compares
+  # (`seeded_project?/2`, run per repo per poll) stays silent. Logging inside the resolution would
+  # repeat the same sentence every tick, which is how a real signal becomes scrollback.
+  defp resolve_template(opts) do
+    cond do
+      repo = Keyword.get(opts, :project_template) -> {repo, :named}
+      repo = Application.get_env(:lcars_fleet, :pilot_project_template) -> {repo, :pinned}
+      true -> catalogue_template(Keyword.get(opts, :org))
+    end
   end
+
+  defp catalogue_template(cat) when is_binary(cat) do
+    root = Fleet.Catalogue.root_for(cat)
+
+    if root && File.dir?(Path.join(root, Fleet.Catalogue.rel(:project_template))) do
+      {"#{cat}/#{@template_repo_name}", :own}
+    else
+      {@bundled_template, :fallback}
+    end
+  end
+
+  defp catalogue_template(_), do: {@bundled_template, :fallback}
 
   @doc false
   # F-C084

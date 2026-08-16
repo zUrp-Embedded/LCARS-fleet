@@ -46,6 +46,11 @@ defmodule Mix.Tasks.Lcars.ProjectTemplate.Sync do
       end
 
     case Fleet.Project.TemplateSync.standalone_sync(fc) do
+      {:ok, :no_template} ->
+        Mix.shell().info(
+          "project-template: the bundled catalogue carries no project_template tree — nothing posed"
+        )
+
       {:ok, repo} ->
         Mix.shell().info("project-template: #{repo} synced (content + template flag + labels)")
 

@@ -291,11 +291,11 @@ cmd_catalogue_list() {
 
   case "$rc" in
     0)
-      printf '  %-16s %-11s %s\n' "CATALOGUE" "ETAT" "SOURCE"
+      printf '  %-16s %-11s %s\n' "CATALOGUE" "ETAT" "DEPOT"
       while read -r state name src; do
         case "$state" in
           INSTALLED) printf '  %-16s %-11s %s\n' "$name" "installe" "$src" ;;
-          UPDATABLE) printf '  %-16s %-11s %s\n' "$name" "A JOUR ?" "$src  → « $PROG catalogue install $name » met a jour" ;;
+          UPDATABLE) printf '  %-16s %-11s %s\n' "$name" "MAJ DISPO" "$src  → « $PROG catalogue install $name » met a jour" ;;
           AVAILABLE) printf '  %-16s %-11s %s\n' "$name" "disponible" "$src  → « $PROG catalogue install $name » (admin forge)" ;;
         esac
       done <<< "$out"
