@@ -1,7 +1,9 @@
-# <nom du projet>
+# ${REPO_NAME}
 
-**Date** : à remplir
+**Date** : ${YEAR}-${MONTH}-${DAY}
 **Statut** : nouveau projet
+
+${REPO_DESCRIPTION}
 
 <!-- Cette page est la porte d'entrée du dépôt. Elle répond à trois questions, dans cet ordre, et
      rien d'autre ne devrait s'y trouver :

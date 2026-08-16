@@ -1,6 +1,6 @@
-# CLAUDE.md — conventions du projet
+# CLAUDE.md — conventions de ${REPO_NAME}
 
-**Date** : à remplir à l'accueil du projet
+**Date** : ${YEAR}-${MONTH}-${DAY}
 **Statut** : à compléter — ce fichier est un gabarit
 
 > **Ce fichier est le plus rentable du dépôt.** Les sections de niveau deux ci-dessous sont

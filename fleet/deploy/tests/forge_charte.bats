@@ -193,6 +193,13 @@ FAKE
     --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$BATS_TEST_TMPDIR/rien-ici"
   [ "$status" -eq 0 ]
   [[ "$output" != *"rien-ici"* ]]
+
+  # LA FORME QUI MORD : l'absence d'APPEL, pas seulement l'absence de sortie. Un temoin qui ne lit
+  # que $output resterait vert si le script postait quand meme des avatars derives en silence —
+  # c'est le defaut de la classe « sonde morte » releve par l'audit croise chez le consultant (son
+  # temoin etait vert dans les deux mondes). Aucun POST ne doit viser un compte `web-demo_*`.
+  run grep -c 'web-demo_' "$ARGV_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "catalogue: un chemin RELATIF non plus — le discriminant est le `/`, pas le `/` INITIAL" {
