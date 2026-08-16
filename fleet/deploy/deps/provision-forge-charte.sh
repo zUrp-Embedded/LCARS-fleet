@@ -102,6 +102,10 @@ declare -a ENTRIES=(
 #      le decide pas pour lui ». Le master EST un compte humain. Ne rien poser par defaut la
 #      preserve : le badge n'arrive que si le deploiement NOMME son master, donc le demande.
 ADMIRAL=""
+# Le dossier d'avatars D'UN CATALOGUE, nommes par le ROLE. La table ci-dessus est celle du catalogue
+# de REFERENCE, tenue a la main et par COMPTE ; elle ne peut pas connaitre les roles d'un catalogue
+# tiers. Un catalogue apporte les siens, `<role>.png`, et le compte se derive : `<org>_<role>`.
+CAT_AVATARS=""
 
 usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -112,12 +116,28 @@ while [[ $# -gt 0 ]]; do
     --avatars-dir) AVATARS_DIR="$2"; shift 2 ;;
     --org) ORG="$2"; shift 2 ;;
     --admiral) ADMIRAL="$2"; shift 2 ;;
+    --catalogue-avatars) CAT_AVATARS="$2"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "provision-forge-charte: option inconnue: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
+
+# LES ENTREES D'UN CATALOGUE, DERIVEES DE SES FICHIERS. Aucun index a tenir : le nom du fichier
+# EST le role, et le compte est `<org>_<role>` — la meme derivation que `forge.tf` applique au
+# roster. Un dossier absent ou vide n'ajoute rien et ne dit rien : l'avatar est facultatif
+# (⚖ user 2026-08-16), et un catalogue qui n'en livre pas ne doit produire aucun bruit.
+if [[ -n "$CAT_AVATARS" && -d "$CAT_AVATARS" ]]; then
+  # Le compte se derive de `--org`, qui EST le nom du catalogue (`forge.tf` : « l'org porte le nom
+  # du catalogue »). Pas de garde sur son absence : il a un defaut, donc une garde ne se
+  # declencherait jamais — et une garde qui ne peut pas mordre est pire qu'aucune, elle rassure.
+  for _png in "$CAT_AVATARS"/*.png; do
+    [[ -e "$_png" ]] || continue
+    _role="$(basename "$_png" .png)"
+    ENTRIES+=("${ORG}_${_role}:${_png}")
+  done
+fi
 
 command -v curl >/dev/null || { echo "provision-forge-charte: curl requis" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; exit 1; }
@@ -219,7 +239,12 @@ account_exists() { # $1=compte
 
 for entry in "${ENTRIES[@]}"; do
   account="${entry%%:*}"
-  file="$AVATARS_DIR/${entry#*:}"
+  # Une entree porte soit un NOM DE FICHIER — la table de reference, resolue dans `--avatars-dir` —
+  # soit un chemin ABSOLU : les avatars d'un catalogue, qui vivent dans SON arbre et pas dans celui
+  # de la recette. Les deux formes coexistent parce que les deux sources coexistent, l'une tenue a
+  # la main et l'autre derivee.
+  file="${entry#*:}"
+  [[ "$file" == /* ]] || file="$AVATARS_DIR/$file"
 
   if ! account_exists "$account"; then
     echo "IGNORE $account — compte absent de cette forge (autre catalogue metier) : rien a poser"

@@ -45,11 +45,14 @@ exit "${FAKE_TOFU_RC:-0}"
 FAKE
   chmod +x "$BIN/tofu"
 
-  cat > "$BIN/jq" <<'FAKE'
+  cat > "$BIN/jq" <<FAKE
 #!/usr/bin/env bash
-# Assez de jq pour `.token // empty` sur le corps du mint.
-body="$(cat)"
-[[ "$body" =~ \"token\":\"([^\"]*)\" ]] && printf '%s\n' "${BASH_REMATCH[1]}"
+# Assez de jq pour les DEUX questions posees : le jeton d'enregistrement, et le login de l'id 1.
+body="\$(cat)"
+case "\$*" in
+  *'.id == 1'*) cat "$BATS_TEST_TMPDIR/master.out" 2>/dev/null || true ;;
+  *) [[ "\$body" =~ \"token\":\"([^\"]*)\" ]] && printf '%s\n' "\${BASH_REMATCH[1]}" ;;
+esac
 FAKE
   chmod +x "$BIN/jq"
 
@@ -340,6 +343,46 @@ FAKE
   chmod +x "$BIN/git"
   run bash -c "'$SCRIPT' install cat < /dev/null"
   grep -q 'Authorization: token TOK' "$GIT_LOG"
+}
+
+@test "apply: le catalogue de DEMONSTRATION est depose chez le master (id=1), pas installe" {
+  # Depose = `available`. Installe serait une decision qu'on prend a la place de l'operateur, et le
+  # nom `web-demo` existe justement pour le pousser au fork plutot qu'a l'installation.
+  setup_install
+  demo="$BATS_TEST_TMPDIR/web-demo"
+  mkdir -p "$demo"
+  printf 'name: web-demo\n' > "$demo/catalogue.yaml"
+
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q 'push .*le-master/web-demo' "$GIT_LOG"
+}
+
+@test "apply: master (id=1) NON resolu — le refus NOMME le catalogue qu'il n'a pas depose" {
+  # Un refus qui ne nomme pas son objet est un demi-message : celui qui le lit ne sait pas ce qui
+  # manque a sa forge. Et on ne depose PAS chez un compte devine.
+  setup_install
+  demo="$BATS_TEST_TMPDIR/web-demo"
+  mkdir -p "$demo"
+  : > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"web-demo NON depose"* ]]
+  # Aucun push : `git` n'a meme pas ete appele, donc son journal n'existe pas. Tester le CONTENU
+  # d'un fichier absent ferait echouer le temoin sur sa propre mise en scene et pas sur le sujet.
+  [ ! -s "$GIT_LOG" ]
+}
+
+@test "apply: SANS catalogue de demonstration dans l'image, l'apply ne dit rien" {
+  # Un deploiement qui ne livre pas la demo ne doit produire aucun bruit — ni avertissement, ni
+  # ligne de verdict sur un objet absent par choix.
+  setup_install
+  LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/pas-de-demo" run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"demonstration"* ]]
 }
 
 @test "runner-token: imprime le jeton et RIEN d'autre sur stdout" {

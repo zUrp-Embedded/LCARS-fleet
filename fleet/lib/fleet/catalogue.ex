@@ -117,6 +117,13 @@ defmodule Fleet.Catalogue do
   @rel_project_template "project_template"
   @rel_skills "skills/canon"
 
+  # LES AVATARS, nommes par le ROLE et non par le compte. La recette porte une table
+  # `<compte>:<image>` tenue a la main, donc elle doit connaitre les roles d'un catalogue tiers —
+  # un fichier nomme par le role, dans le catalogue qui le declare, n'a besoin d'aucun index.
+  # FACULTATIF par nature (⚖ user 2026-08-16) : un catalogue sans avatar s'installe, ses comptes
+  # portent l'identicon de Gitea. Un role que personne n'a dessine n'a pas d'avatar, et c'est normal.
+  @rel_avatars "avatars"
+
   @doc """
   Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:lcars_fleet, :catalogue_root`) or `priv/catalogue`.
 
@@ -444,6 +451,7 @@ defmodule Fleet.Catalogue do
 
   @doc "Relative path of a shared tree inside a catalogue — the ONE literal each, for `search/2`."
   @spec rel(atom()) :: String.t()
+  def rel(:avatars), do: @rel_avatars
   def rel(:cap_profiles), do: @rel_cap_profiles
   def rel(:modops), do: @rel_modops
   def rel(:subagent_templates), do: @rel_subagent_templates

@@ -179,6 +179,65 @@ cmd_apply() {
   trap "rm -f '$tf'" EXIT
   FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync \
     || echo "forge-gestures: depot modele NON pose — l'onboard degradera en bare-create (dit a chaque projet)" >&2
+
+  seed_demo_catalogue "$tok"
+}
+
+# ─── LA DEMO, DEPOSEE CHEZ LE MASTER ────────────────────────────────────────────────────────────
+# `web-demo` est un catalogue metier COMPLET qui montre comment on en fait un et comment on
+# l'installe. Il est livre dans l'image, depose sur la forge — donc immediatement `available` — et
+# JAMAIS installe : c'est a l'operateur de decider, et le nom le pousse au fork plutot qu'a
+# l'installation.
+#
+# DANS L'ESPACE DE `id = 1`, et pas ailleurs. C'est le seul espace garanti present que LCARS n'a pas
+# invente : Gitea le cree a son installation, avant nous, et la recette ecrit deja « le premier admin
+# est un PREREQUIS D'ENTREE, pas un produit ». Le compte humain, lui, EST cree par la recette mais
+# sous le login que l'operateur choisit — on ne peut pas s'y ancrer.
+#
+# ⚠ REPOSE A CHAQUE APPLY, en projection (force-push). Son README le dit en toutes lettres : un
+# admin qui l'edite en place perd ses modifications. C'est la bonne semantique pour une demo, et
+# c'est pour ca qu'elle doit etre ECRITE plutot qu'apprise.
+#
+# NON FATAL : la structure est posee a ce stade. Une demo qui ne part pas est une demo absente, pas
+# un deploiement casse.
+DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"
+
+seed_demo_catalogue() { # $1=jeton master
+  local tok="$1"
+  [[ -d "$DEMO_CATALOGUE" ]] || return 0
+
+  local name; name="$(basename "$DEMO_CATALOGUE")"
+  local master
+  master="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+            | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
+            | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true)"
+  if [[ -z "$master" ]]; then
+    # Un refus qui ne nomme pas SON objet est un demi-message : celui qui le lit ne sait pas ce
+    # qui manque a sa forge.
+    echo "forge-gestures: master (id=1) non resolu — $name NON depose, il n'apparaitra pas dans « catalogue list »" >&2
+    return 0
+  fi
+
+  echo "forge-gestures: catalogue de demonstration ($name -> $master/$name)"
+  printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\",\"private\":false,\"auto_init\":false}" \
+      "${FORGE_BASE_URL%/}/api/v1/user/repos" 2>/dev/null || true
+
+  local stage; stage="$(mktemp -d)"
+  cp -r "$DEMO_CATALOGUE/." "$stage/"
+  rm -rf "$stage/.git"
+  ( cd "$stage" \
+    && git init -q -b main \
+    && git add -A \
+    && git -c user.name=lcars-system -c user.email=lcars-system@lcars.local \
+         commit -q -m "chore(catalogue): projection de $name depuis l image" \
+    && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
+       GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
+       GIT_CONFIG_VALUE_0="Authorization: token $tok" \
+       git push -q --force "${FORGE_BASE_URL%/}/${master}/${name}.git" main ) \
+    || echo "forge-gestures: $name NON depose chez $master — il n'apparaitra pas dans « catalogue list »" >&2
+  rm -rf "$stage"
 }
 
 # Le jeton d'ENREGISTREMENT d'un runner. Il n'entre PAS dans la recette, et c'est un choix mesure :
@@ -262,6 +321,12 @@ cmd_install() {
   local dir="$CATALOGUE_WORK/$name"
   mkdir -p "$dir"
   cp -r "$RECIPE_DIR/." "$dir/"
+  # LES AVATARS DU CATALOGUE, a cote de la recette qui va les poser. Ils vivent dans l'arbre du
+  # catalogue (`<catalogue>/avatars/<role>.png`) et sont nommes par le ROLE : la recette n'a donc
+  # aucune table a tenir pour un catalogue tiers, le compte se derive en `<org>_<role>`.
+  # Facultatif : un catalogue qui n'en livre pas laisse ses comptes en identicon, et c'est tout.
+  rm -rf "$dir/catalogue-avatars"
+  [[ -d "$work/src/avatars" ]] && cp -r "$work/src/avatars" "$dir/catalogue-avatars"
   "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
     || die "install: roster non derive depuis $name"
 

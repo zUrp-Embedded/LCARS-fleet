@@ -167,6 +167,50 @@ FAKE
   grep -q "Sudo: admiral" "$ARGV_LOG"
 }
 
+# ─── LES AVATARS D'UN CATALOGUE (2026-08-16) ─────────────────────────────────────────────────────
+# La table `ENTRIES` est celle du catalogue de REFERENCE, tenue a la main et indexee par COMPTE :
+# elle ne peut pas connaitre les roles d'un catalogue tiers. Un catalogue apporte les siens sous
+# `avatars/<role>.png`, et le compte se derive — `<org>_<role>`, la meme derivation que le roster.
+
+@test "catalogue: les avatars d'un catalogue sont poses sur <org>_<role>" {
+  cat_dir="$BATS_TEST_TMPDIR/cat-avatars"
+  mkdir -p "$cat_dir"
+  : > "$cat_dir/dev.png"
+  : > "$cat_dir/writer.png"
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$cat_dir"
+  [ "$status" -eq 0 ]
+  grep -q "Sudo: web-demo_dev" "$ARGV_LOG"
+  grep -q "Sudo: web-demo_writer" "$ARGV_LOG"
+}
+
+@test "catalogue: un dossier d'avatars ABSENT ne dit rien et ne casse rien" {
+  # ⚖ user 2026-08-16 : « on refuse pas un catalogue parce qu'il n'a pas d'avatar pour chaque
+  # worker ». Un catalogue qui n'en livre pas doit produire ZERO bruit — pas un avertissement, pas
+  # une entree comptee.
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$BATS_TEST_TMPDIR/rien-ici"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"rien-ici"* ]]
+}
+
+@test "catalogue: le chemin ABSOLU d'un avatar de catalogue n'est pas re-prefixe" {
+  # Les entrees de la table portent un NOM DE FICHIER, resolu dans `--avatars-dir` ; celles d'un
+  # catalogue portent un chemin ABSOLU, parce qu'elles vivent dans l'arbre du catalogue. Les
+  # confondre produirait `<avatars-dir>//chemin/absolu` — un fichier introuvable, et un compte
+  # compte en echec pour une raison qui ne le concerne pas.
+  cat_dir="$BATS_TEST_TMPDIR/abs-avatars"
+  mkdir -p "$cat_dir"
+  : > "$cat_dir/dev.png"
+
+  run env FORGE_ADMIN_TOKEN="T" "$SCRIPT" --forge http://forge.test \
+    --avatars-dir "$AVATARS" --org web-demo --catalogue-avatars "$cat_dir"
+  [ "$status" -eq 0 ]
+  run grep -c "$AVATARS/$cat_dir" "$ARGV_LOG"
+  [ "$output" = "0" ]
+}
+
 # ─── LE NOM DU SIEGE MASTER (2026-08-15) ─────────────────────────────────────────────────────────
 # Le master porte le nom de son SIEGE en `full_name`, pas celui d'une personne : ce compte n'est pas
 # une identite de travail (personne ne travaille sous root), et la boite le barre a tous les etages

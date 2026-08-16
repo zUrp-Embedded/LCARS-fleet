@@ -44,6 +44,8 @@ resource "terraform_data" "charte" {
     join(",", sort([for u in gitea_user.role : u.username])),
     join(",", sort(var.system_roles)),
     var.system_account,
+    # L'ORG : changer de catalogue change les comptes a badger ET le dossier d'avatars lu.
+    var.org,
   ]
 
   provisioner "local-exec" {
@@ -54,7 +56,11 @@ resource "terraform_data" "charte" {
     # PAS de `--admiral` : le script resout le master par `id=1`. L'option reste, pour un appelant
     # qui vise une forge dont le premier compte n'est pas le master (une forge reprise, un import) —
     # mais ce n'est pas le cas de cette recette, qui ne connait pas ce login et n'a pas a l'inventer.
-    command = "${path.module}/provision-forge-charte.sh --forge ${var.gitea_url}"
+    # `--org` porte le nom du catalogue, et `--catalogue-avatars` le dossier que `catalogue install`
+    # a copie a cote de la recette. Le dossier n'existe PAS pour le catalogue de reference : le
+    # script l'ignore alors en silence, parce qu'un avatar est facultatif et qu'un catalogue qui
+    # n'en livre pas ne doit produire aucun bruit.
+    command = "${path.module}/provision-forge-charte.sh --forge ${var.gitea_url} --org ${var.org} --catalogue-avatars ${path.module}/catalogue-avatars"
 
     # Le master-token passe par l'ENVIRONNEMENT, jamais par la ligne de commande : un argument est
     # visible dans la table des processus de la machine, une variable d'environnement ne l'est que
