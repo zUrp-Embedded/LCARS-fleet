@@ -338,6 +338,37 @@ REMOTE
       lcars bash -c "$remote" \
       || { echo "docker.sh forge-apply: échec sur $m — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
   done
+
+  # ─── LE DÉPÔT MODÈLE, dans le même geste ──────────────────────────────────────────────────────
+  # `create_project` GÉNÈRE depuis ce dépôt. Absent, l'onboard dégrade en bare-create — bruyamment,
+  # mais sur chaque projet, et sur une forge d'opérateur c'était l'état permanent : le seul poseur
+  # était une tâche Mix, absente de l'image.
+  #
+  # AVEC LE JETON MASTER, ET C'EST CE QUI SUPPRIME UN ORDRE. Le poser avec le jeton SYSTÈME aurait
+  # exigé qu'il soit déjà minté, donc un boot entre l'apply et ce geste. Le master est là, il a le
+  # droit, et l'auteur des commits est de toute façon écrit en dur à `lcars-system`.
+  #
+  # `|| true` ASSUMÉ : la structure EST posée à ce stade. Un modèle qui ne part pas est une
+  # dégradation nommée, pas une raison de rendre un échec sur un geste qui a réussi.
+  echo "docker.sh forge-apply: dépôt modèle (project-template)"
+  local remote_tpl
+  remote_tpl=$(cat <<'REMOTE'
+set -eu
+stdin_tok=""
+IFS= read -r stdin_tok || true
+tok="$stdin_tok"
+[[ -n "$tok" ]] || tok="$(cat /home/private/forge-master.token 2>/dev/null || true)"
+[[ -n "$tok" ]] || { echo "forge-apply: pas d'autorite pour le depot modele" >&2; exit 1; }
+umask 077
+tf="$(mktemp)"
+printf '%s\n' "$tok" > "$tf"
+trap 'rm -f "$tf"' EXIT
+FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$tf" /opt/lcars/entrypoint.sh template-sync
+REMOTE
+)
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root lcars bash -c "$remote_tpl" \
+    || echo "docker.sh forge-apply: dépôt modèle NON posé — l'onboard dégradera en bare-create (dit à chaque projet)" >&2
+
   echo ""
   echo "docker.sh forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
   echo "  ./docker.sh doctor    # ce que la boîte voit de sa forge maintenant"

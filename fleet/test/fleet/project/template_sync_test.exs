@@ -1,8 +1,11 @@
-defmodule Mix.Tasks.Lcars.ProjectTemplate.SyncTest do
+defmodule Fleet.Project.TemplateSyncTest do
   # async: false — mutates global Application env (the git-runner seam + :forge_auth).
   use ExUnit.Case, async: false
 
-  alias Mix.Tasks.Lcars.ProjectTemplate.Sync
+  # Le sujet a DEMENAGE : le corps de la projection vit dans un module ordinaire, parce qu'une
+  # tache Mix n'existe pas dans l'image runtime — donc le seul poseur du template ne pouvait pas
+  # tourner sur une boite deployee. Ce temoin suit le corps, pas la porte.
+  alias Fleet.Project.TemplateSync, as: Sync
 
   @token "s3cr3t-forge-token-should-never-touch-argv"
 

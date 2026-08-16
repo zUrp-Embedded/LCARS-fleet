@@ -63,6 +63,26 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(\"${root}\")"
 fi
 
+# `template-sync` : POSE le depot modele que `create_project` genere. Meme porte outil que `roles`
+# et `verify`, et pour la meme raison — la question se pose a un script de provisionnement, dehors
+# d'une fleet vivante.
+#
+# ⚠ CE GESTE N'EXISTAIT QUE SUR LE BANC, et il n'y avait aucun moyen de le jouer ailleurs : son
+# seul poseur etait une tache MIX, et `mix` n'est pas dans cette image (15-toolchain : build only).
+# Une forge de production n'avait donc pas de `project-template`, et `Onboard` degradait en
+# bare-create sur chaque projet, en silence. Le corps a demenage dans `Fleet.Project.TemplateSync`.
+#
+# PAS `nobody` ICI, contrairement aux trois portes au-dessus, et c'est structurel : celles-la LISENT
+# le catalogue, celle-ci ECRIT sur la forge. Elle a besoin de lire le jeton (`FORGE_TOKEN_FILE`,
+# 0640 root:fleet ou 0600 root) et d'un tmp pour les deux faces qu'elle pousse. L'appelant choisit
+# l'identite ; ce qu'il ne choisit pas, c'est la forge : les deux variables sont EXIGEES, un defaut
+# serait la mauvaise forge le jour ou ca compte.
+if [[ "${1:-}" == "template-sync" ]]; then
+  exec env RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "Fleet.Project.TemplateSync.eval_main()"
+fi
+
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).

@@ -104,7 +104,7 @@ check() {
     # l'env, la forge n'est bootstrappée qu'après) : le fichier est à l'humain, on ne le
     # réécrit JAMAIS — on instruit les 2 lignes exactes. Révélé par le run de validation.
     if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
-      p_warn "token système minté mais non câblé dans $ENV_FILE — ajoute : FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token et FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT (puis fleet_v2 stop/start)"
+      p_drift "token système minté mais non câblé dans $ENV_FILE — l'apply le câble (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN), puis « fleet_v2 stop && start »"
     fi
   else
     p_drift "fleet_v2.env absent ($ENV_FILE)"
@@ -164,6 +164,37 @@ apply() {
   elif ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
     # L'apply ne réécrit JAMAIS le fichier de l'humain : il converge SA part et DIT le reste.
     p_warn "fleet_v2.env sans FORGE_BASE_URL — fleet_v2 start refusera ; édite $ENV_FILE (le doctor le comptera en drift tant que ce n'est pas fait)"
+  fi
+
+  # ─── LE CÂBLAGE DU JETON SYSTÈME CONVERGE, IL NE S'INSTRUIT PLUS ────────────────────────────────
+  # L'ORDRE DU COLD BOOT LE RENDAIT INATTEIGNABLE. Le seed ci-dessus ne câble que si le jeton existe
+  # DÉJÀ ; or au premier boot la forge n'est pas encore bootstrappée, donc il n'existe pas. Ensuite
+  # le fichier appartient à l'humain et n'était plus jamais complété : le module se contentait de
+  # DIRE les deux lignes à ajouter. Sur un banc, `bench-forge-bootstrap.sh` les ajoutait pour lui.
+  # En production, PERSONNE — et la fleet retombait sur `~/.gitea_token`, qui n'existe pas : la
+  # création de projet échouait en enoent, ou pire en 403 (la team `humans` n'a pas
+  # `can_create_repos` ; seul le compte SYSTÈME crée des dépôts d'org).
+  #
+  # POURQUOI CE N'EST PAS « RÉÉCRIRE LE FICHIER DE L'HUMAIN ». Une clé ABSENTE n'est pas un choix :
+  # le runtime ne la lit pas, il RETOMBE sur un dernier recours que sa propre doc nomme ainsi.
+  # Une clé PRÉSENTE est un choix, et celui-là on n'y touche jamais — l'humain qui veut un autre
+  # jeton écrit une valeur, il n'efface pas une ligne. La convergence porte donc sur le trou, pas
+  # sur la décision, et elle ne demande aucune sentinelle pour savoir où elle en est.
+  if [[ -f "$ENV_FILE" ]] && [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] \
+     && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
+    local tmp2
+    tmp2="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (câblage)"; verdict_apply; }
+    {
+      cat "$ENV_FILE"
+      echo ""
+      echo "# — posé par 70-human (D4) : les marqueurs système sont signés lcars-system —"
+      echo "FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token"
+      echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
+    } > "$tmp2"
+    as_human chmod 0600 "$tmp2"
+    as_human mv -f "$tmp2" "$ENV_FILE"
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet_v2 stop && start » pour l'appliquer"
   fi
 
   probe_identity
