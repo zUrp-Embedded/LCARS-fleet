@@ -107,6 +107,22 @@ cmd_config_seed() {
   echo "forge-gestures: seed pose ($SEED_FILE, 0600 root)"
 }
 
+# ⚠ UN SEUL APPLY A LA FOIS. Deux `forge-apply` concurrents ecriraient le meme `terraform.tfstate`
+# dans `$RECIPE_DIR`, et tofu ne se protege pas d'un backend local partage. L'etat est jetable
+# depuis le lot 1, donc le degat n'est pas durable — mais un apply qui se termine sur l'etat de
+# l'autre rend un verdict sur un travail qu'il n'a pas fait, et c'est ca qu'on refuse.
+#
+# `flock -n` : on REFUSE, on n'attend pas. Un appelant qui attendrait aurait deja recu son verdict
+# quand l'autre finit, et il repartirait sur une forge qui a bouge sous lui. Meme choix que
+# `provision`, qui refuse aussi (`un autre apply est en cours`).
+with_apply_lock() {
+  local lock="${LCARS_APPLY_LOCK:-/run/lock/lcars-forge-apply.lock}"
+  mkdir -p "$(dirname "$lock")" 2>/dev/null || true
+  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock)"
+  flock -n 9 || die "un autre apply de structure est en cours (verrou $lock) — rien n'a ete tente"
+  "$@"
+}
+
 cmd_apply() {
   local tok seed
   # Le jeton donne a la main l'emporte sur celui que la boite garde ; le SEED, lui, n'a pas de
@@ -181,7 +197,7 @@ cmd_runner_token() {
 case "${1:-}" in
   config-token) cmd_config_token ;;
   config-seed)  cmd_config_seed ;;
-  apply)        cmd_apply ;;
+  apply)        with_apply_lock cmd_apply ;;
   runner-token) cmd_runner_token ;;
   *) echo "forge-gestures: geste requis (config-token|config-seed|apply|runner-token)" >&2; exit 1 ;;
 esac

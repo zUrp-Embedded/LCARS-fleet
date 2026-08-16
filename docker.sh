@@ -190,8 +190,10 @@ cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 # LE NOM DU FICHIER NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des
 # jetons de RÔLE (`<login>.gitea_token`, contrat FORGE_ROLE_TOKENS_DIR). Aucun lecteur ne globbe ce
 # répertoire aujourd'hui — le premier qui le fera ne doit pas ramasser un site-admin.
-FORGE_MASTER_TOKEN_FILE=/home/private/forge-master.token
-FORGE_SEED_FILE=/home/private/forge-seed.pass
+# Les deux chemins vivent DANS la boîte, et c'est `forge-gestures.sh` qui les connaît
+# (`LCARS_MASTER_TOKEN_FILE`, `LCARS_FORGE_SEED_FILE`). Ce script est côté hôte : il ne lit pas le
+# système de fichiers du conteneur, donc il n'a rien à en nommer. Deux variables les redisaient
+# ici, sans un seul lecteur — un second exemplaire d'un chemin, qui ne sert qu'à diverger.
 
 # Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans la boîte.
 # LE GESTE LUI-MÊME VIT DANS L'IMAGE (`/opt/lcars/forge-gestures.sh`), et pas ici : le banc ne peut
@@ -245,8 +247,10 @@ cmd_config() {
 # `/proc` de tout l'hôte pendant l'appel — la leçon payée deux fois par 6-141 et 6-141bis, sur des
 # credentials moins puissants que celui-ci.
 #
-# ⚠ CE DÉCLENCHEMENT À LA MAIN EST PROVISOIRE. La cible est que le boot le joue seul ; ce qui
-# manque pour ça n'est pas tofu (il est là) mais l'endroit où le jeton vit durablement.
+# ⚠ CE DÉCLENCHEMENT RESTE À LA MAIN, et la raison a changé — celle écrite ici disait « il manque
+# l'endroit où le jeton vit durablement », ce que `docker.sh config` a posé depuis. Ce qui manque
+# désormais est une DÉCISION, pas une pièce : à quel moment de la séquence de boot l'apply
+# s'accroche, et ce que ça veut dire qu'un démarrage mute la forge de l'opérateur tout seul.
 #
 # IL NE PREND PLUS RIEN EN ENTRÉE, et c'est tout l'intérêt : la boîte DÉTIENT son autorité et son
 # seed (`./docker.sh config`), et l'URL vient de son environnement. Un `FORGE_ADMIN_TOKEN` ou un
