@@ -153,10 +153,10 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "un catalogue de destination absent est refuse", %{tmp: tmp} do
-      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
+      assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
                ProjectOnboard.import_deposit("lordzurp/mon-projet", "grominet", opts(tmp))
 
-      assert "web" in installed
+      assert gestures =~ "web"
     end
 
     @tag :tmp_dir

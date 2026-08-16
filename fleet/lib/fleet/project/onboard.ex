@@ -347,15 +347,43 @@ defmodule Fleet.Project.Onboard do
   # declaration et cherchait des jetons de role que personne n'avait frappes.
   #
   # Ce qui reste tient en une phrase : le materiel est ICI ou il n'y est pas, et il n'y arrive que
-  # par la forge. Le pendant forge (`catalogue_org_absent`, plus bas dans le preflight) n'est PAS un
+  # par la forge. Le pendant forge (le preflight, plus bas) n'est PAS un
   # troisieme etat — c'est le meme fait mesure a sa source, pour le cas ou l'install a ete
   # interrompu entre l'org et le materiel.
-  defp require_target_installed(target) do
+  defp require_target_installed(target), do: require_installed(target)
+
+  @doc """
+  The single not-installed refusal — ONE atom, ONE payload shape, for every caller inside and
+  outside this module.
+
+  ## Why the payload is a SENTENCE and not the installed list
+
+  Until 2026-08-16 two sites answered the same atom with different third elements: a LIST of
+  installed names from the local guards, a gestures STRING from the forge preflight
+  (ex-`catalogue_org_absent`). A caller holding `{:catalogue_not_installed, name, x}` could not
+  know which it had — the same ambiguity as the two atoms before, moved down one level instead of
+  removed. ⚖ Concession recorded in the cross-audit: the ACTION is identical in both cases (a
+  forge admin installs it), and an inventory is only worth printing inside a sentence that says
+  what to do with it. The sentence carries the inventory.
+
+  Public so the MCP delegation door cannot grow a second wording of it: two phrasings of one
+  refusal is how the vocabulary split in the first place.
+  """
+  @spec catalogue_not_installed(String.t()) ::
+          {:error, {:catalogue_not_installed, String.t(), String.t()}}
+  def catalogue_not_installed(name) do
     installed = installed_orgs()
 
-    if target in installed,
-      do: :ok,
-      else: {:error, {:catalogue_not_installed, target, installed}}
+    {:error,
+     {:catalogue_not_installed, name,
+      "the catalogue '#{name}' is not installed on this box (installed: " <>
+        "#{Enum.join(installed, ", ")}). A project outside an installed catalogue is INVISIBLE — " <>
+        "the poller only discovers on installed orgs. An admin installs it, inside the box: " <>
+        "`lcars catalogue install #{name}`."}}
+  end
+
+  defp require_installed(name) do
+    if name in installed_orgs(), do: :ok, else: catalogue_not_installed(name)
   end
 
   # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
@@ -406,21 +434,13 @@ defmodule Fleet.Project.Onboard do
 
         System.halt(0)
 
-      {:error, {:catalogue_not_installed, cat, installed}} ->
+      {:error, {:catalogue_not_installed, cat, gestures}} ->
         IO.puts(
           :stderr,
           "REFUSE : le catalogue #{inspect(cat)} n'est pas installe sur cette boite."
         )
 
-        IO.puts(:stderr, "  installes : #{Enum.join(installed, ", ")}")
-
-        IO.puts(
-          :stderr,
-          "  un projet migre vers un catalogue absent devient INVISIBLE : le poller"
-        )
-
-        IO.puts(:stderr, "  ne decouvre que sur les orgs des catalogues installes.")
-        IO.puts(:stderr, "  l'installer : « lcars catalogue install #{cat} » (admin forge).")
+        IO.puts(:stderr, "  #{gestures}")
         System.halt(1)
 
       {:error, {:already_in_catalogue, cat}} ->
@@ -671,13 +691,7 @@ defmodule Fleet.Project.Onboard do
       else: :ok
   end
 
-  defp require_destination_catalogue(catalogue) do
-    installed = installed_orgs()
-
-    if catalogue in installed,
-      do: :ok,
-      else: {:error, {:catalogue_not_installed, catalogue, installed}}
-  end
+  defp require_destination_catalogue(catalogue), do: require_installed(catalogue)
 
   # A PRIVATE deposit is refused, and it is refused HERE rather than left to the clone.
   #
@@ -719,14 +733,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp require_catalogue_installed(full_name) do
-    cat = full_name |> String.split("/") |> List.first()
-    installed = installed_orgs()
-
-    if cat in installed do
-      :ok
-    else
-      {:error, {:catalogue_not_installed, cat, installed}}
-    end
+    full_name |> String.split("/") |> List.first() |> require_installed()
   end
 
   # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
@@ -2183,7 +2190,7 @@ defmodule Fleet.Project.Onboard do
           # La question est « l'org existe-t-elle », or dans Gitea une org est une ligne de la MEME
           # table `user` : un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
           # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test
-          # rendait alors `true` et le diagnostic exact (`catalogue_org_absent`) retombait en
+          # rendait alors `true` et le diagnostic exact (l'org absente) retombait en
           # erreur brute — degradation silencieuse du seul message qui nomme le geste manquant.
           {:error, {:http, 404, _}} = err ->
             case users.org_exists?(org, fc) do
@@ -2195,7 +2202,10 @@ defmodule Fleet.Project.Onboard do
                   # Les deux ne peuvent diverger qu'entre les deux moities d'un install interrompu,
                   # et c'est precisement ce cas-la qu'il faut nommer : sans lui l'appelant recevrait
                   # un 404 brut la ou le geste manquant est connu.
-                  {:catalogue_org_absent, org, provisioning_gestures(:catalogue, human, org)}
+                  # SAME ATOM as the local guards since the payload unification — what differs is
+                  # the sentence, because what was MEASURED differs: here the material is on the
+                  # box and the forge lacks the org, half an install.
+                  {:catalogue_not_installed, org, provisioning_gestures(:catalogue, human, org)}
                 }
 
               _ ->

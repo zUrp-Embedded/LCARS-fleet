@@ -1135,9 +1135,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     case Map.get(args, "catalogue") do
       cat when is_binary(cat) ->
+        # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
+        # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
         if cat in installed,
           do: {:ok, cat},
-          else: {:error, {:catalogue_not_installed, cat, installed}}
+          else: Fleet.Project.Onboard.catalogue_not_installed(cat)
 
       nil ->
         case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||

@@ -162,10 +162,14 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # `web/vitrine` sur une boite qui n'a pas le catalogue `web` ne doit PAS retomber sur le
       # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
       # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
-      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
+      assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
                Fleet.Project.Onboard.import("grominet/vitrine")
 
-      assert "fleet" in installed, "le refus doit nommer ce qui EST installe"
+      # LA CHARGE UTILE EST UNE PHRASE, une seule forme pour tous les sites : elle porte
+      # l'inventaire ET le geste, parce qu'un inventaire ne vaut qu'a l'interieur d'une phrase qui
+      # dit quoi en faire.
+      assert gestures =~ "fleet", "le refus doit nommer ce qui EST installe"
+      assert gestures =~ "lcars catalogue install grominet"
     end
 
     test "le catalogue livre passe ce refus — il ne bloque pas le cas nominal" do
@@ -183,10 +187,10 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # Meme refus que l'import, meme raison : le poller ne decouvre que sur les orgs des catalogues
       # INSTALLES, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
       # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
-      assert {:error, {:catalogue_not_installed, "grominet", installed}} =
+      assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
                Fleet.Project.Onboard.migrate("fleet/vitrine", "grominet")
 
-      assert "fleet" in installed
+      assert gestures =~ "fleet"
     end
 
     test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
@@ -204,8 +208,10 @@ defmodule Fleet.Project.OnboardPreflightTest do
   # org qui existe deja.
   describe "org du catalogue absente de la forge : le refus NOMME le geste manquant" do
     @tag :tmp_dir
-    test "org PROUVEE absente → catalogue_org_absent + le geste d'enrolement", %{tmp_dir: tmp} do
-      assert {:error, {:catalogue_org_absent, org, gestures}} =
+    test "org PROUVEE absente → le MEME atome, la phrase qui mesure l'autre moitie", %{
+      tmp_dir: tmp
+    } do
+      assert {:error, {:catalogue_not_installed, org, gestures}} =
                ProjectOnboard.onboard("poc-unenrolled", opts(tmp, UnenrolledCatalogueUsers))
 
       assert is_binary(org)

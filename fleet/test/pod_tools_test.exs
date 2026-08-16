@@ -1588,14 +1588,14 @@ defmodule Fleet.MCP.PodToolsTest do
       # catalogues INSTALLES. Onboarder ailleurs produit donc un projet que rien ne dispatchera jamais :
       # ca ne casse pas, ca ne dit rien. Le refus nomme ce qui EST installe, pour que l'humain choisisse
       # dans l'offre au lieu de deviner.
-      assert {:error, {:catalogue_not_installed, "grominet", installed}, _} =
+      assert {:error, {:catalogue_not_installed, "grominet", gestures}, _} =
                PodTools.handle_tool_call(
                  "project_create",
                  %{"name" => "demo-proj", "catalogue" => "grominet"},
                  pod_state(uniq("pod-arch"))
                )
 
-      assert "fleet" in installed, "le refus doit nommer l'offre reelle"
+      assert gestures =~ "fleet", "le refus doit nommer l'offre reelle"
     end
 
     test "le guichet rend un TABLEAU catalogue x carte — chaque carte nommee par son catalogue" do
