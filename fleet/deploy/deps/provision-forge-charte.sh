@@ -118,9 +118,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Le badge de starfleet rejoint la table SEULEMENT si l'appelant a nomme son master. Pose apres le
-# parsing (l'option peut arriver dans n'importe quel ordre) et avant tout usage d'ENTRIES.
-[[ -n "$ADMIRAL" ]] && ENTRIES+=("${ADMIRAL}:admiral.png")
 
 command -v curl >/dev/null || { echo "provision-forge-charte: curl requis" >&2; exit 1; }
 command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; exit 1; }
@@ -162,6 +159,30 @@ AUTH_CFG="header = \"Authorization: token $(curl_cfg_escape "$ADMIN_TOKEN")\""
 # Un seul point de passage vers curl : l'auth arrive par stdin, les options par argv. Ecrire
 # `printf … | curl -K -` a chaque site laisserait la porte ouverte au prochain qui ajoute un appel.
 forge_curl() { printf '%s\n' "$AUTH_CFG" | curl -K - "$@"; }
+
+# ─── QUI EST LE MASTER — RESOLU UNE FOIS, POUR LES DEUX FAITS QU'IL PORTE ────────────────────────
+# ⚠ CETTE RESOLUTION ETAIT FAITE DEUX FOIS, DE DEUX FACONS, ET LE BADGE PERDAIT. Le nom du siege se
+# repliait sur `id=1` quand `--admiral` manquait ; le BADGE, lui, entrait dans la table au PARSING,
+# donc seulement si l'option etait la. Le jour ou l'appelant a cesse de nommer le master — parce que
+# ce login se DERIVE et ne se parametre pas (arbitrage 2026-08-16) — le siege a garde son nom et
+# l'avatar du master a disparu, EN SILENCE. La sonde du banc l'a dit : « FAIL admiral — pas d'avatar
+# custom » a cote de « OK admiral — nom du siege ». Un fait, une resolution.
+#
+# `/admin/users` EXIGE l'autorite : en `--check` (aucun jeton d'admin garanti) on ne resout pas, on
+# se contente de ce que l'appelant a nomme. Une sonde qui devinerait le master rendrait un verdict
+# sur un compte qu'elle a choisi elle-meme.
+master="$ADMIRAL"
+master_src="nomme (--admiral)"
+if [[ -z "$master" && "$CHECK_ONLY" -eq 0 ]]; then
+  master="$(forge_curl -s -m 10 "$FORGE/api/v1/admin/users?limit=50" \
+    | jq -r 'map(select(.id == 1)) | .[0].login // ""' 2>/dev/null || true)"
+  master_src="resolu par id=1 (premier compte de la forge)"
+fi
+
+# Le badge du master rejoint la table une fois qu'on sait QUI il est — jamais avant. La table nomme
+# ses fichiers par ce qu'ils dessinent, et une entree `admiral:admiral.png` en dur ne poserait rien
+# chez qui n'a pas ce login-la.
+[[ -n "$master" ]] && ENTRIES+=("${master}:admiral.png")
 
 # Un avatar custom uploadé porte un hash long (SHA256, 64 hex) ; l'identicon par défaut porte un hash
 # court (32 hex). Heuristique de sonde (dépend de l'interne Gitea, mais stable en 1.26) : basename ≥ 40 hex.
@@ -242,17 +263,6 @@ done
 # ⚠ PATCH, et `login_name` + `source_id` sont OBLIGATOIRES dans le corps meme si on ne les change
 # pas — meme exigence que la rotation de mot de passe documentee dans `instance/accounts.tf`. Sans
 # eux Gitea rend 422, et le message n'aide pas.
-master="$ADMIRAL"
-master_src="nomme (--admiral)"
-# La resolution par id=1 passe par `/admin/users`, qui EXIGE l'autorite : elle n'a donc lieu qu'en
-# mode POSE. En `--check` sans `--admiral`, on ne sait pas qui est le master et on le DIT — une sonde
-# qui devinerait ici rendrait un verdict sur un compte qu'elle a choisi elle-meme.
-if [[ -z "$master" && "$CHECK_ONLY" -eq 0 ]]; then
-  master="$(forge_curl -s -m 10 "$FORGE/api/v1/admin/users?limit=50" \
-    | jq -r 'map(select(.id == 1)) | .[0].login // ""' 2>/dev/null || true)"
-  master_src="resolu par id=1 (premier compte de la forge)"
-fi
-
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
   # SONDE : `full_name` est un champ PUBLIC (`/users/<login>`), donc lisible sans master-token —
   # c'est ce qui permet au banc de verifier ce que la recette a pose, sans pouvoir le reposer.

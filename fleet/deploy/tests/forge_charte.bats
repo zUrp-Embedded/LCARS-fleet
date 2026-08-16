@@ -136,6 +136,26 @@ run_avatars() {
   [ "$output" = "0" ]
 }
 
+@test "badge: SANS --admiral, le badge suit la resolution par id=1 — MEME resolution que le siege" {
+  # ⚠ LA REGRESSION QUE CE TEMOIN GARDE, ET ELLE A EU LIEU (2026-08-16, attrapee par la sonde du
+  # banc). Le nom du siege se repliait sur `id=1`, le BADGE entrait dans la table au PARSING : le
+  # jour ou l'appelant a cesse de nommer le master — parce que ce login se DERIVE — le siege a garde
+  # son nom et l'avatar du master a disparu, en silence. Deux resolutions pour un fait, et c'est
+  # celle qu'on ne teste pas qui casse.
+  cat > "$BIN/jq" <<'FAKE'
+#!/usr/bin/env bash
+cat >/dev/null
+# La seule question posee a jq avant la table : « qui porte l'id 1 ? »
+case "$*" in *'.id == 1'*) printf 'le-master\n' ;; *) printf '' ;; esac
+FAKE
+  chmod +x "$BIN/jq"
+  : > "$AVATARS/admiral.png"
+
+  run_avatars
+  [ "$status" -eq 0 ]
+  grep -q "Sudo: le-master" "$ARGV_LOG"
+}
+
 @test "badge: le compte starfleet n'est plus servi — son avatar ne part que vers le master" {
   # La regression que ce temoin garde : re-ajouter `starfleet:admiral.png` a la table ferait
   # reapparaitre un POST vers un compte que la forge ne porte plus, et le verdict compterait une

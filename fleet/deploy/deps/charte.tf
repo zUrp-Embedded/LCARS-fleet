@@ -34,14 +34,16 @@ resource "terraform_data" "charte" {
   # NOM, puisqu'ils vivent dans un autre etat. La pose reste correcte sans l'arete : le script
   # re-asserte la charte a chaque passe et compte un compte absent comme hors-perimetre, pas comme
   # un echec — un catalogue tiers n'a aucune raison d'avoir les comptes qu'on a dessines.
-  # `admiral_username` EST un declencheur, au meme titre que la population : le badge du master est
-  # pose sur un LOGIN, donc changer ce login laisse l'ancien porteur avec l'image et le nouveau sans.
-  # C'est le meme evenement que « un role renomme », qui est deja ici.
+  # ⚠ `admiral_username` A DISPARU DE CETTE LISTE, ET DU SCRIPT. Le login du master ne se PARAMETRE
+  # pas : une instance Gitea a toujours un premier compte, `id = 1`, site-admin par construction —
+  # le script le resout lui-meme, pour le badge ET pour le nom du siege, d'une seule resolution
+  # (⚖ arbitrage 2026-08-16 : « le compte master se DERIVE »).
+  # Il n'a donc rien a declencher ici : ce qui changerait de master changerait la forge, pas une
+  # variable de cette recette.
   triggers_replace = [
     join(",", sort([for u in gitea_user.role : u.username])),
     join(",", sort(var.system_roles)),
     var.system_account,
-    var.admiral_username,
   ]
 
   provisioner "local-exec" {
@@ -49,11 +51,10 @@ resource "terraform_data" "charte" {
     # `path.module` designe ce meme dossier. Les deux pointent le meme endroit ; le repeter
     # creerait deux verites pour un chemin.
     #
-    # `--admiral` n'apparait QUE s'il y a un master a badger. La table des avatars ne liste aucun
-    # compte humain par principe (« il pose son propre avatar, on ne le decide pas pour lui ») ; le
-    # master est l'exception, et elle doit etre DEMANDEE. Sans la variable, ce chemin se comporte
-    # exactement comme avant. Le login est valide au plan (cf. `variables.tf`), pas espere propre.
-    command = "${path.module}/provision-forge-charte.sh --forge ${var.gitea_url}${var.admiral_username == "" ? "" : " --admiral ${var.admiral_username}"}"
+    # PAS de `--admiral` : le script resout le master par `id=1`. L'option reste, pour un appelant
+    # qui vise une forge dont le premier compte n'est pas le master (une forge reprise, un import) —
+    # mais ce n'est pas le cas de cette recette, qui ne connait pas ce login et n'a pas a l'inventer.
+    command = "${path.module}/provision-forge-charte.sh --forge ${var.gitea_url}"
 
     # Le master-token passe par l'ENVIRONNEMENT, jamais par la ligne de commande : un argument est
     # visible dans la table des processus de la machine, une variable d'environnement ne l'est que

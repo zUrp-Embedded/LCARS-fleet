@@ -26,6 +26,7 @@
 #   forge-check      le contrat que TA forge doit tenir + les gestes pour l'y amener
 #   forge-apply      pose la structure sur TA forge (OpenTofu tourne DANS la boîte — rien à
 #                    installer chez toi). Rejouable : un second passage importe ce qui existe
+#   runner-token     imprime un jeton d'enregistrement pour TON runner CI (usage unique)
 #   help             cette aide
 #
 # -p <projet> (ou LCARS_PROJECT) : QUEL déploiement on vise. Défaut « lcars ». Un poste de dev en
@@ -193,59 +194,13 @@ FORGE_MASTER_TOKEN_FILE=/home/private/forge-master.token
 FORGE_SEED_FILE=/home/private/forge-seed.pass
 
 # Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans la boîte.
-# `bash -c "$remote"` avec un script LITTÉRAL (heredoc cité) — aucune interpolation, donc rien
-# d'injectable, et le quoting reste lisible.
-config_put_token() {
-  local remote
-  remote=$(cat <<'REMOTE'
-set -eu
-IFS= read -r tok || true
-[[ -n "$tok" ]] || { echo "config: jeton vide sur stdin" >&2; exit 1; }
-[[ -n "${FORGE_BASE_URL:-}" ]] || {
-  echo "config: cette boite n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
-  echo "        FORGE_BASE_URL=<url> ./docker.sh up   puis rejoue ce config." >&2
-  exit 2; }
-# VERIFIER AVANT D'ECRIRE. Poser un jeton qui ne s'authentifie pas produirait une boite qui croit
-# tenir son autorite et decouvre le contraire au premier geste structurel, des mois plus tard.
-esc() { local v="$1"; v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; printf '%s' "$v"; }
-code="$(printf 'header = "Authorization: token %s"\n' "$(esc "$tok")" \
-        | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 "${FORGE_BASE_URL%/}/api/v1/user" || true)"
-[[ "$code" == "200" ]] || {
-  echo "config: ce jeton ne s'authentifie pas sur $FORGE_BASE_URL (HTTP $code) — RIEN n'a ete ecrit." >&2
-  exit 3; }
-install -d -m 0750 -o root -g fleet /home/private
-umask 077
-printf '%s\n' "$tok" > /home/private/.forge-master.token.tmp
-chmod 0600 /home/private/.forge-master.token.tmp
-chown root:root /home/private/.forge-master.token.tmp
-mv -f /home/private/.forge-master.token.tmp /home/private/forge-master.token
-echo "config: jeton master pose et VERIFIE (/home/private/forge-master.token, 0600 root)"
-REMOTE
-)
-  printf '%s' "$1" | compose exec -T -u root lcars bash -c "$remote"
-}
-
-# Le seed n'a pas de verification possible : c'est un mot de passe, pas un credential qu'on peut
-# presenter. Ce qui compte est qu'il soit posé UNE FOIS et ne bouge plus — tofu ne REMPLACE pas le
-# password d'un compte existant (mesure du 2026-08-16 sur le provider 0.8), donc un seed regenere
-# a chaque passe donnerait un fichier qui ne correspond plus aux comptes, et le mint des jetons de
-# role partirait en 401. Ce fichier EST le handoff tofu -> A4.
-config_put_seed() {
-  local remote
-  remote=$(cat <<'REMOTE'
-set -eu
-IFS= read -r seed || true
-[[ -n "$seed" ]] || { echo "config: seed vide sur stdin" >&2; exit 1; }
-install -d -m 0750 -o root -g fleet /home/private
-umask 077
-printf '%s' "$seed" > /home/private/.forge-seed.pass.tmp
-chmod 0600 /home/private/.forge-seed.pass.tmp
-chown root:root /home/private/.forge-seed.pass.tmp
-mv -f /home/private/.forge-seed.pass.tmp /home/private/forge-seed.pass
-echo "config: seed pose (/home/private/forge-seed.pass, 0600 root)"
-REMOTE
-)
-  printf '%s' "$1" | compose exec -T -u root lcars bash -c "$remote"
+# LE GESTE LUI-MÊME VIT DANS L'IMAGE (`/opt/lcars/forge-gestures.sh`), et pas ici : le banc ne peut
+# pas appeler ce script — sa boîte vient d'un autre couple de fichiers compose, et la garde
+# `assert_project_ours` refuse, à raison, d'agir sur un projet que ce compose n'a pas créé. Porter
+# les gestes ici aurait donc obligé le banc à en tenir une seconde copie, et deux copies d'un même
+# contrat dérivent. Ce fichier est une PORTE ; la recette est dans la boîte, avec ce qu'elle joue.
+gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
+  compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"
 }
 
 cmd_config() {
@@ -267,8 +222,8 @@ cmd_config() {
     } >&2
     exit 1
   fi
-  [[ -n "$token" ]] && { config_put_token "$token" || exit 1; }
-  [[ -n "$seed" ]]  && { config_put_seed  "$seed"  || exit 1; }
+  [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
+  [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
   echo ""
   echo "docker.sh config: posé. La boîte tient son autorité — « ./docker.sh forge-apply » n'a plus"
   echo "                  besoin d'aucune variable."
@@ -298,81 +253,23 @@ cmd_config() {
 # `FORGE_SEED_PASSWORD` dans l'environnement l'emporte quand même — c'est le chemin d'un opérateur
 # qui veut jouer un apply avec une autre autorité sans toucher à ce que la boîte garde.
 cmd_forge_apply() {
-  local human="${LCARS_HUMAN:-lcars}" email="${LCARS_HUMAN_EMAIL:-}"
-  # Le script distant est un LITTÉRAL : `$m` n'y est pas interpolé, il arrive par l'environnement.
-  # Une interpolation shell dans un script qu'on envoie est une porte qu'on n'a aucune raison
-  # d'ouvrir, et elle se referme mal.
-  local remote
-  remote=$(cat <<'REMOTE'
-set -eu
-stdin_tok=""
-IFS= read -r stdin_tok || true
-# Le jeton donne a la main l'emporte sur celui que la boite garde ; le seed, LUI, n'a pas de
-# variante : il doit etre celui des comptes existants, et rien d'autre.
-TF_VAR_gitea_token="$stdin_tok"
-[[ -n "$TF_VAR_gitea_token" ]] || TF_VAR_gitea_token="$(cat /home/private/forge-master.token 2>/dev/null || true)"
-TF_VAR_seed_password="$(cat /home/private/forge-seed.pass 2>/dev/null || true)"
-TF_VAR_gitea_url="${FORGE_BASE_URL:-}"
-manque=""
-[[ -n "$TF_VAR_gitea_url" ]]     || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> ./docker.sh up"
-[[ -n "$TF_VAR_gitea_token" ]]   || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> ./docker.sh config"
-[[ -n "$TF_VAR_seed_password" ]] || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> ./docker.sh config"
-if [[ -n "$manque" ]]; then
-  printf 'forge-apply: la boite ne detient pas ce qu il faut :%b\n' "$manque" >&2
-  exit 1
-fi
-export TF_VAR_gitea_token TF_VAR_seed_password TF_VAR_gitea_url
-cd "/opt/lcars/fleet/deploy/$LCARS_TOFU_MODULE"
-exec tofu apply -auto-approve -input=false -no-color
-REMOTE
-)
-  # L'ORDRE EST UN INVARIANT, pas une préférence : `instance/` porte les comptes partagés, et une
-  # adhésion peut nommer un compte qu'elle ne crée pas, jamais un compte qui n'existe pas.
-  local m
-  for m in deps/instance deps; do
-    echo "docker.sh forge-apply: $m"
-    printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
-      -e LCARS_TOFU_MODULE="$m" \
-      -e TF_VAR_human_username="$human" \
-      -e TF_VAR_human_email="${email:-$human@lcars.local}" \
-      lcars bash -c "$remote" \
-      || { echo "docker.sh forge-apply: échec sur $m — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
-  done
-
-  # ─── LE DÉPÔT MODÈLE, dans le même geste ──────────────────────────────────────────────────────
-  # `create_project` GÉNÈRE depuis ce dépôt. Absent, l'onboard dégrade en bare-create — bruyamment,
-  # mais sur chaque projet, et sur une forge d'opérateur c'était l'état permanent : le seul poseur
-  # était une tâche Mix, absente de l'image.
-  #
-  # AVEC LE JETON MASTER, ET C'EST CE QUI SUPPRIME UN ORDRE. Le poser avec le jeton SYSTÈME aurait
-  # exigé qu'il soit déjà minté, donc un boot entre l'apply et ce geste. Le master est là, il a le
-  # droit, et l'auteur des commits est de toute façon écrit en dur à `lcars-system`.
-  #
-  # `|| true` ASSUMÉ : la structure EST posée à ce stade. Un modèle qui ne part pas est une
-  # dégradation nommée, pas une raison de rendre un échec sur un geste qui a réussi.
-  echo "docker.sh forge-apply: dépôt modèle (project-template)"
-  local remote_tpl
-  remote_tpl=$(cat <<'REMOTE'
-set -eu
-stdin_tok=""
-IFS= read -r stdin_tok || true
-tok="$stdin_tok"
-[[ -n "$tok" ]] || tok="$(cat /home/private/forge-master.token 2>/dev/null || true)"
-[[ -n "$tok" ]] || { echo "forge-apply: pas d'autorite pour le depot modele" >&2; exit 1; }
-umask 077
-tf="$(mktemp)"
-printf '%s\n' "$tok" > "$tf"
-trap 'rm -f "$tf"' EXIT
-FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$tf" /opt/lcars/entrypoint.sh template-sync
-REMOTE
-)
-  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root lcars bash -c "$remote_tpl" \
-    || echo "docker.sh forge-apply: dépôt modèle NON posé — l'onboard dégradera en bare-create (dit à chaque projet)" >&2
-
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
+    -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
+    -e LCARS_HUMAN_EMAIL="${LCARS_HUMAN_EMAIL:-}" \
+    lcars /opt/lcars/forge-gestures.sh apply \
+    || { echo "docker.sh forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
   echo ""
   echo "docker.sh forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
   echo "  ./docker.sh doctor    # ce que la boîte voit de sa forge maintenant"
 }
+
+# Le jeton d'ENREGISTREMENT d'un runner CI. Il s'imprime et ne se pose nulle part : c'est un
+# credential a usage unique — act_runner range les siens dans son volume apres le premier appairage.
+# L'operateur le donne a SON compose de runner, qui vit avec sa forge, en amont de LCARS.
+cmd_runner_token() {
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | gesture runner-token
+}
+
 cmd_logs()  { compose logs -f "$@"; }
 cmd_down() {
   assert_project_ours down
@@ -513,6 +410,7 @@ case "${1:-help}" in
   config)      cmd_config ;;
   forge-check) cmd_forge_check ;;
   forge-apply) cmd_forge_apply ;;
+  runner-token) cmd_runner_token ;;
   help|-h|--help) usage ;;
   *) echo "docker.sh: commande inconnue: $1 (./docker.sh help)" >&2; exit 1 ;;
 esac

@@ -416,6 +416,10 @@ COPY fleet/deploy/docker/console-landing.sh /opt/lcars/console-landing.sh
 COPY fleet/deploy/docker/console-deck.py    /opt/lcars/console-deck.py
 COPY fleet/deploy/docker/console-pod.sh     /opt/lcars/console-pod.sh
 COPY fleet/deploy/docker/human-converger.sh /opt/lcars/human-converger.sh
+# Les gestes forge, DANS l'image : `docker.sh` et le banc les jouent par la meme porte, au lieu
+# d'en porter chacun une copie (le banc ne peut pas appeler `docker.sh` — sa boite vient d'un autre
+# couple de fichiers compose, et `docker.sh` refuse a raison d'agir sur un projet qu'il n'a pas cree).
+COPY fleet/deploy/docker/forge-gestures.sh /opt/lcars/forge-gestures.sh
 COPY fleet/deploy/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
