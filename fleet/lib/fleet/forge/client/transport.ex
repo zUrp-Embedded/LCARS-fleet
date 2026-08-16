@@ -175,11 +175,24 @@ defmodule Fleet.Forge.Client.Transport do
   @max_pages 200
 
   @doc false
-  def paginate(config, path_base, query) do
-    do_paginate(config, path_base, query, 1, [])
+  def paginate(config, path_base, query), do: paginate(config, path_base, query, nil)
+
+  @doc """
+  Same pagination, for an endpoint whose page arrives in an ENVELOPE instead of as a bare list.
+
+  Gitea is not uniform here: the list endpoints answer with a JSON array, `/repos/search` answers
+  `%{"ok" => true, "data" => [...]}`. `unwrap` names the key to take, `nil` means "the body IS the
+  list" — the shape every existing caller has.
+
+  It is a PARAMETER and not a second paginator, because the stop condition is the part that has a
+  scar (`X-Total-Count` first, empty page always wins, `< @page_limit` only as a fallback). A copy
+  of that loop for one endpoint is a copy that drifts away from the reasoning above it.
+  """
+  def paginate(config, path_base, query, unwrap) do
+    do_paginate(config, path_base, query, unwrap, 1, [])
   end
 
-  defp do_paginate(_config, path_base, _query, page, _acc) when page > @max_pages do
+  defp do_paginate(_config, path_base, _query, _unwrap, page, _acc) when page > @max_pages do
     {:error, {:pagination_budget_exceeded, path_base, @max_pages}}
   end
 
@@ -196,11 +209,11 @@ defmodule Fleet.Forge.Client.Transport do
   #
   # Le total supprime les deux : on s'arrete quand on tient ce qui a ete annonce. `nil` veut dire
   # « non annonce », jamais zero — dans ce cas seulement on retombe sur l'heuristique.
-  defp do_paginate(config, path_base, query, page, acc) do
+  defp do_paginate(config, path_base, query, unwrap, page, acc) do
     sep = if query == "", do: "?", else: "?#{query}&"
     path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
 
-    case request_raw(config, :get, path, nil) do
+    case request_raw(config, :get, path, nil) |> unwrap_page(unwrap) do
       {:ok, %Req.Response{status: status, body: items} = resp}
       when status in 200..299 and is_list(items) ->
         acc = [items | acc]
@@ -213,7 +226,7 @@ defmodule Fleet.Forge.Client.Transport do
           items == [] -> {:ok, collect(acc)}
           is_integer(total) and got >= total -> {:ok, collect(acc)}
           is_nil(total) and length(items) < @page_limit -> {:ok, collect(acc)}
-          true -> do_paginate(config, path_base, query, page + 1, acc)
+          true -> do_paginate(config, path_base, query, unwrap, page + 1, acc)
         end
 
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
@@ -226,6 +239,18 @@ defmodule Fleet.Forge.Client.Transport do
         {:error, {:transport, exception}}
     end
   end
+
+  # The envelope is taken BEFORE the shape guard, so a body that is neither a list nor the expected
+  # envelope falls through to `:unexpected_page_shape` — one refusal for both, and the headers stay
+  # on the response the stop condition reads.
+  defp unwrap_page(result, nil), do: result
+
+  defp unwrap_page({:ok, %Req.Response{status: status, body: body} = resp}, key)
+       when status in 200..299 and is_map(body) do
+    {:ok, %{resp | body: Map.get(body, key)}}
+  end
+
+  defp unwrap_page(other, _key), do: other
 
   defp collect(acc), do: acc |> Enum.reverse() |> Enum.concat()
 

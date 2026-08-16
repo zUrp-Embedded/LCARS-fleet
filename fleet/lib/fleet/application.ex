@@ -21,6 +21,15 @@ defmodule Fleet.Application do
       # The catalogue is verified before either image freezes from it (cf. start/2) — a boot
       # concern for the same reason, on the foundation that resolves it.
       Fleet.Catalogue,
+      # DELIBERATE WIDENING, and it must be declared rather than left implicit: the catalogue
+      # lifecycle became a FORGE fact — `available` is "the forge carries a deposit", `installed`
+      # is "the forge signs an org". `CatalogueDeposits` reads it.
+      #
+      # ⚠ Boundary would NOT have caught this on its own. The forge modules are reached through a
+      # seam (`Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)`), and a module name placed
+      # in a default and dispatched through a variable is invisible to it — the exact blind spot
+      # CLAUDE.md names. Declaring the edge buys the honesty of the graph, not a check.
+      Fleet.Forge,
       # The durable warning+ trace, installed BEFORE the two guards above can fail-loud (BL-6-41).
       # Same nature as the three edges above and the same justification: a node-global installation
       # that must happen once, at the single-threaded spot, before anything can warn. Naming the
