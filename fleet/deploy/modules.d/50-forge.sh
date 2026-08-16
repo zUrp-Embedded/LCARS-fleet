@@ -140,7 +140,17 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
 # team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
 # membre / 404 non-membre) et c'est la sonde qui manquait.
-member_state() { # $1=compte → visible | hidden | absent
+#
+# ⚠ QUATRE ETATS, PAS TROIS — et le quatrieme est « je ne sais pas ». `forge_code` appelle SANS
+# AUCUN JETON quand le token systeme n'existe pas encore, et Gitea rend alors 404 sur l'adhesion
+# d'une org privee : indiscernable d'une absence reelle. Le module accusait donc la recette
+# (« la recette ne les place dans aucune team ») pour un fait qu'il n'avait pas l'autorite de lire.
+# Mesure du 2026-08-16 sur une forge fraichement posee par `docker.sh forge-apply` : les cinq teams
+# etaient peuplees et les dix comptes membres de l'org — le module annoncait le contraire, et
+# renvoyait le lecteur vers les listes writers/judges/externals, qui n'y etaient pour rien.
+# C'est l'etat NOMINAL d'une installation neuve : structure posee, jeton systeme pas encore minte.
+member_state() { # $1=compte → visible | hidden | absent | unknown
+  [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] || { printf 'unknown'; return; }
   [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
   if [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/public_members/$1")" == "204" ]]; then
     printf 'visible'
@@ -158,7 +168,16 @@ members_in_state() { # $1=état recherché, $2=liste → sous-liste
 members_hidden() { members_in_state hidden "$1"; }
 
 check_members_visible() {
-  local hidden absent
+  local hidden absent unknown
+  unknown="$(members_in_state unknown "$ACCOUNTS")"
+  # NE RIEN DIRE D'AUTRE quand on ne peut pas lire. Enchainer sur « absent » ici produirait un
+  # verdict sur des comptes qu'on n'a pas interroges, et il serait FAUX exactement au moment le plus
+  # courant : juste apres la pose de la structure, avant le premier mint.
+  if [[ -n "$unknown" ]]; then
+    p_drift "adhésions org NON SONDABLES (jeton système absent : $PROV_TOKENS_DIR/system.gitea_token) — l'apply le minte dès que le seed est posé ; rien n'est conclu sur les comptes en attendant"
+    return 0
+  fi
+
   absent="$(members_in_state absent "$ACCOUNTS")"
   hidden="$(members_hidden "$ACCOUNTS")"
 
@@ -184,6 +203,13 @@ check_members_visible() {
 
 converge_members_visible() {
   local hidden acct pwd code
+  # Sans autorite, `members_hidden` rend une liste VIDE — qui se lit « rien a faire ». Le dire
+  # plutot que de reporter un OK : ce module tourne AVANT le mint du jeton systeme sur une boite
+  # neuve, et un « deja visibles » y serait une phrase sur des comptes jamais interroges.
+  if [[ -n "$(members_in_state unknown "$ACCOUNTS")" ]]; then
+    p_drift "visibilité des adhésions non sondable (jeton système absent) — reprise au prochain apply, une fois le jeton minté"
+    return 0
+  fi
   hidden="$(members_hidden "$ACCOUNTS")"
   [[ -z "$hidden" ]] && { p_ok "adhésions org déjà visibles (comptes machine)"; return 0; }
   # Basic-auth par compte : le passwords-file est la MÊME source que le mint A4 (convergée
@@ -224,7 +250,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu, bootstrap requis : « ./docker.sh forge-check » donne les commandes"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « ./docker.sh forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -253,7 +279,7 @@ check() {
 check_human_onboardable() {
   local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok code
   if ! account_exists "$PROV_HUMAN"; then
-    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : ajoute-le à TF_VAR_human_username et « tofu apply »"
+    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « ./docker.sh forge-apply »"
     return 0
   fi
   p_ok "compte forge de l'humain ($PROV_HUMAN)"
@@ -263,7 +289,7 @@ check_human_onboardable() {
           "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
   case "$code" in
     204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
-    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; ajoute-le à la team humans (forge.tf) et « tofu apply »" ;;
+    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « ./docker.sh forge-apply »" ;;
     *)   p_drift "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non vérifiable (HTTP $code) — scope du token système ?" ;;
   esac
 }
@@ -284,8 +310,9 @@ apply() {
   local miss
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    # Territoire tofu : rien n'est exécutable ICI (geste d'identité bootstrap — instruit).
-    p_drift "structure absente (comptes : $miss) — bootstrap requis (admin + tofu apply + seed) : « ./docker.sh forge-check » les énonce"
+    # Territoire tofu, et ce module ne le joue pas : il n'a ni l'URL ni le jeton MASTER, qui
+    # arrivent par l'operateur. Le geste, lui, est desormais executable — tofu vit dans l'image.
+    p_drift "structure absente (comptes : $miss) — « ./docker.sh forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
     verdict_apply
   fi
 

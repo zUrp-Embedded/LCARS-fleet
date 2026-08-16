@@ -332,6 +332,73 @@ RUN set -eu; \
 # les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
 COPY fleet/deploy /opt/lcars/fleet/deploy
 COPY fleet/etc     /opt/lcars/fleet/etc
+
+# ─── OpenTofu : LE BINAIRE ET SES PROVIDERS, DANS L'IMAGE ───────────────────────────────────────
+# LA RECETTE ETAIT LA DEPUIS TOUJOURS, ET RIEN NE POUVAIT LA JOUER. `/opt/lcars/fleet/deploy/deps`
+# est copie juste au-dessus, la structure de la forge est indispensable, et c'est tofu qui la pose
+# — or tofu n'etait installe NULLE PART : ni dans cette image, ni par un module de `provision`, ni
+# par `install.sh`. La boucle etait fermee : `50-forge` sonde, ne trouve pas la structure, renvoie a
+# `docker.sh forge-check`, qui imprime une commande exigeant un binaire que rien ne pose. Un
+# operateur qui clone et lance obtenait `tofu: command not found`, sans qu'aucun fichier du produit
+# ne dise ce qu'est OpenTofu ni ou l'obtenir.
+#
+# Meme discipline que ttyd et le precompile Elixir : version + sha256 epingles ICI, nulle part
+# ailleurs, et l'arch vient de `TARGETARCH` (BuildKit) et jamais d'un `uname -m`, qui repondrait
+# pour la machine de BUILD — faux des le premier cross-build, et invisible jusqu'au boot sur cible.
+ARG TOFU_VERSION=1.12.3
+ARG TOFU_SHA256_AMD64=46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08
+ARG TOFU_SHA256_ARM64=b2110d1ce46e366ce861b7f53d293dad99080075629aed7fb50d7328916d91c2
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) tofu_sha="${TOFU_SHA256_AMD64}" ;; \
+      arm64) tofu_sha="${TOFU_SHA256_ARM64}" ;; \
+      *) echo "tofu: arch de build non supportee: '${TARGETARCH}' (attendu amd64 ou arm64)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --proto '=https' -m 300 -o /tmp/tofu.zip \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${TARGETARCH}.zip" \
+    && echo "${tofu_sha}  /tmp/tofu.zip" | sha256sum -c - \
+    && unzip -q -o -d /tmp/tofu /tmp/tofu.zip \
+    && install -m 0755 /tmp/tofu/tofu /usr/local/bin/tofu \
+    && rm -rf /tmp/tofu /tmp/tofu.zip \
+    && tofu version
+
+# LES PROVIDERS SONT VENDORES AU BUILD, et c'est un choix, pas une contrainte : `tofu init` au
+# runtime FONCTIONNERAIT (le dossier est inscriptible), mais il ferait dependre le premier apply du
+# reseau et du registre OpenTofu — au moment precis ou l'operateur monte sa boite. Le miroir de
+# fichiers supprime cette dependance, comme le pin sha256 la supprime pour ttyd et Elixir.
+#
+# `direct { exclude = ["*/*"] }` FERME la porte reseau, et ce n'est pas de la ceinture : sans lui,
+# un provider absent du miroir serait telecharge en silence au premier init, et l'image cesserait
+# d'etre reproductible sans que personne ne le voie. Avec, elle echoue en nommant ce qui manque.
+#
+# LE TEMOIN DU LOT est le `tofu init` en fin de RUN : il ne peut PAS atteindre le reseau. S'il
+# passe, le miroir est complet et les deux lock files sont satisfaits par lui. S'il echoue, l'image
+# NE SE BATIT PAS — plutot que de livrer une boite qui decouvre le manque chez l'operateur.
+#
+# ⚠ AUCUN COMMENTAIRE EN BACKTICKS ENTRE DEUX INSTRUCTIONS de ce RUN. La forme `# … ` marche dans
+# une LISTE D'ARGUMENTS (cf. le apt-get plus haut) et casse ici : la substitution vide precede
+# `for … ; do`, le shell lit `for` comme un nom de commande et rend « Syntax error: do unexpected ».
+ENV TF_CLI_CONFIG_FILE=/opt/lcars/tofu/tofurc
+RUN set -eu; \
+    mkdir -p /opt/lcars/tofu/providers; \
+    for m in /opt/lcars/fleet/deploy/deps /opt/lcars/fleet/deploy/deps/instance; do \
+      (cd "$m" && tofu providers mirror -platform="linux_${TARGETARCH}" /opt/lcars/tofu/providers); \
+    done; \
+    { echo 'provider_installation {'; \
+      echo '  filesystem_mirror {'; \
+      echo '    path    = "/opt/lcars/tofu/providers"'; \
+      echo '    include = ["*/*"]'; \
+      echo '  }'; \
+      echo '  direct {'; \
+      echo '    exclude = ["*/*"]'; \
+      echo '  }'; \
+      echo '}'; } > /opt/lcars/tofu/tofurc; \
+    chmod -R a+rX /opt/lcars/tofu; \
+    for m in /opt/lcars/fleet/deploy/deps /opt/lcars/fleet/deploy/deps/instance; do \
+      (cd "$m" && tofu init -input=false -no-color >/dev/null) || { echo "tofu: init hors-ligne en echec dans $m" >&2; exit 1; }; \
+    done; \
+    echo "tofu: miroir de providers complet, init hors-ligne OK"
 # P11 — LA BRIQUE token-saver DOIT ETRE DANS L'IMAGE. Sans ce COPY le shim la cherche, ne la trouve
 # pas et s'efface : fail-open, AUCUN symptome, et la compression annoncee ne tourne jamais. C'est le
 # seul defaut du lot dont personne ne peut s'apercevoir en regardant tourner la fleet.
