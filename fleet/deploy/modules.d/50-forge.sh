@@ -11,10 +11,16 @@
 # créée par LE SYSTÈME, jamais par LCARS), et sa STRUCTURE n'est plus créée ici non plus :
 # comptes/org/teams/hardening sont le territoire EXCLUSIF d'OpenTofu (forge.tf, arbitrage WS1 :
 # « TF fait toute la STRUCTURE, bash SEULEMENT les tokens »). Ce module :
-#   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il
-#      INSTRUIT le geste bootstrap (« ./docker.sh forge-check », qui énonce le contrat et les
-#      commandes exactes) et n'exécute RIEN : même
-#      famille de gestes d'identité que « claude /login », sondés et instruits, jamais faits ;
+#   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il NOMME
+#      la commande qui la pose : « ./docker.sh forge-apply ».
+#      ⚠ LE MOTIF ÉCRIT ICI ÉTAIT « même famille de gestes d'identité que claude /login, sondés et
+#      instruits, jamais faits ». C'ÉTAIT UN COMMENTAIRE, PAS UNE DOCTRINE — écrit ici le
+#      2026-07-05 avec le code qu'il décrivait, sans arbitrage derrière. Et il est devenu faux : le
+#      geste EST exécutable depuis le 2026-08-16 (tofu vit dans l'image, l'apply est rejouable).
+#      Ce module ne le joue pas ENCORE, et ce « pas encore » n'a rien d'une propriété : où l'apply
+#      se déclenche dans le boot est une question ouverte du chantier « deploy avec tofu dedans ».
+#      Ce qui reste vrai sans discussion : l'apply a besoin d'une AUTORITÉ que l'opérateur fournit
+#      (`./docker.sh config`), et ce module ne l'invente pas ;
 #   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
 #      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
@@ -30,8 +36,10 @@
 #      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
 #
 # Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_SEED_FILE (défaut
-# <tokens-dir>/forge-seed.pass, 0600 root, posé par le geste bootstrap) · PROV_PASSWORDS_FILE
-# (défaut <tokens-dir>/forge-role-passwords.json — l'A4 durable, rejouable sur forge nuke).
+# <tokens-dir>/forge-seed.pass, 0600 root, posé par « ./docker.sh config ») · PROV_MASTER_TOKEN_FILE
+# (défaut <tokens-dir>/forge-master.token, 0600 root, même geste — l'autorité de création, elle
+# RESTE) · PROV_PASSWORDS_FILE (défaut <tokens-dir>/forge-role-passwords.json — l'A4 durable,
+# rejouable sur forge nuke).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -82,6 +90,20 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
   printf '%s' "${absents# }"
 }
 
+# ─── L'AUTORITÉ QUE LA BOÎTE DÉTIENT (⚖ user 2026-08-16 : « on pose le token, IL RESTE ») ────────
+# `p_warn` et PAS `p_drift`, et la nuance est le fond du sujet : une boîte sans ce jeton FONCTIONNE
+# — l'apply de structure converge en lisant la forge, le runtime tourne sur les jetons de rôle. Ce
+# qu'elle perd est la capacité d'un geste STRUCTUREL autonome : `lcars catalogue enable` crée un
+# compte par rôle, et sans autorité de création il redevient un geste manuel de l'opérateur.
+# Un drift dirait « l'état-cible n'est pas tenu », ce qui serait crier au loup sur une boîte saine.
+check_master_authority() {
+  if [[ -r "$PROV_MASTER_TOKEN_FILE" ]]; then
+    p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
+  else
+    p_warn "pas d'autorité de création ($PROV_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « ./docker.sh config » la pose"
+  fi
+}
+
 # La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
@@ -102,7 +124,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$PROV_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — pose le seed (geste décrit par « ./docker.sh forge-check ») ou complète $PROV_PASSWORDS_FILE, puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> ./docker.sh config » le pose (ou complète $PROV_PASSWORDS_FILE), puis relance"
     return 1
   fi
   local seed tmp rc=0
@@ -246,6 +268,7 @@ check() {
   fi
   p_ok "forge joignable ($PROV_FORGE_URL)"
   probe_registration
+  check_master_authority
 
   local miss acct
   miss="$(missing_accounts)"
@@ -306,6 +329,7 @@ apply() {
     verdict_apply
   fi
   [[ -x "$A4_SCRIPT" ]] || { p_fail "script A4 introuvable : $A4_SCRIPT"; verdict_apply; }
+  check_master_authority
 
   local miss
   miss="$(missing_accounts)"

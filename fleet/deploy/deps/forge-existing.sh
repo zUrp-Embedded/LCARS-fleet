@@ -17,7 +17,7 @@
 # object of string->string must leave on stdout, and NOTHING else may reach stdout. Anything else,
 # on either stream, is reported by tofu as a failure of the whole plan.
 #
-#   in : {"gitea_url":…, "org":…, "users":"a,b,c", "teams":"x,y", "token_file":…}
+#   in : {"gitea_url":…, "org":…, "users":"a,b,c", "teams":"x,y"}
 #   out: {"user:a":"13", "org:fleet":"10", "team:x":"4"}    -- only what EXISTS
 #
 # THE IDS ARE NUMERIC BECAUSE THE PROVIDER MAKES THEM SO: it converts an import id to an integer,
@@ -36,7 +36,6 @@ FORGE="$(q gitea_url)"; FORGE="${FORGE%/}"
 ORG="$(q org)"
 USERS="$(q users)"
 TEAMS="$(q teams)"
-TOKEN_FILE="$(q token_file)"
 
 [[ -n "$FORGE" ]] || { echo "forge-existing: gitea_url manquant dans la requete" >&2; exit 1; }
 
@@ -46,11 +45,11 @@ TOKEN_FILE="$(q token_file)"
 # channel every caller of this recipe uses to hand tofu the same secret, so reading it here adds no
 # new requirement on the caller. `FORGE_ADMIN_TOKEN` comes first: it is the name the charte seam
 # already uses, and an explicit export must win over the ambient one.
+#
+# NO FILE PATH HERE, deliberately. The durable home of the master token is `docker.sh config`'s
+# business, and whoever launches the apply reads it from there and exports it -- one channel, taken
+# by every caller. A second one, taken by none, is a branch nobody exercises and nobody tests.
 TOKEN="${FORGE_ADMIN_TOKEN:-${TF_VAR_gitea_token:-}}"
-if [[ -z "$TOKEN" && -n "$TOKEN_FILE" ]]; then
-  [[ -r "$TOKEN_FILE" ]] || { echo "forge-existing: token_file illisible ($TOKEN_FILE)" >&2; exit 1; }
-  TOKEN="$(< "$TOKEN_FILE")"
-fi
 
 # argv is world-readable through /proc while the request runs; `curl -K -` reads its configuration
 # from stdin instead. Same gesture as `provision-forge-charte.sh` (6-141bis), and the value is

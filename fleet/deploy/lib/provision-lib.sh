@@ -35,6 +35,11 @@ PROVISION_LIB_LOADED=1
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
+# L'AUTORITE DE CREATION, posee par `docker.sh config` et QUI RESTE (⚖ user 2026-08-16). Le suffixe
+# n'est PAS `.gitea_token` : celui-la designe un jeton de ROLE (`<login>.gitea_token`, contrat
+# FORGE_ROLE_TOKENS_DIR). Personne ne globbe ce repertoire aujourd'hui — le premier qui le fera ne
+# doit pas ramasser un site-admin en croyant lire un role.
+: "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
 # GRAINE du binaire vendor : un chemin où un binaire `claude` déjà présent SUR LA MACHINE
 # court-circuite l'installeur officiel de 40-claude-bin (donc le réseau). Root-owned, hors de tout
 # home — l'humain du runtime n'existe pas encore quand un semis extérieur le pose. Vide/absent =
