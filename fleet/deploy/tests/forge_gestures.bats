@@ -69,6 +69,9 @@ FAKE
   export LCARS_RECIPE_DIR="$RECIPE"
   export LCARS_TEMPLATE_SYNC="$BIN/tplsync"
   export FORGE_BASE_URL="http://forge.test"
+  # Le verrou d'apply vit dans le tmpdir du test : `/run/lock` n'est pas ecrivable par le temoin,
+  # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
+  export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
 }
 
 @test "config-token: le jeton n'apparait JAMAIS dans argv" {
@@ -131,10 +134,23 @@ FAKE
 }
 
 @test "apply: sans rien, il NOMME les trois manques au lieu d'en deviner un" {
-  run bash -c "'$SCRIPT' apply < /dev/null"
+  # LE TITRE DISAIT TROIS ET LE TEMOIN EN VERIFIAIT DEUX (audit 2026-08-16) : le `setup` injecte
+  # `FORGE_BASE_URL`, donc le troisieme manque n'etait jamais atteint. Un temoin qui promet plus
+  # qu'il ne mesure est pire qu'un temoin absent — on le croit.
+  run env -u FORGE_BASE_URL bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
+  [[ "$output" == *"l'URL de la forge"* ]]
   [[ "$output" == *"l'autorite"* ]]
   [[ "$output" == *"le seed des comptes"* ]]
+}
+
+@test "apply: avec l'URL mais rien d'autre, il ne nomme QUE ce qui manque" {
+  # Le contre-temoin : sans lui, une implementation qui recite les trois manques en toutes
+  # circonstances passerait le test ci-dessus.
+  run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"l'URL de la forge"* ]]
+  [[ "$output" == *"l'autorite"* ]]
 }
 
 @test "apply: l'ORDRE des deux modules est instance PUIS catalogue" {
@@ -185,6 +201,35 @@ FAKE
   [ "$status" -eq 0 ]
   # Le fichier de la boite n'est PAS reecrit : `apply` consomme, il ne pose pas.
   [ "$(cat "$PRIV/forge-master.token")" = "TOK-BOITE" ]
+}
+
+@test "apply: DEUX applys concurrents — le second REFUSE, il n'attend pas" {
+  # Deux applys sur le meme `terraform.tfstate` : le second rendrait un verdict sur un travail
+  # qu'il n'a pas fait. Attendre serait pire que refuser — il repartirait sur une forge qui a
+  # bouge sous lui pendant qu'il patientait.
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+
+  # Un tiers tient le verrou pendant que l'apply tente sa chance.
+  ( flock 9 && sleep 5 ) 9>"$LCARS_APPLY_LOCK" &
+  holder=$!
+  sleep 0.3
+  run bash -c "'$SCRIPT' apply < /dev/null"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"un autre apply de structure est en cours"* ]]
+  # TEMOIN : rien n'a ete TENTE — pas un seul tofu n'a tourne.
+  [ ! -s "$TOFU_LOG" ]
+}
+
+@test "apply: TEMOIN — verrou libre, l'apply passe (sinon le refus ci-dessus serait un blocage permanent)" {
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [ -s "$TOFU_LOG" ]
 }
 
 @test "runner-token: imprime le jeton et RIEN d'autre sur stdout" {

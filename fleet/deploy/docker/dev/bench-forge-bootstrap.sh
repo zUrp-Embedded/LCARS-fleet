@@ -21,7 +21,9 @@
 # Ce que le script fait, dans l'ordre :
 #   1. attend que la forge reponde ;
 #   2. cree le compte admiral (master forge + sysadmin) s'il manque (mot de passe de bench fixe) ;
-#   3. minte le master token EPHEMERE d'admiral (celui que tofu consomme, jete apres la passe) ;
+#   3. minte le master token d'admiral et le CONFIE A LA BOITE (`forge-gestures.sh config-token`),
+#      ou il RESTE — cf. l'arbitrage du 2026-08-16 : tout geste structurel (un catalogue de plus,
+#      un role de plus) a besoin de cette meme autorite, au jour 400 comme au premier ;
 #   4-5. DEPOSE le roster derive dans la recette de la boite, puis passe la main aux GESTES DE
 #      L'IMAGE (`/opt/lcars/forge-gestures.sh`) : les deux secrets par stdin, puis l'apply — module
 #      `instance/`, module catalogue, et le depot modele. Ce script ne joue plus tofu lui-meme, et
@@ -136,14 +138,15 @@ for _ in $(seq 1 60); do
 done
 curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $FORGE_URL" 2
 
-# ─── 2-3. admiral (master forge + sysadmin) + master token EPHEMERE ──────────────────────────────
+# ─── 2-3. admiral (master forge + sysadmin) + son master token ───────────────────────────────────
 # ⚠ CE COMMENTAIRE DISAIT L'INVERSE, ET SA PREMISSE A CHANGE (identite-v2). Le mot de passe etait
 # GENERE parce que ce compte etait « un outil de provisioning, pas un siege d'operateur ». Or admiral
 # EST desormais un siege d'operateur : le master se logue au deck/forge, et il est materialise en
 # sysadmin root cote box (uid 1000). Il lui faut donc un mot de passe CONNU — exactement comme
 # l'humain worker (HUMAN_PASSWORD, deja fixe dans ce script). Bench : fixe (`toto1234`), pour tester,
 # dans un banc JETABLE sur LAN sur ; prod : l'installeur choisit. Ce qui ne doit jamais persister
-# dans un fichier suivi, c'est le MASTER TOKEN qu'admiral minte pour tofu — lui reste EPHEMERE.
+# dans un fichier SUIVI, c'est le MASTER TOKEN qu'admiral minte. Il ne disparait pas pour autant :
+# il est confie a la boite plus bas, en 0600 root dans /home/private, et il y RESTE.
 ADMIN_PW="${LCARS_BENCH_ADMIRAL_PW:-toto1234}"
 
 # LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES

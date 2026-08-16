@@ -110,6 +110,10 @@ fi
 # exist and take a 409 at apply time, far from here. So a missing authority on an EXISTING org is
 # fatal, loudly. On an absent org the question does not arise -- no org, no teams.
 if [[ -n "$TEAMS" && -n "$ORG_ID" ]]; then
+  # `limit=100` EST une borne, donc elle doit se DIRE quand on la touche. Une troncature muette
+  # rendrait un ensemble d'existence incomplet, tofu tenterait de creer des teams qui existent, et
+  # le 409 tomberait a l'apply — loin d'ici, sur un motif qui ne nomme pas la borne. Cinq teams
+  # aujourd'hui ; ce refus est pour la forge de quelqu'un d'autre.
   body="$(forge_curl -w '\n%{http_code}' "$FORGE/api/v1/orgs/$ORG/teams?limit=100")" \
     || { echo "forge-existing: la forge ne repond pas (teams de $ORG)" >&2; exit 1; }
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
@@ -122,6 +126,12 @@ if [[ -n "$TEAMS" && -n "$ORG_ID" ]]; then
     *)   echo "forge-existing: HTTP $code sur les teams de $ORG -- on refuse de conclure" >&2
          exit 1 ;;
   esac
+  n_teams="$(printf '%s' "$body" | jq -r 'length' 2>/dev/null || echo 0)"
+  if [[ "$n_teams" -ge 100 ]]; then
+    echo "forge-existing: l'org $ORG porte >= 100 teams — la lecture est peut-etre TRONQUEE, et un" >&2
+    echo "  ensemble d'existence incomplet ferait echouer l'apply en 409, loin d'ici." >&2
+    exit 1
+  fi
   IFS=',' read -r -a _teams <<< "$TEAMS"
   for t in "${_teams[@]}"; do
     [[ -n "$t" ]] || continue
