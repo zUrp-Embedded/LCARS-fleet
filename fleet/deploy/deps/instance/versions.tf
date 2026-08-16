@@ -10,5 +10,11 @@ terraform {
       source  = "go-gitea/gitea"
       version = "~> 0.8"
     }
+
+    # Meme sonde d'existence que le module catalogue, meme script — cf. `existing.tf`.
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3"
+    }
   }
 }

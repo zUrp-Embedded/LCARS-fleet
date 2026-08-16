@@ -38,10 +38,20 @@ variable "role_names" {
   }
 }
 
+# VARIABLE et non plus litteral : le login etait ecrit ici et une seconde fois dans le module
+# catalogue (`var.system_account`, qui le NOMME pour ses adhesions). Deux ecritures d'un meme fait
+# derivent, et la sonde d'existence a besoin de celui-ci — un nom faux ne rend pas d'erreur, il rend
+# « absent », et tofu retente alors une creation qui echoue en 409.
+variable "system_account" {
+  type        = string
+  default     = "lcars-system"
+  description = "Compte SYSTEME de l'instance — meme valeur que `var.system_account` du module catalogue"
+}
+
 resource "gitea_user" "system" {
-  username             = "lcars-system"
-  login_name           = "lcars-system"
-  email                = "lcars-system@lcars.local"
+  username             = var.system_account
+  login_name           = var.system_account
+  email                = "${var.system_account}@lcars.local"
   password             = var.seed_password
   must_change_password = false
   admin                = false # PAS site-admin : org-power via la team `system`, blast-radius borné à l'org

@@ -22,7 +22,7 @@
 # `humans` en READ : il voit et commente, il ne relabellise (issues:write requis) ni
 # ne crée. C'est CE lock — et non un units_map par-rôle — qui rend les labels
 # `stage/*` infalsifiables. Et il s'exprime en permission UNIFORME, donc nativement
-# en TF (le provider v0.7 ne fait que de l'uniforme par team ; sans importance ici,
+# en TF (le provider ne fait que de l'uniforme par team ; sans importance ici,
 # justement parce que le per-rôle n'a pas besoin d'être fin).
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -171,9 +171,15 @@ resource "gitea_org" "fleet" {
 # Le moindre privilège ne suffit donc plus à ce que la fleet doit faire, et la recette ne peut pas
 # le corriger elle-même : `50-forge` n'écrit qu'avec le jeton système ou en basic-auth machine, et
 # le jeton système ne peut gérer une team qu'une fois DÉJÀ propriétaire. La seule identité de classe
-# propriétaire est celle qui lance cet apply. Le provider ne l'exprime pas non plus : ni data source
-# `gitea_team` (donc l'id de la team `Owners` est introuvable), ni champ propriétaire sur
+# propriétaire est celle qui lance cet apply. Le provider n'a pas de champ propriétaire sur
 # `gitea_org` — le créateur d'une org en est le propriétaire, un point c'est tout.
+#
+# ⚠ LE SECOND MOTIF ÉCRIT ICI EST TOMBÉ AVEC LA MONTÉE DU PROVIDER (2026-08-16). Il disait « ni data
+# source `gitea_team`, donc l'id de la team `Owners` est introuvable » : `data.gitea_team` EXISTE en
+# 0.8, et la recette détient déjà le master token. Rien n'empêche donc plus la recette de poser
+# cette adhésion elle-même — c'est un geste à rapatrier, pas une impossibilité. Il n'est PAS fait
+# ici pour l'instant : il reste à l'étape 4-bis du banc, et son déménagement appartient au lot 4 du
+# chantier « deploy avec tofu dedans ».
 #
 # ⚖ TRANCHÉ (user, 2026-08-11) : c'est `lcars-system` qui possède les orgs — c'est déjà le seul
 # compte qui y crée des dépôts. L'adhésion se pose dans la FENÊTRE DU MASTER TOKEN, celle qui lance
@@ -183,73 +189,57 @@ resource "gitea_org" "fleet" {
 # La team `system` ci-dessous reste donc au moindre privilège pour ce qu'elle sert (créer et pousser)
 # ; la propriété de l'org est un fait SÉPARÉ, posé ailleurs, et écrit ici pour qu'on ne relise pas
 # « PAS admin/owner » comme « ce compte n'a aucun pouvoir d'org ». Il en a un, et il est nommé.
-resource "gitea_team" "system" {
-  name                     = "system"
-  organisation             = gitea_org.fleet.name
-  permission               = "write"
-  can_create_repos         = true
-  include_all_repositories = true
-  # Gitea 1.26 stocke l'accès en units_map ; le champ `permission` top-level se relit « none »
-  # (déprécié) → sans ça le provider verrait un drift perpétuel write→none. L'accès réel
-  # (units_map) est posé au CREATE depuis `permission` et stable → on ignore la relecture cosmétique.
-  # (Coût assumé : changer le niveau d'une team plus tard = taint/recreate, pas un simple edit.)
-  lifecycle {
-    ignore_changes = [permission]
+
+# LES CINQ TEAMS SONT UNE SEULE RESSOURCE INDEXÉE, et la table ci-dessous est la SEULE liste de
+# leurs noms. Elles étaient cinq ressources nommées ; le bloc `import` qui les fait rejoindre l'état
+# sur une forge existante a besoin de cette liste, et l'écrire une seconde fois dans `existing.tf`
+# aurait produit exactement la classe de dérive qui a déjà mordu ici (`chief` dans `roles` et pas
+# dans `writers` : un compte, un token, aucun droit — trouvé en lisant une org, par aucun check).
+locals {
+  teams = {
+    # SEULE à créer des repos d'org (création réservée au système) + write dessus (push, topics de
+    # découverte, labels via le token système). PAS admin/owner : cf. la cicatrice de propriété
+    # ci-dessus — elle se pose hors de cette recette, dans la fenêtre du master token.
+    system = { permission = "write", can_create_repos = true }
+
+    # rôles qui PRODUISENT (push code, ouvrent/mergent des PR). Le système agit `as_role` pour
+    # l'authorship. Write uniforme (issues:write inclus = bénin : pods aveugles).
+    # `can_create_repos = false` est EXPLICITE : le provider défaute à true → seul `system` crée.
+    writers = { permission = "write", can_create_repos = false }
+
+    # qualifier/reviewer — WRITE. Ils postent des RAPPORTS D'AUDIT lourds committés dans ops (via le
+    # système `as_role`, jamais le pod forge-aveugle) → write, pas juste la review en read.
+    # Corollaire : le grant per-repo `add_collaborator` du runtime (engineer/qualifier/reviewer/
+    # gatekeeper) devient REDONDANT avec writers+judges → à retirer côté runtime.
+    judges = { permission = "write", can_create_repos = false }
+
+    # rôle EXTERNE (vulcan) — READ strict. Séparé des judges JUSTEMENT pour que leur write ne fuite
+    # pas à l'externe : un externe ne pousse RIEN (ni code, ni audit), il commente/review en read.
+    externals = { permission = "read", can_create_repos = false }
+
+    # l'humain daily — READ. LE lock qui compte : voit + commente, ne relabellise ni ne crée. Rend
+    # `stage/*` infalsifiable côté acteur indépendant, et `can_create_repos = false` EST ce lock.
+    humans = { permission = "read", can_create_repos = false }
   }
 }
 
-# writers : rôles qui PRODUISENT (push code, ouvrent/mergent des PR). Le système agit
-# `as_role` pour l'authorship. Write uniforme (issues:write inclus = bénin : pods aveugles).
-resource "gitea_team" "writers" {
-  name                     = "writers"
+# ⚠ IL N'Y A PLUS DE `ignore_changes = [permission]` ICI, ET SON RETRAIT EST UN CORRECTIF.
+# Il portait ceci, qui reste vrai : Gitea 1.26 stocke l'accès en units_map et relit le champ
+# `permission` top-level en « none » (déprécié), donc le provider voit un drift perpétuel
+# write→none. Mais sur une team IMPORTÉE, la valeur planifiée d'un attribut ignoré est celle de
+# l'ÉTAT, soit « none » — et l'update part avec, ce que Gitea refuse : `permission mode invalid`,
+# les cinq teams d'un coup (mesuré 2026-08-16). Un garde-fou cosmétique transformait l'import en
+# panne dure.
+# Le prix, mesuré et assumé : `permission` et `units` ne convergent jamais en lecture, donc chaque
+# apply annonce et rejoue un update par team. Il réussit, l'apply rend 0 — mais un plan VIDE est
+# impossible tant que le provider relit ce champ ainsi. C'est le bruit, pas la panne.
+resource "gitea_team" "this" {
+  for_each                 = local.teams
+  name                     = each.key
   organisation             = gitea_org.fleet.name
-  permission               = "write"
-  can_create_repos         = false # EXPLICITE : le provider défaute à true → seul `system` crée des repos.
+  permission               = each.value.permission
+  can_create_repos         = each.value.can_create_repos
   include_all_repositories = true
-  lifecycle {
-    ignore_changes = [permission] # cf. team `system` : relecture `permission=none` dépréciée.
-  }
-}
-
-# judges : qualifier/reviewer — WRITE. Ils postent des RAPPORTS D'AUDIT lourds committés dans ops
-# (via le système `as_role`, jamais le pod forge-aveugle) → ils ont besoin de write, pas juste de la
-# review en read. Corollaire : le grant per-repo `add_collaborator` du runtime (engineer/qualifier/
-# reviewer/gatekeeper) devient REDONDANT avec les teams writers+judges → à retirer côté runtime.
-resource "gitea_team" "judges" {
-  name                     = "judges"
-  organisation             = gitea_org.fleet.name
-  permission               = "write"
-  can_create_repos         = false # EXPLICITE : le provider défaute à true.
-  include_all_repositories = true
-  lifecycle {
-    ignore_changes = [permission] # cf. team `system` : relecture `permission=none` dépréciée.
-  }
-}
-
-# externals : rôle EXTERNE (vulcan) — READ strict. Séparé des judges JUSTEMENT pour que leur write ne
-# fuite pas à l'externe : un externe ne pousse RIEN (ni code, ni audit), il commente/review en read.
-resource "gitea_team" "externals" {
-  name                     = "externals"
-  organisation             = gitea_org.fleet.name
-  permission               = "read"
-  can_create_repos         = false
-  include_all_repositories = true
-  lifecycle {
-    ignore_changes = [permission]
-  }
-}
-
-# humans : l'humain daily — READ. LE lock qui compte : voit + commente, ne relabellise
-# ni ne crée. Rend `stage/*` infalsifiable côté acteur indépendant.
-resource "gitea_team" "humans" {
-  name                     = "humans"
-  organisation             = gitea_org.fleet.name
-  permission               = "read"
-  can_create_repos         = false # EXPLICITE (le lock) : l'humain ne crée AUCUN repo.
-  include_all_repositories = true
-  lifecycle {
-    ignore_changes = [permission] # cf. team `system` : relecture `permission=none` dépréciée.
-  }
 }
 
 # ── Memberships ────────────────────────────────────────────────────────────
@@ -287,33 +277,33 @@ variable "externals" {
 }
 
 resource "gitea_team_membership" "system" {
-  team_id  = gitea_team.system.id
+  team_id  = gitea_team.this["system"].id
   username = var.system_account
 }
 
 resource "gitea_team_membership" "writers" {
   for_each   = toset(var.writers)
-  team_id    = gitea_team.writers.id
+  team_id    = gitea_team.this["writers"].id
   username   = each.key
   depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "judges" {
   for_each   = toset(var.judges)
-  team_id    = gitea_team.judges.id
+  team_id    = gitea_team.this["judges"].id
   username   = each.key
   depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "externals" {
   for_each   = toset(var.externals)
-  team_id    = gitea_team.externals.id
+  team_id    = gitea_team.this["externals"].id
   username   = each.key
   depends_on = [gitea_user.role]
 }
 
 resource "gitea_team_membership" "human" {
-  team_id  = gitea_team.humans.id
+  team_id  = gitea_team.this["humans"].id
   username = var.human_username
 }
 
@@ -335,6 +325,6 @@ resource "gitea_team_membership" "human" {
 # Conséquence pratique : ne pas conclure « inutile » d'une mesure faite sur un banc. Le retirer
 # rendrait l'admission de l'onboard non vérifiable exactement là où personne ne teste — en recette.
 resource "gitea_team_membership" "system_reads_humans" {
-  team_id  = gitea_team.humans.id
+  team_id  = gitea_team.this["humans"].id
   username = var.system_account
 }

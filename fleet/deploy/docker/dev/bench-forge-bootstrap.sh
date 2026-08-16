@@ -193,13 +193,17 @@ if [[ -z "$TOFU_DIR" ]]; then
   cp -r "$REPO_ROOT/fleet/deploy/deps/." "$TOFU_DIR/"
   say "recette tofu copiee dans $TOFU_DIR (tfstate hors de l'arbre)"
 fi
-# Le module INSTANCE a son propre etat : ce qu'il possede (systeme, starfleet, humain, roles
-# `system_*`) vit une fois par FORGE, pas une fois par catalogue. Le meler a l'etat d'un catalogue
-# rendrait ces comptes propriete du premier enrole — les detruire en detruisant celui-la.
-INSTANCE_DIR="${TOFU_DIR%/}.instance"
-rm -rf "$TOFU_DIR/instance"
-mkdir -p "$INSTANCE_DIR"
-cp -r "$REPO_ROOT/fleet/deploy/deps/instance/." "$INSTANCE_DIR/"
+# Le module INSTANCE a son propre etat : ce qu'il possede (systeme, humain, roles `system_*`) vit
+# une fois par FORGE, pas une fois par catalogue. Le meler a l'etat d'un catalogue rendrait ces
+# comptes propriete du premier enrole — les detruire en detruisant celui-la.
+#
+# CETTE SEPARATION EST CELLE DES DOSSIERS, ET IL SUFFIT QU'IL SOIT LE SOUS-DOSSIER : un tfstate vit
+# dans le repertoire d'ou l'apply est joue. Ce script extrayait `instance/` vers un dossier FRERE
+# (`${TOFU_DIR%/}.instance`) pour obtenir cette meme separation, et cette copie cassait desormais la
+# sonde d'existence — `existing.tf` du module instance appelle `${path.module}/../forge-existing.sh`,
+# qui n'existe pas a cote d'un dossier frere. On garde donc l'arborescence telle que la recette la
+# porte, ce qui SUPPRIME un geste au lieu d'en ajouter un.
+INSTANCE_DIR="$TOFU_DIR/instance"
 
 # The roster is DERIVED from the catalogue, never taken from the recipe defaults. Those defaults are
 # a second writing of a fact `mix lcars.catalogue.roles --tfvars` already produces, and the two DID
@@ -259,12 +263,16 @@ printf '%s\n' "$CATALOGUE_OUT" \
   | sed 's/^ *//' | while IFS= read -r l; do say "charte: $l"; done || true
 
 # ─── 4-bis. le compte SYSTEME devient PROPRIETAIRE de l'org ──────────────────────────────────────
-# POURQUOI ICI ET PAS DANS TOFU : le provider n'expose ni data source `gitea_team` (donc l'id de la
-# team `Owners`, creee par Gitea avec l'org, est introuvable) ni champ proprietaire sur `gitea_org`
-# — le createur d'une org en est le proprietaire, point. Et pas dans `50-forge` non plus : ce module
-# n'ecrit qu'avec le jeton systeme ou en basic-auth machine, et le jeton systeme ne peut gerer une
-# team qu'une fois DEJA proprietaire. La seule identite de classe proprietaire est celle qui lance
-# l'apply — le master token, ici, et l'admin de l'operateur en production.
+# POURQUOI PAS DANS `50-forge` : ce module n'ecrit qu'avec le jeton systeme ou en basic-auth
+# machine, et le jeton systeme ne peut gerer une team qu'une fois DEJA proprietaire. La seule
+# identite de classe proprietaire est celle qui lance l'apply — le master token, ici, et l'admin de
+# l'operateur en production.
+#
+# ⚠ ET « PAS DANS TOFU » N'EST PLUS VRAI DEPUIS LA MONTEE DU PROVIDER (2026-08-16). Le motif ecrit
+# ici etait « ni data source `gitea_team`, donc l'id de la team `Owners` est introuvable » :
+# `data.gitea_team` existe en 0.8, et la recette detient deja le master token. Ce geste reste au
+# banc pour l'instant, et il MANQUE en production — c'est une des lignes du lot 4 du chantier
+# « deploy avec tofu dedans ».
 #
 # POURQUOI C'EST NECESSAIRE, mesure le 2026-08-11 : `lcars project migrate` transfere un depot d'une
 # org a l'autre, et Gitea exige le PROPRIETAIRE de l'org SOURCE.
