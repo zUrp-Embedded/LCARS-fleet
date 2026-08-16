@@ -32,41 +32,68 @@ setup() {
 
 # ─── le predicat ────────────────────────────────────────────────────────────────────────────────
 
-@test "SANS declaration : le catalogue LIVRE est actif, et lui seul" {
-  run "$SUT" catalogue list
-  [ "$status" -eq 0 ]
-  # La ligne d'inventaire disait « inactif » pour le catalogue qui tourne.
-  [[ "$output" == *"fleet"*"actif"* ]]
-  [[ "$output" != *"fleet          inactif"* ]]
-  # Et le bloc ACTIFS le NOMME, au lieu de le decrire sans le nommer.
-  [[ "$output" == *"1. fleet"* ]]
-  [[ "$output" == *"par defaut"* ]]
+# ─── `list` : l'etat vient de la FORGE, et sans release on le DIT ───────────────────────────────
+# Les quatre temoins qui vivaient ici epinglaient l'ACTIVITE (« fleet actif », le bloc ACTIFS, la
+# numerotation de precedence). Ce modele est retire : un catalogue est INSTALLE (la forge porte sa
+# source, tout le monde est servi) ou DISPONIBLE, et l'activation n'existe plus. La liste ne peut
+# donc plus repondre seule — et c'est ca que ces temoins tiennent maintenant.
+
+@test "list: SANS release, il REFUSE de deviner et nomme la raison" {
+  # LE MENSONGE QUE CE TEMOIN INTERDIT est celui qu'on vient de retirer : imprimer « installe »
+  # pour tout dossier present. Un banc a affiche `web` installe pendant que la forge n'avait jamais
+  # porte d'org `web`. Sans release, on ne SAIT pas, et on le dit a l'endroit qu'un operateur lit
+  # en premier.
+  run env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
+  [ "$status" -eq 127 ]
+  [[ "$output" == *"fait de FORGE"* ]]
+  [[ "$output" != *"installe"* ]]
 }
 
-@test "SANS declaration : un catalogue installe reste inactif" {
-  run "$SUT" catalogue list
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"web"*"inactif"* ]]
+@test "list: SANS release, il montre quand meme le MATERIEL present, et d'ou il vient" {
+  # Le contre-temoin du precedent : refuser de conclure ne doit pas vouloir dire ne rien montrer.
+  # L'operateur voit ce qu'il a sous la main, sans qu'on prononce son etat.
+  mkdir -p "$LCARS_CATALOGUES_DIR/mobile"
+  run env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
+  [[ "$output" == *"mobile"* ]]
+  [[ "$output" == *"web"* ]]
+  [[ "$output" == *"fleet"* ]]
 }
 
-@test "AVEC une declaration qui ne le nomme pas : le livre est bien inactif" {
-  printf 'web\n' > "$LCARS_CATALOGUES_ACTIVE"
-  run "$SUT" catalogue list
+@test "list: la porte du release parle en MOTS, et la CLI les traduit" {
+  # La porte rend `<ETAT> <nom> <source>`, la CLI met en forme. Un tableau formate cote release
+  # obligerait deux langages a s'accorder sur une colonne le jour ou on en ajoute une.
+  bin="$BATS_TEST_TMPDIR/fake_release"
+  cat > "$bin" <<'FAKE'
+#!/usr/bin/env bash
+printf 'INSTALLED fleet -\nUPDATABLE web alice/web\nAVAILABLE mobile bob/mob\n'
+FAKE
+  chmod +x "$bin"
+
+  run env LCARS_FLEET_BIN="$bin" "$SUT" catalogue list
   [ "$status" -eq 0 ]
-  [[ "$output" == *"fleet          inactif"* ]]
-  [[ "$output" == *"web"*"actif"* ]]
+  [[ "$output" == *"fleet"*"installe"* ]]
+  [[ "$output" == *"mobile"*"disponible"*"bob/mob"* ]]
+  # `updatable` NE S'APPLIQUE PAS TOUT SEUL : la ligne montre le geste, elle ne le fait pas.
+  [[ "$output" == *"catalogue install web"* ]]
 }
 
-@test "un commentaire et des lignes vides ne font pas une declaration" {
-  printf '# rien\n\n   \n' > "$LCARS_CATALOGUES_ACTIVE"
-  run "$SUT" catalogue list
-  [ "$status" -eq 0 ]
-  # Fichier non vide mais declaration vide : la regle du defaut s'applique quand meme.
-  [[ "$output" == *"1. fleet"* ]]
-  [[ "$output" == *"par defaut"* ]]
-}
+@test "list: un DOUBLON refuse, et nomme les DEUX proprietaires" {
+  # On ne choisit pas. Devenir arbitre ici rendrait une reponse a celui qui perd sans qu'il puisse
+  # savoir pourquoi.
+  bin="$BATS_TEST_TMPDIR/fake_dup"
+  cat > "$bin" <<'FAKE'
+#!/usr/bin/env bash
+printf 'DUPLICATE web alice/web bob/web\n' >&2
+exit 3
+FAKE
+  chmod +x "$bin"
 
-# ─── le defaut ne se retire pas par soustraction ────────────────────────────────────────────────
+  run env LCARS_FLEET_BIN="$bin" "$SUT" catalogue list
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"alice/web"* ]]
+  [[ "$output" == *"bob/web"* ]]
+  [[ "$output" == *"Aucun des deux n'est choisi"* ]]
+}
 
 @test "disable du livre SANS declaration : refuse, et dit qu'un defaut se REMPLACE" {
   run "$SUT" catalogue disable fleet

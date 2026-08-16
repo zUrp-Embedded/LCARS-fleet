@@ -298,67 +298,67 @@ cat_active_by_default() { [[ -z "$(cat_declared)" ]]; }
 # reellement des deux cotes, livre dans l'image et installe par l'operateur — et `cat_dir_of` fait
 # gagner l'operateur. Le masquage est une FONCTIONNALITE ; une liste qui montre deux lignes
 # identiques la rend indiscernable d'un bug, et l'operateur ne sait pas lequel des deux tourne.
+# LA LISTE NE PEUT PAS REPONDRE SEULE, ET ELLE NE FAIT PLUS SEMBLANT.
+#
+# Elle imprimait « installe » pour tout ce qui avait un dossier — c'est exactement comme ca qu'un
+# banc a affiche `web` installe pendant que la forge n'avait jamais porte d'org `web`. « Installe »
+# est un fait de FORGE (l'org porte sa source), et `bin/lcars` n'a aucun acces forge, par design :
+# donner a une commande locale un acteur distant est precisement ce que cette regle evite.
+#
+# Elle demande donc au release, par la meme porte `eval` que `catalogue verify`. La porte parle en
+# MOTS (`INSTALLED`, `AVAILABLE`, `UPDATABLE`), pas en tableau formate : une colonne ajoutee un jour
+# ne doit pas avoir a se mettre d'accord entre deux langages.
+cat_states() {
+  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  [[ -x "$bin" ]] || return 127
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Application.CatalogueLifecycle.eval_main()"
+}
+
 cmd_catalogue_list() {
-  local installed=()
-  [[ -d "$CAT_DIR" ]] && while IFS= read -r d; do installed+=("operateur:$(basename "$d")"); done \
-    < <(find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-  [[ -d "$CAT_SHIPPED" ]] && while IFS= read -r d; do installed+=("livre:$(basename "$d")"); done \
-    < <(find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d | sort)
+  # ⚠ `out="$(...)"; rc=$?` NE MARCHE PAS SOUS `set -e` : une substitution de commande qui echoue
+  # dans une affectation tue le script AVANT la ligne suivante — donc `rc` n'etait jamais lu et
+  # aucun des refus ci-dessous n'etait atteint. Le `||` fait de l'affectation une condition, ce qui
+  # est exactement l'exception que `set -e` prevoit.
+  local out rc=0
+  out="$(cat_states 2>&1)" || rc=$?
 
-  echo "ACTIFS (ordre = precedence, $CAT_ACTIVE)"
-  if [[ -s "$CAT_ACTIVE" ]] && [[ -n "$(cat_declared)" ]]; then
-    local n=0
-    while IFS= read -r name; do
-      n=$((n + 1))
-      if [[ "$name" == "$CAT_BUNDLED" ]]; then
-        echo "  $n. $name    (livre dans le release)"
-      elif cat_dir_of "$name" >/dev/null; then
-        echo "  $n. $name    $(cat_dir_of "$name")"
-      else
-        echo "  $n. $name    INSTALLE NULLE PART — le boot refusera" >&2
-      fi
-    done < <(cat_declared)
-  else
-    # Le nommer, et pas seulement le decrire : « le catalogue livre dans le release » et la ligne
-    # « fleet » plus bas etaient le meme objet, et rien ne le disait.
-    echo "  1. $CAT_BUNDLED    (par defaut — aucune declaration, cf. « $CAT_ACTIVE »)"
-  fi
-
-  echo
-  echo "INSTALLES"
-  # Le catalogue LIVRE DANS LE RELEASE n'est ni dans CAT_DIR ni dans CAT_SHIPPED — il vit dans le
-  # release. Il ne figurait donc nulle part, alors qu'il est le DEFAUT et qu'on peut l'activer par
-  # son nom : un operateur qui n'a active que le sien n'avait aucun moyen d'apprendre qu'il existe.
-  if cat_active_by_default; then
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release — par defaut, aucune declaration)"
-  elif cat_is_active "$CAT_BUNDLED"; then
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "actif" "(dans le release)"
-  else
-    printf '  %-14s %-9s %s\n' "$CAT_BUNDLED" "inactif" "(dans le release — « $PROG catalogue enable $CAT_BUNDLED »)"
-  fi
-
-  if [[ ${#installed[@]} -eq 0 ]]; then
-    :
-  else
-    local entry origin name state note
-    for entry in "${installed[@]}"; do
-      origin="${entry%%:*}"; name="${entry#*:}"
-      state="inactif"; cat_is_active "$name" && state="actif"
-      note=""
-      # Un nom present des deux cotes : l'operateur GAGNE (cat_dir_of le resout ainsi). On le dit
-      # sur les deux lignes, sans quoi elles sont indiscernables.
-      if [[ "$origin" == "livre" && -d "$CAT_DIR/$name" ]]; then
-        note="(livre — MASQUE par celui de l'operateur)"
-      elif [[ "$origin" == "livre" ]]; then
-        note="(livre avec l'image)"
-      elif [[ -d "$CAT_SHIPPED/$name" ]]; then
-        note="(operateur — MASQUE le livre du meme nom)"
-      else
-        note="(operateur)"
-      fi
-      printf '  %-14s %-9s %s\n' "$name" "$state" "$note"
-    done
-  fi
+  case "$rc" in
+    0)
+      printf '  %-16s %-11s %s\n' "CATALOGUE" "ETAT" "SOURCE"
+      while read -r state name src; do
+        case "$state" in
+          INSTALLED) printf '  %-16s %-11s %s\n' "$name" "installe" "$src" ;;
+          UPDATABLE) printf '  %-16s %-11s %s\n' "$name" "A JOUR ?" "$src  → « $PROG catalogue install $name » met a jour" ;;
+          AVAILABLE) printf '  %-16s %-11s %s\n' "$name" "disponible" "$src  → « $PROG catalogue install $name » (admin forge)" ;;
+        esac
+      done <<< "$out"
+      ;;
+    3)
+      # Le doublon : on NE CHOISIT PAS. Les deux proprietaires sont nommes, et c'est a eux de
+      # trancher — devenir arbitre ici, ce serait rendre une reponse a celui qui perd sans qu'il
+      # puisse savoir pourquoi.
+      echo "catalogue list: DEUX depots declarent le meme catalogue — refus." >&2
+      printf '%s\n' "$out" | sed 's/^DUPLICATE /  /' >&2
+      echo "  Aucun des deux n'est choisi. Supprimez-en un (ou renommez-le dans son manifeste)." >&2
+      return 3
+      ;;
+    127)
+      # SANS RELEASE ON DIT QU'ON NE SAIT PAS. Deviner rendrait le mensonge qu'on vient de retirer,
+      # a l'endroit qu'un operateur lit en premier.
+      echo "catalogue list: pas de release joignable (LCARS_FLEET_BIN) — l'etat des catalogues est" >&2
+      echo "  un fait de FORGE, et cette commande n'y a pas acces. Le materiel present ici :" >&2
+      [[ -d "$CAT_DIR" ]] && find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d -printf '    %f  (operateur)\n' 2>/dev/null | sort >&2
+      [[ -d "$CAT_SHIPPED" ]] && find "$CAT_SHIPPED" -mindepth 1 -maxdepth 1 -type d -printf '    %f  (livre avec l image)\n' 2>/dev/null | sort >&2
+      echo "    $CAT_BUNDLED  (dans le release)" >&2
+      return 127
+      ;;
+    *)
+      echo "catalogue list: la forge n'a pas repondu — rien n'est conclu." >&2
+      printf '%s\n' "$out" | sed 's/^/  /' >&2
+      return "$rc"
+      ;;
+  esac
 }
 
 # Le binaire de release joue les memes controles que le boot. Dans la boite il est a l'install ;

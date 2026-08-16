@@ -64,15 +64,33 @@ defmodule Fleet.Application.CatalogueDeposits do
   @spec list(keyword()) :: {:ok, %{String.t() => deposit()}} | {:error, term()}
   def list(opts \\ []) do
     repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
+
+    with {:ok, repos} <- repo_mod.search_repos(opts), do: from_repos(repos, opts)
+  end
+
+  @doc """
+  Same reading, on a repo list ALREADY fetched.
+
+  It exists so that a caller needing both halves of the lifecycle — the deposits and the stores —
+  pays for ONE `/repos/search`. Fetching twice would not only cost a round trip: the two reads
+  could straddle a push and produce a state nobody ever had.
+  """
+  @spec from_repos([map()], keyword()) :: {:ok, %{String.t() => deposit()}} | {:error, term()}
+  def from_repos(repos, opts \\ []) when is_list(repos) do
+    repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
     files_mod = Keyword.get(opts, :forge_files, Fleet.Forge.Client.Files)
 
-    with {:ok, repos} <- repo_mod.search_repos(opts) do
-      repos
-      |> Enum.reject(&store_or_empty?/1)
-      |> Enum.flat_map(&deposit(&1, repo_mod, files_mod, opts))
-      |> group()
-    end
+    repos
+    |> Enum.reject(&store_or_empty?/1)
+    |> Enum.flat_map(&deposit(&1, repo_mod, files_mod, opts))
+    |> group()
   end
+
+  @doc """
+  The reserved repo name an INSTALLED catalogue's source lives under, inside its own org.
+  """
+  @spec store_repo() :: String.t()
+  def store_repo, do: @store_repo
 
   # The store of an installed catalogue is not a deposit — it is the copy WE pushed there, and
   # listing it would report every installed catalogue as also available from itself.
