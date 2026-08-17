@@ -88,10 +88,36 @@ defmodule Fleet.Workflow.Loader do
       "presentation" => get_in(yaml, ["metadata", "presentation"]),
       "status" => get_in(yaml, ["metadata", "status"]) || "canon",
       # WHERE the card is declared — a different axis from `status`, which says what CLASS it is.
-      # A production card can still be unavailable at project scope: `workshop-direct` is chosen by
-      # an issue's genre and a project declaring it would route every ticket through a jury-less
-      # direct seal. Absent = `project`, the ordinary case.
-      "scope" => get_in(yaml, ["metadata", "scope"]) || "project"
+      # A production card can still be unavailable at project scope: a card reached by an issue's
+      # genre, declared by a project, would route EVERY ticket through it.
+      #
+      # ⚠ IL SE DERIVE, ET IL SE TENAIT A LA MAIN. `scope: ticket` etait un champ que l'auteur d'un
+      # catalogue devait penser a ecrire — a cote d'une PROPRIETE qui dit deja la meme chose, et que
+      # le runtime derive deja pour resoudre le rail doc (`workshop_card_name/1`, qui a remplace un
+      # knob nomme pour cette exact raison : « one knob cannot name N cards »). Le meme fichier
+      # portait donc les deux regimes, et la moitie tenue a la main a pourri.
+      #
+      # MESURE 2026-08-17, sur les onze cartes livrees : la correlation `scope: ticket` <->
+      # producteur `face: workshop` est EXACTE, sauf sur `web-demo/content` — qui porte la face et a
+      # oublie le champ. Consequence mesuree, `declarable_card("content") == :ok` : un projet
+      # `web-demo` pouvait declarer la carte d'atelier, et TOUT son travail de production serait
+      # parti sur la branche d'atelier, sans jury, sans CI, sans jamais atteindre `main`. Les deux
+      # gardes qui l'auraient arrete — le guichet et `declarable_card/3` — lisent le MEME champ
+      # absent : elles tombent ensemble.
+      #
+      # POURQUOI LA DERIVATION EST FONDEE ET PAS UNE COMMODITE : `ensure_one_workshop_rail!/2`
+      # refuse deja DEUX cartes a producteur d'atelier par catalogue. Porter cette face implique
+      # donc d'ETRE le rail doc de son catalogue, et le rail doc s'atteint par le genre d'un ticket.
+      # Une carte mixte (des etapes code + une etape atelier) n'est pas un cas perdu : elle est deja
+      # impossible des qu'une vraie carte d'atelier existe a cote.
+      #
+      # Un `scope` EXPLICITE gagne toujours — la derivation ne comble qu'une absence, et la
+      # contradiction (`scope: project` sur une carte d'atelier) est refusee au publish, la ou
+      # l'objet fusionne est enfin visible. Un champ ecrase en silence serait une correction que son
+      # auteur n'apprend jamais.
+      "scope" =>
+        get_in(yaml, ["metadata", "scope"]) ||
+          if(workshop_producer?(%{"steps" => steps}), do: "ticket", else: "project")
     }
   end
 
@@ -166,6 +192,7 @@ defmodule Fleet.Workflow.Loader do
       names = disk_canon_names!(opts)
       image = Map.new(names, fn name -> {name, load_from_disk!(Fleet.Slug.cast!(name), opts)} end)
       ensure_one_workshop_rail!(image, dir)
+      ensure_workshop_scope!(image, dir)
       :persistent_term.put(image_key(dir), image)
     end
 
@@ -300,6 +327,29 @@ defmodule Fleet.Workflow.Loader do
       _ ->
         :ok
     end
+  end
+
+  # LA CONTRADICTION SE REFUSE, ELLE NE SE CORRIGE PAS. Une carte qui porte un producteur d'atelier
+  # EST le rail doc de son catalogue (cf. `ensure_one_workshop_rail!/2`, qui en refuse deux) — donc
+  # elle s'atteint par le genre d'un ticket. Un auteur qui ecrit `scope: project` dessus affirme
+  # quelque chose qui ne peut pas etre vrai : un projet qui la declarerait enverrait TOUT son
+  # travail sur la face atelier, sans jury.
+  #
+  # Ici et pas dans `normalize/1` : la meme raison que la garde voisine — un refus appartient a
+  # l'endroit ou l'objet fusionne devient enfin visible, et une carte lue seule ne sait pas encore
+  # si elle est publiee.
+  defp ensure_workshop_scope!(image, dir) do
+    for {name, card} <- image,
+        workshop_producer?(card),
+        card["scope"] == "project" do
+      raise "Fleet.Workflow.Loader: #{dir}/#{name} carries a `face: workshop` producer AND " <>
+              "declares `scope: project` — the two cannot both be true. A workshop card IS the " <>
+              "catalogue's doc rail, reached by an issue's genre; a project declaring it would " <>
+              "route EVERY ticket through a jury-less direct seal on the workshop face. Drop the " <>
+              "`scope` line (it derives) or move the producer off `face: workshop`."
+    end
+
+    :ok
   end
 
   defp workshop_producer?(card) when is_map(card) do

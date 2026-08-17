@@ -127,4 +127,102 @@ defmodule Fleet.Workflow.CardRolesTest do
       assert :ok = CardRoles.verify!(root)
     end
   end
+
+  describe "le scope d'une carte d'atelier se DERIVE de sa face" do
+    defp workshop_card(root, name, extra \\ "") do
+      dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+      File.mkdir_p!(dir)
+
+      File.write!(Path.join(dir, "#{name}.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: #{name}#{extra}
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: architect
+            face: workshop
+            needs: []
+            inputs:
+              - ticket.body
+      """)
+
+      [workflow_maps_root: dir]
+    end
+
+    test "carte d'atelier SANS `scope` -> ticket, donc INDECLARABLE par un projet", %{root: root} do
+      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE LIVRE : `web-demo/content` portait
+      # `face: workshop` et avait oublie `scope: ticket`. Mesure du 2026-08-17,
+      # `declarable_card("content") == :ok` — un projet pouvait donc declarer la carte d'atelier, et
+      # TOUT son travail de production serait parti sur la branche d'atelier, sans jury, sans CI,
+      # sans jamais atteindre `main`. Les DEUX gardes qui l'auraient arrete (le guichet et
+      # `declarable_card/3`) lisent le meme champ absent : elles tombent ensemble.
+      opts = workshop_card(root, "atelier")
+
+      assert %{"scope" => "ticket"} = Fleet.Workflow.Loader.load!("atelier", opts)
+
+      assert {:error, {:card_not_project_scoped, "atelier", "ticket"}} =
+               Fleet.Project.Intensity.declarable_card("atelier", nil, opts)
+    end
+
+    test "une carte ORDINAIRE reste `project` — la derivation ne mord que sur la face", %{
+      root: root
+    } do
+      dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+      File.mkdir_p!(dir)
+
+      File.write!(Path.join(dir, "ordinaire.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: ordinaire
+      spec:
+        jury: []
+        ci: ignore
+        max_rework_rounds: 1
+        steps:
+          build:
+            role: architect
+            needs: []
+            inputs:
+              - ticket.body
+      """)
+
+      opts = [workflow_maps_root: dir]
+      assert %{"scope" => "project"} = Fleet.Workflow.Loader.load!("ordinaire", opts)
+      assert :ok = Fleet.Project.Intensity.declarable_card("ordinaire", nil, opts)
+    end
+
+    test "un `scope` EXPLICITE gagne — la derivation ne comble qu'une absence", %{root: root} do
+      # Le schema borne le champ a `project|ticket`, donc « explicite » ne veut pas dire « libre » :
+      # ce qui est teste est que la derivation n'ECRASE pas ce que l'auteur a ecrit.
+      opts = workshop_card(root, "atelier", "\n  scope: ticket")
+      assert %{"scope" => "ticket"} = Fleet.Workflow.Loader.load!("atelier", opts)
+    end
+
+    test "la CONTRADICTION `face: workshop` + `scope: project` est REFUSEE, en NOMMANT la carte",
+         %{
+           root: root
+         } do
+      # Elle affirme quelque chose qui ne peut pas etre vrai : une carte d'atelier EST le rail doc de
+      # son catalogue (le publish en refuse deja deux), donc elle s'atteint par le genre d'un ticket.
+      # Ecrasee en silence par la derivation, l'auteur ne l'apprendrait jamais ; refusee, il
+      # l'apprend au demarrage — la ou l'objet fusionne est enfin visible.
+      opts = workshop_card(root, "atelier", "\n  scope: project")
+
+      Fleet.TestEnv.put_env_restoring(
+        :lcars_fleet,
+        :workflow_workflow_maps_root,
+        Keyword.fetch!(opts, :workflow_maps_root)
+      )
+
+      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+
+      assert_raise RuntimeError, ~r/atelier.*face: workshop.*scope: project/s, fn ->
+        Fleet.Workflow.Loader.publish_image!()
+      end
+    end
+  end
 end

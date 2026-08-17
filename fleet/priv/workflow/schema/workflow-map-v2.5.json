@@ -50,7 +50,7 @@
             "project",
             "ticket"
           ],
-          "description": "WHERE this card is DECLARED, which is not the same axis as `status`. Absent = project: the card is a criticality choice for a whole project, offered by list_workflow_cards and accepted by project_create/revise_card. `ticket` = the card is chosen per TICKET by its genre (an atelier card reached through `genre/doc`), and a project can never declare it - offering it in the framing catalogue would present a choice that does not exist at that scope."
+          "description": "WHERE this card is DECLARED, which is not the same axis as `status`. `ticket` = the card is chosen per TICKET by its genre (a workshop card, reached through `destination/workshop`), and a project can never declare it - offering it in the framing catalogue would present a choice that does not exist at that scope. OPTIONAL, and DERIVED when absent: a card carrying a `face: workshop` producer IS its catalogue's doc rail (the publish refuses two), so it is ticket-scoped by construction; everything else is `project`. Held by hand it was forgotten on a shipped workshop card, which a project could then declare - routing every ticket through a jury-less direct seal. Writing it explicitly is allowed and checked: `scope: project` on a workshop card is refused at publish."
         },
         "status": {
           "enum": [

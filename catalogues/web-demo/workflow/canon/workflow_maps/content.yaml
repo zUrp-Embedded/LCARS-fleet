@@ -2,23 +2,25 @@
 #  CARTE : content — l'atelier, ce qui ne sort pas du projet
 # =============================================================================
 #
-# ⚠ CETTE CARTE DEMANDE UNE VARIABLE D'ENVIRONNEMENT, et c'est la seule.
+# COMMENT CETTE CARTE EST ATTEINTE — par une PROPRIETE, pas par son nom.
 #
-#     LCARS_WORKSHOP_CARD=content
+# Elle porte une etape en `face: workshop` (voir tout en bas). C'est CA qui fait
+# d'elle le rail d'atelier de ce catalogue : le runtime cherche « quelle carte
+# porte un producteur d'atelier », et trouve celle-ci. Son nom est donc libre.
 #
-# Pourquoi : tous les roles de ce catalogue se resolvent par CAPACITE — le runtime
-# cherche « qui produit », « qui signe », et trouve le role qui le declare. Les
-# noms sont donc libres. La carte d'atelier fait exception : elle se designe par
-# son NOM, et le nom par defaut est celui du catalogue de reference de LCARS
-# (`workshop-direct`).
+# Un ticket l'atteint par son GENRE (`destination/workshop`), jamais parce qu'un
+# projet l'a declaree — et le runtime REFUSE qu'un projet la declare : elle
+# enverrait alors TOUT le travail du projet sur la face atelier, sans jury et
+# sans CI. Ce refus se derive de la face ; il n'y a rien a ecrire pour l'obtenir.
 #
-# Sans cette variable, la flotte demarre quand meme — avec un avertissement qui
-# dit exactement ce qui manque — mais aucun ticket d'atelier ne peut atteindre
-# cette carte. Vous auriez alors une carte que rien n'appelle.
-#
-# L'autre solution serait d'appeler cette carte `workshop-direct`. On ne l'a pas
-# fait : un catalogue metier ne devrait pas porter le vocabulaire interne d'un
-# autre catalogue, et le probleme se verrait moins qu'il ne se voit ici.
+# ⚠ CE BLOC A LONGTEMPS DIT LE CONTRAIRE, et c'est instructif pour qui ecrit un
+# catalogue. Il exigeait `LCARS_WORKSHOP_CARD=content` et annoncait que sans
+# cette variable « aucun ticket d'atelier ne peut atteindre cette carte ». La
+# variable n'existe nulle part dans le runtime — le rail d'atelier se resolvait
+# par un nom configure, ce knob a ete supprime (« un seul knob ne peut pas nommer
+# N cartes »), et le commentaire est reste. Un commentaire faux ne casse rien et
+# oriente tout le monde : celui-ci demandait de poser une variable inutile, et
+# taisait la seule chose a savoir.
 #
 # -----------------------------------------------------------------------------
 #  CE QUE L'ATELIER EST, ET LE CRITERE QUI LE DEFINIT

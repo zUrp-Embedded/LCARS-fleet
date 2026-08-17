@@ -313,7 +313,12 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the workflow map for routeless `genre/doc` issues, defaulting to `"workshop-direct"`.
+  The workflow map serving routeless `destination/workshop` issues — the catalogue's doc rail.
+
+  ⚠ NO DEFAULT NAME, and the `@doc` claimed one (`"workshop-direct"`) long after the knob that held
+  it was removed. The rail resolves by a PROPERTY (a card carrying a `face: workshop` producer), so
+  each catalogue answers with ITS own card and a catalogue shipping none answers `nil` — which the
+  boot warns about by name. A default here would hand one catalogue's card to every other.
   """
   @spec workshop_workflow_map(keyword()) :: String.t() | nil
   def workshop_workflow_map(opts \\ []) do

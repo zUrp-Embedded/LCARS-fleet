@@ -1,7 +1,7 @@
 # Faire tourner ce catalogue, et en faire le vôtre
 
 **Date** : 2026-08-10
-**Dernière révision** : 2026-08-16
+**Dernière révision** : 2026-08-17
 **Statut** : actif — guide d'accompagnement du catalogue `web-demo`
 **Référencé par** : `catalogues/README.md`
 
@@ -122,17 +122,16 @@ LCARS_CATALOGUE_ROOT=/opt/lcars/catalogues/web-demo
 Elle apporte le catalogue entier — chaque arbre en dérive son chemin. C'est la grosse molette : un
 catalogue, une variable. La déclaration ci-dessus est ce qui permet d'en faire tourner **plusieurs**.
 
-Une seconde variable reste nécessaire dans les deux cas :
+Et c'est **tout** : il n'y a pas de seconde variable. Chaque chose que ce catalogue apporte se
+résout par une **propriété**, jamais par un nom qu'il faudrait configurer — les rôles par leur
+capacité (§6), la carte d'atelier par la face de son producteur (§5).
 
-```bash
-LCARS_WORKSHOP_CARD=content
-```
-
-Elle désigne la carte d'**atelier**. Elle est nécessaire parce que c'est la seule chose de
-tout le contrat qu'un catalogue ne peut pas encore déclarer lui-même : les rôles se résolvent par
-capacité (§6), cette carte-là se désigne par son nom, et le nom par défaut est celui du catalogue de
-LCARS. Sans cette variable, la flotte démarre — avec un avertissement explicite — mais aucun ticket
-d'atelier n'atteint la carte.
+> ⚠ Ce guide a longtemps demandé ici une variable `LCARS_WORKSHOP_CARD=content`, avec un paragraphe
+> expliquant pourquoi elle était inévitable. Elle n'existe nulle part dans le runtime : le rail
+> d'atelier se résolvait autrefois par un nom configuré, ce réglage a été supprimé (« un seul
+> réglage ne peut pas nommer N cartes »), et le texte est resté. Si vous écrivez un catalogue,
+> c'est la leçon la plus rentable de cette page : **une consigne qui survit à ce qu'elle décrivait
+> coûte plus cher que son absence** — elle fait poser un geste inutile et tait le vrai mécanisme.
 
 Avant de démarrer quoi que ce soit — `lcars catalogue verify <nom>` depuis la boîte, ou, depuis le
 dépôt, sur un chemin quelconque :
@@ -184,16 +183,35 @@ Chaque rôle a deux fichiers, et la distinction compte :
 `dev` et `writer` ont des permissions presque identiques. Ce qui en fait deux métiers, c'est le
 second fichier.
 
-## 5. Les trois cartes
+## 5. Les cartes — deux au choix du projet, une atteinte par le ticket
+
+**Un projet choisit entre DEUX cartes** :
 
 | Carte | Étapes | Jury | Intégration continue | Pour |
 |---|---|---|---|---|
 | `quick-fix` | `dev` | aucun | ignorée | ce qu'on refait sans regret |
 | `standard` | `spec-reviewer` → `dev` | `code-reviewer` | exigée | tout ce qui vit |
-| `content` | `writer` (atelier) | aucun | ignorée | ce qui ne part pas avec le produit |
 
-**Le niveau d'exigence est le contenu de ces trois colonnes**, pas un réglage du runtime. Deux
-tickets du même projet peuvent être traités avec deux niveaux de soin différents.
+**Le niveau d'exigence est le contenu de ces colonnes**, pas un réglage du runtime. Deux tickets du
+même projet peuvent être traités avec deux niveaux de soin différents.
+
+**La troisième carte ne se choisit pas** — elle s'atteint :
+
+| Carte | Étapes | Jury | Intégration continue | Comment on l'atteint |
+|---|---|---|---|---|
+| `content` | `writer` (atelier) | aucun | ignorée | le **genre du ticket** (`destination/workshop`) |
+
+Elle porte une étape en `face: workshop`, et c'est cette propriété qui fait d'elle le rail d'atelier
+du catalogue — son nom n'a aucune importance. Le runtime **refuse** qu'un projet la déclare, et le
+refus est mérité : un projet qui l'aurait déclarée aurait envoyé **tout** son travail de production
+sur la branche d'atelier, sans jury, sans intégration continue, sans jamais atteindre `main`.
+
+> ⚠ Ce tableau a longtemps compté « les trois cartes » sur une seule ligne, comme si un projet
+> choisissait parmi elles — et le runtime le permettait, parce que le champ qui l'en empêche
+> (`scope`) était à écrire à la main et avait été oublié ici. Il se DÉRIVE désormais de la face :
+> il n'y a plus rien à penser à écrire, et un catalogue qui affirmerait le contraire est refusé au
+> démarrage. Deuxième leçon rentable de cette page : **ce qu'un auteur doit penser à écrire finit
+> par manquer** — quand la propriété existe déjà, c'est elle qui doit décider.
 
 Comparez `quick-fix` et `standard` : trois lignes changent, et rien d'autre.
 

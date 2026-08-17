@@ -523,8 +523,8 @@ defmodule Fleet.Pilot.StepDispatcher do
          issue,
          opts
        ) do
-    # The GENRE gate first (chantier face-projet): a `genre/doc` label on the routeless issue
-    # burns the DOC card — the documentary path is a base function of every project, whatever its
+    # The GENRE gate first (chantier face-projet): a `destination/workshop` label on the routeless
+    # issue burns the WORKSHOP card — that path is a base function of every project, whatever its
     # declared card, so it never transits .lcars.json. It said "the OPS card" until the third
     # tree existed: the deliverable lands on `workshop`, and `ops` is the record the runtime
     # keeps, which no producer writes. Read ONCE, here: the engraved `wfmap/*`
