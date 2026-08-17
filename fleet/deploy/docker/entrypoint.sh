@@ -82,14 +82,23 @@ fi
 # nom nu d'un role, a cote des vrais. Le compte est `<org>_<role>`, et seul `roles-tfvars` le sait.
 # Le motif va sur stderr : capturer stdout sur un echec doit rendre la chaine VIDE, jamais un
 # message d'erreur qu'on creerait ensuite comme compte forge.
+#
+# ⚠ LA RACINE EST FACULTATIVE, ET SON ABSENCE VEUT DIRE « LE TIEN ». Elle etait obligatoire, donc
+# l'appelant devait NOMMER un chemin — et sur un banc il nommait celui de l'HOTE, que ce conteneur
+# n'a pas. Mesure du 2026-08-18 : monter l'arbre de l'hote ne suffit pas non plus, cette porte
+# tourne en `nobody` et un `/home/<user>` en 0700 lui reste ferme. Une image PORTE son catalogue :
+# lui demander le roster du sien ne demande ni chemin, ni montage, ni droits — et c'est plus juste,
+# parce que les comptes doivent correspondre au catalogue que la boite SERVIRA, pas a un arbre de
+# l'hote qui peut avoir bouge depuis le build.
 if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
-  root="${2:?roles: chemin de racine catalogue requis}"
+  root="${2:-}"
   fun="Fleet.Application.CatalogueRoles.eval_main"
   [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Application.CatalogueRoles.eval_tfvars"
+  if [[ -n "$root" ]]; then arg="\"${root}\""; else arg="Fleet.Catalogue.root()"; fi
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
-    "${fun}(\"${root}\")"
+    "${fun}(${arg})"
 fi
 
 # `catalogue-source <nom>` : resout UN nom vers le depot qui le porte, et n'imprime que

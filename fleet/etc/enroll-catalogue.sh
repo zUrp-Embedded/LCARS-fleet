@@ -21,13 +21,23 @@
 #   droits. Un catalogue nomme ses gens ; la recette dit ce qu'etre l'un d'eux permet.
 #
 # USAGE
-#   enroll-catalogue.sh --catalogue <root> --tofu-dir <dir> [--image <img>] [--repo <fleet-dir>]
+#   enroll-catalogue.sh --tofu-dir <dir> [--catalogue <root>] [--image <img>] [--repo <fleet-dir>]
 #                       [--served "<roles deja servis par cette boite>"]
 #
 #   Deux chemins de lecture, selon ce qu'on a sous la main :
-#     --repo <dir>     un arbre avec mix     -> mix lcars.catalogue.roles (dev, banc)
-#     --image <img>    une image livree      -> docker run --rm IMG roles-tfvars <root> (prod)
+#     --image <img>    une image livree   -> docker run --rm IMG roles-tfvars [<root>]
+#     --repo <dir>     un arbre avec mix  -> mix lcars.catalogue.roles <root>  (exige Elixir SUR L'HOTE)
 #   Sans l'un ni l'autre : le depot de ce script, s'il porte un mix.exs.
+#
+#   ⚠ PREFERER `--image`, ET CE N'EST PAS UN GOUT. `--repo` compile l'arbre source : il exige un
+#   toolchain Elixir sur la machine qui appelle. Le chemin de livraison n'en a pas — c'est la
+#   promesse ecrite du README de la beta — et le banc est mort dessus sur la premiere machine
+#   neuve (2026-08-18, `mix: ABSENT`). `--image` lit par la MEME autorite (`CatalogueRoles`),
+#   simplement la ou le runtime existe deja.
+#
+#   `--catalogue` est alors FACULTATIF : une image porte le sien. Le nommer ne sert qu'a en enroler
+#   un que l'operateur apporte — il est monte en lecture seule a la meme place dans le conteneur,
+#   et doit donc etre lisible par `nobody` (la porte de l'image tourne sous ce compte).
 #
 # SORTIES : 0 ok · 1 usage/arguments · 2 lecture du catalogue impossible · 3 ecriture impossible
 set -euo pipefail
@@ -58,9 +68,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$CATALOGUE" ]] || die "--catalogue <root> requis"
+# ⚠ `--catalogue` EST FACULTATIF AVEC `--image`, ET SON ABSENCE VEUT DIRE « CELUI DE L'IMAGE ».
+# Une image porte son catalogue ; lui en nommer un autre n'a de sens que pour en enroler un que
+# l'operateur apporte. Avec `--repo` il reste obligatoire : un arbre source en porte plusieurs.
+[[ -n "$CATALOGUE" || -n "$IMAGE" ]] || die "--catalogue <root> requis (ou --image, qui porte le sien)"
 [[ -n "$TOFU_DIR"  ]] || die "--tofu-dir <dir> requis"
 [[ -d "$TOFU_DIR"  ]] || die "tofu-dir introuvable: $TOFU_DIR" 3
+
+# ABSOLU DES QU'IL EXISTE : la lecture par image le monte a la MEME place dans le conteneur, et un
+# chemin relatif y designerait le cwd du conteneur. Un catalogue livre dans l'image n'existe pas
+# sur l'hote — il reste tel quel, et c'est le seul cas ou ce chemin n'est pas de l'hote.
+[[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
 # Le depot par defaut : ce script vit dans fleet/etc/, donc fleet/ est un cran au-dessus.
 [[ -n "$REPO" || -n "$IMAGE" ]] || REPO="$(cd "$HERE/.." && pwd)"
@@ -71,8 +89,19 @@ done
 # ecrivain) est en Elixir, testee, pas reecrite ici en jq.
 if [[ -n "$IMAGE" ]]; then
   SRC="image $IMAGE"
-  TFVARS="$("$DOCKER_BIN" run --rm "$IMAGE" roles-tfvars "$CATALOGUE" 2>/dev/null)" \
-    || die "l'image ne rend pas le roster de $CATALOGUE" 2
+  # LE CATALOGUE EST UN CHEMIN DE L'HOTE, ET IL DOIT ENTRER DANS LE CONTENEUR. Sans ce montage,
+  # cette branche ne savait lire que le catalogue LIVRE dans l'image : `--catalogue` designait un
+  # chemin que le conteneur n'avait pas, et le message ne pouvait que dire « l'image ne rend pas le
+  # roster » — vrai, et muet sur la seule cause. Le montage est en lecture seule, a la MEME place :
+  # ce qui est enrole est l'arbre qu'on a sous la main, y compris celui qu'un operateur apporte.
+  #
+  # La porte de l'image tourne en `nobody` (drop_priv) : un catalogue que ce compte ne peut pas
+  # lire echoue ici, avec le chemin dans le message.
+  MOUNT=()
+  [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && MOUNT=(-v "$CATALOGUE:$CATALOGUE:ro")
+  # Sans `--catalogue`, la porte de l'image lit le SIEN : ni chemin, ni montage, ni droits.
+  TFVARS="$("$DOCKER_BIN" run --rm ${MOUNT[@]+"${MOUNT[@]}"} "$IMAGE" roles-tfvars ${CATALOGUE:+"$CATALOGUE"} 2>/dev/null)" \
+    || die "l'image ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
 else
   SRC="depot $REPO"
   [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
@@ -159,7 +188,7 @@ say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""
 
-say "catalogue : $CATALOGUE (lu via $SRC)"
+say "catalogue : ${CATALOGUE:-<celui de l image>} (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"
 say "org       : ${ORG_LINE:-<non declaree>}"

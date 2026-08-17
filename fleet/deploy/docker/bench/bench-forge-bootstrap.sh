@@ -205,17 +205,26 @@ else
   say "seed relu depuis $BOX (celui des comptes existants)"
 fi
 
-# Le ROSTER reste DERIVE ici, et c'est une propriete de banc assumee : la derivation passe par
-# `mix lcars.catalogue.roles`, qui vit dans l'arbre source. La boite, elle, sait aussi la produire
-# (`entrypoint.sh roles-tfvars`), mais QUEL catalogue elle doit deriver est la question du chantier
-# catalogues, pas de celui-ci. On derive donc ici et on DEPOSE le resultat dans la recette de la
-# boite — un fichier, pas un geste de plus.
+# Le ROSTER est DERIVE ici et DEPOSE dans la recette de la boite — un fichier, pas un geste de plus.
+#
+# ⚠ IL PASSAIT PAR `mix`, ET CA A CASSE SUR LA PREMIERE MACHINE QUI N'EN AVAIT PAS. Mesure du
+# 2026-08-18, boite Debian neuve : `enroll-catalogue.sh --repo` compile l'arbre source, donc exige
+# Elixir SUR L'HOTE — `mix: ABSENT`, rc 2, amorcage mort en passe 1. Le README de la beta promet
+# exactement le contraire, en toutes lettres : « No Elixir, no Erlang, no toolchain on your
+# machine ». La promesse etait fausse sur le chemin qu'il donne.
+#
+# La lecture passe donc par l'IMAGE, qui est la seule chose dont ce banc soit sur : `bench-up.sh`
+# refuse de demarrer sans elle. C'est la meme autorite de lecture des deux cotes
+# (`CatalogueRoles`), simplement jouee la ou le runtime existe deja. L'image se demande a la BOITE
+# plutot que de se re-deviner : c'est celle qui tourne, pas celle qu'on croit avoir bati.
 ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
+BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || true)"
+[[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
 ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
                 --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
                 --tofu-dir "$ENROLL_DIR" \
-                --repo "$REPO_ROOT/fleet" 2>/dev/null)" \
-  || die "derivation du roster en echec (enroll-catalogue.sh) -- recette non enrolee" 4
+                --image "$BOX_IMAGE" 2>/dev/null)" \
+  || die "derivation du roster en echec (enroll-catalogue.sh, image $BOX_IMAGE) -- recette non enrolee" 4
 ROSTER_LINE="$(printf '%s\n' "$ENROLL_OUT" | grep '^PROV_ROLES=')"
 ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
 ORG="${ORG:-fleet}"
