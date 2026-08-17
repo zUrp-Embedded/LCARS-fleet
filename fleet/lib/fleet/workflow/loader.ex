@@ -225,6 +225,26 @@ defmodule Fleet.Workflow.Loader do
   def card_roots, do: Enum.map(card_scopes(), & &1.dir)
 
   @doc """
+  The INSTALLED catalogues that carry a card of this name — `[]` when nobody does.
+
+  One fact, one answer: "who offers this card" is asked by the front desk when it presents the
+  offer, by the org inference when a creation omits its catalogue, and by the refusal that tells a
+  caller their card lives elsewhere. Derived here, from `card_scopes/0`, so a refusal can never
+  point at a catalogue the listing does not show.
+
+  A name alone stops designating anything as soon as two catalogues are installed — `standard` is
+  the obvious collision, and it is not hypothetical: it is the name both shipped catalogues would
+  reach for. This function is what lets every caller say WHICH rather than pick one.
+  """
+  @spec catalogues_carrying(String.t()) :: [String.t()]
+  def catalogues_carrying(name) when is_binary(name) do
+    for %{catalogue: cat, dir: dir} <- card_scopes(),
+        is_binary(cat),
+        name in canon_names(workflow_maps_root: dir),
+        do: cat
+  end
+
+  @doc """
   The load options that make a card read resolve in `repo`'s OWN catalogue — `[]` when no installed
   catalogue claims that org.
 

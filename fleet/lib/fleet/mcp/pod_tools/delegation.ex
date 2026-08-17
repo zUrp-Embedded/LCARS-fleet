@@ -1130,6 +1130,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #
   # `:delegation_org` survit en surcharge explicite pour le cas rare ou l'onboarding doit viser une
   # autre org que celles-la.
+  @doc false
+  # La resolution d'org, exposee pour ses temoins. Elle decide d'un lien FIXE POUR LA VIE d'un
+  # projet a partir d'arguments partiels : la tester au travers de `project_create` demanderait une
+  # forge, et ce qui doit etre epingle est la DECISION, pas le voyage.
+  @spec resolve_org_for_test(map()) :: {:ok, String.t()} | {:error, term()}
+  def resolve_org_for_test(args), do: resolve_org(args)
+
   defp resolve_org(args) do
     installed = Fleet.Project.Onboard.installed_orgs()
 
@@ -1145,13 +1152,43 @@ defmodule Fleet.MCP.PodTools.Delegation do
         case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||
                Application.get_env(:lcars_fleet, :pilot_fleet_org) do
           org when is_binary(org) -> {:ok, org}
-          nil -> first_installed(installed)
+          nil -> infer_org(Map.get(args, "workflow_map"), installed)
         end
     end
   end
 
-  defp first_installed([org | _]), do: {:ok, org}
-  defp first_installed([]), do: {:error, :no_installed_catalogue}
+  # ⚠ L'OMISSION LIAIT LE PROJET AU PREMIER CATALOGUE INSTALLE, POUR SA VIE, EN SILENCE.
+  # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». Ils le peuvent, et
+  # `standard` est le nom que les deux catalogues livres prennent — le guichet le dit deja dans son
+  # propre commentaire (« un nom seul ne designe plus rien »), et le prenait quand meme.
+  #
+  # C'est EXACTEMENT le defaut que ce depot a tue pour `Catalogue.root/0` : « choisir le premier —
+  # alphabetiquement, par ordre d'install, peu importe — c'est donner a un projet les cartes de
+  # celui qui trie en tete ». Un cran plus haut, la consequence est pire : la carte se revise, l'org
+  # d'un projet est FIXEE POUR SA VIE.
+  #
+  # ON NE DEVINE PAS, ON DERIVE OU ON DEMANDE :
+  #   * un seul catalogue installe -> il n'y a rien a choisir ;
+  #   * une carte nommee, portee par UN seul catalogue -> la carte a deja decide, et c'est ce que
+  #     l'humain a choisi au guichet (qui presente chaque carte AVEC son catalogue) ;
+  #   * portee par PLUSIEURS -> personne ne peut trancher a la place de l'humain : on refuse en les
+  #     nommant tous ;
+  #   * aucune carte et plusieurs catalogues -> rien ne determine l'org : on la demande.
+  #
+  # `:mcp_delegation_org` reste au-dessus : une surcharge de deploiement est une reponse EXPLICITE,
+  # pas un defaut.
+  defp infer_org(_card, [only]), do: {:ok, only}
+
+  defp infer_org(card, installed) when is_binary(card) and card != "" do
+    case Fleet.Workflow.Loader.catalogues_carrying(card) do
+      [one] -> {:ok, one}
+      [] -> {:error, {:catalogue_required, installed}}
+      many -> {:error, {:catalogue_ambiguous, card, Enum.sort(many)}}
+    end
+  end
+
+  defp infer_org(_none, []), do: {:error, :no_installed_catalogue}
+  defp infer_org(_none, installed), do: {:error, {:catalogue_required, installed}}
 
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 

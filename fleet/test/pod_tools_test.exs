@@ -2602,4 +2602,72 @@ defmodule Fleet.MCP.PodToolsTest do
                )
     end
   end
+
+  describe "l'org d'un projet ne se DEVINE pas quand plusieurs catalogues sont installes" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "orgs-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      for {cat, cartes} <- [{"aaa", ["standard", "propre-a-aaa"]}, {"bbb", ["standard"]}] do
+        root = Path.join(tmp, cat)
+        dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+        File.mkdir_p!(dir)
+        File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: #{cat}\n")
+
+        for n <- cartes do
+          File.write!(Path.join(dir, "#{n}.yaml"), """
+          kind: WorkflowMap
+          metadata:
+            name: #{n}
+          spec:
+            jury: []
+            ci: ignore
+            max_rework_rounds: 1
+            steps:
+              build:
+                role: architect
+                needs: []
+                inputs:
+                  - ticket.body
+          """)
+        end
+      end
+
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_delegation_org, nil)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_fleet_org, nil)
+      :ok
+    end
+
+    test "une carte portee par DEUX catalogues, sans `catalogue` : REFUS qui les nomme" do
+      # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». `standard` est
+      # precisement le nom que deux catalogues prennent. Avant, l'omission liait le projet au
+      # PREMIER installe — pour sa vie, en silence. Le meme defaut que `Catalogue.root/0` un cran
+      # plus haut, et plus cher : une carte se revise, une org non.
+      assert {:error, {:catalogue_ambiguous, "standard", ["aaa", "bbb"]}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"workflow_map" => "standard"})
+    end
+
+    test "une carte portee par UN SEUL : la carte a deja decide — pas de friction inutile" do
+      assert {:ok, "aaa"} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
+                 "workflow_map" => "propre-a-aaa"
+               })
+    end
+
+    test "AUCUNE carte et plusieurs catalogues : rien ne determine l'org, on la DEMANDE" do
+      assert {:error, {:catalogue_required, orgs}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
+
+      assert "aaa" in orgs and "bbb" in orgs
+    end
+
+    test "`catalogue` explicite gagne toujours, meme sur une carte ambigue" do
+      assert {:ok, "bbb"} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
+                 "catalogue" => "bbb",
+                 "workflow_map" => "standard"
+               })
+    end
+  end
 end

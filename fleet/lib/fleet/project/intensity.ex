@@ -181,17 +181,23 @@ defmodule Fleet.Project.Intensity do
       end
   end
 
-  # Les catalogues INSTALLES qui portent ce nom de carte, hors celui du projet. Lu sur les scopes,
-  # comme le guichet : la meme source repond « qui offre cette carte » des deux cotes, sinon le
-  # refus renverrait vers un catalogue que la liste ne montre pas.
+  # Les porteurs, MOINS celui du projet. La question « qui porte cette carte » a UNE reponse et elle
+  # vit chez le loader (`catalogues_carrying/1`, lue aussi par l'inference d'org du guichet) : la
+  # deriver ici en second ferait de ce refus et de cette inference deux verites d'un meme fait.
   defp carriers_of(name, repo) do
-    mine = Fleet.Workflow.Loader.card_root_for_repo(repo)
+    mine =
+      case Fleet.Workflow.Loader.card_root_for_repo(repo) do
+        nil ->
+          nil
 
-    for %{catalogue: cat, dir: dir} <- Fleet.Workflow.Loader.card_scopes(),
-        is_binary(cat),
-        dir != mine,
-        name in Fleet.Workflow.Loader.canon_names(workflow_maps_root: dir),
-        do: cat
+        dir ->
+          Enum.find_value(
+            Fleet.Workflow.Loader.card_scopes(),
+            &if(&1.dir == dir, do: &1.catalogue)
+          )
+      end
+
+    Fleet.Workflow.Loader.catalogues_carrying(name) -- [mine]
   end
 
   # LA MEME RESOLUTION QUE LES LECTEURS, et c'est une condition de correction et non un detail :
