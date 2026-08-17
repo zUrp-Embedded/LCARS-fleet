@@ -19,16 +19,26 @@ variable "seed_password" {
   description = "Mot de passe initial des comptes. Bots : simple formalité API (ils s'authentifient par token). Humain : change au 1er login."
 }
 
-variable "human_username" {
+# ⚠ CETTE VARIABLE S'APPELAIT `human_username` ET SON DÉFAUT TOMBAIT D'UNE VARIABLE MORTE. Côté
+# boîte elle était alimentée par `${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`, et `LCARS_HUMAN`
+# n'existe plus depuis identity-v2 (cf. `console.sh` : « Pas de defaut : identite-v2 a retire
+# l'humain unique »). Le nom `lcars` n'était donc plus un choix, c'était un résidu — alors que le
+# compte qu'il désigne, lui, a une raison d'être précise.
+#
+# CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du compte que l'admin d'une forge crée à son
+# installation, et il sert de cible au tutoriel de promotion (l'admiral le passe `is_admin`, l'onglet
+# admin du deck apparaît à sa session suivante). Un déploiement réel ne « passe pas le sien » — les
+# vraies personnes s'inscrivent seules et un admin les ajoute à `humans`.
+variable "builtin_human" {
   type        = string
   default     = "lcars"
-  description = "Login de l'humain daily, miroir de l'user OS de la boîte (`id -un`, sans table de correspondance). Défaut = l'humain DÉMO ; un déploiement réel passe le sien."
+  description = "Login du compte BUILT-IN de démonstration — pas une personne : le siège tutoriel sur lequel un admin exerce la promotion."
 }
 
-variable "human_email" {
+variable "builtin_email" {
   type        = string
   default     = "lcars@lcars.local"
-  description = "Email du compte forge de l'humain — celui qui mappe ses commits (LCARS_HUMAN_EMAIL côté boîte doit porter le même)."
+  description = "Email du compte built-in. Formalité d'API : ce compte ne reçoit rien et ne mappe aucun commit d'humain."
 }
 
 # ⚠ `admiral_username` A ETE RETIREE (2026-08-16), et son absence est l'arbitrage : le login du

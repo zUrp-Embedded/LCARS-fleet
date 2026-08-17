@@ -233,7 +233,7 @@ printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-g
 
 # L'apply : les deux modules ET le depot modele, dans la boite.
 "$DOCKER_BIN" exec -i -u root \
-    -e LCARS_FORGE_HUMAN="$HUMAN" -e LCARS_HUMAN_EMAIL="$HUMAN_EMAIL" \
+    -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN_EMAIL" \
     "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
   || die "apply de la structure en echec dans $BOX (rejoue-le : docker exec -u root $BOX /opt/lcars/forge-gestures.sh apply)" 4
 say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"

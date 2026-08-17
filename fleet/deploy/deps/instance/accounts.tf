@@ -119,9 +119,9 @@ resource "gitea_user" "system_role" {
 # `--admiral`). Le nom quitte la forge, la charte reste.
 
 resource "gitea_user" "human" {
-  username             = var.human_username
-  login_name           = var.human_username
-  email                = var.human_email
+  username             = var.builtin_human
+  login_name           = var.builtin_human
+  email                = var.builtin_email
   password             = var.seed_password
 
   # `false`, et c'est un CORRECTIF (⚖ arbitrage user 2026-08-11). Ce compte portait

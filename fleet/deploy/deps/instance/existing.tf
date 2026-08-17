@@ -19,7 +19,7 @@ data "external" "forge" {
     gitea_url = var.gitea_url
     org       = ""
     teams     = ""
-    users     = join(",", concat([var.system_account, var.human_username], var.system_roles))
+    users     = join(",", concat([var.system_account, var.builtin_human], var.system_roles))
   }
 }
 
@@ -31,7 +31,7 @@ locals {
   # Les deux comptes non indexés se rendent facultatifs par une carte à zéro ou une entrée — un bloc
   # `import` n'a pas de condition, mais un `for_each` vide ne produit aucun import.
   existing_system = { for k, v in local.existing_users : k => v if k == var.system_account }
-  existing_human  = { for k, v in local.existing_users : k => v if k == var.human_username }
+  existing_human  = { for k, v in local.existing_users : k => v if k == var.builtin_human }
   existing_roles  = { for k, v in local.existing_users : k => v if contains(var.system_roles, k) }
 }
 

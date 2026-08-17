@@ -19,14 +19,14 @@ variable "seed_password" {
   description = "Mot de passe initial des comptes. Bots : simple formalité API (ils s'authentifient par token). Humain : change au 1er login."
 }
 
-variable "human_username" {
+variable "builtin_human" {
   type        = string
   default     = "lcars"
   description = "Login de l'humain daily, miroir de l'user OS de la boîte (`id -un`, sans table de correspondance). Défaut = l'humain DÉMO ; un déploiement réel passe le sien."
 }
 
-variable "human_email" {
+variable "builtin_email" {
   type        = string
   default     = "lcars@lcars.local"
-  description = "Email du compte forge de l'humain — celui qui mappe ses commits (LCARS_HUMAN_EMAIL côté boîte doit porter le même)."
+  description = "Email du compte built-in. Formalité d'API : ce compte ne reçoit rien et ne mappe aucun commit d'humain."
 }

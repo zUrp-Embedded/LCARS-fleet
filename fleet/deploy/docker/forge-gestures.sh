@@ -168,8 +168,14 @@ cmd_apply() {
   export TF_VAR_gitea_url="$FORGE_BASE_URL"
   export TF_VAR_gitea_token="$tok"
   export TF_VAR_seed_password="$seed"
-  export TF_VAR_human_username="${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}"
-  export TF_VAR_human_email="${LCARS_HUMAN_EMAIL:-${TF_VAR_human_username}@lcars.local}"
+  # ⚠ LE DEFAUT ETAIT UN RESIDU, PAS UN CHOIX : cette ligne lisait
+  # `${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`, et `LCARS_HUMAN` n'existe plus depuis identity-v2
+  # (cf. `console.sh` : « Pas de defaut : identite-v2 a retire l'humain unique »). Le nom `lcars`
+  # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
+  # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
+  # delibere et la variable dit ce qu'elle nomme.
+  export TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
 
   # L'ORDRE EST UN INVARIANT, pas une preference : `instance/` porte les comptes partages, et une
   # adhesion peut nommer un compte qu'elle ne cree pas, jamais un compte qui n'existe pas.
@@ -407,8 +413,14 @@ cmd_install() {
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une
   #    reecriture — `var.org` porte le nom du catalogue depuis le premier jour.
   export TF_VAR_gitea_url="$FORGE_BASE_URL" TF_VAR_gitea_token="$tok" TF_VAR_seed_password="$seed"
-  export TF_VAR_human_username="${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}"
-  export TF_VAR_human_email="${LCARS_HUMAN_EMAIL:-${TF_VAR_human_username}@lcars.local}"
+  # ⚠ LE DEFAUT ETAIT UN RESIDU, PAS UN CHOIX : cette ligne lisait
+  # `${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`, et `LCARS_HUMAN` n'existe plus depuis identity-v2
+  # (cf. `console.sh` : « Pas de defaut : identite-v2 a retire l'humain unique »). Le nom `lcars`
+  # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
+  # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
+  # delibere et la variable dit ce qu'elle nomme.
+  export TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 

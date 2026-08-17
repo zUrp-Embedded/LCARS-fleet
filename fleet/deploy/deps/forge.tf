@@ -189,7 +189,7 @@ resource "gitea_org" "fleet" {
 # aurait produit exactement la classe de dérive qui a déjà mordu ici (`chief` dans `roles` et pas
 # dans `writers` : un compte, un token, aucun droit — trouvé en lisant une org, par aucun check).
 locals {
-  teams = {
+  base_teams = {
     # SEULE à créer des repos d'org (création réservée au système) + write dessus (push, topics de
     # découverte, labels via le token système). PAS admin/owner : cf. la cicatrice de propriété
     # ci-dessus — elle se pose hors de cette recette, dans la fenêtre du master token.
@@ -209,11 +209,44 @@ locals {
     # rôle EXTERNE (vulcan) — READ strict. Séparé des judges JUSTEMENT pour que leur write ne fuite
     # pas à l'externe : un externe ne pousse RIEN (ni code, ni audit), il commente/review en read.
     externals = { permission = "read", can_create_repos = false }
+  }
 
+  # ⚠ `humans` N'EXISTE QUE DANS L'ORG SYSTÈME, et cette recette est jouée UNE FOIS PAR ORG — pour
+  # `fleet` par `cmd_apply`, puis pour chaque catalogue par `cmd_install`, qui la recopie dans le
+  # dossier du catalogue avec `var.org` = son nom.
+  #
+  # POURQUOI ELLE N'A RIEN À FAIRE DANS UNE ORG DE CATALOGUE. Elle répondait à UNE question : le
+  # préflight d'onboarding vérifiait l'adhésion de l'humain à `<catalogue>:humans` avant de créer un
+  # projet. Ce préflight exigeait un `read` que l'humain a déjà (l'org est publique, les dépôts
+  # aussi) pour des écritures qu'il ne fait pas — c'est le jeton système qui écrit. Il part avec ce
+  # lot, et la team n'a plus de lecteur : mesuré, `web-demo/humans` ne contenait que le compte
+  # built-in et `lcars-system`, jamais un humain réel.
+  #
+  # ⚠ ET CE RETRAIT DÉPEND D'UN AUTRE : tant que la forge naissait avec
+  # `DEFAULT_USER_IS_RESTRICTED=true`, l'adhésion à `<catalogue>:humans` était la SEULE chose qui
+  # rendait un catalogue visible à un humain — un compte restreint ne voit que ce qui lui est
+  # explicitement accordé, et mesuré le 2026-08-17 il recevait 404 sur l'org d'un catalogue en étant
+  # connecté, 200 en anonyme. Le drapeau est parti d'abord (`dev/forge-compose.yml`) ; retirer la
+  # team avant lui aurait aveuglé tous les humains sur tous les catalogues.
+  #
+  # LA FORME EST UN CONDITIONNEL ET PAS UN MODULE SÉPARÉ, mesuré : un module neuf n'hérite pas de la
+  # couche sonde+`import` d'`existing.tf`, donc son premier apply meurt en 409 sur toute forge déjà
+  # provisionnée. Ici la sonde suit d'elle-même — elle interroge `keys(local.teams)`, donc elle ne
+  # demande `humans` que là où la table la porte.
+  teams = var.org == var.system_org ? merge(local.base_teams, {
     # l'humain daily — READ. LE lock qui compte : voit + commente, ne relabellise ni ne crée. Rend
     # `stage/*` infalsifiable côté acteur indépendant, et `can_create_repos = false` EST ce lock.
     humans = { permission = "read", can_create_repos = false }
-  }
+  }) : local.base_teams
+}
+
+# L'ORG SYSTÈME EST NOMMÉE, PAS DEVINÉE. Elle porte l'identité (`humans`, lue par le convergeur et
+# par le deck) ; les orgs de catalogue portent du travail. Une recette qui sert les deux a besoin de
+# savoir laquelle elle sert, et une variable le dit mieux qu'une convention de nommage.
+variable "system_org" {
+  type        = string
+  description = "Org qui porte l'identité de la fleet — la seule à recevoir la team `humans`"
+  default     = "fleet"
 }
 
 # ⚠ IL N'Y A PLUS DE `ignore_changes = [permission]` ICI, ET SON RETRAIT EST UN CORRECTIF.
@@ -295,32 +328,35 @@ resource "gitea_team_membership" "externals" {
   depends_on = [gitea_user.role]
 }
 
+# LE COMPTE BUILT-IN, et il n'est PAS une personne : il tient le siège du compte que l'admin d'une
+# forge crée à son installation. Sa raison d'être aujourd'hui est un TUTORIEL — il donne à l'admiral
+# une cible sur laquelle exercer la promotion (`is_admin` sur la forge → onglet admin du deck à la
+# session suivante), sans avoir à enrôler une vraie personne pour essayer.
+#
+# `count` et pas une ressource inconditionnelle : `humans` n'existe que dans l'org système (cf. la
+# table plus haut), donc l'adhésion la suit. Une org de catalogue n'a ni la team ni ce compte.
 resource "gitea_team_membership" "human" {
+  count    = var.org == var.system_org ? 1 : 0
   team_id  = gitea_team.this["humans"].id
-  username = var.human_username
+  username = var.builtin_human
 }
 
-# lcars-system ∈ humans : le token système doit LIRE les membres de `humans` — c'est la
-# vérification d'admission de l'onboard (`{:human_team_unverifiable, …}` refuse l'onboard quand
-# cette lecture échoue). BL-6-27 : deux agents ont posé ce membership à la main, séparément, sur
-# deux bancs — un contournement réinventé deux fois est un trou de recette. Aucun privilège
-# nouveau : la team est `read` et `system` (write, can_create_repos) la domine déjà — seule la
-# visibilité de la liste des membres est acquise. Le volet delete_project (repo-admin exigé par
-# Gitea) reste OUVERT dans BL-6-27 : il se règle par une identité, pas en élargissant `system`.
+# ⚠ `gitea_team_membership.system_reads_humans` A VÉCU ICI, ET SON RETRAIT EST DATÉ (2026-08-17).
 #
-# ⚠ CE MEMBERSHIP A L'AIR REDONDANT SUR UN BANC, ET IL NE L'EST PAS SUR LA RECETTE. Mesuré le
-# 2026-08-12 : en le RETIRANT, `GET /teams/<humans>/members` au token système rend toujours 200.
-# La raison est ailleurs — sur un banc, `bench-forge-bootstrap.sh` ajoute AUSSI lcars-system aux
-# `Owners` de l'org (geste hors Terraform : le provider ne sait pas référencer la team `Owners`
-# auto-créée par Gitea), et un propriétaire d'org lit tout. Une forge montée par CETTE RECETTE
-# SEULE n'a pas cette propriété : le membership ci-dessous y est la seule chose qui rend la
-# lecture possible.
-# Conséquence pratique : ne pas conclure « inutile » d'une mesure faite sur un banc. Le retirer
-# rendrait l'admission de l'onboard non vérifiable exactement là où personne ne teste — en recette.
-resource "gitea_team_membership" "system_reads_humans" {
-  team_id  = gitea_team.this["humans"].id
-  username = var.system_account
-}
+# Il mettait `lcars-system` dans `humans` pour que le jeton système puisse LIRE les membres de cette
+# team — la vérification d'admission de l'onboard en dépendait. Son commentaire soutenait qu'il était
+# indispensable en recette : mesuré le 2026-08-12, le retirer laissait `GET /teams/<humans>/members`
+# répondre 200, mais SEULEMENT parce que le banc ajoutait aussi `lcars-system` aux `Owners` hors
+# Terraform — « une forge montée par CETTE RECETTE SEULE n'a pas cette propriété ».
+#
+# CETTE PHRASE EST DEVENUE FAUSSE LE 2026-08-16, quatre jours après avoir été écrite : la propriété
+# de l'org a été rapatriée dans la recette (`gitea_team_membership.owner`, plus bas). Personne n'a
+# relu l'une en écrivant l'autre. Re-mesuré le 2026-08-17 : `lcars-system` lit `judges`, `writers` et
+# `externals` — 200 sur les trois, membre d'aucune. La propriété suffit.
+#
+# CE QUE LE RETRAIT ACHÈTE, et c'est la raison de fond : le système n'est plus DANS la liste qu'il
+# lit. `fleet:humans` répond « qui est une personne de cette fleet », et une liste qui contient son
+# propre lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple.
 
 # ─── LA PROPRIÉTÉ DE L'ORG — rapatriée du banc le 2026-08-16 ─────────────────────────────────────
 # CE GESTE N'EXISTAIT QU'AU BANC, donc PAS en production. Il vivait à l'étape 4-bis de
