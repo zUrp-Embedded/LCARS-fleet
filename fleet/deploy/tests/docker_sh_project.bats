@@ -48,12 +48,19 @@ case "\$1 \$2" in
   "ps -aq")          printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
+# Le verdict de provisionnement, lu par `up` DANS la boite. `STUB_PROV_RC` vide = le fichier n'est
+# pas encore la, ce qui est l'etat normal pendant tout le provisionnement.
+if [[ "\$*" == *"cat /run/lcars-provision.rc"* ]]; then
+  [[ -n "\${STUB_PROV_RC:-}" ]] || exit 1
+  printf '%s\n' "\${STUB_PROV_RC}"
+  exit 0
+fi
 exit 0
 EOF
   chmod 0755 "$BINDIR/docker"
 
   export PATH="$BINDIR:$PATH"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC
 }
 
 # A project holding one container, created from the files given as arguments.
@@ -182,4 +189,48 @@ seed_project() {
   [[ "$output" == *"EXIT :"* ]]
   # And the -p contract is documented where an operator looks for it.
   [[ "$output" == *"LCARS_PROJECT"* ]]
+}
+
+# ─── `up` REND LE VERDICT DE PROVISIONNEMENT ────────────────────────────────────────────────────
+#
+# ⚠ CES TEMOINS EXISTENT PARCE QUE `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort des
+# que le conteneur demarre ; le provisionnement tourne DANS l'entrypoint et dure. Une boite qui n'a
+# rien pu provisionner annoncait « fleet up », se declarait *healthy* (son healthcheck teste le port
+# 22) et ne pouvait demarrer AUCUN pod — le seul endroit ou ca se lisait etant les logs, qu'on ne va
+# pas lire apres une commande qui a dit oui.
+#
+# Les quatre etats sont distincts PARCE QU'ILS APPELLENT QUATRE GESTES DIFFERENTS, et le quatrieme
+# est celui qui compte : ne pas avoir LU le verdict n'est pas l'avoir lu mauvais. On le dit, et on
+# sort 0 — sortir non nul sur une non-mesure apprendrait a ignorer le code de sortie, ce qui coute
+# exactement le jour ou il est vrai.
+
+@test "up: verdict 0 -> CONVERGE, sortie 0" {
+  STUB_PROV_RC=0 run "$SRC" -p lcars up
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"provisionnement CONVERGÉ"* ]]
+}
+
+@test "up: verdict 2 -> DRIFT nomme, mais PAS un echec (un geste manque, rien n'est casse)" {
+  STUB_PROV_RC=2 run "$SRC" -p lcars up
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT RÉSIDUEL"* ]]
+  [[ "$output" != *"EN ÉCHEC"* ]]
+}
+
+@test "up: verdict non nul -> ECHEC, sortie NON NULLE, et la consequence est nommee" {
+  STUB_PROV_RC=1 run "$SRC" -p lcars up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EN ÉCHEC"* ]]
+  # « la boite tourne » ET « ne produira rien » : les deux moities, sinon le lecteur croit que
+  # le conteneur est mort et va le relancer au lieu de diagnostiquer.
+  [[ "$output" == *"la boîte tourne"* ]]
+  [[ "$output" == *"ne produira RIEN"* ]]
+}
+
+@test "up: verdict ILLISIBLE -> on le DIT et on sort 0 — une non-mesure n'est pas un echec" {
+  LCARS_UP_VERDICT_TIMEOUT=1 run "$SRC" -p lcars up
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NON LU"* ]]
+  [[ "$output" == *"n'est PAS mesuré"* ]]
+  [[ "$output" != *"EN ÉCHEC"* ]]
 }

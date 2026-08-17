@@ -306,6 +306,16 @@ fi
 # ─── 3. Convergence de l'état — LE MÊME provision que le chemin WSL, substrat docker ─────────────
 # rc capturé, jamais fatal : le doctor dira la vérité, sshd doit démarrer pour permettre la
 # réparation. (Le détail des verdicts est dans les logs du conteneur.)
+#
+# ⚠ ET LE VERDICT SE PUBLIE, parce que « jamais fatal » n'a jamais voulu dire « jamais dit ». Il ne
+# vivait que dans les logs du conteneur, donc `./docker.sh up` rendait la main sur une boîte qui
+# annonce « fleet up », se déclare *healthy* (son healthcheck teste le port 22) et ne peut démarrer
+# AUCUN pod. Un opérateur n'a aucune raison d'aller lire des logs après une commande qui a dit oui.
+#
+# `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
+# TOUJOURS ce boot-ci. Même emplacement et même motif que `/run/lcars-converger.refused` — un
+# composant sait pourquoi, il l'écrit là où un autre peut le lire.
+PROV_RC_FILE=/run/lcars-provision.rc
 prov_rc=0
 "$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
 case "$prov_rc" in
@@ -316,6 +326,12 @@ case "$prov_rc" in
 credentials, réseau). Détail : $PROVISION doctor" ;;
   *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
 esac
+
+# APRÈS le `case`, pas dedans : le verdict se publie quel qu'il soit, y compris 0. Un fichier qui
+# n'apparaît que sur l'échec forcerait son lecteur à distinguer « pas encore écrit » de « tout va
+# bien », c'est-à-dire à deviner exactement ce que ce fichier existe pour dire.
+printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
+chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
 
 # ─── 3ter. Convergence CONTINUE des humains (forge `humans` → users Linux) ───────────────────────
 # L'étape 3 converge un état FIGÉ, au boot. Enrôler quelqu'un demandait donc un redémarrage — ce qui

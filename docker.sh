@@ -159,6 +159,51 @@ cmd_up() {
   echo "LCARS fleet up (projet $PROJECT). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
   echo "  ./docker.sh doctor                                   # état provisionné ?"
+  await_provision_verdict
+}
+
+# ─── LE VERDICT DE PROVISIONNEMENT, RENDU PAR `up` ──────────────────────────────────────────────
+#
+# ⚠ `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort dès que le conteneur démarre ; le
+# provisionnement, lui, tourne DANS l'entrypoint et dure (le premier boot télécharge ~310 Mo de
+# binaire claude). Une boîte qui n'a rien pu provisionner annonçait donc « fleet up », se déclarait
+# *healthy* — son healthcheck teste le port 22 — et ne pouvait démarrer aucun pod. Le seul endroit
+# où ça se lisait était les logs du conteneur, qu'on ne va pas lire après une commande qui a dit oui.
+#
+# ⚖ ON NE REFUSE PAS LE DÉMARRAGE POUR AUTANT, et ce n'est pas un demi-geste : l'entrypoint porte
+# l'arbitrage inverse, écrit — « rc capturé, jamais fatal : le doctor dira la vérité, sshd doit
+# démarrer pour permettre la réparation ». Une boîte qui refuse de démarrer ferme la porte par
+# laquelle on la répare. Elle démarre, et `up` DIT ce qu'elle vaut en sortant non nul.
+#
+# ⚠ ET L'EXPIRATION N'EST PAS UN ÉCHEC. Ne pas avoir lu le verdict n'est pas l'avoir lu mauvais :
+# on le dit, et on sort 0 — `up` a fait son travail, la mesure manque. Sortir non nul sur une
+# non-mesure apprendrait à ignorer le code de sortie, ce qui coûte exactement le jour où il est vrai.
+await_provision_verdict() {
+  local deadline=$((SECONDS + ${LCARS_UP_VERDICT_TIMEOUT:-900})) rc=""
+  echo ""
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    rc="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
+    [[ "$rc" =~ ^[0-9]+$ ]] && break
+    rc=""
+    sleep 5
+  done
+
+  case "$rc" in
+    "")
+      echo "docker.sh up: verdict de provisionnement NON LU après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
+      echo "              La boîte tourne ; son état n'est PAS mesuré. « ./docker.sh doctor »." ;;
+    0)
+      echo "docker.sh up: provisionnement CONVERGÉ." ;;
+    2)
+      # 2 = appliqué, état-cible non tenu. Ce n'est pas un échec — un geste manque (forge,
+      # credentials, réseau) — donc pas de sortie non nulle, mais il se dit.
+      echo "docker.sh up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
+      echo "              « ./docker.sh doctor » nomme lequel." ;;
+    *)
+      echo "docker.sh up: provisionnement EN ÉCHEC (rc=$rc) — la boîte tourne et ne produira RIEN."
+      echo "              « ./docker.sh doctor » nomme ce qui manque." >&2
+      return 1 ;;
+  esac
 }
 
 cmd_doctor() {
