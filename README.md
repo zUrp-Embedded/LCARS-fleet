@@ -1,297 +1,206 @@
-<!-- Date: 2026-03-30 · Dernière révision: 2026-03-30 · Statut: v6.5 validé · Référencé par: — -->
+<!-- Date: 2026-08-17 · Dernière révision: 2026-08-17 · Statut: README de la BETA livrée (le README produit d'avant est conservé en README.md.pre-beta.bak) · Référencé par: le tar de livraison -->
 
-<div align="center">
+<a id="top"></a>
 
-# LCARS-fleet
+# LCARS-fleet — beta
 
 ### Firmware-as-a-Service.
 *Pas mal non ? C'est français.*
 
-**A governed system for producing code with LLM agents inside a bounded, legible, redeployable framework.**
+An agent fleet that runs on your machine: a git forge, a CI runner, role-bound agents, and a
+dashboard — all brought up by one command, in containers, with nothing installed on your host.
 
-[![Release](https://img.shields.io/badge/release-v6.0--beta-4A90D9?style=flat-square)](https://github.com/lordzurp/LCARS-fleet/releases)
-[![Platform](https://img.shields.io/badge/platform-WSL2%20%7C%20Docker-informational?style=flat-square)]()
-[![Runtime](https://img.shields.io/badge/runtime-self--hosted-informational?style=flat-square)]()
-[![License](https://img.shields.io/badge/license-AGPL--v3-blue?style=flat-square)](LICENSE)
-[![Third-party](https://img.shields.io/badge/third--party-notices-lightgrey?style=flat-square)](THIRD_PARTY_NOTICES.md)
-
-**Jump to** — [Quick Start](#quick-start) · [Why LCARS](#why-lcars) · [In Numbers](#in-numbers) · [What You Get](#what-you-get) · [Architecture](#architecture) · [Who It's For](#who-its-for)
-
-</div>
+> **This is a BETA meant for testing.** It stands up a **disposable** stack: its own forge, its own
+> runner, its own accounts. It is not a production deployment and it does not touch any forge you
+> already have. Tearing it down leaves nothing behind but the container images.
 
 ---
 
-## 🚀 Why LCARS
+## What you need
 
-LCARS starts from a simple premise: an LLM remains a probabilistic component. The real engineering problem is therefore not how to make it "magical," but how to build a surrounding system that is bounded, legible, inspectable, and redeployable.
+Three things, and your distribution almost certainly has all three:
 
-LCARS is built around a simple requirement: **nothing implicit, clean boundaries, and a runtime that can be rebuilt cleanly**.
-
-LCARS is not trying to be the smoothest wrapper around chat. It is trying to be a usable machine in which specialized agents produce work through a process that is visible, replayable, and governable.
-
-The target is not impressive generation. The target is **output you can actually use**.
-
-The agents are not the system. They are the unstable engine inside the system. LCARS is the enclosure around that engine.
-
-That is the whole project.
-
----
-
-<a id="quick-start"></a>
-
-## ⚡ Quick Start
-
-LCARS is primarily built for **Ubuntu LTS on WSL2**, with Docker support as a secondary deployment path.
-
-### WSL2
-
-```powershell
-wsl --install Ubuntu-24.04 --name fleet
-```
-
-```bash
-wget -O /tmp/install.sh https://raw.githubusercontent.com/lordzurp/LCARS-fleet/main/install.sh
-sudo bash /tmp/install.sh
-```
-
-### Docker
-
-```bash
-git clone https://github.com/lordzurp/LCARS-fleet.git
-cd LCARS-fleet
-./docker.sh up
-```
-
-### Launch the fleet
-
-```bash
-~/start
-~/start --template executive
-~/start --template panoptique
-```
-
-Within minutes, you get a live dashboard, a role-bound fleet, Linux-native message routing, persistent handoff state, and a runtime designed to be rebuilt cleanly rather than maintained by drift.
-
----
-
-<a id="in-numbers"></a>
-
-## 📏 In Numbers
-
-| | LCARS |
+| | why |
 |---|---|
-| Active runtime | **1.8 MB** |
-| Shell + Python | **12K lines** |
-| Directive corpus | **1,405 lines** |
-| Test coverage | **20K lines** (ratio **1.7×**) |
-| Agents governed | **6 roles**, tiered |
+| **docker** | everything runs in containers — the box, the forge, the runner |
+| **curl** | the bootstrap talks to the forge over HTTP |
+| **python3** | it reads the forge's JSON answers |
 
-The point is not that LCARS is "small." The point is that it stays **compact enough to inspect** while still carrying a real runtime, a real coordination layer, and a non-trivial behavioral control surface.
+Nothing else. **No Elixir, no Erlang, no toolchain on your machine** — the runtime is compiled
+inside a throwaway build container and only the result is kept.
 
-For context: many frameworks in this space use **100K-225K lines of Go or TypeScript** for the same general class of agent coordination problem.
+You also need an **Anthropic account**: the agents are Claude Code processes. If you already use
+`claude` on this machine, your credentials are picked up automatically from
+`~/.claude/.credentials.json`.
 
-If you know embedded, firmware, or systems work, you already know why this matters: when the machine lies, size alone does not save you. Legibility does.
-
----
-
-<a id="what-you-get"></a>
-
-## 🧰 What You Get
-
-### 🛰️ A real fleet
-
-LCARS ships a topology with explicit responsibilities. Each agent has a role, a scope, a user, a home, and a directive surface.
-
-| Role | Function |
-|---|---|
-| `architect` | user-facing boundary: architecture, arbitration, prioritization |
-| `starfleet` | system boundary: deployment, provisioning, maintenance, hotfixes |
-| `engineer` | internal coordination and dispatch |
-| `dev` | code production |
-| `qualifier` | validation and PASS/FAIL testing |
-| `reviewer` | independent read-only review |
-
-This matters because most multi-agent setups fail exactly where ownership, escalation, state, and authority become vague.
-
-### 📜 Versioned behavioral control
-
-LCARS does not rely on repeated prompt rituals. Behavior is shaped through versioned artifacts: directive sources, role bindings, protocol files, hooks, and deployment logic. The point is not to "prompt better." The point is to make behavioral control inspectable and deployable.
-
-### 📡 Linux-native coordination
-
-The core coordination layer stays intentionally plain:
-
-- one AF_UNIX MCP socket **per pod**, under the human's own `~/.lcars/run/`
-- a git forge as the durable substrate: issues, PRs, labels — the truth outlives every process
-- shell launchers for the sandbox, and a tmux session you can attach to
-
-This makes the fleet readable with ordinary Linux reflexes. No hidden broker. No mystery service. If something drifts, there is a file, a path, a process, a user, or a permission behind it.
-
-*(Until 2026-08-07 this section named `/var/spool/fleet/inbox/<role>/` and `$FLEET_HANDOFFS` — the
-v1 file spool. It is gone: measured at zero references before removal. A README that describes a
-coordination layer the product no longer has is worse than one that describes none.)*
-
-### ♻️ A disposable runtime
-
-LCARS assumes the runtime is consumable. Durable truth is expected to live in versioned source, deployment logic, and explicit persistence surfaces rather than in a machine slowly drifting out of spec.
-
-That is one of the central design choices in the whole project.
+**During the build you need internet** on three fronts: Docker Hub (base images), hex.pm (Elixir
+dependencies), and `claude.ai` (the agent binary). A hiccup on any of them fails the build — loudly,
+without leaving a half-installed box.
 
 ---
 
-<a id="architecture"></a>
+## Install
 
-## 🏗️ Architecture
+```bash
+tar xzf lcars-fleet-beta.tar.gz
+cd lcars-fleet
 
-LCARS is built as a small tiered runtime:
-
-- **Tier 0** — the boundaries
-  - `starfleet` for the OS and deployment boundary
-  - `architect` for the user and decision boundary
-- **Tier 1** — internal coordination
-  - `engineer` for dispatch and organization
-- **Tier 2** — specialized workers
-  - `dev`, `qualifier`, `reviewer`, builders, and domain-specific roles
-
-The key architectural choice is simple:
-
-> keep the model flexible inside the box, but make the box itself more legible and more governable
-
-LCARS does not pretend to make reasoning deterministic. It tries to clean up the operational surface:
-
-- who can act
-- how work is routed
-- how state is handed off
-- how sessions resume
-- how the runtime is restarted
-- where truth actually lives
-
-This is the point: not to make the model pure, but to make the surrounding machine less likely to lie.
-
----
-
-## 🧭 Positioning
-
-LCARS is not trying to compete with generic agent orchestration frameworks on "more features" or "more autonomy."
-
-If you know tools like CrewAI, Goose, or the broader ecosystem of agent wrappers, the difference is not subtle:
-
-- LCARS is less interested in orchestration theater
-- less interested in abstract agent graphs
-- less interested in hiding the machine behind convenience
-
-It is more interested in:
-
-- explicit boundaries
-- visible state
-- restartability
-- handoff discipline
-- redeployable runtime
-- output quality under real constraints
-
-In short: LCARS is closer to a governed runtime than to a generic agent framework.
-
----
-
-## 🪞 Built Inside The Box
-
-LCARS is not only a runtime for real projects. It is also the first real project built and maintained inside that runtime.
-
-This repository is itself a product of the LCARS workflow: role-bound agents, explicit handoffs, bounded authority, review surfaces, and repeated redeploy.
-
-That does not prove perfection. It proves something more useful: the system is already capable of producing, evolving, and maintaining a non-trivial codebase under its own operating model.
-
-The recursive part is not a gimmick. It is one of the strongest pieces of evidence the project can offer.
-
----
-
-<a id="who-its-for"></a>
-
-## 🎯 Who It's For
-
-LCARS is for people who want more than a coding assistant and less than a theatrical agent narrative.
-
-It is a good fit if you care about:
-
-- governed agent collaboration
-- self-hosted systems
-- explicit roles and boundaries
-- replayability and auditability
-- firmware, embedded, infrastructure, systems, or technical project work where "close enough" is not a serious standard
-
-It is a bad fit if you want:
-
-- instant cloud convenience
-- the smallest possible setup
-- a lightweight wrapper around chat
-- a workflow where nobody cares how the output was produced as long as it looks plausible
-
-LCARS is not optimized for minimal friction. It is optimized for the path where the machine becomes more useful over time instead of less trustworthy.
-
----
-
-## 🔥 The Promise
-
-LCARS does **not** promise perfect agents, zero bugs, or autonomous magic.
-
-It promises something more grounded:
-
-- a bounded environment
-- visible coordination
-- cleaner process
-- rebuildable runtime
-- better odds of outputs you can actually use
-
-The standard is not "interesting demo."
-
-The standard is:
-
-> install the box, start the fleet, give it real work, and get back something clean enough to rely on without immediately needing to tear the whole thing open
-
----
-
-## 🗂️ Repository Map
-
-```text
-LCARS-fleet/
-├── .claude/          # hooks, CLAUDE surfaces, settings
-├── .gitea/           # the live CI
-├── .github/          # Pages publication of the showcase site only
-├── assets/           # brand marks, charter, and the showcase site (github.io)
-├── fleet/            # THE product — fleet/ is the Mix root
-│   ├── lib/          # the single OTP app, domains under lib/fleet/<domain>/
-│   ├── priv/         # runtime assets, and priv/catalogue/ = the business data
-│   ├── test/         # the suite, plus test/shell_gate.sh for the out-of-mix nets
-│   ├── bin/          # the launchers: bwrap (sanctuary), host, vendor
-│   ├── config/       # compile-time, per-env, and boot config
-│   ├── etc/          # deploy and run procedure
-│   ├── deploy/       # provisioning: bare machine -> working fleet, one idempotent gesture
-│   ├── vendor/       # vendored bricks (token-saver) + our integration layer
-│   ├── git-hooks/    # the GO-7 wall, force-push block, hook installer
-│   └── system-prompt/sources/user/   # the interactive protocol's two personalisation files
-├── docs/#_Archived/  # the pre-v2 documentation, kept READABLE rather than only reachable by git
-├── knowledge/        # reusable domain knowledge
-├── install.sh        # WSL bootstrap entrypoint
-├── docker.sh         # Docker bootstrap entrypoint
-└── THIRD_PARTY_NOTICES.md   # what we borrowed, from whom, under which licence
+./docker.sh build                          # ~3 GB transient, reclaimable afterwards
+fleet/deploy/docker/dev/bench-up.sh        # forge + box + runner, one gesture
 ```
 
-The v1 tree (`fleet/v1/`, `fleet/provisioning/`, `fleet/tests/`, the 24-file directive corpus and
-six more directories) left this map on 2026-08-07. It is archived, not deleted: the tag
-`v1-excommunication-base` holds it, and `git show v1-excommunication-base:<path>` returns any file.
+The second command is the whole install. It creates a git forge, waits for it, provisions the
+accounts and teams, mints the tokens, starts the box, registers a CI runner, and prints what it
+built. It is **replayable**: run it again and it converges rather than duplicating.
 
-LCARS stands on other people's work. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists every borrowing — copied code, reimplemented code, and borrowed method alike — with its licence and its place in the tree. It deliberately covers more than the licences require.
+When it is done it prints a block like this — those are your entry points:
+
+```
+banc PRET
+  forge     : http://127.0.0.5:3700   (humain lcars / toto32toto32)
+  boite     : lcars-nuit-lcars-1   ssh 127.0.0.5:2222   deck 127.0.0.5:20999
+  runner    : ENREGISTRE (1 vu(s) par la forge)
+  destruire : bench-down.sh --project lcars-nuit
+```
+
+If it says anything other than `banc PRET`, it names what is missing. It never reports success on a
+stack it could not verify.
 
 ---
 
-## 🧪 Try It If...
+## Getting in
 
-You should probably try LCARS if your target sounds like this:
+Two accounts exist, and they are **not** interchangeable.
 
-- "I want a real multi-agent environment, not a prompt toy."
-- "I want something self-hosted and inspectable."
-- "I want roles, scopes, handoffs, and process."
-- "I want a runtime I can rebuild instead of fear."
-- "I care whether the code works, not just whether the generation looks clever."
+| account | password | what it is |
+|---|---|---|
+| **`lcars`** | `toto32toto32` | **the human of the fleet.** This is the one you use. It owns projects, talks to the agents, and has a console on the dashboard. |
+| **`admiral`** | `toto1234` | **the system administrator.** It owns the box (sudo) and founded the forge. It runs the machine; it does not run the fleet — starting a fleet under it is refused by design. |
 
-If what you really want is just "make the model type faster," LCARS is almost certainly too much machine for the job.
+⚠ **These passwords are test defaults, written in plain text in this README.** This stack is meant to
+be bound to `127.0.0.x` on your own machine. Do not expose it to a network you do not control.
+
+### Three doors
+
+**The dashboard** — `http://127.0.0.5:20999`
+
+The main entrance. Log in through the forge (the button is on the landing page). You get your own
+web terminal, the state of your fleet, and the list of running agents.
+
+**The forge** — `http://127.0.0.5:3700`
+
+A full Gitea. Your projects, their pull requests, their CI runs. Log in as `lcars`.
+
+**SSH** — `ssh lcars@127.0.0.5 -p 2222`
+
+The same box, in a real terminal. From there:
+
+```bash
+fleet_v2 start        # start the fleet
+fleet_v2 status       # what it is doing
+lcars catalogue list  # which business catalogues this box carries
+```
+
+### Installing the demo catalogue
+
+Out of the box you have one catalogue, `fleet`. A second, `web-demo`, is sitting on the forge as a
+deposit — `catalogue list` shows it as `disponible`. Installing it is one command:
+
+```bash
+lcars catalogue install web-demo
+```
+
+That creates its organisation on the forge, its role accounts, its teams, and lays its material on
+the box. It is an **admin** gesture: `lcars` can play it because this bench makes it a forge admin,
+and the runtime reads that fact from the forge rather than from any local flag.
+
+Once installed, its cards show up next to `fleet`'s when an agent offers you the catalogue for a new
+project — and a project's catalogue is fixed for its life, so you are asked rather than guessed for.
+
+---
+
+## Your first project
+
+Everything happens through a conversation with an agent — you do not fill in forms.
+
+1. Open the dashboard and start your console.
+2. Run `fleet_v2 start`, then `claude` — you are talking to the fleet's front desk.
+3. Ask it for a project. It will show you the **cards** the installed catalogues carry (a card is a
+   workflow: who writes, who reviews, whether CI must be green before merge), let you pick one, and
+   create the repository, the branches and the working folders.
+4. Open a ticket on that project. The fleet picks it up, spawns the agents the card names, and the
+   work lands as a pull request judged by the reviewers that card declares.
+
+The runner is already registered, so a project whose card requires green CI actually gets it.
+
+---
+
+## Tearing it down
+
+```bash
+fleet/deploy/docker/dev/bench-down.sh --project lcars-nuit
+```
+
+Removes the box, the forge, the runner and their volumes. Then, to reclaim the build space:
+
+```bash
+docker builder prune -af
+```
+
+Your machine is back where it started. Nothing was ever written outside docker.
+
+---
+
+## What this beta does NOT do
+
+Said plainly, because a tool that hides its edges wastes your time:
+
+- **It is not a production deployment.** The forge it creates is disposable and lives on your
+  loopback. Plugging LCARS into a forge you already run is a different path, and it is not in this
+  package.
+- **The passwords above are fixed defaults.** Fine for a test on your own machine, wrong anywhere
+  else.
+- **Nothing is deleted for you.** Projects, repositories and containers stay until you remove them.
+- **Agents cost tokens.** They are real Claude Code processes running against your account. A fleet
+  left running keeps working.
+- **It has been exercised on Debian/Ubuntu with Docker.** Other distributions are untested rather
+  than unsupported — if it breaks, the failure messages are written to tell you where.
+
+---
+
+## If something goes wrong
+
+The stack is built to say what is missing rather than to look healthy:
+
+```bash
+./docker.sh -p lcars-nuit doctor   # what is provisioned, what drifted, and the gesture that fixes it
+./docker.sh -p lcars-nuit logs     # the box's own account of its boot
+```
+
+⚠ `-p lcars-nuit` is not optional here. `docker.sh` defaults to a project called `lcars`, and the
+bench above creates one called `lcars-nuit` — without the flag you would be asking about a
+deployment that does not exist. (`bench-up.sh --project <name>` changes it; the teardown line it
+prints always carries the right one.)
+
+`bench-up.sh` prints its verdict block even when it fails — the details are what you need to repair
+it, so it never swallows them.
+
+---
+
+## What is inside
+
+- **A box** — Debian, one container, running the fleet's runtime (Elixir/OTP) and a web dashboard.
+- **A forge** — Gitea, in its own container, with the organisations, teams and machine accounts the
+  fleet needs.
+- **A runner** — Gitea Actions, registered, so CI is real.
+- **Catalogues** — the business definitions: which roles exist, which workflow cards they serve,
+  what each agent's system prompt is. A catalogue is **data, not code**. `fleet` ships inside the
+  runtime and is always there; `web-demo` is deposited on the forge and installs in one gesture
+  (see *Installing the demo catalogue* above).
+- **Agents** — Claude Code processes, each in a sandbox that mounts exactly what its role needs.
+
+---
+
+## Licence
+
+See [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
