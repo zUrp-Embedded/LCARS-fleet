@@ -62,6 +62,10 @@ defmodule Fleet.Project.OnboardPreflightTest do
 
   defp opts(tmp, users),
     do: [
+      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
+      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
+      # installe » — un devineur, mort avec lui.
+      org: "fleet",
       human: "ghost-human",
       forge_users: users,
       code_root: Path.join(tmp, "projects"),

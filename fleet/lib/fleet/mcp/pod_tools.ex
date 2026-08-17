@@ -296,11 +296,9 @@ defmodule Fleet.MCP.PodTools do
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
           "catalogue first (`list_workflow_cards`, which names the CATALOGUE of every card) and pass " <>
           "the human's chosen card as `workflow_map` plus its `catalogue` — the project lives in that " <>
-          "catalogue's forge org, and the binding is FIXED FOR ITS LIFE. Omit `catalogue` only when the card " <>
-          "already determines it: the org is the one installed catalogue that can answer your " <>
-          "declaration. Several can (two catalogues may both ship a `standard`, and a name alone then " <>
-          "designates nothing) and the call is REFUSED, naming them — relay that choice to the human, " <>
-          "never pick for them. " <>
+          "catalogue's forge org, and the binding is FIXED FOR ITS LIFE — so `catalogue` is REQUIRED, never " <>
+          "inferred: the listing hands you each card WITH its catalogue, copy both. Two catalogues may " <>
+          "both ship a `standard`, and a name alone then designates nothing. " <>
           "(accepted even off-matrix — logged loud, the human has the last word). A declared level " <>
           "(`intensity_level` C0..C4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
           "verbatim when the human states one: you MAY ask the framing questions (mains voltage? cuts " <>
@@ -327,7 +325,7 @@ defmodule Fleet.MCP.PodTools do
         "catalogue" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
-      "required" => ["name"]
+      "required" => ["name", "catalogue"]
     })
   end
 
@@ -502,7 +500,7 @@ defmodule Fleet.MCP.PodTools do
         "nature" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
-      "required" => ["name"]
+      "required" => ["name", "catalogue"]
     })
   end
 
@@ -531,6 +529,7 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{
       "type" => "object",
       "properties" => %{
+        "catalogue" => %{"type" => "string"},
         "url" => %{"type" => "string"},
         "name" => %{"type" => "string"},
         "intensity_level" => %{"type" => "string", "enum" => ["C0", "C1", "C2", "C3", "C4"]},
@@ -538,7 +537,7 @@ defmodule Fleet.MCP.PodTools do
         "nature" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
-      "required" => ["url", "name"]
+      "required" => ["url", "name", "catalogue"]
     })
   end
 

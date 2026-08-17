@@ -1623,7 +1623,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     # Privileged tools split along the two gates. VALID business args so ONLY the role decides.
     @onboarding_tools [
-      {"project_create", %{"name" => "demo-proj"}},
+      # `catalogue` est REQUIS depuis 2026-08-17 (l'org d'un projet est fixee pour sa vie et ne se
+      # deduit pas). Ces deux temoins mesurent la PORTE (qui a le droit d'appeler), pas la
+      # resolution — mais un appel qui echoue avant la porte ne mesure plus rien.
+      {"project_create", %{"name" => "demo-proj", "catalogue" => "fleet"}},
       {"project_install", %{"full_name" => "fleet/demo-proj"}},
       {"project_open", %{"full_name" => "fleet/demo-proj"}},
       {"project_delete", %{"full_name" => "fleet/demo-proj"}},
@@ -1634,8 +1637,13 @@ defmodule Fleet.MCP.PodToolsTest do
          "justification" => "le poc est devenu serieux"
        }},
       {"project_close", %{"full_name" => "fleet/demo-proj"}},
-      {"project_adopt", %{"name" => "demo-proj"}},
-      {"project_import", %{"url" => "https://github.com/ext/demo-proj", "name" => "demo-proj"}},
+      {"project_adopt", %{"name" => "demo-proj", "catalogue" => "fleet"}},
+      {"project_import",
+       %{
+         "url" => "https://github.com/ext/demo-proj",
+         "name" => "demo-proj",
+         "catalogue" => "fleet"
+       }},
       # The deposit door and its discovery side: same head as every other onboarding verb, so the
       # gate table is where they belong — a new door admitted by nobody's test is a door with a
       # different admission.
@@ -1747,10 +1755,12 @@ defmodule Fleet.MCP.PodToolsTest do
       end)
 
       for {tool, biz_args} <- [
-            {"project_create", %{"name" => "demo-proj"}},
+            # `catalogue` requis (2026-08-17) : ce temoin mesure les FACES rendues sur le fil, pas
+            # la resolution d'org — un appel refuse avant d'atterrir n'a plus de faces a montrer.
+            {"project_create", %{"name" => "demo-proj", "catalogue" => "fleet"}},
             {"project_install", %{"full_name" => "fleet/demo-proj"}},
             {"project_open", %{"full_name" => "fleet/demo-proj"}},
-            {"project_adopt", %{"name" => "demo-proj"}}
+            {"project_adopt", %{"name" => "demo-proj", "catalogue" => "fleet"}}
           ] do
         assert {:ok, %{content: [%{"text" => text}]}, _} =
                  PodTools.handle_tool_call(tool, biz_args, pod_state(uniq("pod-sf")))
@@ -2603,99 +2613,60 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  describe "l'org d'un projet ne se DEVINE pas quand plusieurs catalogues sont installes" do
+  describe "l'org d'un projet ne se DEVINE pas — le catalogue est OBLIGATOIRE" do
     setup do
       tmp = Path.join(System.tmp_dir!(), "orgs-#{System.unique_integer([:positive])}")
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      for {cat, cartes} <- [{"aaa", ["standard", "propre-a-aaa"]}, {"bbb", ["standard"]}] do
-        root = Path.join(tmp, cat)
-        dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
-        File.mkdir_p!(dir)
-        File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: #{cat}\n")
-
-        for n <- cartes do
-          File.write!(Path.join(dir, "#{n}.yaml"), """
-          kind: WorkflowMap
-          metadata:
-            name: #{n}
-          spec:
-            jury: []
-            ci: ignore
-            max_rework_rounds: 1
-            steps:
-              build:
-                role: architect
-                needs: []
-                inputs:
-                  - ticket.body
-          """)
-        end
-      end
+      root = Path.join(tmp, "aaa")
+      File.mkdir_p!(Path.join(root, Fleet.Catalogue.rel(:workflow_maps)))
+      File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: aaa\n")
 
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_delegation_org, nil)
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_fleet_org, nil)
       :ok
     end
 
-    test "une carte portee par DEUX catalogues, sans `catalogue` : REFUS qui les nomme" do
-      # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». `standard` est
-      # precisement le nom que deux catalogues prendraient. Avant, l'omission liait le projet au
-      # PREMIER installe — pour sa vie, en silence. Le meme defaut que `Catalogue.root/0` un cran
-      # plus haut, et plus cher : une carte se revise, une org non.
-      assert {:error, {:catalogue_undetermined, "standard", ["aaa", "bbb"]}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"workflow_map" => "standard"})
-    end
-
-    test "une carte portee par UN SEUL : la carte a deja decide — pas de friction inutile" do
-      assert {:ok, "aaa"} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
-                 "workflow_map" => "propre-a-aaa"
-               })
-    end
-
-    test "AUCUNE carte et plusieurs catalogues : rien ne determine l'org, on la DEMANDE" do
-      # « Rien de declare » veut dire « la carte par DEFAUT » — et de quel catalogue est exactement
-      # la question ouverte. Le refus porte le meme atome et la meme forme, la carte a `nil`.
-      assert {:error, {:catalogue_undetermined, nil, orgs}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
-
-      assert "aaa" in orgs and "bbb" in orgs
-    end
-
-    test "une carte que PERSONNE ne porte ne reclame pas de catalogue — c'est la CARTE qui est fausse" do
-      # Une faute de frappe ne determine rien, mais reclamer un catalogue pour elle enverrait
-      # l'appelant repondre a la mauvaise question. Sur une boite a plusieurs catalogues l'org reste
-      # indeterminee (il faut bien en nommer une), mais le refus ne PRETEND pas que le nom de carte
-      # etait bon : il ne le cite pas comme porteur d'une ambiguite.
-      assert {:error, {:catalogue_undetermined, "carte-fantome", _}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
-                 "workflow_map" => "carte-fantome"
-               })
-    end
-
-    test "UN SEUL catalogue installe : la regle GENERALE suffit, sans branche de population" do
-      # ⚖ user, 2026-08-17 : « si tu ne derives que s'il y a un seul catalogue, tu cables un rail
-      # d'exception par confort ». La branche a disparu, et le comportement n'a pas bouge : le seul
-      # catalogue est le seul CANDIDAT — pour la meme raison que partout ailleurs.
+    test "sans `catalogue` : REFUS, et il nomme ce qui est installe" do
+      # ⚖ user, 2026-08-17, troisieme passe sur le meme sujet : « donc tu as encore un rail qui
+      # teste un truc, que tu supprimerais en posant le catalogue obligatoire ». Les deux versions
+      # precedentes DEVINAIENT — le premier catalogue installe, puis « celui que la carte
+      # determine » — et toutes deux liaient un projet a une org POUR SA VIE sur une deduction.
       #
-      # ⚠ ET « UN SEUL » VEUT DIRE « AUCUN CATALOGUE METIER », ce que la premiere version de ce
-      # temoin n'avait pas vu : `fleet` est installe PAR CONSTRUCTION (il vit dans le release), donc
-      # installer quoi que ce soit donne DEUX. La branche de confort ne servait donc que les boites
-      # incapables de faire du metier — un rail d'exception encore plus mort que je ne le croyais.
+      # Mon argument pour l'inference etait faux : « friction pour zero information ». L'information
+      # est dans l'objet que l'appelant vient de lire (`list_workflow_cards` rend chaque carte AVEC
+      # son catalogue). Ce qu'elle achetait, en echange de rien : un comportement qui change quand un
+      # TIERS installe un catalogue portant le meme nom de carte.
+      assert {:error, {:catalogue_required, orgs}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"workflow_map" => "standard"})
+
+      assert "aaa" in orgs and "fleet" in orgs
+    end
+
+    test "meme sur une boite ou UN SEUL catalogue pourrait repondre — pas de rail d'exception" do
+      # Le piege des deux versions precedentes : une branche qui ne s'execute que dans une certaine
+      # POPULATION est une branche que personne n'exerce jamais dans l'autre. Ici il n'y en a plus
+      # qu'une, donc elle est prise partout.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
       assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
 
-      assert {:ok, "fleet"} = Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
+      assert {:error, {:catalogue_required, ["fleet"]}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
     end
 
-    test "`catalogue` explicite gagne toujours, meme sur une carte ambigue" do
-      assert {:ok, "bbb"} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
-                 "catalogue" => "bbb",
-                 "workflow_map" => "standard"
-               })
+    test "`catalogue` explicite : accepte s'il est installe, refuse sinon — en le NOMMANT" do
+      assert {:ok, "aaa"} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => "aaa"})
+
+      assert {:error, {:catalogue_not_installed, "jamais-vu", _gestes}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => "jamais-vu"})
+    end
+
+    test "une chaine VIDE n'est pas une reponse — elle vaut l'absence" do
+      # `""` traverse un schema `"type": "string"` sans broncher. Le lire comme un catalogue nomme
+      # produirait un refus `catalogue_not_installed ""`, qui accuse l'appelant d'avoir nomme un
+      # catalogue inconnu la ou il n'a rien nomme du tout.
+      assert {:error, {:catalogue_required, _}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => ""})
     end
   end
 end

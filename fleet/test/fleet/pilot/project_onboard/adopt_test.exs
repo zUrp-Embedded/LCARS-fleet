@@ -83,6 +83,10 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     Process.put(:file_forge_root, forge_root)
 
     [
+      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
+      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
+      # installe » — un devineur, mort avec lui.
+      org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),

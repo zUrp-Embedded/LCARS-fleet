@@ -1128,12 +1128,34 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
   # orgs des catalogues INSTALLES, la condition se dit exactement ainsi.
   #
-  # `:delegation_org` survit en surcharge explicite pour le cas rare ou l'onboarding doit viser une
-  # autre org que celles-la.
+  # ⚖ LE CATALOGUE EST OBLIGATOIRE (user, 2026-08-17), ET CE QUI A ETE RETIRE VAUT D'ETRE LU.
+  #
+  # Trois versions en une journee, chacune tuee par la meme question posee un cran plus loin :
+  #   1. l'omission prenait le PREMIER catalogue installe — deviner un lien fixe pour la vie ;
+  #   2. puis « un seul installe -> lui, sinon derive de la carte » — « tu cables un rail
+  #      d'exception par confort », et c'etait vrai : cette branche derivait de la POPULATION ;
+  #   3. puis la regle unique « quels catalogues peuvent repondre ? un -> il decide » — « donc tu as
+  #      encore un rail qui teste un truc, que tu supprimerais en posant le catalogue obligatoire ».
+  #
+  # Vrai aussi, et mon argument pour la garder etait FAUX. J'avais dit « friction pour zero
+  # information » : l'information n'est pas absente, elle est dans l'objet que l'appelant vient de
+  # lire — `list_workflow_cards` rend chaque carte AVEC son catalogue. Exiger le champ coute une
+  # recopie, et l'inference achetait, contre ce rien : un comportement qui change quand un TIERS
+  # installe un catalogue portant le meme nom de carte, et deux branches dont laquelle s'execute
+  # depend de la population de la boite — donc jamais les deux au meme endroit.
+  #
+  # Le voisin le disait deja : `import_deposit/4` prend son catalogue en argument POSITIONNEL. Ce
+  # verbe-ci etait l'exception, pas la regle.
+  #
+  # « Quel metier traite ce projet » est la question la plus basique qu'on puisse poser sur lui, et
+  # elle n'a pas de defaut — bien moins que « quel niveau de soin », qui en a un (C0 non declare).
+  # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.
+  #
+  # `:mcp_delegation_org` est mort avec l'inference : il n'avait que ce lecteur. `:pilot_fleet_org`
+  # survit, il appartient au poller.
   @doc false
-  # La resolution d'org, exposee pour ses temoins. Elle decide d'un lien FIXE POUR LA VIE d'un
-  # projet a partir d'arguments partiels : la tester au travers de `project_create` demanderait une
-  # forge, et ce qui doit etre epingle est la DECISION, pas le voyage.
+  # La resolution d'org, exposee pour ses temoins : elle decide d'un lien FIXE POUR LA VIE d'un
+  # projet, et la tester au travers de `project_create` demanderait une forge.
   @spec resolve_org_for_test(map()) :: {:ok, String.t()} | {:error, term()}
   def resolve_org_for_test(args), do: resolve_org(args)
 
@@ -1141,74 +1163,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
     installed = Fleet.Project.Onboard.installed_orgs()
 
     case Map.get(args, "catalogue") do
-      cat when is_binary(cat) ->
+      cat when is_binary(cat) and cat != "" ->
         # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
         # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
         if cat in installed,
           do: {:ok, cat},
           else: Fleet.Project.Onboard.catalogue_not_installed(cat)
 
-      nil ->
-        case Application.get_env(:lcars_fleet, :mcp_delegation_org) ||
-               Application.get_env(:lcars_fleet, :pilot_fleet_org) do
-          org when is_binary(org) -> {:ok, org}
-          nil -> infer_org(Map.get(args, "workflow_map"), installed)
-        end
+      _ ->
+        {:error, {:catalogue_required, installed}}
     end
   end
-
-  # ⚠ L'OMISSION LIAIT LE PROJET AU PREMIER CATALOGUE INSTALLE, POUR SA VIE, EN SILENCE.
-  # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». Ils le peuvent, et
-  # `standard` est le nom que les deux catalogues livres prendraient — le guichet le dit deja dans
-  # son propre commentaire (« un nom seul ne designe plus rien »), et le prenait quand meme.
-  #
-  # C'est EXACTEMENT le defaut que ce depot a tue pour `Catalogue.root/0` : « choisir le premier —
-  # alphabetiquement, par ordre d'install, peu importe — c'est donner a un projet les cartes de
-  # celui qui trie en tete ». Un cran plus haut, la consequence est pire : la carte se revise, l'org
-  # d'un projet est FIXEE POUR SA VIE.
-  #
-  # UNE SEULE REGLE, SANS CAS PARTICULIER : quels catalogues INSTALLES peuvent repondre a cette
-  # declaration ? Exactement un — il decide. Plusieurs — personne ne peut trancher a la place de
-  # l'humain.
-  #
-  # ⚖ user, meme jour, sur ma premiere version : « si tu ne derives que s'il y a un seul catalogue,
-  # tu cables un rail d'exception par confort ». Exact, et l'argument est plus fort que celui que
-  # j'avais donne. J'avais une branche « un seul catalogue installe -> lui » : elle ne repond pas a
-  # la question, elle observe que la question n'a qu'une reponse possible — donc elle derive de la
-  # POPULATION, ce que la ligne du dessus vient precisement de condamner. Et c'est la branche qui
-  # tourne sur toutes les boites d'aujourd'hui : le chemin general serait devenu celui que personne
-  # n'emprunte jamais, jusqu'au jour ou il compte.
-  #
-  # Elle disparait sans rien changer au comportement, parce que la regle unique la contient : sur
-  # une boite a un catalogue, ce catalogue est le seul candidat — pour la meme raison que partout
-  # ailleurs, pas par exception.
-  #
-  # `:mcp_delegation_org` reste au-dessus : une surcharge de deploiement est une reponse EXPLICITE,
-  # pas un defaut.
-  defp infer_org(card, installed) do
-    case candidates(card, installed) do
-      [one] -> {:ok, one}
-      [] -> {:error, :no_installed_catalogue}
-      many -> {:error, {:catalogue_undetermined, card, Enum.sort(many)}}
-    end
-  end
-
-  # LA CARTE DECIDE QUAND ELLE PEUT. Une carte nommee designe ses porteurs — et c'est ce que
-  # l'humain a choisi au guichet, qui presente chaque carte AVEC son catalogue. Une carte que
-  # PERSONNE ne porte ne determine rien : le refus qui compte est alors celui de la carte
-  # (`declarable_card/3` la nomme et liste ce qui existe), pas celui de l'org — donc on laisse tous
-  # les installes candidats plutot que de reclamer un catalogue pour une faute de frappe.
-  #
-  # Aucune carte du tout ne determine rien non plus : « rien de declare » veut dire « la carte par
-  # DEFAUT », et de quel catalogue est exactement la question ouverte.
-  defp candidates(card, installed) when is_binary(card) and card != "" do
-    case Fleet.Workflow.Loader.catalogues_carrying(card) do
-      [] -> installed
-      carriers -> carriers
-    end
-  end
-
-  defp candidates(_none, installed), do: installed
 
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 
@@ -1376,8 +1341,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp do_adopt_project(name, args, role) do
-    with {:ok, onboard} <- conforming_onboard() do
+    # LE CATALOGUE, RESOLU PAR LA MEME PORTE QUE `project_create` : adopter cree un depot sur la
+    # forge, donc c'est une creation, donc l'org est une declaration. Elle tombait sur le premier
+    # catalogue installe (`Onboard.default_org/0`, mort le 2026-08-17) — un projet adopte partait
+    # donc dans `fleet` quel que soit le metier auquel il appartient.
+    with {:ok, onboard} <- conforming_onboard(),
+         {:ok, org} <- resolve_org(args) do
       opts = [
+        org: org,
         description: Map.get(args, "description", ""),
         intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
@@ -1425,8 +1396,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp do_import_external(url, name, args, role) do
-    with {:ok, onboard} <- conforming_onboard() do
+    # Meme porte que les deux autres creations : importer un depot EXTERNE cree un depot sur NOTRE
+    # forge, donc l'org est une declaration. Elle tombait sur le premier catalogue installe.
+    with {:ok, onboard} <- conforming_onboard(),
+         {:ok, org} <- resolve_org(args) do
       opts = [
+        org: org,
         intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
         intensity_nature: Map.get(args, "nature"),

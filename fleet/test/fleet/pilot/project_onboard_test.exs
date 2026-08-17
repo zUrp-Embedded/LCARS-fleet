@@ -453,7 +453,9 @@ defmodule Fleet.Project.OnboardTest do
         assert Fleet.Layout.project_slug("fleet/#{name}") == "mon-projet",
                "fixture #{inspect(name)} ne collisionne pas — le test ne prouverait rien"
 
-        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name),
+        # `org:` explicite : l'admission commune la refuserait AVANT le nom, et ce temoin mesure la
+        # charte des noms, pas la declaration de catalogue.
+        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name, org: "fleet"),
                "#{inspect(name)} a franchi la porte : la collision de 6-079 devient atteignable"
       end
     end
@@ -463,7 +465,9 @@ defmodule Fleet.Project.OnboardTest do
       # alphanumerique aux DEUX bouts, et c'est ce qui interdit `../` et les noms d'un caractere
       # non alphanumerique.
       for name <- ["-x", "x-", "", "A", "Mon-Projet", "a/b", "../evil", "a b"] do
-        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name),
+        # `org:` explicite : l'admission commune la refuserait AVANT le nom, et ce temoin mesure la
+        # charte des noms, pas la declaration de catalogue.
+        assert {:error, {:invalid_name, ^name}} = ProjectOnboard.onboard(name, org: "fleet"),
                "#{inspect(name)} accepte a la porte"
       end
     end
@@ -481,6 +485,45 @@ defmodule Fleet.Project.OnboardTest do
             :ok
         end
       end
+    end
+  end
+
+  describe "l'admission est UNE, pour les cinq verbes d'entree" do
+    # ⚖ user, 2026-08-17 : « on a des rails paralleles qui font la meme chose, alors qu'on devrait
+    # avoir une seule fonction parametrique » — et « ca serait vachement plus facile a fixer si tous
+    # les verbes passaient par le meme filtre ». Mis cote a cote, les cinq preambules posaient les
+    # memes questions, et `import/2` etait le SEUL a ne pas verifier que la carte est declarable.
+    # Personne ne l'avait vu parce que personne ne les avait alignes : des rails paralleles ne
+    # divergent pas d'un coup, ils divergent d'UNE ligne.
+    #
+    # CE TEMOIN LIT LA SOURCE, et c'est le seul moyen d'epingler « tous passent par la meme porte » :
+    # exercer les cinq demanderait cinq mondes (forge, depots, URL externes), et c'est precisement
+    # ce cout qui a laisse la divergence s'installer.
+    @entry_verbs ~w(onboard import adopt_project import_external import_deposit)
+
+    test "les cinq verbes d'entree appellent `admit/3` — aucun ne refait le preambule" do
+      src = File.read!("lib/fleet/project/onboard.ex")
+
+      for verb <- @entry_verbs do
+        [_, body] = String.split(src, ~r/^  def #{verb}\(/m, parts: 2)
+        head = String.slice(body, 0, 1200)
+
+        assert head =~ "admit(",
+               "#{verb}/n ne passe pas par l'admission commune — un sixieme preambule est ne"
+      end
+    end
+
+    test "l'admission reste LOCALE — un refus pur ne coute pas un aller-retour forge" do
+      # ⚠ LA PREMIERE VERSION Y AVAIT MIS `ensure_human_provisioned/2`, qui appelle la forge, et un
+      # temoin l'a montre dans la minute : une URL externe invalide, refusee jusque-la sans toucher
+      # le monde, coutait desormais un appel forge. La loi d'ordre est en trois temps — admission
+      # locale, gardes pures du verbe, puis le monde — et c'est ce que ce temoin tient.
+      src = File.read!("lib/fleet/project/onboard.ex")
+      [_, body] = String.split(src, ~r/^  def admit\(/m, parts: 2)
+      corps = String.slice(body, 0, 400)
+
+      refute corps =~ "ensure_human_provisioned",
+             "l'admission touche la forge — un refus local en paie le prix"
     end
   end
 end

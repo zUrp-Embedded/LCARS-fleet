@@ -113,15 +113,14 @@ defmodule Fleet.Project.Onboard do
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
-    org = Keyword.get(opts, :org) || default_org()
     dirs = face_dirs(name, opts)
 
-    with :ok <- validate_name(name),
-         # MEME CRENEAU QUE LE PREFLIGHT HUMAIN, et pour la meme raison : le refus doit tomber
-         # AVANT que le depot existe. La regle, elle, est appliquee chez le seul ecrivain
-         # (`Intensity.write/2`) pour qu'aucune porte ne puisse la contourner ; ici on lui evite
-         # de refuser apres une creation, donc une compensation.
-         :ok <- Fleet.Project.Intensity.refute_unloadable_card("#{org}/#{name}", opts),
+    # `admit/3` porte le preambule commun aux cinq verbes d'entree — dont le refus de carte, qui
+    # doit tomber AVANT que le depot existe : la regle vit chez le seul ecrivain
+    # (`Intensity.write/2`) pour qu'aucune porte ne la contourne, et ici on lui evite de refuser
+    # apres une creation, donc une compensation.
+    with {:ok, org} <- required_org(opts),
+         :ok <- admit(org, name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
@@ -275,10 +274,73 @@ defmodule Fleet.Project.Onboard do
   # par construction et il est en tete. Un deploiement qui apporte le sien nomme son org au guichet,
   # ce qui est le geste qu'on veut — un defaut ne devine pas quel metier l'appelant visait.
   # `project_create` passe `:org` explicitement ; ce defaut sert les appels directs et les tests.
-  defp default_org do
+  # ⚠ CE DEFAUT NE SERT PLUS QU'AU LISTING, ET IL Y EST FAUX — mesure du 2026-08-17.
+  # ⚖ user : l'org d'un projet est fixee POUR SA VIE, donc elle s'enonce, elle ne se devine pas. Les
+  # cinq verbes d'ENTREE l'exigent desormais, comme `import/2` le faisait deja depuis son depot.
+  #
+  # Reste `describe_project/3` : ses DEUX appelants passent `[]`, donc tout projet est etiquette
+  # `fleet/<nom>` — y compris ceux de `web-demo` — et `parked_state/2` interroge ensuite avec cette
+  # mauvaise cle. Ce n'est pas cosmetique, et ce n'est pas corrige ici : la bonne source est l'ORIGINE
+  # git du projet lui-meme, qu'aucun lecteur de ce depot ne lit encore. Le defaut est MESURE, pas
+  # soupconne, et melanger les deux gestes rendrait les deux illisibles.
+  defp listing_org_placeholder do
     case installed_orgs() do
       [org | _] -> org
       [] -> "fleet"
+    end
+  end
+
+  @doc false
+  # ─── L'ADMISSION, UNE FOIS, POUR LES CINQ VERBES QUI FONT ENTRER UN PROJET ─────────────────────
+  #
+  # ⚖ user, 2026-08-17 : « on a des rails paralleles qui font la meme chose, alors qu'on devrait
+  # avoir une seule fonction parametrique, je me trompe ? » — non. Mis cote a cote, les cinq
+  # preambules posaient les MEMES questions, chacun a sa facon :
+  #
+  #   verbe             org           nom   catalogue installe   carte declarable   humain
+  #   onboard           declaree      ✓     via l'org            ✓                  ✓
+  #   adopt_project     declaree      ✓     via l'org            ✓                  ✓
+  #   import_external   declaree      ✓     via l'org            ✓                  ✓
+  #   import_deposit    du catalogue  ✓     via l'org            ✓                  ✓
+  #   import            du DEPOT      ✓     require_catalogue…   ✗  ← LE TROU       ✓
+  #
+  # ET LE TABLEAU EST CE QUI L'A MONTRE : `import/2` etait le seul des cinq a ne pas verifier que la
+  # carte est declarable. Un depot importe avec une carte d'ATELIER (`scope: ticket`) ou une faute de
+  # frappe passait, la ou les quatre autres refusent. Personne ne l'avait vu parce que personne ne
+  # les avait alignes — c'est le cout exact des rails paralleles : ils ne divergent pas d'un coup,
+  # ils divergent d'UNE ligne, et la ligne manquante ne ressemble a rien.
+  #
+  # L'ORG N'EST PAS DANS LE FILTRE, et c'est la seule chose qui differe legitimement : trois verbes
+  # la recoivent declaree (creer une chose neuve n'a pas de source d'ou la tirer), deux la LISENT de
+  # leur source (le proprietaire du depot, le catalogue nomme). Chaque verbe resout donc SON org,
+  # puis passe par ici.
+  #
+  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME. La premiere version incluait
+  # `ensure_human_provisioned/2` — qui APPELLE LA FORGE — et un temoin l'a montre dans la minute :
+  # une URL externe invalide, refusee jusque-la sans toucher le monde, coutait desormais un
+  # aller-retour forge. « Les deux controles sont purs » etait faux, et je l'avais ecrit dans le
+  # commentaire du meme geste. La loi d'ordre est donc en TROIS temps, pour les cinq verbes :
+  #   1. cette admission — locale, commune ;
+  #   2. les gardes PURES du verbe (URL externe, `main` local, faces en place) ;
+  #   3. le monde — `ensure_human_provisioned/2` puis les sondes forge du verbe.
+  #
+  # L'humain reste appele par chaque verbe : c'est UNE fonction, invoquee la ou l'ordre de ce
+  # verbe-la l'exige, et non un preambule recopie.
+  @spec admit(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def admit(org, name, opts) when is_binary(org) and is_binary(name) do
+    with :ok <- require_installed(org),
+         :ok <- validate_name(name) do
+      Fleet.Project.Intensity.refute_unloadable_card("#{org}/#{name}", opts)
+    end
+  end
+
+  # L'ORG EST UNE DECLARATION, PAS UNE DEDUCTION. Les verbes de creation la recoivent ou refusent en
+  # nommant ce qui est installe — le meme refus que le guichet, pour que les deux portes disent la
+  # meme chose. Les verbes qui ont une SOURCE (un depot, un catalogue nomme) la lisent d'elle.
+  defp required_org(opts) do
+    case Keyword.get(opts, :org) do
+      org when is_binary(org) and org != "" -> {:ok, org}
+      _ -> {:error, {:catalogue_required, installed_orgs()}}
     end
   end
 
@@ -494,8 +556,10 @@ defmodule Fleet.Project.Onboard do
     name = Fleet.Layout.project_name(full_name)
     dirs = face_dirs(name, opts)
 
-    with :ok <- validate_name(name),
-         :ok <- require_catalogue_installed(full_name),
+    # ⚠ LE TROU QUE L'ALIGNEMENT A MONTRE : ce verbe etait le seul des cinq a ne pas verifier que la
+    # carte est DECLARABLE. Un depot importe avec une carte d'atelier (`scope: ticket`) ou une faute
+    # de frappe passait ici, la ou les quatre autres refusent.
+    with :ok <- admit(org, name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
@@ -570,8 +634,7 @@ defmodule Fleet.Project.Onboard do
       full_name = "#{catalogue}/#{name}"
       dirs = face_dirs(name, opts)
 
-      with :ok <- validate_name(name),
-           :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
+      with :ok <- admit(catalogue, name, opts),
            :ok <- ensure_human_provisioned(catalogue, opts),
            :ok <- require_machine_absent(full_name, dirs),
            :ok <- require_forge_absent(full_name, opts),
@@ -730,10 +793,6 @@ defmodule Fleet.Project.Onboard do
       {:error, reason} ->
         {:error, {:deposit_clone_failed, reason}}
     end
-  end
-
-  defp require_catalogue_installed(full_name) do
-    full_name |> String.split("/") |> List.first() |> require_installed()
   end
 
   # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
@@ -939,7 +998,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp describe_project(name, root, opts) do
-    full_name = "#{Keyword.get(opts, :org) || default_org()}/#{name}"
+    full_name = "#{Keyword.get(opts, :org) || listing_org_placeholder()}/#{name}"
 
     %{"name" => name, "repo" => full_name}
     |> Map.merge(declared_intensity(Path.join(root, name)))
@@ -1085,14 +1144,13 @@ defmodule Fleet.Project.Onboard do
   """
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def adopt_project(name, opts \\ []) when is_binary(name) do
-    org = Keyword.get(opts, :org) || default_org()
-    full_name = "#{org}/#{name}"
     dirs = face_dirs(name, opts)
 
-    with :ok <- validate_name(name),
-         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
-         :ok <- ensure_human_provisioned(org, opts),
+    with {:ok, org} <- required_org(opts),
+         full_name = "#{org}/#{name}",
+         :ok <- admit(org, name, opts),
          :ok <- require_local_main(dirs.code),
+         :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_adoptable_origin(full_name, dirs.code, opts),
          {:ok, states} <- classify_adopt_writer_faces(dirs),
          :ok <- require_forge_absent(full_name, opts),
@@ -1311,15 +1369,15 @@ defmodule Fleet.Project.Onboard do
   """
   @spec import_external(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
-    org = Keyword.get(opts, :org) || default_org()
-    full_name = "#{org}/#{name}"
     dirs = face_dirs(name, opts)
     # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
     url_gate = Keyword.get(opts, :url_gate, &default_external_url_gate/1)
 
-    with :ok <- validate_name(name),
+    # L'ADMISSION COMMUNE D'ABORD, LES SPECIFICITES ENSUITE — uniformement sur les cinq verbes.
+    with {:ok, org} <- required_org(opts),
+         :ok <- admit(org, name, opts),
+         full_name = "#{org}/#{name}",
          :ok <- url_gate.(url),
-         :ok <- Fleet.Project.Intensity.refute_unloadable_card(full_name, opts),
          :ok <- ensure_human_provisioned(org, opts),
          :ok <- require_machine_absent(full_name, dirs),
          :ok <- require_forge_absent(full_name, opts) do

@@ -82,6 +82,10 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     Process.put(:file_forge_root, forge_root)
 
     [
+      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
+      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
+      # installe » — un devineur, mort avec lui.
+      org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
       workshop_root: Path.join(tmp, "doc"),
@@ -238,9 +242,15 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     _ = o
 
     gate = fn url ->
-      # Reaches the default gate through the public function with no seam override: the
-      # earliest `with` step, so the refusal arrives before any world contact.
-      ProjectOnboard.import_external(url, "x-gate-probe", [])
+      # Reaches the default gate through the public function with no seam override — la preuve que
+      # la garde de PROD est bien cablee sur le chemin reel, et pas seulement testable a part.
+      #
+      # ⚠ CE COMMENTAIRE DISAIT « the earliest `with` step », ET CE N'EST PLUS VRAI (2026-08-17) :
+      # l'admission commune aux cinq verbes d'entree (`admit/3` : catalogue installe, nom, carte
+      # declarable, humain) passe devant, uniformement. La garde reste AVANT tout contact avec le
+      # monde, ce qui est la propriete qui comptait — mais elle n'est plus la premiere, et un
+      # commentaire qui l'affirme enverrait le prochain lecteur chercher un ordre qui n'existe plus.
+      ProjectOnboard.import_external(url, "x-gate-probe", org: "fleet")
     end
 
     assert {:error, {:unsupported_forge, {:scheme, "http"}}} = gate.("http://github.com/a/b")
