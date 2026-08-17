@@ -62,13 +62,28 @@ services:
       # et l'unique acte d'enrollment est l'ajout à l'équipe `humans` par un propriétaire d'org.
       # Ajouter une validation admin à l'inscription ajouterait un geste qui ne trie rien.
       GITEA__service__DISABLE_REGISTRATION: "false"
-      # Ceinture, et elle ne protège RIEN aujourd'hui — le dire franchement vaut mieux que de la
-      # présenter comme une sécurité. Mesuré le 2026-08-12 : sur un dépôt PUBLIC, un compte
-      # restricted, un compte ordinaire et un ANONYME reçoivent le même 200. `restricted` ne masque
-      # que du privé, et il n'y en a pas. Elle est là pour le jour où un dépôt le deviendra, et elle
-      # ne coûte aucun geste : mesuré aussi, un membre restricted de `humans` traverse la porte
-      # OpenID du deck normalement (claim `groups` intacte, session ouverte, bloc servi).
-      GITEA__service__DEFAULT_USER_IS_RESTRICTED: "true"
+      # ⚠ `DEFAULT_USER_IS_RESTRICTED` A ÉTÉ POSÉ ICI PUIS RETIRÉ (2026-08-17), et le motif du
+      # retrait était déjà écrit dans le motif de la pose : « ceinture, elle ne protège RIEN
+      # aujourd'hui ». Une décision qui porte sa propre condition se rouvre le jour où la condition
+      # tombe — c'est ce jour-là.
+      #
+      # CE QUE LA MESURE DE POSE N'AVAIT PAS REGARDÉ. Le 2026-08-12 on avait mesuré l'accès aux
+      # DÉPÔTS : sur un dépôt public, restricted / ordinaire / anonyme reçoivent le même 200, donc
+      # « restricted ne masque que du privé ». Vrai, et hors sujet — un utilisateur restreint ne
+      # voit que ce qui lui est explicitement accordé, et une ORG n'est pas un dépôt.
+      #
+      # Mesuré le 2026-08-17 : `lordzurp`, auto-inscrit donc `restricted=true`, membre de `fleet`
+      # via `fleet:humans` mais membre d'AUCUNE org de catalogue → `web-demo` répond 404 quand il
+      # est connecté, et 200 quand il ne l'est pas. Connecté, il voit MOINS qu'un inconnu, et tous
+      # les catalogues installés lui sont invisibles.
+      #
+      # Ça contredit frontalement l'arbitrage A1.4 : « une fois installé, le catalogue est dispo
+      # system-wide, on filtre pas par confort ». Avec ce drapeau, tout humain est filtré par
+      # défaut — pas par confort, par Gitea.
+      #
+      # LCARS livre donc une forge dont les comptes ne sont PAS restreints (le défaut Gitea est
+      # `false`, l'absence de ligne suffit). Un admin qui veut la ceinture la remet chez lui : on ne
+      # la lui reprend pas, et `50-forge.sh` la sonde et lui dit ce qu'elle coûte à ses humains.
       # L'UI affiche le `full_name` a la place du login. Les comptes de role sont
       # `<catalogue>_<role>` — un username Gitea est unique a l'INSTANCE, donc sans prefixe deux
       # catalogues nommant chacun un `dev` se partagent un compte. Le full_name porte le nom du role,

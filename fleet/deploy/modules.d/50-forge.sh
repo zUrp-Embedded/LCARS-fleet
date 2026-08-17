@@ -61,11 +61,20 @@ ACCOUNTS="$ROLES $PROV_SYSTEM_ACCOUNT"
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
 
 # L'INSCRIPTION LIBRE EST UNE PRÉCONDITION DU MODÈLE D'ENROLLMENT, ET RIEN NE LA VÉRIFIAIT.
-# Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`. Sur
-# une forge PRÉEXISTANTE — le cas de la production — l'opérateur a pu fermer l'inscription dans son
-# `app.ini`, et alors le rail entier ne marche plus : personne ne peut créer son compte, et aucun
-# message nulle part ne dit pourquoi. C'est un réglage d'INSTANCE, donc ni tofu ni ce module ne
-# peuvent le poser : on le SONDE et on l'annonce, jamais on ne le mute.
+# Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`.
+#
+# ⚠ CETTE PHRASE DISAIT « sur une forge PRÉEXISTANTE — LE CAS DE LA PRODUCTION — l'opérateur a pu
+# fermer l'inscription dans SON app.ini », et le glissement était dans « son » : la forge n'est pas
+# celle d'un tiers, c'est un COMPOSANT de LCARS (⚖ user 2026-08-17). L'autre objet, celui qui
+# appartient à la team, c'est la SORTIE PUBLIQUE — GitHub, un GitLab interne — atteinte par
+# `lcars forge add --host github` et le rail `publish`. Deux choses, un seul mot, et les confondre
+# fait dériver tout le raisonnement d'autorité qui suit.
+#
+# CE QUI NE CHANGE PAS, ET QUI EST LE BON GESTE : on livre un DÉFAUT (inscription ouverte, comptes
+# non restreints — cf. `dev/forge-compose.yml`), et un admin peut le changer chez lui. Alors le rail
+# entier ne marche plus, sans qu'aucun message ne dise pourquoi — donc on SONDE et on ANNONCE,
+# jamais on ne mute. Ce n'est pas parce que le réglage ne serait pas à nous ; c'est parce qu'un
+# admin qui a décidé quelque chose ne doit pas se le faire reprendre en silence.
 #
 # ⚠ LE CODE HTTP NE DISCRIMINE RIEN — mesuré le 2026-08-12 sur Gitea 1.26.1, les deux états rendent
 # `GET /user/sign_up` -> 200. La page, elle, diffère : ouverte, elle porte le FORMULAIRE ; fermée,
@@ -83,6 +92,32 @@ probe_registration() {
   else
     p_drift "inscription FERMÉE sur cette forge — l'enrollment ne peut pas fonctionner : personne ne peut créer son compte. C'est un réglage d'instance (DISABLE_REGISTRATION dans app.ini), à ouvrir par l'opérateur de la forge"
   fi
+}
+
+# JUMELLE DE LA SONDE CI-DESSUS, ET LE MÊME CONTRAT : un défaut qu'on livre, un admin qui peut le
+# changer, une conséquence qu'il doit connaître.
+#
+# UN COMPTE `restricted` NE VOIT QUE CE QUI LUI EST EXPLICITEMENT ACCORDÉ, et une ORG n'est pas un
+# dépôt — c'est ce que la mesure de 2026-08-12 avait manqué en ne regardant que l'accès aux dépôts.
+# Mesuré le 2026-08-17 : un humain restreint, membre de `fleet` mais d'aucune org de catalogue, reçoit
+# 404 sur l'org d'un catalogue quand il est CONNECTÉ, et 200 quand il ne l'est pas. Connecté, il voit
+# moins qu'un inconnu, et tous les catalogues installés lui sont invisibles — contre l'arbitrage
+# « une fois installé, le catalogue est dispo system-wide ».
+#
+# La sonde n'a besoin d'AUCUN jeton : `GET /users/<login>` expose `restricted` en anonyme (mesuré).
+# C'est ce qui la rend jouable au même rang que `probe_registration`, avant tout mint.
+probe_restricted() { # $1=login à sonder
+  local login="$1" body
+  [[ -n "$login" ]] || return 0
+  body="$(curl -fsS -m 10 "$PROV_FORGE_URL/api/v1/users/$login" 2>/dev/null || true)"
+  # ⚠ `has()` ET PAS `//` : l'opérateur `//` de jq traite `false` comme absent, donc un compte
+  # correctement NON restreint serait lu « non mesurable » et la sonde se tairait là où elle doit
+  # dire OK. Même piège que `forge_is_admin` dans human-converger.sh, même correctif.
+  case "$(printf '%s' "$body" | jq -r 'if has("restricted") then .restricted else "?" end' 2>/dev/null)" in
+    false) p_ok "compte $login non restreint — il voit les orgs des catalogues installés" ;;
+    true)  p_drift "compte $login RESTREINT sur la forge — il ne verra AUCUNE org de catalogue dont il n'est pas membre (404 connecté, 200 en anonyme). C'est un réglage d'instance (DEFAULT_USER_IS_RESTRICTED dans app.ini) + le drapeau du compte : geste admin « Site Administration → Users → $login → décocher Restricted »" ;;
+    *)     p_warn "drapeau restricted de $login non lisible ($PROV_FORGE_URL/api/v1/users/$login) — la visibilité des catalogues N'EST PAS mesurée" ;;
+  esac
 }
 
 account_exists() { # $1=login — endpoint public en lecture (pas besoin d'admin pour SONDER)
@@ -311,6 +346,7 @@ check() {
   fi
   p_ok "forge joignable ($PROV_FORGE_URL)"
   probe_registration
+  probe_restricted "$PROV_HUMAN"
   check_master_authority
   PROV_MODE=check converge_authority_modes
 
