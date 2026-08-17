@@ -146,12 +146,52 @@ defmodule Fleet.Project.Intensity do
     end
   rescue
     _ ->
+      # ⚠ « INCONNUE ICI » N'EST PAS « INCONNUE », ET LA DIFFERENCE EST LA SEULE CHOSE UTILE A DIRE.
+      # Mesure du 2026-08-17, transcript d'un starfleet : le guichet lui presente `standard` du
+      # catalogue `web-demo` (la liste NOMME le catalogue de chaque carte), il la choisit, et
+      # `project_create` la refuse en `{:unknown_card, "standard"}` — parce que l'appel n'a pas
+      # porte `catalogue`, donc l'org a pris le defaut et la carte s'est resolue chez `fleet`. Le
+      # refus enumerait alors les cartes de `fleet`, ou celle demandee ne figure evidemment pas :
+      # un message qui accuse le NOM alors que ce qui manque est l'ARGUMENT VOISIN.
+      #
+      # L'agent a bien travaille — il a verifie qu'aucun depot n'avait ete cree a moitie, il a
+      # refuse de contourner, et il a rendu la main en nommant deux sorties. Il a seulement conclu
+      # « la creation ne sait resoudre que les cartes de fleet », ce qui est faux : elle resout dans
+      # le catalogue du PROJET, et le projet avait atterri dans le mauvais.
+      #
+      # On ne devine PAS a sa place — le catalogue fixe l'org du projet POUR SA VIE, donc choisir
+      # pour lui serait le pire des services. On NOMME : la carte existe la-bas, voici l'argument.
+      elsewhere = carriers_of(name, repo)
+
       Logger.warning(
         "ProjectIntensity: card #{inspect(name)} is not declarable by a project — REFUSED " <>
-          "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(loader_opts(repo, opts)), ", ")})"
+          "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(loader_opts(repo, opts)), ", ")})" <>
+          case elsewhere do
+            [] ->
+              ""
+
+            cats ->
+              " — it EXISTS in #{Enum.join(cats, ", ")}: pass `catalogue`, the project's org is fixed for life"
+          end
       )
 
-      {:error, {:unknown_card, name}}
+      case elsewhere do
+        [] -> {:error, {:unknown_card, name}}
+        cats -> {:error, {:card_in_another_catalogue, name, cats}}
+      end
+  end
+
+  # Les catalogues INSTALLES qui portent ce nom de carte, hors celui du projet. Lu sur les scopes,
+  # comme le guichet : la meme source repond « qui offre cette carte » des deux cotes, sinon le
+  # refus renverrait vers un catalogue que la liste ne montre pas.
+  defp carriers_of(name, repo) do
+    mine = Fleet.Workflow.Loader.card_root_for_repo(repo)
+
+    for %{catalogue: cat, dir: dir} <- Fleet.Workflow.Loader.card_scopes(),
+        is_binary(cat),
+        dir != mine,
+        name in Fleet.Workflow.Loader.canon_names(workflow_maps_root: dir),
+        do: cat
   end
 
   # LA MEME RESOLUTION QUE LES LECTEURS, et c'est une condition de correction et non un detail :

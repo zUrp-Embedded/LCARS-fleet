@@ -37,8 +37,14 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
 
 ## Refus que tu verras, et ce qu'ils veulent dire
 
-- `{:unknown_card, _}` — la carte nommée ne charge pas : une faute de frappe, pas un cas à
+- `{:unknown_card, _}` — la carte nommée ne charge nulle part : une faute de frappe, pas un cas à
   contourner. Re-présente le catalogue.
+- `{:card_in_another_catalogue, nom, catalogues}` — la carte existe, mais **pas dans le catalogue de
+  ce projet**. Ce n'est pas une faute de frappe et ce n'est pas à toi de trancher : le catalogue fixe
+  l'org du projet pour sa vie entière. Sur une **création**, l'oubli est presque toujours l'argument
+  `catalogue` — la liste nomme le catalogue de chaque carte, passe les deux ensemble. Sur une
+  **révision**, le projet existe déjà : sa carte doit venir de SON catalogue, et une carte d'ailleurs
+  n'est pas une option — remonte à l'humain.
 - `{:card_push_failed, _}` — la forge a refusé la traversée : rien n'a changé, la règle de
   protection est restaurée. Réessaie ou remonte à l'humain.
 - `justification` absente — le refus est voulu. Il n'y a pas de révision sans pourquoi.

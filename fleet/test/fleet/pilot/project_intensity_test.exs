@@ -244,4 +244,62 @@ defmodule Fleet.Project.IntensityTest do
     assert iopts[:reason_detail] =~ ".lcars.json"
     assert log =~ "unreadable/invalid"
   end
+
+  describe "une carte inconnue ICI mais presente AILLEURS — le refus nomme le catalogue" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "carte-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      for {cat, cartes} <- [{"aaa", ["commune", "propre-a-aaa"]}, {"bbb", ["commune"]}] do
+        root = Path.join(tmp, cat)
+        dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+        File.mkdir_p!(dir)
+        File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: #{cat}\n")
+
+        for n <- cartes do
+          File.write!(Path.join(dir, "#{n}.yaml"), """
+          kind: WorkflowMap
+          metadata:
+            name: #{n}
+          spec:
+            jury: []
+            ci: ignore
+            max_rework_rounds: 1
+            steps:
+              build:
+                role: architect
+                needs: []
+                inputs:
+                  - ticket.body
+          """)
+        end
+      end
+
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+      :ok
+    end
+
+    test "la carte existe chez le VOISIN : le refus le NOMME, et nomme l'argument manquant" do
+      # ⚠ MESURE DU 2026-08-17, transcript d'un starfleet, reproduite au caractere pres : le guichet
+      # presente `standard` du catalogue `web-demo`, l'agent la choisit, `project_create` refuse en
+      # `{:unknown_card, "standard"}` en enumerant les cartes de `fleet`. Cause : l'appel n'a pas
+      # porte `catalogue`, l'org a pris le defaut, et la carte s'est resolue dans le mauvais
+      # catalogue. Le message accusait le NOM alors que ce qui manquait etait l'ARGUMENT VOISIN —
+      # l'agent en a conclu, raisonnablement et faussement, que « la creation ne sait resoudre que
+      # les cartes de fleet ».
+      assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
+               Fleet.Project.Intensity.declarable_card("propre-a-aaa", "bbb/un-projet", [])
+    end
+
+    test "vraiment inconnue partout : `unknown_card`, comme avant" do
+      # Le refus d'origine survit pour ce qu'il decrit VRAIMENT — une faute de frappe. Sans cette
+      # separation, le nouveau message dirait « elle existe ailleurs » en listant zero catalogue.
+      assert {:error, {:unknown_card, "carte-fantome"}} =
+               Fleet.Project.Intensity.declarable_card("carte-fantome", "bbb/un-projet", [])
+    end
+
+    test "la carte de SON catalogue passe — le refus ne mord pas sur le cas nominal" do
+      assert :ok = Fleet.Project.Intensity.declarable_card("commune", "bbb/un-projet", [])
+    end
+  end
 end
