@@ -387,8 +387,8 @@ defmodule Fleet.Pilot.Application do
     :ok
   end
 
-  # EVERY active catalogue is proved, not just the first. `canon_names!/1` with no opts reads the
-  # image of the FIRST active root, so a second catalogue's cards were validated by nobody and met
+  # EVERY installed catalogue is proved, not just the bundled one. `canon_names!/1` with no opts
+  # reads the image of the BUNDLED root, so another catalogue's cards were validated by nobody and met
   # their first reader at dispatch — far from the boot that could have refused them. Explicit opts
   # still mean "this root and no other": that is the per-catalogue verifier naming its target.
   #

@@ -257,7 +257,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
-  The forge orgs a project can be onboarded into — one per ACTIVE catalogue, and the org IS the
+  The forge orgs a project can be onboarded into — one per INSTALLED catalogue, and the org IS the
   catalogue's name.
 
   Lives here rather than being read from `Fleet.Catalogue` by every caller: "where can a project
@@ -724,7 +724,7 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # The names already carried by an ACTIVE catalogue org. Fail-loud: an unreachable org would make
+  # The names already carried by an INSTALLED catalogue org. Fail-loud: an unreachable org would make
   # the candidate list too WIDE, i.e. offer to import what is already in.
   defp enrolled_names(repo, fc) do
     Enum.reduce_while(installed_orgs(), {:ok, MapSet.new()}, fn org, {:ok, acc} ->

@@ -797,7 +797,7 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # ONE PASS PER ACTIVE CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
+  # ONE PASS PER INSTALLED CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
   # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
   # projection came from `Fleet.Application.CatalogueRoles`, where it ran with a single catalogue
   # BORROWED into `:lcars_fleet, :catalogue_root`, so `Fleet.Catalogue.name()` was the declaring
@@ -806,7 +806,7 @@ defmodule Fleet.CapProfile do
   # account is `biz_biz-dev`. A projection that is right for one catalogue and silently wrong for
   # every other is worse than none — it is the 404 this whole rail was built to stop, relocated.
   #
-  # Declaration ORDER decides (`put_new`), which is the same rule stated for the overlay: a business
+  # `installed_roots/0` ORDER decides (`put_new`), which is the same rule stated for the overlay: a business
   # catalogue may ship its own `architect.yaml` and the account stays `system_architect`, because
   # the system roster is consulted first for every name.
   defp build_login_maps do

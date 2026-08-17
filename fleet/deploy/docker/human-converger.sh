@@ -454,9 +454,16 @@ reconcile_humans() { # reconcile_humans <login…>
 # revocation : la personne reste un worker legitime, et interrompre son travail pour lui retirer un
 # droit qu'elle n'exerce peut-etre pas serait un cout sans rapport avec la decision prise.
 #
-# Ce qui est ferme IMMEDIATEMENT, lui, c'est l'onglet admin du deck : il relit `is_admin` a chaque
-# connexion. Ce qui survit est une session shell OUVERTE AVANT la demotion. Le geste qui la ferme
-# est nomme dans le message, et il appartient a l'operateur.
+# LE DECK NE FERME PAS PLUS VITE, contrairement a ce que cette ligne a longtemps affirme (« ferme
+# IMMEDIATEMENT »). Il lit `is_admin` UNE FOIS, au retour OIDC, et le booleen vit dans la session
+# jusqu'a son terme. Une demotion se voit donc a la prochaine CONNEXION, jamais au prochain clic —
+# et la phrase se contredisait dans sa propre seconde moitie. Sans consequence aujourd'hui :
+# l'onglet ne commande aucun backend. C'est la premiere chose a revoir le jour ou il en commandera
+# un, car le droit serait alors porte par un cache, pas par une lecture.
+#
+# Ce qui survit cote systeme est une session shell OUVERTE AVANT la demotion : un process porte ses
+# groupes depuis son login. Le geste qui la ferme est nomme dans le message, et il appartient a
+# l'operateur.
 converge_admins() { # converge_admins <login...>
   getent group "$ADMIN_GROUP" >/dev/null 2>&1 || {
     err "groupe $ADMIN_GROUP absent — aucune adminite projetee (« provision apply » le cree)"

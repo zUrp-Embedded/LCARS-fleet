@@ -256,7 +256,7 @@ defmodule Fleet.Project.Roles do
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
     # THE PROJECT'S OWN CATALOGUE, and it was never consulted. This read named the card and let the
-    # loader answer from the default root — the FIRST active catalogue — so a project belonging to
+    # loader answer from the default root — the BUNDLED catalogue — so a project belonging to
     # any other one asked for a card the loader had published under another key and was told it does
     # not exist. Measured: `web/test2` declares `standard`, the `web` catalogue carries it, and the
     # fleet raised `declared_card_unloadable` on every tick while falling back to a card the human

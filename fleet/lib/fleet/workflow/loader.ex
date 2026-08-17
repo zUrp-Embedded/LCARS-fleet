@@ -180,9 +180,9 @@ defmodule Fleet.Workflow.Loader do
   """
   @spec publish_image!() :: :ok
   def publish_image! do
-    # ONE image PER ACTIVE CATALOGUE, and the key was already per-root (`image_key/1`) — only the
-    # publication was single. It published from `workflow_maps_root([])`, i.e. the FIRST active
-    # root, so the cards of every catalogue after the first existed on disk and in no image. A
+    # ONE image PER INSTALLED CATALOGUE, and the key was already per-root (`image_key/1`) — only
+    # the publication was single. It published from `workflow_maps_root([])`, i.e. the bundled
+    # root, so the cards of every other catalogue existed on disk and in no image. A
     # project served by such a catalogue found no card at all.
     #
     # Not a search path: cards do not supersede across catalogues. A card names roles, and a role

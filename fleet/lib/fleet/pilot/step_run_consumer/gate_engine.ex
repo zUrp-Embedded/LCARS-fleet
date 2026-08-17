@@ -80,7 +80,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   the effective mode is absent. Resolution errors remain explicit. `DR-013`.
   """
   # The seam takes the catalogue ROOT beside the role: a role only exists in the catalogue that
-  # declares it, and this rail serves every project of every active catalogue from ONE singleton
+  # declares it, and this rail serves every project of every installed catalogue from ONE singleton
   # consumer — so the root cannot be bound once at init, it arrives with the work item.
   @spec producer?(
           term(),
@@ -144,7 +144,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   end
 
   # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
-  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues actifs.
+  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes.
   defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   defp payload_repo(payload),

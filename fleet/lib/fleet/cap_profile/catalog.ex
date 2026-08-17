@@ -78,7 +78,7 @@ defmodule Fleet.CapProfile.Catalog do
   @doc """
   Le meme role, lu dans l'image d'un catalogue NOMME — la porte per-catalogue.
 
-  `nil` garde le comportement du jour : l'image du PREMIER catalogue actif. C'est ce que veut un
+  `nil` garde le comportement du jour : l'image du catalogue LIVRE. C'est ce que veut un
   appelant sans projet en main ; un appelant qui en a un passe la racine de SON catalogue, parce
   qu'un role n'existe que dans le catalogue qui le declare.
   """
@@ -123,10 +123,10 @@ defmodule Fleet.CapProfile.Catalog do
   # contract.
   #
   # `disk_scope/1` mirrors `published_for/1` exactly: a named root reads ITS tree_scope (own
-  # cap-profiles + system, the same pair its image is published from), nil reads the FIRST installed
-  # catalogue's — because `published_for(nil)` answers the first catalogue's image, and the disk
+  # cap-profiles + system, the same pair its image is published from), nil reads the BUNDLED
+  # catalogue's — because `published_for(nil)` answers the bundled catalogue's image, and the disk
   # must not answer more than the image would.
-  defp disk_scope(nil), do: disk_scope(List.first(Fleet.Catalogue.installed_roots()))
+  defp disk_scope(nil), do: disk_scope(Fleet.Catalogue.root())
   defp disk_scope(root), do: Fleet.Catalogue.tree_scope(root, :cap_profiles)
 
   defp read_role_from_disk(role, root) do
@@ -334,7 +334,7 @@ defmodule Fleet.CapProfile.Catalog do
   def read_modops(modop_set) when is_list(modop_set), do: read_modops(modop_set, nil)
 
   @doc """
-  Les memes overlays, dans l'image du catalogue NOMME — `nil` = le premier actif.
+  Les memes overlays, dans l'image du catalogue NOMME — `nil` = celui qui est livre.
 
   Un modop appartient au catalogue qui le livre : celui d'un role du second catalogue n'existe pas
   dans l'image du premier, et le chercher la rendait `:modop_not_found` sur un fichier bien present.
@@ -445,7 +445,7 @@ defmodule Fleet.CapProfile.Catalog do
   def snapshot_roles, do: snapshot_roles(root_dirs())
 
   @doc """
-  The same index over an EXPLICIT search path — one catalogue's, rather than every active one merged.
+  The same index over an EXPLICIT search path — one catalogue's, rather than every installed one merged.
 
   `snapshot_roles/0` answers "everything this deployment can see", which a global view wants. A
   PROJECT wants its own catalogue over the system and nothing from its neighbours, and that path is

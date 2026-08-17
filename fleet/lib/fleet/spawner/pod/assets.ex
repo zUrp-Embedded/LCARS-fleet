@@ -191,12 +191,15 @@ defmodule Fleet.Spawner.Pod.Assets do
     end
   end
 
-  # `root` is nil for a profile loaded without a named catalogue: the FIRST installed one, because
-  # that is what the image regime answers for the same caller. The not-found error names a path in
-  # the scope's OWN tree, never a foreign one — the same rule `Catalogue.find/2` states for its
-  # fallback: send the author to the tree they own.
+  # `root` is nil for a profile loaded without a named catalogue: the BUNDLED one, because that is
+  # what the image regime answers for the same caller. The not-found error names a path in the
+  # scope's OWN tree, never a foreign one — send the author to the tree they own.
+  #
+  # ⚠ This said "the same rule `Catalogue.find/2` states for its fallback", and `find/2` no longer
+  # exists: it was one of the flattened per-tree doors killed with the `search/1` debt (2026-08-16).
+  # The rule survives its function, so it is stated here rather than delegated to a dead name.
   defp protocol_from_disk(root, name, error_tag) do
-    scope_root = root || List.first(Fleet.Catalogue.installed_roots())
+    scope_root = root || Fleet.Catalogue.root()
     scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
 
     path =

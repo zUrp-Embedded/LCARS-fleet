@@ -242,11 +242,10 @@ defmodule Fleet.SPBuilder.Image do
 
   defp sha_of(content), do: :crypto.hash(:sha256, content)
 
-  @doc "The published image of a catalogue, or nil. No argument = the FIRST installed catalogue."
+  @doc "The published image of a catalogue, or nil. No argument = the BUNDLED catalogue."
   @spec published() :: map() | nil
   def published do
-    # `installed_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
-    Fleet.Catalogue.installed_roots() |> hd() |> published()
+    published(Fleet.Catalogue.root())
   end
 
   @spec published(Path.t()) :: map() | nil
@@ -263,7 +262,7 @@ defmodule Fleet.SPBuilder.Image do
   end
 
   @doc """
-  Restores an image for the FIRST installed catalogue — TESTS ONLY, symmetric of `unpublish/0`.
+  Restores an image for the BUNDLED catalogue — TESTS ONLY, symmetric of `unpublish/0`.
 
   Exists so a test never writes the persistent_term key itself: the key carries the catalogue root
   now, and a test that composes it by hand pins a private representation instead of the contract —
@@ -271,7 +270,7 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    :persistent_term.put(image_key(hd(Fleet.Catalogue.installed_roots())), image)
+    :persistent_term.put(image_key(Fleet.Catalogue.root()), image)
     :ok
   end
 

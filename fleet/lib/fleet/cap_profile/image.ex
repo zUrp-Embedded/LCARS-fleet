@@ -178,13 +178,12 @@ defmodule Fleet.CapProfile.Image do
   @doc """
   The published image of a catalogue (`%{index, overlays, version}`), or nil (fallback-to-disk).
 
-  No argument = the FIRST installed catalogue, which is what a caller with no project in hand gets.
+  No argument = the BUNDLED catalogue, which is what a caller with no project in hand gets.
   The per-project door is `published/1`, named by that project's catalogue root.
   """
   @spec published() :: map() | nil
   def published do
-    # `installed_roots/0` rend TOUJOURS au moins le catalogue bundle — pas de branche vide a ecrire.
-    published(default_root())
+    published(Fleet.Catalogue.root())
   end
 
   @spec published(Path.t()) :: map() | nil
@@ -202,12 +201,6 @@ defmodule Fleet.CapProfile.Image do
 
   defp image_key(root), do: {__MODULE__, :image, root}
 
-  # The cap-profile directory of the first installed catalogue — the scope a caller without a project
-  # resolves to. `nil` when nothing is readable at all, which `published/0` reports as "no image".
-  defp default_root do
-    hd(Fleet.Catalogue.installed_roots())
-  end
-
   @doc """
   Restores a previously-`published/0` image — TESTS ONLY, the symmetric of `unpublish/0`.
 
@@ -218,7 +211,7 @@ defmodule Fleet.CapProfile.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    :persistent_term.put(image_key(default_root()), image)
+    :persistent_term.put(image_key(Fleet.Catalogue.root()), image)
     :ok
   end
 

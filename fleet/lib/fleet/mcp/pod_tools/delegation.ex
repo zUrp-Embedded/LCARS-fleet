@@ -674,7 +674,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Reads the validation-card catalogue for the framing interview — from the ACTIVE authority:
+  Reads the validation-card catalogue for the framing interview — from the LOADING authority:
   `Loader.canon_names!/0` (the configured maps root, never a hardcoded priv path) and
   `Loader.load!/1` (schema + graph validated — the listing can only offer what the engine can
   actually load). For each card: `name` (the LOADABLE id — the `workflow_map` value of

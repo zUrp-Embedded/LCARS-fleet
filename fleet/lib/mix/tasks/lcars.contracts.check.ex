@@ -2495,7 +2495,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   @tool_cite_re ~r/\b(?:mcp__[a-z0-9_]+|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+)\b/
 
-  # `{name, allowedTools, disallowedTools, modops}` per cap-profile of EVERY active catalogue root.
+  # `{name, allowedTools, disallowedTools, modops}` per cap-profile of EVERY installed catalogue root.
   defp catalogue_profiles(root) do
     root
     |> catalogue_roots()

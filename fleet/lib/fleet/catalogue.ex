@@ -125,24 +125,35 @@ defmodule Fleet.Catalogue do
   @rel_avatars "avatars"
 
   @doc """
-  Root of the catalogue. `LCARS_CATALOGUE_ROOT` (→ `:lcars_fleet, :catalogue_root`) or `priv/catalogue`.
+  Root of the BUNDLED catalogue — and the root a caller holding no catalogue resolves to.
 
-  The default is `:code.priv_dir`-derived, NOT CWD-relative: it must resolve in a release
+  `LCARS_CATALOGUE_ROOT` (→ `:lcars_fleet, :catalogue_root`) or `priv/catalogue`. The default is
+  `:code.priv_dir`-derived, NOT CWD-relative: it must resolve in a release
   (`lib/lcars_fleet-<vsn>/priv`) exactly as in dev, with no environment at all.
+
+  ## It is THE default, and that is why it has a name
+
+  It is also the head of `installed_roots/0`, by construction rather than by coincidence — the list
+  is built from this function. Six callers used to spell the same default `hd(installed_roots())`,
+  which READS as "whichever catalogue happens to be first" while the mechanism guarantees a
+  constant: a caller with no catalogue in hand resolves in the one that always ships. The
+  expression invited a reordering of `installed_roots/0` to silently change six resolutions, and it
+  named a position where the thing has a name.
   """
   @spec root() :: Path.t()
-  def root, do: bundled_root()
+  def root, do: to_string(bundled_root())
 
-  # THE BUSINESS ROOT IS THE FIRST ACTIVE CATALOGUE, and it took a bench to see why that matters.
+  # THE BUNDLED ROOT IS THE BUSINESS ROOT OF A CALLER WITHOUT A CATALOGUE, and it took a bench to
+  # see why that matters.
   #
   # `search/1` covers the trees BOTH halves of a deployment share — cap-profiles, modops, drafts,
   # blocks… The purely business trees (workflow maps, brief templates, project_template, coord
-  # policies) have no system default, so they read this root DIRECTLY. While `root/0` ignored the
-  # declaration, activating a catalogue gave you its ROLES and the bundled catalogue's CARDS.
+  # policies) have no system default, so they read this root DIRECTLY. A caller that resolves its
+  # ROLES in one catalogue and its CARDS here gets a coherent-looking half-wiring.
   #
   # Measured on the lcars-d1 bench: cap-profiles resolved to `web-arch` (8 profiles) and the
   # delegation card still came from the shipped reference, whose jury names `qualifier` — a role the
-  # active catalogue does not carry. The boot REFUSED, loudly, which is the guard working; the
+  # other catalogue does not carry. The boot REFUSED, loudly, which is the guard working; the
   # half-wiring was mine. It is exactly the "coherent-looking skew" this module's own header warns
   # about, one level up.
   defp bundled_root do
@@ -239,7 +250,7 @@ defmodule Fleet.Catalogue do
   The ordered search path for one TREE, named by its atom — the N-root door.
 
   Where `search/2` asks the caller for a business root, this resolves the whole precedence itself:
-  the fine override for that tree if one is set, otherwise every ACTIVE catalogue in order, and the
+  the fine override for that tree if one is set, otherwise every INSTALLED catalogue in order, and the
   system default last. Absent directories drop out, so a catalogue that ships only what its roles
   need costs nothing.
 
@@ -318,7 +329,7 @@ defmodule Fleet.Catalogue do
   """
   @spec installed_roots() :: [Path.t()]
   def installed_roots do
-    [to_string(bundled_root()) | installed_dirs()]
+    [root() | installed_dirs()]
   end
 
   # WHERE the material sits arrives by CONFIG, and this module stays `deps: []`.
@@ -417,7 +428,7 @@ defmodule Fleet.Catalogue do
   def rel(:skills), do: @rel_skills
   # The cards had no clause here while their constant existed, and the absence was the mechanism:
   # `rel/1` is what a caller uses to address a tree under an ARBITRARY root, so a tree missing from
-  # it can only be addressed under `root/0` — the first active catalogue. Cards are still NOT a
+  # it can only be addressed under `root/0` — the bundled catalogue. Cards are still NOT a
   # search path (they do not supersede), but they are now addressable per root, which is what
   # publishing one image per catalogue requires.
   def rel(:workflow_maps), do: @rel_workflow_maps
@@ -473,7 +484,7 @@ defmodule Fleet.Catalogue do
   def sp_templates_root, do: Path.join(root(), @rel_sp_templates)
 
   @doc """
-  One search path per active catalogue for a TREE — the per-catalogue door, next to `search/1` which
+  One search path per installed catalogue for a TREE — the per-catalogue door, next to `search/1` which
   merges them all.
 
   `search/1` answers "everything this deployment can see for this tree", which is what a global view
@@ -527,7 +538,7 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The workflow-map directory of EVERY active catalogue, in declaration order.
+  The workflow-map directory of EVERY installed catalogue, in `installed_roots/0` order.
 
   Cards do not supersede across catalogues and never will: a card names roles, and a role belongs to
   the catalogue that declares it — a card from one catalogue over the roles of another describes a
@@ -702,8 +713,8 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The declared name of EVERY active catalogue, in declaration order — the forge orgs this
-  deployment discovers on.
+  The declared name of EVERY installed catalogue, in `installed_roots/0` order — the forge orgs
+  this deployment discovers on.
 
   A catalogue that declares no name is skipped rather than defaulted: the name is required and
   `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
@@ -712,7 +723,7 @@ defmodule Fleet.Catalogue do
   def installed_names, do: installed_catalogues() |> Enum.map(& &1.name) |> Enum.uniq()
 
   @doc """
-  Every active catalogue as `%{name, root}`, in declaration order — THE pairing.
+  Every installed catalogue as `%{name, root}`, in `installed_roots/0` order — THE pairing.
 
   Three readers want it in three shapes (the poller wants the orgs, the card listing wants
   name-plus-cards-dir, the enroller wants the root), and re-reading the manifest in each is how the
@@ -732,17 +743,17 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  Root of the active catalogue NAMED `name`, or `nil` — the pairing read by its other end.
+  Root of the installed catalogue NAMED `name`, or `nil` — the pairing read by its other end.
 
   It exists because the dispatch rail knows a project by its forge repo, and a project lives in the
   org of its catalogue: the `owner` of `owner/name` IS the catalogue name (lot 4 of the org-par-
   catalogue chantier). So a step run carries, for free, the catalogue that must resolve its roles —
   and this is the function that spends it.
 
-  `nil` for a name no active catalogue answers to. That is not a defect to guard against: the poller
-  only discovers on the orgs of ACTIVE catalogues, so a work item for an inactive one does not
-  exist. Callers treat `nil` as "no catalogue named, resolve in the default image", which is what
-  every pre-catalogue caller already did.
+  `nil` for a name no installed catalogue answers to. That is not a defect to guard against: the
+  poller only discovers on the orgs of INSTALLED catalogues, so a work item for a catalogue absent
+  from this box does not exist. Callers treat `nil` as "no catalogue named, resolve in the default
+  image", which is what every pre-catalogue caller already did.
   """
   @spec root_for(String.t() | nil) :: Path.t() | nil
   def root_for(nil), do: nil
@@ -775,7 +786,7 @@ defmodule Fleet.Catalogue do
   def default_card, do: default_card(root())
 
   @doc """
-  The same card, for ONE catalogue root — every ACTIVE catalogue has its own, and a guard that
+  The same card, for ONE catalogue root — every INSTALLED catalogue has its own, and a guard that
   checks them has to ask each in turn rather than the default one N times.
   """
   @spec default_card(Path.t()) :: String.t() | nil

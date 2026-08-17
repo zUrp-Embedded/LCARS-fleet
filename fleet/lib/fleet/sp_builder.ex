@@ -256,7 +256,7 @@ defmodule Fleet.SPBuilder do
   defp read_modop_fragments([], _root), do: {:ok, []}
 
   # La racine vient du PROFIL (`catalogue_root`), pas d'un argument transporte a cote : les fragments
-  # d'un role appartiennent au catalogue qui le declare. `nil` = le premier catalogue actif, ce que
+  # d'un role appartiennent au catalogue qui le declare. `nil` = le catalogue livre, ce que
   # veut un appelant sans projet en main.
   defp read_modop_fragments(modop_bundles, root) do
     case sp_image(root) do
@@ -340,7 +340,7 @@ defmodule Fleet.SPBuilder do
         # `find/2` : elle resolvait au premier catalogue installe qui portait le template, tous
         # confondus — le regime image d'a cote etait deja per-catalogue, et deux regimes qui
         # repondent differemment est LE defaut (dette `search/1`, fermee 2026-08-16).
-        scope_root = root || hd(Fleet.Catalogue.installed_roots())
+        scope_root = root || Fleet.Catalogue.root()
 
         Fleet.Catalogue.tree_scope(scope_root, :subagent_templates)
         |> Fleet.Catalogue.find_in("subagent-#{name}.md")
@@ -422,10 +422,12 @@ defmodule Fleet.SPBuilder do
   """
   @spec sp_draft_path(String.t(), Path.t() | nil) :: Path.t()
   def sp_draft_path(role, root \\ nil) when is_binary(role) do
-    # `hd/1` et pas `List.first/1` : `installed_roots/0` rend TOUJOURS au moins le catalogue
-    # livre, et `List.first` ajoute un `nil` fantome au typage que le spec `Path.t()` ne couvre
-    # pas — dialyzer `missing_range`, mesure.
-    scope_root = root || hd(Fleet.Catalogue.installed_roots())
+    # `Catalogue.root/0` et pas `hd(installed_roots())` : les deux rendent le meme chemin — la liste
+    # est CONSTRUITE a partir de cette fonction — mais l'un le NOMME la ou l'autre designe une
+    # position. Au passage, `hd/1` etait deja obligatoire face a `List.first/1`, qui ajoutait un
+    # `nil` fantome au typage que le spec `Path.t()` ne couvre pas (dialyzer `missing_range`) ; la
+    # question ne se pose plus.
+    scope_root = root || Fleet.Catalogue.root()
     name = "agent-#{role}-base.md"
 
     scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
