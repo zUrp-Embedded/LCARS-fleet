@@ -19,6 +19,16 @@
 # La porte est simulee par un `lcars` pose dans le PROV_LINK_DIR du test : aucun release n'est
 # construit, aucune socket n'est ouverte.
 
+# ⚠ L'IDENTITE DU LANCEUR EST POSEE, JAMAIS HERITEE — ET CE N'EST PAS DE LA PRUDENCE : ce fichier
+# a ete VERT sur la machine de dev et ROUGE dans la CI du banc, au premier tour. Le module
+# court-circuite pour qui n'est pas un humain de fleet (`is_fleet_human` : uid >= UID_MIN et
+# uid != SYSADMIN_UID), le job de CI tourne en ROOT (uid 0), et les neuf temoins de traduction
+# recevaient donc « n'est pas un humain de fleet » a la place du verdict qu'ils mesurent.
+#
+# Un test qui lit l'uid de sa machine mesure la machine. Les deux entrees de la regle sont des
+# knobs — `PASSWD_DEFS` pour UID_MIN, `LCARS_SYSADMIN_UID` pour le siege — donc le setup les POSE
+# de facon que l'uid courant soit un humain de fleet, quel qu'il soit. Les deux temoins de la garde
+# les re-posent a l'envers pour eux-memes : c'est la seule facon d'epingler les DEUX reponses.
 setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/75-projects.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
@@ -28,6 +38,12 @@ setup() {
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin"
   export PROV_HUMAN="$(id -un)"
   mkdir -p "$PROV_LINK_DIR"
+
+  # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris.
+  echo "UID_MIN 0" > "$BATS_TEST_TMPDIR/login.defs"
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  # Le siege du sysadmin est un uid que personne ici ne porte.
+  export LCARS_SYSADMIN_UID="$(( $(id -u) + 1 ))"
 }
 
 # La porte rend ce qu'on lui dit de rendre. $1 = code de sortie, stdin = les lignes de verdict.
@@ -175,9 +191,9 @@ EOF
 @test "un compte SYSTEME (uid < UID_MIN) est ecarte par la meme garde" {
   # La garde a deux conditions parce qu'il y a deux regles : la frontiere systeme/humain, declaree
   # par login.defs, et la reservation du siege du sysadmin, que login.defs ne peut PAS exprimer.
-  # Un UID_MIN au-dessus de l'uid courant simule le compte systeme sans en creer un.
+  # Un UID_MIN au-dessus de l'uid courant simule le compte systeme sans en creer un — il ECRASE le
+  # `UID_MIN 0` du setup, qui existe pour que les autres temoins ne dependent pas de l'uid reel.
   echo "UID_MIN $(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
   run "$MOD" check
   [ "$status" -eq 0 ]
