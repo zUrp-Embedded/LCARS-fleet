@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-down.sh
+# SOURCE: fleet/deploy/docker/bench/bench-down.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
 # STATUS: geste de BANC — DETRUIT un banc complet, volumes compris

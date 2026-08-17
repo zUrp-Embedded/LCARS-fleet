@@ -1,4 +1,4 @@
-# SOURCE: fleet/deploy/docker/dev/runner-compose.yml
+# SOURCE: fleet/deploy/docker/bench/runner-compose.yml
 # AUTHOR: DrDree
 # STARDATE: 2026-08-01
 # STATUS: runner CI — ne fait PAS partie de LCARS, comme la forge
@@ -23,8 +23,8 @@
 # confiance du CI est donc le DAEMON, jamais le job. Un job hostile ne casse pas le runner : il a la
 # machine. Ne pose ce fichier que sur une machine dont tu acceptes ce modèle.
 #
-# LANCER :   docker compose -f fleet/deploy/docker/dev/runner-compose.yml -p lcars-runner up -d
-# DÉTRUIRE : docker compose -f fleet/deploy/docker/dev/runner-compose.yml -p lcars-runner down -v
+# LANCER :   docker compose -f fleet/deploy/docker/bench/runner-compose.yml -p lcars-runner up -d
+# DÉTRUIRE : docker compose -f fleet/deploy/docker/bench/runner-compose.yml -p lcars-runner down -v
 #
 # PREMIER BOOT — un token d'enregistrement est requis, minté PAR la forge (site-admin) :
 #   POST /api/v1/admin/actions/runners/registration-token

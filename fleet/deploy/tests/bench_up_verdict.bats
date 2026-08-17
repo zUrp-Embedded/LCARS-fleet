@@ -18,10 +18,10 @@
 
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
-  DEV="$ROOT/fleet/deploy/docker/dev"
-  mkdir -p "$DEV" "$ROOT/fleet/deploy/deps" "$ROOT/fleet/deploy/lib"
-  cp "$BATS_TEST_DIRNAME/../docker/dev/bench-up.sh" "$DEV/bench-up.sh"
-  SRC="$DEV/bench-up.sh"
+  BENCH="$ROOT/fleet/deploy/docker/bench"
+  mkdir -p "$BENCH" "$ROOT/fleet/deploy/deps" "$ROOT/fleet/deploy/lib"
+  cp "$BATS_TEST_DIRNAME/../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
+  SRC="$BENCH/bench-up.sh"
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
   : > "$ROOT/fleet/deploy/deps/.keep"
@@ -34,23 +34,23 @@ setup() {
   # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par
   # `forge-gestures.sh config-token`), et `bench-up` l'y lit. Cette doublure ecrivait dans le
   # `--tofu-dir` que le banc n'a plus.
-  cat > "$DEV/bench-forge-bootstrap.sh" <<'FAKE'
+  cat > "$BENCH/bench-forge-bootstrap.sh" <<'FAKE'
 #!/usr/bin/env bash
 exit 0
 FAKE
-  chmod 0755 "$DEV/bench-forge-bootstrap.sh"
+  chmod 0755 "$BENCH/bench-forge-bootstrap.sh"
 
   # La doublure PARLE quand elle refuse — c'est la matiere du test « le refus remonte ». Un faux
   # sous-script muet ne pourrait pas distinguer « bench-up relaie » de « bench-up invente ».
   RUNNER_RC="$BATS_TEST_TMPDIR/runner.rc"
   echo 0 > "$RUNNER_RC"
-  cat > "$DEV/bench-runner.sh" <<FAKE
+  cat > "$BENCH/bench-runner.sh" <<FAKE
 #!/usr/bin/env bash
 rc="\$(cat "$RUNNER_RC")"
 [[ "\$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
 exit "\$rc"
 FAKE
-  chmod 0755 "$DEV/bench-runner.sh"
+  chmod 0755 "$BENCH/bench-runner.sh"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"

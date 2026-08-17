@@ -74,7 +74,7 @@ forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/de
 # fait dériver tout le raisonnement d'autorité qui suit.
 #
 # CE QUI NE CHANGE PAS, ET QUI EST LE BON GESTE : on livre un DÉFAUT (inscription ouverte, comptes
-# non restreints — cf. `dev/forge-compose.yml`), et un admin peut le changer chez lui. Alors le rail
+# non restreints — cf. `bench/forge-compose.yml`), et un admin peut le changer chez lui. Alors le rail
 # entier ne marche plus, sans qu'aucun message ne dise pourquoi — donc on SONDE et on ANNONCE,
 # jamais on ne mute. Ce n'est pas parce que le réglage ne serait pas à nous ; c'est parce qu'un
 # admin qui a décidé quelque chose ne doit pas se le faire reprendre en silence.

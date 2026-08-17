@@ -1,7 +1,7 @@
-# SOURCE: fleet/deploy/docker/dev/forge-compose.yml
+# SOURCE: fleet/deploy/docker/bench/forge-compose.yml
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
-# STATUS: forge JETABLE de DÉVELOPPEMENT — ne fait PAS partie de LCARS
+# STATUS: forge JETABLE du BANC — livrée avec la beta, ce n'est pas une forge de production
 #
 # ┌──────────────────────────────────────────────────────────────────────────────────────────┐
 # │ CE FICHIER N'EST PAS LE DÉPLOIEMENT DE TA FORGE.                                         │
@@ -10,13 +10,18 @@
 # │ LCARS ne fabrique pas la forge, il vérifie qu'elle tient le contrat.                     │
 # └──────────────────────────────────────────────────────────────────────────────────────────┘
 #
-# POURQUOI CE FICHIER EXISTE QUAND MÊME : pour développer sur LCARS, il faut une forge en face.
-# Celle-ci se monte en une commande et se jette sans regret. Elle vit dans son PROPRE projet
-# compose (`-p lcars-devforge`), donc ses volumes lui appartiennent (`lcars-devforge_*`) et
-# AUCUNE commande de docker.sh ne peut les atteindre — c'est tout l'intérêt.
+# POURQUOI CE FICHIER EXISTE QUAND MÊME : LCARS a besoin d'une forge en face, et il y a deux
+# lecteurs pour ça — celui qui DÉVELOPPE sur LCARS, et celui à qui on TEND la beta pour l'essayer.
+# La beta livre le banc entier, forge comprise : personne n'a à provisionner un Gitea pour voir
+# tourner une fleet. Le fichier vivait sous `dev/`, un nom qui ne parlait qu'au premier des deux et
+# disait au second « ceci n'est pas pour toi » sur le chemin qu'on lui donne.
 #
-# LANCER :   docker compose -f fleet/deploy/docker/dev/forge-compose.yml -p lcars-devforge up -d
-# DÉTRUIRE : docker compose -f fleet/deploy/docker/dev/forge-compose.yml -p lcars-devforge down -v
+# Elle se monte en une commande et se jette sans regret. Elle vit dans son PROPRE projet compose
+# (`-p lcars-devforge` en autonome, `-p <projet>forge` sous `bench-up.sh`), donc ses volumes lui
+# appartiennent et AUCUNE commande de docker.sh ne peut les atteindre — c'est tout l'intérêt.
+#
+# LANCER :   docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge up -d
+# DÉTRUIRE : docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge down -v
 #            (le `-v` est ici, dans TON geste délibéré, jamais dans une commande LCARS)
 #
 # BRANCHER LCARS DESSUS : attacher le conteneur LCARS au réseau de CE projet, puis pointer

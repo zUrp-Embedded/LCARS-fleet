@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-degrade.sh
+# SOURCE: fleet/deploy/docker/bench/bench-degrade.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — ouvre l'UI de la forge jetable et declare le client OAuth du deck

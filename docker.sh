@@ -132,7 +132,7 @@ assert_project_ours() {
     echo ""
     echo "  Appliquer un compose à un projet qu'il n'a pas créé recrée et republie SANS erreur."
     echo "  Vise le bon projet    : ./docker.sh -p <projet> $*"
-    echo "  Ou agis sur celui-ci avec SA recette (un banc se descend par dev/bench-down.sh)."
+    echo "  Ou agis sur celui-ci avec SA recette (un banc se descend par bench/bench-down.sh)."
     echo "  Projets visibles      : docker compose ls"
   } >&2
   exit 1
@@ -432,7 +432,7 @@ CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
                                 dit avec le geste exact pour le combler.
 
 BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
-      docker compose -f fleet/deploy/docker/dev/forge-compose.yml -p lcars-devforge up -d
+      docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge up -d
       → projet SÉPARÉ, volumes à lui, détruit uniquement par TA commande explicite.
       Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} ./docker.sh up
 EOF

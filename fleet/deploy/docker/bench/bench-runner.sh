@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-runner.sh
+# SOURCE: fleet/deploy/docker/bench/bench-runner.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — enregistre un runner CI de circonstance sur la forge jetable

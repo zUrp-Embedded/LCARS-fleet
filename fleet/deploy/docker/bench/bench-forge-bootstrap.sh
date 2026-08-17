@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-forge-bootstrap.sh
+# SOURCE: fleet/deploy/docker/bench/bench-forge-bootstrap.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — amene une forge jetable NEUVE a l'etat "la fleet peut travailler dessus"

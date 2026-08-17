@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-up.sh
+# SOURCE: fleet/deploy/docker/bench/bench-up.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
 # STATUS: geste de BANC — monte un banc COMPLET (forge jetable + boite + amorcage) en une commande
@@ -150,16 +150,21 @@ fi
   || die "aucun daemon docker joignable (DOCKER_HOST=${DOCKER_HOST:-<vide>}) — Docker Desktop lance ?" 1
 
 # La sonde : un aller-retour attache sur l'image qu'on s'apprete a deployer (locale, aucun pull).
-# ⚠ LE GESTE CITE ICI POINTAIT VERS `./docker.sh build` — UN SCRIPT QUI N'EXISTE PAS dans ce depot
-# (verifie le 2026-08-14 : aucun fichier de ce nom, et personne n'exporte LCARS_GIT_SHA). Un
-# operateur qui suit ce message ne construit rien ; un agent qui le suit invente sa propre commande,
-# et c'est exactement comme cette boite a fini par tourner sans savoir dire quel code elle portait.
+#
+# ⚠ CE MESSAGE A TENDU UNE INCANTATION MANUELLE PENDANT TROIS JOURS, AU MOTIF QUE `./docker.sh
+# build` « n'existait pas dans ce depot ». Il existe, a la racine, et son `build_env()` exporte
+# exactement les DEUX estampilles que ce refus declare obligatoires (`LCARS_GIT_SHA`,
+# `LCARS_BUILD_DATE`). Le geste juste etait donc a une ligne, et le message envoyait recopier
+# quatre lignes ou l'une des deux s'oublie en silence — ce qui produit precisement l'image muette
+# sur son origine que le bloc « revision » ci-dessous existe pour attraper.
+#
+# LA LECON N'EST PAS « verifier ses chemins » : un refus qui DICTE une commande a la place de
+# l'outil du depot double le rail. Quand l'outil bouge, la dictee reste, et c'est elle qu'on suit.
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement: $IMAGE
-   Construire (le sha est OBLIGATOIRE, cf. le bloc revision plus bas) :
-     LCARS_IMAGE=$IMAGE LCARS_GIT_SHA=\$(git rev-parse --short HEAD) \\
-     LCARS_BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \\
-     docker compose -f fleet/deploy/docker/docker-compose.yml build" 1
+   Construire (depuis la racine du depot) :
+     ./docker.sh build
+   Il pose le sha et la date de build, tous deux OBLIGATOIRES (cf. le bloc revision plus bas)." 1
 
 # LA BOITE DOIT POUVOIR DIRE QUEL CODE ELLE PORTE, ET LE BANC DOIT LE LIRE AVANT DE L'ANNONCER.
 # Mesure du 2026-08-14 : une image batie a la main (docker build nu, sans --build-arg) deployait un

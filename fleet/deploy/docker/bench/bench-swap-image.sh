@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/dev/bench-swap-image.sh
+# SOURCE: fleet/deploy/docker/bench/bench-swap-image.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
 # STATUS: geste de BANC — remplace l'IMAGE de la boite d'un banc deja seme, forge intacte

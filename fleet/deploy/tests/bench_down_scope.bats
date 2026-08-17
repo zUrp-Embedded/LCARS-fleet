@@ -24,7 +24,7 @@
 # status: the stub does not fake compose's output.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../docker/dev/bench-down.sh"
+  SRC="$BATS_TEST_DIRNAME/../docker/bench/bench-down.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"

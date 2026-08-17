@@ -46,7 +46,7 @@ tar xzf lcars-fleet-beta.tar.gz
 cd lcars-fleet
 
 ./docker.sh build                          # ~3 GB transient, reclaimable afterwards
-fleet/deploy/docker/dev/bench-up.sh        # forge + box + runner, one gesture
+fleet/deploy/docker/bench/bench-up.sh        # forge + box + runner, one gesture
 ```
 
 The second command is the whole install. It creates a git forge, waits for it, provisions the
@@ -138,7 +138,7 @@ The runner is already registered, so a project whose card requires green CI actu
 ## Tearing it down
 
 ```bash
-fleet/deploy/docker/dev/bench-down.sh --project lcars-nuit
+fleet/deploy/docker/bench/bench-down.sh --project lcars-nuit
 ```
 
 Removes the box, the forge, the runner and their volumes. Then, to reclaim the build space:

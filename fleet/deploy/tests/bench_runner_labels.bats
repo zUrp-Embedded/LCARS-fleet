@@ -19,7 +19,7 @@
 # absent exactly when it is needed.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../docker/dev/bench-runner.sh"
+  SRC="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"
