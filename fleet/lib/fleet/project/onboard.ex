@@ -81,13 +81,20 @@ defmodule Fleet.Project.Onboard do
   defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @type result :: %{
-          repo: String.t(),
-          project_dir: Path.t(),
-          work_dir: Path.t(),
-          doc_dir: Path.t(),
+          :repo => String.t(),
+          :project_dir => Path.t(),
+          :work_dir => Path.t(),
+          :doc_dir => Path.t(),
           # Per-project architect ensure outcome (reorg 2026-07-19) — reported, never dropped:
           # %{status: "up", pod_id: _} | %{status: "failed", reason: _}.
-          architect: map()
+          :architect => map(),
+          # LA RE-EMISSION CONVERGENTE SE DIT DANS LE RESULTAT, et ce type l'oubliait.
+          # `refute_existing_or_converge` pose cette cle quand l'etat de fin est deja realise : le
+          # verbe rend alors `{:ok, result}` sans rien avoir cree. Absente de la declaration, elle
+          # rendait `%{idempotent: true}` formellement INATTEIGNABLE — un appelant qui distingue
+          # « importe » de « deja la » ecrivait un motif que Dialyzer refusait, sur une valeur que
+          # le code produit vraiment.
+          optional(:idempotent) => true
         }
 
   @doc """
@@ -247,11 +254,18 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  # TROIS ISSUES, ET LA TROISIEME N'EST NI UN SUCCES NI UN ECHEC. Un appelant qui n'a pas de fleet
+  # sous la main — la porte de reconvergence tourne dans un `eval`, donc dans une VM qui a CHARGE
+  # l'app sans la demarrer — ne peut pas assurer d'architecte : il n'y a aucun superviseur a qui le
+  # demander. Le dire « failed » accuserait le projet d'un defaut qu'il n'a pas ; le dire « up »
+  # serait un mensonge sur un pod qui n'existe pas. `deferred` dit ce qui est vrai, et qui prend la
+  # suite : le poller de la fleet assure l'architecte de chaque projet qu'il sert.
   defp ensure_architect(repo, opts) do
     ensure = Keyword.get(opts, :ensure_architect, &Fleet.Project.Architect.ensure/2)
 
     case ensure.(repo, opts) do
       {:ok, pod_id} -> %{status: "up", pod_id: pod_id}
+      {:deferred, reason} -> %{status: "deferred", reason: reason}
       {:error, reason} -> %{status: "failed", reason: inspect(reason)}
     end
   end
@@ -537,6 +551,179 @@ defmodule Fleet.Project.Onboard do
         IO.puts(:stderr, "ECHEC : #{inspect(reason)}")
         System.halt(2)
     end
+  end
+
+  @doc """
+  Porte RELEASE de la reconvergence de `/home` : la forge dit quels projets existent, le disque suit.
+
+      bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_reconcile(:check)'
+      bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_reconcile(:apply)'
+
+  L'INVENTAIRE N'EXISTE QUE SUR LA FORGE, et c'est ce qui rend cette porte necessaire.
+  `list_projects/1` enumere le DISQUE (`code_root`) : sur une boite neuve — ou apres un nuke, ou
+  pour un second humain qui arrive sur une fleet deja peuplee — il n'y a rien a enumerer, alors que
+  les projets, eux, sont intacts. Aucun verbe n'est ecrit ici : `import/2` est deja le rail
+  forge→boite et deja idempotent. Ce qui manquait etait la LISTE.
+
+  Sortie : un mot par projet, sur une ligne. `check` ne touche rien (`DEJA` / `MANQUE`), `apply`
+  importe (`DEJA` / `IMPORTE`). Un projet en echec n'arrete pas les autres — une boite a laquelle il
+  manque neuf projets sur dix doit en recuperer neuf, pas zero.
+
+  Codes de sortie : `0` tout converge · `1` au moins un `ECHEC` · `2` au moins un `MANQUE` et aucun
+  echec. Le module de provisioning qui joue cette porte lit les LIGNES et rend son propre verdict ;
+  ces codes sont la pour l'operateur qui l'appelle a la main.
+  """
+  @spec eval_reconcile(:check | :apply) :: no_return()
+  def eval_reconcile(mode) when mode in [:check, :apply] do
+    # Meme raison qu'`eval_migrate` : `eval` CHARGE l'app, il ne la demarre pas, et le premier appel
+    # forge meurt alors en `unknown registry: Fleet.Forge.Finch`.
+    {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
+
+    # ⚠ UNE PORTE DONT LA SORTIE SE PARSE NE PARTAGE PAS STDOUT AVEC LE LOGGER. Mesure du
+    # 2026-08-17 au banc : l'apply a REUSSI, les trois faces etaient posees, et le module l'a rendu
+    # en ECHEC — `import/2` loggue (un `info` de reussite, quatre `warning` de cap-profile), le
+    # handler par defaut ecrit sur stdout, et chaque ligne de log arrivait au lecteur comme un
+    # verdict de projet illisible. Le contrat « un mot par ligne » etait donc intenable par
+    # construction, pas par derive de format.
+    #
+    # Les diagnostics ne sont pas perdus, ils sont DEPLACES sur stderr — la ou l'appelant les
+    # reprend deja quand la porte meurt. Ne rien changer aurait laisse un module qui crie sur une
+    # convergence reussie ; les couper aurait rendu muette la seule trace utile en cas d'echec.
+    log_to_stderr!()
+
+    entries = reconcile(mode)
+
+    case entries do
+      [] -> IO.puts("RIEN aucun projet declare dans les catalogues installes")
+      _ -> Enum.each(entries, &IO.puts(reconcile_line(&1)))
+    end
+
+    cond do
+      Enum.any?(entries, &(&1.status == :failed)) -> System.halt(1)
+      Enum.any?(entries, &(&1.status == :missing)) -> System.halt(2)
+      true -> System.halt(0)
+    end
+  end
+
+  @doc """
+  L'etat de reconvergence de chaque projet des catalogues installes — la porte sans la sortie.
+
+  Rend une liste de `%{repo:, status:, reason:}`. `:check` lit (`:present` / `:missing`), `:apply`
+  agit (`:already` / `:imported`), les deux rendent `:failed` avec sa raison.
+
+  LE FILTRE EST `.lcars.json` SUR `main`, et il ne se derive pas du nom. Une org de catalogue porte
+  aussi des depots qui ne sont pas des projets — le `catalogue` qui la signe, le `project-template`
+  d'ou les projets sont generes — et les importer creerait trois faces autour d'un depot qu'aucun
+  humain n'a ouvert. Mesure du 2026-08-17 sur la forge du banc : un projet rend `200` sur ce
+  fichier, `project-template` et `catalogue` rendent `404`.
+  """
+  @spec reconcile(:check | :apply, keyword()) :: [
+          %{repo: String.t(), status: atom(), reason: term()}
+        ]
+  def reconcile(mode, opts \\ []) when mode in [:check, :apply] do
+    Enum.flat_map(installed_orgs(), &reconcile_org(&1, mode, opts))
+  end
+
+  # UNE ORG ILLISIBLE EST UN ECHEC, PAS UNE ORG VIDE. Rendre `[]` ferait lire « rien a importer » a
+  # un `check` qui n'a simplement pas su demander, et les autres orgs, elles, restent lisibles.
+  defp reconcile_org(org, mode, opts) do
+    case repo_mod(opts).list_org_repos(org, fc_opts(opts)) do
+      {:ok, names} ->
+        names |> Enum.sort() |> Enum.flat_map(&reconcile_repo(&1, mode, opts))
+
+      {:error, reason} ->
+        [%{repo: "#{org}/*", status: :failed, reason: {:org_unreadable, reason}}]
+    end
+  end
+
+  defp reconcile_repo(full_name, mode, opts) do
+    case declared_project?(full_name, opts) do
+      {:ok, true} -> [converge_project(full_name, mode, opts)]
+      {:ok, false} -> []
+      {:error, reason} -> [%{repo: full_name, status: :failed, reason: reason}]
+    end
+  end
+
+  defp declared_project?(full_name, opts) do
+    file = Fleet.Layout.project_declaration_file()
+    fc = Keyword.put(fc_opts(opts), :ref, "main")
+
+    case files_mod(opts).get_file(full_name, file, fc) do
+      {:ok, _} -> {:ok, true}
+      {:error, :not_found} -> {:ok, false}
+      # Une forge muette ne prouve pas l'absence de declaration : la nommer ici evite qu'un projet
+      # bien reel disparaisse de l'inventaire sur un timeout.
+      {:error, reason} -> {:error, {:declaration_unreadable, file, reason}}
+    end
+  end
+
+  defp converge_project(full_name, :check, opts) do
+    dirs = face_dirs(Fleet.Layout.project_name(full_name), opts)
+
+    # LES TROIS FACES, PAS UNE. Un projet dont il manque une seule face n'est pas ouvert ici : son
+    # architecte monterait un chemin absent. `check` ne tranche pas plus finement — il dit qu'il y a
+    # a faire, et `apply` dit quoi, avec le refus exact d'`import/2` si l'etat est a moitie pose.
+    if Enum.all?([dirs.code, dirs.ops, dirs.workshop], &File.dir?/1),
+      do: %{repo: full_name, status: :present, reason: nil},
+      else: %{repo: full_name, status: :missing, reason: nil}
+  end
+
+  # ⚠ L'ARCHITECTE NE S'ASSURE PAS D'ICI, ET CE N'EST PAS UN RACCOURCI. Mesure du 2026-08-17 au
+  # banc : l'import posait ses trois faces puis MOURAIT sur
+  # `GenServer.call(Fleet.Spawner.Supervisor, …) ** (EXIT) no process` — `eval` charge l'app, il ne
+  # la demarre pas, donc aucun superviseur de spawn n'existe dans cette VM. La convergence
+  # aboutissait sur le disque et rendait un echec, sans compensation, a la derniere jambe.
+  #
+  # Ce qui prend la suite existe deja : le poller de la fleet assure l'architecte de chaque projet
+  # qu'il sert (`Architect.ensure_alive/2`, a chaque tour). La reconvergence pose les FACES ; les
+  # pods appartiennent au cycle de vie d'une fleet vivante, qui n'est pas celui d'un provisionnement.
+  defp converge_project(full_name, :apply, opts) do
+    opts =
+      Keyword.put_new(opts, :ensure_architect, fn _repo, _o ->
+        {:deferred, "aucune fleet dans cette VM — le poller l'assure au demarrage"}
+      end)
+
+    # `__MODULE__.` obligatoire : `import/2` nu est la forme speciale du compilateur, pas ce verbe.
+    case __MODULE__.import(full_name, opts) do
+      {:ok, %{idempotent: true}} -> %{repo: full_name, status: :already, reason: nil}
+      {:ok, _} -> %{repo: full_name, status: :imported, reason: nil}
+      {:error, reason} -> %{repo: full_name, status: :failed, reason: reason}
+    end
+  end
+
+  # RETIRER PUIS REPOSER, et ce n'est pas une precaution de style : `type` est immuable sur un
+  # handler vivant — `update_handler_config` rend
+  # `{:error, {:illegal_config_change, :logger_std_h, %{type: :standard_io}, …}}`. Le handler est
+  # donc recree a l'identique, `type` mis a part, pour que le format et le niveau restent ceux que
+  # l'operateur a configures.
+  #
+  # AUCUN SECOURS : si la sortie ne peut pas etre separee, cette porte ne doit rien imprimer du
+  # tout. Un stdout partage produit des verdicts que l'appelant lira comme des projets, et c'est
+  # exactement le defaut qu'on ferme. On casse fort, l'appelant rend le cri.
+  defp log_to_stderr! do
+    {:ok, cfg} = :logger.get_handler_config(:default)
+    :ok = :logger.remove_handler(:default)
+
+    :ok =
+      :logger.add_handler(:default, cfg.module, %{
+        cfg
+        | config: Map.put(cfg.config, :type, :standard_error)
+      })
+  end
+
+  defp reconcile_line(%{repo: repo, status: :failed, reason: reason}),
+    do: "ECHEC   #{repo} — #{inspect(reason)}"
+
+  defp reconcile_line(%{repo: repo, status: status}) do
+    word =
+      case status do
+        :present -> "DEJA"
+        :already -> "DEJA"
+        :imported -> "IMPORTE"
+        :missing -> "MANQUE"
+      end
+
+    "#{String.pad_trailing(word, 7)} #{repo}"
   end
 
   @doc """
@@ -2098,14 +2285,28 @@ defmodule Fleet.Project.Onboard do
   # L'echec porte l'inventaire avec lui (`{:error, reason, published}`) parce que les faces sont
   # posees EN SEQUENCE : `ops` peut etre publiee avant que `workshop` echoue, et c'est le cas exact
   # que la fiche 6-124 decrit.
+  #
+  # LE MODE EST UN FAIT DE LAYOUT, il se declare ou la branche et le sous-arbre se declarent. Les
+  # trois faces vivent sous des racines PARTAGEES (`2775 root:fleet`), donc un projet ouvert par un
+  # humain est vu par les autres. `workshop` est la seule face qu'un architecte monte en **rw**
+  # (`Fleet.Project.Architect`), et elle heritait `2755` de l'umask : le second humain qui ouvre le
+  # projet d'un premier a le groupe `fleet` et pas le bit d'ecriture — ses pods meurent a la
+  # premiere ecriture, avec une erreur qui accuse bwrap. `ops` reste `2755` : elle est montee `ro`,
+  # et le declarer ici est ce qui rend la difference LISIBLE au lieu de la laisser a l'umask.
+  # Le setgid est conserve dans les deux (le groupe `fleet` est herite de la racine, pas repose).
   defp ensure_writer_faces(full_name, url, dirs, name, opts) do
     faces = [
-      {dirs.ops, Fleet.Layout.ops_branch(), "ops"},
-      {dirs.workshop, Fleet.Layout.workshop_branch(), "workshop"}
+      %{dir: dirs.ops, branch: Fleet.Layout.ops_branch(), template: "ops", mode: 0o2755},
+      %{
+        dir: dirs.workshop,
+        branch: Fleet.Layout.workshop_branch(),
+        template: "workshop",
+        mode: 0o2775
+      }
     ]
 
-    Enum.reduce_while(faces, {:ok, []}, fn {dir, branch, template}, {:ok, published} ->
-      case ensure_face(full_name, url, dir, branch, template, name, opts) do
+    Enum.reduce_while(faces, {:ok, []}, fn %{branch: branch} = face, {:ok, published} ->
+      case ensure_face(full_name, url, face, name, opts) do
         {:ok, :published} -> {:cont, {:ok, published ++ [branch]}}
         {:ok, :cloned} -> {:cont, {:ok, published}}
         {:error, reason} -> {:halt, {:error, reason, published}}
@@ -2203,6 +2404,8 @@ defmodule Fleet.Project.Onboard do
   defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
 
   defp repo_mod(opts), do: Keyword.get(opts, :forge_repo, ForgeClient.Repo)
+
+  defp files_mod(opts), do: Keyword.get(opts, :forge_files, ForgeClient.Files)
 
   # L'ORG DU CATALOGUE EXISTE-T-ELLE SUR CETTE FORGE ? C'est la SEULE question que cette porte pose,
   # et elle la pose DIRECTEMENT.
@@ -2505,8 +2708,8 @@ defmodule Fleet.Project.Onboard do
   end
 
   # Clone the face if the forge already carries the branch, otherwise build and publish it. Same
-  # shape for both writer faces: the ONLY per-face inputs are the branch and the template subtree,
-  # so a third one costs a call site and no new logic.
+  # shape for both writer faces: every per-face input travels in ONE map (branch, template subtree,
+  # host mode), so a third face costs a call site and no new logic.
   #
   # ⚠ SITE 3 SUR 3 — ET C'EST LUI QUI ECRIT. Sur une forge illisible, l'ancien `false` envoyait dans
   # le `else` : init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une
@@ -2519,7 +2722,9 @@ defmodule Fleet.Project.Onboard do
   # pour defaire : `:published` est une branche que CETTE tentative a mise sur la forge, `:cloned`
   # une branche qui appartenait deja au depot. Confondre les deux, c'est soit laisser un residu,
   # soit supprimer le travail de quelqu'un d'autre.
-  defp ensure_face(full_name, url, dir, branch, template, name, opts) do
+  defp ensure_face(full_name, url, face, name, opts) do
+    %{dir: dir, branch: branch, template: template, mode: mode} = face
+
     case repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
       {:error, reason} ->
         {:error, {:branch_unreadable, branch, reason}}
@@ -2527,17 +2732,28 @@ defmodule Fleet.Project.Onboard do
       {:ok, true} ->
         File.mkdir_p!(Path.dirname(dir))
 
-        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true) do
+        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true),
+             :ok <- chmod_face(dir, mode) do
           {:ok, :cloned}
         end
 
       {:ok, false} ->
         with :ok <- init_face(dir, url, branch),
+             :ok <- chmod_face(dir, mode),
              :ok <- Scaffold.face(dir, template, name, opts),
              :ok <- commit(dir, "chore(import): init #{branch}"),
              :ok <- publish_face(dir, branch) do
           {:ok, :published}
         end
+    end
+  end
+
+  # NOMME L'ECHEC. Un `{:error, :eperm}` nu remonterait jusqu'a l'appelant sans dire de quel
+  # repertoire il parle, dans un `with` qui en enchaine cinq.
+  defp chmod_face(dir, mode) do
+    case File.chmod(dir, mode) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:face_mode_failed, dir, mode, reason}}
     end
   end
 

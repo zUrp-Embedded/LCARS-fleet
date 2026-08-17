@@ -143,3 +143,26 @@ printf "INSTALLED fleet -\n"
   [ ! -e "$HOME/.lcars/catalogues.active" ]
   [ ! -e "$BATS_TEST_TMPDIR/catalogues.active" ]
 }
+
+# ─── `project reconcile` : la porte de reconvergence de /home ────────────────────────────────────
+# La CLI n'agit pas plus ici qu'ailleurs — elle transmet un mode au release. Ce qui se mesure est
+# donc ce qu'elle refuse et ce qu'elle instruit.
+
+@test "project reconcile: un mode inconnu est refuse, et les deux modes sont nommes" {
+  # Le footgun exact : `reconcile --apply`, `reconcile all`, `reconcile now`. Un mode non reconnu
+  # qui retomberait sur `check` rendrait un succes muet a qui croyait importer.
+  run "$SUT" project reconcile maintenant
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"check|apply"* ]]
+}
+
+@test "project: le verbe est INSTRUIT — l'usage et le refus nomment les deux sous-commandes" {
+  # Un verbe absent de l'usage est un verbe que personne n'instruit : c'est ce que ce depot a deja
+  # paye une fois, sur une commande vivante et invisible.
+  run "$SUT" project
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"migrate|reconcile"* ]]
+
+  run "$SUT" help
+  [[ "$output" == *"project reconcile"* ]]
+}

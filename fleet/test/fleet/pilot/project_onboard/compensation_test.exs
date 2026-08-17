@@ -454,4 +454,66 @@ defmodule Fleet.Project.OnboardCompensationTest do
       assert {:error, {:already_exists, _}} = ProjectOnboard.onboard("apollo", o)
     end
   end
+
+  # ⚠ TROIS ISSUES POUR L'ARCHITECTE, ET CELLE-CI EST NEE D'UNE MORT AU BANC (2026-08-17). La porte
+  # de reconvergence tourne dans un `eval` : l'app est CHARGEE, pas demarree, donc
+  # `GenServer.call(Fleet.Spawner.Supervisor, …)` rend `** (EXIT) no process`. L'import posait ses
+  # trois faces puis mourait a la derniere jambe, sans compensation. Un appelant sans fleet dit
+  # donc `:deferred`, et le resultat le PORTE : « failed » accuserait le projet d'un defaut qu'il
+  # n'a pas, « up » mentirait sur un pod qui n'existe pas.
+  test "un appelant SANS fleet differe l'architecte — ni up, ni failed", %{tmp_dir: tmp} do
+    o =
+      Keyword.put(opts(tmp), :ensure_architect, fn _repo, _o ->
+        {:deferred, "aucune fleet dans cette VM"}
+      end)
+
+    assert {:ok, %{repo: "fleet/differe", architect: arch}} =
+             ProjectOnboard.onboard("differe", o)
+
+    assert arch == %{status: "deferred", reason: "aucune fleet dans cette VM"}
+  end
+
+  describe "le MODE des faces d'ecriture" do
+    # ⚠ CE N'EST PAS UN REGLAGE COSMETIQUE. Les trois faces vivent sous des racines PARTAGEES
+    # (`2775 root:fleet`) : le projet ouvert par un humain est vu par les autres. `workshop` est la
+    # SEULE face qu'un architecte monte en `rw` (`Fleet.Project.Architect`), et elle heritait `2755`
+    # de l'umask — donc un second humain, membre du groupe `fleet` et sans le bit d'ecriture, voyait
+    # ses pods mourir a la premiere ecriture sur une erreur qui accuse bwrap.
+    #
+    # ⚠ LES DEUX ASSERTIONS SONT LE TEMOIN, PAS UNE SEULE. Sans le `chmod`, les deux faces heritent
+    # du MEME mode — celui de l'umask du processus — et une seule des deux valeurs attendues peut
+    # alors coincider par accident : `umask 002` rend `2775` (ops tombe), `umask 022` rend `2755`
+    # (workshop tombe). Garder la paire est ce qui rend le temoin independant de l'environnement ;
+    # en supprimer une moitie le rendrait vert sur la machine ou l'umask est complaisant.
+    defp face_mode(dir), do: Bitwise.band(File.stat!(dir).mode, 0o7777)
+
+    test "creees : workshop est g+w, ops ne l'est pas", %{tmp_dir: tmp} do
+      o = opts(tmp)
+      {:ok, "fleet/neuf"} = FileForge.create_repo("neuf", [])
+
+      assert {:ok, %{repo: "fleet/neuf"}} = ProjectOnboard.import("fleet/neuf", o)
+
+      assert face_mode(Path.join(o[:workshop_root], "neuf")) == 0o2775
+      assert face_mode(Path.join(o[:ops_root], "neuf")) == 0o2755
+    end
+
+    test "CLONEES : le mode est pose sur l'autre branche aussi", %{tmp_dir: tmp} do
+      # Le chemin qui manquait le plus : quand la forge porte deja les deux branches, les faces sont
+      # CLONEES et non initialisees. C'est le cas exact du second humain qui rejoint un projet — le
+      # seul ou le bit manquant se paie — donc un `chmod` pose dans la seule branche de creation
+      # n'aurait jamais touche personne.
+      o = opts(tmp)
+      {:ok, "fleet/rejoint"} = FileForge.create_repo("rejoint", [])
+      bare = Path.join([tmp, "forge", "fleet", "rejoint.git"])
+      {_, 0} = System.cmd("git", ["-C", bare, "branch", "ops", "main"], stderr_to_stdout: true)
+
+      {_, 0} =
+        System.cmd("git", ["-C", bare, "branch", "workshop", "main"], stderr_to_stdout: true)
+
+      assert {:ok, %{repo: "fleet/rejoint"}} = ProjectOnboard.import("fleet/rejoint", o)
+
+      assert face_mode(Path.join(o[:workshop_root], "rejoint")) == 0o2775
+      assert face_mode(Path.join(o[:ops_root], "rejoint")) == 0o2755
+    end
+  end
 end

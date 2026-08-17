@@ -101,6 +101,13 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
 
+  $PROG project reconcile [check|apply]
+      La forge dit quels projets existent, le disque suit. Sur un /home neuf — boite
+      reinstallee, second humain qui arrive sur une fleet deja peuplee — les faces
+      locales n'existent pas alors que les projets, eux, sont intacts. « check » ne
+      touche rien et liste ce qui manque ; « apply » importe. Un projet en echec
+      n'arrete pas les autres.
+
   $PROG forge add <name> --host github|gitlab --owner <owner> [--dest-host H]
   $PROG forge list
   $PROG forge status
@@ -275,26 +282,37 @@ cat_dir_of() {
 # Elle demande donc au release, par la meme porte `eval` que `catalogue verify`. La porte parle en
 # MOTS (`INSTALLED`, `AVAILABLE`, `UPDATABLE`), pas en tableau formate : une colonne ajoutee un jour
 # ne doit pas avoir a se mettre d'accord entre deux langages.
-cat_states() {
-  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
-  [[ -x "$bin" ]] || return 127
-
-  # ⚠ L'ADRESSE de la forge vient de `~/.lcars/fleet_v2.env`, et cette porte ne la chargeait pas —
-  # D3 de l'audit independant (2026-08-16). Mesure du 2026-08-11, deja payee par `project migrate` :
-  # l'environ d'un login humain ne porte AUCUN FORGE_*, rien ne source ce fichier hors fleet_v2.
-  # Sans lui, la porte rendait `{:config, {:missing, :base_url}}` — une liste inutilisable sur toute
-  # boite dont l'env n'est pas cable a la main, sous un message qui accuse la forge.
-  #
-  # Meme frontiere que `cmd_project_migrate`, prise par le meme bout : charger le fichier ne donne
-  # aucun acces forge a ce CLI — il TRANSMET sa configuration au release, qui agit. Les ports que le
-  # fichier porte aussi sont neutralises par `LCARS_TOOL_EVAL=1`.
+# ─── la configuration de la BOITE, chargee une fois pour toutes les portes ────────────────────────
+#
+# ⚠ L'ADRESSE de la forge vit dans `~/.lcars/fleet_v2.env` et NULLE PART AILLEURS. Mesure du
+# 2026-08-11 : l'environ d'un login humain ne porte aucun `FORGE_*`, et rien ne source ce fichier
+# hors `fleet_v2`. Une porte qui ne le charge pas rend `{:config, {:missing, :base_url}}` sur une
+# boite entierement cablee, sous un message qui accuse la forge — c'est D3 de l'audit independant
+# du 2026-08-16, et il avait deja mordu `project migrate` avant `catalogue list`.
+#
+# CHARGER CE FICHIER NE DONNE AUCUN ACCES FORGE A CE CLI. Il ne fait toujours aucun appel : il
+# TRANSMET sa configuration au release, qui agit. Le fichier porte AUSSI des ports d'ecoute ;
+# `LCARS_TOOL_EVAL=1`, pose par chaque appelant, neutralise le bloc qui les ouvrirait.
+#
+# La fonction existe parce que ces lignes etaient recopiees a chaque porte, avec leur commentaire :
+# trois copies d'un contrat qui n'a qu'une source, dont deux avaient deja diverge d'un `2>/dev/null`.
+_load_box_env() {
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
-  if [[ -f "$env_file" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-  fi
+  [[ -f "$env_file" ]] || return 0
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  set +a
+}
+
+# Le binaire de release — un seul defaut, pose ici. L'appelant decide ce qu'il fait de son absence :
+# `catalogue list` la rend en 127 pour la dire, les autres portes meurent dessus.
+_release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"; }
+
+cat_states() {
+  local bin; bin="$(_release_bin)"
+  [[ -x "$bin" ]] || return 127
+  _load_box_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Application.CatalogueLifecycle.eval_main()"
@@ -434,35 +452,41 @@ cmd_project_migrate() {
   local repo="${1:?project migrate: depot requis (owner/nom)}"
   local cat="${2:?project migrate: catalogue forge requis}"
   [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
-  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
-
-  # L'ADRESSE de la forge vient de l'environnement de l'OPERATEUR : `~/.lcars/fleet_v2.env` est le
-  # fichier qu'il edite, et `bin/fleet_v2` le charge exactement ainsi. Le charger ici ne donne aucun
-  # acces forge a ce CLI — il ne fait toujours aucun appel : il TRANSMET sa configuration au release,
-  # qui agit. Sans ca la porte echoue sur `{:config, {:missing, :base_url}}` sur une boite ou tout est
-  # cable, parce que FORGE_BASE_URL ne vit que dans ce fichier (mesure du 2026-08-11 : `env` du login
-  # `lcars` ne porte aucun FORGE_*, et rien ne le source hors fleet_v2).
-  #
-  # Le fichier porte AUSSI des ports ; `LCARS_TOOL_EVAL=1` neutralise le bloc qui les ouvrirait, donc
-  # le charger reste sans effet de bord. C'est la meme frontiere que le garde, prise par l'autre bout.
-  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
-  if [[ -f "$env_file" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-  fi
+  _load_box_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Project.Onboard.eval_migrate(\"$repo\", \"$cat\")"
 }
 
+# LA FORGE SAIT QUELS PROJETS EXISTENT, LE DISQUE NE LE SAIT PLUS. Un `/home` neuf — boite
+# reinstallee, second humain qui arrive sur une fleet deja peuplee — n'a aucune face : l'inventaire
+# n'existe que sur la forge, et rien ne l'y lisait. Cette porte relaie ; l'import lui-meme est le
+# rail qui existe deja (`import/2`, idempotent), aucun verbe n'est ajoute.
+#
+# `check` ne touche rien et dit ce qui manque ; `apply` importe. Un projet en echec n'arrete pas les
+# autres — une boite a laquelle il manque neuf projets sur dix doit en recuperer neuf, pas zero.
+cmd_project_reconcile() {
+  local mode="${1:-check}"
+  case "$mode" in
+    check|apply) ;;
+    *) die "project reconcile: mode inconnu « $mode » (check|apply)" ;;
+  esac
+  local bin; bin="$(_release_bin)"
+  [[ -x "$bin" ]] || die "project reconcile: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
+  _load_box_env
+
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Project.Onboard.eval_reconcile(:$mode)"
+}
+
 cmd_project() {
   case "${1:-}" in
-    migrate) shift; cmd_project_migrate "$@" ;;
-    "")      die "project: sous-commande requise (migrate)" ;;
-    *)       die "project: sous-commande inconnue « $1 » (migrate)" ;;
+    migrate)   shift; cmd_project_migrate "$@" ;;
+    reconcile) shift; cmd_project_reconcile "$@" ;;
+    "")        die "project: sous-commande requise (migrate|reconcile)" ;;
+    *)         die "project: sous-commande inconnue « $1 » (migrate|reconcile)" ;;
   esac
 }
 
@@ -669,10 +693,11 @@ cmd_approve() {
   if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then have_cli=1; fi
   export GIT_TERMINAL_PROMPT=0
 
-  # Internal forge config — same source as cmd_project_migrate: ~/.lcars/fleet_v2.env, nowhere else.
+  # Internal forge config — one source, loaded by the one function that knows it (`_load_box_env`).
+  # This door is the only one that CONSUMES the values itself instead of passing them to the release,
+  # so it is also the only one that refuses on their absence.
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
-  # shellcheck disable=SC1090
-  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+  _load_box_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
   [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] || die "approve: FORGE_TOKEN_FILE absent/illisible ($env_file)"
 

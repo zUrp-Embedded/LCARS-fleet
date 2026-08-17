@@ -564,6 +564,38 @@ as_human() {
 # AVANT la garde p_fail de l'appelant — abort muet, le contrat « vide si inconnu » était un mensonge.
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
+# ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
+#
+# ⚠ TOUS LES `# NEEDS: human` NE PARLENT PAS DU MÊME HUMAIN. L'entrypoint conteneur joue le cycle de
+# boot avec `--human $LCARS_ADMIRAL` : le sysadmin. C'est juste pour ce qui lui appartient (son
+# `~/.lcars`, son binaire `claude`), et FAUX pour ce qui appartient à une fleet — un module qui
+# poserait du travail de fleet sous cet uid le poserait sous le seul compte qui ne peut pas en
+# lancer une.
+#
+# DEUX CONDITIONS, PARCE QU'IL Y A DEUX RÈGLES, et c'est le même couple que le GUARD B de
+# `bin/fleet_v2` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
+#   1. `uid >= UID_MIN` — la frontière système/humain. Elle n'est pas à inventer : `/etc/login.defs`
+#      la déclare et `useradd` la lit.
+#   2. `uid != SYSADMIN_UID` — la réservation du siège, que `login.defs` ne peut PAS exprimer :
+#      UID_MIN vaut 1000 et le sysadmin EST 1000, donc le système le classe utilisateur régulier.
+#
+# La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet_v2` parce que le provisioning ne peut
+# pas dépendre de l'artefact qu'il INSTALLE : `60-deploy` pose ce binaire, et une machine vierge
+# n'en a aucun quand ce cycle démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
+#
+# ⚠ ARITHMÉTIQUE, jamais des chaînes : en comparaison lexicographique `"999" < "1000"` est FAUX, et
+# un compte système à uid 999 passerait la garde.
+is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
+  local login="${1:-$PROV_HUMAN}" uid uid_min
+  uid="$(id -u -- "$login" 2>/dev/null || true)"
+  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  # `|| true` LOAD-BEARING : sous `set -euo pipefail`, un login.defs absent tuerait le module AVANT
+  # la garde. Une garde qui s'évanouit sur une lecture ratée est pire que pas de garde.
+  uid_min="$(awk '/^UID_MIN/ {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
+  [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
+  (( uid >= uid_min )) && (( uid != ${LCARS_SYSADMIN_UID:-1000} ))
+}
+
 # Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de
 # la lib (fleet/deploy/lib/ → ../../..), jamais re-devinée par heuristique dans un module.
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
