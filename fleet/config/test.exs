@@ -14,15 +14,28 @@ config :lcars_fleet, mcp_boot_environment: :host
 # Hermétisme (acte3 vague C) : le cold-boot sweep de MCP.Supervisor.init/1 rm les sockets
 # résiduels sous :sock_base. Sans cet override il taperait `/run/lcars/mcp` réel (fleet vivante
 # même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
-config :lcars_fleet, mcp_sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test")
+#
+# ⚠ ET LE SUFFIXE PAR PID N'EST PAS COSMETIQUE : ce chemin etait CONSTANT, donc deux `mix test`
+# concurrents sur la meme machine ecrivaient au meme endroit — et ce sweep-la SUPPRIME ce qu'il
+# trouve. La suite A effaçait les sockets de la suite B en demarrant. L'hermetisme ci-dessus a ete
+# ecrit contre une fleet VIVANTE, pas contre une seconde suite : il tenait la question qu'on lui
+# posait, et pas celle-ci. (Relaye par le consultant, 2026-08-17, en enquetant sur des echecs non
+# reproductibles ; verifie ici.)
+#
+# `System.pid/0` plutot qu'un entier unique : le dossier DIT quelle execution le possede, ce qui
+# transforme un residu dans `/tmp` en information au lieu d'un dechet anonyme.
+config :lcars_fleet,
+  mcp_sock_base: Path.join(System.tmp_dir!(), "lcars-fleet-mcp-test-#{System.pid()}")
 
 # 6-127 — MÊME HERMÉTISME, MÊME RAISON. Le journal des completions dues vit par défaut sous
 # `~/.lcars/completion-outbox`, c'est-à-dire dans l'état d'une fleet VIVANTE sur cette machine.
 # Sans cet override, `mix test` y écrirait ses charges utiles et, pire, le `StepRunConsumer`
 # démarré par un cas rejouerait au boot les completions RÉELLES qu'il y trouverait — des écritures
 # forge déclenchées par une suite de tests. On l'isole sous un tmp.
+# Meme suffixe par PID, meme raison qu'au-dessus : deux suites concurrentes partageaient ce journal.
 config :lcars_fleet,
-  pilot_completion_outbox_root: Path.join(System.tmp_dir!(), "lcars-completion-outbox-test")
+  pilot_completion_outbox_root:
+    Path.join(System.tmp_dir!(), "lcars-completion-outbox-test-#{System.pid()}")
 
 # Hermétisme : le SocketWarden réconcilie les sockets contre les pods VIVANTS du spawner — en test
 # il verrait les sockets posées à la main par les cases (aucun pod réel derrière) et les réclamerait
