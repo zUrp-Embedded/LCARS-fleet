@@ -28,14 +28,11 @@
 #    l'HOTE ; c'est un geste de banc (le lien Anthropic est un compte, pas un artefact du projet).
 # 3bis. LE BINAIRE CLAUDE N'EST PAS DANS L'IMAGE. Il est installe dans le stage `build` (pour le
 #    gate) et ce stage est JETE : l'image finale n'en a pas. Le module `40-claude-bin` le telecharge
-#    au boot depuis claude.ai — donc une boite NEUVE sans reseau n'obtient aucun binaire, aucun pod
-#    ne demarre, et la fleet a l'air saine en ne produisant rien. On seme donc le binaire de l'hote
-#    AVANT le premier boot, a `$PROV_CLAUDE_SEED` (chemin lu dans provision-lib, pas recopie ici).
-#    DEUX raisons pour la fenetre create→start, et pas plus tard : l'humain du runtime n'existe pas
-#    encore (l'entrypoint le cree au boot, donc son home n'est pas un endroit ou deposer quoi que ce
-#    soit), et une graine posee APRES le boot laisserait le module en drift permanent apres avoir
-#    brule un telechargement rate. La source est resolue par `readlink -f` : l'installeur vendor
-#    pose un SYMLINK, et copier le lien donne une cible morte dans la boite.
+#    au boot depuis claude.ai — donc UN BANC EXIGE DU RESEAU, et c'est voulu (⚖ user 2026-08-17 :
+#    « il DOIT derouler le compose entierement, et re-dl a chaque tour »). Un semis a existe ici et
+#    a ete retire : il rendait vert un chemin que le banc n'avait pas parcouru. Sans reseau, le boot
+#    ne pose aucun binaire, aucun pod ne demarre — et c'est au VERDICT de provisioning de le dire
+#    fort, pas a une copie cachee de le masquer.
 # 4. UN BANC NE DOIT JAMAIS COGNER LE BANC D'A COTE. Projet compose, port de forge et adresse de
 #    bind sont TOUS parametres et defaultent sur des valeurs libres. `--bind` couvre la boite ET la
 #    forge depuis le 2026-08-07 : jusque-la il n'etait passe qu'a la boite, la forge retombait sur
@@ -46,7 +43,7 @@
 #
 # USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 3700] [--bind 127.0.0.5]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
-#                     [--claude-from ~/.local/bin/claude] [--no-claude-bin] [--no-human-admin]
+#                     [--no-human-admin]
 # EXIT  : 0 banc pret (verdict `banc PRET`, ou `banc PRET_SANS_CI` sous --no-runner) · 1
 #         arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas · 4 amorcage
 #         forge · 5 creds · 6 le verdict final ne passe pas — Y COMPRIS un runner DEMANDE qui ne
@@ -73,8 +70,6 @@ RUNNER_LABELS=""
 WITH_RUNNER=1
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
-CLAUDE_FROM="$HOME/.local/bin/claude"
-WITH_CLAUDE_BIN=1
 HUMAN="lcars"
 # LE BANC PROMEUT L'HUMAIN SITE-ADMIN, ET IL LE DEMANDE — il ne l'herite plus. Depuis le
 # 2026-08-07 le bootstrap defaute au modele de prod (non-admin) : la propriete de banc est donc
@@ -93,8 +88,6 @@ while [[ $# -gt 0 ]]; do
     --no-runner)  WITH_RUNNER=0; shift ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
-    --claude-from) CLAUDE_FROM="${2:?}"; shift 2 ;;
-    --no-claude-bin) WITH_CLAUDE_BIN=0; shift ;;
     --no-human-admin) BOOTSTRAP_EXTRA=("${BOOTSTRAP_EXTRA[@]/--human-admin/}"); shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
     -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -227,26 +220,20 @@ env LCARS_IMAGE="$IMAGE" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3
 
-# La graine du binaire vendor (piege 3bis) — dans la fenetre create→start, sur un conteneur qui
-# existe et n'a pas demarre. Le chemin cible est lu dans provision-lib : le module qui le consomme
-# en est l'autorite, et un chemin recopie ici derive le jour ou il bouge.
-if [[ "$WITH_CLAUDE_BIN" -eq 1 ]]; then
-  SEED_DEST="$(bash -c '. "$1" >/dev/null 2>&1; echo "$PROV_CLAUDE_SEED"' _ \
-                 "$REPO_ROOT/fleet/deploy/lib/provision-lib.sh")"
-  CLAUDE_REAL="$(readlink -f "$CLAUDE_FROM" 2>/dev/null || true)"
-  if [[ -z "$SEED_DEST" ]]; then
-    say "graine claude SAUTEE : provision-lib ne rend pas PROV_CLAUDE_SEED (la boite telechargera)"
-  elif [[ ! -x "$CLAUDE_REAL" ]]; then
-    # Degrade en le DISANT, jamais en mourant : un banc avec reseau marche tres bien sans graine.
-    say "graine claude SAUTEE : $CLAUDE_FROM introuvable ou non executable — la boite telechargera au boot (il lui faut du reseau)"
-  else
-    "$DOCKER_BIN" cp "$CLAUDE_REAL" "$BOX:$SEED_DEST" \
-      || die "graine claude non copiee vers $BOX:$SEED_DEST" 3
-    say "graine claude posee ($CLAUDE_REAL -> $SEED_DEST) — 40-claude-bin ne touchera pas au reseau"
-  fi
-else
-  say "graine claude NON posee (--no-claude-bin) — la boite telechargera au boot, par choix"
-fi
+# ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS (2026-08-17). NE PAS LE REMETTRE.
+#
+# ⚖ ARBITRAGE USER : « le bench ne devrait PAS copier le binaire local, il DOIT derouler le compose
+# entierement, et re-dl a chaque tour. C'est moi qui paye la BP, j'ai jamais demande a l'economiser
+# pour 300 Mo — et en faisant ca on a un banc qui ne reflete pas la realite du deploy de prod, donc
+# il est inutile. »
+#
+# C'est la meme faute que ce depot traque partout : un banc seme rend VERT un chemin qu'il n'a pas
+# parcouru. Le telechargement du binaire EST une etape du deploiement reel ; la sauter fait mesurer
+# autre chose que ce qu'on croit mesurer.
+#
+# La fenetre `create` -> `start` reste, elle, pour la raison qui la justifiait deja seule : la boite
+# doit etre sur le reseau de la forge AVANT de demarrer (piege 1), sinon `forge` ne resout pas et
+# tout le provisioning forge part en drift au premier boot.
 
 # PAS DE `network connect` : la surcouche a declare le reseau de la forge en `external`, donc le
 # `create` ci-dessus a DEJA branche la boite. `forge` resout avant le premier boot, ce qui etait

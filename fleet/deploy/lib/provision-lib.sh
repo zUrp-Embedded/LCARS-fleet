@@ -56,7 +56,6 @@ PROVISION_LIB_LOADED=1
 # court-circuite l'installeur officiel de 40-claude-bin (donc le réseau). Root-owned, hors de tout
 # home — l'humain du runtime n'existe pas encore quand un semis extérieur le pose. Vide/absent =
 # comportement inchangé : le module télécharge.
-: "${PROV_CLAUDE_SEED:=/local/claude-seed}"
 # QUATRIÈME liste de rôles du système (avec forge.tf, provision-role-tokens.sh, le catalogue
 # cap-profiles) — et elle GAGNE : 50-forge passe --roles "$PROV_ROLES" au mint A4, écrasant le
 # défaut du .sh. un producteur absent ICI = pas de token sur une fleet fraîche = rail ops en

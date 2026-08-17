@@ -25,7 +25,10 @@ setup() {
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
   : > "$ROOT/fleet/deploy/deps/.keep"
-  printf '#!/usr/bin/env bash\nPROV_CLAUDE_SEED=/local/claude\n' > "$ROOT/fleet/deploy/lib/provision-lib.sh"
+  # La lib est une doublure VIDE : `bench-up` ne la source plus depuis que le semis du binaire
+  # vendor a ete retire (2026-08-17). Le fichier reste parce que son ABSENCE ferait echouer des
+  # gestes qui verifient l'arbre, pas parce qu'on en lit quelque chose.
+  printf '#!/usr/bin/env bash\n' > "$ROOT/fleet/deploy/lib/provision-lib.sh"
 
   # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
   # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par

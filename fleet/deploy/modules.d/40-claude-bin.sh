@@ -22,16 +22,22 @@
 # Pas de pin/sha : Anthropic ne publie ni hash ni signature (risque supply-chain ASSUMÉ et
 # documenté depuis la v0 — la sonde d'intégrité est fonctionnelle : le binaire répond --version).
 #
-# DEUX SOURCES, et la GRAINE passe avant le réseau. `$PROV_CLAUDE_SEED` (défaut dans provision-lib)
-# est un binaire déjà posé sur la machine par un geste EXTÉRIEUR — un semis de banc, une image
-# pré-chargée. S'il répond `--version`, on le copie et on ne télécharge rien. Raison d'être : une
-# boîte NEUVE sans réseau n'obtient aucun binaire, donc aucun pod ne démarre, et la fleet a l'air
-# saine en ne produisant rien. La graine est root-owned et HORS de tout home : l'humain du runtime
-# n'existe pas encore quand un semis extérieur la pose (l'entrypoint le crée au boot).
+# ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$PROV_CLAUDE_SEED`, un binaire
+# déjà posé sur la machine par un geste extérieur — un semis de banc — que ce module préférait au
+# réseau. NE PAS LA RÉINTRODUIRE.
 #
-# La graine est une SOURCE, jamais une destination : le binaire final vit dans le home de l'humain
-# comme avant, posé par le même remplacement atomique. Les deux chemins partagent `install_bin` —
-# un `mv` non atomique sur l'un des deux serait un binaire tronqué que rien ne distingue.
+# ⚖ ARBITRAGE USER : « on ne cache pas un binaire anthropic, on fait UNIQUEMENT l'install
+# officielle », et pour le banc : « il ne devrait PAS copier le binaire local, il DOIT dérouler le
+# compose entièrement et re-dl à chaque tour. C'est moi qui paye la BP, j'ai jamais demandé à
+# l'économiser pour 300 Mo. »
+#
+# LE MOTIF EST UNE QUESTION DE MESURE, pas d'économie. Un banc semé n'exerce pas le chemin de
+# déploiement qu'il existe pour mesurer : il rend vert un chemin qu'il n'a pas parcouru, et c'est
+# exactement la classe de défaut que ce dépôt traque partout ailleurs. Le motif d'origine de la
+# graine — « une boîte NEUVE sans réseau n'obtient aucun binaire, donc aucun pod ne démarre, et la
+# fleet a l'air saine en ne produisant rien » — reste VRAI comme description ; ce qui change est la
+# réponse. Le bon comportement d'une boîte sans réseau n'est pas de se rabattre sur une copie
+# cachée, c'est de REFUSER FORT (cf. le verdict de provisioning publié par l'entrypoint).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -53,8 +59,8 @@ claude_ok() {
 # Remplacement ATOMIQUE dans le home de l'humain : copie vers un tmp DU MÊME DOSSIER puis `mv`.
 # Le même dossier n'est pas un détail — `mv` n'est atomique qu'à l'intérieur d'un système de
 # fichiers, et un binaire de ~100 Mo à moitié écrit sous le nom `claude` est indiscernable d'un bon.
-# Partagé par les deux sources (graine et installeur) : un des deux chemins non atomique poserait
-# exactement le défaut que l'autre évite.
+# ATOMIQUE, et ça reste vrai avec une seule source : un binaire de ~100 Mo à moitié écrit sous le
+# nom `claude` est indiscernable d'un bon.
 install_bin() {
   local src="$1" home="$2" dest="$3"
   local tmp="$home/.local/bin/.claude.new.$$"
@@ -85,30 +91,6 @@ apply() {
   bin="$(human_bin)"
 
   as_human mkdir -p "$home/.local/bin" || { p_fail "mkdir ~/.local/bin"; verdict_apply; }
-
-  # LA GRAINE D'ABORD. Un binaire déjà sur la machine rend le réseau inutile ; l'ordre est le
-  # contrat, pas une optimisation (cf. en-tête). La sonde est fonctionnelle — un fichier exécutable
-  # qui ne répond pas à `--version` n'est pas un binaire, c'est un piège, et on retombe sur
-  # l'installeur plutôt que de poser ça dans le home de l'humain.
-  local seed="${PROV_CLAUDE_SEED:-}"
-  # Sonde NUE, jamais `run_quiet` : run_quiet compte tout échec via p_fail (« l'échec COMPTE »,
-  # cf. lib B1), donc une graine qui répond « non » ferait échouer le module au lieu de le faire
-  # retomber sur l'installeur. Une sonde qui répond non n'est pas une panne, c'est une réponse.
-  if [[ -n "$seed" && -x "$seed" ]] && "$seed" --version >/dev/null 2>&1; then
-    if install_bin "$seed" "$home" "$bin"; then
-      if claude_ok; then
-        PROV_CHANGED=$((PROV_CHANGED + 1))
-        p_chg "claude posé depuis la graine $seed (aucun réseau) — $bin, version $(as_human "$bin" --version 2>/dev/null | head -1)"
-        verdict_apply
-      fi
-      p_fail "graine $seed copiée mais --version ne répond pas depuis $bin"
-      verdict_apply
-    fi
-    # Graine présente et vivante mais non copiable : c'est un défaut de la machine, pas une raison
-    # de télécharger 100 Mo par-dessus. On le DIT et on s'arrête là.
-    p_fail "graine $seed lisible mais non copiable vers $bin"
-    verdict_apply
-  fi
 
   staging="$(as_human mktemp -d "${TMPDIR:-/tmp}/claude-install.XXXXXX")" || { p_fail "staging mktemp"; verdict_apply; }
 
