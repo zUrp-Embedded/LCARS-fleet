@@ -494,13 +494,39 @@ admin_probe() { # admin_probe <login> <corps json|DOWN|NOTOKEN> [code http]
 }
 
 @test "adminite: le groupe est celui de la config, pas un litteral" {
-  # Le miroir shell de `PROV_ADMIN_GROUP` : deux noms qui divergent donneraient un convergeur qui
-  # peuple un groupe que personne ne lit.
+  # Un groupe que le convergeur peuple et que personne ne lit, c'est deux noms qui ont diverge.
   run bash -c "source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
   [ "$output" = "lcars-admin" ]
 
-  run bash -c "export LCARS_ADMIN_GROUP=autre; source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
+  run bash -c "export PROV_ADMIN_GROUP=autre; source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
   [ "$output" = "autre" ]
+}
+
+# ─── UN SEUL JEU DE NOMS POUR LES QUATRE FAITS PARTAGES ─────────────────────────────────────────
+#
+# ⚠ CE TEMOIN EXISTE PARCE QU'IL Y AVAIT DEUX FAMILLES DE VARIABLES. Ce script lisait
+# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_ADMIN_GROUP` / `LCARS_FLEET_GROUP` pendant que
+# `provision-lib.sh` declarait `PROV_*` pour les memes faits — mesure du 2026-08-17 : 59 occurrences
+# `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Personne ne posait ni l'un ni
+# l'autre, donc les DEFAUTS portaient seuls l'accord : poser `PROV_FORGE_ORG=starfleet` provisionnait
+# une org que ce convergeur n'interrogeait jamais, en silence.
+#
+# CE QUE CE TEMOIN NE PEUT PAS FAIRE, et il faut le dire : ce script ne source pas
+# `provision-lib.sh` (il tourne en boucle permanente, pas dans un cycle de provisionnement), donc le
+# defaut litteral reste ecrit DEUX FOIS. C'est cette egalite-la qu'on epingle, faute de pouvoir la
+# deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
+@test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
+  lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_ADMIN_GROUP:ADMIN_GROUP PROV_FLEET_GROUP:GROUP; do
+    prov="${v%%:*}"; local_var="${v##*:}"
+    declared="$(bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\${$prov}\"")"
+    used="$(bash -c "source '$SUT' 2>/dev/null; printf '%s' \"\${$local_var}\"")"
+    [ -n "$declared" ]
+    [ "$declared" = "$used" ] || {
+      echo "divergence sur $prov : provision-lib='$declared' convergeur='$used'" >&2
+      return 1
+    }
+  done
 }
 
 # ─── LA CONSOLE D'UN HUMAIN QUI EXISTE DEJA ─────────────────────────────────────────────────────

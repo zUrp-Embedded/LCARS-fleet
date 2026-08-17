@@ -61,15 +61,15 @@ OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC", "/etc/lcars/deck-oidc.json")
 # self-registered guest gets NO `groups` claim at all.
 #
 # ⚠ ONE PAIR OF VARIABLES NAMES THIS TEAM, AND THERE USED TO BE TWO. This line read
-# `LCARS_DECK_TEAM` (default `fleet:humans`) while `human-converger.sh` reads `LCARS_FORGE_ORG`
-# (`fleet`) and `LCARS_HUMANS_TEAM` (`humans`) — two knob sets for ONE fact, in two formats, and
+# `LCARS_DECK_TEAM` (default `fleet:humans`) while `human-converger.sh` read its own pair — two
+# knob sets for ONE fact, in two formats, and
 # nobody sets either: the defaults carried the agreement. Renaming the org broke it silently and in
 # one direction only. The forge then emits `<org>:humans` in the `groups` claim, this page compares
 # against a literal `fleet:humans` and REFUSES every non-admin human, while the converger keeps
 # creating their accounts — a box that provisions people it will not let in. The deck derives from
 # the same pair now, so the two doors cannot answer differently.
-FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
-HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("LCARS_HUMANS_TEAM", "humans"))
+FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
+HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("PROV_HUMANS_TEAM", "humans"))
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
 PENDING_TTL = 600

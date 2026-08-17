@@ -69,6 +69,10 @@ PROVISION_LIB_LOADED=1
 : "${PROV_CATALOGUES_DIR:=/home/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
+# La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck. Elle n'avait pas de nom
+# ici — elle vivait en `LCARS_HUMANS_TEAM` cote boite, seconde famille de variables pour un fait
+# que ce fichier declare deja pour ses voisins (org, groupes). Un jeu de noms, un fait.
+: "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
 # le SERVEUR compose (dans un conteneur, le nom du service : `http://forge:3000`) ; celle-ci est

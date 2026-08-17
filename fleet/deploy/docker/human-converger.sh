@@ -79,13 +79,24 @@ ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
 
 FORGE="${FORGE_BASE_URL:-}"
-ORG="${LCARS_FORGE_ORG:-fleet}"
-TEAM="${LCARS_HUMANS_TEAM:-humans}"
+# ⚠ CES NOMS SONT CEUX DU PROVISIONNEMENT, ET C'ETAIT UN SECOND JEU. Ce script lisait
+# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_ADMIN_GROUP` / `LCARS_FLEET_GROUP` pendant que
+# `provision-lib.sh` declare `PROV_FORGE_ORG` / `PROV_ADMIN_GROUP` / `PROV_FLEET_GROUP` — mesure du
+# 2026-08-17 : 59 occurrences `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Deux
+# jeux de noms pour UN fait, que personne ne pose, et dont les DEFAUTS portaient seuls l'accord :
+# un operateur qui pose `PROV_FORGE_ORG=starfleet` provisionne une org que ce convergeur
+# n'interroge jamais, en silence et dans un seul sens.
+#
+# Le defaut litteral, lui, reste ecrit deux fois — ce script ne source pas `provision-lib.sh` (il
+# tourne en boucle, pas dans un cycle de provisionnement). C'est l'egalite de ces deux litteraux
+# qu'un temoin bats epingle, faute de pouvoir la deriver.
+ORG="${PROV_FORGE_ORG:-fleet}"
+TEAM="${PROV_HUMANS_TEAM:-humans}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/system.gitea_token}"
 # L'AUTORITE, lue SEULEMENT pour la question de l'adminite — cf. `forge_is_admin`. Le convergeur
 # tourne en root permanent, donc il peut deja lire ce fichier ; ce qui change est qu'il s'en sert.
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
-ADMIN_GROUP="${LCARS_ADMIN_GROUP:-lcars-admin}"
+ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-lcars-system}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
@@ -105,7 +116,7 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
 # la console a la source, pour ses deux consommateurs a la fois.
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
-GROUP="${LCARS_FLEET_GROUP:-fleet}"
+GROUP="${PROV_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # GUARD A — L'UID RESERVE DU SYSADMIN (admiral) N'EST JAMAIS CONVERGE NI REVOQUE. Garde DUR keye sur
 # l'UID (1000), PAS sur un login : en prod le login d'admiral est celui de l'installeur (variable),

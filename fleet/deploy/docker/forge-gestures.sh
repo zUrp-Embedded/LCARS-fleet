@@ -48,7 +48,7 @@ MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
 # Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
-ADMIN_GROUP="${LCARS_ADMIN_GROUP:-lcars-admin}"
+ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
 # L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
 # `catalogue-source`, `template-sync`). Il s'appelait `TEMPLATE_SYNC` quand il n'en servait
 # qu'une : un nom qui decrit un seul usage devient faux au deuxieme.

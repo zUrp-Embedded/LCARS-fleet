@@ -1189,26 +1189,25 @@ forge_srv.shutdown()
 
 # ── L'EQUIPE DES HUMAINS SUIT L'ORG, ELLE N'EST PLUS UN LITTERAL ────────────────────────────────
 # Ce que ce temoin tient : le deck et `human-converger.sh` nomment la MEME equipe a partir des
-# MEMES variables. Il y en avait deux jeux (`LCARS_DECK_TEAM` ici, `LCARS_FORGE_ORG` +
-# `LCARS_HUMANS_TEAM` la-bas), personne n'en posait aucun, et les defauts portaient seuls l'accord.
+# MEMES variables. Il y en avait deux jeux (`LCARS_DECK_TEAM` ici, une paire `LCARS_*` la-bas), personne n'en posait aucun, et les defauts portaient seuls l'accord.
 # Le renommage de l'org le rompait dans un seul sens : la forge emet `<org>:humans`, le deck
 # comparait a `fleet:humans` et refusait tout humain non-admin pendant que le convergeur creait
 # leurs comptes.
 #
 # La forme negative est la moitie qui compte : sans elle, un `HUMANS_TEAM` reste fige a
 # `fleet:humans` passerait le premier check par pure coincidence de defaut.
-_env_saved = {k: os.environ.get(k) for k in ("LCARS_FORGE_ORG", "LCARS_HUMANS_TEAM")}
+_env_saved = {k: os.environ.get(k) for k in ("PROV_FORGE_ORG", "PROV_HUMANS_TEAM")}
 try:
     for _k in _env_saved:
         os.environ.pop(_k, None)
     check(load_deck().HUMANS_TEAM == "fleet:humans",
           "equipe: sans variable, le defaut vaut celui du convergeur (fleet + humans)")
 
-    os.environ["LCARS_FORGE_ORG"] = "starfleet"
+    os.environ["PROV_FORGE_ORG"] = "starfleet"
     check(load_deck().HUMANS_TEAM == "starfleet:humans",
           "equipe: renommer l'org DEPLACE l'equipe du deck — le litteral est mort")
 
-    os.environ["LCARS_HUMANS_TEAM"] = "crew"
+    os.environ["PROV_HUMANS_TEAM"] = "crew"
     check(load_deck().HUMANS_TEAM == "starfleet:crew",
           "equipe: les deux moities viennent des memes variables que le convergeur")
 finally:
