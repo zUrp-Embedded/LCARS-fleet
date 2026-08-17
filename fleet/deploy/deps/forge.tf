@@ -364,22 +364,16 @@ resource "gitea_team_membership" "human" {
   username = var.builtin_human
 }
 
-# ⚠ `gitea_team_membership.system_reads_humans` A VÉCU ICI, ET SON RETRAIT EST DATÉ (2026-08-17).
+# ⚠ LE COMPTE SYSTÈME N'EST MEMBRE D'AUCUNE TEAM, ET IL NE DOIT PAS LE DEVENIR.
 #
-# Il mettait `lcars-system` dans `humans` pour que le jeton système puisse LIRE les membres de cette
-# team — la vérification d'admission de l'onboard en dépendait. Son commentaire soutenait qu'il était
-# indispensable en recette : mesuré le 2026-08-12, le retirer laissait `GET /teams/<humans>/members`
-# répondre 200, mais SEULEMENT parce que le banc ajoutait aussi `lcars-system` aux `Owners` hors
-# Terraform — « une forge montée par CETTE RECETTE SEULE n'a pas cette propriété ».
+# `fleet:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
+# lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple. L'adhésion qui
+# vivait ici (le système dans `humans`) faisait exactement ça, pour un droit qu'il a déjà.
 #
-# CETTE PHRASE EST DEVENUE FAUSSE LE 2026-08-16, quatre jours après avoir été écrite : la propriété
-# de l'org a été rapatriée dans la recette (`gitea_team_membership.owner`, plus bas). Personne n'a
-# relu l'une en écrivant l'autre. Re-mesuré le 2026-08-17 : `lcars-system` lit `judges`, `writers` et
-# `externals` — 200 sur les trois, membre d'aucune. La propriété suffit.
-#
-# CE QUE LE RETRAIT ACHÈTE, et c'est la raison de fond : le système n'est plus DANS la liste qu'il
-# lit. `fleet:humans` répond « qui est une personne de cette fleet », et une liste qui contient son
-# propre lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple.
+# LA PROPRIÉTÉ DE L'ORG SUFFIT À LIRE LES TEAMS, et c'est ce qu'il faut savoir avant de « réparer »
+# une lecture en ajoutant une adhésion : `gitea_team_membership.owner` (plus bas) met le compte
+# système dans `Owners`, et depuis ce siège il lit les membres de n'importe quelle team de l'org.
+# Mesuré le 2026-08-17 : 200 sur `judges`, `writers` et `externals`, membre d'aucune.
 
 # ─── LA PROPRIÉTÉ DE L'ORG — rapatriée du banc le 2026-08-16 ─────────────────────────────────────
 # CE GESTE N'EXISTAIT QU'AU BANC, donc PAS en production. Il vivait à l'étape 4-bis de

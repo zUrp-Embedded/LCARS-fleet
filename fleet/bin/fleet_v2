@@ -332,8 +332,20 @@ cmd_start() {
   #  2. `uid == SYSADMIN_UID` — la reservation du siege, que `login.defs` ne peut PAS exprimer :
   #     UID_MIN vaut 1000 et admiral EST 1000, donc le systeme le classe utilisateur regulier. Cette
   #     regle-la est a LCARS, elle reste ici.
-  # Deplacer UID_MIN a 1001 aurait fusionne les deux — ecarte : `human-converger.sh` calcule un
-  # OFFSET d'uid a partir de UID_MIN, donc le bouger decale l'attribution des uid des workers.
+  # Deplacer UID_MIN a 1001 fusionnerait les deux regles en une — ecarte, et le motif ecrit ici
+  # etait FAUX : « human-converger.sh calcule un OFFSET d'uid a partir de UID_MIN ». Il n'en calcule
+  # rien, `UID_OFFSET="${LCARS_UID_OFFSET:-1000}"` est un defaut litteral, independant. Bouger
+  # UID_MIN ne decalerait aucun uid de worker.
+  #
+  # LE VRAI MOTIF : `UID_MIN` est une declaration du SYSTEME, pas la notre. `useradd` la lit, et
+  # deux autres lecteurs de ce depot aussi. La deplacer pour y loger une reservation propre a LCARS
+  # ferait porter une decision LCARS par un fichier de l'OS, la ou n'importe quel autre outil la
+  # lira comme une frontiere systeme. La reservation du siege est a nous : elle reste ici, en clair.
+  #
+  # Et elle ne peut PAS etre produite par une formule : le sysadmin est cree par l'entrypoint avec
+  # un uid EXPLICITE (`useradd -u ${LCARS_UID:-1000}`), hors du `forge_id + UID_OFFSET` par lequel
+  # le convergeur derive les humains. Aucune arithmetique ne le rend, aucune arithmetique ne
+  # l'ecarte — d'ou une condition, et non un intervalle.
   #
   # ⚠ ARITHMETIQUE, jamais des chaines : en comparaison lexicographique `"999" < "1000"` est FAUX,
   # et un compte systeme a uid 999 passerait le garde.
