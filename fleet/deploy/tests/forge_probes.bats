@@ -124,3 +124,60 @@ EOF
   [[ "$output" == *"inscription FERMÉE"* ]]
   [[ "$output" == *"DISABLE_REGISTRATION"* ]]
 }
+
+# ─── LE MODE APPLY NE DOIT PAS MOURIR SUR UNE BOITE DEJA CONVERGEE ──────────────────────────────
+#
+# ⚠ CE TEMOIN EXISTE PARCE QUE L'ABSENCE D'UN `return 0` A TUE UN BANC ENTIER (2026-08-17).
+# `converge_authority_modes` finissait sur `[[ "$PROV_MODE" == "check" ]] && p_ok …`. En mode APPLY
+# ce test est FAUX, donc la fonction rendait 1, donc `set -e` tuait le module juste apres — sans un
+# mot, en annoncant seulement « echecs: 1 ».
+#
+# ET IL NE MORD QUE SUR UNE BOITE DEJA CONVERGEE : au premier apply les modes sont a corriger, la
+# branche qui chgrp/chmod rend 0. C'est au SECOND que ca casse. Conséquence mesurée sur `lcars-l6` :
+# aucun jeton de role minte, deck OIDC non pose, convergeur aveugle, AUCUN humain materialise.
+#
+# CE QUE LE TEMOIN MESURE : que l'apply ATTEINT l'etape suivante. Pas un succes d'apply — il en
+# faudrait une forge entiere — mais le franchissement de la ligne qui tuait.
+apply_stubs() { # $1 = mode rendu par `stat` sur les fichiers d'autorite
+  cat > "$BIN/getent" <<'EOF2'
+#!/usr/bin/env bash
+[[ "$1" == "group" ]] && { printf 'lcars-admin:x:3000:\n'; exit 0; }
+exit 2
+EOF2
+  cat > "$BIN/stat" <<EOF2
+#!/usr/bin/env bash
+printf '%s' '$1'
+EOF2
+  cat > "$BIN/curl" <<'EOF2'
+#!/usr/bin/env bash
+url=""
+for a in "$@"; do case "$a" in http*) url="$a" ;; esac; done
+case "$url" in
+  */api/v1/version)   printf '{"version":"1.26.1"}'; exit 0 ;;
+  */user/sign_up)     printf '<form><input name="user_name"></form>'; exit 0 ;;
+  */api/v1/users/zoe) printf '{"login":"zoe","restricted":false}'; exit 0 ;;
+  # Aucun compte de role n'existe : l'apply doit atteindre le drift « structure absente ».
+  *)                  exit 22 ;;
+esac
+EOF2
+  chmod +x "$BIN/getent" "$BIN/stat" "$BIN/curl"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-seed.pass"
+}
+
+@test "apply : modes DEJA convergés → le module ne meurt pas, il atteint l'étape suivante" {
+  apply_stubs "640 root:lcars-admin"
+  run "$MODULE" apply
+
+  # L'etape d'apres est la sonde de structure. Si elle parle, la ligne mortelle a ete franchie.
+  [[ "$output" == *"structure absente"* ]]
+}
+
+@test "apply : modes À CORRIGER → même chemin, et c'est le cas qui MASQUAIT le défaut" {
+  # Ici la branche chgrp/chmod rend 0, donc le module survivait meme sans `return 0`. Le garder
+  # comme temoin nomme le pourquoi : sans lui, on croirait que le premier test suffit.
+  apply_stubs "600 root:root"
+  run "$MODULE" apply
+
+  [[ "$output" == *"structure absente"* ]]
+}

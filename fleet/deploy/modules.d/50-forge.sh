@@ -183,6 +183,20 @@ converge_authority_modes() {
       [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0640 root:$PROV_ADMIN_GROUP)"
     fi
   done
+
+  # ⚠ `return 0` OBLIGATOIRE, ET SON ABSENCE A TUE UN BANC ENTIER (2026-08-17). Le dernier geste de
+  # la boucle est `[[ "$PROV_MODE" == "check" ]] && p_ok …` : en mode APPLY il est FAUX, donc la
+  # fonction rendait 1, donc `set -e` tuait le module juste apres cette ligne — sans un mot.
+  #
+  # ET IL NE MORD QUE SUR UNE BOITE DEJA CONVERGEE : au premier apply les modes sont a corriger, la
+  # branche `chgrp && chmod && p_chg` rend 0, tout va bien. Des que `put_secret` a pose les fichiers
+  # au bon mode (ce qu'il fait), le SECOND apply passe par ce `else` et meurt. Consequence mesuree :
+  # aucun jeton de role minte, `55-deck-oidc` en drift, le convergeur aveugle, AUCUN humain
+  # materialise — et le module annonce « echecs: 1 » sans nommer ce qui a echoue.
+  #
+  # La forme `[[ test ]] && cmd` en DERNIERE instruction d'une fonction est un piege general sous
+  # `set -e` : elle transforme « ce cas ne s'applique pas » en « cette fonction a echoue ».
+  return 0
 }
 
 # La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
