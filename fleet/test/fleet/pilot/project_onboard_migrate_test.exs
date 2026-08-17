@@ -18,9 +18,11 @@ defmodule Fleet.Project.OnboardMigrateTest do
   @old_url "http://forge.test/fleet/vitrine.git"
 
   defmodule RefuseUsers do
-    # Refuse l'humain, et ENREGISTRE l'org sur laquelle on l'a interroge — c'est le fait mesure.
-    def user_exists?(_u, _fc), do: {:ok, true}
-    def team_member?(org, _t, _u, _fc), do: {:ok, put_org(org)}
+    # Refuse l'org, et ENREGISTRE celle sur laquelle on l'a interroge — c'est le fait mesure. Le
+    # stub portait `user_exists?`/`team_member?` : le preflight HUMAIN est mort le 2026-08-17, la
+    # garde forge qui suit l'admission locale demande desormais `org_exists?`. Ce que le temoin
+    # mesure n'a pas bouge d'un pouce — SUR QUELLE ORG la garde suivante est interrogee.
+    def org_exists?(org, _fc), do: {:ok, put_org(org)}
 
     defp put_org(org),
       do:
@@ -209,10 +211,11 @@ defmodule Fleet.Project.OnboardMigrateTest do
         )
 
       refute match?({:error, {:not_in_org, _, _}}, result)
-      refute match?({:error, {:catalogue_not_installed, _, _}}, result)
 
-      # La garde suivante est l'admission humaine, et elle est interrogee sur l'org DU DEPOT.
-      assert {:error, {:human_not_provisioned, _, _}} = result
+      # La garde suivante est l'existence de l'org SUR LA FORGE, et elle est interrogee sur l'org DU
+      # DEPOT. Meme atome que le refus local (`catalogue_not_installed`) : c'est le meme FAIT mesure
+      # a sa source, la moitie forge d'un install au lieu de la moitie locale.
+      assert {:error, {:catalogue_not_installed, _, _}} = result
       assert RefuseUsers.last_org() == "web"
     end
   end

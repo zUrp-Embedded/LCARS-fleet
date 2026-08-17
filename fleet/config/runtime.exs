@@ -640,18 +640,14 @@ if config_env() != :test and not tool_mode? do
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
   end
 
-  # DR-018 degraded admission (the E-02 knob, read by MCP delegation at create_project):
-  # accept an UNVERIFIABLE `humans` team-check (403 on the team API — the deployment's
-  # system token is deliberately a plain org member). The runtime still logs LOUD on every
-  # degraded admission. Default false (fail-closed). This is THE deployment surface the
-  # knob never had — the boot ritual used to re-pose it by RPC after every restart.
-  config :lcars_fleet,
-    pilot_allow_unverifiable_human_team?:
-      Fleet.EnvParse.bool(
-        "LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM",
-        System.get_env("LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM"),
-        false
-      )
+  # ⚠ `LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM` A VECU ICI (DR-018) ET N'EXISTE PLUS (2026-08-17), avec
+  # la garde qu'il assouplissait. Ne pas le reintroduire : le preflight d'onboarding verifiait
+  # l'adhesion de l'humain a `<org>:humans` avant de creer un projet, c'est-a-dire un `read` que
+  # l'humain a deja (l'org est publique, ses depots aussi) pour des ecritures qu'il ne fait pas —
+  # c'est le jeton systeme qui ecrit. Son mode degrade se justifiait par « downstream create_issue
+  # remains the net » : mesure du 2026-08-17, un compte non-membre de l'org cree une issue sur un
+  # depot public (201). Le filet n'existait pas, donc le knob assouplissait une garde qui ne
+  # gardait rien.
 
   # No label-routing knob exists. Routing lives in the
   # scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`; delegation workflow_map, default brief-gate). type:* = display.

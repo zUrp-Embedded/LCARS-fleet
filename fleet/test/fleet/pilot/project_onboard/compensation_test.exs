@@ -116,8 +116,10 @@ defmodule Fleet.Project.OnboardCompensationTest do
   end
 
   defmodule Humans do
-    def user_exists?(_h, _fc), do: {:ok, true}
-    def team_member?(_org, _team, _h, _fc), do: {:ok, true}
+    # Le preflight forge ne pose plus qu'UNE question depuis le 2026-08-17 : l'org de ce
+    # catalogue existe-t-elle. Le couple `user_exists?`/`team_member?` verifiait l'humain,
+    # garde morte avec son motif.
+    def org_exists?(_o, _fc), do: {:ok, true}
   end
 
   defp opts(tmp) do

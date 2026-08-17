@@ -1197,11 +1197,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # onboarding must target another org than the one being polled.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-      # DR-018: onboarding REFUSES by default when the runtime token cannot PROVE the human's `humans`
-      # membership (403 on the team read) — a load-bearing admission unproven ≠ verified. A deployment whose
-      # service token is deliberately a plain org member (not org-admin) opts into the degraded mode as an
-      # EXPLICIT, deployment-visible config property (`:lcars_fleet, :pilot_allow_unverifiable_human_team?`),
-      # never a silent per-call default. Same `:lcars_fleet` config read as `:mcp_org` above (BL-6-05).
+      # ⚠ `allow_unverifiable_human_team?` VIVAIT ICI (DR-018) ET N'EXISTE PLUS (2026-08-17). Il
+      # ouvrait un mode degrade quand le jeton runtime ne pouvait pas PROUVER l'adhesion de l'humain a
+      # `<org>:humans`. La garde qu'il assouplissait est morte avec lui : elle exigeait un `read` que
+      # l'humain a deja (org publique, depots publics) pour des ecritures qu'il ne fait pas — c'est le
+      # jeton systeme qui ecrit. Son propre message de repli invoquait « downstream create_issue
+      # remains the net » : mesure du 2026-08-17, un non-membre de l'org cree une issue sur un depot
+      # public (201). Le filet n'existait pas.
       opts = [
         org: org,
         description: Map.get(args, "description", pitch),
@@ -1213,9 +1215,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         intensity_justification: Map.get(args, "intensity_justification"),
         intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
-        onboarded_by: onboarder_role,
-        allow_unverifiable_human_team?:
-          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
+        onboarded_by: onboarder_role
       ]
 
       case onboard.onboard(name, opts) do
@@ -1240,14 +1240,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
     with {:ok, onboard} <- conforming_onboard() do
-      # DR-018: same admission contract as onboard — refuse an unprovable `humans` membership by default,
-      # degrade only under the explicit deployment-visible config knob.
-      opts = [
-        allow_unverifiable_human_team?:
-          Application.get_env(:lcars_fleet, :pilot_allow_unverifiable_human_team?, false)
-      ]
-
-      case onboard.import(full_name, opts) do
+      # PAS D'OPTS, ET C'EST UN RESTE QUI PART. Ce verbe ne portait que le drapeau
+      # `allow_unverifiable_human_team?` (DR-018), mort avec la garde qu'il assouplissait — cf. le
+      # commentaire de `do_onboard_project` plus haut. L'org, elle, n'a rien a faire ici : `import/2`
+      # la LIT du depot (`owner/nom`), elle ne se declare pas.
+      case onboard.import(full_name, []) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
            %{

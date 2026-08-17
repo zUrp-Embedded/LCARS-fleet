@@ -121,7 +121,7 @@ defmodule Fleet.Project.Onboard do
     # apres une creation, donc une compensation.
     with {:ok, org} <- required_org(opts),
          :ok <- admit(org, name, opts),
-         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name, provision} <- create_repo(name, org, opts) do
       case guarded_finish(full_name, provision, dirs, name, opts) do
@@ -315,17 +315,24 @@ defmodule Fleet.Project.Onboard do
   # leur source (le proprietaire du depot, le catalogue nomme). Chaque verbe resout donc SON org,
   # puis passe par ici.
   #
-  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME. La premiere version incluait
-  # `ensure_human_provisioned/2` — qui APPELLE LA FORGE — et un temoin l'a montre dans la minute :
-  # une URL externe invalide, refusee jusque-la sans toucher le monde, coutait desormais un
-  # aller-retour forge. « Les deux controles sont purs » etait faux, et je l'avais ecrit dans le
-  # commentaire du meme geste. La loi d'ordre est donc en TROIS temps, pour les cinq verbes :
+  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME. La premiere version incluait un controle
+  # qui APPELLE LA FORGE, et un temoin l'a montre dans la minute : une URL externe invalide, refusee
+  # jusque-la sans toucher le monde, coutait desormais un aller-retour forge. « Les deux controles
+  # sont purs » etait faux, et je l'avais ecrit dans le commentaire du meme geste. La loi d'ordre est
+  # donc en TROIS temps, pour les cinq verbes :
   #   1. cette admission — locale, commune ;
   #   2. les gardes PURES du verbe (URL externe, `main` local, faces en place) ;
-  #   3. le monde — `ensure_human_provisioned/2` puis les sondes forge du verbe.
+  #   3. le monde — `ensure_catalogue_org_on_forge/2` puis les sondes forge du verbe.
   #
-  # L'humain reste appele par chaque verbe : c'est UNE fonction, invoquee la ou l'ordre de ce
-  # verbe-la l'exige, et non un preambule recopie.
+  # ⚠ LA CLE DE VOUTE, ET C'EST ICI QU'ON LA CHERCHE AVANT D'AJOUTER UNE GARDE. Aucun de ces cinq
+  # verbes ne verifie que l'humain qui les joue est un humain legitime, et ce n'est pas un trou :
+  # ce flag est tenu UNE FOIS, au lancement, par Guard B (`bin/fleet_v2`). Le BEAM refuse de demarrer
+  # sous un uid systeme ou sous l'admiral, et il herite de cet uid pour lui et pour ses pods — donc
+  # quiconque atteint ce code EST un humain de la fleet, par construction. Une garde par verbe ne
+  # mesurerait que le uid qui l'execute, c'est-a-dire l'instrument.
+  #
+  # Le controle d'org, lui, reste appele par chaque verbe : c'est UNE fonction, invoquee la ou
+  # l'ordre de ce verbe-la l'exige, et non un preambule recopie.
   @spec admit(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def admit(org, name, opts) when is_binary(org) and is_binary(name) do
     with :ok <- require_installed(org),
@@ -560,7 +567,7 @@ defmodule Fleet.Project.Onboard do
     # carte est DECLARABLE. Un depot importe avec une carte d'atelier (`scope: ticket`) ou une faute
     # de frappe passait ici, la ou les quatre autres refusent.
     with :ok <- admit(org, name, opts),
-         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
       case finish_import(full_name, dirs, name, opts) do
@@ -635,7 +642,7 @@ defmodule Fleet.Project.Onboard do
       dirs = face_dirs(name, opts)
 
       with :ok <- admit(catalogue, name, opts),
-           :ok <- ensure_human_provisioned(catalogue, opts),
+           :ok <- ensure_catalogue_org_on_forge(catalogue, opts),
            :ok <- require_machine_absent(full_name, dirs),
            :ok <- require_forge_absent(full_name, opts),
            {:ok, source_url} <- repo_url(source, opts) do
@@ -1150,7 +1157,7 @@ defmodule Fleet.Project.Onboard do
          full_name = "#{org}/#{name}",
          :ok <- admit(org, name, opts),
          :ok <- require_local_main(dirs.code),
-         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- require_adoptable_origin(full_name, dirs.code, opts),
          {:ok, states} <- classify_adopt_writer_faces(dirs),
          :ok <- require_forge_absent(full_name, opts),
@@ -1378,7 +1385,7 @@ defmodule Fleet.Project.Onboard do
          :ok <- admit(org, name, opts),
          full_name = "#{org}/#{name}",
          :ok <- url_gate.(url),
-         :ok <- ensure_human_provisioned(org, opts),
+         :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- require_machine_absent(full_name, dirs),
          :ok <- require_forge_absent(full_name, opts) do
       scratch = external_scratch_dir(name)
@@ -2197,109 +2204,56 @@ defmodule Fleet.Project.Onboard do
 
   defp repo_mod(opts), do: Keyword.get(opts, :forge_repo, ForgeClient.Repo)
 
-  defp ensure_human_provisioned(org, opts) do
+  # L'ORG DU CATALOGUE EXISTE-T-ELLE SUR CETTE FORGE ? C'est la SEULE question que cette porte pose,
+  # et elle la pose DIRECTEMENT.
+  #
+  # ⚠ ELLE EN POSAIT DEUX AUTRES, ET ELLES SONT MORTES LE 2026-08-17 : le compte forge de l'humain
+  # existe-t-il (`user_exists?`), et est-il membre de `<org>:humans` (`team_member?`). Les deux
+  # exigeaient de l'humain un droit qu'il a deja et qu'il n'utilise pas — l'org est publique et les
+  # depots aussi, donc il lit ; et ce n'est pas lui qui ecrit, c'est le JETON SYSTEME. Mesure du
+  # 2026-08-17 : un compte non-membre de l'org cree une issue sur un depot public (201). Le mode
+  # degrade invoquait « downstream create_issue remains the net » — un filet qui n'existe pas.
+  #
+  # L'ADMISSION D'UN HUMAIN NE SE VERIFIE PLUS PAR VERBE, et ce n'est pas un trou : elle est tenue
+  # UNE FOIS, au lancement, par Guard B (`bin/fleet_v2`) — le BEAM refuse de demarrer sous un uid
+  # systeme ou sous l'admiral, et il herite de cet uid pour lui et ses pods. Cinq verbes sans garde
+  # d'humain sont la consequence de ce garde-la.
+  #
+  # ⚠ LE 404 NE SE DEDUIT PLUS D'UNE AUTRE QUESTION. Cette detection vivait dans la branche d'erreur
+  # du test d'equipe : elle ne tombait que si CE test-la rendait 404, donc jamais quand la reponse
+  # arrivait par un autre chemin. Elle demande maintenant `org_exists?` en direct — un appel au lieu
+  # de deux sur le chemin nominal, et une reponse qui ne depend plus du hasard d'un code d'erreur.
+  #
+  # ⚠ `org_exists?/2` ET PAS UNE SONDE SUR LES COMPTES : dans Gitea une org est une ligne de la MEME
+  # table `user`, donc un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
+  # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test rendait
+  # `true` et le seul message qui nomme le geste manquant retombait en erreur brute.
+  defp ensure_catalogue_org_on_forge(org, opts) do
     users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
-    human = Keyword.get(opts, :human) || Fleet.Credentials.Human.current!()
-    fc = fc_opts(opts)
 
-    case users.user_exists?(human, fc) do
+    case users.org_exists?(org, fc_opts(opts)) do
+      {:ok, true} ->
+        :ok
+
+      # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus local lit le
+      # materiel present sur la boite ; celui-ci demande a la forge si l'org existe. Les deux ne
+      # peuvent diverger qu'entre les deux moities d'un install interrompu, et c'est precisement ce
+      # cas-la qu'il faut nommer : sans lui l'appelant recevrait, deux gestes plus tard, un « user
+      # redirect does not exist [name: web] / GetOrgByName » dont personne ne remonte jusqu'a « le
+      # materiel est ici et la forge ne porte pas son org ».
       {:ok, false} ->
-        {:error, {:human_not_provisioned, human, provisioning_gestures(:account, human, org)}}
+        {:error, {:catalogue_not_installed, org, half_install_gesture(org)}}
 
+      # ON N'HABILLE PAS UNE LECTURE RATEE D'UN DIAGNOSTIC INVENTE : forge injoignable, jeton mort,
+      # 500 — l'erreur remonte brute, et l'appelant sait qu'il n'a pas mesure.
       {:error, reason} ->
         {:error, {:forge_preflight_failed, reason}}
-
-      {:ok, true} ->
-        case users.team_member?(org, "humans", human, fc) do
-          {:ok, true} ->
-            :ok
-
-          {:ok, false} ->
-            {:error, {:human_not_provisioned, human, provisioning_gestures(:team, human, org)}}
-
-          # DR-018
-          {:error, {:http, 403, _}} ->
-            if Keyword.get(opts, :allow_unverifiable_human_team?, false) do
-              Logger.warning(
-                "ProjectOnboard: preflight team-check `humans` NOT VERIFIABLE for #{human} (403 — the " <>
-                  "runtime token cannot read team membership) → onboarding in EXPLICIT DEGRADED MODE " <>
-                  "(allow_unverifiable_human_team?: true). Human admission is NOT proven; downstream " <>
-                  "create_issue remains the net."
-              )
-
-              :ok
-            else
-              {:error,
-               {:human_team_unverifiable, human, provisioning_gestures(:team_read, human, org)}}
-            end
-
-          # L'ORG DU CATALOGUE N'EXISTE PAS SUR CETTE FORGE — un install interrompu entre ses deux
-          # moities, ou un materiel pose a la main. L'echec, lui, tombait deux gestes plus tard et
-          # dans le vocabulaire de Gitea : « user redirect does not exist [name: web] /
-          # GetOrgByName ». Personne ne remonte de cette phrase-la jusqu'a « le materiel est ici et
-          # la forge ne porte pas son org ».
-          # Un 404 ici a exactement deux causes, et on les separe avec l'appel qui les distingue au
-          # lieu de deviner sur un message : soit l'org manque (diagnostiquable, geste nomme), soit
-          # c'est autre chose (on rend l'erreur brute, sans l'habiller d'un diagnostic invente).
-          # Meme discipline que le deck refusant lui-meme une entree non declaree plutot que de
-          # laisser la forge le faire illisiblement.
-          #
-          # ⚠ C'EST `org_exists?/2` QUI POSE LA QUESTION, et l'endpoint n'est pas interchangeable.
-          # La question est « l'org existe-t-elle », or dans Gitea une org est une ligne de la MEME
-          # table `user` : un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
-          # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test
-          # rendait alors `true` et le diagnostic exact (l'org absente) retombait en
-          # erreur brute — degradation silencieuse du seul message qui nomme le geste manquant.
-          {:error, {:http, 404, _}} = err ->
-            case users.org_exists?(org, fc) do
-              {:ok, false} ->
-                {
-                  :error,
-                  # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus plus
-                  # haut lit le materiel present ici ; celui-ci demande a la forge si l'org existe.
-                  # Les deux ne peuvent diverger qu'entre les deux moities d'un install interrompu,
-                  # et c'est precisement ce cas-la qu'il faut nommer : sans lui l'appelant recevrait
-                  # un 404 brut la ou le geste manquant est connu.
-                  # SAME ATOM as the local guards since the payload unification — what differs is
-                  # the sentence, because what was MEASURED differs: here the material is on the
-                  # box and the forge lacks the org, half an install.
-                  {:catalogue_not_installed, org, provisioning_gestures(:catalogue, human, org)}
-                }
-
-              _ ->
-                {:error, {:forge_preflight_failed, elem(err, 1)}}
-            end
-
-          {:error, reason} ->
-            {:error, {:forge_preflight_failed, reason}}
-        end
     end
   end
 
-  defp provisioning_gestures(:account, human, org) do
-    "forge account '#{human}' does not exist — admin gestures (admin token required): " <>
-      "1) POST /api/v1/admin/users {\"username\":\"#{human}\",\"email\":\"#{human}@lcars.local\"," <>
-      "\"password\":\"<initial>\",\"must_change_password\":true}; " <>
-      "2) add it to the 'humans' team of org '#{org}' (cf. the :team gesture). " <>
-      "Then re-run the onboarding."
-  end
-
-  defp provisioning_gestures(:team, human, org) do
-    "account '#{human}' exists but is NOT a member of the 'humans' team of org '#{org}' — " <>
-      "admin gesture: GET /api/v1/orgs/#{org}/teams → id of 'humans', then " <>
-      "PUT /api/v1/teams/<id>/members/#{human}. Then re-run the onboarding."
-  end
-
-  defp provisioning_gestures(:team_read, human, org) do
-    "membership of '#{human}' in the 'humans' team of org '#{org}' is NOT VERIFIABLE " <>
-      "(403 — the runtime token has no right to read GET /api/v1/teams/<id>/members/<u>). " <>
-      "Options: 1) grant the runtime token team-read (org owner, or member of 'humans'); " <>
-      "2) prove the membership by adding '#{human}' to 'humans' (cf. the :team gesture); " <>
-      "3) onboard in EXPLICIT DEGRADED MODE with `allow_unverifiable_human_team?: true` (human " <>
-      "admission will NOT be proven — downstream create_issue remains the net)."
-  end
-
-  defp provisioning_gestures(:catalogue, _human, org) do
+  # UNE SEULE FORME RESTE, donc plus d'atome de tag ni d'argument ignore : elles etaient la
+  # forme d'une famille (`:account`, `:team`, `:team_read`) morte avec le preflight humain.
+  defp half_install_gesture(org) do
     "the catalogue '#{org}' has its material on this box but its org does NOT exist on the forge — " <>
       "half an install. Nothing can be onboarded into it until the forge carries the org and its " <>
       "role accounts, and ONE gesture lays both: `lcars catalogue install #{org}`, played by an " <>
