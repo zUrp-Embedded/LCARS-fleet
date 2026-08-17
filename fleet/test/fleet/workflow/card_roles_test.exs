@@ -1,5 +1,19 @@
 defmodule Fleet.Workflow.CardRolesTest do
-  use ExUnit.Case, async: true
+  # ⚠ `async: false`, ET CE N'EST PAS DE LA PRUDENCE — MESURE, build d'image du 2026-08-17.
+  #
+  # Le dernier bloc pose `:workflow_workflow_maps_root` en env d'APPLICATION, restauree en
+  # `on_exit`. `Application.put_env` est GLOBAL au node : pendant cette fenetre, tout test
+  # concurrent qui resout une carte lit la racine temporaire de CELUI-CI. C'est ce qui est arrive —
+  # `Fleet.Pilot.ApplicationTest` est mort sur
+  # `/tmp/cr-19589/workflow/canon/workflow_maps/c0-poc.yaml: no such file`, une racine qui ne lui
+  # appartient pas et qui n'existait deja plus.
+  #
+  # LE VERT DE LA MACHINE DE DEV NE PROUVE RIEN ICI : la collision demande que les deux modules
+  # tombent dans la meme fenetre, donc elle depend du nombre de coeurs et de l'ordre du seed. Elle
+  # se declenche sur la machine la plus chargee — le build d'image — c'est-a-dire la ou elle coute
+  # le plus cher. La regle, elle, n'a pas de zone grise : un test qui ECRIT une cle d'env
+  # d'application n'est pas asynchrone, quelle que soit la cle.
+  use ExUnit.Case, async: false
 
   alias Fleet.Workflow.CardRoles
 
