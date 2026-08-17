@@ -296,11 +296,11 @@ defmodule Fleet.MCP.PodTools do
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
           "catalogue first (`list_workflow_cards`, which names the CATALOGUE of every card) and pass " <>
           "the human's chosen card as `workflow_map` plus its `catalogue` — the project lives in that " <>
-          "catalogue's forge org, and the binding is FIXED FOR ITS LIFE. Omitting `catalogue` is only " <>
-          "safe when nothing is left to choose: one catalogue installed, or a card only one catalogue " <>
-          "carries. Otherwise the call is REFUSED and names the candidates (two catalogues can ship a " <>
-          "`standard`, and a name alone then designates nothing) — relay the choice to the human, never " <>
-          "pick for them. " <>
+          "catalogue's forge org, and the binding is FIXED FOR ITS LIFE. Omit `catalogue` only when the card " <>
+          "already determines it: the org is the one installed catalogue that can answer your " <>
+          "declaration. Several can (two catalogues may both ship a `standard`, and a name alone then " <>
+          "designates nothing) and the call is REFUSED, naming them — relay that choice to the human, " <>
+          "never pick for them. " <>
           "(accepted even off-matrix — logged loud, the human has the last word). A declared level " <>
           "(`intensity_level` C0..C4 + `intensity_justification`) is the framing TRACE on top — relay it " <>
           "verbatim when the human states one: you MAY ask the framing questions (mains voltage? cuts " <>

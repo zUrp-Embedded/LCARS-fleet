@@ -1159,36 +1159,56 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # ⚠ L'OMISSION LIAIT LE PROJET AU PREMIER CATALOGUE INSTALLE, POUR SA VIE, EN SILENCE.
   # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». Ils le peuvent, et
-  # `standard` est le nom que les deux catalogues livres prennent — le guichet le dit deja dans son
-  # propre commentaire (« un nom seul ne designe plus rien »), et le prenait quand meme.
+  # `standard` est le nom que les deux catalogues livres prendraient — le guichet le dit deja dans
+  # son propre commentaire (« un nom seul ne designe plus rien »), et le prenait quand meme.
   #
   # C'est EXACTEMENT le defaut que ce depot a tue pour `Catalogue.root/0` : « choisir le premier —
   # alphabetiquement, par ordre d'install, peu importe — c'est donner a un projet les cartes de
   # celui qui trie en tete ». Un cran plus haut, la consequence est pire : la carte se revise, l'org
   # d'un projet est FIXEE POUR SA VIE.
   #
-  # ON NE DEVINE PAS, ON DERIVE OU ON DEMANDE :
-  #   * un seul catalogue installe -> il n'y a rien a choisir ;
-  #   * une carte nommee, portee par UN seul catalogue -> la carte a deja decide, et c'est ce que
-  #     l'humain a choisi au guichet (qui presente chaque carte AVEC son catalogue) ;
-  #   * portee par PLUSIEURS -> personne ne peut trancher a la place de l'humain : on refuse en les
-  #     nommant tous ;
-  #   * aucune carte et plusieurs catalogues -> rien ne determine l'org : on la demande.
+  # UNE SEULE REGLE, SANS CAS PARTICULIER : quels catalogues INSTALLES peuvent repondre a cette
+  # declaration ? Exactement un — il decide. Plusieurs — personne ne peut trancher a la place de
+  # l'humain.
+  #
+  # ⚖ user, meme jour, sur ma premiere version : « si tu ne derives que s'il y a un seul catalogue,
+  # tu cables un rail d'exception par confort ». Exact, et l'argument est plus fort que celui que
+  # j'avais donne. J'avais une branche « un seul catalogue installe -> lui » : elle ne repond pas a
+  # la question, elle observe que la question n'a qu'une reponse possible — donc elle derive de la
+  # POPULATION, ce que la ligne du dessus vient precisement de condamner. Et c'est la branche qui
+  # tourne sur toutes les boites d'aujourd'hui : le chemin general serait devenu celui que personne
+  # n'emprunte jamais, jusqu'au jour ou il compte.
+  #
+  # Elle disparait sans rien changer au comportement, parce que la regle unique la contient : sur
+  # une boite a un catalogue, ce catalogue est le seul candidat — pour la meme raison que partout
+  # ailleurs, pas par exception.
   #
   # `:mcp_delegation_org` reste au-dessus : une surcharge de deploiement est une reponse EXPLICITE,
   # pas un defaut.
-  defp infer_org(_card, [only]), do: {:ok, only}
-
-  defp infer_org(card, installed) when is_binary(card) and card != "" do
-    case Fleet.Workflow.Loader.catalogues_carrying(card) do
+  defp infer_org(card, installed) do
+    case candidates(card, installed) do
       [one] -> {:ok, one}
-      [] -> {:error, {:catalogue_required, installed}}
-      many -> {:error, {:catalogue_ambiguous, card, Enum.sort(many)}}
+      [] -> {:error, :no_installed_catalogue}
+      many -> {:error, {:catalogue_undetermined, card, Enum.sort(many)}}
     end
   end
 
-  defp infer_org(_none, []), do: {:error, :no_installed_catalogue}
-  defp infer_org(_none, installed), do: {:error, {:catalogue_required, installed}}
+  # LA CARTE DECIDE QUAND ELLE PEUT. Une carte nommee designe ses porteurs — et c'est ce que
+  # l'humain a choisi au guichet, qui presente chaque carte AVEC son catalogue. Une carte que
+  # PERSONNE ne porte ne determine rien : le refus qui compte est alors celui de la carte
+  # (`declarable_card/3` la nomme et liste ce qui existe), pas celui de l'org — donc on laisse tous
+  # les installes candidats plutot que de reclamer un catalogue pour une faute de frappe.
+  #
+  # Aucune carte du tout ne determine rien non plus : « rien de declare » veut dire « la carte par
+  # DEFAUT », et de quel catalogue est exactement la question ouverte.
+  defp candidates(card, installed) when is_binary(card) and card != "" do
+    case Fleet.Workflow.Loader.catalogues_carrying(card) do
+      [] -> installed
+      carriers -> carriers
+    end
+  end
+
+  defp candidates(_none, installed), do: installed
 
   defp escalation_human, do: Fleet.Credentials.Human.current!()
 

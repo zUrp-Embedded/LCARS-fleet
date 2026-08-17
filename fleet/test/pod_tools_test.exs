@@ -2641,10 +2641,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "une carte portee par DEUX catalogues, sans `catalogue` : REFUS qui les nomme" do
       # ⚖ user, 2026-08-17 : « et si 2 catalogues ont le meme nom de carte ? ». `standard` est
-      # precisement le nom que deux catalogues prennent. Avant, l'omission liait le projet au
+      # precisement le nom que deux catalogues prendraient. Avant, l'omission liait le projet au
       # PREMIER installe — pour sa vie, en silence. Le meme defaut que `Catalogue.root/0` un cran
       # plus haut, et plus cher : une carte se revise, une org non.
-      assert {:error, {:catalogue_ambiguous, "standard", ["aaa", "bbb"]}} =
+      assert {:error, {:catalogue_undetermined, "standard", ["aaa", "bbb"]}} =
                Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"workflow_map" => "standard"})
     end
 
@@ -2656,10 +2656,38 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "AUCUNE carte et plusieurs catalogues : rien ne determine l'org, on la DEMANDE" do
-      assert {:error, {:catalogue_required, orgs}} =
+      # « Rien de declare » veut dire « la carte par DEFAUT » — et de quel catalogue est exactement
+      # la question ouverte. Le refus porte le meme atome et la meme forme, la carte a `nil`.
+      assert {:error, {:catalogue_undetermined, nil, orgs}} =
                Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
 
       assert "aaa" in orgs and "bbb" in orgs
+    end
+
+    test "une carte que PERSONNE ne porte ne reclame pas de catalogue — c'est la CARTE qui est fausse" do
+      # Une faute de frappe ne determine rien, mais reclamer un catalogue pour elle enverrait
+      # l'appelant repondre a la mauvaise question. Sur une boite a plusieurs catalogues l'org reste
+      # indeterminee (il faut bien en nommer une), mais le refus ne PRETEND pas que le nom de carte
+      # etait bon : il ne le cite pas comme porteur d'une ambiguite.
+      assert {:error, {:catalogue_undetermined, "carte-fantome", _}} =
+               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{
+                 "workflow_map" => "carte-fantome"
+               })
+    end
+
+    test "UN SEUL catalogue installe : la regle GENERALE suffit, sans branche de population" do
+      # ⚖ user, 2026-08-17 : « si tu ne derives que s'il y a un seul catalogue, tu cables un rail
+      # d'exception par confort ». La branche a disparu, et le comportement n'a pas bouge : le seul
+      # catalogue est le seul CANDIDAT — pour la meme raison que partout ailleurs.
+      #
+      # ⚠ ET « UN SEUL » VEUT DIRE « AUCUN CATALOGUE METIER », ce que la premiere version de ce
+      # temoin n'avait pas vu : `fleet` est installe PAR CONSTRUCTION (il vit dans le release), donc
+      # installer quoi que ce soit donne DEUX. La branche de confort ne servait donc que les boites
+      # incapables de faire du metier — un rail d'exception encore plus mort que je ne le croyais.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
+      assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
+
+      assert {:ok, "fleet"} = Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
     end
 
     test "`catalogue` explicite gagne toujours, meme sur une carte ambigue" do
