@@ -502,3 +502,88 @@ admin_probe() { # admin_probe <login> <corps json|DOWN|NOTOKEN> [code http]
   run bash -c "export LCARS_ADMIN_GROUP=autre; source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
   [ "$output" = "autre" ]
 }
+
+# ─── LA CONSOLE D'UN HUMAIN QUI EXISTE DEJA ─────────────────────────────────────────────────────
+#
+# ⚠ CES TEMOINS EXISTENT PARCE QUE LE GESTE ETAIT ECRIT DEUX FOIS ET MANQUAIT AU TROISIEME CHEMIN.
+# Le convergeur voit un humain de la team dans trois etats : compte Unix absent (`useradd`), compte
+# present mais revoque (`restore_human`), compte present et EN BONNE SANTE. Les deux premiers
+# demarraient sa console ; le troisieme faisait `continue`.
+#
+# Mesure du 2026-08-17 sur le banc `lcars-l6` : un compte cree A LA MAIN (uid 1042, groupe `fleet`,
+# shell `/bin/bash`) puis ajoute a `fleet:humans` traverse un tour complet EN SILENCE — pas de ligne
+# dans le log, pas de repertoire dans `/run/lcars/console/`. Le deck lui affiche alors l'adresse d'un
+# terminal qui n'existe pas et le navigateur ecrit « [connexion impossible] ».
+#
+# ⚠ ET UN REDEMARRAGE LE MASQUE : `console.sh --all` tourne a l'entrypoint, donc au boot suivant tout
+# le monde a sa console. Le defaut ne se voit que sur une boite VIVANTE — c'est-a-dire exactement au
+# moment ou un admin enrole quelqu'un. C'est ce qui l'a rendu invisible aussi longtemps.
+#
+# Le stub de `console.sh` JOURNALISE ses arguments : ce qu'on mesure est « le geste a ete demande
+# pour CE login », pas « une commande a tourne ».
+console_stub() {
+  CONSOLE_LOG="$BATS_TEST_TMPDIR/console.log"
+  : > "$CONSOLE_LOG"
+  cat > "$BATS_TEST_TMPDIR/console.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$CONSOLE_LOG"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/console.sh"
+  export CONSOLE_LOG
+}
+
+ensure_console_for() { # ensure_console_for <login>
+  run bash -c "
+    set -euo pipefail
+    export LCARS_CONSOLE_SH='$BATS_TEST_TMPDIR/console.sh'
+    source '$SUT'
+    ensure_console '$1'"
+}
+
+@test "console: le geste est DEMANDE pour un login, et il nomme ce login" {
+  console_stub
+  ensure_console_for "zoe"
+  [ "$status" -eq 0 ]
+  grep -q -- "--human zoe" "$CONSOLE_LOG"
+}
+
+@test "console: LCARS_CONSOLE=0 coupe le geste — l'interrupteur vaut pour les trois chemins" {
+  console_stub
+  run bash -c "
+    set -euo pipefail
+    export LCARS_CONSOLE=0 LCARS_CONSOLE_SH='$BATS_TEST_TMPDIR/console.sh'
+    source '$SUT'
+    ensure_console 'zoe'"
+  [ "$status" -eq 0 ]
+  [ ! -s "$CONSOLE_LOG" ]
+}
+
+@test "console: un console.sh en echec NE TUE PAS le convergeur — il le DIT et continue" {
+  # Le convergeur tourne en boucle sous `set -e` : une console qui ne demarre pas ne doit pas
+  # emporter la convergence des autres humains. ssh reste la porte, et le message le dit.
+  cat > "$BATS_TEST_TMPDIR/console.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/console.sh"
+  run bash -c "
+    set -euo pipefail
+    export LCARS_CONSOLE_SH='$BATS_TEST_TMPDIR/console.sh'
+    source '$SUT'
+    ensure_console 'zoe'
+    echo SURVECU"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SURVECU"* ]]
+  [[ "$output" == *"sa console n'a pas demarre"* ]]
+}
+
+@test "console: LE TROISIEME CHEMIN — les trois appelants passent par la MEME fonction" {
+  # Ce qui a produit le defaut est le geste RECOPIE : deux exemplaires, un chemin oublie. Le temoin
+  # epingle la forme, pas seulement le comportement — trois appels, une fonction.
+  run grep -c '^\s*ensure_console "\$login"' "$SUT"
+  [ "$output" -eq 3 ]
+
+  # Et aucune copie ne subsiste : plus personne n'appelle `$CONSOLE` en direct.
+  run grep -c '"\$CONSOLE" --human' "$SUT"
+  [ "$output" -eq 1 ]
+}

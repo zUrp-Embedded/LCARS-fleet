@@ -338,6 +338,29 @@ forge_is_admin() { # forge_is_admin <login>
 }
 
 
+# UNE CONSOLE SE GARANTIT, ELLE NE SE LANCE PAS « UNE FOIS ». Ce geste etait ecrit DEUX fois — a la
+# creation d'un user, et a sa reintegration — et il manquait au TROISIEME chemin : l'humain dont le
+# compte Unix existe deja et se porte bien. Il ne passe ni par `useradd` ni par `restore_human`, donc
+# il ne recevait rien. Mesure du 2026-08-17 sur banc : un compte cree A LA MAIN (groupe `fleet`,
+# shell valide) ajoute a `fleet:humans` traverse un tour de convergeur en SILENCE et sans console —
+# le deck lui affiche alors l'adresse d'un terminal qui n'existe pas, et le navigateur rend
+# « [connexion impossible] ».
+#
+# ⚠ ET UN REDEMARRAGE LE MASQUE, ce qui est le pire des deux : `console.sh --all` tourne a
+# l'entrypoint, donc au boot suivant tout le monde a sa console et le defaut disparait. Il ne se voit
+# que sur une boite VIVANTE, entre deux boots — c'est-a-dire exactement quand un admin enrole
+# quelqu'un.
+#
+# `console.sh --human` est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce soit, et une
+# console vivante lui coute une sonde. C'est ce qui permet de l'appeler a chaque tour plutot que de
+# tenir un etat « je l'ai deja fait » — un etat de plus qui pourrait mentir.
+ensure_console() { # ensure_console <login>
+  [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]] || return 0
+  "$CONSOLE" --human "$1" >/dev/null 2>&1 \
+    || err "$1 : sa console n'a pas demarre — ssh reste la porte ($CONSOLE --human $1)"
+  return 0
+}
+
 # Sourcer ce fichier donne l'ADMISSION, la SELECTION des revoques et la LECTURE de l'adminite
 # ci-dessus, et RIEN d'autre : ni preflight, ni boucle, et surtout aucun geste. Ce sont les trois
 # decisions qui, en se trompant, creent un compte que personne ne voulait, coupent quelqu'un qui
@@ -417,10 +440,7 @@ restore_human() { # restore_human <login>
   usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
   usermod -s "$SHELL_" -- "$login" 2>/dev/null || true
   say "REINTEGRE $login — remis dans $GROUP, shell $SHELL_"
-  if [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]]; then
-    "$CONSOLE" --human "$login" >/dev/null 2>&1 \
-      || err "$login : reintegre mais sa console n'a pas redemarre ($CONSOLE --human $login)"
-  fi
+  ensure_console "$login"
 }
 
 # LE GESTE, sur la decision ci-dessus. Appelee UNIQUEMENT avec une liste de membres prouvee non
@@ -524,6 +544,9 @@ converge_once() {
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
         restore_human "$login"
       fi
+      # LE TROISIEME CHEMIN, ET IL N'AVAIT RIEN. Un humain dont le compte existe et se porte bien
+      # sort d'ici sans passer par `restore_human` : sa console n'etait donc jamais garantie.
+      ensure_console "$login"
       continue
     fi
     if reserved "$login"; then
@@ -593,10 +616,7 @@ converge_once() {
       # n'avait demarree : « cette page ne fonctionne pas ». Le convergeur est le seul a savoir qu'un
       # humain vient d'apparaitre ; c'est donc a lui de completer le geste.
       # Meme interrupteur que l'entrypoint : qui coupe les consoles les coupe pour tout le monde.
-      if [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]]; then
-        "$CONSOLE" --human "$login" >/dev/null 2>&1 \
-          || err "$login : user cree mais sa console n'a pas demarre — ssh reste la porte ($CONSOLE --human $login)"
-      fi
+      ensure_console "$login"
     else
       err "$login : useradd a echoue — AUCUN user cree (relance au prochain tour)"
     fi
