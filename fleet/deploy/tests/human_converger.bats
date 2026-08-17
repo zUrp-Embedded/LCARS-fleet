@@ -38,6 +38,9 @@ EOF
 
 # Helper: source the SUT in a fresh shell and run a predicate on <login>.
 admits() { # admits <login>  -> exit 0 if the converger would create that user
+  # ⚠ `cmd; echo $?` NE MARCHE PAS SOUS `set -e` : un rc non-nul tue le shell AVANT l'echo, donc
+  # les cas « prouve non-admin » et « pas su lire » — c'est-a-dire tout ce qui compte — ne
+  # rendaient rien. `|| rc=$?` fait de l'appel une condition, l'exception que `set -e` prevoit.
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
@@ -412,4 +415,90 @@ EOF
   absent alice dave erin
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# ─── L'ADMINITE : UN FAIT DE FORGE, PROJETE EN GROUPE (⚖ user 2026-08-17) ───────────────────────
+#
+# ⚠ CE QUE CES TEMOINS TIENNENT AVANT TOUT : la MESURE qui a change le design. Gitea 1.26.1 MASQUE
+# `is_admin` aux lecteurs non-admin — `/api/v1/users/admiral` rend `is_admin: false` sous le jeton
+# systeme ET en anonyme, alors que le compte l'est. Un convergeur branche sur le jeton systeme
+# n'aurait donc accorde l'adminite a personne : fail-closed, et parfaitement inutile. La sonde va
+# donc au jeton MASTER, et l'absence de ce jeton ne conclut RIEN.
+#
+# La forge est simulee par un `curl` en tete de PATH. Ce qui est mesure est la DECISION.
+
+# `admin_probe <login>` -> le rc de `forge_is_admin` : 0 prouve admin · 1 prouve non · 2 pas su lire
+admin_probe() { # admin_probe <login> <corps json|DOWN|NOTOKEN> [code http]
+  local body="$2" code="${3:-200}"
+  local tokfile="$BATS_TEST_TMPDIR/master.token"
+
+  if [[ "$body" == "NOTOKEN" ]]; then
+    rm -f "$tokfile"
+  else
+    printf 'MASTER\n' > "$tokfile"
+  fi
+
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  if [[ "$body" == "DOWN" ]]; then
+    printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
+  else
+    { printf '#!/usr/bin/env bash\n'
+      printf 'printf %%s %s\n' "'$body'"
+      printf 'printf "\\n%s"\n' "$code"
+    } > "$BATS_TEST_TMPDIR/bin/curl"
+  fi
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+
+  run bash -c "
+    set -euo pipefail
+    export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+    export LCARS_MASTER_TOKEN_FILE='$tokfile'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    source '$SUT'
+    rc=0; forge_is_admin '$1' || rc=\$?; echo \"rc=\$rc\""
+}
+
+@test "adminite: la forge dit is_admin=true -> PROUVE admin" {
+  admin_probe alice '{"login":"alice","is_admin":true}'
+  [[ "$output" == *"rc=0"* ]]
+}
+
+@test "adminite: is_admin=false -> PROUVE non-admin (une demotion se lit, elle ne se devine pas)" {
+  admin_probe alice '{"login":"alice","is_admin":false}'
+  [[ "$output" == *"rc=1"* ]]
+}
+
+@test "adminite: SANS jeton master, on ne conclut RIEN — ni promotion, ni demotion" {
+  # Le jeton master est ce qui permet de VOIR l'adminite d'autrui. Sans lui la boite ne peut pas
+  # repondre a la question ; elle ne l'invente pas. Une lecture rendue « non-admin » ici
+  # DEMOTERAIT tout le monde au premier tour sur une boite sans autorite posee.
+  admin_probe alice NOTOKEN
+  [[ "$output" == *"rc=2"* ]]
+}
+
+@test "adminite: forge MUETTE -> pas su lire, jamais « non-admin »" {
+  admin_probe alice DOWN
+  [[ "$output" == *"rc=2"* ]]
+}
+
+@test "adminite: HTTP non-200 -> pas su lire (un 403 n'est pas une reponse a la question)" {
+  admin_probe alice '{"message":"token does not have scope"}' 403
+  [[ "$output" == *"rc=2"* ]]
+}
+
+@test "adminite: un champ ABSENT n'est pas un « false » — c'est une non-reponse" {
+  # LA MESURE QUI A CHANGE LE DESIGN, tenue ici : un lecteur non-admin recoit une charge SANS la
+  # verite du champ. Le lire comme `false` accorderait a la boite une certitude qu'elle n'a pas.
+  admin_probe alice '{"login":"alice"}'
+  [[ "$output" == *"rc=2"* ]]
+}
+
+@test "adminite: le groupe est celui de la config, pas un litteral" {
+  # Le miroir shell de `PROV_ADMIN_GROUP` : deux noms qui divergent donneraient un convergeur qui
+  # peuple un groupe que personne ne lit.
+  run bash -c "source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
+  [ "$output" = "lcars-admin" ]
+
+  run bash -c "export LCARS_ADMIN_GROUP=autre; source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
+  [ "$output" = "autre" ]
 }

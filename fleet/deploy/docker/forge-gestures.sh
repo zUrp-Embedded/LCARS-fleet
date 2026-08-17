@@ -23,8 +23,8 @@
 #
 # USAGE : forge-gestures.sh <geste>
 #   config-token   lit un jeton master sur STDIN, le VERIFIE contre la forge de la boite, puis le
-#                  pose en 0600 root. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
-#   config-seed    lit le seed sur STDIN et le pose en 0600 root (handoff tofu -> mint A4).
+#                  pose en `0640 root:lcars-admin`. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
+#   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
 #   apply          joue la recette : module instance/, module catalogue, puis le depot modele.
 #                  Ne prend RIEN — il lit ce que la boite detient. Un jeton sur STDIN l'emporte.
 #   install <nom>  installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte :
@@ -47,6 +47,8 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
+# Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
+ADMIN_GROUP="${LCARS_ADMIN_GROUP:-lcars-admin}"
 # L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
 # `catalogue-source`, `template-sync`). Il s'appelait `TEMPLATE_SYNC` quand il n'en servait
 # qu'une : un nom qui decrit un seul usage devient faux au deuxieme.
@@ -80,8 +82,21 @@ put_secret() { # $1=chemin  $2=valeur
   local tmp="${1%/*}/.$(basename "$1").tmp"
   umask 077
   printf '%s\n' "$2" > "$tmp"
-  chmod 0600 "$tmp"
-  [[ "$(id -u)" -eq 0 ]] && chown root:root "$tmp"
+
+  # ⚖ 2026-08-17 : `0640 root:$ADMIN_GROUP` ET PLUS `0600 root`. Le mode EST le gate — « la
+  # capacite, pas un drapeau qu'on peut oublier de poser » — mais il gatait sur `uid 0`, or aucun
+  # humain n'est root et ne le sera : le seul root est `admiral`, compte d'administration SYSTEME,
+  # dont le metier est d'installer des paquets et non des catalogues. Le groupe porte `is_admin`
+  # de la forge, projete par le convergeur d'humains. La capacite ne change pas de nature, elle
+  # change de GRANTEUR : la forge au lieu de l'uid.
+  if [[ "$(id -u)" -eq 0 ]] && getent group "$ADMIN_GROUP" >/dev/null 2>&1; then
+    chmod 0640 "$tmp"
+    chown root:"$ADMIN_GROUP" "$tmp"
+  else
+    # Pas root, ou groupe absent : on RESSERRE plutot que d'ouvrir a un groupe qu'on n'a pas pu
+    # nommer. Un secret trop ferme se diagnostique ; trop ouvert, non.
+    chmod 0600 "$tmp"
+  fi
   mv -f "$tmp" "$1"
 }
 
@@ -105,14 +120,14 @@ cmd_config_token() {
     || die "ce jeton ne s'authentifie pas sur $FORGE_BASE_URL (HTTP $code) — RIEN n'a ete ecrit" 3
 
   put_secret "$MASTER_TOKEN_FILE" "$tok"
-  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, 0600 root)"
+  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, lisible par $ADMIN_GROUP)"
 }
 
 cmd_config_seed() {
   local seed; seed="$(read_stdin_secret)"
   [[ -n "$seed" ]] || die "seed vide sur stdin"
   put_secret "$SEED_FILE" "$seed"
-  echo "forge-gestures: seed pose ($SEED_FILE, 0600 root)"
+  echo "forge-gestures: seed pose ($SEED_FILE, lisible par $ADMIN_GROUP)"
 }
 
 # ⚠ UN SEUL APPLY A LA FOIS. Deux `forge-apply` concurrents ecriraient le meme `terraform.tfstate`
@@ -268,7 +283,8 @@ cmd_runner_token() {
 # flotte qui tourne.
 #
 # LE GATE ADMIN N'EST PAS UN DRAPEAU QU'ON INVENTE. Installer exige de lire le jeton master
-# (0600 root) et d'ecrire l'etat de tofu : la capacite EST la permission. Un worker qui tente le
+# (`0640 root:lcars-admin`, groupe derive de `is_admin`) et d'ecrire l'etat de tofu : la capacite
+# EST la permission. Un non-admin qui tente le
 # geste est refuse par le systeme de fichiers, pas par un booleen qu'on pourrait oublier de poser.
 #
 # ⚠ UN DOSSIER DE RECETTE PAR CATALOGUE. La recette lit `roles.auto.tfvars.json` dans son propre
@@ -291,7 +307,7 @@ cmd_install() {
   #    avec son code — on ne traduit pas, on relaie.
   #    ⚠ PAS LE JETON MASTER, ET CE N'EST PAS UNE PREFERENCE. La porte tourne en `nobody:fleet`
   #    (`setpriv --reuid 65534 --regid 2000`) parce que c'est une LECTURE ; le jeton master est
-  #    `0600 root`, donc illisible pour elle. Mesure sur banc du 2026-08-16 : l'install mourait sur
+  #    ferme au monde, donc illisible pour elle. Mesure sur banc du 2026-08-16 : l'install mourait sur
   #    `UNREACHABLE {:config, {:token_file, …, :eacces}}` — un refus de permission presente comme
   #    « pas de source installable », c'est-a-dire le mauvais diagnostic pour le mauvais probleme.
   #

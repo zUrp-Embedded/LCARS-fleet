@@ -113,6 +113,40 @@ check_master_authority() {
   fi
 }
 
+# ⚠ LE MODE DES FICHIERS D'AUTORITÉ SE CONVERGE, IL NE SE POSE PAS UNE FOIS. `put_secret` (côté
+# `forge-gestures.sh`) ne s'applique qu'à l'ÉCRITURE : un jeton posé avant le passage à
+# `0640 root:$PROV_ADMIN_GROUP` restait `0600 root:root` pour toujours, et aucun admin de la forge
+# ne pouvait le lire — le groupe existait, les répertoires étaient convertis, et la porte restait
+# fermée. MESURÉ SUR BANC le 2026-08-17, sur une boîte dont les jetons dataient de la veille.
+#
+# C'est la loi #1 du provisionnement (« l'état, c'est le système ») appliquée à un mode : ce qui
+# n'est reposé qu'au geste initial dérive dès que le geste change d'avis.
+#
+# Le CONTENU n'est jamais touché ici — seulement `chmod`/`chgrp`. Un module qui réécrirait un
+# secret pour en corriger le mode pourrait le perdre.
+converge_authority_modes() {
+  local f cur want="root:$PROV_ADMIN_GROUP"
+  getent group "$PROV_ADMIN_GROUP" >/dev/null 2>&1 || {
+    p_drift "groupe $PROV_ADMIN_GROUP absent — modes d'autorité non convergés (20-groups le crée)"
+    return 0; }
+
+  for f in "$PROV_MASTER_TOKEN_FILE" "$PROV_FORGE_SEED_FILE"; do
+    [[ -f "$f" ]] || continue
+    cur="$(stat -c '%a %U:%G' "$f")"
+    if [[ "$cur" != "640 $want" ]]; then
+      if [[ "$PROV_MODE" == "check" ]]; then
+        p_drift "$f est $cur — attendu 640 $want (un admin de la forge ne peut pas le lire)"
+      else
+        chgrp "$PROV_ADMIN_GROUP" "$f" && chmod 0640 "$f" \
+          && p_chg "$f -> 0640 root:$PROV_ADMIN_GROUP (lisible par les admins de la forge)" \
+          || p_fail "$f : mode non convergé"
+      fi
+    else
+      [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0640 root:$PROV_ADMIN_GROUP)"
+    fi
+  done
+}
+
 # La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
@@ -278,6 +312,7 @@ check() {
   p_ok "forge joignable ($PROV_FORGE_URL)"
   probe_registration
   check_master_authority
+  PROV_MODE=check converge_authority_modes
 
   local miss acct
   miss="$(missing_accounts)"
@@ -339,6 +374,7 @@ apply() {
   fi
   [[ -x "$A4_SCRIPT" ]] || { p_fail "script A4 introuvable : $A4_SCRIPT"; verdict_apply; }
   check_master_authority
+  PROV_MODE=apply converge_authority_modes
 
   local miss
   miss="$(missing_accounts)"

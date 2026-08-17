@@ -51,11 +51,24 @@ set -euo pipefail
 # entrée ajoutée ici est vérifiée ET posée, sans qu'on puisse en oublier la moitié.
 # Les zones de face sont le MIROIR SHELL de `Fleet.Layout.face_root/1` — en ajouter une sans
 # l'ajouter là-bas (ou l'inverse) fait rougir `layout.face_roots_provisioned`, en la NOMMANT.
+# ⚠ LES DEUX ZONES CATALOGUE N'ONT PAS LE MEME MODE, ET LA DIFFERENCE EST LEUR CONTENU.
+# `$PROV_CATALOGUES_DIR` (le materiel installe) est du METIER : les cap-profiles, les cartes, les
+# prompts. Tout le monde le lit — chaque fleet humaine, et les pods par leurs mounts — donc `2775`.
+# `$PROV_CATALOGUES_WORK` (les recettes tofu par catalogue) porte l'ETAT terraform, qui contient
+# les valeurs des variables : le mot de passe de seed y figure. Donc `2770`, aucun acces monde.
+#
+# `2` (setgid) sur les deux : un fichier cree par un admin y reste attribue au groupe, sinon le
+# second admin ne peut pas reprendre le travail du premier — et un install est rejouable par
+# DEFINITION, donc par quelqu'un d'autre.
+#
+# Le groupe est `$PROV_ADMIN_GROUP` et non `$PROV_FLEET_GROUP` : ecrire ici est un geste
+# d'administration (⚖ user 2026-08-17), lire le materiel ne l'est pas.
 prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
     "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
-    "$PROV_CATALOGUES_DIR 0755 root:root" \
+    "$PROV_CATALOGUES_DIR 2775 root:$PROV_ADMIN_GROUP" \
+    "$PROV_CATALOGUES_WORK 2770 root:$PROV_ADMIN_GROUP" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"

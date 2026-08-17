@@ -33,6 +33,18 @@ PROVISION_LIB_LOADED=1
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
+# ⚖ ARBITRAGE USER (2026-08-17) : « ADMIN » EST UN FAIT DE FORGE, PAS `uid 0`.
+# `is_admin` cote Gitea dit qui administre le runtime — le deck le lit deja a chaque connexion
+# (`console-deck.py`, porte OIDC). Le CLI, lui, gatait `catalogue install` sur root : or AUCUN
+# humain n'est root et ne le sera. Le seul root est `admiral`, compte d'ADMINISTRATION SYSTEME —
+# son metier est d'installer des paquets, pas des catalogues.
+#
+# Ce groupe est la PROJECTION Unix de ce fait, exactement comme `fleet` projette l'appartenance a
+# la team `humans` : le convergeur d'humains l'ecrit, et il ouvre la lecture de l'autorite de la
+# boite (jeton master, seed). La capacite reste le systeme de fichiers — jamais un booleen qu'un
+# appelant pourrait oublier de tester.
+: "${PROV_ADMIN_GROUP:=lcars-admin}"           # is_admin sur la forge -> administre le runtime
+: "${PROV_CATALOGUES_WORK:=/var/lib/lcars/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 # L'AUTORITE DE CREATION, posee par `docker.sh config` et QUI RESTE (⚖ user 2026-08-16). Le suffixe
@@ -400,6 +412,14 @@ ensure_group() {
     getent group "$grp" >/dev/null || { p_fail "groupe $grp absent après groupadd"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp"
   fi
+}
+
+# Les membres d'un groupe, secondaires ET primaires — `getent group` ne liste que les premiers, et
+# un humain dont le groupe d'admin serait primaire aurait disparu du rapport.
+members_of() {
+  local grp="$1" sec
+  sec="$(getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' ' ')"
+  printf '%s' "${sec:-aucun}"
 }
 
 ensure_member() {

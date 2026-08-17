@@ -25,6 +25,28 @@
 set -euo pipefail
 
 # ─── MODE OUTIL : `verify <racine>` — valider un catalogue SANS booter la boîte ─────────────────
+# ─── `drop_priv` — ABAISSER quand on est root, ne rien faire quand on ne l'est pas ──────────────
+#
+# Les trois portes de LECTURE ci-dessous tournent en `nobody:fleet` : le runtime REFUSE root
+# (R-no-root-runtime), et une lecture n'a besoin que du gid `fleet` (l'install RO est root:fleet).
+#
+# ⚠ `setpriv --reuid` EST UN ABAISSEMENT, DONC IL EXIGE D'ETRE ROOT — et ces portes ont ete ecrites
+# quand leur seul appelant l'etait. Depuis que « admin » est un fait de FORGE et non `uid 0`
+# (⚖ user 2026-08-17), l'appelant est un humain ordinaire : `setpriv` rendait alors
+# `setresuid failed: Operation not permitted`, et l'install mourait sur « pas de source
+# installable » — un refus de catalogue pour un probleme de privilege. MESURE SUR BANC le
+# 2026-08-17, sur la premiere install jouee par un non-root.
+#
+# Un appelant deja non-root n'a RIEN a abaisser : il est deja depourvu. On ne simule donc pas
+# `nobody` — on constate qu'il n'y a plus rien a retirer, et on execute en place.
+drop_priv() { # drop_priv <cmd...>
+  if [[ "$(id -u)" -eq 0 ]]; then
+    exec setpriv --reuid 65534 --regid 2000 --clear-groups "$@"
+  else
+    exec "$@"
+  fi
+}
+
 # `docker run --rm -v $PWD:/cat <image> verify /cat` : le code de sortie est le verdict
 # (0 = catalogue OK, 1 = refusé), exploitable en CI ; le rapport s'imprime sur stdout et
 # déclare ses hypothèses (la racine lue, les surcharges fines ignorées). Ne converge rien,
@@ -39,7 +61,7 @@ if [[ "${1:-}" == "verify" ]]; then
   # LCARS_TOOL_EVAL=1 : `release eval` execute les config providers (runtime.exs ENTIER) avant
   # l'expression — ce drapeau saute le corps de config deploiement (ports, forge, credentials),
   # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
-  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+  drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
@@ -64,7 +86,7 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
   root="${2:?roles: chemin de racine catalogue requis}"
   fun="Fleet.Application.CatalogueRoles.eval_main"
   [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Application.CatalogueRoles.eval_tfvars"
-  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+  drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "${fun}(\"${root}\")"
@@ -79,7 +101,7 @@ fi
 # nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
 if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
-  exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+  drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \

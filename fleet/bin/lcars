@@ -79,7 +79,8 @@ USAGE
 
   $PROG catalogue install <nom>
       Installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte.
-      ADMIN SEULEMENT : le geste lit le jeton master de la boite (0600 root).
+      ADMIN SEULEMENT, et « admin » est un fait de la FORGE (is_admin), pas de l'uid :
+      le geste lit le jeton master, ouvert au groupe que le convergeur derive de la forge.
 
       La source arrive par la FORGE : un humain pousse son catalogue dans son espace
       personnel depuis son disque, et n'importe qui peut le faire. L'installer est un
@@ -385,10 +386,14 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # plus de materiel localement : la source arrive par la FORGE — un humain pousse son catalogue dans
 # son espace personnel, un admin l'installe. Le materiel local devient un cache derive.
 #
-# LE GATE EST LA CAPACITE, PAS UN DRAPEAU. Installer exige de lire le jeton master (0600 root) et
-# d'ecrire l'etat de tofu : un worker est refuse par le systeme de fichiers, jamais par un booleen
-# qu'on pourrait oublier de poser. Cette commande NE LE CONTOURNE PAS — elle NOMME le geste quand
-# elle n'a pas le droit, au lieu d'echouer sur une permission qui n'apprend rien.
+# LE GATE EST LA CAPACITE, PAS UN DRAPEAU. Installer exige de lire le jeton master
+# (`0640 root:lcars-admin`) et d'ecrire l'etat de tofu : un non-admin est refuse par le systeme de
+# fichiers, jamais par un booleen qu'on pourrait oublier de poser. Cette commande NE LE CONTOURNE
+# PAS — elle NOMME ce qui manque au lieu d'echouer sur une permission qui n'apprend rien.
+#
+# ⚖ 2026-08-17 : le groupe porte `is_admin` DE LA FORGE, projete par le convergeur d'humains. Le
+# gate ne change pas de nature, il change de GRANTEUR — la forge au lieu de `uid 0`, que personne
+# n'a ni n'aura.
 cmd_catalogue_install() {
   local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
   local gestures="${LCARS_FORGE_GESTURES:-/opt/lcars/forge-gestures.sh}"
@@ -399,10 +404,27 @@ cmd_catalogue_install() {
   [[ -x "$gestures" ]] \
     || die "catalogue install: gestes forge introuvables ($gestures) — cette commande ne s'execute que DANS la boite"
 
-  if [[ "$(id -u)" -ne 0 ]]; then
-    die "catalogue install: installer exige l'autorite de la boite (le jeton master est 0600 root).
-  Rejoue en root : « sudo $gestures install $name »
-  — et si tu n'as pas sudo ici, c'est la reponse : seul un admin installe un catalogue."
+  # ⚖ ARBITRAGE USER (2026-08-17) : « ADMIN » EST UN FAIT DE FORGE, PAS `uid 0`.
+  # Ce test etait `[[ "$(id -u)" -ne 0 ]]`, et il gatait sur une propriete qu'AUCUN humain n'a ni
+  # n'aura : le seul root de la boite est `admiral`, compte d'administration SYSTEME, dont le
+  # metier est d'installer des paquets et non des catalogues. Le deck, lui, tenait deja le bon
+  # modele — il lit `is_admin` sur la forge a chaque connexion. Les deux portes disent desormais la
+  # meme chose.
+  #
+  # LE GATE RESTE LA CAPACITE, PAS UN BOOLEEN : c'est la lecture du jeton master
+  # (`0640 root:lcars-admin`) qui autorise, et l'appartenance au groupe vient de `is_admin` par le
+  # convergeur d'humains. Tester ici ne fait qu'expliquer un refus que le systeme de fichiers
+  # prononcerait de toute facon — un test oublie ne donnerait donc rien a personne.
+  local master="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
+  if [[ ! -r "$master" ]]; then
+    if [[ ! -e "$master" ]]; then
+      die "catalogue install: cette boite n'a AUCUNE autorite de creation ($master absent).
+  Un admin la pose une fois : « FORGE_ADMIN_TOKEN=<jeton site-admin> ./docker.sh config »."
+    fi
+    die "catalogue install: ton compte n'administre pas ce runtime.
+  « admin » est un fait de la FORGE : ton compte y porte is_admin, ou il ne le porte pas. Un
+  proprietaire de la forge te promeut, et le convergeur t'ouvre la porte au tour suivant (30 s) —
+  effectif a ta prochaine session. Ce n'est PAS une histoire de sudo : personne n'est root ici."
   fi
 
   "$gestures" install "$name"

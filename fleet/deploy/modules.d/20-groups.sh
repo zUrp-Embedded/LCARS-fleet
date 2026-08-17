@@ -12,6 +12,11 @@
 # sont des cap-profiles DANS le runtime + des comptes sur la FORGE, cf. 50-forge). Il ne reste
 # que : le groupe `fleet` (lecture de l'install RO + des role-tokens 0640) et l'appartenance de
 # l'humain-lanceur à ce groupe.
+#
+# ⚠ LE SECOND GROUPE N'A AUCUN MEMBRE ICI, ET C'EST LE POINT. `$PROV_ADMIN_GROUP` projette
+# `is_admin` de la forge (⚖ user 2026-08-17) : qui l'administre est une decision prise SUR LA
+# FORGE, convergee par `human-converger.sh`. Y ajouter l'humain-lanceur d'office ferait de « qui a
+# lance la fleet » un droit d'administration — ce que ce lot existe pour retirer.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -32,12 +37,22 @@ check() {
   else
     p_drift "humain cible inconnu du système : $PROV_HUMAN (--human pour désigner le bon)"
   fi
+  if getent group "$PROV_ADMIN_GROUP" >/dev/null; then
+    p_ok "groupe $PROV_ADMIN_GROUP (membres : $(members_of "$PROV_ADMIN_GROUP"))"
+  else
+    p_drift "groupe $PROV_ADMIN_GROUP absent — aucun humain ne pourra administrer le runtime"
+  fi
+
   verdict_check
 }
 
 apply() {
   ensure_group "$PROV_FLEET_GROUP" || verdict_apply
   ensure_member "$PROV_HUMAN" "$PROV_FLEET_GROUP" || verdict_apply
+  # Le groupe d'administration existe TOUJOURS, meme vide : les fichiers d'autorite lui sont
+  # attribues (`0640 root:$PROV_ADMIN_GROUP`), et un groupe absent ferait echouer ce chown sur une
+  # boite dont personne n'est encore admin.
+  ensure_group "$PROV_ADMIN_GROUP" || verdict_apply
   verdict_apply
 }
 
