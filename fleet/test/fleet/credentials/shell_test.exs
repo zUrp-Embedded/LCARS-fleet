@@ -28,6 +28,38 @@ defmodule Fleet.Credentials.ShellTest do
     test "non-binary args → {:error, {:bad_opt, :args}}" do
       assert {:error, {:bad_opt, :args}} = Shell.run("sh", ["-c", 123])
     end
+
+    # ⚠ CE TEMOIN EXISTE PARCE QUE LE CONTRAIRE A COUTE 15 MINUTES DE DEADLINE. `ProjectPublish`
+    # passait `timeout:` la ou ce module lit `:timeout_ms` ; la cle etait absorbee sans un mot et le
+    # rail tournait sur les 30 s du defaut. Valider le TYPE des cles connues sans refuser les
+    # inconnues ne gardait que les fautes que personne ne commet.
+    test "unknown option → {:error, {:bad_opt, {:unknown, [key]}}}, named, before any value check" do
+      assert {:error, {:bad_opt, {:unknown, [:timeout]}}} =
+               Shell.run("sh", ["-c", "true"], timeout: 900_000)
+
+      # PLUSIEURS inconnues sont TOUTES nommees : un message qui n'en cite qu'une envoie le lecteur
+      # corriger, relancer, et retomber sur la suivante.
+      assert {:error, {:bad_opt, {:unknown, [:timeout, :retries]}}} =
+               Shell.run("sh", ["-c", "true"], timeout: 1, retries: 3)
+
+      # L'ORDRE COMPTE : une cle inconnue tombe AVANT la validation des valeurs. Ici `timeout_ms`
+      # est invalide ET `timeout` est inconnue — c'est la cle qui n'a jamais ete lue qu'on nomme,
+      # pas la valeur d'une cle qui, elle, l'aurait ete.
+      assert {:error, {:bad_opt, {:unknown, [:timeout]}}} =
+               Shell.run("sh", ["-c", "true"], timeout: 1, timeout_ms: -1)
+    end
+
+    # LE TEMOIN NEGATIF, sans lequel le precedent passerait sur un garde qui refuse TOUT. Les quatre
+    # cles du contrat traversent, et la commande s'execute reellement.
+    test "the four contract keys pass through — the guard refuses the unknown, not the known" do
+      assert {:ok, {_, 0}} =
+               Shell.run("sh", ["-c", "true"],
+                 timeout_ms: 5_000,
+                 max_output_bytes: 1_000,
+                 env: [{"K", "v"}],
+                 cd: "/tmp"
+               )
+    end
   end
 
   describe "run/3 — bounded by construction (MOVE-1/MA-22)" do

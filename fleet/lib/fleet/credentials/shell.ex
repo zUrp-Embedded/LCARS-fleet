@@ -266,10 +266,22 @@ defmodule Fleet.Credentials.Shell do
     end
   end
 
+  # THE ONLY OPTIONS THIS RUNNER HONOURS. Anything else is refused by name — see the scar below.
+  @run_opts [:timeout_ms, :max_output_bytes, :env, :cd]
+
   # Parse-don't-validate at the boundary: `run/3` promises `result()` for ANY caller, so bad opts become a
   # typed `{:error, {:bad_opt, _}}`, never a raise (a non-integer `timeout_ms` used to blow up on the
   # deadline `+`, a malformed `env`/`cd` in the charlist conversion). Prod callers (`git/2`) always pass
   # valid opts; this guards a direct/buggy caller so the contract holds.
+  #
+  # ⚠ VALIDATING THE KEYS IT KNOWS AND IGNORING THE REST GUARDED ONLY THE MISTAKES NOBODY MAKES.
+  # Measured on `MCP.PodTools.ProjectPublish`: it declared a 15-minute wall for a rail that re-clones
+  # a repository and rewrites its whole history, then passed it as `timeout:`. This function reads
+  # `:timeout_ms`. The option was absorbed without a word, the rail ran on the 30 s default — thirty
+  # times less than the intent written two lines above the call — and the failure surfaced as a
+  # generic `:timeout`, under a constant announcing fifteen minutes to whoever came to diagnose.
+  # A typed refusal on an unknown key is what turns that class of typo into a caller that cannot
+  # start, instead of one that silently runs on a default.
   defp parse_run(args, opts) do
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
     max_output_bytes = Keyword.get(opts, :max_output_bytes, @default_max_output_bytes)
@@ -277,6 +289,12 @@ defmodule Fleet.Credentials.Shell do
     cd = Keyword.get(opts, :cd)
 
     cond do
+      # FIRST, and the order is the point: an unknown key means the caller's intent was never
+      # applied at all. Reporting a value problem before a key problem would send the reader to
+      # inspect a setting that was never read.
+      (unknown = Enum.uniq(Keyword.keys(opts)) -- @run_opts) != [] ->
+        {:error, {:bad_opt, {:unknown, unknown}}}
+
       not Enum.all?(args, &is_binary/1) ->
         {:error, {:bad_opt, :args}}
 

@@ -98,7 +98,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
          {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
          args = rail_args(repo, b, forge_url, forge_tok, fresh_work(slug)),
          {:ok, {out, 0}} <-
-           Fleet.Credentials.Shell.run(rail_path(), args, timeout: @rail_timeout_ms) do
+           Fleet.Credentials.Shell.run(rail_path(), args, timeout_ms: @rail_timeout_ms) do
       {:ok, parse_result(out)}
     else
       {:ok, {out, code}} -> {:error, {:rail_exit, code, last_line(out)}}
