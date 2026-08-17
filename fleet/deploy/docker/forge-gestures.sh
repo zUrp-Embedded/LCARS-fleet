@@ -146,6 +146,57 @@ with_apply_lock() {
   "$@"
 }
 
+# ─── LA VISIBILITE DES ADHESIONS MACHINE ────────────────────────────────────────────────────────
+# CE GESTE VIVAIT DANS LA BOUCLE DE BOOT, ET IL N'AVAIT RIEN A Y FAIRE. `50-forge.sh` le rejouait a
+# chaque `provision apply` : une convergence, a chaque demarrage, pour un fait qui ne peut changer
+# qu'au moment ou des comptes sont crees. C'est la regle du re-roll (⚖ user 2026-08-17) — on repose
+# le squelette, on ne remute pas la config.
+#
+# ET IL ETAIT MONO-ORG, ce que le deplacement corrige tout seul. La sonde interrogeait
+# `/orgs/$PROV_FORGE_ORG/...` en dur, donc elle ne voyait jamais l'org d'un catalogue : mesure du
+# 2026-08-17, `fleet` portait ses dix comptes machine en public et `web-demo` AUCUN. Pire, elle
+# accusait — les comptes `web-demo_*` etaient dans sa liste, cherches dans `fleet`, donc rendus
+# « absents », et le module imprimait « la recette ne les place dans aucune team » pour des comptes
+# parfaitement places dans la leur. Ici chaque geste traite SON org, et la question ne se pose plus.
+#
+# A QUOI CA SERT, ET CE N'EST PAS DE LA SURETE (⚖ user 2026-08-17) : c'est de l'UX. Une adhesion
+# privee est invisible aux non-membres, donc un humain qui ouvre l'org ne voit pas quels workers y
+# travaillent. Le motif « savoir QUI existe est un prerequis de surete » etait emprunte : rien dans
+# le depot ne LIT cette visibilite.
+#
+# ⚠ `publicize` EST SELF-ONLY, mesure sur Gitea 1.26.4 : le jeton master sur un autre compte rend
+# 403, meme avec `write:organization` ; un jeton de role au scope A4 rend 403 meme sur lui-meme. La
+# seule voie est donc la basic-auth DU COMPTE — et c'est ce qui rend cette boucle auto-limitante :
+# les comptes que tofu vient de creer portent le seed, une vraie personne porte le sien, donc un
+# 401 sur un humain est le comportement voulu et non une panne. On ne publicise que ce qu'on possede.
+publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
+  local org="$1" tok="$2" seed="$3" acct code posed=0 skipped=0
+  local -a members=()
+  mapfile -t members < <(curl -sS -m 15 -H "Authorization: token $tok" \
+      "${FORGE_BASE_URL%/}/api/v1/orgs/$org/members" 2>/dev/null \
+    | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null || true)
+
+  [[ ${#members[@]} -gt 0 ]] || { echo "forge-gestures: $org — aucun membre lu, visibilite non posee" >&2; return 0; }
+
+  for acct in "${members[@]}"; do
+    [[ -n "$acct" ]] || continue
+    # DEJA PUBLIC : on ne rejoue pas un PUT pour le plaisir d'un 204. 204 = public, 404 = prive.
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" \
+          "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null)" == "204" ]] && continue
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 -X PUT -u "$acct:$seed" \
+            "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null || true)"
+    case "$code" in
+      204) posed=$((posed + 1)) ;;
+      # 401/403 = ce compte n'est pas a nous (une personne a change son mot de passe, ou n'a jamais
+      # eu le seed). C'est le cas NOMINAL pour un humain : sa visibilite lui appartient.
+      401|403) skipped=$((skipped + 1)) ;;
+      *) echo "forge-gestures: $org/$acct — publicize HTTP $code" >&2 ;;
+    esac
+  done
+
+  echo "forge-gestures: $org — $posed adhesion(s) rendue(s) visible(s), $skipped compte(s) hors de notre autorite"
+}
+
 cmd_apply() {
   local tok seed
   # Le jeton donne a la main l'emporte sur celui que la boite garde ; le SEED, lui, n'a pas de
@@ -200,6 +251,9 @@ cmd_apply() {
   trap "rm -f '$tf'" EXIT
   FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync \
     || echo "forge-gestures: depot modele NON pose — l'onboard degradera en bare-create (dit a chaque projet)" >&2
+
+  # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
+  publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
 
   seed_demo_catalogue "$tok"
 }
@@ -424,6 +478,11 @@ cmd_install() {
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 
+  # 5bis. La visibilite des comptes machine de CETTE org, dans le geste qui vient de les creer.
+  #       Elle ne se faisait NULLE PART pour un catalogue : le convergeur de boot ne regardait que
+  #       l'org systeme, donc `web-demo` n'avait aucun membre public (mesure du 2026-08-17).
+  publicize_org_members "$name" "$tok" "$seed"
+
   # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
   #    sans sa source est un install interrompu, et aucune boite ne peut servir un catalogue dont le
   #    materiel n'est nulle part.
@@ -516,6 +575,16 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
     || { rm -rf "$stage"; die "install: source NON poussee dans $name/catalogue — l'org est posee mais le catalogue n'est PAS installe"; }
   rm -rf "$stage"
 }
+
+# ⚠ FRONTIERE DE SOURCING — TOUT CE QUI EST AU-DESSUS EST TESTABLE, TOUT CE QUI EST DESSOUS NE
+# L'EST PAS. Un temoin charge ce fichier pour appeler UNE fonction sans jouer le dispatch ; sans
+# cette ligne, `case "${1:-}"` tombe sur `*)` et sort 1 des le `source`. Meme forme et meme motif que
+# `human-converger.sh`.
+#
+# ⚠ ET LE PIEGE EST DE POSER UNE FONCTION SOUS CETTE LIGNE : elle devient invisible aux temoins,
+# qui echouent alors sur « command not found » — une erreur qui accuse le test, pas le rangement.
+# C'est arrive une fois sur `forge_is_admin`.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-}" in
   config-token) cmd_config_token ;;

@@ -28,9 +28,12 @@
 #      le GARDENT : must_change_password=false dans forge.tf), le module le DÉRIVE :
 #      {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge donc les
 #      tokens dans le MÊME cycle — plus aucun geste.
-#   3. converge la VISIBILITÉ des adhésions d'org des comptes machine (BL-6-46 : une adhésion
-#      créée par API est PRIVÉE par défaut — on se cachait sans l'avoir décidé). Le provider
-#      n'expose pas cette visibilité → recette, pas tofu. Le compte operateur est sondé + instruit,
+#   3. SONDE (et ne converge plus) la VISIBILITÉ des adhésions d'org des comptes machine de l'org
+#      SYSTÈME. Une adhésion créée par API est PRIVÉE par défaut, donc invisible aux non-membres :
+#      un humain qui ouvre l'org ne voit pas quels workers y travaillent. C'est de l'UX, pas de la
+#      sûreté (⚖ user 2026-08-17 — rien dans le dépôt ne LIT cette visibilité). Le geste qui la pose
+#      vit dans `forge-gestures.sh`, joué par `forge-apply` et par `catalogue install`, chacun sur
+#      l'org qu'il vient de créer. Le compte operateur est sondé + instruit,
 #      jamais convergé : son mot de passe n'est dans aucun fichier de la recette (le passwords-file
 #      ne porte que les comptes machine), donc il n'y a rien avec quoi converger. Le motif ecrit ici
 #      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
@@ -219,12 +222,20 @@ ensure_passwords_entries() {
   p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
 }
 
-# La visibilité des adhésions (BL-6-46 : « savoir QUI existe est un prérequis de sûreté ») —
-# sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui :
-# 403, même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal
-# A4 (write:repository,write:issue) répond 403 même sur soi. La seule voie recette est donc la
-# basic-auth PAR COMPTE du passwords-file — la même mécanique que le mint A4, les bots gardent
-# le seed. Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
+# La visibilité des adhésions, SONDÉE ICI et posée ailleurs (`forge-gestures.sh`).
+#
+# ⚠ SON MOTIF ÉTAIT EMPRUNTÉ : « savoir QUI existe est un prérequis de sûreté » (BL-6-46). Mesuré le
+# 2026-08-17 — `public_members` n'a AUCUNE autre occurrence dans le dépôt, et cette fiche n'apparaît
+# que dans les commentaires de ce fichier. Rien ne LIT cette visibilité. Le besoin est réel et il est
+# d'UX (⚖ user) : une adhésion privée est invisible aux non-membres, donc un humain qui ouvre l'org
+# ne voit pas quels workers y travaillent. Nommer une commodité « sûreté » lui donne une priorité
+# qu'elle n'a pas et rend son coût indiscutable.
+#
+# Sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui : 403,
+# même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal A4
+# (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
+# COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
+# Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
   local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok=""
   local -a auth=()
@@ -267,9 +278,19 @@ members_in_state() { # $1=état recherché, $2=liste → sous-liste
 
 members_hidden() { members_in_state hidden "$1"; }
 
+# ⚠ CETTE SONDE INTERROGEAIT `$ACCOUNTS`, ET ELLE ACCUSAIT. `$ACCOUNTS` contient les comptes de TOUS
+# les catalogues installés (`prov_roles` boucle sur `/home/catalogues/*/`), or `member_state` ne
+# regarde que `$PROV_FORGE_ORG`. Un `web-demo_dev`, parfaitement membre de `web-demo`, y était donc
+# rendu « absent », et le module imprimait « la recette ne les place dans aucune team » — un
+# diagnostic faux, qui envoyait l'opérateur vérifier des listes writers/judges/externals sans
+# rapport. Mesuré le 2026-08-17.
+#
+# Elle sonde donc le ROSTER SYSTÈME seul : `$PROV_ROLES` est le plancher (avant que `prov_roles` n'y
+# ajoute les catalogues), et c'est exactement la population de l'org système. La visibilité d'une org
+# de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
 check_members_visible() {
-  local hidden absent unknown
-  unknown="$(members_in_state unknown "$ACCOUNTS")"
+  local hidden absent unknown org_accounts="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
+  unknown="$(members_in_state unknown "$org_accounts")"
   # NE RIEN DIRE D'AUTRE quand on ne peut pas lire. Enchainer sur « absent » ici produirait un
   # verdict sur des comptes qu'on n'a pas interroges, et il serait FAUX exactement au moment le plus
   # courant : juste apres la pose de la structure, avant le premier mint.
@@ -278,8 +299,8 @@ check_members_visible() {
     return 0
   fi
 
-  absent="$(members_in_state absent "$ACCOUNTS")"
-  hidden="$(members_hidden "$ACCOUNTS")"
+  absent="$(members_in_state absent "$org_accounts")"
+  hidden="$(members_hidden "$org_accounts")"
 
   # Un compte sans adhésion a un jeton et AUCUN droit d'écriture : il échoue au premier geste, et
   # tard, parce que la recette ne l'a placé dans aucune team. Le publiciser n'y ferait rien.
@@ -289,7 +310,7 @@ check_members_visible() {
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"
   else
-    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — l'apply les publicise (basic-auth par compte)"
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « ./docker.sh forge-apply » (il les publicise juste après la structure)"
   fi
 
   # L'humain : sonde seule, geste instruit — jamais convergé ici (cf. en-tête, point 3).
@@ -301,39 +322,6 @@ check_members_visible() {
   fi
 }
 
-converge_members_visible() {
-  local hidden acct pwd code
-  # Sans autorite, `members_hidden` rend une liste VIDE — qui se lit « rien a faire ». Le dire
-  # plutot que de reporter un OK : ce module tourne AVANT le mint du jeton systeme sur une boite
-  # neuve, et un « deja visibles » y serait une phrase sur des comptes jamais interroges.
-  if [[ -n "$(members_in_state unknown "$ACCOUNTS")" ]]; then
-    p_drift "visibilité des adhésions non sondable (jeton système absent) — reprise au prochain apply, une fois le jeton minté"
-    return 0
-  fi
-  hidden="$(members_hidden "$ACCOUNTS")"
-  [[ -z "$hidden" ]] && { p_ok "adhésions org déjà visibles (comptes machine)"; return 0; }
-  # Basic-auth par compte : le passwords-file est la MÊME source que le mint A4 (convergée
-  # par entrée depuis le seed) — pas de source de secret nouvelle pour ce geste.
-  if ! ensure_passwords_entries; then
-    p_drift "adhésions privées ($hidden) non convergées — passwords-file incomplet (cf. ci-dessus)"
-    return 0
-  fi
-  for acct in $hidden; do
-    pwd="$(jq -r --arg a "$acct" '.[$a] // empty' "$PROV_PASSWORDS_FILE" 2>/dev/null)"
-    if [[ -z "$pwd" ]]; then
-      p_drift "adhésion de $acct non convergée : pas d'entrée passwords-file"
-      continue
-    fi
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -u "$acct:$pwd" -X PUT \
-            "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/public_members/$acct" 2>/dev/null || true)"
-    if [[ "$code" == "204" ]]; then
-      PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "adhésion org publicisée : $acct"
-    else
-      p_drift "publicize $acct → HTTP $code (publicize est self-only ; password du seed encore valide ?)"
-    fi
-  done
-}
 
 check() {
   if [[ -z "$PROV_FORGE_URL" ]]; then
@@ -421,10 +409,13 @@ apply() {
     verdict_apply
   fi
 
-  # AVANT l'early-return des tokens : la visibilité converge à CHAQUE apply, pas seulement
-  # quand des tokens manquent (les deux jambes sont indépendantes — BL-6-46).
-  converge_members_visible
-
+  # ⚠ `converge_members_visible` VIVAIT ICI ET N'Y EST PLUS (2026-08-17). Elle rendait publiques les
+  # adhésions d'org des comptes machine — à CHAQUE apply, donc à chaque démarrage, pour un fait qui
+  # ne peut changer qu'au moment où des comptes sont créés. ⚖ Règle du re-roll : on repose le
+  # squelette sans lequel la fleet ne produit rien, on ne remute pas la config.
+  # Le geste vit désormais dans `forge-gestures.sh`, joué par `forge-apply` pour l'org système et par
+  # `catalogue install` pour l'org du catalogue — chacun sur l'org qu'il vient de créer, ce qui
+  # supprime au passage le défaut mono-org que ce module portait.
   if a4_check; then
     p_ok "role-tokens déjà valides ($PROV_TOKENS_DIR)"
     verdict_apply
