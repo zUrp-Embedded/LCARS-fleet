@@ -64,7 +64,12 @@ defmodule Fleet.Project do
       Fleet.Workflow,
       Fleet.Forge,
       Fleet.ReceptionFilter,
-      Fleet.Conflict
+      Fleet.Conflict,
+      # Ce domaine porte des portes RELEASE (`eval_reconcile`, `eval_migrate`) dont stdout est lu
+      # par un appelant shell. La regle qui rend cette sortie fiable est une primitive de
+      # foundation, partagee avec les portes de `Fleet.Application` — la recopier ferait deux
+      # exemplaires d'un meme contrat dans deux domaines.
+      Fleet.ReleaseDoor
     ],
     exports: [
       Onboard,

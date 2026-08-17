@@ -30,6 +30,11 @@ defmodule Fleet.Application.CatalogueVerify do
   """
   @spec eval_main(Path.t()) :: no_return()
   def eval_main(root) when is_binary(root) do
+    # Le rapport EST la sortie de cette porte, et l'entrypoint le rend a l'operateur. Meme regle que
+    # les autres portes release : le logger va sur stderr, le rapport garde stdout pour lui seul.
+    # Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case verify(root) do
       {:ok, %{assumptions: assumptions}} ->
         print(assumptions)

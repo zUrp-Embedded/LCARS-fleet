@@ -100,6 +100,12 @@ defmodule Fleet.Application.CatalogueLifecycle do
   """
   @spec eval_main() :: no_return()
   def eval_main do
+    # ⚠ `cat_states` (bin/lcars) PARSE cette sortie mot par mot, et son `case` ne connait que
+    # INSTALLED / UPDATABLE / AVAILABLE : une ligne de log sur stdout n'y produit AUCUNE ligne de
+    # tableau — un catalogue qui disparait de la liste sans un mot. Ce chemin loggue (deux
+    # `Logger.warning` sous `states/1`). Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case with_transport(fn -> states([]) end) do
       {:ok, entries} ->
         Enum.each(lines(entries), &IO.puts/1)

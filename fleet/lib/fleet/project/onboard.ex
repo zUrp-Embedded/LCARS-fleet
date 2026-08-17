@@ -506,6 +506,10 @@ defmodule Fleet.Project.Onboard do
     # tool. The door needs exactly this one process and starts exactly it.
     {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
 
+    # Le rapport de cette porte est lu par un operateur, pas parse — mais un « migre : a -> b »
+    # entrelace d'avertissements du transfert se lit tout aussi mal. Meme regle, meme geste.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case migrate(full_name, target) do
       {:ok, %{repo: new_name, faces: faces, absent: absent}} ->
         IO.puts("migre : #{full_name} -> #{new_name}")
@@ -579,17 +583,9 @@ defmodule Fleet.Project.Onboard do
     # forge meurt alors en `unknown registry: Fleet.Forge.Finch`.
     {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
 
-    # ⚠ UNE PORTE DONT LA SORTIE SE PARSE NE PARTAGE PAS STDOUT AVEC LE LOGGER. Mesure du
-    # 2026-08-17 au banc : l'apply a REUSSI, les trois faces etaient posees, et le module l'a rendu
-    # en ECHEC — `import/2` loggue (un `info` de reussite, quatre `warning` de cap-profile), le
-    # handler par defaut ecrit sur stdout, et chaque ligne de log arrivait au lecteur comme un
-    # verdict de projet illisible. Le contrat « un mot par ligne » etait donc intenable par
-    # construction, pas par derive de format.
-    #
-    # Les diagnostics ne sont pas perdus, ils sont DEPLACES sur stderr — la ou l'appelant les
-    # reprend deja quand la porte meurt. Ne rien changer aurait laisse un module qui crie sur une
-    # convergence reussie ; les couper aurait rendu muette la seule trace utile en cas d'echec.
-    log_to_stderr!()
+    # Le module qui lit cette porte parse un mot par ligne : `stdout` est un format de fil, pas une
+    # console. Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
+    Fleet.ReleaseDoor.claim_stdout!()
 
     entries = reconcile(mode)
 
@@ -689,26 +685,6 @@ defmodule Fleet.Project.Onboard do
       {:ok, _} -> %{repo: full_name, status: :imported, reason: nil}
       {:error, reason} -> %{repo: full_name, status: :failed, reason: reason}
     end
-  end
-
-  # RETIRER PUIS REPOSER, et ce n'est pas une precaution de style : `type` est immuable sur un
-  # handler vivant — `update_handler_config` rend
-  # `{:error, {:illegal_config_change, :logger_std_h, %{type: :standard_io}, …}}`. Le handler est
-  # donc recree a l'identique, `type` mis a part, pour que le format et le niveau restent ceux que
-  # l'operateur a configures.
-  #
-  # AUCUN SECOURS : si la sortie ne peut pas etre separee, cette porte ne doit rien imprimer du
-  # tout. Un stdout partage produit des verdicts que l'appelant lira comme des projets, et c'est
-  # exactement le defaut qu'on ferme. On casse fort, l'appelant rend le cri.
-  defp log_to_stderr! do
-    {:ok, cfg} = :logger.get_handler_config(:default)
-    :ok = :logger.remove_handler(:default)
-
-    :ok =
-      :logger.add_handler(:default, cfg.module, %{
-        cfg
-        | config: Map.put(cfg.config, :type, :standard_error)
-      })
   end
 
   defp reconcile_line(%{repo: repo, status: :failed, reason: reason}),

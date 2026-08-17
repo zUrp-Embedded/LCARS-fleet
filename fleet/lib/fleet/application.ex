@@ -14,6 +14,11 @@ defmodule Fleet.Application do
       # boot (`Quiesce.init_busy!` — single-threaded spot, before any concurrent first
       # use) — a foundation primitive, reachable by design.
       Fleet.Shutdown.Quiesce,
+      # Ce domaine porte deux portes RELEASE (`CatalogueLifecycle`, `CatalogueVerify`) dont stdout
+      # est lu par un appelant shell. La regle qui rend cette sortie fiable est une primitive de
+      # foundation, partagee avec la porte de `Fleet.Project` — la recopier ferait deux exemplaires
+      # d'un meme contrat dans deux domaines.
+      Fleet.ReleaseDoor,
       # Proven-good images at boot (tier B): the ROOT publishes both snapshots before any child
       # can spawn a pod — a boot concern by nature (do-not-boot on invalid), hence the two edges.
       Fleet.CapProfile,

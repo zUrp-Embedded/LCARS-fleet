@@ -317,11 +317,16 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       assert src =~ "defp with_transport",
              "le demarrage du transport a disparu — les portes eval rendront une ArgumentError"
 
+      # ⚠ CE TEMOIN MESURAIT UNE DISTANCE EN CARACTERES (`String.slice(corps, 0, 200)`), et une
+      # distance n'est pas une structure : ajouter un commentaire en tete d'une porte — un geste
+      # qui ne touche a aucun appel — poussait `with_transport` hors de la fenetre et rendait le
+      # temoin rouge. Un test qui casse sur de la prose apprend a le contourner. La borne est
+      # desormais la FIN DE LA FONCTION : la definition suivante au meme niveau d'indentation.
       for porte <- ["def eval_main do", "def eval_source(name) when is_binary(name) do"] do
-        [_, corps] = String.split(src, porte, parts: 2)
-        entete = String.slice(corps, 0, 200)
+        [_, apres] = String.split(src, porte, parts: 2)
+        corps = apres |> String.split(~r/\n  defp? /, parts: 2) |> hd()
 
-        assert entete =~ "with_transport",
+        assert corps =~ "with_transport",
                "#{porte} appelle la forge sans demarrer le transport"
       end
     end

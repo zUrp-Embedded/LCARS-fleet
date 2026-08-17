@@ -55,6 +55,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.PodId` | 0 |
 | foundation | `Fleet.Publish.InFlight` | 0 |
 | foundation | `Fleet.ReceptionFilter` | 0 |
+| foundation | `Fleet.ReleaseDoor` | 0 |
 | foundation | `Fleet.SchemaCache` | 0 |
 | foundation | `Fleet.Shutdown.Quiesce` | 0 |
 | foundation | `Fleet.Slug` | 0 |
