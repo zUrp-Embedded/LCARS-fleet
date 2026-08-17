@@ -153,6 +153,29 @@ variable "org" {
 resource "gitea_org" "fleet" {
   name       = var.org
   visibility = "public"
+
+  # ⚖ REGLE DU RE-ROLL (user, 2026-08-17) : un re-roll repose le SQUELETTE sans lequel la fleet ne
+  # produit rien, et rien d'autre. L'EXISTENCE de cette org est du squelette ; sa visibilite est un
+  # reglage, et un admin qui la passe en `limited` a pris une decision qu'on ne lui reprend pas.
+  #
+  # MESURE DU 2026-08-17 SUR BANC, parce que ce n'est pas une precaution theorique : org passee en
+  # `limited` par l'API, puis `tofu plan` -> `~ visibility = "limited" -> "public"`. Sans ce bloc, le
+  # prochain apply annule le geste, en silence, au milieu de cinq autres lignes de plan.
+  #
+  # ⚠ POURQUOI `ignore_changes` ET PAS « ne pas declarer l'attribut » : mesure du schema du provider
+  # (`tofu providers schema -json`), `visibility` est `optional=true, computed=FALSE`. Sans
+  # `computed`, un attribut omis ne veut pas dire « non gere » — il vaut sa valeur ZERO, et tofu
+  # planifie un diff vers `""` a chaque apply. C'est `Optional + Computed:true` qui signifie « si tu
+  # ne le declares pas, je n'y touche pas », et ce n'est pas le cas ici.
+  #
+  # ⚠ ET LE PIEGE DE `ignore_changes` DE CE FICHIER NE MORD PAS ICI, verifie plutot que suppose. Il
+  # a ete retire des teams (cf. la cicatrice sur `gitea_team`) parce que Gitea relit `permission` en
+  # `none` — une valeur INVALIDE en ecriture, que l'update renvoyait et que Gitea refusait. La
+  # visibilite, elle, se relit `public`/`limited` : des valeurs valides. Plan apres ce bloc :
+  # `gitea_org.fleet` disparait du plan, l'org reste `limited`.
+  lifecycle {
+    ignore_changes = [visibility, repo_admin_change_team_access]
+  }
 }
 
 # system : SEUL à créer des repos d'org (création réservée au système) + write dessus
