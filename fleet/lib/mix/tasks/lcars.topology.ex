@@ -64,7 +64,13 @@ defmodule Mix.Tasks.Lcars.Topology do
     # edges are ordinary compile deps the boundary checker holds. The seams still exist — they are
     # how a test injects a stub — but as INJECTION over a declared dep, which this table does not
     # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
-    {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"}
+    {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"},
+    # Two edges this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
+    # them "same shape as `:coord_backend`", which is the class excluded just above. The test is
+    # the `deps:` list, not the injection mechanism — `Fleet.Coord` IS in `Fleet.Starfleet`'s deps,
+    # `Fleet.Pilot` is in neither Starfleet's nor Project's. Both cross an edge boundary forbids.
+    {"Fleet.Starfleet", "Fleet.Pilot", ":starfleet_completion_inflight_fun"},
+    {"Fleet.Project", "Fleet.Pilot", ":project_incident_rail"}
   ]
 
   # Editorial layer names — the ONLY place they are declared. Keys are domain module

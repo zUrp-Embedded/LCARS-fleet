@@ -507,10 +507,15 @@ if config_env() != :test and not tool_mode? do
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
   # The project-lifecycle domain sits BELOW the rail that drives projects, so its two card-fallback
-  # sites cannot reference the incident registry at compile time. Same shape as the seam above and
-  # as `:coord_backend`: the module crosses the boundary as a VALUE. Unwired, the fallback still
-  # runs and warns — what is lost is the durable trace, and `Project.Incidents` says so loudly
-  # rather than swallowing it.
+  # sites cannot reference the incident registry at compile time: the module crosses the boundary
+  # as a VALUE. Unwired, the fallback still runs and warns — what is lost is the durable trace, and
+  # `Project.Incidents` says so loudly rather than swallowing it.
+  #
+  # ⚠ SAME SHAPE AS THE SEAM ABOVE, AND *NOT* AS `:coord_backend` — this line said "and as
+  # `:coord_backend`" and the misfiling had a consequence. `Fleet.Coord` IS in `Fleet.Starfleet`'s
+  # `deps:`, so that one swaps an implementation over an edge the compiler already holds; it is the
+  # class `@seams` excludes BY NAME. These two cross an edge boundary forbids, so they belong IN
+  # the table — and were missing from it for exactly as long as this sentence stood.
   config :lcars_fleet,
          :project_incident_rail,
          {Fleet.Pilot.IncidentRegistry, :record_or_escalate}
