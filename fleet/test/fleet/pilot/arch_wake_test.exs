@@ -1,5 +1,11 @@
 defmodule Fleet.Pilot.ArchWakeTest do
-  use ExUnit.Case, async: true
+  # ⚠ `async: false` : ce fichier ECRIT `:pilot_arch_deliverable_fetch` en env d'APPLICATION, qui est
+  # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
+  # lit cette cle lit la valeur de celui-ci. Mesure du 2026-08-17 : la meme forme a tue
+  # `Pilot.ApplicationTest` sur une racine de catalogue temporaire qui ne lui appartenait pas, dans
+  # le build d'image et pas sur la machine de dev — la collision depend du nombre de coeurs et de
+  # l'ordre du seed, donc elle mord la ou ca coute le plus cher.
+  use ExUnit.Case, async: false
 
   alias Fleet.Pilot.ArchWake
 

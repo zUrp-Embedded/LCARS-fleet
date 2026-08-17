@@ -55,6 +55,17 @@ defmodule Fleet.TestEnv do
   Sets `value` under `{app, key}` and registers restoration of the PREVIOUS value
   (re-set, or deletion if the key was absent) at the end of the test. Set + restore
   in one call — the call site writes neither `prev` nor `on_exit`.
+
+  ⚠ **A TEST FILE THAT CALLS THIS IS `async: false`.** The restoration is per-test; the WRITE is
+  global to the node, and no `on_exit` narrows that. Between the set and the restore, every
+  concurrent test reading that key reads this one's value.
+
+  Not a theoretical hazard — measured 2026-08-17. `CardRolesTest` pointed
+  `:workflow_workflow_maps_root` at its own tmp root, and `Fleet.Pilot.ApplicationTest`, running
+  concurrently, resolved its cards THERE and died on a path that was never its own and no longer
+  existed. It surfaced in the image build while the host gate was green at the same commit: the
+  collision needs both modules inside the same window, so it depends on core count and seed order,
+  and it fires on the busiest machine.
   """
   def put_env_restoring(app, key, value) do
     restore_env_on_exit(app, key)
