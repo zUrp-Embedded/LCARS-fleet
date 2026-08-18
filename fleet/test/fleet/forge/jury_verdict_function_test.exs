@@ -10,7 +10,12 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
   defp f(severities) when is_list(severities),
     do: %{"findings" => Enum.map(severities, &%{"severity" => &1, "category" => "tests"})}
 
-  describe "C2 — la carte peut refuser ce qu'un juge a approuvé" do
+  # ⚠ CES CAS ONT CHANGÉ DE SORTIE AVEC C3, ET LA SÉMANTIQUE EST INCHANGÉE. En C2 un blocage par
+  # courbe rendait `:changes_requested` — la PR repartait chez le producteur. C3 lui donne son nom :
+  # `:gray_zone`, l'état où le jury approuve et où seule la carte refuse. Le ROUTAGE, lui, fait
+  # aujourd'hui la même chose (rework) tant que le gatekeeper n'est pas convoqué ; ce qui change est
+  # qu'un arbitre PEUT désormais trancher cette zone, et qu'une surface peut la nommer.
+  describe "C2/C3 — la carte peut refuser ce qu'un juge a approuvé (zone grise)" do
     test "un finding AU-DESSUS du plancher refuse une PR pourtant approuvée" do
       # LE CAS QUI FAIT EXISTER LE MODÈLE : un juge documente un défaut critique et approuve quand
       # même. Sur un livrable qui peut blesser, c'est la carte qui dit non — et le finding qui le
@@ -18,7 +23,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"qualifier" => f(["critical"])}
 
-      assert :changes_requested =
+      assert :gray_zone =
                Jury.review_outcome(@jury, verdicts, findings, %{"block_at" => "critical"})
     end
 
@@ -34,7 +39,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"reviewer" => f(["minor"])}
 
-      assert :changes_requested =
+      assert :gray_zone =
                Jury.review_outcome(@jury, verdicts, findings, %{"block_at" => "minor"})
 
       assert :approved =
@@ -102,8 +107,74 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
                  "une carte a promu une PR qu'un juge refusait — le plancher a cédé"
         end
 
-        assert with_policy in [:approved, :changes_requested]
+        assert with_policy in [:approved, :changes_requested, :gray_zone]
       end
+    end
+  end
+
+  describe "C3 — l'arbitre tranche la zone grise, et RIEN D'AUTRE" do
+    @arbiter "gatekeeper"
+
+    setup do
+      %{
+        verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+        findings: %{"qualifier" => f(["critical"])},
+        policy: %{"block_at" => "critical"}
+      }
+    end
+
+    test "sans arbitre nommé : zone grise", ctx do
+      assert :gray_zone =
+               Jury.review_outcome(@jury, ctx.verdicts, ctx.findings, ctx.policy, nil)
+    end
+
+    test "arbitre nommé mais qui n'a pas encore voté : zone grise", ctx do
+      assert :gray_zone =
+               Jury.review_outcome(@jury, ctx.verdicts, ctx.findings, ctx.policy, @arbiter)
+    end
+
+    test "l'arbitre approuve → la PR passe MALGRÉ la courbe", ctx do
+      # C'est le pouvoir propre du gatekeeper : renverser une règle de carte sur un cas d'espèce.
+      # Il ne renverse pas un JUGE (cf. le plancher), il tranche une contradiction entre ce qu'un
+      # juge a approuvé et ce que la carte tolère.
+      verdicts = Map.put(ctx.verdicts, @arbiter, :approved)
+
+      assert :approved =
+               Jury.review_outcome(@jury, verdicts, ctx.findings, ctx.policy, @arbiter)
+    end
+
+    test "l'arbitre refuse → rework, la contradiction est tranchée dans l'autre sens", ctx do
+      verdicts = Map.put(ctx.verdicts, @arbiter, :changes_requested)
+
+      assert :changes_requested =
+               Jury.review_outcome(@jury, verdicts, ctx.findings, ctx.policy, @arbiter)
+    end
+
+    test "HORS zone grise, la voix de l'arbitre n'est pas lue — F-C061 tient", ctx do
+      # Deux directions, et les deux comptent. (a) L'arbitre ne peut pas bloquer une PR que rien ne
+      # bloque : il n'est pas un juré de plus, seuls les rôles du jury de la carte pèsent.
+      assert :approved =
+               Jury.review_outcome(
+                 @jury,
+                 Map.put(ctx.verdicts, @arbiter, :changes_requested),
+                 %{},
+                 nil,
+                 @arbiter
+               )
+
+      # (b) Il ne peut pas sauver un livrable qu'un JUGE refuse : le plancher est au-dessus de lui.
+      assert :changes_requested =
+               Jury.review_outcome(
+                 @jury,
+                 %{
+                   "qualifier" => :changes_requested,
+                   "reviewer" => :approved,
+                   @arbiter => :approved
+                 },
+                 ctx.findings,
+                 ctx.policy,
+                 @arbiter
+               )
     end
   end
 

@@ -136,7 +136,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
            requested,
            verdicts,
            findings,
-           issue_card_verdict_policy(head, ctx)
+           issue_card_verdict_policy(head, ctx),
+           Fleet.Project.Roles.gatekeeper_role(ctx.opts)
          ) do
       {:pending, [next | _]} ->
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
@@ -162,6 +163,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         end
 
       :changes_requested ->
+        Remediation.dispatch_rework(pr_number, head, ctx)
+
+      # C3 — ZONE GRISE : le jury a tout approuvé, la courbe de la carte refuse, personne n'a
+      # arbitré. Une clause EXPLICITE et pas un fourre-tout : sans elle, le nouvel état tombait sur
+      # un `case` sans clause — un CaseClauseError sur le chemin de verdict, c'est-à-dire un rail
+      # mort au moment précis où il devait décider.
+      #
+      # Elle rend AUJOURD'HUI ce que C2 rendait (rework producteur) : la convocation du gatekeeper
+      # est le geste suivant, et la livrer ici sans son budget ni son drapeau reviendrait à spawner
+      # un pod sur chaque PR grise sans savoir l'arrêter. Le repli est sûr — le producteur reçoit
+      # une PR qu'un juge a mesurée trop sévèrement pour cette criticité, ce qui est actionnable.
+      :gray_zone ->
         Remediation.dispatch_rework(pr_number, head, ctx)
 
       :approved ->

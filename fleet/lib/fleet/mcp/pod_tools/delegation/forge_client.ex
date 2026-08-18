@@ -114,12 +114,6 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   that omits the key is rendered as such (verdicts without substance), NEVER as an unreachable
   forge: a stub behind an outage message is how a missing implementation stays invisible.
   """
-  @doc """
-  The card ROUTE engraved on an issue — `{:ok, {card_name, step}}`, or `:none` when the issue
-  carries no route (a human ticket, a PR adopted after the fact).
-  """
-  @callback get_route(repo :: String.t(), number :: integer(), opts :: keyword()) ::
-              {:ok, {String.t(), String.t()}} | :none | {:error, term()}
 
   @callback pr_review_state(repo :: String.t(), index :: integer(), opts :: keyword()) ::
               {:ok,
@@ -130,6 +124,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
                  outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
                }}
               | {:error, term()}
+
+  @doc """
+  The card ROUTE engraved on an issue — `{:ok, {card_name, step}}`, or `:none` when the issue
+  carries no route (a human ticket, a PR adopted after the fact).
+  """
+  @callback get_route(repo :: String.t(), number :: integer(), opts :: keyword()) ::
+              {:ok, {String.t(), String.t()}} | :none | {:error, term()}
 
   @doc """
   Posts a comment on an issue. Delegation call site: the SYSTEM's supersede-retirement trace

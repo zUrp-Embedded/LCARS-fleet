@@ -2513,7 +2513,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp render_pr(forge, repo, issue_number, pr) do
     policy = Fleet.Project.Roles.verdict_policy_for(forge, repo, issue_number)
 
-    read_opts = [head_sha: get_in(pr, ["head", "sha"]), verdict_policy: policy]
+    read_opts = [
+      head_sha: get_in(pr, ["head", "sha"]),
+      verdict_policy: policy,
+      # C3 — même exigence que la courbe : l'arbitre entre des DEUX côtés ou d'aucun. Sans lui,
+      # cette surface rendrait `gray_zone` sur une PR que le gate a déjà tranchée.
+      verdict_arbiter: Fleet.Project.Roles.gatekeeper_role()
+    ]
 
     {verdicts, records, review} =
       case forge.pr_review_state(repo, pr["number"], read_opts) do
@@ -2564,6 +2570,13 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp review_string(:no_jury), do: "no_jury"
   defp review_string(:changes_requested), do: "changes_requested"
   defp review_string(:approved), do: "approved"
+
+  # C3 — l'état que l'arch DOIT pouvoir lire : le jury a approuvé, la courbe de la carte refuse, et
+  # personne n'a encore arbitré. Le rendre `changes_requested` mentirait sur qui refuse (aucun juge
+  # ne refuse) ; le rendre `approved` mentirait sur ce qui va se passer (rien ne se scellera). Un
+  # nom à lui est la seule sortie honnête, et c'est aussi celui que l'humain verra dans un rapport
+  # quand il se demandera pourquoi sa PR ne bouge pas.
+  defp review_string(:gray_zone), do: "gray_zone"
 
   # Channel identity supplies role and project binding; missing or unbound identity is refused.
   defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do

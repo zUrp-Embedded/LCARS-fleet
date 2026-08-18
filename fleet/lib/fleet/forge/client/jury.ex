@@ -67,7 +67,7 @@ defmodule Fleet.Forge.Client.Jury do
           %{optional(String.t()) => map()},
           map() | nil
         ) :: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
-  def review_outcome(jury, verdicts, findings, policy)
+  def review_outcome(jury, verdicts, findings, policy, arbiter \\ nil)
       when is_list(jury) and is_map(verdicts) and is_map(findings) do
     pending = jury -- Map.keys(verdicts)
 
@@ -82,10 +82,35 @@ defmodule Fleet.Forge.Client.Jury do
         :changes_requested
 
       policy_blocks?(jury, findings, policy) ->
-        :changes_requested
+        arbitrated(verdicts, arbiter)
 
       true ->
         :approved
+    end
+  end
+
+  # C3 — LA ZONE GRISE, ET ELLE A UNE DÉFINITION ÉTROITE : le jury a TOUT approuvé, et c'est la
+  # courbe de la carte qui refuse. Rien d'autre n'est gris. Un refus de juge est net (plancher), une
+  # PR propre est nette ; ici la machine s'apprête à renverser une approbation humaine-de-forme sur
+  # la foi de mesures que ce même juge a écrites. C'est exactement le cas que le SP du gatekeeper
+  # décrit depuis dix mois — « tu es invoqué quand le runtime ne peut pas trancher seul » — et qui
+  # n'avait jamais eu de code.
+  #
+  # L'arbitre n'est PAS un juré de plus : sa voix n'est lue QUE dans cette zone. Hors d'elle il ne
+  # peut ni sauver un livrable qu'un juge refuse (le plancher est au-dessus de lui), ni bloquer une
+  # PR que rien ne bloque (F-C061 : seuls les rôles du jury de la carte pèsent sur le verdict). Il
+  # tranche une contradiction, il ne re-juge pas le travail.
+  #
+  # `:gray_zone` quand personne n'a encore arbitré — un état TERMINAL du prédicat, que le routage
+  # transforme en convocation ; et sa lecture par la surface arch dit à un humain « le rail attend
+  # un arbitrage », au lieu de lui montrer un « approuvé » qui ne se sellera jamais.
+  defp arbitrated(_verdicts, nil), do: :gray_zone
+
+  defp arbitrated(verdicts, arbiter) do
+    case Map.get(verdicts, arbiter) do
+      :approved -> :approved
+      :changes_requested -> :changes_requested
+      _ -> :gray_zone
     end
   end
 
@@ -149,7 +174,8 @@ defmodule Fleet.Forge.Client.Jury do
              reviewers: [String.t()],
              records: [map()],
              findings: %{optional(String.t()) => map()},
-             outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+             outcome:
+               {:pending, [String.t()]} | :no_jury | :changes_requested | :approved | :gray_zone
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -206,7 +232,13 @@ defmodule Fleet.Forge.Client.Jury do
          # le rail renvoie en rework, ce qui est exactement la seconde vérité que le @doc de
          # `review_outcome/2` existe pour interdire. Absente des opts ⟹ agrégation booléenne.
          outcome:
-           review_outcome(reviewers, verdicts, findings, Keyword.get(opts, :verdict_policy))
+           review_outcome(
+             reviewers,
+             verdicts,
+             findings,
+             Keyword.get(opts, :verdict_policy),
+             Keyword.get(opts, :verdict_arbiter)
+           )
        }}
     end
   end
