@@ -28,7 +28,11 @@
 #     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
 #
 # Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde ·
-#                                 apply 0=convergé 1=échec 2=appliqué, drift résiduel.
+#                                 apply 0=convergé 1=échec 2=appliqué, drift résiduel ·
+#                                 3 (les DEUX verbes) = MORT AVANT SON VERDICT, rendu par la garde
+#                                 de sortie de provision-lib. Il lui fallait son propre code : `2`
+#                                 est pris des deux cotes, et un module tue par `set -e` rendait
+#                                 justement 2 — donc « rien n'est cassé » sur un module inacheve.
 # Codes retour runner : apply 0=tout convergé 1=au moins un échec 2=appliqué, drift résiduel ·
 #                       doctor 0=conforme 1=drift 2=erreur.
 # Le 2 d'apply manquait, et son absence n'etait pas un trou de vocabulaire : un module qui constate
@@ -256,18 +260,35 @@ for i in "${!SELECTED[@]}"; do
     [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($eff) ==="
   fi
   rc=0
-  PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
+  PROVISION_RUN=1 PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
   case "$CMD:$eff:$rc" in
+    # 3 = MORT AVANT SON VERDICT (garde de sortie de provision-lib). Un code a lui seul, parce que
+    # `2` est deja pris — « erreur de sonde » au doctor, « appliqué, drift résiduel » a l'apply — et
+    # qu'un module tue par `set -e` rendait justement 2 par coincidence. Le bilan disait alors
+    # « rien n'est cassé » d'un module qui n'avait pas fini de tourner. Le module le dit lui-meme :
+    # lui seul sait s'il a rendu son verdict.
+    *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    doctor:check:*) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
+    doctor:check:*)
+      failed=$((failed + 1)); REPORT+=("$name=ERROR")
+      # UN COMPTEUR SANS LIGNE EST UN ECHEC MUET. rc >= 2 vaut « erreur de sonde » — et c'est AUSSI
+      # ce que rend un module mort sous `set -e` avant d'avoir appele `verdict_check`. Dans ce
+      # second cas il n'a rien imprime du tout : le bilan affichait « échecs: 1 » sans nommer le
+      # module ni la raison, et le lecteur n'avait aucun bout par ou tirer. Mesure du 2026-08-18 :
+      # 70-human, tue par `pipefail` sur un `fleet_v2.env` absent, trois lignes DRIFT justes puis
+      # plus rien.
+      echo "ERREUR $name: sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     # 2 = « appliqué, drift résiduel » : le module a fait ce qu'il pouvait et l'état-cible n'est
     # PAS tenu. Ce n'est pas un échec (rien n'est cassé) et surtout pas un OK — c'est le troisième
     # mot, et son absence faisait compter ces modules comme convergés, ligne de bilan comprise.
     # AVANT le fourre-tout : l'ordre des clauses EST ce qui distingue les deux.
     apply:apply:2)  drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    apply:apply:*)  failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+    apply:apply:*)
+      failed=$((failed + 1)); REPORT+=("$name=FAIL")
+      # Meme raison qu'au doctor : un apply qui meurt avant son verdict ne dit rien de lui-meme.
+      echo "ERREUR $name: apply en echec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
       # État-cible absent ET inapplicable ici : rien sur CE substrat ne peut le converger — le

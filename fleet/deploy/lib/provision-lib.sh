@@ -114,12 +114,36 @@ p_chg()  { printf 'POSÉ  %s: %s\n' "$PROV_MODULE_TAG" "$*"; }
 p_drift(){ printf 'DRIFT %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
 p_warn() { printf 'WARN  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; }
 p_fail() { printf 'FAIL  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
-p_die()  { printf 'FATAL %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
+p_die()  { PROV_VERDICT_RENDERED=1; printf 'FATAL %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
 
 # Sortie standard d'un module : à appeler en FIN de check() et d'apply().
 # check  : exit 0 conforme · 1 drift constaté · (2 réservé erreur de sonde, via p_die)
 # apply  : exit 0 convergé · 1 au moins un échec
+# ─── UN MODULE QUI MEURT DOIT LE DIRE LUI-MEME ──────────────────────────────────────────────────
+#
+# Mesure du 2026-08-18, banc lcars-l8 : `70-human` sondait `root`, imprimait trois lignes DRIFT
+# justes, puis MOURAIT — `pipefail` sur un `sed` d'un `fleet_v2.env` absent, rc 2, avant tout
+# verdict. Le doctor affichait « échecs: 1 » sans nommer personne. Pire du cote apply : rc 2 y
+# signifie « appliqué, drift résiduel », donc le bilan disait « rien n'est cassé, il manque un
+# geste » sur un module qui n'avait pas fini de tourner.
+#
+# Le runner ne peut pas distinguer ces deux 2 : c'est le meme entier. Le module, lui, SAIT s'il a
+# rendu son verdict. Il le dit, et il rend un code qui n'appartient qu'a ce cas.
+#
+# ⚠ La garde n'est armee que sous le RUNNER (`PROVISION_RUN`). Un extrait qui source cette lib pour
+# appeler une primitive — les temoins bats — n'est pas un module et n'a aucun verdict a rendre.
+PROV_VERDICT_RENDERED=0
+_prov_exit_guard() {
+  local rc=$?
+  [[ "$PROV_VERDICT_RENDERED" -eq 1 ]] && return 0
+  printf 'ERREUR %s: MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
+    "$PROV_MODULE_TAG" "$rc" >&2
+  exit 3
+}
+[[ -n "${PROVISION_RUN:-}" ]] && trap _prov_exit_guard EXIT
+
 verdict_check() {
+  PROV_VERDICT_RENDERED=1
   if [[ "$PROV_FAILED" -gt 0 ]]; then exit 2; fi
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 1
   exit 0
@@ -138,6 +162,7 @@ verdict_check() {
 # serait confondre « je n'ai pas pu converger » avec « j'ai casse »). L'operateur a besoin des deux
 # mots, et l'entrypoint conteneur les distingue desormais dans son message.
 verdict_apply() {
+  PROV_VERDICT_RENDERED=1
   [[ "$PROV_FAILED" -gt 0 ]] && exit 1
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 2
   exit 0

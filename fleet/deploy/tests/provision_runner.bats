@@ -227,3 +227,58 @@ EOF
   run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 1 ]
 }
+
+# ─── UN ECHEC COMPTE DOIT ETRE UN ECHEC NOMME ───────────────────────────────────────────────────
+#
+# Mesure du 2026-08-18, banc lcars-l8 : `provision doctor` rendait « modules: 11 · drift: 4 ·
+# échecs: 1 » sans une seule ligne pour dire QUEL module. Le coupable etait `70-human`, tue par
+# `pipefail` sur un `sed` d'un `fleet_v2.env` absent — donc mort AVANT `verdict_check`, sans rien
+# imprimer. Cote apply c'etait pire : `set -e` rendait 2, et 2 y signifie « appliqué, drift
+# résiduel » — le bilan disait « rien n'est cassé » d'un module qui n'avait pas fini de tourner.
+#
+# DEUX FILETS, ET ILS NE SE RECOUVRENT PAS. Le module qui a source la lib porte une garde de sortie
+# et rend 3, un code qui n'appartient qu'a ce cas. Celui qui meurt AVANT d'avoir source la lib n'a
+# pas de garde : c'est le runner qui le nomme, sur son rc brut.
+
+mort_module() { # mort_module <NN-nom> <source-la-lib: 0|1>
+  { echo '#!/usr/bin/env bash'
+    echo '# APPLY-ON: any'
+    echo '# CHECK-ON: any'
+    echo '# NEEDS: human'
+    echo 'set -euo pipefail'
+    [[ "$2" -eq 1 ]] && echo '. "${PROVISION_LIB:?}"'
+    # meurt exactement comme 70-human : pipeline en echec sous pipefail, aucune sortie
+    echo 'x="$(sed -n '"'"'s/^X=//p'"'"' /inexistant-par-construction 2>/dev/null | tail -n1)"'
+    echo 'echo "jamais atteint: $x"'
+  } > "$SANDBOX/modules.d/$1.sh"
+}
+
+@test "doctor : un module qui MEURT sans verdict est NOMME, pas seulement compte" {
+  mort_module 90-mort 1
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ERREUR 90-mort"* ]]
+  [[ "$output" == *"MORT avant de rendre son verdict"* ]]
+}
+
+@test "apply : un module mort n'est PAS un drift residuel — le message rassurant serait faux" {
+  mort_module 91-mort 1
+  run "$SANDBOX/provision" apply --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ERREUR 91-mort"* ]]
+  [[ "$output" != *"Rien n'est cassé"* ]]
+}
+
+@test "mort AVANT de sourcer la lib : sans garde, c'est le RUNNER qui nomme" {
+  mort_module 93-tot 0
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ERREUR 93-tot"* ]]
+}
+
+@test "TEMOIN : un module SAIN ne declenche aucune ligne ERREUR" {
+  stub_module 92-sain any any human
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ERREUR"* ]]
+}
