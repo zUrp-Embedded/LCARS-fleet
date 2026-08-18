@@ -88,3 +88,40 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   [ "$status" -eq 2 ]
   [[ "$output" == *"manifest introuvable"* ]]
 }
+
+# ─── L'OUTILLAGE DU GATE : UNE EGALITE DE LISTES, TENUE PAR UN TEMOIN ───────────────────────────
+#
+# Le Dockerfile porte en commentaire « Liste = celle de 10-packages + les 2 du gate ». C'etait une
+# affirmation que rien ne verifiait, et elle avait deja derive : le stage build installe TROIS
+# paquets de plus (python3-pytest, bats, procps), et le rail natif n'en installait aucun.
+#
+# Mesure du 2026-08-18, Ubuntu 26.04 LTS neuve : « ECHEC: pytest absent — les lcars_tests de
+# token-saver ne peuvent pas tourner (pas de skip silencieux) ». Gate rouge, release non posee,
+# install natif mort. La liste vivait a un seul endroit, et c'etait le Dockerfile.
+
+@test "tout paquet exige par le gate est installe DES DEUX COTES (image et rail natif)" {
+  DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  MOD="$BATS_TEST_DIRNAME/../modules.d/60-deploy.sh"
+  PKG="$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"
+  [ -f "$DOCKERFILE" ] && [ -f "$MOD" ] && [ -f "$PKG" ]
+
+  # ce que le rail natif installe : les paquets runtime + l'outillage du gate
+  runtime="$(sed -n 's/^PACKAGES=(\(.*\))$/\1/p' "$PKG")"
+  gate="$(sed -n 's/^  GATE_PACKAGES=(\(.*\))$/\1/p' "$MOD")"
+  [ -n "$runtime" ]
+  [ -n "$gate" ]
+
+  # le stage build de l'image DOIT contenir chacun d'eux
+  for p in $runtime $gate; do
+    grep -q -- " $p " "$DOCKERFILE" || grep -q -- " $p\\\\" "$DOCKERFILE" || {
+      echo "paquet '$p' absent du stage build du Dockerfile" >&2; false; }
+  done
+}
+
+@test "le gate a bien ses trois outils nommes — un ajout silencieux ne passe pas" {
+  MOD="$BATS_TEST_DIRNAME/../modules.d/60-deploy.sh"
+  gate="$(sed -n 's/^  GATE_PACKAGES=(\(.*\))$/\1/p' "$MOD")"
+  [[ "$gate" == *"python3-pytest"* ]]   # shell_gate: les lcars_tests de token-saver
+  [[ "$gate" == *"bats"* ]]             # BATS_MISSING_FATAL=1 pose par mix.exs
+  [[ "$gate" == *"procps"* ]]           # les sondes qui lisent pgrep
+}

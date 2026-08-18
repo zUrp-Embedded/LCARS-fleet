@@ -133,6 +133,21 @@ apply() {
   ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
   chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
 
+  # 1-bis. L'OUTILLAGE DU GATE, ET C'EST CE MODULE QUI LE DOIT — pas 10-packages.
+  #
+  # `etc/install.sh` joue `mix gate`, et le gate REFUSE de sauter ses moitiés hors-mix en silence :
+  # `shell_gate` exige `pytest` (les lcars_tests de token-saver) et `bats` (BATS_MISSING_FATAL=1
+  # posé par mix.exs), et plusieurs sondes lisent `pgrep` (procps). Aucun de ces trois n'est un
+  # paquet de RUNTIME : les mettre dans 10-packages alourdirait toute installation pour un besoin
+  # qui n'existe qu'ici, à la minute du build.
+  #
+  # Mesure du 2026-08-18, Ubuntu 26.04 LTS neuve, rail natif : « ECHEC: pytest absent — les
+  # lcars_tests de token-saver ne peuvent pas tourner (pas de skip silencieux) », gate rouge,
+  # release non posée. Le stage build de l'image, lui, les installe depuis toujours — la liste
+  # vivait donc à un seul endroit, et c'était le Dockerfile.
+  GATE_PACKAGES=(python3-pytest bats procps)
+  apt_ensure "${GATE_PACKAGES[@]}" || { p_fail "outillage du gate non installé (${GATE_PACKAGES[*]})"; verdict_apply; }
+
   # 2. hex/rebar de l'humain (idempotent, silencieux en succès).
   p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply

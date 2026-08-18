@@ -27,8 +27,14 @@ set -euo pipefail
 # sans condition : redirige vers un fichier, son bandeau y laissait des `[1;37m` en clair pendant
 # que le provisionnement, lui, se taisait proprement. Un log a moitie colorise est le pire des deux
 # — illisible a la relecture ET incoherent. `-t 1` tranche pour les deux moities du meme geste.
-if [[ -n "${NO_COLOR:-}" || ! -t 1 ]]; then
+# ⚠ UN SEUL INTERRUPTEUR POUR LES DEUX MOITIES : `PROV_COLOR=1` force la couleur jusque DANS le
+# fichier (utile a qui relit ses installs au `cat`, qui rend les sequences), `NO_COLOR` la coupe
+# partout, et sans rien c'est le terminal qui decide. Le defaut est le log NU : une sequence ANSI
+# dans un fichier casse le grep et se lit en clair dans un editeur.
+if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
+   || { [[ -z "${PROV_COLOR:-}" ]] && [[ ! -t 1 ]]; }; then
   AMBER=''; CYAN=''; W=''; G=''; R=''; N=''; BA=''
+  LCARS_COLOR_HINT=1
 else
   AMBER=$'\033[38;5;214m'; CYAN=$'\033[0;36m'; W=$'\033[1;37m'
   G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
@@ -128,7 +134,10 @@ EOF
   # device or address » — avant la phrase calme qui l'explique, et le `2>/dev/null` du `read` ne
   # l'attrape pas. Mesure du 2026-08-18, install joue par ssh sans TTY : l'operateur voit d'abord
   # une erreur brute, puis apprend que tout va bien. On ne montre que la seconde.
-  { read -r _ < /dev/tty; } 2>/dev/null || echo "  [install] Pas de TTY — continue automatiquement."
+  { read -r _ < /dev/tty; } 2>/dev/null || {
+    echo "  [install] Pas de TTY — continue automatiquement."
+    [[ -n "${LCARS_COLOR_HINT:-}" ]] && echo "  [install] Sortie non-terminal : couleurs coupées (PROV_COLOR=1 pour les garder dans le log)."
+  }
   echo ""
   echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
   REEXEC_ARGS=(--repo "$REPO_URL" --branch "$BRANCH")
