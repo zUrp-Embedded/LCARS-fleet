@@ -782,24 +782,25 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # pushes a new commit. So it routes to the producer, exactly like a REQUEST_CHANGES round, and the
   # rework budget bounds it — a CI that stays red does not loop forever, it ends up escalating with
   # the rounds spent, which is a true statement about what was tried.
-  # LA POLITIQUE DE LA CARTE VAUT ICI AUSSI, et elle n'y valait pas — mesure sur banc 2026-08-10.
+  # DEUX CICATRICES OPPOSEES SUR LA MEME LIGNE, et la carte n'etait la bonne reponse a aucune.
   #
-  # `CiGate.decide/4` consulte `issue_card_ci` avant de gater : une carte `ci: ignore` passe. Cette
-  # fonction-ci lisait `commit_ci_state` INCONDITIONNELLEMENT et rendait `{:skipped, :ci_pending}`
-  # sur `:pending` — donc `wait/ci`. Deux sites, une seule question, un seul des deux ecoutait la
-  # reponse.
+  # 2026-08-10 (banc) : carte `ci: ignore` + deploiement SANS runner → le ticket prenait `wait/ci`
+  # pour toujours. Le court-circuit "carte ignore → ne lis pas la CI" a ete pose ici pour ca.
+  # 2026-08-18 (banc, premier conflit reel de bout en bout) : le meme court-circuit a MAL ESCALADE
+  # un merge parfaitement sain. La protection de main exige le status `CI / *` (plancher pose a
+  # l'onboard, INDEPENDANT de la carte) ; le seal a tente 3 s apres la livraison de la resolution ;
+  # Gitea a rendu 405 « Not all required status checks successful » — un etat TRANSITOIRE (le
+  # runner n'avait pas encore couru sur le sha neuf) — et ce chemin, aveugle a la CI par la carte,
+  # l'a classe :policy et a immobilise un humain pour une attente de 30 secondes.
   #
-  # Ce que ca coutait, vecu de bout en bout : un catalogue dont la carte declare `ci: ignore` et un
-  # deploiement sans runner. Le producteur livre, la PR est mergeable, le jury est vide — donc on
-  # arrive ici — et le ticket prend `wait/ci` pour toujours. La carte promettait de ne pas dependre
-  # d'une CI ; la seule chose qui arrivait ensuite etait l'escalade a 45 minutes. Le sceau n'est
-  # tombe qu'apres avoir branche un runner, ce qui prouve la lecture.
+  # La carte gouverne le JURY (convoquer ou pas des juges sur la CI) ; la protection est un FAIT de
+  # la forge, que la carte ne peut pas abroger. Ce site lit donc TOUJOURS l'etat reel — et le
+  # mecanisme du hang de 08-10 n'existe plus dans ce lecteur : `:none` (aucun runner n'a jamais
+  # repondu) tombe dans le catch-all → re-request, exactement le chemin que le court-circuit
+  # donnait. Seuls `:pending` (un rail COURT — on retick) et `:failure` (rouge sur la tete — le
+  # producteur repare : un merge protege ne passera pas) changent, et c'est le but.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
-    if Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(head, ctx) == :ignore do
-      reconverge_rerequest(pr_number, head, ctx)
-    else
-      reconverge_on_ci(pr_number, head, ctx)
-    end
+    reconverge_on_ci(pr_number, head, ctx)
   end
 
   defp reconverge_on_ci(pr_number, head, %Ctx{} = ctx) do

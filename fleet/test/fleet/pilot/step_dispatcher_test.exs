@@ -1555,16 +1555,16 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "…mais une carte `ci: ignore` ne doit PAS attendre la CI, meme sur ce chemin" do
-      # LA JOINTURE QUI MANQUAIT, mesuree de bout en bout sur un banc le 2026-08-10.
+      # DEUX CICATRICES, UN SEUL DISCRIMINANT — l'ETAT, jamais la carte.
       #
-      # `CiGate.decide/4` consulte la politique de la carte avant de gater. La RECONVERGENCE, elle,
-      # lisait `commit_ci_state` inconditionnellement et rendait `{:skipped, :ci_pending}` sur
-      # `:pending` — donc `wait/ci`. Deux sites, une seule question, un seul des deux ecoutait la
-      # reponse.
-      #
-      # Vecu : un catalogue dont la carte declare `ci: ignore`, un deploiement sans runner. Le
-      # producteur livre, la PR est mergeable, le jury est vide — donc on arrive ici — et le ticket
-      # prend `wait/ci` pour toujours, alors que sa carte promettait de ne pas dependre d'une CI.
+      # 2026-08-10 : carte `ci: ignore`, deploiement SANS runner → wait/ci eternel. Cette fixture
+      # modelisait ce monde avec `:pending` — FAUX etat : sans runner, AUCUN status n'existe et
+      # `commit_ci_state` rend `:none`. La fixture racontait un autre monde que sa propre histoire.
+      # 2026-08-18 (premier conflit reel au banc) : la protection de main exige `CI / *`
+      # (independant de la carte) ; le court-circuit par la carte a classe :policy un 405
+      # « status checks » TRANSITOIRE (runner pas encore couru sur le sha de la resolution) et
+      # immobilise un humain pour 30 secondes d'attente. Le test jumeau ci-dessous epingle ce
+      # cas-la : `:pending` = un rail COURT, on retick.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1586,12 +1586,44 @@ defmodule Fleet.Pilot.StepDispatcherTest do
             _test_merge_result: {:error, {:http, 405, "policy"}},
             _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
             _test_rerequested: [],
-            _test_ci: :pending
+            _test_ci: :none
           ]
         )
 
       refute match?({:skipped, :ci_pending}, StepDispatcher.dispatch_review(pr, opts)),
-             "une carte `ci: ignore` ne doit jamais produire wait/ci — la CI n'est pas ce qui bloque"
+             "sans runner (:none), une carte `ci: ignore` ne doit jamais produire wait/ci"
+    end
+
+    test "A0.5 : un merge bloque par des status checks EN COURS retick — jamais une escalade arch" do
+      # Le 405 « Not all required status checks successful » de la protection est un etat
+      # transitoire quand un runner court (mesure au banc : 3 s apres la livraison de la
+      # resolution d'un conflit). L'escalader en :policy immobilisait un humain pour 30 s
+      # d'attente. La carte (`ci: ignore`) ne peut pas abroger le plancher de la forge.
+      pr =
+        pr(%{
+          "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
+          "number" => 6
+        })
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result:
+              {:error, {:http, 405, "Not all required status checks successful"}},
+            _test_route: {:ok, {"g", "build"}},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true
+            },
+            _test_ci: :pending
+          ]
+        )
+
+      assert {:skipped, :ci_pending} = StepDispatcher.dispatch_review(pr, opts)
+      refute_received {:spawned, _, _}
     end
 
     # Les deux seams de conflit (`:conflict_diagnoser` / `:conflict_applier`) existaient sans qu'un
