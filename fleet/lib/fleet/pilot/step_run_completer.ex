@@ -440,6 +440,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
         label: "verdict"
       )
 
+    # C2 — THE MACHINE VERDICT RIDES THE REVIEW ITSELF. C1 engraved it as an ops object, which is
+    # the right ARCHIVE and the wrong transport: the gate that has to consume it (`Jury`) already
+    # fetches every review body in one call, while the ops store is write-only. Appended here,
+    # `findings_v1` reaches the gate with no extra request and no new read path, scoped to the very
+    # review that carried it -- a superseded review takes its findings out of play WITH it.
+    #
+    # OUTSIDE `Pinning.render`, deliberately, and this is the same lesson the conflict rail already
+    # paid for its `[conflict-engine:...]` marker: a pinned body is SUMMARIZED, so anything folded
+    # into the prose is dropped exactly on the long verdicts -- the ones that carry the findings
+    # worth reading. Rendered inside, the wire would work on short reviews only, which is where
+    # nobody would notice it missing.
+    body = body <> Fleet.FindingsWire.render(Map.get(step_run, :review_findings))
+
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
     # the review author = qualifier/reviewer (honest avatar/trace), not the system account. Token
     # absent → `{:error, :role_token_unavailable}` (fail-closed: no review under the system account).
@@ -471,7 +484,25 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # OPTIONAL payload never blocks a valid verdict.
   defp maybe_engrave_findings(step_run, work_dir, role) do
     case {Map.get(step_run, :review_findings), work_dir} do
+      # THIS SILENCE WAS RIGHT FOR ONE DAY AND WRONG THE NEXT. It read "no key = a legacy judge,
+      # today's path" -- true while `findings_v1` was brand new and no SP named it. Every judge's
+      # composed SP names it now, so an absence is no longer a judge that never heard of the key:
+      # it is a judge that was told and did not. MEASURED 2026-08-19 (bench, PR#34): the qualifier
+      # returned an excellent verdict -- it named the planted faux-vert structurally -- and NO
+      # machine payload at all, and nothing anywhere said so.
+      #
+      # That silence is what would make the verdict function of C2 blind: f reads findings, an
+      # absent payload starves it, and a starved f degrades to exactly today's boolean AND while
+      # LOOKING like it is weighing severities. A rail that silently stops being fed is worse than
+      # one that was never built. So: loud, per verdict, naming the judge.
       {nil, _} ->
+        Logger.warning(
+          "StepRunCompleter: judge #{role} submitted NO details.findings_v1 on " <>
+            "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
+            "survives as prose only. The SP asks every judge for the machine payload; without it " <>
+            "no aggregation can weigh this verdict, it can only count it."
+        )
+
         :ok
 
       {findings, nil} ->

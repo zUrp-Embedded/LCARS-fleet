@@ -12,6 +12,8 @@ defmodule Fleet.Forge.Client.Jury do
 
   import Fleet.Forge.Client.Transport, only: [resolve_config: 1, paginate: 3]
 
+  require Logger
+
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
@@ -97,6 +99,7 @@ defmodule Fleet.Forge.Client.Jury do
              verdicts: %{optional(String.t()) => :approved | :changes_requested},
              reviewers: [String.t()],
              records: [map()],
+             findings: %{optional(String.t()) => map()},
              outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
            }}
           | {:error, term()}
@@ -144,9 +147,42 @@ defmodule Fleet.Forge.Client.Jury do
          verdicts: verdicts,
          reviewers: reviewers,
          records: to_records(decisive),
+         findings: findings_by_role(decisive),
          outcome: review_outcome(reviewers, verdicts)
        }}
     end
+  end
+
+  # C2 — THE MACHINE VERDICT, READ OUT OF THE BODIES THIS FUNCTION ALREADY HOLDS. The judges'
+  # `findings_v1` rides its own review (`Fleet.FindingsWire`), so it arrives commit-scoped for
+  # free: the same `reject_stale_reviews` that decides which VERDICT counts decides which findings
+  # count, with no second rule to keep in sync. A judge that emitted nothing simply has no key --
+  # absence is a fact the consumer reads, never an error invented here.
+  #
+  # Keyed by ROLE like `verdicts`, and for the same reason: no account name leaves this module.
+  defp findings_by_role(decisive) do
+    decisive
+    |> Enum.reduce(%{}, fn {login, r}, acc ->
+      case Fleet.FindingsWire.parse(r["body"]) do
+        {:ok, findings} ->
+          Map.put(acc, RoleIdentity.role_or_login(login), findings)
+
+        # A block that is present and broken is NOT the same fact as no block, and the difference
+        # is worth a line in the log: nobody can edit a review body except a human, so this is
+        # either a judge writing malformed JSON or a hand that reached in after the fact. Dropped
+        # either way -- the verdict itself is untouched, it just stops carrying measurements.
+        {:error, :undecodable} ->
+          Logger.warning(
+            "Jury: #{login}'s review carries a findings-v1 block that does not decode — " <>
+              "machine payload dropped, the binary verdict stands"
+          )
+
+          acc
+
+        :none ->
+          acc
+      end
+    end)
   end
 
   # F-C069

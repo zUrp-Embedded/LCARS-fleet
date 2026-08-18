@@ -713,6 +713,69 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert log =~ "verdict: verdicts/issue-42-qualifier.json"
     end
 
+    # C2 2026-08-19 — le MÊME payload part aussi SUR LA REVIEW. L'objet gravé est l'archive ; le
+    # corps de la review est le TRANSPORT que le gate consomme (`Jury` fetch déjà tous les corps).
+    @tag :tmp_dir
+    test "review_findings → le corps posté PORTE le bloc machine, hors du résumé", %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      findings = %{"findings" => [%{"severity" => "important", "description" => "faux-vert"}]}
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :request_changes,
+        review_body: "Le test passe sans rien prouver.",
+        review_findings: findings
+      }
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(step_run,
+                 forge_client: PrForge,
+                 forge_opts: [],
+                 ops_root: tmp
+               )
+
+      assert_received {:review, 7, :request_changes, body}
+
+      assert {:ok, ^findings} = Fleet.FindingsWire.parse(body),
+             "le gate relit le payload dans le corps même de la review"
+
+      assert body =~ "Le test passe sans rien prouver.",
+             "et la prose du juge reste intacte devant : le bloc s'ajoute, il ne remplace pas"
+    end
+
+    test "un juge SANS verdict machine poste le corps d'aujourd'hui, et son silence est DIT" do
+      # Deux propriétés en un test, parce qu'elles sont le même arbitrage : la compat est
+      # byte-for-byte (un juge qui n'émet rien ne voit pas sa review changer), MAIS l'absence
+      # cesse d'être muette. Mesuré au banc le 2026-08-19 : un qualifier a rendu un excellent
+      # verdict et zéro payload machine, sans qu'une ligne le dise nulle part — et c'est
+      # exactement ce qui affamerait la fonction d'agrégation qui vient.
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_body: "Rien à redire."
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
+        end)
+
+      assert_received {:review, 7, :approve, body}
+      assert body == "Rien à redire.", "aucun octet ajouté quand il n'y a rien à transporter"
+      assert log =~ "NO details.findings_v1"
+      assert log =~ "qualifier"
+    end
+
     @tag :tmp_dir
     test "no ops face → NO machine file, review posts, the absence is RECORDED loud", %{
       tmp_dir: tmp
@@ -774,8 +837,18 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert log =~ "findings_v1 NOT engraved"
     end
 
+    # ⚠ CE TEST A CHANGÉ DE VERDICT LE 2026-08-19, ET C'EST UN RENVERSEMENT ASSUMÉ. Il s'appelait
+    # « no machine file and NO noise (the legacy judge is nominal) » et épinglait le silence : au
+    # 18 août, `findings_v1` venait de naître, aucun SP ne le nommait, et un juge qui n'en émettait
+    # pas était un juge legacy — un cas NOMINAL, que rien ne devait accuser.
+    #
+    # Ce qui a changé n'est pas l'avis, c'est le monde : tous les SP de juge composent désormais la
+    # consigne. Une absence ne dit plus « ce juge n'a jamais entendu parler de la clé », elle dit
+    # « on lui a demandé et il ne l'a pas fait » — mesuré au banc le 2026-08-19 (PR#34 : verdict
+    # excellent, zéro payload, zéro trace). Le fichier machine reste absent (rien à graver) ; ce
+    # qui devient faux, c'est le silence.
     @tag :tmp_dir
-    test "no review_findings → no machine file and NO noise (the legacy judge is nominal)", %{
+    test "no review_findings → toujours aucun fichier machine, mais l'absence est DITE", %{
       tmp_dir: tmp
     } do
       work_dir = Path.join(tmp, "proj")
@@ -800,8 +873,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                    )
         end)
 
-      refute File.exists?(Path.join(work_dir, "verdicts/issue-42-qualifier.json"))
-      refute log =~ "findings_v1"
+      refute File.exists?(Path.join(work_dir, "verdicts/issue-42-qualifier.json")),
+             "rien à graver : c'est l'ABSENCE de payload, pas un échec de gravure"
+
+      assert log =~ "NO details.findings_v1"
+
+      refute log =~ "NOT engraved",
+             "et surtout PAS le message d'échec de gravure : ne rien avoir à écrire n'est pas " <>
+               "avoir échoué à écrire, et confondre les deux enverrait chercher une panne d'ops"
     end
 
     test "record_review propagates the forge error" do

@@ -93,6 +93,10 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Labels" => "foundation",
     "Fleet.Decision" => "foundation",
     "Fleet.Conflict" => "foundation",
+    # C2 (chantier rails) — the judge's machine verdict on the wire (render into a review body,
+    # read it back). Pure text <-> map like Conflict, and foundation for the same reason: its two
+    # ends are Fleet.Pilot (writes) and Fleet.Forge (reads), which cannot see each other.
+    "Fleet.FindingsWire" => "foundation",
     "Fleet.Shutdown.Quiesce" => "foundation",
     "Fleet.Publish.InFlight" => "foundation",
     "Fleet.Opts" => "foundation",

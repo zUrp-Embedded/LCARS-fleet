@@ -48,6 +48,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.DurableLog` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |
+| foundation | `Fleet.FindingsWire` | 0 |
 | foundation | `Fleet.GitRef` | 0 |
 | foundation | `Fleet.Labels` | 0 |
 | foundation | `Fleet.Layout` | 0 |
