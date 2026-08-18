@@ -84,8 +84,10 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
 | 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
+| 55-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json`. Les ENTRÉES (`PROV_DECK_ORIGINS`) convergent : la loopback y est semée dans ses **deux** écritures (`127.0.0.1` ET `localhost` — deux origines pour un même point d'écoute), et une liste changée repose le client |
 | 60-deploy | wsl linux | any | orchestre `fleet/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
+| 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
 install.sh) et le reste converge à l'entrypoint. L'ISO WSL↔Docker n'est plus seulement la liste

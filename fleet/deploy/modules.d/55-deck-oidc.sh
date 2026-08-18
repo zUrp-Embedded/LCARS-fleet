@@ -41,7 +41,12 @@ OIDC_GROUP="nogroup"
 # personne ne tient l'inventaire, et c'est la sonde de derive juste en dessous qui compare des
 # listes triees qui en paierait le prix.
 callback_uris() {
-  local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback" o u
+  # DEUX ECRITURES DE LA LOOPBACK, PARCE QU'OAUTH2 COMPARE DES CHAINES. `localhost` et `127.0.0.1`
+  # designent le meme point d'ecoute et sont deux ORIGINES DIFFERENTES pour la comparaison exacte du
+  # `redirect_uri` — or `localhost` est ce qu'un humain tape, et sous WSL c'est la seule adresse qui
+  # marche depuis le navigateur de l'hote. N'en declarer qu'une, c'est fermer la porte a celui qui
+  # entre par l'autre, APRES son identification (mesure du 2026-08-18).
+  local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback http://localhost:$PROV_DECK_PORT/auth/callback" o u
   IFS=',' read -ra _origins <<<"${PROV_DECK_ORIGINS:-}"
   for o in "${_origins[@]:-}"; do
     o="$(echo "$o" | tr -d '[:space:]')"; [[ -n "$o" ]] || continue
@@ -86,10 +91,16 @@ app_id() { # app_id <uris-attendues, separees par espace>
 
 # Les homonymes qui ne sont PAS a nous — a NOMMER, jamais a toucher.
 foreign_apps() { # foreign_apps <uris-attendues>
+  # ⚠ NOTRE PROPRE CLIENT EST EXCLU PAR SON client_id. Sans ce filtre, une boîte qui change ses
+  # entrées voit son ANCIEN client (retours différents, même nom) comme celui d'une autre boîte :
+  # elle le laisse en place en le dénonçant, et en crée un second. Deux clients homonymes vivants
+  # sous le même compte, dont un mort — l'inventaire devient illisible en deux passages.
+  local ours; ours="$(our_client_id)"
   forge_api GET "/user/applications/oauth2" \
-    | jq -r --arg n "$APP_NAME" --arg u "$1" \
+    | jq -r --arg n "$APP_NAME" --arg u "$1" --arg c "$ours" \
         'if type=="array" then (.[]
            | select(.name==$n)
+           | select(.client_id != $c)
            | select((.redirect_uris|sort) != ($u|split(" ")|sort))
            | "\(.id):\(.redirect_uris|join(","))") else empty end' 2>/dev/null
 }
@@ -99,11 +110,40 @@ foreign_apps() { # foreign_apps <uris-attendues>
 # would surface as an opaque OAuth2 error in a browser, half a rail away from its cause.
 config_live() {
   local cid
-  cid="$(jq -r '.client_id // empty' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
+  cid="$(our_client_id)"
   [[ -n "$cid" ]] || return 1
   forge_api GET "/user/applications/oauth2" \
     | jq -e --arg c "$cid" 'if type=="array" then any(.[]; .client_id==$c) else false end' \
       >/dev/null 2>&1
+}
+
+# Le client QUI EST LE NOTRE : celui que NOTRE fichier nomme. C'est le seul ancrage qui ne se
+# devine pas — le nom est partage sur une forge commune, et les `redirect_uris` sont precisement ce
+# qu'on veut pouvoir CHANGER (donc ils ne peuvent pas servir a s'identifier soi-meme).
+our_client_id() { jq -r '.client_id // empty' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true; }
+
+# Les retours REELLEMENT enregistres chez la forge pour notre client, tries et joints par espace.
+registered_uris() {
+  local cid; cid="$(our_client_id)"
+  [[ -n "$cid" ]] || return 0
+  forge_api GET "/user/applications/oauth2" \
+    | jq -r --arg c "$cid" \
+        'if type=="array" then (.[] | select(.client_id==$c) | .redirect_uris | sort | join(" "))
+         else empty end' 2>/dev/null | head -n1
+}
+
+# ⚠ LA LISTE DES ENTREES DOIT CONVERGER, ET ELLE NE CONVERGEAIT PAS. `apply` sortait des que le
+# fichier nommait un client encore connu de la forge — sans jamais comparer les retours enregistres
+# a ceux qu'on veut. Consequence mesuree le 2026-08-18 : ajouter une origine a `LCARS_DECK_ORIGINS`
+# et rejouer le provisionnement ne changeait RIEN, en silence. Et c'est exactement le geste que la
+# page de refus du deck prescrit — le runtime imprimait une instruction que le runtime n'honorait
+# pas. Un mensonge operationnel, pas une lacune de confort.
+uris_converged() { # uris_converged <uris-voulues, separees par espace>
+  local want got
+  # shellcheck disable=SC2086 -- $1 est une LISTE separee par des espaces, a eclater
+  want="$(printf '%s\n' $1 | sort | tr '\n' ' ')"
+  got="$(registered_uris) "
+  [[ "$want" == "$got" ]]
 }
 
 check() {
@@ -116,7 +156,14 @@ check() {
   elif ! forge_up; then
     p_ok "$PROV_DECK_OIDC_FILE présent (forge injoignable : client non re-vérifié)"
   elif config_live; then
-    p_ok "client OAuth2 du deck posé et connu de la forge ($PROV_DECK_OIDC_FILE)"
+    local _want; _want="$(callback_uris)"
+    if uris_converged "$_want"; then
+      p_ok "client OAuth2 du deck posé et connu de la forge ($PROV_DECK_OIDC_FILE)"
+    else
+      # NOMMER LES DEUX LISTES. Le symptome de cette derive est une page de refus dans un navigateur,
+      # a l'autre bout du rail : sans les deux listes cote a cote, personne ne fait le lien.
+      p_drift "entrées du deck non convergées — enregistrées : « $(registered_uris) » / voulues : « $_want » (apply les repose)"
+    fi
   else
     p_drift "$PROV_DECK_OIDC_FILE nomme un client que la forge ne connaît plus — à re-poser"
   fi
@@ -142,13 +189,29 @@ apply() {
     verdict_apply
   fi
 
-  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live; then
+  local uris body resp cid csec
+  uris="$(callback_uris)"
+
+  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris"; then
     p_ok "client OAuth2 du deck déjà posé et vivant"
     verdict_apply
   fi
 
-  local uris body resp cid csec
-  uris="$(callback_uris)"
+  # NOTRE client existe mais ne vise plus les bonnes entrées : c'est LUI qu'on retire, designe par
+  # le client_id de notre fichier — pas par son nom (partagé sur une forge commune) ni par ses
+  # retours (c'est justement ce qui a changé). Le secret n'étant rendu qu'à la création, remplacer
+  # est le seul geste possible : on ne peut pas ré-écrire le fichier autour d'un secret perdu.
+  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live; then
+    local ours; ours="$(our_client_id)"
+    local oid
+    oid="$(forge_api GET "/user/applications/oauth2" \
+            | jq -r --arg c "$ours" 'if type=="array" then (.[]|select(.client_id==$c)|.id) else empty end' \
+              2>/dev/null | head -n1)"
+    if [[ -n "$oid" ]]; then
+      forge_api DELETE "/user/applications/oauth2/$oid" >/dev/null
+      p_chg "entrées du deck changées — client OAuth2 (id $oid) retiré pour être reposé sur : $uris"
+    fi
+  fi
 
   # THE SECRET IS RETURNED ONCE, AT CREATION. If an application carrying our name AND our exact
   # return addresses exists while the config file is missing or stale, its secret is unrecoverable —
