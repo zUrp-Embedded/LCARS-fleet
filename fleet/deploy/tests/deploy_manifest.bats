@@ -125,3 +125,17 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   [[ "$gate" == *"bats"* ]]             # BATS_MISSING_FATAL=1 pose par mix.exs
   [[ "$gate" == *"procps"* ]]           # les sondes qui lisent pgrep
 }
+
+@test "install.sh fait TRAVERSER ses reglages a l'escalade sudo" {
+  # `sudo` remet l'environnement a zero. Un reglage pose avant l'escalade (PROV_COLOR, PROV_VERBOSE)
+  # meurt en la traversant : mesure du 2026-08-18, `PROV_COLOR=1 bash install.sh` colorisait le
+  # preflight puis rendait un provisionnement blanc, sans un mot pour dire pourquoi. Troisieme
+  # incarnation de ce piege dans la meme journee (le shim docker, le temp root de bench-swap).
+  SH="$BATS_TEST_DIRNAME/../../../install.sh"
+  [ -f "$SH" ]
+  grep -q 'REEXEC_ENV+=' "$SH"
+  grep -q 'exec sudo "${REEXEC_ENV\[@\]}"' "$SH"
+  for v in PROV_COLOR NO_COLOR PROV_VERBOSE; do
+    grep -q "$v" "$SH" || { echo "reglage $v non transmis a travers sudo" >&2; false; }
+  done
+}

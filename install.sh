@@ -142,7 +142,16 @@ EOF
   echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
   REEXEC_ARGS=(--repo "$REPO_URL" --branch "$BRANCH")
   [[ "$DOCTOR_MODE" -eq 1 ]] && REEXEC_ARGS+=(--check)
-  exec sudo bash "$(readlink -f "$0")" "${REEXEC_ARGS[@]}" "${PASSTHRU[@]}"
+  # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO (env_reset), ET C'EST LE TROISIEME PIEGE DE CETTE FAMILLE
+  # MESURE AUJOURD'HUI sur cette machine. Les reglages de provisionnement posés AVANT l'escalade
+  # meurent en la traversant : `PROV_COLOR=1 bash install.sh` colorisait le preflight puis rendait
+  # un provisionnement blanc, sans que rien ne dise pourquoi. Les assignations en tete de commande
+  # sont la forme que sudo laisse passer — on les nomme, une par une, plutot que d'ouvrir `-E`.
+  REEXEC_ENV=()
+  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES; do
+    [[ -n "${!_v:-}" ]] && REEXEC_ENV+=("$_v=${!_v}")
+  done
+  exec sudo "${REEXEC_ENV[@]}" bash "$(readlink -f "$0")" "${REEXEC_ARGS[@]}" "${PASSTHRU[@]}"
 fi
 # À partir d'ici : root, SUDO_USER = l'humain.
 
