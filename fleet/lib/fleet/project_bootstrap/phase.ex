@@ -654,6 +654,36 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # « la base a disparu » est exactement l'etat ou un verdict ne doit pas etre rendu. Le pod n'est
     # pas pris : le verrou n'a pas ete pose, le tick suivant retente, et un echec durable remonte
     # sous son propre nom au lieu de produire un juge aveugle.
+    @doc """
+    A0.5 (chantier rails, mesuré au banc 2026-08-18) — refreshes `refs/lcars/base` ALONE on a live
+    workspace, no reset, no clean, no `/clear`.
+
+    The hole it closes sits at the INTERSECTION of two deliberate decisions: an instance-scoped
+    producer in rework is re-briefed in place without reprovision (2026-08-03 — the ticket's
+    context is an asset), and `refs/lcars/base` only moves inside the reprovision path (6-135 —
+    "le re-brief déplace la base, donc le ref doit suivre"). A CONFLICT rework is precisely the
+    case where the base HAS moved — measured: the pod merged its stale `lcars/base` ("Already up
+    to date", twice), redelivered unchanged, burned its budget and escalated a conflict it was
+    never given the means to see. It cannot fetch by itself: it is forge-blind by design.
+
+    Requires the project map to carry `pr_base_branch` (stamped by `RoleDispatch` on every review
+    dispatch) — a conflict rework without it is a caller that has not said which base moved.
+    """
+    @spec refresh_work_base(Path.t(), map()) :: {:ok, term()} | {:error, term()}
+    def refresh_work_base(ws, project) do
+      case project["pr_base_branch"] do
+        base when is_binary(base) and base != "" ->
+          case fetch_work_base(ws, base) do
+            {:ok, {_, 0}} -> {:ok, :refreshed}
+            {:ok, {out, rc}} -> {:error, {:refresh_fetch_failed, rc, out}}
+            {:error, _} = err -> err
+          end
+
+        _ ->
+          {:error, :no_pr_base_branch}
+      end
+    end
+
     defp pin_work_base(ws, project) do
       case project["pr_base_branch"] do
         base when is_binary(base) and base != "" ->

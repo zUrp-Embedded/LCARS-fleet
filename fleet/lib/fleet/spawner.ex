@@ -530,6 +530,26 @@ defmodule Fleet.Spawner do
     end
   end
 
+  @doc """
+  A0.5 — refreshes `refs/lcars/base` alone on a live pod's workspace (conflict rework: the base
+  moved and the forge-blind pod cannot fetch it itself). `:not_found` when the pod is not
+  registered — the caller treats that as fine (a fresh spawn pins its own base at clone).
+  """
+  @spec refresh_work_base(String.t(), map()) :: :ok | {:error, term()}
+  def refresh_work_base(pod_id, project) when is_binary(pod_id) and is_map(project) do
+    case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
+      [{pid, _}] ->
+        try do
+          GenServer.call(pid, {:refresh_work_base, project}, 30_000)
+        catch
+          :exit, reason -> {:error, {:refresh_call_failed, reason}}
+        end
+
+      [] ->
+        {:error, :not_found}
+    end
+  end
+
   @doc "Returns the deliverable workspace for an already-known pod directory."
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
