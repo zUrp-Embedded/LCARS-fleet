@@ -174,13 +174,24 @@ wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/home/private" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
 
-CREDS_TMP="$(mktemp)"
-if "$DOCKER_BIN" cp "$BOX:/home/$HUMAN/.claude/.credentials.json" "$CREDS_TMP" >/dev/null 2>&1 && [[ -s "$CREDS_TMP" ]]; then
+# ⚠ LE SECRET NE DESCEND PLUS SUR L'HOTE, ET IL Y RESTAIT. Cette mesure copiait
+# `.credentials.json` dans un `mktemp` pour tester sa taille, puis faisait `rm -f`. Deux defauts
+# empiles : le fichier extrait porte des jetons OAuth Anthropic VIVANTS, et le `rm` echouait sans
+# que personne ne regarde — sur une machine ou `DOCKER_BIN` passe par sudo (socket rootful, cas
+# ordinaire), `docker cp` ecrit le fichier en root, et `/tmp` est sticky : son proprietaire n'est
+# plus celui qui l'a cree, donc il ne peut pas le supprimer. Mesure du 2026-08-18 : deux copies des
+# credentials, une par swap, encore la, pendant que le script se croyait propre.
+#
+# Or on ne veut pas le CONTENU, on veut « present et non vide ». Le flux tar de `docker cp … -` le
+# dit dans son en-tete : rien ne touche le disque. (Et on ne repasse pas par `exec`, mute a travers
+# ce relais — c'est la raison qui avait fait choisir `cp` au depart, elle tient toujours.)
+CREDS_SIZE="$("$DOCKER_BIN" cp "$BOX:/home/$HUMAN/.claude/.credentials.json" - 2>/dev/null \
+              | tar -tv 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+if [[ "${CREDS_SIZE:-}" =~ ^[0-9]+$ ]] && [[ "$CREDS_SIZE" -gt 0 ]]; then
   CREDS_OK=oui
 else
   CREDS_OK=non
 fi
-rm -f "$CREDS_TMP"
 
 REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$BOX" 2>/dev/null \
             | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1)"

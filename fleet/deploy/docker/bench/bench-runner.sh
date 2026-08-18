@@ -152,6 +152,11 @@ fi
 say "token d'enregistrement minte (${#REG} car)"
 
 # ─── 2. Config jobs + override reseau, generes a cote de rien (tmpdir) ──────────────────────────
+# CE TMPDIR N'EST PAS NETTOYE, ET C'EST DELIBERE (revu le 2026-08-18, en fermant la fuite de
+# credentials de `bench-swap-image`). Il ne porte AUCUN secret — un nom de reseau et un chemin de
+# config — et `override.yml` est un `-f` de compose : compose l'inscrit dans le label
+# `config_files` du projet, donc l'effacer casserait un `compose` ultérieur sur ce meme projet.
+# Quelques ko qui restent valent mieux qu'un projet compose qui ne se relit plus.
 GEN="$(mktemp -d)"
 cat > "$GEN/config.yaml" <<EOF
 # Genere par bench-runner.sh — les conteneurs de JOB rejoignent le reseau de la forge,

@@ -1,0 +1,56 @@
+#!/usr/bin/env bats
+# SOURCE: fleet/deploy/tests/bench_swap_creds.bats
+# AUTHOR: DrDree
+# STARDATE: (posee par /push-github)
+# STATUS: bats tests for bench-swap-image.sh — la sonde des credentials ne fait pas descendre le secret
+#
+# CE QUE CE TEMOIN TIENT, ET CE QU'IL A COUTE. Pour dire « creds : oui/non » dans son recap, ce
+# script copiait `.credentials.json` de la boite dans un `mktemp` de l'hote, testait sa taille, puis
+# faisait `rm -f`. Le fichier extrait porte des jetons OAuth Anthropic VIVANTS.
+#
+# Le `rm` echouait, et personne ne regardait son code de retour : sur une machine ou l'acces au
+# daemon passe par sudo (socket rootful — cas ordinaire, et celui de ce poste), `docker cp` ecrit en
+# root, `/tmp` est sticky, donc celui qui a cree le fichier n'en est plus proprietaire et ne peut
+# pas l'effacer. Mesure du 2026-08-18 : DEUX copies des credentials dans /tmp, une par swap,
+# toujours la, pendant que le script se croyait propre. Une seule ligne d'erreur `rm:` dans un flot
+# de sortie, jamais lue.
+#
+# La question posee etait « present et non vide », jamais « quel contenu ». L'en-tete du flux tar de
+# `docker cp … -` y repond sans qu'un octet touche le disque.
+
+setup() {
+  SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-swap-image.sh"
+  [ -f "$SUT" ]
+}
+
+@test "aucun secret n'est ecrit sur l'hote : pas de mktemp, et le cp des creds STREAME" {
+  ! grep -q 'mktemp' "$SUT"
+  # tout `docker cp` des credentials doit finir par « - » (stdout), jamais par un chemin d'hote
+  run bash -c "grep -n 'credentials.json' '$SUT' | grep -v '^\\s*#' | grep 'cp '"
+  [ -n "$output" ]
+  [[ "$output" == *'credentials.json" -'* ]]
+}
+
+@test "le recap dit toujours oui/non — la sonde n'a pas disparu avec le fichier temporaire" {
+  grep -q 'CREDS_OK=oui' "$SUT"
+  grep -q 'CREDS_OK=non' "$SUT"
+  grep -q 'creds     : \$CREDS_OK' "$SUT"
+}
+
+@test "la TAILLE se lit bien au champ 3 du listing tar — l'hypothese de parsing, epinglee" {
+  # C'est la seule partie fragile : `tar -tv` n'a pas le meme format partout. Si un jour il bouge,
+  # la sonde repondrait « non » sur des credentials presentes et le banc s'accuserait a tort.
+  printf '%0.s.' $(seq 1 509) > "$BATS_TEST_TMPDIR/.credentials.json"
+  run bash -c "tar -C '$BATS_TEST_TMPDIR' -cf - .credentials.json | tar -tv | awk 'NR==1 {print \$3}'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "509" ]
+}
+
+@test "un flux VIDE (fichier absent dans la boite) ne rend pas un faux « oui »" {
+  run bash -c "printf '' | tar -tv 2>/dev/null | awk 'NR==1 {print \$3}'"
+  [ -z "$output" ]
+  # et la garde du script refuse tout ce qui n'est pas un entier strictement positif
+  CREDS_SIZE=""
+  run bash -c '[[ "${CREDS_SIZE:-}" =~ ^[0-9]+$ ]] && [[ "$CREDS_SIZE" -gt 0 ]]'
+  [ "$status" -ne 0 ]
+}
