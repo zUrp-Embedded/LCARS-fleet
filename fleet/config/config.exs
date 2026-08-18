@@ -32,7 +32,9 @@ end
 config :lcars_fleet, pilot_conflict_diagnosis?: false
 
 # Chief exception pass (tier 2: ONE outsider inference pass on a conflict the producer could not
-# close, before immobilizing a human). FLEET design flag, not an admin knob. OFF until a real
-# conflict has converged end-to-end on a bench (chantier rails, lot A1: the pass existed but was
-# unreachable behind the GitWand switch, and unproven — prove, then flip).
-config :lcars_fleet, pilot_conflict_exception_pass?: false
+# close, before immobilizing a human). FLEET design flag, not an admin knob. Was OFF until a real
+# conflict converged end-to-end on a bench — CONDITION MET 2026-08-18 (probe-rails PR#28,
+# image 3441e1de2): budget exhausted → chief pod → fresh base (A0.5) → resolution delivered ON the
+# PR (A0.6), trailer LCARS-chief → CI retick → merged_by system_chief. Three real defects were
+# found and fixed by that proof before this line could flip.
+config :lcars_fleet, pilot_conflict_exception_pass?: true
