@@ -69,6 +69,14 @@ site en ferait un second exemplaire, qui divergerait le jour où l'un des deux s
 
 `node_modules/`, `dist/` et `public/` sont gitignorés.
 
+## Ajouter une page
+
+Le mode d'emploi complet vit dans [`src/pages/_README.md`](src/pages/_README.md) — là où le geste se
+fait. En deux lignes : **poser le fichier** (`src/pages/machin.astro` → `/machin/`, aucune liste de
+pages à construire nulle part), puis **le ranger dans le rail** (`src/layouts/Site.astro`, `PAGES`
+ou `MANUAL`). Le second geste n'est pas optionnel et le build le vérifie dans les deux sens : le
+rail porte le groupe et l'ordre de lecture, qu'un nom de fichier ne dit pas.
+
 ## Comment ça tourne sur GitHub
 
 `.github/workflows/site.yml` — le workflow vit à la racine parce qu'Actions ne lit que là, et il

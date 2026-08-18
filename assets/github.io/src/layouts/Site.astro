@@ -40,8 +40,17 @@ for (const p of [...nav, ...MANUAL]) {
 // Ces deux faits vivent donc a deux endroits, et deux endroits derivent. La page nouvelle
 // existerait, servie a son URL, et n'apparaitrait dans aucune navigation : publiee et introuvable,
 // sans un mot. La liste reste ecrite ; c'est sa COUVERTURE qui devient mecanique.
-const ROUTES = Object.keys(import.meta.glob('../pages/*.astro'))
-  .map((f) => f.split('/').pop().replace(/\.astro$/, ''))
+// ⚠ TOUTES LES EXTENSIONS QU'ASTRO ROUTE, PAS SEULEMENT `.astro`. Mesure du 2026-08-18 : un
+// `essai2.md` depose ici est sorti en NEUVIEME page, et ce garde — qui ne globait que `.astro` — ne
+// l'a pas vu. Il aurait donc laisse passer exactement ce qu'il existe pour empecher : une page
+// publiee et absente de toute navigation. Un garde partiel est pire qu'un garde absent, parce qu'on
+// s'y fie. (Un nom prefixe `_` n'est PAS route : c'est ainsi que le README de ce dossier y vit.)
+const ROUTES = Object.keys(import.meta.glob('../pages/*.{astro,md,mdx,html}'))
+  .map((f) => f.split('/').pop().replace(/\.(astro|md|mdx|html)$/, ''))
+  // Le `_` est la regle d'ASTRO, pas la notre : un nom prefixe n'est pas route. Ce garde doit la
+  // refleter exactement, sinon il reclame une entree de rail pour un fichier qui ne sera jamais
+  // servi — c'est ce qui est arrive au `_README.md` de `src/pages/`, une minute apres l'avoir ecrit.
+  .filter((n) => !n.startsWith('_'))
   .map((n) => (n === 'index' ? u('/') : u(`/${n}/`)));
 const DECLARED = new Set([...PAGES, ...MANUAL].map((p) => p.href));
 const orphan = ROUTES.filter((r) => !DECLARED.has(r));
