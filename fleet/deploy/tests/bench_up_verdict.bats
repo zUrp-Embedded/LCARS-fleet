@@ -83,7 +83,9 @@ FAKE
 #!/usr/bin/env bash
 argv="\$*"
 # Les variables du box traversent en ENVIRONNEMENT, pas en argv : la doublure les depose quand elle
-# voit le `create`, sinon aucun temoin ne peut lire ce que la boite recoit.
+# voit le 'create', sinon aucun temoin ne peut lire ce que la boite recoit.
+# (guillemets simples et pas d'accents graves : ce heredoc n'est PAS quote, donc bash y fait de la
+#  SUBSTITUTION DE COMMANDE — un mot entre accents graves y est EXECUTE, meme dans un commentaire.)
 case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/box.env" ;; esac
 case "\$argv" in
   *"ps --filter publish="*) [[ -f "$BATS_TEST_TMPDIR/port_holder" ]] && cat "$BATS_TEST_TMPDIR/port_holder"; exit 0 ;;
@@ -108,7 +110,7 @@ case "\$argv" in
   *"*.gitea_token"*)      echo 9 ;;
   # Le token OPERATEUR, dans le home du worker — distinct du glob /home/private ci-dessus, qui vise
   # les tokens de ROLE. Deux fichiers homonymes, deux rails : celui-ci est la voie de la boite vers
-  # la forge, et `bench-up.sh` l'EXIGE depuis 2026-08-15 (il pouvait etre saute par les deux passes).
+  # la forge, et 'bench-up.sh' l'EXIGE depuis 2026-08-15 (saute par les deux passes, sinon).
   *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;
   *credentials.json*)     echo oui ;;
 esac
