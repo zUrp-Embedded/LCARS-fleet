@@ -159,10 +159,22 @@ say "token d'enregistrement minte (${#REG} car)"
 # Quelques ko qui restent valent mieux qu'un projet compose qui ne se relit plus.
 GEN="$(mktemp -d)"
 cat > "$GEN/config.yaml" <<EOF
-# Genere par bench-runner.sh — les conteneurs de JOB rejoignent le reseau de la forge,
-# sinon le clone echoue sur un nom que leur reseau par defaut ne resout pas (piege n2 de l'en-tete).
+# Genere par bench-runner.sh.
+#
+# ⚠ CE FICHIER FORÇAIT LES CONTENEURS DE JOB SUR LE RESEAU DE LA FORGE, et depuis que le runner
+# tourne en dind ce reseau N'EXISTE PLUS DE LEUR POINT DE VUE. Il appartient au daemon de la
+# MACHINE ; le daemon embarque du runner n'a que `bridge`, `host`, `none`. Un job nomme donc un
+# reseau introuvable et son conteneur meurt a la creation, sans une ligne d'erreur exploitable —
+# mesure du 2026-08-18 : « shim disconnected » deux dixiemes de seconde apres « Running job ».
+#
+# Et le forçage n'est plus necessaire, ce qui est le point : le runner, LUI, est sur le reseau de
+# la forge, et ses conteneurs de job heritent de son resolveur. Mesure du meme jour, depuis le
+# bridge interne : `getent hosts forge` -> 172.18.0.2, `wget http://forge:3000/api/v1/version` ->
+# {"version":"1.26.1"}, et `git ls-remote http://forge:3000/fleet/lcars.git` rend le sha. Le clone
+# — la seule chose que ce forçage protegeait — passe sans lui.
 container:
-  network: $NETWORK
+  # Aucun reseau force : le bridge du daemon embarque suffit, et lui existe.
+  privileged: false
 EOF
 # La config part par `docker cp`, JAMAIS par bind : le daemon vit dans la VM Docker Desktop, un
 # bind d'un chemin de CETTE distro WSL lui est invisible — il cree un repertoire vide a la place,
