@@ -27,14 +27,26 @@ setup() {
 
   # Knows two images and nothing else. `image inspect` on anything else fails, which is exactly
   # what a daemon does for an image nobody built.
+  # Le daemon connait deux images au depart. `pull` ACQUIERT — sauf ce que `PULLABLE` refuse : une
+  # image locale (`lcars-build:<tag>`) n'est sur aucun registre, et c'est la difference que la garde
+  # doit garder entre « pas encore tiree » et « n'existe nulle part ».
+  KNOWN="$BATS_TEST_TMPDIR/known"
+  printf 'alpine:3.20\nlcars-build:9\n' > "$KNOWN"
+  UNPULLABLE="$BATS_TEST_TMPDIR/unpullable"
+  : > "$UNPULLABLE"
   cat > "$BINDIR/dockerstub" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
 if [[ "\$1 \$2" == "image inspect" ]]; then
-  case "\$3" in
-    alpine:3.20|lcars-build:9) exit 0 ;;
-    *) exit 1 ;;
-  esac
+  grep -qxF "\$3" "$KNOWN" && exit 0 || exit 1
+fi
+if [[ "\$1" == "pull" ]]; then
+  img="\${@: -1}"
+  # Un tag LOCAL (`lcars-build:*`) n'est sur aucun registre — le tir echoue, comme en vrai.
+  case "\$img" in lcars-build:*) exit 1 ;; esac
+  grep -qxF "\$img" "$UNPULLABLE" && exit 1
+  echo "\$img" >> "$KNOWN"
+  exit 0
 fi
 exit 0
 EOF
@@ -105,4 +117,35 @@ run_runner() {
 
   [[ "$output" != *"introuvable"* ]]
   ! grep -q "image inspect host" "$CALLS"
+}
+
+# ─── une image publique absente se TIRE avant de se refuser ──────────────────────────────────────
+
+@test "une image de label absente est TIREE, et le banc continue" {
+  # LE DEFAUT MESURE (2026-08-18, Debian neuve, chemin de livraison) : `REFUS : docker:cli`, banc
+  # exit 6. Personne ne tirait les images publiques dont les labels dependent — sur la machine de
+  # dev elles etaient la depuis des mois, donc invisible. ⚖ La BP est arbitree : le banc tire.
+  run_runner --labels "shell:docker://alpine:3.20,dood:docker://docker:cli"
+
+  # Ce qui est mesure est la GARDE, pas la fin du script : la forge est une doublure muette, donc
+  # l'enregistrement echoue apres — comme dans le temoin « labels whose images all resolve ».
+  [[ "$output" == *"tentative de tir : docker:cli"* ]]
+  [[ "$output" != *"REFUS"* ]]
+  grep -q "^pull -q docker:cli" "$CALLS"
+  # Une image DEJA la n'est pas re-tiree : la garde tire ce qui manque, pas ce qui est.
+  ! grep -q "^pull -q alpine:3.20" "$CALLS"
+  grep -q '^CURL' "$CALLS"
+}
+
+@test "une image que le tir ne ramene pas reste un REFUS, et il nomme le build" {
+  # La distinction qui compte : `lcars-build:<tag>` n'est sur aucun registre. Tirer echoue, l'image
+  # reste absente, et le refus doit rester celui qui nomme la commande de build — pas un message de
+  # registre que personne ne peut suivre.
+  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:absente"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUS"* ]]
+  [[ "$output" == *"lcars-build:absente"* ]]
+  [[ "$output" == *"--target build"* ]]
+  ! grep -q '^CURL' "$CALLS"
 }

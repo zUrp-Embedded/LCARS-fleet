@@ -97,17 +97,30 @@ EOM
     exit 1
   fi
 
+  # ⚠ UNE IMAGE ABSENTE SE TIRE AVANT DE SE REFUSER. La garde ci-dessous est juste — un runner qui
+  # annonce un label qu'il ne sait pas servir rate chaque job qui le demande — mais elle refusait
+  # AUSSI les images publiques que personne n'avait jamais demande a personne de tirer. Mesure du
+  # 2026-08-18, machine Debian neuve, chemin de livraison : `REFUS : docker:cli`, banc exit 6. Sur
+  # la machine de dev les memes images etaient la depuis des mois, donc invisible.
+  #
+  # ⚖ La bande passante est arbitree (user) : « le bench DOIT derouler le compose entierement, et
+  # re-dl a chaque tour ». On tire donc, et le refus ne tombe que si le tir echoue ET que l'image
+  # reste absente — ce qui garde le refus intact pour une image LOCALE (`lcars-build:<tag>`), qui
+  # n'est sur aucun registre et dont le message nomme la commande de build.
   local missing=()
   local entry image
   local IFS=,
   for entry in $LABELS; do
     image="${entry#*docker://}"
     [[ "$image" == "$entry" ]] && continue   # label sans image (host runner) : rien a resoudre
+    "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1 && continue
+    say "image absente, tentative de tir : $image"
+    "$DOCKER_BIN" pull -q "$image" >/dev/null 2>&1 || true
     "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1 || missing+=("$image")
   done
 
   if [[ ${#missing[@]} -gt 0 ]]; then
-    say "REFUS : image(s) introuvable(s) sur ce daemon : ${missing[*]}"
+    say "REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : ${missing[*]}"
     say "  un runner annonce le label quand meme et rate chaque job qui le demande."
     say "  construis-la (docker build --target build -t <image> ...) ou corrige --labels."
     exit 1
