@@ -90,6 +90,8 @@ PROVISION_LIB_LOADED=1
 # Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
 # PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage
 # F-E1 de fleet-update v1 : vérifier le remote APRÈS le pull était une inversion de chaîne payée).
+# Combien de lignes d'une commande en échec atterrissent à l'écran (le reste vit dans le fichier).
+: "${PROV_DUMP_LINES:=40}"
 : "${PROV_UPDATE_REMOTE:=origin}"
 : "${PROV_EXPECTED_REPO:=}"
 # Toolchain build — pins EXACTS (bump = changer la paire version+sha ICI, nulle part ailleurs).
@@ -109,12 +111,37 @@ PROV_CHANGED=0
 PROV_DRIFT=0
 PROV_FAILED=0
 
-p_ok()   { printf 'OK    %s: %s\n' "$PROV_MODULE_TAG" "$*"; }
-p_chg()  { printf 'POSÉ  %s: %s\n' "$PROV_MODULE_TAG" "$*"; }
-p_drift(){ printf 'DRIFT %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
-p_warn() { printf 'WARN  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; }
-p_fail() { printf 'FAIL  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
-p_die()  { PROV_VERDICT_RENDERED=1; printf 'FATAL %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
+# ─── LA PALETTE — LA MÊME QUE CELLE DU BANDEAU D'ENTRÉE ─────────────────────────────────────────
+#
+# Le préflight de `install.sh` sortait en couleurs et le provisionnement en blanc : deux moitiés du
+# même geste, dont celle qu'on regarde pendant vingt minutes était la terne. Les quatre teintes sont
+# reprises telles quelles de l'en-tête (vert / cyan du cadre / ambre du bandeau / rouge).
+#
+# ⚠ LA COULEUR NE SORT QUE SUR UN TERMINAL. Une séquence ANSI dans un fichier de log, c'est du
+# `[1;32m` au milieu du texte : illisible à la relecture et cassé au grep. `-t 1` tranche, `NO_COLOR`
+# (convention de fait) coupe, et `PROV_COLOR=1` force pour un `script`/`unbuffer`.
+#
+# ⚠ ET LA COULEUR N'ENTOURE QUE L'ÉTIQUETTE, JAMAIS LE REMPLISSAGE. Les espaces qui suivent restent
+# littéraux : une séquence ANSI compte des caractères et s'affiche sur zéro colonne, donc tout
+# alignement qui l'inclurait se décalerait sans que personne ne le voie. Ici les six colonnes de
+# l'étiquette sont tenues par des espaces nus, et il n'y a rien à réaligner.
+if [[ -n "${NO_COLOR:-}" ]]; then PROV_COLOR=0
+elif [[ -n "${PROV_COLOR:-}" ]]; then :
+elif [[ -t 1 ]]; then PROV_COLOR=1
+else PROV_COLOR=0
+fi
+if [[ "$PROV_COLOR" -eq 1 ]]; then
+  _PG=$'\033[1;32m'; _PC=$'\033[0;36m'; _PA=$'\033[38;5;214m'; _PR=$'\033[1;31m'; _PN=$'\033[0m'
+else
+  _PG=''; _PC=''; _PA=''; _PR=''; _PN=''
+fi
+
+p_ok()   { printf '%sOK%s    %s: %s\n' "$_PG" "$_PN" "$PROV_MODULE_TAG" "$*"; }
+p_chg()  { printf '%sPOSÉ%s  %s: %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$*"; }
+p_drift(){ printf '%sDRIFT%s %s: %s\n' "$_PA" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
+p_warn() { printf '%sWARN%s  %s: %s\n' "$_PA" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; }
+p_fail() { printf '%sFAIL%s  %s: %s\n' "$_PR" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
+p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL%s %s: %s\n' "$_PR" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
 
 # Sortie standard d'un module : à appeler en FIN de check() et d'apply().
 # check  : exit 0 conforme · 1 drift constaté · (2 réservé erreur de sonde, via p_die)
@@ -136,8 +163,8 @@ PROV_VERDICT_RENDERED=0
 _prov_exit_guard() {
   local rc=$?
   [[ "$PROV_VERDICT_RENDERED" -eq 1 ]] && return 0
-  printf 'ERREUR %s: MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
-    "$PROV_MODULE_TAG" "$rc" >&2
+  printf '%sERREUR%s %s: MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
+    "$_PR" "$_PN" "$PROV_MODULE_TAG" "$rc" >&2
   exit 3
 }
 [[ -n "${PROVISION_RUN:-}" ]] && trap _prov_exit_guard EXIT
@@ -180,14 +207,22 @@ run_quiet() {
     # les compteurs à zéro : `run_quiet x || verdict_apply` sortait 0 (« convergé ») alors que
     # x avait échoué — le verdict vert menteur, exactement le péché v1 que cette lib jure de tuer.
     p_fail "commande en échec (rc=$rc) : $*"
+    # ⚠ BORNÉ À L'ÉCRAN, ENTIER SUR LE DISQUE — et l'ancienne forme faisait exactement l'inverse.
+    # Elle déversait TOUT puis supprimait le fichier : mesure du 2026-08-18, l'install native sur
+    # une Ubuntu neuve a craché 3 300 lignes de log de suite ExUnit dans le terminal, et l'unique
+    # copie partait au `rm` de la ligne suivante. Illisible sur le moment, irrécupérable après.
+    # La queue porte le verdict (« gate: the ExUnit suite FAILED ») ; le détail vit dans le fichier,
+    # qu'on NOMME et qu'on garde. Un échec est une pièce à conviction, pas un tas à balayer.
+    local n; n="$(wc -l < "$out")"
     {
-      printf '───── sortie complète ─────\n'
-      cat "$out"
-      printf '───────────────────────────\n'
+      printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
+      tail -n "$PROV_DUMP_LINES" "$out"
+      printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$out"
     } >&2
+    return "$rc"
   fi
   rm -f "$out"
-  return "$rc"
+  return 0
 }
 
 # ─── prov_parse_remote <url> — normalise un remote git en `host/owner/repo`, ou REFUSE ───────────

@@ -255,9 +255,9 @@ for i in "${!SELECTED[@]}"; do
   eff="${EFFECTIVE[$i]}"
   total=$((total + 1))
   if [[ "$CMD" == "apply" && "$eff" == "check" ]]; then
-    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ==="
+    [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ===${_PN}"
   else
-    [[ "$PORCELAIN" -eq 1 ]] || echo "=== $name ($eff) ==="
+    [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff) ===${_PN}"
   fi
   rc=0
   PROVISION_RUN=1 PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
@@ -303,13 +303,17 @@ if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
 else
   echo ""
-  echo "=== provision $CMD — substrat $SUBSTRATE ==="
-  printf '  modules: %d · conformes/convergés: %d · drift: %d · échecs: %d\n' "$total" "$ok" "$drift" "$failed"
+  echo "${_PC}=== provision $CMD — substrat $SUBSTRATE ===${_PN}"
+  # UN COMPTEUR N'EST TEINTÉ QUE S'IL PORTE QUELQUE CHOSE. Un « échecs: 0 » en rouge apprend au
+  # lecteur à ignorer le rouge, et le jour où il vaut 3 il ne le voit plus.
+  _tint() { if [[ "$2" -gt 0 ]]; then printf '%s%s%s' "$1" "$2" "$_PN"; else printf '%s' "$2"; fi; }
+  printf '  modules: %d · conformes/convergés: %s · drift: %s · échecs: %s\n' \
+    "$total" "$(_tint "$_PG" "$ok")" "$(_tint "$_PA" "$drift")" "$(_tint "$_PR" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
-    echo "  → converger : sudo $SELF apply"
+    echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
   fi
   if [[ "$CMD" == "apply" && "$drift" -gt 0 ]]; then
-    echo "  → APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU sur $drift module(s) — voir les lignes"
+    echo "  ${_PA}→ APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU${_PN} sur $drift module(s) — voir les lignes"
     echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
   fi
 fi
