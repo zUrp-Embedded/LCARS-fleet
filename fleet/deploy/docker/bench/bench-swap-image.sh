@@ -35,8 +35,8 @@
 # le rappelle plutot que de laisser croire a un banc qui travaille.
 #
 # USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 0.0.0.0]
-#                             [--forge-port 21000] [--creds-from ~/.claude/.credentials.json]
-#                             [--no-creds] [--human lcars]
+#                             [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
+#                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human lcars]
 # EXIT  : 0 boite remplacee · 1 arguments/dependance · 3 la boite ne monte pas · 5 creds
 #         6 le verdict final ne passe pas
 
@@ -53,6 +53,12 @@ FORGE_PORT="21000"
 # sur un autre port et passe ici ressortait republie sur 20999 — la boite ecoutait ailleurs que la
 # ou sa forge l'annonce, sans un mot. Meme defaut, meme option.
 DECK_PORT="20999"
+# ⚠ MEME MALADIE, QUATRIEME SITE (mesure 2026-08-18) : le port SSH etait en dur a 2222 dans le
+# `create` ci-dessous. Un swap d'un banc monte ailleurs (vanille : 2223) aurait republie sa boite
+# sur le port ssh d'un AUTRE banc (l8 : 2222) — au mieux un create qui meurt sur le port pris, au
+# pire une boite qui repond a la place d'une autre. Le paragraphe au-dessus decrivait deja le
+# defaut ; il ne manquait que l'instance.
+SSH_PORT="2222"
 BIND="0.0.0.0"
 ADVERTISE=""
 IMAGE=""
@@ -66,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --project)    PROJECT="${2:?}"; shift 2 ;;
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
     --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
+    --ssh-port)   SSH_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
@@ -119,7 +126,7 @@ env LCARS_IMAGE="$IMAGE" \
     FORGE_BASE_URL="http://forge:3000" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
-    LCARS_SSH_PORT="${BIND}:2222" \
+    LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="http://${ADVERTISE}:${FORGE_PORT}" \
     `# Les deux ecritures de la loopback sont semees par 55-deck-oidc ; ici, l'entree annoncee.` \
