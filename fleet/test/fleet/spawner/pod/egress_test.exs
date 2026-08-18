@@ -25,8 +25,14 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   # NOT under `tmp_dir`: an ExUnit tmp_dir carries the test NAME, and AF_UNIX caps a path at ~108
   # bytes. The first run failed on `:einval` for that reason alone — which is why the module now
   # names the constraint instead of relaying the kernel's word for "no".
+  #
+  # PID-SUFFIXED, and it is the same disease `config/test.exs` was cured of (`b6398ab39`): a
+  # CONSTANT `/tmp` path collides across RUNNERS — on a shared box, the first human to run the
+  # suite owns `/tmp/lcars-eg`, and every other human then dies on `:eacces` (measured 2026-08-18:
+  # dir owned by another user, 3 reds that had nothing to do with the code under test). The pid
+  # names the run that owns the dir; it stays short enough for AF_UNIX.
   defp sock(_tmp) do
-    dir = Path.join(System.tmp_dir!(), "lcars-eg")
+    dir = Path.join(System.tmp_dir!(), "lcars-eg-#{System.pid()}")
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{System.unique_integer([:positive])}.sock")
     on_exit(fn -> File.rm(path) end)
@@ -263,7 +269,8 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     setup do
       # Short base, same reason as the sockets above: `tmp_dir` carries the test NAME and AF_UNIX
       # caps the path. The real base is `/run/lcars/egress`, which is short for this exact reason.
-      base = Path.join(System.tmp_dir!(), "lcars-egb")
+      # Same pid suffix as `sock/1` above, same reason (cross-runner `/tmp` collision).
+      base = Path.join(System.tmp_dir!(), "lcars-egb-#{System.pid()}")
       File.mkdir_p!(base)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_egress_sock_base, base)
       on_exit(fn -> File.rm_rf(base) end)
