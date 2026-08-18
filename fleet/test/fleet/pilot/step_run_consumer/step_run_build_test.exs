@@ -150,4 +150,49 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
     assert log =~ "2 open fleet PRs"
     assert log =~ "REFUSING"
   end
+
+  describe "A0.6 — on livre là où on a repris (delivery_branch)" do
+    # Mesuré au banc 2026-08-18 : la première passe chief réelle a poussé une résolution PARFAITE
+    # sur `lcars/issue-N-chief` — une branche qu'aucune PR ne regarde — parce que le target était
+    # la formule `feature_branch(n, role)`. Le discriminant est la base de CLONE.
+    defp git_native_seams do
+      %StepRunBuild.Seams{
+        repo: "fleet/demo",
+        remote: "origin",
+        role_emails: fn _role -> ["human@x"] end,
+        deliverable_mode_fun: fn _role, _root -> {:ok, "git_native"} end,
+        forge_client: NoPrForge,
+        forge_opts: []
+      }
+    end
+
+    defp deliverable_target(role, base_branch) do
+      route = %{intent: :review, next_assignee: nil, next_step: nil}
+
+      payload = %{
+        "pod_id" => "p1",
+        "role" => role,
+        "base_branch" => base_branch,
+        "workspace" => "/w",
+        "base_sha" => "abc",
+        "deliverable_mode" => "git_native"
+      }
+
+      step_run = StepRunBuild.build(payload, 42, role, route, git_native_seams())
+      step_run.deliverable_opts.target_branch
+    end
+
+    test "build producteur (base = une face) → sa branche de formule" do
+      assert deliverable_target("engineer", "main") == "lcars/issue-42-engineer"
+    end
+
+    test "rework producteur (base = SA feature) → la même branche (la formule coïncide)" do
+      assert deliverable_target("engineer", "lcars/issue-42-engineer") ==
+               "lcars/issue-42-engineer"
+    end
+
+    test "passe d'exception (base = la feature du PRODUCTEUR) → re-livre DESSUS, jamais une branche à son nom" do
+      assert deliverable_target("chief", "lcars/issue-42-engineer") == "lcars/issue-42-engineer"
+    end
+  end
 end
