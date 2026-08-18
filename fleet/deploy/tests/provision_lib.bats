@@ -486,3 +486,19 @@ module_sh() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"FAIL"* ]]
 }
+
+@test "lan_addr tient son contrat « vide si indeterminable » — meme sans `ip`" {
+  # ⚠ TROISIEME INCARNATION DE B5 DANS LA MEME JOURNEE. `ip` n'existe pas partout — l'image du job
+  # CI ne l'a pas — et sous `pipefail` une commande introuvable rend 127 que le pipeline propage :
+  # la fonction rendait 127, l'assignation echouait, `set -e` tuait l'appelant. Mesure du
+  # 2026-08-18 : huit temoins de `bench_up_verdict.bats` rouges DANS la CI et verts partout
+  # ailleurs, parce que `bench-up.sh` mourait sur la ligne qui derive une adresse.
+  module_sh '
+    a="$(PATH=/nonexistent lan_addr)"
+    [ -z "$a" ]
+    # et advertise_addr, qui l en depend, survit aussi
+    PATH=/nonexistent advertise_addr 0.0.0.0
+    [ -n "$PROV_ADVERTISE" ]
+  '
+  [ "$status" -eq 0 ]
+}

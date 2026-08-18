@@ -778,7 +778,13 @@ wsl_networking_mode() {
 
 # L'adresse source de sortie — vide si indéterminable. Vraie SEULEMENT là où on est joignable par
 # elle : `advertise_addr` en est le seul appelant légitime.
-lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1; }
+# ⚠ `|| true` — MEME CLASSE QUE B5, TROISIEME FOIS DANS LA MEME JOURNEE. `ip` n'existe pas partout
+# (l'image du job CI ne l'a pas), et sous `pipefail` une commande introuvable rend 127 que le
+# pipeline propage : la fonction rend 127, l'assignation echoue, `set -e` tue l'appelant. Mesure du
+# 2026-08-18 : huit temoins de `bench_up_verdict.bats` rouges DANS la CI et verts partout ailleurs,
+# parce que `bench-up.sh` mourait a la ligne qui derive une adresse. « Vide si indeterminable » est
+# le contrat de cette fonction ; sans ce garde elle ne le tenait pas.
+lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 
 # advertise_addr <bind> — POSE DEUX GLOBALES, N'IMPRIME RIEN :
 #   PROV_ADVERTISE      l'adresse à ANNONCER (ROOT_URL, redirect_uri, liens du récap)
