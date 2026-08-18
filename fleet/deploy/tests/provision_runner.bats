@@ -416,3 +416,23 @@ EOF
     source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"\$PROV_FORGE_URL\""
   [ "$output" = "http://depuis-le-fichier:3000" ]
 }
+
+@test "forge.url : une chaine VIDE explicite n'est pas « non pose » — le piege de `:=`" {
+  # ⚠ MESURE DU 2026-08-18. `48-forge-host` a ouvert une SECONDE porte vers `PROV_FORGE_URL` : le
+  # fichier. L'idiome `:=` de la lib traite une chaine vide comme « non pose », donc un appelant qui
+  # dit « pas de forge » par `PROV_FORGE_URL=""` se voyait rendre celle de la machine. Un temoin est
+  # passe au rouge sur un poste ou la forge venait d'etre montee, vert partout ailleurs, et toute la
+  # difference tenait a l'existence d'un fichier.
+  #
+  # Ce temoin ne corrige pas `:=` — il l'EPINGLE, pour que le prochain qui ajoute une source sache
+  # ce qu'elle ecrase. La parade est cote appelant : poser son propre PROV_TOKENS_DIR.
+  d="$BATS_TEST_TMPDIR/tk"; mkdir -p "$d"; echo "http://la-forge-de-la-machine:3000" > "$d/forge.url"
+  run bash -c "set -euo pipefail; export PROV_TOKENS_DIR='$d' PROV_FORGE_URL=''
+    source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"[\$PROV_FORGE_URL]\""
+  [ "$output" = "[http://la-forge-de-la-machine:3000]" ]
+  # la parade, elle, tient : un PROV_TOKENS_DIR sans fichier rend bien le vide
+  e="$BATS_TEST_TMPDIR/vide"; mkdir -p "$e"
+  run bash -c "set -euo pipefail; export PROV_TOKENS_DIR='$e' PROV_FORGE_URL=''
+    source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"[\$PROV_FORGE_URL]\""
+  [ "$output" = "[]" ]
+}

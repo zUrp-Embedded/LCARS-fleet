@@ -36,6 +36,14 @@ setup() {
   # `FORGE_BASE_URL` (set -a) pour tout le run, gate compris — quatre temoins rouges sur une
   # installation parfaitement saine, et verts joues a la main.
   unset FORGE_BASE_URL FORGE_PUBLIC_URL FORGE_TOKEN_FILE FORGE_ADMIN_TOKEN
+  # ⚠ ET LE FICHIER, QUI EST UNE SECONDE PORTE VERS LA MEME VARIABLE. Depuis que `48-forge-host`
+  # ecrit `$PROV_TOKENS_DIR/forge.url`, la lib le lit en dernier repli — et l'idiome `:=` traite une
+  # chaine VIDE comme « non pose ». Un test qui dit « pas de forge » par `PROV_FORGE_URL=""` se
+  # voyait donc rendre celle de la machine. Mesure du 2026-08-18 sur un poste ou la forge venait
+  # d'etre montee : rouge la-bas, vert ici, et la seule difference etait un fichier.
+  # On pose donc un PROV_TOKENS_DIR a nous : le repli ne trouve rien, comme sur une machine nue.
+  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
+  mkdir -p "$PROV_TOKENS_DIR"
   MOD="$BATS_TEST_DIRNAME/../modules.d/75-projects.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   [ -x "$MOD" ]
