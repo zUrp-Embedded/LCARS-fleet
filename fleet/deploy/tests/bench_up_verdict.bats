@@ -339,3 +339,16 @@ run_bench() {
   [[ "$output" == *"bench-down.sh"* ]]
   [[ "$output" == *"--forge-port"* ]]
 }
+
+@test "sous WSL, le recap DIT host-only et ne dicte aucune reconfiguration reseau" {
+  # ⚖ ARBITRAGE USER 2026-08-18. Ce bloc imprimait deux `netsh portproxy` prets a coller. Une
+  # recette est une invitation, et celle-ci invitait a reconfigurer la pile Hyper-V du poste pour un
+  # banc de dev. Le NAT est le defaut de WSL et de Docker Desktop : host-only EST la cible sur ce
+  # substrat, et la cible LAN c'est le Linux natif.
+  #
+  # TEMOIN STRUCTUREL, et il l'est par necessite : la ligne ne s'imprime que sur un substrat WSL en
+  # NAT. Un temoin qui l'executerait mesurerait la machine qui joue les tests, pas le script.
+  ! grep -qE '^[[:space:]]*say .*netsh' "$SRC"
+  ! grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
+  grep -q "n'est joignable que depuis CETTE machine" "$SRC"
+}

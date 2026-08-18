@@ -559,17 +559,22 @@ if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
     say "  ⚠ adresse : les liens pointent sur $ADVERTISE. ${ADVERTISE_GUESSED}"
     say "              « --advertise <ip-ou-nom> » pour annoncer autre chose."
   fi
-  # LE GESTE QUI OUVRE VRAIMENT SUR LE LAN SOUS WSL EST COTE WINDOWS, et il n'y en a pas d'autre :
-  # publier sur 0.0.0.0 ouvre le port DANS la VM, pas sur la machine. On l'imprime ; on ne peut pas
-  # l'executer d'ici, et pretendre le contraire ferait chercher la panne du mauvais cote.
+  # ⚖ ARBITRAGE USER 2026-08-18 — SOUS WSL, LE BANC EST HOST-ONLY, ET C'EST LA CIBLE.
+  # Publier sur 0.0.0.0 ouvre le port DANS la VM, pas sur la machine : en NAT — le defaut de WSL et
+  # de Docker Desktop, donc le cas de la quasi-totalite des postes Windows — rien ne route jusqu'a
+  # elle depuis le LAN. L'ouvrir demanderait de toucher au reseau Hyper-V du poste, et ce n'est pas
+  # une chose qu'un banc de test propose a qui que ce soit.
+  #
+  # ⚠ CE QUE CETTE LIGNE NE FAIT PLUS, DELIBEREMENT : elle imprimait deux commandes `netsh
+  # portproxy` pretes a coller. Une recette est une invitation ; celle-ci invitait a reconfigurer la
+  # pile reseau de la machine pour un banc de dev. On dit le FAIT et on s'arrete la.
+  #
+  # La cible LAN — un NAS, un rpi, un homelab dispo 24/7 — c'est le Linux natif, ou la derivation
+  # nominale donne la vraie adresse et ou il n'y a rien a regler. Depuis l'exterieur, c'est un
+  # tunnel monte par la personne : hors perimetre.
   if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
-    _wslip="$(lan_addr)"
-    say "  LAN (WSL) : depuis une AUTRE machine, il faut un relais cote Windows — PowerShell admin :"
-    say "              netsh interface portproxy add v4tov4 listenport=${DECK_PORT} listenaddress=0.0.0.0 connectport=${DECK_PORT} connectaddress=${_wslip}"
-    say "              netsh interface portproxy add v4tov4 listenport=${FORGE_PORT} listenaddress=0.0.0.0 connectport=${FORGE_PORT} connectaddress=${_wslip}"
-    say "              (+ une regle de pare-feu entrante sur ces ports). ${_wslip} CHANGE a chaque"
-    say "              redemarrage de WSL : le relais est a refaire, ou a pointer sur un nom stable."
-    say "              Ensuite : --advertise <ip-windows-sur-le-LAN> pour que les liens la portent."
+    say "  portee    : WSL en mode NAT (le defaut) — ce banc n'est joignable que depuis CETTE machine."
+    say "              Un deploiement ouvert sur le LAN, c'est un Linux natif ; ici c'est test/dev."
   fi
 else
   say "  ecoute    : $BIND (cette machine seulement)"

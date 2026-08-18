@@ -585,6 +585,13 @@ detect_substrate() {
 #
 # Le mode miroir (`--networking-mode mirrored`) supprime le NAT : la VM porte alors les interfaces
 # de l'hôte et `ip route get` redevient vrai. Le discriminant est donc le MODE, pas « est-ce WSL ».
+#
+# ⚖ ARBITRAGE USER 2026-08-18 : sous WSL on RESTE host-only, et ce n'est pas un pis-aller. Le NAT
+# est le défaut de WSL et de Docker Desktop — donc l'état de presque tous les postes Windows — et
+# l'ouvrir sur le LAN demanderait de reconfigurer la pile réseau Hyper-V de la machine. Ce substrat
+# est celui du test/dev ; la cible d'un déploiement joignable 24/7 sur le LAN, c'est le Linux natif,
+# où la dérivation nominale donne la vraie adresse et où il n'y a rien à régler. Quelqu'un qui a
+# déjà tuné son réseau saura le retuner : `--advertise` est là pour ça, et il n'est pas ignoré.
 PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
 
@@ -620,7 +627,7 @@ advertise_addr() {
   esac
   if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
     PROV_ADVERTISE="localhost"
-    PROV_ADVERTISE_WHY="WSL2 en mode NAT — l'adresse de la VM n'est routée depuis aucune autre machine et change à chaque redémarrage de WSL ; localhost est le relais que Windows tient vers elle. Ouvrir sur le LAN est un portproxy CÔTÉ WINDOWS, pas un réglage d'ici."
+    PROV_ADVERTISE_WHY="WSL2 en mode NAT (le défaut) — l'adresse de la VM n'est routée depuis aucune autre machine et change à chaque redémarrage de WSL ; localhost est le relais que Windows tient vers elle. Sous ce substrat, un déploiement est joignable de CETTE machine et pas du LAN : c'est du test/dev, et l'ouvrir demanderait de toucher au réseau Hyper-V du poste."
     return 0
   fi
   PROV_ADVERTISE="$(lan_addr)"
