@@ -282,3 +282,32 @@ mort_module() { # mort_module <NN-nom> <source-la-lib: 0|1>
   [ "$status" -eq 0 ]
   [[ "$output" != *"ERREUR"* ]]
 }
+
+@test "la garde de sortie ne DESCEND pas : un petit-fils qui source la lib n'est pas un module" {
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE EST CELUI QU'A CREE LA GARDE ELLE-MEME. `PROVISION_RUN` arrive
+  # par l'ENVIRONNEMENT, donc il descendait a tout ce que le module lance. `bench-up.sh` source
+  # cette lib et ne rend aucun verdict : il sortait 3 avec un « MORT avant de rendre son verdict »
+  # mensonger, apres un `exit 0` parfaitement propre.
+  #
+  # Mesure du 2026-08-18 : 12 temoins de bench_up_verdict.bats rouges pendant `mix gate`, verts
+  # joues a la main, et toute la difference tenait a ce mot dans l'environnement. Un garde pose
+  # pour rendre les echecs bruyants fabriquait des echecs a partir de succes, un etage plus bas.
+  cat > "$SANDBOX/modules.d/94-petitfils.sh" <<EOF
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+set -euo pipefail
+. "\$PROVISION_LIB"
+rc=0
+bash -c '. "\$PROVISION_LIB"; echo PETIT-FILS-OK; exit 0' || rc=\$?
+echo "PETIT-FILS-RC=\$rc"
+p_ok "le module, lui, rend bien son verdict"
+verdict_apply
+EOF
+  run "$SANDBOX/provision" apply --substrate docker
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PETIT-FILS-OK"* ]]
+  [[ "$output" == *"PETIT-FILS-RC=0"* ]]
+  [[ "$output" != *"MORT avant de rendre son verdict"* ]]
+}

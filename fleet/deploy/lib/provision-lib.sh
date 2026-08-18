@@ -175,7 +175,18 @@ _prov_exit_guard() {
     "$_PR" "$_PN" "$PROV_MODULE_TAG" "$rc" >&2
   exit 3
 }
-[[ -n "${PROVISION_RUN:-}" ]] && trap _prov_exit_guard EXIT
+if [[ -n "${PROVISION_RUN:-}" ]]; then
+  trap _prov_exit_guard EXIT
+  # ⚠ ET LE DRAPEAU EST RETIRE AUSSITOT. Il arrive par l'ENVIRONNEMENT (le runner le pose devant la
+  # commande du module), donc il DESCEND a tout ce que le module lance ensuite. Or seul le module
+  # doit rendre un verdict : `bench-up.sh` source cette lib et n'en rend aucun — il sortait donc 3
+  # avec un « MORT avant de rendre son verdict » mensonger, apres un `exit 0` parfaitement propre.
+  #
+  # Mesure du 2026-08-18 : 12 temoins de `bench_up_verdict.bats` rouges pendant `mix gate`, verts
+  # joues a la main, et la difference tenait a ce seul mot dans l'environnement. Un garde pose pour
+  # rendre les echecs bruyants transformait des succes en echecs, un etage plus bas.
+  unset PROVISION_RUN
+fi
 
 verdict_check() {
   PROV_VERDICT_RENDERED=1
