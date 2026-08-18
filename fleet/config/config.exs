@@ -19,10 +19,20 @@ if File.exists?(Path.join(__DIR__, "#{Mix.env()}.exs")) do
   import_config "#{Mix.env()}.exs"
 end
 
-# Conflict engine (tier 0 deterministic diagnosis + tier 2 gatekeeper pass). OFF by default and
-# stated HERE rather than left to a `get_env` default: a capability whose only trace is the absence
-# of a line is one an operator cannot discover, and cannot audit as deliberately off.
-# ON → `Remediation` routes trivial conflicts to auto-resolution (the jury still re-judges the
-# pushed head) and gives the gatekeeper one pass before the human. OFF → producer then arch,
-# unchanged. Seams: `:conflict_diagnoser`, `:conflict_applier`.
+# GitWand kill-switch (tier 0 ONLY: deterministic conflict diagnosis + trivial auto-resolution —
+# the jury still re-judges the pushed head). OFF by default and stated HERE rather than left to a
+# `get_env` default: a capability whose only trace is the absence of a line is one an operator
+# cannot discover, and cannot audit as deliberately off. This is an ADMIN setting: the box-wide
+# file `/etc/lcars/fleet.json` (`{"conflict_engine": true}`, root-owned, read once at boot by
+# `runtime.exs`) is how it turns on — inherited from the engine's origin project: off at install,
+# the admin opts in. Seams: `:conflict_diagnoser`, `:conflict_applier`.
+# (A1 — this flag used to ALSO gate the tier-2 chief pass: one switch, two owners. The chief pass
+# is FLEET design and lives on its own flag below; the admin's GitWand choice no longer silently
+# removes a rung of the fleet's escalation ladder.)
 config :lcars_fleet, pilot_conflict_diagnosis?: false
+
+# Chief exception pass (tier 2: ONE outsider inference pass on a conflict the producer could not
+# close, before immobilizing a human). FLEET design flag, not an admin knob. OFF until a real
+# conflict has converged end-to-end on a bench (chantier rails, lot A1: the pass existed but was
+# unreachable behind the GitWand switch, and unproven — prove, then flip).
+config :lcars_fleet, pilot_conflict_exception_pass?: false

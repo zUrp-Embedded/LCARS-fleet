@@ -410,18 +410,41 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp applier,
     do: Application.get_env(:lcars_fleet, :pilot_conflict_applier, Fleet.Pilot.ConflictApply)
 
-  # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
-  # the OUTSIDER a single inference pass before immobilizing a human (tier-3). Flag off, or that pass
-  # already spent → the legacy arch escalation, byte-for-byte unchanged.
+  # Producer conflict-rework budget exhausted → tier-2: give the OUTSIDER a single inference pass
+  # before immobilizing a human (tier-3). The gate lives INSIDE `exception_stage` (its own flag,
+  # A1) — this call site no longer decides anything.
+  #
+  # A1 — THIS READ THE GITWAND SWITCH, AND THAT WAS AN OWNERSHIP BUG: `pilot_conflict_diagnosis?`
+  # is the ADMIN's kill-switch for an engine of external origin (tier 0), while the chief pass is
+  # a rung of the FLEET's own escalation ladder. One switch, two owners — the admin's GitWand
+  # choice silently removed a rung that has nothing to do with GitWand (the pass consumes neither
+  # probe nor applier: it counts forge markers and dispatches a pod).
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
-    if diagnosis_enabled?() do
-      exception_stage(pr_number, head, reason, ctx, producer_rounds)
-    else
-      escalate_exhausted(pr_number, head, reason, ctx, producer_rounds)
-    end
+    exception_stage(pr_number, head, reason, ctx, producer_rounds)
   end
 
   defp exception_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    # Self-gated (A1): BOTH callers land here — budget exhausted, and tier-0's all-semantic
+    # shortcut — so the flag is read at ONE point. Off → the honest immediate escalation, with a
+    # reason that NAMES the disabled rung: an arch reading the freeze must be able to tell "the
+    # pass failed" from "the pass is not armed on this box".
+    if exception_pass_enabled?() do
+      do_exception_stage(pr_number, head, reason, ctx, producer_rounds)
+    else
+      escalate_exhausted(
+        pr_number,
+        head,
+        {:exception_pass_disabled, reason},
+        ctx,
+        producer_rounds
+      )
+    end
+  end
+
+  defp exception_pass_enabled?,
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_exception_pass?, false)
+
+  defp do_exception_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     marker = "[conflict-chief:pr-#{pr_number}"
     count = ctx.forge.count_comments_marked(ctx.repo, pr_number, marker, ctx.forge_opts)
 

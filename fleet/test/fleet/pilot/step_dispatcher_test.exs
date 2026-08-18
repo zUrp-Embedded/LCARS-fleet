@@ -1736,6 +1736,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "tier-0 : un conflit TOUT-SEMANTIQUE saute le producteur, et sans chief il atteint l'arch" do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      # A1 — la passe chief a SON flag : sans lui, ce test n'exercerait plus ce que sa prose
+      # affirme (le barreau tenté puis passé à l'arch) mais le chemin « pas armé ».
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_exception_pass?, true)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllSemanticProbe)
 
       # Le gain de tier-0 RACCOURCIT un chemin, il n'en casse aucun : un conflit dont rien n'est
@@ -1750,6 +1753,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
 
       # Et c'est LA le gain, pas le tuple : aucun round de producteur n'a ete brule.
+      refute_received {:spawned, _issue, _opts}
+    end
+
+    test "A1 : passe chief DESARMEE (flag off) → escalade immediate, AUCUNE tentative de dispatch" do
+      # Le kill-switch GitWand est ON (l'admin fait tourner le moteur) mais la passe chief — design
+      # FLEET, flag propre — reste off : l'all-semantique escalade directement, et le log ne porte
+      # AUCUNE trace d'un dispatch tenté. C'est la scission d'A1 : le choix admin n'éteint plus un
+      # barreau de la fleet, et le barreau désarmé se dit dans le motif, pas en silence.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_exception_pass?, false)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllSemanticProbe)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:skipped, {:merge_blocked_escalated, 6}} =
+                   StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+        end)
+
+      refute log =~ "chief exception pass NOT dispatched"
       refute_received {:spawned, _issue, _opts}
     end
 

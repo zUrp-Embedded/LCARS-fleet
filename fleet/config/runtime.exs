@@ -297,6 +297,20 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================
+  # ── Box-wide ADMIN settings (/etc/lcars/fleet.json, root-owned) ────────────────────────────────
+  # The GitWand kill-switch (tier-0 deterministic conflict resolution) is the ADMINISTRATOR's call,
+  # not the fleet's and not a human worker's: the path is HARDCODED on purpose — an env-named path
+  # would pass through the launcher's per-human env, and any worker could point it at their own
+  # file. Read once here → frozen for the fleet's lifetime (this file runs once at boot).
+  # Absent file = every default (off) — the state of every box until its admin opts in.
+  # NB: this arms tier 0 ONLY. The chief exception pass has its own flag (`config.exs`,
+  # `:pilot_conflict_exception_pass?`) — fleet design, deliberately NOT an admin knob.
+  system_settings = Fleet.SystemConfig.read("/etc/lcars/fleet.json")
+
+  if system_settings.conflict_engine do
+    config :lcars_fleet, pilot_conflict_diagnosis?: true
+  end
+
   # fleet_spawner — skills tree fine override (BL-6-22). ONLY the fine key is mapped here: the
   # DEFAULT is resolved at SPAWN time (`:catalogue` sentinel in Spawner.Pod → Fleet.Catalogue,
   # AFTER Config.Reader's batch-apply — a Catalogue call in THIS file would read the pre-runtime
