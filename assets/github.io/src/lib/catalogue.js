@@ -110,7 +110,34 @@ export function fineOverrides() {
   return [...block[1].matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]);
 }
 
-/** Ou vivent les catalogues, et ou se declare leur activite. */
+/**
+ * Ou vivent les catalogues.
+ *
+ * ⚠ IL Y AVAIT UNE TROISIEME ENTREE ICI, `active`, ET SA DISPARITION A CASSE CE BUILD — ce qui est
+ * le comportement voulu (cf. le README du site : une plaquette qui ne trouve plus ce qu'elle decrit
+ * doit echouer, pas servir la version d'avant). ⚖ user 2026-08-16 : la declaration d'activite
+ * (`~/.lcars/catalogues.active`, un nom par ligne, l'ordre faisant precedence) est MORTE avec les
+ * verbes qui l'ecrivaient. Un catalogue est INSTALLE — la forge porte son org et sa source, tout le
+ * monde est servi — ou DISPONIBLE. Il n'y a pas de troisieme etat et pas d'ordre a tenir.
+ */
+/**
+ * Les etats d'un catalogue, LUS dans la CLI qui les traduit — jamais recopies ici.
+ *
+ * `bin/lcars` porte le seul endroit ou le mot de la porte (`INSTALLED`) et le mot de l'operateur
+ * (`installe`) se rencontrent. Les lire la garde la plaquette d'accord avec ce que l'utilisateur
+ * verra a l'ecran, et fait ECHOUER ce build le jour ou un quatrieme etat apparait sans que
+ * personne ne l'ait dit ici.
+ */
+const LCARS_CLI = join(here, '..', '..', '..', '..', 'fleet', 'bin', 'lcars');
+
+export function states() {
+  const src = readFileSync(LCARS_CLI, 'utf8');
+  const out = [...src.matchAll(/^\s*([A-Z]+)\)\s+printf\s+'\s+%-16s %-11s[^']*'\s+"\$name" "([^"]+)"/gm)]
+    .map((m) => ({ door: m[1], shown: m[2] }));
+  if (out.length === 0) throw new Error('catalogue.js: aucun etat de catalogue lu dans bin/lcars');
+  return out;
+}
+
 export function paths() {
   const src = readFileSync(LAYOUT_EX, 'utf8');
   const pick = (name) => {
@@ -121,8 +148,7 @@ export function paths() {
   const dir = pick('catalogues_dirname');
   return {
     shipped: `${pick('platform_root')}/${dir}`,
-    operator: `~/.lcars/${dir}`,
-    active: `~/.lcars/${pick('active_catalogues_basename')}`
+    operator: `~/.lcars/${dir}`
   };
 }
 

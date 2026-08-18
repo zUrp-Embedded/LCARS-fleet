@@ -8,7 +8,7 @@
 // publiable — les `@moduledoc` qui le portent sont en anglais et s'adressent a un developpeur.
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
-import { trees, supportedApiVersions, bundledName, fineOverrides, paths, systemRoleCount }
+import { trees, supportedApiVersions, bundledName, fineOverrides, paths, states, systemRoleCount }
   from '../lib/catalogue.js';
 
 const T = trees();
@@ -16,6 +16,7 @@ const api = supportedApiVersions();
 const bundled = bundledName();
 const fines = fineOverrides();
 const P = paths();
+const ST = states();
 const sysRoles = systemRoleCount();
 
 // Le libelle humain d'un arbre. La GARDE est en dessous : un arbre ajoute au module sans un mot
@@ -32,6 +33,7 @@ const LABEL = {
   sp_blocks:          ['Les blocs de prompt', 'Le substrat commun. Le noyau livré se remplace par son nom.', 'green'],
   sp_templates:       ['Les gabarits de prompt', 'La forme que prend chaque prompt émis.', 'green'],
   skills:             ['Les compétences', 'Ce qu’un agent sait faire au-delà de ses outils.', 'mauve'],
+  avatars:            ['Les visages', 'Le portrait d’un siège sur la forge, nommé par le rôle — facultatif : sans lui, l’identicon.', 'dim'],
   coord_policies:     ['La politique d’escalade', 'Un fichier, pas un dossier : quand et vers qui ça remonte.', 'mauve']
 };
 
@@ -105,15 +107,15 @@ const sections = [
     <div class="stack">
       <div class="layer" style="--k:var(--amber)">
         <div class="r">1</div>
-        <div class="c"><b>catalogue actif</b>
-        <span>Le premier de la déclaration. Un fichier qu'il porte <b>remplace</b> celui du
+        <div class="c"><b>catalogue installé</b>
+        <span>Le premier des installés. Un fichier qu'il porte <b>remplace</b> celui du
         dessous.</span></div>
       </div>
       <div class="layer" style="--k:var(--amber-soft)">
         <div class="r">2</div>
-        <div class="c"><b>catalogue actif suivant</b>
-        <span>Et ainsi de suite, dans l'ordre des lignes. Un répertoire absent disparaît du
-        chemin.</span></div>
+        <div class="c"><b>catalogue installé suivant</b>
+        <span>Et ainsi de suite, dans l'ordre de déclaration. Un répertoire absent disparaît du
+        chemin — un catalogue qui ne livre que ce dont ses rôles ont besoin ne coûte rien.</span></div>
       </div>
       <div class="layer base" style="--k:var(--violet)">
         <div class="r">∞</div>
@@ -207,45 +209,38 @@ const sections = [
   </section>
 
   <section id="declaration">
-    <SectionHead id="declaration" title="La déclaration d'activité" cap="un nom par ligne, l’ordre décide" />
-    <p class="intro">Un fichier, dans l'espace de l'opérateur. <b>Des noms, pas des chemins</b> : où
-    un catalogue a été installé n'est pas à redire — c'est son vocabulaire, pas sa topographie.</p>
+    <SectionHead id="declaration" title="Installé, ou disponible" cap="l’état est un fait de forge" />
+    <p class="intro">Un catalogue est <b>installé</b> quand la forge porte son organisation et sa
+    source — et il l'est alors <b>pour tout le monde</b>, pas pour la boîte qui l'a posé. Sinon il
+    est <b>disponible</b> : quelqu'un l'a déposé, personne ne l'a installé. Il n'y a pas de
+    troisième état, pas de fichier d'activation à tenir, pas d'ordre de précédence à arbitrer.</p>
 
-    <pre class="term"><span class="m"># {P.active} — l'ordre EST la précédence</span>
-<span class="c">web</span>          <span class="m"># le mien : ses rôles et ses cartes gagnent</span>
-<span class="c">{bundled}</span>        <span class="m"># celui livré dans la release</span></pre>
+    <pre class="term"><span class="m"># lcars catalogue list — l'état vient de la forge, pas d'un fichier local</span>
+{ST.map((st) => `  ${st.shown.padEnd(12)}${st.door}`).join('\n')}</pre>
 
     <dl class="kv">
-      <dt>{P.operator}</dt><dd>les catalogues que <b>l'opérateur</b> a importés — jamais écrasés par une mise à jour</dd>
-      <dt>{P.shipped}</dt><dd>ceux qui arrivent avec l'<b>image</b></dd>
-      <dt>{P.active}</dt><dd>la déclaration : qui tourne, dans quel ordre</dd>
+      <dt>{P.shipped}</dt><dd>le matériel local — un <b>cache</b>, reconstruit depuis la forge à chaque convergence</dd>
+      <dt>{P.operator}</dt><dd>l'espace de l'opérateur</dd>
     </dl>
 
-    <div class="grid" style="margin-top:16px">
-      <div class="cell" style="--k:var(--dim)"><b>Pas de fichier, ou vide</b><i>le défaut</i>
-        <span>Le catalogue métier livré, seul. Le comportement d’une boîte qui sort de son
-        carton.</span></div>
-      <div class="cell" style="--k:var(--salmon)"><b>Un nom qui ne résout nulle part</b><i>refus</i>
-        <span>Le démarrage <b>échoue</b>. Une fleet qui sauterait la ligne en silence tournerait sur
-        un effectif que personne n’a assemblé, et refuserait le travail au premier envoi — loin de
-        la ligne qui l’a demandé.</span></div>
-    </div>
-
-    <div class="warn"><b>La cicatrice, mesurée sur un banc.</b> Pendant un temps, activer un
-    catalogue donnait ses <b>rôles</b> et les <b>cartes</b> du catalogue livré : la carte de
-    délégation venait toujours de la référence livrée, laquelle nommait un juge que le catalogue
-    actif ne porte pas. Le démarrage a refusé, bruyamment. C'est exactement le <b>décalage cohérent
-    en apparence</b> contre lequel tout ce mécanisme existe — et il a fallu le vivre pour le
-    voir.</div>
+    <div class="warn"><b>Ce que ce modèle remplace, et pourquoi.</b> Il y a eu un troisième état,
+    « actif », déclaré dans un fichier local dont l'ordre faisait la précédence. Un fait tenu à deux
+    endroits dérive : la CLI lisait le fichier pendant que le runtime appliquait « pas de
+    déclaration = le catalogue livré, seul ». Mesuré sur une boîte où tout tournait sur le catalogue
+    livré — <code>list</code> l'affichait « inactif », <code>enable</code> le faisait sortir sans un
+    mot, <code>disable</code> répondait « n'est pas actif ». Trois sens du même modèle faux. La
+    réparation n'était pas de synchroniser les deux copies : c'était d'en supprimer une.</div>
   </section>
 
   <section id="cycle">
-    <SectionHead id="cycle" title="Le cycle" cap="quatre gestes, et un cinquième qui n’est pas local" />
+    <SectionHead id="cycle" title="Le cycle" cap="un verbe, et ce qu’il pose vraiment" />
     <div class="steps">
       <div class="stp" style="--k:var(--blue)">
         <div class="v">install</div>
-        <div class="x">Depuis un dépôt git, une archive ou un dossier. <b>N'active rien</b> — un
-        catalogue installé n'est pas lu.</div>
+        <div class="x">Un seul geste, et il <b>provisionne</b> : l'organisation sur la forge, les
+        comptes de rôle, les teams, la source du catalogue dans <code>&lt;nom&gt;/catalogue</code>,
+        et le matériel posé sur la boîte. C'est un geste d'<b>admin de forge</b> — le runtime lit ce
+        fait sur la forge, jamais dans un drapeau local.</div>
       </div>
       <div class="stp" style="--k:var(--yellow)">
         <div class="v">verify</div>
@@ -253,27 +248,22 @@ const sections = [
         verdict.</div>
       </div>
       <div class="stp" style="--k:var(--green)">
-        <div class="v">enable</div>
-        <div class="x">Ajoute la ligne. <b>Refuse</b> un catalogue qui ne passe pas la vérification —
-        c'est ce refus qui rend l'étape précédente utile plutôt qu'optionnelle.</div>
+        <div class="v">list</div>
+        <div class="x">Interroge la forge et rend l'état de chacun. Sans release joignable, elle
+        <b>dit qu'elle ne sait pas</b> plutôt que de deviner depuis les dossiers présents.</div>
       </div>
       <div class="stp" style="--k:var(--amber)">
         <div class="v">restart</div>
-        <div class="x">Les images sont gelées au démarrage. <b>Rien ne bascule à chaud</b>, et
-        prétendre le contraire serait un mensonge d'exploitation.</div>
-      </div>
-      <div class="stp" style="--k:var(--salmon)">
-        <div class="v">la forge</div>
-        <div class="x"><b>Activer ne provisionne pas.</b> Le catalogue devient lu ; son org et ses
-        comptes de rôle n'existent pas pour autant. Un redémarrage sur un catalogue non provisionné
-        part chercher des jetons qui n'existent pas, et le premier envoi boucle — loin d'ici.</div>
+        <div class="x">Les images sont gelées au démarrage — rôles et prompts sont figés avant
+        qu'aucun agent ne puisse naître. <b>Rien ne bascule à chaud</b>, et prétendre le contraire
+        serait un mensonge d'exploitation.</div>
       </div>
     </div>
 
-    <p class="note">Ce dernier geste n'est pas local, et la commande ne peut pas le faire à votre
-    place : elle n'a aucun accès à la forge, et lui en donner un ferait d'un outil local un acteur
-    distant. <b>Elle le nomme</b> — c'est la différence entre un outil qui se tait et un outil qui
-    n'agit pas. <a href="/manuel/">Les commandes de la console →</a></p>
+    <p class="note">Il n'y a plus de geste « activer », et son absence est le sujet : installer un
+    catalogue le rend servi. Ce qui se décide encore, c'est le catalogue d'un <b>projet</b> — fixé
+    pour sa vie à sa création, donc demandé et jamais deviné.
+    <a href="/manuel/">Les commandes de la console →</a></p>
   </section>
 
 </Site>

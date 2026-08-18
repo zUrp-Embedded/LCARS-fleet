@@ -52,24 +52,39 @@ const LCARS = {
                    maintenir Maj pendant la sélection copie vers le presse-papier du système. Il
                    faut le même UID que le daemon — chacun attache ses propres pods, sans privilège
                    et sans cas particulier.`,
-  'lcars catalogue list': `L'ordre des lignes est la précédence. Deux catalogues peuvent porter le
-                           même nom — un livré, un apporté ; celui de l'opérateur gagne, et la
-                           liste dit lequel masque l'autre : deux lignes identiques seraient
-                           indiscernables d'un bug.`,
-  'lcars catalogue install': `Trois transports, pour qu'une boîte sans accès disque en ait toujours
-                              un sous la main. Installer n'active rien.`,
+  'lcars catalogue list': `L'état vient de la FORGE, pas des dossiers présents : « installé » veut
+                           dire que la forge porte l'organisation du catalogue et sa source. Sans
+                           release joignable, la liste dit qu'elle ne sait pas — une boîte a déjà
+                           affiché « installé » pour un catalogue dont la forge n'avait jamais
+                           porté l'org.`,
+  'lcars catalogue install': `Le seul verbe, et il provisionne : l'organisation, les comptes de
+                              rôle, les teams, la source dans « <nom>/catalogue », le matériel sur
+                              la boîte. Geste d'admin de forge — le runtime lit ce droit sur la
+                              forge, jamais dans un drapeau local.`,
   'lcars catalogue verify': `Sans lui, un catalogue cassé se découvre au redémarrage suivant, par
                              quelqu'un qui ne fera pas le lien.`,
-  'lcars catalogue enable': `Activer refuse un catalogue qui ne passe pas la vérification — c'est
-                             ce refus qui rend l'étape précédente utile plutôt qu'optionnelle. Et
-                             activer ne provisionne pas la forge : le catalogue devient lu, son org
-                             et ses comptes de rôle n'existent pas pour autant. La commande nomme
-                             le geste qui reste.`,
-  'lcars catalogue remove': `Les catalogues livrés avec l'image ne se suppriment pas : ils
-                             reviendraient à la prochaine mise à jour.`,
   'lcars project migrate': `Les deux moitiés, ou rien. Un transfert seul laisserait un projet qui
                             marche par accident, par la redirection que la forge laisse derrière
                             elle — jusqu'au jour où elle disparaît.`,
+  'lcars project reconcile': `La forge dit quels projets existent, le disque suit. Sur un /home neuf
+                              — boîte réinstallée, second humain sur une fleet déjà peuplée — les
+                              faces locales n'existent pas alors que les projets, eux, sont
+                              intacts. Un projet en échec n'arrête pas les autres.`,
+  'lcars forge add': `Une forge de publication = une forge, un compte, un dépôt. L'auth n'est PAS
+                      stockée ici : c'est le CLI officiel (« gh auth login », « glab auth login »),
+                      déjà credential helper de git. Aucun jeton ne transite par LCARS.`,
+  'lcars forge list': `Le pool de CET humain, sous son propre espace. Chacun le sien : publier est
+                       un geste signé, pas une capacité de la boîte.`,
+  'lcars forge status': `Le doctor du pool : chaque forge déclarée, et si son CLI est authentifié.
+                         Une forge listée dont personne n'est connecté est exactement ce qu'on
+                         découvre au moment de publier, sinon.`,
+  'lcars approve': `Le gate manuel DUR de la publication, et il est manuel par décision : rien ne
+                    sort de chez vous sans qu'une personne l'ait tapé. L'attribution est réécrite
+                    (l'auteur est l'humain) avant tout push. Sans « --forge », c'est un envoi direct
+                    sur la base déjà liée, refusé si elle n'est pas un ancêtre de ce qu'on pousse.`,
+  'lcars publish status': `Le doctor du pool de publication : chaque forge déclarée, et si son CLI
+                           officiel est authentifié. L'auth n'est jamais stockée ici — c'est « gh
+                           auth login » ou « glab auth login », déjà credential helper de git.`,
   'lcars help': null
 };
 
