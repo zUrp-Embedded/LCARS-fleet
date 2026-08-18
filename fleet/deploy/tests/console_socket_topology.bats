@@ -49,8 +49,19 @@ if [[ "\$(cat "$TTYD_MAKES_SOCK")" == "1" ]]; then
   # script's \`-S\` guard pass on something that is not a socket, i.e. test the wrong property.
   sock=""; prev=""
   for a in "\$@"; do [[ "\$prev" == "-i" ]] && sock="\$a"; prev="\$a"; done
-  [[ -n "\$sock" ]] && python3 -c 'import socket,sys
-s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "\$sock"
+  # BIND *ET* LISTEN, comme le vrai ttyd. Un `bind` seul cree bien un fichier de socket, mais toute
+  # connexion dessus est REFUSEE — et c'est exactement ce que la sonde d'idempotence mesure. Une
+  # doublure qui ne fait que binder rendrait « morte » une console que le vrai ttyd sert.
+  # BIND *ET* LISTEN, comme le vrai ttyd. Un `bind` seul cree bien un fichier de socket, mais toute
+  # connexion dessus est REFUSEE — et c'est exactement ce que la sonde d'idempotence mesure. Une
+  # doublure qui ne fait que binder rendrait « morte » une console que le vrai ttyd sert. Le
+  # `setsid` + les redirections detachent l'ecouteur du tuyau de bats, qui attendrait sinon sa fin.
+  if [[ -n "\$sock" ]]; then
+    setsid python3 -c 'import socket,sys,time
+s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(8); time.sleep(6)' "\$sock" \
+      </dev/null >/dev/null 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -S "\$sock" ]] && break; sleep 0.1; done
+  fi
 fi
 sleep 5
 EOF
@@ -357,4 +368,42 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   [[ "$output" == *"zoe"* ]]
   [[ "$output" != *"gone"* ]]
   [[ "$output" != *"svc"* ]]
+}
+
+# ─── l'idempotence, qui etait DECLAREE ailleurs et n'existait pas ─────────────────────────────────
+
+@test "rejoue sur une console VIVANTE : aucun ttyd de plus, la socket n'est pas touchee" {
+  # LE DEFAUT MESURE (2026-08-18). `human-converger.sh` appelle `console.sh --human` PAR HUMAIN ET
+  # PAR TOUR (30 s), sous un commentaire qui affirmait que ce script « sonde la socket avant de
+  # lancer quoi que ce soit ». Il ne sondait rien : `rm -f` puis relance. Resultat sur un banc de
+  # trente minutes : **64 ttyd par humain**, empiles sur la meme socket, celle-ci effacee et
+  # re-posee sous le navigateur a chaque tour. L'operateur voyait « la console du nouvel humain ne
+  # demarre pas » — elle demarrait, et la suivante la remplacait.
+  run_console
+  [ "$status" -eq 0 ]
+  local avant; avant="$(grep -c '^ttyd ' "$CALLS")"
+  local inode; inode="$(stat -c '%i' "$LCARS_CONSOLE_SOCK_ROOT/bt/console.sock")"
+
+  run_console
+  [ "$status" -eq 0 ]
+
+  # Pas un ttyd de plus : ni pour la console, ni pour les pods.
+  [ "$(grep -c '^ttyd ' "$CALLS")" -eq "$avant" ]
+  # ET LA SOCKET EST LA MEME — un `rm -f` suivi d'un re-bind rendrait le meme CHEMIN avec un autre
+  # inode, ce qui coupe tout navigateur deja connecte. Le compte de processus seul ne le verrait pas.
+  [ "$(stat -c '%i' "$LCARS_CONSOLE_SOCK_ROOT/bt/console.sock")" = "$inode" ]
+}
+
+@test "une socket RESIDUELLE (fichier sans serveur) est bien remplacee" {
+  # L'autre moitie, et sans elle la garde ci-dessus serait un blocage permanent : un fichier de
+  # socket survit a son processus. `[[ -S ]]` ne distingue pas les deux etats — seule une connexion
+  # le fait, et c'est ce que le deck fera.
+  mkdir -p "$LCARS_CONSOLE_SOCK_ROOT/bt"
+  python3 -c 'import socket,sys
+s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/bt/console.sock"
+  [ -S "$LCARS_CONSOLE_SOCK_ROOT/bt/console.sock" ]
+
+  run_console
+  [ "$status" -eq 0 ]
+  [ -n "$(ttyd_line console.sock)" ]
 }

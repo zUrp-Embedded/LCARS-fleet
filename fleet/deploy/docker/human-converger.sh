@@ -362,9 +362,17 @@ forge_is_admin() { # forge_is_admin <login>
 # que sur une boite VIVANTE, entre deux boots — c'est-a-dire exactement quand un admin enrole
 # quelqu'un.
 #
-# `console.sh --human` est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce soit, et une
-# console vivante lui coute une sonde. C'est ce qui permet de l'appeler a chaque tour plutot que de
-# tenir un etat « je l'ai deja fait » — un etat de plus qui pourrait mentir.
+# ⚠ CETTE LIGNE AFFIRMAIT UNE PROPRIETE D'UN AUTRE FICHIER, ET ELLE ETAIT FAUSSE. Elle disait
+# « console.sh --human est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce soit ». Il ne
+# sondait rien : il faisait `rm -f` sur la socket et relancait un ttyd. Appele par humain et par
+# tour (30 s) depuis cette fonction, ca empile — mesure du 2026-08-18, **64 ttyd par humain** sur un
+# banc de trente minutes, la socket effacee et re-posee sous le navigateur a chaque tour. Ce que
+# l'operateur voyait : « la console du nouvel humain ne demarre pas ».
+#
+# L'idempotence EXISTE maintenant, et elle est mesuree la ou elle vit (`console_alive`, dans
+# `console.sh`) : une connexion reelle sur la socket, ce que le deck fera. Cette ligne n'affirme
+# donc plus rien sur le voisin — elle dit ce que CE fichier fait : appeler a chaque tour, et
+# accepter que le geste soit sans effet quand il n'y a rien a faire.
 ensure_console() { # ensure_console <login>
   [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]] || return 0
   "$CONSOLE" --human "$1" >/dev/null 2>&1 \

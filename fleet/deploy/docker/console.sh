@@ -89,6 +89,36 @@ command -v ttyd >/dev/null || { echo "console.sh: ttyd absent de l'image" >&2; e
 CONSOLE_SOCK_ROOT="${LCARS_CONSOLE_SOCK_ROOT:-/run/lcars/console}"
 CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
 
+# ─── UNE CONSOLE VIVANTE SE MESURE EN S'Y CONNECTANT ────────────────────────────────────────────
+#
+# ⚠ CE SCRIPT ETAIT DECLARE IDEMPOTENT AILLEURS, ET IL NE L'ETAIT PAS. `human-converger.sh` porte
+# depuis le 2026-08-17 un `ensure_console` PAR HUMAIN ET PAR TOUR (30 s), sous un commentaire qui
+# affirmait « console.sh --human est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce
+# soit ». Il ne sondait rien : il faisait `rm -f` sur la socket puis relancait un ttyd.
+#
+# Mesure du 2026-08-18 sur un banc de 30 minutes : **64 ttyd par humain**, empiles sur la meme
+# socket, celle-ci effacee et re-posee sous le navigateur a chaque tour. C'est le defaut que
+# l'operateur voyait comme « la console du nouvel humain ne demarre pas » — elle demarrait, et la
+# suivante la remplacait. Un redemarrage du conteneur « reparait » en vidant la pile, jusqu'au tour
+# suivant.
+#
+# La sonde MESURE ce que le deck fera : elle ouvre la socket. Un fichier residuel sans serveur
+# derriere refuse la connexion — c'est exactement la difference entre « injoignable » et
+# « vivante », et `[[ -S ]]` ne la voit pas.
+console_alive() { # <socket> — 0 si un serveur repond dessus
+  local sock="$1"
+  [[ -S "$sock" ]] || return 1
+  python3 - "$sock" <<'PROBE' 2>/dev/null
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(2)
+try:
+    s.connect(sys.argv[1])
+finally:
+    s.close()
+PROBE
+}
+
 # Rend le repertoire de socket de l'humain, cree et garde. Echoue FORT : une socket qui sort dans le
 # mauvais groupe est injoignable par le deck, et la console serait morte sans que rien ne le dise.
 sock_dir_for() {
@@ -176,9 +206,17 @@ launch_one() {
   sock_dir="$(sock_dir_for "$human")" || return 1
   sock="$sock_dir/console.sock"
 
+  # RIEN A FAIRE SI ELLE REPOND DEJA. C'est ce qui rend ce script rejouable a chaque tour du
+  # convergeur sans empiler un ttyd de plus — cf. `console_alive` en tete pour la mesure de 64.
+  if console_alive "$sock"; then
+    launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir"
+    return 0
+  fi
+
   # UNE SOCKET RESIDUELLE EMPECHE LE BIND, et le mode d'echec est muet : ttyd meurt a peine lance,
   # exactement comme sur un port deja pris. La difference avec un port, c'est qu'un fichier SURVIT
   # au processus — donc ce nettoyage n'est pas une precaution, c'est la condition d'un redemarrage.
+  # On n'arrive ici QUE si personne ne repond : le fichier est un residu, pas un service.
   rm -f "$sock"
 
   # `-H` : ttyd REFUSE (407) toute requete sans cet en-tete. C'est une garde en profondeur derriere
@@ -244,6 +282,11 @@ launch_pod_console() {
   local sock="$sock_dir/pod.sock"
 
   [[ -x "$pod_sh" ]] || { say "consoles de pod indisponibles pour $human ($pod_sh absent)"; return 0; }
+
+  # Sa propre sonde, parce que c'est sa propre socket : la console d'un humain peut vivre pendant
+  # que celle de ses pods est morte. Une garde partagee avec l'appelant laisserait ce cas sans
+  # reparation, et c'est le cas qui se voit le moins.
+  console_alive "$sock" && return 0
 
   rm -f "$sock"
 
