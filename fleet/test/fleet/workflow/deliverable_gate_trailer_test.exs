@@ -110,7 +110,10 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
     # base repo, a "main" that advances with a FOREIGN commit (system-authored, other-role trailer),
     # a feature branch, then the conflict resolved by MERGING main into feature (the rail's shape).
     base = init_repo(dir)
-    {main0, 0} = System.cmd("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"], stderr_to_stdout: true)
+
+    {main0, 0} =
+      System.cmd("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"], stderr_to_stdout: true)
+
     main = String.trim(main0)
     git!(dir, ["checkout", "-q", "-b", "feature"])
     File.write!(Path.join(dir, "f.txt"), "feat")

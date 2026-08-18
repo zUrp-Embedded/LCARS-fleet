@@ -340,6 +340,7 @@ defmodule Fleet.SPBuilderTest do
       refute evidence =~ "Prouver ce que tu livres"
 
       assert producer_output =~ "Prouver ce que tu livres"
+
       # WHERE to look — the exact heading the extraction carries over, not a vague "the repo doc".
       assert producer_output =~ "## Test"
       # And the clause that makes a missing runner visible rather than silently assumed.

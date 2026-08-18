@@ -122,29 +122,52 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
   end
 
-  defp seal_with_method(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, method, signer) do
+  defp seal_with_method(
+         forge,
+         repo,
+         pr_number,
+         issue_n,
+         producer,
+         forge_opts,
+         opts,
+         gk_opts,
+         method,
+         signer
+       ) do
     # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
-        # (a zero-judge card still passes here: the mechanical floor is not the card's to
-        # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
-        # statement passes LOUD (emission is best-effort, DR-010 — absence is recorded,
-        # incoherence blocks). The wall is deterministic (git+JSON, no LLM) — the one
-        # check a confabulating jury consensus cannot cross.
-        case verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
-          {:error, {:provenance_incoherent, reason}} ->
-            {:error, {:provenance_incoherent, reason}}
+    # (a zero-judge card still passes here: the mechanical floor is not the card's to
+    # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
+    # statement passes LOUD (emission is best-effort, DR-010 — absence is recorded,
+    # incoherence blocks). The wall is deterministic (git+JSON, no LLM) — the one
+    # check a confabulating jury consensus cannot cross.
+    case verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
+      {:error, {:provenance_incoherent, reason}} ->
+        {:error, {:provenance_incoherent, reason}}
 
-          # ⚠ IL N'Y A PAS DE CLAUSE `:provenance_stale` ICI, ET C'EST LE RESULTAT DU FIX (BL-6-43).
-          # Elle a existe une heure : une preuve gravee pour un sha, puis une tete qui bouge, et le
-          # sceau cherchait un nom de fichier que personne n'avait ecrit. Depuis que l'attestation
-          # vit sur `refs/lcars/provenance/<sha>` et voyage dans le meme `git push` que la brique,
-          # « perimee » n'est plus un etat atteignable — le dialyzer l'a dit avant moi, en refusant
-          # la clause comme inatteignable. Un cas qui cesse d'exister ne se detecte plus.
+      # ⚠ IL N'Y A PAS DE CLAUSE `:provenance_stale` ICI, ET C'EST LE RESULTAT DU FIX (BL-6-43).
+      # Elle a existe une heure : une preuve gravee pour un sha, puis une tete qui bouge, et le
+      # sceau cherchait un nom de fichier que personne n'avait ecrit. Depuis que l'attestation
+      # vit sur `refs/lcars/provenance/<sha>` et voyage dans le meme `git push` que la brique,
+      # « perimee » n'est plus un etat atteignable — le dialyzer l'a dit avant moi, en refusant
+      # la clause comme inatteignable. Un cas qui cesse d'exister ne se detecte plus.
 
-          wall ->
-            # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
-            # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
-            # `note_wall_not_run/5`.
-            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method, signer)
+      wall ->
+        # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
+        # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
+        # `note_wall_not_run/5`.
+        do_seal(
+          forge,
+          repo,
+          pr_number,
+          issue_n,
+          producer,
+          forge_opts,
+          opts,
+          gk_opts,
+          wall,
+          method,
+          signer
+        )
     end
   end
 
@@ -170,7 +193,19 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     )
   end
 
-  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method, signer) do
+  defp do_seal(
+         forge,
+         repo,
+         pr_number,
+         issue_n,
+         producer,
+         forge_opts,
+         opts,
+         gk_opts,
+         wall,
+         method,
+         signer
+       ) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
@@ -186,7 +221,9 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
     # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
-    body = promote_comment(issue_n, pr_number, producer, approvers, wall, method, signer) <> "\n\n" <> signature
+    body =
+      promote_comment(issue_n, pr_number, producer, approvers, wall, method, signer) <>
+        "\n\n" <> signature
 
     # `dedup_any_author`: the comment is signed by the SEAL's signer (gatekeeper — or chief on a
     # resolved conflict, A2; a role account either way, never the system bot) → the dedup

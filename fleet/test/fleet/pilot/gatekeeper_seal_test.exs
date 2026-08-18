@@ -508,6 +508,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule SignalDownForge do
     @moduledoc "The conflict signal cannot be read — the seal must REFUSE, before any write."
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:error, {:http, 500, "boom"}}
+
     def merge_pr(repo, pr, opts) do
       send(self(), {:merge, repo, pr, opts})
       :ok
@@ -521,7 +522,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   describe "A0 — the conflict signal picks the merge method" do
     test "no marker → method \"rebase\" (the historic behavior, byte-for-byte)" do
-      assert :ok = GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", [], base_branch: "main")
+      assert :ok =
+               GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
       assert_received {:merge, "fleet/p", 7, opts}
       assert Keyword.get(opts, :method) == "rebase"
     end
@@ -567,7 +572,13 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:conflict_signal_unreadable, _}} =
-                   GatekeeperSeal.seal_and_merge(SignalDownForge, "fleet/p", 7, 42, "engineer", [],
+                   GatekeeperSeal.seal_and_merge(
+                     SignalDownForge,
+                     "fleet/p",
+                     7,
+                     42,
+                     "engineer",
+                     [],
                      base_branch: "main"
                    )
         end)

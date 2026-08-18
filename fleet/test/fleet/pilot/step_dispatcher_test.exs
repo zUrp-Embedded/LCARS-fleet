@@ -1800,6 +1800,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
+
       # The loss is FORCED: a tokens dir carrying ONLY the gatekeeper's token — the seal can still
       # sign the (clean-signal) merge attempt, but the CHIEF identity is unresolvable, so the
       # report (and its marker, tier 0's only mark) cannot be posted. (The fixture dir now carries
