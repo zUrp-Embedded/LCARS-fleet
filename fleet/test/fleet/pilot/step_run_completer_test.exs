@@ -667,6 +667,143 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
     end
 
+    # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings_v1` rides the
+    # step_run as `:review_findings` and lands as `verdicts/issue-<n>-<role>.json`, committed in
+    # the ops worktree next to the prose pin. Best-effort like the provenance triplet: every
+    # degradation below posts the review anyway and RECORDS the absence loud.
+    @tag :tmp_dir
+    test "review_findings → verdicts/issue-42-qualifier.json engraved (committed), review posted",
+         %{tmp_dir: tmp} do
+      # the project's ops face: project_name("fleet/proj") = "proj", a real git repo.
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      findings = %{
+        "findings" => [%{"severity" => "minor", "description" => "naming"}],
+        "score" => 9
+      }
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: findings
+      }
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(step_run,
+                 forge_client: PrForge,
+                 forge_opts: [],
+                 ops_root: tmp
+               )
+
+      assert_received {:review, 7, :approve, _body}
+
+      # The object on disk IS the validated payload — nothing wrapped, nothing fabricated: the
+      # path carries (issue, role), git carries the identity, the file carries the judge's words.
+      path = Path.join(work_dir, "verdicts/issue-42-qualifier.json")
+      assert File.exists?(path)
+      assert path |> File.read!() |> Jason.decode!() == findings
+
+      # committed, not just written: an uncommitted machine verdict has no citable identity.
+      {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
+      assert log =~ "verdict: verdicts/issue-42-qualifier.json"
+    end
+
+    @tag :tmp_dir
+    test "no ops face → NO machine file, review posts, the absence is RECORDED loud", %{
+      tmp_dir: tmp
+    } do
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: %{"findings" => []}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      assert_received {:review, 7, :approve, _body}
+      # Same doctrine as the provenance {:work_dir_missing, _}: the missing record says so.
+      assert log =~ "findings_v1 NOT engraved"
+      refute File.exists?(Path.join([tmp, "proj", "verdicts"]))
+    end
+
+    @tag :tmp_dir
+    test "engrave failure (ops write refused) → loud warning, review UNHARMED", %{tmp_dir: tmp} do
+      # A `verdicts` regular FILE where the subdir must go: OpsObject's mkdir_p returns
+      # {:error, _} — a clean commit failure, no raise, exercising the degraded branch.
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      File.write!(Path.join(work_dir, "verdicts"), "not a directory")
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: %{"findings" => []}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      assert_received {:review, 7, :approve, _body}
+      assert log =~ "findings_v1 NOT engraved"
+    end
+
+    @tag :tmp_dir
+    test "no review_findings → no machine file and NO noise (the legacy judge is nominal)", %{
+      tmp_dir: tmp
+    } do
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      refute File.exists?(Path.join(work_dir, "verdicts/issue-42-qualifier.json"))
+      refute log =~ "findings_v1"
+    end
+
     test "record_review propagates the forge error" do
       step_run = %{
         repo: "fleet/proj",

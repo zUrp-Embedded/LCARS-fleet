@@ -422,6 +422,22 @@ defmodule Fleet.Layout do
       )
 
   @doc """
+  ops-relative ref of a committed MACHINE verdict (`details.findings_v1`): `verdicts/issue-<n>-<role>.json`.
+
+  Same tree and same basename as `verdict_ref/2`, deliberately — the extension is the only
+  difference: prose and machine are two RENDERINGS of the same act (this judge, this delivery),
+  so they sit side by side under the same key instead of opening a fourth tree. The nature-based
+  split (`verdicts/` vs `gate-verdicts/` vs `conflicts/`) separates ACTS, not formats.
+  """
+  @spec verdict_findings_ref(integer(), String.t()) :: String.t()
+  def verdict_findings_ref(issue_number, role) when is_integer(issue_number) and is_binary(role),
+    do:
+      Path.join(
+        @verdicts_subdir,
+        "issue-#{issue_number}-#{sanitize_artifact_name(role)}.json"
+      )
+
+  @doc """
   Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
 
   `/u` is LOAD-BEARING. Without it the regex works on BYTES, so one accented character — two bytes

@@ -365,6 +365,30 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "git_ops_denied"
     end
 
+    # C1 2026-08-18 — the machine key is a CONSIGNE, not a guessed convention: the block that
+    # defines a judge's output NAMES `details.findings_v1` and its shape. Same resolver as the
+    # composer (`Catalogue.find`), same reason as the D1 test above: a hardcoded path here would
+    # measure a file the fleet does not read.
+    test "the judge is told the machine key and its shape (details.findings_v1)" do
+      judge_verdict =
+        Fleet.Catalogue.find(
+          Fleet.Catalogue.root(),
+          Fleet.Catalogue.rel(:sp_blocks),
+          "core/judge-verdict.md"
+        )
+        |> File.read!()
+
+      assert judge_verdict =~ "details.findings_v1"
+      # The TWO reconciled production vocabularies, named — never a third (spec-reviewer's
+      # severity/category/verdict triples + the moon-shot 0-10 mechanical score).
+      assert judge_verdict =~ "critical|important|minor"
+      assert judge_verdict =~ "missing|extra|divergent"
+      assert judge_verdict =~ "proven|partial|fail"
+      assert judge_verdict =~ "0-10"
+      # And the failure direction the rail implements, told to the judge in its own words.
+      assert judge_verdict =~ "ne casse PAS ton verdict"
+    end
+
     test "returns :repo_claude_md_unreadable when path absent" do
       assert {:error, {:repo_claude_md_unreadable, _path, _reason}} =
                Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), "/tmp/__no_such_file")
