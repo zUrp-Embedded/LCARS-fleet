@@ -370,10 +370,16 @@ printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec
 # n'y a plus rien a faire survivre. Le dossier partage, la copie de la recette et le `--tofu-dir`
 # sont partis avec le defaut qui les avait fait naitre.
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
+# ⚠ LE CODE DU SOUS-SCRIPT EST RENDU, PAS REMPLACE PAR 4. `bench-forge-bootstrap.sh` distingue
+# SEPT sorties (2 la forge muette · 3 admiral/token · 4 la structure · 5 le seed · 6 le verdict ·
+# 7 le semis) et ce site les ecrasait toutes sous « amorcage passe 1 en echec 4 » — un chiffre qui
+# nomme la passe et pas la cause. Mesure du 2026-08-18 : deux diagnostics a l'aveugle sur cette
+# ligne exacte, sur une machine distante, ou relire le sous-script coute un aller-retour.
+BOOT_RC=0
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_LOCAL_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
-  || die "amorcage passe 1 en echec" 4
+    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
+[[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 1 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
 # ─── 5. relance de la boite : 50-forge minte les role-tokens sur le seed (piege 2) ───────────────
 say "relance de la boite pour que 50-forge minte les role-tokens"
@@ -404,10 +410,11 @@ fi
 
 # ─── 6. amorcage passe 2 : le semis ──────────────────────────────────────────────────────────────
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
+BOOT_RC=0
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     --forge-url "$FORGE_LOCAL_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
-    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
-  || die "amorcage passe 2 en echec" 4
+    ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
+[[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 2 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
 # ─── 7. verdict MESURE ───────────────────────────────────────────────────────────────────────────
 SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat /home/private/system.gitea_token 2>/dev/null | tr -d '[:space:]' || true)"
