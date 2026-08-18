@@ -143,13 +143,21 @@ fi
 # (`package:tmux — installed`). Un `mix gate` n'a pas d'objets à égrener : il lui faut donc ce que
 # la v1 n'avait pas besoin d'avoir — dire ce qui commence, avant de dire comment ça s'est terminé.
 # Les six colonnes de l'étiquette sont tenues en ASCII pur, pour la même raison que les autres.
-p_step() { printf '%s>>%s    %s: %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$*"; }
-p_ok()   { printf '%sOK%s    %s: %s\n' "$_PG" "$_PN" "$PROV_MODULE_TAG" "$*"; }
-p_chg()  { printf '%sPOSÉ%s  %s: %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$*"; }
-p_drift(){ printf '%sDRIFT%s %s: %s\n' "$_PA" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
-p_warn() { printf '%sWARN%s  %s: %s\n' "$_PA" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; }
-p_fail() { printf '%sFAIL%s  %s: %s\n' "$_PR" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
-p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL%s %s: %s\n' "$_PR" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
+# ⚠ LA TEINTE ENVELOPPE TOUT LE PREFIXE « ETIQUETTE  module: », JAMAIS SON INTERIEUR.
+# Une sequence ANSI glissee entre l'etiquette et le nom du module COUPE le jeton : la sortie devient
+# « <ESC>ERREUR<ESC> 90-mort » et la chaine litterale « ERREUR 90-mort » n'y est plus. Mesure du
+# 2026-08-18 : plusieurs temoins cherchent exactement ce bloc (`"OK    engineer"`, `"FAIL  engineer"`,
+# `"DRIFT 60-deploy: bin/"`, `"ERREUR 90-mort"`) et sont passes au rouge le jour ou la couleur a ete
+# allumee — et seulement ce jour-la, donc sur la machine de quelqu'un d'autre.
+# Le remplissage reste A L'INTERIEUR de la teinte : des espaces restent des espaces, l'alignement ne
+# bouge pas, et il n'y a plus aucun endroit ou un motif puisse etre coupe en deux.
+p_step() { printf '%s>>    %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
+p_ok()   { printf '%sOK    %s:%s %s\n' "$_PG" "$PROV_MODULE_TAG" "$_PN" "$*"; }
+p_chg()  { printf '%sPOSÉ  %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
+p_drift(){ printf '%sDRIFT %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
+p_warn() { printf '%sWARN  %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; }
+p_fail() { printf '%sFAIL  %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
+p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; exit 1; }
 
 # Sortie standard d'un module : à appeler en FIN de check() et d'apply().
 # check  : exit 0 conforme · 1 drift constaté · (2 réservé erreur de sonde, via p_die)
@@ -171,8 +179,8 @@ PROV_VERDICT_RENDERED=0
 _prov_exit_guard() {
   local rc=$?
   [[ "$PROV_VERDICT_RENDERED" -eq 1 ]] && return 0
-  printf '%sERREUR%s %s: MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
-    "$_PR" "$_PN" "$PROV_MODULE_TAG" "$rc" >&2
+  printf '%sERREUR %s:%s MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
+    "$_PR" "$PROV_MODULE_TAG" "$_PN" "$rc" >&2
   exit 3
 }
 if [[ -n "${PROVISION_RUN:-}" ]]; then

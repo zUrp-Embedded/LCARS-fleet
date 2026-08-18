@@ -30,6 +30,12 @@
 # de facon que l'uid courant soit un humain de fleet, quel qu'il soit. Les deux temoins de la garde
 # les re-posent a l'envers pour eux-memes : c'est la seule facon d'epingler les DEUX reponses.
 setup() {
+  # ⚠ L'ENVIRONNEMENT DE LA MACHINE N'A PAS SON MOT A DIRE ICI. Ces temoins mesurent une ABSENCE de
+  # forge ; si la variable existe deja dans l'environnement, ils mesurent la machine et passent au
+  # rouge sans que rien ne soit casse. Mesure du 2026-08-18 : `provision --env` exporte
+  # `FORGE_BASE_URL` (set -a) pour tout le run, gate compris — quatre temoins rouges sur une
+  # installation parfaitement saine, et verts joues a la main.
+  unset FORGE_BASE_URL FORGE_PUBLIC_URL FORGE_TOKEN_FILE FORGE_ADMIN_TOKEN
   MOD="$BATS_TEST_DIRNAME/../modules.d/75-projects.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   [ -x "$MOD" ]

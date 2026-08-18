@@ -13,6 +13,12 @@
 # is controlled; gh/glab are stubbed. The real create/link/push are operator-exercised.
 
 setup() {
+  # ⚠ L'ENVIRONNEMENT DE LA MACHINE N'A PAS SON MOT A DIRE ICI. Ces temoins mesurent une ABSENCE de
+  # forge ; si la variable existe deja dans l'environnement, ils mesurent la machine et passent au
+  # rouge sans que rien ne soit casse. Mesure du 2026-08-18 : `provision --env` exporte
+  # `FORGE_BASE_URL` (set -a) pour tout le run, gate compris — quatre temoins rouges sur une
+  # installation parfaitement saine, et verts joues a la main.
+  unset FORGE_BASE_URL FORGE_PUBLIC_URL FORGE_TOKEN_FILE FORGE_ADMIN_TOKEN
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/lcars"
   TMP="$(mktemp -d)"
   export HOME="$TMP"                       # -> ~/.lcars resolves under TMP

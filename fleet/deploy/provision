@@ -281,7 +281,7 @@ for i in "${!SELECTED[@]}"; do
       # module ni la raison, et le lecteur n'avait aucun bout par ou tirer. Mesure du 2026-08-18 :
       # 70-human, tue par `pipefail` sur un `fleet_v2.env` absent, trois lignes DRIFT justes puis
       # plus rien.
-      echo "ERREUR $name: sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
+      echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     # 2 = « appliqué, drift résiduel » : le module a fait ce qu'il pouvait et l'état-cible n'est
     # PAS tenu. Ce n'est pas un échec (rien n'est cassé) et surtout pas un OK — c'est le troisième
@@ -291,7 +291,7 @@ for i in "${!SELECTED[@]}"; do
     apply:apply:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
       # Meme raison qu'au doctor : un apply qui meurt avant son verdict ne dit rien de lui-meme.
-      echo "ERREUR $name: apply en echec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
+      echo "${_PR}ERREUR $name:${_PN} apply en echec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
       # État-cible absent ET inapplicable ici : rien sur CE substrat ne peut le converger — le
@@ -309,9 +309,19 @@ else
   echo "${_PC}=== provision $CMD — substrat $SUBSTRATE ===${_PN}"
   # UN COMPTEUR N'EST TEINTÉ QUE S'IL PORTE QUELQUE CHOSE. Un « échecs: 0 » en rouge apprend au
   # lecteur à ignorer le rouge, et le jour où il vaut 3 il ne le voit plus.
-  _tint() { if [[ "$2" -gt 0 ]]; then printf '%s%s%s' "$1" "$2" "$_PN"; else printf '%s' "$2"; fi; }
-  printf '  modules: %d · conformes/convergés: %s · drift: %s · échecs: %s\n' \
-    "$total" "$(_tint "$_PG" "$ok")" "$(_tint "$_PA" "$drift")" "$(_tint "$_PR" "$failed")"
+  #
+  # ⚠ LA TEINTE ENGLOBE « libellé: valeur », JAMAIS LA VALEUR SEULE. Une séquence ANSI glissée entre
+  # les deux COUPE le jeton : la sortie devient « drift: <ESC>1<ESC> » et la chaîne littérale
+  # « drift: 1 » n'y est plus. Mesuré le 2026-08-18 — deux témoins du runner, qui cherchent
+  # exactement cette chaîne, sont passés au rouge dès que la couleur a été allumée, et seulement
+  # alors. Même règle que pour les étiquettes : on ne teinte jamais l'intérieur d'un motif.
+  _tint() { # _tint <couleur> <libellé> <valeur>
+    if [[ "$3" -gt 0 ]]; then printf '%s%s: %s%s' "$1" "$2" "$3" "$_PN"; else printf '%s: %s' "$2" "$3"; fi
+  }
+  printf '  modules: %d · %s · %s · %s\n' "$total" \
+    "$(_tint "$_PG" "conformes/convergés" "$ok")" \
+    "$(_tint "$_PA" "drift" "$drift")" \
+    "$(_tint "$_PR" "échecs" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
   fi
