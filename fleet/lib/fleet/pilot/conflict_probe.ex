@@ -76,13 +76,24 @@ defmodule Fleet.Pilot.ConflictProbe do
   def probe(_repo, feature_ref, opts) do
     base_branch = Keyword.fetch!(opts, :base_branch)
     dir = Keyword.fetch!(opts, :dir)
+    auth = Keyword.get(opts, :auth, true)
     probe_ref = "refs/lcars/conflict-probe/" <> sanitize(feature_ref)
 
     if File.dir?(Path.join(dir, ".git")) do
+      # TWO fetches, and the FIRST one is the fix for a measured lie. The probe used to fetch ONLY
+      # the feature ref and judge the merge against whatever `origin/<base>` this clone last saw.
+      # On the bench (probe-rails PR#30): a sister brick landed on main AFTER the clone's last
+      # fetch — the forge said CONFLICT, the probe merged clean against yesterday's base (0 hunks),
+      # and tier 0 silently degraded to a producer round. Same input-skew disease ConflictApply's
+      # diff3 note documents: the diagnosis and the write must read the SAME inputs — and apply
+      # already runs a full `fetch origin` before writing. Two commands, not one refspec list: an
+      # explicit refspec on `git fetch` REPLACES the default refspec, so a single call would update
+      # the probe ref and once again skip `origin/<base>`.
       result =
-        with :ok <-
+        with :ok <- GitOps.run(["-C", dir, "fetch", "origin"], auth: auth),
+             :ok <-
                GitOps.run(["-C", dir, "fetch", "origin", "+#{feature_ref}:#{probe_ref}"],
-                 auth: true
+                 auth: auth
                ),
              {:ok, base} <- GitOps.read(["-C", dir, "merge-base", base_branch, probe_ref]) do
           diagnose_refs(dir, base, base_branch, probe_ref)

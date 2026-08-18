@@ -216,10 +216,34 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
     case diagnoser().probe(ctx.repo, head, conflict_face_opts(ctx)) do
+      # TRIPWIRE — the two readers disagree. We are on this path because the FORGE reported a
+      # conflict; a probe that merges clean (0 hunks) is contradicting it, and that contradiction
+      # has a known face: the probe reading a stale base (measured on the bench, PR#30, fixed in
+      # ConflictProbe by the full fetch) — or a forge mergeable flag lagging a rework. Either way
+      # the honest move is the same (fall through to the producer, who re-merges against the real
+      # main) but it must be SAID: this exact silence is what let a dead tier 0 look like a
+      # deliberate routing for a whole play.
+      {:ok, %{totals: %{total: 0}}} ->
+        Logger.warning(
+          "ConflictProbe: PR ##{pr_number} — the forge reports a conflict, the probe merges " <>
+            "clean (0 hunks). Stale probe base or lagging forge flag; falling through to " <>
+            "producer rework."
+        )
+
+        :fall_through
+
       {:ok, diagnosis} ->
         tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx, diagnosis)
 
-      {:error, _} ->
+      # A probe failure demotes tier 0 for THIS conflict — by design (the gain only ever shortens
+      # a path). But a demotion nobody can see is indistinguishable from an engine nobody armed:
+      # say why the rail got longer.
+      {:error, reason_probe} ->
+        Logger.warning(
+          "ConflictProbe: probe failed on PR ##{pr_number} (#{inspect(reason_probe)}) — " <>
+            "tier 0 unavailable, falling through to producer rework."
+        )
+
         :fall_through
     end
   end
