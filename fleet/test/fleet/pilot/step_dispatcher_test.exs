@@ -1418,6 +1418,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "merge failure + REAL conflict, budget EXHAUSTED → honest arch escalation (tier 3)" do
+      # A2 — the harness answers `_test_conflict_rounds` for EVERY marker prefix, so the seal's
+      # conflict signal reads >0 here and it signs CHIEF: the signer needs its token for the merge
+      # ATTEMPT to happen at all (it then fails on the 409, which is what this test is about).
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
+
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -1794,6 +1800,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
+      # The loss is FORCED: a tokens dir carrying ONLY the gatekeeper's token — the seal can still
+      # sign the (clean-signal) merge attempt, but the CHIEF identity is unresolvable, so the
+      # report (and its marker, tier 0's only mark) cannot be posted. (The fixture dir now carries
+      # a system_chief token — A2 boot readiness — so the nominal path posts fine; this test pins
+      # the DEGRADED one.)
+      Fleet.TestEnv.put_env_restoring(
+        :lcars_fleet,
+        :credentials_role_tokens_dir,
+        Path.join(System.tmp_dir!(), "lcars-gk-only-#{System.unique_integer([:positive])}")
+      )
+
+      Fleet.TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->

@@ -7,7 +7,13 @@ defmodule Fleet.Pilot.ConflictApply do
   alias Fleet.Conflict
   alias Fleet.Project.GitOps
 
-  @author %{name: "lcars-conflict-engine", email: "conflict-engine@lcars.local"}
+  # A2 — the runtime's ONE identity (`ForgeIdentity.system_identity/0`), not a locally-minted one.
+  # `lcars-conflict-engine` was the measurement that the function needed a name (chief.yaml tells
+  # that story); it also mapped to NO forge account — a grey author, no avatar, no link — while
+  # every other runtime write (onboard, template sync) maps to `lcars-system`. Measured on the
+  # bench (chantier doc 02 rev 3-4): one author per substrate is the signature matrix, and the
+  # mechanical substrate's author is the system.
+  defp author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @doc """
   Auto-resolves and pushes `feature_ref` if the merge with `:base_branch` (default `"origin/main"`)
@@ -81,7 +87,7 @@ defmodule Fleet.Pilot.ConflictApply do
   defp merge_and_resolve(wt, base_branch) do
     case GitOps.run(
            ["-C", wt, "-c", "merge.conflictStyle=diff3", "merge", "--no-edit", base_branch],
-           author: @author
+           author: author()
          ) do
       :ok ->
         # Clean merge -- git already made the merge commit.
@@ -95,7 +101,7 @@ defmodule Fleet.Pilot.ConflictApply do
 
           {:ok, files} ->
             case resolve_all(wt, files) do
-              :ok -> GitOps.run(["-C", wt, "commit", "--no-edit"], author: @author)
+              :ok -> GitOps.run(["-C", wt, "commit", "--no-edit"], author: author())
               {:error, _} = err -> abort(wt, err)
             end
 

@@ -7,7 +7,7 @@ defmodule Fleet.Pilot.ConflictReportTest do
   and nothing else. A machine's worth of reasoning, published as a count.
 
   It matters most where the machine WRITES: an auto-resolution pushes to a producer's branch, and
-  the only trace was a commit by `lcars-conflict-engine`. A human seeing an unexpected line asks why,
+  the only trace was a commit by the runtime identity. A human seeing an unexpected line asks why,
   and the answer existed in memory and was dropped one function before it could be posted.
   """
   use ExUnit.Case, async: true
@@ -90,7 +90,7 @@ defmodule Fleet.Pilot.ConflictReportTest do
       assert body =~ "juges re-jugent"
       # The attribution is the whole point of the item: the pen and the responsibility are two
       # different facts, and both are true.
-      assert body =~ "lcars-conflict-engine"
+      assert body =~ "lcars-system"
       assert body =~ "posté par le chief"
     end
 

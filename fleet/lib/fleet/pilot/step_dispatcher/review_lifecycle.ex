@@ -301,16 +301,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # ============================================================
 
   # PROMOTE PR-state-driven (interim, without branch-protection): all judges have
-  # approved → the system SEALS. Closing comment + merge signed GATEKEEPER
-  # (the PRs' keeper — "it's in the name"; role token, `as_role`). HONEST comment
+  # approved → the system SEALS. Closing comment + merge signed by the FUNCTION that closed the
+  # PR (A2): gatekeeper on a clean one, chief on a resolved conflict — the seal reads the
+  # conflict signal and picks signer AND method itself. HONEST comment
   # (we don't lie, we show): delivered by the eng, validated by the judges (APPROVED), merged
   # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
-  # `rebase` merge (LINEAR, handles a `main` advanced under a parallel PR — multi-issue, cf. merge_pr) —
+  # `rebase` merge on the clean path (LINEAR, handles a `main` advanced under a parallel PR —
+  # multi-issue, cf. merge_pr; a conflict-resolved PR merges in `merge`, its resolution IS a
+  # merge commit) —
   # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
   # auto-close: coherent chronology). No lock (single-process poller); PR already
   # merged → 409 → the PR disappears on the next tick (idempotent).
   #
-  # `promote_comment` + the gatekeeper role + the merge live in `Fleet.Pilot.GatekeeperSeal`
+  # `promote_comment` + the signer choice + the merge live in `Fleet.Pilot.GatekeeperSeal`
   # (SINGLE seal shared with `StepRunCompleter.promote` — no fork of the merge signature).
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- RoleDispatch.parse_feature_branch_or_skip(head) do

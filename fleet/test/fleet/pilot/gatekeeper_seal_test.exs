@@ -526,7 +526,12 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
       assert Keyword.get(opts, :method) == "rebase"
     end
 
-    test "a conflict marker on the PR → method \"merge\" (the resolution IS a merge commit; rebase would drop it)" do
+    test "a conflict marker on the PR → method \"merge\", SIGNED CHIEF (the function that closed it)" do
+      # A2 — the signer follows the function: a resolved conflict merges under the
+      # conflict_resolver's token, and the closing comment names both the signer and the method.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
+
       assert :ok =
                GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
                  base_branch: "main"
@@ -534,10 +539,28 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
       assert_received {:merge, "fleet/p", 7, opts}
       assert Keyword.get(opts, :method) == "merge"
-      # the closing comment SAYS the method — a hardcoded "rebase" would lie on this exact ticket
+      # signed CHIEF: the role token in the merge opts is the chief's, not the gatekeeper's
+      assert Keyword.get(opts, :token) == "CHIEF-TOKEN"
+      # the closing comment SAYS the signer and the method — hardcoded "gatekeeper"/"rebase"
+      # would lie on this exact ticket
       assert_received {:comment, "fleet/p", 42, body, _opts}
+      assert body =~ "scellé au nom de `chief`"
       assert body =~ "conflit résolu"
       refute body =~ "historique linéaire"
+    end
+
+    test "conflict PR + chief token MISSING → fail-closed refusal, never a gatekeeper fallback" do
+      # The other signer's token IS available (setup posts the gatekeeper's) — falling back to it
+      # would erase the one fact the signature carries. The PR stays unmerged, nothing is written.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+
+      assert {:error, :role_token_unavailable} =
+               GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      refute_received {:merge, _, _, _}
+      refute_received {:comment, _, _, _, _}
     end
 
     test "signal unreadable → seal REFUSED before any write (fail-loud, never a blind rebase)" do

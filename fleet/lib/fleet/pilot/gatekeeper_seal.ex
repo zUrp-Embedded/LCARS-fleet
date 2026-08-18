@@ -1,7 +1,9 @@
 defmodule Fleet.Pilot.GatekeeperSeal do
   @moduledoc """
-  **Gatekeeper merge seal** — a SINGLE path to seal a PR: honest closing comment
-  on the issue + merge **signed in the name of the `gatekeeper`** (role token via `gk_opts`).
+  **Merge seal** — a SINGLE path to seal a PR: honest closing comment on the issue + merge
+  **signed in the name of the FUNCTION that closed it** (role token): `gatekeeper` on a clean PR
+  (the verdict rail's act), `chief` on a conflict-resolved one (the conflict rail's act — A2,
+  signature model rev 2-4 of the chantier).
 
   UNIQUE path shared by the **two** merge points (otherwise they would diverge):
   - `Fleet.Pilot.StepDispatcher.promote_pr` (judges APPROVED directly);
@@ -10,17 +12,17 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   Both call `seal_and_merge/7` → same gatekeeper signature, same trace, everywhere (without this
   single point, a merge would go through with a raw system token, without a comment, attributed to `lcars-system`).
 
-  The gatekeeper signature (`as_gatekeeper/1` = `Fleet.Forge.Client.as_role(forge_opts,
-  gatekeeper_role())`) is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`
-  and signs itself — there is only ONE writer of the `as_role(_, gatekeeper_role())` idiom
-  in the runtime (this module; `ArchEscalation` signs its escalation comment via the same
-  `as_gatekeeper/1`). A caller cannot forget the signature nor fork it. `as_role` remains
+  The signature is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`,
+  reads the conflict signal, picks its signer and signs itself — the seal is the ONLY site that
+  chooses a merge signer, and `ArchEscalation` signs its escalation comments via `as_gatekeeper/1`
+  (escalations stay gatekeeper on BOTH rails: an escalation is a ruling, not a resolution — the
+  chief signs only where it acted). A caller cannot forget the signature nor fork it. `as_role` remains
   the single source of the credential→wire adapter (`Fleet.Forge.Client.as_role/2` — not
   duplicated, called). The gatekeeper role has its SINGLE AUTHORITY in `Fleet.Project.Roles`;
   `gatekeeper_role/0` here is only a re-export.
   """
 
-  @doc "PR guardian role (signs the merges). Re-export of the single authority `Fleet.Project.Roles.gatekeeper_role/0`."
+  @doc "PR guardian role (signs the CLEAN merges — a resolved conflict signs chief, A2). Re-export of the single authority `Fleet.Project.Roles.gatekeeper_role/0`."
   require Logger
 
   @spec gatekeeper_role() :: String.t()
@@ -63,33 +65,47 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           :ok
           | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
   def seal_and_merge(forge, repo, pr_number, issue_n, producer, forge_opts, opts \\ []) do
-    case as_gatekeeper(forge_opts) do
-      {:error, :role_token_unavailable} = err ->
-        # Fail-CLOSED: no gatekeeper role token → we do NOT merge/close under the SYSTEM account (privilege
-        # escalation + attribution lie). Refuse; the caller surfaces it (the PR stays unmerged until the token
-        # is provisioned). `RoleToken.token/1` already logged the missing/empty token.
-        err
+    # A0 (chantier rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
+    # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
+    # and Gitea's `Do: rebase` DROPS merge commits: the resolution vanishes, the conflict
+    # resurfaces mid-replay — measured 2026-08-18 on a live 1.26.1 (409, EMPTY body, and the
+    # PR settles back on `mergeable: true`, so the failure would be classified `:policy`, the
+    # wrong ladder, with a motive naming reviews for a rebase problem). The signal is the
+    # conflict rail's own forge-visible markers — the same marks that already bound its
+    # passes. A read that fails REFUSES the seal (fail-loud): defaulting to `rebase` on a
+    # blind read would misroute exactly the PRs this branch exists for.
+    case conflict_resolved?(forge, repo, pr_number, forge_opts) do
+      {:error, reason} ->
+        Logger.error(
+          "GatekeeperSeal: #{repo} PR ##{pr_number} conflict signal UNREADABLE " <>
+            "(#{inspect(reason)}) — seal REFUSED, no merge attempted (retried next tick)"
+        )
 
-      {:ok, gk_opts} ->
-        # A0 (chantier rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
-        # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
-        # and Gitea's `Do: rebase` DROPS merge commits: the resolution vanishes, the conflict
-        # resurfaces mid-replay — measured 2026-08-18 on a live 1.26.1 (409, EMPTY body, and the
-        # PR settles back on `mergeable: true`, so the failure would be classified `:policy`, the
-        # wrong ladder, with a motive naming reviews for a rebase problem). The signal is the
-        # conflict rail's own forge-visible markers — the same marks that already bound its
-        # passes. A read that fails REFUSES the seal (fail-loud): defaulting to `rebase` on a
-        # blind read would misroute exactly the PRs this branch exists for.
-        case conflict_resolved?(forge, repo, pr_number, forge_opts) do
-          {:error, reason} ->
-            Logger.error(
-              "GatekeeperSeal: #{repo} PR ##{pr_number} conflict signal UNREADABLE " <>
-                "(#{inspect(reason)}) — seal REFUSED, no merge attempted (retried next tick)"
-            )
+        {:error, {:conflict_signal_unreadable, reason}}
 
-            {:error, {:conflict_signal_unreadable, reason}}
+      {:ok, resolved?} ->
+        # A2 — the SIGNER follows the FUNCTION that closed the PR (signature model rev 2-4,
+        # chantier doc 02): a clean PR is the verdict rail's act — gatekeeper; a PR whose conflict
+        # the rail resolved is the conflict function's act — chief (`conflict_resolver`, resolved
+        # by capability like every structural role; the boot validator guarantees exactly one).
+        # `merged_by` then reads on the forge as WHAT HAPPENED: "merged by chief" = a conflict was
+        # resolved here; the resolution commit's author/trailer says which substrate held the pen.
+        {signer, method} =
+          if resolved?,
+            do: {Fleet.Project.Roles.conflict_resolver_role(), "merge"},
+            else: {gatekeeper_role(), "rebase"}
 
-          {:ok, resolved?} ->
+        # Fail-CLOSED, for EITHER signer: no role token → we do NOT merge/close under the SYSTEM
+        # account (privilege escalation + attribution lie) and we do NOT fall back to the other
+        # signer (a chief merge signed gatekeeper would erase the one fact the signature carries).
+        # The PR stays unmerged until the token is provisioned — and the rail boot now verifies
+        # both signers' tokens up front (`Fleet.Pilot.Application`), so this branch is a
+        # mid-flight token LOSS, not a provisioning gap discovered at the worst moment.
+        case Fleet.Forge.Client.as_role(forge_opts, signer) do
+          {:error, :role_token_unavailable} = err ->
+            err
+
+          {:ok, signer_opts} ->
             seal_with_method(
               forge,
               repo,
@@ -98,14 +114,15 @@ defmodule Fleet.Pilot.GatekeeperSeal do
               producer,
               forge_opts,
               opts,
-              gk_opts,
-              if(resolved?, do: "merge", else: "rebase")
+              signer_opts,
+              method,
+              signer
             )
         end
     end
   end
 
-  defp seal_with_method(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, method) do
+  defp seal_with_method(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, method, signer) do
     # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
         # (a zero-judge card still passes here: the mechanical floor is not the card's to
         # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
@@ -127,7 +144,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
             # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
             # `note_wall_not_run/5`.
-            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method)
+            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method, signer)
     end
   end
 
@@ -153,7 +170,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     )
   end
 
-  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method) do
+  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method, signer) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
@@ -169,9 +186,10 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
     # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
-    body = promote_comment(issue_n, pr_number, producer, approvers, wall, method) <> "\n\n" <> signature
+    body = promote_comment(issue_n, pr_number, producer, approvers, wall, method, signer) <> "\n\n" <> signature
 
-    # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
+    # `dedup_any_author`: the comment is signed by the SEAL's signer (gatekeeper — or chief on a
+    # resolved conflict, A2; a role account either way, never the system bot) → the dedup
     # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
     comment_opts =
       gk_opts
@@ -674,18 +692,36 @@ defmodule Fleet.Pilot.GatekeeperSeal do
           String.t(),
           [String.t()],
           :ok | {:skipped, term()},
+          String.t(),
           String.t()
         ) :: String.t()
-  def promote_comment(issue_n, pr_number, producer, approvers \\ [], wall \\ :ok, method \\ "rebase") do
+  def promote_comment(
+        issue_n,
+        pr_number,
+        producer,
+        approvers \\ [],
+        wall \\ :ok,
+        method \\ "rebase",
+        signer \\ "gatekeeper"
+      ) do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
     - #{validation_line(approvers, wall)}
-    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), #{merge_method_line(method)} — ce ticket sera fermé juste après ce commentaire.
+    - **Fusionnée par** : le système, #{signer_line(signer)}, #{merge_method_line(method)} — ce ticket sera fermé juste après ce commentaire.
     #{interim_note(approvers)}
     """
   end
+
+  # A2 — the seal line names its ACTUAL signer. "scellé au nom de `gatekeeper`" was hardcoded, and
+  # from the moment a resolved conflict merges under chief, that sentence would contradict the
+  # merge line just above it — a readable contradiction in the one comment an operator rereads
+  # months later, the exact class this file spends a hundred lines forbidding.
+  defp signer_line("gatekeeper"), do: "**scellé au nom de `gatekeeper`** (gardien des PRs)"
+
+  defp signer_line(signer),
+    do: "**scellé au nom de `#{signer}`** (le rail conflit a fermé cette PR)"
 
   # The method line is a TRACE, not decor: on a conflict-resolved PR the seal merges in `merge`
   # (the resolution is a merge commit; rebase would drop it), and a hardcoded "rebase" here would
