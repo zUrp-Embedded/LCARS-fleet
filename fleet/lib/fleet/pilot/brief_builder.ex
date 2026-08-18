@@ -367,7 +367,16 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
     with {:ok, outputs} <- judge_outputs(forge, repo, number, forge_opts) do
-      step_judge_brief(role, forge, repo, number, forge_opts, route, opts, with_ci(outputs, opts))
+      step_judge_brief(
+        role,
+        forge,
+        repo,
+        number,
+        forge_opts,
+        route,
+        opts,
+        outputs |> with_ci(opts) |> with_gray_zone(opts)
+      )
     end
   end
 
@@ -401,6 +410,53 @@ defmodule Fleet.Pilot.BriefBuilder do
       _ ->
         outputs
     end
+  end
+
+  # C3 — LES MESURES QUE L'ARBITRE DOIT TRANCHER, et rien d'autre. Threadées comme le fait CI par
+  # `VerdictException` : le gate a lu les findings et la courbe, le brief les CITE. Sans elles, un
+  # gatekeeper convoqué sur une zone grise ne saurait pas ce qui est gris — il re-jugerait le
+  # livrable à l'aveugle et rendrait un troisième avis au lieu d'arbitrer les deux existants.
+  defp with_gray_zone(outputs, opts) do
+    case Keyword.get(opts, :gray_zone) do
+      %{findings: findings, policy: policy} when map_size(findings) > 0 ->
+        Map.put(outputs, "zone_grise", gray_zone_line(findings, policy))
+
+      _ ->
+        outputs
+    end
+  end
+
+  defp gray_zone_line(findings, policy) do
+    seuil =
+      case policy do
+        %{"block_at" => at} when is_binary(at) -> at
+        _ -> "inconnu"
+      end
+
+    "ARBITRAGE — le jury a APPROUVÉ ce livrable, et la carte du projet le refuse : au moins un " <>
+      "finding rendu par un juge atteint la sévérité `#{seuil}`, seuil au-delà duquel cette " <>
+      "criticité ne tolère rien. Personne ne s'oppose au livrable ; ce sont une approbation et une " <>
+      "mesure, du MÊME juge, qui se contredisent. Tu es convoqué pour trancher CETTE " <>
+      "contradiction — pas pour rendre un troisième avis sur le travail. Approuver signifie « la " <>
+      "mesure est juste et ce livrable peut vivre avec » ; refuser signifie « la courbe a raison, " <>
+      "le producteur doit reprendre ». Les rapports, par rôle : #{findings_digest(findings)}"
+  end
+
+  # Le DIGEST, pas les rapports : leur substance vit dans les reviews de la PR, que le pod lit déjà.
+  # Recopier ici des findings complets ferait du brief une seconde source de la même donnée — et
+  # celle qu'on lit n'est jamais celle qu'on a corrigée.
+  defp findings_digest(findings) do
+    Enum.map_join(findings, " ; ", fn {role, payload} ->
+      list = if is_map(payload), do: Map.get(payload, "findings", []), else: []
+      sev = list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies()
+
+      détail =
+        if sev == %{},
+          do: "aucune sévérité lisible",
+          else: Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
+
+      "`#{role}` (#{détail})"
+    end)
   end
 
   defp ci_line(sha, contexts) do

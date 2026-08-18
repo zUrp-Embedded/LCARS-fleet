@@ -38,3 +38,10 @@ config :lcars_fleet, pilot_conflict_diagnosis?: false
 # PR (A0.6), trailer LCARS-chief → CI retick → merged_by system_chief. Three real defects were
 # found and fixed by that proof before this line could flip.
 config :lcars_fleet, pilot_conflict_exception_pass?: true
+
+# Gatekeeper arbitration pass (verdict rail, tier 2: ONE outsider ruling on a GRAY ZONE — the jury
+# approved and the card's curve refuses on the judges' own findings — before immobilizing a human).
+# FLEET design flag, twin of the conflict pass above, and OFF for the same reason its twin was: a
+# rung that has never fired end-to-end on a bench is a hypothesis. Its flip condition is written
+# and identical: one gray zone arbitrated from summon to seal on a real project.
+config :lcars_fleet, pilot_verdict_exception_pass?: false

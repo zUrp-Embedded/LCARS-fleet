@@ -57,6 +57,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # Spawn.spawn_step. Shared by routing ↔ remediation (the flow's acyclic cut).
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException
 
   defmodule Ctx do
     @moduledoc """
@@ -170,12 +171,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       # un `case` sans clause — un CaseClauseError sur le chemin de verdict, c'est-à-dire un rail
       # mort au moment précis où il devait décider.
       #
-      # Elle rend AUJOURD'HUI ce que C2 rendait (rework producteur) : la convocation du gatekeeper
-      # est le geste suivant, et la livrer ici sans son budget ni son drapeau reviendrait à spawner
-      # un pod sur chaque PR grise sans savoir l'arrêter. Le repli est sûr — le producteur reçoit
-      # une PR qu'un juge a mesurée trop sévèrement pour cette criticité, ce qui est actionnable.
+      # Elle convoque l'arbitre — passe unique, bornée par un marqueur forge, auto-gatée par son
+      # drapeau. Tout ce qui n'aboutit pas là remonte à l'architecte avec le motif qui NOMME le
+      # barreau (non armé / dépensé / non convocable), parce qu'un humain qui lit un gel doit
+      # pouvoir distinguer « la passe a échoué » de « la passe n'existe pas sur cette boîte ».
       :gray_zone ->
-        Remediation.dispatch_rework(pr_number, head, ctx)
+        VerdictException.dispatch(
+          pr_number,
+          head,
+          findings,
+          issue_card_verdict_policy(head, ctx),
+          ctx
+        )
 
       :approved ->
         # All approved → MERGE (sealed, honest failure routing — `promote_or_route`).

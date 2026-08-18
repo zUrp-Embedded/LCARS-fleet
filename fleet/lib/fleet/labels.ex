@@ -228,6 +228,14 @@ defmodule Fleet.Labels do
   # skip, ou un operateur peut agir dessus.
   def wait_for({:ci_deadline_unreachable, _why}), do: @wait_prefix <> "ci"
 
+  # C3 — la passe d'arbitrage n'a pas pu POSER son marqueur de budget, donc elle ne s'est pas
+  # convoquée (un marqueur non écrit est une passe non bornée). Du côté du ticket, le fait est le
+  # même que pour ses voisins de la famille « attendre un rôle » : personne ne travaille dessus, et
+  # rien n'est cassé — le tick suivant réessaiera. `wait/role` plutôt qu'un cinquième nom : un
+  # humain lit « ce ticket attend qu'un rôle s'y mette », ce qui est exact ; LEQUEL des appels a
+  # échoué vit dans la raison du skip et dans le log, où un opérateur peut agir dessus.
+  def wait_for({:verdict_marker_unposted, _why}), do: @wait_prefix <> "role"
+
   # ─── Already carried by an existing label: a second one would be a second truth ────────────────
   # The one you read is never the one somebody corrected.
   def wait_for(:in_flight), do: nil
