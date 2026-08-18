@@ -346,3 +346,34 @@ EOF
   [[ "$output" == *"50-forge"* ]]
   [[ "$output" == *"55-deck-oidc"* ]]
 }
+
+@test "48-forge-host : sans docker, une DERIVE qui nomme la consequence — jamais un echec" {
+  # La forge est un CONTENEUR. Sans docker le runtime s'installe quand meme : ce n'est pas casse,
+  # il manque un geste. Le dire en derive, et nommer ce qui restera non converge.
+  run env PATH="/usr/bin:/bin" PROV_SUBSTRATE=wsl PROVISION_MODULE=48-forge-host \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" PROV_DOCKER_BIN=docker-inexistant \
+      bash "$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker absent"* ]]
+  [[ "$output" == *"50-forge"* ]]
+  [[ "$output" == *"55-deck-oidc"* ]]
+}
+
+@test "48-forge-host : il tourne AVANT 50-forge — l'ordre est le prefixe, et il porte le sens" {
+  # 50-forge SONDE une forge et minte contre elle ; 48 la fait exister. L'inverse rendrait la
+  # premiere passe systematiquement en derive sur une machine neuve.
+  ls "$BATS_TEST_DIRNAME/../modules.d/" | grep -E "^(48-forge-host|50-forge)\.sh$" | sort > "$BATS_TEST_TMPDIR/ordre"
+  [ "$(head -n1 "$BATS_TEST_TMPDIR/ordre")" = "48-forge-host.sh" ]
+}
+
+@test "48-forge-host : la structure passe par un run TRANSITOIRE, jamais par une boite vivante" {
+  # ⚖ « reconstruire et relancer un LCARS en conteneur pour tester celui qu'on vient d'installer
+  # nativement » — c'est precisement ce que ce module evite. Il monte la forge et joue la recette
+  # par `docker run --rm`, possible parce que le tfstate est jetable par construction.
+  MOD="$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh"
+  grep -q -- "run --rm" "$MOD"
+  grep -q -- "forge-apply" "$MOD"
+  ! grep -q -- "compose .*create lcars\|exec .*lcars-1" "$MOD"
+  # et la porte existe cote image
+  grep -q '"forge-apply"' "$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
+}

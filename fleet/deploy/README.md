@@ -83,6 +83,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent, ready-room optionnelle |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
+| 48-forge-host | wsl | wsl | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 50-forge et 55-deck-oidc restent en dérive et leurs consignes nomment la boîte |
 | 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
 | 55-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json`. Les ENTRÉES (`PROV_DECK_ORIGINS`) convergent : la loopback y est semée dans ses **deux** écritures (`127.0.0.1` ET `localhost` — deux origines pour un même point d'écoute), et une liste changée repose le client |
 | 60-deploy | wsl linux | any | orchestre `fleet/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |

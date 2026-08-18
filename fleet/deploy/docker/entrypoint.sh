@@ -101,6 +101,28 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(${arg})"
 fi
 
+# `forge-apply` : LA STRUCTURE DE LA FORGE, POSEE PAR UN RUN TRANSITOIRE ─────────────────────────
+#
+# Meme geste que `docker.sh forge-apply`, mais SANS boite vivante : `docker run --rm <image>
+# forge-apply`. C'est ce qui permet a un POSTE DE TRAVAIL (rail WSL) d'avoir une forge utilisable
+# sans reconstruire et relancer un LCARS en conteneur alors qu'il vient de l'installer nativement.
+#
+# ⚠ CETTE PORTE N'EST PAS `nobody`, CONTRAIREMENT AUX AUTRES. `roles`, `catalogue-source` et
+# consorts sont des LECTURES ; celle-ci ecrit sur une forge et lit le jeton master et le seed dans
+# `/home/private` (0750 root:fleet). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
+#
+# ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
+# reconstruit ce qui existe par ses blocs `import`, donc partir d'un tfstate VIDE est le cas normal.
+# C'est exactement pourquoi `--tofu-dir` est devenu un argument ignore. Un run `--rm` est donc
+# legitime ici, la ou il aurait ete un piege avant ce chantier.
+#
+# L'appelant fournit : `--network <reseau-de-la-forge>`, `-v /home/private:/home/private`,
+# `-e FORGE_BASE_URL=http://forge:3000`. Le jeton peut aussi arriver sur stdin (jamais en argv).
+if [[ "${1:-}" == "forge-apply" ]]; then
+  [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /home/private — elle exige root dans le conteneur" >&2; exit 1; }
+  exec /opt/lcars/forge-gestures.sh apply
+fi
+
 # `catalogue-source <nom>` : resout UN nom vers le depot qui le porte, et n'imprime que
 # `<repo> <branche> <sha>`. Le geste d'install le donne a `git clone`, donc une ligne de politesse
 # deviendrait un morceau d'URL.
