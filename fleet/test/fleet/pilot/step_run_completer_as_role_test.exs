@@ -10,6 +10,9 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   # be IN THE JUDGE'S NAME (role token), not the system account's. Labels stay system-signed (not
   # captured).
   defmodule TokenCaptureForge do
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def post_comment(_repo, _n, _body, opts) do
       send(self(), {:comment_token, opts[:token]})
       {:ok, :posted}

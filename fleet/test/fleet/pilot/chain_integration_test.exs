@@ -218,6 +218,9 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
 
   # Wrapper (modules call ForgeClient.f/arity; the sim pid lives in the pdict).
   defmodule SimForge do
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def put(pid), do: Process.put(:sim, pid)
     defp p, do: Process.get(:sim)
     def add_label(r, n, l, o), do: Sim.add_label(p(), r, n, l, o)

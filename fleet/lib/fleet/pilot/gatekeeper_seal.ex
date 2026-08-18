@@ -71,7 +71,42 @@ defmodule Fleet.Pilot.GatekeeperSeal do
         err
 
       {:ok, gk_opts} ->
-        # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
+        # A0 (chantier rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
+        # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
+        # and Gitea's `Do: rebase` DROPS merge commits: the resolution vanishes, the conflict
+        # resurfaces mid-replay — measured 2026-08-18 on a live 1.26.1 (409, EMPTY body, and the
+        # PR settles back on `mergeable: true`, so the failure would be classified `:policy`, the
+        # wrong ladder, with a motive naming reviews for a rebase problem). The signal is the
+        # conflict rail's own forge-visible markers — the same marks that already bound its
+        # passes. A read that fails REFUSES the seal (fail-loud): defaulting to `rebase` on a
+        # blind read would misroute exactly the PRs this branch exists for.
+        case conflict_resolved?(forge, repo, pr_number, forge_opts) do
+          {:error, reason} ->
+            Logger.error(
+              "GatekeeperSeal: #{repo} PR ##{pr_number} conflict signal UNREADABLE " <>
+                "(#{inspect(reason)}) — seal REFUSED, no merge attempted (retried next tick)"
+            )
+
+            {:error, {:conflict_signal_unreadable, reason}}
+
+          {:ok, resolved?} ->
+            seal_with_method(
+              forge,
+              repo,
+              pr_number,
+              issue_n,
+              producer,
+              forge_opts,
+              opts,
+              gk_opts,
+              if(resolved?, do: "merge", else: "rebase")
+            )
+        end
+    end
+  end
+
+  defp seal_with_method(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, method) do
+    # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
         # (a zero-judge card still passes here: the mechanical floor is not the card's to
         # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
         # statement passes LOUD (emission is best-effort, DR-010 — absence is recorded,
@@ -92,12 +127,33 @@ defmodule Fleet.Pilot.GatekeeperSeal do
             # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
             # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
             # `note_wall_not_run/5`.
-            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall)
-        end
+            do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method)
     end
   end
 
-  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall) do
+  # The three prefixes are the conflict rail's own bounded-pass marks: tier 1 rework rounds,
+  # tier 2 chief round (posted at dispatch — if the pass then failed, the PR is still conflicted
+  # and the merge fails either way, so over-detection is harmless), tier 0 engine report (its ONLY
+  # mark: the engine resolves without a dispatch). Prefix-matched — rounds and outcomes vary behind.
+  defp conflict_resolved?(forge, repo, pr_number, forge_opts) do
+    Enum.reduce_while(
+      [
+        "[conflict-rework:pr-#{pr_number}",
+        "[conflict-chief:pr-#{pr_number}",
+        "[conflict-engine:pr-#{pr_number}"
+      ],
+      {:ok, false},
+      fn prefix, acc ->
+        case forge.count_comments_marked(repo, pr_number, prefix, forge_opts) do
+          {:ok, 0} -> {:cont, acc}
+          {:ok, n} when is_integer(n) and n > 0 -> {:halt, {:ok, true}}
+          {:error, reason} -> {:halt, {:error, {prefix, reason}}}
+        end
+      end
+    )
+  end
+
+  defp do_seal(forge, repo, pr_number, issue_n, producer, forge_opts, opts, gk_opts, wall, method) do
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
@@ -113,7 +169,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
     # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
-    body = promote_comment(issue_n, pr_number, producer, approvers, wall) <> "\n\n" <> signature
+    body = promote_comment(issue_n, pr_number, producer, approvers, wall, method) <> "\n\n" <> signature
 
     # `dedup_any_author`: the comment is signed GATEKEEPER (role account, not the system bot) → the dedup
     # must see it regardless of author, otherwise double-post when `promote` replays (merge retry / escalation).
@@ -129,7 +185,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
     # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
     # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
-    case do_merge(forge, repo, pr_number, gk_opts) do
+    case do_merge(forge, repo, pr_number, gk_opts, method) do
       :ok ->
         note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
 
@@ -528,8 +584,11 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   end
 
   # `ForgeClient.merge_pr/3` returns `:ok` (not `{:ok, _}`) on success — match both.
-  defp do_merge(forge, repo, pr_number, opts) do
-    case forge.merge_pr(repo, pr_number, opts) do
+  # `method` comes from the conflict signal (seal_and_merge): "rebase" on a clean PR (linear
+  # history preserved), "merge" on a conflict-resolved one (the resolution IS a merge commit;
+  # rebase would drop it — measured, doc 07 of the chantier).
+  defp do_merge(forge, repo, pr_number, opts, method) do
+    case forge.merge_pr(repo, pr_number, Keyword.put(opts, :method, method)) do
       :ok -> :ok
       {:ok, _} -> :ok
       {:error, reason} -> {:error, {:merge, reason}}
@@ -609,18 +668,34 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   sentences on purpose: an operator reading this comment months later must be able to tell a
   verdict from an absence of verdict without opening the PR.
   """
-  @spec promote_comment(integer(), integer(), String.t(), [String.t()], :ok | {:skipped, term()}) ::
+  @spec promote_comment(
+          integer(),
+          integer(),
+          String.t(),
+          [String.t()],
+          :ok | {:skipped, term()},
           String.t()
-  def promote_comment(issue_n, pr_number, producer, approvers \\ [], wall \\ :ok) do
+        ) :: String.t()
+  def promote_comment(issue_n, pr_number, producer, approvers \\ [], wall \\ :ok, method \\ "rebase") do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
     - #{validation_line(approvers, wall)}
-    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), merge **rebase** (historique linéaire) — ce ticket sera fermé juste après ce commentaire.
+    - **Fusionnée par** : le système, **scellé au nom de `gatekeeper`** (gardien des PRs), #{merge_method_line(method)} — ce ticket sera fermé juste après ce commentaire.
     #{interim_note(approvers)}
     """
   end
+
+  # The method line is a TRACE, not decor: on a conflict-resolved PR the seal merges in `merge`
+  # (the resolution is a merge commit; rebase would drop it), and a hardcoded "rebase" here would
+  # be a lie on exactly those tickets — the class of contradiction this comment exists to avoid.
+  defp merge_method_line("merge"),
+    do:
+      "merge `merge` (commit de fusion : cette PR est passée par un **conflit résolu** — la " <>
+        "bulle sur main en est la trace)"
+
+  defp merge_method_line(_), do: "merge **rebase** (historique linéaire)"
 
   # Judged path: name the accounts. Zero-judge path: say WHY there is no verdict, and on whose
   # authority the merge happened — the card. « Aucun juge n'a répondu » would describe a failure;

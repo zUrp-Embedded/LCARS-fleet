@@ -249,6 +249,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         label: "conflict"
       )
 
+    # A0 — the engine's STABLE marker. The seal chooses its merge method by reading the conflict
+    # rail's forge-visible marks; tiers 1-2 post theirs at dispatch, tier 0 resolves WITHOUT a
+    # dispatch — this report is the only place its mark can live. Appended OUTSIDE
+    # `ConflictReport.render` (the report is a human text; the marker is protocol), and OUTSIDE
+    # the pinning (a pinned body is summarized — the marker must survive on the comment itself).
+    body = body <> "\n\n[conflict-engine:pr-#{pr_number}:#{outcome}]"
+
     case ForgeClient.as_role(ctx.forge_opts, Fleet.Project.Roles.conflict_resolver_role()) do
       {:ok, role_opts} ->
         case ctx.forge.post_comment(ctx.repo, pr_number, body, role_opts) do
@@ -258,7 +265,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           {:error, why} ->
             Logger.warning(
               "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} " <>
-                "(#{inspect(why)}) — the routing stands, only its explanation is missing"
+                "(#{inspect(why)}) — the routing stands, only its explanation is missing" <>
+                report_loss_consequence(outcome, pr_number)
             )
         end
 
@@ -266,10 +274,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         Logger.warning(
           "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} — no chief " <>
             "identity (#{inspect(why)}); posting it under the system account would name the " <>
-            "wrong owner for the call"
+            "wrong owner for the call" <> report_loss_consequence(outcome, pr_number)
         )
     end
   end
+
+  # On the AUTO-RESOLVED path the lost report is not just a missing explanation: the engine has no
+  # dispatch, so the report's `[conflict-engine:pr-N]` mark is the seal's ONLY conflict signal for
+  # this PR — without it the merge goes out in `rebase` and dies misclassified (`:policy`). The
+  # other outcomes keep their own dispatch-time marks; their loss stays cosmetic.
+  defp report_loss_consequence(:auto_resolved, pr_number),
+    do:
+      " — AND the seal's conflict signal is now MISSING (tier-0 leaves no other mark): the merge " <>
+        "will be attempted in `rebase` and misrouted. Repair: post a comment containing " <>
+        "`[conflict-engine:pr-#{pr_number}]` on the PR."
+
+  defp report_loss_consequence(_outcome, _pr_number), do: ""
 
   defp conflict_report_work_dir(%Ctx{} = ctx) do
     dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(ctx.repo))

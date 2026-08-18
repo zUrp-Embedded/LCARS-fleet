@@ -17,6 +17,14 @@ defmodule Fleet.Pilot.ForgeStubs do
     """
     # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}
     # (a numeric id is never returned — stub aligned).
+    # A0 — the seal now reads the conflict signal before choosing its merge method. Default
+    # stub answer: CLEAN PR (0 marks on every prefix) → method "rebase", the historic behavior.
+    # Spied like the writes, so a test can assert the read happened.
+    def count_comments_marked(repo, n, prefix, opts) do
+      send(self(), {:count_marked, repo, n, prefix, opts})
+      {:ok, 0}
+    end
+
     def post_comment(repo, n, body, opts) do
       send(self(), {:comment, repo, n, body, opts})
       {:ok, :posted}
@@ -50,6 +58,14 @@ defmodule Fleet.Pilot.ForgeStubs do
 
   defmodule CloseFailForge do
     @moduledoc "Merge OK but `close_issue` FAILS — proves the seal LOGS LOUD (merged brick stays OPEN)."
+    # A0 — the seal now reads the conflict signal before choosing its merge method. Default
+    # stub answer: CLEAN PR (0 marks on every prefix) → method "rebase", the historic behavior.
+    # Spied like the writes, so a test can assert the read happened.
+    def count_comments_marked(repo, n, prefix, opts) do
+      send(self(), {:count_marked, repo, n, prefix, opts})
+      {:ok, 0}
+    end
+
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def merge_pr(_repo, _pr, _opts), do: :ok
 
@@ -72,6 +88,14 @@ defmodule Fleet.Pilot.ForgeStubs do
     the completer `:promote` path opens the PR THEN fails at merge — the seal tests never
     call `open_pr` (harmless extra function).
     """
+    # A0 — the seal now reads the conflict signal before choosing its merge method. Default
+    # stub answer: CLEAN PR (0 marks on every prefix) → method "rebase", the historic behavior.
+    # Spied like the writes, so a test can assert the read happened.
+    def count_comments_marked(repo, n, prefix, opts) do
+      send(self(), {:count_marked, repo, n, prefix, opts})
+      {:ok, 0}
+    end
+
     def open_pr(_repo, _head, _base, _title, _opts), do: {:ok, 7}
 
     def post_comment(repo, n, body, opts) do

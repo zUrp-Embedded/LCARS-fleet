@@ -1764,6 +1764,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
     end
 
+    test "A0 : rapport tier-0 imposte — la perte du signal du seal est DITE, avec le geste de reparation" do
+      # Cette fixture n'a pas de role `conflict_resolver` : le rapport (et donc le marqueur
+      # `[conflict-engine:pr-N]`, seule marque du tier 0) ne peut pas etre poste. Sur le chemin
+      # AUTO-RESOLU c'est une perte PORTANTE — le seal choisira `rebase` et sera mal classe. Le
+      # warning doit le dire et nommer la reparation, pas seulement regretter l'explication.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, {:auto_resolved, 6}} =
+                   StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+        end)
+
+      assert log =~ "conflict signal is now MISSING"
+      assert log =~ "[conflict-engine:pr-6]"
+    end
+
     # ❌ PAS de test pour la sonde MUETTE (`{:error, _}` → `:fall_through`), et la raison est
     # mesuree : dans ce harnais le chemin legacy converge sur le MEME observable que l'escalade
     # tier-0 — meme tuple de retour, et aucun spawn dans les deux cas. Un test ecrit ici

@@ -127,11 +127,19 @@ defmodule Fleet.Workflow.DeliverableGate do
   end
 
   @doc """
-  Requires each commit author and committer email to be allowed; empty range is valid.
+  Requires each FIRST-PARENT commit author and committer email to be allowed; empty range is valid.
   """
+  # A0 (chantier rails) — FIRST-PARENT, same cut as the secret scan below, and the asymmetry was
+  # the defect: a conflict resolution is a MERGE commit, and the full `base..HEAD` range then
+  # imports the BASE's own commits — system-authored onboard writes (`lcars-system@lcars.local`),
+  # sibling bricks trailed by OTHER roles — all already gated when they landed on the base.
+  # Re-walking them here refused every merge-bearing deliverable ({:bad_identity, lcars-system}),
+  # and the chief's exception pass had NO success path at all. The pod's own line IS the
+  # first-parent line; the merge commit itself sits on it, authored by the pod's human and
+  # hook-trailed, and stays fully checked.
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
-    case git(workspace, ["log", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
+    case git(workspace, ["log", "--first-parent", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
       {out, 0} ->
         # Remove only the record terminator so empty identity fields remain rejectable.
         case out do
@@ -164,8 +172,11 @@ defmodule Fleet.Workflow.DeliverableGate do
   defp label_email(e), do: e
 
   @doc """
-  Requires the expected `Co-authored-by: LCARS-<role>` trailer per commit.
+  Requires the expected `Co-authored-by: LCARS-<role>` trailer per FIRST-PARENT commit.
   """
+  # FIRST-PARENT for the same reason as `check_identity` above: a merge imports commits trailed
+  # by their OWN producers — demanding THIS role's trailer on a sibling brick's commit refused
+  # the range wholesale ({:missing_coauthor_trailer}). The pod's own commits stay checked.
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
     # F-03: git parses real trailers; prose mentioning a trailer cannot attest a commit.
@@ -178,6 +189,7 @@ defmodule Fleet.Workflow.DeliverableGate do
     # NUL separates commits, unit separator splits SHA and trailer values.
     case git(workspace, [
            "log",
+           "--first-parent",
            "#{base_sha}..HEAD",
            "--format=%H%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
          ]) do

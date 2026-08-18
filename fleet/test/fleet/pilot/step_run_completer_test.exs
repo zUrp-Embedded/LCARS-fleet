@@ -69,6 +69,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule PrForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -122,6 +125,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule PrFailForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -144,6 +150,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule OrchForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
