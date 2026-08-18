@@ -44,6 +44,7 @@
 # EXIT CODES, as they actually are — this runs under `set -euo pipefail` with no trap, so most failures
 # propagate the exit status of the command that failed, they are NOT normalised:
 #   0   the rewritten clone is ready in --out
+#   4   --linearize failed its postconditions (final tree differs, or a merge survived) — do not push
 #   1   usage, unreadable token/identity file, --out already exists, or git-filter-repo missing
 #   2   ONE case only: no non-system commit in the clone, so the human cannot be derived (the pre-scan)
 #   *   anything else is the failing command's own status — `git clone` returns git's (128 on the usual
@@ -60,9 +61,14 @@ OUT_DIR=""
 VENDOR_IDENTITY="$SCRIPT_DIR/claude_launch.identity"
 FILTER_REPO_BIN="${FILTER_REPO_BIN:-git-filter-repo}"
 SYSTEM_EMAIL="lcars-system@lcars.local"
+# D2 — branche à APLATIR en first-parent après la transformation (forme MR canonique, cf. la
+# fonction). Vide = off : le miroir publie l'historique tel quel, bulles comprises — elles sont
+# GitHub-normales sur un main ; l'aplatissement ne sert que la branche d'une MR upstream (D3).
+LINEARIZE=""
 
 usage() {
   echo "Usage: $0 --repo OWNER/NAME --forge URL --token-file FICHIER --out DIR [options]" >&2
+  echo "  Options: --vendor-identity F · --filter-repo-bin B · --system-email E · --linearize BRANCHE" >&2
   exit 1
 }
 
@@ -97,8 +103,42 @@ scan_forbidden_markers() {
   return "$hits"
 }
 
+# D2 (chantier rails, 2026-08-18) — FIRST-PARENT LINEARIZATION, the seam-side flattening.
+# WHY: the work forge keeps the TRUE history — a resolved conflict is a merge commit (the bubble is
+# the trace, chantier doc 08). GitHub's canonical MR form wants a LINEAR branch, and purists shred
+# back-merges in a PR. The two requirements live on two remotes, so the flattening happens HERE, at
+# publication, on a COPY — never on the internal record.
+# HOW: NOT a rebase (replaying side-branches would resurface the very conflicts the merges
+# resolved). Each first-parent commit is REBUILT with `git commit-tree` on its OWN TREE: identical
+# content at every step, author/committer/dates/message preserved, and a merge point becomes one
+# regular commit carrying its resolution (side-branch content squashed into it — the published FORM;
+# the per-commit truth stays on the work forge). Deterministic, zero conflict by construction.
+# POSTCONDITIONS, both fail-loud: the new tip's tree is BYTE-IDENTICAL to the old one, and no merge
+# commit remains.
+linearize_first_parent() { # <dir> <branch>
+  local dir="$1" branch="$2" prev="" new c old_tip
+  old_tip="$(git -C "$dir" rev-parse "refs/heads/${branch}" 2>/dev/null)"     || { echo "publish-to-github: --linearize: branche inconnue: $branch" >&2; return 1; }
+
+  while IFS= read -r c; do
+    new="$(
+      GIT_AUTHOR_NAME="$(git -C "$dir" log -1 --format=%an "$c")"       GIT_AUTHOR_EMAIL="$(git -C "$dir" log -1 --format=%ae "$c")"       GIT_AUTHOR_DATE="$(git -C "$dir" log -1 --format=%aD "$c")"       GIT_COMMITTER_NAME="$(git -C "$dir" log -1 --format=%cn "$c")"       GIT_COMMITTER_EMAIL="$(git -C "$dir" log -1 --format=%ce "$c")"       GIT_COMMITTER_DATE="$(git -C "$dir" log -1 --format=%cD "$c")"       git -C "$dir" commit-tree "$c^{tree}" ${prev:+-p "$prev"}         < <(git -C "$dir" log -1 --format=%B "$c")
+    )" || return 1
+    prev="$new"
+  done < <(git -C "$dir" rev-list --first-parent --reverse "$old_tip")
+
+  [[ "$(git -C "$dir" rev-parse "$prev^{tree}")" == "$(git -C "$dir" rev-parse "$old_tip^{tree}")" ]]     || { echo "publish-to-github: linearize: l arbre final DIFFERE de l original — refus" >&2; return 1; }
+
+  git -C "$dir" update-ref "refs/heads/${branch}" "$prev"
+
+  if [[ -n "$(git -C "$dir" rev-list --merges "refs/heads/${branch}")" ]]; then
+    echo "publish-to-github: linearize: un commit de merge survit — refus" >&2
+    return 1
+  fi
+}
+
 # Source guard (standard idiom): sourcing loads the functions WITHOUT running the transform — the bats
-# suite drives scan_forbidden_markers directly on a fixture repo, without git-filter-repo.
+# suite drives scan_forbidden_markers AND linearize_first_parent directly on fixture repos, without
+# git-filter-repo.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 while [[ $# -gt 0 ]]; do
@@ -110,6 +150,7 @@ while [[ $# -gt 0 ]]; do
     --vendor-identity) VENDOR_IDENTITY="$2"; shift 2 ;;
     --filter-repo-bin) FILTER_REPO_BIN="$2"; shift 2 ;;
     --system-email) SYSTEM_EMAIL="$2"; shift 2 ;;
+    --linearize) LINEARIZE="$2"; shift 2 ;;
     *) echo "publish-to-github: option inconnue: $1" >&2; usage ;;
   esac
 done
@@ -196,6 +237,11 @@ commit.message = re.sub(
     flags=re.IGNORECASE,
 )
 ')
+
+if [[ -n "$LINEARIZE" ]]; then
+  echo "publish-to-github: linearisation first-parent de '$LINEARIZE' (forme MR — arbre final identique, merges aplatis)"
+  linearize_first_parent "$OUT_DIR" "$LINEARIZE" || exit 4
+fi
 
 # CERTIFY the transform instead of trusting its exit code (see scan_forbidden_markers). A surviving
 # internal marker = a broken publish that would leak the internal attribution to GitHub — refuse loud
