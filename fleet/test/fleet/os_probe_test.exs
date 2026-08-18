@@ -71,11 +71,24 @@ defmodule Fleet.Test.OsProbeTest do
     # `comm` in /proc/<pid>/stat is the executable's filename, and the kernel does not escape it.
     # A binary called `ev) il` writes `1234 (ev) il) S …`: cutting at the FIRST `)` returns `il) S`
     # and reads `i` as the state — a running process reported with a state that means nothing.
+    # ⚠ ON COPIE `bash`, PAS `sleep`, ET CE N'EST PAS UN DETAIL DE GOUT.
+    # Ce fixture copiait `sleep` sous un nom bizarre. Mesure du 2026-08-18, Ubuntu 26.04 LTS neuve :
+    # `/usr/bin/sleep -> ../lib/cargo/bin/coreutils/sleep` — la distribution a remplace GNU coreutils
+    # par uutils (Rust), qui est un binaire MULTI-APPEL et dispatche sur `argv[0]`. Renomme, il rend
+    # `coreutils: unknown program ''ev) il''` et meurt avant meme l'exec qu'on voulait observer. Le
+    # temoin disait alors honnetement « je ne prouve rien » — donc gate ROUGE, donc `60-deploy`
+    # refusait de poser la release : le rail d'install natif s'arretait la, sur toute machine en
+    # 26.04. Invisible dans l'image (Debian bookworm, coreutils GNU) et sur les postes plus anciens.
+    #
+    # `bash` est un binaire autonome sur les deux familles. La boucle l'empeche de se faire
+    # remplacer : `bash -c 'sleep 30'` s'exec-remplace par `sleep` en dernier ordre, et `comm`
+    # redeviendrait `sleep` — ce qui viderait le test de son sujet sans le faire echouer.
     weird = Path.join(tmp, "ev) il")
-    File.cp!(System.find_executable("sleep"), weird)
+    File.cp!(System.find_executable("bash"), weird)
     File.chmod!(weird, 0o755)
 
-    port = Port.open({:spawn_executable, weird}, [:binary, args: ["30"]])
+    port =
+      Port.open({:spawn_executable, weird}, [:binary, args: ["-c", "while :; do sleep 1; done"]])
     {:os_pid, pid} = Port.info(port, :os_pid)
     on_exit(fn -> System.cmd("kill", ["-KILL", to_string(pid)], stderr_to_stdout: true) end)
 

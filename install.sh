@@ -115,7 +115,12 @@ ${CYAN}  ┌──────────────────────�
   ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}
 
 EOF
-  read -r _ < /dev/tty 2>/dev/null || echo "  [install] Pas de TTY — continue automatiquement."
+  # ⚠ LES ACCOLADES PORTENT LA REDIRECTION D'ERREUR, PAS LE `read`. Sans elles, l'echec du
+  # `< /dev/tty` est signale par le SHELL lui-meme — « install.sh: line NNN: /dev/tty: No such
+  # device or address » — avant la phrase calme qui l'explique, et le `2>/dev/null` du `read` ne
+  # l'attrape pas. Mesure du 2026-08-18, install joue par ssh sans TTY : l'operateur voit d'abord
+  # une erreur brute, puis apprend que tout va bien. On ne montre que la seconde.
+  { read -r _ < /dev/tty; } 2>/dev/null || echo "  [install] Pas de TTY — continue automatiquement."
   echo ""
   echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
   REEXEC_ARGS=(--repo "$REPO_URL" --branch "$BRANCH")
