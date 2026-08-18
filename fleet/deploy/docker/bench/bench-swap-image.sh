@@ -118,20 +118,30 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 "$DOCKER_BIN" rm -f "$BOX" >/dev/null 2>&1 || true
 
 # ─── 2. create → connect → start (piege 1) ───────────────────────────────────────────────────────
-env LCARS_IMAGE="$IMAGE" \
-    `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
-    `# vient de la forge (fleet:humans) via le convergeur, pas du box. Miroir de bench-up.sh.` \
-    LCARS_ADMIRAL="admiral" \
-    LCARS_ADMIRAL_EMAIL="admiral@lcars.local" \
-    FORGE_BASE_URL="http://forge:3000" \
-    LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
-    LCARS_BIND="$BIND" \
-    LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
-    LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
-    FORGE_PUBLIC_URL="http://${ADVERTISE}:${FORGE_PORT}" \
-    `# Les deux ecritures de la loopback sont semees par 55-deck-oidc ; ici, l'entree annoncee.` \
-    LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
-    "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
+# ⚠ PAR --env-file, PLUS JAMAIS PAR L'ENVIRONNEMENT (mesuré 2026-08-18, trois morsures le meme
+# jour) : la substitution `${VAR}` d'un compose file se fait dans le PROCESS compose — et quand
+# `DOCKER_BIN` est un wrapper qui s'escalade (sudo interne, env remis a zero), les variables
+# prefixees ici n'existent plus de l'autre cote. Consequences mesurees : l'image DEFAUTAIT (le tag
+# de la liste rouge a ete ecrase, puis un pull du registre NAS), le port ssh DEFAUTAIT (bind sur le
+# 2222 d'un autre banc). Un fichier d'env est lu du DISQUE par compose, apres l'escalade — il ne
+# peut pas etre strippe. `identite-v2` : le box materialise admiral (master/sysadmin, uid 1000) ;
+# le worker "$HUMAN" (lcars) vient de la forge (fleet:humans) via le convergeur. Miroir bench-up.sh.
+SWAP_ENV="$(mktemp)"
+cat > "$SWAP_ENV" <<ENVEOF
+LCARS_IMAGE=$IMAGE
+LCARS_ADMIRAL=admiral
+LCARS_ADMIRAL_EMAIL=admiral@lcars.local
+FORGE_BASE_URL=http://forge:3000
+LCARS_SOURCE_REMOTE=http://forge:3000/fleet/lcars.git
+LCARS_BIND=$BIND
+LCARS_SSH_PORT=${BIND}:${SSH_PORT}
+LCARS_LANDING_PORT_BIND=${BIND}:${DECK_PORT}
+FORGE_PUBLIC_URL=http://${ADVERTISE}:${FORGE_PORT}
+LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
+ENVEOF
+trap 'rm -f "$SWAP_ENV"' EXIT
+
+"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
   || die "la boite ne se cree pas" 3
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
