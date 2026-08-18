@@ -72,8 +72,10 @@ spec:
         - audits/scribe-{date}.json
       gate:
         # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
-        # (le chemin terminal-string ne les évaluait pas), avoués tels quels. L'escalade gatekeeper vient
-        # du type: terminal (StepRunConsumer {:dispatch_gatekeeper} sur règle en échec).
+        # (le chemin terminal-string ne les évaluait pas), avoués tels quels.
+        # ⚠ Une règle `terminal` en échec rend {:fail} → REWORK borné, jamais une escalade
+        # gatekeeper : seul `type: soft` dispatche le juge (`Fleet.Workflow.Gates`). Ce commentaire
+        # a affirmé le contraire pendant des mois — corrigé A3, mesuré dans gates.ex.
         type: terminal
         rules:
           # FAITS SYSTEME (BL-6-59, ferme). Ces deux cles sont produites par

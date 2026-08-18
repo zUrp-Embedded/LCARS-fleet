@@ -23,7 +23,7 @@ defmodule Fleet.Conflict do
   not carry) AND resolved at or above `:min_confidence` (default `:high`). That pair is the single
   "safe to write back" signal; confidence alone was not enough, and the gap wrote Python indentation
   and duplicate YAML keys at `:high`. Any residual (`:complex`, or a resolvable hunk below threshold) leaves `merged: nil`; the
-  caller then routes to the producer conflict-rework / gatekeeper, never writing on a partial guess.
+  caller then routes to the producer conflict-rework / chief exception pass, never writing on a partial guess.
 
   `resolve/2` returns `{:error, {:unterminated_conflict, state, line}}` when the markers do not
   close. That case USED to come back as `{:ok, %Report{merged: nil, hunks: [], stats: %{total: 0}}}`

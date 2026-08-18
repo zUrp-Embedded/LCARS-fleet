@@ -355,12 +355,14 @@ defmodule Fleet.Project.Roles do
   `:lcars_fleet, :pilot_conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
   `conflict_resolver` capability. Raises on zero and on several, like every structural role.
 
-  Its own capability, NOT `exception_judge`. The two responsibilities sit on the same role today,
-  and that is a catalogue fact rather than a law: resolving a conflict means WRITING code on the
-  PR, signing the merge means attesting it. Sharing one key would make moving the first move the
-  second in silence — and the signatory of the seal is not something a remediation policy changes
-  as a side effect. With two keys, substituting the resolver is a cap-profile edit that no file in
-  `lib/` sees and that leaves the seal's signature exactly where it was.
+  Its own capability, NOT `exception_judge`. The two responsibilities have lived on SEPARATE roles
+  since the 2026-08-04 scission (`chief` carries `conflict_resolver`, the gatekeeper keeps
+  `exception_judge`) — whether one role or two carry them stays the CATALOGUE's call: resolving a
+  conflict means WRITING code on the PR, signing a clean merge means attesting the verdicts.
+  Sharing one key would make moving the first move the second in silence. With two keys,
+  substituting the resolver is a cap-profile edit that no file in `lib/` sees — and since A2 the
+  seal itself signs a conflict-resolved merge as THIS role (the function that closed the PR),
+  which is exactly why the two keys must never fuse.
   """
   @spec conflict_resolver_role(keyword()) :: String.t()
   def conflict_resolver_role(opts \\ []) do
