@@ -1217,4 +1217,50 @@ finally:
         else:
             os.environ[_k] = _v
 
+# ─── LA DOC SERVIE PAR LE DECK ───────────────────────────────────────────────────────────────────
+#
+# La plaquette part dans l'image (Dockerfile, stage `site`) et le deck la sert sous `/doc/`. Deux
+# choses seulement sont a tenir, et ce sont les deux qui coutent si elles lachent :
+#
+#   1. `..` NE SORT PAS DE LA RACINE. Le prefixe voisin porte les jetons de la boite ; une
+#      traversee servirait un fichier que ce serveur n'a aucun droit de lire a un navigateur.
+#   2. L'ONGLET SUIT LA PRESENCE REELLE. Une image d'avant ce stage n'a pas de doc — l'annoncer
+#      donnerait un onglet qui ouvre un 404, ce qui est pire que pas d'onglet.
+_deck = load_deck()
+_doc_root = tempfile.mkdtemp(prefix="lcars-doc-")
+os.makedirs(os.path.join(_doc_root, "manuel"), exist_ok=True)
+with open(os.path.join(_doc_root, "index.html"), "w") as _fh:
+    _fh.write("<!doctype html><title>doc</title>")
+with open(os.path.join(_doc_root, "manuel", "index.html"), "w") as _fh:
+    _fh.write("<!doctype html><title>manuel</title>")
+
+_secret = os.path.join(os.path.dirname(_doc_root), "hors-doc.html")
+with open(_secret, "w") as _fh:
+    _fh.write("SECRET")
+
+check(_deck.DOC_TYPES.get(".html") == "text/html; charset=utf-8",
+      "doc: les types servis sont ENUMERES — ce qui n'est pas dans la table ne sort pas")
+check(_deck.DOC_TYPES.get(".gitea_token") is None and _deck.DOC_TYPES.get("") is None,
+      "doc: une extension inconnue n'a pas de type, donc pas de reponse")
+
+# La resolution, telle que la route la fait : join + realpath + prefixe.
+def _resolve(rel):
+    full = os.path.realpath(os.path.join(_doc_root, rel))
+    root = os.path.realpath(_doc_root)
+    return full if (full == root or full.startswith(root + os.sep)) else None
+
+check(_resolve("index.html") is not None and _resolve("manuel/index.html") is not None,
+      "doc: une page de la doc se resout dans sa racine")
+check(_resolve("../hors-doc.html") is None,
+      "doc: `..` sort de la racine et est REFUSE — le prefixe voisin porte les jetons de la boite")
+check(_resolve("manuel/../../hors-doc.html") is None,
+      "doc: une traversee cachee au milieu du chemin est refusee comme les autres")
+
+# L'onglet suit le FICHIER d'entree, pas le repertoire : un dossier vide passerait une existence.
+check(os.path.isfile(os.path.join(_doc_root, "index.html")),
+      "doc: la sonde de l'onglet regarde index.html")
+_vide = tempfile.mkdtemp(prefix="lcars-doc-vide-")
+check(not os.path.isfile(os.path.join(_vide, "index.html")),
+      "doc: un repertoire VIDE ne fait pas apparaitre l'onglet")
+
 sys.exit(0 if ok else 1)

@@ -97,6 +97,25 @@ CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/consol
 # une surface qu'on n'a aucune raison d'ouvrir — et un `..` dans un nom de fichier n'est meme pas
 # une question qui se pose.
 DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
+# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT. Elle part dans l'image a cote du runtime
+# (`Dockerfile`, stage `site`), donc la boite sert SA propre doc — pas la derniere en ligne, pas une
+# copie a resynchroniser. Absente (image d'avant, ou build sans elle), l'onglet ne s'affiche pas :
+# un onglet qui ouvre un 404 est pire que pas d'onglet.
+DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/local/LCARS_v2/doc")
+# Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
+# pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
+DOC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".woff2": "font/woff2",
+    ".ico": "image/x-icon",
+    ".json": "application/json; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
 STATIC_FILES = {
     "xterm.js": "application/javascript; charset=utf-8",
     "xterm.css": "text/css; charset=utf-8",
@@ -575,7 +594,12 @@ def state(only=None, admin=False, people=None):
                 "project": p.get("project_slug"),
             })
         hs.append(h)
-    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin)}
+    # `doc` EST UNE MESURE, PAS UNE OPTION. L'onglet ne se dessine que si la doc est vraiment dans
+    # cette image : une image d'avant le stage `site`, ou un build qui l'a sautee, n'a rien a servir
+    # — et un onglet qui ouvre un 404 est pire que pas d'onglet. On regarde le fichier d'entree, pas
+    # le repertoire : un dossier vide passerait un test d'existence.
+    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin),
+            "doc": os.path.isfile(os.path.join(DECK_DOC, "index.html"))}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -827,6 +851,28 @@ function show(tab) {
     // n'existe pas.
     t.fit.fit();
     t.term.focus();
+  } else if (tab.frame) {
+    // ⚠ UN CADRE, ICI, ET C'EST COMPATIBLE AVEC CE QUI L'A RETIRE AILLEURS. Ce qu'on a fermé plus
+    // haut n'est pas l'iframe : c'est la SECONDE ORIGINE qu'elle recousait (un ttyd sur son propre
+    // port). `/doc/` est une route de CE serveur, derriere CETTE session — il n'y a rien a
+    // recoudre. Et le contenu est un document, pas un terminal : il n'a ni socket a perdre ni
+    // geometrie a ajuster.
+    //
+    // Cree UNE fois, comme les terminaux : recharger l'iframe a chaque clic reperdrait la page ou
+    // le lecteur en etait.
+    panel.style.display = 'none';
+    let f = stage.querySelector(`.pane[data-key="${tab.key}"]`);
+    if (!f) {
+      f = el('div', 'pane');
+      f.dataset.key = tab.key;
+      const fr = document.createElement('iframe');
+      fr.src = tab.frame;
+      fr.title = tab.crumb;
+      fr.style.cssText = 'width:100%;height:100%;border:0;background:var(--bg)';
+      f.appendChild(fr);
+      stage.appendChild(f);
+    }
+    f.hidden = false;
   } else {
     panel.style.display = '';
     panel.innerHTML = ''; panel.appendChild(tab.render());
@@ -1129,6 +1175,12 @@ function build(s) {
   };
 
   add('boite', 'Statut', null, { key: 'status', crumb: 'STATUT', render: () => statusPanel(s) });
+  // LA DOC DE CETTE VERSION, servie par CE serveur. Pas un lien vers le site en ligne : celui-la
+  // decrit la derniere version publiee, celle-ci decrit la boite qu'on regarde. Meme origine, meme
+  // porte — le cadre charge une route du deck, derriere la session deja verifiee.
+  if (s.doc) {
+    add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
+  }
   // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
   // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
   // ouvre. Un rail qui se dessine sur une reponse du serveur est un confort de lecture ; s'il etait
@@ -1460,6 +1512,46 @@ class Deck(BaseHTTPRequestHandler):
         # plus arriver par ailleurs.
         # Le statique vit DERRIERE la porte, comme la page qui le charge : il n'a aucun usage pour
         # qui n'est pas identifie, et le navigateur porte deja le cookie en le demandant.
+        # LA DOC — derriere la porte, meme origine, chemin relatif. Le site est bati avec
+        # `LCARS_SITE_BASE=/doc/`, donc ses liens internes pointent deja ici ; le servir ailleurs
+        # n'aurait aucun sens et le servir depuis une autre origine rouvrirait celle que ce deck a
+        # fermee.
+        #
+        # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE, et ce n'est pas une precaution de
+        # principe : `..` dans une URL est la faute la plus vieille du web, et elle sortirait ici du
+        # cote d'un prefixe qui porte les jetons de la boite. `realpath` + prefixe, sinon 404.
+        if path == "/doc" or path.startswith("/doc/"):
+            rel = path[len("/doc"):].lstrip("/") or "index.html"
+            if rel.endswith("/"):
+                rel += "index.html"
+            full = os.path.realpath(os.path.join(DECK_DOC, rel))
+            root = os.path.realpath(DECK_DOC)
+            if not (full == root or full.startswith(root + os.sep)):
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            if os.path.isdir(full):
+                full = os.path.join(full, "index.html")
+            ctype = DOC_TYPES.get(os.path.splitext(full)[1].lower())
+            if not ctype:
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            try:
+                with open(full, "rb") as fh:
+                    raw = fh.read()
+            except OSError:
+                # PAS DE 503 ICI. Une doc absente n'est pas une panne de la boite : l'onglet ne
+                # s'affiche que si `/api/state` l'a annoncee, donc arriver ici veut dire une URL
+                # tapee a la main ou une page qui n'existe pas dans cette version.
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+
         if path.startswith("/static/"):
             name = path[len("/static/"):]
             ctype = STATIC_FILES.get(name)

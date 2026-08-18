@@ -11,6 +11,7 @@
 // encore vrai.
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
+import { u } from '../lib/href.js';
 import { fleetVerbs, fleetStartOptions, lcarsEntries, envVars } from '../lib/cli.js';
 
 const verbs = fleetVerbs();
@@ -200,7 +201,7 @@ const sections = [
 
     <p class="note">La frontière n'est pas cosmétique : un shell exécute, starfleet arbitre. Un
     import demande une carte, une criticité et un cadrage — trois choses qu'une ligne de commande
-    ne saurait pas réclamer au bon moment. <a href="/outils/">Les outils, par porteur →</a></p>
+    ne saurait pas réclamer au bon moment. <a href={u("/outils/")}>Les outils, par porteur →</a></p>
   </section>
 
 </Site>

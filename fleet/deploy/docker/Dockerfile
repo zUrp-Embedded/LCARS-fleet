@@ -192,6 +192,44 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
     mix local.hex --force && mix local.rebar --force \
     && { LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh || [ "$?" -eq 3 ]; }
 
+# ─── Stage 1bis : la DOC, batie depuis le meme arbre ─────────────────────────────────────────────
+#
+# La plaquette (`assets/github.io`) se genere DEPUIS le code du produit : les cartes, les sieges,
+# les verbes de la console, les arbres d'un catalogue. Sur GitHub elle est publiee par Pages ; ici
+# elle part dans l'image pour que la boite serve sa PROPRE doc — celle de la version qu'elle fait
+# tourner, pas la derniere en ligne, pas une copie a resynchroniser.
+#
+# UN STAGE A ELLE, ET NODE N'ENTRE JAMAIS DANS LE RUNTIME. Meme patron que le stage `build` : on ne
+# copie que le resultat, ~300 Ko de HTML statique. Le runtime reste Elixir/Debian, sans node, sans
+# npm, sans node_modules.
+#
+# ⚠ L'ARBORESCENCE EST LE CONTRAT. Les lecteurs du site remontent quatre crans depuis
+# `src/lib/` pour trouver la racine du depot (`fleet/`, `assets/`), et `collect-assets.mjs` remonte
+# deux crans pour trouver `assets/`. Le stage reproduit donc la MEME forme : `/src/assets/github.io`
+# avec `/src/fleet` et `/src/assets/*` a cote. Un raccourci de chemin ici ferait echouer le build
+# sur un `illisible` qui accuserait le code.
+#
+# `LCARS_SITE_BASE=/doc/` : le deck la sert sous ce chemin, et tout lien interne se compose depuis
+# cette base (`src/lib/href.js`). Batie a la racine, la copie locale s'afficherait et tous ses liens
+# partiraient a la racine du deck — cassee en silence.
+FROM node:20-slim AS site
+# La provenance vient de l'APPELANT : ce stage n'a ni git ni `.git`, et la plaquette affiche le sha
+# en pied de page. Sans cet argument elle imprime « unknown », ce qui est honnete et visible.
+ARG GIT_SHA=unknown
+ENV LCARS_GIT_SHA=${GIT_SHA}
+WORKDIR /src/assets/github.io
+# Les manifestes d'abord : leur couche se cache tant qu'ils ne bougent pas.
+COPY assets/github.io/package.json assets/github.io/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+# Le site, puis CE QU'IL LIT. Le build echoue si l'un manque, et c'est voulu : une plaquette qui ne
+# trouve plus ce qu'elle decrit doit casser, pas servir la version d'avant.
+COPY assets/github.io ./
+COPY assets/avatars ../avatars
+COPY assets/favicon ../favicon
+COPY fleet /src/fleet
+ENV LCARS_SITE_BASE=/doc/
+RUN npm run build
+
 # ─── Stage 2 : runtime — slim, sshd = login-manager, tini = PID 1 ────────────────────────────────
 FROM ${RUNTIME_IMAGE} AS runtime
 
@@ -253,6 +291,10 @@ RUN apt-get update -qq \
 # /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
 # $PREFIX/bin, fleet_v2 pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
 COPY --from=build /local/LCARS_v2 /local/LCARS_v2
+# LA DOC, A COTE DU RUNTIME QU'ELLE DECRIT. Meme prefixe, meme verrou RO que le reste : elle est
+# lue par le deck, jamais ecrite. Le meme commit a produit les deux, donc la boite ne peut pas
+# servir la doc d'une autre version qu'elle-meme.
+COPY --from=site /src/assets/github.io/dist /local/LCARS_v2/doc
 RUN chown -R root:fleet /local/LCARS_v2 \
     && chmod -R u=rwX,g=rX,o= /local/LCARS_v2 \
     && ln -sf /local/LCARS_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \

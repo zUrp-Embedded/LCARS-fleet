@@ -7,6 +7,19 @@
 !fleet/deploy
 !catalogues
 !LICENSE
+# LA DOC ENTRE DANS LE CONTEXTE, ET SEULEMENT CE QU'ELLE LIT. Le stage `site` du Dockerfile batit
+# la plaquette depuis le meme arbre ; sans ces lignes il meurt sur « /assets/github.io: not found »,
+# parce que ce fichier est une allowlist (`*` puis des exceptions) et non une denylist.
+!assets/github.io
+!assets/avatars
+!assets/favicon
+# ... et surtout PAS ses 173 Mo de dependances, ni ses sorties : `npm ci` les reconstruit dans le
+# stage, et `public/` y est regenere par `collect-assets.mjs`. Les envoyer multiplierait par cent le
+# contexte de CHAQUE build, y compris ceux qui ne touchent pas au site.
+assets/github.io/node_modules
+assets/github.io/dist
+assets/github.io/public
+assets/github.io/.astro
 
 # Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et
 # état d'éditeur — jamais dans une image (le stage build refait deps+release proprement).

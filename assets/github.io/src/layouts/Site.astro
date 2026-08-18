@@ -2,23 +2,34 @@
 // Le SEUL squelette du site. Rail a deux niveaux (les pages, puis les sections de la page
 // courante), bascule de theme, et pied de provenance. Aucune page ne redefinit tout ca :
 // c'est la difference entre un site et cinq fichiers qui se ressemblent.
+import { u, base } from '../lib/href.js';
 const { title, pages, current, sections = [] } = Astro.props;
 // Deux groupes, et la separation encode ce qu'elle separe : au-dessus on presente, en dessous
 // on reference. Une page de manuel n'a pas le meme lecteur qu'une page de presentation — celui-ci
 // arrive avec une question precise, il ne se laisse pas derouler.
 const PAGES = [
-  { href: '/',                 label: 'Ce que c’est' },
-  { href: '/mecaniques/',      label: 'Comment ça marche' },
-  { href: '/equipage/',        label: 'L’équipage' },
-  { href: '/travailler-avec/', label: 'Travailler avec' },
-  { href: '/mettre-en-route/', label: 'Mettre en route' }
+  { href: u('/'),                 label: 'Ce que c’est' },
+  { href: u('/mecaniques/'),      label: 'Comment ça marche' },
+  { href: u('/equipage/'),        label: 'L’équipage' },
+  { href: u('/travailler-avec/'), label: 'Travailler avec' },
+  { href: u('/mettre-en-route/'), label: 'Mettre en route' }
 ];
 const MANUAL = [
-  { href: '/manuel/',     label: 'La console' },
-  { href: '/outils/',     label: 'Les outils' },
-  { href: '/catalogues/', label: 'Les catalogues' }
+  { href: u('/manuel/'),     label: 'La console' },
+  { href: u('/outils/'),     label: 'Les outils' },
+  { href: u('/catalogues/'), label: 'Les catalogues' }
 ];
 const nav = pages ?? PAGES;
+
+// LA GARDE, et elle vaut mieux qu'une consigne : elle refuse le build. Un `href="/quelque-chose"`
+// ecrit en dur est juste a la racine et faux sous une base, en SILENCE — la page s'affiche et ses
+// liens partent ailleurs. Les composer par `u()` est la seule forme qui tienne pour les deux
+// sorties, donc on verifie que c'est bien ce qui est arrive.
+for (const p of [...nav, ...MANUAL]) {
+  if (!p.href.startsWith(base)) {
+    throw new Error(`Site.astro: lien interne hors base (${p.href}) — passer par u() de lib/href.js`);
+  }
+}
 ---
 <!doctype html>
 <html lang="fr">
@@ -26,8 +37,8 @@ const nav = pages ?? PAGES;
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{title}</title>
-  <link rel="icon" href="/favicon/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/styles/lcars.css" />
+  <link rel="icon" href={u('/favicon/favicon.svg')} type="image/svg+xml" />
+  <link rel="stylesheet" href={u('/styles/lcars.css')} />
   <script is:inline>
     // Le theme AVANT le premier rendu, sinon la page clignote. Le choix du lecteur l'emporte
     // sur sa preference systeme ; sans choix, on ne pose rien et le media query decide.
@@ -37,7 +48,7 @@ const nav = pages ?? PAGES;
 <body>
   <div class="shell">
     <nav class="rail" aria-label="Navigation">
-      <a class="brand" href="/">LCARS</a>
+      <a class="brand" href={u('/')}>LCARS</a>
       <p class="grp">Le site</p>
       {nav.map((p) => (
         <a href={p.href} aria-current={p.href === current ? 'page' : undefined}>{p.label}</a>

@@ -8,6 +8,7 @@
 // publiable — les `@moduledoc` qui le portent sont en anglais et s'adressent a un developpeur.
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
+import { u } from '../lib/href.js';
 import { trees, supportedApiVersions, bundledName, fineOverrides, paths, states, systemRoleCount }
   from '../lib/catalogue.js';
 
@@ -263,7 +264,7 @@ const sections = [
     <p class="note">Il n'y a plus de geste « activer », et son absence est le sujet : installer un
     catalogue le rend servi. Ce qui se décide encore, c'est le catalogue d'un <b>projet</b> — fixé
     pour sa vie à sa création, donc demandé et jamais deviné.
-    <a href="/manuel/">Les commandes de la console →</a></p>
+    <a href={u("/manuel/")}>Les commandes de la console →</a></p>
   </section>
 
 </Site>
