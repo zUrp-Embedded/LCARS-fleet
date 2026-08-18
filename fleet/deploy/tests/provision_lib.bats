@@ -412,3 +412,48 @@ module_sh() {
   '
   [ "$status" -eq 0 ]
 }
+
+# ─── run_step — une etape longue qui dit ou elle en est ──────────────────────────────────────────
+#
+# `run_quiet` est muet par contrat, et c'est juste pour trente secondes. Le build de la release
+# dure plusieurs minutes : rien ne distingue alors « ca travaille » de « c'est fige », et la seule
+# chose qu'un humain fasse d'un ecran immobile, c'est l'interrompre. Ce qui est tenu ici : la phase
+# vient de la sortie REELLE de l'enfant (aucun pourcentage devine), et le rc traverse.
+
+@test "run_step: une ligne par CHANGEMENT de phase — pas une par seconde" {
+  module_sh '
+    run_step "build" -- bash -c "echo Compiling 3 files; sleep 1.2; echo Running ExUnit; sleep 1.2"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"build · compilation"* ]]
+  [[ "$output" == *"build · suite ExUnit"* ]]
+  # deux phases traversees, donc DEUX lignes — la boucle sonde chaque seconde, elle n'imprime pas.
+  [ "$(printf '%s\n' "$output" | grep -c '>>')" -eq 2 ]
+}
+
+@test "run_step: l'echec garde le rc, COMPTE, borne l'ecran et CONSERVE le fichier" {
+  module_sh '
+    export PROV_DUMP_LINES=3
+    rc=0
+    run_step "etape" -- bash -c "for i in \$(seq 1 200); do echo ligne-\$i; done; sleep 1.1; exit 7" || rc=$?
+    [ "$rc" -eq 7 ]
+    [ "$PROV_FAILED" -eq 1 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ligne-200"* ]]
+  [[ "$output" != *"ligne-100"* ]]
+  [[ "$output" == *"sortie COMPLÈTE conservée"* ]]
+  # le fichier nomme existe VRAIMENT — l'ancienne forme le supprimait juste apres l'avoir cite
+  f="$(printf '%s\n' "$output" | sed -n 's/.*conservée : \([^ ]*\).*/\1/p' | tail -n1)"
+  [ -s "$f" ]
+  [ "$(wc -l < "$f")" -eq 200 ]
+  rm -f "$f"
+}
+
+@test "run_step: un succes ne laisse AUCUN fichier derriere lui" {
+  before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
+  [ "$status" -eq 0 ]
+  after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  [ "$after" -eq "$before" ]
+}

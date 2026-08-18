@@ -149,8 +149,8 @@ apply() {
   # minutes : gate complet (format, compile strict, 3000+ tests, bats, topologie, dialyzer) puis
   # `mix release`. Sans cette ligne, l'ecran est fige et rien ne distingue « ca travaille » de
   # « c'est plante ». `--verbose` donne le detail a qui le demande.
-  p_step "build + pose de la release : gate complet puis mix release — PLUSIEURS MINUTES (--verbose pour le detail)"
-  run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
+  run_step "build de la release" -- \
+    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
   local install_rc=$?
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
     p_fail "etc/install.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"

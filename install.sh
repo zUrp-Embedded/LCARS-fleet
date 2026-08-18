@@ -23,8 +23,16 @@
 
 set -euo pipefail
 
-AMBER=$'\033[38;5;214m'; CYAN=$'\033[0;36m'; W=$'\033[1;37m'
-G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
+# MEME REGLE QUE `provision-lib.sh`, ET C'EST POURQUOI ELLE EST ICI AUSSI. Ce script colorisait
+# sans condition : redirige vers un fichier, son bandeau y laissait des `[1;37m` en clair pendant
+# que le provisionnement, lui, se taisait proprement. Un log a moitie colorise est le pire des deux
+# — illisible a la relecture ET incoherent. `-t 1` tranche pour les deux moities du meme geste.
+if [[ -n "${NO_COLOR:-}" || ! -t 1 ]]; then
+  AMBER=''; CYAN=''; W=''; G=''; R=''; N=''; BA=''
+else
+  AMBER=$'\033[38;5;214m'; CYAN=$'\033[0;36m'; W=$'\033[1;37m'
+  G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
+fi
 
 # ─── Options ────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"

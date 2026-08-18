@@ -206,6 +206,83 @@ verdict_apply() {
 # ─── run_quiet — succès silencieux, échec verbeux (l'école mail-in-a-box `hide_output`) ──────────
 # La commande est un ARGV. En échec : la commande, son code, et TOUTE sa sortie sont dumpés.
 # Rien n'est jamais étouffé en 2>/dev/null (le silence v1 cachait des perms cassées).
+# ─── run_step <label> -- <cmd…> — UNE ETAPE LONGUE QUI DIT OU ELLE EN EST ───────────────────────
+#
+# `run_quiet` est muet par contrat, et c'est juste pour trente secondes. Pour le build de la release
+# — gate complet puis `mix release`, plusieurs minutes — le mutisme n'est plus de la sobriete : rien
+# ne distingue « ca travaille » de « c'est fige », et la seule chose qu'un humain peut faire d'un
+# ecran immobile, c'est l'interrompre.
+#
+# ⚠ AUCUN POURCENTAGE INVENTE. On ne connait pas la duree totale et la deviner produirait une barre
+# qui ment — le pire des deux mondes, puisqu'elle serait crue. Ce qui est affiche est ce que
+# l'enfant a REELLEMENT annonce : la derniere phase reconnue dans sa propre sortie, et le temps
+# ecoule. Si les marqueurs changent un jour, la phase se fige et le chrono continue : on perd du
+# detail, jamais la verite.
+#
+# Sur un terminal : UNE ligne reecrite en place. Ailleurs (log, CI) : une ligne par CHANGEMENT de
+# phase — un log n'a que faire de soixante redessins de la meme seconde.
+_prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase reconnue
+  local m
+  m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1)"
+  case "$m" in
+    "Compiling"*)        echo "compilation" ;;
+    "Running ExUnit")    echo "suite ExUnit (3000+ temoins)" ;;
+    "Finished in "*)     echo "suite ExUnit terminee" ;;
+    "=== shell_gate"*)   echo "gate shell (python + bats)" ;;
+    "--- bats"*)         echo "gate shell (bats)" ;;
+    *"contracts.check green") echo "contrats" ;;
+    "lcars.topology")    echo "topologie" ;;
+    "Checking "*)        echo "dialyzer (construction du PLT)" ;;
+    "Total errors"*)     echo "dialyzer" ;;
+    "done (passed"*)     echo "dialyzer termine" ;;
+    "Release created at") echo "release posee" ;;
+    *)                   echo "demarrage" ;;
+  esac
+}
+
+run_step() { # run_step <label> -- <cmd…>
+  local label="$1"; shift
+  [[ "${1:-}" == "--" ]] && shift
+  # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
+  if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
+    p_step "$label"
+    run_quiet "$@"
+    return "$?"
+  fi
+  local out rc=0 t0="$SECONDS" phase="" prev="" el
+  out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
+  "$@" >"$out" 2>&1 &
+  local pid=$!
+  # On SONDE le fichier une fois par seconde plutot que de brancher un pipe : le code de retour de
+  # l'enfant reste recuperable par `wait`, alors qu'un `cmd | while read` mettrait la boucle dans un
+  # sous-shell et perdrait a la fois le rc et tout compteur touche dedans (meme piege que B3).
+  while kill -0 "$pid" 2>/dev/null; do
+    phase="$(_prov_phase_of "$out")"
+    el="$(printf '%02d:%02d' "$(( (SECONDS - t0) / 60 ))" "$(( (SECONDS - t0) % 60 ))")"
+    if [[ -t 1 ]]; then
+      printf '\r\033[K%s>>%s    %s: %s · %s · %s' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase" "$el"
+    elif [[ "$phase" != "$prev" ]]; then
+      printf '%s>>%s    %s: %s · %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase"
+    fi
+    prev="$phase"
+    sleep 1
+  done
+  wait "$pid" || rc=$?
+  [[ -t 1 ]] && printf '\r\033[K'
+  if [[ "$rc" -ne 0 ]]; then
+    p_fail "commande en échec (rc=$rc) : $*"
+    local n; n="$(wc -l < "$out")"
+    {
+      printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
+      tail -n "$PROV_DUMP_LINES" "$out"
+      printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$out"
+    } >&2
+    return "$rc"
+  fi
+  rm -f "$out"
+  return 0
+}
+
 run_quiet() {
   local out rc=0
   # `--verbose` (PROV_VERBOSE=1) : on ne capture RIEN, tout défile. C'est le mode de celui qui
