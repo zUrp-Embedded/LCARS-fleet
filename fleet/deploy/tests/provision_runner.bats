@@ -311,3 +311,38 @@ EOF
   [[ "$output" == *"PETIT-FILS-RC=0"* ]]
   [[ "$output" != *"MORT avant de rendre son verdict"* ]]
 }
+
+# ─── LA CIBLE EST WSL2 + DOCKER, ET LE REFUS EST UNE GARDE, PAS UN GOUT ─────────────────────────
+#
+# ⚖ ARBITRAGE USER 2026-08-18 : « jamais on s'installe sur le poste de l'user directement » et
+# « tu fais le script pour installer sur WSL, avec docker dispo, et tu arretes de vouloir gerer
+# toutes les configs de la terre ». Ce provisionnement possede /etc/wsl.conf, cree un groupe
+# systeme, pose /local et /home/private — et n'a aucun desinstalleur.
+
+@test "cible : un substrat linux est REFUSE, et le refus nomme la cible et l'echappatoire" {
+  run env PROV_SUBSTRATE=linux PROVISION_MODULE=00-preflight \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
+      bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
+  [[ "$output" == *"HORS CIBLE"* ]]
+  [[ "$output" == *"WSL2"* ]]
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
+}
+
+@test "cible : l'echappatoire est REELLE — nommee, elle degrade en avertissement" {
+  run env PROV_SUBSTRATE=linux LCARS_ALLOW_ANY_HOST=1 PROVISION_MODULE=00-preflight \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
+      bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
+  [[ "$output" != *"HORS CIBLE"* ]]
+  [[ "$output" == *"hors cible"* ]]
+}
+
+@test "cible : sous WSL, docker absent est une DERIVE qui nomme ce qui restera non converge" {
+  BIN="$BATS_TEST_TMPDIR/nodocker"; mkdir -p "$BIN"
+  # PATH reduit : les outils de base restent, `docker` n'y est pas.
+  run env PATH="$BIN:/usr/bin:/bin" PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
+      bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
+  [[ "$output" == *"docker absent"* ]]
+  [[ "$output" == *"50-forge"* ]]
+  [[ "$output" == *"55-deck-oidc"* ]]
+}
