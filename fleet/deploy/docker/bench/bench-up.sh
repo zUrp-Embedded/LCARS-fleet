@@ -163,6 +163,11 @@ if [[ -z "$ADVERTISE" ]]; then
 fi
 
 FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
+# L'adresse par laquelle un CONTENEUR atteint cette machine — troisieme role, distinct des deux
+# au-dessus. `lan_addr` repond « par ou je sors », ce qui est faux pour ANNONCER (cf. WSL en NAT)
+# et juste pour ceci : c'est la meme interface que le NAT du daemon emprunte. Repli sur l'annoncee
+# quand il n'y a pas d'adresse de sortie du tout (machine hors reseau).
+JOB_HOST="$(lan_addr)"; JOB_HOST="${JOB_HOST:-$ADVERTISE}"
 FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 
 say() { printf '[bench-up] %s\n' "$*"; }
@@ -511,7 +516,15 @@ else
        --forge-api "$FORGE_LOCAL_URL/api/v1" \
        --admin-token "$MASTER_TOKEN" \
        ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
-       --instance-url "http://forge:3000" \
+       `# ⚠ TROISIEME ADRESSE, ET LES DEUX AUTRES NE MARCHENT PAS ICI. Ce n'est ni le nom de service` \
+       `# compose (le runner tourne en dind : ses conteneurs de JOB sont sur un reseau par job, ou` \
+       `# "forge" n'existe pas — mesure du 2026-08-18, « Failed to connect to forge port 3000 »),` \
+       `# ni l'adresse ANNONCEE (sous WSL c'est "localhost", qui dans un conteneur designe le` \
+       `# conteneur). C'est celle par laquelle un CONTENEUR atteint cette machine : l'adresse de` \
+       `# sortie, et le port publie. Mesure du meme jour, depuis un reseau isole dans le dind :` \
+       `# http://<lan_addr>:21000/api/v1/version rend {"version":"1.26.1"}.` \
+       `# Elle sert aux DEUX : le runner y sonde la forge, et le job y clone.` \
+       --instance-url "http://${JOB_HOST}:${FORGE_PORT}" \
        --network "$FORGE_NET" \
        --project "${PROJECT}-runner" \
        --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
