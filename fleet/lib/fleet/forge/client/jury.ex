@@ -191,13 +191,22 @@ defmodule Fleet.Forge.Client.Jury do
 
       reviewers = reviews |> jury_reviewers() |> Enum.map(&RoleIdentity.role_or_login/1)
 
+      findings = findings_by_role(decisive)
+
       {:ok,
        %{
          verdicts: verdicts,
          reviewers: reviewers,
          records: to_records(decisive),
-         findings: findings_by_role(decisive),
-         outcome: review_outcome(reviewers, verdicts)
+         findings: findings,
+         # C2 — la courbe de la carte s'applique ICI AUSSI, et c'est la moitié qui compte de ce
+         # geste. Cette sortie est celle que lit l'arch ; le gate calcule la sienne sur l'union
+         # défensive du jury. Deux ENTRÉES, une RÈGLE — donc la politique doit entrer des deux
+         # côtés ou d'aucun : nourrir le gate seul afficherait « approuvé » à un humain pendant que
+         # le rail renvoie en rework, ce qui est exactement la seconde vérité que le @doc de
+         # `review_outcome/2` existe pour interdire. Absente des opts ⟹ agrégation booléenne.
+         outcome:
+           review_outcome(reviewers, verdicts, findings, Keyword.get(opts, :verdict_policy))
        }}
     end
   end

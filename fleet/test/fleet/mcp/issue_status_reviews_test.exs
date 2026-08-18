@@ -62,7 +62,14 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
     def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
 
     @impl true
-    def pr_review_state(_repo, _index, _opts), do: Process.get(:review_state)
+    # Ce monde n'a pas de route gravée : la politique de verdict retombe donc sur la carte du
+    # projet, et le rendu arch exerce le repli plutôt que la branche carte-de-l'issue.
+    def get_route(_repo, _number, _opts), do: :none
+
+    def pr_review_state(_repo, _index, opts) do
+      send(self(), {:review_state_opts, opts})
+      Process.get(:review_state)
+    end
 
     @impl true
     def create_issue(_r, _t, _b, _o), do: raise("read-only")
@@ -218,6 +225,33 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
       assert pr["review"] == "unknown"
       assert log =~ "forge unreachable"
       refute log =~ "returned no :records"
+    end
+  end
+
+  describe "C2 — la surface arch et le gate lisent la MÊME politique" do
+    test "la politique de verdict traverse jusqu'à la lecture d'état" do
+      # LA PROPRIÉTÉ QUE CE GESTE EXISTE POUR TENIR. `Jury.review_outcome` est factorisée — son
+      # @doc dit « factored so the status surface can NEVER drift from what the gate actually
+      # does ». Depuis que la carte peut refuser une PR que les juges ont approuvée, cette phrase
+      # n'est vraie que si la courbe entre des DEUX côtés. Ici on prouve le côté arch : la surface
+      # résout la politique par `Roles.verdict_policy_for/4` — la fonction que le gate appelle —
+      # et la passe à la lecture d'état au lieu de rendre un verdict de jury nu.
+      #
+      # Ce banc n'a pas de route gravée (`get_route → :none`) : la politique résolue est celle de
+      # la carte du PROJET. La valeur importe moins que le fait qu'une clé `:verdict_policy` soit
+      # présente — c'est elle qui distingue « la courbe a été consultée » de « personne n'a
+      # demandé », et c'est cette seconde forme qui laissait diverger les deux lecteurs.
+      Process.put(:review_state, {:ok, %{verdicts: %{}, reviewers: [], records: []}})
+      _ = status()
+
+      assert_received {:review_state_opts, opts}
+
+      assert Keyword.has_key?(opts, :verdict_policy),
+             "la surface arch a lu l'état du jury SANS la courbe : elle peut afficher approuvé " <>
+               "pendant que le gate renvoie en rework"
+
+      assert Keyword.has_key?(opts, :head_sha),
+             "témoin : le scoping par commit voyage toujours par la même porte"
     end
   end
 end

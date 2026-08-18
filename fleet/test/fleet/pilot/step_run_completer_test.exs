@@ -72,6 +72,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 

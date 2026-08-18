@@ -59,6 +59,7 @@ defmodule Fleet.MCP.DependencyToolsTest do
     @impl true
     def merged_pr_of_issue(_r, _n, _o), do: :none
     @impl true
+    def get_route(_r, _n, _o), do: :none
     def pr_review_state(_r, _n, _o), do: {:ok, %{}}
   end
 

@@ -2439,7 +2439,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Reads the issue PR across open, closed, and merged states.
   defp issue_pr_status(forge, repo, number) do
     case find_issue_pr(forge, repo, number) do
-      {:ok, pr} -> {:ok, render_pr(forge, repo, pr)}
+      {:ok, pr} -> {:ok, render_pr(forge, repo, number, pr)}
       other -> other
     end
   end
@@ -2502,9 +2502,21 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Arch-facing PR object. `review` renders the gate's own routing predicate, computed
   # pilot-side (`Jury.review_outcome/2`) and carried as DATA by `pr_review_state` — factored,
   # never copied here.
-  defp render_pr(forge, repo, pr) do
+  #
+  # C2 — ET LA POLITIQUE DE VERDICT ENTRE ICI AUSSI, PAR LA MÊME PORTE QUE LE GATE. Depuis que la
+  # carte peut refuser ce qu'un juge a approuvé, « ce que dit le jury » et « ce que fait le rail »
+  # ne coïncident plus tout seuls : cette surface afficherait `approved` à un architecte pendant
+  # que le pilote renvoie le producteur en rework, et l'architecte n'aurait aucun moyen de voir
+  # pourquoi sa PR ne bouge pas. `Roles.verdict_policy_for/4` est la résolution UNIQUE, appelée des
+  # deux côtés avec le client forge de l'appelant — c'est précisément pour cette propriété que
+  # `review_outcome` est factorisée plutôt que recopiée, et la respecter coûte cet argument.
+  defp render_pr(forge, repo, issue_number, pr) do
+    policy = Fleet.Project.Roles.verdict_policy_for(forge, repo, issue_number)
+
+    read_opts = [head_sha: get_in(pr, ["head", "sha"]), verdict_policy: policy]
+
     {verdicts, records, review} =
-      case forge.pr_review_state(repo, pr["number"], head_sha: get_in(pr, ["head", "sha"])) do
+      case forge.pr_review_state(repo, pr["number"], read_opts) do
         {:ok, %{verdicts: verdicts, outcome: outcome, records: records}} ->
           {verdicts, records, review_string(outcome)}
 

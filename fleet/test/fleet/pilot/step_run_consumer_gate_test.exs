@@ -18,6 +18,8 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   defmodule StubForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 

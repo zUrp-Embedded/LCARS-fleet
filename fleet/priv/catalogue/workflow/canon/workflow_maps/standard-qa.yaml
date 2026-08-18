@@ -26,6 +26,12 @@ spec:
   # ressembler a un gate qui travaille. Vert -> le jury est convoque et le FAIT voyage dans son
   # brief (le juge ne re-derive pas ce qu'une machine atteste mieux que lui).
   ci: required
+  # C2 — LA COURBE DE TOLÉRANCE. Cette carte sert C2 à C4 : du firmware qui clignote au firmware
+  # qui peut blesser. Un juge qui documente un finding CRITIQUE et approuve quand même a mesuré un
+  # défaut et l'a laissé passer ; à cette criticité, c'est la carte qui dit non. Elle ne peut que
+  # DURCIR : un `request_changes` reste bloquant quoi qu'il arrive, jamais l'inverse.
+  verdict_policy:
+    block_at: critical
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
   max_rework_rounds: 2
   steps:

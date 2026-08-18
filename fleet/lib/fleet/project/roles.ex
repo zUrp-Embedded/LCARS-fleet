@@ -239,6 +239,69 @@ defmodule Fleet.Project.Roles do
   defp get_card_name(_), do: nil
 
   @doc """
+  The card's VERDICT POLICY — its tolerance curve, or `nil` when it declares none.
+
+  Single site that knows the field, exactly as `ci/1` is the single site that knows that enum: a
+  rename must have one place to fail. `nil` is a VALUE here ("this card declares no curve"), never
+  a default invented on absence — `Jury.review_outcome/4` given `nil` is indistinguishable from the
+  boolean aggregation, which is what lets the canon migrate one card at a time.
+
+  NO WARNING ON ABSENCE, and that is the difference with `ci/1`: `spec.ci` is mandatory to the
+  schema, so a card without it bypassed validation and deserves to be shouted at. `verdict_policy`
+  is optional by design — most cards will never carry one, and a line of log per verdict for a
+  field nobody promised would train a reader to skip the logs that matter.
+  """
+  @spec verdict_policy(map() | any()) :: map() | nil
+  def verdict_policy(%{"verdict_policy" => %{} = policy}), do: policy
+  def verdict_policy(_card), do: nil
+
+  @doc "Verdict policy of the PROJECT's declared card — twin of `project_ci/2`, same fallback family."
+  @spec project_verdict_policy(String.t(), keyword()) :: map() | nil
+  def project_verdict_policy(repo, opts \\ []) when is_binary(repo),
+    do: verdict_policy(load_project_card(repo, opts))
+
+  @doc """
+  The verdict policy that applies to a PR, resolved from the ISSUE's engraved card when a route
+  exists and from the PROJECT's declared card otherwise.
+
+  ⚠ UNE SEULE FONCTION, PARCE QUE DEUX LECTEURS EN DÉPENDENT ET QU'ILS DOIVENT DIRE LA MÊME CHOSE.
+  `Jury.review_outcome` est décrit dans son propre @doc comme « the SINGLE truth of where a jury
+  stands », partagé par le gate de merge et la lecture de statut de l'arch, « factored so the status
+  surface can NEVER drift from what the gate actually does ». Une politique résolue deux fois —
+  une par appelant — rendrait cette phrase fausse le jour où les deux copies divergent, et la
+  divergence serait invisible : le gate refuserait, l'arch lirait « approuvé ».
+
+  Elle prend le client forge en ARGUMENT plutôt que de le nommer : ses deux appelants vivent dans
+  des domaines qui ne se voient pas (le pilote et la surface pod), et c'est le seul détail qui les
+  sépare. Le reste — route, chargement, repli — est ici, une fois.
+
+  Fail-safe : toute panne de lecture rend `nil`, c'est-à-dire l'agrégation booléenne. Une carte
+  illisible ne doit pas pouvoir DURCIR un rail par accident ; elle le laisse où il était.
+  """
+  @spec verdict_policy_for(module(), String.t(), integer(), keyword()) :: map() | nil
+  def verdict_policy_for(forge, repo, issue_number, opts \\ [])
+      when is_binary(repo) and is_integer(issue_number) do
+    forge_opts = Keyword.get(opts, :forge_opts, [])
+
+    with {:ok, {map_name, _step}} <- forge.get_route(repo, issue_number, forge_opts),
+         {:ok, card} when is_map(card) <- safe_load_card(map_name, repo) do
+      verdict_policy(card)
+    else
+      _ -> verdict_policy(load_project_card(repo, opts))
+    end
+  end
+
+  # `load!` raises on an unloadable card; here a raise would take down a gate tick over a curve that
+  # is optional in the first place. Rescued into the same `nil` every other failure yields — the
+  # project card fallback right above stays the interesting path, and an unreadable engraved card
+  # is reported by the routing that OWNS that failure, not invented a second time here.
+  defp safe_load_card(map_name, repo) do
+    {:ok, Fleet.Workflow.Loader.load!(map_name, Fleet.Workflow.Loader.card_opts_for_repo(repo))}
+  rescue
+    _ -> :error
+  end
+
+  @doc """
   Returns the CI policy of the project's declared card — the twin of `project_jury/2`, and it exists
   because the two were NOT twins.
 

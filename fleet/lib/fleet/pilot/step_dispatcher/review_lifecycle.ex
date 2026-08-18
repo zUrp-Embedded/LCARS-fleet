@@ -126,13 +126,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   read of `pr_review_state`. `requested` = union(volatile requested_reviewers, stable jury);
   `verdicts` = commit-scoped `login → verdict` map.
   """
-  @spec dispatch_by_verdicts([String.t()], map(), integer(), String.t(), Ctx.t()) ::
+  @spec dispatch_by_verdicts([String.t()], map(), map(), integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
-  def dispatch_by_verdicts(requested, verdicts, pr_number, head, %Ctx{} = ctx) do
+  def dispatch_by_verdicts(requested, verdicts, findings, pr_number, head, %Ctx{} = ctx) do
     # The classification is NOT re-derived here: `Jury.review_outcome/2` is the single truth
     # (also carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) —
     # a divergence between what the gate does and what the status says would be a second truth.
-    case Fleet.Forge.Client.Jury.review_outcome(requested, verdicts) do
+    case Fleet.Forge.Client.Jury.review_outcome(
+           requested,
+           verdicts,
+           findings,
+           issue_card_verdict_policy(head, ctx)
+         ) do
       {:pending, [next | _]} ->
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
         # not a fleet feature branch can never receive a judge — `RoleDispatch.dispatch` refuses it
@@ -235,6 +240,30 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       Fleet.Project.Roles.jury(map, ctx.opts)
     else
       _ -> Fleet.Project.Roles.project_jury(ctx.repo, ctx.opts)
+    end
+  end
+
+  # The card's VERDICT POLICY — the tolerance curve applied to what the judges MEASURED. Third of
+  # the trio (`jury`, `ci`, `verdict_policy`), and the only one whose resolution does NOT live here:
+  # `Roles.verdict_policy_for/4` owns it because the arch-facing surface needs the SAME answer, and
+  # the two live in domains that cannot see each other. A copy on each side would drift silently —
+  # the gate refusing while the status reads "approved" — which is the failure `review_outcome`'s
+  # own @doc names as the reason it is factored at all.
+  defp issue_card_verdict_policy(head, %Ctx{} = ctx) do
+    case RoleDispatch.parse_feature_branch_or_skip(head) do
+      {:ok, {issue_n, _producer}} ->
+        Fleet.Project.Roles.verdict_policy_for(
+          ctx.forge,
+          ctx.repo,
+          issue_n,
+          Keyword.put(ctx.opts, :forge_opts, ctx.forge_opts)
+        )
+
+      # A head that is not a fleet feature branch has no engraved route to read. The project's own
+      # card still governs it — same fallback as the jury and the CI policy, for the same PRs
+      # (human PR, adopted orphan).
+      _ ->
+        Fleet.Project.Roles.project_verdict_policy(ctx.repo, ctx.opts)
     end
   end
 
