@@ -134,18 +134,41 @@ apply() {
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
 
-  # 5. LA STRUCTURE, par un run TRANSITOIRE de l'image (porte `forge-apply` de l'entrypoint).
-  #    Le conteneur rejoint le réseau de la forge : `forge` y résout, comme pour la boîte.
+  # 5. LA STRUCTURE, par un conteneur TRANSITOIRE de l'image (porte `forge-apply` de l'entrypoint).
+  #
+  # ⚠ AUCUN BIND D'UN CHEMIN DE L'HÔTE, ET CE N'EST PAS UNE PRÉFÉRENCE. Le daemon peut vivre
+  # ailleurs que sur cette machine — sous Docker Desktop il est dans une autre VM — et un chemin
+  # d'hôte lui est alors INVISIBLE : il crée un répertoire vide à sa place, EN SILENCE. Mesuré ici
+  # le 2026-08-18 : `-v /home/private:/home/private` donnait au conteneur un dossier vide, et le
+  # geste répondait « la boîte ne détient pas ce qu'il faut » en nommant des fichiers qui existaient
+  # à trente centimètres. `bench-runner.sh` porte déjà cet avertissement mot pour mot ; j'y suis
+  # entré quand même.
+  #
+  # La forme qui traverse : `docker create` → `docker cp` → `docker start`. `cp` passe par l'API du
+  # daemon, donc il atteint le conteneur où qu'il soit. Le volume nommé porte l'autorité (un objet
+  # du daemon, pas un chemin), et il est monté HORS de `/home` — que l'image déclare déjà comme
+  # volume. `LCARS_PRIVATE_DIR` dit au geste où regarder ; il l'accepte depuis toujours.
   p_step "forge du poste : pose de la structure (orgs, comptes de rôle, teams, dépôt modèle)"
-  run_step "structure de la forge" -- \
-    d run --rm --network "$FORGE_NET" \
-      -v "$PROV_TOKENS_DIR:$PROV_TOKENS_DIR" \
-      -v "$enroll/roles.auto.tfvars.json:/opt/lcars/fleet/deploy/deps/roles.auto.tfvars.json:ro" \
-      -e FORGE_BASE_URL="http://forge:3000" \
-      -e LCARS_BUILTIN_HUMAN="$PROV_HUMAN" \
-      "$PROV_FORGE_IMAGE" forge-apply \
-    || { p_fail "structure NON posée — relis la sortie, rien n'est supposé"; rm -rf "$enroll"; verdict_apply; }
+  local vol="${PROV_FORGE_PROJECT}-authority" cid rc=0
+  d volume create "$vol" >/dev/null 2>&1 || true
+  cid="$(d create --network "$FORGE_NET" \
+        -v "$vol:/authority" \
+        -e LCARS_PRIVATE_DIR=/authority \
+        -e FORGE_BASE_URL="http://forge:3000" \
+        -e LCARS_BUILTIN_HUMAN="$PROV_HUMAN" \
+        "$PROV_FORGE_IMAGE" forge-apply 2>/dev/null)"
+  [[ -n "$cid" ]] || { p_fail "conteneur de pose non créable ($PROV_FORGE_IMAGE)"; rm -rf "$enroll"; verdict_apply; }
+  {
+    d cp "$MASTER_TOKEN_FILE" "$cid:/authority/forge-master.token" &&
+    d cp "$SEED_FILE"         "$cid:/authority/forge-seed.pass" &&
+    d cp "$enroll/roles.auto.tfvars.json" "$cid:/opt/lcars/fleet/deploy/deps/roles.auto.tfvars.json"
+  } >/dev/null 2>&1 \
+    || { p_fail "autorité/roster non déposés dans le conteneur de pose"; d rm -f "$cid" >/dev/null 2>&1; rm -rf "$enroll"; verdict_apply; }
+  run_step "structure de la forge" -- d start -a "$cid" || rc=$?
+  d rm -f "$cid" >/dev/null 2>&1 || true
   rm -rf "$enroll"
+  [[ "$rc" -eq 0 ]] \
+    || { p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
   verdict_apply
