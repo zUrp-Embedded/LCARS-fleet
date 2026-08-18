@@ -89,6 +89,7 @@ defmodule Fleet.Test.OsProbeTest do
 
     port =
       Port.open({:spawn_executable, weird}, [:binary, args: ["-c", "while :; do sleep 1; done"]])
+
     {:os_pid, pid} = Port.info(port, :os_pid)
     on_exit(fn -> System.cmd("kill", ["-KILL", to_string(pid)], stderr_to_stdout: true) end)
 
