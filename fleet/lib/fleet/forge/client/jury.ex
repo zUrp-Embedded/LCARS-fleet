@@ -33,7 +33,42 @@ defmodule Fleet.Forge.Client.Jury do
   """
   @spec review_outcome([String.t()], %{optional(String.t()) => :approved | :changes_requested}) ::
           {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
-  def review_outcome(jury, verdicts) when is_list(jury) and is_map(verdicts) do
+  def review_outcome(jury, verdicts), do: review_outcome(jury, verdicts, %{}, nil)
+
+  @doc """
+  The same predicate, given what the judges MEASURED and the curve the card declares.
+
+  `verdict = f(rapports, criticité)` — the origin model, and the four-arity is where it finally
+  becomes true. The criticality reaches here as DATA (`policy`, resolved from the card that the
+  project's declared level selected), never as a policy compiled into this module: same doctrine as
+  `spec.ci` and `spec.jury` — the card governs, the engine stays agnostic.
+
+  ## The one rule that keeps this safe
+
+  **A card can only be STRICTER. It never repeals a judge's explicit refusal.** `:changes_requested`
+  in, `:changes_requested` out, whatever the curve says. This is the same line the CI path was
+  corrected onto (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
+  floor, a card's tolerance is a ceiling, and a machine that promotes over an explicit human-shaped
+  refusal is not a policy — it is an override.
+
+  So the ONLY thing a policy can do is turn an `:approved` jury into `:changes_requested`, when a
+  judge's own measurements exceed what this card tolerates. That case is real and is the whole
+  point of the model: an approval carrying a `critical` finding is a judge that documented a defect
+  and waved it through, and on a deliverable that can hurt someone, the card is what says no.
+
+  Leniency is NOT expressible here, deliberately — a low-criticality card grants it by declaring no
+  jury at all (`c0-poc`: `jury: []`), which is honest: nobody judged, so nobody was overruled.
+
+  `policy` nil / no `block_at` / empty findings ⟹ IDENTICAL to `review_outcome/2`, byte-for-byte.
+  """
+  @spec review_outcome(
+          [String.t()],
+          %{optional(String.t()) => :approved | :changes_requested},
+          %{optional(String.t()) => map()},
+          map() | nil
+        ) :: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+  def review_outcome(jury, verdicts, findings, policy)
+      when is_list(jury) and is_map(verdicts) and is_map(findings) do
     pending = jury -- Map.keys(verdicts)
 
     cond do
@@ -46,10 +81,24 @@ defmodule Fleet.Forge.Client.Jury do
       Enum.any?(Map.values(Map.take(verdicts, jury)), &(&1 == :changes_requested)) ->
         :changes_requested
 
+      policy_blocks?(jury, findings, policy) ->
+        :changes_requested
+
       true ->
         :approved
     end
   end
+
+  # The findings of a reviewer who is NOT on the jury are not consulted: a human passing by and
+  # leaving a review does not get to raise the bar of a card they were never named in — the same
+  # `Map.take(verdicts, jury)` discipline the clause above already applies to verdicts.
+  defp policy_blocks?(jury, findings, %{"block_at" => block_at}) do
+    findings
+    |> Map.take(jury)
+    |> Enum.any?(fn {_role, f} -> Fleet.FindingsWire.blocks?(f, block_at) end)
+  end
+
+  defp policy_blocks?(_jury, _findings, _policy), do: false
 
   @doc """
   Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per

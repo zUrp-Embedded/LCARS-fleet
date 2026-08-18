@@ -91,6 +91,50 @@ defmodule Fleet.FindingsWire do
 
   def parse(_), do: :none
 
+  @doc """
+  The severities the findings-v1 scale defines, weakest first. The ONLY place this order is
+  written: a card's `block_at` is compared against it, and a second copy would be a second scale.
+  """
+  @spec severities() :: [String.t()]
+  def severities, do: ["minor", "important", "critical"]
+
+  @doc """
+  Does this judge's payload carry a finding at or above `block_at`?
+
+  UNKNOWN SEVERITIES DO NOT BLOCK, and that is a decision rather than an oversight: the schema
+  constrains the enum at ingestion, so a value outside it means the payload is off-spec — and
+  refusing a delivery on the strength of a string nobody can rank would be inventing a verdict out
+  of garbage. They are not silently equal to `minor` either; they simply carry no measure. The
+  binary verdict of the judge is untouched by any of this: it is the floor, this is a ceiling.
+
+  A payload with no findings, or shaped unexpectedly, answers `false` — an absence of measurement
+  is never evidence of a defect.
+  """
+  @spec blocks?(map() | nil, String.t() | nil) :: boolean()
+  def blocks?(nil, _block_at), do: false
+  def blocks?(_findings, nil), do: false
+
+  def blocks?(%{"findings" => findings}, block_at) when is_list(findings) do
+    case rank(block_at) do
+      nil ->
+        false
+
+      floor ->
+        Enum.any?(findings, fn
+          %{"severity" => s} -> (rank(s) || -1) >= floor
+          _ -> false
+        end)
+    end
+  end
+
+  def blocks?(_findings, _block_at), do: false
+
+  defp rank(severity) when is_binary(severity) do
+    Enum.find_index(severities(), &(&1 == severity))
+  end
+
+  defp rank(_), do: nil
+
   # Cut at the last marker, then take the first fenced block after it. String primitives rather
   # than a regex: the payload is arbitrary JSON (braces, quotes, newlines), and a regex that has to
   # be right about all three is harder to read than two splits.
