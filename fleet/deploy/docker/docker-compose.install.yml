@@ -69,7 +69,6 @@ services:
       LCARS_UID: "${LCARS_UID:-1000}"
       # L'email du compte FORGE de l'humain — c'est lui qui mappe ses commits sur son compte
       # (avatar, attribution). Vide = les commits signent <user>@<hostname>, non mappables.
-      LCARS_ADMIRAL_EMAIL: "${LCARS_ADMIRAL_EMAIL:-}"
       # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
       # ses listeners (API, deck d'observation) en loopback par defaut : dans une boite, cette
       # loopback est celle du CONTENEUR — le deck repond a l'interieur et reste injoignable depuis

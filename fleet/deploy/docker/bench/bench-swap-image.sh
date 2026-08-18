@@ -115,7 +115,6 @@ env LCARS_IMAGE="$IMAGE" \
     `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
     `# vient de la forge (fleet:humans) via le convergeur, pas du box. Miroir de bench-up.sh.` \
     LCARS_ADMIRAL="admiral" \
-    LCARS_ADMIRAL_EMAIL="admiral@lcars.local" \
     FORGE_BASE_URL="http://forge:3000" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \

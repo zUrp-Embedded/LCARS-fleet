@@ -256,19 +256,15 @@ if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
   fi
 fi
 
-# L'IDENTITÉ GIT DE L'HUMAIN — seed-once, comme fleet_v2.env : sans user.email, git signe
-# `<user>@<hostname>` et la forge ne peut mapper le commit sur AUCUN compte (l'attribution
-# auteur-humain devient un fantôme sans avatar). L'email doit être CELUI du compte forge de
-# l'humain ; il arrive par l'environnement d'install. Absent = dit, jamais inventé.
-if [[ -n "${LCARS_ADMIRAL_EMAIL:-}" ]]; then
-  HOME_DIR="$(getent passwd "$LCARS_ADMIRAL" | cut -d: -f6)"
-  if ! su - "$LCARS_ADMIRAL" -c 'git config --global user.email' >/dev/null 2>&1; then
-    su - "$LCARS_ADMIRAL" -c "git config --global user.name '$LCARS_ADMIRAL' && git config --global user.email '$LCARS_ADMIRAL_EMAIL'"
-    say "identité git seedée : $LCARS_ADMIRAL <$LCARS_ADMIRAL_EMAIL> (à l'humain ensuite)"
-  fi
-else
-  say "LCARS_ADMIRAL_EMAIL non posé — les commits de l'humain signeront <user>@<hostname>, la forge ne les mappera pas"
-fi
+# ⚠ L'IDENTITÉ GIT NE SE POSE PLUS ICI, ET LA VARIABLE `LCARS_ADMIRAL_EMAIL` N'EXISTE PLUS.
+# Ce bloc posait `user.name`/`user.email` de `LCARS_HUMAN` — l'unique humain de la boîte à l'époque.
+# `identity-v2` a fait de l'entrée du conteneur le SYSADMIN et confié les humains à la team
+# `humans` : la substitution `LCARS_HUMAN` → `LCARS_ADMIRAL` a suivi mécaniquement, et l'identité a
+# atterri sur le seul compte qui ne commite jamais, pendant que le boot annonçait « identité git
+# seedée » à chaque démarrage. Un humain enrôlé après le boot n'était de toute façon pas atteignable
+# d'ici.
+# C'est `70-human` qui la porte désormais, per-humain, DÉRIVÉE DU COMPTE FORGE — la seule adresse
+# qui mappe un commit sur un compte (avatar compris). Une variable d'install n'en était qu'une copie.
 
 if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
   # git refuse un repo d'un autre owner (« dubious ownership ») : le clone vient de l'hôte,

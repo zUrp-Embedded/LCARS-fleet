@@ -31,6 +31,75 @@ HOME_DIR="$(human_home)"
 ENV_FILE="$HOME_DIR/.lcars/fleet_v2.env"
 TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 
+# ─── L'IDENTITÉ GIT DE L'HUMAIN, ET POURQUOI ELLE VIENT DE LA FORGE ─────────────────────────────
+#
+# Sans `user.email`, git signe `<login>@<hostname>` — `lcars@bridge` sur cette image. La forge ne
+# mappe cette adresse sur AUCUN compte : le commit s'affiche sans lien, sans avatar, attribué à un
+# fantôme. L'adresse qui mappe est celle du COMPTE FORGE, et c'est la seule ; toute autre source
+# (une variable d'install, une convention `<login>@lcars.local`) en est au mieux une copie, qui a
+# raison jusqu'au jour où quelqu'un change son email sur la forge.
+#
+# ⚠ CE BLOC A VÉCU DANS L'ENTRYPOINT ET IL Y EST MORT EN SILENCE. Il posait l'identité de
+# `LCARS_HUMAN` — l'unique humain de la boîte, à l'époque. `identity-v2` (b99d035f2) a fait de
+# l'entrée du conteneur le SYSADMIN et confié les humains à la team `humans` : la substitution
+# `LCARS_HUMAN` → `LCARS_ADMIRAL` a suivi, mécaniquement, et l'identité a atterri sur le seul
+# compte qui ne commite jamais. Le commentaire, lui, disait toujours « l'email du compte forge de
+# l'humain » — vrai, à côté d'un code qui ne le faisait plus. Le boot annonçait « identité git
+# seedée » à chaque démarrage, ce qui achevait de rendre le trou invisible.
+# Mesure du 2026-08-18, banc lcars-l8 : admiral <admiral@lcars.local>, `lcars` et `lordzurp` VIDES.
+#
+# Ici, c'est per-humain par construction : ce module tourne pour CHAQUE humain convergé, y compris
+# ceux enrôlés après le boot — le cas que l'entrypoint ne pouvait pas couvrir.
+GITCONFIG_EMAIL() { as_human git config --global --get user.email 2>/dev/null || true; }
+
+# Le compte forge de PROV_HUMAN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
+# jeton système n'est pas là, ou si ce login n'a pas de compte — trois absences qu'on ne comble pas.
+forge_account() {
+  local tok
+  [[ -n "$PROV_FORGE_URL" ]] || return 0
+  [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] || return 0
+  tok="$(tr -d '[:space:]' < "$PROV_TOKENS_DIR/system.gitea_token")"
+  curl -s -m 10 -H "Authorization: token $tok" \
+       "$PROV_FORGE_URL/api/v1/users/$PROV_HUMAN" 2>/dev/null \
+    | jq -r 'if type=="object" and ((.email // "") != "") then "\(.full_name // "")\t\(.email)" else empty end' \
+       2>/dev/null || true
+}
+
+# La sonde ne PARLE que si cette personne a un compte forge. « Pas de compte » est un fait que
+# `50-forge` possède déjà et rapporte ; le redire ici en ferait deux, et deux voix sur un même fait
+# divergent le jour où l'une des deux change.
+check_git_identity() {
+  local mail; mail="$(GITCONFIG_EMAIL)"
+  if [[ -n "$mail" ]]; then
+    p_ok "identité git posée pour $PROV_HUMAN <$mail> (le fichier lui appartient — on n'y revient pas)"
+    return 0
+  fi
+  local acct; acct="$(forge_account)"
+  [[ -n "$acct" ]] || return 0
+  p_drift "identité git absente pour $PROV_HUMAN — ses commits signeront <login>@<hostname>, que la forge ne mappe sur aucun compte (ni attribution ni avatar) ; l'apply la pose depuis son compte forge"
+}
+
+# SEED-ONCE, comme `fleet_v2.env` : dès qu'un `user.email` existe, il est à la personne. Un apply
+# qui le réécrirait effacerait le choix de quelqu'un à chaque passage.
+apply_git_identity() {
+  local mail; mail="$(GITCONFIG_EMAIL)"
+  [[ -z "$mail" ]] || return 0
+  local acct name email
+  acct="$(forge_account)"
+  if [[ -z "$acct" ]]; then
+    # Rien à poser et rien à inventer. Muet si la personne n'a pas de compte (fait de 50-forge) ;
+    # sinon c'est la forge qui n'a pas répondu, et le prochain passage la trouvera.
+    return 0
+  fi
+  name="${acct%%$'\t'*}"
+  email="${acct#*$'\t'}"
+  [[ -n "$name" ]] || name="$PROV_HUMAN"
+  as_human git config --global user.name  "$name"  || { p_fail "git config user.name pour $PROV_HUMAN"; return 1; }
+  as_human git config --global user.email "$email" || { p_fail "git config user.email pour $PROV_HUMAN"; return 1; }
+  PROV_CHANGED=$((PROV_CHANGED + 1))
+  p_chg "identité git posée : $name <$email> (depuis son compte forge — c'est elle qui mappe ses commits, avatar compris)"
+}
+
 # Sondes d'identité — verdicts + consignes, AUCUNE mutation, TOUJOURS en warn : les credentials
 # sont des gestes de l'humain, un apply ne peut ni les converger ni échouer dessus.
 probe_identity() {
@@ -116,6 +185,7 @@ check() {
     p_drift "fleet_v2.env absent ($ENV_FILE)"
   fi
 
+  check_git_identity
   probe_identity
   verdict_check
 }
@@ -203,6 +273,7 @@ apply() {
     p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet_v2 stop && start » pour l'appliquer"
   fi
 
+  apply_git_identity
   probe_identity
   verdict_apply
 }
