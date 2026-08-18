@@ -45,9 +45,12 @@ without leaving a half-installed box.
 tar xzf lcars-fleet-beta.tar.gz
 cd lcars-fleet
 
-./docker.sh build                          # ~3 GB transient, reclaimable afterwards
+./docker.sh build                            # ~3 GB transient, reclaimable afterwards
 fleet/deploy/docker/bench/bench-up.sh        # forge + box + runner, one gesture
 ```
+
+`build` produces **two** images: the box you will run, and the toolchain twin its CI runner serves.
+Both come out of the same Dockerfile, so the second costs a tag, not a build.
 
 The second command is the whole install. It creates a git forge, waits for it, provisions the
 accounts and teams, mints the tokens, starts the box, registers a CI runner, and prints what it

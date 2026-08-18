@@ -146,7 +146,35 @@ build_env() {
   export LCARS_GIT_SHA LCARS_BUILD_DATE
 }
 
-cmd_build() { build_env; compose build "$@"; }
+# ⚠ DEUX IMAGES SORTENT D'ICI, ET LA SECONDE NE SORTAIT DE NULLE PART. Le runner du banc sert le
+# label `elixir` avec `lcars-build:<tag>` — le stage `build` du MÊME Dockerfile, celui qui porte le
+# toolchain. Aucun script du dépôt ne le construisait : chaque mention était une consigne
+# « docker build --target build … » adressée à l'opérateur. Sur cette machine les jumeaux
+# existaient parce qu'un jour on avait joué la consigne à la main ; sur une machine neuve, jamais.
+#
+# Mesure du 2026-08-18, install sur une Debian vierge, chemin exact du README : forge, boîte,
+# tokens, creds, admin — tout vert, puis `bench-up` **exit 6**, « pas d'image lcars-build:2 pour le
+# label elixir ». Et ce n'est pas une dégradation : la carte canon déclare `ci: required`, donc
+# rien ne se livre sur ce banc sans runner. Les deux commandes du README rendaient donc un banc
+# qui refuse de monter, sur toute machine qui n'avait pas joué la consigne cachée.
+#
+# Le stage est DÉJÀ construit quand le runtime l'est — c'est sa dépendance. Le second appel ne fait
+# donc que l'étiqueter, sur le cache que le premier vient de remplir : le coût est le tag.
+cmd_build() {
+  build_env
+  compose build "$@"
+
+  # `docker build` et non `compose build` : compose ne construit que les services declares, et le
+  # stage `build` n'en est pas un. Le TAG derive de celui du runtime — c'est la regle que
+  # `bench-up.sh` applique pour trouver son jumeau (`lcars-fleet:v4` -> `lcars-build:v4`).
+  local tag="${LCARS_IMAGE:-lcars-fleet:2}"
+  tag="lcars-build:${tag##*:}"
+  echo "docker.sh: étiquetage du jumeau de build ($tag — le toolchain que le runner CI sert)"
+  docker build --target build -t "$tag" \
+    --build-arg "GIT_SHA=$LCARS_GIT_SHA" --build-arg "BUILD_DATE=$LCARS_BUILD_DATE" \
+    -f "$SCRIPT_DIR/fleet/deploy/docker/Dockerfile" "$SCRIPT_DIR" \
+    || { echo "docker.sh: jumeau de build NON étiqueté — le banc refusera de monter (bench-up, exit 6)" >&2; return 1; }
+}
 
 cmd_up() {
   assert_project_ours up
