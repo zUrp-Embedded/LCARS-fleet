@@ -533,3 +533,43 @@ FAKE
   [[ "$output" == *"config-token"* ]]
   [[ "$output" == *"apply"* ]]
 }
+
+# ─── le verrou d'apply se partage entre root et l'humain admin ───────────────────────────────────
+
+@test "le verrou est CREE partageable — root au boot, l'humain admin ensuite" {
+  # LE DEFAUT MESURE (2026-08-18, reproduit sur deux bancs). Le verrou vivait dans `/run/lock`, en
+  # `1777` : n'importe qui y cree un fichier, mais le boot joue l'apply en ROOT, donc root le creait
+  # en `0644 root:root` — et l'humain qui jouait `lcars catalogue install` ensuite ouvrait en
+  # ecriture un fichier qui n'etait pas le sien. « Permission denied », puis « verrou d'apply
+  # inouvrable » : un refus qui accuse le verrou pour un probleme de proprietaire, et un geste
+  # injouable par un humain sur toute boite ayant demarre une fois.
+  unset LCARS_APPLY_LOCK
+  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work"
+  mkdir -p "$LCARS_CATALOGUE_WORK"
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+
+  run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+
+  # Le verrou vit dans le repertoire que le provisionnement pose en 2770 root:<admin>, et il est
+  # ouvrable en ecriture par le GROUPE — c'est ca, et rien d'autre, qui rend le geste rejouable par
+  # les deux identites qui le jouent.
+  LOCK="$LCARS_CATALOGUE_WORK/.apply.lock"
+  [ -e "$LOCK" ]
+  [ "$(stat -c '%a' "$LOCK")" = "660" ]
+}
+
+@test "un verrou DEJA pose garde son mode — un durcissement d'operateur n'est pas contredit" {
+  unset LCARS_APPLY_LOCK
+  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work2"
+  mkdir -p "$LCARS_CATALOGUE_WORK"
+  : > "$LCARS_CATALOGUE_WORK/.apply.lock"
+  chmod 0600 "$LCARS_CATALOGUE_WORK/.apply.lock"
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+
+  run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$LCARS_CATALOGUE_WORK/.apply.lock")" = "600" ]
+}

@@ -47,6 +47,10 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
+# Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
+# que le verrou d'apply y vit desormais — et une variable definie plus bas que sa premiere lecture
+# ne tient que par l'ordre d'execution.
+CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
 # Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
 ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
 # L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
@@ -138,10 +142,27 @@ cmd_config_seed() {
 # `flock -n` : on REFUSE, on n'attend pas. Un appelant qui attendrait aurait deja recu son verdict
 # quand l'autre finit, et il repartirait sur une forge qui a bouge sous lui. Meme choix que
 # `provision`, qui refuse aussi (`un autre apply est en cours`).
+#
+# ⚠ LE VERROU VIVAIT DANS `/run/lock`, ET IL N'ETAIT PRENABLE QUE PAR SON PREMIER CREATEUR.
+# `/run/lock` est en `1777` : n'importe qui y CREE un fichier — mais le boot joue l'apply en ROOT,
+# donc root creait `lcars-forge-apply.lock` en `0644 root:root`, et l'humain qui jouait
+# `lcars catalogue install` ensuite ouvrait en ecriture un fichier qui ne lui appartenait pas.
+# Mesure du 2026-08-18, reproduite sur deux bancs : « Permission denied », puis « verrou d'apply
+# inouvrable » — un refus qui accuse le verrou pour un probleme de proprietaire. Le geste etait
+# donc injouable par un humain sur toute boite ayant demarre une fois.
+#
+# Il vit maintenant dans `$CATALOGUE_WORK`, et ce n'est pas un deplacement de commodite : ce
+# repertoire est POSE PAR LE PROVISIONNEMENT en `2770 root:$ADMIN_GROUP`, c'est-a-dire avec
+# exactement la reponse a « qui a le droit de jouer un geste de structure ». Le setgid donne le
+# groupe, `umask 007` a la creation donne l'ecriture — donc root au boot et l'humain admin ensuite
+# ouvrent le MEME verrou, quel que soit celui des deux qui l'a cree en premier.
 with_apply_lock() {
-  local lock="${LCARS_APPLY_LOCK:-/run/lock/lcars-forge-apply.lock}"
+  local lock="${LCARS_APPLY_LOCK:-$CATALOGUE_WORK/.apply.lock}"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
-  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock)"
+  # `umask 007` PORTE LE PARTAGE, et il ne vaut qu'a la creation : un fichier deja la garde son
+  # mode. C'est voulu — un operateur qui a durci ce verrou n'est pas contredit en silence.
+  [[ -e "$lock" ]] || ( umask 007; : > "$lock" ) 2>/dev/null || true
+  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — regarde son proprietaire et son mode : il doit etre ouvrable en ecriture par $ADMIN_GROUP (le provisionnement pose $CATALOGUE_WORK en 2770 root:$ADMIN_GROUP)"
   flock -n 9 || die "un autre apply de structure est en cours (verrou $lock) — rien n'a ete tente"
   "$@"
 }
@@ -351,7 +372,7 @@ cmd_runner_token() {
 # dossier, et ce fichier porte l'org ET le roster : deux catalogues dans le meme dossier, c'est le
 # dernier installe qui decide de ce que le suivant applique. L'etat etant jetable (il se reconstruit
 # par import), un dossier par catalogue ne coute qu'une copie et supprime la question.
-CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
+# (`CATALOGUE_WORK` est declare en tete, avec les autres chemins : le verrou d'apply en depend.)
 
 cmd_install() {
   local name="${1:-}"
