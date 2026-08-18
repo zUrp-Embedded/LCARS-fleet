@@ -41,7 +41,7 @@
 #    n'est pas ici : il est dans `bench-down.sh`, separement, pour qu'aucune faute de frappe sur ce
 #    script-ci ne detruise un banc qui travaille.
 #
-# USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 21000] [--deck-port 20999]
+# USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
 #                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
 #                     [--no-human-admin]
@@ -102,6 +102,11 @@ while [[ $# -gt 0 ]]; do
     --project)    PROJECT="${2:?}"; shift 2 ;;
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
     --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
+    # ⚠ LE PORT SSH ETAIT LE SEUL DES TROIS A NE PAS AVOIR SON OPTION, et c'est le pre-vol des
+    # ports qui l'a rendu visible : deux bancs sur une meme machine se refusaient sur 2222 alors
+    # que la forge et le deck, eux, se deplacaient. Un banc de plus par machine est le cas
+    # ordinaire ici (un jetable qu'on casse, un complet ou on travaille), pas une exception.
+    --ssh-port)   SSH_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
@@ -274,7 +279,7 @@ if [[ ${#BUSY[@]} -gt 0 ]]; then
   for _b in "${BUSY[@]}"; do say "  $_b"; done
   say "  Un bind « $BIND » prend le port sur TOUTES les adresses : il n'y a qu'un banc par port."
   say "  Sorties : detruire l'autre banc (bench-down.sh --project <son-projet>),"
-  say "            ou deplacer celui-ci (--forge-port / --deck-port, et --bind pour une loopback)."
+  say "            ou deplacer celui-ci (--forge-port / --deck-port / --ssh-port, et --bind pour une loopback)."
   exit 1
 fi
 

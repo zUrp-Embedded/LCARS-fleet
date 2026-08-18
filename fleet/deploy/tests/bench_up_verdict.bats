@@ -352,3 +352,15 @@ run_bench() {
   ! grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
   grep -q "n'est joignable que depuis CETTE machine" "$SRC"
 }
+
+@test "les TROIS ports du banc ont leur option — sinon deux bancs ne cohabitent pas" {
+  # Le pre-vol refuse un port deja tenu (temoin plus haut). `--forge-port` et `--deck-port`
+  # existaient, `--ssh-port` non : un second banc sur la meme machine se refusait donc sur 2222,
+  # sans qu'aucune option ne permette de le deplacer. Deux bancs par machine — un jetable qu'on
+  # casse, un complet ou on travaille — est le cas ordinaire ici.
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 127.0.0.5 \
+      --forge-port 21001 --deck-port 20998 --ssh-port 2223
+  [[ "$output" == *"ssh 127.0.0.5:2223"* ]]
+  [[ "$output" == *"http://127.0.0.5:21001"* ]]
+  [[ "$output" == *"http://127.0.0.5:20998"* ]]
+}
