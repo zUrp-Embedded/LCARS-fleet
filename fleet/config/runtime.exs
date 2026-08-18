@@ -88,6 +88,68 @@ if forge_opts != [] do
   config :lcars_fleet, :pilot_forge, forge_opts
 end
 
+# ⚠ HORS DU GARDE `tool_mode?`, ET POUR LA MEME RAISON QUE LE BLOC CI-DESSUS. Il vivait dedans, donc
+# `LCARS_TOOL_EVAL=1` le sautait — et toute porte `eval` qui POUSSE se retrouvait sans credential :
+# « fatal: could not read Username for 'http://…': terminal prompts disabled ». Mesure du
+# 2026-08-18, en creant un projet depuis une porte outil sur un banc entierement cable.
+#
+# Le defaut ne se voyait pas depuis `eval_reconcile`, qui l'a pourtant sous la main : sur un projet
+# dont les branches d'ecriture existent DEJA, `ensure_face` CLONE et ne pousse jamais. Il fallait un
+# projet neuf pour qu'un push ait lieu. Un chemin qu'aucun appelant ne prend n'est pas couvert.
+#
+# Ce bloc respecte le critere que ce fichier s'est donne ligne 49 : il n'ouvre aucun port et ne
+# demarre rien. Il dit seulement avec quoi git s'authentifie — un fait de lecture, dont toute porte
+# qui ecrit sur la forge a besoin.
+# Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
+# OUTSIDE argv AND OUTSIDE .git/config). System token (lcars-system, write:repository).
+# FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
+#
+# ⚠ THE TOKEN LIVES IN THE APPLICATION ENV, IN CLEAR, FOR THE WHOLE LIFE OF THE NODE. That is a
+# DECISION, not an oversight: `ForgeAuth` reads it from there on every auth-required git op, and
+# a vault would move the secret without removing the moment it is in memory. It is written here
+# because a secret whose exposure is undocumented gets re-exposed by the next well-meaning patch.
+#
+# WHAT MAKES IT ACCEPTABLE IS A PROPERTY OF THE SURFACE, AND THAT PROPERTY MUST BE PRESERVED:
+# nothing in the runtime reads the application env WHOLESALE, and the pod-facing MCP surface is a
+# closed list of business verbs — no pod can ask for configuration. Adding a config-dump door
+# (an "/api/config" route, a doctor that prints the env, a crash reporter that inspects it)
+# publishes this token, and the door will not look like a credentials change when it is written.
+# Never `inspect` this value: `ForgeAuth` says the same at its own site, for the same reason.
+forge_base = System.get_env("FORGE_BASE_URL")
+
+# The push token must come from the SAME source as the poller token: var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
+# THEN the FILE (FORGE_TOKEN_FILE, default ~/.gitea_token). Without this file fallback, a deployment
+# that only sets the file (the nominal case) would have an auth-less push → "could not read Username"
+# (the poller would read the file while the push reads only the var).
+default_token_file =
+  case System.user_home() do
+    home when is_binary(home) -> Path.join(home, ".gitea_token")
+    _ -> nil
+  end
+
+forge_push_token =
+  System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN") ||
+    case System.get_env("FORGE_TOKEN_FILE") || default_token_file do
+      path when is_binary(path) ->
+        case File.read(path) do
+          {:ok, t} -> String.trim(t)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+
+# `config_env() != :test` COMME LES DEUX BLOCS AU-DESSUS : la regle de ce fichier est que toute
+# config runtime reste hors de `:test`, et sortir du garde `tool_mode?` ne dispense pas de celui-la.
+if config_env() != :test and is_binary(forge_base) and is_binary(forge_push_token) and
+     forge_push_token != "" do
+  config :lcars_fleet, :credentials_forge_auth, %{
+    url_prefix: forge_base,
+    token: forge_push_token
+  }
+end
+
 if config_env() != :test and not tool_mode? do
   # ============================================================
   # R-no-root-runtime — anti-root boot guard
@@ -661,53 +723,6 @@ if config_env() != :test and not tool_mode? do
   # it is PER-STEP-RUN, derived from the project's `repo_path` and embedded in the `pod.completed` event (cf.
   # `Fleet.Spawner.Pod.pod_completed_payload` + `Fleet.Pilot.StepRunConsumer.step_run_state/2`). Push auth
   # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, never in the URL).
-
-  # Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
-  # OUTSIDE argv AND OUTSIDE .git/config). System token (lcars-system, write:repository).
-  # FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
-  #
-  # ⚠ THE TOKEN LIVES IN THE APPLICATION ENV, IN CLEAR, FOR THE WHOLE LIFE OF THE NODE. That is a
-  # DECISION, not an oversight: `ForgeAuth` reads it from there on every auth-required git op, and
-  # a vault would move the secret without removing the moment it is in memory. It is written here
-  # because a secret whose exposure is undocumented gets re-exposed by the next well-meaning patch.
-  #
-  # WHAT MAKES IT ACCEPTABLE IS A PROPERTY OF THE SURFACE, AND THAT PROPERTY MUST BE PRESERVED:
-  # nothing in the runtime reads the application env WHOLESALE, and the pod-facing MCP surface is a
-  # closed list of business verbs — no pod can ask for configuration. Adding a config-dump door
-  # (an "/api/config" route, a doctor that prints the env, a crash reporter that inspects it)
-  # publishes this token, and the door will not look like a credentials change when it is written.
-  # Never `inspect` this value: `ForgeAuth` says the same at its own site, for the same reason.
-  forge_base = System.get_env("FORGE_BASE_URL")
-
-  # The push token must come from the SAME source as the poller token: var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
-  # THEN the FILE (FORGE_TOKEN_FILE, default ~/.gitea_token). Without this file fallback, a deployment
-  # that only sets the file (the nominal case) would have an auth-less push → "could not read Username"
-  # (the poller would read the file while the push reads only the var).
-  default_token_file =
-    case System.user_home() do
-      home when is_binary(home) -> Path.join(home, ".gitea_token")
-      _ -> nil
-    end
-
-  forge_push_token =
-    System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN") ||
-      case System.get_env("FORGE_TOKEN_FILE") || default_token_file do
-        path when is_binary(path) ->
-          case File.read(path) do
-            {:ok, t} -> String.trim(t)
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-  if is_binary(forge_base) and is_binary(forge_push_token) and forge_push_token != "" do
-    config :lcars_fleet, :credentials_forge_auth, %{
-      url_prefix: forge_base,
-      token: forge_push_token
-    }
-  end
 
   # NB catalogue trees: covered by `LCARS_CATALOGUE_ROOT` (coarse, all of them) and the three fine
   # keys above — `LCARS_CAPPROFILES_ROOT`, `LCARS_WORKFLOW_MAPS_ROOT`, `LCARS_COORD_POLICIES_PATH`.
