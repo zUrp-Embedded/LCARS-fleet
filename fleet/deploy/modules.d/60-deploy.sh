@@ -164,9 +164,13 @@ apply() {
   # minutes : gate complet (format, compile strict, 3000+ tests, bats, topologie, dialyzer) puis
   # `mix release`. Sans cette ligne, l'ecran est fige et rien ne distingue « ca travaille » de
   # « c'est plante ». `--verbose` donne le detail a qui le demande.
-  run_step "build de la release" -- \
+  # `--ok 3` PORTE LA TOLERANCE AU POINT D'APPEL. Elle etait ecrite juste en dessous — et
+  # inatteignable : sous `set -euo pipefail`, une commande nue qui rend 3 tue le module AVANT la
+  # ligne qui lit `$?`. Le commentaire decrivait une intention que le code ne pouvait pas executer,
+  # et personne ne s'en est apercu parce que ce chemin ne se prend QUE hors conteneur.
+  run_step --ok 3 "build de la release" -- \
     as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
-  local install_rc=$?
+  local install_rc="$PROV_LAST_RC"
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
     p_fail "etc/install.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply

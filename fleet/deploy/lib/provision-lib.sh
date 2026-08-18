@@ -259,7 +259,17 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
   esac
 }
 
-run_step() { # run_step <label> -- <cmd…>
+# ⚠ `--ok N` : UN CODE QUI N'EST PAS UN ECHEC, DIT AU POINT D'APPEL.
+# `etc/install.sh` rend 3 quand la release est posee mais le cablage PATH incomplet — un FAIT, pas
+# un verdict, et c'est le cas NOMINAL des qu'il tourne en tant qu'humain (il n'ecrit pas dans
+# /usr/local/bin). Sans ce drapeau la primitive p_fail-ait dessus, donc PROV_FAILED montait, donc
+# le module rendait un echec sur un succes.
+# Le code reel reste lisible dans PROV_LAST_RC ; la fonction, elle, rend 0 pour un code tolere,
+# sinon `set -e` tuerait l'appelant AVANT la ligne qui lit `$?` — c'est ce qui rendait la tolerance
+# ecrite dans 60-deploy litteralement inatteignable (mesure du 2026-08-18).
+run_step() { # run_step [--ok N]… <label> -- <cmd…>
+  local ok_codes=()
+  while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
   # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
@@ -288,6 +298,14 @@ run_step() { # run_step <label> -- <cmd…>
   done
   wait "$pid" || rc=$?
   [[ -t 1 ]] && printf '\r\033[K'
+  PROV_LAST_RC="$rc"
+  local c
+  for c in "${ok_codes[@]:-}"; do
+    [[ -n "$c" && "$rc" == "$c" ]] || continue
+    p_ok "$label — terminé (rc=$rc, code attendu)"
+    rm -f "$out"
+    return 0
+  done
   if [[ "$rc" -ne 0 ]]; then
     p_fail "commande en échec (rc=$rc) : $*"
     local n; n="$(wc -l < "$out")"
@@ -741,6 +759,7 @@ detect_substrate() {
 # déjà tuné son réseau saura le retuner : `--advertise` est là pour ça, et il n'est pas ignoré.
 PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
+PROV_LAST_RC=0
 
 wsl_networking_mode() {
   local m

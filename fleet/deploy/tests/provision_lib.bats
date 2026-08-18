@@ -457,3 +457,32 @@ module_sh() {
   after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
   [ "$after" -eq "$before" ]
 }
+
+@test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `etc/install.sh` rend 3
+  # quand la release est posee mais le cablage PATH incomplet — le cas NOMINAL des qu'il tourne en
+  # tant qu'humain. 60-deploy portait la tolerance juste sous l'appel... et sous `set -euo pipefail`
+  # une commande nue qui rend 3 tue le module AVANT la ligne qui lit `$?`. Le commentaire decrivait
+  # une intention que le code ne pouvait pas executer, et ce chemin ne se prend QUE hors conteneur —
+  # donc nulle part ou on regardait. Mesure du 2026-08-18, rail natif sur Ubuntu neuve.
+  module_sh '
+    run_step --ok 3 "etape" -- bash -c "sleep 1.1; exit 3"
+    # on est encore la : `set -e` ne nous a pas tues
+    [ "$PROV_LAST_RC" -eq 3 ]
+    [ "$PROV_FAILED" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "run_step --ok N : un code NON tolere reste un echec entier" {
+  module_sh '
+    rc=0
+    run_step --ok 3 "etape" -- bash -c "echo boum; sleep 1.1; exit 4" || rc=$?
+    [ "$rc" -eq 4 ]
+    [ "$PROV_FAILED" -eq 1 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAIL"* ]]
+}
