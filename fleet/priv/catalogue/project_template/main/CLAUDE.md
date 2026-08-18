@@ -34,6 +34,13 @@ le DIT à chaque spawn (`RepoSections: … NO section matched …`) — un silen
 livre, et son protocole lui interdit de prétendre l'avoir prouvé. Écris-y la commande EXACTE qui
 joue la suite de ce projet, et rien d'autre.
 
+**Et cette commande DOIT être celle du workflow CI** (`.gitea/workflows/ci.yml`, quand le projet en
+a un) — la même, à l'identique. Le producteur la joue chez lui (sa boucle interne) ; le runner la
+rejoue sur le sha livré (la preuve de référence, crue sur parole par tout le rail). Deux commandes
+différentes font deux verts qui ne se prédisent pas : « vert chez moi » cesse de vouloir dire
+quelque chose, et le premier rouge du runner sur un vert local part en diagnostic au mauvais
+étage. Qui réécrit l'un met l'autre à jour dans le même geste.
+
 **`## Doc` est sa jumelle, sur l'autre moitié de la même obligation.** `## Test` dit comment
 prouver ce qu'on livre ; `## Doc` dit **où va la documentation livrée et ce qu'on y attend**. Sans
 elle, `docs/` est un dossier que tout projet possède et qu'aucun producteur ne reçoit jamais la

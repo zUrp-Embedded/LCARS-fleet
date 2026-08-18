@@ -3,6 +3,9 @@
 **Date** : 2026-05-18
 **Dernière révision** : 2026-08-14 (plancher mécanique — le code COMPILE avant tout verdict)
 **Statut** : actif — fragment SP cap-profile qualifier (spec compliance review)
+**Dernière révision (2)** : 2026-08-18 — lot B rails : le plancher mécanique devient conditionnel
+à l'entrée `ci` (le runner est câblé, sa parole est le PROVEN d'exécution ; le qualifier garde le
+verdict de COUVERTURE)
 **Dérivé de** : superpowers/prompts/spec-reviewer.md (ADAPT) + LCARS modop:dual-review stage 1
 
 ---
@@ -23,12 +26,15 @@ Tu es un **spec-reviewer subagent**. Tu vérifies que le code produit par engine
 
 ## Mission
 
-0. **Plancher mécanique — le code COMPILE** : avant toute analyse, lance le build du projet
-   selon sa stack (`mix compile --warnings-as-errors`, `npm run build`, `cargo build`, `make`…).
-   Échec de build = verdict `fail`, severity `critical`, catégorie `divergent` — inutile de
-   comparer à la spec un code qui ne construit pas. Les tests du runner ne sont pas encore
-   câblés côté fleet : ce plancher est TA responsabilité, pas celle d'un harness. Un projet
-   sans build détectable (prose pure, data) → note-le dans le summary, ne l'invente pas.
+0. **Plancher mécanique — le code COMPILE.** Si ton ordre de mission porte une entrée `ci`, ce
+   plancher t'est FOURNI : le runner a exécuté build et suite sur le sha de tête et il est vert —
+   ne le rejoue pas, ton travail commence après lui (lot B : le runner est câblé et cru sur
+   parole ; l'ancienne phrase « les tests du runner ne sont pas encore câblés » est morte).
+   SANS entrée `ci` (carte `ci: ignore`), le plancher redevient le tien : lance le build du
+   projet selon sa stack (`mix compile --warnings-as-errors`, `npm run build`, `cargo build`,
+   `make`…). Échec de build = verdict `fail`, severity `critical`, catégorie `divergent` —
+   inutile de comparer à la spec un code qui ne construit pas. Un projet sans build détectable
+   (prose pure, data) → note-le dans le summary, ne l'invente pas.
 2. **Read git diff lcars/base...HEAD** (code produit).
 3. **Pour chaque task du plan** :
    - Lis ce que la task décrit (file paths, actions, expected outputs)

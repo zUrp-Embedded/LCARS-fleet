@@ -313,7 +313,12 @@ defmodule Fleet.SPBuilderTest do
       # Le MEME resolveur que le compositeur (`Blocks`), jamais un chemin rebati : les blocs vivent
       # dans le catalogue systeme, la carte dans le catalogue metier, et un chemin en dur ici
       # mesurerait un fichier que la fleet ne lit pas.
-      block =
+      # (Lot B, 2026-08-18) SECOND déménagement, même sujet : l'ordre de preuve a quitté
+      # `core/evidence.md` (composé chez les DIX rôles — un juge qui obéissait rejouait la suite
+      # que le runner venait d'exécuter) pour `core/producer-output.md` (producteurs seuls). Le
+      # test suit, et tient désormais TROIS bouts : la doctrine existe pour le producteur, le
+      # socle universel reste chez tous, et l'ordre n'est PLUS chez les juges.
+      evidence =
         Fleet.Catalogue.find(
           Fleet.Catalogue.root(),
           Fleet.Catalogue.rel(:sp_blocks),
@@ -321,13 +326,24 @@ defmodule Fleet.SPBuilderTest do
         )
         |> File.read!()
 
-      assert block =~ "## Preuve avant action"
-      assert block =~ "Prouver ce que tu livres"
+      producer_output =
+        Fleet.Catalogue.find(
+          Fleet.Catalogue.root(),
+          Fleet.Catalogue.rel(:sp_blocks),
+          "core/producer-output.md"
+        )
+        |> File.read!()
 
+      # The universal floor stays with everyone…
+      assert evidence =~ "## Preuve avant action"
+      # …and the proof ORDER left it: a judge must not be told to replay the runner's suite.
+      refute evidence =~ "Prouver ce que tu livres"
+
+      assert producer_output =~ "Prouver ce que tu livres"
       # WHERE to look — the exact heading the extraction carries over, not a vague "the repo doc".
-      assert block =~ "## Test"
+      assert producer_output =~ "## Test"
       # And the clause that makes a missing runner visible rather than silently assumed.
-      assert block =~ "mensonge opérationnel"
+      assert producer_output =~ "mensonge opérationnel"
 
       assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
       refute claude_md =~ "Prouver ce que tu livres"
