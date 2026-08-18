@@ -25,10 +25,11 @@ setup() {
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
   : > "$ROOT/fleet/deploy/deps/.keep"
-  # La lib est une doublure VIDE : `bench-up` ne la source plus depuis que le semis du binaire
-  # vendor a ete retire (2026-08-17). Le fichier reste parce que son ABSENCE ferait echouer des
-  # gestes qui verifient l'arbre, pas parce qu'on en lit quelque chose.
-  printf '#!/usr/bin/env bash\n' > "$ROOT/fleet/deploy/lib/provision-lib.sh"
+  # ⚠ LA LIB EST LA VRAIE, ET PLUS UNE DOUBLURE VIDE (2026-08-18). `bench-up` la source de nouveau :
+  # la derivation de l'adresse ANNONCEE (`advertise_addr`) y vit, parce qu'elle depend du substrat et
+  # que la recopier ici la ferait diverger. Un stub vide rendrait `advertise_addr` introuvable et le
+  # script mourrait avant son verdict — le test mesurerait alors autre chose que ce qu'il croit.
+  cp "$BATS_TEST_DIRNAME/../lib/provision-lib.sh" "$ROOT/fleet/deploy/lib/provision-lib.sh"
 
   # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
   # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par
@@ -299,12 +300,14 @@ run_bench() {
   [[ "$output" == *"http://10.0.0.9:20999"* ]]
 }
 
-@test "les DEUX entrees du deck sont enregistrees — la locale et celle du reseau" {
-  # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. La
-  # machine hote arrive en 127.0.0.1, un ami par l'adresse annoncee : une seule enregistree, et
-  # l'autre finit sur un refus APRES identification, sur une page qui n'est pas la notre.
+@test "le banc ne declare que l'entree qu'il ANNONCE — les loopbacks sont semees par le module" {
+  # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. Il y a
+  # donc au moins TROIS entrees vraies : `127.0.0.1`, `localhost` (deux ORIGINES distinctes pour un
+  # meme point d'ecoute — et c'est `localhost` que tape un humain) et l'adresse annoncee.
+  # Les deux premieres sont invariantes : 55-deck-oidc les seme, une fois, pour toutes les boites.
+  # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
-  grep -q "LCARS_DECK_ORIGINS=http://127.0.0.1:20999,http://10.0.0.9:20999" "$BATS_TEST_TMPDIR/box.env"
+  grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/box.env"
 }
 
 @test "un bind PRECIS rend les deux adresses egales — l'ancien comportement revient" {

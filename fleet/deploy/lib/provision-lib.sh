@@ -540,6 +540,76 @@ detect_substrate() {
   fi
 }
 
+# ─── PAR QUELLE ADRESSE CETTE MACHINE EST-ELLE ATTEINTE DU DEHORS ? ─────────────────────────────
+#
+# ⚠ CE N'EST PAS LA MÊME QUESTION QUE « quelle est mon IP », et c'est le substrat qui les sépare.
+#
+# La forme historique — `ip route get 1.1.1.1`, l'adresse SOURCE utilisée pour sortir — répond
+# « par où je pars », et on la lisait comme « par où on m'atteint ». Les deux coïncident sur une
+# machine posée sur son LAN. Sous WSL2 en mode NAT, elles ne coïncident pas :
+#
+#   · l'eth0 de la VM (172.25.115.129/20 ici) vit sur un commutateur Hyper-V NATé. AUCUNE autre
+#     machine ne la route — pas « pare-feu à ouvrir » : pas de route, par construction ;
+#   · elle est RÉATTRIBUÉE à chaque redémarrage de WSL, donc même juste, elle périme seule ;
+#   · ce qui marche depuis Windows, c'est `localhost` : WSL relaie les ports publiés vers la VM.
+#
+# Mesure du 2026-08-18 (ce poste, `wslinfo --networking-mode` = nat) : le banc annonçait
+# `172.25.115.129:20999`, le navigateur arrivait en `localhost:20999`, et la porte du deck refusait
+# — correctement — une entrée non déclarée. L'adresse annoncée était fausse depuis le début ; c'est
+# le premier accès par le navigateur de l'hôte qui l'a dit.
+#
+# Le mode miroir (`--networking-mode mirrored`) supprime le NAT : la VM porte alors les interfaces
+# de l'hôte et `ip route get` redevient vrai. Le discriminant est donc le MODE, pas « est-ce WSL ».
+PROV_ADVERTISE=""
+PROV_ADVERTISE_WHY=""
+
+wsl_networking_mode() {
+  local m
+  m="$(wslinfo --networking-mode 2>/dev/null | tr -d '[:space:]')"
+  # `wslinfo` absent = WSL antérieur au mode miroir. Il n'existait alors QUE le NAT : c'est un fait
+  # de version, pas une supposition de repli.
+  [[ -n "$m" ]] && { echo "$m"; return 0; }
+  echo nat
+}
+
+# L'adresse source de sortie — vide si indéterminable. Vraie SEULEMENT là où on est joignable par
+# elle : `advertise_addr` en est le seul appelant légitime.
+lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1; }
+
+# advertise_addr <bind> — POSE DEUX GLOBALES, N'IMPRIME RIEN :
+#   PROV_ADVERTISE      l'adresse à ANNONCER (ROOT_URL, redirect_uri, liens du récap)
+#   PROV_ADVERTISE_WHY  vide si c'est une vraie adresse de réseau ; sinon la phrase qui dit ce
+#                       qu'elle vaut. Un appelant qui l'ignore annonce sans savoir ce qu'il annonce.
+#
+# ⚠ POURQUOI DEUX GLOBALES ET PAS UN `echo` — c'est un piège de langage, pas un goût. Un appelant
+# écrit naturellement `a="$(advertise_addr ...)"`, or `$( )` ouvre un SOUS-SHELL : la valeur revient
+# par stdout, et TOUTE variable posée dedans meurt avec lui. La forme « j'imprime l'un, je pose
+# l'autre » perd donc silencieusement le second — mesuré ici même en écrivant cette fonction.
+advertise_addr() {
+  local bind="${1:-0.0.0.0}"
+  PROV_ADVERTISE=""; PROV_ADVERTISE_WHY=""
+  case "$bind" in
+    0.0.0.0|::|"*") ;;
+    # Un bind précis EST l'adresse : rien à dériver, et la dérivation se tromperait.
+    *) PROV_ADVERTISE="$bind"; return 0 ;;
+  esac
+  if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
+    PROV_ADVERTISE="localhost"
+    PROV_ADVERTISE_WHY="WSL2 en mode NAT — l'adresse de la VM n'est routée depuis aucune autre machine et change à chaque redémarrage de WSL ; localhost est le relais que Windows tient vers elle. Ouvrir sur le LAN est un portproxy CÔTÉ WINDOWS, pas un réglage d'ici."
+    return 0
+  fi
+  PROV_ADVERTISE="$(lan_addr)"
+  if [[ -z "$PROV_ADVERTISE" ]]; then
+    PROV_ADVERTISE="127.0.0.1"
+    PROV_ADVERTISE_WHY="aucune adresse de sortie détectée — les liens ne valent que sur cette machine"
+  fi
+  # ⚠ `return 0` EXPLICITE. Sans lui, la fonction rend le code du dernier `if` — donc 1 quand la
+  # dérivation a RÉUSSI (le test `-z` est faux). Tous les appelants tournent sous `set -e` : un
+  # succès y avortait le script. Trouvé par le témoin « n'imprime rien », sur le chemin linux —
+  # celui qu'aucun appel de cette machine ne prend.
+  return 0
+}
+
 # ─── as_human <cmd…> — exécute comme PROV_HUMAN avec le HOME de PROV_HUMAN ───────────────────────
 # Depuis root : runuser + env EXPLICITE (runuser sans -l garde le HOME de root — piège classique).
 # Déjà cet utilisateur : exécution directe. Autre user non-root : impossible proprement → échec dit.

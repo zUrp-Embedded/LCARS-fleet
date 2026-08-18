@@ -138,26 +138,24 @@ COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker
 #                    boite, la ligne du recap. C'est celle qu'un ami compose depuis sa machine.
 #
 # Un bind precis (`--bind 127.0.0.5`) rend les deux egales et l'ancien comportement revient.
-detect_lan_addr() { # l'IP source que cette machine utilise pour sortir — vide si indeterminable
-  ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1
-}
+# LA DERIVATION DE L'ADRESSE ANNONCEE VIT DANS `provision-lib.sh`, PAS ICI — et elle depend du
+# SUBSTRAT. `ip route get`, qui tenait ce role, repond « par ou je pars » ; on le lisait « par ou on
+# m'atteint ». Sous WSL2 en mode NAT les deux different, et la reponse etait fausse : cf. le pave
+# `advertise_addr` dans la lib, qui porte la mesure. Ce script ne re-implemente rien — deux copies
+# d'une meme derivation divergent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
+# shellcheck source=../../lib/provision-lib.sh
+source "$DOCKER_DIR/../lib/provision-lib.sh"
 
 case "$BIND" in
-  0.0.0.0|::|"*")
-    PROBE_HOST="127.0.0.1"
-    if [[ -z "$ADVERTISE" ]]; then
-      ADVERTISE="$(detect_lan_addr)"
-      # RIEN A ANNONCER N'EST PAS UNE PANNE, mais ca doit se DIRE : sans adresse, le banc reste
-      # joignable de sa propre machine et les liens de la forge y pointent. Un ami qui echoue
-      # ensuite saurait au moins ou regarder.
-      [[ -n "$ADVERTISE" ]] || { ADVERTISE="127.0.0.1"; ADVERTISE_GUESSED="aucune adresse LAN detectee"; }
-    fi
-    ;;
-  *)
-    PROBE_HOST="$BIND"
-    [[ -n "$ADVERTISE" ]] || ADVERTISE="$BIND"
-    ;;
+  0.0.0.0|::|"*") PROBE_HOST="127.0.0.1" ;;
+  *)              PROBE_HOST="$BIND" ;;
 esac
+if [[ -z "$ADVERTISE" ]]; then
+  advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"
+  # RIEN A ANNONCER N'EST PAS UNE PANNE, mais ca doit se DIRE. `PROV_ADVERTISE_WHY` est vide quand
+  # l'adresse est une vraie adresse de reseau, et porte sinon la phrase qui dit ce qu'elle vaut.
+  ADVERTISE_GUESSED="${PROV_ADVERTISE_WHY:-}"
+fi
 
 FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
 FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
@@ -306,11 +304,11 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="$FORGE_URL" \
-    `# DEUX ENTREES ENREGISTREES, PARCE QU'IL Y EN A DEUX. Le deck derive son redirect_uri du Host` \
-    `# de la requete (console-deck.py) et OAuth2 compare EXACTEMENT : la machine hote arrive en` \
-    `# 127.0.0.1, un ami arrive par l'adresse annoncee. Une seule enregistree = l'autre finit sur un` \
-    `# refus apres identification, sur une page qui n'est pas la notre.` \
-    LCARS_DECK_ORIGINS="http://127.0.0.1:${DECK_PORT},http://${ADVERTISE}:${DECK_PORT}" \
+    `# L'ENTREE ANNONCEE. Le deck derive son redirect_uri du Host de la requete (console-deck.py) et` \
+    `# OAuth2 compare EXACTEMENT : une entree non declaree finit sur un refus APRES identification.` \
+    `# Les deux ecritures de la loopback (127.0.0.1 ET localhost — deux ORIGINES pour un meme point` \
+    `# d'ecoute) sont semees par 55-deck-oidc ; ici on ne nomme que celle qu'on annonce.` \
+    LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3
@@ -558,8 +556,22 @@ if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
   say "  ecoute    : $BIND — OUVERT SUR LE RESEAU. Les mots de passe de ce banc sont des defauts de"
   say "              test, publics dans le README : a n'ouvrir que sur un reseau de confiance."
   say "              « --bind 127.0.0.1 » le referme sur cette machine."
-  [[ -n "${ADVERTISE_GUESSED:-}" ]] && say "  ⚠ adresse : ${ADVERTISE_GUESSED} — les liens pointent sur $ADVERTISE, donc seule cette machine
-              les suivra. « --advertise <ip-ou-nom> » pour annoncer la bonne."
+  if [[ -n "${ADVERTISE_GUESSED:-}" ]]; then
+    say "  ⚠ adresse : les liens pointent sur $ADVERTISE. ${ADVERTISE_GUESSED}"
+    say "              « --advertise <ip-ou-nom> » pour annoncer autre chose."
+  fi
+  # LE GESTE QUI OUVRE VRAIMENT SUR LE LAN SOUS WSL EST COTE WINDOWS, et il n'y en a pas d'autre :
+  # publier sur 0.0.0.0 ouvre le port DANS la VM, pas sur la machine. On l'imprime ; on ne peut pas
+  # l'executer d'ici, et pretendre le contraire ferait chercher la panne du mauvais cote.
+  if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
+    _wslip="$(lan_addr)"
+    say "  LAN (WSL) : depuis une AUTRE machine, il faut un relais cote Windows — PowerShell admin :"
+    say "              netsh interface portproxy add v4tov4 listenport=${DECK_PORT} listenaddress=0.0.0.0 connectport=${DECK_PORT} connectaddress=${_wslip}"
+    say "              netsh interface portproxy add v4tov4 listenport=${FORGE_PORT} listenaddress=0.0.0.0 connectport=${FORGE_PORT} connectaddress=${_wslip}"
+    say "              (+ une regle de pare-feu entrante sur ces ports). ${_wslip} CHANGE a chaque"
+    say "              redemarrage de WSL : le relais est a refaire, ou a pointer sur un nom stable."
+    say "              Ensuite : --advertise <ip-windows-sur-le-LAN> pour que les liens la portent."
+  fi
 else
   say "  ecoute    : $BIND (cette machine seulement)"
 fi

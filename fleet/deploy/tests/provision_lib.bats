@@ -341,3 +341,74 @@ module_sh() {
   '
   [ "$status" -eq 0 ]
 }
+
+# ─── advertise_addr — « quelle est mon IP » N'EST PAS « par ou on m'atteint » ────────────────────
+#
+# Mesure du 2026-08-18, ce poste, WSL2 en mode NAT : le banc annoncait 172.25.115.129:20999 (l'eth0
+# de la VM, derriere un commutateur Hyper-V NATe — routee depuis AUCUNE autre machine, et
+# reattribuee a chaque redemarrage de WSL) pendant que le navigateur de l'hote arrivait en
+# localhost:20999. La porte du deck refusait, correctement, une entree non declaree : l'adresse
+# annoncee etait fausse depuis le debut, et c'est le premier acces par navigateur qui l'a dit.
+# Le discriminant est le MODE RESEAU, pas « est-ce WSL » : en mode miroir, `ip route get` redevient vrai.
+
+@test "advertise_addr: un bind PRECIS est l'adresse — rien a deriver" {
+  module_sh '
+    advertise_addr 127.0.0.5
+    [ "$PROV_ADVERTISE" = "127.0.0.5" ]
+    [ -z "$PROV_ADVERTISE_WHY" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "advertise_addr: WSL en NAT annonce localhost, et DIT pourquoi" {
+  module_sh '
+    detect_substrate() { echo wsl; }
+    wsl_networking_mode() { echo nat; }
+    lan_addr() { echo 172.25.115.129; }
+    advertise_addr 0.0.0.0
+    [ "$PROV_ADVERTISE" = "localhost" ]
+    [ -n "$PROV_ADVERTISE_WHY" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "advertise_addr: WSL en MIROIR n'est pas un cas a part — l'adresse de sortie est vraie" {
+  module_sh '
+    detect_substrate() { echo wsl; }
+    wsl_networking_mode() { echo mirrored; }
+    lan_addr() { echo 10.42.0.63; }
+    advertise_addr 0.0.0.0
+    [ "$PROV_ADVERTISE" = "10.42.0.63" ]
+    [ -z "$PROV_ADVERTISE_WHY" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "advertise_addr: aucune adresse de sortie = loopback ANNONCEE COMME TELLE" {
+  module_sh '
+    detect_substrate() { echo linux; }
+    lan_addr() { echo ""; }
+    advertise_addr 0.0.0.0
+    [ "$PROV_ADVERTISE" = "127.0.0.1" ]
+    [ -n "$PROV_ADVERTISE_WHY" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "advertise_addr: n'imprime RIEN — la capture \$( ) perdrait le second fait" {
+  # LE PIEGE DE LANGAGE, TENU PAR UN TEMOIN. `a=\"\$(advertise_addr ...)\"` ouvre un SOUS-SHELL :
+  # toute globale posee dedans meurt avec lui. Une fonction qui imprimerait l'adresse et poserait
+  # la raison perdrait donc la raison, en silence, chez tous ses appelants. Elle pose les DEUX.
+  module_sh '
+    detect_substrate() { echo linux; }
+    lan_addr() { echo 10.42.0.63; }
+    out="$(advertise_addr 0.0.0.0)"
+    [ -z "$out" ]
+    # et la globale posee DANS le sous-shell n en est pas ressortie : le parent est intact.
+    [ -z "$PROV_ADVERTISE" ]
+    # la seule forme qui marche : appeler, PUIS lire.
+    advertise_addr 0.0.0.0
+    [ "$PROV_ADVERTISE" = "10.42.0.63" ]
+  '
+  [ "$status" -eq 0 ]
+}

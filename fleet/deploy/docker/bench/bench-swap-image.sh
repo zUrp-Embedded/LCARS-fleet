@@ -49,6 +49,10 @@ PROJECT="lcars-nuit"
 # MEMES DEFAUTS QUE `bench-up.sh`, et ils doivent le rester : ce script RECREE la boite d'un banc
 # existant. Des ports differents ici republieraient la boite ailleurs que sa forge ne l'annonce.
 FORGE_PORT="21000"
+# ⚠ LE PORT DU DECK ETAIT EN DUR (20999) ALORS QUE `bench-up.sh` LE PREND EN OPTION. Un banc monte
+# sur un autre port et passe ici ressortait republie sur 20999 — la boite ecoutait ailleurs que la
+# ou sa forge l'annonce, sans un mot. Meme defaut, meme option.
+DECK_PORT="20999"
 BIND="0.0.0.0"
 ADVERTISE=""
 IMAGE=""
@@ -61,6 +65,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --project)    PROJECT="${2:?}"; shift 2 ;;
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
+    --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
@@ -76,14 +81,12 @@ FORGE_PROJECT="${PROJECT}forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
-# ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine.
-detect_lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1; }
-if [[ -z "${ADVERTISE:-}" ]]; then
-  case "$BIND" in
-    0.0.0.0|::) ADVERTISE="$(detect_lan_addr)"; ADVERTISE="${ADVERTISE:-127.0.0.1}" ;;
-    *)          ADVERTISE="$BIND" ;;
-  esac
-fi
+# ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
+# la derivation depend du SUBSTRAT (WSL en NAT n'a pas d'adresse annoncable). Une seule definition,
+# dans la lib : la copie qui vivait ici portait la meme erreur et il aurait fallu la corriger deux fois.
+# shellcheck source=../../lib/provision-lib.sh
+source "$DOCKER_DIR/../lib/provision-lib.sh"
+if [[ -z "${ADVERTISE:-}" ]]; then advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"; fi
 FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
 
 say() { echo "bench-swap-image: $*"; }
@@ -117,9 +120,10 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
-    LCARS_LANDING_PORT_BIND="${BIND}:20999" \
+    LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="http://${ADVERTISE}:${FORGE_PORT}" \
-    LCARS_DECK_ORIGINS="http://127.0.0.1:20999,http://${ADVERTISE}:20999" \
+    `# Les deux ecritures de la loopback sont semees par 55-deck-oidc ; ici, l'entree annoncee.` \
+    LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
     "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
   || die "la boite ne se cree pas" 3
 
