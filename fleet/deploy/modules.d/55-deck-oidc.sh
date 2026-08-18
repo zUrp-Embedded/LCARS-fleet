@@ -35,12 +35,19 @@ OIDC_GROUP="nogroup"
 
 # The entrances, as full callback URIs. Loopback always: it is how the box's own operator reaches
 # the deck, and it is the one address that is true everywhere.
+# ⚠ DEDUPLIQUE. La loopback est posee ici d'office ET nommee par l'appelant depuis que le banc
+# annonce deux entrees : sans ce filtre, elle est enregistree DEUX FOIS chez la forge (mesure du
+# 2026-08-18). Gitea l'accepte, donc rien ne casse — mais une liste qui se repete est une liste dont
+# personne ne tient l'inventaire, et c'est la sonde de derive juste en dessous qui compare des
+# listes triees qui en paierait le prix.
 callback_uris() {
-  local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback" o
+  local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback" o u
   IFS=',' read -ra _origins <<<"${PROV_DECK_ORIGINS:-}"
   for o in "${_origins[@]:-}"; do
     o="$(echo "$o" | tr -d '[:space:]')"; [[ -n "$o" ]] || continue
-    out="$out ${o%/}/auth/callback"
+    u="${o%/}/auth/callback"
+    case " $out " in *" $u "*) continue ;; esac
+    out="$out $u"
   done
   echo "$out"
 }

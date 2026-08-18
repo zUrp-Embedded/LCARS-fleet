@@ -220,8 +220,13 @@ fi
 ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
 BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || true)"
 [[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
+# ⚠ AUCUN `--catalogue`, ET C'EST LE POINT. Nommer l'arbre de l'HOTE le fait monter dans le
+# conteneur, ou la porte tourne en `nobody` : un parent en `drwxrws---` ou un `/home/<user>` en 0700
+# lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Mesure du
+# 2026-08-18 : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
+# L'image PORTE son catalogue ; c'est aussi le plus juste, les comptes doivent correspondre a ce que
+# la boite SERVIRA — l'arbre de l'hote peut avoir bouge depuis le build.
 ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
-                --catalogue "$REPO_ROOT/fleet/priv/catalogue" \
                 --tofu-dir "$ENROLL_DIR" \
                 --image "$BOX_IMAGE" 2>/dev/null)" \
   || die "derivation du roster en echec (enroll-catalogue.sh, image $BOX_IMAGE) -- recette non enrolee" 4

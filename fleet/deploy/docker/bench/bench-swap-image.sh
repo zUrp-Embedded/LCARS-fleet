@@ -34,8 +34,8 @@
 # s'arrete a « puis `fleet_v2 start` » — le daemon se lance a la main, et le verdict final ci-dessous
 # le rappelle plutot que de laisser croire a un banc qui travaille.
 #
-# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 127.0.0.5]
-#                             [--forge-port 3700] [--creds-from ~/.claude/.credentials.json]
+# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 0.0.0.0]
+#                             [--forge-port 21000] [--creds-from ~/.claude/.credentials.json]
 #                             [--no-creds] [--human lcars]
 # EXIT  : 0 boite remplacee · 1 arguments/dependance · 3 la boite ne monte pas · 5 creds
 #         6 le verdict final ne passe pas
@@ -46,8 +46,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 
 PROJECT="lcars-nuit"
-FORGE_PORT="3700"
-BIND="127.0.0.5"
+# MEMES DEFAUTS QUE `bench-up.sh`, et ils doivent le rester : ce script RECREE la boite d'un banc
+# existant. Des ports differents ici republieraient la boite ailleurs que sa forge ne l'annonce.
+FORGE_PORT="21000"
+BIND="0.0.0.0"
+ADVERTISE=""
 IMAGE=""
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
@@ -59,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --project)    PROJECT="${2:?}"; shift 2 ;;
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
+    --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
@@ -71,6 +75,15 @@ done
 FORGE_PROJECT="${PROJECT}forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
+# MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
+# ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine.
+detect_lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1; }
+if [[ -z "${ADVERTISE:-}" ]]; then
+  case "$BIND" in
+    0.0.0.0|::) ADVERTISE="$(detect_lan_addr)"; ADVERTISE="${ADVERTISE:-127.0.0.1}" ;;
+    *)          ADVERTISE="$BIND" ;;
+  esac
+fi
 FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
 
 say() { echo "bench-swap-image: $*"; }
@@ -105,8 +118,8 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:2222" \
     LCARS_LANDING_PORT_BIND="${BIND}:20999" \
-    FORGE_PUBLIC_URL="http://${BIND}:${FORGE_PORT}" \
-    LCARS_DECK_ORIGINS="http://${BIND}:20999" \
+    FORGE_PUBLIC_URL="http://${ADVERTISE}:${FORGE_PORT}" \
+    LCARS_DECK_ORIGINS="http://127.0.0.1:20999,http://${ADVERTISE}:20999" \
     "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
   || die "la boite ne se cree pas" 3
 

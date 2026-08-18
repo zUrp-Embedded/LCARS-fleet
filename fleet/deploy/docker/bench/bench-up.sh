@@ -41,7 +41,8 @@
 #    n'est pas ici : il est dans `bench-down.sh`, separement, pour qu'aucune faute de frappe sur ce
 #    script-ci ne detruise un banc qui travaille.
 #
-# USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 3700] [--bind 127.0.0.5]
+# USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 21000] [--deck-port 20999]
+#                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
 #                     [--no-human-admin]
 # EXIT  : 0 banc pret (verdict `banc PRET`, ou `banc PRET_SANS_CI` sous --no-runner) · 1
@@ -57,8 +58,26 @@ DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 
 PROJECT="lcars-nuit"
-FORGE_PORT="3700"
-BIND="127.0.0.5"
+# ⚖ ARBITRAGE USER 2026-08-18 — LE BANC S'OUVRE SUR LE LAN, ET DEUX PORTS SONT FIXES : 20999 pour
+# le deck, 21000 pour la forge. La beta se pretе a des amis : ils arrivent d'une AUTRE machine, donc
+# un bind sur une loopback (`127.0.0.5`) leur ferme la porte sans un mot — le port repond, mais
+# seulement a la machine qui l'heberge.
+#
+# ⚠ CE QUE CA COUTE, ET IL FAUT LE LIRE AVANT DE LANCER : ce banc porte des mots de passe de TEST
+# ecrits en clair dans le README (`toto32toto32`, `toto1234`). Ouvert sur 0.0.0.0, il est joignable
+# par tout ce qui atteint cette machine. C'est un choix pour un LAN de confiance, pas un defaut a
+# emporter ailleurs — `--bind 127.0.0.1` le referme.
+FORGE_PORT="21000"
+DECK_PORT="20999"
+SSH_PORT="2222"
+BIND="0.0.0.0"
+# L'ADRESSE ANNONCEE N'EST PAS L'ADRESSE D'ECOUTE, et les confondre casse deux choses precises.
+# `0.0.0.0` est un joker d'ecoute : ce n'est l'adresse de personne. Mise dans le `ROOT_URL` de Gitea
+# elle part dans chaque lien qu'il fabrique, et le navigateur d'un ami suit un lien vers nulle part ;
+# mise dans le `redirect_uri` OAuth2, le retour de login tombe dans le vide. On DERIVE donc l'adresse
+# que les autres composent — l'IP de cette machine sur son reseau — et `--advertise` la remplace
+# quand la derivation se trompe (plusieurs interfaces, un nom DNS, un reverse-proxy).
+ADVERTISE=""
 IMAGE="lcars-fleet:2"
 # Le runner du banc sert TROIS labels, et celui qui compte est `elixir` : il doit porter l'image du
 # stage `build`, pas celle de BASE — sinon `mix gate` y meurt sur `git` introuvable et le runner a
@@ -82,7 +101,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --project)    PROJECT="${2:?}"; shift 2 ;;
     --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
+    --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
+    --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
     --runner-labels) RUNNER_LABELS="${2:?}"; shift 2 ;;
     --no-runner)  WITH_RUNNER=0; shift ;;
@@ -107,9 +128,39 @@ FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
 COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$PROJECT")
-# L'URL suit le BIND, pas un 127.0.0.1 fige : sinon un banc bind sur .7 amorce une forge joignable
-# a une autre adresse que celle qu'il annonce, et le premier lecteur du recap se trompe de fenetre.
-FORGE_URL="http://${BIND}:${FORGE_PORT}"
+# ─── LES DEUX ADRESSES, ET ELLES NE SE CONFONDENT PAS ────────────────────────────────────────────
+#
+#   FORGE_LOCAL_URL  celle que CE script compose pour parler a la forge (sondes, amorcage, API).
+#                    Elle doit etre joignable depuis ici, tout de suite. Un bind joker (`0.0.0.0`)
+#                    n'est pas une adresse : on passe par la loopback, qui atteint le port publie
+#                    quel que soit le bind.
+#   FORGE_URL        celle qu'on ANNONCE — le `ROOT_URL` de Gitea, le `FORGE_PUBLIC_URL` de la
+#                    boite, la ligne du recap. C'est celle qu'un ami compose depuis sa machine.
+#
+# Un bind precis (`--bind 127.0.0.5`) rend les deux egales et l'ancien comportement revient.
+detect_lan_addr() { # l'IP source que cette machine utilise pour sortir — vide si indeterminable
+  ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1
+}
+
+case "$BIND" in
+  0.0.0.0|::|"*")
+    PROBE_HOST="127.0.0.1"
+    if [[ -z "$ADVERTISE" ]]; then
+      ADVERTISE="$(detect_lan_addr)"
+      # RIEN A ANNONCER N'EST PAS UNE PANNE, mais ca doit se DIRE : sans adresse, le banc reste
+      # joignable de sa propre machine et les liens de la forge y pointent. Un ami qui echoue
+      # ensuite saurait au moins ou regarder.
+      [[ -n "$ADVERTISE" ]] || { ADVERTISE="127.0.0.1"; ADVERTISE_GUESSED="aucune adresse LAN detectee"; }
+    fi
+    ;;
+  *)
+    PROBE_HOST="$BIND"
+    [[ -n "$ADVERTISE" ]] || ADVERTISE="$BIND"
+    ;;
+esac
+
+FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
+FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 
 say() { printf '[bench-up] %s\n' "$*"; }
 die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
@@ -194,6 +245,41 @@ if "$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX"; then
   die "le projet $PROJECT existe deja ($BOX) — detruis-le d'abord (bench-down.sh) ou change --project" 1
 fi
 
+# ─── 0. LES PORTS SONT-ILS LIBRES ? ──────────────────────────────────────────────────────────────
+#
+# ⚠ UN BIND JOKER NE PARTAGE PAS UN PORT, ET L'ERREUR NE LE DIT PAS. Avec des binds de loopback
+# distincts (`127.0.0.5`, `.6`, `.7`) plusieurs bancs cohabitaient sur les memes numeros. Sur
+# `0.0.0.0`, il n'y en a plus qu'UN par port — et docker le refuse en nommant l'adresse de l'AUTRE :
+# « Bind for 127.0.0.6:2222 failed: port is already allocated », sur un banc ou personne n'a jamais
+# tape `127.0.0.6`. Mesure du 2026-08-18. Le script mourait la-dessus en « la boite ne demarre pas ».
+#
+# On demande donc AVANT, et on nomme le detenteur. Deux sorties, pas une : detruire l'autre banc, ou
+# deplacer les ports de celui-ci.
+port_holder() { # <port> -> "<nom> (projet <p>)" du conteneur qui le publie, hors de NOS projets
+  local port="$1" name proj
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    proj="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name" 2>/dev/null || true)"
+    [[ "$proj" == "$PROJECT" || "$proj" == "$FORGE_PROJECT" || "$proj" == "${PROJECT}-runner" ]] && continue
+    printf '%s (projet %s)\n' "$name" "${proj:-<hors compose>}"
+    return 0
+  done < <("$DOCKER_BIN" ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null)
+  return 1
+}
+
+BUSY=()
+for _p in "$SSH_PORT" "$DECK_PORT" "$FORGE_PORT"; do
+  _h="$(port_holder "$_p")" && BUSY+=("$_p -> $_h")
+done
+if [[ ${#BUSY[@]} -gt 0 ]]; then
+  say "REFUS : un autre conteneur tient deja un des ports de ce banc."
+  for _b in "${BUSY[@]}"; do say "  $_b"; done
+  say "  Un bind « $BIND » prend le port sur TOUTES les adresses : il n'y a qu'un banc par port."
+  say "  Sorties : detruire l'autre banc (bench-down.sh --project <son-projet>),"
+  say "            ou deplacer celui-ci (--forge-port / --deck-port, et --bind pour une loopback)."
+  exit 1
+fi
+
 # ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
 LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="${FORGE_URL}/" \
@@ -201,10 +287,10 @@ LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROO
   || die "la forge ne monte pas" 2
 
 for _ in $(seq 1 60); do
-  curl -sf -m 3 "$FORGE_URL/api/v1/version" >/dev/null 2>&1 && break
+  curl -sf -m 3 "$FORGE_LOCAL_URL/api/v1/version" >/dev/null 2>&1 && break
   sleep 2
 done
-curl -sf -m 3 "$FORGE_URL/api/v1/version" >/dev/null 2>&1 || die "la forge ne repond pas sur $FORGE_URL" 2
+curl -sf -m 3 "$FORGE_LOCAL_URL/api/v1/version" >/dev/null 2>&1 || die "la forge ne repond pas sur $FORGE_LOCAL_URL" 2
 say "forge up"
 
 # ─── 2. la boite — create, brancher, PUIS demarrer (piege 1) ─────────────────────────────────────
@@ -217,10 +303,14 @@ env LCARS_IMAGE="$IMAGE" \
     FORGE_BASE_URL="http://forge:3000" \
     LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
-    LCARS_SSH_PORT="${BIND}:2222" \
-    LCARS_LANDING_PORT_BIND="${BIND}:20999" \
+    LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
+    LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="$FORGE_URL" \
-    LCARS_DECK_ORIGINS="http://${BIND}:20999" \
+    `# DEUX ENTREES ENREGISTREES, PARCE QU'IL Y EN A DEUX. Le deck derive son redirect_uri du Host` \
+    `# de la requete (console-deck.py) et OAuth2 compare EXACTEMENT : la machine hote arrive en` \
+    `# 127.0.0.1, un ami arrive par l'adresse annoncee. Une seule enregistree = l'autre finit sur un` \
+    `# refus apres identification, sur une page qui n'est pas la notre.` \
+    LCARS_DECK_ORIGINS="http://127.0.0.1:${DECK_PORT},http://${ADVERTISE}:${DECK_PORT}" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3
@@ -281,7 +371,7 @@ printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec
 # sont partis avec le defaut qui les avait fait naitre.
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
-    --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
+    --forge-url "$FORGE_LOCAL_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 1 en echec" 4
 
@@ -315,7 +405,7 @@ fi
 # ─── 6. amorcage passe 2 : le semis ──────────────────────────────────────────────────────────────
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
-    --forge-url "$FORGE_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
+    --forge-url "$FORGE_LOCAL_URL" --container "$FORGE_CONTAINER" --box "$BOX" --human "$HUMAN" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} \
   || die "amorcage passe 2 en echec" 4
 
@@ -336,7 +426,7 @@ OP_TOKEN_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.gitea_toke
    de la team forge fleet:humans, pas de l'entrypoint) — 'docker exec $BOX id $HUMAN' et 'docker logs $BOX'" 6
 # Le verdict RESONDE la promotion plutot que de repeter le flag : ce qui est affiche est ce que la
 # forge repond, pas ce qu'on lui a demande.
-HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_URL/api/v1/user" \
+HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api/v1/user" \
   | python3 -c 'import json,sys; print("site-admin" if json.load(sys.stdin).get("is_admin") else "non-admin")' 2>/dev/null || echo "?")"
 
 # ─── 7. LE RUNNER — on APPELLE la recette, on ne la refait pas ───────────────────────────────────
@@ -409,7 +499,7 @@ else
   # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
   REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
-       --forge-api "$FORGE_URL/api/v1" \
+       --forge-api "$FORGE_LOCAL_URL/api/v1" \
        --admin-token "$MASTER_TOKEN" \
        ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
        --instance-url "http://forge:3000" \
@@ -419,7 +509,7 @@ else
     # Le verdict RESONDE la forge : un runner qui tourne sans s'etre enregistre est exactement le
     # silence que ce banc doit refuser.
     RUNNERS="$(curl -s -m 5 -H "Authorization: token $MASTER_TOKEN" \
-        "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null \
+        "$FORGE_LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null \
       | python3 -c 'import json,sys
 try:
     d = json.load(sys.stdin)
@@ -452,7 +542,20 @@ fi
 say "─────────────────────────────────────────────────────────"
 say "$VERDICT"
 say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
-say "  boite     : $BOX   ssh ${BIND}:2222   deck ${BIND}:20999"
+say "  deck      : http://${ADVERTISE}:${DECK_PORT}"
+say "  boite     : $BOX   ssh ${ADVERTISE}:${SSH_PORT}"
+# LE RECAP DIT L'ADRESSE QU'ON COMPOSE, PAS CELLE SUR LAQUELLE ON ECOUTE. Il imprimait `$BIND`, ce
+# qui donnait « deck 0.0.0.0:20999 » — une ligne qu'on ne peut pas taper. L'ecoute reste dite, a
+# part, parce qu'elle porte la consequence : ouvert sur le reseau ou ferme sur la machine.
+if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
+  say "  ecoute    : $BIND — OUVERT SUR LE RESEAU. Les mots de passe de ce banc sont des defauts de"
+  say "              test, publics dans le README : a n'ouvrir que sur un reseau de confiance."
+  say "              « --bind 127.0.0.1 » le referme sur cette machine."
+  [[ -n "${ADVERTISE_GUESSED:-}" ]] && say "  ⚠ adresse : ${ADVERTISE_GUESSED} — les liens pointent sur $ADVERTISE, donc seule cette machine
+              les suivra. « --advertise <ip-ou-nom> » pour annoncer la bonne."
+else
+  say "  ecoute    : $BIND (cette machine seulement)"
+fi
 say "  image     : $IMAGE"
 say "  revision  : $IMAGE_REV_STATE"
 say "  runner    : $RUNNER_STATE"

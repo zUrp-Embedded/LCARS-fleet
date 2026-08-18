@@ -81,6 +81,12 @@ FAKE
   cat > "$BINDIR/dockerstub" <<FAKE
 #!/usr/bin/env bash
 argv="\$*"
+# Les variables du box traversent en ENVIRONNEMENT, pas en argv : la doublure les depose quand elle
+# voit le `create`, sinon aucun temoin ne peut lire ce que la boite recoit.
+case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/box.env" ;; esac
+case "\$argv" in
+  *"ps --filter publish="*) [[ -f "$BATS_TEST_TMPDIR/port_holder" ]] && cat "$BATS_TEST_TMPDIR/port_holder"; exit 0 ;;
+esac
 case "\$1 \$2" in
   "run --rm")      echo flux-ok; exit 0 ;;
   "ps -a")         exit 0 ;;
@@ -276,4 +282,57 @@ run_bench() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"PRET_SANS_CI"* ]]
   [[ "$output" != *"PAS PRET"* ]]
+}
+
+# ─── ecoute vs annonce : `0.0.0.0` n'est l'adresse de personne ────────────────────────────────────
+#
+# ⚖ ARBITRAGE USER 2026-08-18 : le banc s'ouvre sur le LAN (20999 deck, 21000 forge). Le bind passe
+# donc a `0.0.0.0` — un JOKER D'ECOUTE. Mis dans une URL il casse trois choses d'un coup : le
+# `ROOT_URL` de Gitea (chaque lien qu'il fabrique pointe nulle part), le `redirect_uri` OAuth2 du
+# deck (le retour de login tombe dans le vide) et la ligne de recap (une adresse qu'on ne peut pas
+# taper). Ces temoins tiennent la separation.
+
+@test "l'adresse ANNONCEE n'est jamais le joker d'ecoute" {
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
+  [[ "$output" != *"http://0.0.0.0:"* ]]
+  [[ "$output" == *"http://10.0.0.9:21000"* ]]
+  [[ "$output" == *"http://10.0.0.9:20999"* ]]
+}
+
+@test "les DEUX entrees du deck sont enregistrees — la locale et celle du reseau" {
+  # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. La
+  # machine hote arrive en 127.0.0.1, un ami par l'adresse annoncee : une seule enregistree, et
+  # l'autre finit sur un refus APRES identification, sur une page qui n'est pas la notre.
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
+  grep -q "LCARS_DECK_ORIGINS=http://127.0.0.1:20999,http://10.0.0.9:20999" "$BATS_TEST_TMPDIR/box.env"
+}
+
+@test "un bind PRECIS rend les deux adresses egales — l'ancien comportement revient" {
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 127.0.0.5
+  [[ "$output" == *"http://127.0.0.5:21000"* ]]
+  [[ "$output" == *"cette machine seulement"* ]]
+}
+
+@test "ouvert sur le reseau, le banc DIT ce que ca coute" {
+  # Les mots de passe de ce banc sont des defauts de test, publics dans le README. Ouvrir sans le
+  # dire, c'est livrer une porte ouverte a quelqu'un qui croit avoir une boite fermee.
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
+  [[ "$output" == *"OUVERT SUR LE RESEAU"* ]]
+  [[ "$output" == *"--bind 127.0.0.1"* ]]
+}
+
+@test "un port deja tenu par un AUTRE banc est refuse AVANT de creer quoi que ce soit" {
+  # LE DEFAUT MESURE (2026-08-18) : sur un bind joker, docker refuse en nommant l'adresse de
+  # l'AUTRE banc — « Bind for 127.0.0.6:2222 failed » sur une machine ou personne n'a tape
+  # 127.0.0.6 — et le script mourait en « la boite ne demarre pas », c'est-a-dire en accusant la
+  # boite d'un conflit qui ne lui appartient pas.
+  echo "un-autre-banc" > "$BATS_TEST_TMPDIR/port_holder"
+  run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUS"* ]]
+  [[ "$output" == *"un-autre-banc"* ]]
+  # Les deux sorties sont nommees, sinon le refus ne se distingue pas d'une panne.
+  [[ "$output" == *"bench-down.sh"* ]]
+  [[ "$output" == *"--forge-port"* ]]
 }
