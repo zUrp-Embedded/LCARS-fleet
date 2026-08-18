@@ -193,6 +193,14 @@ defmodule Fleet.Labels do
   # make a human learn a taxonomy to read "not started yet".
   def wait_for(:role_at_capacity), do: @wait_prefix <> "capacity"
   def wait_for(:role_busy), do: @wait_prefix <> "role"
+
+  # A0.5 — a conflict-rework dispatch whose live pod could not get its `refs/lcars/base` refreshed
+  # (the base moved; briefing on the stale one would replay the measured failure, one budget round
+  # per tick). Same label as `:role_busy`, deliberately: from the ticket's seat both read "the
+  # producer is not ready for me yet, retry next tick" — WHICH readiness is missing is an
+  # operator's diagnosis (the refresh failure is already logged loud pod-side), not a distinct
+  # state of the ticket.
+  def wait_for(:stale_base_unrefreshed), do: @wait_prefix <> "role"
   def wait_for(:draining), do: @wait_prefix <> "draining"
   def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"
   def wait_for(:ci_pending), do: @wait_prefix <> "ci"
