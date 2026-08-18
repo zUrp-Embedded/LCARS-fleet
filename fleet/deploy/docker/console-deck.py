@@ -99,8 +99,8 @@ CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/consol
 DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 # LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT. Elle part dans l'image a cote du runtime
 # (`Dockerfile`, stage `site`), donc la boite sert SA propre doc — pas la derniere en ligne, pas une
-# copie a resynchroniser. Absente (image d'avant, ou build sans elle), l'onglet ne s'affiche pas :
-# un onglet qui ouvre un 404 est pire que pas d'onglet.
+# copie a resynchroniser. Le Dockerfile la pose au meme titre que le runtime : si elle manque,
+# l'image est ratee, et ca doit se voir.
 DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/local/LCARS_v2/doc")
 # Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
 # pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
@@ -594,12 +594,7 @@ def state(only=None, admin=False, people=None):
                 "project": p.get("project_slug"),
             })
         hs.append(h)
-    # `doc` EST UNE MESURE, PAS UNE OPTION. L'onglet ne se dessine que si la doc est vraiment dans
-    # cette image : une image d'avant le stage `site`, ou un build qui l'a sautee, n'a rien a servir
-    # — et un onglet qui ouvre un 404 est pire que pas d'onglet. On regarde le fichier d'entree, pas
-    # le repertoire : un dossier vide passerait un test d'existence.
-    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin),
-            "doc": os.path.isfile(os.path.join(DECK_DOC, "index.html"))}
+    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin)}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -1178,9 +1173,13 @@ function build(s) {
   // LA DOC DE CETTE VERSION, servie par CE serveur. Pas un lien vers le site en ligne : celui-la
   // decrit la derniere version publiee, celle-ci decrit la boite qu'on regarde. Meme origine, meme
   // porte — le cadre charge une route du deck, derriere la session deja verifiee.
-  if (s.doc) {
-    add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
-  }
+  //
+  // INCONDITIONNEL. Cet onglet a porte un `if (s.doc)` pendant une heure, au motif qu'une image
+  // batie avant le stage `site` n'aurait rien a servir. Cette image N'EXISTE PAS : rien n'est
+  // deploye, les bancs se rebatissent entiers, et le Dockerfile pose la doc au meme titre que le
+  // runtime. Le garde ne gardait donc rien — et il aurait CACHE une image cassee au lieu de la
+  // montrer. Doc absente = image ratee : l'onglet s'ouvre, la route rend 404, ca se voit.
+  add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
   // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
   // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
   // ouvre. Un rail qui se dessine sur une reponse du serveur est un confort de lecture ; s'il etait
@@ -1539,9 +1538,6 @@ class Deck(BaseHTTPRequestHandler):
                 with open(full, "rb") as fh:
                     raw = fh.read()
             except OSError:
-                # PAS DE 503 ICI. Une doc absente n'est pas une panne de la boite : l'onglet ne
-                # s'affiche que si `/api/state` l'a annoncee, donc arriver ici veut dire une URL
-                # tapee a la main ou une page qui n'existe pas dans cette version.
                 self._send(404, "not found\n", "text/plain; charset=utf-8")
                 return
             self.send_response(200)

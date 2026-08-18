@@ -1224,8 +1224,7 @@ finally:
 #
 #   1. `..` NE SORT PAS DE LA RACINE. Le prefixe voisin porte les jetons de la boite ; une
 #      traversee servirait un fichier que ce serveur n'a aucun droit de lire a un navigateur.
-#   2. L'ONGLET SUIT LA PRESENCE REELLE. Une image d'avant ce stage n'a pas de doc — l'annoncer
-#      donnerait un onglet qui ouvre un 404, ce qui est pire que pas d'onglet.
+#   2. LES TYPES SERVIS SONT UNE LISTE, pas une deduction : ce qui n'y est pas ne sort pas.
 _deck = load_deck()
 _doc_root = tempfile.mkdtemp(prefix="lcars-doc-")
 os.makedirs(os.path.join(_doc_root, "manuel"), exist_ok=True)
@@ -1256,11 +1255,5 @@ check(_resolve("../hors-doc.html") is None,
 check(_resolve("manuel/../../hors-doc.html") is None,
       "doc: une traversee cachee au milieu du chemin est refusee comme les autres")
 
-# L'onglet suit le FICHIER d'entree, pas le repertoire : un dossier vide passerait une existence.
-check(os.path.isfile(os.path.join(_doc_root, "index.html")),
-      "doc: la sonde de l'onglet regarde index.html")
-_vide = tempfile.mkdtemp(prefix="lcars-doc-vide-")
-check(not os.path.isfile(os.path.join(_vide, "index.html")),
-      "doc: un repertoire VIDE ne fait pas apparaitre l'onglet")
 
 sys.exit(0 if ok else 1)
