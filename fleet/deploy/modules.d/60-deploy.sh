@@ -134,6 +134,7 @@ apply() {
   chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
 
   # 2. hex/rebar de l'humain (idempotent, silencieux en succès).
+  p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
 
@@ -144,6 +145,11 @@ apply() {
   # l'installeur REFUSE de dire « OK » sur des liens ratés et rend 3 ; c'est un FAIT (« release
   # posée, câblage incomplet »), pas un verdict, et c'est l'étape 5 ci-dessous qui pose ces liens
   # en root. Traiter 3 comme un échec casserait la provision sur toute machine normale.
+  # L'ETAPE LA PLUS LONGUE DE TOUT LE PROVISIONNEMENT, et la seule qui soit muette plusieurs
+  # minutes : gate complet (format, compile strict, 3000+ tests, bats, topologie, dialyzer) puis
+  # `mix release`. Sans cette ligne, l'ecran est fige et rien ne distingue « ca travaille » de
+  # « c'est plante ». `--verbose` donne le detail a qui le demande.
+  p_step "build + pose de la release : gate complet puis mix release — PLUSIEURS MINUTES (--verbose pour le detail)"
   run_quiet as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
   local install_rc=$?
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then

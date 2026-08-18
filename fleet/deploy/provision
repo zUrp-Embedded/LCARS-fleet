@@ -40,8 +40,8 @@
 # bilan alors qu'une ligne DRIFT venait d'etre imprimee.
 #
 # USAGE :
-#   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE]
-#   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain]
+#   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
+#   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain] [--verbose]
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #
@@ -86,6 +86,9 @@ while [[ $# -gt 0 ]]; do
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
+    # Le détail d'une étape longue, pour celui qui veut savoir sur quoi elle traîne. Hérité par les
+    # modules (qui sont des processus) : d'où l'export.
+    --verbose|-v) export PROV_VERBOSE=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     *) die "option inconnue: $1 (--help)" ;;
   esac

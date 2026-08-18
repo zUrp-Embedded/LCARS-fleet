@@ -136,6 +136,14 @@ else
   _PG=''; _PC=''; _PA=''; _PR=''; _PN=''
 fi
 
+# UNE ACTION LONGUE ET MUETTE N'EST PAS DISCERNABLE D'UN BLOCAGE. `60-deploy` construit la release
+# — gate complet compris — et `run_quiet` n'imprime rien pendant plusieurs minutes : l'écran est
+# figé, et la seule interprétation disponible est « c'est planté ». La v1 n'a jamais eu ce problème
+# parce que sa plus longue action durait trente secondes ; elle annonçait un résultat PAR OBJET
+# (`package:tmux — installed`). Un `mix gate` n'a pas d'objets à égrener : il lui faut donc ce que
+# la v1 n'avait pas besoin d'avoir — dire ce qui commence, avant de dire comment ça s'est terminé.
+# Les six colonnes de l'étiquette sont tenues en ASCII pur, pour la même raison que les autres.
+p_step() { printf '%s>>%s    %s: %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$*"; }
 p_ok()   { printf '%sOK%s    %s: %s\n' "$_PG" "$_PN" "$PROV_MODULE_TAG" "$*"; }
 p_chg()  { printf '%sPOSÉ%s  %s: %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$*"; }
 p_drift(){ printf '%sDRIFT%s %s: %s\n' "$_PA" "$_PN" "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
@@ -200,6 +208,14 @@ verdict_apply() {
 # Rien n'est jamais étouffé en 2>/dev/null (le silence v1 cachait des perms cassées).
 run_quiet() {
   local out rc=0
+  # `--verbose` (PROV_VERBOSE=1) : on ne capture RIEN, tout défile. C'est le mode de celui qui
+  # regarde une étape qui traîne et veut savoir sur quoi — pas le mode nominal, qui doit rester
+  # lisible par un humain. Le verdict, lui, ne change pas : un échec compte pareil.
+  if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
+    "$@" || rc=$?
+    [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
+    return "$rc"
+  fi
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 || rc=$?
   if [[ "$rc" -ne 0 ]]; then

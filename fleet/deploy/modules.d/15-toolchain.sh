@@ -81,6 +81,7 @@ apply() {
     # Dépose dans un dossier de travail puis mv (le zip vérifié peut quand même être ré-extrait
     # après un crash : le .partial est jetable, le mv final est atomique).
     rm -rf "${ELIXIR_HOME}.partial"
+    p_step "Elixir $PROV_ELIXIR_VERSION (OTP $PROV_ELIXIR_OTP_MAJOR) — decompression du precompile officiel"
     if ! run_quiet unzip -q "$zip" -d "${ELIXIR_HOME}.partial"; then
       rm -rf "${ELIXIR_HOME}.partial" "$zip"; p_fail "unzip du précompilé Elixir"; verdict_apply
     fi
