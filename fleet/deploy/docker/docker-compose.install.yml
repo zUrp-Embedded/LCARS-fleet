@@ -135,6 +135,10 @@ services:
       # l'en-tête de `docker-compose.yml`, source unique.
       - seccomp=./lcars-hardened-seccomp.json
       - apparmor=unconfined
+      # Sans lui, `bwrap` ne peut pas monter son `/proc` et AUCUN pod ne naît sur un Linux
+      # ordinaire (mesuré le 2026-08-18 sur Debian 13 : la fleet démarre et ne produit jamais).
+      # Le motif complet vit dans l'en-tête de `docker-compose.yml`, source unique.
+      - systempaths=unconfined
     logging:
       driver: json-file
       options:

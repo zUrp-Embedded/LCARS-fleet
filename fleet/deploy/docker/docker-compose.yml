@@ -38,12 +38,29 @@
 # et `SYS_ADMIN` n'est PAS retirable — mesuré, pas déduit. Le run 4 confirme au passage la prémisse
 # de ce commentaire, qui n'avait jamais été vérifiée.
 #
-# ⚠ `apparmor=unconfined` RESTE, et ce qui manque est une MESURE, pas une décision : AppArmor n'est
-# pas actif sur la boîte de dev (`docker info` → SecurityOptions sans `name=apparmor`), donc tout run
-# vert y est muet sur lui. Le retirer sur cette foi-là serait répondre à une question voisine. Ce qui
-# tranchera : rejouer les quatre runs sur un hôte où `docker info` annonce AppArmor — le profil
-# `docker-default` refuse `mount`, donc l'attente est un KO, et c'est justement ce qu'il faut voir
-# avant d'y toucher.
+# ⚠ `apparmor=unconfined` RESTE, et la mesure qui manquait a ete faite le 2026-08-18 sur une Debian
+# 13 dont `docker info` annonce AppArmor : le conteneur y tourne bien `unconfined`, donc AppArmor
+# n'est PAS ce qui bloquait. Cette ligne garde sa raison d'etre et n'a plus a etre reverifiee.
+#
+# ⚠ `systempaths=unconfined` — LA LIGNE SANS LAQUELLE AUCUN POD NE NAIT SUR UN LINUX ORDINAIRE.
+# Meme jour, meme machine : la boite montait, la fleet demarrait, et le pod permanent `starfleet`
+# mourait en boucle sur `bwrap: Can't mount proc on /newroot/proc: Operation not permitted` —
+# jusqu'a l'escalade d'incident. Docker MASQUE des chemins sous `/proc` (mknod par-dessus) ; dans un
+# user-namespace le noyau refuse alors de monter un `/proc` neuf, parce que ce montage cacherait des
+# mounts verrouilles. Le pod ne peut donc pas construire son sanctuaire.
+#
+# Isole en une commande, en tant qu'utilisateur non privilegie, sur l'image du banc :
+#     bwrap --unshare-all --dev-bind / / --proc /proc true
+#       sans systempaths ......... rc=1  « Can't mount proc … Operation not permitted »
+#       avec systempaths ......... rc=0
+#
+# CE N'EST PAS UNE DEGRADATION DE LA SANDBOX DES PODS, c'est la condition pour qu'elle EXISTE. Le
+# modele est ecrit en tete du Dockerfile : le conteneur est le SUBSTRAT, le sanctuaire est bwrap.
+# Un substrat qui interdit a bwrap de monter son `/proc` ne rend pas les pods plus surs — il les
+# empeche de naitre, et la fleet tourne alors sans jamais produire.
+#
+# POURQUOI CA NE S'EST PAS VU AVANT : la boite de dev est sous WSL, ou le meme `bwrap` passe. Il a
+# fallu une machine ordinaire — celle a qui on tend la beta — pour que la question se pose.
 #
 # Le chemin du profil est RELATIF au fichier compose, pas au cwd de l'appelant — vérifié par un
 # contrôle : profil retiré d'à côté du compose, docker nomme le chemin absolu qu'il a tenté.
@@ -134,6 +151,9 @@ services:
       # 6-071 — mesuré : ce profil suffit à bwrap, le défaut docker non (cf. l'en-tête).
       - seccomp=./lcars-hardened-seccomp.json
       - apparmor=unconfined
+      # Sans lui, `bwrap` ne peut pas monter son `/proc` et AUCUN pod ne naît sur un Linux
+      # ordinaire — mesuré le 2026-08-18, motif complet dans l'en-tête.
+      - systempaths=unconfined
     # Les logs d'une boite qui tourne 24/7 grossissent SANS FIN par defaut : `docker inspect`
     # rend `json-file` avec ZERO option (mesure du 2026-07-31). L'entrypoint, ttyd, le provision
     # et le BEAM ecrivent jusqu'a remplir le disque du NAS — panne certaine, au pire moment, et
