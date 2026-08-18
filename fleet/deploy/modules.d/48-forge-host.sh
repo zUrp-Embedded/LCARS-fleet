@@ -88,6 +88,14 @@ apply() {
     p_ok "forge du poste déjà vivante ($LOCAL_URL)"
   fi
 
+  # 1-bis. ELLE ANNONCE SON ADRESSE, parce que personne d'autre ne peut le faire pour elle. Les
+  #    modules sont des PROCESSUS : ce shell ne peut rien exporter vers `50-forge`. Sans ce fichier,
+  #    une install qui vient de monter une forge vivante voit `50-forge` et `55-deck-oidc` dériver
+  #    sur « FORGE_BASE_URL non posé » — mesuré le 2026-08-18. 0644 : c'est une ADRESSE, pas un
+  #    secret, et le doctor d'un humain doit pouvoir la lire.
+  write_atomic "$PROV_TOKENS_DIR/forge.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$LOCAL_URL" \
+    || { p_fail "adresse de la forge non posée ($PROV_TOKENS_DIR/forge.url)"; verdict_apply; }
+
   # 2. L'AUTORITÉ. Le compte d'administration et son jeton, mintés DANS le conteneur (`gitea admin`
   #    n'a pas besoin d'un jeton pour créer le premier). Le fichier est le même que celui que la
   #    boîte garde : `50-forge` le lit sans savoir qui l'a posé.

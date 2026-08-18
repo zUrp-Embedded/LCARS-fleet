@@ -392,3 +392,27 @@ EOF
   grep -q -- "d start -a" "$MOD"
   grep -q -- "LCARS_PRIVATE_DIR=/authority" "$MOD"
 }
+
+@test "48-forge-host : la forge ANNONCE son adresse — les modules sont des processus" {
+  # Mesure du 2026-08-18 : une install qui venait de monter une forge parfaitement vivante rendait
+  # « FORGE_BASE_URL/PROV_FORGE_URL non pose » sur 50-forge ET 55-deck-oidc. `48` ne peut rien
+  # exporter vers `50` : ce sont deux shells. Il ecrit donc l'adresse, et la lib la relit.
+  MOD="$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh"
+  LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  grep -q 'write_atomic "\$PROV_TOKENS_DIR/forge.url"' "$MOD"
+  grep -q 'PROV_TOKENS_DIR/forge.url' "$LIB"
+  # 0644 : c'est une adresse, pas un secret
+  grep -q 'forge.url" 0644' "$MOD"
+}
+
+@test "la lecture de forge.url est un REPLI — l'environnement garde la priorite" {
+  # En conteneur le fichier n'existe pas et l'environnement du compose gagne. Et s'il existe, il ne
+  # doit jamais ecraser un FORGE_BASE_URL pose explicitement.
+  d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
+  run bash -c "set -euo pipefail; export PROV_TOKENS_DIR='$d' FORGE_BASE_URL=http://depuis-l-env:9999
+    source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"\$PROV_FORGE_URL\""
+  [ "$output" = "http://depuis-l-env:9999" ]
+  run bash -c "set -euo pipefail; export PROV_TOKENS_DIR='$d'
+    source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"\$PROV_FORGE_URL\""
+  [ "$output" = "http://depuis-le-fichier:3000" ]
+}

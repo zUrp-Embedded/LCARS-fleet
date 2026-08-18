@@ -73,7 +73,13 @@ PROVISION_LIB_LOADED=1
 # ici — elle vivait en `LCARS_HUMANS_TEAM` cote boite, seconde famille de variables pour un fait
 # que ce fichier declare deja pour ses voisins (org, groupes). Un jeu de noms, un fait.
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
-: "${PROV_FORGE_URL:=${FORGE_BASE_URL:-}}"     # la forge cible ; vide = modules forge en instruct-only
+# ⚠ TROISIÈME SOURCE, ET ELLE EXISTE PARCE QUE LES MODULES SONT DES PROCESSUS. `48-forge-host` monte
+# la forge du poste — et ne peut rien exporter vers `50-forge`, qui tourne dans un autre shell. Il
+# écrit donc son adresse là, et c'est ici qu'on la relit. Mesure du 2026-08-18 : sans cette ligne,
+# une install qui vient de créer une forge parfaitement vivante rendait « FORGE_BASE_URL non posé »
+# sur les deux modules qui en dépendent.
+# En conteneur ce fichier n'existe pas : l'environnement du compose gagne, rien ne change.
+: "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
 # le SERVEUR compose (dans un conteneur, le nom du service : `http://forge:3000`) ; celle-ci est
 # celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `forge:3000`
