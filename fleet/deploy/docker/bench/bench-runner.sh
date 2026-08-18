@@ -196,6 +196,60 @@ LCARS_RUNNER_LABELS="$LABELS" \
   $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
 say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volume)"
 
+# ─── 3-bis. LE MAGASIN DU DAEMON EMBARQUE — un daemon neuf n'a AUCUNE image ─────────────────────
+#
+# Depuis que le runner tourne en `dind-rootless`, ses jobs parlent a un daemon QUI LUI APPARTIENT,
+# et non plus a celui de la machine. Ce daemon demarre vide : les images publiques, il les tire
+# tout seul ; les images LOCALES — `lcars-build:<tag>` en tete, qu'aucun registre au monde ne porte
+# — il ne peut pas les connaitre. Sans cette etape, le label `elixir` est annonce et chaque job qui
+# le demande echoue sur une image introuvable : le « runner vert qui rate tous ses jobs » que
+# l'etape 0 refuse deja, une couche plus bas.
+#
+# On ne parametre rien : LES LABELS NOMMENT DEJA CES IMAGES, et l'etape 0 a deja verifie qu'elles
+# existent cote hote. On relit la meme liste.
+#
+# ⚠ `docker exec` PEUT RENDRE ZERO OCTET ET `exit 0` a travers un relais (c'est ecrit noir sur blanc
+# a l'etape 0 de ce fichier, a propos du relais systemd du groupe fleet). Une sonde qui se
+# contenterait du code de retour semerait donc dans le vide en se croyant verte. On EXIGE une sortie
+# NON VIDE : si le relais avale, on refuse en le disant, on ne continue pas en silence.
+seed_dind_images() {
+  local c="$PROJECT-runner-1" i out entry image
+  for i in $(seq 1 30); do
+    out="$("$DOCKER_BIN" exec "$c" docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    [[ -n "$out" ]] && break
+    sleep 2
+  done
+  [[ -n "$out" ]] || {
+    say "REFUS : le daemon embarque du runner ne rend rien apres 60 s."
+    say "  soit il n'a pas demarre (privileged ? apparmor=rootlesskit ?), soit ce relais docker"
+    say "  avale la sortie de \`exec\` — dans les deux cas on ne peut RIEN semer, et un runner"
+    say "  sans ses images locales annonce des labels qu'il ne sait pas servir."
+    exit 1
+  }
+  say "daemon embarque du runner : docker $out"
+
+  local IFS=,
+  for entry in $LABELS; do
+    image="${entry#*docker://}"
+    [[ "$image" == "$entry" ]] && continue
+    [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] && continue
+    # Publique : qu'il la tire lui-meme — c'est plus court qu'un transfert et ca suit l'amont.
+    if "$DOCKER_BIN" exec "$c" docker pull -q "$image" >/dev/null 2>&1 &&
+       [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]]; then
+      continue
+    fi
+    # Locale : elle n'est sur aucun registre. On la lui donne, depuis le daemon de la machine.
+    say "image locale semee dans le daemon du runner : $image"
+    "$DOCKER_BIN" save "$image" 2>/dev/null | "$DOCKER_BIN" exec -i "$c" docker load >/dev/null 2>&1 || true
+    [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] || {
+      say "REFUS : $image absente du daemon du runner apres semis — le label qui la nomme serait un mensonge"
+      exit 1
+    }
+  done
+  say "magasin du runner : toutes les images des labels sont resolubles"
+}
+seed_dind_images
+
 # ─── 4. Preuve d'enregistrement : la forge le LISTE — pas le log du runner ──────────────────────
 # LA SONDE DISTINGUE « pas enregistre » DE « je n'ai pas pu regarder », parce qu'elle a menti sur
 # cette difference. Mesure du 2026-08-09 : le runner s'etait enregistre (« Runner registered

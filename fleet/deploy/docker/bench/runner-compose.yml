@@ -38,7 +38,33 @@ name: lcars-runner
 services:
   runner:
     # PIN par digest — act_runner officiel (jamais d'image custom pour l'infra CI).
-    image: gitea/act_runner:0.6.1@sha256:b5c35d6bdbb9bb25e531230bfc7cc663cb751406cbec90a2a891b85fea54de86
+    # ⚠ VARIANTE `dind-rootless`, ET LE SOCKET DE L'HOTE N'EST PLUS MONTE NULLE PART.
+    #
+    # CE QU'ON ENLEVE : `- /var/run/docker.sock:/var/run/docker.sock`. Avec lui, n'importe quel job
+    # parle au daemon de la MACHINE — c'est-a-dire root, par conception et sans rien avoir a casser.
+    # La doc Gitea le dit elle-meme : « jobs share the host's daemon and can see its other
+    # containers », et un job peut lire les jetons dans l'inspection des conteneurs voisins. Sur un
+    # banc jetable ca passe ; a cote de vrais services, non.
+    #
+    # ⚖ ARBITRAGE USER 2026-08-18 : « si on fait les 2 rails, on peut pas juste faire le bon, secure,
+    # et l'utiliser aussi pour le banc ? ». Un seul rail, et c'est le bon — parce que deux rails,
+    # c'est un rail qui pourrit : le natif n'avait pas tourne depuis trois semaines et il etait mort
+    # sans que personne le voie.
+    #
+    # CE QU'ON ACHETE ET CE QU'ON PAIE. `privileged: true` est exige par la variante dind, y compris
+    # rootless — mais le daemon INTERNE tourne sans root, et surtout : plus aucun job n'atteint le
+    # daemon de la machine. Avec le socket il n'y avait rien a casser ; ici il faut s'echapper de son
+    # conteneur de job, PUIS d'un daemon rootless. Ce n'est pas le meme ordre de difficulte.
+    #
+    # Mesure du 2026-08-18, les deux substrats : demarre sous Docker Desktop/WSL ET sous LMDE 7
+    # natif, daemon interne 28.5.2, tire une image publique, accepte `docker load`.
+    #
+    # `apparmor=rootlesskit` : sur Ubuntu/Debian le profil par defaut bloque les changements de
+    # namespace dont le daemon embarque a besoin (doc Gitea).
+    image: gitea/act_runner:0.6.1-dind-rootless@sha256:6b8f7c4297c0a5c4c181e4737665d4af69288cdc380e2887105a05a2b78930df
+    privileged: true
+    security_opt:
+      - apparmor=rootlesskit
     hostname: lcars-runner
     environment:
       # La forge de l'opérateur. Pas de défaut : une URL fausse fait un runner qui tourne et ne
@@ -72,12 +98,19 @@ services:
       #   docker build --target build -t lcars-build:<tag> -f .../Dockerfile .
       #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
       GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
+      # Le daemon EMBARQUE, rootless : c'est lui que les jobs utilisent, plus celui de la machine.
+      DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
+      DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"
+      DOCKERD_ROOTLESS_ROOTLESSKIT_MTU: "65520"
     volumes:
       - runner-data:/data
-      # Le socket du daemon TEL QU'IL EXISTE DANS LA VM du moteur — pas un chemin de la distro WSL
-      # (un bind depuis WSL rendrait un répertoire VIDE côté conteneur, en silence).
-      - /var/run/docker.sock:/var/run/docker.sock
+      # ⚠ LE MAGASIN DU DAEMON INTERNE, NOMME. L'image DECLARE deja ce chemin comme volume, donc
+      # docker en cree un — mais ANONYME : un `down -v` l'emporte et un `recreate` l'orpheline, et
+      # les images qu'on y a semees (dont `lcars-build`, qu'aucun registre ne porte) disparaissent
+      # avec. C'est le trou de l'exemple officiel, et il coute cette ligne.
+      - runner-dind:/home/rootless/.local/share/docker
     restart: unless-stopped
 
 volumes:
   runner-data:
+  runner-dind:

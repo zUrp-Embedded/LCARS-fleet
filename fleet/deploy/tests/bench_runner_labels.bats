@@ -149,3 +149,51 @@ run_runner() {
   [[ "$output" == *"--target build"* ]]
   ! grep -q '^CURL' "$CALLS"
 }
+
+# ─── UN SEUL RAIL, ET C'EST LE SECURISE ──────────────────────────────────────────────────────────
+#
+# ⚖ ARBITRAGE USER 2026-08-18 : « si on fait les 2 rails, on peut pas juste faire le bon, secure, et
+# l'utiliser aussi pour le banc ? ». Oui — parce que deux rails, c'est un rail qui pourrit.
+#
+# Le socket de l'hote donnait a N'IMPORTE QUEL job le daemon de la machine : root, par conception,
+# sans rien avoir a casser. La doc Gitea le dit elle-meme (« jobs share the host's daemon and can
+# see its other containers »).
+
+@test "le compose du runner ne monte PLUS le socket de l'hote" {
+  C="$BATS_TEST_DIRNAME/../docker/bench/runner-compose.yml"
+  [ -f "$C" ]
+  # aucune ligne de MONTAGE du socket (les mentions en commentaire, elles, expliquent pourquoi)
+  ! grep -qE '^\s*-\s*/var/run/docker\.sock' "$C"
+  # la variante dind-rootless, epinglee par digest
+  grep -q 'act_runner:0.6.1-dind-rootless@sha256:' "$C"
+  grep -qE '^\s*privileged: true' "$C"
+  grep -q 'apparmor=rootlesskit' "$C"
+  grep -q 'DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"' "$C"
+}
+
+@test "le magasin du daemon embarque est un volume NOMME — sinon le semis meurt au recreate" {
+  # L'image DECLARE ce chemin comme volume : docker en cree donc un, mais ANONYME. Un `down -v`
+  # l'emporte, un `recreate` l'orpheline, et `lcars-build` — qu'aucun registre ne porte — part avec.
+  C="$BATS_TEST_DIRNAME/../docker/bench/runner-compose.yml"
+  grep -q 'runner-dind:/home/rootless/.local/share/docker' "$C"
+  grep -qE '^\s{2}runner-dind:\s*$' "$C"
+}
+
+@test "le semeur EXIGE une sortie non vide — un exec qui avale ne doit pas passer pour un succes" {
+  # L'etape 0 de ce script le dit deja : `exec` rend zero octet et exit 0 a travers le relais
+  # systemd du groupe fleet. Une sonde qui se contenterait du code de retour semerait dans le vide
+  # en se croyant verte.
+  SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
+  grep -q 'seed_dind_images' "$SUT"
+  grep -q 'docker image inspect -f .{{.Id}}.' "$SUT"
+  # le refus existe et il nomme les deux causes possibles
+  grep -q "ne rend rien apres 60 s" "$SUT"
+}
+
+@test "le semeur lit LES LABELS — aucune seconde liste d'images a tenir" {
+  # Une quatrieme liste du meme fait est morte ailleurs dans ce depot (PROV_ROLES). On ne
+  # recommence pas : les labels nomment deja les images, l'etape 0 a deja verifie qu'elles existent.
+  SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
+  awk '/^seed_dind_images\(\)/,/^}/' "$SUT" | grep -q 'for entry in \$LABELS'
+  awk '/^seed_dind_images\(\)/,/^}/' "$SUT" | grep -q 'image="\${entry#\*docker://}"'
+}
