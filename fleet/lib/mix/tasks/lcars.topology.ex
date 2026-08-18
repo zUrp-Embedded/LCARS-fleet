@@ -79,6 +79,9 @@ defmodule Mix.Tasks.Lcars.Topology do
   @layers %{
     "Fleet.Slug" => "foundation",
     "Fleet.EnvParse" => "foundation",
+    # A1 (chantier rails) — box-wide admin settings reader (/etc/lcars/fleet.json), pure like its
+    # neighbour EnvParse: deps [], read once by runtime.exs at boot.
+    "Fleet.SystemConfig" => "foundation",
     "Fleet.GitRef" => "foundation",
     "Fleet.Layout" => "foundation",
     "Fleet.PodId" => "foundation",

@@ -59,6 +59,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.SchemaCache` | 0 |
 | foundation | `Fleet.Shutdown.Quiesce` | 0 |
 | foundation | `Fleet.Slug` | 0 |
+| foundation | `Fleet.SystemConfig` | 0 |
 <!-- boundary-topology:end -->
 
 ## Reading the table
