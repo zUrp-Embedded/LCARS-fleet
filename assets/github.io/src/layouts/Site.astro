@@ -30,6 +30,29 @@ for (const p of [...nav, ...MANUAL]) {
     throw new Error(`Site.astro: lien interne hors base (${p.href}) — passer par u() de lib/href.js`);
   }
 }
+
+// ─── LE RAIL COUVRE LES PAGES, ET LE BUILD LE VERIFIE ────────────────────────────────────────────
+//
+// Astro route par FICHIER : poser `src/pages/machin.astro` suffit a le construire et a le publier.
+// Le rail, lui, est une liste ECRITE ci-dessus — parce qu'il porte deux choses qu'un nom de fichier
+// ne dit pas : le groupe (on presente / on reference) et l'ordre de lecture.
+//
+// Ces deux faits vivent donc a deux endroits, et deux endroits derivent. La page nouvelle
+// existerait, servie a son URL, et n'apparaitrait dans aucune navigation : publiee et introuvable,
+// sans un mot. La liste reste ecrite ; c'est sa COUVERTURE qui devient mecanique.
+const ROUTES = Object.keys(import.meta.glob('../pages/*.astro'))
+  .map((f) => f.split('/').pop().replace(/\.astro$/, ''))
+  .map((n) => (n === 'index' ? u('/') : u(`/${n}/`)));
+const DECLARED = new Set([...PAGES, ...MANUAL].map((p) => p.href));
+const orphan = ROUTES.filter((r) => !DECLARED.has(r));
+const ghost = [...DECLARED].filter((d) => !ROUTES.includes(d));
+if (orphan.length || ghost.length) {
+  throw new Error(
+    'Site.astro: le rail et les pages ont diverge — ' +
+    (orphan.length ? `page(s) sans entree de rail : ${orphan.join(', ')} (ajouter a PAGES ou MANUAL). ` : '') +
+    (ghost.length ? `entree(s) de rail sans page : ${ghost.join(', ')}.` : '')
+  );
+}
 ---
 <!doctype html>
 <html lang="fr">
