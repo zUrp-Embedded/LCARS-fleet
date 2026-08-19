@@ -207,11 +207,6 @@ apply_egress() { # apply_egress <yaml> <eco>
     echo "toolchain-converger: egress $role <- ${hosts[*]}"
   done
 
-  # LE MARQUEUR QUI DISTINGUE LE SILENCE NOMINAL DES QUATRE PANNES. Sans lui, « aucun hote » recouvre
-  # « rien n'a ete approuve » (nominal), « le convergeur n'est jamais passe », « le volume n'est pas
-  # monte » et « le volume a ete purge » — tous rendant le meme rien, puis un REFUSED au premier
-  # appel. Lu par `Fleet.Spawner.Pod.Egress`.
-  printf '%s\n' "$SHA" > "$dir/.applied"
 }
 
 # ─── LA FORME `installer` : LA FORME DOMINANTE DE L'EMBARQUE ────────────────────────────────────
@@ -360,5 +355,19 @@ for path in $(list_manifests); do
     rc=3
   fi
 done
+
+# LE MARQUEUR QUI DISTINGUE LE SILENCE NOMINAL DES QUATRE PANNES — pose ICI, en fin de passe, et
+# JAMAIS dans `apply_egress`. Une v1 l'ecrivait dans le verbe : un manifeste SANS `egress_hosts`
+# (le cas nominal d'une boite qui n'a rien ouvert) ne le posait donc jamais, et « aucun hote »
+# recouvrait a nouveau « le convergeur n'est jamais passe », « volume non monte », « volume
+# purge » — les pannes exactes que ce marqueur existe pour separer. Trouve par la relecture du
+# 2026-08-19. Lu par `Fleet.Spawner.Pod.Egress.warn_unless_applied/1`.
+#
+# Pose SEULEMENT si la passe est ENTIEREMENT verte : un rc=3 laisse l'etat en arriere d'au moins
+# un manifeste, et estampiller dirait « courant au SHA » sur une boite qui ne l'est pas.
+if [[ "$rc" -eq 0 ]]; then
+  mkdir -p "$STORE/state/egress.d"
+  printf '%s\n' "$SHA" > "$STORE/state/egress.d/.applied"
+fi
 
 exit "$rc"

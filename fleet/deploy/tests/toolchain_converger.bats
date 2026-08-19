@@ -141,6 +141,29 @@ EOF
   grep -q '^files.pythonhosted.org$' "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts"
 }
 
+@test "EGRESS: le marqueur .applied est pose MEME SANS egress_hosts — le silence nominal est estampille" {
+  # Une v1 posait le marqueur dans apply_egress : une boite qui n'a jamais rien ouvert (le cas
+  # NOMINAL) ne l'avait donc jamais, et « aucun hote » recouvrait de nouveau les pannes que le
+  # marqueur separe. Ce temoin epingle : convergence verte SANS hotes => marqueur pose quand meme.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  [[ "$(cat "$LCARS_STORE_ROOT/state/egress.d/.applied")" == "deadbeef" ]]
+}
+
+@test "EGRESS: une passe en ECHEC ne pose PAS le marqueur — estampiller mentirait" {
+  cat > "$BATS_TEST_TMPDIR/bin/sha256sum" <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/sha256sum"
+  local sha; sha="$(printf 'a%.0s' {1..64})"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: https://sh.rustup.rs\n  version: "1.27"\n' "$sha" | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 3 ]]
+  [[ ! -r "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
 @test "EGRESS: le marqueur .applied porte le SHA — c'est lui qui distingue le silence nominal" {
   # Sans marqueur, « aucun hote » recouvre quatre etats dont trois sont des pannes : convergeur
   # jamais passe, volume non monte, volume purge. Tous rendent le meme rien.
