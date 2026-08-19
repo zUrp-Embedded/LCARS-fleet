@@ -10,6 +10,14 @@
 # le compose. Un chemin recopie ici en serait une seconde verite, et c'est toujours celle qu'on ne
 # lit pas qui gagne.
 #
+# ⚠ NE MONTE JAMAIS UN VOLUME SUR LA RACINE DU MAGASIN — SEULEMENT SUR SES ENFANTS. Cette racine a
+# deja un locataire que ce lot n'a pas pose : `PROV_CATALOGUES_WORK` (defini dans
+# `provision-lib.sh`) vit dessous, cree par `25-directories.sh`, et il est porte par la COUCHE
+# CONTENEUR. Un volume monte a la racine le masquerait — l'etat tofu des catalogues disparaitrait
+# derriere un point de montage vide, sans un message. Constate en verifiant le rejeu du 2026-08-19
+# sur une machine reelle : le voisin etait la, a cote des quatre montages, et rien ne l'annoncait.
+# Les volumes de ce fichier sont ses FRERES, jamais son parent.
+#
 # POURQUOI DES VOLUMES EXTERNES, ET CE QUE CA ACHETE : `external: true` les met HORS PROJET, donc
 # `compose down -v` ne peut pas les emporter. Ce n'est pas de la discipline, c'est le contrat de
 # docker. Mesure du 2026-08-18 : `docker compose -p vtest down -v` detruit `vtest_projet-home` et
@@ -49,6 +57,14 @@ LCARS_STORE_VOLUMES=(
   lcars-sysroots     # images disque amont extraites — perdre coute un telechargement de plusieurs Go.
   lcars-state        # env.d/ et egress.d/ — ETAT CONVERGE, pas un artefact. Petit, et sa perte est MUETTE.
 )
+
+# ⚠ CE QUI N'EST PAS ENCORE FAIT, ET QUI SE VOIT SUR UN BANC NEUF. Les quatre points de montage
+# naissent `root:root 0755` — c'est docker qui les cree, pas nous. `01` §4.8 du rail toolchain exige
+# `root:fleet 2775` (setgid) plus `umask 002` cote pod, sans quoi un humain de la boite ne peut ni
+# ecrire dans le cache ni ecraser le fichier d'un autre. Mesure du 2026-08-19 sur .63 : montages
+# corrects, modes non poses. C'est l'etape 2 du rail toolchain, pas ce lot — mais un magasin monte
+# et non ouvert a l'air fini alors qu'il ne sert encore a personne, et ca se dit ici plutot que de
+# se decouvrir au premier build qui echoue sur un « permission denied » dans un cache.
 
 # store_ensure_volumes <docker-bin> — cree ce qui manque, ne touche a rien d'autre.
 #
