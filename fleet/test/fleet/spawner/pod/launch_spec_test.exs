@@ -361,4 +361,97 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       refute env =~ "rw:/home/project:"
     end
   end
+
+  # ⚠ `async: false` sur ce bloc : il ECRIT `LCARS_STORE_ROOT`, qui est globale au node. Le reste du
+  # fichier reste `async: true` — seul ce describe touche l'environnement.
+  describe "le magasin d'outillage — monte, et l'environnement qui le rend utilisable" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "lcars-store-test-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "state/env.d"))
+      File.mkdir_p!(Path.join(root, "cache"))
+      prev = System.get_env("LCARS_STORE_ROOT")
+      System.put_env("LCARS_STORE_ROOT", root)
+
+      on_exit(fn ->
+        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+        File.rm_rf!(root)
+      end)
+
+      {:ok, root: root}
+    end
+
+    defp envd(root, name, body), do: File.write!(Path.join([root, "state/env.d", name]), body)
+
+    defp cap, do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => "t"}, spec: %{}}
+
+    test "DEUX montages, et le `rw` du cache vient APRES le `ro` de l'arbre", %{root: root} do
+      env = LaunchSpec.pod_mounts_env(cap(), [], "/opt/claude_launch.sh")
+      ro = :binary.match(env, "ro:#{root}\n") |> elem(0)
+      rw = :binary.match(env, "rw:#{Path.join(root, "cache")}") |> elem(0)
+
+      # L'ORDRE EST LE SENS : bwrap applique dans l'ordre, donc le rw doit recouvrir le ro. Les
+      # inverser rend le cache lisible et non ecrivable — `EROFS` au premier `pip install`, avec
+      # l'air d'etre configure.
+      assert ro < rw
+    end
+
+    test "pas de cache sur le disque : le `ro` seul, jamais un `rw` invente", %{root: root} do
+      File.rm_rf!(Path.join(root, "cache"))
+      env = LaunchSpec.pod_mounts_env(cap(), [], "/opt/claude_launch.sh")
+      assert env =~ "ro:#{root}"
+      refute env =~ "rw:#{Path.join(root, "cache")}"
+    end
+
+    test "aucun magasin : la ligne est celle d'aujourd'hui, octet pour octet (DR-023)" do
+      System.delete_env("LCARS_STORE_ROOT")
+      assert LaunchSpec.toolchain_env() == ""
+      refute LaunchSpec.pod_mounts_env(cap(), [], "/opt/claude_launch.sh") =~ "lcars-store-test"
+    end
+
+    test "env.d vide : le montage, et AUCUN --setenv de plus" do
+      assert LaunchSpec.toolchain_env() == ""
+    end
+
+    test "deux fichiers : union, ordre stable, commentaires et blancs ignores", %{root: root} do
+      envd(root, "10-rust.env", "# la toolchain rust\nCARGO_HOME=/store/toolchains/rust\n\n")
+      envd(root, "20-esp.env", "IDF_PATH=/store/toolchains/esp-idf\n")
+
+      assert LaunchSpec.toolchain_env() ==
+               "CARGO_HOME=/store/toolchains/rust\nIDF_PATH=/store/toolchains/esp-idf"
+    end
+
+    test "une valeur peut contenir `=` — on coupe au PREMIER", %{root: root} do
+      envd(root, "a.env", "OPTS=--flag=value\n")
+      assert LaunchSpec.toolchain_env() == "OPTS=--flag=value"
+    end
+
+    test "newline dans une valeur => REFUS du spawn, pas un env tronque", %{root: root} do
+      envd(root, "a.env", "A=x\nB=y\n")
+      # Deux lignes valides : ce cas passe. L'injection se fait par un ECHAPPEMENT dans la valeur,
+      # que le format ne permet pas — la garde est verifiee sur la clef ci-dessous et sur `\r` ici.
+      assert LaunchSpec.toolchain_env() == "A=x\nB=y"
+
+      envd(root, "b.env", "C=avec\rretour\n")
+
+      assert_raise ArgumentError, ~r/SECURITY REFUSAL/, fn -> LaunchSpec.toolchain_env() end
+    end
+
+    test "clef hors motif => REFUS", %{root: root} do
+      envd(root, "a.env", "bad-key=1\n")
+      assert_raise ArgumentError, ~r/not a shell environment name/, fn -> LaunchSpec.toolchain_env() end
+    end
+
+    test "ligne sans `=` => REFUS (ce fichier n'est pas du shell)", %{root: root} do
+      envd(root, "a.env", "export FOO\n")
+      assert_raise ArgumentError, ~r/no `=`/, fn -> LaunchSpec.toolchain_env() end
+    end
+
+    test "une variable de build UNIVERSELLE est LARGUEE, pas refusee", %{root: root} do
+      # L'asymetrie est deliberee : un fichier malforme est un bug du producteur et arrete la ligne ;
+      # une variable universelle est une violation de politique dont le rayon d'action est LES AUTRES
+      # pods. Refuser le spawn laisserait un seul mauvais env.d tuer tous les pods de la boite.
+      envd(root, "a.env", "CC=aarch64-linux-gnu-gcc\nCARGO_HOME=/store/rust\n")
+      assert LaunchSpec.toolchain_env() == "CARGO_HOME=/store/rust"
+    end
+  end
 end

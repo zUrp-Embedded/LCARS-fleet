@@ -335,11 +335,173 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path, pod_dir \\ nil) do
     (system_mounts(claude_launch_path) ++
+       store_mounts() ++
        cap_profile_mounts(cap_profile) ++
        opts_mounts(opts) ++
        other_face_reference_mount(opts, cap_profile, pod_dir))
     |> Enum.uniq_by(fn m -> m["path"] || m[:path] end)
     |> mounts_env()
+  end
+
+  # ── LE MAGASIN D'OUTILLAGE ──────────────────────────────────────────────────────────────────
+  #
+  # DEUX MONTAGES, ET UN SEUL SERAIT UNE PANNE. L'arbre entier en `ro` — un pod n'installe rien,
+  # c'est la propriete centrale du rail : un magasin writable le rendrait contournable par le pod,
+  # ce que la garde humaine existe pour empecher. MAIS `cache/` est ecrit par pip, npm et cargo :
+  # monte en lecture seule, le premier `pip install` du pod rend `EROFS` et un `CARGO_HOME` pointant
+  # dedans fait exploser cargo a la premiere dependance.
+  #
+  # L'ORDRE PORTE LE SENS : bwrap applique les montages dans l'ordre declare, donc le `rw` du cache
+  # doit venir APRES le `ro` de l'arbre pour le recouvrir. Les inverser rend le cache lisible et non
+  # ecrivable, c'est-a-dire la panne ci-dessus avec l'air d'etre configure.
+  #
+  # LA RACINE SE LIT, ELLE NE SE DECLARE PAS : `LCARS_STORE_ROOT` vient du compose, qui en est le
+  # seul proprietaire (`deploy/lib/store.sh` possede les noms de volumes). Absente ou non montee :
+  # AUCUN montage, et le pod demarre — DR-023, deja paye sur `GIT_MIRROR` (« a spawn died on a
+  # missing relic »). Un outillage manquant ralentit un pod, il ne le tue pas.
+  defp store_mounts do
+    case store_root() do
+      nil ->
+        []
+
+      root ->
+        [%{"mode" => "ro", "path" => root}] ++
+          if File.dir?(Path.join(root, "cache")),
+            do: [%{"mode" => "rw", "path" => Path.join(root, "cache")}],
+            else: []
+    end
+  end
+
+  @doc false
+  @spec store_root() :: Path.t() | nil
+  def store_root do
+    case System.get_env("LCARS_STORE_ROOT") do
+      root when is_binary(root) and root != "" -> if File.dir?(root), do: root, else: nil
+      _unset -> nil
+    end
+  end
+
+  # ── L'ENVIRONNEMENT D'OUTILLAGE ─────────────────────────────────────────────────────────────
+  #
+  # INSTALLER NE SUFFIT PAS — LE POD DOIT POUVOIR S'EN SERVIR, et c'est le trou le plus couteux a
+  # diagnostiquer de tout ce rail : l'install sort verte, le pod compile toujours sans la toolchain,
+  # et RIEN NE RELIE LES DEUX SYMPTOMES. Un pod ne voit que ce que `bwrap_launch.sh` lui monte et lui
+  # `--setenv`. Le magasin monte (ci-dessus) rend l'arbre VISIBLE ; ceci le rend UTILISABLE.
+  #
+  # `KEY=VALUE` A PLAT, ET SURTOUT PAS UN `source`. Sourcer du shell fourni par un artefact
+  # telecharge, dans le processus qui CONSTRUIT le bac a sable, rouvrirait dans le launcher
+  # exactement le trou que le convergeur referme. Le pod recoit un RESULTAT, jamais un programme :
+  # c'est au convergeur de jouer l'`env_script` d'un SDK une fois, dans le contexte du pod, et d'en
+  # figer le delta ici.
+  #
+  # LA VALIDATION VIT ICI, cote Elixir, comme pour les montages — le bash ne valide rien, il deplie.
+  @doc """
+  The `LCARS_POD_TOOLCHAIN_ENV` payload: `KEY=VALUE` lines composed from `<store>/state/env.d/*.env`.
+
+  Empty string when there is no store, no `env.d`, or nothing declared — the launcher then adds no
+  `--setenv` at all and the pod's command line is what it is today, byte for byte.
+  """
+  @spec toolchain_env() :: String.t()
+  def toolchain_env do
+    case store_root() do
+      nil -> ""
+      root -> root |> Path.join("state/env.d") |> read_env_dir() |> Enum.join("\n")
+    end
+  end
+
+  # DENYLIST CLOSE, PAS UNE HEURISTIQUE. `CARGO_HOME` n'est lu que par cargo : un pod Python qui le
+  # porte ne perd rien. `CC` est lu par TOUT systeme de build. Un `CC=aarch64-linux-gnu-gcc` global,
+  # et le premier pod Python qui installe un paquet a extension C native compile de l'ARM64 : `pip`
+  # REUSSIT, et l'import echoue plus tard en « Exec format error », sans une ligne qui nomme
+  # l'environnement de compilation. Une compilation croisee nomme sa toolchain dans SES PROPRES
+  # fichiers de build, ou c'est lisible et versionne avec le projet.
+  @universal_build_vars ~w(CC CXX LD AR NM RANLIB STRIP CFLAGS CXXFLAGS LDFLAGS CPPFLAGS)
+  @key_re ~r/\A[A-Z_][A-Z0-9_]*\z/
+
+  defp read_env_dir(dir) do
+    case File.ls(dir) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.ends_with?(&1, ".env"))
+        |> Enum.sort()
+        |> Enum.flat_map(&read_env_file(Path.join(dir, &1)))
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.error(
+          "LaunchSpec: toolchain env dir #{dir} present but UNREADABLE (#{inspect(reason)}) — " <>
+            "the pod launches WITHOUT its toolchain environment. An installed toolchain it cannot see."
+        )
+
+        []
+    end
+  end
+
+  defp read_env_file(path) do
+    case File.read(path) do
+      {:ok, body} ->
+        body |> String.split("\n") |> Enum.flat_map(&parse_env_line(&1, path))
+
+      {:error, reason} ->
+        Logger.error("LaunchSpec: toolchain env file #{path} unreadable (#{inspect(reason)})")
+        []
+    end
+  end
+
+  defp parse_env_line(line, path) do
+    trimmed = String.trim(line)
+
+    cond do
+      trimmed == "" or String.starts_with?(trimmed, "#") ->
+        []
+
+      not String.contains?(trimmed, "=") ->
+        raise ArgumentError,
+              "LaunchSpec: REFUSAL — #{path} carries a line with no `=`: #{inspect(trimmed)}. " <>
+                "This file is KEY=VALUE, never shell. Pod projection refused."
+
+      true ->
+        [key, value] = String.split(trimmed, "=", parts: 2)
+        validate_env_pair(String.trim(key), value, path)
+    end
+  end
+
+  # NEWLINE ET `\r` REFUSENT LE SPAWN — le meme geste que `mounts_env/1`, et pour la meme raison :
+  # une valeur qui porte un saut de ligne casse le format de passage et fait apparaitre une seconde
+  # variable que personne n'a declaree. `\r` est teste avec `\n` parce qu'il traverse `--setenv`
+  # silencieusement et casse ensuite un `[[ "$VAR" == "attendu" ]]` de facon invisible.
+  defp validate_env_pair(key, value, path) do
+    cond do
+      not Regex.match?(@key_re, key) ->
+        raise ArgumentError,
+              "LaunchSpec: REFUSAL — #{path} declares #{inspect(key)}, which is not a shell " <>
+                "environment name (`[A-Z_][A-Z0-9_]*`). Pod projection refused."
+
+      String.contains?(value, "\n") or String.contains?(value, "\r") ->
+        raise ArgumentError,
+              "LaunchSpec: SECURITY REFUSAL — newline in a toolchain env value for #{key} " <>
+                "(#{path}). Pod projection refused — an injecting value is NOT dropped-and-launched."
+
+      key in @universal_build_vars ->
+        # DROPPED, NOT REFUSED, and the asymmetry is deliberate: a malformed file is a bug in the
+        # producer and must stop the line; a universal build var is a POLICY breach whose blast
+        # radius is other pods. Refusing the spawn would let one bad env.d file kill every pod on
+        # the box — a worse failure than the one being prevented. The converger refuses it at
+        # write time; this is the belt at read time.
+        Logger.error(
+          "LaunchSpec: #{key} DROPPED from #{path} — universal build variables are refused. " <>
+            "Set globally they make every pod cross-compile: `pip` succeeds and the import fails " <>
+            "later with `Exec format error`, naming nothing. A cross build declares its toolchain " <>
+            "in its own build files."
+        )
+
+        []
+
+      true ->
+        ["#{key}=#{value}"]
+    end
   end
 
   defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])

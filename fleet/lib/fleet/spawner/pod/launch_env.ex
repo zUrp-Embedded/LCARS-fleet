@@ -140,6 +140,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # containment) leaves the variable empty, and `bwrap_launch.sh` then binds nothing and
           # starts no relay — the launcher's own fail-closed branch.
           |> Map.put("LCARS_POD_EGRESS_SOCK", egress_socket(state, claude_launch_path))
+          # L'ENVIRONNEMENT D'OUTILLAGE — le pendant du montage du magasin. Vide quand il n'y a pas
+          # de magasin : `bwrap_launch.sh` n'ajoute alors AUCUN `--setenv` et la ligne de commande
+          # du pod est celle d'aujourd'hui, octet pour octet.
+          |> Map.put("LCARS_POD_TOOLCHAIN_ENV", LaunchSpec.toolchain_env())
           |> Map.put(
             "LCARS_POD_MOUNTS",
             LaunchSpec.pod_mounts_env(

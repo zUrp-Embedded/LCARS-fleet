@@ -386,6 +386,37 @@ RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 # absolute + existing path; RW forbidden on the system roots (already mounted RO by the base sandbox).
 # The cap-profile source is trusted-operator — the belt is anti-footgun, not anti-adversary.
 # =============================================================
+# =============================================================
+# ENVIRONNEMENT D'OUTILLAGE (LCARS_POD_TOOLCHAIN_ENV = lignes `KEY=VALUE`, composees et VALIDEES
+# cote Elixir par `LaunchSpec.toolchain_env/0` — ici on DEPLIE, on ne valide pas).
+#
+# Le pod ne source JAMAIS de script : sourcer du shell venu d'un artefact telecharge, dans le
+# processus qui construit le bac a sable, rouvrirait ici le trou que le convergeur referme. Le
+# convergeur joue l'`env_script` d'un SDK UNE fois et fige son delta a plat ; le pod recoit un
+# resultat.
+#
+# `LCARS_PATH_PREPEND` EST LE SEUL CAS PARTICULIER, et il ne se regle pas par « le dernier gagne » :
+# le PATH final est compose ICI, en PREFIXANT celui d'aujourd'hui, jamais en le remplacant. Un
+# `--setenv PATH` venu du tableau ecraserait `$SANDBOX_HOME/.local/bin` et couperait le pod de ses
+# propres outils.
+#
+# Vide (pas de magasin, pas d'env.d) => tableau vide, ZERO `--setenv` de plus, ligne de commande
+# identique a aujourd'hui.
+# =============================================================
+TOOLCHAIN_ENV=()
+POD_PATH="$SANDBOX_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+if [[ -n "${LCARS_POD_TOOLCHAIN_ENV:-}" ]]; then
+  while IFS= read -r _pair; do
+    [[ -z "$_pair" ]] && continue
+    _k="${_pair%%=*}"; _v="${_pair#*=}"
+    if [[ "$_k" == "LCARS_PATH_PREPEND" ]]; then
+      [[ -n "$_v" ]] && POD_PATH="$_v:$POD_PATH"
+    else
+      TOOLCHAIN_ENV+=(--setenv "$_k" "$_v")
+    fi
+  done <<< "$LCARS_POD_TOOLCHAIN_ENV"
+fi
+
 CATALOG_BINDS=()
 if [[ -n "${LCARS_POD_MOUNTS:-}" ]]; then
   while IFS= read -r _mount; do
@@ -487,7 +518,7 @@ exec env -i "$BWRAP_BIN" \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
   --setenv HOME "$SANDBOX_HOME" \
-  --setenv PATH "$SANDBOX_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+  --setenv PATH "$POD_PATH" \
   --setenv TERM "${TERM:-xterm-256color}" \
   --setenv LANG "${LANG:-C.UTF-8}" \
   --setenv LCARS_POD_ID "$POD_ID" \
@@ -519,6 +550,9 @@ exec env -i "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
   ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
+  `# APRES les --setenv nommes ci-dessus : une cle d'outillage ne peut pas ecraser en silence une` \
+  `# variable du contrat (HOME, LCARS_POD_ID, les proxys). PATH est deja compose, pas ecrase.` \
+  ${TOOLCHAIN_ENV[@]+"${TOOLCHAIN_ENV[@]}"} \
   -- /bin/sh -c '
        socat_bin=$1; egress_sock=$2; egress_port=$3; tmux_bin=$4; sock=$5; name=$6; shift 6
        # THE RELAY, started BEFORE the session and inside the namespace: the pod has no route to

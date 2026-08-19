@@ -180,6 +180,48 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_GIT_MIRROR="/nonexistent/mirror"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"git mirror"* ]]
 }
+@test "outillage: LCARS_POD_TOOLCHAIN_ENV absent -> INERT, aucun --setenv de plus (DR-023)" {
+  # Le pendant exact du miroir git ci-dessus : une boite sans magasin doit produire la ligne de
+  # commande d'hier, pas une ligne degradee. Un outillage manquant ralentit un pod, il ne le tue pas.
+  unset LCARS_POD_TOOLCHAIN_ENV
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"BWRAP_ARGS:"* ]]
+  [[ "$output" != *"CARGO_HOME"* ]]
+}
+
+@test "outillage: chaque paire devient un --setenv" {
+  export LCARS_POD_TOOLCHAIN_ENV=$'CARGO_HOME=/store/toolchains/rust\nIDF_PATH=/store/toolchains/esp'
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--setenv CARGO_HOME /store/toolchains/rust"* ]]
+  [[ "$output" == *"--setenv IDF_PATH /store/toolchains/esp"* ]]
+}
+
+@test "outillage: LCARS_PATH_PREPEND PREFIXE le PATH, il ne le REMPLACE pas" {
+  # LE CAS QUI COMPTE. Un `--setenv PATH` venu du tableau ecraserait `$SANDBOX_HOME/.local/bin` et
+  # couperait le pod de ses propres outils — une toolchain gagnee contre un pod casse. Le PATH final
+  # est compose par CE script, jamais fourni par le fichier.
+  export LCARS_POD_TOOLCHAIN_ENV='LCARS_PATH_PREPEND=/store/toolchains/rust/bin'
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--setenv PATH /store/toolchains/rust/bin:"*"/.local/bin:/usr/local/bin:/usr/bin:/bin"* ]]
+  # et il n'apparait PAS comme une variable a lui seul
+  [[ "$output" != *"--setenv LCARS_PATH_PREPEND"* ]]
+}
+
+@test "outillage: une clef d'outillage ne peut pas ecraser une variable du contrat" {
+  # Le tableau est deplie APRES les --setenv nommes. bwrap garde la DERNIERE occurrence, donc
+  # l'ordre est la garde : ce temoin epingle que le contrat passe en premier et que le tableau ne
+  # peut pas se glisser avant lui.
+  export LCARS_POD_TOOLCHAIN_ENV='HOME=/tmp/pirate'
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  home_pos=$(awk '{print index($0, "--setenv HOME ")}' <<< "$output" | head -1)
+  pirate_pos=$(awk '{print index($0, "--setenv HOME /tmp/pirate")}' <<< "$output" | head -1)
+  [[ "$home_pos" -lt "$pirate_pos" ]]
+}
+
 @test "mounts: mode+src binds in place (the ordinary form, unchanged)" {
   mkdir -p "$TMP_BASE/plain"
   export LCARS_POD_MOUNTS="ro:$TMP_BASE/plain"
