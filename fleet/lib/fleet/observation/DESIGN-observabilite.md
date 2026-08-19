@@ -14,6 +14,12 @@
 > `Readiness.deep/0`) DANS le ReadModel. Le code courant ne fait RIEN de tout ça : `/api/pods` lit les
 > pods live via le `Deck`, `/api/projection` lit UNIQUEMENT la projection event-stream (aucun snapshot
 > readiness), et le `ReadModel` consomme TOUT le Bus (il route aussi des diagnostics `fleet.boot*` /
+> ⚠ **PÉRIMÉ EN PARTIE (brouette + renommage, 2026-08-19)** : le domaine `fleet_starfleet` est
+> devenu `Fleet.Admiral` ; le rail décision (`fleet_coord`, `audit.verdict`, le deck GATEKEEPER du
+> read_model) et le rail de sévérité max sont SUPPRIMÉS. Les tables « Coordination + policy » et
+> la section « HORS PÉRIMÈTRE fleet_starfleet » ci-dessous décrivent l'état d'avant — gardées pour
+> la trace, à ne pas re-câbler.
+>
 > `mcp.server_crashed` / `sdk.upstream_alert`, y compris d'origine starfleet). **L'autorité observabilité
 > courante = les `@moduledoc` de `Fleet.Observation.Deck` et `Fleet.Observation.ReadModel` + le code.**
 > Ne PAS se servir de ce doc comme référence du runtime courant.

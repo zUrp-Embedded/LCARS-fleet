@@ -7,7 +7,7 @@
 
 Read / observability frontier (surface): serves an LCARS observation deck on a per-human
 port. Read-only, no-auth, intra-release — it observes the fleet, mutates nothing (it depends
-DOWN on the core; nothing in the core depends on it, and it never touches `fleet_starfleet`).
+DOWN on the core; nothing in the core depends on it, and it never touches the admiral domain).
 
 **This file is a map, not the contract.** Each module owns its contract in its own
 `@moduledoc` — read those (`h Fleet.Observation.Deck` in IEx, or `lib/`). Nothing here is

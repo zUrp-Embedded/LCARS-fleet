@@ -21,14 +21,12 @@ defmodule Fleet.Admiral do
     exports: [Shutdown]
 
   @moduledoc """
-  ⚠ **This domain is named after a role whose meaning moved, and the name has not caught up yet.**
-  `starfleet` was the SYSADMIN role — a sudo agent that kept the box running. What lives here is the
-  system-side half of that job: audit, MCP health, boot orchestration, quiesce + drain. Then the
-  role became the fleet-level front desk, and this domain kept a name that no longer describes it —
-  it does not reference that role once. Target name: `Fleet.Admiral` ([BL-6-103], successor of the
-  retired [BL-6-53] — the rename is MECHANICAL since the 2026-08-19 brouette removed the
-  interpolated topics; the wire value `source: :admiral` was the last datum, renamed in ITS OWN
-  commit — never with the mechanics).
+  Le domaine SYSADMIN de la boîte, côté système : audit, MCP health, boot orchestration,
+  quiesce + drain, et le rail d'outillage. Il porte le nom de sa fonction depuis le 2026-08-19
+  ([BL-6-103], successeur du [BL-6-53] retiré) — il s'est appelé `Fleet.Starfleet` d'après un rôle
+  dont le sens avait bougé (l'ex-rôle sysadmin devenu front desk), une homonymie que le domaine ne
+  référençait pas une seule fois. Renommage en deux commits : mécanique, puis la valeur wire
+  `source: :admiral` (le dernier datum) dans le sien.
 
   Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
 
