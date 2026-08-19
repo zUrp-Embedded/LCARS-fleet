@@ -47,12 +47,25 @@ set -euo pipefail
 store_root() { printf '%s' "${LCARS_STORE_ROOT:-}"; }
 
 # LA TABLE — une entree par volume, `sous-repertoire mode owner:groupe`.
+#
+# ⚠ `DELEGUE` EST UN MODE A PART ENTIERE, ET IL EXISTE POUR UNE PANNE MESUREE. `state/` a deja un
+# proprietaire : `45-sudoers-toolchain` le cree en `install -d -m 2775` pour y poser le marqueur
+# `pilot.assignee`, avec son motif ecrit au site. Ce module-ci le declarait `0755 root:root`, donc
+# DEUX modules convergeaient le meme repertoire vers deux modes — 26 posait 755, 45 reposait 2775,
+# et la passe suivante rendait FAIL sur un banc parfaitement sain. Une derive permanente par
+# construction, mesuree sur banc neuf le 2026-08-20.
+#
+# La reponse n'est pas d'aligner les deux valeurs a la main : deux ecritures d'un meme fait
+# derivent. C'est de dire QUI decide. Un volume delegue reste dans la table — la garde de completude
+# ci-dessous exige toujours qu'aucun volume ne soit sans decision — mais ce module n'en converge
+# pas le mode : il verifie seulement que le repertoire EXISTE, parce que c'est le point de montage
+# du volume et que son absence est une panne de compose que son proprietaire ne saurait pas nommer.
 prov_store_dirs() {
   printf '%s\n' \
     "cache      2775 root:$PROV_FLEET_GROUP" \
     "toolchains 0755 root:root" \
     "sysroots   0755 root:root" \
-    "state      0755 root:root"
+    "state      DELEGUE 45-sudoers-toolchain"
 }
 
 # ─── LA GARDE DE COMPLETUDE ─────────────────────────────────────────────────────────────────────
@@ -84,7 +97,11 @@ check() {
       continue
     fi
     cur="$(stat -c '%a %U:%G' "$path")"
-    if [[ "$cur" == "${mode#0} $owner" ]]; then
+    if [[ "$mode" == "DELEGUE" ]]; then
+      # On SONDE sans juger : le mode appartient a `$owner`, pas a nous. Ce qui se verifie ici est
+      # la seule chose dont ce module reponde — le point de montage existe.
+      p_ok "$path ($cur) — mode delegue a $owner"
+    elif [[ "$cur" == "${mode#0} $owner" ]]; then
       p_ok "$path ($cur)"
     else
       p_drift "$path : $cur ≠ ${mode#0} $owner"
@@ -100,6 +117,11 @@ apply() {
   store_completeness || { verdict_apply; return; }
   while read -r spec; do
     read -r sub mode owner <<< "$spec"
+    if [[ "$mode" == "DELEGUE" ]]; then
+      # Le repertoire est cree par son proprietaire ; on ne le devance pas et on ne le corrige pas.
+      [[ -d "$root/$sub" ]] || p_drift "$root/$sub absent — $owner le pose, volume non monte ?"
+      continue
+    fi
     ensure_dir "$root/$sub" "$mode" "$owner" || verdict_apply
   done < <(prov_store_dirs)
   verdict_apply

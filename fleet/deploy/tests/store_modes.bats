@@ -66,13 +66,25 @@ fake_tree() { # $1... = noms de volumes declares
   [[ "$output" != *"mode sans volume"* ]]
 }
 
-@test "cache est le SEUL setgid et le seul au groupe fleet" {
+@test "cache est le SEUL que ce module met au groupe fleet" {
   local table
   table="$(sed -n '/^prov_store_dirs()/,/^}/p' "$MODULE")"
-  [[ "$(grep -c '2775' <<< "$table")" -eq 1 ]]
   grep -qE '"cache +2775 root:\$PROV_FLEET_GROUP"' <<< "$table"
-  # Les trois autres sont lus en `ro` par le pod : root:root suffit, et c'est un choix, pas un oubli.
-  [[ "$(grep -c 'root:root' <<< "$table")" -eq 3 ]]
+  # Les deux arbres lus en `ro` par le pod : root:root suffit, et c'est un choix, pas un oubli.
+  [[ "$(grep -c 'root:root' <<< "$table")" -eq 2 ]]
+}
+
+@test "un volume dont un AUTRE module decide le mode est DELEGUE, jamais dispute" {
+  # ⚠ LE TEMOIN DE LA PANNE MESUREE. `state/` appartient a `45-sudoers-toolchain`, qui le cree en
+  # 2775 pour y poser `pilot.assignee`. Ce module l'a declare `0755 root:root` : deux modules
+  # convergeaient le meme repertoire vers deux modes, 26 posait 755, 45 reposait 2775, et la passe
+  # suivante rendait FAIL sur un banc sain. Sans ce temoin, un correctif qui aligne les deux valeurs
+  # A LA MAIN passerait — et rederiverait le jour ou l'une des deux bouge.
+  local table
+  table="$(sed -n '/^prov_store_dirs()/,/^}/p' "$MODULE")"
+  grep -qE '"state +DELEGUE 45-sudoers-toolchain"' <<< "$table"
+  # Et la delegation NOMME son proprietaire : « delegue » sans dire a qui n'est pas une decision.
+  [[ "$(grep -c 'DELEGUE' <<< "$table")" -eq 1 ]]
 }
 
 @test "un mode faux se DIT en drift, chemin par chemin" {
