@@ -51,9 +51,25 @@ defmodule Fleet.Pilot.VerdictExceptionTest do
   defp policy, do: %{"block_at" => "critical"}
 
   describe "le drapeau — une passe non armée s'annonce comme telle" do
-    test "OFF (défaut) : aucune convocation, escalade qui NOMME le barreau non armé" do
+    test "le DÉFAUT est désormais ARMÉ — la condition de bascule est remplie" do
+      # Ce test était l'inverse jusqu'au 2026-08-19, et son retournement est le fait qu'il épingle :
+      # `pilot_verdict_exception_pass?` valait `false` en attendant qu'une zone grise soit arbitrée
+      # de bout en bout sur un vrai projet. PR71/72 l'a fait. Le drapeau ne disparaît pas pour
+      # autant (un exploitant doit pouvoir désarmer un barreau qui convoque un pod), mais un
+      # déploiement neuf convoque maintenant au lieu d'escalader.
+      #
+      # On épingle le DÉFAUT DE CONFIG, pas le dispatch : la descente réelle traverse tout le
+      # constructeur de brief, et c'est déjà couvert plus bas.
+      refute Application.get_env(:lcars_fleet, :pilot_verdict_exception_pass?) == false,
+             "le défaut est repassé à OFF — si c'est voulu, la condition écrite dans config.exs " <>
+               "doit être réécrite avec"
+    end
+
+    test "OFF (explicite) : aucune convocation, escalade qui NOMME le barreau non armé" do
       # La distinction que l'arch doit pouvoir faire en lisant le gel : « la passe a échoué » et
       # « la passe n'existe pas sur cette boîte » demandent deux gestes différents de sa part.
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, false)
+
       assert {:skipped, {:merge_blocked_escalated, 7}} =
                VerdictException.dispatch(7, "lcars/issue-4-engineer", findings(), policy(), ctx())
 
