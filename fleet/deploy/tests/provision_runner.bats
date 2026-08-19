@@ -336,27 +336,67 @@ EOF
   [[ "$output" == *"hors cible"* ]]
 }
 
-@test "cible : sous WSL, docker absent est une DERIVE qui nomme ce qui restera non converge" {
-  BIN="$BATS_TEST_TMPDIR/nodocker"; mkdir -p "$BIN"
-  # PATH reduit : les outils de base restent, `docker` n'y est pas.
-  run env PATH="$BIN:/usr/bin:/bin" PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
+@test "cible : sous WSL, docker qui ne repond pas est un REFUS — pas une derive" {
+  # ⚖ ARBITRAGE USER 2026-08-18 : « ça, on refuse. docker-desktop c'est un clic. »
+  # Une DERIVE dit « pas tenu, et ce rail peut le tenir ». Ici il ne peut pas : la forge est un
+  # conteneur, il n'en existe aucune autre forme, donc 50-forge et 55-deck-oidc ne convergeront
+  # JAMAIS. Installer un runtime qui ne peut pas travailler, c'est livrer un objet qui a l'air pose.
+  #
+  # ⚠ CE TEMOIN EPINGLAIT LE MOT « docker absent », ET CE MOT ETAIT LE DEFAUT. La sonde testait
+  # `command -v docker` : sa presence ne prouve pas que le daemon repond (Docker Desktop eteint),
+  # et son ABSENCE ne prouve pas qu'il manque — sur WSL la CLI et les sockets vivent dans le
+  # montage `/mnt/wsl/docker-desktop`, present pour toute distro. Mesure du 2026-08-19 : aucun
+  # binaire dans le PATH, et le daemon repond. Le temoin epingle donc ce qui est CONTRACTUEL — un
+  # refus, et la consequence nommee — jamais le vocabulaire d'une cause supposee.
+  #
+  # DOCKER_HOST vise une socket qui n'existe pas : c'est le seul moyen de fabriquer « rien ne
+  # repond » sur une machine qui, elle, a docker. Vider le PATH ne suffit plus, et c'est le sujet.
+  run env PATH="/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
-  [[ "$output" == *"docker absent"* ]]
-  [[ "$output" == *"50-forge"* ]]
-  [[ "$output" == *"55-deck-oidc"* ]]
+  # rc 2 = erreur de sonde (p_fail), pas 1 = derive
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL"* ]]
+  # ⚠ FRAGMENT SANS ACCENT, DELIBEREMENT : la sortie de ce rail est du francais accentue
+  # (« aucun daemon ne repond » s'y ecrit avec un e accent aigu), et un temoin qui recopie
+  # l'accent epingle l'encodage en plus du contrat. « aucun daemon » couvre les deux branches de
+  # `docker_endpoint` — DOCKER_HOST pose et mort, et aucune socket qui reponde.
+  [[ "$output" == *"aucun daemon"* ]]
+  [[ "$output" == *"JAMAIS"* ]]
+  [[ "$output" != *"DRIFT 00-preflight: docker"* ]]
 }
 
-@test "48-forge-host : sans docker, une DERIVE qui nomme la consequence — jamais un echec" {
-  # La forge est un CONTENEUR. Sans docker le runtime s'installe quand meme : ce n'est pas casse,
-  # il manque un geste. Le dire en derive, et nommer ce qui restera non converge.
-  run env PATH="/usr/bin:/bin" PROV_SUBSTRATE=wsl PROVISION_MODULE=48-forge-host \
-      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" PROV_DOCKER_BIN=docker-inexistant \
+@test "cible : le refus ne dit JAMAIS « installe docker » — le montage prouverait le contraire" {
+  # Le message d'un refus enseigne le geste. « docker absent, installe-le » envoyait installer ce
+  # qui etait deja la : sur WSL le donne est un montage, pas un binaire. Un refus qui dicte le
+  # mauvais geste coute une enquete a celui qui le suit.
+  run env PATH="/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
+      bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
+  [[ "$output" != *"installe docker"* ]]
+  [[ "$output" != *"Installe Docker"* ]]
+  [[ "$output" != *"intégration WSL activée"* ]]
+}
+
+@test "48-forge-host : sans daemon, un REFUS — le meme mot que le preflight" {
+  # ⚖ USER : « ça, on refuse ». Deux modules qui parlent du meme manque doivent le nommer pareil ;
+  # une derive ici et un refus la-bas, et le lecteur ne sait plus lequel des deux dit vrai. Les
+  # deux passent maintenant par `docker_endpoint`, donc la phrase VIENT du meme endroit — ce n'est
+  # plus une convention entre deux auteurs, c'est un seul texte a un seul site.
+  run env PATH="/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_SUBSTRATE=wsl PROVISION_MODULE=48-forge-host \
+      PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"docker absent"* ]]
-  [[ "$output" == *"50-forge"* ]]
-  [[ "$output" == *"55-deck-oidc"* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL"* ]]
+  # ⚠ FRAGMENT SANS ACCENT, DELIBEREMENT : la sortie de ce rail est du francais accentue
+  # (« aucun daemon ne repond » s'y ecrit avec un e accent aigu), et un temoin qui recopie
+  # l'accent epingle l'encodage en plus du contrat. « aucun daemon » couvre les deux branches de
+  # `docker_endpoint` — DOCKER_HOST pose et mort, et aucune socket qui reponde.
+  [[ "$output" == *"aucun daemon"* ]]
+  [[ "$output" == *"aucune autre forme"* ]]
 }
 
 @test "48-forge-host : il tourne AVANT 50-forge — l'ordre est le prefixe, et il porte le sens" {

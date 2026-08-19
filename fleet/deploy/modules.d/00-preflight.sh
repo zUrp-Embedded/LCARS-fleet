@@ -103,10 +103,34 @@ check() {
   # Mesuré le 2026-08-18 sur une Ubuntu neuve sans docker : exactement ces deux dérives, et le
   # lecteur n'avait aucun moyen de savoir d'avance que c'était attendu. On le dit AVANT.
   if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
-    if command -v docker >/dev/null 2>&1; then
-      p_ok "docker présent — la forge du poste peut être montée (fleet/deploy/docker/bench/bench-up.sh)"
+    # ⚠ ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE. `command -v docker` se trompait DANS LES
+    # DEUX SENS : sa présence ne prouve pas que Docker Desktop tourne (cas fréquent après un reboot
+    # Windows), et son absence ne prouve pas que docker manque — sur WSL le donné est le montage
+    # `/mnt/wsl/docker-desktop`, CLI comprise, présent pour toute distro même sans intégration
+    # activée. Mesuré le 2026-08-19 sur ce poste : aucun binaire dans le PATH, et le daemon répond.
+    # `docker_endpoint` rend la paire CLI+socket qui marche, ou dit ce qui manque.
+    if docker_endpoint; then
+      p_ok "docker répond ($PROV_DOCKER_BIN) — la forge du poste peut être montée (fleet/deploy/docker/bench/bench-up.sh)"
     else
-      p_drift "docker absent — le runtime s'installera, mais la forge est un CONTENEUR : sans docker, 50-forge et 55-deck-oidc resteront en dérive et leurs consignes (« ./docker.sh … ») seront injouables. Installe Docker Desktop côté Windows (intégration WSL activée)"
+      # ⚖ ARBITRAGE USER 2026-08-18 : « ça, on refuse. docker-desktop c'est un clic. »
+      #
+      # ET C'EST UN REFUS, PAS UNE DÉRIVE, parce que les deux mots ne disent pas la même chose. Une
+      # dérive, c'est « l'état-cible n'est pas tenu ET ce rail peut le tenir » — on l'annonce, un
+      # apply le converge. Ici il ne le peut pas : la forge est un CONTENEUR, il n'en existe aucune
+      # autre forme dans ce dépôt, donc `50-forge` et `55-deck-oidc` ne convergeront JAMAIS sur
+      # cette machine. Mesuré le 2026-08-18 : 11 modules sur 13, et les deux manquants étaient
+      # exactement ceux-là.
+      #
+      # Installer un runtime qui ne peut pas travailler, c'est livrer un objet qui a l'air posé et
+      # qui n'aboutit nulle part — et le remède tient en un clic, sur cette machine, avant de
+      # relancer. Un refus qui coûte un relancement vaut mieux qu'une install qui coûte une enquête.
+      #
+      # ⚠ LE MESSAGE PORTE LE MOTIF DE LA SONDE, PAS UNE SUPPOSITION. Il disait « docker absent […]
+      # intégration WSL activée pour cette distro » : deux affirmations fausses dans le cas le plus
+      # fréquent. Docker peut être là et éteint ; et l'intégration n'est PAS nécessaire — le montage
+      # suffit. `PROV_DOCKER_WHY` dit ce qui a été essayé et ce qui n'a pas répondu ; on l'imprime au
+      # lieu de le paraphraser, sinon la sonde mesure une chose et le refus en raconte une autre.
+      p_fail "$PROV_DOCKER_WHY — et sans docker la forge de LCARS n'a AUCUNE autre forme (c'est un conteneur) : 50-forge et 55-deck-oidc ne convergeront JAMAIS sur cette machine, le poste aurait un runtime qui ne peut pas travailler"
     fi
   fi
 

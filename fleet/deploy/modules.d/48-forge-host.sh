@@ -46,8 +46,11 @@ d() { "$PROV_DOCKER_BIN" "$@"; }
 forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; }
 
 check() {
-  if ! command -v "$PROV_DOCKER_BIN" >/dev/null 2>&1; then
-    p_drift "docker absent — la forge du poste est un CONTENEUR : sans lui, pas de forge, donc 50-forge et 55-deck-oidc resteront en dérive (Docker Desktop, intégration WSL)"
+  if ! docker_endpoint; then
+    # Même mot que 00-preflight, et pour la même raison : ce rail ne PEUT pas tenir son état-cible
+    # sans docker, donc ce n'est pas une dérive. Le préflight refuse déjà en amont ; si on arrive
+    # ici quand même, on ne se contredit pas.
+    p_fail "$PROV_DOCKER_WHY — la forge du poste est un CONTENEUR, il n'en existe aucune autre forme"
     verdict_check
   fi
   if forge_up; then
@@ -61,8 +64,8 @@ check() {
 }
 
 apply() {
-  if ! command -v "$PROV_DOCKER_BIN" >/dev/null 2>&1; then
-    p_drift "docker absent — forge NON montée (Docker Desktop côté Windows, intégration WSL activée)"
+  if ! docker_endpoint; then
+    p_fail "$PROV_DOCKER_WHY — forge NON montée, et elle ne peut pas l'être autrement"
     verdict_apply
   fi
   # L'IMAGE PORTE tofu, LA RECETTE ET LES GESTES. Sans elle il n'y a pas de structure à poser, et
@@ -109,6 +112,15 @@ apply() {
       # Déjà là : on ne casse pas un compte existant, on lui refait juste un jeton.
       p_ok "compte « $PROV_FORGE_ADMIN » déjà présent sur la forge"
     fi
+    # ⚠ SONDER LE FLUX AVANT DE CAPTURER — sinon le diagnostic accuse la forge, qui est saine.
+    # Un relais docker peut répondre parfaitement à `version`/`ps`/`inspect` et rendre ZÉRO OCTET,
+    # EXIT 0, sur `exec`. La capture ci-dessous devient alors une chaîne vide, et le refus juste en
+    # dessous dit « la forge n'a rendu aucun jeton master » — un diagnostic faux, sur un objet sain,
+    # exactement celui que `bench-up.sh` a payé et documenté. La sonde est un aller-retour RÉEL.
+    docker_stream_ok "$FORGE_CONTAINER" || {
+      p_fail "le daemon docker répond aux lectures mais rend du VIDE sur « exec » (relais amputé) — rien ne peut être capturé depuis $FORGE_CONTAINER, et la forge n'y est pour rien. Vise la socket Docker Desktop directement : DOCKER_HOST=unix://$(_docker_mount_sock)"
+      verdict_apply
+    }
     local tok
     tok="$(d exec -u git "$FORGE_CONTAINER" gitea admin user generate-access-token \
              --username "$PROV_FORGE_ADMIN" --token-name "poste-$(date +%s)" --scopes all --raw \
