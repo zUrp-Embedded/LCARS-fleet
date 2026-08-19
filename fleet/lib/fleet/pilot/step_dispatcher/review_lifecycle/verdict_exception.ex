@@ -11,10 +11,20 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException do
 
   ## What a gray zone is, and what the gatekeeper is asked
 
-  The jury approved unanimously; the card's tolerance curve refuses on findings those same judges
-  wrote (`Jury.review_outcome/5` → `:gray_zone`). Nobody is wrong yet: the judge may have
-  waved through a real defect, or measured severely something this deliverable can live with. The
-  gatekeeper is the OUTSIDER who settles it — and its verdict is a plain review on the PR, so the
+  The jury returned a unanimously FAVOURABLE OPINION; the card's tolerance curve refuses on findings
+  those same judges wrote (`Jury.review_outcome/5` → `:gray_zone`). Nobody is wrong yet: the judge
+  may have waved through a real defect, or measured severely something this deliverable can live
+  with.
+
+  ⚖ « OPINION », NOT « APPROVAL », AND THE WORD IS LOAD-BEARING. The truth taxonomy
+  (moon-shot `iec-like-rigor`) tags a judge's verdict JUDGED — soft gate, "never an acceptance on
+  its own". The acceptance belongs to the rail: a green CI (PROVEN) as a floor, then the seal.
+  Writing "the jury approved" credited the judges with an act that is not theirs, and it told the
+  arbiter its own decision had already been taken by others — the opposite of its mandate. The
+  forge keeps its own word (`APPROVED` stays the review state: branch protection counts them and
+  the seal reads them back); it is the PROSE a human reads that must tell the truth.
+
+  The gatekeeper is the OUTSIDER who settles it — and its verdict is a plain review on the PR, so the
   next tick reads it through the same predicate as everything else. No new resumption machinery, no
   second decision channel.
 
@@ -76,9 +86,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException do
     role = Fleet.Project.Roles.gatekeeper_role(ctx.opts)
 
     body =
-      "⚖ **Zone grise du verdict** — le jury a approuvé cette PR, et la carte du projet la refuse " <>
-        "sur les mesures que ces mêmes juges ont rendues (seuil `#{block_at(policy)}`). Aucun juge " <>
-        "ne s'oppose : c'est une contradiction, pas un refus.\n\n" <>
+      "⚖ **Zone grise du verdict** — les juges ont rendu un AVIS FAVORABLE sur cette PR, et la " <>
+        "carte du projet la refuse sur les mesures que ces mêmes juges ont produites (seuil " <>
+        "`#{block_at(policy)}`). Aucun juge ne s'oppose : c'est une contradiction, pas un refus — " <>
+        "et personne n'a encore accepté quoi que ce soit.\n\n" <>
         "Passe d'arbitrage unique : le **#{role}** relit le livrable et les rapports, puis rend un " <>
         "verdict qui tranche — approuver malgré la courbe, ou confirmer le renvoi au producteur. " <>
         "Au-delà de cette passe, l'arbitrage revient à l'architecte.\n\n" <> signature

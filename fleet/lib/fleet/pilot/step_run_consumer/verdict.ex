@@ -279,7 +279,13 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     if substance == [] do
       nil
     else
-      verdict = if event == :approve, do: "APPROUVÉ", else: "CHANGEMENTS DEMANDÉS"
+      # ⚖ TAXONOMIE (moon-shot `iec-like-rigor`, hiérarchie de vérité) : un verdict de juge est
+      # tagué JUDGED — « soft gate, jamais acceptation seule ». Il ne PEUT donc pas approuver, et
+      # écrire « APPROUVÉ » lui attribuait un acte qui n'est pas le sien : l'acceptation est
+      # l'affaire du rail (CI verte = PROVEN, puis le seal). La forge, elle, garde son mot
+      # (`APPROVED` reste l'état de la review — la branch-protection les compte, et le seal les
+      # relit) : c'est la PROSE lue par un humain qui doit dire la vérité, pas le protocole.
+      verdict = if event == :approve, do: "AVIS FAVORABLE", else: "CHANGEMENTS DEMANDÉS"
 
       ["**#{verdict}** — verdict du juge.", reason, details, chain]
       |> Enum.reject(&(&1 in [nil, ""]))

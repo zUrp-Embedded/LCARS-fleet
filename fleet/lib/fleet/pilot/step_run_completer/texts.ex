@@ -28,7 +28,8 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
   def review_body(role, event) do
     case event do
       :approve ->
-        "Verdict du juge **#{role}** : **APPROUVÉ** — la brique satisfait son critère de revue."
+        "Verdict du juge **#{role}** : **AVIS FAVORABLE** — la brique satisfait son critère de " <>
+          "revue. (Un avis de juge ne vaut pas acceptation : c'est le rail qui scelle.)"
 
       :request_changes ->
         "Verdict du juge **#{role}** : **CHANGEMENTS DEMANDÉS** — la brique ne satisfait pas " <>

@@ -443,7 +443,8 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> "inconnu"
       end
 
-    "ARBITRAGE — le jury a APPROUVÉ ce livrable, et la carte du projet le refuse : au moins un " <>
+    "ARBITRAGE — les juges ont rendu un AVIS FAVORABLE sur ce livrable, et la carte du projet le " <>
+      "refuse : au moins un " <>
       "finding rendu par un juge atteint la sévérité `#{seuil}`, seuil au-delà duquel cette " <>
       "criticité ne tolère rien. Personne ne s'oppose au livrable ; ce sont une approbation et une " <>
       "mesure, du MÊME juge, qui se contredisent. Tu es convoqué pour trancher CETTE " <>

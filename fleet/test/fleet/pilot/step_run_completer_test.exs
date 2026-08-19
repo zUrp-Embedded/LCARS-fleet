@@ -649,7 +649,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
       # "APPROUVÉ" pins the FR user-facing review body.
-      assert body =~ "APPROUVÉ"
+      # ⚖ TAXONOMIE : un juge rend un AVIS (tag JUDGED — « jamais acceptation seule »), il
+      # n'approuve pas. L'état de la review sur la forge reste `APPROVED` — c'est le protocole, et
+      # la branch-protection les compte — mais la prose lue par un humain ne doit pas attribuer au
+      # juge un acte qui appartient au rail.
+      assert body =~ "AVIS FAVORABLE"
+
+      refute body =~ "APPROUVÉ",
+             "le mot d'acceptation appartient au seal, pas au juge"
     end
 
     test "verdict :request_changes with explicit body" do
