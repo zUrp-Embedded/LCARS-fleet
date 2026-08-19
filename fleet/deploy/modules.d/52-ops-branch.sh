@@ -92,7 +92,19 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
 create_branch() {
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  [[ -n "$tok" ]] || { p_fail "pas de jeton systeme ($tokfile) — impossible de pousser la branche"; return 1; }
+  # ⚠ PAS ENCORE N'EST PAS EN PANNE, et c'est la difference qui a fait rougir un banc sain. Ce
+  # module tourne en 52, le jeton systeme est minte en 50 — mais au PREMIER boot la forge n'est pas
+  # encore semee, donc `50-forge` n'a rien pu frapper et le fichier n'existe pas. Rendre FAIL la
+  # faisait publier `rc=1` a une boite dont le seul tort etait d'etre neuve, et le vrai etat — « la
+  # branche se posera a la convergence suivante » — n'etait dit nulle part.
+  #
+  # Un DRIFT dit exactement ca : non converge, converge-moi. Le doctor le montre, la passe d'apres
+  # le ferme, et un jeton qui ne viendrait JAMAIS reste visible a chaque passage au lieu de
+  # disparaitre dans un echec de boot que personne ne relit. Mesure du 2026-08-20, banc neuf : boot
+  # en FAIL, puis `provision apply --only 52-ops-branch` -> branche orpheline creee, 0 defaut.
+  [[ -n "$tok" ]] || {
+    p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
+    return 0; }
 
   local tmp; tmp="$(mktemp -d)"
   # Le jetable meurt quoi qu'il arrive : il contient un depot git avec un remote authentifie.
