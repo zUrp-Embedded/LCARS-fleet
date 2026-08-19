@@ -27,7 +27,28 @@ The brief `{{step}}` was written by the architect and has NOT been executed yet.
 The envelope is schema-VALIDATED and fail-closed: a mistyped field halts the step run, it is not
 coerced. `decision` and `reason` are required; the two optional fields have an enforced shape.
 
-- `details` — a FLAT object of scalars, rendered as one `- **key** : value` line each.
+- `details` — un objet de scalaires (une ligne `- **clé** : valeur` chacun), **PLUS, si tu es un
+  juge de PR, la clé versionnée `findings_v1`, qui est un OBJET et la seule exception à la
+  platitude** :
+
+  ```json
+  "details": {
+    "gate_rule": "R-coverage",
+    "findings_v1": {
+      "findings": [
+        {"severity": "minor", "category": "divergent",
+         "description": "nommage incohérent avec le reste du module", "refs": ["lib/x.sh:12"]}
+      ],
+      "severity_max": "minor"
+    }
+  }
+  ```
+
+  `findings` est obligatoire dans cet objet — **liste vide si tu n'as rien à signaler** : dire
+  l'absence est une mesure, l'omettre n'en est pas une. `severity` ∈ `critical|important|minor` ;
+  `severity_max` ∈ les trois plus `none`. Ta prose est lue par des humains, cette clé est lue par
+  le RAIL : c'est elle qui permet à la carte du projet de PESER ton verdict au lieu de seulement le
+  compter. Ne la sérialise pas en chaîne — c'est un objet.
   Example: `{"rule_missing": "acceptance criteria", "brief_size": "3 bricks"}`
 - `chain` — an array of PLAIN STRINGS, one reasoning step per entry, rendered as bullets under
   "Raisonnement". An array of objects is REFUSED (`#/chain/0: expected String`).
