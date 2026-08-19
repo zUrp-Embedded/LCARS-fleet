@@ -114,9 +114,9 @@ defmodule Fleet.Pilot.BriefBuilder do
     Ce n'est PAS ton travail et tu n'as pas de brief à reprendre. Le producteur a épuisé son
     budget de rework sur ce conflit ; tu interviens en dernière passe avant escalade humaine.
 
-    Le contenu des deux côtés est déjà APPROUVÉ : les juges ont validé la branche, et les briques
-    sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le fond — la seule question
-    est de composer les deux intentions sans en sacrifier une.
+    Le fond des deux côtés est déjà ACCEPTÉ — les juges ont rendu un AVIS FAVORABLE, le rail l'a
+    scellé, et les briques sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le
+    fond : la seule question est de composer les deux intentions sans en sacrifier une.
 
     1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
        est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est

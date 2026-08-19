@@ -184,11 +184,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   # C3 — ET CETTE CLASSE N'EST PAS UN ÉCHEC DE MERGE, ce qui est la raison même d'avoir sa clause :
   # tombée dans le fourre-tout `_unknown`, une zone grise se serait annoncée à l'architecte comme un
   # « échec de merge non classifié », et il aurait cherché un conflit git qui n'existe pas. Ici rien
-  # n'a échoué : le jury a approuvé, et la carte refuse sur les mesures de ces mêmes juges. Ce qui
+  # n'a échoué : le jury a rendu un AVIS FAVORABLE, et la carte refuse sur les mesures de ces
+  # mêmes juges — personne n'a encore ACCEPTÉ quoi que ce soit. Ce qui
   # manque est un ARBITRAGE, et le sous-motif dit lequel des trois chemins y a mené.
   defp merge_blocked_cause(:verdict_gray_zone, reason),
     do:
-      "zone grise du verdict — le jury a approuvé, la courbe de tolérance de la carte refuse sur " <>
+      "zone grise du verdict — le jury a rendu un AVIS FAVORABLE, la courbe de tolérance de la " <>
+        "carte refuse sur " <>
         "les findings rendus par ces mêmes juges, et #{gray_zone_detail(reason)} Aucun conflit " <>
         "git, aucun refus de juge : c'est un arbitrage qui manque, et il te revient."
 

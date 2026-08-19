@@ -2571,7 +2571,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp review_string(:changes_requested), do: "changes_requested"
   defp review_string(:approved), do: "approved"
 
-  # C3 — l'état que l'arch DOIT pouvoir lire : le jury a approuvé, la courbe de la carte refuse, et
+  # C3 — l'état que l'arch DOIT pouvoir lire : le jury a rendu un AVIS FAVORABLE, la courbe de la
+  # carte refuse, et
   # personne n'a encore arbitré. Le rendre `changes_requested` mentirait sur qui refuse (aucun juge
   # ne refuse) ; le rendre `approved` mentirait sur ce qui va se passer (rien ne se scellera). Un
   # nom à lui est la seule sortie honnête, et c'est aussi celui que l'humain verra dans un rapport
