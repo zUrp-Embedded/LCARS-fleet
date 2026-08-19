@@ -244,7 +244,7 @@ defmodule LcarsFleet.MixProject do
       # release this Erlang can build. It lifts when OTP does, not before — and the reason is written
       # HERE because an exact pin with no stated cause reads as gratuitous and gets removed.
       {:jose, "1.11.10", override: true},
-      # — forge HTTP (pilot/starfleet) —
+      # — forge HTTP (Fleet.Forge ; finch aussi par workflow/project.template_sync) —
       {:req, "~> 0.7"},
       {:finch, "~> 0.23"},
       # — runtime misc —
