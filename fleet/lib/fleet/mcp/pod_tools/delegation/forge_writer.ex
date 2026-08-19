@@ -55,6 +55,12 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   voit la branche bouger et le convergeur applique. Trois acteurs, et le seul qui tourne en root
   prend un manifeste qu'un humain a déjà approuvé.
   """
+  @callback schedule_auto_merge(
+              repo :: String.t(),
+              index :: integer(),
+              opts :: keyword()
+            ) :: :ok | {:error, term()}
+
   @callback add_label(
               repo :: String.t(),
               issue :: integer(),

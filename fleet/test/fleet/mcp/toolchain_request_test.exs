@@ -32,6 +32,12 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     end
 
     @impl true
+    def schedule_auto_merge(repo, index, _opts) do
+      send(self(), {:auto_merge_armed, repo, index})
+      :ok
+    end
+
+    @impl true
     def add_label(repo, issue, label, _opts) do
       send(self(), {:add_label, repo, issue, label})
       Process.get(:add_label_result, {:ok, %{}})
@@ -226,6 +232,28 @@ defmodule Fleet.MCP.ToolchainRequestTest do
         end)
 
       assert log =~ "commentaire de lien NON pos"
+    end
+  end
+  describe "l'auto-merge — UN clic admin, gate par config, DEFAUT OFF" do
+    test "defaut : PAS d'armement (sans protection de branche, l'armer mergerait sans signature)" do
+      pod = "pod-am-off-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      refute_received {:auto_merge_armed, _, _}
+    end
+
+    test "config posee (par le geste d'installation, AVEC la protection) : la PR est armee" do
+      prev = Application.get_env(:lcars_fleet, :toolchain_auto_merge)
+      Application.put_env(:lcars_fleet, :toolchain_auto_merge, true)
+      on_exit(fn ->
+        if prev, do: Application.put_env(:lcars_fleet, :toolchain_auto_merge, prev),
+          else: Application.delete_env(:lcars_fleet, :toolchain_auto_merge)
+      end)
+
+      pod = "pod-am-on-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+      assert_received {:auto_merge_armed, _repo, 412}
     end
   end
 end

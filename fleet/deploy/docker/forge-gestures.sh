@@ -341,6 +341,47 @@ seed_demo_catalogue() { # $1=jeton master
 # 0.8.1), mais une data source ECRIT sa valeur dans le tfstate — un credential dans un fichier
 # d'etat, pour un objet qui n'est pas de la structure. C'est une LECTURE a usage unique : elle
 # s'imprime et s'oublie.
+# ─── toolchain-protection — LE GESTE D'INSTALLATION du rail toolchain (⚖ user 2026-08-19) ──────
+# Pose la protection de la branche `sysadmin` du depot ops : `required_approvals=1` + whitelist
+# d'approbateurs (les admins convergés + LE SIEGE, nomme par argument — il n'est pas dans
+# fleet:humans, `01` §3.11) + `dismiss_stale_approvals` (un re-push tue l'approbation — la seule
+# propriete qu'aucun test ni ACL ne porte). SANS status check : l'allumage est en DEUX temps
+# (`01` §4.7 addendum), le contexte `toolchain-dryrun` viendra AVEC son job.
+#
+# ⚠ CE GESTE ET LA CONFIG :toolchain_auto_merge VONT ENSEMBLE, JAMAIS L'UN SANS L'AUTRE : armer
+# l'auto-merge sur une branche sans protection = « conditions remplies » tout de suite = merge
+# sans signature, convergeur derriere. Le defaut runtime est OFF ; ce geste imprime la ligne de
+# config a poser une fois la protection VERIFIEE (le test de fin de chantier).
+cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-approbateurs...]
+  need_forge_url
+  [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
+  local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
+
+  local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="${LCARS_SYSADMIN_BRANCH:-sysadmin}"
+  local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
+
+  local code
+  code="$(curl -sS -m 15 -o /tmp/tp-resp.$$ -w '%{http_code}'     -H "Authorization: token $tok" -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true)"
+
+  case "$code" in
+    201)
+      echo "forge-gestures: protection posee sur $repo:$branch (approbateurs: $approvers)"
+      echo "  -> ACTIVER l'auto-merge maintenant que la protection tient :"
+      echo "     config :lcars_fleet, :toolchain_auto_merge, true   (runtime.exs / env du deploy)"
+      ;;
+    409|422)
+      echo "forge-gestures: protection deja presente sur $repo:$branch ($code) — idempotent, rien a refaire"
+      cat /tmp/tp-resp.$$ >&2 || true
+      ;;
+    *)
+      cat /tmp/tp-resp.$$ >&2 || true
+      die "toolchain-protection: la forge a refuse ($code)"
+      ;;
+  esac
+  rm -f /tmp/tp-resp.$$
+}
+
 cmd_runner_token() {
   need_forge_url
   local tok
@@ -613,5 +654,6 @@ case "${1:-}" in
   apply)        with_apply_lock cmd_apply ;;
   install)      shift; with_apply_lock cmd_install "$@" ;;
   runner-token) cmd_runner_token ;;
+  toolchain-protection) shift; cmd_toolchain_protection "$@" ;;
   *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token)" >&2; exit 1 ;;
 esac

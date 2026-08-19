@@ -2698,6 +2698,27 @@ defmodule Fleet.MCP.PodTools.Delegation do
             )
         end
 
+        # UN CLIC ADMIN (⚖ user) : l'auto-merge est armé par le runtime, la signature humaine est
+        # l'approbation, la forge merge seule. GATE sur config, DÉFAUT OFF — armé sans protection
+        # de branche, « conditions remplies » voudrait dire TOUT DE SUITE : merge sans signature,
+        # convergeur derrière. Le geste d'installation pose la protection ET la config ENSEMBLE.
+        # Best-effort : un armement raté laisse le chemin deux-clics (approve puis merge à la main).
+        if Application.get_env(:lcars_fleet, :toolchain_auto_merge, false) do
+          case forge.schedule_auto_merge(repo, pr_number(pr), []) do
+            {:ok, _} ->
+              :ok
+
+            :ok ->
+              :ok
+
+            {:error, why} ->
+              Logger.warning(
+                "Delegation: toolchain_request — auto-merge NON armé sur ##{pr_number(pr)} " <>
+                  "(#{inspect(why)}) ; le chemin deux-clics reste (approve puis merge)"
+              )
+          end
+        end
+
         {:ok, %{"status" => "toolchain_requested", "ecosystem" => eco, "pr" => pr_number(pr)}}
       end
     end

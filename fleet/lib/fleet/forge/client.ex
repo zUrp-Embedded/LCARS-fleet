@@ -633,6 +633,33 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
+  Arme l'AUTO-MERGE d'une PR (`merge_when_checks_succeed`) — le clic unique du rail toolchain.
+
+  Fonction DISTINCTE de `merge_pr/3`, et les deux différences sont le sujet :
+    * `merge_pr` supprime la head sur succès (`delete_head_branch_spaced`) — sur un merge
+      PROGRAMMÉ, ça détruirait la branche AVANT que le merge ait lieu ;
+    * `merge_pr` traite « no approvals » en fail-loud — ici c'est l'ÉTAT NOMINAL : la PR attend
+      sa signature, l'armement dit « merge tout seul QUAND elle arrive ».
+
+  ⚠ N'ARME JAMAIS une branche sans protection : sans `required_approvals`, « quand les conditions
+  sont remplies » = TOUT DE SUITE — la PR se merge sans signature et le convergeur applique. La
+  garde vit chez l'appelant (`request_toolchain`, config `:toolchain_auto_merge`, défaut OFF —
+  posée par le geste d'installation AVEC la protection, jamais l'un sans l'autre).
+  """
+  @spec schedule_auto_merge(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
+  def schedule_auto_merge(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
+             "do" => Keyword.get(opts, :method, "rebase"),
+             "merge_when_checks_succeed" => true
+           }) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Merges (PROMOTES) the PR `index` via **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
   `Do: rebase` by default): replays the PR's commits onto the current `main` then fast-forwards →
   stays **LINEAR** (no merge commit, append-only doctrine preserved) AND handles a `main` that has
