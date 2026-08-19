@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 0000.000
+# STARDATE: 2026.231
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -80,7 +80,23 @@ PASS_N="$(printf '%s\n' "$PY_OUT" | grep -c '^PASS: ' || true)"
 FAIL_N="$(printf '%s\n' "$PY_OUT" | grep -c '^FAIL: ' || true)"
 TOTAL_N=$((PASS_N + FAIL_N))
 
-echo "--- python : PASS=$PASS_N FAIL=$FAIL_N (exit=$PY_RC) ---"
+# ⚠ LE VERDICT PORTE LES SAUTS, SINON UN VERT CACHE CE QUI N'A PAS TOURNE. Ces fichiers annoncent
+# deja leurs sauts (« SKIP: … ») quand un outil optionnel manque ; c'est le DECOMPTE qui les
+# ignorait, donc la ligne de verdict aussi. Mesure du 2026-08-19 : 145 PASS sur un poste qui a node,
+# 124 sur une instance vierge qui ne l'a pas — 21 verifications du JS du deck non jouees, dont
+# l'EXECUTION du client de terminal, ajoutee justement parce que `node --check` avait laisse passer
+# un ReferenceError fatal. Les deux runs disaient « FAIL=0 », et rien dans le verdict ne distinguait
+# « tout a tourne » de « une fonctionnalite entiere n'a pas ete validee ».
+#
+# On n'ECHOUE PAS dessus : node n'est pas un prerequis declare (cf. `10-packages`, et le Dockerfile
+# qui dit le runtime « sans node »). Echouer rendrait le gate rouge sur toute machine CONFORME. La
+# regle est celle du reste de ce filet : ce qui n'a pas tourne se DIT, il ne se devine pas.
+SKIP_N="$(printf '%s\n' "$PY_OUT" | grep -c '^SKIP: ' || true)"
+
+echo "--- python : PASS=$PASS_N FAIL=$FAIL_N SKIP=$SKIP_N (exit=$PY_RC) ---"
+if [[ "$SKIP_N" -gt 0 ]]; then
+  printf '%s\n' "$PY_OUT" | grep '^SKIP: ' | sed 's/^/    ⚠ /'
+fi
 
 if [[ "$TOTAL_N" -eq 0 ]]; then
   # 0 test compte = coquille vide (fichier casse, import qui plante avant tout check, refactor qui a
@@ -288,7 +304,7 @@ fi
 # ---------------------------------------------------------------------------
 # Verdict.
 # ---------------------------------------------------------------------------
-echo "=== shell_gate : PASS=$PASS_N FAIL=$FAIL_N (python) | bats=$BATS_TEST_COUNT test(s) $(command -v bats >/dev/null 2>&1 && echo joues || echo MANQUES) ==="
+echo "=== shell_gate : PASS=$PASS_N FAIL=$FAIL_N SKIP=$SKIP_N (python) | bats=$BATS_TEST_COUNT test(s) $(command -v bats >/dev/null 2>&1 && echo joues || echo MANQUES) ==="
 if [[ "$GATE_FAIL" -ne 0 ]]; then
   echo "=== shell_gate : ECHEC ==="
   exit 1
