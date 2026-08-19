@@ -197,15 +197,32 @@ EOF
 # l'interpolation refuse MEME un down. Sans elles, ce nettoyage echoue en silence sous le
 # `|| true`, l'identite zombie survit dans le volume, et act_runner IGNORE le nouveau token
 # (il ne s'enregistre pas si `.runner` existe) — un runner appaire a une forge morte.
-LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN=" " \
-  $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
-LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_NAME="bench-runner" \
-LCARS_RUNNER_LABELS="$LABELS" \
-  $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
+# ⚠ LES VARIABLES D'INTERPOLATION VOYAGENT PAR UN ENV-FILE, PLUS PAR L'ENVIRONNEMENT — et c'est un
+# appel qui traverse peut-etre une escalade. Sur WSL la socket docker appartient a root : le rail
+# passe alors par un shim qui `sudo`, et `sudo` remet l'environnement a zero. Ces assignations en
+# tete de commande mouraient donc en le traversant, compose retombait sur ses defauts, et le runner
+# bouclait sur « token is empty » — un runner qui tourne, qui seme son magasin d'images, et qui ne
+# s'enregistre jamais. Mesure sur instance vierge le 2026-08-19.
+#
+# ET LE JETON NE PASSE PAS EN ARGV POUR AUTANT. Le shim NE transmet PAS les noms qui portent la
+# marque d'un secret, precisement pour ne pas les mettre dans une ligne de commande que /proc
+# expose (cicatrice 6-141). L'env-file est la troisieme voie : le CHEMIN est dans argv, la VALEUR
+# est dans un fichier 0600 qui meurt avec le tmpdir.
+RUNNER_ENV="$GEN/runner.env"
+umask 077
+printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_RUNNER_LABELS=%s\n' \
+  "$INSTANCE_URL" "$REG" "bench-runner" "$LABELS" > "$RUNNER_ENV"
+# Le `down` d'office porte un token factice : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et
+# l'interpolation refuse MEME un down. Sans lui, ce nettoyage echoue en silence sous le `|| true`,
+# l'identite zombie survit dans le volume, et act_runner IGNORE le nouveau token (il ne s'enregistre
+# pas si `.runner` existe) — un runner appaire a une forge morte.
+RUNNER_ENV_DOWN="$GEN/runner-down.env"
+printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "$INSTANCE_URL" " " > "$RUNNER_ENV_DOWN"
+
+$DOCKER_BIN compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
+$DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
 $DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-runner-1:/data/bench-config.yaml"
-LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_NAME="bench-runner" \
-LCARS_RUNNER_LABELS="$LABELS" \
-  $DOCKER_BIN compose -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
+$DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
 say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volume)"
 
 # ─── 3-bis. LE MAGASIN DU DAEMON EMBARQUE — un daemon neuf n'a AUCUNE image ─────────────────────

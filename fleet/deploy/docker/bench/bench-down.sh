@@ -79,9 +79,17 @@ RESIDU_V="$("$DOCKER_BIN" volume ls --format '{{.Name}}' \
 # bench-runner : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et l'interpolation refuse MEME
 # un down — sans elles ce nettoyage echoue en silence sous le `|| true`.
 echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
-LCARS_FORGE_URL="http://forge:3000" LCARS_RUNNER_TOKEN=" " \
-  "$DOCKER_BIN" compose -f "$HERE/runner-compose.yml" -p "$RUNNER_PROJECT" \
+# ⚠ MEME RAISON QUE DANS `bench-runner.sh` : ces valeurs voyagent par un ENV-FILE, pas par
+# l'environnement. Sur WSL le rail passe peut-etre par un shim qui `sudo` pour joindre la socket, et
+# `sudo` remet l'environnement a zero — les assignations en tete de commande mourraient en le
+# traversant, l'interpolation de `runner-compose.yml` refuserait (`:?`), et ce nettoyage echouerait
+# EN SILENCE sous le `|| true`. Un runner zombie survivrait a la destruction du banc.
+RUNNER_ENV_DOWN="$(mktemp "${TMPDIR:-/tmp}/bench-down-runner.XXXXXX")"
+chmod 0600 "$RUNNER_ENV_DOWN"
+printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://forge:3000" " " > "$RUNNER_ENV_DOWN"
+"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -p "$RUNNER_PROJECT" \
   down -v --remove-orphans || true
+rm -f "$RUNNER_ENV_DOWN"
 
 echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" down -v --remove-orphans || true
