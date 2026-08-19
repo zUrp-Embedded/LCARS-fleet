@@ -33,7 +33,8 @@ defmodule Fleet.Forge.Client.Jury do
   """
   @spec review_outcome([String.t()], %{optional(String.t()) => :approved | :changes_requested}) ::
           {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
-  def review_outcome(jury, verdicts), do: review_outcome(jury, verdicts, %{}, nil)
+  def review_outcome(jury, verdicts) when is_list(jury) and is_map(verdicts),
+    do: base_outcome(jury, verdicts)
 
   @doc """
   The same predicate, given what the judges MEASURED and the curve the card declares.
@@ -66,9 +67,32 @@ defmodule Fleet.Forge.Client.Jury do
           %{optional(String.t()) => :approved | :changes_requested},
           %{optional(String.t()) => map()},
           map() | nil
-        ) :: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+        ) ::
+          {:pending, [String.t()]} | :no_jury | :changes_requested | :approved | :gray_zone
   def review_outcome(jury, verdicts, findings, policy, arbiter \\ nil)
       when is_list(jury) and is_map(verdicts) and is_map(findings) do
+    # DEUX ÉTAGES, ET L'ORDRE EST LE MODÈLE : le PLANCHER d'abord (ce que le jury dit), le PLAFOND
+    # de la carte ensuite, et il ne s'applique qu'à une approbation. Écrit comme un `cond` à cinq
+    # branches, le même comportement laissait croire que la courbe est un juré de plus ; écrit
+    # ainsi, on lit qu'elle ne peut QUE durcir — il n'existe aucun chemin par lequel elle promeut.
+    #
+    # C'est aussi ce qui rend `review_outcome/2` prouvablement incapable de rendre `:gray_zone`
+    # (Dialyzer le vérifie) : sans politique il n'y a pas de zone grise, et cette impossibilité
+    # est maintenant STRUCTURELLE au lieu d'être une propriété qu'il fallait croire sur parole.
+    case base_outcome(jury, verdicts) do
+      :approved ->
+        if policy_blocks?(jury, findings, policy),
+          do: arbitrated(verdicts, arbiter),
+          else: :approved
+
+      other ->
+        other
+    end
+  end
+
+  # Le prédicat NU : jury complet, un refus l'emporte. C'est l'agrégation booléenne d'origine, et
+  # elle reste le socle sur lequel tout le reste se pose.
+  defp base_outcome(jury, verdicts) do
     pending = jury -- Map.keys(verdicts)
 
     cond do
@@ -80,9 +104,6 @@ defmodule Fleet.Forge.Client.Jury do
 
       Enum.any?(Map.values(Map.take(verdicts, jury)), &(&1 == :changes_requested)) ->
         :changes_requested
-
-      policy_blocks?(jury, findings, policy) ->
-        arbitrated(verdicts, arbiter)
 
       true ->
         :approved
