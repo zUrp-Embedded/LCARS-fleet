@@ -1021,4 +1021,34 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received :created
     end
   end
+  describe "every kind that fires has a describe clause" do
+    alias Fleet.Pilot.IncidentRegistry.Escalation
+
+    # TROUVE PAR LA RELECTURE 2026-08-19 : `:awaits_arch_stuck` (emis par
+    # `StepRunConsumer.drain_failed/4`) n'avait pas de clause `kind_describe/1` — l'escalade
+    # crashait en FunctionClauseError au lieu d'ouvrir l'issue, exactement sur le chemin
+    # « un ticket sort du pipeline en silence ». Le temoin du drain stubbe `escalate_fun`,
+    # donc SEUL un appel au VRAI `Escalation.escalate/5` peut attraper cette classe de trou.
+    test ":awaits_arch_stuck opens an issue instead of crashing on kind_describe" do
+      pid = self()
+
+      opts = [
+        list_issues_fun: fn _r, _o -> {:ok, []} end,
+        create_issue_fun: fn _r, title, _body, _o -> send(pid, {:title, title}) && {:ok, 91} end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+
+      assert {:ok, 91} =
+               Escalation.escalate(
+                 :awaits_arch_stuck,
+                 "o/r#7",
+                 {:remove_label_failed, :forge_write_down},
+                 "awaits_arch_stuck:o/r#7",
+                 opts
+               )
+
+      assert_received {:title, title}
+      assert title =~ "awaits-arch"
+    end
+  end
 end

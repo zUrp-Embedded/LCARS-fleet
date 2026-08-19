@@ -350,6 +350,17 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
 
+  # TROUVE PAR LA RELECTURE 2026-08-19 : ce kind est emis par `StepRunConsumer.drain_failed/4`
+  # (drain de `lcars-awaits-arch`), et il n'avait PAS de clause ici — l'escalade crashait en
+  # FunctionClauseError au lieu d'ouvrir l'issue, precisement sur le chemin « un ticket sort du
+  # pipeline en silence ». Le temoin du drain stubbe `escalate_fun`, donc il ne pouvait pas le voir.
+  defp kind_describe(:awaits_arch_stuck),
+    do:
+      {"awaits-arch NON draine — ticket sorti du pipeline",
+       "Le drain de `lcars-awaits-arch` a echoue : le label RESTE pose et le dispatcher saute " <>
+         "toute issue qui le porte. Ce ticket a quitte le pipeline et aucun tick ne le " <>
+         "re-proposera — seul un retrait manuel du label le debloque."}
+
   defp kind_describe(:cat5),
     do:
       {"Cat-5 (sévérité MAX)",
