@@ -2659,14 +2659,66 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # le manifeste et on laisse la PR existante porter le diff mis à jour.
       _ = forge.create_branch(repo, branch, base, [])
 
-      with {:ok, _} <- forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
-           {:ok, pr} <- forge.open_pr(repo, branch, base, "[toolchain] #{eco}", []) do
+      # LE LIEN EST ÉCRIT SUR LA FORGE, DANS LES DEUX SENS, jamais en mémoire (`01` §7.3) :
+      #   * le corps de la PR porte le work-item (`workitem_marker`) — c'est ce que la seconde
+      #     passe du réconciliateur lit pour savoir QUEL ticket drainer quand la PR se ferme
+      #     (une fermeture sans merge ne fait pas bouger la branche : sans ce marqueur, le
+      #     work-item attendrait un événement qui n'arrivera jamais) ;
+      #   * l'issue du work-item porte le verrou `lcars-awaits-toolchain` + le marqueur de PR —
+      #     le dispatcher la SAUTE tant que le verrou est posé.
+      # L'échec du VERROU est fatal (fail-loud, le pod ré-émet — toute la chaîne amont est
+      # idempotente : branche réutilisée, put_file écrase, open_pr rend la PR existante sur 409).
+      # Le COMMENTAIRE est best-effort : sa perte ne coûte que du contexte humain, le drain se key
+      # sur le verrou et le marqueur de PR.
+      with {:ok, item_repo, item_issue} <- workitem_address(pod_id, work_item),
+           {:ok, _} <-
+             forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
+           {:ok, pr} <-
+             forge.open_pr(repo, branch, base, "[toolchain] #{eco}",
+               body:
+                 "Demande d'outillage — work-item `#{work_item.id}` (#{item_repo}##{item_issue}).\n" <>
+                   Fleet.Toolchain.workitem_marker(item_repo, item_issue)
+             ),
+           {:ok, _} <- forge.add_label(item_repo, item_issue, Fleet.Toolchain.waiting_label(), []) do
+        case forge.post_comment(
+               item_repo,
+               item_issue,
+               "Demande d'outillage en vol : PR #{repo}!#{pr_number(pr)} — ce ticket attend la " <>
+                 "signature d'un admin (ou son refus).\n" <> Fleet.Toolchain.marker(pr_number(pr) || 0),
+               []
+             ) do
+          {:ok, _} ->
+            :ok
+
+          {:error, why} ->
+            Logger.warning(
+              "Delegation: toolchain_request — commentaire de lien NON posé sur " <>
+                "#{item_repo}##{item_issue} (#{inspect(why)}) ; le verrou et le marqueur de PR " <>
+                "portent le drain, seule la lisibilité humaine est perdue"
+            )
+        end
+
         {:ok, %{"status" => "toolchain_requested", "ecosystem" => eco, "pr" => pr_number(pr)}}
       end
     end
   end
 
   def request_toolchain(_args, _pod_id), do: {:error, :pod_id_required}
+
+  # L'ADRESSE du work-item (dépôt du projet + numéro d'issue) — les deux clés du verrou. Le repo
+  # vient de l'IDENTITÉ du pod (le canal, jamais le wire) ; le numéro de son issue_id. Un work-item
+  # sans issue rattachable n'a pas de ticket à verrouiller ni à re-dispatcher : refus typé, le pod
+  # sait que sa demande n'est pas traçable.
+  defp workitem_address(pod_id, work_item) do
+    with {:ok, %{repo: repo}} when is_binary(repo) and repo != "" <- resolve_identity(pod_id),
+         {:ok, n} <- Fleet.Toolchain.workitem_issue_number(work_item.issue_id) do
+      {:ok, repo, n}
+    else
+      :error -> {:error, :work_item_issue_unparseable}
+      {:ok, _} -> {:error, :pod_repo_unbound}
+      {:error, _} = err -> err
+    end
+  end
 
   # Le work-item ACTIF de ce pod, en lecture seule. `:no_active_work_item` plutôt qu'un `nil` qui
   # laisserait la suite composer un manifeste sans traçabilité — une demande qu'aucun ticket ne

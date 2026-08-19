@@ -157,6 +157,24 @@ defmodule Fleet.Toolchain do
     do: "ops/toolchains.d/" <> ecosystem <> ".yaml"
 
   @doc """
+  Le numéro d'issue d'un `WorkItem.issue_id` (`"issue-<n>"`), ou `:error`.
+
+  ⚠ MIROIR, pas autorité : le format est composé par `Fleet.Pilot.IssueId.compose/1`, mais la
+  frontière interdit `Fleet.MCP -> Fleet.Pilot` — même motif que le miroir de slug du SeedStore
+  (`lcars.slug_witness` le confronte au réel). Deux lignes, un préfixe : si le format bouge,
+  le témoin du round-trip casse ici.
+  """
+  @spec workitem_issue_number(String.t() | nil) :: {:ok, integer()} | :error
+  def workitem_issue_number("issue-" <> rest) do
+    case Integer.parse(rest) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  def workitem_issue_number(_), do: :error
+
+  @doc """
   The hidden marker that ties a work item to its pull request.
 
   On the ISSUE, in an HTML comment — invisible rendered, exact in the body text. Same shape and
@@ -165,6 +183,31 @@ defmodule Fleet.Toolchain do
   """
   @spec marker(integer()) :: String.t()
   def marker(pr) when is_integer(pr), do: "<!-- lcars-toolchain:#{pr} -->"
+
+  @doc """
+  The hidden marker that ties a pull request BACK to its work item — the inverse of `marker/1`.
+
+  On the PR BODY. The reconciler's second pass reads it to find WHICH ticket to drain when the PR
+  closes (merged or refused) : la branche ne bouge pas sur une fermeture sans merge, donc la
+  comparaison de head ne verra JAMAIS ce cas — seul ce marqueur relie la PR au ticket qui attend.
+  """
+  @spec workitem_marker(String.t(), integer()) :: String.t()
+  def workitem_marker(repo, issue) when is_binary(repo) and is_integer(issue),
+    do: "<!-- lcars-toolchain-workitem:#{repo}##{issue} -->"
+
+  @doc """
+  Reads a `workitem_marker/2` back from a PR body. `:error` when absent or malformed — a PR toward
+  the protected branch that carries no marker is not OURS (posée à la main) : le drain la saute.
+  """
+  @spec parse_workitem_marker(String.t() | nil) :: {:ok, String.t(), integer()} | :error
+  def parse_workitem_marker(body) when is_binary(body) do
+    case Regex.run(~r/<!-- lcars-toolchain-workitem:([^#\s]+)#(\d+) -->/, body) do
+      [_, repo, n] -> {:ok, repo, String.to_integer(n)}
+      _ -> :error
+    end
+  end
+
+  def parse_workitem_marker(_), do: :error
 
   @doc """
   The label a work item wears while its request is in flight — `Fleet.Labels.awaits_toolchain/0`.

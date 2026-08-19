@@ -32,8 +32,20 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     end
 
     @impl true
-    def open_pr(repo, head, base, title, _opts) do
-      send(self(), {:open_pr, repo, head, base, title})
+    def add_label(repo, issue, label, _opts) do
+      send(self(), {:add_label, repo, issue, label})
+      Process.get(:add_label_result, {:ok, %{}})
+    end
+
+    @impl true
+    def post_comment(repo, issue, body, _opts) do
+      send(self(), {:post_comment, repo, issue, body})
+      Process.get(:post_comment_result, {:ok, %{}})
+    end
+
+    @impl true
+    def open_pr(repo, head, base, title, opts) do
+      send(self(), {:open_pr, repo, head, base, title, Keyword.get(opts, :body, "")})
       # Le NUMERO NU — le contrat du client canonique ({:ok, integer}, 409 compris). Une v1 de ce
       # double rendait une map : vert ici, `"pr" => nil` en prod. Le double suit le client, jamais
       # l'inverse.
@@ -44,10 +56,22 @@ defmodule Fleet.MCP.ToolchainRequestTest do
   setup do
     prev = Application.get_env(:lcars_fleet, :mcp_forge_client)
     Application.put_env(:lcars_fleet, :mcp_forge_client, Writer)
+
+    # L'ADRESSE du work-item vient de l'IDENTITÉ du pod (le canal) : le résolveur est la couture.
+    prev_resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver)
+
+    Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+      {:ok, %{role: "engineer", repo: "fleet/morse"}}
+    end)
+
     on_exit(fn ->
       if prev,
         do: Application.put_env(:lcars_fleet, :mcp_forge_client, prev),
         else: Application.delete_env(:lcars_fleet, :mcp_forge_client)
+
+      if prev_resolver,
+        do: Application.put_env(:lcars_fleet, :mcp_pod_resolver, prev_resolver),
+        else: Application.delete_env(:lcars_fleet, :mcp_pod_resolver)
     end)
 
     :ok
@@ -67,7 +91,8 @@ defmodule Fleet.MCP.ToolchainRequestTest do
   defp enqueue!(pod_id) do
     {:ok, item} =
       TaskQueue.enqueue(pod_id, %{
-        issue_id: "412",
+        # Le format REEL (Pilot.IssueId.compose) — un "412" nu serait refuse par le miroir.
+        issue_id: "issue-412",
         role: "engineer",
         brief: "compile le module morse"
       })
@@ -133,14 +158,17 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       # atterrir une déclaration non validée là où le convergeur la trouverait.
       assert_received {:create_branch, _repo, ^branch, ^base}
       assert_received {:put_file, _repo, "ops/toolchains.d/python.yaml", content, ^branch}
-      assert_received {:open_pr, _repo, ^branch, ^base, "[toolchain] python"}
+      assert_received {:open_pr, _repo, ^branch, ^base, "[toolchain] python", pr_body}
+      # Le lien INVERSE : le corps de la PR nomme le work-item — c'est ce que la seconde passe du
+      # réconciliateur lit pour drainer quand la PR se ferme sans faire bouger la branche.
+      assert {:ok, "fleet/morse", 412} = Fleet.Toolchain.parse_workitem_marker(pr_body)
 
       assert content =~ "kind: ecosystem_enable"
       assert content =~ "ecosystem: python"
       # La traçabilité voyage AVEC le document : le merge doit pouvoir être retracé au ticket.
-      # CITÉ, et c'est juste : `issue_id` est une chaîne, et un scalaire qui commence par un chiffre
-      # non cité se lit comme un nombre — `01` deviendrait `1`.
-      assert content =~ ~s(issue: "412")
+      # (Non cité : `issue-412` commence par une lettre — la citation de yaml_scalar ne vaut que
+      # pour les scalaires à tête de chiffre.)
+      assert content =~ ~s(issue: issue-412)
       assert content =~ "work_item: "
     end
 
@@ -161,6 +189,43 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       {:ok, _} = Delegation.request_toolchain(req(%{"ecosystem" => "rust"}), pod)
       assert_received {:put_file, _, "ops/toolchains.d/rust.yaml", _, _}
+    end
+  end
+  describe "le verrou du work-item — le lien est écrit sur la forge, dans les deux sens" do
+    test "la création pose `lcars-awaits-toolchain` + le commentaire à marqueur sur le ticket" do
+      pod = "pod-verrou-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+
+      assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+
+      lock = Fleet.Toolchain.waiting_label()
+      assert_received {:add_label, "fleet/morse", 412, ^lock}
+      assert_received {:post_comment, "fleet/morse", 412, body}
+      assert body =~ Fleet.Toolchain.marker(412)
+    end
+
+    test "échec du VERROU = échec de la demande (fail-loud, le pod ré-émet — chaîne idempotente)" do
+      pod = "pod-verrou-ko-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      Process.put(:add_label_result, {:error, {:http, 500, "boom"}})
+
+      assert {:error, {:http, 500, _}} = Delegation.request_toolchain(req(), pod)
+      # Sans le verrou, le dispatcher re-proposerait un ticket dont la demande est en vol — le
+      # refus force le ré-émit, et toute la chaîne amont se rejoue sans doublon.
+      refute_received {:post_comment, _, _, _}
+    end
+
+    test "échec du COMMENTAIRE = demande OK quand même (best-effort — le drain se key sur le verrou)" do
+      pod = "pod-comment-ko-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      Process.put(:post_comment_result, {:error, :forge_down})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+        end)
+
+      assert log =~ "commentaire de lien NON pos"
     end
   end
 end

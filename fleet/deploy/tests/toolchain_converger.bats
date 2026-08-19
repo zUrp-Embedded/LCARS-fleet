@@ -163,6 +163,49 @@ EOS
   [[ "$output" == *"kind inattendu"* ]]
 }
 
+@test "GRAMMAIRE: la forme REELLE du render (entrees a 4 espaces) — apt recoit les paquets" {
+  # Le temoin qui a paye : une v1 de list_under exigeait `^  - ` pendant que le render emet a 4
+  # espaces — apply_apt lisait ZERO paquet sur un manifeste reellement rendu, en silence, et
+  # chaque cote etait vert avec ses propres fixtures. Cette fixture est la forme du RENDER.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n    - python3-yaml\n' | base64 -w0)"
+  cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<EOS
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >> "$BATS_TEST_TMPDIR/apt-args"
+exit 0
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/apt-get"
+
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  grep -qx 'python3-yaml' "$BATS_TEST_TMPDIR/apt-args"
+}
+
+@test "GRAMMAIRE: manifeste COMBINE apt+sysroot — la cible ne s'installe JAMAIS sur l'hote" {
+  # Le cas cross legitime : apt.packages = paquets HOTE, sysroot.packages = paquets CIBLE. Sans le
+  # scope par bloc (block_under), `  packages` aspirait les deux et apt installait la cible sur
+  # l'hote. Piege latent depuis la v1, mesure en reparant la grammaire.
+  local sr; sr="$BATS_TEST_TMPDIR/keyring.gpg"; : > "$sr"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\napt:\n  packages:\n    - crossbuild-essential-arm64\nsysroot:\n  arch: arm64\n  keyring: %s\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' "$sr" | base64 -w0)"
+  # UNE LIGNE VIDE entre les invocations : c'est elle qui fait de chaque appel un paragraphe
+  # (RS="") — sans elle le fichier est UN bloc et le temoin serait creux (le Dir:: du sysroot
+  # couvrirait un libssl-dev arrive dans l'appel hote).
+  cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<EOS
+#!/usr/bin/env bash
+{ printf '%s\n' "\$@"; echo; } >> "$BATS_TEST_TMPDIR/apt-args"
+exit 0
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/apt-get"
+  # curl du sysroot : rien a telecharger (print-uris vide via stub apt-get) — on ne teste que le TRI.
+
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  grep -qx 'crossbuild-essential-arm64' "$BATS_TEST_TMPDIR/apt-args"
+  # La preuve du tri — nuance : le sysroot appelle AUSSI apt-get (racine privee, `-o Dir::Etc`).
+  # Ce qui est interdit est libssl-dev dans un appel SANS `Dir::` (l'appel HOTE) : on refuse tout
+  # PARAGRAPHE (= une invocation, separee par la ligne vide du stub) hote portant le paquet cible.
+  ! awk 'BEGIN{RS=""} !/Dir::/ && /libssl-dev/ {found=1} END{exit !found}' "$BATS_TEST_TMPDIR/apt-args"
+}
+
 @test "EGRESS: les hotes approuves sont poses sur le volume d'etat" {
   # Sans ce verbe, tout le prealable A ouvre un registry que RIEN ne pose : les deux autres sources
   # vivent dans l'image et un rebuild les efface.

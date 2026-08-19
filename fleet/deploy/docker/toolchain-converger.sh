@@ -95,11 +95,37 @@ fetch_manifest() {
 # de ces clefs apparait au plus une fois dans un manifeste.
 field() { sed -n "s/^ *$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
 
-list_under() { # list_under <cle> <yaml> -> une entree par ligne
+# Le BLOC top-level (lignes indentees sous la cle) — le scope qui empeche `  packages` d'un bloc
+# d'aspirer celui d'un autre : un manifeste cross porte apt.packages (paquets HOTE) ET
+# sysroot.packages (paquets CIBLE), et les confondre installerait la cible sur l'hote. Piege
+# LATENT depuis la v1 (une seule forme par manifeste dans les fixtures) — mesure en reparant la
+# grammaire d'indentation (B3).
+block_under() { # block_under <yaml> <cle top-level> -> les lignes du bloc
   awk -v key="$2:" '
-    $0 == key         { inb=1; next }
-    inb && /^  - /    { sub(/^  - /,""); gsub(/^"|"$/,""); print; next }
-    inb && /^[^ ]/    { inb=0 }
+    $0 == key { inb=1; next }
+    inb && /^[^ ]/ { inb=0 }
+    inb { print }
+  ' <<< "$1"
+}
+
+# ⚠ LA GRAMMAIRE EST CELLE DU RENDER, PAS UNE CONVENTION LOCALE. Une v1 exigeait `^  - ` (2
+# espaces) pendant que `Fleet.Toolchain.render/2` emet les entrees d'`apt.packages` a 4 (un cran
+# sous leur cle) : sur un manifeste REELLEMENT rendu, apply_apt lisait ZERO paquet, en silence —
+# le verbe fondateur ne faisait rien, et chaque cote etait vert avec ses propres fixtures. Trouve
+# par le temoin du round-trip (B3, 2026-08-19). La regle : les entrees sont les lignes `- `
+# indentees AU MOINS comme leur cle (YAML admet le meme niveau) ; le bloc se ferme a la premiere
+# ligne non-vide, non-tiret, d'indentation <= celle de la cle.
+list_under() { # list_under <yaml> <cle (avec son indentation)> -> une entree par ligne
+  awk -v key="$2:" '
+    BEGIN { kind=0; while (substr(key, kind+1, 1) == " ") kind++ }
+    $0 == key { inb=1; next }
+    inb {
+      ind=0; while (substr($0, ind+1, 1) == " ") ind++
+      if ($0 ~ /^[[:space:]]*- / && ind >= kind) {
+        line=$0; sub(/^[[:space:]]*- /,"",line); gsub(/^"|"$/,"",line); print line; next
+      }
+      if ($0 != "" && ind <= kind) inb=0
+    }
   ' <<< "$1"
 }
 
@@ -118,7 +144,7 @@ apply_apt() { # apply_apt <yaml>
     [[ -z "$p" ]] && continue
     safe_pkg "$p" || die 2 "nom de paquet refuse: '$p'"
     pkgs+=("$p")
-  done < <(list_under "$1" "  packages")
+  done < <(list_under "$(block_under "$1" apt)" "  packages")
 
   [[ ${#pkgs[@]} -eq 0 ]] && return 0
   echo "toolchain-converger: apt-get install ${pkgs[*]}"
@@ -137,7 +163,7 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
                           "$root"/var/lib/apt/lists/partial "$root"/var/cache/apt/archives/partial \
                           "$root"/var/lib/dpkg
   : > "$root/var/lib/dpkg/status"
-  list_under "$1" "  sources" > "$root/etc/apt/sources.list"
+  list_under "$(block_under "$1" sysroot)" "  sources" > "$root/etc/apt/sources.list"
 
   # ⚠ LE KEYRING N'EST PAS OPTIONNEL. Un convergeur qui telecharge des paquets non signes est le
   # trou supply-chain qu'on refuse d'ouvrir par commodite — et la commodite serait grande, puisque
@@ -155,7 +181,7 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
     [[ -z "$p" ]] && continue
     safe_pkg "$p" || die 2 "nom de paquet refuse: '$p'"
     pkgs+=("$p")
-  done < <(list_under "$1" "  packages")
+  done < <(list_under "$(block_under "$1" sysroot)" "  packages")
   [[ ${#pkgs[@]} -eq 0 ]] && return 0
 
   mkdir -p "$target"
@@ -308,6 +334,8 @@ validate_manifest() { # validate_manifest <yaml> <eco>
     [[ -z "$v" ]] && continue
     safe_pkg "$v" || die 2 "nom de paquet refuse: '$v'"
   done < <(list_under "$1" "  packages")
+  # ^ GLOBAL voulu : on VALIDE les noms de TOUS les blocs (apt + sysroot) ; l'application, elle,
+  #   scope par bloc (block_under) — la cible ne s'installe jamais sur l'hote.
 
   while IFS= read -r v; do
     [[ -z "$v" ]] && continue

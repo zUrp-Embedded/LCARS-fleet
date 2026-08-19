@@ -55,6 +55,20 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   voit la branche bouger et le convergeur applique. Trois acteurs, et le seul qui tourne en root
   prend un manifeste qu'un humain a déjà approuvé.
   """
+  @callback add_label(
+              repo :: String.t(),
+              issue :: integer(),
+              label :: String.t(),
+              opts :: keyword()
+            ) :: {:ok, term()} | {:error, term()}
+
+  @callback post_comment(
+              repo :: String.t(),
+              issue :: integer(),
+              body :: String.t(),
+              opts :: keyword()
+            ) :: {:ok, term()} | {:error, term()}
+
   # LE CONTRAT EST CELUI DU CLIENT CANONIQUE, ET IL EST ETROIT : `Fleet.Forge.Client.open_pr/5`
   # rend `{:ok, integer}` — le NUMERO de la PR — dans ses DEUX branches, y compris le 409 (une PR
   # existe deja pour ce couple head→base : le client la retrouve et rend son numero). Un `{:ok,
