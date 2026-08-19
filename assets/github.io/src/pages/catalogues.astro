@@ -34,8 +34,7 @@ const LABEL = {
   sp_blocks:          ['Les blocs de prompt', 'Le substrat commun. Le noyau livré se remplace par son nom.', 'green'],
   sp_templates:       ['Les gabarits de prompt', 'La forme que prend chaque prompt émis.', 'green'],
   skills:             ['Les compétences', 'Ce qu’un agent sait faire au-delà de ses outils.', 'mauve'],
-  avatars:            ['Les visages', 'Le portrait d’un siège sur la forge, nommé par le rôle — facultatif : sans lui, l’identicon.', 'dim'],
-  coord_policies:     ['La politique d’escalade', 'Un fichier, pas un dossier : quand et vers qui ça remonte.', 'mauve']
+  avatars:            ['Les visages', 'Le portrait d’un siège sur la forge, nommé par le rôle — facultatif : sans lui, l’identicon.', 'dim']
 };
 
 const unlabelled = T.filter((t) => !(t.key in LABEL)).map((t) => t.key);
