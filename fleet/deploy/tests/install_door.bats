@@ -100,14 +100,37 @@ setup() {
   [ "$choice" -lt "$pf" ]
 }
 
-@test "la branche BOITE n'escalade JAMAIS en root — c'est la promesse auditee du rail" {
-  # « rien hors de ton clone et de docker » : un sudo sur ce chemin la casserait sans rien acheter.
-  local box_line sudo_line
-  box_line="$(grep -n 'RAIL" == "box"' "$SRC" | head -1 | cut -d: -f1)"
-  sudo_line="$(grep -n '^  exec sudo' "$SRC" | head -1 | cut -d: -f1)"
-  [ "$box_line" -lt "$sudo_line" ]
-  # Et le chemin boite se termine par un exec : il ne retombe pas dans la suite du script.
+@test "la branche BOITE ne POSE rien sur le systeme — c'est ca, la promesse auditee" {
+  # ⚠ CE TEMOIN EPINGLAIT « n'escalade JAMAIS en root », ET C'ETAIT LE MAUVAIS INVARIANT. L'audit de
+  # Mintie (11 h) porte sur ce que le rail MODIFIE — « rien hors de ton clone et de docker » — pas
+  # sur l'uid qui appelle. Les confondre a fait pire que de se tromper de mot : le rail ne pouvait
+  # pas joindre une socket appartenant a root, donc la demo ne tenait que par un `sudo` pose A LA
+  # MAIN, hors du code, par celui qui l'ecrivait. Un temoin qui interdit le correctif protege le
+  # contournement.
+  #
+  # ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
+  # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. »
+  #
+  # Ce qui est epingle desormais est ce qui est reellement promis, et c'est verifiable : aucune
+  # commande de pose systeme sur le chemin boite.
+  local box_start ws_start branche
+  box_start="$(grep -n 'RAIL" == "box"' "$SRC" | head -1 | cut -d: -f1)"
+  ws_start="$(grep -n 'LA BRANCHE POSTE' "$SRC" | head -1 | cut -d: -f1)"
+  branche="$(sed -n "${box_start},${ws_start}p" "$SRC")"
+  # Ni paquet, ni utilisateur, ni groupe, ni ecriture dans /etc ou /usr.
+  ! grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
+  # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
   grep -q 'exec "$SCRIPT_DIR/docker.sh" up' "$SRC"
+}
+
+@test "l'escalade pour JOINDRE le daemon est ANNONCEE avant la pause, jamais decouverte" {
+  # Le cout s'annonce, il ne se decouvre pas — meme regle que le reste du bandeau. Un sudo qui
+  # surgit apres le consentement transforme une promesse bornee en surprise.
+  grep -q 'sudo sera demandé pour PARLER au daemon docker' "$SRC"
+  local annonce pause
+  annonce="$(grep -n 'sudo sera demandé' "$SRC" | head -1 | cut -d: -f1)"
+  pause="$(grep -n 'read -r _ < /dev/tty' "$SRC" | head -1 | cut -d: -f1)"
+  [ "$annonce" -lt "$pause" ]
 }
 
 @test "stdin reste REFUSE — l'arbitrage de l'user, pas une commodite" {

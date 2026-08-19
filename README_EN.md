@@ -47,9 +47,16 @@ without leaving a half-installed box.
 tar xzf lcars-fleet-beta.tar.gz
 cd lcars-fleet
 
-./docker.sh build                            # ~3 GB transient, reclaimable afterwards
-fleet/deploy/docker/bench/bench-up.sh        # forge + box + runner, one gesture
+bash install.sh --box --bench                 # forge + box + runner, one gesture
 ```
+
+`install.sh` is **the** door, and the only one. It looks at what your machine allows, asks what you
+want when both are possible, states what it takes, then delegates. `--box` says "LCARS runs in a
+container"; `--bench` says "and build me the annexes rather than requiring that I already have them".
+
+⚠ **On WSL it will ask for `sudo` to talk to the docker daemon** — its socket is owned by root. This
+is not a system install: nothing is placed outside your clone and docker. All `sudo` buys here is
+reaching the daemon.
 
 `build` produces **two** images: the box you will run, and the toolchain twin its CI runner serves.
 Both come out of the same Dockerfile, so the second costs a tag, not a build.
@@ -93,8 +100,11 @@ of this beta is that a friend on the same network opens the dashboard from their
 choice for a network you trust, and nothing else. To close it back onto this machine alone:
 
 ```bash
-fleet/deploy/docker/bench/bench-up.sh --bind 127.0.0.1
+bash install.sh --box --bench -- --bind 127.0.0.1
 ```
+
+⚠ Whatever follows `--` is passed **verbatim** to the bench provider: that is where `--bind`,
+`--advertise`, `--project` and the ports live.
 
 If the address it announces is wrong (several interfaces, a DNS name, a reverse proxy), name it:
 `--advertise <ip-or-name>`. Ports move the same way — `--forge-port`, `--deck-port`.
@@ -198,10 +208,10 @@ The stack is built to say what is missing rather than to look healthy:
 
 ⚠ `-p lcars-nuit` is not optional here. `docker.sh` defaults to a project called `lcars`, and the
 bench above creates one called `lcars-nuit` — without the flag you would be asking about a
-deployment that does not exist. (`bench-up.sh --project <name>` changes it; the teardown line it
+deployment that does not exist. (`install.sh --box --bench -- --project <name>` changes it; the teardown line it
 prints always carries the right one.)
 
-`bench-up.sh` prints its verdict block even when it fails — the details are what you need to repair
+The bench provider prints its verdict block even when it fails — the details are what you need to repair
 it, so it never swallows them.
 
 ---

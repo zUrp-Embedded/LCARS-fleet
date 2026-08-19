@@ -62,6 +62,30 @@ PROV_DOCKER_WHY=""
 # 1 quand le daemon repond mais refuse CET utilisateur — un fait different de « injoignable ».
 PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
+# LE PREFIXE D'ESCALADE : vide, ou de quoi joindre un daemon dont la socket appartient a root.
+#
+# ⚠ POURQUOI IL EXISTE, ET POURQUOI CE N'EST PAS UNE REGRESSION DE LA PROMESSE. Sur WSL la socket
+# Docker Desktop est `root:root 755` : le daemon repond, et pas a l'utilisateur qui lance. Deux
+# sorties etaient possibles, et la moins invasive n'est pas celle qu'on croit :
+#
+#   - `chgrp` sur la socket : elle vit sous `/mnt/wsl`, PARTAGE PAR TOUTES LES DISTROS de la VM. Le
+#     geste ouvre donc la socket bien au-dela de l'instance dediee — et il faut le re-poser a chaque
+#     demarrage de Docker Desktop, qui recree la socket. Deux defauts pour un confort ;
+#   - `sudo` sur l'APPEL : ne modifie RIEN, n'a rien a converger, et laisse intacte la promesse
+#     auditee du rail boite — « rien hors de ton clone et de docker ».
+#
+# ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
+# sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La promesse porte sur
+# ce qu'on MODIFIE, jamais sur l'uid qui appelle — les confondre a fait epingler le mauvais
+# invariant par un temoin, et surtout a fait poser le sudo A LA MAIN, en dehors du code, pendant que
+# celui-ci pretendait ne pas en avoir besoin.
+#
+# ⚠ TROIS PIEGES, TOUS DEJA PAYES ICI. (1) `sudo` remet l'environnement a zero : `DOCKER_HOST` meurt
+# en traversant, d'ou les assignations EN TETE de commande — jamais `sudo -E`, refuse sans `SETENV`.
+# (2) `sudo` impose `secure_path` : une CLI hors des chemins systeme devient introuvable, d'ou le
+# chemin ABSOLU. (3) L'escalade est PAR COMMANDE : un re-exec global ferait tourner `git` en root sur
+# le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
+PROV_DOCKER_SUDO=""
 
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
@@ -91,6 +115,7 @@ docker_endpoint() {
   # objet, et c'est celle qu'on ne lit pas qui gagne. On capture donc la valeur entrante d'abord.
   local want="${PROV_DOCKER_BIN:-}"
   PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_SOCK=""
+  PROV_DOCKER_SUDO=""
   local cli sock
 
   # 1. La CLI. Le choix de l'appelant l'emporte — c'est son droit, et il peut viser un shim.
@@ -143,7 +168,37 @@ docker_endpoint() {
   done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
+    # LA SOCKET REFUSE CET UTILISATEUR — on tente l'escalade AVANT de conclure. Elle ne modifie rien
+    # (cf. l'en-tete de PROV_DOCKER_SUDO) et c'est le seul chemin vers un daemon dont la socket
+    # appartient a root. `sudo -n` : on ne bloque JAMAIS sur une invite de mot de passe dans une
+    # sonde — sans NOPASSWD, on rend le fait tel quel et l'appelant decide d'escalader lui-meme.
+    local abs; abs="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
+    if [[ "$EUID" -ne 0 ]] && command -v sudo >/dev/null 2>&1 \
+       && sudo -n DOCKER_HOST="unix://$PROV_DOCKER_SOCK" "$abs" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+      PROV_DOCKER_HOST="unix://$PROV_DOCKER_SOCK"
+      PROV_DOCKER_SUDO="sudo DOCKER_HOST=unix://$PROV_DOCKER_SOCK"
+      # ⚠ L'ESCALADE PREND LA FORME D'UN SHIM, ET C'EST CE QUI PRESERVE TOUS LES CONTRATS. Les
+      # appelants recoivent un BINAIRE — `store_ensure_volumes` le documente en toutes lettres, et
+      # `bench-up`/`48-forge-host` composent `"$DOCKER_BIN" <verbe>`. Rendre ici une LIGNE DE
+      # COMMANDE ferait chercher un executable dont le nom contient des espaces, avec un diagnostic
+      # qui accuserait docker. Le shim est donc un fichier, et tout le rail continue de ne
+      # manipuler qu'un chemin.
+      #
+      # Il porte `DOCKER_HOST` EN TETE DE COMMANDE parce que `sudo` remet l'environnement a zero :
+      # exporter la variable ne la ferait pas traverser. C'est le piege paye cinq fois aujourd'hui.
+      #
+      # 0700 dans un repertoire 0700 : ce fichier invoque sudo, il ne doit etre modifiable par
+      # personne d'autre. Il n'est pas nettoye — il ne porte aucun secret, seulement un chemin, et
+      # sa duree de vie est celle de l'arbre de processus qui s'en sert.
+      local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
+      chmod 0700 "$shim_dir"
+      printf '#!/usr/bin/env bash\nexec sudo DOCKER_HOST=%s %s "$@"\n' \
+        "unix://$PROV_DOCKER_SOCK" "$abs" > "$shim_dir/docker"
+      chmod 0700 "$shim_dir/docker"
+      PROV_DOCKER_BIN="$shim_dir/docker"
+      return 0
+    fi
+    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $abs"
     return 1
   fi
 

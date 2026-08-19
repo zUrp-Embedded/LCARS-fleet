@@ -48,6 +48,18 @@ fleet/deploy/provision list                  # les modules retenus pour ce subst
 sudo fleet/deploy/provision apply --only 60  # un seul module
 ```
 
+**Le jumeau : `fleet/deploy/box`.** `provision` provisionne un HÔTE (paquets, groupes, `/local`,
+`wsl.conf`) ; `box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes verbes
+documentés en tête, mêmes codes retour, même place dans l'arbre — qui sait lire l'un sait lire
+l'autre. Les douze verbes (`build up doctor shell logs down reset source-push config forge-check
+forge-apply runner-token`) s'appellent par `./docker.sh <verbe>` à la racine, qui détecte, refuse en
+nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
+
+**La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
+PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et délègue — `--workstation`
+vers `provision apply`, `--box` vers `docker.sh`, `--bench` vers le fournisseur de banc. Ce qui suit
+`--` part verbatim au délégué de la branche.
+
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
 vérification d'autorité — le remote, normalisé en `host/owner/repo`, doit être **exactement égal** à
 `PROV_EXPECTED_REPO` (déclaré, jamais deviné ; sans lui, aucun pull). ⚠ **L'hôte fait partie de

@@ -294,6 +294,7 @@ ${CYAN}  ┌──────────────────────�
   │${N}  Pas de paquet, pas d'utilisateur, pas de groupe, rien   ${CYAN}│
   │${N}  dans /etc ni /usr. ~3 Go d'image, ~15 min de build.     ${CYAN}│
   │${N}  Pour tout défaire : ${W}./docker.sh reset${N} — 30 s.           ${CYAN}│
+$( [[ -n "${PROV_DOCKER_SUDO:-}" ]] && printf '  │%s  ⚠ sudo sera demandé pour PARLER au daemon docker —%s     %s│\n  │%s    sa socket appartient à root. Aucune modification.%s    %s│\n' "$W" "$N" "$CYAN" "$N" "$N" "$CYAN" )
 $( [[ "$WITH_BENCH" -eq 1 ]] && printf '  │%s  --bench : forge jetable + runner CI montés ici.%s      %s│\n' "$W" "$N" "$CYAN" \
                              || printf '  │%s  Il te faut une forge : FORGE_BASE_URL + un token.%s    %s│\n' "$N" "$N" "$CYAN" )
   └─────────────────────────────────────────────────────────┘${N}
@@ -318,17 +319,21 @@ echo ""
 # Elle ne demande PAS root, et c'est la promesse auditée du rail : « rien hors de ton clone et de
 # docker ». Un `sudo` ici la casserait sans rien acheter.
 if [[ "$RAIL" == "box" ]]; then
-  # ⚠ ICI, ET SEULEMENT ICI, « le daemon refuse cet utilisateur » est FATAL : ce rail ne monte
-  # jamais en root, donc c'est l'humain qui doit atteindre docker. Le rail poste, lui, escalade et
-  # s'en accommode. Le geste est un groupe, pas une install — et le dire evite de chercher docker.
+  # ⚠ CE BLOC DICTAIT UN GESTE QU'ON SAIT FAIRE, et c'est la faute qu'il fallait retirer. Il
+  # renvoyait l'opérateur cliquer dans Docker Desktop ou ouvrir la socket à un groupe — pendant que
+  # la seule chose qui avait jamais fait tourner ce rail, c'était un `sudo` posé À LA MAIN, hors du
+  # code, par celui qui l'écrivait. Un refus qui dicte double le rail ; et un rail dont la démo tient
+  # par un geste non écrit ne tient pas.
+  #
+  # ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
+  # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La sonde escalade
+  # donc elle-même quand la socket appartient à root — et ce qui reste ici est le cas où même ça ne
+  # suffit pas.
   if [[ "$DOCKER_OK" -eq 0 ]]; then
     echo ""
     echo "  ${R}$PROV_DOCKER_WHY${N}"
-    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-      echo "  Ce rail ne monte JAMAIS en root : c'est toi qui dois atteindre docker."
-      echo "  Sous Docker Desktop : Settings → Resources → WSL integration, active cette distro."
-      echo "  Sinon, ouvre la socket à un groupe dont tu es membre — jamais un chmod 666."
-    fi
+    [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]] && \
+      echo "  L'escalade a été tentée et refusée : « sudo -n » n'a pas abouti (mot de passe requis ?)."
     exit 1
   fi
   [[ -x "$SCRIPT_DIR/docker.sh" ]] || {

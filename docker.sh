@@ -101,6 +101,8 @@ docker_endpoint || fail "$PROV_DOCKER_WHY" \
 # `docker compose` (plugin) ou `docker-compose` (standalone) : les deux existent dans la nature, et
 # une install récente n'a que le premier. On NOMME celui qu'on a trouvé au délégué plutôt que de
 # le laisser re-chercher — deux détections pour un fait donneraient deux réponses possibles.
+# Le délégué reçoit la résolution, il ne la refait pas — shim d'escalade compris.
+export LCARS_DOCKER_BIN="$PROV_DOCKER_BIN"
 if "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
   export LCARS_COMPOSE_CMD="$PROV_DOCKER_BIN compose"
 elif command -v docker-compose >/dev/null 2>&1; then

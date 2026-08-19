@@ -37,6 +37,13 @@ PROJECT="${LCARS_PROJECT:-lcars}"
 # shellcheck source=lib/store.sh
 . "$SCRIPT_DIR/fleet/deploy/lib/store.sh"
 
+# ⚠ LE BINAIRE DOCKER VIENT DE LA PORTE, IL NE SE REDECOUVRE PAS ICI. `docker.sh` a deja resolu la
+# paire CLI+endpoint qui repond — y compris, sur une socket appartenant a root, un SHIM qui escalade.
+# Le redecouvrir donnerait deux resolutions pour un fait, donc deux verdicts possibles selon la porte
+# empruntee ; et un `docker` nu ici contournerait l'escalade en silence, pour echouer plus loin sur
+# une permission. Defaut `docker` : ce delegue reste jouable seul sur une machine ou il suffit.
+DOCKER="${LCARS_DOCKER_BIN:-docker}"
+
 usage() { exec "$SCRIPT_DIR/docker.sh" help; }
 
 # ─── Le projet visé est un ARGUMENT (cf. assert_project_ours) ─────────────────────────────────────
@@ -74,10 +81,10 @@ compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
 # le créer.
 project_config_files() {
   local ids
-  ids="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
+  ids="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
   [[ -n "$ids" ]] || return 0
   # shellcheck disable=SC2086 -- liste d'ids séparés par des blancs, à éclater
-  docker inspect $ids \
+  "$DOCKER" inspect $ids \
     --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
 }
 
@@ -136,7 +143,7 @@ cmd_build() {
   local tag="${LCARS_IMAGE:-lcars-fleet:2}"
   tag="lcars-build:${tag##*:}"
   echo "box: étiquetage du jumeau de build ($tag — le toolchain que le runner CI sert)"
-  docker build --target build -t "$tag" \
+  "$DOCKER" build --target build -t "$tag" \
     --build-arg "GIT_SHA=$LCARS_GIT_SHA" --build-arg "BUILD_DATE=$LCARS_BUILD_DATE" \
     -f "$SCRIPT_DIR/fleet/deploy/docker/Dockerfile" "$SCRIPT_DIR" \
     || { echo "box: jumeau de build NON étiqueté — le banc refusera de monter (bench-up, exit 6)" >&2; return 1; }
@@ -150,7 +157,7 @@ cmd_up() {
   # le seul endroit qui s'execute avant le up, donc le seul qui puisse les poser. C'est le prix de
   # l'externalite — et c'est aussi ce qu'elle achete : `down -v` ne peut pas emporter trois heures
   # de toolchain, parce que docker ne le PEUT pas, pas parce qu'on aurait pense a le lui interdire.
-  store_ensure_volumes docker || { echo "box: magasin non pose — up annule" >&2; exit 1; }
+  store_ensure_volumes "$DOCKER" || { echo "box: magasin non pose — up annule" >&2; exit 1; }
   # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
   # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
   # « ./docker.sh build », et son verdict est le sien ; image absente → up échoue en le disant.
@@ -348,7 +355,7 @@ cmd_reset() {
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "box: annulé."; exit 1; }
   compose down --rmi local
-  docker volume rm -f "${PROJECT}_lcars-home" >/dev/null 2>&1 || true
+  "$DOCKER" volume rm -f "${PROJECT}_lcars-home" >/dev/null 2>&1 || true
   echo "box: reset fait. « ./docker.sh up » pour repartir de zéro."
 }
 
@@ -367,7 +374,7 @@ cmd_source_push() {
 
   echo "box: copie de $src → /home/projects/LCARS (historique git compris, ça prend un moment)…"
   compose exec -T lcars rm -rf /home/projects/.LCARS.incoming
-  docker cp "$src/." "$ctr:/home/projects/.LCARS.incoming" || { echo "box: copie échouée" >&2; exit 1; }
+  "$DOCKER" cp "$src/." "$ctr:/home/projects/.LCARS.incoming" || { echo "box: copie échouée" >&2; exit 1; }
   # Bascule ATOMIQUE (rename), après la copie : la fleet ne voit jamais un arbre à moitié copié.
   # `mv -T` obligatoire : `mv src dst` NICHE dans dst quand dst est un dossier existant, et
   # l'arbre se retrouve imbriqué. Et pas de `[ -e x ] && mv … || true` : la forme AVALE l'échec

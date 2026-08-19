@@ -48,9 +48,17 @@ déjà `claude` sur cette machine, tes credentials sont repris automatiquement d
 tar xzf lcars-fleet-beta.tar.gz
 cd lcars-fleet
 
-./docker.sh build                            # ~3 Go transitoires, récupérables ensuite
-fleet/deploy/docker/bench/bench-up.sh        # forge + boîte + runner, un seul geste
+bash install.sh --box --bench                 # forge + boîte + runner, un seul geste
 ```
+
+`install.sh` est **la** porte, et la seule. Elle regarde ce que ta machine permet, te demande ce que
+tu veux quand les deux sont possibles, annonce ce que ça prend, puis délègue. `--box` dit « LCARS
+tourne dans un conteneur », `--bench` dit « et fabrique-moi les annexes au lieu d'exiger que je les
+aie déjà ».
+
+⚠ **Sur WSL, elle demandera `sudo` pour parler au daemon docker** — sa socket appartient à root. Ce
+n'est pas une installation système : rien n'est posé hors de ton clone et de docker. Tout ce que
+`sudo` sert ici, c'est à joindre le daemon.
 
 `build` produit **deux** images : la boîte que tu vas faire tourner, et le jumeau toolchain que son
 runner CI sert. Les deux sortent du même Dockerfile, donc la seconde coûte une étiquette, pas un
@@ -95,8 +103,11 @@ beta, c'est qu'un ami sur le même réseau ouvre le tableau de bord depuis son p
 un choix pour un réseau de confiance, et rien d'autre. Pour le refermer sur cette machine seule :
 
 ```bash
-fleet/deploy/docker/bench/bench-up.sh --bind 127.0.0.1
+bash install.sh --box --bench -- --bind 127.0.0.1
 ```
+
+⚠ Ce qui suit `--` part **verbatim** au fournisseur de banc : c'est là que vivent `--bind`,
+`--advertise`, `--project` et les ports.
 
 Si l'adresse annoncée est fausse (plusieurs interfaces, un nom DNS, un reverse-proxy), nomme-la :
 `--advertise <ip-ou-nom>`. Les ports se déplacent pareil — `--forge-port`, `--deck-port`.
@@ -202,10 +213,10 @@ La pile est faite pour dire ce qui manque plutôt que pour avoir l'air en bonne 
 
 ⚠ `-p lcars-nuit` n'est pas optionnel ici. `docker.sh` vise par défaut un projet appelé `lcars`, et
 le banc ci-dessus en crée un appelé `lcars-nuit` — sans le drapeau, tu interrogerais un déploiement
-qui n'existe pas. (`bench-up.sh --project <nom>` le change ; la ligne de destruction qu'il imprime
+qui n'existe pas. (`install.sh --box --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
 porte toujours le bon.)
 
-`bench-up.sh` imprime son bloc de verdict même quand il échoue — les détails sont ce qu'il te faut
+Le fournisseur de banc imprime son bloc de verdict même quand il échoue — les détails sont ce qu'il te faut
 pour réparer, donc il ne les avale jamais.
 
 ---
