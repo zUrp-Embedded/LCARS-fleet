@@ -5,6 +5,17 @@ kind: CapabilityProfile
 metadata:
   name: engineer
   containment: bwrap
+  # LE PREMIER PRODUCTEUR QUI LE DIT, et `architect.yaml` avait ecrit d'avance la regle :
+  # « tous les autres roles restent au defaut vendor-only [...] c'est une DECLARATION, pas une
+  # derivation : le jour ou un producteur en a besoin, il le dit ». Ce jour est arrive, et le
+  # besoin est mecanique : ce role construit (`Bash` generique = mix/npm/cargo/pytest, cf. le
+  # commentaire de scope.allowedTools). Un build qui doit resoudre ses dependances et qui ne
+  # joint aucun registre echoue a la premiere dep externe.
+  #
+  # DEUX CLEFS, ET AUCUNE NE SUFFIT : `network` dit QUI a le droit de sortir, `scope.egress_hosts`
+  # dit OU. Le fail-closed est preserve a chaque couche — un role sans cette ligne ne recoit
+  # RIEN de plus que les hotes de son vendor, meme si un fichier d'hotes existe pour lui.
+  network: egress
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
   role_index: 3
@@ -45,6 +56,21 @@ spec:
       # one face leaves the other open. This role does not browse: both faces are closed.
       - WebSearch
       - WebFetch
+    # LES REGISTRES DE PAQUETS, ET RIEN D'AUTRE. Ce role ne navigue pas : `WebSearch`/`WebFetch`
+    # et leurs jumeaux serveur sont refuses juste au-dessus, et cette liste ne les rouvre pas —
+    # le proxy ne decide que du HOTE d'un CONNECT, il ne rend pas un navigateur.
+    #
+    # ⚠ PYTHON SEUL, ET C'EST DELIBERE. L'image porte pip et venv depuis la baseline d'outillage ;
+    # elle NE PORTE NI node/npm NI cargo. Declarer `registry.npmjs.org` ou `crates.io` aujourd'hui
+    # ouvrirait des hotes pour des gestionnaires absents — une permission sans capacite, qui se lit
+    # comme un acquis et ne sert rien. Ces registres arrivent AVEC leur gestionnaire, dans le lot
+    # qui le pose.
+    #
+    # `files.pythonhosted.org` n'est pas un doublon de `pypi.org` : le premier sert l'INDEX, le
+    # second les ARCHIVES. Sans les deux, pip resout et ne telecharge pas.
+    egress_hosts:
+      - pypi.org
+      - files.pythonhosted.org
     # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`,
     # intangible) — not duplicated here. `push` added here = the MECHANICAL forge-blind
     # barrier: `Bash(git push:*)` becomes disallowed (disallow > allow), not merely absent

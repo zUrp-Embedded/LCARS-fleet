@@ -108,6 +108,13 @@
               "items": {
                 "type": "string"
               }
+            },
+            "egress_hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "LES HOTES QUE CE ROLE PEUT JOINDRE EN PLUS DE CEUX DE SON VENDOR — et rien tant que `metadata.network` ne vaut pas `egress`. `Fleet.Spawner.Pod.Egress.allowlist/2` compose `Vendor.hosts/1` (base obligatoire, lue a cote du launcher) PUIS cette liste, et seulement si le profil declare `network: egress`. Deux clefs, aucune ne suffit : `network` dit QUI a le droit de sortir, cette liste dit OU. ⚠ CETTE CLEF ETAIT LUE PAR LE CODE ET INTERDITE PAR CE SCHEMA. `role_hosts/1` fait `get_in([\"scope\", \"egress_hosts\"])` depuis son ecriture, alors que `scope` est en `additionalProperties: false` : aucun profil ne pouvait la porter, donc la moitie `role` de l'allowlist etait du code mort. Mesure 2026-08-19 : zero occurrence dans tout `fleet/priv`. Ajoutee ici pour que la declaration redevienne possible. UN HOTE PAR ENTREE, nom exact ou regle de sous-domaine `*.` ancree a droite — jamais un `contains`, jamais un suffixe nu : c'est l'ancre qui empeche `x.io.attaquant.net` de passer `*.x.io` (`Egress.decide/2`). Ni schema, ni port, ni chemin : le proxy ne decide que du HOTE."
             }
           }
         },
