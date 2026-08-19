@@ -57,7 +57,19 @@ defmodule Fleet.Spawner.Pod.Egress.Vendor do
     Path.join(dir, base <> ".egress")
   end
 
-  defp parse(body) do
+  @doc """
+  Parses a host declaration: one hostname per line, `#` starts a comment, blanks dropped, deduped.
+
+  PUBLIC BECAUSE A SECOND SOURCE SHARES THIS GRAMMAR — the converged allowlist that
+  `Fleet.Spawner.Pod.Egress` reads off the state volume is the same file format, written by the
+  toolchain converger instead of shipped beside a launcher. Two parsers for one format is two
+  places to disagree about what a comment is, and the disagreement would show up as a host that
+  is allowed on one path and refused on the other.
+
+  It parses a FORMAT; it grants nothing. The decision stays in `Egress.decide/2`.
+  """
+  @spec parse(binary()) :: [String.t()]
+  def parse(body) do
     body
     |> String.split("\n")
     |> Enum.map(&(&1 |> String.split("#") |> List.first() |> String.trim()))

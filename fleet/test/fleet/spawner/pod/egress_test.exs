@@ -40,7 +40,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   # neuf a chaque run, des debris dans /tmp, et le temoin de la socket PERIMEE ne teste plus rien).
   defp sock(_tmp) do
     dir = Path.join(System.tmp_dir!(), "lcars-eg-" <> Path.basename(Path.expand("..", File.cwd!())))
-
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{System.unique_integer([:positive])}.sock")
     on_exit(fn -> File.rm(path) end)
@@ -351,6 +350,91 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
       hosts = Egress.allowlist(cap, Path.join(File.cwd!(), "bin/claude_launch.sh"))
       assert "api.anthropic.com" in hosts
+    end
+  end
+
+  describe "allowlist/2 — the CONVERGED source, the only one that survives a rebuild" do
+    # The vendor declaration and the cap-profile both live IN THE IMAGE. A nuke restores them as
+    # they were at build time, so an opening a human signed would be erased with no trace. These
+    # cases pin the third source: read off the state volume, gated by the SAME `network` key.
+
+    setup %{tmp_dir: tmp} do
+      root = Path.join(tmp, "store")
+      File.mkdir_p!(Path.join([root, "state", "egress.d"]))
+      prev = System.get_env("LCARS_STORE_ROOT")
+      System.put_env("LCARS_STORE_ROOT", root)
+
+      on_exit(fn ->
+        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+      end)
+
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+      {:ok, root: root, launcher: launcher}
+    end
+
+    defp converged(root, role, body),
+      do: File.write!(Path.join([root, "state", "egress.d", role <> ".hosts"]), body)
+
+    defp cap(name, network \\ nil) do
+      meta = %{"name" => name}
+      meta = if network, do: Map.put(meta, "network", network), else: meta
+      %Fleet.CapProfile{kind: "CapabilityProfile", metadata: meta, spec: %{}}
+    end
+
+    test "an `egress` role gets the converged hosts, deduped after the vendor's", ctx do
+      converged(ctx.root, "eng", "# les registres approuves\npypi.org\napi.vendor.test\n")
+
+      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) ==
+               ["api.vendor.test", "pypi.org"]
+    end
+
+    test "TWO KEYS: a sealed role gets NOTHING from the file, however signed", ctx do
+      converged(ctx.root, "eng", "pypi.org\n")
+
+      # The whole point of the pair. The merge landed, the file is there, and the profile does not
+      # grant egress: the pod reaches its vendor and nothing else.
+      assert Egress.allowlist(cap("eng"), ctx.launcher) == ["api.vendor.test"]
+    end
+
+    test "THE FILE IS ACTUALLY READ — it changes between two calls and so does the answer", ctx do
+      converged(ctx.root, "eng", "pypi.org\n")
+      assert "pypi.org" in Egress.allowlist(cap("eng", "egress"), ctx.launcher)
+
+      # Without this case, an implementation that IGNORES the third source entirely passes every
+      # other test in this block: absent-file and ignored-source render the same list.
+      converged(ctx.root, "eng", "pypi.org\nfiles.pythonhosted.org\n")
+      assert "files.pythonhosted.org" in Egress.allowlist(cap("eng", "egress"), ctx.launcher)
+    end
+
+    test "the file name is DERIVED from the profile name, not guessed", ctx do
+      converged(ctx.root, "eng", "pypi.org\n")
+
+      # Same store, another role: its own file does not exist, so it gets the vendor's only. A
+      # hardcoded path or a wrong naming convention passes all the cases above and fails here.
+      assert Egress.allowlist(cap("qualifier", "egress"), ctx.launcher) == ["api.vendor.test"]
+    end
+
+    test "no file: the answer is exactly today's, byte for byte", ctx do
+      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) == ["api.vendor.test"]
+    end
+
+    test "no store at all: inert, never a refusal (DR-023)", ctx do
+      System.delete_env("LCARS_STORE_ROOT")
+      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) == ["api.vendor.test"]
+    end
+
+    test "comments and blanks obey the vendor grammar — one parser, not two", ctx do
+      converged(ctx.root, "eng", "# entete\n\npypi.org # en fin de ligne\n\n")
+      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) == ["api.vendor.test", "pypi.org"]
+    end
+
+    test "the converged source opens NO new matcher — `*.` stays anchored", ctx do
+      converged(ctx.root, "eng", "*.pypi.org\n")
+      allowed = Egress.allowlist(cap("eng", "egress"), ctx.launcher)
+
+      assert {:ok, "files.pypi.org", 443} = Egress.decide("CONNECT files.pypi.org:443 HTTP/1.1\r\n", allowed)
+      assert {:refused, _} = Egress.decide("CONNECT pypi.org.attaquant.net:443 HTTP/1.1\r\n", allowed)
     end
   end
 end

@@ -134,15 +134,33 @@ defmodule Fleet.Spawner.Pod.Egress do
   end
 
   @doc """
-  The hosts this pod may reach: the vendor's, plus the role's own when it declares `network: egress`.
+  The hosts this pod may reach: the vendor's, plus — only when the role declares `network: egress` —
+  the ones its cap-profile carries AND the ones a human APPROVED, converged onto the state volume.
+
+  THREE SOURCES, TWO KEYS, AND NEITHER KEY IS ENOUGH. `network` says WHO may leave; the two lists
+  say WHERE. A role that says nothing gets the vendor's list and nothing else, whatever sits on the
+  volume — the fail-closed default holds at every layer rather than at one.
+
+  WHY A THIRD SOURCE AT ALL, and it is not a convenience: the first two live IN THE IMAGE (the
+  vendor declaration beside the launcher, the cap-profile inside the catalogue). A rebuild restores
+  them as they were at build time, so an opening a human signed would be ERASED at the next nuke —
+  silently, since a pod that reaches nothing looks exactly like a pod nobody opened. The converged
+  file lives on the state volume, which survives, and that is the whole reason it exists.
   """
   @spec allowlist(Fleet.CapProfile.t(), Path.t()) :: [String.t()]
   def allowlist(cap_profile, launcher_path) do
     vendor = Vendor.hosts(launcher_path)
 
     case Fleet.CapProfile.network(cap_profile) do
-      "egress" -> Enum.uniq(vendor ++ role_hosts(cap_profile))
-      _vendor_only -> vendor
+      "egress" ->
+        Enum.uniq(vendor ++ role_hosts(cap_profile) ++ converged_hosts(cap_profile))
+
+      _vendor_only ->
+        # THE FILE IS NOT READ HERE — but its PRESENCE is worth a word, because this exact pair
+        # (an approved list, a role that cannot use it) is the one shape a human cannot diagnose
+        # from the pod side: the merge landed, the file is there, and the pod still reaches nothing.
+        warn_if_converged_but_sealed(cap_profile)
+        vendor
     end
   end
 
@@ -162,6 +180,105 @@ defmodule Fleet.Spawner.Pod.Egress do
     |> get_in(["scope", "egress_hosts"])
     |> List.wrap()
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
+
+  # ── The CONVERGED source ────────────────────────────────────────────────────────────────────
+  #
+  # `$LCARS_STORE_ROOT/state/egress.d/<role>.hosts`, one hostname per line, `#` comments — the SAME
+  # grammar as the vendor declaration, parsed by the same function, because two parsers for one file
+  # format is two places to disagree about what a comment is.
+  #
+  # THE ROOT IS READ FROM THE ENVIRONMENT AND NEVER DECLARED HERE. The compose owns the path
+  # (`LCARS_STORE_ROOT`) and `deploy/lib/store.sh` owns the volume names. Re-deriving it here would
+  # make two truths for one place, which is the defect this split exists to prevent.
+  #
+  # ABSENT IS SILENT, AND THAT IS DELIBERATE — but it is not the same silence as the vendor's.
+  # There, a missing file is a WIRING HOLE and shouts. Here, a missing file is the NOMINAL state of
+  # a box where nobody has approved anything yet. Two absences, two gravities.
+  #
+  # WHICH IS WHY THE MARKER EXISTS. Silence alone would cover five states, four of them faults:
+  # nothing approved (nominal) · the converger never ran · the volume is not mounted · the volume
+  # was purged · the path or role name is wrong. All render the same nothing, then a REFUSED on the
+  # first call. `.applied` (written by the converger, carrying the SHA it applied) separates the
+  # nominal silence from the four failures: marker present + no hosts = normal; marker absent = the
+  # converger never came through here, and THAT is worth saying once.
+  defp converged_hosts(cap_profile) do
+    case converged_dir() do
+      nil ->
+        []
+
+      dir ->
+        role = Fleet.CapProfile.name(cap_profile)
+        warn_unless_applied(dir)
+        read_hosts(Path.join(dir, role <> ".hosts"))
+    end
+  end
+
+  # The converged directory, or `nil` when this box has no store mounted (DR-023: a disabled
+  # feature is not a precondition — no store means no extra hosts, never a refused spawn).
+  defp converged_dir do
+    case System.get_env("LCARS_STORE_ROOT") do
+      root when is_binary(root) and root != "" ->
+        dir = Path.join([root, "state", "egress.d"])
+        if File.dir?(dir), do: dir, else: nil
+
+      _unset ->
+        nil
+    end
+  end
+
+  # UNREADABLE IS NOT EMPTY. A file that exists and cannot be read is a fault, and returning the
+  # vendor list quietly would render it as "nobody approved anything" — a partial allowlist that
+  # looks like a nominal one is the failure this whole rail is built to refuse.
+  defp read_hosts(path) do
+    case File.read(path) do
+      {:ok, body} ->
+        Vendor.parse(body)
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.error(
+          "Egress: converged host file #{path} is present but UNREADABLE (#{inspect(reason)}) — " <>
+            "this pod gets the vendor list ONLY. An approval may be in force and not applied."
+        )
+
+        []
+    end
+  end
+
+  defp warn_unless_applied(dir) do
+    marker = Path.join(dir, ".applied")
+
+    unless File.exists?(marker) do
+      Logger.warning(
+        "Egress: #{dir} carries no `.applied` marker — the toolchain converger has never run on " <>
+          "this box. An empty egress list here is NOT the nominal 'nothing approved yet': it is " <>
+          "indistinguishable from a converger that never came, a volume never mounted, or a " <>
+          "volume purged. The marker is what separates the four."
+      )
+    end
+
+    :ok
+  end
+
+  # A converged file for a role that is not `egress`: the approval landed and does nothing.
+  # Named on BOTH facts, because either alone sends the reader to the wrong side.
+  defp warn_if_converged_but_sealed(cap_profile) do
+    with dir when is_binary(dir) <- converged_dir(),
+         role = Fleet.CapProfile.name(cap_profile),
+         path = Path.join(dir, role <> ".hosts"),
+         true <- File.exists?(path) do
+      Logger.warning(
+        "Egress: #{path} exists but role #{role} declares network=" <>
+          "#{Fleet.CapProfile.network(cap_profile)} — the converged hosts are IGNORED. Two keys " <>
+          "are required: the catalogue grants `network: egress`, the converged file names the " <>
+          "hosts. This pod reaches its vendor and nothing else."
+      )
+    end
+
+    :ok
   end
 
   @doc """
