@@ -76,7 +76,11 @@ Trois fichiers de config, évalués dans cet ordre :
 
 **Invariant critique** dans `config/runtime.exs` : tout le fichier est wrappé dans `if config_env() != :test do … end`. Sans ce garde, `mix test` évalue runtime.exs, met `start_listener: true`, et Cowboy tente de bind le port → crash du boot. Toute config runtime ajoutée reste DANS le garde.
 
-**Les atoms de config `:fleet_<dom>` sont LEGACY et VALIDES** (`config :fleet_spawner, …` marche sans app OTP réelle — la config ETS est keyed par atom ; décision D-07 du chantier migration). Ne pas les « corriger » en `:lcars_fleet` au détour d'un patch — migration de namespace = chantier dédié si un jour.
+**Les atoms de config `:fleet_<dom>` N'EXISTENT PLUS** — la migration est faite (ex-BL-6-05). D-07 ne l'interdisait pas, il en prescrivait la forme : *« migration de namespace = chantier dédié »*, et ce chantier a eu lieu. Toute la config vit sous `:lcars_fleet`, la clef préfixée par son domaine — `config :fleet_api, http_port:` est devenu `config :lcars_fleet, api_http_port:`.
+
+Le préfixe n'est pas cosmétique : `http_port` et `start_listener` **collisionnent** entre `api` et `observation`, donc une fusion à plat ferait écouter un service sur le port d'un autre, sans un mot. Le mur `config.no_legacy_namespace` de `mix lcars.contracts.check` refuse le retour en arrière — et il existe parce que le mode de défaillance est SILENCIEUX : un site oublié lit un namespace vide et reçoit le défaut, jamais une erreur.
+
+⚠ Ce paragraphe a affirmé l'inverse pendant une semaine après la migration, en instruisant chaque agent de ne pas corriger ce qui n'existait plus. Le mur ne lit pas le markdown : il a certifié la migration terminée pendant que ce fichier la niait.
 
 Plusieurs env vars ont été **retirées** (plus aucun lecteur, ou dangereuses) — ne pas les réintroduire : le transport MCP HTTP-loopback partagé (remplacé par une socket AF_UNIX par-pod), le vault de credentials, le routing par label, le drop-UID / TmuxBackend hors-bwrap.
 
