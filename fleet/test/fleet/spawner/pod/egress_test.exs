@@ -46,7 +46,12 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     dir = Path.join(System.tmp_dir!(), "lcars-eg-#{System.pid()}")
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{System.unique_integer([:positive])}.sock")
-    on_exit(fn -> File.rm(path); File.rmdir(dir) end)
+
+    on_exit(fn ->
+      File.rm(path)
+      File.rmdir(dir)
+    end)
+
     path
   end
 
