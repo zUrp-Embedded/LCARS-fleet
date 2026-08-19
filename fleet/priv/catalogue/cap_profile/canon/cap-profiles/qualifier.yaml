@@ -56,7 +56,12 @@ spec:
     monk_instance: null
   invocation:
     lifetime_scope: one-shot
-    model: sonnet        # catalogue -> --model (alias or full name; tunable)
+    # ⚖ USER 2026-08-19 — RETOUR À OPUS. Le passage en sonnet était un contournement de banc (pluie
+    # de 529 sur opus le 18), pas un arbitrage. Et le doc 04 du chantier rails l'argumentait déjà
+    # dans l'autre sens : juger un faux-vert est une tâche d'ADVERSAIRE, pas de conformité — c'est
+    # le juge dont les findings alimentent la courbe de tolérance de la carte, et il était le moins
+    # cher des deux jurés.
+    model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
     boot_at_start: false
     # ⚖ USER 2026-08-19 : PAS de superpowers chez les juges (pour le moment). Débranché, et trois
