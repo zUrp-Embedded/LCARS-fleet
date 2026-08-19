@@ -234,6 +234,19 @@ if [[ "$RAIL" == "workstation" ]]; then
     echo "    bash $0 --box"
     exit 1
   }
+  # ⚠ `--bench` N'A AUCUN OBJET ICI, ET L'AVALER EN SILENCE EST LA FAUTE QU'ON CORRIGE PARTOUT
+  # AILLEURS. Ce drapeau FOURNIT les annexes (forge jetable + runner) au rail boîte ; le rail poste,
+  # lui, monte sa propre forge par `48-forge-host`, dans son propre cycle de convergence. Le lire
+  # nulle part sur cette branche, c'est laisser quelqu'un croire qu'il a demandé quelque chose.
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    echo ""
+    echo "  ${R}--bench n'a pas d'objet sur le rail poste.${N}"
+    echo "  Il fournit les annexes à une BOÎTE ; ici la forge est montée par le provisionnement"
+    echo "  lui-même (module 48-forge-host), dans le même cycle et sans drapeau."
+    echo "  Tu voulais sans doute :  bash $0 --box --bench"
+    exit 1
+  fi
+
   # Le seul fichier système que ce rail PREND en entier. Le reste (paquets, groupe, /local) est
   # additif ; `wsl.conf` est une propriété exclusive.
   #

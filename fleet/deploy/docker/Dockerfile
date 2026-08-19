@@ -186,6 +186,15 @@ ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 ENV LCARS_GIT_SHA=${GIT_SHA} LCARS_BUILD_DATE=${BUILD_DATE}
 
+# ⚠ LE JUMEAU AUSSI PORTE SA REVISION. Ce LABEL n'existait que dans le stage `runtime` : l'image
+# `lcars-build:<tag>` — celle que le runner CI sert au label `elixir` — sortait donc MUETTE sur son
+# origine. Mesure du 2026-08-19 : `lcars-2231:build` porte `6694a417`, `lcars-build:build` une
+# chaine vide. Consequence : on ne peut pas dire de quel commit vient le toolchain qui a juge un
+# verdict, alors que c'est exactement la question qu'on pose au runtime. Un stage jete n'a pas
+# besoin d'etiquette ; celui-ci ne l'est pas, il est PUBLIE sous un tag et consomme par la CI.
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
 RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \

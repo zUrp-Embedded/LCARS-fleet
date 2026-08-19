@@ -178,3 +178,15 @@ SPY
   [ "$status" -ne 0 ]
   [[ "$output" == *"Option inconnue"* ]]
 }
+
+@test "un drapeau sans objet sur sa branche est REFUSE, jamais avale en silence" {
+  # ⚠ `--bench` FOURNIT les annexes a une BOITE. Le rail poste monte sa propre forge par
+  # `48-forge-host`, dans son cycle de convergence : le drapeau n'y a aucun objet. Il etait accepte
+  # par le parseur et lu NULLE PART sur cette branche — donc silencieusement avale, ce qui laisse
+  # quelqu'un croire qu'il a demande quelque chose. C'est la meme classe que tout ce que ce fichier
+  # epingle : un vert, ou un depart, qui ne dit pas ce qui n'a pas eu lieu.
+  run env LCARS_DOCKER=1 bash "$SRC" --workstation --bench < /dev/null
+  [ "$status" -ne 0 ]
+  # Hors WSL c'est le garde de substrat qui parle en premier ; l'un ou l'autre refuse, jamais aucun.
+  [[ "$output" == *"n'a pas d'objet sur le rail poste"* ]] || [[ "$output" == *"réservé à WSL2"* ]]
+}
