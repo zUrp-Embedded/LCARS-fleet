@@ -40,7 +40,19 @@ STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/system.gitea_token}"
-WORK="${LCARS_TOOLCHAIN_WORK:-/var/lib/lcars/tofu/toolchain}"
+# LE REPERTOIRE DE TRAVAIL EST JETABLE, ET IL NE S'OUVRE NI DANS L'ETAT TOFU NI DANS LE MAGASIN.
+# `/var/lib/lcars/tofu` porte les recettes tofu par catalogue — 2770 root:admin, aucun acces monde,
+# parce que l'etat terraform contient les valeurs des variables et que le mot de passe de seed y
+# figure. Un aptroot jetable, `rm -rf` a chaque passe, n'a rien a faire imbrique dans l'etat
+# sensible d'un autre proprietaire : les deux arbres ont des cycles de vie, des groupes et des
+# modes differents, et le jour ou l'un se nettoie il emporte l'autre.
+# Pas davantage sous `$STORE` : les quatre volumes externes y sont montes, et un chemin qui leur
+# ressemble sans etre monte promet une persistance qu'il n'a pas — un aptroot survivrait a un
+# rebuild dans l'esprit du lecteur, jamais sur le disque.
+# `/var/tmp` et pas `/run` : la racine apt telecharge des paquets, donc des centaines de Mo, et
+# `/run` est un tmpfs — c'est de la RAM. Le marqueur d'etat, lui, EST en tmpfs, et pour la raison
+# inverse : sa duree de vie doit etre celle du conteneur.
+WORK="${LCARS_TOOLCHAIN_WORK:-/var/tmp/lcars/toolchain-work}"
 
 # LE VERROU EST PRIS AVANT TOUT LE RESTE, et il n'est pas defensif. Deux invocations peuvent se
 # croiser — un tick pendant le boot, deux ticks qui se chevauchent sur un `apt` long — et `apt-get`

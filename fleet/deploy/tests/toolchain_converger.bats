@@ -12,6 +12,27 @@
 # La forge est simulee par un `curl` en tete de PATH. Ce qui est mesure est la DECISION, jamais le
 # reseau.
 
+# ⚠ LE DEFAUT DE `LCARS_TOOLCHAIN_WORK` N'EST EXERCE PAR AUCUN AUTRE TEMOIN DE CE FICHIER : le
+# `setup` le surcharge vers le tmpdir, comme il faut — un temoin qui poserait un aptroot au chemin
+# de production serait un temoin qui provisionne la machine. Le prix de cette surcharge est qu'un
+# defaut faux passe INVISIBLE ici, et il l'a ete : il pointait dans l'etat tofu. Le temoin qui suit
+# est le seul a regarder la valeur elle-meme.
+
+@test "le repertoire de travail par defaut ne s'ouvre ni dans l'etat tofu ni dans le magasin" {
+  local default
+  default="$(sed -n 's/^WORK="\${LCARS_TOOLCHAIN_WORK:-\(.*\)}"$/\1/p' "$SUT")"
+  [[ -n "$default" ]]
+  # `/var/lib/lcars/tofu` porte l'etat terraform des catalogues (2770 root:admin, le mot de passe de
+  # seed y figure). Un arbre `rm -rf` a chaque passe ne s'imbrique pas dans l'etat sensible d'un
+  # autre proprietaire.
+  [[ "$default" != /var/lib/lcars/tofu* ]]
+  # Ni sous la racine du magasin : les volumes externes y sont montes, et un voisin non monte
+  # promet une persistance qu'il n'a pas.
+  [[ "$default" != /var/lib/lcars/* ]]
+  # Ni en tmpfs : une racine apt telecharge des centaines de Mo, `/run` est de la RAM.
+  [[ "$default" != /run/* ]]
+}
+
 setup() {
   SUT="${BATS_TEST_DIRNAME}/../docker/toolchain-converger.sh"
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
