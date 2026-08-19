@@ -437,8 +437,16 @@ apply() {
   # Des tokens manquent/sont morts → mode pose (mint basic-auth). Le passwords-file converge
   # PAR ENTRÉE depuis le seed — fichier absent OU rôle ajouté après bootstrap, même chemin.
   ensure_passwords_entries || verdict_apply
+  # ⚠ LE JETON MASTER EST DONNE AU MINTEUR, ET C'EST CE QUI REND LE MINT INDEPENDANT DE TOFU.
+  # Le passwords-file reste, en repli : il derive du seed, or le provider ne pose reellement ce
+  # password qu'a la CREATION du compte (`deps/instance/accounts.tf`). Des que les deux divergent,
+  # le mint partait en 401 sur des comptes sains, definitivement. Avec le master token, le minteur
+  # POSE un password neuf juste avant de s'en servir puis l'oublie — il n'a plus a croire ce qu'un
+  # autre outil a bien voulu ecrire. Mesure sur instance vierge, 2026-08-19 : dix comptes en 401
+  # avec le fichier, et PATCH 200 / basic-auth 200 / token minte par cette voie.
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
+      ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
       --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "tokens A4 posés ($PROV_TOKENS_DIR)"

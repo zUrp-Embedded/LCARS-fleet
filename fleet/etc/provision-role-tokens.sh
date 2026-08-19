@@ -102,6 +102,7 @@ SCOPES="write:repository,write:issue"
 SYSTEM_ACCOUNT="lcars-system"
 SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
+MASTER_TOKEN_FILE=""
 CHECK_ONLY=0
 # Non-role tokens whose account is not the filename (the mapping is DATA, not a special case): the
 # SYSTEM token is the `lcars-system` account but the runtime reads `system.gitea_token`. Filled by
@@ -121,6 +122,7 @@ while [[ $# -gt 0 ]]; do
     --group) GROUP="$2"; shift 2 ;;
     --token-name) TOKEN_NAME="$2"; shift 2 ;;
     --passwords-file) PASSWORDS_FILE="$2"; shift 2 ;;
+    --master-token-file) MASTER_TOKEN_FILE="$2"; shift 2 ;;
     --extra-token)
       [[ "$2" == *:* ]] || { echo "provision-role-tokens: --extra-token attend <compte>:<fichier> (vu: $2)" >&2; exit 1; }
       EXTRA_ENTRIES+=("$2"); shift 2 ;;
@@ -137,7 +139,7 @@ FORGE="${FORGE%/}"
 
 # In POSE mode the basic auth (passwords-file) is required — the only route Gitea accepts to create a
 # token (cf. the header: an admin token CANNOT mint).
-if [[ "$CHECK_ONLY" -eq 0 && -z "$PASSWORDS_FILE" ]]; then
+if [[ "$CHECK_ONLY" -eq 0 && -z "$PASSWORDS_FILE" && -z "$MASTER_TOKEN_FILE" ]]; then
   echo "provision-role-tokens: mode pose sans droit de mint — --passwords-file requis (--check pour sonder seul)" >&2
   exit 1
 fi
@@ -187,8 +189,56 @@ token_valid() { # $1=token
 # with the underlying system rather than imposing a stricter constraint than it does. The value is
 # either a bare string OR an object `{password: ...}`. Basic auth is the only mint Gitea accepts.
 CURL_AUTH_CFG=""
+# ─── FORCER PUIS OUBLIER — le mot de passe n'est plus un etat, c'est un jeton de passage ─────────
+#
+# ⚠ POURQUOI CETTE VOIE EXISTE. Le password d'un compte de role n'etait connu que par un FICHIER
+# (`--passwords-file`, derive du seed), et le provider tofu ne pose reellement ce password qu'a la
+# CREATION du compte (piege documente dans `deps/instance/accounts.tf`) : des que les deux divergent
+# — seed regenere, compte cree lors d'une passe anterieure, roster elargi apres coup — le mint part
+# en 401 POUR TOUJOURS, sur des comptes parfaitement sains. Mesure sur une instance vierge le
+# 2026-08-19 : les dix comptes en 401, le fichier de passwords contenant exactement le seed.
+#
+# LA SORTIE NE DEMANDE AUCUN SECRET DE PLUS. Avec le jeton MASTER — que le rail detient deja, et qui
+# est le seul credential qu'il garde — on POSE un password neuf sur le compte, on minte avec, et on
+# l'oublie. Il ne survit a rien : ni fichier, ni variable exportee, ni second appel. Mesure du meme
+# jour, bout en bout : PATCH 200 · basic-auth 200 · token minte.
+#
+# CE QUE CA SUPPRIME : la dependance a l'etat d'un AUTRE artefact (ce que tofu a bien voulu poser),
+# remplacee par un fait qu'on etablit soi-meme juste avant de s'en servir.
+#
+# ⚠ RIEN NE PASSE PAR ARGV, NI LE JETON NI LE PASSWORD. `-d` mettrait le password dans la ligne de
+# commande, lisible dans /proc de tout l'hote pendant l'appel — cicatrice 6-141, payee deux fois sur
+# des credentials moins puissants. Le fichier de config de curl accepte `header =` ET `data =` : les
+# deux voyagent donc par stdin, comme l'auth basic plus bas.
+# ⚠ LE JETON MASTER NE MINTE JAMAIS, IL NE FAIT QUE POSER UN PASSWORD. La distinction porte le
+# nom de l'option : un mode qui MINTAIT par jeton admin a existe et a ete retire — Gitea rend
+# « auth required » sur cette voie, quel que soit le privilege, et un temoin garde ce nom-la mort.
+# Ici le jeton sert a un `PATCH /admin/users/<u>` (que Gitea accepte, mesure : 200) ; le mint qui
+# suit est une basic-auth de la CIBLE, la seule forme que Gitea ait jamais acceptee. Meme
+# credential, autre geste — d'ou un autre nom.
+force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
+  local account="$1" admin_tok pw
+  admin_tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null)" || return 1
+  [[ -n "$admin_tok" ]] || return 1
+  pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+  printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
+    "$admin_tok" "$account" "$pw" \
+    | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$FORGE/api/v1/admin/users/$account" \
+    | grep -q '^200$' || return 1
+  printf '%s' "$pw"
+}
+
 set_auth_for() { # $1=role
   local role="$1" pwd
+  # La voie FORCE d'abord quand un jeton master est fourni : elle ne depend d'aucun etat anterieur.
+  if [[ -n "$MASTER_TOKEN_FILE" ]]; then
+    pwd="$(force_password_for "$role")" && [[ -n "$pwd" ]] && {
+      CURL_AUTH_CFG="user = \"$(curl_cfg_escape "$role"):$(curl_cfg_escape "$pwd")\""
+      return 0
+    }
+    # Echec du PATCH : on ne conclut pas, on retombe sur le fichier — un master token peut etre
+    # perime sans que les passwords poses a la creation le soient.
+  fi
   pwd="$(jq -r --arg r "$role" '
     to_entries[]
     | select((.key | ascii_downcase) == ($r | ascii_downcase))

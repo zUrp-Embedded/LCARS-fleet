@@ -46,7 +46,10 @@ cfg=""
 # stdin n'est lu que sur les appels `-K -` ; ailleurs il n'y a rien a lire.
 if [[ " $* " == *" -K "* ]]; then cfg="$(cat)"; printf '%s\n' "$cfg" >> "$STDIN_LOG"; fi
 if [[ " $* " == *"%{http_code}"* ]]; then
-  if [[ "$cfg" == *TOKEN-MINTE* ]]; then printf '200'; else printf '401'; fi
+  # Le PATCH de la voie « forcer puis oublier » : il repond 200, comme la vraie forge le fait avec
+  # un jeton master valide (mesure du 2026-08-19 sur instance vierge).
+  if [[ "$cfg" == *'request = "PATCH"'* ]]; then printf '200'
+  elif [[ "$cfg" == *TOKEN-MINTE* ]]; then printf '200'; else printf '401'; fi
 else
   printf '{"sha1":"TOKEN-MINTE"}'
 fi
@@ -107,4 +110,49 @@ run_provision() {
   grep -q 'user = "architect:a\\"b\\\\c"' "$STDIN_LOG"
   run grep -c 'a"b' "$ARGV_LOG"
   [ "$output" = "0" ]
+}
+
+
+# ─── LA VOIE « FORCER PUIS OUBLIER » (2026-08-19) ────────────────────────────────────────────────
+# Le mint dependait du password que tofu avait pose A LA CREATION du compte. Des que le fichier de
+# passwords et la forge divergent — seed regenere, compte cree a une passe anterieure, roster elargi
+# — le mint part en 401 sur des comptes sains, DEFINITIVEMENT. Mesure sur instance vierge : dix
+# comptes en 401, le fichier contenant exactement le seed. Avec le jeton master, le minteur pose un
+# password neuf juste avant de s'en servir, puis l'oublie : il n'a plus a croire ce qu'un autre
+# outil a bien voulu ecrire.
+
+@test "voie FORCE : le password utilise n'est PAS celui du fichier — il vient d'etre pose" {
+  run "$SCRIPT" --forge http://forge.test --passwords-file "$PASSWORDS" \
+    --master-token-file <(printf 'JETON-MASTER\n') \
+    --tokens-dir "$TOKENS_DIR" --roles "architect"
+  [ "$status" -eq 0 ]
+  # Le PATCH a eu lieu, sur le bon compte.
+  grep -q 'request = "PATCH"' "$STDIN_LOG"
+  grep -q 'admin/users/architect' "$ARGV_LOG"
+  # Et la basic-auth du mint n'utilise PAS le mot de passe du fichier : c'est tout l'objet.
+  ! grep -q 'MOT-DE-PASSE-SECRET' "$STDIN_LOG"
+}
+
+@test "6-141 sur la voie FORCE : ni le jeton master ni le password force ne passent par argv" {
+  # Le temoin d'attaque va par paire avec sa preuve : un correctif qui supprimerait l'auth
+  # satisferait « pas dans argv » sans rien minter. On verifie donc que le secret EST dans stdin.
+  run "$SCRIPT" --forge http://forge.test --passwords-file "$PASSWORDS" \
+    --master-token-file <(printf 'JETON-MASTER\n') \
+    --tokens-dir "$TOKENS_DIR" --roles "architect"
+  [ "$status" -eq 0 ]
+  ! grep -q 'JETON-MASTER' "$ARGV_LOG"
+  grep -q 'JETON-MASTER' "$STDIN_LOG"
+  # Le password force voyage dans le meme canal — jamais en `-d` sur la ligne de commande.
+  ! grep -qE '"password":' "$ARGV_LOG"
+  grep -q 'password' "$STDIN_LOG"
+}
+
+@test "PATCH en echec : on RETOMBE sur le fichier, on ne conclut pas a l'echec du mint" {
+  # Un jeton master perime ne rend pas faux le password pose a la creation. Refuser tout net
+  # transformerait une degradation en panne.
+  run "$SCRIPT" --forge http://forge.test --passwords-file "$PASSWORDS" \
+    --master-token-file /inexistant/master.token \
+    --tokens-dir "$TOKENS_DIR" --roles "architect"
+  [ "$status" -eq 0 ]
+  grep -q 'MOT-DE-PASSE-SECRET' "$STDIN_LOG"
 }
