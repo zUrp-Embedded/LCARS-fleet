@@ -244,6 +244,10 @@ defmodule Fleet.Labels do
   # The one you read is never the one somebody corrected.
   def wait_for(:in_flight), do: nil
   def wait_for(:awaits_arch), do: nil
+  # Le verrou `lcars-awaits-toolchain` EST l'etiquette (B3, 2026-08-19) : il dit deja « ce ticket
+  # attend une signature d'admin sur une PR d'outillage », et le drain du reconciliateur le retire.
+  # Un jumeau `wait/*` serait une seconde verite — celle qu'on lit n'est jamais celle qu'on corrige.
+  def wait_for(:awaits_toolchain), do: nil
   # Its open PR IS the state, and it is what a human looks at. The ticket is not waiting on the
   # fleet — the fleet is working on it, one rail over.
   def wait_for(:pr_open), do: nil
