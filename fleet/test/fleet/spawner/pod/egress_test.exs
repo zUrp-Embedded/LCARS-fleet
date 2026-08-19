@@ -25,8 +25,22 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   # NOT under `tmp_dir`: an ExUnit tmp_dir carries the test NAME, and AF_UNIX caps a path at ~108
   # bytes. The first run failed on `:einval` for that reason alone — which is why the module now
   # names the constraint instead of relaying the kernel's word for "no".
+  #
+  # ⚠ ET IL PORTE LE NOM DU CLONE, mesure du 2026-08-19 : un chemin FIXE dans `/tmp` appartient au
+  # premier qui l'a cree. Ce depot se travaille en clones freres (`LCARS`, `LCARS-admiral`,
+  # `LCARS-rails`...), un agent par clone, sur la MEME machine — le second a jouer cette suite
+  # prenait `:eacces` sur les trois cas de `start/3`, avec un message qui accuse la socket au lieu
+  # de nommer le proprietaire du repertoire.
+  #
+  # La cle est le CLONE, pas l'uid : c'est lui qui distingue deux suites concurrentes, et un nom se
+  # lit dans un `ls /tmp` la ou un nombre ne dit rien. `mix` s'execute depuis la racine du projet,
+  # donc le parent de `File.cwd!()` est le clone. Ca tient dans les ~108 octets de `sun_path` et ca
+  # reste STABLE d'un run a l'autre — ce que l'uid n'aurait pas donne (`UID` est une variable de
+  # shell, non exportee : `System.get_env` rend nil et on retombe sur un pid, donc un repertoire
+  # neuf a chaque run, des debris dans /tmp, et le temoin de la socket PERIMEE ne teste plus rien).
   defp sock(_tmp) do
-    dir = Path.join(System.tmp_dir!(), "lcars-eg")
+    dir = Path.join(System.tmp_dir!(), "lcars-eg-" <> Path.basename(Path.expand("..", File.cwd!())))
+
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{System.unique_integer([:positive])}.sock")
     on_exit(fn -> File.rm(path) end)
