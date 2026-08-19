@@ -71,12 +71,9 @@ defmodule Fleet.Pilot.ToolchainReconciler do
   """
   @spec applied_sha() :: String.t() | nil
   def applied_sha do
-    case marker_path() do
-      nil -> nil
-      path -> path |> File.read() |> case do
-                {:ok, sha} -> String.trim(sha) |> nil_if_empty()
-                {:error, _} -> nil
-              end
+    case File.read(marker_path()) do
+      {:ok, sha} -> String.trim(sha) |> nil_if_empty()
+      {:error, _} -> nil
     end
   end
 
@@ -166,26 +163,48 @@ defmodule Fleet.Pilot.ToolchainReconciler do
     {:error, {:branch_unreadable, reason}}
   end
 
+  # LE MARQUEUR VIT AVEC LE CONTENEUR, PAS AVEC LE MAGASIN — et c'est le cas du rebuild qui l'exige.
+  # Une v1 le posait sous `LCARS_STORE_ROOT/state/` : un volume EXTERNE, qui survit au rebuild,
+  # pendant que `/usr` — ce que le marqueur décrit — meurt avec le conteneur. Après un rebuild, la
+  # comparaison lisait « à jour » sur une boîte revenue à la baseline : l'exact mensonge que le
+  # moduledoc de ce fichier promet d'empêcher. La durée de vie d'un marqueur suit celle de l'objet
+  # qu'il décrit (la doctrine des volumes de `01` §4.8, appliquée à un fichier).
+  #
+  # Le répertoire est posé par le provisioning (`45-sudoers-toolchain.sh`, 2775 root:fleet — le
+  # BEAM écrit sous un uid worker, membre de fleet). Les verbes MAGASIN gardent leurs marqueurs à
+  # eux sur le volume (ils décrivent des artefacts qui survivent) — c'est le convergeur qui les
+  # gère, pas ce module.
+  @default_run_state "/var/lib/lcars/toolchain"
+
   defp marker_path do
-    case System.get_env("LCARS_STORE_ROOT") do
-      root when is_binary(root) and root != "" -> Path.join([root, "state", "toolchain.applied"])
-      _unset -> nil
-    end
+    dir =
+      case System.get_env("LCARS_TOOLCHAIN_RUN_STATE") do
+        d when is_binary(d) and d != "" -> d
+        _unset -> @default_run_state
+      end
+
+    Path.join(dir, "toolchain.applied")
   end
 
   defp write_marker(head) do
-    case marker_path() do
-      nil ->
+    path = marker_path()
+    _ = File.mkdir_p(Path.dirname(path))
+
+    case File.write(path, head <> "\n") do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        # Convergé mais sans mémoire : la passe suivante reconvergera (idempotent, donc correct) —
+        # mais un tick qui refait le travail à CHAQUE passe doit se voir, pas passer pour un cycle
+        # normal.
         Logger.warning(
-          "ToolchainReconciler: convergé sur #{head} mais AUCUN magasin pour noter le SHA — la " <>
-            "prochaine passe reconvergera. Sans LCARS_STORE_ROOT il n'y a pas de mémoire."
+          "ToolchainReconciler: convergé sur #{head} mais le marqueur est INÉCRIVABLE " <>
+            "(#{inspect(reason)} sur #{path}) — la prochaine passe reconvergera. Le répertoire " <>
+            "est posé par le provisioning (45-sudoers-toolchain)."
         )
 
         :ok
-
-      path ->
-        _ = File.mkdir_p(Path.dirname(path))
-        File.write(path, head <> "\n")
     end
   end
 

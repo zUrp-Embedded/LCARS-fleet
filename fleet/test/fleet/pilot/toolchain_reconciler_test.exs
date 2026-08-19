@@ -21,9 +21,9 @@ defmodule Fleet.Pilot.ToolchainReconcilerTest do
 
   setup do
     root = Path.join(System.tmp_dir!(), "lcars-recon-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(Path.join(root, "state"))
-    prev_root = System.get_env("LCARS_STORE_ROOT")
-    System.put_env("LCARS_STORE_ROOT", root)
+    File.mkdir_p!(root)
+    prev_root = System.get_env("LCARS_TOOLCHAIN_RUN_STATE")
+    System.put_env("LCARS_TOOLCHAIN_RUN_STATE", root)
 
     prev_forge = Application.get_env(:lcars_fleet, :forge_client)
     prev_conv = Application.get_env(:lcars_fleet, :toolchain_converger)
@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.ToolchainReconcilerTest do
     end)
 
     on_exit(fn ->
-      if prev_root, do: System.put_env("LCARS_STORE_ROOT", prev_root), else: System.delete_env("LCARS_STORE_ROOT")
+      if prev_root, do: System.put_env("LCARS_TOOLCHAIN_RUN_STATE", prev_root), else: System.delete_env("LCARS_TOOLCHAIN_RUN_STATE")
       restore(:forge_client, prev_forge)
       restore(:toolchain_converger, prev_conv)
       File.rm_rf!(root)
@@ -113,14 +113,24 @@ defmodule Fleet.Pilot.ToolchainReconcilerTest do
     end
   end
 
-  describe "sans magasin" do
+  describe "marqueur inécrivable" do
     test "convergé quand même, mais le SHA n'a nulle part où vivre — et ça se DIT" do
-      System.delete_env("LCARS_STORE_ROOT")
+      # Un CHEMIN qui ne peut pas exister (fichier en travers) : mkdir_p et write échouent tous
+      # les deux — le cas « répertoire non posé par le provisioning », sans toucher au FS réel.
+      blocker = Path.join(System.tmp_dir!(), "lcars-recon-block-#{System.unique_integer([:positive])}")
+      File.write!(blocker, "pas un dossier")
+      on_exit(fn -> File.rm_rf!(blocker) end)
+      System.put_env("LCARS_TOOLCHAIN_RUN_STATE", Path.join(blocker, "sub"))
 
-      assert {:ok, :converged, "sha-1"} = R.reconcile([])
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :converged, "sha-1"} = R.reconcile([])
+        end)
+
       # Sans mémoire, la passe suivante reconvergera. C'est correct (la convergence est idempotente)
       # et ça doit être visible plutôt que d'être pris pour un cycle normal.
       assert R.applied_sha() == nil
+      assert log =~ "INÉCRIVABLE"
     end
   end
 end

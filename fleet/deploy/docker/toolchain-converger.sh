@@ -332,24 +332,41 @@ for path in $(list_manifests); do
   eco="$(basename "$path" .yaml)"
   safe_eco "$eco" || die 2 "nom d'ecosysteme refuse: '$eco'"
 
-  # IDEMPOTENCE PAR LE SHA, PAS PAR LA PRESENCE D'UN REPERTOIRE. Un arbre a moitie telecharge
-  # existe et n'est pas installe : le marqueur n'est pose qu'APRES un succes, et il porte le SHA qui
-  # l'a produit.
+  # IDEMPOTENCE PAR LE SHA, PAS PAR LA PRESENCE D'UN REPERTOIRE — mais le marqueur ne gate QUE LES
+  # VERBES MAGASIN (installer, sysroot), et cette restriction est LE CAS DU REBUILD :
+  #
+  #   Le marqueur vit sur le MAGASIN (volume externe) et SURVIT a un rebuild, pendant que /usr —
+  #   la cible du verbe apt — MEURT avec le conteneur. Une v1 gatait le manifeste ENTIER : apres
+  #   un rebuild, « deja a <sha> » sautait apt, et la boite annoncait convergee avec un /usr nu —
+  #   l'exact « etat approuve mais non applique » que ce rail refuse partout.
+  #
+  #   La duree de vie du garde suit celle de l'objet garde (la doctrine des volumes, appliquee a
+  #   un marqueur) : les artefacts MAGASIN survivent au rebuild => leur marqueur aussi, on ne
+  #   retelecharge pas des Go deja la ; /usr meurt => apt REJOUE a chaque convergence (il est
+  #   idempotent nativement, c'est SA cle — `01` §4.5) ; les fichiers d'egress se reposent
+  #   (ecriture idempotente, cout nul).
   marker="$(applied_marker "$eco")"
-  [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && { echo "toolchain-converger: $eco deja a $SHA"; continue; }
+  store_current=0
+  [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
 
   yaml="$(fetch_manifest "$path")"
   validate_manifest "$yaml" "$eco"
 
   if ( set -e
        grep -q '^apt:'         <<< "$yaml" && apply_apt       "$yaml"
-       grep -q '^sysroot:'     <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
-       grep -q '^installer:'   <<< "$yaml" && apply_installer "$yaml" "$eco"
+       if [[ "$store_current" -eq 0 ]]; then
+         grep -q '^sysroot:'   <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
+         grep -q '^installer:' <<< "$yaml" && apply_installer "$yaml" "$eco"
+       fi
        grep -q '^egress_hosts:' <<< "$yaml" && apply_egress   "$yaml" "$eco"
        true )
   then
     mkdir -p "$(dirname "$marker")"; printf '%s\n' "$SHA" > "$marker"
-    echo "toolchain-converger: $eco applique a $SHA"
+    if [[ "$store_current" -eq 1 ]]; then
+      echo "toolchain-converger: $eco — magasin deja a $SHA (verbes magasin sautes), apt rejoue"
+    else
+      echo "toolchain-converger: $eco applique a $SHA"
+    fi
   else
     echo "toolchain-converger: $eco A ECHOUE — le marqueur n'est PAS pose" >&2
     rc=3

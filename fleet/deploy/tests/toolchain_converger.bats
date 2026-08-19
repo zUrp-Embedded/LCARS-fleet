@@ -100,14 +100,46 @@ EOF
   exec 8>&-
 }
 
-@test "IDEMPOTENCE: un ecosysteme deja applique AU MEME SHA est saute" {
-  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+@test "IDEMPOTENCE: marqueur au MEME SHA — les verbes MAGASIN sont sautes, APT REJOUE" {
+  # LE CAS DU REBUILD : le marqueur (magasin, volume externe) survit au conteneur, /usr non. Une
+  # v1 sautait le manifeste ENTIER sur marqueur courant — apres rebuild, la boite se disait
+  # convergee avec un /usr nu. Deux temoins en un : apt est INVOQUE malgre le marqueur courant,
+  # et l'installeur (verbe magasin) ne l'est PAS.
+  # ⚠ l'eco vient du CHEMIN servi par stub_forge (python.yaml), et list_under attend des entrees
+  # indentees a DEUX espaces (`  - `).
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n  - python3-venv\n' | base64 -w0)"
   mkdir -p "$LCARS_STORE_ROOT/state/eco.d"
+  printf 'deadbeef\n' > "$LCARS_STORE_ROOT/state/eco.d/python.applied"
+  # apt-get TEMOIN : enregistre son passage.
+  cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<EOS
+#!/usr/bin/env bash
+touch "$BATS_TEST_TMPDIR/apt-was-called"
+exit 0
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/apt-get"
+
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"magasin deja a deadbeef"* ]]
+  [[ -e "$BATS_TEST_TMPDIR/apt-was-called" ]]
+}
+
+@test "IDEMPOTENCE: marqueur au MEME SHA — l'installeur (verbe magasin) N'EST PAS rejoue" {
+  # sha256sum saboteur : si l'installeur tournait, la passe echouerait (rc 3). Elle sort 0 :
+  # la preuve que le verbe magasin est saute quand le marqueur est courant.
+  cat > "$BATS_TEST_TMPDIR/bin/sha256sum" <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/sha256sum"
+  local sha; sha="$(printf 'a%.0s' {1..64})"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: https://sh.rustup.rs\n  version: "1.27"\n' "$sha" | base64 -w0)"
+  mkdir -p "$LCARS_STORE_ROOT/state/eco.d"
+  # ⚠ le marqueur porte l'eco du CHEMIN (python.yaml via stub_forge), pas celui du contenu.
   printf 'deadbeef\n' > "$LCARS_STORE_ROOT/state/eco.d/python.applied"
 
   run "$SUT" deadbeef
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"deja a deadbeef"* ]]
 }
 
 @test "IDEMPOTENCE: un marqueur d'un AUTRE sha ne fait pas sauter" {
@@ -118,7 +150,8 @@ EOF
   printf 'cafe1234\n' > "$LCARS_STORE_ROOT/state/eco.d/python.applied"
 
   run "$SUT" deadbeef
-  [[ "$output" != *"deja a"* ]]
+  [[ "$output" != *"magasin deja a"* ]]
+  [[ "$output" == *"applique a deadbeef"* ]]
 }
 
 @test "REFUS: un manifeste dont le kind n'est pas celui du rail" {
