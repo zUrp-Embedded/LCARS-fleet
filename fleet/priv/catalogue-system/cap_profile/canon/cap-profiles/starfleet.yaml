@@ -5,8 +5,8 @@
 # starfleet = the GLOBAL fleet orchestrator (front-desk + project organizer) — the user-facing
 # FLEET-LEVEL controller. SANDBOXED (bwrap) like a briefing role: it reads project code to frame and
 # organizes repos, so it belongs INSIDE the sanctuary (the world is protected from it, and its doctrine
-# is protected from the human's ~/.claude). NO root / NO host-native anymore — the ex-sysadmin concern
-# (systemd/ACL/provisioning) moves to a dedicated infra agent later; starfleet is a plain bwrap pod.
+# is protected from the human's ~/.claude). NO root / NO host-native — the machine-tending concern
+# (systemd/ACL/provisioning) belongs to `admiral`, the host-native seat; starfleet is a plain bwrap pod.
 # (Reorg 2026-07-19: starfleet takes the global-orchestrator role; the arch specializes per-project.)
 kind: CapabilityProfile
 metadata:
@@ -125,8 +125,8 @@ spec:
       - tool_search_bash
     # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`) — not duplicated.
     git_ops_denied: []
-    # (no `outputs`: the ready-room/outbox line was a SYSADMIN reliquat left over from starfleet's
-    # previous role — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
+    # (no `outputs`: the ready-room/outbox line came from the machine-tending role starfleet used to
+    # carry — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
   knowledge:
     # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that never
     # existed (cf. architect.yaml, same note). card-revision is the FIRST real one — the
@@ -152,7 +152,7 @@ spec:
     # WORK forge (NAS) needs the same forge-master gesture at its next deploy.
     boot_at_start: true
     subagent_template: null
-    host_native: false       # was true (sysadmin) — now an ordinary sandboxed pod
+    host_native: false       # `admiral` is the host-native seat; this one is an ordinary sandboxed pod
     # Human-terminal class (like the architect): the REPL is the human's conversation (Desktop
     # bridge) — NO kick send-keys at all, engage included (live 2026-07-19: a resumed starfleet took
     # the bootstrap engage drizzle ~3 min to the cap). Flag-only; the human/bridge side is the armer.
