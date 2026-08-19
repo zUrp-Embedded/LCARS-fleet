@@ -134,6 +134,10 @@ spec:
       - mcp__fleet__issue_list       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
       - mcp__fleet__issue_get         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
       - mcp__fleet__issue_comment     # return channel: replies on an in-flight ticket (in the role's name)
+      # Rail toolchain (chantier admiral 2026-08-19) : l'arch peut demander un outillage AVANT que
+      # les producers butent dessus (anticiper une toolchain, un essai voulu par l'humain). La
+      # demande reste une PR vers `sysadmin` qu'un admin signe — le grant n'installe rien.
+      - mcp__fleet__toolchain_request
     disallowedTools:
       # snake_case: server-side API tools. Declared here, enforced by the vendor — cf. the
       # convention note above `allowedTools`.
