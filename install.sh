@@ -237,14 +237,11 @@ fi
 # vierge dans le préflight commun refuserait la machine de travail de quelqu'un qui voulait
 # simplement lancer une boîte depuis elle — c'est le cas de la machine où ce rail a été écrit.
 if [[ "$RAIL" == "workstation" ]]; then
-  # Ce rail escalade pour provisionner : sans sudo il ne peut rien faire, et le dire ici est plus
-  # juste que de le dire a tout le monde.
-  if [[ "$EUID" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
-    echo ""
-    echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
-    echo "  La boîte, elle, n'escalade que pour joindre le daemon :  bash $0 --box"
-    exit 1
-  fi
+  # ⚠ LE SUBSTRAT D'ABORD, SUDO ENSUITE — ON NOMME LA RAISON LA PLUS FONDAMENTALE. Sur une machine
+  # qui n'est pas WSL, ce rail est refusé QUOI QU'IL ARRIVE : dire « sudo manque » y enverrait
+  # installer sudo pour se faire refuser ensuite. Mesuré en CI, où le job tourne non-root et sans
+  # sudo dans un conteneur : le refus sortait « sudo est absent » sur une machine dont le vrai
+  # problème est qu'elle n'est pas un poste de travail.
   [[ "$SUBSTRATE" == "wsl" ]] || {
     echo ""
     echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
@@ -261,6 +258,15 @@ if [[ "$RAIL" == "workstation" ]]; then
     echo "  Il fournit les annexes à une BOÎTE ; ici la forge est montée par le provisionnement"
     echo "  lui-même (module 48-forge-host), dans le même cycle et sans drapeau."
     echo "  Tu voulais sans doute :  bash $0 --box --bench"
+    exit 1
+  fi
+
+  # Ce rail escalade pour provisionner : sans sudo il ne peut rien faire. Ici et pas dans le
+  # préflight commun — le rail boîte n'escalade que pour joindre le daemon, et la sonde le dit.
+  if [[ "$EUID" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+    echo ""
+    echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
+    echo "  La boîte, elle, ne modifie rien :  bash $0 --box"
     exit 1
   fi
 

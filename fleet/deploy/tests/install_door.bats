@@ -49,6 +49,14 @@ setup() {
 }
 
 @test "PAS DE DEFAUT sans TTY : le refus NOMME les deux drapeaux" {
+  # ⚠ CE TEMOIN NE PEUT PAS TOURNER HORS WSL, ET IL LE DIT AU LIEU DE ROUGIR. La question n'existe
+  # que la ou les DEUX rails sont possibles — c'est-a-dire WSL. Dans le conteneur du gate CI, le
+  # substrat est `docker` : aucune question n'est posee, donc rien a mesurer. Un `skip` bats est
+  # BRUYANT (« ok N # skip … ») : il dit ce qui n'a pas tourne, ce qu'un rouge ne dirait pas mieux
+  # et qu'un vert cacherait. Mesure du 2026-08-19 : ces deux temoins passaient sur trois machines
+  # WSL et rougissaient en CI, pour une raison qui n'a rien a voir avec ce qu'ils epinglent.
+  [[ "$(grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo autre)" == "wsl" ]] \
+    || skip "la question n'est posee que sur WSL — ce substrat n'a qu'un rail possible"
   # Le coeur du dessin. Un defaut silencieux ici choisit a la place de quelqu'un entre « on te prend
   # /etc » et « on te construit 3 Go » — les deux erreurs qu'aucune valeur par defaut ne repare.
   run bash "$SRC" < /dev/null
@@ -59,6 +67,14 @@ setup() {
 }
 
 @test "la question DIT ce que chaque branche PREND — le cout est dans la question, pas apres" {
+  # ⚠ CE TEMOIN NE PEUT PAS TOURNER HORS WSL, ET IL LE DIT AU LIEU DE ROUGIR. La question n'existe
+  # que la ou les DEUX rails sont possibles — c'est-a-dire WSL. Dans le conteneur du gate CI, le
+  # substrat est `docker` : aucune question n'est posee, donc rien a mesurer. Un `skip` bats est
+  # BRUYANT (« ok N # skip … ») : il dit ce qui n'a pas tourne, ce qu'un rouge ne dirait pas mieux
+  # et qu'un vert cacherait. Mesure du 2026-08-19 : ces deux temoins passaient sur trois machines
+  # WSL et rougissaient en CI, pour une raison qui n'a rien a voir avec ce qu'ils epinglent.
+  [[ "$(grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo autre)" == "wsl" ]] \
+    || skip "la question n'est posee que sur WSL — ce substrat n'a qu'un rail possible"
   run bash "$SRC" < /dev/null
   # Le rail poste annonce ce qu'il possede, et qu'on ne revient pas en arriere.
   [[ "$output" == *"AUCUN désinstalleur"* ]]
