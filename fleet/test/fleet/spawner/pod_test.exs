@@ -74,35 +74,44 @@ defmodule Fleet.Spawner.PodTest do
     {:ok, tmp_dir: tmp_dir}
   end
 
-  describe "kick_keyword/4 (#5.2 — kick keyword based on the ACK + the two gates + resume)" do
+  describe "kick_keyword/3 (#5.2 — kick keyword based on the ACK + the two gates)" do
     test "not yet polled → 'engage' (bootstrap-arm, never gated by the GLOBAL knob)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true, false) == "engage"
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, true, false) == "engage"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true) == "engage"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, true) == "engage"
     end
 
     test "already polled + knob on → 'wake' (fallback)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true, false) == "wake"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true) == "wake"
     end
 
     test "already polled + knob off → nil (flag-only, no send-keys)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false, true, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false, true) == nil
     end
 
     test "profile gate off → nil for EVERYTHING, engage included (human-terminal class)" do
       # Live 2026-07-19: a resumed starfleet (front-desk, Desktop bridge) took the bootstrap engage
       # drizzle to the cap — the cap-profile gate must mute the engage too, not just the wake.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false, false) == nil
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, false, false) == nil
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, false, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, false) == nil
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, false) == nil
     end
 
-    test "RESUMED + not yet polled → nil: a live session is never typed engage (it self-resumes)" do
-      # A resumed pod is an ongoing conversation; engage would be a spurious turn in it. It self-arms
-      # its Monitor, and the handler's armed-stop cancels the loop.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true, true) == nil
+    test "REGRESSION — resume is NOT an input: an unarmed pod gets engage however it was started" do
+      # ⚠ THIS WITNESS ASSERTED THE BUG. It read `kick_keyword(false, true, true, true) == nil`,
+      # documented as "a live session is never typed engage (it self-resumes) — it self-arms its
+      # Monitor". Measured false on a bench 2026-08-19: `TurnFlag.reset/1` clears `.seen` at EVERY
+      # launch (resumed included, by design), so a resumed pod is unarmed and self-arms nothing. It
+      # got no engage, never acked, and held a `max_fan` seat until someone typed `engage` by hand.
+      #
+      # A witness that encodes a premise instead of a behaviour protects whatever the premise is
+      # wrong about. What the loop must key on is the OBSERVABLE state of the rail — the handler's
+      # `monitor_armed?` stop — never how the pod was started.
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true) == "engage"
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true) == "wake"
 
-      # Resume does NOT suppress the wake fallback once polled — that stays gated by the knob, not resume.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true, true) == "wake"
+      # And the human-terminal class stays mute, which is what actually held the starfleet scar:
+      # it is `wake_send_keys: false` on the profile that gates it, not the resume flag.
+      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false) == nil
     end
   end
 

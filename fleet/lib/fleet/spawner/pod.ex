@@ -733,9 +733,15 @@ defmodule Fleet.Spawner.Pod do
 
       # BOOTSTRAP branch (not polled): the Monitor is ARMED (`turn.flag.seen` exists) → the flag rail is
       # LIVE, so engage's one job (get the agent to arm its rail) is done. Stop, whether the agent polls
-      # now or takes its brief via the rail ("Monitor event: ton tour"). A RESUMED pod self-arms and
-      # lands here with NO engage sent (`kick_keyword` gates it — a live session is never typed into);
-      # a FRESH pod lands here right after ÉTAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
+      # now or takes its brief via the rail ("Monitor event: ton tour"). A pod lands here right after
+      # ÉTAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
+      #
+      # ⚠ THIS CLAUSE IS WHAT MAKES A RESUMED POD SAFE TO TYPE INTO, and it used to say the opposite —
+      # "a RESUMED pod self-arms and lands here with NO engage sent". It does not self-arm: `TurnFlag`
+      # clears `.seen` at EVERY launch, resumed included and by design. So a resumed pod reached
+      # neither this stop nor an engage, and burned its whole cap in silence (measured 2026-08-19).
+      # The gate on `resume?` is gone from `kick_keyword`; THIS armed-stop is the real guard, and it
+      # is keyed on what is observable — the rail being live — not on how the pod was started.
       not polled and Fleet.Spawner.Pod.TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
         Logger.debug(
           "pod #{data.pod_id} bootstrap: Monitor armed (turn.flag.seen) → loop stopped (rail is live)"

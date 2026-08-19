@@ -8,7 +8,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
     `spawner_kick_bootstrap_max`, `spawner_kick_bootstrap_retry_ms`): `:lcars_fleet` config read on every tick;
-  - **the PURE decisions** (`acked?/3`, `kick_keyword/4`): should the loop stop (ACK) and,
+  - **the PURE decisions** (`acked?/3`, `kick_keyword/3`): should the loop stop (ACK) and,
     otherwise, which keyword to send (`engage`/`wake`/nothing) — testable outside the process;
   - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
 
@@ -32,8 +32,8 @@ defmodule Fleet.Spawner.Pod.Kick do
     `handle_event({:timeout, :kick}, {:attempt, n}, ...)`).
   - `acked?/3` (PURE decision) — did the agent reach out? STOP of the loop (called by the handler;
     the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.acked?/3`).
-  - `kick_keyword/4` (PURE decision) — keyword according to the ACK (`engage`/`wake`/`nil`) (called by
-    `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/4`).
+  - `kick_keyword/3` (PURE decision) — keyword according to the ACK (`engage`/`wake`/`nil`) (called by
+    `kick_send`; the test exercises it DIRECTLY via `Fleet.Spawner.Pod.Kick.kick_keyword/3`).
   - `kick_send/2` — chooses the keyword then sends it to the pod's tmux (called by the handler).
 
   `do_send_keys/2` is internal (called ONLY by `kick_send`).
@@ -151,12 +151,7 @@ defmodule Fleet.Spawner.Pod.Kick do
     #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
     fallback_on? = Application.get_env(:lcars_fleet, :spawner_wake_send_keys, true)
 
-    case kick_keyword(
-           polled,
-           fallback_on?,
-           profile_send_keys?(state),
-           Map.get(state, :resume, false)
-         ) do
+    case kick_keyword(polled, fallback_on?, profile_send_keys?(state)) do
       nil -> :ok
       key -> do_send_keys(state, key)
     end
@@ -170,16 +165,30 @@ defmodule Fleet.Spawner.Pod.Kick do
     do: Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
 
   @doc false
-  # `resume?` gates the BOOTSTRAP engage: a RESUMED pod is a LIVE session (its conversation is ongoing),
-  # so typing `engage` into it is a spurious turn in that session — the same class as a wake landing in
-  # a human terminal. A resumed pod self-continues and re-arms its Monitor on its own; the armed-stop in
-  # the handler then cancels the loop, and `repl_up?`+cap still escalates a resume that never comes up.
-  # A FRESH pod (`resume? == false`) is idle at its prompt — engage is the legitimate trigger.
-  @spec kick_keyword(boolean(), boolean(), boolean(), boolean()) :: String.t() | nil
-  def kick_keyword(polled, fallback_on?, profile_allows?, resume?) do
+  # ⚠ A `resume?` GATE LIVED HERE AND DEADLOCKED EVERY RESUMED POD. It read
+  # `not polled and resume? -> nil`, on the premise that "a resumed pod self-continues and re-arms
+  # its Monitor on its own". The premise contradicted the code sitting next to it: `TurnFlag.reset/1`
+  # DELETES `turn.flag.seen` at every launch, resumed pods INCLUDED and by design ("so a resumed
+  # pod's STALE `.seen` cannot false-signal armed before its new Monitor"). A resumed pod is
+  # therefore UNARMED by construction, and something has to arm it.
+  #
+  # Measured on a bench (2026-08-19): `turn.flag` present, `.seen` absent, `LCARS_POD_RESUME 1` on
+  # every pod process, `kick (wake) abandoned after 12 attempts`, and a hand-typed `engage` starting
+  # the agent INSTANTLY. The pod then holds a `max_fan` seat forever and unrelated tickets queue in
+  # silent `wait/capacity`; `kill_pod` respawns it into the same state.
+  #
+  # The gate could only ever fire on an UNARMED pod — i.e. exactly where engage is required — because
+  # the handler's `not polled and monitor_armed?` clause cancels the loop BEFORE `kick_send` runs.
+  # It was dead where it was right, and harmful where it fired.
+  #
+  # What still holds the ORIGINAL scar (a resumed starfleet taking the engage drizzle for ~3 min,
+  # because `polled?` is broker RAM wiped at fleet restart): the PER-POD profile gate, not this one.
+  # `starfleet.yaml` carries `wake_send_keys: false`, so `profile_allows?` is false and nothing is
+  # ever typed into it. The human-terminal class is defined by that field — never by resume.
+  @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
+  def kick_keyword(polled, fallback_on?, profile_allows?) do
     cond do
       not profile_allows? -> nil
-      not polled and resume? -> nil
       not polled -> "engage"
       fallback_on? -> "wake"
       true -> nil
