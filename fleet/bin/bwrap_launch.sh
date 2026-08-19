@@ -517,6 +517,12 @@ exec env -i "$BWRAP_BIN" \
   ${SKILL_BINDS[@]+"${SKILL_BINDS[@]}"} \
   ${CATALOG_BINDS[@]+"${CATALOG_BINDS[@]}"} \
   --chdir "$WORKDIR" \
+  `# AVANT les --setenv nommes, et c'est la garde : bwrap garde la DERNIERE occurrence (mesure —` \
+  `# --setenv V a --setenv V b rend b). Le tableau d'outillage passe donc EN PREMIER, pour qu'une` \
+  `# cle venue d'un env.d ne puisse pas ecraser une variable du contrat (HOME, LCARS_POD_ID, les` \
+  `# proxys) : le contrat, deplie apres, a toujours le dernier mot. PATH est deja compose, jamais` \
+  `# ecrase (POD_PATH). Un temoin bats epingle cet ordre.` \
+  ${TOOLCHAIN_ENV[@]+"${TOOLCHAIN_ENV[@]}"} \
   --setenv HOME "$SANDBOX_HOME" \
   --setenv PATH "$POD_PATH" \
   --setenv TERM "${TERM:-xterm-256color}" \
@@ -550,9 +556,6 @@ exec env -i "$BWRAP_BIN" \
   --setenv CLAUDE_CODE_DISABLE_AUTO_MEMORY "1" \
   --setenv CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "100" \
   ${TELEMETRY_ENV[@]+"${TELEMETRY_ENV[@]}"} \
-  `# APRES les --setenv nommes ci-dessus : une cle d'outillage ne peut pas ecraser en silence une` \
-  `# variable du contrat (HOME, LCARS_POD_ID, les proxys). PATH est deja compose, pas ecrase.` \
-  ${TOOLCHAIN_ENV[@]+"${TOOLCHAIN_ENV[@]}"} \
   -- /bin/sh -c '
        socat_bin=$1; egress_sock=$2; egress_port=$3; tmux_bin=$4; sock=$5; name=$6; shift 6
        # THE RELAY, started BEFORE the session and inside the namespace: the pod has no route to

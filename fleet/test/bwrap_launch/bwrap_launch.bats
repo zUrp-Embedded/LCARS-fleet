@@ -211,15 +211,20 @@ teardown() { rm -rf "$TMP_BASE"; }
 }
 
 @test "outillage: une clef d'outillage ne peut pas ecraser une variable du contrat" {
-  # Le tableau est deplie APRES les --setenv nommes. bwrap garde la DERNIERE occurrence, donc
-  # l'ordre est la garde : ce temoin epingle que le contrat passe en premier et que le tableau ne
-  # peut pas se glisser avant lui.
+  # bwrap garde la DERNIERE occurrence (mesure : `--setenv V a --setenv V b` rend b). La garde est
+  # donc que le tableau d'outillage passe EN PREMIER et que le contrat, deplie apres, ait le dernier
+  # mot. ⚠ Une v1 de ce temoin epinglait l'ordre INVERSE en croyant epingler la garde — son propre
+  # commentaire disait « derniere occurrence » ET « le contrat passe en premier », c'est-a-dire la
+  # victoire du pirate. Temoin vert, propriete violee : le hollow-green exact que ce fichier chasse.
   export LCARS_POD_TOOLCHAIN_ENV='HOME=/tmp/pirate'
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
   [[ "$status" -eq 0 ]]
-  home_pos=$(awk '{print index($0, "--setenv HOME ")}' <<< "$output" | head -1)
+  # Sans LCARS_POD_HOME, SANDBOX_HOME == POD_DIR : c'est LUI la valeur du contrat ici.
   pirate_pos=$(awk '{print index($0, "--setenv HOME /tmp/pirate")}' <<< "$output" | head -1)
-  [[ "$home_pos" -lt "$pirate_pos" ]]
+  contract_pos=$(awk '{print index($0, "--setenv HOME '"$POD_DIR"'")}' <<< "$output" | head -1)
+  [[ "$pirate_pos" -gt 0 ]]
+  [[ "$contract_pos" -gt 0 ]]
+  [[ "$pirate_pos" -lt "$contract_pos" ]]
 }
 
 @test "mounts: mode+src binds in place (the ordinary form, unchanged)" {
