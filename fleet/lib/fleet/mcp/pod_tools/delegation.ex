@@ -87,6 +87,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     DependencyForge,
     EscalationForge,
     ForgeClient,
+    ForgeWriter,
     ProjectOnboard
   }
 
@@ -2618,4 +2619,66 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
   @default_pod_reaper Fleet.Pilot.PodReaper
   defp pod_reaper, do: Application.get_env(:lcars_fleet, :mcp_pod_reaper, @default_pod_reaper)
+
+  @doc """
+  Ouvre la demande d'outillage d'un pod bloqué : branche, manifeste, pull request.
+
+  L'IDENTITÉ EST LE CANAL. `pod_id` vient de l'accepteur de socket (un pod, une socket) et le
+  work-item s'en DÉDUIT — jamais d'un argument. Rien dans la demande ne nomme un ticket : il n'y a
+  donc rien à prouver, la socket discrimine. C'est ce que `mix lcars.contracts.check` exige d'un
+  outil MCP, et c'est aussi ce qui empêche un pod de demander au nom d'un autre.
+
+  LECTURE PURE DU WORK-ITEM, et c'est un piège évité : `TaskQueue.get_for_pod/1` **mute** — il
+  enregistre un poll et fait passer l'item de `:pending` à `:assigned` avec un broadcast. L'appeler
+  ici émettrait une assignation fantôme et remettrait à zéro l'horloge de poll d'un pod qui, lui,
+  n'a rien demandé de tel. `list_active/0` est une lecture, et les items actifs se comptent sur les
+  doigts.
+
+  IDEMPOTENT PAR LA BRANCHE : son nom dérive du work-item, donc un second appel réécrit le même
+  fichier sur la même branche au lieu d'ouvrir une deuxième pull request pour un seul besoin. Une
+  branche déjà là n'est pas une erreur.
+  """
+  @spec request_toolchain(map(), String.t()) :: {:ok, map()} | {:error, term()}
+  def request_toolchain(args, pod_id) when is_map(args) and is_binary(pod_id) and pod_id != "" do
+    with {:ok, work_item} <- active_work_item(pod_id),
+         :ok <- Fleet.Toolchain.validate_form(args),
+         {:ok, forge} <- conforming(ForgeWriter, ForgeWriter.resolved()) do
+      repo = Fleet.Toolchain.ops_repo()
+      base = Fleet.Toolchain.branch()
+      branch = Fleet.Toolchain.branch_for(work_item.id)
+      eco = args["ecosystem"]
+
+      content =
+        Fleet.Toolchain.render(args,
+          issue: work_item.issue_id,
+          role: work_item.role,
+          work_item_id: work_item.id
+        )
+
+      # UNE BRANCHE DÉJÀ LÀ N'EST PAS UNE ERREUR : c'est le second appel du même besoin. On écrase
+      # le manifeste et on laisse la PR existante porter le diff mis à jour.
+      _ = forge.create_branch(repo, branch, base, [])
+
+      with {:ok, _} <- forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
+           {:ok, pr} <- forge.open_pr(repo, branch, base, "[toolchain] #{eco}", []) do
+        {:ok, %{"status" => "toolchain_requested", "ecosystem" => eco, "pr" => pr_number(pr)}}
+      end
+    end
+  end
+
+  def request_toolchain(_args, _pod_id), do: {:error, :pod_id_required}
+
+  # Le work-item ACTIF de ce pod, en lecture seule. `:no_active_work_item` plutôt qu'un `nil` qui
+  # laisserait la suite composer un manifeste sans traçabilité — une demande qu'aucun ticket ne
+  # réclame est une demande que personne ne saura rattacher au merge.
+  defp active_work_item(pod_id) do
+    case Enum.find(Fleet.TaskQueue.list_active(), &(&1.pod_id == pod_id)) do
+      nil -> {:error, :no_active_work_item}
+      item -> {:ok, item}
+    end
+  end
+
+  defp pr_number(%{"number" => n}) when is_integer(n), do: n
+  defp pr_number(%{number: n}) when is_integer(n), do: n
+  defp pr_number(_), do: nil
 end

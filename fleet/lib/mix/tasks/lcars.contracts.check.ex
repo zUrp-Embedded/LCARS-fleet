@@ -2986,6 +2986,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     Fleet.MCP.PodTools.Delegation.ForgeClient,
     Fleet.MCP.PodTools.Delegation.EscalationForge,
     Fleet.MCP.PodTools.Delegation.DependencyForge,
+    Fleet.MCP.PodTools.Delegation.ForgeWriter,
     Fleet.MCP.PodTools.Delegation.ProjectOnboard
   ]
 

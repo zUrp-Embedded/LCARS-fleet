@@ -10,6 +10,10 @@ defmodule Fleet.MCP do
       Fleet.EnvParse,
       Fleet.GitRef,
       Fleet.Labels,
+      # Le vocabulaire d'une demande d'outillage et la facon dont elle s'ecrit. FONDATION, comme
+      # Fleet.Labels et pour la meme raison : ce domaine ET le reconciliateur (au-dessus) la lisent,
+      # donc elle ne peut vivre dans ni l'un ni l'autre.
+      Fleet.Toolchain,
       Fleet.Layout,
       Fleet.Event,
       Fleet.SchemaCache,

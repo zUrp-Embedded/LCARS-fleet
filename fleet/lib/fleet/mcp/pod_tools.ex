@@ -146,7 +146,8 @@ defmodule Fleet.MCP.PodTools do
     "project_list" => :read,
     "issue_retire" => :mutation,
     "forge_list" => :read,
-    "publish_link" => :mutation
+    "publish_link" => :mutation,
+    "toolchain_request" => :mutation
   }
 
   @doc """
@@ -745,6 +746,118 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
   end
 
+  deftool "toolchain_request" do
+    meta do
+      name("Request a Toolchain")
+
+      description(
+        "ASK FOR A TOOL THE BOX DOES NOT HAVE — a compiler, a language runtime, a cross " <>
+          "toolchain, a system library your build needs. Use it ONLY when you are BLOCKED: you " <>
+          "tried, and the tool is absent. Not to tidy an environment you find sparse.\n" <>
+          "⚠ THIS IS NOT HOW YOU INSTALL A PROJECT DEPENDENCY. A python module, an npm package, a " <>
+          "crate belong to your project's OWN manifest (`pyproject.toml`, `package.json`, " <>
+          "`Cargo.toml`): you commit them there and they install in your workspace, with no " <>
+          "privilege and no approval. This tool is for what lives OUTSIDE your project and is " <>
+          "shared by EVERY pod on this box — which is exactly why a human has to say yes.\n" <>
+          "WHAT HAPPENS: the fleet renders your fields as a declaration, opens a pull request on " <>
+          "the box's manifest, and A HUMAN ADMIN APPROVES OR REFUSES IT. Nothing installs until " <>
+          "they do. Your work item is put on hold and RE-DISPATCHED once the tool is there — you " <>
+          "do not wait for it: you stop, and a later pod picks the item up with the tool in place.\n" <>
+          "EXACTLY ONE of `apt`, `installer` or `sysroot` per request — they act on different " <>
+          "places, and two in one diff would make the human approve one effect for another.\n" <>
+          "`evidence` is read BY THE HUMAN and by nobody else: paste the error that stopped you, " <>
+          "VERBATIM. It is what they judge on, and a request whose evidence is a paraphrase gets " <>
+          "refused for lack of one.\n" <>
+          "Returns {\"status\":\"toolchain_requested\",\"pr\":N}. A refusal comes back on your " <>
+          "ticket; it is not a failure of this call."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "ecosystem" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9-]{1,31}$",
+          "description" =>
+            "What this enables, in one token — `python`, `node`, `rust`, `cross-arm64`. It names " <>
+              "the FAMILY, not the package: it is the key the box converges on, and the word the " <>
+              "human reads first."
+        },
+        "apt" => %{
+          "type" => "object",
+          "description" =>
+            "HOST packages, native architecture, into the box's /usr. Monotone: adding one never " <>
+              "breaks what worked.",
+          "properties" => %{
+            "packages" => %{
+              "type" => "array",
+              "items" => %{"type" => "string", "pattern" => "^[a-z0-9][a-z0-9+.:-]*$"}
+            }
+          },
+          "required" => ["packages"],
+          "additionalProperties" => false
+        },
+        "installer" => %{
+          "type" => "object",
+          "description" =>
+            "An OFFICIAL installer for an SDK apt cannot serve (rustup, a Zephyr/west workspace, " <>
+              "esp-idf). The human approves the installer's IDENTITY and its pin, not each command " <>
+              "it runs.",
+          "properties" => %{
+            "name" => %{"type" => "string", "pattern" => "^[a-z][a-z0-9-]{1,31}$"},
+            "url" => %{"type" => "string", "pattern" => "^https://"},
+            "version" => %{"type" => "string"},
+            "sha256" => %{"type" => "string", "pattern" => "^[a-f0-9]{64}$"},
+            "env_script" => %{
+              "type" => "string",
+              "description" =>
+                "Path, RELATIVE to the installed tree, of the script the SDK ships to set its " <>
+                  "environment. Your pod never runs it: the box plays it once and freezes the " <>
+                  "result. Without it the SDK installs and no pod can use it."
+            }
+          },
+          "required" => ["name", "url", "version", "sha256"],
+          "additionalProperties" => false
+        },
+        "sysroot" => %{
+          "type" => "object",
+          "description" =>
+            "A cross-compilation sysroot, ASSEMBLED from the target's own repositories — never " <>
+              "taken off a running board. Declare the sources the target itself uses and the " <>
+              "packages you link against; the closure is resolved for you.",
+          "properties" => %{
+            "arch" => %{"type" => "string", "pattern" => "^[a-z0-9]+$"},
+            "sources" => %{"type" => "array", "items" => %{"type" => "string"}},
+            "keyring" => %{"type" => "string"},
+            "packages" => %{
+              "type" => "array",
+              "items" => %{"type" => "string", "pattern" => "^[a-z0-9][a-z0-9+.:-]*$"}
+            }
+          },
+          "required" => ["arch", "sources", "packages"],
+          "additionalProperties" => false
+        },
+        "egress_hosts" => %{
+          "type" => "array",
+          "items" => %{"type" => "string", "pattern" => "^[*a-zA-Z0-9._-]+$"},
+          "description" =>
+            "The registry hosts this ecosystem needs — a package manager the box has installed " <>
+              "but cannot reach is a tool you still do not have. Hostnames only: no scheme, no " <>
+              "port, no path."
+        },
+        "evidence" => %{
+          "type" => "string",
+          "description" =>
+            "THE ERROR THAT STOPPED YOU, verbatim. Read by the human who decides, never by the " <>
+              "machine that applies."
+        }
+      },
+      "required" => ["ecosystem", "evidence"],
+      "additionalProperties" => false
+    })
+  end
+
   deftool "list_workflow_cards" do
     meta do
       name("List Workflow Cards")
@@ -1098,6 +1211,25 @@ defmodule Fleet.MCP.PodTools do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
+  end
+
+  def handle_tool_call("toolchain_request", args, %{pod_id: pod_id} = state)
+      when is_map(args) and is_binary(pod_id) and pod_id != "" do
+    # Identity = the channel. `pod_id` comes from the socket acceptor (one pod = one socket) and
+    # the work item is DERIVED from it — nothing in the arguments names a ticket, so there is
+    # nothing to prove: the socket discriminates. That is also what stops a pod requesting on
+    # another's behalf.
+    case Delegation.request_toolchain(args, pod_id) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("toolchain_request", _args, state) do
+    # `pod_id` absent = acceptor anomaly (it MUST always carry it). Typed refusal rather than a
+    # request nobody could attach to a ticket — a manifest whose origin is unknown is one no human
+    # can judge and no merge can be traced back to.
+    {:error, :pod_id_required, state}
   end
 
   def handle_tool_call("forge_list", _args, state) do
