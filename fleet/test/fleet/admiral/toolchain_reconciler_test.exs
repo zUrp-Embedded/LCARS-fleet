@@ -22,7 +22,8 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
 
     # La 2e passe (drain) : PRs scriptees, issue au verrou scriptable, gestes ENREGISTRES.
-    def list_pulls(_repo, _opts), do: {:ok, :persistent_term.get({__MODULE__, :prs}, [])}
+    def list_pulls_for_base(_repo, _base, _opts),
+      do: {:ok, :persistent_term.get({__MODULE__, :prs}, [])}
 
     def get_issue(_repo, _n, _opts) do
       labels =
@@ -44,7 +45,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
   defmodule ForgeDown do
     def branch_head(_repo, _branch, _opts), do: {:error, :econnrefused}
-    def list_pulls(_repo, _opts), do: {:error, :econnrefused}
+    def list_pulls_for_base(_repo, _base, _opts), do: {:error, :econnrefused}
   end
 
   setup do
@@ -271,6 +272,37 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
       {:ok, :converged, _} = R.check_now(server)
       refute_received {:removed, _, _, _}
+    end
+  end
+
+  describe "le SHA refusé est COLLANT (rc=2 du convergeur = document faux)" do
+    test "rc=2 => gel : la passe suivante NE rappelle PAS le convergeur ; un nouveau head dégèle",
+         %{server: server} do
+      converger_result({:error, {:converger_failed, 2, "kind inattendu"}})
+
+      assert {:error, {:converger_failed, 2, _}} = R.check_now(server)
+      assert_received {:converged, "sha-1"}
+
+      # Même head : GELÉ — sans ce gel, le rail reboucle toutes les 60 s sur une faute qu'aucun
+      # rejeu ne répare (en re-téléchargeant l'installeur à chaque tour — audit 2026-08-19).
+      assert {:error, {:manifest_rejected, "sha-1"}} = R.check_now(server)
+      refute_received {:converged, _}
+
+      # La branche bouge : le gel se PURGE, le nouveau document a droit à sa chance.
+      converger_result(:ok)
+      :persistent_term.put({ForgeUp, :head}, "sha-2")
+      assert {:ok, :converged, "sha-2"} = R.check_now(server)
+    end
+
+    test "rc=3 (retryable) ne gèle PAS : le tick suivant rappelle le convergeur", %{
+      server: server
+    } do
+      converger_result({:error, {:converger_failed, 3, "apt transitoire"}})
+      assert {:error, {:converger_failed, 3, _}} = R.check_now(server)
+      assert_received {:converged, "sha-1"}
+
+      assert {:error, {:converger_failed, 3, _}} = R.check_now(server)
+      assert_received {:converged, "sha-1"}
     end
   end
 end

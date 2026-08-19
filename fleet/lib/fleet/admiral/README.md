@@ -1,5 +1,9 @@
 # Fleet.Admiral — le domaine sysadmin, côté système
 
+**Date** : 2026-08-19
+**Statut** : actif — la carte du domaine `Fleet.Admiral`
+**Référencé par** : `lib/fleet/admiral.ex` (la façade), le chantier admiral (`04`/`05`)
+
 **Réécrit le 2026-08-19** (audit du chantier admiral). L'ancienne carte était une copie sed de
 `starfleet/README.md` : elle promettait douze modules dont six morts avec la brouette du
 2026-08-19 (le validateur de décision, DriftMonitor, l'escaladeur de sévérité max, AuditLog,

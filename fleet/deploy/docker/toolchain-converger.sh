@@ -96,10 +96,11 @@ fetch_manifest() {
 field() { sed -n "s/^ *$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
 
 # Le BLOC top-level (lignes indentees sous la cle) — le scope qui empeche `  packages` d'un bloc
-# d'aspirer celui d'un autre : un manifeste cross porte apt.packages (paquets HOTE) ET
-# sysroot.packages (paquets CIBLE), et les confondre installerait la cible sur l'hote. Piege
-# LATENT depuis la v1 (une seule forme par manifeste dans les fixtures) — mesure en reparant la
-# grammaire d'indentation (B3).
+# d'aspirer celui d'un autre : apt.packages (paquets HOTE) vs sysroot.packages (paquets CIBLE),
+# les confondre installerait la cible sur l'hote. ⚠ Un tel manifeste COMBINE ne peut PAS venir du
+# rail (`validate_form/1` exige exactement UNE forme) — mais ce script lit un FICHIER : un
+# manifeste pose a la main sur la branche n'est pas passe par le schema, et la ceinture est ici,
+# la derniere (meme motif que safe_pkg). Mesure en reparant la grammaire d'indentation (B3).
 block_under() { # block_under <yaml> <cle top-level> -> les lignes du bloc
   awk -v key="$2:" '
     $0 == key { inb=1; next }
@@ -291,28 +292,35 @@ apply_installer() { # apply_installer <yaml> <eco>
 # installe un paquet a extension C native compile de l'ARM64, `pip` REUSSIT, et l'import echoue plus
 # tard en « Exec format error » sans une ligne qui nomme l'environnement de compilation.
 freeze_env() { # freeze_env <tree> <env_script> <eco>
-  local out="$STORE/state/env.d/$3.env" before after tmp
+  local tree="$1" out="$STORE/state/env.d/$3.env" before after tmp
   mkdir -p "$(dirname "$out")"
   before="$(env | sort)"
-  after="$(cd "$tree" && HOME="$1" . "$1/$2" >/dev/null 2>&1 && env | sort || true)"
+  # HOME est modifie PAR LA MESURE (root a HOME=/root, la sonde impose HOME=$tree) : il apparait
+  # donc TOUJOURS dans le delta — filtre plus bas avec les artefacts de shell, jamais fige (un
+  # --setenv HOME ecraserait le contrat du pod ; seule la POSITION du tableau le rattrapait —
+  # audit 2026-08-19). Et `$tree` est un parametre, plus une portee dynamique.
+  after="$(cd "$tree" && HOME="$tree" . "$tree/$2" >/dev/null 2>&1 && env | sort || true)"
   [[ -z "$after" ]] && { echo "toolchain-converger: env_script muet pour $3" >&2; return 0; }
 
   tmp="$(mktemp "$(dirname "$out")/.$3.XXXXXX")"
   printf '# genere par le rail toolchain — delta fige, NE PAS EDITER\n' > "$tmp"
-  comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | while IFS= read -r pair; do
+  # `< <(comm ...)` et PAS un pipe : dans `comm | while`, le `die 2` du refus hors-magasin ne
+  # tuait que le sous-shell du pipe — freeze_env CONTINUAIT et posait l'env.d tronque comme un
+  # succes (mesure par le temoin RC2, qui a aussi attrape la perte de ce correctif lui-meme).
+  while IFS= read -r pair; do
     local k="${pair%%=*}" v="${pair#*=}"
     [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
     case "$k" in
       CC|CXX|LD|AR|NM|RANLIB|STRIP|CFLAGS|CXXFLAGS|LDFLAGS|CPPFLAGS)
         echo "toolchain-converger: $k LARGUEE (variable de build universelle)" >&2; continue ;;
-      PWD|SHLVL|OLDPWD|_) continue ;;
+      HOME|PWD|SHLVL|OLDPWD|_) continue ;;
       PATH) printf 'LCARS_PATH_PREPEND=%s\n' "${v%%:$PATH}" >> "$tmp"; continue ;;
     esac
     case "$v" in
-      /*) [[ "$v" == "$STORE"/* ]] || die 2 "$3: $k pointe HORS du magasin ('$v') — delta faux" ;;
+      /*) [[ "$v" == "$STORE"/* ]] || { rm -f "$tmp"; die 2 "$3: $k pointe HORS du magasin ('$v') — delta faux"; } ;;
     esac
     printf '%s=%s\n' "$k" "$v" >> "$tmp"
-  done
+  done < <(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
   mv -f "$tmp" "$out"
   echo "toolchain-converger: environnement de $3 fige dans $out"
 }
@@ -396,8 +404,21 @@ for path in $(list_manifests); do
       echo "toolchain-converger: $eco applique a $SHA"
     fi
   else
-    echo "toolchain-converger: $eco A ECHOUE — le marqueur n'est PAS pose" >&2
-    rc=3
+    sub=$?
+    # LE CODE DU SOUS-SHELL EST LA DISTINCTION, et une v1 le jetait (audit) : un `die 2` ne au
+    # milieu de l'APPLICATION (freeze_env : delta hors magasin — invisible a validate_manifest,
+    # c'est un resultat d'EXECUTION) ressortait en 3 « retryable » et le rail rebouclait toutes
+    # les 60 s sur un document qu'aucun rejeu ne repare — en RE-TELECHARGEANT l'installeur a
+    # chaque tour. 2 = le DOCUMENT est faux (un humain corrige, le reconciliateur gele ce SHA) ;
+    # tout le reste = 3, retryable. Mixte (un 2 et un 3 sur deux manifestes) => 3 : le retryable
+    # impose le rejeu, le refuse sera re-saute a ce moment-la.
+    if [[ "$sub" -eq 2 ]]; then
+      echo "toolchain-converger: $eco REFUSE en application (document faux) — le marqueur n'est PAS pose" >&2
+      [[ "$rc" -eq 3 ]] || rc=2
+    else
+      echo "toolchain-converger: $eco A ECHOUE (rc=$sub) — le marqueur n'est PAS pose" >&2
+      rc=3
+    fi
   fi
 done
 

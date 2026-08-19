@@ -26,7 +26,8 @@
 #      JAMAIS une redirection — et `visudo -cf` sur le contenu AVANT la pose : un sudoers.d
 #      invalide fait refuser TOUT sudo, pas seulement celui-ci.
 #
-#   2. l'ETAT CONTENEUR du reconciliateur (`/var/lib/lcars/toolchain`, 2775 root:fleet) : le
+#   2. l'ETAT CONTENEUR du reconciliateur (`/run/lcars/toolchain` — un TMPFS : il meurt avec le
+#      conteneur PAR CONSTRUCTION, et aucun volume ne peut le recouvrir ; 2775 root:fleet) : le
 #      marqueur `toolchain.applied` decrit L'ETAT DE /usr, qui meurt avec le conteneur. Le poser
 #      sur le magasin (volume externe, survit au rebuild) faisait dire « a jour » a une boite
 #      reconstruite dont /usr etait revenu a la baseline — l'exact mensonge que `01` §4.5 refuse.
@@ -61,7 +62,7 @@ set -euo pipefail
 SUDOERS_DIR="${LCARS_SUDOERS_DIR:-/etc/sudoers.d}"
 SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
 CONVERGE_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
-RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/var/lib/lcars/toolchain}"
+RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/run/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-/opt/lcars/admiral-skills}"
 
@@ -78,6 +79,17 @@ check() {
   else
     p_drift "etat conteneur absent ($RUN_STATE) — le reconciliateur n'aura pas de memoire"
   fi
+  # Le skill du siege — sonde uniquement quand le module tourne POUR le siege (meme cle que apply).
+  local _uid; _uid="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
+  if [[ "$_uid" == "$SYSADMIN_UID" ]]; then
+    local _home; _home="${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"
+    if [[ -x "$_home/.claude/skills/system-issues/list.sh" ]]; then
+      p_ok "skill system-issues present chez $PROV_HUMAN"
+    else
+      p_drift "skill system-issues ABSENT chez $PROV_HUMAN — la boite de reception est illisible depuis sa session"
+    fi
+  fi
+
   # La projection ne se check que si elle est POSSIBLE (magasin monte) et DUE (siege connu).
   if [[ -n "${LCARS_STORE_ROOT:-}" && -d "${LCARS_STORE_ROOT:-/nonexistent}" ]]; then
     if [[ -s "$LCARS_STORE_ROOT/state/pilot.assignee" ]]; then

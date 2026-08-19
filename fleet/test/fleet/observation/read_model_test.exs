@@ -27,7 +27,7 @@ defmodule Fleet.Observation.ReadModelTest do
     send(pid, ev("work_item.completed", source: :task_queue))
     send(pid, ev("workflow_map.completed", source: :workflow))
     send(pid, ev("gitea.opened", source: :api))
-    send(pid, ev("fleet.boot_complete", source: :coord))
+    send(pid, ev("fleet.boot_complete", source: :admiral))
     sync(pid)
 
     p = ReadModel.projection()

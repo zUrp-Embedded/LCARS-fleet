@@ -13,6 +13,9 @@
 # ⚠ Ces temoins exigent mix + le projet compile (comme la suite ExUnit) — ils vivent ici parce que
 # la garde est HORS de portee d'ExUnit (`config_env() != :test` la desarme en test, et c'est voulu :
 # elle vise les lancements manuels).
+# ⚠ COUT ASSUME (audit) : MIX_ENV=dev — sur un checkout CI froid c'est une compilation dev
+# complete en plus du budget. Pas de contournement propre : la garde n'existe qu'en dev/prod, et
+# un skip conditionnel serait un temoin qui ne mesure rien exactement la ou la CI passe.
 
 setup() {
   FLEET_DIR="$BATS_TEST_DIRNAME/../.."
@@ -31,4 +34,26 @@ setup() {
   run env LCARS_SYSADMIN_UID="99999" \
     bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -eq 0 ]]
+}
+
+@test "R-no-root: un compte SYSTEME (uid < UID_MIN) est refuse — le miroir de GUARD B est ENTIER" {
+  # fleet_v2 porte DEUX regles (siege + frontiere systeme/humain) ; la v1 du miroir n'en portait
+  # qu'une et demie (audit). `id` est double en tete de PATH : la config lit uid=999.
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
+  run env PATH="$BIN:$PATH" LCARS_SYSADMIN_UID="1000" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"SYSTEM account"* ]]
+}
+
+@test "R-no-root: LCARS_SYSADMIN_UID posee VIDE ne desarme PAS la garde du siege" {
+  run env LCARS_SYSADMIN_UID="" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1" 
+  # Notre uid n'est pas 1000 ici ? Si l'uid des tests EST 1000, la garde tire (refus attendu) ;
+  # sinon elle passe. Les deux etats sont legitimes — ce qu'on epingle : "" == defaut 1000, donc
+  # le MEME comportement qu'avec la variable absente.
+  run2=$status
+  run bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$run2" -eq "$status" ]]
 }

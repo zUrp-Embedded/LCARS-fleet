@@ -292,7 +292,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     send(pid, Fleet.Event.new(:spawner, :"pod.drift"))
 
-    send(pid, Fleet.Event.new(:coord, :"coord.action_dispatched"))
+    send(pid, Fleet.Event.new(:pilot, :"pod.completed"))
 
     _ = :sys.get_state(pid)
     assert Process.alive?(pid)

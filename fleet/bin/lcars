@@ -63,6 +63,13 @@ USAGE
       boot_at_start (starfleet) montent seuls au boot de la fleet ; spawn sert
       surtout aux roles ponctuels et au test.
 
+  $PROG admiral
+      LA SEANCE DE FIX ([BL-6-101]) : demande le spawn du siege machine \`admiral\` —
+      le SEUL pod hors sandbox, et il ne s'obtient que par CE geste (la porte
+      generique refuse tout \`containment: none\` sans l'acquittement que cette
+      commande pose). Aucun argument : c'est une seance, pas un dispatch. Le pod
+      tourne sous TON uid ; « $PROG attach » pour t'y asseoir.
+
   $PROG list
       Liste les pods VIVANTS (socks tmux par-pod) + le statut de leur session tmux.
 

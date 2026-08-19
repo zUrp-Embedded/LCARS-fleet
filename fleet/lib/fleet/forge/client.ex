@@ -825,6 +825,27 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
+  Lists the PRs of ONE base branch, all states, FULL records — one paginated call, no N+1.
+
+  Le endpoint `/pulls` (pas `/issues?type=pulls`) rend directement les objets complets
+  (`head`/`base`/`merged`) ET filtre `base=` cote serveur. Ecrit pour la passe de drain du
+  reconciliateur : `list_pulls/2` sur le depot ops paginait TOUTES les PR de la boite puis
+  faisait un GET par PR, toutes les 60 s — mesure par l'audit du chantier admiral.
+  """
+  @spec list_pulls_for_base(String.t(), String.t(), Keyword.t()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_pulls_for_base(repo, base, opts \\ [])
+      when is_binary(repo) and is_binary(base) do
+    with {:ok, config} <- resolve_config(opts) do
+      paginate(
+        config,
+        "/repos/#{encode_repo(repo)}/pulls",
+        "state=all&base=" <> URI.encode_www_form(base)
+      )
+    end
+  end
+
+  @doc """
   Lists full open and closed PR records. This N+1 status read preserves review history after merge.
   """
   @spec list_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}

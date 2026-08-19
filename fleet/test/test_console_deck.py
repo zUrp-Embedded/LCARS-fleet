@@ -1233,7 +1233,13 @@ with open(os.path.join(_doc_root, "index.html"), "w") as _fh:
 with open(os.path.join(_doc_root, "manuel", "index.html"), "w") as _fh:
     _fh.write("<!doctype html><title>manuel</title>")
 
-_secret = os.path.join(os.path.dirname(_doc_root), "hors-doc.html")
+# ⚠ Le secret vit dans un VOISIN UNIQUE, jamais au parent partage : `/tmp/hors-doc.html` en dur
+# etait un chemin commun a tous les agents de la machine — deux chantiers en parallele, et le
+# second crashe en PermissionError sur le fichier du premier (mesure ; meme classe que la
+# collision de socket corrigee par 5ec16673e).
+_outside = tempfile.mkdtemp(prefix="lcars-doc-out-")
+_secret = os.path.join(_outside, "hors-doc.html")
+_secret_rel = os.path.join("..", os.path.basename(_outside), "hors-doc.html")
 with open(_secret, "w") as _fh:
     _fh.write("SECRET")
 
@@ -1250,9 +1256,9 @@ def _resolve(rel):
 
 check(_resolve("index.html") is not None and _resolve("manuel/index.html") is not None,
       "doc: une page de la doc se resout dans sa racine")
-check(_resolve("../hors-doc.html") is None,
+check(_resolve(_secret_rel) is None,
       "doc: `..` sort de la racine et est REFUSE — le prefixe voisin porte les jetons de la boite")
-check(_resolve("manuel/../../hors-doc.html") is None,
+check(_resolve(os.path.join("manuel", "..", _secret_rel)) is None,
       "doc: une traversee cachee au milieu du chemin est refusee comme les autres")
 
 

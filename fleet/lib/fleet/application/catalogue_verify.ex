@@ -73,8 +73,8 @@ defmodule Fleet.Application.CatalogueVerify do
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
   manifest is a precondition (nothing downstream is meaningful without it), and the images are a
   precondition for the spawn proof and the card guards (both read the frozen image, so a failed
-  image would cascade into noise). The escalation policies read their own file and are proved
-  regardless.
+  image would cascade into noise). (La sonde « escalation policies » est partie avec
+  `Fleet.Coord` — brouette 2026-08-19 : sur images cassées il ne reste que le rapport d'images.)
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do

@@ -62,11 +62,22 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [[ ! -f "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
 }
 
-@test "sudoers: PAS de redirection en place — le fichier ne transite jamais par un etat partiel" {
-  # write_atomic = tmp + rename. Le temoin : AUCUN artefact temporaire ne survit dans sudoers.d.
+@test "sudoers: un REFUS en cours de mise a jour laisse l'ANCIEN fichier intact (atomicite observable)" {
+  # ⚠ La v1 de ce temoin cherchait des artefacts .prov.* survivants — write_atomic les nettoie sur
+  # TOUS ses chemins, et une redirection nue n'en laisse pas non plus : il etait vert sur
+  # l'implementation qu'il pretendait interdire (audit). La propriete OBSERVABLE est celle-ci :
+  # un sudoers valide est en place, la mise a jour est REFUSEE (visudo) => l'ancien fichier est
+  # toujours la, OCTET POUR OCTET. Une ecriture en place l'aurait tronque ou remplace avant le
+  # refus — la machine ou plus personne ne passe root (cicatrice provision-lib.sh:18).
   run_apply
   [[ "$status" -eq 0 ]]
-  [[ -z "$(find "$LCARS_SUDOERS_DIR" -name '.prov.*' -o -name '*.tmp' | head -1)" ]]
+  local before; before="$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")"
+
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/visudo"; chmod +x "$BIN/visudo"
+  export LCARS_TOOLCHAIN_CONVERGE_BIN="/usr/local/bin/autre-binaire"
+  run_apply
+  [[ "$status" -ne 0 ]]
+  [[ "$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")" == "$before" ]]
 }
 
 @test "etat conteneur: le repertoire du marqueur existe en 2775" {

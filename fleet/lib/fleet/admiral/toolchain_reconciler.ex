@@ -29,11 +29,16 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   ## Le rebuild, et pourquoi le marqueur vit AVEC LE CONTENEUR
 
   Le marqueur (`toolchain.applied`) décrit pour moitié l'état de `/usr`, qui meurt avec le
-  conteneur. Il vit donc sous `LCARS_TOOLCHAIN_RUN_STATE` (défaut `/var/lib/lcars/toolchain`,
-  posé 2775 root:fleet par `45-sudoers-toolchain`) — JAMAIS sur le magasin : un volume externe
-  survit au rebuild, et un marqueur survivant ferait dire « à jour » à une boîte revenue à la
-  baseline. Après un rebuild, le marqueur est mort ⇒ le premier tick reconverge. C'est le
-  mécanisme qui remplace l'ancien « convergeur dans la séquence d'entrypoint » de `01` §4.5.
+  conteneur. Il vit donc sous `LCARS_TOOLCHAIN_RUN_STATE` — défaut `/run/lcars/toolchain`, un
+  **tmpfs** : il meurt avec le conteneur PAR CONSTRUCTION, même motif que
+  `/run/lcars-provision.rc` (« le fichier décrit TOUJOURS ce boot-ci »). JAMAIS sur le magasin ni
+  sous un chemin qu'un volume pourrait recouvrir : une v2 le posait en `/var/lib/lcars/toolchain`
+  pendant que le convergeur défaute son STORE sur `/var/lib/lcars` — si le lot F montait le
+  magasin là, le marqueur « conteneur » aurait survécu au rebuild et la boîte se serait dite à
+  jour sur un /usr nu (le défaut de `b341f415f`, ré-ouvert par collision de défauts — audit).
+  Posé 2775 root:fleet par `45-sudoers-toolchain` à chaque boot. Après un rebuild, le marqueur
+  est mort ⇒ le premier tick reconverge — c'est le mécanisme qui remplace l'ancien « convergeur
+  dans la séquence d'entrypoint » de `01` §4.5.
 
   ## Ce qu'il n'est pas
 
@@ -56,7 +61,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   alias Fleet.Admiral.PeriodicCheck
 
   @default_interval_ms 60_000
-  @default_run_state "/var/lib/lcars/toolchain"
+  @default_run_state "/run/lcars/toolchain"
 
   # ── API ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -97,7 +102,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       interval_ms: Keyword.get(opts, :interval_ms) || config_interval(),
       repo: Keyword.get(opts, :repo),
       branch: Keyword.get(opts, :branch),
-      last_result: nil
+      last_result: nil,
+      rejected_sha: nil
     }
 
     _ = PeriodicCheck.schedule(:reconcile, state.interval_ms)
@@ -125,24 +131,52 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       rescue
         e ->
           Logger.error("ToolchainReconciler: passe en échec — #{Exception.message(e)}")
-          {:error, {:raised, Exception.message(e)}}
+          {{:error, {:raised, Exception.message(e)}}, state.rejected_sha}
       end
 
-    %{state | last_result: result}
+    %{state | last_result: elem(result, 0), rejected_sha: elem(result, 1)}
   end
 
+  # Rend `{résultat, sha_refusé}` — LE SHA REFUSÉ EST COLLANT (audit 2026-08-19) : un convergeur
+  # qui sort 2 dit « ce DOCUMENT est faux, un humain corrige ». Sans mémoire, la comparaison
+  # revoyait le même écart au tick suivant et rebouclait toutes les 60 s sur une faute qu'aucun
+  # rejeu ne répare — en re-téléchargeant l'installeur à chaque tour. Le gel se PURGE dès que la
+  # branche bouge : le head suivant est un autre document, il a droit à sa chance.
   defp reconcile_pass(state) do
     repo = state.repo || Fleet.Toolchain.ops_repo()
     branch = state.branch || Fleet.Toolchain.branch()
 
-    result =
+    {result, rejected} =
       case forge().branch_head(repo, branch, []) do
-        {:ok, head} -> converge_if_moved(head)
-        {:error, reason} -> unreachable(reason)
+        {:ok, head} when head == state.rejected_sha ->
+          Logger.debug(
+            "ToolchainReconciler: head #{head} déjà REFUSÉ (document faux) — gelé jusqu'à un " <>
+              "nouveau merge"
+          )
+
+          {{:error, {:manifest_rejected, head}}, head}
+
+        {:ok, head} ->
+          case converge_if_moved(head) do
+            {:error, {:converger_failed, 2, _out}} = err ->
+              Logger.error(
+                "ToolchainReconciler: le convergeur a JUGÉ LE DOCUMENT FAUX (rc=2) à #{head} — " <>
+                  "gelé : aucun rejeu ne répare un manifeste refusé, seul un nouveau merge dégèle"
+              )
+
+              {err, head}
+
+            other ->
+              {other, nil}
+          end
+
+        {:error, reason} ->
+          # Une forge injoignable ne PURGE pas le gel : on n'a rien appris sur la branche.
+          {unreachable(reason), state.rejected_sha}
       end
 
     drain_pass(repo, branch, result)
-    result
+    {result, rejected}
   end
 
   # ── LA SECONDE PASSE, ET ELLE N'EST PAS OPTIONNELLE (`01` §7.3) ──────────────────────────────
@@ -160,7 +194,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # LOSSY : un échec de liste ou de drain se dit et n'altère pas le résultat de branche — le tick
   # suivant retentera (le verrou est toujours là).
   defp drain_pass(repo, branch, branch_result) do
-    case forge().list_pulls(repo, []) do
+    # UNE passe paginee, filtree `base=` COTE SERVEUR (`/pulls?state=all&base=`) — la v1 passait
+    # par list_pulls/2 : toutes les PR de la boite + un GET par PR, toutes les 60 s (audit).
+    case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
         Enum.each(prs, &maybe_drain(&1, branch, branch_result))
 
@@ -176,6 +212,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   end
 
   defp maybe_drain(pr, branch, branch_result) do
+    # Ceinture : le serveur a filtre `base=`, on re-verifie quand meme (un double de test ou une
+    # forge exotique pourraient rendre plus large).
     with true <- pr["base"]["ref"] == branch,
          {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
       case pr_outcome(pr) do

@@ -70,7 +70,7 @@ defmodule Fleet.EventTest do
 
   describe "new/3 — opts" do
     test "defaults: pod_id/correlation_id nil, payload %{}" do
-      assert %Event{pod_id: nil, correlation_id: nil, payload: %{}} = Event.new(:coord, :x)
+      assert %Event{pod_id: nil, correlation_id: nil, payload: %{}} = Event.new(:pilot, :x)
     end
 
     test "pod_id / correlation_id / payload carried" do
@@ -86,17 +86,17 @@ defmodule Fleet.EventTest do
 
     test "non-map payload → ArgumentError (fail-loud, like source/timestamp)" do
       assert_raise ArgumentError, ~r/payload .* is not a map/, fn ->
-        Event.new(:coord, :x, payload: "not-a-map")
+        Event.new(:pilot, :x, payload: "not-a-map")
       end
     end
 
     test "non-binary pod_id / correlation_id → ArgumentError" do
       assert_raise ArgumentError, ~r/pod_id .* is not a String/, fn ->
-        Event.new(:coord, :x, pod_id: 42)
+        Event.new(:pilot, :x, pod_id: 42)
       end
 
       assert_raise ArgumentError, ~r/correlation_id .* is not a String/, fn ->
-        Event.new(:coord, :x, correlation_id: {:not, :a, :string})
+        Event.new(:pilot, :x, correlation_id: {:not, :a, :string})
       end
     end
 

@@ -187,14 +187,28 @@ if config_env() != :test and not tool_mode? do
       e -> {:unreadable, Exception.message(e)}
     end
 
-  sysadmin_uid = System.get_env("LCARS_SYSADMIN_UID", "1000")
+  # `""` (variable posee VIDE) retomberait sur… rien : une garde desarmee en silence (audit).
+  sysadmin_uid =
+    case System.get_env("LCARS_SYSADMIN_UID", "1000") do
+      "" -> "1000"
+      v -> v
+    end
+
+  # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
+  # ET la frontiere systeme/humain (`uid >= UID_MIN`). Un compte SYSTEME (uid < 1000) lancant la
+  # release directement passait le BEAM et n'etait refuse que par le launcher.
+  uid_min =
+    case System.get_env("LCARS_UID_MIN", "1000") do
+      "" -> 1000
+      v -> String.to_integer(v)
+    end
 
   case uid_reading do
     "0" ->
       raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
               "(launch under your human UID via bin/fleet_v2, never as root)"
 
-    ^sysadmin_uid ->
+    uid when uid == sysadmin_uid ->
       raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
               "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
               "pods, the exact inverse of the sandbox. The seat fixes the box; a fleet human " <>
@@ -204,8 +218,16 @@ if config_env() != :test and not tool_mode? do
       raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
               "guard refuses a boot it cannot verify (launch via bin/fleet_v2)"
 
-    _other ->
-      :ok
+    uid when is_binary(uid) ->
+      case Integer.parse(uid) do
+        {n, ""} when n < uid_min ->
+          raise "R-no-root-runtime: the fleet daemon refuses to run under a SYSTEM account " <>
+                  "(uid #{n} < UID_MIN #{uid_min}) — the fleet runs under a HUMAN uid " <>
+                  "(launch via bin/fleet_v2 under a worker account)"
+
+        _human_or_unparseable ->
+          :ok
+      end
   end
 
   # ============================================================

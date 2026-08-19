@@ -294,3 +294,45 @@ EOS
   [[ -r "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
   [[ "$(cat "$LCARS_STORE_ROOT/state/eco.d/python.applied")" == "deadbeef" ]]
 }
+
+@test "RC 2 vs RC 3: un delta HORS MAGASIN (freeze_env) sort en 2 — document faux, pas retryable" {
+  # Le refus nait pendant l'EXECUTION (invisible a validate_manifest) : l'env_script pose un chemin
+  # hors magasin. Une v1 le laissait mourir dans le sous-shell du pipe : freeze_env CONTINUAIT
+  # (env.d tronque possible) et le rc sortait en 3 « retryable » — le rail rebouclait toutes les
+  # 60 s en RE-TELECHARGEANT l'installeur. Deux proprietes : rc=2, et AUCUN env.d pose.
+  local sha; sha="$(printf 'a%.0s' {1..64})"
+  local B64; B64="$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: https://sh.rustup.rs\n  version: "1.27"\n  env_script: env.sh\n' "$sha" | base64 -w0)"
+  stub_forge "$B64"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BATS_TEST_TMPDIR/bin/sha256sum"; chmod +x "$BATS_TEST_TMPDIR/bin/sha256sum"
+
+  # Le faux installeur : il pose l'env_script, qui exporte un chemin HORS magasin.
+  cat > "$BATS_TEST_TMPDIR/fake-installer.sh" <<'EOS'
+#!/bin/sh
+cat > env.sh <<'EOF2'
+export EVIL_TOOL_HOME=/usr/lib/evil
+EOF2
+exit 0
+EOS
+
+  # curl : les DEUX roles — servir la forge (delegue aux reponses de stub_forge via fichiers) et
+  # « telecharger » l'installeur (-o <fichier>).
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOS
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  if [[ "\$prev" == "-o" ]]; then cp "$BATS_TEST_TMPDIR/fake-installer.sh" "\$a"; exit 0; fi
+  prev="\$a"
+  case "\$a" in
+    *contents/ops/toolchains.d/python.yaml*) echo '{"content":"$B64"}'; exit 0;;
+    *contents/ops/toolchains.d*) echo '[{"name":"python.yaml","path":"ops/toolchains.d/python.yaml"}]'; exit 0;;
+  esac
+done
+exit 0
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+
+  run "$SUT" deadbeef
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"REFUSE en application"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/env.d/python.env" ]]
+}

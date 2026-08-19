@@ -158,4 +158,49 @@ defmodule Fleet.ToolchainTest do
       refute Toolchain.branch() == "ops"
     end
   end
+
+  describe "LE ROUND-TRIP écrivain↔lecteur — le témoin que la classe de panne exige" do
+    # La panne d'origine (B3) : le render émettait à 4 espaces, `list_under` du convergeur n'en
+    # lisait que 2 — apply_apt voyait ZÉRO paquet sur un manifeste réel, et CHAQUE CÔTÉ était vert
+    # avec ses propres fixtures. Les deux bats « GRAMMAIRE » épinglent la grammaire du lecteur sur
+    # une fixture À LA MAIN : si le render change d'indentation, ils restent verts (audit). CE
+    # témoin-ci ferme la classe : la sortie RÉELLE de `render/2` traverse le VRAI `list_under` du
+    # script — l'un des deux bouge sans l'autre, il casse.
+    test "render/2 → list_under du convergeur : les paquets ressortent identiques" do
+      manifest =
+        Toolchain.render(
+          %{
+            "ecosystem" => "python",
+            "evidence" => "boom",
+            "apt" => %{"packages" => ["python3-yaml", "python3-venv"]}
+          },
+          issue: "issue-7",
+          role: "engineer",
+          work_item_id: "wi-1"
+        )
+
+      script = Path.expand("deploy/docker/toolchain-converger.sh")
+
+      extracted =
+        {"""
+         set -euo pipefail
+         eval "$(sed -n '/^block_under()/,/^}/p' #{script})"
+         eval "$(sed -n '/^list_under()/,/^}/p' #{script})"
+         list_under "$(block_under "$(cat)" apt)" "  packages"
+         """, manifest}
+
+      {shell, stdin} = extracted
+      tmp = Path.join(System.tmp_dir!(), "roundtrip-#{System.unique_integer([:positive])}")
+      File.write!(tmp <> ".sh", shell)
+      File.write!(tmp <> ".yaml", stdin)
+
+      on_exit(fn ->
+        File.rm(tmp <> ".sh")
+        File.rm(tmp <> ".yaml")
+      end)
+
+      {out, 0} = System.cmd("bash", ["-c", "bash #{tmp}.sh < #{tmp}.yaml"])
+      assert String.split(out, "\n", trim: true) == ["python3-yaml", "python3-venv"]
+    end
+  end
 end

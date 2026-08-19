@@ -27,6 +27,12 @@
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
 #   apply          joue la recette : module instance/, module catalogue, puis le depot modele.
 #                  Ne prend RIEN — il lit ce que la boite detient. Un jeton sur STDIN l'emporte.
+#   toolchain-protection <login-du-siege> [admins...]
+#                  GESTE D'INSTALLATION du rail toolchain : pose la protection de la branche
+#                  \`sysadmin\` du depot ops (required_approvals=1, whitelist nommant le SIEGE —
+#                  son login est VARIABLE, jamais en dur — dismiss_stale ; SANS status check,
+#                  allumage en deux temps). Conclut par RELECTURE, et n'imprime la ligne de config
+#                  :toolchain_auto_merge QUE si la protection tient — jamais l'un sans l'autre.
 #   install <nom>  installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte :
 #                  resolution du depot, clone, MEME verification que le boot, roster derive, recette
 #                  (org + comptes + teams), puis la source poussee dans <nom>/catalogue. Jamais
@@ -361,25 +367,29 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="${LCARS_SYSADMIN_BRANCH:-sysadmin}"
   local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
 
-  local code
-  code="$(curl -sS -m 15 -o /tmp/tp-resp.$$ -w '%{http_code}'     -H "Authorization: token $tok" -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true)"
+  # POST best-effort (idempotence par RELECTURE, pas par code devine — une v1 concluait
+  # « deja presente » sur un 409/422 alors que Gitea rend d'autres codes selon la version, et un
+  # 422 de validation aurait passe pour un succes suivi de l'activation de l'auto-merge : merge
+  # sans signature, l'exact bloquant n5 du PLAN).
+  curl -sS -m 15 -o /dev/null     -H "Authorization: token $tok" -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
 
-  case "$code" in
-    201)
-      echo "forge-gestures: protection posee sur $repo:$branch (approbateurs: $approvers)"
-      echo "  -> ACTIVER l'auto-merge maintenant que la protection tient :"
-      echo "     config :lcars_fleet, :toolchain_auto_merge, true   (runtime.exs / env du deploy)"
-      ;;
-    409|422)
-      echo "forge-gestures: protection deja presente sur $repo:$branch ($code) — idempotent, rien a refaire"
-      cat /tmp/tp-resp.$$ >&2 || true
-      ;;
-    *)
-      cat /tmp/tp-resp.$$ >&2 || true
-      die "toolchain-protection: la forge a refuse ($code)"
-      ;;
-  esac
-  rm -f /tmp/tp-resp.$$
+  # LA RELECTURE FAIT FOI : la protection existe ET porte les champs qui comptent, sinon rien
+  # n'est annonce et SURTOUT pas la ligne de config auto-merge.
+  local got
+  got="$(curl -sS -m 15 -H "Authorization: token $tok"     "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections/$branch" 2>/dev/null || true)"
+
+  local ra ds
+  ra="$(jq -r '.required_approvals // empty' <<< "$got" 2>/dev/null || true)"
+  ds="$(jq -r '.dismiss_stale_approvals // empty' <<< "$got" 2>/dev/null || true)"
+
+  if [[ "$ra" == "1" && "$ds" == "true" ]]; then
+    echo "forge-gestures: protection VERIFIEE par relecture sur $repo:$branch (required_approvals=1, dismiss_stale, approbateurs: $approvers)"
+    echo "  -> ACTIVER l'auto-merge maintenant que la protection TIENT :"
+    echo "     config :lcars_fleet, :toolchain_auto_merge, true   (runtime.exs / env du deploy)"
+  else
+    echo "relecture: $got" >&2
+    die "toolchain-protection: la protection n'est PAS en place sur $repo:$branch — NE PAS activer :toolchain_auto_merge"
+  fi
 }
 
 cmd_runner_token() {
@@ -655,5 +665,5 @@ case "${1:-}" in
   install)      shift; with_apply_lock cmd_install "$@" ;;
   runner-token) cmd_runner_token ;;
   toolchain-protection) shift; cmd_toolchain_protection "$@" ;;
-  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token)" >&2; exit 1 ;;
+  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection)" >&2; exit 1 ;;
 esac

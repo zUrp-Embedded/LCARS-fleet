@@ -28,13 +28,15 @@ defmodule Fleet.API.SpawnAdmission do
        soon as the broadcast happened, a non-existent `cap_profile_name` would
        be detected ONLY in `PublishConsumer` (mere warning, ZERO pod) → lying
        202. Same loader as the consumer (single source `Fleet.CapProfile.load/1`).
-    4. **Host-native refused** — a `containment: none` cap-profile would launch
-       a pod OUT-OF-SANDBOX on the host *as* the human (the strongest power
-       of the fleet) via this generic no-auth door. Made UNREPRESENTABLE
-       by this path: refusal at admission, host-native keeps its dedicated
-       out-of-band path (`bin/host_launch.sh`, an off-fleet interactive session).
-       Fail-closed — a defensive guard even though no canon profile is host-native
-       since the 2026-07-19 reorg (starfleet became an ordinary bwrap orchestrator).
+    4. **Host-native refused SAUF acquittement explicite** ([BL-6-101], 2026-08-19) — a
+       `containment: none` cap-profile would launch a pod OUT-OF-SANDBOX on the host *as* the
+       human (the strongest power of the fleet) via this generic no-auth door: 422 at admission.
+       L'OUVERTURE NOMMÉE : `host_native_ack: true` dans le DTO — le GESTE de l'opérateur
+       (`lcars admiral`), jamais un chemin automatique (le dispatcher ne passe pas par cette
+       porte et n'a pas le champ). L'ack ne part PAS dans le payload broadcast (un fait
+       d'ADMISSION, pas un ordre de spawn). UN canon profile est host-native — `admiral`, le
+       siège machine — et l'unicité est tenue par le témoin anti-bitrot du control_router : un
+       second profil hors sandbox exige son propre arbitrage.
     5. **Fleet-scope singleton already alive** — `role_index: 0` is the fleet-level slot: ONE per
        fleet, by construction (the reaper spares it, its session UUID carries no project). The door
        did not know, so `lcars spawn starfleet` next to a running permanent was ADMITTED: a second
