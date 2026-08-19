@@ -22,6 +22,7 @@ defmodule Fleet.Starfleet.Application do
          `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
        * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
        * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
+       * `ToolchainReconciler` (default `true`) — le rail d'outillage (head↔SHA, `PeriodicCheck`)
 
   `BootOrchestrator` is NOT a child here: as a mid-boot Task it could
   spawn permanent pods (real claude spend) BEFORE the later domains (pilot/api) are up —
@@ -33,7 +34,7 @@ defmodule Fleet.Starfleet.Application do
 
   One boolean `:starfleet_start_*` knob per child (all under `:lcars_fleet`):
   `:start_shutdown`, `:start_audit_consumer`,
-  `:start_mcp_monitor` (default `true`) —
+  `:start_mcp_monitor`, `:start_toolchain_reconciler` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
   (`Fleet.Application`), not by this tree. Tests set a knob to `false` to start that
   child manually via `start_supervised/1`.
@@ -73,6 +74,10 @@ defmodule Fleet.Starfleet.Application do
         ) ++
         if(boot_enabled?(:starfleet_start_mcp_monitor, true),
           do: [Fleet.Starfleet.MCPMonitor],
+          else: []
+        ) ++
+        if(boot_enabled?(:starfleet_start_toolchain_reconciler, true),
+          do: [Fleet.Starfleet.ToolchainReconciler],
           else: []
         )
 

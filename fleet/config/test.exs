@@ -92,6 +92,7 @@ config :lcars_fleet, starfleet_start_boot_orchestrator: false
 # dédiés instancient avec opts. (`start_mcp_watcher` retiré avec MCPWatcher le 2026-08-03 — la
 # veille amont est passée en CI ; une clef de config sans lecteur est une promesse morte.)
 config :lcars_fleet, starfleet_start_mcp_monitor: false
+config :lcars_fleet, starfleet_start_toolchain_reconciler: false
 
 # Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :
 # DriftMonitor subscribe le Bus inconditionnellement + Shutdown expose un drain global — off en test,

@@ -12,6 +12,8 @@ defmodule Fleet.Starfleet do
       Fleet.CapProfile,
       Fleet.Spawner,
       Fleet.TaskQueue,
+      Fleet.Toolchain,
+      Fleet.Forge,
       Fleet.MCP,
       # — external wire surface (lib fencing: every reference is declared) —
       Req
@@ -43,6 +45,8 @@ defmodule Fleet.Starfleet do
       by config: test hermeticity)
     * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
       (lifecycle + security, log prefix `AUDIT <event.type>`)
+    * `Fleet.Starfleet.ToolchainReconciler` — le déclencheur du rail d'outillage
+      (comparaison head↔SHA appliqué sur `PeriodicCheck` ; le seul geste privilégié du rail)
     * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
       Task triggered via `boot_orchestrate/0` by the root AFTER full boot;
       emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
