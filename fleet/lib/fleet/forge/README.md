@@ -43,7 +43,7 @@ two real attachments to where they belong rather than dragging them along:
 
 ## Seam
 
-`:forge_client` (app env `:fleet_pilot` / `:fleet_mcp`) injects the client module — test stubs, and
+`:forge_client` (an OPTS keyword, `Keyword.get(opts, :forge_client, …)`) injects the client module — test stubs, and
 the upward `mcp → pilot` runtime seam this extraction is expected to retire (MCP can now declare a
 plain compile dep on this domain). **Not retired yet**: the behaviour and its 12 callbacks still
 live in `Fleet.MCP.PodTools.Delegation.ForgeClient`, and removing them is a separate gesture with
