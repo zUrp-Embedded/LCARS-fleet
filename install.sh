@@ -50,7 +50,30 @@ else
   G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ─── Refus curl|bash (un installeur se lit avant de s'exécuter) ─────────────
+# ⚖ USER 2026-08-19 : « si on refuse stdin c'est que ça nous a emmerdé, je paye pas une 2ᵉ fois. »
+# Ce refus RESTE, et il commande la forme publique : on télécharge, on lit, on exécute. Les
+# drapeaux `--box`/`--workstation` servent le cas SANS TTY (ssh non interactif, CI, cron) sur un
+# fichier posé, jamais un pipe.
+if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
+  echo ""
+  echo "  ${R}ERREUR : install.sh doit être exécuté depuis un fichier, pas pipé depuis stdin.${N}"
+  echo "  Télécharge d'abord :"
+  echo "    wget -O /tmp/install.sh https://raw.githubusercontent.com/lordzurp/LCARS-fleet/main/install.sh"
+  echo "    sudo bash /tmp/install.sh --workstation   # ou --box"
+  exit 1
+fi
+
+# ⚠ ET IL PASSE AVANT `SCRIPT_DIR`, PAS APRES — LA GARDE ETAIT INJOIGNABLE QUAND ON PIPAIT.
+# `SCRIPT_DIR` derive de `${BASH_SOURCE[0]}`, qui est NON LIE quand bash lit son script sur stdin.
+# Sous `set -u`, la ligne mourait donc AVANT la garde, en rendant une erreur brute de bash a la
+# place de la phrase calme — exactement le defaut que le `/dev/tty` de la pause documente deja.
+# Mesure sur instance vierge (Ubuntu 26.04) : « BASH_SOURCE[0]: unbound variable », ligne 53,
+# refus jamais imprime. Ca PASSAIT sur un poste au bash plus ancien, plus tolerant sur les
+# elements de tableau non lies : un test vert qui ne prouvait que la version de bash de sa machine.
+#
+# La regle : un script qui refuse d'etre pipe doit le detecter AVANT tout ce qui suppose un fichier.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # ─── Options ────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
@@ -82,20 +105,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
   esac
 done
-
-# ─── Refus curl|bash (un installeur se lit avant de s'exécuter) ─────────────
-# ⚖ USER 2026-08-19 : « si on refuse stdin c'est que ça nous a emmerdé, je paye pas une 2ᵉ fois. »
-# Ce refus RESTE, et il commande la forme publique : on télécharge, on lit, on exécute. Les
-# drapeaux `--box`/`--workstation` servent le cas SANS TTY (ssh non interactif, CI, cron) sur un
-# fichier posé, jamais un pipe.
-if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
-  echo ""
-  echo "  ${R}ERREUR : install.sh doit être exécuté depuis un fichier, pas pipé depuis stdin.${N}"
-  echo "  Télécharge d'abord :"
-  echo "    wget -O /tmp/install.sh https://raw.githubusercontent.com/lordzurp/LCARS-fleet/main/install.sh"
-  echo "    sudo bash /tmp/install.sh --workstation   # ou --box"
-  exit 1
-fi
 
 # ─── PRÉFLIGHT COMMUN — ce dont les DEUX branches ont besoin ────────────────
 # Et docker en fait partie, y compris pour le poste : la forge de LCARS est un CONTENEUR, il n'en
