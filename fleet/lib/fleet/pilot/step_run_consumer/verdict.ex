@@ -117,6 +117,16 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # validity on purpose: the findings object stands on its own schema, and coupling the two would
   # make one optional payload's fate depend on a check it has already lost or won elsewhere.
   def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
+    # ON DÉCODE UNE CHAÎNE AVANT DE JUGER, ET C'EST MESURÉ, PAS PRÉVENTIF. Banc du 2026-08-19,
+    # probe-rails#47 : un juge a rendu `findings_v1` sous forme de JSON SÉRIALISÉ
+    # (`"{\"findings\":[]}"`), refusé par le schéma en « Expected Object but got String » — sa
+    # mesure était juste, son encodage non, et le rail a tout jeté. Un agent qui produit du JSON
+    # dans un champ hésite naturellement entre l'objet et sa sérialisation ; refuser la seconde
+    # ne défend RIEN (le contenu est identique une fois décodé) et coûte la mesure entière.
+    # Libéral sur la forme reçue, strict sur le fond : ce qui sort du décodage passe le MÊME
+    # schéma, et une chaîne qui ne décode pas reste un refus.
+    findings = decode_if_string(findings)
+
     case ExJsonSchema.Validator.validate(resolved_schema(@findings_schema_file), findings) do
       :ok ->
         {findings, %{result | "details" => Map.delete(details, @findings_key)}}
@@ -133,6 +143,15 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   def take_findings(result), do: {nil, result}
+
+  defp decode_if_string(findings) when is_binary(findings) do
+    case Jason.decode(findings) do
+      {:ok, %{} = decoded} -> decoded
+      _ -> findings
+    end
+  end
+
+  defp decode_if_string(findings), do: findings
 
   @doc false
   def findings_key, do: @findings_key

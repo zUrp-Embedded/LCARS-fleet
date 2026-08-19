@@ -204,6 +204,21 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     {findings, result} = Verdict.take_findings(result)
     step_run = put_unless_nil(step_run, :review_findings, findings)
 
+    # DISTINGUER « rien envoyé » DE « envoyé et refusé », PARCE QUE LE COMPLETER ACCUSE. Son log
+    # d'absence dit « judge X submitted NO details.findings_v1 » — vrai quand le juge s'est tu,
+    # FAUX quand il a émis un payload que le schéma a écarté, et c'est le cas qu'on a mesuré
+    # (banc 2026-08-19 : deux refus sur trois émissions — un JSON sérialisé, un `severity_max`
+    # hors énumération). Accuser un juge d'un silence qu'il n'a pas commis envoie corriger le
+    # mauvais bout : on cherche pourquoi il n'émet pas alors qu'il émet, et c'est exactement ce
+    # que cette mesure m'a coûté avant de le voir.
+    step_run =
+      if findings == nil and is_map(result["details"]) and
+           Map.has_key?(result["details"], Verdict.findings_key()) do
+        Map.put(step_run, :review_findings_refused, true)
+      else
+        step_run
+      end
+
     case Verdict.judge_review_body(event, result) do
       body when is_binary(body) and body != "" -> Map.put(step_run, :review_body, body)
       _ -> step_run

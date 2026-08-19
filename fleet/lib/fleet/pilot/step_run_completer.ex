@@ -496,12 +496,27 @@ defmodule Fleet.Pilot.StepRunCompleter do
       # LOOKING like it is weighing severities. A rail that silently stops being fed is worse than
       # one that was never built. So: loud, per verdict, naming the judge.
       {nil, _} ->
-        Logger.warning(
-          "StepRunCompleter: judge #{role} submitted NO details.findings_v1 on " <>
-            "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
-            "survives as prose only. The SP asks every judge for the machine payload; without it " <>
-            "no aggregation can weigh this verdict, it can only count it."
-        )
+        # DEUX PHRASES, PARCE QUE CE SONT DEUX FAITS. Ce log n'en disait qu'une — « ce juge n'a
+        # rien envoyé » — et il l'a dite à tort pendant toute une campagne de mesure : les juges
+        # émettaient, le schéma refusait en amont (`take_findings`), et l'accusation d'ici
+        # m'envoyait chercher pourquoi ils se taisaient. Un rail qui nomme mal la panne qu'il
+        # observe coûte plus cher qu'un rail muet.
+        if Map.get(step_run, :review_findings_refused) do
+          Logger.warning(
+            "StepRunCompleter: judge #{role} DID submit details.findings_v1 on " <>
+              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)}, and it was " <>
+              "REFUSED upstream (see the schema error logged by StepRunConsumer just above). " <>
+              "Its measure is lost to the rail — but the judge did its part: fix the form, not " <>
+              "the judge."
+          )
+        else
+          Logger.warning(
+            "StepRunCompleter: judge #{role} submitted NO details.findings_v1 on " <>
+              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
+              "survives as prose only. The SP asks every judge for the machine payload; without " <>
+              "it no aggregation can weigh this verdict, it can only count it."
+          )
+        end
 
         :ok
 

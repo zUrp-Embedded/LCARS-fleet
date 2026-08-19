@@ -751,6 +751,35 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
              "et la prose du juge reste intacte devant : le bloc s'ajoute, il ne remplace pas"
     end
 
+    test "un juge dont le payload a été REFUSÉ n'est pas accusé de s'être tu" do
+      # MESURÉ AU BANC (2026-08-19, probe-rails#47) : sur trois émissions, DEUX refusées par le
+      # schéma — un `findings_v1` sérialisé en chaîne, un `severity_max: "none"` hors énumération.
+      # Le log d'absence les rangeait toutes deux en « ce juge n'a rien envoyé », et cette phrase
+      # m'a envoyé chercher pendant des heures pourquoi les juges se taisaient — alors qu'ils
+      # parlaient. Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un rail muet.
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_body: "Prose.",
+        review_findings_refused: true
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
+        end)
+
+      assert log =~ "DID submit details.findings_v1"
+      assert log =~ "REFUSED upstream"
+
+      refute log =~ "submitted NO details.findings_v1",
+             "le juge a émis : l'accuser de silence envoie corriger le mauvais bout"
+    end
+
     test "un juge SANS verdict machine poste le corps d'aujourd'hui, et son silence est DIT" do
       # Deux propriétés en un test, parce qu'elles sont le même arbitrage : la compat est
       # byte-for-byte (un juge qui n'émet rien ne voit pas sa review changer), MAIS l'absence
