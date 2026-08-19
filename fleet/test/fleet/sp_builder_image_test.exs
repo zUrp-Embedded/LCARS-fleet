@@ -309,10 +309,29 @@ defmodule Fleet.SPBuilderImageTest do
     end
   end
 
-  test "proven-good or do not boot: an empty artifact root makes publish! raise", %{tmp_dir: tmp} do
+  # ⚠ ICI VIVAIT « an empty artifact root makes publish! raise », RETIRÉ LE 2026-08-19, ET SON
+  # ABSENCE SE DOCUMENTE PLUTÔT QUE DE SE CACHER.
+  #
+  # Il vidait la racine des subagent-templates. Ça marchait pour une raison qu'il ne disait pas :
+  # `tree_scope/2` filtre les racines existantes, et le catalogue SYSTÈME n'a jamais porté cet
+  # arbre-là — c'était donc la seule classe dont la liste de racines pouvait tomber à `[]`. Pour
+  # toutes les autres (modops, drafts, templates EEx), le catalogue système sert de fond de panier
+  # et la classe n'est jamais vide, quoi que la fixture fasse de son override.
+  #
+  # Depuis la sortie de superpowers, cette classe-là est justement celle qui a le DROIT d'être vide
+  # (aucun rôle ne déclare de template ; `Image` la lit sans `!`). La propriété « une classe
+  # d'artefacts vide refuse de booter » n'a donc plus aucune porte par laquelle être exercée : elle
+  # ne peut se produire que sur un déploiement dont le `priv` système a disparu, ce qu'un test ne
+  # simule pas sans déplacer le priv de l'application sous les pieds des autres tests.
+  #
+  # Ce qui RESTE tenu, et par le test juste en dessous : un artefact TRONQUÉ lève. C'est la moitié
+  # de « proven-good or do not boot » qui reste atteignable, et c'est celle qui attrape un vrai
+  # déploiement abîmé.
+  test "une racine de subagent-templates VIDE ne bloque PLUS le boot (aucun rôle n'en déclare)",
+       %{tmp_dir: tmp} do
     File.rm_rf!(Path.join(tmp, "templates"))
     File.mkdir_p!(Path.join(tmp, "templates"))
-    assert_raise RuntimeError, ~r/no artifact matches/, fn -> Image.publish!() end
+    assert :ok = Image.publish!()
   end
 
   test "proven-good or do not boot: an empty artifact file makes publish! raise", %{tmp_dir: tmp} do

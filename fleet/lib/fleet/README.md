@@ -44,6 +44,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.DurableLog` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |
+| foundation | `Fleet.FindingsWire` | 0 |
 | foundation | `Fleet.GitRef` | 0 |
 | foundation | `Fleet.Labels` | 0 |
 | foundation | `Fleet.Layout` | 0 |
@@ -55,6 +56,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.SchemaCache` | 0 |
 | foundation | `Fleet.Shutdown.Quiesce` | 0 |
 | foundation | `Fleet.Slug` | 0 |
+| foundation | `Fleet.SystemConfig` | 0 |
 | foundation | `Fleet.Toolchain` | 1 |
 | substrate | `Fleet.CapProfile` | 1 |
 | substrate | `Fleet.EventRouter` | 1 |

@@ -80,6 +80,9 @@ defmodule Mix.Tasks.Lcars.Topology do
   @layers %{
     "Fleet.Slug" => "foundation",
     "Fleet.EnvParse" => "foundation",
+    # A1 (chantier rails) — box-wide admin settings reader (/etc/lcars/fleet.json), pure like its
+    # neighbour EnvParse: deps [], read once by runtime.exs at boot.
+    "Fleet.SystemConfig" => "foundation",
     "Fleet.GitRef" => "foundation",
     "Fleet.Layout" => "foundation",
     "Fleet.PodId" => "foundation",
@@ -91,6 +94,10 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Labels" => "foundation",
     "Fleet.Toolchain" => "foundation",
     "Fleet.Conflict" => "foundation",
+    # C2 (chantier rails) — the judge's machine verdict on the wire (render into a review body,
+    # read it back). Pure text <-> map like Conflict, and foundation for the same reason: its two
+    # ends are Fleet.Pilot (writes) and Fleet.Forge (reads), which cannot see each other.
+    "Fleet.FindingsWire" => "foundation",
     "Fleet.Shutdown.Quiesce" => "foundation",
     "Fleet.Publish.InFlight" => "foundation",
     "Fleet.Opts" => "foundation",

@@ -249,6 +249,8 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def parse_feature_branch(_head), do: :error
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -298,6 +300,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
@@ -401,6 +405,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
@@ -458,6 +464,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
 
     @impl true
@@ -542,6 +550,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "closed"}}
 
     @impl true
@@ -750,6 +760,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
 
@@ -859,6 +871,8 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
     @impl true
     def list_pulls(_repo, _opts), do: {:ok, []}
@@ -2419,6 +2433,8 @@ defmodule Fleet.MCP.PodToolsTest do
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
     @impl true
+    def get_route(_r, _n, _o), do: :none
+
     def get_issue("fleet/alpha", 5, _opts) do
       {:ok,
        %{
@@ -2432,6 +2448,8 @@ defmodule Fleet.MCP.PodToolsTest do
          "labels" => [%{"name" => "type:workshop"}, %{"name" => "destination/workshop"}]
        }}
     end
+
+    def get_route(_r, _n, _o), do: :none
 
     def get_issue(_repo, _n, _opts), do: {:error, :not_found}
 

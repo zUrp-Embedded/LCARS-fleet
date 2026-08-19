@@ -27,8 +27,19 @@ defmodule Fleet.SPBuilder.Image do
     image = %{
       modop_sp:
         read_dir_map!(modop_roots(root), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
+      # ⚠ `read_dir_map` SANS le `!` DEPUIS LE 2026-08-19, ET C'EST UN CHANGEMENT DE CE QU'UNE
+      # ABSENCE SIGNIFIE. Cette classe exigeait au moins un artefact — garde juste tant qu'un
+      # cap-profile en déclarait un : zéro fichier voulait alors dire « déploiement cassé ».
+      # La sortie de superpowers a retiré les trois derniers templates ET les deux seules
+      # déclarations (`qualifier`, `reviewer` → `subagent_template: null`) : plus aucun rôle n'en
+      # demande, donc un ensemble VIDE est désormais la forme correcte, pas une panne. Garder le
+      # `!` faisait refuser le boot sur un catalogue parfaitement sain.
+      # Ce qui reste gardé, et c'est l'essentiel : un fichier TRONQUÉ lève toujours, et un rôle qui
+      # DÉCLARE un template introuvable échoue toujours au spawn (`read_subagent_template` →
+      # `subagent_template_missing`, épinglé par `catalogue_verify_test`). On a retiré l'exigence
+      # d'une population non vide, pas la détection d'un artefact manquant.
       subagent:
-        read_dir_map!(
+        read_dir_map(
           subagent_roots(root),
           "subagent-*.md",
           &(&1 |> Path.basename(".md") |> String.replace_prefix("subagent-", ""))

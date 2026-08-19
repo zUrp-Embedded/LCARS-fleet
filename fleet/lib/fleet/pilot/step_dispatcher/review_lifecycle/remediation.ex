@@ -216,10 +216,34 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   defp tier0_conflict_route(pr_number, head, reason, %Ctx{} = ctx) do
     case diagnoser().probe(ctx.repo, head, conflict_face_opts(ctx)) do
+      # TRIPWIRE — the two readers disagree. We are on this path because the FORGE reported a
+      # conflict; a probe that merges clean (0 hunks) is contradicting it, and that contradiction
+      # has a known face: the probe reading a stale base (measured on the bench, PR#30, fixed in
+      # ConflictProbe by the full fetch) — or a forge mergeable flag lagging a rework. Either way
+      # the honest move is the same (fall through to the producer, who re-merges against the real
+      # main) but it must be SAID: this exact silence is what let a dead tier 0 look like a
+      # deliberate routing for a whole play.
+      {:ok, %{totals: %{total: 0}}} ->
+        Logger.warning(
+          "ConflictProbe: PR ##{pr_number} — the forge reports a conflict, the probe merges " <>
+            "clean (0 hunks). Stale probe base or lagging forge flag; falling through to " <>
+            "producer rework."
+        )
+
+        :fall_through
+
       {:ok, diagnosis} ->
         tier0_act(tier0_decision(diagnosis), pr_number, head, reason, ctx, diagnosis)
 
-      {:error, _} ->
+      # A probe failure demotes tier 0 for THIS conflict — by design (the gain only ever shortens
+      # a path). But a demotion nobody can see is indistinguishable from an engine nobody armed:
+      # say why the rail got longer.
+      {:error, reason_probe} ->
+        Logger.warning(
+          "ConflictProbe: probe failed on PR ##{pr_number} (#{inspect(reason_probe)}) — " <>
+            "tier 0 unavailable, falling through to producer rework."
+        )
+
         :fall_through
     end
   end
@@ -229,9 +253,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # carried by every Report, and dropped here: this router read `totals` and nothing else. The engine
   # wrote a machine's worth of reasoning and published a count.
   #
-  # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by
-  # `lcars-conflict-engine`. The two are different facts and both are true: the engine held the pen,
-  # the chief owns the act (user split — gatekeeper = verdicts, chief = the merge). Signing the
+  # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by the runtime
+  # (`lcars-system`, ForgeIdentity's single authority — A2). The two are different facts and both
+  # are true: the engine held the pen, the chief owns the act (signature model rev 2-4: merged_by
+  # says which FUNCTION closed the PR, the commit author says which SUBSTRATE wrote). Signing the
   # report with the engine would name a machine as the responsible party for a call a role answers
   # for.
   #
@@ -249,6 +274,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         label: "conflict"
       )
 
+    # A0 — the engine's STABLE marker. The seal chooses its merge method by reading the conflict
+    # rail's forge-visible marks; tiers 1-2 post theirs at dispatch, tier 0 resolves WITHOUT a
+    # dispatch — this report is the only place its mark can live. Appended OUTSIDE
+    # `ConflictReport.render` (the report is a human text; the marker is protocol), and OUTSIDE
+    # the pinning (a pinned body is summarized — the marker must survive on the comment itself).
+    body = body <> "\n\n[conflict-engine:pr-#{pr_number}:#{outcome}]"
+
     case ForgeClient.as_role(ctx.forge_opts, Fleet.Project.Roles.conflict_resolver_role()) do
       {:ok, role_opts} ->
         case ctx.forge.post_comment(ctx.repo, pr_number, body, role_opts) do
@@ -258,7 +290,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           {:error, why} ->
             Logger.warning(
               "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} " <>
-                "(#{inspect(why)}) — the routing stands, only its explanation is missing"
+                "(#{inspect(why)}) — the routing stands, only its explanation is missing" <>
+                report_loss_consequence(outcome, pr_number)
             )
         end
 
@@ -266,10 +299,22 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         Logger.warning(
           "Remediation: conflict report NOT posted on #{ctx.repo}##{pr_number} — no chief " <>
             "identity (#{inspect(why)}); posting it under the system account would name the " <>
-            "wrong owner for the call"
+            "wrong owner for the call" <> report_loss_consequence(outcome, pr_number)
         )
     end
   end
+
+  # On the AUTO-RESOLVED path the lost report is not just a missing explanation: the engine has no
+  # dispatch, so the report's `[conflict-engine:pr-N]` mark is the seal's ONLY conflict signal for
+  # this PR — without it the merge goes out in `rebase` and dies misclassified (`:policy`). The
+  # other outcomes keep their own dispatch-time marks; their loss stays cosmetic.
+  defp report_loss_consequence(:auto_resolved, pr_number),
+    do:
+      " — AND the seal's conflict signal is now MISSING (tier-0 leaves no other mark): the merge " <>
+        "will be attempted in `rebase` and misrouted. Repair: post a comment containing " <>
+        "`[conflict-engine:pr-#{pr_number}]` on the PR."
+
+  defp report_loss_consequence(_outcome, _pr_number), do: ""
 
   defp conflict_report_work_dir(%Ctx{} = ctx) do
     dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(ctx.repo))
@@ -390,18 +435,41 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp applier,
     do: Application.get_env(:lcars_fleet, :pilot_conflict_applier, Fleet.Pilot.ConflictApply)
 
-  # Producer conflict-rework budget exhausted. Under the conflict-diagnosis flag this is tier-2: give
-  # the OUTSIDER a single inference pass before immobilizing a human (tier-3). Flag off, or that pass
-  # already spent → the legacy arch escalation, byte-for-byte unchanged.
+  # Producer conflict-rework budget exhausted → tier-2: give the OUTSIDER a single inference pass
+  # before immobilizing a human (tier-3). The gate lives INSIDE `exception_stage` (its own flag,
+  # A1) — this call site no longer decides anything.
+  #
+  # A1 — THIS READ THE GITWAND SWITCH, AND THAT WAS AN OWNERSHIP BUG: `pilot_conflict_diagnosis?`
+  # is the ADMIN's kill-switch for an engine of external origin (tier 0), while the chief pass is
+  # a rung of the FLEET's own escalation ladder. One switch, two owners — the admin's GitWand
+  # choice silently removed a rung that has nothing to do with GitWand (the pass consumes neither
+  # probe nor applier: it counts forge markers and dispatches a pod).
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
-    if diagnosis_enabled?() do
-      exception_stage(pr_number, head, reason, ctx, producer_rounds)
-    else
-      escalate_exhausted(pr_number, head, reason, ctx, producer_rounds)
-    end
+    exception_stage(pr_number, head, reason, ctx, producer_rounds)
   end
 
   defp exception_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
+    # Self-gated (A1): BOTH callers land here — budget exhausted, and tier-0's all-semantic
+    # shortcut — so the flag is read at ONE point. Off → the honest immediate escalation, with a
+    # reason that NAMES the disabled rung: an arch reading the freeze must be able to tell "the
+    # pass failed" from "the pass is not armed on this box".
+    if exception_pass_enabled?() do
+      do_exception_stage(pr_number, head, reason, ctx, producer_rounds)
+    else
+      escalate_exhausted(
+        pr_number,
+        head,
+        {:exception_pass_disabled, reason},
+        ctx,
+        producer_rounds
+      )
+    end
+  end
+
+  defp exception_pass_enabled?,
+    do: Application.get_env(:lcars_fleet, :pilot_conflict_exception_pass?, false)
+
+  defp do_exception_stage(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     marker = "[conflict-chief:pr-#{pr_number}"
     count = ctx.forge.count_comments_marked(ctx.repo, pr_number, marker, ctx.forge_opts)
 
@@ -738,24 +806,25 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # pushes a new commit. So it routes to the producer, exactly like a REQUEST_CHANGES round, and the
   # rework budget bounds it — a CI that stays red does not loop forever, it ends up escalating with
   # the rounds spent, which is a true statement about what was tried.
-  # LA POLITIQUE DE LA CARTE VAUT ICI AUSSI, et elle n'y valait pas — mesure sur banc 2026-08-10.
+  # DEUX CICATRICES OPPOSEES SUR LA MEME LIGNE, et la carte n'etait la bonne reponse a aucune.
   #
-  # `CiGate.decide/4` consulte `issue_card_ci` avant de gater : une carte `ci: ignore` passe. Cette
-  # fonction-ci lisait `commit_ci_state` INCONDITIONNELLEMENT et rendait `{:skipped, :ci_pending}`
-  # sur `:pending` — donc `wait/ci`. Deux sites, une seule question, un seul des deux ecoutait la
-  # reponse.
+  # 2026-08-10 (banc) : carte `ci: ignore` + deploiement SANS runner → le ticket prenait `wait/ci`
+  # pour toujours. Le court-circuit "carte ignore → ne lis pas la CI" a ete pose ici pour ca.
+  # 2026-08-18 (banc, premier conflit reel de bout en bout) : le meme court-circuit a MAL ESCALADE
+  # un merge parfaitement sain. La protection de main exige le status `CI / *` (plancher pose a
+  # l'onboard, INDEPENDANT de la carte) ; le seal a tente 3 s apres la livraison de la resolution ;
+  # Gitea a rendu 405 « Not all required status checks successful » — un etat TRANSITOIRE (le
+  # runner n'avait pas encore couru sur le sha neuf) — et ce chemin, aveugle a la CI par la carte,
+  # l'a classe :policy et a immobilise un humain pour une attente de 30 secondes.
   #
-  # Ce que ca coutait, vecu de bout en bout : un catalogue dont la carte declare `ci: ignore` et un
-  # deploiement sans runner. Le producteur livre, la PR est mergeable, le jury est vide — donc on
-  # arrive ici — et le ticket prend `wait/ci` pour toujours. La carte promettait de ne pas dependre
-  # d'une CI ; la seule chose qui arrivait ensuite etait l'escalade a 45 minutes. Le sceau n'est
-  # tombe qu'apres avoir branche un runner, ce qui prouve la lecture.
+  # La carte gouverne le JURY (convoquer ou pas des juges sur la CI) ; la protection est un FAIT de
+  # la forge, que la carte ne peut pas abroger. Ce site lit donc TOUJOURS l'etat reel — et le
+  # mecanisme du hang de 08-10 n'existe plus dans ce lecteur : `:none` (aucun runner n'a jamais
+  # repondu) tombe dans le catch-all → re-request, exactement le chemin que le court-circuit
+  # donnait. Seuls `:pending` (un rail COURT — on retick) et `:failure` (rouge sur la tete — le
+  # producteur repare : un merge protege ne passera pas) changent, et c'est le but.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
-    if Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(head, ctx) == :ignore do
-      reconverge_rerequest(pr_number, head, ctx)
-    else
-      reconverge_on_ci(pr_number, head, ctx)
-    end
+    reconverge_on_ci(pr_number, head, ctx)
   end
 
   defp reconverge_on_ci(pr_number, head, %Ctx{} = ctx) do

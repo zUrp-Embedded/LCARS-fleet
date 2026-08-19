@@ -6,8 +6,15 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   The contract belongs to the CONSUMER: the callbacks are EXACTLY the
   functions that `Delegation` calls (create_issue, add_label, get_issue,
   list_pulls, list_open_issues, parse_feature_branch, pr_review_state,
-  post_comment, close_issue, merged_pr_of_issue) — not the full surface of the
+  post_comment, close_issue, merged_pr_of_issue, get_route) — not the full surface of the
   pilot's forge client.
+
+  `get_route/3` a rejoint la liste avec C2, et l'ajouter au CONTRAT plutôt que l'appeler en
+  douce est le fond de l'affaire : la surface arch doit résoudre la politique de verdict d'une PR
+  par la MÊME fonction que le gate (`Roles.verdict_policy_for/4`), sinon elle affiche « approuvé »
+  pendant que le rail renvoie en rework. Cette résolution lit la carte gravée sur l'issue, donc
+  elle a besoin de la route — et une dépendance qu'un implémenteur découvre par un
+  `UndefinedFunctionError` en production n'est pas un contrat, c'est un piège.
 
   ## Why a RUNTIME seam (and not a compile dep)
 
@@ -107,6 +114,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   that omits the key is rendered as such (verdicts without substance), NEVER as an unreachable
   forge: a stub behind an outage message is how a missing implementation stays invisible.
   """
+
   @callback pr_review_state(repo :: String.t(), index :: integer(), opts :: keyword()) ::
               {:ok,
                %{
@@ -116,6 +124,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
                  outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
                }}
               | {:error, term()}
+
+  @doc """
+  The card ROUTE engraved on an issue — `{:ok, {card_name, step}}`, or `:none` when the issue
+  carries no route (a human ticket, a PR adopted after the fact).
+  """
+  @callback get_route(repo :: String.t(), number :: integer(), opts :: keyword()) ::
+              {:ok, {String.t(), String.t()}} | :none | {:error, term()}
 
   @doc """
   Posts a comment on an issue. Delegation call site: the SYSTEM's supersede-retirement trace

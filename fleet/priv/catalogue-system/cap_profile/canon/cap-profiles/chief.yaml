@@ -9,7 +9,8 @@
 # the runtime with no pod at all, tier 1 hands it back to the producer on its own PR, tier 2 is one
 # bounded pass by an agent, tier 3 escalates to the architect. What was missing is a NAME for that
 # function and an identity for its writes — the tier-0 applier had already minted itself a local
-# one (`lcars-conflict-engine`), which is the measurement that the need was real.
+# one (`lcars-conflict-engine` — since folded into `lcars-system`, the runtime's one identity),
+# which is the measurement that the need was real.
 #
 # Why not the gatekeeper. The two dispatches are already separate everywhere except the role name:
 # a `soft`/undecidable gate escalates through `StepRunConsumer` with a DEFUSED GateBrief, while a

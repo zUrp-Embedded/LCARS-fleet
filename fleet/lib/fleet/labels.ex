@@ -213,6 +213,14 @@ defmodule Fleet.Labels do
   # make a human learn a taxonomy to read "not started yet".
   def wait_for(:role_at_capacity), do: @wait_prefix <> "capacity"
   def wait_for(:role_busy), do: @wait_prefix <> "role"
+
+  # A0.5 — a conflict-rework dispatch whose live pod could not get its `refs/lcars/base` refreshed
+  # (the base moved; briefing on the stale one would replay the measured failure, one budget round
+  # per tick). Same label as `:role_busy`, deliberately: from the ticket's seat both read "the
+  # producer is not ready for me yet, retry next tick" — WHICH readiness is missing is an
+  # operator's diagnosis (the refresh failure is already logged loud pod-side), not a distinct
+  # state of the ticket.
+  def wait_for(:stale_base_unrefreshed), do: @wait_prefix <> "role"
   def wait_for(:draining), do: @wait_prefix <> "draining"
   def wait_for(:criterion_unavailable), do: @wait_prefix <> "criterion"
   def wait_for(:ci_pending), do: @wait_prefix <> "ci"
@@ -239,6 +247,14 @@ defmodule Fleet.Labels do
   # cote du ticket c'est le meme fait — arrete a la porte CI. La distinction vit dans la raison du
   # skip, ou un operateur peut agir dessus.
   def wait_for({:ci_deadline_unreachable, _why}), do: @wait_prefix <> "ci"
+
+  # C3 — la passe d'arbitrage n'a pas pu POSER son marqueur de budget, donc elle ne s'est pas
+  # convoquée (un marqueur non écrit est une passe non bornée). Du côté du ticket, le fait est le
+  # même que pour ses voisins de la famille « attendre un rôle » : personne ne travaille dessus, et
+  # rien n'est cassé — le tick suivant réessaiera. `wait/role` plutôt qu'un cinquième nom : un
+  # humain lit « ce ticket attend qu'un rôle s'y mette », ce qui est exact ; LEQUEL des appels a
+  # échoué vit dans la raison du skip et dans le log, où un opérateur peut agir dessus.
+  def wait_for({:verdict_marker_unposted, _why}), do: @wait_prefix <> "role"
 
   # ─── Already carried by an existing label: a second one would be a second truth ────────────────
   # The one you read is never the one somebody corrected.

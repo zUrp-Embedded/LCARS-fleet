@@ -484,6 +484,78 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.get_pull("fleet/lcars", 6, opts(handlers))
     end
 
+    test "C2 — findings : le verdict MACHINE se relit dans le corps de la review, par rôle" do
+      # LE FIL, DE BOUT EN BOUT. `StepRunCompleter` appende le bloc au corps qu'il poste ; ici on
+      # vérifie l'autre bout : le gate le retrouve dans les corps qu'il fetch DÉJÀ, sans requête
+      # supplémentaire et sans chemin de lecture neuf (l'objet gravé par C1 reste l'archive, il
+      # n'est pas le transport — `OpsObjectSync` est en écriture seule).
+      f_qual = %{"findings" => [%{"severity" => "important", "category" => "tests"}]}
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Qualifier"},
+               "dismissed" => false,
+               "body" => "Prose du juge." <> Fleet.FindingsWire.render(f_qual)
+             },
+             # Le reviewer n'émet QUE de la prose : absence de clé, jamais d'erreur inventée ici.
+             %{
+               "state" => "APPROVED",
+               "user" => %{"login" => "Reviewer"},
+               "dismissed" => false,
+               "body" => "Rien à redire."
+             }
+           ]}
+      }
+
+      assert {:ok, %{findings: findings, verdicts: verdicts}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 opts(handlers) ++ [head_sha: :unscoped]
+               )
+
+      assert findings == %{"qualifier" => f_qual},
+             "le payload machine est indexé par RÔLE, et un juge qui n'en émet pas n'a pas de clé"
+
+      assert verdicts == %{"qualifier" => :changes_requested, "reviewer" => :approved},
+             "et le verdict binaire est INCHANGÉ : le fil ajoute de la mesure, il ne re-décide rien"
+    end
+
+    test "C2 — findings : une review périmée emporte ses findings AVEC elle" do
+      # La propriété que le transport par le corps donne GRATUITEMENT : le scoping par commit est
+      # décidé UNE fois (`reject_stale_reviews`), et il vaut pour le verdict comme pour la mesure.
+      # Un canal séparé (objet ops, commentaire dédié) aurait exigé une seconde règle de péremption
+      # à tenir synchrone — et deux règles qui doivent s'accorder finissent par diverger.
+      stale = %{"findings" => [%{"severity" => "critical", "category" => "obsolete"}]}
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
+          {200,
+           [
+             %{
+               "state" => "REQUEST_CHANGES",
+               "user" => %{"login" => "Qualifier"},
+               "dismissed" => false,
+               "commit_id" => "vieux-sha",
+               "body" => "Sur l'ancien head." <> Fleet.FindingsWire.render(stale)
+             }
+           ]}
+      }
+
+      assert {:ok, %{findings: %{}, verdicts: verdicts}} =
+               ForgeClient.pr_review_state(
+                 "fleet/lcars",
+                 6,
+                 opts(handlers) ++ [head_sha: "head-du-jour"]
+               )
+
+      assert verdicts == %{}, "témoin : la review périmée ne porte plus de verdict non plus"
+    end
+
     test "verdicts (pr_review_state): last decisive review per reviewer (login↓ → verdict)" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>

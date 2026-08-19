@@ -25,6 +25,11 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule CommentFailForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -43,6 +48,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule CloseFailForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -60,6 +68,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule CloseFlakyForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -80,6 +91,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule StageFlakyForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -143,6 +157,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule TimeoutButMergedForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -170,6 +187,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule TimeoutNotMergedForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -285,6 +305,9 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   defmodule WallForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -456,5 +479,115 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     assert body =~ "Provenance NON vérifiée"
     assert body =~ "no_statement"
     refute body =~ "Provenance incohérente"
+  end
+
+  # ─── A0 — conflict signal → merge METHOD ────────────────────────────────────────────────────────
+
+  defmodule ConflictForge do
+    @moduledoc "A PR that went through a conflict: the chief round marker is on it."
+    def count_comments_marked(repo, n, prefix, opts) do
+      send(self(), {:count_marked, repo, n, prefix, opts})
+      if String.starts_with?(prefix, "[conflict-chief:pr-"), do: {:ok, 1}, else: {:ok, 0}
+    end
+
+    def post_comment(repo, n, body, opts) do
+      send(self(), {:comment, repo, n, body, opts})
+      {:ok, :posted}
+    end
+
+    def merge_pr(repo, pr, opts) do
+      send(self(), {:merge, repo, pr, opts})
+      :ok
+    end
+
+    def pr_review_state(_repo, _n, _opts),
+      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+
+    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    def close_issue(_repo, _n, _opts), do: {:ok, :closed}
+  end
+
+  defmodule SignalDownForge do
+    @moduledoc "The conflict signal cannot be read — the seal must REFUSE, before any write."
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:error, {:http, 500, "boom"}}
+
+    def merge_pr(repo, pr, opts) do
+      send(self(), {:merge, repo, pr, opts})
+      :ok
+    end
+
+    def post_comment(repo, n, body, opts) do
+      send(self(), {:comment, repo, n, body, opts})
+      {:ok, :posted}
+    end
+  end
+
+  describe "A0 — the conflict signal picks the merge method" do
+    test "no marker → method \"rebase\" (the historic behavior, byte-for-byte)" do
+      assert :ok =
+               GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:merge, "fleet/p", 7, opts}
+      assert Keyword.get(opts, :method) == "rebase"
+    end
+
+    test "a conflict marker on the PR → method \"merge\", SIGNED CHIEF (the function that closed it)" do
+      # A2 — the signer follows the function: a resolved conflict merges under the
+      # conflict_resolver's token, and the closing comment names both the signer and the method.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
+
+      assert :ok =
+               GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:merge, "fleet/p", 7, opts}
+      assert Keyword.get(opts, :method) == "merge"
+      # signed CHIEF: the role token in the merge opts is the chief's, not the gatekeeper's
+      assert Keyword.get(opts, :token) == "CHIEF-TOKEN"
+      # the closing comment SAYS the signer and the method — hardcoded "gatekeeper"/"rebase"
+      # would lie on this exact ticket
+      assert_received {:comment, "fleet/p", 42, body, _opts}
+      assert body =~ "scellé au nom de `chief`"
+      assert body =~ "conflit résolu"
+      refute body =~ "historique linéaire"
+    end
+
+    test "conflict PR + chief token MISSING → fail-closed refusal, never a gatekeeper fallback" do
+      # The other signer's token IS available (setup posts the gatekeeper's) — falling back to it
+      # would erase the one fact the signature carries. The PR stays unmerged, nothing is written.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+
+      assert {:error, :role_token_unavailable} =
+               GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      refute_received {:merge, _, _, _}
+      refute_received {:comment, _, _, _, _}
+    end
+
+    test "signal unreadable → seal REFUSED before any write (fail-loud, never a blind rebase)" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:conflict_signal_unreadable, _}} =
+                   GatekeeperSeal.seal_and_merge(
+                     SignalDownForge,
+                     "fleet/p",
+                     7,
+                     42,
+                     "engineer",
+                     [],
+                     base_branch: "main"
+                   )
+        end)
+
+      refute_received {:merge, _, _, _}
+      refute_received {:comment, _, _, _, _}
+      assert log =~ "conflict signal UNREADABLE"
+    end
   end
 end

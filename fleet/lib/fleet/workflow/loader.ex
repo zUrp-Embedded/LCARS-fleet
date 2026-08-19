@@ -83,6 +83,14 @@ defmodule Fleet.Workflow.Loader do
       "ci" => Map.fetch!(spec, "ci"),
       "max_rework_rounds" => Map.fetch!(spec, "max_rework_rounds"),
       "jury" => Map.fetch!(spec, "jury"),
+      # C2 — la courbe de tolérance de la carte, et `get` PLUTÔT QUE `fetch!` à dessein : contre
+      # `ci`/`jury`/`max_rework_rounds`, ce champ est OPTIONNEL au schéma. Une carte qui n'en
+      # déclare pas doit garder l'agrégation booléenne, à l'octet près — c'est la condition pour
+      # que les huit cartes du canon migrent quand elles veulent, une par une, au lieu d'être
+      # forcées ensemble par une exception au chargement. `nil` est donc ici une VALEUR («aucune
+      # courbe déclarée»), pas un défaut choisi par accident : la différence tient à ce que le
+      # consommateur en fait, et il ne fabrique aucun seuil à partir d'une absence.
+      "verdict_policy" => Map.get(spec, "verdict_policy"),
       "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],
       "description" => get_in(yaml, ["metadata", "description"]),
       "presentation" => get_in(yaml, ["metadata", "presentation"]),

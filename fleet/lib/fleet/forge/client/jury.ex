@@ -12,6 +12,8 @@ defmodule Fleet.Forge.Client.Jury do
 
   import Fleet.Forge.Client.Transport, only: [resolve_config: 1, paginate: 3]
 
+  require Logger
+
   # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
@@ -31,7 +33,66 @@ defmodule Fleet.Forge.Client.Jury do
   """
   @spec review_outcome([String.t()], %{optional(String.t()) => :approved | :changes_requested}) ::
           {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
-  def review_outcome(jury, verdicts) when is_list(jury) and is_map(verdicts) do
+  def review_outcome(jury, verdicts) when is_list(jury) and is_map(verdicts),
+    do: base_outcome(jury, verdicts)
+
+  @doc """
+  The same predicate, given what the judges MEASURED and the curve the card declares.
+
+  `verdict = f(rapports, criticité)` — the origin model, and the four-arity is where it finally
+  becomes true. The criticality reaches here as DATA (`policy`, resolved from the card that the
+  project's declared level selected), never as a policy compiled into this module: same doctrine as
+  `spec.ci` and `spec.jury` — the card governs, the engine stays agnostic.
+
+  ## The one rule that keeps this safe
+
+  **A card can only be STRICTER. It never repeals a judge's explicit refusal.** `:changes_requested`
+  in, `:changes_requested` out, whatever the curve says. This is the same line the CI path was
+  corrected onto (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
+  floor, a card's tolerance is a ceiling, and a machine that promotes over an explicit human-shaped
+  refusal is not a policy — it is an override.
+
+  So the ONLY thing a policy can do is turn an `:approved` jury into `:changes_requested`, when a
+  judge's own measurements exceed what this card tolerates. That case is real and is the whole
+  point of the model: an approval carrying a `critical` finding is a judge that documented a defect
+  and waved it through, and on a deliverable that can hurt someone, the card is what says no.
+
+  Leniency is NOT expressible here, deliberately — a low-criticality card grants it by declaring no
+  jury at all (`c0-poc`: `jury: []`), which is honest: nobody judged, so nobody was overruled.
+
+  `policy` nil / no `block_at` / empty findings ⟹ IDENTICAL to `review_outcome/2`, byte-for-byte.
+  """
+  @spec review_outcome(
+          [String.t()],
+          %{optional(String.t()) => :approved | :changes_requested},
+          %{optional(String.t()) => map()},
+          map() | nil
+        ) ::
+          {:pending, [String.t()]} | :no_jury | :changes_requested | :approved | :gray_zone
+  def review_outcome(jury, verdicts, findings, policy, arbiter \\ nil)
+      when is_list(jury) and is_map(verdicts) and is_map(findings) do
+    # DEUX ÉTAGES, ET L'ORDRE EST LE MODÈLE : le PLANCHER d'abord (ce que le jury dit), le PLAFOND
+    # de la carte ensuite, et il ne s'applique qu'à une approbation. Écrit comme un `cond` à cinq
+    # branches, le même comportement laissait croire que la courbe est un juré de plus ; écrit
+    # ainsi, on lit qu'elle ne peut QUE durcir — il n'existe aucun chemin par lequel elle promeut.
+    #
+    # C'est aussi ce qui rend `review_outcome/2` prouvablement incapable de rendre `:gray_zone`
+    # (Dialyzer le vérifie) : sans politique il n'y a pas de zone grise, et cette impossibilité
+    # est maintenant STRUCTURELLE au lieu d'être une propriété qu'il fallait croire sur parole.
+    case base_outcome(jury, verdicts) do
+      :approved ->
+        if policy_blocks?(jury, findings, policy),
+          do: arbitrated(verdicts, arbiter),
+          else: :approved
+
+      other ->
+        other
+    end
+  end
+
+  # Le prédicat NU : jury complet, un refus l'emporte. C'est l'agrégation booléenne d'origine, et
+  # elle reste le socle sur lequel tout le reste se pose.
+  defp base_outcome(jury, verdicts) do
     pending = jury -- Map.keys(verdicts)
 
     cond do
@@ -48,6 +109,42 @@ defmodule Fleet.Forge.Client.Jury do
         :approved
     end
   end
+
+  # C3 — LA ZONE GRISE, ET ELLE A UNE DÉFINITION ÉTROITE : le jury a TOUT approuvé, et c'est la
+  # courbe de la carte qui refuse. Rien d'autre n'est gris. Un refus de juge est net (plancher), une
+  # PR propre est nette ; ici la machine s'apprête à renverser une approbation humaine-de-forme sur
+  # la foi de mesures que ce même juge a écrites. C'est exactement le cas que le SP du gatekeeper
+  # décrit depuis dix mois — « tu es invoqué quand le runtime ne peut pas trancher seul » — et qui
+  # n'avait jamais eu de code.
+  #
+  # L'arbitre n'est PAS un juré de plus : sa voix n'est lue QUE dans cette zone. Hors d'elle il ne
+  # peut ni sauver un livrable qu'un juge refuse (le plancher est au-dessus de lui), ni bloquer une
+  # PR que rien ne bloque (F-C061 : seuls les rôles du jury de la carte pèsent sur le verdict). Il
+  # tranche une contradiction, il ne re-juge pas le travail.
+  #
+  # `:gray_zone` quand personne n'a encore arbitré — un état TERMINAL du prédicat, que le routage
+  # transforme en convocation ; et sa lecture par la surface arch dit à un humain « le rail attend
+  # un arbitrage », au lieu de lui montrer un « approuvé » qui ne se sellera jamais.
+  defp arbitrated(_verdicts, nil), do: :gray_zone
+
+  defp arbitrated(verdicts, arbiter) do
+    case Map.get(verdicts, arbiter) do
+      :approved -> :approved
+      :changes_requested -> :changes_requested
+      _ -> :gray_zone
+    end
+  end
+
+  # The findings of a reviewer who is NOT on the jury are not consulted: a human passing by and
+  # leaving a review does not get to raise the bar of a card they were never named in — the same
+  # `Map.take(verdicts, jury)` discipline the clause above already applies to verdicts.
+  defp policy_blocks?(jury, findings, %{"block_at" => block_at}) do
+    findings
+    |> Map.take(jury)
+    |> Enum.any?(fn {_role, f} -> Fleet.FindingsWire.blocks?(f, block_at) end)
+  end
+
+  defp policy_blocks?(_jury, _findings, _policy), do: false
 
   @doc """
   Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per
@@ -97,7 +194,9 @@ defmodule Fleet.Forge.Client.Jury do
              verdicts: %{optional(String.t()) => :approved | :changes_requested},
              reviewers: [String.t()],
              records: [map()],
-             outcome: {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
+             findings: %{optional(String.t()) => map()},
+             outcome:
+               {:pending, [String.t()]} | :no_jury | :changes_requested | :approved | :gray_zone
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -139,14 +238,72 @@ defmodule Fleet.Forge.Client.Jury do
 
       reviewers = reviews |> jury_reviewers() |> Enum.map(&RoleIdentity.role_or_login/1)
 
+      findings = findings_by_role(decisive)
+
       {:ok,
        %{
          verdicts: verdicts,
          reviewers: reviewers,
          records: to_records(decisive),
-         outcome: review_outcome(reviewers, verdicts)
+         findings: findings,
+         # C2 — la courbe de la carte s'applique ICI AUSSI, et c'est la moitié qui compte de ce
+         # geste. Cette sortie est celle que lit l'arch ; le gate calcule la sienne sur l'union
+         # défensive du jury. Deux ENTRÉES, une RÈGLE — donc la politique doit entrer des deux
+         # côtés ou d'aucun : nourrir le gate seul afficherait « approuvé » à un humain pendant que
+         # le rail renvoie en rework, ce qui est exactement la seconde vérité que le @doc de
+         # `review_outcome/2` existe pour interdire. Absente des opts ⟹ agrégation booléenne.
+         outcome:
+           review_outcome(
+             reviewers,
+             verdicts,
+             findings,
+             Keyword.get(opts, :verdict_policy),
+             Keyword.get(opts, :verdict_arbiter)
+           )
        }}
     end
+  end
+
+  # C2 — THE MACHINE VERDICT, READ OUT OF THE BODIES THIS FUNCTION ALREADY HOLDS. The judges'
+  # `findings_v1` rides its own review (`Fleet.FindingsWire`), so it arrives commit-scoped for
+  # free: the same `reject_stale_reviews` that decides which VERDICT counts decides which findings
+  # count, with no second rule to keep in sync. A judge that emitted nothing simply has no key --
+  # absence is a fact the consumer reads, never an error invented here.
+  #
+  # Keyed by ROLE like `verdicts`, and for the same reason: no account name leaves this module.
+  defp findings_by_role(decisive) do
+    decisive
+    |> Enum.reduce(%{}, fn {login, r}, acc ->
+      case Fleet.FindingsWire.parse(r["body"]) do
+        {:ok, findings} ->
+          Map.put(acc, RoleIdentity.role_or_login(login), findings)
+
+        # A block that is present and broken is NOT the same fact as no block -- and this used to
+        # DROP it, which spent the difference the moment it mattered. Under a card that declares a
+        # floor, a dropped payload is read downstream as "this judge measured nothing", so an
+        # unreadable measurement REMOVED a block instead of raising one: a gray zone that owed an
+        # arbitration got sealed as `:approved`, with a log line as its only witness. Measured
+        # 2026-08-19 on the two shipped cards that declare `block_at: critical`.
+        #
+        # So it is RECORDED, as a fact of its own kind. Not as a fabricated finding -- inventing a
+        # `critical` nobody measured would put a defect in the record -- but as the honest one:
+        # a measurement exists here and cannot be read. `FindingsWire.blocks?/2` answers `true` for
+        # it whenever a floor is declared, because *unknown* must not be spent as *no*. A card with
+        # no curve is untouched: no floor, no question, same behaviour as before.
+        #
+        # The binary verdict stays sovereign either way -- this is a ceiling, the judge is a floor.
+        {:error, :undecodable} ->
+          Logger.warning(
+            "Jury: #{login}'s review carries a findings-v1 block that does not decode — " <>
+              "recorded as UNREADABLE (blocks under a declared floor), the binary verdict stands"
+          )
+
+          Map.put(acc, RoleIdentity.role_or_login(login), Fleet.FindingsWire.unreadable())
+
+        :none ->
+          acc
+      end
+    end)
   end
 
   # F-C069

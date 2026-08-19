@@ -33,8 +33,21 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   mistyped `details`/`chain` — fail-closes to `halt_invalid` (refusal logged) instead of
   crossing with a silently truncated trace. The compiled enum+reason check stays the
   floor: the module list is the compile-time authority, the schema its wire mirror
-  (equality pinned by `GateDecisionTest`). The only side effect in this module is that
-  refusal warning — no state is carried.
+  (equality pinned by `GateDecisionTest`). The only side effects in this module are the
+  two refusal warnings (envelope, findings) — no state is carried.
+
+  ## The optional machine payload (`details.findings_v1`)
+
+  A judge MAY carry its findings machine-readable under the VERSIONED key
+  `details.findings_v1` (`findings-v1.json`, C1 2026-08-18). The envelope stays intact:
+  a legacy judge without the key crosses exactly as before. `take_findings/1` validates
+  the payload and the failure direction is the opposite of the envelope's, on purpose:
+  an INVALID `findings_v1` never flips the decision — the envelope was already validated,
+  and a broken OPTIONAL payload must not kill a valid verdict (absence is recorded, never
+  fabricated). Invalid → loud warning, no machine object, the raw payload stays in the
+  prose details rendering (noisy rather than silently discarded). Valid → stripped from
+  the prose (its human matter already lives in `reason`, by SP contract) and handed to
+  the completer for the git write next to the prose pinning.
   """
 
   require Logger
@@ -45,6 +58,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   # Wire contract of the judge verdict — validated integrally on ingest (see moduledoc).
   @schema_file "gate-decision-v1.json"
+
+  # OPTIONAL machine payload under `details` — its own versioned key + schema so the
+  # gate-decision-v1 envelope never moves (a legacy judge stays valid byte-for-byte).
+  @findings_key "findings_v1"
+  @findings_schema_file "findings-v1.json"
 
   # ============================================================
   # Decoding — reading the decision buried in the envelopes
@@ -66,7 +84,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     reason = result["reason"]
 
     if result["decision"] in @gate_decisions and is_binary(reason) and reason != "" do
-      case ExJsonSchema.Validator.validate(resolved_schema(), result) do
+      case ExJsonSchema.Validator.validate(resolved_schema(@schema_file), result) do
         :ok ->
           result["decision"]
 
@@ -86,14 +104,69 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def gate_decision(_), do: "halt_invalid"
 
   @doc false
+  # C1 2026-08-18: the OPTIONAL machine payload, extracted AND validated in one gesture.
+  #
+  # Returns `{findings, result}` where `findings` is the valid `details.findings_v1` map or `nil`,
+  # and `result` is the envelope WITHOUT the key when findings are valid (the prose rendering must
+  # not inspect-dump a machine object into a human review — its human matter already lives in
+  # `reason`, the SP demands it) and UNTOUCHED otherwise. The failure direction is deliberate and
+  # opposite to `gate_decision/1`'s: an invalid `findings_v1` NEVER flips the verdict — the
+  # envelope was already validated, and a broken optional payload must not kill a valid verdict.
+  # Invalid → loud warning + `nil` + the raw payload LEFT in `details` (it reaches the review body
+  # as an inspect dump: noisy rather than silently discarded). Independent of the envelope's own
+  # validity on purpose: the findings object stands on its own schema, and coupling the two would
+  # make one optional payload's fate depend on a check it has already lost or won elsewhere.
+  def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
+    # ON DÉCODE UNE CHAÎNE AVANT DE JUGER, ET C'EST MESURÉ, PAS PRÉVENTIF. Banc du 2026-08-19,
+    # probe-rails#47 : un juge a rendu `findings_v1` sous forme de JSON SÉRIALISÉ
+    # (`"{\"findings\":[]}"`), refusé par le schéma en « Expected Object but got String » — sa
+    # mesure était juste, son encodage non, et le rail a tout jeté. Un agent qui produit du JSON
+    # dans un champ hésite naturellement entre l'objet et sa sérialisation ; refuser la seconde
+    # ne défend RIEN (le contenu est identique une fois décodé) et coûte la mesure entière.
+    # Libéral sur la forme reçue, strict sur le fond : ce qui sort du décodage passe le MÊME
+    # schéma, et une chaîne qui ne décode pas reste un refus.
+    findings = decode_if_string(findings)
+
+    case ExJsonSchema.Validator.validate(resolved_schema(@findings_schema_file), findings) do
+      :ok ->
+        {findings, %{result | "details" => Map.delete(details, @findings_key)}}
+
+      {:error, errors} ->
+        Logger.warning(
+          "StepRunConsumer: details.#{@findings_key} refused — #{@findings_schema_file} invalid " <>
+            "(#{inspect(errors)}); the verdict stands (envelope already validated), the machine " <>
+            "payload is dropped and stays prose-only"
+        )
+
+        {nil, result}
+    end
+  end
+
+  def take_findings(result), do: {nil, result}
+
+  defp decode_if_string(findings) when is_binary(findings) do
+    case Jason.decode(findings) do
+      {:ok, %{} = decoded} -> decoded
+      _ -> findings
+    end
+  end
+
+  defp decode_if_string(findings), do: findings
+
+  @doc false
+  def findings_key, do: @findings_key
+
+  @doc false
+  # BOTH wire schemas resolve here, fail-loud at rail boot (`Fleet.Pilot.Application`): a broken
+  # deploy artifact refuses before the first verdict instead of crashing the consumer singleton.
   def load_schema! do
-    _ = resolved_schema()
+    _ = resolved_schema(@schema_file)
+    _ = resolved_schema(@findings_schema_file)
     :ok
   end
 
-  defp resolved_schema do
-    path =
-      :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{@schema_file}")
+  defp resolved_schema(file) do
+    path = :code.priv_dir(:lcars_fleet) |> to_string() |> Path.join("workflow/schema/#{file}")
 
     Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
   end
@@ -206,7 +279,13 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     if substance == [] do
       nil
     else
-      verdict = if event == :approve, do: "APPROUVÉ", else: "CHANGEMENTS DEMANDÉS"
+      # ⚖ TAXONOMIE (moon-shot `iec-like-rigor`, hiérarchie de vérité) : un verdict de juge est
+      # tagué JUDGED — « soft gate, jamais acceptation seule ». Il ne PEUT donc pas approuver, et
+      # écrire « APPROUVÉ » lui attribuait un acte qui n'est pas le sien : l'acceptation est
+      # l'affaire du rail (CI verte = PROVEN, puis le seal). La forge, elle, garde son mot
+      # (`APPROVED` reste l'état de la review — la branch-protection les compte, et le seal les
+      # relit) : c'est la PROSE lue par un humain qui doit dire la vérité, pas le protocole.
+      verdict = if event == :approve, do: "AVIS FAVORABLE", else: "CHANGEMENTS DEMANDÉS"
 
       ["**#{verdict}** — verdict du juge.", reason, details, chain]
       |> Enum.reject(&(&1 in [nil, ""]))

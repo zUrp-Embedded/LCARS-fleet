@@ -116,6 +116,13 @@ spec:
       # modop que le catalogue accepte pouvait donc GELER le pod qui l'active, verrou du ticket
       # compris. La règle écrite trois lignes plus haut s'applique littéralement : la liste couvre
       # ce que le rôle peut LÉGITIMEMENT atteindre, pas seulement ce qu'on veut qu'il fasse.
+      # ⚠ LA RAISON CI-DESSUS A CHANGÉ LE 2026-08-19 (sortie de superpowers) : le bundle
+      # `brainstorming` qui ORDONNAIT ce TodoWrite n'existe plus. L'outil RESTE, et c'est
+      # délibéré — le retirer parce que son commanditaire a disparu rejouerait exactement le
+      # gel 6-136 : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
+      # saute pas, il PROMPTE, et un pod n'a personne pour répondre. La règle écrite plus haut
+      # tient toute seule sans le modop : la liste couvre ce que le rôle peut LÉGITIMEMENT
+      # atteindre, et un rôle de conception atteint légitimement une liste de tâches.
       - TodoWrite
       # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
       # (create_project/import_project/list_workflow_cards) belongs to starfleet (fleet-master) since the
@@ -187,6 +194,11 @@ spec:
     wake_send_keys: true
   modop_set:
     default: [long-session-discipline]
-    optional: [brainstorming, rubber-duck]
+    # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (brainstorming)
+    # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
+    # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
+    # ils étaient livrés et jamais composés. Le tri n'a rien trouvé à rapatrier — leur
+    # doctrine était soit importée telle quelle, soit déjà couverte par nos propres blocs.
+    optional: [rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null

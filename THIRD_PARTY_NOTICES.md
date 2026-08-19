@@ -33,7 +33,7 @@ Chaque emprunt est qualifié par sa **forme**, parce que les obligations et les 
 | [token-saver](https://github.com/ppgranger/token-saver) | ppgranger | Apache-2.0 | `import` | `fleet/vendor/token_saver/` |
 | [wshobson/agents](https://github.com/wshobson/agents) | wshobson et contributeurs | MIT | `import` | `knowledge/wshobson-agents/` |
 | [GitWand](https://github.com/devlint/GitWand) | devlint | MIT | `recode` | `fleet/lib/fleet/conflict.ex` |
-| [superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT | `pattern` + `dep` | `fleet/priv/catalogue/cap_profile/canon/` |
+| [superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT | `pattern` + `dep` — **RETIRÉ le 2026-08-19** | *(plus aucun fichier ; cf. §4)* |
 
 ---
 
@@ -90,19 +90,44 @@ La chaîne complète — audit, ce qui a été gardé, ce qui a été refusé et
 
 ---
 
-## 4. superpowers — `pattern` et `dep`
+## 4. superpowers — `pattern` et `dep` — **RETIRÉ**
 
 - **Source** : https://github.com/obra/superpowers
 - **Auteur** : Jesse Vincent
 - **Licence** : MIT
+- **Statut** : **plus aucun fichier de ce dépôt ne dérive de ce corpus** (retrait du 2026-08-19)
 
-**Forme `pattern`** — la doctrine d'ingénierie agentique (revue de code par pairs, développement piloté par les tests, idéation, développement par sous-agents) a été **entièrement réécrite** pour LCARS. Aucune prose n'est copiée : un prompt système ne se traduit pas, il se réécrit.
+**Cette section reste au passé plutôt que d'être supprimée.** Un emprunt a eu lieu ; l'effacer
+réécrirait l'histoire du dépôt, et une notice tierce sert précisément à ce que cette histoire soit
+vérifiable après coup. Ce qui suit décrit ce qui a été emprunté, et ce qu'il en reste.
 
-Neuf fichiers de `fleet/priv/catalogue/cap_profile/canon/` portent l'attribution explicite de leur source via la convention interne `**Dérivé de**`, avec la mention `ADAPT` (réécrit) ou `ADOPT` (repris tel quel dans l'esprit).
+**Ce qui avait été emprunté — forme `pattern`.** La doctrine d'ingénierie agentique (revue par
+pairs, développement piloté par les tests, idéation, développement par sous-agents) avait été
+réécrite pour LCARS, sans copie de prose, sous la convention interne `**Dérivé de**` (`ADAPT` /
+`ADOPT`). Le matériel vivait dans huit fichiers markdown de
+`fleet/priv/catalogue*/cap_profile/canon/` — cinq modop-bundles et trois subagent-templates. La
+version précédente de cette notice en annonçait neuf : le compte avait déjà dérivé.
 
-**Forme `dep`** — le plugin `superpowers` lui-même peut être chargé à l'exécution dans les pods de la fleet, via la variable `LCARS_SKILLS_PLUGINS`. Il n'est **pas redistribué** par ce dépôt : il est récupéré depuis sa source d'origine, à une version épinglée.
+**Ce qui avait été emprunté — forme `dep`.** Le plugin `superpowers` pouvait être chargé au
+runtime dans un pod via `LCARS_SKILLS_PLUGINS`. Il n'a jamais été redistribué par ce dépôt, et
+**aucun cap-profile ne l'a jamais déclaré** : le mécanisme de chargement est générique et sert
+d'autres skills (`card-revision`). Il reste ; le plugin n'a rien à y voir.
 
-Le corpus d'origine cite lui-même ses propres sources — notamment les travaux de Cialdini (2007) et Meincke (2025) sur les principes de persuasion. Cette filiation est conservée dans nos fichiers dérivés.
+**Le retrait, et pourquoi.** Décision utilisateur : l'intégration avait été faite vite et le
+matériel décrivait une architecture qui n'est pas la nôtre — les fragments faisaient lire des
+`spec.md` / `plan.md` qu'un projet LCARS ne contient pas, et parlaient de « sous-agents » alors
+qu'aucun n'est jamais lancé (le fragment était concaténé dans le prompt du rôle lui-même). Rien
+n'était actif au moment du retrait : aucun bundle `optional` n'est jamais activé en production, et
+les deux dernières déclarations vivantes (juges) avaient été débranchées le même jour.
+
+Ce qui, dans ces fichiers, était de LCARS a été rapatrié dans le catalogue avant suppression : la
+grille de sévérité (→ `sp_blocks/core/judge-verdict.md`) et le plancher mécanique conditionnel du
+lot B (→ `sp_blocks/method/test-evidence-review.md`).
+
+**Vérifier** : `grep -rn "Dérivé de.*superpowers" fleet/priv` — zéro résultat attendu.
+
+Le corpus d'origine cite lui-même ses sources (Cialdini 2007, Meincke 2025) ; cette filiation
+partait avec les fichiers dérivés.
 
 ---
 

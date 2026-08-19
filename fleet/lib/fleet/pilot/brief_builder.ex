@@ -114,9 +114,9 @@ defmodule Fleet.Pilot.BriefBuilder do
     Ce n'est PAS ton travail et tu n'as pas de brief à reprendre. Le producteur a épuisé son
     budget de rework sur ce conflit ; tu interviens en dernière passe avant escalade humaine.
 
-    Le contenu des deux côtés est déjà APPROUVÉ : les juges ont validé la branche, et les briques
-    sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le fond — la seule question
-    est de composer les deux intentions sans en sacrifier une.
+    Le fond des deux côtés est déjà ACCEPTÉ — les juges ont rendu un AVIS FAVORABLE, le rail l'a
+    scellé, et les briques sœurs sont mergées sur `#{base}`. Il n'y a donc rien à arbitrer sur le
+    fond : la seule question est de composer les deux intentions sans en sacrifier une.
 
     1. Intègre l'état actuel de `#{base}` : `git merge lcars/base` dans ton workspace. (`lcars/base`
        est le ref que le runtime a posé sur `#{base}` avant ton démarrage — ton clone est
@@ -367,7 +367,16 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
     with {:ok, outputs} <- judge_outputs(forge, repo, number, forge_opts) do
-      step_judge_brief(role, forge, repo, number, forge_opts, route, opts, with_ci(outputs, opts))
+      step_judge_brief(
+        role,
+        forge,
+        repo,
+        number,
+        forge_opts,
+        route,
+        opts,
+        outputs |> with_ci(opts) |> with_gray_zone(opts)
+      )
     end
   end
 
@@ -402,6 +411,86 @@ defmodule Fleet.Pilot.BriefBuilder do
         outputs
     end
   end
+
+  # C3 — LES MESURES QUE L'ARBITRE DOIT TRANCHER, et rien d'autre. Threadées comme le fait CI par
+  # `VerdictException` : le gate a lu les findings et la courbe, le brief les CITE. Sans elles, un
+  # gatekeeper convoqué sur une zone grise ne saurait pas ce qui est gris — il re-jugerait le
+  # livrable à l'aveugle et rendrait un troisième avis au lieu d'arbitrer les deux existants.
+  defp with_gray_zone(outputs, opts) do
+    case Keyword.get(opts, :gray_zone) do
+      %{findings: findings, policy: policy} when map_size(findings) > 0 ->
+        Map.put(outputs, "zone_grise", gray_zone_line(findings, policy))
+
+      _ ->
+        outputs
+    end
+  end
+
+  @doc false
+  # PUBLIC pour le test, et la propriété qu'il tient n'est observable que d'ici : le brief de
+  # l'arbitre est composé en profondeur (outputs → sections → rendu), et la seule chose qui compte
+  # dans cette ligne est qu'elle distingue trois états d'un rapport de juge. La rendre atteignable
+  # coûte un `@doc false` ; la tenir par le brief complet coûterait une couture de forge entière.
+  def gray_zone_line_for_test(opts) do
+    %{findings: f, policy: p} = Keyword.fetch!(opts, :gray_zone)
+    gray_zone_line(f, p)
+  end
+
+  defp gray_zone_line(findings, policy) do
+    seuil =
+      case policy do
+        %{"block_at" => at} when is_binary(at) -> at
+        _ -> "inconnu"
+      end
+
+    "ARBITRAGE — les juges ont rendu un AVIS FAVORABLE sur ce livrable, et la carte du projet le " <>
+      "refuse : au moins un " <>
+      "finding rendu par un juge atteint la sévérité `#{seuil}`, seuil au-delà duquel cette " <>
+      "criticité ne tolère rien. Personne ne s'oppose au livrable ; ce sont une approbation et une " <>
+      "mesure, du MÊME juge, qui se contredisent. Tu es convoqué pour trancher CETTE " <>
+      "contradiction — pas pour rendre un troisième avis sur le travail. Approuver signifie « la " <>
+      "mesure est juste et ce livrable peut vivre avec » ; refuser signifie « la courbe a raison, " <>
+      "le producteur doit reprendre ». Les rapports, par rôle : #{findings_digest(findings)}"
+  end
+
+  # Le DIGEST, pas les rapports : leur substance vit dans les reviews de la PR, que le pod lit déjà.
+  # Recopier ici des findings complets ferait du brief une seconde source de la même donnée — et
+  # celle qu'on lit n'est jamais celle qu'on a corrigée.
+  defp findings_digest(findings) do
+    Enum.map_join(findings, " ; ", fn {role, payload} ->
+      "`#{role}` (#{digest_detail(payload)})"
+    end)
+  end
+
+  # TROIS ÉTATS, PAS DEUX — et le troisième est celui que l'arbitre doit pouvoir distinguer.
+  # La version d'avant rangeait « ce juge a mesuré et n'a RIEN trouvé » sous « aucune sévérité
+  # lisible », qui se lit comme un défaut de sa charge. Mesuré au banc le 2026-08-19 (PR71) : le
+  # reviewer avait rendu `{"findings": [], "severity_max": "none"}` — une mesure valide, explicite,
+  # et le brief du gatekeeper la lui a présentée comme illisible. Un arbitre convoqué pour trancher
+  # une contradiction entre une approbation et une mesure ne peut pas travailler si le rail lui
+  # décrit une mesure claire comme du bruit.
+  # L'arbitre doit savoir qu'il arbitre sur un TROU, pas sur une mesure. C'est le seul état où la
+  # zone grise ne vient pas d'un désaccord entre un juge et la carte, mais d'une charge illisible.
+  defp digest_detail(%{"findings_unreadable" => true}),
+    do: "a mesuré, mais sa charge est ILLISIBLE — c'est ce trou qui bloque, pas un finding"
+
+  defp digest_detail(payload) when is_map(payload) do
+    case Map.get(payload, "findings") do
+      [] ->
+        "a mesuré, aucun finding"
+
+      list when is_list(list) ->
+        case list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies() do
+          sev when map_size(sev) == 0 -> "#{length(list)} finding(s), sévérités non lisibles"
+          sev -> Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
+        end
+
+      _ ->
+        "charge de forme inattendue"
+    end
+  end
+
+  defp digest_detail(_), do: "pas de mesure"
 
   defp ci_line(sha, contexts) do
     "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a rendu VERT. Ce fait t'est " <>

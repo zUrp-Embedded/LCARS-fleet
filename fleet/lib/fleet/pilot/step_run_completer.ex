@@ -394,7 +394,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
   traceable, readable without a custom query. It is the durable HOME of the verdict.
 
   `step_run`: `:repo`, `:issue_number`, `:pr_number`, `:role`, `:review_event` (`:approve` |
-  `:request_changes` | `:comment`), `:review_body` (optional, default generated from role + verdict).
+  `:request_changes` | `:comment`), `:review_body` (optional, default generated from role + verdict),
+  `:review_findings` (optional — the schema-valid `details.findings_v1` machine payload, engraved
+  as `verdicts/issue-<n>-<role>.json` next to the prose pin, best-effort).
   Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
 
   `:issue_number` is REQUIRED and fetched fail-loud: a verdict long enough to be committed is
@@ -411,6 +413,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
     event = Map.fetch!(step_run, :review_event)
 
     role = Map.get(step_run, :role, "juge")
+    work_dir = verdict_work_dir(repo, opts)
+
+    # C1 2026-08-18: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
+    # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
+    # same reason (OpsObject's idempotent content probe: a re-run re-finds the commit, never forks
+    # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
+    # blocks the review — the human matter of the findings already lives in the `reason` prose,
+    # so the verdict loses its machine copy, not its substance.
+    :ok = maybe_engrave_findings(step_run, work_dir, role)
 
     # SUMMARY + POINTER above the threshold. A long verdict pasted into a review is unreadable in
     # the UI, unquotable (nothing addresses a version of it) and EDITABLE — a human amending the
@@ -423,11 +434,24 @@ defmodule Fleet.Pilot.StepRunCompleter do
       step_run
       |> Map.get(:review_body, Texts.review_body(role, event))
       |> Pinning.render(
-        work_dir: verdict_work_dir(repo, opts),
+        work_dir: work_dir,
         ref: Fleet.Layout.verdict_ref(Map.fetch!(step_run, :issue_number), role),
         kind: "Verdict",
         label: "verdict"
       )
+
+    # C2 — THE MACHINE VERDICT RIDES THE REVIEW ITSELF. C1 engraved it as an ops object, which is
+    # the right ARCHIVE and the wrong transport: the gate that has to consume it (`Jury`) already
+    # fetches every review body in one call, while the ops store is write-only. Appended here,
+    # `findings_v1` reaches the gate with no extra request and no new read path, scoped to the very
+    # review that carried it -- a superseded review takes its findings out of play WITH it.
+    #
+    # OUTSIDE `Pinning.render`, deliberately, and this is the same lesson the conflict rail already
+    # paid for its `[conflict-engine:...]` marker: a pinned body is SUMMARIZED, so anything folded
+    # into the prose is dropped exactly on the long verdicts -- the ones that carry the findings
+    # worth reading. Rendered inside, the wire would work on short reviews only, which is where
+    # nobody would notice it missing.
+    body = body <> Fleet.FindingsWire.render(Map.get(step_run, :review_findings))
 
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
     # the review author = qualifier/reviewer (honest avatar/trace), not the system account. Token
@@ -445,6 +469,87 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
       {:error, :role_token_unavailable} = err ->
         err
+    end
+  end
+
+  # The machine verdict's git write — a SIMPLE ops commit, deliberately NOT `Pinning.render`:
+  # Pinning is comment-oriented (summary + pointer posted on the forge surface), and a JSON object
+  # has no surface to summarize onto — its only home is the file. Same tree and basename as the
+  # prose pin (`verdicts/issue-<n>-<role>.{md,json}`): one act, two renderings, side by side.
+  #
+  # NONE of these exits is mute except the nominal absence (no `:review_findings` = a legacy judge,
+  # today's path). A judge that DID emit machine findings and finds no ops face loses the machine
+  # copy — that fact is recorded loud (same doctrine as the provenance `{:work_dir_missing, _}`:
+  # absence is recorded, never fabricated), and the review posts regardless: a broken or homeless
+  # OPTIONAL payload never blocks a valid verdict.
+  defp maybe_engrave_findings(step_run, work_dir, role) do
+    case {Map.get(step_run, :review_findings), work_dir} do
+      # THIS SILENCE WAS RIGHT FOR ONE DAY AND WRONG THE NEXT. It read "no key = a legacy judge,
+      # today's path" -- true while `findings_v1` was brand new and no SP named it. Every judge's
+      # composed SP names it now, so an absence is no longer a judge that never heard of the key:
+      # it is a judge that was told and did not. MEASURED 2026-08-19 (bench, PR#34): the qualifier
+      # returned an excellent verdict -- it named the planted faux-vert structurally -- and NO
+      # machine payload at all, and nothing anywhere said so.
+      #
+      # That silence is what would make the verdict function of C2 blind: f reads findings, an
+      # absent payload starves it, and a starved f degrades to exactly today's boolean AND while
+      # LOOKING like it is weighing severities. A rail that silently stops being fed is worse than
+      # one that was never built. So: loud, per verdict, naming the judge.
+      {nil, _} ->
+        # DEUX PHRASES, PARCE QUE CE SONT DEUX FAITS. Ce log n'en disait qu'une — « ce juge n'a
+        # rien envoyé » — et il l'a dite à tort pendant toute une campagne de mesure : les juges
+        # émettaient, le schéma refusait en amont (`take_findings`), et l'accusation d'ici
+        # m'envoyait chercher pourquoi ils se taisaient. Un rail qui nomme mal la panne qu'il
+        # observe coûte plus cher qu'un rail muet.
+        if Map.get(step_run, :review_findings_refused) do
+          Logger.warning(
+            "StepRunCompleter: judge #{role} DID submit details.findings_v1 on " <>
+              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)}, and it was " <>
+              "REFUSED upstream (see the schema error logged by StepRunConsumer just above). " <>
+              "Its measure is lost to the rail — but the judge did its part: fix the form, not " <>
+              "the judge."
+          )
+        else
+          Logger.warning(
+            "StepRunCompleter: judge #{role} submitted NO details.findings_v1 on " <>
+              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
+              "survives as prose only. The SP asks every judge for the machine payload; without " <>
+              "it no aggregation can weigh this verdict, it can only count it."
+          )
+        end
+
+        :ok
+
+      {findings, nil} ->
+        Logger.warning(
+          "StepRunCompleter: findings_v1 NOT engraved (#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} " <>
+            "role=#{role}): the project has no ops face — the judge's machine verdict " <>
+            "(#{length(Map.get(findings, "findings", []))} finding(s)) survives only as prose"
+        )
+
+        :ok
+
+      {findings, work_dir} ->
+        ref = Fleet.Layout.verdict_findings_ref(Map.fetch!(step_run, :issue_number), role)
+
+        case Fleet.Workflow.OpsObjectSync.commit_object(
+               work_dir,
+               ref,
+               Jason.encode!(findings, pretty: true) <> "\n",
+               label: "verdict",
+               push: :ops
+             ) do
+          {:ok, _sha, _push_state} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "StepRunCompleter: findings_v1 NOT engraved at #{ref} (#{inspect(reason)}) — " <>
+                "the review posts anyway; the machine verdict survives only as prose"
+            )
+
+            :ok
+        end
     end
   end
 

@@ -147,21 +147,42 @@ defmodule Fleet.SPBuilderTest do
       assert sp_md =~ "fire-mode"
     end
 
-    test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud" do
-      # reviewer→code-quality-reviewer: subagent-code-quality-reviewer.md exists in the canon (default root
-      # = app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/subagent-templates"), not overridden by the setup).
+    @tag :tmp_dir
+    test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud",
+         %{tmp_dir: tmp} do
+      # ⚠ CE TEST EMPRUNTAIT SON ARTEFACT AU CANON, ET LE CANON A CHANGÉ. Il composait
+      # `code-quality-reviewer` en comptant sur `subagent-code-quality-reviewer.md` livré par le
+      # catalogue — donc sur une COÏNCIDENCE : que ce fichier existe encore. La sortie de
+      # superpowers (⚖ user 2026-08-19) l'a supprimé avec ses deux frères, et le test est tombé
+      # alors que le MÉCANISME qu'il existe pour prouver n'avait pas bougé d'une ligne.
+      #
+      # Il fabrique donc son propre template, comme le fait déjà `catalogue_verify_test` depuis le
+      # même jour : ce qu'on veut prouver, c'est qu'un fragment DÉCLARÉ est injecté et qu'un
+      # fragment déclaré-mais-absent échoue fort — deux propriétés du composeur, qui ne doivent
+      # rien devoir au contenu du catalogue.
+      root = Path.join(tmp, "subagent-templates")
+      File.mkdir_p!(root)
+      File.write!(Path.join(root, "subagent-fixture-lentille.md"), "# fixture lentille\ncorps\n")
+
+      prev = Application.get_env(:lcars_fleet, :sp_builder_subagent_template_root)
+      Application.put_env(:lcars_fleet, :sp_builder_subagent_template_root, root)
+
+      on_exit(fn ->
+        Application.put_env(:lcars_fleet, :sp_builder_subagent_template_root, prev)
+      end)
+
       profile =
         valid_cap_profile(%{
           "systemPrompt" => nil,
           "invocation" => %{
             "lifetime_scope" => "one-shot",
-            "subagent_template" => "code-quality-reviewer"
+            "subagent_template" => "fixture-lentille"
           }
         })
 
       assert {:ok, %{sp_md: sp_md}} = Fleet.SPBuilder.compose(profile, [])
-      assert sp_md =~ "subagent-template:code-quality-reviewer"
-      assert sp_md =~ "code-quality-reviewer"
+      assert sp_md =~ "subagent-template:fixture-lentille"
+      assert sp_md =~ "fixture lentille"
 
       # Declared but file absent → fail-loud (the pod does not launch on a half-composed SP).
       bad =
@@ -313,7 +334,12 @@ defmodule Fleet.SPBuilderTest do
       # Le MEME resolveur que le compositeur (`Blocks`), jamais un chemin rebati : les blocs vivent
       # dans le catalogue systeme, la carte dans le catalogue metier, et un chemin en dur ici
       # mesurerait un fichier que la fleet ne lit pas.
-      block =
+      # (Lot B, 2026-08-18) SECOND déménagement, même sujet : l'ordre de preuve a quitté
+      # `core/evidence.md` (composé chez les DIX rôles — un juge qui obéissait rejouait la suite
+      # que le runner venait d'exécuter) pour `core/producer-output.md` (producteurs seuls). Le
+      # test suit, et tient désormais TROIS bouts : la doctrine existe pour le producteur, le
+      # socle universel reste chez tous, et l'ordre n'est PLUS chez les juges.
+      evidence =
         Fleet.Catalogue.find(
           Fleet.Catalogue.root(),
           Fleet.Catalogue.rel(:sp_blocks),
@@ -321,13 +347,25 @@ defmodule Fleet.SPBuilderTest do
         )
         |> File.read!()
 
-      assert block =~ "## Preuve avant action"
-      assert block =~ "Prouver ce que tu livres"
+      producer_output =
+        Fleet.Catalogue.find(
+          Fleet.Catalogue.root(),
+          Fleet.Catalogue.rel(:sp_blocks),
+          "core/producer-output.md"
+        )
+        |> File.read!()
+
+      # The universal floor stays with everyone…
+      assert evidence =~ "## Preuve avant action"
+      # …and the proof ORDER left it: a judge must not be told to replay the runner's suite.
+      refute evidence =~ "Prouver ce que tu livres"
+
+      assert producer_output =~ "Prouver ce que tu livres"
 
       # WHERE to look — the exact heading the extraction carries over, not a vague "the repo doc".
-      assert block =~ "## Test"
+      assert producer_output =~ "## Test"
       # And the clause that makes a missing runner visible rather than silently assumed.
-      assert block =~ "mensonge opérationnel"
+      assert producer_output =~ "mensonge opérationnel"
 
       assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
       refute claude_md =~ "Prouver ce que tu livres"
@@ -346,6 +384,30 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "Contraintes pod"
       refute claude_md =~ "disallowedTools"
       refute claude_md =~ "git_ops_denied"
+    end
+
+    # C1 2026-08-18 — the machine key is a CONSIGNE, not a guessed convention: the block that
+    # defines a judge's output NAMES `details.findings_v1` and its shape. Same resolver as the
+    # composer (`Catalogue.find`), same reason as the D1 test above: a hardcoded path here would
+    # measure a file the fleet does not read.
+    test "the judge is told the machine key and its shape (details.findings_v1)" do
+      judge_verdict =
+        Fleet.Catalogue.find(
+          Fleet.Catalogue.root(),
+          Fleet.Catalogue.rel(:sp_blocks),
+          "core/judge-verdict.md"
+        )
+        |> File.read!()
+
+      assert judge_verdict =~ "details.findings_v1"
+      # The TWO reconciled production vocabularies, named — never a third (spec-reviewer's
+      # severity/category/verdict triples + the moon-shot 0-10 mechanical score).
+      assert judge_verdict =~ "critical|important|minor"
+      assert judge_verdict =~ "missing|extra|divergent"
+      assert judge_verdict =~ "proven|partial|fail"
+      assert judge_verdict =~ "0-10"
+      # And the failure direction the rail implements, told to the judge in its own words.
+      assert judge_verdict =~ "ne casse PAS ton verdict"
     end
 
     test "returns :repo_claude_md_unreadable when path absent" do

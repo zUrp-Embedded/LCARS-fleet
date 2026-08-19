@@ -273,13 +273,14 @@ defmodule Fleet.Pilot.Application do
     validate_card_juries!()
     validate_card_steps!()
     validate_structural_roles!()
+    require_signer_tokens!()
     validate_workshop_card!()
     validate_default_card_matrix!()
 
-    # The verdict wire schema (gate-decision-v1) is EXECUTED on every ingest by
-    # Verdict.gate_decision/1 — resolved here once, fail-loud: a broken deploy artifact
-    # refuses at rail boot instead of crashing the StepRunConsumer singleton on the
-    # first verdict.
+    # The verdict wire schemas (gate-decision-v1 envelope + findings-v1 machine payload)
+    # are EXECUTED on every ingest by Verdict.gate_decision/1 / Verdict.take_findings/1 —
+    # resolved here once, fail-loud: a broken deploy artifact refuses at rail boot instead
+    # of crashing the StepRunConsumer singleton on the first verdict.
     Fleet.Pilot.StepRunConsumer.Verdict.load_schema!()
 
     interval = Application.get_env(:lcars_fleet, :pilot_poll_interval_ms, 30_000)
@@ -366,6 +367,9 @@ defmodule Fleet.Pilot.Application do
   # tient desormais est le check `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui
   # lit les DEUX listes a l'AST et refuse la divergence. Ajouter une garde au boot sans l'ajouter
   # ici fait maintenant rougir le gate, au lieu de rendre la phrase fausse en silence.
+  # (Perimetre : les gardes de CATALOGUE, la famille `validate_*!`. Une garde de BOITE —
+  # `require_signer_tokens!`, credentials sur disque — reste au boot seul : ce verificateur est
+  # tokenless par construction, cf. son commentaire.)
   @spec verify_cards_and_roles!(keyword()) :: :ok
   def verify_cards_and_roles!(opts \\ []) do
     Fleet.Workflow.Loader.publish_image!()
@@ -379,6 +383,37 @@ defmodule Fleet.Pilot.Application do
 
   defp validate_structural_roles! do
     _ = Fleet.Project.Roles.resolve_structural_roles!()
+    :ok
+  end
+
+  # A2 — the seal is fail-closed on its signer's role token, and since the signer follows the
+  # FUNCTION (gatekeeper on a clean PR, chief on a resolved conflict), a missing CHIEF token would
+  # surface at the most terminal act of the rarest path — the exact shape of the `chief`-not-in-
+  # `writers` scar (forge.tf): "le défaut attendait le pire moment pour se manifester". Same
+  # doctrine as the structural roles one line up: a box that cannot SIGN as its signers refuses
+  # readiness, it does not boot green and die months later.
+  #
+  # `require_`, NOT `validate_` — and the name is the declaration. The `validate_*!` family is the
+  # CATALOGUE-guard sequence, mirrored by the standalone verifier under the
+  # `boot.verifier_covers_rail` contract. This guard's subject is the BOX (credentials on disk),
+  # and the verifier is tokenless BY DESIGN (the container `verify` door drops to nobody:fleet and
+  # judges a catalogue that may not even be installed here) — playing it there would refuse valid
+  # catalogues for a credential question. A box guard therefore does not wear the family name:
+  # boot-only, by nature, and declared as such instead of hidden in an AST blind spot.
+  defp require_signer_tokens! do
+    # Through `as_role/2` — the seal's own door — and not `Credentials.RoleToken` directly: the
+    # boundary keeps RoleToken internal to Credentials, and probing through the exact call the
+    # seal will make is the stronger proof anyway (same resolution, same policy).
+    for role <- [
+          Fleet.Project.Roles.gatekeeper_role(),
+          Fleet.Project.Roles.conflict_resolver_role()
+        ],
+        match?({:error, :role_token_unavailable}, Fleet.Forge.Client.as_role([], role)) do
+      raise "pilot: no role token for merge signer #{inspect(role)} — the seal signs merges " <>
+              "fail-closed as this role and would refuse every merge on its path. Provision the " <>
+              "token (etc/provision-role-tokens.sh) before booting the rail."
+    end
+
     :ok
   end
 

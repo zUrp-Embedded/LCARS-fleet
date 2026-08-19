@@ -112,6 +112,9 @@ defmodule Fleet.Pilot do
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.Conflict,
+      # C2 — the judge's machine verdict is appended to the review body it posts (the gate reads it
+      # back out of the same object, cf. Fleet.FindingsWire).
+      Fleet.FindingsWire,
       Fleet.EventRouter,
       Fleet.Workflow,
       Fleet.Spawner,

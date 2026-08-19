@@ -181,9 +181,33 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     do:
       "blocage de branch-protection non levable mécaniquement (commits signés requis, ou une approbation manquante hors re-request) → à débloquer manuellement."
 
+  # C3 — ET CETTE CLASSE N'EST PAS UN ÉCHEC DE MERGE, ce qui est la raison même d'avoir sa clause :
+  # tombée dans le fourre-tout `_unknown`, une zone grise se serait annoncée à l'architecte comme un
+  # « échec de merge non classifié », et il aurait cherché un conflit git qui n'existe pas. Ici rien
+  # n'a échoué : le jury a rendu un AVIS FAVORABLE, et la carte refuse sur les mesures de ces
+  # mêmes juges — personne n'a encore ACCEPTÉ quoi que ce soit. Ce qui
+  # manque est un ARBITRAGE, et le sous-motif dit lequel des trois chemins y a mené.
+  defp merge_blocked_cause(:verdict_gray_zone, reason),
+    do:
+      "zone grise du verdict — le jury a rendu un AVIS FAVORABLE, la courbe de tolérance de la " <>
+        "carte refuse sur " <>
+        "les findings rendus par ces mêmes juges, et #{gray_zone_detail(reason)} Aucun conflit " <>
+        "git, aucun refus de juge : c'est un arbitrage qui manque, et il te revient."
+
   defp merge_blocked_cause(_unknown, reason),
     do:
       "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
+
+  defp gray_zone_detail(:verdict_pass_disabled),
+    do: "la passe d'arbitrage du gatekeeper n'est PAS armée sur cette boîte."
+
+  defp gray_zone_detail(:verdict_pass_spent),
+    do: "la passe d'arbitrage unique du gatekeeper a déjà été dépensée sans convergence."
+
+  defp gray_zone_detail({:verdict_pass_undispatchable, why}),
+    do: "la passe d'arbitrage n'a pas pu être convoquée (`#{inspect(why)}`)."
+
+  defp gray_zone_detail(other), do: "l'arbitrage n'a pas abouti (`#{inspect(other)}`)."
 
   # CORE of arch escalation (factored — conflict AND exhausted rework): DEDUPLICATED gatekeeper comment
   # (signed via `as_role`) + `lcars-awaits-arch` lock on the ISSUE → the poller SKIPS it

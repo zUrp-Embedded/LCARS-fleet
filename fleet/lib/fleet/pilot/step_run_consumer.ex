@@ -29,7 +29,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     * `:pass`                  → advances in the workflow_map (next_step).
     * `{:fail, _}`             → bounded REBOUND to the 1st step (anti-runaway rework).
-    * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft` or `terminal`
+    * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft`
       gate is NOT a scheduling step — it is a summons
       of the **one-shot per-project gatekeeper** (exception judge, reorg 2026-07-19). We enqueue
       an eval brief to the gatekeeper (work-session, addressed by `pod_id` via

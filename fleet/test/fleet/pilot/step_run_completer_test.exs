@@ -69,6 +69,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule PrForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -122,6 +127,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule PrFailForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -144,6 +152,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   defmodule OrchForge do
     # Read by the seal before it names who approved (it must not claim verdicts that do not
     # exist). No jury in this stub -> empty verdicts.
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -638,7 +649,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
       # "APPROUVÉ" pins the FR user-facing review body.
-      assert body =~ "APPROUVÉ"
+      # ⚖ TAXONOMIE : un juge rend un AVIS (tag JUDGED — « jamais acceptation seule »), il
+      # n'approuve pas. L'état de la review sur la forge reste `APPROVED` — c'est le protocole, et
+      # la branch-protection les compte — mais la prose lue par un humain ne doit pas attribuer au
+      # juge un acte qui appartient au rail.
+      assert body =~ "AVIS FAVORABLE"
+
+      refute body =~ "APPROUVÉ",
+             "le mot d'acceptation appartient au seal, pas au juge"
     end
 
     test "verdict :request_changes with explicit body" do
@@ -656,6 +674,251 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
 
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
+    end
+
+    # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings_v1` rides the
+    # step_run as `:review_findings` and lands as `verdicts/issue-<n>-<role>.json`, committed in
+    # the ops worktree next to the prose pin. Best-effort like the provenance triplet: every
+    # degradation below posts the review anyway and RECORDS the absence loud.
+    @tag :tmp_dir
+    test "review_findings → verdicts/issue-42-qualifier.json engraved (committed), review posted",
+         %{tmp_dir: tmp} do
+      # the project's ops face: project_name("fleet/proj") = "proj", a real git repo.
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      findings = %{
+        "findings" => [%{"severity" => "minor", "description" => "naming"}],
+        "score" => 9
+      }
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: findings
+      }
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(step_run,
+                 forge_client: PrForge,
+                 forge_opts: [],
+                 ops_root: tmp
+               )
+
+      assert_received {:review, 7, :approve, _body}
+
+      # The object on disk IS the validated payload — nothing wrapped, nothing fabricated: the
+      # path carries (issue, role), git carries the identity, the file carries the judge's words.
+      path = Path.join(work_dir, "verdicts/issue-42-qualifier.json")
+      assert File.exists?(path)
+      assert path |> File.read!() |> Jason.decode!() == findings
+
+      # committed, not just written: an uncommitted machine verdict has no citable identity.
+      {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
+      assert log =~ "verdict: verdicts/issue-42-qualifier.json"
+    end
+
+    # C2 2026-08-19 — le MÊME payload part aussi SUR LA REVIEW. L'objet gravé est l'archive ; le
+    # corps de la review est le TRANSPORT que le gate consomme (`Jury` fetch déjà tous les corps).
+    @tag :tmp_dir
+    test "review_findings → le corps posté PORTE le bloc machine, hors du résumé", %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      findings = %{"findings" => [%{"severity" => "important", "description" => "faux-vert"}]}
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :request_changes,
+        review_body: "Le test passe sans rien prouver.",
+        review_findings: findings
+      }
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(step_run,
+                 forge_client: PrForge,
+                 forge_opts: [],
+                 ops_root: tmp
+               )
+
+      assert_received {:review, 7, :request_changes, body}
+
+      assert {:ok, ^findings} = Fleet.FindingsWire.parse(body),
+             "le gate relit le payload dans le corps même de la review"
+
+      assert body =~ "Le test passe sans rien prouver.",
+             "et la prose du juge reste intacte devant : le bloc s'ajoute, il ne remplace pas"
+    end
+
+    test "un juge dont le payload a été REFUSÉ n'est pas accusé de s'être tu" do
+      # MESURÉ AU BANC (2026-08-19, probe-rails#47) : sur trois émissions, DEUX refusées par le
+      # schéma — un `findings_v1` sérialisé en chaîne, un `severity_max: "none"` hors énumération.
+      # Le log d'absence les rangeait toutes deux en « ce juge n'a rien envoyé », et cette phrase
+      # m'a envoyé chercher pendant des heures pourquoi les juges se taisaient — alors qu'ils
+      # parlaient. Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un rail muet.
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_body: "Prose.",
+        review_findings_refused: true
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
+        end)
+
+      assert log =~ "DID submit details.findings_v1"
+      assert log =~ "REFUSED upstream"
+
+      refute log =~ "submitted NO details.findings_v1",
+             "le juge a émis : l'accuser de silence envoie corriger le mauvais bout"
+    end
+
+    test "un juge SANS verdict machine poste le corps d'aujourd'hui, et son silence est DIT" do
+      # Deux propriétés en un test, parce qu'elles sont le même arbitrage : la compat est
+      # byte-for-byte (un juge qui n'émet rien ne voit pas sa review changer), MAIS l'absence
+      # cesse d'être muette. Mesuré au banc le 2026-08-19 : un qualifier a rendu un excellent
+      # verdict et zéro payload machine, sans qu'une ligne le dise nulle part — et c'est
+      # exactement ce qui affamerait la fonction d'agrégation qui vient.
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_body: "Rien à redire."
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
+        end)
+
+      assert_received {:review, 7, :approve, body}
+      assert body == "Rien à redire.", "aucun octet ajouté quand il n'y a rien à transporter"
+      assert log =~ "NO details.findings_v1"
+      assert log =~ "qualifier"
+    end
+
+    @tag :tmp_dir
+    test "no ops face → NO machine file, review posts, the absence is RECORDED loud", %{
+      tmp_dir: tmp
+    } do
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: %{"findings" => []}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      assert_received {:review, 7, :approve, _body}
+      # Same doctrine as the provenance {:work_dir_missing, _}: the missing record says so.
+      assert log =~ "findings_v1 NOT engraved"
+      refute File.exists?(Path.join([tmp, "proj", "verdicts"]))
+    end
+
+    @tag :tmp_dir
+    test "engrave failure (ops write refused) → loud warning, review UNHARMED", %{tmp_dir: tmp} do
+      # A `verdicts` regular FILE where the subdir must go: OpsObject's mkdir_p returns
+      # {:error, _} — a clean commit failure, no raise, exercising the degraded branch.
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      File.write!(Path.join(work_dir, "verdicts"), "not a directory")
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve,
+        review_findings: %{"findings" => []}
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      assert_received {:review, 7, :approve, _body}
+      assert log =~ "findings_v1 NOT engraved"
+    end
+
+    # ⚠ CE TEST A CHANGÉ DE VERDICT LE 2026-08-19, ET C'EST UN RENVERSEMENT ASSUMÉ. Il s'appelait
+    # « no machine file and NO noise (the legacy judge is nominal) » et épinglait le silence : au
+    # 18 août, `findings_v1` venait de naître, aucun SP ne le nommait, et un juge qui n'en émettait
+    # pas était un juge legacy — un cas NOMINAL, que rien ne devait accuser.
+    #
+    # Ce qui a changé n'est pas l'avis, c'est le monde : tous les SP de juge composent désormais la
+    # consigne. Une absence ne dit plus « ce juge n'a jamais entendu parler de la clé », elle dit
+    # « on lui a demandé et il ne l'a pas fait » — mesuré au banc le 2026-08-19 (PR#34 : verdict
+    # excellent, zéro payload, zéro trace). Le fichier machine reste absent (rien à graver) ; ce
+    # qui devient faux, c'est le silence.
+    @tag :tmp_dir
+    test "no review_findings → toujours aucun fichier machine, mais l'absence est DITE", %{
+      tmp_dir: tmp
+    } do
+      work_dir = Path.join(tmp, "proj")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      step_run = %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve
+      }
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(step_run,
+                     forge_client: PrForge,
+                     forge_opts: [],
+                     ops_root: tmp
+                   )
+        end)
+
+      refute File.exists?(Path.join(work_dir, "verdicts/issue-42-qualifier.json")),
+             "rien à graver : c'est l'ABSENCE de payload, pas un échec de gravure"
+
+      assert log =~ "NO details.findings_v1"
+
+      refute log =~ "NOT engraved",
+             "et surtout PAS le message d'échec de gravure : ne rien avoir à écrire n'est pas " <>
+               "avoir échoué à écrire, et confondre les deux enverrait chercher une panne d'ops"
     end
 
     test "record_review propagates the forge error" do

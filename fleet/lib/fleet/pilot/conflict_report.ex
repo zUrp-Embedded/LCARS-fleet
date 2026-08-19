@@ -9,7 +9,8 @@ defmodule Fleet.Pilot.ConflictReport do
   worth of reasoning and published a count.
 
   That matters most on the path where the machine WRITES. An auto-resolution pushes to a producer's
-  branch, and the only trace was a commit authored by `lcars-conflict-engine`. A human seeing an
+  branch, and the only trace was a commit authored by the runtime (`lcars-system` since A2 — the
+  engine minted itself `lcars-conflict-engine` before the function had a name). A human seeing an
   unexpected line asks "why did the machine touch this", and the answer existed, in memory, and was
   dropped one function before it could be posted.
 
@@ -122,8 +123,8 @@ defmodule Fleet.Pilot.ConflictReport do
   defp footer(:auto_resolved),
     do:
       "_Rapport du moteur de conflit. Le commit de résolution est signé " <>
-        "`lcars-conflict-engine` — c'est lui qui a tenu le stylo ; ce rapport est posté par le " <>
-        "chief, à qui l'acte appartient._"
+        "`lcars-system` — le moteur du runtime a tenu le stylo ; ce rapport est posté par le " <>
+        "chief, à qui l'acte appartient, et le merge sera scellé en son nom._"
 
   defp footer(:all_semantic),
     do:

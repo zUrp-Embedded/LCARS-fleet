@@ -36,6 +36,9 @@ defmodule Fleet.Forge do
       Fleet.GitRef,
       Fleet.Labels,
       Fleet.Layout,
+      # C2 — the gate reads the judges' machine verdict out of the review bodies it already
+      # fetches; the wire format is a foundation primitive shared with the writer side (Pilot).
+      Fleet.FindingsWire,
       Fleet.EnvParse,
       Fleet.Opts,
       Fleet.Credentials,

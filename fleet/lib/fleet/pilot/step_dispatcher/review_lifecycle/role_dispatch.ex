@@ -75,6 +75,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
+  defp maybe_refresh_conflict_base(kind, decision, spawner, pod_id, project)
+       when kind in [:conflict_rework, :conflict_rework_exception],
+       do: Spawn.refresh_conflict_base(decision, spawner, pod_id, project)
+
+  defp maybe_refresh_conflict_base(_kind, _decision, _spawner, _pod_id, _project), do: :ok
+
   @doc """
   Maps feature-branch parsing to the poller's skip contract.
   """
@@ -197,7 +203,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
          # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).
          project = stamp_pr_base(project, review_opts),
-         :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work") do
+         :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work"),
+         # A0.5 — conflict kinds only: the base MOVED (that is what a conflict is), and a live
+         # re-briefed-in-place pod keeps everything from its last provisioning, its stale
+         # `refs/lcars/base` included. Non-conflict kinds keep today's path byte-for-byte.
+         :ok <- maybe_refresh_conflict_base(kind, decision, ctx.spawner, pod_id, project) do
       # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
       case review_brief(
              kind,

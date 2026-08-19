@@ -103,4 +103,85 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
 
     assert :ok = DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
   end
+
+  # ─── A0 — FIRST-PARENT: a conflict-resolution merge imports the base's commits ─────────────────
+
+  defp merge_conflict_fixture(dir) do
+    # base repo, a "main" that advances with a FOREIGN commit (system-authored, other-role trailer),
+    # a feature branch, then the conflict resolved by MERGING main into feature (the rail's shape).
+    base = init_repo(dir)
+
+    {main0, 0} =
+      System.cmd("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"], stderr_to_stdout: true)
+
+    main = String.trim(main0)
+    git!(dir, ["checkout", "-q", "-b", "feature"])
+    File.write!(Path.join(dir, "f.txt"), "feat")
+    git!(dir, ["add", "-A"])
+
+    git!(dir, [
+      "commit",
+      "-q",
+      "-m",
+      "feat: mine\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>"
+    ])
+
+    git!(dir, ["checkout", "-q", main])
+    File.write!(Path.join(dir, "f.txt"), "mainchange")
+    git!(dir, ["add", "-A"])
+
+    git!(dir, [
+      "-c",
+      "user.name=lcars-system",
+      "-c",
+      "user.email=lcars-system@lcars.local",
+      "commit",
+      "-q",
+      "-m",
+      "chore(onboard): declaration\n\nCo-authored-by: LCARS-scribe <scribe@lcars.local>"
+    ])
+
+    git!(dir, ["checkout", "-q", "feature"])
+    {_, 1} = System.cmd("git", ["-C", dir, "merge", main], stderr_to_stdout: true)
+    File.write!(Path.join(dir, "f.txt"), "resolved")
+    git!(dir, ["add", "-A"])
+
+    git!(dir, [
+      "commit",
+      "-q",
+      "-m",
+      "resolve conflict\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>"
+    ])
+
+    # the pod's base_sha = the feature tip at dispatch = its own last commit before the merge
+    {tip, 0} =
+      System.cmd("git", ["-C", dir, "rev-parse", "HEAD~1"], stderr_to_stdout: true)
+
+    {base, String.trim(tip)}
+  end
+
+  @tag :tmp_dir
+  test "A0: a resolution merge importing a foreign-trailed base commit → trailer check PASSES (first-parent)",
+       %{tmp_dir: dir} do
+    {_root, feature_tip} = merge_conflict_fixture(dir)
+    assert :ok = DeliverableGate.check_coauthor_trailer(dir, feature_tip, "engineer")
+  end
+
+  @tag :tmp_dir
+  test "A0: the same merge range passes check_identity (imported lcars-system author is base-side)",
+       %{tmp_dir: dir} do
+    {_root, feature_tip} = merge_conflict_fixture(dir)
+    assert :ok = DeliverableGate.check_identity(dir, feature_tip, ["lordzurp.dev@gmail.com"])
+  end
+
+  @tag :tmp_dir
+  test "A0: a first-parent violation is STILL refused (the cut narrows the range, not the rule)",
+       %{tmp_dir: dir} do
+    {_root, feature_tip} = merge_conflict_fixture(dir)
+    # one more commit on the pod's own line, without trailer → refused
+    commit!(dir, "g.txt", "feat: sloppy, no trailer")
+
+    assert {:error, {:missing_coauthor_trailer, "engineer", [_sha]}} =
+             DeliverableGate.check_coauthor_trailer(dir, feature_tip, "engineer")
+  end
 end

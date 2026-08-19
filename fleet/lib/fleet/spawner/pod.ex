@@ -568,6 +568,28 @@ defmodule Fleet.Spawner.Pod do
     {:keep_state_and_data, [{:reply, from, info}]}
   end
 
+  # A0.5 — the LIGHT sibling of the cold reset below: moves `refs/lcars/base` alone on the live
+  # workspace. No reset, no clean, no `/clear` — the ticket's context stays (that is the point:
+  # an instance-scoped rework keeps its context BY DESIGN, and this call gives it the one thing
+  # that design withheld on a conflict: the base that moved). Touching a ref is safe on an idle
+  # pod — the working tree does not change under anyone.
+  def handle_event({:call, from}, {:refresh_work_base, project}, _state, data) do
+    ws = Fleet.Spawner.Pod.Paths.pod_workspace_path(data.pod_dir)
+
+    case Fleet.ProjectBootstrap.Phase.Clone.refresh_work_base(ws, project) do
+      {:ok, :refreshed} ->
+        Logger.info(
+          "pod #{data.pod_id} refs/lcars/base REFRESHED (conflict rework — the base moved)"
+        )
+
+        {:keep_state_and_data, [{:reply, from, :ok}]}
+
+      {:error, reason} = err ->
+        Logger.error("pod #{data.pod_id} refs/lcars/base refresh FAILED: #{inspect(reason)}")
+        {:keep_state_and_data, [{:reply, from, err}]}
+    end
+  end
+
   # Cold pipe reset is destructive and relies on the caller's :ready/:publishing gate.
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
     eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)

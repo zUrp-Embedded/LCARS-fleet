@@ -660,7 +660,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Merges (PROMOTES) the PR `index` via **`rebase`** (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
+  Merges (PROMOTES) the PR `index` via **`rebase`** by default — the SEAL passes `method: "merge"`
+  on a conflict-resolved PR (A0: its resolution IS a merge commit, a rebase drops it) — (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
   `Do: rebase` by default): replays the PR's commits onto the current `main` then fast-forwards →
   stays **LINEAR** (no merge commit, append-only doctrine preserved) AND handles a `main` that has
   advanced under the PR (PARALLEL MULTI-ISSUE: 2 disjoint issues → 2 PRs off the same `main` → the 1st

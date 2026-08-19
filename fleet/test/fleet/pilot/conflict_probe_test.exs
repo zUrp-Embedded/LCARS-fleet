@@ -102,6 +102,84 @@ defmodule Fleet.Pilot.ConflictProbeTest do
     end
   end
 
+  describe "probe/3 (fetch layer) — la sonde juge la base d'AUJOURD'HUI" do
+    # MESURE (banc vanille, probe-rails PR#30, 2026-08-18) : la sonde ne fetchait QUE la feature
+    # ref et jugeait le merge contre le `origin/main` que le clone avait vu en dernier. Une brique
+    # soeur posee sur main APRES ce fetch → la forge dit CONFLIT, la sonde fusionne PROPRE contre
+    # la base d'hier (0 hunks), et le tier 0 degrade en round producteur — sans une ligne de log.
+    # Meme maladie d'entrees dissymetriques que la note diff3 de ConflictApply : le diagnostic et
+    # l'ecriture doivent lire les MEMES entrees, et apply fait deja un `fetch origin` complet.
+    @tag :tmp_dir
+    test "une brique soeur posee sur main apres le dernier fetch du clone est VUE", %{
+      tmp_dir: dir
+    } do
+      remote = Path.join(dir, "remote.git")
+      work = Path.join(dir, "work")
+      clone = Path.join(dir, "pilot-clone")
+      git = fn cd, args -> {_, 0} = System.cmd("git", args, cd: cd, stderr_to_stdout: true) end
+
+      File.mkdir_p!(remote)
+      git.(remote, ["init", "-q", "--bare", "-b", "main"])
+
+      File.mkdir_p!(work)
+      git.(work, ["init", "-q", "-b", "main"])
+      git.(work, ["config", "user.email", "t@example.test"])
+      git.(work, ["config", "user.name", "Test"])
+
+      File.write!(
+        Path.join(work, "journal.txt"),
+        "- alpha\n- gamma\n- beta\n- epsilon\n- eta\n- zeta\n"
+      )
+
+      git.(work, ["add", "."])
+      git.(work, ["commit", "-qm", "base"])
+      git.(work, ["remote", "add", "origin", remote])
+      git.(work, ["push", "-q", "origin", "main"])
+
+      # Le clone du pilote fetch ICI — c'est la derniere fois qu'il voit main.
+      {_, 0} = System.cmd("git", ["clone", "-q", remote, clone], stderr_to_stdout: true)
+
+      # La feature : ligne 5 relue. La soeur, posee sur main APRES le clone : ligne 6 relue.
+      # Lignes adjacentes → git conflicte, et la base prouve les regions disjointes
+      # (non_overlapping, ecrivable) — mais seulement pour qui lit le main d'aujourd'hui.
+      git.(work, ["checkout", "-qb", "feature"])
+
+      File.write!(
+        Path.join(work, "journal.txt"),
+        "- alpha\n- gamma\n- beta\n- epsilon\n- eta (relu)\n- zeta\n"
+      )
+
+      git.(work, ["commit", "-qam", "feature: eta relu"])
+      git.(work, ["push", "-q", "origin", "feature"])
+      git.(work, ["checkout", "-q", "main"])
+
+      File.write!(
+        Path.join(work, "journal.txt"),
+        "- alpha\n- gamma\n- beta\n- epsilon\n- eta\n- zeta (relu)\n"
+      )
+
+      git.(work, ["commit", "-qam", "soeur: zeta relu"])
+      git.(work, ["push", "-q", "origin", "main"])
+
+      {:ok, diag} =
+        Fleet.Pilot.ConflictProbe.probe(
+          "x/probe-fetch",
+          "feature",
+          base_branch: "origin/main",
+          dir: clone,
+          auth: false
+        )
+
+      # Sur l'ancienne sonde : origin/main perime = la base elle-meme → merge propre → total 0,
+      # et le routage tier-0 conclut « rien a ecrire ici » sur un conflit que la forge voit.
+      assert diag.totals.total == 1,
+             "la sonde a juge contre une base perimee : le conflit que la forge voit n'existe pas chez elle"
+
+      assert diag.totals.writable == 1 and diag.totals.all_writable?,
+             "et ce conflit est exactement la cible du tier 0 : regions disjointes, base a l'appui"
+    end
+  end
+
   describe "diagnose_refs (git-backed)" do
     @tag :tmp_dir
     test "classifies a real 3-way merge: one whitespace hunk (trivial), one value hunk (complex)",

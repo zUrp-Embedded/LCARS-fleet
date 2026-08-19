@@ -116,7 +116,12 @@ spec:
     bridge_enabled: false
   modop_set:
     default: []
-    optional: [tdd, subagent-driven, rubber-duck]
+    # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (tdd, subagent-driven)
+    # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
+    # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
+    # ils étaient livrés et jamais composés. Le tri n'a rien trouvé à rapatrier — leur
+    # doctrine était soit importée telle quelle, soit déjà couverte par nos propres blocs.
+    optional: [rubber-duck]
     incompatible: []
     # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,
     # self-exit one-shot — predates MCP submit_result and contradicted the runtime protocol; the

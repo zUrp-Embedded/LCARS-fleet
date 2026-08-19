@@ -269,6 +269,9 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
   # judge lock) — same same-second tie risk as above, this time between two LABEL writes of
   # distinct families (cf. `Fleet.Labels`).
   defmodule PromoteSeqForge do
+    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+
     def get_pr_for_branch(_repo, _head, _base, _opts),
       do:
         (
@@ -308,6 +311,8 @@ defmodule Fleet.Pilot.StepRunCompleterSpacingTest do
 
     # Read by the seal to name the accounts that approved before it writes its closing
     # comment (it must not claim verdicts that do not exist). No jury here -> empty.
+    def get_route(_r, _n, _o), do: :none
+
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 

@@ -227,6 +227,24 @@
             "ignore"
           ],
           "description": "REQUIRED (`spec.required`), NEVER defaulted — exact twin of `jury`, and for the same reason. `required`: the gate READS the runner's verdict on the head sha BEFORE summoning the jury — red = producer rework with no judge spent, pending/absent = BOUNDED wait then escalation, green = the jury is summoned AND receives the fact in its brief. `ignore`: the pre-gate rail. The policy lives in the CARD, never in the engine (F-C061, same rule as the jury). WHY MANDATORY: while a default existed, a card that FORGOT to declare was indistinguishable from a card that DECIDED against — and the silent branch was the permissive one, so the omission read as green. Making the field mandatory does not pick a side; it makes the un-declared card unrepresentable, which is the only state that cannot be audited. CONSULTED WHENEVER A REVIEW IS PENDING, jury or not: `requested` is the union of the card's stable jury and the forge's volatile `requested_reviewers`, so a human asking for a review on a zero-jury card reaches this gate. `ignore` on `jury: []` is therefore a live declaration, not a decorative one."
+        },
+        "verdict_policy": {
+          "description": "C2 — la COURBE DE TOLÉRANCE de cette carte : à partir de quelle sévérité un finding mesuré par un juge refuse la PR alors même que ce juge l'a approuvée. OPTIONNEL : une carte qui n'en déclare pas garde l'agrégation booléenne (tout approuvé → promote, un refus → rework), byte-for-byte. Une carte ne peut être que PLUS stricte : elle N'ANNULE JAMAIS le refus explicite d'un juge (même règle que `ci` — la carte ne peut pas abroger un plancher). La clémence d'un niveau bas ne s'écrit pas ici mais dans `jury` : c0-poc n'a pas de juge du tout.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "block_at"
+          ],
+          "properties": {
+            "block_at": {
+              "description": "Sévérité PLANCHER qui bloque (échelle findings-v1 : minor < important < critical). `critical` ne refuse que sur un finding critique ; `minor` refuse sur le moindre finding mesuré — c'est la posture d'un livrable qui peut blesser.",
+              "enum": [
+                "critical",
+                "important",
+                "minor"
+              ]
+            }
+          }
         }
       }
     }

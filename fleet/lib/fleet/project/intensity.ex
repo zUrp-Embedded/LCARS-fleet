@@ -272,6 +272,37 @@ defmodule Fleet.Project.Intensity do
   end
 
   @doc """
+  The project's declared criticality — `"C0".."C4"`, `nil` if undeclared or unreadable.
+
+  ⚠ CE LECTEUR N'EXISTAIT PAS, ET C'EST LA MESURE LA PLUS NETTE DE L'ÉTAT DU RAIL VERDICT. Le
+  `level` était ÉCRIT par `write/2`, VALIDÉ par le schéma, et lu par personne : ce module exposait
+  `pipeline_default`, `declared_max_fan`, `declarable_card`, `undeclared_level`, `write` — aucune
+  fonction ne rendait la criticité d'un projet. Le niveau servait à choisir une CARTE
+  (`applicable_intensity`) et s'arrêtait là, donc sur un projet déclaré C4 la fonction de verdict
+  était byte-identique à celle d'un C0. Le modèle d'origine (« le verdict est une fonction de la
+  criticité ») n'était pas mal branché : il n'était pas LISIBLE.
+
+  Silencieux comme `declared_max_fan/2` et pour la même raison : ce qui alarme sur un fichier
+  cassé, c'est `pipeline_default/2` (substituer une carte change la couche de jugement), et deux
+  alarmes pour un fichier apprennent à un lecteur que la seconde ne veut rien dire.
+
+  L'absence se REND, jamais ne se fabrique : un appelant qui a besoin d'un niveau pour décider
+  prend `undeclared_level/0` — « on ne sait pas, donc on juge » — et le fait explicitement.
+  """
+  @spec declared_level(String.t(), keyword()) :: String.t() | nil
+  def declared_level(repo, opts \\ []) when is_binary(repo) do
+    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
+    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
+
+    with {:ok, raw} <- File.read(path),
+         {:ok, %{"level" => level}} when is_binary(level) <- Jason.decode(raw) do
+      level
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
   The project's declared throughput — workflow_runs in flight, `nil` if undeclared.
 
   Deliberately QUIETER than `pipeline_default/2` on a broken file: that one records an INCIDENT,

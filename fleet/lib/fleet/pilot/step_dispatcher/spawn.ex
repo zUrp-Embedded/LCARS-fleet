@@ -814,6 +814,38 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # COLD in-place reset of the workspace + /clear BEFORE the rebrief, then :ok (proceed). Reset failed -> DEFERRED
   # (retry at the next tick). No project (legacy) or spawner without the fn (stub) -> :ok without reset
   # (honest degrade: we do not block, but without the cold guarantee of this round).
+  @doc """
+  A0.5 — on a CONFLICT rework, the base has moved by definition; a live instance-scoped pod is
+  re-briefed in place (`:proceed`, context kept — 2026-08-03) and its `refs/lcars/base` must
+  follow anyway. `:ready_needs_reprovision` already re-pins inside the cold reset (6-135);
+  `:proceed` on a DEAD pod pins at clone; only `:proceed` on a LIVE pod carries the hole —
+  measured on the bench 2026-08-18: two rework rounds merging a stale base ("Already up to
+  date"), a burned budget, and an arch escalated over a conflict the pod was never shown.
+
+  Fail direction: a live pod whose refresh FAILS is NOT briefed (skip → retry next tick) —
+  briefing it would replay the measured failure, one round of budget per tick, politely.
+  """
+  @spec refresh_conflict_base(
+          :proceed | :ready_needs_reprovision,
+          module(),
+          String.t(),
+          map() | nil
+        ) :: :ok | {:skipped, :stale_base_unrefreshed}
+  def refresh_conflict_base(:ready_needs_reprovision, _spawner, _pod_id, _project), do: :ok
+
+  def refresh_conflict_base(:proceed, spawner, pod_id, project) do
+    if is_map(project) and function_exported?(spawner, :refresh_work_base, 2) do
+      case spawner.refresh_work_base(pod_id, project) do
+        :ok -> :ok
+        # Not registered = fresh spawn ahead: it pins its own base at clone.
+        {:error, :not_found} -> :ok
+        {:error, _} -> {:skipped, :stale_base_unrefreshed}
+      end
+    else
+      :ok
+    end
+  end
+
   defp reprovision_then_proceed(spawner, pod_id, project, slug) do
     if is_map(project) and function_exported?(spawner, :reprovision_pipe_workspace, 3) do
       case spawner.reprovision_pipe_workspace(pod_id, project, slug: slug) do

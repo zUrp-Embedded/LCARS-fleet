@@ -165,5 +165,15 @@ defmodule Fleet.Workflow.PinningTest do
     test "a conflict report is keyed on the PR — a conflict is a property of the merge" do
       assert Layout.conflict_ref(7) == "conflicts/pr-7.md"
     end
+
+    # C1 2026-08-18 — the machine verdict is NOT a fourth tree: prose and machine are two
+    # RENDERINGS of the same act (this judge, this delivery), so they share tree and basename
+    # and differ only by extension. The nature-based split above separates ACTS, not formats.
+    test "the machine verdict shares the prose verdict's tree and basename — one act, two renderings" do
+      assert Layout.verdict_findings_ref(42, "qualifier") == "verdicts/issue-42-qualifier.json"
+
+      assert Path.rootname(Layout.verdict_findings_ref(42, "qualifier")) ==
+               Path.rootname(Layout.verdict_ref(42, "qualifier"))
+    end
   end
 end

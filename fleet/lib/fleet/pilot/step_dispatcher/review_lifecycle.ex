@@ -57,6 +57,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # Spawn.spawn_step. Shared by routing ↔ remediation (the flow's acyclic cut).
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException
 
   defmodule Ctx do
     @moduledoc """
@@ -126,13 +127,25 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   read of `pr_review_state`. `requested` = union(volatile requested_reviewers, stable jury);
   `verdicts` = commit-scoped `login → verdict` map.
   """
-  @spec dispatch_by_verdicts([String.t()], map(), integer(), String.t(), Ctx.t()) ::
+  @spec dispatch_by_verdicts([String.t()], map(), map(), integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
-  def dispatch_by_verdicts(requested, verdicts, pr_number, head, %Ctx{} = ctx) do
-    # The classification is NOT re-derived here: `Jury.review_outcome/2` is the single truth
-    # (also carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) —
-    # a divergence between what the gate does and what the status says would be a second truth.
-    case Fleet.Forge.Client.Jury.review_outcome(requested, verdicts) do
+  def dispatch_by_verdicts(requested, verdicts, findings, pr_number, head, %Ctx{} = ctx) do
+    # The classification is NOT re-derived here: `Jury.review_outcome` is the single truth (also
+    # carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) — a
+    # divergence between what the gate does and what the status says would be a second truth.
+    #
+    # THE FULL ARITY, and naming the `/2` here was wrong: it cannot return `:gray_zone` at all
+    # (the behaviour's contract says so, and Dialyzer holds it), so a reader who followed this
+    # comment went looking for the gray zone in a function structurally incapable of producing
+    # one. Same defect class this chantier paid for twice — a text describing a neighbouring
+    # behaviour rather than the one under it.
+    case Fleet.Forge.Client.Jury.review_outcome(
+           requested,
+           verdicts,
+           findings,
+           issue_card_verdict_policy(head, ctx),
+           Fleet.Project.Roles.gatekeeper_role(ctx.opts)
+         ) do
       {:pending, [next | _]} ->
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
         # not a fleet feature branch can never receive a judge — `RoleDispatch.dispatch` refuses it
@@ -158,6 +171,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
       :changes_requested ->
         Remediation.dispatch_rework(pr_number, head, ctx)
+
+      # C3 — ZONE GRISE : le jury a tout approuvé, la courbe de la carte refuse, personne n'a
+      # arbitré. Une clause EXPLICITE et pas un fourre-tout : sans elle, le nouvel état tombait sur
+      # un `case` sans clause — un CaseClauseError sur le chemin de verdict, c'est-à-dire un rail
+      # mort au moment précis où il devait décider.
+      #
+      # Elle convoque l'arbitre — passe unique, bornée par un marqueur forge, auto-gatée par son
+      # drapeau. Tout ce qui n'aboutit pas là remonte à l'architecte avec le motif qui NOMME le
+      # barreau (non armé / dépensé / non convocable), parce qu'un humain qui lit un gel doit
+      # pouvoir distinguer « la passe a échoué » de « la passe n'existe pas sur cette boîte ».
+      :gray_zone ->
+        VerdictException.dispatch(
+          pr_number,
+          head,
+          findings,
+          issue_card_verdict_policy(head, ctx),
+          ctx
+        )
 
       :approved ->
         # All approved → MERGE (sealed, honest failure routing — `promote_or_route`).
@@ -238,6 +269,30 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
+  # The card's VERDICT POLICY — the tolerance curve applied to what the judges MEASURED. Third of
+  # the trio (`jury`, `ci`, `verdict_policy`), and the only one whose resolution does NOT live here:
+  # `Roles.verdict_policy_for/4` owns it because the arch-facing surface needs the SAME answer, and
+  # the two live in domains that cannot see each other. A copy on each side would drift silently —
+  # the gate refusing while the status reads "approved" — which is the failure `review_outcome`'s
+  # own @doc names as the reason it is factored at all.
+  defp issue_card_verdict_policy(head, %Ctx{} = ctx) do
+    case RoleDispatch.parse_feature_branch_or_skip(head) do
+      {:ok, {issue_n, _producer}} ->
+        Fleet.Project.Roles.verdict_policy_for(
+          ctx.forge,
+          ctx.repo,
+          issue_n,
+          Keyword.put(ctx.opts, :forge_opts, ctx.forge_opts)
+        )
+
+      # A head that is not a fleet feature branch has no engraved route to read. The project's own
+      # card still governs it — same fallback as the jury and the CI policy, for the same PRs
+      # (human PR, adopted orphan).
+      _ ->
+        Fleet.Project.Roles.project_verdict_policy(ctx.repo, ctx.opts)
+    end
+  end
+
   # The card's CI policy, read exactly like its jury and through the same fallback: the ISSUE's
   # engraved card when a route exists, the PROJECT's declared card otherwise. The sentence was here
   # before the code was — the jury fallback read the project card, this one answered a hardcoded
@@ -301,16 +356,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # ============================================================
 
   # PROMOTE PR-state-driven (interim, without branch-protection): all judges have
-  # approved → the system SEALS. Closing comment + merge signed GATEKEEPER
-  # (the PRs' keeper — "it's in the name"; role token, `as_role`). HONEST comment
+  # approved → the system SEALS. Closing comment + merge signed by the FUNCTION that closed the
+  # PR (A2): gatekeeper on a clean one, chief on a resolved conflict — the seal reads the
+  # conflict signal and picks signer AND method itself. HONEST comment
   # (we don't lie, we show): delivered by the eng, validated by the judges (APPROVED), merged
   # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
-  # `rebase` merge (LINEAR, handles a `main` advanced under a parallel PR — multi-issue, cf. merge_pr) —
+  # `rebase` merge on the clean path (LINEAR, handles a `main` advanced under a parallel PR —
+  # multi-issue, cf. merge_pr; a conflict-resolved PR merges in `merge`, its resolution IS a
+  # merge commit) —
   # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
   # auto-close: coherent chronology). No lock (single-process poller); PR already
   # merged → 409 → the PR disappears on the next tick (idempotent).
   #
-  # `promote_comment` + the gatekeeper role + the merge live in `Fleet.Pilot.GatekeeperSeal`
+  # `promote_comment` + the signer choice + the merge live in `Fleet.Pilot.GatekeeperSeal`
   # (SINGLE seal shared with `StepRunCompleter.promote` — no fork of the merge signature).
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- RoleDispatch.parse_feature_branch_or_skip(head) do

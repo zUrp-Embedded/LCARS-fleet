@@ -387,7 +387,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
         case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
-          {:ok, %{verdicts: verdicts, reviewers: jury}} ->
+          {:ok, %{verdicts: verdicts, reviewers: jury} = state} ->
             # F-C061: only configured jury roles can dispatch or affect the verdict.
             jury_roles =
               MapSet.new(Fleet.Project.Roles.project_jury(ctx.repo, opts), &String.downcase/1)
@@ -396,7 +396,19 @@ defmodule Fleet.Pilot.StepDispatcher do
               Enum.split_with(Enum.uniq(requested_field ++ jury), &MapSet.member?(jury_roles, &1))
 
             warn_foreign_reviewers(foreign, ctx.repo, pr_number, jury_roles)
-            ReviewLifecycle.dispatch_by_verdicts(requested, verdicts, pr_number, head, ctx)
+            # Les MESURES voyagent avec les verdicts, depuis la même lecture : la courbe de la
+            # carte s'applique à l'union défensive du jury ici, et au jury stable dans
+            # `pr_review_state` — deux entrées, une règle. `Map.get` et pas `fetch!` : une couture
+            # de test qui rend un état sans `:findings` n'est pas une forge muette, elle décrit un
+            # monde sans mesure, où la politique ne peut rien durcir. C'est le repli sûr.
+            ReviewLifecycle.dispatch_by_verdicts(
+              requested,
+              verdicts,
+              Map.get(state, :findings, %{}),
+              pr_number,
+              head,
+              ctx
+            )
 
           {:error, reason} ->
             {:error, {:review_state, reason}}
