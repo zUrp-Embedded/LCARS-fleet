@@ -1226,14 +1226,25 @@ finally:
 #      traversee servirait un fichier que ce serveur n'a aucun droit de lire a un navigateur.
 #   2. LES TYPES SERVIS SONT UNE LISTE, pas une deduction : ce qui n'y est pas ne sort pas.
 _deck = load_deck()
-_doc_root = tempfile.mkdtemp(prefix="lcars-doc-")
+# LE BAC A SABLE EST CLOS, ET IL NE L'ETAIT PAS. `_doc_root` etait bien unique
+# (`mkdtemp`), mais le fichier « hors doc » ci-dessous se pose chez son PARENT — c'est-a-dire
+# `/tmp` lui-meme, a un chemin FIXE. Sur une machine partagee, le premier utilisateur qui joue ce
+# test cree `/tmp/hors-doc.html` a son nom, et tout autre utilisateur echoue ensuite en
+# PermissionError : gate rouge sur un test qui n'a rien a voir avec ce qu'on vient de changer.
+# MESURE 2026-08-19 : c'est ce qui a fait rougir un build d'image entier.
+# Meme classe que la collision d'egress corrigee le meme jour — un test qui ecrit a un chemin
+# partage ne teste pas ce qu'il croit, il teste qui est passe avant.
+_sandbox = tempfile.mkdtemp(prefix="lcars-deck-")
+_doc_root = os.path.join(_sandbox, "doc")
 os.makedirs(os.path.join(_doc_root, "manuel"), exist_ok=True)
 with open(os.path.join(_doc_root, "index.html"), "w") as _fh:
     _fh.write("<!doctype html><title>doc</title>")
 with open(os.path.join(_doc_root, "manuel", "index.html"), "w") as _fh:
     _fh.write("<!doctype html><title>manuel</title>")
 
-_secret = os.path.join(os.path.dirname(_doc_root), "hors-doc.html")
+# Voisin de la racine servie, DANS le bac a sable : la propriete testee est « `..` ne sort pas de
+# la racine », et elle se teste aussi bien contre un voisin prive que contre un voisin partage.
+_secret = os.path.join(_sandbox, "hors-doc.html")
 with open(_secret, "w") as _fh:
     _fh.write("SECRET")
 
