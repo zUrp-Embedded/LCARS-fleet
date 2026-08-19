@@ -518,6 +518,40 @@ STUB
   [[ "$output" == "0" ]]
 }
 
+# ============== the pod's umask — what makes the shared cache shared ==============
+#
+# The store's `cache/` is bound `rw` on a setgid directory, so a pod's writes land in the fleet
+# group. setgid fixes the GROUP and never the MODE: at 022 every entry pip/npm/cargo leaves is
+# `0644`, and the next human's pod reads it without being able to replace it. The cache silently
+# becomes one stale copy per human. These two witnesses hold the fix from both ends — that the
+# value REACHES the sandbox, and that it is set late enough not to loosen anything else.
+
+@test "toolchain store: the pod is launched under umask 002" {
+  # Behavioural, not a grep: the stub records ITS OWN umask, so this proves the value crosses the
+  # exec. `env -i` is no threat to it — a umask is a process attribute, not an environment
+  # variable — and this witness is what would catch someone "cleaning up" that distinction.
+  cat > "$LCARS_BWRAP_BIN" <<STUB
+#!/usr/bin/env bash
+umask > "$TMP_BASE/bwrap.umask"
+exit 0
+STUB
+  chmod +x "$LCARS_BWRAP_BIN"
+  umask 022
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$(cat "$TMP_BASE/bwrap.umask")" == "0002" ]]
+}
+
+@test "toolchain store: umask 002 is set LAST, immediately before the exec" {
+  # Everything the launcher creates before this point — the pod dir, the socket dir — must keep the
+  # mode it was created with. Moving the line up would widen them by a side effect nobody reads as
+  # one, and no other witness here would notice.
+  run bash -c "grep -n -E '^(umask 002|exec env -i)' '$SCRIPT' | cut -d: -f1 | tr '\\n' ' '"
+  read -r umask_line exec_line <<< "$output"
+  [[ -n "$umask_line" && -n "$exec_line" ]]
+  [[ $((exec_line - umask_line)) -eq 2 ]]
+}
+
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   grep -q "^# SOURCE:" "$SCRIPT"; grep -q "^# AUTHOR:" "$SCRIPT"
   grep -q "^# STARDATE:" "$SCRIPT"; grep -q "^# STATUS:" "$SCRIPT"

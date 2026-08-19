@@ -467,6 +467,24 @@ else
   EGRESS_BINDS=()
 fi
 
+# THE POD'S UMASK, and it is what makes the shared cache actually shared. The store's `cache/` is
+# bound `rw` and lives on a setgid directory, so what a pod writes there lands in the fleet group —
+# but setgid fixes the GROUP, never the MODE. At the default 022 every entry pip, npm or cargo
+# leaves is `0644`, and the next human's pod can read it and not replace it. The cache then degrades
+# into one copy per human that nobody can refresh: the failure mode `/home/projects` already pays
+# setgid to avoid, arriving through the one door setgid does not close.
+#
+# 002, NOT 000 — group-writable, world-untouched. Every tree a pod writes into is group-owned by
+# design (the store cache, the face zones, the per-human pod dir); none of them wants world-write.
+#
+# IT SURVIVES `env -i`, AND THAT IS THE WHOLE REASON THIS LINE CAN LIVE HERE. The umask is a
+# process attribute, not an environment variable — `env -i` empties the environment and leaves it
+# untouched. bwrap inherits it, and the tmux server is started INSIDE the sandbox on a per-pod
+# socket dir, so it inherits too instead of carrying the umask of some server that was already
+# running. Set LAST, immediately before the exec: anything this script created earlier keeps the
+# mode it was created with.
+umask 002
+
 exec env -i "$BWRAP_BIN" \
   "${NET_ARGS[@]}" \
   --hostname "lcars-pod-$POD_ID" \
