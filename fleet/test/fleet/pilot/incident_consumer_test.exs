@@ -24,7 +24,17 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
         incident: %{op: "spawn", subject: "cap_profile_name", escalate_kind: nil, forward: []}
       },
       {:starfleet, :"starfleet.audit_cat5_pod_drift"} => %{action: :incident_cat5},
-      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5}
+      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5},
+      {:workflow, :"workflow_map.failed"} => %{
+        action: :incident,
+        incident: %{
+          op: "workflow_map",
+          subject: "workflow_map",
+          gate: :immediate,
+          escalate_kind: :workflow_map_failed,
+          forward: []
+        }
+      }
     }
   end
 
@@ -386,6 +396,43 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       me = self()
       assert {:ok, :offloaded} = IncidentConsumer.offload_async(fn -> send(me, :recorded) end)
       assert_receive :recorded, 500
+    end
+  end
+  describe "gate: immediate — la porte est un champ de la route, pas une classe de severite" do
+    test "issue des la 1re occurrence : escalate_fun recoit le kind DECLARE et la signature op:sujet" do
+      pid = self()
+
+      consumer =
+        start(fn _, _, _, _ -> flunk("gate=immediate ne passe JAMAIS par record_or_escalate") end,
+          escalate_fun: fn kind, subject, reason, sig, _opts ->
+            send(pid, {:escalated, kind, subject, reason, sig}) && {:ok, 42}
+          end
+        )
+
+      send(
+        consumer,
+        Fleet.Event.new(:workflow, :"workflow_map.failed",
+          payload: %{"workflow_map" => "standard-qa", "reason" => "yaml illisible"}
+        )
+      )
+
+      assert_receive {:escalated, :workflow_map_failed, "standard-qa", "yaml illisible",
+                      "workflow_map:standard-qa"},
+                     500
+    end
+
+    test "gate ABSENT de la table = recurrence (le defaut du YAML, pas un crash)" do
+      pid = self()
+
+      # La route pod.failed du harnais ne porte PAS :gate — elle doit passer par record_or_escalate.
+      consumer = start(fn op, subject, _r, _o -> send(pid, {:recorded, op, subject}) && :recorded end)
+
+      send(
+        consumer,
+        Fleet.Event.new(:spawner, :"pod.failed", payload: %{"pod_id" => "pod-7", "reason" => "x"})
+      )
+
+      assert_receive {:recorded, "pod", "pod-7"}, 500
     end
   end
 end

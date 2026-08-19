@@ -96,6 +96,13 @@
                       "type": "string",
                       "pattern": "^[a-z][a-z0-9_]*$"
                     }
+                  },
+                  "gate": {
+                    "enum": [
+                      "immediate",
+                      "recurrence"
+                    ],
+                    "description": "The gate: immediate = durable issue on the FIRST occurrence (escalate_gated, cooldown only); recurrence (default) = first noted, recurrence escalated (record_or_escalate). immediate REQUIRES escalate_kind (closed kind table in Escalation - an unnamed kind crashes; refused at boot by the Catalog)."
                   }
                 }
               }

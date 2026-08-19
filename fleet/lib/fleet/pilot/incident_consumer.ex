@@ -158,7 +158,20 @@ defmodule Fleet.Pilot.IncidentConsumer do
             if(inc.escalate_kind, do: [escalate_kind: inc.escalate_kind], else: []) ++
             for key <- inc.forward, do: {key, payload[Atom.to_string(key)]}
 
-        record(state, inc.op, subject, payload["reason"], reg_opts, payload)
+        # LA PORTE EST UN CHAMP DE LA ROUTE, PAS UNE CLASSE DE SEVERITE (brouette 2026-08-19) :
+        # `immediate` ouvre l'issue des la PREMIERE occurrence (cooldown seul — via escalate_gated,
+        # la meme porte que les kinds tires du code) ; `recurrence` note d'abord. Le Catalog a
+        # deja garanti au boot qu'`immediate` porte un escalate_kind nomme.
+        # Map.get et pas inc.gate : la table canonique (Catalog) pose TOUJOURS la cle, mais la
+        # couture :routing_fun accepte des tables ecrites a la main — absent = defaut, la meme
+        # semantique que le YAML.
+        case Map.get(inc, :gate, :recurrence) do
+          :immediate ->
+            escalate_immediate(state, inc, subject, payload["reason"], reg_opts)
+
+          _recurrence ->
+            record(state, inc.op, subject, payload["reason"], reg_opts, payload)
+        end
 
       _ ->
         Logger.warning(
@@ -172,6 +185,37 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # registered key the routing's cat5 route was validated against at boot).
   defp cat5_tag(type),
     do: type |> Atom.to_string() |> String.replace_prefix("starfleet.audit_cat5_", "")
+
+  # Porte immediate DECLARATIVE — issue durable des la 1re occurrence, cooldown seul. Offloadee
+  # comme record/6 (touche la forge). Un echec est BRUYANT : perdre l'alarme re-silencierait
+  # exactement ce que la porte existe pour dire tout de suite.
+  defp escalate_immediate(state, inc, subject, reason, reg_opts) do
+    sig = "#{inc.op}:#{subject}"
+
+    exec = fn ->
+      case state.escalate_fun.(inc.escalate_kind, subject, reason, sig, reg_opts) do
+        {:ok, number} ->
+          Logger.warning(
+            "IncidentConsumer: #{inc.op} #{subject} → sysadmin issue ##{number} " <>
+              "(gate=immediate, 1re occurrence)"
+          )
+
+        {:suppressed, issue} ->
+          Logger.debug(
+            "IncidentConsumer: #{inc.op} #{subject} sous cooldown — l'issue ouverte " <>
+              "#{inspect(issue)} porte l'alarme"
+          )
+
+        {:error, e} ->
+          Logger.error(
+            "IncidentConsumer: #{inc.op} #{subject} gate=immediate mais l'escalade a ECHOUE — " <>
+              "AUCUNE issue sysadmin (forge down ?) : #{inspect(e)}"
+          )
+      end
+    end
+
+    (state.runner || (&run_sync/1)).(exec)
+  end
 
   defp record(state, op, pod_id, reason, reg_opts, payload) do
     exec = fn ->

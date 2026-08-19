@@ -390,6 +390,13 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "toute issue qui le porte. Ce ticket a quitte le pipeline et aucun tick ne le " <>
          "re-proposera — seul un retrait manuel du label le debloque."}
 
+  defp kind_describe(:workflow_map_failed),
+    do:
+      {"workflow_map illisible — le dispatch est saute",
+       "La carte de workflow de ce depot ne se charge pas : le rail d'etapes le SAUTE tant que " <>
+         "personne ne corrige. Une carte illisible bloque le dispatch de TOUTES ses issues — " <>
+         "d'ou l'issue des la premiere occurrence, pas a la recidive."}
+
   defp kind_describe(:cat5),
     do:
       {"Cat-5 (sévérité MAX)",

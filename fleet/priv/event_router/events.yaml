@@ -175,8 +175,11 @@ events:
   # signal" anticipated here. DRAFT: covers the main dispatch load-failure, not yet every rail path.
   workflow_map.failed:
     source: workflow
-    action: cat5
-    cat5_source: workflow_map_failed
+    action: incident
+    # gate: immediate — une carte illisible bloque le dispatch de TOUTES les issues de son depot :
+    # issue des la 1re occurrence (cooldown seul), pas a la recidive. Le sujet est le NOM de la
+    # carte (payload "workflow_map") : c'est lui qui dit QUOI corriger.
+    incident: {op: workflow_map, subject: workflow_map, gate: immediate, escalate_kind: workflow_map_failed}
   # deliverable.published (slot-freeze): emitted by Pilot.StepRunCompleter (source :workflow — the
   # publication IS a workflow op via Deliverable.publish) AFTER push + PR confirmed, carries `pod_id` (the
   # producer pod, from the pod.completed payload). Consumed by Spawner.Pod: a resident pod (pipe) goes

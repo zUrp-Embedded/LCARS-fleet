@@ -35,8 +35,17 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
              threshold: %{counter: "drift_count", min: 3}
            } = routing[{:spawner, :"pod.drift"}]
 
-    assert %{action: :cat5, cat5_source: :workflow_map_failed, threshold: nil} =
-             routing[{:workflow, :"workflow_map.failed"}]
+    # Bascule 2026-08-19 (brouette) : plus une route cat5 — une route incident a porte IMMEDIATE
+    # declaree, avec le kind nomme (exige au boot : la table kind_describe est close).
+    assert %{
+             action: :incident,
+             incident: %{
+               op: "workflow_map",
+               subject: "workflow_map",
+               gate: :immediate,
+               escalate_kind: :workflow_map_failed
+             }
+           } = routing[{:workflow, :"workflow_map.failed"}]
 
     assert %{action: :coord_decision} = routing[{:workflow, :"audit.verdict"}]
   end

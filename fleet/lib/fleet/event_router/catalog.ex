@@ -181,9 +181,34 @@ defmodule Fleet.EventRouter.Catalog do
       incident =
         case route["incident"] do
           %{"op" => op, "subject" => subject} = inc ->
+            # LA PORTE EST DECLARATIVE (brouette 2026-08-19) : `immediate` = issue des la PREMIERE
+            # occurrence (escalate_gated, cooldown seul) ; `recurrence` (defaut) = 1re notee,
+            # recidive escaladee (record_or_escalate). Le perimetre est borne : la porte
+            # declarative vaut pour les evenements ROUTES PAR CETTE TABLE ; les kinds tires depuis
+            # le code appellent leur porte au site — on ne re-decrit pas des chemins de code ici.
+            gate =
+              case inc["gate"] do
+                nil -> :recurrence
+                "recurrence" -> :recurrence
+                "immediate" -> :immediate
+                other -> raise "Catalog: #{type} declares incident gate=#{inspect(other)} " <>
+                          "(expected \"immediate\" or \"recurrence\")"
+              end
+
+            # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
+            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue — la panne exacte de
+            # `:awaits_arch_stuck` (trouvee par revue, 2026-08-19). Refus au BOOT, pas au premier
+            # incident.
+            if gate == :immediate and is_nil(inc["escalate_kind"]) do
+              raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
+                      "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>
+                      "an unnamed kind would crash at the first incident instead of at boot"
+            end
+
             %{
               op: op,
               subject: subject,
+              gate: gate,
               escalate_kind: inc["escalate_kind"] && String.to_atom(inc["escalate_kind"]),
               forward: Enum.map(inc["forward"] || [], &String.to_atom/1)
             }
