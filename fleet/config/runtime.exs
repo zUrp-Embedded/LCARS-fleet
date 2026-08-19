@@ -404,7 +404,7 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_spawner — permanent pods
   # `:boot_permanent_at_start` IS the canonical gate of the permanent-pod boot
-  # (consulted by `Fleet.Starfleet.BootOrchestrator` via
+  # (consulted by `Fleet.Admiral.BootOrchestrator` via
   # `PermanentBoot.auto_boot_enabled?/0`, the single authority). Default
   # **true** (prod);
   # `LCARS_BOOT_PERMANENT_AT_START=false` disables it (BootOrchestrator wires the
@@ -558,21 +558,21 @@ if config_env() != :test and not tool_mode? do
   # lecteurs : le BEAM draine pendant ce delai, le launcher attend ce delai PLUS une marge avant de
   # conclure. Sans ca, les deux derivaient — 45 s cote BEAM, 90 s en dur cote shell.
   config :lcars_fleet,
-         :starfleet_shutdown_grace_ms,
+         :admiral_shutdown_grace_ms,
          Fleet.EnvParse.positive_ms(
            "LCARS_SHUTDOWN_GRACE_MS",
            System.get_env("LCARS_SHUTDOWN_GRACE_MS") || "45000"
          )
 
   config :lcars_fleet,
-         :starfleet_shutdown_dispatcher,
-         Fleet.Starfleet.Shutdown.AggregateDispatcher
+         :admiral_shutdown_dispatcher,
+         Fleet.Admiral.Shutdown.AggregateDispatcher
 
-  # CI-02 — in-flight COMPLETION offloads for the drain. Starfleet must NOT reference Pilot at compile
+  # CI-02 — in-flight COMPLETION offloads for the drain. Admiral must NOT reference Pilot at compile
   # time (no boundary dep); this runtime fun crosses the boundary as a value (cf. AggregateDispatcher
   # ## Boundary). Absent in `:test` → the seam default `fn -> 0 end` (no completion Tasks to drain there).
   config :lcars_fleet,
-         :starfleet_completion_inflight_fun,
+         :admiral_completion_inflight_fun,
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
   # The project-lifecycle domain sits BELOW the rail that drives projects, so its two card-fallback

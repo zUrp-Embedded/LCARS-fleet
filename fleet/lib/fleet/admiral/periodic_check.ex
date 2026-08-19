@@ -1,6 +1,6 @@
-defmodule Fleet.Starfleet.PeriodicCheck do
+defmodule Fleet.Admiral.PeriodicCheck do
   @moduledoc """
-  Plumbing for starfleet's periodic-check GenServers. `MCPMonitor` is its only user since
+  Plumbing for the admiral domain's periodic-check GenServers. `MCPMonitor` is its only user since
   MCPWatcher moved to CI (2026-08-03); kept generic rather than inlined — the next periodic
   check should not have to re-derive the tick/re-arm/test-hook shape.
 

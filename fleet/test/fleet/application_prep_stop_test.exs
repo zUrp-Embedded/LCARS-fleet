@@ -5,19 +5,19 @@ defmodule Fleet.ApplicationPrepStopTest do
   or a failing drain must never wedge the teardown — prep_stop always passes the state
   through.
   """
-  # async: false — registers the REAL Fleet.Starfleet.Shutdown global name.
+  # async: false — registers the REAL Fleet.Admiral.Shutdown global name.
   use ExUnit.Case, async: false
 
   test "with the Shutdown server up, prep_stop drains and passes the state through" do
     # Real server under its global name (prep_stop resolves it by Process.whereis),
     # NoOp dispatcher default, fast poll — the drain concludes immediately (0 in-flight).
-    start_supervised!({Fleet.Starfleet.Shutdown, name: Fleet.Starfleet.Shutdown, poll_ms: 10})
+    start_supervised!({Fleet.Admiral.Shutdown, name: Fleet.Admiral.Shutdown, poll_ms: 10})
 
     assert Fleet.Application.prep_stop(:app_state) == :app_state
   end
 
   test "without the server (hermetic boot), prep_stop passes through untouched" do
-    refute Process.whereis(Fleet.Starfleet.Shutdown)
+    refute Process.whereis(Fleet.Admiral.Shutdown)
     assert Fleet.Application.prep_stop(:app_state) == :app_state
   end
 end

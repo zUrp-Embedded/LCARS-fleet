@@ -34,8 +34,8 @@ flowchart TB
         Fleet_Observation["Fleet.Observation"]
     end
     subgraph steering["steering"]
+        Fleet_Admiral["Fleet.Admiral"]
         Fleet_Pilot["Fleet.Pilot"]
-        Fleet_Starfleet["Fleet.Starfleet"]
     end
     subgraph work["work"]
         Fleet_Forge["Fleet.Forge"]
@@ -59,13 +59,20 @@ flowchart TB
         Fleet_CapProfile["Fleet.CapProfile"]
         Fleet_EventRouter["Fleet.EventRouter"]
     end
+    Fleet_API --> Fleet_Admiral
     Fleet_API --> Fleet_CapProfile
     Fleet_API --> Fleet_Credentials
     Fleet_API --> Fleet_EventRouter
     Fleet_API --> Fleet_MCP
     Fleet_API --> Fleet_Pilot
     Fleet_API --> Fleet_Spawner
-    Fleet_API --> Fleet_Starfleet
+    Fleet_Admiral --> Fleet_CapProfile
+    Fleet_Admiral --> Fleet_EventRouter
+    Fleet_Admiral --> Fleet_Forge
+    Fleet_Admiral --> Fleet_MCP
+    Fleet_Admiral --> Fleet_Spawner
+    Fleet_Admiral --> Fleet_TaskQueue
+    Fleet_Admiral --> Fleet_Toolchain
     Fleet_Credentials --> Fleet_CapProfile
     Fleet_Credentials --> Fleet_EventRouter
     Fleet_Forge --> Fleet_Credentials
@@ -107,11 +114,6 @@ flowchart TB
     Fleet_Spawner --> Fleet_ProjectBootstrap
     Fleet_Spawner --> Fleet_SPBuilder
     Fleet_Spawner --> Fleet_TaskQueue
-    Fleet_Starfleet --> Fleet_CapProfile
-    Fleet_Starfleet --> Fleet_EventRouter
-    Fleet_Starfleet --> Fleet_MCP
-    Fleet_Starfleet --> Fleet_Spawner
-    Fleet_Starfleet --> Fleet_TaskQueue
     Fleet_TaskQueue --> Fleet_EventRouter
     Fleet_Workflow --> Fleet_CapProfile
     Fleet_Workflow --> Fleet_Credentials
@@ -120,7 +122,7 @@ flowchart TB
     Fleet_Workflow --> Fleet_TaskQueue
     Fleet_Spawner -. "seam :mcp_socket_provisioner" .-> Fleet_MCP
     Fleet_MCP -. "seam :pod_reaper" .-> Fleet_Pilot
-    Fleet_Starfleet -. "seam :starfleet_completion_inflight_fun" .-> Fleet_Pilot
+    Fleet_Admiral -. "seam :admiral_completion_inflight_fun" .-> Fleet_Pilot
     Fleet_Project -. "seam :project_incident_rail" .-> Fleet_Pilot
 ```
 

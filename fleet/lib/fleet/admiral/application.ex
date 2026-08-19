@@ -1,8 +1,8 @@
-defmodule Fleet.Starfleet.Application do
+defmodule Fleet.Admiral.Application do
   @moduledoc """
   Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
 
-  Supervisor for the starfleet domain.
+  Supervisor for the admiral domain.
 
   Starts:
 
@@ -11,7 +11,7 @@ defmodule Fleet.Starfleet.Application do
     2. ⚠ NOTHING IS PRE-REGISTERED HERE, and this step used to claim it was. It read
        "pre-registers … event atoms (compile-time via a module attribute, atom-leak DoS
        mitigation)" — there is no such attribute in this module, nor anywhere under
-       `starfleet/`. The atoms come from `events.yaml` through
+       `admiral/`. The atoms come from `events.yaml` through
        `Fleet.EventRouter.Catalog`, which says so itself: "this function is the ONLY
        source of pre-registered event atoms". A reader chasing the atom-leak mitigation
        here found a sentence instead of a mechanism.
@@ -32,7 +32,7 @@ defmodule Fleet.Starfleet.Application do
 
   ## Configuration
 
-  One boolean `:starfleet_start_*` knob per child (all under `:lcars_fleet`):
+  One boolean `:admiral_start_*` knob per child (all under `:lcars_fleet`):
   `:start_shutdown`, `:start_audit_consumer`,
   `:start_mcp_monitor`, `:start_toolchain_reconciler` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
@@ -63,21 +63,21 @@ defmodule Fleet.Starfleet.Application do
     # zero network I/O, consistent with AuditConsumer).
     children =
       [] ++
-        if boot_enabled?(:starfleet_start_shutdown, true) do
-          [Fleet.Starfleet.Shutdown]
+        if boot_enabled?(:admiral_start_shutdown, true) do
+          [Fleet.Admiral.Shutdown]
         else
           []
         end ++
-        if(boot_enabled?(:starfleet_start_audit_consumer, true),
-          do: [Fleet.Starfleet.AuditConsumer],
+        if(boot_enabled?(:admiral_start_audit_consumer, true),
+          do: [Fleet.Admiral.AuditConsumer],
           else: []
         ) ++
-        if(boot_enabled?(:starfleet_start_mcp_monitor, true),
-          do: [Fleet.Starfleet.MCPMonitor],
+        if(boot_enabled?(:admiral_start_mcp_monitor, true),
+          do: [Fleet.Admiral.MCPMonitor],
           else: []
         ) ++
-        if(boot_enabled?(:starfleet_start_toolchain_reconciler, true),
-          do: [Fleet.Starfleet.ToolchainReconciler],
+        if(boot_enabled?(:admiral_start_toolchain_reconciler, true),
+          do: [Fleet.Admiral.ToolchainReconciler],
           else: []
         )
 
@@ -99,7 +99,7 @@ defmodule Fleet.Starfleet.Application do
 
       other ->
         raise ArgumentError,
-              "Fleet.Starfleet boot knob #{inspect(key)} must be a boolean, got #{inspect(other)} — a " <>
+              "Fleet.Admiral boot knob #{inspect(key)} must be a boolean, got #{inspect(other)} — a " <>
                 "malformed boot config must not silently change the supervision topology (fail-closed at boot)"
     end
   end

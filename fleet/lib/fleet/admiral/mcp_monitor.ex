@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.MCPMonitor do
+defmodule Fleet.Admiral.MCPMonitor do
   @moduledoc """
   Passive health check of the **pod-facing MCP substrate** (the DynamicSupervisor
   of per-pod sockets, `Fleet.MCP.PodSocketSupervisor`).
@@ -6,7 +6,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
   ## Mechanics
 
   GenServer + recursive `Process.send_after/3` — the plumbing (named start_link, tick + re-arming,
-  test hook `:check_now`) lives in `Fleet.Starfleet.PeriodicCheck` (shared plumbing kept generic
+  test hook `:check_now`) lives in `Fleet.Admiral.PeriodicCheck` (shared plumbing kept generic
   after MCPWatcher moved to CI — the shape outlived its second user); this
   module keeps its state, its `do_check/1` and the shape of its reply (`{:ok, status}`). On each
   tick (default 60s), checks the target's liveness:
@@ -37,8 +37,8 @@ defmodule Fleet.Starfleet.MCPMonitor do
 
   ## Configuration
 
-    * `:lcars_fleet, :starfleet_mcp_monitor_check_interval_ms` — default `60_000` (1 min)
-    * `:lcars_fleet, :starfleet_mcp_monitor_target` — target (default
+    * `:lcars_fleet, :admiral_mcp_monitor_check_interval_ms` — default `60_000` (1 min)
+    * `:lcars_fleet, :admiral_mcp_monitor_target` — target (default
       `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
       atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
   """
@@ -47,7 +47,7 @@ defmodule Fleet.Starfleet.MCPMonitor do
   require Logger
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Starfleet.PeriodicCheck
+  alias Fleet.Admiral.PeriodicCheck
 
   @default_interval_ms 60_000
   @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}
@@ -141,12 +141,12 @@ defmodule Fleet.Starfleet.MCPMonitor do
   defp config_interval_ms do
     Application.get_env(
       :lcars_fleet,
-      :starfleet_mcp_monitor_check_interval_ms,
+      :admiral_mcp_monitor_check_interval_ms,
       @default_interval_ms
     )
   end
 
   defp config_target do
-    Application.get_env(:lcars_fleet, :starfleet_mcp_monitor_target, @default_target)
+    Application.get_env(:lcars_fleet, :admiral_mcp_monitor_target, @default_target)
   end
 end

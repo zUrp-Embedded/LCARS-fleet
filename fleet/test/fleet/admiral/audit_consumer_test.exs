@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.AuditConsumerTest do
+defmodule Fleet.Admiral.AuditConsumerTest do
   @moduledoc """
   B10/#583 — AuditConsumer as pure send/handle, no global subscribe
   (test-seam `:subscribe`). async.
@@ -8,7 +8,7 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Starfleet.AuditConsumer
+  alias Fleet.Admiral.AuditConsumer
 
   defp start_consumer do
     name = :"audit_#{System.unique_integer([:positive])}"

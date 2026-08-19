@@ -1147,15 +1147,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # is enforced by boundary (Z4) — each domain declares its deps in `use Boundary` and the
   # COMPILER refuses violations, stronger than any grep. What boundary CANNOT see, and what
   # this check locks, is the BOOT invariant: the children order of Fleet.Application is the
-  # SOLE carrier of F8 (event_router first; mcp before spawner — no starfleet constraint,
+  # SOLE carrier of F8 (event_router first; mcp before spawner — no admiral-domain constraint,
   # cf. A-08 comment in the function) — reordering it breaks the boot WITHOUT a compile
   # error. Hence the honest check id: `boot.order_f8`.
   @doc false
   def check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
-    # A-08: there is NO `mcp < starfleet` / `spawner < starfleet` constraint — their only
-    # would-be cause (a mid-boot starfleet child spawning the permanents) does not exist:
+    # A-08: there is NO `mcp < admiral` / `spawner < admiral` constraint — their only
+    # would-be cause (a mid-boot admiral-domain child spawning the permanents) does not exist:
     # the BootOrchestrator is a root-level POST-boot trigger. What holds: event_router
     # FIRST (the Bus is every subscriber's substrate) and mcp BEFORE spawner (spawner's
     # PublishConsumer can receive an admin.spawn.request as soon as it subscribes →
@@ -1176,7 +1176,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         id: "boot.order_f8",
         remediation:
           "reorder the children of Fleet.Application: event_router FIRST, " <>
-            "mcp BEFORE spawner (F8 scar in the moduledoc; no starfleet " <>
+            "mcp BEFORE spawner (F8 scar in the moduledoc; no admiral-domain " <>
             "constraint per A-08 — BootOrchestrator is triggered post-boot by the root)",
         status: if(ok?, do: :pass, else: :fail),
         evidence: [

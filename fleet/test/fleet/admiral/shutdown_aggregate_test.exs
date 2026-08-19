@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
+defmodule Fleet.Admiral.Shutdown.AggregateDispatcherTest do
   @moduledoc """
   REAL backend of the `:shutdown_dispatcher` seam. async: false: `refuse_new_jobs` mutates the global
   `Fleet.Shutdown.Quiesce` flag (on_exit `resume!` mandatory).
@@ -11,9 +11,9 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Shutdown.Quiesce
-  alias Fleet.Starfleet.Shutdown.AggregateDispatcher
+  alias Fleet.Admiral.Shutdown.AggregateDispatcher
 
-  # Broker stubs injected via `:lcars_fleet, :starfleet_task_queue_mod`. The REAL broker IS present in the test
+  # Broker stubs injected via `:lcars_fleet, :admiral_task_queue_mod`. The REAL broker IS present in the test
   # env (so `task_queue_running?` is true) — these induce specific `list_active` returns/failures.
   defmodule TwoActiveBroker do
     def list_active, do: [%{id: "a"}, %{id: "b"}]
@@ -37,10 +37,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
   end
 
   defp inject_broker(mod),
-    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :starfleet_task_queue_mod, mod)
+    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :admiral_task_queue_mod, mod)
 
   defp inject_completion(fun),
-    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :starfleet_completion_inflight_fun, fun)
+    do: Fleet.TestEnv.put_env_restoring(:lcars_fleet, :admiral_completion_inflight_fun, fun)
 
   test "refuse_new_jobs/1 activates quiescence" do
     Quiesce.resume!()
@@ -114,10 +114,10 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcherTest do
 
     {:ok, _} =
       start_supervised(
-        {Fleet.Starfleet.Shutdown, name: name, dispatcher: AggregateDispatcher, poll_ms: 10}
+        {Fleet.Admiral.Shutdown, name: name, dispatcher: AggregateDispatcher, poll_ms: 10}
       )
 
-    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 200)
+    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 200)
     assert %{status: :timeout} = :sys.get_state(name)
   end
 end

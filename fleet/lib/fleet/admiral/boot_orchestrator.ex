@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.BootOrchestrator do
+defmodule Fleet.Admiral.BootOrchestrator do
   @moduledoc """
   One-shot permanent-pod orchestration invoked after root readiness. It optionally
   runs `Fleet.Spawner.PermanentBoot`, then logs and broadcasts exactly one

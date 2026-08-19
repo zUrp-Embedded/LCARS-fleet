@@ -85,19 +85,19 @@ config :lcars_fleet,
 # B10/#583 Sprint 1 — hermétisme test : consumers + BootOrchestrator
 # off par défaut. Subscribe global au Bus + emit fleet.boot_* parasiterait
 # tests async ; les tests dédiés démarrent manuellement avec opts isolés.
-config :lcars_fleet, starfleet_start_audit_consumer: false
-config :lcars_fleet, starfleet_start_boot_orchestrator: false
+config :lcars_fleet, admiral_start_audit_consumer: false
+config :lcars_fleet, admiral_start_boot_orchestrator: false
 # BL-021 chantier 8 — Extension V2 off par défaut en test (hermétisme : MCPMonitor fait
 # Process.whereis + un timer qui broadcast sur le Bus, ce qui pollue les tests async). Les tests
 # dédiés instancient avec opts. (`start_mcp_watcher` retiré avec MCPWatcher le 2026-08-03 — la
 # veille amont est passée en CI ; une clef de config sans lecteur est une promesse morte.)
-config :lcars_fleet, starfleet_start_mcp_monitor: false
-config :lcars_fleet, starfleet_start_toolchain_reconciler: false
+config :lcars_fleet, admiral_start_mcp_monitor: false
+config :lcars_fleet, admiral_start_toolchain_reconciler: false
 
 # Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :
 # DriftMonitor subscribe le Bus inconditionnellement + Shutdown expose un drain global — off en test,
 # les tests dédiés démarrent leur instance avec opts isolés (même règle que les consumers ci-dessus).
-config :lcars_fleet, starfleet_start_shutdown: false
+config :lcars_fleet, admiral_start_shutdown: false
 config :lcars_fleet, spawner_start_publish_consumer: false
 
 # (ArchFeed : déménagé côté pilot, démarré par le rail step — `:step_dispatch?` off en test le coupe.)

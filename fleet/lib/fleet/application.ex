@@ -5,7 +5,7 @@ defmodule Fleet.Application do
       Fleet.TaskQueue,
       Fleet.MCP,
       Fleet.Spawner,
-      Fleet.Starfleet,
+      Fleet.Admiral,
       Fleet.Pilot,
       Fleet.API,
       Fleet.Observation,
@@ -71,11 +71,11 @@ defmodule Fleet.Application do
       requires `ensure_pod_socket` (`Fleet.MCP.PodSocketSupervisor`) already
       alive — and spawner's PublishConsumer can receive an `admin.spawn.request`
       as soon as it subscribes.
-    * (There is NO `mcp < starfleet` nor `spawner < starfleet` constraint: the
+    * (There is NO `mcp < admiral` nor `spawner < admiral` constraint: the
       BootOrchestrator — the only thing that would create them — is not a
-      mid-boot child of starfleet; it is triggered below AFTER the start_link OK,
+      mid-boot child of the admiral domain; it is triggered below AFTER the start_link OK,
       when the ENTIRE fleet is provably up. "Post-readiness" is mechanical.)
-    * `api` second-to-last (readiness probes pilot/mcp/spawner/starfleet),
+    * `api` second-to-last (readiness probes pilot/mcp/spawner/admiral),
       `observation` LAST (read-only, nothing in the core depends on it).
 
   ## Failure semantics (D-17 — faithful umbrella transposition)
@@ -152,7 +152,7 @@ defmodule Fleet.Application do
       Fleet.TaskQueue.Application,
       Fleet.MCP.Supervisor,
       Fleet.Spawner.Application,
-      Fleet.Starfleet.Application,
+      Fleet.Admiral.Application,
       Fleet.Pilot.Application,
       Fleet.API.Application,
       Fleet.Observation.Application
@@ -163,7 +163,7 @@ defmodule Fleet.Application do
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
         Fleet.API.Application.post_boot()
-        Fleet.Starfleet.boot_orchestrate()
+        Fleet.Admiral.boot_orchestrate()
 
         {:ok, pid}
 
@@ -174,9 +174,9 @@ defmodule Fleet.Application do
 
   @impl Application
   def prep_stop(state) do
-    if Process.whereis(Fleet.Starfleet.Shutdown) do
+    if Process.whereis(Fleet.Admiral.Shutdown) do
       try do
-        _ = Fleet.Starfleet.Shutdown.begin()
+        _ = Fleet.Admiral.Shutdown.begin()
       catch
         kind, reason ->
           require Logger

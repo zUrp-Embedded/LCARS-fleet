@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.BootOrchestratorTest do
+defmodule Fleet.Admiral.BootOrchestratorTest do
   @moduledoc """
   B10/#583 — BootOrchestrator as a pure function (run/1 testable outside a Task).
   `async: false`: subscribes to the global singleton Bus. boot_permanent_pods
@@ -7,7 +7,7 @@ defmodule Fleet.Starfleet.BootOrchestratorTest do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Starfleet.BootOrchestrator
+  alias Fleet.Admiral.BootOrchestrator
 
   setup do
     :ok = Bus.subscribe()

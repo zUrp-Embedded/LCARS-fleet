@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.ToolchainReconcilerTest do
+defmodule Fleet.Admiral.ToolchainReconcilerTest do
   @moduledoc """
   Le déclencheur est une COMPARAISON, et ces cas défendent les endroits où elle peut mentir.
 
@@ -15,7 +15,7 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Starfleet.ToolchainReconciler, as: R
+  alias Fleet.Admiral.ToolchainReconciler, as: R
 
   defmodule ForgeUp do
     def branch_head(_repo, _branch, _opts), do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
@@ -187,7 +187,7 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
 
   describe "la plomberie est à PeriodicCheck, pas ici" do
     test "le module ne porte AUCUN timer maison" do
-      src = File.read!("lib/fleet/starfleet/toolchain_reconciler.ex")
+      src = File.read!("lib/fleet/admiral/toolchain_reconciler.ex")
       refute src =~ "Process.send_after"
       refute src =~ "defp schedule"
     end

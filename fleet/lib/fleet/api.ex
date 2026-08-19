@@ -13,7 +13,7 @@ defmodule Fleet.API do
       Fleet.MCP,
       Fleet.Pilot,
       Fleet.Spawner,
-      Fleet.Starfleet,
+      Fleet.Admiral,
       Fleet.Credentials,
       Plug,
       Plug.Builder,

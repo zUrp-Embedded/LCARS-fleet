@@ -27,7 +27,7 @@ Core lifecycle:
 
 Boot / respawn / seams:
 - `Fleet.Spawner.PublishConsumer` — Bus consumer of `admin.spawn.request` → `spawn_pod/3`
-- `Fleet.Spawner.PermanentBoot` — boot of the permanent Type-1 pods (invoked only by `Fleet.Starfleet.BootOrchestrator`)
+- `Fleet.Spawner.PermanentBoot` — boot of the permanent Type-1 pods (invoked only by `Fleet.Admiral.BootOrchestrator`)
 - `Fleet.Spawner.PermanentWarden` — respawn of dead permanents (Bus `pod.failed`, capped backoff)
 - `Fleet.Spawner.SeedStore` — checkpoint/restore of a pod's session jsonl for recall (`--resume`)
 - `Fleet.Spawner.LaunchBackend` (behaviour) + `.LauncherPortBackend` (the real Port/bwrap backend) / `StubBackend` (tests)

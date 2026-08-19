@@ -7,7 +7,7 @@ defmodule Fleet.API.ReadinessTest do
   alias Fleet.API.Readiness
 
   @mutated [
-    {:lcars_fleet, :starfleet_shutdown_dispatcher},
+    {:lcars_fleet, :admiral_shutdown_dispatcher},
     {:lcars_fleet, :spawner_launch_backend}
   ]
 
@@ -70,8 +70,8 @@ defmodule Fleet.API.ReadinessTest do
     test "degraded on NoOpDispatcher (Fleet.Dispatcher missing)" do
       Application.put_env(
         :lcars_fleet,
-        :starfleet_shutdown_dispatcher,
-        Fleet.Starfleet.Shutdown.NoOpDispatcher
+        :admiral_shutdown_dispatcher,
+        Fleet.Admiral.Shutdown.NoOpDispatcher
       )
 
       assert %{state: :degraded, detail: %{backend: "NoOpDispatcher"}} =
@@ -79,20 +79,20 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "operational when real backend wired" do
-      Application.put_env(:lcars_fleet, :starfleet_shutdown_dispatcher, Fleet.Coord)
+      Application.put_env(:lcars_fleet, :admiral_shutdown_dispatcher, Fleet.Coord)
       assert %{state: :operational} = sub(Readiness.deep(), "shutdown.dispatcher")
     end
 
     # Drift-kill: key unset → readiness reads the OWNER's canonical default
-    # (`Fleet.Starfleet.Shutdown.configured_dispatcher/0` → NoOpDispatcher), not a re-declared default.
+    # (`Fleet.Admiral.Shutdown.configured_dispatcher/0` → NoOpDispatcher), not a re-declared default.
     test "missing key → shared canonical default (NoOpDispatcher) → degraded" do
-      Application.delete_env(:lcars_fleet, :starfleet_shutdown_dispatcher)
+      Application.delete_env(:lcars_fleet, :admiral_shutdown_dispatcher)
 
       assert %{state: :degraded, detail: %{backend: "NoOpDispatcher"}} =
                sub(Readiness.deep(), "shutdown.dispatcher")
 
-      assert Fleet.Starfleet.Shutdown.configured_dispatcher() ==
-               Fleet.Starfleet.Shutdown.NoOpDispatcher
+      assert Fleet.Admiral.Shutdown.configured_dispatcher() ==
+               Fleet.Admiral.Shutdown.NoOpDispatcher
     end
   end
 

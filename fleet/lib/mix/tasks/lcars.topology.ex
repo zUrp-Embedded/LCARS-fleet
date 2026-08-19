@@ -70,7 +70,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     # which is the class excluded just above. The test is the `deps:` list, not the injection
     # mechanism — `Fleet.Pilot` is in neither Starfleet's nor Project's deps. Both cross an edge
     # boundary forbids.
-    {"Fleet.Starfleet", "Fleet.Pilot", ":starfleet_completion_inflight_fun"},
+    {"Fleet.Admiral", "Fleet.Pilot", ":admiral_completion_inflight_fun"},
     {"Fleet.Project", "Fleet.Pilot", ":project_incident_rail"}
   ]
 
@@ -115,7 +115,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.MCP" => "work",
     "Fleet.Observation" => "surface",
     "Fleet.Pilot" => "steering",
-    "Fleet.Starfleet" => "steering",
+    "Fleet.Admiral" => "steering",
     "Fleet.API" => "surface",
     "Fleet.Application" => "OTP root"
   }

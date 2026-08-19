@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.MCPMonitorTest do
+defmodule Fleet.Admiral.MCPMonitorTest do
   @moduledoc """
   MCPMonitor tests (liveness health check; default = supervised drive
   `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodTools}`, cf. F049).
@@ -16,7 +16,7 @@ defmodule Fleet.Starfleet.MCPMonitorTest do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
-  alias Fleet.Starfleet.MCPMonitor
+  alias Fleet.Admiral.MCPMonitor
 
   defmodule FakeTarget do
     use GenServer

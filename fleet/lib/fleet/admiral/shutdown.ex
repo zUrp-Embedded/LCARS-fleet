@@ -1,6 +1,6 @@
-defmodule Fleet.Starfleet.Shutdown.Dispatcher do
+defmodule Fleet.Admiral.Shutdown.Dispatcher do
   @moduledoc """
-  Dispatcher backend behaviour consumed by `Fleet.Starfleet.Shutdown`.
+  Dispatcher backend behaviour consumed by `Fleet.Admiral.Shutdown`.
 
   **This behaviour IS the drain abstraction** (user decision): a global
   `Fleet.Dispatcher` god-module does not and must NOT exist. The
@@ -14,12 +14,12 @@ defmodule Fleet.Starfleet.Shutdown.Dispatcher do
   @callback in_flight_count() :: non_neg_integer()
 end
 
-defmodule Fleet.Starfleet.Shutdown.NoOpDispatcher do
+defmodule Fleet.Admiral.Shutdown.NoOpDispatcher do
   @moduledoc """
   Test and unwired fallback backend. It accepts quiescence and reports no
   in-flight work, so shutdown drains immediately.
   """
-  @behaviour Fleet.Starfleet.Shutdown.Dispatcher
+  @behaviour Fleet.Admiral.Shutdown.Dispatcher
 
   @impl true
   def refuse_new_jobs(_opts), do: :ok
@@ -28,7 +28,7 @@ defmodule Fleet.Starfleet.Shutdown.NoOpDispatcher do
   def in_flight_count, do: 0
 end
 
-defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
+defmodule Fleet.Admiral.Shutdown.AggregateDispatcher do
   @moduledoc """
   **Real** backend of the `:shutdown_dispatcher` seam — aggregates the in-flight
   and activates quiescence. User decision: **no** `Fleet.Dispatcher`
@@ -72,14 +72,14 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
 
   ## Boundary — why the completion count is a runtime seam
 
-  `Fleet.Starfleet` does NOT depend on `Fleet.Pilot` (and must not — siblings). So the completion
+  `Fleet.Admiral` does NOT depend on `Fleet.Pilot` (and must not — siblings). So the completion
   Task.Supervisor (a Pilot concern) cannot be referenced here at compile time. `:completion_inflight_fun`
   (`Application.get_env`, wired in `runtime.exs` to `&Fleet.Pilot.StepRunConsumer.inflight_completions/0`)
   crosses that boundary as a runtime fun, never a compile reference — same shape as `:shutdown_dispatcher`
   / `:coord_backend`. Default (no wiring / test) = `fn -> 0 end`. The broker count stays a direct call
   (`Fleet.TaskQueue` IS a declared downward dep), through the `:task_queue_mod` test seam.
   """
-  @behaviour Fleet.Starfleet.Shutdown.Dispatcher
+  @behaviour Fleet.Admiral.Shutdown.Dispatcher
 
   require Logger
 
@@ -128,7 +128,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   defp task_queue_running?, do: is_pid(Process.whereis(Fleet.TaskQueue.Server))
 
   defp task_queue_mod,
-    do: Application.get_env(:lcars_fleet, :starfleet_task_queue_mod, @task_queue_default)
+    do: Application.get_env(:lcars_fleet, :admiral_task_queue_mod, @task_queue_default)
 
   defp safe_count_active do
     {:ok, length(task_queue_mod().list_active())}
@@ -139,7 +139,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   end
 
   defp completion_phases do
-    case Application.get_env(:lcars_fleet, :starfleet_completion_inflight_fun, fn -> 0 end).() do
+    case Application.get_env(:lcars_fleet, :admiral_completion_inflight_fun, fn -> 0 end).() do
       n when is_integer(n) and n >= 0 ->
         n
 
@@ -165,7 +165,7 @@ defmodule Fleet.Starfleet.Shutdown.AggregateDispatcher do
   end
 end
 
-defmodule Fleet.Starfleet.Shutdown do
+defmodule Fleet.Admiral.Shutdown do
   @moduledoc """
   Coordinated shutdown server. `fleet_v2 stop` sends SIGTERM; OTP invokes
   `Fleet.Application.prep_stop/1`, which calls `begin/1` before supervisors stop.
@@ -195,7 +195,7 @@ defmodule Fleet.Starfleet.Shutdown do
   @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet_v2`."
   @spec grace_ms() :: pos_integer()
   def grace_ms,
-    do: Application.get_env(:lcars_fleet, :starfleet_shutdown_grace_ms, @default_grace_ms)
+    do: Application.get_env(:lcars_fleet, :admiral_shutdown_grace_ms, @default_grace_ms)
 
   @default_poll_ms 500
 
@@ -240,7 +240,7 @@ defmodule Fleet.Starfleet.Shutdown do
   # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real
   # prod backend `AggregateDispatcher` is not wired (runtime.exs). Set HERE once
   # only — see `configured_dispatcher/0`.
-  @default_dispatcher Fleet.Starfleet.Shutdown.NoOpDispatcher
+  @default_dispatcher Fleet.Admiral.Shutdown.NoOpDispatcher
 
   # --- API ---
 
@@ -250,7 +250,7 @@ defmodule Fleet.Starfleet.Shutdown do
   end
 
   @doc """
-  Dispatcher backend resolved from config (`:lcars_fleet, :starfleet_shutdown_dispatcher`),
+  Dispatcher backend resolved from config (`:lcars_fleet, :admiral_shutdown_dispatcher`),
   default `NoOpDispatcher`. SINGLE SOURCE of the default: this process reads it at `init` and
   readiness (the anti-hollow-green probe) reads it too — neither re-declares the default,
   so no drift between the real drain and what readiness believes is wired. (The test
@@ -258,7 +258,7 @@ defmodule Fleet.Starfleet.Shutdown do
   """
   @spec configured_dispatcher() :: module()
   def configured_dispatcher do
-    Application.get_env(:lcars_fleet, :starfleet_shutdown_dispatcher, @default_dispatcher)
+    Application.get_env(:lcars_fleet, :admiral_shutdown_dispatcher, @default_dispatcher)
   end
 
   @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."

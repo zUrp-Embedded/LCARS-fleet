@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   @moduledoc """
   Q2 DRAFT producers — `StepRunConsumer` feeds the incident rail that had a consumer
-  (`Starfleet.DriftMonitor`) but NO producer:
+  (l'ex-DriftMonitor, mort avec la brouette) but NO producer:
 
   - `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`).
 

@@ -73,9 +73,9 @@ defmodule Fleet.API.Readiness do
 
 
   defp shutdown_dispatcher do
-    backend = Fleet.Starfleet.Shutdown.configured_dispatcher()
+    backend = Fleet.Admiral.Shutdown.configured_dispatcher()
 
-    if backend == Fleet.Starfleet.Shutdown.NoOpDispatcher do
+    if backend == Fleet.Admiral.Shutdown.NoOpDispatcher do
       probe("shutdown.dispatcher", :degraded, %{
         backend: "NoOpDispatcher",
         note: "NoOp drain (AggregateDispatcher not wired) — 0 in-flight, immediate drain"

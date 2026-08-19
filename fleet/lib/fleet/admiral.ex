@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet do
+defmodule Fleet.Admiral do
   use Boundary,
     deps: [
       Fleet.Slug,
@@ -41,20 +41,20 @@ defmodule Fleet.Starfleet do
 
   ## Sub-modules
 
-    * `Fleet.Starfleet.Application` — the app's supervisor (consumers gated
+    * `Fleet.Admiral.Application` — the app's supervisor (consumers gated
       by config: test hermeticity)
-    * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
+    * `Fleet.Admiral.AuditConsumer` — Bus consumer of the AUDIT rail
       (lifecycle + security, log prefix `AUDIT <event.type>`)
-    * `Fleet.Starfleet.ToolchainReconciler` — le déclencheur du rail d'outillage
+    * `Fleet.Admiral.ToolchainReconciler` — le déclencheur du rail d'outillage
       (comparaison head↔SHA appliqué sur `PeriodicCheck` ; le seul geste privilégié du rail)
-    * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
+    * `Fleet.Admiral.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
       Task triggered via `boot_orchestrate/0` by the root AFTER full boot;
       emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
-    * `Fleet.Starfleet.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
+    * `Fleet.Admiral.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
       `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
-    * `Fleet.Starfleet.MCPMonitor` — passive health check of the pod-facing
+    * `Fleet.Admiral.MCPMonitor` — passive health check of the pod-facing
       MCP substrate (`Fleet.MCP.PodSocketSupervisor`)
-    * `Fleet.Starfleet.PeriodicCheck` — shared plumbing for the periodic
+    * `Fleet.Admiral.PeriodicCheck` — shared plumbing for the periodic
       checks (`MCPMonitor`)
 
   ## Vendor boundary
@@ -73,8 +73,8 @@ defmodule Fleet.Starfleet do
   """
   @spec boot_orchestrate() :: :ok
   def boot_orchestrate do
-    if Fleet.Starfleet.Application.boot_enabled?(:starfleet_start_boot_orchestrator, true) do
-      {:ok, _task} = Task.start(Fleet.Starfleet.BootOrchestrator, :run, [[]])
+    if Fleet.Admiral.Application.boot_enabled?(:admiral_start_boot_orchestrator, true) do
+      {:ok, _task} = Task.start(Fleet.Admiral.BootOrchestrator, :run, [[]])
       :ok
     else
       :ok

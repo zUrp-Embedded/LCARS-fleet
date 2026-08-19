@@ -1,6 +1,6 @@
-defmodule Fleet.Starfleet.ShutdownTest do
+defmodule Fleet.Admiral.ShutdownTest do
   @moduledoc """
-  DN ring0/lcars-fleet_service §Fleet.Starfleet.Shutdown. `async: false`:
+  DN ring0/lcars-fleet_service §Fleet.Admiral.Shutdown. `async: false`:
   the stub backend models a singleton dispatcher (named Agent, read
   cross-process by the GenServer). Deliberate, coherent global coupling.
   The backend is injected via the `:shutdown_dispatcher` seam (behaviour
@@ -8,20 +8,20 @@ defmodule Fleet.Starfleet.ShutdownTest do
   """
   use ExUnit.Case, async: false
 
-  @box Fleet.Starfleet.ShutdownTest.Box
+  @box Fleet.Admiral.ShutdownTest.Box
 
   defmodule StubDispatcher do
-    @behaviour Fleet.Starfleet.Shutdown.Dispatcher
+    @behaviour Fleet.Admiral.Shutdown.Dispatcher
 
     @impl true
     def refuse_new_jobs(_opts) do
-      Agent.update(Fleet.Starfleet.ShutdownTest.Box, fn s -> %{s | refused: true} end)
+      Agent.update(Fleet.Admiral.ShutdownTest.Box, fn s -> %{s | refused: true} end)
       :ok
     end
 
     @impl true
     def in_flight_count do
-      Agent.get_and_update(Fleet.Starfleet.ShutdownTest.Box, fn
+      Agent.get_and_update(Fleet.Admiral.ShutdownTest.Box, fn
         %{seq: [h | t]} = s -> {h, %{s | seq: t}}
         %{seq: []} = s -> {0, s}
       end)
@@ -51,7 +51,7 @@ defmodule Fleet.Starfleet.ShutdownTest do
     # Fast poll for tests (prod default 500ms); the debounce (drain_confirmations, default 3) still applies.
     {:ok, _} =
       start_supervised(
-        {Fleet.Starfleet.Shutdown, [name: name] ++ Keyword.put_new(opts, :poll_ms, 10)}
+        {Fleet.Admiral.Shutdown, [name: name] ++ Keyword.put_new(opts, :poll_ms, 10)}
       )
 
     name
@@ -59,21 +59,21 @@ defmodule Fleet.Starfleet.ShutdownTest do
 
   test "NoOp default → begin/drain :ok, immediate drain (0 in-flight)" do
     name = start_sd([])
-    assert :ok = Fleet.Starfleet.Shutdown.begin(name: name, grace_ms: 200)
-    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 200)
+    assert :ok = Fleet.Admiral.Shutdown.begin(name: name, grace_ms: 200)
+    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 200)
   end
 
   test "backend sequence [2,1,0] → real drain converges" do
     box([2, 1, 0])
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
+    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
     assert %{seq: []} = Agent.get(@box, & &1)
   end
 
   test "backend always >0 → drain times out but :reply :ok (shutdown proceeds)" do
     box(List.duplicate(3, 100))
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 300)
+    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 300)
   end
 
   test "debounce (CI-02): a LONE transient 0 does NOT conclude — needs N consecutive 0s" do
@@ -83,7 +83,7 @@ defmodule Fleet.Starfleet.ShutdownTest do
     # would remain.
     box([1, 0, 1, 0, 0, 0])
     name = start_sd(dispatcher: StubDispatcher, drain_confirmations: 3)
-    assert :ok = Fleet.Starfleet.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
+    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
     assert %{seq: []} = Agent.get(@box, & &1)
     assert %{status: :drained} = :sys.get_state(name)
   end
@@ -91,7 +91,7 @@ defmodule Fleet.Starfleet.ShutdownTest do
   test "begin calls refuse_new_jobs" do
     box([0])
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Starfleet.Shutdown.begin(name: name, grace_ms: 300)
+    assert :ok = Fleet.Admiral.Shutdown.begin(name: name, grace_ms: 300)
     assert %{refused: true} = Agent.get(@box, & &1)
   end
 end

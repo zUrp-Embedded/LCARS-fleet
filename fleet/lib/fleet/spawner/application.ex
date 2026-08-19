@@ -6,8 +6,8 @@ defmodule Fleet.Spawner.Application do
   ## Permanent pod boot: SOLE authority = BootOrchestrator
 
   The boot of permanent pods (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`)
-  is orchestrated **only** by `Fleet.Starfleet.BootOrchestrator` (post-readiness,
-  guarded by `:lcars_fleet, :starfleet_start_boot_orchestrator`). This app does **NOT**
+  is orchestrated **only** by `Fleet.Admiral.BootOrchestrator` (post-readiness,
+  guarded by `:lcars_fleet, :admiral_start_boot_orchestrator`). This app does **NOT**
   boot the permanent pods: a second boot path here (an auto-invoke hook guarded
   by `:boot_permanent_at_start`) would double-boot — if `:boot_permanent_at_start`
   were enabled in prod (the documented path), it would boot the permanent pods IN

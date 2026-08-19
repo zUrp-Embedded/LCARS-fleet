@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.AuditConsumer do
+defmodule Fleet.Admiral.AuditConsumer do
   @moduledoc """
   Audit consumer — events lifecycle + security.
 
@@ -83,7 +83,7 @@ defmodule Fleet.Starfleet.AuditConsumer do
         state
       ) do
     Logger.error(
-      "AUDIT starfleet.mcp.server_crashed target=#{inspect(Map.get(p, "target"))} " <>
+      "AUDIT admiral.mcp.server_crashed target=#{inspect(Map.get(p, "target"))} " <>
         "previous=#{inspect(Map.get(p, "previous_status"))} " <>
         "new=#{inspect(Map.get(p, "new_status"))}"
     )

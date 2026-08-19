@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.ToolchainReconciler do
+defmodule Fleet.Admiral.ToolchainReconciler do
   @moduledoc """
   Le déclencheur du rail d'outillage — et ce n'est pas un événement, c'est une COMPARAISON.
 
@@ -43,7 +43,7 @@ defmodule Fleet.Starfleet.ToolchainReconciler do
 
   ## Configuration
 
-    * `:lcars_fleet, :starfleet_toolchain_reconcile_interval_ms` — défaut `60_000`
+    * `:lcars_fleet, :admiral_toolchain_reconcile_interval_ms` — défaut `60_000`
     * `:lcars_fleet, :forge_client` — seam de lecture (`branch_head/3`)
     * `:lcars_fleet, :toolchain_converger` — seam du geste (défaut : `sudo -n` sur le binaire)
     * `:lcars_fleet, :toolchain_converger_bin` — défaut `/usr/local/bin/lcars-toolchain-converge`
@@ -53,7 +53,7 @@ defmodule Fleet.Starfleet.ToolchainReconciler do
 
   require Logger
 
-  alias Fleet.Starfleet.PeriodicCheck
+  alias Fleet.Admiral.PeriodicCheck
 
   @default_interval_ms 60_000
   @default_run_state "/var/lib/lcars/toolchain"
@@ -359,7 +359,7 @@ defmodule Fleet.Starfleet.ToolchainReconciler do
     do:
       Application.get_env(
         :lcars_fleet,
-        :starfleet_toolchain_reconcile_interval_ms,
+        :admiral_toolchain_reconcile_interval_ms,
         @default_interval_ms
       )
 

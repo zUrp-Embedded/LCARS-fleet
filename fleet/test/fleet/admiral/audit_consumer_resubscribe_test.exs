@@ -1,4 +1,4 @@
-defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
+defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
   @moduledoc """
   Bus re-subscribe contract after restart: a killed event consumer restarts and RE-SUBSCRIBES,
   so it receives the NEXT events. The guarantee holds by construction (the subscribe lives in
@@ -55,7 +55,7 @@ defmodule Fleet.Starfleet.AuditConsumerResubscribeTest do
     {:ok, sup} =
       Supervisor.start_link(
         [
-          Supervisor.child_spec({Fleet.Starfleet.AuditConsumer, name: name, subscribe: true},
+          Supervisor.child_spec({Fleet.Admiral.AuditConsumer, name: name, subscribe: true},
             id: :real_audit
           )
         ],
