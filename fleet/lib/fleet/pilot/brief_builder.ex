@@ -469,6 +469,11 @@ defmodule Fleet.Pilot.BriefBuilder do
   # et le brief du gatekeeper la lui a présentée comme illisible. Un arbitre convoqué pour trancher
   # une contradiction entre une approbation et une mesure ne peut pas travailler si le rail lui
   # décrit une mesure claire comme du bruit.
+  # L'arbitre doit savoir qu'il arbitre sur un TROU, pas sur une mesure. C'est le seul état où la
+  # zone grise ne vient pas d'un désaccord entre un juge et la carte, mais d'une charge illisible.
+  defp digest_detail(%{"findings_unreadable" => true}),
+    do: "a mesuré, mais sa charge est ILLISIBLE — c'est ce trou qui bloque, pas un finding"
+
   defp digest_detail(payload) when is_map(payload) do
     case Map.get(payload, "findings") do
       [] ->

@@ -72,4 +72,61 @@ defmodule Fleet.FindingsWireTest do
       assert {:ok, findings()} == FindingsWire.parse(body)
     end
   end
+
+  describe "F-3 — le corps est ÉDITABLE, et le parseur ne doit pas dépendre du contraire" do
+    test "une main qui répond avec un bloc de code APRÈS le nôtre ne casse plus la lecture" do
+      # LE CAS MESURÉ (2026-08-19). La règle « notre barrière est la dernière » était vraie au
+      # rendu et fausse dès qu'un humain répondait dans le même corps sur la forge. Un ```bash
+      # ajouté rendait `{:error, :undecodable}` — et un cran plus haut, ça EFFAÇAIT le blocage
+      # d'une carte au lieu de le lever : une zone grise qui devait un arbitrage était scellée
+      # `:approved`.
+      charge = %{"findings" => [%{"severity" => "critical", "category" => "tests"}]}
+
+      corps =
+        "AVIS FAVORABLE\n" <>
+          FindingsWire.render(charge) <>
+          "\n\nvu, je corrige :\n\n```bash\nmix test --only tests\n```\n"
+
+      assert {:ok, ^charge} = FindingsWire.parse(corps)
+    end
+
+    test "et le cas qui avait motivé « la dernière barrière » tient toujours" do
+      # Un finding CITE DU CODE — c'est sa forme normale. Les deux contraintes sont désormais
+      # satisfaites par la même règle : décoder, du plus long au plus court.
+      charge = %{"findings" => [%{"detail" => "le test fait\n```\nassert true\n```\net rien"}]}
+
+      assert {:ok, ^charge} = FindingsWire.parse("prose\n" <> FindingsWire.render(charge))
+    end
+
+    test "les deux à la fois : citation interne ET réponse humaine après" do
+      charge = %{"findings" => [%{"severity" => "minor", "detail" => "cf ```mix gate```"}]}
+
+      corps =
+        FindingsWire.render(charge) <> "\n\nok\n\n```elixir\nassert false\n```\n"
+
+      assert {:ok, ^charge} = FindingsWire.parse(corps)
+    end
+  end
+
+  describe "F-3 — « illisible » n'est pas « absent », et ne s'échange pas contre un feu vert" do
+    test "une charge illisible BLOQUE dès qu'un plancher est déclaré" do
+      # L'honnêteté du modèle tient à ça : la réponse à « y a-t-il un finding au-dessus de la
+      # ligne ? » est INCONNUE, et inconnu ne se dépense pas comme non.
+      assert FindingsWire.blocks?(FindingsWire.unreadable(), "critical")
+      assert FindingsWire.blocks?(FindingsWire.unreadable(), "minor")
+    end
+
+    test "sans plancher déclaré, elle ne bloque rien — la dégénérescence est intacte" do
+      # La condition qui autorise les cartes sans courbe à ne rien changer : pas de plancher, pas
+      # de question posée, donc pas de réponse inventée.
+      refute FindingsWire.blocks?(FindingsWire.unreadable(), nil)
+    end
+
+    test "ce n'est PAS un finding fabriqué" do
+      # Inventer un `critical` que personne n'a mesuré ferait entrer un défaut imaginaire dans le
+      # dossier — et le premier lecteur à le citer aurait raison de le croire.
+      assert FindingsWire.unreadable() == %{"findings_unreadable" => true}
+      refute Map.has_key?(FindingsWire.unreadable(), "findings")
+    end
+  end
 end

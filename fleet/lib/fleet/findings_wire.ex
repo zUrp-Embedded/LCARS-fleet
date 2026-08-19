@@ -44,6 +44,7 @@ defmodule Fleet.FindingsWire do
   """
 
   @marker "[findings-v1]"
+  @unreadable_key "findings_unreadable"
   @fence "```json"
 
   @doc "The stable marker -- exported so a reader/test names it once."
@@ -77,15 +78,10 @@ defmodule Fleet.FindingsWire do
   """
   @spec parse(String.t() | nil) :: {:ok, map()} | :none | {:error, :undecodable}
   def parse(body) when is_binary(body) do
-    case last_block(body) do
-      nil ->
-        :none
-
-      json ->
-        case Jason.decode(json) do
-          {:ok, %{} = map} -> {:ok, map}
-          _ -> {:error, :undecodable}
-        end
+    case block(body) do
+      {:ok, map} -> {:ok, map}
+      :absent -> :none
+      :undecodable -> {:error, :undecodable}
     end
   end
 
@@ -97,6 +93,18 @@ defmodule Fleet.FindingsWire do
   """
   @spec severities() :: [String.t()]
   def severities, do: ["minor", "important", "critical"]
+
+  @doc """
+  The value a reader stores for a judge whose block is PRESENT AND UNREADABLE.
+
+  Not a finding, and deliberately not shaped like one -- fabricating a `critical` to make the gate
+  behave would put a defect in the record that nobody measured. It carries one fact: a measurement
+  was made and cannot be read. `blocks?/2` treats it as blocking whenever a card declares a floor,
+  because the honest answer to "is there a finding above the line?" is then *unknown*, and unknown
+  must not be spent as *no*.
+  """
+  @spec unreadable() :: map()
+  def unreadable, do: %{@unreadable_key => true}
 
   @doc """
   Does this judge's payload carry a finding at or above `block_at`?
@@ -113,6 +121,7 @@ defmodule Fleet.FindingsWire do
   @spec blocks?(map() | nil, String.t() | nil) :: boolean()
   def blocks?(nil, _block_at), do: false
   def blocks?(_findings, nil), do: false
+  def blocks?(%{@unreadable_key => true}, _block_at), do: true
 
   def blocks?(%{"findings" => findings}, block_at) when is_list(findings) do
     case rank(block_at) do
@@ -135,35 +144,59 @@ defmodule Fleet.FindingsWire do
 
   defp rank(_), do: nil
 
-  # Cut at the last marker, then take the first fenced block after it. String primitives rather
-  # than a regex: the payload is arbitrary JSON (braces, quotes, newlines), and a regex that has to
-  # be right about all three is harder to read than two splits.
-  defp last_block(body) do
+  # Cut at the last marker, then read the fenced block after it. String primitives rather than a
+  # regex: the payload is arbitrary JSON (braces, quotes, newlines), and a regex that has to be
+  # right about all three is harder to read than two splits.
+  #
+  # THREE OUTCOMES, NOT TWO, and collapsing any pair of them costs something real: `:absent` (no
+  # block -- a judge that wrote prose only), `{:ok, map}`, and `:undecodable` (a block is there and
+  # nothing in it reads). The first version of the hardened parser returned `:absent` when no
+  # candidate decoded, which erased the very distinction this module exists to keep -- caught by
+  # its own tests, one commit after the distinction had been argued for.
+  defp block(body) do
     case String.split(body, @marker) do
-      [_only] ->
-        nil
-
-      parts ->
-        parts
-        |> List.last()
-        |> after_fence()
+      [_only] -> :absent
+      parts -> parts |> List.last() |> after_fence()
     end
   end
 
-  # THE CLOSING FENCE IS THE LAST ONE, NOT THE FIRST, and the difference is not academic: a
-  # finding QUOTES CODE. "assertion creuse -- `parse_duration \"90s\" >/dev/null`" is the normal
-  # shape of a judge's payload, so backticks (and ```-fenced snippets) live INSIDE the JSON as a
-  # matter of course. Cutting at the first "```" after the opening fence truncated the payload
-  # mid-object on exactly those findings -- the substantial ones -- and handed back
-  # `{:error, :undecodable}`, which reads as "the judge wrote garbage" about a judge that wrote
-  # the most useful thing it could. Our block is appended LAST to the body, so the last fence in
-  # the string is ours by construction; everything before it is payload.
+  # WHICH FENCE CLOSES THE BLOCK CANNOT BE DECIDED BY POSITION -- neither the first nor the last is
+  # reliably ours, and each wrong guess fails on a case the other handles:
+  #
+  #   * the FIRST fence is wrong because a finding QUOTES CODE. "assertion creuse --
+  #     `parse_duration \"90s\" >/dev/null`" is the normal shape of a payload, so ```-fenced
+  #     snippets live INSIDE the JSON as a matter of course; cutting at the first fence truncated
+  #     the substantial findings mid-object and reported them as garbage.
+  #   * the LAST fence is wrong because THE BODY IS EDITABLE. It is ours only until a human replies
+  #     inside that same body with a code block of their own -- measured 2026-08-19: one appended
+  #     ```bash snippet turned a readable payload into `{:error, :undecodable}`, and one layer up
+  #     that erased a card's block instead of raising it. A parser whose correctness depends on
+  #     nobody touching the text is not a parser, it is a convention.
+  #
+  # So: DECIDE BY DECODING. Take every candidate ending, longest first, and keep the first one that
+  # is valid JSON. The longest-first order is what makes it right rather than merely lucky -- inner
+  # fences are swallowed by a longer candidate before a shorter one can cut the object short.
   defp after_fence(tail) do
     with [_, rest] <- String.split(tail, @fence, parts: 2),
          parts when length(parts) >= 2 <- String.split(rest, "```") do
-      parts |> Enum.drop(-1) |> Enum.join("```") |> String.trim()
+      candidates(parts)
     else
-      _ -> nil
+      # A marker with no fenced block under it is a judge QUOTING the marker in its prose, not a
+      # broken payload -- it accuses nobody.
+      _ -> :absent
     end
+  end
+
+  # Longest first: n-1 candidates for n segments, each a prefix ending on a different fence. The
+  # first that decodes wins; if none does, the block is there and unreadable, and that is said.
+  defp candidates(parts) do
+    (length(parts) - 1)..1//-1
+    |> Enum.map(&(parts |> Enum.take(&1) |> Enum.join("```") |> String.trim()))
+    |> Enum.find_value(:undecodable, fn candidate ->
+      case Jason.decode(candidate) do
+        {:ok, %{} = map} -> {:ok, map}
+        _ -> nil
+      end
+    end)
   end
 end

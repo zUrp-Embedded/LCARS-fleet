@@ -278,17 +278,27 @@ defmodule Fleet.Forge.Client.Jury do
         {:ok, findings} ->
           Map.put(acc, RoleIdentity.role_or_login(login), findings)
 
-        # A block that is present and broken is NOT the same fact as no block, and the difference
-        # is worth a line in the log: nobody can edit a review body except a human, so this is
-        # either a judge writing malformed JSON or a hand that reached in after the fact. Dropped
-        # either way -- the verdict itself is untouched, it just stops carrying measurements.
+        # A block that is present and broken is NOT the same fact as no block -- and this used to
+        # DROP it, which spent the difference the moment it mattered. Under a card that declares a
+        # floor, a dropped payload is read downstream as "this judge measured nothing", so an
+        # unreadable measurement REMOVED a block instead of raising one: a gray zone that owed an
+        # arbitration got sealed as `:approved`, with a log line as its only witness. Measured
+        # 2026-08-19 on the two shipped cards that declare `block_at: critical`.
+        #
+        # So it is RECORDED, as a fact of its own kind. Not as a fabricated finding -- inventing a
+        # `critical` nobody measured would put a defect in the record -- but as the honest one:
+        # a measurement exists here and cannot be read. `FindingsWire.blocks?/2` answers `true` for
+        # it whenever a floor is declared, because *unknown* must not be spent as *no*. A card with
+        # no curve is untouched: no floor, no question, same behaviour as before.
+        #
+        # The binary verdict stays sovereign either way -- this is a ceiling, the judge is a floor.
         {:error, :undecodable} ->
           Logger.warning(
             "Jury: #{login}'s review carries a findings-v1 block that does not decode — " <>
-              "machine payload dropped, the binary verdict stands"
+              "recorded as UNREADABLE (blocks under a declared floor), the binary verdict stands"
           )
 
-          acc
+          Map.put(acc, RoleIdentity.role_or_login(login), Fleet.FindingsWire.unreadable())
 
         :none ->
           acc
