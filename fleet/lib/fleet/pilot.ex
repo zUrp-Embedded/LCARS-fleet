@@ -97,6 +97,10 @@ defmodule Fleet.Pilot do
   # deliberate API gesture.
   use Boundary,
     deps: [
+      # Le vocabulaire d'une demande d'outillage. FONDATION, partagee avec Fleet.MCP : le
+      # reconciliateur applique ce qu'un humain a merge, l'outil MCP rend ce que le pod a tape, et
+      # MCP est SOUS ce domaine — donc la piece commune ne peut vivre dans ni l'un ni l'autre.
+      Fleet.Toolchain,
       Fleet.Slug,
       Fleet.PodId,
       Fleet.EnvParse,
