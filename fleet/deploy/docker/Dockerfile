@@ -488,6 +488,10 @@ COPY fleet/deploy/docker/console-landing.sh /opt/lcars/console-landing.sh
 COPY fleet/deploy/docker/console-deck.py    /opt/lcars/console-deck.py
 COPY fleet/deploy/docker/console-pod.sh     /opt/lcars/console-pod.sh
 COPY fleet/deploy/docker/human-converger.sh /opt/lcars/human-converger.sh
+# L'UNIQUE GESTE PRIVILEGIE DU RAIL TOOLCHAIN — au chemin que le sudoers etroit (45-sudoers) et le
+# reconciliateur (`toolchain_reconciler.ex` : `sudo -n <bin> <sha>`) attendent. Dans /usr/local/bin
+# et pas /opt : c'est un binaire d'exploitation, pas un composant de boot.
+COPY fleet/deploy/docker/toolchain-converger.sh /usr/local/bin/lcars-toolchain-converge
 # Les gestes forge, DANS l'image : `docker.sh` et le banc les jouent par la meme porte, au lieu
 # d'en porter chacun une copie (le banc ne peut pas appeler `docker.sh` — sa boite vient d'un autre
 # couple de fichiers compose, et `docker.sh` refuse a raison d'agir sur un projet qu'il n'a pas cree).
@@ -549,6 +553,7 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/human-converger.sh \
+               /usr/local/bin/lcars-toolchain-converge \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh
