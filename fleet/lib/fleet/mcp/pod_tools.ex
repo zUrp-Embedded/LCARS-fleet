@@ -187,10 +187,32 @@ defmodule Fleet.MCP.PodTools do
       )
     end
 
+    # ⚠ `payload` ÉTAIT UN `object` NU, ET C'EST LÀ QUE LA CHARGE MACHINE DES JUGES SE PERDAIT.
+    # MESURÉ le 2026-08-19 au banc, sur deux juges indépendants (probe-rails PR#34 puis PR#37) :
+    # trois verdicts rendus, trois gravures en prose, ZÉRO `details.findings_v1`. La consigne
+    # existe pourtant — `core/judge-verdict` la compose dans le SP de chaque juge — mais elle vit
+    # dans un bloc de prose lu au démarrage, à des centaines de lignes du moment où l'agent
+    # remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
+    # disait « un objet ». Un objet, c'est tout ce qu'il rendait.
+    #
+    # Le schéma reste PERMISSIF (aucun `required` ajouté, aucun `additionalProperties: false`) :
+    # `submit_result` sert tous les rôles, et la forme d'un livrable de producteur n'est pas celle
+    # d'un verdict de juge. On ne contraint pas, on NOMME — la description est le seul endroit qui
+    # atteint l'agent au bon instant.
     input_schema(%{
       "type" => "object",
       "properties" => %{
-        "payload" => %{"type" => "object"},
+        "payload" => %{
+          "type" => "object",
+          "description" =>
+            "Le résultat structuré de ta tâche. SI TU ES UN JUGE : l'enveloppe de verdict " <>
+              "(`decision`, `reason`, …) ET, sous `details.findings_v1`, la charge MACHINE de tes " <>
+              "findings — `%{\"findings\" => [%{\"severity\" => \"critical\"|\"important\"|" <>
+              "\"minor\", \"category\" => …, \"description\" => …}, …]}`. Ta prose est lue par " <>
+              "des humains ; cette charge est lue par le RAIL : c'est elle qui permet à la carte du " <>
+              "projet de peser ton verdict au lieu de seulement le compter. L'omettre ne casse rien " <>
+              "et ne perd que ça — mais elle est perdue pour de bon."
+        },
         "work_item_id" => %{"type" => "string"}
       },
       "required" => ["payload", "work_item_id"]
