@@ -50,6 +50,13 @@ set -euo pipefail
 # temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /home/private. Les defauts
 # sont les chemins reels ; aucun appelant de production ne les passe.
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER. Son nom etait ecrit en dur dans les deux
+# projections de catalogue (`git -c user.name=...`), donc le renommer demandait de les retrouver.
+# Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
+# chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
+# une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
@@ -224,6 +231,53 @@ publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
   echo "forge-gestures: $org — $posed adhesion(s) rendue(s) visible(s), $skipped compte(s) hors de notre autorite"
 }
 
+# ─── LE CREATEUR DE L'ORG N'EN EST PAS LE PROPRIETAIRE ──────────────────────────────────────────
+# Gitea fait de qui cree une org un membre de son equipe `Owners`. La recette n'a jamais declare ca :
+# `forge.tf` ne nomme QU'UN owner, le compte systeme. Le master s'y retrouvait donc par effet de
+# bord — parce que c'est SON jeton que tofu porte — et une liste de proprietaires qui nomme
+# quelqu'un qui n'a fait que creer ment sur qui tient l'org.
+#
+# ⚠ CE N'EST PAS UNE QUESTION DE POUVOIR, C'EST UNE QUESTION DE CE QUE LA LISTE DIT. Le master est
+# site-admin : il passe outre toutes les permissions de team, avant comme apres. Mesure du
+# 2026-08-20 sur banc neuf : apres le retrait, le compte systeme lit toujours les membres d'une team
+# (200 — la capacite qui exigeait la propriete, il l'a parce que c'est LUI l'owner), et le master
+# atteint toujours l'org avec un jeton sans droit d'org. Rien ne se degrade, la liste cesse de mentir.
+#
+# L'ORDRE EST LE GESTE : on RELIT la liste et on confirme que le compte systeme y est AVANT de
+# retirer le master. Jamais l'inverse, jamais sans la relecture — sinon une passe ou tofu n'a pas
+# encore pose l'adhesion laisserait une org sans proprietaire. C'est la meme discipline que
+# `toolchain-protection` : la relecture fait foi, pas l'ordre suppose des gestes.
+demote_creator_from_owners() { # $1=org  $2=jeton master
+  local org="$1" tok="$2" api="${FORGE_BASE_URL%/}/api/v1" tid owners
+  tid="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/orgs/$org/teams" 2>/dev/null \
+        | python3 -c 'import json,sys;print(next((t["id"] for t in json.load(sys.stdin) if t["name"]=="Owners"),""))' 2>/dev/null || true)"
+  [[ -n "$tid" ]] || { echo "forge-gestures: equipe Owners de $org introuvable — le master y reste (rien n'est retire a l'aveugle)" >&2; return 0; }
+
+  owners="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/teams/$tid/members" 2>/dev/null \
+           | python3 -c 'import json,sys;print(" ".join(m["login"] for m in json.load(sys.stdin)))' 2>/dev/null || true)"
+
+  # LA PRECONDITION, ET ELLE EST LUE, PAS SUPPOSEE : sans le compte systeme dans la liste, on ne
+  # retire rien. Une org sans proprietaire est irreparable sans site-admin.
+  [[ " $owners " == *" $SYSTEM_ACCOUNT "* ]] || {
+    echo "forge-gestures: $SYSTEM_ACCOUNT n'est PAS owner de $org (vu: ${owners:-aucun}) — le master y reste" >&2
+    return 0; }
+
+  # Le master est celui dont ce jeton est l'autorite : on le demande a la forge plutot que de le
+  # deviner, son login etant variable (l'installeur en prod, `admiral` au banc).
+  local master
+  master="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/user" 2>/dev/null \
+           | python3 -c 'import json,sys;print(json.load(sys.stdin).get("login",""))' 2>/dev/null || true)"
+  [[ -n "$master" ]] || return 0
+  [[ " $owners " == *" $master "* ]] || return 0   # deja retire : rien a dire
+
+  if curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "Authorization: token $tok" \
+       -X DELETE "$api/teams/$tid/members/$master" 2>/dev/null | grep -q '^204$'; then
+    echo "forge-gestures: $master retire des Owners de $org — il l'etait par creation, pas par decision ($SYSTEM_ACCOUNT reste proprietaire ; le site-admin est intact)"
+  else
+    echo "forge-gestures: retrait de $master des Owners de $org REFUSE — la liste garde son proprietaire de creation" >&2
+  fi
+}
+
 cmd_apply() {
   local tok seed
   # Le jeton donne a la main l'emporte sur celui que la boite garde ; le SEED, lui, n'a pas de
@@ -282,6 +336,8 @@ cmd_apply() {
   # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
   publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
 
+  demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"
+
   seed_demo_catalogue "$tok"
 }
 
@@ -332,7 +388,7 @@ seed_demo_catalogue() { # $1=jeton master
   ( cd "$stage" \
     && git init -q -b main \
     && git add -A \
-    && git -c user.name=lcars-system -c user.email=lcars-system@lcars.local \
+    && git -c "user.name=$SYSTEM_ACCOUNT" -c "user.email=$SYSTEM_EMAIL" \
          commit -q -m "chore(catalogue): projection de $name depuis l image" \
     && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
        GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
@@ -447,11 +503,11 @@ cmd_install() {
   #    `UNREACHABLE {:config, {:token_file, …, :eacces}}` — un refus de permission presente comme
   #    « pas de source installable », c'est-a-dire le mauvais diagnostic pour le mauvais probleme.
   #
-  #    `system.gitea_token` est `0640 root:fleet`, donc lisible par la porte, et c'est l'identite
-  #    juste : `lcars-system` est le compte avec lequel la boite lit sa forge. Un depot de catalogue
+  #    `<compte-systeme>.gitea_token` est `0640 root:fleet`, donc lisible par la porte, et c'est l'identite
+  #    juste : `$SYSTEM_ACCOUNT` (defaut `system_starfleet`) est le compte avec lequel la boite lit sa forge. Un depot de catalogue
   #    est public par construction, donc ce jeton suffit — donner le site-admin a une lecture serait
   #    lui accorder un pouvoir dont elle n'a aucun usage.
-  local sys_token="$PRIVATE_DIR/system.gitea_token"
+  local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
   [[ -r "$sys_token" ]] \
     || die "install: $sys_token illisible — la boite n'a pas encore de jeton systeme (« provision apply » le minte)"
 
@@ -641,7 +697,7 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
   ( cd "$stage" \
     && git init -q -b main \
     && git add -A \
-    && git -c user.name=lcars-system -c user.email=lcars-system@lcars.local \
+    && git -c "user.name=$SYSTEM_ACCOUNT" -c "user.email=$SYSTEM_EMAIL" \
          commit -q -m "chore(catalogue): projection de $name depuis son depot" \
                    -m "Source-Commit: $src_sha" \
     && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \

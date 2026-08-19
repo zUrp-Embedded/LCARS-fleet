@@ -32,7 +32,7 @@ defmodule Fleet.Project.Onboard do
     2. `git clone --branch main` → `/home/projects/<name>`
     3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, CI) — PAS de spec : la matiere de
        cadrage vit sur `workshop`, la seule face dont l architecte ait la plume avant la 1re livraison
-    4. commit (author=`lcars-system`, committer=git config runtime = the human) + push `main`
+    4. commit (author=`system_starfleet`, committer=git config runtime = the human) + push `main`
     5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
        `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
        * `ops` → `/home/projects.ops/<name>` — the RECORD the runtime keeps (README only:
@@ -46,10 +46,10 @@ defmodule Fleet.Project.Onboard do
   records how that pod was judged.
 
   Identity (onboarding is an act of system INFRA, not creative work):
-  `author=lcars-system` (the SYSTEM generates the scaffold from templates; the arch writes no file,
+  `author=system_starfleet` (the SYSTEM generates the scaffold from templates; the arch writes no file,
   it **relays** `name`+`pitch` — it is transparent in the git attribution, its trace lives in the request),
   `committer`=the human (git config runtime = **the user who initiated the project → traced**),
-  `pusher`=`lcars-system` (`ForgeAuth.git_env`, fleet-wide owner). All avatared (emails → Gitea accounts).
+  `pusher`=`system_starfleet` (`ForgeAuth.git_env`, fleet-wide owner). All avatared (emails → Gitea accounts).
   No GenServer (Iron Law — I/O orchestration without shared state).
 
   ⚠ CROSS CONTRACT (seam `fleet_mcp`): `onboard/2` is the REAL impl (default) of the behaviour

@@ -68,7 +68,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   # ── Forge-blind barrier §4 — MECHANICAL invariant (not a poster) ───────────
   # DN forge-state-machine §4 + gatekeeper-forge-encoding-v2 §9.9: the producer
   # pods of the chain (engineer deliverable, gatekeeper verdict) NEVER touch
-  # the forge — the SYSTEM (lcars-system) writes. Verified here, not merely
+  # the forge — the SYSTEM (system_starfleet) writes. Verified here, not merely
   # commented in the yaml (audit meta-finding: "barriers = posters").
   # F-C007 (resolved, user-validated): the JUDGES (qualifier, reviewer — brief_kind: judge) receive an
   # in-pod clone, work on it, return a verdict payload → NOTHING to do with the forge → forge-blind.

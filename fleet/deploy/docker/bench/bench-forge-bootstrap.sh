@@ -384,7 +384,7 @@ printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "cha
 # degrade en bare-create + scaffold local, LOUD). Une forge vierge sans les deux est une forge sur
 # laquelle la fleet ne peut rien faire — et c'est l'etat par defaut apres chaque nuke.
 if [[ "$SEED_REPOS" -eq 1 ]]; then
-  SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat /home/private/system.gitea_token 2>/dev/null | tr -d '[:space:]' || true)"
+  SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 
   if [[ -z "$SYS_TOKEN" ]]; then
     say "token systeme absent de la boite — semis SAUTE (relance la boite puis rejoue ce script)"
@@ -393,7 +393,7 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       -d '{"name":"lcars","description":"LCARS — la source de la boite","private":false,"auto_init":false}' \
       "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
-    LCARS_REMOTE="http://lcars-system:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
+    LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
     git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
       && say "fleet/lcars : main pousse" || say "fleet/lcars : main NON pousse"
 

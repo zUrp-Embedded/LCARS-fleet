@@ -39,7 +39,7 @@ set -euo pipefail
 STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/system.gitea_token}"
+TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token}"
 # LE REPERTOIRE DE TRAVAIL EST JETABLE, ET IL NE S'OUVRE NI DANS L'ETAT TOFU NI DANS LE MAGASIN.
 # `/var/lib/lcars/tofu` porte les recettes tofu par catalogue — 2770 root:admin, aucun acces monde,
 # parce que l'etat terraform contient les valeurs des variables et que le mot de passe de seed y

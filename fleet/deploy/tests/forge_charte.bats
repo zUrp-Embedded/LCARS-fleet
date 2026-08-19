@@ -36,6 +36,14 @@ setup() {
   while IFS= read -r png; do
     : > "$AVATARS/$png"
   done < <(sed -n 's/.*ENTRIES+=(.*:\([^"]*\.png\)".*/\1/p' "$SCRIPT")
+  # L'AVATAR DE L'ORG N'EST PAS UNE LIGNE DE LA TABLE — il se pose par un endpoint distinct, avec
+  # un fichier que le script nomme dans son code. Il ARRIVAIT ici par accident : le compte systeme
+  # portait `favicon.png` faute d'un dessin a lui, donc la derivation ci-dessus le produisait. Le
+  # jour ou ce compte a pris son propre visage, la doublure a cesse de fabriquer le fichier et
+  # quatre temoins sont tombes sur « favicon introuvable » — un echec qui n'accusait ni la table ni
+  # l'org, mais le lien fortuit entre les deux. Ce qu'un test derive d'une table doit venir de la
+  # table ; ce qui n'en vient pas se pose ICI, en le disant.
+  : > "$AVATARS/favicon.png"
 
   ARGV_LOG="$BATS_TEST_TMPDIR/argv.log"
   STDIN_LOG="$BATS_TEST_TMPDIR/stdin.log"

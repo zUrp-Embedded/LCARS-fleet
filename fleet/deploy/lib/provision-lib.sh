@@ -75,7 +75,13 @@ PROVISION_LIB_LOADED=1
 # runtime ne casse rien : `45-catalogues` converge un repertoire que personne ne lit, et la boite
 # tourne sur le catalogue livre en annonçant qu'elle en sert trois.
 : "${PROV_CATALOGUES_DIR:=/home/catalogues}"
-: "${PROV_SYSTEM_ACCOUNT:=lcars-system}"       # compte forge du SYSTÈME (signe les marqueurs)
+: "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
+# SON JETON SE DÉRIVE DE SON LOGIN, COMME LES NEUF AUTRES. Il s'appelait `system.gitea_token` pour
+# un compte nommé `lcars-system` : ni dérivé, ni cohérent, et il fallait donc une TABLE — le
+# `--extra-token "<compte>:system.gitea_token"` que `50-forge.sh` portait à deux endroits pour ce
+# seul compte. Le contrat des jetons de rôle est `<login>.gitea_token` ; ce compte-ci le respecte
+# désormais, et le cas particulier disparaît avec lui.
+: "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 # La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck. Elle n'avait pas de nom
 # ici — elle vivait en `LCARS_HUMANS_TEAM` cote boite, seconde famille de variables pour un fait

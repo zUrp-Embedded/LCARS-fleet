@@ -6,7 +6,7 @@
 #
 # WHY THIS SCRIPT (rather than a refinement of onboard): the work forge (Gitea) carries an INTERNAL
 # truth — author=human, co-author=`LCARS-<role>` (Fleet.Credentials.ForgeIdentity, commit gate) — and
-# some system commits (onboard/scaffold) are authored by `lcars-system`. That is HONEST for the work
+# some system commits (onboard/scaffold) are authored by `system_starfleet`. That is HONEST for the work
 # (the system really did generate the scaffold), but it is NOT what we want to publish: on a GitHub
 # mirror the human must own their whole tree (human author everywhere) and the credit goes to the VENDOR
 # that did the work — never an internal role, never a hardcoded "Claude", but derived from the active N1
@@ -38,7 +38,7 @@
 #       --token-file /home/private/test/system.gitea_token --out /tmp/mon-projet-gh
 #   Options: --vendor-identity FILE (default: bin/claude_launch.identity, co-located with the active N1
 #            launcher — NAME=/EMAIL=) · --filter-repo-bin BIN (default: git-filter-repo on PATH, or
-#            $FILTER_REPO_BIN) · --system-email EMAIL (default: lcars-system@lcars.local — MUST match
+#            $FILTER_REPO_BIN) · --system-email EMAIL (default: system_starfleet@lcars.local — MUST match
 #            Fleet.Credentials.ForgeIdentity.system_email/0, the single authority runtime-side).
 #
 # EXIT CODES, as they actually are — this runs under `set -euo pipefail` with no trap, so most failures
@@ -60,7 +60,7 @@ TOKEN_FILE=""
 OUT_DIR=""
 VENDOR_IDENTITY="$SCRIPT_DIR/claude_launch.identity"
 FILTER_REPO_BIN="${FILTER_REPO_BIN:-git-filter-repo}"
-SYSTEM_EMAIL="lcars-system@lcars.local"
+SYSTEM_EMAIL="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}@lcars.local"
 # D2 — branche à APLATIR en first-parent après la transformation (forme MR canonique, cf. la
 # fonction). Vide = off : le miroir publie l'historique tel quel, bulles comprises — elles sont
 # GitHub-normales sur un main ; l'aplatissement ne sert que la branche d'une MR upstream (D3).
@@ -192,11 +192,11 @@ GIT_CONFIG_COUNT=1 \
 # least one scaffold/work commit with a human committer). This is the pre-scan the header describes as
 # step 0, and the only path in this script that exits 2.
 HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se {print; exit}')"
-[[ -n "$HUMAN_LINE" ]] || { echo "publish-to-github: tous les commits sont au compte lcars-system — l'humain reste inconnu" >&2; exit 2; }
+[[ -n "$HUMAN_LINE" ]] || { echo "publish-to-github: tous les commits sont au compte system_starfleet — l'humain reste inconnu" >&2; exit 2; }
 HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
 
-echo "publish-to-github: passe filter-repo — author lcars-system devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
+echo "publish-to-github: passe filter-repo — author system_starfleet devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
 # The 5 values cross through the ENVIRONMENT (os.environb, callback side), NEVER through bash
 # interpolation into the Python source: an author name is UNCONTROLLED data (git log %cn), and the old
 # `${VAR@Q}` produced, on an apostrophe (O'Brien), a bash literal `$'...'` that is INVALID Python —

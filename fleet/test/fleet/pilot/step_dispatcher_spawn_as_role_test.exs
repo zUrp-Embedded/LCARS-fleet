@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   @moduledoc """
   Stopwatch attribution: `Spawn.spawn_step` must start the stopwatch IN THE NAME OF THE dispatched
   ROLE (`as_role`), not the system account — otherwise Gitea attributes all tracked time to
-  `lcars-system`, never to the real worker. The label stays system-signed (protocol), only the
+  `system_starfleet`, never to the real worker. The label stays system-signed (protocol), only the
   stopwatch (attributable data) is role-signed. async: false (mutates the global `:role_tokens_dir`
   config).
   """

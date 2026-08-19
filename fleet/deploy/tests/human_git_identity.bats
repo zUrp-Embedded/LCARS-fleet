@@ -38,7 +38,7 @@ SH
   export PROV_HUMAN="$(id -un)"
   export PROV_FORGE_URL="http://forge.test"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
-  echo "tok" > "$PROV_TOKENS_DIR/system.gitea_token"
+  echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"
 
   # HOME jetable : `as_human` s'execute DIRECTEMENT quand PROV_HUMAN est deja l'utilisateur courant,
   # donc `git config --global` ecrit dans CE home et nulle part ailleurs.

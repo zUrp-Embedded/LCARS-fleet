@@ -90,7 +90,7 @@ defmodule Fleet.Pilot.ConflictReportTest do
       assert body =~ "juges re-jugent"
       # The attribution is the whole point of the item: the pen and the responsibility are two
       # different facts, and both are true.
-      assert body =~ "lcars-system"
+      assert body =~ "system_starfleet"
       assert body =~ "posté par le chief"
     end
 

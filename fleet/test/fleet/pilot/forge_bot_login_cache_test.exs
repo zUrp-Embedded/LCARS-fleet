@@ -49,7 +49,9 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
   end
 
   test "two tokens on the same forge do not share one cached login" do
-    a = comments_for("lcars-system") ++ [token: "token-A-#{System.unique_integer([:positive])}"]
+    a =
+      comments_for("system_starfleet") ++ [token: "token-A-#{System.unique_integer([:positive])}"]
+
     b = comments_for("lcars-other") ++ [token: "token-B-#{System.unique_integer([:positive])}"]
 
     # `count_signed_step_runs/3` is the shortest public path that resolves the bot login, and its
@@ -57,16 +59,16 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
     assert {:ok, la} = resolve(a)
     assert {:ok, lb} = resolve(b)
 
-    assert la == "lcars-system"
+    assert la == "system_starfleet"
     assert lb == "lcars-other", "the second token inherited the first one's cached login"
   end
 
   test "the same token resolves once and is reused" do
     tok = "token-same-#{System.unique_integer([:positive])}"
-    opts = comments_for("lcars-system") ++ [token: tok]
+    opts = comments_for("system_starfleet") ++ [token: tok]
 
-    assert {:ok, "lcars-system"} = resolve(opts)
-    assert {:ok, "lcars-system"} = resolve(opts)
+    assert {:ok, "system_starfleet"} = resolve(opts)
+    assert {:ok, "system_starfleet"} = resolve(opts)
   end
 
   defp resolve(opts) do
@@ -90,7 +92,7 @@ defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
                1,
                base_url: "http://fake.test",
                token: "t",
-               forge_bot_login: "lcars-system",
+               forge_bot_login: "system_starfleet",
                req_options: [plug: {Whoami, "ignored"}]
              )
   end

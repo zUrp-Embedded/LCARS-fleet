@@ -27,7 +27,7 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 APP_NAME="lcars-deck"
-TOKEN_FILE="$PROV_TOKENS_DIR/system.gitea_token"
+TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
 # `nobody` runs the deck (it reads and pilots nothing), and it reads this file. Group `nogroup` is
 # what `setpriv --regid nogroup` gives it, so 0640 root:nogroup is the narrowest mode that works:
 # the client_secret stays unreadable to every human on the box.

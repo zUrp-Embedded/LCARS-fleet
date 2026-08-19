@@ -44,7 +44,7 @@ variable "role_names" {
 # « absent », et tofu retente alors une creation qui echoue en 409.
 variable "system_account" {
   type        = string
-  default     = "lcars-system"
+  default     = "system_starfleet"
   description = "Compte SYSTEME de l'instance — meme valeur que `var.system_account` du module catalogue"
 }
 
@@ -55,7 +55,7 @@ resource "gitea_user" "system" {
   password             = var.seed_password
   must_change_password = false
   admin                = false # PAS site-admin : org-power via la team `system`, blast-radius borné à l'org
-  # Hardening : lcars-system crée des repos DANS l'org (team can_create_repos), jamais de
+  # Hardening : system_starfleet crée des repos DANS l'org (team can_create_repos), jamais de
   # nouvelle org ; aucun git-hook serveur ni import local (vecteurs d'exécution sur l'hôte forge).
   allow_create_organization = false
   allow_git_hook            = false

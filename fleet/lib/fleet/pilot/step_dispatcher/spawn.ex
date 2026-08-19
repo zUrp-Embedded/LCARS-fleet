@@ -356,7 +356,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          # lock (issue or PR) — global mechanic, role-agnostic (cf. § Time-tracking, ForgeClient).
          # Signed IN THE WORKER'S NAME (`as_role`) — NOT the label (protocol = system): Gitea attributes the
          # tracked time to the AUTHENTICATED user, so a system stopwatch would count all the time
-         # under `lcars-system`, never the real worker. Gitea requires the SAME identity for start AND stop
+         # under `system_starfleet`, never the real worker. Gitea requires the SAME identity for start AND stop
          # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
          # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
          # A role that DECLARES no forge identity is not a provisioning hole: its writes go through

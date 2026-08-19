@@ -101,7 +101,7 @@ end
 # demarre rien. Il dit seulement avec quoi git s'authentifie — un fait de lecture, dont toute porte
 # qui ecrit sur la forge a besoin.
 # Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
-# OUTSIDE argv AND OUTSIDE .git/config). System token (lcars-system, write:repository).
+# OUTSIDE argv AND OUTSIDE .git/config). System token (system_starfleet, write:repository).
 # FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
 #
 # ⚠ THE TOKEN LIVES IN THE APPLICATION ENV, IN CLEAR, FOR THE WHOLE LIFE OF THE NODE. That is a

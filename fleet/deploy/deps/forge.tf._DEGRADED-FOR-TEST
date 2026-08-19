@@ -35,7 +35,7 @@
 # HORS de ce fichier, par choix :
 #   · les tokens runtime      → bin/provision-role-tokens.sh (le provider ne minte
 #     pas proprement un secret par-rôle → seam bash assumé, comme partout ailleurs).
-#   · les repos projet        → créés au RUNTIME par lcars-system (project_onboard).
+#   · les repos projet        → créés au RUNTIME par system_starfleet (project_onboard).
 #     C'est de la DONNÉE MÉTIER, pas de la structure : ça ne vit pas dans le socle.
 #
 # MODÈLE D'ACCÈS — la clé de voûte : les PODS sont FORGE-AVEUGLES (zéro token, zéro
@@ -73,13 +73,13 @@ locals {
 }
 
 resource "gitea_user" "system" {
-  username             = "lcars-system"
-  login_name           = "lcars-system"
-  email                = "lcars-system@lcars.local"
+  username             = "system_starfleet"
+  login_name           = "system_starfleet"
+  email                = "system_starfleet@lcars.local"
   password             = var.seed_password
   must_change_password = false
   admin                = false # PAS site-admin : org-power via la team `system`, blast-radius borné à l'org
-  # Hardening : lcars-system crée des repos DANS l'org (team can_create_repos), jamais de
+  # Hardening : system_starfleet crée des repos DANS l'org (team can_create_repos), jamais de
   # nouvelle org ; aucun git-hook serveur ni import local (vecteurs d'exécution sur l'hôte forge).
   allow_create_organization = false
   allow_git_hook            = false

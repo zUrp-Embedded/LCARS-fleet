@@ -10,7 +10,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
   - `Fleet.Pilot.StepRunCompleter.promote` (terminal `:promote`, e.g. after gatekeeper escalation).
 
   Both call `seal_and_merge/7` → same gatekeeper signature, same trace, everywhere (without this
-  single point, a merge would go through with a raw system token, without a comment, attributed to `lcars-system`).
+  single point, a merge would go through with a raw system token, without a comment, attributed to `system_starfleet`).
 
   The signature is built HERE, internally: `seal_and_merge/7` receives the RAW `forge_opts`,
   reads the conflict signal, picks its signer and signs itself — the seal is the ONLY site that
@@ -331,7 +331,7 @@ defmodule Fleet.Pilot.GatekeeperSeal do
     end
 
     # VISIBLE terminal step: the brick is merged. System-side (`forge_opts`, not the gatekeeper
-    # signature): the stage/* are managed by lcars-system (WS1). The merge is authoritative, but
+    # signature): the stage/* are managed by system_starfleet (WS1). The merge is authoritative, but
     # this label is NOT mere display: `StepDispatcher.decide/1` reads it as the durable
     # `{:skip, :merged}` guard (F-C066) when the close below fails. A load-bearing projection
     # MUST have a reconciliation — a discarded, un-retried failure left the arch waiting

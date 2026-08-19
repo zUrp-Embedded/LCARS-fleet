@@ -859,10 +859,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
              [
                "-C",
                dir,
+               # Demandee a `ForgeIdentity`, jamais recopiee : c'est lui l'autorite du nom systeme.
                "-c",
-               "user.name=lcars-system",
+               "user.name=#{Fleet.Credentials.ForgeIdentity.system_identity().name}",
                "-c",
-               "user.email=lcars-system@lcars.local",
+               "user.email=#{Fleet.Credentials.ForgeIdentity.system_email()}",
                "commit",
                "-q",
                "-m",

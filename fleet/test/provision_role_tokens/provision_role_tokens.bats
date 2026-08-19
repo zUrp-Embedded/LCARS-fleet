@@ -207,15 +207,15 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "--extra-token ACCOUNT:FILE: mints the system account, writes the file (account is not file)" {
-  printf '{"lcars-system":"pw-sys"}' > "$TMP/syspw.json"
+  printf '{"system_starfleet":"pw-sys"}' > "$TMP/syspw.json"
   printf '{"sha1":"tok-sys"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
-      --roles "" --extra-token lcars-system:system.gitea_token
+      --roles "" --extra-token system_starfleet:system.gitea_token
   [ "$status" -eq 0 ]
-  [[ "$output" == *"POSE  lcars-system"* ]]
+  [[ "$output" == *"POSE  system_starfleet"* ]]
   [ "$(cat "$TOKDIR/system.gitea_token")" = "tok-sys" ]
-  [ ! -f "$TOKDIR/lcars-system.gitea_token" ]
+  [ ! -f "$TOKDIR/system_starfleet.gitea_token" ]
 }
 
 @test "--extra-token without ':' → exit 1 fail-loud (account:file format required)" {
@@ -225,11 +225,11 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "A4 complete: 1 role + the system account in ONE gesture (the canonical call)" {
-  printf '{"engineer":"pw-eng","lcars-system":"pw-sys"}' > "$TMP/full.json"
+  printf '{"engineer":"pw-eng","system_starfleet":"pw-sys"}' > "$TMP/full.json"
   printf '{"sha1":"tok-x"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
-      --roles engineer --extra-token lcars-system:system.gitea_token
+      --roles engineer --extra-token system_starfleet:system.gitea_token
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
   [ -f "$TOKDIR/system.gitea_token" ]

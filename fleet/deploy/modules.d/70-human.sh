@@ -57,8 +57,8 @@ GITCONFIG_EMAIL() { as_human git config --global --get user.email 2>/dev/null ||
 forge_account() {
   local tok
   [[ -n "$PROV_FORGE_URL" ]] || return 0
-  [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] || return 0
-  tok="$(tr -d '[:space:]' < "$PROV_TOKENS_DIR/system.gitea_token")"
+  [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || return 0
+  tok="$(tr -d '[:space:]' < "$PROV_SYSTEM_TOKEN_FILE")"
   curl -s -m 10 -H "Authorization: token $tok" \
        "$PROV_FORGE_URL/api/v1/users/$PROV_HUMAN" 2>/dev/null \
     | jq -r 'if type=="object" and ((.email // "") != "") then "\(.full_name // "")\t\(.email)" else empty end' \
@@ -178,7 +178,7 @@ check() {
     # D4, cas env-seedé-AVANT-bootstrap (l'ordre du cold boot docker : le premier boot seed
     # l'env, la forge n'est bootstrappée qu'après) : le fichier est à l'humain, on ne le
     # réécrit JAMAIS — on instruit les 2 lignes exactes. Révélé par le run de validation.
-    if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
+    if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
       p_drift "token système minté mais non câblé dans $ENV_FILE — l'apply le câble (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN), puis « fleet_v2 stop && start »"
     fi
   else
@@ -219,14 +219,14 @@ apply() {
         { echo ""; echo "LCARS_BIND_HOST=$LCARS_BIND_HOST"; } >> "$tmp"
       fi
       # D4 (ADR install/compile/release) : ce que le système fait est signé du SYSTÈME. Si le
-      # token lcars-system est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
+      # token system_starfleet est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
       # du cycle), on câble sa lecture ICI ; sinon le token minté ne serait jamais lu (le
       # défaut runtime est ~/.gitea_token) — le travail mort que l'ADR pointait.
-      if [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]]; then
+      if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]]; then
         {
           echo ""
-          echo "# — posé par le seed 70-human (D4) : les marqueurs système sont signés lcars-system —"
-          echo "FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token"
+          echo "# — posé par le seed 70-human (D4) : les marqueurs système sont signés system_starfleet —"
+          echo "FORGE_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
           echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
         } >> "$tmp"
       fi
@@ -256,15 +256,15 @@ apply() {
   # Une clé PRÉSENTE est un choix, et celui-là on n'y touche jamais — l'humain qui veut un autre
   # jeton écrit une valeur, il n'efface pas une ligne. La convergence porte donc sur le trou, pas
   # sur la décision, et elle ne demande aucune sentinelle pour savoir où elle en est.
-  if [[ -f "$ENV_FILE" ]] && [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] \
+  if [[ -f "$ENV_FILE" ]] && [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] \
      && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
     local tmp2
     tmp2="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (câblage)"; verdict_apply; }
     {
       cat "$ENV_FILE"
       echo ""
-      echo "# — posé par 70-human (D4) : les marqueurs système sont signés lcars-system —"
-      echo "FORGE_TOKEN_FILE=$PROV_TOKENS_DIR/system.gitea_token"
+      echo "# — posé par 70-human (D4) : les marqueurs système sont signés system_starfleet —"
+      echo "FORGE_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
       echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
     } > "$tmp2"
     as_human chmod 0600 "$tmp2"

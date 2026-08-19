@@ -46,7 +46,7 @@ SH
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=55-deck-oidc
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
-  echo "tok" > "$PROV_TOKENS_DIR/system.gitea_token"
+  echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"
   export PROV_FORGE_URL="http://forge.test"
   export PROV_FORGE_PUBLIC_URL="http://10.0.0.5:21000"
   export PROV_DECK_PORT=20999

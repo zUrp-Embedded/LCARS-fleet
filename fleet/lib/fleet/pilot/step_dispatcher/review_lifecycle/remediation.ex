@@ -254,7 +254,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # wrote a machine's worth of reasoning and published a count.
   #
   # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by the runtime
-  # (`lcars-system`, ForgeIdentity's single authority — A2). The two are different facts and both
+  # (`system_starfleet`, ForgeIdentity's single authority — A2). The two are different facts and both
   # are true: the engine held the pen, the chief owns the act (signature model rev 2-4: merged_by
   # says which FUNCTION closed the PR, the commit author says which SUBSTRATE wrote). Signing the
   # report with the engine would name a machine as the responsible party for a call a role answers

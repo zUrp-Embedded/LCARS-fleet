@@ -11,7 +11,7 @@
 # ZERO test while being the one piece that rewrites history for publication.
 # The linearize tests (lot D2) need NO filter-repo: pure git, driven through the source guard.
 
-SYSTEM_EMAIL="lcars-system@lcars.local"
+SYSTEM_EMAIL="system_starfleet@lcars.local"
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-to-github.sh"
@@ -27,7 +27,7 @@ need_filter_repo() {
 }
 
 git_h()   { git -C "$1" -c user.name="Lord Zurp" -c user.email="human@example.com" "${@:2}"; }
-git_sys() { git -C "$1" -c user.name="lcars-system" -c user.email="$SYSTEM_EMAIL" "${@:2}"; }
+git_sys() { git -C "$1" -c user.name="system_starfleet" -c user.email="$SYSTEM_EMAIL" "${@:2}"; }
 
 # A work-forge shaped fixture: auto_init root (author AND committer = system), an onboard commit
 # (author = system, committer = HUMAN — the GitOps shape), a work commit (human + role trailer).
@@ -37,11 +37,11 @@ make_fixture() {
   git -C "$src" init -q -b main
   printf 'seed' > "$src/README.md"
   git_sys "$src" add -A
-  GIT_AUTHOR_NAME=lcars-system GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" \
+  GIT_AUTHOR_NAME=system_starfleet GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" \
     git_sys "$src" commit -q -m "Initial commit"
   printf '{}' > "$src/.lcars.json"
   git_h "$src" add -A
-  GIT_AUTHOR_NAME=lcars-system GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" \
+  GIT_AUTHOR_NAME=system_starfleet GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" \
     git_h "$src" commit -q -m "chore(onboard): declaration"
   printf 'work' > "$src/f.txt"
   git_h "$src" add -A
@@ -83,7 +83,7 @@ run_transform() {
   local src="$TMP/src" bare="$TMP/forge/fleet/demo.git"
   mkdir -p "$src"; git -C "$src" init -q -b main
   printf 'seed' > "$src/README.md"; git_sys "$src" add -A
-  GIT_AUTHOR_NAME=lcars-system GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" git_sys "$src" commit -q -m "Initial commit"
+  GIT_AUTHOR_NAME=system_starfleet GIT_AUTHOR_EMAIL="$SYSTEM_EMAIL" git_sys "$src" commit -q -m "Initial commit"
   mkdir -p "$(dirname "$bare")"; git clone -q --bare "$src" "$bare"
   printf 'NAME="V"\nEMAIL="v@e"\n' > "$TMP/vendor.identity"; printf 't\n' > "$TMP/token"
   run_transform

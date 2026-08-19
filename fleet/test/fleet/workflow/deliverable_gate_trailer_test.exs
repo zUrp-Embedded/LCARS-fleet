@@ -132,9 +132,9 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
 
     git!(dir, [
       "-c",
-      "user.name=lcars-system",
+      "user.name=system_starfleet",
       "-c",
-      "user.email=lcars-system@lcars.local",
+      "user.email=system_starfleet@lcars.local",
       "commit",
       "-q",
       "-m",
@@ -168,7 +168,7 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   end
 
   @tag :tmp_dir
-  test "A0: the same merge range passes check_identity (imported lcars-system author is base-side)",
+  test "A0: the same merge range passes check_identity (imported system_starfleet author is base-side)",
        %{tmp_dir: dir} do
     {_root, feature_tip} = merge_conflict_fixture(dir)
     assert :ok = DeliverableGate.check_identity(dir, feature_tip, ["lordzurp.dev@gmail.com"])

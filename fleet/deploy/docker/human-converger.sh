@@ -20,7 +20,7 @@
 # ─── LA REVOCATION, ET POURQUOI ELLE TUE DES PROCESS ────────────────────────────────────────────
 # Sortir de la team retire l'identite PROPRE de la personne. Ca ne suffisait pas : mesure du
 # 2026-08-12, compte forge PURGE (204, re-lu 404), user Linux intact, elle gardait le groupe
-# `fleet` — donc /home/private/system.gitea_token, donc un jeton qui REPOND `lcars-system` sur
+# `fleet` — donc le jeton du compte systeme, donc un jeton qui REPOND ce compte sur
 # /api/v1/user, c'est-a-dire PROPRIETAIRE D'ORG — plus une console ttyd ECRIVABLE que
 # `console.sh --all` lui relance (elle ne lit que /etc/passwd, jamais la forge) et qui repond 200
 # sans aucune authentification.
@@ -67,7 +67,7 @@
 # dur serait fausse le jour ou l'image ajoute un paquet qui cree son compte de service.
 #
 # ⚠ La team `humans` contient des comptes qui ne sont PAS des humains — mesure : elle porte
-# `lcars-system` a cote de l'humain. Le compte systeme et les comptes de role sont donc exclus
+# `system_starfleet` a cote de l'humain. Le compte systeme et les comptes de role sont donc exclus
 # nommement, depuis la meme source que le provisioning.
 #
 # USAGE : human-converger.sh [--once]      (--once : une passe, pour sonder ou tester)
@@ -92,12 +92,17 @@ FORGE="${FORGE_BASE_URL:-}"
 # qu'un temoin bats epingle, faute de pouvoir la deriver.
 ORG="${PROV_FORGE_ORG:-fleet}"
 TEAM="${PROV_HUMANS_TEAM:-humans}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/system.gitea_token}"
+# ⚠ LE COMPTE SE DÉCLARE AVANT LE CHEMIN QUI EN DÉRIVE. Le jeton système s'appelle désormais
+# `<compte>.gitea_token` comme les neuf autres, donc ce défaut LIT `SYSTEM_ACCOUNT` — qui vivait
+# vingt lignes plus bas. Sous `set -u`, une variable lue avant d'être posée tue le convergeur au
+# démarrage, et un convergeur mort ne crée aucun humain : la panne se lit comme « la forge ne
+# répond pas ».
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
+TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/$SYSTEM_ACCOUNT.gitea_token}"
 # L'AUTORITE, lue SEULEMENT pour la question de l'adminite — cf. `forge_is_admin`. Le convergeur
 # tourne en root permanent, donc il peut deja lire ce fichier ; ce qui change est qu'il s'en sert.
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
 ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-lcars-system}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 # CADENCE DE RECONCILIATION DE L'ETAT DES HUMAINS DEJA LA. La boucle rapide ci-dessus ne cree que

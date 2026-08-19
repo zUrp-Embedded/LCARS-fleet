@@ -125,7 +125,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 }
 
 @test "le compte SYSTEME de la fleet est refuse — il EST membre de la team humans (mesure)" {
-  admits "lcars-system"
+  admits "system_starfleet"
   [ "$status" -eq 1 ]
 }
 
@@ -359,7 +359,7 @@ EOF
 
 @test "toute la team encore la : rien a revoquer" {
   passwd_fixture; group_fixture "alice,bob"
-  absent alice bob lcars-system
+  absent alice bob system_starfleet
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }

@@ -366,7 +366,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
 
     # The commit is the ledger entry: old -> new in the message, system account as author.
     log = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%an|%s", "main"])
-    assert log =~ "lcars-system"
+    assert log =~ "system_starfleet"
     assert log =~ "card revision: c0-poc -> audit-only"
 
     # Lift FIRST (push door reduced to the system account), canonical restore AFTER (door
@@ -374,7 +374,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert_received {:protect_branch, "fleet/tetris", lift}
     assert lift[:enable_push] == true
     assert lift[:enable_push_whitelist] == true
-    assert lift[:push_whitelist_usernames] == ["lcars-system"]
+    assert lift[:push_whitelist_usernames] == ["system_starfleet"]
     refute Map.has_key?(lift, :required_approvals)
 
     assert_received {:protect_branch, "fleet/tetris", restore}

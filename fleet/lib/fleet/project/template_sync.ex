@@ -224,11 +224,16 @@ defmodule Fleet.Project.TemplateSync do
            {:ok, {_, 0}} <- git(["add", "-A"], cd: tmp, timeout_ms: @local_timeout_ms),
            {:ok, {_, 0}} <-
              git(
+               # L'IDENTITE SYSTEME SE DEMANDE, ELLE NE SE RECOPIE PAS. `ForgeIdentity` porte
+               # `ONE system identity, defined HERE only` — et trois fichiers en tenaient une copie
+               # litterale, dont celui-ci. Le renommage du compte l'a revele : une autorite qui se
+               # declare unique et qu'on recopie n'en est pas une, elle est juste la premiere a etre
+               # corrigee le jour ou le nom bouge.
                [
                  "-c",
-                 "user.name=lcars-system",
+                 "user.name=#{Fleet.Credentials.ForgeIdentity.system_identity().name}",
                  "-c",
-                 "user.email=lcars-system@lcars.local",
+                 "user.email=#{Fleet.Credentials.ForgeIdentity.system_email()}",
                  "commit",
                  "-q",
                  "-m",

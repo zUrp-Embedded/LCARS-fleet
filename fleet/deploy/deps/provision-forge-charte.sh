@@ -29,8 +29,8 @@
 #   provision-forge-charte.sh --forge URL --admin-token-file /root/forge/test/admin.token
 #   provision-forge-charte.sh --forge URL --admin-token-file … --check      # sonde seule
 # Options : --avatars-dir DIR (défaut : <dir du script>/avatars) · --org NAME (défaut fleet ; --org "" pour
-#           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le badge de
-#           starfleet, dont le compte n'existe plus. Absent = aucun avatar posé sur un compte humain).
+#           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le delta simple,
+#           `admiral.png`. Absent = aucun avatar posé sur un compte humain).
 #           Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
 # EXIT : 0 = tout posé/valide · 1 = usage/dépendance · 2 = au moins une entrée en échec.
 
@@ -43,8 +43,11 @@ AVATARS_DIR=""
 ORG="fleet"
 CHECK_ONLY=0
 
-# Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles portent leur avatar de charte ;
-# lcars-system porte le favicon LCARS (identité système = la marque, pas un rôle métier).
+# Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles portent leur avatar de charte, et
+# le compte système porte celui de STARFLEET — parce que c'est sa main : `starfleet` est le seul
+# rôle canon (avec `admiral`) à porter `forge_identity: false`, et le catalogue dit pourquoi —
+# toutes ses écritures passent par le compte système. Il portait le favicon du produit, faute
+# d'un porteur nommé ; il a le sien depuis que ce compte s'appelle `system_starfleet`.
 # L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 #
@@ -75,23 +78,16 @@ declare -a ENTRIES=(
   # Cote COMPTE : le LOGIN (`<catalogue>_<role>`). Cote IMAGE : le ROLE — une charte pointe des
   # FICHIERS, et un PNG ne se derive pas d'un nom. C'est pourquoi cette table reste tenue a la main
   # la ou les trois autres listes de roles sont desormais derivees du catalogue.
-  "lcars-system:favicon.png"
+  "system_starfleet:starfleet.png"
 )
-# ⚠ `starfleet.png` EXISTE DANS `avatars/` ET N'EST PAS ICI — ce n'est pas un oubli. Le role
-# `starfleet` porte son insigne (l'escadre, trois deltas) parce qu'il vit au canon ; il n'a PAS de
-# compte forge (`forge_identity: false`, toutes ses ecritures passent par le systeme), donc il n'y a
-# aucun compte a qui le poser. Un dessin appartient au ROLE, une entree de cette table a un COMPTE :
-# les deux ensembles ne se recouvrent pas, et vouloir les aligner ajouterait ici une ligne vers un
-# compte inexistant — 404 a chaque passe, pour rien.
+# ⚠ `starfleet.png` EST DANS CETTE TABLE DEPUIS QUE SON PORTEUR A UN NOM. Le role `starfleet` n'a
+# toujours PAS de compte a lui (`forge_identity: false` au canon) — mais le compte SYSTEME est sa
+# main, le catalogue l'ecrit, et il s'appelle desormais `system_starfleet`. L'insigne (l'escadre,
+# trois deltas) va donc sur le compte qui pose ses gestes. Un dessin appartient au ROLE, une entree
+# de cette table a un COMPTE : ici les deux se rejoignent, ailleurs non.
 # (Le delta simple, l'ancien insigne de starfleet, est devenu `admiral.png` : le siege garde le
 # delta, le role prend l'escadre.)
 
-# ⚠ `starfleet:starfleet.png` A QUITTE CETTE TABLE (2026-08-15) — le compte forge `starfleet` est
-# supprime (cf. `instance/accounts.tf`). Le badge, lui, passe au MASTER : c'est lui qui tient
-# desormais le siege admin de la forge, et la charte ne perd pas son dessin. L'IMAGE suit son
-# porteur et s'appelle `admiral.png` : cette table nomme ses fichiers par ce qu'ils DESSINENT, et
-# ce delta est desormais celui de l'amiral. (Le ROLE `starfleet` existe toujours — chef de
-# portefeuille — et garde sa couleur de charte cote site : `assets/avatars/starfleet.svg`.)
 #
 # PARAMETRE, ET PAS ECRIT EN DUR, pour deux raisons qui se cumulent :
 #   1. le login du master est VARIABLE — `admiral` au banc, le login de l'installeur en prod. Une

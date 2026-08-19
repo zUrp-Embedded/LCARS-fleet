@@ -63,10 +63,10 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
 
   test "allowed_emails: git_native = human only; payload = human + system" do
     assert ForgeIdentity.allowed_emails(:git_native, "h@x.tld") == ["h@x.tld"]
-    # H2: the system identity = the REAL forge account lcars-system (an identity without an
+    # H2: the system identity = the REAL forge account system_starfleet (an identity without an
     # actual forge account would be a ghost). The payload allow-list DERIVES from system_email
     # (structural coherence tested, not the literal retyped twice).
-    assert ForgeIdentity.system_email() == "lcars-system@lcars.local"
+    assert ForgeIdentity.system_email() == "system_starfleet@lcars.local"
 
     assert ForgeIdentity.allowed_emails(:payload, "h@x.tld") == [
              "h@x.tld",
@@ -74,7 +74,7 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
            ]
 
     assert ForgeIdentity.system_identity() == %{
-             name: "lcars-system",
+             name: "system_starfleet",
              email: ForgeIdentity.system_email()
            }
 

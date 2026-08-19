@@ -202,7 +202,7 @@ converge_authority_modes() {
 # La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-    --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token" --check >/dev/null 2>&1
+    --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")" --check >/dev/null 2>&1
 }
 
 # Le handoff tofu→A4, convergent PAR ENTRÉE : chaque compte de $ACCOUNTS a son entrée dans le
@@ -251,7 +251,7 @@ ensure_passwords_entries() {
 # COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
 # Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
-  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok=""
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   local -a auth=()
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
   [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
@@ -275,7 +275,7 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # renvoyait le lecteur vers les listes writers/judges/externals, qui n'y etaient pour rien.
 # C'est l'etat NOMINAL d'une installation neuve : structure posee, jeton systeme pas encore minte.
 member_state() { # $1=compte → visible | hidden | absent | unknown
-  [[ -r "$PROV_TOKENS_DIR/system.gitea_token" ]] || { printf 'unknown'; return; }
+  [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
   [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
   if [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/public_members/$1")" == "204" ]]; then
     printf 'visible'
@@ -309,7 +309,7 @@ check_members_visible() {
   # verdict sur des comptes qu'on n'a pas interroges, et il serait FAUX exactement au moment le plus
   # courant : juste apres la pose de la structure, avant le premier mint.
   if [[ -n "$unknown" ]]; then
-    p_drift "adhésions org NON SONDABLES (jeton système absent : $PROV_TOKENS_DIR/system.gitea_token) — l'apply le minte dès que le seed est posé ; rien n'est conclu sur les comptes en attendant"
+    p_drift "adhésions org NON SONDABLES (jeton système absent : $PROV_SYSTEM_TOKEN_FILE) — l'apply le minte dès que le seed est posé ; rien n'est conclu sur les comptes en attendant"
     return 0
   fi
 
@@ -382,7 +382,7 @@ check() {
 # /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
 # et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
 check_human_onboardable() {
-  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok code
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok code
   if ! account_exists "$PROV_HUMAN"; then
     p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « ./docker.sh forge-apply »"
     return 0
@@ -447,7 +447,7 @@ apply() {
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
       ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
-      --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:system.gitea_token"; then
+      --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "tokens A4 posés ($PROV_TOKENS_DIR)"
   else

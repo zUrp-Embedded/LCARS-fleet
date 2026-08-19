@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.GatekeeperSealWorktreeTest do
     # Fail-closed: without a gatekeeper role token, the seal does NOT merge/close under the SYSTEM
     # account (privilege escalation + traceability lie). It refuses via the `RoleIdentity` smart-ctor
     # → the merge does not happen, nothing to project. (Fallback #3: an `as_role` returning
-    # `forge_opts` unchanged = system token kept → merge as lcars-system.)
+    # `forge_opts` unchanged = system token kept → merge as system_starfleet.)
     empty = Path.join(System.tmp_dir!(), "no-gk-token-#{System.unique_integer([:positive])}")
     File.mkdir_p!(empty)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)

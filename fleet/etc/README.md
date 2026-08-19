@@ -124,14 +124,17 @@ Les comptes de rôle (architect, consultant, engineer, gatekeeper, qualifier, re
 postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
 
     etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json> \
-        --extra-token lcars-system:system.gitea_token       # les 6 rôles + le token système = A4 complet
+                                                                # les 6 rôles + le système = A4 complet
     etc/provision-role-tokens.sh --forge <URL> --check                          # sonde (nuke-drill)
 
 Le `passwords-file` (JSON `{"compte":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :
 un fichier opérateur-only, rejouable. Chaque token = une paire `compte:fichier` : les rôles produisent
-`<role>.gitea_token` ; `--extra-token lcars-system:system.gitea_token` pose le token SYSTÈME (compte
-`lcars-system` ≠ nom de fichier `system.gitea_token`) dans le MÊME geste → A4 100%, pas de token système
-minté à la main. Gitea n'accepte QUE la basic auth pour créer un token (même un token site-admin ne peut
+`<role>.gitea_token`, et le compte SYSTÈME suit le MÊME contrat depuis qu'il s'appelle
+`system_starfleet` — son fichier est `system_starfleet.gitea_token`, dérivé de son login comme les
+autres. Tout part donc dans le même geste → A4 100%, pas de token système minté à la main.
+(Il portait `system.gitea_token` pour un compte nommé `lcars-system` : un nom qui ne dérivait de
+rien, donc une table `--extra-token` pour lui seul. Le drapeau existe toujours pour un vrai
+décalage compte↔fichier ; il n'a plus d'usager dans la recette.) Gitea n'accepte QUE la basic auth pour créer un token (même un token site-admin ne peut
 pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge, idempotente. Sans ces
 tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu 2026-07-05).
 Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).

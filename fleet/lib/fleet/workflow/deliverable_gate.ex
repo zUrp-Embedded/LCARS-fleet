@@ -131,9 +131,9 @@ defmodule Fleet.Workflow.DeliverableGate do
   """
   # A0 (chantier rails) — FIRST-PARENT, same cut as the secret scan below, and the asymmetry was
   # the defect: a conflict resolution is a MERGE commit, and the full `base..HEAD` range then
-  # imports the BASE's own commits — system-authored onboard writes (`lcars-system@lcars.local`),
+  # imports the BASE's own commits — system-authored onboard writes (`system_starfleet@lcars.local`),
   # sibling bricks trailed by OTHER roles — all already gated when they landed on the base.
-  # Re-walking them here refused every merge-bearing deliverable ({:bad_identity, lcars-system}),
+  # Re-walking them here refused every merge-bearing deliverable ({:bad_identity, system_starfleet}),
   # and the chief's exception pass had NO success path at all. The pod's own line IS the
   # first-parent line; the merge commit itself sits on it, authored by the pod's human and
   # hook-trailed, and stays fully checked.

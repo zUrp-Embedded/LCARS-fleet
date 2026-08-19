@@ -1284,7 +1284,7 @@ defmodule Fleet.Forge.ClientTest do
   # get_route reads the POSITION from the SCOPED labels `wfmap/<map>` + `stage/<step>` (no longer a
   # `[lcars-route:...]` comment). The map comes from the DATA (wfmap label), NOT a coded default:
   # two issues may follow two maps. One of the two missing → `:none` (no invented map). Trust comes
-  # from the WS1 write lock (only lcars-system sets the labels), not a read-time filter.
+  # from the WS1 write lock (only system_starfleet sets the labels), not a read-time filter.
   # ============================================================
   describe "get_route/3 — via wfmap/* + stage/* labels" do
     test "wfmap/brief-gate + stage/build → {:ok, {\"brief-gate\", \"build\"}}" do

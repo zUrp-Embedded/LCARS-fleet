@@ -271,7 +271,7 @@ FAKE
 setup_install() {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  printf 'SYS\n' > "$PRIV/system.gitea_token"
+  printf 'SYS\n' > "$PRIV/system_starfleet.gitea_token"
 }
 
 @test "install: la LECTURE de la source va sous le jeton SYSTEME, jamais le master" {
@@ -293,18 +293,18 @@ FAKE
   chmod +x "$BIN/entrypoint"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
-  grep -q "catalogue-source cat TOKFILE=$PRIV/system.gitea_token" "$ENTRY_LOG"
+  grep -q "catalogue-source cat TOKFILE=$PRIV/system_starfleet.gitea_token" "$ENTRY_LOG"
   ! grep -q "catalogue-source .*forge-master.token" "$ENTRY_LOG"
 }
 
 @test "install: sans jeton systeme, il REFUSE en le NOMMANT (pas un echec de lecture opaque)" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  rm -f "$PRIV/system.gitea_token"
+  rm -f "$PRIV/system_starfleet.gitea_token"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"system.gitea_token"* ]]
+  [[ "$output" == *"system_starfleet.gitea_token"* ]]
   [[ "$output" == *"provision apply"* ]]
   [ ! -s "$ENTRY_LOG" ]
 }

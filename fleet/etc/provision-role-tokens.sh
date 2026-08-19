@@ -40,15 +40,16 @@
 #
 # USAGE :
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
-#       --extra-token lcars-system:system.gitea_token        # les 6 roles + le token systeme = A4 complet
+#                                                            # les 6 roles + le systeme = A4 complet
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 #   provision-role-tokens.sh --help                          # cette aide
 # Options : --tokens-dir DIR (defaut /home/private) · --roles "a b c" (defaut : les 6) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
-#             fichier, ex. le systeme `lcars-system:system.gitea_token`) · --group GRP (defaut fleet) ·
+#             fichier. Le compte systeme en etait le seul usager ; il suit le contrat de role depuis
+#             qu'il s'appelle `system_starfleet`) · --group GRP (defaut fleet) ·
 #           --token-name NAME (defaut lcars-fleet) · -h|--help
 # passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte systeme
-#   y a sa cle, ex. "lcars-system"). Cle insensible a la casse (Gitea resout les comptes
+#   y a sa cle, ex. "system_starfleet"). Cle insensible a la casse (Gitea resout les comptes
 #   case-insensitive : `Architect` matche le role `architect`).
 # EXIT : 0 = tous les tokens poses ou valides · 1 = usage/dependance manquante · 2 = au moins un token
 #   en echec.
@@ -99,14 +100,18 @@ SCOPES="write:repository,write:issue"
 # Listing both would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
 # `write:user` alone. Measured on the widened token, `GET /user` still answers 200 — the write
 # scope subsumes the read, and the forge_bot_login rail is intact.
-SYSTEM_ACCOUNT="lcars-system"
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
 MASTER_TOKEN_FILE=""
 CHECK_ONLY=0
-# Non-role tokens whose account is not the filename (the mapping is DATA, not a special case): the
-# SYSTEM token is the `lcars-system` account but the runtime reads `system.gitea_token`. Filled by
-# `--extra-token <account>:<file>` (repeatable). Without it, A4 leaves the system token a manual step.
+# Non-role tokens whose account is not the filename (the mapping is DATA, not a special case).
+# ⚠ THE SYSTEM TOKEN NO LONGER NEEDS IT. It did while the account was `lcars-system` and the file
+# `system.gitea_token` — a name that derived from nothing, so a table had to carry the pair. The
+# account is `system_starfleet` now and its file follows the role contract `<login>.gitea_token`,
+# so it mints through the SAME path as the other nine. The flag stays for genuine mismatches;
+# it simply has no user in the recipe any more.
+# Filled by `--extra-token <account>:<file>` (repeatable).
 declare -a EXTRA_ENTRIES
 
 # --help renders the header block above verbatim. It stops at the FIRST BLANK LINE rather than at a
@@ -250,8 +255,8 @@ set_auth_for() { # $1=role
 }
 
 # ONE entry to provision = one `account:file` pair (the mapping is DATA). Roles produce
-# `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file (the system:
-# `lcars-system:system.gitea_token`). One mint mechanism for all of them.
+# `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file. The system
+# account WAS that pair and is not any more — it derives like the rest. One mint mechanism for all.
 declare -a ENTRIES
 # Le compte est le LOGIN (`<catalogue>_<role>`, unique a l'instance Gitea) et le FICHIER reste le
 # ROLE : c'est la cle que le runtime connait — `as_role/2` indexe `<role>.gitea_token`, jamais le

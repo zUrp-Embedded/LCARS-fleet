@@ -7,7 +7,7 @@
 # HORS de ce fichier, par choix :
 #   · les tokens runtime      → bin/provision-role-tokens.sh (le provider ne minte
 #     pas proprement un secret par-rôle → seam bash assumé, comme partout ailleurs).
-#   · les repos projet        → créés au RUNTIME par lcars-system (project_onboard).
+#   · les repos projet        → créés au RUNTIME par system_starfleet (project_onboard).
 #     C'est de la DONNÉE MÉTIER, pas de la structure : ça ne vit pas dans le socle.
 #
 # MODÈLE D'ACCÈS — la clé de voûte : les PODS sont FORGE-AVEUGLES (zéro token, zéro
@@ -76,7 +76,7 @@ variable "system_roles" {
 
 variable "system_account" {
   type        = string
-  default     = "lcars-system"
+  default     = "system_starfleet"
   description = "Compte systeme, cree par le module instance/ — nomme ici pour ses adhesions"
 }
 
@@ -197,7 +197,7 @@ resource "gitea_org" "fleet" {
 # propriétaire est celle qui lance cet apply. Le provider n'a pas de champ propriétaire sur
 # `gitea_org` — le créateur d'une org en est le propriétaire, un point c'est tout.
 #
-# ⚖ TRANCHÉ (user, 2026-08-11) : c'est `lcars-system` qui possède les orgs — c'est déjà le seul
+# ⚖ TRANCHÉ (user, 2026-08-11) : c'est `system_starfleet` qui possède les orgs — c'est déjà le seul
 # compte qui y crée des dépôts. L'adhésion se pose dans la FENÊTRE DU MASTER TOKEN, celle qui lance
 # cet apply. Elle EST posée par cette recette depuis le 2026-08-16 (`gitea_team_membership.owner`,
 # plus bas) : elle vivait à l'étape 4-bis du banc, et n'existait donc PAS en production.
@@ -243,7 +243,7 @@ locals {
   # projet. Ce préflight exigeait un `read` que l'humain a déjà (l'org est publique, les dépôts
   # aussi) pour des écritures qu'il ne fait pas — c'est le jeton système qui écrit. Il part avec ce
   # lot, et la team n'a plus de lecteur : mesuré, `web-demo/humans` ne contenait que le compte
-  # built-in et `lcars-system`, jamais un humain réel.
+  # built-in et `system_starfleet`, jamais un humain réel.
   #
   # ⚠ ET CE RETRAIT DÉPEND D'UN AUTRE : tant que la forge naissait avec
   # `DEFAULT_USER_IS_RESTRICTED=true`, l'adhésion à `<catalogue>:humans` était la SEULE chose qui

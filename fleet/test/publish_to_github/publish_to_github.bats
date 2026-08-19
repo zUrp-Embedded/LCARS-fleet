@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: test/publish_to_github/publish_to_github.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.226
+# STARDATE: 2026.232
 # STATUS: bats tests for bin/publish-to-github.sh post-transform certification
 #
 # filter-repo's exit 0 means "the callback ran", not "no internal attribution survived". These drive
@@ -23,21 +23,21 @@ teardown() { rm -rf "$TMP"; }
 
 @test "clean tree (no internal marker) → certification PASSES" {
   git commit -q --allow-empty -m "a normal commit"
-  run scan_forbidden_markers "$TMP" "lcars-system@lcars.local"
+  run scan_forbidden_markers "$TMP" "system_starfleet@lcars.local"
   [ "$status" -eq 0 ]
 }
 
 @test "a surviving @lcars.local committer → certification FAILS" {
   GIT_COMMITTER_NAME="LCARS-engineer" GIT_COMMITTER_EMAIL="lcars-engineer@lcars.local" \
     git commit -q --allow-empty -m "leaked internal committer"
-  run scan_forbidden_markers "$TMP" "lcars-system@lcars.local"
+  run scan_forbidden_markers "$TMP" "system_starfleet@lcars.local"
   [ "$status" -ne 0 ]
   [[ "$output" == *"identite interne survivante"* ]]
 }
 
 @test "a surviving LCARS- co-author trailer → certification FAILS" {
   git commit -q --allow-empty -m "$(printf 'work\n\nCo-authored-by: LCARS-reviewer <lcars-reviewer@lcars.local>')"
-  run scan_forbidden_markers "$TMP" "lcars-system@lcars.local"
+  run scan_forbidden_markers "$TMP" "system_starfleet@lcars.local"
   [ "$status" -ne 0 ]
   [[ "$output" == *"trailer interne survivant"* ]]
 }

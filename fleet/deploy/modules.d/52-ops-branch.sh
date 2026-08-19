@@ -65,7 +65,7 @@ readonly OPS_BRANCH="tool_request"
 # `GET /repos/<repo>/branches/<branch>` : 200 la branche est la, 404 elle manque. Le jeton systeme
 # suffit (lecture d'un depot d'org dont `system` est membre) — pas besoin de l'autorite master.
 forge_branch_code() {
-  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok=""
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   local -a auth=()
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
   [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
@@ -90,7 +90,7 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
 # le rail — et JAMAIS dans l'URL du remote, qui finirait dans `.git/config` du jetable puis dans
 # n'importe quelle sortie de debug.
 create_branch() {
-  local tokfile="$PROV_TOKENS_DIR/system.gitea_token" tok=""
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
   [[ -n "$tok" ]] || { p_fail "pas de jeton systeme ($tokfile) — impossible de pousser la branche"; return 1; }
 
@@ -127,7 +127,7 @@ SEED
 
   # `git init` + premier commit = un commit SANS PARENT, donc une branche orpheline par
   # construction. Aucun `--orphan`, donc aucun plancher de version git.
-  local ident_n="${PROV_SYSTEM_ACCOUNT:-lcars-system}"
+  local ident_n="${PROV_SYSTEM_ACCOUNT:-system_starfleet}"
   (
     cd "$tmp"
     git init -q -b "$OPS_BRANCH" .
