@@ -126,7 +126,23 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # 2222 d'un autre banc). Un fichier d'env est lu du DISQUE par compose, apres l'escalade — il ne
 # peut pas etre strippe. `identite-v2` : le box materialise admiral (master/sysadmin, uid 1000) ;
 # le worker "$HUMAN" (lcars) vient de la forge (fleet:humans) via le convergeur. Miroir bench-up.sh.
-SWAP_ENV="$(mktemp)"
+# ⚠ PAS DE FICHIER TEMPORAIRE ANONYME, ET PAS DANS `/tmp` — le temoin `bench_swap_creds.bats`
+# l'interdit, pour une raison mesuree : sur un poste ou le daemon passe par sudo, `docker cp` ecrit
+# en ROOT, `/tmp` est sticky, donc celui qui a cree le fichier ne peut plus l'effacer. Deux copies
+# de credentials VIVANTS y etaient restees le 2026-08-18, pendant que le script se croyait propre.
+# Ce fichier-ci ne porte que de la CONFIGURATION (image, ports, URLs — le mot de passe admiral part
+# par un tube vers `chpasswd`, jamais par ici), mais le piege de propriete est le meme.
+#
+# ⚠⚠ ET LE TEMOIN GREPE LE FICHIER ENTIER, COMMENTAIRES COMPRIS : ecrire le nom de la commande
+# interdite, meme pour expliquer qu'on ne l'utilise pas, suffit a le faire rougir. C'est pour ca
+# qu'elle n'est nommee nulle part ici.
+#
+# Donc : un chemin DETERMINISTE dans le repertoire d'execution de l'appelant, cree par lui, en 0600,
+# efface par le trap. `compose` le lit du DISQUE apres l'escalade — root lit un 0600 qui ne lui
+# appartient pas, c'est tout ce dont on a besoin.
+SWAP_ENV="${XDG_RUNTIME_DIR:-$HOME/.cache}/lcars-bench-swap.$PROJECT.env"
+mkdir -p "$(dirname "$SWAP_ENV")"
+( umask 077; : > "$SWAP_ENV" )
 cat > "$SWAP_ENV" <<ENVEOF
 LCARS_IMAGE=$IMAGE
 LCARS_ADMIRAL=admiral

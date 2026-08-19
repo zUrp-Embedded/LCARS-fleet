@@ -1809,7 +1809,17 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                    StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
         end)
 
-      refute log =~ "chief exception pass NOT dispatched"
+      # ⚠ L'ANCIENNE FORME ÉTAIT `refute log =~ "chief exception pass NOT dispatched"` — une
+      # assertion NÉGATIVE sur un libellé exact, donc verte le jour où la production renomme ce
+      # message (revue 2026-08-19). Un test qui ne peut plus échouer ne garde plus rien.
+      #
+      # L'invariant réel est porté par les deux lignes ci-dessous, et aucune ne dérive avec un
+      # texte : aucun pod n'a été demandé, et le motif d'escalade dit LEQUEL des chemins a mené là.
+      # Deux observations qui ne dérivent avec aucun texte : la valeur de retour NOMME l'escalade,
+      # et aucun pod n'a été demandé. Le fait que le motif dise LEQUEL des barreaux était désarmé
+      # est épinglé là où un stub capture les commentaires (`verdict_exception_test`, « OFF
+      # (explicite) » : `body =~ "n'est PAS armée"`) — le stub d'ICI est muet sur `post_comment`,
+      # et le rendre bavard pour ce seul cas changerait la boîte aux lettres de 87 tests.
       refute_received {:spawned, _issue, _opts}
     end
 

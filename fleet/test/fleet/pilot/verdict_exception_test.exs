@@ -84,8 +84,17 @@ defmodule Fleet.Pilot.VerdictExceptionTest do
     test "ON : le marqueur de budget est posé AVANT toute convocation" do
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, true)
 
-      # Ce test épingle L'ORDRE, pas la convocation : marqueur d'abord. Un pod convoqué sans
-      # marqueur serait re-convoqué à chaque tick, le compte lisant zéro indéfiniment.
+      # ⚠ CE TEST N'ÉPINGLE PAS L'ORDRE, et son commentaire le prétendait (revue 2026-08-19). Il
+      # observe qu'un marqueur est dans la boîte à la fin — inverser `post_comment` et le dispatch
+      # le laisserait vert.
+      #
+      # L'ordre n'a pas besoin d'un test parce qu'il n'est pas une séquence d'instructions : le
+      # dispatch vit DANS la branche `{:ok, _}` du post (`summon/5`). Pas de marqueur, pas
+      # d'appelant — c'est une dépendance de données, qu'aucune permutation ne contourne. Et sa
+      # CONSÉQUENCE est mesurée par « marqueur NON posté » plus bas : un post en échec rend
+      # `{:skipped, {:verdict_marker_unposted, _}}`, ce qu'une inversion ferait immédiatement
+      # tomber. Ce test-ci prouve autre chose, et c'est utile aussi : le marqueur porte la bonne
+      # signature, le bon seuil, et dit que PERSONNE ne s'oppose.
       #
       # Le dispatch réel descend ensuite dans tout le constructeur de brief (couture forge complète,
       # catalogue de rôles, worktrees) : le laisser échouer là est DÉLIBÉRÉ. Stubber cette descente
