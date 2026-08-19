@@ -20,8 +20,17 @@ setup() {
   cat > "$TMP/bin/curl" <<SHIM
 #!/usr/bin/env bash
 echo "\$*" >> "$MOCK/calls.log"
+# ⚠ STDIN EST JOURNALISE AUSSI, ET C'EST CE QUI REND LES TEMOINS 6-141 POSSIBLES. Le shim de ce
+# fichier ne lisait qu'argv : il pouvait donc prouver « le secret n'est pas dans la ligne de
+# commande » et pas « il EST dans stdin » — c'est-a-dire ne pas distinguer un secret DEPLACE d'un
+# secret PERDU. Les deux moities vont par paire (P-40).
+cfg=""
+if [[ " \$* " == *" -K "* ]]; then cfg="\$(cat)"; printf '%s\n' "\$cfg" >> "$MOCK/stdin.log"; fi
 case " \$* " in
-  *" -w "*) cat "$MOCK/probe_code" 2>/dev/null || printf '401' ;;
+  # Le PATCH de la voie « forcer puis oublier » : la vraie forge rend 200 avec un jeton master
+  # valide (mesure du 2026-08-19 sur instance vierge).
+  *" -w "*) if [[ "\$cfg" == *'request = "PATCH"'* ]]; then printf '200'
+            else cat "$MOCK/probe_code" 2>/dev/null || printf '401'; fi ;;
   *" DELETE "*) exit 0 ;;
   *" POST "*) cat "$MOCK/post_response" 2>/dev/null || printf '{}' ;;
   *) exit 0 ;;
@@ -30,6 +39,7 @@ SHIM
   chmod +x "$TMP/bin/curl"
   export PATH="$TMP/bin:$PATH"
 
+  : > "$MOCK/stdin.log"
   PWDFILE="$TMP/passwords.json"
   printf '{"engineer":"pw-eng","qualifier":{"password":"pw-qual"}}' > "$PWDFILE"
 }
@@ -223,4 +233,97 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
   [ -f "$TOKDIR/system.gitea_token" ]
+}
+
+# ═══ 6-141 — LES SECRETS HORS D'ARGV ═════════════════════════════════════════════════════════════
+#
+# Rapatries depuis `deploy/tests/role_tokens.bats` le 2026-08-19, qui n'existe plus : ce script
+# avait DEUX maisons de temoins, et j'ai ecrit dans l'une sans voir l'autre — c'est la seconde qui a
+# rattrape une collision de nom d'option. Deux maisons pour un contrat, c'est la forme qui derive,
+# et la convention du depot est un dossier par script shell (`test/bwrap_launch`, `test/claude_*`).
+#
+# CE QUI EST MESURE ICI est le canal, pas la politesse : `-u "$role:$pwd"` et `-H "Authorization:
+# token $tok"` mettent le secret dans la LIGNE DE COMMANDE, que `/proc/<pid>/cmdline` expose a tout
+# l'hote pendant la requete. Un observateur local recolte les mots de passe de tous les roles et les
+# tokens fraichement mintes — et un mot de passe re-minte des tokens pour toujours, donc faire
+# tourner le token capture ne repare rien.
+#
+# ⚠ CHAQUE ASSERTION D'ATTAQUE VA PAR PAIRE AVEC UN TEMOIN (P-40) : « le secret n'est pas dans
+# argv » serait satisfait par un correctif qui supprimerait l'auth. Le temoin — « il EST dans
+# stdin » — est ce qui distingue un secret deplace d'un secret perdu.
+
+mint_ok() {   # etat nominal du shim pour un mint qui aboutit
+  printf '200' > "$MOCK/probe_code"
+  printf '{"sha1":"TOKEN-MINTE"}' > "$MOCK/post_response"
+}
+
+@test "6-141: le mot de passe n'apparait JAMAIS dans argv, et il EST dans stdin" {
+  mint_ok
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --roles engineer
+  [ "$status" -eq 0 ]
+  ! grep -q 'pw-eng' "$MOCK/calls.log"
+  grep -q 'pw-eng' "$MOCK/stdin.log"
+}
+
+@test "6-141: le token minte ne repart pas en argv sur la sonde de validite" {
+  mint_ok
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --roles engineer
+  [ "$status" -eq 0 ]
+  ! grep -q 'TOKEN-MINTE' "$MOCK/calls.log"
+  grep -q 'TOKEN-MINTE' "$MOCK/stdin.log"
+  # Et la chaine fonctionne encore : le fichier est ecrit avec ce que la forge a rendu.
+  grep -q 'TOKEN-MINTE' "$TOKDIR/engineer.gitea_token"
+}
+
+@test "6-141: un mot de passe portant guillemets et backslashs traverse INTACT" {
+  # Le fichier de config de curl a sa propre syntaxe : un echappement rate coupe le mot de passe en
+  # silence, et le mint part en 401 sans que rien ne dise pourquoi.
+  mint_ok
+  printf '{"engineer":"a\\"b\\\\c d"}' > "$PWDFILE"
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --roles engineer
+  [ "$status" -eq 0 ]
+  grep -q 'a\\"b' "$MOCK/stdin.log"
+}
+
+# ═══ LA VOIE « FORCER PUIS OUBLIER » (2026-08-19) ════════════════════════════════════════════════
+#
+# Le mint dependait du password que tofu pose — or le provider ne le pose reellement qu'a la
+# CREATION du compte (`deps/instance/accounts.tf`). Des que le fichier et la forge divergent — seed
+# regenere, compte cree a une passe anterieure, roster elargi — le mint part en 401 sur des comptes
+# SAINS, definitivement. Mesure sur instance vierge : dix comptes en 401, le fichier contenant
+# exactement le seed. Avec le jeton master, le minteur pose un password neuf juste avant de s'en
+# servir, puis l'oublie : il n'a plus a croire ce qu'un autre outil a bien voulu ecrire.
+
+@test "voie FORCE : le password utilise n'est PAS celui du fichier — il vient d'etre pose" {
+  mint_ok
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --master-token-file <(printf 'JETON-MASTER\n') --roles engineer
+  [ "$status" -eq 0 ]
+  grep -q 'request = "PATCH"' "$MOCK/stdin.log"
+  grep -q 'admin/users/engineer' "$MOCK/calls.log"
+  ! grep -q 'pw-eng' "$MOCK/stdin.log"
+}
+
+@test "6-141 sur la voie FORCE : ni le jeton master ni le password force ne passent par argv" {
+  mint_ok
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --master-token-file <(printf 'JETON-MASTER\n') --roles engineer
+  [ "$status" -eq 0 ]
+  ! grep -q 'JETON-MASTER' "$MOCK/calls.log"
+  grep -q 'JETON-MASTER' "$MOCK/stdin.log"
+  ! grep -qE '"password":' "$MOCK/calls.log"
+  grep -q 'password' "$MOCK/stdin.log"
+}
+
+@test "PATCH en echec : on RETOMBE sur le fichier, on ne conclut pas a l'echec du mint" {
+  # Un jeton master perime ne rend pas faux le password pose a la creation. Refuser tout net
+  # transformerait une degradation en panne.
+  mint_ok
+  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+    --passwords-file "$PWDFILE" --master-token-file /inexistant/master.token --roles engineer
+  [ "$status" -eq 0 ]
+  grep -q 'pw-eng' "$MOCK/stdin.log"
 }
