@@ -65,7 +65,6 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
-
   describe "shutdown.dispatcher" do
     test "degraded on NoOpDispatcher (Fleet.Dispatcher missing)" do
       Application.put_env(

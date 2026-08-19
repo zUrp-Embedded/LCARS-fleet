@@ -870,7 +870,6 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     end
   end
 
-
   describe "Escalation idempotency (create is not idempotent, readback is)" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
 
@@ -931,6 +930,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received :created
     end
   end
+
   describe "every kind that fires has a describe clause" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
 
@@ -961,6 +961,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert title =~ "awaits-arch"
     end
   end
+
   describe "l'assignee est une PROJECTION — jamais un nom en dur" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
 
@@ -981,7 +982,9 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       try do
         fun.()
       after
-        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+        if prev,
+          do: System.put_env("LCARS_STORE_ROOT", prev),
+          else: System.delete_env("LCARS_STORE_ROOT")
       end
     end
 
@@ -992,7 +995,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       on_exit(fn -> File.rm_rf!(root) end)
 
       with_store(root, fn ->
-        assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-a", escalate_opts(self()))
+        assert {:ok, 5} =
+                 Escalation.escalate(:recurrence, "s", :r, "sig-a", escalate_opts(self()))
       end)
 
       assert_received {:create, iopts}
@@ -1011,7 +1015,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           with_store(root, fn ->
-            assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-b", escalate_opts(pid))
+            assert {:ok, 5} =
+                     Escalation.escalate(:recurrence, "s", :r, "sig-b", escalate_opts(pid))
           end)
         end)
 
@@ -1030,7 +1035,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           with_store(root, fn ->
-            assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-c", escalate_opts(pid))
+            assert {:ok, 5} =
+                     Escalation.escalate(:recurrence, "s", :r, "sig-c", escalate_opts(pid))
           end)
         end)
 

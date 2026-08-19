@@ -2684,7 +2684,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
                item_repo,
                item_issue,
                "Demande d'outillage en vol : PR #{repo}!#{pr_number(pr)} — ce ticket attend la " <>
-                 "signature d'un admin (ou son refus).\n" <> Fleet.Toolchain.marker(pr_number(pr) || 0),
+                 "signature d'un admin (ou son refus).\n" <>
+                 Fleet.Toolchain.marker(pr_number(pr) || 0),
                []
              ) do
           {:ok, _} ->

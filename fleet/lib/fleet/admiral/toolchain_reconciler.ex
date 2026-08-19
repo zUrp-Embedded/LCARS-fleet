@@ -366,7 +366,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   defp forge, do: Application.get_env(:lcars_fleet, :forge_client, Fleet.Forge.Client)
 
   defp converger,
-    do: Application.get_env(:lcars_fleet, :toolchain_converger, &__MODULE__.default_converger_fun/2)
+    do:
+      Application.get_env(:lcars_fleet, :toolchain_converger, &__MODULE__.default_converger_fun/2)
 
   @doc false
   def default_converger_fun(head, opts), do: default_converger(head, opts)

@@ -272,7 +272,6 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     refute_receive :rec, 100
   end
 
-
   describe "gate: immediate — la porte est un champ de la route, pas une classe de severite" do
     test "issue des la 1re occurrence : escalate_fun recoit le kind DECLARE et la signature op:sujet" do
       pid = self()
@@ -300,7 +299,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       pid = self()
 
       # La route pod.failed du harnais ne porte PAS :gate — elle doit passer par record_or_escalate.
-      consumer = start(fn op, subject, _r, _o -> send(pid, {:recorded, op, subject}) && :recorded end)
+      consumer =
+        start(fn op, subject, _r, _o -> send(pid, {:recorded, op, subject}) && :recorded end)
 
       send(
         consumer,

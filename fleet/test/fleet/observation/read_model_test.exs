@@ -34,6 +34,7 @@ defmodule Fleet.Observation.ReadModelTest do
     assert p.total == 4
     assert p.counts["work_item.completed"] == 1
     assert [%{type: "workflow_map.completed"}] = p.workflow_runs
+
     # (le deck :gatekeeper est mort avec ses deux seuls producteurs — audit.verdict et coord.* —
     # brouette 2026-08-19)
     refute Map.has_key?(p, :gatekeeper)

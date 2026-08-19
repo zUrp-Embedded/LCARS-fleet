@@ -106,7 +106,6 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
     end
   end
 
-
   describe "DR-013 — unreadable cap-profile at completion → escalation, never a silent judge" do
     test "deliverable_mode_fun {:error, :cap_profile_unloadable} → arch freeze (await_arch), NO silent completion" do
       # A role whose cap-profile has vanished/corrupted since the spawn: the producer/judge mode is

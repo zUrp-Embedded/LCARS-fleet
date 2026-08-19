@@ -174,7 +174,6 @@ defmodule Fleet.Pilot.IncidentConsumer do
     end
   end
 
-
   # Porte immediate DECLARATIVE — issue durable des la 1re occurrence, cooldown seul. Offloadee
   # comme record/6 (touche la forge). Un echec est BRUYANT : perdre l'alarme re-silencierait
   # exactement ce que la porte existe pour dire tout de suite.
@@ -358,6 +357,4 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   defp run_sync(fun), do: fun.()
-
-
 end

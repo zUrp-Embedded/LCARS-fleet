@@ -71,7 +71,6 @@ defmodule Fleet.API.Readiness do
     probe("spawn.dispatch", state, detail)
   end
 
-
   defp shutdown_dispatcher do
     backend = Fleet.Admiral.Shutdown.configured_dispatcher()
 

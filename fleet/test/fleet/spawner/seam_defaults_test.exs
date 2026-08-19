@@ -25,7 +25,6 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
   """
   use ExUnit.Case, async: true
 
-
   test "MCPSocketProvisioner: the canonical default is the real fleet_mcp side" do
     # Asserted on `default/0` rather than through `resolved/0`: reaching the fallback would mean
     # deleting the key globally, and an async suite would then hand the REAL provisioner to

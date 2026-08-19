@@ -52,6 +52,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     @impl true
     def open_pr(repo, head, base, title, opts) do
       send(self(), {:open_pr, repo, head, base, title, Keyword.get(opts, :body, "")})
+
       # Le NUMERO NU — le contrat du client canonique ({:ok, integer}, 409 compris). Une v1 de ce
       # double rendait une map : vert ici, `"pr" => nil` en prod. Le double suit le client, jamais
       # l'inverse.
@@ -165,6 +166,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       assert_received {:create_branch, _repo, ^branch, ^base}
       assert_received {:put_file, _repo, "ops/toolchains.d/python.yaml", content, ^branch}
       assert_received {:open_pr, _repo, ^branch, ^base, "[toolchain] python", pr_body}
+
       # Le lien INVERSE : le corps de la PR nomme le work-item — c'est ce que la seconde passe du
       # réconciliateur lit pour drainer quand la PR se ferme sans faire bouger la branche.
       assert {:ok, "fleet/morse", 412} = Fleet.Toolchain.parse_workitem_marker(pr_body)
@@ -197,6 +199,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       assert_received {:put_file, _, "ops/toolchains.d/rust.yaml", _, _}
     end
   end
+
   describe "le verrou du work-item — le lien est écrit sur la forge, dans les deux sens" do
     test "la création pose `lcars-awaits-toolchain` + le commentaire à marqueur sur le ticket" do
       pod = "pod-verrou-#{System.unique_integer([:positive])}"
@@ -234,6 +237,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       assert log =~ "commentaire de lien NON pos"
     end
   end
+
   describe "l'auto-merge — UN clic admin, gate par config, DEFAUT OFF" do
     test "defaut : PAS d'armement (sans protection de branche, l'armer mergerait sans signature)" do
       pod = "pod-am-off-#{System.unique_integer([:positive])}"
@@ -245,8 +249,10 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     test "config posee (par le geste d'installation, AVEC la protection) : la PR est armee" do
       prev = Application.get_env(:lcars_fleet, :toolchain_auto_merge)
       Application.put_env(:lcars_fleet, :toolchain_auto_merge, true)
+
       on_exit(fn ->
-        if prev, do: Application.put_env(:lcars_fleet, :toolchain_auto_merge, prev),
+        if prev,
+          do: Application.put_env(:lcars_fleet, :toolchain_auto_merge, prev),
           else: Application.delete_env(:lcars_fleet, :toolchain_auto_merge)
       end)
 

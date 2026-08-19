@@ -18,13 +18,16 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   alias Fleet.Admiral.ToolchainReconciler, as: R
 
   defmodule ForgeUp do
-    def branch_head(_repo, _branch, _opts), do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
+    def branch_head(_repo, _branch, _opts),
+      do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
 
     # La 2e passe (drain) : PRs scriptees, issue au verrou scriptable, gestes ENREGISTRES.
     def list_pulls(_repo, _opts), do: {:ok, :persistent_term.get({__MODULE__, :prs}, [])}
 
     def get_issue(_repo, _n, _opts) do
-      labels = :persistent_term.get({__MODULE__, :issue_labels}, [%{"name" => "lcars-awaits-toolchain"}])
+      labels =
+        :persistent_term.get({__MODULE__, :issue_labels}, [%{"name" => "lcars-awaits-toolchain"}])
+
       {:ok, %{"labels" => labels}}
     end
 
@@ -144,6 +147,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       converger_result({:error, :boom})
 
       assert {:error, :boom} = R.check_now(server)
+
       # Noter avant d'appliquer ferait d'un convergeur mort en route une boîte qui se croit à jour :
       # la passe suivante verrait « pas d'écart » et l'état approuvé resterait non appliqué.
       assert R.applied_sha() == nil
@@ -163,7 +167,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   describe "marqueur inécrivable" do
-    test "convergé quand même, mais le SHA n'a nulle part où vivre — et ça se DIT", %{server: server} do
+    test "convergé quand même, mais le SHA n'a nulle part où vivre — et ça se DIT", %{
+      server: server
+    } do
       # Un CHEMIN qui ne peut pas exister (fichier en travers) : mkdir_p et write échouent tous
       # les deux — le cas « répertoire non posé par le provisioning », sans toucher au FS réel.
       blocker =
@@ -192,6 +198,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute src =~ "defp schedule"
     end
   end
+
   describe "la seconde passe — le drain (une PR fermee ne fait pas bouger la branche)" do
     defp pr(attrs) do
       Map.merge(
@@ -215,7 +222,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       assert body =~ "APPLIQU"
     end
 
-    test "PR MERGEE mais branche NON appliquee (convergeur en echec) => PAS de drain", %{server: server} do
+    test "PR MERGEE mais branche NON appliquee (convergeur en echec) => PAS de drain", %{
+      server: server
+    } do
       # Re-dispatcher un work-item AVANT que sa toolchain soit posee le renverrait au mur.
       converger_result({:error, :boom})
       :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
@@ -241,7 +250,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute_received {:removed, _, _, _}
     end
 
-    test "verrou DEJA absent => idempotent, aucun geste (pas de re-annonce a chaque tick)", %{server: server} do
+    test "verrou DEJA absent => idempotent, aucun geste (pas de re-annonce a chaque tick)", %{
+      server: server
+    } do
       :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
       :persistent_term.put({ForgeUp, :issue_labels}, [])
 
@@ -250,7 +261,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute_received {:commented, _, _, _}
     end
 
-    test "PR sans marqueur, ou d'une autre base => pas a nous, ni geste ni bruit", %{server: server} do
+    test "PR sans marqueur, ou d'une autre base => pas a nous, ni geste ni bruit", %{
+      server: server
+    } do
       :persistent_term.put({ForgeUp, :prs}, [
         pr(%{"body" => "posee a la main", "state" => "closed", "merged" => true}),
         pr(%{"base" => %{"ref" => "main"}, "state" => "closed", "merged" => true})

@@ -137,10 +137,17 @@ defmodule Fleet.EventRouter.Catalog do
             # le code appellent leur porte au site — on ne re-decrit pas des chemins de code ici.
             gate =
               case inc["gate"] do
-                nil -> :recurrence
-                "recurrence" -> :recurrence
-                "immediate" -> :immediate
-                other -> raise "Catalog: #{type} declares incident gate=#{inspect(other)} " <>
+                nil ->
+                  :recurrence
+
+                "recurrence" ->
+                  :recurrence
+
+                "immediate" ->
+                  :immediate
+
+                other ->
+                  raise "Catalog: #{type} declares incident gate=#{inspect(other)} " <>
                           "(expected \"immediate\" or \"recurrence\")"
               end
 

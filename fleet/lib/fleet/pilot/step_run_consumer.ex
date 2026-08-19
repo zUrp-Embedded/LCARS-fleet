@@ -888,7 +888,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     if File.dir?(dir), do: dir
   end
 
-
   defp close_with_trace(n, role, trace, state) do
     step_run = %{
       repo: state.repo,

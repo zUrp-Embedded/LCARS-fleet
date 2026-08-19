@@ -111,7 +111,7 @@ defmodule Fleet.Toolchain do
     # LES SÉRIES DE TIRETS SONT REPLIÉES, et ce n'est pas cosmétique : la substitution travaille sur
     # les OCTETS, donc un caractère non-ASCII en rend deux ou trois. Sans le repli, le nom de branche
     # dépendrait de l'encodage du work-item id — lisible pour un ascii, illisible pour le reste, et
-    #variable selon la largeur du caractère. Replié, il ne dépend que du contenu.
+    # variable selon la largeur du caractère. Replié, il ne dépend que du contenu.
     slug =
       work_item_id
       |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
@@ -241,8 +241,11 @@ defmodule Fleet.Toolchain do
       |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
 
     case fields do
-      [] -> nil
-      f -> "requested_by:\n" <> Enum.map_join(f, "\n", fn {k, v} -> "  #{k}: #{yaml_scalar(v)}" end)
+      [] ->
+        nil
+
+      f ->
+        "requested_by:\n" <> Enum.map_join(f, "\n", fn {k, v} -> "  #{k}: #{yaml_scalar(v)}" end)
     end
   end
 

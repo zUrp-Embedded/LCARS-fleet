@@ -39,7 +39,9 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   # shell, non exportee : `System.get_env` rend nil et on retombe sur un pid, donc un repertoire
   # neuf a chaque run, des debris dans /tmp, et le temoin de la socket PERIMEE ne teste plus rien).
   defp sock(_tmp) do
-    dir = Path.join(System.tmp_dir!(), "lcars-eg-" <> Path.basename(Path.expand("..", File.cwd!())))
+    dir =
+      Path.join(System.tmp_dir!(), "lcars-eg-" <> Path.basename(Path.expand("..", File.cwd!())))
+
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{System.unique_integer([:positive])}.sock")
     on_exit(fn -> File.rm(path) end)
@@ -365,7 +367,9 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       System.put_env("LCARS_STORE_ROOT", root)
 
       on_exit(fn ->
-        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+        if prev,
+          do: System.put_env("LCARS_STORE_ROOT", prev),
+          else: System.delete_env("LCARS_STORE_ROOT")
       end)
 
       launcher = Path.join(tmp, "claude_launch.sh")
@@ -426,15 +430,22 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
     test "comments and blanks obey the vendor grammar — one parser, not two", ctx do
       converged(ctx.root, "eng", "# entete\n\npypi.org # en fin de ligne\n\n")
-      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) == ["api.vendor.test", "pypi.org"]
+
+      assert Egress.allowlist(cap("eng", "egress"), ctx.launcher) == [
+               "api.vendor.test",
+               "pypi.org"
+             ]
     end
 
     test "the converged source opens NO new matcher — `*.` stays anchored", ctx do
       converged(ctx.root, "eng", "*.pypi.org\n")
       allowed = Egress.allowlist(cap("eng", "egress"), ctx.launcher)
 
-      assert {:ok, "files.pypi.org", 443} = Egress.decide("CONNECT files.pypi.org:443 HTTP/1.1\r\n", allowed)
-      assert {:refused, _} = Egress.decide("CONNECT pypi.org.attaquant.net:443 HTTP/1.1\r\n", allowed)
+      assert {:ok, "files.pypi.org", 443} =
+               Egress.decide("CONNECT files.pypi.org:443 HTTP/1.1\r\n", allowed)
+
+      assert {:refused, _} =
+               Egress.decide("CONNECT pypi.org.attaquant.net:443 HTTP/1.1\r\n", allowed)
     end
   end
 end

@@ -10,7 +10,8 @@ defmodule Fleet.ToolchainTest do
 
   alias Fleet.Toolchain
 
-  defp apt(pkgs), do: %{"ecosystem" => "python", "evidence" => "boom", "apt" => %{"packages" => pkgs}}
+  defp apt(pkgs),
+    do: %{"ecosystem" => "python", "evidence" => "boom", "apt" => %{"packages" => pkgs}}
 
   describe "validate_form/1 — exactement une forme, et un refus plutôt qu'une réparation" do
     test "une forme : accepté" do
@@ -59,9 +60,11 @@ defmodule Fleet.ToolchainTest do
     end
 
     test "`evidence` est rendu EN DERNIER et en bloc littéral" do
-      out = Toolchain.render(Map.put(apt(["x"]), "evidence", "erreur: pas de wheel\n  ligne deux"))
+      out =
+        Toolchain.render(Map.put(apt(["x"]), "evidence", "erreur: pas de wheel\n  ligne deux"))
 
       assert out =~ "evidence: |-"
+
       # Un bloc littéral n'est pas ré-échappé : une erreur porte des guillemets, des deux-points et
       # des antislashs, et un mauvais échappement transformerait un diagnostic en erreur de parse.
       assert out =~ "  erreur: pas de wheel"

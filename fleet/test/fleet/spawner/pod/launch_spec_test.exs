@@ -366,14 +366,19 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   # fichier reste `async: true` — seul ce describe touche l'environnement.
   describe "le magasin d'outillage — monte, et l'environnement qui le rend utilisable" do
     setup do
-      root = Path.join(System.tmp_dir!(), "lcars-store-test-#{System.unique_integer([:positive])}")
+      root =
+        Path.join(System.tmp_dir!(), "lcars-store-test-#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(Path.join(root, "state/env.d"))
       File.mkdir_p!(Path.join(root, "cache"))
       prev = System.get_env("LCARS_STORE_ROOT")
       System.put_env("LCARS_STORE_ROOT", root)
 
       on_exit(fn ->
-        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+        if prev,
+          do: System.put_env("LCARS_STORE_ROOT", prev),
+          else: System.delete_env("LCARS_STORE_ROOT")
+
         File.rm_rf!(root)
       end)
 
@@ -382,7 +387,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
     defp envd(root, name, body), do: File.write!(Path.join([root, "state/env.d", name]), body)
 
-    defp cap, do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => "t"}, spec: %{}}
+    defp cap,
+      do: %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => "t"}, spec: %{}}
 
     test "DEUX montages, et le `rw` du cache vient APRES le `ro` de l'arbre", %{root: root} do
       env = LaunchSpec.pod_mounts_env(cap(), [], "/opt/claude_launch.sh")
@@ -438,7 +444,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
     test "clef hors motif => REFUS", %{root: root} do
       envd(root, "a.env", "bad-key=1\n")
-      assert_raise ArgumentError, ~r/not a shell environment name/, fn -> LaunchSpec.toolchain_env() end
+
+      assert_raise ArgumentError, ~r/not a shell environment name/, fn ->
+        LaunchSpec.toolchain_env()
+      end
     end
 
     test "ligne sans `=` => REFUS (ce fichier n'est pas du shell)", %{root: root} do

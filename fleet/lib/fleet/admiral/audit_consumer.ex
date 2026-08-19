@@ -109,7 +109,6 @@ defmodule Fleet.Admiral.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 
   def handle_info(_other, state), do: {:noreply, state}

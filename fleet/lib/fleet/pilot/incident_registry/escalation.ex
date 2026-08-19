@@ -399,5 +399,4 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
        "La carte de workflow de ce depot ne se charge pas : le rail d'etapes le SAUTE tant que " <>
          "personne ne corrige. Une carte illisible bloque le dispatch de TOUTES ses issues — " <>
          "d'ou l'issue des la premiere occurrence, pas a la recidive."}
-
 end

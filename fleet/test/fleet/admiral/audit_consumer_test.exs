@@ -28,7 +28,6 @@ defmodule Fleet.Admiral.AuditConsumerTest do
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
-
   test "canonical event not audited: ignored (no crash, NO count — the audit trail is selective)" do
     {pid, _} = start_consumer()
     send(pid, canon(:api, :"some.unknown"))

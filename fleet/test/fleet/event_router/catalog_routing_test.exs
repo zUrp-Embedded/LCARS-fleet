@@ -45,7 +45,6 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     assert routing |> Map.values() |> Enum.all?(&(&1.action == :incident))
   end
 
-
   @tag :tmp_dir
   test "DPF-13: a route with a non-canonical source → boot REFUSED", %{tmp_dir: tmp} do
     path = Path.join(tmp, "events.yaml")
@@ -66,7 +65,6 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
       Fleet.EventRouter.Catalog.load!()
     end
   end
-
 
   # (Les gardes JG-012/DPF-14 du rail de severite max sont parties avec lui — brouette
   # 2026-08-19. Les gardes survivantes dans leur esprit, ci-dessous : un `gate` hors enum refuse
