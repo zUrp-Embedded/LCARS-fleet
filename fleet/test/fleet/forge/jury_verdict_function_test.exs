@@ -248,7 +248,13 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
       findings = %{"qualifier" => Fleet.FindingsWire.unreadable()}
 
       assert :approved =
-               Jury.review_outcome(@jury, verdicts, findings, %{"block_at" => "minor"}, "gatekeeper")
+               Jury.review_outcome(
+                 @jury,
+                 verdicts,
+                 findings,
+                 %{"block_at" => "minor"},
+                 "gatekeeper"
+               )
     end
 
     test "un juge illisible HORS jury ne bloque personne" do
