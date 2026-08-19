@@ -150,6 +150,11 @@ COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker
 # d'une meme derivation divergent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
 # shellcheck source=../../lib/provision-lib.sh
 source "$DOCKER_DIR/../lib/provision-lib.sh"
+# Les noms des volumes du magasin. Le banc monte LA MEME boite que l'install nominale
+# (`docker-compose.install.yml`), donc il porte les memes volumes externes — et il doit les poser
+# avant son `create`, pour la meme raison : compose REFUSE de demarrer sur un `external` absent.
+# shellcheck source=../../lib/store.sh
+source "$DOCKER_DIR/../lib/store.sh"
 
 case "$BIND" in
   0.0.0.0|::|"*") PROBE_HOST="127.0.0.1" ;;
@@ -302,6 +307,11 @@ curl -sf -m 3 "$FORGE_LOCAL_URL/api/v1/version" >/dev/null 2>&1 || die "la forge
 say "forge up"
 
 # ─── 2. la boite — create, brancher, PUIS demarrer (piege 1) ─────────────────────────────────────
+# Les volumes du magasin AVANT le create : `external: true` veut dire que compose ne les fabrique
+# pas et refuse de demarrer sans eux. Ils sont partages entre les bancs de la machine — un volume
+# externe n'est pas prefixe par le projet — donc le second banc ne repaie pas ce que le premier a
+# telecharge, et `bench-down` ne peut pas les emporter.
+store_ensure_volumes "$DOCKER_BIN" || die "magasin non pose — la boite ne peut pas se creer" 3
 say "boite : projet $PROJECT, image $IMAGE, bind $BIND"
 env LCARS_IMAGE="$IMAGE" \
     `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
@@ -320,7 +330,7 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
-  || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ?)" 3
+  || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
 
 # ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS (2026-08-17). NE PAS LE REMETTRE.
 #

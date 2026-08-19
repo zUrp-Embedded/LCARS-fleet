@@ -59,6 +59,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/fleet/deploy/docker/docker-compose.yml"
 PROJECT="${LCARS_PROJECT:-lcars}"
 
+# Les NOMS des volumes du magasin, et rien d'autre : le chemin ou ils se montent appartient au
+# compose. Ce fichier n'a aucun effet de bord — pas de couleur, pas de garde de sortie — il declare
+# une liste et deux fonctions. C'est pourquoi il est sourcable ici sans entrainer tout le rail.
+# shellcheck source=fleet/deploy/lib/store.sh
+. "$SCRIPT_DIR/fleet/deploy/lib/store.sh"
+
 # L'aide se DELIMITE par son contenu, pas par des numeros de ligne : la forme `sed -n '6,35p'`
 # tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
 # jamais. Ancrage sur la premiere et la derniere ligne du bloc.
@@ -179,6 +185,12 @@ cmd_build() {
 cmd_up() {
   assert_project_ours up
   build_env
+  # ⚠ AVANT LE `up`, ET C'EST UN ORDRE, PAS UNE PRECAUTION. Les volumes du magasin sont declares
+  # `external: true` : compose ne les cree pas, il REFUSE de demarrer s'ils manquent. Ce script est
+  # le seul endroit qui s'execute avant le up, donc le seul qui puisse les poser. C'est le prix de
+  # l'externalite — et c'est aussi ce qu'elle achete : `down -v` ne peut pas emporter trois heures
+  # de toolchain, parce que docker ne le PEUT pas, pas parce qu'on aurait pense a le lui interdire.
+  store_ensure_volumes docker || { echo "docker.sh: magasin non pose — up annule" >&2; exit 1; }
   # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
   # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
   # « ./docker.sh build », et son verdict est le sien ; image absente → up échoue en le disant.
@@ -367,6 +379,12 @@ cmd_reset() {
   echo "docker.sh: RESET du projet « $PROJECT » — conteneur + image + volume ${PROJECT}_lcars-home."
   echo "           La forge n'est pas concernée (elle est à toi, dans son propre déploiement)."
   echo "           Ton travail poussé y survit."
+  # ⚠ UN GESTE DE DESTRUCTION DOIT NOMMER CE QU'IL EPARGNE. Sans cette ligne, « reset » se lit
+  # comme « la machine est propre » alors que quatre volumes restent — dont des heures de
+  # toolchain. La croyance se decouvre le jour ou quelqu'un purge un cache et se demande ce qu'il
+  # vient de perdre : un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission.
+  echo ""
+  store_spared_line | sed 's/^/           /'
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "docker.sh: annulé."; exit 1; }
   compose down --rmi local

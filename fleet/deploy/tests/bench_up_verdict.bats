@@ -30,6 +30,11 @@ setup() {
   # que la recopier ici la ferait diverger. Un stub vide rendrait `advertise_addr` introuvable et le
   # script mourrait avant son verdict — le test mesurerait alors autre chose que ce qu'il croit.
   cp "$BATS_TEST_DIRNAME/../lib/provision-lib.sh" "$ROOT/fleet/deploy/lib/provision-lib.sh"
+  # ⚠ CE DECOR PORTE CE QUE LE SCRIPT SOURCE, ET RIEN DE PLUS — donc toute dependance nouvelle doit
+  # y entrer, sinon les 12 temoins de ce fichier tombent d'un coup sur un `No such file`. C'est ce
+  # qui est arrive en ajoutant `store.sh` : le decor est un contrat implicite, et il ne se signale
+  # que par un echec de masse dont la cause est une ligne de setup.
+  cp "$BATS_TEST_DIRNAME/../lib/store.sh" "$ROOT/fleet/deploy/lib/store.sh"
 
   # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
   # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par

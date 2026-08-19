@@ -90,3 +90,12 @@ echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] banc '$PROJECT' detruit"
+
+# ⚠ CE SCRIPT DIT « volumes compris » TROIS FOIS, ET IL EN EPARGNE QUATRE. Sans la ligne qui suit,
+# « banc detruit » se lit comme « la machine est propre » — et des heures de toolchain dorment
+# invisibles jusqu'au jour ou quelqu'un purge un cache en se demandant ce qu'il vient de perdre.
+# Ce n'est pas une politesse : c'est la contrepartie non negociable de volumes que docker ne PEUT
+# pas emporter. Ce qu'un geste de destruction laisse doit etre dit par lui, pas decouvert apres.
+# shellcheck source=../../lib/store.sh
+source "$DOCKER_DIR/../lib/store.sh"
+store_spared_line | sed 's/^/[bench-down] /'

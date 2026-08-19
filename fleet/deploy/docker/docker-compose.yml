@@ -108,6 +108,16 @@ services:
       # après l'identification, là où c'est le plus déroutant. La loopback est toujours incluse
       # par le module ; ce qui se déclare ici, c'est le reste (l'adresse de bind, le nom d'hôte).
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      # ─── LE MAGASIN : CE FICHIER POSSEDE LE CHEMIN, ET PERSONNE D'AUTRE ──────────────────────
+      # Tout ce qui vit DANS la boite — entrypoint, convergeur toolchain, BEAM (montage du magasin
+      # dans le pod) — lit cette variable. Elle n'est defaultee nulle part ailleurs : un second
+      # `/var/lib/lcars` ecrit dans un script serait une seconde verite, et c'est celle qu'on ne
+      # relit pas qui derive. `fleet/deploy/lib/store.sh` ne possede QUE les noms de volumes.
+      #
+      # /var/lib et pas ailleurs : hors `/home` (qui a le cycle de vie des humains, pas celui des
+      # artefacts), hors `/usr` (que le pod recoit deja en `--ro-bind` et qu'un magasin n'a pas a
+      # encombrer), sans collision avec `/opt/lcars` que le rebuild d'image remplace.
+      LCARS_STORE_ROOT: /var/lib/lcars
     ports:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
@@ -140,6 +150,32 @@ services:
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home
+      # LE MAGASIN — des volumes EXTERNES, donc hors projet, donc `down -v` ne peut pas les
+      # emporter. Ce n'est pas de la discipline, c'est le contrat de docker.
+      #
+      # MESURE DU 2026-08-19, SUR CE FICHIER (pas sur un compose de test) : marqueur ecrit dans
+      # `lcars-toolchains`, `compose -p storetest create lcars`, puis `down -v` —
+      # `storetest_lcars-home` DETRUIT, les quatre externes intacts, et le marqueur toujours
+      # lisible. `docker compose config` le confirme par les noms : les externes ne sont pas
+      # prefixes (`lcars-cache`) la ou le volume de projet l'est (`lcars_lcars-home`).
+      #
+      # Cette non-prefixation les rend aussi PARTAGES entre les bancs de la machine, et c'est le
+      # but : une toolchain de trois heures se paie une fois, pas une par banc.
+      #
+      # QUATRE, et il y en avait deux dans le premier jet : trois des cinq chemins declares par le
+      # rail toolchain n'avaient pas de volume. Le pire est `state/` — le perdre ne casse RIEN DE
+      # VISIBLE : la toolchain reste, le pod cesse juste de la voir, l'install sort verte et la
+      # compilation echoue sans que rien ne relie les deux symptomes.
+      #
+      # ⚠ ILS DOIVENT EXISTER AVANT CE `up`, sinon compose refuse de demarrer. C'est
+      # `store_ensure_volumes` (fleet/deploy/lib/store.sh) qui les pose, appelee par le script
+      # d'ENTREE — seul endroit qui s'execute avant. Un `docker compose up` joue a la main sans
+      # passer par lui echouera en nommant le volume manquant : c'est un refus lisible, et il vaut
+      # mieux que de fabriquer un volume vide en silence.
+      - lcars-cache:/var/lib/lcars/cache
+      - lcars-toolchains:/var/lib/lcars/toolchains
+      - lcars-sysroots:/var/lib/lcars/sysroots
+      - lcars-state:/var/lib/lcars/state
       # PAS de bind-mount de la source ici, et c'est MESURÉ, pas frileux : le daemon ne voit pas
       # forcément le FS d'où l'on parle (Docker Desktop + WSL non intégrée → le bind se résout
       # dans le VM du daemon et rend un dossier VIDE, silencieusement — pire que pas de montage,
@@ -167,7 +203,19 @@ services:
     networks: [lcars]
 
 volumes:
+  # Celui-ci appartient au PROJET : ses humains sont ceux de CETTE boite, et il meurt avec elle.
   lcars-home:
+  # Ceux-la n'appartiennent a personne : `external: true` = compose ne les cree pas et ne les
+  # detruit pas. Meme forme que le reseau `devforge` du compose de banc, et pour la meme raison —
+  # ce qui survit a la boite ne doit pas etre dans son interrupteur de destruction.
+  lcars-cache:
+    external: true
+  lcars-toolchains:
+    external: true
+  lcars-sysroots:
+    external: true
+  lcars-state:
+    external: true
 
 networks:
   lcars:

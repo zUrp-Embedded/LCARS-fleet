@@ -67,6 +67,9 @@ services:
     environment:
       LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"
       LCARS_UID: "${LCARS_UID:-1000}"
+      # Le magasin. MEME VALEUR QUE `docker-compose.yml`, et ces deux fichiers sont les SEULS a
+      # l'ecrire : tout ce qui vit dans la boite la lit ici, aucun script ne la redefault.
+      LCARS_STORE_ROOT: /var/lib/lcars
       # L'email du compte FORGE de l'humain — c'est lui qui mappe ses commits sur son compte
       # (avatar, attribution). Vide = les commits signent <user>@<hostname>, non mappables.
       # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
@@ -126,6 +129,17 @@ services:
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home
+      # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER. Quatre volumes EXTERNES —
+      # hors projet, donc `down -v` ne peut pas les emporter, et partages entre les bancs de la
+      # machine. Le POURQUOI (les quatre durees de vie, la mesure du `down -v`, le prix du « il
+      # doit exister avant le up ») vit dans `docker-compose.yml`, source unique.
+      #
+      # Ils doivent exister AVANT ce `up` : c'est `store_ensure_volumes`
+      # (fleet/deploy/lib/store.sh) qui les pose, appelee par le script d'entree.
+      - lcars-cache:/var/lib/lcars/cache
+      - lcars-toolchains:/var/lib/lcars/toolchains
+      - lcars-sysroots:/var/lib/lcars/sysroots
+      - lcars-state:/var/lib/lcars/state
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -147,7 +161,17 @@ services:
     networks: [lcars]
 
 volumes:
+  # Au PROJET : ses humains sont ceux de cette boite, il meurt avec elle.
   lcars-home:
+  # Hors projet : compose ne les cree pas et ne les detruit pas. Cf. `docker-compose.yml`.
+  lcars-cache:
+    external: true
+  lcars-toolchains:
+    external: true
+  lcars-sysroots:
+    external: true
+  lcars-state:
+    external: true
 
 networks:
   lcars:
