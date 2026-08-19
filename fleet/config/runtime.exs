@@ -152,12 +152,19 @@ end
 
 if config_env() != :test and not tool_mode? do
   # ============================================================
-  # R-no-root-runtime — anti-root boot guard
+  # R-no-root-runtime — anti-root boot guard + LA RESERVATION DU SIEGE (B9, 2026-08-19)
   # ============================================================
   # The fleet daemon NEVER runs as root (the BEAM runs under the human's UID; this self-check
   # catches dev/manual launches as root, where `~/.gitea_token` resolves to `/root/.gitea_token` =
-  # the admin token). starfleet/sysadmin is OUT-of-fleet (invoked outside the daemon) → no
-  # exception here. Hygiene, not an anti-adversary defense (cooperative threat model).
+  # the admin token). Hygiene, not an anti-adversary defense (cooperative threat model).
+  #
+  # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet_v2:363`)
+  # refuse une fleet sous l'uid du sysadmin — le BEAM herite de l'uid de son lanceur, ses pods
+  # avec : une fleet sous le siege donnerait des pods sudo-capables, l'exact inverse de la
+  # sandbox. Mais la release elle-meme (`rel/.../lcars_fleet start`) est sur le PATH d'admiral et
+  # ce fichier ne refusait que "0" : le contournement etait a une commande. Le miroir BEAM de
+  # GUARD B vit ICI — keye sur l'UID (`LCARS_SYSADMIN_UID`, defaut 1000), JAMAIS sur un login
+  # (`00` §5 : le login du siege est variable, l'uid est la reservation).
   #
   # NO ENVIRONMENT CONDITION, and that is the point: the danger it names — a daemon writing
   # root-owned state into `~/.lcars`, then unreachable to the human UID that owns the next boot —
@@ -180,10 +187,18 @@ if config_env() != :test and not tool_mode? do
       e -> {:unreadable, Exception.message(e)}
     end
 
+  sysadmin_uid = System.get_env("LCARS_SYSADMIN_UID", "1000")
+
   case uid_reading do
     "0" ->
       raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
               "(launch under your human UID via bin/fleet_v2, never as root)"
+
+    ^sysadmin_uid ->
+      raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
+              "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
+              "pods, the exact inverse of the sandbox. The seat fixes the box; a fleet human " <>
+              "runs the fleet (bin/fleet_v2 under a worker account)."
 
     {:unreadable, why} ->
       raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
