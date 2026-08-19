@@ -187,6 +187,72 @@ SPY
   [[ "$output" == *'[--project][bt][--ssh-port][2299]'* ]]
 }
 
+# ============ L'IMAGE : LA PRECONDITION QUE LA PORTE FOURNIT, ET QUI N'ETAIT PAS COUVERTE ========
+#
+# ⚠ CES TROIS TEMOINS EXISTENT PARCE QUE LEUR ABSENCE A COUTE UNE JOURNEE. L'en-tete de ce fichier
+# dit qu'aucun temoin ne traverse, « le chemin boite par un build de 15 min » — vrai, et c'est
+# justement pour ca que le chemin `--bench` n'a jamais ete joue SANS IMAGE. Il `exec`utait son
+# delegue avant d'atteindre le build, qui ne vivait que sur l'autre chemin ; sur une machine sans
+# image, le seul rail qui promet « en un geste » mourait en dictant `./docker.sh build`.
+#
+# Le defaut a survecu a quatre rejeux sur trois machines : sous WSL le daemon est partage par toute
+# la VM, donc une distro vierge n'est PAS un docker vierge, et l'image etait toujours deja la.
+#
+# CE QU'ILS MESURENT EST L'APPEL, JAMAIS LE BUILD : `docker.sh` est un espion. Un temoin qui
+# batirait vraiment provisionnerait la machine qui joue la suite.
+
+# Un arbre factice complet : la porte, la sonde reelle, et deux espions a la place des delegues.
+# `$1` = code de sortie de `image inspect` (0 presente, 1 absente) · `$2` = celui de `docker.sh`.
+_fake_tree() {
+  local inspect_rc="${1:-0}" dockersh_rc="${2:-0}" fake="$BATS_TEST_TMPDIR/arbre-img"
+  rm -rf "$fake"; mkdir -p "$fake/fleet/deploy/docker/bench" "$fake/fleet/deploy/lib"
+  cp "$SRC" "$fake/install.sh"
+  cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$fake/fleet/deploy/lib/"
+  cat > "$fake/docker.sh" <<SPY
+#!/usr/bin/env bash
+echo "DOCKERSH:\$*"
+exit $dockersh_rc
+SPY
+  cat > "$fake/fleet/deploy/docker/bench/bench-up.sh" <<'SPY'
+#!/usr/bin/env bash
+echo "BENCHUP:$*"
+SPY
+  cat > "$BINDIR/docker" <<SPY
+#!/usr/bin/env bash
+[[ "\$1 \$2" == "image inspect" ]] && exit $inspect_rc
+exit 0
+SPY
+  chmod 0755 "$fake/docker.sh" "$fake/fleet/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
+  printf '%s' "$fake"
+}
+
+@test "image ABSENTE : la porte la construit AVANT de deleguer — la promesse « en un geste » tient" {
+  local fake; fake="$(_fake_tree 1 0)"
+  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DOCKERSH:build"* ]]
+  [[ "$output" == *"BENCHUP:--project bt"* ]]
+  # L'ORDRE PORTE LE SENS : deleguer avant de batir, c'est le defaut qu'on ferme.
+  [[ "${output%%BENCHUP*}" == *"DOCKERSH:build"* ]]
+}
+
+@test "image PRESENTE : aucun build — un re-run reste court, sinon --check coute un quart d'heure" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"DOCKERSH:build"* ]]
+  [[ "$output" == *"BENCHUP:--project bt"* ]]
+}
+
+@test "build EN ECHEC : la porte s'arrete, et le delegue n'est JAMAIS atteint" {
+  local fake; fake="$(_fake_tree 1 1)"
+  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DOCKERSH:build"* ]]
+  # Un banc monte sur une image qu'on n'a pas pu batir serait un vert sur du vide.
+  [[ "$output" != *"BENCHUP:"* ]]
+}
+
 @test "sans « -- », une option inconnue est REFUSEE — jamais avalee en silence" {
   # Le pendant du temoin precedent : la porte ne doit pas gober une option qu'elle ne comprend pas
   # en esperant qu'un delegue s'en arrange. Un drapeau mal orthographie doit se voir tout de suite.

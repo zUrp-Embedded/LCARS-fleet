@@ -380,6 +380,41 @@ if [[ "$RAIL" == "box" ]]; then
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     exec "$SCRIPT_DIR/docker.sh" doctor
   fi
+  # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
+  # `--bench` promet « forge jetable + boîte + runner CI, EN UN GESTE », et la porte entière existe
+  # pour FOURNIR les préconditions au lieu de les exiger. L'image était bâtie plus bas, sur le chemin
+  # sans `--bench` UNIQUEMENT — et `--bench` `exec`ute son délégué bien avant d'y arriver. Donc sur
+  # une machine sans image, le seul rail qui promet « en un geste » mourait sur « image absente
+  # localement » en DICTANT `./docker.sh build`. Le geste ne bouge pas, il REMONTE : un seul endroit,
+  # les deux chemins.
+  #
+  # ⚠ ET LES DÉLÉGUÉS GARDENT LEUR REFUS. `up` porte `--no-build` sur une cicatrice mesurée (un `up`
+  # qui masquait un build `--no-cache` raté en repartant du cache de layers) et `bench-up` refuse pour
+  # la même raison : un build rend SON verdict, il n'est jamais l'effet de bord d'autre chose. La
+  # porte, elle, a le droit de l'appeler — c'est son métier — et le verdict reste celui du build.
+  #
+  # ⚠ LE TROU A SURVÉCU À QUATRE REJEUX SUR TROIS MACHINES, et la raison est dans le substrat : sous
+  # WSL le daemon est partagé par toute la VM, donc une distro vierge n'est PAS un docker vierge —
+  # l'image était toujours déjà là. Le chemin sans image ne s'est joué qu'une fois toutes les images
+  # supprimées. Les témoins de `install_door.bats` le couvrent maintenant avec un `docker.sh` espion.
+  #
+  # L'image PRÉSENTE n'est jamais reconstruite : rebâtir à chaque passage ferait d'un `--check` de
+  # dix secondes un quart d'heure, et le re-run doit rester sûr ET court.
+  BOX_IMAGE="${LCARS_IMAGE:-lcars-fleet:2}"
+  for _i in "${!DELEGATE_ARGS[@]}"; do
+    [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"
+  done
+  if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
+    echo ""
+    echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
+    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/docker.sh" build || {
+      echo "  ${R}Le build a échoué — son verdict est le sien, rien n'a été déployé.${N}"
+      exit 1
+    }
+  else
+    say_ok "image $BOX_IMAGE présente — je la garde (elle ne se rebâtit pas toute seule)"
+  fi
+
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     # `--bench` FOURNIT les préconditions au lieu de les exiger : forge jetable, boîte, runner CI.
     # Après lui, l'état est le MÊME qu'un déploiement où l'opérateur les avait déjà — c'est ce qui
@@ -402,8 +437,8 @@ if [[ "$RAIL" == "box" ]]; then
     exit 1
   }
   echo ""
-  echo "  ${W}build${N} puis ${W}up${N} — la sortie qui suit est celle de ./docker.sh"
-  "$SCRIPT_DIR/docker.sh" build
+  echo "  ${W}up${N} — la sortie qui suit est celle de ./docker.sh"
+  # L'image est déjà là : le bloc au-dessus l'a construite si elle manquait, pour les DEUX chemins.
   exec "$SCRIPT_DIR/docker.sh" up
 fi
 
