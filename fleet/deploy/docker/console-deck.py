@@ -863,7 +863,13 @@ function show(tab) {
       const fr = document.createElement('iframe');
       fr.src = tab.frame;
       fr.title = tab.crumb;
-      fr.style.cssText = 'width:100%;height:100%;border:0;background:var(--bg)';
+      // ⚠ LE SIGNE POUR-CENT SE DOUBLE ICI, PARTOUT, Y COMPRIS DANS CE COMMENTAIRE. Ce bloc vit
+      // dans PAGE, rendu par un formatage pour-cent de Python : un signe seul y est lu comme le
+      // debut d'une conversion, et la page AUTHENTIFIEE meurt en « TypeError: not enough arguments
+      // for format string ». La page no-auth marche, elle — donc le defaut n'apparait qu'APRES un
+      // login reussi, ce qui est exactement la moitie qu'aucun temoin ne rend. Le reste du gabarit
+      // est double depuis toujours ; ces deux-ci sont arrives avec l'onglet doc.
+      fr.style.cssText = 'width:100%%;height:100%%;border:0;background:var(--bg)';
       f.appendChild(fr);
       stage.appendChild(f);
     }

@@ -966,6 +966,25 @@ import subprocess as _subprocess
 _src = open(os.path.join(HERE, "..", "deploy", "docker", "console-deck.py")).read()
 _page = _re.search(r'PAGE = r"""(.*?)"""', _src, _re.S)
 check(_page is not None, "la page du deck est trouvable dans le source")
+
+# (9i-bis) ET ELLE DOIT SE RENDRE. Ce fichier connaissait deja la convention — il fait
+# `.replace("%%", "%")` deux lignes plus bas pour parser le JS — mais personne ne FORMATAIT le
+# gabarit. Or `PAGE` est rendu par un formatage pour-cent : un signe seul, dans le CSS ou dans un
+# commentaire du bloc JS, y est lu comme le debut d'une conversion et la page meurt en TypeError.
+#
+# ⚠ ET LA MOITIE QUI MEURT EST CELLE QUE PERSONNE NE VOIT PASSER : la page no-auth se sert sans
+# formatage, donc le banc monte vert, le bouton de login marche, le renvoi vers la forge marche —
+# et c'est APRES un login reussi que le serveur rend 500. Mesure du 2026-08-19 : deux signes nus
+# arrives avec l'onglet doc ont casse la page authentifiee du deck, sur un banc dont tous les
+# verdicts etaient verts.
+try:
+    _page.group(1) % {"host": "h", "who": "w"}
+    _page_renders, _page_why = True, ""
+except Exception as _e:  # noqa: BLE001 — on veut la CLASSE et le message, pas un relance
+    _page_renders, _page_why = False, "%s: %s" % (type(_e).__name__, _e)
+check(_page_renders,
+      "la page AUTHENTIFIEE se rend — un pour-cent nu dans le gabarit ne tue QUE l'apres-login%s"
+      % ("" if _page_renders else " (vu: " + _page_why + ")"))
 _js = "\n".join(_re.findall(r"<script>(.*?)</script>", _page.group(1), _re.S)).replace("%%", "%")
 check(len(_js.splitlines()) > 100,
       "le bloc JS extrait est bien le vrai (vu: %d lignes)" % len(_js.splitlines()))
