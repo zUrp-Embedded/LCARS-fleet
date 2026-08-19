@@ -120,8 +120,18 @@ DOCKER_OK=0
 if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
   # shellcheck source=fleet/deploy/lib/docker-endpoint.sh
   . "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh"
-  if docker_endpoint; then DOCKER_OK=1; say_ok "docker répond ($PROV_DOCKER_BIN)"
-  else say_miss "$PROV_DOCKER_WHY"; fi
+  if docker_endpoint; then
+    DOCKER_OK=1; say_ok "docker répond ($PROV_DOCKER_BIN)"
+  elif [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+    # ⚠ « REFUSE À MOI » N'EST PAS « ABSENT », ET LE VERDICT DIFFÈRE SELON LA BRANCHE. Mesuré le
+    # 2026-08-19 sur une WSL neuve : la socket est `root:root 755`, donc le daemon répond et
+    # l'utilisateur ne l'atteint pas. Le rail POSTE escalade en root trois lignes plus bas et s'en
+    # moque ; le rail BOÎTE tourne sous l'humain et ne peut pas travailler. Refuser ici, c'était
+    # refuser une machine saine sur la moitié des cas — la décision descend donc à la branche.
+    echo "  ${W}[à voir]${N} $PROV_DOCKER_WHY"
+  else
+    say_miss "$PROV_DOCKER_WHY"
+  fi
 else
   # Mode standalone : le dépôt n'est pas encore là, donc la sonde partagée non plus. On se contente
   # du minimum honnête, et la vraie sonde tournera après le clone.
@@ -215,14 +225,27 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   }
   # Le seul fichier système que ce rail PREND en entier. Le reste (paquets, groupe, /local) est
-  # additif ; `wsl.conf` est une propriété exclusive, et l'écraser en silence ferait perdre à
-  # quelqu'un une configuration qu'il a écrite.
+  # additif ; `wsl.conf` est une propriété exclusive.
+  #
+  # ⚠ CE BLOC REFUSAIT, ET C'ÉTAIT TROP BRUTAL — mesuré sur une WSL 26.04 neuve le 2026-08-19.
+  # Toute distro correctement préparée porte un `wsl.conf` : `[boot] systemd=true` est un prérequis
+  # de LCARS lui-même, et `[user] default=` est ce que pose n'importe quel setup soigné. Refuser
+  # sur son existence, c'était refuser précisément les machines prêtes, et n'accepter que celles
+  # qui ne le sont pas.
+  #
+  # On MONTRE ce qui va disparaître, et la pause qui suit est le consentement. C'est la même règle
+  # que le bandeau : le coût s'annonce, il ne se découvre pas. Ce qui serait faux, c'est d'écraser
+  # en silence — sur cette machine, `[user] default=lordzurp` serait parti sans un mot, et la
+  # distro se serait rouverte sur un autre utilisateur au prochain `wsl --shutdown`.
   if [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
-    echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre.${N}"
-    echo "  Ce rail le POSSÈDE en entier (verrouillage de l'interop, montage C:). Sauvegarde-le et"
-    echo "  retire-le, ou choisis la boîte — elle ne touche à rien :  bash $0 --box"
-    exit 1
+    echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
+    echo "  C'est la frontière de sécurité de la boîte (C: fermé, interop coupé), donc il n'est pas"
+    echo "  fusionné : tout ce qui suit disparaît, sauvegarde ce qui compte."
+    echo ""
+    sed 's/^/      /' /etc/wsl.conf
+    echo ""
+    echo "  Si tu ne veux pas de ça : la boîte ne touche à rien —  bash $0 --box"
   fi
 fi
 
@@ -285,6 +308,19 @@ echo ""
 # Elle ne demande PAS root, et c'est la promesse auditée du rail : « rien hors de ton clone et de
 # docker ». Un `sudo` ici la casserait sans rien acheter.
 if [[ "$RAIL" == "box" ]]; then
+  # ⚠ ICI, ET SEULEMENT ICI, « le daemon refuse cet utilisateur » est FATAL : ce rail ne monte
+  # jamais en root, donc c'est l'humain qui doit atteindre docker. Le rail poste, lui, escalade et
+  # s'en accommode. Le geste est un groupe, pas une install — et le dire evite de chercher docker.
+  if [[ "$DOCKER_OK" -eq 0 ]]; then
+    echo ""
+    echo "  ${R}$PROV_DOCKER_WHY${N}"
+    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+      echo "  Ce rail ne monte JAMAIS en root : c'est toi qui dois atteindre docker."
+      echo "  Sous Docker Desktop : Settings → Resources → WSL integration, active cette distro."
+      echo "  Sinon, ouvre la socket à un groupe dont tu es membre — jamais un chmod 666."
+    fi
+    exit 1
+  fi
   [[ -x "$SCRIPT_DIR/docker.sh" ]] || {
     echo "  ${R}docker.sh introuvable — ce rail exige le checkout complet.${N}"
     echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"

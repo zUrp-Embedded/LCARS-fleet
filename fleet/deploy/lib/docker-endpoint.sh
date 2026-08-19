@@ -59,6 +59,9 @@ detect_substrate() {
 PROV_DOCKER_BIN=""
 PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
+# 1 quand le daemon repond mais refuse CET utilisateur — un fait different de « injoignable ».
+PROV_DOCKER_DENIED=0
+PROV_DOCKER_SOCK=""
 
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
@@ -69,7 +72,7 @@ docker_endpoint() {
   # Introduire un second nom pour « la CLI que l'appelant veut » aurait fait deux variables pour un
   # objet, et c'est celle qu'on ne lit pas qui gagne. On capture donc la valeur entrante d'abord.
   local want="${PROV_DOCKER_BIN:-}"
-  PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""
+  PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_SOCK=""
   local cli sock
 
   # 1. La CLI. Le choix de l'appelant l'emporte — c'est son droit, et il peut viser un shim.
@@ -100,14 +103,31 @@ docker_endpoint() {
     PROV_DOCKER_WHY="DOCKER_HOST=$DOCKER_HOST est posé et aucun daemon ne répond dessus"
     return 1
   fi
+  # ⚠ « REFUSE » ET « INJOIGNABLE » NE SONT PAS LE MEME FAIT, et les confondre refuse des machines
+  # saines. Mesure du 2026-08-19 sur une WSL neuve : la socket du montage est `755 root:root`, donc
+  # le daemon REPOND — mais pas a cet utilisateur-la. Le rail poste escalade en root juste apres et
+  # s'en moque ; le rail boite, lui, tourne sous l'humain et ne peut pas travailler. Un seul verdict
+  # pour les deux serait faux dans un cas sur deux, donc la sonde REND la distinction et laisse
+  # l'appelant en tirer sa conclusion.
+  local out
   for sock in /var/run/docker.sock /run/docker-fleet.sock "$(_docker_mount_sock)"; do
     [[ -S "$sock" ]] || continue
-    if DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    out="$(DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' 2>&1)" && {
       PROV_DOCKER_HOST="unix://$sock"
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
-    fi
+    }
+    case "$out" in
+      *"permission denied"*|*"Permission denied"*)
+        PROV_DOCKER_DENIED=1
+        PROV_DOCKER_SOCK="$sock" ;;
+    esac
   done
+
+  if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK ne lui est pas ouverte ($(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null))"
+    return 1
+  fi
 
   # 3. Rien ne répond. LE MESSAGE NE DIT PAS « INSTALLE DOCKER » — sur WSL le montage prouverait le
   #    contraire, et sur linux natif le paquet n'est pas forcément le geste juste. Il dit ce qui a
