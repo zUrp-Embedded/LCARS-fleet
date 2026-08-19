@@ -47,8 +47,7 @@ defmodule Fleet.Pilot.ArchFeed do
     :"pod.spawned",
     :"pod.completed",
     :"pod.failed",
-    :"spawn.failed",
-    :"audit.verdict"
+    :"spawn.failed"
   ]
 
   def start_link(opts \\ []) do
@@ -120,9 +119,6 @@ defmodule Fleet.Pilot.ArchFeed do
 
   defp render_line(:"spawn.failed", p),
     do: "⚠ spawn en ÉCHEC#{ctx(p)}"
-
-  defp render_line(:"audit.verdict", p),
-    do: "verdict de juge#{ctx(p)}"
 
   # Best-effort context suffix — issue number + title when readable (payload shapes vary per
   # producer; the feed is a courtesy line, not a schema consumer). The repo never appears (axiom

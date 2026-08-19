@@ -24,9 +24,6 @@ defmodule Fleet.Observation.ReadModel do
   # (`String.starts_with?`), the catalogue varies.
   @deck_prefixes [
     {"workflow_map.", :workflow_runs},
-    {"audit.verdict", :gatekeeper},
-    {"coord.escalation", :gatekeeper},
-    {"coord.", :coordination},
     {"gitea.", :coordination},
     {"fleet.boot", :diagnostics},
     {"oauth.", :diagnostics},
@@ -221,7 +218,6 @@ defmodule Fleet.Observation.ReadModel do
       counts: %{},
       stream: [],
       workflow_runs: [],
-      gatekeeper: [],
       coordination: [],
       diagnostics: []
     }

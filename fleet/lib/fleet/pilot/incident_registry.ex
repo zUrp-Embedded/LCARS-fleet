@@ -140,7 +140,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  Cat-5 facade: escalates through the registry's cooldown gate while PRESERVING
+  The IMMEDIATE-gate facade (longtemps nommee d'apres le rail de severite max — a tort : trois de
+  ses quatre appelants n'en ont jamais ete) : escalates through the registry's cooldown gate while PRESERVING
   "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
   REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
   suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays

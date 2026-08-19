@@ -31,7 +31,8 @@ defmodule Fleet.Starfleet.AuditConsumer do
   reason `DurableLog` names for excluding `info` in the first place.
 
   A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not
-  in a level bump. `Fleet.Starfleet.AuditLog` is that shape and is reserved for Cat-5 by design, so
+  in a level bump. (L'ancien `AuditLog` NDJSON etait reserve par conception au rail de severite
+  max — il est parti avec lui, brouette 2026-08-19, ses deux ecrivains morts avec lui.) So
   widening it is a DECISION with a schema behind it, not a patch.
 
   `:"pod.drift"` handler (type-only clause): DORMANT — NO producer emits it (the claimed
@@ -108,14 +109,6 @@ defmodule Fleet.Starfleet.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  def handle_info(%Fleet.Event{type: :"pod.drift", payload: payload} = event, state) do
-    Logger.warning(
-      "AUDIT pod.drift pod=#{event.pod_id || Map.get(payload, "pod_id", "?")} " <>
-        "count=#{inspect(Map.get(payload, "drift_count", "?"))}"
-    )
-
-    {:noreply, %{state | events_count: state.events_count + 1}}
-  end
 
   def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
 

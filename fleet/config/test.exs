@@ -96,7 +96,6 @@ config :lcars_fleet, starfleet_start_mcp_monitor: false
 # Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :
 # DriftMonitor subscribe le Bus inconditionnellement + Shutdown expose un drain global — off en test,
 # les tests dédiés démarrent leur instance avec opts isolés (même règle que les consumers ci-dessus).
-config :lcars_fleet, starfleet_start_drift_monitor: false
 config :lcars_fleet, starfleet_start_shutdown: false
 config :lcars_fleet, spawner_start_publish_consumer: false
 

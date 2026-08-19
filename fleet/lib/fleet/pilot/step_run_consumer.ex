@@ -845,7 +845,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         result
 
       other ->
-        emit_audit_verdict_draft(other, n, role, trace)
+        # (Le doublon `audit.verdict` est parti — brouette 2026-08-19 : il re-disait CE gel a une
+        # machinerie de coordination dont le terminus re-emettait un evenement. Le gel ci-dessous
+        # EST le chemin ; l'arch est reveille, le ticket est fige.)
         TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
     end
   end
@@ -876,11 +878,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp emit_workflow_map_failed_draft(_other_reason, _n, _role), do: :ok
 
-  # `audit.verdict` — emitted on an escalation-worthy judge verdict (apply_verdict `other` branch:
-  # halt/`halt_invalid`/… → freeze-to-arch; NOT continue/abandon). DRAFT: the pilot judge vocabulary is
-  # coarsely translated to a decision-v1 `{decision: "escalate", reason: "audit_verdict"}` (which matches
-  # the coord policy `escalate.audit_verdict`); the REAL verdict + issue + role + trace ride in `details`
-  # so nothing is lost. Routed by DriftMonitor DIRECTLY to CoordBackend.handle_decision.
   # The project's ops worktree, or nil when there is none. A project never onboarded has
   # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
   # brief materialization already takes on that path.
@@ -891,33 +888,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     if File.dir?(dir), do: dir
   end
 
-  defp emit_audit_verdict_draft(verdict, n, role, trace) do
-    decision_json =
-      Jason.encode!(%{
-        "decision" => "escalate",
-        "reason" => "audit_verdict",
-        "details" => %{
-          "verdict" => to_string(verdict),
-          "issue" => n,
-          "role" => role,
-          "trace" => trace
-        },
-        "chain" => ["pilot.step_run_consumer.apply_verdict"]
-      })
-
-    case Bus.safe_emit(
-           :workflow,
-           :"audit.verdict",
-           [payload: %{"decision_json" => decision_json}],
-           on_unregistered: :log
-         ) do
-      :ok ->
-        :ok
-
-      {:error, why} ->
-        Logger.warning("StepRunConsumer: audit.verdict draft NOT emitted: #{inspect(why)}")
-    end
-  end
 
   defp close_with_trace(n, role, trace, state) do
     step_run = %{

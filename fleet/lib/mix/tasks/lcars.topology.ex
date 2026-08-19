@@ -66,9 +66,10 @@ defmodule Mix.Tasks.Lcars.Topology do
     # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
     {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"},
     # Two edges this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
-    # them "same shape as `:coord_backend`", which is the class excluded just above. The test is
-    # the `deps:` list, not the injection mechanism — `Fleet.Coord` IS in `Fleet.Starfleet`'s deps,
-    # `Fleet.Pilot` is in neither Starfleet's nor Project's. Both cross an edge boundary forbids.
+    # them "same shape as `:coord_backend`" (un seam mort avec `Fleet.Coord`, brouette 2026-08-19),
+    # which is the class excluded just above. The test is the `deps:` list, not the injection
+    # mechanism — `Fleet.Pilot` is in neither Starfleet's nor Project's deps. Both cross an edge
+    # boundary forbids.
     {"Fleet.Starfleet", "Fleet.Pilot", ":starfleet_completion_inflight_fun"},
     {"Fleet.Project", "Fleet.Pilot", ":project_incident_rail"}
   ]
@@ -88,7 +89,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Event" => "foundation",
     "Fleet.SchemaCache" => "foundation",
     "Fleet.Labels" => "foundation",
-    "Fleet.Decision" => "foundation",
+    "Fleet.Toolchain" => "foundation",
     "Fleet.Conflict" => "foundation",
     "Fleet.Shutdown.Quiesce" => "foundation",
     "Fleet.Publish.InFlight" => "foundation",
@@ -99,7 +100,6 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Credentials" => "pod primitives",
     "Fleet.TaskQueue" => "pod primitives",
     "Fleet.SPBuilder" => "pod primitives",
-    "Fleet.Coord" => "pod primitives",
     "Fleet.ProjectBootstrap" => "pod composition",
     "Fleet.Spawner" => "pod composition",
     "Fleet.Workflow" => "work",

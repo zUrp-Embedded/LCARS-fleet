@@ -23,8 +23,6 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
         action: :incident,
         incident: %{op: "spawn", subject: "cap_profile_name", escalate_kind: nil, forward: []}
       },
-      {:starfleet, :"starfleet.audit_cat5_pod_drift"} => %{action: :incident_cat5},
-      {:starfleet, :"starfleet.audit_cat5_workflow_map_failed"} => %{action: :incident_cat5},
       {:workflow, :"workflow_map.failed"} => %{
         action: :incident,
         incident: %{
@@ -274,130 +272,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     refute_receive :rec, 100
   end
 
-  # ── Regression acte4 A-06 — durable Cat-5 ────────────────────────────────
-  # A Cat-5 escalation (MAX severity — corrupted permanent seed, unreadable workflow_map) leaving
-  # only a local NDJSON + 2 lossy Bus broadcasts EVAPORATES if nobody tails, while the
-  # low-severity incident rail does open a durable forge issue (severity/durability inversion).
-  # Instead: consumer → IncidentRegistry.escalate/5 DIRECT (issue from the 1st occurrence, label
-  # error_cat5 — no recurrence gate), the correlation_id linking the issue to the causing mandate.
 
-  defp start_cat5(escalate_fun) do
-    start_supervised!(
-      {IncidentConsumer,
-       subscribe: false,
-       record_fun: fn _, _, _, _ -> :recorded end,
-       escalate_fun: escalate_fun,
-       routing_fun: fn -> routing() end}
-    )
-  end
-
-  defp cat5_echo do
-    me = self()
-
-    fn kind, subject, reason, sig, opts ->
-      send(me, {:esc, kind, subject, reason, sig, opts})
-      {:ok, 77}
-    end
-  end
-
-  test "A-06: cat5 pod_drift → escalate(:cat5) DIRECT, label error_cat5, correlation_id linked" do
-    pid = start_cat5(cat5_echo())
-
-    send(
-      pid,
-      Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_pod_drift",
-        pod_id: "permanent-architect",
-        correlation_id: "issue-42",
-        payload: %{"pod_id" => "permanent-architect", "reason" => "corrupted seed"}
-      )
-    )
-
-    assert_receive {:esc, :cat5, "permanent-architect", "corrupted seed", sig, opts}
-    assert sig == "cat5:pod_drift:permanent-architect"
-    assert Keyword.get(opts, :label) == "error_cat5"
-    assert Keyword.get(opts, :correlation_id) == "issue-42"
-  end
-
-  test "A-06: cat5 workflow_map_failed without pod_id → subject = the source (never a crash)" do
-    pid = start_cat5(cat5_echo())
-
-    send(
-      pid,
-      Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_workflow_map_failed",
-        correlation_id: "issue-7",
-        payload: %{"reason" => "load KO"}
-      )
-    )
-
-    assert_receive {:esc, :cat5, "workflow_map_failed", "load KO", sig, _opts}
-    assert sig == "cat5:workflow_map_failed:workflow_map_failed"
-  end
-
-  test "A-06: cat5 escalation failure → LOUD (Logger.error), the consumer survives" do
-    pid = start_cat5(fn _, _, _, _, _ -> {:error, :forge_down} end)
-
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        send(
-          pid,
-          Fleet.Event.new(:starfleet, :"starfleet.audit_cat5_workflow_map_failed",
-            payload: %{"reason" => "map KO"}
-          )
-        )
-
-        # synchronize: the handle_info is processed before the call returns
-        _ = :sys.get_state(pid)
-      end)
-
-    assert log =~ "Cat-5"
-    assert log =~ "escalation FAILED"
-    assert Process.alive?(pid)
-  end
-
-  describe "offload_async/1 — a saturated pool records INLINE, never drops" do
-    # The incident is the durable memory the escalation chain rests on (the Warden's HALT
-    # assumes the sysadmin issue was opened by this rail) — and a failure burst is exactly
-    # when the pool saturates. max_children: 0 = permanent saturation.
-    test "pool saturated → the work still runs (inline), {:ok, :inline}" do
-      start_supervised!(
-        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 0}
-      )
-
-      me = self()
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, :inline} = IncidentConsumer.offload_async(fn -> send(me, :recorded) end)
-        end)
-
-      assert_received :recorded
-      assert log =~ "INLINE"
-    end
-
-    test "inline fallback isolates a crashing record (the singleton must survive)" do
-      start_supervised!(
-        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 0}
-      )
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, :inline_crashed} =
-                   IncidentConsumer.offload_async(fn -> raise "poisoned payload" end)
-        end)
-
-      assert log =~ "INLINE fallback crashed"
-    end
-
-    test "pool available → offloaded as before, {:ok, :offloaded}" do
-      start_supervised!(
-        {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 4}
-      )
-
-      me = self()
-      assert {:ok, :offloaded} = IncidentConsumer.offload_async(fn -> send(me, :recorded) end)
-      assert_receive :recorded, 500
-    end
-  end
   describe "gate: immediate — la porte est un champ de la route, pas une classe de severite" do
     test "issue des la 1re occurrence : escalate_fun recoit le kind DECLARE et la signature op:sujet" do
       pid = self()

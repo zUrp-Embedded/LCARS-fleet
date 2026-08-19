@@ -85,11 +85,11 @@ defmodule Fleet.SchemaCacheTest do
 
       err =
         assert_raise ArgumentError, fn ->
-          SchemaCache.fetch!(key, "Fleet.Coord.Policies.init_policies!/0")
+          SchemaCache.fetch!(key, "Fleet.Workflow.GateBrief.init_schema!/0")
         end
 
       assert err.message =~ "not loaded"
-      assert err.message =~ "call Fleet.Coord.Policies.init_policies!/0 at boot"
+      assert err.message =~ "call Fleet.Workflow.GateBrief.init_schema!/0 at boot"
     end
 
     test "key not loaded, no hint → generic \"boot-time init\" message" do

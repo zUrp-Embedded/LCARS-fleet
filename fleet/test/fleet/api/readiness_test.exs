@@ -7,7 +7,6 @@ defmodule Fleet.API.ReadinessTest do
   alias Fleet.API.Readiness
 
   @mutated [
-    {:lcars_fleet, :starfleet_coord_backend},
     {:lcars_fleet, :starfleet_shutdown_dispatcher},
     {:lcars_fleet, :spawner_launch_backend}
   ]
@@ -33,17 +32,18 @@ defmodule Fleet.API.ReadinessTest do
   defp sub(result, id), do: Enum.find(result.subsystems, &(&1.id == id))
 
   describe "deep/0 — shape" do
-    test "global verdict + degraded list + 7 subsystems + ts" do
+    test "global verdict + degraded list + 6 subsystems + ts" do
       assert %{status: status, degraded: degraded, subsystems: subsystems, ts: ts} =
                Readiness.deep()
 
       assert status in ["operational", "degraded"]
       assert is_list(degraded)
 
-      # 7 subsystems: event.registry, coord.backend, shutdown.dispatcher, launch.backend,
-      # mcp.pod_facing, pilot.step (forge-state-machine rail), + spawn.dispatch (PublishConsumer =
-      # the sole subscriber of admin.spawn.request — the probe kills the hollow-green 202).
-      assert length(subsystems) == 7
+      # 6 subsystems: event.registry, shutdown.dispatcher, launch.backend, mcp.pod_facing,
+      # pilot.step (forge-state-machine rail), + spawn.dispatch (PublishConsumer = the sole
+      # subscriber of admin.spawn.request — the probe kills the hollow-green 202).
+      # (coord.backend est parti avec Fleet.Coord — brouette 2026-08-19.)
+      assert length(subsystems) == 6
       assert is_binary(ts)
 
       # each subsystem: id/state/detail, state within the vocabulary
@@ -65,22 +65,6 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
-  describe "coord.backend" do
-    test "operational when real backend wired" do
-      Application.put_env(:lcars_fleet, :starfleet_coord_backend, Fleet.Coord)
-      assert %{state: :operational} = sub(Readiness.deep(), "coord.backend")
-    end
-
-    test "degraded when NotWiredYet" do
-      Application.put_env(
-        :lcars_fleet,
-        :starfleet_coord_backend,
-        Fleet.Starfleet.CoordBackend.NotWiredYet
-      )
-
-      assert %{state: :degraded} = sub(Readiness.deep(), "coord.backend")
-    end
-  end
 
   describe "shutdown.dispatcher" do
     test "degraded on NoOpDispatcher (Fleet.Dispatcher missing)" do

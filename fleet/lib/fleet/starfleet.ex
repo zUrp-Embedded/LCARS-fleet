@@ -6,54 +6,41 @@ defmodule Fleet.Starfleet do
       Fleet.GitRef,
       Fleet.Layout,
       Fleet.Event,
-      Fleet.Decision,
       Fleet.SchemaCache,
       Fleet.Shutdown.Quiesce,
       Fleet.EventRouter,
       Fleet.CapProfile,
       Fleet.Spawner,
       Fleet.TaskQueue,
-      Fleet.Coord,
       Fleet.MCP,
       # — external wire surface (lib fencing: every reference is declared) —
       Req
     ],
-    exports: [Shutdown, CoordBackend]
+    exports: [Shutdown]
 
   @moduledoc """
   ⚠ **This domain is named after a role whose meaning moved, and the name has not caught up yet.**
   `starfleet` was the SYSADMIN role — a sudo agent that kept the box running. What lives here is the
-  system-side half of that job: audit, Cat 5 escalation, drift, MCP health, boot orchestration,
-  quiesce + drain. Then the role became the fleet-level front desk, and this domain kept a name that
-  no longer describes it — it does not reference that role once. Target name: `sysadmin`
-  (BL-6-53, deliberately deferred: two of its four surfaces are DATA, not identifiers — the wire
-  value `%Fleet.Event{source: :starfleet}` and the interpolated topics `starfleet.audit_cat5_<x>`).
+  system-side half of that job: audit, MCP health, boot orchestration, quiesce + drain. Then the
+  role became the fleet-level front desk, and this domain kept a name that no longer describes it —
+  it does not reference that role once. Target name: `Fleet.Admiral` ([BL-6-103], successor of the
+  retired [BL-6-53] — the rename is MECHANICAL since the 2026-08-19 brouette removed the
+  interpolated topics; the one datum left is the wire value `%Fleet.Event{source: :starfleet}`,
+  renamed in its own commit, never with the mechanics).
 
   Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
 
-  System-side module consuming the outputs of arbitration pods
-  (gatekeeper + other decision-making roles) on the system side.
-
-  **No pod, no inference in this module** — validation, parsing, audit,
-  Cat 5 escalation only.
+  **No pod, no inference, no automatic ACTION in this module** — the system detects, logs and
+  tickets (`error_system`, the admiral inbox); a human treats, off-box. The 2026-08-19 brouette
+  removed the whole decision/max-severity apparatus (the escalator, DriftMonitor, the decision validator,
+  CoordBackend, Fleet.Coord, Fleet.Decision, AuditLog): a second severity label with no
+  definition, and a verdict rail whose terminus re-emitted an event — telemetry posing as action.
+  What an incident deserves is declared in `events.yaml` (`gate: immediate | recurrence`).
 
   ## Sub-modules
 
     * `Fleet.Starfleet.Application` — the app's supervisor (consumers gated
       by config: test hermeticity)
-    * `Fleet.Decision` — validated-output struct (foundation — moved down so Coord can require it without a Starfleet dep)
-    * `Fleet.Starfleet.Gatekeeper` — pure functions, decision-JSON
-      validation (frozen `{decision, reason, details, chain}` schema)
-    * `Fleet.Starfleet.DriftMonitor` — GenServer subscribing to `fleet.events`,
-      3 routed types: `workflow_map.failed` + `audit.verdict` (draft producers, live);
-      `pod.drift` (wired but DORMANT — no producer; its condition of end is in `events.yaml`)
-    * `Fleet.Starfleet.Cat5Escalator` — pure functions, Cat 5 escalation:
-      canonical broadcast `starfleet.audit_cat5_<source>` + `CoordBackend` delegation
-    * `Fleet.Starfleet.AuditLog` — pure functions, fail-safe non-bang `File.write`
-      wrapper, rotated NDJSON (default `~/.lcars/log/fleet-starfleet.jsonl`,
-      knob `:audit_log_path`)
-    * `Fleet.Starfleet.CoordBackend` — seam wrapping `Fleet.Coord`
-      (default `NotWiredYet`)
     * `Fleet.Starfleet.AuditConsumer` — Bus consumer of the AUDIT rail
       (lifecycle + security, log prefix `AUDIT <event.type>`)
     * `Fleet.Starfleet.BootOrchestrator` — post-readiness orchestrator (fire-and-forget

@@ -36,15 +36,11 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | work | `Fleet.MCP` | 8 |
 | pod composition | `Fleet.ProjectBootstrap` | 3 |
 | pod composition | `Fleet.Spawner` | 4 |
-| pod primitives | `Fleet.Coord` | 2 |
 | pod primitives | `Fleet.Credentials` | 2 |
 | pod primitives | `Fleet.SPBuilder` | 2 |
 | pod primitives | `Fleet.TaskQueue` | 2 |
-| substrate | `Fleet.CapProfile` | 1 |
-| substrate | `Fleet.EventRouter` | 1 |
 | foundation | `Fleet.Catalogue` | 0 |
 | foundation | `Fleet.Conflict` | 0 |
-| foundation | `Fleet.Decision` | 0 |
 | foundation | `Fleet.DurableLog` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |
@@ -59,6 +55,9 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.SchemaCache` | 0 |
 | foundation | `Fleet.Shutdown.Quiesce` | 0 |
 | foundation | `Fleet.Slug` | 0 |
+| foundation | `Fleet.Toolchain` | 1 |
+| substrate | `Fleet.CapProfile` | 1 |
+| substrate | `Fleet.EventRouter` | 1 |
 <!-- boundary-topology:end -->
 
 ## Reading the table

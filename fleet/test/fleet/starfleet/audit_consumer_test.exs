@@ -28,16 +28,6 @@ defmodule Fleet.Starfleet.AuditConsumerTest do
     assert %{events_count: 1} = :sys.get_state(pid)
   end
 
-  test "canonical pod.drift (type-only, DORMANT — no producer): log warning + count++" do
-    {pid, _} = start_consumer()
-
-    send(
-      pid,
-      canon(:spawner, :"pod.drift", pod_id: "p1", payload: %{"drift_count" => 3})
-    )
-
-    assert %{events_count: 1} = :sys.get_state(pid)
-  end
 
   test "canonical event not audited: ignored (no crash, NO count — the audit trail is selective)" do
     {pid, _} = start_consumer()

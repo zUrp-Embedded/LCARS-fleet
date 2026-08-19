@@ -8,7 +8,7 @@ defmodule Fleet.Project.Incidents do
   reference would close an edge boundary refuses, and the fallback would stop compiling the day
   someone read the graph.
 
-  So the module is resolved at RUNTIME from app-env, exactly like `Fleet.Starfleet.CoordBackend`,
+  So the module is resolved at RUNTIME from app-env (the seam pattern of `@seams`),
   and for the same reason. The default is side-effect-free.
 
   ## What `NotWiredYet` means here, and what it does NOT mean

@@ -14,7 +14,6 @@
 #   sp_builder/templates                    EEx templates shaping every emitted prompt
 #   workflow/canon/workflow_maps            pipeline maps
 #   workflow/brief_templates                brief templates rendered into forge tickets
-#   coord/config/coord-policies.yaml        escalation policy map (a FILE)
 #   project_template/<face>                 scaffolding for a freshly onboarded project
 #
 # NOT part of the catalogue, and deliberately outside every tree above:

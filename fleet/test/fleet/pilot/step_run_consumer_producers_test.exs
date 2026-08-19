@@ -1,10 +1,9 @@
 defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   @moduledoc """
-  Q2 DRAFT producers — `StepRunConsumer` feeds 2 dormant Cat-5 rails that had a consumer
+  Q2 DRAFT producers — `StepRunConsumer` feeds the incident rail that had a consumer
   (`Starfleet.DriftMonitor`) but NO producer:
 
   - `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`).
-  - `audit.verdict` — emitted on an escalation-worthy judge verdict (`other` branch of `apply_verdict`).
 
   Both are emitted with source `:workflow` (DriftMonitor anti-spoof invariant) via `safe_emit`:
   an emission failure is logged warning by the producer and never blocks the carrying escalation
@@ -76,7 +75,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   end
 
   describe "workflow_map.failed draft producer" do
-    test "workflow_map LOAD failure → emits workflow_map.failed (source :workflow), NO audit.verdict" do
+    test "workflow_map LOAD failure → emits workflow_map.failed (source :workflow), rien d'autre" do
       payload = %{
         "issue_id" => "issue-42",
         "workspace" => "/ws",
@@ -102,48 +101,11 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
                      },
                      500
 
-      # Targeted rail: a load failure is NOT a verdict → no audit.verdict.
-      refute_received %Fleet.Event{type: :"audit.verdict"}
+      # Targeted rail: one failure, one event — nothing else broadcast.
+      refute_received %Fleet.Event{type: :"incident.escalated"}
     end
   end
 
-  describe "audit.verdict draft producer" do
-    test "escalation-worthy judge verdict → emits audit.verdict (decision escalate, real verdict in details) + arch freeze" do
-      payload = %{
-        "issue_id" => "issue-42",
-        "workspace" => "/ws",
-        "base_sha" => "cafe",
-        "role" => "consultant",
-        "workflow_map" => "judgemap-q2",
-        "step" => "gate",
-        "result" => %{"decision" => "halt_wait_input", "reason" => "missing info"}
-      }
-
-      StepRunConsumer.maybe_complete(payload, state())
-
-      assert_receive %Fleet.Event{
-                       source: :workflow,
-                       type: :"audit.verdict",
-                       payload: %{"decision_json" => json}
-                     },
-                     500
-
-      # decision-v1: decision "escalate" (matches the coord policy escalate.audit_verdict) + reason;
-      # the REAL judge verdict is preserved in details (nothing lost by the draft translation).
-      decoded = Jason.decode!(json)
-      assert decoded["decision"] == "escalate"
-      assert decoded["reason"] == "audit_verdict"
-      assert decoded["details"]["verdict"] == "halt_wait_input"
-      assert decoded["details"]["issue"] == 42
-      assert decoded["details"]["role"] == "consultant"
-
-      # The human escalation (freeze_to_arch) did happen AFTER the emission (the draft replaces nothing).
-      assert_received {:await_arch, _step_run, _opts}
-
-      # Targeted rail: a verdict is not a load failure → no workflow_map.failed.
-      refute_received %Fleet.Event{type: :"workflow_map.failed"}
-    end
-  end
 
   describe "DR-013 — unreadable cap-profile at completion → escalation, never a silent judge" do
     test "deliverable_mode_fun {:error, :cap_profile_unloadable} → arch freeze (await_arch), NO silent completion" do

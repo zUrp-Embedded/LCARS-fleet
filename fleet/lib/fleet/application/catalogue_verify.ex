@@ -133,13 +133,13 @@ defmodule Fleet.Application.CatalogueVerify do
           # suivi d'un boot rouge. C'est le defaut que ce fichier a deja paye une fois (6-008,
           # « cinq gardes au boot, quatre ici »).
           {"cards -> roles", fn -> Fleet.Workflow.CardRoles.verify!(root) end},
-          {"business catalogue advice", fn -> advise_business!(root) end},
-          {"escalation policies", fn -> Fleet.Coord.init_policies!() end}
+          {"business catalogue advice", fn -> advise_business!(root) end}
         ]
       else
-        # Images broke → the spawn proof and card guards would only echo it. Policies are
-        # independent (own file), so they are still worth a real verdict.
-        [{"escalation policies", fn -> Fleet.Coord.init_policies!() end}]
+        # Images broke → the spawn proof and card guards would only echo it. (La sonde
+        # « escalation policies » est partie avec `Fleet.Coord` — brouette 2026-08-19 : le rail
+        # verdict→dashboard etait de la telemetrie sans acte, et son YAML a quitte le catalogue.)
+        []
       end
 
     findings =

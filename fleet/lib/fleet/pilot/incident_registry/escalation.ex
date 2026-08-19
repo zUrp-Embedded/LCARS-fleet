@@ -19,7 +19,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     * Forge down (create) → `{:error, _}` propagated (`record_or_escalate` renders it as
       `{:escalation_failed, _}`, never a lying `{:escalated}`).
     * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
-      SP suspect / Cat-5 max severity) — the diagnosis guides the sysadmin toward the root-cause.
+      SP suspect / …) — the diagnosis guides the sysadmin toward the root-cause. The table
+      `kind_describe/1` is CLOSED: a kind without a clause CRASHES here instead of opening the
+      issue (paid once — `:awaits_arch_stuck`), so declarative immediate routes are boot-checked
+      by the Catalog.
   """
 
   require Logger
@@ -28,7 +31,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   Opens a system issue (default label `error_system` — `opts[:label]` overrides; assignee = the
   PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
   incident. `kind`: `:recurrence` | `:reroll_failed` |
-  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:cat5`. The label is a DURABLE discovery signal (always set,
+  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
   is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
@@ -330,7 +333,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp pane_block(_), do: ""
 
   # Incident ↔ mandate link (correlation_id = the source issue, threaded end-to-end): the
-  # operator walks back from the Cat-5 symptom to the causing mandate without digging the logs.
+  # operator walks back from the symptom to the causing mandate without digging the logs.
   defp correlation_block(corr) when is_binary(corr) and corr != "" do
     "Mandat lié (correlation_id) : `#{corr}`.\n"
   end
@@ -397,9 +400,4 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "personne ne corrige. Une carte illisible bloque le dispatch de TOUTES ses issues — " <>
          "d'ou l'issue des la premiere occurrence, pas a la recidive."}
 
-  defp kind_describe(:cat5),
-    do:
-      {"Cat-5 (sévérité MAX)",
-       "Escalade Cat-5 (seed permanent corrompu / workflow_map illisible / oauth) — issue dès la " <>
-         "PREMIÈRE occurrence, PAS de gate de récurrence : la sévérité max ne s'échantillonne pas."}
 end

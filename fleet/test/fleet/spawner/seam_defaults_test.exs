@@ -6,7 +6,6 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
 
   | seam | default changed to | suite |
   |---|---|---|
-  | `CoordBackend` | the real `Fleet.Coord` | **2435 green** |
   | `MCPSocketProvisioner` | `nil` | **2435 green** |
   | `LaunchBackend` | the test stub | 1 failure (held) |
 
@@ -26,16 +25,6 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
   """
   use ExUnit.Case, async: true
 
-  test "CoordBackend: unconfigured resolves to NotWiredYet — an unwired relay must READ unwired" do
-    # No config gymnastics: `config/test.exs` deliberately pins nothing here, so the ambient value
-    # IS the default. If someone starts pinning it, this assertion turns red rather than silent —
-    # which is the correct reaction, since the fallback would then stop being observable.
-    assert Application.fetch_env(:lcars_fleet, :starfleet_coord_backend) == :error,
-           "un pin de :coord_backend en :test rendrait ce defaut inobservable — a traiter, pas a contourner"
-
-    assert Fleet.Starfleet.CoordBackend.resolved() ==
-             Fleet.Starfleet.CoordBackend.NotWiredYet
-  end
 
   test "MCPSocketProvisioner: the canonical default is the real fleet_mcp side" do
     # Asserted on `default/0` rather than through `resolved/0`: reaching the fallback would mean

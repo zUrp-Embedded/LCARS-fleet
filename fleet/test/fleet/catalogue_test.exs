@@ -37,7 +37,6 @@ defmodule Fleet.CatalogueTest do
         Catalogue.sp_templates_root(),
         Catalogue.workflow_maps_root(),
         Catalogue.brief_templates_root(),
-        Catalogue.coord_policies_path(),
         Catalogue.project_template_root(),
         Catalogue.skills_root(),
         Catalogue.manifest_path()
@@ -70,7 +69,7 @@ defmodule Fleet.CatalogueTest do
         assert File.dir?(tree), "bundled catalogue is missing #{tree}"
       end
 
-      assert File.regular?(Catalogue.coord_policies_path())
+      # (coord_policies_path est parti avec Fleet.Coord — brouette 2026-08-19.)
     end
 
     test "a nil root (a cross-test config leak) never reaches Path.join" do

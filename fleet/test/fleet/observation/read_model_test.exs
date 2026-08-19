@@ -26,18 +26,17 @@ defmodule Fleet.Observation.ReadModelTest do
 
     send(pid, ev("work_item.completed", source: :task_queue))
     send(pid, ev("workflow_map.completed", source: :workflow))
-    send(pid, ev("audit.verdict", source: :starfleet))
-    send(pid, ev("coord.escalation_triggered", source: :coord))
     send(pid, ev("gitea.opened", source: :api))
     send(pid, ev("fleet.boot_complete", source: :coord))
     sync(pid)
 
     p = ReadModel.projection()
-    assert p.total == 6
+    assert p.total == 4
     assert p.counts["work_item.completed"] == 1
     assert [%{type: "workflow_map.completed"}] = p.workflow_runs
-    # audit.verdict AND coord.escalation_* → gatekeeper deck (2 entries)
-    assert [%{type: "coord.escalation_triggered"}, %{type: "audit.verdict"}] = p.gatekeeper
+    # (le deck :gatekeeper est mort avec ses deux seuls producteurs — audit.verdict et coord.* —
+    # brouette 2026-08-19)
+    refute Map.has_key?(p, :gatekeeper)
     assert [%{type: "gitea.opened"}] = p.coordination
     assert [%{type: "fleet.boot_complete"}] = p.diagnostics
   end

@@ -21,7 +21,7 @@
 # an inline lambda in a file wrapped `config_env() != :test` would never be tested. `Fleet.Layout`
 # holds the platform paths because it is the authority on them, and inverting the call would add a
 # dep to the one module whose layer name is mechanically checkable (`foundation ≡ deps: []`). The
-# module *references* posted as values — the shutdown dispatcher, the coord backend, the incident
+# module *references* posted as values — the shutdown dispatcher, the incident
 # rail, the completion-inflight fun — are seams: they cross as data so the domains stay uncoupled
 # at compile time.
 #
@@ -535,14 +535,6 @@ if config_env() != :test and not tool_mode? do
   # NO reader. Do not reintroduce: current workspaces are per-pod (pod_dir), not a
   # shared pipeline git scratch.
 
-  # ============================================================
-  # fleet_starfleet — Cat 5 audit log
-  # ============================================================
-  if path = System.get_env("LCARS_STARFLEET_AUDIT_LOG") do
-    config :lcars_fleet,
-      starfleet_audit_log_path: Fleet.EnvParse.path("LCARS_STARFLEET_AUDIT_LOG", path)
-  end
-
   # Shutdown drain: real backend (aggregates the TaskQueue active work + the completion offloads and
   # activates quiescence). Outside `:test` (this file is guarded) →
   # tests keep the `NoOpDispatcher` default (hermeticity). User decision:
@@ -573,24 +565,13 @@ if config_env() != :test and not tool_mode? do
   # as a VALUE. Unwired, the fallback still runs and warns — what is lost is the durable trace, and
   # `Project.Incidents` says so loudly rather than swallowing it.
   #
-  # ⚠ SAME SHAPE AS THE SEAM ABOVE, AND *NOT* AS `:coord_backend` — this line said "and as
-  # `:coord_backend`" and the misfiling had a consequence. `Fleet.Coord` IS in `Fleet.Starfleet`'s
-  # `deps:`, so that one swaps an implementation over an edge the compiler already holds; it is the
-  # class `@seams` excludes BY NAME. These two cross an edge boundary forbids, so they belong IN
-  # the table — and were missing from it for exactly as long as this sentence stood.
+  # ⚠ SAME SHAPE AS THE SEAM ABOVE — these two cross an edge boundary forbids, so they belong IN
+  # the table (`@seams`) — and were missing from it for exactly as long as this sentence stood.
+  # (L'ancien contre-exemple de cette note, `:coord_backend`, est parti avec `Fleet.Coord` —
+  # brouette 2026-08-19.)
   config :lcars_fleet,
          :project_incident_rail,
          {Fleet.Pilot.IncidentRegistry, :record_or_escalate}
-
-  # ============================================================
-  # fleet_coord — wired Fleet.Coord backend for starfleet
-  # ============================================================
-  config :lcars_fleet, :starfleet_coord_backend, Fleet.Coord
-
-  if path = System.get_env("LCARS_COORD_POLICIES_PATH") do
-    config :lcars_fleet,
-      coord_policies_path: Fleet.EnvParse.path("LCARS_COORD_POLICIES_PATH", path)
-  end
 
   # ============================================================
   # fleet_api — plus de port : le domaine n'a que son socket de contrôle

@@ -25,18 +25,15 @@ defmodule Fleet.Pilot.IncidentConsumer do
       (no pod created → no pod_id). Subject = `cap_profile_name` (the role: recurrence = "this role keeps
       failing to spawn"; issue_id is per-request → never recurs). op="spawn", default recurrence escalation.
 
-  ## Cat-5 (source `:starfleet`) — MAX severity, DIRECT escalation (A-06)
+  ## La porte immédiate (`gate: immediate`)
 
-  `starfleet.audit_cat5_<pod_drift|workflow_map_failed>` — the max-severity
-  rail (`Cat5Escalator`). Without this route it would only leave a LOCAL NDJSON line + two lossy
-  Bus broadcasts: the LOW-severity incident rail opens a durable forge issue while the
-  MAX-severity one evaporates if nobody tails the file (severity/durability inversion). Routed
-  here to the SAME durable forge sink — via `IncidentRegistry.escalate_gated/5` (issue on FIRST
-  occurrence, label `error_cat5`): max severity is not sampled by a recurrence gate — only the
-  REPEATS of the same signature under the registry cooldown are suppressed (the open issue
-  carries the alarm; a permanent drift does not re-create one issue per event). The event's
-  `correlation_id` links the issue back to the causing mandate. No new compile dep:
-  the event is plain data on the Bus, its 3 atoms are registry-declared.
+  Déclarée dans la table (`events.yaml`, champ `gate` du bloc `incident`) : issue durable dès la
+  PREMIÈRE occurrence via `IncidentRegistry.escalate_gated/5` — seuls les REPEATS de la même
+  signature sous le cooldown du registre sont supprimés (l'issue ouverte porte l'alarme). Le kind
+  est nommé dans la route (`escalate_kind`, exigé au boot par le Catalog : la table
+  `kind_describe` est close). L'ancien déguisement de cette porte — un second label de
+  sévérité sans définition, au bout d'une chaîne à quatre modules — est parti avec la brouette du
+  2026-08-19.
 
   ## Offload (`:runner`)
 
@@ -51,8 +48,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
     * `:record_fun` — `fn op, subject, reason, opts -> :recorded | {:escalated|…, _} end`
       (default `&Fleet.Pilot.IncidentRegistry.record_or_escalate/4`). Test seam (zero forge).
     * `:escalate_fun` — `fn kind, subject, reason, sig, opts -> {:ok, n} | {:suppressed, n} | {:error, _} end`
-      (default `&Fleet.Pilot.IncidentRegistry.escalate_gated/5`). Cat-5 path: 1st occurrence
-      immediate, repeats under the registry cooldown suppressed.
+      (default `&Fleet.Pilot.IncidentRegistry.escalate_gated/5`). Porte `gate: immediate` : 1st
+      occurrence immediate, repeats under the registry cooldown suppressed.
     * `:runner` — offload seam (see above). Default `nil` → sync.
   """
 
@@ -110,16 +107,12 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # TABLE-DRIVEN consumer (audit B-05): which event becomes WHICH incident class — op, subject key,
   # escalation kind, forwarded diag keys — is DATA (`events.yaml` routing), this module is the
   # MECHANIC. Adding an incident class is a registry edit, not a new clause. Actions owned here:
-  # `incident` (recurrence-gated recording) and `incident_cat5` (direct escalation, max severity —
-  # the tag derived from the synthesized `starfleet.audit_cat5_<tag>` type). Other actions belong
-  # to other mechanics (DriftMonitor) and are ignored, as are unrouted events.
+  # `incident` — porte `recurrence` (record_or_escalate) ou `immediate` (escalate_gated), champ
+  # `gate` de la route. Unrouted events are ignored.
   def handle_info(%Fleet.Event{source: source, type: type, payload: p} = ev, state) do
     case Map.get(state.routing_fun.(), {source, type}) do
       %{action: :incident, incident: inc} ->
         handle_incident(state, inc, p, ev)
-
-      %{action: :incident_cat5} ->
-        escalate_cat5(state, cat5_tag(type), ev)
 
       _ ->
         :ok
@@ -181,10 +174,6 @@ defmodule Fleet.Pilot.IncidentConsumer do
     end
   end
 
-  # The Cat-5 tag from the synthesized broadcast type (`starfleet.audit_cat5_<tag>` — the
-  # registered key the routing's cat5 route was validated against at boot).
-  defp cat5_tag(type),
-    do: type |> Atom.to_string() |> String.replace_prefix("starfleet.audit_cat5_", "")
 
   # Porte immediate DECLARATIVE — issue durable des la 1re occurrence, cooldown seul. Offloadee
   # comme record/6 (touche la forge). Un echec est BRUYANT : perdre l'alarme re-silencierait
@@ -370,46 +359,5 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  # Cat-5 → durable forge issue from the FIRST occurrence via `IncidentRegistry.escalate_gated/5`
-  # (label `error_cat5`, sysadmin triage distinct from pod crashes) — no recurrence gate
-  # on the 1st alarm (max severity, doctrine A-06); only the REPEATS of the same
-  # signature under the registry cooldown are suppressed (the open issue carries the alarm —
-  # without it, a permanent drift would re-create one issue per event). Offloaded like `record/5`
-  # (touches the forge). A failed escalation is LOUD: losing the alarm would re-silence exactly
-  # the evaporation this rail closes (the severity/durability inversion).
-  defp escalate_cat5(state, source, %Fleet.Event{} = ev) do
-    subject = ev.pod_id || source
-    reason = extract_cat5_reason(ev.payload)
-    sig = "cat5:#{source}:#{subject}"
 
-    exec = fn ->
-      case state.escalate_fun.(:cat5, subject, reason, sig,
-             label: "error_cat5",
-             correlation_id: ev.correlation_id
-           ) do
-        {:ok, number} ->
-          Logger.warning(
-            "IncidentConsumer: Cat-5 #{source} #{subject} → sysadmin issue ##{number} " <>
-              "(error_cat5, 1st occurrence — immediate, no recurrence gate)"
-          )
-
-        {:suppressed, number} ->
-          Logger.info(
-            "IncidentConsumer: Cat-5 #{source} #{subject} recurrent under cooldown — " <>
-              "existing issue #{inspect(number)} carries the alarm (recurrence noted)"
-          )
-
-        {:error, e} ->
-          Logger.error(
-            "IncidentConsumer: Cat-5 #{source} #{subject} escalation FAILED — NO durable issue " <>
-              "(forge down?): #{inspect(e)} — the max-severity alarm is NOT engraved"
-          )
-      end
-    end
-
-    (state.runner || (&run_sync/1)).(exec)
-  end
-
-  defp extract_cat5_reason(%{"reason" => reason}), do: reason
-  defp extract_cat5_reason(payload), do: payload
 end

@@ -120,63 +120,12 @@ defmodule Fleet.EventRouter.Catalog do
 
   defp build_routing!(events) do
     for {type, %{"source" => source, "action" => action} = route} <- events, into: %{} do
-      cat5_source = route["cat5_source"]
-
-      if action == "cat5" do
-        cat5_source ||
-          raise "Catalog: routing for #{type} declares action=cat5 without cat5_source"
-
-        audit_key = "starfleet.audit_cat5_#{cat5_source}"
-
-        Map.has_key?(events, audit_key) ||
-          raise "Catalog: routing for #{type} synthesizes #{audit_key}, which is NOT a " <>
-                  "registered event key — the Cat-5 broadcast would be refused at emit"
-      end
-
-      if action == "incident" and not match?(%{"op" => _, "subject" => _}, route["incident"]) do
-        raise "Catalog: routing for #{type} declares action=incident without a complete " <>
-                "incident block ({op, subject} required)"
-      end
-
-      # THE MIRROR OF THE `cat5` CHECK ABOVE, AND IT RUNS THE OTHER WAY. `cat5` SYNTHESIZES the type
-      # `starfleet.audit_cat5_<cat5_source>` and the check proves that key is registered.
-      # `incident_cat5` CONSUMES that same naming: `IncidentConsumer.cat5_tag/1` derives the
-      # incident tag by stripping the `starfleet.audit_cat5_` prefix off the type itself.
-      #
-      # `String.replace_prefix/3` IS A NO-OP WHEN THE PREFIX IS ABSENT, so a route that declares
-      # `action: incident_cat5` on any other type does not fail — it escalates at MAXIMUM SEVERITY
-      # under a tag that is the full type name, which no operator named and no dedup namespace
-      # expects. Silent, and at the one severity where silence costs the most.
-      #
-      # The rule was already written twice — in this registry's own JSON schema ("the tag derives
-      # from the starfleet.audit_cat5_<tag> type") and in `IncidentConsumer`'s moduledoc — and held
-      # by nothing. Two prose statements of a constraint are not a constraint.
-      #
-      # NOT the completeness block the register's fiche asks for: an `incident_cat5` route admits
-      # only `{source, action, threshold?}`. The schema is `additionalProperties: false` and the two
-      # inverse checks below refuse `cat5_source` and `incident` on it, so there is no required
-      # block left to omit. What CAN be malformed about such a route is its NAME.
-      if action == "incident_cat5" and not String.starts_with?(type, "starfleet.audit_cat5_") do
-        raise "Catalog: routing for #{type} declares action=incident_cat5, but the incident tag " <>
-                "is derived by stripping the `starfleet.audit_cat5_` prefix off the type — which " <>
-                "#{type} does not carry. It would escalate at maximum severity under the tag " <>
-                "#{inspect(type)}. Rename the event, or route it as action=incident with an " <>
-                "explicit incident block."
-      end
-
-      if cat5_source && action != "cat5" do
-        raise "Catalog: #{type} carries cat5_source but action=#{action} is not cat5"
-      end
-
+      # (Les actions du rail de severite max et leurs gardes de prefixe sont parties avec lui
+      # de severite max — brouette 2026-08-19. La garde qui survit dans leur esprit : une route
+      # `incident` a porte immediate exige un `escalate_kind` nomme, plus bas.)
       if route["incident"] && action != "incident" do
         raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
       end
-
-      threshold =
-        case route["threshold"] do
-          %{"counter" => counter, "min" => min} -> %{counter: counter, min: min}
-          nil -> nil
-        end
 
       incident =
         case route["incident"] do
@@ -227,8 +176,6 @@ defmodule Fleet.EventRouter.Catalog do
       {{source_atom, String.to_atom(type)},
        %{
          action: String.to_atom(action),
-         cat5_source: cat5_source && String.to_atom(cat5_source),
-         threshold: threshold,
          incident: incident
        }}
     end

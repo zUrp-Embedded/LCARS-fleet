@@ -6,8 +6,8 @@ defmodule Fleet.Starfleet.Application do
 
   Starts:
 
-    1. Pre-loads the decision schema via
-       `Fleet.Starfleet.Gatekeeper.init_schema!/0` (boot fail-fast)
+    1. (retiré 2026-08-19, brouette — le pré-chargement du schéma de décision est parti avec
+       `Gatekeeper`/`decision-v1.json` : le validateur gardait une chaîne sans acte)
     2. ⚠ NOTHING IS PRE-REGISTERED HERE, and this step used to claim it was. It read
        "pre-registers … event atoms (compile-time via a module attribute, atom-leak DoS
        mitigation)" — there is no such attribute in this module, nor anywhere under
@@ -17,8 +17,7 @@ defmodule Fleet.Starfleet.Application do
        here found a sentence instead of a mechanism.
        (`sdk.upstream_alert` was also named in that list — removed 2026-08-14, cf. 6-016:
        it was `MCPWatcher`'s declared half, and the module left on 2026-08-03.)
-    3. Supervises five opt-in children, each gated by a `:start_*` config knob:
-       * `DriftMonitor` (default `true`) — GenServer subscriber for pod drift
+    3. Supervises the opt-in children, each gated by a `:start_*` config knob:
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
          `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
        * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
@@ -33,7 +32,7 @@ defmodule Fleet.Starfleet.Application do
   ## Configuration
 
   One boolean `:starfleet_start_*` knob per child (all under `:lcars_fleet`):
-  `:start_drift_monitor`, `:start_shutdown`, `:start_audit_consumer`,
+  `:start_shutdown`, `:start_audit_consumer`,
   `:start_mcp_monitor` (default `true`) —
   plus `:start_boot_orchestrator` (default `true`), read by the ROOT post-boot trigger
   (`Fleet.Application`), not by this tree. Tests set a knob to `false` to start that
@@ -53,8 +52,6 @@ defmodule Fleet.Starfleet.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    :ok = Fleet.Starfleet.Gatekeeper.init_schema!()
-
     # V2 extensions.
     # MCPWatcher REMOVED on 2026-08-03 (BL-6-44): upstream version watch moved to CI
     # (`.gitea/workflows/deps-upstream.yml`). It was OFF by default and had NEVER been enabled
@@ -62,13 +59,9 @@ defmodule Fleet.Starfleet.Application do
     # on. Polling a package registry is not a control plane's job: no online consumer, one more
     # network egress from the daemon, and nothing a cron does not do better. MCPMonitor stays ON:
     # purely local (Process.whereis),
-    # zero network I/O, consistent with DriftMonitor/AuditConsumer).
+    # zero network I/O, consistent with AuditConsumer).
     children =
       [] ++
-        if(boot_enabled?(:starfleet_start_drift_monitor, true),
-          do: [Fleet.Starfleet.DriftMonitor],
-          else: []
-        ) ++
         if boot_enabled?(:starfleet_start_shutdown, true) do
           [Fleet.Starfleet.Shutdown]
         else

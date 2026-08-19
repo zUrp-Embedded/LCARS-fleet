@@ -113,7 +113,6 @@ defmodule Fleet.Catalogue do
   @rel_sp_templates "sp_builder/templates"
   @rel_workflow_maps "workflow/canon/workflow_maps"
   @rel_brief_templates "workflow/brief_templates"
-  @rel_coord_policies "coord/config/coord-policies.yaml"
   @rel_project_template "project_template"
   @rel_skills "skills/canon"
 
@@ -147,8 +146,8 @@ defmodule Fleet.Catalogue do
   # see why that matters.
   #
   # `search/1` covers the trees BOTH halves of a deployment share — cap-profiles, modops, drafts,
-  # blocks… The purely business trees (workflow maps, brief templates, project_template, coord
-  # policies) have no system default, so they read this root DIRECTLY. A caller that resolves its
+  # blocks… The purely business trees (workflow maps, brief templates, project_template) have no
+  # system default, so they read this root DIRECTLY. A caller that resolves its
   # ROLES in one catalogue and its CARDS here gets a coherent-looking half-wiring.
   #
   # Measured on the lcars-d1 bench: cap-profiles resolved to `web-arch` (8 profiles) and the
@@ -439,10 +438,10 @@ defmodule Fleet.Catalogue do
   # tree a new project starts from — but it is now addressable per root, which is what per-catalogue
   # resolution requires.
   #
-  # ⚠ TWO TREES ARE STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
-  # (read by `Workflow.BriefTemplate`) and `coord_policies` (read by `Coord.Policies`). Both carry
-  # the same latent skew — a catalogue's own would never be read — and neither is closed here
-  # because neither has a caller holding the catalogue in hand today.
+  # ⚠ ONE TREE IS STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
+  # (read by `Workflow.BriefTemplate`). Same latent skew — a catalogue's own would never be read —
+  # not closed here because no caller holds the catalogue in hand today. (Its former twin,
+  # `coord_policies`, est parti avec `Fleet.Coord` — brouette 2026-08-19.)
   def rel(:project_template), do: @rel_project_template
 
   @doc """
@@ -560,10 +559,6 @@ defmodule Fleet.Catalogue do
   @doc "Brief templates rendered into forge tickets (`<root>/#{@rel_brief_templates}`)."
   @spec brief_templates_root() :: Path.t()
   def brief_templates_root, do: Path.join(root(), @rel_brief_templates)
-
-  @doc "Escalation policy map — a FILE, not a directory (`<root>/#{@rel_coord_policies}`)."
-  @spec coord_policies_path() :: Path.t()
-  def coord_policies_path, do: Path.join(root(), @rel_coord_policies)
 
   @doc "Scaffolding copied into a freshly onboarded project (`<root>/#{@rel_project_template}/<face>`)."
   @spec project_template_root() :: Path.t()

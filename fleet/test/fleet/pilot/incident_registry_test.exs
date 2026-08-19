@@ -720,11 +720,11 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       refute_received :issue_created
     end
 
-    test "escalate_gated (Cat-5): 1st occurrence IMMEDIATE, repetition under cooldown suppressed",
+    test "escalate_gated (porte immediate): 1st occurrence IMMEDIATE, repetition under cooldown suppressed",
          %{tmp_dir: tmp} do
-      # Doctrine A-06 preserved: max severity opens the issue on the FIRST occurrence (no
-      # recurrence gate) — only intra-cooldown repetitions of the same signature are suppressed
-      # (a permanent drift no longer re-creates one issue per event).
+      # La porte immediate (gate: immediate des routes declaratives, et les kinds tires du code) :
+      # issue des la PREMIERE occurrence — seules les repetitions intra-cooldown de la meme
+      # signature sont supprimees (une panne permanente ne re-cree pas une issue par event).
       pid = self()
 
       name =
@@ -739,13 +739,15 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
-      sig = "cat5:pod_drift:permanent-architect"
+      sig = "workflow_map:standard-qa"
 
-      assert {:ok, 77} = Reg.escalate_gated(:cat5, "permanent-architect", "drift", sig, opts)
+      assert {:ok, 77} =
+               Reg.escalate_gated(:workflow_map_failed, "standard-qa", "illisible", sig, opts)
+
       assert_received :issue_created
 
       assert {:suppressed, 77} =
-               Reg.escalate_gated(:cat5, "permanent-architect", "drift", sig, opts)
+               Reg.escalate_gated(:workflow_map_failed, "standard-qa", "illisible", sig, opts)
 
       refute_received :issue_created
     end

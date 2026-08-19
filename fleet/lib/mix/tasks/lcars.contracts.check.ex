@@ -247,43 +247,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # seam must not come back).
   @doc false
   def check_coord_backend_wired(root) do
-    # `soft_gate.ex` does not exist (gates consolidated onto the gatekeeper). Since
-    # `grep_lines/2` returns `[]` on an absent file, grepping a dead file
-    # would ALWAYS pass empty = hollow-green (the failure class this checker exists
-    # to prevent). So we grep the WHOLE coord lib (glob of REAL files, not a
-    # dead file) for the `NotWiredYet` placeholder that must not reappear
-    # in the coord gate-path.
-    coord_sources = Path.wildcard(Path.join(root, "lib/fleet/coord/**/*.ex"))
-
-    notwired =
-      coord_sources
-      |> Enum.flat_map(fn file ->
-        file
-        |> grep_lines(~r/NotWiredYet/)
-        |> Enum.map(fn {ln, _} -> "#{Path.relative_to(file, root)}:#{ln}" end)
-      end)
+    # MOITIE SURVIVANTE d'une gate a deux moitiés : l'autre grepait `lib/fleet/coord/**` pour le
+    # placeholder `NotWiredYet` — le domaine `Fleet.Coord` est parti entier (brouette 2026-08-19,
+    # rail decision = telemetrie sans acte), il n'y a plus de source a sonder. Ce qui reste a
+    # garder : `Workflow.Gates` est PUR — aucune delegation coord ne doit y reapparaitre (le gate
+    # LLM vit chez le gatekeeper, jamais dans une machinerie systeme).
+    gates_path = Path.join(root, "lib/fleet/workflow/gates.ex")
 
     gates_coord_dep =
-      Path.join(root, "lib/fleet/workflow/gates.ex")
+      gates_path
       |> grep_lines(~r/coord_backend|CoordBackend/)
       |> Enum.filter(fn {_ln, line} ->
         Regex.match?(~r/coord_backend|CoordBackend/, strip_comment(line))
       end)
       |> Enum.map(fn {ln, _} -> "lib/fleet/workflow/gates.ex:#{ln}" end)
 
-    evidence = notwired ++ gates_coord_dep
-
-    if measured_nothing?(coord_sources) do
-      broken_result("coord.backend.wired_or_pure", "source under lib/fleet/coord")
+    if not File.exists?(gates_path) do
+      broken_result("coord.backend.wired_or_pure", "lib/fleet/workflow/gates.ex")
     else
       %{
         id: "coord.backend.wired_or_pure",
         remediation:
-          "keep the LLM gate on the gatekeeper (pure Gates) — no residual NotWiredYet nor coord delegation",
-        status: if(evidence == [], do: :pass, else: :fail),
-        evidence: evidence,
-        note:
-          "LLM gate consolidated on the gatekeeper (pure Gates); no residual NotWiredYet nor coord delegation"
+          "keep the LLM gate on the gatekeeper (pure Gates) — no coord delegation may reappear",
+        status: if(gates_coord_dep == [], do: :pass, else: :fail),
+        evidence: gates_coord_dep,
+        note: "Gates purity (the coord-lib half of this gate died with Fleet.Coord, 2026-08-19)"
       }
     end
   end

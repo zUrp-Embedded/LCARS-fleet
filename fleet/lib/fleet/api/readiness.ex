@@ -37,7 +37,6 @@ defmodule Fleet.API.Readiness do
   defp default_probes do
     [
       {"event.registry", &event_registry/0},
-      {"coord.backend", &coord_backend/0},
       {"shutdown.dispatcher", &shutdown_dispatcher/0},
       {"launch.backend", &launch_backend/0},
       {"mcp.pod_facing", &mcp_pod_facing/0},
@@ -72,18 +71,6 @@ defmodule Fleet.API.Readiness do
     probe("spawn.dispatch", state, detail)
   end
 
-  defp coord_backend do
-    backend = Fleet.Starfleet.CoordBackend.resolved()
-
-    if backend == Fleet.Starfleet.CoordBackend.NotWiredYet do
-      probe("coord.backend", :degraded, %{
-        backend: inspect(backend),
-        note: "NotWiredYet/absent — silent audit-only Cat 5 escalations"
-      })
-    else
-      probe("coord.backend", :operational, %{backend: inspect(backend)})
-    end
-  end
 
   defp shutdown_dispatcher do
     backend = Fleet.Starfleet.Shutdown.configured_dispatcher()
