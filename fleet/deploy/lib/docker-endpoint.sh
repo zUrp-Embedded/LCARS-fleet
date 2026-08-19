@@ -95,6 +95,7 @@ PROV_DOCKER_SUDO=""
 
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
+_docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/docker/cli-plugins"; }
 
 # ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
 #
@@ -213,10 +214,44 @@ docker_endpoint() {
       # sa duree de vie est celle de l'arbre de processus qui s'en sert.
       local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
       chmod 0700 "$shim_dir"
-      printf '#!/usr/bin/env bash\nexec sudo DOCKER_HOST=%s %s "$@"\n' \
-        "unix://$PROV_DOCKER_SOCK" "$abs" > "$shim_dir/docker"
+
+      # ⚠ ET LE SHIM PORTE LE CHEMIN DES PLUGINS, SANS QUOI `docker compose` N'EXISTE PAS.
+      # `compose` n'est pas une sous-commande : c'est un PLUGIN CLI, cherche dans `~/.docker/
+      # cli-plugins` et quelques repertoires systeme. Sous `sudo`, `HOME` devient celui de root — le
+      # repertoire de l'humain n'est donc plus regarde — et la CLI du montage range les siens dans un
+      # emplacement a elle, qui n'est dans aucune liste par defaut. Resultat mesure sur instance
+      # vierge : `version` et `ps` repondent parfaitement, et `compose -f …` echoue sur « unknown
+      # shorthand flag: 'f' » — le mot `compose` etant tombe, `-f` devient un drapeau global.
+      #
+      # C'est la meme classe que le relais muet : UN INSTRUMENT QUI REPOND A MOITIE. La sonde
+      # prouvait que le daemon repond, pas que la CLI soit complete — et `--bench` court-circuite
+      # `docker.sh`, donc le controle `compose version` qui s'y trouve ne tournait pas.
+      #
+      # `DOCKER_CLI_PLUGIN_EXTRA_DIRS` n'est pas honore par cette version (mesure). La voie qui
+      # marche est `DOCKER_CONFIG` + `cliPluginsExtraDirs`. On PART de la config de l'humain quand
+      # elle existe : elle porte ses credentials de registry, et forcer un repertoire vide les
+      # rendrait invisibles — un `pull` d'image privee echouerait en accusant le reseau.
+      local cfg="$shim_dir/config"; mkdir -p "$cfg"
+      if [[ -r "${HOME:-}/.docker/config.json" ]] && command -v jq >/dev/null 2>&1; then
+        jq --arg d "$(_docker_mount_plugins)" '.cliPluginsExtraDirs = [$d]' \
+          "$HOME/.docker/config.json" > "$cfg/config.json" 2>/dev/null \
+          || printf '{"cliPluginsExtraDirs":["%s"]}\n' "$(_docker_mount_plugins)" > "$cfg/config.json"
+      else
+        printf '{"cliPluginsExtraDirs":["%s"]}\n' "$(_docker_mount_plugins)" > "$cfg/config.json"
+      fi
+
+      printf '#!/usr/bin/env bash\nexec sudo DOCKER_HOST=%s DOCKER_CONFIG=%s %s "$@"\n' \
+        "unix://$PROV_DOCKER_SOCK" "$cfg" "$abs" > "$shim_dir/docker"
       chmod 0700 "$shim_dir/docker"
       PROV_DOCKER_BIN="$shim_dir/docker"
+
+      # ⚠ ON VERIFIE QUE LA PAIRE EST COMPLETE, PAS SEULEMENT QU'ELLE REPOND. Un shim qui rend
+      # `version` et pas `compose` est pire qu'une absence : il passe le preflight et meurt trois
+      # etapes plus loin, sur un message qui accuse un fichier compose.
+      if ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
+        PROV_DOCKER_WHY="le daemon repond via sudo, mais « docker compose » reste introuvable (plugins cherches dans $(_docker_mount_plugins))"
+        return 1
+      fi
       return 0
     fi
     PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $abs"
