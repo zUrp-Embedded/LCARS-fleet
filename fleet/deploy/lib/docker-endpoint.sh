@@ -231,14 +231,28 @@ docker_endpoint() {
       # marche est `DOCKER_CONFIG` + `cliPluginsExtraDirs`. On PART de la config de l'humain quand
       # elle existe : elle porte ses credentials de registry, et forcer un repertoire vide les
       # rendrait invisibles — un `pull` d'image privee echouerait en accusant le reseau.
+      # ⚠ LA BRANCHE DE REPLI DETRUISAIT CE QUE LE COMMENTAIRE PROMETTAIT DE GARDER. Ecrire un
+      # `config.json` reduit a `cliPluginsExtraDirs` efface `auths`, `credHelpers` et `credsStore` :
+      # sous `DOCKER_CONFIG`, un `pull` d'image privee echoue alors en accusant le registry ou le
+      # reseau, et la cause — jq absent — n'apparait nulle part. python3 est un prerequis DECLARE de
+      # ce rail (`10-packages`), jq ne l'est pas : c'est donc lui qui porte le repli.
       local cfg="$shim_dir/config"; mkdir -p "$cfg"
-      if [[ -r "${HOME:-}/.docker/config.json" ]] && command -v jq >/dev/null 2>&1; then
-        jq --arg d "$(_docker_mount_plugins)" '.cliPluginsExtraDirs = [$d]' \
-          "$HOME/.docker/config.json" > "$cfg/config.json" 2>/dev/null \
-          || printf '{"cliPluginsExtraDirs":["%s"]}\n' "$(_docker_mount_plugins)" > "$cfg/config.json"
+      local src="${HOME:-}/.docker/config.json" plug; plug="$(_docker_mount_plugins)"
+      if [[ -r "$src" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$src" "$plug" > "$cfg/config.json" <<'PYCFG' 2>/dev/null || printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$cfg/config.json"
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+d["cliPluginsExtraDirs"] = [sys.argv[2]]
+json.dump(d, sys.stdout)
+PYCFG
       else
-        printf '{"cliPluginsExtraDirs":["%s"]}\n' "$(_docker_mount_plugins)" > "$cfg/config.json"
+        # Aucune config a preserver (ou pas de python3) : on n'en invente pas, on pose le minimum.
+        printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$cfg/config.json"
       fi
+      chmod 0600 "$cfg/config.json"
 
       # ⚠ LE SHIM DOIT FAIRE TRAVERSER L'ENVIRONNEMENT, SINON IL CASSE TOUT CE QUI PILOTE COMPOSE.
       # `sudo` remet l'environnement a zero — sixieme occurrence de ce piege dans la journee, et
@@ -265,7 +279,7 @@ declare -a keep=()
 while IFS= read -r -d '' kv; do
   k="${kv%%=*}"; v="${kv#*=}"
   case "$k" in
-    *TOKEN*|*PASSWORD*|*SECRET*|*CREDENTIAL*|*PASSWD*) continue ;;
+    *TOKEN*|*PASSWORD*|*SECRET*|*CREDENTIAL*|*PASSWD*|*_PW|*_KEY|*_AUTH) continue ;;
     LCARS_*|FORGE_*|COMPOSE_*|PROV_*) [[ "$v" == *$'\n'* ]] || keep+=("$k=$v") ;;
   esac
 done < <(env -0)

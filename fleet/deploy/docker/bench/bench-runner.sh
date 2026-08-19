@@ -61,6 +61,20 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "bench-runner: --forge-api et --admin-token requis" >&2; exit 1; }
 
+# ─── L'AUTH DE LA FORGE PASSE PAR STDIN, JAMAIS PAR ARGV ────────────────────────────────────────
+#
+# ⚠ `-H "Authorization: token $TOKEN"` MET LE JETON MASTER DANS LA LIGNE DE COMMANDE, que
+# `/proc/<pid>/cmdline` expose a tout l'hote pendant la requete — cicatrice 6-141, deja payee deux
+# fois sur des credentials MOINS puissants que celui-ci. Trois appels de ce fichier le faisaient.
+#
+# Releve par une revue adverse le 2026-08-19, et le constat porte plus loin que les trois lignes :
+# le commit qui a sorti `LCARS_RUNNER_TOKEN` de l'environnement affirmait « le jeton ne passe pas en
+# argv pour autant » — vrai du jeton d'ENREGISTREMENT, faux du jeton MASTER, qui voyageait juste a
+# cote. Une correction qui deplace une fuite sans le dire en fabrique une seconde, plus discrete.
+#
+# `-K -` : curl lit sa config sur stdin. Le jeton n'apparait ni dans argv ni dans l'environnement.
+forge_curl() { printf 'header = "Authorization: token %s"\n' "$TOKEN" | curl -K - "$@"; }
+
 say() { echo "[bench-runner] $*"; }
 
 # ─── 0. LES LABELS SONT UNE PROMESSE, ET ELLE SE VERIFIE AVANT DE LA FAIRE ──────────────────────
@@ -142,7 +156,7 @@ if [[ -n "${REG_GIVEN:-}" ]]; then
   REG="$REG_GIVEN"
   say "token d'enregistrement FOURNI (--reg-token), pas d'appel API"
 else
-  REG=$(curl -s -m 10 -X POST -H "Authorization: token $TOKEN" "$FORGE_API/admin/actions/runners/registration-token" \
+  REG=$(forge_curl -s -m 10 -X POST "$FORGE_API/admin/actions/runners/registration-token" \
         | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
 fi
 [[ -n "$REG" ]] || {
@@ -293,7 +307,7 @@ PROBE_HTTP=""
 for _ in $(seq 1 20); do
   sleep 3
   body="$(mktemp)"
-  PROBE_HTTP=$(curl -s -m 5 -o "$body" -w '%{http_code}' -H "Authorization: token $TOKEN" \
+  PROBE_HTTP=$(forge_curl -s -m 5 -o "$body" -w '%{http_code}' \
                "$FORGE_API/admin/actions/runners" 2>/dev/null || echo 000)
   if [[ "$PROBE_HTTP" == "200" ]]; then
     n=$(python3 -c "import json,sys;print(len(json.load(open('$body')).get('runners') or []))" 2>/dev/null || echo 0)
@@ -327,7 +341,7 @@ if [[ -n "$VERIFY_REPO" ]]; then
   # La sonde a rendu 4 sur un runner qui allait tres bien. 20 min couvre un vrai gate.
   for _ in $(seq 1 200); do
     sleep 6
-    st=$(curl -s -m 6 -H "Authorization: token $TOKEN" "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" \
+    st=$(forge_curl -s -m 6 "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" \
          | python3 -c "
 import json,sys
 d=json.load(sys.stdin); runs=d.get('workflow_runs') or []

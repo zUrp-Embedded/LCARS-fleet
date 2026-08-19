@@ -114,7 +114,13 @@ while [[ $# -gt 0 ]]; do
     --no-runner)  WITH_RUNNER=0; shift ;;
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
-    --no-human-admin) BOOTSTRAP_EXTRA=("${BOOTSTRAP_EXTRA[@]/--human-admin/}"); shift ;;
+    # ⚠ `BOOTSTRAP_EXTRA=()`, PAS UNE SUBSTITUTION DE MOTIF. `("${A[@]/x/}")` ne RETIRE pas
+    # l'element : il le remplace par une CHAINE VIDE, et le tableau garde sa taille. Mesure :
+    #   A=(--human-admin); A=("${A[@]/--human-admin/}"); echo ${#A[@]}  ->  1
+    # L'argument vide partait donc au bootstrap, tombait dans son `*)` — « option inconnue: » — et
+    # le banc mourait en exit 4 sur « amorcage passe 1 en echec », pour un drapeau qui devait juste
+    # ne rien ajouter. Ce tableau ne porte qu'une valeur : le vider est la seule forme juste.
+    --no-human-admin) BOOTSTRAP_EXTRA=(); shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
     -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-up: option inconnue: $1" >&2; exit 1 ;;

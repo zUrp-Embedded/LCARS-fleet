@@ -43,8 +43,21 @@ setup() {
   # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par
   # `forge-gestures.sh config-token`), et `bench-up` l'y lit. Cette doublure ecrivait dans le
   # `--tofu-dir` que le banc n'a plus.
+  # ⚠ LA DOUBLURE REFUSE CE QU'ELLE NE COMPREND PAS, comme le vrai script. Elle etait `exit 0` nu :
+  # elle avalait donc n'importe quel argv, y compris malforme — et c'est exactement ce qui a masque
+  # un defaut pendant des semaines. `--no-human-admin` vidait son tableau par substitution de motif
+  # (`("${A[@]/x/}")`), ce qui remplace l'element par une CHAINE VIDE au lieu de le retirer : le vrai
+  # bootstrap tombait dans son `*)` — « option inconnue: » — et le banc mourait en exit 4. Le stub,
+  # lui, disait oui. Une doublure plus permissive que l'original ne teste pas l'original.
   cat > "$BENCH/bench-forge-bootstrap.sh" <<'FAKE'
 #!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    --forge|--forge-url|--box|--human|--human-admin|--no-human-admin|--tofu-dir|--seed|--*=*) ;;
+    -*) ;;                       # les options a valeur passent, leur valeur suit
+    "") echo "stub bootstrap: argument VIDE recu — argv malforme" >&2; exit 1 ;;
+  esac
+done
 exit 0
 FAKE
   chmod 0755 "$BENCH/bench-forge-bootstrap.sh"
@@ -373,4 +386,22 @@ run_bench() {
   [[ "$output" == *"ssh 127.0.0.5:2223"* ]]
   [[ "$output" == *"http://127.0.0.5:21001"* ]]
   [[ "$output" == *"http://127.0.0.5:20998"* ]]
+}
+
+
+@test "REGRESSION --no-human-admin : le drapeau ne transmet AUCUN argument, pas un argument VIDE" {
+  # ⚠ CE DEFAUT A VECU MASQUE PAR SON PROPRE HARNAIS. `("${A[@]/motif/}")` ne RETIRE pas l'element :
+  # il le remplace par une chaine vide, et le tableau garde sa taille. Mesure :
+  #   A=(--human-admin); A=("${A[@]/--human-admin/}"); echo ${#A[@]}   ->  1
+  # L'argument vide partait au bootstrap, tombait dans son `*)`, et le banc mourait en exit 4 sur
+  # « amorcage passe 1 en echec » — pour un drapeau qui devait juste ne rien ajouter.
+  #
+  # On epingle le CONTRAT (zero argument transmis), pas la forme du code : une autre facon de vider
+  # le tableau resterait juste.
+  local decl
+  decl="$(grep -n -- '--no-human-admin)' "$SRC" | head -1)"
+  [[ "$decl" != *'[@]/'* ]]
+  # Et le comportement, joue pour de vrai : la doublure refuse desormais un argv malforme.
+  RUNNER_RC_VAL=0 run_bench
+  [[ "$output" != *"argument VIDE"* ]]
 }
