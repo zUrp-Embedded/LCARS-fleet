@@ -27,7 +27,6 @@ restated, only pointed at.
   (`Application.deck_socket/0`) et jamais déclaré. `LCARS_OBSERVATION_PORT` et
   `:observation_http_port` ont été **retirées**, pas rendues optionnelles : une variable obligatoire
   dont la valeur ne sert à rien bloque un démarrage sans rien configurer.
-- Knobs `:start_listener` / `:start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
-- Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, like `fleet_api`).
-- Deps (see `use Boundary`): `fleet_spawner` (`list_pods/0`), `fleet_cap_profile` (role catalogue), `fleet_event_router` (Bus + listener), + `plug`/`plug_cowboy`/`jason`.
-- `DESIGN-observabilite.md` — note de design **HISTORIQUE**/exploratoire, PAS l'autorité courante (décrit des mécaniques abandonnées : ports `:8089`/`:8090`, snapshot readiness dans le ReadModel). L'autorité observabilité = les `@moduledoc` (`Deck`, `ReadModel`) + le code.
+- Knobs `:lcars_fleet, :observation_start_listener` / `:observation_start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
+- Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, same as the API domain).
+- Deps: the facade's `use Boundary` declaration (`lib/fleet/observation.ex`) — this card points at it and does not copy it. A dependency list transcribed here goes stale the day an edge moves, and nothing goes red: boundary compiles the real one.
