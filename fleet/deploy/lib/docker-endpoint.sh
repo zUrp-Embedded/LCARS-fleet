@@ -109,33 +109,59 @@ docker_endpoint() {
   # s'en moque ; le rail boite, lui, tourne sous l'humain et ne peut pas travailler. Un seul verdict
   # pour les deux serait faux dans un cas sur deux, donc la sonde REND la distinction et laisse
   # l'appelant en tirer sa conclusion.
-  local out
+  # ⚠ ON LIT LE DROIT SUR LA SOCKET, PAS LE MESSAGE D'ERREUR — et la premiere version faisait
+  # l'inverse : elle cherchait « permission denied » dans la sortie de la CLI. Un libelle d'erreur
+  # est une convention de version, un droit unix est un fait. `-w` repond a la question exacte
+  # — « puis-je m'en servir » — sans dependre de qui la pose ni de comment il le formule.
+  #
+  # ⚠ CE QUI A DECLENCHE CE CHANGEMENT N'EST PAS EXPLIQUE, ET C'EST NOTE COMME TEL. Le 2026-08-19,
+  # sur une meme WSL neuve, deux sessions ont rendu deux verdicts : l'une annoncait « CLI trouvee
+  # (docker) », l'autre ne trouvait AUCUN docker. Verifie depuis la seconde : aucun fichier de
+  # demarrage (`/etc/profile`, `~/.profile`, `~/.bashrc`, `/etc/profile.d/*`) ne mentionne docker, et
+  # aucun binaire n'existe dans les emplacements standards. L'origine du `docker` vu par la premiere
+  # session reste INCONNUE — l'hypothese `~/.bashrc` a ete posee puis MESUREE FAUSSE.
+  #
+  # C'est pour ca que le refus porte desormais ses propres mesures (chemin resolu, etat de chaque
+  # socket) : quand deux sessions se contredisent, il faut que la sortie dise laquelle a vu quoi,
+  # sinon on rejoue en aveugle.
   for sock in /var/run/docker.sock /run/docker-fleet.sock "$(_docker_mount_sock)"; do
     [[ -S "$sock" ]] || continue
-    out="$(DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' 2>&1)" && {
+    if DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       PROV_DOCKER_HOST="unix://$sock"
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
-    }
-    case "$out" in
-      *"permission denied"*|*"Permission denied"*)
-        PROV_DOCKER_DENIED=1
-        PROV_DOCKER_SOCK="$sock" ;;
-    esac
+    fi
+    # Elle existe et je ne peux pas ecrire dedans : le daemon est la, la porte ne m'est pas ouverte.
+    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
   done
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK ne lui est pas ouverte ($(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null))"
+    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
     return 1
   fi
 
   # 3. Rien ne répond. LE MESSAGE NE DIT PAS « INSTALLE DOCKER » — sur WSL le montage prouverait le
   #    contraire, et sur linux natif le paquet n'est pas forcément le geste juste. Il dit ce qui a
   #    été essayé et ce que ça signifie.
+  #
+  # ⚠ ET IL DIT LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » est un message qui ne se
+  # diagnostique pas : il ne dit ni QUEL fichier a été retenu, ni quelles sockets ont été essayées.
+  # Mesuré le 2026-08-19 : un run d'opérateur a rendu exactement ça sur une machine où, depuis une
+  # autre session, aucun `docker` n'était trouvable — et rien dans la sortie ne permettait de savoir
+  # lequel des deux environnements mentait. Un refus qui ne porte pas ses propres mesures oblige à
+  # rejouer pour savoir ce qu'il a vu.
+  local resolved tried=""
+  resolved="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
+  for sock in /var/run/docker.sock /run/docker-fleet.sock "$(_docker_mount_sock)"; do
+    if [[ -S "$sock" ]]; then tried+=" ${sock}[socket$([[ -w "$sock" ]] && echo ",accessible" || echo ",NON-ACCESSIBLE")]"
+    elif [[ -e "$sock" ]]; then tried+=" ${sock}[existe,PAS-UNE-SOCKET]"
+    else tried+=" ${sock}[absent]"
+    fi
+  done
   if [[ "$(detect_substrate)" == "wsl" ]]; then
-    PROV_DOCKER_WHY="aucun daemon docker joignable — CLI trouvée ($PROV_DOCKER_BIN) mais aucune socket ne répond. Sur WSL c'est Docker Desktop qui le porte : démarre-le côté Windows, puis relance"
+    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$tried. Sur WSL c'est Docker Desktop qui porte le daemon : démarre-le côté Windows, puis relance"
   else
-    PROV_DOCKER_WHY="aucun daemon docker joignable — CLI trouvée ($PROV_DOCKER_BIN) mais aucune socket ne répond (/var/run/docker.sock). Le service tourne-t-il, et suis-je dans le groupe docker ?"
+    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$tried. Le service tourne-t-il, et suis-je dans le groupe docker ?"
   fi
   return 1
 }
