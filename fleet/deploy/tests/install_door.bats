@@ -31,6 +31,12 @@ setup() {
   # La sonde prend la branche « DOCKER_HOST est pose » et interroge la doublure — sinon ces temoins
   # dependraient d'une socket sur la machine qui les joue.
   export DOCKER_HOST="unix:///dev/null"
+  # ⚠ LA DOUBLURE SE DÉCLARE, elle ne se glisse plus dans le PATH en espérant être prise. Sur WSL la
+  # sonde préfère DÉLIBÉRÉMENT la CLI du montage Docker Desktop : il n'y a pas de « binaire docker »
+  # dans une distro, seulement un montage, et un `docker` du PATH y est une copie que quelqu'un a
+  # posée. Un test qui compte sur l'ordre du PATH mesure donc la machine qui le joue.
+  # `PROV_DOCKER_BIN` est le choix de l'appelant et il l'emporte sur tout — c'est la couture prévue.
+  export PROV_DOCKER_BIN="$BINDIR/docker"
   unset FORGE_BASE_URL
 }
 

@@ -56,7 +56,13 @@ detect_substrate() {
 # ⚠ CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ (`exec`, `cp`, `run`)
 # rendent quelque chose. Un relais peut répondre parfaitement à `version` et rendre ZÉRO OCTET avec
 # EXIT 0 sur un `exec` — cf. `docker_stream_ok`, la sonde des appelants qui CAPTURENT.
-PROV_DOCKER_BIN=""
+# ⚠ CETTE LIGNE FAISAIT `PROV_DOCKER_BIN=""`, ET ELLE ECRASAIT LE CHOIX DE L'APPELANT AU SOURCE.
+# La fonction lit `want="${PROV_DOCKER_BIN:-}"` pour honorer une CLI imposee — un shim, une doublure
+# de test — mais l'initialisation a plat s'executait AVANT, donc `want` etait toujours vide et la
+# couture n'a jamais fonctionne depuis que ce code a quitte provision-lib. Mesure : un test qui
+# declare sa doublure la voyait ignoree au profit de la CLI du montage, sur la machine qui joue le
+# test. La forme `${VAR:-}` preserve ce qui arrive de l'environnement ; `=""` le detruit.
+PROV_DOCKER_BIN="${PROV_DOCKER_BIN:-}"
 PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
 # 1 quand le daemon repond mais refuse CET utilisateur — un fait different de « injoignable ».
@@ -120,12 +126,27 @@ docker_endpoint() {
 
   # 1. La CLI. Le choix de l'appelant l'emporte — c'est son droit, et il peut viser un shim.
   #
+  # ⚠ SUR WSL, LA CLI DU MONTAGE PASSE AVANT LE PATH, ET CE N'EST PAS UN DÉTAIL D'ORDRE.
+  # ⚖ USER : « ya PAS, JAMAIS de "binaire docker" dans WSL. C'est DÉJÀ une VM, et on a docker
+  # installé côté Windows. » Ce qui existe dans la distro est un MONTAGE, CLI comprise. Un `docker`
+  # trouvé dans un PATH y est donc soit une copie que quelqu'un a posée, soit un wrapper — jamais
+  # « le » docker. Le préférer, c'est risquer une CLI qui ne correspond pas au daemon (sur le poste
+  # de l'auteur : une copie de 39 Mo à côté d'une CLI de 41 Mo dans le montage).
+  #
+  # C'est la même règle que pour les sockets, appliquée à l'autre moitié de la paire : on ne
+  # cherche pas, on sait. Le PATH ne sert que là où il est l'autorité — un linux natif.
+  #
   # ⚠ UN NOM NU ET UN CHEMIN NE SE TESTENT PAS PAREIL, ET LA FORME NAÏVE RETIENT UN RÉPERTOIRE.
   # `[[ -x docker ]]` est VRAI dès que le CWD contient un dossier `docker` — un dossier est
-  # exécutable, c'est-à-dire traversable. Mesuré ici même : lancée depuis `fleet/deploy/`, la sonde
-  # retenait le RÉPERTOIRE `fleet/deploy/docker` comme CLI et annonçait « CLI trouvée » avec un
-  # PATH vide. Un nom nu n'a de sens QUE par le PATH ; un chemin doit être un fichier.
-  for cli in "$want" docker "$(_docker_mount_cli)"; do
+  # exécutable, c'est-à-dire traversable. Un nom nu n'a de sens QUE par le PATH ; un chemin doit
+  # être un fichier.
+  local -a candidats
+  if [[ "$(detect_substrate)" == "wsl" ]]; then
+    candidats=("$want" "$(_docker_mount_cli)" docker)
+  else
+    candidats=("$want" docker "$(_docker_mount_cli)")
+  fi
+  for cli in "${candidats[@]}"; do
     [[ -n "$cli" ]] || continue
     if [[ "$cli" == */* ]]; then
       [[ -f "$cli" && -x "$cli" ]] && { PROV_DOCKER_BIN="$cli"; break; }

@@ -48,8 +48,13 @@ case "\$1 \$2" in
   "ps -aq")          printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
-# Le verdict de provisionnement, lu par `up` DANS la boite. `STUB_PROV_RC` vide = le fichier n'est
+# Le verdict de provisionnement, lu par 'up' DANS la boite. STUB_PROV_RC vide = le fichier n'est
 # pas encore la, ce qui est l'etat normal pendant tout le provisionnement.
+# ⚠ PAS D'ACCENTS GRAVES ICI : ce heredoc n'est PAS quote, donc bash y fait de la SUBSTITUTION DE
+# COMMANDE — un mot entre accents graves est EXECUTE a l'ecriture du fichier, meme dans un
+# commentaire. Ces deux-la imprimaient « up: command not found » et « STUB_PROV_RC: command not
+# found » a chaque setup, un bruit que personne ne lisait parce que les tests passaient. Meme
+# cicatrice que 042f351d6, dans un autre fichier.
 if [[ "\$*" == *"cat /run/lcars-provision.rc"* ]]; then
   [[ -n "\${STUB_PROV_RC:-}" ]] || exit 1
   printf '%s\n' "\${STUB_PROV_RC}"
@@ -69,6 +74,12 @@ EOF
   # machine sans daemon, pour une raison qui n'a rien a voir avec ce qu'ils mesurent. En la posant,
   # la sonde prend la branche « DOCKER_HOST est pose » et interroge LA DOUBLURE, qui repond 0.
   export DOCKER_HOST="unix:///dev/null"
+  # ⚠ ET LA DOUBLURE SE DÉCLARE, elle ne se glisse plus dans le PATH en espérant être prise. Sur
+  # WSL la sonde préfère DÉLIBÉRÉMENT la CLI du montage Docker Desktop : il n'y a pas de « binaire
+  # docker » dans une distro, seulement un montage, et un `docker` trouvé dans un PATH y est une
+  # copie que quelqu'un a posée. Un test qui compte sur l'ordre du PATH mesurait donc la machine.
+  # `PROV_DOCKER_BIN` est le choix de l'appelant, et il l'emporte sur tout — c'est la couture.
+  export PROV_DOCKER_BIN="$BINDIR/docker"
 }
 
 # A project holding one container, created from the files given as arguments.

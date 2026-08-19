@@ -178,7 +178,11 @@ FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 say() { printf '[bench-up] %s\n' "$*"; }
 die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
 
-command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
+# ⚠ UN NOM NU ET UN CHEMIN NE SE TESTENT PAS PAREIL. `command -v` ne trouve un chemin absolu que
+# s'il est executable, mais il rend VRAI pour un repertoire portant ce nom — et surtout, la porte
+# peut nous passer un SHIM d'escalade (socket appartenant a root), qui est un chemin, pas un nom.
+[[ "$DOCKER_BIN" == */* ]] && { [[ -f "$DOCKER_BIN" && -x "$DOCKER_BIN" ]] || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"; } \
+  || command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
 
 # ─── 0. LE DAEMON, ET LA SONDE QUI ATTRAPE LE RELAIS MUET ───────────────────────────────────────
 # Sur cette distro, le daemon est Docker Desktop cote Windows : il n'y a NI dockerd NI

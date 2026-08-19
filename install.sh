@@ -350,6 +350,11 @@ if [[ "$RAIL" == "box" ]]; then
     # empêche « flux banc » et « flux prod » de diverger.
     echo ""
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI, en un geste."
+    # ⚠ LE DÉLÉGUÉ REÇOIT LA RÉSOLUTION, IL NE LA REFAIT PAS. Mesuré sur une instance vierge : sans
+    # cette ligne, `bench-up.sh` retombe sur son défaut `docker` et meurt sur « docker introuvable »
+    # — sur une machine où la porte venait d'annoncer « docker répond ». Deux résolutions pour un
+    # fait, donc deux verdicts selon qui regarde. Le shim d'escalade voyage avec.
+    export DOCKER_BIN="$PROV_DOCKER_BIN"
     exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
