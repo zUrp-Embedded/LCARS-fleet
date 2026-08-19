@@ -130,9 +130,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   @spec dispatch_by_verdicts([String.t()], map(), map(), integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch_by_verdicts(requested, verdicts, findings, pr_number, head, %Ctx{} = ctx) do
-    # The classification is NOT re-derived here: `Jury.review_outcome/2` is the single truth
-    # (also carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) —
-    # a divergence between what the gate does and what the status says would be a second truth.
+    # The classification is NOT re-derived here: `Jury.review_outcome` is the single truth (also
+    # carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) — a
+    # divergence between what the gate does and what the status says would be a second truth.
+    #
+    # THE FULL ARITY, and naming the `/2` here was wrong: it cannot return `:gray_zone` at all
+    # (the behaviour's contract says so, and Dialyzer holds it), so a reader who followed this
+    # comment went looking for the gray zone in a function structurally incapable of producing
+    # one. Same defect class this chantier paid for twice — a text describing a neighbouring
+    # behaviour rather than the one under it.
     case Fleet.Forge.Client.Jury.review_outcome(
            requested,
            verdicts,
