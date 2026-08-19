@@ -40,22 +40,22 @@ detect_substrate() {
 #
 # ⚠ `command -v docker` SE TROMPE DANS LES DEUX SENS, ET LA SECONDE ERREUR EST LA PLUS COÛTEUSE.
 #
-#   1. Sa présence ne prouve rien : après un reboot Windows, la CLI est dans le PATH et Docker
-#      Desktop est éteint. L'install avançait et mourait plus loin, sur un `compose up` qui accuse
-#      autre chose.
-#   2. Son ABSENCE ne prouve rien non plus. Mesuré le 2026-08-19 sur ce poste, intégration WSL
-#      DÉSACTIVÉE : ni `/usr/bin/docker` ni `/var/run/docker.sock`, et pourtant
-#      `/mnt/wsl/docker-desktop/…/docker.proxy.sock` rend « serveur 29.2.1 ». Sur WSL le donné est
-#      un MONTAGE — présent pour toute distro, CLI comprise — pas un binaire installé. Une sonde
-#      qui refuse sur l'absence du binaire refuse une machine qui a parfaitement docker.
+#   1. Sa présence ne prouve rien : le binaire peut être là et le daemon éteint.
+#   2. Son ABSENCE ne prouve rien non plus. Sur WSL, le daemon vit dans la VM Docker Desktop et
+#      s'expose par un MONTAGE partagé par toutes les distros — CLI comprise. Une distro peut donc
+#      n'avoir aucun binaire installé et joindre docker parfaitement.
 #
-# D'où : on cherche une PAIRE qui répond. Et la CLI du montage est en prime plus récente que les
-# copies posées à la main (41 Mo/février contre 39 Mo) — la préférer au binaire trouvé dans le PATH
-# serait un autre débat, mais la prendre EN DERNIER RECOURS est gratuit et correspond au daemon.
+# MESURE, SUR UNE INSTANCE VIERGE (Ubuntu 26.04 neuve, aucun geste manuel — c'est la seule mesure
+# qui vaille : un poste de travail porte des annees de cablage a la main et ne dit rien du cas
+# general) : aucun `docker` dans le PATH, pas de `/var/run/docker.sock`, et le daemon repond a
+# travers la socket du montage. Une sonde qui refuse sur l'absence du binaire refuse cette
+# machine-la, qui a pourtant docker.
+#
+# D'ou : on cherche une PAIRE — une CLI et un endpoint — et la seule preuve est qu'elle reponde.
 #
 # ⚠ CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ (`exec`, `cp`, `run`)
-# rendent quelque chose. Un relais qui répond parfaitement à `version` peut rendre ZÉRO OCTET et
-# EXIT 0 sur un `exec` — cf. `docker_stream_ok`, qui est la sonde des appelants qui CAPTURENT.
+# rendent quelque chose. Un relais peut répondre parfaitement à `version` et rendre ZÉRO OCTET avec
+# EXIT 0 sur un `exec` — cf. `docker_stream_ok`, la sonde des appelants qui CAPTURENT.
 PROV_DOCKER_BIN=""
 PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
@@ -65,6 +65,24 @@ PROV_DOCKER_SOCK=""
 
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
+
+# ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
+#
+# ⚠ LA REGLE : l'adresse du daemon est FIXE pour un substrat donne. Sur WSL, Docker Desktop expose
+# toujours sa socket au meme endroit du montage partage, et `/var/run/docker.sock` s'y ajoute quand
+# l'integration est activee pour la distro. Sur linux, `/var/run/docker.sock`. Ce sont des chemins
+# CONNUS, pas des trouvailles.
+#
+# Une sonde qui PARCOURT des chemins « au cas ou » finit toujours par y mettre ceux de la machine
+# de son auteur — et fait alors juger toutes les autres a travers son cablage particulier. Si un
+# operateur a une topologie a lui, il pose `DOCKER_HOST` : c'est une DECISION, honoree avant tout
+# le reste. Ce n'est pas a la sonde de la deviner en fouillant.
+_docker_sockets() {
+  case "$(detect_substrate)" in
+    wsl) printf '%s\n%s\n' /var/run/docker.sock "$(_docker_mount_sock)" ;;
+    *)   printf '%s\n' /var/run/docker.sock ;;
+  esac
+}
 
 docker_endpoint() {
   # ⚠ `PROV_DOCKER_BIN` est À LA FOIS L'ENTRÉE ET LA SORTIE, et c'est délibéré : le contrat existait
@@ -104,27 +122,16 @@ docker_endpoint() {
     return 1
   fi
   # ⚠ « REFUSE » ET « INJOIGNABLE » NE SONT PAS LE MEME FAIT, et les confondre refuse des machines
-  # saines. Mesure du 2026-08-19 sur une WSL neuve : la socket du montage est `755 root:root`, donc
-  # le daemon REPOND — mais pas a cet utilisateur-la. Le rail poste escalade en root juste apres et
-  # s'en moque ; le rail boite, lui, tourne sous l'humain et ne peut pas travailler. Un seul verdict
-  # pour les deux serait faux dans un cas sur deux, donc la sonde REND la distinction et laisse
-  # l'appelant en tirer sa conclusion.
-  # ⚠ ON LIT LE DROIT SUR LA SOCKET, PAS LE MESSAGE D'ERREUR — et la premiere version faisait
-  # l'inverse : elle cherchait « permission denied » dans la sortie de la CLI. Un libelle d'erreur
-  # est une convention de version, un droit unix est un fait. `-w` repond a la question exacte
-  # — « puis-je m'en servir » — sans dependre de qui la pose ni de comment il le formule.
+  # saines. Sur une instance vierge, la socket du montage est `root:root 755` : le daemon REPOND, et
+  # pas a l'utilisateur qui lance. Le rail poste escalade en root juste apres et s'en moque ; le
+  # rail boite tourne sous l'humain et ne peut pas travailler. Un verdict unique serait faux dans un
+  # cas sur deux — la sonde rend donc le FAIT, chaque branche en tire sa conclusion.
   #
-  # ⚠ CE QUI A DECLENCHE CE CHANGEMENT N'EST PAS EXPLIQUE, ET C'EST NOTE COMME TEL. Le 2026-08-19,
-  # sur une meme WSL neuve, deux sessions ont rendu deux verdicts : l'une annoncait « CLI trouvee
-  # (docker) », l'autre ne trouvait AUCUN docker. Verifie depuis la seconde : aucun fichier de
-  # demarrage (`/etc/profile`, `~/.profile`, `~/.bashrc`, `/etc/profile.d/*`) ne mentionne docker, et
-  # aucun binaire n'existe dans les emplacements standards. L'origine du `docker` vu par la premiere
-  # session reste INCONNUE — l'hypothese `~/.bashrc` a ete posee puis MESUREE FAUSSE.
-  #
-  # C'est pour ca que le refus porte desormais ses propres mesures (chemin resolu, etat de chaque
-  # socket) : quand deux sessions se contredisent, il faut que la sortie dise laquelle a vu quoi,
-  # sinon on rejoue en aveugle.
-  for sock in /var/run/docker.sock /run/docker-fleet.sock "$(_docker_mount_sock)"; do
+  # ⚠ ET ON LIT LE DROIT SUR LA SOCKET, JAMAIS UN MESSAGE. Un libelle d'erreur est une convention de
+  # version, et le code de sortie ne discrimine pas : `docker version` rend 1 aussi bien sur une
+  # socket qui refuse que sur un daemon absent (mesure du 2026-08-19). `-w` repond a la question
+  # exacte — « puis-je m'en servir » — sans dependre de qui la formule.
+  while read -r sock; do
     [[ -S "$sock" ]] || continue
     if DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       PROV_DOCKER_HOST="unix://$sock"
@@ -133,7 +140,7 @@ docker_endpoint() {
     fi
     # Elle existe et je ne peux pas ecrire dedans : le daemon est la, la porte ne m'est pas ouverte.
     [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
-  done
+  done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
     PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
@@ -152,12 +159,12 @@ docker_endpoint() {
   # rejouer pour savoir ce qu'il a vu.
   local resolved tried=""
   resolved="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
-  for sock in /var/run/docker.sock /run/docker-fleet.sock "$(_docker_mount_sock)"; do
+  while read -r sock; do
     if [[ -S "$sock" ]]; then tried+=" ${sock}[socket$([[ -w "$sock" ]] && echo ",accessible" || echo ",NON-ACCESSIBLE")]"
     elif [[ -e "$sock" ]]; then tried+=" ${sock}[existe,PAS-UNE-SOCKET]"
     else tried+=" ${sock}[absent]"
     fi
-  done
+  done < <(_docker_sockets)
   if [[ "$(detect_substrate)" == "wsl" ]]; then
     PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$tried. Sur WSL c'est Docker Desktop qui porte le daemon : démarre-le côté Windows, puis relance"
   else

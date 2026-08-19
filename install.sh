@@ -112,10 +112,11 @@ for t in git curl; do
 done
 [[ "$EUID" -ne 0 ]] && { command -v sudo >/dev/null 2>&1 && say_ok sudo || say_miss "sudo — requis pour le setup système"; }
 
-# ⚠ ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE. Mesuré le 2026-08-19 : sur WSL, une distro
-# sans intégration activée n'a NI `/usr/bin/docker` NI `/var/run/docker.sock`, et le daemon répond
-# quand même — la CLI et les sockets vivent dans `/mnt/wsl/docker-desktop`, monté pour toute
-# distro. Refuser sur l'absence du binaire refuserait une machine qui a parfaitement docker.
+# ⚠ ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE. Mesuré sur une instance VIERGE — la seule
+# mesure qui vaille, un poste de travail portant des années de câblage à la main : une distro sans
+# intégration activée n'a NI `/usr/bin/docker` NI `/var/run/docker.sock`, et le daemon répond quand
+# même, la CLI et la socket vivant dans le montage partagé par toutes les distros de la VM.
+# Refuser sur l'absence du binaire refuserait cette machine-là, qui a pourtant docker.
 DOCKER_OK=0
 if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
   # shellcheck source=fleet/deploy/lib/docker-endpoint.sh
@@ -124,7 +125,7 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     DOCKER_OK=1; say_ok "docker répond ($PROV_DOCKER_BIN)"
   elif [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
     # ⚠ « REFUSE À MOI » N'EST PAS « ABSENT », ET LE VERDICT DIFFÈRE SELON LA BRANCHE. Mesuré le
-    # 2026-08-19 sur une WSL neuve : la socket est `root:root 755`, donc le daemon répond et
+    # sur une instance vierge : la socket est `root:root 755`, donc le daemon répond et
     # l'utilisateur ne l'atteint pas. Le rail POSTE escalade en root trois lignes plus bas et s'en
     # moque ; le rail BOÎTE tourne sous l'humain et ne peut pas travailler. Refuser ici, c'était
     # refuser une machine saine sur la moitié des cas — la décision descend donc à la branche.
@@ -235,8 +236,8 @@ if [[ "$RAIL" == "workstation" ]]; then
   #
   # On MONTRE ce qui va disparaître, et la pause qui suit est le consentement. C'est la même règle
   # que le bandeau : le coût s'annonce, il ne se découvre pas. Ce qui serait faux, c'est d'écraser
-  # en silence — sur cette machine, `[user] default=lordzurp` serait parti sans un mot, et la
-  # distro se serait rouverte sur un autre utilisateur au prochain `wsl --shutdown`.
+  # en silence : un `[user] default=` présent partirait sans un mot, et la distro se rouvrirait
+  # sur un autre utilisateur au prochain `wsl --shutdown`. Constaté sur une instance vierge.
   if [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"

@@ -107,7 +107,8 @@ check() {
     # DEUX SENS : sa présence ne prouve pas que Docker Desktop tourne (cas fréquent après un reboot
     # Windows), et son absence ne prouve pas que docker manque — sur WSL le donné est le montage
     # `/mnt/wsl/docker-desktop`, CLI comprise, présent pour toute distro même sans intégration
-    # activée. Mesuré le 2026-08-19 sur ce poste : aucun binaire dans le PATH, et le daemon répond.
+    # activée. Mesuré sur une instance VIERGE (la seule mesure qui vaille — un poste de travail
+    # porte des années de câblage à la main) : aucun binaire dans le PATH, et le daemon répond.
     # `docker_endpoint` rend la paire CLI+socket qui marche, ou dit ce qui manque.
     if docker_endpoint; then
       p_ok "docker répond ($PROV_DOCKER_BIN) — la forge du poste peut être montée (fleet/deploy/docker/bench/bench-up.sh)"
