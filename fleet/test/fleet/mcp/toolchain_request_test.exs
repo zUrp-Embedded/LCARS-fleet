@@ -34,7 +34,10 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     @impl true
     def open_pr(repo, head, base, title, _opts) do
       send(self(), {:open_pr, repo, head, base, title})
-      {:ok, %{"number" => 412}}
+      # Le NUMERO NU — le contrat du client canonique ({:ok, integer}, 409 compris). Une v1 de ce
+      # double rendait une map : vert ici, `"pr" => nil` en prod. Le double suit le client, jamais
+      # l'inverse.
+      {:ok, 412}
     end
   end
 

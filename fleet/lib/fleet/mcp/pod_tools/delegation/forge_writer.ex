@@ -55,13 +55,19 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   voit la branche bouger et le convergeur applique. Trois acteurs, et le seul qui tourne en root
   prend un manifeste qu'un humain a déjà approuvé.
   """
+  # LE CONTRAT EST CELUI DU CLIENT CANONIQUE, ET IL EST ETROIT : `Fleet.Forge.Client.open_pr/5`
+  # rend `{:ok, integer}` — le NUMERO de la PR — dans ses DEUX branches, y compris le 409 (une PR
+  # existe deja pour ce couple head→base : le client la retrouve et rend son numero). Un `{:ok,
+  # term()}` laissait un double rendre une map, le double etait vert, et `pr_number/1` en prod
+  # recevait un entier qu'il ne savait pas lire — la reponse MCP portait `"pr" => nil` a chaque
+  # appel. Trouve par la relecture du 2026-08-19.
   @callback open_pr(
               repo :: String.t(),
               head :: String.t(),
               base :: String.t(),
               title :: String.t(),
               opts :: keyword()
-            ) :: {:ok, term()} | {:error, term()}
+            ) :: {:ok, integer()} | {:error, term()}
 
   @default_writer Fleet.Forge.Client
 
