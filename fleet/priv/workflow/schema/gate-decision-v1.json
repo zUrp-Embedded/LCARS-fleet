@@ -1,13 +1,22 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Gate Decision (gatekeeper, projet)",
-  "description": "Décision rendue par le gatekeeper sur une gate de pipeline projet. Distinct de decision-v1.json (starfleet/escalade OS : allow/halt/escalate/retry). Vocab canon gatekeeper-exception.md.",
+  "description": "Décision rendue par le gatekeeper sur une gate de pipeline projet. (Son ancien jumeau decision-v1.json — le schéma d'escalade du rail décision — est mort avec la brouette du 2026-08-19 ; celui-ci est le SEUL schéma de décision restant.) Vocab canon gatekeeper-exception.md.",
   "type": "object",
-  "required": ["decision", "reason"],
+  "required": [
+    "decision",
+    "reason"
+  ],
   "properties": {
     "decision": {
       "type": "string",
-      "enum": ["continue", "abandon", "redirect", "escalate_user", "halt_wait_input"]
+      "enum": [
+        "continue",
+        "abandon",
+        "redirect",
+        "escalate_user",
+        "halt_wait_input"
+      ]
     },
     "reason": {
       "type": "string",
@@ -18,7 +27,9 @@
     },
     "chain": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     }
   }
 }
