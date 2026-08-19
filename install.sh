@@ -119,7 +119,16 @@ echo "  ${W}Préflight${N}"
 for t in git curl; do
   command -v "$t" >/dev/null 2>&1 && say_ok "$t" || say_miss "$t — apt install $t"
 done
-[[ "$EUID" -ne 0 ]] && { command -v sudo >/dev/null 2>&1 && say_ok sudo || say_miss "sudo — requis pour le setup système"; }
+# ⚠ `sudo` N'EST PAS UN PREREQUIS COMMUN, ET LE METTRE ICI REFUSAIT DES MACHINES SAINES. C'est une
+# exigence du rail POSTE, qui escalade pour provisionner. Le rail BOITE ne monte jamais en root : il
+# n'a besoin de sudo que si la socket docker appartient a root — et la sonde le dit deja
+# (`PROV_DOCKER_DENIED`). Sur une machine ou l'humain atteint docker directement, exiger sudo est un
+# refus sans objet.
+#
+# Mesure : le gate CI tourne dans `lcars-build:2`, sous `builder`, SANS sudo — et il a docker par
+# son daemon embarque. Le preflight commun y refusait tout, donc cinq temoins de ce rail tombaient
+# en CI en passant partout ailleurs. C'est la meme regle que le preflight de branche : ce qui n'est
+# vrai que d'une branche se verifie DANS cette branche.
 
 # ⚠ ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE. Mesuré sur une instance VIERGE — la seule
 # mesure qui vaille, un poste de travail portant des années de câblage à la main : une distro sans
@@ -228,6 +237,14 @@ fi
 # vierge dans le préflight commun refuserait la machine de travail de quelqu'un qui voulait
 # simplement lancer une boîte depuis elle — c'est le cas de la machine où ce rail a été écrit.
 if [[ "$RAIL" == "workstation" ]]; then
+  # Ce rail escalade pour provisionner : sans sudo il ne peut rien faire, et le dire ici est plus
+  # juste que de le dire a tout le monde.
+  if [[ "$EUID" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+    echo ""
+    echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
+    echo "  La boîte, elle, n'escalade que pour joindre le daemon :  bash $0 --box"
+    exit 1
+  fi
   [[ "$SUBSTRATE" == "wsl" ]] || {
     echo ""
     echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"

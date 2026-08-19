@@ -354,7 +354,13 @@ EOF
   #
   # DOCKER_HOST vise une socket qui n'existe pas : c'est le seul moyen de fabriquer « rien ne
   # repond » sur une machine qui, elle, a docker. Vider le PATH ne suffit plus, et c'est le sujet.
-  run env PATH="/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
+  # ⚠ LE TEMOIN FOURNIT LA CLI QU'IL MESURE, IL NE L'HERITE PAS DE LA MACHINE. Sans elle, la sonde
+  # rend « aucune CLI docker » — un refus JUSTE, mais un autre que celui qu'on epingle ici. Mesure :
+  # ce temoin passait sur trois machines et tombait dans le conteneur de CI, qui n'a pas de docker.
+  # Un test qui herite de son environnement mesure l'environnement.
+  local cli="$BATS_TEST_TMPDIR/bin"; mkdir -p "$cli"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$cli/docker"; chmod 0755 "$cli/docker"
+  run env PATH="$cli:/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
       PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
@@ -388,7 +394,10 @@ EOF
   # une derive ici et un refus la-bas, et le lecteur ne sait plus lequel des deux dit vrai. Les
   # deux passent maintenant par `docker_endpoint`, donc la phrase VIENT du meme endroit — ce n'est
   # plus une convention entre deux auteurs, c'est un seul texte a un seul site.
-  run env PATH="/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
+  # Meme raison qu'au temoin precedent : la CLI est FOURNIE, pas heritee.
+  local cli="$BATS_TEST_TMPDIR/bin"; mkdir -p "$cli"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$cli/docker"; chmod 0755 "$cli/docker"
+  run env PATH="$cli:/usr/bin:/bin" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/absent.sock" \
       PROV_SUBSTRATE=wsl PROVISION_MODULE=48-forge-host \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh" check
