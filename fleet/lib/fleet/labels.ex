@@ -50,6 +50,7 @@ defmodule Fleet.Labels do
 
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
+  @awaits_toolchain "lcars-awaits-toolchain"
   # ONE LITERAL FOR THE FACE, and the label is derived from it. Three places used to spell it
   # independently — the wire enum offered to the arch, the clause that routes the wire value, and
   # the label posted on the forge — so the wire could ANNOUNCE a token the code did not accept and
@@ -65,6 +66,25 @@ defmodule Fleet.Labels do
   @doc "HUMAN lock: the issue awaits an action via the arch (escalate/halt/redirect verdict)."
   @spec awaits_arch() :: String.t()
   def awaits_arch, do: @awaits_arch
+
+  @doc """
+  HUMAN lock, SECOND SHAPE: the work-item asked for a tool the box does not have, and waits on an
+  ADMIN — not on the arch.
+
+  ⚠ DISTINCT FROM `awaits_arch/0`, AND IT IS NOT COSMETIC. The arch can do nothing with a toolchain
+  request: it does not approve installs, and it has no forge write. Merging the two would fill the
+  arch's inbox (`list_escalations` reads `lcars-awaits-arch`) with items its reader cannot action —
+  which that tool's own contract forbids in as many words. Two locks because two audiences.
+
+  DRAINED BY THE RECONCILER, IN BOTH DIRECTIONS, and the second one is the reason it exists at all:
+  the request merged (the tool arrived, the work-item is re-dispatched) OR its PR was closed without
+  merging (nothing will arrive, the ticket says so and hands back to the project's human). A PR that
+  is closed never moves the branch SHA, so a reconciler that only compared branch state would never
+  see it — and a work-item waiting on an event that will not come is indistinguishable from one in
+  flight.
+  """
+  @spec awaits_toolchain() :: String.t()
+  def awaits_toolchain, do: @awaits_toolchain
 
   @doc """
   DESTINATION marker of a WORKSHOP ticket (`destination/workshop`): an INPUT to the
