@@ -31,10 +31,20 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # that this list must be edited when a check of this shape is added — which is exactly the moment
   # to ask whether the exemption is warranted.
   #
-  # Both entries share ONE cause: their subject is `fleet/deploy`, which the image's `build` stage
-  # excludes on purpose (a compose edit would otherwise invalidate the layer and repay a ~10 min
-  # gate). They are checks about the MACHINE, played inside an artifact that does not carry it.
-  @declares_it_did_not_measure ["shell.sourcers_set_strict", "layout.face_roots_provisioned"]
+  # The three entries share ONE cause: their subject is `fleet/deploy`, which the image's `build`
+  # stage excludes on purpose (a compose edit would otherwise invalidate the layer and repay a ~10
+  # min gate). They are checks about the MACHINE, played inside an artifact that does not carry it.
+  #
+  # `toolchain.branch_single_source` joined on 2026-08-19 and its exemption was weighed here, as
+  # this comment asks. Its authority — the frozen literal in `Fleet.Toolchain.branch/0` — DOES ship
+  # in the artifact, and the check fails loudly when that literal becomes unreadable. What it cannot
+  # see in a runtime-only artifact is the three shell copies, and a wall about copies that are not
+  # there has nothing to judge. Same shape, same cause, same answer.
+  @declares_it_did_not_measure [
+    "shell.sourcers_set_strict",
+    "layout.face_roots_provisioned",
+    "toolchain.branch_single_source"
+  ]
 
   defp empty_root do
     root = Path.join(System.tmp_dir!(), "no_pass_#{System.unique_integer([:positive])}")

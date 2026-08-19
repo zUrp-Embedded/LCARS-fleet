@@ -92,6 +92,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_roles_role_index_unique(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
+        check_toolchain_branch_single_source(root),
         check_gitea_template_expansion(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
@@ -1894,6 +1895,116 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
           "(BL-6-36: bash's silent-coercion class)"
     }
+  end
+
+  @doc """
+  The tool-request branch is named in ONE place and copied everywhere else, and the copies are
+  checked here.
+
+  Four components must agree on that name: the provisioning module that creates the branch, the
+  gesture that protects it, the admiral skill that reads the letterbox, and `Fleet.Toolchain` that
+  polls its head. Three are shell, one is the BEAM — they cannot share a literal, so `Toolchain`
+  DECLARES it and the others copy. A copy nobody verifies is not a single source of truth; this
+  check is what makes the claim true.
+
+  It also refuses `LCARS_SYSADMIN_BRANCH` anywhere under `deploy/`. That variable made the name
+  HALF tunable: turning it moved the shell side while the BEAM kept its own default, so the branch
+  was created and protected under one name while the reconciler polled another — manifests landing
+  where nobody looks, no message, a rail that looks calm.
+  """
+  def check_toolchain_branch_single_source(root) do
+    mirrors = [
+      "deploy/modules.d/52-ops-branch.sh",
+      "deploy/docker/forge-gestures.sh",
+      "deploy/admiral/skills/system-issues/list.sh"
+    ]
+
+    id = "toolchain.branch_single_source"
+
+    remediation =
+      "copy the literal from `Fleet.Toolchain.branch/0` into the shell file, and never reintroduce " <>
+        "`LCARS_SYSADMIN_BRANCH` — a name half of the rail can retune is a rail that splits in " <>
+        "silence"
+
+    expected =
+      case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
+        {:ok, src} ->
+          case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"/, src) do
+            [_, name] -> name
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    case tree_scope(Path.expand("deploy", root)) do
+      :out_of_scope ->
+        %{
+          id: id,
+          remediation: "—",
+          status: :pass,
+          evidence: [],
+          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+        }
+
+      :required ->
+        if is_nil(expected) do
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: ["lib/fleet/toolchain.ex"],
+            # Fail-closed: an unreadable authority is not "nothing to compare", it is the one case
+            # where every mirror would pass by default.
+            note:
+              "`Fleet.Toolchain.branch/0` no longer reads as a frozen literal — the authority is " <>
+                "unreadable, so nothing was compared"
+          }
+        else
+          bad =
+            Enum.flat_map(mirrors, fn rel ->
+              case File.read(Path.expand(rel, root)) do
+                {:ok, body} ->
+                  cond do
+                    String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
+                      [{rel, "carries LCARS_SYSADMIN_BRANCH — the name is frozen, not tunable"}]
+
+                    not String.contains?(body, "\"#{expected}\"") ->
+                      [{rel, "does not carry the literal #{inspect(expected)}"}]
+
+                    true ->
+                      []
+                  end
+
+                _ ->
+                  [{rel, "unreadable"}]
+              end
+            end)
+
+          if bad == [] do
+            %{
+              id: id,
+              remediation: "—",
+              status: :pass,
+              evidence: mirrors,
+              note:
+                "#{inspect(expected)} declared by Fleet.Toolchain.branch/0 and copied by the " <>
+                  "#{length(mirrors)} shell readers; no tunable left"
+            }
+          else
+            %{
+              id: id,
+              remediation: remediation,
+              status: :fail,
+              evidence: Enum.map(bad, &elem(&1, 0)),
+              note:
+                "authority says #{inspect(expected)} — " <>
+                  Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end)
+            }
+          end
+        end
+    end
   end
 
   # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime

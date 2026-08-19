@@ -154,7 +154,7 @@ defmodule Fleet.ToolchainTest do
       # `ops` porte le registre d'incidents, que le runtime ECRIT : la protéger casserait ces
       # écritures. Même dépôt, branche différente, protections opposées.
       assert Toolchain.ops_repo() == "fleet/lcars"
-      assert Toolchain.branch() == "sysadmin"
+      assert Toolchain.branch() == "tool_request"
       refute Toolchain.branch() == "ops"
     end
   end

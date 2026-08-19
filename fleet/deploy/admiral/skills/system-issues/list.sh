@@ -16,7 +16,10 @@ set -euo pipefail
 FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || true)}"
 TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
-BRANCH="${LCARS_SYSADMIN_BRANCH:-sysadmin}"
+# Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
+# `toolchain.branch_single_source`. Reglable a moitie, il faisait relever une boite aux lettres
+# pendant que les demandes atterrissaient dans une autre.
+BRANCH="tool_request"
 
 [[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }
 [[ -r "$TOKEN_FILE" ]] || { echo "system-issues: master token illisible ($TOKEN_FILE) — cette session peut-elle le lire ?" >&2; exit 1; }

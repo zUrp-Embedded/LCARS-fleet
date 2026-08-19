@@ -49,13 +49,17 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# LE DEPOT ET LE NOM viennent de l'environnement, avec les MEMES defauts que les deux lecteurs du
-# rail (`toolchain-converger.sh`, `Fleet.Admiral.ToolchainReconciler`). Trois copies d'un defaut
-# derivent ; celle-ci est la troisieme, et c'est la raison pour laquelle elle est ECRITE ici plutot
-# que devinee : un module qui creerait `sysadmin` pendant que le runtime lit `sysops` poserait une
-# boite aux lettres que personne ne releve, sans qu'aucun message ne le dise.
+# LE NOM DE LA BRANCHE N'EST PAS REGLABLE, ET IL N'EST PAS DECIDE ICI. Son autorite est
+# `Fleet.Toolchain.branch/0` ; cette ligne en est une RECOPIE, tenue par le contrat
+# `toolchain.branch_single_source` de `mix lcars.contracts.check`, qui rougit si les deux divergent.
+#
+# ⚠ IL A ETE REGLABLE A MOITIE, et c'est exactement la panne que le gel ferme : une clef d'app-env
+# cote BEAM, une variable d'environnement cote shell, aucun pont. Les defauts coincidaient donc rien
+# ne cassait — jusqu'a ce que quelqu'un tourne celle du shell : la branche se cree sous le nouveau
+# nom, la protection le suit, et le reconciliateur continue d'interroger l'ancien pendant que les
+# manifestes atterrissent la ou personne ne regarde. Le rail a l'air calme.
+readonly OPS_BRANCH="tool_request"
 : "${LCARS_OPS_REPO:=fleet/lcars}"
-: "${LCARS_SYSADMIN_BRANCH:=sysadmin}"
 
 # ─── LA SONDE ───────────────────────────────────────────────────────────────────────────────────
 # `GET /repos/<repo>/branches/<branch>` : 200 la branche est la, 404 elle manque. Le jeton systeme
@@ -66,7 +70,7 @@ forge_branch_code() {
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
   [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
   curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
-       "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branches/$LCARS_SYSADMIN_BRANCH" \
+       "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branches/$OPS_BRANCH" \
        2>/dev/null || true
 }
 
@@ -101,7 +105,7 @@ create_branch() {
   mkdir -p "$tmp/ops/toolchains.d"
   : > "$tmp/ops/toolchains.d/.gitkeep"
   cat > "$tmp/README.md" <<'SEED'
-# Branche `sysadmin` — les demandes d'outillage
+# Branche `tool_request` — les demandes d'outillage
 
 Cette branche est une **boite aux lettres**, pas une branche de code : elle n'a aucune histoire
 commune avec `main`, et elle ne porte que des manifestes d'outillage sous `ops/toolchains.d/`.
@@ -126,7 +130,7 @@ SEED
   local ident_n="${PROV_SYSTEM_ACCOUNT:-lcars-system}"
   (
     cd "$tmp"
-    git init -q -b "$LCARS_SYSADMIN_BRANCH" .
+    git init -q -b "$OPS_BRANCH" .
     git add -A
     GIT_AUTHOR_NAME="$ident_n"    GIT_AUTHOR_EMAIL="$ident_n@noreply.localhost" \
     GIT_COMMITTER_NAME="$ident_n" GIT_COMMITTER_EMAIL="$ident_n@noreply.localhost" \
@@ -135,21 +139,21 @@ SEED
     GIT_CONFIG_KEY_0="http.${PROV_FORGE_URL%/}.extraheader" \
     GIT_CONFIG_VALUE_0="Authorization: token $tok" \
       git push -q "${PROV_FORGE_URL%/}/$LCARS_OPS_REPO.git" \
-        "HEAD:refs/heads/$LCARS_SYSADMIN_BRANCH"
-  ) || { p_fail "création de $LCARS_OPS_REPO:$LCARS_SYSADMIN_BRANCH refusée"; return 1; }
+        "HEAD:refs/heads/$OPS_BRANCH"
+  ) || { p_fail "création de $LCARS_OPS_REPO:$OPS_BRANCH refusée"; return 1; }
 
   # RELECTURE : la branche existe VRAIMENT, sinon on n'annonce rien. Un `push` qui rend 0 sur un
   # remote qui a refusé côté hook est un cas connu, et « poussé » n'est pas « présent ».
-  probe || { p_fail "après push, $LCARS_SYSADMIN_BRANCH est toujours absente de $LCARS_OPS_REPO"; return 1; }
+  probe || { p_fail "après push, $OPS_BRANCH est toujours absente de $LCARS_OPS_REPO"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "branche orpheline $LCARS_OPS_REPO:$LCARS_SYSADMIN_BRANCH créée (ops/toolchains.d/ + README de signature)"
+  p_chg "branche orpheline $LCARS_OPS_REPO:$OPS_BRANCH créée (ops/toolchains.d/ + README de signature)"
 }
 
 check() {
   case "$(probe; echo $?)" in
-    0) p_ok "$LCARS_OPS_REPO:$LCARS_SYSADMIN_BRANCH présente — les demandes d'outillage ont où atterrir" ;;
-    1) p_drift "$LCARS_OPS_REPO:$LCARS_SYSADMIN_BRANCH ABSENTE — un pod qui demande un outil n'a pas de base de PR, et le réconciliateur échoue à chaque tick sur son head" ;;
-    *) p_drift "forge injoignable ou sans réponse sur $LCARS_OPS_REPO — état de la branche $LCARS_SYSADMIN_BRANCH INCONNU (ce module ne conclut pas sans mesure)" ;;
+    0) p_ok "$LCARS_OPS_REPO:$OPS_BRANCH présente — les demandes d'outillage ont où atterrir" ;;
+    1) p_drift "$LCARS_OPS_REPO:$OPS_BRANCH ABSENTE — un pod qui demande un outil n'a pas de base de PR, et le réconciliateur échoue à chaque tick sur son head" ;;
+    *) p_drift "forge injoignable ou sans réponse sur $LCARS_OPS_REPO — état de la branche $OPS_BRANCH INCONNU (ce module ne conclut pas sans mesure)" ;;
   esac
   verdict_check
 }
@@ -159,7 +163,7 @@ apply() {
   case "$rc" in
     0) # JAMAIS de force-push, JAMAIS de re-semis : cette branche porte des signatures humaines et
        # des manifestes appliqués. Présente = on n'y touche pas, quel que soit son contenu.
-       p_ok "$LCARS_OPS_REPO:$LCARS_SYSADMIN_BRANCH déjà présente — rien à faire"
+       p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
     *) p_fail "forge injoignable — la branche ne peut pas être posée (ce n'est pas un état convergé)" ;;

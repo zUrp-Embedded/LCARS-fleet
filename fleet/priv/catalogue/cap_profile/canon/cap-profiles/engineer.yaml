@@ -44,7 +44,7 @@ spec:
       - TaskGet
       - TaskStop
       # Rail toolchain (chantier admiral 2026-08-19) : le producer qui compile est le premier a
-      # buter sur un outil systeme absent. L'appel ouvre une PR vers `sysadmin` et verrouille son
+      # buter sur un outil systeme absent. L'appel ouvre une PR vers `tool_request` et verrouille son
       # work-item (`lcars-awaits-toolchain`) — rien ne s'installe sans la signature d'un admin.
       # Depuis 6-099 la liste servie au pod est decouverte ET autorisation : sans cette ligne,
       # l'outil existe cote serveur mais aucun pod ne peut l'atteindre.

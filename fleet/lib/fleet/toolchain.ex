@@ -136,14 +136,32 @@ defmodule Fleet.Toolchain do
   def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
 
   @doc """
-  The protected branch the manifest lives on — `:lcars_fleet, :toolchain_branch`, default
-  `"sysadmin"`.
+  The protected branch the manifest lives on — `"tool_request"`, and it is **frozen here**.
+
+  ⚠ CETTE FONCTION EST LA SOURCE UNIQUE DU NOM, ET C'EST POUR ÇA QU'ELLE NE LIT PLUS DE CONFIG.
+  Quatre composants doivent s'accorder sur ce nom : le module de provisioning qui crée la branche,
+  le geste qui pose sa protection, la skill qui relève la boîte, et ce domaine qui lit son head.
+  Trois vivent en shell, un dans le BEAM — ils ne peuvent pas partager un littéral, donc le nom est
+  déclaré ICI et recopié là-bas, et le contrat `toolchain.branch_single_source` de
+  `mix lcars.contracts.check` refuse toute divergence. Un littéral vérifié vaut une source unique ;
+  une convention non vérifiée n'en est pas une.
+
+  ⚠ ET IL N'EST PAS RÉGLABLE, PAR DÉCISION (⚖ user 2026-08-19). Il l'a été à moitié : une clef
+  d'app-env ici, une variable d'environnement côté shell, et aucun pont entre les deux. Les défauts
+  coïncidaient, donc rien ne cassait — jusqu'au jour où quelqu'un tourne celle du shell : la branche
+  se crée sous le nouveau nom, la protection le suit, et ce domaine continue d'interroger l'ancien
+  pendant que les manifestes atterrissent là où personne ne regarde. Aucun message, le rail a l'air
+  calme. **Une molette lue par la moitié des parties est pire que pas de molette.**
+
+  LE NOM DIT CE QUE LA BRANCHE FAIT. Elle s'appelait `sysadmin` : un mot qui désigne un métier,
+  une posture et un ex-rôle, donc rien. Ce mécanisme-ci est le SEUL qui l'utilise — un pod dépose
+  une demande d'outil, un humain signe. Elle porte donc le nom de ce qu'on y dépose.
 
   PAS `ops`, et la raison est mesurée : le runtime ÉCRIT déjà sur `ops` (le registre d'incidents),
   donc la protéger casserait ces écritures. Même dépôt, branche différente, protections opposées.
   """
   @spec branch() :: String.t()
-  def branch, do: Application.get_env(:lcars_fleet, :toolchain_branch, "sysadmin")
+  def branch, do: "tool_request"
 
   @doc """
   The manifest path a request writes to, keyed on the ecosystem.

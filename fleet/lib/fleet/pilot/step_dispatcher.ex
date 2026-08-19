@@ -87,7 +87,7 @@ defmodule Fleet.Pilot.StepDispatcher do
       @awaits_arch_label in labels ->
         {:skip, :awaits_arch}
 
-      # Toolchain lock : la demande d'outillage est en vol (PR vers `sysadmin`). Re-dispatcher ce
+      # Toolchain lock : la demande d'outillage est en vol (PR vers `tool_request`). Re-dispatcher ce
       # ticket relancerait un pod voue au meme mur ; le drain (reconciliateur, 2e passe) retire le
       # verrou au merge OU a la fermeture — c'est LUI le re-dispatch.
       @awaits_toolchain_label in labels ->

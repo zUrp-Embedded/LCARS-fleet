@@ -155,7 +155,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
 #!/usr/bin/env bash
 for a in "$@"; do case "$a" in
   *issues*) echo '[{"number":12,"created_at":"2026-08-19T00:00:00Z","title":"pod en echec"}]'; exit 0;;
-  *pulls*)  echo '[{"number":7,"created_at":"2026-08-19T00:00:00Z","title":"[toolchain] python","base":{"ref":"sysadmin"}}]'; exit 0;;
+  *pulls*)  echo '[{"number":7,"created_at":"2026-08-19T00:00:00Z","title":"[toolchain] python","base":{"ref":"tool_request"}}]'; exit 0;;
 esac; done
 exit 1
 EOS

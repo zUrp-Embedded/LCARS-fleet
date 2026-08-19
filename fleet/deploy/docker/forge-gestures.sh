@@ -348,7 +348,7 @@ seed_demo_catalogue() { # $1=jeton master
 # d'etat, pour un objet qui n'est pas de la structure. C'est une LECTURE a usage unique : elle
 # s'imprime et s'oublie.
 # ─── toolchain-protection — LE GESTE D'INSTALLATION du rail toolchain (⚖ user 2026-08-19) ──────
-# Pose la protection de la branche `sysadmin` du depot ops : `required_approvals=1` + whitelist
+# Pose la protection de la branche `tool_request` du depot ops : `required_approvals=1` + whitelist
 # d'approbateurs (les admins convergés + LE SIEGE, nomme par argument — il n'est pas dans
 # fleet:humans, `01` §3.11) + `dismiss_stale_approvals` (un re-push tue l'approbation — la seule
 # propriete qu'aucun test ni ACL ne porte). SANS status check : l'allumage est en DEUX temps
@@ -364,7 +364,11 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
 
-  local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="${LCARS_SYSADMIN_BRANCH:-sysadmin}"
+  # LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` — cette ligne en est une
+  # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Il a ete reglable a moitie (une
+  # variable ici, une clef d'app-env dans le BEAM, aucun pont) : la tourner posait la protection sur
+  # une branche pendant que le reconciliateur en interrogeait une autre.
+  local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="tool_request"
   local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
 
   # POST best-effort (idempotence par RELECTURE, pas par code devine — une v1 concluait
