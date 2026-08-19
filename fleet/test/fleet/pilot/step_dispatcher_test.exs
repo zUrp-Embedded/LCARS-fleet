@@ -44,6 +44,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert {:skip, :awaits_arch} = StepDispatcher.decide(payload)
     end
 
+    test "verrou TOOLCHAIN lcars-awaits-toolchain → {:skip, :awaits_toolchain} — le drain est le re-dispatch" do
+      # Re-dispatcher un ticket dont la demande d'outillage est en vol relancerait un pod voue au
+      # meme mur. Le reconciliateur retire le verrou au merge OU a la fermeture de la PR (B3).
+      payload = eng_issue(%{"labels" => [%{"name" => "lcars-awaits-toolchain"}]})
+      assert {:skip, :awaits_toolchain} = StepDispatcher.decide(payload)
+    end
+
     test "F-C066: stage/merged label → {:skip, :merged} (TERMINAL merged brick, never re-engaged)" do
       # A merged brick whose explicit close failed (issue left OPEN, lock possibly reclaimed by the
       # reconciliation) must NOT be re-dispatched → otherwise double-delivery. The `stage/merged`

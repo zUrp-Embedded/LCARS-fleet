@@ -135,10 +135,130 @@ defmodule Fleet.Starfleet.ToolchainReconciler do
     repo = state.repo || Fleet.Toolchain.ops_repo()
     branch = state.branch || Fleet.Toolchain.branch()
 
-    case forge().branch_head(repo, branch, []) do
-      {:ok, head} -> converge_if_moved(head)
-      {:error, reason} -> unreachable(reason)
+    result =
+      case forge().branch_head(repo, branch, []) do
+        {:ok, head} -> converge_if_moved(head)
+        {:error, reason} -> unreachable(reason)
+      end
+
+    drain_pass(repo, branch, result)
+    result
+  end
+
+  # ── LA SECONDE PASSE, ET ELLE N'EST PAS OPTIONNELLE (`01` §7.3) ──────────────────────────────
+  #
+  # Une PR fermée SANS merge ne fait pas bouger la branche : la comparaison de head ne la verra
+  # JAMAIS. Sans cette passe, le work-item attend un événement qui n'arrivera pas — indistinguable
+  # d'un work-item en cours, l'ambiguïté que tout le rail refuse.
+  #
+  # STATELESS : le VERROU (`lcars-awaits-toolchain` sur l'issue) est l'état, la forge le porte.
+  # Une PR déjà drainée n'a plus le verrou ⇒ aucun geste, aucune re-annonce. Et le drain d'une PR
+  # MERGÉE est gaté sur « la branche est appliquée » (`:up_to_date` ou `:converged` de CETTE
+  # passe) : re-dispatcher un work-item AVANT que sa toolchain soit posée le renverrait au mur.
+  # Une PR REFUSÉE se draine sans condition — il n'y a rien à attendre.
+  #
+  # LOSSY : un échec de liste ou de drain se dit et n'altère pas le résultat de branche — le tick
+  # suivant retentera (le verrou est toujours là).
+  defp drain_pass(repo, branch, branch_result) do
+    case forge().list_pulls(repo, []) do
+      {:ok, prs} ->
+        Enum.each(prs, &maybe_drain(&1, branch, branch_result))
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: passe de drain — PR illisibles (#{inspect(reason)}), " <>
+            "les verrous restent posés, le tick suivant retentera"
+        )
     end
+  rescue
+    e ->
+      Logger.warning("ToolchainReconciler: passe de drain en échec — #{Exception.message(e)}")
+  end
+
+  defp maybe_drain(pr, branch, branch_result) do
+    with true <- pr["base"]["ref"] == branch,
+         {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
+      case pr_outcome(pr) do
+        :open ->
+          :ok
+
+        :merged ->
+          if applied?(branch_result),
+            do: drain(item_repo, item_issue, pr, :merged),
+            else: :ok
+
+        :refused ->
+          drain(item_repo, item_issue, pr, :refused)
+      end
+    else
+      # Une PR vers la branche protégée SANS marqueur n'est pas à nous (posée à la main) ; une PR
+      # d'une autre base n'est pas du rail. Ni geste ni bruit.
+      _ -> :ok
+    end
+  end
+
+  defp pr_outcome(pr) do
+    cond do
+      pr["merged"] == true -> :merged
+      pr["state"] == "closed" -> :refused
+      true -> :open
+    end
+  end
+
+  defp applied?({:ok, :up_to_date}), do: true
+  defp applied?({:ok, :converged, _}), do: true
+  defp applied?(_), do: false
+
+  defp drain(repo, issue, pr, why) do
+    lock = Fleet.Toolchain.waiting_label()
+
+    case forge().get_issue(repo, issue, []) do
+      {:ok, %{"labels" => labels}} ->
+        if Enum.any?(labels || [], &(&1["name"] == lock)) do
+          do_drain(repo, issue, pr, why, lock)
+        else
+          :ok
+        end
+
+      {:ok, _shape} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: drain — issue #{repo}##{issue} illisible (#{inspect(reason)}), " <>
+            "le verrou reste, le tick suivant retentera"
+        )
+    end
+  end
+
+  defp do_drain(repo, issue, pr, why, lock) do
+    case forge().remove_label(repo, issue, lock, []) do
+      {:ok, _} ->
+        # Le retrait du verrou EST le re-dispatch : `StepDispatcher.decide/1` cesse de sauter
+        # l'issue, le poller la re-propose au tick suivant. Le commentaire est le POURQUOI humain.
+        _ = forge().post_comment(repo, issue, drain_comment(why, pr), [])
+
+        Logger.info(
+          "ToolchainReconciler: work-item #{repo}##{issue} drainé (#{why}, PR ##{pr["number"]})"
+        )
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: drain — verrou de #{repo}##{issue} non retiré " <>
+            "(#{inspect(reason)}), le tick suivant retentera"
+        )
+    end
+  end
+
+  defp drain_comment(:merged, pr) do
+    "Outillage APPLIQUÉ : la PR ##{pr["number"]} est mergée et la boîte a convergé. " <>
+      "Ce ticket redevient dispatchable."
+  end
+
+  defp drain_comment(:refused, pr) do
+    "Demande d'outillage REFUSÉE : la PR ##{pr["number"]} a été fermée sans merge. " <>
+      "Ce ticket redevient dispatchable — à l'humain du projet de décider la suite " <>
+      "(autre approche, ou re-demande amendée)."
   end
 
   defp converge_if_moved(head) do

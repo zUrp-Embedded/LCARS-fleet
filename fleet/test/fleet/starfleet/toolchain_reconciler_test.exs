@@ -19,10 +19,29 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
 
   defmodule ForgeUp do
     def branch_head(_repo, _branch, _opts), do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
+
+    # La 2e passe (drain) : PRs scriptees, issue au verrou scriptable, gestes ENREGISTRES.
+    def list_pulls(_repo, _opts), do: {:ok, :persistent_term.get({__MODULE__, :prs}, [])}
+
+    def get_issue(_repo, _n, _opts) do
+      labels = :persistent_term.get({__MODULE__, :issue_labels}, [%{"name" => "lcars-awaits-toolchain"}])
+      {:ok, %{"labels" => labels}}
+    end
+
+    def remove_label(repo, n, label, _opts) do
+      send(:persistent_term.get({__MODULE__, :test_pid}), {:removed, repo, n, label})
+      {:ok, %{}}
+    end
+
+    def post_comment(repo, n, body, _opts) do
+      send(:persistent_term.get({__MODULE__, :test_pid}), {:commented, repo, n, body})
+      {:ok, %{}}
+    end
   end
 
   defmodule ForgeDown do
     def branch_head(_repo, _branch, _opts), do: {:error, :econnrefused}
+    def list_pulls(_repo, _opts), do: {:error, :econnrefused}
   end
 
   setup do
@@ -31,6 +50,8 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
     prev_root = System.get_env("LCARS_TOOLCHAIN_RUN_STATE")
     System.put_env("LCARS_TOOLCHAIN_RUN_STATE", root)
     :persistent_term.put({ForgeUp, :head}, "sha-1")
+    :persistent_term.put({ForgeUp, :test_pid}, self())
+    :persistent_term.put({ForgeUp, :prs}, [])
 
     prev_forge = Application.get_env(:lcars_fleet, :forge_client)
     prev_conv = Application.get_env(:lcars_fleet, :toolchain_converger)
@@ -62,6 +83,9 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
       restore(:forge_client, prev_forge)
       restore(:toolchain_converger, prev_conv)
       :persistent_term.erase({ForgeUp, :head})
+      :persistent_term.erase({ForgeUp, :test_pid})
+      :persistent_term.erase({ForgeUp, :prs})
+      :persistent_term.erase({ForgeUp, :issue_labels})
       :persistent_term.erase({__MODULE__, :converger_result})
       File.rm_rf!(root)
     end)
@@ -166,6 +190,74 @@ defmodule Fleet.Starfleet.ToolchainReconcilerTest do
       src = File.read!("lib/fleet/starfleet/toolchain_reconciler.ex")
       refute src =~ "Process.send_after"
       refute src =~ "defp schedule"
+    end
+  end
+  describe "la seconde passe — le drain (une PR fermee ne fait pas bouger la branche)" do
+    defp pr(attrs) do
+      Map.merge(
+        %{
+          "number" => 7,
+          "state" => "open",
+          "merged" => false,
+          "base" => %{"ref" => Fleet.Toolchain.branch()},
+          "body" => "demande\n" <> Fleet.Toolchain.workitem_marker("fleet/morse", 42)
+        },
+        attrs
+      )
+    end
+
+    test "PR MERGEE + branche appliquee => verrou retire + commentaire", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+
+      assert {:ok, :converged, _} = R.check_now(server)
+      assert_received {:removed, "fleet/morse", 42, "lcars-awaits-toolchain"}
+      assert_received {:commented, "fleet/morse", 42, body}
+      assert body =~ "APPLIQU"
+    end
+
+    test "PR MERGEE mais branche NON appliquee (convergeur en echec) => PAS de drain", %{server: server} do
+      # Re-dispatcher un work-item AVANT que sa toolchain soit posee le renverrait au mur.
+      converger_result({:error, :boom})
+      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+
+      assert {:error, :boom} = R.check_now(server)
+      refute_received {:removed, _, _, _}
+    end
+
+    test "PR FERMEE SANS MERGE => drain SANS condition, avec le refus commente", %{server: server} do
+      # Il n'y a rien a attendre : la branche n'a pas bouge et ne bougera pas pour cette PR.
+      converger_result({:error, :boom})
+      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => false})])
+
+      assert {:error, :boom} = R.check_now(server)
+      assert_received {:removed, "fleet/morse", 42, "lcars-awaits-toolchain"}
+      assert_received {:commented, "fleet/morse", 42, body}
+      assert body =~ "REFUS"
+    end
+
+    test "PR OUVERTE => aucun geste", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr(%{})])
+      {:ok, :converged, _} = R.check_now(server)
+      refute_received {:removed, _, _, _}
+    end
+
+    test "verrou DEJA absent => idempotent, aucun geste (pas de re-annonce a chaque tick)", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+      :persistent_term.put({ForgeUp, :issue_labels}, [])
+
+      {:ok, :converged, _} = R.check_now(server)
+      refute_received {:removed, _, _, _}
+      refute_received {:commented, _, _, _}
+    end
+
+    test "PR sans marqueur, ou d'une autre base => pas a nous, ni geste ni bruit", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [
+        pr(%{"body" => "posee a la main", "state" => "closed", "merged" => true}),
+        pr(%{"base" => %{"ref" => "main"}, "state" => "closed", "merged" => true})
+      ])
+
+      {:ok, :converged, _} = R.check_now(server)
+      refute_received {:removed, _, _, _}
     end
   end
 end

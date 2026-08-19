@@ -53,6 +53,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Protocol vocabulary = single source Fleet.Labels (compile-time constants).
   @in_flight_label Fleet.Labels.in_flight()
   @awaits_arch_label Fleet.Labels.awaits_arch()
+  @awaits_toolchain_label Fleet.Labels.awaits_toolchain()
   # Scoped label `stage/merged` (set by GatekeeperSeal BEFORE the close). Composed from the TWO
   # Labels authorities (prefix + value), not a forked literal.
   @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
@@ -61,7 +62,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   @doc """
   PURE decision (gate): issue payload → `:engage` | `{:skip, reason}`. decide does ONLY the
-  gate: `lcars-in-flight` / `lcars-awaits-arch` lock → skip; else → `:engage` (proceed). The role AND
+  gate: `lcars-in-flight` / `lcars-awaits-arch` / `lcars-awaits-toolchain` lock → skip; else → `:engage` (proceed). The role AND
   the action (spawn vs onboard) are decided DOWNSTREAM (`dispatch_issue`) — hence `:engage` and not `:spawn`. The SCOPING
   (forge-side, upstream) and the ROUTING (route → role, via `workflow_map_role`/onboard in `dispatch_issue`) are
   NOT here — decide loads nothing and does not decide the role.
@@ -85,6 +86,12 @@ defmodule Fleet.Pilot.StepDispatcher do
       # Architect lock suppresses judgement-loop redispatch.
       @awaits_arch_label in labels ->
         {:skip, :awaits_arch}
+
+      # Toolchain lock : la demande d'outillage est en vol (PR vers `sysadmin`). Re-dispatcher ce
+      # ticket relancerait un pod voue au meme mur ; le drain (reconciliateur, 2e passe) retire le
+      # verrou au merge OU a la fermeture — c'est LUI le re-dispatch.
+      @awaits_toolchain_label in labels ->
+        {:skip, :awaits_toolchain}
 
       true ->
         :engage
