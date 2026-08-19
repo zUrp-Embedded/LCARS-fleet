@@ -28,8 +28,15 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
     Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
   ]
 
-  @subagent_templates ~w(subagent-code-quality-reviewer subagent-implementer
-                         subagent-spec-reviewer)
+  # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS : les trois templates (spec-reviewer,
+  # code-quality-reviewer, implementer) ont été supprimés avec les déclarations qui les
+  # activaient. Le corpus est VIDE et c'est la forme correcte, pas une perte.
+  # La propriété tenue par ce test change donc de nature : elle n'épingle plus une LISTE
+  # (qui serait un inventaire à maintenir à la main, et qui a déjà menti une fois — la
+  # notice tierce en annonçait neuf pour huit) mais un INVARIANT : tout template PRÉSENT
+  # est bien formé. Un corpus vide le satisfait ; un template ajouté demain est vérifié
+  # sans que personne ait à penser à l'inscrire ici.
+  @subagent_templates []
 
   # KNOWN orphan bundles: they EXIST but no canon cap-profile references them in its
   # `modop_set` (default/optional), so nothing can activate them. Their `sp.md` content also
@@ -38,7 +45,10 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   # no consumer", explicitly and by NAME, so a NEW orphan (a bundle added without a consumer)
   # fails instead of being silently absorbed by a presence/size count. Shrinking this list = the
   # SP chantier removing the fossil; growing it must be a conscious, named act.
-  @known_orphans ~w(archive-mode fire-mode persuasion-discipline)
+  # `persuasion-discipline` a QUITTÉ cette liste le 2026-08-19 : il n'est plus orphelin, il
+  # n'existe plus (sortie de superpowers). Rétrécir cette liste est l'acte conscient que le
+  # commentaire ci-dessus réclame.
+  @known_orphans ~w(archive-mode fire-mode)
 
   defp bundle_dirs, do: Enum.map(@modop_canons, &Path.join(&1, "modop-bundles"))
 
@@ -81,17 +91,20 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
     end
   end
 
-  test "3 subagent-templates present + well-formed" do
-    for t <- @subagent_templates do
-      f =
-        Enum.find_value(@modop_canons, fn r ->
-          p = Path.join([r, "subagent-templates", "#{t}.md"])
-          if File.exists?(p), do: p
-        end)
+  test "tout subagent-template PRÉSENT est bien formé (corpus vide accepté)" do
+    présents =
+      Enum.flat_map(@modop_canons, fn r ->
+        Path.wildcard(Path.join([r, "subagent-templates", "subagent-*.md"]))
+      end)
 
-      assert f, "missing subagent-template: #{t}.md"
+    assert présents == [] or @subagent_templates != [],
+           "des templates existent sur disque alors que la liste attendue est vide : " <>
+             "la sortie de superpowers a été partiellement défaite, ou un template est revenu " <>
+             "sans que personne le déclare — #{inspect(présents)}"
+
+    for f <- présents do
       c = File.read!(f)
-      assert byte_size(c) > 150 and c =~ ~r/^#\s/, "#{t}.md malformed"
+      assert byte_size(c) > 150 and c =~ ~r/^#\s/, "#{Path.basename(f)} malformed"
     end
   end
 

@@ -81,7 +81,10 @@ spec:
     bridge_enabled: false
   modop_set:
     default: []
-    # `tdd` is code-shaped (test-first has no doc analog) and stays off this profile.
+    # (`tdd` était nommé ici — « code-shaped, test-first has no doc analog » — pour dire
+    # pourquoi ce profil ne le prenait PAS. Le bundle a été supprimé le 2026-08-19 avec la
+    # sortie de superpowers ; la raison de son absence n'a plus d'objet, et un commentaire
+    # qui nomme un artefact disparu envoie le prochain lecteur le chercher.)
     optional: [rubber-duck]
     incompatible: []
   project: null

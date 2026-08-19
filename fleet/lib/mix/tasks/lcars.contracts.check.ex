@@ -2433,13 +2433,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # comme outil. Un mur qu'on desarme en retirant la derniere declaration ne protege rien.
   #
   # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
-  # porteurs, ou figurer ci-dessous avec sa raison. Le seul faux positif du corpus est mesure —
-  # `tdd/sp.md` cite `MailerTest`, un nom de module dans un test d'exemple, qu'aucun pod n'invoque.
-  # La liste se PURGE quand son sujet disparait (lecon 6-091 : une exemption qui ne correspond plus
-  # a rien n'exempte rien et masque la suivante).
-  @modop_not_tools %{
-    "MailerTest" => "module name in the tdd bundle's sample test — a pod never invokes it"
-  }
+  # porteurs, ou figurer ci-dessous avec sa raison. La liste se PURGE quand son sujet disparait
+  # (lecon 6-091 : une exemption qui ne correspond plus a rien n'exempte rien et masque la
+  # suivante) — et elle vient de le faire, toute seule, le 2026-08-19.
+  #
+  # ⚠ ELLE ETAIT VIDEE PAR LA SORTIE DE SUPERPOWERS, ET C'EST LA GARDE QUI L'A DIT. Son unique
+  # entree, `MailerTest`, etait un nom de module cite par le test d'exemple de `tdd/sp.md` ; le
+  # bundle supprime, l'exemption ne designait plus rien et le check a demande sa purge de lui-meme
+  # (« MailerTest is cited by no bundle — purge it »). Une exemption survivante aurait laisse un
+  # trou nomme dans un mur, pret a couvrir le prochain nom homonyme.
+  #
+  # La map reste, VIDE : c'est la porte par ou une future exemption entre AVEC sa raison, et son
+  # absence forcerait la prochaine a s'inventer un mecanisme.
+  @modop_not_tools %{}
 
   @doc false
   def check_modop_tools_granted(root) do

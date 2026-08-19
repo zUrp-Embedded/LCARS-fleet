@@ -60,7 +60,11 @@ defmodule Fleet.CatalogueTest do
       for tree <- [
             Catalogue.cap_profiles_root(),
             Catalogue.modop_root(),
-            Catalogue.subagent_templates_root(),
+            # (`subagent_templates_root()` retiré de cette liste le 2026-08-19 : l'arbre a été
+            # supprimé avec la sortie de superpowers, et son absence est désormais une forme
+            # VALIDE de catalogue — aucun rôle ne déclare de template, et `SPBuilder.Image`
+            # lit cette classe sans exiger qu'elle soit peuplée. Un catalogue qui en porte un
+            # reste servi : la racine est résolue à la demande, pas exigée au démarrage.)
             Catalogue.sp_drafts_root(),
             Catalogue.sp_templates_root(),
             Catalogue.workflow_maps_root(),

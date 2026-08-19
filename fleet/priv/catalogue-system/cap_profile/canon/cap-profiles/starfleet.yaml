@@ -80,6 +80,13 @@ spec:
       # `modop_set.optional` ici aussi et ordonne un `TodoWrite` que ce rôle n'avait pas. Sous
       # `--permission-mode default`, l'absence ne fait pas éviter l'outil : elle fait PROMPTER, et
       # le pod gèle en tenant son créneau (mesuré sur banc le 2026-08-09, cf. architect.yaml).
+      # ⚠ LA RAISON CI-DESSUS A CHANGÉ LE 2026-08-19 (sortie de superpowers) : le bundle
+      # `brainstorming` qui ORDONNAIT ce TodoWrite n'existe plus. L'outil RESTE, et c'est
+      # délibéré — le retirer parce que son commanditaire a disparu rejouerait exactement le
+      # gel 6-136 : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
+      # saute pas, il PROMPTE, et un pod n'a personne pour répondre. La règle écrite plus haut
+      # tient toute seule sans le modop : la liste couvre ce que le rôle peut LÉGITIMEMENT
+      # atteindre, et un rôle de conception atteint légitimement une liste de tâches.
       - TodoWrite
       # Fleet MCP tools of the FLEET-MASTER: ONLY the portfolio head (create/adopt a project + card
       # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
@@ -155,6 +162,11 @@ spec:
     # lives in the modops/SP). Removed here 2026-07-19; the full field nuke is on the sabrer-list.)
   modop_set:
     default: [long-session-discipline]
-    optional: [brainstorming, rubber-duck]
+    # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (brainstorming)
+    # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
+    # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
+    # ils étaient livrés et jamais composés. Le tri n'a rien trouvé à rapatrier — leur
+    # doctrine était soit importée telle quelle, soit déjà couverte par nos propres blocs.
+    optional: [rubber-duck]
     incompatible: [[fire-mode, long-session-discipline]]
   project: null

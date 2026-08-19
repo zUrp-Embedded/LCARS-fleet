@@ -147,21 +147,42 @@ defmodule Fleet.SPBuilderTest do
       assert sp_md =~ "fire-mode"
     end
 
-    test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud" do
-      # reviewer→code-quality-reviewer: subagent-code-quality-reviewer.md exists in the canon (default root
-      # = app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/subagent-templates"), not overridden by the setup).
+    @tag :tmp_dir
+    test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud",
+         %{tmp_dir: tmp} do
+      # ⚠ CE TEST EMPRUNTAIT SON ARTEFACT AU CANON, ET LE CANON A CHANGÉ. Il composait
+      # `code-quality-reviewer` en comptant sur `subagent-code-quality-reviewer.md` livré par le
+      # catalogue — donc sur une COÏNCIDENCE : que ce fichier existe encore. La sortie de
+      # superpowers (⚖ user 2026-08-19) l'a supprimé avec ses deux frères, et le test est tombé
+      # alors que le MÉCANISME qu'il existe pour prouver n'avait pas bougé d'une ligne.
+      #
+      # Il fabrique donc son propre template, comme le fait déjà `catalogue_verify_test` depuis le
+      # même jour : ce qu'on veut prouver, c'est qu'un fragment DÉCLARÉ est injecté et qu'un
+      # fragment déclaré-mais-absent échoue fort — deux propriétés du composeur, qui ne doivent
+      # rien devoir au contenu du catalogue.
+      root = Path.join(tmp, "subagent-templates")
+      File.mkdir_p!(root)
+      File.write!(Path.join(root, "subagent-fixture-lentille.md"), "# fixture lentille\ncorps\n")
+
+      prev = Application.get_env(:lcars_fleet, :sp_builder_subagent_template_root)
+      Application.put_env(:lcars_fleet, :sp_builder_subagent_template_root, root)
+
+      on_exit(fn ->
+        Application.put_env(:lcars_fleet, :sp_builder_subagent_template_root, prev)
+      end)
+
       profile =
         valid_cap_profile(%{
           "systemPrompt" => nil,
           "invocation" => %{
             "lifetime_scope" => "one-shot",
-            "subagent_template" => "code-quality-reviewer"
+            "subagent_template" => "fixture-lentille"
           }
         })
 
       assert {:ok, %{sp_md: sp_md}} = Fleet.SPBuilder.compose(profile, [])
-      assert sp_md =~ "subagent-template:code-quality-reviewer"
-      assert sp_md =~ "code-quality-reviewer"
+      assert sp_md =~ "subagent-template:fixture-lentille"
+      assert sp_md =~ "fixture lentille"
 
       # Declared but file absent → fail-loud (the pod does not launch on a half-composed SP).
       bad =
