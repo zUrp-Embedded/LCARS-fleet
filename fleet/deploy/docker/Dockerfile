@@ -281,6 +281,27 @@ RUN apt-get update -qq \
        `# Absent, un pod est scelle et ne joint meme pas son vendor — bwrap_launch refuse (exit 2).` \
        socat \
        less bash-completion \
+       `# ─── BASELINE D'OUTILLAGE (lot 1 du rail toolchain) ────────────────────────────────────` \
+       `# CE QUI EST DEJA LA NE SE DEMANDE PAS. Sans ces paquets un pod ne produit que du bash, du` \
+       `# HTML et du python NU : ni venv, ni pip, ni compilateur. Chaque dependance de projet` \
+       `# devrait alors passer par une approbation humaine — six mois a faire signer ce qui aurait` \
+       `# du etre dans l'image. Les voici une fois, pour tous les pods (le /usr du bac est CELUI-CI).` \
+       `#` \
+       `# python3-venv N'EST PAS UN CONFORT, c'est le seul chemin. MESURE sur bookworm :` \
+       `# libpython3.11-stdlib livre /usr/lib/python3.11/EXTERNALLY-MANAGED, donc PEP 668 est` \
+       `# ACTIF et un pip install hors venv ECHOUE PAR CONCEPTION. python3-pip seul ne suffit pas.` \
+       `# Effet de bord favorable : le chemin sans privilege devient obligatoire cote pod, gratis.` \
+       python3-venv python3-pip \
+       `# La longue traine des builds natifs, et la raison de chaque ligne :` \
+       `#  - la plupart des paquets python populaires livrent des wheels manylinux -> RIEN ne compile.` \
+       `#    build-essential + python3-dev sont pour la QUEUE : le paquet sans wheel pour cette` \
+       `#    plateforme, qui compile ses extensions C.` \
+       `#  - les modules npm natifs (node-gyp) veulent python3 + make + g++ -> build-essential.` \
+       `#  - les crates rust en -sys veulent cc + pkg-config + le -dev de la lib C visee.` \
+       `# Une baseline unique fait tomber les trois. Cout mesure : +119 paquets sur la liste` \
+       `# ci-dessus, dont 60 pour build-essential seul. C'est le prix d'un compilateur, et une boite` \
+       `# qui n'en a pas envoie CHAQUE build natif par la garde humaine.` \
+       build-essential pkg-config python3-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     `# LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : traverser les repertoires de socket des consoles.` \
