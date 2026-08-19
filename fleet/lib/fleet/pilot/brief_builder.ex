@@ -426,6 +426,16 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
+  @doc false
+  # PUBLIC pour le test, et la propriété qu'il tient n'est observable que d'ici : le brief de
+  # l'arbitre est composé en profondeur (outputs → sections → rendu), et la seule chose qui compte
+  # dans cette ligne est qu'elle distingue trois états d'un rapport de juge. La rendre atteignable
+  # coûte un `@doc false` ; la tenir par le brief complet coûterait une couture de forge entière.
+  def gray_zone_line_for_test(opts) do
+    %{findings: f, policy: p} = Keyword.fetch!(opts, :gray_zone)
+    gray_zone_line(f, p)
+  end
+
   defp gray_zone_line(findings, policy) do
     seuil =
       case policy do
@@ -447,17 +457,34 @@ defmodule Fleet.Pilot.BriefBuilder do
   # celle qu'on lit n'est jamais celle qu'on a corrigée.
   defp findings_digest(findings) do
     Enum.map_join(findings, " ; ", fn {role, payload} ->
-      list = if is_map(payload), do: Map.get(payload, "findings", []), else: []
-      sev = list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies()
-
-      détail =
-        if sev == %{},
-          do: "aucune sévérité lisible",
-          else: Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
-
-      "`#{role}` (#{détail})"
+      "`#{role}` (#{digest_detail(payload)})"
     end)
   end
+
+  # TROIS ÉTATS, PAS DEUX — et le troisième est celui que l'arbitre doit pouvoir distinguer.
+  # La version d'avant rangeait « ce juge a mesuré et n'a RIEN trouvé » sous « aucune sévérité
+  # lisible », qui se lit comme un défaut de sa charge. Mesuré au banc le 2026-08-19 (PR71) : le
+  # reviewer avait rendu `{"findings": [], "severity_max": "none"}` — une mesure valide, explicite,
+  # et le brief du gatekeeper la lui a présentée comme illisible. Un arbitre convoqué pour trancher
+  # une contradiction entre une approbation et une mesure ne peut pas travailler si le rail lui
+  # décrit une mesure claire comme du bruit.
+  defp digest_detail(payload) when is_map(payload) do
+    case Map.get(payload, "findings") do
+      [] ->
+        "a mesuré, aucun finding"
+
+      list when is_list(list) ->
+        case list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies() do
+          sev when map_size(sev) == 0 -> "#{length(list)} finding(s), sévérités non lisibles"
+          sev -> Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
+        end
+
+      _ ->
+        "charge de forme inattendue"
+    end
+  end
+
+  defp digest_detail(_), do: "pas de mesure"
 
   defp ci_line(sha, contexts) do
     "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a rendu VERT. Ce fait t'est " <>
