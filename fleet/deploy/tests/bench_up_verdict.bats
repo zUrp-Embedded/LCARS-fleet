@@ -29,7 +29,10 @@ setup() {
   # la derivation de l'adresse ANNONCEE (`advertise_addr`) y vit, parce qu'elle depend du substrat et
   # que la recopier ici la ferait diverger. Un stub vide rendrait `advertise_addr` introuvable et le
   # script mourrait avant son verdict — le test mesurerait alors autre chose que ce qu'il croit.
+  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
+  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$BATS_TEST_DIRNAME/../lib/provision-lib.sh" "$ROOT/fleet/deploy/lib/provision-lib.sh"
+  cp "$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh" "$ROOT/fleet/deploy/lib/docker-endpoint.sh"
   # ⚠ CE DECOR PORTE CE QUE LE SCRIPT SOURCE, ET RIEN DE PLUS — donc toute dependance nouvelle doit
   # y entrer, sinon les 12 temoins de ce fichier tombent d'un coup sur un `No such file`. C'est ce
   # qui est arrive en ajoutant `store.sh` : le decor est un contrat implicite, et il ne se signale

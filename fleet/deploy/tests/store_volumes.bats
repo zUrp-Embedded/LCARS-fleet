@@ -111,18 +111,21 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "les deux gestes de destruction appellent la contrepartie" {
+  # ⚠ LE SECOND CHEMIN A SUIVI LA DECOUPE : les douze verbes ont quitte `docker.sh` pour
+  # `fleet/deploy/box`, et un temoin qui grepperait encore la racine passerait au vert sur un
+  # `reset` devenu muet — il mesurerait un fichier qui ne porte plus le geste.
   grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
-  grep -q "store_spared_line" "$DEPLOY/../../docker.sh"
+  grep -q "store_spared_line" "$DEPLOY/box"
 }
 
 @test "les deux gestes qui montent la boite posent le magasin AVANT" {
   # `external: true` = compose refuse de demarrer sur un volume absent. L'appel doit donc preceder
   # le up/create, et ces deux scripts sont les seuls a s'executer avant.
   grep -q "store_ensure_volumes" "$DEPLOY/docker/bench/bench-up.sh"
-  grep -q "store_ensure_volumes" "$DEPLOY/../../docker.sh"
+  grep -q "store_ensure_volumes" "$DEPLOY/box"
 
   local up_line ensure_line
-  ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/../../docker.sh" | head -1 | cut -d: -f1)"
-  up_line="$(grep -n "compose up -d" "$DEPLOY/../../docker.sh" | head -1 | cut -d: -f1)"
+  ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/box" | head -1 | cut -d: -f1)"
+  up_line="$(grep -n "compose up -d" "$DEPLOY/box" | head -1 | cut -d: -f1)"
   [ "$ensure_line" -lt "$up_line" ]
 }

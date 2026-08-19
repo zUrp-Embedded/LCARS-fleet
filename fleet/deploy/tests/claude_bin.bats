@@ -31,7 +31,10 @@ setup() {
 
   # The real lib, plus the single override. Appended rather than edited: what the module calls is
   # the shipped code, and the diff between it and what runs here is these three lines.
+  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
+  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
+  cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
   cat >> "$SANDBOX/lib/provision-lib.sh" <<EOF
 
 human_home() { echo "$HOMEDIR"; }

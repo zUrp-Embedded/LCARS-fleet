@@ -15,7 +15,10 @@ setup() {
   SRC="$BATS_TEST_DIRNAME/.."
   ROOT="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$ROOT/fleet/deploy/lib" "$ROOT/fleet/etc"
+  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
+  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$ROOT/fleet/deploy/lib/"
+  cp "$SRC/lib/docker-endpoint.sh" "$ROOT/fleet/deploy/lib/"
   cp "$SRC/modules.d/60-deploy.sh" "$BATS_TEST_TMPDIR/60-deploy.sh"
 
   cat > "$ROOT/fleet/etc/install.manifest" <<'EOF'

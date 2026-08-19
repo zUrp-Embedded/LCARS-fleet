@@ -61,6 +61,14 @@ EOF
 
   export PATH="$BINDIR:$PATH"
   unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC
+
+  # ⚠ SANS CETTE LIGNE, CES SEIZE TEMOINS DEPENDENT D'UNE SOCKET SUR LA MACHINE QUI LES JOUE.
+  # `docker.sh` sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
+  # sonde parcourt /var/run/docker.sock, /run/docker-fleet.sock et la socket du montage WSL. Ici
+  # elle en trouvait une VRAIE et passait — donc verts sur ce poste, et rouges d'un bloc sur une
+  # machine sans daemon, pour une raison qui n'a rien a voir avec ce qu'ils mesurent. En la posant,
+  # la sonde prend la branche « DOCKER_HOST est pose » et interroge LA DOUBLURE, qui repond 0.
+  export DOCKER_HOST="unix:///dev/null"
 }
 
 # A project holding one container, created from the files given as arguments.
@@ -259,4 +267,46 @@ seed_project() {
 
   [ "$status" -eq 0 ]
   grep -q -- "build --target build -t lcars-build:v4" "$CALLS"
+}
+
+# ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────
+# Les seize temoins ci-dessus passent par `docker.sh`, donc ils traversent la delegation sans le
+# savoir. C'est voulu : le plan prevoyait de les DESCENDRE vers le delegue, et les garder ici prouve
+# strictement plus — l'entree ET le relais. Ce qu'ils ne prouvent pas, ce sont les deux proprietes
+# du relais lui-meme, et c'est ce que les deux temoins suivants ajoutent.
+
+@test "la racine DELEGUE, et transmet l'argv VERBATIM" {
+  # Un wrapper qui reconstruit la ligne de commande perd toujours quelque chose — le plus souvent
+  # un argument a espaces, et on ne s'en apercoit que le jour ou quelqu'un en passe un.
+  #
+  # ARBRE FACTICE plutot qu'une couture dans le script : un `LCARS_BOX_OVERRIDE` dont le seul
+  # client serait ce temoin ferait porter au code une variable qui ne sert a personne. Ici on
+  # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/fleet/deploy/box`).
+  local root="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$root/fleet/deploy/lib"
+  cp "$SRC" "$root/docker.sh"
+  cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$root/fleet/deploy/lib/"
+  cat > "$root/fleet/deploy/box" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$#"; printf '[%s]' "$@"; echo
+FAKE
+  chmod 0755 "$root/fleet/deploy/box"
+
+  run bash "$root/docker.sh" logs --tail "deux mots" -f
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "4" ]]
+  [[ "${lines[1]}" == '[logs][--tail][deux mots][-f]' ]]
+}
+
+@test "delegue absent : on nomme le CHECKOUT, pas docker — il n'y est pour rien" {
+  local root="$BATS_TEST_TMPDIR/tronque"
+  mkdir -p "$root/fleet/deploy/lib"
+  cp "$SRC" "$root/docker.sh"
+  cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$root/fleet/deploy/lib/"
+  # pas de `box` : c'est exactement un checkout incomplet
+
+  run bash "$root/docker.sh" up
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Checkout incomplet"* ]]
+  [[ "$output" != *"daemon"* ]]
 }
