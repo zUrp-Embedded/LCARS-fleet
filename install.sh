@@ -59,6 +59,7 @@ DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 WITH_BENCH=0
 declare -a PASSTHRU=()
+declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -69,6 +70,12 @@ while [[ $# -gt 0 ]]; do
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
     --env|--human|--only|--substrate) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+    # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
+    # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),
+    # et le parseur ci-dessous refuse ce qu'il ne connaît pas : aucune d'elles ne pouvait donc
+    # l'atteindre. Trouvé en rejouant sur une vraie machine, pas en relisant — un délégué qu'on ne
+    # peut pas paramétrer n'est utilisable que dans le cas par défaut, c'est-à-dire une fois.
+    --) shift; DELEGATE_ARGS=("$@"); break ;;
     --help|-h)
       sed -n '/^#     install.sh — LA porte/,/^#     système/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
       exit 0 ;;
@@ -292,7 +299,7 @@ if [[ "$RAIL" == "box" ]]; then
     # empêche « flux banc » et « flux prod » de diverger.
     echo ""
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI, en un geste."
-    exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" "$@"
+    exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
     echo ""

@@ -118,3 +118,34 @@ setup() {
   [[ "$output" == *"pas pipé depuis stdin"* ]]
   [[ "$output" == *"wget -O"* ]]
 }
+
+@test "REGRESSION — tout ce qui suit « -- » atteint le delegue, VERBATIM" {
+  # ⚠ SANS CA, `--bench` ETAIT UNE IMPASSE. Il delegue a `bench-up.sh`, qui a ses propres options
+  # (`--project`, `--ssh-port`, `--image`), et le parseur de cette porte refuse ce qu'il ne connait
+  # pas : aucune d'elles ne pouvait l'atteindre, donc le delegue n'etait utilisable que dans son cas
+  # par defaut — c'est-a-dire une fois par machine. Trouve en rejouant sur une vraie machine, pas en
+  # relisant : un trou qui ne se voit qu'a l'usage.
+  local fake="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$fake/fleet/deploy/docker/bench" "$fake/fleet/deploy/lib"
+  cp "$SRC" "$fake/install.sh"
+  cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$fake/fleet/deploy/lib/"
+  cat > "$fake/fleet/deploy/docker/bench/bench-up.sh" <<'SPY'
+#!/usr/bin/env bash
+printf '%s\n' "$#"; printf '[%s]' "$@"; echo
+SPY
+  chmod 0755 "$fake/fleet/deploy/docker/bench/bench-up.sh"
+  touch "$fake/docker.sh"; chmod 0755 "$fake/docker.sh"
+
+  run bash "$fake/install.sh" --box --bench -- --project bt --ssh-port 2299 < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"4"* ]]
+  [[ "$output" == *'[--project][bt][--ssh-port][2299]'* ]]
+}
+
+@test "sans « -- », une option inconnue est REFUSEE — jamais avalee en silence" {
+  # Le pendant du temoin precedent : la porte ne doit pas gober une option qu'elle ne comprend pas
+  # en esperant qu'un delegue s'en arrange. Un drapeau mal orthographie doit se voir tout de suite.
+  run bash "$SRC" --box --projet-avec-une-faute < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Option inconnue"* ]]
+}
