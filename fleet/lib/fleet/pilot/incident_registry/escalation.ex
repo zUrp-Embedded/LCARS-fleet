@@ -24,12 +24,11 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   require Logger
 
-  alias Fleet.EventRouter.Bus
-
   @doc """
-  Opens a system issue (default label `error_system` — `opts[:label]` overrides, e.g. `error_cat5`;
-  assignee `starfleet`=sysadmin) for an incident. `kind`: `:recurrence` | `:reroll_failed` |
-  `:pod_failed` | `:sp_suspect` | `:cat5`. The label is a DURABLE discovery signal (always set,
+  Opens a system issue (default label `error_system` — `opts[:label]` overrides; assignee = the
+  PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
+  incident. `kind`: `:recurrence` | `:reroll_failed` |
+  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:cat5`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
   is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
@@ -50,9 +49,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     label =
       opts[:label] || Application.get_env(:lcars_fleet, :pilot_system_issue_label, "error_system")
 
-    assignee =
-      opts[:assignee] ||
-        Application.get_env(:lcars_fleet, :pilot_system_issue_assignee, "starfleet")
+    assignee = resolve_assignee(opts)
 
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
@@ -112,44 +109,69 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
           )
       end
 
-    _ = announce(result, kind, subject, repo, label, opts)
     result
   end
 
-  # The escalation ARRIVES somewhere. Until 2026-08-05 it ended at an `error_system` issue assigned
-  # to starfleet — and starfleet's tool surface is the portfolio head, with no forge read: the one
-  # role with a human in front of it could not open the issue naming it as assignee. The fact was
-  # established, written durably, addressed correctly, and discovered by a probe or not at all.
+  # ── L'ASSIGNEE EST UNE PROJECTION, JAMAIS UN NOM EN DUR ──────────────────────────────────────
   #
-  # Announced HERE, at the single point both branches return `{:ok, number}` through, so the reuse
-  # path (a create whose ack was lost, or a concurrent escalation) announces too. That can duplicate
-  # a feed line for one incident; a duplicated alarm is not in the same class of error as a missing
-  # one, and the recurrence gate upstream is what bounds the volume.
+  # Le login du siege est VARIABLE (celui de l'installeur en prod — `admiral` n'est qu'un
+  # full_name, on n'assigne pas une issue a un full_name). Le provisioning le PROJETTE a chaque
+  # boot dans `<store>/state/pilot.assignee` (module `45-sudoers-toolchain`, keye sur l'uid du
+  # siege) ; ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
+  # toute boite dont l'installeur n'a pas ce login — la v1 portait en dur le nom du front desk,
+  # un role qui ne pouvait pas ouvrir l'issue le nommant (la cicatrice du 2026-08-05).
   #
-  # Lossy on purpose: `safe_emit` logs and swallows. An escalation whose ANNOUNCE failed is still an
-  # escalation — the issue is on the forge, which is the durable channel.
-  defp announce({:ok, number}, kind, subject, repo, label, opts) do
-    Bus.safe_emit(
-      :pilot,
-      "incident.escalated",
-      [
-        payload: %{
-          "kind" => to_string(kind),
-          "subject" => subject,
-          "number" => number,
-          "repo" => repo,
-          "label" => label
-        },
-        correlation_id: opts[:correlation_id]
-      ],
-      context: "IncidentRegistry"
-    )
+  # Etats, et qui les dit :
+  #   * fichier present, non vide  -> l'assignee projete ;
+  #   * store present, fichier ABSENT ou VIDE -> nil + WARNING a chaque escalade (le provisioning
+  #     n'est pas passe, ou LCARS_ADMIRAL n'etait pas pose — panne dite, patron `egress.ex`) ;
+  #     ⚠ VIDE = ABSENT, jamais `""` : un `assignees: [""]` partirait sur la forge, echouerait,
+  #     et le retry de `create_system_issue/5` rattraperait en brulant un appel — panne invisible ;
+  #   * store absent (pas de LCARS_STORE_ROOT) -> nil, silencieux : le nominal d'une boite sans
+  #     magasin (avant le lot F). L'issue s'ouvre SANS assignee — le label reste le chemin durable.
+  defp resolve_assignee(opts) do
+    case opts[:assignee] || Application.get_env(:lcars_fleet, :pilot_system_issue_assignee) do
+      name when is_binary(name) and name != "" ->
+        name
+
+      _unset ->
+        read_projected_assignee()
+    end
   end
 
-  # A FAILED escalation announces NOTHING. A feed line saying an incident was escalated, when the
-  # issue is unfindable or was never created, is the lying `{:escalated}` this module refuses one
-  # function above — said to a second audience.
-  defp announce(_not_ok, _kind, _subject, _repo, _label, _opts), do: :ok
+  defp read_projected_assignee do
+    case System.get_env("LCARS_STORE_ROOT") do
+      root when is_binary(root) and root != "" ->
+        path = Path.join([root, "state", "pilot.assignee"])
+
+        case File.read(path) do
+          {:ok, body} ->
+            case String.trim(body) do
+              "" ->
+                warn_projection_missing(path, :empty)
+                nil
+
+              login ->
+                login
+            end
+
+          {:error, _} ->
+            warn_projection_missing(path, :absent)
+            nil
+        end
+
+      _no_store ->
+        nil
+    end
+  end
+
+  defp warn_projection_missing(path, why) do
+    Logger.warning(
+      "Escalation: magasin present mais la projection du siege est #{why} (#{path}) — issue " <>
+        "ouverte SANS assignee. Le provisioning (45-sudoers-toolchain) la pose a chaque boot ; " <>
+        "si elle manque, LCARS_ADMIRAL n'etait pas pose ou le module n'a pas tourne."
+    )
+  end
 
   defp create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label) do
     # `issue_create` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
@@ -277,6 +299,13 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # DURABLE one is the `error_system` label (retried + fail-loud-surfaced, F-C075), so a dropped assignee
   # loses NO discoverability. A precise "drop only on a 422-assignee error" would couple to the forge HTTP
   # error shape (fragile) for a negligible gain — not worth it.
+  # ASSIGNEE NIL => L'OPTION EST OMISE, UN SEUL APPEL. Un `assignees: [nil]` (ou `[""]`) partirait
+  # sur la forge, echouerait, et le retry ci-dessous rattraperait — temoin vert, un appel API brule
+  # par escalade, panne invisible. Trouve par la validation adversariale du PLAN (passe 2).
+  defp create_system_issue(create_fun, repo, title, body, nil) do
+    create_fun.(repo, title, body, [])
+  end
+
   defp create_system_issue(create_fun, repo, title, body, assignee) do
     case create_fun.(repo, title, body, assignees: [assignee]) do
       {:ok, _} = ok -> ok

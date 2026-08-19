@@ -103,14 +103,12 @@ events:
   # `Fleet.Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
   # twin of pod.failed, keyed on the ROLE (no pod was ever created): recurrence = "this role
   # keeps failing to spawn".
-  # incident.escalated: emitted by `IncidentRegistry.Escalation` (source :pilot) once a sysadmin
-  # issue has ACTUALLY landed — both branches, the create and the idempotent reuse. Payload
-  # `kind`/`subject`/`number`/`repo`/`label`. Consumed by `Fleet.Pilot.FleetFeed` (one line into the
-  # permanent starfleet pod's feed + the typed flag notify). UNROUTED (`[]`): this is the OUTCOME of
-  # a routing, never an input to one — giving it an action would loop the incident chain onto itself.
-  # A FAILED escalation emits nothing: an announce for an issue that does not exist is the lying
-  # `{:escalated}` the escalation refuses one function earlier, said to a second audience.
-  incident.escalated: []
+  # incident.escalated: RETIRE (2026-08-19, brouette B1-A — chantier admiral). L'evenement portait
+  # la moitie LIVRAISON de l'escalade : une ligne de feed vers le pod starfleet via FleetFeed. Or le
+  # pod starfleet N'EST PAS sysadmin et n'a jamais eu a connaitre les incidents — la fonction avait
+  # ete assignee au pod parce que le module homonyme n'avait pas de siege (erreur de categorie, cf.
+  # 00 §6.6 du chantier). La PRODUCTION reste entiere : `Escalation.escalate/5` ouvre l'issue
+  # `error_system` (la boite de reception d'admiral, `00` §8.1) — SANS reveil, par decision.
 
   spawn.failed:
     source: spawner

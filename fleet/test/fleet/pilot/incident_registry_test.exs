@@ -612,9 +612,11 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:issue, "fleet/lcars", title, iopts}
       # "récurrence" pins the FR user-facing sysadmin issue title (Escalation).
       assert title =~ "récurrence"
-      # create_issue NO LONGER carries a label (otherwise 422) — assignee only.
+      # create_issue NO LONGER carries a label (otherwise 422). Et SANS projection du siege
+      # (ni config, ni fichier — l'etat de ce banc), il ne porte AUCUN assignee : l'option est
+      # OMISE, pas posee a nil — cf. resolve_assignee/1, plus aucun login en dur.
       refute Keyword.has_key?(iopts, :labels)
-      assert iopts[:assignees] == ["starfleet"]
+      refute Keyword.has_key?(iopts, :assignees)
       # The durable label is set by NAME on the created issue.
       assert_received {:label, "fleet/lcars", 1, "error_system"}
     end
@@ -866,100 +868,6 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     end
   end
 
-  describe "the escalation ANNOUNCES itself — the alarm reaches the role it names" do
-    alias Fleet.EventRouter.Bus
-    alias Fleet.Pilot.IncidentRegistry.Escalation
-
-    setup do
-      :ok = Bus.subscribe()
-      :ok
-    end
-
-    test "a landed escalation emits incident.escalated with what a front desk can relay" do
-      # Until 2026-08-05 the chain ended at an `error_system` issue assigned to starfleet — whose
-      # tool surface is the portfolio head, with NO forge read. The alarm was written durably,
-      # addressed to the right role, and unreachable by it.
-      assert {:ok, 7} =
-               Escalation.escalate(
-                 :sp_suspect,
-                 "permanent-engineer-announce",
-                 :dead,
-                 "sig:announce:1",
-                 list_issues_fun: fn _r, _o -> {:ok, []} end,
-                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 7} end,
-                 add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end,
-                 correlation_id: "corr-1"
-               )
-
-      # Matched on the SUBJECT, not the type alone: this file is `async: true` and it is not the
-      # only suite escalating on the shared Bus. A bare type match would let these assertions read
-      # another suite's event — and make the two refutations below fail on somebody else's alarm.
-      assert_receive %Fleet.Event{
-                       type: :"incident.escalated",
-                       payload: %{"subject" => "permanent-engineer-announce"} = p,
-                       correlation_id: "corr-1"
-                     },
-                     500
-
-      assert p["kind"] == "sp_suspect"
-      assert p["subject"] == "permanent-engineer-announce"
-      assert p["number"] == 7
-      assert p["label"] == "error_system"
-      assert is_binary(p["repo"]) and p["repo"] != ""
-    end
-
-    test "the REUSE branch announces too — a lost ack must not cost the alarm its delivery" do
-      sig = "sig:announce:2"
-      marker = "<!-- lcars-incident:#{sig} -->"
-
-      assert {:ok, 42} =
-               Escalation.escalate(:recurrence, "issue-7-engineer-announce", :dead, sig,
-                 list_issues_fun: fn _r, _o -> {:ok, [%{"number" => 42, "body" => marker}]} end,
-                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 999} end,
-                 add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
-               )
-
-      # It can duplicate a feed line for one incident. A duplicated alarm and a missing one are not
-      # in the same class of error, and the recurrence gate upstream is what bounds the volume.
-      assert_receive %Fleet.Event{
-                       type: :"incident.escalated",
-                       payload: %{"subject" => "issue-7-engineer-announce", "number" => 42}
-                     },
-                     500
-    end
-
-    test "a FAILED escalation announces NOTHING — no second audience for a lying {:escalated}" do
-      assert {:error, _} =
-               Escalation.escalate(:recurrence, "subject-announce-3", :dead, "sig:announce:3",
-                 list_issues_fun: fn _r, _o -> {:ok, []} end,
-                 create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
-               )
-
-      refute_receive %Fleet.Event{
-                       type: :"incident.escalated",
-                       payload: %{"subject" => "subject-announce-3"}
-                     },
-                     50
-    end
-
-    test "an issue created but NOT label-discoverable announces nothing either" do
-      # F-C075: the issue exists and is invisible to label-filtered discovery. `escalate` surfaces
-      # that as an error rather than a clean `{:ok, number}` — and the announce follows the SAME
-      # verdict. A feed line for an unfindable issue would restore the lie at the other end.
-      assert {:error, {:discovery_label_failed, 8, _}} =
-               Escalation.escalate(:recurrence, "subject-announce-4", :dead, "sig:announce:4",
-                 list_issues_fun: fn _r, _o -> {:ok, []} end,
-                 create_issue_fun: fn _r, _t, _b, _o -> {:ok, 8} end,
-                 add_label_fun: fn _r, _n, _l, _o -> {:error, :nope} end
-               )
-
-      refute_receive %Fleet.Event{
-                       type: :"incident.escalated",
-                       payload: %{"subject" => "subject-announce-4"}
-                     },
-                     50
-    end
-  end
 
   describe "Escalation idempotency (create is not idempotent, readback is)" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
@@ -1049,6 +957,90 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       assert_received {:title, title}
       assert title =~ "awaits-arch"
+    end
+  end
+  describe "l'assignee est une PROJECTION — jamais un nom en dur" do
+    alias Fleet.Pilot.IncidentRegistry.Escalation
+
+    defp escalate_opts(pid) do
+      [
+        list_issues_fun: fn _r, _o -> {:ok, []} end,
+        create_issue_fun: fn _r, _t, _b, iopts ->
+          send(pid, {:create, iopts}) && {:ok, 5}
+        end,
+        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
+      ]
+    end
+
+    defp with_store(root, fun) do
+      prev = System.get_env("LCARS_STORE_ROOT")
+      System.put_env("LCARS_STORE_ROOT", root)
+
+      try do
+        fun.()
+      after
+        if prev, do: System.put_env("LCARS_STORE_ROOT", prev), else: System.delete_env("LCARS_STORE_ROOT")
+      end
+    end
+
+    test "fichier projete present => son login part en assignee" do
+      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "state"))
+      File.write!(Path.join([root, "state", "pilot.assignee"]), "le-login-reel\n")
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      with_store(root, fn ->
+        assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-a", escalate_opts(self()))
+      end)
+
+      assert_received {:create, iopts}
+      assert iopts[:assignees] == ["le-login-reel"]
+    end
+
+    test "fichier VIDE = ABSENT : UN SEUL appel, l'option OMISE, et un warning" do
+      # Sans la clause vide->nil, `assignees: [""]` partirait, la forge refuserait, et le retry
+      # sans option rattraperait — temoin naif vert, un appel API brule par escalade.
+      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "state"))
+      File.write!(Path.join([root, "state", "pilot.assignee"]), "  \n")
+      on_exit(fn -> File.rm_rf!(root) end)
+      pid = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_store(root, fn ->
+            assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-b", escalate_opts(pid))
+          end)
+        end)
+
+      assert_received {:create, iopts}
+      refute Keyword.has_key?(iopts, :assignees)
+      refute_received {:create, _}
+      assert log =~ "projection du siege"
+    end
+
+    test "store present + fichier absent => nil + warning (panne dite, pas silence)" do
+      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "state"))
+      on_exit(fn -> File.rm_rf!(root) end)
+      pid = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_store(root, fn ->
+            assert {:ok, 5} = Escalation.escalate(:recurrence, "s", :r, "sig-c", escalate_opts(pid))
+          end)
+        end)
+
+      assert_received {:create, iopts}
+      refute Keyword.has_key?(iopts, :assignees)
+      assert log =~ "projection du siege"
+    end
+
+    test "aucun login en dur ne survit dans ce module" do
+      src = File.read!("lib/fleet/pilot/incident_registry/escalation.ex")
+      refute src =~ ~s("starfleet")
+      refute src =~ ~s("admiral")
     end
   end
 end

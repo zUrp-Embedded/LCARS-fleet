@@ -228,8 +228,7 @@ defmodule Fleet.Pilot.Application do
       incident_consumer: Fleet.Pilot.IncidentConsumer,
       incident_task_supervisor: Fleet.Pilot.IncidentConsumer.task_supervisor(),
       worktree_sync: Fleet.Project.WorktreeSync,
-      arch_feed: Fleet.Pilot.ArchFeed,
-      fleet_feed: Fleet.Pilot.FleetFeed
+      arch_feed: Fleet.Pilot.ArchFeed
     ]
   end
 
@@ -317,10 +316,6 @@ defmodule Fleet.Pilot.Application do
       # the single informational wake on the :delivered unlock). Rides the step rail: its lines ARE
       # step milestones — same lifecycle, hermetic in tests for free (step off).
       Fleet.Pilot.ArchFeed,
-      # The front desk's INCIDENT feed (Bus consumer -> the permanent starfleet pod). Twin gesture,
-      # opposite scope: it carries only what the registry already ESCALATED, so the fleet-blindness
-      # of starfleet is untouched — it learns that something BROKE, never who is working.
-      Fleet.Pilot.FleetFeed,
       # Neither `:repo` to the Poller (org-membership discovery), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
       # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
       # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).

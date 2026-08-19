@@ -171,7 +171,7 @@ defmodule Fleet.Pilot.ArchFeed do
 
   defp normalize_number(_), do: nil
 
-  # -- Feed file: the FORMAT belongs to `PodFeed` (shared with `FleetFeed`); the RAIL belongs here. --
+  # -- Feed file: the FORMAT belongs to `PodFeed`; the RAIL belongs here. --
 
   defp append(pod_id, line, state) do
     with {:ok, %{pod_dir: pod_dir}} when is_binary(pod_dir) <- state.pod_info.(pod_id),

@@ -122,9 +122,10 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert title =~ "re-roll échoué"
 
     # fix F-RUN-2: create_issue WITHOUT label (the Gitea POST requires int IDs, not names → 422);
-    # the error_system label is set AFTERWARDS by NAME via add_label.
+    # the error_system label is set AFTERWARDS by NAME via add_label. Et sans projection du siege
+    # (ni config ni fichier sur ce banc), AUCUNE option assignees — omise, jamais nil (B1-A).
     refute Keyword.has_key?(iopts, :labels)
-    assert iopts[:assignees] == ["starfleet"]
+    refute Keyword.has_key?(iopts, :assignees)
     assert_received {:label, "fleet/lcars", 1, "error_system"}
   end
 
@@ -176,6 +177,9 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     pid = self()
 
     opts = [
+      # L'assignee vient desormais de la PROJECTION (ou d'opts) — ce temoin teste le RETRY, donc il
+      # en fournit un explicitement.
+      assignee: "un-admin",
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> true end,
       create_issue_fun: fn repo, _t, _b, iopts ->
