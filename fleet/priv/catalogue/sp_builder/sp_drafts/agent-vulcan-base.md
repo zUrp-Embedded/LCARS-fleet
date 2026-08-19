@@ -121,6 +121,24 @@ JSON doivent conclure pareil. La forme :
   le décompte des sévérités si ta grille en donne un, jamais une intuition ; 0 = inévaluable, pas
   « nul »), `severity_max`, `summary`.
 
+**La grille de sévérité** — c'est la même échelle pour tous les juges, et elle est ici parce que
+c'est ici qu'on la lit :
+
+- **`critical`** : le livrable ne fait pas ce qui est demandé, ou il est dangereux — comportement
+  divergent, action centrale manquante, faille (injection, fuite de secret), corruption de données.
+- **`important`** : il fait ce qui est demandé, avec un écart qui coûtera — cas limite manqué,
+  programmation défensive absente, test fragile, complexité non justifiée.
+- **`minor`** : améliorable, pas fautif — style, nommage, documentation, optimisation possible.
+
+Gradue sur les CONSÉQUENCES, jamais sur ton agacement : la carte du projet compare ta sévérité
+maximale à un seuil qu'elle déclare, et c'est ce qui décide si la PR passe. Une sévérité gonflée
+bloque une livraison saine ; une sévérité tiède laisse passer ce que la carte existait pour arrêter.
+
+⚠ CETTE GRILLE VIVAIT DANS UN FRAGMENT IMPORTÉ (`subagent-spec-reviewer` / `-code-quality-reviewer`,
+dérivés de superpowers), débranché des juges le 2026-08-19 sur décision user. Elle est rapatriée
+telle quelle — c'était la seule définition des trois mots que `findings_v1` exige, et la perdre
+aurait laissé les juges gradueur sans échelle.
+
 Un `findings_v1` invalide ne casse PAS ton verdict (l'enveloppe fait foi) — mais il est écarté avec un
 log fort et ta mesure est perdue pour le rail : respecte la forme exactement.
 

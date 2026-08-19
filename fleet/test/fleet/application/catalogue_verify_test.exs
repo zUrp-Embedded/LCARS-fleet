@@ -112,8 +112,30 @@ defmodule Fleet.Application.CatalogueVerifyTest do
     # It used to delete the role's DRAFT, and that stopped reaching this stage: the SP image now
     # refuses a declared role whose catalogue carries no prompt for it, so the fault is named one
     # tier earlier and more precisely. The break had to move to keep proving what this test is for.
+    #
+    # ⚠ ET IL A FALLU LE DÉPLACER UNE SECONDE FOIS, 2026-08-19. La version d'avant SUPPRIMAIT
+    # `subagent-spec-reviewer.md` — une faute qui ne dépendait pas de ce test mais d'une
+    # COÏNCIDENCE du canon : que le qualifier déclare encore ce template. Le jour où l'user a
+    # débranché les fragments superpowers des juges (aucun rôle n'en déclare plus), supprimer le
+    # fichier n'a plus rien cassé et le test est devenu vert-sur-rien — il n'exerçait plus l'étage
+    # qu'il existe pour prouver, sans qu'une ligne ne le dise.
+    #
+    # Il FABRIQUE donc sa faute maintenant, au lieu de l'emprunter : on déclare dans la COPIE un
+    # template qui n'existe pas. Schema-valide (le champ accepte une chaîne), infaisable au spawn
+    # (le fichier manque) — exactement la classe que la validation de schéma ne peut pas voir. Et
+    # c'est un test qui ne peut plus être désarmé par une décision de catalogue.
     copy = catalogue_copy(tmp)
-    File.rm!(Path.join(copy, "cap_profile/canon/subagent-templates/subagent-spec-reviewer.md"))
+    profile = Path.join(copy, "cap_profile/canon/cap-profiles/qualifier.yaml")
+
+    File.write!(
+      profile,
+      String.replace(
+        File.read!(profile),
+        "subagent_template: null",
+        "subagent_template: fantome-qui-nexiste-pas",
+        global: false
+      )
+    )
 
     assert {:error, %{findings: findings}} = CatalogueVerify.verify(copy)
 
