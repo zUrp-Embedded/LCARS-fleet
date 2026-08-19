@@ -65,13 +65,14 @@ defmodule Mix.Tasks.Lcars.Topology do
     # how a test injects a stub — but as INJECTION over a declared dep, which this table does not
     # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
     {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"},
-    # Two edges this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
-    # them "same shape as `:coord_backend`" (un seam mort avec `Fleet.Coord`, brouette 2026-08-19),
+    # An edge this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
+    # it "same shape as `:coord_backend`" (un seam mort avec `Fleet.Coord`, brouette 2026-08-19),
     # which is the class excluded just above. The test is the `deps:` list, not the injection
-    # mechanism — `Fleet.Pilot` is in neither Starfleet's nor Project's deps. Both cross an edge
-    # boundary forbids.
-    {"Fleet.Admiral", "Fleet.Pilot", ":admiral_completion_inflight_fun"},
-    {"Fleet.Project", "Fleet.Pilot", ":project_incident_rail"}
+    # mechanism — `Fleet.Pilot` is not in Admiral's deps. It crosses an edge boundary forbids.
+    # (Its former twin `:project_incident_rail` is GONE — BL-6-114, arbitrage user 2026-08-19:
+    # `Project.Incidents` now publishes on the bus, a declared downward dep, and the incident
+    # conversion lives in the `events.yaml` routes. One seam repaid, not redrawn.)
+    {"Fleet.Admiral", "Fleet.Pilot", ":admiral_completion_inflight_fun"}
   ]
 
   # Editorial layer names — the ONLY place they are declared. Keys are domain module

@@ -253,7 +253,7 @@ defmodule Fleet.Project.Intensity do
         )
 
         incident =
-          Keyword.get(opts, :incident_fun, &Fleet.Project.Incidents.record_or_escalate/4)
+          Keyword.get(opts, :incident_fun, &Fleet.Project.Incidents.emit/4)
 
         _ =
           try do

@@ -31,7 +31,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   Opens a system issue (default label `error_system` — `opts[:label]` overrides; assignee = the
   PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
   incident. `kind`: `:recurrence` | `:reroll_failed` |
-  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed`. The label is a DURABLE discovery signal (always set,
+  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed` |
+  `:project_card_failed` | `:project_intensity_invalid`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
   is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
@@ -399,4 +400,21 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
        "La carte de workflow de ce depot ne se charge pas : le rail d'etapes le SAUTE tant que " <>
          "personne ne corrige. Une carte illisible bloque le dispatch de TOUTES ses issues — " <>
          "d'ou l'issue des la premiere occurrence, pas a la recidive."}
+
+  # Les deux kinds du rail projet (BL-6-114) : le fallback local a DEJA tourne — le projet
+  # continue sur la carte par defaut. Ce que l'issue dit : la substitution est SILENCIEUSE tant
+  # que personne ne corrige la declaration, et elle rejouera a chaque dispatch.
+  defp kind_describe(:project_card_failed),
+    do:
+      {"carte declaree illisible — le projet tourne sur la carte par defaut",
+       "La carte que ce depot DECLARE ne se charge pas : chaque dispatch retombe sur la carte de " <>
+         "delegation par defaut — une criticite que personne n'a choisie pour lui. Corriger la " <>
+         "declaration du projet (ou la carte du catalogue qu'elle nomme)."}
+
+  defp kind_describe(:project_intensity_invalid),
+    do:
+      {"declaration d'intensite illisible — pipeline par defaut applique",
+       "Le `.lcars.json` de ce depot est illisible ou invalide : le projet tourne sur le " <>
+         "pipeline de delegation par defaut. Re-declarer pour reparer — d'ici la, la " <>
+         "substitution rejouera a chaque lecture."}
 end

@@ -20,7 +20,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     :ok
   end
 
-  test "the CANON events.yaml loads: the 5 routed entries land in Bus.event_routing with their data" do
+  test "the CANON events.yaml loads: the 7 routed entries land in Bus.event_routing with their data" do
     # Real canon, real loader path (config points the loader at the bundled priv by default).
     Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
@@ -40,8 +40,31 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
              }
            } = routing[{:workflow, :"workflow_map.failed"}]
 
+    # BL-6-114 (arbitrage user 2026-08-19) : les deux fallbacks de declaration de Project entrent
+    # par CE rail — l'arete montante `:project_incident_rail` est morte. Les ops `card`/`intensity`
+    # reprennent les namespaces de dedup de l'ancien seam ; sujet = le DEPOT.
+    assert %{
+             action: :incident,
+             incident: %{
+               op: "card",
+               subject: "repo",
+               gate: :immediate,
+               escalate_kind: :project_card_failed
+             }
+           } = routing[{:project, :"project.card_failed"}]
+
+    assert %{
+             action: :incident,
+             incident: %{
+               op: "intensity",
+               subject: "repo",
+               gate: :immediate,
+               escalate_kind: :project_intensity_invalid
+             }
+           } = routing[{:project, :"project.intensity_invalid"}]
+
     # (pod.drift, audit.verdict et les broadcasts de severite max sont partis — brouette
-    # 2026-08-19. Les cinq routes restantes sont toutes `action: incident`.)
+    # 2026-08-19. Les sept routes restantes sont toutes `action: incident`.)
     assert routing |> Map.values() |> Enum.all?(&(&1.action == :incident))
   end
 

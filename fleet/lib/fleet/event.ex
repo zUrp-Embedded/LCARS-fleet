@@ -15,6 +15,7 @@ defmodule Fleet.Event do
           | :mcp
           | :pilot
           | :workflow
+          | :project
           | :admiral
           | :event_router
           | :credentials
@@ -35,7 +36,7 @@ defmodule Fleet.Event do
   @enforce_keys [:source, :type, :timestamp]
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
-  @canonical_sources ~w(spawner task_queue mcp workflow pilot admiral event_router credentials capprofile spbuilder doctrine api)a
+  @canonical_sources ~w(spawner task_queue mcp workflow pilot project admiral event_router credentials capprofile spbuilder doctrine api)a
 
   @doc "True if the source belongs to the canonical closed enum."
   @spec valid_source?(atom()) :: boolean()

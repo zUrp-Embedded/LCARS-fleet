@@ -611,18 +611,10 @@ if config_env() != :test and not tool_mode? do
          :admiral_completion_inflight_fun,
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
-  # The project-lifecycle domain sits BELOW the rail that drives projects, so its two card-fallback
-  # sites cannot reference the incident registry at compile time: the module crosses the boundary
-  # as a VALUE. Unwired, the fallback still runs and warns — what is lost is the durable trace, and
-  # `Project.Incidents` says so loudly rather than swallowing it.
-  #
-  # ⚠ SAME SHAPE AS THE SEAM ABOVE — these two cross an edge boundary forbids, so they belong IN
-  # the table (`@seams`) — and were missing from it for exactly as long as this sentence stood.
-  # (L'ancien contre-exemple de cette note, `:coord_backend`, est parti avec `Fleet.Coord` —
-  # brouette 2026-08-19.)
-  config :lcars_fleet,
-         :project_incident_rail,
-         {Fleet.Pilot.IncidentRegistry, :record_or_escalate}
+  # (`:project_incident_rail` RETIRÉ — BL-6-114, arbitrage user 2026-08-19 : l'arête montante
+  # `Project → Pilot` passée en valeur est remplacée par le rail catalogué — `Project.Incidents`
+  # publie `project.card_failed`/`project.intensity_invalid` sur le bus (dep déclarée, vers le
+  # bas), routes `incident` de `events.yaml`, `gate: immediate`. Même destination, un seul chemin.)
 
   # ============================================================
   # fleet_api — plus de port : le domaine n'a que son socket de contrôle
