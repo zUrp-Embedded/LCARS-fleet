@@ -240,8 +240,38 @@ docker_endpoint() {
         printf '{"cliPluginsExtraDirs":["%s"]}\n' "$(_docker_mount_plugins)" > "$cfg/config.json"
       fi
 
-      printf '#!/usr/bin/env bash\nexec sudo DOCKER_HOST=%s DOCKER_CONFIG=%s %s "$@"\n' \
-        "unix://$PROV_DOCKER_SOCK" "$cfg" "$abs" > "$shim_dir/docker"
+      # ⚠ LE SHIM DOIT FAIRE TRAVERSER L'ENVIRONNEMENT, SINON IL CASSE TOUT CE QUI PILOTE COMPOSE.
+      # `sudo` remet l'environnement a zero — sixieme occurrence de ce piege dans la journee, et
+      # cette fois c'est le shim qui le cause. Or le rail conduit compose PAR DES VARIABLES :
+      # `bench-up.sh` pose `LCARS_DEVFORGE_PORT`/`LCARS_DEVFORGE_BIND` en tete de commande, les
+      # compose lisent `LCARS_IMAGE`, `FORGE_BASE_URL`, `LCARS_DECK_ORIGINS`… Mesure sur instance
+      # vierge : la forge demandee sur le port 21199 est montee sur 3300, le DEFAUT du compose, et
+      # le banc meurt sur « la forge ne repond pas » en accusant la forge.
+      #
+      # On les NOMME par prefixe plutot que d'ouvrir `-E`, qui exige un `SETENV` dans le sudoers que
+      # personne n'a pose. C'est la forme que sudo accepte partout : des assignations en tete.
+      #
+      # ⚠ ET ON N'Y MET JAMAIS UN SECRET. Une assignation `sudo VAR=valeur` vit dans la LIGNE DE
+      # COMMANDE, que `/proc/<pid>/cmdline` expose a tout l'hote pendant l'appel — cicatrice 6-141,
+      # payee deux fois. Les credentials de ce rail voyagent par STDIN, pas par l'environnement ; le
+      # filtre ci-dessous refuse tout nom qui en porte la marque, et la liste est volontairement
+      # large : un faux positif coute une variable non transmise, un faux negatif coute un secret.
+      #
+      # Une valeur qui porte un saut de ligne est SAUTEE : `sudo VAR=val` ne sait pas la representer,
+      # et la transmettre tronquee serait pire que ne pas la transmettre.
+      cat > "$shim_dir/docker" <<'SHIM'
+#!/usr/bin/env bash
+declare -a keep=()
+while IFS= read -r -d '' kv; do
+  k="${kv%%=*}"; v="${kv#*=}"
+  case "$k" in
+    *TOKEN*|*PASSWORD*|*SECRET*|*CREDENTIAL*|*PASSWD*) continue ;;
+    LCARS_*|FORGE_*|COMPOSE_*|PROV_*) [[ "$v" == *$'\n'* ]] || keep+=("$k=$v") ;;
+  esac
+done < <(env -0)
+exec sudo "${keep[@]+"${keep[@]}"}" DOCKER_HOST=__SOCK__ DOCKER_CONFIG=__CFG__ __CLI__ "$@"
+SHIM
+      sed -i "s|__SOCK__|unix://$PROV_DOCKER_SOCK|; s|__CFG__|$cfg|; s|__CLI__|$abs|" "$shim_dir/docker"
       chmod 0700 "$shim_dir/docker"
       PROV_DOCKER_BIN="$shim_dir/docker"
 
