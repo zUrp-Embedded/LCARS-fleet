@@ -27,9 +27,9 @@ The brief `{{step}}` was written by the architect and has NOT been executed yet.
 The envelope is schema-VALIDATED and fail-closed: a mistyped field halts the step run, it is not
 coerced. `decision` and `reason` are required; the two optional fields have an enforced shape.
 
-- `details` — un objet de scalaires (une ligne `- **clé** : valeur` chacun), **PLUS, si tu es un
-  juge de PR, la clé versionnée `findings_v1`, qui est un OBJET et la seule exception à la
-  platitude** :
+- `details` — un objet de scalaires (une ligne `- **clé** : valeur` chacun), **PLUS la clé
+  versionnée `findings_v1`, qui est un OBJET et la seule exception à la platitude — quel que soit
+  ce que tu juges** :
 
   ```json
   "details": {

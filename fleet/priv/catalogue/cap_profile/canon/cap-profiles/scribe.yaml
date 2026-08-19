@@ -4,7 +4,8 @@
 #
 # The DOCUMENTARY producer (chantier face-projet 2026-08-02): same delivery mechanics as the
 # engineer — git-native commits, forge-blind, the system verifies and pushes — on the OTHER face
-# of the project. The card's step says `face: ops`; this profile only says WHO works and HOW.
+# of the project. The card's step names the FACE (`code` or `workshop` — `ops` is NOT one of
+# them, cf. the schema enum); this profile only says WHO works and HOW.
 # A doc deliverable that needed different mechanics would be the design smell, not the goal:
 # ops is ordinary git, and that identity is the whole thesis of the chantier.
 kind: CapabilityProfile
@@ -90,7 +91,8 @@ spec:
   project: null
   # Same delivery contract as the engineer: commits in its own workspace, the system
   # verifies (I-CBC gate: identity/secrets/base) then pushes on the branch it chose.
-  # The FACE that workspace clones is the card's business (`face: ops`), never this file's.
+  # The FACE that workspace clones is the card's business (`code` | `workshop`), never this
+  # file's — and never `ops`, which no producer may author.
   # Producer watchdog (BL debug scribe 2026-08-02): 300 s default killed a producer mid-way
   # through ONE long generation (the jsonl only grows at message boundaries; the pane-hash
   # probe now carries in-generation liveness, this raises the true-idle budget too — real
