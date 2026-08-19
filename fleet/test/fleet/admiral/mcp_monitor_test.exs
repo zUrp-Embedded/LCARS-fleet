@@ -70,7 +70,7 @@ defmodule Fleet.Admiral.MCPMonitorTest do
       assert {:ok, :crashed} = GenServer.call(monitor_pid, :check_now)
 
       assert_receive %Fleet.Event{
-                       source: :starfleet,
+                       source: :admiral,
                        type: :"mcp.server_crashed",
                        payload: %{
                          "target" => target_str,
@@ -166,7 +166,7 @@ defmodule Fleet.Admiral.MCPMonitorTest do
       assert {:ok, :crashed} = GenServer.call(mon, :check_now)
 
       assert_receive %Fleet.Event{
-                       source: :starfleet,
+                       source: :admiral,
                        type: :"mcp.server_crashed",
                        payload: %{"new_status" => "crashed", "previous_status" => "ok"}
                      },

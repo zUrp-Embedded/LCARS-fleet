@@ -27,8 +27,8 @@ defmodule Fleet.Admiral do
   role became the fleet-level front desk, and this domain kept a name that no longer describes it —
   it does not reference that role once. Target name: `Fleet.Admiral` ([BL-6-103], successor of the
   retired [BL-6-53] — the rename is MECHANICAL since the 2026-08-19 brouette removed the
-  interpolated topics; the one datum left is the wire value `%Fleet.Event{source: :starfleet}`,
-  renamed in its own commit, never with the mechanics).
+  interpolated topics; the wire value `source: :admiral` was the last datum, renamed in ITS OWN
+  commit — never with the mechanics).
 
   Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
 

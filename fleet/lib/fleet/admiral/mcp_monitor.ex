@@ -32,7 +32,7 @@ defmodule Fleet.Admiral.MCPMonitor do
 
   ## Event broadcast
 
-  Canonical schema `%Fleet.Event{source: :starfleet, type: :"mcp.server_crashed",
+  Canonical schema `%Fleet.Event{source: :admiral, type: :"mcp.server_crashed",
   payload: %{previous_status, new_status, target}, correlation_id: nil}`.
 
   ## Configuration
@@ -124,7 +124,7 @@ defmodule Fleet.Admiral.MCPMonitor do
 
   defp broadcast_crashed(target, previous, new) do
     Bus.safe_emit(
-      :starfleet,
+      :admiral,
       :"mcp.server_crashed",
       [
         payload: %{

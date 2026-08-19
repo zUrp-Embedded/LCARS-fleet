@@ -110,7 +110,7 @@ defmodule Fleet.Admiral.BootOrchestrator do
   end
 
   defp emit_canon(type, payload) do
-    Bus.safe_emit(:starfleet, type, [payload: payload],
+    Bus.safe_emit(:admiral, type, [payload: payload],
       on_unregistered: :silent,
       context: "BootOrchestrator: lifecycle event NOT emitted"
     )

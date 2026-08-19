@@ -22,7 +22,7 @@ defmodule Fleet.Admiral.AuditConsumerTest do
 
   test "canonical boot_complete: handle_info → count++ (no crash)" do
     {pid, _} = start_consumer()
-    send(pid, canon(:starfleet, :"fleet.boot_complete", payload: %{"x" => 1}))
+    send(pid, canon(:admiral, :"fleet.boot_complete", payload: %{"x" => 1}))
 
     # Mi14: :sys.get_state/1 synchronizes (FIFO — the send is processed first) → no arbitrary sleep.
     assert %{events_count: 1} = :sys.get_state(pid)

@@ -79,7 +79,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   # comme un rail d'audit vivant, et une clause qu'aucun evenement n'atteint ne se distingue pas
   # d'une clause qui marche.
   def handle_info(
-        %Fleet.Event{source: :starfleet, type: :"mcp.server_crashed", payload: p},
+        %Fleet.Event{source: :admiral, type: :"mcp.server_crashed", payload: p},
         state
       ) do
     Logger.error(
@@ -92,7 +92,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{source: :starfleet, type: type, payload: payload},
+        %Fleet.Event{source: :admiral, type: type, payload: payload},
         state
       )
       when type in [:"fleet.boot_complete", :"fleet.boot_partial", :"fleet.boot_failed"] do

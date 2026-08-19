@@ -19,7 +19,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     BootOrchestrator.run(boot_permanent_pods: fn -> [{:ok, :pod1}, {:ok, :pod2}] end)
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_complete",
                      payload: %{"permanent_pods" => 2}
                    },
@@ -32,13 +32,13 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     # classifies it :failed.
     assert :ok = BootOrchestrator.run(boot_permanent_pods: fn -> exit(:simulated_boot_crash) end)
 
-    assert_receive %Fleet.Event{source: :starfleet, type: :"fleet.boot_failed"}, 1_000
+    assert_receive %Fleet.Event{source: :admiral, type: :"fleet.boot_failed"}, 1_000
   end
 
   test "R2-14: boot_fn that THROWs → boot_failed (same as exit)" do
     assert :ok = BootOrchestrator.run(boot_permanent_pods: fn -> throw(:simulated_throw) end)
 
-    assert_receive %Fleet.Event{source: :starfleet, type: :"fleet.boot_failed"}, 1_000
+    assert_receive %Fleet.Event{source: :admiral, type: :"fleet.boot_failed"}, 1_000
   end
 
   test "BL-028: boot_permanent disabled → boot_complete with 0 pods, boot_fn NOT called" do
@@ -53,7 +53,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     )
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_complete",
                      payload: %{"permanent_pods" => 0}
                    },
@@ -68,7 +68,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     )
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_partial",
                      payload: %{"permanent_pods" => 2, "failed_pods" => failed}
                    },
@@ -81,7 +81,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     BootOrchestrator.run(boot_permanent_pods: fn -> [{:ok, :pod1}, :garbage] end)
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_partial",
                      payload: %{"permanent_pods" => 1, "failed_pods" => failed}
                    },
@@ -94,7 +94,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     BootOrchestrator.run(boot_permanent_pods: fn -> raise "boom" end)
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_failed",
                      payload: %{"reason" => reason}
                    },
@@ -107,7 +107,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
     BootOrchestrator.run(boot_permanent_pods: fn -> {:error, :enoent} end)
 
     assert_receive %Fleet.Event{
-                     source: :starfleet,
+                     source: :admiral,
                      type: :"fleet.boot_failed",
                      payload: %{"reason" => r}
                    },
