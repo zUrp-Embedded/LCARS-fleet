@@ -172,7 +172,24 @@ FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
 # au-dessus. `lan_addr` repond « par ou je sors », ce qui est faux pour ANNONCER (cf. WSL en NAT)
 # et juste pour ceci : c'est la meme interface que le NAT du daemon emprunte. Repli sur l'annoncee
 # quand il n'y a pas d'adresse de sortie du tout (machine hors reseau).
-JOB_HOST="$(lan_addr)"; JOB_HOST="${JOB_HOST:-$ADVERTISE}"
+# ⚠ LA TROISIEME ADRESSE DEPEND DU SUBSTRAT, ET CE SCRIPT N'EN CONNAISSAIT QU'UNE.
+# Ce n'est ni le bind, ni l'adresse ANNONCEE : c'est celle par laquelle un CONTENEUR atteint cette
+# machine. Sur linux natif, c'est l'adresse de sortie — le daemon tourne sur l'hote, ses conteneurs
+# voient son IP (mesure du 2026-08-18 sur .63). Sous Docker Desktop, le daemon vit dans une AUTRE VM :
+# l'IP de la distro WSL ne lui est pas routee, et c'est `host.docker.internal` qui designe l'hote.
+#
+# Mesure du 2026-08-19 sur une WSL vierge, depuis un conteneur de JOB (reseau isole DANS le dind) :
+#   http://<lan_addr>:21199          -> download timed out
+#   http://host.docker.internal:21199 -> {"version":"1.26.1"}
+#
+# Se tromper ici ne casse pas le banc, ce qui est pire : le runner demarre, seme son magasin
+# d'images, et ne s'enregistre JAMAIS — « la forge ne liste aucun runner apres 60 s », un diagnostic
+# qui accuse la forge alors qu'elle repondait a trois adresses sur quatre.
+if [[ "$(detect_substrate)" == "wsl" ]]; then
+  JOB_HOST="host.docker.internal"
+else
+  JOB_HOST="$(lan_addr)"; JOB_HOST="${JOB_HOST:-$ADVERTISE}"
+fi
 FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 
 say() { printf '[bench-up] %s\n' "$*"; }
