@@ -15,6 +15,9 @@
 setup() {
   SRC="$BATS_TEST_DIRNAME/../modules.d/45-sudoers-toolchain.sh"
   [ -f "$SRC" ]
+  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../admiral/skills"
+  # ⚠ SANS cette couture, la branche skill ecrirait dans le VRAI ~/.claude de qui joue les tests.
+  export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$LCARS_SIEGE_HOME"
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=45-sudoers-toolchain
@@ -118,4 +121,50 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   run bash -c ". '$MOD'; check"
   [[ "$status" -eq 0 ]]
   [[ "$output" != *"sudoers etroit absent"* ]]
+}
+
+@test "skill: POSE chez le SIEGE — SKILL.md + list.sh executables dans SON ~/.claude" {
+  run_apply
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"skill system-issues pose"* ]]
+  [ -f "$LCARS_SIEGE_HOME/.claude/skills/system-issues/SKILL.md" ]
+  [ -x "$LCARS_SIEGE_HOME/.claude/skills/system-issues/list.sh" ]
+}
+
+@test "skill: PAS pose quand l'humain n'est pas le siege (la branche uid ferme tout le bloc 3+4)" {
+  export LCARS_SYSADMIN_UID="99999"
+  run_apply
+  [[ "$status" -eq 0 ]]
+  [[ ! -e "$LCARS_SIEGE_HOME/.claude" ]]
+}
+
+@test "list.sh: les deux listes, avec curl et jq stubes — et RIEN d'autre que de la lecture" {
+  BIN="$BATS_TEST_TMPDIR/lbin"; mkdir -p "$BIN"
+  cat > "$BIN/curl" <<'EOS'
+#!/usr/bin/env bash
+for a in "$@"; do case "$a" in
+  *issues*) echo '[{"number":12,"created_at":"2026-08-19T00:00:00Z","title":"pod en echec"}]'; exit 0;;
+  *pulls*)  echo '[{"number":7,"created_at":"2026-08-19T00:00:00Z","title":"[toolchain] python","base":{"ref":"sysadmin"}}]'; exit 0;;
+esac; done
+exit 1
+EOS
+  chmod +x "$BIN/curl"
+  export PATH="$BIN:$PATH"
+  export LCARS_FORGE_URL="http://forge.test"
+  export LCARS_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tok"; printf 'TOK\n' > "$LCARS_MASTER_TOKEN_FILE"
+
+  run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"#12"* ]]
+  [[ "$output" == *"pod en echec"* ]]
+  [[ "$output" == *"!7"* ]]
+  [[ "$output" == *"[toolchain] python"* ]]
+}
+
+@test "list.sh: token illisible => refus type, pas une liste vide" {
+  export LCARS_FORGE_URL="http://forge.test"
+  export LCARS_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/absent"
+  run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"master token illisible"* ]]
 }

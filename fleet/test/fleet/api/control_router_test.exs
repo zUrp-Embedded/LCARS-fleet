@@ -483,18 +483,50 @@ defmodule Fleet.API.ControlRouterTest do
       File.write!(Path.join(dir, "hostnative-probe.yaml"), yaml)
     end
 
-    # PRE-CONDITION (anti-bitrot): the reorg is DONE — every canon profile is now bwrap, so no canon role
-    # can reach the host as the human. If a canon profile silently became `containment: none`, this fires.
-    test "pre-condition: every canon profile is bwrap (host-native retired from canon)" do
+    # PRE-CONDITION (anti-bitrot), AMENDÉE par BL-6-101 (2026-08-19) : tout profil canon est bwrap
+    # — SAUF le siège machine `admiral`, la SEULE exception, née avec l'ouverture nommée du verrou
+    # (l'ack explicite ci-dessous). Un DEUXIÈME profil `containment: none` qui apparaîtrait ici
+    # doit re-passer par un arbitrage, pas hériter du précédent.
+    test "pre-condition: every canon profile is bwrap — sauf l'unique siège admiral" do
       assert {:ok, names} = Fleet.CapProfile.list()
 
-      for name <- names do
-        assert {:ok, cp} = Fleet.CapProfile.load(name)
+      hors_sandbox =
+        for name <- names,
+            {:ok, cp} = Fleet.CapProfile.load(name),
+            Fleet.CapProfile.containment(cp) != "bwrap",
+            do: name
 
-        assert Fleet.CapProfile.containment(cp) == "bwrap",
-               "#{name} is #{Fleet.CapProfile.containment(cp)} — a host-native profile must take the " <>
-                 "out-of-band path (host_launch.sh), NEVER the no-auth API"
-      end
+      assert hors_sandbox in [[], ["admiral"]],
+             "profils hors sandbox : #{inspect(hors_sandbox)} — seul `admiral` (BL-6-101) a ce " <>
+               "droit, et un second exige son propre arbitrage, jamais l'héritage du précédent"
+    end
+
+    test "l'OUVERTURE NOMMÉE : host_native_ack=true admet le profil host-native — c'est le GESTE qui ouvre",
+         %{} do
+      # Le même profil que le 422 ci-dessous, la même porte — plus l'acquittement explicite que
+      # seul `lcars admiral` pose. Aucun chemin automatique ne passe par cette porte avec ce champ.
+      tmp = Path.join(System.tmp_dir!(), "hostnative-ack-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      write_hostnative_fixture(tmp)
+      Fleet.Test.CatalogueIsolation.isolate!(tmp)
+
+      conn =
+        conn(
+          :post,
+          "/api/admin/spawn",
+          Jason.encode!(%{"role" => "hostnative-probe", "host_native_ack" => true})
+        )
+        |> put_req_header("content-type", "application/json")
+        |> ControlRouter.call(@opts)
+
+      assert conn.status == 202
+
+      assert_receive %Fleet.Event{
+                       type: :"admin.spawn.request",
+                       payload: %{"role" => "hostnative-probe"}
+                     },
+                     500
     end
 
     # The nominal case (bwrap) PASSES — the guard only closes host-native, not legitimate spawn. This is

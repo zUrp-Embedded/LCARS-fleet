@@ -72,7 +72,7 @@ defmodule Fleet.API.SpawnAdmission do
           | {:fleet_scope_occupied, String.t(), String.t()}
           | :brief_required
 
-  @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id)
+  @admin_spawn_public_fields ~w(cap_profile_name role issue_id brief pod_id host_native_ack)
 
   @doc """
   Validates a request body and returns its canonical broadcast payload or the
@@ -81,7 +81,9 @@ defmodule Fleet.API.SpawnAdmission do
   @spec admit(term()) :: {:ok, map()} | {:error, refusal()}
   def admit(raw) do
     with {:ok, payload} <- parse_admin_spawn_dto(raw),
-         {:ok, cap} <- validate_cap_profile(payload),
+         # L'ack ne fait PAS partie du payload broadcast (Map.take le jette, et c'est voulu : c'est
+         # un fait d'ADMISSION, pas un ordre de spawn) — il se lit sur le DTO brut.
+         {:ok, cap} <- validate_cap_profile(payload, host_native_ack?(raw)),
          :ok <- check_fleet_scope_free(cap),
          :ok <- check_brief_required(payload, cap) do
       {:ok, payload}
@@ -180,15 +182,32 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  defp validate_cap_profile(payload) do
+  defp host_native_ack?(raw) when is_map(raw), do: raw["host_native_ack"] == true
+  defp host_native_ack?(_), do: false
+
+  defp validate_cap_profile(payload, ack?) do
     case Fleet.CapProfile.name_from_request(payload) do
       name when is_binary(name) ->
         # Admission gates the effective profile, including default modops.
         case Fleet.CapProfile.resolve(Fleet.CapProfile, name) do
           {:ok, cap} ->
-            if Fleet.CapProfile.bwrap?(cap),
-              do: {:ok, cap},
-              else: {:error, {:host_native_forbidden, name}}
+            cond do
+              Fleet.CapProfile.bwrap?(cap) ->
+                {:ok, cap}
+
+              # L'OUVERTURE NOMMÉE du verrou (BL-6-101, 2026-08-19). Un profil `containment: none`
+              # reste REFUSÉ sur ce chemin générique — sauf si l'opérateur le dit EXPLICITEMENT
+              # (`host_native_ack: true`, posé par `lcars admiral`, jamais par un chemin auto : le
+              # dispatcher ne passe pas par cette porte et n'a pas le champ). C'est la doctrine de
+              # la fiche : *« une décision de posture, qui se rouvre en la nommant »* — on nomme le
+              # GESTE (l'acquittement), jamais un nom de rôle (`00` §5 : rien ne se key sur une
+              # chaîne de rôle).
+              ack? ->
+                {:ok, cap}
+
+              true ->
+                {:error, {:host_native_forbidden, name}}
+            end
 
           # A ReservedSeat is its OWN refusal (BL-6-45), not an "unknown cap_profile": the seat
           # exists, the box is closed — wrapped as {:cap_profile, ...} the router would render

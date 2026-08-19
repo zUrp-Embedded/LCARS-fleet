@@ -492,6 +492,9 @@ COPY fleet/deploy/docker/human-converger.sh /opt/lcars/human-converger.sh
 # reconciliateur (`toolchain_reconciler.ex` : `sudo -n <bin> <sha>`) attendent. Dans /usr/local/bin
 # et pas /opt : c'est un binaire d'exploitation, pas un composant de boot.
 COPY fleet/deploy/docker/toolchain-converger.sh /usr/local/bin/lcars-toolchain-converge
+# Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
+# par le catalogue : il ne doit pouvoir atteindre aucun pod.
+COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
 # Les gestes forge, DANS l'image : `docker.sh` et le banc les jouent par la meme porte, au lieu
 # d'en porter chacun une copie (le banc ne peut pas appeler `docker.sh` — sa boite vient d'un autre
 # couple de fichiers compose, et `docker.sh` refuse a raison d'agir sur un projet qu'il n'a pas cree).

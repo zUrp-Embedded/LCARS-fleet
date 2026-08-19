@@ -145,6 +145,31 @@ EOF
 
 # --- spawn -----------------------------------------------------------------
 
+# ─── admiral — la SEANCE DE FIX ([BL-6-101]) ──────────────────────────────────────────────────
+# Le SEUL chemin vers un pod hors sandbox, et il est un GESTE : le spawn generique refuse tout
+# `containment: none` (422) sauf acquittement explicite — c'est CE flag, pose ICI et nulle part
+# ailleurs. Aucun chemin automatique (dispatcher, boot, cartes) ne passe par cette porte.
+# Le pod tourne sous l'uid du lanceur (un humain de fleet) : le « porteur a lui » de [BL-6-102] —
+# GUARD B interdit au siege (uid 1000) d'etre en amont d'un pod, et ca ne change pas ici.
+cmd_admiral() {
+  [[ $# -eq 0 ]] || die "admiral: aucun argument — c'est une seance, pas un dispatch"
+
+  local body http payload='{"cap_profile_name":"admiral","host_native_ack":true}'
+  body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn"     -H 'Content-Type: application/json' -d "$payload" -w $'\n%{http_code}')"     || die "admiral: le daemon ne repond pas sur $API_SOCK (fleet lancee ?)"
+  http="${body##*$'\n'}"; body="${body%$'\n'*}"
+
+  case "$http" in
+    202)
+      echo "admiral: seance demandee (202 = en file, PAS encore vivant)."
+      echo "  suivi :   $PROG list"
+      echo "  s'asseoir: $PROG attach <pod_id>   (Ctrl-b d pour partir sans tuer la seance)"
+      ;;
+    *)
+      die "admiral: refuse ($http) — $body"
+      ;;
+  esac
+}
+
 cmd_spawn() {
   local role="" issue="" brief="" have_brief=0
   [[ $# -ge 1 && "$1" != --* ]] || die "spawn: role requis (ex: $PROG spawn architect)"
@@ -773,6 +798,7 @@ case "${1:-help}" in
   forge) shift; cmd_forge "$@" ;;
   publish) shift; cmd_publish "$@" ;;
   approve) shift; cmd_approve "$@" ;;
+  admiral) shift; cmd_admiral "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
 esac

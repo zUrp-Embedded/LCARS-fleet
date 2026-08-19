@@ -2,8 +2,8 @@
 # SOURCE: fleet/deploy/modules.d/45-sudoers-toolchain.sh
 # AUTHOR: bob
 # STARDATE: 2026-08-19
-# STATUS: PROTO-V2 — les trois ancrages systeme du rail toolchain (sudoers etroit, etat conteneur,
-#         projection du login du siege)
+# STATUS: PROTO-V2 — les quatre ancrages systeme du domaine admiral (sudoers etroit, etat
+#         conteneur, projection du login du siege, skill du siege)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -12,7 +12,7 @@
 # (`deploy/provision`), et `%$PROV_FLEET_GROUP` ci-dessous suppose un groupe que `20-groups.sh`
 # vient de creer. Un rang < 20 accorderait un NOPASSWD a un groupe inexistant.
 #
-# TROIS GESTES, UN MOTIF : le rail toolchain (chantier admiral) est du code livre qui n'etait
+# QUATRE GESTES, UN MOTIF : le rail toolchain (chantier admiral) est du code livre qui n'etait
 # CABLE nulle part — trouve par la validation adversariale du PLAN, 2026-08-19. Ce module est le
 # cablage cote provisioning ; le binaire est pose par l'image (Dockerfile), la supervision par le
 # domaine (BEAM).
@@ -48,6 +48,11 @@
 #      etendrait en `/state/pilot.assignee`, cree a la racine, jamais lu). Magasin non monte
 #      (avant le lot F) => la projection est INERTE et les issues s'ouvrent sans assignee —
 #      DR-023, dit au PLAN B0.3, pas a decouvrir.
+#
+#   4. le SKILL `system-issues` dans le `~/.claude` du SIEGE (`05` §7) : la boite de reception
+#      d'admiral, posee par le provisioning et JAMAIS par le catalogue — un skill du catalogue
+#      serait montable dans un pod par deux fautes de frappe ; celui-ci ne vit que chez le siege.
+#      Meme cle (uid), meme reecriture inconditionnelle que la projection.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -58,6 +63,7 @@ SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
 CONVERGE_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/var/lib/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
+SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-/opt/lcars/admiral-skills}"
 
 sudoers_line() { printf '%%%s ALL=(root) NOPASSWD: %s\n' "$PROV_FLEET_GROUP" "$CONVERGE_BIN"; }
 
@@ -105,10 +111,30 @@ apply() {
   chgrp "$PROV_FLEET_GROUP" "$RUN_STATE" 2>/dev/null \
     || p_drift "etat conteneur: chgrp $PROV_FLEET_GROUP a echoue — le reconciliateur ne pourra pas noter"
 
-  # 3. La projection du siege — uid-keyee, store-gardee, inconditionnelle.
+  # 3+4. La projection du siege ET son skill — uid-keyes, inconditionnels.
   local uid
   uid="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
   if [[ "$uid" == "$SYSADMIN_UID" ]]; then
+    # 4. Le skill system-issues — chez le SIEGE et personne d'autre.
+    if [[ -d "$SKILL_SRC/system-issues" ]]; then
+      local home skdst
+      # Couture de test (LCARS_SIEGE_HOME) : les bats ne doivent JAMAIS ecrire dans le vrai home
+      # de qui les joue. En prod la variable est absente et getent fait foi.
+      home="${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"
+      if [[ -n "$home" && -d "$home" ]]; then
+        skdst="$home/.claude/skills/system-issues"
+        install -d -m 0755 "$skdst"
+        write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:$PROV_HUMAN" < "$SKILL_SRC/system-issues/SKILL.md"           || p_fail "skill system-issues: SKILL.md"
+        write_atomic "$skdst/list.sh" 0755 "$PROV_HUMAN:$PROV_HUMAN" < "$SKILL_SRC/system-issues/list.sh"           || p_fail "skill system-issues: list.sh"
+        chown "$PROV_HUMAN:$PROV_HUMAN" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
+        p_ok "skill system-issues pose chez $PROV_HUMAN"
+      else
+        p_drift "skill system-issues: home de $PROV_HUMAN introuvable"
+      fi
+    else
+      p_drift "skill system-issues: source absente ($SKILL_SRC) — image sans les sources admiral ?"
+    fi
+
     if [[ -n "${LCARS_STORE_ROOT:-}" && -d "$LCARS_STORE_ROOT" ]]; then
       install -d -m 2775 "$LCARS_STORE_ROOT/state" 2>/dev/null || true
       # Redirection, JAMAIS un pipe vers write_atomic : ses compteurs de verdict vivraient dans le
