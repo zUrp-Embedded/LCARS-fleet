@@ -181,26 +181,43 @@ defmodule Fleet.ToolchainTest do
 
       script = Path.expand("deploy/docker/toolchain-converger.sh")
 
-      extracted =
-        {"""
-         set -euo pipefail
-         eval "$(sed -n '/^block_under()/,/^}/p' #{script})"
-         eval "$(sed -n '/^list_under()/,/^}/p' #{script})"
-         list_under "$(block_under "$(cat)" apt)" "  packages"
-         """, manifest}
+      # LE SCRIPT EST UN ARBRE FRERE QUI N'EST PAS TOUJOURS LA, et sans cette garde le temoin ne
+      # mesurait pas ce qu'il croyait. Le stage `build` de l'image copie `fleet/` en EXCLUANT
+      # `deploy/` (`Dockerfile`, `COPY --exclude=deploy`) — deliberement : y toucher invaliderait la
+      # couche et rejouerait un gate de ~10 min a chaque edition de compose. Le `sed` rendait donc du
+      # vide, `eval ""` ne definissait aucune fonction, et le round-trip mourait en `{"", 127}`
+      # — « commande introuvable », un diagnostic qui n'accuse ni le script ni le rendu.
+      #
+      # SAUTE ET NOMME, jamais un vert silencieux : meme idiome que les graines de
+      # `template_material_test`. La ou `deploy/` existe — gate de l'hote, CI du banc — l'assertion
+      # tourne entiere et c'est la qu'elle vaut.
+      if not File.exists?(script) do
+        IO.puts(
+          "toolchain: ROUND-TRIP NON MESURE ici — deploy/ absent de cet artefact " <>
+            "(contexte build d'image, Dockerfile COPY --exclude=deploy)"
+        )
+      else
+        extracted =
+          {"""
+           set -euo pipefail
+           eval "$(sed -n '/^block_under()/,/^}/p' #{script})"
+           eval "$(sed -n '/^list_under()/,/^}/p' #{script})"
+           list_under "$(block_under "$(cat)" apt)" "  packages"
+           """, manifest}
 
-      {shell, stdin} = extracted
-      tmp = Path.join(System.tmp_dir!(), "roundtrip-#{System.unique_integer([:positive])}")
-      File.write!(tmp <> ".sh", shell)
-      File.write!(tmp <> ".yaml", stdin)
+        {shell, stdin} = extracted
+        tmp = Path.join(System.tmp_dir!(), "roundtrip-#{System.unique_integer([:positive])}")
+        File.write!(tmp <> ".sh", shell)
+        File.write!(tmp <> ".yaml", stdin)
 
-      on_exit(fn ->
-        File.rm(tmp <> ".sh")
-        File.rm(tmp <> ".yaml")
-      end)
+        on_exit(fn ->
+          File.rm(tmp <> ".sh")
+          File.rm(tmp <> ".yaml")
+        end)
 
-      {out, 0} = System.cmd("bash", ["-c", "bash #{tmp}.sh < #{tmp}.yaml"])
-      assert String.split(out, "\n", trim: true) == ["python3-yaml", "python3-venv"]
+        {out, 0} = System.cmd("bash", ["-c", "bash #{tmp}.sh < #{tmp}.yaml"])
+        assert String.split(out, "\n", trim: true) == ["python3-yaml", "python3-venv"]
+      end
     end
   end
 end
