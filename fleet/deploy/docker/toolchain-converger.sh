@@ -87,7 +87,13 @@ fetch_manifest() {
 # `yq` n'est pas garanti present ; le manifeste est genere par `Fleet.Toolchain` et sa forme est
 # donc connue et stable. On lit ce dont on a besoin avec des motifs ancres, et TOUT ce qui ne matche
 # pas un motif est ignore — un champ inconnu n'est pas une erreur, c'est un champ qu'on ne joue pas.
-field() { sed -n "s/^$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
+# ⚠ TOLERANT A L'INDENTATION, et c'est l'exclusivite des formes qui le rend sur. Les champs d'une
+# forme sont indentes de deux espaces (`installer:` puis `  name:`), donc un motif ancre en colonne 0
+# lisait du VIDE et refusait sur le premier champ au lieu du bon — trouve par les temoins.
+# Une lecture a plat serait ambigue si deux blocs portaient la meme clef ; ils ne le peuvent pas :
+# `apt`, `installer` et `sysroot` sont EXCLUSIFS (`Fleet.Toolchain.validate_form/1`), donc chacune
+# de ces clefs apparait au plus une fois dans un manifeste.
+field() { sed -n "s/^ *$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
 
 list_under() { # list_under <cle> <yaml> -> une entree par ligne
   awk -v key="$2:" '
@@ -124,8 +130,7 @@ apply_apt() { # apply_apt <yaml>
 # ce repertoire se jette avec un `rm -rf`. La fermeture est resolue par `--print-uris`, jamais un
 # paquet nomme seul (cf. l'en-tete).
 apply_sysroot() { # apply_sysroot <yaml> <eco>
-  local arch; arch="$(field arch "$1")"
-  [[ "$arch" =~ ^[a-z0-9]+$ ]] || die 2 "arch refusee: '$arch'"
+  local arch; arch="$(field arch "$1")"   # motif deja verifie par validate_manifest
 
   local root="$WORK/aptroot-$2" target="$STORE/sysroots/$2"
   rm -rf "$root"; mkdir -p "$root"/etc/apt/{sources.list.d,preferences.d,apt.conf.d,trusted.gpg.d} \
@@ -137,8 +142,7 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
   # ⚠ LE KEYRING N'EST PAS OPTIONNEL. Un convergeur qui telecharge des paquets non signes est le
   # trou supply-chain qu'on refuse d'ouvrir par commodite — et la commodite serait grande, puisque
   # `AllowInsecureRepositories` fait marcher le reste tout de suite.
-  local keyring; keyring="$(field keyring "$1")"
-  [[ -n "$keyring" && -r "$keyring" ]] || die 2 "keyring de la cible absent ou illisible: '$keyring'"
+  local keyring; keyring="$(field keyring "$1")"   # lisibilite deja verifiee
   cp "$keyring" "$root/etc/apt/trusted.gpg.d/target.gpg"
 
   local O=(-o "Dir::State=$root/var/lib/apt" -o "Dir::State::status=$root/var/lib/dpkg/status"
@@ -162,6 +166,172 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
   echo "toolchain-converger: sysroot $2 assemble dans $target"
 }
 
+# ─── LES HOTES D'EGRESS : LE VERBE QUI REND L'OUVERTURE PERSISTANTE ─────────────────────────────
+# Sans lui, tout le prealable A ouvre un registry que rien ne pose. Les deux sources d'aujourd'hui
+# vivent DANS L'IMAGE (la declaration vendor a cote du launcher, le cap-profile du catalogue) : un
+# rebuild les restaure telles qu'elles etaient au build, donc une ouverture qu'un humain a signee
+# serait EFFACEE — silencieusement, puisqu'un pod qui ne joint rien ressemble a un pod que personne
+# n'a ouvert.
+#
+# ⚠ ECRITURE ATOMIQUE, jamais une redirection. `provision-lib.sh:18` garde la trace d'une v1 qui
+# ecrivait `/etc/sudoers.d` en place et rendait un fichier tronque. Ici un `.hosts` tronque est
+# SYNTAXIQUEMENT VALIDE et silencieusement incomplet : le pod joindrait la moitie de ce qui a ete
+# approuve, et rien ne le dirait.
+#
+# ⚠ ET DEUX CLEFS, PAS UNE. Ce fichier ne fait rien si le role n'est pas en `network: egress` dans
+# le catalogue. On l'ecrit quand meme — c'est le RESULTAT du merge — mais le convergeur ne peut pas
+# poser la premiere clef : elle est du code, jugee par le jury normal.
+apply_egress() { # apply_egress <yaml> <eco>
+  local hosts=() h
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    [[ "$h" =~ ^[*a-zA-Z0-9._-]+$ ]] || die 2 "hote refuse: '$h' (nom d'hote seul — ni schema, ni port, ni chemin)"
+    hosts+=("$h")
+  done < <(list_under "$1" "egress_hosts")
+
+  [[ ${#hosts[@]} -eq 0 ]] && return 0
+
+  local dir="$STORE/state/egress.d" role
+  mkdir -p "$dir"
+  # UN FICHIER PAR ROLE. Le manifeste declare l'ecosysteme ; le rail le pose pour les roles
+  # PRODUCTEURS, qui sont ceux dont le cap-profile porte `network: egress`. Faute d'une liste dans
+  # le manifeste, on pose pour `engineer` — le seul producteur declare a ce jour. La liste des roles
+  # cibles est le premier champ a ajouter quand un second producteur en aura besoin.
+  for role in ${LCARS_TOOLCHAIN_EGRESS_ROLES:-engineer}; do
+    local f="$dir/$role.hosts" tmp
+    tmp="$(mktemp "$dir/.$role.XXXXXX")"
+    { printf '# genere par le rail toolchain (%s) — NE PAS EDITER\n' "$2"
+      printf '%s\n' "${hosts[@]}"; } > "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$f"
+    echo "toolchain-converger: egress $role <- ${hosts[*]}"
+  done
+
+  # LE MARQUEUR QUI DISTINGUE LE SILENCE NOMINAL DES QUATRE PANNES. Sans lui, « aucun hote » recouvre
+  # « rien n'a ete approuve » (nominal), « le convergeur n'est jamais passe », « le volume n'est pas
+  # monte » et « le volume a ete purge » — tous rendant le meme rien, puis un REFUSED au premier
+  # appel. Lu par `Fleet.Spawner.Pod.Egress`.
+  printf '%s\n' "$SHA" > "$dir/.applied"
+}
+
+# ─── LA FORME `installer` : LA FORME DOMINANTE DE L'EMBARQUE ────────────────────────────────────
+# esp-idf, nRF Connect SDK (west/Zephyr), rustup, PlatformIO : tous ont la meme forme — script
+# d'amorcage, arbre SDK versionne, environnement a sourcer. Ce n'est pas une exception esp-idf,
+# c'est le cas nominal du cas fondateur du chantier.
+#
+# ⚠ JAMAIS `curl | sh`. Un telechargement coupe produit un script TRONQUE que `sh` execute quand
+# meme, et l'etat partiel qui en resulte passe ensuite pour « deja fait ». On telecharge, on VERIFIE
+# le sha256, on execute — dans cet ordre.
+#
+# ⚠ L'INSTALLEUR POSE SOUS LE MAGASIN, PAS SOUS LE $HOME DU CONVERGEUR. Ce script tourne en root :
+# un `export.sh` de SDK calcule ses chemins depuis `$HOME` et rendrait `IDF_PATH=/root/.espressif/…`,
+# un chemin qui N'EXISTE PAS dans le pod (dont le HOME est son sanctuaire). L'install sortirait
+# verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
+apply_installer() { # apply_installer <yaml> <eco>
+  local name url version sha256 env_script tree
+  name="$(field name "$1")"; url="$(field url "$1")"
+  version="$(field version "$1")"; sha256="$(field sha256 "$1")"
+  env_script="$(field env_script "$1")"
+
+  # name / url / sha256 : motifs deja verifies par validate_manifest, hors sous-shell.
+
+  tree="$STORE/toolchains/$2"
+  mkdir -p "$tree"
+
+  local script="$WORK/$name-$version.sh"
+  curl -sSfL -o "$script" "$url" || die 3 "telechargement de l'installeur $name echoue"
+  # EXIT 3 ET PAS 2 : le manifeste est BIEN FORME, c'est l'artefact qui ne correspond pas. Un pin
+  # perime et un telechargement corrompu se ressemblent ici, et l'un des deux se repare seul au tick
+  # suivant. Un `2` dirait « ce document ne marchera jamais » et ferait attendre une correction
+  # humaine sans objet. (`die` dans le sous-shell d'application ressort en 3, ce qui est ici le bon
+  # code — cf. `validate_manifest` pour les refus qui, eux, doivent sortir AVANT.)
+  echo "$sha256  $script" | sha256sum -c - >/dev/null 2>&1 \
+    || die 3 "sha256 de l'installeur $name NE CORRESPOND PAS — rien n'est execute"
+
+  # Le contexte du POD, pas celui de root : c'est ce qui rend le delta valide de l'autre cote.
+  ( cd "$tree" && HOME="$tree" IDF_TOOLS_PATH="$tree" CARGO_HOME="$tree/cargo" \
+      RUSTUP_HOME="$tree/rustup" sh "$script" ) || die 3 "installeur $name en echec"
+
+  [[ -n "$env_script" ]] && freeze_env "$tree" "$env_script" "$2"
+  echo "toolchain-converger: installeur $name $version pose dans $tree"
+}
+
+# ─── FIGER LE DELTA D'ENVIRONNEMENT ─────────────────────────────────────────────────────────────
+# Le pod ne source JAMAIS de script : sourcer du shell venu d'un artefact telecharge, dans le
+# processus qui construit le bac a sable, rouvrirait dans le launcher le trou que ce fichier
+# referme. On joue l'`env_script` UNE fois, ICI, et on fige le resultat a plat.
+#
+# ⚠ TOUTE VALEUR QUI EST UN CHEMIN ABSOLU DOIT ETRE SOUS LE MAGASIN. Un chemin hors magasin est un
+# delta FAUX, et un delta faux est indetectable cote pod. On refuse la convergence plutot que de
+# poser un environnement valide pour une machine que personne n'habite.
+#
+# ⚠ LES VARIABLES DE BUILD UNIVERSELLES SONT REFUSEES, liste close. `CARGO_HOME` n'est lu que par
+# cargo ; `CC` est lu par TOUT systeme de build : pose globalement, le premier pod Python qui
+# installe un paquet a extension C native compile de l'ARM64, `pip` REUSSIT, et l'import echoue plus
+# tard en « Exec format error » sans une ligne qui nomme l'environnement de compilation.
+freeze_env() { # freeze_env <tree> <env_script> <eco>
+  local out="$STORE/state/env.d/$3.env" before after tmp
+  mkdir -p "$(dirname "$out")"
+  before="$(env | sort)"
+  after="$(cd "$tree" && HOME="$1" . "$1/$2" >/dev/null 2>&1 && env | sort || true)"
+  [[ -z "$after" ]] && { echo "toolchain-converger: env_script muet pour $3" >&2; return 0; }
+
+  tmp="$(mktemp "$(dirname "$out")/.$3.XXXXXX")"
+  printf '# genere par le rail toolchain — delta fige, NE PAS EDITER\n' > "$tmp"
+  comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | while IFS= read -r pair; do
+    local k="${pair%%=*}" v="${pair#*=}"
+    [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
+    case "$k" in
+      CC|CXX|LD|AR|NM|RANLIB|STRIP|CFLAGS|CXXFLAGS|LDFLAGS|CPPFLAGS)
+        echo "toolchain-converger: $k LARGUEE (variable de build universelle)" >&2; continue ;;
+      PWD|SHLVL|OLDPWD|_) continue ;;
+      PATH) printf 'LCARS_PATH_PREPEND=%s\n' "${v%%:$PATH}" >> "$tmp"; continue ;;
+    esac
+    case "$v" in
+      /*) [[ "$v" == "$STORE"/* ]] || die 2 "$3: $k pointe HORS du magasin ('$v') — delta faux" ;;
+    esac
+    printf '%s=%s\n' "$k" "$v" >> "$tmp"
+  done
+  mv -f "$tmp" "$out"
+  echo "toolchain-converger: environnement de $3 fige dans $out"
+}
+
+# ─── LA VALIDATION PRECEDE L'APPLICATION, ET ELLE EST HORS DU SOUS-SHELL ────────────────────────
+# ⚠ TROUVE PAR LES TEMOINS, ET C'EST UN VRAI DEFAUT : un `die 2` place dans le `( set -e ... )` qui
+# applique termine LE SOUS-SHELL, pas le script. Le code de sortie devenait 3 — « application
+# echouee, on reessaiera » — pour un manifeste qui ne marchera JAMAIS. Le reconciliateur ne traite
+# pas les deux pareil : l'un se rejoue au tick suivant, l'autre attend qu'un humain corrige le
+# document. Confondre les deux fait boucler le rail sur une faute qu'aucun rejeu ne repare.
+#
+# Et le bon ordre tombe avec le correctif : on REFUSE UN MANIFESTE ENTIER avant d'avoir touche quoi
+# que ce soit, plutot que de mourir a mi-chemin d'une application.
+validate_manifest() { # validate_manifest <yaml> <eco>
+  local v
+  grep -q '^kind: ecosystem_enable' <<< "$1" || die 2 "kind inattendu"
+
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    safe_pkg "$v" || die 2 "nom de paquet refuse: '$v'"
+  done < <(list_under "$1" "  packages")
+
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    [[ "$v" =~ ^[*a-zA-Z0-9._-]+$ ]] || die 2 "hote refuse: '$v' (nom d'hote seul — ni schema, ni port, ni chemin)"
+  done < <(list_under "$1" "egress_hosts")
+
+  if grep -q '^sysroot:' <<< "$1"; then
+    v="$(field arch "$1")"; [[ "$v" =~ ^[a-z0-9]+$ ]] || die 2 "arch refusee: '$v'"
+    v="$(field keyring "$1")"
+    [[ -n "$v" && -r "$v" ]] || die 2 "keyring de la cible absent ou illisible: '$v'"
+  fi
+
+  if grep -q '^installer:' <<< "$1"; then
+    v="$(field name "$1")";    [[ "$v" =~ ^[a-z][a-z0-9-]{1,31}$ ]] || die 2 "nom d'installeur refuse: '$v'"
+    v="$(field url "$1")";     [[ "$v" =~ ^https:// ]]              || die 2 "url d'installeur refusee (https requis): '$v'"
+    v="$(field sha256 "$1")";  [[ "$v" =~ ^[a-f0-9]{64}$ ]]         || die 2 "sha256 d'installeur refuse pour '$2'"
+  fi
+}
+
 rc=0
 for path in $(list_manifests); do
   eco="$(basename "$path" .yaml)"
@@ -174,11 +344,13 @@ for path in $(list_manifests); do
   [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && { echo "toolchain-converger: $eco deja a $SHA"; continue; }
 
   yaml="$(fetch_manifest "$path")"
-  grep -q '^kind: ecosystem_enable' <<< "$yaml" || die 2 "$path: kind inattendu"
+  validate_manifest "$yaml" "$eco"
 
   if ( set -e
-       grep -q '^apt:'     <<< "$yaml" && apply_apt     "$yaml"
-       grep -q '^sysroot:' <<< "$yaml" && apply_sysroot "$yaml" "$eco"
+       grep -q '^apt:'         <<< "$yaml" && apply_apt       "$yaml"
+       grep -q '^sysroot:'     <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
+       grep -q '^installer:'   <<< "$yaml" && apply_installer "$yaml" "$eco"
+       grep -q '^egress_hosts:' <<< "$yaml" && apply_egress   "$yaml" "$eco"
        true )
   then
     mkdir -p "$(dirname "$marker")"; printf '%s\n' "$SHA" > "$marker"

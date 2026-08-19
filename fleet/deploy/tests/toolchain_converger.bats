@@ -130,6 +130,64 @@ EOF
   [[ "$output" == *"kind inattendu"* ]]
 }
 
+@test "EGRESS: les hotes approuves sont poses sur le volume d'etat" {
+  # Sans ce verbe, tout le prealable A ouvre un registry que RIEN ne pose : les deux autres sources
+  # vivent dans l'image et un rebuild les efface.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\negress_hosts:\n  - pypi.org\n  - files.pythonhosted.org\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  [[ -r "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts" ]]
+  grep -q '^pypi.org$' "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts"
+  grep -q '^files.pythonhosted.org$' "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts"
+}
+
+@test "EGRESS: le marqueur .applied porte le SHA — c'est lui qui distingue le silence nominal" {
+  # Sans marqueur, « aucun hote » recouvre quatre etats dont trois sont des pannes : convergeur
+  # jamais passe, volume non monte, volume purge. Tous rendent le meme rien.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\negress_hosts:\n  - pypi.org\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$(cat "$LCARS_STORE_ROOT/state/egress.d/.applied")" == "deadbeef" ]]
+}
+
+@test "EGRESS: REFUS d'un hote qui n'est pas un nom d'hote" {
+  # Le proxy ne decide que du HOTE d'un CONNECT : un schema ou un chemin ici serait une declaration
+  # qui ne veut rien dire, posee comme si elle en voulait une.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\negress_hosts:\n  - "https://pypi.org/simple"\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"hote refuse"* ]]
+}
+
+@test "INSTALLER: sha256 qui ne correspond pas — RIEN n'est execute, et c'est un echec d'APPLICATION" {
+  # Un telechargement coupe produit un script TRONQUE que `sh` executerait quand meme, et l'etat
+  # partiel passerait ensuite pour « deja fait ».
+  #
+  # EXIT 3 ET PAS 2, ET LA NUANCE EST LE SUJET : le manifeste est BIEN FORME — c'est l'artefact qui
+  # ne correspond pas. Un pin perime et un telechargement corrompu se ressemblent ici, et l'un des
+  # deux se repare tout seul au tick suivant. Un `2` dirait « ce document ne marchera jamais », ce
+  # qui est faux et ferait attendre une correction humaine qui n'a pas lieu d'etre.
+  cat > "$BATS_TEST_TMPDIR/bin/sha256sum" <<'EOS'
+#!/usr/bin/env bash
+exit 1
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/sha256sum"
+  local sha; sha="$(printf 'a%.0s' {1..64})"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: https://sh.rustup.rs\n  version: "1.27"\n' "$sha" | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 3 ]]
+  [[ "$output" == *"NE CORRESPOND PAS"* ]]
+  # Le marqueur n'est PAS pose : rien ne fera croire au prochain tick que c'est fait.
+  [[ ! -r "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+}
+
+@test "INSTALLER: REFUS d'une url non-https" {
+  local sha; sha="$(printf 'a%.0s' {1..64})"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: http://sh.rustup.rs\n  version: "1.27"\n' "$sha" | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"https requis"* ]]
+}
+
 @test "le marqueur n'est pose QU'APRES un succes" {
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
   run "$SUT" deadbeef
