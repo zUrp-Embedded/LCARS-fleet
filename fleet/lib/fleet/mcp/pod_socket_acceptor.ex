@@ -288,13 +288,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       # the role gate cannot express, namely two variants of one role with different surfaces.
       # The bridge still forwards blindly; the refusal happens here.
       #
-      # ⚠ AND THE THREADED HALF IS EMPTY IN EVERY PROFILE SHIPPED. The names come from
-      # `CapProfile.mcp_fleet_tools/1`, i.e. the `scope.allowedTools` entries prefixed
-      # `mcp__fleet__` — and not one canon cap-profile declares a single one, so every pod of every
-      # role is served exactly the two base tools while its SP names a dozen others by their full
-      # `mcp__fleet__…` name. Discovery and instruction disagree by design-in-fact: the agents work
-      # from the prompt, and this list is a filter over a knob nobody fills. Read it as the surface
-      # a profile MAY narrow to, never as the surface a role HAS.
+      # ⚠ LE DEMI-FILETE ETAIT VIDE DANS TOUS LES PROFILS LIVRES, ET IL A CESSE DE L'ETRE LE
+      # 2026-08-20. Les noms viennent de `CapProfile.mcp_fleet_tools/1`, c'est-a-dire des entrees
+      # `scope.allowedTools` prefixees `mcp__fleet__`. Ce paragraphe disait « pas un seul profil
+      # canon n'en declare une » : `qualifier` et `reviewer` declarent desormais
+      # `mcp__fleet__run_probe`, et ce sont les deux SEULS.
+      #
+      # Ce que ca change : la liste est maintenant un filtre qui MORD pour un outil — un pod dont le
+      # profil ne le declare pas se voit refuser `run_probe` ici meme, avant tout dispatch.
+      #
+      # Ce que ca ne change pas : elle reste vide pour tous les autres, donc l'ecart historique
+      # entre DECOUVERTE et INSTRUCTION tient — les agents travaillent depuis leur prompt, qui nomme
+      # une douzaine d'outils que ce filtre ne connait pas. A lire comme la surface qu'un profil PEUT
+      # restreindre, jamais comme la surface qu'un role A.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 

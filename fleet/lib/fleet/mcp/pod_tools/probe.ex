@@ -181,16 +181,67 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ferait dépendre une mesure de rail d'une liste faite pour autre chose, et le jour où la liste
   # bouge la mesure bougerait sans raison.
   #
-  # ⚠ `\b` APRÈS LE NOM, comme chez lui, et pour la même raison inverse : sans lui, demander
-  # « Test » attraperait `## Test paths`.
+  # ⚠ DEUX FAUTES CORRIGÉES LE 2026-08-20, TROUVÉES PAR RELECTURE ADVERSARIALE. Les deux étaient
+  # des cas où ce parseur lisait CONFIANT quelque chose qui n'était pas la déclaration du projet.
+  #
+  # 1. LES BLOCS DE CODE SONT MASQUÉS AVANT LA RECHERCHE. Le `CLAUDE.md` du template DOCUMENTE la
+  #    section `## Harness` et en montre un exemple dans un bloc `` ``` `` — dont la ligne
+  #    `## Harness` est en colonne 0. Avec le drapeau `m`, `^` matche à l'intérieur du bloc : la
+  #    sonde lisait l'EXEMPLE DE LA DOC, puis toute la prose qui suit, au lieu de la déclaration
+  #    écrite par le projet. Mesuré sur le template réel — `harness` valait
+  #    `"tests/ ``` **À quoi elle sert.** La sonde …"`. Un projet qui écrit sa section SOUS la
+  #    documentation (le geste naturel) ne la voyait jamais lue.
+  #
+  # 2. LE TITRE EST ANCRÉ EN FIN DE LIGNE, et le `\b` d'avant ne protégeait rien. Le commentaire
+  #    disait « sans lui, demander "Test" attraperait `## Test paths` » — c'est FAUX et c'est
+  #    l'inverse de ce que ce dépôt a mesuré ailleurs : `\b` tombe entre `t` et l'espace, DONC
+  #    `## Test paths` matchait. Un projet portant `## Test suite` avant son `## Test` faisait
+  #    tourner la sonde avec la mauvaise commande.
+  #
+  # La règle est maintenant : le titre est le nom, SEUL sur sa ligne (espaces de fin tolérés), ET
+  # hors de tout bloc de code.
+  #
+  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ. La première correction masquait
+  # les blocs avant la recherche — ce qui aurait effacé le CORPS d'une section dont la valeur est
+  # légitimement encadrée (`## Test` suivi d'un bloc contenant `mix test`, forme parfaitement
+  # normale). Le titre doit être cherché hors des blocs ; le corps doit être rendu tel qu'il est
+  # écrit. Une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
   defp section(md, name) do
-    case Regex.run(~r/^##\s+#{name}\b[^\n]*\n(.*?)(?=^##\s|\z)/ms, md) do
-      [_, body] -> body |> String.trim() |> strip_fences()
-      _ -> ""
+    md
+    |> String.split("\n")
+    |> Enum.reduce({[], false, :before}, &scan_line(&1, &2, name))
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join("\n")
+    |> String.trim()
+    |> strip_fences()
+  end
+
+  # Trois etats — `:before`, `:capturing`, `:done` — et un drapeau de bloc. Un titre ne compte que
+  # HORS bloc ; le corps, lui, est rendu tel qu'il est ecrit, blocs compris.
+  defp scan_line(_line, {acc, in_fence?, :done}, _name), do: {acc, in_fence?, :done}
+
+  defp scan_line(line, {acc, in_fence?, state}, name) do
+    fence? = String.starts_with?(String.trim_leading(line), "```")
+    next_fence? = if fence?, do: not in_fence?, else: in_fence?
+    heading? = not in_fence? and not fence? and String.starts_with?(line, "## ")
+
+    case {state, heading?} do
+      # Un titre HORS bloc termine la capture en cours.
+      {:capturing, true} -> {acc, in_fence?, :done}
+      {:capturing, false} -> {[line | acc], next_fence?, :capturing}
+      # C'est le NOTRE qui la commence, a condition d'etre seul sur sa ligne.
+      {:before, true} -> {acc, in_fence?, if(ours?(line, name), do: :capturing, else: :before)}
+      {:before, false} -> {acc, next_fence?, :before}
     end
   end
 
-  # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins.
+  # `## Harness` oui ; `## Harness paths`, `## Harnessing` non. Le nom est SEUL sur sa ligne.
+  defp ours?(line, name), do: String.trim_trailing(line) == "## " <> name
+
+  # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins :
+  # `mask_fences/1` a neutralisé les blocs pour la RECHERCHE du titre, celui-ci nettoie le CORPS
+  # d'une section dont la valeur est légitimement encadrée.
   defp strip_fences(text) do
     text
     |> String.split("\n")

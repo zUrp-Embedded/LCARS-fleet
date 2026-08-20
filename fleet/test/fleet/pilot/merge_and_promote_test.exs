@@ -702,19 +702,31 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
            }}
     end
 
+    # Les trois stubs SIGNALENT leur appel : c'est ce qui rend les `refute` ci-dessous
+    # discriminants. Sans ce signal, « aucune mention » est vrai pour `:probed`, pour `:unknown`,
+    # et pour tout chemin qui n'a jamais interrogé la sonde — trois faits opposés, une assertion.
     defmodule Probed do
       @moduledoc false
-      def probed?(_repo, _sha, _opts), do: {:ok, true}
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:ok, true}
+      end
     end
 
     defmodule Unprobed do
       @moduledoc false
-      def probed?(_repo, _sha, _opts), do: {:ok, false}
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:ok, false}
+      end
     end
 
     defmodule Unreadable do
       @moduledoc false
-      def probed?(_repo, _sha, _opts), do: {:error, {:http, 503, "nope"}}
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:error, {:http, 503, "nope"}}
+      end
     end
 
     defp seal_body(actions) do
@@ -740,20 +752,40 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       assert body =~ "livrée et fusionnée"
     end
 
-    test "tête SONDÉE → aucune ligne : seule l'anomalie prend de l'encre" do
+    # ⚠ CES DEUX TESTS ÉTAIENT NON-DISCRIMINANTS, ET UNE RELECTURE ADVERSARIALE L'A DIT. Ils
+    # vérifiaient l'ABSENCE d'une mention — or `:probed` ET `:unknown` produisent tous deux `""`,
+    # donc chacun passait aussi pour la mauvaise raison : un `pr_refs` cassé, un `forge_actions`
+    # non installé, n'importe quel court-circuit du `with` dans `probe_state/4`.
+    #
+    # On mesure donc maintenant CE QUE LA SONDE A RÉPONDU, pas seulement ce que le texte ne dit
+    # pas : chaque stub SIGNALE son appel, et le test exige que le chemin ait été traversé.
+    test "tête SONDÉE → la lecture a bien eu lieu, ET aucune ligne n'est écrite" do
+      body = seal_body(Probed)
+
+      # Le chemin est traversé — sans ça, l'assertion suivante serait vraie pour dix raisons.
+      assert_received {:probed_asked, "fleet/p", "deadbeef"}
       # Une ligne qui dit la même chose sur chaque ticket cesse d'être lue au troisième.
-      refute seal_body(Probed) =~ "Aucune sonde"
+      refute body =~ "Aucune sonde"
     end
 
-    test "lecture IMPOSSIBLE → aucune ligne : on n'affirme pas une absence qu'on n'a pas établie" do
+    test "lecture IMPOSSIBLE → la question a été posée, et RIEN n'est affirmé" do
+      body = seal_body(Unreadable)
+
+      assert_received {:probed_asked, "fleet/p", "deadbeef"}
+
       # `:unknown` est distinct de « personne n'a mesuré ». Les confondre écrirait sur le ticket un
       # fait produit par une forge injoignable.
-      refute seal_body(Unreadable) =~ "Aucune sonde"
+      refute body =~ "Aucune sonde"
     end
 
-    test "zéro juge → aucune ligne, même sans sonde (personne n'a manqué de mesurer)" do
-      # `OkForge` décrit un dépôt SANS jury. L'absence de sonde n'y dit rien : aucun verdict n'a été
-      # rendu, donc aucun verdict n'a été rendu sans mesure.
+    test "zéro juge → la sonde n'est même pas INTERROGÉE (rien à annoter)" do
+      # ⚠ CE TEST ÉTAIT TAUTOLOGIQUE : il installait `Unprobed` alors que la clause
+      # `probe_note([], _)` court-circuite AVANT de regarder l'état de sonde. L'override n'était
+      # jamais consulté, et le test passait avec n'importe quoi — y compris rien.
+      #
+      # Il mesure maintenant la propriété qui compte VRAIMENT : sur un dépôt sans jury, aucun
+      # verdict n'a été rendu, donc l'absence de sonde ne dit rien — et le sceau ne dépense même
+      # pas la lecture forge pour s'en assurer.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
 
       assert :ok =

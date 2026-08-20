@@ -172,6 +172,85 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
   end
 
+  # ═══ LE TROU QUI A LAISSÉ PASSER DEUX FAUTES ═══
+  #
+  # `declarations/3` — la lecture du `CLAUDE.md` du projet — n'avait AUCUN test. Les tests ci-dessus
+  # injectent un `CLAUDE.md` unique et bien formé, donc ils exerçaient le parseur sur le seul cas
+  # où il ne pouvait pas se tromper. Une relecture adversariale y a trouvé deux fautes, toutes deux
+  # du même genre : le parseur lisait CONFIANT quelque chose qui n'était pas la déclaration.
+  describe "declarations/3 — ce que le parseur lit, et ce qu'il refuse de lire" do
+    defp md_forge(content) do
+      Module.create(
+        :"Elixir.MdForge#{System.unique_integer([:positive])}",
+        quote do
+          def get_file(_repo, _path, _opts), do: {:ok, %{content: unquote(content), sha: "x"}}
+        end,
+        Macro.Env.location(__ENV__)
+      )
+      |> elem(1)
+    end
+
+    defp declared(content) do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_client, md_forge(content))
+      {:ok, d} = Fleet.MCP.PodTools.Probe.declarations("fleet/p", "sha")
+      d
+    end
+
+    test "⚠ LE TITRE DANS UN BLOC DE CODE N'EST PAS UN TITRE" do
+      # LA FAUTE CRITIQUE, mesurée sur le VRAI template : son `CLAUDE.md` documente `## Harness` et
+      # en montre un exemple dans un bloc ``` dont la ligne `## Harness` est en colonne 0. Le
+      # parseur s'y accrochait et rendait `"tests/ ``` **À quoi elle sert.** La sonde …"` — l'exemple
+      # de la doc PLUS toute la prose qui suit. Un projet qui écrit sa section SOUS la
+      # documentation, geste naturel, n'était jamais lu.
+      tpl = File.read!(Path.join(File.cwd!(), "priv/catalogue/project_template/main/CLAUDE.md"))
+
+      # Le template SEUL ne déclare rien : c'est de la documentation, pas une déclaration.
+      assert declared(tpl).harness == ""
+
+      # Et sous la doc, la vraie déclaration est lue — elle seule.
+      d = declared(tpl <> "\n## Harness\n\nsrc/tests/\n")
+      assert d.harness == "src/tests/"
+      refute d.harness =~ "À quoi elle sert"
+    end
+
+    test "⚠ `## Test suite` N'EST PAS `## Test` — le titre est le nom, seul sur sa ligne" do
+      # La deuxième faute, et mon commentaire affirmait exactement l'inverse de la vérité : `\b`
+      # tombe entre `t` et l'espace, donc `## Test paths` MATCHAIT. Un projet portant `## Test
+      # suite` avant son `## Test` faisait tourner la sonde avec la mauvaise commande.
+      d = declared("## Test suite\n\nsh faux.sh\n\n## Test\n\nsh vrai.sh\n")
+      assert d.test_cmd == "sh vrai.sh"
+
+      # Et l'ordre inverse ne change rien : ce n'est pas « le premier qui commence par Test ».
+      d2 = declared("## Test\n\nsh vrai.sh\n\n## Test suite\n\nsh faux.sh\n")
+      assert d2.test_cmd == "sh vrai.sh"
+    end
+
+    test "TÉMOIN — un corps ENCADRÉ reste lisible" do
+      # ⚠ SANS CE TÉMOIN, LA CORRECTION SE SERAIT MANGÉ ELLE-MÊME. Ma première version masquait les
+      # blocs AVANT la recherche, ce qui effaçait aussi le CORPS d'une section légitimement
+      # encadrée — `## Test` suivi d'un bloc contenant `mix test`, forme parfaitement normale. Le
+      # titre se cherche hors des blocs ; le corps se rend tel qu'il est écrit.
+      d = declared("## Test\n\n```\nmix test\n```\n\n## Doc\n\nx\n")
+      assert d.test_cmd == "mix test"
+    end
+
+    test "section absente → chaîne vide, jamais une devinette" do
+      d = declared("# projet\n\nrien de contractuel ici\n")
+      assert d.harness == ""
+      assert d.test_cmd == ""
+    end
+
+    test "`CLAUDE.md` absent → pas une erreur : c'est le cas `inapplicable`" do
+      defmodule NoFile do
+        @moduledoc false
+        def get_file(_r, _p, _o), do: {:error, :not_found}
+      end
+
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_client, NoFile)
+      assert {:ok, %{harness: "", test_cmd: ""}} = Probe.declarations("fleet/p", "sha")
+    end
+  end
+
   describe "facts/1 — on rapporte, on n'interprète pas" do
     test "les lignes tardives gagnent, et rien d'autre n'est décidé" do
       facts =

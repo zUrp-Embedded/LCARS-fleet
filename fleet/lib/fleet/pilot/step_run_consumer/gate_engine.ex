@@ -169,7 +169,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
     # BL-6-20
     if judge_kind?(payload, spec) do
-      decision = Verdict.gate_decision(result)
+      # `_with_reason` ET PAS `gate_decision/1` : le motif du refus de schema voyage jusqu'au ctx,
+      # parce que la passe de correction (B4) promet au juge de lui dire CE QUI N'ALLAIT PAS. Il
+      # etait journalise puis jete, et `VerdictCorrection` lisait une cle que personne ne posait —
+      # donc elle demandait au juge de deviner, ce qu'elle promettait justement d'eviter.
+      {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
       trace = Verdict.verdict_comment(payload["role"], decision, result)
 
       ctx = %{
@@ -178,7 +182,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
         payload: payload,
         workflow_map: workflow_map,
         step: step,
-        judge_target: Map.get(spec, "judge_target")
+        judge_target: Map.get(spec, "judge_target"),
+        invalid_reason: invalid_reason
       }
 
       {:judge_verdict, decision, trace, ctx}

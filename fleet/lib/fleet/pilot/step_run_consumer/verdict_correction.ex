@@ -32,9 +32,16 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
 
   ## Pourquoi le pod est encore là pour la recevoir
 
-  Parce que B2 ne le fauche qu'à l'INGESTION de son verdict : la revue native posée, pas avant. Un
-  juge dont l'enveloppe est refusée n'a rien fait ingérer, donc il vit encore, avec son contexte —
-  celui qui lui a coûté sa lecture du livrable. C'est exactement ce que cette passe dépense.
+  Parce qu'**aucune fauche n'est déclenchée par la PRODUCTION d'un verdict, seulement par son
+  INGESTION** — et une enveloppe refusée n'est pas ingérée. Le juge vit donc encore, avec le
+  contexte que lui a coûté sa lecture du livrable, et c'est exactement ce que cette passe dépense.
+
+  ⚠ **Ce paragraphe créditait B2 (`StepRunCompleter.reap_judge/3`), et c'était faux** — corrigé le
+  2026-08-20 après relecture. B2 ne fauche que les juges de **PR**, sur le chemin `record_review`.
+  Les juges de **gate** que cette passe traite (scoper, gatekeeper) passent par `apply_verdict` et
+  n'atteignent jamais `record_review` : B2 ne les touche pas. La conclusion tenait, la raison
+  était fausse — et une raison fausse est ce qui fait qu'un jour quelqu'un « aligne » B2 sur une
+  garantie qu'elle n'a jamais donnée.
   """
 
   require Logger

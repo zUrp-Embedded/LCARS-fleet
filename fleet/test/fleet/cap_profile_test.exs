@@ -995,6 +995,25 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.kill_class(kc_prof(4, "forever")) == 1
     end
 
+    test "un profil SANS `brief_kind` ne se range pas en producteur par défaut" do
+      # ⚠ TROUVÉ PAR RELECTURE ADVERSARIALE. `brief_kind/1` rend `nil` sans défaut, et
+      # `nil == "judge"` est faux : un profil forgé à la main tombait donc dans le `true ->` et se
+      # rangeait PRODUCTEUR, sans un mot. Un juge de fixture parmi les jetables — exactement
+      # l'erreur que B1 venait de corriger, réintroduite par le bas.
+      #
+      # On ne met pas de défaut à `"worker"` : ce serait faire l'inférence que le schéma interdit.
+      # On classe au plus cher et on le DIT.
+      sans =
+        %Fleet.CapProfile{
+          kind: "CapabilityProfile",
+          metadata: %{"name" => "forge-a-la-main", "role_index" => 9},
+          spec: %{"invocation" => %{"lifetime_scope" => "one-shot"}}
+        }
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert Fleet.CapProfile.kill_class(sans) == 1 end)
+      assert log =~ "NO `brief_kind`"
+    end
+
     test "CONTRE-PREUVE : le cycle de vie ne décide plus rien à lui seul" do
       # ⚠ SANS CE TEST, LE CHANGEMENT SERAIT INDÉMONTRABLE. Deux profils au MÊME
       # `lifetime_scope: one-shot` et au même `slot_scope` dérivé, qui tombent dans deux classes

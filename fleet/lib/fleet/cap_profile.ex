@@ -709,6 +709,20 @@ defmodule Fleet.CapProfile do
       brief_kind(profile) == "judge" ->
         3
 
+      # ⚠ UN PROFIL SANS `brief_kind` NE PRODUIT PAS, IL EST CASSE. La cle est REQUISE au schema,
+      # donc ce cas n'existe pas en production ; il existe pour un profil forge a la main, et le
+      # laisser tomber dans le `true ->` ci-dessous le classerait PRODUCTEUR sans un mot — un juge
+      # de fixture range parmi les jetables, ce qui est exactement l'erreur que B1 vient de
+      # corriger. On le nomme, on le classe au plus cher (l'architecte), et on le dit.
+      is_nil(brief_kind(profile)) ->
+        Logger.warning(
+          "CapProfile: #{inspect(name(profile))} has NO `brief_kind` — the schema requires it, so " <>
+            "this profile was not loaded through the catalogue. Filed under class 1 (the most " <>
+            "expensive) rather than guessed: judge-ness is never inferred."
+        )
+
+        1
+
       # `true` ET PAS `slot_scope == "instance"`, et la difference est une AFFIRMATION plutot qu'un
       # reste : tout ce qui n'est ni l'accueil, ni lie au projet, ni un juge, PRODUIT. L'ancien
       # critere mettait les producteurs dans son fourre-tout ; ici c'est l'etage 1 qui a cesse d'en
@@ -999,7 +1013,17 @@ defmodule Fleet.CapProfile do
 
   @doc """
   Returns the required `spec.brief_kind`. `"worker"` receives executable work;
-  `"judge"` receives a defused verdict brief. There is no default.
+  `"judge"` receives a defused verdict brief.
+
+  ⚠ **`nil` EST POSSIBLE, ET C'EST UN PROFIL HORS SCHEMA.** La cle est REQUISE — un profil charge
+  par le catalogue est valide avant d'entrer dans le runtime, donc la production n'y arrive pas.
+  Un profil construit a la main (fixture, injection ad hoc) le peut, et depuis que `kill_class/1`
+  trie sur la judge-ness (B1, 2026-08-20) le `nil` y classait un juge en PRODUCTEUR, silencieusement.
+
+  On ne met PAS de defaut a `"worker"` ici, et le refus est le meme que celui du schema : la
+  judge-ness est une propriete de SECURITE qui ne s'infere jamais. Un defaut ferait exactement
+  l'inference qu'on interdit — il rendrait « ce profil ne dit rien » indiscernable de « ce profil
+  declare produire ». `nil` reste `nil`, et `kill_class/1` le traite explicitement.
   """
   @spec brief_kind(t()) :: String.t() | nil
   def brief_kind(%__MODULE__{spec: spec}) do

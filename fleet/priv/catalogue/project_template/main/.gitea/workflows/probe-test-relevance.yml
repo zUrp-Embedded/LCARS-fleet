@@ -77,27 +77,20 @@ jobs:
       - name: Outils
         run: apk add --no-cache git >/dev/null 2>&1 || true
 
-      - name: Récupérer les deux états
+      - name: Sonder
         env:
           FORGE_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          # L'URL du serveur vient du runner, jamais d'une constante : la forge ne s'adresse pas de
-          # la même façon depuis un conteneur et depuis un navigateur.
-          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth=$(printf '%s' "$url" | sed "s#://#://x-access-token:${FORGE_TOKEN}@#")
-          git init -q repo
-          cd repo
-          git remote add origin "$auth"
-          git fetch -q --depth=1 origin "${{ inputs.base_sha }}"
-          git fetch -q --depth=1 origin "${{ inputs.head_sha }}"
-
-      - name: Sonder
         run: |
           # PAS de `set -e` ici, et c'est délibéré : ce script FAIT ÉCHOUER des commandes exprès —
           # l'échec de la suite EST la mesure. Un `set -e` avorterait au moment précis où le fait
           # apparaît, et la sonde rendrait une panne à la place de son résultat.
-          cd repo
+          #
+          # ⚠ `set -f` : GLOB DÉSACTIVÉE POUR TOUT LE SCRIPT. `$harness` est délibérément NON quoté
+          # là où il est développé — c'est ainsi qu'on obtient plusieurs chemins — mais sans `-f`,
+          # le shell y applique AUSSI l'expansion de motifs : un projet déclarant `*.test` verrait
+          # la sonde travailler sur ce que le répertoire courant contient au moment du run, pas sur
+          # ce qu'il a déclaré. `-f` garde la découpe par espaces et supprime la devinette.
+          set -f
 
           fact() { echo "LCARS-PROBE $*"; }
           harness="${{ inputs.harness }}"
@@ -112,6 +105,54 @@ jobs:
             echo "Ce projet ne déclare aucun chemin de preuve (section '## Harness' de son CLAUDE.md)."
             echo "La sonde ne devine pas quels fichiers sont du code et lesquels sont de la preuve :"
             echo "se tromper ici accuserait une livraison à tort."
+            exit 0
+          fi
+
+          # ⚠ UNE COMMANDE DE TEST VIDE FABRIQUERAIT UN `blind` DE TOUTES PIÈCES. `( )` est une
+          # sous-shell valide en POSIX et sort en 0 : le témoin passerait, la mesure passerait, et
+          # la sonde annoncerait « la suite reste verte sans le code livré » à un projet qui n'a
+          # aucune suite. C'est le seul mensonge que cette sonde pouvait produire.
+          if [ -z "${{ inputs.test_cmd }}" ]; then
+            fact "verdict=inapplicable reason=no-test-cmd"
+            echo "Ce projet ne déclare aucune commande de test (section '## Test' de son CLAUDE.md)."
+            exit 0
+          fi
+
+          # ── LA RÉCUPÉRATION VIT ICI, ET PLUS DANS UNE ÉTAPE À PART ──
+          #
+          # Elle avait son propre step avec `set -e`. Un `fetch` en échec y avortait le step, Gitea
+          # SAUTAIT « Sonder », et le run entier rendait rouge SANS ÉMETTRE LE MOINDRE FAIT : le
+          # rail lisait des logs vides et le juge recevait un appel réussi sans verdict. Le
+          # commentaire de fin promettait « TOUJOURS 0 » alors que le JOB, lui, pouvait échouer.
+          #
+          # Le cas n'est pas théorique : `git fetch <sha>` exige que le serveur autorise
+          # `uploadpack.allowReachableSHA1InWant`, ce qui n'est pas le défaut partout. Une
+          # configuration de forge devenait un run rouge muet.
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+          # Le jeton ne s'injecte que dans une URL qui sait le porter. Un `file://` ou un `ssh://`
+          # recevant un `user:pass@` devient une URL invalide — et surtout, y coller un secret
+          # n'aurait aucun sens.
+          case "$url" in
+            http://*|https://*)
+              auth=$(printf '%s' "$url" | sed "s#://#://x-access-token:${FORGE_TOKEN}@#") ;;
+            *)
+              auth="$url" ;;
+          esac
+
+          git init -q repo || { fact "verdict=inapplicable reason=git-unavailable"; exit 0; }
+          cd repo
+          git remote add origin "$auth"
+
+          # ⚠ `2>/dev/null` SUR LES DEUX : l'URL porte le jeton, et git le recrache dans ses
+          # messages d'erreur. Un `fetch` en échec écrirait le jeton dans les logs du job, que la
+          # forge sert à qui peut lire le dépôt.
+          if ! git fetch -q --depth=1 origin "$base" 2>/dev/null ||
+             ! git fetch -q --depth=1 origin "$head" 2>/dev/null; then
+            fact "verdict=inapplicable reason=fetch-failed"
+            echo "Impossible de récupérer les deux états depuis la forge. Cause la plus fréquente :"
+            echo "le serveur n'autorise pas de demander un SHA non annoncé"
+            echo "(git config uploadpack.allowReachableSHA1InWant=true côté forge)."
             exit 0
           fi
 
@@ -175,6 +216,13 @@ jobs:
           # sonde deviendrait le plus ambigu. (2) Sortir en échec quand la suite est aveugle serait
           # DÉCIDER : la sonde rapporte, le juge tranche. Une sonde qui bloque a cessé d'être un
           # gain pour devenir une précondition, et le jour où elle se trompe elle arrête la flotte.
+          #
+          # ⚠ ET LA PROMESSE PORTE MAINTENANT SUR LE JOB, PAS SEULEMENT SUR CE STEP. Elle ne le
+          # faisait pas : la récupération vivait dans un step à part sous `set -e`, donc un `fetch`
+          # en échec avortait AVANT ce script, Gitea sautait ce step, et le run rendait rouge sans
+          # émettre le moindre fait. Un opérateur lisant ce paragraphe devant un run rouge en
+          # déduisait un bug de runner. La récupération est descendue ici, et son échec est
+          # maintenant un `verdict=inapplicable` comme les autres.
           #
           # Le fait vit dans les lignes `LCARS-PROBE`, que le rail lit dans les logs du JOB.
           exit 0

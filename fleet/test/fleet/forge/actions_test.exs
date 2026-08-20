@@ -114,6 +114,26 @@ defmodule Fleet.Forge.Client.ActionsTest do
       assert log =~ "NO run details"
     end
 
+    test "un VRAI 204 (corps vide, pas de JSON) prend le même chemin" do
+      # ⚠ LE STUB CI-DESSUS ENVOIE `{}`, ET UN VRAI 204 N'A PAS DE CORPS. La branche exercée est la
+      # même aujourd'hui — `""` comme `%{}` tombent dans le catch-all — mais rien ne le prouvait :
+      # quelqu'un resserrant la clause sur les maps aurait laissé ce test vert pendant que la vraie
+      # réponse de la forge cassait. Signalé en relecture, épinglé ici.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:dispatch_untrackable, "probe-test-relevance.yml"}} =
+                   Actions.dispatch_workflow(
+                     "fleet/p",
+                     "probe-test-relevance.yml",
+                     "main",
+                     %{},
+                     opts([{"/dispatches", text(204, "")}])
+                   )
+        end)
+
+      assert log =~ "NO run details"
+    end
+
     test "input non-chaîne : refusé AVANT le fil — la forge n'est jamais appelée" do
       # La forge répondrait 422 en nommant son schéma, pas la clé fautive. Refuser ici nomme
       # l'erreur réelle. Et le contre-test est l'absence de requête : sans lui, un refus posé APRÈS

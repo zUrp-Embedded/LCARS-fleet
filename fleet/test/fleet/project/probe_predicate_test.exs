@@ -35,12 +35,26 @@ defmodule Fleet.Project.ProbePredicateTest do
     yaml = File.read!(Path.join(File.cwd!(), @workflow))
 
     [_, block] =
-      Regex.run(~r/- name: Sonder\n\s+run: \|\n(.*?)(?=\n\s{6}- name: |\z)/s, yaml)
+      Regex.run(
+        ~r/- name: Sonder\n(?:\s+env:\n(?:\s+\S+:.*\n)+)?\s+run: \|\n(.*?)(?=\n\s{6}- name: |\z)/s,
+        yaml
+      )
 
-    block
-    |> String.split("\n")
-    |> Enum.map(&String.replace_prefix(&1, "          ", ""))
-    |> Enum.join("\n")
+    # ⚠ L'INDENTATION SE MESURE, ELLE NE SE DEVINE PAS. Elle était codée en dur à dix espaces : une
+    # ré-indentation du YAML aurait produit un script mal désindenté — bruyamment rouge dans un
+    # sens, silencieusement inchangé dans l'autre. On lit le retrait de la première ligne non vide.
+    lines = String.split(block, "\n")
+
+    indent =
+      lines
+      |> Enum.find("", &(String.trim(&1) != ""))
+      |> then(&(String.length(&1) - String.length(String.trim_leading(&1))))
+
+    prefix = String.duplicate(" ", indent)
+
+    assert indent > 0, "aucun retrait mesuré : l'extraction ne rend pas le script du runner"
+
+    Enum.map_join(lines, "\n", &String.replace_prefix(&1, prefix, ""))
   end
 
   defp render(script, inputs) do
@@ -59,24 +73,37 @@ defmodule Fleet.Project.ProbePredicateTest do
 
   # BASE = un dépôt sans le livrable, mais AVEC un harnais. HEAD = le livrable ajouté, harnais
   # éventuellement modifié. C'est exactement la forme d'une PR de livraison.
+  #
+  # ⚠ ET ON FABRIQUE UNE VRAIE ORIGINE, DEPUIS LE 2026-08-20. La récupération vivait dans un step à
+  # part que ces fixtures n'exerçaient pas ; elle est descendue dans le script, donc elles la jouent
+  # maintenant — `git fetch` par SHA, avec la configuration serveur que ça exige
+  # (`uploadpack.allowReachableSHA1InWant`). C'est la seule façon de mesurer le script que le runner
+  # recevra plutôt qu'une portion choisie de ce script.
   defp build_repo(tmp, base_files, head_files) do
-    repo = Path.join(tmp, "repo")
-    File.mkdir_p!(repo)
-    git!(repo, ["init", "-q", "-b", "main"])
-    git!(repo, ["config", "user.email", "t@t"])
-    git!(repo, ["config", "user.name", "t"])
+    src = Path.join(tmp, "src")
+    File.mkdir_p!(src)
+    git!(src, ["init", "-q", "-b", "main"])
+    git!(src, ["config", "user.email", "t@t"])
+    git!(src, ["config", "user.name", "t"])
 
-    write_all(repo, base_files)
-    git!(repo, ["add", "-A"])
-    git!(repo, ["commit", "-qm", "base"])
-    base = git!(repo, ["rev-parse", "HEAD"])
+    write_all(src, base_files)
+    git!(src, ["add", "-A"])
+    git!(src, ["commit", "-qm", "base"])
+    base = git!(src, ["rev-parse", "HEAD"])
 
-    write_all(repo, head_files)
-    git!(repo, ["add", "-A"])
-    git!(repo, ["commit", "-qm", "head"])
-    head = git!(repo, ["rev-parse", "HEAD"])
+    write_all(src, head_files)
+    git!(src, ["add", "-A"])
+    git!(src, ["commit", "-qm", "head"])
+    head = git!(src, ["rev-parse", "HEAD"])
 
-    %{dir: repo, base: base, head: head}
+    origin = Path.join(tmp, "projet.git")
+    git!(tmp, ["clone", "-q", "--bare", src, origin])
+    # LA CONFIGURATION QUE LE SCRIPT EXIGE DE LA FORGE, posée ici explicitement : sans elle,
+    # `git fetch origin <sha>` répond « Server does not allow request for unadvertised object ».
+    # La fixture la déclare, donc le test dit AUSSI ce que le déploiement doit fournir.
+    git!(origin, ["config", "uploadpack.allowReachableSHA1InWant", "true"])
+
+    %{dir: src, origin: origin, base: base, head: head}
   end
 
   defp write_all(repo, files) do
@@ -88,7 +115,7 @@ defmodule Fleet.Project.ProbePredicateTest do
     end)
   end
 
-  defp sonde(tmp, %{dir: dir, base: base, head: head}, harness, test_cmd) do
+  defp sonde(tmp, %{origin: origin, base: base, head: head}, harness, test_cmd) do
     script =
       probe_script()
       |> render(%{
@@ -101,8 +128,20 @@ defmodule Fleet.Project.ProbePredicateTest do
     path = Path.join(tmp, "sonde.sh")
     File.write!(path, script)
 
-    # `cwd: tmp` : le script fait `cd repo` lui-même, comme dans le job.
-    {out, code} = System.cmd("sh", [path], cd: Path.dirname(dir), stderr_to_stdout: true)
+    # Le script clone lui-même, depuis `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git` — donc on
+    # lui donne une origine locale. Le jeton est vide EXPRÈS : le script ne doit l'injecter que
+    # dans une URL http(s), et un `file://` qui recevrait un `user:pass@` deviendrait invalide.
+    # Ce test est donc aussi la preuve de ce refus.
+    work = Path.join(tmp, "job")
+    File.mkdir_p!(work)
+
+    env = [
+      {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
+      {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
+      {"FORGE_TOKEN", ""}
+    ]
+
+    {out, code} = System.cmd("sh", [path], cd: work, env: env, stderr_to_stdout: true)
     %{out: out, code: code, facts: Fleet.MCP.PodTools.Probe.facts(out)}
   end
 
@@ -201,6 +240,46 @@ defmodule Fleet.Project.ProbePredicateTest do
       # Elle n'a même pas essayé : deviner quels fichiers sont de la preuve reviendrait à accuser
       # une livraison à tort.
       refute Map.has_key?(r.facts, "witness_exit")
+    end
+
+    test "commande de test VIDE → inapplicable, jamais un `blind` fabriqué", %{tmp_dir: tmp} do
+      # ⚠ LE SEUL MENSONGE QUE CETTE SONDE POUVAIT PRODUIRE, trouvé par relecture adversariale.
+      # `( )` est une sous-shell POSIX valide et sort en 0 : sans garde, le témoin passait, la
+      # mesure passait, et la sonde annonçait « la suite reste verte sans le code livré » à un
+      # projet qui n'a AUCUNE suite. Un fait faux présenté comme une mesure.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "")
+
+      assert r.facts["verdict"] == "inapplicable"
+      assert r.facts["reason"] == "no-test-cmd"
+      refute r.facts["verdict"] == "blind"
+      assert r.code == 0
+    end
+
+    test "un harnais qui ressemble à un GLOB n'est pas développé par le shell", %{tmp_dir: tmp} do
+      # ⚠ `$harness` est délibérément NON quoté — c'est ainsi qu'on obtient plusieurs chemins — et
+      # sans `set -f` le shell y appliquait AUSSI l'expansion de motifs : un projet déclarant
+      # `*.test` aurait vu la sonde travailler sur ce que le répertoire contient au moment du run,
+      # pas sur ce qu'il a déclaré. Ici, `*.sh` ne doit désigner AUCUN fichier existant.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "*.sh", "sh tests/run.sh")
+
+      # Le motif est traité comme un chemin littéral, donc absent — et la sonde le DIT.
+      assert r.facts["verdict"] == "inapplicable"
+      assert r.facts["reason"] == "harness-absent"
+      assert r.facts["paths"] == "*.sh"
     end
 
     test "un chemin déclaré ABSENT de la tête est dit, pas contourné", %{tmp_dir: tmp} do
