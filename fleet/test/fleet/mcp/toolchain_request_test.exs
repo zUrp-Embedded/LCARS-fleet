@@ -115,9 +115,85 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       assert {:error, :pod_id_required} = Delegation.request_toolchain(req(), "")
     end
 
-    test "un pod sans work-item actif ne peut pas demander" do
-      assert {:error, :no_active_work_item} =
+    test "un pod sans work-item ET sans identité résolvable est refusé — typé" do
+      # L'ABSENCE DE TICKET N'EST PLUS UN REFUS, l'absence d'IDENTITÉ l'est toujours : le manifeste
+      # porte le rôle du demandeur, et un rôle inconnu rend la demande injugeable.
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:error, :pod_unknown} end)
+
+      assert {:error, :pod_unknown} =
                Delegation.request_toolchain(req(), "pod-sans-item-#{System.unique_integer()}")
+    end
+  end
+
+  describe "l'anticipation — une demande qu'aucun ticket ne porte" do
+    # ⚠ CE QUE CES TÉMOINS ACHÈTENT. Le cap-profile de l'architecte lui accorde `toolchain_request`
+    # avec une raison écrite : « demander un outillage AVANT que les producers butent dessus ».
+    # L'implémentation ouvrait sur `active_work_item/1` et refusait en `:no_active_work_item` —
+    # l'arch n'a pas de work-item, il répond à l'humain. La capacité était donc MORTE pour son seul
+    # usage déclaré, mesuré en vol le 2026-08-20 sur `architect-hello-world` (node absent).
+
+    setup do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ ->
+        {:ok, %{role: "architect", repo: "fleet/hello-world"}}
+      end)
+
+      :ok
+    end
+
+    test "un pod sans work-item ouvre quand même la PR" do
+      pod = "architect-hello-#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{"status" => "toolchain_requested", "ecosystem" => "python", "pr" => 412}} =
+               Delegation.request_toolchain(req(), pod)
+
+      assert_received {:open_pr, _repo, _head, _base, "[toolchain] python (anticipation)", _body}
+    end
+
+    test "la branche est celle du POD, dans un espace de noms qui ne croise pas les work-items" do
+      pod = "architect-hello-#{System.unique_integer([:positive])}"
+      {:ok, _} = Delegation.request_toolchain(req(), pod)
+
+      expected = Fleet.Toolchain.branch_for_pod(pod)
+      assert_received {:create_branch, _repo, ^expected, _base}
+      assert String.starts_with?(expected, "lcars/toolchain-pod-")
+
+      # Le préfixe SÉPARE : deux clés d'espaces de noms indépendants ne peuvent pas atterrir sur
+      # une même branche et s'écraser l'une l'autre.
+      refute expected == Fleet.Toolchain.branch_for(pod)
+    end
+
+    test "AUCUN verrou, AUCUN commentaire — il n'y a pas de ticket à mettre en attente" do
+      pod = "architect-hello-#{System.unique_integer([:positive])}"
+      {:ok, _} = Delegation.request_toolchain(req(), pod)
+
+      refute_received {:add_label, _, _, _}
+      refute_received {:post_comment, _, _, _}
+    end
+
+    test "le corps de PR ne porte PAS de marqueur de work-item, et le dit" do
+      pod = "architect-hello-#{System.unique_integer([:positive])}"
+      {:ok, _} = Delegation.request_toolchain(req(), pod)
+
+      assert_received {:open_pr, _repo, _head, _base, _title, body}
+
+      # LE DRAIN LE SAIT DÉJÀ : une PR sans marqueur n'est pas la sienne, il la saute. C'est ce qui
+      # rend le chemin sans ticket sûr en aval — pas une tolérance ajoutée pour l'occasion.
+      assert :error = Fleet.Toolchain.parse_workitem_marker(body)
+
+      # Et un admin qui merge doit savoir qu'il n'attend personne : une PR d'anticipation qui
+      # ressemblerait à une PR de déblocage ferait espérer un re-dispatch qui n'arrivera jamais.
+      assert body =~ "ANTICIPÉE"
+      assert body =~ "AUCUN ticket en attente"
+    end
+
+    test "le manifeste porte le rôle du demandeur, sans issue ni work-item" do
+      pod = "architect-hello-#{System.unique_integer([:positive])}"
+      {:ok, _} = Delegation.request_toolchain(req(), pod)
+
+      assert_received {:put_file, _repo, "ops/toolchains.d/python.yaml", content, _branch}
+      assert content =~ "role: architect"
+      refute content =~ "work_item:"
+      refute content =~ "issue:"
     end
   end
 
