@@ -771,11 +771,10 @@ if config_env() != :test and not tool_mode? do
   # (No `LCARS_POD_HUMAN` knob: the human = the runtime process user, derived in-code, never
   #  a config. Cf. pod.ex `runtime_user`/`runtime_home`.)
 
-  # task-queue state (default home-relative `~/.lcars/task-queue/state.json`; unresolvable HOME =
-  # deliberate fail-loud, raise — cf. task_queue/store.ex `default_path/0`; no fallback).
-  if path = System.get_env("LCARS_STATE_PATH") do
-    config :lcars_fleet, task_queue_state_path: Fleet.EnvParse.path("LCARS_STATE_PATH", path)
-  end
+  # (`LCARS_STATE_PATH` / `:task_queue_state_path` RETIRE le 2026-08-20, BL-6-113 : il nommait le
+  #  `state.json` du broker, dont le rail de persistance est supprime. Un bouton qui ne branche plus
+  #  rien est pire qu'absent — il promet un reglage. NE PAS le confondre avec `LCARS_STATE_FS_ROOT`
+  #  juste en dessous : celui-la est l'etat par POD, et il vit toujours.)
 
   # Pod FS state (session_id/phase, recovery). Default `~/.lcars/state` (fleet under the human
   # — cf. pod.ex `default_state_fs_root`). Explicit override for a non-standard deployment;

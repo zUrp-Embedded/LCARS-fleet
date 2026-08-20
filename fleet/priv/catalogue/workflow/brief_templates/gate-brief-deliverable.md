@@ -24,6 +24,46 @@ send back / escalate?
 {{gate_rules}}
 ```
 
+## MESURE OBLIGATOIRE avant tout verdict — `mcp__fleet__run_probe`
+
+Appelle `mcp__fleet__run_probe` avec `{"probe": "test-relevance"}` **avant** de rendre ta décision.
+Ce n'est pas une option offerte, c'est un acte attendu de toi : sans lui, ton avis sur la valeur
+d'une suite de tests est une opinion, et une opinion ne contrôle rien.
+
+Tu ne fournis ni dépôt, ni PR, ni SHA, ni chemins — ils viennent de ton canal et des déclarations du
+projet. Tu n'as qu'un nom à écrire.
+
+**Ce que la sonde te rend.** Elle remet le code de cette livraison à son état de base *en gardant sa
+suite*, et regarde si la suite s'en aperçoit :
+
+- `verdict=relevant` — la suite devient rouge sans le code livré : **elle le prouve**.
+- `verdict=blind` — la suite reste **verte sans le code livré**. C'est un fait sur la SUITE, pas un
+  verdict sur la livraison : à toi de décider ce que ça vaut ici. Une suite aveugle sur un livrable
+  trivial n'est pas la même chose qu'une suite aveugle sur la logique qu'on t'a demandé de couvrir.
+- `verdict=inapplicable` — rien n'était mesurable, et `reason` dit quoi. **`inapplicable` n'est PAS
+  un vert** : c'est l'absence de mesure, et la raconter comme une mesure réussie serait le seul vrai
+  mensonge possible ici. Les raisons se lisent en deux familles :
+
+  | le PROJET n'a pas ce qu'il faut | la MÉCANIQUE n'a pas pu tourner |
+  |---|---|
+  | `no-harness-declared` — aucune section `## Harness` : la sonde ne devine pas quels fichiers sont de la preuve | `fetch-failed` — les deux états n'ont pas pu être récupérés de la forge |
+  | `no-test-cmd` — aucune section `## Test` : il n'y a pas de suite à jouer | `head-unreachable` / `base-unreachable` — un des deux SHA ne se sort pas |
+  | `harness-absent` — les chemins déclarés n'existent pas sur cette tête (le `paths=` les nomme) | `harness-not-restorable` — les chemins n'ont pas pu être rapatriés |
+  | `head-suite-red` — la suite était **déjà rouge** avant qu'on touche à quoi que ce soit, donc rien n'est concluable | `git-unavailable` — pas de git dans l'image du runner |
+
+  La colonne de gauche te dit quelque chose sur **le projet que tu juges** — une suite déjà rouge ou
+  une déclaration manquante sont des faits qui peuvent compter dans ton verdict. Celle de droite ne
+  dit rien du livrable : c'est une panne d'outillage, et la mentionner comme un défaut du projet
+  serait lui imputer la nôtre.
+
+⚠ **Le fait ne décide pas à ta place.** La sonde rapporte, tu tranches. Elle ne peut ni t'obliger à
+refuser, ni t'autoriser à approuver : elle t'enlève seulement la possibilité de conclure sans avoir
+regardé.
+
+⚠ **Et son échec ne te bloque pas.** Runner mort, workflow absent, attente épuisée : rends ton
+verdict quand même, en le disant dans ton `reason`. Ce mécanisme est un GAIN, jamais une condition
+d'avancement — le rail, lui, sait constater après coup si cette tête a été sondée.
+
 ## Expected decision — strict JSON (`gate-decision-v1.json`)
 `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 

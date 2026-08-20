@@ -2332,6 +2332,21 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
+  @doc """
+  Les contextes de statut EXIGÉS sur `main` d'un projet — l'autorité, et la seule.
+
+  Extrait de la règle ci-dessous le 2026-08-20 parce qu'un SECOND lecteur est apparu : le template
+  livre désormais des workflows de SONDE (`probe-*`), dont toute la protection tient à ce que leur
+  contexte ne matche PAS ce glob. Une sonde renommée `CI-…` deviendrait un statut requis et son
+  rouge bloquerait le merge — on aurait retiré le CI de la boucle en croyant l'augmenter.
+
+  Le test qui garde ça (`project_template_workflows_test`) lit CETTE fonction. Recopier `"CI / *"`
+  chez lui aurait fait deux vérités d'un même fait, et c'est celle du test qui aurait survécu au
+  jour où celle-ci change.
+  """
+  @spec main_status_check_contexts() :: [String.t()]
+  def main_status_check_contexts, do: ["CI / *"]
+
   defp protect_main(repo, opts) do
     rule = %{
       rule_name: "main",
@@ -2357,7 +2372,7 @@ defmodule Fleet.Project.Onboard do
       # coupling this leaves, deliberately, because the alternative (`*`) would require every
       # status any tool ever posts on the commit.
       enable_status_check: true,
-      status_check_contexts: ["CI / *"]
+      status_check_contexts: main_status_check_contexts()
     }
 
     case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do

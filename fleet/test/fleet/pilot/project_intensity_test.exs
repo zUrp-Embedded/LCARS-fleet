@@ -281,6 +281,14 @@ defmodule Fleet.Project.IntensityTest do
         end
       end
 
+      # UNE CARTE DECLAREE PAR LE CATALOGUE ET ILLISIBLE : le fichier existe, donc `canon_names` la
+      # liste, mais son enveloppe viole le schema (`ci`, `max_rework_rounds`, `steps` absents), donc
+      # `load!` leve. C'est exactement le cas que le `rescue _` d'avant rebaptisait « inconnue ».
+      File.write!(
+        Path.join([tmp, "bbb", Fleet.Catalogue.rel(:workflow_maps), "cassee.yaml"]),
+        "kind: WorkflowMap\nmetadata:\n  name: cassee\nspec:\n  jury: []\n"
+      )
+
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
       :ok
     end
@@ -306,6 +314,35 @@ defmodule Fleet.Project.IntensityTest do
 
     test "la carte de SON catalogue passe — le refus ne mord pas sur le cas nominal" do
       assert :ok = Fleet.Project.Intensity.declarable_card("commune", "bbb/un-projet", [])
+    end
+
+    test "declaree mais ILLISIBLE : `card_load_failed`, PAS `unknown_card` — BL-6-116" do
+      # ⚠ LE POINT DE TOUT C1. Le corps etait un `rescue _ ->` qui rebaptisait chaque levee de
+      # `load!` en « carte inconnue » : nom non-slug, absence de l'image, YAML illisible, schema
+      # invalide, graphe invalide, `spec.ci` manquant — six causes, un seul terme. Mesure : un
+      # `{:unknown_card, "brief-gate"}` intermittent sur une carte canon qui existe, que douze seeds
+      # pleins n'ont pas reproduit parce que la preuve etait detruite a la source.
+      #
+      # `cassee` EST dans le catalogue de `bbb` — c'est le fichier ecrit par le setup. La confondre
+      # avec une absence est le bug ; l'assertion negative ci-dessous est donc la moitie qui compte.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:card_load_failed, "cassee", message}} =
+                   Fleet.Project.Intensity.declarable_card("cassee", "bbb/un-projet", [])
+
+          assert message =~ "schema"
+        end)
+
+      # Le journal NOMME la classe d'exception et l'endroit consulte : au prochain flake, la cause
+      # est ecrite. Et il est en `error` — une carte declaree qui ne charge pas est un catalogue
+      # casse, pas un refus de routine.
+      assert log =~ "FAILED TO LOAD"
+      assert log =~ "[error]"
+
+      refute match?(
+               {:error, {:unknown_card, _}},
+               Fleet.Project.Intensity.declarable_card("cassee", "bbb/un-projet", [])
+             )
     end
   end
 end

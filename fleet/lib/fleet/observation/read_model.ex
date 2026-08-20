@@ -27,11 +27,12 @@ defmodule Fleet.Observation.ReadModel do
     {"gitea.", :coordination},
     {"fleet.boot", :diagnostics},
     {"oauth.", :diagnostics},
-    {"mcp.server_crashed", :diagnostics},
+    {"mcp.server_crashed", :diagnostics}
     # `sdk.upstream_alert` retire le 2026-08-14 (6-016) : residu de `MCPWatcher` (supprime BL-6-44,
-    # la veille du SDK est passee en CI). Une regle de routage pour un type que personne n'emet
-    # trie un flux vide, et se lit comme une categorie alimentee.
-    {"state.corrupt", :diagnostics}
+    # la veille du SDK est passee en CI). `state.corrupt` retire le 2026-08-20 (BL-6-113) : residu
+    # du rail de persistance du broker (`Fleet.TaskQueue.Store`), supprime avec lui. MEME MOTIF, ET
+    # C'EST POURQUOI LA REGLE EST ECRITE ICI PLUTOT QUE DEUX FOIS — une regle de routage pour un
+    # type que personne n'emet trie un flux vide, et se lit comme une categorie alimentee.
   ]
 
   # ── Client ────────────────────────────────────────────────────────────────

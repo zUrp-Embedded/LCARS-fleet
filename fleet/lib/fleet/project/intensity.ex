@@ -137,7 +137,43 @@ defmodule Fleet.Project.Intensity do
   """
   @spec declarable_card(String.t(), String.t() | nil, keyword()) :: :ok | {:error, term()}
   def declarable_card(name, repo, opts \\ []) when is_binary(name) do
-    case Fleet.Workflow.Loader.load!(name, loader_opts(repo, opts)) do
+    lopts = loader_opts(repo, opts)
+
+    # ⚠ L'ABSENCE SE DEMANDE, ELLE NE SE DEDUIT PAS D'UNE EXCEPTION.
+    #
+    # Ce corps etait un `rescue _ ->` qui rebaptisait TOUTE levee de `load!` en « carte inconnue ».
+    # Mesure (BL-6-116) : un `{:error, {:unknown_card, "brief-gate"}}` intermittent sur une carte
+    # canon qui EXISTE — douze seeds pleins n'ont rien reproduit, parce que la preuve etait detruite
+    # a la source. `load!` leve pour au moins six raisons distinctes : nom non-slug (`Slug.cast!`),
+    # carte absente de l'image publiee, YAML illisible, schema invalide, graphe invalide, `spec.ci`
+    # manquant. UNE SEULE est une absence ; les cinq autres sont un catalogue casse, et se faisaient
+    # passer pour la premiere.
+    #
+    # La question « cette carte existe-t-elle ici » a une fonction qui y repond, et elle traverse le
+    # MEME aiguillage que `load!` — image publiee sinon disque (`canon_names/1` = `image_names` |
+    # `disk_canon_names` ; `load!` = `image_card` | `load_from_disk!`). Cette appartenance EST donc le
+    # predicat d'absence de `load!`, sans avoir a classer ce qu'il a leve — classer aurait voulu dire
+    # reconnaitre un message d'exception, ce qui ment le jour ou le message est reformule.
+    #
+    # Et le nom non-slug reste refuse comme inconnu, exactement comme avant : `Slug.cast!` VALIDE
+    # sans transformer (« validates ... without transforming them »), donc un nom invalide ne figure
+    # dans aucune liste. Les deux tests qui l'epinglent (`{:unknown_card, "wfmap/ghost"}`) tiennent.
+    if name in Fleet.Workflow.Loader.canon_names(lopts) do
+      load_declared(name, lopts)
+    else
+      refuse_absent(name, repo, lopts)
+    end
+  end
+
+  # La carte EXISTE la ou on la cherche. Ce qui sort d'ici n'est donc jamais une absence : c'est un
+  # catalogue casse, et il est nomme comme tel.
+  #
+  # On ne laisse PAS l'exception voler — cette fonction est aussi le preflight de la creation de
+  # projet (`Onboard`), dont tout le contrat est de rendre `:ok | {:error, _}` AVANT que le depot
+  # existe. Mais le terme d'erreur porte desormais le message d'origine, et le journal est en
+  # `error` et non en `warning` : au prochain flake, la cause est ecrite, pas a redecouvrir.
+  defp load_declared(name, lopts) do
+    case Fleet.Workflow.Loader.load!(name, lopts) do
       %{"scope" => "project"} ->
         :ok
 
@@ -145,40 +181,52 @@ defmodule Fleet.Project.Intensity do
         {:error, {:card_not_project_scoped, name, scope}}
     end
   rescue
-    _ ->
-      # ⚠ « INCONNUE ICI » N'EST PAS « INCONNUE », ET LA DIFFERENCE EST LA SEULE CHOSE UTILE A DIRE.
-      # Mesure du 2026-08-17, transcript d'un starfleet : le guichet lui presente `standard` du
-      # catalogue `web-demo` (la liste NOMME le catalogue de chaque carte), il la choisit, et
-      # `project_create` la refuse en `{:unknown_card, "standard"}` — parce que l'appel n'a pas
-      # porte `catalogue`, donc l'org a pris le defaut et la carte s'est resolue chez `fleet`. Le
-      # refus enumerait alors les cartes de `fleet`, ou celle demandee ne figure evidemment pas :
-      # un message qui accuse le NOM alors que ce qui manque est l'ARGUMENT VOISIN.
-      #
-      # L'agent a bien travaille — il a verifie qu'aucun depot n'avait ete cree a moitie, il a
-      # refuse de contourner, et il a rendu la main en nommant deux sorties. Il a seulement conclu
-      # « la creation ne sait resoudre que les cartes de fleet », ce qui est faux : elle resout dans
-      # le catalogue du PROJET, et le projet avait atterri dans le mauvais.
-      #
-      # On ne devine PAS a sa place — le catalogue fixe l'org du projet POUR SA VIE, donc choisir
-      # pour lui serait le pire des services. On NOMME : la carte existe la-bas, voici l'argument.
-      elsewhere = carriers_of(name, repo)
-
-      Logger.warning(
-        "ProjectIntensity: card #{inspect(name)} is not declarable by a project — REFUSED " <>
-          "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(loader_opts(repo, opts)), ", ")})" <>
-          case elsewhere do
-            [] ->
-              ""
-
-            cats ->
-              " — it EXISTS in #{Enum.join(cats, ", ")}: pass `catalogue`, the project's org is fixed for life"
-          end
+    e ->
+      Logger.error(
+        "ProjectIntensity: card #{inspect(name)} IS declared by the catalogue but FAILED TO LOAD — " <>
+          "#{inspect(e.__struct__)}: #{Exception.message(e)} (looked in #{inspect(lopts)})"
       )
 
-      case elsewhere do
-        [] -> {:error, {:unknown_card, name}}
-        cats -> {:error, {:card_in_another_catalogue, name, cats}}
-      end
+      {:error, {:card_load_failed, name, Exception.message(e)}}
+  end
+
+  # Le refus d'une carte reellement absente d'ici. Corps inchange depuis le 2026-08-17 — seule son
+  # entree a change : il n'est plus atteint par la retombee d'une exception, mais par un test
+  # d'appartenance. Les deux termes qu'il rend sont les memes, et leurs appelants aussi.
+  defp refuse_absent(name, repo, lopts) do
+    # ⚠ « INCONNUE ICI » N'EST PAS « INCONNUE », ET LA DIFFERENCE EST LA SEULE CHOSE UTILE A DIRE.
+    # Mesure du 2026-08-17, transcript d'un starfleet : le guichet lui presente `standard` du
+    # catalogue `web-demo` (la liste NOMME le catalogue de chaque carte), il la choisit, et
+    # `project_create` la refuse en `{:unknown_card, "standard"}` — parce que l'appel n'a pas
+    # porte `catalogue`, donc l'org a pris le defaut et la carte s'est resolue chez `fleet`. Le
+    # refus enumerait alors les cartes de `fleet`, ou celle demandee ne figure evidemment pas :
+    # un message qui accuse le NOM alors que ce qui manque est l'ARGUMENT VOISIN.
+    #
+    # L'agent a bien travaille — il a verifie qu'aucun depot n'avait ete cree a moitie, il a
+    # refuse de contourner, et il a rendu la main en nommant deux sorties. Il a seulement conclu
+    # « la creation ne sait resoudre que les cartes de fleet », ce qui est faux : elle resout dans
+    # le catalogue du PROJET, et le projet avait atterri dans le mauvais.
+    #
+    # On ne devine PAS a sa place — le catalogue fixe l'org du projet POUR SA VIE, donc choisir
+    # pour lui serait le pire des services. On NOMME : la carte existe la-bas, voici l'argument.
+    elsewhere = carriers_of(name, repo)
+
+    Logger.warning(
+      "ProjectIntensity: card #{inspect(name)} is not declarable by a project — REFUSED " <>
+        "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(lopts), ", ")})" <>
+        case elsewhere do
+          [] ->
+            ""
+
+          cats ->
+            " — it EXISTS in #{Enum.join(cats, ", ")}: pass `catalogue`, the project's org is fixed for life"
+        end
+    )
+
+    case elsewhere do
+      [] -> {:error, {:unknown_card, name}}
+      cats -> {:error, {:card_in_another_catalogue, name, cats}}
+    end
   end
 
   # Les porteurs, MOINS celui du projet. La question « qui porte cette carte » a UNE reponse et elle

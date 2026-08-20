@@ -45,6 +45,14 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
   `catalogue` — la liste nomme le catalogue de chaque carte, passe les deux ensemble. Sur une
   **révision**, le projet existe déjà : sa carte doit venir de SON catalogue, et une carte d'ailleurs
   n'est pas une option — remonte à l'humain.
+- `{:card_load_failed, nom, message}` — la carte **existe bien** dans le catalogue de ce projet, et
+  elle ne se charge pas : YAML illisible, schéma invalide, graphe invalide. Ce n'est pas une faute
+  de frappe, et ce n'est pas à toi de le réparer — un catalogue cassé se répare par qui le
+  maintient, jamais en choisissant une autre carte. Remonte le `message` tel quel : il nomme
+  exactement ce qui bloque.
+  *(Ce refus était indiscernable de `{:unknown_card, _}` jusqu'au 2026-08-20 : toute levée du
+  chargeur ressortait sous ce seul nom, donc une carte CASSÉE s'annonçait comme une carte
+  INEXISTANTE — et on cherchait une faute de frappe qui n'existait pas.)*
 - `{:card_push_failed, _}` — la forge a refusé la traversée : rien n'a changé, la règle de
   protection est restaurée. Réessaie ou remonte à l'humain.
 - `justification` absente — le refus est voulu. Il n'y a pas de révision sans pourquoi.

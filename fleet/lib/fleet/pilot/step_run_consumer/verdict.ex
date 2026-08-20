@@ -82,13 +82,30 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @doc false
   # F-C161
   @spec gate_decision(term()) :: String.t()
-  def gate_decision(result) when is_map(result) do
+  def gate_decision(result), do: result |> gate_decision_with_reason() |> elem(0)
+
+  @doc """
+  La meme decision, PLUS ce qui a ete refuse.
+
+  ⚠ **LE MOTIF ETAIT CONSOMME DANS UN LOG ET PERDU** (trouve par relecture adversariale,
+  2026-08-20). Cette fonction validait l'enveloppe, journalisait les violations de schema, et
+  rendait `"halt_invalid"` — une chaine sans memoire. La passe de correction du juge
+  (`VerdictCorrection`, B4) promet de lui remettre « ce qui n'allait pas » ; elle lisait une cle
+  `:invalid_reason` que PERSONNE ne posait, donc elle envoyait toujours son texte de repli
+  generique. Le mecanisme entier tenait sur un detail que rien ne produisait — et il aurait demande
+  au juge de deviner, ce qu'il promettait justement d'eviter.
+
+  Rend `{decision, reason}`, `reason` valant `nil` quand il n'y a rien a dire : un verdict valide
+  n'a pas de violation a nommer, et en inventer une serait pire que de n'en pas avoir.
+  """
+  @spec gate_decision_with_reason(term()) :: {String.t(), String.t() | nil}
+  def gate_decision_with_reason(result) when is_map(result) do
     reason = result["reason"]
 
     if result["decision"] in @gate_decisions and is_binary(reason) and reason != "" do
       case ExJsonSchema.Validator.validate(resolved_schema(@schema_file), result) do
         :ok ->
-          result["decision"]
+          {result["decision"], nil}
 
         {:error, errors} ->
           Logger.warning(
@@ -96,14 +113,50 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
               "#{@schema_file} envelope invalid (#{inspect(errors)}); fail-closed halt_invalid"
           )
 
-          "halt_invalid"
+          {"halt_invalid", describe_violations(errors)}
       end
     else
-      "halt_invalid"
+      {"halt_invalid", missing_envelope(result)}
     end
   end
 
-  def gate_decision(_), do: "halt_invalid"
+  def gate_decision_with_reason(_), do: {"halt_invalid", "aucun verdict lisible dans le resultat"}
+
+  # Les violations, en une ligne LISIBLE PAR L'AGENT : `inspect/1` du terme ExJsonSchema rend une
+  # liste de tuples que personne ne lit a froid. On garde le pointeur JSON et le message, qui sont
+  # exactement ce qu'il faut pour re-emballer.
+  #
+  # UNE SEULE CLAUSE, et pas de repli `defp describe_violations(other)` : Dialyzer prouve qu'il
+  # serait mort — `ExJsonSchema.Validator.validate/2` rend toujours une liste sur `{:error, _}`.
+  # Une clause de garde inatteignable est exactement ce que ce chantier traque ailleurs ; on ne va
+  # pas en poser une ici pour se rassurer. Le `inspect/1` INTERNE, lui, reste : il couvre une forme
+  # d'entree que la bibliotheque peut faire evoluer sans changer le type de retour.
+  defp describe_violations(errors) when is_list(errors) do
+    errors
+    |> Enum.map_join(" · ", fn
+      {msg, path} when is_binary(msg) and is_binary(path) -> "#{path} : #{msg}"
+      other -> inspect(other)
+    end)
+    |> String.slice(0, 600)
+  end
+
+  # Le cas « meme pas une enveloppe » : on nomme ce qui manque, pas « c'est invalide ».
+  #
+  # Pas de clause `_` ici non plus : l'unique appelant est deja sous `when is_map(result)`. Le
+  # « resultat qui n'est pas un objet » est traite une fonction plus haut, par la clause fourre-tout
+  # de `gate_decision_with_reason/1`, qui est le seul endroit ou ce cas peut exister.
+  defp missing_envelope(result) when is_map(result) do
+    cond do
+      is_nil(result["decision"]) ->
+        "cle `decision` absente"
+
+      result["decision"] not in @gate_decisions ->
+        "`decision` hors vocabulaire : #{inspect(result["decision"])}"
+
+      true ->
+        "cle `reason` absente ou vide — un verdict sans motif n'en est pas un"
+    end
+  end
 
   @doc false
   # C1 2026-08-18: the OPTIONAL machine payload, extracted AND validated in one gesture.

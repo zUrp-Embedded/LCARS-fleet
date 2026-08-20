@@ -32,6 +32,17 @@ spec:
       # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
       - Monitor
       - ToolSearch
+      # LA MESURE, ET ELLE NE DONNE AUCUN ACCES. Ce role juge un LIVRABLE : sans elle son verdict
+      # sur la pertinence d'une suite est une opinion, et une carotte qui controle une opinion est
+      # un RNG en uniforme. L'outil ne prend qu'un NOM de sonde — depot, PR, SHAs et chemins de
+      # preuve viennent du canal et des declarations du projet, jamais du fil (§10c : un juge qui
+      # choisirait sa base choisirait celle qui l'arrange).
+      #
+      # Ni `scoper` ni `gatekeeper` ne l'ont, et l'omission est une decision : le scoper juge un
+      # BRIEF, le gatekeeper juge une EXCEPTION. Aucun des deux n'a de livrable sous les yeux, donc
+      # aucun des deux n'a rien a mesurer — leur donner l'outil ouvrirait un dispatch de runner
+      # pour une question qu'ils ne posent pas.
+      - mcp__fleet__run_probe
     disallowedTools:
       - web_search
       - web_fetch

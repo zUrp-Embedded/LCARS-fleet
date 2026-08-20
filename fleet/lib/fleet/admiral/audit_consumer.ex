@@ -9,15 +9,14 @@ defmodule Fleet.Admiral.AuditConsumer do
     * `:"fleet.boot_complete"` / `:"fleet.boot_partial"` / `:"fleet.boot_failed"`
       — BootOrchestrator lifecycle.
     * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
-      `:"work_item.cleared"` / `:"work_item.failed"` / `:"state.corrupt"` (producer `Fleet.TaskQueue`).
+      `:"work_item.cleared"` / `:"work_item.failed"` (producer `Fleet.TaskQueue`).
 
   ## HALF OF THIS SURVIVES A RESTART, AND IT IS NOT THE HALF YOU WOULD ASSUME
 
   "Audit-grade" describes the CONTENT of these lines, never their durability. The split is by
   Logger level, and `Fleet.DurableLog` writes `warning` and above:
 
-    * ANOMALIES are durable — `pod.failed`, `work_item.failed`, `state.corrupt`, `boot_partial`,
-      `boot_failed`.
+    * ANOMALIES are durable — `pod.failed`, `work_item.failed`, `boot_partial`, `boot_failed`.
     * THE NOMINAL TIMELINE IS NOT — `work_item.enqueued` / `assigned` / `completed` / `cleared` and
       `fleet.boot_complete` are `:info`, so they live in the daemon's console and die with it.
 
@@ -137,10 +136,9 @@ defmodule Fleet.Admiral.AuditConsumer do
     )
   end
 
-  defp log_task_queue_event(:"state.corrupt", %Fleet.Event{payload: p}) do
-    Logger.error("AUDIT task_queue.state.corrupt #{inspect(p)}")
-  end
-
+  # (Clause `:"state.corrupt"` RETIREE le 2026-08-20 avec le rail de persistance du broker, BL-6-113.
+  # Elle journalisait la relecture ratee d'un `state.json` ; plus rien ne peut emettre ce type, et le
+  # registre d'evenements ne l'autorise plus. Une clause qui ne peut plus filtrer decrit un flux.)
   defp log_task_queue_event(_other, _event), do: :ok
 
   defp log_boot_event(:"fleet.boot_complete", payload) do

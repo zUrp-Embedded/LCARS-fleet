@@ -186,7 +186,20 @@ def save_card(name, text):
 # ─── L'etat vivant (onglet AGENTS) ──────────────────────────────────────────────────────────────
 
 SESSION_RE = re.compile(r"^([0-9a-f])badcafe-(\d{4})-4dad-babe-(\d{4})dec0de([0-9a-f])([0-9a-f])$")
-KILL_CLASS = {"0": "jamais tue", "1": "persistant · reprend son slot", "2": "one-shot · moissonne"}
+# ⚠ CETTE TABLE ETAIT FAUSSE, ET PAS A CAUSE DU CHANGEMENT DU 2026-08-20. Elle portait TROIS
+# entrees pour QUATRE classes : la `3` etait absente, donc tout juge, tout `chief` et tout
+# `gatekeeper` s'affichaient « inconnue (3) » dans cet onglet. Et la `2` etait etiquetee
+# « one-shot · moissonne » alors qu'elle porte des pods lies a un ticket, qui ne sont PAS one-shot.
+# Un inventaire d'un artefact voisin ment le jour ou le voisin bouge ; ici il mentait deja avant.
+#
+# L'autorite est `Fleet.CapProfile.kill_class/1`, qui trie desormais par MISSION et non par cycle
+# de vie : l'accueil, l'architecte (tant que le projet est ouvert), les producteurs, les juges.
+KILL_CLASS = {
+    "0": "l'accueil · jamais tue",
+    "1": "l'architecte · une conversation en cours",
+    "2": "producteur · le travail d'un ticket",
+    "3": "juge · une passe de verdict",
+}
 
 def decode_session(sid):
     m = SESSION_RE.match(sid or "")

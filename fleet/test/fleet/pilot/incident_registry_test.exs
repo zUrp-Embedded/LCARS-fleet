@@ -1,5 +1,10 @@
 defmodule Fleet.Pilot.IncidentRegistryTest do
-  use ExUnit.Case, async: true
+  # `async: false` : `with_store/2` ECRIT `LCARS_STORE_ROOT`, globale au NOEUD, et la restaure. En
+  # parallele de `Fleet.Spawner.Pod.LaunchSpecTest` — qui ecrit et lit la meme — cette restauration
+  # tombe au milieu de ses tests et leur fait lire une racine qui n'est pas la leur (mesure du
+  # 2026-08-20, en `mix gate` complet). La regle de `Fleet.TestEnv` vaut pour l'env OS comme pour
+  # l'env d'application : un fichier qui l'ecrit est `async: false`.
+  use ExUnit.Case, async: false
 
   alias Fleet.Pilot.IncidentRegistry, as: Reg
 

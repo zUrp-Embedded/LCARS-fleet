@@ -77,6 +77,7 @@ defmodule Fleet.MCP.PodTools do
   use ExMCP.Server
 
   alias Fleet.MCP.PodTools.Delegation
+  alias Fleet.MCP.PodTools.Probe
   alias Fleet.MCP.PodTools.WorkItems
 
   # F-C138
@@ -147,7 +148,13 @@ defmodule Fleet.MCP.PodTools do
     "issue_retire" => :mutation,
     "forge_list" => :read,
     "publish_link" => :mutation,
-    "toolchain_request" => :mutation
+    "toolchain_request" => :mutation,
+    # ⚠ `:mutation` ET PAS `:read`, malgre un nom qui sonne comme une lecture. Un dispatch FAIT
+    # TOURNER UN RUNNER : deux appels identiques concurrents jouent la sonde deux fois — observable,
+    # facture, et sans autre effet que de doubler l'attente du juge. Le single-flight de l'acceptor
+    # est exactement le bon arbitre. Ce qu'elle ne change pas, c'est l'etat du PROJET : la sonde ne
+    # pousse rien, ne commente rien, ne decide rien.
+    "run_probe" => :mutation
   }
 
   @doc """
@@ -217,6 +224,46 @@ defmodule Fleet.MCP.PodTools do
         "work_item_id" => %{"type" => "string"}
       },
       "required" => ["payload", "work_item_id"]
+    })
+  end
+
+  deftool "run_probe" do
+    meta do
+      name("Run Probe")
+
+      description(
+        "MESURE le livrable que tu juges, au lieu d'en avoir seulement l'opinion. Le rail joue la " <>
+          "sonde nommée sur la forge et te rend son FAIT brut ; il ne te donne aucun accès et ne " <>
+          "juge rien à ta place.\n\n" <>
+          "`probe` = `\"test-relevance\"` : remet le code de cette livraison à son état de base EN " <>
+          "GARDANT sa suite de tests, et regarde si la suite s'en aperçoit. `verdict=relevant` = la " <>
+          "suite prouve le code livré. `verdict=blind` = elle reste VERTE sans lui, donc elle ne le " <>
+          "prouve pas. `verdict=inapplicable` = rien n'était mesurable, et le `reason` dit quoi " <>
+          "(suite déjà rouge sur la tête, aucun chemin de preuve déclaré…).\n\n" <>
+          "⚠ `blind` N'EST PAS un verdict sur la livraison, c'est un fait sur la SUITE — à toi de " <>
+          "décider ce que ça vaut ici. Et `inapplicable` n'est pas un vert : c'est l'absence de " <>
+          "mesure, qui ne se raconte pas comme une mesure réussie.\n\n" <>
+          "Tu ne fournis NI dépôt, NI PR, NI SHA, NI chemins : ils viennent de ton canal et des " <>
+          "déclarations du projet. Un juge qui choisirait sa base choisirait celle qui l'arrange."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "probe" => %{
+          "type" => "string",
+          "enum" => Fleet.MCP.PodTools.Probe.known(),
+          "description" => "Le NOM de la sonde à jouer."
+        },
+        "inputs" => %{
+          "type" => "object",
+          "description" =>
+            "Entrées ADDITIONNELLES déclarées par la sonde. Les clés que le rail calcule " <>
+              "(`base_sha`, `head_sha`, `harness`, `test_cmd`) ne sont jamais écrasées."
+        }
+      },
+      "required" => ["probe"]
     })
   end
 
@@ -1133,6 +1180,34 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("submit_result", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  # ============================================================
+  # Dispatch — mesure demandee par un juge (Fleet.MCP.PodTools.Probe)
+  # ============================================================
+
+  # POD-SCOPE, comme `get_work_item`/`submit_result` et pour la meme raison : le SUJET de l'appel
+  # (depot, PR, SHAs) est derive du canal, jamais du fil. Le seul parametre du juge est le NOM de la
+  # sonde — et un nom inconnu est refuse en enumerant ceux qui existent.
+  def handle_tool_call("run_probe", %{"probe" => probe} = args, %{pod_id: pod_id} = state)
+      when is_binary(probe) and is_binary(pod_id) and pod_id != "" do
+    inputs = Map.get(args, "inputs", %{})
+    inputs = if is_map(inputs), do: inputs, else: %{}
+
+    case Probe.run(pod_id, probe, inputs) do
+      {:ok, facts} -> {:ok, %{content: [json(facts)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("run_probe", %{"probe" => probe}, state) when is_binary(probe) do
+    # `pod_id` absent de l'etat = anomalie d'acceptor. Refus type : une mesure sans pod identifie
+    # n'a pas de sujet, et en inventer un serait sonder le depot de quelqu'un d'autre.
+    {:error, :pod_id_required, state}
+  end
+
+  def handle_tool_call("run_probe", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

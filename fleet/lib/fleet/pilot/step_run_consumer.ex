@@ -105,6 +105,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.GateEngine
   alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
 
   defstruct [
@@ -788,9 +789,12 @@ defmodule Fleet.Pilot.StepRunConsumer do
         state
       ) do
     result = Verdict.gate_result(raw_payload)
-    decision = Verdict.gate_decision(result)
+
+    # Le SECOND chemin vers `apply_verdict`, et il doit porter le motif comme le premier : sinon la
+    # passe de correction (B4) est detaillee sur une moitie du rail et generique sur l'autre.
+    {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
     trace = Verdict.verdict_comment("gatekeeper (juge d'exception §L441)", decision, result)
-    apply_verdict(decision, trace, ctx, state)
+    apply_verdict(decision, trace, Map.put(ctx, :invalid_reason, invalid_reason), state)
   end
 
   defp apply_verdict(
@@ -853,6 +857,41 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
         _ = TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
         result
+
+      # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
+      #
+      # `halt_invalid` est le repli fail-closed de la validation de FORME : un `details` en chaine
+      # au lieu d'un objet, un `chain` d'objets au lieu de chaines nues. Le juge a lu le livrable,
+      # il a une opinion, il l'a mal emballee — et le geler immobilisait un humain pour un champ mal
+      # type. Une passe de correction, une seule, bornee par un marqueur forge.
+      #
+      # LE POD EST ENCORE LA POUR LA RECEVOIR, et la raison exacte a ete corrigee le 2026-08-20
+      # apres relecture : ce N'EST PAS B2 qui le garantit. B2 (`StepRunCompleter.reap_judge/3`) ne
+      # fauche que les juges de PR, sur le chemin `record_review` — les juges de GATE qui arrivent
+      # ici (scoper, gatekeeper) n'y passent jamais. Ce qui garantit leur survie est plus simple et
+      # plus large : AUCUNE fauche n'est declenchee par la PRODUCTION d'un verdict, seulement par
+      # son INGESTION, et une enveloppe refusee n'est pas ingeree. Le pod vit donc encore, avec la
+      # lecture du livrable qui lui a coute son contexte — et c'est ce que la passe depense.
+      #
+      # Auto-gate et ETEINT par defaut : au-dela de la passe, ou si elle n'est pas armee, c'est
+      # exactement le gel d'avant — en nommant pourquoi.
+      "halt_invalid" ->
+        VerdictCorrection.request(
+          n,
+          role,
+          # Le repli n'est plus le cas nominal : les deux chemins qui atteignent ce point posent
+          # desormais `:invalid_reason`. Il reste pour un ctx construit ailleurs un jour.
+          Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision-v1.json` invalide",
+          trace,
+          %VerdictCorrection.Seams{
+            repo: state.repo,
+            forge: state.forge_client,
+            forge_opts: state.forge_opts,
+            task_queue: state.task_queue,
+            spawner: state.spawner,
+            terminal: terminal_seams(state)
+          }
+        )
 
       other ->
         # (Le doublon `audit.verdict` est parti — brouette 2026-08-19 : il re-disait CE gel a une

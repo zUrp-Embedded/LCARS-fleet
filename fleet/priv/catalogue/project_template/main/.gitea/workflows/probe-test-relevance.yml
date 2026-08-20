@@ -1,0 +1,228 @@
+name: probe-test-relevance
+
+# LA SONDE DE PERTINENCE — posée par le scaffold, comme `ci.yml`, et servie par la même source unique
+# (`priv/catalogue/project_template/main/`).
+#
+# ELLE NE JUGE RIEN. Elle répond à UNE question, mécaniquement : « si on remet le code de cette
+# livraison à son état de base en gardant sa suite de tests, la suite s'en aperçoit-elle ? » Une
+# suite qui reste VERTE sans le code qu'elle prétend couvrir ne prouve pas ce code. Une suite qui
+# devient ROUGE l'a prouvé.
+#
+# Le verdict est un FAIT, pas une décision : la sonde le mesure et l'écrit, un juge le lit et
+# tranche. C'est pour ça qu'elle SORT TOUJOURS EN 0 — voir plus bas, c'est la partie contre-intuitive.
+#
+# ═══ LE NOM EST UNE GARDE, PAS UNE DÉCORATION ═══
+#
+# `probe-*`, JAMAIS `CI*`. Gitea compose le contexte d'un statut ainsi :
+# `<workflow> / <job> (<déclencheur>)`. Ce fichier produit donc
+# `probe-test-relevance / relevance (workflow_dispatch)`, qui NE MATCHE PAS le glob `CI / *` exigé
+# par la protection de `main`. Renommé `CI-…`, ce workflow deviendrait un statut REQUIS : son rouge
+# bloquerait le merge, et on aurait retiré le CI de la boucle en croyant l'augmenter.
+#
+# ⚠ Ce qui est établi, c'est que LE NOM protège. Il n'est PAS établi qu'un `workflow_dispatch` ne
+# crée aucun statut, quel que soit son nom. Tant que personne n'a dispatché délibérément un workflow
+# nommé `CI / probe` pour regarder, traite le nom comme LA SEULE protection.
+#
+# ═══ TU RÉÉCRIS `ci.yml` ? ALORS RÉÉCRIS CELUI-CI DANS LE MÊME GESTE ═══
+#
+# Ce fichier REJOUE la commande de ta suite. Il doit donc tourner dans un environnement qui sait la
+# jouer. Le label `shell` est mappé sur `alpine:3.20` dans le déploiement de référence : un `sh`
+# POSIX, `git` ajouté ci-dessous, et RIEN D'AUTRE — pas de python, pas de node, pas de mix.
+#
+# Le jour où ton projet pose sa vraie suite, il donne à `ci.yml` une image qui la fait tourner
+# (`container: <image>` sur le job). **Donne la même à celui-ci.** Deux environnements différents
+# font deux verts qui ne se prédisent pas, et cette sonde deviendrait un générateur d'« inapplicable »
+# que personne ne relierait à l'image.
+#
+# ═══ POURQUOI DEUX EXÉCUTIONS ET PAS UNE ═══
+#
+# Le témoin d'abord, la mesure ensuite. Si la suite est DÉJÀ rouge sur la tête livrée, son rouge sur
+# le code de base ne prouve rien du tout — on mesurerait une panne, pas une couverture. Alors :
+#
+#   1. TÉMOIN — la suite sur la tête telle quelle. Doit être VERTE, sinon rien n'est concluable et
+#      la sonde le dit (`verdict=inapplicable reason=head-suite-red`).
+#   2. MESURE — arbre de BASE, plus le harnais rapatrié de la tête. Rouge ⟹ `relevant`,
+#      vert ⟹ `blind`.
+#
+# Ça double le temps (≈ 3 s par exécution, mesuré) et c'est la différence entre une mesure et un
+# tirage au sort.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: "SHA de l'état de BASE — le code y retourne, la suite n'y retourne pas"
+        required: true
+      head_sha:
+        description: "SHA de la tête livrée — d'où vient le harnais, et où tourne le témoin"
+        required: true
+      harness:
+        description: "Chemins de PREUVE, séparés par des espaces (section `## Harness` du CLAUDE.md)"
+        required: false
+        default: ""
+      test_cmd:
+        description: "La commande EXACTE qui joue la suite — la même que `## Test` et que `ci.yml`"
+        required: true
+
+jobs:
+  relevance:
+    runs-on: shell
+    # `alpine` n'a pas bash. Tout ce qui suit est POSIX.
+    defaults:
+      run:
+        shell: sh
+    steps:
+      # Pas d'`actions/checkout` : l'action est du node, que l'image du job ne porte pas. On pose
+      # `git` et on clone à la main — sortie n°1 de la note de `ci.yml`, celle qui coûte une ligne.
+      - name: Outils
+        run: apk add --no-cache git >/dev/null 2>&1 || true
+
+      - name: Sonder
+        env:
+          FORGE_TOKEN: ${{ github.token }}
+        run: |
+          # PAS de `set -e` ici, et c'est délibéré : ce script FAIT ÉCHOUER des commandes exprès —
+          # l'échec de la suite EST la mesure. Un `set -e` avorterait au moment précis où le fait
+          # apparaît, et la sonde rendrait une panne à la place de son résultat.
+          #
+          # ⚠ `set -f` : GLOB DÉSACTIVÉE POUR TOUT LE SCRIPT. `$harness` est délibérément NON quoté
+          # là où il est développé — c'est ainsi qu'on obtient plusieurs chemins — mais sans `-f`,
+          # le shell y applique AUSSI l'expansion de motifs : un projet déclarant `*.test` verrait
+          # la sonde travailler sur ce que le répertoire courant contient au moment du run, pas sur
+          # ce qu'il a déclaré. `-f` garde la découpe par espaces et supprime la devinette.
+          set -f
+
+          fact() { echo "LCARS-PROBE $*"; }
+          harness="${{ inputs.harness }}"
+          base="${{ inputs.base_sha }}"
+          head="${{ inputs.head_sha }}"
+
+          fact "probe=test-relevance base=${base} head=${head}"
+
+          # ── Cas inapplicables, DITS et non devinés (un vert par défaut serait le mensonge) ──
+          if [ -z "$harness" ]; then
+            fact "verdict=inapplicable reason=no-harness-declared"
+            echo "Ce projet ne déclare aucun chemin de preuve (section '## Harness' de son CLAUDE.md)."
+            echo "La sonde ne devine pas quels fichiers sont du code et lesquels sont de la preuve :"
+            echo "se tromper ici accuserait une livraison à tort."
+            exit 0
+          fi
+
+          # ⚠ UNE COMMANDE DE TEST VIDE FABRIQUERAIT UN `blind` DE TOUTES PIÈCES. `( )` est une
+          # sous-shell valide en POSIX et sort en 0 : le témoin passerait, la mesure passerait, et
+          # la sonde annoncerait « la suite reste verte sans le code livré » à un projet qui n'a
+          # aucune suite. C'est le seul mensonge que cette sonde pouvait produire.
+          if [ -z "${{ inputs.test_cmd }}" ]; then
+            fact "verdict=inapplicable reason=no-test-cmd"
+            echo "Ce projet ne déclare aucune commande de test (section '## Test' de son CLAUDE.md)."
+            exit 0
+          fi
+
+          # ── LA RÉCUPÉRATION VIT ICI, ET PLUS DANS UNE ÉTAPE À PART ──
+          #
+          # Elle avait son propre step avec `set -e`. Un `fetch` en échec y avortait le step, Gitea
+          # SAUTAIT « Sonder », et le run entier rendait rouge SANS ÉMETTRE LE MOINDRE FAIT : le
+          # rail lisait des logs vides et le juge recevait un appel réussi sans verdict. Le
+          # commentaire de fin promettait « TOUJOURS 0 » alors que le JOB, lui, pouvait échouer.
+          #
+          # Le cas n'est pas théorique : `git fetch <sha>` exige que le serveur autorise
+          # `uploadpack.allowReachableSHA1InWant`, ce qui n'est pas le défaut partout. Une
+          # configuration de forge devenait un run rouge muet.
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+          # Le jeton ne s'injecte que dans une URL qui sait le porter. Un `file://` ou un `ssh://`
+          # recevant un `user:pass@` devient une URL invalide — et surtout, y coller un secret
+          # n'aurait aucun sens.
+          case "$url" in
+            http://*|https://*)
+              auth=$(printf '%s' "$url" | sed "s#://#://x-access-token:${FORGE_TOKEN}@#") ;;
+            *)
+              auth="$url" ;;
+          esac
+
+          git init -q repo || { fact "verdict=inapplicable reason=git-unavailable"; exit 0; }
+          cd repo
+          git remote add origin "$auth"
+
+          # ⚠ `2>/dev/null` SUR LES DEUX : l'URL porte le jeton, et git le recrache dans ses
+          # messages d'erreur. Un `fetch` en échec écrirait le jeton dans les logs du job, que la
+          # forge sert à qui peut lire le dépôt.
+          if ! git fetch -q --depth=1 origin "$base" 2>/dev/null ||
+             ! git fetch -q --depth=1 origin "$head" 2>/dev/null; then
+            fact "verdict=inapplicable reason=fetch-failed"
+            echo "Impossible de récupérer les deux états depuis la forge. Cause la plus fréquente :"
+            echo "le serveur n'autorise pas de demander un SHA non annoncé"
+            echo "(git config uploadpack.allowReachableSHA1InWant=true côté forge)."
+            exit 0
+          fi
+
+          git checkout -q "$head" 2>/dev/null || {
+            fact "verdict=inapplicable reason=head-unreachable"
+            exit 0
+          }
+
+          missing=""
+          for p in $harness; do
+            [ -e "$p" ] || missing="$missing $p"
+          done
+          if [ -n "$missing" ]; then
+            fact "verdict=inapplicable reason=harness-absent paths=$(echo $missing | tr ' ' ',')"
+            echo "Chemins déclarés absents de la tête livrée :$missing"
+            exit 0
+          fi
+
+          # ── 1. TÉMOIN — la suite doit être verte AVANT qu'on touche à quoi que ce soit ──
+          echo "===== TÉMOIN : la suite sur la tête livrée ====="
+          ( ${{ inputs.test_cmd }} ) ; witness=$?
+          fact "witness_exit=${witness}"
+
+          if [ "$witness" -ne 0 ]; then
+            fact "verdict=inapplicable reason=head-suite-red"
+            echo "La suite est DÉJÀ rouge sur la tête livrée. Son rouge sur le code de base ne"
+            echo "prouverait rien : on mesurerait une panne, pas une couverture."
+            exit 0
+          fi
+
+          # ── 2. MESURE — arbre de BASE, puis le harnais rapatrié de la tête ──
+          # `checkout base` d'abord : l'arbre devient EXACTEMENT l'état de base, donc un fichier
+          # ajouté par la livraison hors du harnais DISPARAÎT. C'est le but — s'il restait, la suite
+          # le trouverait et le vert ne voudrait rien dire.
+          git checkout -q "$base" || {
+            fact "verdict=inapplicable reason=base-unreachable"
+            exit 0
+          }
+          git checkout -q "$head" -- $harness || {
+            fact "verdict=inapplicable reason=harness-not-restorable"
+            exit 0
+          }
+
+          echo "===== MESURE : code de base + harnais de la tête ====="
+          ( ${{ inputs.test_cmd }} ) ; reverted=$?
+          fact "reverted_exit=${reverted}"
+
+          if [ "$reverted" -ne 0 ]; then
+            fact "verdict=relevant harness=$(echo $harness | tr ' ' ',')"
+            echo "La suite S'APERÇOIT de l'absence du code livré. Elle le prouve."
+          else
+            fact "verdict=blind harness=$(echo $harness | tr ' ' ',')"
+            echo "La suite reste VERTE sans le code livré : elle ne le prouve pas."
+            echo "Ce n'est pas un verdict sur la livraison — c'est un fait sur la suite."
+          fi
+
+          # ⚠ TOUJOURS 0, ET C'EST LA PARTIE CONTRE-INTUITIVE.
+          #
+          # Deux raisons, et la seconde est la vraie. (1) Un run rouge serait indiscernable d'un
+          # runner cassé, d'une image sans python, d'un réseau coupé — le fait le plus utile de cette
+          # sonde deviendrait le plus ambigu. (2) Sortir en échec quand la suite est aveugle serait
+          # DÉCIDER : la sonde rapporte, le juge tranche. Une sonde qui bloque a cessé d'être un
+          # gain pour devenir une précondition, et le jour où elle se trompe elle arrête la flotte.
+          #
+          # ⚠ ET LA PROMESSE PORTE MAINTENANT SUR LE JOB, PAS SEULEMENT SUR CE STEP. Elle ne le
+          # faisait pas : la récupération vivait dans un step à part sous `set -e`, donc un `fetch`
+          # en échec avortait AVANT ce script, Gitea sautait ce step, et le run rendait rouge sans
+          # émettre le moindre fait. Un opérateur lisant ce paragraphe devant un run rouge en
+          # déduisait un bug de runner. La récupération est descendue ici, et son échec est
+          # maintenant un `verdict=inapplicable` comme les autres.
+          #
+          # Le fait vit dans les lignes `LCARS-PROBE`, que le rail lit dans les logs du JOB.
+          exit 0

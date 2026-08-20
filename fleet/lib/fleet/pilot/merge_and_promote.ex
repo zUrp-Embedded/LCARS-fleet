@@ -279,8 +279,15 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
     # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
+    # LA VERIFICATION POST-HOC DE LA SONDE (Q1/①′). Le juge DOIT sonder — son brief l'exige — mais
+    # rien dans le protocole ne l'y force au moment ou il rend son verdict. Ce qui est mecanisable,
+    # c'est le CONSTAT : la forge tient le registre des runs par `head_sha`, donc « personne n'a
+    # mesure cette tete » se lit sans aucun etat local. Meilleur effort — une lecture ratee rend
+    # `:unknown` et n'ecrit rien plutot que d'affirmer une absence qu'on n'a pas etablie.
+    probe = probe_state(forge, repo, pr_number, forge_opts)
+
     body =
-      promote_comment(issue_n, pr_number, producer, approvers, wall, method) <>
+      promote_comment(issue_n, pr_number, producer, approvers, wall, method, probe) <>
         "\n\n" <> signature
 
     # MERGE FIRST, only comment "✅ delivered and merged" IF the merge REALLY succeeded. The reverse
@@ -817,7 +824,8 @@ defmodule Fleet.Pilot.MergeAndPromote do
           String.t(),
           [String.t()],
           :ok | {:skipped, term()},
-          String.t()
+          String.t(),
+          :probed | :unprobed | :unknown
         ) :: String.t()
   def promote_comment(
         issue_n,
@@ -825,13 +833,14 @@ defmodule Fleet.Pilot.MergeAndPromote do
         producer,
         approvers \\ [],
         wall \\ :ok,
-        method \\ "rebase"
+        method \\ "rebase",
+        probe \\ :unknown
       ) do
     """
     ## ✅ Brique ##{issue_n} livrée et fusionnée
 
     - **Livrée par** : `#{producer}` — PR ##{pr_number} (le producteur a codé, le système a poussé).
-    - #{validation_line(approvers, wall)}
+    - #{validation_line(approvers, wall)}#{probe_note(approvers, probe)}
     - **Fusionnée par** : le **rail merge** (`chief`), #{merge_method_line(method)}.
     - **Promue par** : le **rail décision** (`gatekeeper`) — ce commentaire est son acte, et ce ticket sera fermé juste après.
     #{interim_note(approvers)}
@@ -898,11 +907,60 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # none to require: printing it there would contradict the line above it in the same comment.
   defp interim_note([]), do: ""
 
+  # ⚠ CETTE NOTE A SURVECU A LA SEPARATION DES RAILS, ET ELLE LA CONTREDISAIT DANS LE MEME
+  # COMMENTAIRE. Elle disait « puis le `gatekeeper` (habilité au merge) scelle » — trois lignes sous
+  # un « Fusionnée par : le rail merge (`chief`) » que ce module venait d'ecrire. Mesure : ticket
+  # #4 de `fleet/chifoumi` sur le banc, 2026-08-20 04:41, `merged_by: system_chief` a la forge et
+  # le texte annoncant le gatekeeper juste en dessous.
+  #
+  # Le lot D avait corrige tout ce qui NOMMAIT un signataire ; celui-ci decrit une HABILITATION,
+  # donc aucune des relectures ne l'a attrape. C'est le premier defaut rendu par le banc, et il
+  # n'etait trouvable que la : une suite verte ne lit pas la prose qu'elle produit.
   defp interim_note(_approvers),
     do:
       "\n> ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** " <>
-        "(push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le " <>
-        "`gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**.\n"
+        "(push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, le **rail " <>
+        "merge** (`chief`) fusionne, et le **rail décision** (`gatekeeper`) promeut. Cible : y " <>
+        "**ajouter le CI vert requis**.\n"
+
+  # Deux lectures, et la seconde ne part que si la premiere a rendu un sha. `rescue`/`:unknown` sur
+  # tout le reste : cette fonction s'execute APRES un merge reussi, et aucune de ses reponses ne
+  # doit pouvoir empecher la promotion d'une brique deja fusionnee.
+  defp probe_state(forge, repo, pr_number, forge_opts) do
+    with true <- function_exported?(forge, :pr_refs, 3),
+         {:ok, %{head_sha: sha}} <- forge.pr_refs(repo, pr_number, forge_opts),
+         {:ok, probed?} <- forge_actions().probed?(repo, sha, forge_opts) do
+      if probed?, do: :probed, else: :unprobed
+    else
+      _ -> :unknown
+    end
+  rescue
+    _ -> :unknown
+  end
+
+  # Couture unique avec `Fleet.MCP.PodTools.Probe` (`:forge_actions`) : la sonde et sa verification
+  # interrogent le MEME sous-domaine, et deux clefs en donneraient deux avis en test.
+  defp forge_actions,
+    do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
+
+  # SEULE L'ANOMALIE PREND DE L'ENCRE, et c'est un choix contre l'habitude « chaque mur montre qu'il
+  # mord ». Une ligne qui dit la meme chose sur CHAQUE ticket cesse d'etre lue au troisieme ticket ;
+  # celle-ci n'apparait que quand personne n'a mesure, donc elle garde son pouvoir de surprendre.
+  #
+  # `:unknown` N'ECRIT RIEN, jamais. C'est le cas « on n'a pas su regarder » — forge injoignable,
+  # tete illisible. Ecrire « aucune sonde » sur une lecture ratee serait affirmer une absence qu'on
+  # n'a pas etablie, exactement l'inverse de ce que ce commentaire promet.
+  #
+  # ZERO JUGE => RIEN NON PLUS. Sur une carte sans jury (`workshop-direct`), l'absence de sonde ne
+  # dit rien : personne n'a juge, donc personne n'a manque de mesurer.
+  defp probe_note([], _probe), do: ""
+
+  defp probe_note(_approvers, :unprobed),
+    do:
+      "\n    - ⚠ **Aucune sonde n'a tourné sur cette tête** — les avis ci-dessus sont rendus sans " <>
+        "mesure de pertinence des tests. Le verdict reste valable ; sa base est plus étroite."
+
+  defp probe_note(_approvers, _probed_or_unknown), do: ""
 
   # Best-effort by construction: this runs AFTER a real merge, and a forge hiccup here must not
   # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims

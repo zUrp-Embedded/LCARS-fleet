@@ -168,6 +168,41 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert stage_opts[:token] == "system-token"
   end
 
+  # ⚠ MESURE DU BANC, 2026-08-20 — `fleet/chifoumi` ticket #4, `merged_by: system_chief` à la forge,
+  # et LE MÊME COMMENTAIRE annonçant trois lignes plus bas « puis le `gatekeeper` (habilité au merge)
+  # scelle ». La note interim avait survécu à la séparation des rails.
+  #
+  # POURQUOI RIEN NE L'AVAIT ATTRAPÉE, et c'est la seule chose utile à retenir : le lot D a corrigé
+  # tout ce qui NOMMAIT un signataire — `signer_line`, `validation_line`, les logs. Cette note-là ne
+  # nomme pas un signataire, elle décrit une HABILITATION, donc aucune relecture pilotée par
+  # « qui signe » ne pouvait la voir. Et le test ci-dessus épingle les JETONS, pas la prose : une
+  # suite verte ne lit pas le texte qu'elle produit.
+  #
+  # D'où ce test, qui épingle la prose elle-même. Il est plus sévère que la note : il refuse au
+  # commentaire ENTIER d'attribuer la fusion au rail décision, où que ce soit.
+  test "la PROSE du sceau n'attribue jamais la fusion au gatekeeper — le banc l'a prise en défaut" do
+    forge_opts = [token: "system-token"]
+
+    assert :ok =
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", forge_opts,
+               base_branch: "main"
+             )
+
+    assert_received {:comment, "fleet/p", 42, body, _opts}
+
+    # Ce que le texte DOIT dire : chaque rail à son acte.
+    assert body =~ "rail merge"
+    assert body =~ "rail décision"
+
+    # Ce qu'il ne doit JAMAIS dire. Fusionner est une exécution, et le gatekeeper déclare
+    # `brief_kind: judge` — « never execute what you judge ».
+    refute body =~ "habilité au merge"
+
+    for phrase <- ["gatekeeper` (habilité", "gatekeeper fusionne", "gatekeeper` fusionne"] do
+      refute body =~ phrase, "le sceau attribue la fusion au rail décision : #{inspect(phrase)}"
+    end
+  end
+
   test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do
     assert {:error, {:merge, {:http, 409, _}}} =
              MergeAndPromote.merge_and_promote(MergeFailForge, "fleet/p", 7, 42, "engineer", [],
@@ -634,6 +669,132 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       refute_received {:merge, _, _, _}
       refute_received {:comment, _, _, _, _}
       assert log =~ "conflict signal UNREADABLE"
+    end
+  end
+
+  # ═══ A5 — LA VÉRIFICATION POST-HOC DE LA SONDE ═══
+  #
+  # Arbitrage Q1 : la sonde est TIRÉE par le juge, donc rien ne peut le forcer à l'appeler au moment
+  # où il rend son verdict. Ce qui devient mécanique, c'est le CONSTAT — la forge tient le registre
+  # des runs par `head_sha`. Politique : ANNOTER, jamais rejeter. Rejeter referait de la sonde une
+  # précondition par la porte de derrière, et le doc 14 pose qu'elle est un gain.
+  describe "A5 — le sceau constate si la tête a été sondée, et n'en fait jamais un mur" do
+    # `OkForge` décrit un dépôt SANS jury, et l'absence de sonde n'y veut rien dire. Il fallait donc
+    # un stub qui porte de vrais avis favorables : c'est la seule forme où « rendu sans mesure » est
+    # une phrase qui a un sens.
+    defmodule JuryForge do
+      @moduledoc false
+      defdelegate count_comments_marked(r, n, p, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate post_comment(r, n, b, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate merge_pr(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate set_stage(r, n, s, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate close_issue(r, n, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate pr_refs(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      def get_route(_r, _n, _o), do: :none
+
+      def pr_review_state(_repo, _n, _opts),
+        do:
+          {:ok,
+           %{
+             verdicts: %{"fleet_qualifier" => :approved, "fleet_reviewer" => :approved},
+             reviewers: ["fleet_qualifier", "fleet_reviewer"],
+             outcome: :approved
+           }}
+    end
+
+    # Les trois stubs SIGNALENT leur appel : c'est ce qui rend les `refute` ci-dessous
+    # discriminants. Sans ce signal, « aucune mention » est vrai pour `:probed`, pour `:unknown`,
+    # et pour tout chemin qui n'a jamais interrogé la sonde — trois faits opposés, une assertion.
+    defmodule Probed do
+      @moduledoc false
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:ok, true}
+      end
+    end
+
+    defmodule Unprobed do
+      @moduledoc false
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:ok, false}
+      end
+    end
+
+    defmodule Unreadable do
+      @moduledoc false
+      def probed?(repo, sha, _opts) do
+        send(self(), {:probed_asked, repo, sha})
+        {:error, {:http, 503, "nope"}}
+      end
+    end
+
+    defp seal_body(actions) do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, actions)
+
+      assert :ok =
+               MergeAndPromote.merge_and_promote(JuryForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:comment, "fleet/p", 42, body, _}
+      body
+    end
+
+    test "tête NON sondée + des juges → la mention est écrite, et le merge a quand même eu lieu" do
+      body = seal_body(Unprobed)
+
+      assert body =~ "Aucune sonde n'a tourné sur cette tête"
+
+      # ⚠ LA MOITIÉ QUI COMPTE. Le verdict reste valable et la brique est fusionnée : la mention
+      # documente une base plus étroite, elle ne refuse rien.
+      assert_received {:merge, "fleet/p", 7, _}
+      assert body =~ "livrée et fusionnée"
+    end
+
+    # ⚠ CES DEUX TESTS ÉTAIENT NON-DISCRIMINANTS, ET UNE RELECTURE ADVERSARIALE L'A DIT. Ils
+    # vérifiaient l'ABSENCE d'une mention — or `:probed` ET `:unknown` produisent tous deux `""`,
+    # donc chacun passait aussi pour la mauvaise raison : un `pr_refs` cassé, un `forge_actions`
+    # non installé, n'importe quel court-circuit du `with` dans `probe_state/4`.
+    #
+    # On mesure donc maintenant CE QUE LA SONDE A RÉPONDU, pas seulement ce que le texte ne dit
+    # pas : chaque stub SIGNALE son appel, et le test exige que le chemin ait été traversé.
+    test "tête SONDÉE → la lecture a bien eu lieu, ET aucune ligne n'est écrite" do
+      body = seal_body(Probed)
+
+      # Le chemin est traversé — sans ça, l'assertion suivante serait vraie pour dix raisons.
+      assert_received {:probed_asked, "fleet/p", "deadbeef"}
+      # Une ligne qui dit la même chose sur chaque ticket cesse d'être lue au troisième.
+      refute body =~ "Aucune sonde"
+    end
+
+    test "lecture IMPOSSIBLE → la question a été posée, et RIEN n'est affirmé" do
+      body = seal_body(Unreadable)
+
+      assert_received {:probed_asked, "fleet/p", "deadbeef"}
+
+      # `:unknown` est distinct de « personne n'a mesuré ». Les confondre écrirait sur le ticket un
+      # fait produit par une forge injoignable.
+      refute body =~ "Aucune sonde"
+    end
+
+    test "zéro juge → la sonde n'est même pas INTERROGÉE (rien à annoter)" do
+      # ⚠ CE TEST ÉTAIT TAUTOLOGIQUE : il installait `Unprobed` alors que la clause
+      # `probe_note([], _)` court-circuite AVANT de regarder l'état de sonde. L'override n'était
+      # jamais consulté, et le test passait avec n'importe quoi — y compris rien.
+      #
+      # Il mesure maintenant la propriété qui compte VRAIMENT : sur un dépôt sans jury, aucun
+      # verdict n'a été rendu, donc l'absence de sonde ne dit rien — et le sceau ne dépense même
+      # pas la lecture forge pour s'en assurer.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
+
+      assert :ok =
+               MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:comment, "fleet/p", 42, body, _}
+      refute body =~ "Aucune sonde"
     end
   end
 end

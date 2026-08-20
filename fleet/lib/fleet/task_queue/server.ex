@@ -1,34 +1,35 @@
 defmodule Fleet.TaskQueue.Server do
   @moduledoc """
-  GenServer holding the queue IN RAM (a single writer). Atomic `state.json` persistence
-  versioned `v: 1` (**opt-in**); `%Fleet.Event{}` events on the bus.
+  GenServer holding the queue IN RAM (a single writer); `%Fleet.Event{}` events on the bus.
 
   SINGLE-SOURCE AXIOM: the **forge** is the truth of the work (issues/routes/PR); the
-  broker is only its RAM FRONT. No `WorkItem` field is broker-only-durable (everything is
-  re-derivable on forge re-dispatch) → **in prod the broker runs EPHEMERAL** (`persist: false`, cf.
-  `Application`): no `state.json`, hence no stale persisted tasks that survive reboots.
-  On restart, the queue re-derives itself from the forge polls (canonical
-  reconciliation rail). The persistence below stays an **opt-in** mechanism (tested) for a
-  future broker-only-durable state — NONE exists to this day.
+  broker is only its RAM FRONT. No `WorkItem` field is broker-only-durable — everything is
+  re-derivable on forge re-dispatch — so **the broker is EPHEMERAL, period**: no persisted state,
+  hence no stale tasks surviving a reboot. On restart, the queue re-derives itself from the forge
+  polls (canonical reconciliation rail).
+
+  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** Jusqu'au 2026-08-20 l'axiome ci-dessus cohabitait
+  avec un rail de persistance `state.json` opt-in (`Fleet.TaskQueue.Store`, `persist: true`), garde
+  « pour un etat durable cote broker — AUCUN n'existe a ce jour ». Retire (BL-6-113) : 92 lignes de
+  rail, 135 de test et son orchestration ici, pour un mode dont zero appelant demandait
+  l'activation. Le garder coutait plus que sa dette — l'axiome est devenu une POUTRE du cycle de vie
+  du worker, donc rallumer `persist: true` ne serait plus inutile, ce serait FAUX : on
+  ressusciterait au demarrage des mandats que la forge a deja depasses. Un mecanisme dormant qui
+  s'allume detruit du travail ; un mecanisme retire de trop se reecrit.
 
   Broadcasts `%Fleet.Event{source: :task_queue, ...}` on `Phoenix.PubSub`
-  topic `fleet.events`, `correlation_id = work_item.id`. Cross-restart recovery via
-  `state.json` (fail-loud `:state.corrupt` on schema mismatch at READ, non-blocking
-  fallback). On the WRITE side: `persist/1` never blocks a transition — a write failure is
-  logged **error** (durability of the recovery point broken), **non-fatal** (we
-  don't crash the broker over a disk blip); reconciliation goes through the
-  forge-driven rail (re-dispatch from the forge state), not through this local persistence.
+  topic `fleet.events`, `correlation_id = work_item.id`. Reconciliation across a restart goes
+  through the forge-driven rail (re-dispatch from the forge state), and through nothing else.
 
   ## Assumed bottleneck
-  GenServer = intended serialization of state transitions (idempotence + atomic
-  `state.json` write). The ETS-reads / pool optimization is **deferred** (trigger
-  criterion: get_work_item/submit_result latency > 100ms). MVP: everything goes through `call`.
+  GenServer = intended serialization of state transitions (idempotence). The ETS-reads / pool
+  optimization is **deferred** (trigger criterion: get_work_item/submit_result latency > 100ms).
+  MVP: everything goes through `call`.
 
   ## Options
-  `:name` (`nil` → anonymous, test isolation), `:state_path`, `:persist`,
+  `:name` (`nil` → anonymous, test isolation),
   `:topic` (default `"fleet.events"`), `:retention_terminal_max` (max number
-  of TERMINAL tasks kept, default 500; bounds `work_items` in memory AND the size
-  of `state.json` rewritten on every mutation. ACTIVE tasks do not count),
+  of TERMINAL tasks kept, default 500; bounds `work_items` in memory. ACTIVE tasks do not count),
   `:bus` (seam, default `Fleet.EventRouter.Bus`; module with `broadcast/2` — injected in test to
   exercise the non-swallowed `work_item.completed` lifecycle path).
 
@@ -36,7 +37,7 @@ defmodule Fleet.TaskQueue.Server do
   `work_item.completed` is LIFECYCLE load-bearing (the StepRunConsumer depends on it to finish the step_run) →
   `required_broadcast`: a failure is NOT swallowed, it propagates `{:error, {:broadcast_failed, _}}` to the caller
   of `submit_result` (no more mute `:ok` that leaves the forge lock for life). The other events
-  (enqueued/assigned/cleared/failed-deadline/state.corrupt) = `lossy_broadcast` (observability, rescue).
+  (enqueued/assigned/cleared/failed-deadline) = `lossy_broadcast` (observability, rescue).
 
   ⚠ **`required` is about THIS server's obligation, not about delivery.** Its `:ok` proves the bus
   accepted the message; zero subscriber is also `:ok`, so a completion CAN be committed terminal
@@ -47,15 +48,14 @@ defmodule Fleet.TaskQueue.Server do
 
   ## Split — what was extracted, what stays (and why)
 
-  Two concerns extracted into stateless modules (the GenServer state no longer traverses them):
+  One concern extracted into a stateless module (the GenServer state no longer traverses it):
 
-    * `Fleet.TaskQueue.Store` — `state.json` persistence (serialization + FS, atomic
-      write, fail-loud `:corrupt` decoding). The Server keeps the ORCHESTRATION:
-      `persist/1` decides WHETHER to persist (`persist: false` / `state_path: nil`),
-      `load_state/2` decides WHETHER to reload — Store only knows how to read/write.
     * `Fleet.TaskQueue.Broadcast` — load-bearing vs lossy-observability policy + the
       `event/3` envelope. The Server keeps one-line adapters that unpack
       `state.bus`/`state.topic` (the per-instance seams).
+
+  A second one, `Fleet.TaskQueue.Store`, was extracted the same day and REMOVED the day the axiom
+  above became load-bearing (BL-6-113) — cf. the warning at the top.
 
   Two concerns REFUSED for extraction (2 clean cuts > 4 forced ones):
 
@@ -75,7 +75,6 @@ defmodule Fleet.TaskQueue.Server do
 
   alias Fleet.EventRouter.Bus
   alias Fleet.TaskQueue.Broadcast
-  alias Fleet.TaskQueue.Store
   alias Fleet.TaskQueue.WorkItem
 
   # F-C050
@@ -96,26 +95,6 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def init(opts) do
-    persist? = Keyword.get(opts, :persist, true)
-
-    # 6-017 — `Keyword.get(opts, :state_path, Store.default_path())` PAYAIT LE DEFAUT TOUJOURS.
-    # Le troisieme argument de `Keyword.get/3` est un argument ordinaire : il est evalue a chaque
-    # appel, que la cle soit posee ou non. Or `Store.default_path/0` porte un `System.user_home!()`
-    # — c'est exactement la parade que son propre commentaire enonce (« un defaut qui coute quelque
-    # chose ne doit tourner que s'il EST la reponse »), et son unique appelant l'enfreignait.
-    #
-    # La consequence n'etait pas theorique : en production le broker tourne EPHEMERE
-    # (`{Server, persist: false}`, cf. `TaskQueue.Application`). Un HOME irresolvable levait donc au
-    # demarrage du serveur, pour un chemin que rien n'aurait lu.
-    #
-    # `nil` n'est pas une valeur nouvelle : `persist/1` et `load_state/2` la traitent deja, et un
-    # test la passe explicitement. On ne resout le defaut que lorsqu'il sert.
-    state_path =
-      case Keyword.fetch(opts, :state_path) do
-        {:ok, path} -> path
-        :error -> if persist?, do: Store.default_path(), else: nil
-      end
-
     base = %{
       work_items: %{},
       # Last-poll per pod (the agent called get_for_pod = in-band ACK, EVEN with no work item → bootstrap
@@ -129,8 +108,6 @@ defmodule Fleet.TaskQueue.Server do
       # not a no-op (tmux buffers the keys and the TUI replays each line as its own submission).
       # Same in-mem/ephemeral nature as `polls`, same purge point (`clear_for_pod`).
       connects: %{},
-      state_path: state_path,
-      persist: persist?,
       topic: Keyword.get(opts, :topic, Bus.main_topic()),
       # Bus seam (default = the real `Fleet.EventRouter.Bus`). Module with `broadcast/2`. Lets us
       # test the non-swallowed lifecycle path (a stub bus that returns `{:error,_}` / raises on work_item.completed)
@@ -152,37 +129,13 @@ defmodule Fleet.TaskQueue.Server do
           )
     }
 
-    case load_state(state_path, persist?) do
-      :empty ->
-        {:ok, base}
-
-      {:ok, work_items} ->
-        {:ok, %{base | work_items: work_items}, {:continue, :reschedule_deadlines}}
-
-      {:corrupt, found} ->
-        {:ok, base, {:continue, {:corrupt, found}}}
-    end
-  end
-
-  @impl GenServer
-  def handle_continue(:reschedule_deadlines, state) do
-    for {_id, %WorkItem{state: s} = t} <- state.work_items, s in @active_states do
-      maybe_schedule_deadline(t)
-    end
-
-    {:noreply, state}
-  end
-
-  @impl GenServer
-  def handle_continue({:corrupt, found}, state) do
-    lossy_broadcast(
-      state,
-      Fleet.Event.new(:task_queue, :"state.corrupt",
-        payload: %{expected: 1, found: inspect(found)}
-      )
-    )
-
-    {:noreply, state}
+    # UN BROKER NEUF EST VIDE, SANS ALTERNATIVE. Il y avait ici un `case load_state(...)` a trois
+    # branches, et les deux autres emportaient chacune un `handle_continue` : `:reschedule_deadlines`
+    # (rearmer les echeances d'items restaures) et `{:corrupt, found}` (diffuser `state.corrupt`).
+    # Aucune n'avait d'autre declencheur que la relecture d'un `state.json`. Sans rail de
+    # persistance, elles ne sont pas « rarement atteintes », elles sont INATTEIGNABLES — et un
+    # `handle_continue` mort est pire qu'absent : il decrit un demarrage que la machine n'a pas.
+    {:ok, base}
   end
 
   # ============================================================
@@ -215,7 +168,7 @@ defmodule Fleet.TaskQueue.Server do
         # `find_active`/`max_by` becomes moot (at most 1 active/pod by construction).
         {state, superseded} = supersede_active(state, pod_id)
 
-        new_state = state |> put_work_item(work_item) |> persist()
+        new_state = state |> put_work_item(work_item)
 
         # Supersede was the ONLY terminal transition with no event: the mandates it closes went
         # `:cleared` behind a debug log, so the audit trail lied by omission about their fate and
@@ -250,7 +203,7 @@ defmodule Fleet.TaskQueue.Server do
 
       %WorkItem{state: :pending} = work_item ->
         assigned = %{work_item | state: :assigned, assigned_at: now()}
-        new_state = state |> put_work_item(assigned) |> persist()
+        new_state = state |> put_work_item(assigned)
 
         lossy_broadcast(
           new_state,
@@ -338,7 +291,7 @@ defmodule Fleet.TaskQueue.Server do
             # Across-restart durability stays the forge reconciliation (F-C050), NOT this ephemeral broker.
             case required_broadcast(state, ev) do
               :ok ->
-                new_state = state |> put_work_item(completed) |> persist()
+                new_state = state |> put_work_item(completed)
                 {:reply, {:ok, completed}, new_state}
 
               {:error, _} = err ->
@@ -375,7 +328,7 @@ defmodule Fleet.TaskQueue.Server do
 
       work_items ->
         cleared = Enum.map(work_items, &%{&1 | state: :cleared})
-        new_state = Enum.reduce(cleared, state, &put_work_item(&2, &1)) |> persist()
+        new_state = Enum.reduce(cleared, state, &put_work_item(&2, &1))
 
         for t <- cleared,
             do:
@@ -440,7 +393,7 @@ defmodule Fleet.TaskQueue.Server do
       %WorkItem{state: s} = work_item when s in @active_states ->
         if deadline_reached?(work_item) do
           failed = %{work_item | state: :failed}
-          new_state = state |> put_work_item(failed) |> persist()
+          new_state = state |> put_work_item(failed)
 
           lossy_broadcast(
             new_state,
@@ -597,16 +550,4 @@ defmodule Fleet.TaskQueue.Server do
     do: Broadcast.required(state.bus, state.topic, ev)
 
   defp now, do: DateTime.utc_now()
-
-  defp persist(%{persist: false} = state), do: state
-  defp persist(%{state_path: nil} = state), do: state
-
-  defp persist(%{state_path: path, work_items: work_items} = state) do
-    Store.save(path, work_items)
-    state
-  end
-
-  defp load_state(_path, false), do: :empty
-  defp load_state(nil, _persist), do: :empty
-  defp load_state(path, true), do: Store.load(path)
 end

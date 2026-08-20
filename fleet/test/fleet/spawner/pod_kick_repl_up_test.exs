@@ -16,7 +16,7 @@ defmodule Fleet.Spawner.Pod.KickReplUpTest do
     name = :"tq_kick_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
-      start_supervised({Fleet.TaskQueue.Server, name: name, persist: false, state_path: nil})
+      start_supervised({Fleet.TaskQueue.Server, name: name})
 
     %{queue: pid, name: name}
   end
