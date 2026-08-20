@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.ForgeStubs do
   @moduledoc """
   Shared ForgeClient stubs for pilot test files (B6 dedup): the two gatekeeper seal
-  tests (`gatekeeper_seal_test` / `gatekeeper_seal_worktree_test`) and the completer
+  tests (`merge_and_promote_test` / `merge_and_promote_worktree_test`) and the completer
   (`step_run_completer_test`) each need the same OkForge / MergeFailForge.
 
   Spies: forge write-ops `send(self(), …)`. The caller (`merge_and_promote`, `complete_pr`)
@@ -45,13 +45,21 @@ defmodule Fleet.Pilot.ForgeStubs do
     # WS2: the seal sets stage/merged post-merge — a load-bearing system trace. Its failure is NOT
     # dropped silently: `merge_and_promote` RETRIES it (bounded, `set_stage_merged_with_retry`) and logs
     # loud, since a lost stage/merged left the arch waiting forever on a merged brick (cf.
-    # gatekeeper_seal.ex). This stub always succeeds — No-op (it proves the merge↔comment order).
-    def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
+    # merge_and_promote.ex).
+    #
+    # ⚠ SIGNALE SES OPTS DEPUIS LA REVUE DU 2026-08-20. Il les avalait (`_opts`), donc RIEN
+    # n'épinglait que ce label part sous le compte SYSTÈME et non sous un jeton de rail — mutation
+    # survivante : substituer `merge_opts` à `forge_opts` violait WS1 en silence, suite verte. WS1
+    # n'est pas une préférence : le chemin dégradé (`converge_out_of_band_merge`) n'a AUCUN jeton de
+    # rôle et doit quand même pouvoir poser ce label, qui est la garde anti-redispatch.
+    def set_stage(repo, n, stage, opts) do
+      send(self(), {:set_stage, repo, n, stage, opts})
+      {:ok, :posted}
+    end
 
     # Explicit close: last act of merge_and_promote. SIGNALS (opts included): a test
-    # (MergeAndPromoteTest) proves the close is signed GATEKEEPER, same identity as
-    # merge_pr/comment (regression class: a close signed by the system would break the
-    # identity of the seal).
+    # (MergeAndPromoteTest) proves the close is signed by the DECISION rail — a close signed by the
+    # system, or by the merge rail, would name an owner that did not promote.
     def close_issue(repo, n, opts) do
       send(self(), {:close_issue, repo, n, opts})
       {:ok, :closed}

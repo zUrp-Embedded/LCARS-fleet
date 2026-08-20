@@ -155,6 +155,17 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     # RAIL DÉCISION — la fermeture. C'est la promotion qui ferme, pas la fusion.
     assert_received {:close_issue, "fleet/p", 42, close_opts}
     assert close_opts[:token] == "GK-TOKEN"
+
+    # SYSTÈME — et c'est le troisième acteur, celui qu'on oublie. Le label `stage/merged` ne porte
+    # AUCUN jeton de rôle : ni chief, ni gatekeeper. WS1 (tous les `stage/*` sont système), et ce
+    # n'est pas une préférence de style — le chemin dégradé `converge_out_of_band_merge` n'a aucun
+    # jeton de rôle disponible et doit pourtant pouvoir poser ce label, qui est la garde
+    # anti-redispatch d'une brique fusionnée.
+    #
+    # Sans cette assertion, substituer `merge_opts` à `forge_opts` sur cet appel violait WS1 en
+    # silence, suite verte (mutation nommée par la revue du 2026-08-20).
+    assert_received {:set_stage, "fleet/p", 42, _stage, stage_opts}
+    assert stage_opts[:token] == "system-token"
   end
 
   test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do

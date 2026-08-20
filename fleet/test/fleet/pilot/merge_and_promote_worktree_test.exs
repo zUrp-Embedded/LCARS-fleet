@@ -58,12 +58,16 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
     refute_received {:worktree_sync, _, _}
   end
 
-  test "soft-default #3 — gatekeeper token ABSENT → seal REFUSES (no merge as system, no projection)" do
-    # Fail-closed: without a gatekeeper role token, the seal does NOT merge/close under the SYSTEM
-    # account (privilege escalation + traceability lie). It refuses via the `RoleIdentity` smart-ctor
-    # → the merge does not happen, nothing to project. (Fallback #3: an `as_role` returning
-    # `forge_opts` unchanged = system token kept → merge as lcars-system.)
-    empty = Path.join(System.tmp_dir!(), "no-gk-token-#{System.unique_integer([:positive])}")
+  test "soft-default #3 — jeton du rail MERGE absent → refus AVANT toute tentative, rien a projeter" do
+    # ⚠ CE TEST S'APPELAIT « gatekeeper token ABSENT → seal REFUSES » ET IL PASSAIT POUR LA MAUVAISE
+    # RAISON (revue 2026-08-20). Il vide le repertoire de jetons ENTIER : depuis la separation des
+    # rails, c'est le jeton CHIEF qui manque en premier et c'est LUI qui provoque le refus. Le test
+    # decrivait donc l'ancien contrat — « sans jeton gatekeeper, le sceau ne fusionne pas » — tout en
+    # mesurant autre chose.
+    #
+    # Fail-closed intact, et c'est ce qu'on epingle ici : sans le jeton du rail merge, AUCUNE
+    # tentative, jamais de repli sur le compte systeme ni sur l'autre rail.
+    empty = Path.join(System.tmp_dir!(), "no-role-token-#{System.unique_integer([:positive])}")
     File.mkdir_p!(empty)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
 
@@ -73,6 +77,57 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
              )
 
     refute_received {:worktree_sync, _, _}
+  end
+
+  test "jeton du rail DECISION absent APRES un merge reussi → close_after_merge, et la projection a lieu" do
+    # LE CAS QUE LA SEPARATION DES RAILS A CREE, ET QUE RIEN NE COUVRAIT (revue 2026-08-20). Le
+    # `@doc` le promet — « or the decision rail had no token » — et aucun test ne le mesurait.
+    #
+    # LA MUTATION QU'IL TUE : remplacer `as_role(forge_opts, gatekeeper_role())` par `forge_opts`
+    # dans `converge_postconditions` ferait partir le commentaire et la fermeture sous le compte
+    # SYSTEME — exactement le mensonge d'attribution que ce lot existe pour supprimer — et la suite
+    # serait restee verte.
+    #
+    # Ce qui doit se produire : le merge A LIEU (le rail merge a son jeton), puis la promotion ne
+    # peut pas etre signee. Ni commentaire ni fermeture, retour honnete `{:close_after_merge, _}` —
+    # et la projection se fait quand meme, parce que la brique EST fusionnee : c'est la forge qui
+    # fait foi, pas la ceremonie.
+    Fleet.TestEnv.delete_role_token!("gatekeeper")
+
+    assert {:error, {:close_after_merge, :role_token_unavailable}} =
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "engineer", [],
+               base_branch: "main"
+             )
+
+    # ⚠ ON CIBLE LA SIGNATURE, PAS « un commentaire ». La note de mur de provenance est elle aussi un
+    # commentaire, et elle DOIT partir : signée SYSTÈME, elle dit un fait mécanique, pas une
+    # promotion. Un `refute_received {:comment, ...}` nu échouait dessus — il aurait interdit un
+    # message qu'on veut voir. (`refute_received` n'accepte pas `opts[...]` en garde : on vide la
+    # boîte et on filtre en code.)
+    msgs = drain_mailbox()
+
+    refute Enum.any?(msgs, fn
+             {:comment, _, _, _, opts} -> opts[:dedup_signature] == "[merge:pr-7]"
+             _ -> false
+           end),
+           "le commentaire de promotion ne doit PAS partir sans le jeton du rail décision"
+
+    refute Enum.any?(msgs, &match?({:close_issue, _, _, _}, &1)),
+           "la fermeture est un acte du rail décision — pas de jeton, pas de fermeture"
+
+    assert Enum.any?(msgs, &match?({:worktree_sync, "fleet/myproj", "main"}, &1)),
+           "la brique EST fusionnée : la projection a lieu quoi qu'il arrive à la cérémonie"
+  end
+
+  # Vide la boîte du test et rend les messages dans l'ordre. Nécessaire dès qu'on doit RAISONNER sur
+  # l'ensemble des messages plutôt que d'en attendre un : les gardes de `refute_received` ne peuvent
+  # pas lire une keyword list.
+  defp drain_mailbox(acc \\ []) do
+    receive do
+      msg -> drain_mailbox([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 
   test "F-C066 — merge OK but close FAILS (persistent) → seal {:error, {:close_after_merge, _}} + LOUD log, projection anyway" do
