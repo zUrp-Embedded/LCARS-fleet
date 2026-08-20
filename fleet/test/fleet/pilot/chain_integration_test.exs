@@ -199,7 +199,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # (requested = requested_reviewers).
     def pr_review_state(_pid, _r, _pr, _o), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
-    # FF merge: PR merged + issue close. The real GatekeeperSeal closes the issue EXPLICITLY,
+    # FF merge: PR merged + issue close. The real MergeAndPromote closes the issue EXPLICITLY,
     # separately, after the comment — this sim closes both in the same call for simplicity; the
     # explicit `close_issue` (line ~124) re-sets the same state afterwards, idempotent, without
     # changing the final assertion (`state == "closed"`).

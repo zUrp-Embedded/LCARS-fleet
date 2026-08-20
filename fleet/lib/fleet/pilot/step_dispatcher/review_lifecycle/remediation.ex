@@ -663,7 +663,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp converge_out_of_band(pr_number, head, %Ctx{} = ctx) do
     case RoleDispatch.parse_feature_branch_or_skip(head) do
       {:ok, {issue_n, producer}} ->
-        case Fleet.Pilot.GatekeeperSeal.converge_out_of_band_merge(
+        case Fleet.Pilot.MergeAndPromote.converge_out_of_band_merge(
                ctx.forge,
                ctx.repo,
                pr_number,

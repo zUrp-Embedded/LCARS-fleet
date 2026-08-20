@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.GatekeeperSealReapTest do
+defmodule Fleet.Pilot.MergeAndPromoteReapTest do
   @moduledoc """
   TICKET-LIVE (2026-08-03) — the ticket-scoped producer is reaped AT THE SEAL, and nowhere else.
 
@@ -17,7 +17,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
-  alias Fleet.Pilot.GatekeeperSeal
+  alias Fleet.Pilot.MergeAndPromote
   alias Fleet.TestEnv
 
   @moduletag :tmp_dir
@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   end
 
   defmodule SpySpawner do
-    # Called synchronously from seal_and_merge (same process) → self() = the test.
+    # Called synchronously from merge_and_promote (same process) → self() = the test.
     def kill_pod(pod_id) do
       send(self(), {:killed, pod_id})
       :ok
@@ -45,7 +45,10 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
   setup %{tmp_dir: tmp} do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_worktree_sync, SpySync)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
+    # Les DEUX rails du sceau : `chief` fusionne, `gatekeeper` promeut (séparation 2026-08-20).
+    # Le boot les exige tous les deux ; un fixture qui n'en pose qu'un décrit le monde d'avant.
     Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
+    Fleet.TestEnv.put_role_token!("chief", "tok-chief")
     :ok
   end
 
@@ -53,7 +56,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -66,7 +69,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "architect", [],
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "architect", [],
                base_branch: "main"
              )
 
@@ -77,7 +80,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, DeadPodSpawner)
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(OkForge, "fleet/myproj", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -88,7 +91,13 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert {:error, {:merge, _}} =
-             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/myproj", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(
+               MergeFailForge,
+               "fleet/myproj",
+               7,
+               42,
+               "engineer",
+               [],
                base_branch: "main"
              )
 
@@ -99,7 +108,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
-             GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
+             MergeAndPromote.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
                base_branch: "main",
                producer: "engineer"
              )
@@ -112,7 +121,7 @@ defmodule Fleet.Pilot.GatekeeperSealReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, SpySpawner)
 
     assert :ok =
-             GatekeeperSeal.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
+             MergeAndPromote.converge_out_of_band_merge(OkForge, "fleet/myproj", 7, 42, [],
                base_branch: "main"
              )
 

@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.ForgeStubs do
   tests (`gatekeeper_seal_test` / `gatekeeper_seal_worktree_test`) and the completer
   (`step_run_completer_test`) each need the same OkForge / MergeFailForge.
 
-  Spies: forge write-ops `send(self(), …)`. The caller (`seal_and_merge`, `complete_pr`)
+  Spies: forge write-ops `send(self(), …)`. The caller (`merge_and_promote`, `complete_pr`)
   runs IN the test process (direct calls, no GenServer) → messages land in the test
   mailbox. A test that does not assert them ignores them at no cost.
   """
@@ -43,13 +43,13 @@ defmodule Fleet.Pilot.ForgeStubs do
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
     # WS2: the seal sets stage/merged post-merge — a load-bearing system trace. Its failure is NOT
-    # dropped silently: `seal_and_merge` RETRIES it (bounded, `set_stage_merged_with_retry`) and logs
+    # dropped silently: `merge_and_promote` RETRIES it (bounded, `set_stage_merged_with_retry`) and logs
     # loud, since a lost stage/merged left the arch waiting forever on a merged brick (cf.
     # gatekeeper_seal.ex). This stub always succeeds — No-op (it proves the merge↔comment order).
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
-    # Explicit close: last act of seal_and_merge. SIGNALS (opts included): a test
-    # (GatekeeperSealTest) proves the close is signed GATEKEEPER, same identity as
+    # Explicit close: last act of merge_and_promote. SIGNALS (opts included): a test
+    # (MergeAndPromoteTest) proves the close is signed GATEKEEPER, same identity as
     # merge_pr/comment (regression class: a close signed by the system would break the
     # identity of the seal).
     def close_issue(repo, n, opts) do

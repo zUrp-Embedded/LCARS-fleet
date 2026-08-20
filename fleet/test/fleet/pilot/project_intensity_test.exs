@@ -41,7 +41,7 @@ defmodule Fleet.Project.IntensityTest do
        %{tmp_dir: tmp} do
     # `declared_by` ships in the project repo for good. A caller that declares a level without
     # saying who must not have a role name written on its behalf: that is a permanent false
-    # attribution, the same one `GatekeeperSeal` refuses when it declines the system token.
+    # attribution, the same one `MergeAndPromote` refuses when it declines the system token.
     assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()

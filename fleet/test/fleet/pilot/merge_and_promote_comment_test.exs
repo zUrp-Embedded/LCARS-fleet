@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.GatekeeperSealCommentTest do
+defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
   @moduledoc """
   The closing comment of a merge is the trace an operator reads months later. It must state what
   HAPPENED, not what the nominal path usually does.
@@ -9,11 +9,11 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Pilot.GatekeeperSeal
+  alias Fleet.Pilot.MergeAndPromote
 
   describe "zero-judge card — the frequent, nominal case" do
     test "claims NO approval, and says on whose authority the merge happened" do
-      body = GatekeeperSeal.promote_comment(4, 5, "scribe", [])
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", [])
 
       refute body =~ "APPROUVÉ"
       refute body =~ "APPROVED"
@@ -24,14 +24,14 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
     end
 
     test "the branch-protection note is NOT printed — it would contradict the line above it" do
-      body = GatekeeperSeal.promote_comment(4, 5, "scribe", [])
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", [])
       refute body =~ "EXIGE les approbations"
     end
   end
 
   describe "judged card" do
     test "names the accounts that actually approved" do
-      body = GatekeeperSeal.promote_comment(7, 9, "engineer", ["qualifier", "reviewer"])
+      body = MergeAndPromote.promote_comment(7, 9, "engineer", ["qualifier", "reviewer"])
 
       assert body =~ "`qualifier`"
       assert body =~ "`reviewer`"
@@ -40,7 +40,7 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
     end
 
     test "keeps the interim branch-protection note where it is true" do
-      body = GatekeeperSeal.promote_comment(7, 9, "engineer", ["qualifier"])
+      body = MergeAndPromote.promote_comment(7, 9, "engineer", ["qualifier"])
       assert body =~ "EXIGE les approbations"
     end
   end
@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
   describe "invariants shared by both paths" do
     test "the producer and the PR are named in every case" do
       for approvers <- [[], ["qualifier"]] do
-        body = GatekeeperSeal.promote_comment(42, 43, "scribe", approvers)
+        body = MergeAndPromote.promote_comment(42, 43, "scribe", approvers)
         assert body =~ "`scribe`"
         assert body =~ "PR #43"
         assert body =~ "Brique #42"
@@ -66,7 +66,7 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
   describe "JG-068 — la ligne de validation dit ce que le mur a fait" do
     test "mur SAUTE + zero juge → « n'a PAS tourne », jamais « franchi »" do
       body =
-        GatekeeperSeal.promote_comment(4, 5, "scribe", [], {:skipped, {:no_statement, "ref"}})
+        MergeAndPromote.promote_comment(4, 5, "scribe", [], {:skipped, {:no_statement, "ref"}})
 
       refute body =~ "il a été franchi",
              "le sceau atteste un mur qui n'a pas tourne — et la note posee juste apres dit le " <>
@@ -78,7 +78,7 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
     end
 
     test "TEMOIN — mur FRANCHI + zero juge → la phrase d'origine, inchangee" do
-      body = GatekeeperSeal.promote_comment(4, 5, "scribe", [], :ok)
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", [], :ok)
 
       assert body =~ "il a été franchi"
       refute body =~ "n'a PAS tourné"
@@ -86,15 +86,15 @@ defmodule Fleet.Pilot.GatekeeperSealCommentTest do
 
     test "TEMOIN — avec des juges, la ligne parle des juges quel que soit le mur" do
       for wall <- [:ok, {:skipped, :no_local_clone}] do
-        body = GatekeeperSeal.promote_comment(7, 9, "engineer", ["qualifier"], wall)
+        body = MergeAndPromote.promote_comment(7, 9, "engineer", ["qualifier"], wall)
         assert body =~ "review(s) **APPROVED** natives"
         refute body =~ "n'a PAS tourné"
       end
     end
 
     test "le defaut reste `:ok` — les appelants a quatre arguments ne changent pas de sens" do
-      assert GatekeeperSeal.promote_comment(4, 5, "scribe", []) ==
-               GatekeeperSeal.promote_comment(4, 5, "scribe", [], :ok)
+      assert MergeAndPromote.promote_comment(4, 5, "scribe", []) ==
+               MergeAndPromote.promote_comment(4, 5, "scribe", [], :ok)
     end
   end
 end

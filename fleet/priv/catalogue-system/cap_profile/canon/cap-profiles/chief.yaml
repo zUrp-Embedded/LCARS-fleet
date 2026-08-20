@@ -2,7 +2,32 @@
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
 # Schema: ../../schema/cap-profile-v2.5.json
 #
-# The CONFLICT RESOLVER — the producer half that used to be worn by the gatekeeper.
+# THE MERGE RAIL — the producer half that used to be worn by the gatekeeper.
+#
+# ⚖ ELARGI LE 2026-08-20 (user), ET SON NOM DE CAPACITE EST RESTE EN ARRIERE. Ce profil s'ouvrait
+# sur « The CONFLICT RESOLVER », ce qui etait exact le 2026-08-04 : resoudre un conflit etait tout
+# son travail. Depuis que les rails sont separes par DOMAINE — celui-ci ecrit sur git, le gatekeeper
+# decide — il signe TOUS les merges, leur poussee et la suppression de branche, pas seulement les
+# PR conflictuelles. La capacite s'appelle toujours `conflict_resolver` : elle nomme desormais un
+# SOUS-ENSEMBLE du role.
+#
+# La cle n'est pas renommee ici, et c'est deliberе : une capacite est un contrat de catalogue. La
+# changer dans ce seul fichier ferait declarer aux profils une capacite que rien ne resout, et le
+# validateur de roles structurels refuserait de booter — bruyamment, mais pour un motif que personne
+# ne relierait a une edition de doc. Le renommage est une passe de catalogue entiere (cle + profils
+# + validateur + le SP du chief), prise d'un bloc ou pas du tout.
+#
+# ⚠ ET LE BLOC SP DE CE ROLE NE BOUGE PAS, LUI. Il decrit le POD — « tu arrives sur une PR dont le
+# merge est bloque par un conflit » — et c'est exact : l'agent chief n'est convoque que pour ca. La
+# signature des merges propres est un acte de RAIL, execute par le runtime sous cette identite
+# forge, sans qu'aucun pod ne naisse. Elargir le SP dirait a un agent qu'il accomplit des actes
+# qu'il ne voit jamais. Le nom du role couvre les deux ; le prompt ne couvre que le pod.
+#
+# La raison pour laquelle cette capacite ne peut PAS fusionner avec `exception_judge` n'a pas
+# change, elle s'est renforcee : les deux briefs portent des `brief_kind` opposes — `judge` (« never
+# execute what you judge », propriete de SECURITE que le schema exige de declarer) et `worker`.
+# Fusionner est une execution. Une cle commune laisserait une edition de catalogue deplacer la
+# capacite d'ecriture sur le role qui juge, en silence.
 #
 # It adds no path. The conflict-resolution FUNCTION already existed in four tiers
 # (`Pilot.StepDispatcher.ReviewLifecycle.Remediation`): tier 0 resolves an all-trivial conflict in

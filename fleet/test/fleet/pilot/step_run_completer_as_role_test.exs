@@ -63,9 +63,10 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     # B-04: a non-engineer producer (the doc rail's scribe) needs its own resolvable token.
     Fleet.TestEnv.put_role_token!("scribe", "tok-scribe")
 
-    # :promote goes through `GatekeeperSeal.seal_and_merge` (fail-closed, soft-default #3) →
-    # gatekeeper token required.
+    # :promote goes through `MergeAndPromote.merge_and_promote` (fail-closed, soft-default #3) → LES
+    # DEUX jetons de rail sont requis depuis le 2026-08-20 : `chief` fusionne, `gatekeeper` promeut.
     Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
+    Fleet.TestEnv.put_role_token!("chief", "tok-chief")
 
     :ok
   end

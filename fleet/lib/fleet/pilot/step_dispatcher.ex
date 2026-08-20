@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   @in_flight_label Fleet.Labels.in_flight()
   @awaits_arch_label Fleet.Labels.awaits_arch()
   @awaits_toolchain_label Fleet.Labels.awaits_toolchain()
-  # Scoped label `stage/merged` (set by GatekeeperSeal BEFORE the close). Composed from the TWO
+  # Scoped label `stage/merged` (set by MergeAndPromote BEFORE the close). Composed from the TWO
   # Labels authorities (prefix + value), not a forked literal.
   @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 

@@ -207,7 +207,7 @@ defmodule Fleet.Forge.Client.Jury do
     #
     # WHAT THAT COST, and it is the whole severity of the finding: a PR approved on commit A and
     # then completed by commit B reads as still approved, `review_outcome/2` yields `:approved`,
-    # the routing promotes, and `GatekeeperSeal` merges. Code no judge ever saw lands on the main
+    # the routing promotes, and `MergeAndPromote` merges. Code no judge ever saw lands on the main
     # branch, under a seal that attests the opposite.
     #
     # The unscoped mode still exists — some callers legitimately want every review — but it is now

@@ -1,7 +1,7 @@
 defmodule Fleet.Project.RolesTest do
   @moduledoc """
   Locks the single AUTHORITY for workshop roles (`Fleet.Project.Roles`): capability RESOLUTION +
-  opts overrides. `ProjectOnboard` and `GatekeeperSeal` delegate here (no literal rewritten elsewhere).
+  opts overrides. `ProjectOnboard` and `MergeAndPromote` delegate here (no literal rewritten elsewhere).
   """
   # `async: false` : ce fichier tient `:lcars_fleet, :pilot_producer_role` — une clé GLOBALE que le code de
   # production lit — pendant la durée d'un test. Il la nettoie bien (`on_exit` + `delete_env`), donc
@@ -190,8 +190,8 @@ defmodule Fleet.Project.RolesTest do
     assert "other" == Roles.delegation_workflow_map(delegation_workflow_map: "other")
   end
 
-  test "GatekeeperSeal.gatekeeper_role/0 re-exports the authority (same value)" do
-    assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == Roles.gatekeeper_role()
+  test "MergeAndPromote.gatekeeper_role/0 re-exports the authority (same value)" do
+    assert Fleet.Pilot.MergeAndPromote.gatekeeper_role() == Roles.gatekeeper_role()
   end
 
   describe "conflict_resolver_role/1 — its OWN capability, so the seal keeps its signatory" do
@@ -219,7 +219,7 @@ defmodule Fleet.Project.RolesTest do
 
       assert Roles.conflict_resolver_role(conflict_resolver_role: "engineer") == "engineer"
       assert Roles.gatekeeper_role() == signatory
-      assert Fleet.Pilot.GatekeeperSeal.gatekeeper_role() == signatory
+      assert Fleet.Pilot.MergeAndPromote.gatekeeper_role() == signatory
     end
 
     test "and the reverse: moving the signatory does not move the resolver" do

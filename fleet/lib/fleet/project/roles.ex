@@ -5,7 +5,7 @@ defmodule Fleet.Project.Roles do
   each caller). Override per project/test via the opts.
 
   The three roles live HERE: producer (`producer_role/1`), jury (`jury/2`) and gatekeeper
-  (`gatekeeper_role/1`). `Fleet.Project.Onboard` and `Fleet.Pilot.GatekeeperSeal` delegate here
+  (`gatekeeper_role/1`). `Fleet.Project.Onboard` and `Fleet.Pilot.MergeAndPromote` delegate here
   (never an `engineer`/`gatekeeper` literal rewritten at the caller).
 
   ## The structural roles are RESOLVED, not defaulted
@@ -106,7 +106,7 @@ defmodule Fleet.Project.Roles do
     * `producer` — **at least one**. Several is a legitimate catalogue (`eng_hw` + `eng_sw`): the
       card names which one it dispatches, per step. Refusing readiness for a specialised fleet would
       be the guard inventing a policy nobody asked for.
-    * `exception_judge` — **exactly one**. `Fleet.Pilot.GatekeeperSeal` is the sole writer of the
+    * `exception_judge` — **exactly one**. `Fleet.Pilot.MergeAndPromote` is the sole writer of the
       signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
     * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
     * `project_delegate` — **exactly one**, and it is the one this check was MISSING. Unlike the
@@ -413,19 +413,35 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  TIER-2 CONFLICT RESOLVER — the role handed an unresolved merge conflict once the producer has
-  spent its rework budget. Override by the opt `:conflict_resolver_role` (project/test), then config
+  THE MERGE RAIL — the role that writes on git for the pipeline: it resolves a tier-2 conflict the
+  producer could not close, AND it signs every merge, its push, and the head-branch delete.
+
+  Override by the opt `:conflict_resolver_role` (project/test), then config
   `:lcars_fleet, :pilot_conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
   `conflict_resolver` capability. Raises on zero and on several, like every structural role.
 
-  Its own capability, NOT `exception_judge`. The two responsibilities have lived on SEPARATE roles
-  since the 2026-08-04 scission (`chief` carries `conflict_resolver`, the gatekeeper keeps
-  `exception_judge`) — whether one role or two carry them stays the CATALOGUE's call: resolving a
-  conflict means WRITING code on the PR, signing a clean merge means attesting the verdicts.
-  Sharing one key would make moving the first move the second in silence. With two keys,
-  substituting the resolver is a cap-profile edit that no file in `lib/` sees — and since A2 the
-  seal itself signs a conflict-resolved merge as THIS role (the function that closed the PR),
-  which is exactly why the two keys must never fuse.
+  ## ⚠ The capability key says `conflict_resolver`, and it now names a SUBSET of the job
+
+  ⚖ user, 2026-08-20: the rails were separated by DOMAIN — this one merges, the gatekeeper decides —
+  so this role signs every merge, not only the conflicted ones. Its key and its cap-profile header
+  still describe the day it was born (2026-08-04), when resolving a conflict was all it did.
+
+  The key is DELIBERATELY not renamed here, and the reason is the one this codebase keeps paying
+  for: a capability key is a catalogue contract. Renaming it in `lib/` alone would leave every
+  cap-profile declaring a capability nothing resolves, and the boot validator would refuse to start —
+  loudly, but for a reason nobody would connect to a doc edit. The rename belongs to a catalogue
+  pass (key + profiles + structural-role validator + the chief's SP), taken whole or not at all.
+
+  Until then this docstring IS the correction: the key is historical, the job is the merge rail.
+
+  ## Why it is its own capability, NOT `exception_judge`
+
+  Unchanged, and reinforced. The two responsibilities have lived on separate roles since the
+  2026-08-04 scission, and the reason is a SECURITY property the schema requires declared: their
+  briefs carry opposite `brief_kind` values — `judge` ("never execute what you judge") and `worker`
+  ("execute it"), and one role cannot declare both. Merging is an execution. Sharing one key would
+  let a catalogue edit move the write capability onto the judging role in silence — which is
+  precisely the state the 2026-08-20 separation had to undo in `MergeAndPromote`.
   """
   @spec conflict_resolver_role(keyword()) :: String.t()
   def conflict_resolver_role(opts \\ []) do
