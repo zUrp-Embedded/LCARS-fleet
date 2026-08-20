@@ -164,8 +164,18 @@ run_runner() {
   [ -f "$C" ]
   # aucune ligne de MONTAGE du socket (les mentions en commentaire, elles, expliquent pourquoi)
   ! grep -qE '^\s*-\s*/var/run/docker\.sock' "$C"
-  # la variante dind-rootless, epinglee par digest
-  grep -q 'act_runner:0.6.1-dind-rootless@sha256:' "$C"
+  # ⚠ CE QUI EST TENU EST LA VARIANTE, PLUS LA VERSION. Ce temoin exigeait un digest fige
+  # (`0.6.1-dind-rootless@sha256:…`). Le pin est parti — ⚖ user 2026-08-20 : ce compose ne sert que
+  # des BANCS (`act_runner` n'apparait dans aucun des deux compose produit ; en prod l'admin
+  # provisionne son runner), et un banc est fait pour DECOUVRIR qu'un amont a bouge. Figer du
+  # jetable, c'est apprendre la rupture chez quelqu'un d'autre.
+  #
+  # Le SUFFIXE, lui, reste tenu : `dind` decide si un job a un daemon docker — donc si `container:`
+  # est jouable — et un `latest` nu ramenerait le montage du socket de l'hote que la ligne
+  # ci-dessus refuse. C'est la variante qui porte la propriete de securite, pas le numero.
+  grep -qE 'act_runner:[a-z0-9.]+-dind-rootless' "$C"
+  # Et le digest ne revient pas par la fenetre : un pin ici serait un choix a re-arbitrer.
+  ! grep -qE 'act_runner:[^[:space:]]*@sha256:' "$C"
   grep -qE '^\s*privileged: true' "$C"
   grep -q 'apparmor=rootlesskit' "$C"
   grep -q 'DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"' "$C"

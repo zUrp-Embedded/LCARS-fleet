@@ -37,7 +37,22 @@ name: lcars-runner
 
 services:
   runner:
-    # PIN par digest — act_runner officiel (jamais d'image custom pour l'infra CI).
+    # TAG MOUVANT, DELIBERE — act_runner officiel (jamais d'image custom pour l'infra CI).
+    #
+    # ⚠ CE FICHIER NE SERT QUE DES BANCS. `act_runner` n'apparait nulle part dans les deux compose
+    # du PRODUIT : en prod, la forge et le runner sont provisionnes par l'admin, avec ses choix. Le
+    # pin par digest qui vivait ici ne gouvernait donc que du jetable, et il l'a gouverne trois
+    # semaines sans que personne ne le rouvre.
+    #
+    # ⚖ ARBITRAGE USER 2026-08-20 : un banc est fait pour DECOUVRIR qu'un amont a bouge. Le figer,
+    # c'est apprendre la rupture chez quelqu'un d'autre — le meme motif qui a fait tuer le rail natif
+    # du runner (« deux rails, c'est un rail qui pourrit »). Discriminer une regression amont reste
+    # possible et ne coute rien : un `docker run` avec un tag date. Ce n'est pas une propriete que le
+    # banc doit garantir.
+    #
+    # LA VARIANTE, ELLE, RESTE EXIGEE : `dind-rootless`, pas `latest` nu. Elle decide si un job a un
+    # daemon docker — donc si `container:` est jouable du tout — et le motif complet est juste en
+    # dessous. Un `latest` sans suffixe ramenerait le montage du socket de l'hote.
     # ⚠ VARIANTE `dind-rootless`, ET LE SOCKET DE L'HOTE N'EST PLUS MONTE NULLE PART.
     #
     # CE QU'ON ENLEVE : `- /var/run/docker.sock:/var/run/docker.sock`. Avec lui, n'importe quel job
@@ -61,7 +76,7 @@ services:
     #
     # `apparmor=rootlesskit` : sur Ubuntu/Debian le profil par defaut bloque les changements de
     # namespace dont le daemon embarque a besoin (doc Gitea).
-    image: gitea/act_runner:0.6.1-dind-rootless@sha256:6b8f7c4297c0a5c4c181e4737665d4af69288cdc380e2887105a05a2b78930df
+    image: gitea/act_runner:latest-dind-rootless
     privileged: true
     security_opt:
       - apparmor=rootlesskit

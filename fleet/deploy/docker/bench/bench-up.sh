@@ -582,7 +582,21 @@ try:
     print(len(rs))
 except Exception: print(0)' 2>/dev/null || echo 0)"
     if [[ "${RUNNERS:-0}" -gt 0 ]]; then
-      RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)"
+      # ⚠ CE QUE SERT LE RUNNER EST INDEVINABLE DEPUIS UN POD, ET C'EST LE MOTIF DE CES LIGNES.
+      # L'architecte redige des briefs dont un critere de fin peut dependre d'un vert CI, et il n'a
+      # AUCUN canal vers les runs — aucun outil MCP ne porte de statut CI. Ce que le runner sert, il
+      # ne peut donc que le PARIER. Un banc qui l'imprime est un deploiement qui peut le publier.
+      # Deux faits decident, et aucun ne se devine : le suffixe de variante (`dind` veut dire qu'un
+      # job a un daemon, donc que `container:` est jouable) et le BACKEND des labels — un label
+      # nomme `shell` peut etre servi par une image, auquel cas `runs-on: shell` tourne en conteneur.
+      #
+      # Ce n'est PAS une mesure d'attribuabilite : le tag est mouvant par choix (cf. l'en-tete de
+      # `runner-compose.yml`), et discriminer une regression amont se fait avec un `docker run` date.
+      RUNNER_VER="$("$DOCKER_BIN" exec "${PROJECT}-runner-runner-1" act_runner --version 2>/dev/null | head -1 || true)"
+      RUNNER_IMG="$("$DOCKER_BIN" inspect "${PROJECT}-runner-runner-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
+      RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)
+              ${RUNNER_VER:-version illisible} · image ${RUNNER_IMG:-inconnue}
+              labels : ${RUNNER_LABELS:-aucun}"
       RUNNER_SERT=1
     else
       RUNNER_STATE="demarre mais AUCUN runner vu par la forge — enregistrement rate"
