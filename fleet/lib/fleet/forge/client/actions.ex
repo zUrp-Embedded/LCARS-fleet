@@ -189,6 +189,34 @@ defmodule Fleet.Forge.Client.Actions do
   end
 
   @doc """
+  Cette tête a-t-elle été SONDÉE ? — la vérification post-hoc, et elle ne demande aucun état local.
+
+  C'est la moitié mécanique de l'arbitrage Q1. La sonde est TIRÉE par le juge : son brief l'exige,
+  mais rien dans le protocole ne peut l'y forcer au moment où il rend son verdict. Ce qui devient
+  mécanique n'est donc pas le verdict — c'est **le fait que quelqu'un a mesuré**. Glissement
+  `judge → check`, à coût nul sur le tick du pilote.
+
+  ⚠ **ELLE NE DIT PAS QUI.** Le dispatch part sous le compte du RAIL, pas sous celui du juge, donc
+  l'`actor` du run est le même pour tous. Le fait disponible est « cette tête a été sondée », pas
+  « ce juge a sondé ». C'est suffisant pour ce qu'on en fait : si aucune sonde n'a tourné, aucun
+  juge n'a mesuré.
+
+  ⚠ **ET ELLE NE REJETTE RIEN.** Politique arrêtée : ANNOTER. Un verdict rendu sans sonde reste
+  valable et porte la mention. Rejeter referait de la sonde une PRÉCONDITION par la porte de
+  derrière — et le doc 14 pose qu'elle est un gain, jamais une condition d'avancement.
+
+  `{:error, _}` sur lecture impossible, et le refus de deviner est le point : un `false` rendu sur
+  une forge injoignable écrirait « personne n'a mesuré » alors qu'on n'a pas su regarder.
+  """
+  @spec probed?(String.t(), String.t(), keyword()) :: {:ok, boolean()} | {:error, term()}
+  def probed?(repo, head_sha, opts \\ []) when is_binary(repo) and is_binary(head_sha) do
+    case runs_for_sha(repo, head_sha, [event: "workflow_dispatch"], opts) do
+      {:ok, runs} -> {:ok, runs != []}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   The logs of a run, job by job, concatenated with a header naming each job.
 
   **The logs of a RUN do not exist as an endpoint** — see the moduledoc. This walks

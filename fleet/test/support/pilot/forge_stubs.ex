@@ -35,6 +35,12 @@ defmodule Fleet.Pilot.ForgeStubs do
       :ok
     end
 
+    # A5 — le sceau lit la tête de la PR pour demander à la forge si elle a été SONDÉE. Présent ici
+    # et pas seulement dans le test qui s'en sert : sans lui, `probe_state/4` retomberait sur son
+    # `:unknown` de garde et le mur de la sonde serait muet dans TOUTE la suite, silencieusement.
+    def pr_refs(_repo, _pr, _opts),
+      do: {:ok, %{head_sha: "deadbeef", head_ref: "feat", base_sha: "cafe", base_ref: "main"}}
+
     # The seal READS who approved before writing its closing comment (it must not claim verdicts
     # that do not exist). No jury here → empty verdicts, i.e. the zero-judge sentence.
     def get_route(_r, _n, _o), do: :none

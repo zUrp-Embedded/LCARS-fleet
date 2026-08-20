@@ -671,4 +671,98 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       assert log =~ "conflict signal UNREADABLE"
     end
   end
+
+  # ═══ A5 — LA VÉRIFICATION POST-HOC DE LA SONDE ═══
+  #
+  # Arbitrage Q1 : la sonde est TIRÉE par le juge, donc rien ne peut le forcer à l'appeler au moment
+  # où il rend son verdict. Ce qui devient mécanique, c'est le CONSTAT — la forge tient le registre
+  # des runs par `head_sha`. Politique : ANNOTER, jamais rejeter. Rejeter referait de la sonde une
+  # précondition par la porte de derrière, et le doc 14 pose qu'elle est un gain.
+  describe "A5 — le sceau constate si la tête a été sondée, et n'en fait jamais un mur" do
+    # `OkForge` décrit un dépôt SANS jury, et l'absence de sonde n'y veut rien dire. Il fallait donc
+    # un stub qui porte de vrais avis favorables : c'est la seule forme où « rendu sans mesure » est
+    # une phrase qui a un sens.
+    defmodule JuryForge do
+      @moduledoc false
+      defdelegate count_comments_marked(r, n, p, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate post_comment(r, n, b, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate merge_pr(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate set_stage(r, n, s, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate close_issue(r, n, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate pr_refs(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      def get_route(_r, _n, _o), do: :none
+
+      def pr_review_state(_repo, _n, _opts),
+        do:
+          {:ok,
+           %{
+             verdicts: %{"fleet_qualifier" => :approved, "fleet_reviewer" => :approved},
+             reviewers: ["fleet_qualifier", "fleet_reviewer"],
+             outcome: :approved
+           }}
+    end
+
+    defmodule Probed do
+      @moduledoc false
+      def probed?(_repo, _sha, _opts), do: {:ok, true}
+    end
+
+    defmodule Unprobed do
+      @moduledoc false
+      def probed?(_repo, _sha, _opts), do: {:ok, false}
+    end
+
+    defmodule Unreadable do
+      @moduledoc false
+      def probed?(_repo, _sha, _opts), do: {:error, {:http, 503, "nope"}}
+    end
+
+    defp seal_body(actions) do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, actions)
+
+      assert :ok =
+               MergeAndPromote.merge_and_promote(JuryForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:comment, "fleet/p", 42, body, _}
+      body
+    end
+
+    test "tête NON sondée + des juges → la mention est écrite, et le merge a quand même eu lieu" do
+      body = seal_body(Unprobed)
+
+      assert body =~ "Aucune sonde n'a tourné sur cette tête"
+
+      # ⚠ LA MOITIÉ QUI COMPTE. Le verdict reste valable et la brique est fusionnée : la mention
+      # documente une base plus étroite, elle ne refuse rien.
+      assert_received {:merge, "fleet/p", 7, _}
+      assert body =~ "livrée et fusionnée"
+    end
+
+    test "tête SONDÉE → aucune ligne : seule l'anomalie prend de l'encre" do
+      # Une ligne qui dit la même chose sur chaque ticket cesse d'être lue au troisième.
+      refute seal_body(Probed) =~ "Aucune sonde"
+    end
+
+    test "lecture IMPOSSIBLE → aucune ligne : on n'affirme pas une absence qu'on n'a pas établie" do
+      # `:unknown` est distinct de « personne n'a mesuré ». Les confondre écrirait sur le ticket un
+      # fait produit par une forge injoignable.
+      refute seal_body(Unreadable) =~ "Aucune sonde"
+    end
+
+    test "zéro juge → aucune ligne, même sans sonde (personne n'a manqué de mesurer)" do
+      # `OkForge` décrit un dépôt SANS jury. L'absence de sonde n'y dit rien : aucun verdict n'a été
+      # rendu, donc aucun verdict n'a été rendu sans mesure.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
+
+      assert :ok =
+               MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
+                 base_branch: "main"
+               )
+
+      assert_received {:comment, "fleet/p", 42, body, _}
+      refute body =~ "Aucune sonde"
+    end
+  end
 end

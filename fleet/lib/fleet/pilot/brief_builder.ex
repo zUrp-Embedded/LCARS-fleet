@@ -395,10 +395,17 @@ defmodule Fleet.Pilot.BriefBuilder do
   # fraichement onboarde, le juge recevait donc « une preuve a ete executee » alors qu'aucune ne
   # l'avait ete, et la seule chose que `success` etablit est qu'un runner a repondu vert (6-140).
   #
-  # LES CONTEXTES SONT LA REPONSE HONNETE. Rien ne declare le harnais attendu d'un projet — le
-  # template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est — donc on ne peut
-  # pas verifier qu'il a tourne. On peut nommer ce qui A tourne, et laisser le juge conclure : un
-  # `CI / no-harness-yet` n'est plus indistinguable d'une suite.
+  # LES CONTEXTES SONT LA REPONSE HONNETE. On ne peut pas verifier qu'un harnais attendu a tourne ;
+  # on peut nommer ce qui A tourne, et laisser le juge conclure : un `CI / no-harness-yet` n'est
+  # plus indistinguable d'une suite.
+  #
+  # ⚠ CE PARAGRAPHE DISAIT « RIEN NE DECLARE LE HARNAIS ATTENDU D'UN PROJET ». PLUS VRAI DEPUIS LE
+  # 2026-08-20 : le template porte une section `## Harness` — les chemins qui sont de la PREUVE — et
+  # la sonde `probe-test-relevance` s'en sert. Elle ne repond PAS a la meme question que ce fait-ci :
+  # `success` dit « ca s'execute », la sonde dit « la suite s'apercoit-elle de l'absence du code
+  # livre ». Les deux restent distincts, et leurs rails aussi — le fait CI voyage POUSSE dans ce
+  # brief, la sonde est TIREE par le juge (arbitrage Q1). L'un ne peut pas charger le tick, l'autre
+  # ne peut pas bloquer le pipeline.
   #
   # Absent key = the card does not require the CI (`spec.ci: ignore`): we add NOTHING rather than
   # writing "CI: unknown", which a judge would rightly read as a fact about the code.

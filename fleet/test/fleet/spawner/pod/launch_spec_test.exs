@@ -1,5 +1,8 @@
 defmodule Fleet.Spawner.Pod.LaunchSpecTest do
-  use ExUnit.Case, async: true
+  # `async: false` : ce fichier ECRIT `LCARS_STORE_ROOT`, globale au NOEUD (bloc « magasin
+  # d'outillage » plus bas, ou le raisonnement complet est ecrit). Un second module l'ecrit aussi ;
+  # en parallele, leurs restaurations se marchent dessus.
+  use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod.LaunchSpec
 
@@ -362,8 +365,22 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
-  # ⚠ `async: false` sur ce bloc : il ECRIT `LCARS_STORE_ROOT`, qui est globale au node. Le reste du
-  # fichier reste `async: true` — seul ce describe touche l'environnement.
+  # ⚠ CE COMMENTAIRE DISAIT « `async: false` sur ce bloc », ET CE MECANISME N'EXISTE PAS. Le mode
+  # `async` d'ExUnit se declare une fois par MODULE, dans `use ExUnit.Case` — il n'y a pas d'`async`
+  # par `describe`. La protection annoncee ici n'a donc jamais existe : ce bloc ecrivait
+  # `LCARS_STORE_ROOT`, variable d'environnement GLOBALE AU NOEUD, pendant que le module entier
+  # tournait en parallele des autres.
+  #
+  # MESURE DU 2026-08-20, dans un `mix gate` complet : « clef hors motif => REFUS » n'a rien leve.
+  # `Fleet.Pilot.IncidentRegistryTest` — `async: true` lui aussi — ecrit et RESTAURE la meme variable
+  # dans son `with_store/2` ; sa restauration, tombee au milieu d'un test d'ici, a fait lire une
+  # racine qui n'etait pas la sienne, ou le fichier `bad-key=1` n'existe pas. Le test attendait un
+  # refus et a vu une lecture propre. Il passait seul et echouait en suite complete, donc la seule
+  # facon de le voir etait de le faire tomber.
+  #
+  # Le fichier est desormais `async: false` (en tete), des DEUX cotes. La regle que `Fleet.TestEnv`
+  # enonce pour l'env d'APPLICATION vaut mot pour mot pour l'env OS : un fichier qui l'ecrit est
+  # `async: false`, et aucun commentaire ne remplace le mot-clef.
   describe "le magasin d'outillage — monte, et l'environnement qui le rend utilisable" do
     setup do
       root =
