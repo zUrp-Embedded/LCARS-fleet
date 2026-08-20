@@ -128,8 +128,17 @@ oldest_internal_commit() { # <dir> <system_email> -> sha, or empty
 import os, re, sys
 ident = re.compile(os.environb[b"LCARS_IDENT_RE"], re.I)
 msg = re.compile(os.environb[b"LCARS_MSG_RE"], re.I)
+# ⚠ `maxsplit=3` ET PAS UN SPLIT NU : le body est le DERNIER champ et un message de commit peut
+# contenir nimporte quel octet, `\x1f` compris. Un split nu rendait alors plus de quatre champs et
+# `f[3]` ne portait que la premiere tranche — un marqueur interne place apres restait invisible a
+# la borne. Avec `maxsplit=3`, tout ce qui suit le troisieme separateur EST le body.
+#
+# ANGLE MORT DECLARE : un `\x1e` dans un body coupe le RECORD, pas le champ, et la borne rate ce
+# commit. Aucun format de `git log` ne prefixe ses longueurs, donc aucun separateur ne peut etre sur.
+# La direction reste SURE : la certification rescanne toute lhistoire, voit le marqueur, et REFUSE.
+# On perd une publication, on ne laisse jamais fuir une attribution interne.
 for rec in sys.stdin.buffer.read().split(b"\x1e"):
-    f = rec.strip(b"\n").split(b"\x1f")
+    f = rec.strip(b"\n").split(b"\x1f", 3)
     if len(f) < 4:
         continue
     sha, ae, ce, body = f[0], f[1], f[2], f[3]

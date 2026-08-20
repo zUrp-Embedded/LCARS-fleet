@@ -139,6 +139,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
   echo tok > "$TMP/tok"
 
   git -C "$forge/proj.git" rev-list main | sort > "$TMP/before"
+  # The three foreign commits, captured BY NAME before anything runs.
+  foreign="$(git -C "$work" log --format='%H %s' | awk '$2=="upstream"{print $1}')"
+  [ "$(printf '%s\n' "$foreign" | wc -l)" -eq 3 ]
 
   run "$SCRIPT" --repo fleet/proj --forge "file://$TMP/forge" --token-file "$TMP/tok" \
       --out "$TMP/out" --filter-repo-bin "$FR"
@@ -146,10 +149,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
   [[ "$output" == *"BORNEE"* ]]
 
   git -C "$TMP/out" rev-list main | sort > "$TMP/after"
-  # Same count, and every foreign sha survives: exactly two commits differ, ours.
   [ "$(wc -l < "$TMP/before")" -eq "$(wc -l < "$TMP/after")" ]
-  [ "$(comm -23 "$TMP/before" "$TMP/after" | wc -l)" -eq 2 ]
-  # The import tip — the commit a fork's upstream also has — is untouched.
+
+  # ⚠ COUNTING THE CHANGED SHAS IS NOT ENOUGH, and the first version of this witness did only that.
+  # `comm -23 | wc -l == 2` is equally true of a boundary that rewrote two FOREIGN commits and left
+  # ours alone — the wrong two. So each foreign sha is named and checked individually.
+  for sha in $foreign; do
+    git -C "$TMP/out" cat-file -e "$sha" || {
+      echo "le commit importe $sha a ete reecrit — la lignee du fork est perdue" >&2
+      return 1
+    }
+  done
+  # The import tip is one of them, and it is the commit the upstream also has.
   git -C "$TMP/out" cat-file -e "$tip"
   # And nothing internal is left in what will be published.
   run scan_forbidden_markers "$TMP/out" "$SYSTEM_EMAIL"
@@ -172,6 +183,42 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
       --out "$TMP/out" --filter-repo-bin "$FR"
   [ "$status" -eq 0 ]
   [ -z "$(git -C "$TMP/out" for-each-ref --format='%(refname)' 'refs/remotes/**')" ]
+}
+
+@test "BOUNDED + merge mid-work: the foreign commit inside the range keeps its sha" {
+  # The boundary test above proves the merge does not MOVE the boundary. This one proves what
+  # actually matters afterwards: the foreign commit sits INSIDE the rewritten range, goes through
+  # filter-repo, and comes out with the same sha — because git is content-addressed and nothing
+  # about it changed. Without this, "it keeps its sha" was reasoning, not measurement.
+  need_filter_repo
+  forge="$TMP/forge/fleet"; mkdir -p "$forge"
+  work="$TMP/work"
+  tip="$(fixture_fork "$work")"
+
+  git -C "$work" branch up "$tip"
+  git -C "$work" checkout -q up
+  git -C "$work" -c user.name="Upstream Dev" -c user.email="dev@upstream.example" \
+    commit -q --allow-empty -m "upstream 4"
+  mid="$(git -C "$work" rev-parse HEAD)"
+  git -C "$work" checkout -q main
+  git_sys "$work" merge -q --no-ff up -m "Merge upstream"
+  git_h "$work" commit -q --allow-empty -m "feat: apres le merge
+
+Co-authored-by: LCARS-engineer <engineer@lcars.local>"
+
+  git clone -q --bare "$work" "$forge/proj.git"
+  echo tok > "$TMP/tok"
+
+  run "$SCRIPT" --repo fleet/proj --forge "file://$TMP/forge" --token-file "$TMP/tok" \
+      --out "$TMP/out" --filter-repo-bin "$FR"
+  [ "$status" -eq 0 ]
+
+  # The upstream commit merged in mid-work survives the pass untouched...
+  git -C "$TMP/out" cat-file -e "$mid"
+  # ...and so does everything the fork inherited.
+  git -C "$TMP/out" cat-file -e "$tip"
+  run scan_forbidden_markers "$TMP/out" "$SYSTEM_EMAIL"
+  [ "$status" -eq 0 ]
 }
 
 @test "COUNTER-PROOF: an unbounded rewrite destroys the imported shas" {
