@@ -48,7 +48,8 @@
 #       --host github --dest-repo lordzurp/LCARS-fleet --work /tmp/pub-lcars-fleet
 #   Optional: --host gitlab (default github) · --dest-host HOST (default github.com / gitlab.com;
 #             set it for Enterprise / self-hosted) · --branch lcars/publish · --base main ·
-#             publish-to-github passthroughs (--vendor-identity, --filter-repo-bin, --system-email)
+#             publish-to-github passthroughs (--vendor-identity, --filter-repo-bin,
+#             --system-email, --linearize BRANCH)
 #
 # EXIT CODES:
 #   0   PR/MR open/updated (Tier 1) OR branch pushed + a ready-to-open URL printed (Tier 2)
@@ -95,7 +96,11 @@ while [[ $# -gt 0 ]]; do
     --work) WORK="$2"; shift 2 ;;
     --branch) BRANCH="$2"; shift 2 ;;
     --base) BASE="$2"; shift 2 ;;
-    --vendor-identity|--filter-repo-bin|--system-email) PASSTHROUGH+=("$1" "$2"); shift 2 ;;
+    # `--linearize` WAS MISSING FROM THIS LIST, and that made a documented, tested function
+    # (`linearize_first_parent`, publish-to-github.sh:118) reachable by NOBODY: the transform is
+    # only ever invoked from here, and this rail dropped the flag on the floor. A capability the
+    # script advertises and no path can exercise is a promise the code does not keep.
+    --vendor-identity|--filter-repo-bin|--system-email|--linearize) PASSTHROUGH+=("$1" "$2"); shift 2 ;;
     *) echo "publish-rail: option inconnue: $1" >&2; usage ;;
   esac
 done

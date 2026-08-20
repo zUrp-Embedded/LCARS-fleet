@@ -137,6 +137,33 @@ _full_binding='{"host":"github","dest_host":"ghe.example.com","dest_repo":"acme/
   rm -rf "$(dirname "$work")"
 }
 
+@test "--linearize reaches the rail — the flag used to be dropped on the floor" {
+  # `linearize_first_parent` is written, documented (D2) and covered by three witnesses of its own,
+  # and NO path could reach it: the transform is only invoked from `publish-rail.sh`, and that rail
+  # relayed three passthroughs, not this one. A capability the code advertises and nobody can
+  # exercise is a promise the code does not keep.
+  _bind "$_full_binding"
+  run "$SUT" publish run fleet/demo --linearize main
+  [ "$status" -eq 0 ]
+  grep -q -- "--linearize main" "$RAILLOG"
+}
+
+@test "without --linearize, the flag is absent — not passed empty" {
+  # An empty `--linearize ''` would make the transform refuse on an unknown branch, turning an
+  # option nobody asked for into a failure.
+  _bind "$_full_binding"
+  run "$SUT" publish run fleet/demo
+  [ "$status" -eq 0 ]
+  ! grep -q -- "--linearize" "$RAILLOG"
+}
+
+@test "an unknown option on publish run is refused" {
+  _bind "$_full_binding"
+  run "$SUT" publish run fleet/demo --flatten
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"option inconnue"* ]]
+}
+
 @test "any other non-zero exit propagates AND sweeps" {
   _bind "$_full_binding"
   LCARS_TEST_RAIL_EXIT=4 run "$SUT" publish run fleet/demo

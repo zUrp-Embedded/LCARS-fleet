@@ -39,7 +39,8 @@
 #   forge-cli.sh <verb> --host github|gitlab --dest-host HOST --repo OWNER/NAME [verb args]
 #
 # VERBS:
-#   auth-ok                                   0 = the CLI is present AND authenticated ON THIS HOST
+#   auth-ok                                   0 = present and authenticated ON THIS HOST
+#                                             1 = present but not logged in - 4 = NOT INSTALLED
 #   repo-exists                               0 = present · 1 = absent · 2 = undecidable (rights)
 #   repo-create      --visibility public|private
 #   default-branch                            prints the repository's default branch
@@ -54,6 +55,9 @@
 #   3   the CLI FAILED — to be distinguished from "answered empty". That is exactly what
 #       `EXISTING="$(request_find || true)"` used to flatten: a failing `list` read as "no PR open",
 #       and the final message blamed `create`.
+#   4   `auth-ok`: the CLI is NOT INSTALLED — distinct from "installed but logged out". The box
+#       installs neither `gh` nor `glab` (`10-packages.sh`), so "absent" is the MAJORITY case on a
+#       fresh machine, and "run `gh auth login`" is unusable advice for a binary nobody has.
 
 set -euo pipefail
 
@@ -109,8 +113,13 @@ need_cli() {
 #     while github.com was answering perfectly;
 #   · authenticated on github.com only, destination Enterprise -> exit 0 -> we announced Tier 1,
 #     then the call went to the wrong host.
+# TWO REASONS TO ANSWER NO, AND THEY NEED DIFFERENT GESTURES. Absent (4) is "install it"; present
+# and logged out (1) is "log in". The box installs neither CLI, so the first is what an operator
+# meets on a fresh machine — and being told to run `gh auth login` when there is no `gh` sends them
+# looking in the wrong place. Callers that only care about the tier (the rail) still read any
+# non-zero as Tier 2; callers that ADVISE (the two doctors) read the difference.
 cmd_auth_ok() {
-  command -v "$CLI" >/dev/null 2>&1 || return 1
+  command -v "$CLI" >/dev/null 2>&1 || return 4
   "$CLI" auth status --hostname "$DEST_HOST" >/dev/null 2>&1
 }
 

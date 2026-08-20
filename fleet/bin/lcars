@@ -137,7 +137,7 @@ USAGE
       phase 2 (PR/MR reguliere) : « publish run » ci-dessous, ou le tool « project_publish »
       cote pod — les deux appellent le MEME rail avec les MEMES arguments.
 
-  $PROG publish run <owner/nom-interne>
+  $PROG publish run <owner/nom-interne> [--linearize BRANCHE]
       PHASE 2 — la publication qui se REPETE : rejoue le rail sur le projet lie. Pousse la
       branche roulante (lcars/publish) et laisse UNE seule PR/MR ouverte contre la base ;
       c'est un humain qui la merge. Tier 2 (pas de CLI authentifie) : la branche part quand
@@ -145,6 +145,9 @@ USAGE
       le tool « project_publish », expose du cote ou on peut le rejouer pour diagnostiquer.
       Sortie 6 = la reecriture n'est plus deterministe : le clone est CONSERVE et son
       chemin imprime.
+      --linearize BRANCHE : aplatit l'histoire publiee en first-parent (forme MR canonique,
+      arbre final identique, merges aplatis). Geste HUMAIN : le runtime publie une PR
+      roulante ou les bulles de merge sont normales ; cette forme sert une MR upstream.
 
   $PROG publish status <owner/nom-interne>
       Le doctor par PROJET : est-il pret a publier ? Non lie = etat valide, rapporte
@@ -688,11 +691,15 @@ cmd_forge_status() {
       # host has an issue, and exits 0 as soon as ONE host is fine. A dashboard that shows
       # `[ok] authentifie` to an operator who is not authenticated ON THIS FORGE is worse than no
       # dashboard at all: it lies at the exact spot where one goes looking for the failure.
-      if _fc auth-ok "$host" "$dest_host" "$owner/-"; then
-        echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie"
-      else
-        echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »"
-      fi
+      local arc=0
+      _fc auth-ok "$host" "$dest_host" "$owner/-" || arc=$?
+      case "$arc" in
+        0) echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie" ;;
+        # Absent et deconnecte demandent DEUX gestes differents, et la boite n'installe ni l'un ni
+        # l'autre : « auth login » est un conseil inexecutable quand le binaire n'est pas la.
+        4) echo "  [!!] $name  ($host $owner @ $dest_host) — $cli PAS INSTALLE. Tier 2 : cable un helper git (PR/MR a ouvrir a la main). Tier 1 : installe $cli puis « $cli auth login »." ;;
+        *) echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »" ;;
+      esac
     done
   fi
   [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
@@ -722,8 +729,15 @@ cmd_publish() {
 # It reads the same binding and calls the same rail with the same arguments as the runtime does; a
 # second implementation of the argument list would drift from the first.
 cmd_publish_run() {
-  local repo="${1:-}"
-  [[ -n "$repo" ]] || die "publish run: usage — publish run <owner/nom-interne>"
+  local repo="" linearize=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --linearize) linearize="$2"; shift 2 ;;
+      -*) die "publish run: option inconnue $1" ;;
+      *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "publish run: argument en trop « $1 »"; fi ;;
+    esac
+  done
+  [[ -n "$repo" ]] || die "publish run: usage — publish run <owner/nom-interne> [--linearize BRANCHE]"
   [[ "$repo" == */* ]] || die "publish run: « $repo » n'est pas un owner/nom (repo interne)"
   local slug="${repo//\//__}"
   local binding="$PUBLISH_DIR/$slug.json"
@@ -754,10 +768,19 @@ cmd_publish_run() {
   # rewrite lost its determinism — the one failure that cannot be reproduced from a message.
   local work; work="$(mktemp -d)/clone"
 
+  # `--linearize` STAYS A HUMAN GESTURE, and the boundary is deliberate. The runtime publishes a
+  # ROLLING pull request against a base we control, where merge bubbles are ordinary; the flattened
+  # first-parent form serves the branch of an UPSTREAM merge request, which is a human decision
+  # about a human destination. Carrying it in the runtime would mean a fifth binding key that
+  # `approve`, the rail and `project_publish.ex` all have to keep aligned — the exact shape of
+  # defect this chantier spent its morning closing. It is one key away the day the need is real.
+  local -a extra=()
+  [[ -n "$linearize" ]] && extra=(--linearize "$linearize")
+
   local rc=0
   "$rail" --project "$repo" --forge "$FORGE_BASE_URL" --forge-token-file "$FORGE_TOKEN_FILE" \
     --host "$host" --dest-repo "$dest_repo" --dest-host "$dest_host" --base "$base" \
-    --work "$work" || rc=$?
+    --work "$work" "${extra[@]}" || rc=$?
 
   if [[ "$rc" == 6 ]]; then
     echo "publish run: clone conserve pour inspection -> $work" >&2
@@ -788,11 +811,13 @@ cmd_publish_status() {
   base="$(_json_field "$binding" base)"
   cli="$(_dest_cli "$host")"
   echo "publish « $repo » : lie a $dest_host/$dest_repo (base $base)"
-  if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then
-    echo "  [ok] $cli authentifie"
-  else
-    echo "  [!!] $cli non authentifie — « $cli auth login » (ou cable un helper git)"
-  fi
+  local arc=0
+  _fc auth-ok "$host" "$dest_host" "$dest_repo" || arc=$?
+  case "$arc" in
+    0) echo "  [ok] $cli authentifie" ;;
+    4) echo "  [!!] $cli PAS INSTALLE — Tier 2 (helper git cable, PR/MR a ouvrir a la main), ou installe $cli pour l'automatique" ;;
+    *) echo "  [!!] $cli non authentifie — « $cli auth login » (ou cable un helper git)" ;;
+  esac
   export GIT_TERMINAL_PROMPT=0
   local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
   if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then

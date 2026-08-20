@@ -79,11 +79,29 @@ EOF
   grep -q -- "auth status --hostname ghe.example.com" "$ARGLOG"
 }
 
-@test "auth-ok: a missing CLI is 'not authenticated', not a hard error" {
-  # Tier 2 is a SUPPORTED degraded mode, not a breakdown: the rail still pushes and hands back a URL
-  # to open. A hard error here would turn a planned degradation into a failure.
+@test "auth-ok: a missing CLI answers 4 — NOT INSTALLED, distinct from logged out" {
+  # TWO REASONS TO ANSWER NO, AND THEY NEED DIFFERENT GESTURES. The box installs neither `gh` nor
+  # `glab` (`10-packages.sh`), so "absent" is the majority case on a fresh machine — and telling
+  # that operator to run `gh auth login` sends them looking for a setting on a binary they do not
+  # have. `glab` is genuinely absent from this test's PATH, which is exactly the state under test.
   run "$SUT" auth-ok --host gitlab --dest-host gitlab.com --repo grp/proj
+  [ "$status" -eq 4 ]
+}
+
+@test "auth-ok: a CLI present but logged out answers 1 — 'log in', not 'install'" {
+  _stub gh 1
+  run "$SUT" auth-ok --host github --dest-host github.com --repo acme/widget
   [ "$status" -eq 1 ]
+}
+
+@test "auth-ok: neither answer is a hard error — Tier 2 is a supported mode" {
+  # A caller that only cares about the tier reads any non-zero as Tier 2 and degrades: the rail
+  # still pushes and hands back a URL to open. Only the callers that ADVISE read the difference.
+  _stub gh 1
+  run "$SUT" auth-ok --host github --dest-host github.com --repo acme/widget
+  [ "$status" -ne 0 ]
+  [ "$status" -lt 10 ]
+  [ -z "$output" ]   # and it stays quiet: degrading is not an incident
 }
 
 # ─── request-find: "answered empty" and "failed" are TWO states ────────────────────────────────
