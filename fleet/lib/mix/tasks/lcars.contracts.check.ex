@@ -1950,8 +1950,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     listed =
       case File.read(wf) do
         {:ok, y} ->
-          Regex.scan(~r/^\s*-\s*'([^']+)'\s*$/m, y, capture: :all_but_first)
+          # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Ce motif ne
+          # prenait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur etait vert —
+          # mais passer une entree en double-quote ou en nu l'aurait rendue invisible a `listed`,
+          # donc tous les chemins qu'elle couvre auraient ete declares NON couverts. Un FAUX ROUGE
+          # sur un filtre correct, et l'operateur aurait cherche le defaut dans le filtre. Un
+          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine. (Revue
+          # 2026-08-20.)
+          ~r/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s#'"][^\s#]*))\s*$/m
+          |> Regex.scan(y, capture: :all_but_first)
           |> List.flatten()
+          |> Enum.reject(&(&1 == ""))
           |> MapSet.new()
 
         _ ->
@@ -2566,11 +2575,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> Enum.sort()
 
     # `incompatible` est une liste de PAIRES : le bundle ne doit apparaitre dans aucune.
+    #
+    # ⚠ ET ON ACCEPTE AUSSI L'ENTREE PLATE, QUI EST UNE MALFORMATION. `incompatible:
+    # [adresser-un-agent]` (des chaines au lieu de paires) faisait echouer le `is_list(pair)` :
+    # chaque element etait une chaine, aucun n'etait signale, et le mur passait au VERT sur un
+    # profil qui retire pourtant le bundle. Le schema doit refuser cette forme en amont — mais un
+    # mur qui ne tient que si un AUTRE controle a fait son travail ne tient rien par lui-meme, et
+    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire. (Revue
+    # 2026-08-20.)
     excluded =
       profiles
       |> Enum.filter(fn p ->
-        Enum.any?(p.modop_incompatible, fn pair ->
-          is_list(pair) and @adresser_bundle in pair
+        Enum.any?(p.modop_incompatible, fn entry ->
+          (is_list(entry) and @adresser_bundle in entry) or entry == @adresser_bundle
         end)
       end)
       |> Enum.map(& &1.name)

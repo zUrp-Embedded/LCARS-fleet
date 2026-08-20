@@ -184,7 +184,17 @@ SEED
 
   # RELECTURE : la branche existe VRAIMENT, sinon on n'annonce rien. Un `push` qui rend 0 sur un
   # remote qui a refusé côté hook est un cas connu, et « poussé » n'est pas « présent ».
-  probe || { p_fail "après push, $OPS_BRANCH est toujours absente de $LCARS_OPS_REPO"; return 1; }
+  # ⚠ LES DEUX ECHECS DE LA SONDE NE DISENT PAS LA MEME CHOSE, et les confondre envoie l'operateur
+  # chercher au mauvais endroit. `probe` rend 1 sur « branche absente » et 2 sur « forge
+  # injoignable » : un seul message pour les deux annonçait un push raté là où la forge avait
+  # simplement cessé de répondre entre le push et la relecture. Fenêtre étroite, diagnostic faux.
+  # (Revue 2026-08-20.)
+  local rc; probe && rc=0 || rc=$?
+  case "$rc" in
+    0) : ;;
+    1) p_fail "après push, $OPS_BRANCH est toujours absente de $LCARS_OPS_REPO"; return 1 ;;
+    *) p_fail "après push, la forge ne répond plus — l'état de $OPS_BRANCH est INCONNU, ni confirmé ni infirmé"; return 1 ;;
+  esac
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "branche orpheline $LCARS_OPS_REPO:$OPS_BRANCH créée (ops/toolchains.d/ + README de signature)"
 }

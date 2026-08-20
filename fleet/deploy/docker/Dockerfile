@@ -544,26 +544,29 @@ COPY fleet/deploy/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 COPY fleet/deploy/docker/skel.bashrc      /etc/skel/.bashrc
 
-# ─── A FAIRE — token-saver n'est PAS embarque, et le hook s'efface donc ─────────────────────────
+# ─── token-saver : EMBARQUE, et aucun pod ne l'execute — les deux moities comptent ──────────────
 #
-# La brique de compression d'output (fleet/vendor/token_saver/, Apache-2.0 + glue LCARS)
-# est cablee cote hooks — mais AUCUN pod ne peut executer un hook (sanctuaire : ni `hooks/` monte,
-# ni cle `hooks` dans les settings du pod ; mesure 2026-08-07) et AUCUN
-# COPY ne l'amene ici. Le shim la cherche parmi une liste de candidats, ne la trouve pas, et passe
-# la commande intacte : fail-open. Rien ne casse, rien ne compresse. AUCUN SYMPTOME VISIBLE —
-# c'est precisement pourquoi cette note est dans ce fichier et pas seulement dans un plan.
+# La brique de compression d'output (fleet/vendor/token_saver/, Apache-2.0 + glue LCARS) est
+# EMBARQUEE : le `COPY` est ~30 lignes plus haut, et le chemin qu'il pose figure bien dans les
+# candidats du shim (`.claude/hooks/token-saver-hook.sh`). Ce qui manque n'est pas le transport.
 #
-# A ajouter quand ce fichier sera rouvert (demenagement d'arborescence) :
+# Ce qui manque est l'EXECUTANT : la brique est cablee cote hooks, et un pod n'a pas de hooks — le
+# sanctuaire ne monte pas `hooks/` et ne pose pas de cle `hooks` dans ses settings, deliberement
+# (`bwrap_launch.sh` : charger le `.claude` de l'humain lui ferait heriter SES hooks et bloquerait
+# le boot). Le shim n'est donc jamais appele. Rien ne casse, rien ne compresse, AUCUN SYMPTOME
+# VISIBLE — c'est pour ca que la note vit dans ce fichier.
 #
-#     COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
+# ⚠ CE BLOC A DIT L'INVERSE PENDANT DEUX SEMAINES. Il annoncait « AUCUN COPY ne l'amene ici » et
+# proposait, en A FAIRE, d'ajouter la ligne qui existait deja 44 lignes plus haut — posee par le
+# demenagement d'arborescence (`7177c9dc2`) sans que la note qui le reclamait soit relue. Deux
+# sources contradictoires sur un meme fait, dans un meme fichier : celle qu'on lit n'est jamais
+# celle qu'on a corrigee. Releve par une revue le 2026-08-20.
 #
-# Le chemin de destination doit figurer dans les candidats de .claude/hooks/token-saver-hook.sh
-# (/opt/lcars/fleet/vendor/token_saver y est deja) ou etre passe par LCARS_TOKEN_SAVER_HOME.
-# python3 est deja installe plus haut — la brique est stdlib pure, aucune dependance a ajouter.
-# Le switch reste LCARS_TOKEN_SAVER=off, sans rebuild.
+# Ce qu'il reste a decider, et ce n'est pas un COPY : par quel chemin un pod compresserait sa
+# sortie, puisque les hooks lui sont fermes par construction. `LCARS_TOKEN_SAVER=off` reste le
+# switch, python3 est deja la (la brique est stdlib pure).
 #
 # Ref : fleet/vendor/token_saver/VENDOR.md
-#       work/beyond_#6/chantier-demenagement-arbo-2026-08-04/02-PLAN.md
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
