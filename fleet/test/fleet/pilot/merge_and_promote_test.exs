@@ -1,23 +1,33 @@
-defmodule Fleet.Pilot.GatekeeperSealTest do
+defmodule Fleet.Pilot.MergeAndPromoteTest do
   @moduledoc """
   SINGLE merge seal (F-arch-MCP): signed merge THEN signed gatekeeper comment. The merge is the
   source of truth — NEVER a "merged" claim before reality (F-MERGE-CLAIM-BEFORE-REALITY). The
-  gatekeeper signature is applied INTERNALLY by `seal_and_merge` (`as_gatekeeper` → RoleToken): the
+  gatekeeper signature is applied INTERNALLY by `merge_and_promote` (les deux jetons de rail → RoleToken): the
   gatekeeper account token comes from a controlled tmp_dir (never the runner's real
   `/home/private`). async: false (mutates the global `:role_tokens_dir` config).
   """
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
-  alias Fleet.Pilot.GatekeeperSeal
+  alias Fleet.Pilot.MergeAndPromote
   alias Fleet.TestEnv
 
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    # Resolvable gatekeeper role token → `seal_and_merge` must sign merge AND comment with it.
+    # ⚖ DEUX JETONS, ET C'EST LE CHANGEMENT DE 2026-08-20. Le sceau ne signe plus tout avec un seul
+    # rôle : le rail MERGE (`chief`) fusionne, pousse et supprime la branche ; le rail DÉCISION
+    # (`gatekeeper`) commente la promotion et ferme. Un `setup` qui ne posait que le gatekeeper
+    # décrivait le monde d'avant — et le faisait passer pour le monde tout court.
+    #
+    # Les deux sont résolus EN TÊTE et fail-closed ensemble : la contrepartie assumée est qu'un
+    # merge propre dépend désormais du jeton du chief, alors qu'il ne le touchait pas avant. C'est
+    # tenable parce que le boot les exige déjà tous les deux
+    # (`Pilot.Application.require_signer_tokens!`) — ici, une absence est une PERTE en vol, pas un
+    # trou de provisioning.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     Fleet.TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
+    Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
 
     :ok
   end
@@ -109,39 +119,58 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     end
   end
 
-  test "signed merge THEN gatekeeper comment (internal as_gatekeeper signature) + dedup → :ok" do
-    # RAW forge_opts (system token): the gatekeeper signature must be applied INTERNALLY by
-    # `seal_and_merge` (single writer `as_gatekeeper`) — the role token OVERWRITES the system's.
+  test "DEUX RAILS : le merge signe chief, le commentaire et la fermeture signent gatekeeper" do
+    # RAW forge_opts (system token): les deux signatures sont appliquées EN INTERNE par
+    # `merge_and_promote` — les jetons de rôle ÉCRASENT celui du système, et il y en a deux.
+    #
+    # ⚖ CE TEST A ÉTÉ RETOURNÉ (user, 2026-08-20). Il épinglait « merge, commentaire et fermeture
+    # portent TOUS le jeton gatekeeper », ce qui était vrai et faux à la fois : vrai du code,
+    # faux du modèle. Fusionner est une EXÉCUTION, et le gatekeeper déclare `brief_kind: judge`
+    # — « never execute what you judge », propriété de sécurité que le schéma exige de déclarer.
+    # Le rail qui juge signait donc l'écriture git sur 90 % des PR.
     forge_opts = [token: "system-token"]
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", forge_opts,
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", forge_opts,
                base_branch: "main"
              )
 
+    # RAIL MERGE — la fusion (et, avec elle, la poussée sur main et la suppression de branche que
+    # Gitea attribue au même compte : un seul appel, un seul doer, aucun paramètre d'acteur sur
+    # l'endpoint — mesuré sur 1.26.1).
     assert_received {:merge, "fleet/p", 7, m_opts}
-    assert m_opts[:token] == "GK-TOKEN"
+    assert m_opts[:token] == "CHIEF-TOKEN"
 
     assert_received {:comment, "fleet/p", 42, body, c_opts}
     assert body =~ "Brique #42"
     assert body =~ "`engineer`"
     assert body =~ "[merge:pr-7]"
 
-    # gatekeeper-signed (role token, applied internally) + author-agnostic dedup (otherwise
-    # double-post on retry).
+    # RAIL DÉCISION — le commentaire de promotion, + dedup author-agnostic (sinon double-post au
+    # retry, et la raison est plus forte qu'avant : DEUX comptes écrivent maintenant sur ce ticket).
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
     assert c_opts[:dedup_any_author] == true
 
-    # Explicit close SIGNED GATEKEEPER (regression: it went out system-signed — identity break
-    # inside the seal while merge+comment are ALREADY gatekeeper, cf. above).
+    # RAIL DÉCISION — la fermeture. C'est la promotion qui ferme, pas la fusion.
     assert_received {:close_issue, "fleet/p", 42, close_opts}
     assert close_opts[:token] == "GK-TOKEN"
+
+    # SYSTÈME — et c'est le troisième acteur, celui qu'on oublie. Le label `stage/merged` ne porte
+    # AUCUN jeton de rôle : ni chief, ni gatekeeper. WS1 (tous les `stage/*` sont système), et ce
+    # n'est pas une préférence de style — le chemin dégradé `converge_out_of_band_merge` n'a aucun
+    # jeton de rôle disponible et doit pourtant pouvoir poser ce label, qui est la garde
+    # anti-redispatch d'une brique fusionnée.
+    #
+    # Sans cette assertion, substituer `merge_opts` à `forge_opts` sur cet appel violait WS1 en
+    # silence, suite verte (mutation nommée par la revue du 2026-08-20).
+    assert_received {:set_stage, "fleet/p", 42, _stage, stage_opts}
+    assert stage_opts[:token] == "system-token"
   end
 
   test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do
     assert {:error, {:merge, {:http, 409, _}}} =
-             GatekeeperSeal.seal_and_merge(MergeFailForge, "fleet/p", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(MergeFailForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -207,7 +236,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert :ok =
-                 GatekeeperSeal.seal_and_merge(
+                 MergeAndPromote.merge_and_promote(
                    TimeoutButMergedForge,
                    "fleet/p",
                    7,
@@ -229,7 +258,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   test "merge POST errors and the readback says NOT merged → error propagates, nothing posts" do
     assert {:error, {:merge, {:http, :timeout, _}}} =
-             GatekeeperSeal.seal_and_merge(
+             MergeAndPromote.merge_and_promote(
                TimeoutNotMergedForge,
                "fleet/p",
                7,
@@ -250,7 +279,13 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert :ok =
-                 GatekeeperSeal.seal_and_merge(CommentFailForge, "fleet/p", 7, 42, "engineer", [],
+                 MergeAndPromote.merge_and_promote(
+                   CommentFailForge,
+                   "fleet/p",
+                   7,
+                   42,
+                   "engineer",
+                   [],
                    base_branch: "main"
                  )
       end)
@@ -264,7 +299,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # the caller believed the brick sealed while the issue stayed OPEN → re-dispatch →
     # double-delivery. Instead: HONEST typed return (the merge succeeded, but the close did not).
     assert {:error, {:close_after_merge, {:http, 500, "close boom"}}} =
-             GatekeeperSeal.seal_and_merge(CloseFailForge, "fleet/p", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(CloseFailForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -280,7 +315,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # was lost on a transient blip → Delegation read `closed_without_merge` forever (arch waits on a
     # merged brick). Now retried (mirror of the close retry): a transient failure self-heals.
     assert :ok =
-             GatekeeperSeal.seal_and_merge(StageFlakyForge, "fleet/p", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(StageFlakyForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -292,7 +327,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
 
   test "F-C066: flaky close (fails 2×, succeeds the 3rd) → retry → :ok (self-heal of a transient blip)" do
     assert :ok =
-             GatekeeperSeal.seal_and_merge(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [],
+             MergeAndPromote.merge_and_promote(CloseFlakyForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
@@ -395,7 +430,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     :ok = wall_statement(tmp, 9, head, alien)
 
     assert {:error, {:provenance_incoherent, {:base_not_ancestor, ^alien, ^head}}} =
-             GatekeeperSeal.seal_and_merge(
+             MergeAndPromote.merge_and_promote(
                WallForge,
                "fleet/demo",
                4,
@@ -416,7 +451,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     :ok = wall_statement(tmp, 9, head, base)
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(
+             MergeAndPromote.merge_and_promote(
                WallForge,
                "fleet/demo",
                4,
@@ -459,7 +494,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
     # PAS de `wall_statement/4` → `{:skip, {:no_statement, ref}}`.
 
     assert :ok =
-             GatekeeperSeal.seal_and_merge(
+             MergeAndPromote.merge_and_promote(
                WallForge,
                "fleet/demo",
                4,
@@ -525,7 +560,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
   describe "A0 — the conflict signal picks the merge method" do
     test "no marker → method \"rebase\" (the historic behavior, byte-for-byte)" do
       assert :ok =
-               GatekeeperSeal.seal_and_merge(OkForge, "fleet/p", 7, 42, "engineer", [],
+               MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
                  base_branch: "main"
                )
 
@@ -533,36 +568,47 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
       assert Keyword.get(opts, :method) == "rebase"
     end
 
-    test "a conflict marker on the PR → method \"merge\", SIGNED CHIEF (the function that closed it)" do
-      # A2 — the signer follows the function: a resolved conflict merges under the
-      # conflict_resolver's token, and the closing comment names both the signer and the method.
+    test "un marqueur de conflit → méthode \"merge\", et le TEXTE le dit — la signature, elle, ne change pas" do
+      # ⚖ CE TEST A ÉTÉ RETOURNÉ (user, 2026-08-20), et c'est le piège de la séparation des rails.
+      # Il épinglait « conflit résolu ⟹ SIGNÉ CHIEF », c'est-à-dire une signature CONDITIONNELLE au
+      # fait qu'un conflit ait eu lieu. Le chief signe désormais TOUS les merges — donc la signature
+      # ne discrimine plus rien, et ce qui reste conditionnel est la MÉTHODE.
+      #
+      # Collapser les deux ensemble aurait dé-résolu tous les conflits : `Do: rebase` DROPPE le
+      # commit de fusion qui porte la résolution. C'est la seule moitié de l'ancienne conditionnelle
+      # qui devait survivre, et ce test est ce qui l'empêche de partir avec l'autre.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
-      Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
 
       assert :ok =
-               GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
+               MergeAndPromote.merge_and_promote(ConflictForge, "fleet/p", 7, 42, "engineer", [],
                  base_branch: "main"
                )
 
       assert_received {:merge, "fleet/p", 7, opts}
       assert Keyword.get(opts, :method) == "merge"
-      # signed CHIEF: the role token in the merge opts is the chief's, not the gatekeeper's
       assert Keyword.get(opts, :token) == "CHIEF-TOKEN"
-      # the closing comment SAYS the signer and the method — hardcoded "gatekeeper"/"rebase"
-      # would lie on this exact ticket
+
+      # Le fait « conflit » vit maintenant dans la MÉTHODE, jamais dans la signature — et le texte
+      # le déduit de ce qui a réellement été employé.
       assert_received {:comment, "fleet/p", 42, body, _opts}
-      assert body =~ "scellé au nom de `chief`"
       assert body =~ "conflit résolu"
       refute body =~ "historique linéaire"
     end
 
-    test "conflict PR + chief token MISSING → fail-closed refusal, never a gatekeeper fallback" do
-      # The other signer's token IS available (setup posts the gatekeeper's) — falling back to it
-      # would erase the one fact the signature carries. The PR stays unmerged, nothing is written.
+    test "jeton du rail MERGE manquant → refus fail-closed, jamais un repli sur l'autre rail" do
+      # Le jeton de l'AUTRE rail est disponible (le `setup` pose les deux, on retire celui-ci) —
+      # s'y replier ferait signer une exécution par le rail qui juge. La PR reste non fusionnée et
+      # rien n'est écrit.
+      #
+      # ⚠ Ce test couvre désormais TOUTES les PR, pas seulement les conflictuelles : depuis que le
+      # chief fusionne à tous les coups, un merge propre dépend lui aussi de son jeton. C'est la
+      # contrepartie assumée de la séparation, et le boot l'exige déjà des deux
+      # (`require_signer_tokens!`) — une absence ici est une PERTE en vol.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      Fleet.TestEnv.delete_role_token!("chief")
 
       assert {:error, :role_token_unavailable} =
-               GatekeeperSeal.seal_and_merge(ConflictForge, "fleet/p", 7, 42, "engineer", [],
+               MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
                  base_branch: "main"
                )
 
@@ -574,7 +620,7 @@ defmodule Fleet.Pilot.GatekeeperSealTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:conflict_signal_unreadable, _}} =
-                   GatekeeperSeal.seal_and_merge(
+                   MergeAndPromote.merge_and_promote(
                      SignalDownForge,
                      "fleet/p",
                      7,

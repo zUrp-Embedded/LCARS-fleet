@@ -11,7 +11,7 @@ defmodule Fleet.Pilot.PodReaper do
 
   Two callers, two ends of a ticket:
 
-    * the MERGE — `Fleet.Pilot.GatekeeperSeal` reaps the producer it just sealed (it knows the
+    * the MERGE — `Fleet.Pilot.MergeAndPromote` reaps the producer it just sealed (it knows the
       role, so it kills one precise id);
     * the SUPERSEDE — `Fleet.MCP`'s delegation retires an issue and calls THIS module through the
       `:pod_reaper` upward seam (MCP cannot reference `Fleet.Pilot`, cf. the `:forge_client`

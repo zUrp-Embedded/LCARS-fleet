@@ -966,7 +966,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # Invariant F-MERGE-CLAIM-BEFORE-REALITY: the seal is MERGE-FIRST → a 409 merge must leave NO
       # "sealed/merged" comment on the issue (commenting before confirmation would freeze a success
       # that never happened). PrFailForge SIGNALS its comments → this refute is probative (it would
-      # break on a comment-before-merge regression, the exact bug gatekeeper_seal avoids).
+      # break on a comment-before-merge regression, the exact bug MergeAndPromote avoids).
       refute_received {:comment, _, _, _}
     end
   end

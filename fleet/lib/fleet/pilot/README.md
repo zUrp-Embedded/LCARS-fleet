@@ -25,7 +25,7 @@ restated, only pointed at.
 **Step-run completion**
 - `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, StepRunBuild}`.
 - `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
-- `Fleet.Pilot.GatekeeperSeal` — the SINGLE merge seal (`seal_and_merge/6`), shared by both merge points.
+- `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/6`), shared by both merge points.
 
 **Forge — NOT here any more**
 - The client and the wire protocol are their own domain: `Fleet.Forge` (`lib/fleet/forge/`, own map). The pilot DRIVES it and declares it as a dep; it does not contain it. What made the move necessary: `Req`/`Req.Response` were deps of THIS boundary, so "one HTTP exit" was a convention any new call could break — it is compiled over there now.

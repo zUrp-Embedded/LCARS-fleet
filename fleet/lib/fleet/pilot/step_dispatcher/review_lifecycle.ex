@@ -20,7 +20,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   ## UNI-directional dependency (no cycle)
 
   ReviewLifecycle → `RoleDispatch`/`Remediation` → `Spawn` (SINGLE-AUTHORITY spawn leaf) +
-  `ArchEscalation` (writing the human escalation) + `GatekeeperSeal` (merge seal, EXTERNAL authority
+  `ArchEscalation` (writing the human escalation) + `MergeAndPromote` (merge seal, EXTERNAL authority
   shared with `StepRunCompleter.promote`) → ø. This module NEVER NAMES `StepDispatcher`:
   the review flow descends toward the leaves, it doesn't climb back to the core. The core DECIDES (PR
   gate + verdicts read), ReviewLifecycle ROUTES, the leaves EXECUTE.
@@ -116,9 +116,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
        A judge already decisive (even if still listed in requested_reviewers) is NOT re-spawned → end of
        the re-spawn loop.
     2. all requested have a verdict + at least one `:changes_requested` → producer rework.
-    3. all requested have APPROVED → MERGE (gatekeeper-sealed).
+    3. all requested have APPROVED → MERGE (rail merge) puis promotion (rail décision).
     4. no requested judge → the CARD decides: a zero-judge card (`project_jury` == []) makes this
-       the NOMINAL path → straight to the sealed merge (the provenance wall inside `seal_and_merge`
+       the NOMINAL path → straight to the sealed merge (the provenance wall inside `merge_and_promote`
        stays the floor); a judged card makes it an ORPHAN (typ. HUMAN/fork PR discovered without
        setup) → ADOPTION: we LAY the card's jury → normal review on the next tick. Agent-agnostic
        gate: origin doesn't matter.
@@ -352,31 +352,33 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   end
 
   # ============================================================
-  # Promotion (gatekeeper-sealed merge)
+  # Sortie du pipeline : merge signé chief, promotion signée gatekeeper
   # ============================================================
 
   # PROMOTE PR-state-driven (interim, without branch-protection): all judges have
-  # approved → the system SEALS. Closing comment + merge signed by the FUNCTION that closed the
-  # PR (A2): gatekeeper on a clean one, chief on a resolved conflict — the seal reads the
-  # conflict signal and picks signer AND method itself. HONEST comment
-  # (we don't lie, we show): delivered by the eng, validated by the judges (APPROVED), merged
+  # approved → the pipeline EXITS. ⚠ CE COMMENTAIRE DÉCRIVAIT L'ANCIENNE CONDITIONNELLE — « signé
+  # par la FONCTION qui a fermé la PR : gatekeeper sur une propre, chief sur un conflit résolu ».
+  # Cette conditionnelle-là est morte (revue 2026-08-20) : la signature suit désormais le DOMAINE de
+  # l'acte, pas l'histoire de la PR. Le merge est TOUJOURS signé chief, la promotion TOUJOURS
+  # gatekeeper ; seule la MÉTHODE reste conditionnelle au conflit. HONEST comment
+  # (we don't lie, we show): delivered by the eng, AVIS FAVORABLE of the judges (APPROVED), merged
   # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
   # `rebase` merge on the clean path (LINEAR, handles a `main` advanced under a parallel PR —
   # multi-issue, cf. merge_pr; a conflict-resolved PR merges in `merge`, its resolution IS a
   # merge commit) —
-  # `seal_and_merge` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
+  # `merge_and_promote` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
   # auto-close: coherent chronology). No lock (single-process poller); PR already
   # merged → 409 → the PR disappears on the next tick (idempotent).
   #
-  # `promote_comment` + the signer choice + the merge live in `Fleet.Pilot.GatekeeperSeal`
+  # `promote_comment` + the signer choice + the merge live in `Fleet.Pilot.MergeAndPromote`
   # (SINGLE seal shared with `StepRunCompleter.promote` — no fork of the merge signature).
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- RoleDispatch.parse_feature_branch_or_skip(head) do
       # SINGLE seal shared with `StepRunCompleter.promote`: gatekeeper comment + gatekeeper-signed
-      # merge. The signature is applied INTERNALLY by `seal_and_merge` (single writer
-      # `GatekeeperSeal.as_gatekeeper/1`) — a separate merge path would fork into a system token
+      # merge. The signature is applied INTERNALLY by `merge_and_promote` (single writer
+      # `Forge.Client.as_role/2` (rail décision)) — a separate merge path would fork into a system token
       # (the escalation would sign `system`).
-      case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
+      case Fleet.Pilot.MergeAndPromote.merge_and_promote(
              ctx.forge,
              ctx.repo,
              pr_number,
@@ -412,13 +414,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # (Missed on the first live round 2026-07-18: only the completer's promote carried
           # it — the poller promote, the path real rounds actually take, said "étape franchie".)
           #
-          # CI-08 — the caller must NOT announce the retrait before its VERDICT. `seal_and_merge` has
+          # CI-08 — the caller must NOT announce the retrait before its VERDICT. `merge_and_promote` has
           # just CLOSED the issue, so the OPEN-issue poll no longer revisits it: a lost unlock leaves a
           # residual `lcars-in-flight` + a stopwatch running forever with NO natural retry. We therefore
           # (a) VERIFY the verdict (no more `_ =` + a blanket "lock released" log that lied on failure),
           # (b) RETRY it bounded — this is the LAST reconciliation opportunity (idempotent: `unlock` no-ops
           # a removed label / a 409'd stopwatch), and (c) log per the ACTUAL outcome. We deliberately do NOT
-          # fold the unlock into `GatekeeperSeal.seal_and_finalize` (the Cible's other option): unlock
+          # fold the unlock into `MergeAndPromote.seal_and_finalize` (the Cible's other option): unlock
           # (stop_stopwatch + remove in-flight + emit) is a concern OWNED by `StepRunCompleter.unlock` (its
           # SOLE-AUTHORITY @doc), and the stop identity differs between callers (here the branch-parsed
           # `producer`; `route(:promote)` uses `producer_stop_role`) — folding it would couple the seal to
@@ -426,9 +428,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # honesty discipline (verify-then-announce), not a physical merge.
           case finalize_issue_unlock(ctx, issue_n, producer) do
             :ok ->
+              # ⚠ CE LOG DISAIT « rebase merge, gatekeeper sealed » — DEUX FAITS FAUX depuis la
+              # séparation des rails (revue 2026-08-20). Le merge est signé `chief`, et `rebase`
+              # n'est la méthode que sur une PR propre. Un opérateur qui filtrait ses logs sur
+              # « gatekeeper » pour auditer les merges croisait ensuite le fil Gitea, y trouvait
+              # `system_chief`, et enquêtait sur une contradiction qui n'existait que dans ce texte.
               Logger.info(
                 "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-                  "(judges OK → rebase merge, gatekeeper sealed, explicit close ; eng killed, issue lock released)"
+                  "(judges OK → chief merged, gatekeeper promoted + explicit close ; " <>
+                  "eng killed, issue lock released)"
               )
 
             {:error, reason} ->
@@ -474,7 +482,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # CI-08 — BOUNDED retry of THE terminal issue unlock (mirror of `GatekeeperSeal.{close,set_stage_merged}_with_retry`).
+  # CI-08 — BOUNDED retry of THE terminal issue unlock (mirror of `MergeAndPromote.{close,set_stage_merged}_with_retry`).
   # This is the LAST reconciliation of the poller-driven promote: after the explicit close, the open-issue poll no
   # longer revisits the issue, so a lost unlock has no natural retry. A transient blip (HTTP 500 / lock contention)
   # self-heals on retry; `unlock` is idempotent (`remove_label` no-ops if absent, `stop_stopwatch` 409 → :ok), so a

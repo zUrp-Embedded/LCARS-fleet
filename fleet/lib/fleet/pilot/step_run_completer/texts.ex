@@ -2,7 +2,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Texts do
   @moduledoc """
   Pure default markdown generators for step-run completion.
 
-  Caller bodies take precedence. PR text never emits `Closes #N`; `GatekeeperSeal`
+  Caller bodies take precedence. PR text never emits `Closes #N`; `MergeAndPromote`
   closes the issue explicitly after writing its seal.
   """
 

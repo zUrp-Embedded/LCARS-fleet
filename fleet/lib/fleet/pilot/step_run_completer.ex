@@ -554,7 +554,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  Seals and rebases the PR, then closes its issue through `GatekeeperSeal`.
+  Seals and rebases the PR, then closes its issue through `MergeAndPromote`.
 
   Merge, close and role-token failures propagate without unlocking the brick.
   """
@@ -572,7 +572,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       |> Keyword.put(:head_branch, Map.get(step_run, :producer_branch))
       |> Keyword.put(:base_branch, Map.fetch!(step_run, :base_branch))
 
-    case Fleet.Pilot.GatekeeperSeal.seal_and_merge(
+    case Fleet.Pilot.MergeAndPromote.merge_and_promote(
            forge,
            repo,
            pr,

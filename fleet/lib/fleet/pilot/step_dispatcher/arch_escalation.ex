@@ -215,14 +215,24 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   # load-bearing effect (its failure is logged error below), the comment is explanatory only. A single
   # forge write point for all PR arch escalations (no fork of signature/label).
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
-    # Gatekeeper-signed comment (EXPLANATORY, not load-bearing) via the UNIQUE writer
-    # `GatekeeperSeal.as_gatekeeper/1`. Fail-CLOSED on the token: if the gatekeeper role token is
-    # unavailable, SKIP the comment (do not post it under the system account) but STILL post the
-    # load-bearing `lcars-awaits-arch` label (system, the poller throttle) — the escalation's effect
-    # (out-of-dispatch) holds regardless of the comment. A failed/skipped post is LOGGED (never
-    # retried: once the label sticks, `decide/1` skips → no re-post path exists) — the arch would
-    # otherwise see the throttle label with no explanation and no trace of why.
-    case Fleet.Pilot.GatekeeperSeal.as_gatekeeper(seams.forge_opts) do
+    # Signé par le rail DÉCISION, et il le reste sur les DEUX rails : une escalade est un jugement,
+    # pas une résolution — le chief ne signe que là où il a agi.
+    #
+    # ⚠ L'APPEL PASSE DÉSORMAIS PAR `Forge.Client.as_role/2` DIRECTEMENT. Il transitait par un
+    # `as_gatekeeper/1` porté par le module du sceau, du temps où celui-ci s'appelait
+    # `GatekeeperSeal` : un adaptateur de credential logé dans le module de sortie du pipeline
+    # n'avait de sens que parce que le nom du module le suggérait. Le module renommé, l'emprunt
+    # n'en a plus, et `as_role/2` était déjà l'autorité unique — on l'appelle, on ne la relaie plus.
+    #
+    # Fail-CLOSED sur le jeton : indisponible → on SAUTE le commentaire (jamais sous le compte
+    # système) mais on pose quand même le label porteur `lcars-awaits-arch` (système, le throttle du
+    # poller) — l'effet de l'escalade tient sans son explication. Un post raté ou sauté est
+    # JOURNALISÉ et jamais retenté (le label posé fait sauter `decide/1`, il n'existe aucun chemin
+    # de re-post) : sinon l'arch verrait le throttle sans savoir pourquoi.
+    case Fleet.Forge.Client.as_role(
+           seams.forge_opts,
+           Fleet.Project.Roles.gatekeeper_role()
+         ) do
       {:ok, gk} ->
         gk_opts =
           gk |> Keyword.put(:dedup_signature, signature) |> Keyword.put(:dedup_any_author, true)

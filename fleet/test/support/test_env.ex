@@ -52,6 +52,33 @@ defmodule Fleet.TestEnv do
   end
 
   @doc """
+  Removes `role`'s forge token, at the path the runtime reads.
+
+  The inverse of `put_role_token!/2`, and it exists because provisioning EVERY signer became the
+  honest default the day the seal split into two rails — the boot requires them all
+  (`Pilot.Application.require_signer_tokens!`). A fixture proving a fail-closed refusal can no
+  longer do it by OMISSION; it must take one away. Which is also the real shape of that failure: a
+  mid-flight token loss, never a provisioning gap discovered at merge time.
+
+  Raises on an undeclared role, exactly like its counterpart: deleting the token of a role no
+  catalogue carries would assert on a world that does not exist.
+  """
+  def delete_role_token!(role) do
+    case Fleet.Credentials.RoleIdentity.token_path(role) do
+      {:ok, path} ->
+        # `_ =` : `rm_rf!` rend la LISTE des chemins supprimés, et le gate refuse les retours non
+        # appariés (`:unmatched_returns`). On ne l'inspecte pas — un fichier déjà absent rend `[]`,
+        # ce qui est le cas nominal ici : la fixture veut l'ABSENCE, pas une suppression.
+        _ = File.rm_rf!(path)
+        path
+
+      :error ->
+        raise "TestEnv.delete_role_token!: no forge login for #{inspect(role)} — the catalogue " <>
+                "in scope declares no such role. Name a role the fixture's catalogue carries."
+    end
+  end
+
+  @doc """
   Sets `value` under `{app, key}` and registers restoration of the PREVIOUS value
   (re-set, or deletion if the key was absent) at the end of the test. Set + restore
   in one call — the call site writes neither `prev` nor `on_exit`.

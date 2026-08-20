@@ -1196,7 +1196,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     test "ZERO-JUDGE card (jury []) + no requested judge → NOMINAL sealed merge, NOT adoption" do
       # The card arbitrates the no-judge case: an empty jury makes `requested == []` the
-      # nominal path → straight to the sealed merge (provenance wall inside seal_and_merge);
+      # nominal path → straight to the sealed merge (provenance wall inside merge_and_promote);
       # no judge laid, no judge spawned. `reviewer_roles: []` = the card's jury via the seam.
       pr = pr(%{"requested_reviewers" => [], "number" => 6})
 
@@ -1223,7 +1223,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       assert {:ok, {:merged, 6}} = StepDispatcher.dispatch_review(pr, opts)
 
-      # the FF merge was triggered on the PR (explicit close via seal_and_merge, no more Closes #N)
+      # the FF merge was triggered on the PR (explicit close via merge_and_promote, no more Closes #N)
       assert_received {:merged, 6}
       refute_received {:spawned, _, _}
 
@@ -1841,20 +1841,29 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
     end
 
-    test "A0 : rapport tier-0 imposte — la perte du signal du seal est DITE, avec le geste de reparation" do
-      # Cette fixture n'a pas de role `conflict_resolver` : le rapport (et donc le marqueur
-      # `[conflict-engine:pr-N]`, seule marque du tier 0) ne peut pas etre poste. Sur le chemin
-      # AUTO-RESOLU c'est une perte PORTANTE — le seal choisira `rebase` et sera mal classe. Le
-      # warning doit le dire et nommer la reparation, pas seulement regretter l'explication.
+    test "A0 : sans jeton du rail MERGE, le rail conflit ne fait RIEN — il ne resout pas a moitie" do
+      # ⚖ CE TEST A CHANGE D'OBJET AVEC LA SEPARATION DES RAILS (2026-08-20), ET SON ANCIEN OBJET
+      # N'EXISTE PLUS.
+      #
+      # Il epinglait un chemin degrade precis : jeton `chief` absent → le tier 0 resout quand meme,
+      # son rapport ne peut pas etre poste, et le warning devait NOMMER la reparation. Le commentaire
+      # d'origine disait lui-meme ce que ca coutait : « le seal choisira rebase et sera mal classe »
+      # — autrement dit, on resolvait un conflit puis on le rejetait en fusionnant sans son commit.
+      #
+      # Depuis que `chief` EST le rail de merge, ce chemin est INATTEIGNABLE : son jeton absent
+      # arrete la tentative de merge, donc `route_merge_failure` n'est jamais appele, donc le moteur
+      # tier-0 ne tourne pas du tout. Le rail conflit ne resout plus a moitie — il s'arrete d'un
+      # bloc, sur son propre jeton, et le dit.
+      #
+      # C'est un GAIN, pas une perte de couverture : l'etat que l'ancien test decrivait etait
+      # precisement celui ou le rail travaillait pour rien.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnosis?, true)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllWritableProbe)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_applier, ResolvingApplier)
 
-      # The loss is FORCED: a tokens dir carrying ONLY the gatekeeper's token — the seal can still
-      # sign the (clean-signal) merge attempt, but the CHIEF identity is unresolvable, so the
-      # report (and its marker, tier 0's only mark) cannot be posted. (The fixture dir now carries
-      # a system_chief token — A2 boot readiness — so the nominal path posts fine; this test pins
-      # the DEGRADED one.)
+      # La perte est FORCEE : un repertoire de jetons qui ne porte QUE celui du gatekeeper, donc
+      # l'identite CHIEF est irresolvable et le rapport (avec son marqueur, seule marque du tier 0)
+      # ne peut pas etre poste.
       Fleet.TestEnv.put_env_restoring(
         :lcars_fleet,
         :credentials_role_tokens_dir,
@@ -1865,12 +1874,18 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, {:auto_resolved, 6}} =
+          assert {:error, :role_token_unavailable} =
                    StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
         end)
 
-      assert log =~ "conflict signal is now MISSING"
-      assert log =~ "[conflict-engine:pr-6]"
+      # Le refus NOMME le role et la politique — un operateur sait quoi provisionner sans lire le
+      # code. C'est tout ce que ce test garde de l'ancien : l'exigence que la panne PARLE.
+      assert log =~ "chief"
+      assert log =~ "fail-closed"
+
+      # Et surtout : RIEN n'a ete tente. Pas de resolution orpheline, pas de merge de travers.
+      refute log =~ "auto-resolved"
+      refute log =~ "conflict-engine:pr-6"
     end
 
     # ❌ PAS de test pour la sonde MUETTE (`{:error, _}` → `:fall_through`), et la raison est

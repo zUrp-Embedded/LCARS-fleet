@@ -25,7 +25,7 @@ defmodule Fleet.Project do
   across a boundary, which does not compile.
 
   So the cut follows where the code actually separates: these seven modules have **zero** call into
-  the rail (`Poller`, `StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `GatekeeperSeal`,
+  the rail (`Poller`, `StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `MergeAndPromote`,
   `IncidentRegistry`, `ReviewLifecycle`, `ArchWake`, `ArchFeed` — measured at extraction). The
   traffic is entirely the other way: the rail asks this domain who the jury is, what the card says,
   where the architect lives. `Roles`/`Intensity` calling each other is fine INSIDE one boundary —

@@ -34,7 +34,7 @@ defmodule Fleet.Pilot do
   the replay is safe).
 
   **E — Review & merge** (next tick: `dispatch_review` → `ReviewLifecycle`):
-  commit-scoped verdicts → judges/rework → promotion via `GatekeeperSeal`
+  commit-scoped verdicts → judges/rework → promotion via `MergeAndPromote`
   (SINGLE AUTHORITY of the signed merge) → `WorktreeSync` → unlock.
 
   Transverse rail: failures (`pod.failed`/`wake.failed`) go to
