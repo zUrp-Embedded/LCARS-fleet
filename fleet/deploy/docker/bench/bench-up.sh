@@ -603,8 +603,21 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
     fi
   else
     RUNNER_STATE="ABSENT — bench-runner.sh en echec, son refus mot pour mot :
-$(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)"
+$(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
+              sortie COMPLETE conservee : $RUNNER_LOG"
   fi
+
+  # ⚠ CE FICHIER FUYAIT, ET SURTOUT QUAND TOUT ALLAIT BIEN. `mktemp` le cree a chaque passage ; le
+  # chemin de SUCCES ne le lit jamais — la sortie du sous-script est muette au succes, par contrat —
+  # et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers `bench-runner-bt.*` dans /tmp, dont
+  # 1189 de ZERO octet (des succes) et 372 portant un refus de 65 octets que le verdict cite deja EN
+  # ENTIER. Une boucle de nuit sur un banc en a pose 1561, pour zero lecteur.
+  #
+  # La regle est celle de `run_step` : on efface ce que personne ne lira, on GARDE ce qui explique un
+  # echec — et on le NOMME, sinon c'est un dechet anonyme de plus au lieu d'un fichier auquel le
+  # verdict renvoie. Le verdict ne cite que les 12 dernieres lignes : pour un refus plus long, ce
+  # fichier est la seule copie du reste.
+  [[ "$RUNNER_SERT" -eq 1 ]] && rm -f "$RUNNER_LOG"
 fi
 
 # TROIS VERDICTS, ET `--no-runner` EN PORTE SON PROPRE — jamais l'equivalent du banc complet. Un

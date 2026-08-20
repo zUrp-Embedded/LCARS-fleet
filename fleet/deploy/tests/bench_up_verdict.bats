@@ -207,6 +207,32 @@ run_bench() {
   [[ "$output" == *"PAS PRET"* ]]
 }
 
+@test "FUITE: un banc REUSSI ne laisse aucun log de sous-script derriere lui" {
+  # ⚠ ELLE FUYAIT SURTOUT QUAND TOUT ALLAIT BIEN, ce qui est le pire cas : `mktemp` posait le log a
+  # chaque passage, le chemin de SUCCES ne le lit jamais (la sortie du sous-script est muette au
+  # succes, par contrat) et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers
+  # `bench-runner-bt.*` dans /tmp — `bt` est le projet de CETTE suite, donc c'est elle qui les a
+  # poses, un par execution, pour zero lecteur. 1189 faisaient ZERO octet.
+  local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
+  TMPDIR="$T" run_bench
+  [ "$status" -eq 0 ]
+  [ "$(find "$T" -name 'bench-runner-*' | wc -l)" -eq 0 ]
+}
+
+@test "FUITE: un banc EN ECHEC garde son log, et le verdict le NOMME" {
+  # Le pendant, et c'est lui qui empeche de « corriger » la fuite en effacant tout : le verdict ne
+  # cite que les 12 dernieres lignes du refus. Pour un refus plus long, ce fichier est la seule copie
+  # du reste — le supprimer rendrait le diagnostic tronque sans que personne le sache. Garde ET
+  # nomme : un fichier auquel le verdict renvoie, pas un dechet anonyme de plus.
+  local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
+  echo 1 > "$RUNNER_RC"
+  TMPDIR="$T" run_bench
+  [ "$status" -eq 6 ]
+  [ "$(find "$T" -name 'bench-runner-*' | wc -l)" -eq 1 ]
+  [[ "$output" == *"sortie COMPLETE conservee"* ]]
+  [[ "$output" == *"$T/bench-runner-"* ]]
+}
+
 @test "6-133: runner demarre mais AUCUN vu par la forge → PAS PRET, exit 6" {
   # L'etat le plus traitre : le processus tourne, et la forge ne le connait pas.
   printf '{"runners":[]}\n' > "$RUNNERS_JSON"
