@@ -19,6 +19,11 @@
 # c'est d'en supprimer une. Ce que ces temoins tiennent maintenant : la CLI n'a AUCUN etat de
 # catalogue a elle, elle relaie celui du release, et sans release elle le DIT.
 
+# ⚠ EXIGE PAR `run -<code>`, ET C'EST UNE DECLARATION DE CONTRAT, PAS UNE FORMALITE. Sans cette
+# ligne, bats avertit qu'il ne garantit pas la semantique de `run -127` avant 1.5 — et en 1.11 un
+# avertissement suffit a rendre la suite ROUGE. Le fichier dit donc de quelle version il depend.
+bats_require_minimum_version 1.5.0
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../bin/lcars"
   [ -x "$SUT" ]
@@ -38,8 +43,15 @@ setup() {
   # pour tout dossier present. Un banc a affiche `web` installe pendant que la forge n'avait jamais
   # porte d'org `web`. Sans release, on ne SAIT pas, et on le dit a l'endroit qu'un operateur lit
   # en premier.
-  run env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
-  [ "$status" -eq 127 ]
+  # ⚠ `run -127`, ET LE CODE EST DECLARE PLUTOT QUE CONSTATE. Ce `run` etait nu : bats 1.11 emet
+  # alors un avertissement BW01 (« exited with 127, indicating command not found ») et sort en
+  # **exit 1 malgre zero echec**. Mesure du 2026-08-20 : le meme arbre rend le gate VERT sous bats
+  # 1.10 (poste WSL) et ROUGE sous 1.11 (poste natif Mintie), 853 tests `ok` des deux cotes. Un
+  # verdict qui depend de la version de l'outil n'est pas un verdict.
+  #
+  # Declarer le code est aussi meilleur en soi : 127 est ce que ce temoin ATTEND — le binaire
+  # n'existe pas, c'est le sujet — et le dire au harnais vaut mieux que le verifier apres coup.
+  run -127 env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
   [[ "$output" == *"fait de FORGE"* ]]
   [[ "$output" != *"installe"* ]]
 }
@@ -48,7 +60,9 @@ setup() {
   # Le contre-temoin du precedent : refuser de conclure ne doit pas vouloir dire ne rien montrer.
   # L'operateur voit ce qu'il a sous la main, sans qu'on prononce son etat.
   mkdir -p "$LCARS_CATALOGUES_DIR/mobile"
-  run env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
+  # `run -127` pour la meme raison qu'au temoin precedent : sans release, la porte sort en 127 et
+  # bats 1.11 en fait un avertissement fatal.
+  run -127 env LCARS_FLEET_BIN=/inexistant "$SUT" catalogue list
   [[ "$output" == *"mobile"* ]]
   [[ "$output" == *"web"* ]]
   [[ "$output" == *"fleet"* ]]
@@ -139,7 +153,8 @@ printf "INSTALLED fleet -\n"
 
 @test "aucune declaration d'activite n'est ecrite, par aucun verbe" {
   # Le fichier a disparu du modele ; ce temoin tient qu'il ne revient pas par la porte de service.
-  run "$SUT" catalogue list
+  # `run -127` : ce decor n'a pas de release non plus, donc la porte sort en 127 — declare, pas subi.
+  run -127 "$SUT" catalogue list
   [ ! -e "$HOME/.lcars/catalogues.active" ]
   [ ! -e "$BATS_TEST_TMPDIR/catalogues.active" ]
 }
