@@ -105,7 +105,14 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
       result = Check.check_mcp_tool_effects(File.cwd!())
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
-      refute result.note =~ "0 tools"
+
+      # ⚠ ANCRE, ET IL NE L'ETAIT PAS. Ce `refute` s'ecrivait `result.note =~ "0 tools"` — une
+      # SOUS-CHAINE — donc il devenait rouge au 30e outil, `"30 tools"` contenant `"0 tools"`,
+      # comme il l'aurait fait au 20e, au 40e et a tous les comptes ronds. Mesure du 2026-08-20, en
+      # ajoutant `run_probe` : le mur a mordu son propre depot sans qu'aucune propriete soit
+      # violee. Une garde d'instrument qui tombe sur un COMPTE apprend a ignorer les gardes
+      # d'instrument.
+      refute result.note =~ ~r/\b0 tools\b/
     end
 
     test "un nom d'outil cite dans un COMMENTAIRE ne peut pas verdir ce mur" do

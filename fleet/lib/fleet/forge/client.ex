@@ -535,6 +535,60 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
+  Le `owner/name` d'un dépôt, depuis son ID numérique de forge.
+
+  Existe parce que l'identité de canal d'un pod DISPATCHÉ ne porte pas la chaîne `owner/name` : le
+  dispatch file `:repo_id` et jamais `:repo`, et ce n'est pas un oubli — le `slot_key` du spawner
+  se clef dessus, donc un `nil` y mettrait tous les producteurs et tous les juges de tous les
+  projets dans un même seau. L'ID, lui, est toujours là. C'est la traduction qui manquait.
+
+  `{:error, :repo_not_found}` sur 404 — un id inconnu est un fait.
+  """
+  @spec repo_full_name(integer(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
+  def repo_full_name(repo_id, opts \\ []) when is_integer(repo_id) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repositories/#{repo_id}") do
+        {:ok, %{"full_name" => full}} when is_binary(full) and full != "" -> {:ok, full}
+        {:ok, _} -> {:error, {:unexpected_repo_shape, repo_id}}
+        {:error, {:http, 404, _}} -> {:error, :repo_not_found}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Les deux extrémités d'une PR : `%{head_sha, base_sha, head_ref, base_ref}`.
+
+  Existe pour la SONDE de pertinence, qui a besoin des deux SHAs et pas des deux refs : une branche
+  bouge, un SHA non. Mesurer « la suite de cette tête contre le code de cette base » sur des REFS
+  reviendrait à mesurer un état qui a pu changer entre la lecture et le run — et le fait porterait
+  un nom d'état au lieu d'un état.
+
+  `{:error, :pr_not_found}` sur 404, comme son voisin `get_pr_for_branch/4` : un numéro de PR
+  inconnu est un fait, pas une panne de transport.
+  """
+  @spec pr_refs(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
+  def pr_refs(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}") do
+        {:ok, %{"head" => %{"sha" => hs, "ref" => hr}, "base" => %{"sha" => bs, "ref" => br}}} ->
+          {:ok, %{head_sha: hs, head_ref: hr, base_sha: bs, base_ref: br}}
+
+        # Une PR sans ces champs n'est pas une PR qu'on peut sonder : on refuse en le NOMMANT
+        # plutôt que de rendre des `nil` qui iraient s'écrire dans les entrées d'un workflow.
+        {:ok, other} when is_map(other) ->
+          {:error, {:unexpected_pr_shape, Map.keys(other)}}
+
+        {:error, {:http, 404, _}} ->
+          {:error, :pr_not_found}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
   Requests native PR reviews from the supplied ROLES.
 
   ROLES, not logins, and the distinction is the whole point. The fleet reasons in roles everywhere;

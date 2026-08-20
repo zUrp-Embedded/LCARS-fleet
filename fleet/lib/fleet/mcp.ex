@@ -15,6 +15,12 @@ defmodule Fleet.MCP do
       # donc elle ne peut vivre dans ni l'un ni l'autre.
       Fleet.Toolchain,
       Fleet.Layout,
+      # MEME CLASSE QUE `Fleet.Layout` JUSTE AU-DESSUS, et son propre moduledoc le dit :
+      # « FOUNDATION, next to `Fleet.Layout` which owns the human-facing twin ». Feuille pure
+      # (`deps: []`), et surtout AUTORITE : `parse_ref/2` est ecrit chez celui qui CONSTRUIT l'id,
+      # seule facon d'empecher deux endroits d'avoir deux avis sur ce qu'un pod_id contient. La
+      # sonde en a besoin pour savoir de quelle PR un juge est le juge.
+      Fleet.PodId,
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.Credentials,

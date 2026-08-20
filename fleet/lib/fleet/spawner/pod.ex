@@ -554,6 +554,14 @@ defmodule Fleet.Spawner.Pod do
       # was simply never published. Exposing it is the whole fix: no dispatcher change, and the
       # `/proc` scan has nothing left to justify it.
       project_slug: Keyword.get(data.opts, :project_slug),
+      # LE MEME DEFAUT QUE `:project_slug` JUSTE AU-DESSUS, ET LE MEME REMEDE : deja filete par les
+      # deux sites de dispatch, jamais publie. `:repo` est `nil` pour tout producteur et tout juge —
+      # le dispatch ne met JAMAIS la chaine `owner/name` dans les spawn_opts, parce que le
+      # `slot_key` en depend (cf. `Fleet.Spawner`) — donc un lecteur ayant besoin du DEPOT n'avait
+      # rien a lire. `:repo_id` est la designation qui existe pour ces pods : celle que
+      # `SessionMint` exige et que le `<REPO4>` du session_id encode. On la publie ; on ne file rien
+      # de nouveau, et le `slot_key` ne bouge pas.
+      repo_id: Keyword.get(data.opts, :repo_id),
       phase: state,
       conditions: MapSet.to_list(data.conditions),
       has_active_task: TaskProbe.pod_has_active_task?(data.pod_id),
