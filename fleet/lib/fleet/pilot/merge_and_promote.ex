@@ -898,11 +898,21 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # none to require: printing it there would contradict the line above it in the same comment.
   defp interim_note([]), do: ""
 
+  # ⚠ CETTE NOTE A SURVECU A LA SEPARATION DES RAILS, ET ELLE LA CONTREDISAIT DANS LE MEME
+  # COMMENTAIRE. Elle disait « puis le `gatekeeper` (habilité au merge) scelle » — trois lignes sous
+  # un « Fusionnée par : le rail merge (`chief`) » que ce module venait d'ecrire. Mesure : ticket
+  # #4 de `fleet/chifoumi` sur le banc, 2026-08-20 04:41, `merged_by: system_chief` a la forge et
+  # le texte annoncant le gatekeeper juste en dessous.
+  #
+  # Le lot D avait corrige tout ce qui NOMMAIT un signataire ; celui-ci decrit une HABILITATION,
+  # donc aucune des relectures ne l'a attrape. C'est le premier defaut rendu par le banc, et il
+  # n'etait trouvable que la : une suite verte ne lit pas la prose qu'elle produit.
   defp interim_note(_approvers),
     do:
       "\n> ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** " <>
-        "(push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, puis le " <>
-        "`gatekeeper` (habilité au merge) scelle. Cible : y **ajouter le CI vert requis**.\n"
+        "(push direct sur `main` bloqué) ; LCARS orchestre l'obtention des verdicts, le **rail " <>
+        "merge** (`chief`) fusionne, et le **rail décision** (`gatekeeper`) promeut. Cible : y " <>
+        "**ajouter le CI vert requis**.\n"
 
   # Best-effort by construction: this runs AFTER a real merge, and a forge hiccup here must not
   # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims

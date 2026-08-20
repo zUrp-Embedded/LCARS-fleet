@@ -168,6 +168,41 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert stage_opts[:token] == "system-token"
   end
 
+  # ⚠ MESURE DU BANC, 2026-08-20 — `fleet/chifoumi` ticket #4, `merged_by: system_chief` à la forge,
+  # et LE MÊME COMMENTAIRE annonçant trois lignes plus bas « puis le `gatekeeper` (habilité au merge)
+  # scelle ». La note interim avait survécu à la séparation des rails.
+  #
+  # POURQUOI RIEN NE L'AVAIT ATTRAPÉE, et c'est la seule chose utile à retenir : le lot D a corrigé
+  # tout ce qui NOMMAIT un signataire — `signer_line`, `validation_line`, les logs. Cette note-là ne
+  # nomme pas un signataire, elle décrit une HABILITATION, donc aucune relecture pilotée par
+  # « qui signe » ne pouvait la voir. Et le test ci-dessus épingle les JETONS, pas la prose : une
+  # suite verte ne lit pas le texte qu'elle produit.
+  #
+  # D'où ce test, qui épingle la prose elle-même. Il est plus sévère que la note : il refuse au
+  # commentaire ENTIER d'attribuer la fusion au rail décision, où que ce soit.
+  test "la PROSE du sceau n'attribue jamais la fusion au gatekeeper — le banc l'a prise en défaut" do
+    forge_opts = [token: "system-token"]
+
+    assert :ok =
+             MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", forge_opts,
+               base_branch: "main"
+             )
+
+    assert_received {:comment, "fleet/p", 42, body, _opts}
+
+    # Ce que le texte DOIT dire : chaque rail à son acte.
+    assert body =~ "rail merge"
+    assert body =~ "rail décision"
+
+    # Ce qu'il ne doit JAMAIS dire. Fusionner est une exécution, et le gatekeeper déclare
+    # `brief_kind: judge` — « never execute what you judge ».
+    refute body =~ "habilité au merge"
+
+    for phrase <- ["gatekeeper` (habilité", "gatekeeper fusionne", "gatekeeper` fusionne"] do
+      refute body =~ phrase, "le sceau attribue la fusion au rail décision : #{inspect(phrase)}"
+    end
+  end
+
   test "merge KO → {:error, {:merge, _}} AND NO \"merged\" claim posted (no lie before reality)" do
     assert {:error, {:merge, {:http, 409, _}}} =
              MergeAndPromote.merge_and_promote(MergeFailForge, "fleet/p", 7, 42, "engineer", [],
