@@ -783,8 +783,11 @@ defmodule Fleet.MCP.PodTools do
           "shared by EVERY pod on this box — which is exactly why a human has to say yes.\n" <>
           "WHAT HAPPENS: the fleet renders your fields as a declaration, opens a pull request on " <>
           "the box's manifest, and A HUMAN ADMIN APPROVES OR REFUSES IT. Nothing installs until " <>
-          "they do. Your work item is put on hold and RE-DISPATCHED once the tool is there — you " <>
-          "do not wait for it: you stop, and a later pod picks the item up with the tool in place.\n" <>
+          "they do. If you are working a WORK ITEM, it is put on hold and RE-DISPATCHED once the " <>
+          "tool is there — you do not wait for it: you stop, and a later pod picks the item up " <>
+          "with the tool in place. If you have NO work item (you are anticipating a need rather " <>
+          "than blocked on one), the request still opens: nothing is put on hold, and nothing is " <>
+          "re-dispatched, because there is no ticket waiting.\n" <>
           "EXACTLY ONE of `apt`, `installer` or `sysroot` per request — they act on different " <>
           "places, and two in one diff would make the human approve one effect for another.\n" <>
           "`evidence` is read BY THE HUMAN and by nobody else: paste the error that stopped you, " <>

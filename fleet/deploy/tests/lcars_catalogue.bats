@@ -166,3 +166,95 @@ printf "INSTALLED fleet -\n"
   run "$SUT" help
   [[ "$output" == *"project reconcile"* ]]
 }
+
+# ─── `catalogue install` : DEUX etats, DEUX messages ─────────────────────────────────────────────
+# MESURE DU 2026-08-20, en vol. `-r` sur le jeton master echoue pour deux raisons qui n'ont rien a
+# voir — le compte n'administre pas, ou il l'est devenu APRES l'ouverture de la session — et un
+# message unique annoncait la premiere. Un humain DEJA promu s'est vu prescrire sa propre promotion,
+# et a cherche une heure du cote de la forge un defaut qui etait dans son shell.
+#
+# Un process porte ses groupes supplementaires depuis son LOGIN. `usermod -aG` ecrit `/etc/group` et
+# ne touche aucun process vivant : `id -nG <compte>` lit la base, `id -nG` nu lit le process. C'est
+# cette difference qu'on mesure, et ces deux temoins la tiennent dans les deux sens.
+
+_install_stubs() { # <groupe rendu par `id -nG` nu>
+  STUBS="$BATS_TEST_TMPDIR/stubs"; mkdir -p "$STUBS"
+  # Le jeton EXISTE et n'est PAS lisible — l'etat exact ou la commande doit choisir son message.
+  MASTER="$BATS_TEST_TMPDIR/forge-master.token"; echo tok > "$MASTER"; chmod 000 "$MASTER"
+
+  cat > "$STUBS/stat" <<EOF
+#!/usr/bin/env bash
+echo lcars-admin
+EOF
+  # Avec un argument (`id -nG lcars`) : la BASE, ou le compte est admin.
+  # Sans argument (`id -nG`) : le PROCESS, dont les groupes sont ceux du test.
+  cat > "$STUBS/id" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "-un")    echo lcars ;;
+  "-nG lcars") echo "lcars fleet lcars-admin" ;;
+  "-nG")    echo "$1" ;;
+  *)        exec /usr/bin/id "\$@" ;;
+esac
+EOF
+  chmod +x "$STUBS/stat" "$STUBS/id"
+  GESTURES="$BATS_TEST_TMPDIR/gestures.sh"; printf '#!/usr/bin/env bash\nexit 0\n' > "$GESTURES"
+  chmod +x "$GESTURES"
+}
+
+@test "catalogue install: compte promu, SESSION antérieure — le refus nomme la session, pas la forge" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  _install_stubs "lcars fleet"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SESSION est anterieure"* ]]
+  [[ "$output" == *"Deconnecte-toi"* ]]
+  # LE MENSONGE INTERDIT : prescrire une promotion deja faite.
+  [[ "$output" != *"proprietaire de la forge te promeut"* ]]
+}
+
+@test "catalogue install: compte NON promu — le message general revient, inchange" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # Le process ET la base sont d'accord : le compte n'est pas dans le groupe. Le stub `id -nG lcars`
+  # ne repond plus admin.
+  _install_stubs "lcars fleet"
+  cat > "$STUBS/id" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "-un")       echo lcars ;;
+  "-nG lcars") echo "lcars fleet" ;;
+  "-nG")       echo "lcars fleet" ;;
+  *)           exec /usr/bin/id "$@" ;;
+esac
+EOF
+  chmod +x "$STUBS/id"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'administre pas ce runtime"* ]]
+  [[ "$output" != *"SESSION est anterieure"* ]]
+}
+
+# ─── `catalogue install` lit l'env de la BOITE, pas celui du shell ───────────────────────────────
+# ELLE ETAIT LA SEULE DES CINQ PORTES FORGE A NE PAS LE FAIRE (`cat_states`, `project migrate`,
+# `project reconcile`, `approve` le font). Consequence mesuree le 2026-08-20 : sous `sudo`, qui
+# reinitialise l'environnement et deplace $HOME, la commande accusait la boite de n'avoir pas de
+# `FORGE_BASE_URL` — un manque qui etait celui de l'appelant.
+@test "catalogue install: la configuration vient de fleet_v2.env, pas du shell" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  T="$BATS_TEST_TMPDIR"
+  echo tok > "$T/tok"; chmod 0644 "$T/tok"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$T/gestures.sh"; chmod +x "$T/gestures.sh"
+  cat > "$T/fleet_v2.env" <<EOF
+LCARS_MASTER_TOKEN_FILE=$T/tok
+LCARS_FORGE_GESTURES=$T/gestures.sh
+EOF
+
+  # RIEN dans l'environnement : tout doit venir du fichier de la boite.
+  run env -u LCARS_MASTER_TOKEN_FILE -u LCARS_FORGE_GESTURES \
+      LCARS_FLEET_V2_ENV="$T/fleet_v2.env" "$SUT" catalogue install web-demo
+  [ "$status" -eq 0 ]
+}

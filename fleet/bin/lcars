@@ -444,8 +444,55 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # ⚖ 2026-08-17 : le groupe porte `is_admin` DE LA FORGE, projete par le convergeur d'humains. Le
 # gate ne change pas de nature, il change de GRANTEUR — la forge au lieu de `uid 0`, que personne
 # n'a ni n'aura.
+# DEUX ETATS, DEUX MESSAGES — et les confondre a coute une heure de diagnostic (2026-08-20).
+# `-r` echoue pour deux raisons qui n'ont rien a voir :
+#   1. le compte n'est pas admin sur la forge, donc pas dans le groupe ;
+#   2. il l'est devenu APRES l'ouverture de la session.
+# Un process porte ses groupes supplementaires depuis son LOGIN : `usermod -aG` ecrit /etc/group et
+# ne touche aucun process vivant. Le message unique annoncait la cause 1 et prescrivait une
+# promotion DEJA FAITE — un diagnostic faux qui envoie chercher ailleurs.
+#
+# LA DIFFERENCE SE MESURE, elle ne se devine pas : `id -nG <compte>` lit la BASE, `id -nG` nu lit
+# le PROCESS. Le groupe compare est celui que porte le fichier, pas un nom recopie ici — le mode
+# est le gate, il est donc aussi la source.
+#
+# Sans `stat` ou sans groupe lisible, on retombe sur le message general : une mesure ratee ne
+# devient pas un diagnostic.
+_die_master_unreadable() {
+  local master=$1 grp
+  grp="$(stat -c %G "$master" 2>/dev/null || true)"
+
+  if [[ -n "$grp" ]] \
+     && id -nG "$(id -un)" 2>/dev/null | tr ' ' '\n' | grep -qx "$grp" \
+     && ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
+    die "catalogue install: ta SESSION est anterieure a ta promotion.
+  Ton compte EST dans « $grp » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
+  ne le sait pas : il porte les groupes qu'il avait a son ouverture, et personne ne les lui ajoute
+  en vol. Deconnecte-toi et reconnecte-toi. Il n'y a rien a redemander."
+  fi
+
+  die "catalogue install: ton compte n'administre pas ce runtime.
+  « admin » est un fait de la FORGE : ton compte y porte is_admin, ou il ne le porte pas. Un
+  proprietaire de la forge te promeut, et le convergeur t'ouvre la porte au tour suivant (30 s) —
+  effectif a ta prochaine session. Ce n'est PAS une histoire de sudo : personne n'est root ici."
+}
+
 cmd_catalogue_install() {
   local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
+
+  # L'ENV DE LA BOITE, ET CETTE COMMANDE ETAIT LA SEULE A NE PAS LE CHARGER. Les quatre autres
+  # portes qui parlent a la forge le font (`cat_states`, `project migrate`, `project reconcile`,
+  # `approve`) ; celle-ci dependait du shell ambiant. Mesure du 2026-08-20 : sous `sudo`, qui
+  # reinitialise l'environnement ET deplace $HOME, `forge-gestures` mourait sur
+  # « cette boite n'a pas de FORGE_BASE_URL » — un refus qui accuse la boite d'un manque qui est
+  # celui de l'appelant.
+  #
+  # ⚠ AVANT TOUTE LIAISON `${VAR:-defaut}`, et je l'avais mis apres en premiere ecriture : un
+  # `local` resolu plus haut fige la valeur du shell ambiant, et l'env de la boite arrive trop tard
+  # pour la corriger. La commande aurait alors lu la boite pour une variable et pas pour l'autre —
+  # un chargement a moitie est pire qu'aucun, parce qu'il a l'air de marcher.
+  _load_box_env
+
   local gestures="${LCARS_FORGE_GESTURES:-/opt/lcars/forge-gestures.sh}"
 
   [[ "$name" == "$CAT_BUNDLED" ]] \
@@ -471,10 +518,7 @@ cmd_catalogue_install() {
       die "catalogue install: cette boite n'a AUCUNE autorite de creation ($master absent).
   Un admin la pose une fois : « FORGE_ADMIN_TOKEN=<jeton site-admin> ./docker.sh config »."
     fi
-    die "catalogue install: ton compte n'administre pas ce runtime.
-  « admin » est un fait de la FORGE : ton compte y porte is_admin, ou il ne le porte pas. Un
-  proprietaire de la forge te promeut, et le convergeur t'ouvre la porte au tour suivant (30 s) —
-  effectif a ta prochaine session. Ce n'est PAS une histoire de sudo : personne n'est root ici."
+    _die_master_unreadable "$master"
   fi
 
   "$gestures" install "$name"

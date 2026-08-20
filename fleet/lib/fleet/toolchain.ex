@@ -107,18 +107,34 @@ defmodule Fleet.Toolchain do
   opening a second pull request for one need.
   """
   @spec branch_for(String.t()) :: String.t()
-  def branch_for(work_item_id) when is_binary(work_item_id) do
-    # LES SÉRIES DE TIRETS SONT REPLIÉES, et ce n'est pas cosmétique : la substitution travaille sur
-    # les OCTETS, donc un caractère non-ASCII en rend deux ou trois. Sans le repli, le nom de branche
-    # dépendrait de l'encodage du work-item id — lisible pour un ascii, illisible pour le reste, et
-    # variable selon la largeur du caractère. Replié, il ne dépend que du contenu.
-    slug =
-      work_item_id
-      |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
-      |> String.replace(~r/-{2,}/, "-")
-      |> String.trim("-")
+  def branch_for(work_item_id) when is_binary(work_item_id),
+    do: "lcars/toolchain-" <> slug(work_item_id)
 
-    "lcars/toolchain-" <> slug
+  @doc """
+  The request branch of an ANTICIPATED toolchain — une demande qu'aucun ticket ne porte.
+
+  ⚠ UN PRÉFIXE DISTINCT, ET C'EST LA RAISON D'ÊTRE DE CETTE FONCTION. Les deux clés viennent
+  d'espaces de noms indépendants — un `work_item_id` d'un côté, un `pod_id` de l'autre — et rien
+  n'interdit qu'ils rendent un jour le même slug. Deux besoins distincts qui atterrissent sur UNE
+  branche, c'est un manifeste qui en écrase un autre en silence. Le préfixe les sépare par
+  construction plutôt que par chance.
+
+  Même propriété d'idempotence que `branch_for/1` : un second appel du même pod retombe sur la même
+  branche au lieu d'ouvrir une deuxième pull request.
+  """
+  @spec branch_for_pod(String.t()) :: String.t()
+  def branch_for_pod(pod_id) when is_binary(pod_id),
+    do: "lcars/toolchain-pod-" <> slug(pod_id)
+
+  # LES SÉRIES DE TIRETS SONT REPLIÉES, et ce n'est pas cosmétique : la substitution travaille sur
+  # les OCTETS, donc un caractère non-ASCII en rend deux ou trois. Sans le repli, le nom de branche
+  # dépendrait de l'encodage de la clé — lisible pour un ascii, illisible pour le reste, et
+  # variable selon la largeur du caractère. Replié, il ne dépend que du contenu.
+  defp slug(key) do
+    key
+    |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
+    |> String.replace(~r/-{2,}/, "-")
+    |> String.trim("-")
   end
 
   @doc """
