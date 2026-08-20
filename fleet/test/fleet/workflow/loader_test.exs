@@ -5,12 +5,12 @@ defmodule Fleet.Workflow.LoaderTest do
   alias Fleet.Workflow.Loader
 
   setup %{tmp_dir: tmp_dir} do
-    Application.put_env(:lcars_fleet, :workflow_workflow_maps_root, tmp_dir)
-
-    on_exit(fn ->
-      Application.delete_env(:lcars_fleet, :workflow_workflow_maps_root)
-    end)
-
+    # `put_env_restoring` ET PAS `put_env` + `delete_env` : la clef EST posee ailleurs
+    # (`config/runtime.exs:581`, depuis `LCARS_WORKFLOW_MAPS_ROOT`), donc l'ancien couple ne
+    # restaurait pas — il SUPPRIMAIT, et laissait derriere lui un ambiant que ce fichier n'avait pas
+    # trouve. `restore_env_on_exit` capture par `fetch_env` : absente elle est re-supprimee, posee
+    # elle est re-posee telle quelle.
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp_dir)
     :ok
   end
 
