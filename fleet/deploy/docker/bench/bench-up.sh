@@ -335,9 +335,15 @@ say "forge up"
 
 # ─── 2. la boite — create, brancher, PUIS demarrer (piege 1) ─────────────────────────────────────
 # Les volumes du magasin AVANT le create : `external: true` veut dire que compose ne les fabrique
-# pas et refuse de demarrer sans eux. Ils sont partages entre les bancs de la machine — un volume
-# externe n'est pas prefixe par le projet — donc le second banc ne repaie pas ce que le premier a
-# telecharge, et `bench-down` ne peut pas les emporter.
+# pas et refuse de demarrer sans eux.
+#
+# ⚠ UN MAGASIN PAR BANC, ET C'EST LE MOT « JETABLE » QUI L'EXIGE. Ils ont ete partages entre les
+# bancs — `external` deprefixe autant qu'il protege — au motif qu'une toolchain de trois heures se
+# paie une fois. Sur un banc ce motif est faux : on y compile une toolchain pour verifier que la
+# mecanique marche, pas pour garder l'artefact. Et le partage rendait la destruction menteuse —
+# `bench-down` epargnait les quatre en dictant la ligne pour finir le menage, laquelle vidait le
+# magasin de l'autre banc, en marche. Le prefixe est le projet ; `bench-down` les detruit desormais.
+export LCARS_STORE_PREFIX="$PROJECT"
 store_ensure_volumes "$DOCKER_BIN" || die "magasin non pose — la boite ne peut pas se creer" 3
 say "boite : projet $PROJECT, image $IMAGE, bind $BIND"
 env LCARS_IMAGE="$IMAGE" \

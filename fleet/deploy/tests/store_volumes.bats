@@ -32,16 +32,76 @@ setup() {
   COMPOSE_INSTALL="$DEPLOY/docker/docker-compose.install.yml"
   # shellcheck source=../lib/store.sh
   source "$STORE_LIB"
+  # Le prefixe est EXIGE par la lib (aucun defaut, pour que deux installations ne puissent pas
+  # retomber sur le meme magasin). Les temoins s'en donnent un, arbitraire.
+  export LCARS_STORE_PREFIX="testproj"
 }
 
-# Les montages du magasin declares dans un compose : « <volume>:<chemin> » sous `/var/lib/lcars`.
+# Les montages du magasin declares dans un compose : « <clef>:<chemin> » sous `/var/lib/lcars`.
+# ⚠ LA CLEF LOCALE, PAS LE NOM REEL. Un volume `external` porte deux identites : la clef que le
+# service monte (`lcars-cache`, interne au fichier) et le `name:` que docker voit
+# (`<projet>-cache`). Ce qui se lit sur une ligne de montage est toujours la premiere.
 store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed 's/^\s*- //'; }
 
-@test "chaque volume declare par store.sh est monte par le compose — aucun orphelin" {
-  local vol
-  for vol in "${LCARS_STORE_VOLUMES[@]}"; do
-    grep -q "^\s*- ${vol}:/var/lib/lcars/" "$COMPOSE" \
-      || { echo "volume declare et JAMAIS monte : $vol"; return 1; }
+@test "chaque nature declaree par store.sh est montee par le compose — aucun orphelin" {
+  local nature
+  for nature in "${LCARS_STORE_TREES[@]}"; do
+    grep -q "^\s*- lcars-${nature}:/var/lib/lcars/${nature}\$" "$COMPOSE" \
+      || { echo "nature declaree et JAMAIS montee : $nature"; return 1; }
+  done
+}
+
+@test "REGRESSION — le nom REEL porte le projet : deux installations ne partagent AUCUN volume" {
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE LIVRE. `external: true` sort le volume du projet
+  # DANS LES DEUX SENS : compose ne le detruit pas, et ne le prefixe pas. Les quatre volumes
+  # s'appelaient donc `lcars-cache` etc. pour TOUTE LA MACHINE — une prod et un test cote a cote
+  # (le cas meme que docker sert) partageaient leur magasin, et jouer avec le test vidait la prod.
+  local a b
+  a="$(LCARS_STORE_PREFIX=prod store_volume_names | sort)"
+  b="$(LCARS_STORE_PREFIX=test store_volume_names | sort)"
+  [ -n "$a" ]
+  [ "$a" != "$b" ]
+  # Disjoints, pas seulement differents : une seule collision suffit a faire le degat.
+  [ -z "$(comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b"))" ]
+}
+
+@test "le prefixe n'a AUCUN defaut — sans lui, la derivation refuse au lieu de retomber sur un nom nu" {
+  # Un `:-lcars` ici ressusciterait le defaut par commodite : deux installations mal cablees
+  # retomberaient sur les memes noms, et rien ne le dirait.
+  unset LCARS_STORE_PREFIX
+  run store_volume_names
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LCARS_STORE_PREFIX"* ]]
+  # RIEN d'ecrit : une liste partielle ferait croire a un appelant qui detruit qu'il a fini.
+  [[ "$output" != *"-cache"* ]]
+}
+
+@test "prefixe absent : les deux gestes ECHOUENT — jamais un succes muet sur un magasin fantome" {
+  # ⚠ LE PIEGE ETAIT DANS LA FORME DE LA BOUCLE, PAS DANS LE GARDE. `while read … < <(f)` JETTE le
+  # code de retour de `f` : zero ligne lue, corps jamais execute, `rc` reste 0. Les deux gestes
+  # rendaient donc un SUCCES sans avoir touche un seul volume — « magasin pose » sur rien, et
+  # « magasin detruit » sur rien, ce qui est le pire des deux.
+  local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
+  local calls="$BATS_TEST_TMPDIR/calls"; : > "$calls"
+  printf '#!/usr/bin/env bash\necho "$*" >> %s\nexit 0\n' "$calls" > "$bin/dockerstub"
+  chmod 0755 "$bin/dockerstub"
+
+  unset LCARS_STORE_PREFIX
+  run store_ensure_volumes "$bin/dockerstub"
+  [ "$status" -ne 0 ]
+  run store_destroy_volumes "$bin/dockerstub"
+  [ "$status" -ne 0 ]
+  # Et docker n'a JAMAIS ete appele : refuser, ce n'est pas agir a moitie.
+  [ ! -s "$calls" ]
+}
+
+@test "les deux compose EXIGENT le prefixe — un up sans lui est refuse, jamais silencieux" {
+  # `:?` et non `:-` : c'est la moitie compose du temoin precedent. Sans elle, la lib refuserait de
+  # creer pendant que le compose monterait joyeusement un nom nu.
+  local f
+  for f in "$COMPOSE" "$COMPOSE_INSTALL"; do
+    [ "$(grep -c 'LCARS_STORE_PREFIX:?' "$f")" -eq 4 ] \
+      || { echo "les 4 volumes de $f n'exigent pas tous le prefixe"; return 1; }
   done
 }
 
@@ -53,7 +113,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   while read -r mount; do
     [[ -n "$mount" ]] || continue
     vol="${mount%%:*}"
-    grep -A 1 "^  ${vol}:\$" "$COMPOSE" | grep -q "external: true" \
+    grep -A 2 "^  ${vol}:\$" "$COMPOSE" | grep -q "external: true" \
       || { echo "monte mais PAS external (donc emporte par down -v) : $vol"; return 1; }
   done < <(store_mounts "$COMPOSE")
 }
@@ -83,9 +143,27 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   store_ensure_volumes "$bin/dockerstub"   # idempotent : `volume create` rend 0 sur un existant
 
   local vol
-  for vol in "${LCARS_STORE_VOLUMES[@]}"; do
+  while read -r vol; do
     grep -q "^volume create $vol\$" "$calls" || { echo "jamais cree : $vol"; return 1; }
-  done
+  done < <(store_volume_names)
+  # Et ce qu'il cree porte bien le prefixe — sinon il fabriquerait le magasin d'une autre install.
+  grep -q "^volume create testproj-cache\$" "$calls"
+}
+
+@test "store_destroy_volumes n'efface QUE le magasin de son projet" {
+  # ⚠ CE GESTE N'EXISTAIT PAS, ET C'EST LE PARTAGE QUI L'INTERDISAIT : detruire aurait vide les
+  # voisins. La destruction se dictait donc a l'operateur en toutes lettres — une ligne qui, tapee,
+  # emportait le magasin du banc d'a cote, en marche. Une ligne dictee est un geste quand meme.
+  local calls="$BATS_TEST_TMPDIR/calls"; : > "$calls"
+  local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\necho "$*" >> %s\nexit 0\n' "$calls" > "$bin/dockerstub"
+  chmod 0755 "$bin/dockerstub"
+
+  LCARS_STORE_PREFIX=banc2 store_destroy_volumes "$bin/dockerstub"
+
+  [ "$(grep -c '^volume rm -f banc2-' "$calls")" -eq 4 ]
+  # Le temoin qui compte : AUCUN nom nu, donc rien qui appartienne a une autre installation.
+  ! grep -qE '^volume rm -f lcars-(cache|toolchains|sysroots|state)$' "$calls"
 }
 
 @test "store_ensure_volumes ECHOUE bruyamment quand docker refuse — jamais un up sur un magasin absent" {
@@ -96,26 +174,42 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   [[ "$output" == *"refusera de demarrer"* ]]
 }
 
-@test "LA CONTREPARTIE — la destruction NOMME les quatre volumes qu'elle epargne" {
-  # Sans ca, « banc detruit » se lit comme « la machine est propre » alors que des heures de
-  # toolchain restent. Un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission,
-  # et il ne se decouvre qu'au moment ou quelqu'un purge un cache.
+@test "LA CONTREPARTIE — ce que `box reset` epargne, il le NOMME" {
+  # Sans ca, « reset » se lit comme « la machine est propre » alors que des heures de toolchain
+  # restent. Un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission, et il ne se
+  # decouvre qu'au moment ou quelqu'un purge un cache.
   run store_spared_line
   [ "$status" -eq 0 ]
   local vol
-  for vol in "${LCARS_STORE_VOLUMES[@]}"; do
+  while read -r vol; do
     [[ "$output" == *"$vol"* ]] || { echo "epargne mais NON NOMME : $vol"; return 1; }
-  done
+  done < <(store_volume_names)
   # Et elle donne le geste qui les detruit vraiment : nommer sans dire comment est un demi-aveu.
   [[ "$output" == *"docker volume rm"* ]]
 }
 
-@test "les deux gestes de destruction appellent la contrepartie" {
-  # ⚠ LE SECOND CHEMIN A SUIVI LA DECOUPE : les douze verbes ont quitte `docker.sh` pour
-  # `fleet/deploy/box`, et un temoin qui grepperait encore la racine passerait au vert sur un
+@test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
+  # ⚠ LA DISTINCTION EST LE FOND DU LOT, pas un detail d'implementation. Reinitialiser une BOITE
+  # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `box reset`
+  # epargne et le dit. Un BANC est jetable : le sien part avec lui, sinon le mot est faux.
+  #
+  # ⚠ ET LE TEMOIN GREPPE `fleet/deploy/box`, PAS LA RACINE : les douze verbes ont quitte
+  # `docker.sh` a la decoupe, et un temoin reste sur l'ancien fichier passerait au vert sur un
   # `reset` devenu muet — il mesurerait un fichier qui ne porte plus le geste.
-  grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_spared_line" "$DEPLOY/box"
+  ! grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
+  grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
+  ! grep -q "store_destroy_volumes" "$DEPLOY/box"
+}
+
+@test "tout appelant du magasin POSE le prefixe avant d'appeler compose ou la lib" {
+  # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
+  # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
+  local f
+  for f in "$DEPLOY/box" "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
+    grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$f" \
+      || { echo "n'exporte pas le prefixe au nom du projet : $f"; return 1; }
+  done
 }
 
 @test "les deux gestes qui montent la boite posent le magasin AVANT" {

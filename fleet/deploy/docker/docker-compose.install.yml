@@ -130,9 +130,10 @@ services:
     volumes:
       - lcars-home:/home
       # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER. Quatre volumes EXTERNES —
-      # hors projet, donc `down -v` ne peut pas les emporter, et partages entre les bancs de la
-      # machine. Le POURQUOI (les quatre durees de vie, la mesure du `down -v`, le prix du « il
-      # doit exister avant le up ») vit dans `docker-compose.yml`, source unique.
+      # hors projet, donc `down -v` ne peut pas les emporter — et NOMMES PAR LE PROJET, sans quoi
+      # deux installations sur une machine partageraient leur magasin. Le POURQUOI (les quatre durees
+      # de vie, la mesure du `down -v`, le prix du « il doit exister avant le up », le prefixe) vit
+      # dans `docker-compose.yml` et `lib/store.sh`, sources uniques.
       #
       # Ils doivent exister AVANT ce `up` : c'est `store_ensure_volumes`
       # (fleet/deploy/lib/store.sh) qui les pose, appelee par le script d'entree.
@@ -163,15 +164,20 @@ services:
 volumes:
   # Au PROJET : ses humains sont ceux de cette boite, il meurt avec elle.
   lcars-home:
-  # Hors projet : compose ne les cree pas et ne les detruit pas. Cf. `docker-compose.yml`.
+  # Hors projet : compose ne les cree pas et ne les detruit pas — mais il ne les prefixe pas non
+  # plus, d'ou le `name:` derive du projet. Cf. `docker-compose.yml`, source unique.
   lcars-cache:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait)}-cache"
   lcars-toolchains:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"
   lcars-sysroots:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-sysroots"
   lcars-state:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
 
 networks:
   lcars:

@@ -75,8 +75,14 @@ prov_store_dirs() {
 # posee, un mode sans volume est un chemin qui n'existera jamais et que `check` reclamera a vie.
 store_completeness() {
   local tabled declared missing=() extra=()
+  # ⚠ ON LIT LES NATURES, PLUS DES NOMS DEPREFIXES A LA MAIN. Cette ligne faisait
+  # `"${LCARS_STORE_VOLUMES[@]#lcars-}"` — elle retirait un prefixe LITTERAL pour retrouver le nom du
+  # sous-repertoire. Depuis que le nom du volume porte le projet (`lcars-b2-cache`), ce strip ne rend
+  # plus « cache » mais « b2-cache », et la garde de completude accuse une table parfaitement juste.
+  # Le sous-repertoire n'a jamais ete un nom de volume ampute : c'est la NATURE, et `lib/store.sh` la
+  # publie telle quelle.
   tabled="$(prov_store_dirs | awk '{print $1}' | sort)"
-  declared="$(printf '%s\n' "${LCARS_STORE_VOLUMES[@]#lcars-}" | sort)"
+  declared="$(printf '%s\n' "${LCARS_STORE_TREES[@]}" | sort)"
   mapfile -t missing < <(comm -13 <(printf '%s\n' "$tabled") <(printf '%s\n' "$declared"))
   mapfile -t extra   < <(comm -23 <(printf '%s\n' "$tabled") <(printf '%s\n' "$declared"))
   (( ${#missing[@]} == 0 )) || { p_fail "volume sans mode declare ici : ${missing[*]}"; return 1; }

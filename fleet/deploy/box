@@ -65,6 +65,13 @@ COMPOSE=(${LCARS_COMPOSE_CMD:-docker compose})
 
 compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
 
+# ⚠ POSE APRES LE PARSING DE `-p`, ET EXPORTE. Le magasin est NOMME PAR L'INSTALLATION : le compose
+# derive `${LCARS_STORE_PREFIX}-cache` et refuse le up sans lui, `lib/store.sh` derive les memes noms
+# pour les creer et les detruire. Le poser avant le parsing donnerait le magasin du projet par defaut
+# a une boite lancee avec `-p autre` — c'est-a-dire exactement le partage que le prefixe tue.
+# Exporte parce que le lecteur est compose, un PROCESSUS FILS : une variable de shell ne l'atteint pas.
+export LCARS_STORE_PREFIX="$PROJECT"
+
 # ─── LE PROJET VISÉ EXISTE-T-IL, ET EST-CE LE NÔTRE ? ─────────────────────────────────────────────
 # Un nom de projet compose N'EST PAS une adresse sûre. Compose applique volontiers un fichier à un
 # projet qu'il n'a pas créé : il calcule l'état désiré depuis CE fichier et recrée, republie les

@@ -159,8 +159,12 @@ services:
       # lisible. `docker compose config` le confirme par les noms : les externes ne sont pas
       # prefixes (`lcars-cache`) la ou le volume de projet l'est (`lcars_lcars-home`).
       #
-      # Cette non-prefixation les rend aussi PARTAGES entre les bancs de la machine, et c'est le
-      # but : une toolchain de trois heures se paie une fois, pas une par banc.
+      # ⚠ MAIS `external` DEPREFIXE AUSSI, ET C'EST POURQUOI LE NOM PORTE LE PROJET. Retirer un
+      # volume du projet joue dans les deux sens : compose ne le detruit pas, et il ne le prefixe pas
+      # non plus. Sans le `name:` derive ci-dessous, DEUX INSTALLATIONS SUR UNE MACHINE tombent sur
+      # les quatre memes volumes — une prod et un test cote a cote, le cas que docker existe pour
+      # servir, et jouer avec le test vide la prod. Le prefixe est le nom du projet compose, qui est
+      # deja l'identite d'une installation ; le motif complet vit dans `lib/store.sh`.
       #
       # QUATRE, et il y en avait deux dans le premier jet : trois des cinq chemins declares par le
       # rail toolchain n'avaient pas de volume. Le pire est `state/` — le perdre ne casse RIEN DE
@@ -208,14 +212,23 @@ volumes:
   # Ceux-la n'appartiennent a personne : `external: true` = compose ne les cree pas et ne les
   # detruit pas. Meme forme que le reseau `devforge` du compose de banc, et pour la meme raison —
   # ce qui survit a la boite ne doit pas etre dans son interrupteur de destruction.
+  # ⚠ LA CLEF EST LOCALE, LE `name:` EST LE NOM REEL. La clef (`lcars-cache`) ne sert qu'au montage
+  # ci-dessus ; c'est `name:` que docker voit. `:?` et non `:-` : un prefixe absent doit REFUSER le
+  # up, jamais retomber sur un nom nu — ce nom nu est precisement celui que deux installations se
+  # partageraient. `lib/store.sh` derive les memes noms pour les creer ; les deux lisent la meme
+  # variable, posee par le script d'entree.
   lcars-cache:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait)}-cache"
   lcars-toolchains:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"
   lcars-sysroots:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-sysroots"
   lcars-state:
     external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
 
 networks:
   lcars:

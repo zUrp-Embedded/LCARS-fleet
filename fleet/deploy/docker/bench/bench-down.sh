@@ -42,6 +42,14 @@ done
 [[ -n "$PROJECT" ]] || { echo "bench-down: --project est OBLIGATOIRE (aucun defaut, par choix)" >&2; exit 1; }
 [[ "$CONFIRM" -eq 1 ]] || { echo "bench-down: --yes requis — ceci efface les volumes de '$PROJECT'" >&2; exit 1; }
 
+# ⚠ AVANT LE PREMIER APPEL A COMPOSE, PAS A LA FIN. Le compose de la boite nomme ses volumes de
+# magasin `${LCARS_STORE_PREFIX}-<nature>` avec un `:?` : sans la variable, il REFUSE de parser le
+# fichier, et le `down -v` ci-dessous echouerait sur un banc parfaitement destructible. C'est aussi
+# la variable dont `store_destroy_volumes` derive ce qu'il efface.
+export LCARS_STORE_PREFIX="$PROJECT"
+# shellcheck source=../../lib/store.sh
+source "$DOCKER_DIR/../lib/store.sh"
+
 FORGE_PROJECT="${PROJECT}forge"
 RUNNER_PROJECT="${PROJECT}-runner"
 BOX="${PROJECT}-lcars-1"
@@ -97,13 +105,17 @@ echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
-echo "[bench-down] banc '$PROJECT' detruit"
+# ⚠ LE MAGASIN EST DETRUIT AVEC LE BANC, ET C'EST LE SENS DU MOT « JETABLE ». Ce script a epargne
+# les quatre volumes du magasin — ils etaient partages entre les bancs de la machine, donc les
+# emporter aurait vide le voisin. Il le DISAIT (c'etait la contrepartie honnete d'un partage qu'il ne
+# pouvait pas defaire) en dictant `docker volume rm lcars-cache …` pour finir le menage : une ligne
+# qui, tapee, vidait le magasin de l'autre banc EN MARCHE. Un banc n'est pas jetable si le detruire
+# demande une seconde commande dangereuse pour les autres.
+#
+# Depuis que les noms portent le projet (`lib/store.sh`), il n'y a plus rien a arbitrer : ce magasin
+# n'appartient qu'a ce banc, et il part avec lui. Une toolchain compilee sur un banc l'a ete pour
+# verifier que la mecanique marche, pas pour etre gardee.
+echo "[bench-down] destruction du magasin de '$PROJECT' ($(store_volume_names | tr '\n' ' ' | sed 's/ $//'))"
+store_destroy_volumes "$DOCKER_BIN" || echo "[bench-down] ATTENTION : au moins un volume du magasin n'a pas pu etre detruit" >&2
 
-# ⚠ CE SCRIPT DIT « volumes compris » TROIS FOIS, ET IL EN EPARGNE QUATRE. Sans la ligne qui suit,
-# « banc detruit » se lit comme « la machine est propre » — et des heures de toolchain dorment
-# invisibles jusqu'au jour ou quelqu'un purge un cache en se demandant ce qu'il vient de perdre.
-# Ce n'est pas une politesse : c'est la contrepartie non negociable de volumes que docker ne PEUT
-# pas emporter. Ce qu'un geste de destruction laisse doit etre dit par lui, pas decouvert apres.
-# shellcheck source=../../lib/store.sh
-source "$DOCKER_DIR/../lib/store.sh"
-store_spared_line | sed 's/^/[bench-down] /'
+echo "[bench-down] banc '$PROJECT' detruit"

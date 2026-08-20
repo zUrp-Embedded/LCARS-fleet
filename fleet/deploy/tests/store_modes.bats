@@ -26,13 +26,18 @@ setup() {
   export PROVISION_LIB="$DEPLOY/lib/provision-lib.sh"
 }
 
-# Un arbre jetable : le module + une lib/store.sh dont ce test choisit les volumes declares.
+# Un arbre jetable : le module + une lib/store.sh dont ce test choisit les NATURES declarees.
 # Le module resout `../lib/store.sh` depuis SA position, donc le copier suffit a detourner la
 # declaration sans toucher au depot.
-fake_tree() { # $1... = noms de volumes declares
+#
+# ⚠ DES NATURES, PLUS DES NOMS DE VOLUMES. Ce decor ecrivait `LCARS_STORE_VOLUMES=(lcars-cache …)`
+# et le module en retirait le prefixe litteral `lcars-` pour retrouver le sous-repertoire. Depuis
+# que le nom du volume porte le projet (`lcars-b2-cache`), ce strip ne rendait plus « cache » : la
+# nature est desormais publiee telle quelle, et c'est elle que la table met en regard.
+fake_tree() { # $1... = natures declarees
   mkdir -p "$BATS_TEST_TMPDIR/modules.d" "$BATS_TEST_TMPDIR/lib"
   cp "$MODULE" "$BATS_TEST_TMPDIR/modules.d/"
-  { echo 'LCARS_STORE_VOLUMES=('"$*"')'; } > "$BATS_TEST_TMPDIR/lib/store.sh"
+  { echo 'LCARS_STORE_TREES=('"$*"')'; } > "$BATS_TEST_TMPDIR/lib/store.sh"
   printf '%s' "$BATS_TEST_TMPDIR/modules.d/26-store.sh"
 }
 
@@ -44,7 +49,7 @@ fake_tree() { # $1... = noms de volumes declares
 }
 
 @test "completude : un volume declare sans mode dans la table est un FAIL, pas un defaut silencieux" {
-  local mod; mod="$(fake_tree lcars-cache lcars-toolchains lcars-sysroots lcars-state lcars-wheels)"
+  local mod; mod="$(fake_tree cache toolchains sysroots state wheels)"
   run env LCARS_STORE_ROOT=/nonexistent bash "$mod" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"volume sans mode"* ]]
@@ -52,7 +57,7 @@ fake_tree() { # $1... = noms de volumes declares
 }
 
 @test "completude : un mode sans volume est un FAIL — check ne reclamerait ce chemin a vie" {
-  local mod; mod="$(fake_tree lcars-cache lcars-toolchains lcars-sysroots)"
+  local mod; mod="$(fake_tree cache toolchains sysroots)"
   run env LCARS_STORE_ROOT=/nonexistent bash "$mod" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"mode sans volume"* ]]
