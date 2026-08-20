@@ -32,11 +32,30 @@ defmodule Fleet.Project.TemplateSyncTest do
              )
 
     calls = drain_git_calls([])
-    # 4 ops (init/add/commit/push) × 2 faces (main + ops).
-    assert length(calls) == 8
+
+    # ⚠ LE COMPTE SE DERIVE DE L'ARBRE, IL NE S'ECRIT PLUS « 2 ». Cette assertion disait « 4 ops ×
+    # 2 faces (main + ops) » — un litteral qui a survecu a l'arrivee de `workshop/` sans broncher,
+    # pendant que le code, lui aussi litteral, cessait de projeter la troisieme face. Deux copies du
+    # meme chiffre : la seconde ne pouvait pas contredire la premiere, donc elle n'a rien garde.
+    faces =
+      Fleet.Catalogue.project_template_root()
+      |> File.ls!()
+      |> Enum.filter(&File.dir?(Path.join(Fleet.Catalogue.project_template_root(), &1)))
+
+    assert "main" in faces
+    assert "workshop" in faces, "la face de l'architecte doit etre projetee comme les autres"
+
+    # 4 ops (init/add/commit/push) par face.
+    assert length(calls) == 4 * length(faces)
 
     push_calls = Enum.filter(calls, fn {args, _opts} -> "push" in args end)
-    assert length(push_calls) == 2
+    assert length(push_calls) == length(faces)
+
+    # Chaque face part sur la branche de son nom, `main` en tete (c'est la branche par defaut, la
+    # seule que `generate` sert : la poser en second laisserait une fenetre ou le modele n'en a pas).
+    branches = Enum.map(push_calls, fn {args, _} -> List.last(args) end)
+    assert hd(branches) == "main"
+    assert Enum.sort(branches) == Enum.sort(faces)
 
     for {args, opts} <- push_calls do
       # The secret is NOWHERE in the argv — no token-in-URL, no `-c extraheader` arg.

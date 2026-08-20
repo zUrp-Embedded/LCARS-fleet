@@ -176,12 +176,24 @@ defmodule Fleet.Project.TemplateSync do
     end
   end
 
-  # Force-push BOTH faces of the priv tree, each as a single fresh commit (projection
-  # semantics: the forge copy mirrors priv exactly; template history is NOT load-bearing).
-  # `main/` → the default branch (served by `generate`); `ops/` → the `ops`
-  # branch (pure blueprint: `generate` ignores non-default branches — verified live — the
-  # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
-  # forge are the honest blueprint, expansion happens at write time).
+  # Force-push EVERY face of the priv tree, each as a single fresh commit (projection semantics:
+  # the forge copy mirrors priv exactly; template history is NOT load-bearing). `main/` → the
+  # default branch (served by `generate`); every other face → the branch of the same name (pure
+  # blueprint: `generate` ignores non-default branches — verified live — the runtime writes those
+  # faces itself via Scaffold.work, same source; raw ${VAR}s on the forge are the honest blueprint,
+  # expansion happens at write time).
+  #
+  # ⚠ CETTE LIGNE DISAIT « BOTH », ET LES DEUX FACES ETAIENT ECRITES EN DUR. Le catalogue en porte
+  # TROIS depuis l'arrivee de `workshop/`, et la troisieme n'a jamais ete projetee : mesure du
+  # 2026-08-20 sur la forge du poste natif — `main` et `ops` presentes, `workshop` introuvable. Un
+  # projet onboarde depuis ce modele naissait donc sans la face ou l'architecte a la plume, et rien
+  # ne le disait : `generate` ne sert que la branche par defaut, donc l'absence ne se voit pas au
+  # moment ou elle se cree.
+  #
+  # LES FACES SE LISENT DANS L'ARBRE, elles ne se listent plus. Ajouter une face au catalogue est un
+  # geste de CATALOGUE ; exiger en plus une edition ici, c'est garantir qu'un jour l'une des deux
+  # sera oubliee — et c'est exactement ce qui s'est passe. Le mot « BOTH » d'un commentaire ne
+  # compte pas les dossiers ; le code, si.
   @doc false
   @spec push_template(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def push_template(repo, src_root, fc) do
@@ -201,8 +213,36 @@ defmodule Fleet.Project.TemplateSync do
     url = base_prefix <> "/" <> repo <> ".git"
 
     with {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result(),
-         :ok <- push_face(url, auth_env, src_root, "main", "main") do
-      push_face(url, auth_env, src_root, "ops", "ops")
+         {:ok, faces} <- template_faces(src_root) do
+      Enum.reduce_while(faces, :ok, fn face, :ok ->
+        case push_face(url, auth_env, src_root, face, face) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  # Les faces du modele, `main` en tete. Le nom du dossier EST le nom de la branche — c'etait deja
+  # vrai des deux faces ecrites en dur, et le rendre explicite retire la table de correspondance qui
+  # n'aurait servi qu'a diverger.
+  #
+  # L'ABSENCE DE `main` EST UN REFUS, PAS UNE FACE EN MOINS. C'est la branche par defaut, la seule
+  # que `generate` sert : sans elle, la projection poserait un depot modele dont tout `generate`
+  # ultérieur produirait un projet vide, en rendant `:ok`. Un catalogue sans `main/` est casse, et
+  # il vaut mieux qu'il le dise ici qu'au premier onboarding.
+  @spec template_faces(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  defp template_faces(src_root) do
+    faces =
+      case File.ls(src_root) do
+        {:ok, entries} -> Enum.sort(Enum.filter(entries, &File.dir?(Path.join(src_root, &1))))
+        {:error, _} -> []
+      end
+
+    if "main" in faces do
+      {:ok, ["main" | List.delete(faces, "main")]}
+    else
+      {:error, {:template_without_main_face, src_root}}
     end
   end
 
