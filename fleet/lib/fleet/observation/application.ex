@@ -1,7 +1,7 @@
 defmodule Fleet.Observation.Application do
   @moduledoc """
-  Supervisor for the read-only observation frontier: event projection plus a
-  dedicated loopback Cowboy deck. Live pods come from the spawner; event-derived
+  Supervisor for the read-only observation frontier: event projection plus the
+  deck, served on a unix socket (the TCP port is gone — cf. `## The deck has no port`). Live pods come from the spawner; event-derived
   views come from `ReadModel`.
   """
 
@@ -51,6 +51,7 @@ defmodule Fleet.Observation.Application do
   `:ip` is no longer a contract to test: an AF_UNIX socket has no address to get wrong. What
   replaces it is the SOCKET'S mode, asserted below.
   """
+  @spec listener_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def listener_children do
     if Application.get_env(:lcars_fleet, :observation_start_listener, true) do
       # The binding gesture belongs to EventRouter — the only domain that declares `Plug.Cowboy`.

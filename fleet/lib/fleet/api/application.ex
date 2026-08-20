@@ -43,6 +43,7 @@ defmodule Fleet.API.Application do
   Logs build information after the root supervisor has started. Always returns
   `:ok`.
   """
+  @spec post_boot() :: :ok
   def post_boot do
     log_build_info()
     :ok

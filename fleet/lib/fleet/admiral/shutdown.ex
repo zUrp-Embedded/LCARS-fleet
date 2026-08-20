@@ -237,13 +237,15 @@ defmodule Fleet.Admiral.Shutdown do
   # that does not exist, and the first thing they will do is "repair" it.
   @default_drain_confirmations 3
 
-  # Canonical default of the dispatcher backend: NoOp (inert drain) as long as the real
-  # prod backend `AggregateDispatcher` is not wired (runtime.exs). Set HERE once
+  # Canonical default of the dispatcher backend: NoOp (inert drain) for the case where the real
+  # prod backend `AggregateDispatcher` is NOT wired — it IS wired in `runtime.exs` hors `:test`,
+  # donc ce defaut ne sert qu'aux tests et aux boots sans config runtime. Set HERE once
   # only — see `configured_dispatcher/0`.
   @default_dispatcher Fleet.Admiral.Shutdown.NoOpDispatcher
 
   # --- API ---
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)

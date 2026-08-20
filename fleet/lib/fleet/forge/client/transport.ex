@@ -31,7 +31,27 @@ defmodule Fleet.Forge.Client.Transport do
           req_options: Keyword.t()
         }
 
+  @typedoc """
+  Le retour de TOUT verbe HTTP de ce module.
+
+  Trois formes, et la deuxieme est la seule que vingt sites filtrent : `{:http, status, body}` porte
+  un refus de la forge (y compris les 412/423 DEFINITIFS, dont la forme est deliberement identique —
+  cf. `name_permanent/4`), `{:transport, exception}` porte une panne de fil.
+  """
+  @type response ::
+          {:ok, term()} | {:error, {:http, pos_integer(), term()} | {:transport, term()}}
+
+  @typedoc """
+  Le retour de la pagination : la liste COLLECTEE, ou un refus.
+
+  Deux refus lui sont propres, en plus de ceux de `response()` : une page 2xx dont la forme n'est ni
+  une liste ni l'enveloppe attendue (`:unexpected_page_shape`), et le filet `@max_pages` — une forge
+  qui ignore `page` rendrait sinon la meme page indefiniment.
+  """
+  @type paginated :: {:ok, [term()]} | {:error, term()}
+
   @doc false
+  @spec resolve_config(keyword()) :: {:ok, config()} | {:error, term()}
   def resolve_config(opts) do
     env = Application.get_env(:lcars_fleet, :pilot_forge, [])
     merged = Keyword.merge(env, opts)
@@ -87,6 +107,7 @@ defmodule Fleet.Forge.Client.Transport do
   end
 
   @doc false
+  @spec forge_bot_login(config(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def forge_bot_login(config, opts) do
     case Keyword.get(opts, :forge_bot_login) ||
            Application.get_env(:lcars_fleet, :pilot_forge_bot_login) do
@@ -114,6 +135,10 @@ defmodule Fleet.Forge.Client.Transport do
   # `forge_bot_login/2`, lui, consulte d'abord `opts[:forge_bot_login]` puis l'env applicative —
   # deux surcharges qui rendraient le login du SYSTEME pour un jeton de ROLE, ce qui est exactement
   # le genre de reponse plausible et fausse qu'on cherche a supprimer.
+  @spec login_of(config()) ::
+          {:ok, String.t()}
+          | {:error,
+             :bot_login_unresolved | {:transport, term()} | {:http, pos_integer(), term()}}
   def login_of(config), do: derive_bot_login(config)
 
   # L'EMPREINTE DU JETON EST UNE VALEUR, PLUS UNE CLE — et c'est tout le correctif. Elle etait DANS
@@ -175,6 +200,7 @@ defmodule Fleet.Forge.Client.Transport do
   @max_pages 200
 
   @doc false
+  @spec paginate(config(), String.t(), String.t()) :: paginated()
   def paginate(config, path_base, query), do: paginate(config, path_base, query, nil)
 
   @doc """
@@ -188,6 +214,7 @@ defmodule Fleet.Forge.Client.Transport do
   scar (`X-Total-Count` first, empty page always wins, `< @page_limit` only as a fallback). A copy
   of that loop for one endpoint is a copy that drifts away from the reasoning above it.
   """
+  @spec paginate(config(), String.t(), String.t(), String.t() | nil) :: paginated()
   def paginate(config, path_base, query, unwrap) do
     do_paginate(config, path_base, query, unwrap, 1, [])
   end
@@ -255,14 +282,19 @@ defmodule Fleet.Forge.Client.Transport do
   defp collect(acc), do: acc |> Enum.reverse() |> Enum.concat()
 
   @doc false
+  @spec http_get(config(), String.t()) :: response()
   def http_get(config, path), do: request(config, :get, path, nil)
   @doc false
+  @spec http_put(config(), String.t(), term()) :: response()
   def http_put(config, path, body), do: request(config, :put, path, body)
   @doc false
+  @spec http_post(config(), String.t(), term()) :: response()
   def http_post(config, path, body), do: request(config, :post, path, body)
   @doc false
+  @spec http_patch(config(), String.t(), term()) :: response()
   def http_patch(config, path, body), do: request(config, :patch, path, body)
   @doc false
+  @spec http_delete(config(), String.t()) :: response()
   def http_delete(config, path), do: request(config, :delete, path, nil)
 
   # DELETE WITH A BODY. Unusual, and it is the forge that asks for it: Gitea identifies a
@@ -270,6 +302,7 @@ defmodule Fleet.Forge.Client.Transport do
   # the same body its POST twin takes. Kept separate from `http_delete/2` so that no caller sends a
   # body by accident on the many endpoints that carry their target in the URL.
   @doc false
+  @spec http_delete_body(config(), String.t(), term()) :: response()
   def http_delete_body(config, path, body), do: request(config, :delete, path, body)
 
   defp request_raw(config, method, path, body) do

@@ -115,6 +115,7 @@ defmodule Fleet.API.BuildInfo do
   # Expose pour le test : c'est le SEUL chemin par lequel une image obtient sa revision, et il n'a
   # pas de git pour le corroborer. Un repli non teste est un repli qu'on decouvre casse en lisant
   # « unknown » dans un banc, six semaines apres.
+  @spec env_facts() :: {:ok, map()} | :error
   def env_facts do
     case System.get_env("LCARS_GIT_SHA") do
       nil -> :error

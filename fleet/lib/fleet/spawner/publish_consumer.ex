@@ -188,6 +188,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   """
   @allowed_spawn_opts ~w(brief pod_id self_enqueue_brief)a
 
+  @spec to_keyword(map() | keyword() | term()) :: keyword()
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->
       try do

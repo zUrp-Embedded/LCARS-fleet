@@ -438,6 +438,7 @@ defmodule Fleet.Pilot.Application do
   @doc false
   # Public like its two siblings, and for their reason: a boot validator has to be reachable from a
   # test without booting the fleet.
+  @spec validate_card_juries!(keyword()) :: :ok
   def validate_card_juries!(opts \\ []) do
     for {scope, root} <- card_scopes(opts),
         map_name <- Fleet.Workflow.Loader.canon_names!(scope),
@@ -471,6 +472,7 @@ defmodule Fleet.Pilot.Application do
   # It used to guard a knob (`:lcars_fleet, :pilot_workshop_workflow_map`, default `"workshop-direct"` —
   # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
   # can be wrong. A property cannot.
+  @spec validate_workshop_card!(keyword()) :: :ok
   def validate_workshop_card!(opts \\ []) do
     for {scope, _root} <- card_scopes(opts) do
       if Fleet.Workflow.Loader.workshop_card_name(scope) == nil do
@@ -511,6 +513,7 @@ defmodule Fleet.Pilot.Application do
   # undeclared project it ever receives, silently, and the level is the one thing a human is
   # entitled not to declare. `undeclared_level/0` is read from its owner — restating the level here
   # would be the second copy of a default, which is how one fact acquires two answers.
+  @spec validate_default_card_matrix!(keyword()) :: :ok
   def validate_default_card_matrix!(opts \\ []) do
     level = Fleet.Project.Intensity.undeclared_level()
 
@@ -539,6 +542,7 @@ defmodule Fleet.Pilot.Application do
   # stuck ticket that never spawns). We resolve every canon step role at boot — a role that cannot
   # load = a broken canon, fail-loud HERE. A step without a role (nil) is skipped: it is not a
   # dispatch role. (`opts` carries `:workflow_maps_root` for tests; prod calls it argument-less.)
+  @spec validate_card_steps!(keyword()) :: :ok
   def validate_card_steps!(opts \\ []) do
     for {scope, root} <- card_scopes(opts),
         map_name <- Fleet.Workflow.Loader.canon_names!(scope),

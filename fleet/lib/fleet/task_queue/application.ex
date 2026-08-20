@@ -2,6 +2,7 @@ defmodule Fleet.TaskQueue.Application do
   @moduledoc false
   use Supervisor
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end

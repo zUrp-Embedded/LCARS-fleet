@@ -162,6 +162,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @doc false
+  @spec offload_async((-> any()), map()) ::
+          {:ok, :inline | :offloaded} | {:error, :inline_crashed}
   def offload_async(fun, meta \\ %{}),
     do:
       Fleet.Pilot.Offload.async_or_inline(
@@ -531,6 +533,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp reconstruct_eval_ctx(_, _), do: :not_gate_eval
 
   @doc false
+  @spec maybe_complete(map(), term()) ::
+          {:ok, term()} | {:skip, term()} | {:escalate, term(), map()} | {:error, term()}
   def maybe_complete(payload, state) do
     cond do
       Map.has_key?(payload, "workflow_map_id") ->
@@ -772,6 +776,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @doc false
+  @spec resume_gate(map(), map(), term()) :: term()
   def resume_gate(
         %{n: _n, role: _role, payload: _payload, workflow_map: _workflow_map, step: _step} = ctx,
         raw_payload,

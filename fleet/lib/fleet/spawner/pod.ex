@@ -984,6 +984,7 @@ defmodule Fleet.Spawner.Pod do
   def handle_event(:info, _msg, _state, _data), do: :keep_state_and_data
 
   @doc false
+  @spec result_deadline_fire(atom(), term()) :: term()
   def result_deadline_fire(:active, data),
     do: transition_failed(data, {:result_timeout, data.pod_id})
 

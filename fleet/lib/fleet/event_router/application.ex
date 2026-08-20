@@ -47,6 +47,7 @@ defmodule Fleet.EventRouter.Application do
     end
   end
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -87,6 +88,7 @@ defmodule Fleet.EventRouter.Application do
   end
 
   @doc false
+  @spec base_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def base_children do
     [
       %{
