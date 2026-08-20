@@ -191,7 +191,16 @@ GIT_CONFIG_COUNT=1 \
 # the OTHER commits for the first non-system identity (guaranteed to exist: any onboarded project has at
 # least one scaffold/work commit with a human committer). This is the pre-scan the header describes as
 # step 0, and the only path in this script that exits 2.
-HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se {print; exit}')"
+# ⚠ `awk '… {print; exit}'` TUE CE SCRIPT SUR TOUT DEPOT REEL, et aucune fixture ne pouvait le
+# montrer. `exit` ferme le tuyau des la premiere ligne retenue ; si `git log` ecrit encore — ce qui
+# est le cas des que la sortie depasse le tampon de pipe, ~64 Ko — il recoit SIGPIPE, `pipefail`
+# remonte 141, et `set -e` abat le script juste apres le clone. Mesure du 2026-08-20 sur
+# jquery/jquery : 8489 commits -> exit 141 ; les 3 premiers du meme depot -> exit 0. Toutes les
+# fixtures du depot font une poignee de commits, donc toutes passaient.
+# `awk` LIT DONC TOUT et n'imprime qu'une fois. Le cout est une lecture complete du log — quelques
+# secondes sur une histoire de deux millions de commits, contre les minutes que filter-repo prendra
+# juste apres.
+HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se && !seen {print; seen=1}')"
 [[ -n "$HUMAN_LINE" ]] || { echo "publish-transform: tous les commits sont au compte system_starfleet — l'humain reste inconnu" >&2; exit 2; }
 HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
