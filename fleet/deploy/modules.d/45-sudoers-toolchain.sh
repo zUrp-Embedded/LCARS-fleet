@@ -136,9 +136,9 @@ apply() {
       if [[ -n "$home" && -d "$home" ]]; then
         skdst="$home/.claude/skills/system-issues"
         install -d -m 0755 "$skdst"
-        write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:$PROV_HUMAN" < "$SKILL_SRC/system-issues/SKILL.md"           || p_fail "skill system-issues: SKILL.md"
-        write_atomic "$skdst/list.sh" 0755 "$PROV_HUMAN:$PROV_HUMAN" < "$SKILL_SRC/system-issues/list.sh"           || p_fail "skill system-issues: list.sh"
-        chown "$PROV_HUMAN:$PROV_HUMAN" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
+        write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/SKILL.md"           || p_fail "skill system-issues: SKILL.md"
+        write_atomic "$skdst/list.sh" 0755 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/list.sh"           || p_fail "skill system-issues: list.sh"
+        chown "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
         p_ok "skill system-issues pose chez $PROV_HUMAN"
       else
         p_drift "skill system-issues: home de $PROV_HUMAN introuvable"

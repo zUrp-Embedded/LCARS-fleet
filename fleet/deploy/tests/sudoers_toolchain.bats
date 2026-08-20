@@ -151,6 +151,37 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [ -x "$LCARS_SIEGE_HOME/.claude/skills/system-issues/list.sh" ]
 }
 
+@test "skill: le don a l'humain ne NOMME jamais de groupe — un groupe prive n'est pas garanti" {
+  # CE QUE CE TEMOIN FERME. Le module donnait ses fichiers en `<humain>:<humain>` : une hypothese de
+  # groupe prive homonyme, vraie seulement la ou `USERGROUPS_ENAB yes` en cree un a l'inscription du
+  # compte. Un humain de la fleet dont le groupe primaire est `fleet` n'a AUCUN groupe a son nom, et
+  # l'appel meurt sur `chown: invalid group`. Mesure du 2026-08-20 : neuf temoins rouges sur le
+  # poste natif, verts ici, pour la seule raison que le compte local porte un groupe prive.
+  #
+  # ⚠ ET C'EST POURQUOI ON SONDE `chown` PLUTOT QUE LE RESULTAT. Sur la machine qui joue ce test le
+  # compte a probablement un groupe prive — donc les deux formes REUSSIRAIENT, et un temoin qui
+  # regarde le fichier pose ne verrait aucune difference. Ce qui distingue les deux formes n'est
+  # observable que dans l'ARGUMENT passe a chown.
+  cat > "$BIN/chown" <<FAKE
+#!/usr/bin/env bash
+printf '%s\n' "\$1" >> "$BATS_TEST_TMPDIR/chown.argv"
+exit 0
+FAKE
+  chmod 0755 "$BIN/chown"
+  : > "$BATS_TEST_TMPDIR/chown.argv"
+
+  run_apply
+  [[ "$status" -eq 0 ]]
+
+  # Au moins un don a eu lieu, sinon ce temoin ne mesure rien.
+  [ -s "$BATS_TEST_TMPDIR/chown.argv" ]
+  # Aucune specification ne nomme un groupe apres le deux-points.
+  run grep -cE ":[^[:space:]]+$" "$BATS_TEST_TMPDIR/chown.argv"
+  [ "$output" = "0" ]
+  # …et la forme attendue est bien presente : `<humain>:`, le groupe de CONNEXION de l'humain.
+  grep -qx -- "$PROV_HUMAN:" "$BATS_TEST_TMPDIR/chown.argv"
+}
+
 @test "skill: PAS pose quand l'humain n'est pas le siege (la branche uid ferme tout le bloc 3+4)" {
   export LCARS_SYSADMIN_UID="99999"
   run_apply

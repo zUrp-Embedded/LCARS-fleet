@@ -559,6 +559,17 @@ prov_refuse_symlink_path() {
 # Contenu lu sur stdin. tmp dans le MÊME dossier (mv intra-FS = rename atomique), mode/owner posés
 # sur le tmp AVANT le mv (le fichier n'existe jamais dans un état intermédiaire). Si le contenu,
 # le mode ET l'owner sont déjà conformes : aucune écriture (mtime préservé, verdict OK).
+#
+# ⚠ POUR DONNER UN FICHIER À UN HUMAIN, ÉCRIRE `<humain>:` ET JAMAIS `<humain>:<humain>`. Le deux-
+# points nu dit à `chown` « le groupe de CONNEXION de cet utilisateur », quel qu'il soit ; répéter
+# le nom suppose un groupe privé homonyme, ce qui n'est vrai que là où `USERGROUPS_ENAB yes` a
+# créé un groupe à l'inscription du compte. Un humain de la fleet créé avec `fleet` pour groupe
+# primaire n'a AUCUN groupe à son nom, et l'appel meurt sur `chown: invalid group`.
+#
+# Mesuré le 2026-08-20 : neuf témoins rouges sur le poste natif — `lcars` y a `fleet` en groupe
+# primaire — pendant que les mêmes passaient sur un poste dont le compte porte un groupe privé.
+# La forme `<humain>:` est correcte dans les DEUX cas, donc il n'y a pas d'arbitrage à faire : la
+# seconde moitié n'apportait rien qu'une hypothèse sur la distribution.
 write_atomic() {
   local dest="$1" mode="$2" owner="${3:-}"
   local dir tmp

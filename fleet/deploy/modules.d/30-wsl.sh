@@ -121,9 +121,9 @@ apply() {
   local home mask
   home="$(human_home)"
   if [[ -n "$home" && -d "$home" ]]; then
-    ensure_dir "$home/.config" 0755 "$PROV_HUMAN:$PROV_HUMAN" || verdict_apply
-    ensure_dir "$home/.config/systemd" 0755 "$PROV_HUMAN:$PROV_HUMAN" || verdict_apply
-    ensure_dir "$home/.config/systemd/user" 0755 "$PROV_HUMAN:$PROV_HUMAN" || verdict_apply
+    ensure_dir "$home/.config" 0755 "$PROV_HUMAN:" || verdict_apply
+    ensure_dir "$home/.config/systemd" 0755 "$PROV_HUMAN:" || verdict_apply
+    ensure_dir "$home/.config/systemd/user" 0755 "$PROV_HUMAN:" || verdict_apply
     mask="$(gpg_socket_mask_path)"
     ensure_symlink "$mask" /dev/null || verdict_apply
   else
