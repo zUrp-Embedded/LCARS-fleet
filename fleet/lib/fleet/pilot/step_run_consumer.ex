@@ -105,6 +105,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.GateEngine
   alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
 
   defstruct [
@@ -843,6 +844,36 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
         _ = TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
         result
+
+      # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
+      #
+      # `halt_invalid` est le repli fail-closed de la validation de FORME : un `details` en chaine
+      # au lieu d'un objet, un `chain` d'objets au lieu de chaines nues. Le juge a lu le livrable,
+      # il a une opinion, il l'a mal emballee — et le geler immobilisait un humain pour un champ mal
+      # type. Une passe de correction, une seule, bornee par un marqueur forge.
+      #
+      # LE POD EST ENCORE LA POUR LA RECEVOIR, ET C'EST B2 QUI LE GARANTIT : la fauche du juge est
+      # causee par l'INGESTION de son verdict (revue posee), jamais par sa production. Une
+      # enveloppe refusee n'a rien fait ingerer, donc le pod vit encore — avec la lecture du
+      # livrable qui lui a coute son contexte, et c'est precisement ce que la passe depense.
+      #
+      # Auto-gate et ETEINT par defaut : au-dela de la passe, ou si elle n'est pas armee, c'est
+      # exactement le gel d'avant — en nommant pourquoi.
+      "halt_invalid" ->
+        VerdictCorrection.request(
+          n,
+          role,
+          Map.get(ctx, :invalid_reason, "enveloppe `gate-decision-v1.json` invalide"),
+          trace,
+          %VerdictCorrection.Seams{
+            repo: state.repo,
+            forge: state.forge_client,
+            forge_opts: state.forge_opts,
+            task_queue: state.task_queue,
+            spawner: state.spawner,
+            terminal: terminal_seams(state)
+          }
+        )
 
       other ->
         # (Le doublon `audit.verdict` est parti — brouette 2026-08-19 : il re-disait CE gel a une
