@@ -78,8 +78,39 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "operational when real backend wired" do
-      Application.put_env(:lcars_fleet, :admiral_shutdown_dispatcher, Fleet.Coord)
-      assert %{state: :operational} = sub(Readiness.deep(), "shutdown.dispatcher")
+      # ⚠ CE TEST CABLAIT `Fleet.Coord`, SUPPRIME LE 2026-08-19 — et il passait quand meme, parce que
+      # la sonde ne teste qu'une INEGALITE (`backend == NoOpDispatcher`, `readiness.ex:77`).
+      # N'importe quel atome le rendait vert. Un test dont le nom promet « real backend wired » et
+      # qui accepte un module inexistant ne prouve pas ce qu'il annonce.
+      #
+      # Le fichier le SAVAIT : il ecrit trente lignes plus haut « coord.backend est parti avec
+      # Fleet.Coord — brouette 2026-08-19 », puis continuait de le cabler ici.
+      #
+      # Cable sur le vrai backend, et on assert le NOM en plus de l'etat : la sonde doit rapporter
+      # CE QUI TOURNE, pas seulement « pas le NoOp ».
+      Application.put_env(
+        :lcars_fleet,
+        :admiral_shutdown_dispatcher,
+        Fleet.Admiral.Shutdown.AggregateDispatcher
+      )
+
+      assert %{state: :operational, detail: %{backend: backend}} =
+               sub(Readiness.deep(), "shutdown.dispatcher")
+
+      assert backend =~ "AggregateDispatcher"
+    end
+
+    @tag :skip
+    test "un module INEXISTANT ne doit pas se lire comme operationnel — TROU CONNU" do
+      # La contre-epreuve que le test ci-dessus laissait passer, ecrite et MARQUEE plutot
+      # qu'omise : elle echoue aujourd'hui, parce que la sonde ne sait dire que « ce n'est pas le
+      # NoOp ». Un trou nomme vaut mieux qu'un trou vert.
+      #
+      # Le geste qui la leverait est cote PRODUCTION (`readiness.ex:77`) : verifier que le backend
+      # exporte le contrat attendu (`in_flight_count/0`, `refuse_new_jobs/1`) au lieu de le comparer
+      # a un module. C'est un changement de sonde, pas de test — hors de ce lot.
+      Application.put_env(:lcars_fleet, :admiral_shutdown_dispatcher, Fleet.NExistePas)
+      assert %{state: :degraded} = sub(Readiness.deep(), "shutdown.dispatcher")
     end
 
     # Drift-kill: key unset → readiness reads the OWNER's canonical default
