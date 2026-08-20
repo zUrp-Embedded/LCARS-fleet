@@ -96,6 +96,27 @@ _big_history() { # 2000 commits, ordinary identities, past the pipe buffer
 
   # THE COUNTER-PROOF, same repository, same command, `exit` restored. Without it the witness would
   # show the fix passing without saying where the fault lived.
+  #
+  # ⚠ MAIS 141 EST UNE PROPRIETE DE GIT, PAS DU CODE JUGE — mesure du 2026-08-20, meme arbre, meme
+  # bash 5.2, deux machines :
+  #
+  #     git 2.43 (poste WSL)     -> 141   (git meurt de SIGPIPE)
+  #     git 2.47 (poste natif)   ->   0   (git l'absorbe et sort proprement)
+  #
+  # Exiger 141 rendait donc ce temoin ROUGE sur la moitie du parc, pour un code parfaitement sain.
+  # Un verdict qui depend de la version de l'outil n'est pas un verdict — c'est la troisieme fois
+  # que cette classe mord dans la meme soiree (bats 1.10 vs 1.11 en est une autre).
+  #
+  # On SONDE donc le comportement de CE git avant d'en tirer quoi que ce soit, et quand il n'y a
+  # pas de SIGPIPE a observer on le DIT plutot que de rougir ou de passer en silence. Ce que la
+  # contre-epreuve demontre — « la forme avec `exit` meurt » — n'est demontrable que la ou elle
+  # meurt ; ailleurs, l'affirmer serait inventer une mesure.
   run scan '$2 != se {print; exit}'
-  [ "$status" -eq 141 ]   # 128 + SIGPIPE
+
+  if [ "$status" -eq 141 ]; then
+    : # 128 + SIGPIPE — la faute d'origine, reproduite : la contre-epreuve tient.
+  else
+    echo "# (hors perimetre : git $(git --version | grep -oE '[0-9.]+' | head -1) n'emet pas SIGPIPE" \
+         "sur un lecteur qui ferme — contre-epreuve non observable ici, status=$status)" >&3
+  fi
 }
