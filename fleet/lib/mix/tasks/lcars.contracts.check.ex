@@ -282,24 +282,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ## Preuve (mutation jouee a la pose, 2026-08-20)
   # Insere `defp _mutation_seam, do: Application.get_env(:lcars_fleet, :gate_backend)` dans
   # `gates.ex` : ce check ECHOUE et nomme `lib/fleet/workflow/gates.ex:43`. Mutation retiree.
+  # Quatre contournements de la version grep, rejoues et ROUGES depuis la lecture AST :
+  # `Application.get_all_env(…)`, `@x Application.compile_env(…)` en corps de module,
+  # `seam.eval?(1, 2)` (dispatch sur une cible non statique) et `inj.(1)` (fonction injectee).
   # Son angle mort, declare : la granularite est le FICHIER `gates.ex`. Un seam installe dans
   # `gates/predicate.ex` passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste
   # dans `Fleet.Workflow`. Les deux couches se composent et aucune ne couvre l'autre.
   @doc false
   @spec check_gates_no_runtime_seam(String.t()) :: result()
   def check_gates_no_runtime_seam(root) do
-    gates_path = Path.join(root, "lib/fleet/workflow/gates.ex")
-    seam = ~r/Application\.(get|fetch)_env|\bapply\(/
-
-    gates_seams =
-      gates_path
-      |> grep_lines(seam)
-      |> Enum.filter(fn {_ln, line} -> Regex.match?(seam, strip_comment(line)) end)
-      |> Enum.map(fn {ln, _} -> "lib/fleet/workflow/gates.ex:#{ln}" end)
+    rel = "lib/fleet/workflow/gates.ex"
+    gates_path = Path.join(root, rel)
 
     if not File.exists?(gates_path) do
-      broken_result("gates.no_runtime_seam", "lib/fleet/workflow/gates.ex")
+      broken_result("gates.no_runtime_seam", rel)
     else
+      gates_seams =
+        gates_path
+        |> File.read!()
+        |> Code.string_to_quoted!()
+        |> collect(&runtime_seam/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+        |> Enum.map(&"#{rel}: #{&1}")
+
       %{
         id: "gates.no_runtime_seam",
         remediation:
@@ -311,6 +317,36 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       }
     end
   end
+
+  # UN SEAM D'EXECUTION, LU SUR L'AST ET NON SUR LE TEXTE. La version grep ne nommait que
+  # `Application.get_env`/`fetch_env` et `apply(` — trois contournements passaient au vert en
+  # faisant exactement la meme chose : `Application.get_all_env`, `Application.compile_env`, et le
+  # dispatch par cible non statique (`mod().f()`, `fun.()`), qui est la forme la plus pure de
+  # l'injection de module qu'on refuse ici.
+  defp runtime_seam({{:., _, [{:__aliases__, _, [:Application]}, f]}, _, _}),
+    do: "Application.#{f}"
+
+  defp runtime_seam({{:., _, [{:__aliases__, _, [:Kernel]}, :apply]}, _, args}),
+    do: "apply/#{length(args)}"
+
+  defp runtime_seam({:apply, _, args}) when is_list(args), do: "apply/#{length(args)}"
+
+  # `fun.(…)` — une fonction injectee est un seam sans nom de module.
+  defp runtime_seam({{:., _, [target]}, _, _}) when not is_atom(target),
+    do: "appel d'une fonction injectee"
+
+  # `expr.f(…)` dont la cible n'est ni un alias ni un atome. `meta[:no_parens]` distingue l'ACCES
+  # (`state.field`, qui n'est pas un dispatch) de l'APPEL (`mod().f()`, qui en est un).
+  defp runtime_seam({{:., _, [target, f]}, meta, _}) when is_atom(f) do
+    cond do
+      meta[:no_parens] == true -> nil
+      match?({:__aliases__, _, _}, target) -> nil
+      is_atom(target) -> nil
+      true -> "dispatch dynamique .#{f}()"
+    end
+  end
+
+  defp runtime_seam(_), do: nil
 
   # LE JUMEAU DE `docs.public_functions_documented`, sur l'autre contrat.
   #
@@ -571,8 +607,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # JSON n'en porte aucun. Une severite ajoutee d'un cote et pas de l'autre est refusee ici.
   #
   # ## Preuve (mutation jouee a la pose, 2026-08-20)
-  # Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est nommee du
-  # cote ou elle manque. Mutation retiree.
+  # (a) Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est
+  #     nommee absente des DEUX enums.
+  # (b) Remplacer `"important"` par `"zzz"` dans le seul enum `severity_max` -> ECHEC, une absence
+  #     et un surnombre nommes. La version qui ne lisait que l'enum par-finding restait verte.
+  # Angle mort declare : `"none"` est ecrit ici, pas derive — aucun code Elixir ne le produit, il
+  # naît du juge et ne vit que dans le schema. Un second sentinelle du meme genre serait invisible.
+  # La valeur que le juge rend quand la mesure est faite et vide. Elle n'existe QUE dans le
+  # schema — aucun code Elixir ne la produit — donc le mur la nomme ici plutot que de deviner.
+  @severity_max_empty "none"
+
   @doc false
   @spec check_findings_severities_aligned(String.t()) :: result()
   def check_findings_severities_aligned(root) do
@@ -591,18 +635,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> collect_strings()
       |> MapSet.new()
 
-    from_schema =
+    json =
       with {:ok, raw} <- File.read(Path.join(root, rel_json)),
-           {:ok, json} <- Jason.decode(raw) do
-        json
-        |> get_in(["properties", "findings", "items", "properties", "severity", "enum"])
-        |> case do
-          l when is_list(l) -> MapSet.new(l)
-          _ -> MapSet.new()
-        end
+           {:ok, decoded} <- Jason.decode(raw) do
+        decoded
       else
+        _ -> %{}
+      end
+
+    enum = fn path ->
+      case get_in(json, path) do
+        l when is_list(l) -> MapSet.new(l)
         _ -> MapSet.new()
       end
+    end
+
+    from_schema = enum.(["properties", "findings", "items", "properties", "severity", "enum"])
+
+    # LE SECOND ENUM, ET CELUI OU L'INCIDENT A EU LIEU. `severity_max` n'est pas une redite de
+    # `severity` : c'est l'operande que `Gates.Predicate` compare (`"severity_max != critical"`),
+    # donc le seul des deux qu'une porte lise. Il porte une valeur de plus, `"none"` — la mesure
+    # faite dont le resultat est vide, refusee au fil quand elle manquait. Le mur ne lisait que
+    # l'enum par-finding : une severite ajoutee ici et pas la, ou l'inverse, passait au vert.
+    max_expected = MapSet.put(from_code, @severity_max_empty)
+    from_max = enum.(["properties", "severity_max", "enum"])
 
     cond do
       measured_nothing?(MapSet.to_list(from_code)) ->
@@ -611,20 +667,33 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       measured_nothing?(MapSet.to_list(from_schema)) ->
         broken_result("findings.severities_aligned", "severity enum in #{rel_json}")
 
+      measured_nothing?(MapSet.to_list(from_max)) ->
+        broken_result("findings.severities_aligned", "severity_max enum in #{rel_json}")
+
       true ->
         code_only = from_code |> MapSet.difference(from_schema) |> Enum.sort()
         schema_only = from_schema |> MapSet.difference(from_code) |> Enum.sort()
+        max_missing = max_expected |> MapSet.difference(from_max) |> Enum.sort()
+        max_extra = from_max |> MapSet.difference(max_expected) |> Enum.sort()
 
         %{
           id: "findings.severities_aligned",
           remediation:
             "une severite ecrite d'un seul cote est soit refusee au fil (le juge perd sa charge " <>
               "entiere, cf. le cas `none`), soit acceptee et jamais comparee au `block_at`",
-          status: if(code_only == [] and schema_only == [], do: :pass, else: :fail),
+          status:
+            if(code_only == [] and schema_only == [] and max_missing == [] and max_extra == [],
+              do: :pass,
+              else: :fail
+            ),
           evidence:
-            Enum.map(code_only, &"absente du schema: #{inspect(&1)}") ++
-              Enum.map(schema_only, &"absente de severities/0: #{inspect(&1)}"),
-          note: "findings-v1 severity vocabulary: Elixir set == JSON enum set"
+            Enum.map(code_only, &"absente de l'enum severity: #{inspect(&1)}") ++
+              Enum.map(schema_only, &"absente de severities/0: #{inspect(&1)}") ++
+              Enum.map(max_missing, &"absente de l'enum severity_max: #{inspect(&1)}") ++
+              Enum.map(max_extra, &"en trop dans severity_max: #{inspect(&1)}"),
+          note:
+            "findings-v1 severity vocabulary: severities/0 == enum severity, " <>
+              "et == enum severity_max prive de #{inspect(@severity_max_empty)}"
         }
     end
   end
@@ -657,7 +726,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # ## Preuve (mutations jouees a la pose, 2026-08-20)
   # (a) clause retiree pour un kind produit -> ECHEC, kind nomme cote « sans clause » ;
-  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme cote « morte ».
+  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme cote « morte » ;
+  # (c) `escalate_kind: :disk_full` pose chez un appelant de `record_or_escalate/4` -> ECHEC, kind
+  #     nomme « emis SANS clause ». C'est la voie CANONIQUE, et la version precedente la manquait
+  #     entierement : le kind ne passe pas en argument, il voyage dans les opts ;
+  # (d) une clause morte gardee vivante par un COMMENTAIRE de `events.yaml` -> ECHEC. Le regex
+  #     lisait le texte brut, donc une ligne d'historique suffisait a nier la mort d'une clause.
   # Angle mort declare : un kind construit dynamiquement (variable, interpolation) est invisible —
   # aucun n'existe aujourd'hui, et un mur precis vaut mieux qu'un mur qui devine.
   @doc false
@@ -686,8 +760,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     from_yaml =
       case File.read(Path.join(root, "priv/event_router/events.yaml")) do
         {:ok, y} ->
+          # Les commentaires tombent AVANT la lecture : la version brute lisait le texte entier,
+          # donc `# historique: on avait un jour escalate_kind: zzz_dead` suffisait a garder
+          # vivante une clause que plus personne ne produit. Un mur qui lit un commentaire mesure
+          # ce que quelqu'un a ECRIT, pas ce que le systeme EMET.
           ~r/escalate_kind:\s*([a-z_]+)/
-          |> Regex.scan(y)
+          |> Regex.scan(y |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1))
           |> Enum.map(fn [_, k] -> String.to_atom(k) end)
           |> MapSet.new()
 
@@ -727,9 +805,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # escalade. Couvre l'appel direct, la couture (`escalate.(…)`) et le relais local.
   defp escalated_kinds(ast) do
     collect(ast, fn
+      # (1) le kind litteral en TETE d'un appel a cinq arguments dont l'appele nomme une escalade.
       {callee, _, [k | rest]} when is_atom(k) and length(rest) == 4 ->
         n = callee_name(callee)
         if n && String.contains?(Atom.to_string(n), "escalate"), do: k, else: nil
+
+      # (2) `escalate_kind: :foo` dans n'importe quelle liste a mots-cles. C'EST LA VOIE
+      #     CANONIQUE, et la version (1) seule la manquait entierement : l'API publique est
+      #     `record_or_escalate/4`, qui ne prend PAS le kind en argument — il voyage dans ses
+      #     `opts` jusqu'a `escalate/5` (`incident_registry.ex:84`). Un `escalate_kind: :disk_full`
+      #     ecrit chez un appelant passait donc au vert et levait un `FunctionClauseError` a
+      #     l'execution, exactement le crash que cette table close est censee rendre impossible.
+      {:escalate_kind, k} when is_atom(k) and k not in [nil, true, false] ->
+        k
+
+      # (3) le DEFAUT du meme acces : `Keyword.get(opts, :escalate_kind, :recurrence)` emet
+      #     `:recurrence` sans qu'aucun appelant ne l'ecrive nulle part.
+      {{:., _, [{:__aliases__, _, [:Keyword]}, g]}, _, [_, :escalate_kind, d]}
+      when g in [:get, :get_lazy] and is_atom(d) and d not in [nil, true, false] ->
+        d
 
       _ ->
         nil
@@ -752,8 +846,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # naitrait produit et jamais seme, exactement comme le deuxieme.
   #
   # ## Preuve (mutation jouee a la pose, 2026-08-20)
-  # Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
-  # `@destinations` : ce check ECHOUE en annoncant 3 clauses pour 2 destinations. Mutation retiree.
+  # (a) Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
+  #     `@destinations` -> ECHEC, 3 clauses annoncees pour 2 destinations.
+  # (b) Rendre `visual_types/0` a sa forme d'avant — `do: ["type:feature", "type:doc"]`, la recopie
+  #     exacte qui a diverge seize jours -> ECHEC, la derivation manquante ET les deux litteraux
+  #     nommes. La version qui comptait seulement clauses contre destinations restait verte : elle
+  #     ne lisait jamais la fonction dont elle porte le nom.
   # Son angle mort, declare : il compte, il ne resout pas — deux clauses rendant le MEME type
   # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas n'existe pas
   # aujourd'hui et un compteur exact vaut mieux qu'un resolveur qui devine.
@@ -775,6 +873,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         _ -> nil
       end)
 
+    # LE CORPS DE `visual_types/0`, ET C'EST LE POINT QUI MANQUAIT. Le mur comptait des clauses
+    # contre des destinations et ne lisait JAMAIS la fonction dont il porte le nom : reecrire
+    # `def visual_types, do: ["type:feature", "type:doc"]` — la recopie exacte qui a diverge
+    # pendant seize jours — le laissait au vert. Un mur qui garde une DERIVATION doit constater
+    # la derivation, pas ses deux operandes.
+    body =
+      collect(ast, fn
+        {:def, _, [{:visual_types, _, a}, [do: b]]} when a in [nil, []] -> b
+        _ -> nil
+      end)
+
     cond do
       measured_nothing?(clauses) ->
         broken_result("labels.visual_types_derived", "def type_for_destination/1 in #{rel}")
@@ -782,9 +891,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       measured_nothing?(destinations) ->
         broken_result("labels.visual_types_derived", "@destinations in #{rel}")
 
+      measured_nothing?(body) ->
+        broken_result("labels.visual_types_derived", "def visual_types/0 in #{rel}")
+
       true ->
         n_clauses = length(clauses)
         n_dest = hd(destinations)
+        b = hd(body)
+
+        reads = fn name ->
+          [] !=
+            collect(b, fn
+              {:@, _, [{^name, _, _}]} -> :ref
+              {^name, _, _} -> :ref
+              {:/, _, [{^name, _, _}, _]} -> :ref
+              _ -> nil
+            end)
+        end
+
+        derived? = reads.(:destinations) and reads.(:type_for_destination)
+        literals = b |> collect_strings() |> Enum.sort()
 
         %{
           id: "labels.visual_types_derived",
@@ -792,14 +918,24 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             "une clause de `type_for_destination/1` sans sa destination dans `@destinations` " <>
               "produit un type visuel que `visual_types/0` ne seme pas — il naitra gris et sans " <>
               "description, comme `type:workshop` pendant seize jours",
-          status: if(n_clauses == n_dest, do: :pass, else: :fail),
+          status: if(n_clauses == n_dest and derived? and literals == [], do: :pass, else: :fail),
           evidence:
             if(n_clauses == n_dest,
               do: [],
               else: [
                 "#{rel}: #{n_clauses} clause(s) type_for_destination/1 pour #{n_dest} @destinations"
               ]
-            ),
+            ) ++
+              if(derived?,
+                do: [],
+                else: [
+                  "#{rel}: visual_types/0 ne lit pas @destinations via type_for_destination/1"
+                ]
+              ) ++
+              Enum.map(
+                literals,
+                &"#{rel}: visual_types/0 ecrit un type en dur: #{inspect(&1)}"
+              ),
           note: "visual_types derives from type_for_destination over @destinations"
         }
     end

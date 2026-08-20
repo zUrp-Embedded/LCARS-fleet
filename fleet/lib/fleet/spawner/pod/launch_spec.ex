@@ -165,7 +165,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   A present value outside the enum raises instead of being normalized.
   """
-  @spec permission_mode(Fleet.CapProfile.t() | term()) :: String.t()
+  @spec permission_mode(term()) :: String.t()
   def permission_mode(%Fleet.CapProfile{spec: spec}),
     do: bound_permission_mode(get_in(spec || %{}, ["invocation", "permission_mode"]) || "default")
 
@@ -194,7 +194,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   the pods spawned while it is on and does not retro-fit the ones already up. A pod's visibility is
   therefore a property of its own launch, not a fleet-wide state that shifts under it.
   """
-  @spec remote_control?(Fleet.CapProfile.t() | term()) :: boolean()
+  @spec remote_control?(term()) :: boolean()
   def remote_control?(cap_profile) do
     Fleet.CapProfile.remote_control?(cap_profile) or Fleet.Spawner.debug_visibility?()
   end
@@ -235,7 +235,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   décision de conception derrière, pas une correction. Ce paragraphe est ce qui empêche de lire
   l'inertie comme un bug à réparer ici.
   """
-  @spec output_compression?(Fleet.CapProfile.t() | term()) :: boolean()
+  @spec output_compression?(term()) :: boolean()
   def output_compression?(cap_profile) do
     Fleet.CapProfile.output_compression?(cap_profile) and
       Fleet.Spawner.output_compression_allowed?()
