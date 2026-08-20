@@ -79,12 +79,28 @@ usage() {
 # trailer, the system email) and REFUSE if one remains — the certification is a real postcondition, not
 # a trust in the transform's silence. `system_email` is passed so it is checked even when it equals the
 # default. Prints every offending line found; returns non-zero if any.
+# THE VOCABULARY OF INTERNAL ATTRIBUTION, WRITTEN ONCE AND READ FROM BOTH ENDS.
+# The same two patterns decide what gets REWRITTEN (the boundary, below) and what gets REFUSED (the
+# certification, here). One function each, one source of truth: if a new form of internal
+# attribution appears tomorrow, both ends learn it at the same instant. A boundary that drifted from
+# the certification would select less than the certification refuses — which is a publish that dies
+# at the last gate instead of one that never had the marker.
+internal_ident_re() { # <system_email>
+  printf '@lcars\.local|%s' "$(printf '%s' "$1" | sed 's/[.[\*^$]/\\&/g')"
+}
+# ⚠ `\s` ET NON `[[:space:]]`, parce que ce motif est lu par DEUX moteurs. La classe POSIX est
+# valide en ERE (grep) et n'existe PAS en Python, qui la lit comme un ensemble imbrique et emet un
+# `FutureWarning` sur stderr — lequel s'est retrouve melange a la sortie de la fonction et a fait
+# rougir quatre temoins pour une raison qui n'etait pas la leur. `\s` est compris des deux.
+# Le prix d'une source unique est qu'elle doit parler la langue de tous ses lecteurs.
+internal_msg_re() { printf 'Co-authored-by:\s*LCARS-|@lcars\.local'; }
+
 scan_forbidden_markers() {
   local dir="$1" system_email="$2" hits=0
 
   # Author/committer emails still internal (the transform should have rewritten every one).
   local ident
-  ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE '@lcars\.local|'"$(printf '%s' "$system_email" | sed 's/[.[\*^$]/\\&/g')"'' || true)"
+  ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE "$(internal_ident_re "$system_email")" || true)"
   if [[ -n "$ident" ]]; then
     echo "publish-transform: CERTIFICATION KO — identite interne survivante dans author/committer :" >&2
     printf '  %s\n' "$ident" >&2
@@ -93,7 +109,7 @@ scan_forbidden_markers() {
 
   # Internal co-author trailers still in the messages.
   local trailer
-  trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE 'Co-authored-by:\s*LCARS-|@lcars\.local' || true)"
+  trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE "$(internal_msg_re)" || true)"
   if [[ -n "$trailer" ]]; then
     echo "publish-transform: CERTIFICATION KO — trailer interne survivant dans les messages :" >&2
     printf '  %s\n' "$trailer" >&2
@@ -101,6 +117,26 @@ scan_forbidden_markers() {
   fi
 
   return "$hits"
+}
+
+# LA BORNE — definie ICI, avant le garde de sourcing, pour la meme raison que ses voisines : la
+# suite bats source ce fichier pour piloter ses fonctions une par une, et ce qui vit apres le garde
+# n'existe pas pour elle. Une fonction non testable est une fonction dont on croit le comportement.
+oldest_internal_commit() { # <dir> <system_email> -> sha, or empty
+  (cd "$1" && git log --topo-order --reverse --format='%H%x1f%ae%x1f%ce%x1f%B%x1e' HEAD) \
+    | LCARS_IDENT_RE="$(internal_ident_re "$2")" LCARS_MSG_RE="$(internal_msg_re)" python3 -c '
+import os, re, sys
+ident = re.compile(os.environb[b"LCARS_IDENT_RE"], re.I)
+msg = re.compile(os.environb[b"LCARS_MSG_RE"], re.I)
+for rec in sys.stdin.buffer.read().split(b"\x1e"):
+    f = rec.strip(b"\n").split(b"\x1f")
+    if len(f) < 4:
+        continue
+    sha, ae, ce, body = f[0], f[1], f[2], f[3]
+    if ident.search(ae) or ident.search(ce) or msg.search(body):
+        sys.stdout.write(sha.decode())
+        break
+'
 }
 
 # D2 (chantier rails, 2026-08-18) — FIRST-PARENT LINEARIZATION, the seam-side flattening.
@@ -205,6 +241,45 @@ HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v s
 HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
 
+# ── LA BORNE : ne reecrire QUE ce qui porte de l'attribution interne ────────────────────────────
+# A FULL REWRITE MAKES CONTRIBUTION IMPOSSIBLE, and that is not a detail of taste. Measured
+# 2026-08-20: a full pass keeps 2454 of jquery s 8489 SHAs and 2165 of git/git s 85342 — because
+# every descendant of a rewritten commit is rewritten, and filter-repo touches something early. A
+# branch published that way shares almost nothing with the upstream it came from, so a fork ->
+# upstream pull request shows tens of thousands of commits as new. LCARS could never be used to
+# contribute back.
+#
+# What must be scrubbed lives ONLY on the commits the fleet made, and those sit at the TIP. So the
+# rewrite is bounded to them, and everything below keeps its identity byte for byte (measured on the
+# real history: 8489 of 8489 imported commits survive).
+#
+# THE BOUNDARY IS COMPUTED FROM THE COMMITS, never from a file kept beside them. Each commit says
+# what it is — the role trailer the commit gate makes mandatory, or an internal identity — so there
+# is no state to keep in sync and nothing to drift. Upstream commits merged in MID-WORK are not a
+# problem: they sit inside the rewritten range and keep their SHAs anyway, because git is
+# content-addressed and nothing about them changes (measured).
+#
+# AND THE SAFETY IS FREE: the boundary selects, the certification then rescans the WHOLE history. A
+# boundary computed too high leaves an internal marker below it, and the certification REFUSES. A
+# wrong boundary cannot leak; it can only stop the publish.
+
+FIRST_OURS="$(oldest_internal_commit "$OUT_DIR" "$SYSTEM_EMAIL")"
+REFS_ARGS=()
+if [[ -z "$FIRST_OURS" ]]; then
+  # Nothing internal anywhere: nothing to scrub. Skipping the pass keeps EVERY sha, which is the
+  # right answer for a project whose history is entirely foreign (or already published once).
+  echo "publish-transform: aucune attribution interne — rien a reecrire, tous les SHA conserves"
+elif BOUND="$(git -C "$OUT_DIR" rev-parse -q --verify "${FIRST_OURS}^" 2>/dev/null)" && [[ -n "$BOUND" ]]; then
+  REFS_ARGS=(--refs "${BOUND}..HEAD")
+  echo "publish-transform: reecriture BORNEE a ${FIRST_OURS:0:8}..HEAD ($(git -C "$OUT_DIR" rev-list --count "${BOUND}..HEAD") commits) — l histoire importee garde ses SHA"
+else
+  # Our oldest commit IS the root: the whole history is ours, so the whole history is rewritten.
+  # This is a project CREATED in the fleet rather than imported, and it is the behaviour that
+  # shipped before the boundary existed.
+  echo "publish-transform: tout l historique est interne (projet ne dans la fleet) — reecriture complete"
+fi
+
+if [[ -n "$FIRST_OURS" ]]; then
 echo "publish-transform: passe filter-repo — author system_starfleet devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
 # The 5 values cross through the ENVIRONMENT (os.environb, callback side), NEVER through bash
 # interpolation into the Python source: an author name is UNCONTROLLED data (git log %cn), and the old
@@ -245,7 +320,20 @@ commit.message = re.sub(
     commit.message,
     flags=re.IGNORECASE,
 )
-')
+' ${REFS_ARGS[@]+"${REFS_ARGS[@]}"})
+fi
+
+# ⚠ `--partial` LAISSE `refs/remotes/origin/*` SUR L'HISTOIRE D'AVANT, et filter-repo le documente
+# ("no automatic remapping of refs/remotes/origin/* to refs/heads/*"). La certification, elle, lit
+# `git log --all` — donc elle voyait l'attribution interne survivre dans des refs QUI NE SONT PAS
+# PUBLIEES, et refusait une passe pourtant propre. Mesure du 2026-08-20 : HEAD portait 0 marqueur,
+# `--all` en portait 3, tous derriere `origin/*`.
+#
+# On RESTAURE L'INVARIANT au lieu de retrecir le controle : `--all` doit vouloir dire « tout ce que
+# ce clone peut publier ». Retirer le remote le rend vrai a nouveau — et c'est exactement ce que la
+# passe NON bornee faisait deja d'elle-meme, donc les deux chemins finissent identiques. Rien en
+# aval n'en depend : le rail ajoute son propre remote `dest`, et `approve` fetch par URL explicite.
+git -C "$OUT_DIR" remote remove origin 2>/dev/null || true
 
 if [[ -n "$LINEARIZE" ]]; then
   echo "publish-transform: linearisation first-parent de '$LINEARIZE' (forme MR — arbre final identique, merges aplatis)"
@@ -262,8 +350,9 @@ if ! scan_forbidden_markers "$OUT_DIR" "$SYSTEM_EMAIL"; then
 fi
 
 echo ""
-echo "publish-transform: fin de la passe filter-repo → $OUT_DIR (certifie : zero attribution interne survivante)"
-echo "  Les SHA sont tous neufs (passe one-way : ce n'est PAS un sync avec la forge de travail)."
+echo "publish-transform: fin de la passe → $OUT_DIR (certifie : zero attribution interne survivante)"
+echo "  Les SHA des commits REECRITS sont neufs (passe one-way : ce n'est PAS un sync avec la forge)."
+echo "  Ceux de l'histoire importee sont CONSERVES — c'est ce qui rend une PR vers l'upstream lisible."
 # ⚠ CE MESSAGE NOMMAIT `git@github.com:` IN THE CLEAR, whatever the destination — so a run aimed at
 # a GitLab project printed instructions that were simply false. This script is forge-AGNOSTIC: it
 # rewrites a history and never learns where the result is going. Its closing words must therefore
