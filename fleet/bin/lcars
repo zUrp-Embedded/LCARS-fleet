@@ -881,7 +881,13 @@ cmd_approve() {
 
   # Scratch clone, removed on ANY exit (die exits → EXIT trap fires; the CLI runs one verb then ends,
   # so a single EXIT trap is safe). mktemp -d is 0700; no external secret ever lands in it.
-  local work_base; work_base="$(mktemp -d)"
+  # ⚠ NOT `local`, AND THE TRAP IS WHY. An EXIT trap fires when the SCRIPT ends, which is after this
+  # function has returned — a `local` is gone by then. Under `set -u` the trap then died on
+  # "work_base: unbound variable", which cost twice: `approve` exited 1 ON SUCCESS (every caller
+  # reading a failure that did not happen), and the scratch clone was NEVER removed — the very leak
+  # this trap was written to prevent. Measured 2026-08-20 by running the verb end to end against a
+  # real destination; reading the code had shown a sweep that does not happen.
+  work_base="$(mktemp -d)"
   trap 'rm -rf "$work_base"' EXIT
   local work="$work_base/clone"
 
