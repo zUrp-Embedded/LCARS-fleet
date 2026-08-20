@@ -167,6 +167,45 @@ defmodule Fleet.Observation.DeckTest do
     # autre, et rien ne pouvait le signaler.
     #
     # La source est `assets/`, l'installation la pose sous `media_root`, tout le monde y lit.
+    #
+    # ⚠ LE DECOR EST FABRIQUE ICI, IL NE POINTE PLUS SUR `assets/` DU DEPOT. `config/test.exs` l'y
+    # visait, avec un motif qui sonnait juste — « les tests mesurent le vrai arbre plutot qu'un
+    # decor ». Il couplait la suite a un arbre qui n'est pas toujours la : le stage `build` de
+    # l'image copie `fleet` SEUL, donc `../../assets` n'y existe pas et ces quatre temoins ont fait
+    # ECHOUER LA CONSTRUCTION DE L'IMAGE (mesure du 2026-08-20). Ce qu'ils tiennent — la route, les
+    # deux arbres freres, les extensions, la traversee — ne demande pas les vrais fichiers de
+    # marque ; le lien avec la marque reelle est tenu par le dernier temoin, qui se DIT hors
+    # perimetre quand l'arbre n'est pas la plutot que de rougir.
+    setup do
+      root =
+        Path.join(System.tmp_dir!(), "lcars-media-test-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(root, "avatars"))
+      File.mkdir_p!(Path.join(root, "favicon"))
+
+      File.write!(
+        Path.join([root, "avatars", "architect.svg"]),
+        ~s(<svg xmlns="http://www.w3.org/2000/svg"/>)
+      )
+
+      File.write!(Path.join([root, "avatars", "architect.png"]), <<137, 80, 78, 71>>)
+      File.write!(Path.join([root, "avatars", "index.html"]), "<html/>")
+
+      File.write!(
+        Path.join([root, "favicon", "favicon.svg"]),
+        ~s(<svg xmlns="http://www.w3.org/2000/svg"/>)
+      )
+
+      previous = Application.get_env(:lcars_fleet, :media_root)
+      Application.put_env(:lcars_fleet, :media_root, root)
+
+      on_exit(fn ->
+        if previous, do: Application.put_env(:lcars_fleet, :media_root, previous)
+        File.rm_rf!(root)
+      end)
+
+      :ok
+    end
 
     test "un avatar de role est servi depuis la racine INSTALLEE, avec son type" do
       conn = call(:get, "/media/avatars/architect.svg")
@@ -204,16 +243,37 @@ defmodule Fleet.Observation.DeckTest do
       assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/index.html")
     end
 
-    test "les roles affiches viennent de la MARQUE, et le deck n'a plus de jeu a lui" do
-      # Le temoin qui empeche la troisieme copie de renaitre : ce que le deck enumere doit etre ce
-      # que `assets/avatars/` contient, sans dossier intermediaire dans `priv/`.
+    test "le deck n'a PLUS de jeu a lui — la troisieme copie ne peut pas renaitre" do
+      # Vrai partout, y compris dans le stage `build` : c'est une absence dans `priv/`, pas une
+      # presence dans un arbre voisin.
+      refute File.dir?(Application.app_dir(:lcars_fleet, "priv/observation/static/assets"))
+
+      # Et la liste des roles se lit dans l'arbre `avatars/`, jamais ailleurs : le favicon est un
+      # frere, il ne peut pas fuiter dans les roles.
       roles = Fleet.Observation.Deck.display_roles()
       assert "architect" in roles
-      assert "vulcan" in roles
-      assert "starfleet" in roles
-      # Les favicons ne sont plus dans cet arbre : aucun ne peut fuiter dans la liste des roles.
       refute Enum.any?(roles, &String.starts_with?(&1, "favicon"))
-      refute File.dir?(Application.app_dir(:lcars_fleet, "priv/observation/static/assets"))
+    end
+
+    test "les roles affiches viennent de la MARQUE REELLE du depot" do
+      # ⚠ HORS PERIMETRE QUAND L'ARBRE N'EST PAS LA, JAMAIS ROUGE. `assets/` est un voisin de
+      # `fleet/`, et un contexte legitime ne le porte pas : le stage `build` de l'image copie
+      # `fleet` SEUL puis joue ce gate. Meme doctrine que les listes de provisioning et que
+      # `site.build_inputs` — pas d'arbre du tout = hors perimetre, on le DIT ; arbre present et
+      # incomplet = le vrai defaut.
+      brand = Path.expand("../../../../assets/avatars", __DIR__)
+
+      if File.dir?(brand) do
+        Application.put_env(:lcars_fleet, :media_root, Path.expand("..", brand))
+        roles = Fleet.Observation.Deck.display_roles()
+
+        for r <- ~w(architect vulcan starfleet) do
+          assert r in roles, "#{r} absent de la marque installee — la source n'est plus assets/"
+        end
+      else
+        # Un skip qui ne dit pas ce qu'il n'a pas mesure est un vert muet.
+        IO.puts("\n  (hors perimetre : #{brand} absent — la marque n'est pas dans cet arbre)")
+      end
     end
   end
 end

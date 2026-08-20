@@ -90,6 +90,14 @@ const LCARS = {
   'lcars publish status': `Le doctor du pool de publication : chaque forge déclarée, et si son CLI
                            officiel est authentifié. L'auth n'est jamais stockée ici — c'est « gh
                            auth login » ou « glab auth login », déjà credential helper de git.`,
+  'lcars publish run': `La publication qui se RÉPÈTE, une fois le projet lié : la branche roulante
+                        « lcars/publish » est poussée et une seule PR reste ouverte contre la base —
+                        c'est un humain qui la merge. Sans CLI authentifié, la branche part quand
+                        même et l'URL de la PR à ouvrir est imprimée : le rail ne s'arrête pas sur
+                        ce qui ne lui appartient pas. Même rail que le tool « project_publish » du
+                        côté pod, exposé ici pour pouvoir le rejouer et diagnostiquer. Une sortie 6
+                        dit que la réécriture a cessé d'être déterministe : le clone est CONSERVÉ et
+                        son chemin imprimé, parce qu'à ce moment-là c'est la seule pièce à charge.`,
   'lcars help': null
 };
 
