@@ -325,6 +325,48 @@ defmodule Fleet.Project.ProbePredicateTest do
       assert r.code == 0
     end
 
+    test "une commande MULTI-LIGNES s'arrête à la première erreur", %{tmp_dir: tmp} do
+      # ⚠ MESURÉ LE 2026-08-20. Le corps d'un `## Test` était joint par des ESPACES, donc
+      # « make build \n make test » devenait `make build make test` — une commande avec des
+      # arguments, ni l'une ni l'autre. Et substituée en ligne dans `( … )`, une version
+      # multi-lignes aurait pris le code de retour de la DERNIÈRE : la première étape pouvait
+      # échouer et le témoin rester vert.
+      #
+      # Ici la première ligne ÉCHOUE. La suite doit être vue rouge — c'est la sémantique de la CI
+      # (première erreur, arrêt), et le template exige que `## Test` et `ci.yml` portent la même
+      # commande.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "false\nsh tests/run.sh")
+
+      assert r.facts["witness_exit"] == "1",
+             "la première ligne a échoué et le témoin est vert : #{r.out}"
+
+      assert r.facts["verdict"] == "inapplicable"
+      assert r.facts["reason"] == "head-suite-red"
+    end
+
+    test "une commande MULTI-LIGNES qui passe entièrement mesure bien", %{tmp_dir: tmp} do
+      # Le témoin du témoin : sans lui, « multi-lignes → rouge » passerait aussi si le multi-lignes
+      # était cassé de bout en bout.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "true\nsh tests/run.sh")
+
+      assert r.facts["witness_exit"] == "0"
+      assert r.facts["verdict"] == "relevant"
+    end
+
     test "un harnais qui ressemble à un GLOB n'est pas développé par le shell", %{tmp_dir: tmp} do
       # ⚠ `$harness` est délibérément NON quoté — c'est ainsi qu'on obtient plusieurs chemins — et
       # sans `set -f` le shell y appliquait AUSSI l'expansion de motifs : un projet déclarant

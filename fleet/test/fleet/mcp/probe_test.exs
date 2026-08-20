@@ -234,6 +234,14 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
       assert d.test_cmd == "mix test"
     end
 
+    test "un `## Test` MULTI-LIGNES reste un script, il n'est pas aplati" do
+      # ⚠ LE CORPS ÉTAIT JOINT PAR DES ESPACES : `make build` + `make test` rendait
+      # `"make build make test"`, UNE commande avec des arguments. La sonde tournait et son verdict
+      # portait sur autre chose que la suite du projet.
+      d = declared("## Test\n\nmake build\nmake test\n\n## Doc\n\nx\n")
+      assert d.test_cmd == "make build\nmake test"
+    end
+
     test "section absente → chaîne vide, jamais une devinette" do
       d = declared("# projet\n\nrien de contractuel ici\n")
       assert d.harness == ""
@@ -281,6 +289,28 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
       # L'absence de fait est un état lisible. Un défaut ici rendrait « la sonde n'a rien dit »
       # indiscernable de « la sonde a dit que tout va bien ».
       assert Probe.facts("des logs sans le moindre marqueur\n") == %{}
+    end
+  end
+
+  describe "l'état du run voyage avec les faits" do
+    defmodule Cancelled do
+      @moduledoc false
+      def dispatch_workflow(_r, _w, _ref, _i, _o), do: {:ok, %{run_id: 5}}
+      def run(_r, _i, _o), do: {:ok, %{"status" => "cancelled", "conclusion" => "cancelled"}}
+      def run_logs(_r, _i, _o), do: {:ok, "le runner a été interrompu avant toute mesure\n"}
+    end
+
+    test "run ANNULÉ sans le moindre fait → l'absence de verdict est EXPLICABLE" do
+      # ⚠ SANS L'ÉTAT DU RUN, DEUX FAITS OPPOSÉS ONT LA MÊME FORME : « la sonde a été interrompue »
+      # et « la sonde a tourné et n'a rien conclu » rendaient tous deux une map sans `verdict`. Le
+      # juge ne pouvait pas les séparer, et l'un est une panne quand l'autre est une mesure.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Cancelled)
+
+      assert {:ok, facts} = Probe.run(judge_pod_id(), "test-relevance")
+
+      refute Map.has_key?(facts, "verdict")
+      assert facts["status"] == "cancelled"
+      assert facts["conclusion"] == "cancelled"
     end
   end
 

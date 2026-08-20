@@ -67,6 +67,14 @@ on:
 jobs:
   relevance:
     runs-on: shell
+    # ⚠ LE PLAFOND PROTÈGE TON PROJET, PAS LA FLOTTE. La sonde joue TA suite, deux fois. Une suite
+    # qui ne termine jamais — boucle, attente réseau, prompt — ferait tourner ce job indéfiniment
+    # sur TON runner : le rail, lui, abandonne son attente au bout de deux minutes et n'a aucun
+    # moyen d'arrêter ce qui tourne ici.
+    #
+    # 15 min couvre deux exécutions d'une suite ordinaire avec une marge large. Si ta suite en
+    # demande plus, monte ce chiffre dans le même geste que l'image du job.
+    timeout-minutes: 15
     # `alpine` n'a pas bash. Tout ce qui suit est POSIX.
     defaults:
       run:
@@ -117,6 +125,20 @@ jobs:
             echo "Ce projet ne déclare aucune commande de test (section '## Test' de son CLAUDE.md)."
             exit 0
           fi
+
+          # ── LA COMMANDE EST UN SCRIPT, ET ELLE S'EXÉCUTE COMME TEL ──
+          #
+          # Elle était substituée EN LIGNE dans `( … )`. Sur un `## Test` de plusieurs lignes, ça
+          # donnait deux commandes dans un sous-shell dont le code de retour est celui de la
+          # DERNIÈRE : `make build` pouvait échouer et le témoin rester vert. Mesuré le 2026-08-20.
+          #
+          # Écrite dans un fichier et jouée par `sh -e`, elle a la sémantique de la CI — première
+          # erreur, arrêt — et le contrat du template exige justement que `## Test` et `ci.yml`
+          # portent la MÊME commande. Le délimiteur est quoté : rien n'est ré-interprété à l'écriture.
+          cmd_file="$(pwd)/.lcars-probe-cmd.sh"
+          cat > "$cmd_file" <<'LCARS_PROBE_CMD_EOF'
+          ${{ inputs.test_cmd }}
+          LCARS_PROBE_CMD_EOF
 
           # ── LA RÉCUPÉRATION VIT ICI, ET PLUS DANS UNE ÉTAPE À PART ──
           #
@@ -214,7 +236,7 @@ jobs:
 
           # ── 1. TÉMOIN — la suite doit être verte AVANT qu'on touche à quoi que ce soit ──
           echo "===== TÉMOIN : la suite sur la tête livrée ====="
-          ( ${{ inputs.test_cmd }} ) ; witness=$?
+          ( sh -e "$cmd_file" ) ; witness=$?
           fact "witness_exit=${witness}"
 
           if [ "$witness" -ne 0 ]; then
@@ -238,7 +260,7 @@ jobs:
           }
 
           echo "===== MESURE : code de base + harnais de la tête ====="
-          ( ${{ inputs.test_cmd }} ) ; reverted=$?
+          ( sh -e "$cmd_file" ) ; reverted=$?
           fact "reverted_exit=${reverted}"
 
           if [ "$reverted" -ne 0 ]; then

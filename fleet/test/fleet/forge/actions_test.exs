@@ -189,6 +189,45 @@ defmodule Fleet.Forge.Client.ActionsTest do
                )
     end
 
+    test "probed?/3 — un dispatch MANUEL d'un autre workflow ne compte pas comme une sonde" do
+      # ⚠ `event: workflow_dispatch` COUVRE AUSSI LE GESTE D'UN OPÉRATEUR. Un humain qui relance un
+      # workflow quelconque depuis l'UI Gitea sur la même tête faisait disparaître l'annotation
+      # « aucune sonde n'a tourné » — alors que personne n'avait mesuré. Et cette annotation est
+      # précisément le signal qui dira, au banc, si les juges appellent l'outil : un faux négatif
+      # dessus fausse la première mesure qu'on va en faire.
+      autre = [
+        {"/actions/runs",
+         json(200, %{
+           "total_count" => 1,
+           "workflow_runs" => [%{"id" => 3, "path" => ".gitea/workflows/ci.yml"}]
+         })}
+      ]
+
+      assert {:ok, false} = Actions.probed?("fleet/p", "abc", opts(autre))
+
+      sonde = [
+        {"/actions/runs",
+         json(200, %{
+           "total_count" => 1,
+           "workflow_runs" => [
+             %{"id" => 4, "path" => ".gitea/workflows/probe-test-relevance.yml"}
+           ]
+         })}
+      ]
+
+      assert {:ok, true} = Actions.probed?("fleet/p", "abc", opts(sonde))
+    end
+
+    test "probed?/3 — un run dont le chemin est ILLISIBLE ne compte pas" do
+      # Ne pas savoir ce qu'un run était ne prouve pas qu'il sondait. Même direction que partout
+      # ailleurs dans ce module : l'ignorance ne crédite jamais.
+      sans = [
+        {"/actions/runs", json(200, %{"total_count" => 1, "workflow_runs" => [%{"id" => 9}]})}
+      ]
+
+      assert {:ok, false} = Actions.probed?("fleet/p", "abc", opts(sans))
+    end
+
     test "page partielle : la troncature est DITE (pas de plafond silencieux)" do
       routes = [
         {"/actions/runs", json(200, %{"total_count" => 30, "workflow_runs" => [%{"id" => 1}]})}
