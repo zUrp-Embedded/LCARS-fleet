@@ -227,6 +227,16 @@ defmodule Fleet.Project.TemplateSync do
   # vrai des deux faces ecrites en dur, et le rendre explicite retire la table de correspondance qui
   # n'aurait servi qu'a diverger.
   #
+  # ⚠ CE SONT DES NOMS DE BRANCHE, PAS DES NOMS DE FACE, et la nuance se paie si on l'ignore : la
+  # face s'appelle `code` et sa branche `main` (`Fleet.Layout` @face_branches). Les dossiers du
+  # modele portent `main`, donc le vocabulaire d'ICI est celui des branches. Chercher un dossier
+  # `code/` ne trouverait rien, en silence.
+  #
+  # On lit l'ARBRE et non `Fleet.Layout` parce que le catalogue est substituable : celui qu'un
+  # operateur apporte a le droit de ne pas fournir de plan pour chaque branche. Ce qu'on projette
+  # est ce que le catalogue DONNE ; ce qu'un projet doit avoir est une autre question, et elle se
+  # tranche a l'onboarding, pas ici.
+  #
   # L'ABSENCE DE `main` EST UN REFUS, PAS UNE FACE EN MOINS. C'est la branche par defaut, la seule
   # que `generate` sert : sans elle, la projection poserait un depot modele dont tout `generate`
   # ultérieur produirait un projet vide, en rendant `:ok`. Un catalogue sans `main/` est casse, et
