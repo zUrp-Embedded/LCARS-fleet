@@ -962,6 +962,58 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert detail =~ name
     end
 
+    @tag :tmp_dir
+    test "un catalogue SANS rail doc → aucune route, et un incident DURABLE", %{tmp_dir: tmp} do
+      # LE JUMEAU DE 6-125, sur la moitie voisine. `refute_missing_rail/1` rend
+      # `:no_doc_rail_in_catalogue` quand aucune carte du catalogue ne porte de producteur
+      # `face: workshop`. Un deploiement a le DROIT de ne pas avoir de rail doc ; un ticket
+      # documentaire dessus echouait alors a chaque tick, indefiniment, sans trace — le mode de
+      # panne exact que la clause voisine a ete ecrite pour fermer.
+      #
+      # Le catalogue temporaire porte UNE carte, sans producteur `face: workshop` : la resolution
+      # par PROPRIETE ne trouve rien et rend `nil`. C'est le seul chemin vers ce refus.
+      maps = Path.join(tmp, Fleet.Catalogue.rel(:workflow_maps))
+      File.mkdir_p!(maps)
+      File.write!(Path.join(tmp, "catalogue.yaml"), "api_version: 1\nname: sans-atelier\n")
+
+      File.write!(Path.join(maps, "brief-gate.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: brief-gate
+      spec:
+        max_rework_rounds: 1
+        jury: []
+        ci: ignore
+        steps:
+          only:
+            role: engineer
+      """)
+
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, tmp)
+
+      payload = eng_issue(%{"labels" => [%{"name" => "destination/workshop"}]})
+
+      opts =
+        dispatch_opts(
+          forge_opts: [_test_route: :none],
+          incident_fun: fn op, subject, reason, o ->
+            send(self(), {:incident, op, subject, reason, o[:reason_detail]})
+            :recorded
+          end
+        )
+
+      assert {:error, {:onboard, {:error, :no_doc_rail_in_catalogue}}} =
+               StepDispatcher.dispatch_issue(payload, opts)
+
+      refute_received {:routed, _, _, _}
+      refute_received {:spawned, _, _}
+
+      # MEME `op` que la carte illisible : les deux disent « la resolution de carte de ce depot a
+      # echoue », donc une seule signature de dedup et un seul ticket.
+      assert_received {:incident, "card", _repo, :no_doc_rail_in_catalogue, detail}
+      assert detail =~ "rail doc"
+    end
+
     test "route read failure → {:error, {:route_resolution, _}}, NO lock nor spawn" do
       payload = eng_issue()
       opts = dispatch_opts(forge_opts: [_test_route: {:error, :http_500}])
