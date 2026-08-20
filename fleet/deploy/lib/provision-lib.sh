@@ -850,7 +850,20 @@ as_human() {
   if [[ "$(id -un)" == "$PROV_HUMAN" ]]; then
     "$@"
   elif [[ "$EUID" -eq 0 ]]; then
-    runuser -u "$PROV_HUMAN" -- env HOME="$home" USER="$PROV_HUMAN" LOGNAME="$PROV_HUMAN" "$@"
+    # ⚠ LE `cd` FAIT PARTIE DE L'IDENTITE, ET SON ABSENCE A CASSE UNE INSTALLATION NATIVE. Cette
+    # ligne posait HOME/USER/LOGNAME et laissait le REPERTOIRE COURANT de root. Un humain qui hérite
+    # d'un cwd qu'il ne peut pas lire est un demi-humain : tout ce qui résout un chemin RELATIF
+    # échoue, et le message n'accuse jamais le cwd.
+    #
+    # Mesure du 2026-08-20, poste natif Mintie : `75-projects` lance la porte `lcars project
+    # reconcile` depuis un `provision apply` démarré en root avec cwd `/root` (0700). L'ERTS y
+    # cherche ses modules par chemin relatif et rend `File operation error: eacces. Target:
+    # ./Elixir.Logger.beam` — vingt lignes de `.beam` illisibles, aucune ne nommant le vrai fait :
+    # le répertoire courant n'appartient pas à celui qui lit.
+    #
+    # `cd` dans un SOUS-SHELL : le cwd du module appelant n'est pas touché. Les 39 appelants
+    # travaillent en chemins absolus, donc aucun ne dépend du cwd hérité — vérifié avant de changer.
+    ( cd "$home" && runuser -u "$PROV_HUMAN" -- env HOME="$home" USER="$PROV_HUMAN" LOGNAME="$PROV_HUMAN" "$@" )
   else
     p_fail "as_human: je suis $(id -un), pas root ni $PROV_HUMAN — relance en root"
     return 1

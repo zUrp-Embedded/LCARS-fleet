@@ -126,6 +126,29 @@ module_sh() {
   [[ "$output" == *"user inconnu"* ]]
 }
 
+@test "as_human POSE LE CWD, pas seulement HOME — un cwd illisible casse tout chemin relatif" {
+  # ⚠ TEMOIN D'UNE INSTALLATION CASSEE, pas d'une precaution. `as_human` posait HOME/USER/LOGNAME
+  # et laissait le REPERTOIRE COURANT de root. Mesure du 2026-08-20 sur un poste natif : la porte
+  # `lcars project reconcile`, lancee depuis un `provision apply` en root avec cwd `/root` (0700),
+  # rendait vingt lignes de `File operation error: eacces. Target: ./Elixir.Logger.beam` — l'ERTS
+  # cherchant ses modules par chemin RELATIF dans un dossier que l'humain ne peut pas lire. Aucune
+  # de ces vingt lignes ne nomme le cwd : le diagnostic accuse le release, jamais le repertoire.
+  #
+  # Le `cd` fait donc partie de l'identite au meme titre que HOME. Ce temoin lit le cwd DEPUIS le
+  # process fils, la seule place ou la question se pose.
+  # ⚠ LU SUR LA SOURCE, ET C'EST LE SEUL MOYEN. Le defaut ne vit QUE sur la branche root→humain
+  # (`runuser`) : quand l'appelant EST deja l'humain, `as_human` execute directement et le cwd est
+  # son propre choix, pas un heritage. Exercer la vraie branche demanderait root et un second
+  # compte — ce que cette suite ne peut pas fabriquer. Un temoin qui se rabattrait sur la branche
+  # directe passerait au vert sans jamais toucher le code fautif : c'est le faux-vert que ce
+  # fichier existe pour interdire, alors il lit la forme et le DIT.
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  grep -qE '^\s*\( cd "\$home" && runuser -u "\$PROV_HUMAN"' "$lib"
+  # Et le `cd` est dans un SOUS-SHELL : sans les parentheses, le module appelant repartirait avec
+  # un cwd change sous lui, ce qui echangerait un defaut contre un autre, plus difficile a voir.
+  grep -qE '^\s*\( cd .* \)$' "$lib"
+}
+
 # ─── write_atomic — regression guards on the primitive itself ────────────────────────────────────
 
 @test "write_atomic: identical content is a no-op (no change counted, mtime preserved)" {
