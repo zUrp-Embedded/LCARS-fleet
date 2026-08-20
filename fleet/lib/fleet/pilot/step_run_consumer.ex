@@ -777,6 +777,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @doc false
+  # Le retour reste ouvert PAR CONSTRUCTION : il descend dans `apply_verdict`, qui rend soit le
+  # resultat de `close_with_trace`, soit celui de `freeze_to_arch` — les deux traversant la couture
+  # `run_completion` (`(String.t(), (-> term()) -> term())`). Le resserrer serait inventer un
+  # contrat que la couture ne tient pas.
   @spec resume_gate(map(), map(), term()) :: term()
   def resume_gate(
         %{n: _n, role: _role, payload: _payload, workflow_map: _workflow_map, step: _step} = ctx,
