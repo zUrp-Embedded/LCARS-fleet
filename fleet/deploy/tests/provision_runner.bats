@@ -15,6 +15,24 @@
 # runner as a real process. Stubs log "<name>:<mode>" to RUN_LOG and exit STUB_RC.
 
 setup() {
+  # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT DE PROVISIONNEMENT, PAS SEULEMENT SES FICHIERS. Ces temoins
+  # jugent ce que le runner fait d'un environnement DONNE ; s'ils heritent de celui de l'appelant,
+  # ils jugent l'appelant.
+  #
+  # MESURE DU 2026-08-20, ET LE COUPABLE ETAIT LE GESTE DE REVISION LUI-MEME. `lcars-revise` lance
+  # l'apply avec `LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_URL=… FORGE_BASE_URL=…` — legitime, c'est ce
+  # qu'un poste hors cible doit poser. Le gate tourne DANS cet apply, donc les trois variables
+  # descendaient jusqu'ici : le temoin « un substrat linux est REFUSE » voyait l'echappatoire posee
+  # et lisait un avertissement au lieu d'un refus, et les deux temoins de `forge.url` voyaient une
+  # URL la ou ils en attendaient l'absence. Verifie dans les deux sens : les trois passent sans les
+  # variables, les trois tombent avec.
+  #
+  # On efface donc TOUTE la famille, pas les trois noms mesures : le prochain drapeau que le geste
+  # de revision aura besoin de poser ne doit pas rouvrir ce trou en silence.
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+
   SRC="$BATS_TEST_DIRNAME/.."
   SANDBOX="$BATS_TEST_TMPDIR/prov"
   mkdir -p "$SANDBOX/lib" "$SANDBOX/modules.d"
