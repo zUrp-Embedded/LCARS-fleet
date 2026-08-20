@@ -33,7 +33,8 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   So an acknowledged delivery is an ARCHITECTURE decision — a per-event-type subscriber notion in
   `Fleet.EventRouter` (which deliberately has "direct subscribers, no dispatch table"), or the
-  durable outbox this fleet does not have and whose single queue is `persist: false` by decision.
+  durable outbox this fleet does not have and whose single queue is EPHEMERAL BY CONSTRUCTION since
+  2026-08-20 (the broker's `state.json` rail is gone, BL-6-113 — cf. `Server`'s moduledoc).
   Until one is taken, the durable half of completion stays the forge reconciliation (F-C050).
   """
 

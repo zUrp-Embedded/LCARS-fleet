@@ -214,7 +214,10 @@ events:
   work_item.completed: []
   work_item.cleared: []
   work_item.failed: []
-  state.corrupt: []
+  # `state.corrupt` RETIRE le 2026-08-20 (BL-6-113) : il annoncait la relecture ratee d'un
+  # `state.json`, et le rail de persistance du broker est parti avec `Fleet.TaskQueue.Store`. Un
+  # type AUTORISE que plus aucun emetteur ne peut poser se lit comme une categorie alimentee — meme
+  # motif que `sdk.upstream_alert` ci-dessous.
 
   # --- V2 extensions (MCPMonitor) ---
   # `sdk.upstream_alert` RETIRE le 2026-08-14 (6-016) : il etait la moitie declaree de `MCPWatcher`,

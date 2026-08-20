@@ -291,8 +291,10 @@ defmodule Fleet.Spawner.PodTest do
           assert_receive {:launch_called, _args, _env}, 2_000
         end)
 
-      assert log =~ "CORRUPT",
-             "a corrupt state.json must be LOUD (error, like the TaskQueue's state.corrupt), not silent"
+      # (La comparaison disait « comme le `state.corrupt` de la TaskQueue » — ce voisin est parti le
+      #  2026-08-20 avec le rail de persistance du broker, BL-6-113. Le POD, lui, garde son
+      #  `state.json` : c'est un AUTRE etat, par pod, et cette exigence-la ne bouge pas.)
+      assert log =~ "CORRUPT", "a corrupt pod state.json must be LOUD (error), not silent"
     end
 
     test "R1-20: state.json ABSENT → SILENT fresh init (no false corrupt warning)" do

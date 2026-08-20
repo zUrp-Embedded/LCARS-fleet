@@ -4,10 +4,10 @@ defmodule Fleet.TaskQueueTest do
   Every `assert_receive` matches the canonical `%Fleet.Event{}` schema.
 
   Async isolation: one unique PubSub topic per test (canonical default `fleet.events`
-  overridden via the `:topic` opt) + `@moduletag :tmp_dir` for the `state.json`.
+  overridden via the `:topic` opt). Le `@moduletag :tmp_dir` est parti le 2026-08-20 avec le
+  `state.json` qu'il abritait (BL-6-113) : le broker n'ecrit plus rien sur disque.
   """
   use ExUnit.Case, async: true
-  @moduletag :tmp_dir
 
   alias Fleet.TaskQueue
   alias Fleet.TaskQueue.Server
@@ -37,12 +37,11 @@ defmodule Fleet.TaskQueueTest do
     end
   end
 
-  setup %{tmp_dir: tmp_dir} do
+  setup do
     topic = "fleet.events.test.#{System.unique_integer([:positive])}"
     Phoenix.PubSub.subscribe(Fleet.PubSub, topic)
-    state_path = Path.join(tmp_dir, "state.json")
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: state_path})
-    %{q: q, topic: topic, tmp_dir: tmp_dir}
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic})
+    %{q: q, topic: topic}
   end
 
   test "1. enqueue + get_for_pod happy path", %{q: q} do
@@ -151,13 +150,10 @@ defmodule Fleet.TaskQueueTest do
   # finish the step_run). If its broadcast fails, `submit_result` does NOT return a mute `{:ok}` (the pod would
   # believe its deliverable accepted while the step_run never finishes → forge lock forever) — it propagates
   # `{:error,{:broadcast_failed,_}}`.
-  test "3b. MA-04: work_item.completed broadcast RETURNING {:error} → submit_result {:error,{:broadcast_failed,_}}, not {:ok}",
-       %{tmp_dir: tmp_dir} do
-    state_path = Path.join(tmp_dir, "state_failbus.json")
-
+  test "3b. MA-04: work_item.completed broadcast RETURNING {:error} → submit_result {:error,{:broadcast_failed,_}}, not {:ok}" do
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: "t.failbus", state_path: state_path, bus: FailBus},
+        {Server, name: nil, topic: "t.failbus", bus: FailBus},
         id: :q_failbus
       )
 
@@ -186,13 +182,10 @@ defmodule Fleet.TaskQueueTest do
 
   # MA-04 — variant: the broadcast RAISES (UnregisteredError / PubSub down). `required_broadcast` rescues
   # and propagates `{:error,{:broadcast_failed,_}}`, never a mute `:ok` (the rescue does not re-swallow lifecycle).
-  test "3c. MA-04: work_item.completed broadcast that RAISES → {:error,{:broadcast_failed,_}}, not {:ok}",
-       %{tmp_dir: tmp_dir} do
-    state_path = Path.join(tmp_dir, "state_raisebus.json")
-
+  test "3c. MA-04: work_item.completed broadcast that RAISES → {:error,{:broadcast_failed,_}}, not {:ok}" do
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: "t.raisebus", state_path: state_path, bus: RaiseBus},
+        {Server, name: nil, topic: "t.raisebus", bus: RaiseBus},
         id: :q_raisebus
       )
 
@@ -289,13 +282,10 @@ defmodule Fleet.TaskQueueTest do
   # terminal `:completed` state: the item STAYS ACTIVE so a re-submit RE-PLAYS the delivery instead of
   # being lied to with `:double_submit_ignored` (pre-CI-03 the commit was done first → lost broadcast =
   # terminal item + false "already received" at retry).
-  test "CI-03: a FAILED broadcast leaves the item ACTIVE + a re-submit RE-ATTEMPTS (never double_submit_ignored)",
-       %{tmp_dir: tmp_dir} do
-    state_path = Path.join(tmp_dir, "state_ci03_active.json")
-
+  test "CI-03: a FAILED broadcast leaves the item ACTIVE + a re-submit RE-ATTEMPTS (never double_submit_ignored)" do
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: "t.ci03.active", state_path: state_path, bus: FailBus},
+        {Server, name: nil, topic: "t.ci03.active", bus: FailBus},
         id: :q_ci03_active
       )
 
@@ -313,18 +303,15 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.submit_result(q, "pod-A", %{"verdict" => "proven"})
   end
 
-  test "CI-03: a re-submit after a failed broadcast RE-PLAYS the delivery, exactly once → :completed",
-       %{tmp_dir: tmp_dir} do
+  test "CI-03: a re-submit after a failed broadcast RE-PLAYS the delivery, exactly once → :completed" do
     topic = "t.ci03.toggle.#{System.unique_integer([:positive])}"
     Phoenix.PubSub.subscribe(Fleet.PubSub, topic)
     :persistent_term.put({ToggleBus, topic}, :fail)
     on_exit(fn -> :persistent_term.erase({ToggleBus, topic}) end)
 
-    state_path = Path.join(tmp_dir, "state_ci03_toggle.json")
-
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: topic, state_path: state_path, bus: ToggleBus},
+        {Server, name: nil, topic: topic, bus: ToggleBus},
         id: :q_ci03_toggle
       )
 
@@ -356,173 +343,27 @@ defmodule Fleet.TaskQueueTest do
     refute_receive %Fleet.Event{type: :"work_item.completed"}, 100
   end
 
-  test "5. recovery cross-restart", %{topic: topic, tmp_dir: tmp_dir} do
-    path = Path.join(tmp_dir, "recover.json")
-    {:ok, q1} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :q1)
-    {:ok, _} = TaskQueue.enqueue(q1, "pod-A", %{brief: "a"})
-    {:ok, _} = TaskQueue.enqueue(q1, "pod-B", %{brief: "b"})
-    {:ok, _} = TaskQueue.enqueue(q1, "pod-C", %{brief: "c"})
-    {:ok, _} = TaskQueue.get_for_pod(q1, "pod-A")
-    {:ok, _} = TaskQueue.submit_result(q1, "pod-A", %{"verdict" => "proven"})
-
-    :ok = stop_supervised(:q1)
-
-    {:ok, q2} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :q2)
-    # 3 work items total: A completed, B + C pending — state rebuilt
-    assert {:ok, :completed} = TaskQueue.pod_status(q2, "pod-A")
-
-    assert [%{pod_id: "pod-B"}, %{pod_id: "pod-C"}] =
-             q2 |> TaskQueue.list_pending() |> Enum.sort_by(& &1.pod_id)
-  end
-
-  test "6. recovery schema mismatch → state.corrupt + empty state (non-blocking)", %{
-    topic: topic,
-    tmp_dir: tmp_dir
-  } do
-    path = Path.join(tmp_dir, "corrupt.json")
-    File.write!(path, Jason.encode!(%{"v" => 99, "work_items" => %{}}))
-
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qc)
-
-    # `found` is stringified at the producer (inspect/1): the payload stays JSON-safe
-    # end to end (the WS edge encodes it raw).
-    assert_receive %Fleet.Event{
-      source: :task_queue,
-      type: :"state.corrupt",
-      payload: %{expected: 1, found: "99"}
-    }
-
-    # non-blocking fallback: the queue runs, empty state
-    assert [] = TaskQueue.list_pending(q)
-  end
-
-  test "6b. WorkItem.from_map round-trip preserves rich fields (deep-02 fix: recovery no longer loses brief/role/metadata)" do
-    t = %Fleet.TaskQueue.WorkItem{
-      id: "t1",
-      pod_id: "p1",
-      enqueued_at: ~U[2026-06-02 00:00:00Z],
-      state: :assigned,
-      issue_id: "tk1",
-      role: "engineer",
-      brief: "do X",
-      metadata: %{"step" => "qa"},
-      result: %{"ok" => true}
-    }
-
-    assert {:ok, back} = Fleet.TaskQueue.WorkItem.from_map(Fleet.TaskQueue.WorkItem.to_map(t))
-
-    assert %{
-             brief: "do X",
-             role: "engineer",
-             issue_id: "tk1",
-             state: :assigned,
-             metadata: %{"step" => "qa"},
-             result: %{"ok" => true}
-           } = back
-  end
-
-  test "6c. recovery of a work item with an UNKNOWN state → state.corrupt (deep-02 fix: fail-loud, no raise nor silent drop)",
-       %{topic: topic, tmp_dir: tmp_dir} do
-    path = Path.join(tmp_dir, "badstate.json")
-
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "v" => 1,
-        "work_items" => %{
-          "t1" => %{
-            "id" => "t1",
-            "pod_id" => "p1",
-            "enqueued_at" => "2026-06-02T00:00:00Z",
-            "state" => "bogus_xyz"
-          }
-        }
-      })
-    )
-
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qbs)
-
-    # The {:work_item, id, reason} variant was the ONLY non-JSON-encodable `found`: the
-    # producer stringifies it (inspect/1) so the event crosses the WS edge without crashing.
-    assert_receive %Fleet.Event{
-      source: :task_queue,
-      type: :"state.corrupt",
-      payload: %{found: found}
-    }
-
-    assert found == inspect({:work_item, "t1", :invalid})
-    assert {:ok, _} = Jason.encode(%{found: found})
-
-    assert [] = TaskQueue.list_pending(q)
-  end
-
-  # JG-020 — `nil` A UN SENS ICI : « pas d'echeance ». Une date ILLISIBLE n'est pas une absence
-  # d'echeance, c'est une echeance qu'on n'a pas su lire, et les plier l'une sur l'autre produisait
-  # un mandat que la file ne ferait JAMAIS expirer (`deadline_reached?/1` ne conclut rien sur `nil`),
-  # jusqu'a ce qu'un `enqueue` du meme pod le supersede. Meme traitement que `enqueued_at` depuis
-  # 6d : refus a la lecture, chemin `state.corrupt`, compte et bruyant.
-  test "6d-bis. une echeance ILLISIBLE invalide l'item — elle ne devient pas « pas d'echeance »" do
-    base = %{
-      "id" => "t1",
-      "pod_id" => "p1",
-      "enqueued_at" => "2026-06-02T00:00:00Z",
-      "state" => "assigned"
-    }
-
-    assert {:error, :invalid} =
-             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "deadline", "pas-une-date"))
-
-    # Les trois dates optionnelles partagent le defaut, donc les trois partagent le test.
-    assert {:error, :invalid} =
-             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "assigned_at", "pas-une-date"))
-
-    assert {:error, :invalid} =
-             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "completed_at", "pas-une-date"))
-
-    # Un type inattendu n'est pas une absence non plus.
-    assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "deadline", 42))
-  end
-
-  test "6d-ter. TEMOIN — une echeance ABSENTE reste legitime, elle rend bien `nil`" do
-    # Sans ce temoin, invalider tout item sans echeance passerait le test ci-dessus et casserait
-    # la forme nominale : la plupart des mandats n'ont pas d'echeance.
-    base = %{
-      "id" => "t1",
-      "pod_id" => "p1",
-      "enqueued_at" => "2026-06-02T00:00:00Z",
-      "state" => "pending"
-    }
-
-    assert {:ok, %Fleet.TaskQueue.WorkItem{deadline: nil, assigned_at: nil, completed_at: nil}} =
-             Fleet.TaskQueue.WorkItem.from_map(base)
-  end
-
-  test "6d. invalid ISO enqueued_at → {:error,:invalid} (required field, no silent nil — after-9b3aea3d fix)" do
-    bad = %{"id" => "t1", "pod_id" => "p1", "enqueued_at" => "not-a-date", "state" => "pending"}
-    assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad)
-  end
-
-  test "6e. from_map REJECTS a malformed optional (non-map metadata/result, non-binary id) → :invalid" do
-    base = %{
-      "id" => "t1",
-      "pod_id" => "p1",
-      "enqueued_at" => "2026-06-02T00:00:00Z",
-      "state" => "pending"
-    }
-
-    for bad <- [
-          Map.put(base, "metadata", "not-a-map"),
-          Map.put(base, "result", ["not", "a", "map"]),
-          Map.put(base, "issue_id", 42)
-        ] do
-      assert {:error, :invalid} = Fleet.TaskQueue.WorkItem.from_map(bad),
-             "map #{inspect(bad)} should be :invalid"
-    end
-
-    # A-15: an OLD state.json carrying the vestigial retry_count key stays readable (key ignored).
-    assert {:ok, %Fleet.TaskQueue.WorkItem{}} =
-             Fleet.TaskQueue.WorkItem.from_map(Map.put(base, "retry_count", 0))
-  end
+  # ═══ HUIT TESTS DE RECUPERATION RETIRES LE 2026-08-20 AVEC LEUR RAIL (BL-6-113) ═══
+  #
+  # `5. recovery cross-restart` · `6. schema mismatch -> state.corrupt` · `6b. from_map round-trip`
+  # · `6c. etat inconnu -> state.corrupt` · `6d-bis` · `6d-ter` · `6d` · `6e. from_map optionnel
+  # malforme`. Tous interrogeaient `Fleet.TaskQueue.Store` et `WorkItem.from_map/to_map`, supprimes :
+  # le broker n'ecrit plus de `state.json`, donc il n'a rien a relire et pas d'etat a trouver
+  # corrompu.
+  #
+  # CE QU'ILS PROUVAIENT ET QUI NE DOIT PAS PARTIR AVEC EUX — verifie, pas suppose :
+  #
+  #   * « une echeance ILLISIBLE n'est pas une absence d'echeance » (6d-bis/6d-ter, JG-020) : la
+  #     distinction vit maintenant dans `new/2` (`cast_deadline`), et `6f` l'epingle — l'assertion
+  #     sur la chaine illisible y a ete AJOUTEE le meme jour, parce que `6f` ne couvrait que
+  #     l'entier et l'absence. Sans cet ajout, retirer 6d-bis aurait rendu la propriete a personne ;
+  #   * « une echeance deja passee sur un item actif le fait echouer » (6e-recovery) : couvert par
+  #     `7. failed via deadline`, qui l'obtient par `enqueue` au lieu d'une relecture ;
+  #   * « un timer au-dela du plafond ERTS est borne » (MINE-TQ-02 recovery) : couvert par
+  #     `MINE-TQ-02: max-DateTime deadline`, meme clamp, atteint par `enqueue`.
+  #
+  # Ce qui part vraiment : la serialisation et sa reciproque. Une paire de fonctions dont la seule
+  # preuve etait qu'elles s'inversent l'une l'autre ne prouvait rien du systeme.
 
   test "6f. WorkItem.new/2 = smart-constructor: casts (deadline ISO→DateTime), rejects a malformed attr" do
     alias Fleet.TaskQueue.WorkItem
@@ -539,6 +380,15 @@ defmodule Fleet.TaskQueueTest do
     assert {:error, {:bad_attr, {:metadata, _}}} = WorkItem.new("p1", %{metadata: "nope"})
     assert {:error, {:bad_attr, {:deadline, _}}} = WorkItem.new("p1", %{deadline: 12_345})
     assert {:error, {:bad_attr, {:issue_id, _}}} = WorkItem.new("p1", %{issue_id: 7})
+
+    # JG-020, RAPATRIE ICI LE 2026-08-20 DEPUIS `6d-bis` (parti avec `from_map`). ABSENTE et
+    # ILLISIBLE sont deux faits, et un seul est une absence d'echeance. Le couple juste au-dessus
+    # ne couvrait que l'ENTIER et l'ABSENCE : une CHAINE qu'on ne sait pas lire etait le cas non
+    # teste, et c'est precisement celui qui, plie sur `nil`, produisait un mandat que la file ne
+    # ferait JAMAIS expirer — `deadline_reached?/1` ne conclut rien sur `nil`, donc l'item restait
+    # la jusqu'a ce qu'un `enqueue` du meme pod le supersede.
+    assert {:error, {:bad_attr, {:deadline, "pas-une-date"}}} =
+             WorkItem.new("p1", %{deadline: "pas-une-date"})
 
     # BND-123: brief_sha/brief_ref are the ADDRESS of the physical brief, not free text. A bogus
     # sha would pass itself off as verifiable provenance in the MCP envelope → shape validated at
@@ -577,7 +427,7 @@ defmodule Fleet.TaskQueueTest do
   test "6g. enqueue propagates the smart-constructor error + casts the ISO deadline", %{
     topic: topic
   } do
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qenq)
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic}, id: :qenq)
 
     assert {:error, {:bad_attr, {:deadline, 42}}} = TaskQueue.enqueue(q, "p1", %{deadline: 42})
     assert [] = TaskQueue.list_pending(q)
@@ -586,44 +436,14 @@ defmodule Fleet.TaskQueueTest do
              TaskQueue.enqueue(q, "p2", %{deadline: "2030-01-01T00:00:00Z"})
   end
 
-  test "6e. recovery re-arms active deadlines — expired during downtime → fail (deep-02 P1 fix)",
-       %{topic: topic, tmp_dir: tmp_dir} do
-    now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
-    past_iso = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
-    path = Path.join(tmp_dir, "deadline_recovery.json")
-
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "v" => 1,
-        "work_items" => %{
-          "t1" => %{
-            "id" => "t1",
-            "pod_id" => "p1",
-            "enqueued_at" => now_iso,
-            "state" => "assigned",
-            "deadline" => past_iso
-          }
-        }
-      })
-    )
-
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qdl)
-
-    assert_receive %Fleet.Event{
-                     source: :task_queue,
-                     type: :"work_item.failed",
-                     correlation_id: "t1",
-                     payload: %{reason: :deadline_expired}
-                   },
-                   1000
-
-    assert {:ok, :failed} = TaskQueue.pod_status(q, "p1")
-  end
+  # (`6e. recovery re-arms active deadlines` retire le 2026-08-20 avec le rail : il ecrivait un
+  #  `state.json` portant une echeance DEJA passee et attendait l'echec au boot. Le rearmement au
+  #  demarrage n'existe plus — un broker neuf est vide. La propriete qu'il portait, « une echeance
+  #  atteinte fait echouer l'item actif », est celle de `7. failed via deadline`.)
 
   test "MINE-TQ-02: max-DateTime deadline (year 9999) → enqueue does NOT crash the GenServer (timer clamp)",
        %{topic: topic} do
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qfar)
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic}, id: :qfar)
 
     # Elixir's MAX valid DateTime: ms ≈ 2.5e14 > the ERTS `Process.send_after` ceiling → without a clamp,
     # `send_after` raises ArgumentError INSIDE handle_call(:enqueue) → GenServer crash (same at recovery).
@@ -640,7 +460,7 @@ defmodule Fleet.TaskQueueTest do
   test "MINE-TQ-02: PREMATURE check_deadline (deadline not reached) → re-arms, does NOT fail", %{
     topic: topic
   } do
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, persist: false}, id: :qearly)
+    {:ok, q} = start_supervised({Server, name: nil, topic: topic}, id: :qearly)
 
     # deadline in 1h: a check_deadline arriving BEFORE it (clamped timer firing early) must NOT
     # fail the item — only a deadline ACTUALLY reached does.
@@ -652,41 +472,17 @@ defmodule Fleet.TaskQueueTest do
     assert [%{pod_id: "p1", state: :pending}] = TaskQueue.list_pending(q)
   end
 
-  test "MINE-TQ-02: recovery of a far deadline (year 9999) → boot WITHOUT crash (clamp on re-arm)",
-       %{topic: topic, tmp_dir: tmp_dir} do
-    now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
-    path = Path.join(tmp_dir, "far_deadline_recovery.json")
-
-    # Worst case: a PERSISTED far deadline → init re-arms it → without a clamp, crash at boot
-    # (potentially in a LOOP, the reloaded state.json re-crashes on every restart).
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "v" => 1,
-        "work_items" => %{
-          "t1" => %{
-            "id" => "t1",
-            "pod_id" => "p1",
-            "enqueued_at" => now_iso,
-            "state" => "assigned",
-            "deadline" => "9999-12-31T23:59:59Z"
-          }
-        }
-      })
-    )
-
-    {:ok, q} = start_supervised({Server, name: nil, topic: topic, state_path: path}, id: :qfarrec)
-
-    assert Process.alive?(q), "the GenServer crashed at boot while re-arming a far deadline"
-    # recovered item active (the far deadline does not expire) — no spurious fail.
-    assert {:ok, :assigned} = TaskQueue.pod_status(q, "p1")
-  end
+  # (`MINE-TQ-02: recovery of a far deadline` retire le 2026-08-20 avec le rail. Il visait le PIRE
+  #  cas — une echeance lointaine PERSISTEE, rearmee au boot, qui sans borne faisait planter en
+  #  BOUCLE puisque le `state.json` relu replantait a chaque redemarrage. Cette boucle ne peut plus
+  #  se former : rien n'est relu. La borne elle-meme reste epinglee par le test ci-dessus, qui
+  #  l'atteint par `enqueue`.)
 
   test "MINE-TQ-01: STALE polls (> TTL) are purged → `polls` bounded (dead pod without clear does not leak)",
        %{topic: topic} do
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: topic, persist: false, poll_retention_ms: 30},
+        {Server, name: nil, topic: topic, poll_retention_ms: 30},
         id: :qpolls
       )
 
@@ -818,12 +614,10 @@ defmodule Fleet.TaskQueueTest do
   end
 
   test "12. F148 — retention bounds terminal work items (active ones intact + double-submit of the most recent)",
-       %{topic: topic, tmp_dir: tmp_dir} do
-    path = Path.join(tmp_dir, "retention.json")
-
+       %{topic: topic} do
     {:ok, q} =
       start_supervised(
-        {Server, name: nil, topic: topic, state_path: path, retention_terminal_max: 3},
+        {Server, name: nil, topic: topic, retention_terminal_max: 3},
         id: :qret
       )
 
