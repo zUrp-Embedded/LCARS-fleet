@@ -140,11 +140,18 @@ defmodule Fleet.Pilot do
     exports: [Application]
 
   @doc "Step-rail health (inactive/operational/degraded) — cf. `Fleet.Pilot.Application.step_status/0`."
+  @spec step_status() :: {:operational | :degraded | :inactive, map()}
   defdelegate step_status, to: Fleet.Pilot.Application
 
   @doc "Immediate synchronous poll (ops/debug) — cf. `Fleet.Pilot.Poller.force_poll/1`."
+  @spec force_poll() :: %{
+          dispatched: non_neg_integer(),
+          skipped: non_neg_integer(),
+          errors: non_neg_integer()
+        }
   defdelegate force_poll, to: Fleet.Pilot.Poller
 
   @doc "Onboarding of a fresh project (repo + its three faces + scaffold) — cf. `Fleet.Project.Onboard.onboard/2`."
+  @spec onboard(String.t(), keyword()) :: {:ok, term()} | {:error, term()}
   defdelegate onboard(name, opts \\ []), to: Fleet.Project.Onboard
 end

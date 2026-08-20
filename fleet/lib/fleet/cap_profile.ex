@@ -108,6 +108,7 @@ defmodule Fleet.CapProfile do
   @default_network "vendor-only"
 
   @doc "Publishes the validated catalogue image, raising on an invalid artifact."
+  @spec publish_image!() :: :ok
   defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
 
   @doc """
@@ -708,6 +709,7 @@ defmodule Fleet.CapProfile do
 
   @doc "Lists catalogue profile names, optionally below `dir`."
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec list() :: {:ok, [String.t()]} | {:error, term()}
   defdelegate list(), to: Catalog
   defdelegate list(dir), to: Catalog
 
@@ -718,6 +720,7 @@ defmodule Fleet.CapProfile do
   account. See `Fleet.CapProfile.Catalog.forge_identity_roles/1`.
   """
   @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec forge_identity_roles() :: {:ok, [String.t()]} | {:error, term()}
   defdelegate forge_identity_roles(), to: Catalog
   defdelegate forge_identity_roles(dir), to: Catalog
 
@@ -870,6 +873,8 @@ defmodule Fleet.CapProfile do
   judge?}`. See `Fleet.CapProfile.Catalog.forge_roster/1`.
   """
   @spec forge_roster(String.t()) ::
+          {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
+  @spec forge_roster() ::
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   defdelegate forge_roster(), to: Catalog
   defdelegate forge_roster(dir), to: Catalog

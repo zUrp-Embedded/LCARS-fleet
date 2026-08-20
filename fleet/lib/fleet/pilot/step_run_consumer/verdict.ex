@@ -71,6 +71,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @doc false
   # Extracts the decision from the `work_item.completed` payload. TWO envelopes: (1) TaskQueue sets
   # `:result` (atom key); (2) worker envelope `%{"status","result"}` (string keys).
+  @spec gate_result(term()) :: map() | nil
   def gate_result(payload) when is_map(payload) do
     (Map.get(payload, :result) || Map.get(payload, "result"))
     |> unwrap_worker_envelope()
@@ -80,6 +81,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   @doc false
   # F-C161
+  @spec gate_decision(term()) :: String.t()
   def gate_decision(result) when is_map(result) do
     reason = result["reason"]
 
@@ -116,6 +118,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # as an inspect dump: noisy rather than silently discarded). Independent of the envelope's own
   # validity on purpose: the findings object stands on its own schema, and coupling the two would
   # make one optional payload's fate depend on a check it has already lost or won elsewhere.
+  @spec take_findings(term()) :: {map() | nil, term()}
   def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
     # ON DÉCODE UNE CHAÎNE AVANT DE JUGER, ET C'EST MESURÉ, PAS PRÉVENTIF. Banc du 2026-08-19,
     # probe-rails#47 : un juge a rendu `findings_v1` sous forme de JSON SÉRIALISÉ
@@ -154,11 +157,13 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   defp decode_if_string(findings), do: findings
 
   @doc false
+  @spec findings_key() :: String.t()
   def findings_key, do: @findings_key
 
   @doc false
   # BOTH wire schemas resolve here, fail-loud at rail boot (`Fleet.Pilot.Application`): a broken
   # deploy artifact refuses before the first verdict instead of crashing the consumer singleton.
+  @spec load_schema!() :: :ok
   def load_schema! do
     _ = resolved_schema(@schema_file)
     _ = resolved_schema(@findings_schema_file)
@@ -175,6 +180,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # Unwraps the worker envelope `%{"status","result"}`. The worker returns either directly
   # `%{"decision"=>...}` / the outputs, or the envelope `%{"status"=>"ok","result"=>...}`.
   # Without unwrapping: decision/outputs buried → false escalation / wrongful hard-gate.
+  # `term()` et PAS `map()` : la derniere clause de `normalize_producer/1` rend ce qu'on lui donne.
+  # Le typer `map()` etait faux, et ça se voyait a trois modules de la : la clause defensive de
+  # `judge_review_body/2` devenait inatteignable, donc du code mort — pour une charge de pod qui
+  # n'est pas une map, cas que ce rail existe precisement pour encaisser.
+  @spec unwrap_worker_envelope(term()) :: term()
   def unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
 
   # The outer `status` is CARRIED IN rather than dropped: it is the very field the normalization
@@ -251,6 +261,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # parameterizes the ATTRIBUTION (gatekeeper, scoper, …) → honest forge traceability (the right judge named).
   # `halt_invalid` is NOT a rendered decision: it is the internal fail-closed fallback (absent/malformed
   # verdict) → distinct message so as not to make it look like a "halt_invalid" verdict.
+  @spec verdict_comment(String.t(), String.t(), term()) :: String.t()
   def verdict_comment(judge_label, "halt_invalid", _result) do
     "Verdict du **#{judge_label}** illisible ou absent (fail-closed) → escalade humaine."
   end
@@ -264,12 +275,14 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
+  @spec review_event(String.t()) :: atom()
   def review_event("continue"), do: :approve
   def review_event(:advance), do: :approve
   def review_event(:promote), do: :approve
   def review_event(_other), do: :request_changes
 
   @doc false
+  @spec judge_review_body(term(), term()) :: String.t() | nil
   def judge_review_body(event, result) when is_map(result) do
     reason = result |> Map.get("reason") |> safe_str() |> String.trim()
     details = format_review_details(Map.get(result, "details"))
@@ -296,6 +309,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def judge_review_body(_event, _), do: nil
 
   @doc false
+  @spec eng_summary(term()) :: String.t()
   def eng_summary(payload) do
     case unwrap_worker_envelope(payload["result"] || %{}) do
       m when is_map(m) -> m |> Map.get("summary") |> safe_str() |> String.trim()

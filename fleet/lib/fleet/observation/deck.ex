@@ -101,6 +101,7 @@ defmodule Fleet.Observation.Deck do
   # `/api/pods` promises, and proving it through the route alone would need live pods. Same testable
   # split, same file.
   @doc false
+  @spec pod_view(map(), term()) :: map()
   def pod_view(info, known) do
     %{
       pod_id: info.pod_id,
@@ -182,6 +183,8 @@ defmodule Fleet.Observation.Deck do
   @doc false
   # Testable split of the catalogue result: `{:ok, names}` → display-filtered roles ; `{:error, reason}` →
   # propagated (the /table route renders `View.error_page/1`, not a silent-empty table).
+  @spec roles_for_display({:ok, [String.t()]} | {:error, term()}) ::
+          {:ok, [String.t()]} | {:error, term()}
   def roles_for_display({:ok, names}) do
     {:ok,
      names

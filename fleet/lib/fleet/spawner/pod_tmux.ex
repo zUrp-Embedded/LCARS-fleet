@@ -194,6 +194,7 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc false
+  @spec send_keys_args(String.t(), String.t()) :: [[String.t(), ...], ...]
   def send_keys_args(pod_id, keys) when is_binary(pod_id) and is_binary(keys) do
     s = session_name(pod_id)
     [["send-keys", "-t", s, "-l", keys], ["send-keys", "-t", s, "Enter"]]

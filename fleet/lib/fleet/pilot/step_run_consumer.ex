@@ -141,6 +141,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   @gate_eval_sweep_ms 600_000
 
   @doc false
+  @spec task_supervisor() :: module()
   def task_supervisor, do: @step_run_task_supervisor
 
   @doc """
@@ -928,6 +929,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @doc false
+  @spec parse_issue_number(String.t()) :: {:ok, integer()} | :error
   defdelegate parse_issue_number(issue_id), to: Fleet.Pilot.IssueId, as: :parse
 
   defp default_role_emails(role) do

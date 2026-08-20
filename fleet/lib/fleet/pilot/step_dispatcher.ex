@@ -720,5 +720,6 @@ defmodule Fleet.Pilot.StepDispatcher do
   # `Fleet.Pilot.StepDispatcher.ProjectResolver` (isolated I/O cluster, quasi-pure). `default_project_resolver/2`
   # stays THIS module's PUBLIC API (default of the `:project_resolver` seam + called by the tests) →
   # `defdelegate` keeps the exact contract.
+  @spec default_project_resolver(String.t(), keyword()) :: {:ok, map() | nil} | {:error, term()}
   defdelegate default_project_resolver(repo, opts), to: Fleet.Pilot.StepDispatcher.ProjectResolver
 end

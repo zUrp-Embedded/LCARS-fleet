@@ -34,6 +34,7 @@ defmodule Fleet.Pilot.Application do
   # flickers on a single transient 500 is one they learn to ignore.
   @poll_blackout_window 3
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -67,6 +68,7 @@ defmodule Fleet.Pilot.Application do
   needed, not what it belongs to, and keeping it here made the pool unstartable by anything that
   does not depend on the pilot.
   """
+  @spec forge_finch_spec() :: tuple()
   defdelegate forge_finch_spec, to: Fleet.Forge, as: :finch_spec
 
   @doc """
@@ -174,6 +176,7 @@ defmodule Fleet.Pilot.Application do
   #   * a summary   — degraded only on a BLACKOUT: every sample of the window in error, window at
   #     least `@poll_blackout_window`. `stats/0` tallies errors by scope (a map), `cycle_stats/0`
   #     as a count (an integer); both are compared against the SAME window they came from.
+  @spec polls_healthy?(term()) :: boolean()
   def polls_healthy?(:no_data), do: true
   def polls_healthy?(:unavailable), do: true
 
@@ -215,6 +218,7 @@ defmodule Fleet.Pilot.Application do
   # beside their single start site `step_children!`. EVERY process `step_children!` starts must appear
   # here (a rail with any of them dead is degraded, not a hollow "operational"); the drift test
   # `step_rail_processes ⇔ step_children!` fails if a new child is added there but not here.
+  @spec step_rail_processes() :: list()
   def step_rail_processes do
     [
       # The instrument is part of the rail's readiness, not an accessory: a rail running with its
@@ -250,6 +254,7 @@ defmodule Fleet.Pilot.Application do
   @doc false
   # Test seam: exposes the rail child-specs WITHOUT starting the supervisor (which would register the
   # singletons under their global names → conflicts / parasitic boot). Used to verify the fail-loud guard.
+  @spec step_children_for_test() :: list()
   def step_children_for_test, do: step_children()
 
   # MULTI-PROJECT: no mandatory `:poll_repo` nor remote frozen at boot — the Poller DISCOVERS its

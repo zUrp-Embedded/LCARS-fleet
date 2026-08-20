@@ -57,8 +57,10 @@ defmodule Fleet.Forge.Client do
 
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
+  @spec parse_feature_branch(term()) :: {:ok, {integer(), String.t()}} | :error
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
+  @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
   @doc """
@@ -106,6 +108,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc false
+  @spec assigned_by_qs(keyword()) :: String.t()
   def assigned_by_qs(opts) do
     case Keyword.get(opts, :assigned_by) do
       login when is_binary(login) and login != "" -> "&assigned_by=" <> URI.encode_www_form(login)
@@ -911,9 +914,12 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc "Jury state (verdicts + jury SET + outcome) of a PR. See `Fleet.Forge.Client.Jury.pr_review_state/3`."
+  @spec pr_review_state(String.t(), integer(), Keyword.t()) :: {:ok, term()} | {:error, term()}
   def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
   @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Forge.Client.Jury.change_request_feedback/3`."
+  @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
+          {:ok, term()} | {:error, term()}
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 

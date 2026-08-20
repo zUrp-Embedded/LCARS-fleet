@@ -433,6 +433,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   # l'arbitre est composé en profondeur (outputs → sections → rendu), et la seule chose qui compte
   # dans cette ligne est qu'elle distingue trois états d'un rapport de juge. La rendre atteignable
   # coûte un `@doc false` ; la tenir par le brief complet coûterait une couture de forge entière.
+  @spec gray_zone_line_for_test(keyword()) :: String.t()
   def gray_zone_line_for_test(opts) do
     %{findings: f, policy: p} = Keyword.fetch!(opts, :gray_zone)
     gray_zone_line(f, p)

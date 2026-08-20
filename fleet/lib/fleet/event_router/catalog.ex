@@ -189,6 +189,7 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   @doc "Returns the configured registry path or its default under `priv/`."
+  @spec events_yaml_path() :: String.t()
   def events_yaml_path do
     Application.get_env(
       :lcars_fleet,

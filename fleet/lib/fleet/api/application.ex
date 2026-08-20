@@ -26,6 +26,7 @@ defmodule Fleet.API.Application do
 
   use Supervisor
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -69,6 +70,7 @@ defmodule Fleet.API.Application do
   a eteindre, donc rien a oublier d'eteindre. Un drapeau qui doit valoir `false` en test est une
   chose de plus qui peut valoir `true` par accident.
   """
+  @spec listener_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def listener_children, do: control_socket_child()
 
   defp control_socket_child do

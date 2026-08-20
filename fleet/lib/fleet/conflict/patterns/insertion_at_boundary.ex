@@ -16,6 +16,7 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   def requires, do: :both
 
   @impl true
+  @spec detect?(map()) :: boolean()
   def detect?(%{base_lines: []} = h), do: detect_without_base(h)
 
   def detect?(h) do

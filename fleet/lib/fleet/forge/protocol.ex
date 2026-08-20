@@ -337,6 +337,7 @@ defmodule Fleet.Forge.Protocol do
   @doc false
   # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native
   # counting (`ForgeClient.count_signed_step_runs`).
+  @spec step_run_marker?(term()) :: boolean()
   def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
   def step_run_marker?(_), do: false
 
@@ -448,6 +449,7 @@ defmodule Fleet.Forge.Protocol do
   # Pure: extracts the map from the FIRST ```result block of a body (`Regex.run` = first match),
   # otherwise nil. The "last wins" semantics lives at the CALLER: `ForgeClient.get_predecessor_result`
   # reverses the comment list before `find_value`, so the most recent comment's block wins.
+  @spec parse_result_block(binary()) :: {:ok, map()} | nil
   def parse_result_block(body) when is_binary(body) do
     case Regex.run(@result_block_rx, body) do
       [_, json] ->
@@ -474,6 +476,7 @@ defmodule Fleet.Forge.Protocol do
   # (human/attacker) has a different login → its markers are ignored. The SINGLE predicate of the
   # trust primitive: the marker readers on comments (`ForgeClient` route/step_run/result)
   # all go through here — no copy.
+  @spec system_authored?(term(), term()) :: boolean()
   def system_authored?(object, bot_login)
       when is_map(object) and is_binary(bot_login) and bot_login != "" do
     get_in(object, ["user", "login"]) == bot_login

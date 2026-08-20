@@ -115,6 +115,7 @@ defmodule Fleet.EventRouter.Application do
 
   The listener binds to loopback unless `LCARS_WEBHOOK_BIND_HOST` overrides it.
   """
+  @spec webhook_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def webhook_children do
     if Application.get_env(:lcars_fleet, :event_router_start_webhooks, false) do
       port = Application.get_env(:lcars_fleet, :event_router_webhook_port, 8081)

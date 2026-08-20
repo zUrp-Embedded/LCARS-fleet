@@ -343,7 +343,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     manquantes =
       Enum.flat_map(files, fn path ->
-        case unspecced_public_functions(File.read!(path)) do
+        case unspecced_public_units(File.read!(path)) do
           [] -> []
           names -> [{Path.relative_to(path, root), names}]
         end
@@ -371,53 +371,113 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Les fonctions publiques d'UN fichier qui n'ont pas de `@spec`. Lecture ligne a ligne, heredocs
-  # sautes : un `def` cite dans un `@moduledoc` n'est pas une definition.
-  defp unspecced_public_functions(src) do
+  # Les callbacks dont le contrat vit dans leur BEHAVIOUR — meme exclusion que le jumeau
+  # `docs.public_functions_documented`, et pour le meme motif : le restater par implementation est
+  # la duplication que ce depot refuse ailleurs. Beaucoup ne portent pas `@impl` dans cet arbre, et
+  # c'est une AUTRE dette : les exclure par nom ferme le trou du spec sans masquer celui-la.
+  # `start_link` et `child_spec` N'Y SONT PAS : leur contrat est propre a chaque module.
+  @behaviour_callbacks ~w(init handle_call handle_cast handle_info handle_continue terminate
+                          code_change handle_event)a
+
+  # Les unites publiques d'UN fichier qui n'ont pas de `@spec`, par NOM ET ARITE.
+  #
+  # ⚠ RECRITURE SUR L'AST (2026-08-20), et le motif de la reecriture est le defaut qu'elle repare :
+  # la premiere version lisait ligne a ligne avec une machine a phases, et sa bascule de heredoc
+  # (`String.starts_with?(trimmed, ~s("""))`) ne basculait PAS sur `@moduledoc """` — cette ligne ne
+  # COMMENCE pas par les trois guillemets. Seule la fermeture basculait, donc tout ce qui suivait un
+  # moduledoc etait invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
+  # moitie, et onze fichiers vus a ZERO. Le mur annonçait 100 % sur 92,8 % de reel. Meme classe de
+  # bug que celui trouve le matin meme dans l'outil de replay de l'audit — un compteur qui se trompe
+  # de phase ne se rapiece pas, il se refait sur la seule structure qui ne ment pas.
+  #
+  # TROIS choses que la version ligne a ligne ne pouvait pas faire :
+  #   * `defdelegate` — la regex `^def\s+` ne le matche pas (pas d'espace) ; 22 delegations
+  #     publiques etaient hors de portee, dont `Pilot.onboard` et `IncidentRegistry.escalate` ;
+  #   * l'ARITE — les `@spec` etaient indexes par nom seul, donc un `in_flight/1` ajoute a cote d'un
+  #     `in_flight/0` spec'e passait au vert ;
+  #   * les ARGS PAR DEFAUT — `def f(a, b \\ 1)` definit deux arites et un seul `@spec` les couvre.
+  #     Une unite porte donc son intervalle, et un spec dedans suffit.
+  defp unspecced_public_units(src) do
     src
-    |> String.split("\n")
-    |> Enum.reduce(
-      %{defs: MapSet.new(), specs: MapSet.new(), impls: MapSet.new(), doc?: false, impl?: false},
-      fn
-        line, st ->
-          trimmed = String.trim_leading(line)
+    |> Code.string_to_quoted!()
+    |> module_bodies()
+    |> Enum.flat_map(&scope_gap/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 
-          cond do
-            String.starts_with?(trimmed, ~s(""")) ->
-              %{st | doc?: not st.doc?, impl?: false}
-
-            st.doc? ->
-              st
-
-            String.starts_with?(trimmed, "@impl") ->
-              %{st | impl?: true}
-
-            String.starts_with?(trimmed, "@spec ") ->
-              case Regex.run(~r/^@spec\s+([a-z_][a-zA-Z0-9_?!]*)/, trimmed) do
-                [_, n] -> %{st | specs: MapSet.put(st.specs, n)}
-                _ -> st
-              end
-
-            Regex.match?(~r/^def\s+[a-z_]/, trimmed) and leading_spaces(line) <= 4 ->
-              [_, n] = Regex.run(~r/^def\s+([a-z_][a-zA-Z0-9_?!]*)/, trimmed)
-              key = if st.impl?, do: :impls, else: :defs
-              %{st | key => MapSet.put(Map.fetch!(st, key), n), impl?: false}
-
-            trimmed == "" or String.starts_with?(trimmed, "#") or
-                String.starts_with?(trimmed, "@") ->
-              st
-
-            true ->
-              %{st | impl?: false}
-          end
-      end
-    )
-    |> then(fn st ->
-      st.defs |> MapSet.difference(st.impls) |> MapSet.difference(st.specs) |> Enum.sort()
+  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose (2026-08-20) :
+  #   * un corps a UN SEUL statement n'est pas un `__block__` — un module d'une fonction etait
+  #     entierement invisible ;
+  #   * les statements d'un module IMBRIQUE sont aussi des statements du parent. Melanger les deux
+  #     faisait fuir les `@spec` et les `@impl` d'un module vers son voisin du meme fichier :
+  #     quatre modules dans `conflict/types.ex`, quatre dans `admiral/shutdown.ex`, et le spec de
+  #     l'un couvrait la fonction homonyme de l'autre. Chaque module est donc son propre monde.
+  defp module_bodies(ast) do
+    collect(ast, fn
+      {:defmodule, _, [_name, [do: body]]} -> stmts_of(body)
+      _ -> nil
     end)
   end
 
-  defp leading_spaces(line), do: byte_size(line) - byte_size(String.trim_leading(line))
+  defp stmts_of({:__block__, _, stmts}) when is_list(stmts), do: stmts
+  defp stmts_of(single), do: [single]
+
+  defp scope_gap(stmts) do
+    {defs, specs} =
+      Enum.reduce(stmts, {{[], MapSet.new()}, false}, fn stmt, {{ds, ss}, impl?} ->
+        case stmt do
+          # Le module imbrique a son propre monde (`module_bodies/1` le visite a part).
+          {:defmodule, _, _} ->
+            {{ds, ss}, false}
+
+          {:@, _, [{:impl, _, _}]} ->
+            {{ds, ss}, true}
+
+          {:@, _, [{:spec, _, [spec]}]} ->
+            {{ds, spec_unit(spec, ss)}, false}
+
+          {kind, _, [head | _]} when kind in [:def, :defdelegate, :defmacro] ->
+            {{def_unit(head, ds, impl?), ss}, false}
+
+          _ ->
+            {{ds, ss}, false}
+        end
+      end)
+      |> elem(0)
+
+    impls = for {n, lo, hi, true} <- defs, a <- lo..hi, into: MapSet.new(), do: {n, a}
+
+    defs
+    |> Enum.reject(fn {name, _lo, _hi, impl?} -> impl? or name in @behaviour_callbacks end)
+    |> Enum.reject(fn {name, lo, hi, _} ->
+      Enum.any?(lo..hi, fn a ->
+        MapSet.member?(specs, {name, a}) or MapSet.member?(impls, {name, a})
+      end)
+    end)
+    |> Enum.map(fn {name, _lo, hi, _} -> "#{name}/#{hi}" end)
+  end
+
+  # `{nom, arite_min, arite_max}` — l'intervalle vient des arguments a valeur par defaut.
+  defp def_unit({:when, _, [inner | _]}, acc, impl?), do: def_unit(inner, acc, impl?)
+
+  defp def_unit({name, _, args}, acc, impl?) when is_atom(name) and is_list(args) do
+    hi = length(args)
+    defaults = Enum.count(args, &match?({:\\, _, _}, &1))
+    [{name, hi - defaults, hi, impl?} | acc]
+  end
+
+  defp def_unit({name, _, nil}, acc, impl?) when is_atom(name), do: [{name, 0, 0, impl?} | acc]
+  defp def_unit(_, acc, _impl?), do: acc
+
+  defp spec_unit({:when, _, [inner | _]}, acc), do: spec_unit(inner, acc)
+  defp spec_unit({:"::", _, [head | _]}, acc), do: spec_unit(head, acc)
+
+  defp spec_unit({name, _, args}, acc) when is_atom(name) and is_list(args),
+    do: MapSet.put(acc, {name, length(args)})
+
+  defp spec_unit({name, _, nil}, acc) when is_atom(name), do: MapSet.put(acc, {name, 0})
+  defp spec_unit(_, acc), do: acc
 
   # LA DEPENDANCE INVISIBLE DU FOURNISSEUR — nature de couture SANS PRECEDENT dans ce depot.
   #
@@ -3601,6 +3661,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @seam_reflection [behaviour_info: 1]
 
   @doc false
+  @spec check_mcp_seam_surface(String.t(), [module()]) :: result()
   def check_mcp_seam_surface(root, behaviours \\ @seam_behaviours) do
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
 

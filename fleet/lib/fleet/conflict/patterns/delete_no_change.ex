@@ -17,6 +17,7 @@ defmodule Fleet.Conflict.Patterns.DeleteNoChange do
   def requires, do: :both
 
   @impl true
+  @spec detect?(map()) :: boolean()
   def detect?(%{base_lines: []} = h) do
     (h.ours_lines == [] and h.theirs_lines != []) or (h.theirs_lines == [] and h.ours_lines != [])
   end
@@ -29,6 +30,7 @@ defmodule Fleet.Conflict.Patterns.DeleteNoChange do
   end
 
   @impl true
+  @spec confidence(map()) :: Fleet.Conflict.ConfidenceScore.t()
   def confidence(%{base_lines: []}),
     do:
       Score.make(60, 30, 0,

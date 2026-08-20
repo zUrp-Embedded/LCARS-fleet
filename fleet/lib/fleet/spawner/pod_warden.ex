@@ -16,6 +16,7 @@ defmodule Fleet.Spawner.PodWarden do
   # Unlike pre-respawn cleanup, orphan GC may reclaim failed tombstones after grace.
   @terminal_phases ~w(succeeded released killed failed)
 
+  @spec start_link(term()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @impl true

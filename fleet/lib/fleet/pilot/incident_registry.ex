@@ -188,6 +188,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   the registry keeps the MEMORY). Facade kept: **shared** by WakeRecovery and
   the failure consumers (DRY). Returns `{:ok, number}` | `{:error, term}`.
   """
+  @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
+          {:ok, integer()} | {:error, term()}
   defdelegate escalate(kind, subject, reason, sig, opts \\ []),
     to: Fleet.Pilot.IncidentRegistry.Escalation
 
@@ -195,6 +197,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # GenServer
   # ============================================================
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end

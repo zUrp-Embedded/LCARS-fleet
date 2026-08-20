@@ -264,12 +264,14 @@ defmodule Fleet.Admiral.Shutdown do
   end
 
   @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."
+  @spec begin(keyword()) :: :ok
   def begin(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, grace_ms())
     GenServer.call(server(opts), {:begin, grace_ms}, grace_ms + 5_000)
   end
 
   @doc "TEST-ONLY seam: same drain as `begin/1` WITHOUT the refuse step (exercise wait_drain in isolation). No prod caller."
+  @spec drain_in_flight(keyword()) :: non_neg_integer()
   def drain_in_flight(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, grace_ms())
     GenServer.call(server(opts), {:drain, grace_ms}, grace_ms + 5_000)

@@ -183,6 +183,7 @@ defmodule Fleet.Project.TemplateSync do
   # runtime writes this face itself via Scaffold.work, same source; raw ${VAR}s on the
   # forge are the honest blueprint, expansion happens at write time).
   @doc false
+  @spec push_template(String.t(), String.t(), keyword()) :: term()
   def push_template(repo, src_root, fc) do
     # The token rides the git ENVIRON (extraheader via GIT_CONFIG_*), NEVER the argv/URL:
     # /proc/<pid>/cmdline is world-readable (another human's `ps` would read a token-in-URL), the

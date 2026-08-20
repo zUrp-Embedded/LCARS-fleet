@@ -209,6 +209,7 @@ defmodule Fleet.Workflow.Loader do
 
   @doc false
   # Persistent images outlive tests, so clear every root.
+  @spec unpublish_all_images() :: :ok
   def unpublish_all_images do
     for {key, _} <- :persistent_term.get(), match?({__MODULE__, :image, _}, key) do
       :persistent_term.erase(key)

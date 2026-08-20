@@ -7,6 +7,7 @@ defmodule Fleet.Observation.Application do
 
   use Supervisor
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -67,6 +68,7 @@ defmodule Fleet.Observation.Application do
   Where the deck listens. Per-human, beside the terminals' sockets — the landing derives the SAME
   path from the login it authenticated, so neither side carries a table of the other's.
   """
+  @spec deck_socket() :: String.t()
   def deck_socket do
     root = Application.get_env(:lcars_fleet, :console_sock_root, "/run/lcars/console")
     Path.join([root, human(), "deck.sock"])

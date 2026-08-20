@@ -1900,6 +1900,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # through `issue_create` would need an arch pod, role credentials and a ops tree — a test that
   # proves the fixture, not the guard.
   @doc false
+  @spec attach_dependencies(module(), String.t(), map(), term()) :: map()
   def attach_dependencies(_forge, _repo, result, nil), do: result
   def attach_dependencies(_forge, _repo, result, []), do: result
 
@@ -2321,6 +2322,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # here is not "the edges exist" but "they are written BEFORE the close", and that is only
   # observable from the caller.
   @doc false
+  @spec retire_superseded(module(), String.t(), term(), term(), map()) :: map()
   def retire_superseded(_forge, _repo, nil, _target_state, result), do: result
 
   def retire_superseded(_forge, _repo, n, :closed, result),

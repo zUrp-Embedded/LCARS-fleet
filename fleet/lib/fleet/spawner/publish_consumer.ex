@@ -16,6 +16,7 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   alias Fleet.EventRouter.Bus
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
@@ -188,7 +189,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   """
   @allowed_spawn_opts ~w(brief pod_id self_enqueue_brief)a
 
-  @spec to_keyword(map() | keyword() | term()) :: keyword()
+  @spec to_keyword(term()) :: keyword()
   def to_keyword(map) when is_map(map) do
     Enum.flat_map(map, fn {k, v} ->
       try do

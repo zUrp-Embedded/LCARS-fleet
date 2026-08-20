@@ -36,6 +36,7 @@ defmodule Fleet.Observation.ReadModel do
 
   # ── Client ────────────────────────────────────────────────────────────────
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
@@ -173,6 +174,7 @@ defmodule Fleet.Observation.ReadModel do
   # ── Projection (pure) ────────────────────────────────────────────────────────
 
   @doc false
+  @spec project(map(), Fleet.Event.t()) :: map()
   def project(proj, %Fleet.Event{} = event) do
     s = summarize(event)
     type = s.type
