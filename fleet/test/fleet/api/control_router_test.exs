@@ -479,6 +479,14 @@ defmodule Fleet.API.ControlRouterTest do
         |> String.replace("name: engineer", "name: hostnative-probe")
         |> String.replace("containment: bwrap", "containment: none")
         |> String.replace("host_native: false", "host_native: true")
+        # ⚠ LE DECOR EST UN CATALOGUE ISOLE QUI NE PORTE QUE CE FICHIER. Depuis que tout profil canon
+        # declare `adresser-un-agent` dans son `modop_set.default`, la copie traine une dependance
+        # vers un overlay (`cap-profiles/modop/<nom>/profile.yaml`) que ce dossier n'a pas : la
+        # resolution echoue en `:modop_not_found` et la porte rend 422 pour une raison qui n'a RIEN a
+        # voir avec ce qu'elle teste. Mesure du 2026-08-20 : deux cas rouges le jour ou le bundle est
+        # devenu universel. On retire le modop plutot que de copier son arbre — ce temoin porte sur
+        # le containment, pas sur la composition de SP, et un decor minimal doit le rester.
+        |> String.replace("default: [adresser-un-agent]", "default: []")
 
       File.write!(Path.join(dir, "hostnative-probe.yaml"), yaml)
     end

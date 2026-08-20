@@ -197,7 +197,11 @@ spec:
     # per-pod flag that also silences bootstrap is the wrong instrument for it.
     wake_send_keys: true
   modop_set:
-    default: [long-session-discipline]
+    # `adresser-un-agent` : dans le default de TOUS les roles, tenu par le contrat
+    # `sp.adresser_un_agent`. Ce role est le premier concerne — c'est lui qui redige les briefs, et
+    # les deux defauts mesures le 2026-08-20 (sur-expliquer, sur-specifier) sont sortis d'ici.
+    # Jamais dans un `incompatible:` : ce n'est pas un mode, il ne se commute pas.
+    default: [long-session-discipline, adresser-un-agent]
     # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (brainstorming)
     # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
     # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc

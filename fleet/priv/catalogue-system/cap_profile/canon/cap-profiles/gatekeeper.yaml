@@ -78,7 +78,10 @@ spec:
     bridge_enabled: false
     remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control
   modop_set:
-    default: [rubber-duck]
+    # `adresser-un-agent` : dans le default de TOUS les roles, tenu par le contrat
+    # `sp.adresser_un_agent`. Un verdict est aussi un texte adresse a un agent — le `reason` d'un
+    # redirect est lu par l'architecte, pas par un humain seul. Jamais dans un `incompatible:`.
+    default: [rubber-duck, adresser-un-agent]
     optional: []
     incompatible: []
     # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,

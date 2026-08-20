@@ -73,7 +73,10 @@ spec:
     # mecanisme, pas ajouter du churn : le slot se RE-ATTACHE au lieu de se multiplier.
     remote_control: true
   modop_set:
-    default: []
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Ce role produit du cadrage que d'autres executent : sur-specifier y coute le plus cher.
+    # Jamais dans un `incompatible:` — ce n'est pas un mode commutable.
+    default: [adresser-un-agent]
     optional: [rubber-duck]
     incompatible: []
     # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,

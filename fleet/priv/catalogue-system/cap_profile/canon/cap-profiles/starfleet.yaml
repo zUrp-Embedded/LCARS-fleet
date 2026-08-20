@@ -161,7 +161,11 @@ spec:
     # (no `rubber_duck_enabled`: it is a DEAD flag — zero consumer in lib/ (the rubber-duck behaviour
     # lives in the modops/SP). Removed here 2026-07-19; the full field nuke is on the sabrer-list.)
   modop_set:
-    default: [long-session-discipline]
+    # `adresser-un-agent` : dans le default de TOUS les roles, tenu par le contrat
+    # `sp.adresser_un_agent`. Il arrive par l'ENVELOPPE (`sp_template.eex`, `@modop_fragments`), donc
+    # il atteint ce role et l'architecte SANS toucher a leur SP ecrit a la main — la composition par
+    # blocs, elle, leur est fermee (`Blocks.audit!` : une seule source par role, jamais deux).
+    default: [long-session-discipline, adresser-un-agent]
     # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (brainstorming)
     # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
     # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc

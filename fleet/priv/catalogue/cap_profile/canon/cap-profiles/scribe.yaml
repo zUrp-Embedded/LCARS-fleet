@@ -81,7 +81,10 @@ spec:
     host_native: false
     bridge_enabled: false
   modop_set:
-    default: []
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Ce role ECRIT le contrat que les autres liront — une spec est le cas ou « ce qui fait foi »
+    # doit rester distinguable de ce qui a cesse. Jamais dans un `incompatible:`.
+    default: [adresser-un-agent]
     # (`tdd` était nommé ici — « code-shaped, test-first has no doc analog » — pour dire
     # pourquoi ce profil ne le prenait PAS. Le bundle a été supprimé le 2026-08-19 avec la
     # sortie de superpowers ; la raison de son absence n'a plus d'objet, et un commentaire

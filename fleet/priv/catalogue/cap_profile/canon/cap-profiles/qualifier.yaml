@@ -104,7 +104,10 @@ spec:
     # mecanisme, pas ajouter du churn : le slot se RE-ATTACHE au lieu de se multiplier.
     remote_control: true
   modop_set:
-    default: []
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Un juge ecrit un `reason` et des `findings` que d'autres agents executent — le destinataire
+    # d'un redirect est l'architecte. Jamais dans un `incompatible:`.
+    default: [adresser-un-agent]
     # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (dual-review)
     # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
     # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc

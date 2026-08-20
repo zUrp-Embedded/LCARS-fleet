@@ -84,7 +84,11 @@ spec:
     wake_send_keys: false
     bridge_enabled: false
   modop_set:
-    default: [long-session-discipline]
+    # `adresser-un-agent` est dans le default de TOUS les roles, et le contrat
+    # `sp.adresser_un_agent` le tient. Ce n'est pas un mode commutable : il n'existe aucune conduite
+    # ou il serait juste d'ecrire a un agent en le prenant pour un executant. Il ne doit donc
+    # apparaitre dans AUCUN `incompatible:` — l'y nommer le retirerait legalement a un role.
+    default: [long-session-discipline, adresser-un-agent]
     optional: []
     incompatible: [[fire-mode, long-session-discipline]]
   project: null

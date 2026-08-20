@@ -110,6 +110,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # ── Authority locks (Z7 — one fact = one source, cross-language) ──
         check_roles_provisioning_locked(root),
         check_roles_role_index_unique(root),
+        check_sp_adresser_un_agent(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
@@ -2521,6 +2522,99 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
+  # ── sp.adresser_un_agent ───────────────────────────────────────────────────────────────────────
+  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR — et c'est le mur qui rend les deux premiers tenables.
+  #
+  # La regle « le destinataire de ce que tu ecris est le meme agent que toi » doit atteindre TOUS les
+  # roles. Elle ne peut pas passer par un bloc `core/*` : `Blocks.audit!` impose UNE source par role
+  # — une entree dans `sp-map.yaml` OU un draft ecrit a la main, jamais les deux — et `architect` et
+  # `starfleet`, qui ont un draft, sont precisement les deux premiers concernes. Y recopier le
+  # paragraphe en ferait deux exemplaires de prose, et deux prose divergent en restant plausibles.
+  #
+  # Elle passe donc par l'ENVELOPPE : `sp_template.eex` rend `@modop_fragments` pour tout pod, quelle
+  # que soit l'origine de son SP. Le bundle est la source unique ; chaque carte le NOMME.
+  #
+  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX. Un role dont la carte oublie la ligne
+  # ne recoit rien, et rien ne le dit — meme classe de panne que la prose qui derive, en plus discret.
+  # Un drapeau peut manquer, une prose peut mentir : l'un se detecte, l'autre non. C'est tout ce que
+  # ce mur achete, et ca suffit a rendre la voie bundle superieure a la voie bloc.
+  #
+  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE. Le piege est deja mesure dans ce depot :
+  # `architect.yaml` ecrit que « aucun appelant de production n'active un bundle `optional` »
+  # (`CapProfile.resolve/4` est toujours appele a deux arguments), donc les bundles ranges la sont
+  # livres et jamais composes. Un role qui declarerait celui-ci en `optional` passerait un controle
+  # naif en ne recevant rien. Le second volet lit `incompatible:` pour la meme raison : l'y nommer
+  # retirerait legalement le bundle a un role, et ce n'est pas un mode commutable — il n'existe
+  # aucune conduite ou ecrire a un agent en le prenant pour un executant serait juste.
+  #
+  # Les `ReservedSeat` sont hors perimetre : un siege n'a pas de `spec`, donc pas de SP a garnir.
+  @adresser_bundle "adresser-un-agent"
+  @doc false
+  @spec check_sp_adresser_un_agent(String.t()) :: result()
+  def check_sp_adresser_un_agent(root) do
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+
+    profiles =
+      root
+      |> scan_catalogue_roles()
+      |> Enum.filter(&(&1.kind == "CapabilityProfile"))
+
+    missing =
+      profiles
+      |> Enum.reject(&(@adresser_bundle in &1.modop_default))
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+
+    # `incompatible` est une liste de PAIRES : le bundle ne doit apparaitre dans aucune.
+    excluded =
+      profiles
+      |> Enum.filter(fn p ->
+        Enum.any?(p.modop_incompatible, fn pair ->
+          is_list(pair) and @adresser_bundle in pair
+        end)
+      end)
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+
+    bundle =
+      Path.join(
+        root,
+        "priv/catalogue-system/cap_profile/canon/modop-bundles/#{@adresser_bundle}/sp.md"
+      )
+
+    cond do
+      not File.regular?(bundle) ->
+        %{
+          id: "sp.adresser_un_agent",
+          status: :fail,
+          remediation:
+            "le bundle #{@adresser_bundle} est nomme par les cartes et sa prose est ABSENTE — " <>
+              "les pods recevraient un nom qui ne compose rien",
+          evidence: ["source introuvable : #{Path.relative_to(bundle, root)}"],
+          note: "la source unique de prose du bundle"
+        }
+
+      measured_nothing?(profiles) ->
+        broken_result("sp.adresser_un_agent", "CapabilityProfile in the catalogues")
+
+      true ->
+        %{
+          id: "sp.adresser_un_agent",
+          status: if(missing == [] and excluded == [], do: :pass, else: :fail),
+          remediation:
+            "ajouter `#{@adresser_bundle}` a `spec.modop_set.default` de la carte (jamais " <>
+              "`optional` : aucun appelant de production ne l'activerait ; jamais dans un " <>
+              "`incompatible:` : ce n'est pas un mode commutable)",
+          evidence:
+            Enum.map(missing, &"#{&1} : absent de modop_set.default") ++
+              Enum.map(excluded, &"#{&1} : nomme dans un incompatible: — retire au role"),
+          note:
+            "une seule source de prose (le bundle), un nom par carte, ce mur contre le nom " <>
+              "manquant (#{length(profiles)} profil(s) mesure(s) ; les ReservedSeat sont hors perimetre)"
+        }
+    end
+  end
+
   @doc false
   @spec check_roles_role_index_unique(String.t()) :: result()
   def check_roles_role_index_unique(root) do
@@ -3176,7 +3270,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               forge_identity: get_in(raw, ["metadata", "forge_identity"]) != false,
               role_index: get_in(raw, ["metadata", "role_index"]),
               capabilities: get_in(raw, ["spec", "capabilities"]) || [],
-              allowed_tools: get_in(raw, ["spec", "scope", "allowedTools"]) || []
+              allowed_tools: get_in(raw, ["spec", "scope", "allowedTools"]) || [],
+              modop_default: get_in(raw, ["spec", "modop_set", "default"]) || [],
+              modop_incompatible: get_in(raw, ["spec", "modop_set", "incompatible"]) || []
             }
           ]
 

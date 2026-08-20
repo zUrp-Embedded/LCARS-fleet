@@ -121,7 +121,10 @@ spec:
     host_native: false
     bridge_enabled: false
   modop_set:
-    default: []
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Un producteur ecrit aussi : corps de PR, resultat rendu au rail, commentaires que d'autres
+    # agents liront. Jamais dans un `incompatible:` — ce n'est pas un mode commutable.
+    default: [adresser-un-agent]
     # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (tdd, subagent-driven)
     # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
     # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
