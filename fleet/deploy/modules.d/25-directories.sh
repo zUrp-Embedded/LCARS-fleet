@@ -2,7 +2,8 @@
 # SOURCE: fleet/deploy/modules.d/25-directories.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — arborescence systeme : /local + /home/private, et les ZONES DE FACE
+# STATUS: PROTO-V2 — arborescence systeme : /local + /home/private, les ZONES DE FACE, et la racine
+#         des sockets de console sous /run (avec sa declaration tmpfiles, car /run est un tmpfs)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -63,6 +64,32 @@ set -euo pipefail
 #
 # Le groupe est `$PROV_ADMIN_GROUP` et non `$PROV_FLEET_GROUP` : ecrire ici est un geste
 # d'administration (⚖ user 2026-08-17), lire le materiel ne l'est pas.
+# ─── LA RACINE DES SOCKETS DE CONSOLE — SANS ELLE LA FLEET NE BOOTE PAS ─────────────────────────
+# MEME CICATRICE QUE LES ZONES DE FACE, UN SITE PLUS LOIN. `Fleet.Observation` fait ecouter le deck
+# sur `/run/lcars/console/<humain>/deck.sock`, et ce dossier n'etait cree QUE par `console.sh`,
+# artefact de CONTENEUR (`/opt/lcars/console.sh`, appele par l'entrypoint). Une install native ne le
+# joue jamais, donc le dossier n'existait pas, donc Ranch echouait a binder et — `max_restarts: 0`
+# au sommet — le node MOURAIT au boot :
+#
+#   [error] Failed to start Ranch listener {Fleet.EventRouter.UnixListener, 3205} … ip: {:local,
+#   "/run/lcars/console/lcars/deck.sock"} … for reason :enoent (no such file or directory)
+#
+# Mesure du 2026-08-20 sur le poste natif : `provision apply` vert sur ses 14 modules, release
+# posee, `fleet_v2 start` annoncant « fleet up » — et zero `beam.smp` une seconde plus tard. Le
+# lanceur ne ment pas, il rend la main avant que le BEAM ne meure.
+#
+# ⚠ SUR `docker` ON NE TOUCHE A RIEN : `console.sh` y possede ces dossiers et les veut en
+# `<humain>:lcars-console`, un groupe que seule l'image cree. Deux createurs avec deux groupes
+# donneraient un dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose
+# PAS le mode d'un dossier existant, donc le desaccord serait SILENCIEUX.
+prov_runtime_dirs() {
+  [[ "${PROV_SUBSTRATE:-}" == "docker" ]] && return 0
+  printf '%s\n' \
+    "/run/lcars 0755 root:root" \
+    "/run/lcars/console 0711 root:root" \
+    "/run/lcars/console/$PROV_HUMAN 2710 $PROV_HUMAN:$PROV_FLEET_GROUP"
+}
+
 prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
@@ -72,6 +99,28 @@ prov_dirs() {
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"
+  prov_runtime_dirs
+}
+
+# ─── ET ELLES DOIVENT SURVIVRE AU REBOOT, SANS QU'ON REJOUE QUOI QUE CE SOIT ────────────────────
+# `/run` est un tmpfs : tout ce que le bloc ci-dessus y pose disparait a l'extinction. Sans cette
+# declaration, la fleet demarrerait apres un `provision apply` et plus jamais apres un redemarrage
+# de la machine — la pire des pannes, parce qu'elle arrive des jours plus tard et que rien dans le
+# journal du reboot ne la relie a l'install.
+#
+# `tmpfiles.d` EST le mecanisme prevu pour ca, et il est DERIVE de la meme table : une seule source
+# decrit ces dossiers, donc la version du boot ne peut pas diverger de celle de l'apply. Sans
+# systemd (un conteneur, un chroot) on ne pose rien et on le DIT — un fichier de configuration pour
+# un service absent n'est pas une garde, c'est un decor.
+prov_tmpfiles_conf() { echo "${LCARS_TMPFILES_CONF:-/etc/tmpfiles.d/lcars-console.conf}"; }
+
+prov_tmpfiles_body() {
+  echo "# Genere par 25-directories.sh — /run est un tmpfs, ces dossiers s'y refont a chaque boot."
+  echo "# NE PAS EDITER : la source est la table \`prov_runtime_dirs\` du module."
+  local path mode owner
+  while read -r path mode owner; do
+    printf 'd %s %s %s %s -\n' "$path" "$mode" "${owner%%:*}" "${owner##*:}"
+  done < <(prov_runtime_dirs)
 }
 
 check() {
@@ -93,7 +142,23 @@ check() {
       p_drift "$path : $cur ≠ ${mode#0} $owner"
     fi
   done < <(prov_dirs)
+  check_tmpfiles
   verdict_check
+}
+
+check_tmpfiles() {
+  local conf; conf="$(prov_tmpfiles_conf)"
+  if ! prov_runtime_dirs | grep -q .; then
+    [[ -e "$conf" ]] && p_drift "tmpfiles: $conf present alors que ce substrat ne le porte pas"
+    return 0
+  fi
+  if [[ ! -f "$conf" ]]; then
+    p_drift "tmpfiles: $conf absent — /run/lcars/console ne se refera pas au reboot, et la fleet ne demarrera pas"
+  elif [[ "$(cat "$conf")" != "$(prov_tmpfiles_body)" ]]; then
+    p_drift "tmpfiles: $conf ne correspond plus a la table du module"
+  else
+    p_ok "tmpfiles: $conf"
+  fi
 }
 
 apply() {
@@ -102,7 +167,45 @@ apply() {
     read -r path mode owner <<< "$spec"
     ensure_dir "$path" "$mode" "$owner" || verdict_apply
   done < <(prov_dirs)
+  apply_tmpfiles
   verdict_apply
+}
+
+apply_tmpfiles() {
+  local conf; conf="$(prov_tmpfiles_conf)"
+  local body; body="$(prov_tmpfiles_body)"
+
+  # Rien a declarer (substrat docker) : on retire une declaration devenue fausse plutot que de la
+  # laisser vivre. Un fichier tmpfiles qui decrit des dossiers dont ce module ne repond plus est un
+  # ordre donne au boot par un composant qui a change d'avis.
+  if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! prov_runtime_dirs | grep -q .; then
+    [[ -e "$conf" ]] && { rm -f "$conf" && p_ok "tmpfiles: declaration retiree ($conf) — ce substrat ne la porte pas"; }
+    return 0
+  fi
+
+  if [[ ! -d "$(dirname "$conf")" ]]; then
+    p_drift "tmpfiles: $(dirname "$conf") absent — les dossiers de /run ne se referont PAS au reboot"
+    return 0
+  fi
+
+  # PAS D'OWNER NOMME, ET C'EST RAISONNE. Ce module declare `NEEDS: root` : le fichier est donc cree
+  # PAR root, et ecrire `root:root` ne fait que redire ce que le processus garantit deja. En
+  # revanche, ce mot rendait ce bloc intestable hors root — un harnais non privilegie mourait sur
+  # « chown: Operation not permitted » pour une convergence qui n'avait rien a converger. Un
+  # /etc/tmpfiles.d/*.conf qui n'appartiendrait pas a root n'est pas une derive a rattraper ici,
+  # c'est une machine compromise.
+  printf '%s\n' "$body" | write_atomic "$conf" 0644 || { p_fail "tmpfiles: $conf"; return 1; }
+
+  # ⚠ ON NE JOUE PAS `--create` ICI : `apply()` vient de creer les memes dossiers, donc il n'y a rien
+  # a rattraper, et `systemd-tmpfiles` rendrait non-nul pour des lignes SANS RAPPORT avec les notres
+  # (il traite tout /etc/tmpfiles.d). Le fichier est pose pour le PROCHAIN boot ; ce boot-ci est deja
+  # convergé par le bloc du dessus.
+  if command -v systemd-tmpfiles >/dev/null 2>&1; then
+    p_ok "tmpfiles: $conf pose — /run/lcars/console se refera au reboot"
+  else
+    p_drift "tmpfiles: $conf pose mais systemd-tmpfiles est ABSENT — au reboot, /run/lcars/console
+     ne sera pas recree et la fleet ne demarrera pas tant que 'provision apply' n'aura pas rejoue"
+  fi
 }
 
 case "${1:?usage: 25-directories.sh <check|apply>}" in
