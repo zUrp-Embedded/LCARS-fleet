@@ -321,14 +321,32 @@ RUN apt-get update -qq \
 # /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
 # $PREFIX/bin, fleet_v2 pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
 COPY --from=build /local/LCARS_v2 /local/LCARS_v2
-# LA DOC, A COTE DU RUNTIME QU'ELLE DECRIT. Meme prefixe, meme verrou RO que le reste : elle est
-# lue par le deck, jamais ecrite. Le meme commit a produit les deux, donc la boite ne peut pas
-# servir la doc d'une autre version qu'elle-meme.
-COPY --from=site /src/assets/github.io/dist /local/LCARS_v2/doc
 RUN chown -R root:fleet /local/LCARS_v2 \
     && chmod -R u=rwX,g=rX,o= /local/LCARS_v2 \
     && ln -sf /local/LCARS_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \
     && ln -sf /local/LCARS_v2/bin/lcars    /usr/local/bin/lcars
+
+# LA DOC DE CETTE VERSION, ET ELLE EST HORS DU PREFIXE DE RELEASE — c'est le fond de l'affaire, pas
+# du rangement. Elle a vecu en `/local/LCARS_v2/doc`, « meme prefixe, meme verrou RO que le reste ».
+# Ce verrou est `750 root:fleet` (fichiers `640`), pose deux lignes plus haut, et le deck largue ses
+# privileges vers `nobody:nogroup` : il ne pouvait ni traverser le repertoire ni ouvrir un fichier.
+# Son `open()` levait, et le handler rendait 404 — un 404 honnete sur « je n'ai pas pu lire », muet
+# sur la raison, qui ne distingue pas l'absent de l'interdit. Mesure du 2026-08-20 sur banc neuf,
+# session authentifiee reelle : les 9 pages presentes dans l'image, `/doc/` `/doc/manuel/`
+# `/doc/outils/` tous en 404.
+#
+# Affaiblir le verrou du prefixe pour un fichier HTML serait le mauvais echange : ce qu'il protege
+# est le runtime deploye. La doc n'est pas du binaire livre, c'est de l'actif statique pour le deck —
+# elle sort donc de l'arbre de release, et le `chmod` du runtime ne la touche plus (il est AU-DESSUS
+# de ce COPY, et ce n'est pas un hasard d'ordre : c'est lui qui retirait `o`).
+#
+# Ce qu'elle garde de l'ancien emplacement, parce que c'etait le vrai motif : le MEME COMMIT produit
+# le runtime et sa doc, donc la boite ne peut pas servir la doc d'une autre version qu'elle-meme.
+COPY --from=site /src/assets/github.io/dist /usr/share/lcars/doc
+# Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
+# (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
+# n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.
+RUN chmod -R a+rX /usr/share/lcars
 
 # ─── La console web : ttyd, binaire STATIQUE pinné par sha256 ────────────────────────────────────
 # La porte d'entrée demandée : une page web avec un shell SOUS L'IDENTITÉ DE L'HUMAIN, dans lequel

@@ -1241,6 +1241,32 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     wf = Path.join(repo, ".github/workflows/site.yml")
     lib = Path.join(repo, "assets/github.io/src/lib")
 
+    # ⚠ L'ARBRE `assets/` EST UN VOISIN, ET UN CONTEXTE LEGITIME NE LE PORTE PAS. Le stage `build`
+    # de l'image copie `fleet` SEUL puis joue ce gate : un artefact runtime ne peut rien prouver sur
+    # une plaquette qu'il n'embarque pas. Ce check a d'abord rendu FAIL la — 0 entree derivee, mon
+    # fail-closed — et il a fait echouer la construction de l'image sur une plaquette absente.
+    #
+    # L'absence se lit au niveau de L'ARBRE, comme pour les listes de provisioning : pas d'arbre du
+    # tout = hors perimetre, on passe EN LE DISANT (jamais un vert muet sur du terrain non mesure).
+    # Arbre present mais workflow illisible = le vrai defaut, et il reste rouge.
+    if not File.dir?(lib) do
+      %{
+        id: "site.build_inputs",
+        status: :pass,
+        remediation:
+          "aucun geste : l'arbre du site n'est pas ici. Rejouer ce check depuis un arbre complet " <>
+            "(racine du depot) pour mesurer le filtre `paths:`",
+        evidence: [],
+        note:
+          "HORS PERIMETRE — assets/github.io absent de cet arbre (le stage image `build` ne copie " <>
+            "que fleet/), donc le filtre `paths:` n'est pas mesure ici"
+      }
+    else
+      check_site_build_inputs_measured(wf, lib, repo)
+    end
+  end
+
+  defp check_site_build_inputs_measured(wf, lib, repo) do
     listed =
       case File.read(wf) do
         {:ok, y} ->

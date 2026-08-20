@@ -1,0 +1,78 @@
+#!/usr/bin/env bats
+# SOURCE: fleet/deploy/tests/deck_doc.bats
+# AUTHOR: DrDree
+# STARDATE: (posee par /push-github)
+# STATUS: bats tests for the /doc/ route — l'arbre servi doit etre LISIBLE PAR CELUI QUI LE SERT
+#
+# CE QUE CES TEMOINS TIENNENT, et ce n'est pas une question de rangement. La plaquette est batie par
+# le stage `site` du Dockerfile, copiee dans l'image, et le deck la sert sous `/doc/`. Toute cette
+# chaine etait juste en source, et elle rendait 404 sur des fichiers presents.
+#
+# LA CAUSE : la doc etait posee dans `/local/LCARS_v2/doc`, sous le verrou RO du prefixe de release
+# (`750 root:fleet`, fichiers `640`) — pose par le `chmod -R u=rwX,g=rX,o=` du meme Dockerfile. Le
+# deck largue ses privileges vers `nobody:nogroup` : il ne pouvait ni traverser le repertoire ni
+# ouvrir un fichier. Chaque `open()` levait, le handler rendait son 404, et ce 404 est honnete sur
+# « je n'ai pas pu lire » tout en etant MUET sur la raison : il ne distingue pas l'absent de
+# l'interdit. Mesure du 2026-08-20, banc neuf et session OIDC reelle : 9 pages dans l'image,
+# `/doc/`, `/doc/manuel/` et `/doc/outils/` tous en 404.
+#
+# ⚠ LE PIEGE EST UN ORDRE, PAS UN CHEMIN, et c'est pour ca qu'un temoin sur le seul chemin ne
+# suffirait pas. Le `chmod` frappe un ARBRE : n'importe quel `COPY` place AVANT lui, ou dessous, se
+# fait retirer `o` — sans qu'aucune ligne ne parle de la doc. Le second temoin tient cet ordre.
+#
+# La reponse n'est pas d'affaiblir le verrou : ce qu'il protege est le runtime deploye. La doc n'est
+# pas du binaire livre, c'est de l'actif statique pour le deck, et la porte n'est pas le mode du
+# fichier — c'est la session OIDC devant la route.
+
+setup() {
+  DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  DECK="$BATS_TEST_DIRNAME/../docker/console-deck.py"
+  [ -f "$DOCKERFILE" ]
+  [ -f "$DECK" ]
+  # La destination du `COPY --from=site`, telle qu'ecrite dans l'image.
+  DOC_DEST="$(grep -E '^COPY --from=site ' "$DOCKERFILE" | awk '{print $NF}')"
+  # Le defaut du serveur, celui qui vaut quand personne ne pose la variable — et personne ne la pose.
+  DECK_DEFAULT="$(grep -oE 'LCARS_DECK_DOC", "[^"]+' "$DECK" | sed 's/.*, "//')"
+}
+
+@test "la doc est servie depuis LE MEME chemin que celui ou l'image la pose" {
+  # Deux ecritures d'un meme fait derivent. Ici la derive est SILENCIEUSE dans les deux sens : un
+  # deck qui pointe ailleurs rend 404 sur une image complete, une image qui pose ailleurs rend 404
+  # sur un deck correct — et le message est le meme.
+  [ -n "$DOC_DEST" ]
+  [ -n "$DECK_DEFAULT" ]
+  [ "$DOC_DEST" = "$DECK_DEFAULT" ]
+}
+
+@test "la doc est HORS du prefixe de release — le verrou RO y interdit sa lecture" {
+  # Le prefixe est `750 root:fleet` et le deck tourne en `nobody:nogroup` : tout ce qui vit dessous
+  # lui est illisible, quel que soit le mode du fichier lui-meme.
+  [[ "$DOC_DEST" != /local/LCARS_v2* ]]
+  [[ "$DECK_DEFAULT" != /local/LCARS_v2* ]]
+}
+
+@test "le COPY de la doc vient APRES le chmod qui retire les droits « autres »" {
+  # ⚠ LE TEMOIN QUI TIENT LA VRAIE CICATRICE. Le `chmod -R …,o=` frappe l'ARBRE du prefixe : ce qui
+  # compte n'est pas seulement ou la doc atterrit, mais qu'aucune passe de durcissement ne repasse
+  # dessus ensuite. Un `COPY` remonte de quelques lignes suffit a tout re-casser sans qu'une seule
+  # ligne ne mentionne la doc.
+  local copy_line chmod_line
+  copy_line="$(grep -nE '^COPY --from=site ' "$DOCKERFILE" | cut -d: -f1)"
+  chmod_line="$(grep -nE '^\s+&& chmod -R u=rwX,g=rX,o= /local/LCARS_v2' "$DOCKERFILE" | cut -d: -f1)"
+  [ -n "$copy_line" ]
+  [ -n "$chmod_line" ]
+  [ "$copy_line" -gt "$chmod_line" ]
+}
+
+@test "l'arbre servi est rendu lisible EXPLICITEMENT, jamais par heritage du COPY" {
+  # `COPY` conserve les modes de l'etage source (`node:20-slim`), qui ne nous doit rien. Un arbre
+  # servi doit dire lui-meme qu'il est lisible ; l'heritage est une hypothese sur une image amont.
+  grep -qE "^RUN chmod -R a\+rX ${DOC_DEST%/doc}\$" "$DOCKERFILE"
+}
+
+@test "la route /doc/ refuse de sortir de sa racine — `..` reste la plus vieille faute du web" {
+  # Le prefixe voisin porte les jetons de la boite : une remontee ici ne serait pas un defaut de
+  # confort. La garde est `realpath` + comparaison de prefixe, pas un filtrage de la chaine.
+  grep -q 'os.path.realpath(os.path.join(DECK_DOC, rel))' "$DECK"
+  grep -q 'full == root or full.startswith(root + os.sep)' "$DECK"
+}

@@ -97,11 +97,17 @@ CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/consol
 # une surface qu'on n'a aucune raison d'ouvrir — et un `..` dans un nom de fichier n'est meme pas
 # une question qui se pose.
 DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
-# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT. Elle part dans l'image a cote du runtime
-# (`Dockerfile`, stage `site`), donc la boite sert SA propre doc — pas la derniere en ligne, pas une
-# copie a resynchroniser. Le Dockerfile la pose au meme titre que le runtime : si elle manque,
-# l'image est ratee, et ca doit se voir.
-DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/local/LCARS_v2/doc")
+# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT. Elle part dans l'image (`Dockerfile`, stage
+# `site`), donc la boite sert SA propre doc — pas la derniere en ligne, pas une copie a
+# resynchroniser. Le Dockerfile la pose au meme titre que le runtime : si elle manque, l'image est
+# ratee, et ca doit se voir.
+#
+# ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON. Elle a vecu en `/local/LCARS_v2/doc`,
+# sous le verrou RO du prefixe (`750 root:fleet`, fichiers `640`). Ce serveur largue ses privileges
+# vers `nobody:nogroup` : il ne pouvait ni traverser ni ouvrir. Chaque `open()` levait et la route
+# `/doc/` rendait 404 sur des fichiers parfaitement presents — mesure du 2026-08-20, session
+# authentifiee, les 9 pages dans l'image et les trois routes en 404.
+DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/usr/share/lcars/doc")
 # Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
 # pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
 DOC_TYPES = {
