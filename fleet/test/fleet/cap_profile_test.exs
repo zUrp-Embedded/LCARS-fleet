@@ -19,7 +19,12 @@ defmodule Fleet.CapProfileTest do
 
   # Minimal in-memory profile for kill_class/1. `slot` is optional: absent = the historical
   # derivation from `lifetime`, which is what every profile that does not declare one still gets.
-  defp kc_prof(role_index, lifetime, slot \\ nil) do
+  #
+  # ⚠ `brief_kind` A ETE AJOUTE LE 2026-08-20 (B1), ET C'EST UN AXE, PAS UN PARAMETRE DE PLUS. La
+  # classe de fauche ne trie plus sur le CYCLE DE VIE mais sur la MISSION : `"judge"` designe la
+  # classe 3. Une fixture qui ne le declare pas decrit donc un PRODUCTEUR — ce qui est le bon
+  # defaut, et ce que la plupart de ces cas veulent dire.
+  defp kc_prof(role_index, lifetime, slot \\ nil, brief_kind \\ "worker") do
     invocation =
       %{"lifetime_scope" => lifetime}
       |> then(&if slot, do: Map.put(&1, "slot_scope", slot), else: &1)
@@ -27,7 +32,7 @@ defmodule Fleet.CapProfileTest do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
       metadata: %{"name" => "r", "role_index" => role_index},
-      spec: %{"invocation" => invocation}
+      spec: %{"invocation" => invocation, "brief_kind" => brief_kind}
     }
   end
 
@@ -928,45 +933,96 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  describe "kill_class/1 — the <X> nibble: WHAT KILLING THIS PROCESS COSTS" do
-    test "role_index 0 → 0 (outside the fleet), whatever the lifetime" do
+  describe "kill_class/1 — le <X> du nibble : LA MISSION, plus le cycle de vie" do
+    test "role_index 0 → 0 (l'accueil), quel que soit le reste" do
       assert Fleet.CapProfile.kill_class(kc_prof(0, "forever")) == 0
     end
 
-    test "cold (one-shot) → 3 — costs nothing, meant to be swept" do
-      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 3
-      assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot")) == 3
+    test "les JUGES → 3, et c'est `brief_kind` qui le dit" do
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot", nil, "judge")) == 3
+      assert Fleet.CapProfile.kill_class(kc_prof(6, "one-shot", nil, "judge")) == 3
     end
 
-    test "context-long, one identity per TICKET → 2 — costs one re-dispatchable ticket" do
-      # The combination the 2026-08-03 override exists for: a producer must survive its rework
-      # rounds without outliving its ticket. It fell into "everything else" until this class.
+    test "les PRODUCTEURS → 2, y compris ceux qui sont one-shot" do
+      # ⚠ LE CŒUR DU CHANGEMENT DU 2026-08-20. `chief` est `lifetime_scope: one-shot` ET
+      # `brief_kind: worker` : l'ancien critère le classait 3, « jetable », dans le même seau que
+      # quatre juges. Fusionner est une EXÉCUTION — ce pod produit, il ne juge pas.
+      assert Fleet.CapProfile.kill_class(kc_prof(15, "one-shot")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(3, "pipe", "instance")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(7, "pipe", "instance")) == 2
     end
 
-    test "context-long, one identity per PROJECT → 1 — costs a live human conversation" do
+    test "l'ARCHITECTE → 1 : il vit tant que le projet est ouvert" do
       assert Fleet.CapProfile.kill_class(kc_prof(13, "forever")) == 1
       assert Fleet.CapProfile.kill_class(kc_prof(13, "forever", "project")) == 1
     end
 
-    test "the ORDER is the invariant: one-shot derives `instance`, so cold is tested FIRST" do
-      # Reversed, every judge would file under 2 — "costs a ticket" for a pod that carries none.
-      assert Fleet.CapProfile.slot_scope(kc_prof(4, "one-shot")) == "instance"
-      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 3
+    test "L'ORDRE est l'invariant : lié au projet AVANT juge" do
+      # Inversé, un rôle qui parle à un humain ET qui juge tomberait en classe 3, donc dans un
+      # balayage de routine — au milieu d'une phrase. Le coût décide, pas l'étiquette.
+      assert Fleet.CapProfile.kill_class(kc_prof(13, "forever", "project", "judge")) == 1
     end
 
-    test "the four classes are DISTINCT — a sweep of one never takes another" do
+    test "les quatre classes sont DISTINCTES — un balayage de l'une n'en prend jamais une autre" do
       classes =
         [
           kc_prof(0, "forever"),
           kc_prof(13, "forever"),
           kc_prof(3, "pipe", "instance"),
-          kc_prof(4, "one-shot")
+          kc_prof(4, "one-shot", nil, "judge")
         ]
         |> Enum.map(&Fleet.CapProfile.kill_class/1)
 
       assert classes == [0, 1, 2, 3]
+    end
+
+    test "CONTRE-PREUVE : le cycle de vie ne décide plus rien à lui seul" do
+      # ⚠ SANS CE TEST, LE CHANGEMENT SERAIT INDÉMONTRABLE. Deux profils au MÊME
+      # `lifetime_scope: one-shot` et au même `slot_scope` dérivé, qui tombent dans deux classes
+      # différentes : c'est exactement ce que l'ancien critère ne pouvait pas exprimer, et c'est
+      # pour ça qu'il mettait `chief` avec les juges.
+      assert Fleet.CapProfile.kill_class(kc_prof(9, "one-shot", nil, "judge")) == 3
+      assert Fleet.CapProfile.kill_class(kc_prof(9, "one-shot", nil, "worker")) == 2
+    end
+
+    test "le VRAI catalogue se range comme annoncé — mesuré, jamais recopié" do
+      # Le docstring de `kill_class/1` REFUSE d'inventorier les rôles, parce qu'un inventaire ment
+      # le jour où l'artefact bouge — il l'a déjà fait une fois (2026-08-11, `gatekeeper` classé 1
+      # alors que son profil portait `one-shot` depuis des semaines). Alors on ne recopie pas la
+      # liste : on la MESURE sur les profils installés.
+      #
+      # On lit les FICHIERS LIVRÉS (patron de `cap_profile_image_test`), pas le catalogue résolu :
+      # `load/1` dépend d'une racine que d'autres tests de ce module déplacent, et un test qui
+      # mesure des artefacts ne doit pas dépendre de l'ambiant de ses voisins. Ça permet en prime de
+      # couvrir les DEUX catalogues, système compris — donc `chief`, le seul rôle qui change de
+      # classe dans ce commit.
+      klass = fn catalogue, name ->
+        path =
+          Application.app_dir(
+            :lcars_fleet,
+            "priv/#{catalogue}/cap_profile/canon/cap-profiles/#{name}.yaml"
+          )
+
+        {:ok, raw} = YamlElixir.read_from_file(path)
+        {:ok, profile} = Fleet.CapProfile.from_map(raw)
+        Fleet.CapProfile.kill_class(profile)
+      end
+
+      # L'accueil, et l'architecte qui parle à un humain.
+      assert klass.("catalogue-system", "starfleet") == 0
+      assert klass.("catalogue-system", "architect") == 1
+
+      # Les producteurs — dont `chief`, qui portait 3 avant ce commit. Fusionner est une EXÉCUTION.
+      assert klass.("catalogue-system", "chief") == 2
+      assert klass.("catalogue", "engineer") == 2
+      assert klass.("catalogue", "scribe") == 2
+
+      # Les juges — et `scoper` en fait partie, ce qui n'allait pas de soi : il juge un BRIEF et non
+      # un livrable, mais il juge.
+      assert klass.("catalogue-system", "gatekeeper") == 3
+      assert klass.("catalogue", "qualifier") == 3
+      assert klass.("catalogue", "reviewer") == 3
+      assert klass.("catalogue", "scoper") == 3
     end
   end
 

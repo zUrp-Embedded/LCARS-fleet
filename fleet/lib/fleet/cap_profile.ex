@@ -653,29 +653,43 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The pod's KILL/HARVEST class — the `<X>` nibble of the deterministic session_id
-  (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field). It answers ONE
-  question, asked by an operator from a shell: **what does killing this process cost?**
+  (`Fleet.Spawner.SessionId.encode`), DERIVED from existing metadata (no new field). It sorts pods by
+  **MISSION**, and the four tiers are named by what they are:
 
-    * `0` — costs nothing and is never asked: `role_index == 0`, outside the fleet's ordinary pod
-      management. Spared by every class-anchored pattern.
-    * `1` — costs a LIVE HUMAN CONVERSATION: context-long, one identity per project. Never in a
-      routine sweep; somebody is mid-sentence with it.
-    * `2` — costs the work in flight on ONE ticket, which is re-dispatchable: context-long, but one
-      identity per ticket.
-    * `3` — costs nothing: cold, independent, they accumulate and are meant to be swept.
+    * `0` — **l'accueil**, toujours la : `role_index == 0`, hors de la gestion ordinaire des pods.
+      Epargne par tout motif ancre sur la classe.
+    * `1` — **l'architecte**, qui vit tant que le projet est ouvert : `slot_scope: "project"`, une
+      identite par projet.
+    * `2` — **les producteurs**.
+    * `3` — **les juges** : `brief_kind: "judge"`.
+
+  ## Pourquoi ce n'est plus le cycle de vie qui trie
+
+  Ca l'etait jusqu'au 2026-08-20, et le critere etait faux sur DEUX points a la fois (user).
+
+  Il testait `lifetime_scope == "one-shot"` pour la classe 3. Or **un juge n'est pas one-shot** : il
+  meurt quand son livrable est traite, exactement comme un producteur — esperance de vie plus
+  courte, nature identique. Et le tri se justifiait par « jetable », qui **ne distingue rien** : un
+  producteur est jetable aussi, simplement plus cher. Mesure de l'ampleur : la classe 3 contenait
+  quatre juges ET un ouvrier de merge (`chief`, `brief_kind: worker`).
+
+  `brief_kind` porte le nouveau critere et il ne s'invente pas pour l'occasion : REQUIS au schema,
+  fail-closed, et declare propriete de SECURITE (« judge-ness is a SECURITY property, NEVER
+  inferred »). C'est le meme axe qui a separe `chief` de `gatekeeper`.
+
+  ## Ce que le nombre dit encore, et qu'il disait mal
+
+  **Le gradient de cout survit** — `1` coute une conversation humaine, `2` le travail d'un ticket,
+  `3` une passe de verdict. Le nombre se lit donc de deux facons, toutes deux vraies : mission ET
+  cout. L'ancien enonce n'en portait qu'une, et fausse.
+
+  Effet acquis en prime : l'UUID devient un **temoin visible de la judge-ness**. Editer le
+  `brief_kind` d'un profil change l'identite de ses pods, donc se voit.
 
   NO ROLE IS NAMED HERE, deliberately. This doc listed them until 2026-08-11 and the list was FALSE:
   it filed `gatekeeper` under 1 while its profile had carried `lifetime_scope: one-shot` for weeks.
   A comment that inventories another artefact lies the day that artefact moves, in silence. The
   criterion is stated; roles sort themselves into it.
-
-  IT READS BOTH AXES, and that is what the 2026-08-11 revision fixed. The rule was written when
-  `slot_scope` was purely derived from `lifetime_scope` — one axis, so three tiers matched three
-  lifetimes and "everything else" was exact. The 2026-08-03 override made `slot_scope` declarable
-  precisely because one combination could not be written (context-long AND one pod per ticket, which
-  is what a producer needs), and that new combination fell into "everything else". Class 1 then held
-  both the architects and the producers, so no sweep could take the producers without cutting every
-  human's conversation.
 
   Reaping, and ALWAYS anchor on `claude.*`: a bare pattern reaps any concurrent `grep` carrying it in
   its argv (cf. `SessionId` moduledoc).
@@ -683,12 +697,24 @@ defmodule Fleet.CapProfile do
   @spec kill_class(t()) :: 0..3
   def kill_class(%__MODULE__{} = profile) do
     cond do
-      role_index(profile) == 0 -> 0
-      # BEFORE the slot test, and the order carries the invariant: `one-shot` DERIVES
-      # `slot_scope: "instance"`, so testing the slot first would file every judge under 2.
-      lifetime_scope(profile) == "one-shot" -> 3
-      slot_scope(profile) == "instance" -> 2
-      true -> 1
+      role_index(profile) == 0 ->
+        0
+
+      # AVANT le test de judge-ness, et l'ordre porte l'invariant : un role qui vit tant que le
+      # projet est ouvert parle a un humain. Le classer par sa mission de jugement le mettrait dans
+      # le seau des jetables, et un balayage de routine couperait une conversation en cours.
+      slot_scope(profile) == "project" ->
+        1
+
+      brief_kind(profile) == "judge" ->
+        3
+
+      # `true` ET PAS `slot_scope == "instance"`, et la difference est une AFFIRMATION plutot qu'un
+      # reste : tout ce qui n'est ni l'accueil, ni lie au projet, ni un juge, PRODUIT. L'ancien
+      # critere mettait les producteurs dans son fourre-tout ; ici c'est l'etage 1 qui a cesse d'en
+      # etre un.
+      true ->
+        2
     end
   end
 
