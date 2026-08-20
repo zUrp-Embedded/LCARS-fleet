@@ -36,12 +36,9 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   INGESTION** — et une enveloppe refusée n'est pas ingérée. Le juge vit donc encore, avec le
   contexte que lui a coûté sa lecture du livrable, et c'est exactement ce que cette passe dépense.
 
-  ⚠ **Ce paragraphe créditait B2 (`StepRunCompleter.reap_judge/3`), et c'était faux** — corrigé le
-  2026-08-20 après relecture. B2 ne fauche que les juges de **PR**, sur le chemin `record_review`.
-  Les juges de **gate** que cette passe traite (scoper, gatekeeper) passent par `apply_verdict` et
-  n'atteignent jamais `record_review` : B2 ne les touche pas. La conclusion tenait, la raison
-  était fausse — et une raison fausse est ce qui fait qu'un jour quelqu'un « aligne » B2 sur une
-  garantie qu'elle n'a jamais donnée.
+  La règle vaut pour les deux familles de juges, et par deux chemins différents : un juge de PR
+  serait fauché par `StepRunCompleter` à la pose de sa revue — qui n'a pas lieu ici ; un juge de
+  GATE (scoper, gatekeeper) arrive par `apply_verdict` et n'a aucune faucheuse sur ce chemin.
   """
 
   require Logger

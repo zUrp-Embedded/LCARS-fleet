@@ -472,14 +472,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # ═══ B2 — LE POINT DE FAUCHE DU JUGE, JUMEAU DE CELUI DU PRODUCTEUR ═══
+  # ═══ LE POINT DE FAUCHE DU JUGE ═══
   #
-  # La mort d'un juge etait un EFFET DE BORD : son pod s'eteignait quand la machinerie voulait bien,
-  # et rien dans le rail ne DISAIT « ce juge a fini ». Le pendant producteur existe depuis
-  # longtemps et se lit d'un coup d'oeil — `MergeAndPromote.reap_ticket_producer/3`, appele au
-  # moment du sceau. Ici c'est le meme geste au meme genre d'endroit : la revue native est POSEE,
-  # donc le livrable du juge est INGERE, donc le juge a fini. Les deux morts se lisent desormais au
-  # meme etage du rail.
+  # DEUX ROLES, DEUX CRITERES, ET LA DIFFERENCE EST CE QUE CHACUN POSSEDE :
+  #
+  #   * le PRODUCTEUR possede le TICKET jusqu'a sa livraison fusionnee — il meurt au merge
+  #     (`MergeAndPromote.reap_ticket_producer/3`), parce qu'un rework le rappelle et qu'il doit
+  #     retrouver son contexte ;
+  #   * le JUGE ne possede que SON VERDICT — il meurt quand ce verdict est ingere, c'est-a-dire
+  #     quand sa revue native tient sur la PR. Un rework le rappellera FROID, par design : re-lire
+  #     sans prejuge est le mandat, pas un pis-aller.
   #
   # ⚠ APRES LA POSE, JAMAIS AVANT. Un juge fauche avant que sa revue tienne serait un verdict perdu
   # sans personne pour le refaire — et le chemin d'echec ci-dessus rend `{:error, {:review, _}}`

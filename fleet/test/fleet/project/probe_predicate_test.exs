@@ -135,10 +135,17 @@ defmodule Fleet.Project.ProbePredicateTest do
     work = Path.join(tmp, "job")
     File.mkdir_p!(work)
 
+    # ⚠ ON PLANTE DE VRAIS SECRETS. Sans eux, la fixture de fuite passerait sans rien mesurer :
+    # l'environnement d'un test ExUnit n'en porte aucun, donc « zéro secret survivant » serait vrai
+    # avant comme après le nettoyage. `ACTIONS_RUNTIME_TOKEN` est celui que le runner Gitea injecte
+    # réellement ; les deux autres représentent ce qu'un opérateur y met.
     env = [
       {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
       {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
-      {"FORGE_TOKEN", ""}
+      {"FORGE_TOKEN", ""},
+      {"ACTIONS_RUNTIME_TOKEN", "runner-secret"},
+      {"NPM_TOKEN", "publish-secret"},
+      {"DB_PASSWORD", "hunter2"}
     ]
 
     {out, code} = System.cmd("sh", [path], cd: work, env: env, stderr_to_stdout: true)
@@ -256,6 +263,7 @@ defmodule Fleet.Project.ProbePredicateTest do
     @leak_check """
     #!/bin/sh
     echo "LEAKCHECK remote=[$(git config --get remote.origin.url)] token=[${FORGE_TOKEN}]"
+    echo "LEAKSCAN=[$(env | sed -n 's/^\\([A-Za-z_][A-Za-z0-9_]*\\)=.*/\\1/p' | grep -cE '(TOKEN|SECRET|PASSWORD)$')]"
     exit 0
     """
 
@@ -282,6 +290,12 @@ defmodule Fleet.Project.ProbePredicateTest do
       # ce paragraphe est là pour qu'on ne la lise pas comme telle.
       assert r.out =~ "LEAKCHECK remote=[] token=[]",
              "le livrable jugé voit encore un secret : #{r.out}"
+
+      # ⚠ ET PAS SEULEMENT LE NÔTRE. Le runner injecte ses propres secrets — `ACTIONS_RUNTIME_TOKEN`
+      # et ce que l'opérateur y met. Le harnais compte lui-même, DEPUIS LA PLACE DE L'ATTAQUANT,
+      # combien de variables au nom de secret survivent dans son environnement. La réponse doit être
+      # zéro, et le compte discrimine là où `token=[]` ne discriminait pas.
+      assert r.out =~ "LEAKSCAN=[0]", "des variables de secret survivent : #{r.out}"
 
       # ⚠ ET LA SONDE MARCHE TOUJOURS. Couper le remote après les `fetch` ne doit rien casser :
       # tout ce qui suit est du `checkout` local. Sans cette moitié, on aurait pu « corriger » en

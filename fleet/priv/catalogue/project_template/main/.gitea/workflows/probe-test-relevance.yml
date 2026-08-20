@@ -175,6 +175,28 @@ jobs:
           git remote remove origin
           unset FORGE_TOKEN
 
+          # ── ET ON RETIRE TOUT LE RESTE, PAS SEULEMENT LE NÔTRE ──
+          #
+          # Le runner injecte ses propres secrets dans l'environnement du job — `ACTIONS_RUNTIME_TOKEN`
+          # pour le cache et les artefacts, et ce que l'opérateur y a mis. La commande de test vient
+          # du `CLAUDE.md` de la TÊTE JUGÉE : elle appartient au livrable qu'on évalue, et elle n'a
+          # besoin d'AUCUN d'eux pour jouer une suite.
+          #
+          # C'est le geste qui compte, plus que le filtrage du canal : `tests/run.sh` a exactement le
+          # même accès, et durcir l'un sans l'autre ne durcit rien. On retire au job ce qu'il n'a pas
+          # besoin d'avoir, une fois pour les deux.
+          #
+          # Filtrage sur la FORME du nom, pas sur une liste : une liste rate le secret ajouté demain.
+          for v in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' |
+                     grep -E '(TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|CREDENTIAL)$|^GITHUB_TOKEN$'); do
+            unset "$v" 2>/dev/null || true
+          done
+
+          # ⚠ CE QUI RESTE HORS DE CE FICHIER, et qu'un opérateur doit poser : l'EGRESS. Après ce
+          # point la sonde ne parle plus à rien ; un job sans réseau sortant fermerait la dernière
+          # porte, et il la fermerait aussi pour `tests/run.sh`. Ça se déclare sur le runner ou sur
+          # l'image, pas ici.
+
           git checkout -q "$head" 2>/dev/null || {
             fact "verdict=inapplicable reason=head-unreachable"
             exit 0
