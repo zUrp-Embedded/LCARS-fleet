@@ -121,9 +121,27 @@ defmodule Fleet.Labels do
   def type_for_destination(@destination_workshop_token), do: "type:workshop"
   def type_for_destination(_), do: "type:feature"
 
-  @doc "The visual types, for the seeding that must create them before anyone can wear them."
+  # LES DESTINATIONS CONNUES, et c'est la seule liste du couple. `nil` n'est pas un trou : il tient
+  # la clause par defaut de `type_for_destination/1` (« toute autre destination »), qui produit un
+  # type reel qu'il faut semer comme les autres.
+  @destinations [@destination_workshop_token, nil]
+
+  @doc """
+  The visual types, for the seeding that must create them before anyone can wear them.
+
+  DERIVEE de `type_for_destination/1`, jamais recopiee — et c'est la reparation d'un defaut mesure.
+  Cette fonction rendait `["type:feature", "type:doc"]` en dur pendant que sa jumelle produisait
+  `type:workshop` depuis le renommage `genre/doc` -> `destination/workshop` (`280e3fb62`,
+  2026-08-09) : `type:doc` etait seme et porte par personne, `type:workshop` porte et jamais seme —
+  donc cree paresseusement par `add_issue_label/4`, gris par defaut et sans description. Six jours
+  de demi-vie entre le correctif qui a rendu la jumelle derivee et le commit qui l'a re-cassee, et
+  seize jours ouverts ensuite. L'avertissement qui l'annonce est dans le `@moduledoc` de ce fichier :
+  « la phrase qui borne un vocabulaire est la premiere chose qu'un lecteur croit et la derniere que
+  quiconque met a jour ». Une liste derivee ne peut plus mentir ; ce qui reste a garder, c'est que
+  `@destinations` couvre toutes les clauses — mur `labels.visual_types_derived`.
+  """
   @spec visual_types() :: [String.t()]
-  def visual_types, do: ["type:feature", "type:doc"]
+  def visual_types, do: @destinations |> Enum.map(&type_for_destination/1) |> Enum.uniq()
 
   # --- workflow_map position: 2 mutex label scopes (via `exclusive:true`, set PER-REPO by
   # ForgeClient.ensure_repo_label). `wfmap/<map>` = WHICH map (data, per-issue → multi-map);

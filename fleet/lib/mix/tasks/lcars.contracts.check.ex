@@ -28,6 +28,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   either has an executable check or it is not listed.
   """
 
+  @typedoc """
+  Le verdict d'UN check.
+
+  `status` est ternaire dans les faits : `:pass`, `:fail`, et le `:fail` particulier de
+  `broken_result/2` — « INSTRUMENT BROKEN », quand la population mesuree est vide. Un mur qui ne
+  voit plus rien ne verdit pas, il se declare casse.
+  """
+  @type result :: %{
+          id: String.t(),
+          remediation: String.t(),
+          status: :pass | :fail,
+          evidence: [String.t()],
+          note: String.t()
+        }
+
   use Mix.Task
 
   @recursive false
@@ -68,7 +83,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_event_consumers_canon(root),
         check_pipeline_v25_normalized(root),
         check_events_handlers_exist(root),
-        check_coord_backend_wired(root),
+        check_gates_no_runtime_seam(root),
+        check_visual_types_derived(root),
+        check_escalation_kinds_closed(root),
+        check_findings_severities_aligned(root),
+        check_pulled_states_declared(root),
+        check_public_functions_spec(root),
         check_capprofile_lifetime_scope_path(root),
         check_capprofile_modop_incompatible_path(root),
         check_launch_backend_containment(root),
@@ -137,6 +157,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
   # what the name claims (it long scanned only api/ws.ex, the last migrant).
   @doc false
+  @spec check_event_consumers_canon(String.t()) :: result()
   def check_event_consumers_canon(root) do
     # The check's NAME claims the canon for ALL consumers; it long grepped ws.ex alone (the last
     # migrant), leaving the guarantee narrower than its label. The residue scan now covers
@@ -160,6 +181,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # "v1/v2.5" = external envelope vs internal flat (same version, two shapes), NOT two versions.
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   @doc false
+  @spec check_pipeline_v25_normalized(String.t()) :: result()
   def check_pipeline_v25_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
@@ -206,6 +228,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Every handler referenced in events.yaml must exist, otherwise the route is a
   # phantom handler tolerated silently.
   @doc false
+  @spec check_events_handlers_exist(String.t()) :: result()
   def check_events_handlers_exist(root) do
     yaml = Path.join(root, "priv/event_router/events.yaml")
 
@@ -238,42 +261,487 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Invariant: the LLM gate (soft + terminal non-adjudicable) is judged by the
-  # **gatekeeper** on the workflow side; `coord` carries no gate spawn, and the
-  # `NotWiredYet` placeholder (which would silently break the soft gates) must
-  # not reappear in the coord gate-path. So we check the REAL code,
-  # not trusting a comment:
-  # (a) no residual `HookSpawner.NotWiredYet` in the coord lib, (b) `Gates`
-  # is pure — no `coord_backend()`/`CoordBackend` delegation (the dead
-  # seam must not come back).
+  # Invariant: the LLM gate (soft + terminal non-adjudicable) is judged by the **gatekeeper** on the
+  # workflow side. `Workflow.Gates` is SYSTEM machinery and stays PURE — it must not acquire a
+  # runtime seam that re-installs a judgement inside it.
+  #
+  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM. La version precedente cherchait
+  # `coord_backend|CoordBackend` : deux chaines qu'aucun commit ne pouvait produire depuis que
+  # `Fleet.Coord` est parti entier (brouette 2026-08-19). Un mur contre une resurrection que
+  # personne ne peut accomplir se lit comme une garantie et n'en tient aucune — et il verdissait
+  # sur n'importe quelle delegation vers un AUTRE destinataire.
+  #
+  # `boundary` attrape deja toute delegation EN DUR vers un autre domaine, a la compilation. Ce
+  # qu'il ne voit pas, c'est le seam passe EN VALEUR (`Application.get_env` puis `apply/3`) — le
+  # mecanisme exact de feu `:coord_backend`. C'est donc lui qu'on refuse ici, et les deux couches
+  # se composent sans se recouvrir.
+  #
+  # Ne pond aucun faux positif aujourd'hui : `gates.ex` n'a ni lecture d'app-env ni `apply/3`
+  # (mesure a la pose, 2026-08-20) — le mur nait VERT, seul etat dans lequel un mur puisse naitre.
+  #
+  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # Insere `defp _mutation_seam, do: Application.get_env(:lcars_fleet, :gate_backend)` dans
+  # `gates.ex` : ce check ECHOUE et nomme `lib/fleet/workflow/gates.ex:43`. Mutation retiree.
+  # Son angle mort, declare : la granularite est le FICHIER `gates.ex`. Un seam installe dans
+  # `gates/predicate.ex` passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste
+  # dans `Fleet.Workflow`. Les deux couches se composent et aucune ne couvre l'autre.
   @doc false
-  def check_coord_backend_wired(root) do
-    # MOITIE SURVIVANTE d'une gate a deux moitiés : l'autre grepait `lib/fleet/coord/**` pour le
-    # placeholder `NotWiredYet` — le domaine `Fleet.Coord` est parti entier (brouette 2026-08-19,
-    # rail decision = telemetrie sans acte), il n'y a plus de source a sonder. Ce qui reste a
-    # garder : `Workflow.Gates` est PUR — aucune delegation coord ne doit y reapparaitre (le gate
-    # LLM vit chez le gatekeeper, jamais dans une machinerie systeme).
+  @spec check_gates_no_runtime_seam(String.t()) :: result()
+  def check_gates_no_runtime_seam(root) do
     gates_path = Path.join(root, "lib/fleet/workflow/gates.ex")
+    seam = ~r/Application\.(get|fetch)_env|\bapply\(/
 
-    gates_coord_dep =
+    gates_seams =
       gates_path
-      |> grep_lines(~r/coord_backend|CoordBackend/)
-      |> Enum.filter(fn {_ln, line} ->
-        Regex.match?(~r/coord_backend|CoordBackend/, strip_comment(line))
-      end)
+      |> grep_lines(seam)
+      |> Enum.filter(fn {_ln, line} -> Regex.match?(seam, strip_comment(line)) end)
       |> Enum.map(fn {ln, _} -> "lib/fleet/workflow/gates.ex:#{ln}" end)
 
     if not File.exists?(gates_path) do
-      broken_result("coord.backend.wired_or_pure", "lib/fleet/workflow/gates.ex")
+      broken_result("gates.no_runtime_seam", "lib/fleet/workflow/gates.ex")
     else
       %{
-        id: "coord.backend.wired_or_pure",
+        id: "gates.no_runtime_seam",
         remediation:
-          "keep the LLM gate on the gatekeeper (pure Gates) — no coord delegation may reappear",
-        status: if(gates_coord_dep == [], do: :pass, else: :fail),
-        evidence: gates_coord_dep,
-        note: "Gates purity (the coord-lib half of this gate died with Fleet.Coord, 2026-08-19)"
+          "keep the LLM gate on the gatekeeper — `Workflow.Gates` reads no app-env and applies " <>
+            "no injected module; a judgement belongs to a role, never to system machinery",
+        status: if(gates_seams == [], do: :pass, else: :fail),
+        evidence: gates_seams,
+        note: "Gates purity: no runtime seam (app-env read / apply) inside system machinery"
       }
+    end
+  end
+
+  # LE JUMEAU DE `docs.public_functions_documented`, sur l'autre contrat.
+  #
+  # Dialyzer tourne au dernier maillon du gate avec `:extra_return` et `:missing_return` — deux
+  # drapeaux dont tout le metier est de comparer le DECLARE a l'INFERE. Ils sont INERTES sur une
+  # fonction sans `@spec` : le fichier est analyse, mais avec le contrat le plus permissif que
+  # l'inference veuille bien lui accorder. Une fonction sans spec n'est donc pas « moins finie »,
+  # elle est HORS DE PORTEE de l'instrument le plus strict du gate, tout en le faisant verdir.
+  #
+  # ⚖ Arbitrage user, 2026-08-20 : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est
+  # le dernier kilometre ». La couverture etait a 89,0 % (64 fonctions sur 16 fichiers) et la fuite
+  # S'ELARGISSAIT — chaque check ajoute a ce fichier ajoutait une fonction publique sans spec.
+  #
+  # `@impl` EXCLU, meme motif que le jumeau : le contrat d'un callback vit dans son behaviour, et le
+  # restater par implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP
+  # NOMMES ne sont PAS exclus, eux : `start_link/1` et `child_spec/1` portent un contrat propre a
+  # chaque module, et les exclure retirerait du mur ce qu'on vient de fermer.
+  #
+  # ## Preuve (mesure et mutation, 2026-08-20)
+  # Pose a 540/540. Retirer un `@spec` -> ECHEC, fonction et fichier nommes. Et l'exercice s'est
+  # auto-verifie pendant qu'on le faisait : QUATRE specs ecrits de bonne foi etaient FAUX, et
+  # Dialyzer les a nommes un par un — `paginate/3` (une chaine de requete prise pour un keyword,
+  # 75 avertissements en cascade), `forge_bot_login/2` et `login_of/1` (un tuple pris pour une
+  # chaine), `maybe_complete/2` (deux formes de retour sur quatre). Aucun n'aurait pu passer en
+  # silence : c'est la propriete qui rend ce mur sur a poser.
+  @doc false
+  @spec check_public_functions_spec(String.t()) :: result()
+  def check_public_functions_spec(root) do
+    files = Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
+
+    manquantes =
+      Enum.flat_map(files, fn path ->
+        case unspecced_public_functions(File.read!(path)) do
+          [] -> []
+          names -> [{Path.relative_to(path, root), names}]
+        end
+      end)
+
+    %{
+      id: "types.public_functions_spec",
+      remediation:
+        "donne un `@spec` a la fonction — sans lui, Dialyzer l'analyse avec le contrat le plus " <>
+          "permissif qu'il puisse inferer, et `:extra_return`/`:missing_return` n'ont rien a " <>
+          "comparer. Un `@impl` n'en a pas besoin : son contrat vit dans le behaviour",
+      status: if(files != [] and manquantes == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          files == [] ->
+            ["INSTRUMENT BROKEN — aucun fichier source lu sous lib/"]
+
+          manquantes != [] ->
+            Enum.map(manquantes, fn {f, ns} -> "#{f}: #{Enum.join(ns, ", ")}" end)
+
+          true ->
+            []
+        end,
+      note: "public functions carrying a @spec (@impl excluded), #{length(files)} files scanned"
+    }
+  end
+
+  # Les fonctions publiques d'UN fichier qui n'ont pas de `@spec`. Lecture ligne a ligne, heredocs
+  # sautes : un `def` cite dans un `@moduledoc` n'est pas une definition.
+  defp unspecced_public_functions(src) do
+    src
+    |> String.split("\n")
+    |> Enum.reduce(
+      %{defs: MapSet.new(), specs: MapSet.new(), impls: MapSet.new(), doc?: false, impl?: false},
+      fn
+        line, st ->
+          trimmed = String.trim_leading(line)
+
+          cond do
+            String.starts_with?(trimmed, ~s(""")) ->
+              %{st | doc?: not st.doc?, impl?: false}
+
+            st.doc? ->
+              st
+
+            String.starts_with?(trimmed, "@impl") ->
+              %{st | impl?: true}
+
+            String.starts_with?(trimmed, "@spec ") ->
+              case Regex.run(~r/^@spec\s+([a-z_][a-zA-Z0-9_?!]*)/, trimmed) do
+                [_, n] -> %{st | specs: MapSet.put(st.specs, n)}
+                _ -> st
+              end
+
+            Regex.match?(~r/^def\s+[a-z_]/, trimmed) and leading_spaces(line) <= 4 ->
+              [_, n] = Regex.run(~r/^def\s+([a-z_][a-zA-Z0-9_?!]*)/, trimmed)
+              key = if st.impl?, do: :impls, else: :defs
+              %{st | key => MapSet.put(Map.fetch!(st, key), n), impl?: false}
+
+            trimmed == "" or String.starts_with?(trimmed, "#") or
+                String.starts_with?(trimmed, "@") ->
+              st
+
+            true ->
+              %{st | impl?: false}
+          end
+      end
+    )
+    |> then(fn st ->
+      st.defs |> MapSet.difference(st.impls) |> MapSet.difference(st.specs) |> Enum.sort()
+    end)
+  end
+
+  defp leading_spaces(line), do: byte_size(line) - byte_size(String.trim_leading(line))
+
+  # LA DEPENDANCE INVISIBLE DU FOURNISSEUR — nature de couture SANS PRECEDENT dans ce depot.
+  #
+  # `Reconciliation.@pulled_states [:assigned]` dit qu'un work-item `:pending` (enfile, jamais tire)
+  # ne possede AUCUN verrou. Trois modules raisonnent sur cette regle sans jamais l'appeler : ils la
+  # citent en commentaire. Le fournisseur, lui, ignorait qu'il portait une garantie pour eux — la
+  # changer casse leur raisonnement en silence, et rien ne relie les quatre fichiers.
+  #
+  # Les cinq autres natures de couture se verifient entre deux ENSEMBLES qui s'ecrivent. Celle-ci
+  # n'a rien a comparer : la dependance ne laisse aucune trace executable. La seule forme qui la
+  # rende verifiable est que le fournisseur la DECLARE — d'ou `pulled_states_dependents/0`, une
+  # valeur dont le seul lecteur est ce mur.
+  #
+  # DEUX SENS, et le second est celui qui coute : un dependant qui apparait sans etre declare
+  # reintroduit exactement l'angle mort qu'on ferme.
+  #
+  # ## Preuve (mutations jouees a la pose, 2026-08-20)
+  # (a) un dependant retire de la declaration -> ECHEC, fichier nomme cote « cite, non declare » ;
+  # (b) un fichier declare qui ne cite plus rien -> ECHEC, nomme cote « declare, ne cite plus ».
+  # Angle mort declare : la citation est un GREP sur `@pulled_states`. Un module qui raisonnerait
+  # sur la regle sans la nommer resterait invisible — c'est le prix d'une dependance qui ne
+  # s'execute pas, et le nommage est deja la discipline du depot.
+  @doc false
+  @spec check_pulled_states_declared(String.t()) :: result()
+  def check_pulled_states_declared(root) do
+    rel = "lib/fleet/pilot/poller/reconciliation.ex"
+
+    declared =
+      root
+      |> quoted!(rel)
+      |> collect(fn
+        {:@, _, [{:pulled_states_dependents, _, [list]}]} when is_list(list) -> list
+        _ -> nil
+      end)
+      |> List.flatten()
+      |> collect_strings()
+      |> MapSet.new()
+
+    citing =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.filter(&String.contains?(File.read!(&1), "@pulled_states"))
+      |> Enum.map(&Path.relative_to(&1, root))
+      # Le fournisseur lui-meme, et CE FICHIER : le gate LIT la regle, il n'en depend pas. S'auto-
+      # compter ferait rougir le mur sur sa propre pose — mesure a la pose, 2026-08-20.
+      |> Enum.reject(&(&1 in [rel, "lib/mix/tasks/lcars.contracts.check.ex"]))
+      |> MapSet.new()
+
+    cond do
+      measured_nothing?(MapSet.to_list(declared)) ->
+        broken_result(
+          "reconciliation.pulled_states_declared",
+          "@pulled_states_dependents in #{rel}"
+        )
+
+      measured_nothing?(MapSet.to_list(citing)) ->
+        broken_result("reconciliation.pulled_states_declared", "files citing @pulled_states")
+
+      true ->
+        non_declares = citing |> MapSet.difference(declared) |> Enum.sort()
+        fantomes = declared |> MapSet.difference(citing) |> Enum.sort()
+
+        %{
+          id: "reconciliation.pulled_states_declared",
+          remediation:
+            "`@pulled_states` porte une garantie pour des modules qui ne l'appellent pas — le " <>
+              "fournisseur doit les nommer, sinon le changer casse leur raisonnement en silence",
+          status: if(non_declares == [] and fantomes == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(non_declares, &"cite @pulled_states, NON declare: #{&1}") ++
+              Enum.map(fantomes, &"declare, ne cite plus: #{&1}"),
+          note: "provider declares the dependents of its ownership rule (nature 4)"
+        }
+    end
+  end
+
+  # L'ECHELLE DE SEVERITE, ECRITE DEUX FOIS.
+  #
+  # `FindingsWire.severities/0` porte l'ORDRE (du plus faible au plus fort) : le `block_at` d'une
+  # carte s'y compare. `findings-v1.json` porte l'APPARTENANCE : ce qu'un juge a le droit d'ecrire.
+  # Deux formes, un seul vocabulaire — et le `@doc` de la fonction affirme etre « the ONLY place
+  # this order is written », ce qui est vrai de l'ORDRE et faux de l'ENSEMBLE.
+  #
+  # La paire est nee DANS le lot qui a paye le cas `"none"` : un juge avait ecrit `"none"` pour dire
+  # « rien trouve », l'enum ne le portait pas, et toute sa charge est morte pour un mot. La lecon du
+  # lot etait « tout ce qu'un juge peut ecrire doit etre accepte ou refuse lisiblement » ; le meme
+  # lot a cree une seconde copie du meme vocabulaire, sans mur.
+  #
+  # Ce check compare les ENSEMBLES, jamais l'ordre : l'ordre n'existe que cote Elixir, et un enum
+  # JSON n'en porte aucun. Une severite ajoutee d'un cote et pas de l'autre est refusee ici.
+  #
+  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est nommee du
+  # cote ou elle manque. Mutation retiree.
+  @doc false
+  @spec check_findings_severities_aligned(String.t()) :: result()
+  def check_findings_severities_aligned(root) do
+    rel_ex = "lib/fleet/findings_wire.ex"
+    rel_json = "priv/workflow/schema/findings-v1.json"
+
+    from_code =
+      root
+      |> quoted!(rel_ex)
+      |> collect(fn
+        {:def, _, [{:severities, _, nil} | rest]} -> rest
+        {:def, _, [{:severities, _, []} | rest]} -> rest
+        _ -> nil
+      end)
+      |> List.flatten()
+      |> collect_strings()
+      |> MapSet.new()
+
+    from_schema =
+      with {:ok, raw} <- File.read(Path.join(root, rel_json)),
+           {:ok, json} <- Jason.decode(raw) do
+        json
+        |> get_in(["properties", "findings", "items", "properties", "severity", "enum"])
+        |> case do
+          l when is_list(l) -> MapSet.new(l)
+          _ -> MapSet.new()
+        end
+      else
+        _ -> MapSet.new()
+      end
+
+    cond do
+      measured_nothing?(MapSet.to_list(from_code)) ->
+        broken_result("findings.severities_aligned", "severities/0 in #{rel_ex}")
+
+      measured_nothing?(MapSet.to_list(from_schema)) ->
+        broken_result("findings.severities_aligned", "severity enum in #{rel_json}")
+
+      true ->
+        code_only = from_code |> MapSet.difference(from_schema) |> Enum.sort()
+        schema_only = from_schema |> MapSet.difference(from_code) |> Enum.sort()
+
+        %{
+          id: "findings.severities_aligned",
+          remediation:
+            "une severite ecrite d'un seul cote est soit refusee au fil (le juge perd sa charge " <>
+              "entiere, cf. le cas `none`), soit acceptee et jamais comparee au `block_at`",
+          status: if(code_only == [] and schema_only == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(code_only, &"absente du schema: #{inspect(&1)}") ++
+              Enum.map(schema_only, &"absente de severities/0: #{inspect(&1)}"),
+          note: "findings-v1 severity vocabulary: Elixir set == JSON enum set"
+        }
+    end
+  end
+
+  # Les binaires litteraux d'un fragment d'AST — la liste rendue par une fonction, sans l'evaluer.
+  defp collect_strings(ast) do
+    collect(ast, fn
+      s when is_binary(s) -> s
+      _ -> nil
+    end)
+  end
+
+  # LA TABLE DES KINDS D'ESCALADE, FERMEE DANS LES DEUX SENS.
+  #
+  # `Escalation.kind_describe/1` est une table CLOSE : un kind sans clause n'ouvre pas d'issue, il
+  # leve un `FunctionClauseError`. C'est ce qui est arrive a `:awaits_arch_stuck` — emis par
+  # `StepRunConsumer.drain_failed/4`, sans clause — et il a crashe exactement sur le chemin
+  # « un ticket sort du pipeline en silence ». Le temoin du drain stubbait `escalate_fun`, donc il
+  # ne pouvait pas le voir : une couverture de test ne dit rien d'une couture.
+  #
+  # L'autre sens coute moins cher mais ment autant : une clause sans producteur (`:pod_failed`,
+  # 2026-08-20) se lit comme une garantie que quelque chose sait remonter ce cas. C'est le motif
+  # « mensonge du registre » que `events.yaml` nomme deja pour ses propres cles.
+  #
+  # DEUX SOURCES DE PRODUCTION, et il faut les deux : les routes declaratives d'`events.yaml`
+  # (`escalate_kind:`) et les sites de code, ou le kind est le PREMIER argument d'un appel a cinq
+  # arguments dont l'appele nomme une escalade (`escalate`, `escalate_gated`, `escalate_or_signal`,
+  # ou la couture homonyme). Le Catalog garde deja au boot qu'une route `immediate` PORTE un
+  # `escalate_kind` ; il ne verifie pas que ce kind ait une clause.
+  #
+  # ## Preuve (mutations jouees a la pose, 2026-08-20)
+  # (a) clause retiree pour un kind produit -> ECHEC, kind nomme cote « sans clause » ;
+  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme cote « morte ».
+  # Angle mort declare : un kind construit dynamiquement (variable, interpolation) est invisible —
+  # aucun n'existe aujourd'hui, et un mur precis vaut mieux qu'un mur qui devine.
+  @doc false
+  @spec check_escalation_kinds_closed(String.t()) :: result()
+  def check_escalation_kinds_closed(root) do
+    rel = "lib/fleet/pilot/incident_registry/escalation.ex"
+
+    declared =
+      root
+      |> quoted!(rel)
+      |> collect(fn
+        {:defp, _, [{:kind_describe, _, [k]} | _]} when is_atom(k) -> k
+        _ -> nil
+      end)
+      |> MapSet.new()
+
+    from_code =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn f ->
+        f |> File.read!() |> Code.string_to_quoted!() |> escalated_kinds()
+      end)
+      |> MapSet.new()
+
+    from_yaml =
+      case File.read(Path.join(root, "priv/event_router/events.yaml")) do
+        {:ok, y} ->
+          ~r/escalate_kind:\s*([a-z_]+)/
+          |> Regex.scan(y)
+          |> Enum.map(fn [_, k] -> String.to_atom(k) end)
+          |> MapSet.new()
+
+        _ ->
+          MapSet.new()
+      end
+
+    emitted = MapSet.union(from_code, from_yaml)
+
+    sans_clause = emitted |> MapSet.difference(declared) |> Enum.sort()
+    mortes = declared |> MapSet.difference(emitted) |> Enum.sort()
+
+    cond do
+      measured_nothing?(MapSet.to_list(declared)) ->
+        broken_result("incident.kinds_closed", "defp kind_describe/1 in #{rel}")
+
+      measured_nothing?(MapSet.to_list(emitted)) ->
+        broken_result("incident.kinds_closed", "escalate_kind producers (events.yaml + lib/)")
+
+      true ->
+        %{
+          id: "incident.kinds_closed",
+          remediation:
+            "tout kind emis doit avoir sa clause `kind_describe/1` (sinon l'escalade CRASHE au " <>
+              "lieu d'ouvrir l'issue) et toute clause doit avoir un producteur (sinon la table " <>
+              "annonce une remontee que personne ne declenche)",
+          status: if(sans_clause == [] and mortes == [], do: :pass, else: :fail),
+          evidence:
+            Enum.map(sans_clause, &"emis SANS clause: #{inspect(&1)}") ++
+              Enum.map(mortes, &"clause MORTE (aucun producteur): #{inspect(&1)}"),
+          note: "escalation kinds: emitted set == kind_describe/1 clause set"
+        }
+    end
+  end
+
+  # Le kind d'une escalade : premier argument d'un appel a CINQ arguments dont l'appele nomme une
+  # escalade. Couvre l'appel direct, la couture (`escalate.(…)`) et le relais local.
+  defp escalated_kinds(ast) do
+    collect(ast, fn
+      {callee, _, [k | rest]} when is_atom(k) and length(rest) == 4 ->
+        n = callee_name(callee)
+        if n && String.contains?(Atom.to_string(n), "escalate"), do: k, else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp callee_name({:., _, [{n, _, _}]}) when is_atom(n), do: n
+  defp callee_name({:., _, [_mod, n]}) when is_atom(n), do: n
+  defp callee_name(n) when is_atom(n), do: n
+  defp callee_name(_), do: nil
+
+  # LE COUPLE `type_for_destination/1` <-> `visual_types/0` : l'un PRODUIT les types visuels, l'autre
+  # les SEME sur chaque depot. Deux ensembles qui doivent rester egaux, et qui ont divergé pendant
+  # SEIZE JOURS — `type:doc` seme et porte par personne, `type:workshop` porte et jamais seme, donc
+  # cree paresseusement, gris et sans description.
+  #
+  # `visual_types/0` est desormais DERIVEE : elle mappe `type_for_destination/1` sur `@destinations`.
+  # La derivation ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee a
+  # `type_for_destination/1` ait sa destination dans `@destinations`. Sans lui, un troisieme type
+  # naitrait produit et jamais seme, exactement comme le deuxieme.
+  #
+  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
+  # `@destinations` : ce check ECHOUE en annoncant 3 clauses pour 2 destinations. Mutation retiree.
+  # Son angle mort, declare : il compte, il ne resout pas — deux clauses rendant le MEME type
+  # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas n'existe pas
+  # aujourd'hui et un compteur exact vaut mieux qu'un resolveur qui devine.
+  @doc false
+  @spec check_visual_types_derived(String.t()) :: result()
+  def check_visual_types_derived(root) do
+    rel = "lib/fleet/labels.ex"
+    ast = quoted!(root, rel)
+
+    clauses =
+      collect(ast, fn
+        {:def, _, [{:type_for_destination, _, [_arg]} | _]} -> :clause
+        _ -> nil
+      end)
+
+    destinations =
+      collect(ast, fn
+        {:@, _, [{:destinations, _, [list]}]} when is_list(list) -> length(list)
+        _ -> nil
+      end)
+
+    cond do
+      measured_nothing?(clauses) ->
+        broken_result("labels.visual_types_derived", "def type_for_destination/1 in #{rel}")
+
+      measured_nothing?(destinations) ->
+        broken_result("labels.visual_types_derived", "@destinations in #{rel}")
+
+      true ->
+        n_clauses = length(clauses)
+        n_dest = hd(destinations)
+
+        %{
+          id: "labels.visual_types_derived",
+          remediation:
+            "une clause de `type_for_destination/1` sans sa destination dans `@destinations` " <>
+              "produit un type visuel que `visual_types/0` ne seme pas — il naitra gris et sans " <>
+              "description, comme `type:workshop` pendant seize jours",
+          status: if(n_clauses == n_dest, do: :pass, else: :fail),
+          evidence:
+            if(n_clauses == n_dest,
+              do: [],
+              else: [
+                "#{rel}: #{n_clauses} clause(s) type_for_destination/1 pour #{n_dest} @destinations"
+              ]
+            ),
+          note: "visual_types derives from type_for_destination over @destinations"
+        }
     end
   end
 
@@ -285,6 +753,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (string form `spec, "lifetime_scope"`) — future-proof against a regression that
   # would reintroduce the wrong path under another form.
   @doc false
+  @spec check_capprofile_lifetime_scope_path(String.t()) :: result()
   def check_capprofile_lifetime_scope_path(root) do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
@@ -304,6 +773,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # than the grep: any CODE mention of `modop_incompatible` on a
   # `Map.get(spec, …)` line counts, even reformatted.
   @doc false
+  @spec check_capprofile_modop_incompatible_path(String.t()) :: result()
   def check_capprofile_modop_incompatible_path(root) do
     residue_check(root, %{
       id: "capprofile.modop_incompatible_path",
@@ -332,6 +802,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # even a comment mention of TmuxBackend in the runtime config is
   # a resurrection signal to flag.
   @doc false
+  @spec check_launch_backend_containment(String.t()) :: result()
   def check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "lib/fleet/spawner/launch_backend/tmux_backend.ex"
@@ -372,6 +843,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # the doc line (prose prefixed by a backtick, not `{:error,`) does not count. Unwiring the
   # real clause turns it RED again, whatever the doc says.
   @doc false
+  @spec check_mcp_required_real_backend(String.t()) :: result()
   def check_mcp_required_real_backend(root) do
     pod = "lib/fleet/spawner/pod.ex"
     mcp = "lib/fleet/spawner/pod/mcp_provision.ex"
@@ -411,6 +883,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #      nobody chose for it, which is undetectable from the outside.
   # Unwiring any clause turns this RED, whatever the docs say.
   @doc false
+  @spec check_spawn_has_brief(String.t()) :: result()
   def check_spawn_has_brief(root) do
     spawner = "lib/fleet/spawner.ex"
 
@@ -451,6 +924,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # in prose; `code_match?` excludes doc blocks, and the tuple-shape confirm excludes an inline mention).
   # Red if absent.
   @doc false
+  @spec check_skills_declared_present(String.t()) :: result()
   def check_skills_declared_present(root) do
     presence_check(root, %{
       id: "skills.declared_present",
@@ -474,6 +948,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # covered by the fail-loud validation of the broadcast at runtime (an unregistered type
   # crashes its emitter), so this check covers only the consumption side.
   @doc false
+  @spec check_events_registry_keys_aligned(String.t()) :: result()
   def check_events_registry_keys_aligned(root) do
     registry = registry_event_keys(root)
 
@@ -640,6 +1115,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
   # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
   @doc false
+  @spec check_no_cowboy_bypass(String.t()) :: result()
   def check_no_cowboy_bypass(root) do
     builder = "lib/fleet/event_router/listener.ex"
 
@@ -697,6 +1173,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #       would arrive without ever leaving `:monitoring` → deadline not cancelled → kill at cycle 2).
   # Red if one is missing, OR if the band-aid `"forever" -> 60_000` (a HACK) reappears.
   @doc false
+  @spec check_result_deadline_cancelled(String.t()) :: result()
   def check_result_deadline_cancelled(root) do
     pod = "lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
@@ -756,6 +1233,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the login-validity gate.
   # Red if one is missing. A gate that runs only in test guards nothing in prod.
   @doc false
+  @spec check_spawn_gates_wired(String.t()) :: result()
   def check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
@@ -798,6 +1276,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
   @doc false
+  @spec check_gatekeeper_not_a_step(String.t()) :: result()
   def check_gatekeeper_not_a_step(root) do
     dir = "priv/catalogue/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
@@ -845,6 +1324,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # decision (resume_gate/gate_result) OR evaluating the gate (gate_decide) — otherwise
   # decision/outputs stay buried → false escalation / wrongful hard-gate.
   @doc false
+  @spec check_verdict_envelope_unwrapped(String.t()) :: result()
   def check_verdict_envelope_unwrapped(root) do
     step_run = "lib/fleet/pilot/step_run_consumer.ex"
     abs = Path.join(root, step_run)
@@ -888,6 +1368,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # confirmation looser than the grep (`root` alone): the long marker may live partly
   # in a comment on the line, only `root` needs to survive in the code.
   @doc false
+  @spec check_no_root_runtime_guard(String.t()) :: result()
   def check_no_root_runtime_guard(root) do
     presence_check(root, %{
       id: "runtime.no_root_boot_guard",
@@ -916,6 +1397,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Public (`@doc false`) so the anti-hollow-green property (a marker in prose does NOT count, BND-111)
   # is unit-testable against a crafted fixture file, not only via the whole-repo smoke test.
   @doc false
+  @spec code_match?(String.t(), String.t(), Regex.t(), Regex.t() | [Regex.t()] | nil) :: boolean()
   def code_match?(root, rel, pattern, confirm \\ nil) do
     confirms = if confirm, do: List.wrap(confirm), else: [pattern]
     path = Path.join(root, rel)
@@ -985,7 +1467,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # a `file:line` evidence. ⚠ inherits the hollow-green trap of `grep_lines/2`
   # (absent file = 0 hit = pass): list here only live files whose
   # existence is guarded elsewhere — for a residue on a potentially
-  # dead file, grep a glob (cf. check_coord_backend_wired).
+  # dead file, grep a glob (cf. check_gates_no_runtime_seam).
   # POPULATION GUARD — zero subjects and zero violations are indistinguishable at the output of an
   # absence-of-violation wall. Every check below that answers "nothing violates X" owes its reader
   # the count it looked at: a glob that matches nothing, a registry that loads empty, a directory
@@ -1113,7 +1595,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
   # a path that became a directory, on a permission the runner lost; never in nominal operation,
   # which is exactly why it was never noticed swallowing three absence-of-violation walls
-  # (`coord.backend.wired_or_pure`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
+  # (`gates.no_runtime_seam`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
   # which globs REAL files and would have reported compliance about one it could not open.
   defp grep_lines(path, regex) do
     case File.read(path) do
@@ -1152,6 +1634,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # cf. A-08 comment in the function) — reordering it breaks the boot WITHOUT a compile
   # error. Hence the honest check id: `boot.order_f8`.
   @doc false
+  @spec check_boot_order_f8(String.t()) :: result()
   def check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
@@ -1270,6 +1753,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # il demande un catalogue invalide ET des images publiees, c'est-a-dire exactement le boot qu'un
   # test hermetique ne joue pas.
   @doc false
+  @spec check_catalogue_before_freeze(String.t()) :: result()
   def check_catalogue_before_freeze(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
@@ -1315,6 +1799,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
   # compare les APPELS de `validate_*!` dans les deux corps de fonction.
   @doc false
+  @spec check_verifier_covers_rail(String.t()) :: result()
   def check_verifier_covers_rail(root) do
     rel = "lib/fleet/pilot/application.ex"
     ast = quoted!(root, rel)
@@ -1391,6 +1876,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # flipped ANYWHERE ELSE than `config/test.exs`: it silently moves a production daemon onto
   # evaluate-whatever-is-on-disk, and nothing in the code would look different.
   @doc false
+  @spec check_proven_image_regime(String.t()) :: result()
   def check_proven_image_regime(root) do
     files = Path.wildcard(Path.join(root, "config/*.exs"))
 
@@ -1461,6 +1947,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `@permit_empty_default` to `false` yields **101 failures out of 2698**. The permissive default
   # is load-bearing. What was missing was never the fail-closed posture — it was this lock.
   @doc false
+  @spec check_event_registry_loaded_before_children(String.t()) :: result()
   def check_event_registry_loaded_before_children(root) do
     rel = "lib/fleet/event_router/application.ex"
     src = File.read!(Path.join(root, rel))
@@ -1513,6 +2000,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # system), a ReservedSeat (vulcan) counts as a seat = an account + a token, both inert.
   # Boundary can NEVER see any of this: three of the four lists are outside the BEAM.
   @doc false
+  @spec check_roles_provisioning_locked(String.t()) :: result()
   def check_roles_provisioning_locked(root) do
     # Decoded reads (kind/forge_identity are yaml fields, not greppable shapes) — the task
     # context does not start :yaml_elixir by itself; same explicit start as lcars.sp.gen.
@@ -1652,6 +2140,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
   @doc false
+  @spec check_roles_role_index_unique(String.t()) :: result()
   def check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
@@ -1731,6 +2220,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # l'appel) et les cles DYNAMIQUES (une variable, un attribut de module). La premiere est attrapee
   # ici ; la seconde ne peut l'etre par personne — d'ou la regle posee au meme moment : une cle de
   # config se lit EN TOUTES LETTRES a son point d'usage, jamais assemblee.
+  @spec check_no_legacy_config_namespace(String.t()) :: result()
   def check_no_legacy_config_namespace(root) do
     scanned =
       ["lib", "test", "config"]
@@ -1768,6 +2258,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
+  @spec check_sanctuary_contained(String.t()) :: result()
   def check_sanctuary_contained(root) do
     # EVERY FILE OF THE THREE TREES, not the three source extensions. `**/*.{ex,exs,sh}` could not
     # see `bin/claude_launch.egress`, which carried the word, in a scanned directory, with no
@@ -1825,6 +2316,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
   @doc false
+  @spec check_sourcers_set_strict(String.t()) :: result()
   def check_sourcers_set_strict(root) do
     # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
@@ -1912,6 +2404,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   was created and protected under one name while the reconciler polled another — manifests landing
   where nobody looks, no message, a rail that looks calm.
   """
+  @spec check_toolchain_branch_single_source(String.t()) :: result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
       "deploy/modules.d/52-ops-branch.sh",
@@ -2027,6 +2520,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # passing on an empty read. A renamed line would otherwise turn the guard off in silence, which is
   # worse than the drift it watches.
   @doc false
+  @spec check_face_roots_provisioned(String.t()) :: result()
   def check_face_roots_provisioned(root) do
     entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
     module = Path.expand("deploy/modules.d/25-directories.sh", root)
@@ -2318,6 +2812,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # anti-regression test exists (deleting the test is visible to the gate — belt over
   # the ExUnit net).
   @doc false
+  @spec check_mcp_wire_inputschema(String.t()) :: result()
   def check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
     test = "test/pod_socket_test.exs"
@@ -2391,6 +2886,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # never distinguish "nothing wrong" from "nothing measured". It takes its root as an argument
   # precisely so a test can hand it one.
   @doc false
+  @spec check_mcp_tools_gated(String.t()) :: result()
   def check_mcp_tools_gated(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -2469,6 +2965,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Meme posture d'instrument que son voisin : les findings sont des ABSENCES, et un parseur casse
   # produit les memes. Le plancher attrape un instrument aveugle, il ne fige pas le nombre d'outils.
   @doc false
+  @spec check_mcp_tool_effects(String.t()) :: result()
   def check_mcp_tool_effects(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
 
@@ -2547,6 +3044,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @modop_not_tools %{}
 
   @doc false
+  @spec check_modop_tools_granted(String.t()) :: result()
   def check_modop_tools_granted(root) do
     profiles = catalogue_profiles(root)
     bundles = catalogue_modop_bundles(root)
@@ -2649,6 +3147,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # not happen is the two lists drifting, which is why this wall exists: every key the resolver
   # WRITES must be declared on one side or the other, and no key may be on both.
   @doc false
+  @spec check_cap_profile_project_keys(String.t()) :: result()
   def check_cap_profile_project_keys(root) do
     resolver_rel = "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
     schema_rel = "priv/cap_profile/schema/cap-profile-v2.5.json"
@@ -2756,6 +3255,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # reach the forge; it owes the start. The false positive (a door that names Forge without
   # calling it) costs three lines; the false negative costs a bench session.
   @doc false
+  @spec check_eval_doors_start_transport(String.t()) :: result()
   def check_eval_doors_start_transport(root) do
     files =
       Path.wildcard(Path.join(root, "lib/**/*.ex"))
@@ -2817,6 +3317,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
   # NAMED in the note; tree present and the default gone = the real defect, FAIL.
   @doc false
+  @spec check_catalogue_paths_locked(String.t()) :: result()
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
@@ -2956,6 +3457,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # an inert capability is not covered — its boot refuses an unresolvable capability, never a
   # useless one.
   @doc false
+  @spec check_capabilities_exercisable(String.t()) :: result()
   def check_capabilities_exercisable(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -3260,6 +3762,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # This wall answers the DECIDABLE half of that: a declaration whose module holds no example runs
   # no test. It does NOT claim to notice a deleted test file or a shrunk suite — those need a
   # recorded floor, which is state that rots. One decidable question, answered without state.
+  @spec check_doctest_declarations_have_examples(String.t()) :: result()
   def check_doctest_declarations_have_examples(root) do
     declarations =
       Path.wildcard(Path.join(root, "test/**/*.exs"))
@@ -3354,6 +3857,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # modules — dominated by behaviour implementations — and excluding `@impl` left 9 modules and 12
   # functions, four of which were verified BY HAND before anything shipped. Those twelve were
   # documented; the check then starts green, which is the only state a wall may be born in.
+  @spec check_public_functions_documented(String.t()) :: result()
   def check_public_functions_documented(root) do
     undocumented =
       Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
@@ -3496,6 +4000,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
+  @spec check_test_corpora_on_record(String.t()) :: result()
   def check_test_corpora_on_record(root) do
     repo = Path.expand("..", root)
 
@@ -3604,6 +4109,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # module. Let those two drift and a project declares a throughput the schema accepts and the
   # engine silently clamps away — a declaration that validates and does not apply, which is the
   # worst of the three possible outcomes.
+  @spec check_intensity_max_fan_ceiling(String.t()) :: result()
   def check_intensity_max_fan_ceiling(root) do
     path = Path.join([root, "priv", "cap_profile", "schema", "intensity-v1.json"])
     src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
@@ -3660,6 +4166,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
+  @spec check_forge_fields_read(String.t()) :: result()
   def check_forge_fields_read(root) do
     lib = Path.join(root, "fleet/lib")
     lib = if File.dir?(lib), do: lib, else: Path.join(root, "lib")
@@ -3740,6 +4247,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   }
 
   @doc false
+  @spec check_forge_mutations_exposed(String.t()) :: result()
   def check_forge_mutations_exposed(root) do
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
     path = Path.join(root, deleg_rel)
