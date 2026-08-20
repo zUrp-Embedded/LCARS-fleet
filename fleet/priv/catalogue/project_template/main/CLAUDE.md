@@ -22,9 +22,14 @@ niveau 2, et sept seulement** :
 
 `## Stack` · `## Build` · `## Test` · `## Doc` · `## Conventions` · `## Commands` · `## Gotchas`
 
-Tout le reste est ignoré — un titre nommé autrement ne voyage pas. Une section recopiée devient une
-**directive** pour l'agent qui produit sur ce dépôt : ce qui est écrit ici est ce qu'il tiendra pour
-vrai, sans pouvoir le vérifier ailleurs.
+Aucune autre ne voyage — un titre nommé autrement ne part pas au pod. Une section recopiée devient
+une **directive** pour l'agent qui produit sur ce dépôt : ce qui est écrit ici est ce qu'il tiendra
+pour vrai, sans pouvoir le vérifier ailleurs.
+
+**Une huitième section existe, et elle ne voyage PAS** : `## Harness`, décrite plus bas. Ce n'est
+pas une directive pour l'agent, c'est un fait que le **rail** lit pour mesurer. La distinction n'est
+pas cosmétique : ce qui part au pod, l'agent le tient pour vrai sans recours ; ce qui reste ici sert
+à une machine qui vérifie.
 
 **Elles ne sont pas pré-remplies exprès.** Une section présente mais creuse ferait croire à la fleet
 qu'elle a du contexte, et à l'agent qu'il a une commande. Tant qu'elles n'existent pas, le runtime
@@ -55,3 +60,36 @@ fait juger comme n'importe quel autre livrable.
 ⚠ Et **n'ouvre pas** ces titres pour les laisser vides : un `## Test` qui contient « (à compléter) »
 matche, donc l'avertissement s'éteint, donc la fleet croit avoir du contexte et l'agent croit avoir
 une commande. Un titre absent est un manque visible ; un titre creux est un mensonge silencieux.
+
+## `## Harness` — la huitième section, celle qui sépare le code de la preuve
+
+Elle liste les chemins qui sont de la **preuve** dans ce dépôt, un par ligne ou séparés par des
+espaces. Rien d'autre :
+
+```
+## Harness
+
+tests/
+```
+
+**À quoi elle sert.** La sonde `.gitea/workflows/probe-test-relevance.yml` remet le code d'une
+livraison à son état de base **en gardant sa suite**, et regarde si la suite s'en aperçoit. Pour
+faire ça, il faut savoir lesquels de tes fichiers sont du code et lesquels sont la preuve. C'est la
+seule chose que cette section dit.
+
+**Pourquoi tu la déclares au lieu de laisser deviner.** Une heuristique (`test/`, `spec/`,
+`*_test.*`) marche partout et se trompe en silence — et se tromper ici veut dire remettre à leur
+état de base des fichiers qui étaient ta preuve, donc **accuser ta livraison à tort**. Un fait faux
+qui se présente comme une mesure coûte plus cher que pas de mesure du tout. Absente, la sonde se
+déclare *inapplicable* et le dit ; elle ne devine jamais.
+
+**Elle suit tes tests, elle ne les commande pas.** Si tu déplaces ta suite, mets-la à jour dans le
+même geste — même obligation que `## Test` avec `.gitea/workflows/ci.yml`. Une déclaration qui a
+dérivé fait mesurer autre chose que ce qu'on croit mesurer, et la sonde n'a aucun moyen de le
+savoir : elle CITE ce qu'elle a lu, précisément pour qu'un juge qui vient de lire le diff puisse
+écarter le fait.
+
+⚠ Elle ne s'appelle **pas** `## Test paths`, et ce n'est pas un choix de style : la fleet reconnaît
+`## Test` sur une frontière de mot, donc `## Test paths` serait extraite comme une **deuxième**
+section `## Test` et partirait au pod. Le producteur y lirait des chemins là où son contrat promet
+« la commande EXACTE, et rien d'autre ».
