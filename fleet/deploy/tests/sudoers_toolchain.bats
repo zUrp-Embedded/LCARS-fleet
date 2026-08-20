@@ -35,6 +35,15 @@ setup() {
 
   MOD="$BATS_TEST_TMPDIR/mod.sh"
   sed '/^case "${1:?usage/,$d' "$SRC" > "$MOD"
+
+  # ⚠ LE DECOR POSSEDE SON DOSSIER RUNTIME, meme motif que son `sudoers.d` et son store ci-dessus.
+  # Le module prend un verrou, et `prov_lock_path` le veut dans
+  # `${XDG_RUNTIME_DIR:-/run/user/$uid}/lcars` pour un appelant non-root — REFUS si le parent
+  # manque (6-130 : pas de repli dans un dossier partage). Un compte de service n'a PAS de session
+  # logind : mesure du 2026-08-20, `/run/user/1001` n'existe par aucune voie sur le poste natif.
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 0700 "$XDG_RUNTIME_DIR"
 }
 
 run_apply() { run bash -c ". '$MOD'; apply"; }

@@ -25,6 +25,17 @@ setup() {
   cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
+
+  # ⚠ LE DECOR POSSEDE SON DOSSIER RUNTIME. `provision` prend un verrou avant tout apply, et
+  # `prov_lock_path` le veut dans `${XDG_RUNTIME_DIR:-/run/user/$uid}/lcars` pour un appelant
+  # non-root — REFUS si le parent manque (6-130 : pas de repli dans un dossier partage). Un compte
+  # de service n'a PAS de session logind : mesure du 2026-08-20, `/run/user/1001` n'existe par
+  # aucune voie sur le poste natif. Sans cette ligne ces temoins ne mesurent pas la selection des
+  # modules, ils mesurent la session de qui les lance — et ils rougissent tous ensemble sur
+  # « verrou: emplacement sur indisponible ».
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 0700 "$XDG_RUNTIME_DIR"
 }
 
 # stub <NN-name> <apply-on> <check-on> <needs> [rc-var-name]

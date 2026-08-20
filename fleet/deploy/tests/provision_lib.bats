@@ -16,6 +16,19 @@ setup() {
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export LIB
   [ -f "$LIB" ]
+
+  # ⚠ LE DECOR POSSEDE SON DOSSIER RUNTIME, comme il possede deja ses tmp. `prov_lock_path` derive
+  # `${XDG_RUNTIME_DIR:-/run/user/$uid}/lcars` pour un appelant non-root et REFUSE si le parent
+  # n'existe pas — fail-loud deliberé de 6-130 : un verrou privilegie ne vit pas dans un dossier
+  # partage, et faute d'emplacement sur on le DIT plutot que de se rabattre ailleurs.
+  #
+  # OR UN COMPTE DE SERVICE N'A PAS DE SESSION LOGIND. Mesure du 2026-08-20 sur le poste natif :
+  # `/run/user/1001` n'existe par AUCUNE voie — ni `sudo -u`, ni `runuser`, ni meme un login ssh.
+  # Ces temoins tombaient donc sur « verrou: emplacement sur indisponible » pour un code
+  # parfaitement sain, et la faute etait de mesurer la SESSION de qui lance les tests.
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 0700 "$XDG_RUNTIME_DIR"
 }
 
 # Helper: run a module-like snippet (fresh bash, module shell options, lib sourced).
@@ -272,6 +285,22 @@ module_sh() {
     [ "$(stat -c %u "$dir")" = "$(id -u)" ]
   '
   [ "$status" -eq 0 ]
+}
+
+@test "6-130: sans dossier runtime, c'est un REFUS qui NOMME le parent — jamais un repli" {
+  # LE CAS N'EST PAS THEORIQUE, C'EST L'ETAT NOMINAL D'UN COMPTE DE SERVICE. Mesure du 2026-08-20
+  # sur le poste natif : `lcars` (uid 1001) n'a `/run/user/1001` par AUCUNE voie — ni `sudo -u`, ni
+  # `runuser`, ni un login ssh, parce qu'aucune de ces voies n'ouvre de session logind pour lui.
+  #
+  # Ce que ce temoin garde n'est donc pas une bizarrerie : c'est que dans cet etat la lib REFUSE et
+  # DIT ou, au lieu de se rabattre sur un emplacement partage. Un repli silencieux vers /tmp
+  # rouvrirait exactement le trou que 6-130 a ferme, et il le rouvrirait la ou personne ne regarde —
+  # sur les machines sans session, c'est-a-dire tous les comptes de service.
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/absent/xdg"
+  module_sh 'prov_lock_path'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/absent"* ]]
+  [[ "$output" == *"pas d'emplacement sur"* ]]
 }
 
 # ─── 6-109 — L AUTORITE DU SELF-UPDATE ROOT ETAIT UNE SOUS-CHAINE ────────────────────────────────
