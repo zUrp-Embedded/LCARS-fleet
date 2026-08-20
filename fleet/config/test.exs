@@ -49,6 +49,13 @@ config :lcars_fleet, observation_start_listener: false
 # async ; les tests le démarrent manuellement avec subscribe:false).
 config :lcars_fleet, observation_start_readmodel: false
 
+# LES MEDIAS, POINTES SUR LA SOURCE DU DEPOT. En prod l'installation les pose en
+# `/usr/share/lcars` ; ce poste ne l'a pas, et le defaut ferait tourner toute la suite sur un
+# `:enoent`. `assets/` a EXACTEMENT la forme attendue d'une racine de medias — `avatars/` et
+# `favicon/` en freres — donc les tests mesurent le vrai arbre plutot qu'un decor, et un fichier
+# retire de la marque casse le temoin qui le nomme.
+config :lcars_fleet, :media_root, Path.expand("../../assets", __DIR__)
+
 # B5 #576 — baseline hermétique launch_backend en :test. PortBackend
 # est désormais RÉEL (spawn bwrap) ; sans baseline, le code-default
 # atteint sous race async global :launch_backend produirait un spawn

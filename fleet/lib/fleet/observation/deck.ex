@@ -11,11 +11,13 @@ defmodule Fleet.Observation.Deck do
 
   alias Fleet.Observation.Deck.View
 
+  # `priv/` ne porte plus que la feuille de style : elle EST du runtime, versionnee avec le code qui
+  # la genere. Les medias de marque, eux, ont quitte cet arbre — cf. `media_root/0` plus bas.
   plug(Plug.Static,
     at: "/static",
     from: {:lcars_fleet, "priv/observation/static"},
     gzip: false,
-    only: ~w(lcars-tva.css assets)
+    only: ~w(lcars-tva.css)
   )
 
   plug(:match)
@@ -25,6 +27,46 @@ defmodule Fleet.Observation.Deck do
     conn
     |> put_resp_content_type("text/html")
     |> send_resp(200, View.page())
+  end
+
+  # ─── LES MEDIAS DE MARQUE ───────────────────────────────────────────────────────────────────────
+  # Servis A LA MAIN plutot que par `Plug.Static`, et ce n'est pas un gout : `Plug.Static` resout son
+  # `from:` a la COMPILATION (Plug.Builder appelle `init/1` la), donc il ne peut pas viser un chemin
+  # que la config pose au boot. Une racine de medias figee dans le BEAM serait exactement le contraire
+  # de ce que ce chantier retire.
+  #
+  # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE. `..` dans une URL est la faute la plus
+  # vieille du web ; `Path.expand` + prefixe, sinon 404 — jamais un filtrage de la CHAINE, qui se
+  # contourne par encodage. Meme forme que la route `/doc/` du deck de console, pour la meme raison.
+  # DEUX ARBRES, ENUMERES : `avatars` (les roles) et `favicon` (le produit). Ils sont freres sous la
+  # racine et servis par la meme route, mais le nom de l'arbre ne vient PAS de l'URL librement — il
+  # est valide contre cette liste, sinon `/media/../../etc/` serait une question ouverte.
+  get "/media/:tree/:file" do
+    if tree in ~w(avatars favicon) do
+      root = Path.join(media_root(), tree)
+      full = Path.expand(Path.join(root, file))
+
+      with true <- String.starts_with?(full, Path.expand(root) <> "/"),
+           {:ok, type} <- media_type(full),
+           {:ok, raw} <- File.read(full) do
+        conn |> put_resp_content_type(type) |> send_resp(200, raw)
+      else
+        _ -> send_resp(conn, 404, "not found")
+      end
+    else
+      send_resp(conn, 404, "not found")
+    end
+  end
+
+  # ENUMEREE, pas devinee : ce qui n'est pas dans cette liste ne sort pas. Un dossier statique servi
+  # par extension inconnue rend `application/octet-stream` ou pire, et la liste EST la surface.
+  defp media_type(path) do
+    case Path.extname(path) do
+      ".svg" -> {:ok, "image/svg+xml"}
+      ".png" -> {:ok, "image/png"}
+      ".ico" -> {:ok, "image/x-icon"}
+      _ -> :error
+    end
   end
 
   get "/table" do
@@ -146,17 +188,35 @@ defmodule Fleet.Observation.Deck do
 
   defp role_icon(_role, _known), do: nil
 
-  # Role icons are derived from assets; missing assets degrade to the generic icon.
-  defp display_roles do
-    dir = Application.app_dir(:lcars_fleet, "priv/observation/static/assets")
+  # LA RACINE DES MEDIAS INSTALLES — une source, posee par l'installation, lue par tout le monde.
+  #
+  # ⚠ IL Y EN AVAIT TROIS EXEMPLAIRES, ET ILS AVAIENT DERIVE. Les memes avatars vivaient sous
+  # `assets/avatars/` (la marque), `fleet/deploy/deps/avatars/` (les png de la charte forge) et
+  # `priv/observation/static/assets/` (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf
+  # roles communs differaient entre la marque et ce deck — pas par decision, mais parce qu'une mise a
+  # jour touchait un dossier et pas les autres. Le deck affichait donc une generation d'avatars
+  # pendant que la forge en posait une autre.
+  #
+  # `assets/` est la source ; l'installation la pose en `/usr/share/lcars/{avatars,favicon}`, a cote
+  # de la doc, et le rail de deploiement (`provision-forge-charte.sh`) lit le meme endroit.
+  defp media_root, do: Application.get_env(:lcars_fleet, :media_root, "/usr/share/lcars")
+
+  # ⚠ AUCUN REPLI SUR `priv/`, ET C'EST UNE DECISION. Une installation qui n'a pas pose ses medias
+  # est RATEE, pas degradee : un repli servirait l'ancienne generation d'avatars — c'est-a-dire
+  # exactement la panne qu'on vient de retirer — et rendrait vert un deploiement a moitie fait. Ici
+  # l'absence reste bruyante et l'affichage tombe sur l'icone generique, ce qui SE VOIT.
+  @doc false
+  # Public comme `roles_for_display/1` et pour la meme raison : c'est le point ou la source des
+  # icones se mesure, et un temoin doit pouvoir constater qu'elle est bien la marque installee.
+  def display_roles do
+    dir = Path.join(media_root(), "avatars")
 
     case File.ls(dir) do
       {:ok, files} ->
-        for f <- files,
-            String.ends_with?(f, ".svg"),
-            role = Path.rootname(f),
-            not String.starts_with?(role, "favicon"),
-            do: role
+        # Le filtre `favicon` qui vivait ici est parti AVEC le fait qu'il decrivait : les deux
+        # favicons partageaient ce dossier, ils ont maintenant le leur. Une condition qui protege
+        # d'un cas devenu impossible enseigne un modele faux au prochain lecteur.
+        for f <- files, String.ends_with?(f, ".svg"), do: Path.rootname(f)
 
       {:error, reason} ->
         # `[]` reste la reponse — chaque pod tombera sur l'icone generique, ce qui est une

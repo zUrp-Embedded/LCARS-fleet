@@ -70,6 +70,34 @@ setup() {
   grep -qE "^RUN chmod -R a\+rX ${DOC_DEST%/doc}\$" "$DOCKERFILE"
 }
 
+@test "l'image pose les MEDIAS a cote de la doc — une source installee, lue par tous" {
+  # ⚠ TROIS EXEMPLAIRES AVAIENT DERIVE. Les memes avatars vivaient dans `assets/avatars/` (la
+  # marque), `fleet/deploy/deps/avatars/` (les png de la charte forge) et
+  # `fleet/priv/observation/static/assets/` (les svg du deck) : sept des neuf roles communs
+  # differaient, parce qu'une mise a jour touchait un dossier et pas les autres. La source est
+  # `assets/`, l'installation la pose ici, et les deux lecteurs — le deck d'observation et
+  # `provision-forge-charte.sh` — visent cette racine.
+  local root="${DOC_DEST%/doc}"
+  grep -qE "^COPY assets/avatars +${root}/avatars\$" "$DOCKERFILE"
+  grep -qE "^COPY assets/favicon +${root}/favicon\$" "$DOCKERFILE"
+  # Les deux dossiers qui portaient les copies ont disparu, sinon elles repousseraient.
+  [ ! -d "$BATS_TEST_DIRNAME/../deps/avatars" ]
+  [ ! -d "$BATS_TEST_DIRNAME/../../priv/observation/static/assets" ]
+}
+
+@test "la source porte les DEUX formats — le png n'est pas un derive du svg" {
+  # Gitea decode png/jpeg/gif et PAS le svg : le raster est de la matiere, pas une projection. Et
+  # aucun rasteriseur n'existe dans le runtime — le generer au boot est impossible, le generer au
+  # build exigerait un outil de plus pour un fichier qui ne change qu'a la main.
+  local src="$BATS_TEST_DIRNAME/../../../assets/avatars"
+  [ -d "$src" ]
+  local r
+  for r in architect starfleet vulcan; do
+    [ -f "$src/$r.svg" ] || { echo "svg manquant : $r"; return 1; }
+    [ -f "$src/$r.png" ] || { echo "png manquant : $r"; return 1; }
+  done
+}
+
 @test "la route /doc/ refuse de sortir de sa racine — `..` reste la plus vieille faute du web" {
   # Le prefixe voisin porte les jetons de la boite : une remontee ici ne serait pas un defaut de
   # confort. La garde est `realpath` + comparaison de prefixe, pas un filtrage de la chaine.

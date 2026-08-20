@@ -654,6 +654,22 @@ if config_env() != :test and not tool_mode? do
   # un « deck injoignable » sans cause visible.
   config :lcars_fleet, observation_start_listener: true
 
+  # LES MEDIAS DE MARQUE — une racine INSTALLEE, pas un arbre du release.
+  #
+  # ⚠ CETTE CLEF N'A PAS DE PREFIXE DE DOMAINE, ET C'EST VOULU. La regle de prefixage existe parce
+  # que `http_port` et `start_listener` COLLISIONNENT entre `api` et `observation` : elle protege des
+  # clefs qu'un domaine possede. Celle-ci n'appartient a aucun domaine — c'est un chemin de BOITE,
+  # lu aussi par le rail shell (`provision-forge-charte.sh`, meme variable d'env), et lui donner un
+  # proprietaire fictif rendrait ce partage illisible.
+  #
+  # Les avatars ont eu TROIS exemplaires — la marque, les png de la charte forge, les svg du deck —
+  # et sept des neuf roles communs avaient derive entre eux. `assets/` est la source, l'installation
+  # la pose ici, tout le monde lit ici. AUCUN REPLI sur `priv/` : une boite sans ses medias est une
+  # installation ratee, et un repli servirait justement l'ancienne generation.
+  config :lcars_fleet,
+         :media_root,
+         System.get_env("LCARS_MEDIA_ROOT", "/usr/share/lcars")
+
   # ============================================================
   # fleet_pilot — only the forge-state-machine rail exists (config `LCARS_PILOT_STEP`). There is no
   # label-routing knob, no legacy dispatcher knob, and no fixed-repo knob: MULTI-PROJECT, the Poller

@@ -22,8 +22,14 @@ setup() {
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
-  AVATARS="$BATS_TEST_TMPDIR/avatars"
-  mkdir -p "$BIN" "$AVATARS"
+  # ⚠ LE DECOR EST UNE RACINE DE MEDIAS, PLUS UN DOSSIER D'AVATARS NU. Les avatars ont eu trois
+  # exemplaires (la marque, les png de ce script, les svg du deck) dont sept des neuf roles communs
+  # avaient derive. Ils vivent maintenant sous une racine INSTALLEE, avec `favicon/` en frere — et le
+  # script lit cette racine, donc le decor doit avoir la meme forme que la boite.
+  MEDIA="$BATS_TEST_TMPDIR/media"
+  AVATARS="$MEDIA/avatars"
+  mkdir -p "$BIN" "$AVATARS" "$MEDIA/favicon"
+  export LCARS_MEDIA_ROOT="$MEDIA"
   # Les PNG sont DERIVES de la table du script, jamais listes ici : une entree ajoutee la-bas ferait
   # sinon echouer ces tests pour une raison qui n'est pas la leur (« asset introuvable »), et le
   # verdict de succes — ce qu'ils mesurent — ne serait jamais atteint.
@@ -43,7 +49,13 @@ setup() {
   # quatre temoins sont tombes sur « favicon introuvable » — un echec qui n'accusait ni la table ni
   # l'org, mais le lien fortuit entre les deux. Ce qu'un test derive d'une table doit venir de la
   # table ; ce qui n'en vient pas se pose ICI, en le disant.
-  : > "$AVATARS/favicon.png"
+  #
+  # ⚠ ET IL N'EST PLUS DANS LE DOSSIER DES AVATARS. `deps/avatars/favicon.png` etait l'octet pour
+  # octet `assets/favicon/favicon-512.png` (md5 identique) sous un autre nom : un doublon que rien
+  # ne signalait comme tel. Il vit dans l'arbre `favicon/`, qui est sa seule maison, et les quatre
+  # temoins « catalogue » sont tombes en le deplacant — ils prouvent donc que le script lit bien la
+  # nouvelle adresse et pas l'ancienne.
+  : > "$MEDIA/favicon/favicon-512.png"
 
   ARGV_LOG="$BATS_TEST_TMPDIR/argv.log"
   STDIN_LOG="$BATS_TEST_TMPDIR/stdin.log"
@@ -75,6 +87,32 @@ FAKE
 run_avatars() {
   run env FORGE_ADMIN_TOKEN="JETON-ADMIN-SECRET" "$SCRIPT" \
     --forge http://forge.test --avatars-dir "$AVATARS" --org "" "$@"
+}
+
+@test "medias: le defaut est la racine INSTALLEE, jamais un voisin du script" {
+  # ⚠ CE TEMOIN GARDE LA SOURCE UNIQUE. Ce script portait son propre jeu de png dans
+  # `deps/avatars/` — un TROISIEME exemplaire des memes avatars, a cote de la marque (`assets/`) et
+  # du deck d'observation. Mesure du 2026-08-20 : sept des neuf roles communs avaient DERIVE entre
+  # ces copies, parce qu'une mise a jour touchait un dossier et pas les autres. Un defaut qui
+  # repointerait a cote du script ressusciterait la copie, en silence.
+  grep -qE '^: "\$\{LCARS_MEDIA_ROOT:=/usr/share/lcars\}"' "$SCRIPT"
+  grep -qE 'AVATARS_DIR="\$LCARS_MEDIA_ROOT/avatars"' "$SCRIPT"
+  # Et le favicon de l'org se lit dans SON arbre, pas parmi les avatars : il n'est pas un role.
+  grep -qE 'org_file="\$LCARS_MEDIA_ROOT/favicon/favicon-512\.png"' "$SCRIPT"
+  # Le dossier qui portait la copie n'existe plus — sinon le defaut pourrait y retomber sans bruit.
+  [ ! -d "$BATS_TEST_DIRNAME/../deps/avatars" ]
+}
+
+@test "medias: une racine ABSENTE est un ECHEC nomme — jamais un repli silencieux" {
+  # Une installation qui n'a pas pose ses medias est RATEE, pas degradee. Poser des identicons en
+  # silence rendrait vert un deploiement a moitie fait, et personne ne relierait l'avatar generique
+  # a sa cause. Le refus nomme le chemin ET le geste qui aurait du le poser.
+  run env FORGE_ADMIN_TOKEN="T" LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/nulle-part" \
+      "$SCRIPT" --forge http://forge.test
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier avatars introuvable"* ]]
+  [[ "$output" == *"nulle-part/avatars"* ]]
+  [[ "$output" == *"COPY assets/avatars"* ]]
 }
 
 @test "6-141bis: le jeton SITE-ADMIN n'apparait JAMAIS dans argv" {

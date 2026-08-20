@@ -157,4 +157,63 @@ defmodule Fleet.Observation.DeckTest do
     assert %Plug.Conn{status: 404} = conn
     assert %{"error" => _} = Jason.decode!(conn.resp_body)
   end
+
+  describe "/media — one installed source, and the guards that keep it one" do
+    # ⚠ CE QUE CES TEMOINS TIENNENT. Les avatars ont eu TROIS exemplaires — `assets/` (la marque),
+    # `fleet/deploy/deps/avatars/` (les png de la charte forge) et `priv/observation/static/assets/`
+    # (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf roles communs differaient entre la
+    # marque et ce deck, non par decision mais parce qu'une mise a jour touchait un dossier et pas
+    # les autres. Le deck affichait une generation d'avatars pendant que la forge en posait une
+    # autre, et rien ne pouvait le signaler.
+    #
+    # La source est `assets/`, l'installation la pose sous `media_root`, tout le monde y lit.
+
+    test "un avatar de role est servi depuis la racine INSTALLEE, avec son type" do
+      conn = call(:get, "/media/avatars/architect.svg")
+      assert %Plug.Conn{status: 200} = conn
+      assert ["image/svg+xml" <> _] = Plug.Conn.get_resp_header(conn, "content-type")
+      assert conn.resp_body =~ "<svg"
+    end
+
+    test "le PNG voyage AUSSI par ici — Gitea ne decode pas le svg, les deux formats sont de la matiere" do
+      conn = call(:get, "/media/avatars/architect.png")
+      assert %Plug.Conn{status: 200} = conn
+      assert ["image/png" <> _] = Plug.Conn.get_resp_header(conn, "content-type")
+    end
+
+    test "le favicon est un arbre FRERE, pas un avatar de role" do
+      # Il a vecu dans le dossier des avatars, et `deps/avatars/favicon.png` etait l'octet pour
+      # octet `assets/favicon/favicon-512.png` sous un autre nom.
+      assert %Plug.Conn{status: 200} = call(:get, "/media/favicon/favicon.svg")
+      assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/favicon.svg")
+    end
+
+    test "un arbre non ENUMERE est refuse — le nom ne vient pas librement de l'URL" do
+      assert %Plug.Conn{status: 404} = call(:get, "/media/doc/index.html")
+      assert %Plug.Conn{status: 404} = call(:get, "/media/etc/passwd")
+    end
+
+    test "`..` ne sort pas de la racine — la plus vieille faute du web" do
+      # Verifie contre le chemin RESOLU, jamais par filtrage de la chaine : un filtrage se contourne
+      # par encodage, et la racine voisine porte la doc et le favicon.
+      assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/../favicon/favicon.svg")
+      assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/..%2f..%2fetc%2fpasswd")
+    end
+
+    test "une extension hors liste ne sort pas — la liste EST la surface" do
+      assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/index.html")
+    end
+
+    test "les roles affiches viennent de la MARQUE, et le deck n'a plus de jeu a lui" do
+      # Le temoin qui empeche la troisieme copie de renaitre : ce que le deck enumere doit etre ce
+      # que `assets/avatars/` contient, sans dossier intermediaire dans `priv/`.
+      roles = Fleet.Observation.Deck.display_roles()
+      assert "architect" in roles
+      assert "vulcan" in roles
+      assert "starfleet" in roles
+      # Les favicons ne sont plus dans cet arbre : aucun ne peut fuiter dans la liste des roles.
+      refute Enum.any?(roles, &String.starts_with?(&1, "favicon"))
+      refute File.dir?(Application.app_dir(:lcars_fleet, "priv/observation/static/assets"))
+    end
+  end
 end

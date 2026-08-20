@@ -20,7 +20,7 @@ defmodule Fleet.Observation.Deck.View do
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>LCARS // OBSERVATION DECK</title>
-    <link rel="icon" href="/static/assets/favicon.svg">
+    <link rel="icon" href="/media/favicon/favicon.svg">
     <link rel="stylesheet" href="/static/lcars-tva.css">
     <style>
       .obs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px}
@@ -85,7 +85,7 @@ defmodule Fleet.Observation.Deck.View do
       // runtime), `role_icon` est la reponse a « quel asset existe ». Avant, un role sans `.svg`
       // etait mis a `null` cote API pour tomber ici sur le generique — le rendu etait bon et
       // `/api/pods` mentait a tous ses autres consommateurs.
-      var icon = p.role_icon ? '/static/assets/'+esc(p.role_icon)+'.svg' : '/static/assets/favicon-minimal.svg';
+      var icon = p.role_icon ? '/media/avatars/'+esc(p.role_icon)+'.svg' : '/media/favicon/favicon-minimal.svg';
       return '<div class="pod-card">'
         + '<div class="pc-head"><img class="pc-icon" src="'+icon+'" alt=""><span class="pc-id">'+esc(p.pod_id)+'</span></div>'
         + '<div class="pc-row"><span class="pc-k">phase</span><span class="glyph">'+esc(p.phase)+'</span></div>'

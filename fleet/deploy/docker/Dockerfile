@@ -343,6 +343,25 @@ RUN chown -R root:fleet /local/LCARS_v2 \
 # Ce qu'elle garde de l'ancien emplacement, parce que c'etait le vrai motif : le MEME COMMIT produit
 # le runtime et sa doc, donc la boite ne peut pas servir la doc d'une autre version qu'elle-meme.
 COPY --from=site /src/assets/github.io/dist /usr/share/lcars/doc
+
+# ─── LES MEDIAS DE MARQUE — UNE SOURCE, POSEE UNE FOIS, LUE PAR TOUS ────────────────────────────
+# ⚠ IL Y EN AVAIT TROIS EXEMPLAIRES, ET ILS AVAIENT DERIVE. Les memes avatars vivaient dans
+# `assets/avatars/` (marque, svg), `fleet/deploy/deps/avatars/` (png, pour la charte forge) et
+# `fleet/priv/observation/static/assets/` (svg, pour le deck d'observation). Mesure du 2026-08-20 :
+# sept des neuf roles communs DIVERGEAIENT entre la marque et le deck — non pas par choix, mais
+# parce qu'une mise a jour touchait un dossier et pas les autres. Trois copies d'un meme fait
+# derivent ; celle qu'on regarde n'est jamais celle qu'on a corrigee.
+#
+# `assets/` est la source, et la SEULE chose editee a la main : `<role>.svg` pour l'affichage
+# vectoriel, `<role>.png` (256) parce que Gitea decode png/jpeg/gif et PAS le svg — les deux formats
+# sont de la matiere, pas un derive l'un de l'autre, et aucun rasteriseur n'a a exister ici.
+#
+# Le favicon ne se recopie pas non plus : `deps/avatars/favicon.png` etait l'octet pour octet le
+# meme fichier que `assets/favicon/favicon-512.png` (md5 identique), sous un autre nom, pour servir
+# l'avatar de l'org.
+COPY assets/avatars  /usr/share/lcars/avatars
+COPY assets/favicon  /usr/share/lcars/favicon
+
 # Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
 # (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
 # n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.

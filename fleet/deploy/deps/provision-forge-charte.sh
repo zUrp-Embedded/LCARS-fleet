@@ -28,7 +28,8 @@
 #   FORGE_BASE_URL=http://localhost:3000 FORGE_ADMIN_TOKEN=<tok> provision-forge-charte.sh
 #   provision-forge-charte.sh --forge URL --admin-token-file /root/forge/test/admin.token
 #   provision-forge-charte.sh --forge URL --admin-token-file … --check      # sonde seule
-# Options : --avatars-dir DIR (défaut : <dir du script>/avatars) · --org NAME (défaut fleet ; --org "" pour
+# Options : --avatars-dir DIR (défaut : $LCARS_MEDIA_ROOT/avatars, soit /usr/share/lcars/avatars —
+#           ce que l'installation a POSÉ depuis assets/) · --org NAME (défaut fleet ; --org "" pour
 #           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le delta simple,
 #           `admiral.png`. Absent = aucun avatar posé sur un compte humain).
 #           Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
@@ -140,8 +141,19 @@ command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; ex
 command -v base64 >/dev/null || { echo "provision-forge-charte: base64 requis" >&2; exit 1; }
 [[ -n "$FORGE" ]] || { echo "provision-forge-charte: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
 FORGE="${FORGE%/}"
-[[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$(cd "$(dirname "$0")" && pwd)/avatars"
-[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR" >&2; exit 1; }
+# ⚠ LE DEFAUT EST LE CHEMIN INSTALLE, PLUS UN VOISIN DU SCRIPT. Ce script portait son propre jeu de
+# png dans `deps/avatars/` — un TROISIEME exemplaire des memes avatars, a cote de la marque
+# (`assets/avatars/`) et du deck d'observation. Mesure du 2026-08-20 : sept des neuf roles communs
+# avaient DERIVE entre ces copies, parce qu'une mise a jour touchait un dossier et pas les autres.
+#
+# `assets/` est desormais la source, et l'installation la pose en `/usr/share/lcars/avatars` a cote
+# de la doc. Ce script lit donc ce que la boite a INSTALLE, pas ce qui traine a cote de lui.
+: "${LCARS_MEDIA_ROOT:=/usr/share/lcars}"
+[[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$LCARS_MEDIA_ROOT/avatars"
+# AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
+# installation degradee : servir des identicons en silence rendrait vert un deploiement a moitie
+# fait, et personne ne relierait jamais l'avatar generique a la cause.
+[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR — l'installation ne les a pas poses (COPY assets/avatars du Dockerfile, ou LCARS_MEDIA_ROOT mal cable)" >&2; exit 1; }
 
 # Le master-token n'est requis qu'en mode POSE (le --check lit des champs publics).
 if [[ -n "$ADMIN_TOKEN_FILE" ]]; then
@@ -324,7 +336,11 @@ fi
 
 # L'ORG (endpoint distinct, sans Sudo — l'admin édite l'org). --org "" pour sauter.
 if [[ -n "$ORG" ]]; then
-  org_file="$AVATARS_DIR/favicon.png"
+  # ⚠ LE FAVICON N'EST PAS UN AVATAR DE ROLE, et il vivait quand meme dans le dossier des avatars.
+  # `deps/avatars/favicon.png` etait l'octet pour octet `assets/favicon/favicon-512.png` (md5
+  # identique) sous un autre nom : un doublon dont rien ne disait qu'il en etait un. Il se lit
+  # maintenant dans l'arbre favicon installe, qui est sa seule maison.
+  org_file="$LCARS_MEDIA_ROOT/favicon/favicon-512.png"
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
     url="$(forge_curl -s -m 10 "$FORGE/api/v1/orgs/$ORG" | jq -r '.avatar_url // ""')"
     if avatar_is_custom "$url"; then echo "OK    org:$ORG — avatar custom"; else

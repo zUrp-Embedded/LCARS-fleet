@@ -4,20 +4,12 @@
   <rect x="208" y="16" width="32" height="24" rx="12" fill="#9966CC"/>
   <rect x="32" y="88" width="192" height="140" rx="16" fill="#9966CC"/>
 
-  <!-- IDIC glyph: circle + equilateral triangle, gem at apex -->
-  <!-- Circle (evidé) -->
-  <circle cx="128" cy="160" r="56" 
-          fill="none" stroke="#0a0a0a" stroke-width="9"/>
+  <!-- IDIC glyph: circle + equilateral triangle -->
+  <!-- circle r54 (not 56): buys 2px of headroom for the triangle's apex miter spike -->
+  <circle cx="128" cy="160" r="54" fill="none" stroke="#0a0a0a" stroke-width="15"/>
 
-  <!-- Equilateral triangle, apex pointing up, apex lands on the circle's top arc -->
-  <!-- Side length 104, centroid (128, 160): apex (128, 100), base-L (76, 190), base-R (180, 190) -->
-  <polygon points="128,100 76,190 180,190" 
-           fill="none" stroke="#0a0a0a" stroke-width="9" 
-           stroke-linejoin="miter"/>
-
-  <!-- Gemstone at the apex (intersection of circle + triangle top) -->
-  <!-- Diamond shape, black solid -->
-  <polygon points="128,92 138,104 128,120 118,104" fill="#0a0a0a"/>
-  <!-- Gem facet highlight -->
-  <polygon points="128,92 138,104 128,104" fill="#9966CC"/>
+  <!-- Equilateral triangle, side 104, apex on the circle's top arc (160 - 54 = 106) -->
+  <!-- stroke 16 (1px over the circle) + miter joins: the 3 corners spike past the ring -->
+  <polygon points="128,106 76,196 180,196"
+           fill="none" stroke="#0a0a0a" stroke-width="16" stroke-linejoin="miter"/>
 </svg>
