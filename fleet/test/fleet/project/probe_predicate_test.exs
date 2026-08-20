@@ -36,7 +36,7 @@ defmodule Fleet.Project.ProbePredicateTest do
 
     [_, block] =
       Regex.run(
-        ~r/- name: Sonder\n(?:\s+env:\n(?:\s+\S+:.*\n)+)?\s+run: \|\n(.*?)(?=\n\s{6}- name: |\z)/s,
+        ~r/- name: Sonder\n(?:\s+env:\n(?:\s+\S+:.*\n)+)?\s+run: \|\n(.*?)(?=\n[ ]{2,}- name: |\z)/s,
         yaml
       )
 
@@ -135,10 +135,37 @@ defmodule Fleet.Project.ProbePredicateTest do
     work = Path.join(tmp, "job")
     File.mkdir_p!(work)
 
+    # ⚠ UN `HOME` PLANTÉ, PARCE QUE LES SECRETS NE VIVENT PAS QUE DANS L'ENVIRONNEMENT. `.netrc`,
+    # `.git-credentials`, `.aws/credentials`, `.docker/config.json` sont sur DISQUE : aucun filtre
+    # de variables ne les atteint jamais, et la suite jugée les lirait avec un `cat`. Le script donne
+    # à la suite un `HOME` VIERGE ; celui-ci porte un `.netrc` pour que ce geste ait quelque chose à
+    # cacher — sans lui, « la suite ne voit pas de `.netrc` » serait vrai avant comme après.
+    fake_home = Path.join(tmp, "home")
+    File.mkdir_p!(fake_home)
+    File.write!(Path.join(fake_home, ".netrc"), "machine forge login x password netrc-secret\n")
+
+    # ⚠ ON PLANTE DE VRAIS SECRETS. Sans eux, la fixture de fuite passerait sans rien mesurer :
+    # l'environnement d'un test ExUnit n'en porte aucun, donc « zéro secret survivant » serait vrai
+    # avant comme après le nettoyage. `ACTIONS_RUNTIME_TOKEN` est celui que le runner Gitea injecte
+    # réellement ; les autres représentent ce qu'un opérateur y met.
+    #
+    # ⚠ ET LA SECONDE MOITIÉ DE CETTE LISTE EST LE TÉMOIN D'UN DÉFAUT MESURÉ. Le nettoyage était un
+    # motif sur les noms — `…(TOKEN|SECRET|PASSWORD)$` — et ces quatre-là lui échappaient tous :
+    # `AWS_SECRET_ACCESS_KEY` finit par `_KEY`, `DEPLOY_KEY` aussi, `DATABASE_URL` porte son mot de
+    # passe dans l'URL, `KUBECONFIG` n'a aucun suffixe connu. Ils sont ici pour que le retour à une
+    # liste noire soit ROUGE, et pas seulement déconseillé en commentaire.
     env = [
       {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
       {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
-      {"FORGE_TOKEN", ""}
+      {"FORGE_TOKEN", ""},
+      {"HOME", fake_home},
+      {"ACTIONS_RUNTIME_TOKEN", "runner-secret"},
+      {"NPM_TOKEN", "publish-secret"},
+      {"DB_PASSWORD", "hunter2"},
+      {"AWS_SECRET_ACCESS_KEY", "aws-secret"},
+      {"DEPLOY_KEY", "deploy-secret"},
+      {"DATABASE_URL", "postgres://u:hunter2@db/x"},
+      {"KUBECONFIG", "/etc/kube/admin.conf"}
     ]
 
     {out, code} = System.cmd("sh", [path], cd: work, env: env, stderr_to_stdout: true)
@@ -242,6 +269,79 @@ defmodule Fleet.Project.ProbePredicateTest do
       refute Map.has_key?(r.facts, "witness_exit")
     end
 
+    # ⚠ LE SECRET NE DOIT PLUS ÊTRE LÀ QUAND LE CODE JUGÉ S'EXÉCUTE.
+    #
+    # La commande de test vient du `CLAUDE.md` de la TÊTE JUGÉE — donc du livrable qu'on évalue. Elle
+    # tournait dans un répertoire dont `.git/config` portait le jeton de forge en clair (écrit par
+    # `git remote add origin "$auth"`), et dans un shell qui portait `FORGE_TOKEN`. Un
+    # `cat .git/config` suffisait.
+    #
+    # « Pas de privilège nouveau » restait vrai — qui contrôle `tests/run.sh` exécute déjà du code
+    # arbitraire ici. Ça justifiait de ne pas paniquer, pas de laisser le geste.
+    #
+    # Ce test s'exécute DEPUIS LA PLACE DE L'ATTAQUANT : le harnais lui-même va chercher les deux.
+    # ⚠ LE COMPTE EST TOTAL, ET C'EST TOUTE LA DIFFÉRENCE. Il comptait les variables au NOM DE
+    # SECRET (`…(TOKEN|SECRET|PASSWORD)$`) — le même motif que le nettoyage d'alors, donc un test
+    # qui ne pouvait pas voir ce que ce motif ratait. `AWS_SECRET_ACCESS_KEY` survivait, et le
+    # compte restait à zéro.
+    #
+    # Ici on compte TOUT ce qui n'est pas dans la liste blanche du script. Le complément d'une liste
+    # blanche est fermé : le test n'a plus besoin de connaître le nom du secret de demain pour le
+    # voir passer. `PWD`/`SHLVL`/`OLDPWD`/`_` sont posés par `sh` lui-même après `env -i`.
+    @leak_check """
+    #!/bin/sh
+    echo "LEAKCHECK remote=[$(git config --get remote.origin.url)] token=[${FORGE_TOKEN}]"
+    echo "NETRC=[$(cat "$HOME/.netrc" 2>/dev/null)]"
+    echo "LEAKSCAN=[$(env | sed -n 's/^\\([A-Za-z_][A-Za-z0-9_]*\\)=.*/\\1/p' |
+      grep -cvE '^(PATH|HOME|TMPDIR|TERM|LANG|LC_ALL|CI|LCARS_PROBE|PWD|SHLVL|OLDPWD|_)$')]"
+    exit 0
+    """
+
+    test "le jeton n'est PLUS accessible quand la commande du livrable tourne", %{tmp_dir: tmp} do
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/leak.sh" => @leak_check},
+          %{"tests/leak.sh" => @leak_check, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "sh tests/leak.sh")
+
+      # Les deux vecteurs, dans une seule ligne écrite par le code jugé lui-même.
+      #
+      # ⚠ CE QUE CETTE FIXTURE PROUVE, ET CE QU'ELLE NE PROUVE PAS. Mutation jouée : en retirant les
+      # deux lignes du workflow, `remote=[file:///…/projet.git]` apparaît et ce test devient rouge —
+      # donc la moitié `remote` MORD.
+      #
+      # La moitié `token`, elle, ne discrimine PAS ici : l'origine du test est un `file://` et
+      # `FORGE_TOKEN` y vaut `""` par construction, donc `token=[]` serait vrai même sans `unset`.
+      # Elle reste écrite parce qu'elle épingle la FORME de ce qu'on interdit, et parce qu'un jour
+      # une fixture http la rendra discriminante. Elle ne compte pas comme preuve aujourd'hui, et
+      # ce paragraphe est là pour qu'on ne la lise pas comme telle.
+      assert r.out =~ "LEAKCHECK remote=[] token=[]",
+             "le livrable jugé voit encore un secret : #{r.out}"
+
+      # ⚠ ET LE SECRET SUR DISQUE, QUI EST L'AUTRE MOITIÉ. `.netrc` ne vit dans aucune variable :
+      # un filtre d'environnement, si large soit-il, ne l'a jamais atteint. C'est le `HOME` vierge
+      # qui le ferme, et cette ligne est la seule qui le prouve.
+      assert r.out =~ "NETRC=[]", "le livrable jugé lit les identifiants sur disque : #{r.out}"
+
+      # ⚠ ET PAS SEULEMENT LE NÔTRE, ET PAS SEULEMENT CEUX QU'ON SAIT NOMMER. Le runner injecte ses
+      # propres secrets — `ACTIONS_RUNTIME_TOKEN` — et l'opérateur les siens. Le harnais compte
+      # lui-même, DEPUIS LA PLACE DE L'ATTAQUANT, tout ce qui survit HORS de la liste blanche.
+      # Zéro, donc : les quatre plantés que l'ancien motif ratait (`AWS_SECRET_ACCESS_KEY`,
+      # `DEPLOY_KEY`, `DATABASE_URL`, `KUBECONFIG`) sont dedans, et le compte les voit.
+      assert r.out =~ "LEAKSCAN=[0]",
+             "des variables survivent hors de la liste blanche : #{r.out}"
+
+      # ⚠ ET LA SONDE MARCHE TOUJOURS. Couper le remote après les `fetch` ne doit rien casser :
+      # tout ce qui suit est du `checkout` local. Sans cette moitié, on aurait pu « corriger » en
+      # cassant la mesure sans que rien ne le dise.
+      assert r.facts["witness_exit"] == "0"
+      assert r.facts["verdict"] in ["relevant", "blind"]
+      assert r.code == 0
+    end
+
     test "commande de test VIDE → inapplicable, jamais un `blind` fabriqué", %{tmp_dir: tmp} do
       # ⚠ LE SEUL MENSONGE QUE CETTE SONDE POUVAIT PRODUIRE, trouvé par relecture adversariale.
       # `( )` est une sous-shell POSIX valide et sort en 0 : sans garde, le témoin passait, la
@@ -260,6 +360,74 @@ defmodule Fleet.Project.ProbePredicateTest do
       assert r.facts["reason"] == "no-test-cmd"
       refute r.facts["verdict"] == "blind"
       assert r.code == 0
+    end
+
+    test "une commande qui COLLE au délimiteur du heredoc → inapplicable, pas une mesure partielle",
+         %{tmp_dir: tmp} do
+      # ⚠ MÊME CLASSE QUE LA COMMANDE VIDE : un verdict rendu sur autre chose que la commande du
+      # projet. Une ligne de `## Test` égale au délimiteur ferme le heredoc à cet endroit — le
+      # fichier ne reçoit que le début, le reste retombe dans le shell de la sonde, et la mesure
+      # porte sur une commande tronquée sans que rien ne le dise.
+      #
+      # La sentinelle rend la troncature VISIBLE. Ce test est ce qui prouve qu'elle mord : en la
+      # retirant du workflow, la sonde rend un verdict ordinaire sur `echo before` seul.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "echo before\nLCARS_PROBE_CMD_EOF\nsh tests/run.sh")
+
+      assert r.facts["verdict"] == "inapplicable"
+      assert r.facts["reason"] == "test-cmd-untranscribable"
+
+      # Et surtout : AUCUNE mesure n'a été tentée sur la fraction transcrite.
+      refute Map.has_key?(r.facts, "witness_exit")
+      assert r.code == 0
+    end
+
+    test "une commande MULTI-LIGNES s'arrête à la première erreur", %{tmp_dir: tmp} do
+      # ⚠ MESURÉ LE 2026-08-20. Le corps d'un `## Test` était joint par des ESPACES, donc
+      # « make build \n make test » devenait `make build make test` — une commande avec des
+      # arguments, ni l'une ni l'autre. Et substituée en ligne dans `( … )`, une version
+      # multi-lignes aurait pris le code de retour de la DERNIÈRE : la première étape pouvait
+      # échouer et le témoin rester vert.
+      #
+      # Ici la première ligne ÉCHOUE. La suite doit être vue rouge — c'est la sémantique de la CI
+      # (première erreur, arrêt), et le template exige que `## Test` et `ci.yml` portent la même
+      # commande.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "false\nsh tests/run.sh")
+
+      assert r.facts["witness_exit"] == "1",
+             "la première ligne a échoué et le témoin est vert : #{r.out}"
+
+      assert r.facts["verdict"] == "inapplicable"
+      assert r.facts["reason"] == "head-suite-red"
+    end
+
+    test "une commande MULTI-LIGNES qui passe entièrement mesure bien", %{tmp_dir: tmp} do
+      # Le témoin du témoin : sans lui, « multi-lignes → rouge » passerait aussi si le multi-lignes
+      # était cassé de bout en bout.
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/run.sh" => @honest_test},
+          %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "true\nsh tests/run.sh")
+
+      assert r.facts["witness_exit"] == "0"
+      assert r.facts["verdict"] == "relevant"
     end
 
     test "un harnais qui ressemble à un GLOB n'est pas développé par le shell", %{tmp_dir: tmp} do

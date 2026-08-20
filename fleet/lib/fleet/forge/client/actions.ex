@@ -211,10 +211,22 @@ defmodule Fleet.Forge.Client.Actions do
   @spec probed?(String.t(), String.t(), keyword()) :: {:ok, boolean()} | {:error, term()}
   def probed?(repo, head_sha, opts \\ []) when is_binary(repo) and is_binary(head_sha) do
     case runs_for_sha(repo, head_sha, [event: "workflow_dispatch"], opts) do
-      {:ok, runs} -> {:ok, runs != []}
+      {:ok, runs} -> {:ok, Enum.any?(runs, &probe_run?/1)}
       {:error, _} = err -> err
     end
   end
+
+  # ⚠ LE DECLENCHEUR NE SUFFIT PAS A NOMMER UNE SONDE. `event: workflow_dispatch` couvre AUSSI le
+  # geste d'un operateur qui relance un workflow quelconque depuis l'UI Gitea sur la meme tete : ce
+  # run faisait disparaitre l'annotation « aucune sonde n'a tourne », alors que personne n'avait
+  # mesure.
+  #
+  # Le nom du fichier est ce qui distingue — meme prefixe que la garde de nommage du template, et
+  # meme raison : `probe-` designe une mesure, et rien d'autre ne porte ce prefixe. Un run dont le
+  # chemin est illisible ne compte PAS : ne pas savoir ce qu'un run etait ne prouve pas qu'il
+  # sondait.
+  defp probe_run?(%{"path" => path}) when is_binary(path), do: String.contains?(path, "probe-")
+  defp probe_run?(_), do: false
 
   @doc """
   The logs of a run, job by job, concatenated with a header naming each job.

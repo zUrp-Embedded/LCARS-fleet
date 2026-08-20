@@ -865,13 +865,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
       # il a une opinion, il l'a mal emballee — et le geler immobilisait un humain pour un champ mal
       # type. Une passe de correction, une seule, bornee par un marqueur forge.
       #
-      # LE POD EST ENCORE LA POUR LA RECEVOIR, et la raison exacte a ete corrigee le 2026-08-20
-      # apres relecture : ce N'EST PAS B2 qui le garantit. B2 (`StepRunCompleter.reap_judge/3`) ne
-      # fauche que les juges de PR, sur le chemin `record_review` — les juges de GATE qui arrivent
-      # ici (scoper, gatekeeper) n'y passent jamais. Ce qui garantit leur survie est plus simple et
-      # plus large : AUCUNE fauche n'est declenchee par la PRODUCTION d'un verdict, seulement par
-      # son INGESTION, et une enveloppe refusee n'est pas ingeree. Le pod vit donc encore, avec la
-      # lecture du livrable qui lui a coute son contexte — et c'est ce que la passe depense.
+      # LE POD EST ENCORE LA POUR LA RECEVOIR : aucune fauche n'est declenchee par la PRODUCTION
+      # d'un verdict, seulement par son INGESTION — et une enveloppe refusee n'est pas ingeree. Le
+      # juge vit donc encore, avec la lecture du livrable qui lui a coute son contexte, et c'est ce
+      # que la passe depense.
       #
       # Auto-gate et ETEINT par defaut : au-dela de la passe, ou si elle n'est pas armee, c'est
       # exactement le gel d'avant — en nommant pourquoi.

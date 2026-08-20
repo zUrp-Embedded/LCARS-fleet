@@ -57,7 +57,7 @@ on:
         description: "SHA de la tête livrée — d'où vient le harnais, et où tourne le témoin"
         required: true
       harness:
-        description: "Chemins de PREUVE, séparés par des espaces (section `## Harness` du CLAUDE.md)"
+        description: "Chemins de PREUVE, séparés par des blancs (section `## Harness` du CLAUDE.md)"
         required: false
         default: ""
       test_cmd:
@@ -67,6 +67,14 @@ on:
 jobs:
   relevance:
     runs-on: shell
+    # ⚠ LE PLAFOND PROTÈGE TON PROJET, PAS LA FLOTTE. La sonde joue TA suite, deux fois. Une suite
+    # qui ne termine jamais — boucle, attente réseau, prompt — ferait tourner ce job indéfiniment
+    # sur TON runner : le rail, lui, abandonne son attente au bout de deux minutes et n'a aucun
+    # moyen d'arrêter ce qui tourne ici.
+    #
+    # 15 min couvre deux exécutions d'une suite ordinaire avec une marge large. Si ta suite en
+    # demande plus, monte ce chiffre dans le même geste que l'image du job.
+    timeout-minutes: 15
     # `alpine` n'a pas bash. Tout ce qui suit est POSIX.
     defaults:
       run:
@@ -118,6 +126,40 @@ jobs:
             exit 0
           fi
 
+          # ── LA COMMANDE EST UN SCRIPT, ET ELLE S'EXÉCUTE COMME TEL ──
+          #
+          # Elle était substituée EN LIGNE dans `( … )`. Sur un `## Test` de plusieurs lignes, ça
+          # donnait deux commandes dans un sous-shell dont le code de retour est celui de la
+          # DERNIÈRE : `make build` pouvait échouer et le témoin rester vert. Mesuré le 2026-08-20.
+          #
+          # Écrite dans un fichier et jouée par `sh -e`, elle a la sémantique de la CI — première
+          # erreur, arrêt — et le contrat du template exige justement que `## Test` et `ci.yml`
+          # portent la MÊME commande. Le délimiteur est quoté : rien n'est ré-interprété à l'écriture.
+          #
+          # ⚠ ET UNE TRANSCRIPTION PARTIELLE SERAIT PIRE QU'UN ÉCHEC. Un `## Test` contenant une
+          # ligne ÉGALE au délimiteur ferme le heredoc à cet endroit : le fichier ne reçoit que le
+          # début, le reste retombe dans CE shell (hors `set -e`, hors sous-shell), et la sonde rend
+          # un verdict sur une commande qui n'est pas celle du projet. Silencieux, donc inacceptable
+          # — c'est la même classe que la commande vide et que le `## Test` multi-lignes aplati.
+          #
+          # La SENTINELLE le rend visible : `:` est le no-op POSIX, elle ne change ni la sémantique
+          # ni le code de sortie (sous `sh -e`, un échec antérieur a déjà arrêté le script ; si tout
+          # passe, `:` rend 0 comme la dernière commande l'aurait fait). Absente du fichier, elle
+          # PROUVE que la transcription s'est arrêtée avant la fin.
+          cmd_file="$(pwd)/.lcars-probe-cmd.sh"
+          cat > "$cmd_file" <<'LCARS_PROBE_CMD_EOF'
+          ${{ inputs.test_cmd }}
+          : LCARS_PROBE_CMD_COMPLETE
+          LCARS_PROBE_CMD_EOF
+
+          if [ "$(tail -n 1 "$cmd_file")" != ": LCARS_PROBE_CMD_COMPLETE" ]; then
+            fact "verdict=inapplicable reason=test-cmd-untranscribable"
+            echo "La commande de test n'a pas pu être transcrite intégralement : une de ses lignes"
+            echo "entre en collision avec le délimiteur interne de la sonde (LCARS_PROBE_CMD_EOF)."
+            echo "Mesurer la fraction transcrite rendrait un verdict sur une AUTRE commande."
+            exit 0
+          fi
+
           # ── LA RÉCUPÉRATION VIT ICI, ET PLUS DANS UNE ÉTAPE À PART ──
           #
           # Elle avait son propre step avec `set -e`. Un `fetch` en échec y avortait le step, Gitea
@@ -156,6 +198,78 @@ jobs:
             exit 0
           fi
 
+          # ═══ LE JETON SORT D'ICI, ET IL EN SORT AVANT QUE LE MOINDRE CODE DU LIVRABLE TOURNE ═══
+          #
+          # Deux vecteurs, et le premier était le pire parce qu'il était sur DISQUE :
+          #
+          #   1. `git remote add origin "$auth"` écrit l'URL — jeton compris, en clair — dans
+          #      `repo/.git/config`. Or la commande de test tourne dans CE répertoire, et elle vient
+          #      du `CLAUDE.md` de la TÊTE JUGÉE. Un `cat .git/config` suffisait ;
+          #   2. `FORGE_TOKEN` est dans l'environnement de ce shell, donc hérité par tout enfant.
+          #
+          # ⚠ « PAS DE PRIVILÈGE NOUVEAU » N'EST PAS UNE RAISON DE LAISSER LE GESTE. Qui contrôle
+          # `tests/run.sh` exécute déjà du code arbitraire dans ce job — c'est vrai, et ça justifie
+          # de ne pas paniquer, pas de laisser un secret écrit à côté du code qu'on juge. Ça coûte
+          # deux lignes.
+          #
+          # La sonde n'a plus besoin du réseau : tout ce qui suit est du `checkout` LOCAL. On coupe
+          # donc les deux vecteurs ici, à l'endroit exact où le besoin s'arrête.
+          git remote remove origin
+          unset FORGE_TOKEN
+
+          # ── ET LA SUITE JUGÉE NE VOIT PLUS RIEN DU TOUT : LISTE BLANCHE, PAS LISTE NOIRE ──
+          #
+          # Le runner injecte ses propres secrets dans l'environnement du job — `ACTIONS_RUNTIME_TOKEN`
+          # pour le cache et les artefacts, et ce que l'opérateur y a mis. La commande de test vient
+          # du `CLAUDE.md` de la TÊTE JUGÉE : elle appartient au livrable qu'on évalue, et elle n'a
+          # besoin d'AUCUN d'eux pour jouer une suite.
+          #
+          # ⚠ CE FILTRE ÉTAIT UN MOTIF SUR LES NOMS, ET C'ÉTAIT LA MAUVAISE FORME. `…(TOKEN|SECRET|
+          # PASSWORD)$` laissait passer `AWS_SECRET_ACCESS_KEY` (finit par `_KEY`), `DEPLOY_KEY`,
+          # `SSH_PRIVATE_KEY`, `DATABASE_URL` (mot de passe dans l'URL), `KUBECONFIG`,
+          # `GCP_SERVICE_ACCOUNT_JSON`, `VAULT_ROLE_ID`. Mesuré le 2026-08-20. Élargir le motif
+          # n'aurait déplacé la frontière que jusqu'au prochain nom : une liste noire est fausse par
+          # construction, puisqu'elle doit connaître à l'avance ce qu'elle n'a jamais vu.
+          #
+          # `env -i` renverse la charge : la suite reçoit CE QU'ON LUI DONNE, et rien d'autre. La
+          # liste ci-dessous est complète par construction — ce qui n'y figure pas n'existe pas pour
+          # elle, aujourd'hui comme pour le secret ajouté demain.
+          #
+          # `HOME` pointe sur un répertoire VIERGE, et ce n'est pas un détail : le vrai `HOME` porte
+          # `.netrc`, `.git-credentials`, `.aws/credentials`, `.docker/config.json` — des secrets sur
+          # DISQUE, qu'aucun filtre d'environnement n'atteint jamais. Un `HOME` neuf les ferme tous
+          # d'un geste, et il reste inscriptible pour les outils qui y écrivent leur cache.
+          #
+          # ⚠ CE QUE ÇA COÛTE, ET POURQUOI ON LE PAIE : une suite qui a BESOIN d'un secret ou d'un
+          # cache dans `$HOME` devient rouge au TÉMOIN, et la sonde rend `inapplicable`. C'est le
+          # sens voulu. Une suite qui pousse vers un registre ou tape un service authentifié serait
+          # jouée DEUX FOIS par cette sonde, avec les effets de bord en double ; et sa mesure ne
+          # dirait de toute façon rien sur sa capacité à voir un code manquant. Refuser de la mesurer
+          # est le résultat juste — à condition de le DIRE, ce que fait le texte de `head-suite-red`.
+          probe_home="$(pwd)/.lcars-probe-home"
+          rm -rf "$probe_home" && mkdir -p "$probe_home"
+
+          # Jouée deux fois, à l'identique. Une seule définition, sinon les deux exécutions dérivent
+          # et la comparaison ne compare plus rien.
+          run_suite() {
+            env -i \
+              PATH="$PATH" \
+              HOME="$probe_home" \
+              TMPDIR="${TMPDIR:-/tmp}" \
+              TERM="${TERM:-dumb}" \
+              LANG="${LANG:-C}" \
+              LC_ALL="${LC_ALL:-C}" \
+              CI=true \
+              LCARS_PROBE=1 \
+              sh -e "$cmd_file"
+          }
+
+          # ⚠ CE QUI RESTE HORS DE CE FICHIER, et qu'un opérateur doit poser : l'EGRESS. Après ce
+          # point la sonde ne parle plus à rien ; un job sans réseau sortant fermerait la dernière
+          # porte, et il la fermerait aussi pour `tests/run.sh`. Ça se déclare sur le runner ou sur
+          # l'image, pas ici — et tant que ce n'est pas posé, un secret que l'opérateur a mis dans
+          # l'environnement du job reste lisible par tout ce que le job lance HORS de `run_suite`.
+
           git checkout -q "$head" 2>/dev/null || {
             fact "verdict=inapplicable reason=head-unreachable"
             exit 0
@@ -173,13 +287,18 @@ jobs:
 
           # ── 1. TÉMOIN — la suite doit être verte AVANT qu'on touche à quoi que ce soit ──
           echo "===== TÉMOIN : la suite sur la tête livrée ====="
-          ( ${{ inputs.test_cmd }} ) ; witness=$?
-          fact "witness_exit=${witness}"
+          run_suite ; witness=$?
+          fact "witness_exit=${witness} env=minimal"
 
           if [ "$witness" -ne 0 ]; then
             fact "verdict=inapplicable reason=head-suite-red"
-            echo "La suite est DÉJÀ rouge sur la tête livrée. Son rouge sur le code de base ne"
+            echo "La suite est rouge sur la tête livrée. Son rouge sur le code de base ne"
             echo "prouverait rien : on mesurerait une panne, pas une couverture."
+            echo
+            echo "⚠ LIRE CE ROUGE AVEC SA CONDITION : la sonde joue la suite dans un environnement"
+            echo "MINIMAL — aucun secret, aucune variable de l'opérateur, HOME vierge. Une suite qui"
+            echo "a besoin d'un jeton ou d'un cache est rouge ICI sans l'être dans la CI. Ce fait"
+            echo "porte sur la mesurabilité de la suite, PAS sur la livraison."
             exit 0
           fi
 
@@ -197,7 +316,7 @@ jobs:
           }
 
           echo "===== MESURE : code de base + harnais de la tête ====="
-          ( ${{ inputs.test_cmd }} ) ; reverted=$?
+          run_suite ; reverted=$?
           fact "reverted_exit=${reverted}"
 
           if [ "$reverted" -ne 0 ]; then
@@ -223,6 +342,12 @@ jobs:
           # émettre le moindre fait. Un opérateur lisant ce paragraphe devant un run rouge en
           # déduisait un bug de runner. La récupération est descendue ici, et son échec est
           # maintenant un `verdict=inapplicable` comme les autres.
+          #
+          # ⚠ SAUF UN CAS, ET IL FAUT LE CONNAÎTRE : `timeout-minutes` TUE LE JOB. Le script
+          # n'atteint alors jamais cette ligne, le job rend rouge, et les logs portent le
+          # `probe=test-relevance` du début SANS `verdict=`. C'est le seul run rouge légitime de
+          # cette sonde, et il se reconnaît à ça — des faits ouverts, pas de verdict. Un rail qui
+          # verrait un run rouge sans verdict lit un DÉPASSEMENT DE PLAFOND, pas un runner cassé.
           #
           # Le fait vit dans les lignes `LCARS-PROBE`, que le rail lit dans les logs du JOB.
           exit 0

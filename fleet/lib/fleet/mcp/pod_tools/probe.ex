@@ -83,8 +83,15 @@ defmodule Fleet.MCP.PodTools.Probe do
              rail_inputs(refs, declared, inputs),
              forge_opts(opts)
            ),
-         {:ok, logs} <- await_logs(repo, run_id, opts) do
-      {:ok, facts(logs) |> Map.put("probe", probe) |> Map.put("run_id", run_id)}
+         {:ok, logs, run_state} <- await_logs(repo, run_id, opts) do
+      facts =
+        logs
+        |> facts()
+        |> Map.merge(run_state)
+        |> Map.put("probe", probe)
+        |> Map.put("run_id", run_id)
+
+      {:ok, facts}
     end
   end
 
@@ -239,14 +246,28 @@ defmodule Fleet.MCP.PodTools.Probe do
   # `## Harness` oui ; `## Harness paths`, `## Harnessing` non. Le nom est SEUL sur sa ligne.
   defp ours?(line, name), do: String.trim_trailing(line) == "## " <> name
 
-  # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins :
-  # `mask_fences/1` a neutralisé les blocs pour la RECHERCHE du titre, celui-ci nettoie le CORPS
-  # d'une section dont la valeur est légitimement encadrée.
+  # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins : la
+  # recherche du titre ignore les blocs, celui-ci nettoie le CORPS d'une section dont la valeur est
+  # légitimement encadrée.
+  #
+  # ⚠ ON JOINT PAR DES SAUTS DE LIGNE, PAS PAR DES ESPACES. Le corps d'un `## Test` est un SCRIPT :
+  #
+  #     ## Test
+  #     make build
+  #     make test
+  #
+  # Joint par un espace, ça rendait `"make build make test"` — UNE commande avec des arguments, qui
+  # n'est ni l'une ni l'autre. La sonde tournait, rendait un verdict, et il portait sur autre chose
+  # que la suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
+  #
+  # `## Harness`, lui, est une LISTE de chemins, et le workflow la découpe sur tout blanc — un saut
+  # de ligne y est aussi bon qu'un espace. Les deux sections partagent donc ce nettoyage sans que
+  # l'une paie pour l'autre.
   defp strip_fences(text) do
     text
     |> String.split("\n")
     |> Enum.reject(&String.starts_with?(String.trim(&1), "```"))
-    |> Enum.join(" ")
+    |> Enum.map_join("\n", &String.trim_trailing/1)
     |> String.trim()
   end
 
@@ -277,8 +298,15 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   defp poll(repo, run_id, deadline, opts) do
     case forge_actions().run(repo, run_id, forge_opts(opts)) do
-      {:ok, %{"status" => status}} when status in ~w(success failure cancelled skipped) ->
-        forge_actions().run_logs(repo, run_id, forge_opts(opts))
+      {:ok, %{"status" => status} = run} when status in ~w(success failure cancelled skipped) ->
+        # ⚠ L'ETAT DU RUN VOYAGE AVEC LES FAITS. Un run ANNULE avant d'avoir ecrit ses lignes
+        # `LCARS-PROBE` rend une map vide — indiscernable de « la sonde a tourne et n'a rien
+        # conclu ». Deux faits opposes, une meme forme. Le juge doit pouvoir les separer, et ca
+        # coute deux cles.
+        case forge_actions().run_logs(repo, run_id, forge_opts(opts)) do
+          {:ok, logs} -> {:ok, logs, Map.take(run, ["status", "conclusion"])}
+          {:error, _} = err -> err
+        end
 
       {:ok, _still_going} ->
         if System.monotonic_time(:millisecond) >= deadline do
