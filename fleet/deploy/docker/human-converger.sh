@@ -142,7 +142,7 @@ err() { echo "[lcars-converger] $*" >&2; }
 # Ces trois predicats decident si un login de la forge devient un user Linux. C'est la seule partie
 # qui, en se trompant, cree un compte que personne ne voulait — donc elle est definie AVANT le
 # garde de sourcing, pour etre testable sans lancer ni preflight ni boucle (meme idiome que
-# publish-to-github.sh).
+# publish-transform.sh).
 
 # Les noms qu'on ne creera JAMAIS : tout ce qui est deja pris sous UID_MIN, plus les comptes de
 # service de la fleet (qui vivent dans l'org, et dont l'un est membre de la team).

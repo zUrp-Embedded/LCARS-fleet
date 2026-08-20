@@ -12,6 +12,29 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
 
   @moduletag :tmp_dir
 
+  # UNE FORGE QUI NE SAIT PAS REPONDRE, et c'est le troisieme etat que `require_forge_absent`
+  # distingue : `{:ok, _}` = le depot existe · `{:http, 404, _}` = il est absent · TOUT LE RESTE =
+  # on ne peut pas conclure. Cette doublure n'existait pas, donc ce troisieme etat n'etait epingle
+  # nulle part — une discipline ECRITE que rien ne tenait, exactement la forme du defaut trouve
+  # cote export (le helper distinguait trois etats, l'appelant en raplatissait deux).
+  defmodule UnreachableForge do
+    defdelegate generate_repo(t, n, o), to: Fleet.Project.Onboard.ImportExternalTest.ExtForge
+    defdelegate protect_branch(r, rule, fc), to: Fleet.Project.Onboard.ImportExternalTest.ExtForge
+    defdelegate branch_exists?(r, b, fc), to: Fleet.Project.Onboard.ImportExternalTest.ExtForge
+
+    def default_branch(_full_name, _fc), do: {:error, {:http, 500, "forge en carafe"}}
+
+    def create_repo(name, _opts) do
+      send(self(), {:repo_created, "fleet/#{name}"})
+      {:ok, "fleet/#{name}"}
+    end
+
+    def delete_repo(full_name, _fc) do
+      send(self(), {:forge_deleted, full_name})
+      :ok
+    end
+  end
+
   defmodule ExtForge do
     def generate_repo(_template, _name, _opts), do: {:error, :template_missing}
 
@@ -261,5 +284,42 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
              gate.("https://sourceforge.net/p/x")
 
     assert {:error, {:unsupported_forge, {:scheme, nil}}} = gate.("not-a-url")
+  end
+
+  # ─── Les deux gardes que l'audit avait LOUES sans que rien ne les tienne ────────────────────────
+  # Mesure du 2026-08-20 : `grep -rc forge_unverifiable test/` et `grep -rc external_clone_failed
+  # test/` rendaient ZERO. Le rapport de ce chantier citait le premier comme la preuve que l'import
+  # tenait une discipline qui manquait a l'export. Une discipline ecrite qu'aucun temoin ne tient se
+  # raplatit au premier refactor, et personne ne le voit — c'est litteralement le defaut majeur que
+  # la revue de code a trouve de l'autre cote.
+
+  test "forge INJOIGNABLE : ni « existe » ni « absent » — refus NOMME, et rien n'est cree",
+       %{tmp_dir: tmp} do
+    o = tmp |> opts() |> Keyword.put(:forge_repo, UnreachableForge)
+    url = build_external_repo(tmp)
+
+    assert {:error, {:forge_unverifiable, {:http, 500, _}}} =
+             ProjectOnboard.import_external(url, "pong", o)
+
+    # LE MENSONGE INTERDIT : lire « je ne sais pas » comme « absent » et creer par-dessus un depot
+    # qui existe peut-etre. Rien ne part vers la forge, rien n'atterrit sur le disque.
+    refute_received {:repo_created, _}
+    refute File.exists?(Path.join(o[:code_root], "pong"))
+    refute File.exists?(Path.join(o[:ops_root], "pong"))
+  end
+
+  test "clone externe EN ECHEC : refus type, monde intact, scratch balaye", %{tmp_dir: tmp} do
+    o = opts(tmp)
+    # Une URL bien formee pour la garde (le seam la laisse passer) et qui ne mene nulle part.
+    url = "file://" <> Path.join(tmp, "ce-depot-nexiste-pas")
+
+    assert {:error, {:external_clone_failed, _}} = ProjectOnboard.import_external(url, "pong", o)
+
+    refute_received {:repo_created, _}
+    refute File.exists?(Path.join(o[:code_root], "pong"))
+
+    # Le scratch part par le `after`, sur TOUS les chemins — y compris celui-ci, qui echoue avant
+    # d'avoir touche quoi que ce soit.
+    assert System.tmp_dir!() |> Path.join("lcars-import-pong-*") |> Path.wildcard() == []
   end
 end

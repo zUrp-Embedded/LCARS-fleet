@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# SOURCE: bin/publish-to-github.sh
+# SOURCE: bin/publish-transform.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-07
-# STATUS: PROTO-V1 — GitHub publish transform: rewrites a forge clone's history for a GitHub mirror
+# STATUS: PROTO-V1 — publish transform: rewrites a forge clone's history for an EXTERNAL mirror
 #
 # WHY THIS SCRIPT (rather than a refinement of onboard): the work forge (Gitea) carries an INTERNAL
 # truth — author=human, co-author=`LCARS-<role>` (Fleet.Credentials.ForgeIdentity, commit gate) — and
 # some system commits (onboard/scaffold) are authored by `system_starfleet`. That is HONEST for the work
-# (the system really did generate the scaffold), but it is NOT what we want to publish: on a GitHub
+# (the system really did generate the scaffold), but it is NOT what we want to publish: on a PUBLIC
 # mirror the human must own their whole tree (human author everywhere) and the credit goes to the VENDOR
 # that did the work — never an internal role, never a hardcoded "Claude", but derived from the active N1
 # launcher. `Co-authored-by:` is NOT git-native: it is a message trailer, a GitHub convention, so it can
@@ -25,7 +25,7 @@
 #      "author := committer" — the committer is precisely what cannot be trusted on that one commit.
 #   3. In the callback, for every commit: rewrite the `Co-authored-by: LCARS-<role> <...@lcars.local>`
 #      trailer into `Co-Authored-By: <vendor>`.
-# This script NEVER PUSHES to GitHub (a hard project constraint: pushes go to local forges ONLY) — it
+# This script NEVER PUSHES ANYWHERE (a hard project constraint: pushes go to local forges ONLY) — it
 # prepares the rewritten clone and prints the publish gesture for the HUMAN to run.
 #
 # DEPENDENCY: `git-filter-repo` (a Python script, NOT packaged by default here). Install it in a
@@ -34,7 +34,7 @@
 # --filter-repo-bin or $FILTER_REPO_BIN when it is off PATH (e.g. /path/to/venv/bin/git-filter-repo).
 #
 # USAGE:
-#   publish-to-github.sh --repo fleet/mon-projet --forge http://localhost:3000 \
+#   publish-transform.sh --repo fleet/mon-projet --forge http://localhost:3000 \
 #       --token-file /home/private/test/system.gitea_token --out /tmp/mon-projet-gh
 #   Options: --vendor-identity FILE (default: bin/claude_launch.identity, co-located with the active N1
 #            launcher — NAME=/EMAIL=) · --filter-repo-bin BIN (default: git-filter-repo on PATH, or
@@ -63,7 +63,7 @@ FILTER_REPO_BIN="${FILTER_REPO_BIN:-git-filter-repo}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}@lcars.local"
 # D2 — branche à APLATIR en first-parent après la transformation (forme MR canonique, cf. la
 # fonction). Vide = off : le miroir publie l'historique tel quel, bulles comprises — elles sont
-# GitHub-normales sur un main ; l'aplatissement ne sert que la branche d'une MR upstream (D3).
+# normales sur un main, des deux cotes ; l'aplatissement ne sert que la branche d'une MR upstream (D3).
 LINEARIZE=""
 
 usage() {
@@ -79,23 +79,39 @@ usage() {
 # trailer, the system email) and REFUSE if one remains — the certification is a real postcondition, not
 # a trust in the transform's silence. `system_email` is passed so it is checked even when it equals the
 # default. Prints every offending line found; returns non-zero if any.
+# THE VOCABULARY OF INTERNAL ATTRIBUTION, WRITTEN ONCE AND READ FROM BOTH ENDS.
+# The same two patterns decide what gets REWRITTEN (the boundary, below) and what gets REFUSED (the
+# certification, here). One function each, one source of truth: if a new form of internal
+# attribution appears tomorrow, both ends learn it at the same instant. A boundary that drifted from
+# the certification would select less than the certification refuses — which is a publish that dies
+# at the last gate instead of one that never had the marker.
+internal_ident_re() { # <system_email>
+  printf '@lcars\.local|%s' "$(printf '%s' "$1" | sed 's/[.[\*^$]/\\&/g')"
+}
+# ⚠ `\s` ET NON `[[:space:]]`, parce que ce motif est lu par DEUX moteurs. La classe POSIX est
+# valide en ERE (grep) et n'existe PAS en Python, qui la lit comme un ensemble imbrique et emet un
+# `FutureWarning` sur stderr — lequel s'est retrouve melange a la sortie de la fonction et a fait
+# rougir quatre temoins pour une raison qui n'etait pas la leur. `\s` est compris des deux.
+# Le prix d'une source unique est qu'elle doit parler la langue de tous ses lecteurs.
+internal_msg_re() { printf 'Co-authored-by:\s*LCARS-|@lcars\.local'; }
+
 scan_forbidden_markers() {
   local dir="$1" system_email="$2" hits=0
 
   # Author/committer emails still internal (the transform should have rewritten every one).
   local ident
-  ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE '@lcars\.local|'"$(printf '%s' "$system_email" | sed 's/[.[\*^$]/\\&/g')"'' || true)"
+  ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE "$(internal_ident_re "$system_email")" || true)"
   if [[ -n "$ident" ]]; then
-    echo "publish-to-github: CERTIFICATION KO — identite interne survivante dans author/committer :" >&2
+    echo "publish-transform: CERTIFICATION KO — identite interne survivante dans author/committer :" >&2
     printf '  %s\n' "$ident" >&2
     hits=1
   fi
 
   # Internal co-author trailers still in the messages.
   local trailer
-  trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE 'Co-authored-by:\s*LCARS-|@lcars\.local' || true)"
+  trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE "$(internal_msg_re)" || true)"
   if [[ -n "$trailer" ]]; then
-    echo "publish-to-github: CERTIFICATION KO — trailer interne survivant dans les messages :" >&2
+    echo "publish-transform: CERTIFICATION KO — trailer interne survivant dans les messages :" >&2
     printf '  %s\n' "$trailer" >&2
     hits=1
   fi
@@ -103,10 +119,39 @@ scan_forbidden_markers() {
   return "$hits"
 }
 
+# LA BORNE — definie ICI, avant le garde de sourcing, pour la meme raison que ses voisines : la
+# suite bats source ce fichier pour piloter ses fonctions une par une, et ce qui vit apres le garde
+# n'existe pas pour elle. Une fonction non testable est une fonction dont on croit le comportement.
+oldest_internal_commit() { # <dir> <system_email> -> sha, or empty
+  (cd "$1" && git log --topo-order --reverse --format='%H%x1f%ae%x1f%ce%x1f%B%x1e' HEAD) \
+    | LCARS_IDENT_RE="$(internal_ident_re "$2")" LCARS_MSG_RE="$(internal_msg_re)" python3 -c '
+import os, re, sys
+ident = re.compile(os.environb[b"LCARS_IDENT_RE"], re.I)
+msg = re.compile(os.environb[b"LCARS_MSG_RE"], re.I)
+# ⚠ `maxsplit=3` ET PAS UN SPLIT NU : le body est le DERNIER champ et un message de commit peut
+# contenir nimporte quel octet, `\x1f` compris. Un split nu rendait alors plus de quatre champs et
+# `f[3]` ne portait que la premiere tranche — un marqueur interne place apres restait invisible a
+# la borne. Avec `maxsplit=3`, tout ce qui suit le troisieme separateur EST le body.
+#
+# ANGLE MORT DECLARE : un `\x1e` dans un body coupe le RECORD, pas le champ, et la borne rate ce
+# commit. Aucun format de `git log` ne prefixe ses longueurs, donc aucun separateur ne peut etre sur.
+# La direction reste SURE : la certification rescanne toute lhistoire, voit le marqueur, et REFUSE.
+# On perd une publication, on ne laisse jamais fuir une attribution interne.
+for rec in sys.stdin.buffer.read().split(b"\x1e"):
+    f = rec.strip(b"\n").split(b"\x1f", 3)
+    if len(f) < 4:
+        continue
+    sha, ae, ce, body = f[0], f[1], f[2], f[3]
+    if ident.search(ae) or ident.search(ce) or msg.search(body):
+        sys.stdout.write(sha.decode())
+        break
+'
+}
+
 # D2 (chantier rails, 2026-08-18) — FIRST-PARENT LINEARIZATION, the seam-side flattening.
 # WHY: the work forge keeps the TRUE history — a resolved conflict is a merge commit (the bubble is
-# the trace, chantier doc 08). GitHub's canonical MR form wants a LINEAR branch, and purists shred
-# back-merges in a PR. The two requirements live on two remotes, so the flattening happens HERE, at
+# the trace, chantier doc 08). The canonical change-request form of BOTH forges wants a LINEAR
+# branch, and reviewers shred back-merges in a PR/MR. The two requirements live on two remotes, so the flattening happens HERE, at
 # publication, on a COPY — never on the internal record.
 # HOW: NOT a rebase (replaying side-branches would resurface the very conflicts the merges
 # resolved). Each first-parent commit is REBUILT with `git commit-tree` on its OWN TREE: identical
@@ -117,7 +162,7 @@ scan_forbidden_markers() {
 # commit remains.
 linearize_first_parent() { # <dir> <branch>
   local dir="$1" branch="$2" prev="" new c old_tip
-  old_tip="$(git -C "$dir" rev-parse "refs/heads/${branch}" 2>/dev/null)"     || { echo "publish-to-github: --linearize: branche inconnue: $branch" >&2; return 1; }
+  old_tip="$(git -C "$dir" rev-parse "refs/heads/${branch}" 2>/dev/null)"     || { echo "publish-transform: --linearize: branche inconnue: $branch" >&2; return 1; }
 
   while IFS= read -r c; do
     new="$(
@@ -126,12 +171,12 @@ linearize_first_parent() { # <dir> <branch>
     prev="$new"
   done < <(git -C "$dir" rev-list --first-parent --reverse "$old_tip")
 
-  [[ "$(git -C "$dir" rev-parse "$prev^{tree}")" == "$(git -C "$dir" rev-parse "$old_tip^{tree}")" ]]     || { echo "publish-to-github: linearize: l arbre final DIFFERE de l original — refus" >&2; return 1; }
+  [[ "$(git -C "$dir" rev-parse "$prev^{tree}")" == "$(git -C "$dir" rev-parse "$old_tip^{tree}")" ]]     || { echo "publish-transform: linearize: l arbre final DIFFERE de l original — refus" >&2; return 1; }
 
   git -C "$dir" update-ref "refs/heads/${branch}" "$prev"
 
   if [[ -n "$(git -C "$dir" rev-list --merges "refs/heads/${branch}")" ]]; then
-    echo "publish-to-github: linearize: un commit de merge survit — refus" >&2
+    echo "publish-transform: linearize: un commit de merge survit — refus" >&2
     return 1
   fi
 }
@@ -151,32 +196,32 @@ while [[ $# -gt 0 ]]; do
     --filter-repo-bin) FILTER_REPO_BIN="$2"; shift 2 ;;
     --system-email) SYSTEM_EMAIL="$2"; shift 2 ;;
     --linearize) LINEARIZE="$2"; shift 2 ;;
-    *) echo "publish-to-github: option inconnue: $1" >&2; usage ;;
+    *) echo "publish-transform: option inconnue: $1" >&2; usage ;;
   esac
 done
 
 [[ -n "$REPO" && -n "$FORGE" && -n "$TOKEN_FILE" && -n "$OUT_DIR" ]] || usage
-[[ -r "$TOKEN_FILE" ]] || { echo "publish-to-github: token-file illisible: $TOKEN_FILE" >&2; exit 1; }
-[[ -e "$OUT_DIR" ]] && { echo "publish-to-github: --out ($OUT_DIR) n'est pas un chemin neuf — filter-repo exige un clone FRAIS" >&2; exit 1; }
+[[ -r "$TOKEN_FILE" ]] || { echo "publish-transform: token-file illisible: $TOKEN_FILE" >&2; exit 1; }
+[[ -e "$OUT_DIR" ]] && { echo "publish-transform: --out ($OUT_DIR) n'est pas un chemin neuf — filter-repo exige un clone FRAIS" >&2; exit 1; }
 
 command -v "$FILTER_REPO_BIN" >/dev/null 2>&1 || {
-  echo "publish-to-github: git-filter-repo introuvable ($FILTER_REPO_BIN)." >&2
+  echo "publish-transform: git-filter-repo introuvable ($FILTER_REPO_BIN)." >&2
   echo "  Installe-le dans un venv (PEP 668 bloque le pip global) :" >&2
   echo "    python3 -m venv ~/.venvs/git-filter-repo && ~/.venvs/git-filter-repo/bin/pip install git-filter-repo" >&2
   echo "  Puis relance avec --filter-repo-bin ~/.venvs/git-filter-repo/bin/git-filter-repo" >&2
   exit 1
 }
 
-[[ -r "$VENDOR_IDENTITY" ]] || { echo "publish-to-github: fichier vendor illisible: $VENDOR_IDENTITY" >&2; exit 1; }
+[[ -r "$VENDOR_IDENTITY" ]] || { echo "publish-transform: fichier vendor illisible: $VENDOR_IDENTITY" >&2; exit 1; }
 # shellcheck source=/dev/null
 source "$VENDOR_IDENTITY"
-[[ -n "${NAME:-}" && -n "${EMAIL:-}" ]] || { echo "publish-to-github: $VENDOR_IDENTITY doit poser NAME= et EMAIL=" >&2; exit 1; }
+[[ -n "${NAME:-}" && -n "${EMAIL:-}" ]] || { echo "publish-transform: $VENDOR_IDENTITY doit poser NAME= et EMAIL=" >&2; exit 1; }
 VENDOR_NAME="$NAME"
 VENDOR_EMAIL="$EMAIL"
 
 TOKEN="$(<"$TOKEN_FILE")"
 
-echo "publish-to-github: clone frais $FORGE/$REPO.git → $OUT_DIR"
+echo "publish-transform: clone frais $FORGE/$REPO.git → $OUT_DIR"
 # Header auth (NEVER the token in the URL or argv — the same mechanism as
 # Fleet.Credentials.ForgeAuth.git_env: GIT_CONFIG_KEY/VALUE rather than https://<token>@host, so the
 # token does not leak through /proc/<pid>/cmdline).
@@ -191,12 +236,60 @@ GIT_CONFIG_COUNT=1 \
 # the OTHER commits for the first non-system identity (guaranteed to exist: any onboarded project has at
 # least one scaffold/work commit with a human committer). This is the pre-scan the header describes as
 # step 0, and the only path in this script that exits 2.
-HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se {print; exit}')"
-[[ -n "$HUMAN_LINE" ]] || { echo "publish-to-github: tous les commits sont au compte system_starfleet — l'humain reste inconnu" >&2; exit 2; }
+# ⚠ `awk '… {print; exit}'` TUE CE SCRIPT SUR TOUT DEPOT REEL, et aucune fixture ne pouvait le
+# montrer. `exit` ferme le tuyau des la premiere ligne retenue ; si `git log` ecrit encore — ce qui
+# est le cas des que la sortie depasse le tampon de pipe, ~64 Ko — il recoit SIGPIPE, `pipefail`
+# remonte 141, et `set -e` abat le script juste apres le clone. Mesure du 2026-08-20 sur
+# jquery/jquery : 8489 commits -> exit 141 ; les 3 premiers du meme depot -> exit 0. Toutes les
+# fixtures du depot font une poignee de commits, donc toutes passaient.
+# `awk` LIT DONC TOUT et n'imprime qu'une fois. Le cout est une lecture complete du log — quelques
+# secondes sur une histoire de deux millions de commits, contre les minutes que filter-repo prendra
+# juste apres.
+HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se && !seen {print; seen=1}')"
+[[ -n "$HUMAN_LINE" ]] || { echo "publish-transform: tous les commits sont au compte system_starfleet — l'humain reste inconnu" >&2; exit 2; }
 HUMAN_NAME="${HUMAN_LINE%%|*}"
 HUMAN_EMAIL="${HUMAN_LINE##*|}"
 
-echo "publish-to-github: passe filter-repo — author system_starfleet devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
+# ── LA BORNE : ne reecrire QUE ce qui porte de l'attribution interne ────────────────────────────
+# A FULL REWRITE MAKES CONTRIBUTION IMPOSSIBLE, and that is not a detail of taste. Measured
+# 2026-08-20: a full pass keeps 2454 of jquery s 8489 SHAs and 2165 of git/git s 85342 — because
+# every descendant of a rewritten commit is rewritten, and filter-repo touches something early. A
+# branch published that way shares almost nothing with the upstream it came from, so a fork ->
+# upstream pull request shows tens of thousands of commits as new. LCARS could never be used to
+# contribute back.
+#
+# What must be scrubbed lives ONLY on the commits the fleet made, and those sit at the TIP. So the
+# rewrite is bounded to them, and everything below keeps its identity byte for byte (measured on the
+# real history: 8489 of 8489 imported commits survive).
+#
+# THE BOUNDARY IS COMPUTED FROM THE COMMITS, never from a file kept beside them. Each commit says
+# what it is — the role trailer the commit gate makes mandatory, or an internal identity — so there
+# is no state to keep in sync and nothing to drift. Upstream commits merged in MID-WORK are not a
+# problem: they sit inside the rewritten range and keep their SHAs anyway, because git is
+# content-addressed and nothing about them changes (measured).
+#
+# AND THE SAFETY IS FREE: the boundary selects, the certification then rescans the WHOLE history. A
+# boundary computed too high leaves an internal marker below it, and the certification REFUSES. A
+# wrong boundary cannot leak; it can only stop the publish.
+
+FIRST_OURS="$(oldest_internal_commit "$OUT_DIR" "$SYSTEM_EMAIL")"
+REFS_ARGS=()
+if [[ -z "$FIRST_OURS" ]]; then
+  # Nothing internal anywhere: nothing to scrub. Skipping the pass keeps EVERY sha, which is the
+  # right answer for a project whose history is entirely foreign (or already published once).
+  echo "publish-transform: aucune attribution interne — rien a reecrire, tous les SHA conserves"
+elif BOUND="$(git -C "$OUT_DIR" rev-parse -q --verify "${FIRST_OURS}^" 2>/dev/null)" && [[ -n "$BOUND" ]]; then
+  REFS_ARGS=(--refs "${BOUND}..HEAD")
+  echo "publish-transform: reecriture BORNEE a ${FIRST_OURS:0:8}..HEAD ($(git -C "$OUT_DIR" rev-list --count "${BOUND}..HEAD") commits) — l histoire importee garde ses SHA"
+else
+  # Our oldest commit IS the root: the whole history is ours, so the whole history is rewritten.
+  # This is a project CREATED in the fleet rather than imported, and it is the behaviour that
+  # shipped before the boundary existed.
+  echo "publish-transform: tout l historique est interne (projet ne dans la fleet) — reecriture complete"
+fi
+
+if [[ -n "$FIRST_OURS" ]]; then
+echo "publish-transform: passe filter-repo — author system_starfleet devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
 # The 5 values cross through the ENVIRONMENT (os.environb, callback side), NEVER through bash
 # interpolation into the Python source: an author name is UNCONTROLLED data (git log %cn), and the old
 # `${VAR@Q}` produced, on an apostrophe (O'Brien), a bash literal `$'...'` that is INVALID Python —
@@ -236,26 +329,47 @@ commit.message = re.sub(
     commit.message,
     flags=re.IGNORECASE,
 )
-')
+' ${REFS_ARGS[@]+"${REFS_ARGS[@]}"})
+fi
+
+# ⚠ `--partial` LAISSE `refs/remotes/origin/*` SUR L'HISTOIRE D'AVANT, et filter-repo le documente
+# ("no automatic remapping of refs/remotes/origin/* to refs/heads/*"). La certification, elle, lit
+# `git log --all` — donc elle voyait l'attribution interne survivre dans des refs QUI NE SONT PAS
+# PUBLIEES, et refusait une passe pourtant propre. Mesure du 2026-08-20 : HEAD portait 0 marqueur,
+# `--all` en portait 3, tous derriere `origin/*`.
+#
+# On RESTAURE L'INVARIANT au lieu de retrecir le controle : `--all` doit vouloir dire « tout ce que
+# ce clone peut publier ». Retirer le remote le rend vrai a nouveau — et c'est exactement ce que la
+# passe NON bornee faisait deja d'elle-meme, donc les deux chemins finissent identiques. Rien en
+# aval n'en depend : le rail ajoute son propre remote `dest`, et `approve` fetch par URL explicite.
+git -C "$OUT_DIR" remote remove origin 2>/dev/null || true
 
 if [[ -n "$LINEARIZE" ]]; then
-  echo "publish-to-github: linearisation first-parent de '$LINEARIZE' (forme MR — arbre final identique, merges aplatis)"
+  echo "publish-transform: linearisation first-parent de '$LINEARIZE' (forme MR — arbre final identique, merges aplatis)"
   linearize_first_parent "$OUT_DIR" "$LINEARIZE" || exit 4
 fi
 
 # CERTIFY the transform instead of trusting its exit code (see scan_forbidden_markers). A surviving
-# internal marker = a broken publish that would leak the internal attribution to GitHub — refuse loud
+# internal marker = a broken publish that would leak the internal attribution outside — refuse loud
 # (exit 3), the clone is left in place for inspection.
 if ! scan_forbidden_markers "$OUT_DIR" "$SYSTEM_EMAIL"; then
-  echo "publish-to-github: ARRET — le clone transforme porte encore une attribution interne (voir ci-dessus)." >&2
+  echo "publish-transform: ARRET — le clone transforme porte encore une attribution interne (voir ci-dessus)." >&2
   echo "  Le clone est laisse dans $OUT_DIR pour inspection ; NE PAS pousser en l'etat." >&2
   exit 3
 fi
 
 echo ""
-echo "publish-to-github: fin de la passe filter-repo → $OUT_DIR (certifie : zero attribution interne survivante)"
-echo "  Les SHA sont tous neufs (passe one-way : ce n'est PAS un sync avec la forge de travail)."
-echo "  Geste de publish (ce script ne pousse JAMAIS — le push GitHub est ton geste) :"
+echo "publish-transform: fin de la passe → $OUT_DIR (certifie : zero attribution interne survivante)"
+echo "  Les SHA des commits REECRITS sont neufs (passe one-way : ce n'est PAS un sync avec la forge)."
+echo "  Ceux de l'histoire importee sont CONSERVES — c'est ce qui rend une PR vers l'upstream lisible."
+# ⚠ CE MESSAGE NOMMAIT `git@github.com:` IN THE CLEAR, whatever the destination — so a run aimed at
+# a GitLab project printed instructions that were simply false. This script is forge-AGNOSTIC: it
+# rewrites a history and never learns where the result is going. Its closing words must therefore
+# name no host at all. The name of the file is the other place where "GitLab is a first-class
+# forge" is not held; that one is not a message, it is a rename, and it is not this commit's job.
+echo "  Geste de publish (ce script ne pousse JAMAIS — le push est ton geste) :"
 echo "    cd $OUT_DIR"
-echo "    git remote add github git@github.com:<owner>/<repo>.git"
-echo "    git push github main"
+echo "    git remote add <nom> <url-du-depot-de-destination>"
+echo "    git push <nom> main"
+echo "  Ou, si le projet est deja lie : « lcars publish run <owner/nom-interne> » — le rail"
+echo "  pousse une branche roulante et ouvre UNE PR/MR, sans toucher la base." 

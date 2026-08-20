@@ -72,7 +72,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   fact co-located with the active N1 launcher (`bin/<vendor>_launch.identity`, cf.
   `bin/claude_launch.identity`) — same discipline as the N0/N1 vendor boundary. The AUTHOR becomes
   the human (the system steps aside too: `author := committer` on `system_email()` commits). The
-  rewrite itself lives outside Elixir (`bin/publish-to-github.sh`, `git filter-repo`): this module
+  rewrite itself lives outside Elixir (`bin/publish-transform.sh`, `git filter-repo`): this module
   stays the authority for the LOCAL forge identities, not the executor of the publish transformation.
   """
 

@@ -51,7 +51,12 @@ defmodule Fleet.MCP.ProjectPublishTest do
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf(tmp) end)
 
-      # Point HOME at an empty home so ~/.lcars/publish/<slug>.json is absent.
+      # ⚠ THIS REDIRECTION DOES NOTHING, and the comment used to claim it did. `read_binding/1`
+      # resolves under `System.user_home!()`, which OTP caches at VM start: `put_env("HOME", …)`
+      # moves `System.get_env/1` and leaves `user_home!/0` where it was (measured 2026-08-20).
+      # The witness is still SOUND — this slug has no binding in the real home either, which is the
+      # state it means to exercise — but it passes for a reason its own setup does not create. Kept
+      # for the isolation of the `on_exit`, no longer described as the mechanism under test.
       prev_home = System.get_env("HOME")
       System.put_env("HOME", tmp)
       on_exit(fn -> if prev_home, do: System.put_env("HOME", prev_home) end)
@@ -69,6 +74,53 @@ defmodule Fleet.MCP.ProjectPublishTest do
                        }
                      },
                      2_000
+    end
+  end
+
+  describe "the work directory: swept on every outcome but the one that must be inspected" do
+    # PHASE 1 HAS SWEPT SINCE DAY ONE (`trap 'rm -rf' EXIT` in `lcars approve`); phase 2 never did.
+    # Every publish left a COMPLETE rewritten clone in the system temp dir, forever — the size of the
+    # repository, once per publication.
+    #
+    # ⚠ THESE DRIVE `sweep_work/2` DIRECTLY rather than a full `run/2`, and that is not laziness:
+    # `read_binding/1` resolves the binding under `System.user_home!()`, which OTP caches at VM start
+    # and which `System.put_env("HOME", …)` does NOT move (measured 2026-08-20). A witness that
+    # redirected HOME would not be exercising the binding it thinks it wrote — it would pass for a
+    # reason of its own. The property at stake is the sweep and its single exception; that is what is
+    # pinned, at the seam where it lives.
+
+    defp a_work_dir do
+      d =
+        System.tmp_dir!()
+        |> Path.join("lcars-publish-witness-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(d, ".git"))
+      File.write!(Path.join(d, "README.md"), "x")
+      d
+    end
+
+    test "a normal outcome sweeps the clone" do
+      d = a_work_dir()
+      assert File.dir?(d)
+      assert {:ok, _} = ProjectPublish.sweep_work(d, 0)
+      refute File.exists?(d)
+    end
+
+    test "any non-zero exit sweeps it too — a failed publish is not a reason to fill /tmp" do
+      for code <- [1, 2, 3, 4, 5] do
+        d = a_work_dir()
+        assert {:ok, _} = ProjectPublish.sweep_work(d, code)
+        refute File.exists?(d), "exit #{code} left its clone behind"
+      end
+    end
+
+    test "exit 6 KEEPS the clone — the only failure nobody can diagnose afterwards" do
+      # The rail leaves it "pour inspection" when the rewrite lost its determinism. Sweeping it would
+      # erase the only evidence of a failure that cannot be reproduced from a message.
+      d = a_work_dir()
+      assert :kept_for_inspection = ProjectPublish.sweep_work(d, 6)
+      assert File.dir?(d), "exit 6 must KEEP its clone for inspection"
+      File.rm_rf(d)
     end
   end
 end

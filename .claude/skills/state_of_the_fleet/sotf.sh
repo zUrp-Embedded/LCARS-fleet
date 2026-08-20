@@ -254,7 +254,7 @@ jsonl_exit_code() {
   if [[ "$unr" -gt 0 ]]; then echo 2; elif [[ "$deg" -gt 0 ]]; then echo 1; else echo 0; fi
 }
 
-# Garde de source (meme motif que `publish-to-github.sh`) : sourcer ce fichier donne acces aux
+# Garde de source (meme motif que `publish-transform.sh`) : sourcer ce fichier donne acces aux
 # fonctions SANS declencher un run. Sans elle, les tests du raisonnement de capacite devraient passer
 # par la CLI et donc par de vraies sondes — ils mesureraient la machine au lieu de la logique.
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] || return 0

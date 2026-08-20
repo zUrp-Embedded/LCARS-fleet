@@ -32,7 +32,24 @@ defmodule Fleet.Workflow.DeliverableGate do
     {~r/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/, "jwt_token"},
     {~r/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "private_key"},
     {~r/AKIA[0-9A-Z]{16}/, "aws_access_key"},
-    {~r/ghp_[A-Za-z0-9]{36}/, "github_pat"},
+    # ⚠ THE FORGE TOKENS WERE ONE PATTERN, OF ONE FORGE, AND NOT THE SHAPE WE USE OURSELVES.
+    # The list carried `ghp_` alone — the CLASSIC personal access token. GitHub documents six
+    # prefixes (`ghp_` classic, `github_pat_` fine-grained, `gho_` OAuth, `ghu_` user-to-server,
+    # `ghs_` installation, `ghr_` refresh), and `gho_` is precisely what `gh auth status` reports
+    # on a machine where the operator ran `gh auth login`. The gate that refuses a leaked
+    # credential in a deliverable did not recognise the credential of its own tooling.
+    #
+    # AND NOTHING AT ALL FOR GITLAB, on a fleet whose import AND export both announce GitLab as a
+    # first-class forge: a `glpat-` travelled through without a word.
+    #
+    # THE BODY LENGTH IS NO LONGER FIXED. `{36}` encoded the classic format as if it were the only
+    # one; GitHub shipped a stateless `ghs_APPID_JWT` form on 2026-04-27 warning that anything
+    # assuming a fixed length would mishandle it. A floor (`{20,}`) refuses the same secrets and
+    # survives the next format.
+    {~r/gh[pousr]_[A-Za-z0-9]{20,}/, "github_token"},
+    {~r/github_pat_[A-Za-z0-9_]{20,}/, "github_pat_fine_grained"},
+    {~r/glpat-[A-Za-z0-9_\-]{20,}/, "gitlab_pat"},
+    {~r/gloas-[A-Za-z0-9_\-]{20,}/, "gitlab_oauth_secret"},
     {~r/xox[baprs]-[A-Za-z0-9\-]{10,}/, "slack_token"},
     {~r/AIza[0-9A-Za-z_\-]{35}/, "google_api_key"}
   ]

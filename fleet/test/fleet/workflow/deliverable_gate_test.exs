@@ -71,6 +71,49 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:secret_detected, "google_api_key", _}} = Gate.scan_secrets(dir, base)
   end
 
+  # ⚠ LES JETONS DE FORGE ETAIENT UN MOTIF, D'UNE FORGE, ET PAS CELUI QU'ON PORTE SOI-MEME. La liste
+  # ne connaissait que `ghp_`, le PAT CLASSIQUE de GitHub. Or la doc GitHub nomme six prefixes, et
+  # `gho_` — le jeton OAuth — est exactement ce que `gh auth status` rend sur une machine ou
+  # l'operateur a fait `gh auth login`. Le gate qui refuse un identifiant echappe dans un livrable
+  # ne reconnaissait pas l'identifiant de son propre outillage.
+  # Et RIEN pour GitLab, sur une fleet dont l'import et l'export annoncent GitLab de plein droit.
+  for {label, sample, kind} <- [
+        {"classique (ghp_)", "ghp_" <> String.duplicate("a", 36), "github_token"},
+        {"OAuth (gho_) — celui de notre propre gh", "gho_" <> String.duplicate("b", 36),
+         "github_token"},
+        {"user-to-server (ghu_)", "ghu_" <> String.duplicate("c", 36), "github_token"},
+        {"installation (ghs_)", "ghs_" <> String.duplicate("d", 36), "github_token"},
+        {"refresh (ghr_)", "ghr_" <> String.duplicate("e", 36), "github_token"},
+        {"fine-grained (github_pat_)", "github_pat_" <> String.duplicate("f", 40),
+         "github_pat_fine_grained"},
+        {"GitLab PAT (glpat-)", "glpat-" <> String.duplicate("g", 20), "gitlab_pat"},
+        {"GitLab OAuth (gloas-)", "gloas-" <> String.duplicate("h", 24), "gitlab_oauth_secret"}
+      ] do
+    test "jeton de forge — #{label} dans le diff → BLOQUE", %{tmp_dir: tmp} do
+      {dir, base} =
+        setup_repo(Path.join(tmp, "leak-forge-#{System.unique_integer([:positive])}"))
+
+      commit_file(dir, "conf.txt", "TOKEN=#{unquote(sample)}", "conf")
+
+      assert {:error, {:secret_detected, unquote(kind), _}} = Gate.scan_secrets(dir, base)
+    end
+  end
+
+  test "un livrable SANS jeton n'est pas bloque par les motifs de forge", %{tmp_dir: tmp} do
+    # La contre-epreuve : un motif trop large refuserait des commits legitimes, et un gate qui
+    # refuse tout est un gate qu'on desactive.
+    {dir, base} = setup_repo(Path.join(tmp, "no-leak"))
+
+    commit_file(
+      dir,
+      "notes.md",
+      "On parle de ghp_ et de glpat- dans la doc, et le module gh_client existe.",
+      "notes"
+    )
+
+    assert :ok = Gate.scan_secrets(dir, base)
+  end
+
   test "JG-049 — CE QUE LA PORTE NE VOIT PAS, mesure plutot que suppose", %{tmp_dir: tmp} do
     # ⚠ Ce test EPINGLE UNE LIMITE, il ne demande pas de la corriger. Un jeton Gitea est 40 hex
     # sans prefixe — la forme exacte de tout SHA git present dans un diff. Un motif pour lui

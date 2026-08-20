@@ -1673,6 +1673,14 @@ defmodule Fleet.Project.Onboard do
 
   # The parking-lot USB check (BL-6-16/6-31): instruction-tier material only — scanning the
   # whole code would drown in false positives (a README legitimately says "force-push").
+  #
+  # ⚠ DECLARED BLIND SPOT — `.gitmodules` IS NOT READ. This gate probes exactly two things,
+  # `**/.claude` and `**/CLAUDE.md`, and a foreign repo can carry a `.gitmodules` pointing anywhere.
+  # Nothing is fetched from it: `clone_external` passes `--no-recurse-submodules`, and the fleet
+  # never runs `git submodule update` on an imported project — so the practical risk today is low.
+  # The reason this sentence exists is that the limit was written NOWHERE, and a gate whose
+  # perimeter nobody knows is a gate people lean on too hard. Widening the probe is a decision, not
+  # a reflex; the honest minimum is to say what is not looked at, next to what is.
   defp adoption_gate(scratch) do
     case foreign_claude_dirs(scratch) do
       [] -> scan_claude_mds(scratch)
