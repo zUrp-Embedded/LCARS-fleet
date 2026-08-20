@@ -156,6 +156,25 @@ jobs:
             exit 0
           fi
 
+          # ═══ LE JETON SORT D'ICI, ET IL EN SORT AVANT QUE LE MOINDRE CODE DU LIVRABLE TOURNE ═══
+          #
+          # Deux vecteurs, et le premier était le pire parce qu'il était sur DISQUE :
+          #
+          #   1. `git remote add origin "$auth"` écrit l'URL — jeton compris, en clair — dans
+          #      `repo/.git/config`. Or la commande de test tourne dans CE répertoire, et elle vient
+          #      du `CLAUDE.md` de la TÊTE JUGÉE. Un `cat .git/config` suffisait ;
+          #   2. `FORGE_TOKEN` est dans l'environnement de ce shell, donc hérité par tout enfant.
+          #
+          # ⚠ « PAS DE PRIVILÈGE NOUVEAU » N'EST PAS UNE RAISON DE LAISSER LE GESTE. Qui contrôle
+          # `tests/run.sh` exécute déjà du code arbitraire dans ce job — c'est vrai, et ça justifie
+          # de ne pas paniquer, pas de laisser un secret écrit à côté du code qu'on juge. Ça coûte
+          # deux lignes.
+          #
+          # La sonde n'a plus besoin du réseau : tout ce qui suit est du `checkout` LOCAL. On coupe
+          # donc les deux vecteurs ici, à l'endroit exact où le besoin s'arrête.
+          git remote remove origin
+          unset FORGE_TOKEN
+
           git checkout -q "$head" 2>/dev/null || {
             fact "verdict=inapplicable reason=head-unreachable"
             exit 0

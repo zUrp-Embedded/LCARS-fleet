@@ -242,6 +242,55 @@ defmodule Fleet.Project.ProbePredicateTest do
       refute Map.has_key?(r.facts, "witness_exit")
     end
 
+    # ⚠ LE SECRET NE DOIT PLUS ÊTRE LÀ QUAND LE CODE JUGÉ S'EXÉCUTE.
+    #
+    # La commande de test vient du `CLAUDE.md` de la TÊTE JUGÉE — donc du livrable qu'on évalue. Elle
+    # tournait dans un répertoire dont `.git/config` portait le jeton de forge en clair (écrit par
+    # `git remote add origin "$auth"`), et dans un shell qui portait `FORGE_TOKEN`. Un
+    # `cat .git/config` suffisait.
+    #
+    # « Pas de privilège nouveau » restait vrai — qui contrôle `tests/run.sh` exécute déjà du code
+    # arbitraire ici. Ça justifiait de ne pas paniquer, pas de laisser le geste.
+    #
+    # Ce test s'exécute DEPUIS LA PLACE DE L'ATTAQUANT : le harnais lui-même va chercher les deux.
+    @leak_check """
+    #!/bin/sh
+    echo "LEAKCHECK remote=[$(git config --get remote.origin.url)] token=[${FORGE_TOKEN}]"
+    exit 0
+    """
+
+    test "le jeton n'est PLUS accessible quand la commande du livrable tourne", %{tmp_dir: tmp} do
+      repo =
+        build_repo(
+          tmp,
+          %{"tests/leak.sh" => @leak_check},
+          %{"tests/leak.sh" => @leak_check, "hello.sh" => @deliverable}
+        )
+
+      r = sonde(tmp, repo, "tests/", "sh tests/leak.sh")
+
+      # Les deux vecteurs, dans une seule ligne écrite par le code jugé lui-même.
+      #
+      # ⚠ CE QUE CETTE FIXTURE PROUVE, ET CE QU'ELLE NE PROUVE PAS. Mutation jouée : en retirant les
+      # deux lignes du workflow, `remote=[file:///…/projet.git]` apparaît et ce test devient rouge —
+      # donc la moitié `remote` MORD.
+      #
+      # La moitié `token`, elle, ne discrimine PAS ici : l'origine du test est un `file://` et
+      # `FORGE_TOKEN` y vaut `""` par construction, donc `token=[]` serait vrai même sans `unset`.
+      # Elle reste écrite parce qu'elle épingle la FORME de ce qu'on interdit, et parce qu'un jour
+      # une fixture http la rendra discriminante. Elle ne compte pas comme preuve aujourd'hui, et
+      # ce paragraphe est là pour qu'on ne la lise pas comme telle.
+      assert r.out =~ "LEAKCHECK remote=[] token=[]",
+             "le livrable jugé voit encore un secret : #{r.out}"
+
+      # ⚠ ET LA SONDE MARCHE TOUJOURS. Couper le remote après les `fetch` ne doit rien casser :
+      # tout ce qui suit est du `checkout` local. Sans cette moitié, on aurait pu « corriger » en
+      # cassant la mesure sans que rien ne le dise.
+      assert r.facts["witness_exit"] == "0"
+      assert r.facts["verdict"] in ["relevant", "blind"]
+      assert r.code == 0
+    end
+
     test "commande de test VIDE → inapplicable, jamais un `blind` fabriqué", %{tmp_dir: tmp} do
       # ⚠ LE SEUL MENSONGE QUE CETTE SONDE POUVAIT PRODUIRE, trouvé par relecture adversariale.
       # `( )` est une sous-shell POSIX valide et sort en 0 : sans garde, le témoin passait, la
