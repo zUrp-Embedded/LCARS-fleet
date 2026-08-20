@@ -54,8 +54,8 @@ defmodule Fleet.Application do
   libraries with no supervision tree (cap_profile, credentials, sp_builder,
   workflow, project_bootstrap) — nothing to start for them (they have NO process;
   their modules are loaded in the app, the pure functions work without a
-  supervisor). Only the 9 domains that actually start something remain in the
-  children.
+  supervisor). Only the domains that actually start something remain in the
+  children below.
 
   ## The children ORDER IS the boot invariant (F8 scar)
 

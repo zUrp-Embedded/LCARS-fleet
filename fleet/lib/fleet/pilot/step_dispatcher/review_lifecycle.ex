@@ -306,6 +306,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # est le site unique qui connait les valeurs de l'enum, pour qu'un renommage n'ait qu'un endroit
   # ou echouer. `CiGateTest` tient la jointure contre le loader canon.
   @doc false
+  @spec issue_card_ci(String.t(), Ctx.t()) :: :required | :ignore
   def issue_card_ci(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
          {:ok, {map_name, _step}} <-

@@ -39,7 +39,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
 
   # R5/R08 — an EMPTY handler list is VALID: an event can be registered
   # (key = authorized_event_type) without a dispatch handler, consumed by direct
-  # subscribers (WS, AuditConsumer, DriftMonitor). `minItems: 0`.
+  # subscribers (WS, AuditConsumer). `minItems: 0`.
   test "valid config — empty handler list (registered without dispatch)", %{schema: schema} do
     ok = %{"events" => %{"pod.allocate" => []}}
     assert :ok = ExJsonSchema.Validator.validate(schema, ok)

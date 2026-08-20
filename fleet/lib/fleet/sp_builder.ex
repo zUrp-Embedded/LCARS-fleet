@@ -88,21 +88,29 @@ defmodule Fleet.SPBuilder do
         ]
 
   @doc "Publishes the validated prompt-artifact image; unreadable artifacts raise."
+  @spec publish_image!() :: :ok
   defdelegate publish_image!(), to: Fleet.SPBuilder.Image, as: :publish!
 
   @doc "Returns a published role draft, `:not_found`, or `:unpublished`."
+  @spec image_draft(String.t()) :: {:ok, String.t()} | :not_found | :unpublished
   defdelegate image_draft(role), to: Fleet.SPBuilder.Image, as: :draft
+  @spec image_draft(String.t(), Path.t() | nil) :: {:ok, String.t()} | :not_found | :unpublished
   defdelegate image_draft(role, root), to: Fleet.SPBuilder.Image, as: :draft
 
   @doc "Returns the published worker protocol or `:unpublished`."
+  @spec image_worker_protocol() :: {:ok, String.t()} | :unpublished
   defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
+  @spec image_worker_protocol(Path.t() | nil) :: {:ok, String.t()} | :unpublished
   defdelegate image_worker_protocol(root), to: Fleet.SPBuilder.Image, as: :worker_protocol
 
   @doc "Returns the published human protocol or `:unpublished`."
+  @spec image_human_protocol() :: {:ok, String.t()} | :unpublished
   defdelegate image_human_protocol(), to: Fleet.SPBuilder.Image, as: :human_protocol
+  @spec image_human_protocol(Path.t() | nil) :: {:ok, String.t()} | :unpublished
   defdelegate image_human_protocol(root), to: Fleet.SPBuilder.Image, as: :human_protocol
 
   @doc "Returns modified/vanished image sources, or `:unpublished`."
+  @spec image_drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
   defdelegate image_drift(), to: Fleet.SPBuilder.Image, as: :drift
 
   @doc """

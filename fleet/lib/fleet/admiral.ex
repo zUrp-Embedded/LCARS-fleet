@@ -31,10 +31,7 @@ defmodule Fleet.Admiral do
   Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
 
   **No pod, no inference, no automatic ACTION in this module** — the system detects, logs and
-  tickets (`error_system`, the admiral inbox); a human treats, off-box. The 2026-08-19 brouette
-  removed the whole decision/max-severity apparatus (the escalator, DriftMonitor, the decision validator,
-  CoordBackend, Fleet.Coord, Fleet.Decision, AuditLog): a second severity label with no
-  definition, and a verdict rail whose terminus re-emitted an event — telemetry posing as action.
+  tickets (`error_system`, the admiral inbox); a human treats, off-box.
   What an incident deserves is declared in `events.yaml` (`gate: immediate | recurrence`).
 
   ## Sub-modules

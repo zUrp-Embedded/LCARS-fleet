@@ -108,6 +108,7 @@ defmodule Fleet.CapProfile do
   @default_network "vendor-only"
 
   @doc "Publishes the validated catalogue image, raising on an invalid artifact."
+  @spec publish_image!() :: :ok
   defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
 
   @doc """
@@ -462,7 +463,7 @@ defmodule Fleet.CapProfile do
   Returns whether terminal send-keys fallback is allowed. Defaults to `true`, including
   for absent or non-profile input; `false` protects interactive human-facing terminals.
   """
-  @spec wake_send_keys?(t() | nil | term()) :: boolean()
+  @spec wake_send_keys?(term()) :: boolean()
   def wake_send_keys?(%__MODULE__{spec: spec}) when is_map(spec),
     do: get_in(spec, ["invocation", "wake_send_keys"]) != false
 
@@ -498,7 +499,7 @@ defmodule Fleet.CapProfile do
   `Fleet.Spawner.Pod.LaunchSpec.remote_control?/1` is the EFFECTIVE authority (this, plus the
   fleet's debug widening); this one answers what the profile itself says.
   """
-  @spec remote_control?(t() | nil | term()) :: boolean()
+  @spec remote_control?(term()) :: boolean()
   def remote_control?(%__MODULE__{spec: spec} = profile) when is_map(spec) do
     case get_in(spec, ["invocation", "remote_control"]) do
       declared when is_boolean(declared) -> declared
@@ -523,7 +524,7 @@ defmodule Fleet.CapProfile do
   compression REMOVES information. So the fleet-wide knob may only CUT compression, never impose it
   on a role that declared `false` and would lose exactly what it was spawned to read.
   """
-  @spec output_compression?(t() | nil | term()) :: boolean()
+  @spec output_compression?(term()) :: boolean()
   def output_compression?(%__MODULE__{spec: spec}) when is_map(spec) do
     case get_in(spec, ["invocation", "output_compression"]) do
       declared when is_boolean(declared) -> declared
@@ -708,6 +709,7 @@ defmodule Fleet.CapProfile do
 
   @doc "Lists catalogue profile names, optionally below `dir`."
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec list() :: {:ok, [String.t()]} | {:error, term()}
   defdelegate list(), to: Catalog
   defdelegate list(dir), to: Catalog
 
@@ -718,6 +720,7 @@ defmodule Fleet.CapProfile do
   account. See `Fleet.CapProfile.Catalog.forge_identity_roles/1`.
   """
   @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec forge_identity_roles() :: {:ok, [String.t()]} | {:error, term()}
   defdelegate forge_identity_roles(), to: Catalog
   defdelegate forge_identity_roles(dir), to: Catalog
 
@@ -871,6 +874,8 @@ defmodule Fleet.CapProfile do
   """
   @spec forge_roster(String.t()) ::
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
+  @spec forge_roster() ::
+          {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   defdelegate forge_roster(), to: Catalog
   defdelegate forge_roster(dir), to: Catalog
 
@@ -921,7 +926,7 @@ defmodule Fleet.CapProfile do
   Returns `spec.invocation.lifetime_scope`, using `"one-shot"` or the supplied default
   when absent.
   """
-  @spec lifetime_scope(t(), term()) :: String.t() | term()
+  @spec lifetime_scope(t(), String.t() | nil) :: String.t() | nil
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
     get_in(spec, ["invocation", "lifetime_scope"]) || default
   end
@@ -941,7 +946,7 @@ defmodule Fleet.CapProfile do
   @doc """
   Returns `spec.deliverable_mode`, using `"payload"` or the supplied default when absent.
   """
-  @spec deliverable_mode(t(), term()) :: String.t() | term()
+  @spec deliverable_mode(t(), String.t() | nil) :: String.t() | nil
   def deliverable_mode(%__MODULE__{spec: spec}, default \\ "payload") do
     get_in(spec, ["deliverable_mode"]) || default
   end

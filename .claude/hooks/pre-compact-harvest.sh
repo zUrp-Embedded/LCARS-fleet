@@ -17,7 +17,7 @@
 #     | [ LCARS-FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
 #     +-----------------------------------------------------------+
 #     | MODULE: PRE-COMPACT       | SUBSYSTEM: HOOKS / PRECOMPACT |
-#     | LICENSE: AGPL-3           | STARDATE: 2026.090            |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.232            |
 #     +---------------------------+-------------------------------+
 #     |                                                           |
 #     |  PreCompact hook: mechanical harvest before auto-compact. |
@@ -55,7 +55,7 @@
 #         Env:     CLAUDE_AGENT_NAME (instance identity)
 #
 #     DEPENDENCIES
-#         git, fleet-done.sh (fleet Ring 2)
+#         git, fleet-done.sh
 #
 #     EXIT CODES
 #         0    Always (hook must not block compaction)

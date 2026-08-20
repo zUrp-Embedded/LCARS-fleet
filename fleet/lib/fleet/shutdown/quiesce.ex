@@ -4,7 +4,7 @@ defmodule Fleet.Shutdown.Quiesce do
   @moduledoc """
   Zero-dependency daemon quiescence primitive. Admission and respawn paths refuse
   new work while finalizers remain allowed to drain current work. Policy stays in
-  Starfleet; this module only owns persistent flags and activity counters.
+  `Fleet.Admiral`; this module only owns persistent flags and activity counters.
   """
 
   @key {__MODULE__, :quiescing}
@@ -44,6 +44,7 @@ defmodule Fleet.Shutdown.Quiesce do
   # Boot hook (`Fleet.Application.start`, single-threaded): materializes the counter ref
   # before any concurrent first use (two concurrent lazy inits would orphan one ref and
   # undercount its wrap).
+  @spec init_busy!() :: :ok
   def init_busy! do
     _ = busy_ref()
     :ok

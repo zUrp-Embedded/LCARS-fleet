@@ -42,7 +42,6 @@ defmodule Fleet.API.ReadinessTest do
       # 6 subsystems: event.registry, shutdown.dispatcher, launch.backend, mcp.pod_facing,
       # pilot.step (forge-state-machine rail), + spawn.dispatch (PublishConsumer = the sole
       # subscriber of admin.spawn.request — the probe kills the hollow-green 202).
-      # (coord.backend est parti avec Fleet.Coord — brouette 2026-08-19.)
       assert length(subsystems) == 6
       assert is_binary(ts)
 

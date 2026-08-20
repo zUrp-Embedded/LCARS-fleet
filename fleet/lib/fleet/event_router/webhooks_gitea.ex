@@ -129,6 +129,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   @doc false
+  @spec read_raw_body(Plug.Conn.t(), keyword()) ::
+          {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
   def read_raw_body(conn, opts) do
     # SERVES WHAT `authenticate_webhook/2` ALREADY READ. A body can only be read once: on the
     # webhook route the authenticating plug has consumed it, so a second `read_body` here would

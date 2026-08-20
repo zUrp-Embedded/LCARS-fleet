@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 2026.231
+# STARDATE: 2026.232
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -294,7 +294,7 @@ elif command -v bats >/dev/null 2>&1; then
 else
   # bats ABSENT : on ne saute pas en silence — on COMPTE les tests non joues et on avertit fort.
   echo "AVERTISSEMENT: bats absent — $BATS_TEST_COUNT test(s) launchers NON executes" \
-       "($BATS_FILE_COUNT fichier(s) : bwrap_launch/claude_launch). Installer : apt/brew install bats-core." >&2
+       "($BATS_FILE_COUNT fichier(s) : les quatre corpus bats (deploy, git-hooks, test, skills)). Installer : apt/brew install bats-core." >&2
   if [[ "$BATS_MISSING_FATAL" != "0" ]]; then
     echo "ECHEC: bats absent et BATS_MISSING_FATAL=$BATS_MISSING_FATAL — durcissement actif." >&2
     GATE_FAIL=1

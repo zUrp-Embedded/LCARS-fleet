@@ -72,10 +72,13 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   @doc false
+  @spec task_supervisor() :: module()
   def task_supervisor, do: @task_supervisor
 
   # Saturation runs inline: incident memory is never dropped.
   @doc false
+  @spec offload_async((-> any())) ::
+          {:ok, :inline | :offloaded} | {:error, :inline_crashed}
   def offload_async(fun) do
     Fleet.Pilot.Offload.async_or_inline(
       @task_supervisor,
@@ -296,6 +299,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # Best-effort BY OBLIGATION: a brake that cannot be placed must not break the incident rail,
   # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
   # silently absent brake, which is worse than no brake at all (you would believe you are covered).
+  @spec default_brake(String.t(), integer(), term()) :: :ok
   def default_brake(repo, number, reason) do
     forge = Application.get_env(:lcars_fleet, :pilot_forge_client, Fleet.Forge.Client)
 

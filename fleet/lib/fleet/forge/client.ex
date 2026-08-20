@@ -57,8 +57,10 @@ defmodule Fleet.Forge.Client do
 
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
+  @spec parse_feature_branch(term()) :: {:ok, {integer(), String.t()}} | :error
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
+  @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
   @doc """
@@ -106,6 +108,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc false
+  @spec assigned_by_qs(keyword()) :: String.t()
   def assigned_by_qs(opts) do
     case Keyword.get(opts, :assigned_by) do
       login when is_binary(login) and login != "" -> "&assigned_by=" <> URI.encode_www_form(login)
@@ -415,6 +418,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc "Org repos (WS3 discovery, org-membership = admission). See `ForgeClient.Repo.list_org_repos/2`."
+  @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []), do: Repo.list_org_repos(org, opts)
 
   @doc "Repos in a human's personal space — the deposit candidates (cf. `Repo.list_user_repos/2`)."
@@ -426,9 +430,11 @@ defmodule Fleet.Forge.Client do
   def private?(repo, opts \\ []), do: Repo.private?(repo, opts)
 
   @doc "Transfere un depot vers une autre org. Cf. `Fleet.Forge.Client.Repo.transfer_repo/3`."
+  @spec transfer_repo(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def transfer_repo(repo, new_owner, opts \\ []), do: Repo.transfer_repo(repo, new_owner, opts)
 
   @doc "Numeric forge id of the repo. See `Fleet.Forge.Client.Repo.repo_id/2`."
+  @spec repo_id(String.t(), Keyword.t()) :: {:ok, integer()} | {:error, term()}
   def repo_id(repo, opts \\ []), do: Repo.repo_id(repo, opts)
 
   @doc """
@@ -908,9 +914,12 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc "Jury state (verdicts + jury SET + outcome) of a PR. See `Fleet.Forge.Client.Jury.pr_review_state/3`."
+  @spec pr_review_state(String.t(), integer(), Keyword.t()) :: {:ok, term()} | {:error, term()}
   def pr_review_state(repo, index, opts \\ []), do: Jury.pr_review_state(repo, index, opts)
 
   @doc "Feedback of the REQUEST_CHANGES in force. See `Fleet.Forge.Client.Jury.change_request_feedback/3`."
+  @spec change_request_feedback(String.t(), integer(), Keyword.t()) ::
+          {:ok, term()} | {:error, term()}
   def change_request_feedback(repo, index, opts \\ []),
     do: Jury.change_request_feedback(repo, index, opts)
 
@@ -936,6 +945,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc "Counts the rework rounds. See `Fleet.Forge.Client.Jury.count_change_request_rounds/3`."
+  @spec count_change_request_rounds(String.t(), integer(), Keyword.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
   def count_change_request_rounds(repo, index, opts \\ []),
     do: Jury.count_change_request_rounds(repo, index, opts)
 
@@ -1059,6 +1070,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc "Judges re-requested after judgment (timeline). See `Fleet.Forge.Client.Jury.pr_rerequested_reviewers/3`."
+  @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
+          {:ok, [String.t()]} | {:error, term()}
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 

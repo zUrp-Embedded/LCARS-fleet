@@ -68,6 +68,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   @max_attempts 5
   @max_delay_ms 600_000
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)

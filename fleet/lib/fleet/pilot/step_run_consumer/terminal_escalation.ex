@@ -125,7 +125,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   @doc """
   Commits the await-architect state, then offers and wakes the architect only after success.
   """
-  @spec freeze_to_arch(pos_integer(), String.t(), term(), String.t(), Seams.t()) :: term()
+  # `decision` est HETEROGENE, et l'ecrire l'a montre : `:blocked_dep` et `:terminal_error` sur
+  # les deux chemins nommes, mais une BINAIRE sur le troisieme (`step_run_consumer.ex:857`, la
+  # branche `other` du verdict). `label/2` l'absorbe par sa clause fourre-tout et la valeur part
+  # telle quelle dans le `step_run` durable. Le spec dit l'etat, il ne le corrige pas.
+  @spec freeze_to_arch(pos_integer(), String.t(), atom() | String.t(), String.t(), Seams.t()) ::
+          term()
   def freeze_to_arch(n, role, decision, comment_body, %Seams{} = seams) do
     step_run = %{
       repo: seams.repo,

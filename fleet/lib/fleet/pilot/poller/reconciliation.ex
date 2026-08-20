@@ -99,6 +99,31 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # wake was lost) owns nothing, on either side.
   @pulled_states [:assigned]
 
+  # CE QUE CETTE LISTE PORTE POUR LES AUTRES — et c'est une nature de couture sans precedent dans ce
+  # depot : le FOURNISSEUR ignorait qu'il portait une garantie. Trois modules lisent la propriete de
+  # verrou sur cette regle, aucun ne l'appelle : ils la CITENT en commentaire et raisonnent dessus.
+  # Changer `@pulled_states` sans les relire casse leur raisonnement en silence — aucun test ne les
+  # relie, aucun appel ne les traverse.
+  #
+  # La declaration ci-dessous est ce qui manquait : le fournisseur nomme ses dependants, et le mur
+  # `reconciliation.pulled_states_declared` la garde vraie DANS LES DEUX SENS — un dependant qui
+  # cesse de dependre sort de la liste, un nouveau qui apparait doit y entrer.
+  @pulled_states_dependents [
+    "lib/fleet/pilot/step_run_consumer/gatekeeper_escalation.ex",
+    "lib/fleet/pilot/step_dispatcher/spawn.ex",
+    "lib/fleet/task_queue/server.ex"
+  ]
+
+  @doc """
+  Les fichiers qui s'appuient sur `@pulled_states` sans l'appeler.
+
+  Existe pour que la garantie soit LISIBLE cote fournisseur : une valeur est la seule forme qu'un
+  mur puisse lire sans deviner, et un commentaire ne se verifie pas. Ne sert a rien au runtime, et
+  c'est assume — son lecteur est le gate.
+  """
+  @spec pulled_states_dependents() :: [String.t()]
+  def pulled_states_dependents, do: @pulled_states_dependents
+
   defmodule Seams do
     @moduledoc """
     Reconciliation boundary contract: the 5 seams (and NOTHING else) that `reconcile/5` reads.

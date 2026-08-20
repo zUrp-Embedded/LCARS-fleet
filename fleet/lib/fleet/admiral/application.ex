@@ -20,7 +20,7 @@ defmodule Fleet.Admiral.Application do
     3. Supervises the opt-in children, each gated by a `:start_*` config knob:
        * `Shutdown` (default `true`) — coordinated graceful shutdown; invoked by
          `bin/fleet_v2 stop` (cmd_stop RPCs `Shutdown.begin` then `:init.stop()`)
-       * `AuditConsumer` (default `true`) — audit-verdict NDJSON rail
+       * `AuditConsumer` (default `true`) — consumer du Bus, log AUDIT (cycle de vie + securite)
        * `MCPMonitor` (default `true`) — local `Process.whereis` liveness, no network
        * `ToolchainReconciler` (default `true`) — le rail d'outillage (head↔SHA, `PeriodicCheck`)
 
@@ -47,6 +47,7 @@ defmodule Fleet.Admiral.Application do
 
   use Supervisor
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(init_arg \\ []) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end

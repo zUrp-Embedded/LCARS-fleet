@@ -806,6 +806,7 @@ defmodule Fleet.Spawner do
   def restart_strategy_for(_scope), do: :temporary
 
   @doc "Runs the same canonical-role spawn-readiness proof used at boot."
+  @spec prove_canon!() :: :ok
   defdelegate prove_canon!(), to: Fleet.Spawner.CanonProof, as: :prove_all!
 
   defp pod_child_spec(args) do

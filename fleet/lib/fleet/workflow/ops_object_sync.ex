@@ -76,6 +76,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
   defp drain_timeout,
     do: Application.get_env(:lcars_fleet, :workflow_ops_sync_drain_timeout, call_timeout())
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end

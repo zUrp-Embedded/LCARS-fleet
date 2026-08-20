@@ -48,10 +48,12 @@ defmodule Fleet.EventRouter.UnixListener do
   Child spec. Options: `:plug` and `:socket` (required), `:mode` (default `0o660`), `:chmod_fun`
   and `:id` (tests).
   """
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{id: Keyword.get(opts, :id, __MODULE__), start: {__MODULE__, :start_link, [opts]}}
   end
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     case Keyword.get(opts, :name) do
       nil -> GenServer.start_link(__MODULE__, opts)

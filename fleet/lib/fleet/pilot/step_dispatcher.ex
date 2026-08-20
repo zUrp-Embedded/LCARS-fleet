@@ -608,6 +608,33 @@ defmodule Fleet.Pilot.StepDispatcher do
     err
   end
 
+  # LE SECOND CHEMIN SANS CARTE, et il etait muet. `refute_missing_rail/1` rend
+  # `:no_doc_rail_in_catalogue` quand le catalogue du projet ne declare aucun rail doc : chaque
+  # ticket documentaire de ce depot echoue alors A CHAQUE TICK, indefiniment, et tombait dans la
+  # clause fourre-tout ci-dessous — le meme mode de panne que la clause du dessus a ete ecrite pour
+  # fermer (« ce qui manquait n'etait pas le repli, c'etait la TRACE »), sur la moitie voisine.
+  # MEME `op` que la carte illisible : les deux disent « la resolution de carte de ce depot a
+  # echoue », donc ils partagent une signature de dedup et le registre n'ouvre qu'un ticket.
+  defp record_unloadable_card(repo, {:error, :no_doc_rail_in_catalogue} = err, opts) do
+    incident =
+      Keyword.get(opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+
+    _ =
+      try do
+        incident.("card", repo, :no_doc_rail_in_catalogue,
+          reason_detail:
+            "le catalogue de ce depot ne declare aucun rail doc (routeless issue NOT onboarded)"
+        )
+      catch
+        kind, why ->
+          Logger.warning(
+            "StepDispatcher: missing-doc-rail incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
+          )
+      end
+
+    err
+  end
+
   defp record_unloadable_card(_repo, err, _opts), do: err
 
   defp refute_missing_rail(nil), do: {:error, :no_doc_rail_in_catalogue}
@@ -693,5 +720,6 @@ defmodule Fleet.Pilot.StepDispatcher do
   # `Fleet.Pilot.StepDispatcher.ProjectResolver` (isolated I/O cluster, quasi-pure). `default_project_resolver/2`
   # stays THIS module's PUBLIC API (default of the `:project_resolver` seam + called by the tests) →
   # `defdelegate` keeps the exact contract.
+  @spec default_project_resolver(String.t(), keyword()) :: {:ok, map() | nil} | {:error, term()}
   defdelegate default_project_resolver(repo, opts), to: Fleet.Pilot.StepDispatcher.ProjectResolver
 end

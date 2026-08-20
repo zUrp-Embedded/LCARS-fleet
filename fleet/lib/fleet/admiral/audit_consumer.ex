@@ -31,13 +31,8 @@ defmodule Fleet.Admiral.AuditConsumer do
   reason `DurableLog` names for excluding `info` in the first place.
 
   A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not
-  in a level bump. (L'ancien `AuditLog` NDJSON etait reserve par conception au rail de severite
-  max — il est parti avec lui, brouette 2026-08-19, ses deux ecrivains morts avec lui.) So
+  in a level bump. So
   widening it is a DECISION with a schema behind it, not a patch.
-
-  `:"pod.drift"` handler (type-only clause): DORMANT — NO producer emits it (the claimed
-  PermanentBoot producer does not exist). Also consumed by
-  DriftMonitor. Kept wired for the day a real drift signal is produced.
 
   GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
   ONLY (no tuple format exists on the Bus). No runtime side effect
@@ -52,6 +47,7 @@ defmodule Fleet.Admiral.AuditConsumer do
 
   alias Fleet.EventRouter.Bus
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)

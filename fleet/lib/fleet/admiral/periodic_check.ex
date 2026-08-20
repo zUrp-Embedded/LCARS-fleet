@@ -1,8 +1,8 @@
 defmodule Fleet.Admiral.PeriodicCheck do
   @moduledoc """
-  Plumbing for the admiral domain's periodic-check GenServers. `MCPMonitor` is its only user since
-  MCPWatcher moved to CI (2026-08-03); kept generic rather than inlined — the next periodic
-  check should not have to re-derive the tick/re-arm/test-hook shape.
+  Plumbing for the admiral domain's periodic-check GenServers (its clients call
+  `start_link/1` — grep for them, this list would rot). Kept generic rather than inlined: the next
+  periodic check should not have to re-derive the tick/re-arm/test-hook shape.
 
   Both twins carry the SAME skeleton: named GenServer + recursive `Process.send_after/3`
   (a single deadline armed at any instant: the tick runs the check then re-arms the next) +

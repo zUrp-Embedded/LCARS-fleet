@@ -35,6 +35,8 @@ defmodule Fleet.Pilot.BriefBuilder do
   OWNER resumes work the judges approved, an OUTSIDER arrives on someone else's branch after that
   budget ran out, and telling the second "ton brief est INCHANGÉ" names a brief it never had.
   """
+  @spec rework_brief(String.t(), module(), String.t(), map(), keyword(), term(), keyword()) ::
+          String.t()
   def rework_brief(role, forge, repo, pr, forge_opts, _route, opts \\ []) do
     # The eng-voice prose (OUTGOING info, twin of the incoming info starvation) lives IN the
     # template (F-23): the summary posted on the PR is the producer's only voice for the human.
@@ -431,6 +433,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   # l'arbitre est composé en profondeur (outputs → sections → rendu), et la seule chose qui compte
   # dans cette ligne est qu'elle distingue trois états d'un rapport de juge. La rendre atteignable
   # coûte un `@doc false` ; la tenir par le brief complet coûterait une couture de forge entière.
+  @spec gray_zone_line_for_test(keyword()) :: String.t()
   def gray_zone_line_for_test(opts) do
     %{findings: f, policy: p} = Keyword.fetch!(opts, :gray_zone)
     gray_zone_line(f, p)

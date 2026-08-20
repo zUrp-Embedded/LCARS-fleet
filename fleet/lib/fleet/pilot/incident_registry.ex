@@ -142,11 +142,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
   @doc """
   The IMMEDIATE-gate facade (longtemps nommee d'apres le rail de severite max — a tort : trois de
   ses quatre appelants n'en ont jamais ete) : escalates through the registry's cooldown gate while PRESERVING
-  "issue on the FIRST occurrence" (no recurrence gate — max severity, doctrine A-06): only the
+  "issue on the FIRST occurrence" (no recurrence gate — porte `immediate`, cf. `events.yaml`): only the
   REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
   suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays
   stateless; the memory lives here. If the registry owner is down, we FAIL-OPEN to the
-  escalation: the max-severity alarm must not be lost because its throttle is.
+  escalation: l'alarme ne doit pas etre perdue parce que son etrangleur l'est.
 
   Returns `{:ok, number}` | `{:suppressed, number | nil}` | `{:error, term}`.
   """
@@ -188,6 +188,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   the registry keeps the MEMORY). Facade kept: **shared** by WakeRecovery and
   the failure consumers (DRY). Returns `{:ok, number}` | `{:error, term}`.
   """
+  @spec escalate(atom(), String.t(), term(), String.t(), keyword()) ::
+          {:ok, integer()} | {:error, term()}
   defdelegate escalate(kind, subject, reason, sig, opts \\ []),
     to: Fleet.Pilot.IncidentRegistry.Escalation
 
@@ -195,6 +197,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # GenServer
   # ============================================================
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end

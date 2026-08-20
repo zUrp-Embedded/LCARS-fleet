@@ -196,6 +196,7 @@ defmodule Fleet.Observation.Deck.View do
   silent-empty table that would lie "no roles" during a broken cap-profile deploy. `reason` is an internal
   error term (`inspect`-ed), not client input.
   """
+  @spec error_page(term()) :: String.t()
   def error_page(reason) do
     """
     <!DOCTYPE html>

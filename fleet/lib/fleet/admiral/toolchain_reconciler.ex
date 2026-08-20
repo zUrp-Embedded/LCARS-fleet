@@ -408,6 +408,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       Application.get_env(:lcars_fleet, :toolchain_converger, &__MODULE__.default_converger_fun/2)
 
   @doc false
+  @spec default_converger_fun(String.t(), keyword()) ::
+          :ok | {:error, {:converger_failed, pos_integer(), binary()}}
   def default_converger_fun(head, opts), do: default_converger(head, opts)
 
   defp nil_if_empty(""), do: nil

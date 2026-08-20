@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   Opens a system issue (default label `error_system` — `opts[:label]` overrides; assignee = the
   PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
   incident. `kind`: `:recurrence` | `:reroll_failed` |
-  `:pod_failed` | `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed` |
+  `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed` |
   `:project_card_failed` | `:project_intensity_invalid`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
@@ -370,11 +370,6 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     do:
       {"re-roll échoué",
        "Le re-roll (re-spawn + re-wake) n'a PAS réparé → problème actif, ici et maintenant."}
-
-  defp kind_describe(:pod_failed),
-    do:
-      {"pod en échec récurrent",
-       "Pod déjà tombé sur la même cause (registre `ops`) → pattern → ROOT-CAUSE requis."}
 
   defp kind_describe(:sp_suspect),
     do:
