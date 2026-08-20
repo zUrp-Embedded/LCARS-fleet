@@ -167,6 +167,78 @@ EOF
   [[ "$output" == *"merge_request%5Btarget_branch%5D=main"* ]]
 }
 
+# ─── request-open: the most complex verb, and it had NO test at all ────────────────────────────
+# By the time the URL is resolved the request IS created; only its address is uncertain. Reporting a
+# failure there makes the operator open a SECOND request, which is worse than saying nothing.
+
+setup_open() { export FORGE_CLI_URL_RETRIES=2 FORGE_CLI_URL_DELAY=0; }
+
+@test "request-open github: the url comes from what create printed" {
+  setup_open
+  _stub gh 0 'https://github.com/acme/widget/pull/9'
+  run "$SUT" request-open --host github --dest-host github.com --repo acme/widget       --head h --base b --title T --body Y
+  [ "$status" -eq 0 ]
+  [[ "$output" == "https://github.com/acme/widget/pull/9" ]]
+  grep -q -- "pr create --repo github.com/acme/widget" "$ARGLOG"
+}
+
+@test "request-open github: create FAILS -> exit 3, and no url is invented" {
+  setup_open
+  _stub gh 1 'HTTP 422: A pull request already exists'
+  run "$SUT" request-open --host github --dest-host github.com --repo acme/widget       --head h --base b --title T --body Y
+  [ "$status" -eq 3 ]
+  [[ "$output" != *"http"* ]]
+}
+
+@test "request-open: create SUCCEEDS but prints no url -> the CONTRACT is asked, not exit 1" {
+  # THE DEFECT THIS FORBIDS: `grep | tail` exits 1 when it matches nothing, and under `pipefail`
+  # that became the verb's exit code — 1 means "usage error" in this file's contract, for a request
+  # that WAS opened. The re-read is what turns "I did not see the url" into "here it is".
+  setup_open
+  cat > "$STUBS/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$ARGLOG"
+case "\$*" in
+  *"pr create"*) echo "Creating pull request..." ;;
+  *"pr list"*)   echo "https://github.com/acme/widget/pull/11" ;;
+esac
+exit 0
+EOF
+  chmod +x "$STUBS/gh"
+  run "$SUT" request-open --host github --dest-host github.com --repo acme/widget       --head h --base b --title T --body Y
+  [ "$status" -eq 0 ]
+  [[ "$output" == "https://github.com/acme/widget/pull/11" ]]
+}
+
+@test "request-open: neither create nor the re-read gives a url -> exit 3, and it SAYS not to reopen" {
+  setup_open
+  _stub gh 0 ''
+  run "$SUT" request-open --host github --dest-host github.com --repo acme/widget       --head h --base b --title T --body Y
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"CREEE"* ]]
+  [[ "$output" == *"NE PAS en rouvrir"* ]]
+}
+
+@test "request-open gitlab: create prints nothing usable, so the contract answers" {
+  # `glab mr create` has NO json output — measured against the doc. The url can only come from
+  # `mr list`, which indexes ASYNCHRONOUSLY: "not indexed yet" and "does not exist" look the same
+  # for a second or two, which is why the re-read retries.
+  setup_open
+  cat > "$STUBS/glab" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$ARGLOG"
+case "\$*" in
+  *"mr create"*) echo "Creating merge request for h into b" ;;
+  *"mr list"*)   echo '[{"web_url":"https://gitlab.com/grp/proj/-/merge_requests/4"}]' ;;
+esac
+exit 0
+EOF
+  chmod +x "$STUBS/glab"
+  run "$SUT" request-open --host gitlab --dest-host gitlab.com --repo grp/proj       --head h --base b --title T --body Y
+  [ "$status" -eq 0 ]
+  [[ "$output" == "https://gitlab.com/grp/proj/-/merge_requests/4" ]]
+}
+
 # ─── usage refusals ────────────────────────────────────────────────────────────────────────────
 
 @test "an unknown --host is refused, and both valid ones are named" {

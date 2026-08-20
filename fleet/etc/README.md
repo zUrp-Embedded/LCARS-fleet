@@ -67,11 +67,11 @@ du provisioning (`60-deploy check`). Avant le manifest, la liste existait ici ET
 et les deux copies avaient commencé à dériver.
 
 `bin/claude_launch.identity` **est** dans le manifest depuis que le BEAM publie : le tool MCP
-`github_publish` fait tourner `bin/publish-to-github.sh` côté hôte, et ce script source l'identité
+`github_publish` fait tourner `bin/publish-transform.sh` côté hôte, et ce script source l'identité
 co-localisée (`$SCRIPT_DIR/claude_launch.identity`) pour l'attribution du co-auteur. Tant que seul
 l'opérateur lançait le script depuis le repo, l'identité n'avait pas à être livrée ; son invocation
 par le BEAM la rend nécessaire à l'install. `bin/publish-rail.sh` (le rail phase-2) et
-`bin/publish-to-github.sh` shippent pour la même raison.
+`bin/publish-transform.sh` shippent pour la même raison.
 
 ## Tests intégration
 

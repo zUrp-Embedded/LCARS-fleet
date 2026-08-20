@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: test/publish_to_github/publish_to_github_transform.bats
+# SOURCE: test/publish_transform/publish_transform_history.bats
 # AUTHOR: vanille (chantier rails gatekeeper/chief, lot D1)
 # STARDATE: 2026-08-18
-# STATUS: the TRANSFORM itself, end-to-end — the half publish_to_github.bats never covered.
+# STATUS: the TRANSFORM itself, end-to-end — the half publish_transform.bats never covered.
 #
 # The sibling file drives scan_forbidden_markers (certification) without filter-repo. These drive
 # the WHOLE script against a LOCAL bare fixture (git clone accepts a path: --forge <dir>), with a
@@ -14,7 +14,7 @@
 SYSTEM_EMAIL="system_starfleet@lcars.local"
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-to-github.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-transform.sh"
   TMP="$(mktemp -d)"
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 }

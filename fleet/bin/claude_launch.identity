@@ -3,7 +3,7 @@
 #
 # Pure vendor fact: the name + email used for the git CO-AUTHOR attribution when publishing to GitHub.
 # Never read by the pod, never by the BEAM runtime — only an out-of-fleet publication tool such as
-# `etc/publish-to-github.sh` sources it. The co-author IS THE VENDOR, never hardcoded in the publication
+# `etc/publish-transform.sh` sources it. The co-author IS THE VENDOR, never hardcoded in the publication
 # logic: each vendor carries ITS OWN identity, co-located with ITS launcher, the same discipline as the
 # N0/N1 frontier ("new vendor → new bin/<vendor>_launch.sh" — here: "→ co-locate
 # bin/<vendor>_launch.identity").

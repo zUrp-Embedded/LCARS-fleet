@@ -917,7 +917,7 @@ cmd_approve() {
   local work="$work_base/clone"
 
   # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
-  "$(dirname "$(readlink -f "$0")")/publish-to-github.sh" \
+  "$(dirname "$(readlink -f "$0")")/publish-transform.sh" \
     --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"
@@ -929,9 +929,22 @@ cmd_approve() {
     # Read HERE, right before it decides: the tier is a fact about NOW, not about ten minutes ago.
     have_cli=0
     if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then have_cli=1; fi
-    local repo_exists=0
+    # ⚠ TROIS ETATS, ET `&&` N'EN LIT QUE DEUX. `repo-exists` rend 0 present / 1 absent /
+    # 2 INDECIDABLE (depot prive d'un tiers, droits insuffisants). Un `&& repo_exists=1` faisait
+    # tomber le 2 dans le meme sac que le 1 : on enchainait sur la creation, qui echouait en
+    # « name already exists » — precisement le defaut que le helper documente comme ferme. Il EST
+    # ferme dans le helper, et il etait rouvert ici. Fermer une classe au bon endroit ne sert a
+    # rien si le site d'appel raplatit le resultat.
+    local repo_exists=0 rex=0
     if [[ "$have_cli" == 1 ]]; then
-      _dest_repo_exists "$host" "$dest_host" "$dest_repo" && repo_exists=1
+      _dest_repo_exists "$host" "$dest_host" "$dest_repo" || rex=$?
+      case "$rex" in
+        0) repo_exists=1 ;;
+        1) repo_exists=0 ;;
+        *) die "approve: existence de $dest_host/$dest_repo INDECIDABLE — $cli ne peut ni la voir
+  ni prouver son absence (depot prive d'un tiers ? droits insuffisants ?). Rien n'a ete cree.
+  Verifie le nom et tes droits, ou passe par un repo pre-cree (Tier 2)." ;;
+      esac
     else
       git ls-remote "$dest_url" >/dev/null 2>&1 && repo_exists=1
     fi

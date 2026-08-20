@@ -207,26 +207,49 @@ print(a[0]["web_url"] if isinstance(a, list) and a else "")' <<<"$out")" || exit
 # redirect, doc link) into the pipe, and `tail -1` hands back the LAST one, so the warning wins over
 # the result. So we no longer read `create`'s output at all: we create, then RE-READ through
 # `request-find`, which has a JSON contract. The regex disappears from both sides.
+# BY THE TIME WE GET HERE THE REQUEST IS CREATED; only its URL is uncertain. Two forges, two
+# reasons it can come back empty, and one answer for both:
+#   · GitHub prints the url on stdout, so a grep normally finds it — but a bare `grep | tail` under
+#     `pipefail` exits 1 when it matches NOTHING, and 1 means "usage error" in this file's own
+#     contract. A future `gh` output format would therefore report the wrong failure for a request
+#     that WAS opened.
+#   · GitLab prints nothing machine-readable at all, and `mr list` indexes ASYNCHRONOUSLY: a re-read
+#     fired in the same second can legitimately answer "no MR". "Not indexed yet" and "does not
+#     exist" look identical for a second or two.
+# So: read what `create` said; if that is empty, ask the CONTRACT, and give it a few tries. Never
+# report a failure for a request that exists — the operator would open a second one.
+resolve_request_url() { # <create output> -> url on stdout, exit 3 if unresolvable
+  local url i
+  url="$(grep -oE 'https?://[^[:space:]]+' <<<"${1:-}" | tail -1 || true)"
+  [[ -n "$url" ]] && { printf '%s' "$url"; return 0; }
+
+  for i in $(seq 1 "${FORGE_CLI_URL_RETRIES:-3}"); do
+    url="$(cmd_request_find || true)"
+    [[ -n "$url" ]] && { printf '%s' "$url"; return 0; }
+    sleep "${FORGE_CLI_URL_DELAY:-1}"
+  done
+
+  echo "forge-cli: la PR/MR a ete CREEE mais son URL reste introuvable — NE PAS en rouvrir une" >&2
+  return 3
+}
+
 cmd_request_open() {
   need_cli
   [[ -n "$HEAD" && -n "$BASE" && -n "$TITLE" ]] || { echo "forge-cli: --head --base --title requis" >&2; exit 1; }
   local out
   case "$HOST" in
     github)
-      # `gh pr create` prints the url on stdout — a stable contract, we read it directly.
       out="$(gh pr create --repo "$GH_REPO" --head "$HEAD" --base "$BASE" \
                --title "$TITLE" --body "$BODY" 2>&1)" \
         || { echo "forge-cli: pr create a ECHOUE — $(head -1 <<<"$out")" >&2; exit 3; }
-      grep -oE 'https?://[^[:space:]]+' <<<"$out" | tail -1
       ;;
     gitlab)
       out="$(glab mr create --repo "$REPO" --source-branch "$HEAD" --target-branch "$BASE" \
                --title "$TITLE" --description "$BODY" --yes 2>&1)" \
         || { echo "forge-cli: mr create a ECHOUE — $(head -1 <<<"$out")" >&2; exit 3; }
-      # Re-read through the contract, not a regex over human-facing output.
-      cmd_request_find
       ;;
   esac
+  resolve_request_url "$out"
 }
 
 # THE PRE-FILLED WEB URL — the Tier 2 path, when no CLI is present. No network call: it is a stable

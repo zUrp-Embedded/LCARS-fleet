@@ -123,6 +123,9 @@ _full_binding='{"host":"github","dest_host":"ghe.example.com","dest_repo":"acme/
   work="$(sed -n 's/.*--work \([^ ]*\).*/\1/p' "$RAILLOG")"
   [ -n "$work" ]
   [ ! -e "$work" ]
+  # AND its parent: the verb allocates `mktemp -d` then works in `$tmp/clone`, so sweeping only the
+  # clone would leave one empty temp directory per publication — the same leak, one level up.
+  [ ! -e "$(dirname "$work")" ]
 }
 
 @test "exit 6 KEEPS the clone and prints where it is" {

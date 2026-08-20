@@ -103,4 +103,4 @@ la fois (`concurrency: pages`), et `workflow_dispatch` pour le jouer à la main.
 ## À décider avant publication
 
 L'org et le nom du dépôt — ils fixent l'URL servie (`site:` dans `astro.config.mjs`) — et si GitHub
-reçoit le dépôt tel quel ou un miroir réécrit par `fleet/bin/publish-to-github.sh`.
+reçoit le dépôt tel quel ou un miroir réécrit par `fleet/bin/publish-transform.sh`.

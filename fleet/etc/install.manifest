@@ -14,17 +14,19 @@
 #   link           the entry also gets a PATH symlink $LINK_DIR/<name> -> $PREFIX/bin/<name>
 #                  (pointer symlinks ONLY — copies are the dead D3 invention).
 #
-# bin/claude_launch.identity SHIPS now: the BEAM's `github_publish` MCP tool runs
-# bin/publish-to-github.sh host-side, which sources the co-located identity for co-author
-# attribution. It was repo-only while nothing but the operator ran the script; the BEAM
-# invocation makes it a runtime dependency (cf. etc/README.md). Same reason for the two
-# publish scripts, moved from etc/ to bin/ so the manifest can carry them.
+# bin/claude_launch.identity SHIPS now: the runtime runs bin/publish-transform.sh host-side, and
+# that script sources the co-located identity for co-author attribution. It was repo-only while
+# nothing but the operator ran it; the runtime invocation makes it a dependency (cf. etc/README.md).
+# Same reason for the publish scripts, moved from etc/ to bin/ so the manifest can carry them.
+# ⚠ This paragraph named a `github_publish` MCP tool. There is no such tool — `grep` finds none.
+# The publish path is `project_publish` (async worker) and, since 2026-08-20, `lcars publish run`
+# on the human side. A comment that names a dead object is read as true by whoever reads it next.
 fleet_v2                   exec   link
 lcars                      exec   link
 bwrap_launch.sh            exec
 host_launch.sh             exec
 claude_launch.sh           exec
-publish-to-github.sh       exec
+publish-transform.sh       exec
 publish-rail.sh            exec
 forge-cli.sh               exec
 claude_launch.identity     noexec

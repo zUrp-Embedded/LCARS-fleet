@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: test/publish_to_github/publish_to_github.bats
+# SOURCE: test/publish_transform/publish_transform.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.232
-# STATUS: bats tests for bin/publish-to-github.sh post-transform certification
+# STATUS: bats tests for bin/publish-transform.sh post-transform certification
 #
 # filter-repo's exit 0 means "the callback ran", not "no internal attribution survived". These drive
 # the extracted scan_forbidden_markers (source guard = no filter-repo needed) on a fixture git repo,
@@ -10,7 +10,7 @@
 # passes — the certification the script announces is actually checked, not trusted.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-to-github.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-transform.sh"
   source "$SCRIPT"
   TMP="$(mktemp -d)"
   cd "$TMP"
@@ -42,7 +42,7 @@ teardown() { rm -rf "$TMP"; }
   [[ "$output" == *"trailer interne survivant"* ]]
 }
 
-@test "sourcing publish-to-github.sh never runs the transform (source guard)" {
+@test "sourcing publish-transform.sh never runs the transform (source guard)" {
   run bash -c "source '$SCRIPT'; echo sourced-ok"
   [ "$status" -eq 0 ]
   [[ "$output" == *"sourced-ok"* ]]
