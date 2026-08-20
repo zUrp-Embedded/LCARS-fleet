@@ -8,7 +8,7 @@
 # `Bus.subscribe` + `handle_info`) — NOT by a dispatch table. The `Dispatch`
 # GenServer (table `event → handle_event/1`, never wired) was REMOVED. Which
 # consumer consumes which event is documented in each consumer's moduledoc
-# (`AuditConsumer`, `DriftMonitor`, `Spawner.PublishConsumer`,
+# (`AuditConsumer`, `Spawner.PublishConsumer`,
 # `API.WS`, `Pilot.StepRunConsumer`, …). (The RAM engine `Pipeline.Executor`, once
 # a consumer, is removed: the forge-driven rail `Pilot.StepRunConsumer` replaced it.)
 #

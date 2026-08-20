@@ -66,7 +66,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
     {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"},
     # An edge this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
-    # it "same shape as `:coord_backend`" (un seam mort avec `Fleet.Coord`, brouette 2026-08-19),
+    # it "same shape as `:coord_backend`",
     # which is the class excluded just above. The test is the `deps:` list, not the injection
     # mechanism — `Fleet.Pilot` is not in Admiral's deps. It crosses an edge boundary forbids.
     # (Its former twin `:project_incident_rail` is GONE — BL-6-114, arbitrage user 2026-08-19:

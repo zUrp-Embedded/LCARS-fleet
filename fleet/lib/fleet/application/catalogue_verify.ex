@@ -73,8 +73,7 @@ defmodule Fleet.Application.CatalogueVerify do
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
   manifest is a precondition (nothing downstream is meaningful without it), and the images are a
   precondition for the spawn proof and the card guards (both read the frozen image, so a failed
-  image would cascade into noise). (La sonde « escalation policies » est partie avec
-  `Fleet.Coord` — brouette 2026-08-19 : sur images cassées il ne reste que le rapport d'images.)
+  image would cascade into noise). (La sonde « escalation policies » est partie avec)
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do
@@ -136,9 +135,7 @@ defmodule Fleet.Application.CatalogueVerify do
           {"business catalogue advice", fn -> advise_business!(root) end}
         ]
       else
-        # Images broke → the spawn proof and card guards would only echo it. (La sonde
-        # « escalation policies » est partie avec `Fleet.Coord` — brouette 2026-08-19 : le rail
-        # verdict→dashboard etait de la telemetrie sans acte, et son YAML a quitte le catalogue.)
+        # Images broke → the spawn proof and card guards would only echo it.
         []
       end
 

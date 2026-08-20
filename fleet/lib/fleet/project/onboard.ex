@@ -6,8 +6,8 @@ defmodule Fleet.Project.Onboard do
 
     * `/home/projects/<name>`       → clone, branch `main`       (the deliverable, push origin)
     * `/home/projects.ops/<name>`  → STANDALONE repo, branch `ops` (orphan) — the RECORD:
-      briefs, gate-briefs, verdicts, provenance. Written by the RUNTIME; no pod writes here, and
-      since the mount that read it moved, no pod reads it either.
+      briefs, gate-briefs, verdicts, provenance. Written by the RUNTIME; no pod writes here.
+      Qui le monte, et en quel mode, est declare dans les `mounts:` des cap-profiles.
     * `/home/projects.workshop/<name>`   → STANDALONE repo, branch `workshop` (orphan) — the WORKSHOP:
       plans, backlog, scratchpad, specs in progress. Written by a PRODUCER, ships with nothing.
 

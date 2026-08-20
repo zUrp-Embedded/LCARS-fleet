@@ -440,8 +440,7 @@ defmodule Fleet.Catalogue do
   #
   # ⚠ ONE TREE IS STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
   # (read by `Workflow.BriefTemplate`). Same latent skew — a catalogue's own would never be read —
-  # not closed here because no caller holds the catalogue in hand today. (Its former twin,
-  # `coord_policies`, est parti avec `Fleet.Coord` — brouette 2026-08-19.)
+  # not closed here because no caller holds the catalogue in hand today. (Its former twin,)
   def rel(:project_template), do: @rel_project_template
 
   @doc """

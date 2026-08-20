@@ -188,6 +188,5 @@ dans `etc/README.md` + `etc/fleet_v2.env.template`.
 ## Où lire la suite
 
 - **`CLAUDE.md`** — guide de navigation du dépôt : topologie, invariants, conventions.
-- **Contrat d'un domaine** — le `@moduledoc` de sa façade `Fleet.<Domaine>` (SSoT machine-visible :
-  `h Fleet.Coord`). Les `README.md` des domaines sont des **cartes** (index de modules + pointeurs),
+- **Contrat d'un domaine** — le `@moduledoc` de sa façade `Fleet.<Domaine>` (SSoT machine-visible :). Les `README.md` des domaines sont des **cartes** (index de modules + pointeurs),
   jamais une copie du contrat.

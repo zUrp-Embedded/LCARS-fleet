@@ -72,8 +72,6 @@ defmodule Fleet.CatalogueTest do
           ] do
         assert File.dir?(tree), "bundled catalogue is missing #{tree}"
       end
-
-      # (coord_policies_path est parti avec Fleet.Coord — brouette 2026-08-19.)
     end
 
     test "a nil root (a cross-test config leak) never reaches Path.join" do

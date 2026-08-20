@@ -55,7 +55,7 @@
 #         Env:     CLAUDE_AGENT_NAME (instance identity)
 #
 #     DEPENDENCIES
-#         git, fleet-done.sh (fleet Ring 2)
+#         git, fleet-done.sh
 #
 #     EXIT CODES
 #         0    Always (hook must not block compaction)

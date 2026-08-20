@@ -177,7 +177,7 @@ is_ipc_exception() {
     local base
     base=$(basename "$1")
     case "$base" in
-        *-handoff.md|scratchpad.md) return 0 ;;
+        scratchpad.md) return 0 ;;
     esac
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
     # Graines de projet genere, pas du lignage doc LCARS. Motif ELARGI le 2026-08-06 : il etait ecrit

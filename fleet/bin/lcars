@@ -106,7 +106,7 @@ USAGE
       Migre un projet vers un autre catalogue : transfert du depot dans l'org de ce
       catalogue, PUIS repointage de l'origin des trois faces locales. Les deux
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
-      via la redirection 301. REFUSE un catalogue qui n'est pas actif ici.
+      via la redirection 301. REFUSE un catalogue qui n'est pas installe ici.
 
   $PROG project reconcile [check|apply]
       La forge dit quels projets existent, le disque suit. Sur un /home neuf — boite

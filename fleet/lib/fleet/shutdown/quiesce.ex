@@ -4,7 +4,7 @@ defmodule Fleet.Shutdown.Quiesce do
   @moduledoc """
   Zero-dependency daemon quiescence primitive. Admission and respawn paths refuse
   new work while finalizers remain allowed to drain current work. Policy stays in
-  Starfleet; this module only owns persistent flags and activity counters.
+  `Fleet.Admiral`; this module only owns persistent flags and activity counters.
   """
 
   @key {__MODULE__, :quiescing}

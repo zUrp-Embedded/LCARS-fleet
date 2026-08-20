@@ -1,11 +1,10 @@
 defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   @moduledoc """
-  Q2 DRAFT producers — `StepRunConsumer` feeds the incident rail that had a consumer
-  (l'ex-DriftMonitor, mort avec la brouette) but NO producer:
+  Q2 DRAFT producers — `StepRunConsumer` feeds the incident rail:
 
   - `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`).
 
-  Both are emitted with source `:workflow` (DriftMonitor anti-spoof invariant) via `safe_emit`:
+  Both are emitted with source `:workflow` (invariant anti-spoof du registre : la route exige sa source) via `safe_emit`:
   an emission failure is logged warning by the producer and never blocks the carrying escalation
   (the Bus is the lossy fast-path; durable truth stays on the forge rail).
   We subscribe to the REAL Bus (that is the point of the test: prove the emission) → `async: false`
