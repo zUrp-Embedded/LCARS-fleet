@@ -107,12 +107,20 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   end
 
   # The per-human binding is the source of truth for WHERE this project publishes (chantier §5bis).
+  #
+  # ⚠ `base` EST UNE CLE REQUISE, et elle ne l'etait pas. `rail_args/5` faisait
+  # `Map.get(b, "base") || "main"` : une liaison ecrite par une version anterieure d'`approve`,
+  # editee a la main ou tronquee publiait donc silencieusement contre `main`, quelle que soit la
+  # branche par defaut de la destination. Le defaut avait DEUX entrees independantes — l'ecriture
+  # (`approve` supposait `main`) et la lecture (ici). Fermer une seule des deux laissait le rail
+  # casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une liaison : elle est
+  # refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une supposition.
   defp read_binding(slug) do
     path = Path.join([System.user_home!(), ".lcars", "publish", "#{slug}.json"])
 
     with {:ok, raw} <- file_read(path, {:not_linked, slug}),
          {:ok, map} when is_map(map) <- decode(raw, {:binding_invalid, path}),
-         :ok <- require_keys(map, ~w(host dest_host dest_repo), path) do
+         :ok <- require_keys(map, ~w(host dest_host dest_repo base), path) do
       {:ok, map}
     end
   end
@@ -158,7 +166,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
       "--dest-host",
       b["dest_host"],
       "--base",
-      Map.get(b, "base") || "main",
+      b["base"],
       "--work",
       work
     ]

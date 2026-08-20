@@ -586,6 +586,15 @@ PUBLISH_DIR="$HOME/.lcars/publish"
 # Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
+# THE SINGLE CALL SURFACE FOR AN EXTERNAL FORGE. This CLI carried three bare `auth status` probes
+# and two host-less `gh`/`glab` invocations: on an Enterprise instance `forge status` announced
+# `[ok] authentifie` from a GLOBAL state, and `approve` probed and then CREATED the repository on
+# github.com while pushing to the enterprise host. All of it now lives in one place.
+_FORGE_CLI="$(dirname "$(readlink -f "$0")")/forge-cli.sh"
+_fc() { # _fc <verbe> <host> <dest_host> <repo> [args...]
+  "$_FORGE_CLI" "$1" --host "$2" --dest-host "$3" --repo "$4" "${@:5}"
+}
+
 # The official CLI of a host — the Tier-1 credential helper AND repo-creator. OPTIONAL: absent, approve
 # falls to Tier 2 (link a pre-created repo, push via the operator's own wired helper). gh<->glab are
 # 1:1. We NEVER read or pass a token: auth is `gh/glab auth login` or the operator's helper, never ours.
@@ -594,13 +603,11 @@ _json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).g
 
 # Tier-1 repo bootstrap via the CLI's own API — the create right comes WITH `gh/glab auth login`, no
 # expensive scope to grant by hand. _dest_repo_exists probes; _dest_repo_create makes it under the login.
-_dest_repo_exists() { case "$1" in gh) gh repo view "$2" ;; glab) glab repo view "$2" ;; esac >/dev/null 2>&1; }
-_dest_repo_create() {  # cli repo visibility(public|private)
-  case "$1" in
-    gh)   gh   repo create "$2" "--$3" ;;
-    glab) glab repo create "$2" "--$3" ;;
-  esac
-}
+# THREE STATES, NOT TWO: the helper tells "absent" (1) from "not allowed to see it" (2). Conflated,
+# somebody else's private repository made us proceed to a creation that failed with "name already
+# exists" — a message that teaches nobody anything.
+_dest_repo_exists() { _fc repo-exists "$1" "$2" "$3"; }              # host dest_host repo
+_dest_repo_create() { _fc repo-create "$1" "$2" "$3" --visibility "$4"; }
 
 cmd_forge() {
   case "${1:-}" in
@@ -667,7 +674,11 @@ cmd_forge_status() {
       owner="$(_json_field "$f" owner)"
       dest_host="$(_json_field "$f" dest_host)"
       cli="$(_dest_cli "$host")"
-      if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+      # ON THIS FORGE'S HOST, not on a global state: bare, `auth status` exits 1 as soon as ANY
+      # host has an issue, and exits 0 as soon as ONE host is fine. A dashboard that shows
+      # `[ok] authentifie` to an operator who is not authenticated ON THIS FORGE is worse than no
+      # dashboard at all: it lies at the exact spot where one goes looking for the failure.
+      if _fc auth-ok "$host" "$dest_host" "$owner/-"; then
         echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie"
       else
         echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »"
@@ -706,7 +717,7 @@ cmd_publish_status() {
   base="$(_json_field "$binding" base)"
   cli="$(_dest_cli "$host")"
   echo "publish « $repo » : lie a $dest_host/$dest_repo (base $base)"
-  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then
+  if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then
     echo "  [ok] $cli authentifie"
   else
     echo "  [!!] $cli non authentifie — « $cli auth login » (ou cable un helper git)"
@@ -721,7 +732,14 @@ cmd_publish_status() {
 }
 
 cmd_approve() {
-  local repo="" forge="" as="" base="main" visibility="private"
+  # THE BASE NO LONGER HAS A HARDCODED DEFAULT, AND THIS WAS THE RAIL'S COSTLIEST DEFECT. It was
+  # `main` on both sides and NEVER derived from the destination. Measured on lordzurp/QSS: default
+  # `master`, no `main`, repository NOT empty. The guard reading "never clobber a base the human
+  # populated by hand" interrogated the ASSUMED base: it found nothing, let the push through, and
+  # created an ORPHAN `main` branch next to `master`. The repository ended up with two unrelated
+  # histories, and the whole publication landed on a branch nobody ever looks at.
+  # Empty = "derive it from the destination", done below, after the existence probe.
+  local repo="" forge="" as="" base="" visibility="private"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --forge) forge="$2"; shift 2 ;;
@@ -758,6 +776,12 @@ cmd_approve() {
     dest_host="$(_json_field "$binding" dest_host)"
     dest_repo="$(_json_field "$binding" dest_repo)"
     base="$(_json_field "$binding" base)"
+    # A BINDING THAT DOES NOT SAY WHERE IT PUBLISHES IS NOT A BINDING. On the runtime side,
+    # `project_publish.ex` did not even count `base` among its required keys and fell back to
+    # `main`: the defect had TWO independent entry points, the write and the read. This one is
+    # closed by refusing, never by guessing.
+    [[ -n "$base" ]] || die "approve: la liaison $binding ne declare pas de « base ».
+  Relie a nouveau en la nommant : approve $repo --forge <name> --as <repo-dest> --base <branche>"
   fi
 
   # The CLI (gh/glab) is OPTIONAL — it is only NEEDED to CREATE a repo that does not exist yet (Tier 1).
@@ -766,7 +790,7 @@ cmd_approve() {
   # so a missing helper fails LOUD at push instead of hanging on a prompt (a headless BEAM can't answer).
   local cli; cli="$(_dest_cli "$host")"
   local have_cli=0
-  if command -v "$cli" >/dev/null 2>&1 && "$cli" auth status >/dev/null 2>&1; then have_cli=1; fi
+  if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then have_cli=1; fi
   export GIT_TERMINAL_PROMPT=0
 
   # Internal forge config — one source, loaded by the one function that knows it (`_load_box_env`).
@@ -798,7 +822,7 @@ cmd_approve() {
     # (accurate), else via a bare ls-remote (Tier 2: the operator pre-created it, so it answers).
     local repo_exists=0
     if [[ "$have_cli" == 1 ]]; then
-      _dest_repo_exists "$cli" "$dest_repo" && repo_exists=1
+      _dest_repo_exists "$host" "$dest_host" "$dest_repo" && repo_exists=1
     else
       git ls-remote "$dest_url" >/dev/null 2>&1 && repo_exists=1
     fi
@@ -807,9 +831,32 @@ cmd_approve() {
       # we cannot create: tell the operator his two ways forward rather than push into the void.
       [[ "$have_cli" == 1 ]] || die "approve: $dest_host/$dest_repo n'existe pas et $cli n'est pas authentifie.
   Tier 1 : '$cli auth login' pour l'auto-creation.  Tier 2 : cree le repo vide dans l'UI web puis relance."
-      _dest_repo_create "$cli" "$dest_repo" "$visibility" \
+      _dest_repo_create "$host" "$dest_host" "$dest_repo" "$visibility" \
         || die "approve: creation de $dest_host/$dest_repo echouee ($cli repo create)"
       echo "approve: $dest_host/$dest_repo cree ($visibility) sous ton login $cli."
+    fi
+    # THE BASE IS DERIVED FROM THE DESTINATION, IT IS NOT ASSUMED. Three states, three answers:
+    #   · repository we have just created -> it is empty, we choose its base;
+    #   · repository present and populated -> we READ its default branch (that is the one the forge
+    #     displays, hence the only one a PR against makes any sense);
+    #   · repository present but EMPTY -> no ref to read, this is the supported Tier 2 case
+    #     ("create the empty repo in the web UI, then re-run"): we choose.
+    if [[ -z "$base" ]]; then
+      if [[ "$repo_exists" == 1 ]]; then
+        base="$(_fc default-branch "$host" "$dest_host" "$dest_repo" 2>/dev/null || true)"
+        if [[ -z "$base" ]]; then
+          # `--exit-code` with no pattern: 0 = the repo has refs, non-zero = it is empty.
+          if git ls-remote --exit-code "$dest_url" >/dev/null 2>&1; then
+            die "approve: branche par defaut de $dest_host/$dest_repo illisible alors que le depot
+  n'est PAS vide — refuse de deviner. Nomme-la : approve $repo --forge $forge --as $as --base <branche>"
+          fi
+          base="main"
+        else
+          echo "approve: base derivee de la destination -> « $base »"
+        fi
+      else
+        base="main"
+      fi
     fi
     # LINK: never clobber a base the human populated by hand (a repo pre-created WITH content, Tier 2).
     if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
