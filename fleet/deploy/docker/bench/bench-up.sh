@@ -48,8 +48,9 @@
 # EXIT  : 0 banc pret (verdict `banc PRET`, ou `banc PRET_SANS_CI` sous --no-runner) · 1
 #         arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas · 4 amorcage
 #         forge · 5 creds · 6 le verdict final ne passe pas — Y COMPRIS un runner DEMANDE qui ne
-#         sert pas (image, token, enregistrement ou visibilite). `--no-runner` est le seul mode
-#         degrade qui rende 0, et il porte son propre verdict.
+#         sert pas (image, token, enregistrement ou visibilite), ET une BOITE qui a publie un echec
+#         de convergence dans `/run/lcars-provision.rc`. `--no-runner` est le seul mode degrade qui
+#         rende 0, et il porte son propre verdict.
 
 set -euo pipefail
 
@@ -486,6 +487,37 @@ OP_TOKEN_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.gitea_toke
 HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api/v1/user" \
   | python3 -c 'import json,sys; print("site-admin" if json.load(sys.stdin).get("is_admin") else "non-admin")' 2>/dev/null || echo "?")"
 
+# ─── 6bis. LE VERDICT QUE LA BOITE A PUBLIE SUR ELLE-MEME ────────────────────────────────────────
+# LA BOITE MESURE SA PROPRE CONVERGENCE ET L'ECRIT, ET CE SCRIPT NE LA LISAIT PAS. L'entrypoint pose
+# `/run/lcars-provision.rc` a chaque boot, precisement parce qu'un echec de convergence NE TUE PAS le
+# conteneur : la boite doit rester joignable pour etre reparee, donc elle survit a son propre echec
+# et se declare *healthy* (son healthcheck teste le port 22). Sans cette lecture, un banc dont la
+# boite ne peut demarrer AUCUN pod sortait `banc PRET` et rendait 0.
+#
+# C'est la faute de 6-133 au site d'a cote : le detail existait — dans les logs du conteneur, cette
+# fois, qu'on ne va pas lire apres une commande qui a dit oui — et le verdict principal affirmait
+# l'inverse. C'est le verdict qu'on lit.
+#
+# ⚠ LA SEMANTIQUE EST CELLE DU GESTE OPERATEUR (`deploy/box`, `await_provision_verdict`), reprise a
+# dessein plutot que reinventee : deux chemins qui lisent le meme fichier et en tirent deux verdicts
+# differents, c'est un fichier qui ne veut plus rien dire.
+#   0         convergee ;
+#   2         APPLIQUEE, drift residuel — un geste manque (forge, credentials, reseau), rien n'est
+#             casse : le banc reste PRET, et le drift se DIT ;
+#   autre     au moins un echec — la boite tourne et ne produira RIEN : le banc n'est pas pret ;
+#   illisible NON MESUREE, ce qui n'est PAS un echec. Sortir non nul sur une non-mesure apprend a
+#             ignorer le code de sortie, ce qui coute exactement le jour ou il est vrai.
+BOX_PROV_RC="$("$DOCKER_BIN" exec "$BOX" cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]' || true)"
+[[ "$BOX_PROV_RC" =~ ^[0-9]+$ ]] || BOX_PROV_RC=""
+BOX_PROV_OK=1
+case "$BOX_PROV_RC" in
+  0)  BOX_PROV_STATE="convergee" ;;
+  2)  BOX_PROV_STATE="APPLIQUEE avec DRIFT RESIDUEL — un geste manque, rien n'est casse (\"$DOCKER_BIN exec $BOX /opt/lcars/provision doctor\" nomme lequel)" ;;
+  "") BOX_PROV_STATE="NON MESUREE — /run/lcars-provision.rc illisible dans la boite (elle n'a peut-etre pas fini de converger)" ;;
+  *)  BOX_PROV_STATE="EN ECHEC (rc=$BOX_PROV_RC) — la boite tourne et ne produira RIEN (\"$DOCKER_BIN exec $BOX /opt/lcars/provision doctor\")"
+      BOX_PROV_OK=0 ;;
+esac
+
 # ─── 7. LE RUNNER — on APPELLE la recette, on ne la refait pas ───────────────────────────────────
 # `bench-runner.sh` (2026-08-02) EST le geste, et il porte deux pieges reseau qu'un appel naif
 # reprendrait de plein fouet. Le projet unique en desamorce UN : le runner joint la forge parce
@@ -623,7 +655,11 @@ fi
 # TROIS VERDICTS, ET `--no-runner` EN PORTE SON PROPRE — jamais l'equivalent du banc complet. Un
 # mode degrade choisi et un mode degrade subi ne se disent pas du meme mot : celui qui lit un journal
 # doit pouvoir distinguer « je n'ai pas voulu de CI » de « la CI n'a pas pu se poser ».
-if [[ "$WITH_RUNNER" -eq 0 ]]; then
+# La boite passe AVANT le runner : un runner qui sert parfaitement une boite qui ne produit rien est
+# un banc qui ne produit rien. L'ordre des branches est donc l'ordre de gravite, pas l'ordre du code.
+if [[ "$BOX_PROV_OK" -ne 1 ]]; then
+  VERDICT="banc PAS PRET — la BOITE s'est declaree en echec de convergence"
+elif [[ "$WITH_RUNNER" -eq 0 ]]; then
   VERDICT="banc PRET_SANS_CI"
 elif [[ "$RUNNER_SERT" -eq 1 ]]; then
   VERDICT="banc PRET"
@@ -674,12 +710,20 @@ say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
 say "  op-token  : $OP_TOKEN_OK (~/.gitea_token de $HUMAN — la voie de la boite vers la forge)"
 say "  creds     : $CREDS_OK"
 say "  admin     : $HUMAN_ADMIN_STATE"
+say "  converge  : $BOX_PROV_STATE"
 say "  destruire : bench-down.sh --project $PROJECT"
 say "─────────────────────────────────────────────────────────"
 
 # LE BLOC EST IMPRIME AVANT LE REFUS, delibere : l'operateur a besoin des details POUR reparer, et
 # un `die` en tete les lui prendrait. Le code 6 est celui que ce script reserve deja au « verdict
 # final qui ne passe pas » — la nature est la meme, la cause est nouvelle.
+if [[ "$BOX_PROV_OK" -ne 1 ]]; then
+  die "la BOITE a publie un echec de convergence ($BOX_PROV_STATE) — banc INCOMPLET. Elle tourne et
+     reste joignable POUR ETRE REPAREE, c'est l'arbitrage de l'entrypoint ; elle ne produira rien
+     tant que la convergence n'est pas verte. Aucun \`--no-…\` ne rend ce mode acceptable : un banc
+     sans CI se choisit, une boite qui ne converge pas se subit" 6
+fi
+
 if [[ "$WITH_RUNNER" -eq 1 && "$RUNNER_SERT" -ne 1 ]]; then
   die "runner DEMANDE et non servi ($RUNNER_STATE) — banc INCOMPLET. \`--no-runner\` pour un banc sans CI, assume et dit comme tel" 6
 fi

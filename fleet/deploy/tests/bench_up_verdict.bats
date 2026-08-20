@@ -96,6 +96,14 @@ FAKE
   # Le MASTER token, desormais lu dans la boite et plus sur l'hote. Nominal : present.
   MASTER_TOKEN_OUT="$BATS_TEST_TMPDIR/master_token.out"
   echo "MASTER" > "$MASTER_TOKEN_OUT"
+  # LE VERDICT QUE LA BOITE PUBLIE SUR ELLE-MEME (`/run/lcars-provision.rc`, pose par l'entrypoint a
+  # chaque boot). Nominal : 0, convergee. Un temoin l'ecrase pour mesurer le refus.
+  # ⚠ CE FICHIER DOIT AVOIR UNE VALEUR NOMINALE, et pas rester absent « puisque ca passe quand meme ».
+  # Absent, le script conclut « NON MESUREE » — ce qui n'est PAS un echec, donc les 24 temoins
+  # resteraient verts en mesurant l'etat non-mesure au lieu de l'etat convergé. Un decor qui laisse
+  # tout passer ne teste rien : il faut que le nominal soit le NOMINAL.
+  BOX_PROV_RC_OUT="$BATS_TEST_TMPDIR/box_prov_rc.out"
+  echo "0" > "$BOX_PROV_RC_OUT"
   # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
   # boite en second argument (`exec <box> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
@@ -139,6 +147,7 @@ case "\$argv" in
   # la forge, et 'bench-up.sh' l'EXIGE depuis 2026-08-15 (saute par les deux passes, sinon).
   *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;
   *credentials.json*)     echo oui ;;
+  *lcars-provision.rc*)   cat "$BOX_PROV_RC_OUT" ;;
 esac
 exit 0
 FAKE
@@ -174,6 +183,65 @@ run_bench() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRET"* ]]
   [[ "$output" != *"PAS PRET"* ]]
+  # La boite a publie 0 : le verdict le DIT, il ne se contente pas de ne pas refuser.
+  [[ "$output" == *"converge  : convergee"* ]]
+}
+
+# ─── LA BOITE PUBLIE SON PROPRE VERDICT, ET IL COMPTE ────────────────────────────────────────────
+# MEME FAUTE QUE 6-133, AU SITE D'A COTE. L'entrypoint mesure la convergence de la boite et l'ecrit
+# dans `/run/lcars-provision.rc` — precisement parce qu'un echec de convergence NE TUE PAS le
+# conteneur : la boite doit rester joignable pour etre reparee. Elle survit donc a son propre echec,
+# se declare *healthy* (son healthcheck teste le port 22), et `bench-up` ne lisait pas le fichier.
+# Un banc dont la boite ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
+#
+# Le geste operateur (`deploy/box`, `await_provision_verdict`) le lisait deja. Deux chemins qui
+# lisent le meme fichier doivent en tirer le MEME verdict, sinon le fichier ne veut plus rien dire.
+
+@test "la boite publie un ECHEC de convergence → PAS PRET, exit 6, meme si tout le reste est vert" {
+  echo "1" > "$BOX_PROV_RC_OUT"
+  run_bench
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"PAS PRET"* ]]
+  [[ "$output" == *"BOITE"* ]]
+  [[ "$output" == *"rc=1"* ]]
+  # Le refus nomme le geste de diagnostic, pas seulement l'echec : on repare avec, pas sans.
+  [[ "$output" == *"provision doctor"* ]]
+}
+
+@test "un ECHEC de la boite prime sur un runner parfaitement servi — l'ordre est celui de la gravite" {
+  # Un runner qui sert impeccablement une boite qui ne produit rien est un banc qui ne produit rien.
+  # Ce temoin garde l'ORDRE des branches : intervertir ferait annoncer « banc PRET » a une boite
+  # morte, exactement l'etat que ce correctif ferme.
+  echo "3" > "$BOX_PROV_RC_OUT"
+  run_bench
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"la BOITE s'est declaree en echec"* ]]
+  [[ "$output" != *"le runner etait DEMANDE"* ]]
+}
+
+@test "DRIFT RESIDUEL (rc=2) n'est PAS un echec — le banc reste PRET, et le drift se DIT" {
+  # 2 = applique, etat-cible non tenu : un geste manque (forge, credentials, reseau), rien n'est
+  # casse. Le confondre avec un echec rendrait rouge la moitie des bancs pour un etat que
+  # l'entrypoint ET le geste operateur qualifient tous deux de non-fatal.
+  echo "2" > "$BOX_PROV_RC_OUT"
+  run_bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"banc PRET"* ]]
+  [[ "$output" == *"DRIFT RESIDUEL"* ]]
+}
+
+@test "un verdict de boite ILLISIBLE est une NON-MESURE, pas un echec — et il se dit" {
+  # Ne pas avoir lu le verdict n'est pas l'avoir lu mauvais. Sortir non nul sur une non-mesure
+  # apprend a ignorer le code de sortie, ce qui coute exactement le jour ou il est vrai. Meme
+  # arbitrage que `deploy/box` sur l'expiration de son attente.
+  #
+  # ⚠ ET LE CAS EST REEL, pas theorique : ce fichier vit sur un tmpfs et n'existe qu'apres que
+  # l'entrypoint a fini son apply. Une boite qui vient de repartir n'en a pas encore.
+  printf 'cat: /run/lcars-provision.rc: No such file or directory\n' > "$BOX_PROV_RC_OUT"
+  run_bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"banc PRET"* ]]
+  [[ "$output" == *"NON MESUREE"* ]]
 }
 
 @test "token operateur absent apres DEUX passes → refus, exit 6, et la CAUSE est nommee" {
