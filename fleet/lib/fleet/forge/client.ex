@@ -61,6 +61,14 @@ defmodule Fleet.Forge.Client do
 
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
+  # ⚠ LE SEAM `:forge_client` DOIT PORTER CE QUE SES APPELANTS TAPENT DESSUS. `get_file/3` vit dans
+  # `.Files`, mais `Fleet.MCP.PodTools.Probe` l'appelle via `forge()` — dont le défaut est CE module.
+  # Sans cette ligne, `forge().get_file(...)` levait `undefined or private` À L'EXÉCUTION seulement :
+  # le stub de test, lui, définissait `get_file`, donc la suite restait verte pendant que le rail
+  # réel plantait au banc (les deux juges, `{:tool_crashed, "run_probe", …get_file/3 undefined}`).
+  # Le mur qui prouve que ce trou ne se rouvre pas : `probe_seam_contract_test.exs`.
+  defdelegate get_file(repo, path, opts), to: Fleet.Forge.Client.Files
+
   @doc """
   Adds and verifies a label, returning `:already_present` without writing when applicable.
 
