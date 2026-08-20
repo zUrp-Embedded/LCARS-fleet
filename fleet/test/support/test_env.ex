@@ -66,7 +66,10 @@ defmodule Fleet.TestEnv do
   def delete_role_token!(role) do
     case Fleet.Credentials.RoleIdentity.token_path(role) do
       {:ok, path} ->
-        File.rm_rf!(path)
+        # `_ =` : `rm_rf!` rend la LISTE des chemins supprimés, et le gate refuse les retours non
+        # appariés (`:unmatched_returns`). On ne l'inspecte pas — un fichier déjà absent rend `[]`,
+        # ce qui est le cas nominal ici : la fixture veut l'ABSENCE, pas une suppression.
+        _ = File.rm_rf!(path)
         path
 
       :error ->
