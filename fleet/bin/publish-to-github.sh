@@ -255,7 +255,14 @@ fi
 echo ""
 echo "publish-to-github: fin de la passe filter-repo → $OUT_DIR (certifie : zero attribution interne survivante)"
 echo "  Les SHA sont tous neufs (passe one-way : ce n'est PAS un sync avec la forge de travail)."
-echo "  Geste de publish (ce script ne pousse JAMAIS — le push GitHub est ton geste) :"
+# ⚠ CE MESSAGE NOMMAIT `git@github.com:` IN THE CLEAR, whatever the destination — so a run aimed at
+# a GitLab project printed instructions that were simply false. This script is forge-AGNOSTIC: it
+# rewrites a history and never learns where the result is going. Its closing words must therefore
+# name no host at all. The name of the file is the other place where "GitLab is a first-class
+# forge" is not held; that one is not a message, it is a rename, and it is not this commit's job.
+echo "  Geste de publish (ce script ne pousse JAMAIS — le push est ton geste) :"
 echo "    cd $OUT_DIR"
-echo "    git remote add github git@github.com:<owner>/<repo>.git"
-echo "    git push github main"
+echo "    git remote add <nom> <url-du-depot-de-destination>"
+echo "    git push <nom> main"
+echo "  Ou, si le projet est deja lie : « lcars publish run <owner/nom-interne> » — le rail"
+echo "  pousse une branche roulante et ouvre UNE PR/MR, sans toucher la base." 

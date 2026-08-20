@@ -92,19 +92,45 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   defp do_run(repo) do
     slug = binding_key(repo)
+    work = fresh_work(slug)
 
     with {:ok, b} <- read_binding(slug),
          {:ok, forge_url} <- env("FORGE_BASE_URL"),
          {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
-         args = rail_args(repo, b, forge_url, forge_tok, fresh_work(slug)),
-         {:ok, {out, 0}} <-
+         args = rail_args(repo, b, forge_url, forge_tok, work),
+         {:ok, {out, code}} <-
            Fleet.Credentials.Shell.run(rail_path(), args, timeout_ms: @rail_timeout_ms) do
-      {:ok, parse_result(out)}
-    else
-      {:ok, {out, code}} -> {:error, {:rail_exit, code, last_line(out)}}
-      {:error, _} = err -> err
+      _ = sweep_work(work, code)
+
+      case code do
+        0 -> {:ok, parse_result(out)}
+        _ -> {:error, {:rail_exit, code, last_line(out)}}
+      end
     end
   end
+
+  # NOBODY SWEPT, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail refuses
+  # a path that already exists. Phase 1 (`lcars approve`) has swept since day one — `trap 'rm -rf' EXIT`
+  # — and phase 2 never did. Every publish therefore left a COMPLETE rewritten clone of the project
+  # in the system temp dir, forever: the size of the repository, once per publication. The unique
+  # path per run was written to satisfy the rail's refusal, and the question "what becomes of the
+  # previous one?" was never asked.
+  #
+  # A COMPOUND EFFECT WORTH NAMING: `System.unique_integer/1` is unique WITHIN a runtime instance and
+  # restarts low after a reboot. With nothing ever swept, a path left by a pre-restart run can be
+  # drawn again — and the rail then refuses with "--work must be a fresh path", failing the publish
+  # for a reason with no relation to publishing.
+  #
+  # EXIT 6 IS THE EXCEPTION, and it is deliberate on the rail's side: it means the rewrite lost its
+  # determinism, and it leaves the clone "pour inspection". Sweeping it would erase the only evidence
+  # of the one failure nobody can diagnose after the fact.
+  @keep_work_on_exit 6
+
+  @doc false
+  @spec sweep_work(String.t(), integer()) ::
+          :kept_for_inspection | {:ok, [binary()]} | {:error, term(), binary()}
+  def sweep_work(_work, @keep_work_on_exit), do: :kept_for_inspection
+  def sweep_work(work, _code), do: File.rm_rf(work)
 
   # The per-human binding is the source of truth for WHERE this project publishes (chantier §5bis).
   #

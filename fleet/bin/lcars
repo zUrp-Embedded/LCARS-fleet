@@ -134,7 +134,17 @@ USAGE
       deterministe : refuse si la base n'est pas un ancetre du clone reecrit).
       L'attribution est reecrite (author=humain) avant tout push ; l'auth vers la forge
       externe passe par gh/glab ou le helper git cable (aucun token manipule ici). La
-      phase 2 (PR/MR reguliere) est le tool « project_publish » cote pod, pas ce verbe.
+      phase 2 (PR/MR reguliere) : « publish run » ci-dessous, ou le tool « project_publish »
+      cote pod — les deux appellent le MEME rail avec les MEMES arguments.
+
+  $PROG publish run <owner/nom-interne>
+      PHASE 2 — la publication qui se REPETE : rejoue le rail sur le projet lie. Pousse la
+      branche roulante (lcars/publish) et laisse UNE seule PR/MR ouverte contre la base ;
+      c'est un humain qui la merge. Tier 2 (pas de CLI authentifie) : la branche part quand
+      meme et l'URL de PR/MR a ouvrir est imprimee. Porte HUMAINE : c'est le meme rail que
+      le tool « project_publish », expose du cote ou on peut le rejouer pour diagnostiquer.
+      Sortie 6 = la reecriture n'est plus deterministe : le clone est CONSERVE et son
+      chemin imprime.
 
   $PROG publish status <owner/nom-interne>
       Le doctor par PROJET : est-il pret a publier ? Non lie = etat valide, rapporte
@@ -691,9 +701,70 @@ cmd_forge_status() {
 cmd_publish() {
   case "${1:-}" in
     status) shift; cmd_publish_status "$@" ;;
-    "")     die "publish: sous-commande requise (status)" ;;
-    *)      die "publish: sous-commande inconnue « $1 » (status)" ;;
+    run)    shift; cmd_publish_run "$@" ;;
+    "")     die "publish: sous-commande requise (run|status)" ;;
+    *)      die "publish: sous-commande inconnue « $1 » (run|status)" ;;
   esac
+}
+
+# PHASE 2 HAD NO HUMAN DOOR AT ALL, and that was the asymmetry. `publish-rail.sh` is a host-side,
+# self-contained, executable script — and the BEAM was the only thing able to trigger it
+# (`project_publish.ex` was its single caller in the whole repository). Phase 1 IS a verb
+# (`lcars approve`); phase 2, the one that repeats, was not.
+#
+# Three costs, and the second is the one that bites: an operator holding a
+# `project_publish.failed` reason on the bus had NO way to replay the gesture and look; a doctor
+# (`publish status`) diagnosed a publication it was incapable of running; and proving the rail
+# end-to-end without a BEAM meant rebuilding its argument list by hand out of Elixir source.
+#
+# THIS DOES NOT OPEN ANYTHING TO AN AGENT. A CLI verb is a HUMAN door — pods have no shell on the
+# host — and the human is already the one who arbitrates a publication: they sign the pull request.
+# It reads the same binding and calls the same rail with the same arguments as the runtime does; a
+# second implementation of the argument list would drift from the first.
+cmd_publish_run() {
+  local repo="${1:-}"
+  [[ -n "$repo" ]] || die "publish run: usage — publish run <owner/nom-interne>"
+  [[ "$repo" == */* ]] || die "publish run: « $repo » n'est pas un owner/nom (repo interne)"
+  local slug="${repo//\//__}"
+  local binding="$PUBLISH_DIR/$slug.json"
+  [[ -r "$binding" ]] \
+    || die "publish run: « $repo » n'est pas lie — « lcars approve $repo --forge <name> --as <repo-dest> » d'abord"
+
+  local host dest_host dest_repo base
+  host="$(_json_field "$binding" host)"
+  dest_host="$(_json_field "$binding" dest_host)"
+  dest_repo="$(_json_field "$binding" dest_repo)"
+  base="$(_json_field "$binding" base)"
+  # Same refusal as the runtime: a binding that does not say WHERE it publishes is not a binding.
+  # The runtime counts `base` among its required keys; guessing here would re-open what that closed.
+  for k in host dest_host dest_repo base; do
+    [[ -n "${!k}" ]] || die "publish run: la liaison $binding ne declare pas « $k » — relie a nouveau"
+  done
+
+  _load_box_env
+  [[ -n "${FORGE_BASE_URL:-}" ]] || die "publish run: FORGE_BASE_URL absent — boite non configuree"
+  [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] \
+    || die "publish run: FORGE_TOKEN_FILE absent/illisible"
+
+  local rail; rail="$(dirname "$(readlink -f "$0")")/publish-rail.sh"
+  [[ -x "$rail" ]] || die "publish run: rail introuvable a cote: $rail"
+
+  # A FRESH path per run, because the rail refuses an existing --work (the transform needs a clean
+  # clone). Swept below on every outcome BUT exit 6, which the rail leaves for inspection when the
+  # rewrite lost its determinism — the one failure that cannot be reproduced from a message.
+  local work; work="$(mktemp -d)/clone"
+
+  local rc=0
+  "$rail" --project "$repo" --forge "$FORGE_BASE_URL" --forge-token-file "$FORGE_TOKEN_FILE" \
+    --host "$host" --dest-repo "$dest_repo" --dest-host "$dest_host" --base "$base" \
+    --work "$work" || rc=$?
+
+  if [[ "$rc" == 6 ]]; then
+    echo "publish run: clone conserve pour inspection -> $work" >&2
+  else
+    rm -rf "$(dirname "$work")"
+  fi
+  return "$rc"
 }
 
 # Project-level doctor: is THIS project ready to publish ? A non-linked project is a VALID terminal
@@ -789,8 +860,12 @@ cmd_approve() {
   # own creds — the homelab-GitLab case). We detect it here; we never hold a token. GIT_TERMINAL_PROMPT=0
   # so a missing helper fails LOUD at push instead of hanging on a prompt (a headless BEAM can't answer).
   local cli; cli="$(_dest_cli "$host")"
-  local have_cli=0
-  if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then have_cli=1; fi
+  # ⚠ THE PROBE IS DELIBERATELY *NOT* TAKEN HERE. It used to be, some hundred lines above its use —
+  # and between the two sit a clone and a full history rewrite, 2 to 10 minutes on a real repository.
+  # A `gh` token expiring inside that window made the creation fail on the API's raw 401 instead of
+  # on "your auth expired between the check and the call". `have_cli` is now read at the moment it
+  # decides something, so the answer it gives is the answer that holds.
+  local have_cli
   export GIT_TERMINAL_PROMPT=0
 
   # Internal forge config — one source, loaded by the one function that knows it (`_load_box_env`).
@@ -820,6 +895,9 @@ cmd_approve() {
   if [[ "$link_mode" == 1 ]]; then
     # CREATE-OR-LINK. Does the destination repo exist at all? Probe via the CLI when we have it
     # (accurate), else via a bare ls-remote (Tier 2: the operator pre-created it, so it answers).
+    # Read HERE, right before it decides: the tier is a fact about NOW, not about ten minutes ago.
+    have_cli=0
+    if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then have_cli=1; fi
     local repo_exists=0
     if [[ "$have_cli" == 1 ]]; then
       _dest_repo_exists "$host" "$dest_host" "$dest_repo" && repo_exists=1
