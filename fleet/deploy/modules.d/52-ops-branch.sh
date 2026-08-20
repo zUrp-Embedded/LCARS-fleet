@@ -64,6 +64,15 @@ readonly OPS_BRANCH="tool_request"
 # ─── LA SONDE ───────────────────────────────────────────────────────────────────────────────────
 # `GET /repos/<repo>/branches/<branch>` : 200 la branche est la, 404 elle manque. Le jeton systeme
 # suffit (lecture d'un depot d'org dont `system` est membre) — pas besoin de l'autorite master.
+forge_repo_code() {
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
+  local -a auth=()
+  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
+  [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
+  curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
+       "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO" 2>/dev/null || true
+}
+
 forge_branch_code() {
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   local -a auth=()
@@ -100,11 +109,30 @@ create_branch() {
   #
   # Un DRIFT dit exactement ca : non converge, converge-moi. Le doctor le montre, la passe d'apres
   # le ferme, et un jeton qui ne viendrait JAMAIS reste visible a chaque passage au lieu de
-  # disparaitre dans un echec de boot que personne ne relit. Mesure du 2026-08-20, banc neuf : boot
-  # en FAIL, puis `provision apply --only 52-ops-branch` -> branche orpheline creee, 0 defaut.
+  # disparaitre dans un echec de boot que personne ne relit.
   [[ -n "$tok" ]] || {
     p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
     return 0; }
+
+  # ⚠ ET IL Y A UN SECOND « PAS ENCORE », QUE LE PREMIER CACHAIT. Une branche se pousse sur un
+  # depot, et le depot ops est seme par l'amorcage de la forge — pas par ce module. Sur un banc neuf
+  # l'ordre reel est : boot 1 (pas de jeton) · amorcage passe 1 (structure, pas de semis) · boot 2
+  # (jeton frappe, DEPOT PAS ENCORE LA) · amorcage passe 2 (semis). Donc au seul boot qui avait un
+  # jeton, la cible n'existait pas.
+  #
+  # Sans ce garde, git pousse dans le vide et la forge repond « Push to create is not enabled for
+  # organizations » en 403 — un message qui parle d'une fonctionnalite desactivee, alors que le fait
+  # est « le depot n'est pas encore ne ». Un lecteur y cherche un reglage de forge et ne trouve rien.
+  #
+  # La distinction ne se lit PAS sur la sonde de branche : sur un depot absent, l'API rend 404 sur la
+  # branche exactement comme sur une branche absente d'un depot present. Il faut demander le depot.
+  case "$(forge_repo_code)" in
+    200) : ;;
+    404) p_drift "depot $LCARS_OPS_REPO pas encore seme — l'amorcage de la forge le cree ; la branche se posera a la convergence suivante"
+         return 0 ;;
+    *)   p_fail "$LCARS_OPS_REPO : la forge ne dit pas s'il existe — on ne pousse pas a l'aveugle"
+         return 1 ;;
+  esac
 
   local tmp; tmp="$(mktemp -d)"
   # Le jetable meurt quoi qu'il arrive : il contient un depot git avec un remote authentifie.

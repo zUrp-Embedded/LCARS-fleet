@@ -30,7 +30,10 @@ setup() {
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$PROV_TOKENS_DIR"
 }
 
-# $1 = code HTTP rendu pour la branche (200 presente · 404 absente)
+# $1 = code HTTP de la BRANCHE (200 presente · 404 absente) · $2 = code HTTP du DEPOT (defaut 200)
+# ⚠ L'ORDRE DES MOTIFS EST LE TEMOIN. L'URL du depot est un PREFIXE de celle de la branche :
+# `*/repos/*` matche les deux. La branche doit donc etre testee EN PREMIER, sinon la sonde de branche
+# recoit le code du depot et les deux cas fusionnent — exactement l'ambiguite que le module corrige.
 stub_curl() {
   cat > "$BIN/curl" <<EOF
 #!/usr/bin/env bash
@@ -38,6 +41,7 @@ for a in "\$@"; do
   case "\$a" in
     */api/v1/version) exit 0 ;;
     */branches/*) printf '$1'; exit 0 ;;
+    */api/v1/repos/*) printf '${2:-200}'; exit 0 ;;
   esac
 done
 exit 0
@@ -55,6 +59,33 @@ EOF
   # Le message dit QUI le posera et QUAND ca se fermera — sans ca, « pas encore » est une excuse.
   [[ "$output" == *"50-forge"* ]]
   [[ "$output" == *"convergence suivante"* ]]
+}
+
+@test "DEPOT pas encore seme : drift (rc 2) — la cible nait a l'amorcage, pas ici" {
+  # ⚠ LE SECOND « PAS ENCORE », QUE LE PREMIER CACHAIT. Sur banc neuf l'ordre reel est : boot 1 (pas
+  # de jeton) · amorcage passe 1 (structure, pas de semis) · boot 2 (jeton frappe, DEPOT PAS ENCORE
+  # LA) · amorcage passe 2 (semis). Au seul boot qui avait un jeton, la cible n'existait pas : git
+  # poussait dans le vide et la forge repondait « Push to create is not enabled for organizations »
+  # en 403 — un message qui envoie chercher un reglage de forge pour un depot qui n'est pas ne.
+  stub_curl 404 404
+  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
+  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  run bash "$MODULE" apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"DRIFT"* ]]
+  [[ "$output" == *"pas encore seme"* ]]
+  [[ "$output" == *"convergence suivante"* ]]
+}
+
+@test "DEPOT dont l'existence est INCONNUE : echec — on ne pousse pas a l'aveugle" {
+  # 404 dit « il n'est pas ne » ; 500 ou une reponse vide ne disent rien. Degrader le second en drift
+  # rendrait muet un depot supprime ou une forge a moitie morte.
+  stub_curl 404 500
+  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
+  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  run bash "$MODULE" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne dit pas s'il existe"* ]]
 }
 
 @test "branche DEJA presente : rien n'est touche — elle porte des signatures humaines" {
