@@ -633,6 +633,96 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
+  # ═══ B2 — LE POINT DE FAUCHE DU JUGE ═══
+  #
+  # La mort d'un juge était un EFFET DE BORD ; elle a maintenant un déclencheur causal, au même
+  # étage du rail que celle du producteur (`MergeAndPromote.reap_ticket_producer/3`) : la revue
+  # native est POSÉE, donc le livrable du juge est INGÉRÉ, donc le juge a fini.
+  describe "B2 — la mort du juge est causée par l'ingestion de son verdict" do
+    defmodule ReapSpy do
+      @moduledoc false
+      def kill_pod(pod_id) do
+        send(self(), {:killed, pod_id})
+        :ok
+      end
+    end
+
+    defmodule ReapFails do
+      @moduledoc false
+      def kill_pod(_pod_id), do: {:error, :boom}
+    end
+
+    defmodule ReviewFailForge do
+      @moduledoc false
+      def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "nope"}}
+    end
+
+    defp judge_run,
+      do: %{
+        repo: "fleet/proj",
+        issue_number: 42,
+        pr_number: 7,
+        role: "qualifier",
+        review_event: :approve
+      }
+
+    test "revue POSÉE → le pod du juge est fauché, et l'id se CONSTRUIT comme au dispatch" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapSpy)
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(judge_run(), forge_client: PrForge, forge_opts: [])
+
+      # `PodId.for_pr/3` — jamais une chaîne devinée. Un juge est clefé sur la PR, pas sur l'issue.
+      assert_received {:killed, pod_id}
+      assert pod_id == Fleet.PodId.for_pr("fleet/proj", 7, "qualifier")
+    end
+
+    test "revue EN ÉCHEC → AUCUNE fauche : on ne tue que ce dont on a le résultat" do
+      # ⚠ LA MOITIÉ QUI COMPTE. Faucher avant que la revue tienne perdrait le verdict ET son
+      # auteur : le rail rejoue sur `{:error, {:review, _}}`, et il rejouerait dans le vide.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapSpy)
+
+      assert {:error, {:review, _}} =
+               StepRunCompleter.record_review(judge_run(),
+                 forge_client: ReviewFailForge,
+                 forge_opts: []
+               )
+
+      refute_received {:killed, _}
+    end
+
+    test "fauche EN ÉCHEC → le verdict tient quand même" do
+      # Un pod qui survit est un coût, pas une corruption. Rendre une erreur ici ferait rejouer une
+      # revue DÉJÀ POSÉE — on transformerait une place perdue en double verdict.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapFails)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :reviewed} =
+                   StepRunCompleter.record_review(judge_run(),
+                     forge_client: PrForge,
+                     forge_opts: []
+                   )
+        end)
+
+      assert log =~ "NOT reaped"
+    end
+
+    test "un PRODUCTEUR qui passerait par ce chemin n'est PAS fauché ici" do
+      # La garde lit `brief_kind`, pas un nom de rôle : la mort du producteur appartient au sceau,
+      # à la fusion, pas à une revue. Deux morts, deux causes, et elles ne se recouvrent pas.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapSpy)
+
+      assert {:ok, :reviewed} =
+               StepRunCompleter.record_review(%{judge_run() | role: "engineer"},
+                 forge_client: PrForge,
+                 forge_opts: []
+               )
+
+      refute_received {:killed, _}
+    end
+  end
+
   describe "record_review/2 + promote/2 (PR-native)" do
     test "verdict :approve → native APPROVED review (role-generated body)" do
       step_run = %{

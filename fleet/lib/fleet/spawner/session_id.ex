@@ -9,14 +9,19 @@ defmodule Fleet.Spawner.SessionId do
 
   Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<X>`            kill/HARVEST class (hex nibble) — WHAT KILLING THIS PROCESS COSTS. L'AUTORITE EST
-                      `CapProfile.kill_class/1`, qui enonce le critere et NE NOMME AUCUN ROLE : un
-                      inventaire de roles ecrit ici perime en silence, puisque rien ne le relie a la
-                      source. `0` = nothing, outside the fleet · `1` = a
-                      LIVE HUMAN CONVERSATION · `2` = the work in flight on ONE ticket, re-dispatchable
-                      · `3` = nothing, cold and meant to be swept. `badcafe` = universal kill-marker →
-                      `pkill -f 'claude.*3badcafe'` sweeps the cold ones, `'claude.*2badcafe'` the
-                      ticket residents, `0badcafe` always spared ; `pkill -f 'claude.*badcafe'` = all.
+    - `<X>`            kill/HARVEST class (hex nibble) — LA MISSION DU POD, et par consequent ce que
+                      sa mort coute. L'AUTORITE EST `CapProfile.kill_class/1`, qui enonce le critere
+                      et NE NOMME AUCUN ROLE : un inventaire de roles ecrit ici perime en silence,
+                      puisque rien ne le relie a la source. `0` = l'accueil, hors flotte · `1` =
+                      l'architecte, une conversation humaine en cours · `2` = un producteur, le
+                      travail d'un ticket, re-dispatchable · `3` = un juge, une passe de verdict.
+                      `badcafe` = universal kill-marker → `pkill -f 'claude.*3badcafe'` sweeps the
+                      judges, `'claude.*2badcafe'` the producers, `0badcafe` always spared ;
+                      `pkill -f 'claude.*badcafe'` = all.
+                      ⚠ CES ETIQUETTES ONT CHANGE LE 2026-08-20 (B1) : la `3` disait « froid et fait
+                      pour etre fauche », ce qui triait sur le CYCLE DE VIE et mettait quatre juges
+                      avec un ouvrier de merge. Le tri est desormais la MISSION — et le gradient de
+                      cout tient toujours, dans le meme ordre.
                       ⚠ ALWAYS anchor on `claude.*`:
                       a bare `pkill -f 2badcafe` matches ANY cmdline carrying the pattern — a
                       concurrent `grep -r 2badcafe` (yours, an analysis agent's, a deck probe's)

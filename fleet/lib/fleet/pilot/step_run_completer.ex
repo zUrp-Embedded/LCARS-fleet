@@ -462,8 +462,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
     case ForgeClient.as_role(forge_opts, Map.get(step_run, :role)) do
       {:ok, role_opts} ->
         case forge.post_review(repo, pr, event, body, role_opts) do
-          :ok -> {:ok, :reviewed}
-          {:ok, _} -> {:ok, :reviewed}
+          :ok -> verdict_ingested(repo, pr, role)
+          {:ok, _} -> verdict_ingested(repo, pr, role)
           {:error, reason} -> {:error, {:review, reason}}
         end
 
@@ -471,6 +471,70 @@ defmodule Fleet.Pilot.StepRunCompleter do
         err
     end
   end
+
+  # ═══ B2 — LE POINT DE FAUCHE DU JUGE, JUMEAU DE CELUI DU PRODUCTEUR ═══
+  #
+  # La mort d'un juge etait un EFFET DE BORD : son pod s'eteignait quand la machinerie voulait bien,
+  # et rien dans le rail ne DISAIT « ce juge a fini ». Le pendant producteur existe depuis
+  # longtemps et se lit d'un coup d'oeil — `MergeAndPromote.reap_ticket_producer/3`, appele au
+  # moment du sceau. Ici c'est le meme geste au meme genre d'endroit : la revue native est POSEE,
+  # donc le livrable du juge est INGERE, donc le juge a fini. Les deux morts se lisent desormais au
+  # meme etage du rail.
+  #
+  # ⚠ APRES LA POSE, JAMAIS AVANT. Un juge fauche avant que sa revue tienne serait un verdict perdu
+  # sans personne pour le refaire — et le chemin d'echec ci-dessus rend `{:error, {:review, _}}`
+  # precisement pour que le rail le rejoue. On ne tue que ce dont on a le resultat.
+  #
+  # ⚠ ET LA FAUCHE NE PEUT PAS FAIRE ECHOUER L'INGESTION. Elle rend `{:ok, :reviewed}` quoi qu'il
+  # arrive : le verdict est publie, c'est un fait acquis: un pod qui survit est un cout, pas une
+  # corruption. L'inverse — rendre une erreur parce qu'un `kill_pod` a rate — ferait rejouer une
+  # revue deja posee.
+  defp verdict_ingested(repo, pr, role) do
+    _ = reap_judge(repo, pr, role)
+    {:ok, :reviewed}
+  end
+
+  # L'identite se CONSTRUIT comme le dispatcher la construit (`PodId.for_pr/3`), jamais comme une
+  # chaine devinee — meme discipline que le jumeau producteur, qui lit `slot_scope` avant de tuer
+  # pour ne pas faucher un pod partage par tout un projet.
+  #
+  # Un juge est `slot_scope: instance` par derivation (`one-shot`), donc la garde ci-dessous ne
+  # devrait jamais mordre. Elle est la quand meme : le jour ou un role de jugement deviendrait
+  # lie au PROJET, son pod serait partage, et le tuer sur un verdict couperait les autres.
+  defp reap_judge(repo, pr, role) when is_binary(role) and role != "" do
+    with {:ok, profile} <- Fleet.CapProfile.load(role),
+         "judge" <- Fleet.CapProfile.brief_kind(profile),
+         "instance" <- Fleet.CapProfile.slot_scope(profile) do
+      pod_id = Fleet.PodId.for_pr(repo, pr, role)
+
+      case spawner().kill_pod(pod_id) do
+        :ok ->
+          Logger.info(
+            "StepRunCompleter: #{repo}##{pr} verdict INGESTED — judge pod #{pod_id} reaped " <>
+              "(its context lived until its review held, as designed)"
+          )
+
+        {:error, :not_found} ->
+          :ok
+
+        {:error, reason} ->
+          # Un pod qui survit coute une place, il ne corrompt rien. On le DIT et on continue.
+          Logger.warning(
+            "StepRunCompleter: #{repo}##{pr} judge pod #{pod_id} NOT reaped (#{inspect(reason)}) " <>
+              "— the verdict stands; the pod will be swept by its class"
+          )
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  defp reap_judge(_repo, _pr, _role), do: :ok
+
+  # MEME CLEF QUE LE JUMEAU PRODUCTEUR (`:pilot_spawner`, cf. `MergeAndPromote`) : deux morts au
+  # meme etage du rail se stubbent au meme endroit, sinon un test qui neutralise l'une laisse
+  # l'autre tirer pour de vrai.
+  defp spawner, do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
 
   # The machine verdict's git write — a SIMPLE ops commit, deliberately NOT `Pinning.render`:
   # Pinning is comment-oriented (summary + pointer posted on the forge surface), and a JSON object

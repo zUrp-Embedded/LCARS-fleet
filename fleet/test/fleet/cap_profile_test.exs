@@ -976,6 +976,25 @@ defmodule Fleet.CapProfileTest do
       assert classes == [0, 1, 2, 3]
     end
 
+    test "B3 — `lifetime_scope` décide encore DEUX choses, et plus la classe de fauche" do
+      # Son nom promet une durée de vie ; quatre valeurs le suggèrent ; c'est faux. La durée est
+      # décidée par un ÉVÉNEMENT DU RAIL (le sceau pour un producteur, l'ingestion du verdict pour
+      # un juge), jamais par cette énumération. Ce qui lui reste :
+      #
+      #   1. le RANGEMENT — `slot_scope` en dérive quand le profil n'en déclare pas ;
+      #   2. l'ADMISSION au spawn — résident re-briefé vs pod froid.
+      #
+      # On épingle (1) ici parce qu'il est pur ; (2) vit dans `Spawn.project_scope_decision/4`.
+      assert Fleet.CapProfile.slot_scope(kc_prof(4, "one-shot")) == "instance"
+      assert Fleet.CapProfile.slot_scope(kc_prof(4, "forever")) == "project"
+
+      # Et la dérivation continue de fonctionner alors que la classe, elle, ne la lit plus : les
+      # deux profils ci-dessus tombent dans la MÊME classe 2, malgré deux `lifetime_scope` opposés
+      # et deux `slot_scope` dérivés opposés.
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 2
+      assert Fleet.CapProfile.kill_class(kc_prof(4, "forever")) == 1
+    end
+
     test "CONTRE-PREUVE : le cycle de vie ne décide plus rien à lui seul" do
       # ⚠ SANS CE TEST, LE CHANGEMENT SERAIT INDÉMONTRABLE. Deux profils au MÊME
       # `lifetime_scope: one-shot` et au même `slot_scope` dérivé, qui tombent dans deux classes

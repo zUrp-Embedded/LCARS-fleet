@@ -946,6 +946,31 @@ defmodule Fleet.CapProfile do
   @doc """
   Returns `spec.invocation.lifetime_scope`, using `"one-shot"` or the supplied default
   when absent.
+
+  ## ⚠ CE CHAMP NE DIT PAS COMBIEN DE TEMPS UN POD VIT (B3, 2026-08-20)
+
+  Son nom le promet, quatre valeurs le suggèrent (`one-shot`, `pipe`, `run`, `forever`), et c'est
+  faux. Un juge déclaré `one-shot` vit jusqu'à ce que son verdict soit ingéré
+  (`StepRunCompleter`) ; un producteur `pipe` vit jusqu'au sceau de sa brique
+  (`MergeAndPromote.reap_ticket_producer/3`). Dans les deux cas la durée est décidée par un
+  ÉVÉNEMENT DU RAIL, jamais par cette énumération.
+
+  **Ce qu'elle décide réellement, et c'est tout :**
+
+    1. **le rangement** — `slot_scope/1` en dérive quand le profil n'en déclare pas
+       (`one-shot ⟹ instance`, sinon `project`), donc combien d'identités de pod existent ;
+    2. **l'admission au spawn** — `Spawn.project_scope_decision/4` lit l'axe racine
+       « context-long vs one-shot » pour choisir entre un processus RÉSIDENT re-briefé et un pod
+       froid.
+
+  **Ce qu'elle NE décide plus** : la classe de fauche. `kill_class/1` triait dessus jusqu'au
+  2026-08-20 et se trompait deux fois — un juge n'est pas plus jetable qu'un producteur, et
+  « jetable » ne distingue rien. Elle trie désormais par MISSION (`brief_kind`, `slot_scope`).
+
+  On ne renomme pas le champ : il est écrit dans dix-huit profils, dans le schéma, et dans les
+  invariants `g24_15`/`G24-11`. Un renommage sans lecteur qui le réclame échangerait un nom
+  imprécis contre une migration — et le nom n'a jamais été le mécanisme, seulement sa description.
+  Ce paragraphe est la description corrigée.
   """
   @spec lifetime_scope(t(), term()) :: String.t() | term()
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
