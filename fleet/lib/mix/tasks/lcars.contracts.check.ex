@@ -116,7 +116,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_toolchain_branch_single_source(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
-      check_bats_descriptions_inert(root),
+        check_bats_descriptions_inert(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
         check_no_legacy_config_namespace(root),
@@ -2002,10 +2002,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # d'une machine a l'autre — la meme faute, en plus silencieuse.
   defp evaluable_description_reason(line) do
     cond do
-      Regex.match?(~r/(?<!\\)(?:\\\\)*`/, line) -> "accent grave NU — la commande citee est EXECUTEE"
-      Regex.match?(~r/(?<!\\)(?:\\\\)*\$\(/, line) -> "$( NU — la commande citee est EXECUTEE"
-      Regex.match?(~r/(?<!\\)(?:\\\\)*\$[A-Za-z_{]/, line) -> "$VAR NU — le nom du test varie selon l'environnement"
-      true -> nil
+      Regex.match?(~r/(?<!\\)(?:\\\\)*`/, line) ->
+        "accent grave NU — la commande citee est EXECUTEE"
+
+      Regex.match?(~r/(?<!\\)(?:\\\\)*\$\(/, line) ->
+        "$( NU — la commande citee est EXECUTEE"
+
+      Regex.match?(~r/(?<!\\)(?:\\\\)*\$[A-Za-z_{]/, line) ->
+        "$VAR NU — le nom du test varie selon l'environnement"
+
+      true ->
+        nil
     end
   end
 
