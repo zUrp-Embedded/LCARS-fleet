@@ -420,15 +420,89 @@ module_sh() {
 # chose qu'un humain fasse d'un ecran immobile, c'est l'interrompre. Ce qui est tenu ici : la phase
 # vient de la sortie REELLE de l'enfant (aucun pourcentage devine), et le rc traverse.
 
-@test "run_step: une ligne par CHANGEMENT de phase — pas une par seconde" {
+# ⚠ CE QU'UN ECHANTILLONNEUR NE PROMET PAS, ON NE LE LUI DEMANDE PAS. `run_step` relit le fichier de
+# sortie une fois par SECONDE et n'imprime que si la phase lue differe de la lecture precedente : une
+# phase qui nait et meurt entre deux ticks n'est JAMAIS vue, et c'est le comportement voulu d'un
+# indicateur de progression — rater une ligne ne coute rien, personne n'agit dessus.
+#
+# Ce test a longtemps assert « EXACTEMENT deux lignes » sur un enfant qui vivait 2,4 s : il exigeait
+# donc que l'echantillonneur ATTRAPE un transitoire, ce qui est une propriete de l'ORDONNANCEMENT et
+# pas du code. Il tenait a une fenetre de 0,4 s et rougissait des que la machine etait chargee (vu le
+# 2026-08-20 : vert lance seul, rouge dans une passe des 32 suites). Le reflexe — allonger les
+# `sleep` — achete de la chance d'ordonnancement pour satisfaire une assertion qui ne devrait pas
+# avoir cette forme, et ne rend jamais le temoin sain : juste plus lent a mentir.
+#
+# La course est donc retiree, pas rembourree. Ce que le contrat dit vraiment se tient sans elle, et
+# se decoupe en deux :
+#   - la RECONNAISSANCE de phase est une fonction PURE d'un fichier — testee sur `_prov_phase_of`
+#     ci-dessous, sans aucun enfant ni aucune horloge. Elle n'avait AUCUN temoin a elle : le test
+#     temporel etait sa seule couverture, et c'est ce qui lui avait donne cette forme ;
+#   - la NON-VERBOSITE (« pas une ligne par seconde ») s'enonce sur des invariants vrais quel que
+#     soit le planning : moins de lignes que de ticks ecoules, et jamais deux lignes consecutives
+#     portant la meme phase.
+
+@test "run_step: la reconnaissance de phase est une fonction pure — aucune horloge, aucune course" {
+  local f="$BATS_TEST_TMPDIR/out"
+  # Chaque libelle que la sonde sait nommer, mis en regard de ce qu'elle en dit. La DERNIERE ligne
+  # reconnue gagne : c'est ce qui fait avancer l'affichage quand un build enchaine ses etapes.
   module_sh '
-    run_step "build" -- bash -c "echo Compiling 3 files; sleep 1.2; echo Running ExUnit; sleep 1.2"
+    f="'"$f"'"
+    printf "Compiling 3 files\n"                         > "$f"; _prov_phase_of "$f"
+    printf "Compiling 3 files\nRunning ExUnit\n"         > "$f"; _prov_phase_of "$f"
+    printf "Running ExUnit\nFinished in 12.0s\n"         > "$f"; _prov_phase_of "$f"
+    printf "=== shell_gate\n"                            > "$f"; _prov_phase_of "$f"
+    printf "Release created at _build\n"                 > "$f"; _prov_phase_of "$f"
+    printf "rien de reconnaissable\n"                    > "$f"; _prov_phase_of "$f"
+    : > "$f"                                                   ; _prov_phase_of "$f"
+    _prov_phase_of "/nonexistent/pas-de-fichier"
   '
   [ "$status" -eq 0 ]
+  local -a lines; mapfile -t lines <<< "$output"
+  [ "${lines[0]}" = "compilation" ]
+  [ "${lines[1]}" = "suite ExUnit (3000+ temoins)" ]
+  [ "${lines[2]}" = "suite ExUnit terminee" ]
+  [ "${lines[3]}" = "gate shell (python + bats)" ]
+  [ "${lines[4]}" = "release posee" ]
+  # ⚠ LES TROIS DERNIERS SONT LE FOND DU CONTRAT, ET CE TEMOIN APPELLE LA FONCTION EN DIRECT EXPRES.
+  # « aucune ligne reconnue » est le cas NORMAL (la premiere seconde de toute etape) : grep rend 1,
+  # et sous `pipefail` c'est le code de l'assignation. Mesure du 2026-08-20 : appelee directement la
+  # fonction TUAIT un shell `set -euo pipefail`, alors qu'en substitution — la seule forme qu'utilise
+  # `run_step` — elle survivait. Elle ne tenait donc pas par son code mais par son unique site
+  # d'appel, et le premier appelant a l'ecrire autrement mourait au premier tick. Le `|| true` du
+  # site le corrige ; ce temoin est ce qui l'empeche de repartir.
+  #
+  # Rien de reconnu, fichier vide, fichier ABSENT rendent tous « demarrage » — jamais une chaine
+  # vide, qui ferait imprimer une ligne tronquee a chaque tick.
+  [ "${lines[5]}" = "demarrage" ]
+  [ "${lines[6]}" = "demarrage" ]
+  [ "${lines[7]}" = "demarrage" ]
+}
+
+@test "run_step: une ligne par CHANGEMENT de phase — pas une par seconde" {
+  # L'enfant vit plusieurs ticks en restant dans la MEME phase : c'est le seul cas ou « une par
+  # seconde » se distingue de « une par changement », et il ne depend d'aucun timing fin.
+  module_sh '
+    run_step "build" -- bash -c "echo Compiling 3 files; sleep 4"
+  '
+  [ "$status" -eq 0 ]
+  local n; n="$(printf '%s\n' "$output" | grep -c '>>')"
+  # Au moins une ligne (la phase a ete vue), et STRICTEMENT moins que les ticks ecoules : une boucle
+  # qui imprimerait a chaque sonde en aurait rendu 4 ou 5.
+  [ "$n" -ge 1 ]
+  [ "$n" -lt 4 ]
+  # Et aucune repetition : deux lignes consecutives portant la meme phase, c'est « par seconde ».
+  [ "$(printf '%s\n' "$output" | grep '>>' | sort -u | wc -l)" -eq "$n" ]
   [[ "$output" == *"build · compilation"* ]]
-  [[ "$output" == *"build · suite ExUnit"* ]]
-  # deux phases traversees, donc DEUX lignes — la boucle sonde chaque seconde, elle n'imprime pas.
-  [ "$(printf '%s\n' "$output" | grep -c '>>')" -eq 2 ]
+}
+
+@test "run_step: le rc de l'enfant TRAVERSE la boucle de sonde" {
+  # La cicatrice B3 : sonder un fichier plutot que brancher un pipe existe POUR ca — `cmd | while
+  # read` mettrait la boucle dans un sous-shell et perdrait le rc. Sans ce temoin, remplacer la
+  # sonde par un pipe passerait tous les autres.
+  module_sh '
+    run_step "build" -- bash -c "echo Compiling 3 files; exit 3" || echo "RC=$?"
+  '
+  [[ "$output" == *"RC=3"* ]]
 }
 
 @test "run_step: l'echec garde le rc, COMPTE, borne l'ecran et CONSERVE le fichier" {

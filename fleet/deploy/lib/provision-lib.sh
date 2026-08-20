@@ -262,7 +262,17 @@ verdict_apply() {
 # phase — un log n'a que faire de soixante redessins de la meme seconde.
 _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase reconnue
   local m
-  m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1)"
+  # ⚠ `|| true` LOAD-BEARING, ET LA FONCTION NE MARCHAIT QUE PAR SA FORME D'APPEL. « aucune ligne
+  # reconnue » est le cas NORMAL — la premiere seconde de toute etape, et toute la duree d'une
+  # commande dont la sortie ne parle pas notre langue. grep rend alors 1, et sous `pipefail` c'est le
+  # code du pipeline, donc celui de l'assignation. Mesure du 2026-08-20 sous `set -euo pipefail`, sur
+  # un fichier sans correspondance :
+  #   _prov_phase_of "$f"          -> le shell MEURT, aucune sortie
+  #   p="$(_prov_phase_of "$f")"   -> survit, rend « demarrage »
+  # `run_step` n'utilise que la seconde forme : la sonde tenait a ca, pas a son code. Le premier
+  # appelant qui l'ecrirait autrement tuerait son module au premier tick, sur un fichier parfaitement
+  # normal.
+  m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
   case "$m" in
     "Compiling"*)        echo "compilation" ;;
     "Running ExUnit")    echo "suite ExUnit (3000+ temoins)" ;;

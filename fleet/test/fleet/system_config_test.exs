@@ -10,13 +10,23 @@ defmodule Fleet.SystemConfigTest do
 
   @moduletag :tmp_dir
 
+  # ⚠ ON NIE LE BRUIT DE CE MODULE, PAS TOUT BRUIT — `capture_log` LIT LE LOGGER GLOBAL. Cette
+  # assertion etait `assert log == ""`, dans un cas `async: true` : elle exigeait donc que RIEN dans
+  # toute la suite n'ecrive pendant ces quelques microsecondes. Mesure du 2026-08-20, gate rouge sur
+  # 3118 tests : la capture avait ramasse une ligne de `ProjectOnboard` d'un test voisin — un module
+  # qui n'a rien a voir avec celui-ci. Ce n'est pas un flake a retenter, c'est une assertion sur un
+  # objet PARTAGE, et la reponse n'est pas de passer le cas en `async: false` (ca reduirait la
+  # fenetre sans fermer la course, et paierait en temps de suite ce qui reste faux).
+  #
+  # Toutes les sorties de ce module portent son prefixe : le nier est exactement le contrat annonce
+  # — « une boite neuve n'est pas un evenement » — et c'est vrai quoi qu'il tourne a cote.
   test "absent file → defaults, in SILENCE (a fresh box is not an event)", %{tmp_dir: dir} do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert %{conflict_engine: false} = SystemConfig.read(Path.join(dir, "nope.json"))
       end)
 
-    assert log == ""
+    refute log =~ "Fleet.SystemConfig"
   end
 
   test "conflict_engine: true → armed", %{tmp_dir: dir} do
