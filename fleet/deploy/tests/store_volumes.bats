@@ -174,7 +174,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   [[ "$output" == *"refusera de demarrer"* ]]
 }
 
-@test "LA CONTREPARTIE — ce que `box reset` epargne, il le NOMME" {
+@test "LA CONTREPARTIE — ce que \`box reset\` epargne, il le NOMME" {
   # Sans ca, « reset » se lit comme « la machine est propre » alors que des heures de toolchain
   # restent. Un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission, et il ne se
   # decouvre qu'au moment ou quelqu'un purge un cache.

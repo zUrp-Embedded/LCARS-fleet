@@ -77,7 +77,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 
 # ─── ce qui est REFUSE, et chaque refus a sa raison mesuree ──────────────────────────────────────
 
-@test "un `-` initial est refuse : useradd le lirait comme une OPTION, pas comme un nom" {
+@test "un \`-\` initial est refuse : useradd le lirait comme une OPTION, pas comme un nom" {
   admits -- "-bob"
   [ "$status" -eq 1 ]
 }

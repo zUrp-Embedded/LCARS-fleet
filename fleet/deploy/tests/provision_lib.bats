@@ -584,7 +584,7 @@ module_sh() {
   [[ "$output" == *"FAIL"* ]]
 }
 
-@test "lan_addr tient son contrat « vide si indeterminable » — meme sans `ip`" {
+@test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
   # ⚠ TROISIEME INCARNATION DE B5 DANS LA MEME JOURNEE. `ip` n'existe pas partout — l'image du job
   # CI ne l'a pas — et sous `pipefail` une commande introuvable rend 127 que le pipeline propage :
   # la fonction rendait 127, l'assignation echouait, `set -e` tuait l'appelant. Mesure du

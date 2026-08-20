@@ -469,7 +469,7 @@ EOF
   [ "$output" = "http://depuis-le-fichier:3000" ]
 }
 
-@test "forge.url : une chaine VIDE explicite n'est pas « non pose » — le piege de `:=`" {
+@test "forge.url : une chaine VIDE explicite n'est pas « non pose » — le piege de \`:=\`" {
   # ⚠ MESURE DU 2026-08-18. `48-forge-host` a ouvert une SECONDE porte vers `PROV_FORGE_URL` : le
   # fichier. L'idiome `:=` de la lib traite une chaine vide comme « non pose », donc un appelant qui
   # dit « pas de forge » par `PROV_FORGE_URL=""` se voyait rendre celle de la machine. Un temoin est

@@ -248,7 +248,7 @@ FAKE
   [ "$output" = "0" ]
 }
 
-@test "catalogue: un chemin RELATIF non plus — le discriminant est le `/`, pas le `/` INITIAL" {
+@test "catalogue: un chemin RELATIF non plus — le discriminant est le \`/\`, pas le \`/\` INITIAL" {
   # ⚠ MESURE SUR BANC, 2026-08-16, ET LE TEMOIN D'A COTE NE L'ATTRAPAIT PAS. La recette passe
   # `--catalogue-avatars ${path.module}/catalogue-avatars`, et `path.module` vaut `.` dans le
   # dossier du module : les entrees derivees portaient `./catalogue-avatars/dev.png`, donc un

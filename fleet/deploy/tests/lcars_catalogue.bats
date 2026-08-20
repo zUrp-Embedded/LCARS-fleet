@@ -153,8 +153,23 @@ printf "INSTALLED fleet -\n"
 
 @test "aucune declaration d'activite n'est ecrite, par aucun verbe" {
   # Le fichier a disparu du modele ; ce temoin tient qu'il ne revient pas par la porte de service.
-  # `run -127` : ce decor n'a pas de release non plus, donc la porte sort en 127 — declare, pas subi.
-  run -127 "$SUT" catalogue list
+  #
+  # ⚠ CE TEMOIN MESURAIT LA MACHINE, ET IL ETAIT VIDE SUR LA MOITIE DU PARC. Il lancait la porte
+  # SANS decor : elle cherchait donc un release sur la machine hote. Sur un poste qui n'en a pas,
+  # elle sortait en 127 — la porte ne s'executait JAMAIS, et « aucune declaration n'est ecrite »
+  # etait vrai parce que rien n'avait tourne. Sur un poste qui en a un, elle sortait en 0. Le
+  # `run -127` pose le 2026-08-20 pour taire un avertissement bats 1.11 a fige la reponse d'UNE
+  # machine dans l'assertion : rouge partout ailleurs, et vert pour la mauvaise raison ici.
+  #
+  # Le decor est donc POSE, comme chez les deux temoins ci-dessus : la porte part pour de vrai, et
+  # ce qu'on mesure est ce qu'elle ECRIT — la seule question que ce test pose. Un temoin qui ne fait
+  # pas tourner son sujet ne le teste pas, il le contourne.
+  bin="$BATS_TEST_TMPDIR/fake_release_activite"
+  printf '#!/usr/bin/env bash\nprintf "INSTALLED fleet -\\n"\n' > "$bin"
+  chmod +x "$bin"
+
+  run -0 env LCARS_FLEET_BIN="$bin" LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/inexistant.env" \
+    "$SUT" catalogue list
   [ ! -e "$HOME/.lcars/catalogues.active" ]
   [ ! -e "$BATS_TEST_TMPDIR/catalogues.active" ]
 }

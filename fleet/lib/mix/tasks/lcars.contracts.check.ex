@@ -116,6 +116,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_toolchain_branch_single_source(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
+      check_bats_descriptions_inert(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
         check_no_legacy_config_namespace(root),
@@ -1916,6 +1917,98 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # NON litteral (`join(BIN, name)`) ne se resout pas — on rend alors le prefixe connu comme un
   # repertoire, qui exige une couverture en `**`. C'est volontairement conservateur : mieux vaut
   # exiger trop large sur le seul cas dynamique que de certifier une liste close qui ne l'est pas.
+  # A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER.
+  #
+  # From bats-core 1.11, `bats_test_function` resolves variable references in a description with
+  # `eval "printf -v d '%s' \"$2\""`. Everything a double-quoted string expands, a test NAME expands:
+  # a backtick pair runs a command, `$(…)` runs a command, `$VAR` interpolates. Measured 2026-08-20
+  # on bats 1.11.1: the description « ce que `box reset` epargne » RAN `box reset` at file load —
+  # twice — and the name printed in the report came back MUTILATED, with the quoted text gone.
+  #
+  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose: nobody reviews it
+  # as code, and the danger scales with how ordinary the quoted words look. `box reset`, `ip`, `..`,
+  # `/`, `-`, `:=` were all in this repository, in files that also drive a real provisioning rail.
+  # Nothing ran on bats 1.10, so a whole estate can carry this for months and see it the day one
+  # machine upgrades — six suites went red at once on the native workbench, and the reported failures
+  # named assertions that were fine: the eval's stderr had leaked into `$output`.
+  #
+  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT (measured, both forms, in isolation): `\`` survives
+  # the eval and renders as a plain backtick. So this wall does not ban the repository's habit of
+  # quoting code in a test name — it requires the one backslash that makes the name inert.
+  defp check_bats_descriptions_inert(root) do
+    # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Ce check a d'abord nomme `test/` et `deploy/tests/` :
+    # il ratait les six suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement
+    # les repertoires qu'on oublie. Un mur qui enumere ses arbres ne protege que ceux qu'on avait
+    # deja en tete le jour ou on l'a ecrit — et le suivant qu'on cree n'est protege par rien.
+    #
+    # `_build`, `deps` et `tmp` sont exclus : ce sont des COPIES ou des artefacts, et un doublon
+    # signale la ligne deux fois sous un chemin que personne ne peut editer.
+    files =
+      [root, Path.join(Path.expand("..", root), ".claude")]
+      |> Enum.filter(&File.dir?/1)
+      |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.bats")))
+      |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|tmp|node_modules)/"))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    offenders =
+      for path <- files,
+          {line, n} <- Enum.with_index(String.split(File.read!(path), "\n"), 1),
+          String.starts_with?(line, "@test "),
+          reason = evaluable_description_reason(line),
+          do: "#{Path.relative_to(path, root)}:#{n} — #{reason}"
+
+    cond do
+      files == [] ->
+        %{
+          id: "bats.descriptions_inert",
+          status: :pass,
+          remediation:
+            "aucun geste : aucun fichier .bats dans cet arbre. Rejouer depuis un arbre complet",
+          evidence: [],
+          note: "HORS PERIMETRE — pas de suite bats ici, donc aucune description n'est mesuree"
+        }
+
+      offenders == [] ->
+        %{
+          id: "bats.descriptions_inert",
+          status: :pass,
+          remediation: "",
+          evidence: [],
+          note:
+            "les #{length(files)} suites bats ont des descriptions INERTES — depuis bats 1.11 un " <>
+              "nom de test est evalue par le shell, donc un accent grave nu y EXECUTE une commande"
+        }
+
+      true ->
+        %{
+          id: "bats.descriptions_inert",
+          status: :fail,
+          remediation:
+            "echapper l'accent grave dans la description (\\` au lieu de `) — la forme echappee " <>
+              "traverse l'eval et s'affiche identique. Meme geste pour $( et $VAR",
+          evidence: offenders,
+          note:
+            "#{length(offenders)} description(s) de test EXECUTEES par bats >= 1.11 au chargement " <>
+              "du fichier : le nom est passe a `eval` (bats_test_function), et sa sortie pollue " <>
+              "`$output` de tous les temoins du fichier"
+        }
+    end
+  end
+
+  # Ce que l'eval de bats ferait de cette ligne, ou nil si elle est inerte. Un caractere precede d'un
+  # nombre IMPAIR de contre-obliques est echappe ; sinon il est vivant. `$VAR` est inclus : il
+  # n'execute rien mais il rend le nom du test dependant de l'environnement, ce qui le fait varier
+  # d'une machine a l'autre — la meme faute, en plus silencieuse.
+  defp evaluable_description_reason(line) do
+    cond do
+      Regex.match?(~r/(?<!\\)(?:\\\\)*`/, line) -> "accent grave NU — la commande citee est EXECUTEE"
+      Regex.match?(~r/(?<!\\)(?:\\\\)*\$\(/, line) -> "$( NU — la commande citee est EXECUTEE"
+      Regex.match?(~r/(?<!\\)(?:\\\\)*\$[A-Za-z_{]/, line) -> "$VAR NU — le nom du test varie selon l'environnement"
+      true -> nil
+    end
+  end
+
   defp check_site_build_inputs(root) do
     repo = Path.expand("..", root)
     wf = Path.join(repo, ".github/workflows/site.yml")
