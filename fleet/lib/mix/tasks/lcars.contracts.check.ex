@@ -94,6 +94,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
         check_gitea_template_expansion(root),
+        check_site_build_inputs(root),
         check_awaits_arch_clears_in_flight(root),
         check_sanctuary_contained(root),
         check_no_legacy_config_namespace(root),
@@ -1217,6 +1218,165 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # notres. Les inscrire ici confierait a Gitea des noms qu'il ne connait pas, et le jour ou il
   # expanserait l'inconnu en vide, le script CI partirait en morceaux. La liste des cinq variables
   # est celle de `Onboard.Scaffold` : une seule autorite, des deux cotes.
+  # ── site.build_inputs ──────────────────────────────────────────────────────────────────────────
+  # LE SITE VITRINE LIT LE RUNTIME POUR L'ENUMERER : chaque fichier que son build ouvre est une
+  # ENTREE, et le workflow qui le publie filtre sur `paths:`. Une entree absente de ce filtre est un
+  # changement qui ne redeclenche RIEN — le site reste en ligne et decrit la version d'avant.
+  #
+  # ⚠ LE MODE DE PANNE EST MUET DANS LA MAUVAISE DIRECTION, et c'est ce qui justifie un contrat
+  # plutot qu'une relecture. L'en-tete du workflow dit vouloir l'inverse — « une plaquette qui ne
+  # trouve plus ce qu'elle decrit doit ECHOUER, pas servir la version d'avant » — et les vingt
+  # `throw` des sources du site sont ecrits pour ca. Ils ne servent a rien quand le build NE TOURNE
+  # PAS : le filtre decide s'il tourne, donc le filtre decide si les gardes existent. Mesure du
+  # 2026-08-20 : huit entrees sur dix hors filtre (les cap-profiles systeme, les deux sources Elixir
+  # du catalogue, les launchers, les deux fichiers MCP).
+  #
+  # CE QUI EST DERIVE, ET LA LIMITE ASSUMEE. On resout les `join()` des sources du site : `const X =
+  # join(here, '..'x4, …)` puis `join(X, …)`, style uniforme dans ces quatre fichiers. Un segment
+  # NON litteral (`join(BIN, name)`) ne se resout pas — on rend alors le prefixe connu comme un
+  # repertoire, qui exige une couverture en `**`. C'est volontairement conservateur : mieux vaut
+  # exiger trop large sur le seul cas dynamique que de certifier une liste close qui ne l'est pas.
+  defp check_site_build_inputs(root) do
+    repo = Path.expand("..", root)
+    wf = Path.join(repo, ".github/workflows/site.yml")
+    lib = Path.join(repo, "assets/github.io/src/lib")
+
+    listed =
+      case File.read(wf) do
+        {:ok, y} ->
+          Regex.scan(~r/^\s*-\s*'([^']+)'\s*$/m, y, capture: :all_but_first)
+          |> List.flatten()
+          |> MapSet.new()
+
+        _ ->
+          MapSet.new()
+      end
+
+    read = site_build_inputs(lib)
+
+    uncovered =
+      read
+      |> Enum.reject(fn {path, kind} -> site_path_covered?(path, kind, listed) end)
+      |> Enum.map(fn {path, kind} ->
+        "#{path}#{if kind == :dir, do: "/** (lecture dynamique)"}"
+      end)
+      |> Enum.sort()
+
+    %{
+      id: "site.build_inputs",
+      status: if(File.exists?(wf) and read != [] and uncovered == [], do: :pass, else: :fail),
+      remediation:
+        "ajouter les chemins manquants au `paths:` de .github/workflows/site.yml — le build du " <>
+          "site LIT ces fichiers, donc un changement qui ne les declenche pas laisse la plaquette " <>
+          "decrire la version d'avant, en silence",
+      evidence:
+        cond do
+          not File.exists?(wf) -> [".github/workflows/site.yml INTROUVABLE — fail-closed"]
+          read == [] -> ["aucune entree derivee de #{Path.relative_to(lib, repo)} — fail-closed"]
+          true -> Enum.map(uncovered, &"lu par le build, HORS paths: #{&1}")
+        end,
+      note:
+        "le filtre `paths:` du workflow doit couvrir toute source runtime que le site lit " <>
+          "(#{length(read)} derivees)"
+    }
+  end
+
+  # Les chemins repo-relatifs que le build du site ouvre, en {chemin, :file | :dir}.
+  #
+  # ⚠ UN REPERTOIRE QUI N'EST QU'UN PREFIXE N'EST PAS UNE ENTREE. `const PRIV = join(ROOT, 'fleet',
+  # 'priv')` est un `join()` comme un autre pour l'extracteur, mais personne ne LIT `fleet/priv` :
+  # c'est le point de depart de `fleet/priv/catalogue/…`. Les garder exigeait du filtre qu'il couvre
+  # `fleet/priv` entier — c'est-a-dire tout le catalogue, tous les schemas, tout `priv/` — pour une
+  # ligne qui ne lit rien.
+  #
+  # La lecture DYNAMIQUE echappe a cette regle et c'est le fond de l'affaire : `join(BIN, name)` ne
+  # dit pas quel fichier, donc `fleet/bin` est bien l'entree, meme si un autre site en lit un fichier
+  # nomme. Un prefixe rendu par une lecture dynamique reste une entree ; le meme prefixe rendu par
+  # une definition de constante disparait.
+  defp site_build_inputs(lib) do
+    all =
+      lib
+      |> Path.join("*.js")
+      |> Path.wildcard()
+      |> Enum.flat_map(&site_inputs_of_file/1)
+      |> Enum.uniq()
+
+    deeper = fn p ->
+      Enum.any?(all, fn {q, _} -> q != p and String.starts_with?(q, p <> "/") end)
+    end
+
+    Enum.reject(all, fn {path, kind} -> kind == :file and deeper.(path) end)
+  end
+
+  defp site_inputs_of_file(file) do
+    src = File.read!(file)
+
+    # 1. Les constantes : `const NAME = join(<base>, 'a', 'b')`. `here` vaut le dossier du fichier,
+    #    donc quatre `..` remontent a la racine du depot — ils s'annulent et ne laissent que la
+    #    suite. Deux passes suffisent : ces fichiers ne chainent jamais plus loin.
+    consts =
+      Enum.reduce(1..2, %{}, fn _, acc ->
+        Regex.scan(~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/, src)
+        |> Enum.reduce(acc, fn [_, name, base, rest], m ->
+          case site_resolve(base, rest, m) do
+            {:ok, p} -> Map.put(m, name, p)
+            :error -> m
+          end
+        end)
+      end)
+
+    # 2. Les usages : tout `join(<base>, …)` dont la base est `here` ou une constante connue.
+    Regex.scan(~r/join\(\s*(\w+)\s*,([^)]*)\)/, src)
+    |> Enum.flat_map(fn [_, base, rest] ->
+      case site_resolve(base, rest, consts) do
+        # Un segment non litteral : on ne sait pas QUEL fichier, on sait dans quel repertoire.
+        {:dynamic, p} -> [{p, :dir}]
+        {:ok, p} -> if p == "", do: [], else: [{p, :file}]
+        :error -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # base + segments -> chemin repo-relatif. `here` = racine (les quatre `..` l'y ramenent).
+  defp site_resolve(base, rest, consts) do
+    prefix =
+      case base do
+        "here" -> {:ok, ""}
+        n -> if p = consts[n], do: {:ok, p}, else: :error
+      end
+
+    with {:ok, pre} <- prefix do
+      segs = String.split(rest, ",", trim: true) |> Enum.map(&String.trim/1)
+      # `'..'` ne sert qu'a remonter depuis `here` : ils s'annulent avec la profondeur du fichier.
+      lits = Enum.reject(segs, &(&1 in ["'..'", "\"..\"", ""]))
+      dynamic? = Enum.any?(lits, &(not Regex.match?(~r/^'[^']*'$|^"[^"]*"$/, &1)))
+
+      parts =
+        lits |> Enum.filter(&Regex.match?(~r/^'|^"/, &1)) |> Enum.map(&String.slice(&1, 1..-2//1))
+
+      path = Enum.join([pre | parts] |> Enum.reject(&(&1 == "")), "/")
+
+      if dynamic?, do: {:dynamic, path}, else: {:ok, path}
+    end
+  end
+
+  # Un chemin est couvert si le filtre le nomme, ou si un glob `X/**` le contient. Une lecture
+  # DYNAMIQUE (`:dir`) exige le glob : nommer trois fichiers ne ferme pas un repertoire ouvert.
+  defp site_path_covered?(path, kind, listed) do
+    globs =
+      listed
+      |> Enum.filter(&String.ends_with?(&1, "/**"))
+      |> Enum.map(&String.replace_suffix(&1, "/**", ""))
+
+    covered_by_glob? = Enum.any?(globs, &(path == &1 or String.starts_with?(path, &1 <> "/")))
+
+    case kind do
+      :dir -> covered_by_glob?
+      :file -> covered_by_glob? or MapSet.member?(listed, path)
+    end
+  end
+
   defp check_gitea_template_expansion(root) do
     face = Path.join([root, "priv", "catalogue", "project_template", "main"])
     control = Path.join([face, ".gitea", "template"])
