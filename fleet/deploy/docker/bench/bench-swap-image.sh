@@ -87,6 +87,18 @@ done
 FORGE_PROJECT="${PROJECT}forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
+
+# ⚠ MEME OMISSION QUE `bench-down.sh` A DEJA PAYEE, TROISIEME SITE. Le compose de la boite nomme ses
+# volumes de magasin `${LCARS_STORE_PREFIX}-<nature>` avec un `:?` : sans la variable, il REFUSE de
+# PARSER le fichier — donc pas « un volume manque », mais « rien ne se cree », sur un banc
+# parfaitement sain. `bench-up.sh` et `bench-down.sh` l'exportent chacun ; ce script utilisait le
+# meme compose et ne l'exportait pas.
+#
+# Mesure du 2026-08-21, swap du banc #2 : « error while interpolating volumes.lcars-cache.name:
+# required variable LCARS_STORE_PREFIX is missing a value », puis « la boite ne se cree pas ». Le
+# message dit la variable, il ne dit pas que trois scripts partagent ce compose et qu'un seul
+# l'oubliait.
+export LCARS_STORE_PREFIX="$PROJECT"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
 # ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
 # la derivation depend du SUBSTRAT (WSL en NAT n'a pas d'adresse annoncable). Une seule definition,

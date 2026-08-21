@@ -54,3 +54,28 @@ setup() {
   run bash -c '[[ "${CREDS_SIZE:-}" =~ ^[0-9]+$ ]] && [[ "$CREDS_SIZE" -gt 0 ]]'
   [ "$status" -ne 0 ]
 }
+
+# ─── LE MAGASIN : TROIS SCRIPTS PARTAGENT UN COMPOSE, UN SEUL L'OUBLIAIT ────────────────────────
+#
+# Le compose de la boite nomme ses volumes `${LCARS_STORE_PREFIX}-<nature>` avec un `:?`. Sans la
+# variable, compose refuse de PARSER le fichier — donc pas « un volume manque » mais « rien ne se
+# cree », sur un banc parfaitement sain.
+#
+# Mesure du 2026-08-21, swap du banc #2 : « required variable LCARS_STORE_PREFIX is missing a
+# value », puis « la boite ne se cree pas ». `bench-up.sh` et `bench-down.sh` l'exportaient chacun ;
+# ce script utilisait le meme compose et ne l'exportait pas.
+
+@test "bench-swap-image EXPORTE LCARS_STORE_PREFIX — sinon compose ne parse meme pas" {
+  grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$SUT"
+}
+
+@test "les TROIS scripts de banc derivent le prefixe du MEME endroit — le projet" {
+  # Une derivation differente d'un script a l'autre pointerait sur d'autres volumes : un `down`
+  # effacerait le magasin d'un voisin, un `swap` en fabriquerait un second sous le nez du premier.
+  local d="$BATS_TEST_DIRNAME/../docker/bench"
+  local f
+  for f in bench-up.sh bench-down.sh bench-swap-image.sh; do
+    grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$d/$f" \
+      || { echo "$f ne derive pas le prefixe de \$PROJECT" >&2; false; }
+  done
+}
