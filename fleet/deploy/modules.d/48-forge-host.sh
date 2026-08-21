@@ -42,20 +42,78 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 : "${PROV_FORGE_PROJECT:=lcars-forge}"          # projet compose de la forge du poste
-: "${PROV_FORGE_HOST_PORT:=3000}"               # le port qu'elle publie sur la loopback
+: "${PROV_FORGE_HOST_PORT:=3000}"               # le port qu'elle publie
 : "${PROV_FORGE_ADMIN:=admiral}"                # le compte qui ADMINISTRE la forge
 : "${PROV_FORGE_IMAGE:=lcars-fleet:2}"          # l'image qui porte tofu, la recette et les gestes
 : "${PROV_DOCKER_BIN:=docker}"
+
+# ─── DEUX ADRESSES, ET LES CONFONDRE CASSE LA MOITIÉ DES LIENS ─────────────────────────────────
+# `bench-up.sh` a déjà payé cette leçon et l'a écrite : « LE RECAP DIT L'ADRESSE QU'ON COMPOSE, PAS
+# CELLE SUR LAQUELLE ON ECOUTE. » Ce module n'avait ni l'une ni l'autre — il câblait `127.0.0.1`
+# aux deux endroits.
+#
+#   PROV_FORGE_BIND       l'interface sur laquelle docker PUBLIE le port. C'est une décision de
+#                         sécurité : `127.0.0.1` = cette machine seule, `0.0.0.0` = le réseau.
+#   PROV_FORGE_ADVERTISE  l'adresse qu'on ÉCRIT dans `ROOT_URL`. Gitea s'en sert pour tous ses
+#                         liens, ses URLs de clone et ses retours OAuth. Ouvrir le bind sans la
+#                         bouger donne une UI joignable dont chaque lien pointe sur la loopback du
+#                         visiteur — cassée depuis toute autre machine.
+#
+# ⚖ LE DÉFAUT EST OUVERT, ET LE CONTRAIRE ÉTAIT UN DÉFAUT CASSÉ (user 2026-08-21 : « un container
+# docker inaccessible sur le réseau ET MÊME PAR SON RUNNER, ça sert à quoi ? »).
+#
+# Ce module a publié en loopback seul pendant trois jours, sous couvert de prudence. Or la carte
+# canon déclare `ci: required` : sans runner, chaque PR attend un statut 45 min puis ESCALADE, et
+# rien ne se livre. Et un runner n'atteint PAS une forge en loopback — ses conteneurs de job vivent
+# sur un réseau par job, où `127.0.0.1` les désigne eux-mêmes ; un port publié sur la loopback de
+# l'hôte n'est pas routable depuis la passerelle du bridge. Une forge fermée n'est donc pas une
+# forge prudente : c'est une forge qui ne peut pas faire son travail.
+#
+# Fermer reste possible — `PROV_FORGE_BIND=127.0.0.1` — mais c'est le geste, pas le défaut, et il
+# prive la machine de sa CI. `bench-up.sh` a tranché pareil et porte le coût écrit : les mots de
+# passe d'un banc sont des défauts de test, publics dans le README, donc à n'ouvrir que sur un
+# réseau de confiance. Ici les comptes sont ceux de l'opérateur : même prudence, même conclusion.
+#
+# ⚠ ET SOUS WSL L'OUVERTURE NE DONNE RIEN SUR LE LAN, ce qui compte pour ne pas la promettre : en
+# NAT — le défaut de WSL et de Docker Desktop — publier sur `0.0.0.0` ouvre le port DANS la VM, pas
+# sur la machine Windows. ⚖ user 2026-08-18, porté mot pour mot par `bench-up.sh` ; on ne le
+# re-découvre pas ici. Le runner, lui, tourne dans cette même VM : il y atteint la forge.
+: "${PROV_FORGE_BIND:=0.0.0.0}"
+: "${PROV_FORGE_ADVERTISE:=$PROV_FORGE_BIND}"
+# Un joker d'écoute n'est pas une adresse qu'on compose : si on annonce `0.0.0.0`, on retombe sur
+# l'adresse de sortie de la machine, qui est ce qu'un tiers peut réellement taper.
+case "$PROV_FORGE_ADVERTISE" in
+  0.0.0.0|::|"") PROV_FORGE_ADVERTISE="$(lan_addr 2>/dev/null || true)"
+                 [[ -n "$PROV_FORGE_ADVERTISE" ]] || PROV_FORGE_ADVERTISE=127.0.0.1 ;;
+esac
 
 FORGE_NET="${PROV_FORGE_PROJECT}_default"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-forge-1"
 MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/bench/forge-compose.yml"
+# ⚠ DEUX URLS, ET CHACUNE A UN SEUL LECTEUR LÉGITIME.
+#   LOCAL_URL   par où CE module et ses voisins parlent à la forge — toujours la loopback, parce
+#               qu'ils tournent sur la machine. C'est elle qui va dans `forge.url`, lue par
+#               `50-forge` et `55-deck-oidc`, et c'est elle que sonde `forge_up`. Elle ne dépend pas
+#               de ce qu'on publie : une forge ouverte au réseau reste joignable en local.
+#   PUBLIC_URL  ce que Gitea écrit dans ses liens, ses URLs de clone et ses retours OAuth. C'est
+#               l'adresse qu'un TIERS compose — un navigateur, un `git clone`, un conteneur de job.
 LOCAL_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
+PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 
 d() { "$PROV_DOCKER_BIN" "$@"; }
 forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; }
+
+# LE VERDICT DIT SUR QUOI ELLE ÉCOUTE, parce que c'est la seule chose qu'un opérateur ne peut pas
+# deviner en la voyant répondre en local. Une forge ouverte au réseau et une forme fermée rendent
+# le même `200` sur la loopback.
+forge_reach_note() {
+  case "$PROV_FORGE_BIND" in
+    127.0.0.1|localhost|::1) printf ' — cette machine SEULE' ;;
+    *) printf ' — OUVERTE sur %s, composable en %s' "$PROV_FORGE_BIND" "$PUBLIC_URL" ;;
+  esac
+}
 
 check() {
   if ! docker_endpoint; then
@@ -66,7 +124,7 @@ check() {
     verdict_check
   fi
   if forge_up; then
-    p_ok "forge du poste vivante ($LOCAL_URL)"
+    p_ok "forge du poste vivante ($LOCAL_URL)$(forge_reach_note)"
     [[ -s "$MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($MASTER_TOKEN_FILE)" \
       || p_drift "forge vivante mais AUCUNE autorité ($MASTER_TOKEN_FILE) — l'apply la minte"
   else
@@ -90,17 +148,17 @@ apply() {
   # 1. LE CONTENEUR. `compose up -d` est idempotent : il ne recrée que si la déclaration a bougé.
   if ! forge_up; then
     p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
-    LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="127.0.0.1" \
-    LCARS_DEVFORGE_ROOT_URL="$LOCAL_URL/" \
+    LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="$PROV_FORGE_BIND" \
+    LCARS_DEVFORGE_ROOT_URL="$PUBLIC_URL/" \
       run_quiet d compose -f "$COMPOSE_FILE" -p "$PROV_FORGE_PROJECT" up -d \
       || { p_fail "la forge ne monte pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
     local i
     for i in $(seq 1 60); do forge_up && break; sleep 2; done
     forge_up || { p_fail "forge montée mais muette sur $LOCAL_URL après 120 s"; verdict_apply; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "forge du poste montée ($LOCAL_URL)"
+    p_chg "forge du poste montée ($LOCAL_URL)$(forge_reach_note)"
   else
-    p_ok "forge du poste déjà vivante ($LOCAL_URL)"
+    p_ok "forge du poste déjà vivante ($LOCAL_URL)$(forge_reach_note)"
   fi
 
   # 1-bis. ELLE ANNONCE SON ADRESSE, parce que personne d'autre ne peut le faire pour elle. Les
