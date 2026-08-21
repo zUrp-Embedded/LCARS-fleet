@@ -2995,7 +2995,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `project_import` even referred to itself by its old name.
 
   This is worse than a stale comment. A comment misleads a human who can check; a description is an
-  INSTRUCTION to an agent, delivered at the moment it chooses what to call. `list_workflow_cards`
+  INSTRUCTION to an agent, delivered at the moment it chooses what to call. `card_list`
   told every architect to call `create_project` twice, in the one paragraph that exists to guide
   project framing.
 

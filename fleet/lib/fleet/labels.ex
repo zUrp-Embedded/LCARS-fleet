@@ -73,7 +73,7 @@ defmodule Fleet.Labels do
 
   ⚠ DISTINCT FROM `awaits_arch/0`, AND IT IS NOT COSMETIC. The arch can do nothing with a toolchain
   request: it does not approve installs, and it has no forge write. Merging the two would fill the
-  arch's inbox (`list_escalations` reads `lcars-awaits-arch`) with items its reader cannot action —
+  arch's inbox (`escalation_list` reads `lcars-awaits-arch`) with items its reader cannot action —
   which that tool's own contract forbids in as many words. Two locks because two audiences.
 
   DRAINED BY THE RECONCILER, IN BOTH DIRECTIONS, and the second one is the reason it exists at all:

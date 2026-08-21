@@ -16,10 +16,10 @@ restated, only pointed at.
 ## Modules
 - `Fleet.MCP.PodTools` — pod-facing TOOL layer: the `deftool` schemas + `handle_tool_call/3` routing table (wrapped behind `use ExMCP.Server`); the domain entry point for the pod RPCs
   - `Fleet.MCP.PodTools.WorkItems` — work-item drive, every pod (`get_work_item` / `submit_result`)
-  - `Fleet.MCP.PodTools.Delegation` — forge delegation, architect only (`issue_create` / `project_create` / `project_install` / `issue_status` / `list_escalations` / `issue_comment`) + the `require_architect` gate
+  - `Fleet.MCP.PodTools.Delegation` — forge delegation, architect only (`issue_create` / `project_create` / `project_install` / `issue_status` / `escalation_list` / `issue_comment`) + the `require_architect` gate
   - `Fleet.MCP.PodTools.Delegation.ForgeClient` — behaviour = contract of the `:forge_client` runtime seam (up-seam to pilot)
   - `Fleet.MCP.PodTools.Delegation.ProjectOnboard` — behaviour = contract of the `:project_onboard` runtime seam (up-seam to pilot)
-  - `Fleet.MCP.PodTools.Delegation.EscalationForge` — behaviour = contract of the escalation-read seam (`list_escalations` backend)
+  - `Fleet.MCP.PodTools.Delegation.EscalationForge` — behaviour = contract of the escalation-read seam (`escalation_list` backend)
 - `Fleet.MCP.PodSocketAcceptor` — one AF_UNIX socket acceptor per pod (identity IS the channel; each connection served in its own Task)
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor of the acceptors + the spawner-facing seam API (`ensure_pod_socket` / `release_pod_socket`, paths)
 - `Fleet.MCP.SocketWarden` — periodic reconciler of the per-pod socket footprints (acceptor/listener/Registry/file) against the live pods (2-tick grace)

@@ -227,12 +227,12 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
     # starfleet = ONBOARDING head (portfolio).
     sf = tools.("starfleet")
-    assert "project_create" in sf and "project_install" in sf and "list_workflow_cards" in sf
+    assert "project_create" in sf and "project_install" in sf and "card_list" in sf
     refute "issue_create" in sf
 
     # architect = DELEGATION head (its project) — NOT onboarding.
     arch = tools.("architect")
-    assert "issue_create" in arch and "issue_status" in arch and "list_escalations" in arch
+    assert "issue_create" in arch and "issue_status" in arch and "escalation_list" in arch
     refute "project_create" in arch
     refute "project_install" in arch
   end

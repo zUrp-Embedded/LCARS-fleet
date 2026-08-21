@@ -76,7 +76,7 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
       # The engine runs the workflow CARD; an SP promising `engineer → judges → gatekeeper` as THE
       # chain misrepresents to the human every delegation whose card differs (the human overestimates
       # the proofs behind a delivery). The prompt must not name a fixed chain — the effective card is
-      # data (list_workflow_cards / the engraved route), not prose.
+      # data (card_list / the engraved route), not prose.
       image = composed_image("architect")
 
       # Spans sentence-internal newlines (prose wraps); stops at a sentence end — a chain promise

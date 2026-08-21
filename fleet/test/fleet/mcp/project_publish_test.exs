@@ -37,11 +37,11 @@ defmodule Fleet.MCP.ProjectPublishTest do
       end)
 
       assert {:error, :forbidden_not_onboarder, _} =
-               call(%{"repo" => "fleet/demo"}, %{pod_id: "pod-arch"})
+               call(%{"full_name" => "fleet/demo"}, %{pod_id: "pod-arch"})
     end
 
     test "no pod_id -> the gate refuses before any work" do
-      assert {:error, :pod_id_required, _} = call(%{"repo" => "fleet/demo"}, %{})
+      assert {:error, :pod_id_required, _} = call(%{"full_name" => "fleet/demo"}, %{})
     end
   end
 

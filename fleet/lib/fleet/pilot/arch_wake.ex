@@ -207,7 +207,7 @@ defmodule Fleet.Pilot.ArchWake do
       # mandate is never enqueued for a role the catalogue no longer carries.
       role: Fleet.Project.Roles.project_delegate_role(),
       brief:
-        "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`list_escalations` / " <>
+        "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`escalation_list` / " <>
           "`issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>
           "(`issue_comment`) ou corrige+re-délègue (`issue_create` avec `supersedes: #{n}` — la " <>
           "fleet retire l'ancien ticket elle-même ; sans ça il repart en dispatch après ton " <>

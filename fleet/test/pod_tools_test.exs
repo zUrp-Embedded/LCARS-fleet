@@ -1599,7 +1599,7 @@ defmodule Fleet.MCP.PodToolsTest do
   # `require_onboarder` (the portfolio verbs: create/import/open/adopt/close/revise/delete, plus the
   # card listing that frames them) and `require_architect` (the delegation verbs, inside one repo).
   # An unknown pod or a state without pod_id is refused by both.
-  describe "list_workflow_cards (the framing catalogue — the card choice IS the declaration)" do
+  describe "card_list (the framing catalogue — the card choice IS the declaration)" do
     setup do
       # starfleet, not the architect: framing the choice of a card is part of ENROLLING a project,
       # which happens from outside any project.
@@ -1612,7 +1612,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "returns the canon catalogue: every card carries its human-facing voice + jury; the type cards are present" do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
       %{"cards" => cards} = Jason.decode!(txt)
       by_name = Map.new(cards, &{&1["name"], &1})
@@ -1666,7 +1666,7 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
       assert %{"cards" => [card]} = Jason.decode!(txt)
       assert card["name"] == "weird-file"
@@ -1705,7 +1705,7 @@ defmodule Fleet.MCP.PodToolsTest do
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, %{content: [%{"text" => txt}]}, _} =
                    PodTools.handle_tool_call(
-                     "list_workflow_cards",
+                     "card_list",
                      %{},
                      pod_state(uniq("pod-arch"))
                    )
@@ -1723,7 +1723,7 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
 
       assert {:error, {:workflow_catalogue_unavailable, msg}, _} =
-               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
       assert msg =~ "no *.yaml card"
     end
@@ -1751,7 +1751,7 @@ defmodule Fleet.MCP.PodToolsTest do
       Application.delete_env(:lcars_fleet, :workflow_workflow_maps_root)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("list_workflow_cards", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
       assert %{"cards" => [_ | _] = cards} = Jason.decode!(txt)
 
@@ -1794,7 +1794,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # different admission.
       {"deposit_list", %{}},
       {"deposit_import", %{"source" => "lordzurp/demo-proj", "catalogue" => "fleet"}},
-      {"list_workflow_cards", %{}}
+      {"card_list", %{}}
     ]
     @delegation_tools [
       # No `project` wire param (reorg 2026-07-19): the repo comes from the pod binding.
@@ -2019,7 +2019,7 @@ defmodule Fleet.MCP.PodToolsTest do
                PodTools.handle_tool_call("forge_list", %{}, pod_state(uniq("pod-eng")))
     end
 
-    test "publish_link: onboarder writes the binding (reversible intent, not a push)" do
+    test "forge_link: onboarder writes the binding (reversible intent, not a push)" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       fname = "pl#{System.unique_integer([:positive])}"
@@ -2039,8 +2039,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
-                 "publish_link",
-                 %{"repo" => repo, "forge" => fname, "as" => "MyRepo"},
+                 "forge_link",
+                 %{"full_name" => repo, "forge" => fname, "as" => "MyRepo"},
                  pod_state(uniq("pod-sf"))
                )
 
@@ -2050,26 +2050,26 @@ defmodule Fleet.MCP.PodToolsTest do
       assert File.exists?(binding)
     end
 
-    test "publish_link: unknown forge -> forge_unknown" do
+    test "forge_link: unknown forge -> forge_unknown" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       ghost = "ghost#{System.unique_integer([:positive])}"
 
       assert {:error, {:forge_unknown, _}, _} =
                PodTools.handle_tool_call(
-                 "publish_link",
-                 %{"repo" => "fleet/x", "forge" => ghost, "as" => "Y"},
+                 "forge_link",
+                 %{"full_name" => "fleet/x", "forge" => ghost, "as" => "Y"},
                  pod_state(uniq("pod-sf"))
                )
     end
 
-    test "publish_link: a non-onboarder is refused by the gate" do
+    test "forge_link: a non-onboarder is refused by the gate" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_onboarder, _} =
                PodTools.handle_tool_call(
-                 "publish_link",
-                 %{"repo" => "fleet/x", "forge" => "any", "as" => "Y"},
+                 "forge_link",
+                 %{"full_name" => "fleet/x", "forge" => "any", "as" => "Y"},
                  pod_state(uniq("pod-eng"))
                )
     end
@@ -2356,7 +2356,7 @@ defmodule Fleet.MCP.PodToolsTest do
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
   end
 
-  describe "arch return channel (list_escalations reads / comment_issue replies)" do
+  describe "arch return channel (escalation_list reads / comment_issue replies)" do
     @describetag :tmp_dir
 
     setup %{tmp_dir: tmp} do
@@ -2372,14 +2372,14 @@ defmodule Fleet.MCP.PodToolsTest do
       :ok
     end
 
-    test "list_escalations: the verdict is the ESCALATION comment, not the thread's last one" do
+    test "escalation_list: the verdict is the ESCALATION comment, not the thread's last one" do
       # Le nom de ce test portait le defaut : « verdict = last comment ». C'est ce que le code
       # faisait, et c'est faux — des que l'arch avait repondu, son inbox lui rendait SA PROPRE
       # REPONSE comme etant la question a trancher, sous une description d'outil qui promet
       # « the worker's escalation comment — the reasoning ». Le stub pose donc un commentaire de
       # route AVANT et une reponse d'arch APRES le commentaire marque : seul le marque doit sortir.
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
-               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("escalation_list", %{}, pod_state(uniq("pod-arch")))
 
       # Single-repo inbox (the binding) — and the entry never names the repo (axiom).
       assert {:ok, result} = Jason.decode(txt)
@@ -2392,18 +2392,18 @@ defmodule Fleet.MCP.PodToolsTest do
       assert v =~ "PING-RETOUR-OK"
     end
 
-    test "list_escalations: unreadable inbox surfaces an error, never a silent empty inbox" do
+    test "escalation_list: unreadable inbox surfaces an error, never a silent empty inbox" do
       Application.put_env(:lcars_fleet, :mcp_forge_client, EscalationForgeUnreadable)
 
       assert {:error, {:inbox_unreadable, "fleet/alpha", {:error, :forge_down}}, _} =
-               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-arch")))
+               PodTools.handle_tool_call("escalation_list", %{}, pod_state(uniq("pod-arch")))
     end
 
-    test "list_escalations: architect gate (non-architect role → refused, no read)" do
+    test "escalation_list: architect gate (non-architect role → refused, no read)" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
 
       assert {:error, :forbidden_not_architect, _} =
-               PodTools.handle_tool_call("list_escalations", %{}, pod_state(uniq("pod-eng")))
+               PodTools.handle_tool_call("escalation_list", %{}, pod_state(uniq("pod-eng")))
     end
 
     test "comment_issue: posts on the BOUND repo, IN THE NAME of the architect role (role token)" do
@@ -2782,7 +2782,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # determine » — et toutes deux liaient un projet a une org POUR SA VIE sur une deduction.
       #
       # Mon argument pour l'inference etait faux : « friction pour zero information ». L'information
-      # est dans l'objet que l'appelant vient de lire (`list_workflow_cards` rend chaque carte AVEC
+      # est dans l'objet que l'appelant vient de lire (`card_list` rend chaque carte AVEC
       # son catalogue). Ce qu'elle achetait, en echange de rien : un comportement qui change quand un
       # TIERS installe un catalogue portant le meme nom de carte.
       assert {:error, {:catalogue_required, orgs}} =
