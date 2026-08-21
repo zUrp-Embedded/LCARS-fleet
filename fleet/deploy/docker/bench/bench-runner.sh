@@ -31,7 +31,7 @@
 # USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1> --admin-token <tok>
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/project-template]
-#                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli"]
+#                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
 #                         [--accept-generic]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse
 #         3 le runner ne s'enregistre pas · 4 le job de verification ne passe pas
@@ -105,7 +105,7 @@ check_labels() {
 [bench-runner]   est celle de BASE du stage build : Elixir et rien d'autre. `mix gate` y meurt sur
 [bench-runner]   `git` introuvable, et le runner aura l'air vert. Sortie :
 [bench-runner]     docker build --target build -t lcars-build:<tag> -f fleet/deploy/docker/Dockerfile .
-[bench-runner]     bench-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
+[bench-runner]     bench-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
 [bench-runner]   Un banc qui ne veut que le rail CI du template : --accept-generic (c'est une decision).
 EOM
     exit 1

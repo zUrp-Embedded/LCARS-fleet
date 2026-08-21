@@ -546,10 +546,21 @@ MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /home/private/forge-master
 RUNNER_SERT=0
 
 # Derivation MESUREE du label `elixir` : le stage `build` du meme tag, s'il existe sur ce daemon.
+#
+# ⚠ `ubuntu-latest` EST LA POUR LES WORKFLOWS QU'ON N'ECRIT PAS. C'est le `runs-on` par defaut de
+# l'ecosysteme — tout workflow importe, tout exemple copie d'ailleurs, toute action tierce le nomme.
+# Sans lui, un banc refuse silencieusement ces jobs : la forge les garde en attente d'un runner qui
+# ne viendra pas, 45 min, puis ESCALADE, sans qu'aucune ligne ne dise que c'est le LABEL qui manque.
+# `catthehacker/ubuntu:act-latest` est l'image de reference de `act` pour ce label — publique, donc
+# `seed_dind_images` la tire elle-meme dans le daemon embarque du runner.
+#
+# Les trois autres restent ce qu'ils sont : des labels A NOUS, servis par des images a nous
+# (`lcars-build` est locale, elle se seme par `docker save`). Celui-ci est le seul emprunte a
+# l'exterieur, et c'est pour ca qu'il est nomme a part.
 if [[ -z "$RUNNER_LABELS" ]]; then
   BUILD_IMG="lcars-build:${IMAGE##*:}"
   if "$DOCKER_BIN" image inspect "$BUILD_IMG" >/dev/null 2>&1; then
-    RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://$BUILD_IMG,dood:docker://docker:cli"
+    RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://$BUILD_IMG,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
   fi
 fi
 

@@ -66,8 +66,15 @@ FAKE
   # sous-script muet ne pourrait pas distinguer « bench-up relaie » de « bench-up invente ».
   RUNNER_RC="$BATS_TEST_TMPDIR/runner.rc"
   echo 0 > "$RUNNER_RC"
+  # ⚠ LA DOUBLURE ENREGISTRE SON ARGV, et pas seulement son code de retour. Les labels sont derives
+  # par `bench-up` puis TRANSMIS ici : sans trace, un label qui disparait de la derivation ne se voit
+  # nulle part — le banc monte, le runner s'enregistre, et la forge garde en attente les jobs du
+  # label manquant jusqu'a l'escalade, 45 min plus tard, sans qu'une ligne le dise.
+  RUNNER_ARGV="$BATS_TEST_TMPDIR/runner.argv"
+  export RUNNER_ARGV
   cat > "$BENCH/bench-runner.sh" <<FAKE
 #!/usr/bin/env bash
+printf '%s\n' "\$*" > "$RUNNER_ARGV"
 rc="\$(cat "$RUNNER_RC")"
 [[ "\$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
 exit "\$rc"
@@ -259,6 +266,23 @@ run_bench() {
   [[ "$output" == *"token operateur absent"* ]]
   [[ "$output" == *"convergeur"* ]]
   [[ "$output" != *"banc PRET"* ]]
+}
+
+@test "les labels derives portent les QUATRE, dont « ubuntu-latest »" {
+  # ⚖ USER 2026-08-21. `ubuntu-latest` est le `runs-on` par DEFAUT de l'ecosysteme : tout workflow
+  # importe, tout exemple copie d'ailleurs, toute action tierce le nomme. Sans lui le banc refuse ces
+  # jobs EN SILENCE — la forge les garde en attente d'un runner qui ne viendra pas, 45 min, puis
+  # escalade, et rien ne dit que c'est le LABEL qui manque.
+  #
+  # Ce temoin garde la DERIVATION, pas une chaine : il lit ce que `bench-up` a reellement transmis a
+  # `bench-runner.sh`. Un label retire du defaut n'a alors nulle part ou se cacher.
+  run_bench
+  [ "$status" -eq 0 ]
+  run cat "$RUNNER_ARGV"
+  [[ "$output" == *"shell:docker://alpine:3.20"* ]]
+  [[ "$output" == *"elixir:docker://lcars-build:"* ]]
+  [[ "$output" == *"dood:docker://docker:cli"* ]]
+  [[ "$output" == *"ubuntu-latest:docker://catthehacker/ubuntu:act-latest"* ]]
 }
 
 @test "6-133: pas d'image pour le label elixir → PAS PRET, exit 6" {
