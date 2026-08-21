@@ -97,10 +97,28 @@ EOF
   [[ "$output" == *"déjà présente"* ]]
 }
 
-@test "forge injoignable : ECHEC franc — l'etat de la branche est INCONNU, pas convergé" {
-  # Le pendant du premier temoin : tout « pas de reponse » ne vaut pas « pas encore ». Une forge
-  # muette ne dit rien de la branche, et un module qui degraderait ca en drift rendrait vert un
-  # rail dont personne n'a mesure la moitie.
+@test "forge injoignable : DRIFT (rc 2) — pas convergé, mais pas cassé non plus" {
+  # ⚖ CE TEMOIN DISAIT « ECHEC FRANC », ET IL AVAIT TORT SUR DEUX PLANS — correction du 2026-08-21.
+  #
+  # 1. IL NE TENAIT PAS CE QU'IL DISAIT. Son assertion etait `[ "$status" -ne 0 ]`, et le contrat du
+  #    rail distingue 1 (echec) de 2 (applique, drift residuel). « Non nul » couvre les deux : le
+  #    temoin pose pour garder la ligne fail/drift ne la gardait pas. Passer le module de p_fail a
+  #    p_drift ne l'a pas fait broncher.
+  #
+  # 2. LE MODULE SE CONTREDISAIT LUI-MEME. Sur la MEME mesure — `probe` rend 2, la forge ne repond
+  #    pas — `check` disait drift et `apply` disait echec. Or le modele du rail est que le doctor
+  #    n'est pas un autre code, c'est le meme check. Deux verdicts opposes sur une mesure unique
+  #    n'est pas une nuance, c'est une contradiction.
+  #
+  # ET LE MOTIF D'ORIGINE — « une forge muette ne dit rien de la branche, la degrader en drift
+  # rendrait vert un rail dont personne n'a mesure la moitie » — ne tient pas : drift N'EST PAS
+  # vert. C'est rc 2, il s'imprime DRIFT, il remonte dans le bilan, et la porte le nomme desormais
+  # (« APPLIQUE, avec DRIFT RESIDUEL »). Ce que l'ancien verdict produisait, en revanche, etait
+  # concret : sur une machine dediee a froid la forge n'existe PAS encore — `48-forge-host` la
+  # monte — et ses deux voisins immediats, `50-forge` et `55-deck-oidc`, derivent sur cette cause
+  # exacte. Ce module seul rendait 1, donc l'apply entier rendait 1, donc l'installation etait
+  # declaree EN ECHEC alors qu'il manquait un geste. Mesure du 2026-08-21 :
+  #   DRIFT 48-forge-host · DRIFT 50-forge · **FAIL 52-ops-branch** · DRIFT 55-deck-oidc
   cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 exit 7
@@ -109,8 +127,24 @@ EOF
   export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
   printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
   run bash "$MODULE" apply
-  [ "$status" -ne 0 ]
+  # LE CODE EXACT, PAS « NON NUL » : 2 = applique avec drift residuel, 1 = echec. C'est toute la
+  # difference entre « il manque un geste » et « quelque chose est casse », et c'est elle que ce
+  # temoin existe pour garder.
+  [ "$status" -eq 2 ]
   [[ "$output" == *"injoignable"* ]]
+  [[ "$output" == *"DRIFT"* ]]
+
+  # ET `check` DIT LA MEME CHOSE SUR LA MEME MESURE — c'est la contradiction qui a ete fermee.
+  #
+  # ⚠ LES DEUX VERBES N'ENCODENT PAS LE DRIFT AVEC LE MEME CHIFFRE, et c'est une des raisons pour
+  # lesquelles la contradiction est passee inapercue. Contrat, en tete de `deploy/provision` :
+  #     check : 0 conforme · 1 DRIFT      · 2 erreur de sonde
+  #     apply : 0 convergé · 1 echec      · 2 APPLIQUE, drift residuel
+  # Le meme « 2 » veut donc dire « sonde cassee » d'un cote et « il manque un geste » de l'autre.
+  # Lire ces codes de memoire est une faute qui se paie ; ce temoin les epingle tous les deux.
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT"* ]]
 }
 
 @test "le nom de la branche est GELE dans le module — il ne se lit dans aucune variable" {

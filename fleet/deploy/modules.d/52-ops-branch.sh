@@ -216,7 +216,20 @@ apply() {
        p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
-    *) p_fail "forge injoignable — la branche ne peut pas être posée (ce n'est pas un état convergé)" ;;
+    # ⚠ DRIFT ET PAS FAIL, ET C'EST `check` QUI AVAIT RAISON. Sur la MÊME mesure (`probe` rend 2 :
+    # la forge ne répond pas), `check` disait drift et `apply` disait échec. Le modèle du rail est
+    # que le doctor n'est pas un autre code — c'est le même check — donc deux verdicts opposés sur
+    # une mesure unique est une contradiction interne, pas une nuance.
+    #
+    # ET LA BONNE RÉPONSE EST DRIFT, parce que « pas de forge » est l'état NORMAL d'une première
+    # passe : `48-forge-host` la monte, et s'il dérive (image absente, docker muet) tout l'aval le
+    # constate. Ses deux voisins immédiats — `50-forge` et `55-deck-oidc` — dérivent sur cette
+    # cause exacte. Ce module seul rendait 1, donc l'apply entier rendait 1, donc `install.sh`
+    # déclarait l'installation EN ÉCHEC là où il manquait un geste.
+    #
+    # Mesuré le 2026-08-21, install à froid sur machine dédiée : DRIFT 48 · DRIFT 50 · **FAIL 52** ·
+    # DRIFT 55. Un seul module transformait une convergence partielle en échec.
+    *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par la boîte) ; la branche se posera a la convergence suivante" ;;
   esac
   verdict_apply
 }

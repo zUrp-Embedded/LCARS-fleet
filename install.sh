@@ -558,11 +558,79 @@ if [[ ! -x "$PROVISION" ]]; then
   [[ -x "$PROVISION" ]] || { echo "[install] provision introuvable après clone : $PROVISION" >&2; exit 1; }
 fi
 
+# ─── L'IMAGE EST AUSSI UNE PRÉCONDITION DU RAIL POSTE, DEPUIS `48-forge-host` ───────────────────
+# La porte bâtissait `lcars-fleet:2` sur la branche BOÎTE seulement — c'était juste tant que l'image
+# n'était qu'un artefact de boîte. Depuis le 2026-08-18, le rail poste monte SA forge par
+# `48-forge-host`, et ce module a besoin de la même image : elle porte tofu, la recette et les
+# gestes de forge. Personne n'a déplacé le build avec.
+#
+# ⚠ ET LE TROU EST INVISIBLE SUR LE SUBSTRAT OÙ CE RAIL EST ÉCRIT — le commentaire du build le dit
+# déjà, quelques lignes plus haut, pour la branche boîte : « sous WSL le daemon est partagé par
+# toute la VM, donc une distro vierge n'est PAS un docker vierge — l'image était toujours déjà là ».
+# Le même masque a couvert le rail poste deux jours de plus.
+#
+# MESURÉ le 2026-08-21, install à froid sur une machine dédiée nue :
+#   DRIFT 48-forge-host: image lcars-fleet:2 absente
+#   DRIFT 50-forge: FORGE_BASE_URL non posé
+#   FAIL  52-ops-branch: forge injoignable
+#   DRIFT 55-deck-oidc: FORGE_BASE_URL non posé
+# Quatre modules en cascade, une seule cause, et la porte avait le geste sous la main.
+#
+# Pas de build en `--check` : une sonde read-only qui bâtirait 3 Go n'est plus une sonde.
+if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]]; then
+  _wimg="${LCARS_IMAGE:-lcars-fleet:2}"
+  if ! "$PROV_DOCKER_BIN" image inspect "$_wimg" >/dev/null 2>&1; then
+    echo ""
+    echo "  ${W}$_wimg${N} n'est pas là — la forge du poste en a besoin (tofu, recette, gestes)."
+    echo "  Je la construis (plusieurs minutes, une seule fois)."
+    # ⚠ LA RACINE SE DÉRIVE DE `$PROVISION`, PAS DE `$SCRIPT_DIR` : en mode standalone (script
+    # téléchargé seul) le checkout vient d'être cloné ailleurs, et `$SCRIPT_DIR` désigne le dossier
+    # du fichier téléchargé, où il n'y a pas de `docker.sh`.
+    _wroot="${PROVISION%/fleet/deploy/provision}"
+    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$_wimg" "$_wroot/docker.sh" build || {
+      echo "  ${R}Le build a échoué — son verdict est le sien.${N}"
+      echo "  Le provisionnement CONTINUE : la forge dérivera en le disant, le runtime sera posé."
+    }
+  else
+    say_ok "image $_wimg présente — la forge du poste l'utilisera telle quelle"
+  fi
+fi
+
 # ─── Déléguer TOUT au provisioning (l'autorité) ─────────────────────────────
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$PROVISION" doctor "${PASSTHRU[@]}"
 fi
-"$PROVISION" apply "${PASSTHRU[@]}"
+# ⚠ LE CODE DE RETOUR DE L'APPLY SE LIT, ET IL A TROIS SENS — LA PORTE N'EN CONNAISSAIT AUCUN.
+# `provision apply` rend 0 (tout convergé), 2 (appliqué, drift résiduel : un geste manque, rien
+# n'est cassé) ou 1 (au moins un échec). Cette ligne était nue : sous `set -e`, 1 ET 2 tuaient
+# install.sh au même endroit, sans un mot, et le bandeau de fin — celui qui dit « les verdicts
+# ci-dessus font foi » — n'était imprimé QUE sur une convergence parfaite.
+#
+# Conséquences mesurées le 2026-08-21 sur une install à froid : la première passe d'une machine
+# dédiée dérive forcément (la forge n'existe pas encore), donc la porte mourait muette sur une
+# installation qui venait de poser un runtime complet. L'opérateur voyait des lignes DRIFT puis
+# plus rien — et rien ne lui disait si l'install avait abouti.
+#
+# La sémantique est celle du geste opérateur `deploy/box` (`await_provision_verdict`), reprise à
+# dessein plutôt que réinventée : deux portes qui lisent le même code de retour et en tirent deux
+# verdicts, c'est un code de retour qui ne veut plus rien dire.
+_apply_rc=0
+"$PROVISION" apply "${PASSTHRU[@]}" || _apply_rc=$?
+
+case "$_apply_rc" in
+  0) ;;
+  2)
+    echo ""
+    echo "  ${AMBER}Provisionnement APPLIQUÉ, avec DRIFT RÉSIDUEL.${N} Rien n'est cassé : un geste manque."
+    echo "  Les lignes DRIFT ci-dessus le nomment, et « bash $0 --check » les relit à tout moment."
+    ;;
+  *)
+    echo ""
+    echo "  ${R}Provisionnement EN ÉCHEC (rc=$_apply_rc) — l'installation n'est PAS complète.${N}"
+    echo "  Les lignes FAIL ci-dessus nomment ce qui a échoué ; « bash $0 --check » les relit."
+    exit "$_apply_rc"
+    ;;
+esac
 
 cat <<EOF
 

@@ -151,6 +151,21 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [ -x "$LCARS_SIEGE_HOME/.claude/skills/system-issues/list.sh" ]
 }
 
+@test "skill: la source se trouve AUSSI hors image — le rail poste n'a pas /opt/lcars" {
+  # `/opt/lcars/admiral-skills` est un chemin d'IMAGE (Dockerfile COPY). Sur le rail poste il
+  # n'existe pas, et le module derivait en accusant l'image — « image sans les sources admiral ? » —
+  # sur une machine qui n'est pas une image. Mesure du 2026-08-21, install a froid sur machine
+  # dediee. Le siege n'y recevait jamais son skill, et le message envoyait chercher la faute dans
+  # un artefact absent.
+  unset LCARS_ADMIRAL_SKILLS_SRC
+  run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; echo \"\$SKILL_SRC\""
+  [ "$status" -eq 0 ]
+  # Sur la machine qui joue ce test, /opt/lcars n'existe pas : la source est donc celle du DEPOT,
+  # et elle porte reellement le skill (sinon ce temoin ne prouverait qu'un chemin bien forme).
+  [[ "$output" == */fleet/deploy/admiral/skills ]]
+  [ -f "$output/system-issues/SKILL.md" ]
+}
+
 @test "skill: le don a l'humain ne NOMME jamais de groupe — un groupe prive n'est pas garanti" {
   # CE QUE CE TEMOIN FERME. Le module donnait ses fichiers en `<humain>:<humain>` : une hypothese de
   # groupe prive homonyme, vraie seulement la ou `USERGROUPS_ENAB yes` en cree un a l'inscription du

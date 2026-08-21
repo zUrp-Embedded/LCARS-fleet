@@ -64,7 +64,26 @@ SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
 CONVERGE_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/run/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
-SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-/opt/lcars/admiral-skills}"
+# ─── LA SOURCE DU SKILL VIT AUX DEUX ENDROITS, ET LE DÉFAUT N'EN CONNAISSAIT QU'UN ──────────────
+# `/opt/lcars/admiral-skills` est un chemin d'IMAGE (`Dockerfile:534`, `COPY fleet/deploy/admiral/
+# skills`). Sur le rail poste il n'existe pas : le module dérivait donc en accusant l'image —
+# « image sans les sources admiral ? » — sur une machine qui n'est pas une image, et le siège n'y
+# recevait jamais son skill.
+#
+# Mesuré le 2026-08-21, install à froid sur machine dédiée :
+#   DRIFT 45-sudoers-toolchain: skill system-issues: source absente (/opt/lcars/admiral-skills)
+#
+# Les deux chemins sont sondés, l'image d'abord (c'est là que le fichier est FIGÉ, donc autoritaire
+# quand elle existe), le dépôt ensuite. `repo_root` est déjà ce que la lib rend au module — on ne
+# recopie pas un chemin, on demande. La couture de test garde la priorité sur les deux.
+SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-}"
+if [[ -z "$SKILL_SRC" ]]; then
+  if [[ -d /opt/lcars/admiral-skills ]]; then
+    SKILL_SRC=/opt/lcars/admiral-skills
+  else
+    SKILL_SRC="$(repo_root)/fleet/deploy/admiral/skills"
+  fi
+fi
 
 sudoers_line() { printf '%%%s ALL=(root) NOPASSWD: %s\n' "$PROV_FLEET_GROUP" "$CONVERGE_BIN"; }
 
