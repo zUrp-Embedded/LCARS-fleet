@@ -237,11 +237,18 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
                  %{"alice" => false}
                )
 
-      refute Map.has_key?(s, "alice")
-
-      # Et il ne redevient pas un DEPOT par la bande : son identite est celle de son proprietaire,
-      # donc `split/2` l'a range en candidat store — c'est `org_exists?` qui le jette, pas son nom.
-      assert Map.keys(s) == ["fleet"]
+      # ⚠ IL NE SIGNE RIEN, ET IL NE DISPARAIT PAS NON PLUS. La premiere version de ce garde le
+      # rangeait en candidat store sur son identite, puis `org_exists?` le recalait — et le recale
+      # tombait dans un trou : ni magasin, ni depot, aucun log, aucune ligne. Mot pour mot le defaut
+      # que ce chantier ferme, avec une geometrie differente ; trouve par relecture independante le
+      # 2026-08-21.
+      #
+      # Ce qu'il EST est un depot : `alice` a pousse un catalogue chez elle. Il ne s'installera
+      # jamais — l'org `alice` entrerait en collision avec le compte `alice` — et ce refus-la
+      # appartient a `catalogue install`, au moment ou un admin le demande. Un refus a un moment reel
+      # vaut mieux qu'une disparition a un moment invisible.
+      assert %{state: :available, store: nil, deposit: %{repo: "alice/_catalogue"}} = s["alice"]
+      refute s["alice"].state == :installed
     end
 
     test "TEMOIN de non-vacuite : le meme depot sous une ORG signe, comme avant" do

@@ -21,6 +21,16 @@ defmodule Fleet.Application.CatalogueDepositsTest do
         :error -> {:error, :not_found}
       end
     end
+
+    # Par defaut TOUT proprietaire est une org : ces temoins parlent d'identite, et les faire tous
+    # declarer une carte d'orgs noierait ce qu'ils tiennent. Ceux qui parlent du TYPE du
+    # proprietaire passent `orgs:` explicitement.
+    def org_exists?(owner, opts) do
+      case Keyword.get(opts, :orgs, :all) do
+        :all -> {:ok, true}
+        %{} = m -> {:ok, Map.get(m, owner, false)}
+      end
+    end
   end
 
   defmodule FakeFiles do
@@ -49,13 +59,14 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     )
   end
 
-  defp list(repos, manifests \\ %{}, shas \\ %{}) do
+  defp list(repos, manifests \\ %{}, shas \\ %{}, orgs \\ :all) do
     CatalogueDeposits.list(
       forge_repo: FakeRepo,
       forge_files: FakeFiles,
       repos: repos,
       manifests: manifests,
-      shas: shas
+      shas: shas,
+      orgs: orgs
     )
   end
 
@@ -158,6 +169,61 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     end
   end
 
+  describe "la classification est COMPLETE — un candidat recale retombe en depot" do
+    test "un utilisateur qui nomme son catalogue d'apres SON LOGIN reste un depot" do
+      # ⚠ LE TROU TROUVE PAR RELECTURE INDEPENDANTE, 2026-08-21. `owner == manifest.name` est vrai
+      # pour un magasin ET pour `bob` qui declare `name: bob` chez lui. Tant que le type du
+      # proprietaire etait teste EN AVAL, ce depot partait en candidat store, se faisait recaler
+      # (compte perso, pas org) et tombait dans un trou : ni magasin, ni depot, aucun log, aucune
+      # ligne. C'est le defaut que ce module venait de fermer, avec une geometrie differente.
+      assert {:ok, found} =
+               list(
+                 [repo("bob/mon-catalogue")],
+                 %{"bob/mon-catalogue" => "name: bob\n"},
+                 %{{"bob/mon-catalogue", "main"} => "s1"},
+                 # `bob` est un HUMAIN, pas une org — c'est tout ce qui separe ce cas d'un magasin.
+                 %{"bob" => false}
+               )
+
+      assert %{"bob" => %{repo: "bob/mon-catalogue", owner: "bob"}} = found
+    end
+
+    test "TEMOIN de non-vacuite : sous une ORG, la meme forme EST un magasin" do
+      # Sans lui, l'implementation qui ne classe JAMAIS rien en magasin passerait le test ci-dessus.
+      assert {:ok, deposits, stores} =
+               CatalogueDeposits.split([repo("web/_catalogue")],
+                 forge_repo: FakeRepo,
+                 forge_files: FakeFiles,
+                 manifests: %{"web/_catalogue" => "name: web\n"},
+                 orgs: %{"web" => true}
+               )
+
+      assert deposits == %{}
+      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
+    end
+  end
+
+  describe "deux depots qui revendiquent le MEME magasin" do
+    test "le choix est DETERMINISTE et il est DIT — jamais « le dernier vu »" do
+      # `into: %{}` gardait celui que l'ordre de `/repos/search` designait, en silence : deux boites
+      # lisant la meme forge pouvaient suivre deux magasins differents. On ne refuse pas la liste
+      # (contrairement au doublon de DEPOTS) — le catalogue EST installe, et refuser l'effacerait de
+      # la liste pour un depot de trop.
+      assert {:ok, _deposits, stores} =
+               CatalogueDeposits.split(
+                 [repo("web/_catalogue"), repo("web/vieux-magasin")],
+                 forge_repo: FakeRepo,
+                 forge_files: FakeFiles,
+                 manifests: %{
+                   "web/_catalogue" => "name: web\n",
+                   "web/vieux-magasin" => "name: web\n"
+                 }
+               )
+
+      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
+    end
+  end
+
   describe "le nom du catalogue LIVRE n'est jamais une candidature" do
     test "un depot qui declare `fleet` n'entre pas dans la liste" do
       # La fleet publie sa propre reference sur la forge pour qu'elle soit lisible et forkable. Ce
@@ -241,6 +307,23 @@ defmodule Fleet.Application.CatalogueDepositsTest do
   test "un manifeste SANS `name:` tombe — on n'invente pas une identite" do
     assert {:ok, %{}} ==
              list([repo("alice/anonyme")], %{"alice/anonyme" => "api_version: 1\n"})
+  end
+
+  test "un `name:` INDENTE est un geste d'AUTEUR, et le refus ne parle pas de forge" do
+    # ⚠ DEUX GESTES DIFFERENTS SOUS UN SEUL MESSAGE. Le manifeste a ete LU : ce n'est pas une panne
+    # de forge, c'est un YAML dont le `name:` n'est pas en colonne zero — que son auteur peut
+    # corriger. Dire « could not be read » envoie celui qui lit le log chercher un probleme reseau
+    # devant un fichier qu'il tenait dans la main.
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, %{}} ==
+                 list([repo("alice/role-vole")], %{
+                   "alice/role-vole" => "api_version: 1\nroles:\n  name: dev\n"
+                 })
+      end)
+
+    assert log =~ "COLUMN ZERO"
+    refute log =~ "could not be read"
   end
 
   test "une forge ILLISIBLE ne devient PAS une liste vide" do

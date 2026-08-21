@@ -40,7 +40,8 @@ setup() {
 # pour un vrai magasin. Les ecarts se demandent, par PROPRIETAIRE :
 #   FAKE_BAD_MANIFEST   le manifeste declare un AUTRE nom que l'org
 #   FAKE_NO_MANIFEST    pas de manifeste du tout (404 — une reponse : ce n'est pas un magasin)
-#   FAKE_MANIFEST_MUTE  manifeste illisible (000 — une absence de reponse)
+#   FAKE_MANIFEST_MUTE  manifeste illisible (curl sort non-zero — une absence de reponse)
+#   FAKE_MANIFEST_INDENTED  200, mais le `name:` est INDENTE (donc invisible en colonne zero)
 fake_forge() {
   if [[ $# -eq 0 ]]; then
     printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
@@ -66,8 +67,13 @@ if [[ "$url" == */api/v1/orgs/* ]]; then
 fi
 if [[ "$url" == */raw/catalogue.yaml ]]; then
   rest="${url#*/api/v1/repos/}"; owner="${rest%%/*}"
-  for o in ${FAKE_MANIFEST_MUTE:-}; do [[ "$o" == "$owner" ]] && { printf '\n000'; exit 0; }; done
+  # ⚠ EXIT 7, PAS UN CORPS FABRIQUE. Un `curl` qui ne peut pas connecter sort NON-ZERO sans rien
+  # ecrire : c'est le rescue `|| raw=$'\n000'` du module qui produit alors le code. Une doublure qui
+  # imprimerait `\n000` et sortirait 0 atteindrait la meme decision par un autre chemin — et un
+  # refactoring qui supprimerait le rescue en le croyant redondant ne ferait rougir personne.
+  for o in ${FAKE_MANIFEST_MUTE:-}; do [[ "$o" == "$owner" ]] && exit 7; done
   for o in ${FAKE_NO_MANIFEST:-};   do [[ "$o" == "$owner" ]] && { printf 'Not Found\n404'; exit 0; }; done
+  for o in ${FAKE_MANIFEST_INDENTED:-}; do [[ "$o" == "$owner" ]] && { printf 'api_version: 1\nroles:\n  name: web\n\n200'; exit 0; }; done
   for o in ${FAKE_BAD_MANIFEST:-};  do [[ "$o" == "$owner" ]] && { printf 'api_version: 1\nname: autre-chose\n\n200'; exit 0; }; done
   printf 'api_version: 1\nname: %s\n\n200' "$owner"; exit 0
 fi
@@ -279,6 +285,8 @@ json_one() {
   [ "$status" -eq 0 ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
   # Non signe = non vu : le materiel local part au balayage, comme pour tout catalogue desinstalle.
+  # Et ca SE DIT — ce module supprime, il ne le fait pas en silence.
+  [[ "$output" == *"se declare"* ]]
   [ ! -d "$PROV_CATALOGUES_DIR/web" ]
 }
 
@@ -286,9 +294,30 @@ json_one() {
   fake_forge "$(json_one web)"
   export FAKE_ORGS="web" FAKE_NO_MANIFEST="web"
   fake_git
+  # ⚠ LE MATERIEL EST POSE AVANT, et sans lui ce temoin ne mesurait rien : `[ ! -d ... ]` passait
+  # parce que le repertoire n'avait jamais existe. Ce qu'il faut tenir est que le 404 est une
+  # REPONSE, donc qu'il autorise la SUPPRESSION — pas seulement qu'il n'autorise pas le clone.
+  seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+}
+
+@test "IDENTITE: un 200 qui ne declare RIEN en colonne zero ne signe pas, et le DIT" {
+  # ⚠ LE SEUL CHEMIN QUI SUPPRIMAIT SANS UN MOT. Le manifeste repond 200, `awk` ne trouve pas de
+  # `name:` en colonne zero, `declared` est vide : ni HOLD, ni signature, et le balayage efface le
+  # materiel. La seule sortie etait « materiel de web retire » — l'operateur ne savait pas quelle
+  # couche avait dit non. Un espace d'indentation devant `name:` suffisait a le declencher.
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="web" FAKE_BAD_MANIFEST="web" FAKE_MANIFEST_INDENTED="web"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"COLONNE ZERO"* ]]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
   [ ! -d "$PROV_CATALOGUES_DIR/web" ]
 }

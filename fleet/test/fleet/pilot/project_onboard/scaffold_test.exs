@@ -29,6 +29,52 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
   # Ces temoins epinglent la resolution LA OU ELLE VIT MAINTENANT, pour qu'un prochain retrait ne
   # puisse pas l'emporter en silence une seconde fois.
 
+  describe "le repli s'annonce, et le catalogue LIVRE ne s'annonce pas a lui-meme" do
+    # L'annonce vit sur le chemin qui PEUPLE (`face_root/2`), pas sur la resolution nue : c'est au
+    # moment ou un projet nait du materiel d'un voisin que ca doit se dire.
+
+    test "un catalogue nomme qui n'a pas d'arbre le DIT, en `info`", %{tmp_dir: dir} do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} = Scaffold.ci_workflows(dir, "p", org: "un-catalogue-sans-arbre")
+        end)
+
+      assert log =~ "un-catalogue-sans-arbre"
+      assert log =~ "[info]"
+    end
+
+    test "un appelant qui ne nomme AUCUN catalogue monte d'un cran : `warning`", %{tmp_dir: dir} do
+      # Il ne se distingue pas d'un repli legitime par sa valeur de retour — c'est la forme
+      # silencieuse du defaut, donc c'est celle qui parle le plus fort.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} = Scaffold.ci_workflows(dir, "p", [])
+        end)
+
+      assert log =~ "[warning]"
+    end
+
+    test "le catalogue LIVRE ne se replie PAS : il resout sur son propre arbre", %{tmp_dir: dir} do
+      # ⚠ CE QUE CE TEMOIN A CORRIGE. Il y avait ici une clause qui TAISAIT le repli du catalogue
+      # livre — et elle etait morte : `root_for(<nom livre>)` rend la racine livree, qui porte son
+      # propre `project_template/`, donc `:own`. La mutation du littereal qu'elle contenait ne
+      # rougissait pas, ce qui a montre la clause. Ce qui est epingle est donc le FAIT, pas le
+      # silence : le livre resout sur lui-meme, il n'a rien a annoncer parce qu'il ne se replie pas.
+      assert {_root, :own} = Scaffold.template_root(Fleet.Catalogue.bundled_name())
+
+      # ⚠ `refute =~ "Scaffold:"` ET PAS `log == ""`. La suite est `async: true` : `capture_log`
+      # ramasse aussi les lignes des tests qui tournent a cote, donc exiger le silence TOTAL fait
+      # rougir ce temoin sur le log de quelqu'un d'autre. Mesure a la porte du 2026-08-21.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} =
+                   Scaffold.ci_workflows(dir, "p", org: Fleet.Catalogue.bundled_name())
+        end)
+
+      refute log =~ "Scaffold:"
+    end
+  end
+
   describe "template_root/1" do
     setup %{tmp_dir: dir} do
       # ⚠ LE MANIFESTE FAIT LE CATALOGUE, pas le repertoire. `installed_dirs/0` cherche

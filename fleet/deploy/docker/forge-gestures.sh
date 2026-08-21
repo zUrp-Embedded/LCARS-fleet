@@ -427,8 +427,15 @@ seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message
       -d "{\"name\":\"$name\",\"private\":false,\"auto_init\":false}" \
       "${FORGE_BASE_URL%/}/api/v1/user/repos" 2>/dev/null || true
 
+  # ⚠ `cp` PEUT ECHOUER, ET `set -e` TUE ALORS LE SCRIPT AVANT LE `rm -rf` DE FIN. Source illisible,
+  # disque plein : le repertoire temporaire fuit. Le nettoyer sur place vaut mieux qu'un `trap`, qui
+  # est global au processus et ecraserait celui qu'un autre geste aurait pose.
   local stage; stage="$(mktemp -d)"
-  cp -r "$tree/." "$stage/"
+  cp -r "$tree/." "$stage/" || {
+    rm -rf "$stage"
+    echo "forge-gestures: $tree illisible — $name NON depose" >&2
+    return 0
+  }
   rm -rf "$stage/.git"
   ( cd "$stage" \
     && git init -q -b main \

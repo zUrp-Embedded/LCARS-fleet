@@ -91,8 +91,17 @@ defmodule Fleet.Project.Onboard.Scaffold do
   # il scaffolde depuis le livre sans que personne ne l ait decide, et c est exactement le defaut
   # mesure le 2026-08-16, avec une cause de plus — l absence d argument au lieu d une resolution
   # cablee en dur. Il monte donc d un cran : `warning`.
+  # ⚠ IL Y AVAIT ICI UNE CLAUSE QUI TAISAIT LE REPLI DU CATALOGUE LIVRE, et elle etait morte.
+  # `root_for(<nom livre>)` rend la racine livree, qui porte son propre `project_template/` — donc
+  # `:own`, jamais `:fallback`. Le seul monde ou elle aurait pu tirer est celui d'un release dont le
+  # catalogue livre n'a pas d'arbre : la racine de repli y est le MEME repertoire absent, rien n'est
+  # ecrit, et taire cette ligne-la cacherait la seule trace du probleme.
+  #
+  # Elle portait en plus le nom du catalogue livre en dur — troisieme copie, dans la livraison meme
+  # qui l'a recentre dans `Fleet.Catalogue`. La relecture independante du 2026-08-21 a vu la copie ;
+  # la mutation a montre que le temoin ne rougissait pas, ce qui a montre la clause morte. Retirer
+  # bat parametrer : un littereal qui n'existe plus ne peut pas deriver.
   defp announce_fallback(:own, _org), do: :ok
-  defp announce_fallback(:fallback, "fleet"), do: :ok
 
   defp announce_fallback(:fallback, org) when is_binary(org) do
     Logger.info(

@@ -67,7 +67,10 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
     with {:ok, repos} <- repo_mod.search_repos(opts),
          {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
-      stores = stores(candidates, repo_mod, opts)
+      # `candidates` EST la liste des magasins : `split/2` tranche l'identite ET le type du
+      # proprietaire, donc il n'y a plus de second jugement a rendre ici. Il y en avait un
+      # (`stores/3`), et le candidat qu'il recalait tombait dans un trou — cf. `split/2`.
+      stores = candidates
 
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
@@ -293,52 +296,4 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # one above requires `is_map(store)` and the compiler cannot see they are exhaustive together.
   defp entry(name, _deposit, _store, _repo_mod, _opts),
     do: %{name: name, state: :available, updatable?: nil, deposit: nil, store: nil}
-
-  # ⚠ UN DEPOT NE SIGNE RIEN SI SON PROPRIETAIRE N'EST PAS UNE ORG, et cette fonction acceptait
-  # n'importe quel proprietaire. Dans Gitea, orgs et comptes perso partagent l'espace de noms : un
-  # user non-admin qui poussait un depot public `catalogue` dans SON espace faisait apparaitre son
-  # login comme catalogue INSTALLE — le convergeur clonait son materiel, le mint derivait son roster,
-  # et « seul un admin installe » etait contourne par un push. Trouve par le troisieme regard (audit
-  # independant, 2026-08-16) apres que DEUX auto-audits ont endosse la signature sans voir le trou.
-  #
-  # LES DEUX CONDITIONS SONT NECESSAIRES, ET AUCUNE NE RECOUVRE L'AUTRE :
-  #
-  #   `owner == manifest.name`  — dit que ce depot est le magasin DE CE catalogue-la, et pas un
-  #                               depot quelconque pose dans une org quelconque. Tranche par
-  #                               `CatalogueDeposits.split/2`, seul endroit ou l'identite est lue.
-  #   `org_exists?(owner)`      — dit que le proprietaire est une ORG. Un compte perso `bob` avec un
-  #                               manifeste `name: bob` satisfait la premiere et ment : le catalogue
-  #                               `bob` ne peut PAS etre installe sur une forge ou `bob` est un
-  #                               humain, puisque son org entrerait en collision avec le compte.
-  #
-  # L'objet `owner` de `/repos/search` ne porte AUCUN champ discriminant (mesure sur 1.26.1 : memes
-  # cles pour une org et un compte). La question se pose donc a `/orgs/<owner>` — `org_exists?/2`,
-  # dont la doc porte deja la phrase exacte : « asking the wrong endpoint would sign an installation
-  # that is not one ».
-  #
-  # `{:error, _}` n'est PAS « pas une org » : une forge qui tousse sur le type ne retrograde pas un
-  # catalogue installe en disponible — meme regle que la tete de store illisible plus haut. Le cout
-  # accepte : pendant la panne, un depot perso frais serait annonce installe ; c'est transitoire et
-  # non pilotable par l'auteur du depot, la ou l'autre sens retrograderait la flotte sur un hoquet.
-  defp stores(candidates, repo_mod, opts) do
-    for {name, repo} <- candidates, org_owner?(name, repo_mod, opts), into: %{}, do: {name, repo}
-  end
-
-  defp org_owner?(owner, repo_mod, opts) do
-    case repo_mod.org_exists?(owner, opts) do
-      {:ok, is_org} ->
-        is_org
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "CatalogueLifecycle: cannot read the owner type of #{owner} " <>
-            "(#{inspect(reason)}) — counted as a store. An unreadable forge is not an answer, and " <>
-            "the other reading would retrograde an installed catalogue on a hiccup."
-        )
-
-        true
-    end
-  end
 end

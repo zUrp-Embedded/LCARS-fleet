@@ -118,11 +118,42 @@ defmodule Fleet.Application.CatalogueDeposits do
       |> Enum.reject(&empty?/1)
       |> Enum.flat_map(&classify(&1, repo_mod, files_mod, opts))
 
-    stores = for {:store, name, repo} <- classified, into: %{}, do: {name, repo}
+    stores = pick_stores(for {:store, name, repo} <- classified, do: {name, repo})
 
     with {:ok, deposits} <- group(for {:deposit, d} <- classified, do: d) do
       {:ok, deposits, stores}
     end
+  end
+
+  # ⚠ `into: %{}` GARDAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous deux
+  # declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
+  # effectif etait alors celui que l'ordre de `/repos/search` designait. Trouve par relecture
+  # independante le 2026-08-21.
+  #
+  # ON NE REFUSE PAS LA LISTE, contrairement au doublon de DEPOTS, et l'asymetrie est voulue : un
+  # doublon de depots est une question sans reponse (« lequel installer ? ») ; ici le catalogue EST
+  # installe, et refuser le ferait disparaitre de la liste — un catalogue vivant efface parce qu'il
+  # a un depot de trop. On choisit donc, mais de facon DETERMINISTE (le premier par nom de depot,
+  # trie) et en le DISANT : deux boites lisant la meme forge doivent voir le meme magasin.
+  defp pick_stores(pairs) do
+    pairs
+    |> Enum.group_by(fn {name, _repo} -> name end, fn {_name, repo} -> repo end)
+    |> Map.new(fn
+      {name, [one]} ->
+        {name, one}
+
+      {name, many} ->
+        [chosen | _] = sorted = Enum.sort_by(many, & &1["full_name"])
+
+        Logger.warning(
+          "CatalogueDeposits: #{length(many)} repos claim to be the store of '#{name}' " <>
+            "(#{sorted |> Enum.map(& &1["full_name"]) |> Enum.join(", ")}). Following " <>
+            "#{chosen["full_name"]} — first by name, so every box reading this forge follows the " <>
+            "same one. Delete the others: only one of them is what `catalogue install` pushes to."
+        )
+
+        {name, chosen}
+    end)
   end
 
   # An empty repo carries no manifest to read, and asking for one costs a round trip to learn what
@@ -143,8 +174,24 @@ defmodule Fleet.Application.CatalogueDeposits do
     else
       # Not a catalogue. The overwhelmingly common case, and silent by design: every project repo
       # on the forge takes this branch on every listing.
-      {:error, :not_found} -> []
-      {:error, reason} -> unreadable(full, reason)
+      {:error, :not_found} ->
+        []
+
+      # ⚠ LE MANIFESTE A ETE LU. Ce n'est pas une panne de forge, c'est un YAML dont le `name:` n'est
+      # pas en colonne zero — donc un geste d'AUTEUR, pas d'operateur. Les confondre envoie celui qui
+      # lit le log chercher un probleme reseau devant un fichier qu'il pouvait corriger.
+      {:error, :no_name_in_manifest} ->
+        Logger.warning(
+          "CatalogueDeposits: #{full} carries a #{@manifest} with no `name:` at COLUMN ZERO — NOT " <>
+            "listed. In YAML an indented `name:` belongs to the key above it, so a `name:` under " <>
+            "`roles:` declares a role, not the catalogue. Its owner sees nothing; this line is the " <>
+            "only trace."
+        )
+
+        []
+
+      {:error, reason} ->
+        unreadable(full, reason)
     end
   end
 
@@ -161,7 +208,7 @@ defmodule Fleet.Application.CatalogueDeposits do
     # Exclure un store est le fonctionnement normal, pas une erreur : SILENCIEUX. Une ligne par
     # catalogue installe a chaque listage serait du bruit qui apprend a l'operateur a sauter le log.
     cond do
-      owner_of(full) == name ->
+      owner_of(full) == name and org_owner?(name, repo_mod, opts) ->
         [{:store, name, repo}]
 
       # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et depuis le 2026-08-21 il
@@ -196,6 +243,50 @@ defmodule Fleet.Application.CatalogueDeposits do
           {:error, reason} ->
             unreadable(full, reason)
         end
+    end
+  end
+
+  # ⚠ LES DEUX CONDITIONS SONT NECESSAIRES, ET AUCUNE NE RECOUVRE L'AUTRE.
+  #
+  #   `owner == manifest.name`  — ce depot est le magasin DE CE catalogue-la, pas un depot quelconque
+  #                               pose dans une org quelconque.
+  #   le proprietaire est une ORG — un compte perso `bob` dont le manifeste dit `name: bob` satisfait
+  #                               la premiere et ment : le catalogue `bob` ne peut PAS etre installe
+  #                               sur une forge ou `bob` est un humain, son org entrerait en collision
+  #                               avec le compte.
+  #
+  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI ET PLUS DANS `CatalogueLifecycle.stores/3`. Tant qu'il etait
+  # en aval, `split/2` rendait des CANDIDATS qu'un second lecteur recalait — et un candidat recale
+  # tombait dans un trou : ni magasin (pas une org), ni depot (deja classe magasin), aucun log,
+  # aucune ligne. Mesure du 2026-08-21 par relecture independante : `bob/mon-depot` declarant
+  # `name: bob` disparaissait de `catalogue list` sans un mot, ce qui est mot pour mot le defaut que
+  # ce module venait de fermer, avec une geometrie differente.
+  #
+  # La classification est donc COMPLETE ici, et le recale RETOMBE en depot — ce qu'il est. Il ne
+  # s'installera jamais (son org entrerait en collision avec un compte), et ce refus-la appartient a
+  # `catalogue install`, au moment ou un admin le demande : un refus a un moment reel vaut mieux
+  # qu'une disparition a un moment invisible.
+  #
+  # L'objet `owner` de `/repos/search` ne porte AUCUN champ discriminant (mesure sur Gitea 1.26.1 :
+  # memes cles pour une org et un compte). La question se pose donc a `/orgs/<owner>`.
+  #
+  # `{:error, _}` n'est PAS « pas une org » : une forge qui tousse sur le type ne retrograde pas un
+  # catalogue installe en disponible. Le cout accepte : pendant la panne, un depot perso frais serait
+  # annonce installe ; c'est transitoire et non pilotable par l'auteur du depot, la ou l'autre sens
+  # retrograderait la flotte sur un hoquet.
+  defp org_owner?(owner, repo_mod, opts) do
+    case repo_mod.org_exists?(owner, opts) do
+      {:ok, is_org} ->
+        is_org
+
+      {:error, reason} ->
+        Logger.warning(
+          "CatalogueDeposits: cannot read the owner type of #{owner} (#{inspect(reason)}) — " <>
+            "counted as a store. An unreadable forge is not an answer, and the other reading would " <>
+            "retrograde an installed catalogue on a hiccup."
+        )
+
+        true
     end
   end
 

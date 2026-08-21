@@ -99,7 +99,26 @@ forge_installed() {
     drc=0
     declared="$(declared_name "$full")" || drc=$?
     [[ "$drc" -eq 2 ]] && { printf 'HOLD %s manifeste\n' "$name"; continue; }
-    [[ "$declared" == "$name" ]] || continue
+
+    # ⚠ NE PAS SIGNER SE DIT, PARCE QUE CE MODULE SUPPRIME. Un depot pose ICI — a l'adresse exacte
+    # d'un magasin — et que la forge nous a DECRIT sans qu'on le signe fait disparaitre `$name` de
+    # `$signed`, donc de `$seen`, donc son materiel local part au balayage. C'etait muet : la seule
+    # sortie etait « materiel de X retire », sans jamais dire quelle couche avait dit non.
+    #
+    # Sur STDERR et pas stdout : l'appelant CAPTURE stdout (`signed="$(forge_installed)"`) et le lit
+    # champ par champ. Une ligne de diagnostic y deviendrait une entree de la liste signee.
+    #
+    # Le volume est borne : seuls les depots portant exactement le nom de l'adresse arrivent ici.
+    if [[ "$declared" != "$name" ]]; then
+      if [[ -z "$declared" ]]; then
+        echo "45-catalogues: $full repond, mais son $MANIFEST ne declare aucun \`name:\` en" \
+             "COLONNE ZERO — non signe. En YAML un \`name:\` indente appartient a la cle du dessus." >&2
+      else
+        echo "45-catalogues: $full se declare \`$declared\`, pas \`$name\` — ce n'est pas le magasin" \
+             "de $name, il n'est pas signe." >&2
+      fi
+      continue
+    fi
 
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
     case "$code" in
@@ -123,6 +142,16 @@ forge_installed() {
 # accepter une indentation laisserait le premier `name:` imbrique voler l'identite du catalogue.
 #
 # `-sS` sans `-f` : le corps ET le code sont necessaires, et `-f` avalerait le corps sur un 404.
+#
+# ⚠ LE `|| raw=$'\n000'` EST REDONDANT, ET IL RESTE — MESURE, pas suppose. L'assignation est dans une
+# liste `||` chez l'appelant, donc bash y desactive `errexit` jusque dans la substitution : un `curl`
+# qui echoue laisse simplement `raw` VIDE. `code` vaut alors `""`, qui tombe sur `*` du `case`,
+# c'est-a-dire rc=2, c'est-a-dire HOLD — la meme reponse que le rescue. Les deux chemins convergent.
+#
+# Il est garde parce qu'il ENONCE l'intention, et retire il ne changerait rien : la mutation qui le
+# supprime ne fait rougir aucun temoin (verifie le 2026-08-21). Ce qui est tenu par les temoins est
+# la PROPRIETE — « pas de reponse -> HOLD » — et elle tient avec ou sans lui. Ne pas le lire comme
+# un garde : le garde est le `*` du `case`.
 declared_name() {
   local raw code body
   raw="$(curl -sS -m 10 -w '\n%{http_code}' "$PROV_FORGE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
