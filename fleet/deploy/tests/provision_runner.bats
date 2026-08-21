@@ -715,3 +715,62 @@ EOF
   grep -q 'forge.url" 0644' "$m"
   grep -q 'forge.public.url" 0644' "$m"
 }
+
+# ─── LA MATRICE SE JOUE EN ENTIER, PAS SUR LA CASE QU'ON AVAIT EN TETE ──────────────────────────
+#
+# Trouve par le reverse d'alice le 2026-08-21 : « le point faible n'est pas la structure mais la
+# COMPLETUDE de la matrice — une case declaree `any` sur un axe et `linux` sur l'autre, sans que
+# personne ait joue la combinaison `wsl` ».
+#
+# L'INVARIANT. Un module selectionne (`CHECK-ON`) mais non applicable (`APPLY-ON`) tourne en CHECK
+# meme pendant un apply, et un drift y est un FAIL — c'est le modele D6, et il est juste : rien sur
+# place ne peut converger cet etat. Mais ca ne se tient QUE si quelqu'un d'autre le fournit, et le
+# seul « quelqu'un d'autre » de ce depot est l'IMAGE. Donc :
+#
+#     check-seul est legitime sur `docker`, et sur lui SEUL.
+#
+# Sur `wsl` ou `linux`, check-seul veut dire « personne ici ne peut jamais converger ca ». Ce n'est
+# pas un etat-cible, c'est une impasse — et le runner la traduit par un FAIL dont le geste
+# (« rebuild l'image ») n'a aucun sens sur un rail qui n'en a pas.
+#
+# MESURE : `64-services` a porte `APPLY-ON: linux` / `CHECK-ON: any` pendant une journee. Sur un
+# poste WSL il rendait donc un echec structurel, et `install.sh` sortait en erreur au lieu
+# d'imprimer son bandeau — sur une machine ou tout le reste du runtime natif etait pose.
+
+@test "MATRICE: aucun module n'est en check-seul ailleurs que sur docker" {
+  local dir="$BATS_TEST_DIRNAME/../modules.d" bad=""
+  local m name apply check s
+  for m in "$dir"/*.sh; do
+    name="$(basename "$m" .sh)"
+    apply="$(grep -m1 '^# APPLY-ON:' "$m" | cut -d: -f2-)"
+    check="$(grep -m1 '^# CHECK-ON:' "$m" | cut -d: -f2-)"
+    [ -n "$apply" ] && [ -n "$check" ] || { echo "$name: en-tete APPLY-ON/CHECK-ON manquante" >&2; false; }
+    [[ "$apply" == *any* ]] && apply="wsl linux docker"
+    [[ "$check" == *any* ]] && check="wsl linux docker"
+    for s in wsl linux; do
+      [[ " $check " == *" $s "* ]] || continue          # pas selectionne ici : rien a dire
+      [[ " $apply " == *" $s "* ]] && continue          # applicable ici : le cas nominal
+      bad="$bad $name(check-seul sur $s)"
+    done
+  done
+  [ -z "$bad" ] || {
+    echo "check-seul hors docker — personne ne peut converger ces etats :$bad" >&2; false; }
+}
+
+@test "MATRICE: tout terrain d'APPLY-ON est couvert par CHECK-ON — appliquer sans verifier est irrepresentable" {
+  # Le runner le verifie deja au demarrage (`provision:212`) ; le tenir ici le rend VISIBLE sans
+  # monter un decor, et le fait echouer sur le fichier plutot qu'a la premiere execution.
+  local dir="$BATS_TEST_DIRNAME/../modules.d" bad=""
+  local m name apply check s
+  for m in "$dir"/*.sh; do
+    name="$(basename "$m" .sh)"
+    apply="$(grep -m1 '^# APPLY-ON:' "$m" | cut -d: -f2-)"
+    check="$(grep -m1 '^# CHECK-ON:' "$m" | cut -d: -f2-)"
+    [[ "$apply" == *any* ]] && apply="wsl linux docker"
+    [[ "$check" == *any* ]] && check="wsl linux docker"
+    for s in $apply; do
+      [[ " $check " == *" $s "* ]] || bad="$bad $name($s)"
+    done
+  done
+  [ -z "$bad" ] || { echo "APPLY-ON hors de CHECK-ON :$bad" >&2; false; }
+}

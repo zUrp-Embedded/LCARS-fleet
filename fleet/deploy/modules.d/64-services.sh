@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: PROTO-V2 — ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains
-# APPLY-ON: linux
+# APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
 #
@@ -35,6 +35,28 @@
 #
 # (Le compte système dédié `lcars-system` du Lot 5 est un durcissement à venir : il remplacerait
 # `nobody`, partagé par tout le système. Tant qu'il n'existe pas, on fait ce que fait l'image.)
+#
+# ─── POURQUOI `wsl` AUSSI, ET CE MODULE A PORTÉ `linux` SEUL PENDANT UNE JOURNÉE ────────────────
+#
+# ⚠ `APPLY-ON: linux` + `CHECK-ON: any` FAISAIT UN ÉCHEC STRUCTUREL SUR LE RAIL WSL. Le module y
+# était SÉLECTIONNÉ (check) mais NON APPLICABLE — et le runner traduit cet état, à raison, par un
+# FAIL : « état-cible non tenu sur wsl et inapplicable ici — rebuild l'image qui le fournit ». Sur
+# un poste WSL il n'y a aucune image à rebuilder, donc le verdict était juste dans sa forme et
+# ininterprétable dans son geste, et il faisait sortir `install.sh` en erreur.
+#
+# Le garde `p_warn` qui protège la boîte ne rattrapait rien : `30-wsl` écrit lui-même
+# `[boot] systemd=true`, donc `have_systemd()` répond OUI sous WSL2.
+#
+# Et le fond suit la forme : sur WSL, tout le reste du runtime natif est déjà posé — les scripts de
+# console et `ttyd` par `62-runtime-helpers` (`wsl linux`), les dossiers de socket par
+# `25-directories`, la release par `60-deploy`, l'humain de fleet par `22-fleet-human`. Tout existe
+# SAUF ce qui démarre. Un poste WSL avait donc une fleet et pas de porte.
+#
+# L'INVARIANT QUE CE MODULE VIOLAIT, ET QU'UN TÉMOIN TIENT DÉSORMAIS : un module n'est légitimement
+# en check-seul que sur `docker`, où l'IMAGE fournit l'état. Sur `wsl` ou `linux`, « check-seul »
+# signifie « personne ici ne peut jamais converger ça » — ce qui n'est pas un état-cible, c'est une
+# impasse. (Trouvé par le reverse d'alice, 2026-08-21 : « une case déclarée `any` sur un axe et
+# `linux` sur l'autre, sans que personne ait joué la combinaison `wsl` ».)
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
