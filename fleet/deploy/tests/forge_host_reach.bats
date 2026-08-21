@@ -96,6 +96,66 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [[ "$output" == "127.0.0.1|http://127.0.0.1:"* ]]
 }
 
+# ─── D7 : LE SIEGE, C'EST CELUI QUI INSTALLE ────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « l'user qui installe devient admin, et son login remonte sur la forge. »
+#
+# Ce module cablait `admiral` en dur. Mesure du meme jour sur un poste natif : le proprietaire de la
+# machine n'etait PAS administrateur de sa propre forge, et le compte qui l'etait portait un nom que
+# personne n'avait choisi, avec un mot de passe genere puis JETE — un compte d'administration ou
+# personne ne pouvait entrer.
+
+@test "D7: l'administrateur de la forge est l'OPERATEUR, jamais un nom cable" {
+  head_sh 'echo "$PROV_FORGE_ADMIN"'
+  [ "$status" -eq 0 ]
+  [ "$output" != "admiral" ]
+  [ -n "$output" ]
+  head_sh 'echo "$PROV_FORGE_ADMIN|$PROV_HUMAN"'
+  [[ "$output" == "$(echo "$output" | cut -d'|' -f2)|"* ]]
+}
+
+@test "D7: un nom EXPLICITE garde la priorite — le defaut n'est pas une contrainte" {
+  PROV_FORGE_ADMIN=quelquun head_sh 'echo "$PROV_FORGE_ADMIN"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "quelquun" ]
+}
+
+@test "D7: le mot de passe du #1 fait 10 caracteres ALPHABETIQUES — il se recopie a la main" {
+  head_sh 'new_password'
+  [ "$status" -eq 0 ]
+  [ "${#output}" -eq 10 ]
+  [[ "$output" =~ ^[A-Za-z]{10}$ ]]
+}
+
+@test "D7: deux appels ne rendent pas le meme mot de passe" {
+  head_sh 'a=$(new_password); b=$(new_password); [ "$a" != "$b" ] && echo different'
+  [ "$status" -eq 0 ]
+  [ "$output" = "different" ]
+}
+
+@test "D7: le mot de passe est AFFICHE avec son login, et ne bloque pas sans terminal" {
+  # Sans tty (CI, unite systemd, install.sh pilote) on ne s'arrete pas — on le DIT.
+  head_sh 'announce_password zoe MotDePasse < /dev/null'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" == *"MotDePasse"* ]]
+  [[ "$output" == *"confirmé par personne"* ]]
+}
+
+@test "D7: sans jeton master, l'adminite est INCONNUE — jamais supposee absente" {
+  # « pas admin », « pas de compte » et « je n'ai pas pu demander » appellent trois gestes
+  # differents. Confondre le troisieme avec le second ferait creer un compte qui existe deja.
+  head_sh 'forge_admin_state quiconque'
+  [ "$status" -eq 0 ]
+  [ "$output" = "unknown" ]
+}
+
+@test "D7: sans jeton master, aucune promotion n'est TENTEE" {
+  head_sh 'forge_promote_admin quiconque || echo refuse'
+  [ "$status" -eq 0 ]
+  [ "$output" = "refuse" ]
+}
+
 @test "le verdict DIT sur quoi elle ecoute — un 200 local ne distingue pas les deux postures" {
   # Une forge ouverte au reseau et une forge fermee rendent le MEME `200` sur la loopback. C'est la
   # seule chose qu'un operateur ne peut pas deviner en la voyant repondre.

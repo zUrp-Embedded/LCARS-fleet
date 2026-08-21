@@ -43,7 +43,19 @@ set -euo pipefail
 
 : "${PROV_FORGE_PROJECT:=lcars-forge}"          # projet compose de la forge du poste
 : "${PROV_FORGE_HOST_PORT:=3000}"               # le port qu'elle publie
-: "${PROV_FORGE_ADMIN:=admiral}"                # le compte qui ADMINISTRE la forge
+# ─── QUI ADMINISTRE LA FORGE D'UN POSTE ─────────────────────────────────────────────────────────
+# ⚖ USER 2026-08-21 : « l'user qui installe devient admin, et son login remonte sur la forge. »
+# C'est D7 appliqué à ce rail : au poste, l'autorité est l'UNIX, pas la forge — le siège est celui
+# qui possède la machine, et son compte #1 sur la forge porte SON nom.
+#
+# Ce défaut valait `admiral` en dur. Deux conséquences, mesurées le 2026-08-21 sur un poste natif :
+# le propriétaire de la machine n'était PAS administrateur de sa propre forge, et le compte qui
+# l'était portait un nom que personne n'avait choisi, avec un mot de passe généré puis JETÉ — donc
+# un compte d'administration où personne ne pouvait entrer.
+#
+# `admiral` reste le nom du siège DANS LA BOÎTE, où l'entrypoint crée un uid 1000 qu'aucun humain
+# n'a nommé. Ici il y a quelqu'un pour le nommer : c'est lui.
+: "${PROV_FORGE_ADMIN:=$PROV_HUMAN}"            # le compte qui ADMINISTRE la forge — l'opérateur
 : "${PROV_FORGE_IMAGE:=lcars-fleet:2}"          # l'image qui porte tofu, la recette et les gestes
 : "${PROV_DOCKER_BIN:=docker}"
 
@@ -126,6 +138,82 @@ forge_reach_note() {
   esac
 }
 
+# ─── LE MOT DE PASSE DU #1 SE GARDE, IL NE SE JETTE PAS ─────────────────────────────────────────
+# ⚖ D7 (user, 2026-08-21) : l'administrateur DOIT pouvoir entrer dans le webGUI de Gitea. Ce module
+# générait un mot de passe de 20 caractères et ne l'affichait NULLE PART — le compte d'administration
+# de la forge d'un poste était donc, dès sa création, un compte où personne ne pouvait se connecter.
+# La seule porte restante était `gitea admin user change-password` dans le conteneur, ce que rien
+# n'indiquait à l'écran.
+#
+# Random 10 alphabétiques : assez pour n'être pas devinable sur un LAN, assez court pour être RECOPIÉ
+# À LA MAIN sans se tromper — c'est un mot de passe qu'un humain note sur un papier, une fois.
+#
+# ⚠ `tr -dc` SUR UN FLUX INFINI TUE LE SCRIPT. `/dev/urandom` ne se termine pas : `tr -dc … | head`
+# ferme le tube et `tr` meurt sur SIGPIPE, ce que `set -o pipefail` remonte en échec de la commande
+# entière. On borne la SOURCE, pas la sortie.
+new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | head -c 10; }
+
+# L'AFFICHAGE ATTEND, quand il y a quelqu'un pour lire. Un mot de passe noyé dans deux cents lignes
+# de provisionnement est un mot de passe perdu : on s'arrête, une fois, le temps qu'il soit noté.
+# Sans terminal (CI, unité systemd, `install.sh` piloté), on ne bloque PAS — on le dit en clair et
+# on nomme le fait qu'il n'a été confirmé par personne.
+announce_password() { # announce_password <login> <mot de passe>
+  local _ignored
+  printf '\n'
+  printf '    ┌──────────────────────────────────────────────────────────────┐\n'
+  printf '    │  COMPTE ADMINISTRATEUR DE LA FORGE — note-le maintenant      │\n'
+  printf '    │                                                              │\n'
+  printf '    │    login       : %-42s│\n' "$1"
+  printf '    │    mot de passe: %-42s│\n' "$2"
+  printf '    │                                                              │\n'
+  printf '    │  Il ne sera PAS réaffiché. La forge ne le stocke qu'"'"'en hash.   │\n'
+  printf '    └──────────────────────────────────────────────────────────────┘\n\n'
+  if [[ -t 0 ]]; then
+    read -r -p "    Noté ? Entrée pour continuer. " _ignored || true
+  else
+    p_warn "pas de terminal : le mot de passe ci-dessus n'a été confirmé par personne — relis la sortie de cet install avant de la fermer"
+  fi
+}
+
+# ─── L'ADMINITÉ SE MESURE SUR LA FORGE, ET SEULE LA FORGE PEUT LA CHANGER ───────────────────────
+# Rend `admin`, `plain`, `absent`, ou `unknown` — quatre états, parce que « pas admin » et « pas de
+# compte » appellent deux gestes différents, et « je n'ai pas pu demander » n'en appelle aucun.
+forge_admin_state() { # forge_admin_state <login>
+  local tok body
+  # ⚠ `|| true` OBLIGATOIRE : sous `set -e` + `pipefail`, un fichier absent fait échouer la
+  # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
+  # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
+  #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
+  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  [[ -n "$tok" ]] || { echo unknown; return 0; }
+  body="$(curl -fsS -m 10 -H "Authorization: token $tok" "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" || {
+    # 404 = pas de compte ; tout le reste (forge muette, jeton périmé) n'est pas une réponse sur
+    # l'adminité, et se dire « absent » là-dessus ferait créer un compte qui existe peut-être.
+    if curl -fsS -m 10 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; then echo absent; else echo unknown; fi
+    return 0
+  }
+  case "$body" in
+    *'"is_admin":true'*|*'"is_admin": true'*) echo admin ;;
+    *) echo plain ;;
+  esac
+}
+
+forge_promote_admin() { # forge_promote_admin <login>
+  local tok
+  # ⚠ `|| true` OBLIGATOIRE : sous `set -e` + `pipefail`, un fichier absent fait échouer la
+  # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
+  # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
+  #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
+  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  [[ -n "$tok" ]] || return 1
+  # `login_name` et `source_id` sont EXIGÉS par l'endpoint (Gitea les relit pour la source
+  # d'authentification) : les omettre rend 422 sur un corps qui a l'air complet.
+  curl -fsS -m 15 -X PATCH \
+       -H "Authorization: token $tok" -H "Content-Type: application/json" \
+       -d "{\"admin\":true,\"login_name\":\"$1\",\"source_id\":0}" \
+       "$LOCAL_URL/api/v1/admin/users/$1" >/dev/null 2>&1
+}
+
 check() {
   if ! docker_endpoint; then
     # Même mot que 00-preflight, et pour la même raison : ce rail ne PEUT pas tenir son état-cible
@@ -138,6 +226,14 @@ check() {
     p_ok "forge du poste vivante ($LOCAL_URL)$(forge_reach_note)"
     [[ -s "$MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($MASTER_TOKEN_FILE)" \
       || p_drift "forge vivante mais AUCUNE autorité ($MASTER_TOKEN_FILE) — l'apply la minte"
+    # ⚖ D7 : le propriétaire de la machine administre sa forge. Ça se SONDE, sinon la dérive
+    # n'existe que le jour où quelqu'un essaie d'ouvrir la page d'administration et se fait jeter.
+    case "$(forge_admin_state "$PROV_FORGE_ADMIN")" in
+      admin)   p_ok "« $PROV_FORGE_ADMIN » administre la forge" ;;
+      plain)   p_drift "« $PROV_FORGE_ADMIN » n'est PAS administrateur de sa propre forge — l'apply le promeut" ;;
+      absent)  p_drift "« $PROV_FORGE_ADMIN » n'a pas de compte sur cette forge — l'inscription est libre, elle se fait une fois" ;;
+      *)       p_warn "adminité de « $PROV_FORGE_ADMIN » non mesurable (jeton absent ou forge muette)" ;;
+    esac
   else
     p_drift "aucune forge sur $LOCAL_URL — l'apply monte le conteneur, l'amorce et pose sa structure"
   fi
@@ -185,13 +281,16 @@ apply() {
   #    boîte garde : `50-forge` le lit sans savoir qui l'a posé.
   if [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
     p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
-    local pw; pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
-    if ! d exec -u git "$FORGE_CONTAINER" gitea admin user create \
+    local pw; pw="$(new_password)"
+    if d exec -u git "$FORGE_CONTAINER" gitea admin user create \
            --username "$PROV_FORGE_ADMIN" --password "$pw" \
            --email "$PROV_FORGE_ADMIN@lcars.local" --admin --must-change-password=false \
            >/dev/null 2>&1; then
-      # Déjà là : on ne casse pas un compte existant, on lui refait juste un jeton.
-      p_ok "compte « $PROV_FORGE_ADMIN » déjà présent sur la forge"
+      announce_password "$PROV_FORGE_ADMIN" "$pw"
+    else
+      # Déjà là : on ne casse pas un compte existant, on lui refait juste un jeton. Son mot de
+      # passe est le sien — on ne le remplace pas, et on n'en affiche pas un qui serait faux.
+      p_ok "compte « $PROV_FORGE_ADMIN » déjà présent sur la forge (mot de passe inchangé)"
     fi
     # ⚠ SONDER LE FLUX AVANT DE CAPTURER — sinon le diagnostic accuse la forge, qui est saine.
     # Un relais docker peut répondre parfaitement à `version`/`ps`/`inspect` et rendre ZÉRO OCTET,
@@ -213,6 +312,31 @@ apply() {
   else
     p_ok "autorité de création déjà posée ($MASTER_TOKEN_FILE)"
   fi
+
+  # 2-bis. SUR UNE FORGE DÉJÀ DEBOUT, L'OPÉRATEUR N'EST PEUT-ÊTRE PAS ENCORE ADMIN. Le bloc
+  #    au-dessus ne s'exécute qu'au PREMIER passage ; une machine installée avant ce lot porte donc
+  #    une forge dont l'administrateur est un autre compte, et le propriétaire de la machine y est
+  #    un utilisateur ordinaire. Mesuré le 2026-08-21 : `admiral` admin, `lordzurp` pas admin, sur
+  #    la machine de lordzurp.
+  #
+  #    ⚠ IL N'EXISTE PAS DE `gitea admin user set-admin` : la CLI sait CRÉER un admin, pas en
+  #    promouvoir un. La promotion passe par l'API, avec le jeton master — donc elle n'est possible
+  #    que s'il existe déjà une autorité, ce qui est exactement le cas de figure visé.
+  case "$(forge_admin_state "$PROV_FORGE_ADMIN")" in
+    admin)
+      p_ok "« $PROV_FORGE_ADMIN » administre la forge" ;;
+    absent)
+      p_warn "« $PROV_FORGE_ADMIN » n'a pas de compte sur cette forge — l'inscription est libre, elle se fait une fois puis ce module le promeut" ;;
+    plain)
+      if forge_promote_admin "$PROV_FORGE_ADMIN"; then
+        PROV_CHANGED=$((PROV_CHANGED + 1))
+        p_chg "« $PROV_FORGE_ADMIN » promu administrateur de la forge (⚖ D7 : le siège, c'est celui qui installe)"
+      else
+        p_fail "« $PROV_FORGE_ADMIN » n'a pas pu être promu administrateur — le jeton master de $MASTER_TOKEN_FILE porte-t-il encore l'adminité ?"
+      fi ;;
+    *)
+      p_warn "adminité de « $PROV_FORGE_ADMIN » non mesurable (forge muette ou jeton absent) — rien n'a été tenté" ;;
+  esac
 
   # 3. LE SEED. Il ne se REGÉNÈRE pas : le provider n'écrit pas le password d'un compte existant
   #    (mesure 2026-08-16), donc un seed neuf donnerait un fichier qui ne correspond plus aux
