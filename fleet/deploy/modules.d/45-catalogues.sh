@@ -32,29 +32,46 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
+# Le nom du depot ou la source d'un catalogue installe est POUSSEE. C'est une ADRESSE — l'endroit ou
+# `push_store` ecrit et ou l'on va donc chercher — jamais un predicat : rien ne se decide en la
+# lisant, cf. l'identite ci-dessous.
+STORE_REPO="catalogue"
+MANIFEST="catalogue.yaml"
+
 # ─── ce que la FORGE signe ────────────────────────────────────────────────────────────────────────
 #
-# UN DEPOT `catalogue` DANS UNE ORG = CE CATALOGUE EST INSTALLE. Trois filtres, chacun paye :
+# UN DEPOT QUI SE DECLARE AU NOM DE SON ORG = CE CATALOGUE EST INSTALLE. Quatre filtres, chacun paye :
 #
-#   * le NOM, exact — `q=catalogue` est un match de SOUS-CHAINE cote Gitea, `mon-catalogue-perso`
-#     remonte aussi ; le filtre est fait ici, sur `.name`, jamais laisse au serveur ;
+#   * l'ADRESSE, exacte — `q=catalogue` est un match de SOUS-CHAINE cote Gitea,
+#     `mon-catalogue-perso` remonte aussi ; le filtre est fait ici, sur `.name`, jamais laisse au
+#     serveur. Il ne CONCLUT rien : il dit seulement ou regarder ;
+#   * l'IDENTITE — `manifest.name == owner`. C'est ce qui decide. Un depot pose a l'adresse d'un
+#     magasin, dans une org, mais qui ne se declare pas au nom de cette org, n'est pas le magasin de
+#     ce catalogue : le cloner le servirait sous un nom qu'il ne revendique pas, et le roster du
+#     mint en descendrait. 404 sur le manifeste = ce n'est pas un magasin (reponse) ; illisible =
+#     HOLD (absence de reponse) ;
 #   * le TYPE DU PROPRIETAIRE — ⚠ D1 de l'audit independant (2026-08-16) : orgs et comptes perso
 #     partagent l'espace de noms, et sans ce filtre un user non-admin qui pousse un depot public
 #     `catalogue` chez lui faisait apparaitre son login comme catalogue INSTALLE — clone de son
 #     materiel, roster derive pour le mint, « seul un admin installe » contourne par un push.
-#     L'objet `owner` de la recherche ne porte AUCUN champ discriminant (mesure 1.26.1) ; la
-#     question se pose a `/orgs/<owner>` — 200 = org, 404 = espace perso prouve, le reste est une
-#     ABSENCE de reponse et ne conclut rien (sortie HOLD : ni converge, ni supprime) ;
+#     L'IDENTITE NE LE REMPLACE PAS : `bob` qui declare `name: bob` chez lui la satisfait, et ment —
+#     le catalogue `bob` ne peut pas etre installe sur une forge ou `bob` est un humain, son org
+#     entrerait en collision avec le compte. L'objet `owner` de la recherche ne porte AUCUN champ
+#     discriminant (mesure 1.26.1) ; la question se pose a `/orgs/<owner>` — 200 = org, 404 = espace
+#     perso prouve, le reste est une ABSENCE de reponse et ne conclut rien (HOLD) ;
 #   * la TRONCATURE — D4 : le serveur borne la page a SA limite, et une liste partielle lue comme
 #     entiere ferait SUPPRIMER le materiel des catalogues au-dela de la borne. `X-Total-Count`
 #     (mesure : le header existe) est compare au nombre recu ; ecart = refus, jamais une
 #     convergence sur une liste partielle.
 #
-# Sorties : « OK <nom> <url> » / « HOLD <nom> » ; rc=1 forge muette, rc=3 liste tronquee.
+# Sorties, TOUJOURS trois champs : « OK <nom> <url> » / « HOLD <nom> <cause> ». La cause est portee
+# parce qu'il y a maintenant DEUX facons de ne pas savoir — le manifeste ou le type du proprietaire —
+# et qu'un refus qui nomme la mauvaise en envoie l'operateur regarder le mauvais objet.
+# rc=1 forge muette, rc=3 liste tronquee.
 forge_installed() {
   local hdr body total count
   hdr="$(mktemp)"
-  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=catalogue&limit=50" 2>/dev/null)" \
+  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=$STORE_REPO&limit=50" 2>/dev/null)" \
     || { rm -f "$hdr"; return 1; }
   total="$(tr -d '\r' < "$hdr" | awk -F': ' 'tolower($1)=="x-total-count"{print $2}')"
   rm -f "$hdr"
@@ -62,18 +79,54 @@ forge_installed() {
   count="$(printf '%s' "$body" | jq -r '.data | length')"
   [[ -n "$total" && "$count" -lt "$total" ]] && return 3
 
-  local name url code
-  while read -r name url; do
+  local name full url code declared drc
+  while read -r name full url; do
     [[ -n "$name" ]] || continue
+
+    # ⚠ DEUX LIGNES ET PAS UNE : `local d="$(f)"` rendrait TOUJOURS 0 — `local` est une commande, et
+    # c'est SON code de sortie qui est vu, pas celui de la substitution. Le muet passerait alors pour
+    # un manifeste absent, donc pour un refus, et le materiel serait supprime sur une non-reponse.
+    drc=0
+    declared="$(declared_name "$full")" || drc=$?
+    [[ "$drc" -eq 2 ]] && { printf 'HOLD %s manifeste\n' "$name"; continue; }
+    [[ "$declared" == "$name" ]] || continue
+
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
     case "$code" in
       200) printf 'OK %s %s\n' "$name" "$url" ;;
       404) : ;;
-      *)   printf 'HOLD %s\n' "$name" ;;
+      *)   printf 'HOLD %s proprietaire\n' "$name" ;;
     esac
   done <<< "$(printf '%s' "$body" \
-    | jq -r '.data[]? | select(.name == "catalogue") | select(.empty != true)
-             | "\(.owner.login) \(.clone_url)"')"
+    | jq -r --arg store "$STORE_REPO" \
+           '.data[]? | select(.name == $store) | select(.empty != true)
+            | "\(.owner.login) \(.full_name) \(.clone_url)"')"
+}
+
+# Le `name:` que le depot `$1` (`<owner>/<repo>`) declare. rc=0 avec le nom sur stdout · rc=1 pas de
+# manifeste (une REPONSE : ce n'est pas un magasin) · rc=2 la forge n'a pas repondu (une ABSENCE de
+# reponse, qui ne conclut rien). Le code de sortie et pas une sentinelle dans la sortie : un nom de
+# catalogue est une chaine libre, et toute valeur reservee finit par etre celle de quelqu'un.
+#
+# ⚠ COLONNE ZERO, meme regle que `CatalogueDeposits.manifest_name/1` et pour la meme raison : en YAML
+# un `name:` INDENTE appartient a la cle du dessus (`roles:\n  name: dev` declare un role), donc
+# accepter une indentation laisserait le premier `name:` imbrique voler l'identite du catalogue.
+#
+# `-sS` sans `-f` : le corps ET le code sont necessaires, et `-f` avalerait le corps sur un 404.
+declared_name() {
+  local raw code body
+  raw="$(curl -sS -m 10 -w '\n%{http_code}' "$PROV_FORGE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
+    || raw=$'\n000'
+  code="${raw##*$'\n'}"
+  body="${raw%$'\n'*}"
+
+  case "$code" in
+    200) printf '%s' "$body" | awk '
+           /^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
+                      sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' ;;
+    404) return 1 ;;
+    *)   return 2 ;;
+  esac
 }
 
 # ─── ce que la BOITE porte ────────────────────────────────────────────────────────────────────────
@@ -102,7 +155,7 @@ check() {
     verdict_check
   fi
 
-  local signed status name url rc=0
+  local signed status name arg url rc=0
   signed="$(forge_installed)" || rc=$?
   if [[ "$rc" -eq 3 ]]; then
     p_drift "liste des catalogues TRONQUEE par la forge — rien n'est conclu sur une liste partielle"
@@ -115,13 +168,15 @@ check() {
   fi
 
   local seen=" "
-  while read -r status name url; do
+  while read -r status name arg; do
     [[ -n "$name" ]] || continue
     seen="$seen$name "
     if [[ "$status" == "HOLD" ]]; then
-      p_drift "catalogue $name : type du proprietaire illisible sur la forge — rien n'est conclu"
+      p_drift "catalogue $name : $arg illisible sur la forge — rien n'est conclu"
       continue
     fi
+    # Passe HOLD, le troisieme champ est l'url de clone — le protocole le dit, cf. `forge_installed`.
+    url="$arg"
 
     local dir="$PROV_CATALOGUES_DIR/$name"
     if [[ ! -d "$dir/.git" ]]; then
@@ -160,16 +215,17 @@ apply() {
   # par ne plus etre d'accord. Ici on garantit seulement qu'il existe avant d'y ecrire.
   mkdir -p "$PROV_CATALOGUES_DIR"
 
-  local status name url dir seen=" "
-  while read -r status name url; do
+  local status name arg url dir seen=" "
+  while read -r status name arg; do
     [[ -n "$name" ]] || continue
     # HOLD entre dans `seen` et nulle part ailleurs : son materiel survit au balayage (on n'a pas pu
     # lire le type du proprietaire, on ne conclut rien), et rien n'est clone sous un nom non signe.
     seen="$seen$name "
     if [[ "$status" == "HOLD" ]]; then
-      p_drift "catalogue $name : type du proprietaire illisible — materiel laisse EN L'ETAT"
+      p_drift "catalogue $name : $arg illisible — materiel laisse EN L'ETAT"
       continue
     fi
+    url="$arg"
 
     dir="$PROV_CATALOGUES_DIR/$name"
 

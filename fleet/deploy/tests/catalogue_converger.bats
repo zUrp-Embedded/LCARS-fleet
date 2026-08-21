@@ -25,13 +25,22 @@ setup() {
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
-# La forge repond ce qu'on lui dit de repondre — DEUX endpoints depuis D1 : la recherche (corps
-# JSON + header X-Total-Count vers le fichier -D) et la sonde d'org (`-w %{http_code}`). Fixtures :
+# La forge repond ce qu'on lui dit de repondre — TROIS endpoints : la recherche (corps JSON + header
+# X-Total-Count vers le fichier -D), la sonde d'org (`-w %{http_code}`, depuis D1) et le manifeste
+# brut d'un depot (corps + code, depuis le garde d'identite). Fixtures :
 #   $1            corps JSON de la recherche ; sans argument, la forge est DOWN
 #   FAKE_ORGS     les noms qui repondent 200 sur /orgs/<nom> (des orgs)
 #   FAKE_ORG_MUTE les noms dont la sonde d'org echoue (000) — ni org, ni perso : illisible
 #   FAKE_TOTAL    X-Total-Count force (defaut : la taille reelle de .data — pas de troncature)
 # Tout autre nom sonde repond 404 : espace perso prouve.
+#
+# ⚠ LE MANIFESTE, ET SON DEFAUT N'EST PAS UNE COMPLAISANCE. Un magasin est une PROJECTION du depot
+# de son catalogue : il porte donc `catalogue.yaml`, avec le `name:` de ce catalogue — c'est-a-dire
+# le nom de son org. La doublure sert cela par defaut parce que c'est ce que la vraie forge sert
+# pour un vrai magasin. Les ecarts se demandent, par PROPRIETAIRE :
+#   FAKE_BAD_MANIFEST   le manifeste declare un AUTRE nom que l'org
+#   FAKE_NO_MANIFEST    pas de manifeste du tout (404 — une reponse : ce n'est pas un magasin)
+#   FAKE_MANIFEST_MUTE  manifeste illisible (000 — une absence de reponse)
 fake_forge() {
   if [[ $# -eq 0 ]]; then
     printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
@@ -54,6 +63,13 @@ if [[ "$url" == */api/v1/orgs/* ]]; then
   for o in ${FAKE_ORG_MUTE:-}; do [[ "$o" == "$name" ]] && { echo 000; exit 0; }; done
   for o in ${FAKE_ORGS:-};     do [[ "$o" == "$name" ]] && { echo 200; exit 0; }; done
   echo 404; exit 0
+fi
+if [[ "$url" == */raw/catalogue.yaml ]]; then
+  rest="${url#*/api/v1/repos/}"; owner="${rest%%/*}"
+  for o in ${FAKE_MANIFEST_MUTE:-}; do [[ "$o" == "$owner" ]] && { printf '\n000'; exit 0; }; done
+  for o in ${FAKE_NO_MANIFEST:-};   do [[ "$o" == "$owner" ]] && { printf 'Not Found\n404'; exit 0; }; done
+  for o in ${FAKE_BAD_MANIFEST:-};  do [[ "$o" == "$owner" ]] && { printf 'api_version: 1\nname: autre-chose\n\n200'; exit 0; }; done
+  printf 'api_version: 1\nname: %s\n\n200' "$owner"; exit 0
 fi
 body="$(cat "$FAKE_BODY_FILE")"
 if [[ -n "$hdr" ]]; then
@@ -91,7 +107,12 @@ seed_local() {
   printf 'api_version: 1\nname: %s\n' "$1" > "$PROV_CATALOGUES_DIR/$1/catalogue.yaml"
 }
 
-json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login":"%s"},"clone_url":"http://forge.invalid/%s/catalogue.git"}]}' "$1" "$1"; }
+# `full_name` est porte parce que le module en a besoin pour ALLER LIRE le manifeste : l'adresse du
+# depot vient de la reponse de la forge, jamais d'une recomposition `<owner>/<convention>` ici.
+json_one() {
+  printf '{"data":[{"name":"catalogue","full_name":"%s/catalogue","empty":false,"owner":{"login":"%s"},"clone_url":"http://forge.invalid/%s/catalogue.git"}]}' \
+    "$1" "$1" "$1"
+}
 
 # ─── LA REGLE DE SURETE : on ne supprime QUE sur une lecture reussie ─────────────────────────────
 
@@ -131,7 +152,7 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
 @test "un repo nomme catalogue-perso ne signe RIEN — le filtre est exact, pas une sous-chaine" {
   # `q=catalogue` est un match de sous-chaine cote Gitea. Sans le filtre exact, le depot personnel
   # d'un humain ferait installer un catalogue que personne n'a installe.
-  fake_forge '{"data":[{"name":"catalogue-perso","empty":false,"owner":{"login":"alice"},"clone_url":"http://forge.invalid/alice/catalogue-perso.git"}]}'
+  fake_forge '{"data":[{"name":"catalogue-perso","full_name":"alice/catalogue-perso","empty":false,"owner":{"login":"alice"},"clone_url":"http://forge.invalid/alice/catalogue-perso.git"}]}'
   fake_git
 
   run bash "$MOD" apply
@@ -141,7 +162,7 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
 }
 
 @test "un depot VIDE ne signe rien — une org creee sans sa source est un install interrompu" {
-  fake_forge '{"data":[{"name":"catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/catalogue.git"}]}'
+  fake_forge '{"data":[{"name":"catalogue","full_name":"web/catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/catalogue.git"}]}'
   fake_git
 
   run bash "$MOD" apply
@@ -232,7 +253,60 @@ json_one() { printf '{"data":[{"name":"catalogue","empty":false,"owner":{"login"
 
   run bash "$MOD" apply
   [ "$status" -ne 0 ]
-  [[ "$output" == *"type du proprietaire illisible"* ]]
+  # ⚠ LA CAUSE EST NOMMEE, et le temoin jumeau (manifeste ILLISIBLE) attend l'AUTRE mot. Deux facons
+  # de ne pas savoir sous un seul message enverraient l'operateur regarder le mauvais objet.
+  [[ "$output" == *"proprietaire illisible"* ]]
+  [[ "$output" != *"manifeste illisible"* ]]
+  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+}
+
+# ─── L'IDENTITE : un depot ne signe QUE le catalogue qu'il DECLARE ──────────────────────────────
+#
+# L'adresse dit ou regarder, le manifeste dit ce que c'est. Sans ce garde, tout depot pose a
+# l'adresse d'un magasin dans une org quelconque etait clone et SERVI sous le nom de cette org — et
+# ses roles descendaient dans le roster du mint.
+
+@test "IDENTITE: un depot a l'adresse d'un magasin qui declare un AUTRE nom ne signe rien" {
+  # `web/catalogue` est exactement la ou un magasin se pose, dans une vraie org. Ce qui le disqualifie
+  # est son manifeste : il ne declare pas `web`, donc il n'est pas le magasin de `web`.
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="web" FAKE_BAD_MANIFEST="web"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  # Non signe = non vu : le materiel local part au balayage, comme pour tout catalogue desinstalle.
+  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+}
+
+@test "IDENTITE: un depot SANS manifeste ne signe rien — 404 est une reponse" {
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="web" FAKE_NO_MANIFEST="web"
+  fake_git
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+}
+
+@test "IDENTITE: manifeste ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
+  # ⚠ LA DIFFERENCE QUI COUTE. 404 est une reponse (« pas un magasin ») et autorise la suppression ;
+  # une forge muette est une ABSENCE de reponse et n'autorise rien. Les confondre effacerait le
+  # materiel d'un catalogue bien installe sur un hoquet reseau — la faute que ce fichier entier
+  # existe pour empecher, un endpoint plus loin.
+  fake_forge "$(json_one web)"
+  export FAKE_ORGS="web" FAKE_MANIFEST_MUTE="web"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"manifeste illisible"* ]]
+  [[ "$output" != *"proprietaire illisible"* ]]
   [ -d "$PROV_CATALOGUES_DIR/web" ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
