@@ -81,6 +81,7 @@ BRANCH="main"
 DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
+FLEET_HUMAN=""       # posé par --fleet-human : NOMMER le compte, c'est autoriser sa création
 WITH_BENCH=0
 declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
@@ -100,6 +101,12 @@ while [[ $# -gt 0 ]]; do
     # forcer le substrat doit valoir pour la porte ET pour le rail, jamais pour un seul des deux.
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
+    # ⚖ USER 2026-08-21 : « on crée pas un user sur une machine nue. » Ce drapeau EST la validation :
+    # le nom autorise la création, et il est LU ici — pas seulement transmis — parce que le bandeau
+    # de consentement doit ANNONCER le compte qui va apparaître. Un coût qui se découvre après coup
+    # n'a pas été consenti.
+    --fleet-human) FLEET_HUMAN="${2:?--fleet-human attend un nom}"
+                   PASSTHRU+=("$1" "$2"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
     # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),
@@ -382,6 +389,22 @@ if [[ "$RAIL" == "workstation" ]]; then
   # y nommer un fichier qu'on ne touchera pas sur cette machine-ci est un coût inventé, et un coût
   # inventé décrédibilise ceux qui sont vrais.
   if [[ "$SUBSTRATE" == "wsl" ]]; then _banner_wslconf="· /etc/wsl.conf. "; else _banner_wslconf="                  "; fi
+  # ⚖ LE COMPTE SE DIT AVANT D'EXISTER (USER 2026-08-21). C'est la seule mutation de ce rail qui
+  # crée un UTILISATEUR sur la machine de quelqu'un ; l'annoncer dans le bandeau du coût est ce qui
+  # la rend consentie, et la taire la rendrait subie. Sans `--fleet-human`, rien n'est créé : le
+  # module dérive en nommant le geste, et le bandeau dit ce qui manquera.
+  if [[ "$RAIL" == "workstation" ]]; then
+    if [[ -n "$FLEET_HUMAN" ]]; then
+      echo ""
+      echo "  ${AMBER}Ce rail créera l'utilisateur « $FLEET_HUMAN »${N} (uid libre au-dessus du siège,"
+      echo "  groupe fleet) : c'est lui qui fera tourner la fleet. Toi, tu restes le siège."
+    else
+      echo ""
+      echo "  ${W}Aucun humain de fleet nommé${N} — rien ne sera créé, et personne ne pourra lancer"
+      echo "  la fleet ici (ton compte est le siège, GUARD B le lui interdit). Pour en poser un :"
+      echo "    sudo … bash $0 --workstation --fleet-human <nom>"
+    fi
+  fi
   cat <<EOF
 ${CYAN}  ┌─────────────────────────────────────────────────────────┐
   │${W}  RAIL POSTE — LCARS s'installe DANS ce système.${N}          ${CYAN}│
@@ -650,10 +673,14 @@ else
 fi
 # Le lanceur nommé est celui qui MARCHE. Sur le rail poste la fleet appartient à l'humain de fleet ;
 # l'opérateur la lance par `sudo -u`, et atteint son deck par le groupe.
-if [[ "$RAIL" == "workstation" ]]; then
-  _fh="${PROV_FLEET_HUMAN:-lcars}"
-  _step3="${W}3.${N} ${W}sudo -u $_fh fleet_v2 start${N} — la fleet tourne sous"
-  _step3b="     « $_fh » ; toi tu l'atteins par le groupe ${W}fleet${N}."
+if [[ "$RAIL" == "workstation" && -n "${FLEET_HUMAN:-}" ]]; then
+  _step3="${W}3.${N} ${W}sudo -u $FLEET_HUMAN fleet_v2 start${N} — la fleet tourne sous"
+  _step3b="     « $FLEET_HUMAN » ; toi tu l'atteins par le groupe ${W}fleet${N}."
+elif [[ "$RAIL" == "workstation" ]]; then
+  # Aucun humain nommé : la ligne 3 ne peut pas donner une commande qui marche, donc elle donne le
+  # geste qui manque. Nommer une commande vouée au refus serait pire que de ne rien dire.
+  _step3="${W}3.${N} Nomme un humain de fleet, sinon personne ne peut la lancer :"
+  _step3b="     ${W}bash $0 --workstation --fleet-human <nom>${N}"
 else
   _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
   _step3b="                                                         "

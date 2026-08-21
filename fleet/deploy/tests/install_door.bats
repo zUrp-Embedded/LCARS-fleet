@@ -164,6 +164,37 @@ setup() {
   [[ "$output" == *"réservé à WSL2"* ]]
 }
 
+# ─── LE COMPTE SE DIT AVANT D'EXISTER ───────────────────────────────────────────────────────────
+# ⚖ USER 2026-08-21 : « on cree pas un user sur une machine nue. dans docker c'est sans gravite, la
+# ca demande au moins une validation user. » C'est la SEULE mutation de ce rail qui fait apparaitre
+# un UTILISATEUR sur la machine de quelqu'un. Nommer le compte EST la validation ; l'annoncer dans
+# le bandeau du cout est ce qui la rend consentie, et la taire la rendrait subie.
+
+@test "sans --fleet-human : la porte annonce que RIEN ne sera cree, et donne le geste" {
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"Aucun humain de fleet nommé"* ]]
+  [[ "$output" == *"rien ne sera créé"* ]]
+  [[ "$output" == *"--fleet-human"* ]]
+}
+
+@test "avec --fleet-human : le compte est NOMME dans le bandeau, avant d'exister" {
+  # Le nom n'est pas un detail : sur ce parc les humains s'appellent `vanille`, `bob`, `alice`.
+  # Un defaut cable (`lcars`) ferait apparaitre un utilisateur que personne n'a demande.
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --fleet-human vanille --check < /dev/null
+  [[ "$output" == *"créera l'utilisateur « vanille »"* ]]
+  [[ "$output" != *"Aucun humain de fleet nommé"* ]]
+}
+
+@test "le nom voyage jusqu'au rail — la porte le lit ET le transmet" {
+  # Lu ici pour le bandeau, transmis au rail pour l'acte. Le lire sans le transmettre annoncerait
+  # une creation qui n'aurait pas lieu ; le transmettre sans le lire creerait un compte que le
+  # bandeau n'a pas annonce. Les deux moities sont la meme promesse.
+  run grep -c 'PASSTHRU+=("\$1" "\$2"); shift 2 ;;' "$SRC"
+  [ "$status" -eq 0 ]
+  run grep -A1 -- '--fleet-human) FLEET_HUMAN=' "$SRC"
+  [[ "$output" == *"PASSTHRU+="* ]]
+}
+
 @test "la DERNIERE instruction lue est vraie sur CE terrain — pas celle d'un autre" {
   # Le bandeau de cloture disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
   # « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
@@ -175,7 +206,7 @@ setup() {
   # provisionnement complet (paquets, /local, une forge), ce qu'un temoin ne joue pas. Ce qui se
   # garde ici est que les deux formes EXISTENT et sont choisies par le terrain — un bandeau qui
   # redeviendrait inconditionnel le perdrait sans que rien ne rougisse.
-  run grep -c 'sudo -u \$_fh fleet_v2 start' "$SRC"
+  run grep -c 'sudo -u \$FLEET_HUMAN fleet_v2 start' "$SRC"
   [ "$output" = "1" ]
   run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
   [ "$output" = "1" ]

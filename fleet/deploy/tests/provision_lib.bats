@@ -220,6 +220,47 @@ module_sh() {
   [[ "$output" == *"composant symlink"* ]]
 }
 
+@test "ensure_mode: la forme « user: » est IDEMPOTENTE — sinon le rejeu rechowne a l'infini" {
+  # LE DEUX-POINTS NU dit a `chown` « le groupe de CONNEXION de cet utilisateur » — il ne dit pas
+  # LEQUEL. `stat` rend ensuite `bob:bob` la ou la cible s'ecrit `bob:`, donc une comparaison
+  # litterale echoue A JAMAIS : le module re-chowne a chaque passe et compte une mutation.
+  #
+  # Mesure du 2026-08-21, DEUXIEME passe d'une install deja convergee :
+  #   POSÉ  45-sudoers-toolchain: perms 0644 lordzurp: …/SKILL.md
+  #   POSÉ  45-sudoers-toolchain: perms 0755 lordzurp: …/list.sh
+  # Deux fichiers strictement identiques a ceux de la veille. Le mode de nuisance est doux et
+  # durable : rien ne casse, mais « rejouer ne fait rien » devient faux — et c'est la propriete sur
+  # laquelle tout ce rail est bati.
+  # ⚠ C'EST LA DEUXIEME PASSE QU'ON MESURE, PAS LA PREMIERE. La premiere chowne pour de vrai — un
+  # fichier neuf n'a pas encore le bon proprietaire — et compte donc une mutation legitime. Ce qui
+  # doit etre nul, c'est le DELTA de la seconde. Une assertion sur le compteur absolu confondrait
+  # « converge » et « n'a jamais rien fait ».
+  module_sh '
+    f="$BATS_TEST_TMPDIR/idem"; : > "$f"
+    ensure_mode "$f" 0644 "$(id -un):" >/dev/null 2>&1
+    avant="$PROV_CHANGED"
+    out="$(ensure_mode "$f" 0644 "$(id -un):" 2>&1)"
+    [ "$PROV_CHANGED" -eq "$avant" ] && [ -z "$out" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "ensure_mode: TEMOIN — un groupe NOMME se compare toujours en entier" {
+  # Sans ce pendant, un correctif qui ignorerait le groupe en toutes circonstances passerait le
+  # temoin ci-dessus, et `root:fleet` cesserait d'etre converge — c'est-a-dire que /home/private
+  # pourrait deriver de groupe sans que rien ne le dise.
+  module_sh '
+    f="$BATS_TEST_TMPDIR/nomme"; : > "$f"
+    ensure_mode "$f" 0644 "$(id -un):$(id -gn)" >/dev/null 2>&1
+    avant="$PROV_CHANGED"
+    out="$(ensure_mode "$f" 0644 "$(id -un):$(id -gn)" 2>&1)"
+    [ "$PROV_CHANGED" -eq "$avant" ] && [ -z "$out" ]
+    # Et le groupe est bien celui qui a ete NOMME, pas un autre laisse au systeme.
+    [ "$(stat -c "%U:%G" "$f")" = "$(id -un):$(id -gn)" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
 @test "6-131: ensure_mode dit LIEN et non « absent » sur un lien casse" {
   # `[[ -e ]]` est faux sur un lien casse : diagnostique « absent », le piege reste invisible.
   module_sh '

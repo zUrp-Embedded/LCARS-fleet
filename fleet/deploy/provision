@@ -84,6 +84,12 @@ while [[ $# -gt 0 ]]; do
     --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
     --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
+    # ⚖ USER 2026-08-21 : « on crée pas un user sur une machine nue. dans docker c'est sans gravité,
+    # là ça demande au moins une validation user. » Ce drapeau EST cette validation : nommer le
+    # compte, c'est l'autoriser. Sans lui, `22-fleet-human` ne crée RIEN — il dérive en nommant le
+    # geste. Un défaut câblé (`lcars`) ferait apparaître un utilisateur que personne n'a demandé sur
+    # une machine qui n'a aucun désinstalleur.
+    --fleet-human) export PROV_FLEET_HUMAN="${2:?--fleet-human attend un user}"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     # Le détail d'une étape longue, pour celui qui veut savoir sur quoi elle traîne. Hérité par les
@@ -321,7 +327,8 @@ done
 # ignore la moitié per-humain de l'installation — c'est-à-dire précisément la moitié dont dépend le
 # démarrage de la fleet.
 if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
-  _fleet_human="${PROV_FLEET_HUMAN:-lcars}"
+  _fleet_human="${PROV_FLEET_HUMAN:-}"
+  [[ -n "$_fleet_human" ]] || _fleet_human="${PROV_HUMAN:-}"
   if [[ "$_fleet_human" != "${PROV_HUMAN:-}" ]] && is_fleet_human "$_fleet_human" 2>/dev/null; then
     [[ "$PORCELAIN" -eq 1 ]] || {
       echo ""

@@ -612,6 +612,21 @@ ensure_mode() {
   if [[ -n "$owner" ]]; then
     cur_owner="$(stat -c '%U:%G' "$path")"
     want_owner="$owner"
+    # ⚠ `<user>:` NE SE COMPARE PAS TEL QUEL, ET L'OUBLI COÛTE UNE CONVERGENCE PERPÉTUELLE. Le
+    # deux-points nu dit à `chown` « le groupe de CONNEXION de cet utilisateur » — il ne dit pas
+    # LEQUEL, donc `stat` rend ensuite `lordzurp:lordzurp` là où la cible s'écrit `lordzurp:`. La
+    # comparaison littérale échoue à jamais : le module re-chowne à chaque passe, compte une
+    # mutation, et le rejeu cesse d'être idempotent.
+    #
+    # Mesuré le 2026-08-21, deuxième passe d'une install déjà convergée : deux POSÉ sur des fichiers
+    # strictement identiques à ceux d'avant. Le mode de nuisance est doux et durable — rien ne casse,
+    # mais « rejouer ne fait rien » devient faux, et c'est la propriété sur laquelle ce rail est bâti.
+    #
+    # On compare donc ce que la SPÉCIFICATION dit : l'utilisateur seul quand le groupe est laissé au
+    # système, les deux quand il est nommé.
+    if [[ "$owner" == *: ]]; then
+      cur_owner="$(stat -c '%U' "$path"):"
+    fi
     if [[ "$cur_owner" != "$want_owner" ]]; then
       chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
       changed=1

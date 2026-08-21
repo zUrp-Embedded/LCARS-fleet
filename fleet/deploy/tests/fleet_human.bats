@@ -103,13 +103,40 @@ FAKE
   [ "$output" = "1003" ]
 }
 
-@test "check: humain ABSENT → drift, et il dit la CONSEQUENCE (personne pour lancer la fleet)" {
-  # Le motif importe plus que le fait : « le compte manque » n'apprend rien, « le poste n'a personne
-  # pour lancer la fleet » designe ce qu'on perd.
-  PROV_FLEET_HUMAN="n-existe-pas-$$" mod 'check'
+@test "AUCUN humain nomme : drift qui donne le GESTE, et surtout aucun compte cree" {
+  # ⚖ USER 2026-08-21 : « on cree pas un user sur une machine nue. dans docker c'est sans gravite,
+  # la ca demande au moins une validation user. »
+  #
+  # Ce module portait `: "${PROV_FLEET_HUMAN:=lcars}"` : un apply sur une machine dediee faisait
+  # apparaitre un utilisateur `lcars` que personne n'avait demande, sur un rail sans desinstalleur.
+  # Le nom N'EST PAS un detail non plus — sur ce parc les humains s'appellent `vanille`, `bob`,
+  # `alice` ; `lcars` n'a rien de special.
+  export PROV_HUMAN="$(id -un)"
+  mod 'check'
   [ "$status" -eq 1 ]     # check : 1 = DRIFT (le contrat INVERSE les codes entre check et apply)
   [[ "$output" == *"DRIFT"* ]]
-  [[ "$output" == *"lancer la fleet"* ]]
+  [[ "$output" == *"aucun humain de fleet"* ]] || [[ "$output" == *"DÉCLARÉ"* ]]
+  # Le geste exact, les deux voies — celle du rail et celle qu'on tape soi-meme.
+  [[ "$output" == *"--fleet-human"* ]]
+  [[ "$output" == *"useradd"* ]]
+}
+
+@test "AUCUN humain nomme : l'APPLY non plus ne cree rien — il dit la meme chose que le check" {
+  # C'est le seul module du rail qui fait APPARAITRE UN UTILISATEUR sur la machine de quelqu'un. Le
+  # defaut ne peut pas etre « le faire quand meme » : un apply muet sur ce point serait exactement
+  # la mutation qu'on refuse.
+  export PROV_HUMAN="$(id -un)"
+  mod 'apply'
+  [[ "$output" == *"aucun humain de fleet"* ]] || [[ "$output" == *"DÉCLARÉ"* ]]
+  [[ "$output" != *"cree ("* ]]
+  [[ "$output" != *"créé ("* ]]
+}
+
+@test "humain NOMME mais absent : drift qui annonce la creation — le nom EST l'autorisation" {
+  PROV_FLEET_HUMAN="n-existe-pas-$$" mod 'check'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT"* ]]
+  [[ "$output" == *"CRÉERA"* ]]
 }
 
 @test "check: un humain que GUARD B REFUSE est un drift NOMMÉ, pas un compte qu'on deplace" {

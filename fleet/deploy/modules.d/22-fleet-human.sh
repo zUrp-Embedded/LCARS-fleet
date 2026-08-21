@@ -49,7 +49,19 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-: "${PROV_FLEET_HUMAN:=lcars}"
+# ⚖ ARBITRAGE USER 2026-08-21 : « on crée pas un user sur une machine nue. dans docker c'est sans
+# gravité, là ça demande au moins une validation user. »
+#
+# DONC AUCUN NOM PAR DÉFAUT. Ce module portait `: "${PROV_FLEET_HUMAN:=lcars}"` : un `provision
+# apply` sur une machine dédiée faisait alors apparaître un utilisateur `lcars` que personne n'avait
+# demandé, sur un rail qui n'a AUCUN désinstalleur. Dans un conteneur c'est sans conséquence — il se
+# jette ; sur la machine de quelqu'un, c'est une mutation qu'on ne défait pas.
+#
+# NOMMER LE COMPTE EST LA VALIDATION. `--fleet-human <nom>` (ou `PROV_FLEET_HUMAN`) est le geste par
+# lequel l'opérateur autorise la création ET choisit le nom — parce que `lcars` n'a rien de spécial :
+# sur ce parc les humains s'appellent `vanille`, `bob`, `alice`. Sans ce drapeau, le module ne crée
+# RIEN et dérive en nommant le geste exact.
+FLEET_HUMAN="${PROV_FLEET_HUMAN:-}"
 FLEET_SHELL="${PROV_FLEET_HUMAN_SHELL:-/bin/bash}"
 
 # LE PLANCHER D'UID SE DÉRIVE, IL NE S'ÉCRIT PAS. `is_fleet_human` exige `uid >= UID_MIN` ET
@@ -76,45 +88,59 @@ first_free_uid() {
 
 check() {
   local uid
-  if ! uid="$(id -u -- "$PROV_FLEET_HUMAN" 2>/dev/null)"; then
-    p_drift "humain de fleet « $PROV_FLEET_HUMAN » absent — le poste n'a personne pour lancer la fleet (l'apply le crée)"
+  # AUCUN HUMAIN NOMMÉ : ce n'est pas une panne, c'est une décision que personne n'a prise. On le
+  # DIT, avec le geste exact, et on ne devine pas de nom.
+  if [[ -z "$FLEET_HUMAN" ]]; then
+    p_drift "aucun humain de fleet DÉCLARÉ — personne ne pourra lancer la fleet ici (l'opérateur, uid
+     $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?'), est le siège et GUARD B le lui interdit).
+     Nomme-le, et ce nom AUTORISE sa création : « provision apply --fleet-human <nom> »
+     — ou crée-le toi-même : « useradd -m -G $PROV_FLEET_GROUP <nom> »"
     verdict_check
   fi
-  if is_fleet_human "$PROV_FLEET_HUMAN"; then
-    p_ok "humain de fleet « $PROV_FLEET_HUMAN » (uid $uid) — il peut lancer la fleet"
+  if ! uid="$(id -u -- "$FLEET_HUMAN" 2>/dev/null)"; then
+    p_drift "humain de fleet « $FLEET_HUMAN » absent — l'apply le CRÉERA (tu l'as nommé, donc autorisé)"
+    verdict_check
+  fi
+  if is_fleet_human "$FLEET_HUMAN"; then
+    p_ok "humain de fleet « $FLEET_HUMAN » (uid $uid) — il peut lancer la fleet"
   else
     # Le cas se produit si quelqu'un a créé le compte à la main sur l'uid du siège. On le DIT plutôt
     # que de le déplacer : changer l'uid d'un compte existant orphelinerait tout ce qu'il possède.
-    p_drift "« $PROV_FLEET_HUMAN » existe en uid $uid, que GUARD B refuse (siège ou compte système) — la fleet ne démarrera pas sous lui"
+    p_drift "« $FLEET_HUMAN » existe en uid $uid, que GUARD B refuse (siège ou compte système) — la fleet ne démarrera pas sous lui"
   fi
-  if id -nG "$PROV_FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
-    p_ok "« $PROV_FLEET_HUMAN » ∈ $PROV_FLEET_GROUP"
+  if id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+    p_ok "« $FLEET_HUMAN » ∈ $PROV_FLEET_GROUP"
   else
-    p_drift "« $PROV_FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /home/private ni les zones de face"
+    p_drift "« $FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /home/private ni les zones de face"
   fi
   verdict_check
 }
 
 apply() {
-  if ! id -u -- "$PROV_FLEET_HUMAN" >/dev/null 2>&1; then
+  # ⚠ SANS NOM, L'APPLY NE CRÉE RIEN — il dit la même chose que le check et s'arrête. C'est le seul
+  # module du rail qui fait APPARAÎTRE UN UTILISATEUR sur la machine de quelqu'un : le défaut ne
+  # peut pas être « le faire quand même ».
+  [[ -n "$FLEET_HUMAN" ]] || { check; return; }
+
+  if ! id -u -- "$FLEET_HUMAN" >/dev/null 2>&1; then
     local uid; uid="$(first_free_uid)"
-    if useradd -u "$uid" -m -s "$FLEET_SHELL" -g "$PROV_FLEET_GROUP" -- "$PROV_FLEET_HUMAN" 2>/dev/null; then
+    if useradd -u "$uid" -m -s "$FLEET_SHELL" -g "$PROV_FLEET_GROUP" -- "$FLEET_HUMAN" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "humain de fleet « $PROV_FLEET_HUMAN » créé (uid $uid, groupe $PROV_FLEET_GROUP)"
+      p_chg "humain de fleet « $FLEET_HUMAN » créé (uid $uid, groupe $PROV_FLEET_GROUP)"
     else
-      p_drift "useradd « $PROV_FLEET_HUMAN » (uid $uid) a échoué — le poste reste sans humain de fleet"
+      p_drift "useradd « $FLEET_HUMAN » (uid $uid) a échoué — le poste reste sans humain de fleet"
       verdict_apply
     fi
   fi
 
   # L'APPARTENANCE SE CONVERGE MÊME SUR UN COMPTE QUI EXISTAIT DÉJÀ : `useradd -g` ne vaut que pour
   # une création, et un compte posé à la main (ou par une version antérieure) peut être hors groupe.
-  if ! id -nG "$PROV_FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
-    if usermod -aG "$PROV_FLEET_GROUP" -- "$PROV_FLEET_HUMAN" 2>/dev/null; then
+  if ! id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+    if usermod -aG "$PROV_FLEET_GROUP" -- "$FLEET_HUMAN" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "« $PROV_FLEET_HUMAN » ajouté au groupe $PROV_FLEET_GROUP"
+      p_chg "« $FLEET_HUMAN » ajouté au groupe $PROV_FLEET_GROUP"
     else
-      p_drift "« $PROV_FLEET_HUMAN » n'a pas pu rejoindre $PROV_FLEET_GROUP"
+      p_drift "« $FLEET_HUMAN » n'a pas pu rejoindre $PROV_FLEET_GROUP"
     fi
   fi
 

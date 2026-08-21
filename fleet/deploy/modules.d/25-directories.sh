@@ -97,7 +97,10 @@ set -euo pipefail
 # cree APRES ce module, qui ne pouvait pas lui donner son dossier. Une identite precede les
 # repertoires qu'elle possede — l'ordre est le prefixe, et le prefixe porte le sens.
 prov_console_human() {
-  local h="${PROV_FLEET_HUMAN:-lcars}"
+  # ⚖ AUCUN NOM PAR DÉFAUT (USER 2026-08-21). Tant que l'opérateur n'a pas NOMMÉ l'humain de fleet,
+  # il n'y en a pas — et la console revient à `--human`, qui existe forcément.
+  local h="${PROV_FLEET_HUMAN:-}"
+  [[ -n "$h" ]] || { echo "$PROV_HUMAN"; return 0; }
   # Repli sur `--human` tant que l'humain de fleet n'existe pas : mieux vaut un dossier pour
   # quelqu'un que pas de dossier du tout, et le prochain apply corrigera. Sans ce repli, une
   # machine dont `22-fleet-human` a derive (useradd refuse) perdrait aussi sa racine de console.
