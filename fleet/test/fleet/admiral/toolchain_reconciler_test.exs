@@ -57,9 +57,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     :persistent_term.put({ForgeUp, :test_pid}, self())
     :persistent_term.put({ForgeUp, :prs}, [])
 
-    prev_forge = Application.get_env(:lcars_fleet, :forge_client)
+    prev_forge = Application.get_env(:lcars_fleet, :admiral_forge_client)
     prev_conv = Application.get_env(:lcars_fleet, :toolchain_converger)
-    Application.put_env(:lcars_fleet, :forge_client, ForgeUp)
+    Application.put_env(:lcars_fleet, :admiral_forge_client, ForgeUp)
 
     # Le convergeur par défaut appellerait `sudo`. Ici il ENREGISTRE, parce que ce qu'on teste est
     # la décision de l'appeler et l'ordre dans lequel le SHA est noté — pas ce que root fait.
@@ -84,7 +84,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
         do: System.put_env("LCARS_TOOLCHAIN_RUN_STATE", prev_root),
         else: System.delete_env("LCARS_TOOLCHAIN_RUN_STATE")
 
-      restore(:forge_client, prev_forge)
+      restore(:admiral_forge_client, prev_forge)
       restore(:toolchain_converger, prev_conv)
       :persistent_term.erase({ForgeUp, :head})
       :persistent_term.erase({ForgeUp, :test_pid})
@@ -135,7 +135,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
   describe "les trois façons de mentir, et ce qui les empêche" do
     test "forge injoignable : ce n'est PAS « à jour »", %{server: server} do
-      Application.put_env(:lcars_fleet, :forge_client, ForgeDown)
+      Application.put_env(:lcars_fleet, :admiral_forge_client, ForgeDown)
 
       # Rendre `:up_to_date` ici ferait qu'une panne réseau se lise comme « rien à faire » — et sur
       # un rebuild la boîte resterait sans outillage en annonçant que tout va bien.
