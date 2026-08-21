@@ -301,6 +301,50 @@ for i in "${!SELECTED[@]}"; do
   esac
 done
 
+# ─── SECOND PASSAGE : L'ÉTAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────────
+# `--human` désigne QUI joue les modules `# NEEDS: human`, et sur le rail poste c'est l'opérateur
+# (SUDO_USER) — c'est-à-dire, presque toujours, le compte uid 1000 que GUARD B réserve au siège.
+# `65-fleet-human` vient de créer l'humain de fleet ; sans ce passage, son `~/.lcars`, son `~/pods`
+# et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start` échouerait sous lui pour une
+# raison sans rapport avec ce qu'on a passé la nuit à corriger.
+#
+# LA LISTE SE CALCULE, ELLE NE SE RECOPIE PAS — même règle et même code que `converge_human` du
+# convergeur de boîte : le provisionnement DÉCLARE lesquels de ses modules sont per-humain
+# (`# NEEDS: human`), on lit la déclaration. Une liste en dur redevient fausse au prochain module
+# ajouté ; c'est arrivé deux fois côté boîte (la console, puis le binaire `claude`).
+#
+# ⚠ EN BOUCLE INTERNE, JAMAIS EN RÉ-INVOQUANT `provision` : le verrou est tenu par CE processus, et
+# une ré-entrée se refuserait elle-même — « un autre apply est en cours ». Le convergeur de boîte,
+# lui, tourne dans un processus séparé et peut se permettre l'appel.
+#
+# ⚠ ET LES VERDICTS DE CE PASSAGE COMPTENT COMME LES AUTRES. Les faire taire donnerait un bilan qui
+# ignore la moitié per-humain de l'installation — c'est-à-dire précisément la moitié dont dépend le
+# démarrage de la fleet.
+if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
+  _fleet_human="${PROV_FLEET_HUMAN:-lcars}"
+  if [[ "$_fleet_human" != "${PROV_HUMAN:-}" ]] && is_fleet_human "$_fleet_human" 2>/dev/null; then
+    [[ "$PORCELAIN" -eq 1 ]] || {
+      echo ""
+      echo "${_PC}=== état per-humain de « $_fleet_human » (l'humain qui lancera la fleet) ===${_PN}"
+    }
+    for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
+      [[ -f "$mod" ]] || continue
+      [[ "$(module_field "$mod" NEEDS)" == "human" ]] || continue
+      name="$(basename "$mod" .sh)"
+      total=$((total + 1))
+      [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (apply — humain $_fleet_human) ===${_PN}"
+      rc=0
+      PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$_fleet_human" bash "$mod" apply || rc=$?
+      case "$rc" in
+        0) ok=$((ok + 1));     REPORT+=("$name@$_fleet_human=OK") ;;
+        2) drift=$((drift + 1)); REPORT+=("$name@$_fleet_human=DRIFT") ;;
+        *) failed=$((failed + 1)); REPORT+=("$name@$_fleet_human=FAIL")
+           echo "${_PR}ERREUR $name ($_fleet_human):${_PN} apply en echec (rc=$rc)" >&2 ;;
+      esac
+    done
+  fi
+fi
+
 # ─── Verdict ──────────────────────────────────────────────────────────────────────────────────────
 if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
