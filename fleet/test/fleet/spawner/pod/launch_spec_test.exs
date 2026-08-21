@@ -339,6 +339,82 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
+  describe "pin_object/4 — one file, one pinned version, nothing else" do
+    @describetag :tmp_dir
+
+    # An ops-like repo: a brief committed TWICE (two versions) plus a second file that shares the
+    # tree. Returns the source and the FIRST commit's sha — the version we freeze against.
+    defp ops_repo(tmp) do
+      src = Path.join(tmp, "ops-face")
+      File.mkdir_p!(Path.join(src, "briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q", src], stderr_to_stdout: true)
+      {_, 0} = System.cmd("git", ["-C", src, "config", "user.email", "h@lcars.local"])
+      {_, 0} = System.cmd("git", ["-C", src, "config", "user.name", "H"])
+
+      File.write!(Path.join([src, "briefs", "issue-3-engineer.md"]), "ORDER v1")
+      File.write!(Path.join([src, "briefs", "issue-9-other.md"]), "someone else's order")
+      {_, 0} = System.cmd("git", ["-C", src, "add", "."], stderr_to_stdout: true)
+      {_, 0} = System.cmd("git", ["-C", src, "commit", "-q", "-m", "v1"])
+      {sha, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"])
+
+      # v2 of the SAME brief — the version the pin must NOT surface.
+      File.write!(Path.join([src, "briefs", "issue-3-engineer.md"]), "ORDER v2")
+      {_, 0} = System.cmd("git", ["-C", src, "add", "."], stderr_to_stdout: true)
+      {_, 0} = System.cmd("git", ["-C", src, "commit", "-q", "-m", "v2"])
+
+      {src, String.trim(sha)}
+    end
+
+    test "the pinned version travels, and the later one does NOT", %{tmp_dir: tmp} do
+      {src, sha} = ops_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:ok, file} =
+               LaunchSpec.pin_object(src, pod_dir, sha, "briefs/issue-3-engineer.md")
+
+      # v1, frozen — even though the source HEAD now says v2.
+      assert File.read!(file) == "ORDER v1"
+      refute File.read!(file) == "ORDER v2"
+    end
+
+    test "the path filter is airtight — no other ticket's file rides along", %{tmp_dir: tmp} do
+      {src, sha} = ops_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      {:ok, file} = LaunchSpec.pin_object(src, pod_dir, sha, "briefs/issue-3-engineer.md")
+
+      # The other ticket's brief existed at that same commit; the archive must not carry it.
+      root = Path.join(pod_dir, "obj")
+      others = Path.wildcard(Path.join(root, "**/issue-9-other.md"))
+      assert others == [], "the mount leaked another ticket's order: #{inspect(others)}"
+
+      # No `.git`, no tarball left behind.
+      refute File.exists?(Path.join(Path.dirname(Path.dirname(file)), ".git"))
+      assert Path.wildcard(Path.join(pod_dir, "*.tar")) == []
+    end
+
+    test "a non-commit-sha is REFUSED before any git runs", %{tmp_dir: tmp} do
+      {src, _sha} = ops_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      # HEAD would archive SOMETHING and let the mandate float — exactly the freeze this defeats.
+      assert {:error, {:not_a_commit_sha, "HEAD"}} =
+               LaunchSpec.pin_object(src, pod_dir, "HEAD", "briefs/issue-3-engineer.md")
+    end
+
+    test "a path absent at the sha FAILS — never a silent empty mount", %{tmp_dir: tmp} do
+      {src, sha} = ops_repo(tmp)
+      pod_dir = Path.join(tmp, "pod")
+      File.mkdir_p!(pod_dir)
+
+      assert {:error, _} =
+               LaunchSpec.pin_object(src, pod_dir, sha, "briefs/does-not-exist.md")
+    end
+  end
+
   describe "mounts_env — the translated mount (`mode:src:dst`)" do
     test "src and dst travel together when they differ, and the guard covers dst" do
       cap =
