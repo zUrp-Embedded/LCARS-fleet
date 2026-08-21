@@ -43,6 +43,11 @@ setup() {
   printf '#!/usr/bin/env bash\necho "ttyd version 1.7.7-stub"\n' > "$BINDIR/ttyd"
   chmod 0755 "$BINDIR/ttyd"
   export PATH="$BINDIR:$PATH"
+  # ⚠ LE BINAIRE SE NOMME, IL NE SE CHERCHE PAS DANS LE PATH — sinon le temoin « ttyd absent »
+  # mesure la MACHINE. Mesure du 2026-08-21, passe a froid : retirer la doublure du PATH ne prouve
+  # rien apres que `10-packages` a pose /usr/bin/ttyd, donc vert sur un poste de dev et ROUGE dans
+  # l'install. Un temoin ne peut pas desinstaller ttyd ; il peut viser un chemin qu'il possede.
+  export LCARS_TTYD_BIN="$BINDIR/ttyd"
 }
 
 mod() { run bash "$MOD" "$1"; }

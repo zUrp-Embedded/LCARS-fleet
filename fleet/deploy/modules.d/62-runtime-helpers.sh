@@ -47,6 +47,13 @@ HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
 SRC_DIR="$(repo_root)/fleet/deploy/docker"
+# ⚠ SEAM SUR LE BINAIRE, ET IL EXISTE PARCE QU'UN TEMOIN NE PEUT PAS DESINSTALLER ttyd. Le temoin
+# « le manque de ttyd se DIT » retirait sa doublure du PATH — ce qui ne prouve rien sur une machine
+# ou le VRAI ttyd est installe, c'est-a-dire sur toute machine que ce module a deja convergee.
+# Mesure du 2026-08-21, passe a froid : vert sur un poste de dev, ROUGE dans l'install, apres que
+# `10-packages` a pose /usr/bin/ttyd trente lignes plus haut. Nommer le binaire rend la sonde
+# epinglable sans toucher au systeme.
+TTYD_BIN="${LCARS_TTYD_BIN:-ttyd}"
 
 owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
 
@@ -135,8 +142,8 @@ check() {
     esac
   fi
 
-  command -v ttyd >/dev/null \
-    && p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))" \
+  command -v "$TTYD_BIN" >/dev/null \
+    && p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))" \
     || p_drift "ttyd absent — la console web n'a AUCUN serveur derrière sa socket (page noire)"
 
   for n in "${HELPERS[@]}"; do
@@ -186,8 +193,8 @@ apply() {
   fi
 
   # ttyd : APT, et rien d'autre. Ubuntu le livre en 1.7.7, la version que l'image épingle.
-  if command -v ttyd >/dev/null; then
-    p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
+  if command -v "$TTYD_BIN" >/dev/null; then
+    p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))"
   else
     apt_ensure ttyd || { p_fail "ttyd introuvable par apt — le dépôt « universe » est-il activé ? (sans lui, la console web n'a aucun serveur)"; verdict_apply; }
   fi
