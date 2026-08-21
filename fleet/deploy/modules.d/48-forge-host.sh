@@ -70,9 +70,20 @@ set -euo pipefail
 # forge prudente : c'est une forge qui ne peut pas faire son travail.
 #
 # Fermer reste possible — `PROV_FORGE_BIND=127.0.0.1` — mais c'est le geste, pas le défaut, et il
-# prive la machine de sa CI. `bench-up.sh` a tranché pareil et porte le coût écrit : les mots de
-# passe d'un banc sont des défauts de test, publics dans le README, donc à n'ouvrir que sur un
-# réseau de confiance. Ici les comptes sont ceux de l'opérateur : même prudence, même conclusion.
+# prive la machine de sa CI.
+#
+# ⚠ ET LE BIND N'EST PAS LE LEVIER DE L'EXPOSITION, ce qui est la raison de fond. Ce qu'une forge
+# publiée expose, c'est une Gitea dont **l'inscription est OUVERTE par conception** et dont les
+# comptes ne sont pas restreints (⚖ user 2026-08-17, cf. `50-forge.sh` : « on livre un DÉFAUT »).
+# N'importe qui sur le réseau peut donc s'y créer un compte. Fermer le bind ne retire pas cette
+# exposition — il retire la CI, et laisse l'exposition intacte le jour où on rouvre. Le levier, s'il
+# faut en tirer un, est `DISABLE_REGISTRATION`, et le rail a déjà tranché ce qu'il en fait : il
+# SONDE et ANNONCE, il ne mute pas, « parce qu'un admin qui a décidé quelque chose ne doit pas se le
+# faire reprendre en silence ».
+#
+# Le défaut fermé qui vivait ici ne protégeait donc de rien de nommé : c'était la FORME d'un défaut
+# sûr — `bench-up.sh` a un `--bind`, donc on a supposé qu'il fallait fermer — sans modèle de menace
+# derrière, et au prix du seul usage que la machine a.
 #
 # ⚠ ET SOUS WSL L'OUVERTURE NE DONNE RIEN SUR LE LAN, ce qui compte pour ne pas la promettre : en
 # NAT — le défaut de WSL et de Docker Desktop — publier sur `0.0.0.0` ouvre le port DANS la VM, pas
