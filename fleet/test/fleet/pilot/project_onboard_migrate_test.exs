@@ -81,9 +81,19 @@ defmodule Fleet.Project.OnboardMigrateTest do
     String.trim(url)
   end
 
+  # ⚠ AUCUNE DE CES CIBLES N'EST UN MAGASIN DE CATALOGUE, ET IL FAUT LE DIRE. Depuis le 2026-08-21
+  # `import/2` et `migrate/3` demandent a leur cible « quel catalogue declares-tu ? » avant d'agir,
+  # et une lecture qui ECHOUE est un refus (`:store_check_unreadable`), pas un `:ok`. Sans cette
+  # doublure, la vraie cliente forge repond `{:config, {:missing, :base_url}}` et ces temoins
+  # mesureraient ce refus-la en croyant mesurer le leur.
+  defmodule NotCatalogues do
+    def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
+  end
+
   defp opts(tmp) do
     [
       forge_repo: TransferOk,
+      forge_files: NotCatalogues,
       base_url: "http://forge.test",
       code_root: Path.join(tmp, "code"),
       workshop_root: Path.join(tmp, "workshop"),
@@ -204,6 +214,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
       result =
         ProjectOnboard.import("web/vitrine",
           forge_users: RefuseUsers,
+          forge_files: NotCatalogues,
           base_url: "http://forge.test",
           code_root: Path.join(tmp, "code"),
           workshop_root: Path.join(tmp, "workshop"),

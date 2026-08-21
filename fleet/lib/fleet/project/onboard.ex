@@ -130,8 +130,8 @@ defmodule Fleet.Project.Onboard do
          :ok <- admit(org, name, opts),
          :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
-         {:ok, full_name, provision} <- create_repo(name, org, opts) do
-      case guarded_finish(full_name, provision, dirs, name, opts) do
+         {:ok, full_name} <- create_repo(name, org, opts) do
+      case guarded_finish(full_name, dirs, name, opts) do
         {:ok, result} ->
           {:ok, result}
 
@@ -158,22 +158,22 @@ defmodule Fleet.Project.Onboard do
   # RE-RAISED, NOT SWALLOWED. The crash stays a crash, with its kind and its stacktrace — only the
   # machine is left clean. Converting it to `{:error, _}` here would dress an unforeseen failure as
   # a handled one, and a caller cannot tell those apart afterwards.
-  defp guarded_finish(full_name, provision, dirs, name, opts) do
-    finish_onboard(full_name, provision, dirs, name, opts)
+  defp guarded_finish(full_name, dirs, name, opts) do
+    finish_onboard(full_name, dirs, name, opts)
   catch
     kind, payload ->
       compensate_onboard(full_name, dirs, {kind, payload}, opts)
       :erlang.raise(kind, payload, __STACKTRACE__)
   end
 
-  defp finish_onboard(full_name, provision, dirs, name, opts) do
+  defp finish_onboard(full_name, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          {:ok, url} <- repo_url(full_name, opts),
-         :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
+         :ok <- seed_protocol_labels(full_name, opts),
          :ok <- clone_main(url, dirs.code),
-         :ok <- maybe_scaffold_main(provision, dirs.code, name, opts),
+         :ok <- Scaffold.main(dirs.code, name, opts),
          :ok <- write_declaration(dirs.code, full_name, opts),
-         :ok <- commit(dirs.code, onboard_commit_msg(provision)),
+         :ok <- commit(dirs.code, "chore(onboard): scaffold initial du projet"),
          :ok <- push(dirs.code, "main", false),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
@@ -390,8 +390,12 @@ defmodule Fleet.Project.Onboard do
     name = Fleet.Layout.project_name(full_name)
     dirs = face_dirs(name, opts)
 
+    # La loi d'ordre, la meme qu'a l'import : les refus PURS et LOCAUX d'abord, la forge ensuite.
+    # `refute_store` lit le manifeste de la cible ; le faire avant `require_target_installed` ferait
+    # payer un aller-retour a une migration refusee sur un fait que le disque portait deja.
     with :ok <- refute_same_catalogue(full_name, target_catalogue),
          :ok <- require_target_installed(target_catalogue),
+         :ok <- refute_store(full_name, opts),
          {:ok, new_full_name} <-
            repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
          {:ok, url} <- repo_url(new_full_name, opts),
@@ -415,6 +419,124 @@ defmodule Fleet.Project.Onboard do
     case String.split(full_name, "/") do
       [^target | _] -> {:error, {:already_in_catalogue, target}}
       _ -> :ok
+    end
+  end
+
+  @doc """
+  Refuses to treat a catalogue's STORE as a project — `:ok` when the repo is not one.
+
+  ## Why the explicit doors need this and `reconcile` does not
+
+  `reconcile/2` is already guarded, and better than by a name: it asks every repo *"do you carry a
+  project declaration (`.lcars.json` on `main`)?"* — a guard by PROPERTY, which holds without ever
+  knowing the word `catalogue`.
+
+  The doors where an ADMIN TYPES THE NAME have no such shield. An admin imports `web/_catalogue` to
+  see what happens, the fleet lays three faces and writes `.lcars.json` at its root — and the store
+  becomes a declared project. The property guard then turns around: from the next pass on, it
+  DEFENDS the property that was laid by mistake. That is why this is a refusal at the door and not
+  a repair afterwards.
+
+  ## The discriminant is the identity, and an unknown is a REFUSAL
+
+  `owner == manifest.name`, read from the repo's own `catalogue.yaml` — the same question
+  `Fleet.Application.CatalogueDeposits.split/2` asks, so the two cannot disagree about what a
+  store is.
+
+  A `:not_found` is an ANSWER (not a catalogue — the overwhelmingly common case, and silent). Any
+  OTHER read failure is an ABSENCE of an answer, and it refuses: importing a store is expensive and
+  self-defending, retrying an import is free. ⚖ user: an explicit failure beats an ambiguous
+  success. The refusal for that case says what it could not read, never that this IS a store — a
+  refusal that named the wrong cause would send the admin to delete a repo that is fine.
+  """
+  @spec refute_store(String.t(), keyword()) ::
+          :ok
+          | {:error, {:repo_is_catalogue_store | :store_check_unreadable, String.t(), String.t()}}
+  def refute_store(full_name, opts \\ []) when is_binary(full_name) do
+    owner = full_name |> String.split("/", parts: 2) |> hd()
+
+    case declared_catalogue_name(full_name, opts) do
+      {:ok, ^owner} ->
+        {:error,
+         {:repo_is_catalogue_store, full_name,
+          "'#{full_name}' is the STORE of the catalogue '#{owner}' — the source the fleet pushed " <>
+            "into its own org, not a project. Laying project faces on it would write a project " <>
+            "declaration into a catalogue's source, and every later pass would then read it as a " <>
+            "project. To (re)install that catalogue, inside the box: " <>
+            "`lcars catalogue install #{owner}`."}}
+
+      {:ok, _other} ->
+        :ok
+
+      :not_a_catalogue ->
+        :ok
+
+      {:error, reason} ->
+        {:error,
+         {:store_check_unreadable, full_name,
+          "could not read '#{full_name}''s #{Fleet.Catalogue.manifest_file()} " <>
+            "(#{inspect(reason)}), so it is unknown whether this repo is a catalogue's store. NOT " <>
+            "refused as one — refused as UNREADABLE. Retry; if it persists, the forge is the thing " <>
+            "to look at."}}
+    end
+  end
+
+  @doc """
+  Refuses to CREATE a repo at the address the fleet pushes a store to — `:ok` otherwise.
+
+  ## Why this door asks a different question, and why the answer is a name
+
+  `refute_store/2` asks an EXISTING repo what it declares. `adopt_project/2` publishes a disk-only
+  project to a repo that does not exist yet, so there is nothing to ask. What it can collide with is
+  the ADDRESS: `push_store` force-pushes there, so a project adopted at that name is a project the
+  next `catalogue install` silently overwrites.
+
+  `require_forge_absent/2` already covers the case where the store is there — but the dangerous
+  window is precisely the one it does not see: the org exists, its catalogue is NOT installed yet,
+  nothing occupies the name, and the collision arrives later.
+
+  Checking a name here is not the defect this chantier closed. That one answered "what IS this repo"
+  with a name; this one answers "may I WRITE here", which is what an address is for. Cf.
+  `Fleet.Catalogue.store_repo/0`, which says it and says why in the same breath.
+  """
+  @spec refute_store_address(String.t(), String.t()) ::
+          :ok | {:error, {:store_address, String.t(), String.t()}}
+  def refute_store_address(full_name, name) do
+    store = Fleet.Catalogue.store_repo()
+
+    if name == store do
+      {:error,
+       {:store_address, full_name,
+        "'#{name}' is the repo name the fleet pushes a catalogue's source under, so " <>
+          "'#{full_name}' is where `catalogue install` force-pushes. A project adopted there is a " <>
+          "project the next install overwrites without a word. Rename the local project and adopt " <>
+          "it again."}}
+    else
+      :ok
+    end
+  end
+
+  # LA REGLE DU MANIFESTE N'EST PAS RECOPIEE ICI. `Fleet.Catalogue` la porte — colonne zero,
+  # guillemets, commentaire de fin de ligne — et une seconde ecriture de la meme regle serait
+  # exactement le defaut que ce garde ferme, un cran plus bas : deux lecteurs d'un discriminant est
+  # un discriminant qui derive le jour ou un seul est corrige. Elle vit dans la FONDATION parce que
+  # l'autre lecteur (`Fleet.Application.CatalogueDeposits`) est derriere une frontiere que
+  # `Fleet.Project` ne peut pas referencer — et on n'elargit pas une frontiere pour avoir raison.
+  defp declared_catalogue_name(full_name, opts) do
+    fc = Keyword.put(fc_opts(opts), :ref, "HEAD")
+
+    case files_mod(opts).get_file(full_name, Fleet.Catalogue.manifest_file(), fc) do
+      {:ok, %{content: yaml}} ->
+        case Fleet.Catalogue.manifest_name(yaml) do
+          {:ok, name} -> {:ok, name}
+          {:error, :no_name_in_manifest} -> :not_a_catalogue
+        end
+
+      {:error, :not_found} ->
+        :not_a_catalogue
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -608,10 +730,14 @@ defmodule Fleet.Project.Onboard do
   agit (`:already` / `:imported`), les deux rendent `:failed` avec sa raison.
 
   LE FILTRE EST `.lcars.json` SUR `main`, et il ne se derive pas du nom. Une org de catalogue porte
-  aussi des depots qui ne sont pas des projets — le `catalogue` qui la signe, le `project-template`
-  d'ou les projets sont generes — et les importer creerait trois faces autour d'un depot qu'aucun
-  humain n'a ouvert. Mesure du 2026-08-17 sur la forge du banc : un projet rend `200` sur ce
-  fichier, `project-template` et `catalogue` rendent `404`.
+  aussi des depots qui ne sont pas des projets — a commencer par le `catalogue` qui la signe — et les
+  importer creerait trois faces autour d'un depot qu'aucun humain n'a ouvert. Mesure du 2026-08-17
+  sur la forge du banc : un projet rend `200` sur ce fichier, le magasin rend `404`.
+
+  La liste de ces depots n'est PAS fermee, et c'est la raison d'etre du filtre par propriete : un
+  humain depose ce qu'il veut dans son org, et un garde qui enumererait des noms devrait etre corrige
+  a chaque depot nouveau. Le 2026-08-21 la liste en a d'ailleurs perdu un — `project-template`, retire
+  avec le depot modele — sans que ce garde ait a bouger d'une ligne.
   """
   @spec reconcile(:check | :apply, keyword()) :: [
           %{repo: String.t(), status: atom(), reason: term()}
@@ -729,7 +855,9 @@ defmodule Fleet.Project.Onboard do
     # ⚠ LE TROU QUE L'ALIGNEMENT A MONTRE : ce verbe etait le seul des cinq a ne pas verifier que la
     # carte est DECLARABLE. Un depot importe avec une carte d'atelier (`scope: ticket`) ou une faute
     # de frappe passait ici, la ou les quatre autres refusent.
+    # `admit` (local) avant `refute_store` (un aller-retour forge) : la loi d'ordre en trois temps.
     with :ok <- admit(org, name, opts),
+         :ok <- refute_store(full_name, opts),
          :ok <- ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
@@ -1318,6 +1446,7 @@ defmodule Fleet.Project.Onboard do
 
     with {:ok, org} <- required_org(opts),
          full_name = "#{org}/#{name}",
+         :ok <- refute_store_address(full_name, name),
          :ok <- admit(org, name, opts),
          :ok <- require_local_main(dirs.code),
          :ok <- ensure_catalogue_org_on_forge(org, opts),
@@ -1404,7 +1533,7 @@ defmodule Fleet.Project.Onboard do
 
   defp finish_adopt(full_name, url, dirs, states, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
-         :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
+         :ok <- seed_protocol_labels(full_name, opts),
          :ok <- set_origin(dirs.code, url),
          :ok <- ensure_intensity(dirs.code, full_name, opts),
          :ok <-
@@ -1673,7 +1802,7 @@ defmodule Fleet.Project.Onboard do
 
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
-         :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
+         :ok <- seed_protocol_labels(full_name, opts),
          # The commit message names the ACTUAL door: this leg is shared by the external import and
          # the deposit, and a deposit whose history says "import-externe" tells the project's own
          # log something that did not happen.
@@ -2405,18 +2534,15 @@ defmodule Fleet.Project.Onboard do
   #
   # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
   # illisible (on ne sait pas — on le DIT et l'appelant retentera).
+  # ⚠ LE CAS PARTICULIER DU DEPOT TEMPLATE A DISPARU AVEC LUI (2026-08-21). Il fallait exclure
+  # `<catalogue>/project-template` pour que la reconciliation ne lui pose pas une protection de
+  # `main` dimensionnee sur un jury qui ne le concernait pas. Plus rien ne cree ce depot.
+  #
+  # Ce qui reste est un garde par PROPRIETE, et il est meilleur que le nom qu'il remplace : un depot
+  # qui ne porte pas de branche `ops` n'est pas un projet, quel que soit son nom. Le magasin d'un
+  # catalogue n'en porte pas — il est donc deja hors de portee, sans que rien n'ait a le nommer.
   defp seeded_project?(repo, opts) do
-    # LE TEMPLATE DE SON CATALOGUE, PAS « le » template. `repo` est `<catalogue>/<nom>`, donc le
-    # proprietaire EST le catalogue : comparer a un template global ferait passer le template d'un
-    # catalogue metier pour un projet ordinaire, et la reconciliation lui poserait une protection de
-    # `main` dimensionnee sur un jury qui ne le concerne pas.
-    cat = repo |> String.split("/") |> List.first()
-
-    if repo == project_template(Keyword.put(opts, :org, cat)) do
-      {:ok, false}
-    else
-      repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
-    end
+    repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
   end
 
   @doc """
@@ -2611,55 +2737,34 @@ defmodule Fleet.Project.Onboard do
     match?({:ok, _branch}, repo_mod(opts).default_branch(full_name, fc_opts(opts)))
   end
 
+  # ─── UNE SEULE SOURCE : LE CATALOGUE SUR DISQUE ─────────────────────────────────────────────────
+  #
+  # ⚖ user, 2026-08-21. Ce chemin passait par `generate_repo` — la fonction « template » de Gitea,
+  # qui recopie un depot `<catalogue>/project-template` que la boite avait pousse. Ce depot etait une
+  # COPIE du catalogue, et une copie derive : mesure du 2026-08-21, un banc portait un workflow sur
+  # les deux, sans que rien ne le dise, parce que le `sync` n'est joue qu'a la naissance de la boite.
+  #
+  # POURQUOI PAS « GARDER GITEA ET NE COPIER QU'UNE PARTIE » : `GenerateRepoOption` (swagger de la
+  # forge, mesure) n'a AUCUN champ de chemin — `git_content` est un booleen, tout ou rien. Gitea ne
+  # sait pas peupler depuis un sous-repertoire, donc le depot template devait porter exactement le
+  # squelette, donc il faisait doublon avec le catalogue qui le porte deja.
+  #
+  # Ce qui reste est le chemin qui existait deja comme REPLI, et qui tournait : creation nue, puis
+  # `Scaffold.main` depuis le catalogue installe. Une source, pas deux, donc plus rien a synchroniser
+  # ni a comparer.
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-    {template, origin} = resolve_template(Keyword.put(opts, :org, org))
-
-    if origin == :fallback and org != "fleet" do
-      Logger.info(
-        "ProjectOnboard: #{org}/#{name} scaffolded from #{template} — the catalogue #{inspect(org)} " <>
-          "carries no project_template tree of its own. Legitimate (a starting tree names nothing " <>
-          "and is named by nothing), and said because a catalogue silently built from a neighbour's " <>
-          "material is the defect this resolution exists to close."
-      )
-    end
-
-    case repo_mod(opts).generate_repo(
-           template,
-           name,
-           Keyword.merge(opts, org: org, description: desc)
-         ) do
-      {:ok, :already_exists} ->
-        {:error, {:repo_already_exists, "#{org}/#{name}"}}
-
-      {:ok, full_name} when is_binary(full_name) ->
-        {:ok, full_name, :generated}
-
-      {:error, :template_missing} ->
-        Logger.warning(
-          "ProjectOnboard: forge template #{template} missing — bare create + local scaffold " <>
-            "(run `mix lcars.project_template.sync` to restore the native path)"
-        )
-
-        result =
-          repo_mod(opts).create_repo(name, Keyword.merge(opts, org: org, description: desc))
-
-        with {:ok, full_name} <- classify_create_repo(result, org, name) do
-          {:ok, full_name, :bare}
-        end
-
-      {:error, _} = err ->
-        err
-    end
+    result = repo_mod(opts).create_repo(name, Keyword.merge(opts, org: org, description: desc))
+    classify_create_repo(result, org, name)
   end
 
-  defp maybe_scaffold_main(:generated, _proj_dir, _name, _opts), do: :ok
-  defp maybe_scaffold_main(:bare, proj_dir, name, opts), do: Scaffold.main(proj_dir, name, opts)
-
-  defp maybe_seed_protocol_labels(:generated, _full_name, _opts), do: :ok
-
   # BL-6-33
-  defp maybe_seed_protocol_labels(:bare, full_name, opts) do
+  #
+  # ⚠ LES LABELS CHANGENT DE SOURCE AVEC LE RETRAIT DU TEMPLATE, et c'est voulu. La branche
+  # `:generated` ne faisait RIEN parce que Gitea recopiait les labels avec le depot (`labels: true`).
+  # Ils viennent desormais du CODE, par le seul chemin qui existe — ce qui est le point de tout le
+  # lot : une source, pas une copie.
+  defp seed_protocol_labels(full_name, opts) do
     seeder =
       Keyword.get(opts, :ensure_labels, &Fleet.Forge.Client.ensure_protocol_labels/2)
 
@@ -2668,74 +2773,6 @@ defmodule Fleet.Project.Onboard do
       {:error, reason} -> {:error, {:protocol_labels, reason}}
     end
   end
-
-  defp onboard_commit_msg(:generated),
-    do: "chore(onboard): déclaration de criticité (.lcars.json)"
-
-  defp onboard_commit_msg(:bare), do: "chore(onboard): scaffold initial du projet"
-
-  # The repo NAME is fixed and the OWNER is the catalogue: `<catalogue>/project-template`. Fixing the
-  # name is what lets the resolution be local — no forge lookup to find out what a catalogue called
-  # its template.
-  @template_repo_name "project-template"
-  @bundled_template "fleet/#{@template_repo_name}"
-
-  @doc """
-  The forge template repository a project of `opts[:org]` is generated from.
-
-  ## Per catalogue, and it was not
-
-  It answered the literal `"fleet/project-template"` for every project on the box until 2026-08-16 —
-  measured, and the effect was silent: a `web-demo/*` project was scaffolded from the REFERENCE
-  catalogue's template while `web-demo` shipped thirteen files of its own that nothing ever read. A
-  tree present in the catalogue and unreachable by any caller is not a feature waiting to be wired,
-  it is dead weight that looks wired.
-
-  The repo is `<catalogue>/#{@template_repo_name}`, the same derivation the org-per-catalogue model
-  applies everywhere else, and the LOCAL material decides: a catalogue that carries a
-  `#{"project_template"}` tree has its own repo, because `catalogue install` pushes the two together.
-  Asking the forge instead would be a network call on a path that already knows the answer.
-
-  ## The fallback, and why it is said out loud
-
-  ⚖ user, 2026-08-16: *"the template, we can take fleet's default if there is none, that changes
-  nothing"*. It is the ONE tree that may fall back, and the reason is structural: everything else in
-  a catalogue is named BY NAME — a card names a role, a role names its profile, a profile names its
-  SP — so falling back would resolve a name in a catalogue that never declared it. A project
-  template names nothing and is named by nothing; it is a starting tree.
-
-  It is still SAID at the moment it happens. A catalogue silently scaffolding from a neighbour's
-  template is the exact shape of the defect above, one layer down.
-
-  The two explicit overrides keep precedence: `opts[:project_template]` for a caller that names its
-  own, `:pilot_project_template` for a deployment that pins one for everybody.
-  """
-  @spec project_template(keyword()) :: String.t()
-  def project_template(opts \\ []), do: elem(resolve_template(opts), 0)
-
-  # `{repo, :named | :pinned | :own | :fallback}` — the ORIGIN travels with the answer so the one
-  # caller whose decision has a consequence can say what happened, and the one that only compares
-  # (`seeded_project?/2`, run per repo per poll) stays silent. Logging inside the resolution would
-  # repeat the same sentence every tick, which is how a real signal becomes scrollback.
-  defp resolve_template(opts) do
-    cond do
-      repo = Keyword.get(opts, :project_template) -> {repo, :named}
-      repo = Application.get_env(:lcars_fleet, :pilot_project_template) -> {repo, :pinned}
-      true -> catalogue_template(Keyword.get(opts, :org))
-    end
-  end
-
-  defp catalogue_template(cat) when is_binary(cat) do
-    root = Fleet.Catalogue.root_for(cat)
-
-    if root && File.dir?(Path.join(root, Fleet.Catalogue.rel(:project_template))) do
-      {"#{cat}/#{@template_repo_name}", :own}
-    else
-      {@bundled_template, :fallback}
-    end
-  end
-
-  defp catalogue_template(_), do: {@bundled_template, :fallback}
 
   @doc false
   # F-C084

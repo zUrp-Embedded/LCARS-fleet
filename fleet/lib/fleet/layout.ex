@@ -41,7 +41,7 @@ defmodule Fleet.Layout do
   #
   # `/home/catalogues` holds what is INSTALLED, and it is a cache: `lcars catalogue install` drops
   # the material and provisioning restores it from the forge at every boot. The authority is
-  # `<name>/catalogue` on the forge; this is a local read-through of it.
+  # `<name>/_catalogue` on the forge; this is a local read-through of it.
   #
   # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
   # layout INSIDE a catalogue. The split is the same one this module already draws for the project
@@ -304,7 +304,7 @@ defmodule Fleet.Layout do
 
   Nothing here is authored, and nothing here is worth backing up: `lcars catalogue install` drops
   the material, and convergent provisioning restores it at every container boot from
-  `<name>/catalogue` on the forge. Deleting a directory here uninstalls nothing; the next boot puts
+  `<name>/_catalogue` on the forge. Deleting a directory here uninstalls nothing; the next boot puts
   it back.
 
   ## Why it is a BOX path and not `~/.lcars/catalogues`

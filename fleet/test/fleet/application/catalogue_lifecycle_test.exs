@@ -50,6 +50,11 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
   end
 
+  # ⚠ UN STORE PORTE SON MANIFESTE, ET C'EST CE QUI LE DESIGNE COMME STORE depuis 2026-08-21
+  # (`owner == manifest.name`). Ce n'est pas une commodite de doublure : le store est une PROJECTION
+  # de l'arbre du depot, donc il porte le `catalogue.yaml` de ce depot, avec le meme `name:`. Une
+  # doublure qui l'omet decrit un store que la forge ne produit pas — et fait passer un temoin sur
+  # une absence de manifeste au lieu du garde qu'il pretend tenir.
   defmodule FakeFiles do
     def get_file(full, "catalogue.yaml", opts) do
       case Keyword.get(opts, :manifests, %{}) |> Map.fetch(full) do
@@ -101,13 +106,13 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     # « MAJ DISPO ». Ce qui les relie est le trailer que la projection porte.
     assert {:ok, s} =
              states(
-               [repo("alice/web"), repo("web/catalogue")],
-               %{"alice/web" => "name: web\n"},
+               [repo("alice/web"), repo("web/_catalogue")],
+               %{"alice/web" => "name: web\n", "web/_catalogue" => "name: web\n"},
                %{
                  {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
-                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                 {"web/_catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
                },
-               %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
+               %{"web/_catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
              )
 
     assert %{state: :installed, updatable?: false} = s["web"]
@@ -116,13 +121,13 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   test "le depot a BOUGE depuis la projection : installe ET updatable" do
     assert {:ok, s} =
              states(
-               [repo("alice/web"), repo("web/catalogue")],
-               %{"alice/web" => "name: web\n"},
+               [repo("alice/web"), repo("web/_catalogue")],
+               %{"alice/web" => "name: web\n", "web/_catalogue" => "name: web\n"},
                %{
                  {"alice/web", "main"} => "e2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
-                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                 {"web/_catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
                },
-               %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
+               %{"web/_catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
              )
 
     assert %{state: :installed, updatable?: true} = s["web"]
@@ -133,11 +138,11 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     # pas « a jour » : ce serait annoncer frais un catalogue dont on ignore l'etat.
     assert {:ok, s} =
              states(
-               [repo("alice/web"), repo("web/catalogue")],
-               %{"alice/web" => "name: web\n"},
+               [repo("alice/web"), repo("web/_catalogue")],
+               %{"alice/web" => "name: web\n", "web/_catalogue" => "name: web\n"},
                %{
                  {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
-                 {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                 {"web/_catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
                }
              )
 
@@ -148,7 +153,10 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   test "store SANS depot : installe, et la fraicheur est INCONNUE — jamais `false`" do
     # `nil` et `false` sont deux reponses differentes : « on ne peut pas savoir » et « c'est a
     # jour ». Les confondre annoncerait comme frais un catalogue dont la source a disparu.
-    assert {:ok, s} = states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => "s"})
+    assert {:ok, s} =
+             states([repo("web/_catalogue")], %{"web/_catalogue" => "name: web\n"}, %{
+               {"web/_catalogue", "main"} => "s"
+             })
 
     assert %{state: :installed, updatable?: nil, deposit: nil} = s["web"]
     refute s["web"].updatable? == false
@@ -156,9 +164,11 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
   test "un store ILLISIBLE reste INSTALLE — la source est la, c'est la comparaison qu'on perd" do
     assert {:ok, s} =
-             states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => :unreadable})
+             states([repo("web/_catalogue")], %{"web/_catalogue" => "name: web\n"}, %{
+               {"web/_catalogue", "main"} => :unreadable
+             })
 
-    assert %{state: :installed, updatable?: nil, store: "web/catalogue"} = s["web"]
+    assert %{state: :installed, updatable?: nil, store: "web/_catalogue"} = s["web"]
   end
 
   test "`fleet` est INSTALLE par construction, meme sur une forge qui n'en sait rien" do
@@ -166,6 +176,19 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     # qui marche toujours, y compris quand la forge ne porte rien.
     assert {:ok, s} = states([])
     assert %{state: :installed, store: nil} = s["fleet"]
+  end
+
+  test "un depot d'utilisateur NOMME `catalogue` sort AVAILABLE, avec son adresse" do
+    # ⚠ DE BOUT EN BOUT : c'est la ligne que `lcars catalogue list` imprime, pas seulement l'etat
+    # interne. Avant le 2026-08-21, `bob` ne voyait AUCUNE ligne — la reservation du nom l'ecartait
+    # en silence, et il n'avait aucun moyen d'apprendre pourquoi.
+    assert {:ok, s} =
+             states([repo("bob/catalogue")], %{"bob/catalogue" => "name: mobile\n"}, %{
+               {"bob/catalogue", "main"} => "s"
+             })
+
+    assert %{state: :available, deposit: %{repo: "bob/catalogue"}} = s["mobile"]
+    assert "AVAILABLE mobile bob/catalogue" in CatalogueLifecycle.lines(s)
   end
 
   test "un DOUBLON fait remonter le refus — la liste ne choisit pas a notre place" do
@@ -185,33 +208,58 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     # Sinon un catalogue installe serait AUSSI disponible depuis son propre store, donc toujours
     # « a jour » par construction — une comparaison d'un objet avec lui-meme.
     assert {:ok, s} =
-             states([repo("web/catalogue")], %{"web/catalogue" => "name: web\n"}, %{
-               {"web/catalogue", "main"} => "s"
+             states([repo("web/_catalogue")], %{"web/_catalogue" => "name: web\n"}, %{
+               {"web/_catalogue", "main"} => "s"
              })
 
     assert %{state: :installed, deposit: nil} = s["web"]
   end
 
-  describe "D1 — le nom reserve vaut aussi pour les STORES" do
-    test "un depot `catalogue` dans un espace PERSO ne signe RIEN" do
+  describe "D1 — signer une installation demande une ORG, pas seulement une identite" do
+    test "un depot qui se declare a son propre nom, dans un espace PERSO, ne signe RIEN" do
       # ⚠ LE TROU QUE LE TROISIEME REGARD A TROUVE, apres que deux auto-audits l'ont rate : orgs et
       # comptes perso partagent l'espace de noms Gitea, et rien ne verifiait le TYPE du
       # proprietaire. `alice` poussait un depot public `catalogue` chez elle -> `alice` sortait
       # INSTALLE, le convergeur clonait son materiel, le mint derivait son roster. Le gate admin
       # contourne par un push.
-      assert {:ok, s} = states([repo("alice/catalogue")], %{}, %{}, %{}, %{"alice" => false})
+      #
+      # ⚠ LE MANIFESTE DIT `name: alice`, ET C'EST DELIBERE. Depuis que le garde est
+      # `owner == manifest.name`, un depot sans manifeste n'est plus un candidat store du tout : le
+      # laisser vide ferait passer ce temoin sur l'absence de manifeste, en ayant l'air de tenir le
+      # type du proprietaire. Ici l'identite est SATISFAITE et la SEULE chose qui refuse est
+      # `org_exists?` — ce que ce temoin pretend mesurer.
+      assert {:ok, s} =
+               states(
+                 [repo("alice/_catalogue")],
+                 %{"alice/_catalogue" => "name: alice\n"},
+                 %{{"alice/_catalogue", "main"} => "s"},
+                 %{},
+                 %{"alice" => false}
+               )
 
-      refute Map.has_key?(s, "alice")
-
-      # Et il ne redevient pas un DEPOT par la bande : le nom `catalogue` est reserve des deux cotes.
-      assert Map.keys(s) == ["fleet"]
+      # ⚠ IL NE SIGNE RIEN, ET IL NE DISPARAIT PAS NON PLUS. La premiere version de ce garde le
+      # rangeait en candidat store sur son identite, puis `org_exists?` le recalait — et le recale
+      # tombait dans un trou : ni magasin, ni depot, aucun log, aucune ligne. Mot pour mot le defaut
+      # que ce chantier ferme, avec une geometrie differente ; trouve par relecture independante le
+      # 2026-08-21.
+      #
+      # Ce qu'il EST est un depot : `alice` a pousse un catalogue chez elle. Il ne s'installera
+      # jamais — l'org `alice` entrerait en collision avec le compte `alice` — et ce refus-la
+      # appartient a `catalogue install`, au moment ou un admin le demande. Un refus a un moment reel
+      # vaut mieux qu'une disparition a un moment invisible.
+      assert %{state: :available, store: nil, deposit: %{repo: "alice/_catalogue"}} = s["alice"]
+      refute s["alice"].state == :installed
     end
 
     test "TEMOIN de non-vacuite : le meme depot sous une ORG signe, comme avant" do
       assert {:ok, s} =
-               states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => "s"}, %{}, %{
-                 "web" => true
-               })
+               states(
+                 [repo("web/_catalogue")],
+                 %{"web/_catalogue" => "name: web\n"},
+                 %{{"web/_catalogue", "main"} => "s"},
+                 %{},
+                 %{"web" => true}
+               )
 
       assert %{state: :installed} = s["web"]
     end
@@ -221,9 +269,13 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       # installe en disponible pendant une panne — le mensonge inverse de D1, plus cher que le cout
       # transitoire accepte (un depot perso frais annonce installe le temps du hoquet).
       assert {:ok, s} =
-               states([repo("web/catalogue")], %{}, %{{"web/catalogue", "main"} => "s"}, %{}, %{
-                 "web" => :unreachable
-               })
+               states(
+                 [repo("web/_catalogue")],
+                 %{"web/_catalogue" => "name: web\n"},
+                 %{{"web/_catalogue", "main"} => "s"},
+                 %{},
+                 %{"web" => :unreachable}
+               )
 
       assert %{state: :installed, updatable?: nil} = s["web"]
     end
@@ -245,17 +297,17 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
     test "INSTALLED ne porte PAS le depot — ce n'est plus la source que la boite suit" do
       # ⚖ user : « une fois installe, osef de l'origine ». Et ce n'est pas qu'une question de bruit :
-      # ce que la boite suit desormais est `<nom>/catalogue`, le store. Imprimer le depot la nomme
+      # ce que la boite suit desormais est `<nom>/_catalogue`, le store. Imprimer le depot la nomme
       # quelque chose qui n'est plus la source, dans la colonne qu'un operateur lit COMME la source.
       assert {:ok, s} =
                states(
-                 [repo("alice/web"), repo("web/catalogue")],
-                 %{"alice/web" => "name: web\n"},
+                 [repo("alice/web"), repo("web/_catalogue")],
+                 %{"alice/web" => "name: web\n", "web/_catalogue" => "name: web\n"},
                  %{
                    {"alice/web", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
-                   {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                   {"web/_catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
                  },
-                 %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
+                 %{"web/_catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
                )
 
       assert "INSTALLED web -" in CatalogueLifecycle.lines(s)
@@ -265,13 +317,13 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       # Meme regle, pas une exception : le depot redevient ce que le prochain `install` tirerait.
       assert {:ok, s} =
                states(
-                 [repo("alice/web"), repo("web/catalogue")],
-                 %{"alice/web" => "name: web\n"},
+                 [repo("alice/web"), repo("web/_catalogue")],
+                 %{"alice/web" => "name: web\n", "web/_catalogue" => "name: web\n"},
                  %{
                    {"alice/web", "main"} => "e2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
-                   {"web/catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
+                   {"web/_catalogue", "main"} => "aaaabbbbccccddddeeeeffff0000111122223333"
                  },
-                 %{"web/catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
+                 %{"web/_catalogue" => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"}
                )
 
       assert "UPDATABLE web alice/web" in CatalogueLifecycle.lines(s)

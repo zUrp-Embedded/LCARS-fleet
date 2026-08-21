@@ -169,7 +169,7 @@ defmodule Fleet.Forge.Client.Repo do
 
   ## Why the message is load-bearing here, and a sha alone is not
 
-  A catalogue's store (`<name>/catalogue`) is a PROJECTION of its deposit: a fresh single commit
+  A catalogue's store (`<name>/_catalogue`) is a PROJECTION of its deposit: a fresh single commit
   reflecting the deposit's tree. Two commits of identical content therefore never share a sha, so
   comparing the two HEADs answers "different commit", which is always true, rather than "the source
   moved", which is the question. Measured on a bench 2026-08-16: a catalogue installed thirty

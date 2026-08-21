@@ -122,6 +122,15 @@ defmodule Fleet.Project.OnboardCompensationTest do
     def org_exists?(_o, _fc), do: {:ok, true}
   end
 
+  # ⚠ CES DEPOTS NE SONT PAS DES CATALOGUES, ET IL FAUT LE DIRE. Depuis le 2026-08-21 les portes
+  # explicites demandent a leur cible « quel catalogue declares-tu ? » avant d'y poser trois faces,
+  # et une lecture qui ECHOUE est un refus (`:store_check_unreadable`) et non un `:ok` : importer un
+  # magasin est cher et se defend tout seul ensuite, reessayer un import est gratuit. Sans cette
+  # doublure, ces temoins mesuraient ce refus-la en croyant mesurer leur compensation.
+  defmodule Files do
+    def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
+  end
+
   defp opts(tmp) do
     forge_root = Path.join(tmp, "forge")
     File.mkdir_p!(forge_root)
@@ -138,6 +147,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
       base_url: "file://" <> forge_root,
       forge_repo: FileForge,
       forge_users: Humans,
+      forge_files: Files,
       sleeper: fn _ms -> :ok end,
       ensure_labels: fn repo, _o -> send(self(), {:labels_seeded, repo}) && :ok end,
       ensure_architect: fn _repo, _o -> {:ok, "arch-stub"} end

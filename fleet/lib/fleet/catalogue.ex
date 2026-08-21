@@ -286,6 +286,17 @@ defmodule Fleet.Catalogue do
   @bundled_name "fleet"
 
   @doc """
+  The name the catalogue shipped inside the release declares.
+
+  PUBLIC because a second site needs it — `Fleet.Application.CatalogueLifecycle` had its own
+  `@bundled "fleet"`, and two literals for one fact drift the day one of them is changed. The name
+  is load-bearing beyond this module: it is the forge ORG that carries the reference catalogue's
+  projects, so it cannot be installed FROM the forge and no deposit can ever claim it.
+  """
+  @spec bundled_name() :: String.t()
+  def bundled_name, do: @bundled_name
+
+  @doc """
   The INSTALLED catalogues, as roots — `#{@bundled_name}` first, then the material present on this
   box, by name.
 
@@ -307,7 +318,7 @@ defmodule Fleet.Catalogue do
   ## What makes the material appear
 
   `lcars catalogue install <name>`, played by an admin — the single verb. It lays the org and the
-  role accounts on the forge, pushes the catalogue's source into `<name>/catalogue`, and drops the
+  role accounts on the forge, pushes the catalogue's source into `<name>/_catalogue`, and drops the
   material here. Convergent provisioning replays the second half at every container boot, so this
   directory is a CACHE of what the forge carries rather than a state anyone maintains by hand.
   Deleting a directory here does not uninstall anything; the next boot puts it back.
@@ -562,6 +573,79 @@ defmodule Fleet.Catalogue do
   @doc "Scaffolding copied into a freshly onboarded project (`<root>/#{@rel_project_template}/<face>`)."
   @spec project_template_root() :: Path.t()
   def project_template_root, do: Path.join(root(), @rel_project_template)
+
+  @doc """
+  The repo name the fleet WRITES a catalogue's store under, inside that catalogue's own org.
+
+  ## This is an ADDRESS. It must never become a predicate again.
+
+  Until 2026-08-21 the question "is this repo a store?" was answered by comparing this name. It
+  reserved the most natural repo name in every user's namespace, and reserved it in SILENCE — a
+  deposit called `catalogue` was dropped with no log, no line, no refusal. The question is now
+  answered by IDENTITY (`owner == manifest.name`, `CatalogueDeposits.split/2`), which holds whatever
+  the repo is called.
+
+  The one legitimate read is a WRITE COLLISION: *"am I about to create a repo where `push_store`
+  force-pushes?"* — `Onboard.adopt_project/2`. That does not decide what an existing repo IS; it
+  decides where a new one may be put. Any other reader is the old defect coming back.
+
+  The `_` prefix is UX (⚖ user, 2026-08-21): in a list of repos it separates at a glance what the
+  fleet put there from what a human deposited. It protects nothing.
+
+  The shell writers hold their own copy (`STORE_REPO` in `forge-gestures.sh`, which pushes it, and
+  in `45-catalogues.sh`, which clones from it) — three defaults in three runtimes, not three
+  authorities, the same posture as `SYSTEM_ACCOUNT`.
+  """
+  @spec store_repo() :: String.t()
+  def store_repo, do: "_catalogue"
+
+  @doc """
+  The file a catalogue declares itself in, by BASENAME — what a forge reader asks for at a repo's
+  root, where `manifest_path/0` is what a disk reader opens under `root/0`. One literal for both.
+  """
+  @spec manifest_file() :: String.t()
+  def manifest_file, do: @manifest_basename
+
+  @doc """
+  The `name:` a manifest declares — `{:ok, name}` or `{:error, :no_name_in_manifest}`.
+
+  ## One rule, and it lives HERE because two boundaries ask it
+
+  Three sites ask a repo what catalogue it claims to be: the deposit listing
+  (`Fleet.Application.CatalogueDeposits`), the explicit-door guard (`Fleet.Project.Onboard`), and
+  `45-catalogues.sh` in shell. The first two are in boundaries that may not reference each other,
+  and widening one to reach the other to be right is never the move — so the rule sits in the
+  foundation both may descend onto. The shell copy is unavoidable (a different runtime) and says so.
+
+  The manifest is read for ONE field. A full YAML parse would make a listing fail on a catalogue
+  whose unrelated section is malformed — the identity is what is needed here, and `catalogue verify`
+  is what judges the rest.
+
+  ⚠ COLUMN ZERO, and it is the whole correctness of this read. In YAML an INDENTED `name:` belongs
+  to the key above it: `roles:\n  name: dev` declares a role, not the catalogue. Accepting leading
+  whitespace would let the first nested `name:` in the file steal the catalogue's identity — and it
+  would work by accident on OUR manifests, where the root key happens to come first, then be wrong
+  on somebody else's. Both catalogues shipped today carry `name:` at column 0.
+
+  ⚠ `[_, name | _]` and not `[_, name]`: the trailing comment group makes `Regex.run/2` return
+  THREE elements when a comment is present, and the two-element pattern silently fell through to
+  "no name" — measured by the witness on `name: web   # le metier`.
+  """
+  @spec manifest_name(String.t()) :: {:ok, String.t()} | {:error, :no_name_in_manifest}
+  def manifest_name(yaml) when is_binary(yaml) do
+    yaml
+    |> String.split("\n")
+    |> Enum.find_value(fn line ->
+      case Regex.run(~r/\Aname:\s*"?([^"#\s]+)"?\s*(#.*)?\z/, line) do
+        [_, name | _] -> name
+        _ -> nil
+      end
+    end)
+    |> case do
+      nil -> {:error, :no_name_in_manifest}
+      name -> {:ok, name}
+    end
+  end
 
   @doc """
   Pod-mountable skills (`<root>/#{@rel_skills}/<name>/SKILL.md`) — filtered per cap-profile

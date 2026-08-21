@@ -70,7 +70,6 @@ FAKE
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
-  TPL_LOG="$BATS_TEST_TMPDIR/tpl.log"
   ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
@@ -83,10 +82,6 @@ case "\$1" in
     ;;
   verify)       exit "\$(cat "$BATS_TEST_TMPDIR/verify.rc" 2>/dev/null || echo 0)" ;;
   roles-tfvars) echo '{"org":"cat","roles":["cat_dev"]}' ;;
-  template-sync)
-    { printf 'argv=%s\n' "\$*"; printf 'tokfile=%s\n' "\${FORGE_TOKEN_FILE:-}"; } >> "$TPL_LOG"
-    exit "\$(cat "$BATS_TEST_TMPDIR/tpl.rc" 2>/dev/null || echo 0)"
-    ;;
 esac
 exit 0
 FAKE
@@ -198,27 +193,7 @@ FAKE
   [ "$(sed -n '2p' "$TOFU_LOG")" = "$RECIPE" ]
 }
 
-@test "apply: le depot modele part APRES les applys, et par FICHIER de jeton" {
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  grep -q 'argv=template-sync' "$BATS_TEST_TMPDIR/tpl.log"
-  # Le jeton passe par un FICHIER, jamais en argv ni en variable de ligne de commande.
-  tokfile="$(sed -n 's/^tokfile=//p' "$BATS_TEST_TMPDIR/tpl.log")"
-  [ -n "$tokfile" ]
-  run grep -c 'argv=.*TOK' "$BATS_TEST_TMPDIR/tpl.log"
-  [ "$output" = "0" ]
-}
 
-@test "apply: un modele qui echoue ne fait PAS echouer l'apply — la structure est posee" {
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  echo 1 > "$BATS_TEST_TMPDIR/tpl.rc"
-  run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"bare-create"* ]]
-}
 
 @test "apply: un tofu en echec, LUI, est fatal et nomme le module" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
@@ -347,7 +322,7 @@ FAKE
   [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
   [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
   grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
-  grep -q 'push .*cat/catalogue' "$GIT_LOG"
+  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
@@ -358,29 +333,12 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
   [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-  grep -q "clone .*http://forge.test/cat/catalogue.git" "$GIT_LOG"
+  grep -q "clone .*http://forge.test/cat/_catalogue.git" "$GIT_LOG"
   [[ "$output" == *"materiel pose"* ]]
 }
 
-@test "install: le modele de projet est synchronise APRES le materiel, jamais avant" {
-  # ⚠ MESURE SUR BANC, 2026-08-16. `TemplateSync` decide `<name>/project-template` ou le repli en
-  # LISANT le materiel local. Joue avant que le materiel soit pose, il ne trouvait rien et repliait
-  # TOUJOURS : l'install de `web-demo` annoncait « fleet/project-template synced » pour un
-  # catalogue qui livre treize fichiers a lui. Un repli correct au sens du code, faux au sens du
-  # fait — et invisible, puisqu'il s'annonce comme un succes.
-  setup_install
-  run bash -c "'$SCRIPT' install cat < /dev/null"
-  [ "$status" -eq 0 ]
 
-  # L'ORDRE, LU DANS LA TRACE : le clone du materiel precede l'appel `template-sync`.
-  clone_line="$(grep -n 'clone .*cat/catalogue.git' "$GIT_LOG" | tail -1 | cut -d: -f1)"
-  [ -n "$clone_line" ]
-  grep -q 'template-sync cat' "$ENTRY_LOG"
-  # Le materiel est la AVANT que la porte soit appelee — sinon la porte replierait.
-  [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-}
-
-@test "install: materiel local en echec — ni modele pose, ni promesse de l'avoir fait" {
+@test "install: materiel local en echec — le dire, ne pas defaire ce qui est bon" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
   # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
   setup_install
@@ -391,11 +349,7 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [[ "$output" == *"INSTALLE sur la forge"* ]]
   [[ "$output" == *"redemarrage"* ]]
-  grep -q 'push .*cat/catalogue' "$GIT_LOG"
-  # SANS MATERIEL, PAS DE SYNCHRO DE MODELE : la porte replierait, et son message de succes
-  # annoncerait un modele pose pour un catalogue dont on ne sait rien.
-  ! grep -q 'template-sync' "$ENTRY_LOG"
-  [[ "$output" == *"modele de reference"* ]]
+  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {
@@ -493,6 +447,9 @@ FAKE
   setup_install
   demo="$BATS_TEST_TMPDIR/web-demo"
   mkdir -p "$demo"
+  # Le manifeste est ce qui donne son NOM au depot : sans lui le geste s'arrete avant meme de
+  # chercher le master, et ce temoin passerait sur un refus qui n'est pas le sien.
+  printf 'api_version: 1\nname: web-demo\n' > "$demo/catalogue.yaml"
   : > "$BATS_TEST_TMPDIR/master.out"
 
   LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
@@ -510,6 +467,57 @@ FAKE
   LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/pas-de-demo" run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
   [[ "$output" != *"demonstration"* ]]
+}
+
+@test "apply: le catalogue de REFERENCE est depose aussi, au meme endroit" {
+  # ⚖ user, 2026-08-21 : « il faut republier le catalogue de base fleet ». Il vit dans le release et
+  # tourne sans la forge ; ce qu'il gagne a y etre est la LISIBILITE — on ne forke pas ce qu'on ne
+  # peut pas ouvrir. Il reste NON installable pour autant : `CatalogueDeposits` ecarte toute
+  # candidature portant le nom du catalogue livre.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nname: fleet\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q 'push .*le-master/fleet' "$GIT_LOG"
+}
+
+@test "apply: le nom du depot vient du MANIFESTE, jamais du repertoire" {
+  # Un arbre range sous un nom et qui en declare un autre serait pousse sous le nom du repertoire, et
+  # n'apparaitrait JAMAIS dans « catalogue list » — qui indexe par identite declaree. Le depot serait
+  # la, visible sur la forge, et introuvable par la commande faite pour le trouver.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/un-repertoire-mal-nomme"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nname: le-vrai-nom\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q 'push .*le-master/le-vrai-nom' "$GIT_LOG"
+  [[ "$(cat "$GIT_LOG")" != *un-repertoire-mal-nomme* ]]
+}
+
+@test "apply: un arbre SANS \`name:\` en colonne zero n'est pas depose, et le refus le DIT" {
+  # ⚠ COLONNE ZERO, la meme regle qu'en Elixir et pour la meme raison : en YAML un `name:` INDENTE
+  # appartient a la cle du dessus. Un `name:` sous `roles:` declare un ROLE, et le prendre pour
+  # l'identite du catalogue deposerait le catalogue sous le nom d'un de ses roles.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nroles:\n  name: dev\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ne declare pas de"* ]]
+  [ ! -s "$GIT_LOG" ]
 }
 
 @test "runner-token: imprime le jeton et RIEN d'autre sur stdout" {

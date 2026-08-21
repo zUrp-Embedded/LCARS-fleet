@@ -13,10 +13,29 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   ## What makes a repo a candidate
 
-  It carries `catalogue.yaml` at its root, and its name is not the reserved STORE name
-  (`<org>/catalogue`, which is where an INSTALLED catalogue's source lives). The manifest's
-  `name:` is the catalogue's identity — not the repo name, not the owner. A user may call their
-  repo anything; the manifest says what it IS.
+  It carries `catalogue.yaml` at its root. The manifest's `name:` is the catalogue's identity — not
+  the repo name, not the owner. A user may call their repo anything; the manifest says what it IS.
+
+  ## What makes a repo a STORE, and why it is not a name
+
+  The store is the copy WE pushed into an installed catalogue's own org. Listing it as a deposit
+  would report every installed catalogue as also available from itself.
+
+  It used to be recognised by NAME — any repo called `catalogue`, whoever owned it. That reserved
+  the most natural repo name in every user's namespace, and did it in SILENCE: a user who called
+  their deposit `catalogue` was dropped with no log, no line, no refusal.
+
+  The discriminant is `owner == manifest.name`, and it is true BY CONSTRUCTION: the org is created
+  from the manifest (`/orgs/${name}/repos`), and *"the NAME comes from the repo's manifest, never
+  from the repo name nor from you"*.
+
+  What makes it not a rarity bet — the part a prefix could never buy — is that Gitea gives users and
+  organisations ONE namespace. A catalogue named `X` requires the org `X`, so no user account can be
+  called `X`, so a repo in a user's space can never satisfy `owner == name`. A prefix protects by
+  rarity, and a rarity bet is lost exactly once. This protects by impossibility.
+
+  Cost: the filter runs AFTER the manifest is read, so a store costs one manifest read per listing.
+  That is per installed catalogue, not per repo — and it buys back the whole `catalogue` name.
 
   ## Two deposits of the same name: we REFUSE, and we name both
 
@@ -36,10 +55,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   require Logger
 
-  # The repo name an INSTALLED catalogue's source lives under, inside its own org. Reserved by us,
-  # not user data — which is what makes excluding it by name sound.
-  @store_repo "catalogue"
-  @manifest "catalogue.yaml"
+  @manifest Fleet.Catalogue.manifest_file()
 
   @typedoc """
   A deposit the forge carries: the catalogue's declared name, where it sits, and the head sha of
@@ -69,93 +85,227 @@ defmodule Fleet.Application.CatalogueDeposits do
   end
 
   @doc """
-  Same reading, on a repo list ALREADY fetched.
-
-  It exists so that a caller needing both halves of the lifecycle — the deposits and the stores —
-  pays for ONE `/repos/search`. Fetching twice would not only cost a round trip: the two reads
-  could straddle a push and produce a state nobody ever had.
+  Same reading, on a repo list ALREADY fetched — deposits only.
   """
   @spec from_repos([map()], keyword()) :: {:ok, %{String.t() => deposit()}} | {:error, term()}
   def from_repos(repos, opts \\ []) when is_list(repos) do
-    repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
-    files_mod = Keyword.get(opts, :forge_files, Fleet.Forge.Client.Files)
-
-    repos
-    |> Enum.reject(&store_or_empty?/1)
-    |> Enum.flat_map(&deposit(&1, repo_mod, files_mod, opts))
-    |> group()
+    with {:ok, deposits, _stores} <- split(repos, opts), do: {:ok, deposits}
   end
 
   @doc """
-  The reserved repo name an INSTALLED catalogue's source lives under, inside its own org.
-  """
-  @spec store_repo() :: String.t()
-  def store_repo, do: @store_repo
+  BOTH halves of the lifecycle from ONE list of repos: `{:ok, deposits, stores}`.
 
-  # The store of an installed catalogue is not a deposit — it is the copy WE pushed there, and
-  # listing it would report every installed catalogue as also available from itself.
-  defp store_or_empty?(%{"name" => name}) when name == @store_repo, do: true
-  defp store_or_empty?(%{"empty" => true}), do: true
-  defp store_or_empty?(_), do: false
+  `deposits` is keyed by declared name; `stores` maps a catalogue name to the raw repo map of the
+  store that carries it (`owner == name`, unverified as to whether that owner is an org — that
+  question belongs to whoever signs an installation, cf. `CatalogueLifecycle`).
+
+  ## Why the two halves are read TOGETHER and not twice
+
+  It costs ONE `/repos/search` and ONE manifest read per repo. Reading twice would not only cost
+  round trips: the two reads could straddle a push and produce a state nobody ever had — and worse,
+  the two halves would then answer "is this a store?" independently. A discriminant applied by two
+  readers is a discriminant that drifts; here there is a single classification and the halves cannot
+  disagree, because they are the two outputs of one decision.
+  """
+  @spec split([map()], keyword()) ::
+          {:ok, %{String.t() => deposit()}, %{String.t() => map()}} | {:error, term()}
+  def split(repos, opts \\ []) when is_list(repos) do
+    repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
+    files_mod = Keyword.get(opts, :forge_files, Fleet.Forge.Client.Files)
+
+    classified =
+      repos
+      |> Enum.reject(&empty?/1)
+      |> Enum.flat_map(&classify(&1, repo_mod, files_mod, opts))
+
+    stores = pick_stores(for {:store, name, repo} <- classified, do: {name, repo})
+
+    with {:ok, deposits} <- group(for {:deposit, d} <- classified, do: d) do
+      {:ok, deposits, stores}
+    end
+  end
+
+  # ⚠ `into: %{}` GARDAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous deux
+  # declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
+  # effectif etait alors celui que l'ordre de `/repos/search` designait. Trouve par relecture
+  # independante le 2026-08-21.
+  #
+  # ON NE REFUSE PAS LA LISTE, contrairement au doublon de DEPOTS, et l'asymetrie est voulue : un
+  # doublon de depots est une question sans reponse (« lequel installer ? ») ; ici le catalogue EST
+  # installe, et refuser le ferait disparaitre de la liste — un catalogue vivant efface parce qu'il
+  # a un depot de trop. On choisit donc, mais de facon DETERMINISTE (le premier par nom de depot,
+  # trie) et en le DISANT : deux boites lisant la meme forge doivent voir le meme magasin.
+  defp pick_stores(pairs) do
+    pairs
+    |> Enum.group_by(fn {name, _repo} -> name end, fn {_name, repo} -> repo end)
+    |> Map.new(fn
+      {name, [one]} ->
+        {name, one}
+
+      {name, many} ->
+        [chosen | _] = sorted = Enum.sort_by(many, & &1["full_name"])
+
+        Logger.warning(
+          "CatalogueDeposits: #{length(many)} repos claim to be the store of '#{name}' " <>
+            "(#{sorted |> Enum.map(& &1["full_name"]) |> Enum.join(", ")}). Following " <>
+            "#{chosen["full_name"]} — first by name, so every box reading this forge follows the " <>
+            "same one. Delete the others: only one of them is what `catalogue install` pushes to."
+        )
+
+        {name, chosen}
+    end)
+  end
+
+  # An empty repo carries no manifest to read, and asking for one costs a round trip to learn what
+  # the listing already said.
+  defp empty?(%{"empty" => true}), do: true
+  defp empty?(_), do: false
 
   # Returns a one-element list or none — `flat_map` so that a repo we cannot read drops out with a
   # named warning instead of failing the whole listing. A single unreadable repo among fifty must
   # not hide the other forty-nine.
-  defp deposit(%{"full_name" => full} = repo, repo_mod, files_mod, opts) when is_binary(full) do
+  defp classify(%{"full_name" => full} = repo, repo_mod, files_mod, opts) when is_binary(full) do
     branch = Map.get(repo, "default_branch") || "main"
 
     with {:ok, %{content: yaml}} <-
            files_mod.get_file(full, @manifest, Keyword.put(opts, :ref, branch)),
-         {:ok, name} <- manifest_name(yaml),
-         {:ok, sha} <- repo_mod.branch_head(full, branch, opts) do
-      [%{name: name, repo: full, owner: owner_of(full), branch: branch, sha: sha}]
+         {:ok, name} <- manifest_name(yaml) do
+      identify(name, repo, full, branch, repo_mod, opts)
     else
       # Not a catalogue. The overwhelmingly common case, and silent by design: every project repo
       # on the forge takes this branch on every listing.
       {:error, :not_found} ->
         []
 
-      {:error, reason} ->
+      # ⚠ LE MANIFESTE A ETE LU. Ce n'est pas une panne de forge, c'est un YAML dont le `name:` n'est
+      # pas en colonne zero — donc un geste d'AUTEUR, pas d'operateur. Les confondre envoie celui qui
+      # lit le log chercher un probleme reseau devant un fichier qu'il pouvait corriger.
+      {:error, :no_name_in_manifest} ->
         Logger.warning(
-          "CatalogueDeposits: #{full} carries a #{@manifest} that could not be read " <>
-            "(#{inspect(reason)}) — NOT listed. Its owner sees nothing; this line is the only trace."
+          "CatalogueDeposits: #{full} carries a #{@manifest} with no `name:` at COLUMN ZERO — NOT " <>
+            "listed. In YAML an indented `name:` belongs to the key above it, so a `name:` under " <>
+            "`roles:` declares a role, not the catalogue. Its owner sees nothing; this line is the " <>
+            "only trace."
         )
 
         []
+
+      {:error, reason} ->
+        unreadable(full, reason)
     end
   end
 
-  defp deposit(_repo, _repo_mod, _files_mod, _opts), do: []
+  defp classify(_repo, _repo_mod, _files_mod, _opts), do: []
+
+  # ⚠ LE STORE SE RECONNAIT ICI, ET NULLE PART AILLEURS. C'est le seul point du code ou l'identite
+  # declaree et le proprietaire sont tous les deux connus, donc le seul ou la question puisse etre
+  # posee. La poser une seconde fois ailleurs — ce que faisait `CatalogueLifecycle.stores/3` sur le
+  # NOM du depot — donne deux reponses qui divergent le jour ou une seule est corrigee.
+  #
+  # Un store ne coute PAS de `branch_head` : l'identite tranche avant. La tete d'un store est lue
+  # plus tard, et seulement par l'appelant qui la compare.
+  defp identify(name, repo, full, branch, repo_mod, opts) do
+    # Exclure un store est le fonctionnement normal, pas une erreur : SILENCIEUX. Une ligne par
+    # catalogue installe a chaque listage serait du bruit qui apprend a l'operateur a sauter le log.
+    cond do
+      owner_of(full) == name and org_owner?(name, repo_mod, opts) ->
+        [{:store, name, repo}]
+
+      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et depuis le 2026-08-21 il
+      # existe un depot qui le porte : la fleet publie sa propre reference sur la forge, pour qu'elle
+      # soit LISIBLE et FORKABLE. Sans cette clause, ce depot serait un candidat de plus nomme
+      # `fleet` — et le premier fork qui garde son manifeste tel quel en ferait DEUX, donc
+      # `{:duplicate_catalogues, ...}`, donc `catalogue list` refusant la liste ENTIERE pour tout le
+      # monde. Un objet publie pour etre forke ne doit pas casser la boite au premier fork.
+      #
+      # Ce n'est pas un cas particulier concede : ce nom ne peut structurellement pas etre installe
+      # depuis la forge (`CatalogueLifecycle.eval_source/1` rend BUNDLED), donc un depot qui le
+      # revendique n'est candidat a rien. Et c'est DIT — une candidature ecartee en silence est le
+      # defaut que ce module vient de fermer un cran plus haut.
+      name == Fleet.Catalogue.bundled_name() ->
+        Logger.info(
+          "CatalogueDeposits: #{full} declares '#{name}', the catalogue carried by the release. It " <>
+            "is installed by construction, so no deposit can be installed under that name — this " <>
+            "repo is here to be READ and FORKED. A fork meant to be installed changes `name:` in " <>
+            "its #{@manifest}."
+        )
+
+        []
+
+      true ->
+        case repo_mod.branch_head(full, branch, opts) do
+          {:ok, sha} ->
+            [
+              {:deposit,
+               %{name: name, repo: full, owner: owner_of(full), branch: branch, sha: sha}}
+            ]
+
+          {:error, reason} ->
+            unreadable(full, reason)
+        end
+    end
+  end
+
+  # ⚠ LES DEUX CONDITIONS SONT NECESSAIRES, ET AUCUNE NE RECOUVRE L'AUTRE.
+  #
+  #   `owner == manifest.name`  — ce depot est le magasin DE CE catalogue-la, pas un depot quelconque
+  #                               pose dans une org quelconque.
+  #   le proprietaire est une ORG — un compte perso `bob` dont le manifeste dit `name: bob` satisfait
+  #                               la premiere et ment : le catalogue `bob` ne peut PAS etre installe
+  #                               sur une forge ou `bob` est un humain, son org entrerait en collision
+  #                               avec le compte.
+  #
+  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI ET PLUS DANS `CatalogueLifecycle.stores/3`. Tant qu'il etait
+  # en aval, `split/2` rendait des CANDIDATS qu'un second lecteur recalait — et un candidat recale
+  # tombait dans un trou : ni magasin (pas une org), ni depot (deja classe magasin), aucun log,
+  # aucune ligne. Mesure du 2026-08-21 par relecture independante : `bob/mon-depot` declarant
+  # `name: bob` disparaissait de `catalogue list` sans un mot, ce qui est mot pour mot le defaut que
+  # ce module venait de fermer, avec une geometrie differente.
+  #
+  # La classification est donc COMPLETE ici, et le recale RETOMBE en depot — ce qu'il est. Il ne
+  # s'installera jamais (son org entrerait en collision avec un compte), et ce refus-la appartient a
+  # `catalogue install`, au moment ou un admin le demande : un refus a un moment reel vaut mieux
+  # qu'une disparition a un moment invisible.
+  #
+  # L'objet `owner` de `/repos/search` ne porte AUCUN champ discriminant (mesure sur Gitea 1.26.1 :
+  # memes cles pour une org et un compte). La question se pose donc a `/orgs/<owner>`.
+  #
+  # `{:error, _}` n'est PAS « pas une org » : une forge qui tousse sur le type ne retrograde pas un
+  # catalogue installe en disponible. Le cout accepte : pendant la panne, un depot perso frais serait
+  # annonce installe ; c'est transitoire et non pilotable par l'auteur du depot, la ou l'autre sens
+  # retrograderait la flotte sur un hoquet.
+  defp org_owner?(owner, repo_mod, opts) do
+    case repo_mod.org_exists?(owner, opts) do
+      {:ok, is_org} ->
+        is_org
+
+      {:error, reason} ->
+        Logger.warning(
+          "CatalogueDeposits: cannot read the owner type of #{owner} (#{inspect(reason)}) — " <>
+            "counted as a store. An unreadable forge is not an answer, and the other reading would " <>
+            "retrograde an installed catalogue on a hiccup."
+        )
+
+        true
+    end
+  end
+
+  defp unreadable(full, reason) do
+    Logger.warning(
+      "CatalogueDeposits: #{full} carries a #{@manifest} that could not be read " <>
+        "(#{inspect(reason)}) — NOT listed. Its owner sees nothing; this line is the only trace."
+    )
+
+    []
+  end
 
   defp owner_of(full_name), do: full_name |> String.split("/", parts: 2) |> hd()
 
-  # The manifest is read for ONE field. A full YAML parse would make this listing fail on a
-  # catalogue whose unrelated section is malformed — the identity is what we need here, and
-  # `catalogue verify` is what judges the rest.
-  #
-  # ⚠ COLUMN ZERO, and it is the whole correctness of this read. In YAML an INDENTED `name:` belongs
-  # to the key above it: `roles:\n  name: dev` declares a role, not the catalogue. Accepting leading
-  # whitespace would let the first nested `name:` in the file steal the catalogue's identity — and
-  # it would work by accident on OUR manifests, where the root key happens to come first, then be
-  # wrong on somebody else's. Both catalogues shipped today carry `name:` at column 0.
-  #
-  # ⚠ `[_, name | _]` and not `[_, name]`: the trailing comment group makes `Regex.run/2` return
-  # THREE elements when a comment is present, and the two-element pattern silently fell through to
-  # "no name" — measured by the witness on `name: web   # le metier`.
-  defp manifest_name(yaml) when is_binary(yaml) do
-    yaml
-    |> String.split("\n")
-    |> Enum.find_value(fn line ->
-      case Regex.run(~r/\Aname:\s*"?([^"#\s]+)"?\s*(#.*)?\z/, line) do
-        [_, name | _] -> name
-        _ -> nil
-      end
-    end)
-    |> case do
-      nil -> {:error, :no_name_in_manifest}
-      name -> {:ok, name}
-    end
-  end
+  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation. Elle avait sa copie ici jusqu'au
+  # 2026-08-21 ; la porte explicite (`Onboard.refute_store/2`) a eu besoin de la meme, et sa
+  # frontiere ne peut pas referencer celle-ci. Elargir une frontiere pour avoir raison n'est jamais
+  # le geste — la regle est descendue la ou les deux peuvent la lire.
+  defp manifest_name(yaml), do: Fleet.Catalogue.manifest_name(yaml)
 
   defp group(deposits) do
     by_name = Enum.group_by(deposits, & &1.name)

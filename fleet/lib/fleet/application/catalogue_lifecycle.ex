@@ -15,16 +15,22 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## What signs an installation
 
-  `<org>/#{"catalogue"}` — the source WE pushed into the catalogue's own org. Not "the org exists":
-  an org without its source is an interrupted install, and no box can serve a catalogue whose
-  material is nowhere. Signing on the org alone would report such a catalogue as ready and let a
-  boot discover the hole. The store is the narrower signature and it is the one that matters.
+  A repo that DECLARES the name of the org it sits in — the source WE pushed into the catalogue's own
+  org. Not "the org exists": an org without its source is an interrupted install, and no box can
+  serve a catalogue whose material is nowhere. Signing on the org alone would report such a catalogue
+  as ready and let a boot discover the hole. The store is the narrower signature and it is the one
+  that matters.
+
+  It sits at `<org>/_catalogue`, and that is an ADDRESS, not the signature. What signs is
+  `owner == manifest.name` (`CatalogueDeposits.split/2`) TOGETHER WITH the owner being an ORG —
+  complementary conditions, neither covering the other. Signing on the repo NAME, as this did until
+  2026-08-21, reserved the most natural repo name in every user's namespace, and did it in silence.
 
   ## The reference catalogue is installed by construction
 
-  `#{"fleet"}` ships inside the release. The box can serve it without asking anybody, so its state
+  `fleet` ships inside the release. The box can serve it without asking anybody, so its state
   is not a forge question — and answering "available" for it, on a forge that carries no
-  `fleet/catalogue`, would be a lie about the only catalogue that always works.
+  `fleet/_catalogue`, would be a lie about the only catalogue that always works.
 
   ## An installed catalogue whose deposit vanished
 
@@ -37,7 +43,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   alias Fleet.Application.CatalogueDeposits
 
-  @bundled "fleet"
+  @bundled Fleet.Catalogue.bundled_name()
 
   @type state :: :installed | :available
   @type entry :: %{
@@ -60,8 +66,11 @@ defmodule Fleet.Application.CatalogueLifecycle do
     repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
 
     with {:ok, repos} <- repo_mod.search_repos(opts),
-         {:ok, deposits} <- CatalogueDeposits.from_repos(repos, opts) do
-      stores = stores(repos, repo_mod, opts)
+         {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
+      # `candidates` EST la liste des magasins : `split/2` tranche l'identite ET le type du
+      # proprietaire, donc il n'y a plus de second jugement a rendre ici. Il y en avait un
+      # (`stores/3`), et le candidat qu'il recalait tombait dans un trou — cf. `split/2`.
+      stores = candidates
 
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
@@ -92,7 +101,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   before installing: WHOSE material am I about to serve to everyone.
 
   Once installed it is dropped, and not only because nobody reads it. What the box follows from
-  then on is `<name>/catalogue`, the store — printing the deposit there names something that is no
+  then on is `<name>/_catalogue`, the store — printing the deposit there names something that is no
   longer the source, in the column an operator reads AS the source.
 
   `UPDATABLE` keeps it, and that is the same rule rather than an exception: the deposit is once
@@ -211,8 +220,9 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # repondu », c'est-a-dire un diagnostic de reseau pour une panne de demarrage.
   #
   # Les temoins ne pouvaient pas l'attraper parce qu'ils injectent des doublures de `forge_repo` et
-  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne. `TemplateSync` porte
-  # deja ce demarrage et dit pourquoi — c'est la meme raison, a la meme frontiere.
+  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne.
+  # `Fleet.Project.Onboard.eval_migrate/2` porte deja ce demarrage et dit pourquoi — c'est la meme
+  # raison, a la meme frontiere.
   #
   # `Application.ensure_all_started(:req)` puis le superviseur local : le pool est DECLARE par
   # `Fleet.Forge.finch_spec/0`, sa propre autorite, jamais recompose ici.
@@ -286,52 +296,4 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # one above requires `is_map(store)` and the compiler cannot see they are exhaustive together.
   defp entry(name, _deposit, _store, _repo_mod, _opts),
     do: %{name: name, state: :available, updatable?: nil, deposit: nil, store: nil}
-
-  # ⚠ UN DEPOT NOMME `catalogue` NE SIGNE RIEN SI SON PROPRIETAIRE N'EST PAS UNE ORG, et cette
-  # fonction acceptait n'importe quel proprietaire. Dans Gitea, orgs et comptes perso partagent
-  # l'espace de noms : un user non-admin qui pousse un depot public `catalogue` dans SON espace
-  # faisait apparaitre son login comme catalogue INSTALLE — le convergeur clonait son materiel, le
-  # mint derivait son roster, et « seul un admin installe » etait contourne par un push. Trouve par
-  # le troisieme regard (audit independant, 2026-08-16) apres que DEUX auto-audits ont endosse la
-  # signature sans voir le trou.
-  #
-  # L'asymetrie etait la partie humiliante : la reservation du nom etait appliquee aux DEPOTS
-  # (`store_or_empty?` ecarte tout repo nomme `catalogue` des candidats) et pas aux STORES.
-  #
-  # L'objet `owner` de `/repos/search` ne porte AUCUN champ discriminant (mesure sur 1.26.1 : memes
-  # cles pour une org et un compte). La question se pose donc a `/orgs/<owner>` — `org_exists?/2`,
-  # dont la doc porte deja la phrase exacte : « asking the wrong endpoint would sign an installation
-  # that is not one ».
-  #
-  # `{:error, _}` n'est PAS « pas une org » : une forge qui tousse sur le type ne retrograde pas un
-  # catalogue installe en disponible — meme regle que la tete de store illisible plus haut. Le cout
-  # accepte : pendant la panne, un depot perso frais serait annonce installe ; c'est transitoire et
-  # non pilotable par l'auteur du depot, la ou l'autre sens retrograderait la flotte sur un hoquet.
-  defp stores(repos, repo_mod, opts) do
-    store = CatalogueDeposits.store_repo()
-
-    for %{"name" => ^store, "full_name" => full} = r <- repos,
-        owner = full |> String.split("/", parts: 2) |> hd(),
-        org_owner?(owner, repo_mod, opts),
-        into: %{},
-        do: {owner, r}
-  end
-
-  defp org_owner?(owner, repo_mod, opts) do
-    case repo_mod.org_exists?(owner, opts) do
-      {:ok, is_org} ->
-        is_org
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "CatalogueLifecycle: cannot read the owner type of #{owner}/catalogue " <>
-            "(#{inspect(reason)}) — counted as a store. An unreadable forge is not an answer, and " <>
-            "the other reading would retrograde an installed catalogue on a hiccup."
-        )
-
-        true
-    end
-  end
 end

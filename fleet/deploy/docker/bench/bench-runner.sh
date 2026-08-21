@@ -30,7 +30,7 @@
 #
 # USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1> --admin-token <tok>
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
-#                         [--project lcars-ticket-runner] [--verify-repo fleet/project-template]
+#                         [--project lcars-ticket-runner] [--verify-repo fleet/lcars]
 #                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
 #                         [--accept-generic]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse

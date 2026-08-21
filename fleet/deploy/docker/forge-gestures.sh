@@ -25,7 +25,7 @@
 #   config-token   lit un jeton master sur STDIN, le VERIFIE contre la forge de la boite, puis le
 #                  pose en `0640 root:lcars-admin`. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
-#   apply          joue la recette : module instance/, module catalogue, puis le depot modele.
+#   apply          joue la recette : module instance/, puis module catalogue.
 #                  Ne prend RIEN — il lit ce que la boite detient. Un jeton sur STDIN l'emporte.
 #   toolchain-protection <login-du-siege> [admins...]
 #                  GESTE D'INSTALLATION du rail toolchain : pose la protection de la branche
@@ -35,7 +35,7 @@
 #                  :toolchain_auto_merge QUE si la protection tient — jamais l'un sans l'autre.
 #   install <nom>  installe — ou MET A JOUR — le catalogue <nom> depuis le depot que la forge porte :
 #                  resolution du depot, clone, MEME verification que le boot, roster derive, recette
-#                  (org + comptes + teams), puis la source poussee dans <nom>/catalogue. Jamais
+#                  (org + comptes + teams), puis la source poussee dans <nom>/_catalogue. Jamais
 #                  declenche par le boot.
 #   runner-token   minte un jeton d'ENREGISTREMENT de runner et l'imprime. Sortie unique, sur
 #                  stdout : c'est un credential a usage unique, il ne se pose nulle part.
@@ -66,10 +66,19 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
 CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
 # Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
 ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
-# L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
-# `catalogue-source`, `template-sync`). Il s'appelait `TEMPLATE_SYNC` quand il n'en servait
-# qu'une : un nom qui decrit un seul usage devient faux au deuxieme.
-ENTRYPOINT="${LCARS_ENTRYPOINT:-${LCARS_TEMPLATE_SYNC:-/opt/lcars/entrypoint.sh}}"
+# L'ADRESSE du magasin d'un catalogue installe, dans SON org. Ce fichier est ce qui l'ECRIT (le
+# `push_store` plus bas), et c'est pour ca que le nom vit ici : une adresse appartient a celui qui
+# pose. Rien ne se DECIDE en la lisant — l'identite d'un magasin est `manifest.name == owner`, et
+# elle se tranche cote lecteurs (`CatalogueDeposits.split/2`, `45-catalogues.sh`). Le `_` initial est
+# de l'UX (⚖ user, 2026-08-21) : il separe a l'oeil ce que la fleet pose de ce qu'un humain depose.
+STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
+# L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`, `catalogue-source`).
+# Il s'appelait `TEMPLATE_SYNC` quand il n'en servait qu'une : un nom qui decrit un seul usage
+# devient faux au deuxieme — et celui-la est mort deux fois, la porte `template-sync` ayant ete
+# retiree avec le depot modele le 2026-08-21. Le repli sur l'ancien nom part avec elle : personne ne
+# le posait (verifie sur tout le depot), donc le garder ne compatibilisait rien et faisait croire a
+# un cablage.
+ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
@@ -318,27 +327,13 @@ cmd_apply() {
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
 
-  # ─── LE DEPOT MODELE, dans le meme geste ──────────────────────────────────────────────────────
-  # `create_project` GENERE depuis lui ; absent, l'onboard degrade en bare-create sur chaque projet.
-  # AVEC LE JETON MASTER, ce qui supprime un ordre : le poser avec le jeton SYSTEME exigerait qu'il
-  # soit deja minte, donc un boot entre l'apply et ce geste.
-  #
-  # ⚠ NON FATAL, ET C'EST DELIBERE : la structure EST posee a ce stade. Un modele qui ne part pas
-  # est une degradation NOMMEE, pas une raison de rendre un echec sur un geste qui a reussi.
-  echo "forge-gestures: depot modele (project-template)"
-  local tf; tf="$(umask 077; mktemp)"
-  printf '%s\n' "$tok" > "$tf"
-  # shellcheck disable=SC2064 -- on veut la valeur d'ICI, pas celle du moment du trap
-  trap "rm -f '$tf'" EXIT
-  FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync \
-    || echo "forge-gestures: depot modele NON pose — l'onboard degradera en bare-create (dit a chaque projet)" >&2
-
   # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
   publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
 
   demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"
 
-  seed_demo_catalogue "$tok"
+  seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
+  seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
 }
 
 # ─── LA DEMO, DEPOSEE CHEZ LE MASTER ────────────────────────────────────────────────────────────
@@ -360,11 +355,61 @@ cmd_apply() {
 # un deploiement casse.
 DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"
 
-seed_demo_catalogue() { # $1=jeton master
-  local tok="$1"
-  [[ -d "$DEMO_CATALOGUE" ]] || return 0
+# ─── LA REFERENCE, DEPOSEE AU MEME ENDROIT ──────────────────────────────────────────────────────
+# ⚖ user, 2026-08-21 : « il FAUT garder le catalogue dispo et visible sur la forge », « il faut
+# republier le catalogue de base `fleet` ».
+#
+# Le catalogue metier de reference vit DANS LE RELEASE, pas dans `catalogues/` : il est installe par
+# construction et n'a jamais eu besoin d'etre sur la forge pour tourner. Ce qu'il gagne a y etre est
+# la LISIBILITE — on ne forke pas ce qu'on ne peut pas ouvrir, et faire son propre catalogue commence
+# par lire celui qui marche.
+#
+# ⚠ IL NE DEVIENT PAS INSTALLABLE POUR AUTANT, et la liste le sait : `CatalogueDeposits` ecarte toute
+# candidature portant le nom du catalogue livre. Sans cette clause, ce depot serait un candidat de
+# plus sous ce nom — et le premier fork qui garde son manifeste tel quel en ferait deux, donc
+# `catalogue list` refusant la liste ENTIERE. Publier un objet fait pour etre forke ne doit pas armer
+# la casse au premier fork.
+#
+# LE CHEMIN SE DEMANDE AU RELEASE (`$ENTRYPOINT catalogue-root`) et ne se recompose pas : il porte la
+# VERSION du release, donc tout glob ecrit ici marcherait jusqu'a la premiere reorganisation, puis
+# echouerait en silence sur un glob vide.
+REFERENCE_CATALOGUE="${LCARS_REFERENCE_CATALOGUE:-}"
 
-  local name; name="$(basename "$DEMO_CATALOGUE")"
+reference_catalogue_root() {
+  [[ -n "$REFERENCE_CATALOGUE" ]] && { printf '%s' "$REFERENCE_CATALOGUE"; return 0; }
+
+  local root
+  root="$("$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
+  if [[ -z "$root" || ! -d "$root" ]]; then
+    # Un refus MUET ferait croire a une image sans reference — or elle en porte toujours une.
+    echo "forge-gestures: le release ne dit pas ou vit son catalogue de reference — NON depose" >&2
+    return 0
+  fi
+  printf '%s' "$root"
+}
+
+# ─── LE GESTE, POUR LES DEUX ────────────────────────────────────────────────────────────────────
+# Il etait ecrit pour la demo seule, et la reference l'a rejoint le 2026-08-21. Le PARAMETRER plutot
+# que le recopier n'est pas un gout : les deux depots ont exactement la meme semantique — projection
+# force-poussee chez `id = 1`, non fatale — et deux copies d'un meme geste divergent par la ligne
+# qu'on corrige d'un cote.
+#
+# LE NOM VIENT DU MANIFESTE, jamais du repertoire. Un arbre range sous `catalogues/web-demo` qui
+# declarerait `name: autre` serait pousse sous `web-demo` et n'apparaitrait JAMAIS dans
+# `catalogue list`, qui indexe par identite declaree. Meme regle qu'a l'install, meme colonne zero.
+seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message)
+  local tok="$1" tree="$2" kind="$3"
+  [[ -d "$tree" ]] || return 0
+
+  local name
+  name="$(awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
+                          sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' \
+          "$tree/catalogue.yaml" 2>/dev/null || true)"
+  if [[ -z "$name" ]]; then
+    echo "forge-gestures: $tree ne declare pas de \`name:\` en colonne zero — $kind NON depose" >&2
+    return 0
+  fi
+
   local master
   master="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
             | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
@@ -376,14 +421,21 @@ seed_demo_catalogue() { # $1=jeton master
     return 0
   fi
 
-  echo "forge-gestures: catalogue de demonstration ($name -> $master/$name)"
+  echo "forge-gestures: $kind ($name -> $master/$name)"
   printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
     | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
       -d "{\"name\":\"$name\",\"private\":false,\"auto_init\":false}" \
       "${FORGE_BASE_URL%/}/api/v1/user/repos" 2>/dev/null || true
 
+  # ⚠ `cp` PEUT ECHOUER, ET `set -e` TUE ALORS LE SCRIPT AVANT LE `rm -rf` DE FIN. Source illisible,
+  # disque plein : le repertoire temporaire fuit. Le nettoyer sur place vaut mieux qu'un `trap`, qui
+  # est global au processus et ecraserait celui qu'un autre geste aurait pose.
   local stage; stage="$(mktemp -d)"
-  cp -r "$DEMO_CATALOGUE/." "$stage/"
+  cp -r "$tree/." "$stage/" || {
+    rm -rf "$stage"
+    echo "forge-gestures: $tree illisible — $name NON depose" >&2
+    return 0
+  }
   rm -rf "$stage/.git"
   ( cd "$stage" \
     && git init -q -b main \
@@ -621,39 +673,27 @@ cmd_install() {
   push_store "$name" "$work/src" "$tok" "$sha"
 
   # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Il n'est pas l'installation — celle-ci est le depot
-  #    `$name/catalogue` pousse juste au-dessus — et `45-catalogues` le reposerait de toute facon au
+  #    `$name/$STORE_REPO` pousse juste au-dessus — et `45-catalogues` le reposerait de toute facon au
   #    prochain boot. Mais « au prochain boot » veut dire que la commande rend la main sur une boite
   #    qui ne sert pas encore le catalogue qu'elle vient d'installer, et l'admin n'a aucun moyen de
   #    savoir qu'il doit redemarrer. On converge donc ici le meme cache, par le meme geste.
   #
   #    Un echec ici n'annule RIEN : la forge porte l'org et la source, l'installation a eu lieu. Le
   #    dire, et laisser le boot suivant rattraper, est plus honnete que de defaire ce qui est bon.
+  #
+  #    ⚠ CE MATERIEL EST AUSSI LE SQUELETTE DES PROJETS DE CE CATALOGUE. `Scaffold.template_root/1`
+  #    lit `project_template/` SOUS CE REPERTOIRE ; absent, il se replie sur le catalogue livre. Un
+  #    catalogue qui livre son propre arbre et dont le materiel n'est pas pose voit donc ses projets
+  #    naitre du squelette d'un voisin — c'est ce que le message d'echec ci-dessous doit dire.
   local materiel=1
   install_material "$name" "$work/src" && materiel=0
 
-  # 8. LE MODELE DE PROJET DU CATALOGUE, ET IL VIENT APRES LE MATERIEL — L'ORDRE EST LE POINT.
-  #    `TemplateSync` decide `<name>/project-template` ou le repli en LISANT le materiel local :
-  #    un catalogue dont l'arbre `project_template` est sur le disque a le sien. Joue avant l'etape
-  #    7, il ne trouvait rien et repliait TOUJOURS — mesure sur banc du 2026-08-16, l'install de
-  #    `web-demo` annoncait « fleet/project-template synced » alors que le catalogue livre treize
-  #    fichiers a lui. Le repli etait correct au sens du code, et faux au sens du fait.
-  #
-  #    Un echec ici n'annule rien : la forge porte l'org et la source. Il coute un repli sur le
-  #    modele de reference, ce qui est degrade et pas casse — et ca se dit.
   if [[ "$materiel" -eq 0 ]]; then
-    local tf; tf="$(umask 077; mktemp)"
-    printf '%s\n' "$tok" > "$tf"
-    FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync "$name" \
-      || echo "forge-gestures: modele de projet de $name NON pose — ses projets partiront du modele de reference" >&2
-    rm -f "$tf"
-  fi
-
-  if [[ "$materiel" -eq 0 ]]; then
-    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/catalogue, materiel pose)"
+    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
   else
     echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
     echo "  la boite ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
-    echo "  son modele de projet n'est donc pas pose non plus : ses projets partiront du modele de reference" >&2
+    echo "  son squelette de projet n'est donc pas lisible : ses projets naitront de celui du catalogue livre" >&2
   fi
 }
 
@@ -667,7 +707,7 @@ install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
   GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \
-    "${FORGE_BASE_URL%/}/${name}/catalogue.git" "$dir.tmp" || { rm -rf "$dir.tmp"; return 1; }
+    "${FORGE_BASE_URL%/}/${name}/${STORE_REPO}.git" "$dir.tmp" || { rm -rf "$dir.tmp"; return 1; }
   rm -rf "$dir"
   mv "$dir.tmp" "$dir"
 }
@@ -684,11 +724,11 @@ install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite
 # `Fleet.Forge.Client.Repo.branch_commit/3` est ce qui le relit.
 push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
   local name="$1" tree="$2" tok="$3" src_sha="${4:-}"
-  local url="${FORGE_BASE_URL%/}/${name}/catalogue.git"
+  local url="${FORGE_BASE_URL%/}/${name}/${STORE_REPO}.git"
 
   printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
     | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
-      -d "{\"name\":\"catalogue\",\"private\":false,\"auto_init\":false}" \
+      -d "{\"name\":\"${STORE_REPO}\",\"private\":false,\"auto_init\":false}" \
       "${FORGE_BASE_URL%/}/api/v1/orgs/${name}/repos" || true
 
   local stage; stage="$(mktemp -d)"
@@ -704,7 +744,7 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
        GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
        GIT_CONFIG_VALUE_0="Authorization: token $tok" \
        git push -q --force "$url" main ) \
-    || { rm -rf "$stage"; die "install: source NON poussee dans $name/catalogue — l'org est posee mais le catalogue n'est PAS installe"; }
+    || { rm -rf "$stage"; die "install: source NON poussee dans $name/$STORE_REPO — l'org est posee mais le catalogue n'est PAS installe"; }
   rm -rf "$stage"
 }
 

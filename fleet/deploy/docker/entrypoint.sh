@@ -101,6 +101,26 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(${arg})"
 fi
 
+# `catalogue-root` : OU LE RELEASE PORTE SON CATALOGUE DE REFERENCE. Une ligne, un chemin.
+#
+# Il existe pour que personne ne RECOMPOSE ce chemin. Il vit dans le release, sous un repertoire qui
+# porte la VERSION (`lib/lcars_fleet-<vsn>/priv/catalogue`) : un appelant shell qui le globberait
+# marcherait jusqu'au jour ou la disposition du release change, et casserait alors en silence sur
+# un glob vide. Le release est l'autorite de sa propre disposition, et c'est lui qu'on interroge.
+#
+# Meme porte outil que `verify` et `roles` — meme eval, meme `nobody`, meme `LCARS_TOOL_EVAL`.
+#
+# ⚠ CE DRAPEAU SAUTE LE CORPS DE CONFIG DE DEPLOIEMENT, donc un `LCARS_CATALOGUE_ROOT` pose par
+# l'operateur n'est PAS lu ici — et c'est ce qu'on veut. Cette porte repond « le catalogue que CE
+# RELEASE porte », pas « celui que cette boite sert ». C'est le premier qu'on publie sur la forge :
+# la reference, celle qu'on forke, pas la variante locale de quelqu'un.
+if [[ "${1:-}" == "catalogue-root" ]]; then
+  drop_priv \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    'IO.puts(Fleet.Catalogue.root())'
+fi
+
 # `forge-apply` : LA STRUCTURE DE LA FORGE, POSEE PAR UN RUN TRANSITOIRE ─────────────────────────
 #
 # Meme geste que `docker.sh forge-apply`, mais SANS boite vivante : `docker run --rm <image>
@@ -137,32 +157,6 @@ if [[ "${1:-}" == "catalogue-source" ]]; then
     FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
-fi
-
-# `template-sync` : POSE le depot modele que `create_project` genere. Meme porte outil que `roles`
-# et `verify`, et pour la meme raison — la question se pose a un script de provisionnement, dehors
-# d'une fleet vivante.
-#
-# ⚠ CE GESTE N'EXISTAIT QUE SUR LE BANC, et il n'y avait aucun moyen de le jouer ailleurs : son
-# seul poseur etait une tache MIX, et `mix` n'est pas dans cette image (15-toolchain : build only).
-# Une forge de production n'avait donc pas de `project-template`, et `Onboard` degradait en
-# bare-create sur chaque projet, en silence. Le corps a demenage dans `Fleet.Project.TemplateSync`.
-#
-# PAS `nobody` ICI, contrairement aux trois portes au-dessus, et c'est structurel : celles-la LISENT
-# le catalogue, celle-ci ECRIT sur la forge. Elle a besoin de lire le jeton (`FORGE_TOKEN_FILE`,
-# 0640 root:fleet ou 0600 root) et d'un tmp pour les deux faces qu'elle pousse. L'appelant choisit
-# l'identite ; ce qu'il ne choisit pas, c'est la forge : les deux variables sont EXIGEES, un defaut
-# serait la mauvaise forge le jour ou ca compte.
-# L'ARGUMENT NOMME LE CATALOGUE, et son absence n'est pas un defaut : chaque catalogue a le sien,
-# `<catalogue>/project-template`, et sans argument c'est celui du catalogue livre qui est pose. Un
-# catalogue qui n'apporte pas d'arbre `project_template` n'en fait poser AUCUN — c'est l'absence du
-# depot qui rend le repli visible, et le pousser quand meme le rendrait invisible.
-if [[ "${1:-}" == "template-sync" ]]; then
-  arg=""
-  [[ -n "${2:-}" ]] && arg="\"${2}\""
-  exec env RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
-    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
-    "Fleet.Project.TemplateSync.eval_main(${arg})"
 fi
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que

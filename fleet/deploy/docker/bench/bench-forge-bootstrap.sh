@@ -378,11 +378,14 @@ charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
     'cd /opt/lcars/fleet/deploy/deps && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
-# ─── 8. le semis : la source et le modele ────────────────────────────────────────────────────────
+# ─── 8. le semis : la source ─────────────────────────────────────────────────────────────────────
 # `fleet/lcars` = la source que la boite clone au boot (LCARS_SOURCE_REMOTE, la jambe runtime du
-# triangle). `fleet/project-template` = le modele que `create_project` genere (absent, l'onboard
-# degrade en bare-create + scaffold local, LOUD). Une forge vierge sans les deux est une forge sur
-# laquelle la fleet ne peut rien faire — et c'est l'etat par defaut apres chaque nuke.
+# triangle). Une forge vierge sans elle est une forge sur laquelle la fleet ne peut rien faire — et
+# c'est l'etat par defaut apres chaque nuke.
+#
+# ⚠ IL Y AVAIT UN SECOND SEMIS, `fleet/project-template`, retire le 2026-08-21 avec le depot modele.
+# Un projet neuf se peuple depuis le catalogue sur DISQUE, que la boite porte deja : il n'y a plus
+# rien a semer pour qu'un onboard aboutisse.
 if [[ "$SEED_REPOS" -eq 1 ]]; then
   SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 
@@ -401,9 +404,6 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
       && say "fleet/lcars : ops pousse" || say "fleet/lcars : ops NON pousse" ; }
 
-    # `fleet/project-template` N'EST PLUS POSE ICI : `forge-gestures.sh apply` le fait, dans la
-    # boite, avec le jeton master — donc sur toute forge que le chemin standard touche, et plus
-    # seulement sur un banc. Ce bloc le poussait par `mix`, qui n'existe pas dans une image.
   fi
 fi
 
