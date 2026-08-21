@@ -97,6 +97,63 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     assert Map.keys(found) == ["web-bis"]
   end
 
+  describe "le store se reconnait a `owner == manifest.name`, jamais au nom du depot" do
+    test "un depot d'utilisateur NOMME `catalogue` est un depot comme un autre" do
+      # ⚠ CE QUE LE LOT 2 ACHETE. L'exclusion portait sur le NOM : tout depot appele `catalogue`
+      # etait ecarte, quel que soit son proprietaire, et EN SILENCE — pas de log, pas de ligne, pas
+      # de refus. `bob` qui appelle son depot du nom le plus naturel voyait son catalogue ne jamais
+      # apparaitre, sans un mot nulle part. La fleet reservait un nom dans l'espace des utilisateurs
+      # sans le leur dire.
+      assert {:ok, found} =
+               list(
+                 [repo("bob/catalogue")],
+                 %{"bob/catalogue" => "name: mobile\n"},
+                 %{{"bob/catalogue", "main"} => "sha9"}
+               )
+
+      assert %{"mobile" => %{repo: "bob/catalogue", owner: "bob"}} = found
+    end
+
+    test "un depot A L'ADRESSE d'un store, mais qui declare un AUTRE nom, reste un depot" do
+      # Le complement du precedent, et le plus dur a passer par accident : `web/catalogue` est
+      # exactement la ou un store se pose, sous une org de catalogue. Ce qui le sauve est son
+      # identite — il ne declare pas `web`, donc il n'est pas le magasin de `web`.
+      assert {:ok, found} =
+               list(
+                 [repo("web/catalogue")],
+                 %{"web/catalogue" => "name: autre-chose\n"},
+                 %{{"web/catalogue", "main"} => "sha7"}
+               )
+
+      assert %{"autre-chose" => %{repo: "web/catalogue"}} = found
+    end
+
+    test "`split/2` rend les DEUX moities d'une seule classification" do
+      # Les deux moities ne peuvent pas se contredire parce qu'elles sortent de la MEME decision.
+      # Deux lecteurs de « est-ce un store ? » divergent le jour ou un seul est corrige — c'etait
+      # l'etat d'avant, `store_or_empty?` d'un cote et `stores/3` de l'autre.
+      repos = [repo("web/catalogue"), repo("alice/mob"), repo("bob/catalogue")]
+
+      manifests = %{
+        "web/catalogue" => "name: web\n",
+        "alice/mob" => "name: mobile\n",
+        "bob/catalogue" => "name: notes\n"
+      }
+
+      assert {:ok, deposits, stores} =
+               CatalogueDeposits.split(repos,
+                 forge_repo: FakeRepo,
+                 forge_files: FakeFiles,
+                 manifests: manifests,
+                 shas: %{{"alice/mob", "main"} => "s1", {"bob/catalogue", "main"} => "s2"}
+               )
+
+      assert Enum.sort(Map.keys(deposits)) == ["mobile", "notes"]
+      assert %{"web" => %{"full_name" => "web/catalogue"}} = stores
+      assert Map.keys(stores) == ["web"]
+    end
+  end
+
   test "un depot VIDE est ecarte — il ne peut rien porter" do
     assert {:ok, %{}} == list([repo("alice/vide", %{"empty" => true})])
   end

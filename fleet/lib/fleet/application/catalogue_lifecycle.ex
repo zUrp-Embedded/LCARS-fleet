@@ -60,8 +60,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
     repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
 
     with {:ok, repos} <- repo_mod.search_repos(opts),
-         {:ok, deposits} <- CatalogueDeposits.from_repos(repos, opts) do
-      stores = stores(repos, repo_mod, opts)
+         {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
+      stores = stores(candidates, repo_mod, opts)
 
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
@@ -288,16 +288,22 @@ defmodule Fleet.Application.CatalogueLifecycle do
   defp entry(name, _deposit, _store, _repo_mod, _opts),
     do: %{name: name, state: :available, updatable?: nil, deposit: nil, store: nil}
 
-  # ⚠ UN DEPOT NOMME `catalogue` NE SIGNE RIEN SI SON PROPRIETAIRE N'EST PAS UNE ORG, et cette
-  # fonction acceptait n'importe quel proprietaire. Dans Gitea, orgs et comptes perso partagent
-  # l'espace de noms : un user non-admin qui pousse un depot public `catalogue` dans SON espace
-  # faisait apparaitre son login comme catalogue INSTALLE — le convergeur clonait son materiel, le
-  # mint derivait son roster, et « seul un admin installe » etait contourne par un push. Trouve par
-  # le troisieme regard (audit independant, 2026-08-16) apres que DEUX auto-audits ont endosse la
-  # signature sans voir le trou.
+  # ⚠ UN DEPOT NE SIGNE RIEN SI SON PROPRIETAIRE N'EST PAS UNE ORG, et cette fonction acceptait
+  # n'importe quel proprietaire. Dans Gitea, orgs et comptes perso partagent l'espace de noms : un
+  # user non-admin qui poussait un depot public `catalogue` dans SON espace faisait apparaitre son
+  # login comme catalogue INSTALLE — le convergeur clonait son materiel, le mint derivait son roster,
+  # et « seul un admin installe » etait contourne par un push. Trouve par le troisieme regard (audit
+  # independant, 2026-08-16) apres que DEUX auto-audits ont endosse la signature sans voir le trou.
   #
-  # L'asymetrie etait la partie humiliante : la reservation du nom etait appliquee aux DEPOTS
-  # (`store_or_empty?` ecarte tout repo nomme `catalogue` des candidats) et pas aux STORES.
+  # LES DEUX CONDITIONS SONT NECESSAIRES, ET AUCUNE NE RECOUVRE L'AUTRE :
+  #
+  #   `owner == manifest.name`  — dit que ce depot est le magasin DE CE catalogue-la, et pas un
+  #                               depot quelconque pose dans une org quelconque. Tranche par
+  #                               `CatalogueDeposits.split/2`, seul endroit ou l'identite est lue.
+  #   `org_exists?(owner)`      — dit que le proprietaire est une ORG. Un compte perso `bob` avec un
+  #                               manifeste `name: bob` satisfait la premiere et ment : le catalogue
+  #                               `bob` ne peut PAS etre installe sur une forge ou `bob` est un
+  #                               humain, puisque son org entrerait en collision avec le compte.
   #
   # L'objet `owner` de `/repos/search` ne porte AUCUN champ discriminant (mesure sur 1.26.1 : memes
   # cles pour une org et un compte). La question se pose donc a `/orgs/<owner>` — `org_exists?/2`,
@@ -308,14 +314,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # catalogue installe en disponible — meme regle que la tete de store illisible plus haut. Le cout
   # accepte : pendant la panne, un depot perso frais serait annonce installe ; c'est transitoire et
   # non pilotable par l'auteur du depot, la ou l'autre sens retrograderait la flotte sur un hoquet.
-  defp stores(repos, repo_mod, opts) do
-    store = CatalogueDeposits.store_repo()
-
-    for %{"name" => ^store, "full_name" => full} = r <- repos,
-        owner = full |> String.split("/", parts: 2) |> hd(),
-        org_owner?(owner, repo_mod, opts),
-        into: %{},
-        do: {owner, r}
+  defp stores(candidates, repo_mod, opts) do
+    for {name, repo} <- candidates, org_owner?(name, repo_mod, opts), into: %{}, do: {name, repo}
   end
 
   defp org_owner?(owner, repo_mod, opts) do
@@ -327,7 +327,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
         require Logger
 
         Logger.warning(
-          "CatalogueLifecycle: cannot read the owner type of #{owner}/catalogue " <>
+          "CatalogueLifecycle: cannot read the owner type of #{owner} " <>
             "(#{inspect(reason)}) — counted as a store. An unreadable forge is not an answer, and " <>
             "the other reading would retrograde an installed catalogue on a hiccup."
         )
