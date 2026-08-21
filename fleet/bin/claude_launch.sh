@@ -410,41 +410,40 @@ fi
 # =============================================================
 
 # ╔════════════════════════════════════════════════════════════════════════════════════════════╗
-# ║  EXCEPTION DE DEBUG — A/B DU SP DE L'ARCHITECT — POSEE LE 2026-08-21 — A RETIRER            ║
+# ║  DEBUG EXCEPTION — A/B ON THE ARCHITECT'S SP — POSTED 2026-08-21 — TO BE REMOVED            ║
 # ╚════════════════════════════════════════════════════════════════════════════════════════════╝
 #
-# CE N'EST PAS UNE MECANIQUE, ET IL NE FAUT PAS LA PRENDRE POUR UNE. Un `if` sur un nom de role,
-# en dur, dans un launcher dont TOUT le reste se derive du cap-profile. Il est la pour repondre a
-# UNE question et disparaitre : « l'architect est-il moins con si le SP vendor reste en amont du
-# sien ? ». La reponse se mesure sur pod, elle ne se raisonne pas ici.
+# THIS IS NOT A MECHANISM AND MUST NOT BE READ AS ONE. A hard-coded role test, in a launcher whose
+# every other knob derives from the cap-profile. It exists to answer ONE question and then go:
+# "is the architect less useless when the vendor SP stays upstream of ours?". The answer is
+# measured on a pod; it cannot be reasoned out here.
 #
-# CE QUI EST TESTE. Les workers sont cadres par trois choses — leur pod, leur SP, leur mission — et
-# ils font leur travail. L'architect est LIBRE, et le SP qu'on lui a ecrit ne le cadre pas. En
-# `--system-prompt-file`, ce SP REMPLACE celui du vendor : tout ce que le vendor apporte de
-# discipline disparait avec. En `--append-system-prompt-file`, le SP vendor reste en amont et le
-# notre s'ajoute.
+# WHAT IS UNDER TEST. The workers are framed by three things — their pod, their SP, their mission —
+# and they do their job. The architect is FREE, and the SP written for it does not frame it. Under
+# `--system-prompt-file` that SP REPLACES the vendor's, so whatever discipline the vendor carries
+# goes with it. Under `--append-system-prompt-file` the vendor's stays upstream and ours is added.
 #
-# ⚠ CE QUE CE BRAS CHANGE ET QU'IL FAUT SURVEILLER : le SP de l'architect a ete ecrit pour etre le
-# SP ENTIER. En append, les deux coexistent et le vendor est EN AMONT — il gagne donc les conflits
-# de ton, de format et de discipline d'outillage. Un bras qui se comporte mieux ne prouve pas que
-# le SP est bon, seulement que le melange l'est plus que notre moitie seule.
+# ⚠ WHAT THIS ARM CHANGES, AND WHAT TO WATCH: the architect's SP was written to BE the whole system
+# prompt. Appended, the two coexist and the vendor is UPSTREAM — it therefore wins conflicts of
+# tone, of format and of tooling discipline. An arm that behaves better does not prove our SP is
+# good, only that the mixture beats our half alone.
 #
-# LE TEST PORTE SUR `metadata.name`, PAS SUR `$ROLE`. Le positionnel n'est consomme nulle part
-# ailleurs dans ce fichier (une seule garde de presence, l.131) et sa valeur n'a pas ete verifiee ;
-# le cap-profile, lui, est deja lu, deja valide, et le launcher meurt franc s'il ne l'est pas.
+# THE TEST READS `metadata.name`, NOT `$ROLE`. That positional is consumed NOWHERE else in this
+# file (one presence guard, l.131) and its value was never verified; the cap-profile is already
+# read, already validated, and the launcher dies loud when it is not.
 #
-# ⚠ `claude_probe.sh` PORTE DESORMAIS `--append-system-prompt-file`, et ce n'etait pas un choix :
-# `claude_probe.bats:106` verrouille « tout drapeau que le launcher passe en argv est dans
-# REQUIRED ». En retirant cette exception, retirer aussi la ligne la-bas.
+# ⚠ `claude_probe.sh` NOW CARRIES `--append-system-prompt-file`, and that was not a choice:
+# `claude_probe.bats:106` locks "every flag the launcher passes in argv is in REQUIRED". Removing
+# this exception means removing that line too.
 #
-# LA LIGNE D'ORIGINE, telle qu'elle etait dans l'`exec` ci-dessous — la remettre EST le retrait :
+# THE ORIGINAL LINE, as it stood in the `exec` below — putting it back IS the removal:
 #     --system-prompt-file "$SP_FILE" \
 SP_FLAGS=(--system-prompt-file "$SP_FILE")
 if [[ "$("$JQ_BIN" -r '.metadata.name // empty' "$CAP_PROFILE_JSON" 2>/dev/null)" == "architect" ]]; then
   SP_FLAGS=(--append-system-prompt-file "$SP_FILE")
-  # LE BRAS SE DIT, SINON L'A/B NE MESURE RIEN. Un essai dont on ne sait pas de quel cote il tombe
-  # produit une impression, pas une mesure.
-  echo "claude_launch: EXCEPTION DEBUG — SP de l'architect en APPEND (le SP vendor reste en amont)" >&2
+  # THE ARM ANNOUNCES ITSELF, OR THE A/B MEASURES NOTHING. A trial whose side you cannot tell
+  # produces an impression, not a measurement.
+  echo "claude_launch: DEBUG EXCEPTION — architect SP in APPEND mode (the vendor SP stays upstream)" >&2
 fi
 
 # Tool search stays at the VENDOR DEFAULT (on): disabling it (ENABLE_TOOL_SEARCH=false) was

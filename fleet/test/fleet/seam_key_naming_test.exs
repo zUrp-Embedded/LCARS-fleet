@@ -38,10 +38,9 @@ defmodule Fleet.SeamKeyNamingTest do
   # `lib/fleet/<owner>/…` — the subsystem directory IS the owner, which is also what `use Boundary`
   # carves up. Anything outside that shape (mix tasks) owns nothing and is skipped rather than
   # guessed at.
-  # ⚠ `basename(o, ".ex")` : `fleet/catalogue.ex` et `fleet/catalogue/…` sont LE MEME proprietaire.
-  # Sans ce retrait, la moitie des clefs correctement prefixees se lisaient « sans prefixe », parce
-  # que « catalogue.ex » ne commence pas par « catalogue_ » — une accusation qui ne parlait que de
-  # l'arborescence.
+  # ⚠ `basename(o, ".ex")`: `fleet/catalogue.ex` and `fleet/catalogue/…` are the SAME owner. Without
+  # that strip, half the correctly-prefixed keys read as "no prefix", because "catalogue.ex" does
+  # not start with "catalogue_" — an accusation that spoke only about the directory tree.
   defp owner_of(path) do
     case Path.relative_to(path, @lib_root) |> Path.split() do
       ["fleet", owner | _] -> Path.basename(owner, ".ex")
@@ -49,22 +48,21 @@ defmodule Fleet.SeamKeyNamingTest do
     end
   end
 
-  # ⚠ SUR L'AST, ET LA PREMIERE VERSION NE L'ETAIT PAS. Ecrite en regex ligne-a-ligne, elle voyait
-  # 25 seams sur 33 : les huit autres sont ecrits sur PLUSIEURS lignes (`mix format` casse un appel
-  # trop long) et aucune expression de ligne ne les rattrape. Aucun des huit n'etait en faute, donc
-  # rien n'etait cache — mais un temoin qui annonce une classe et en mesure les trois quarts est
-  # exactement le defaut qu'il est cense attraper ailleurs. L'AST ignore les retours a la ligne, et
-  # il ignore aussi les COMMENTAIRES : ce depot documente ses seams en CITANT l'appel, et une regex
-  # comptait ces citations comme des lectures — un `#` dans `Fleet.Forge.Client` faisait passer une
-  # clef pour bi-proprietaire.
+  # ⚠ ON THE AST, AND THE FIRST VERSION WAS NOT. Written as a line-by-line regex, it saw 25 seams
+  # out of 33: the other eight are written across SEVERAL lines (`mix format` breaks any call that
+  # is too long) and no line expression catches them. None of the eight was in breach, so nothing
+  # was hidden — but a witness that announces a class and measures three quarters of it is exactly
+  # the defect it exists to catch elsewhere. The AST ignores line breaks, and it also ignores
+  # COMMENTS: this repository documents its seams by QUOTING the call, and a regex counted those
+  # quotations as reads — one `#` line in `Fleet.Forge.Client` made a key look cross-owner.
   #
-  # LES TROIS LECTEURS, ET LA FORME PIPE AVEC. `fetch_env` (pas de defaut) et `compile_env` (gele a
-  # la compilation) lisent la meme configuration que `get_env` ; n'en couvrir qu'un rendait un vert
-  # dont la portee etait plus etroite que sa phrase.
+  # THE THREE READERS, AND THE PIPE FORM WITH THEM. `fetch_env` (no default) and `compile_env`
+  # (frozen at compile time) read the same configuration as `get_env`; covering only one produced a
+  # green whose reach was narrower than its sentence.
   defp seam_reads(ast, owner) do
     {_, acc} =
       Macro.prewalk(ast, [], fn
-        # forme PIPE : `:lcars_fleet |> Application.get_env(:key, default)`
+        # PIPE form: `:lcars_fleet |> Application.get_env(:key, default)`
         {:|>, _, [app, {{:., _, [{:__aliases__, _, [:Application]}, f]}, _, args}]} = node, list
         when f in @readers ->
           {node, collect(list, owner, app, args)}
@@ -93,7 +91,11 @@ defmodule Fleet.SeamKeyNamingTest do
 
   defp collect(list, _owner, _app, _args), do: list
 
-  defp seam_owners do
+  # The SITES (key × file) before grouping by key. A number that lives only in a comment is
+  # contradicted by nothing and drifts in silence — the comment is the one artefact of this repo
+  # that neither the gate nor a review filters. An independent review recounted 27/31 where this
+  # file's own logic yields 29/33; what settles it is what the code measures, not the prose.
+  defp seam_pairs do
     for path <- Path.wildcard(Path.join(@lib_root, "**/*.ex")),
         owner = owner_of(path),
         not is_nil(owner),
@@ -101,6 +103,10 @@ defmodule Fleet.SeamKeyNamingTest do
         {key, o} <- seam_reads(ast, owner) do
       {Atom.to_string(key), o}
     end
+  end
+
+  defp seam_owners do
+    seam_pairs()
     |> Enum.group_by(fn {k, _} -> k end, fn {_, o} -> o end)
     |> Map.new(fn {k, os} -> {k, Enum.uniq(os)} end)
   end
@@ -108,8 +114,24 @@ defmodule Fleet.SeamKeyNamingTest do
   test "the sweep still sees the seams — an empty scan would pass on anything" do
     seams = seam_owners()
 
-    # 29 distinct keys today, over 33 call sites — a floor, not a census: it catches "the walk
-    # stopped matching" without reddening on every key someone legitimately adds or removes.
+    # ⚠ A FLOOR DOES NOT GUARD THE REACH, AND I TRIED ONE. `length(seam_pairs()) >= 28` does NOT
+    # redden when the PIPE clause and the two neighbouring readers are removed: 31 sites out of 33
+    # remain, and a global count is far too coarse to notice that a FORM disappeared. A threshold
+    # that survives every real mutation is not a guard, it is a reassuring number.
+    #
+    # What bites is SENTINELS: two keys that exist ONLY in the forms the first version of this file
+    # could not read. Lose the form, lose the key, and the assertion says which one.
+    for {key, form} <- [
+          # split across lines by `mix format` — invisible to any line expression
+          {"task_queue_poll_retention_ms", "multi-line"},
+          # `:lcars_fleet |> Application.get_env(:k, @default)` — two arguments in the AST
+          {"spawner_max_pods_per_role", "pipe"}
+        ] do
+      assert Map.has_key?(seams, key),
+             "the #{form} form is no longer read: `#{key}` vanished from the sweep, so the green " <>
+               "below no longer covers that form"
+    end
+
     assert map_size(seams) >= 25,
            "only #{map_size(seams)} module seams found: the scan stopped matching, it did not " <>
              "prove the naming clean"

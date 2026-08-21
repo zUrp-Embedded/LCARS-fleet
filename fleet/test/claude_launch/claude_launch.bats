@@ -372,17 +372,17 @@ EOF
 }
 
 # =============================================================
-# EXCEPTION DE DEBUG — A/B DU SP DE L'ARCHITECT — POSEE LE 2026-08-21 — A RETIRER AVEC ELLE
+# DEBUG EXCEPTION — A/B ON THE ARCHITECT'S SP — POSTED 2026-08-21 — LEAVES WITH IT
 #
-# Ces deux temoins ne defendent pas un contrat, ils empechent un ESSAI VIDE : un A/B dont les deux
-# bras passent le meme drapeau ne mesure rien, et sa conclusion — quelle qu'elle soit — serait du
-# bruit qu'on prendrait pour un resultat. Le bloc mesure est dans `claude_launch.sh`, juste avant
-# l'`exec` ; quand il part, ces deux tests partent avec.
+# These two witnesses do not defend a contract, they stop an EMPTY TRIAL: an A/B whose two arms
+# pass the same flag measures nothing, and its conclusion — whatever it is — would be noise taken
+# for a result. The measured block lives in `claude_launch.sh`, just above the `exec`; when it
+# goes, these two tests go with it.
 # =============================================================
 
-@test "DEBUG A/B: l'architect part en --append-system-prompt-file (le SP vendor reste en amont)" {
-  # ⚠ LE BRAS SE CHOISIT SUR `metadata.name` DU CAP-PROFILE, pas sur le positionnel — donc c'est le
-  # profil qu'on bascule ici, et le positionnel reste `engineer` pour le prouver.
+@test "DEBUG A/B: the architect gets --append-system-prompt-file (vendor SP stays upstream)" {
+  # ⚠ THE ARM IS CHOSEN ON THE CAP-PROFILE'S `metadata.name`, not on the positional — so it is the
+  # PROFILE we flip here, and the positional stays `engineer` to prove exactly that.
   cat > "$POD_DIR/.cap-profile.json" <<'EOF'
 {
   "api_version": "lcars/v2.5",
@@ -394,17 +394,17 @@ EOF
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--append-system-prompt-file $POD_DIR/.lcars/system-prompt.md"* ]]
 
-  # LES DEUX BRAS SONT EXCLUSIFS. Passer les deux drapeaux laisserait le vendor arbitrer un ordre
-  # qu'on n'a pas choisi, et l'essai ne dirait plus lequel il a mesure.
+  # THE TWO ARMS ARE EXCLUSIVE. Passing both flags would let the vendor arbitrate an order we did
+  # not choose, and the trial would no longer say which one it measured.
   [[ "$output" != *" --system-prompt-file "* ]]
 
-  # Le SP ne fuit toujours pas dans l'argv — l'exception change le drapeau, jamais la doctrine.
+  # The SP still does not leak into the argv — the exception changes the flag, never the doctrine.
   [[ "$output" != *"Engineer test SP"* ]]
 }
 
-@test "DEBUG A/B: tout autre role garde --system-prompt-file — l'exception ne deborde pas" {
-  # La moitie qui compte. Une exception qui mordrait sur les autres roles ne serait pas un A/B,
-  # ce serait un changement de comportement de toute la flotte pose sans etre nomme.
+@test "DEBUG A/B: every other role keeps --system-prompt-file — the exception does not spread" {
+  # The half that counts. An exception biting on the other roles would not be an A/B, it would be a
+  # fleet-wide behaviour change posted without being named.
   run "$SCRIPT" engineer pod-1 "$POD_DIR"
   [[ "$output" == *"--system-prompt-file $POD_DIR/.lcars/system-prompt.md"* ]]
   [[ "$output" != *"--append-system-prompt-file"* ]]
