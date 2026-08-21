@@ -99,6 +99,72 @@ setup() {
   [[ "$output" == *"--box"* ]]
 }
 
+# ─── LA MACHINE DÉDIÉE — LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ ──────────────────────────
+# Le rail poste est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système,
+# /local, /home/private, aucun désinstalleur) — pas parce qu'il ne saurait pas y tourner. Sur une
+# machine DÉDIÉE, c'est exactement l'installation qu'on veut.
+#
+# ⚠ CE DRAPEAU EXISTAIT DÉJÀ, ET IL ÉTAIT INATTEIGNABLE PAR LA PORTE. `00-preflight` lit
+# `LCARS_ALLOW_ANY_HOST` depuis toujours ; la porte, elle, refusait AVANT que le rail n'ait la
+# chance de le lire. Il ne servait donc qu'à qui appelait `provision` à la main — et c'est ce qui
+# s'est passé le 2026-08-20 : une install native jouée geste par geste à côté du rail, parce que la
+# porte disait non. Un drapeau qu'on ne peut pas atteindre par la porte est un drapeau qui n'existe
+# pas.
+
+@test "machine dédiée: SANS le drapeau, linux natif refuse ET NOMME le drapeau" {
+  # Le refus doit rester le défaut — c'est lui qui protège la machine de quelqu'un. Ce qu'il ne
+  # doit plus faire, c'est laisser croire que le natif est hors d'atteinte.
+  run bash "$SRC" --substrate linux --workstation < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"réservé à WSL2"* ]]
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST=1"* ]]
+  [[ "$output" == *"DÉDIÉE"* ]]
+}
+
+@test "machine dédiée: AVEC le drapeau, la porte laisse passer et DIT ce que ça prend" {
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"déclaré DÉDIÉ"* ]]
+  [[ "$output" == *"AUCUN désinstalleur"* ]]
+  # Elle est passée : le bandeau du rail poste est imprimé, donc le garde de substrat est franchi.
+  [[ "$output" == *"RAIL POSTE"* ]]
+  [[ "$output" != *"réservé à WSL2"* ]]
+}
+
+@test "machine dédiée: le drapeau SURVIT à l'escalade sudo" {
+  # `sudo` remet l'environnement à zéro. Sans ce drapeau dans la liste nommée, la porte le lit,
+  # décide de laisser passer, escalade — et la SECONDE instance ne le voit plus, donc se refuse
+  # elle-même en invitant à poser le drapeau qu'on vient de poser. Refus parfaitement circulaire, et
+  # rien dans la sortie ne dit que sudo est passé entre les deux.
+  run grep -n 'for _v in ' "$SRC"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
+}
+
+@test "machine dédiée: le drapeau n'ouvre PAS le rail poste dans un conteneur" {
+  # Installer le rail poste DANS une boîte n'a pas de sens : c'est le rail boîte qui fait ça, au
+  # build de l'image. Aucun drapeau ne rend ça vrai, et un drapeau qui ouvrirait tout serait un
+  # interrupteur général déguisé en garde-fou.
+  run env LCARS_ALLOW_ANY_HOST=1 LCARS_DOCKER=1 bash "$SRC" --workstation < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"réservé à WSL2"* ]]
+}
+
+@test "machine dédiée: le bandeau n'annonce PAS /etc/wsl.conf là où rien ne le touche" {
+  # `30-wsl` porte `APPLY-ON: wsl`. Promettre une destruction qui n'aura pas lieu est du même ordre
+  # qu'en taire une qui aura lieu : dans les deux cas l'opérateur consent à autre chose.
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"RAIL POSTE"* ]]
+  [[ "$output" != *"/etc/wsl.conf"* ]]
+}
+
+@test "--substrate vaut pour la PORTE, pas seulement pour le rail" {
+  # Il était en passe-plat pur : la porte détectait son substrat, décidait dessus, puis remettait au
+  # rail un `--substrate` qui pouvait dire l'inverse. Deux étages, deux terrains, un seul geste.
+  run bash "$SRC" --substrate n-importe-quoi --workstation < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"inconnu"* ]]
+}
+
 @test "--box sans forge : REFUS avant tout build, et les deux voies sont nommees" {
   # La boite ne fabrique pas la forge, elle la consomme. Sans ce refus, 15 min de build finissaient
   # sur une boite qui ne peut rien produire — et le diagnostic arrivait apres la depense.

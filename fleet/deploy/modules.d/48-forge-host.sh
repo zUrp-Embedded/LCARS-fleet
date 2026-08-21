@@ -3,12 +3,24 @@
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — la forge du POSTE DE TRAVAIL : un conteneur Gitea, amorcé et structuré
-# APPLY-ON: wsl
-# CHECK-ON: wsl
+# APPLY-ON: wsl linux
+# CHECK-ON: wsl linux
 # NEEDS: root
 #
 # ⚖ ARBITRAGE USER 2026-08-18 : « soit on fait rien, l'user clone et monte des bancs docker ; soit
 # on installe et on crée la forge dans le pack ». C'est la seconde.
+#
+# ⚠ `wsl linux` ET PAS `wsl` : le terrain de ce module est LE RAIL POSTE, pas un noyau. Il a porté
+# `wsl` seul pendant deux jours, et rien dans son corps ne le justifiait — `docker_endpoint` est
+# déjà substrat-conscient (il choisit son refus selon le terrain), l'adresse est `127.0.0.1`, le
+# compose vient du dépôt. Le seul pré-requis réel est l'image `lcars-fleet:2`, qui porte tofu, la
+# recette et les gestes, et son absence est déjà une dérive NOMMÉE plus bas.
+#
+# CE QUE LE GATE `wsl` A COÛTÉ, mesuré le 2026-08-20 : une install native s'est faite à la main —
+# conteneur Gitea, compte d'administration, jeton master, amorçage en deux passes — c'est-à-dire
+# que les gestes de ce fichier ont été rejoués un par un par un opérateur qui le croyait absent.
+# Un module qui refuse un terrain où il fonctionne n'économise rien : il déplace le travail vers
+# quelqu'un qui le fera moins bien, et sans convergence.
 #
 # POURQUOI CE MODULE EXISTE. Le rail poste-de-travail installe un LCARS qui TOURNE — release posée,
 # `fleet_v2` câblé. Un LCARS qui tourne a besoin d'une forge : c'est là que vivent les projets, les

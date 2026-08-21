@@ -80,6 +80,7 @@ REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 BRANCH="main"
 DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
+FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 WITH_BENCH=0
 declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
@@ -92,7 +93,14 @@ while [[ $# -gt 0 ]]; do
     --bench)          WITH_BENCH=1; shift ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
-    --env|--human|--only|--substrate) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+    # ⚠ `--substrate` EST AUSSI LU ICI, PAS SEULEMENT TRANSMIS. Il était en passe-plat pur : la porte
+    # détectait son substrat, décidait le rail dessus, puis remettait au rail un `--substrate` qui
+    # pouvait dire l'inverse. Les deux étages raisonnaient alors sur deux terrains différents dans le
+    # même geste — et c'est précisément l'étage du haut qui refuse ou autorise. Il reste TRANSMIS :
+    # forcer le substrat doit valoir pour la porte ET pour le rail, jamais pour un seul des deux.
+    --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
+                 PASSTHRU+=("$1" "$2"); shift 2 ;;
+    --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
     # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),
     # et le parseur ci-dessous refuse ce qu'il ne connaît pas : aucune d'elles ne pouvait donc
@@ -168,7 +176,11 @@ fi
 # La distinction est tout le sujet. Deviner « poste », c'est posséder `/etc` de quelqu'un sans son
 # accord ; deviner « boîte », c'est bâtir 3 Go que personne n'a demandés. Les deux erreurs sont
 # graves et asymétriques : une question dont aucune réponse n'est sûre ne doit pas avoir de défaut.
-SUBSTRATE="$(detect_substrate 2>/dev/null || { grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo linux; })"
+SUBSTRATE="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || { grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo linux; })}"
+case "$SUBSTRATE" in
+  wsl|docker|linux) ;;
+  *) echo ""; echo "  ${R}--substrate $SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
+esac
 
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   # WSL1 n'a pas de vrai kernel, donc pas de namespaces, donc pas de bwrap : rien ne peut aboutir.
@@ -187,25 +199,46 @@ fi
 # ⚖ USER : « boot linux : on monte une boîte dans docker. Boot WSL : soit on monte une boîte, et
 # c'est juste le kickstart ; soit on monte un poste, et on s'installe dans WSL. »
 if [[ -z "$RAIL" ]]; then
-  if [[ "$SUBSTRATE" != "wsl" ]]; then
+  if [[ "$SUBSTRATE" != "wsl" ]] && [[ -z "${LCARS_ALLOW_ANY_HOST:-}" || "$SUBSTRATE" != "linux" ]]; then
     # Sur un Linux natif il n'y a rien à deviner : le poste est INTERDIT par le garde de cible du
     # provisionnement (il écrirait `/local` et `/home/private` sur la machine de quelqu'un). Une
     # seule option permise ⇒ pas de question, mais on le DIT.
+    #
+    # ⚠ « UNE SEULE OPTION » DEVIENT FAUX DÈS QUE `LCARS_ALLOW_ANY_HOST` EST POSÉ, d'où la condition
+    # ci-dessus. Le drapeau est un ACTE : il dit « cette machine-ci est dédiée, je sais ce que le
+    # rail poste y prend ». Continuer à afficher « une seule option est permise » pendant qu'une
+    # seconde l'est serait le mensonge que ce dépôt refuse partout ailleurs — et il enverrait
+    # l'opérateur monter une boîte alors qu'il vient de déclarer vouloir l'inverse.
     RAIL=box
     echo ""
     echo "  ${W}Linux natif${N} — une seule option est permise ici : la boîte."
-    echo "  (le rail poste écrit dans /etc, /local et /home/private : il est réservé à WSL)"
+    echo "  (le rail poste écrit dans /etc, /local et /home/private : il est réservé à WSL,"
+    echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
   else
     # Les deux sont possibles. On demande, et la question dit ce que chaque branche PREND —
     # le coût est dans la question, pas après.
+    #
+    # ⚠ LA QUESTION DIT OÙ ON EST, et les deux terrains n'ont pas le même coût. Sur WSL le rail
+    # poste possède `/etc/wsl.conf` en entier ; sur une machine dédiée il n'y a pas de wsl.conf mais
+    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et
+    # l'absence de désinstalleur y pèse d'un cran de plus. Une question qui décrirait le mauvais
+    # terrain ferait choisir sur un coût qui n'est pas celui qu'on paie.
+    if [[ "$SUBSTRATE" == "wsl" ]]; then
+      _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
+      _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
+     /local et /home/private · et il n'existe AUCUN désinstalleur."
+    else
+      _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
+      _prend="sudo · un groupe système · /local et /home/private · des paquets ·
+     et il n'existe AUCUN désinstalleur — ici il n'y a pas de distro à jeter derrière."
+    fi
     cat <<EOF
 
-  ${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}
+  $_ici
 
-  ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque, éditable depuis Windows,
+  ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque,
      la fleet tourne sous ton uid, le gate en 40 s.
-     ${R}Ça prend${N} : sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /local et /home/private · et il n'existe AUCUN désinstalleur.
+     ${R}Ça prend${N} : $_prend
 
   ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
      pas de paquet, pas d'utilisateur, pas de groupe, rien dans /etc ni /usr.
@@ -242,12 +275,39 @@ if [[ "$RAIL" == "workstation" ]]; then
   # installer sudo pour se faire refuser ensuite. Mesuré en CI, où le job tourne non-root et sans
   # sudo dans un conteneur : le refus sortait « sudo est absent » sur une machine dont le vrai
   # problème est qu'elle n'est pas un poste de travail.
-  [[ "$SUBSTRATE" == "wsl" ]] || {
-    echo ""
-    echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
-    echo "    bash $0 --box"
-    exit 1
-  }
+  #
+  # ⚠ ET LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ — la distinction est tout ce qui change ici.
+  # Ce rail est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système, /local,
+  # /home/private, aucun désinstalleur), pas parce qu'il ne saurait pas y tourner : sur une machine
+  # DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
+  # quelqu'un ; il ne décrète pas que le natif est hors d'atteinte.
+  #
+  # `LCARS_ALLOW_ANY_HOST` est donc lu ICI comme il l'est dans `00-preflight` — MÊME drapeau, même
+  # sens, aux deux étages. Il ne l'était qu'en bas : la porte refusait avant que le rail n'ait la
+  # chance de le lire, donc le drapeau était inatteignable par le chemin nominal et ne servait qu'à
+  # qui appelait `provision` à la main. Un drapeau qu'on ne peut pas atteindre par la porte est un
+  # drapeau qui n'existe pas.
+  #
+  # `docker` reste refusé QUOI QU'IL ARRIVE : installer le rail poste DANS un conteneur n'a pas de
+  # sens (c'est le rail boîte qui fait ça, au build de l'image), et aucun drapeau ne rend ça vrai.
+  if [[ "$SUBSTRATE" != "wsl" ]]; then
+    if [[ "$SUBSTRATE" == "linux" && -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
+      echo ""
+      echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
+      echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /home/private."
+      echo "  Il n'y a AUCUN désinstalleur, et rien de LCARS n'est mesuré sur ce substrat."
+    else
+      echo ""
+      echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
+      echo "    bash $0 --box"
+      [[ "$SUBSTRATE" == "linux" ]] && {
+        echo ""
+        echo "  Si cette machine est DÉDIÉE à LCARS et que tu acceptes qu'il la possède :"
+        echo "    sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
+      }
+      exit 1
+    fi
+  fi
   # ⚠ `--bench` N'A AUCUN OBJET ICI, ET L'AVALER EN SILENCE EST LA FAUTE QU'ON CORRIGE PARTOUT
   # AILLEURS. Ce drapeau FOURNIT les annexes (forge jetable + runner) au rail boîte ; le rail poste,
   # lui, monte sa propre forge par `48-forge-host`, dans son propre cycle de convergence. Le lire
@@ -283,7 +343,13 @@ if [[ "$RAIL" == "workstation" ]]; then
   # que le bandeau : le coût s'annonce, il ne se découvre pas. Ce qui serait faux, c'est d'écraser
   # en silence : un `[user] default=` présent partirait sans un mot, et la distro se rouvrirait
   # sur un autre utilisateur au prochain `wsl --shutdown`. Constaté sur une instance vierge.
-  if [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
+  #
+  # ⚠ ET IL NE S'ANNONCE QUE LÀ OÙ IL EST VRAI. `30-wsl` porte `APPLY-ON: wsl` : sur une machine
+  # dédiée non-WSL, ce rail ne touche JAMAIS `/etc/wsl.conf`. Un fichier de ce nom peut pourtant s'y
+  # trouver — recopié, hérité d'une image, posé par un outil tiers — et le bloc l'annonçait alors
+  # comme condamné. Promettre une destruction qui n'aura pas lieu est du même ordre qu'en taire une
+  # qui aura lieu : dans les deux cas l'opérateur consent à autre chose que ce qui se passe.
+  if [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
     echo "  C'est la frontière de sécurité de la boîte (C: fermé, interop coupé), donc il n'est pas"
@@ -312,11 +378,15 @@ ${AMBER}    ______________________________________________________
 EOF
 
 if [[ "$RAIL" == "workstation" ]]; then
+  # `/etc/wsl.conf` n'est pris QUE sur WSL (`30-wsl`, APPLY-ON: wsl). Le bandeau annonce le coût :
+  # y nommer un fichier qu'on ne touchera pas sur cette machine-ci est un coût inventé, et un coût
+  # inventé décrédibilise ceux qui sont vrais.
+  if [[ "$SUBSTRATE" == "wsl" ]]; then _banner_wslconf="· /etc/wsl.conf. "; else _banner_wslconf="                  "; fi
   cat <<EOF
 ${CYAN}  ┌─────────────────────────────────────────────────────────┐
   │${W}  RAIL POSTE — LCARS s'installe DANS ce système.${N}          ${CYAN}│
   │${N}  sudo · paquets · groupe fleet · /local · /home/private  ${CYAN}│
-  │${N}  · /etc/wsl.conf. ${R}Aucun désinstalleur n'existe.${N}         ${CYAN}│
+  │${N}  ${_banner_wslconf}${R}Aucun désinstalleur n'existe.${N}         ${CYAN}│
   │${N}  Idempotent : relancer est toujours sûr ; « --check »    ${CYAN}│
   │${N}  sonde sans rien modifier.                               ${CYAN}│
   │${N}  Confinement : les pods tournent sous bwrap, la fleet    ${CYAN}│
@@ -453,8 +523,14 @@ if [[ "$EUID" -ne 0 ]]; then
   # traversant : `PROV_COLOR=1 bash install.sh` colorisait le preflight puis rendait un
   # provisionnement blanc, sans que rien ne dise pourquoi. Les assignations en tete de commande
   # sont la forme que sudo laisse passer — on les nomme, une par une, plutot que d'ouvrir `-E`.
+  #
+  # ⚠ QUATRIÈME EXEMPLAIRE, ET LE PLUS COÛTEUX : `LCARS_ALLOW_ANY_HOST`. Sans lui dans cette liste,
+  # la machine dédiée est INSTALLABLE EN THÉORIE ET REFUSÉE EN PRATIQUE — la porte lit le drapeau,
+  # décide de laisser passer, escalade… et la seconde instance ne le voit plus, donc se refuse
+  # elle-même avec le message qui invite à poser le drapeau qu'on vient de poser. Le refus est alors
+  # parfaitement circulaire, et rien dans la sortie ne dit que sudo est passé entre les deux.
   REEXEC_ENV=()
-  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES; do
+  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST; do
     [[ -n "${!_v:-}" ]] && REEXEC_ENV+=("$_v=${!_v}")
   done
   exec sudo "${REEXEC_ENV[@]}" bash "$(readlink -f "$0")" "${REEXEC_ARGS[@]}" "${PASSTHRU[@]}"
