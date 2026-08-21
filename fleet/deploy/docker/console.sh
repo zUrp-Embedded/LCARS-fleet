@@ -118,6 +118,139 @@ finally:
     s.close()
 PROBE
 }
+# ─── « VIVANTE » NE DIT PAS « A JOUR ». LE CREDENTIAL DE LA CONSOLE PERIME, ET RIEN NE LE RATTRAPE ─
+#
+# MESURE DU 2026-08-21, ET C'EST LE DEFAUT QUI RENDAIT LA PROMOTION INOPERANTE. Une console est
+# lancee par `setpriv --reuid <h> --regid <h> --init-groups`, et `--init-groups` lit la base des
+# groupes UNE FOIS, a l'exec. Le set atterrit donc dans TTYD, et tout ce qu'il engendre en herite :
+# le serveur tmux, le shell, ce que l'humain y tape. Quand le convergeur projette `is_admin` en
+# `usermod -aG lcars-admin`, il ecrit /etc/group et ne touche AUCUN process vivant — la regle Unix
+# qui vaut deja pour la revocation, en tete de `human-converger.sh`.
+#
+# Jusqu'ici la sonde d'idempotence ci-dessus etait le SEUL predicat : socket qui repond -> on ne
+# touche a rien. Pour la console du deck, la consequence n'etait pas « effectif a sa prochaine
+# session », c'etait JAMAIS : l'onglet ne redemarre pas, `ensure_console` retourne tot a chaque
+# tour, et ce ttyd garde les groupes de sa naissance pour la duree du conteneur. Or c'est la SEULE
+# surface ou l'humain tape des commandes — donc la seule ou son adminite se depense.
+#
+# ⚠ `tmux kill-server` NE REPARE RIEN, et je l'ai prescrit pendant un jour dans le refus de
+# `lcars catalogue install`. Le serveur tmux n'est pas le porteur du cache, il en est l'HERITIER :
+# le suivant naitra sous le meme ttyd perime, avec exactement les memes groupes.
+#
+# ⚖ ARBITRAGE USER (2026-08-21) : ON NE TUE RIEN, ON TAPE `newgrp`.
+# Premiere ecriture : tuer ttyd et le serveur tmux, laisser `ensure_console` relancer. Ca marche et
+# c'est disproportionne — on detruit un porteur pour rafraichir un shell. `newgrp` fait exactement
+# le meme travail (il est setuid-root, relit /etc/group, et demarre un shell avec le set a jour)
+# sans rien detruire. Le pire risque devient : la ligne a moitie tapee est perdue, et l'humain perd
+# cinq secondes. Le geste porte donc son propre commentaire, visible a l'ecran.
+#
+# CE QUE `newgrp` NE REPARE PAS, et il faut le savoir : il corrige LE SHELL DE CE PANE, pas ttyd ni
+# le serveur tmux. Une fenetre tmux ouverte plus tard nait du serveur, donc perimee — et retombe
+# sur le refus de `lcars`, qui nomme `newgrp`. On repare le cas courant automatiquement ; le cas
+# rare garde un message juste. C'est strictement mieux que l'etat precedent, ou aucun des deux
+# n'etait vrai.
+#
+# SOUS-ENSEMBLE, PAS EGALITE — DECISION EXPLICITE (⚖ user, 2026-08-21). On agit quand la base a un
+# groupe que le process n'a PAS (promotion). Le cas inverse — le process porte un groupe que la
+# base a retire (demotion) — ne declenche rien : `newgrp` ne peut de toute facon RIEN retirer, et
+# la demotion est un probleme de fail-open qui se traite ailleurs.
+PROC_ROOT="${LCARS_PROC_ROOT:-/proc}"
+
+console_ttyd_pid() { # <repertoire de socket> <humain> — le pid du ttyd de la console, ou vide
+  pgrep -u "$2" -f "$1/console.sock" 2>/dev/null | head -1
+}
+
+db_gids() { # <humain> — les gid de la BASE, tries, sur une ligne
+  id -G "$1" 2>/dev/null | tr ' ' '\n' | sort -n | tr '\n' ' '
+}
+
+# LA MESURE, ET ELLE EST AUSSI L'ARGUMENT. Elle rend le premier groupe que la BASE accorde et que
+# le ttyd de cette console ne porte pas ; vide = rien a faire. Un seul objet pour le predicat et
+# pour le geste : deux fonctions se seraient repondu differemment le jour ou l'une aurait derive.
+#
+# ⚠ FAIL-OPEN DELIBERE SUR L'ABSENCE DE MESURE : sans pid, sans /proc lisible, sans `id -G`, elle
+# rend vide et on n'agit pas. Un `newgrp` envoye sur une mesure ratee tombe dans un shell qui n'en
+# avait pas besoin.
+missing_group_of() { # <repertoire de socket> <humain> — nom du groupe manquant, ou vide
+  local pid proc_gids g
+  pid="$(console_ttyd_pid "$1" "$2")"
+  [[ -n "$pid" && -r "$PROC_ROOT/$pid/status" ]] || return 0
+  # `Groups:` ne porte QUE les groupes supplementaires — le gid primaire vit sur `Gid:`, et
+  # l'oublier ferait declarer perime tout process dont le gid primaire est dans `id -G`,
+  # c'est-a-dire TOUS. Les deux lignes, donc, et un tampon d'espaces pour que `2000` ne matche
+  # pas `12000`.
+  proc_gids=" $(awk '/^Groups:/{ $1=""; print } /^Gid:/{ print $2 }' "$PROC_ROOT/$pid/status" \
+                 | tr '\n' ' ') "
+  for g in $(db_gids "$2"); do
+    [[ "$proc_gids" == *" $g "* ]] && continue
+    getent group "$g" 2>/dev/null | cut -d: -f1
+    return 0
+  done
+}
+
+# LE TAMPON, ET IL EST NECESSAIRE PARCE QUE LA MESURE NE GUERIT PAS. `newgrp` cree un shell ENFANT :
+# le `pane_pid` que tmux rapporte reste celui du shell d'origine, qui n'aura jamais le groupe. Un
+# convergeur qui remesurerait sans se souvenir retaperait `newgrp` toutes les 30 s, indefiniment —
+# le cousin exact du defaut des 64 ttyd empiles. On enregistre donc le set de groupes pour lequel on
+# a deja tape : une frappe par changement de groupes, pas une par tour.
+#
+# ⚠ IL S'ECRIT APRES UNE FRAPPE REUSSIE, JAMAIS AVANT. Pose d'avance, il consommerait le droit
+# d'agir sur une console ou aucun pane n'etait frappable — celle dont l'unique pane fait tourner un
+# agent, precisement le cas courant ici. Ecrit apres, la reparation attend simplement que l'humain
+# revienne a son shell.
+creds_stamp_path() { printf '%s/.creds-generation' "$1"; }
+
+# LA FRAPPE. Un seul geste, et il ne s'execute que dans un SHELL.
+#
+# ⚠ `pane_current_command` EST LA GARDE, ET ELLE N'EST PAS DECORATIVE. Sans elle, `send-keys` ecrit
+# dans ce qui tourne dans le pane : un prompt d'agent, un `vim`, un `sudo` qui attend un mot de
+# passe. Le cout annonce (« une ligne a moitie tapee est perdue ») n'est vrai QUE devant un shell ;
+# devant autre chose, la meme frappe est une injection dans un programme tiers. On compare au shell
+# de passwd — celui-la meme que ttyd a lance — plutot qu'a une liste de noms de shells a maintenir.
+#
+# `C-u` d'abord : il vide la ligne en cours. C'est ce qui rend le cout borne a « la commande en
+# cours de frappe est perdue » au lieu de « elle est concatenee avec la notre ».
+#
+# LE GROUPE VISE EST CELUI QUI MANQUE, pas un nom recopie ici. S'il en manque plusieurs, le premier
+# suffit : `newgrp` n'en prend qu'un, et le shell qu'il ouvre porte TOUS les groupes de la base de
+# toute facon — l'argument ne choisit que le gid PRIMAIRE.
+nudge_console_creds() { # <humain> <shell de login> <groupe manquant> — 0 si au moins un pane frappe
+  local human="$1" grp="$3" shell_base panes pane cmd hit=1
+  shell_base="$(basename "$2")"
+
+  # ⚠ `env -u TMUX` N'EST PAS UNE PRECAUTION DE STYLE. `runuser` transmet l'environnement, et un
+  # operateur qui lance ce script A LA MAIN le lance depuis un tmux — le sien. Sans ce retrait,
+  # `tmux` viserait la socket de l'APPELANT au lieu de celle de l'humain, et `send-keys` taperait
+  # dans la console de quelqu'un d'autre. Le mode 0700 de la socket refuserait aujourd'hui par
+  # accident ; se reposer sur l'accident, c'est attendre le jour ou les deux uid coincident.
+  panes="$(runuser -u "$human" -- env -u TMUX -u TMUX_PANE tmux list-panes -a \
+             -F '#{pane_id}	#{pane_current_command}' 2>/dev/null || true)"
+  [[ -n "$panes" ]] || return 1
+
+  while IFS=$'\t' read -r pane cmd; do
+    [[ -n "$pane" && "$cmd" == "$shell_base" ]] || continue
+    # ⚠ DEUX APPELS, LE TEXTE PUIS `Enter` — ET CE N'EST PAS UN GOUT. Fusionner la frappe et sa
+    # validation dans un seul `send-keys` ne tient pas : la ligne arrive, la validation se perd, et
+    # ce qui reste a l'ecran est une commande TAPEE MAIS PAS LANCEE — un etat qui a exactement
+    # l'air d'une reparation reussie tant qu'on ne regarde pas le pane. Mesure de l'operateur,
+    # douze fois. La mienne, sur un bash nu hors console, ne l'a PAS reproduit : elle prouve donc
+    # seulement que le bash nu n'est pas la console, pas que la fusion serait sure.
+    #
+    # Separer donne aussi ce qu'on ne pouvait pas avoir fusionne : si le texte ne passe pas, on ne
+    # valide RIEN. Fusionne, un envoi partiel se serait fait executer.
+    runuser -u "$human" -- env -u TMUX -u TMUX_PANE tmux send-keys -t "$pane" C-u \
+      "newgrp $grp ### reset des perms de groupe : newgrp recharge les groupes de ce shell ###" \
+      >/dev/null 2>&1 || continue
+    runuser -u "$human" -- env -u TMUX -u TMUX_PANE tmux send-keys -t "$pane" Enter \
+      >/dev/null 2>&1 || continue
+    say "console de $human : « newgrp $grp » tape dans $pane (groupes acquis depuis son lancement)"
+    hit=0
+  done <<< "$panes"
+
+  return "$hit"
+}
+
+
 
 # Rend le repertoire de socket de l'humain, cree et garde. Echoue FORT : une socket qui sort dans le
 # mauvais groupe est injoignable par le deck, et la console serait morte sans que rien ne le dise.
@@ -208,7 +341,21 @@ launch_one() {
 
   # RIEN A FAIRE SI ELLE REPOND DEJA. C'est ce qui rend ce script rejouable a chaque tour du
   # convergeur sans empiler un ttyd de plus — cf. `console_alive` en tete pour la mesure de 64.
+  #
+  # ⚠ ON NE SORT PLUS SANS REGARDER LE CREDENTIAL. Une console vivante peut porter des groupes que
+  # la base a depasses, et c'est le cas NORMAL apres une promotion (cf. `missing_group_of`). La
+  # reparation ne relance rien : elle tape `newgrp` dans les panes qui sont a un shell.
   if console_alive "$sock"; then
+    local grp want have
+    grp="$(missing_group_of "$sock_dir" "$human")"
+    if [[ -n "$grp" ]]; then
+      want="$(db_gids "$human")"
+      have="$(cat "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true)"
+      if [[ "$want" != "$have" ]]; then
+        nudge_console_creds "$human" "$login_shell" "$grp" \
+          && printf '%s' "$want" > "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true
+      fi
+    fi
     launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir"
     return 0
   fi

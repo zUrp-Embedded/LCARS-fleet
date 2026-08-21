@@ -371,6 +371,45 @@ EOF
   [[ "$output" != *"Engineer test SP"* ]]
 }
 
+# =============================================================
+# DEBUG EXCEPTION — A/B ON THE ARCHITECT'S SP — POSTED 2026-08-21 — LEAVES WITH IT
+#
+# These two witnesses do not defend a contract, they stop an EMPTY TRIAL: an A/B whose two arms
+# pass the same flag measures nothing, and its conclusion — whatever it is — would be noise taken
+# for a result. The measured block lives in `claude_launch.sh`, just above the `exec`; when it
+# goes, these two tests go with it.
+# =============================================================
+
+@test "DEBUG A/B: the architect gets --append-system-prompt-file (vendor SP stays upstream)" {
+  # ⚠ THE ARM IS CHOSEN ON THE CAP-PROFILE'S `metadata.name`, not on the positional — so it is the
+  # PROFILE we flip here, and the positional stays `engineer` to prove exactly that.
+  cat > "$POD_DIR/.cap-profile.json" <<'EOF'
+{
+  "api_version": "lcars/v2.5",
+  "kind": "CapabilityProfile",
+  "metadata": {"name": "architect"},
+  "spec": {"scope": {"allowedTools": ["Read"], "disallowedTools": ["web_search"]}}
+}
+EOF
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$output" == *"--append-system-prompt-file $POD_DIR/.lcars/system-prompt.md"* ]]
+
+  # THE TWO ARMS ARE EXCLUSIVE. Passing both flags would let the vendor arbitrate an order we did
+  # not choose, and the trial would no longer say which one it measured.
+  [[ "$output" != *" --system-prompt-file "* ]]
+
+  # The SP still does not leak into the argv — the exception changes the flag, never the doctrine.
+  [[ "$output" != *"Engineer test SP"* ]]
+}
+
+@test "DEBUG A/B: every other role keeps --system-prompt-file — the exception does not spread" {
+  # The half that counts. An exception biting on the other roles would not be an A/B, it would be a
+  # fleet-wide behaviour change posted without being named.
+  run "$SCRIPT" engineer pod-1 "$POD_DIR"
+  [[ "$output" == *"--system-prompt-file $POD_DIR/.lcars/system-prompt.md"* ]]
+  [[ "$output" != *"--append-system-prompt-file"* ]]
+}
+
 @test "flags: --permission-mode default by default (#kill-yolo: lists ENFORCED, no skip)" {
   # The world is already shaped (bwrap RO/RW + cap-profile allow/deny), so we no longer use
   # --dangerously-skip-permissions, which neutralized the lists. With no

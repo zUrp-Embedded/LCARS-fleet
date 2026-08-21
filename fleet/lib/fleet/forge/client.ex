@@ -63,18 +63,39 @@ defmodule Fleet.Forge.Client do
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
-  # ⚠ LE SEAM `:forge_client` DOIT PORTER CE QUE SES APPELANTS TAPENT DESSUS. `get_file/3` vit dans
-  # `.Files`, mais `Fleet.MCP.PodTools.Probe` l'appelle via `forge()` — dont le défaut est CE module.
-  # Sans cette ligne, `forge().get_file(...)` levait `undefined or private` À L'EXÉCUTION seulement :
-  # le stub de test, lui, définissait `get_file`, donc la suite restait verte pendant que le rail
-  # réel plantait au banc (les deux juges, `{:tool_crashed, "run_probe", …get_file/3 undefined}`).
-  # Le mur qui prouve que ce trou ne se rouvre pas : `probe_seam_contract_test.exs`.
+  # ⚠ ET LE MEME TROU A ETE TROUVE DEUX FOIS LE MEME JOUR, PAR DEUX APPELANTS. Vanille l'a rencontre
+  # par `Fleet.MCP.PodTools.Probe` (`forge().get_file`, chemin de `run_probe`, l'outil des juges) et
+  # a pose `probe_seam_contract_test.exs` ; bob l'a rencontre par `Delegation.ForgeWriter` et a pose
+  # `seam_conformance_test.exs`, qui verifie les cinq seams a la fois. Les deux murs restent : le
+  # premier garde CE seam-la, le second garde la classe. Un defaut trouve deux fois par deux chemins
+  # n'est pas un doublon a arbitrer — c'est la mesure de sa surface.
   #
-  # ⚠ LE `@spec` EST RECOPIÉ DE `.Files`, ET C'EST LE PRIX D'UN `defdelegate`. Le contrat vit à la
-  # SOURCE ; ici il est redit parce que `types.public_functions_spec` (gate, cae5c78c7) mesure la
-  # fonction publique de CE module, et qu'un délégué en est une — Dialyzer, sans lui, l'analyse au
-  # contrat le plus permissif qu'il puisse inférer. Les quatre `defdelegate` au-dessus portent le
-  # leur pour la même raison ; celui-ci est arrivé par une branche antérieure au mur.
+  # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI, PAS PARCE QUE LA FACADE VOUDRAIT GROSSIR.
+  # `Delegation.ForgeWriter` declare six callbacks et pointe son defaut sur `Fleet.Forge.Client`.
+  # Cinq sont definis ici meme ; `put_file/4` est le seul a avoir ete sorti dans `Client.Files` sans
+  # etre reexpose. La demande d'outillage mourait donc en
+  # `{:seam_misconfigured, Fleet.Forge.Client, [put_file: 4]}` — mesure du 2026-08-21, un architecte
+  # qui tirait une toolchain rust, deux fois de suite.
+  #
+  # Le garde a fait exactement son travail : il a nomme le module ET la fonction manquante au lieu
+  # de lever un `UndefinedFunctionError` au fond de la delegation. Ce qui manquait est en amont —
+  # rien ne verifiait que l'implementation PAR DEFAUT d'un seam tient le contrat qui la designe.
+  # C'est ce que ferme desormais `seam_conformance_test.exs`, pour les cinq seams a la fois.
+  @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, term()} | {:error, term()}
+  defdelegate put_file(repo, path, content, opts), to: Fleet.Forge.Client.Files
+
+  # SON JUMEAU, ET IL TOMBAIT PLUS DUREMENT. `Client.Files` porte `get_file` ET `put_file` ; la
+  # facade ne reexposait NI l'un NI l'autre, et deux appelants distincts tapaient dedans. Celui-ci
+  # est `probe.ex:173` — `forge().get_file(repo, "CLAUDE.md", …)`, sur le chemin de `run_probe`,
+  # l'outil des juges. Arites exportees par la facade avant ce jour : AUCUNE.
+  #
+  # ⚠ LA DIFFERENCE DE MANIFESTATION EST TOUTE LA LECON. `put_file` passe par un behaviour, donc
+  # `conforming/2` rendait `{:seam_misconfigured, …, [put_file: 4]}` : un refus qui NOMME quoi
+  # reparer. Le seam de `probe.ex` (`get_env(:lcars_fleet, :mcp_probe_forge_client, …)`) ne declare aucun
+  # `@callback` — aucun garde n'avait rien a verifier, et le juge recevait un
+  # `UndefinedFunctionError` brut. Meme defaut, meme module, meme decoupage : seule la presence d'un
+  # contrat change ce qu'en voit celui qui le subit.
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
           {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
   defdelegate get_file(repo, path, opts), to: Fleet.Forge.Client.Files

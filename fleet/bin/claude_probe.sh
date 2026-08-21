@@ -51,6 +51,13 @@ done
 # omission — elle attesterait un contrat plus petit que celui dont on depend).
 REQUIRED=(
   --system-prompt-file      # le SP du role ; sans lui le pod demarre SANS son mandat
+  # ⚠ EXCEPTION DE DEBUG (2026-08-21) : le bras APPEND de l'A/B du SP de l'architect. Cette ligne
+  # n'est PAS un choix — `claude_probe.bats:106` verrouille « tout drapeau passe en argv est ici ».
+  # Elle part avec l'exception, dont le bloc vit dans `claude_launch.sh` juste avant l'`exec`.
+  # Elle a aussi un metier propre en attendant : le `-file` n'a pas d'entree a lui dans `--help`
+  # (il vit dans la notation a crochets, comme son voisin), donc c'est cette sonde qui attrapera la
+  # version du vendor ou il disparait — plutot qu'un pod qui demarre sans mandat.
+  --append-system-prompt-file
   --setting-sources         # d'ou viennent les settings ; sans lui, ceux de l'humain fuient
   --settings                # le settings.json compose du pod
   --mcp-config              # la socket MCP par-pod

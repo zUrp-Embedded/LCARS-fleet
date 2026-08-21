@@ -81,6 +81,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   alias Fleet.Project.GitOps
 
   @scratch_file "scratchpad.md"
+  # En NOTES. Une note occupe plusieurs lignes : compter les lignes reclamerait le tri cinq fois
+  # trop tot.
   @scratch_nudge_at 150
 
   alias Fleet.MCP.PodTools.Delegation.{
@@ -808,7 +810,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   by the other door.
 
   THE NUDGE RIDES ON THE RETURN VALUE, and that is the whole mechanism. Past `#{@scratch_nudge_at}`
-  lines the answer stops being a receipt and asks for a triage. An agent cannot NOT read what the
+  NOTES the answer stops being a receipt and asks for a triage. An agent cannot NOT read what the
   tool it just called gave back — this is the only place in the system where a rule reaches it AT
   THE MOMENT OF THE GESTURE, instead of a spawn-time instruction that a compaction removes first.
 
@@ -831,12 +833,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  # La racine passe par `workshop_root/0` : une porte qui ecrit un chemin de production en dur ne
+  # peut etre prouvee par aucun test.
   defp scratch_write(repo, note) do
-    dir = Path.join(Fleet.Layout.workshop_root(), Fleet.Layout.project_name(repo))
+    dir = Path.join(workshop_root(), Fleet.Layout.project_name(repo))
     path = Path.join(dir, @scratch_file)
 
     if File.dir?(dir) do
-      case File.write(path, scratch_line(note), [:append]) do
+      case File.write(path, scratch_block(note), [:append]) do
         :ok ->
           _ = scratch_publish(dir, repo)
           {:ok, scratch_receipt(path)}
@@ -849,14 +853,29 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Une seule ligne par note, meme si la note en compte plusieurs : le fichier se relit en
-  # diagonale au tri, et une entree qui s'etale sur dix lignes rend le tri illisible. Les retours
-  # a la ligne deviennent des ` / ` — on garde le texte, on perd la mise en page, c'est le bon
-  # arbitrage pour un bloc-notes.
-  defp scratch_line(note) do
-    {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
-    stamp = :io_lib.format("~2..0B-~2..0B ~2..0B:~2..0B", [mo, d, h, mi]) |> IO.iodata_to_binary()
-    "#{stamp} #{note |> String.split(~r/\s*\n+\s*/) |> Enum.join(" / ")}\n"
+  # Un bloc markdown par note — le fichier est lu dans un rendu, et la note garde sa mise en forme.
+  #
+  #     <ligne vide>
+  #     #### AAAA-MM-JJ - hh:mm
+  #     <ligne vide>
+  #     la note
+  #     <ligne vide>
+  #     ---
+  #
+  # ⚠ LA LIGNE VIDE AVANT `---` EST PORTANTE. Colle sous du texte, `---` n'est pas une barre : c'est
+  # un SOULIGNEMENT DE TITRE, et il transforme la derniere ligne de la note en `<h2>`. Le defaut ne
+  # se voit qu'au rendu.
+  #
+  # `####` et pas `###` : au tri, les notes se rangent sous les titres `###` que l'architecte pose,
+  # sans retoucher chaque bloc.
+  defp scratch_block(note) do
+    {{y, mo, d}, {h, mi, _s}} = :calendar.local_time()
+
+    stamp =
+      :io_lib.format("~4..0B-~2..0B-~2..0B - ~2..0B:~2..0B", [y, mo, d, h, mi])
+      |> IO.iodata_to_binary()
+
+    "\n#### #{stamp}\n\n#{String.trim(note)}\n\n---\n"
   end
 
   # Best-effort DELIBERE : une note ecrite mais non poussee est une note ecrite. Faire echouer le
@@ -895,20 +914,22 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
+  # On compte les TITRES, c'est-a-dire les notes. Compter les lignes rendait le meme nombre tant
+  # qu'une note valait une ligne ; en blocs, il rendrait cinq fois trop.
   defp scratch_receipt(path) do
-    lines =
+    notes =
       case File.read(path) do
-        {:ok, c} -> c |> String.split("\n", trim: true) |> length()
+        {:ok, c} -> Regex.scan(~r/^#### /m, c) |> length()
         _ -> 0
       end
 
-    base = %{"ok" => true, "lines" => lines}
+    base = %{"ok" => true, "notes" => notes}
 
-    if lines >= @scratch_nudge_at do
+    if notes >= @scratch_nudge_at do
       Map.put(
         base,
         "next",
-        "Le scratchpad passe #{lines} lignes. Propose un tri a ton humain : ce qui reste a faire " <>
+        "Le scratchpad porte #{notes} notes. Propose un tri a ton humain : ce qui reste a faire " <>
           "part au backlog, ce qui est specifie part en plans/, ce qui attend son jour de neige " <>
           "reste nomme, le reste se jette. Puis vide ce qui a ete range — l'append-only vaut pour " <>
           "l'ecriture au fil de l'eau, pas contre le menage."
@@ -1764,12 +1785,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # `workshop` is where a project's drafting matter lives (`Fleet.Layout`), which is what a lot is
   # made of. The root is overridable the same way the brief's ops root is, for tests that own a
   # temporary clone.
-  defp lot_workspace(repo) do
-    root =
-      Application.get_env(:lcars_fleet, :mcp_lot_workshop_root) || Fleet.Layout.workshop_root()
+  defp lot_workspace(repo), do: Path.join(workshop_root(), Fleet.Layout.project_name(repo))
 
-    Path.join(root, Fleet.Layout.project_name(repo))
-  end
+  # UNE clef pour la racine des faces atelier, deux lecteurs. Deux clefs seraient deux facons de
+  # brancher une moitie et pas l'autre.
+  defp workshop_root,
+    do: Application.get_env(:lcars_fleet, :mcp_workshop_root) || Fleet.Layout.workshop_root()
 
   defp with_lot(body, nil), do: body
 

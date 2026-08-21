@@ -488,6 +488,50 @@ defmodule Fleet.Project.OnboardTest do
     end
   end
 
+  describe "la declaration nomme SON depot — quatre portes, un entonnoir" do
+    # ⚠ TEMOIN DE FORME, ET C'EST DELIBERE — il faut le dire, pas le maquiller. Les quatre portes
+    # d'ecriture (`finish_onboard`, `finish_adopt`, `finish_external`, `revise`) exigent chacune un
+    # depot forge vivant : les jouer demanderait une doublure de forge que ce module n'a pas. Ce qui
+    # EST epinglable sans elle, c'est qu'aucune ne puisse plus ecrire une declaration sans nommer le
+    # depot — et c'est precisement la propriete dont l'absence a produit le defaut quatre fois.
+    #
+    # MESURE DU 2026-08-20 : le guichet presente les cartes de `web-demo`, l'agent en choisit une,
+    # `project_create` refuse en enumerant celles de `fleet`. Le prefiltre resolvait dans le
+    # catalogue du projet, l'ecriture dans la racine.
+    #
+    # Le comportement de l'aiguillage lui-meme, lui, est mesure — cf. `project_intensity_test.exs`,
+    # « write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme ».
+    @onboard_src "lib/fleet/project/onboard.ex"
+
+    test "aucune porte n'appelle `Intensity.write` en direct — toutes passent par l'entonnoir" do
+      src = File.read!(@onboard_src)
+
+      # Un seul appel direct subsiste : celui QUI EST l'entonnoir. Deux voudraient dire qu'une porte
+      # a repris le chemin court, et le chemin court est celui qui oublie.
+      assert length(Regex.scan(~r/Fleet\.Project\.Intensity\.write\(/, src)) == 1
+      assert src =~ ~r/defp write_declaration\(proj_dir, full_name, opts\)/
+    end
+
+    test "l'entonnoir POSE le depot dans les options — le lire ailleurs ne suffirait pas" do
+      src = File.read!(@onboard_src)
+
+      # ⚠ `Keyword.put`, PAS `put_new` : `revision_write_opts/2` reconstruit une liste neuve, et un
+      # appelant qui porterait un `repo:` perime le ferait gagner sur le depot reel.
+      assert src =~ ~r/Keyword\.put\(opts, :repo, full_name\)/
+    end
+
+    test "le depot est POSITIONNEL chez les relais — une cle optionnelle s'oublie en silence" do
+      src = File.read!(@onboard_src)
+
+      # C'est toute la difference entre ce correctif et un quatrieme rustine : le compilateur refuse
+      # desormais un appel qui ne nomme pas le depot. `Intensity.write/2` ne peut pas l'exiger de son
+      # cote — 38 appels legitimes prennent la racine a bon droit — mais ici, l'omettre est TOUJOURS
+      # un defaut.
+      assert src =~ ~r/defp ensure_intensity\(\s*proj_dir,\s*full_name,\s*opts,/
+      refute src =~ ~r/ensure_intensity\((?:dirs\.code|scratch), opts[,)]/
+    end
+  end
+
   describe "l'admission est UNE, pour les cinq verbes d'entree" do
     # ⚖ user, 2026-08-17 : « on a des rails paralleles qui font la meme chose, alors qu'on devrait
     # avoir une seule fonction parametrique » — et « ca serait vachement plus facile a fixer si tous

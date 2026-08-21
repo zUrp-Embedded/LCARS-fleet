@@ -300,8 +300,21 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
   # silently absent brake, which is worse than no brake at all (you would believe you are covered).
   @spec default_brake(String.t(), integer(), term()) :: :ok
+  # ⚠ LE SEAM `:pilot_forge_client` A ETE RETIRE ICI LE 2026-08-21, ET C'EST UNE SUPPRESSION DE CODE
+  # MORT, PAS UN DURCISSEMENT. Mesure : UN seul lecteur (cette ligne), ZERO poseur — ni `config/`,
+  # ni `runtime.exs`, ni un test, ni le deploiement. Il rendait donc `Fleet.Forge.Client` a tous les
+  # coups. Ce n'etait pas un seam, c'etait `Fleet.Forge.Client` ecrit en trois lignes, et son seul
+  # effet observable etait d'etre un TROISIEME nom pour le meme client (`:forge_client`,
+  # `:mcp_forge_client`).
+  #
+  # ⚠ NE PAS BALAYER SES VOISINS PAR RESSEMBLANCE. `:mcp_pod_reaper` et `:mcp_tool_handler` n'ont pas
+  # de poseur non plus, et ils sont LEGITIMES : ce sont des seams de FRONTIERE — `Fleet.MCP` n'a pas
+  # le droit de dependre de `Fleet.Pilot` a la compilation, et l'indirection est ce qui casse le lien.
+  # Celui-ci n'avait pas cette excuse : son propre defaut nommait `Fleet.Forge.Client` en litteral,
+  # dans un module de `Pilot` qui en depend deja partout ailleurs. Le critere n'est pas « personne ne
+  # le pose », c'est « il ne casse rien ET personne ne le pose ».
   def default_brake(repo, number, reason) do
-    forge = Application.get_env(:lcars_fleet, :pilot_forge_client, Fleet.Forge.Client)
+    forge = Fleet.Forge.Client
 
     case forge.add_label(repo, number, Fleet.Labels.awaits_arch(), []) do
       {:ok, _} ->

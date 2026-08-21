@@ -7,7 +7,11 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
   Ce que le juge peut demander, et ce qu'il ne peut PAS choisir.
 
   `async: false` : ces tests posent les coutures d'application (`:mcp_pod_resolver`,
-  `:forge_client`, `:forge_actions`), qui sont globales au nœud.
+  `:mcp_probe_forge_client`, `:forge_actions`), qui sont globales au nœud.
+
+  `:forge_actions` est la seule sans prefixe de proprietaire, et c'est deliberе : elle est PARTAGEE
+  avec `Fleet.Pilot.MergeAndPromote`, pour que la sonde et sa verification ne puissent pas rendre
+  deux avis differents en test. Les deux sites le disent.
   """
 
   # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
@@ -79,7 +83,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
   end
 
   setup do
-    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_client, ForgeStub)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, ForgeStub)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, ActionsStub)
 
     # Un juge de livrable : lié par `repo_id`, JAMAIS par `repo` — c'est l'état réel d'un pod
@@ -191,7 +195,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     defp declared(content) do
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_client, md_forge(content))
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, md_forge(content))
       {:ok, d} = Fleet.MCP.PodTools.Probe.declarations("fleet/p", "sha")
       d
     end
@@ -254,7 +258,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
         def get_file(_r, _p, _o), do: {:error, :not_found}
       end
 
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_client, NoFile)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, NoFile)
       assert {:ok, %{harness: "", test_cmd: ""}} = Probe.declarations("fleet/p", "sha")
     end
   end

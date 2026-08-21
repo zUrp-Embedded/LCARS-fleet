@@ -240,9 +240,23 @@ EOF
       LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
   [ "$status" -eq 1 ]
   [[ "$output" == *"SESSION est anterieure"* ]]
-  [[ "$output" == *"Deconnecte-toi"* ]]
-  # LE MENSONGE INTERDIT : prescrire une promotion deja faite.
+  # LE MENSONGE INTERDIT #1 : prescrire une promotion deja faite.
   [[ "$output" != *"proprietaire de la forge te promeut"* ]]
+
+  # LE MENSONGE INTERDIT #2, et il a vecu un jour : « deconnecte-toi et reconnecte-toi ». La console
+  # du deck survit au rechargement de l'onglet ; on retombe sur le meme process, ne avant la
+  # promotion. L'operateur a suivi ce conseil, rien n'a change, et c'est `newgrp` qui a debloque.
+  [[ "$output" != *"Deconnecte-toi et reconnecte-toi"* ]]
+
+  # LE MENSONGE INTERDIT #3, ET IL A REMPLACE LE #2 PENDANT UN JOUR : « tmux kill-server ». Le
+  # serveur tmux n'est pas le porteur du cache, il en est l'HERITIER — le set de groupes est fige
+  # dans TTYD par `setpriv --init-groups`, et le serveur suivant nait sous ce meme ttyd avec
+  # exactement les memes groupes. Corriger un geste faux par un autre geste faux a coute une heure
+  # a l'operateur, parti chercher une sortie ssh du conteneur.
+  [[ "$output" != *"kill-server"* ]]
+
+  # LE SEUL GESTE QUI MARCHE, et il est nomme.
+  [[ "$output" == *"newgrp lcars-admin"* ]]
 }
 
 @test "catalogue install: compte NON promu — le message general revient, inchange" {

@@ -409,6 +409,43 @@ fi
 # trusted+replace.
 # =============================================================
 
+# ╔════════════════════════════════════════════════════════════════════════════════════════════╗
+# ║  DEBUG EXCEPTION — A/B ON THE ARCHITECT'S SP — POSTED 2026-08-21 — TO BE REMOVED            ║
+# ╚════════════════════════════════════════════════════════════════════════════════════════════╝
+#
+# THIS IS NOT A MECHANISM AND MUST NOT BE READ AS ONE. A hard-coded role test, in a launcher whose
+# every other knob derives from the cap-profile. It exists to answer ONE question and then go:
+# "is the architect less useless when the vendor SP stays upstream of ours?". The answer is
+# measured on a pod; it cannot be reasoned out here.
+#
+# WHAT IS UNDER TEST. The workers are framed by three things — their pod, their SP, their mission —
+# and they do their job. The architect is FREE, and the SP written for it does not frame it. Under
+# `--system-prompt-file` that SP REPLACES the vendor's, so whatever discipline the vendor carries
+# goes with it. Under `--append-system-prompt-file` the vendor's stays upstream and ours is added.
+#
+# ⚠ WHAT THIS ARM CHANGES, AND WHAT TO WATCH: the architect's SP was written to BE the whole system
+# prompt. Appended, the two coexist and the vendor is UPSTREAM — it therefore wins conflicts of
+# tone, of format and of tooling discipline. An arm that behaves better does not prove our SP is
+# good, only that the mixture beats our half alone.
+#
+# THE TEST READS `metadata.name`, NOT `$ROLE`. That positional is consumed NOWHERE else in this
+# file (one presence guard, l.131) and its value was never verified; the cap-profile is already
+# read, already validated, and the launcher dies loud when it is not.
+#
+# ⚠ `claude_probe.sh` NOW CARRIES `--append-system-prompt-file`, and that was not a choice:
+# `claude_probe.bats:106` locks "every flag the launcher passes in argv is in REQUIRED". Removing
+# this exception means removing that line too.
+#
+# THE ORIGINAL LINE, as it stood in the `exec` below — putting it back IS the removal:
+#     --system-prompt-file "$SP_FILE" \
+SP_FLAGS=(--system-prompt-file "$SP_FILE")
+if [[ "$("$JQ_BIN" -r '.metadata.name // empty' "$CAP_PROFILE_JSON" 2>/dev/null)" == "architect" ]]; then
+  SP_FLAGS=(--append-system-prompt-file "$SP_FILE")
+  # THE ARM ANNOUNCES ITSELF, OR THE A/B MEASURES NOTHING. A trial whose side you cannot tell
+  # produces an impression, not a measurement.
+  echo "claude_launch: DEBUG EXCEPTION — architect SP in APPEND mode (the vendor SP stays upstream)" >&2
+fi
+
 # Tool search stays at the VENDOR DEFAULT (on): disabling it (ENABLE_TOOL_SEARCH=false) was
 # weighed 2026-07-18 and REJECTED — it would load every deferred schema into EVERY pod's
 # context (judges included, who arm nothing) to save a single ToolSearch call per
@@ -418,7 +455,7 @@ fi
 exec "$CLAUDE_BIN" \
     "${RC_FLAGS[@]}" \
     "${SESSION_FLAGS[@]}" \
-    --system-prompt-file "$SP_FILE" \
+    "${SP_FLAGS[@]}" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \

@@ -32,6 +32,7 @@ EOF
 }
 
 ALL_FLAGS='  --system-prompt-file <path>
+  --append-system-prompt-file <path>
   --setting-sources <list>
   --settings <json>
   --mcp-config <path>
@@ -59,7 +60,10 @@ ALL_FLAGS='  --system-prompt-file <path>
 }
 
 @test "un drapeau retire par une mise a jour -> exit 1, et il est NOMME" {
-  fake_claude "$(printf '%s' "$ALL_FLAGS" | grep -v 'system-prompt-file')"
+  # ⚠ LE MOTIF PORTE SES DEUX TIRETS, ET CE N'EST PAS DU STYLE : sans eux, `system-prompt-file`
+  # coupe AUSSI `--append-system-prompt-file`, et le temoin mesure deux retraits en annoncant un.
+  # Il resterait vert, sur autre chose que ce qu'il dit.
+  fake_claude "$(printf '%s' "$ALL_FLAGS" | grep -v -- '--system-prompt-file')"
   run env CLAUDE_BIN="$FAKEBIN/claude" bash "$PROBE"
   [ "$status" -eq 1 ]
   [[ "$output" == *"CONTRAT VENDOR ROMPU"* ]]
