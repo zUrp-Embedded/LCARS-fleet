@@ -55,7 +55,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   require Logger
 
-  @manifest "catalogue.yaml"
+  @manifest Fleet.Catalogue.manifest_file()
 
   @typedoc """
   A deposit the forge carries: the catalogue's declared name, where it sits, and the head sha of
@@ -184,33 +184,11 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   defp owner_of(full_name), do: full_name |> String.split("/", parts: 2) |> hd()
 
-  # The manifest is read for ONE field. A full YAML parse would make this listing fail on a
-  # catalogue whose unrelated section is malformed — the identity is what we need here, and
-  # `catalogue verify` is what judges the rest.
-  #
-  # ⚠ COLUMN ZERO, and it is the whole correctness of this read. In YAML an INDENTED `name:` belongs
-  # to the key above it: `roles:\n  name: dev` declares a role, not the catalogue. Accepting leading
-  # whitespace would let the first nested `name:` in the file steal the catalogue's identity — and
-  # it would work by accident on OUR manifests, where the root key happens to come first, then be
-  # wrong on somebody else's. Both catalogues shipped today carry `name:` at column 0.
-  #
-  # ⚠ `[_, name | _]` and not `[_, name]`: the trailing comment group makes `Regex.run/2` return
-  # THREE elements when a comment is present, and the two-element pattern silently fell through to
-  # "no name" — measured by the witness on `name: web   # le metier`.
-  defp manifest_name(yaml) when is_binary(yaml) do
-    yaml
-    |> String.split("\n")
-    |> Enum.find_value(fn line ->
-      case Regex.run(~r/\Aname:\s*"?([^"#\s]+)"?\s*(#.*)?\z/, line) do
-        [_, name | _] -> name
-        _ -> nil
-      end
-    end)
-    |> case do
-      nil -> {:error, :no_name_in_manifest}
-      name -> {:ok, name}
-    end
-  end
+  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation. Elle avait sa copie ici jusqu'au
+  # 2026-08-21 ; la porte explicite (`Onboard.refute_store/2`) a eu besoin de la meme, et sa
+  # frontiere ne peut pas referencer celle-ci. Elargir une frontiere pour avoir raison n'est jamais
+  # le geste — la regle est descendue la ou les deux peuvent la lire.
+  defp manifest_name(yaml), do: Fleet.Catalogue.manifest_name(yaml)
 
   defp group(deposits) do
     by_name = Enum.group_by(deposits, & &1.name)

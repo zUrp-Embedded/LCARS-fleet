@@ -46,8 +46,18 @@ defmodule Fleet.Project.OnboardPreflightTest do
     def org_exists?(_o, _fc), do: {:error, {:transport, :econnrefused}}
   end
 
+  # ⚠ AUCUNE DE CES CIBLES N'EST UN MAGASIN DE CATALOGUE, ET IL FAUT LE DIRE. Depuis le 2026-08-21
+  # `import/2` et `migrate/3` demandent a leur cible « quel catalogue declares-tu ? » avant d'agir,
+  # et une lecture qui ECHOUE est un refus (`:store_check_unreadable`), pas un `:ok`. Sans cette
+  # doublure, la vraie cliente forge repond `{:config, {:missing, :base_url}}` et ces temoins
+  # mesureraient ce refus-la en croyant mesurer le leur.
+  defmodule NotCatalogues do
+    def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
+  end
+
   defp opts(tmp, users),
     do: [
+      forge_files: NotCatalogues,
       # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
       # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
       # installe » — un devineur, mort avec lui.

@@ -41,9 +41,13 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
     end
 
     def get_file(_repo, ".lcars.json", _fc), do: {:error, :not_found}
+
+    # Aucun de ces depots n'est un catalogue : `import/2` le demande desormais avant d'agir.
+    def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
   end
 
   defmodule MuteFiles do
+    def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
     def get_file(_repo, ".lcars.json", _fc), do: {:error, {:http, 502, "gateway"}}
   end
 
@@ -126,6 +130,8 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
     defmodule BadNameFiles do
       def get_file("fleet/Vitrine_2", ".lcars.json", _fc),
         do: {:ok, %{content: "{}", sha: "cafe"}}
+
+      def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
     end
 
     # ⚠ CE QUI N'EST PAS EPINGLE ICI, ET OU IL L'EST. `apply` pose un assureur d'architecte DIFFERE
