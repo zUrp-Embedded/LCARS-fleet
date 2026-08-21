@@ -34,8 +34,10 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     }
   end
 
-  # These tests assert the brief TEXT and kind; the 4th element (the mandate mount) is exercised by
-  # the dispatch/spawn tests. Strip it here so the assertions stay on the 3-tuple they care about.
+  # These tests assert the brief TEXT and kind; the 4th element (the mandate mount) is asserted by
+  # its own test ("build_brief SURFACES the mandate mount", below) and consumed end-to-end by
+  # step_dispatcher_test's "PR judge with a Criteria: pointer → spawn_opts[:mandate]". Strip it here
+  # so these assertions stay on the 3-tuple they care about.
   defp build(forge_opts, opts \\ []) do
     case BriefBuilder.build_brief(
            judge_profile(),

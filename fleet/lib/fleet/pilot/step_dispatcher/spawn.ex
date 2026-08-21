@@ -280,8 +280,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:ok, {ref, sha}} ->
         # LE CONTENU, PAS UN POINTEUR VERS UN ARBRE MONTE. `materialize/3` vient de commiter
         # EXACTEMENT `brief` a `sha` : le contenu pinne est celui qu'on tient deja, aucune relecture
-        # git n'y ajoute quoi que ce soit. L'adresse voyage a cote (`brief_ref`/`brief_sha`) pour
-        # que le pod CITE la version sur laquelle il a agi, et un tiers rejoue depuis la forge.
+        # git n'y ajoute quoi que ce soit. L'adresse voyage a cote (`brief_ref`/`brief_sha`) : le
+        # RUNTIME la grave en provenance a la completion (`put_runtime_brief`), et un tiers rejoue
+        # depuis la forge. Le pod ne la cite plus (F-15 retire).
         #
         # Ce que ca ferme : le pointeur envoyait le pod lire `$LCARS_PROJECT_OPS/<ref>`, donc
         # exigeait de monter l'arbre d'operations ENTIER — tous les briefs, tous les verdicts — pour
@@ -289,9 +290,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         {:ok, brief, [brief_sha: sha, brief_ref: ref]}
 
       # The only genuinely transient cause, and the only one that still degrades. But the ARTIFACT
-      # says so: the pod carries its order AND the fact that it has no sha to cite, instead of that
-      # fact living for one second in a log nobody re-reads. A degraded mode visible only in real
-      # time is not a visible degraded mode.
+      # says so: the order carries the fact that its version is unprovable (no ops sha the runtime
+      # could engrave), instead of that fact living for one second in a log nobody re-reads. A
+      # degraded mode visible only in real time is not a visible degraded mode.
       {:error, {:git, reason}} ->
         Logger.warning(
           "StepDispatcher: brief materialization failed transiently for #{repo}##{issue_number} " <>
@@ -333,8 +334,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # Emitted payload → French with its accents (operator/agent-facing data, cf. CLAUDE.md).
   defp degraded_order(brief) do
     "⚠ PROVENANCE ABSENTE — cet ordre n'a pas pu être commité dans le ops du projet (panne " <>
-      "transitoire). Il n'a donc PAS de sha à citer : signale-le dans ton résultat plutôt que " <>
-      "d'omettre la citation.\n\n" <> brief
+      "transitoire). Le runtime n'a donc pas de sha à graver : ce livrable ne portera pas " <>
+      "d'adresse d'ordre auditable. Tu n'as rien à faire de plus — livre normalement.\n\n" <>
+      brief
   end
 
   defp locked_spawn_step_run(

@@ -47,6 +47,12 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
     end
   end
 
+  # ⚠ NE PAS SUPPRIMER en croyant que le broker (`put_runtime_brief`) fait doublon — il ne le fait
+  # PAS. Le broker injecte `brief_sha` DANS le `result` (imbriqué). CE code pose le `brief_sha` au
+  # TOP-NIVEAU du payload `pod.completed`, et c'est CELUI-LÀ que la provenance lit
+  # (`StepRunBuild.build_deliverable_opts` → `payload["brief_sha"]`). Deux champs distincts, deux
+  # sources runtime : `opts[:brief_sha]` ici (posé par le dispatch, jamais par le pod), le work_item
+  # là. Retirer celui-ci ferait perdre le sha d'ordre à la provenance en silence.
   defp maybe_put_brief_provenance(payload, opts) do
     case Keyword.get(opts, :brief_sha) do
       sha when is_binary(sha) and sha != "" ->

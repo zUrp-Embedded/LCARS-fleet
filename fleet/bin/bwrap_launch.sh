@@ -264,6 +264,20 @@ if [[ -f "$POD_DIR/fleet.feed" ]]; then
   fi
 fi
 
+# `issues/` porte l'ORDRE du pod — `mandate.md` (le mandat, adresse par contenu) et le contexte
+# lisible `issues/<id>.md`. Le pod le LIT, il ne l'ecrit jamais : on le monte RO par-dessus le bind
+# RW du pod_dir (meme geste que fleet.feed), pour que le mandat soit exactement ce qui a ete authore,
+# immuable — le SP promet "lecture seule", l'implementation le tient. Le dossier est cree par le
+# scaffold avant le lancement ; le garde `-d` couvre le pod qui n'en aurait pas.
+ISSUES_BIND_ARGS=()
+if [[ -d "$POD_DIR/issues" ]]; then
+  ISSUES_BIND_ARGS=(--ro-bind "$POD_DIR/issues" "$SANDBOX_HOME/issues")
+  # Meme double-chemin que le feed pour l'arch (cwd RE-MONTE le pod_dir) : sinon l'autre vue reste RW.
+  if [[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" == "$POD_DIR" && "$WORKDIR" != "$SANDBOX_HOME" ]]; then
+    ISSUES_BIND_ARGS+=(--ro-bind "$POD_DIR/issues" "$WORKDIR/issues")
+  fi
+fi
+
 # The per-pod MCP socket dir MUST pre-exist: central creates the socket file BEFORE this launch (unlike
 # the tmux socket dir above, which tmux fills INSIDE the sandbox). We MOUNT it, we do not create it — its
 # absence means the provisioning contract was broken, and a clear failure at the boundary beats binding a
@@ -524,6 +538,7 @@ exec env -i "$BWRAP_BIN" \
   `# APRES les deux binds du pod_dir, delibere : bwrap applique dans l'ordre, donc ce ro-bind` \
   `# RECOUVRE le fichier deja projete en ecriture. Avant, il serait annule par le bind du dossier.` \
   ${FEED_BIND_ARGS[@]+"${FEED_BIND_ARGS[@]}"} \
+  ${ISSUES_BIND_ARGS[@]+"${ISSUES_BIND_ARGS[@]}"} \
   ${AUTH_BIND_ARGS[@]+"${AUTH_BIND_ARGS[@]}"} \
   ${MIRROR_BIND_ARGS[@]+"${MIRROR_BIND_ARGS[@]}"} \
   --ro-bind "$VENDOR_BIN" "$POD_VENDOR_BIN" \

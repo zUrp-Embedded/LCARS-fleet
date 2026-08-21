@@ -1028,8 +1028,10 @@ defmodule Fleet.Spawner.Pod do
   end
 
   # THE MANDATE, MOUNTED — the pod reads its order from a content-addressed file, not from text it
-  # must trust. `LaunchSpec.pin_object` archives exactly the pinned doc at its sha; we place it at
-  # `issues/mandate.md`, next to the readable context the pod already reads. FAIL-CLOSED when a
+  # must trust. `LaunchSpec.pin_object` archives exactly the pinned doc at its sha; we place it under
+  # `<pod_dir>/issues/`, which bwrap binds to the pod's HOME (`/home/.pod`) — so the brief's
+  # `~/issues/mandate.md` (the path the order names, via `get_work_item`) resolves to this file.
+  # FAIL-CLOSED when a
   # mandate is declared (`:mandate` present) but cannot be materialized: the order REFERENCES this
   # file, so a pod without it would read its order from nothing — it does not start, it defers. No
   # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
