@@ -654,3 +654,64 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"source inconnue"* ]]
 }
+
+# ─── LA FORGE A DEUX ADRESSES, ET LES DEUX SE PERSISTENT ────────────────────────────────────────
+#
+# `48-forge-host` derive `LOCAL_URL` (ce que le SERVEUR compose) et `PUBLIC_URL` (ce qu'un
+# NAVIGATEUR atteint), publie la forge sur le bind, ecrit `PUBLIC_URL` dans le `ROOT_URL` de Gitea —
+# et ne persistait QUE la loopback. Tout ce qui vient apres defautait donc l'adresse navigateur sur
+# l'adresse serveur.
+#
+# Mesure du 2026-08-21, poste natif installe a froid, operateur sur une AUTRE machine : le bouton
+# « s'identifier sur la forge » envoyait sur
+#   http://127.0.0.1:3000/login/oauth/authorize?…&redirect_uri=http://10.42.0.63:20999/…
+# Le RETOUR juste, l'ALLER chez le visiteur.
+
+@test "l'adresse PUBLIQUE se relit dans son fichier — l'aller ne defaute plus sur la loopback" {
+  local root; root="$(readlink -f "$SANDBOX/lib/../../..")"
+  local priv="$BATS_TEST_TMPDIR/private"; mkdir -p "$priv"
+  echo "http://127.0.0.1:3000"   > "$priv/forge.url"
+  echo "http://10.42.0.63:3000"  > "$priv/forge.public.url"
+
+  run bash -c "
+    set -euo pipefail
+    export PROV_TOKENS_DIR='$priv' PROVISION_LIB='$SANDBOX/lib/provision-lib.sh'
+    source \"\$PROVISION_LIB\" >/dev/null 2>&1
+    echo \"\$PROV_FORGE_URL|\$PROV_FORGE_PUBLIC_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "http://127.0.0.1:3000|http://10.42.0.63:3000" ]
+}
+
+@test "sans fichier public, le defaut reste l'interne — une boite ou les deux coincident" {
+  local priv="$BATS_TEST_TMPDIR/private2"; mkdir -p "$priv"
+  echo "http://forge:3000" > "$priv/forge.url"
+
+  run bash -c "
+    set -euo pipefail
+    export PROV_TOKENS_DIR='$priv' PROVISION_LIB='$SANDBOX/lib/provision-lib.sh'
+    source \"\$PROVISION_LIB\" >/dev/null 2>&1
+    echo \"\$PROV_FORGE_PUBLIC_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "http://forge:3000" ]
+}
+
+@test "l'ENVIRONNEMENT garde la priorite sur le fichier — meme regle que forge.url" {
+  local priv="$BATS_TEST_TMPDIR/private3"; mkdir -p "$priv"
+  echo "http://127.0.0.1:3000"  > "$priv/forge.url"
+  echo "http://10.42.0.63:3000" > "$priv/forge.public.url"
+
+  run bash -c "
+    set -euo pipefail
+    export PROV_TOKENS_DIR='$priv' PROVISION_LIB='$SANDBOX/lib/provision-lib.sh'
+    export FORGE_PUBLIC_URL='http://forge.exemple:3000'
+    source \"\$PROVISION_LIB\" >/dev/null 2>&1
+    echo \"\$PROV_FORGE_PUBLIC_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "http://forge.exemple:3000" ]
+}
+
+@test "48-forge-host PERSISTE les deux adresses, pas une" {
+  local m="$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh"
+  grep -q 'forge.url" 0644' "$m"
+  grep -q 'forge.public.url" 0644' "$m"
+}

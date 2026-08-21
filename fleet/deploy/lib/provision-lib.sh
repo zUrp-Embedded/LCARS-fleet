@@ -111,8 +111,22 @@ PROVISION_LIB_LOADED=1
 # le SERVEUR compose (dans un conteneur, le nom du service : `http://forge:3000`) ; celle-ci est
 # celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `forge:3000`
 # ne résout nulle part hors du réseau docker, et l'adresse de l'hôte peut ne pas résoudre dedans.
-# Le défaut égale l'interne : sur une boîte où les deux coïncident, il n'y a rien à poser.
-: "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$PROV_FORGE_URL}}"
+# ⚠ ET LE DÉFAUT « ÉGALE L'INTERNE » EST UN PIÈGE SUR LE RAIL POSTE, où les deux ne coïncident
+# JAMAIS. `48-forge-host` dérive les deux adresses, publie la forge sur `PROV_FORGE_BIND` et écrit
+# `PUBLIC_URL` dans le `ROOT_URL` de Gitea — puis ne persiste QUE la loopback dans `forge.url`.
+# Tout ce qui vient après défaute donc l'adresse NAVIGATEUR sur l'adresse SERVEUR.
+#
+# MESURE DU 2026-08-21, poste natif installé à froid, opérateur sur une autre machine : le bouton
+# « s'identifier sur la forge » du deck envoyait sur
+# `http://127.0.0.1:3000/login/oauth/authorize?…&redirect_uri=http://10.42.0.63:20999/…` — le
+# RETOUR juste, l'ALLER chez le visiteur. Le module qui connaît l'adresse publique était le seul à
+# la connaître, et il la jetait.
+#
+# Le fichier voisin la porte maintenant. Même forme que `forge.url` et même raison : les modules
+# sont des processus, aucun ne peut exporter vers un autre. En conteneur il n'existe pas, et
+# l'environnement du compose gagne — rien ne change là-bas.
+: "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
+: "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
 # Le deck de la BOÎTE (porte d'entrée, hors de l'espace des blocs humains) et son client OAuth2.
 # Les ORIGINES sont les adresses par lesquelles on entre vraiment : OAuth2 compare le `redirect_uri`
 # EXACTEMENT, donc une entrée non déclarée échoue au RETOUR, après l'identification, là où c'est le

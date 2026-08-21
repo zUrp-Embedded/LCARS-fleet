@@ -292,6 +292,14 @@ apply() {
   #    secret, et le doctor d'un humain doit pouvoir la lire.
   write_atomic "$PROV_TOKENS_DIR/forge.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$LOCAL_URL" \
     || { p_fail "adresse de la forge non posée ($PROV_TOKENS_DIR/forge.url)"; verdict_apply; }
+  # ⚠ LES DEUX ADRESSES SE PERSISTENT, PAS UNE. Ce module dérive `PUBLIC_URL`, s'en sert pour le
+  # `ROOT_URL` de Gitea — et ne l'écrivait NULLE PART. `provision-lib` défautait donc l'adresse
+  # NAVIGATEUR sur l'adresse SERVEUR, et le deck envoyait ses visiteurs s'identifier sur LEUR propre
+  # loopback : mesure du 2026-08-21, bouton « s'identifier sur la forge » →
+  # `http://127.0.0.1:3000/login/oauth/authorize?…&redirect_uri=http://10.42.0.63:20999/…`, le retour
+  # juste et l'aller nulle part. Le seul module qui connaissait l'adresse publique la jetait.
+  write_atomic "$PROV_TOKENS_DIR/forge.public.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$PUBLIC_URL" \
+    || { p_fail "adresse publique de la forge non posée ($PROV_TOKENS_DIR/forge.public.url)"; verdict_apply; }
 
   # 2. L'AUTORITÉ. Le compte d'administration et son jeton, mintés DANS le conteneur (`gitea admin`
   #    n'a pas besoin d'un jeton pour créer le premier). Le fichier est le même que celui que la
