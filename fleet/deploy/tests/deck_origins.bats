@@ -119,3 +119,53 @@ apps_with() { # apps_with <uris...>
   ! grep -q "DELETE" "$TRACE"
   ! grep -q "POST" "$TRACE"
 }
+
+# ─── L'ADRESSE QU'UN TIERS COMPOSE ──────────────────────────────────────────────────────────────
+#
+# MEME LECON QUE LA FORGE, UN CRAN PLUS LOIN — et ici c'est pire qu'un lien faux : OAuth2 compare le
+# `redirect_uri` en CHAINE EXACTE, donc une entree non declaree est un REFUS, pas une degradation.
+#
+# Mesure du 2026-08-21, poste natif installe a froid, operateur venant d'une autre machine :
+#   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://10.42.0.63:20999/auth/callback.
+#     Entrees declarees : http://127.0.0.1:20999/…, http://localhost:20999/… »
+# Le levier existait (`PROV_DECK_ORIGINS`) ; c'est le DEFAUT qui etait faux.
+
+head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
+  local head="$BATS_TEST_TMPDIR/deck-head.sh"
+  sed '/^check() {/,$d' "$SUT" > "$head"
+  PROV_DECK_BIND="$1" PROV_DECK_ORIGINS="" PROV_DECK_PORT=20999 \
+    bash -c "set -euo pipefail; source '$head' >/dev/null 2>&1; callback_uris"
+}
+
+@test "le deck declare l'adresse ANNONCEE, pas seulement la loopback" {
+  # `advertise_addr` rend l'adresse de sortie quand le bind est un joker ; on force une adresse
+  # explicite pour que le temoin ne depende pas du reseau de la machine qui le joue.
+  run head_uris "192.0.2.7"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"http://192.0.2.7:20999/auth/callback"* ]]
+  # et la loopback reste, sous ses DEUX ecritures — OAuth2 compare des chaines
+  [[ "$output" == *"http://127.0.0.1:20999/auth/callback"* ]]
+  [[ "$output" == *"http://localhost:20999/auth/callback"* ]]
+}
+
+@test "une adresse qui ne vaut RIEN n'est pas declaree — la lib dit ce qu'elle rend" {
+  # Sous WSL en NAT, `advertise_addr` rend `localhost` AVEC un motif : la VM n'est routee depuis
+  # aucune autre machine. Declarer une entree la-dessus ajouterait une chaine que personne ne peut
+  # taper. Le temoin epingle que le module LIT `PROV_ADVERTISE_WHY` au lieu de l'ignorer.
+  grep -q 'PROV_ADVERTISE_WHY' "$SUT"
+  run head_uris "127.0.0.1"
+  [ "$status" -eq 0 ]
+  # bind loopback : rien d'autre que les deux ecritures de la loopback
+  [ "$(echo "$output" | tr ' ' '\n' | grep -c 'auth/callback')" -eq 2 ]
+}
+
+@test "pas de doublon quand l'operateur NOMME deja l'adresse annoncee" {
+  local head="$BATS_TEST_TMPDIR/deck-head2.sh"
+  sed '/^check() {/,$d' "$SUT" > "$head"
+  run bash -c "set -euo pipefail
+    PROV_DECK_BIND=192.0.2.7 PROV_DECK_PORT=20999 PROV_DECK_ORIGINS='http://192.0.2.7:20999'
+    export PROV_DECK_BIND PROV_DECK_PORT PROV_DECK_ORIGINS
+    source '$head' >/dev/null 2>&1; callback_uris"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | tr ' ' '\n' | grep -c '192.0.2.7')" -eq 1 ]
+}

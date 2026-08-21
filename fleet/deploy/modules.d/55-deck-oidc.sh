@@ -47,6 +47,30 @@ callback_uris() {
   # marche depuis le navigateur de l'hote. N'en declarer qu'une, c'est fermer la porte a celui qui
   # entre par l'autre, APRES son identification (mesure du 2026-08-18).
   local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback http://localhost:$PROV_DECK_PORT/auth/callback" o u
+
+  # ─── ET L'ADRESSE QU'UN TIERS COMPOSE, PARCE QUE LE DECK N'ÉCOUTE PAS QUE SUR LA LOOPBACK ──────
+  #
+  # MÊME LEÇON QUE LA FORGE, UN CRAN PLUS LOIN. `48-forge-host` l'a apprise avec `PROV_FORGE_ADVERTISE`
+  # et `bench-up.sh` l'avait écrite avant lui : « LE RECAP DIT L'ADRESSE QU'ON COMPOSE, PAS CELLE SUR
+  # LAQUELLE ON ECOUTE. » Ici c'est pire qu'un lien faux : OAuth2 compare le `redirect_uri` en CHAÎNE
+  # EXACTE, donc une entrée non déclarée n'est pas une dégradation, c'est un refus.
+  #
+  # MESURÉ LE 2026-08-21, poste natif installé à froid, opérateur venant d'une autre machine :
+  #   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://10.42.0.63:20999/auth/callback.
+  #     Entrees declarees : http://127.0.0.1:20999/…, http://localhost:20999/… »
+  # Le deck s'arrête proprement et nomme le levier — c'est le comportement voulu, et il ne devrait
+  # pas avoir à servir. Le levier existait (`PROV_DECK_ORIGINS`) ; c'est le DÉFAUT qui était faux.
+  #
+  # ⚠ ON N'ANNONCE QUE CE QUI VAUT QUELQUE CHOSE. `advertise_addr` rend l'adresse ET ce qu'elle vaut :
+  # sous WSL en NAT, elle rend `localhost` avec un motif, parce que la VM n'est routée depuis aucune
+  # autre machine. Déclarer une entrée dans ce cas ajouterait une chaîne que personne ne peut taper.
+  # Un appelant qui ignore `PROV_ADVERTISE_WHY` annonce sans savoir ce qu'il annonce — la lib le dit.
+  advertise_addr "${PROV_DECK_BIND:-0.0.0.0}"
+  if [[ -z "$PROV_ADVERTISE_WHY" && -n "$PROV_ADVERTISE" ]]; then
+    u="http://$PROV_ADVERTISE:$PROV_DECK_PORT/auth/callback"
+    case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
+  fi
+
   IFS=',' read -ra _origins <<<"${PROV_DECK_ORIGINS:-}"
   for o in "${_origins[@]:-}"; do
     o="$(echo "$o" | tr -d '[:space:]')"; [[ -n "$o" ]] || continue
