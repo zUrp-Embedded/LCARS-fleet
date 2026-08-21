@@ -11,6 +11,7 @@
 // encore vrai.
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
+import Cmd from '../components/Cmd.astro';
 import { u } from '../lib/href.js';
 import { fleetVerbs, fleetStartOptions, lcarsEntries, envVars } from '../lib/cli.js';
 
@@ -145,23 +146,17 @@ const sections = [
     humain lance sa fleet, et n'attache que ses propres pods.</p>
 
     <div class="entries">
-      {verbs.map((v) => (
-        <article class="entry" style="--k:var(--blue)">
-          <div class="syn"><b>fleet_v2 {v}</b>{v === 'start' && <i>[{startOpts.map((o) => o.flag).join('] [')}]</i>}</div>
-          <div class="bd">
-            <p>{FLEET[v]}</p>
-            {v === 'start' && (
-              <dl class="kv">
-                {startOpts.map((o) => (<><dt>{o.flag}</dt><dd>{o.text}</dd></>))}
-              </dl>
-            )}
-            {v === 'start' && (
-              <div class="warn"><b>Refus au démarrage si les credentials Claude manquent.</b> La
-              fleet démarrerait très bien — et aucun pod ne pourrait penser. Un succès qui ne
-              produit rien est pire qu'un refus.</div>
-            )}
-          </div>
-        </article>
+      {verbs.map((v) => v === 'start' ? (
+        <Cmd syn={`fleet_v2 ${v}`} args={startOpts.map((o) => `[${o.flag}]`)} blurb={FLEET[v]} tint="var(--blue)">
+          <dl class="kv">
+            {startOpts.map((o) => (<Fragment><dt>{o.flag}</dt><dd>{o.text}</dd></Fragment>))}
+          </dl>
+          <div class="warn"><b>Refus au démarrage si les credentials Claude manquent.</b> La fleet
+          démarrerait très bien — et aucun pod ne pourrait penser. Un succès qui ne produit rien est
+          pire qu'un refus.</div>
+        </Cmd>
+      ) : (
+        <Cmd syn={`fleet_v2 ${v}`} blurb={FLEET[v]} tint="var(--blue)" />
       ))}
     </div>
   </section>
@@ -172,14 +167,12 @@ const sections = [
     lui-même : quand un geste en a besoin, il le passe au runtime et rend son verdict.</p>
 
     <div class="entries">
-      {entries.map((e) => (
-        <article class="entry" style="--k:var(--mauve)">
-          <div class="syn"><b>{e.verb}</b>{e.args && <i>{e.args}</i>}</div>
-          <div class="bd">
-            <p>{e.text}</p>
-            {LCARS[e.verb] && <p>{LCARS[e.verb]}</p>}
-          </div>
-        </article>
+      {entries.map((e) => LCARS[e.verb] ? (
+        <Cmd syn={e.verb} args={e.args ? (e.args.match(/<[^>]*>|\[[^\]]*\]|\S+/g) ?? []) : []} blurb={e.text} tint="var(--mauve)">
+          <p>{LCARS[e.verb]}</p>
+        </Cmd>
+      ) : (
+        <Cmd syn={e.verb} args={e.args ? (e.args.match(/<[^>]*>|\[[^\]]*\]|\S+/g) ?? []) : []} blurb={e.text} tint="var(--mauve)" />
       ))}
     </div>
   </section>

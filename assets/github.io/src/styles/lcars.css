@@ -289,6 +289,15 @@ details.entry.off>summary .nm{color:var(--salmon)}
 .flags dt .rq{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--salmon);margin-left:.6ch}
 .flags dd .none{color:var(--faint);font-style:italic}
+/* les arguments d'une commande (manuel) : requis <…> visibles, optionnels […] discrets */
+.args{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+.args .arg{font-style:normal;font-family:var(--mono);font-size:12px}
+.args .rq{color:var(--amber-ink)}
+.args .op{color:var(--faint)}
+.args .lit{color:var(--dim)}
+/* une entree sans corps a reveler : pas de marqueur, pas de curseur main */
+details.entry.nofold>summary{cursor:default;padding-left:16px}
+details.entry.nofold>summary::before{display:none}
 
 @media (max-width:820px){
   .kv{grid-template-columns:1fr;gap:2px 0} .kv dd{margin-bottom:8px}
