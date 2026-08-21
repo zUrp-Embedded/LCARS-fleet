@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.StepDispatcher do
                  route,
                  step_spec
                ) do
-            {:ok, brief, brief_kind} ->
+            {:ok, brief, brief_kind, mandate} ->
               project_slug = Fleet.Layout.project_slug(repo)
 
               spawn_opts =
@@ -239,12 +239,11 @@ defmodule Fleet.Pilot.StepDispatcher do
                 |> Opts.maybe_put(:project, project)
                 |> Spawn.maybe_put_route(route)
                 |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
-                # THE MANDATE MOUNT: the pinned doc the pod reads its order FROM. A judge reads its
-                # CRITERIA (gate-briefs/), a producer its BRIEF (briefs/) — the runtime resolves the
-                # pointer to a `{ref, sha, ops_path}` the spawner materializes with `pin_object`, so
-                # the pod's order is content-addressed rather than trusted inline. `nil` (no pointer:
-                # degraded, or an inline brief) → no mount, the inline order stands.
-                |> Opts.maybe_put(:mandate, mandate_mount(issue, brief_kind, repo, opts))
+                # THE MANDATE MOUNT: the pinned doc the pod reads its order FROM, surfaced by
+                # `build_brief` from the SAME resolution that rendered the brief (so the file the
+                # order names is the file the spawner materializes). `nil` (inline/degraded) → no
+                # mount, the inline order stands.
+                |> Opts.maybe_put(:mandate, mandate)
 
               # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
               # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
@@ -688,33 +687,6 @@ defmodule Fleet.Pilot.StepDispatcher do
     case Fleet.Pilot.WorkflowMapNav.step_role(workflow_map, step) do
       {:ok, role} when is_binary(role) -> {:ok, role}
       _ -> {:error, {:workflow_map_step_unknown, workflow_map_name, step}}
-    end
-  end
-
-  # The mandate mount source: which pinned ops doc the pod reads its order from. A judge reads its
-  # CRITERIA (`Criteria:`, gate-briefs/) and falls back to the brief only when none was authored; a
-  # producer reads its BRIEF (`Brief:`, briefs/). `nil` when no pointer resolves — a degraded/inline
-  # order, where the text still travels in the work item and there is nothing to mount.
-  defp mandate_mount(issue, brief_kind, repo, opts) do
-    body = Map.get(issue, "body")
-
-    pointer =
-      if brief_kind == "judge" do
-        case Fleet.Layout.parse_criteria_pointer(body) do
-          {:ok, p} -> {:ok, p}
-          _ -> Fleet.Layout.parse_brief_pointer(body)
-        end
-      else
-        Fleet.Layout.parse_brief_pointer(body)
-      end
-
-    case pointer do
-      {:ok, {ref, sha}} ->
-        ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
-        %{ref: ref, sha: sha, ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo))}
-
-      _ ->
-        nil
     end
   end
 

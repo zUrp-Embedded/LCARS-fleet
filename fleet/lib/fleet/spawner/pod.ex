@@ -1029,9 +1029,10 @@ defmodule Fleet.Spawner.Pod do
 
   # THE MANDATE, MOUNTED — the pod reads its order from a content-addressed file, not from text it
   # must trust. `LaunchSpec.pin_object` archives exactly the pinned doc at its sha; we place it at
-  # `issues/mandate.md`, next to the readable context the pod already reads. Best-effort: without an
-  # ops worktree (a test, an un-onboarded project) the pin fails and the pod falls back to the inline
-  # order in its work item — a soft loss, never a launch refusal, same posture as the brief itself.
+  # `issues/mandate.md`, next to the readable context the pod already reads. FAIL-CLOSED when a
+  # mandate is declared (`:mandate` present) but cannot be materialized: the order REFERENCES this
+  # file, so a pod without it would read its order from nothing — it does not start, it defers. No
+  # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
   defp materialize_mandate(%{opts: opts, pod_dir: pod_dir} = _data) do
     case Keyword.get(opts, :mandate) do
       %{ref: ref, sha: sha, ops_path: ops_path} ->
