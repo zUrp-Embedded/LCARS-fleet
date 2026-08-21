@@ -12,6 +12,7 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
   « poller may re-offer (no loss) » — ce que le dispatcher contredit : il ne re-offre pas, il passe.
   """
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.StepRunConsumer
 
@@ -55,7 +56,7 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
     pid = start_consumer(ForgeOk)
 
     send(pid, resolution_event(%{"awaits_arch" => true, "repo" => "o/r", "number" => 7}))
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
 
     refute_received {:escalated, _, _, _, _}
   end
@@ -64,7 +65,7 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
     pid = start_consumer(ForgeOk)
 
     send(pid, resolution_event(%{"awaits_arch" => true}))
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
 
     assert_received {:escalated, :awaits_arch_stuck, "unknown", {:metadata_incomplete, _}, _sig},
                     "une escalade resolue sans repo/number a laisse le ticket hors du pipeline " <>
@@ -75,7 +76,7 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
     pid = start_consumer(ForgeDown)
 
     send(pid, resolution_event(%{"awaits_arch" => true, "repo" => "o/r", "number" => 7}))
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
 
     assert_received {:escalated, :awaits_arch_stuck, "o/r#7",
                      {:remove_label_failed, :forge_write_down}, "awaits_arch_stuck:o/r#7"},

@@ -14,6 +14,7 @@ defmodule Fleet.Admiral.MCPMonitorTest do
   """
 
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.EventRouter.Bus
   alias Fleet.Admiral.MCPMonitor
@@ -132,10 +133,10 @@ defmodule Fleet.Admiral.MCPMonitorTest do
           interval_ms: 60_000
         )
 
-      assert nil == :sys.get_state(monitor_pid).last_check
+      assert nil == settle(monitor_pid).last_check
       before = DateTime.utc_now()
       assert {:ok, _} = GenServer.call(monitor_pid, :check_now)
-      state = :sys.get_state(monitor_pid)
+      state = settle(monitor_pid)
       assert %DateTime{} = state.last_check
       assert DateTime.compare(state.last_check, before) in [:eq, :gt]
       GenServer.stop(monitor_pid)

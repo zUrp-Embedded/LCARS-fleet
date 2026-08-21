@@ -9,6 +9,7 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcherTest do
   dead completion supervisor (its Tasks are already dead).
   """
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Shutdown.Quiesce
   alias Fleet.Admiral.Shutdown.AggregateDispatcher
@@ -118,6 +119,6 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcherTest do
       )
 
     assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 200)
-    assert %{status: :timeout} = :sys.get_state(name)
+    assert %{status: :timeout} = settle(name)
   end
 end

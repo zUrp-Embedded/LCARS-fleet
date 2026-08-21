@@ -1,5 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumerTest do
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.StepRunConsumer
 
@@ -545,7 +546,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
         )
 
       assert Process.alive?(pid)
-      assert %StepRunConsumer{repo: nil, remote: nil} = :sys.get_state(pid)
+      assert %StepRunConsumer{repo: nil, remote: nil} = settle(pid)
 
       GenServer.stop(pid)
     end
@@ -611,13 +612,13 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       # FIFO barrier: :sys.get_state is handled AFTER the pod.completed message (GenServer mailbox order),
       # so on return the delegation has run — the effect is now provably present, not racily checked.
-      _ = :sys.get_state(pid)
+      _ = settle(pid)
       assert_received {:delegated, step_run}
       assert step_run.issue_number == 42
 
       # a non-spawner event is ignored without crash (barrier again → the ignore path really ran).
       send(pid, Fleet.Event.new(:task_queue, :"work_item.completed"))
-      _ = :sys.get_state(pid)
+      _ = settle(pid)
       assert Process.alive?(pid)
 
       GenServer.stop(pid)

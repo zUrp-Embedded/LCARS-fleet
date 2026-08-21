@@ -17,6 +17,7 @@ defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
   no flake.
   """
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.EventRouter.Bus
 
@@ -95,7 +96,7 @@ defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
     Enum.reduce_while(1..50, false, fn _, _ ->
       case Process.whereis(name) do
         pid when is_pid(pid) ->
-          if :sys.get_state(pid).events_count >= min,
+          if settle(pid).events_count >= min,
             do: {:halt, true},
             else: Process.sleep(20) && {:cont, false}
 
@@ -122,7 +123,7 @@ defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
 
     # 1) Initial subscription OK: the event is consumed.
     Bus.broadcast(@topic, ev())
-    assert %{count: 1} = :sys.get_state(name)
+    assert %{count: 1} = settle(name)
 
     # 2) Brutal kill → OTP restarts → new init/1 → new Bus.subscribe.
     ref = Process.monitor(pid1)
@@ -136,7 +137,7 @@ defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
     # (fresh instance), so the 1 attests that THIS instance re-subscribed and consumed — not a
     # leftover of the old one. Without re-subscribe we would stay at 0 (deaf consumer).
     Bus.broadcast(@topic, ev())
-    assert %{count: 1} = :sys.get_state(name)
+    assert %{count: 1} = settle(name)
 
     Supervisor.stop(sup)
   end

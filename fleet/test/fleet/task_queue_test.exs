@@ -8,6 +8,7 @@ defmodule Fleet.TaskQueueTest do
   `state.json` qu'il abritait (BL-6-113) : le broker n'ecrit plus rien sur disque.
   """
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.TaskQueue
   alias Fleet.TaskQueue.Server
@@ -668,7 +669,7 @@ defmodule Fleet.TaskQueueTest do
     {:ok, _} = TaskQueue.enqueue(q, "pod-active", %{brief: "in progress"})
     {:ok, _} = TaskQueue.get_for_pod(q, "pod-active")
 
-    work_items = :sys.get_state(q).work_items |> Map.values()
+    work_items = settle(q).work_items |> Map.values()
     terminal = Enum.filter(work_items, &(&1.state == :completed))
     active = Enum.filter(work_items, &(&1.state in [:pending, :assigned]))
 
@@ -719,7 +720,7 @@ defmodule Fleet.TaskQueueTest do
     # RE-BRIEF: a fresh new work item (forge re-dispatch) arrives WHILE the old one is :assigned.
     {:ok, fresh} = TaskQueue.enqueue(q, "pod-Z", %{brief: "new work item"})
 
-    work_items = :sys.get_state(q).work_items |> Map.values()
+    work_items = settle(q).work_items |> Map.values()
 
     active =
       Enum.filter(
@@ -791,7 +792,7 @@ defmodule Fleet.TaskQueueTest do
 
     assert :ok = TaskQueue.clear_for_pod(q, "pod-M")
 
-    work_items = :sys.get_state(q).work_items |> Map.values()
+    work_items = settle(q).work_items |> Map.values()
 
     active =
       Enum.filter(

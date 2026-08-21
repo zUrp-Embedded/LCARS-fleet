@@ -1,5 +1,6 @@
 defmodule Fleet.MCP.IdempotencyTest do
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.MCP.Idempotency
 
@@ -92,7 +93,7 @@ defmodule Fleet.MCP.IdempotencyTest do
       assert {:ok, :r} = Idempotency.run(:"k#{i}", fn -> {:ok, :r} end, server: s)
     end
 
-    assert map_size(:sys.get_state(s).entries) == 0
+    assert map_size(settle(s).entries) == 0
 
     # A rejected result takes the release path — also leaves nothing behind.
     assert {:error, :no} =
@@ -101,7 +102,7 @@ defmodule Fleet.MCP.IdempotencyTest do
                succeeded?: &match?({:ok, _}, &1)
              )
 
-    assert map_size(:sys.get_state(s).entries) == 0
+    assert map_size(settle(s).entries) == 0
   end
 
   test "a runner that DIES before publishing promotes a waiting duplicate — no wedge, still single-flight",

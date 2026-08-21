@@ -7,6 +7,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
   repo, or a project whose arch is not up, drops the line (lossy by doctrine); the file stays bounded.
   """
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.ArchFeed
 
@@ -56,7 +57,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     assert feed(tmp) =~ "pod fleet-x-engineer a fini son run (#issue-4)"
     # L estampille porte la DATE : le feed est borne a 200 lignes et couvre plusieurs jours,
@@ -79,7 +80,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     assert feed(tmp) =~ "engineer parti (#7)"
     refute_received {:notified, _, _}
@@ -99,7 +100,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     # Axiom (reorg): the line never names the repo — the arch has "the project".
     assert feed(tmp) =~ "brique #12 LIVRÉE — mergée, scellée, verrou levé"
@@ -121,7 +122,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     assert feed(tmp) =~ "verdict rendu par qualifier (#12)"
     refute feed(tmp) =~ "fleet/demo"
@@ -132,7 +133,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
     pid = start_feed(tmp)
 
     send(pid, event(:"pod.completed", %{"pod_id" => "p", "issue_id" => "i"}))
-    :sys.get_state(pid)
+    settle(pid)
 
     refute File.exists?(Path.join(tmp, "fleet.feed"))
     refute_received {:notified, _, _}
@@ -142,7 +143,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
     pid = start_feed(tmp)
 
     send(pid, event(:"work_item.enqueued", %{"repo" => "fleet/demo", "issue_id" => "issue-9"}))
-    :sys.get_state(pid)
+    settle(pid)
 
     refute File.exists?(Path.join(tmp, "fleet.feed"))
     refute_received {:notified, _, _}
@@ -161,7 +162,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       event(:"pod.completed", %{"repo" => "fleet/demo", "pod_id" => "p", "issue_id" => "i"})
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     lines = tmp |> feed() |> String.split("\n", trim: true)
     assert length(lines) == 200
@@ -173,7 +174,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
     pid = start_feed(tmp)
 
     send(pid, event(:"pod.completed", %{"repo" => "fleet/other", "pod_id" => "p"}))
-    :sys.get_state(pid)
+    settle(pid)
 
     refute File.exists?(Path.join(tmp, "fleet.feed"))
     assert Process.alive?(pid)
@@ -200,7 +201,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     assert feed(tmp) =~ "brique #12 « Script chifoumi (CLI) » LIVRÉE"
   end
@@ -219,7 +220,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
       })
     )
 
-    :sys.get_state(pid)
+    settle(pid)
 
     assert feed(tmp) =~ "verdict rendu par qualifier (#99)"
     refute feed(tmp) =~ "«"

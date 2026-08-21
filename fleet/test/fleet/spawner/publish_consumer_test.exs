@@ -4,6 +4,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   dispatch chain. `:subscribe` false + `:spawner` stub → async.
   """
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Spawner.PublishConsumer
 
@@ -66,7 +67,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     # Mi14: :sys.get_state = FIFO barrier (the send is handled first) → no arbitrary sleep.
     assert Process.alive?(pid)
-    assert %{count: 1} = :sys.get_state(pid)
+    assert %{count: 1} = settle(pid)
     refute_received {:spawn_called, _, _}
   end
 
@@ -91,7 +92,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
         )
 
         # FIFO barrier: the send is handled before this returns
-        _ = :sys.get_state(pid)
+        _ = settle(pid)
       end)
 
     assert Process.alive?(pid)
@@ -168,7 +169,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     )
 
     assert Process.alive?(pid)
-    assert %{count: 1} = :sys.get_state(pid)
+    assert %{count: 1} = settle(pid)
     refute_received {:spawn_called, _, _}
   end
 
@@ -204,7 +205,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert reason =~ "boom spawn"
     # The drop is non-fatal: the consumer stays alive and counted the event.
     assert Process.alive?(pid)
-    assert %{count: 1} = :sys.get_state(pid)
+    assert %{count: 1} = settle(pid)
   end
 
   test "F-06 (codex audit): EXITING dispatch → consumer stays ALIVE + spawn.failed emitted" do
@@ -232,7 +233,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     assert reason == "exit"
     assert inspect(failed["reason_detail"]) =~ "spawner_unavailable"
     assert Process.alive?(pid)
-    assert %{count: 1} = :sys.get_state(pid)
+    assert %{count: 1} = settle(pid)
   end
 
   test "F-C044: CapProfile.load fail → spawn.failed emitted (the load drop is no longer silent)" do
@@ -294,7 +295,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
 
     send(pid, Fleet.Event.new(:pilot, :"pod.completed"))
 
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
     assert Process.alive?(pid)
     refute_received {:spawn_called, _, _}
   end
@@ -302,7 +303,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "non-event msg: no crash" do
     {pid, _} = start_consumer()
     send(pid, :random)
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
     assert Process.alive?(pid)
   end
 
@@ -436,7 +437,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
       )
 
       # FIFO barrier: the event is handled before we assert its absence of effect.
-      assert %{} = :sys.get_state(pid)
+      assert %{} = settle(pid)
       assert Process.alive?(pid)
       refute_received {:notified, _, _}
     end

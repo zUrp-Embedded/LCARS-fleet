@@ -7,6 +7,7 @@ defmodule Fleet.Admiral.ShutdownTest do
   `Shutdown.Dispatcher`) — default `NoOpDispatcher`, prod `AggregateDispatcher`.
   """
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   @box Fleet.Admiral.ShutdownTest.Box
 
@@ -85,7 +86,7 @@ defmodule Fleet.Admiral.ShutdownTest do
     name = start_sd(dispatcher: StubDispatcher, drain_confirmations: 3)
     assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
     assert %{seq: []} = Agent.get(@box, & &1)
-    assert %{status: :drained} = :sys.get_state(name)
+    assert %{status: :drained} = settle(name)
   end
 
   test "begin calls refuse_new_jobs" do

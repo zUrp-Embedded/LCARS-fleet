@@ -5,6 +5,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
   # 2026-08-20, en `mix gate` complet). La regle de `Fleet.TestEnv` vaut pour l'env OS comme pour
   # l'env d'application : un fichier qui l'ecrit est `async: false`.
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.IncidentRegistry, as: Reg
 
@@ -390,12 +391,12 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
              ]}
           )
 
-          _ = :sys.get_state(name)
+          _ = settle(name)
         end)
 
       assert log =~ "forge backing UNREADABLE"
       assert log =~ "re-sync"
-      assert :sys.get_state(name).sync_pending == true
+      assert settle(name).sync_pending == true
     end
 
     test "boot: forge file CORRUPT (present but not a JSON map) → treated empty, LOUD",
@@ -408,7 +409,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
               get_file_fun: fn _r, _p, _o -> {:ok, %{content: "not json {{{", sha: "s"}} end
             )
 
-          _ = :sys.get_state(name)
+          _ = settle(name)
         end)
 
       assert log =~ "CORRUPT"
@@ -440,7 +441,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           )
 
           # flush of handle_continue(:load) (where read_wal runs)
-          _ = :sys.get_state(name)
+          _ = settle(name)
         end)
 
       assert log =~ "UNPARSEABLE"
@@ -473,11 +474,11 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
              ]}
           )
 
-          _ = :sys.get_state(name)
+          _ = settle(name)
 
           # A write happens (an incident is noted): it must NOT clobber the corrupt evidence.
           :ok = Reg.note("wake:p:x", :dead, server: name)
-          _ = :sys.get_state(name)
+          _ = settle(name)
         end)
 
       assert log =~ "quarantined"
@@ -517,7 +518,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
              end
            ]})
 
-          _ = :sys.get_state(name)
+          _ = settle(name)
         end)
 
       assert log =~ "non-map"

@@ -10,6 +10,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       resume_gate continue->advance(PR), abandon->close(§5), human->await_arch(§5).
   """
   use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.StepRunConsumer
   alias Fleet.Pilot.StubTaskQueue
@@ -918,7 +919,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
 
-    state = :sys.get_state(pid)
+    state = settle(pid)
     assert Map.has_key?(state.gate_evals, "corr-1")
     assert %{step: "build"} = state.gate_evals["corr-1"]
 
@@ -930,7 +931,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
     )
 
-    assert %{gate_evals: evals} = :sys.get_state(pid)
+    assert %{gate_evals: evals} = settle(pid)
     refute Map.has_key?(evals, "corr-1")
   end
 
@@ -956,7 +957,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
 
     send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
-    assert Map.has_key?(:sys.get_state(pid).gate_evals, "corr-1")
+    assert Map.has_key?(settle(pid).gate_evals, "corr-1")
 
     send(
       pid,
@@ -966,7 +967,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
     )
 
-    assert %{gate_evals: evals} = :sys.get_state(pid)
+    assert %{gate_evals: evals} = settle(pid)
     refute Map.has_key?(evals, "corr-1")
   end
 
@@ -995,11 +996,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
 
     send(pid, Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{})))
-    assert Map.has_key?(:sys.get_state(pid).gate_evals, "corr-1")
+    assert Map.has_key?(settle(pid).gate_evals, "corr-1")
 
     send(pid, :sweep_gate_evals)
 
-    assert %{gate_evals: evals} = :sys.get_state(pid)
+    assert %{gate_evals: evals} = settle(pid)
     refute Map.has_key?(evals, "corr-1")
   end
 
@@ -1026,7 +1027,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
     )
 
-    assert %{gate_evals: evals} = :sys.get_state(pid)
+    assert %{gate_evals: evals} = settle(pid)
     assert evals == %{}
   end
 
@@ -1119,14 +1120,14 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       Fleet.Event.new(:spawner, :"pod.completed", payload: build_done("soft", %{"sev" => "high"}))
     )
 
-    assert Map.has_key?(:sys.get_state(pid1).gate_evals, "corr-1")
+    assert Map.has_key?(settle(pid1).gate_evals, "corr-1")
 
     # 2. CRASH of the StepRunConsumer ALONE (the broker would stay alive in prod) → we stop it +
     #    start a FRESH one. The fresh one has EMPTY gate_evals — exactly the post-crash state where
     #    the old code discarded the verdict.
     :ok = GenServer.stop(pid1)
     pid2 = fresh_step_run_consumer()
-    assert :sys.get_state(pid2).gate_evals == %{}
+    assert settle(pid2).gate_evals == %{}
 
     # 3. The verdict comes back (the task's metadata survived in the broker → put in work_item.completed).
     send(
@@ -1143,7 +1144,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # 4. RECONSTRUCTION + COMPLETION: the `continue` verdict opens the PR + request_review + route
     #    — NOT a silent {:noreply}. (`:sys.get_state` after the send serializes the handle_info →
     #    the effect has happened.)
-    _ = :sys.get_state(pid2)
+    _ = settle(pid2)
     assert_received {:open_pr, "lcars/issue-1-engineer", "main", _}
     assert_received {:request_review, 7, ["reviewer"]}
     assert_received {:route, "soft", "review"}
@@ -1155,7 +1156,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   test "MA-03: restart + REBUILT abandon verdict -> close (terminal), no drop" do
     :ok = GenServer.stop(fresh_step_run_consumer())
     pid = fresh_step_run_consumer()
-    assert :sys.get_state(pid).gate_evals == %{}
+    assert settle(pid).gate_evals == %{}
 
     send(
       pid,
@@ -1168,7 +1169,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
     )
 
-    _ = :sys.get_state(pid)
+    _ = settle(pid)
     assert_received {:closed, _}
     refute_received {:publish, _}
   end
@@ -1188,7 +1189,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     # The singleton does not crash, and does NOT act on a truncated context (no PR opened blindly).
     assert Process.alive?(pid)
-    assert :sys.get_state(pid).gate_evals == %{}
+    assert settle(pid).gate_evals == %{}
     refute_received {:open_pr, _, _, _}
   end
 

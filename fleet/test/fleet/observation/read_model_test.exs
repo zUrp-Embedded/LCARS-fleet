@@ -5,6 +5,7 @@ defmodule Fleet.Observation.ReadModelTest do
   ETS table + singleton GenServer name (no cross-module parallelism).
   """
   use ExUnit.Case, async: false
+  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Observation.ReadModel
 
@@ -19,7 +20,7 @@ defmodule Fleet.Observation.ReadModelTest do
     )
   end
 
-  defp sync(pid), do: :sys.get_state(pid)
+  defp sync(pid), do: settle(pid)
 
   test "prefix routing: each event lands in the right deck" do
     pid = start_supervised!({ReadModel, subscribe: false})
