@@ -114,6 +114,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
+        check_tool_descriptions_name_real_tools(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
         check_bats_descriptions_inert(root),
@@ -2980,6 +2981,109 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
           "(BL-6-36: bash's silent-coercion class)"
     }
+  end
+
+  @doc """
+  No tool DESCRIPTION may name a tool by a name that does not exist.
+
+  ## The same rename, missing the same way, twice
+
+  Tool names went object-first on 2026-08-11 (`create_project` → `project_create`). The rename moved
+  the `deftool` names and the `mcp__fleet__` citations. It did NOT move the bare names written INSIDE
+  the description strings — and those strings are the tool catalogue an agent reads. Measured
+  2026-08-21: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
+  `project_import` even referred to itself by its old name.
+
+  This is worse than a stale comment. A comment misleads a human who can check; a description is an
+  INSTRUCTION to an agent, delivered at the moment it chooses what to call. `list_workflow_cards`
+  told every architect to call `create_project` twice, in the one paragraph that exists to guide
+  project framing.
+
+  The scar next to `@tool_effects` already drew the lesson for a list of five bare words: *"a list
+  that is not written like the others is a list a rename misses"*, and the answer there was to make
+  exhaustiveness MECHANICAL. Prose is the same shape — it just looks like it could not be checked.
+
+  ## The rule DERIVES from the authority, so there is nothing to maintain
+
+  For every declared tool, any PERMUTATION of its own segments that is not the tool itself is
+  refused inside a description: `project_create` makes `create_project` illegal, and adding a tool
+  tomorrow extends the wall by itself. A trailing `s` is normalised, so `list_projects` is caught as
+  a permutation of `project_list`.
+
+  It reads by AST, not by line, so a description split across a `<>` chain is one text — the shape
+  that let these thirteen sit under a grep for years.
+  """
+  @spec check_tool_descriptions_name_real_tools(String.t()) :: result()
+  def check_tool_descriptions_name_real_tools(root) do
+    id = "mcp.tool_descriptions_name_real_tools"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    remediation =
+      "write the tool's REAL name in the description — an agent reads it as an instruction, and " <>
+        "a name that does not resolve is a call it cannot make"
+
+    ast = quoted!(root, tools_rel)
+    declared = deftool_names(ast)
+
+    if MapSet.size(declared) < 12 do
+      # Same population guard as its siblings: a `deftool` shape change would empty this set and
+      # the wall would pass by measuring nothing.
+      broken_result(id, "deftool in #{tools_rel} (only #{MapSet.size(declared)}, expected 12+)")
+    else
+      by_shape =
+        Map.new(declared, fn name -> {tool_shape(name), name} end)
+
+      offenders =
+        ast
+        |> description_texts()
+        |> Enum.flat_map(fn text ->
+          ~r/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/
+          |> Regex.scan(text)
+          |> Enum.map(&hd/1)
+          |> Enum.uniq()
+          |> Enum.flat_map(fn token ->
+            case Map.get(by_shape, tool_shape(token)) do
+              nil -> []
+              ^token -> []
+              real -> ["#{token} → the tool is #{real}"]
+            end
+          end)
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      %{
+        id: id,
+        remediation: if(offenders == [], do: "—", else: remediation),
+        status: if(offenders == [], do: :pass, else: :fail),
+        evidence: offenders,
+        note:
+          if(offenders == [],
+            do:
+              "#{MapSet.size(declared)} tools declared; no description names a permutation of one " <>
+                "of them that is not the tool itself",
+            else: "descriptions name #{length(offenders)} tool(s) that do not exist"
+          )
+      }
+    end
+  end
+
+  # The MULTISET of a tool name's segments, trailing `s` normalised — so `project_list` and
+  # `list_projects` share a shape while `project_create` and `project_close` do not.
+  defp tool_shape(name) do
+    name
+    |> String.split("_")
+    |> Enum.map(&String.replace_suffix(&1, "s", ""))
+    |> Enum.sort()
+  end
+
+  # Every `description(...)` body, ONE text per call: a description written as a `<>` chain is a
+  # single instruction to the agent, and reading it line by line is what hid thirteen of them.
+  defp description_texts(ast) do
+    collect(ast, fn
+      {:description, _, [arg]} -> Enum.join(collect(arg, &if(is_binary(&1), do: &1)), " ")
+      _ -> nil
+    end)
   end
 
   @doc """

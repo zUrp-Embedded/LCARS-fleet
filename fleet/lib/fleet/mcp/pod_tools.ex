@@ -443,7 +443,7 @@ defmodule Fleet.MCP.PodTools do
           "into the agent machine: the three faces (`/home/projects/<name>` on `main`, " <>
           "`/home/projects.ops/<name>` on `ops`, `/home/projects.workshop/<name>` on `workshop`) + " <>
           "forge-enforced gate, WITHOUT touching the content " <>
-          "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
+          "of `main` (it stays intact). Use it for a project that already exists (≠ project_create, which " <>
           "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
           "the fleet org, default branch `main`. Returns {\"status\":\"imported\",\"repo\":...}."
       )
@@ -560,15 +560,15 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "ADOPT a project that lives on the agent machine's DISK but not on the forge — the " <>
-          "inverse of import_project: publishes the existing local content (repo created EMPTY, " <>
+          "inverse of project_import: publishes the existing local content (repo created EMPTY, " <>
           "the local main is pushed as-is, ops face brought up, forge gate placed). Use it " <>
           "for a project someone built locally (or whose forge was lost) that the fleet should " <>
           "now work. The local content is NEVER overwritten. `name` = the local dirs' basename " <>
-          "(kebab-case). The card/criticality declaration relays like create_project (present " <>
+          "(kebab-case). The card/criticality declaration relays like project_create (present " <>
           "the catalogue first when the human declares; an existing committed declaration in the " <>
           "project is kept as-is). Refusals name the right verb: repo already on the forge → use " <>
-          "import_project or open_project; no local main → nothing to adopt. Returns " <>
-          "{\"status\":\"adopted\",\"repo\":...} like create_project."
+          "project_import or project_open; no local main → nothing to adopt. Returns " <>
+          "{\"status\":\"adopted\",\"repo\":...} like project_create."
       )
     end
 
@@ -593,7 +593,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "IMPORT a repo from an EXTERNAL forge (GitHub or GitLab ONLY — https URL) into the " <>
           "fleet: full history repatriated, repo created in the org, the three faces + " <>
-          "forge gate like import_project. ONE-WAY: the external origin is left behind (this " <>
+          "forge gate like project_import. ONE-WAY: the external origin is left behind (this " <>
           "is an import, never a mirror). THE ADOPTION GATE runs first (a foreign repo is the " <>
           "found-USB-key of the parking lot): a repo shipping a `.claude/` tree is REFUSED en " <>
           "bloc (we never adopt someone else's hooks), and every CLAUDE.md must pass the " <>
@@ -603,7 +603,7 @@ defmodule Fleet.MCP.PodTools do
           "Private repos: auth is the operator's WIRED git credential helper (gh/glab auth login, " <>
           "or their own helper) — the host clones with it, no token in chat, no env token. `url` = " <>
           "https repo URL; `name` = the kebab-case project " <>
-          "name in our org. The card/criticality declaration relays like create_project. " <>
+          "name in our org. The card/criticality declaration relays like project_create. " <>
           "Returns {\"status\":\"imported_external\",\"repo\":...}."
       )
     end
@@ -655,7 +655,7 @@ defmodule Fleet.MCP.PodTools do
       name("Close Project")
 
       description(
-        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ delete_project: " <>
+        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ project_delete: " <>
           "nothing is destroyed, this is a pause, fully reversible). The running brick finishes; " <>
           "the NEXT ticket never starts. Mechanics: an OPEN marker issue (`[lcars-parked]` title) " <>
           "holds the closed state on the forge — visible in the UI, no hidden state. The " <>
@@ -682,8 +682,8 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "REVISE the validation card of an EXISTING project: the declaration engraved at " <>
-          "create_project gets a tracked revision (a C0 PoC that grew serious no longer keeps its " <>
-          "fast-track for life). Same doctrine as create_project: PRESENT the catalogue first " <>
+          "project_create gets a tracked revision (a C0 PoC that grew serious no longer keeps its " <>
+          "fast-track for life). Same doctrine as project_create: PRESENT the catalogue first " <>
           "(`list_workflow_cards`) and let the HUMAN choose — the card choice IS the criticality " <>
           "declaration, you advise, you never decide. `justification` REQUIRED: the WHY of the " <>
           "revision, committed with the declaration in the project's repo (git history is the " <>
@@ -950,10 +950,10 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "List the validation-card catalogue (the canon workflow maps). Use it DURING project framing, " <>
-          "BEFORE create_project: the card choice IS the criticality declaration (naming a card = declaring), " <>
+          "BEFORE project_create: the card choice IS the criticality declaration (naming a card = declaring), " <>
           "so PRESENT the catalogue to the human and let THEM choose — you may pre-filter or advise from the " <>
           "framing facts (mains voltage? cuts fingers? how long will it live?), you never decide for them. " <>
-          "Each entry carries `name` (the LOADABLE id — pass it as create_project's `workflow_map`), " <>
+          "Each entry carries `name` (the LOADABLE id — pass it as project_create's `workflow_map`), " <>
           "`declared_name` (the card's self-declared label, reference only), `presentation` (FR, show it " <>
           "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
           "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
