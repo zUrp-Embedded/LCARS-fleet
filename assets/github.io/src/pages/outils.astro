@@ -5,6 +5,7 @@
 // `usage()` ne dit jamais pourquoi une liste n'est pas une autorisation.
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
+import Tool from '../components/Tool.astro';
 import { toolMap, roles, counts } from '../lib/tools.js';
 
 const tools = toolMap();
@@ -91,14 +92,7 @@ const sections = [
     pas de gate, parce qu'il n'y a rien à atteindre en dehors de soi.</p>
 
     <div class="entries">
-      {byKind('universal').map((t) => (
-        <article class="entry" style="--k:var(--dim)">
-          <div class="syn"><b>{t.name}</b>{t.required.length > 0 && <i>{t.required.join(' · ')}</i>}</div>
-          <div class="bd">
-            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
-          </div>
-        </article>
-      ))}
+      {byKind('universal').map((t) => <Tool tool={t} tint="var(--dim)" />)}
     </div>
   </section>
 
@@ -108,18 +102,7 @@ const sections = [
         cap={`${c.capabilities.join(' · ') || 'aucune capacité'} — ${carriedBy(c.name).length} outils`} />
       <div class="entries">
         {carriedBy(c.name).map((t) => (
-          <article class="entry" style={`--k:${CARRIER_TINT[c.name] ?? 'var(--mauve)'}`}>
-            <div class="syn">
-              <b>{t.name}</b>
-              {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
-              {t.properties.length > t.required.length &&
-                <i>+ {t.properties.filter((p) => !t.required.includes(p)).join(' · ')}</i>}
-            </div>
-            <div class="bd">
-              <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
-              {t.gate && <dl class="kv"><dt>gate</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd></dl>}
-            </div>
-          </article>
+          <Tool tool={t} tint={CARRIER_TINT[c.name] ?? 'var(--mauve)'} gateLabel={GATE_LABEL[t.gate]} />
         ))}
       </div>
     </section>
@@ -154,33 +137,14 @@ const sections = [
 
     <div class="entries">
       {byKind('orphan').map((t) => (
-        <article class="entry off">
-          <div class="syn">
-            <b>{t.name}</b>
-            {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
-            <span class="flag">sans porteur</span>
-          </div>
-          <div class="bd">
-            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
-            {t.gate && <dl class="kv"><dt>gardé pour</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd></dl>}
-          </div>
-        </article>
+        <Tool tool={t} tint="var(--salmon)" badge="sans porteur" gateVerb="gardé pour" gateLabel={GATE_LABEL[t.gate]} />
       ))}
       {byKind('disarmed').map((t) => (
-        <article class="entry" style="--k:var(--yellow)">
-          <div class="syn"><b>{t.name}</b>
-            {t.required.length > 0 && <i>{t.required.join(' · ')}</i>}
-            <span class="flag q">désarmé</span></div>
-          <div class="bd">
-            <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{t.description}</div>
-            <dl class="kv">
-              <dt>gardé pour</dt><dd>capacité <b>{GATE_LABEL[t.gate]}</b></dd>
-              <dt>et en plus</dt><dd>désarmé par configuration — <b>même son porteur légitime est
-              refusé</b> tant que le réglage n'est pas posé. Ce n'est pas un oubli, c'est une
-              sûreté.</dd>
-            </dl>
-          </div>
-        </article>
+        <Tool tool={t} tint="var(--yellow)" badge="désarmé" badgeClass="flag q" gateVerb="gardé pour" gateLabel={GATE_LABEL[t.gate]}>
+          <dl class="kv"><dt>et en plus</dt><dd>désarmé par configuration — <b>même son porteur
+          légitime est refusé</b> tant que le réglage n'est pas posé. Ce n'est pas un oubli, c'est
+          une sûreté.</dd></dl>
+        </Tool>
       ))}
     </div>
 

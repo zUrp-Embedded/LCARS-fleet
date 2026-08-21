@@ -171,6 +171,7 @@ defmodule Fleet.MCP.PodTools do
   def declared_tool_effects, do: @tool_effects
 
   deftool "get_work_item" do
+    # vitrine: Tire de la fleet la prochaine tâche à traiter ; réponse vide = plus rien à faire, le pod s'arrête.
     meta do
       name("Get Work Item")
 
@@ -185,6 +186,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "submit_result" do
+    # vitrine: Rend à la fleet le résultat structuré de ta tâche, corrélé au ticket que tu clôts.
     meta do
       name("Submit Result")
 
@@ -228,6 +230,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "run_probe" do
+    # vitrine: Fait jouer une sonde nommée sur la forge et rend son fait brut : le juge mesure le livrable au lieu de seulement l'opiner.
     meta do
       name("Run Probe")
 
@@ -268,6 +271,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_create" do
+    # vitrine: Délègue une brique d'implémentation à la fleet : ouvre un ticket prêt à livrer (engineer → PR → revue → merge).
     meta do
       name("Create Issue")
 
@@ -366,6 +370,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_create" do
+    # vitrine: Crée un projet : dépôt sur la forge, ses trois faces, le scaffold, et lance son architecte.
     meta do
       name("Create Project")
 
@@ -412,6 +417,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_open" do
+    # vitrine: Relance un projet déjà sur la boîte : remet son architecte debout (idempotent), sans écrire forge ni disque.
     meta do
       name("Open Project")
 
@@ -435,6 +441,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_install" do
+    # vitrine: Importe un dépôt déjà dans l'org : monte ses trois faces + le gate, sans toucher au contenu de main.
     meta do
       name("Import Project")
 
@@ -459,6 +466,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "deposit_list" do
+    # vitrine: Liste ce que ton humain a poussé dans son espace perso et que la fleet ne porte pas encore.
     meta do
       name("List Deposits")
 
@@ -480,6 +488,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "forge_list" do
+    # vitrine: Liste les forges externes enregistrées par ton humain — le pool de publication, lecture seule.
     meta do
       name("List Forges")
 
@@ -496,6 +505,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "publish_link" do
+    # vitrine: Lie un projet à une forge : déclare où il publie ; ne publie rien (l'approve + le merge humain restent les gates).
     meta do
       name("Link Publish Target")
 
@@ -521,6 +531,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "deposit_import" do
+    # vitrine: Adopte dans un catalogue un dépôt déposé par ton humain ; gate d'adoption à l'entrée, l'original reste chez lui.
     meta do
       name("Import Deposit")
 
@@ -555,6 +566,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_adopt" do
+    # vitrine: Publie sur la forge un projet qui n'existait que sur le disque — l'inverse de l'import, le local jamais écrasé.
     meta do
       name("Adopt Project")
 
@@ -587,6 +599,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_import" do
+    # vitrine: Rapatrie un dépôt d'une forge externe (GitHub/GitLab) : historique complet, sens unique, via le gate d'adoption.
     meta do
       name("Import External Project")
 
@@ -624,6 +637,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_publish" do
+    # vitrine: Publie un projet interne vers sa forge externe liée, en PR/MR roulante — async, le token reste côté hôte.
     meta do
       name("Publish to External Forge")
 
@@ -651,6 +665,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_close" do
+    # vitrine: Met un projet en pause : la fleet s'arrête dessus, disque et forge intacts, réversible (≠ delete).
     meta do
       name("Close Project")
 
@@ -677,6 +692,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_revise_card" do
+    # vitrine: Révise la carte de validation : la criticité gravée reçoit une révision tracée, sur les tickets futurs.
     meta do
       name("Revise Project Card")
 
@@ -713,6 +729,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_delete" do
+    # vitrine: Détruit un projet entièrement. Irréversible, fail-closed (force), désarmé par défaut.
     meta do
       name("Delete Project")
 
@@ -741,6 +758,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_status" do
+    # vitrine: Donne l'état d'un ticket délégué (issue + PR) : outcome, revue, verdicts — la trace survit au merge.
     meta do
       name("Get Issue Status")
 
@@ -776,6 +794,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "scratch" do
+    # vitrine: Pose une pensée dans le brouillon du workshop, geste réflexe : le système commit/pousse ; ça ajoute seulement, ne coupe jamais.
     meta do
       name("Scratch")
 
@@ -808,6 +827,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "list_escalations" do
+    # vitrine: Liste les escalades de ton projet qui attendent ton arbitrage.
     meta do
       name("List Escalations")
 
@@ -830,6 +850,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "toolchain_request" do
+    # vitrine: Demande un outil que la boîte n'a pas (compilateur, runtime, cross) ; un humain admin approuve — pas pour une dépendance de projet.
     meta do
       name("Request a Toolchain")
 
@@ -945,6 +966,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "list_workflow_cards" do
+    # vitrine: Liste le catalogue des cartes de validation, à présenter au cadrage : choisir la carte, c'est déclarer la criticité.
     meta do
       name("List Workflow Cards")
 
@@ -966,6 +988,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_list" do
+    # vitrine: Liste les tickets ouverts de ton projet — le tableau de situation, pas seulement ta boîte.
     meta do
       name("List Issues")
 
@@ -984,6 +1007,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_get" do
+    # vitrine: Lit un ticket en entier : corps + fil de commentaires, la conversation.
     meta do
       name("Get Issue")
 
@@ -1009,6 +1033,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_comment" do
+    # vitrine: Poste un commentaire sur un ticket, en ton nom — typiquement pour répondre à une escalade.
     meta do
       name("Comment Issue")
 
@@ -1031,6 +1056,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "dependency_add" do
+    # vitrine: Déclare qu'un ticket dépend d'un autre, après coup — bloque la clôture du dépendant tant que le bloqueur est ouvert.
     meta do
       name("Add Dependency")
 
@@ -1058,6 +1084,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "dependency_remove" do
+    # vitrine: Lève une dépendance ; lever le dernier bloqueur rend le ticket clôturable.
     meta do
       name("Remove Dependency")
 
@@ -1082,6 +1109,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "emergency_stop" do
+    # vitrine: Le frein : ferme tout ce que la fleet a en vol — pour casser un emballement. Le travail en cours est perdu.
     meta do
       name("Emergency Stop")
 
@@ -1109,6 +1137,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_list" do
+    # vitrine: Liste les projets de la boîte : nom, dépôt, carte, niveau, état.
     meta do
       name("List Projects")
 
@@ -1129,6 +1158,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_retire" do
+    # vitrine: Retire un ticket sans le remplacer : travail abandonné, PR fermée, dépendants libérés (≠ supersedes).
     meta do
       name("Retire Issue")
 

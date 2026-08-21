@@ -36,45 +36,101 @@ export function declaredTools() {
 
   for (const m of src.matchAll(/deftool "([a-z_]+)" do\n([\s\S]*?)\n  end\n/g)) {
     const [, name, body] = m;
-    out.push({ name, description: extractDescription(body), ...extractSchema(body) });
+    out.push({ name, vitrine: extractVitrine(body), description: extractDescription(body), ...extractSchema(body) });
   }
 
   if (out.length === 0) throw new Error('tools.js: aucun `deftool` lu dans pod_tools.ex');
+  // GARDE DE VITRINE — meme esprit que les autres murs de cette page : un outil sans presentation
+  // FR fait ECHOUER le build, plutot que d'afficher un nom nu en public. La ligne `# vitrine:` vit
+  // dans le deftool, jamais dans le payload de l'agent (un commentaire n'est pas compile).
+  const naked = out.filter((t) => !t.vitrine).map((t) => t.name);
+  if (naked.length) {
+    throw new Error(`tools.js: deftool sans "# vitrine:" — ${naked.join(', ')} (poser une ligne de presentation FR dans le deftool)`);
+  }
   return out;
 }
 
-// La description est une concatenation Elixir (`"…" <> "…"`). On recolle les litteraux et on
-// laisse le texte intact : c'est celui que l'agent recoit, il n'y a rien a lisser.
-function extractDescription(body) {
-  const d = body.match(/description\(\s*([\s\S]*?)\s*\)\s*\n/);
-  if (!d) return '';
-  return [...d[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+// La ligne `# vitrine:` du deftool : la presentation FR de l'outil, ecrite POUR CETTE PAGE et
+// jamais envoyee a l'agent (un commentaire n'est pas compile, il ne peut pas polluer le payload
+// MCP). C'est la seule prose de cette page qui n'est pas deja celle que l'agent lit.
+function extractVitrine(body) {
+  const m = body.match(/#\s*vitrine:\s*(.+)/);
+  return m ? m[1].trim() : '';
+}
+
+// Recolle une valeur Elixir concatenee (`"…" <> "…"`) en une chaine, litteraux intacts.
+function joinLiterals(text) {
+  return [...text.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
     .map((s) => s[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'))
     .join('')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// Le schema d'entree est une map Elixir litterale. On n'en tire que ce qu'une page affiche :
-// les noms de proprietes et lesquelles sont obligatoires. Un outil sans schema en rend zero,
-// ce qui est un fait, pas une panne.
+// La description est une concatenation Elixir (`"…" <> "…"`). On recolle les litteraux et on
+// laisse le texte intact : c'est celui que l'agent recoit, il n'y a rien a lisser.
+function extractDescription(body) {
+  const d = body.match(/description\(\s*([\s\S]*?)\s*\)\s*\n/);
+  return d ? joinLiterals(d[1]) : '';
+}
+
+// La valeur d'une cle `"key" => "…" <> "…"` (ou simple), recollee. '' si absente.
+function keyString(text, key) {
+  const m = text.match(new RegExp(`"${key}"\\s*=>\\s*((?:"(?:[^"\\\\]|\\\\.)*"\\s*(?:<>\\s*)?)+)`));
+  return m ? joinLiterals(m[1]) : '';
+}
+
+// Contenu d'un bloc `%{ … }` — `open` = index juste APRES le `{`. Compte les accolades en
+// IGNORANT celles qui vivent dans une chaine : une `description` peut contenir un `%{…}` litteral
+// (submit_result en a un), et un comptage naif le prendrait pour une vraie ouverture.
+function braceSlice(str, open) {
+  let depth = 1;
+  let inStr = false;
+  let i = open;
+  for (; i < str.length; i++) {
+    const c = str[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) break;
+  }
+  return str.slice(open, i);
+}
+
+// Les FLAGS de l'outil : par propriete de premier niveau, {name, type, required, description}. La
+// description existe DEJA dans le schema (c'est ce que l'agent recoit) — on ne la double pas, on
+// l'affiche. Un outil sans schema en rend zero, ce qui est un fait, pas une panne.
 function extractSchema(body) {
-  // Jusqu'a la FIN du corps : le `end` du `deftool` a deja ete consomme par l'extraction du
-  // bloc, donc l'ancrer dessus ne matche jamais — et rendait un schema vide pour les 24 outils,
-  // en silence. Une extraction qui echoue doit rendre du vide VISIBLE, pas du vide plausible.
   const s = body.match(/input_schema\(([\s\S]*)$/);
-  if (!s) return { properties: [], required: [] };
+  if (!s) return { flags: [] };
   const block = s[1];
 
-  const props = block.match(/"properties"\s*=>\s*%\{([\s\S]*?)\n\s*\},?\s*\n\s*"required"/);
-  const properties = props
-    ? [...props[1].matchAll(/"([a-z_]+)"\s*=>\s*%\{/g)].map((p) => p[1])
-    : [...block.matchAll(/"([a-z_]+)"\s*=>\s*%\{"type"/g)].map((p) => p[1]);
+  const p = block.match(/"properties"\s*=>\s*%\{/);
+  if (!p) return { flags: [] };
+  const propsStart = p.index + p[0].length;
+  const propsBody = braceSlice(block, propsStart);
 
-  const req = block.match(/"required"\s*=>\s*\[([^\]]*)\]/);
-  const required = req ? [...req[1].matchAll(/"([a-z_]+)"/g)].map((r) => r[1]) : [];
+  // Le `required` de PREMIER NIVEAU vit APRES le bloc des proprietes : le chercher dans `block`
+  // entier attraperait un `required` imbrique (toolchain_request en a, dans `apt`/`installer`).
+  const afterProps = block.slice(propsStart + propsBody.length);
+  const req = afterProps.match(/"required"\s*=>\s*\[([^\]]*)\]/);
+  const required = new Set(req ? [...req[1].matchAll(/"([a-z_]+)"/g)].map((r) => r[1]) : []);
 
-  return { properties: [...new Set(properties)], required };
+  const flags = [];
+  const re = /"([a-z_]+)"\s*=>\s*%\{/g;
+  let m;
+  while ((m = re.exec(propsBody)) !== null) {
+    const name = m[1];
+    const inner = braceSlice(propsBody, re.lastIndex);
+    re.lastIndex += inner.length + 1; // sauter tout le bloc : ses cles imbriquees ne sont pas des flags
+    const type = (inner.match(/"type"\s*=>\s*"([a-z]+)"/) || [])[1] || '';
+    flags.push({ name, type, required: required.has(name), description: keyString(inner, 'description') });
+  }
+  return { flags };
 }
 
 /** Les roles, avec leurs capacites et les outils fleet de leur allowlist. */
