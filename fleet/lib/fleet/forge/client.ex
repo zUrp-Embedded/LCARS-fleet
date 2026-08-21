@@ -63,6 +63,35 @@ defmodule Fleet.Forge.Client do
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
+  # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI, PAS PARCE QUE LA FACADE VOUDRAIT GROSSIR.
+  # `Delegation.ForgeWriter` declare six callbacks et pointe son defaut sur `Fleet.Forge.Client`.
+  # Cinq sont definis ici meme ; `put_file/4` est le seul a avoir ete sorti dans `Client.Files` sans
+  # etre reexpose. La demande d'outillage mourait donc en
+  # `{:seam_misconfigured, Fleet.Forge.Client, [put_file: 4]}` — mesure du 2026-08-21, un architecte
+  # qui tirait une toolchain rust, deux fois de suite.
+  #
+  # Le garde a fait exactement son travail : il a nomme le module ET la fonction manquante au lieu
+  # de lever un `UndefinedFunctionError` au fond de la delegation. Ce qui manquait est en amont —
+  # rien ne verifiait que l'implementation PAR DEFAUT d'un seam tient le contrat qui la designe.
+  # C'est ce que ferme desormais `seam_conformance_test.exs`, pour les cinq seams a la fois.
+  @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
+          {:ok, term()} | {:error, term()}
+  defdelegate put_file(repo, path, content, opts), to: Fleet.Forge.Client.Files
+
+  # SON JUMEAU, ET IL TOMBAIT PLUS DUREMENT. `Client.Files` porte `get_file` ET `put_file` ; la
+  # facade ne reexposait NI l'un NI l'autre, et deux appelants distincts tapaient dedans. Celui-ci
+  # est `probe.ex:173` — `forge().get_file(repo, "CLAUDE.md", …)`, sur le chemin de `run_probe`,
+  # l'outil des juges. Arites exportees par la facade avant ce jour : AUCUNE.
+  #
+  # ⚠ LA DIFFERENCE DE MANIFESTATION EST TOUTE LA LECON. `put_file` passe par un behaviour, donc
+  # `conforming/2` rendait `{:seam_misconfigured, …, [put_file: 4]}` : un refus qui NOMME quoi
+  # reparer. Le seam de `probe.ex` (`get_env(:lcars_fleet, :mcp_probe_forge_client, …)`) ne declare aucun
+  # `@callback` — aucun garde n'avait rien a verifier, et le juge recevait un
+  # `UndefinedFunctionError` brut. Meme defaut, meme module, meme decoupage : seule la presence d'un
+  # contrat change ce qu'en voit celui qui le subit.
+  @spec get_file(String.t(), String.t(), Keyword.t()) :: {:ok, map()} | {:error, term()}
+  defdelegate get_file(repo, path, opts), to: Fleet.Forge.Client.Files
+
   @doc """
   Adds and verifies a label, returning `:already_present` without writing when applicable.
 
