@@ -409,6 +409,44 @@ fi
 # trusted+replace.
 # =============================================================
 
+# ╔════════════════════════════════════════════════════════════════════════════════════════════╗
+# ║  EXCEPTION DE DEBUG — A/B DU SP DE L'ARCHITECT — POSEE LE 2026-08-21 — A RETIRER            ║
+# ╚════════════════════════════════════════════════════════════════════════════════════════════╝
+#
+# CE N'EST PAS UNE MECANIQUE, ET IL NE FAUT PAS LA PRENDRE POUR UNE. Un `if` sur un nom de role,
+# en dur, dans un launcher dont TOUT le reste se derive du cap-profile. Il est la pour repondre a
+# UNE question et disparaitre : « l'architect est-il moins con si le SP vendor reste en amont du
+# sien ? ». La reponse se mesure sur pod, elle ne se raisonne pas ici.
+#
+# CE QUI EST TESTE. Les workers sont cadres par trois choses — leur pod, leur SP, leur mission — et
+# ils font leur travail. L'architect est LIBRE, et le SP qu'on lui a ecrit ne le cadre pas. En
+# `--system-prompt-file`, ce SP REMPLACE celui du vendor : tout ce que le vendor apporte de
+# discipline disparait avec. En `--append-system-prompt-file`, le SP vendor reste en amont et le
+# notre s'ajoute.
+#
+# ⚠ CE QUE CE BRAS CHANGE ET QU'IL FAUT SURVEILLER : le SP de l'architect a ete ecrit pour etre le
+# SP ENTIER. En append, les deux coexistent et le vendor est EN AMONT — il gagne donc les conflits
+# de ton, de format et de discipline d'outillage. Un bras qui se comporte mieux ne prouve pas que
+# le SP est bon, seulement que le melange l'est plus que notre moitie seule.
+#
+# LE TEST PORTE SUR `metadata.name`, PAS SUR `$ROLE`. Le positionnel n'est consomme nulle part
+# ailleurs dans ce fichier (une seule garde de presence, l.131) et sa valeur n'a pas ete verifiee ;
+# le cap-profile, lui, est deja lu, deja valide, et le launcher meurt franc s'il ne l'est pas.
+#
+# ⚠ `claude_probe.sh` PORTE DESORMAIS `--append-system-prompt-file`, et ce n'etait pas un choix :
+# `claude_probe.bats:106` verrouille « tout drapeau que le launcher passe en argv est dans
+# REQUIRED ». En retirant cette exception, retirer aussi la ligne la-bas.
+#
+# LA LIGNE D'ORIGINE, telle qu'elle etait dans l'`exec` ci-dessous — la remettre EST le retrait :
+#     --system-prompt-file "$SP_FILE" \
+SP_FLAGS=(--system-prompt-file "$SP_FILE")
+if [[ "$("$JQ_BIN" -r '.metadata.name // empty' "$CAP_PROFILE_JSON" 2>/dev/null)" == "architect" ]]; then
+  SP_FLAGS=(--append-system-prompt-file "$SP_FILE")
+  # LE BRAS SE DIT, SINON L'A/B NE MESURE RIEN. Un essai dont on ne sait pas de quel cote il tombe
+  # produit une impression, pas une mesure.
+  echo "claude_launch: EXCEPTION DEBUG — SP de l'architect en APPEND (le SP vendor reste en amont)" >&2
+fi
+
 # Tool search stays at the VENDOR DEFAULT (on): disabling it (ENABLE_TOOL_SEARCH=false) was
 # weighed 2026-07-18 and REJECTED — it would load every deferred schema into EVERY pod's
 # context (judges included, who arm nothing) to save a single ToolSearch call per
@@ -418,7 +456,7 @@ fi
 exec "$CLAUDE_BIN" \
     "${RC_FLAGS[@]}" \
     "${SESSION_FLAGS[@]}" \
-    --system-prompt-file "$SP_FILE" \
+    "${SP_FLAGS[@]}" \
     "${PERM_FLAGS[@]}" \
     --allowedTools "$ALLOWED_TOOLS" \
     --disallowedTools "$DISALLOWED_TOOLS" \
