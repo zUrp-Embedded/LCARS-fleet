@@ -297,7 +297,7 @@ sock_dir_for() {
 
 # ─── Lancement d'UNE console ────────────────────────────────────────────────────────────────────
 launch_one() {
-  local human="$1" home_dir tmux_conf
+  local human="$1" home_dir tmux_conf primary_gid
   local -a tmux_args cmd
 
   id "$human" >/dev/null 2>&1 || { echo "console.sh: humain inconnu: $human" >&2; return 1; }
@@ -316,6 +316,18 @@ launch_one() {
   # console web) ne rendent pas le meme environnement.
   login_shell="$(getent passwd "$human" | cut -d: -f7 || true)"
   [[ -n "$login_shell" && -x "$login_shell" ]] || login_shell=/bin/bash
+
+  # ─── LE GID PRIMAIRE SE LIT, IL NE SE DEVINE PAS DU NOM ────────────────────────────────────────
+  # `setpriv --regid "$human"` supposait qu'un groupe porte le nom de l'humain — vrai sous
+  # `USERGROUPS_ENAB yes` (le defaut Debian, donc l'image), FAUX des qu'un compte est cree avec un
+  # groupe primaire nomme : `useradd -g fleet lcars` ne cree aucun groupe `lcars`.
+  #
+  # MESURE DU 2026-08-21, poste natif : « setpriv: failed to parse regid: 'lcars' », console MORTE
+  # au demarrage, et le message pointait la socket — le motif reel etait deux lignes plus haut. Le
+  # gid est le champ 4 de la MEME ligne de passwd d'ou sortent deja le home (6) et le shell (7) :
+  # il n'y avait qu'a ne pas le deviner.
+  primary_gid="$(getent passwd "$human" | cut -d: -f4 || true)"
+  [[ "$primary_gid" =~ ^[0-9]+$ ]] || { echo "console.sh: gid primaire illisible pour $human" >&2; return 1; }
 
   # `-f` : la config tmux DE LA CONSOLE (molette, historique, barre de statut — sans elle on est
   # cloue a un ecran, tmux possedant l'ecran, le scrollback du navigateur ne voit rien). Elle ne
@@ -356,7 +368,7 @@ launch_one() {
           && printf '%s' "$want" > "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true
       fi
     fi
-    launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir"
+    launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir" "$primary_gid"
     return 0
   fi
 
@@ -378,12 +390,12 @@ launch_one() {
   say "console de $human sur $sock (plus aucun port publie)"
 
   if [[ "$FOREGROUND" -eq 1 ]]; then
-    cd "$home_dir" && exec setpriv --reuid "$human" --regid "$human" --init-groups -- "${cmd[@]}"
+    cd "$home_dir" && exec setpriv --reuid "$human" --regid "$primary_gid" --init-groups -- "${cmd[@]}"
   fi
 
   # Detache : l'entrypoint continue son travail (sshd doit demarrer quoi qu'il arrive). La sortie va
   # dans les logs du conteneur — une console qui meurt doit se voir, pas disparaitre en silence.
-  ( cd "$home_dir" && setpriv --reuid "$human" --regid "$human" --init-groups -- "${cmd[@]}" ) &
+  ( cd "$home_dir" && setpriv --reuid "$human" --regid "$primary_gid" --init-groups -- "${cmd[@]}" ) &
   local pid=$!
 
   # « Lancee » n'est pas « vivante ». Un ttyd qui ne peut pas binder meurt dans la demi-seconde :
@@ -404,7 +416,7 @@ launch_one() {
   fi
   say "console de $human vivante (pid $pid, $(stat -c '%A %U:%G' "$sock"))"
 
-  launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir"
+  launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir" "$primary_gid"
 }
 
 # ─── LA CONSOLE D'UN POD : UN SEUL TTYD POUR TOUS LES AGENTS ────────────────────────────────────
@@ -424,7 +436,7 @@ launch_one() {
 # pour <human>. La garde de forme reste necessaire (elle protege une commande locale), elle n'est
 # plus seule.
 launch_pod_console() {
-  local human="$1" home_dir="$2" login_shell="$3" sock_dir="$4"
+  local human="$1" home_dir="$2" login_shell="$3" sock_dir="$4" primary_gid="$5"
   local pod_sh="${LCARS_CONSOLE_POD:-/opt/lcars/console-pod.sh}"
   local sock="$sock_dir/pod.sock"
 
@@ -443,7 +455,7 @@ launch_pod_console() {
              -t 'theme={"background":"#000000","foreground":"#FF9900"}'
              "$pod_sh")
 
-  ( cd "$home_dir" && setpriv --reuid "$human" --regid "$human" --init-groups -- "${cmd[@]}" ) &
+  ( cd "$home_dir" && setpriv --reuid "$human" --regid "$primary_gid" --init-groups -- "${cmd[@]}" ) &
   local pid=$!
   sleep 0.4
   if ! kill -0 "$pid" 2>/dev/null; then

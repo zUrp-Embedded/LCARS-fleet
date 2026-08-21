@@ -184,8 +184,51 @@ ttyd_line() {
   run_console
   [ "$status" -eq 0 ]
 
-  grep -q -- "setpriv --reuid bt --regid bt" "$CALLS"
+  grep -q -- "setpriv --reuid bt --regid 1000" "$CALLS"
   ! grep -qE "^setpriv .*--reuid (root|0)( |$)" "$CALLS"
+}
+
+# ─── LE GID EST UN NOMBRE QU'ON LIT, PAS UN NOM QU'ON SUPPOSE ───────────────────────────────────
+#
+# Cette ligne a porte `--regid bt` pendant sa vie entiere, et le test l'epinglait — les deux
+# supposaient qu'un groupe porte le nom de l'humain. C'est vrai sous `USERGROUPS_ENAB yes` (le
+# defaut Debian, donc l'image) et FAUX des qu'un compte nait avec un groupe primaire nomme :
+# `useradd -g fleet lcars` ne cree AUCUN groupe `lcars`.
+#
+# Mesure du 2026-08-21, poste natif : « setpriv: failed to parse regid: 'lcars' » — la console de
+# l'humain de fleet mourait au demarrage, et le message affiche ensuite accusait la socket. Le gid
+# est le champ 4 de la ligne passwd d'ou le script tire deja le home (6) et le shell (7).
+@test "le gid primaire vient de passwd, pas du login — un groupe eponyme n'est pas supposé" {
+  # bt a le gid 1000 et AUCUN groupe `bt` : la doublure `getent` refuse `group bt` (exit 2), comme
+  # une vraie base ou le groupe n'existe pas.
+  run_console
+  [ "$status" -eq 0 ]
+
+  ! grep -qE "^setpriv .*--regid bt( |$)" "$CALLS"
+  # les DEUX consoles (humain et pod) passent par la meme identite — le second site avait ete
+  # oublie une fois deja, il est nomme ici.
+  [ "$(grep -c -- "setpriv --reuid bt --regid 1000" "$CALLS")" -ge 2 ]
+}
+
+@test "un humain dont le groupe primaire est NOMMÉ démarre quand même — la faute d'origine" {
+  # `lcars`, gid 1003 (fleet) : la forme exacte que 22-fleet-human pose sur le rail poste, et celle
+  # sur laquelle setpriv refusait de parser.
+  cat > "$BINDIR/getent" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "passwd lcars")         echo "lcars:x:1001:1003::/tmp/bt-home:/bin/bash" ;;
+  "group lcars-console")  echo "lcars-console:x:2001:" ;;
+  "group fleet")          echo "fleet:x:1003:" ;;
+  *) exit 2 ;;
+esac
+EOF
+  chmod 0755 "$BINDIR/getent"
+
+  run bash "$SRC" --human lcars
+  [ "$status" -eq 0 ]
+
+  grep -q -- "setpriv --reuid lcars --regid 1003" "$CALLS"
+  ! grep -q -- "--regid lcars" "$CALLS"
 }
 
 @test "a live process with NO socket is a FAILURE, not a running console" {
