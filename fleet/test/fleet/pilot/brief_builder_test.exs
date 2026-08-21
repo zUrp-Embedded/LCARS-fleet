@@ -155,12 +155,15 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
-      assert brief =~ "ATTENDU-CRITERIA"
-      refute brief =~ "PROCEDURAL-BRIEF"
-
-      # And it cites the criteria's version, not the brief's (same sha here, but the CITED ref is the
-      # criteria doc — the address of what was actually judged).
+      # The criterion is not INLINED — it is a mounted file the judge reads (content-addressed). What
+      # the brief carries is the reference and the ADDRESS: the criteria doc (`gate-briefs/`), never
+      # the producer's brief (`briefs/`). That the cited ref is the criteria doc is the whole fix.
+      assert brief =~ "~/issues/mandate.md"
       assert brief =~ "gate-briefs/issue-42-reviewer.md"
+      refute brief =~ "briefs/issue-42-engineer.md"
+      # Not inlined: the raw doc bodies do not travel in the order.
+      refute brief =~ "ATTENDU-CRITERIA"
+      refute brief =~ "PROCEDURAL-BRIEF"
     end
 
     @tag :tmp_dir
@@ -181,7 +184,10 @@ defmodule Fleet.Pilot.BriefBuilderTest do
           Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", String.trim(sha))
 
       assert {:ok, brief, "judge"} = build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
-      assert brief =~ "BRIEF-ONLY-CRITERION"
+      # Fallback: the mounted file is still the criterion, its address is the brief doc.
+      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "briefs/issue-42-engineer.md"
+      refute brief =~ "BRIEF-ONLY-CRITERION"
     end
   end
 
@@ -367,17 +373,16 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
-      # THE CRITERION IS IN THE BRIEF. It used to be an ERRAND — cite the doc, let the judge
-      # `git show` it out of a mounted ops — and that errand is the whole reason every project
-      # pod carried a read-only bind of the runtime's record: what was asked, what was judged, what
-      # was proven, handed to the producer whose work it scores.
-      assert brief =~ "LE CRITÈRE COMPLET."
+      # THE CRITERION IS A MOUNTED FILE THE JUDGE READS, not inline text. The order references
+      # `~/issues/mandate.md` (content-addressed) instead of carrying the doc body — so what the
+      # judge acts on is exactly what was authored, read from the pin, nothing to trust.
+      assert brief =~ "~/issues/mandate.md"
+      refute brief =~ "LE CRITÈRE COMPLET."
 
-      # The address travels with it, to be CITED: that is how a third party ties the verdict to a
-      # version from the forge. What the judge loses is verifying the pairing — against a tree the
-      # architect writes into, so it could confirm nothing the runtime had not resolved already.
+      # The address travels with it, to be CITED (its ref and short sha): how a third party ties the
+      # verdict to a version from the forge.
       assert brief =~ "#{ref}"
-      assert brief =~ "#{sha}"
+      assert brief =~ String.slice(sha, 0, 7)
 
       # No payload may name that variable: naming it re-creates the need to mount ops.
       refute brief =~ "LCARS_PROJECT_OPS"
@@ -393,10 +398,11 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       # It lands under "CONTEXT — already handled, DO NOT execute". A judge reading that as
       # do-not-read skips its only criterion, and a judge without a criterion APPROVES — the false
-      # green this rail fail-closes against elsewhere. So the two instructions are both stated.
+      # green this rail fail-closes against elsewhere. So both instructions are stated: read the
+      # mounted criterion, do not execute it.
       assert brief =~ "DO NOT execute"
-      assert brief =~ "Ne l'exécute pas"
-      assert brief =~ "que tu évalues"
+      assert brief =~ "ne l'exécute pas"
+      assert brief =~ "lis-le"
     end
 
     test "INVERSE TWIN — an inline brief is still embedded: there is nothing to point at", %{

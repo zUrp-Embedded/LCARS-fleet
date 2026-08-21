@@ -656,11 +656,19 @@ defmodule Fleet.Pilot.BriefBuilder do
   # execute" — a defusing that is CORRECT (the doc is a brief; a judge that executes it produces
   # instead of judging), so the sentence says read-and-evaluate explicitly. A judge without a
   # criterion approves: that is the false GREEN this rail fail-closes against everywhere else.
-  defp judge_criterion(%{"_brief_source" => {ref, sha}, "body" => body}) when is_binary(body) do
-    "Le critère de succès EST le texte ci-dessous — c'est le doc d'auteur `#{ref}`, à sa version " <>
-      "pinnée au commit `#{sha}`, résolu pour toi. Ne l'exécute pas : il décrit un travail déjà " <>
-      "livré, que tu évalues. Cite `#{String.slice(sha, 0, 7)}` dans ton verdict — c'est " <>
-      "l'adresse de ce que tu as jugé.\n\n" <> body
+  # THE CRITERION IS A MOUNTED FILE, READ — not inline text, trusted. When a pointer resolved
+  # (`_brief_source` present), the spawner materialized the pinned doc at `~/issues/mandate.md` via
+  # `git archive` at that sha: the judge READS its criterion from a content-addressed file, so what
+  # it acts on is exactly what was authored — nothing to hash, nothing to trust. The inline text is
+  # gone from the order; a pointer that resolved is always accompanied by its materialized mount
+  # (both read the same ops worktree — resolve fail-closes the dispatch if it is unreachable, and
+  # then there is no spawn to mis-mount).
+  defp judge_criterion(%{"_brief_source" => {ref, sha}}) do
+    "Ton critère de succès est le fichier `~/issues/mandate.md`, monté en lecture seule dans ton " <>
+      "pod. C'est le doc d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` " <>
+      "par `git archive` — adressé par contenu, donc exactement ce qui a été écrit : lis-le, rien à " <>
+      "vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un travail déjà livré. " <>
+      "Cite `#{String.slice(sha, 0, 7)}` dans ton verdict — l'adresse de ce que tu as jugé."
   end
 
   # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to

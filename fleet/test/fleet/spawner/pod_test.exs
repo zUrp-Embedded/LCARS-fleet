@@ -486,6 +486,48 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
+    test "PUSH — the mandate is MOUNTED content-addressed in issues/mandate.md (pod reads, not trusts)" do
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-mandate-#{System.unique_integer([:positive])}"
+
+      # An ops-like worktree carrying the pinned order at a commit — and a LATER version, to prove
+      # the pod is given the pinned one, not the current head.
+      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(ops, "briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: ops)
+      {_, 0} = System.cmd("git", ["-C", ops, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", ops, "config", "user.name", "H"])
+      File.write!(Path.join([ops, "briefs", "issue-1-engineer.md"]), "MANDAT PINNÉ v1")
+      {_, 0} = System.cmd("git", ["-C", ops, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", ops, "commit", "-q", "-m", "v1"])
+      {sha, 0} = System.cmd("git", ["-C", ops, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+      File.write!(Path.join([ops, "briefs", "issue-1-engineer.md"]), "MANDAT v2")
+      {_, 0} = System.cmd("git", ["-C", ops, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", ops, "commit", "-q", "-m", "v2"])
+      on_exit(fn -> File.rm_rf(ops) end)
+
+      args = %{
+        cap_profile: valid_profile(),
+        issue_id: "issue-1",
+        pod_id: pod_id,
+        opts: [
+          mandate: %{ref: "briefs/issue-1-engineer.md", sha: sha, ops_path: ops},
+          repo_id: @test_repo_id
+        ]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      info = GenServer.call(pid, :info)
+      # The pod reads its order from this file — content(sha), the pinned version, not v2.
+      mandate = File.read!(Path.join(info.pod_dir, "issues/mandate.md"))
+      assert mandate == "MANDAT PINNÉ v1"
+
+      Process.exit(pid, :kill)
+    end
+
     test "PUSH — admin.spawn (opts[:brief] + self_enqueue_brief, no dispatcher) enqueues the brief in the TaskQueue (get_work_item channel) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 
