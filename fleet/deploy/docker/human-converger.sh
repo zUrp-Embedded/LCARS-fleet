@@ -496,8 +496,29 @@ converge_human() { # converge_human <login>
   # peut poser (geste d'identité, jamais automatisé). L'appelant annonçait « le provisionnement
   # per-humain a echoue » sur un humain correctement provisionné, et renvoyait vers un doctor qui
   # dit la même chose sans la nommer comme un échec.
-  local rc=0
-  "$PROVISION" apply --human "$login" "${only[@]}" >/dev/null 2>&1 || rc=$?
+  # ⚠ UN ECHEC DE DAEMON QUI JETTE SA SORTIE EST UN ECHEC QU'ON NE DIAGNOSTIQUE JAMAIS. Cette ligne
+  # portait `>/dev/null 2>&1` : l'appelant disait « le provisioning per-humain a echoue — diagnose :
+  # provision doctor --human X », et le doctor, joue PLUS TARD, mesure un etat qui a change depuis.
+  #
+  # MESURE DU 2026-08-21, poste natif : `mintos` cree a 19:35, provisioning per-humain en echec, et
+  # au moment ou j'ai voulu le rejouer il passait — 4 modules, 0 drift, 0 echec. L'etat avait bouge
+  # sous la mesure, et il ne restait RIEN de la panne. Un convergeur tourne toutes les 30 s sans
+  # personne devant : c'est le seul endroit du depot ou la trace doit survivre a l'evenement.
+  #
+  # On garde donc les dernieres lignes, et seulement en cas d'echec — un tour nominal reste muet,
+  # sinon le journal devient illisible a raison de deux passes par minute.
+  local rc=0 out
+  out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
+  if [[ -n "$out" ]]; then
+    "$PROVISION" apply --human "$login" "${only[@]}" >"$out" 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
+      err "$login : provisioning per-humain rc=$rc — les 15 dernieres lignes :"
+      tail -n 15 "$out" | while IFS= read -r l; do err "  | $l"; done
+    fi
+    rm -f "$out"
+  else
+    "$PROVISION" apply --human "$login" "${only[@]}" >/dev/null 2>&1 || rc=$?
+  fi
   [[ "$rc" -eq 0 || "$rc" -eq 2 ]]
 }
 

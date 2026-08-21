@@ -648,3 +648,71 @@ EOF
   run grep -c '"\$CONSOLE" --human' "$SUT"
   [ "$output" -eq 1 ]
 }
+
+
+# ─── UN ECHEC DE DAEMON QUI JETTE SA SORTIE EST UN ECHEC QU'ON NE DIAGNOSTIQUE JAMAIS ───────────
+#
+# `converge_human` portait `>/dev/null 2>&1`. L'appelant disait « le provisioning per-humain a
+# echoue — diagnose : provision doctor --human X », et ce doctor, joue PLUS TARD, mesure un etat qui
+# a change depuis.
+#
+# Mesure du 2026-08-21, poste natif : `mintos` cree a 19:35, provisioning per-humain en echec — et
+# au moment de le rejouer, il passait (4 modules, 0 drift, 0 echec). L'etat avait bouge sous la
+# mesure, et il ne restait RIEN de la panne. Un convergeur tourne toutes les 30 s sans personne
+# devant : c'est le seul endroit du depot ou la trace doit survivre a l'evenement.
+#
+# ⚠ `converge_human` est definie APRES le garde de sourcing (elle appelle le provisioning), donc on
+# ne peut pas la sourcer comme `reserved`/`valid_login`. On l'EXTRAIT — meme idiome que l'en-tete
+# seule dans `forge_host_reach.bats`.
+
+converge_with() { # converge_with <script-provision> — joue converge_human contre une doublure
+  local fn="$BATS_TEST_TMPDIR/fn.sh"
+  sed -n '/^converge_human() {/,/^}/p' "$SUT" > "$fn"
+  [ -s "$fn" ] || { echo "converge_human introuvable dans $SUT" >&2; return 1; }
+  mkdir -p "$BATS_TEST_TMPDIR/modules.d"
+  printf '# NEEDS: human\n' > "$BATS_TEST_TMPDIR/modules.d/70-human.sh"
+  run bash -c "
+    set -uo pipefail
+    err() { echo \"[err] \$*\"; }
+    PROVISION='$1'
+    source '$fn'
+    converge_human zoe && echo CONVERGE || echo REFUSE"
+}
+
+@test "un echec per-humain LAISSE une trace — les dernieres lignes, pas un renvoi vers plus tard" {
+  local prov="$BATS_TEST_TMPDIR/prov-fail"
+  cat > "$prov" <<'EOF'
+#!/usr/bin/env bash
+echo "OK    10-truc: quelque chose"
+echo "FAIL  70-human: la panne exacte qu'on veut lire"
+exit 1
+EOF
+  chmod 0755 "$prov"
+
+  converge_with "$prov"
+  [[ "$output" == *"REFUSE"* ]]
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"la panne exacte qu'on veut lire"* ]]
+}
+
+@test "un tour NOMINAL reste muet — deux passes par minute, un journal lisible" {
+  local prov="$BATS_TEST_TMPDIR/prov-ok"
+  printf '#!/usr/bin/env bash\necho "OK  tout va bien"\nexit 0\n' > "$prov"
+  chmod 0755 "$prov"
+
+  converge_with "$prov"
+  [[ "$output" == *"CONVERGE"* ]]
+  [[ "$output" != *"tout va bien"* ]]
+}
+
+@test "le rc 2 reste un SUCCES, et il ne laisse pas de trace non plus" {
+  # APPLIQUE avec drift residuel : le cas nominal d'un humain frais, a qui il manque ses credentials
+  # `claude` — geste d'identite que personne ne peut automatiser.
+  local prov="$BATS_TEST_TMPDIR/prov-drift"
+  printf '#!/usr/bin/env bash\necho "DRIFT  70-human: credentials claude absentes"\nexit 2\n' > "$prov"
+  chmod 0755 "$prov"
+
+  converge_with "$prov"
+  [[ "$output" == *"CONVERGE"* ]]
+  [[ "$output" != *"rc=2"* ]]
+}
