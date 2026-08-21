@@ -26,11 +26,18 @@ defmodule Fleet.Test.Barrier do
       ** (exit) exited in: :sys.get_state(#PID<0.5518.0>)
           ** (EXIT) time out
 
-  Always the same site: the first barrier after a `pod.completed`, whose handler writes the
-  completion outbox to disk. Every failing run was concurrent with a docker image build saturating
-  the disk. File I/O in the BEAM goes through the async thread pool: when those threads are all
-  queued behind a saturated device, a single `File.write` can sit for seconds, and the barrier's
-  own 5 s runs out while the system is merely slow — not stuck.
+  ⚠ THE CAUSE IS CONCURRENCY ITSELF, AND THE EXPERIMENT THAT ISOLATES IT IS `--max-cases`:
+
+      mix test                    (12 cases, 6 cores)  →  1, then 2, then 4 failures — never the same
+      mix test --max-cases 4                           →  0 failures
+      one file alone                                   →  green, every time
+
+  Scheduling starvation alone is enough to blow a 5-second bound. Nothing blocks: the write path
+  through `WriteSpacing` is 0 in test and the consumer does not call it, so the disk is not the
+  agent here. An earlier reading of this blamed I/O contention from a concurrent docker build —
+  that was a correlation, and `--max-cases 4` refutes it: the same machine, the same disk, fewer
+  cases, no failure. Kept as a warning about how convincing a correlation looks when it happens to
+  be there every time you look.
 
   ## What it cost, and why it was not obvious
 
@@ -41,14 +48,20 @@ defmodule Fleet.Test.Barrier do
   posed, and fail with no visible relation to the first failure. One root cause, four red tests, and
   the three loudest ones point at the wrong module.
 
-  ## The number
+  ## The number, and why it is 30 s and not 60
 
-  60 s is not a guess about how slow a machine may be — it is « long enough that reaching it means
-  something is genuinely stuck, not merely slow ». A hang still fails, with the same message; only
-  the false positive disappears.
+  Not a guess about how slow a machine may be — « long enough that reaching it means something is
+  genuinely stuck, not merely slow ». A hang still fails, with the same message; only the false
+  positive disappears.
+
+  ⚠ IT MUST STAY UNDER ExUnit'S OWN DEADLINE, WHICH IS 60 s BY DEFAULT AND IS NOT OVERRIDDEN HERE.
+  This value was 60 s for an hour, which put the two deadlines in a race: a genuinely hung
+  GenServer would have surfaced as ExUnit killing the test rather than as this barrier saying
+  precisely which server never answered. Half of ExUnit's budget leaves the diagnosis to the
+  instrument that knows what it was waiting for.
   """
 
-  @barrier_timeout 60_000
+  @barrier_timeout 30_000
 
   @doc """
   Returns the GenServer's state once every message queued before this call has been handled.
