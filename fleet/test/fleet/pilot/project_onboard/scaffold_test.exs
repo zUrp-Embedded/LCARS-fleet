@@ -18,6 +18,48 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     refute File.exists?(Path.join(dir, "docs/spec.md"))
   end
 
+  # ─── LA RACINE SUIT LE CATALOGUE DU PROJET ────────────────────────────────────────────────────
+  #
+  # ⚠ DEFAUT MESURE LE 2026-08-16, ET REINTRODUIT LE 2026-08-21 EN RETIRANT LE DEPOT MODELE. La
+  # resolution par catalogue vivait dans la couche template (`resolve_template`) ; en la supprimant
+  # avec elle, `Scaffold.main` retombait sur `Fleet.Catalogue.root/0` — qui rend TOUJOURS la racine
+  # livree. Un projet `web-demo/*` serait ne du squelette de `fleet` pendant que `web-demo` livre le
+  # sien, exactement comme avant le correctif de 2026-08-16.
+  #
+  # Ces temoins epinglent la resolution LA OU ELLE VIT MAINTENANT, pour qu'un prochain retrait ne
+  # puisse pas l'emporter en silence une seconde fois.
+
+  describe "template_root/1" do
+    setup %{tmp_dir: dir} do
+      # ⚠ LE MANIFESTE FAIT LE CATALOGUE, pas le repertoire. `installed_dirs/0` cherche
+      # `<dir>/*/catalogue.yaml` ; sans lui, l'arbre existe et n'appartient a personne — et le
+      # temoin mesurerait le repli en croyant mesurer la resolution.
+      root = Path.join(dir, "cat-a-lui")
+      File.mkdir_p!(Path.join(root, Fleet.Catalogue.rel(:project_template)))
+      File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: cat-a-lui\n")
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
+      %{own_root: root}
+    end
+
+    test "un catalogue qui livre son arbre scaffolde depuis LE SIEN", %{own_root: root} do
+      assert {path, :own} = Scaffold.template_root("cat-a-lui")
+      assert path == Path.join(root, Fleet.Catalogue.rel(:project_template))
+    end
+
+    test "un catalogue SANS arbre se replie sur le livre — l arbitrage de 2026-08-16" do
+      assert {path, :fallback} = Scaffold.template_root("cat-sans-arbre")
+      assert path == Fleet.Catalogue.project_template_root()
+    end
+
+    test "un appelant qui ne nomme pas son catalogue se replie AUSSI, et c est le cas dangereux" do
+      # Il ne peut pas etre distingue d'un repli legitime par la valeur rendue — c'est le LOG qui
+      # les separe (`warning` ici, `info` la-bas). Ce que ce temoin tient, c'est qu'il ne CRASHE
+      # pas et ne devine pas un catalogue.
+      assert {path, :fallback} = Scaffold.template_root(nil)
+      assert path == Fleet.Catalogue.project_template_root()
+    end
+  end
+
   # ─── ci_workflows/3 — le rail CI d'un depot importe ───────────────────────────────────────────
   #
   # La protection de `main` exige un statut `CI / *`. Un depot sans `.gitea/workflows/` n'en produit

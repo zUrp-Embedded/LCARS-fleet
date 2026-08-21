@@ -1,4 +1,6 @@
 defmodule Fleet.Project.Onboard.Scaffold do
+  require Logger
+
   @moduledoc """
   Filesystem projection of the project template used by `Fleet.Project.Onboard`.
 
@@ -16,9 +18,47 @@ defmodule Fleet.Project.Onboard.Scaffold do
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def main(dir, name, opts), do: write_face(dir, "main", name, opts, "(à compléter)")
 
+  @doc """
+  La racine de catalogue d'où le squelette d'un projet de `org` est lu — la SIENNE, ou celle du
+  catalogue livré si le sien n'en porte pas.
+
+  ## Pourquoi ce n'est pas `Fleet.Catalogue.root/0`
+
+  `root/0` rend TOUJOURS la racine livrée. Un `Scaffold.main` branché dessus scaffolde chaque
+  projet depuis le catalogue de référence, quel que soit le sien — et c'est un défaut MESURÉ, le
+  2026-08-16 : un projet `web-demo/*` naissait du template de `fleet` pendant que `web-demo`
+  livrait treize fichiers à lui que rien ne lisait jamais. Un arbre présent dans un catalogue et
+  inatteignable par tout appelant n'est pas une fonctionnalité en attente de câblage, c'est du
+  poids mort qui a l'air câblé.
+
+  La résolution vivait dans la couche template (`resolve_template`, retirée avec le dépôt modèle le
+  2026-08-21). Elle descend ici, parce que c'est désormais ce chemin-ci qui peuple un projet neuf.
+
+  ## Le repli, et pourquoi il est ANNONCÉ
+
+  ⚖ user, 2026-08-16 : *« le template, on peut prendre celui de fleet par défaut s'il n'y en a pas,
+  ça ne change rien »*. C'est le SEUL arbre qui puisse se replier, et la raison est structurelle :
+  tout le reste d'un catalogue est nommé PAR SON NOM — une carte nomme un rôle, un rôle nomme son
+  profil — donc se replier résoudrait un nom dans un catalogue qui ne l'a jamais déclaré. Un
+  squelette de projet ne nomme rien et n'est nommé par rien.
+
+  Il est DIT au moment où il arrive : un catalogue qui scaffolde silencieusement depuis le matériel
+  d'un voisin est exactement la forme du défaut ci-dessus, une couche plus bas.
+  """
+  @spec template_root(String.t() | nil) :: {Path.t(), :own | :fallback}
+  def template_root(org) do
+    root = org && Fleet.Catalogue.root_for(org)
+
+    if root && File.dir?(Path.join(root, Fleet.Catalogue.rel(:project_template))) do
+      {Path.join(root, Fleet.Catalogue.rel(:project_template)), :own}
+    else
+      {Fleet.Catalogue.project_template_root(), :fallback}
+    end
+  end
+
   defp write_face(dir, face, name, opts, pitch_default) do
     vars = template_vars(name, opts, pitch_default)
-    root = face_root(face)
+    root = face_root(face, opts)
 
     files =
       for path <- face_files(root), into: %{} do
@@ -36,7 +76,40 @@ defmodule Fleet.Project.Onboard.Scaffold do
     |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
   end
 
-  defp face_root(face), do: Path.join(Fleet.Catalogue.project_template_root(), face)
+  # ⚠ LA RACINE SUIT LE CATALOGUE DU PROJET, PAS LA RACINE LIVREE. `opts[:org]` porte le catalogue ;
+  # son absence (un appelant qui n'en a pas) retombe sur le livre, ce qui est le repli documente.
+  defp face_root(face, opts) do
+    org = Keyword.get(opts, :org)
+    {root, origin} = template_root(org)
+
+    announce_fallback(origin, org)
+    Path.join(root, face)
+  end
+
+  # ⚠ TROIS ETATS, ET LE TROISIEME EST LE PLUS DANGEREUX. Un repli sur un catalogue NOMME est
+  # legitime et se dit une fois. Un appelant SANS org, lui, ne sait pas de quel catalogue il parle :
+  # il scaffolde depuis le livre sans que personne ne l ait decide, et c est exactement le defaut
+  # mesure le 2026-08-16, avec une cause de plus — l absence d argument au lieu d une resolution
+  # cablee en dur. Il monte donc d un cran : `warning`.
+  defp announce_fallback(:own, _org), do: :ok
+  defp announce_fallback(:fallback, "fleet"), do: :ok
+
+  defp announce_fallback(:fallback, org) when is_binary(org) do
+    Logger.info(
+      "Scaffold: #{org} scaffolde depuis le catalogue LIVRE — le sien ne porte pas d arbre " <>
+        "`project_template`. Legitime (un squelette ne nomme rien et n est nomme par rien), et DIT " <>
+        "parce qu un catalogue bati en silence sur le materiel d un voisin est le defaut que cette " <>
+        "resolution existe pour fermer."
+    )
+  end
+
+  defp announce_fallback(:fallback, _nil) do
+    Logger.warning(
+      "Scaffold: squelette lu dans le catalogue LIVRE parce que l appelant n a pas nomme son " <>
+        "catalogue (`opts[:org]` absent). Si ce projet appartient a un catalogue qui livre son " <>
+        "propre `project_template`, il vient de naitre avec le materiel d un voisin."
+    )
+  end
 
   # Extracted so the workflow-only door expands the SAME placeholders as a full face: two expanders
   # would let a `${VAR}` reach a repository raw the day one of them learns a new one.
@@ -83,7 +156,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
   @spec ci_workflows(Path.t(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
   def ci_workflows(dir, name, opts) do
-    root = face_root("main")
+    root = face_root("main", opts)
     vars = template_vars(name, opts, "")
 
     missing =

@@ -221,8 +221,8 @@ def get(url):
 # La boite se lit dans /proc ; la fleet par son API ; la forge par un ping version sur l'URL que
 # le RUNTIME utilise (fleet_v2.env — la verite de l'humain, pas une reconstruction) ; le runner
 # n'est PAS joignable d'ici (conteneur voisin, pas de socket docker dans la boite — et c'est
-# voulu) : sa preuve de vie est INDIRECTE, le dernier verdict CI du repo temoin.
-_MACH = {"t": 0, "forge": None, "ci": None}
+# voulu) : il n'a plus de preuve de vie ici, cf. la sonde retiree dans `machines()`.
+_MACH = {"t": 0, "forge": None}
 
 def _env_forge_url():
     try:
@@ -265,26 +265,22 @@ def machines():
             v = get(url.rstrip("/") + "/api/v1/version")
             _MACH["forge"] = {"url": url, "version": (v or {}).get("version"),
                               "ms": round((time.monotonic() - t0) * 1000)} if v else {"url": url, "down": True}
-            tok = None
-            try:
-                tok = open(os.path.expanduser("~/.gitea_token")).read().strip()
-            except OSError:
-                pass
-            try:
-                import urllib.request as ur
-                req = ur.Request(url.rstrip("/") + "/api/v1/repos/fleet/project-template/actions/tasks")
-                if tok:
-                    req.add_header("Authorization", "token " + tok)
-                with ur.urlopen(req, timeout=2) as r:
-                    runs = (json.load(r).get("workflow_runs") or [])
-                _MACH["ci"] = {"status": runs[0].get("status"), "at": (runs[0].get("updated_at") or "")[11:16]} if runs else None
-            except Exception:
-                _MACH["ci"] = None
+            # ⚠ LA SONDE CI EST PARTIE AVEC SON CANARI (2026-08-21). Elle interrogeait
+            # `fleet/project-template/actions/tasks` — le depot modele, seul depot garanti present
+            # et porteur d'un workflow. Ce depot n'existe plus : le squelette d'un projet neuf vient
+            # du catalogue sur disque, pas d'une copie sur la forge.
+            #
+            # Laisser la sonde aurait coute pire que la retirer : son `except` rendait `None`, et le
+            # panneau serait reste vide POUR TOUJOURS en ressemblant a « aucune CI recente ». Un
+            # indicateur qui ne peut plus rien indiquer ment plus qu'un indicateur absent.
+            #
+            # Le remplacer demanderait un depot-canari, c'est-a-dire exactement l'artefact qu'on
+            # vient de supprimer. Si l'indicateur revient, il devra viser un projet REEL — et la
+            # CLEF part avec la sonde : un emplacement toujours vide dans la charge utile est un
+            # cablage apparent que le prochain lecteur croira brancher.
         else:
             _MACH["forge"] = None
-            _MACH["ci"] = None
     if _MACH["forge"]: out["forge"] = _MACH["forge"]
-    if _MACH["ci"]: out["ci"] = _MACH["ci"]
     return out
 
 def state():

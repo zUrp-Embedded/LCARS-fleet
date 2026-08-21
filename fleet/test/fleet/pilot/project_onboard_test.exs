@@ -307,7 +307,7 @@ defmodule Fleet.Project.OnboardTest do
       # JG-121 — trois etats : `{:ok, bool}` sur une lecture aboutie. Le cas illisible a son test.
       def branch_exists?(repo, branch, _opts) do
         send(self(), {:branch_exists?, repo, branch})
-        {:ok, repo in ["fleet/onboarded", "fleet/project-template"]}
+        {:ok, repo in ["fleet/onboarded"]}
       end
 
       def protect_branch(repo, rule, _opts) do
@@ -319,7 +319,6 @@ defmodule Fleet.Project.OnboardTest do
     defp reconcile(repo) do
       ProjectOnboard.reconcile_main_protection(repo,
         forge_repo: ProbeRepo,
-        project_template: "fleet/project-template",
         reviewer_roles: ["reviewer"]
       )
     end
@@ -333,11 +332,15 @@ defmodule Fleet.Project.OnboardTest do
       refute_received {:protect_branch, _repo, _rule}
     end
 
-    test "the project TEMPLATE is never protected (its sync FORCE-pushes main)" do
-      # The template carries a `ops` face of its own, so the seeded-project test alone would
-      # let it through. `mix lcars.project_template.sync` force-pushes both faces: a protected
-      # `main` breaks the projection that every new project is generated from.
-      assert :ok = reconcile("fleet/project-template")
+    # ⚠ LE TEMOIN DU DEPOT MODELE EST PARTI AVEC LUI (2026-08-21). Il epinglait que
+    # `fleet/project-template` n'etait jamais protege : son sync force-poussait `main`, et une
+    # protection aurait casse la projection dont tout projet neuf etait genere. Ce depot n'existe
+    # plus — le squelette vient du catalogue sur disque.
+    #
+    # Ce qui garde sa place est plus large et ne nomme rien : un depot sans branche `ops` n'est pas
+    # un projet, quel que soit son nom. Le magasin d'un catalogue n'en porte pas.
+    test "a repo without an `ops` face is not a project — nothing is protected" do
+      assert :ok = reconcile("fleet/no-ops-face")
       refute_received {:protect_branch, _repo, _rule}
     end
 
@@ -369,7 +372,6 @@ defmodule Fleet.Project.OnboardTest do
       assert {:error, {:seeded_unreadable, {:http, 503, "down"}}} =
                ProjectOnboard.reconcile_main_protection("fleet/unknowable",
                  forge_repo: UnreadableRepo,
-                 project_template: "fleet/project-template",
                  reviewer_roles: ["reviewer"]
                )
 

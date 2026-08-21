@@ -211,8 +211,9 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # repondu », c'est-a-dire un diagnostic de reseau pour une panne de demarrage.
   #
   # Les temoins ne pouvaient pas l'attraper parce qu'ils injectent des doublures de `forge_repo` et
-  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne. `TemplateSync` porte
-  # deja ce demarrage et dit pourquoi — c'est la meme raison, a la meme frontiere.
+  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne.
+  # `Fleet.Project.Onboard.eval_migrate/2` porte deja ce demarrage et dit pourquoi — c'est la meme
+  # raison, a la meme frontiere.
   #
   # `Application.ensure_all_started(:req)` puis le superviseur local : le pool est DECLARE par
   # `Fleet.Forge.finch_spec/0`, sa propre autorite, jamais recompose ici.

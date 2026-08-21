@@ -66,10 +66,13 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
 CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
 # Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
 ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
-# L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`,
-# `catalogue-source`, `template-sync`). Il s'appelait `TEMPLATE_SYNC` quand il n'en servait
-# qu'une : un nom qui decrit un seul usage devient faux au deuxieme.
-ENTRYPOINT="${LCARS_ENTRYPOINT:-${LCARS_TEMPLATE_SYNC:-/opt/lcars/entrypoint.sh}}"
+# L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`, `catalogue-source`).
+# Il s'appelait `TEMPLATE_SYNC` quand il n'en servait qu'une : un nom qui decrit un seul usage
+# devient faux au deuxieme — et celui-la est mort deux fois, la porte `template-sync` ayant ete
+# retiree avec le depot modele le 2026-08-21. Le repli sur l'ancien nom part avec elle : personne ne
+# le posait (verifie sur tout le depot), donc le garder ne compatibilisait rien et faisait croire a
+# un cablage.
+ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
@@ -317,21 +320,6 @@ cmd_apply() {
     ( cd "$RECIPE_DIR/$m" && tofu apply -auto-approve -input=false -no-color ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
-
-  # ─── LE DEPOT MODELE, dans le meme geste ──────────────────────────────────────────────────────
-  # `create_project` GENERE depuis lui ; absent, l'onboard degrade en bare-create sur chaque projet.
-  # AVEC LE JETON MASTER, ce qui supprime un ordre : le poser avec le jeton SYSTEME exigerait qu'il
-  # soit deja minte, donc un boot entre l'apply et ce geste.
-  #
-  # ⚠ NON FATAL, ET C'EST DELIBERE : la structure EST posee a ce stade. Un modele qui ne part pas
-  # est une degradation NOMMEE, pas une raison de rendre un echec sur un geste qui a reussi.
-  echo "forge-gestures: depot modele (project-template)"
-  local tf; tf="$(umask 077; mktemp)"
-  printf '%s\n' "$tok" > "$tf"
-  # shellcheck disable=SC2064 -- on veut la valeur d'ICI, pas celle du moment du trap
-  trap "rm -f '$tf'" EXIT
-  FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync \
-    || echo "forge-gestures: depot modele NON pose — l'onboard degradera en bare-create (dit a chaque projet)" >&2
 
   # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
   publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
@@ -628,32 +616,20 @@ cmd_install() {
   #
   #    Un echec ici n'annule RIEN : la forge porte l'org et la source, l'installation a eu lieu. Le
   #    dire, et laisser le boot suivant rattraper, est plus honnete que de defaire ce qui est bon.
+  #
+  #    ⚠ CE MATERIEL EST AUSSI LE SQUELETTE DES PROJETS DE CE CATALOGUE. `Scaffold.template_root/1`
+  #    lit `project_template/` SOUS CE REPERTOIRE ; absent, il se replie sur le catalogue livre. Un
+  #    catalogue qui livre son propre arbre et dont le materiel n'est pas pose voit donc ses projets
+  #    naitre du squelette d'un voisin — c'est ce que le message d'echec ci-dessous doit dire.
   local materiel=1
   install_material "$name" "$work/src" && materiel=0
-
-  # 8. LE MODELE DE PROJET DU CATALOGUE, ET IL VIENT APRES LE MATERIEL — L'ORDRE EST LE POINT.
-  #    `TemplateSync` decide `<name>/project-template` ou le repli en LISANT le materiel local :
-  #    un catalogue dont l'arbre `project_template` est sur le disque a le sien. Joue avant l'etape
-  #    7, il ne trouvait rien et repliait TOUJOURS — mesure sur banc du 2026-08-16, l'install de
-  #    `web-demo` annoncait « fleet/project-template synced » alors que le catalogue livre treize
-  #    fichiers a lui. Le repli etait correct au sens du code, et faux au sens du fait.
-  #
-  #    Un echec ici n'annule rien : la forge porte l'org et la source. Il coute un repli sur le
-  #    modele de reference, ce qui est degrade et pas casse — et ca se dit.
-  if [[ "$materiel" -eq 0 ]]; then
-    local tf; tf="$(umask 077; mktemp)"
-    printf '%s\n' "$tok" > "$tf"
-    FORGE_TOKEN_FILE="$tf" "$ENTRYPOINT" template-sync "$name" \
-      || echo "forge-gestures: modele de projet de $name NON pose — ses projets partiront du modele de reference" >&2
-    rm -f "$tf"
-  fi
 
   if [[ "$materiel" -eq 0 ]]; then
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/catalogue, materiel pose)"
   else
     echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
     echo "  la boite ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
-    echo "  son modele de projet n'est donc pas pose non plus : ses projets partiront du modele de reference" >&2
+    echo "  son squelette de projet n'est donc pas lisible : ses projets naitront de celui du catalogue livre" >&2
   fi
 }
 

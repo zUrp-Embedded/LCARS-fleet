@@ -87,8 +87,9 @@ defmodule Fleet.Forge do
   application module, anything that was not the pilot could name the pool but not START it: an
   `eval` door acting on the forge died on `unknown registry: Fleet.Forge.Finch`, and its only ways
   out were to depend on the pilot or to write the shape a second time. Out-of-app callers start it
-  standalone under their own supervisor (`mix lcars.project_template.sync`, the migrate door) — never
-  `app.start`, because a second fleet must not boot from a tool.
+  standalone under their own supervisor (the `eval` doors: `Onboard.eval_migrate/2`,
+  `Onboard.eval_reconcile/1`, `CatalogueLifecycle`) — never `app.start`, because a second fleet must
+  not boot from a tool.
   """
   @spec finch_spec() :: {module(), keyword()}
   def finch_spec, do: {Finch, name: @finch_name, pools: %{default: [conn_max_idle_time: 30_000]}}

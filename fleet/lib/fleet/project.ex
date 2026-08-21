@@ -78,7 +78,6 @@ defmodule Fleet.Project do
       Intensity,
       Architect,
       WorktreeSync,
-      GitOps,
-      TemplateSync
+      GitOps
     ]
 end

@@ -70,7 +70,6 @@ FAKE
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
-  TPL_LOG="$BATS_TEST_TMPDIR/tpl.log"
   ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
@@ -83,10 +82,6 @@ case "\$1" in
     ;;
   verify)       exit "\$(cat "$BATS_TEST_TMPDIR/verify.rc" 2>/dev/null || echo 0)" ;;
   roles-tfvars) echo '{"org":"cat","roles":["cat_dev"]}' ;;
-  template-sync)
-    { printf 'argv=%s\n' "\$*"; printf 'tokfile=%s\n' "\${FORGE_TOKEN_FILE:-}"; } >> "$TPL_LOG"
-    exit "\$(cat "$BATS_TEST_TMPDIR/tpl.rc" 2>/dev/null || echo 0)"
-    ;;
 esac
 exit 0
 FAKE
@@ -198,27 +193,7 @@ FAKE
   [ "$(sed -n '2p' "$TOFU_LOG")" = "$RECIPE" ]
 }
 
-@test "apply: le depot modele part APRES les applys, et par FICHIER de jeton" {
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  grep -q 'argv=template-sync' "$BATS_TEST_TMPDIR/tpl.log"
-  # Le jeton passe par un FICHIER, jamais en argv ni en variable de ligne de commande.
-  tokfile="$(sed -n 's/^tokfile=//p' "$BATS_TEST_TMPDIR/tpl.log")"
-  [ -n "$tokfile" ]
-  run grep -c 'argv=.*TOK' "$BATS_TEST_TMPDIR/tpl.log"
-  [ "$output" = "0" ]
-}
 
-@test "apply: un modele qui echoue ne fait PAS echouer l'apply — la structure est posee" {
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-  echo 1 > "$BATS_TEST_TMPDIR/tpl.rc"
-  run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"bare-create"* ]]
-}
 
 @test "apply: un tofu en echec, LUI, est fatal et nomme le module" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
@@ -362,23 +337,6 @@ FAKE
   [[ "$output" == *"materiel pose"* ]]
 }
 
-@test "install: le modele de projet est synchronise APRES le materiel, jamais avant" {
-  # ⚠ MESURE SUR BANC, 2026-08-16. `TemplateSync` decide `<name>/project-template` ou le repli en
-  # LISANT le materiel local. Joue avant que le materiel soit pose, il ne trouvait rien et repliait
-  # TOUJOURS : l'install de `web-demo` annoncait « fleet/project-template synced » pour un
-  # catalogue qui livre treize fichiers a lui. Un repli correct au sens du code, faux au sens du
-  # fait — et invisible, puisqu'il s'annonce comme un succes.
-  setup_install
-  run bash -c "'$SCRIPT' install cat < /dev/null"
-  [ "$status" -eq 0 ]
-
-  # L'ORDRE, LU DANS LA TRACE : le clone du materiel precede l'appel `template-sync`.
-  clone_line="$(grep -n 'clone .*cat/catalogue.git' "$GIT_LOG" | tail -1 | cut -d: -f1)"
-  [ -n "$clone_line" ]
-  grep -q 'template-sync cat' "$ENTRY_LOG"
-  # Le materiel est la AVANT que la porte soit appelee — sinon la porte replierait.
-  [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-}
 
 @test "install: materiel local en echec — ni modele pose, ni promesse de l'avoir fait" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
@@ -392,10 +350,6 @@ FAKE
   [[ "$output" == *"INSTALLE sur la forge"* ]]
   [[ "$output" == *"redemarrage"* ]]
   grep -q 'push .*cat/catalogue' "$GIT_LOG"
-  # SANS MATERIEL, PAS DE SYNCHRO DE MODELE : la porte replierait, et son message de succes
-  # annoncerait un modele pose pour un catalogue dont on ne sait rien.
-  ! grep -q 'template-sync' "$ENTRY_LOG"
-  [[ "$output" == *"modele de reference"* ]]
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {

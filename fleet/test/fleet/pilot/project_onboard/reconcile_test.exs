@@ -4,10 +4,12 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
 
   Ce que ces temoins tiennent, et pourquoi chacun coute quelque chose :
 
-    * LE FILTRE. Une org de catalogue porte des depots qui ne sont PAS des projets — le
-      `catalogue` qui la signe, le `project-template` d'ou ils sont generes. Les importer
-      poserait trois faces autour d'un depot qu'aucun humain n'a ouvert. Le discriminant est
-      `.lcars.json` sur `main`, mesure du 2026-08-17 : le projet rend 200, les deux autres 404.
+    * LE FILTRE. Une org de catalogue porte des depots qui ne sont PAS des projets — a commencer
+      par le `catalogue` qui la signe, et ensuite tout ce qu'un humain depose chez lui. Les
+      importer poserait trois faces autour d'un depot qu'aucun humain n'a ouvert. Le discriminant
+      est `.lcars.json` sur `main`, mesure du 2026-08-17 : le projet rend 200, les autres 404.
+      Le stub en tient DEUX qui n'en sont pas, et pas un seul : un filtre qui ne saute qu'un depot
+      passe aussi bien quand il ne sait exclure que celui-la.
     * LA DIFFERENCE ENTRE 404 ET MUET. Un `not_found` est une reponse (« pas un projet ») ; toute
       autre erreur est une ABSENCE de reponse, et la traiter comme un 404 ferait disparaitre un
       projet bien reel de l'inventaire sur un simple timeout.
@@ -24,7 +26,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
   # org, et la question posee au stub est epinglee (une org derivee d'ailleurs se verrait ici).
   defmodule Repo do
     def list_org_repos("fleet", _fc),
-      do: {:ok, ["fleet/project-template", "fleet/vitrine", "fleet/catalogue"]}
+      do: {:ok, ["fleet/notes-perso", "fleet/vitrine", "fleet/catalogue"]}
   end
 
   defmodule MuteRepo do
