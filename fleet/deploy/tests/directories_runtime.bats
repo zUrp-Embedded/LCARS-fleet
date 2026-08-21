@@ -69,7 +69,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   PROV_SUBSTRATE=linux mod 'prov_runtime_dirs'
   [ "$status" -eq 0 ]
   [[ "$output" == *"/run/lcars/console 0711 root:root"* ]]
-  [[ "$output" == *"/run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN:fleet"* ]]
+  [[ "$output" == *"/run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN:lcars-console"* ]]
   # Le parent aussi : sans lui, `install -d` du dossier de console echoue sur un /run nu.
   [[ "$output" == *"/run/lcars 0755 root:root"* ]]
 }
@@ -90,20 +90,22 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   # de console — deux pannes pour une cause, et la seconde sans rapport visible avec la premiere.
   PROV_SUBSTRATE=linux PROV_FLEET_HUMAN="n-existe-pas-$$" mod 'prov_runtime_dirs'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"/run/lcars/console/temoin 2710 temoin:fleet"* ]]
+  [[ "$output" == *"/run/lcars/console/temoin 2710 temoin:lcars-console"* ]]
 }
 
 @test "le dossier de l'humain ne NOMME jamais un groupe homonyme — le groupe primaire est celui de la fleet" {
   # Meme faute que `chown <humain>:<humain>` corrigee le 2026-08-20 : un groupe au nom de l'humain
   # n'existe que la ou `USERGROUPS_ENAB yes` en a cree un. Ici le groupe est celui de la FLEET, qui
-  # est declare par 20-groups.sh — donc il existe par construction.
+  # est declare par 20-groups.sh — donc il existe par construction. (Le groupe est `lcars-console`
+  # depuis le 2026-08-21 : `fleet` porte deja la lecture de tout le runtime, et traverser un
+  # repertoire n'a pas besoin de ca.)
   PROV_SUBSTRATE=linux mod 'prov_runtime_dirs'
   [ "$status" -eq 0 ]
   [[ "$output" != *"temoin:temoin"* ]]
 }
 
 @test "substrat docker: la table n'en porte AUCUN — console.sh les possede la-bas" {
-  # Deux createurs avec deux groupes (`fleet` ici, `lcars-console` dans l'image) donneraient un
+  # Deux createurs pour un meme dossier donneraient un
   # dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose PAS le mode
   # d'un dossier existant, donc le desaccord serait SILENCIEUX.
   PROV_SUBSTRATE=docker mod 'prov_runtime_dirs | wc -l'
@@ -115,7 +117,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   PROV_SUBSTRATE=linux mod 'prov_tmpfiles_body'
   [ "$status" -eq 0 ]
   [[ "$output" == *"d /run/lcars/console 0711 root root -"* ]]
-  [[ "$output" == *"d /run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN fleet -"* ]]
+  [[ "$output" == *"d /run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN lcars-console -"* ]]
   # Autant de lignes `d ` que d'entrees dans la table : une entree ajoutee a la table arrive ici
   # sans geste, et une entree qui n'y est pas ne peut pas y apparaitre.
   PROV_SUBSTRATE=linux mod 'prov_tmpfiles_body | grep -c "^d "'

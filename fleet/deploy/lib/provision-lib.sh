@@ -52,6 +52,19 @@ PROVISION_LIB_LOADED=1
 # boite (jeton master, seed). La capacite reste le systeme de fichiers — jamais un booleen qu'un
 # appelant pourrait oublier de tester.
 : "${PROV_ADMIN_GROUP:=lcars-admin}"           # is_admin sur la forge -> administre le runtime
+# ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
+# Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
+# CONSOMMATEUR (le deck, sous `nobody`) doivent se rencontrer sans que ni l'un ni l'autre ne change
+# d'identite. Le repertoire de chaque humain est `2710 <humain>:lcars-console` : le setgid fait
+# heriter ce groupe a la socket, et le `--x` du groupe donne la traversee sans le listage.
+#
+# ⚠ SURTOUT PAS `$PROV_FLEET_GROUP`, ET C'EST LE PIEGE QUI A MORDU. Celui-la porte deja la lecture
+# de `/local/LCARS_v2`, des role-tokens et de `/home/private` : le reutiliser ici serait plus court
+# et accorderait tout le reste par la meme occasion. L'image le dit deja dans son Dockerfile — « un
+# pouvoir qu'on ne sait pas dire en une phrase est trop large » — et le rail poste, lui, cablait
+# `fleet`. Mesure du 2026-08-21 : `/run/lcars/console/lcars` en `lcars:fleet`, deck sous
+# `nobody:lcars-console`, traversee REFUSEE — une console vivante et injoignable.
+: "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
 : "${PROV_CATALOGUES_WORK:=/var/lib/lcars/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)

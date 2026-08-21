@@ -78,10 +78,23 @@ set -euo pipefail
 # posee, `fleet_v2 start` annoncant « fleet up » — et zero `beam.smp` une seconde plus tard. Le
 # lanceur ne ment pas, il rend la main avant que le BEAM ne meure.
 #
-# ⚠ SUR `docker` ON NE TOUCHE A RIEN : `console.sh` y possede ces dossiers et les veut en
-# `<humain>:lcars-console`, un groupe que seule l'image cree. Deux createurs avec deux groupes
-# donneraient un dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose
+# ⚠ SUR `docker` ON NE TOUCHE A RIEN : `console.sh` y possede ces dossiers. Deux createurs pour un
+# meme dossier donneraient un mode qui depend de qui a couru le premier — et `install -d` ne repose
 # PAS le mode d'un dossier existant, donc le desaccord serait SILENCIEUX.
+#
+# ⚠ LE GROUPE EST CELUI DE LA CONSOLE, PAS CELUI DE LA FLEET, ET CETTE LIGNE A PORTE `fleet` JUSQU'AU
+# 2026-08-21. Le motif ecrit ici disait « un groupe que seule l'image cree » — c'etait vrai, et c'est
+# devenu une raison de se tromper : le rail poste a cable `$PROV_FLEET_GROUP` faute de mieux, au lieu
+# de creer le groupe manquant. `20-groups` le pose desormais.
+#
+# Ce que ca coutait, mesure sur un poste natif : `/run/lcars/console/lcars` en `lcars:fleet`, le deck
+# sous `nobody:lcars-console`, traversee REFUSEE par le noyau. Une console vivante, une socket bien
+# posee, et une page noire — sans une ligne d'erreur nulle part, parce que du point de vue de chaque
+# composant tout etait conforme.
+#
+# Et `fleet` etait le mauvais groupe pour une raison de fond, pas seulement d'accord : il porte deja
+# la lecture de `/local/LCARS_v2`, des role-tokens et de `/home/private`. Le donner au deck pour qu'il
+# traverse un repertoire lui aurait accorde tout le reste au passage.
 # ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
 # differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
 # que GUARD B reserve au siege, et la fleet tourne sous l'HUMAIN DE FLEET pose par `22-fleet-human`.
@@ -114,7 +127,7 @@ prov_runtime_dirs() {
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
     "/run/lcars/console 0711 root:root" \
-    "/run/lcars/console/$h 2710 $h:$PROV_FLEET_GROUP"
+    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP"
 }
 
 prov_dirs() {

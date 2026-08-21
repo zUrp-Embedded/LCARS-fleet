@@ -42,6 +42,11 @@ check() {
   else
     p_drift "groupe $PROV_ADMIN_GROUP absent — aucun humain ne pourra administrer le runtime"
   fi
+  if getent group "$PROV_CONSOLE_GROUP" >/dev/null; then
+    p_ok "groupe $PROV_CONSOLE_GROUP"
+  else
+    p_drift "groupe $PROV_CONSOLE_GROUP absent — la landing ne démarrera pas (setpriv: unknown group), et aucune socket de console ne serait traversable"
+  fi
 
   verdict_check
 }
@@ -53,6 +58,12 @@ apply() {
   # attribues (`0640 root:$PROV_ADMIN_GROUP`), et un groupe absent ferait echouer ce chown sur une
   # boite dont personne n'est encore admin.
   ensure_group "$PROV_ADMIN_GROUP" || verdict_apply
+  # ⚠ SANS LUI, LA LANDING NE DEMARRE MEME PAS. `console-landing.sh` se depose par
+  # `setpriv --reuid nobody --regid nogroup --groups lcars-console` : un groupe absent n'est pas une
+  # degradation, c'est un `setpriv: unknown group` et un service qui meurt au demarrage. L'image le
+  # cree dans son Dockerfile (gid 2001) ; le rail poste ne le creait nulle part, et je l'avais posé
+  # a la main sur la premiere machine — donc le rail ne l'avait jamais fait une seule fois.
+  ensure_group "$PROV_CONSOLE_GROUP" || verdict_apply
   verdict_apply
 }
 
