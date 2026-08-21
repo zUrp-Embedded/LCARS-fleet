@@ -167,3 +167,27 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [ "$status" -eq 0 ]
   [[ "$output" == *"machine SEULE"* ]]
 }
+
+# ─── SONDER LA LIVENESS, CONCLURE SUR LA DECLARATION ────────────────────────────────────────────
+#
+# ⚠ CE MODULE A ETE NON IDEMPOTENT PENDANT TOUTE SA VIE, SOUS UN COMMENTAIRE QUI DISAIT LE
+# CONTRAIRE : « `compose up -d` est idempotent : il ne recree que si la declaration a bouge » —
+# vrai de compose, et parfaitement inutile puisque l'appel etait enferme dans un `if ! forge_up`.
+#
+# Mesure du 2026-08-21 : `PROV_FORGE_BIND` passe de 127.0.0.1 a 0.0.0.0, apply rejoue, verdict
+# « forge du poste deja vivante » — et le conteneur toujours publie sur la loopback. Il a fallu
+# taper `compose up -d` a la main.
+
+@test "l'apply appelle compose SANS condition — une forge vivante doit pouvoir RECONVERGER" {
+  # L'appel ne doit plus etre garde par la liveness : c'est `forge_up` AVANT qui dit si l'on a
+  # monte ou simplement reconverge, pas s'il faut agir.
+  ! grep -qE 'if ! forge_up; then[[:space:]]*$' "$SRC"
+  grep -q 'local was_up=0; forge_up && was_up=1' "$SRC"
+  # et le compose reste bien dans le chemin nominal, pas dans une branche
+  grep -qE '^\s+run_quiet d compose -f "\$COMPOSE_FILE" -p "\$PROV_FORGE_PROJECT" up -d' "$SRC"
+}
+
+@test "le verdict distingue MONTEE de RECONVERGEE — deux faits differents, deux phrases" {
+  grep -q 'forge du poste vivante et convergée' "$SRC"
+  grep -q 'forge du poste montée' "$SRC"
+}

@@ -142,3 +142,49 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
     grep -q "$v" "$SH" || { echo "reglage $v non transmis a travers sudo" >&2; false; }
   done
 }
+
+# ─── DOCKER : DEPENDANCE DURE DU RAIL POSTE, ET DE LUI SEUL ─────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « docker, ça me choque pas que ça soit un pré-requis […] tu peux toujours
+# l'installer si tu trouves pas. »
+#
+# Sur une machine dediee, LCARS MONTE sa forge lui-meme (`48-forge-host` : `compose up -d` sur un
+# Gitea) et refuse sans docker. Aucun module ne le posait : sur une Ubuntu vierge l'install mourait
+# au module 48, et tout ce qui suit sortait en derive pour une cause qui n'etait pas la sienne.
+
+pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
+
+@test "docker n'est PAS dans la liste des deux rails — il n'a rien a faire dans l'image" {
+  # `PACKAGES` est la liste que les DEUX rails obtiennent par apt, et le temoin d'egalite ci-dessus
+  # exige que chacun de ses membres soit dans le Dockerfile. Y mettre docker ferait mentir ce
+  # temoin ou installerait un daemon dans une image qui tourne DANS un daemon.
+  run sed -n 's/^PACKAGES=(\(.*\))$/\1/p' "$(pkg_mod)"
+  [[ "$output" != *"docker"* ]]
+}
+
+@test "docker est pose sur le substrat linux, et sur lui SEUL" {
+  # wsl : le daemon vient de Docker Desktop, monte dans /mnt/wsl/docker-desktop — poser docker.io
+  # dans la distro y fabriquerait un SECOND daemon. docker : on est DANS le conteneur.
+  # L'EN-TETE SEULE : le module se TERMINE par un `case "$1"` qui refuse une invocation sans verbe.
+  # Le sourcer entier tuerait le sous-shell avant la premiere assertion — meme idiome que
+  # `forge_host_reach.bats`, et pour la meme raison.
+  local head="$BATS_TEST_TMPDIR/pkg-head.sh"
+  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+
+  eff() { PROV_SUBSTRATE="$1" PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+            bash -c 'source "$1" >/dev/null 2>&1; effective_packages' _ "$head" 2>/dev/null | tr '\n' ' '; }
+
+  [[ "$(eff linux)" == *"docker.io"* ]]
+  [[ "$(eff linux)" == *"docker-compose-v2"* ]]
+  [[ "$(eff wsl)"    != *"docker.io"* ]]
+  [[ "$(eff docker)" != *"docker.io"* ]]
+  # et la liste commune reste la, sur les trois
+  [[ "$(eff docker)" == *"bubblewrap"* ]]
+}
+
+@test "check et apply lisent la MEME liste — deux derivations repondraient differemment" {
+  # `check` iterait sur `PACKAGES`, `apply` aussi : ajouter une liste conditionnelle a un seul des
+  # deux ferait sonder autre chose que ce qu'on installe.
+  grep -q 'done < <(effective_packages)' "$(pkg_mod)"
+  grep -q 'mapfile -t pkgs < <(effective_packages)' "$(pkg_mod)"
+}

@@ -53,6 +53,37 @@ set -euo pipefail
 
 PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates python3 git-filter-repo gh)
 
+# ─── CE QUE SEUL LE LINUX NATIF DOIT SE FAIRE POSER ─────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « docker, ça me choque pas que ça soit un pré-requis […] tu peux toujours
+# l'installer si tu trouves pas. »
+#
+# SUR UNE MACHINE DÉDIÉE, LCARS MONTE SA FORGE LUI-MÊME — `48-forge-host` fait `compose up -d` sur
+# un Gitea, et il refuse en disant « la forge du poste est un CONTENEUR, il n'en existe aucune
+# autre forme ». Docker n'est donc pas un confort : c'est une dépendance dure de la chaîne, et
+# aucun module ne la posait. Sur une Ubuntu vierge, l'install mourait au module 48 et TOUT ce qui
+# suit — jetons de rôle, OIDC du deck, branche ops — sortait en dérive pour une cause qui n'était
+# pas la leur. Une passe à froid qui s'arrête là ne mesure presque rien.
+#
+# ⚠ `linux` SEULEMENT, ET LES DEUX AUTRES SUBSTRATS SONT DES REFUS RAISONNÉS :
+#   · `wsl`    — le daemon vient de Docker Desktop côté Windows, monté dans `/mnt/wsl/docker-desktop`.
+#                `docker-endpoint.sh` le trouve sans qu'aucun paquet ne soit installé ici ; poser
+#                `docker.io` dans la distro y fabriquerait un SECOND daemon, concurrent du premier.
+#   · `docker` — on est DANS le conteneur ; il n'y a rien à installer et rien à monter.
+#
+# Mesuré sur Launchpad, resolute : `docker.io 27.5.1+dfsg4-2ubuntu1` et `docker-compose-v2
+# 2.40.3+ds1-0ubuntu1`, tous deux dans `universe`. Chez Canonical, donc pas de dépôt tiers et pas
+# de pin — la même règle que pour `gh` et `git-filter-repo` juste au-dessus.
+LINUX_PACKAGES=(docker.io docker-compose-v2)
+
+# La liste EFFECTIVE de ce passage — une seule fonction, lue par `check` ET par `apply`, pour que
+# les deux ne puissent pas répondre différemment sur le même substrat.
+effective_packages() {
+  printf '%s\n' "${PACKAGES[@]}"
+  [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && printf '%s\n' "${LINUX_PACKAGES[@]}"
+  return 0
+}
+
 # Sonde RÉELLE du containment : un bwrap minimal DOIT tourner sous un user NON-root (les pods
 # tournent comme l'humain). Lire une config ou un dpkg -s ne prouve rien — Ubuntu ≥23.10 peut
 # avoir bwrap installé ET bloqué par AppArmor (userns restreints). On sonde en tant que
@@ -68,14 +99,14 @@ check() {
   # (nommé pkg_absent, pas « missing » : la lib a un array `missing` dans apt_ensure, et
   # l'analyse -x confond les deux scopes — SC2178 parasite.)
   local pkg pkg_absent=0
-  for pkg in "${PACKAGES[@]}"; do
+  while IFS= read -r pkg; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
       p_ok "paquet $pkg"
     else
       p_drift "paquet $pkg absent"
       pkg_absent=1
     fi
-  done
+  done < <(effective_packages)
   if [[ "$pkg_absent" -eq 0 ]]; then
     if probe_bwrap; then
       p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
@@ -87,7 +118,8 @@ check() {
 }
 
 apply() {
-  apt_ensure "${PACKAGES[@]}" || verdict_apply
+  local -a pkgs; mapfile -t pkgs < <(effective_packages)
+  apt_ensure "${pkgs[@]}" || verdict_apply
   if probe_bwrap; then
     p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
   else

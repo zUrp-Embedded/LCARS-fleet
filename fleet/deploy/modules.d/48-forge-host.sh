@@ -252,20 +252,37 @@ apply() {
     verdict_apply
   fi
 
-  # 1. LE CONTENEUR. `compose up -d` est idempotent : il ne recrée que si la déclaration a bougé.
-  if ! forge_up; then
-    p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
-    LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="$PROV_FORGE_BIND" \
-    LCARS_DEVFORGE_ROOT_URL="$PUBLIC_URL/" \
-      run_quiet d compose -f "$COMPOSE_FILE" -p "$PROV_FORGE_PROJECT" up -d \
-      || { p_fail "la forge ne monte pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
-    local i
-    for i in $(seq 1 60); do forge_up && break; sleep 2; done
-    forge_up || { p_fail "forge montée mais muette sur $LOCAL_URL après 120 s"; verdict_apply; }
+  # ─── 1. LE CONTENEUR ───────────────────────────────────────────────────────────────────────────
+  #
+  # ⚠ CE BLOC A ÉTÉ NON IDEMPOTENT PENDANT TOUTE SA VIE, SOUS UN COMMENTAIRE QUI DISAIT LE
+  # CONTRAIRE. Il portait « `compose up -d` est idempotent : il ne recrée que si la déclaration a
+  # bougé » — vrai de `compose`, et parfaitement inutile puisque l'appel était enfermé dans un
+  # `if ! forge_up`. Une forge VIVANTE n'atteignait donc jamais la seule commande capable de la
+  # faire converger : le module sondait la LIVENESS et concluait sur la DÉCLARATION.
+  #
+  # MESURE DU 2026-08-21 : `PROV_FORGE_BIND` passe de `127.0.0.1` à `0.0.0.0`, apply rejoué, verdict
+  # « forge du poste déjà vivante » — et le conteneur toujours publié sur la loopback. Il a fallu
+  # taper `compose up -d` à la main. Le mode de défaillance est le pire de sa catégorie : le rail
+  # affirme la conformité d'un état-cible qu'il n'a pas regardé.
+  #
+  # `compose up -d` est la convergence, pas le montage : sur une déclaration inchangée c'est un
+  # no-op d'une seconde ; sur une déclaration modifiée il recrée. On l'appelle donc TOUJOURS, et
+  # c'est `forge_up` AVANT qui dit si l'on a monté ou simplement reconvergé.
+  local was_up=0; forge_up && was_up=1
+  [[ "$was_up" -eq 1 ]] \
+    || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
+  LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="$PROV_FORGE_BIND" \
+  LCARS_DEVFORGE_ROOT_URL="$PUBLIC_URL/" \
+    run_quiet d compose -f "$COMPOSE_FILE" -p "$PROV_FORGE_PROJECT" up -d \
+    || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
+  local i
+  for i in $(seq 1 60); do forge_up && break; sleep 2; done
+  forge_up || { p_fail "forge montée mais muette sur $LOCAL_URL après 120 s"; verdict_apply; }
+  if [[ "$was_up" -eq 1 ]]; then
+    p_ok "forge du poste vivante et convergée ($LOCAL_URL)$(forge_reach_note)"
+  else
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "forge du poste montée ($LOCAL_URL)$(forge_reach_note)"
-  else
-    p_ok "forge du poste déjà vivante ($LOCAL_URL)$(forge_reach_note)"
   fi
 
   # 1-bis. ELLE ANNONCE SON ADRESSE, parce que personne d'autre ne peut le faire pour elle. Les
