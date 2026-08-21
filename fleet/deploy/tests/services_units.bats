@@ -64,7 +64,12 @@ mod() { run bash "$MOD" "$1"; }
   [[ "$output" == *"AUTHOR:"* ]]
   [[ "$output" == *"STARDATE:"* ]]
   [[ "$output" == *"STATUS:"* ]]
-  [[ "$output" == *"APPLY-ON: linux"* ]]
+  # ⚠ `wsl` EST DANS L'EN-TETE, ET CE TEMOIN A GRAVE `linux` SEUL PENDANT UNE JOURNEE. Sur un poste
+  # WSL le module etait alors SELECTIONNE (CHECK-ON: any) et NON APPLICABLE — un echec structurel que
+  # le runner nomme « rebuild l'image », sur un rail qui n'a pas d'image. Le fond suit : `ttyd`, les
+  # scripts de console, les dossiers de socket et la release y sont tous poses ; seul le demarrage
+  # manquait. (Trouve par le reverse d'alice, 2026-08-21.)
+  [[ "$output" == *"APPLY-ON: wsl linux"* ]]
   [[ "$output" == *"CHECK-ON: any"* ]]
   [[ "$output" == *"NEEDS: root"* ]]
 }

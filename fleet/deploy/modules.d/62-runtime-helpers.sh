@@ -87,10 +87,17 @@ deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
 # `LCARS_PROVISION=/opt/lcars/fleet/deploy/provision` — n'aurait donc aucun moyen de nommer sa
 # propre origine. Le tampon comble exactement ce trou : celui qui copie ÉCRIT la révision copiée.
 #
-# ⚠ IL SE POSE À LA RACINE DE `$HELPERS_DIR`, ET CE N'EST PAS UN CHOIX ESTHÉTIQUE. `repo_root()`
-# remonte trois crans depuis `<...>/fleet/deploy/lib` : pour la copie, la racine est `/opt/lcars`,
-# pas `/opt/lcars/fleet`. Un tampon posé un cran plus bas ne serait lu par personne.
-helpers_stamp() { echo "$HELPERS_DIR/${PROV_SOURCE_STAMP:-.source-revision}"; }
+# ⚠ LE TAMPON SE DÉRIVE DE L'EMPLACEMENT DE LA COPIE, PAS DE LA RACINE DES AUXILIAIRES. Les deux
+# coïncident aujourd'hui — `repo_root()` remonte trois crans depuis `<copie>/fleet/deploy/lib`, et la
+# copie est posée en `$HELPERS_DIR/fleet` — mais c'est une COÏNCIDENCE ARITHMÉTIQUE, pas une règle.
+# Déplacer la copie d'un cran (`libexec/fleet`, proposition de regroupement sous préfixe du
+# 2026-08-21) ferait pointer le lecteur sur `<prefix>/libexec` pendant que le tampon resterait à
+# `<prefix>` : posé à côté, lu par personne, et le témoin qui épinglait le chemin LITTÉRAL serait
+# resté vert.
+#
+# On dérive donc du même fait que le lecteur : le parent du `fleet/` embarqué.
+EMBEDDED_FLEET="$HELPERS_DIR/fleet"
+helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.source-revision}"; }
 
 posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
@@ -171,11 +178,11 @@ check() {
     || p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
 
   for n in "${EMBEDDED[@]}"; do
-    [[ -x "$HELPERS_DIR/fleet/deploy/provision" ]] && break
-    p_drift "provisionnement embarqué absent ($HELPERS_DIR/fleet/$n) — le convergeur ne pourra pas converger un humain"
+    [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && break
+    p_drift "provisionnement embarqué absent ($EMBEDDED_FLEET/$n) — le convergeur ne pourra pas converger un humain"
     break
   done
-  [[ -x "$HELPERS_DIR/fleet/deploy/provision" ]] && p_ok "provisionnement embarqué posé ($HELPERS_DIR/fleet/deploy/provision)"
+  [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && p_ok "provisionnement embarqué posé ($EMBEDDED_FLEET/deploy/provision)"
 
   verdict_check
 }
@@ -216,14 +223,14 @@ apply() {
 
   # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —
   # ce qui est posé date de l'apply, pas d'un clone qui a pu bouger ou disparaître depuis.
-  ensure_dir "$HELPERS_DIR/fleet" 0755 "$HELPERS_OWNER" || verdict_apply
+  ensure_dir "$EMBEDDED_FLEET" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(repo_root)/fleet/$n" ]] || { p_fail "source absente: $(repo_root)/fleet/$n"; verdict_apply; }
-    rm -rf "${HELPERS_DIR:?}/fleet/$n.new"
-    cp -a "$(repo_root)/fleet/$n" "$HELPERS_DIR/fleet/$n.new" \
+    rm -rf "${EMBEDDED_FLEET:?}/$n.new"
+    cp -a "$(repo_root)/fleet/$n" "$EMBEDDED_FLEET/$n.new" \
       || { p_fail "copie ratée: fleet/$n"; verdict_apply; }
-    rm -rf "${HELPERS_DIR:?}/fleet/$n"
-    mv "$HELPERS_DIR/fleet/$n.new" "$HELPERS_DIR/fleet/$n" \
+    rm -rf "${EMBEDDED_FLEET:?}/$n"
+    mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
       || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
   done
   p_chg "provisionnement embarqué ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"

@@ -184,6 +184,13 @@ EOF
   # $HELPERS_DIR, pas $HELPERS_DIR/fleet. Un tampon un cran plus bas ne serait lu par personne.
   stub_curl "peu importe"
   mod apply
+  # ⚠ ON EPINGLE LA RELATION, PAS LE CHEMIN. Le tampon doit se poser LA OU `repo_root()` de la copie
+  # ira le chercher — trois crans au-dessus de `<copie>/fleet/deploy/lib`. Aujourd'hui ca tombe sur
+  # `$LCARS_HELPERS_DIR`, mais par COINCIDENCE arithmetique : deplacer la copie d'un cran
+  # (`libexec/fleet`) ferait diverger les deux, le tampon serait pose a cote, lu par personne — et un
+  # temoin qui epingle le chemin litteral resterait VERT.
+  local lu; lu="$(cd "$LCARS_HELPERS_DIR/fleet/deploy/lib" && readlink -f ../../..)"
+  [ -s "$lu/.source-revision" ]
   [ -s "$LCARS_HELPERS_DIR/.source-revision" ]
   [ "$(cat "$LCARS_HELPERS_DIR/.source-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
 }
