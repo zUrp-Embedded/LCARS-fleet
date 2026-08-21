@@ -162,3 +162,67 @@ EOF
   done
   ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
 }
+
+# ─── LA REVISION VOYAGE AVEC LA COPIE ───────────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21, apres la panne : « le rail natif se met a jour depuis un clone git, et rien ne
+# dit a quel commit ce clone est. Un provision apply sur un checkout en retard reinstalle
+# silencieusement l'etat d'avant. Aucun verdict ne le voit. »
+#
+# CE QUE CA A COUTE, MESURE LE MEME JOUR : un correctif d'allocation d'uid pose et verifie sur une
+# machine, puis un apply depuis un clone reste six commits en arriere qui REMET l'ancienne formule.
+# Le service systemd tournait dessus. La collision d'uid suivante etait mecanique, et rien nulle
+# part ne pouvait la relier a un arbre en retard — le module avait fait exactement son travail.
+
+@test "apply TAMPONNE la revision, a la racine que repo_root() de la copie retrouve" {
+  # `repo_root()` remonte trois crans depuis `<...>/fleet/deploy/lib` : pour la copie, la racine est
+  # $HELPERS_DIR, pas $HELPERS_DIR/fleet. Un tampon un cran plus bas ne serait lu par personne.
+  stub_curl "peu importe"
+  mod apply
+  [ -s "$LCARS_HELPERS_DIR/.source-revision" ]
+  [ "$(cat "$LCARS_HELPERS_DIR/.source-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
+}
+
+@test "sans tampon, le check DIT qu'il ne sait pas — il ne suppose pas que c'est a jour" {
+  mod check
+  [[ "$output" == *"impossible de dire de quelle révision"* ]]
+}
+
+@test "une source EN RETARD sur ce qui est pose est un ECHEC, pas une note de bas de page" {
+  # Le cas exact de la panne : le tampon porte un descendant, l'arbre est son ancetre.
+  stub_curl "peu importe"
+  mod apply
+  # HEAD~1 est un ancetre de HEAD : on fait donc croire que la source est en retard d'un commit.
+  local head; head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
+  local prev; prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
+  echo "$head" > "$LCARS_HELPERS_DIR/.source-revision"
+
+  PROV_SOURCE_REV="$prev" mod check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"LA SOURCE EST EN RETARD"* ]]
+  [[ "$output" == *"ANCÊTRE"* ]]
+}
+
+@test "apply ANNONCE le retour en arriere AVANT de l'ecrire — apres, plus rien ne le dira" {
+  stub_curl "peu importe"
+  mod apply
+  local head; head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
+  local prev; prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
+  echo "$head" > "$LCARS_HELPERS_DIR/.source-revision"
+
+  rm -f "$LCARS_HELPERS_DIR/console.sh"
+  PROV_SOURCE_REV="$prev" mod apply
+  [[ "$output" == *"RETOUR EN ARRIÈRE"* ]]
+  # Il ne REFUSE pas : un retour en arriere delibere est un geste legitime, il ne peut simplement
+  # plus etre silencieux. La preuve qu'il a continue, c'est que la pose a EU LIEU — le code de
+  # sortie, lui, appartient au client de terminal, que la doublure de `curl` fait toujours echouer.
+  [ -x "$LCARS_HELPERS_DIR/console.sh" ]
+}
+
+@test "une parente INDETERMINABLE se dit — elle ne se lit ni comme a jour ni comme en retard" {
+  stub_curl "peu importe"
+  mod apply
+  echo "deadbeef" > "$LCARS_HELPERS_DIR/.source-revision"
+  mod check
+  [[ "$output" == *"parenté indéterminable"* ]]
+}

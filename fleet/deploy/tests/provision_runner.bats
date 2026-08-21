@@ -605,3 +605,41 @@ EOF
     source '$BATS_TEST_DIRNAME/../lib/provision-lib.sh'; echo \"[\$PROV_FORGE_URL]\""
   [ "$output" = "[]" ]
 }
+
+# ─── UN VERDICT SANS SON ORIGINE NE SE COMPARE A RIEN ───────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « le rail natif se met a jour depuis un clone git, et rien ne dit a quel commit
+# ce clone est. Un provision apply sur un checkout en retard reinstalle silencieusement l'etat
+# d'avant. Aucun verdict ne le voit. »
+#
+# Chaque module converge vers ce que dit SA source : « conforme » ne signifie donc jamais plus que
+# « conforme a l'arbre que j'ai sous la main ». La seule chose qui manquait etait de DIRE lequel.
+
+@test "le recap NOMME la revision de la source" {
+  stub_module 20-anystub any any human
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source "* ]]
+}
+
+@test "hors checkout git, la revision se lit dans le TAMPON — c'est ce qui rend une COPIE nommable" {
+  # `/opt/lcars/fleet` est un `cp -a` : git n'y repond rien. Sans ce repli, un `provision` lance
+  # depuis la copie — le cas du convergeur — ne pourrait pas nommer sa propre origine.
+  # Le tampon se pose la ou `repo_root()` le cherchera : trois crans au-dessus de `lib/`, ce qui,
+  # pour ce decor, tombe au-dessus du tmpdir du test. On calcule le chemin comme la lib le fait,
+  # plutot que de le supposer — c'est justement l'ecart qui rendrait le repli muet en production.
+  local root; root="$(readlink -f "$SANDBOX/lib/../../..")"
+  echo "abcd1234" > "$root/.source-revision"
+  stub_module 20-anystub any any human
+  run "$SANDBOX/provision" doctor --substrate docker
+  rm -f "$root/.source-revision"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source abcd1234"* ]]
+}
+
+@test "ni git ni tampon : la revision est « inconnue », jamais devinee" {
+  stub_module 20-anystub any any human
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"source inconnue"* ]]
+}

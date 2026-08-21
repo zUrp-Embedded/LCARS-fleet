@@ -117,6 +117,16 @@ fi
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
+# ─── D'OÙ VIENT CE QU'ON S'APPRÊTE À POSER ──────────────────────────────────────────────────────
+# Chaque module converge vers ce que dit SA source, donc « conforme » ne signifie jamais plus que
+# « conforme à l'arbre que j'ai sous la main ». Un checkout en retard réinstalle l'état d'avant en
+# rendant VERT — release, auxiliaires, convergeur — et aucun verdict ne peut le voir.
+#
+# La seule chose qui manquait était de le DIRE. Un opérateur qui lit « source 4c1820dd » en tête de
+# son apply sait ce qu'il pose ; sans cette ligne, il ne le sait jamais, et il n'a aucune raison
+# d'aller le chercher.
+export PROV_SOURCE_REV="$(prov_source_rev)"
+
 # ─── update : pull VÉRIFIÉ du checkout, puis re-exec du runner pullé en apply ─────────────────────
 if [[ "$CMD" == "update" ]]; then
   [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relance : sudo $SELF update"
@@ -366,7 +376,9 @@ if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
 else
   echo ""
-  echo "${_PC}=== provision $CMD — substrat $SUBSTRATE ===${_PN}"
+  # LA SOURCE EST DANS LE RÉCAP, PAS SEULEMENT EN TÊTE : c'est la ligne qu'un opérateur relit, et
+  # c'est celle qu'il colle dans un rapport. Un verdict sans son origine ne se compare à rien.
+  echo "${_PC}=== provision $CMD — substrat $SUBSTRATE · source $PROV_SOURCE_REV ===${_PN}"
   # UN COMPTEUR N'EST TEINTÉ QUE S'IL PORTE QUELQUE CHOSE. Un « échecs: 0 » en rouge apprend au
   # lecteur à ignorer le rouge, et le jour où il vaut 3 il ne le voit plus.
   #

@@ -73,6 +73,23 @@ XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c9708
 
 deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
 
+# ─── LA RÉVISION VOYAGE AVEC CE QU'ON POSE ──────────────────────────────────────────────────────
+#
+# `/opt/lcars/fleet` est un `cp -a`, pas un checkout : `git rev-parse` n'y répond rien. Un
+# `provision` lancé depuis cette copie — c'est le cas du convergeur, dont l'unité systemd pointe
+# `LCARS_PROVISION=/opt/lcars/fleet/deploy/provision` — n'aurait donc aucun moyen de nommer sa
+# propre origine. Le tampon comble exactement ce trou : celui qui copie ÉCRIT la révision copiée.
+#
+# ⚠ IL SE POSE À LA RACINE DE `$HELPERS_DIR`, ET CE N'EST PAS UN CHOIX ESTHÉTIQUE. `repo_root()`
+# remonte trois crans depuis `<...>/fleet/deploy/lib` : pour la copie, la racine est `/opt/lcars`,
+# pas `/opt/lcars/fleet`. Un tampon posé un cran plus bas ne serait lu par personne.
+helpers_stamp() { echo "$HELPERS_DIR/${PROV_SOURCE_STAMP:-.source-revision}"; }
+
+posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inconnue »
+  local f; f="$(helpers_stamp)"
+  [[ -r "$f" ]] && head -n1 "$f" | tr -d '[:space:]' || echo inconnue
+}
+
 # <fichier> <url> <sha256> — la table, lue par le check ET par l'apply : une seule description.
 deck_static_table() {
   printf '%s\t%s\t%s\n' \
@@ -96,6 +113,27 @@ sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 
 check() {
   local n f name url sha stale=0
+
+  # ─── D'OÙ SORT CE QUI EST POSÉ, ET LA SOURCE EST-ELLE EN RETARD DESSUS ? ──────────────────────
+  # C'est LA question que rien ne posait, et elle a coûté un compte utilisateur le 2026-08-21 : un
+  # clone six commits en arrière a reposé l'ancienne allocation d'uid par-dessus la nouvelle, en
+  # rendant vert, et le service systemd a tourné dessus jusqu'à la collision suivante.
+  local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  if [[ "$posed" == "inconnue" ]]; then
+    p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+  elif [[ "$posed" == "$src" ]]; then
+    p_ok "auxiliaires posés depuis $posed (identique à la source)"
+  else
+    # ⚠ `cmd; case "$?"` EST UN PIÈGE SOUS `set -e` : une commande NUE qui rend non-zéro tue le
+    # script avant le `case`. Ici les trois codes sont des RÉPONSES, pas des échecs — la troisième
+    # (« je ne peux pas dire ») étant précisément celle qu'on veut pouvoir énoncer.
+    local rc=0; prov_rev_is_behind "$src" "$posed" || rc=$?
+    case "$rc" in
+      0) p_fail "LA SOURCE EST EN RETARD : posé depuis $posed, cet arbre est $src, qui en est un ANCÊTRE. Un apply REMPLACERAIT du code par du code plus ancien, sans rien casser d'apparent. Mets ce checkout à jour (git pull) avant de converger" ;;
+      1) p_drift "auxiliaires posés depuis $posed, cet arbre est $src — l'apply les mettra à jour" ;;
+      *) p_warn "auxiliaires posés depuis $posed, cet arbre est $src — parenté indéterminable (pas de git, ou révision inconnue de ce clone)" ;;
+    esac
+  fi
 
   command -v ttyd >/dev/null \
     && p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))" \
@@ -138,6 +176,15 @@ check() {
 apply() {
   local n name url sha f
 
+  # ⚠ LE RETOUR EN ARRIÈRE SE DIT AVANT DE L'ÉCRIRE, PAS APRÈS. C'est le seul instant où l'opérateur
+  # peut encore l'empêcher : trois secondes plus tard, l'ancien code est en place et le service qui
+  # tourne dessus ne dira plus rien. On ne REFUSE pas — un retour en arrière délibéré est un geste
+  # légitime — mais il ne peut plus être silencieux.
+  local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  if prov_rev_is_behind "$src" "$posed"; then
+    p_warn "RETOUR EN ARRIÈRE : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ANCÊTRE — ce qui suit REMPLACE du code par du code plus ancien (convergeur d'humains compris). Si ce n'est pas voulu : git pull, puis relance"
+  fi
+
   # ttyd : APT, et rien d'autre. Ubuntu le livre en 1.7.7, la version que l'image épingle.
   if command -v ttyd >/dev/null; then
     p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
@@ -173,6 +220,11 @@ apply() {
       || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
   done
   p_chg "provisionnement embarqué ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
+
+  # LE TAMPON S'ÉCRIT APRÈS LA POSE, JAMAIS AVANT : il atteste ce qui EST là. Posé d'avance, il
+  # certifierait une copie qu'un échec deux lignes plus bas aurait laissée à moitié faite.
+  write_atomic "$(helpers_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" \
+    || { p_fail "révision de source non tamponnée ($(helpers_stamp)) — la prochaine passe ne saura pas d'où sort ce qui est ici"; verdict_apply; }
 
   # ⚠ LE RÉSEAU EN DERNIER, ET C'EST UN ORDRE, PAS UN RANGEMENT. Tout ce qui précède se pose depuis
   # l'arbre local et ne peut échouer que sur un disque. Le client de terminal, lui, dépend d'un CDN :

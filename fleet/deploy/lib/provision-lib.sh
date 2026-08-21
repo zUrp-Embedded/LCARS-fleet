@@ -937,6 +937,55 @@ is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
 # la lib (fleet/deploy/lib/ → ../../..), jamais re-devinée par heuristique dans un module.
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
 
+# ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
+#
+# UN PROVISIONNEMENT NE DIT PAS D'OÙ IL VIENT, ET C'EST LA PANNE QU'ON NE VOIT JAMAIS. Chaque module
+# converge son état-cible vers ce que dit SA source — et « conforme » ne veut alors dire que
+# « conforme à l'arbre que j'ai sous la main ». Un checkout en retard réinstalle donc l'état d'avant,
+# **en rendant vert**, parce que du point de vue du module il n'y a rien à redire.
+#
+# MESURE DU 2026-08-21, ET ELLE A COÛTÉ UN COMPTE UTILISATEUR. Un correctif d'allocation d'uid était
+# posé et vérifié sur une machine ; `62-runtime-helpers` a ensuite reposé ses auxiliaires depuis un
+# clone resté six commits en arrière, ce qui a REMIS EN PLACE l'ancienne formule. Le service systemd
+# tournait dessus. La collision d'uid suivante était mécanique, et rien nulle part ne pouvait la
+# relier à un arbre en retard : le module avait fait exactement son travail.
+#
+# ⚠ ET LA COPIE, ELLE, N'EST PAS UN CHECKOUT. `/opt/lcars/fleet` est un `cp -a` : `git rev-parse`
+# n'y répond rien, donc un `provision` lancé depuis cette copie — c'est le cas du convergeur —
+# n'aurait AUCUN moyen de nommer sa propre origine. D'où le fichier : celui qui copie ÉCRIT la
+# révision qu'il a copiée, et celui qui lit la trouve. La révision voyage avec le code.
+PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
+
+prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou « inconnue »
+  local root="${1:-$(repo_root)}" rev
+  if rev="$(git -C "$root" rev-parse --short=8 HEAD 2>/dev/null)" && [[ -n "$rev" ]]; then
+    # Un arbre modifié n'EST pas sa révision : le dire évite qu'une mesure locale soit lue comme
+    # une mesure sur un commit publié.
+    git -C "$root" diff --quiet HEAD -- 2>/dev/null || rev="$rev+local"
+    printf '%s\n' "$rev"
+    return 0
+  fi
+  if [[ -r "$root/$PROV_SOURCE_STAMP" ]]; then
+    printf '%s\n' "$(head -n1 "$root/$PROV_SOURCE_STAMP" | tr -d '[:space:]')"
+    return 0
+  fi
+  printf 'inconnue\n'
+}
+
+# `A est-il un ANCÊTRE de B ?` — donc « la source est-elle EN RETARD sur ce qui est déjà posé ? ».
+# Rend 0 (oui, en retard), 1 (non) ou 2 (impossible à dire : pas de git, ou l'une des deux révisions
+# est inconnue de cet arbre). Le troisième cas EXISTE et compte : un clone re-cloné ne connaît pas
+# forcément le commit d'où sort ce qui est installé, et répondre « non » là-dessus serait un mensonge.
+prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
+  local a="${1%%+*}" b="${2%%+*}" root="${3:-$(repo_root)}"
+  [[ -n "$a" && -n "$b" && "$a" != "inconnue" && "$b" != "inconnue" ]] || return 2
+  [[ "$a" == "$b" ]] && return 1
+  git -C "$root" cat-file -e "$a^{commit}" 2>/dev/null || return 2
+  git -C "$root" cat-file -e "$b^{commit}" 2>/dev/null || return 2
+  git -C "$root" merge-base --is-ancestor "$a" "$b" 2>/dev/null && return 0
+  return 1
+}
+
 # ─── prov_roles — LE ROSTER FORGE, DERIVE DU MATERIEL ─────────────────────────────────────────────
 #
 # LA QUATRIEME LISTE DE ROLES TENUE A LA MAIN EST MORTE ICI. `PROV_ROLES` enumerait neuf comptes
