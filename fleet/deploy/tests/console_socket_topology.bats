@@ -341,6 +341,40 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   [[ "$output" != *"ghost"* ]]
 }
 
+# ─── LE MEMBRE QUE `/etc/group` NE NOMME PAS ────────────────────────────────────────────────────
+#
+# Un compte cree `useradd -g fleet` a le groupe pour gid PRIMAIRE, et /etc/group ne le liste PAS
+# dans son champ 4 — ce champ ne porte que les ajouts secondaires. `id -nG` le dit membre, ce
+# fichier ne le dit pas : deux reponses vraies a deux questions differentes, et la regle de la
+# console veut la premiere.
+#
+# Mesure du 2026-08-21, poste natif : `lcars`, l'humain de fleet pose par 22-fleet-human, tenait le
+# BEAM et sa `deck.sock` — et etait absent de cette liste. Le deck ne lisait donc jamais sa socket
+# et affichait « 0 pod » sur une fleet vivante. Le mode de defaillance est le pire qui soit : un
+# compteur a zero, identique a celui d'une fleet reellement vide.
+@test "un humain dont le groupe fleet est le groupe PRIMAIRE est un membre — /etc/group ne le nomme pas" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/lcars"
+  # gid 2000 = celui que la fixture donne au groupe fleet ; le champ 4 reste VIDE, comme sur la
+  # machine reelle apres un `useradd -g fleet`.
+  printf 'lcars:x:1001:2000::%s/lcars:/bin/bash\n' "$home" > "$pw"
+
+  humans_sh "$pw" ""
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "lcars 1001 $home/lcars" ]
+}
+
+@test "le gid primaire n'ouvre QUE sur le groupe de la console — un autre gid reste dehors" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/ghost"
+  # 2001 est voisin de 2000 et n'est pas lui : la comparaison doit etre une egalite, pas un prefixe.
+  printf 'ghost:x:1044:2001::%s/ghost:/bin/bash\n' "$home" > "$pw"
+
+  humans_sh "$pw" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ghost"* ]]
+}
+
 @test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe"

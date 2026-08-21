@@ -54,6 +54,22 @@ UID_MAX="${LCARS_CONSOLE_UID_MAX:-59999}"
 CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-fleet}"
 FLEET_MEMBERS=",$(if [[ -n "${LCARS_CONSOLE_GROUP_FILE:-}" ]]; then awk -F: -v g="$CONSOLE_GROUP" '$1==g {print $4}' "$LCARS_CONSOLE_GROUP_FILE"; else getent group "$CONSOLE_GROUP" 2>/dev/null | cut -d: -f4; fi),"
 
+# ⚠ LA LISTE DE MEMBRES DE `/etc/group` NE CONTIENT PAS LES MEMBRES PAR GROUPE PRIMAIRE, et c'est
+# le piege Unix le plus vieux de ce fichier. Un compte cree `useradd -g fleet` a `fleet` pour groupe
+# primaire : `id -nG` le dit membre, le champ 4 de `/etc/group` ne le nomme nulle part. Filtrer sur
+# le seul champ 4, c'est donc repondre a « qui a ete AJOUTE au groupe », pas a « qui en est ».
+#
+# MESURE DU 2026-08-21, poste natif .63 : `lcars` (uid 1001, gid 1003 = fleet) est l'humain de fleet
+# — c'est LUI qui fait tourner le BEAM et qui possede `/run/lcars/console/lcars/deck.sock`. Il etait
+# absent de cette liste, donc le deck ne lisait jamais sa socket : la landing affichait « 0 pod »
+# sur une fleet vivante. Aucune erreur nulle part — la seule surface ou ca se voit est un compteur
+# a zero, qui est aussi ce qu'affiche une fleet reellement vide.
+#
+# Le gid, lui, est DEJA dans la ligne de passwd qu'on lit plus bas ; il suffisait de ne pas le
+# jeter. Meme seam pour les deux formes (`LCARS_CONSOLE_GROUP_FILE`), sinon la regle serait
+# epinglable a moitie.
+CONSOLE_GID="$(if [[ -n "${LCARS_CONSOLE_GROUP_FILE:-}" ]]; then awk -F: -v g="$CONSOLE_GROUP" '$1==g {print $3}' "$LCARS_CONSOLE_GROUP_FILE"; else getent group "$CONSOLE_GROUP" 2>/dev/null | cut -d: -f3; fi)"
+
 # Deux classes de rejet, et elles ne meritent PAS le meme bruit :
 #   - hors plage d'uid (root, daemon, www-data, nobody…) : ATTENDU a chaque boot. Detailler 19
 #     lignes de comptes systeme, c'est apprendre a l'humain a ne plus lire ses logs. → un compte.
@@ -63,7 +79,7 @@ system_n=0
 reject_system() { system_n=$(( system_n + 1 )); }
 reject_odd()    { [[ "$VERBOSE" -eq 1 ]] && echo "[humans] rejete $1 : $2" >&2; return 0; }
 
-while IFS=: read -r login _ uid _ _ home shell; do
+while IFS=: read -r login _ uid gid _ home shell; do
   [[ -n "$login" ]] || continue
 
   if [[ "$uid" -lt "$UID_MIN" ]]; then
@@ -87,7 +103,10 @@ while IFS=: read -r login _ uid _ _ home shell; do
   esac
   # Membre du groupe fleet ? Sinon ce n'est pas un humain de la fleet (sysadmin admiral, compte
   # hors-fleet) : pas de console worker. C'est la garde qui derive de l'autorite, pas de l'uid seul.
-  if [[ "$FLEET_MEMBERS" != *",$login,"* ]]; then
+  # Les deux formes d'appartenance, chacune sur sa source : le champ 4 pour l'ajout explicite
+  # (`usermod -aG`, ce que fait le convergeur), le gid de la ligne passwd pour le groupe primaire
+  # (`useradd -g`, ce que fait 22-fleet-human sur le rail poste).
+  if [[ "$FLEET_MEMBERS" != *",$login,"* && ( -z "$CONSOLE_GID" || "$gid" != "$CONSOLE_GID" ) ]]; then
     reject_odd "$login" "hors du groupe $CONSOLE_GROUP — pas un humain converge de la fleet"
     continue
   fi
