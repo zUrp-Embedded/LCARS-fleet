@@ -121,7 +121,16 @@ defmodule Fleet.MCP.CreateIssueLotTest do
   defp create(args) do
     PodTools.handle_tool_call(
       "issue_create",
-      Map.merge(%{"title" => "reprendre la doc du protocole", "brief" => "part du paquet"}, args),
+      Map.merge(
+        %{
+          "title" => "reprendre la doc du protocole",
+          "brief" => "part du paquet",
+          # A code ticket is judged → it must carry criteria (P8b). These tests exercise the LOT, not
+          # the criteria; a self-contained placeholder keeps them valid code tickets.
+          "criteria" => "l'attendu : le lot est repris fidèlement"
+        },
+        args
+      ),
       %{pod_id: "pod-arch-#{System.unique_integer([:positive])}"}
     )
   end

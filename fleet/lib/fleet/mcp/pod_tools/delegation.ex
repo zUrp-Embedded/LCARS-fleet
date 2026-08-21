@@ -153,6 +153,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
          :ok <- refuse_pointing_criteria(criteria),
+         :ok <- require_criteria_for_code(destination, criteria),
          {:ok, target_state} <- target_state_preflight(forge, repo, supersedes) do
       # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
       # forge POST CONTINUE — a physicalize (push ops) + create_issue can exceed it. The agent then
@@ -1692,6 +1693,20 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp refuse_pointing_criteria(_), do: :ok
+
+  # A CODE TICKET IS JUDGED, so it MUST carry its judge's criteria. A judge without a criterion
+  # approves — the one false GREEN this whole rail exists to refuse — and the split only helps if
+  # the criteria is actually authored. A `workshop` ticket has no jury (the arch closes the loop in
+  # its own mount), so it carries none. Absent/`code` destination = it ships → criteria required.
+  defp require_criteria_for_code(destination, criteria) do
+    workshop = Fleet.Labels.destination_workshop_token()
+
+    cond do
+      destination == workshop -> :ok
+      is_binary(criteria) and criteria != "" -> :ok
+      true -> {:error, {:criteria_required_for_code, destination || "code"}}
+    end
+  end
 
   # ── the user LOT ───────────────────────────────────────────────────────────────────────────
   # The brief is the TASK; the lot is the MATTER it works on — several docs, a directory, images,
