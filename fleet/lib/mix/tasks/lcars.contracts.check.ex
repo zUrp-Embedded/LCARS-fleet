@@ -115,6 +115,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
         check_tool_descriptions_name_real_tools(root),
+        check_tool_grants_resolve(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
         check_bats_descriptions_inert(root),
@@ -2981,6 +2982,88 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
           "(BL-6-36: bash's silent-coercion class)"
     }
+  end
+
+  @doc """
+  Every `mcp__fleet__*` grant in every cap-profile must resolve to a declared tool.
+
+  ## What it prevents, and what did NOT prevent it
+
+  A tool's id is written twice: at its `deftool`, and in the `allowedTools` of every role allowed to
+  call it. Rename the first and forget the second, and the role silently loses the tool — the
+  whitelist simply stops matching. No error, no log: the agent is handed a smaller toolbox and
+  discovers it by not having what its own system prompt tells it to call.
+
+  `roles.capabilities_exercisable` does NOT cover this. It fails only when a role carries NONE of a
+  capability's tools, so the architect — who holds four delegation tools — stays green after losing
+  one. Measured 2026-08-22, renaming three ids that were granted by name: the wall would not have
+  moved.
+
+  The alignment was verified BY HAND that day. A hand check protects the rename that prompted it and
+  nothing after — which is the third time this file's history records a rename missing a copy in
+  silence. The other two answers were mechanical (`@tool_effects` by AST,
+  `mcp.tool_descriptions_name_real_tools`); this is the same answer for the same shape.
+
+  Derived from the authority, so there is nothing to maintain: `deftool` declares, cap-profiles copy,
+  and a tool added or renamed tomorrow moves the wall by itself.
+  """
+  @spec check_tool_grants_resolve(String.t()) :: result()
+  def check_tool_grants_resolve(root) do
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+    id = "roles.tool_grants_resolve"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+    roles = scan_catalogue_roles(root)
+
+    grants =
+      for role <- roles,
+          tool <- role.allowed_tools,
+          String.starts_with?(tool, "mcp__fleet__"),
+          do: {role.name, String.replace_prefix(tool, "mcp__fleet__", "")}
+
+    # INSTRUMENT GUARD, the shape its siblings use: a `deftool` reshape or a cap-profile layout move
+    # would empty either side, and an empty side reports the same clean absence as full agreement.
+    broken =
+      cond do
+        MapSet.size(declared) < 12 ->
+          "deftool in #{tools_rel} (only #{MapSet.size(declared)}, expected 12+)"
+
+        grants == [] ->
+          "mcp__fleet__ grant across #{length(roles)} cap-profile(s)"
+
+        true ->
+          nil
+      end
+
+    if broken do
+      broken_result(id, broken)
+    else
+      dangling =
+        grants
+        |> Enum.reject(fn {_role, tool} -> MapSet.member?(declared, tool) end)
+        |> Enum.map(fn {role, tool} -> "#{role} grants mcp__fleet__#{tool} — no such tool" end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      %{
+        id: id,
+        remediation:
+          if(dangling == [],
+            do: "—",
+            else:
+              "rename the grant with the tool, or drop it — a whitelist entry that matches nothing " <>
+                "takes the tool away from the role without a word"
+          ),
+        status: if(dangling == [], do: :pass, else: :fail),
+        evidence: dangling,
+        note:
+          if(dangling == [],
+            do: "#{length(grants)} grant(s) across #{length(roles)} roles, all resolving",
+            else: "#{length(dangling)} grant(s) name a tool that does not exist"
+          )
+      }
+    end
   end
 
   @doc """
