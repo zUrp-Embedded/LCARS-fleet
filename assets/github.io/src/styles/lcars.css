@@ -46,7 +46,7 @@ code,.mono{font-family:var(--mono);font-size:.86em}
 /* ─── Squelette : rail collant a deux niveaux + colonne principale ───────── */
 .shell{display:grid;grid-template-columns:190px minmax(0,1fr);gap:34px;
        max-width:1080px;margin:0 auto;padding:34px 26px 90px}
-.rail{position:sticky;top:26px;align-self:start;display:flex;flex-direction:column;gap:2px}
+.rail{position:sticky;top:36px;align-self:start;display:flex;flex-direction:column;gap:2px}
 .rail .brand{display:inline-flex;background:var(--amber);color:#0a0a0a;font-family:var(--mono);
   font-size:11.5px;font-weight:700;letter-spacing:.14em;padding:7px 12px;text-decoration:none;
   border-radius:0 12px 12px 0;margin:0 0 4px -26px;width:max-content}
