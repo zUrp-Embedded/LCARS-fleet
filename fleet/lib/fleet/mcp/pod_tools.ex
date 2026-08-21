@@ -306,6 +306,18 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "title" => %{"type" => "string"},
         "brief" => %{"type" => "string"},
+        "criteria" => %{
+          "type" => "string",
+          "description" =>
+            "THE JUDGE'S criteria — a SUMMARY OF THE EXPECTED, self-contained. Distinct from " <>
+              "`brief`: `brief` tells the producer HOW to use the material (it may reference the " <>
+              "workshop it mounts); `criteria` states WHAT the delivery must satisfy, and it must " <>
+              "stand alone — the judge mounts nothing, so a criterion that points to a doc it " <>
+              "cannot reach is not a criterion. Committed under `gate-briefs/`, resolved for the " <>
+              "judge at dispatch. Omit for a `workshop` ticket (no jury judges it — you close the " <>
+              "loop yourself). Required in practice for a `code` ticket: a judge without criteria " <>
+              "approves, the one false GREEN this rail exists to refuse."
+        },
         "summary" => %{"type" => "string"},
         "brief_ref" => %{"type" => "string"},
         "brief_sha" => %{"type" => "string"},
@@ -1240,7 +1252,8 @@ defmodule Fleet.MCP.PodTools do
              args["supersedes"],
              args["destination"],
              args["depends_on"],
-             args["lot"]
+             args["lot"],
+             args["criteria"]
            ) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}

@@ -181,8 +181,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
   # role name. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
   #
-  # Returns `{:ok, brief, kind}` (`kind` = the EFFECTIVE `"worker" | "judge"` — step override
-  # resolved, so the caller routes the physical object without re-deriving judge-ness) |
+  # Returns `{:ok, brief, kind, mount}` — `kind` = the EFFECTIVE `"worker" | "judge"` (step override
+  # resolved, so the caller routes the physical object without re-deriving judge-ness); `mount` =
+  # `%{ref, sha, ops_path}` the pinned doc the brief references (spawn `:mandate`), or `nil` for an
+  # inline/degraded order — so the dispatcher materializes exactly what the brief points at.
   # `{:error, {:criterion_unavailable, reason}}`. The error is reachable ONLY on
   # the DELIVERABLE-judge path, when the criterion (issue body) can't be READ from the forge (F-C083:
   # read-error ≠ absence → the dispatch DEFERS rather than spawn a criterion-less judge). Out-of-vocab
@@ -208,7 +210,9 @@ defmodule Fleet.Pilot.BriefBuilder do
           {String.t(), String.t()} | term(),
           map(),
           keyword()
-        ) :: {:ok, String.t(), String.t()} | {:error, {:criterion_unavailable, term()}}
+        ) ::
+          {:ok, String.t(), String.t(), map() | nil}
+          | {:error, {:criterion_unavailable, term()}}
   def build_brief(
         profile,
         role,
@@ -229,20 +233,36 @@ defmodule Fleet.Pilot.BriefBuilder do
     # rail; never a guessed brief). `:none` → the body IS the brief (inline PoC path, both
     # channels honest, same downstream).
     with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
-      do_build_brief(
-        profile,
-        role,
-        forge,
-        repo,
-        number,
-        issue,
-        forge_opts,
-        route,
-        step_spec,
-        opts
-      )
+      case do_build_brief(
+             profile,
+             role,
+             forge,
+             repo,
+             number,
+             issue,
+             forge_opts,
+             route,
+             step_spec,
+             opts
+           ) do
+        # THE MANDATE MOUNT LEAVES WITH THE BRIEF. `do_build_brief` surfaces the `{ref, sha}` the
+        # order actually references; we wrap it into the spawn's `:mandate` here, ONCE, so every
+        # dispatch path (initial and PR-driven) sets it from the SAME resolution that rendered the
+        # brief — the file the order names is always the file the spawner materializes.
+        {:ok, brief, kind, source} -> {:ok, brief, kind, mandate_from_source(source, repo, opts)}
+        other -> other
+      end
     end
   end
+
+  # `{ref, sha}` → the `:mandate` the spawner needs (`ops_path` = the project's ops worktree). `nil`
+  # source (an inline/degraded order, or a brief-judge that inlines) → no mount.
+  defp mandate_from_source({ref, sha}, repo, opts) do
+    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
+    %{ref: ref, sha: sha, ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo))}
+  end
+
+  defp mandate_from_source(_source, _repo, _opts), do: nil
 
   defp do_build_brief(
          profile,
@@ -275,15 +295,18 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
+        # The BRIEF judge inlines the brief in `outputs` (it judges the brief itself, pre-PR) — it
+        # names no mounted file, so no mount source.
         {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts),
-         "judge"}
+         "judge", nil}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
       # (F-C083: a read-error on the criterion DEFERS, it never yields a criterion-less judge).
       {"judge", target} when target in [nil, "deliverable"] ->
-        with {:ok, brief} <- build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
-          {:ok, brief, "judge"}
+        with {:ok, brief, mount} <-
+               build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
+          {:ok, brief, "judge", mount}
         end
 
       # judge_target PRESENT but outside {brief, deliverable} → anomaly: we don't guess the target.
@@ -292,7 +315,9 @@ defmodule Fleet.Pilot.BriefBuilder do
               "judge_target #{inspect(other)} out of vocabulary {brief, deliverable} — a judge's target is not inferred"
 
       {"worker", _} ->
-        {:ok, build_worker_brief(role, issue), "worker"}
+        # The worker's mount source is the brief pointer resolved at build_brief's entry
+        # (`resolve_issue_brief` → `_brief_source` on the issue in hand).
+        {:ok, build_worker_brief(role, issue), "worker", Map.get(issue, "_brief_source")}
 
       # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->
@@ -318,9 +343,29 @@ defmodule Fleet.Pilot.BriefBuilder do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
-      "brief_body" => issue["body"] || "",
+      "brief_body" => worker_order_body(issue),
       "brief_source" => brief_source_line(issue)
     })
+  end
+
+  # SAME MOVE AS THE JUDGE: when a pointer resolved, the producer's order is a MOUNTED file it reads
+  # (`~/issues/mandate.md`, content-addressed), not inline text. `pin_object` materialized it at the
+  # pinned sha, so what the producer works from is exactly what was authored. Inline (`:none`, a
+  # degraded/PoC brief) → the body is the order, there being nothing to mount.
+  defp worker_order_body(%{"_brief_source" => source}),
+    do: mounted_mandate("Ton ordre de mission est", source, ". Lis-le : c'est ta tâche.")
+
+  defp worker_order_body(issue), do: issue["body"] || ""
+
+  # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source, because they were
+  # near-identical and would have drifted the day one was retouched (nobody would find the other). It
+  # names the mounted, content-addressed file and its pinned version; `lead` says what the file IS to
+  # this role, `tail` is that role's own instruction (it opens with its own separator, so the judge
+  # can continue the sentence lowercase and the producer can start a new one).
+  defp mounted_mandate(lead, {ref, sha}, tail) do
+    "#{lead} le fichier `~/issues/mandate.md`, monté en lecture seule dans ton pod. C'est le doc " <>
+      "d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` par " <>
+      "`git archive` — adressé par contenu, donc exactement ce qui a été écrit#{tail}"
   end
 
   # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
@@ -364,6 +409,42 @@ defmodule Fleet.Pilot.BriefBuilder do
 
       {:error, reason} ->
         {:error, {:criterion_unavailable, {:brief_pointer, reason}}}
+    end
+  end
+
+  # THE JUDGE'S CRITERION IS THE CRITERIA DOC, NOT THE BRIEF — and that is the whole fix. A single
+  # authored brief used to serve both the producer and the judge, so the judge received the
+  # producer's PROCEDURAL order, which may reference the workshop the judge does not mount. The arch
+  # now authors a separate `criteria` (declarative, self-contained), pointed to by `Criteria:`.
+  #
+  # When that pointer is present, the judge's criterion is the criteria doc, resolved and pinned —
+  # written into `_brief_source` so `judge_criterion/1` renders it and cites ITS sha, unchanged.
+  # Absent (an old ticket, a workshop ticket, a degraded materialize) → the judge falls back to the
+  # brief, exactly as before: no regression, the split is additive at the consumer.
+  #
+  # Read-error fail-closes (`criterion_unavailable`) — a judge without its criterion approves, the
+  # false GREEN this rail refuses everywhere.
+  defp resolve_judge_criterion(issue, repo, opts) do
+    case Fleet.Layout.parse_criteria_pointer(issue["body"]) do
+      {:ok, {ref, sha}} ->
+        case Fleet.Workflow.BriefArtifact.resolve(
+               repo,
+               ref,
+               sha,
+               Keyword.take(opts, [:ops_root])
+             ) do
+          {:ok, content} ->
+            {:ok, issue |> Map.put("body", content) |> Map.put("_brief_source", {ref, sha})}
+
+          {:error, reason} ->
+            {:error, {:criterion_unavailable, {:criteria_pointer, reason}}}
+        end
+
+      :none ->
+        resolve_issue_brief(issue, repo, opts)
+
+      {:error, reason} ->
+        {:error, {:criterion_unavailable, {:criteria_pointer, reason}}}
     end
   end
 
@@ -586,8 +667,14 @@ defmodule Fleet.Pilot.BriefBuilder do
     case forge.get_issue(repo, number, forge_opts) do
       {:ok, issue} ->
         # The criterion goes through the SAME pointer resolution as the dispatch entry (E4):
-        # a pointer-ticket's criterion is the PINNED doc, never the pointer line itself.
-        with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
+        # a pointer-ticket's criterion is the PINNED doc, never the pointer line itself. The judge
+        # prefers the `Criteria:` doc (self-contained, authored for it); it falls back to the brief
+        # only when no criteria was authored.
+        with {:ok, issue} <- resolve_judge_criterion(issue, repo, opts) do
+          # THE MOUNT SOURCE TRAVELS OUT WITH THE BRIEF — the `{ref, sha}` `judge_criterion/1` just
+          # referenced. Returning it here is the whole fix for the PR-judge path: the dispatcher sets
+          # `:mandate` from THIS, so the file the order names is the file the spawner materializes.
+          # One resolution, not two — the mount can no longer diverge from what the brief points at.
           {:ok,
            Fleet.Workflow.GateBrief.build(%{
              step: step,
@@ -595,7 +682,7 @@ defmodule Fleet.Pilot.BriefBuilder do
              gate: nil,
              outputs: outputs,
              request: judge_criterion(issue)
-           })}
+           }), Map.get(issue, "_brief_source")}
         end
 
       {:error, reason} ->
@@ -621,11 +708,21 @@ defmodule Fleet.Pilot.BriefBuilder do
   # execute" — a defusing that is CORRECT (the doc is a brief; a judge that executes it produces
   # instead of judging), so the sentence says read-and-evaluate explicitly. A judge without a
   # criterion approves: that is the false GREEN this rail fail-closes against everywhere else.
-  defp judge_criterion(%{"_brief_source" => {ref, sha}, "body" => body}) when is_binary(body) do
-    "Le critère de succès EST le texte ci-dessous — c'est le doc d'auteur `#{ref}`, à sa version " <>
-      "pinnée au commit `#{sha}`, résolu pour toi. Ne l'exécute pas : il décrit un travail déjà " <>
-      "livré, que tu évalues. Cite `#{String.slice(sha, 0, 7)}` dans ton verdict — c'est " <>
-      "l'adresse de ce que tu as jugé.\n\n" <> body
+  # THE CRITERION IS A MOUNTED FILE, READ — not inline text, trusted. When a pointer resolved
+  # (`_brief_source` present), the spawner materialized the pinned doc at `~/issues/mandate.md` via
+  # `git archive` at that sha: the judge READS its criterion from a content-addressed file, so what
+  # it acts on is exactly what was authored — nothing to hash, nothing to trust. The inline text is
+  # gone from the order; a pointer that resolved is always accompanied by its materialized mount
+  # (both read the same ops worktree — resolve fail-closes the dispatch if it is unreachable, and
+  # then there is no spawn to mis-mount). Shares `mounted_mandate/3` with the producer's order.
+  defp judge_criterion(%{"_brief_source" => source}) do
+    mounted_mandate(
+      "Ton critère de succès est",
+      source,
+      " : lis-le, rien à vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un " <>
+        "travail déjà livré. Tu n'as pas à citer sa version — le runtime la grave lui-même, il " <>
+        "l'a résolue et il la connaît."
+    )
   end
 
   # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to

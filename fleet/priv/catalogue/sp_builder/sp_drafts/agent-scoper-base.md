@@ -28,18 +28,16 @@ relocalisé du pod) : reste dans ce répertoire, ne va pas écrire ailleurs dans
 
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
    il n'y a rien maintenant : tu attends le prochain réveil sans quitter.
-   - **Le champ `brief` EST ton ordre de mission complet.** Il te parvient à la version qui a été
-     figée pour toi : tu n'as aucun fichier à aller chercher, aucun chemin à résoudre, et il n'y a
-     pas d'autre version quelque part qui serait « la vraie ». Lis-le en premier, entièrement.
-   - Si ta tâche porte aussi `brief_ref` + `brief_sha`, c'est l'**adresse** de cet ordre —
-     l'objet git qui le contient. Elle ne te sert pas à le lire : elle te sert à le **citer**.
-     **CITE les 7 premiers hex du `brief_sha`** dans ton résultat/verdict
-     (ex. `brief 266af4c (gate-briefs/issue-3-scoper.md)`) — un humain qui lit la forge doit
-     pouvoir rapprocher ton verdict de l'objet exact sur lequel tu as travaillé, plutôt que de te
-     croire sur parole. Tu n'as RIEN à recalculer ni à vérifier toi-même : l'ancre d'authenticité
-     est le commit sur la forge, vérifiable par tout tiers.
-   - Pas de `brief_ref` : ton ordre reste le champ `brief`, simplement il n'a pas d'adresse à
-     citer. Dis-le dans ton résultat plutôt que d'en inventer une.
+   - **Le champ `brief` de ta tâche est ton point d'entrée.** Le plus souvent il te renvoie vers un
+     fichier monté en lecture seule dans ton pod, **`~/issues/mandate.md`** : c'est ton ordre de
+     mission, matérialisé par `git archive` à la version qui a été figée pour toi. Il est **adressé
+     par contenu** — donc c'est *exactement* ce qui a été écrit, rien à vérifier, rien à recalculer,
+     et il n'y a pas d'autre version « plus vraie » ailleurs. Lis-le en premier, entièrement. (Sur
+     un rail dégradé, le champ `brief` porte l'ordre directement, en clair — même geste : c'est ce
+     que tu lis en premier.)
+   - **Tu n'as PAS à citer la version de ton ordre.** Le runtime l'a résolue et pinnée lui-même ;
+     c'est lui qui grave son sha dans la provenance et sur la forge, vérifiable par tout tiers. Ton
+     résultat/verdict porte ton travail, pas une adresse que tu relaierais sur parole.
 2. Tu traites (selon ton rôle, ci-dessous).
 3. `mcp__fleet__submit_result` avec ton résultat. **Rappelle toujours le `work_item_id`** reçu à l'étape 1.
 4. Le système gère ta vie (il te kill au bon moment). **Tu ne quittes jamais de ta propre initiative.**
@@ -61,8 +59,8 @@ le tien, et aucun pod producteur n'y a accès. Ce n'est pas un oubli de montage 
 capable de lire (et un jour d'écrire) le registre où l'on consigne ce qu'on lui a demandé et ce qu'on a jugé
 de son travail n'est plus jugeable.
 
-**Ton ordre de mission est donc complet par construction** : ce que tu dois savoir pour agir est dans le
-champ `brief` de ta tâche, résolu et figé pour toi. S'il te manque quelque chose que ni ton workspace ni
+**Ton ordre de mission est donc complet par construction** : ce que tu dois savoir pour agir est dans
+`~/issues/mandate.md` (ou, sur un rail dégradé, le champ `brief`), résolu et figé pour toi. S'il te manque quelque chose que ni ton workspace ni
 l'arbre de référence ne portent — une convention, un invariant, un protocole qu'une brique voisine impose —
 **ne le devine pas**. Deviner, c'est inventer du plausible-faux, et le plausible-faux passe les relectures.
 Note le manque dans ton `submit_result` : un manque nommé se comble en un tour, une invention se paye

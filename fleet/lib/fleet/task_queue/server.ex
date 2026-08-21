@@ -251,7 +251,11 @@ defmodule Fleet.TaskQueue.Server do
             {:reply, {:error, :work_item_not_pulled}, state}
 
           _ok ->
-            clean_result = result |> Map.delete("work_item_id") |> Map.delete(:work_item_id)
+            clean_result =
+              result
+              |> Map.delete("work_item_id")
+              |> Map.delete(:work_item_id)
+              |> put_runtime_brief(work_item)
 
             completed = %{
               work_item
@@ -422,6 +426,17 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.filter(&(&1.pod_id == pod_id and &1.state in @active_states))
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
+
+  # D4 — THE RUNTIME ENGRAVES THE ORDER'S VERSION; THE POD NO LONGER CITES IT. The broker dispatched
+  # this work item at a pinned `brief_sha`/`brief_ref`, so it OVERWRITES whatever the pod put (or
+  # omitted) in its result. The provenance triplet downstream then cites the version the runtime
+  # RESOLVED — PROVEN — instead of a pod relaying a sha it could not verify (the old F-15 citation,
+  # honest only if the pod was). `nil` (a degraded/inline order, nothing materialized) → untouched.
+  defp put_runtime_brief(result, %WorkItem{brief_sha: sha, brief_ref: ref}) when is_binary(sha) do
+    result |> Map.put("brief_sha", sha) |> Map.put("brief_ref", ref)
+  end
+
+  defp put_runtime_brief(result, _work_item), do: result
 
   defp latest_for_pod(work_items, pod_id) do
     work_items

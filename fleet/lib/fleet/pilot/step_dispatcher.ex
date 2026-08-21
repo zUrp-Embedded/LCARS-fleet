@@ -217,7 +217,7 @@ defmodule Fleet.Pilot.StepDispatcher do
                  route,
                  step_spec
                ) do
-            {:ok, brief, brief_kind} ->
+            {:ok, brief, brief_kind, mandate} ->
               project_slug = Fleet.Layout.project_slug(repo)
 
               spawn_opts =
@@ -239,6 +239,11 @@ defmodule Fleet.Pilot.StepDispatcher do
                 |> Opts.maybe_put(:project, project)
                 |> Spawn.maybe_put_route(route)
                 |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
+                # THE MANDATE MOUNT: the pinned doc the pod reads its order FROM, surfaced by
+                # `build_brief` from the SAME resolution that rendered the brief (so the file the
+                # order names is the file the spawner materializes). `nil` (inline/degraded) → no
+                # mount, the inline order stands.
+                |> Opts.maybe_put(:mandate, mandate)
 
               # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
               # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the

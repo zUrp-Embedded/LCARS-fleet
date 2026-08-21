@@ -34,20 +34,27 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     }
   end
 
-  defp build(forge_opts, opts \\ []),
-    do:
-      BriefBuilder.build_brief(
-        judge_profile(),
-        "reviewer",
-        StubForge,
-        "acme/widget",
-        42,
-        %{},
-        forge_opts,
-        {"pipe", "review"},
-        %{},
-        opts
-      )
+  # These tests assert the brief TEXT and kind; the 4th element (the mandate mount) is asserted by
+  # its own test ("build_brief SURFACES the mandate mount", below) and consumed end-to-end by
+  # step_dispatcher_test's "PR judge with a Criteria: pointer → spawn_opts[:mandate]". Strip it here
+  # so these assertions stay on the 3-tuple they care about.
+  defp build(forge_opts, opts \\ []) do
+    case BriefBuilder.build_brief(
+           judge_profile(),
+           "reviewer",
+           StubForge,
+           "acme/widget",
+           42,
+           %{},
+           forge_opts,
+           {"pipe", "review"},
+           %{},
+           opts
+         ) do
+      {:ok, brief, kind, _mount} -> {:ok, brief, kind}
+      other -> other
+    end
+  end
 
   describe "build_brief — the CI fact rides into the judge brief (porte CI)" do
     test "a measured green CI is HANDED to the judge, with the boundary of what it means" do
@@ -121,6 +128,114 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # judge has the diff via `outputs`, GateBrief renders an empty criterion). Only the read-error
       # defers: no over-fixing.
       assert {:ok, _brief, "judge"} = build(_issue: {:ok, %{"number" => 42}})
+    end
+
+    @tag :tmp_dir
+    test "the judge's criterion is the CRITERIA doc, not the brief, when both are pointed",
+         %{tmp_dir: tmp} do
+      # The bench bug, closed: a single brief used to serve both consumers, so the judge got the
+      # producer's procedural order. Here the ticket points at BOTH a brief and a criteria; the
+      # judge must resolve the CRITERIA (gate-briefs/), never the brief (briefs/).
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(Path.join(work_dir, "briefs"))
+      File.mkdir_p!(Path.join(work_dir, "gate-briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "briefs", "issue-42-engineer.md"]), "PROCEDURAL-BRIEF")
+
+      File.write!(
+        Path.join([work_dir, "gate-briefs", "issue-42-reviewer.md"]),
+        "ATTENDU-CRITERIA"
+      )
+
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "docs"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", sha) <>
+          "\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
+
+      assert {:ok, brief, "judge"} =
+               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+
+      # The criterion is not INLINED — it is a mounted file the judge reads (content-addressed). What
+      # the brief carries is the reference and the ADDRESS: the criteria doc (`gate-briefs/`), never
+      # the producer's brief (`briefs/`). That the cited ref is the criteria doc is the whole fix.
+      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "gate-briefs/issue-42-reviewer.md"
+      refute brief =~ "briefs/issue-42-engineer.md"
+      # Not inlined: the raw doc bodies do not travel in the order.
+      refute brief =~ "ATTENDU-CRITERIA"
+      refute brief =~ "PROCEDURAL-BRIEF"
+    end
+
+    @tag :tmp_dir
+    test "no criteria pointer → the judge falls back to the brief (no regression)",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(Path.join(work_dir, "briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "briefs", "issue-42-engineer.md"]), "BRIEF-ONLY-CRITERION")
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "brief"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", String.trim(sha))
+
+      assert {:ok, brief, "judge"} = build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+      # Fallback: the mounted file is still the criterion, its address is the brief doc.
+      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "briefs/issue-42-engineer.md"
+      refute brief =~ "BRIEF-ONLY-CRITERION"
+    end
+
+    @tag :tmp_dir
+    test "build_brief SURFACES the mandate mount (4th element) — what every dispatch path materializes",
+         %{tmp_dir: tmp} do
+      # The bug the review found: the PR-judge dispatch rendered a brief that references
+      # `~/issues/mandate.md` but never set `:mandate`, so nothing materialized it. The fix is that
+      # build_brief RETURNS the mount source (from the SAME resolution that rendered the brief), so
+      # no dispatch path can render the reference without also carrying what materializes it.
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(Path.join(work_dir, "gate-briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "gate-briefs", "issue-42-reviewer.md"]), "L'ATTENDU")
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "criteria"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
+
+      assert {:ok, _brief, "judge", mount} =
+               BriefBuilder.build_brief(
+                 judge_profile(),
+                 "reviewer",
+                 StubForge,
+                 "acme/widget",
+                 42,
+                 %{},
+                 [_issue: {:ok, %{"body" => body}}],
+                 {"pipe", "review"},
+                 %{},
+                 ops_root: tmp
+               )
+
+      # The mount names the criteria doc, its pinned sha, and the ops worktree the spawner archives.
+      assert %{ref: "gate-briefs/issue-42-reviewer.md", sha: ^sha, ops_path: ops_path} = mount
+      assert String.ends_with?(ops_path, "/widget")
     end
   end
 
@@ -218,18 +333,21 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
 
     defp build_worker(issue, opts) do
-      BriefBuilder.build_brief(
-        worker_profile(),
-        "engineer",
-        StubForge,
-        "acme/widget",
-        42,
-        issue,
-        [],
-        {"pipe", "build"},
-        %{},
-        opts
-      )
+      case BriefBuilder.build_brief(
+             worker_profile(),
+             "engineer",
+             StubForge,
+             "acme/widget",
+             42,
+             issue,
+             [],
+             {"pipe", "build"},
+             %{},
+             opts
+           ) do
+        {:ok, brief, kind, _mount} -> {:ok, brief, kind}
+        other -> other
+      end
     end
 
     defp authored_workops(tmp) do
@@ -252,7 +370,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "worker"} =
                build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
 
-      assert brief =~ "LE DOC COMPLET."
+      # The order is a MOUNTED file the producer reads (content-addressed), not the doc inlined.
+      assert brief =~ "~/issues/mandate.md"
+      refute brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
       # F-25 — the order CITES its source: the resolved pointer stays walkable (ref @ commit),
       # it is not consumed silently by the resolution.
@@ -306,17 +426,16 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
-      # THE CRITERION IS IN THE BRIEF. It used to be an ERRAND — cite the doc, let the judge
-      # `git show` it out of a mounted ops — and that errand is the whole reason every project
-      # pod carried a read-only bind of the runtime's record: what was asked, what was judged, what
-      # was proven, handed to the producer whose work it scores.
-      assert brief =~ "LE CRITÈRE COMPLET."
+      # THE CRITERION IS A MOUNTED FILE THE JUDGE READS, not inline text. The order references
+      # `~/issues/mandate.md` (content-addressed) instead of carrying the doc body — so what the
+      # judge acts on is exactly what was authored, read from the pin, nothing to trust.
+      assert brief =~ "~/issues/mandate.md"
+      refute brief =~ "LE CRITÈRE COMPLET."
 
-      # The address travels with it, to be CITED: that is how a third party ties the verdict to a
-      # version from the forge. What the judge loses is verifying the pairing — against a tree the
-      # architect writes into, so it could confirm nothing the runtime had not resolved already.
+      # The address travels with it, to be CITED (its ref and short sha): how a third party ties the
+      # verdict to a version from the forge.
       assert brief =~ "#{ref}"
-      assert brief =~ "#{sha}"
+      assert brief =~ String.slice(sha, 0, 7)
 
       # No payload may name that variable: naming it re-creates the need to mount ops.
       refute brief =~ "LCARS_PROJECT_OPS"
@@ -332,10 +451,11 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       # It lands under "CONTEXT — already handled, DO NOT execute". A judge reading that as
       # do-not-read skips its only criterion, and a judge without a criterion APPROVES — the false
-      # green this rail fail-closes against elsewhere. So the two instructions are both stated.
+      # green this rail fail-closes against elsewhere. So both instructions are stated: read the
+      # mounted criterion, do not execute it.
       assert brief =~ "DO NOT execute"
-      assert brief =~ "Ne l'exécute pas"
-      assert brief =~ "que tu évalues"
+      assert brief =~ "ne l'exécute pas"
+      assert brief =~ "lis-le"
     end
 
     test "INVERSE TWIN — an inline brief is still embedded: there is nothing to point at", %{

@@ -180,6 +180,25 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_GIT_MIRROR="/nonexistent/mirror"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"git mirror"* ]]
 }
+@test "mandat: issues/ est monte RO par-dessus le pod_dir (le mandat est immuable, le SP dit vrai)" {
+  # Le mandat (issues/mandate.md) est adresse par contenu : le pod le lit, ne l'ecrit jamais. Le SP
+  # promet "lecture seule" → l'implementation doit le tenir. SANDBOX_HOME=$POD_DIR ici (pas de
+  # LCARS_POD_HOME) → la cible est $POD_DIR/issues.
+  mkdir -p "$POD_DIR/issues"
+  printf 'ORDRE\n' > "$POD_DIR/issues/mandate.md"
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"--ro-bind $POD_DIR/issues $POD_DIR/issues"* ]]
+}
+
+@test "mandat: sans issues/, aucun ro-bind issues (garde -d inerte, pas d'echec)" {
+  # setup ne cree pas issues/ → le montage est inerte, pas fatal (meme posture que le miroir git).
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"BWRAP_ARGS:"* ]]
+  [[ "$output" != *"--ro-bind $POD_DIR/issues"* ]]
+}
+
 @test "outillage: LCARS_POD_TOOLCHAIN_ENV absent -> INERT, aucun --setenv de plus (DR-023)" {
   # Le pendant exact du miroir git ci-dessus : une boite sans magasin doit produire la ligne de
   # commande d'hier, pas une ligne degradee. Un outillage manquant ralentit un pod, il ne le tue pas.

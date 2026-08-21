@@ -414,6 +414,7 @@ defmodule Fleet.Spawner.Pod do
              Path.join(issues_dir, "#{Brief.issue_id_to_filename(data.issue_id)}.md"),
              Brief.default_brief(data)
            ),
+         :ok <- materialize_mandate(data),
          :ok <- Brief.maybe_enqueue_brief(data),
          {:ok, mcp_socket_path} <-
            McpProvision.ensure_pod_socket(
@@ -1025,6 +1026,40 @@ defmodule Fleet.Spawner.Pod do
     # The egress proxy dies with its pod: its socket is per-pod, and a listener outliving the pod
     # it served is a hole nobody is watching.
     _ = Fleet.Spawner.Pod.Egress.release(Map.get(data, :pod_id) || "")
+  end
+
+  # THE MANDATE, MOUNTED — the pod reads its order from a content-addressed file, not from text it
+  # must trust. `LaunchSpec.pin_object` archives exactly the pinned doc at its sha; we place it under
+  # `<pod_dir>/issues/`, which bwrap binds to the pod's HOME (`/home/.pod`) — so the brief's
+  # `~/issues/mandate.md` (the path the order names, via `get_work_item`) resolves to this file.
+  # FAIL-CLOSED when a
+  # mandate is declared (`:mandate` present) but cannot be materialized: the order REFERENCES this
+  # file, so a pod without it would read its order from nothing — it does not start, it defers. No
+  # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
+  defp materialize_mandate(%{opts: opts, pod_dir: pod_dir} = _data) do
+    case Keyword.get(opts, :mandate) do
+      %{ref: ref, sha: sha, ops_path: ops_path} ->
+        # FAIL-CLOSED, and it must be: the order REFERENCES this file (`~/issues/mandate.md`). If it
+        # is not there, the pod reads its order from nothing. The mount is expected only when the
+        # dispatch already resolved the same pinned doc (so the ops worktree is reachable) — a
+        # failure here is a real fault, and a pod that cannot be given its provable order does not
+        # start, it defers.
+        with {:ok, file} <- LaunchSpec.pin_object(ops_path, pod_dir, sha, ref),
+             :ok <- File.cp(file, Path.join([pod_dir, "issues", "mandate.md"])) do
+          :ok
+        else
+          other ->
+            Logger.error(
+              "Pod: mandate NOT materialized (#{inspect(other)}) — the order references a file " <>
+                "the pod would not have; refusing to launch a pod that cannot read its order"
+            )
+
+            {:error, {:mandate_not_materialized, other}}
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   defp issue_number_of("issue-" <> rest) do

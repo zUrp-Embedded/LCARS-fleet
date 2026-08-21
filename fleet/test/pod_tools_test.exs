@@ -1092,6 +1092,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{
                    "title" => "Brique v2",
                    "brief" => "brief re-cadré",
+                   "criteria" => "l'attendu : la reprise",
                    "supersedes" => 5
                  },
                  pod_state(uniq("pod-arch"))
@@ -1123,7 +1124,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "Brique v2", "brief" => "x", "supersedes" => 5},
+                 %{
+                   "title" => "Brique v2",
+                   "brief" => "x",
+                   "criteria" => "attendu",
+                   "supersedes" => 5
+                 },
                  pod_state(uniq("pod-arch"))
                )
 
@@ -1142,7 +1148,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "Reprise", "brief" => "x", "supersedes" => 5},
+                 %{
+                   "title" => "Reprise",
+                   "brief" => "x",
+                   "criteria" => "attendu",
+                   "supersedes" => 5
+                 },
                  pod_state(uniq("pod-arch"))
                )
 
@@ -1163,6 +1174,7 @@ defmodule Fleet.MCP.PodToolsTest do
       args = %{
         "title" => "Brique idempotente",
         "brief" => "le meme brief a chaque tentative",
+        "criteria" => "attendu",
         "brief_ref" => "briefs/brique.md",
         "brief_sha" => String.duplicate("a", 40)
       }
@@ -1202,6 +1214,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{
                    "title" => "Un vrai ticket",
                    "brief" => long_brief,
+                   "criteria" => "l'attendu : X livré",
                    "summary" => "Résumé dédié : livrer X, fini quand Y."
                  },
                  pod_state(uniq("pod-arch"))
@@ -1217,6 +1230,105 @@ defmodule Fleet.MCP.PodToolsTest do
       assert shown =~ "ligne 20 du brief complet"
     end
 
+    test "criteria are a SECOND artefact: brief under briefs/, criteria under gate-briefs/, two pins",
+         %{tmp_dir: tmp} do
+      # The split at its root: the arch authors a procedural brief AND a declarative criteria, and
+      # they land in DIFFERENT trees, each pinned. The judge resolves the criteria pointer, not the
+      # brief — which is the whole reason "does the code respect the doc" stops being asked of a
+      # judge that was never handed the doc.
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{
+                   "title" => "Un ticket jugé",
+                   "brief" => "exécute le plan, voici comment",
+                   "criteria" => "l'attendu : la suite passe et la doc est à jour",
+                   "summary" => "résumé"
+                 },
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, "fleet/demo", "Un ticket jugé", body, _opts}
+
+      # Two pointers, two trees.
+      assert {:ok, {brief_ref, brief_sha}} = Fleet.Layout.parse_brief_pointer(body)
+      assert {:ok, {crit_ref, crit_sha}} = Fleet.Layout.parse_criteria_pointer(body)
+      assert String.starts_with?(brief_ref, "briefs/")
+      assert String.starts_with?(crit_ref, "gate-briefs/")
+
+      # Each pin resolves to ITS OWN content — the criteria is not a copy of the brief.
+      {brief_shown, 0} = System.cmd("git", ["show", "#{brief_sha}:#{brief_ref}"], cd: work_dir)
+      {crit_shown, 0} = System.cmd("git", ["show", "#{crit_sha}:#{crit_ref}"], cd: work_dir)
+      assert brief_shown =~ "exécute le plan"
+      assert crit_shown =~ "l'attendu : la suite passe"
+      refute crit_shown =~ "exécute le plan"
+    end
+
+    test "no criteria (e.g. a workshop ticket) → no Criteria pointer, never a wall",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{
+                   "title" => "Doc interne",
+                   "brief" => "rédige la note",
+                   "destination" => "workshop"
+                 },
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, _, _, body, _}
+      assert :none = Fleet.Layout.parse_criteria_pointer(body)
+    end
+
+    test "a CODE ticket WITHOUT criteria is refused — a judge without a criterion approves (P8b)",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      # No destination = the deliverable ships and is judged; without criteria the judge would fall
+      # back to the producer's brief — the very bench bug. Refused at authoring.
+      assert {:error, {:criteria_required_for_code, _}, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{"title" => "code ticket", "brief" => "fais Y"},
+                 pod_state(uniq("pod-arch"))
+               )
+    end
+
+    test "a criteria that EMBEDS a pointer (delegates) is refused — self-contained or nothing",
+         %{tmp_dir: tmp} do
+      # The judge mounts nothing but its criterion; a criterion that points at another committed doc
+      # points at a tree the judge never reads. The non-ambiguous form is refused at authoring.
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      pointing_criteria =
+        "L'attendu :\n\n" <>
+          Fleet.Layout.criteria_pointer_line("gate-briefs/other.md", String.duplicate("a", 40))
+
+      assert {:error, {:criteria_not_self_contained, _}, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{"title" => "T", "brief" => "b", "criteria" => pointing_criteria},
+                 pod_state(uniq("pod-arch"))
+               )
+    end
+
     test "inline brief WITHOUT summary → honest excerpt (marked) + pointer", %{tmp_dir: tmp} do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
@@ -1228,7 +1340,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "Sans résumé", "brief" => long_brief},
+                 %{"title" => "Sans résumé", "brief" => long_brief, "criteria" => "attendu"},
                  pod_state(uniq("pod-arch"))
                )
 
@@ -1251,7 +1363,11 @@ defmodule Fleet.MCP.PodToolsTest do
           assert {:ok, _, _} =
                    PodTools.handle_tool_call(
                      "issue_create",
-                     %{"title" => "T", "brief" => "tout le brief inline"},
+                     %{
+                       "title" => "T",
+                       "brief" => "tout le brief inline",
+                       "criteria" => "attendu"
+                     },
                      pod_state(uniq("pod-arch"))
                    )
         end)
@@ -1271,7 +1387,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "criteria" => "attendu"},
                  pod_state(pod)
                )
 
@@ -1327,7 +1443,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/evil"},
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "criteria" => "attendu",
+                   "project" => "fleet/evil"
+                 },
                  pod_state(pod)
                )
 
@@ -1345,7 +1466,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, :repo_unbound, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "criteria" => "attendu"},
                  pod_state(pod)
                )
 
@@ -1391,7 +1512,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, :forbidden_not_architect, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "criteria" => "attendu",
+                   "project" => "fleet/demo"
+                 },
                  %{pod_id: "p1"}
                )
 
@@ -1410,7 +1536,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, _, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "criteria" => "attendu"},
                  %{pod_id: "p-arch"}
                )
 
@@ -1430,7 +1556,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, :pod_unknown, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X", "project" => "fleet/demo"},
+                 %{
+                   "title" => "T",
+                   "brief" => "fais X",
+                   "criteria" => "attendu",
+                   "project" => "fleet/demo"
+                 },
                  %{pod_id: "ghost"}
                )
 
@@ -1452,7 +1583,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:error, :role_token_unavailable, _} =
                PodTools.handle_tool_call(
                  "issue_create",
-                 %{"title" => "T", "brief" => "fais X"},
+                 %{"title" => "T", "brief" => "fais X", "criteria" => "attendu"},
                  %{pod_id: "p-arch2"}
                )
 
@@ -1667,7 +1798,7 @@ defmodule Fleet.MCP.PodToolsTest do
     ]
     @delegation_tools [
       # No `project` wire param (reorg 2026-07-19): the repo comes from the pod binding.
-      {"issue_create", %{"title" => "T", "brief" => "B"}},
+      {"issue_create", %{"title" => "T", "brief" => "B", "criteria" => "attendu"}},
       {"issue_status", %{"number" => 1}}
     ]
     @privileged_tools @onboarding_tools ++ @delegation_tools

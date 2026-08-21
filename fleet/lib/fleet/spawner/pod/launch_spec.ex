@@ -586,6 +586,71 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
+  @doc """
+  Materializes ONE object — a single file at a PINNED commit — into `<pod_dir>/obj/<safe>/<path>`,
+  and returns the path to that file.
+
+  This is `pin_reference_face/2`'s narrow sibling, and the narrowness is the whole point. Where the
+  face pin archives the WHOLE tree at HEAD, this archives `git archive <sha> -- <path>`: the pod
+  receives exactly `path`, at exactly `sha`, and nothing else — no other ticket's file, no earlier
+  version (history lives in the object store, not in the archive), no `.git`. It is how a brief or a
+  criteria doc reaches the pod that must act on it WITHOUT mounting the ops face and exposing the
+  whole ledger — the third horn the `sevrage` skipped between "mount everything" and "mount nothing".
+
+  The pod reads its mandate FROM this file, so the read is coupled to the sha by git's own object
+  store: an address cannot return a different content, and the commit sha is the Merkle root that
+  covers the blob. The mandate is honest by construction — nothing to hash, nothing to trust.
+
+  `sha` must be a 40-hex commit id (fail-closed: an unpinned `HEAD` here would defeat the freeze).
+  A `path` absent at `sha` makes `git archive` fail, surfaced as `{:error, _}` — never a silent
+  empty mount that would let a pod act on nothing while looking supplied.
+  """
+  @spec pin_object(Path.t(), Path.t(), String.t(), String.t()) ::
+          {:ok, Path.t()} | {:error, term()}
+  def pin_object(source, pod_dir, sha, path)
+      when is_binary(source) and is_binary(pod_dir) and is_binary(sha) and is_binary(path) do
+    safe = String.replace(path, ~r"[^A-Za-z0-9._-]", "_")
+    dest = Path.join([pod_dir, "obj", safe])
+    tarball = Path.join(pod_dir, "obj-#{safe}.tar")
+
+    with :ok <- require_commit_sha(sha),
+         :ok <- require_repo_toplevel(source),
+         {:ok, {_, 0}} <-
+           Fleet.Credentials.Shell.git(
+             ["-C", source, "archive", "--format=tar", "-o", tarball, sha, "--", path],
+             env: []
+           ),
+         :ok <- File.mkdir_p(dest),
+         {:ok, {_, 0}} <- Fleet.Credentials.Shell.run("tar", ["-xf", tarball, "-C", dest]) do
+      _ = File.rm(tarball)
+      {:ok, Path.join(dest, path)}
+    else
+      other ->
+        _ = File.rm(tarball)
+
+        reason =
+          case other do
+            {:error, r} -> r
+            r -> r
+          end
+
+        Logger.warning(
+          "LaunchSpec: object #{path}@#{String.slice(sha, 0, 7)} NOT pinned from #{source} " <>
+            "(#{inspect(reason)}) — the pod cannot be given a provable mandate and must not start"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # An unpinned reference here defeats the freeze it exists to guarantee: `HEAD`, a branch name, a
+  # short sha would all archive SOMETHING, and the mandate would float. Only a full commit id passes.
+  defp require_commit_sha(sha) do
+    if Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
+      do: :ok,
+      else: {:error, {:not_a_commit_sha, sha}}
+  end
+
   # `git -C <dir>` WALKS UP: pointed at a directory that is not itself a repository, it resolves the
   # ENCLOSING one and archives that. Measured, and it is not theoretical — the test fixtures live
   # under the LCARS checkout, so the first run copied the whole runtime into the pod instead of

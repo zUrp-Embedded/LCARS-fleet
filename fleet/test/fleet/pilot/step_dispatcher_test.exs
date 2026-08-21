@@ -1225,6 +1225,41 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:woke, "lordzurp-lcars-test-pr-6-qualifier"}
     end
 
+    test "PR judge with a Criteria: pointer → spawn_opts[:mandate] carries the mount (the fix, tested end-to-end)" do
+      # THE TEST THE ORIGINAL BUG NEEDED. The PR-judge path (role_dispatch) must set `:mandate` so
+      # the spawner materializes the file the judge's order references. The other dispatch_review
+      # tests use an INLINE body (no pointer) → mount is nil → `maybe_put(:mandate, nil)` is a no-op,
+      # so deleting the fix line passes 3200 tests. This test carries a real `Criteria:` pointer, so
+      # a missing `:mandate` (the original bug) is now RED.
+      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      work_dir = Path.join(ops, "lcars-test")
+      File.mkdir_p!(Path.join(work_dir, "gate-briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "gate-briefs", "crit.md"]), "L'ATTENDU")
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "criteria"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+      on_exit(fn -> File.rm_rf(ops) end)
+
+      body = "résumé\n\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/crit.md", sha)
+
+      opts =
+        dispatch_opts(
+          ops_root: ops,
+          forge_opts: [_test_route: {:ok, {"poc", "spec-review"}}, _test_issue_body: body]
+        )
+
+      assert {:ok, {:spawned, _, "qualifier"}} = StepDispatcher.dispatch_review(pr(), opts)
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      # The consumer half: role_dispatch put the mount build_brief surfaced into spawn_opts.
+      assert %{ref: "gate-briefs/crit.md", sha: ^sha, ops_path: ops_path} = spawn_opts[:mandate]
+      assert String.ends_with?(ops_path, "/lcars-test")
+    end
+
     test "locked PR (lcars-in-flight) -> skip, no spawn" do
       pr = pr(%{"labels" => [%{"name" => "lcars-in-flight"}]})
       assert {:skipped, :in_flight} = StepDispatcher.dispatch_review(pr, dispatch_opts())

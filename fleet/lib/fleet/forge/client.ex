@@ -63,6 +63,22 @@ defmodule Fleet.Forge.Client do
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
+  # ⚠ LE SEAM `:forge_client` DOIT PORTER CE QUE SES APPELANTS TAPENT DESSUS. `get_file/3` vit dans
+  # `.Files`, mais `Fleet.MCP.PodTools.Probe` l'appelle via `forge()` — dont le défaut est CE module.
+  # Sans cette ligne, `forge().get_file(...)` levait `undefined or private` À L'EXÉCUTION seulement :
+  # le stub de test, lui, définissait `get_file`, donc la suite restait verte pendant que le rail
+  # réel plantait au banc (les deux juges, `{:tool_crashed, "run_probe", …get_file/3 undefined}`).
+  # Le mur qui prouve que ce trou ne se rouvre pas : `probe_seam_contract_test.exs`.
+  #
+  # ⚠ LE `@spec` EST RECOPIÉ DE `.Files`, ET C'EST LE PRIX D'UN `defdelegate`. Le contrat vit à la
+  # SOURCE ; ici il est redit parce que `types.public_functions_spec` (gate, cae5c78c7) mesure la
+  # fonction publique de CE module, et qu'un délégué en est une — Dialyzer, sans lui, l'analyse au
+  # contrat le plus permissif qu'il puisse inférer. Les quatre `defdelegate` au-dessus portent le
+  # leur pour la même raison ; celui-ci est arrivé par une branche antérieure au mur.
+  @spec get_file(String.t(), String.t(), Keyword.t()) ::
+          {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
+  defdelegate get_file(repo, path, opts), to: Fleet.Forge.Client.Files
+
   @doc """
   Adds and verifies a label, returning `:already_present` without writing when applicable.
 

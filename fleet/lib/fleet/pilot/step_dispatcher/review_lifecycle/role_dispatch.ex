@@ -221,7 +221,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
              pr_number,
              review_opts
            ) do
-        {:ok, brief, brief_kind} ->
+        {:ok, brief, brief_kind, mandate} ->
           project_slug = Fleet.Layout.project_slug(repo)
 
           spawn_opts =
@@ -237,6 +237,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
+            # THE PR-DRIVEN JUDGE GETS ITS MANDATE MOUNT TOO — the bug this closes: the judge's order
+            # references `~/issues/mandate.md`, so the spawner MUST materialize it. `build_brief`
+            # surfaces it (same resolution that rendered the brief); this path used to drop it.
+            |> Opts.maybe_put(:mandate, mandate)
 
           # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
           # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
@@ -330,7 +334,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       )
 
   defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr, _opts),
-    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker"}
+    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker", nil}
 
   # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
   # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
@@ -352,7 +356,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
             conflict: :producer,
             base_branch: Keyword.fetch!(opts, :pr_base_branch)
-          ), "worker"}
+          ), "worker", nil}
 
   # Conflict-rework EXCEPTION pass (tier 2 — Remediation.dispatch_exception_rework): same dispatch,
   # outsider voice. It is not resuming its own work and has no brief of its own to preserve.
@@ -373,5 +377,5 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
             conflict: :exception,
             base_branch: Keyword.fetch!(opts, :pr_base_branch)
-          ), "worker"}
+          ), "worker", nil}
 end
