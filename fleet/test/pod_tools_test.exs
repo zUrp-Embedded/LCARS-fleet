@@ -1217,6 +1217,63 @@ defmodule Fleet.MCP.PodToolsTest do
       assert shown =~ "ligne 20 du brief complet"
     end
 
+    test "criteria are a SECOND artefact: brief under briefs/, criteria under gate-briefs/, two pins",
+         %{tmp_dir: tmp} do
+      # The split at its root: the arch authors a procedural brief AND a declarative criteria, and
+      # they land in DIFFERENT trees, each pinned. The judge resolves the criteria pointer, not the
+      # brief — which is the whole reason "does the code respect the doc" stops being asked of a
+      # judge that was never handed the doc.
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{
+                   "title" => "Un ticket jugé",
+                   "brief" => "exécute le plan, voici comment",
+                   "criteria" => "l'attendu : la suite passe et la doc est à jour",
+                   "summary" => "résumé"
+                 },
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, "fleet/demo", "Un ticket jugé", body, _opts}
+
+      # Two pointers, two trees.
+      assert {:ok, {brief_ref, brief_sha}} = Fleet.Layout.parse_brief_pointer(body)
+      assert {:ok, {crit_ref, crit_sha}} = Fleet.Layout.parse_criteria_pointer(body)
+      assert String.starts_with?(brief_ref, "briefs/")
+      assert String.starts_with?(crit_ref, "gate-briefs/")
+
+      # Each pin resolves to ITS OWN content — the criteria is not a copy of the brief.
+      {brief_shown, 0} = System.cmd("git", ["show", "#{brief_sha}:#{brief_ref}"], cd: work_dir)
+      {crit_shown, 0} = System.cmd("git", ["show", "#{crit_sha}:#{crit_ref}"], cd: work_dir)
+      assert brief_shown =~ "exécute le plan"
+      assert crit_shown =~ "l'attendu : la suite passe"
+      refute crit_shown =~ "exécute le plan"
+    end
+
+    test "no criteria (e.g. a workshop ticket) → no Criteria pointer, never a wall",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      assert {:ok, _, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{"title" => "Doc interne", "brief" => "rédige la note"},
+                 pod_state(uniq("pod-arch"))
+               )
+
+      assert_received {:create_issue, _, _, body, _}
+      assert :none = Fleet.Layout.parse_criteria_pointer(body)
+    end
+
     test "inline brief WITHOUT summary → honest excerpt (marked) + pointer", %{tmp_dir: tmp} do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)

@@ -116,6 +116,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           integer() | nil,
           String.t() | nil,
           [integer()] | nil,
+          String.t() | nil,
           String.t() | nil
         ) ::
           {:ok, map()} | {:error, term()}
@@ -128,7 +129,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
         supersedes \\ nil,
         destination \\ nil,
         depends_on \\ nil,
-        lot \\ nil
+        lot \\ nil,
+        criteria \\ nil
       )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
@@ -160,7 +162,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # supersede retirement still runs on the reuse path — it is itself idempotent via the preflight state
       # (an already-closed target is a no-op), so a first attempt that timed out AFTER the create but
       # BEFORE the retirement is completed by the retry.
-      marker = op_marker(title, brief, summary, supersedes, brief_pointer, lot)
+      marker = op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria)
 
       case find_open_issue_with_marker(forge, repo, marker) do
         {:ok, existing} ->
@@ -176,9 +178,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
           with {:ok, lot_pointer} <- publish_lot(repo, role, lot) do
             {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
 
+            # THE JUDGE'S CRITERIA, a SECOND artefact — not a second copy of the brief. Materialized
+            # under `gate-briefs/` (kind: "judge") and pointed to by `Criteria: <ref> @ <sha>`, so
+            # the dispatch resolves a DIFFERENT pinned doc for the judge than for the producer. A
+            # workshop ticket (no jury) passes no criteria; degraded materialization drops the
+            # pointer rather than walling the ticket, same posture as the brief.
+            criteria_pointer = ensure_criteria_pointer(repo, title, criteria)
+
             full_body =
               body
               |> with_pointer(pointer)
+              |> with_criteria_pointer(criteria_pointer)
               |> with_lot(lot_pointer)
               |> with_supersedes(supersedes)
               |> with_op_marker(marker)
@@ -1628,6 +1638,33 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp with_pointer(brief, {ref, sha}),
     do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
+  # The criteria doc lives under `gate-briefs/` — `kind: "judge"` routes it there (`brief_ref/2`).
+  # `nil`/empty criteria (a workshop ticket, or a degraded materialize) → no pointer, never a wall:
+  # the same posture as the brief, where a producer without a resolvable doc still gets an order.
+  defp ensure_criteria_pointer(_repo, _title, criteria)
+       when not is_binary(criteria) or criteria == "",
+       do: nil
+
+  defp ensure_criteria_pointer(repo, title, criteria) do
+    base = [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "judge", push: :ops]
+
+    opts =
+      case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
+        nil -> base
+        root -> Keyword.put(base, :ops_root, root)
+      end
+
+    case Fleet.Workflow.BriefArtifact.physicalize(criteria, repo, opts) do
+      {ref, sha} when is_binary(sha) -> {ref, sha}
+      _ -> nil
+    end
+  end
+
+  defp with_criteria_pointer(body, nil), do: body
+
+  defp with_criteria_pointer(body, {ref, sha}),
+    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha)
+
   # ── the user LOT ───────────────────────────────────────────────────────────────────────────
   # The brief is the TASK; the lot is the MATTER it works on — several docs, a directory, images,
   # written by the human and the delegating role together on the workshop face. No text field
@@ -1736,11 +1773,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee par `String.contains?` dans les
   # issues OUVERTES d'UN depot — quelques milliers de marqueurs au plus, soit une collision de
   # l'ordre de 1e-11. L'elargir couterait la lisibilite du corps de ticket pour le mauvais risque.
-  defp op_marker(title, brief, summary, supersedes, brief_pointer, lot) do
+  defp op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria) do
     sig =
       :crypto.hash(
         :sha256,
-        :erlang.term_to_binary({title, brief, summary, supersedes, brief_pointer, lot})
+        :erlang.term_to_binary({title, brief, summary, supersedes, brief_pointer, lot, criteria})
       )
       |> Base.encode16(case: :lower)
       |> binary_part(0, 16)

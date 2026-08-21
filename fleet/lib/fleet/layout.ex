@@ -521,4 +521,37 @@ defmodule Fleet.Layout do
           else: {:error, {:invalid_pointer_ref, ref}}
     end
   end
+
+  # ── criteria POINTER notation ─────────────────────────────────────────────
+  # THE SECOND POINTER, and it is a DIFFERENT ARTEFACT, not a second copy of the brief. `Brief:`
+  # addresses the producer's PROCEDURAL order (how to use the material — it may reference the
+  # workshop the producer mounts). `Criteria:` addresses the judge's DECLARATIVE summary of the
+  # expected — self-contained by nature, because the judge mounts nothing and a criterion that
+  # points is not a criterion. Same ref scheme (`gate-briefs/<name>.md`), same shape, one truth for
+  # the notation here, so the parser is the brief parser's twin, not a fork.
+  @criteria_pointer_re Regex.compile!("^Criteria: (\\S+) @ ([0-9a-f]{40})$", "m")
+
+  @doc "The bare criteria-pointer LINE (`Criteria: <ref> @ <sha>`)."
+  @spec criteria_pointer_line(String.t(), String.t()) :: String.t()
+  def criteria_pointer_line(ref, sha), do: "Criteria: #{ref} @ #{sha}"
+
+  @doc """
+  Scans a ticket body for the criteria-pointer line. `:none` / `{:ok, {ref, sha}}` /
+  `{:error, {:invalid_pointer_ref, ref}}`, exactly as `parse_brief_pointer/1`.
+  """
+  @spec parse_criteria_pointer(String.t() | nil) ::
+          {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_pointer_ref, String.t()}}
+  def parse_criteria_pointer(nil), do: :none
+
+  def parse_criteria_pointer(body) when is_binary(body) do
+    case Regex.run(@criteria_pointer_re, body) do
+      nil ->
+        :none
+
+      [_, ref, sha] ->
+        if valid_brief_ref?(ref),
+          do: {:ok, {ref, sha}},
+          else: {:error, {:invalid_pointer_ref, ref}}
+    end
+  end
 end
