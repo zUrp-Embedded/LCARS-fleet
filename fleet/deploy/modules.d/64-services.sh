@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/deploy/modules.d/64-services.sh
+# AUTHOR: DrDree
+# STARDATE: 2026-08-21
+# STATUS: PROTO-V2 — ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains
+# APPLY-ON: linux
+# CHECK-ON: any
+# NEEDS: root
+#
+# ─── DEUX PROCESSUS QUE PERSONNE NE LANÇAIT ─────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « l'installeur doit livrer un système qui fonctionne. » Et D2, posé la veille :
+# ce que l'humain voit et utilise, c'est la LANDING — c'est elle qui doit être up 100 % du temps,
+# tenue par systemd ou par docker.
+#
+# Dans la boîte, l'entrypoint lance les deux et `tini` les tient. Sur un poste natif il n'y a pas
+# d'entrypoint : les deux scripts existaient sur le disque (depuis `62-runtime-helpers`) et RIEN ne
+# les démarrait. Mesuré le 2026-08-21 : la landing tournait parce que je l'avais lancée à la main en
+# `nohup setsid` — un processus orphelin, sans superviseur, qui ne survit pas au reboot et dont
+# personne ne peut dire l'état.
+#
+# ⚠ LA DIFFÉRENCE ENTRE CES DEUX-LÀ ET LA FLEET EST UNE DÉCISION, PAS UN OUBLI (D11). La fleet
+# d'un humain démarre quand SON humain le décide — une unité par personne, activée par elle. Ces
+# deux services-ci sont l'INFRASTRUCTURE de la machine : sans landing personne n'entre, sans
+# convergeur personne n'est enrôlé. Ils s'activent à l'install.
+#
+# ─── LES DEUX TOURNENT EN root, ET CHACUN LAISSE TOMBER CE QU'IL PEUT ───────────────────────────
+#
+# Le convergeur a besoin de `useradd` : il n'y a pas de version non privilégiée de créer un humain.
+# La landing démarre en root et se DÉPOSE elle-même — `console-landing.sh` fait
+# `setpriv --reuid nobody --regid nogroup --groups lcars-console`, exactement comme dans l'image.
+# Ne PAS mettre `User=nobody` dans l'unité : ça retirerait au script le droit de faire ce drop, et
+# surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket de
+# console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
+#
+# (Le compte système dédié `lcars-system` du Lot 5 est un durcissement à venir : il remplacerait
+# `nobody`, partagé par tout le système. Tant qu'il n'existe pas, on fait ce que fait l'image.)
+
+set -euo pipefail
+# shellcheck source=../lib/provision-lib.sh
+. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+
+SYSTEMD_DIR="${LCARS_SYSTEMD_DIR:-/etc/systemd/system}"
+SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
+HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
+# Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
+# `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
+SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
+
+UNITS=(lcars-landing lcars-converger)
+
+have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
+
+# ─── L'ENVIRONNEMENT DES DEUX SERVICES, DÉRIVÉ ─────────────────────────────────────────────────
+# Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
+# le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
+# provisionnement vient d'établir — et jamais recopié à la main dans deux unités.
+#
+# `FORGE_BASE_URL` vient du fichier que `48-forge-host` écrit en annonçant l'adresse de la forge
+# (les modules sont des processus : aucun ne peut exporter vers un autre).
+forge_url() {
+  local f="$PROV_TOKENS_DIR/forge.url"
+  [[ -r "$f" ]] && head -n1 "$f" | tr -d '[:space:]'
+}
+
+services_env_body() {
+  echo "# Genere par 64-services.sh — l'environnement des services LCARS de cette machine."
+  echo "# Un daemon n'herite d'aucun shell : ce qu'il lui faut est ICI, derive du provisionnement."
+  echo "FORGE_BASE_URL=$(forge_url)"
+  echo "PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}"
+  echo "PROV_HUMANS_TEAM=${PROV_HUMANS_TEAM:-humans}"
+  echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
+  echo "PROV_ADMIN_GROUP=$PROV_ADMIN_GROUP"
+  echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"
+  echo "LCARS_PROVISION=$HELPERS_DIR/fleet/deploy/provision"
+}
+
+unit_body() { # unit_body <nom sans .service>
+  case "$1" in
+    lcars-landing)
+      cat <<EOF
+[Unit]
+Description=LCARS — la porte d'entree web (deck) sur :20999
+Documentation=file://$HELPERS_DIR/console-landing.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=$HELPERS_DIR/console-landing.sh --foreground
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    lcars-converger)
+      cat <<EOF
+[Unit]
+Description=LCARS — la team humans de la forge vers les comptes Unix de cette machine
+Documentation=file://$HELPERS_DIR/human-converger.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=$HELPERS_DIR/human-converger.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+unit_path() { echo "$SYSTEMD_DIR/$1.service"; }
+
+unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
+  local u="$1"
+  [[ -f "$(unit_path "$u")" ]] || return 1
+  diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
+}
+
+check() {
+  local u
+
+  if ! have_systemd; then
+    # Un fichier d'unite pour un init qui n'existe pas n'est pas une garde, c'est un decor — meme
+    # regle que le `tmpfiles.d` de 25-directories.
+    p_warn "pas de systemd ici ($SYSTEMCTL absent ou $SYSTEMD_DIR introuvable) — aucune unite posee ; la landing et le convergeur doivent etre tenus autrement"
+    verdict_check
+  fi
+
+  [[ -s "$SERVICES_ENV" ]] \
+    && p_ok "environnement des services posé ($SERVICES_ENV)" \
+    || p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
+
+  for u in "${UNITS[@]}"; do
+    if ! unit_current "$u"; then
+      p_drift "$(unit_path "$u") absente ou divergente"
+      continue
+    fi
+    # « POSÉE » N'EST PAS « DEBOUT », et c'est toute la raison de ce module. Une unité présente et
+    # désactivée décrit un service que personne ne lance — exactement l'état d'avant.
+    if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
+      p_ok "$u.service actif"
+    else
+      p_drift "$u.service posé mais PAS actif — $( [[ "$u" == lcars-landing ]] && echo 'personne ne peut entrer' || echo 'personne ne sera enrole' )"
+    fi
+  done
+
+  verdict_check
+}
+
+apply() {
+  local u
+
+  if ! have_systemd; then
+    p_warn "pas de systemd ici ($SYSTEMCTL absent ou $SYSTEMD_DIR introuvable) — rien à poser, et c'est dit plutôt que fait à moitié"
+    verdict_apply
+  fi
+
+  ensure_dir "$(dirname "$SERVICES_ENV")" 0755 "$SERVICES_OWNER" || verdict_apply
+  # 0640 root:$PROV_FLEET_GROUP : ce n'est pas un secret (une URL, des noms de groupes), mais il n'a
+  # aucune raison d'être lisible par tout le monde, et le groupe fleet doit pouvoir le lire pour
+  # diagnostiquer sans sudo.
+  write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" < <(services_env_body) \
+    || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
+  # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
+  # lire deux écritures là où il n'y en a qu'une.)
+
+  local reload=0
+  for u in "${UNITS[@]}"; do
+    unit_current "$u" && continue
+    write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" < <(unit_body "$u") \
+      || { p_fail "unité non posée: $(unit_path "$u")"; verdict_apply; }
+    reload=1
+  done
+
+  # ⚠ `daemon-reload` AVANT `enable`, TOUJOURS : systemd sert l'unité qu'il a en mémoire, pas celle
+  # qui est sur le disque. Sans ce rechargement, un `enable --now` qui suit une réécriture démarre
+  # l'ANCIENNE — et la mesure d'après lit un service actif qui n'est pas celui qu'on vient d'écrire.
+  [[ "$reload" -eq 1 ]] && { "$SYSTEMCTL" daemon-reload || p_warn "daemon-reload en échec"; }
+
+  for u in "${UNITS[@]}"; do
+    if "$SYSTEMCTL" enable --now "$u.service" >/dev/null 2>&1; then
+      p_chg "$u.service activé et démarré"
+    else
+      p_fail "$u.service n'a pas démarré — « $SYSTEMCTL status $u.service » et « journalctl -u $u.service » disent pourquoi"
+    fi
+  done
+
+  verdict_apply
+}
+
+case "${1:?usage: 64-services.sh <check|apply>}" in
+  check) check ;;
+  apply) apply ;;
+  *) p_die "mode inconnu: $1 (check|apply)" ;;
+esac
