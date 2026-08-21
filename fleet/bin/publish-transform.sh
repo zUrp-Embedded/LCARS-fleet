@@ -245,10 +245,39 @@ GIT_CONFIG_COUNT=1 \
 # `awk` LIT DONC TOUT et n'imprime qu'une fois. Le cout est une lecture complete du log — quelques
 # secondes sur une histoire de deux millions de commits, contre les minutes que filter-repo prendra
 # juste apres.
-HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' -v se="$SYSTEM_EMAIL" '$2 != se && !seen {print; seen=1}')"
-[[ -n "$HUMAN_LINE" ]] || { echo "publish-transform: tous les commits sont au compte system_starfleet — l'humain reste inconnu" >&2; exit 2; }
-HUMAN_NAME="${HUMAN_LINE%%|*}"
-HUMAN_EMAIL="${HUMAN_LINE##*|}"
+# ⚠ « INTERNE » EST UN DOMAINE, PAS UNE ADRESSE — et ce filtre n'excluait qu'une adresse.
+# `system_starfleet` n'est qu'UN des comptes internes : les neuf roles (`system_chief`,
+# `fleet_engineer`, `fleet_scribe`...) authorent tous en `<login>@lcars.local`. Un depot dont le
+# premier committer non-starfleet etait `system_chief@lcars.local` elisait donc un COMPTE INTERNE
+# comme « l humain », et le substituait partout. La certification l aurait rattrape — en accusant
+# une identite survivante, alors que la cause aurait ete une identite mal CHOISIE.
+# ── L IDENTITE DECLAREE D ABORD, LE RENIFLAGE EN REPLI ──────────────────────────────────────────
+# L humain de la boite a DECLARE une identite git (`70-human.sh`, semee une fois depuis son compte
+# forge et jamais reecrite). La prendre supprime un TIRAGE : le reniflage ci-dessous rend la
+# premiere identite non-interne que `git log --all` veut bien sortir, et sur un depot a quatre
+# adresses humaines historiques le resultat depend de l ordre du log, pas d une decision.
+#
+# Le repli reste necessaire : un depot importe d ailleurs peut n avoir aucune identite declaree
+# sous la main (transform joue hors de la boite, banc, outil lance a la main).
+# ⚠ `--global`, ET PAS `--get` NU. Sans lui, git resout local > global : lance depuis un depot qui
+# porte un `[user]` local, le script prendrait CETTE identite au lieu de celle que la boite a
+# declaree — la seule que le commentaire ci-dessus invoque.
+HUMAN_NAME="$(git config --global --get user.name 2>/dev/null || true)"
+HUMAN_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
+
+# ⚠ UNE IDENTITE DECLAREE INTERNE NE VAUT PAS MIEUX QUE PAS D IDENTITE. Un pod, ou une boite dont
+# le git global porte un compte de role, tomberait sinon dans le cas que toute cette passe existe
+# pour supprimer — et la certification refuserait apres coup, en accusant l historique.
+if [[ -z "$HUMAN_EMAIL" || "$HUMAN_EMAIL" == *"@lcars.local" ]]; then
+  HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' '$2 !~ /@lcars\.local$/ && !seen {print; seen=1}')"
+  [[ -n "$HUMAN_LINE" ]] || { echo "publish-transform: aucune identite git declaree, et tous les commits sont a des comptes internes (@lcars.local) — l'humain reste inconnu" >&2; exit 2; }
+  HUMAN_NAME="${HUMAN_LINE%%|*}"
+  HUMAN_EMAIL="${HUMAN_LINE##*|}"
+  echo "publish-transform: identite humaine DEDUITE de l historique ($HUMAN_NAME <$HUMAN_EMAIL>) — aucune n etait declaree"
+else
+  echo "publish-transform: identite humaine DECLAREE ($HUMAN_NAME <$HUMAN_EMAIL>)"
+fi
+[[ -n "$HUMAN_NAME" ]] || HUMAN_NAME="$HUMAN_EMAIL"
 
 # ── LA BORNE : ne reecrire QUE ce qui porte de l'attribution interne ────────────────────────────
 # A FULL REWRITE MAKES CONTRIBUTION IMPOSSIBLE, and that is not a detail of taste. Measured
@@ -289,42 +318,74 @@ else
 fi
 
 if [[ -n "$FIRST_OURS" ]]; then
-echo "publish-transform: passe filter-repo — author system_starfleet devient $HUMAN_NAME, co-author role devient $VENDOR_NAME"
+echo "publish-transform: passe filter-repo — toute identite interne (@lcars.local) devient $HUMAN_NAME, co-author interne devient $VENDOR_NAME"
 # The 5 values cross through the ENVIRONMENT (os.environb, callback side), NEVER through bash
 # interpolation into the Python source: an author name is UNCONTROLLED data (git log %cn), and the old
 # `${VAR@Q}` produced, on an apostrophe (O'Brien), a bash literal `$'...'` that is INVALID Python —
 # a git-filter-repo SyntaxError and an opaque exit 2. The callback is FIXED text (bash single quotes, no
 # apostrophe inside it); `os.environb` yields the exact bytes (no decode/re-encode, non-UTF-8 names ok).
 (cd "$OUT_DIR" && \
-  LCARS_PUB_SYSTEM_EMAIL="$SYSTEM_EMAIL" \
   LCARS_PUB_VENDOR_NAME="$VENDOR_NAME" \
   LCARS_PUB_VENDOR_EMAIL="$VENDOR_EMAIL" \
   LCARS_PUB_HUMAN_NAME="$HUMAN_NAME" \
   LCARS_PUB_HUMAN_EMAIL="$HUMAN_EMAIL" \
   "$FILTER_REPO_BIN" --commit-callback '
 import re, os
-SYSTEM_EMAIL = os.environb[b"LCARS_PUB_SYSTEM_EMAIL"]
 VENDOR_NAME = os.environb[b"LCARS_PUB_VENDOR_NAME"]
 VENDOR_EMAIL = os.environb[b"LCARS_PUB_VENDOR_EMAIL"]
 HUMAN_NAME = os.environb[b"LCARS_PUB_HUMAN_NAME"]
 HUMAN_EMAIL = os.environb[b"LCARS_PUB_HUMAN_EMAIL"]
 
-if commit.author_email == SYSTEM_EMAIL:
-    if commit.committer_email != SYSTEM_EMAIL:
+# INTERNAL IS THE DOMAIN, and it must be the SAME question the certification asks. This keyed on
+# one address (SYSTEM_EMAIL) while the certification refuses on `@lcars.local`: the rewrite and its
+# guard did not mean the same thing by internal, and the guard was the one telling the truth.
+# Measured 2026-08-21 on a real project: 3 survivors out of 8 commits, in two shapes the address
+# test cannot see - an author on another internal account (system_chief), and a HUMAN author whose
+# COMMITTER was internal. The second one this callback never even looked at.
+# CASE-FOLDED, because the certification greps case-insensitively. Leaving the two apart would let
+# a `@LCARS.local` through the rewrite and straight into the refusal - blocked, never leaked, but
+# with a clone the script itself is unable to clean.
+def internal(email):
+    return email.lower().endswith(b"@lcars.local")
+
+# ⚠ THE SIDES ARE READ BEFORE EITHER IS WRITTEN, and re-reading them would not be a style question.
+# The second block used to test the LIVE `commit.author_email`; for an author AND committer both
+# internal, the first block had already replaced the author, so the second one took the branch that
+# means "the author is external and is the same person who committed" - on a commit where that is
+# false. The value produced was right and the reason was wrong, which is the shape a later refactor
+# trusts and breaks.
+# NB: this block is a single-quoted bash string -> NO ASCII apostrophe here (one would close the
+# quote - the exact bug class the env-var passing fixes).
+author_was_internal = internal(commit.author_email)
+committer_was_internal = internal(commit.committer_email)
+
+# EACH SIDE IS DECIDED ON ITS OWN, and an internal side never falls back on the other side, which
+# may be internal as well. Copying an internal committer into the author - what the old fallback did
+# whenever the committer merely was not starfleet - moved the leak instead of closing it.
+if author_was_internal:
+    if not committer_was_internal:
         commit.author_name = commit.committer_name
         commit.author_email = commit.committer_email
     else:
-        # auto_init Gitea (Initial commit): committer is ALSO the system account, no human trace on THIS
-        # commit -> fall back to HUMAN_NAME/EMAIL (human identity scanned upstream, outside the callback).
-        # NB: this block is a single-quoted bash string -> NO ASCII apostrophe here (one would close the
-        # quote - the exact bug class the env-var passing fixes).
         commit.author_name = HUMAN_NAME
         commit.author_email = HUMAN_EMAIL
+
+if committer_was_internal:
+    if not author_was_internal:
+        # The author was already external and is the same person who committed through the system.
+        # Falling back to the repo-wide human here would attribute the commit to somebody else.
+        commit.committer_name = commit.author_name
+        commit.committer_email = commit.author_email
+    else:
         commit.committer_name = HUMAN_NAME
         commit.committer_email = HUMAN_EMAIL
 
+# THE DOMAIN HERE TOO. Anchoring on the `LCARS-` prefix made this pattern a bet on the commit gate
+# always shaping the trailer that way; a co-author written `system_chief <system_chief@lcars.local>`
+# escaped the rewrite and was caught by the certification instead - blocked, and unfixable by the
+# very pass meant to fix it. The address inside the angle brackets is the fact; the name is not.
 commit.message = re.sub(
-    rb"Co-authored-by:\s*LCARS-\S+\s*<[^>]+@lcars\.local>",
+    rb"Co-authored-by:\s*[^<\n]*<[^>]+@lcars\.local>",
     b"Co-Authored-By: " + VENDOR_NAME + b" <" + VENDOR_EMAIL + b">",
     commit.message,
     flags=re.IGNORECASE,
