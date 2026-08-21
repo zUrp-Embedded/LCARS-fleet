@@ -86,9 +86,20 @@ check() {
   # ⚠ LE REFUS EST CONTOURNABLE, DÉLIBÉRÉMENT. Un refus qu'on ne peut pas lever se contourne
   # autrement : par un clone à la main et des commandes recopiées une par une, c'est-à-dire sans
   # aucune des gardes de ce module. Nommer l'échappatoire la rend visible.
+  # ⚠ LE CONSENTEMENT A DEUX SOURCES, ET LA SECONDE EXISTE PARCE QU'UN DAEMON N'A PAS D'ENV.
+  # `LCARS_ALLOW_ANY_HOST` est ce que tape l'humain à l'install ; le marqueur est ce que
+  # `05-host-consent` en garde. Tout ce qui rejoue le provisionnement plus tard — le convergeur
+  # d'humains, une unité systemd, un doctor lancé par cron — tourne SANS cet environnement, et se
+  # faisait refuser ici sur un consentement DÉJÀ donné (mesure du 2026-08-21 : compte Unix créé,
+  # `~/.lcars` absent, et un motif qui parle de choix de plateforme à un programme).
+  #
+  # Le refus, lui, ne bouge pas d'un pouce : sans AUCUNE des deux sources, c'est non.
+  local consent_file="${LCARS_HOST_CONSENT_FILE:-/etc/lcars/host-consent}"
   if [[ "$PROV_SUBSTRATE" == "linux" ]]; then
     if [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
       p_warn "Linux natif, et tu l'as explicitement accepté (LCARS_ALLOW_ANY_HOST) — hors cible : rien ici n'est mesuré sur ce substrat, et il n'y a pas de désinstalleur"
+    elif [[ -s "$consent_file" ]]; then
+      p_warn "Linux natif, accepté une fois sur cette machine ($consent_file) — hors cible : rien ici n'est mesuré sur ce substrat, et il n'y a pas de désinstalleur"
     else
       p_fail "HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /local et /home/private, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici. Sur du Linux natif, clone le dépôt et sers-toi de ce que tu veux — ou LCARS_ALLOW_ANY_HOST=1 si tu sais ce que tu fais"
     fi
