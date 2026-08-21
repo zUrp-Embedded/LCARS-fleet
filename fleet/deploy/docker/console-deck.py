@@ -108,6 +108,10 @@ DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 # `/doc/` rendait 404 sur des fichiers parfaitement presents — mesure du 2026-08-20, session
 # authentifiee, les 9 pages dans l'image et les trois routes en 404.
 DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/usr/share/lcars/doc")
+# Le favicon vit a cote de la doc, MEME source unique dans l'image (`assets/favicon` -> Dockerfile).
+# Le deck n'en declarait aucun : l'onglet du navigateur prend l'icone du document du HAUT, jamais de
+# l'iframe /doc/ — donc sans ca, onglet muet meme quand la doc, elle, en a un.
+DECK_FAVICON = os.environ.get("LCARS_DECK_FAVICON", "/usr/share/lcars/favicon")
 # Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
 # pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
 DOC_TYPES = {
@@ -738,6 +742,8 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LCARS &mdash; %(host)s</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/xterm.css">
 <script src="/static/xterm.js"></script>
 <script src="/static/addon-fit.js"></script>
@@ -1451,6 +1457,26 @@ class Deck(BaseHTTPRequestHandler):
         # whether or not anyone is logged in, and the container's healthcheck has no session.
         if path == "/health":
             self._send(200, "ok\n", "text/plain; charset=utf-8")
+            return
+
+        # Le favicon AUSSI avant la porte : le navigateur le demande sur chaque page, login comprise,
+        # et il n'a rien de sensible — c'est la marque. Source unique dans l'image (DECK_FAVICON),
+        # jamais recopiee ici. Deux noms figes, aucune traversee de chemin depuis l'URL.
+        if path in ("/favicon.svg", "/favicon.ico"):
+            fav, ctype = (("favicon.svg", "image/svg+xml") if path.endswith(".svg")
+                          else ("favicon.ico", "image/x-icon"))
+            try:
+                with open(os.path.join(DECK_FAVICON, fav), "rb") as fh:
+                    raw = fh.read()
+            except OSError:
+                self._send(404, "not found\n", "text/plain; charset=utf-8")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
             return
 
         cfg, why = oidc_config()
