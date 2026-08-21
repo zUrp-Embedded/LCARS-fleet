@@ -49,10 +49,23 @@ defmodule Fleet.MCP.AccessorSeamConformanceTest do
     acc
   end
 
+  # ⚠ LA FORME PIPE COMPTE AUTANT QUE L'APPEL, et l'oublier laisserait un seam entier hors de vue.
+  # `:lcars_fleet |> Application.get_env(:k, Mod)` n'a que DEUX arguments dans l'AST — le pipe n'est
+  # pas expanse par `string_to_quoted` — donc un motif a trois arguments ne le voit pas. Aucun
+  # accesseur n'est ecrit ainsi aujourd'hui ; `lcars.contracts.check` documente pourtant cette forme
+  # comme le piege exact des inventaires par expression, et c'est deja arrive a ce fichier voisin.
   defp put_default(acc, name, body) do
     case body do
       {{:., _, [{:__aliases__, _, [:Application]}, :get_env]}, _,
        [_app, _key, {:__aliases__, _, parts}]} ->
+        Map.put(acc, name, Module.concat(parts))
+
+      {:|>, _,
+       [
+         _app,
+         {{:., _, [{:__aliases__, _, [:Application]}, :get_env]}, _,
+          [_key, {:__aliases__, _, parts}]}
+       ]} ->
         Map.put(acc, name, Module.concat(parts))
 
       _ ->
