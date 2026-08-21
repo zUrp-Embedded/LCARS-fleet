@@ -1407,6 +1407,13 @@ defmodule Fleet.Project.Onboard do
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
          :ok <- set_origin(dirs.code, url),
          :ok <- ensure_intensity(dirs.code, full_name, opts),
+         :ok <-
+           ensure_ci_workflows(
+             dirs.code,
+             name,
+             opts,
+             "ci(adopt): rail CI du depot (.gitea/workflows)"
+           ),
          :ok <- push(dirs.code, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
@@ -1444,6 +1451,38 @@ defmodule Fleet.Project.Onboard do
     case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
       {:ok, _present} -> GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false)
       {:error, _} -> GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
+    end
+  end
+
+  # ─── LE RAIL CI D'UN DEPOT QUI VIENT D'AILLEURS ─────────────────────────────────────────────────
+  #
+  # La protection de `main` exige un statut `CI / *`. Un depot sans `.gitea/workflows/` n'en produit
+  # AUCUN, jamais : aucune PR ne peut fusionner, et la chaine de livraison est morte avant son
+  # premier ticket. `CIGate` lit deja cette impasse et la nomme (`{:ci_impossible, :no_workflow}`),
+  # mais la NOMMER laisse quelqu'un ecrire le fichier — et c'est ainsi qu'il atterrit avec un
+  # `runs-on:` qu'aucun runner ne sert, en attente pour toujours au lieu d'echouer.
+  #
+  # SEULES LES PORTES QUI FONT ENTRER DU CONTENU ETRANGER l'appellent. `import/2` RAPATRIE un depot
+  # deja dans l'org : il y est arrive par la creation, l'adoption ou l'import externe, donc il porte
+  # deja ses workflows par construction.
+  #
+  # ⚠ `Scaffold.main/3` NE POUVAIT PAS SERVIR : il ecrit la face ENTIERE (README, CLAUDE.md,
+  # .gitignore), ce qui est juste pour un depot que la fleet vient de creer et destructeur pour un
+  # depot qu'elle importe. Cette porte-ci n'ajoute que ce qui MANQUE.
+  defp ensure_ci_workflows(proj_dir, name, opts, msg) do
+    case Scaffold.ci_workflows(proj_dir, name, opts) do
+      {:ok, []} ->
+        :ok
+
+      {:ok, added} ->
+        Logger.info(
+          "ProjectOnboard: rail CI pose sur un depot importe — #{Enum.join(added, ", ")}"
+        )
+
+        commit(proj_dir, msg)
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -1639,6 +1678,13 @@ defmodule Fleet.Project.Onboard do
          # the deposit, and a deposit whose history says "import-externe" tells the project's own
          # log something that did not happen.
          :ok <- ensure_intensity(scratch, full_name, opts, intensity_commit_message(opts)),
+         :ok <-
+           ensure_ci_workflows(
+             scratch,
+             name,
+             opts,
+             "ci(import): rail CI du depot (.gitea/workflows)"
+           ),
          :ok <- set_origin(scratch, forge_url),
          :ok <- push(scratch, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),

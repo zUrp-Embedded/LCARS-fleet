@@ -18,6 +18,72 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     refute File.exists?(Path.join(dir, "docs/spec.md"))
   end
 
+  # ─── ci_workflows/3 — le rail CI d'un depot importe ───────────────────────────────────────────
+  #
+  # La protection de `main` exige un statut `CI / *`. Un depot sans `.gitea/workflows/` n'en produit
+  # AUCUN, jamais : aucune PR ne fusionne, et la chaine de livraison est morte avant son premier
+  # ticket. Seule la CREATION posait ces fichiers ; toutes les portes d'import laissaient le depot
+  # dans cet etat.
+
+  test "ci_workflows/3: pose les DEUX workflows sur un depot qui n'en a aucun", %{tmp_dir: dir} do
+    assert {:ok, added} = Scaffold.ci_workflows(dir, "importe", [])
+
+    assert added == [".gitea/workflows/ci.yml", ".gitea/workflows/probe-test-relevance.yml"]
+    assert File.exists?(Path.join(dir, ".gitea/workflows/ci.yml"))
+
+    # `probe-test-relevance.yml` n'est pas un bonus : sans lui `run_probe` — le seul moyen qu'a un
+    # juge de MESURER un livrable au lieu d'en avoir l'opinion — ne tourne pas sur ce projet.
+    assert File.exists?(Path.join(dir, ".gitea/workflows/probe-test-relevance.yml"))
+  end
+
+  test "ci_workflows/3: n'ecrit QUE le rail — ni README, ni CLAUDE.md, ni .gitignore",
+       %{tmp_dir: dir} do
+    # ⚠ LE TEMOIN QUI SEPARE CETTE PORTE DE `main/3`. Celle-la ecrit la face entiere, ce qui est
+    # juste pour un depot que la fleet cree et DESTRUCTEUR pour un depot qu'elle importe : le
+    # README du projet serait remplace par celui du gabarit.
+    assert {:ok, _} = Scaffold.ci_workflows(dir, "importe", [])
+
+    refute File.exists?(Path.join(dir, "README.md"))
+    refute File.exists?(Path.join(dir, ".gitignore"))
+  end
+
+  test "ci_workflows/3: N'ECRASE PAS un workflow deja present", %{tmp_dir: dir} do
+    # Un depot importe peut porter son propre CI, et un humain a pu en ecrire un a la main apres
+    # avoir bute sur l'impasse. Les deux sont des reponses ; les remplacer par un gabarit serait
+    # pire que le trou qu'on ferme.
+    File.mkdir_p!(Path.join(dir, ".gitea/workflows"))
+    mine = Path.join(dir, ".gitea/workflows/ci.yml")
+    File.write!(mine, "name: CI\n# le mien\n")
+
+    assert {:ok, added} = Scaffold.ci_workflows(dir, "importe", [])
+
+    assert added == [".gitea/workflows/probe-test-relevance.yml"]
+    assert File.read!(mine) == "name: CI\n# le mien\n"
+  end
+
+  test "ci_workflows/3: rien a poser -> {:ok, []}, ce que l appelant lit pour ne pas committer",
+       %{tmp_dir: dir} do
+    assert {:ok, _} = Scaffold.ci_workflows(dir, "importe", [])
+    assert {:ok, []} = Scaffold.ci_workflows(dir, "importe", [])
+  end
+
+  test "ci_workflows/3: les placeholders sont expanses comme dans une face complete",
+       %{tmp_dir: dir} do
+    # Deux expanseurs laisseraient un placeholder atteindre un depot en clair le jour ou l'un des
+    # deux apprend une variable que l'autre ignore.
+    #
+    # ⚠ « PLUS AUCUN `${` » EST UN FAUX PREDICAT ICI, et il a rougi au premier tir : un workflow
+    # porte legitimement `${GITHUB_REPOSITORY}` et consorts — des variables du RUNNER, que
+    # l'expanseur de gabarit n'a aucune raison de toucher. Ce qui doit disparaitre est la liste
+    # EXACTE des placeholders du gabarit, pas la syntaxe qui les porte.
+    assert {:ok, _} = Scaffold.ci_workflows(dir, "monprojet", today: "2026-07-18")
+
+    for f <- ["ci.yml", "probe-test-relevance.yml"],
+        v <- ~w(REPO_NAME REPO_DESCRIPTION YEAR MONTH DAY) do
+      refute File.read!(Path.join(dir, ".gitea/workflows/#{f}")) =~ "${#{v}}"
+    end
+  end
+
   test "face/4 (workshop): la spec de cadrage est LA, expansee, la ou l architecte a la plume",
        %{tmp_dir: dir} do
     assert :ok =

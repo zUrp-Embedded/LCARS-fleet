@@ -17,17 +17,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
   def main(dir, name, opts), do: write_face(dir, "main", name, opts, "(à compléter)")
 
   defp write_face(dir, face, name, opts, pitch_default) do
-    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, pitch_default)
-    [year, month, day] = opts |> today() |> String.split("-", parts: 3)
-
-    vars = %{
-      "REPO_NAME" => name,
-      "REPO_DESCRIPTION" => pitch,
-      "YEAR" => year,
-      "MONTH" => month,
-      "DAY" => day
-    }
-
+    vars = template_vars(name, opts, pitch_default)
     root = face_root(face)
 
     files =
@@ -48,8 +38,66 @@ defmodule Fleet.Project.Onboard.Scaffold do
 
   defp face_root(face), do: Path.join(Fleet.Catalogue.project_template_root(), face)
 
+  # Extracted so the workflow-only door expands the SAME placeholders as a full face: two expanders
+  # would let a `${VAR}` reach a repository raw the day one of them learns a new one.
+  defp template_vars(name, opts, pitch_default) do
+    pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, pitch_default)
+    [year, month, day] = opts |> today() |> String.split("-", parts: 3)
+
+    %{
+      "REPO_NAME" => name,
+      "REPO_DESCRIPTION" => pitch,
+      "YEAR" => year,
+      "MONTH" => month,
+      "DAY" => day
+    }
+  end
+
   defp expand(content, vars) do
     Enum.reduce(vars, content, fn {k, v}, acc -> String.replace(acc, "${#{k}}", v) end)
+  end
+
+  @doc """
+  Adds the template's CI workflows to `dir` — and ONLY the ones it does not already have.
+
+  ⚠ **`main/3` CANNOT BE USED HERE.** It writes the whole face — `README.md`, `CLAUDE.md`,
+  `.gitignore` — which is right for a repository the fleet just created and destructive for one it
+  imported: the project's own README would be replaced by a template. This door writes the
+  workflows and nothing else.
+
+  **WHY AN IMPORTED REPOSITORY NEEDS THEM.** `main` protection requires a `CI / *` status, and a
+  repository that ships no `.gitea/workflows/` produces none — ever. No check appears, no pull
+  request can merge, and the delivery rail is dead before its first ticket. `CIGate` already reads
+  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured 2026-08-12 on a repository
+  imported from GitHub), but naming it leaves the human to write the file — which is how one of
+  them landed with a `runs-on:` no runner served, waiting forever instead of failing.
+
+  `probe-test-relevance.yml` travels with it, and not as a bonus: without it `run_probe` — the
+  judges' only way to MEASURE a deliverable instead of opining on it — cannot run on that project.
+  Same absence, second victim.
+
+  **NEVER OVERWRITES.** An imported repository may carry its own CI, and a human may have written
+  one by hand after hitting the dead end. Both are answers, and replacing them with a placeholder
+  would be worse than the gap this closes.
+  """
+  @spec ci_workflows(Path.t(), String.t(), keyword()) ::
+          {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
+  def ci_workflows(dir, name, opts) do
+    root = face_root("main")
+    vars = template_vars(name, opts, "")
+
+    missing =
+      for path <- face_files(root),
+          rel = Path.relative_to(path, root),
+          String.starts_with?(rel, ".gitea/workflows/"),
+          not File.exists?(Path.join(dir, rel)),
+          into: %{},
+          do: {rel, expand(File.read!(path), vars)}
+
+    case write_all(dir, missing) do
+      :ok -> {:ok, missing |> Map.keys() |> Enum.sort()}
+      {:error, _} = err -> err
+    end
   end
 
   @doc """
