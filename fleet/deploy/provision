@@ -327,19 +327,28 @@ if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
       echo ""
       echo "${_PC}=== état per-humain de « $_fleet_human » (l'humain qui lancera la fleet) ===${_PN}"
     }
-    for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
-      [[ -f "$mod" ]] || continue
+    # ⚠ ON REJOUE `SELECTED`, ON NE RE-PARCOURT PAS `modules.d`. La sélection est déjà calculée plus
+    # haut, et elle porte TROIS décisions qu'un second parcours perdrait : le filtre `--only`, le
+    # gating de substrat (`CHECK-ON`), et le choix apply-vs-check (`APPLY-ON`). Les refaire ici,
+    # c'est en oublier une — et un `--only 70-human` qui ne vaudrait que pour la première moitié du
+    # geste est exactement le genre d'asymétrie que personne ne remarque avant longtemps.
+    for i in "${!SELECTED[@]}"; do
+      mod="${SELECTED[$i]}"
       [[ "$(module_field "$mod" NEEDS)" == "human" ]] || continue
       name="$(basename "$mod" .sh)"
+      eff="${EFFECTIVE[$i]}"
       total=$((total + 1))
-      [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (apply — humain $_fleet_human) ===${_PN}"
+      [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff — humain $_fleet_human) ===${_PN}"
       rc=0
-      PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$_fleet_human" bash "$mod" apply || rc=$?
-      case "$rc" in
-        0) ok=$((ok + 1));     REPORT+=("$name@$_fleet_human=OK") ;;
-        2) drift=$((drift + 1)); REPORT+=("$name@$_fleet_human=DRIFT") ;;
-        *) failed=$((failed + 1)); REPORT+=("$name@$_fleet_human=FAIL")
-           echo "${_PR}ERREUR $name ($_fleet_human):${_PN} apply en echec (rc=$rc)" >&2 ;;
+      PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$_fleet_human" bash "$mod" "$eff" || rc=$?
+      # Les codes s'interprètent selon le VERBE joué, jamais selon la commande demandée : `check`
+      # rend 1 pour un drift, `apply` rend 2. Confondre les deux ferait compter un drift comme un
+      # échec sur tout module hors de son substrat d'application.
+      case "$eff:$rc" in
+        *:0)        ok=$((ok + 1));     REPORT+=("$name@$_fleet_human=OK") ;;
+        apply:2|check:1) drift=$((drift + 1)); REPORT+=("$name@$_fleet_human=DRIFT") ;;
+        *)          failed=$((failed + 1)); REPORT+=("$name@$_fleet_human=FAIL")
+                    echo "${_PR}ERREUR $name ($_fleet_human):${_PN} $eff en echec (rc=$rc)" >&2 ;;
       esac
     done
   fi

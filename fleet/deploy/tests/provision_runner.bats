@@ -236,6 +236,64 @@ EOF
   [[ "$output" == *"échecs: 1"* ]]
 }
 
+# ─── LE SECOND PASSAGE : L'ETAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────
+# `--human` designe l'OPERATEUR (SUDO_USER), qui sur un poste est presque toujours l'uid 1000 que
+# GUARD B reserve au siege. `65-fleet-human` cree l'humain de fleet ; sans ce passage, son
+# `~/.lcars`, son `~/pods` et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start`
+# echouerait sous lui pour une raison sans rapport avec ce qu'on vient d'installer.
+
+@test "second passage: les modules per-humain sont REJOUES pour l'humain de fleet" {
+  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
+  # Le siege est ecarte de l'uid courant pour que `is_fleet_human` accepte le compte qui joue les
+  # tests — sinon ce temoin mesurerait la composition de la machine au lieu du mecanisme.
+  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="$(id -un)" \
+    "$SANDBOX/provision" apply --substrate linux --human root
+
+  [ "$status" -eq 0 ]
+  run grep -c "^human=" "$RUN_LOG"
+  [ "$output" = "2" ]
+  grep -qx "human=root" "$RUN_LOG"
+  grep -qx "human=$(id -un)" "$RUN_LOG"
+}
+
+@test "second passage: l'humain de fleet EGAL a l'operateur ne rejoue rien" {
+  # Sans ce pendant, un correctif qui rejouerait TOUJOURS passerait le temoin ci-dessus, et chaque
+  # apply de boite doublerait ses modules per-humain — deux fois le travail, et un bilan qui compte
+  # deux fois les memes modules.
+  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
+  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN=root \
+    "$SANDBOX/provision" apply --substrate linux --human root
+
+  [ "$status" -eq 0 ]
+  run grep -c "^human=" "$RUN_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "second passage: JAMAIS sur docker — c'est le convergeur qui y possede les humains" {
+  # Dans la boite, `human-converger.sh` materialise N humains depuis la team `humans` de la forge et
+  # rejoue leurs modules. Un second passage ici doublerait son travail et poserait l'etat d'un
+  # humain que la forge n'a peut-etre pas declare.
+  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
+  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="$(id -un)" \
+    "$SANDBOX/provision" apply --substrate docker --human root
+
+  [ "$status" -eq 0 ]
+  run grep -c "^human=" "$RUN_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "second passage: un humain de fleet INEXISTANT ne declenche rien, et ne casse rien" {
+  # `65-fleet-human` derive quand `useradd` echoue : l'apply continue, et ce passage doit alors etre
+  # inerte plutot que de jouer des modules pour un compte qui n'existe pas.
+  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
+  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="n-existe-pas-$$" \
+    "$SANDBOX/provision" apply --substrate linux --human root
+
+  [ "$status" -eq 0 ]
+  run grep -c "^human=" "$RUN_LOG"
+  [ "$output" = "1" ]
+}
+
 @test "le RESUME ne dit jamais « rien n'est cassé » quand quelque chose est casse" {
   # LE CODE DE RETOUR ETAIT DEJA JUSTE, ET C'EST CE QUI REND LA FAUTE CHERE : rien n'echouait,
   # aucun temoin ne rougissait, et seul un humain qui lit la FIN se faisait une idee fausse de
