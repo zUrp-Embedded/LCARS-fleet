@@ -325,14 +325,21 @@ defmodule Fleet.Pilot.BriefBuilder do
   # (`~/issues/mandate.md`, content-addressed), not inline text. `pin_object` materialized it at the
   # pinned sha, so what the producer works from is exactly what was authored. Inline (`:none`, a
   # degraded/PoC brief) → the body is the order, there being nothing to mount.
-  defp worker_order_body(%{"_brief_source" => {ref, sha}}) do
-    "Ton ordre de mission est le fichier `~/issues/mandate.md`, monté en lecture seule dans ton " <>
-      "pod. C'est le doc d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` " <>
-      "par `git archive` — adressé par contenu, donc exactement ce qui a été écrit. Lis-le : c'est ta " <>
-      "tâche."
-  end
+  defp worker_order_body(%{"_brief_source" => source}),
+    do: mounted_mandate("Ton ordre de mission est", source, ". Lis-le : c'est ta tâche.")
 
   defp worker_order_body(issue), do: issue["body"] || ""
+
+  # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source, because they were
+  # near-identical and would have drifted the day one was retouched (nobody would find the other). It
+  # names the mounted, content-addressed file and its pinned version; `lead` says what the file IS to
+  # this role, `tail` is that role's own instruction (it opens with its own separator, so the judge
+  # can continue the sentence lowercase and the producer can start a new one).
+  defp mounted_mandate(lead, {ref, sha}, tail) do
+    "#{lead} le fichier `~/issues/mandate.md`, monté en lecture seule dans ton pod. C'est le doc " <>
+      "d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` par " <>
+      "`git archive` — adressé par contenu, donc exactement ce qui a été écrit#{tail}"
+  end
 
   # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
   # (`ref @ commit`, the walkable link into ops history); an inline brief says so
@@ -675,13 +682,15 @@ defmodule Fleet.Pilot.BriefBuilder do
   # it acts on is exactly what was authored — nothing to hash, nothing to trust. The inline text is
   # gone from the order; a pointer that resolved is always accompanied by its materialized mount
   # (both read the same ops worktree — resolve fail-closes the dispatch if it is unreachable, and
-  # then there is no spawn to mis-mount).
-  defp judge_criterion(%{"_brief_source" => {ref, sha}}) do
-    "Ton critère de succès est le fichier `~/issues/mandate.md`, monté en lecture seule dans ton " <>
-      "pod. C'est le doc d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` " <>
-      "par `git archive` — adressé par contenu, donc exactement ce qui a été écrit : lis-le, rien à " <>
-      "vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un travail déjà livré. " <>
-      "Tu n'as pas à citer sa version — le runtime la grave lui-même, il l'a résolue et il la connaît."
+  # then there is no spawn to mis-mount). Shares `mounted_mandate/3` with the producer's order.
+  defp judge_criterion(%{"_brief_source" => source}) do
+    mounted_mandate(
+      "Ton critère de succès est",
+      source,
+      " : lis-le, rien à vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un " <>
+        "travail déjà livré. Tu n'as pas à citer sa version — le runtime la grave lui-même, il " <>
+        "l'a résolue et il la connaît."
+    )
   end
 
   # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to
