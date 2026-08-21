@@ -27,7 +27,7 @@
 #                casse », et surtout jamais un vert.
 #
 # Confondre les deux fabriquerait le pire rapport possible : `forge.credentials` est `inactive` dans
-# TOUT pod par design, et l'inscrire en bloquant declarerait `create_project` mort en permanence sur
+# TOUT pod par design, et l'inscrire en bloquant declarerait `project_create` mort en permanence sur
 # une fleet parfaitement capable de le faire.
 
 set -uo pipefail
@@ -46,10 +46,10 @@ CAP="${LCARS_POD_HOME:-$HOME}/.cap-profile.json"
 # a tourne, le maillon est absent du flux, et la capacite passe `unreachable` en le nommant. C'est le
 # meme motif que `pods.port_guard` — une connaissance recopiee porte son detecteur de derive.
 CHAINS=(
-"list_workflow_cards¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing¤Lecture pure du catalogue de cartes a travers MCP : aucun ecrit, aucune forge.¤Le canal repond et la fleet se declare saine. Ne promet pas que le catalogue est PEUPLE, ni que les cartes qu'il contient sont valides."
-"create_project¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,?forge.reachable,?projects.root_projects,?projects.root_work,?fleet.subsystem.launch.backend,?fleet.subsystem.pilot.step¤ProjectOnboard : create_repo sur la forge (fail-loud si le depot existe), clone, scaffold, dual-dir work/ops, puis spawn de l'architecte per-projet.¤Rien du COTE FORGE : la fleet cree le depot avec SES credentials, que je ne vois pas et ne dois pas voir. Un vert ici veut dire « le geste est appelable », pas « il aboutira ». L'echec du spawn de l'architecte n'annule pas le projet (ProjectOnboard le rapporte sans le defaire), d'ou launch.backend en indicatif."
-"import_project¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,?forge.reachable,?projects.root_projects,?projects.root_work,?fleet.subsystem.pilot.step¤Jumeau de create_project : ADOPTE un depot existant au lieu de le creer. Memes ecritures disque, meme dual-dir.¤Ne dit rien du depot a adopter : ni qu'il existe, ni qu'il est visible par la fleet, ni qu'il a une branche main clonable."
-"open_project¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,!fleet.subsystem.launch.backend,?projects.root_projects,?fleet.subsystem.pilot.step¤Troisieme verbe : RELANCE un projet deja sur la machine — pas de forge, mais un vrai spawn, donc le backend de lancement est bloquant ici alors qu'il est indicatif ailleurs.¤Ne verifie pas que le projet vise existe : la sonde 50 enumere les noms pris, c'est elle qu'on lit AVANT de nommer une cible."
+"card_list¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing¤Lecture pure du catalogue de cartes a travers MCP : aucun ecrit, aucune forge.¤Le canal repond et la fleet se declare saine. Ne promet pas que le catalogue est PEUPLE, ni que les cartes qu'il contient sont valides."
+"project_create¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,?forge.reachable,?projects.root_projects,?projects.root_work,?fleet.subsystem.launch.backend,?fleet.subsystem.pilot.step¤ProjectOnboard : create_repo sur la forge (fail-loud si le depot existe), clone, scaffold, dual-dir work/ops, puis spawn de l'architecte per-projet.¤Rien du COTE FORGE : la fleet cree le depot avec SES credentials, que je ne vois pas et ne dois pas voir. Un vert ici veut dire « le geste est appelable », pas « il aboutira ». L'echec du spawn de l'architecte n'annule pas le projet (ProjectOnboard le rapporte sans le defaire), d'ou launch.backend en indicatif."
+"project_import¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,?forge.reachable,?projects.root_projects,?projects.root_work,?fleet.subsystem.pilot.step¤Jumeau de project_create : ADOPTE un depot existant au lieu de le creer. Memes ecritures disque, meme dual-dir.¤Ne dit rien du depot a adopter : ni qu'il existe, ni qu'il est visible par la fleet, ni qu'il a une branche main clonable."
+"project_open¤!instruments.mcp_socket,!fleet.health,!fleet.subsystem.mcp.pod_facing,!fleet.subsystem.spawn.dispatch,!fleet.subsystem.launch.backend,?projects.root_projects,?fleet.subsystem.pilot.step¤Troisieme verbe : RELANCE un projet deja sur la machine — pas de forge, mais un vrai spawn, donc le backend de lancement est bloquant ici alors qu'il est indicatif ailleurs.¤Ne verifie pas que le projet vise existe : la sonde 50 enumere les noms pris, c'est elle qu'on lit AVANT de nommer une cible."
 )
 
 # Prefixe d'id → sonde qui le produit. Mecanique, pas une table a maintenir : le plan EST le prefixe.

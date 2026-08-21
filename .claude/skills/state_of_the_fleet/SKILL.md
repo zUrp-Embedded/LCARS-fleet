@@ -49,7 +49,7 @@ L'invoquer par son chemin, jamais en supposant un `cwd` :
     $S/sotf.sh report                      # tout, au terminal
     $S/sotf.sh report --out rapport.md     # tout, en markdown archivable
     $S/sotf.sh diag                        # toutes les capacités
-    $S/sotf.sh diag create_project         # une seule chaîne, court-circuitée au premier maillon mort
+    $S/sotf.sh diag project_create         # une seule chaîne, court-circuitée au premier maillon mort
     $S/sotf.sh report --raw                # le JSONL brut : c'est LUI la source de vérité
 
 Le toolkit est **en lecture seule par construction** : la seule écriture qu'il fait est le fichier de
