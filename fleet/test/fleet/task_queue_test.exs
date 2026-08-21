@@ -146,6 +146,41 @@ defmodule Fleet.TaskQueueTest do
     }
   end
 
+  test "3d. D4 — the broker ENGRAVES the work item's brief_sha, overwriting the pod's citation",
+       %{
+         q: q
+       } do
+    # The runtime dispatched this order at a pinned version. The pod no longer cites it (the SP
+    # stopped asking); even if it does — or lies — the broker's value is the one that reaches
+    # provenance, PROVEN because the runtime resolved it.
+    runtime_sha = String.duplicate("a", 40)
+
+    {:ok, _} =
+      TaskQueue.enqueue(q, "pod-A", %{
+        brief: "x",
+        brief_sha: runtime_sha,
+        brief_ref: "gate-briefs/issue-1-reviewer.md"
+      })
+
+    {:ok, _} = TaskQueue.get_for_pod(q, "pod-A")
+
+    {:ok, _} =
+      TaskQueue.submit_result(q, "pod-A", %{
+        "verdict" => "proven",
+        "brief_sha" => String.duplicate("b", 40)
+      })
+
+    assert_receive %Fleet.Event{
+      type: :"work_item.completed",
+      payload: %{
+        result: %{
+          "brief_sha" => ^runtime_sha,
+          "brief_ref" => "gate-briefs/issue-1-reviewer.md"
+        }
+      }
+    }
+  end
+
   # MA-04 — THE finding: `work_item.completed` is load-bearing LIFECYCLE (StepRunConsumer depends on it to
   # finish the step_run). If its broadcast fails, `submit_result` does NOT return a mute `{:ok}` (the pod would
   # believe its deliverable accepted while the step_run never finishes → forge lock forever) — it propagates

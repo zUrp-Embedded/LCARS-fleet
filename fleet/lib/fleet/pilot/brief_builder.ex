@@ -681,7 +681,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       "pod. C'est le doc d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` " <>
       "par `git archive` — adressé par contenu, donc exactement ce qui a été écrit : lis-le, rien à " <>
       "vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un travail déjà livré. " <>
-      "Cite `#{String.slice(sha, 0, 7)}` dans ton verdict — l'adresse de ce que tu as jugé."
+      "Tu n'as pas à citer sa version — le runtime la grave lui-même, il l'a résolue et il la connaît."
   end
 
   # Inline brief (degraded dispatch, no authored doc) → embedded as before: there is nothing else to
