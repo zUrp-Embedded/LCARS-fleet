@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/deploy/modules.d/62-runtime-helpers.sh
+# AUTHOR: DrDree
+# STARDATE: 2026-08-21
+# STATUS: PROTO-V2 — les auxiliaires runtime du rail POSTE : ce que le `COPY` du Dockerfile pose côté image
+# APPLY-ON: wsl linux
+# CHECK-ON: any
+# NEEDS: root
+#
+# ─── UN INSTALLEUR LIVRE UN SYSTÈME QUI FONCTIONNE ──────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21. Ce module existe parce que la moitié du produit n'était posée QUE par le
+# Dockerfile. La console web, la landing, le convergeur d'humains et le convergeur de toolchain sont
+# des `COPY` — donc sur une machine native ils n'existaient nulle part, et rien ne le disait.
+#
+# CE QUE ÇA DONNAIT, MESURÉ LE 2026-08-21 SUR UN POSTE NATIF FRAÎCHEMENT INSTALLÉ :
+#   · la page LCARS s'ouvrait sur un CADRE NOIR — `ttyd` absent de la machine, aucun `console.sh`
+#     pour le lancer, et le client de terminal (xterm.js) jamais récupéré ;
+#   · un humain ajouté à la team `humans` de la forge n'obtenait AUCUN compte Unix — le convergeur
+#     n'était pas sur le disque ;
+#   · `sudo lcars-toolchain-converge`, dont `45-sudoers-toolchain` accorde l'exécution au groupe
+#     `fleet`, était un « command not found » : la règle sudoers désignait un binaire absent.
+#
+# Aucun de ces trois-là ne se voyait dans un verdict : le provisionnement était VERT sur ses modules,
+# et le produit était mort. Un module ne peut pas constater ce qu'aucun module ne pose.
+#
+# ─── LES DEUX RAILS POSENT LA MÊME CHOSE, PAR DEUX MÉCANISMES ───────────────────────────────────
+#
+# La liste ci-dessous est le miroir du bloc `COPY … /opt/lcars/` du Dockerfile, moins `entrypoint.sh`
+# qui n'a de sens que dans un conteneur. `CHECK-ON: any` et `APPLY-ON` sans docker : le doctor sonde
+# les deux rails, seul le rail poste a quelque chose à poser.
+#
+# ⚠ `ttyd` N'EST PAS DANS `10-packages`, ET C'EST DÉLIBÉRÉ. Cette liste-là est celle des paquets que
+# les DEUX rails obtiennent par apt ; `ttyd` n'est pas empaqueté par Debian (l'image le récupère en
+# binaire statique épinglé par sha256), il l'est par Ubuntu — mesuré le 2026-08-21 sur Launchpad :
+# `ttyd 1.7.7-4build1`, `universe`, la version exacte que le Dockerfile épingle. Deux mécanismes pour
+# un même outil, donc deux sites : les mélanger ferait mentir le témoin d'égalité des deux rails.
+
+set -euo pipefail
+# shellcheck source=../lib/provision-lib.sh
+. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+
+# Seams de test — l'emplacement des deux dépôts, la racine des sources, et le propriétaire à poser.
+# Le dernier existe parce qu'un témoin ne peut pas `chown root` : sans lui, la POSE — le sujet même
+# de ce module — ne serait épinglée par personne.
+HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
+TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
+HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
+SRC_DIR="$(repo_root)/fleet/deploy/docker"
+
+owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
+
+# Le miroir du `COPY` de l'image. `entrypoint.sh` en est absent : il n'a pas de sens hors conteneur.
+HELPERS=(
+  console.sh
+  console-humans.sh
+  console-status.sh
+  console-landing.sh
+  console-deck.py
+  console-pod.sh
+  human-converger.sh
+)
+
+# ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
+# Mêmes pins que le Dockerfile, calculés le 2026-08-14 sur ces URLs exactes. Le dépôt ne porte
+# toujours aucun fichier JS tiers : ce qu'il porte est une référence vérifiée. Bump = changer la
+# paire aux DEUX endroits, et le témoin épingle leur égalité.
+XTERM_VERSION="${LCARS_XTERM_VERSION:-5.5.0}"
+XTERM_FIT_VERSION="${LCARS_XTERM_FIT_VERSION:-0.10.0}"
+XTERM_JS_SHA256=1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495
+XTERM_CSS_SHA256=ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6
+XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089
+
+deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
+
+# <fichier> <url> <sha256> — la table, lue par le check ET par l'apply : une seule description.
+deck_static_table() {
+  printf '%s\t%s\t%s\n' \
+    xterm.js "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/lib/xterm.js" "$XTERM_JS_SHA256" \
+    xterm.css "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/css/xterm.css" "$XTERM_CSS_SHA256" \
+    addon-fit.js "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${XTERM_FIT_VERSION}/lib/addon-fit.js" "$XTERM_FIT_SHA256"
+}
+
+# LE PROVISIONNEMENT EN FORME DE REPO, comme dans l'image : `repo_root()` de la lib résout ses
+# chemins inter-arbre depuis `<racine>/fleet/deploy/lib/`, donc le convergeur qui appelle
+# `/opt/lcars/fleet/deploy/provision` retrouve `fleet/etc` sans rien savoir de la machine.
+EMBEDDED=(deploy etc)
+
+# ── Sondes ──────────────────────────────────────────────────────────────────────────────────────
+
+helper_current() { # <nom> — 0 si la copie posée est IDENTIQUE à la source
+  cmp -s "$SRC_DIR/$1" "$HELPERS_DIR/$1"
+}
+
+sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+
+check() {
+  local n f name url sha stale=0
+
+  command -v ttyd >/dev/null \
+    && p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))" \
+    || p_drift "ttyd absent — la console web n'a AUCUN serveur derrière sa socket (page noire)"
+
+  for n in "${HELPERS[@]}"; do
+    if [[ ! -x "$HELPERS_DIR/$n" ]]; then
+      p_drift "$HELPERS_DIR/$n absent"
+      stale=1
+    elif ! helper_current "$n"; then
+      p_drift "$HELPERS_DIR/$n diverge de la source ($SRC_DIR/$n)"
+      stale=1
+    fi
+  done
+  [[ "$stale" -eq 0 ]] && p_ok "${#HELPERS[@]} auxiliaires à jour dans $HELPERS_DIR"
+
+  while IFS=$'\t' read -r name url sha; do
+    f="$(deck_static_dir)/$name"
+    if [[ ! -s "$f" ]]; then
+      p_drift "client de terminal absent ($f) — la console s'ouvre sur un cadre noir, et rien à l'écran ne le dit"
+    elif [[ "$(sha_of "$f")" != "$sha" ]]; then
+      p_drift "$f ne correspond pas à son pin sha256"
+    fi
+  done < <(deck_static_table)
+
+  [[ -x "$TOOLCHAIN_BIN" ]] \
+    && p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)" \
+    || p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
+
+  for n in "${EMBEDDED[@]}"; do
+    [[ -x "$HELPERS_DIR/fleet/deploy/provision" ]] && break
+    p_drift "provisionnement embarqué absent ($HELPERS_DIR/fleet/$n) — le convergeur ne pourra pas converger un humain"
+    break
+  done
+  [[ -x "$HELPERS_DIR/fleet/deploy/provision" ]] && p_ok "provisionnement embarqué posé ($HELPERS_DIR/fleet/deploy/provision)"
+
+  verdict_check
+}
+
+apply() {
+  local n name url sha f
+
+  # ttyd : APT, et rien d'autre. Ubuntu le livre en 1.7.7, la version que l'image épingle.
+  if command -v ttyd >/dev/null; then
+    p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
+  else
+    apt_ensure ttyd || { p_fail "ttyd introuvable par apt — le dépôt « universe » est-il activé ? (sans lui, la console web n'a aucun serveur)"; verdict_apply; }
+  fi
+
+  local -a own; mapfile -t own < <(owner_args)
+
+  ensure_dir "$HELPERS_DIR" 0755 "$HELPERS_OWNER" || verdict_apply
+  for n in "${HELPERS[@]}"; do
+    [[ -f "$SRC_DIR/$n" ]] || { p_fail "source absente: $SRC_DIR/$n (arbre incomplet)"; verdict_apply; }
+    helper_current "$n" && continue
+    install -m 0755 "${own[@]}" "$SRC_DIR/$n" "$HELPERS_DIR/$n" \
+      || { p_fail "pose ratée: $HELPERS_DIR/$n"; verdict_apply; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$HELPERS_DIR/$n"
+  done
+
+  ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
+  install -m 0755 "${own[@]}" "$SRC_DIR/toolchain-converger.sh" "$TOOLCHAIN_BIN" \
+    || { p_fail "pose ratée: $TOOLCHAIN_BIN"; verdict_apply; }
+
+  # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —
+  # ce qui est posé date de l'apply, pas d'un clone qui a pu bouger ou disparaître depuis.
+  ensure_dir "$HELPERS_DIR/fleet" 0755 "$HELPERS_OWNER" || verdict_apply
+  for n in "${EMBEDDED[@]}"; do
+    [[ -d "$(repo_root)/fleet/$n" ]] || { p_fail "source absente: $(repo_root)/fleet/$n"; verdict_apply; }
+    rm -rf "${HELPERS_DIR:?}/fleet/$n.new"
+    cp -a "$(repo_root)/fleet/$n" "$HELPERS_DIR/fleet/$n.new" \
+      || { p_fail "copie ratée: fleet/$n"; verdict_apply; }
+    rm -rf "${HELPERS_DIR:?}/fleet/$n"
+    mv "$HELPERS_DIR/fleet/$n.new" "$HELPERS_DIR/fleet/$n" \
+      || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
+  done
+  p_chg "provisionnement embarqué ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
+
+  # ⚠ LE RÉSEAU EN DERNIER, ET C'EST UN ORDRE, PAS UN RANGEMENT. Tout ce qui précède se pose depuis
+  # l'arbre local et ne peut échouer que sur un disque. Le client de terminal, lui, dépend d'un CDN :
+  # le mettre plus haut ferait qu'une coupure réseau priverait la machine du convergeur et du
+  # binaire de toolchain, qui n'ont rien demandé à personne. Ici, une coupure coûte exactement ce
+  # qu'elle doit coûter — la console s'ouvre sur un cadre noir, et le check le NOMME.
+  #
+  # `fetch_verify` ne télécharge JAMAIS vers la destination : un curl tronqué laisserait un bundle
+  # cassé en place, et une page blanche est plus difficile à lire qu'une page noire — celle-ci au
+  # moins laisse un motif dans les logs du deck.
+  ensure_dir "$(deck_static_dir)" 0755 "$HELPERS_OWNER" || verdict_apply
+  while IFS=$'\t' read -r name url sha; do
+    f="$(deck_static_dir)/$name"
+    [[ -s "$f" && "$(sha_of "$f")" == "$sha" ]] && continue
+    fetch_verify "$url" "$sha" "$f" 0644 || verdict_apply
+  done < <(deck_static_table)
+
+  verdict_apply
+}
+
+case "${1:?usage: 62-runtime-helpers.sh <check|apply>}" in
+  check) check ;;
+  apply) apply ;;
+  *) p_die "mode inconnu: $1 (check|apply)" ;;
+esac
