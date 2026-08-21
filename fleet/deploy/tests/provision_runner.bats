@@ -238,7 +238,7 @@ EOF
 
 # ─── LE SECOND PASSAGE : L'ETAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────
 # `--human` designe l'OPERATEUR (SUDO_USER), qui sur un poste est presque toujours l'uid 1000 que
-# GUARD B reserve au siege. `65-fleet-human` cree l'humain de fleet ; sans ce passage, son
+# GUARD B reserve au siege. `22-fleet-human` cree l'humain de fleet ; sans ce passage, son
 # `~/.lcars`, son `~/pods` et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start`
 # echouerait sous lui pour une raison sans rapport avec ce qu'on vient d'installer.
 
@@ -283,7 +283,7 @@ EOF
 }
 
 @test "second passage: un humain de fleet INEXISTANT ne declenche rien, et ne casse rien" {
-  # `65-fleet-human` derive quand `useradd` echoue : l'apply continue, et ce passage doit alors etre
+  # `22-fleet-human` derive quand `useradd` echoue : l'apply continue, et ce passage doit alors etre
   # inerte plutot que de jouer des modules pour un compte qui n'existe pas.
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="n-existe-pas-$$" \

@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/tests/fleet_human.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
-# STATUS: bats tests for 65-fleet-human — l'humain de fleet du poste, et le plancher d'uid qui le definit
+# STATUS: bats tests for 22-fleet-human — l'humain de fleet du poste, et le plancher d'uid qui le definit
 #
 # CE QUE CES TEMOINS FERMENT. Le rail poste installait un runtime que personne ne pouvait lancer, et
 # il se contredisait en le faisant. Mesure du 2026-08-21, install a froid sur machine dediee, humain
@@ -29,10 +29,10 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
 
-  SRC="$BATS_TEST_DIRNAME/../modules.d/65-fleet-human.sh"
+  SRC="$BATS_TEST_DIRNAME/../modules.d/22-fleet-human.sh"
   [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  export PROVISION_MODULE=65-fleet-human
+  export PROVISION_MODULE=22-fleet-human
   export PROV_FLEET_GROUP="$(id -gn)"
 
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"

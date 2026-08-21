@@ -167,7 +167,7 @@ setup() {
 @test "la DERNIERE instruction lue est vraie sur CE terrain — pas celle d'un autre" {
   # Le bandeau de cloture disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
   # « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-  # l'humain de fleet (65-fleet-human), pas sous l'operateur : GUARD B refuse l'uid du siege, qui
+  # l'humain de fleet (22-fleet-human), pas sous l'operateur : GUARD B refuse l'uid du siege, qui
   # est justement le sien sur une machine standard. Un operateur qui suit cette ligne se fait
   # refuser par un garde, sans savoir pourquoi.
   #

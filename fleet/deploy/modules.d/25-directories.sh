@@ -82,12 +82,36 @@ set -euo pipefail
 # `<humain>:lcars-console`, un groupe que seule l'image cree. Deux createurs avec deux groupes
 # donneraient un dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose
 # PAS le mode d'un dossier existant, donc le desaccord serait SILENCIEUX.
+# ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
+# differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
+# que GUARD B reserve au siege, et la fleet tourne sous l'HUMAIN DE FLEET pose par `22-fleet-human`.
+# Le deck derive son chemin du `USER` du BEAM (`Fleet.Observation.deck_socket/0`), donc c'est cet
+# humain-la qui doit posseder le dossier.
+#
+# Mesure du 2026-08-21, install a froid : `/run/lcars/console/lordzurp` cree, fleet lancee sous
+# `lcars`, et le node MORT au boot sur `:enoent` — le meme echec que la veille, deplace d'un compte.
+# Ce module est `NEEDS: root`, donc il n'est PAS rejoue par le second passage per-humain : il ne
+# peut pas compter dessus pour rattraper, il doit viser juste du premier coup.
+#
+# ⚠ ET C'EST POURQUOI `22-fleet-human` PORTE LE NUMERO 22. Il s'appelait 65 : le compte etait donc
+# cree APRES ce module, qui ne pouvait pas lui donner son dossier. Une identite precede les
+# repertoires qu'elle possede — l'ordre est le prefixe, et le prefixe porte le sens.
+prov_console_human() {
+  local h="${PROV_FLEET_HUMAN:-lcars}"
+  # Repli sur `--human` tant que l'humain de fleet n'existe pas : mieux vaut un dossier pour
+  # quelqu'un que pas de dossier du tout, et le prochain apply corrigera. Sans ce repli, une
+  # machine dont `22-fleet-human` a derive (useradd refuse) perdrait aussi sa racine de console.
+  id -u -- "$h" >/dev/null 2>&1 && { echo "$h"; return 0; }
+  echo "$PROV_HUMAN"
+}
+
 prov_runtime_dirs() {
   [[ "${PROV_SUBSTRATE:-}" == "docker" ]] && return 0
+  local h; h="$(prov_console_human)"
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
     "/run/lcars/console 0711 root:root" \
-    "/run/lcars/console/$PROV_HUMAN 2710 $PROV_HUMAN:$PROV_FLEET_GROUP"
+    "/run/lcars/console/$h 2710 $h:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {

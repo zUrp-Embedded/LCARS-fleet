@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/modules.d/65-fleet-human.sh
+# SOURCE: fleet/deploy/modules.d/22-fleet-human.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — l'humain de fleet du POSTE : un compte unix qui n'est pas le siège
@@ -121,7 +121,7 @@ apply() {
   check
 }
 
-case "${1:?usage: 65-fleet-human.sh <check|apply>}" in
+case "${1:?usage: 22-fleet-human.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

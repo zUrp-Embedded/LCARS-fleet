@@ -635,7 +635,7 @@ esac
 # ⚠ LA DERNIÈRE CHOSE QU'ON LIT EST L'INSTRUCTION QU'ON SUIT — donc elle doit être vraie SUR CE
 # TERRAIN-CI. Ce bandeau disait « WSL : wsl --shutdown » sur une machine dédiée qui n'a pas de WSL,
 # et « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-# l'humain de fleet (`65-fleet-human`), pas sous l'opérateur : GUARD B refuse l'uid du siège, qui
+# l'humain de fleet (`22-fleet-human`), pas sous l'opérateur : GUARD B refuse l'uid du siège, qui
 # est justement celui de l'opérateur sur une machine standard. Un opérateur qui suit la ligne 3 se
 # fait refuser par un garde, sans savoir pourquoi.
 #

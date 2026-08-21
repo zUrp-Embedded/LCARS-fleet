@@ -304,7 +304,7 @@ done
 # ─── SECOND PASSAGE : L'ÉTAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────────
 # `--human` désigne QUI joue les modules `# NEEDS: human`, et sur le rail poste c'est l'opérateur
 # (SUDO_USER) — c'est-à-dire, presque toujours, le compte uid 1000 que GUARD B réserve au siège.
-# `65-fleet-human` vient de créer l'humain de fleet ; sans ce passage, son `~/.lcars`, son `~/pods`
+# `22-fleet-human` vient de créer l'humain de fleet ; sans ce passage, son `~/.lcars`, son `~/pods`
 # et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start` échouerait sous lui pour une
 # raison sans rapport avec ce qu'on a passé la nuit à corriger.
 #
