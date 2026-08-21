@@ -316,10 +316,23 @@ defmodule Fleet.Pilot.BriefBuilder do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
-      "brief_body" => issue["body"] || "",
+      "brief_body" => worker_order_body(issue),
       "brief_source" => brief_source_line(issue)
     })
   end
+
+  # SAME MOVE AS THE JUDGE: when a pointer resolved, the producer's order is a MOUNTED file it reads
+  # (`~/issues/mandate.md`, content-addressed), not inline text. `pin_object` materialized it at the
+  # pinned sha, so what the producer works from is exactly what was authored. Inline (`:none`, a
+  # degraded/PoC brief) → the body is the order, there being nothing to mount.
+  defp worker_order_body(%{"_brief_source" => {ref, sha}}) do
+    "Ton ordre de mission est le fichier `~/issues/mandate.md`, monté en lecture seule dans ton " <>
+      "pod. C'est le doc d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` " <>
+      "par `git archive` — adressé par contenu, donc exactement ce qui a été écrit. Lis-le : c'est ta " <>
+      "tâche."
+  end
+
+  defp worker_order_body(issue), do: issue["body"] || ""
 
   # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
   # (`ref @ commit`, the walkable link into ops history); an inline brief says so

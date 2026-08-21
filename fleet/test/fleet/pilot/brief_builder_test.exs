@@ -319,7 +319,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert {:ok, brief, "worker"} =
                build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
 
-      assert brief =~ "LE DOC COMPLET."
+      # The order is a MOUNTED file the producer reads (content-addressed), not the doc inlined.
+      assert brief =~ "~/issues/mandate.md"
+      refute brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
       # F-25 — the order CITES its source: the resolved pointer stays walkable (ref @ commit),
       # it is not consumed silently by the resolution.
