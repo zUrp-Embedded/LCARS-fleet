@@ -208,9 +208,50 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
 # et l'org `fleet` porte l'id 8. Les uid sont donc CLAIRSEMES, pas contigus — ce qui est sans
 # consequence depuis qu'aucun port n'est derive d'un uid. Ca ne l'etait pas la veille.
 #
-# L'OFFSET N'EST PAS COSMETIQUE : `UID_MIN` vaut 1000 sur cette image, et un uid en dessous designe
-# un compte systeme. L'id 3 de la forge deviendrait `sync` ou `lp`.
-UID_OFFSET="${LCARS_UID_OFFSET:-1000}"
+# ⚠ ET C'EST CE RAISONNEMENT QUI EST TOMBE (⚖ user 2026-08-21, D8). Il tient sur UNE hypothese —
+# que l'espace d'uid soit LIBRE — et cette hypothese n'est vraie que dans une boite fabriquee pour
+# LCARS. Sur une machine qui a deja des utilisateurs, l'auto-increment de la forge et l'espace
+# d'uid de l'OS sont deux suites independantes : les faire coincider par une addition, c'est
+# esperer une collision de moins que le hasard n'en donne.
+#
+# MESURE DU 2026-08-21, poste natif : `admiral` (id de forge 1) veut l'uid 1001, deja porte par
+# `lcars`, l'humain de fleet cree par `22-fleet-human`. REFUS, sans recours, sur une machine ou
+# rien n'etait casse — c'est la formule qui l'etait.
+#
+# LA DERIVATION EST DONC MORTE, ET SON BENEFICE EST REMPLACE, PAS PERDU. Ce qu'elle achetait —
+# « deux boites reconstruites donnent le meme uid a la meme personne » — n'a jamais eu besoin
+# d'etre une FORMULE : c'est une TABLE, et une table se persiste. `useradd` prend le premier uid
+# libre (il sait le faire, et lui seul connait l'espace reel), on ENREGISTRE le couple, et la
+# reconstruction le relit au lieu de le recalculer.
+#
+# L'ANCRE N'EST PAS LE NOM, C'EST L'ID DE FORGE. Gitea conserve l'`id` au renommage : le login est
+# une etiquette que chaque convergence reecrit, l'`id` ne bouge jamais. Une table keyee sur le nom
+# perdrait la personne au premier renommage — exactement ce que le home, lui, n'a jamais perdu.
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/home/private/forge-uid.map}"
+
+uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
+  [[ -r "$UID_MAP_FILE" ]] || return 0
+  awk -F'\t' -v id="$1" '$1 == id { print $2; exit }' "$UID_MAP_FILE" 2>/dev/null
+}
+
+# ENREGISTRE APRES LE `useradd`, JAMAIS AVANT : on note l'uid QUE LE SYSTEME A DONNE, pas celui
+# qu'on esperait. Ecrire d'avance reconstruirait une formule, avec une etape de plus.
+# Rejouable : un id deja present n'est pas re-ecrit (le premier enregistrement fait foi — c'est lui
+# qui correspond au home sur le disque).
+uid_map_record() { # uid_map_record <forge_id> <uid> <login>
+  [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ ]] || return 0
+  [[ -n "$(uid_from_map "$1")" ]] && return 0
+  local dir; dir="$(dirname "$UID_MAP_FILE")"
+  mkdir -p "$dir" 2>/dev/null || true
+  if printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$UID_MAP_FILE" 2>/dev/null; then
+    chmod 0640 "$UID_MAP_FILE" 2>/dev/null || true
+    chown "root:$GROUP" "$UID_MAP_FILE" 2>/dev/null || true
+  else
+    # Le compte EXISTE deja a ce stade : ne pas pouvoir noter son uid ne le defait pas, mais la
+    # prochaine reconstruction ne le retrouvera que par son home. On le DIT.
+    err "$3 : uid $2 NON enregistre dans $UID_MAP_FILE — une reconstruction ne le retrouvera que par son home"
+  fi
+}
 
 # L'uid a demander pour <login>, et la REGLE DE PRIORITE tient en une phrase : un home existant
 # gagne toujours.
@@ -220,6 +261,13 @@ UID_OFFSET="${LCARS_UID_OFFSET:-1000}"
 # elle — exactement le defaut du 2026-08-12, ou zoe et guest1 se sont retrouvees proprietaires du
 # home l'une de l'autre. La forge fait autorite sur QUI EST LA ; le disque fait autorite sur ce qui
 # est deja ecrit.
+#
+# TROIS SOURCES, DANS CET ORDRE, ET LA TROISIEME EST UN SILENCE :
+#   1. le HOME existant — un fait sur le disque, il gagne toujours ;
+#   2. la TABLE — ce que cette machine a deja donne a cet id de forge ;
+#   3. rien — et c'est `useradd` qui choisit le premier uid libre.
+# Rendre vide n'est donc pas un echec : c'est la reponse « personne n'a d'avis, prends ce qui est
+# libre ». La formule d'avant n'avait pas ce troisieme etat, et c'est pour ca qu'elle collisionnait.
 uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
   local from_home
   from_home="$(uid_of_home "$1")"
@@ -228,7 +276,7 @@ uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
     return 0
   fi
   [[ "$2" =~ ^[0-9]+$ ]] || return 0
-  printf '%s\n' "$(( $2 + UID_OFFSET ))"
+  uid_from_map "$2"
 }
 
 # Qui porte deja cet uid, s'il est pris par quelqu'un d'AUTRE que <login>.
@@ -435,7 +483,22 @@ converge_human() { # converge_human <login>
   # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot que
   # de ne rien converger en silence.
   [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
-  "$PROVISION" apply --substrate docker --human "$login" "${only[@]}" >/dev/null 2>&1
+  # ⚠ LE SUBSTRAT NE SE DECLARE PAS ICI, IL SE DETECTE LA-BAS. Cette ligne portait
+  # `--substrate docker` en dur : vrai tant que ce convergeur ne tournait QUE dans la boite, faux
+  # des qu'il tourne sur un poste — et faux en SILENCE, parce que les modules `NEEDS: human` ne
+  # refusent pas un substrat qu'ils n'attendaient pas, ils prennent leurs branches docker.
+  # `provision` resout `--substrate auto` par `detect_substrate` (/.dockerenv, /proc/version), donc
+  # il repond deja juste DANS le conteneur : le litteral n'achetait rien et coutait le rail poste.
+  # ⚠ LES CODES DE `apply` NE SONT PAS CEUX DE `check`, ET LE 2 EST UN SUCCES ICI :
+  #   0 convergé · 1 ÉCHEC · 2 APPLIQUÉ, drift résiduel.
+  # Un `|| return 1` nu traitait donc le 2 comme une panne — et le drift résiduel est le cas
+  # NOMINAL sur un humain frais : il lui manque ses credentials `claude`, qu'aucun programme ne
+  # peut poser (geste d'identité, jamais automatisé). L'appelant annonçait « le provisionnement
+  # per-humain a echoue » sur un humain correctement provisionné, et renvoyait vers un doctor qui
+  # dit la même chose sans la nommer comme un échec.
+  local rc=0
+  "$PROVISION" apply --human "$login" "${only[@]}" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 0 || "$rc" -eq 2 ]]
 }
 
 # LES TROIS GESTES DE LA REVOCATION, dans l'ordre qui les rend vrais (cf. l'en-tete). Chacun est
@@ -603,16 +666,30 @@ converge_once() {
     # plus bas repondrait « il a un home » pour TOUT LE MONDE. Premiere version de cette trace, et
     # elle aurait dit « repris de son home » sur un uid pose par la forge — un mensonge qui n'aurait
     # coute que le jour ou un uid surprend quelqu'un.
-    [[ -d "$HOME_ROOT/$login" ]] && uid_src="repris de son home" || uid_src="pose par la forge"
+    # TROIS SOURCES, TROIS PHRASES. La derniere — « choisi par le systeme » — n'existait pas tant
+    # qu'une formule repondait toujours ; c'est desormais le cas NOMINAL sur une machine neuve.
+    if [[ -d "$HOME_ROOT/$login" ]]; then
+      uid_src="repris de son home"
+    elif [[ -n "$(uid_from_map "$forge_id")" ]]; then
+      uid_src="relu dans la table (id de forge $forge_id)"
+    else
+      uid_src="choisi par le systeme"
+    fi
     want_uid="$(uid_wanted "$login" "$forge_id")"
     if [[ -n "$want_uid" ]]; then
       holder="$(uid_taken_by "$want_uid" "$login")"
       if [[ -n "$holder" ]]; then
         # Deux logins revendiquent le meme uid : c'est un croisement deja installe, et le reparer
         # a l'aveugle deplacerait des fichiers d'humain. On refuse, en nommant les deux cotes.
+        # ⚠ LE MOTIF SE DIT AVEC SA SOURCE, ET IL DISAIT TOUJOURS L'AUTRE. Ce message affirmait
+        # « son home appartient a l'uid N » dans les DEUX cas, alors que `uid_src` distingue deja
+        # « repris de son home » de « pose par la forge ». Mesure du 2026-08-21, poste natif :
+        # `admiral` (id de forge 1 -> uid 1001) refuse contre `lcars`, avec un message envoyant
+        # l'operateur inspecter `/home/admiral` — un repertoire qui N'EXISTE PAS. Un refus qui
+        # nomme la mauvaise cause coute plus qu'un refus muet : il fait chercher au mauvais endroit.
         already_refused "$login" || {
-          err "REFUS $login — son home appartient a l'uid $want_uid, deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
-          mark_refused "$login" "le repertoire /home/$login appartient a un identifiant deja pris par un autre compte ($holder) — un humain doit demeler"; }
+          err "REFUS $login — uid $want_uid ($uid_src), deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
+          mark_refused "$login" "l'uid $want_uid ($uid_src) est deja porte par un autre compte ($holder) — un humain doit demeler"; }
         continue
       fi
       uid_args=(-u "$want_uid")
@@ -622,9 +699,13 @@ converge_once() {
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
       getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
-      # La TRACE DIT D'OU VIENT L'UID : « repris de son home » et « pose par la forge » sont deux
-      # histoires differentes le jour ou un uid surprend quelqu'un.
-      say "user $login cree (membre de $ORG/$TEAM${want_uid:+, uid $want_uid $uid_src})"
+      # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS : `want_uid` est vide dans le cas nominal
+      # (c'est `useradd` qui a choisi), et c'est ce que le systeme a donne qu'il faut enregistrer.
+      local got_uid; got_uid="$(id -u -- "$login" 2>/dev/null || true)"
+      uid_map_record "$forge_id" "$got_uid" "$login"
+      # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « choisi
+      # par le systeme » sont trois histoires differentes le jour ou un uid surprend quelqu'un.
+      say "user $login cree (membre de $ORG/$TEAM${got_uid:+, uid $got_uid $uid_src})"
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.

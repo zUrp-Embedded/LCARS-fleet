@@ -176,15 +176,52 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 # un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre. L'identifiant de la forge, lui,
 # est un auto-increment SQL : lineaire, dense, JAMAIS reutilise apres suppression.
 
-@test "6-surface: sans home, l'uid vient de la FORGE (id + offset)" {
+@test "D8: sans home ET sans table, on ne revendique RIEN — useradd prend le premier uid libre" {
+  # ⚖ USER 2026-08-21 (D8). La derivation `id_forge + 1000` tenait sur une hypothese vraie dans une
+  # boite fabriquee pour LCARS et fausse ailleurs : que l'espace d'uid soit libre. Mesure du meme
+  # jour, poste natif : `admiral` (id 1) revendiquait 1001, deja porte par `lcars` — refus sans
+  # recours sur une machine ou rien n'etait casse.
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     mkdir -p \"\$LCARS_HOME_ROOT\"
     source '$SUT'
-    uid_wanted nouvelle 3"
+    echo \"[\$(uid_wanted nouvelle 3)]\""
   [ "$status" -eq 0 ]
-  [ "$output" = "1003" ]
+  [ "$output" = "[]" ]
+}
+
+@test "D8: la TABLE remplace la formule — un id deja vu rend SON uid, pas un calcul" {
+  # Ce que la derivation achetait — « deux boites reconstruites donnent le meme uid a la meme
+  # personne » — n'a jamais eu besoin d'etre une formule. La table le rend, et elle est keyee sur
+  # l'ID de forge, pas sur le nom : Gitea conserve l'id au renommage.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    mkdir -p \"\$LCARS_HOME_ROOT\"
+    printf '7\t1042\tancien_nom\n' > \"\$LCARS_UID_MAP_FILE\"
+    source '$SUT'
+    echo \"[\$(uid_wanted nouveau_nom 7)]\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "[1042]" ]
+}
+
+@test "D8: la table s'ecrit APRES coup, et le PREMIER enregistrement fait foi" {
+  # Ecrire d'avance reconstruirait une formule avec une etape de plus ; re-ecrire ferait perdre le
+  # couple qui correspond au home REELLEMENT pose sur le disque.
+  run bash -c "
+    set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid2.map' GROUP='$(id -gn)'
+    source '$SUT'
+    uid_map_record 12 1012 zoe
+    uid_map_record 12 9999 zoe_renommee
+    cat \"\$LCARS_UID_MAP_FILE\""
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | wc -l)" -eq 0 ]
+  [[ "$output" == "12	1012	zoe" ]]
 }
 
 @test "6-surface: un home existant GAGNE sur la forge — le disque fait foi sur ce qui est ecrit" {
@@ -218,20 +255,11 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [ "$output" = "[][]" ]
 }
 
-@test "6-surface: l'offset n'est pas cosmetique — un id de forge brut serait un compte SYSTEME" {
-  # UID_MIN vaut 1000 : l'id 3 de la forge, pose tel quel, tomberait sur `sync` ou `lp`. L'offset
-  # est ce qui fait d'un identifiant de forge un siege d'humain.
-  run bash -c "
-    set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
-    mkdir -p \"\$LCARS_HOME_ROOT\"
-    source '$SUT'
-    got=\$(uid_wanted quiconque 3)
-    min=\$(uid_min)
-    [ \"\$got\" -ge \"\$min\" ] || { echo \"uid \$got sous UID_MIN \$min\"; exit 1; }
-    echo ok"
-  [ "$status" -eq 0 ]
-  [ "$output" = "ok" ]
+@test "D8: plus AUCUNE arithmetique d'uid dans le convergeur — la formule est morte, pas commentee" {
+  # Le motif de la disparition doit rester lisible, mais un `UID_OFFSET` encore CALCULE quelque part
+  # serait une seconde regle silencieuse. On epingle l'absence du calcul, pas celle du mot.
+  ! grep -qE '\$\(\(.*(UID_OFFSET|forge_id).*\)\)' "$SUT"
+  ! grep -qE '^UID_OFFSET=' "$SUT"
 }
 
 @test "l'uid revendique est-il deja pris par QUELQU'UN D'AUTRE ?" {
