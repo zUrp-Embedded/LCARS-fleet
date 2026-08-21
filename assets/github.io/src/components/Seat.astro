@@ -1,9 +1,12 @@
 ---
+import { u } from '../lib/href.js';
 // Le siege lit son avatar dans assets/avatars du depot (recopie en public/ au build).
 // Un siege du canon sans avatar rendrait une image cassee : on prefere le savoir au build.
+// Le src passe par u() : sous une base (/doc/ dans le deck) il DOIT se composer comme tout lien
+// interne, sinon il part a la racine et 404 — le deck ne sert que /doc/... et /static/...
 const { name, role, color, ghost = false } = Astro.props;
 ---
 <div class:list={['seat', ghost && 'ghost']}>
-  <div class="face" style={`--seat:${color}`}><img alt="" src={`/avatars/${name}.svg`} /></div>
+  <div class="face" style={`--seat:${color}`}><img alt="" src={u(`/avatars/${name}.svg`)} /></div>
   <div class="who"><b>{name.charAt(0).toUpperCase() + name.slice(1)}</b><i>{role}</i><span><slot /></span></div>
 </div>
