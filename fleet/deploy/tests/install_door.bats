@@ -164,6 +164,26 @@ setup() {
   [[ "$output" == *"réservé à WSL2"* ]]
 }
 
+@test "la DERNIERE instruction lue est vraie sur CE terrain — pas celle d'un autre" {
+  # Le bandeau de cloture disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
+  # « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
+  # l'humain de fleet (65-fleet-human), pas sous l'operateur : GUARD B refuse l'uid du siege, qui
+  # est justement le sien sur une machine standard. Un operateur qui suit cette ligne se fait
+  # refuser par un garde, sans savoir pourquoi.
+  #
+  # ⚠ ON MESURE LE TEXTE DU SCRIPT, PAS UNE EXECUTION : atteindre ce bandeau demande un
+  # provisionnement complet (paquets, /local, une forge), ce qu'un temoin ne joue pas. Ce qui se
+  # garde ici est que les deux formes EXISTENT et sont choisies par le terrain — un bandeau qui
+  # redeviendrait inconditionnel le perdrait sans que rien ne rougisse.
+  run grep -c 'sudo -u \$_fh fleet_v2 start' "$SRC"
+  [ "$output" = "1" ]
+  run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
+  [ "$output" = "1" ]
+  # Et la forme « sous ton uid » n'est plus inconditionnelle : elle vit dans la branche boite.
+  run grep -c 'RAIL" == "workstation" \]\]; then' "$SRC"
+  [ "$status" -eq 0 ]
+}
+
 @test "machine dédiée: le bandeau n'annonce PAS /etc/wsl.conf là où rien ne le touche" {
   # `30-wsl` porte `APPLY-ON: wsl`. Promettre une destruction qui n'aura pas lieu est du même ordre
   # qu'en taire une qui aura lieu : dans les deux cas l'opérateur consent à autre chose.

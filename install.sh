@@ -632,16 +632,42 @@ case "$_apply_rc" in
     ;;
 esac
 
+# ⚠ LA DERNIÈRE CHOSE QU'ON LIT EST L'INSTRUCTION QU'ON SUIT — donc elle doit être vraie SUR CE
+# TERRAIN-CI. Ce bandeau disait « WSL : wsl --shutdown » sur une machine dédiée qui n'a pas de WSL,
+# et « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
+# l'humain de fleet (`65-fleet-human`), pas sous l'opérateur : GUARD B refuse l'uid du siège, qui
+# est justement celui de l'opérateur sur une machine standard. Un opérateur qui suit la ligne 3 se
+# fait refuser par un garde, sans savoir pourquoi.
+#
+# Mesuré le 2026-08-21 sur l'install à froid : les deux lignes fausses, imprimées côte à côte, en
+# clôture d'un provisionnement par ailleurs juste.
+if [[ "$SUBSTRATE" == "wsl" ]]; then
+  _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),
+  │${N}     rouvrir un ${W}NOUVEL${N} onglet, relancer cet install.      ${CYAN}│"
+else
+  _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL.
+  │${N}                                                          ${CYAN}│"
+fi
+# Le lanceur nommé est celui qui MARCHE. Sur le rail poste la fleet appartient à l'humain de fleet ;
+# l'opérateur la lance par `sudo -u`, et atteint son deck par le groupe.
+if [[ "$RAIL" == "workstation" ]]; then
+  _fh="${PROV_FLEET_HUMAN:-lcars}"
+  _step3="${W}3.${N} ${W}sudo -u $_fh fleet_v2 start${N} — la fleet tourne sous"
+  _step3b="     « $_fh » ; toi tu l'atteins par le groupe ${W}fleet${N}."
+else
+  _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
+  _step3b="                                                         "
+fi
 cat <<EOF
 
 ${CYAN}  ┌─────────────────────────────────────────────────────────┐
   │${W}         LCARS-FLEET v2 — PROVISIONING TERMINÉ           ${CYAN}│
   ├─────────────────────────────────────────────────────────┤
   │${N}  Suite (les verdicts ci-dessus font foi) :               ${CYAN}│
-  │${N}  ${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),      ${CYAN}│
-  │${N}     rouvrir un ${W}NOUVEL${N} onglet, relancer cet install.      ${CYAN}│
+  │${N}  $_step1
   │${N}  ${W}2.${N} ${W}claude${N} → /login (geste d'identité, une fois).       ${CYAN}│
-  │${N}  ${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid.            ${CYAN}│
+  │${N}  $_step3
+  │${N}  $_step3b
   │${N}  Sonde à tout moment : ${W}bash install.sh --check${N}          ${CYAN}│
   └─────────────────────────────────────────────────────────┘${N}
 EOF
