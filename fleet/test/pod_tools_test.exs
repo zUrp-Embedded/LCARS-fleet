@@ -1274,6 +1274,27 @@ defmodule Fleet.MCP.PodToolsTest do
       assert :none = Fleet.Layout.parse_criteria_pointer(body)
     end
 
+    test "a criteria that EMBEDS a pointer (delegates) is refused — self-contained or nothing",
+         %{tmp_dir: tmp} do
+      # The judge mounts nothing but its criterion; a criterion that points at another committed doc
+      # points at a tree the judge never reads. The non-ambiguous form is refused at authoring.
+      work_dir = Path.join(tmp, "demo")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
+
+      pointing_criteria =
+        "L'attendu :\n\n" <>
+          Fleet.Layout.criteria_pointer_line("gate-briefs/other.md", String.duplicate("a", 40))
+
+      assert {:error, {:criteria_not_self_contained, _}, _} =
+               PodTools.handle_tool_call(
+                 "issue_create",
+                 %{"title" => "T", "brief" => "b", "criteria" => pointing_criteria},
+                 pod_state(uniq("pod-arch"))
+               )
+    end
+
     test "inline brief WITHOUT summary → honest excerpt (marked) + pointer", %{tmp_dir: tmp} do
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)

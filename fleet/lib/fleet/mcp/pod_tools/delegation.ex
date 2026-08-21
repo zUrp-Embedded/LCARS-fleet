@@ -152,6 +152,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, forge} <- conforming_forge(),
          {:ok, %{role: role, repo: repo}} <- require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
+         :ok <- refuse_pointing_criteria(criteria),
          {:ok, target_state} <- target_state_preflight(forge, repo, supersedes) do
       # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
       # forge POST CONTINUE — a physicalize (push ops) + create_issue can exceed it. The agent then
@@ -1664,6 +1665,33 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp with_criteria_pointer(body, {ref, sha}),
     do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha)
+
+  # THE CRITERIA MUST STAND ALONE — the judge mounts nothing but its criterion, so a criterion that
+  # DELEGATES to another committed doc points at a tree the judge will never read. This wall is the
+  # NON-AMBIGUOUS half of that promise: a criteria that literally embeds a Layout pointer line
+  # (`Brief:`/`Criteria: <ref> @ <sha>`) is a delegation, refused loudly at authoring where the arch
+  # can still inline what it meant.
+  #
+  # ⚠ WHAT THIS DOES NOT CATCH, stated: a PROSE reference ("voir les 8 critères de spec.md") is not
+  # a machine pointer and cannot be told from a criterion that merely mentions a doc as context.
+  # Fuzzy detection there would fail-close legitimate criteria. That half is the authoring
+  # discipline's — and the split itself (a criteria is now its own authored artefact, the tool says
+  # "self-contained") is what pushes toward it. The wall bites the form it can prove, not the form it
+  # would have to guess.
+  defp refuse_pointing_criteria(criteria) when is_binary(criteria) and criteria != "" do
+    cond do
+      match?({:ok, _}, Fleet.Layout.parse_brief_pointer(criteria)) ->
+        {:error, {:criteria_not_self_contained, :embeds_brief_pointer}}
+
+      match?({:ok, _}, Fleet.Layout.parse_criteria_pointer(criteria)) ->
+        {:error, {:criteria_not_self_contained, :embeds_criteria_pointer}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp refuse_pointing_criteria(_), do: :ok
 
   # ── the user LOT ───────────────────────────────────────────────────────────────────────────
   # The brief is the TASK; the lot is the MATTER it works on — several docs, a directory, images,
