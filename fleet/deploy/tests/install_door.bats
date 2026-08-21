@@ -19,6 +19,20 @@
 # Sans lui, on est sur le substrat reel de la machine qui joue les tests.
 
 setup() {
+  # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT, PAS SEULEMENT LE PATH — ET CE FICHIER L'A APPRIS EN SE
+  # TROMPANT LUI-MEME. Le 2026-08-21, le temoin « SANS le drapeau, linux natif refuse » est tombe
+  # ROUGE pendant une install a froid : le gate tourne DANS `provision apply`, qui tourne DANS
+  # `install.sh`, qui exporte `LCARS_ALLOW_ANY_HOST=1` a travers son escalade sudo. La porte
+  # acceptait donc, correctement, et le temoin mesurait l'intention de l'operateur au lieu du code.
+  #
+  # C'est la meme faute que celle corrigee le matin meme dans `provision_runner.bats`, re-ecrite le
+  # soir dans un fichier voisin. La regle qui la ferme : un temoin qui juge ce qu'un script fait
+  # d'un environnement DONNE doit POSER cet environnement, jamais l'heriter — et il efface la
+  # FAMILLE, pas les noms qu'il connait, sinon le prochain drapeau rouvre le trou en silence.
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+
   REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   SRC="$REPO/install.sh"
 
@@ -39,6 +53,7 @@ setup() {
   export PROV_DOCKER_BIN="$BINDIR/docker"
   unset FORGE_BASE_URL
 }
+
 
 @test "l'aide marche SANS docker — un --help qui exige l'outil qu'il documente est une porte fermee" {
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help

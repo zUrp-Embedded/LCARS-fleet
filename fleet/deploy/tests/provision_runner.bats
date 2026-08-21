@@ -236,6 +236,36 @@ EOF
   [[ "$output" == *"échecs: 1"* ]]
 }
 
+@test "le RESUME ne dit jamais « rien n'est cassé » quand quelque chose est casse" {
+  # LE CODE DE RETOUR ETAIT DEJA JUSTE, ET C'EST CE QUI REND LA FAUTE CHERE : rien n'echouait,
+  # aucun temoin ne rougissait, et seul un humain qui lit la FIN se faisait une idee fausse de
+  # l'etat de sa machine. La phrase rassurante sortait des qu'il y avait du drift, echecs compris.
+  #
+  # Mesure du 2026-08-21, install a froid sur machine dediee : « conformes/convergés: 8 · drift: 4
+  # · échecs: 3 » suivi de « APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU … Rien n'est cassé ». La
+  # derniere ligne lue est celle qui reste.
+  lib_module 40-failstub  'p_fail "quelque chose est casse"'
+  lib_module 50-driftstub 'p_drift "et un geste manque"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"échecs: 1"* ]]
+  [[ "$output" == *"drift: 1"* ]]
+  [[ "$output" == *"EN ÉCHEC"* ]]
+  [[ "$output" != *"Rien n'est cassé"* ]]
+}
+
+@test "TEMOIN — sans echec, la phrase rassurante revient : c'est bien le drift qu'elle decrit" {
+  # Sans ce pendant, un correctif qui supprimerait la phrase en toutes circonstances passerait le
+  # temoin ci-dessus (P-40), et un drift pur perdrait le seul message qui dit ce qu'il faut faire.
+  lib_module 50-driftstub 'p_drift "un geste manque"'
+  run "$SANDBOX/provision" apply --substrate docker
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Rien n'est cassé"* ]]
+  [[ "$output" != *"EN ÉCHEC"* ]]
+}
+
 @test "6-101: TEMOIN — un apply reellement convergé rend toujours 0" {
   # Sans lui, un runner qui rendrait 2 en toutes circonstances passerait les tests ci-dessus, et
   # chaque boot de conteneur annoncerait un drift qui n'existe pas.

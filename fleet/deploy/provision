@@ -325,7 +325,20 @@ else
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
   fi
-  if [[ "$CMD" == "apply" && "$drift" -gt 0 ]]; then
+  # ⚠ « RIEN N'EST CASSÉ » NE SE DIT QUE QUAND RIEN N'EST CASSÉ. Cette phrase sortait dès qu'il y
+  # avait du drift, ÉCHECS COMPRIS — donc la dernière ligne lue par l'opérateur rassurait pendant
+  # que trois modules venaient d'imprimer FAIL et que le code de sortie disait 1. Mesuré le
+  # 2026-08-21, install à froid sur machine dédiée : « échecs: 3 » puis « Rien n'est cassé ».
+  #
+  # Le code de retour, lui, était déjà juste. C'est exactement ce qui rend la faute chère : rien
+  # n'échoue, aucun test ne rougit, et seul un humain qui lit la fin se fait une idée fausse de
+  # l'état de sa machine. L'échec passe DEVANT, parce qu'il prime — un état-cible non tenu sur un
+  # module qui a échoué n'est pas « un geste qui manque », c'est une conséquence.
+  if [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
+    echo "  ${_PR}→ EN ÉCHEC${_PN} sur $failed module(s) — voir les lignes FAIL ci-dessus."
+    [[ "$drift" -gt 0 ]] && \
+      echo "    ($drift autre(s) module(s) en DRIFT : état-cible non tenu, souvent en conséquence.)"
+  elif [[ "$CMD" == "apply" && "$drift" -gt 0 ]]; then
     echo "  ${_PA}→ APPLIQUÉ, MAIS L'ÉTAT-CIBLE N'EST PAS TENU${_PN} sur $drift module(s) — voir les lignes"
     echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
   fi
