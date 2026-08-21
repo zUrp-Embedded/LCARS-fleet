@@ -122,6 +122,67 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # defers: no over-fixing.
       assert {:ok, _brief, "judge"} = build(_issue: {:ok, %{"number" => 42}})
     end
+
+    @tag :tmp_dir
+    test "the judge's criterion is the CRITERIA doc, not the brief, when both are pointed",
+         %{tmp_dir: tmp} do
+      # The bench bug, closed: a single brief used to serve both consumers, so the judge got the
+      # producer's procedural order. Here the ticket points at BOTH a brief and a criteria; the
+      # judge must resolve the CRITERIA (gate-briefs/), never the brief (briefs/).
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(Path.join(work_dir, "briefs"))
+      File.mkdir_p!(Path.join(work_dir, "gate-briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "briefs", "issue-42-engineer.md"]), "PROCEDURAL-BRIEF")
+
+      File.write!(
+        Path.join([work_dir, "gate-briefs", "issue-42-reviewer.md"]),
+        "ATTENDU-CRITERIA"
+      )
+
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "docs"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", sha) <>
+          "\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
+
+      assert {:ok, brief, "judge"} =
+               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+
+      assert brief =~ "ATTENDU-CRITERIA"
+      refute brief =~ "PROCEDURAL-BRIEF"
+
+      # And it cites the criteria's version, not the brief's (same sha here, but the CITED ref is the
+      # criteria doc — the address of what was actually judged).
+      assert brief =~ "gate-briefs/issue-42-reviewer.md"
+    end
+
+    @tag :tmp_dir
+    test "no criteria pointer → the judge falls back to the brief (no regression)",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(Path.join(work_dir, "briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "H"])
+      File.write!(Path.join([work_dir, "briefs", "issue-42-engineer.md"]), "BRIEF-ONLY-CRITERION")
+      {_, 0} = System.cmd("git", ["-C", work_dir, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", work_dir, "commit", "-q", "-m", "brief"])
+      {sha, 0} = System.cmd("git", ["-C", work_dir, "rev-parse", "HEAD"])
+
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", String.trim(sha))
+
+      assert {:ok, brief, "judge"} = build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+      assert brief =~ "BRIEF-ONLY-CRITERION"
+    end
   end
 
   describe "build_brief — deliverable-judge, PREDECESSOR read (F-C083, l'autre moitié)" do

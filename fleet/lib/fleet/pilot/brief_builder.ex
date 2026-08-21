@@ -365,6 +365,42 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
+  # THE JUDGE'S CRITERION IS THE CRITERIA DOC, NOT THE BRIEF — and that is the whole fix. A single
+  # authored brief used to serve both the producer and the judge, so the judge received the
+  # producer's PROCEDURAL order, which may reference the workshop the judge does not mount. The arch
+  # now authors a separate `criteria` (declarative, self-contained), pointed to by `Criteria:`.
+  #
+  # When that pointer is present, the judge's criterion is the criteria doc, resolved and pinned —
+  # written into `_brief_source` so `judge_criterion/1` renders it and cites ITS sha, unchanged.
+  # Absent (an old ticket, a workshop ticket, a degraded materialize) → the judge falls back to the
+  # brief, exactly as before: no regression, the split is additive at the consumer.
+  #
+  # Read-error fail-closes (`criterion_unavailable`) — a judge without its criterion approves, the
+  # false GREEN this rail refuses everywhere.
+  defp resolve_judge_criterion(issue, repo, opts) do
+    case Fleet.Layout.parse_criteria_pointer(issue["body"]) do
+      {:ok, {ref, sha}} ->
+        case Fleet.Workflow.BriefArtifact.resolve(
+               repo,
+               ref,
+               sha,
+               Keyword.take(opts, [:ops_root])
+             ) do
+          {:ok, content} ->
+            {:ok, issue |> Map.put("body", content) |> Map.put("_brief_source", {ref, sha})}
+
+          {:error, reason} ->
+            {:error, {:criterion_unavailable, {:criteria_pointer, reason}}}
+        end
+
+      :none ->
+        resolve_issue_brief(issue, repo, opts)
+
+      {:error, reason} ->
+        {:error, {:criterion_unavailable, {:criteria_pointer, reason}}}
+    end
+  end
+
   defp build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
     with {:ok, outputs} <- judge_outputs(forge, repo, number, forge_opts) do
       step_judge_brief(
@@ -583,8 +619,10 @@ defmodule Fleet.Pilot.BriefBuilder do
     case forge.get_issue(repo, number, forge_opts) do
       {:ok, issue} ->
         # The criterion goes through the SAME pointer resolution as the dispatch entry (E4):
-        # a pointer-ticket's criterion is the PINNED doc, never the pointer line itself.
-        with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
+        # a pointer-ticket's criterion is the PINNED doc, never the pointer line itself. The judge
+        # prefers the `Criteria:` doc (self-contained, authored for it); it falls back to the brief
+        # only when no criteria was authored.
+        with {:ok, issue} <- resolve_judge_criterion(issue, repo, opts) do
           {:ok,
            Fleet.Workflow.GateBrief.build(%{
              step: step,
