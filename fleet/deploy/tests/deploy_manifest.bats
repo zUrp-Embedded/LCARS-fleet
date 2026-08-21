@@ -108,9 +108,12 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   PKG="$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"
   [ -f "$DOCKERFILE" ] && [ -f "$MOD" ] && [ -f "$PKG" ]
 
-  # ce que le rail natif installe : les paquets runtime + l'outillage du gate
-  runtime="$(sed -n 's/^PACKAGES=(\(.*\))$/\1/p' "$PKG")"
-  gate="$(sed -n 's/^  GATE_PACKAGES=(\(.*\))$/\1/p' "$MOD")"
+  # ce que le rail natif installe : les paquets runtime + l'outillage du gate.
+  # ⚠ L'EXTRACTION SUIT LE TABLEAU SUR PLUSIEURS LIGNES. Elle lisait `^PACKAGES=(…)$` — donc une
+  # seule ligne — et rendait du VIDE des que la liste s'aerait. Un temoin qui rend du vide ne
+  # compare rien, et `[ -n ]` etait la seule chose qui l'empechait de passer sur une liste absente.
+  runtime="$(native_list 'PACKAGES' "$PKG")"
+  gate="$(native_list 'GATE_PACKAGES' "$MOD")"
   [ -n "$runtime" ]
   [ -n "$gate" ]
 
@@ -119,6 +122,77 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
     grep -q -- " $p " "$DOCKERFILE" || grep -q -- " $p\\\\" "$DOCKERFILE" || {
       echo "paquet '$p' absent du stage build du Dockerfile" >&2; false; }
   done
+}
+
+# ─── ET DANS L'AUTRE SENS, QUI EST CELUI QUI A COUTE ────────────────────────────────────────────
+#
+# Le temoin ci-dessus ne verifie qu'une direction : tout paquet natif est dans l'image. L'inverse —
+# tout paquet du RUNTIME de l'image est sur le rail natif — n'etait verifie par personne, et c'est
+# par la que sont passes `socat` et TOUT le socle d'outillage des pods.
+#
+# MESURE DU 2026-08-21, poste natif installe a froid : `socat` absent, donc
+# `bwrap_launch.sh:478` refuse (exit 2), donc le warden respawne le pod permanent cinq fois puis
+# abandonne — AUCUN pod ne peut naitre. Sur une installation dont les 23 modules etaient verts.
+# Et derriere : ni gcc, ni make, ni pip, ni venv. Le produit livrait des pods infirmes.
+#
+# ⚠ LES EXEMPTIONS SE NOMMENT UNE PAR UNE, AVEC LEUR RAISON. Une liste d'exclusion sans motif
+# devient l'endroit ou l'on range ce qu'on n'a pas envie de traiter.
+
+# ⚠ LES COMMENTAIRES SE RETIRENT AVANT DE CHERCHER LA BORNE, ET C'EST TOUT LE PIEGE. Le depot porte
+# les DEUX formes — un tableau sur une ligne (`GATE_PACKAGES=(a b c)`) et un tableau aere avec des
+# commentaires entre les noms. Avec `/^)/` comme borne, la forme d'une ligne ne fermait jamais la
+# plage et sed rapportait du CODE comme des paquets (« paquet 'apt_ensure' absent du Dockerfile ») ;
+# avec `/)/`, un commentaire contenant « (lot 1 du rail toolchain) » la fermait trop tot. Une
+# machine a etats sur les lignes DECOMMENTEES repond juste sur les deux.
+native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, commentaires retires
+  awk -v n="$1" '
+    !inside && $0 ~ "^[[:space:]]*" n "=\\(" { inside = 1; sub("^[[:space:]]*" n "=\\(", "") }
+    inside {
+      line = $0
+      sub(/#.*/, "", line)
+      if (line ~ /\)[[:space:]]*$/) { sub(/\)[[:space:]]*$/, "", line); print line; exit }
+      print line
+    }
+  ' "$2" | tr '\n' ' '
+}
+
+@test "tout paquet du RUNTIME de l'image est sur le rail natif — l'autre sens, celui qui a coute" {
+  DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  PKG="$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"
+  MOD="$BATS_TEST_DIRNAME/../modules.d/60-deploy.sh"
+
+  # Le stage RUNTIME seul : celui qui decrit la boite livree, pas l'atelier de build.
+  local image
+  image="$(sed -n '/^FROM ${RUNTIME_IMAGE} AS runtime/,/^COPY --from=build/p' "$DOCKERFILE" \
+    | sed -n '/apt-get install/,/rm -rf \/var\/lib\/apt/p' \
+    | grep -vE '^\s*`#' \
+    | tr ' \\' '\n\n' \
+    | grep -vE '^$|apt-get|install|-y|--no-install-recommends|DEBIAN_FRONTEND|&&|^rm$|-rf|/var/lib/apt' \
+    | sort -u)"
+  [ -n "$image" ]
+
+  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") $(native_list 'GATE_PACKAGES' "$MOD") "
+
+  # Ce que l'image seule a le droit de porter, et POURQUOI :
+  #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
+  #   openssh-server  — la porte d'admin de la BOITE. Sur un poste, l'acces reseau appartient a son
+  #                     proprietaire : l'operateur est deja connecte quand ce rail tourne, et lui
+  #                     ouvrir un sshd serait decider de son exposition a sa place.
+  local exempt=" tini openssh-server "
+
+  local miss=""
+  for p in $image; do
+    [[ "$exempt" == *" $p "* ]] && continue
+    [[ "$native" == *" $p "* ]] || miss="$miss $p"
+  done
+  [ -z "$miss" ] || { echo "paquets du runtime de l'image ABSENTS du rail natif :$miss" >&2; false; }
+}
+
+@test "les exemptions sont NOMMEES dans le temoin, pas glissees dans une liste" {
+  # Une exclusion sans motif ecrit devient l'endroit ou l'on range ce qu'on ne veut pas traiter.
+  local f="$BATS_TEST_DIRNAME/deploy_manifest.bats"
+  grep -q 'tini *— PID 1' "$f"
+  grep -q 'openssh-server *— la porte' "$f"
 }
 
 @test "le gate a bien ses trois outils nommes — un ajout silencieux ne passe pas" {

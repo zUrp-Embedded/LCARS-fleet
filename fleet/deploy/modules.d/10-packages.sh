@@ -16,6 +16,18 @@
 #   curl, jq    — clients HTTP forge + parse JSON (deps dures des scripts bin/ et etc/)
 #   unzip       — dépose du précompilé Elixir (module 15-toolchain)
 #   ca-certificates — TLS sortant (installer claude, forge https éventuelle)
+#   socat       — LE RELAIS D'EGRESS DU POD, et il est load-bearing : le sanctuaire n'a AUCUN
+#                 namespace réseau, donc `localhost:<port>` n'existe DANS le bac que parce que socat
+#                 y écoute et porte le flux vers la socket unix du proxy CONNECT. Absent, le pod est
+#                 scellé et `bwrap_launch.sh:478` REFUSE — « the pod would be sealed with no way to
+#                 reach its vendor », exit 2.
+#
+#                 ⚠ MESURE DU 2026-08-21, POSTE NATIF INSTALLÉ À FROID : la fleet démarre, le BEAM
+#                 vit, les credentials sont là — et AUCUN pod ne naît. Le warden respawne le pod
+#                 permanent `starfleet` cinq fois (5 s, 10 s, 20 s, 40 s, 80 s) puis abandonne, avec
+#                 pour seule trace « exited before submitting result (exit=2) ». Le produit était
+#                 mort dans sa fonction centrale, sur une installation dont les 23 modules étaient
+#                 verts, parce qu'un paquet que SEUL le Dockerfile posait manquait.
 #   git-filter-repo — la réécriture d'historique de `bin/publish-transform.sh` : le script la
 #                     REFUSE si elle est absente (exit 1) et imprime une recette de venv à taper.
 #                     Une dépendance qu'on sait nommer est une dépendance qu'on installe.
@@ -51,7 +63,35 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates python3 git-filter-repo gh)
+PACKAGES=(
+  tmux bubblewrap git curl jq unzip ca-certificates python3 socat
+  git-filter-repo gh
+  # ─── LE SOCLE D'OUTILLAGE DES PODS (lot 1 du rail toolchain) ─────────────────────────────────
+  # ⚠ IL N'ÉTAIT QUE DANS L'IMAGE, ET LE RAIL POSTE LIVRAIT DONC DES PODS INFIRMES. Le Dockerfile
+  # dit le coût : « sans ces paquets un pod ne produit que du bash, du HTML et du python NU : ni
+  # venv, ni pip, ni compilateur. Chaque dépendance de projet devrait alors passer par une
+  # approbation humaine — six mois à faire signer ce qui aurait dû être dans l'image. »
+  #
+  # `python3-venv` N'EST PAS UN CONFORT : PEP 668 est ACTIF (les stdlib Debian/Ubuntu livrent
+  # `EXTERNALLY-MANAGED`), donc un `pip install` hors venv ÉCHOUE PAR CONCEPTION. `python3-pip`
+  # seul ne suffit pas.
+  #
+  # build-essential + python3-dev + pkg-config + libssl-dev sont pour la QUEUE : la plupart des
+  # paquets python populaires livrent des wheels manylinux et ne compilent rien ; ceux qui restent
+  # compilent des extensions C, les modules npm natifs veulent node-gyp, et les crates rust en
+  # `-sys` veulent cc + pkg-config + le `-dev` de la lib C visée.
+  build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip
+  # ─── ET CE QUI EST PRÉSENT PAR CHANCE N'EST PAS PRÉSENT PAR LE RAIL ──────────────────────────
+  # Mesuré le 2026-08-21 sur une Ubuntu Server 26.04 fraîche : les quatre ci-dessous étaient déjà
+  # là, par défaut de la distribution. Aucun ne l'est par contrat, et deux sont load-bearing :
+  #   · `util-linux-extra` fournit `setpriv` — TOUTE la console en dépend (`console.sh`,
+  #     `console-landing.sh`), et une image minimale ne l'a pas ;
+  #   · `sudo` est ce que la règle étroite de `45-sudoers-toolchain` désigne — sans lui, ce module
+  #     écrit une permission que personne ne peut exercer.
+  # `less` et `bash-completion` sont du confort de shell, et ils sont dans l'image : les garder
+  # alignés coûte deux mots et évite deux consoles qui ne se comportent pas pareil.
+  util-linux-extra sudo less bash-completion
+)
 
 # ─── CE QUE SEUL LE LINUX NATIF DOIT SE FAIRE POSER ─────────────────────────────────────────────
 #
