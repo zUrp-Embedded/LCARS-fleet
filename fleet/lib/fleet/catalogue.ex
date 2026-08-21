@@ -286,6 +286,17 @@ defmodule Fleet.Catalogue do
   @bundled_name "fleet"
 
   @doc """
+  The name the catalogue shipped inside the release declares.
+
+  PUBLIC because a second site needs it — `Fleet.Application.CatalogueLifecycle` had its own
+  `@bundled "fleet"`, and two literals for one fact drift the day one of them is changed. The name
+  is load-bearing beyond this module: it is the forge ORG that carries the reference catalogue's
+  projects, so it cannot be installed FROM the forge and no deposit can ever claim it.
+  """
+  @spec bundled_name() :: String.t()
+  def bundled_name, do: @bundled_name
+
+  @doc """
   The INSTALLED catalogues, as roots — `#{@bundled_name}` first, then the material present on this
   box, by name.
 

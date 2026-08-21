@@ -101,6 +101,26 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
     "${fun}(${arg})"
 fi
 
+# `catalogue-root` : OU LE RELEASE PORTE SON CATALOGUE DE REFERENCE. Une ligne, un chemin.
+#
+# Il existe pour que personne ne RECOMPOSE ce chemin. Il vit dans le release, sous un repertoire qui
+# porte la VERSION (`lib/lcars_fleet-<vsn>/priv/catalogue`) : un appelant shell qui le globberait
+# marcherait jusqu'au jour ou la disposition du release change, et casserait alors en silence sur
+# un glob vide. Le release est l'autorite de sa propre disposition, et c'est lui qu'on interroge.
+#
+# Meme porte outil que `verify` et `roles` — meme eval, meme `nobody`, meme `LCARS_TOOL_EVAL`.
+#
+# ⚠ CE DRAPEAU SAUTE LE CORPS DE CONFIG DE DEPLOIEMENT, donc un `LCARS_CATALOGUE_ROOT` pose par
+# l'operateur n'est PAS lu ici — et c'est ce qu'on veut. Cette porte repond « le catalogue que CE
+# RELEASE porte », pas « celui que cette boite sert ». C'est le premier qu'on publie sur la forge :
+# la reference, celle qu'on forke, pas la variante locale de quelqu'un.
+if [[ "${1:-}" == "catalogue-root" ]]; then
+  drop_priv \
+    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    'IO.puts(Fleet.Catalogue.root())'
+fi
+
 # `forge-apply` : LA STRUCTURE DE LA FORGE, POSEE PAR UN RUN TRANSITOIRE ─────────────────────────
 #
 # Meme geste que `docker.sh forge-apply`, mais SANS boite vivante : `docker run --rm <image>

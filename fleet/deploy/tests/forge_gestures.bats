@@ -447,6 +447,9 @@ FAKE
   setup_install
   demo="$BATS_TEST_TMPDIR/web-demo"
   mkdir -p "$demo"
+  # Le manifeste est ce qui donne son NOM au depot : sans lui le geste s'arrete avant meme de
+  # chercher le master, et ce temoin passerait sur un refus qui n'est pas le sien.
+  printf 'api_version: 1\nname: web-demo\n' > "$demo/catalogue.yaml"
   : > "$BATS_TEST_TMPDIR/master.out"
 
   LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
@@ -464,6 +467,57 @@ FAKE
   LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/pas-de-demo" run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
   [[ "$output" != *"demonstration"* ]]
+}
+
+@test "apply: le catalogue de REFERENCE est depose aussi, au meme endroit" {
+  # ⚖ user, 2026-08-21 : « il faut republier le catalogue de base fleet ». Il vit dans le release et
+  # tourne sans la forge ; ce qu'il gagne a y etre est la LISIBILITE — on ne forke pas ce qu'on ne
+  # peut pas ouvrir. Il reste NON installable pour autant : `CatalogueDeposits` ecarte toute
+  # candidature portant le nom du catalogue livre.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nname: fleet\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q 'push .*le-master/fleet' "$GIT_LOG"
+}
+
+@test "apply: le nom du depot vient du MANIFESTE, jamais du repertoire" {
+  # Un arbre range sous un nom et qui en declare un autre serait pousse sous le nom du repertoire, et
+  # n'apparaitrait JAMAIS dans « catalogue list » — qui indexe par identite declaree. Le depot serait
+  # la, visible sur la forge, et introuvable par la commande faite pour le trouver.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/un-repertoire-mal-nomme"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nname: le-vrai-nom\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q 'push .*le-master/le-vrai-nom' "$GIT_LOG"
+  [[ "$(cat "$GIT_LOG")" != *un-repertoire-mal-nomme* ]]
+}
+
+@test "apply: un arbre SANS \`name:\` en colonne zero n'est pas depose, et le refus le DIT" {
+  # ⚠ COLONNE ZERO, la meme regle qu'en Elixir et pour la meme raison : en YAML un `name:` INDENTE
+  # appartient a la cle du dessus. Un `name:` sous `roles:` declare un ROLE, et le prendre pour
+  # l'identite du catalogue deposerait le catalogue sous le nom d'un de ses roles.
+  setup_install
+  ref="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$ref"
+  printf 'api_version: 1\nroles:\n  name: dev\n' > "$ref/catalogue.yaml"
+  echo "le-master" > "$BATS_TEST_TMPDIR/master.out"
+
+  LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
+    run bash -c "'$SCRIPT' apply < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ne declare pas de"* ]]
+  [ ! -s "$GIT_LOG" ]
 }
 
 @test "runner-token: imprime le jeton et RIEN d'autre sur stdout" {

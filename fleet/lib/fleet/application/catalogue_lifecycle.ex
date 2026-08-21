@@ -28,7 +28,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## The reference catalogue is installed by construction
 
-  `#{"fleet"}` ships inside the release. The box can serve it without asking anybody, so its state
+  `fleet` ships inside the release. The box can serve it without asking anybody, so its state
   is not a forge question — and answering "available" for it, on a forge that carries no
   `fleet/_catalogue`, would be a lie about the only catalogue that always works.
 
@@ -43,7 +43,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   alias Fleet.Application.CatalogueDeposits
 
-  @bundled "fleet"
+  @bundled Fleet.Catalogue.bundled_name()
 
   @type state :: :installed | :available
   @type entry :: %{

@@ -158,6 +158,57 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     end
   end
 
+  describe "le nom du catalogue LIVRE n'est jamais une candidature" do
+    test "un depot qui declare `fleet` n'entre pas dans la liste" do
+      # La fleet publie sa propre reference sur la forge pour qu'elle soit lisible et forkable. Ce
+      # depot ne peut pas etre installe — le livre l'est deja, par construction.
+      assert {:ok, found} =
+               list(
+                 [repo("admiral/fleet"), repo("alice/mob")],
+                 %{"admiral/fleet" => "name: fleet\n", "alice/mob" => "name: mobile\n"},
+                 %{{"admiral/fleet", "main"} => "s1", {"alice/mob", "main"} => "s2"}
+               )
+
+      assert Map.keys(found) == ["mobile"]
+    end
+
+    test "⚠ ET SON FORK NON PLUS — sinon le premier fork casse `catalogue list` pour tout le monde" do
+      # LE TEMOIN QUI JUSTIFIE LA CLAUSE. Deux depots du meme nom rendent
+      # `{:duplicate_catalogues, ...}`, et cette porte-la refuse la liste ENTIERE — pas la ligne
+      # fautive. Publier un objet fait pour etre forke, sans cette clause, arme la casse de toute la
+      # boite au premier fork qui garde son manifeste tel quel.
+      assert {:ok, found} =
+               list(
+                 [repo("admiral/fleet"), repo("bob/fleet-fork"), repo("alice/mob")],
+                 %{
+                   "admiral/fleet" => "name: fleet\n",
+                   "bob/fleet-fork" => "name: fleet\n",
+                   "alice/mob" => "name: mobile\n"
+                 },
+                 # ⚠ LES DEUX PORTENT LEUR SHA. Sans celui du fork, il tomberait sur une tete illisible
+                 # et ce temoin passerait pour la mauvaise raison — vert avec la clause retiree.
+                 %{
+                   {"admiral/fleet", "main"} => "s1",
+                   {"bob/fleet-fork", "main"} => "s3",
+                   {"alice/mob", "main"} => "s2"
+                 }
+               )
+
+      assert Map.keys(found) == ["mobile"]
+    end
+
+    test "TEMOIN de non-vacuite : un depot qui declare AUTRE CHOSE entre normalement" do
+      assert {:ok, found} =
+               list(
+                 [repo("admiral/fleet")],
+                 %{"admiral/fleet" => "name: fleet-bis\n"},
+                 %{{"admiral/fleet", "main"} => "s1"}
+               )
+
+      assert %{"fleet-bis" => %{repo: "admiral/fleet"}} = found
+    end
+  end
+
   test "un depot VIDE est ecarte — il ne peut rien porter" do
     assert {:ok, %{}} == list([repo("alice/vide", %{"empty" => true})])
   end

@@ -160,16 +160,42 @@ defmodule Fleet.Application.CatalogueDeposits do
   defp identify(name, repo, full, branch, repo_mod, opts) do
     # Exclure un store est le fonctionnement normal, pas une erreur : SILENCIEUX. Une ligne par
     # catalogue installe a chaque listage serait du bruit qui apprend a l'operateur a sauter le log.
-    if owner_of(full) == name do
-      [{:store, name, repo}]
-    else
-      case repo_mod.branch_head(full, branch, opts) do
-        {:ok, sha} ->
-          [{:deposit, %{name: name, repo: full, owner: owner_of(full), branch: branch, sha: sha}}]
+    cond do
+      owner_of(full) == name ->
+        [{:store, name, repo}]
 
-        {:error, reason} ->
-          unreadable(full, reason)
-      end
+      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et depuis le 2026-08-21 il
+      # existe un depot qui le porte : la fleet publie sa propre reference sur la forge, pour qu'elle
+      # soit LISIBLE et FORKABLE. Sans cette clause, ce depot serait un candidat de plus nomme
+      # `fleet` — et le premier fork qui garde son manifeste tel quel en ferait DEUX, donc
+      # `{:duplicate_catalogues, ...}`, donc `catalogue list` refusant la liste ENTIERE pour tout le
+      # monde. Un objet publie pour etre forke ne doit pas casser la boite au premier fork.
+      #
+      # Ce n'est pas un cas particulier concede : ce nom ne peut structurellement pas etre installe
+      # depuis la forge (`CatalogueLifecycle.eval_source/1` rend BUNDLED), donc un depot qui le
+      # revendique n'est candidat a rien. Et c'est DIT — une candidature ecartee en silence est le
+      # defaut que ce module vient de fermer un cran plus haut.
+      name == Fleet.Catalogue.bundled_name() ->
+        Logger.info(
+          "CatalogueDeposits: #{full} declares '#{name}', the catalogue carried by the release. It " <>
+            "is installed by construction, so no deposit can be installed under that name — this " <>
+            "repo is here to be READ and FORKED. A fork meant to be installed changes `name:` in " <>
+            "its #{@manifest}."
+        )
+
+        []
+
+      true ->
+        case repo_mod.branch_head(full, branch, opts) do
+          {:ok, sha} ->
+            [
+              {:deposit,
+               %{name: name, repo: full, owner: owner_of(full), branch: branch, sha: sha}}
+            ]
+
+          {:error, reason} ->
+            unreadable(full, reason)
+        end
     end
   end
 

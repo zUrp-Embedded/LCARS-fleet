@@ -332,7 +332,8 @@ cmd_apply() {
 
   demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"
 
-  seed_demo_catalogue "$tok"
+  seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
+  seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
 }
 
 # ─── LA DEMO, DEPOSEE CHEZ LE MASTER ────────────────────────────────────────────────────────────
@@ -354,11 +355,61 @@ cmd_apply() {
 # un deploiement casse.
 DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"
 
-seed_demo_catalogue() { # $1=jeton master
-  local tok="$1"
-  [[ -d "$DEMO_CATALOGUE" ]] || return 0
+# ─── LA REFERENCE, DEPOSEE AU MEME ENDROIT ──────────────────────────────────────────────────────
+# ⚖ user, 2026-08-21 : « il FAUT garder le catalogue dispo et visible sur la forge », « il faut
+# republier le catalogue de base `fleet` ».
+#
+# Le catalogue metier de reference vit DANS LE RELEASE, pas dans `catalogues/` : il est installe par
+# construction et n'a jamais eu besoin d'etre sur la forge pour tourner. Ce qu'il gagne a y etre est
+# la LISIBILITE — on ne forke pas ce qu'on ne peut pas ouvrir, et faire son propre catalogue commence
+# par lire celui qui marche.
+#
+# ⚠ IL NE DEVIENT PAS INSTALLABLE POUR AUTANT, et la liste le sait : `CatalogueDeposits` ecarte toute
+# candidature portant le nom du catalogue livre. Sans cette clause, ce depot serait un candidat de
+# plus sous ce nom — et le premier fork qui garde son manifeste tel quel en ferait deux, donc
+# `catalogue list` refusant la liste ENTIERE. Publier un objet fait pour etre forke ne doit pas armer
+# la casse au premier fork.
+#
+# LE CHEMIN SE DEMANDE AU RELEASE (`$ENTRYPOINT catalogue-root`) et ne se recompose pas : il porte la
+# VERSION du release, donc tout glob ecrit ici marcherait jusqu'a la premiere reorganisation, puis
+# echouerait en silence sur un glob vide.
+REFERENCE_CATALOGUE="${LCARS_REFERENCE_CATALOGUE:-}"
 
-  local name; name="$(basename "$DEMO_CATALOGUE")"
+reference_catalogue_root() {
+  [[ -n "$REFERENCE_CATALOGUE" ]] && { printf '%s' "$REFERENCE_CATALOGUE"; return 0; }
+
+  local root
+  root="$("$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
+  if [[ -z "$root" || ! -d "$root" ]]; then
+    # Un refus MUET ferait croire a une image sans reference — or elle en porte toujours une.
+    echo "forge-gestures: le release ne dit pas ou vit son catalogue de reference — NON depose" >&2
+    return 0
+  fi
+  printf '%s' "$root"
+}
+
+# ─── LE GESTE, POUR LES DEUX ────────────────────────────────────────────────────────────────────
+# Il etait ecrit pour la demo seule, et la reference l'a rejoint le 2026-08-21. Le PARAMETRER plutot
+# que le recopier n'est pas un gout : les deux depots ont exactement la meme semantique — projection
+# force-poussee chez `id = 1`, non fatale — et deux copies d'un meme geste divergent par la ligne
+# qu'on corrige d'un cote.
+#
+# LE NOM VIENT DU MANIFESTE, jamais du repertoire. Un arbre range sous `catalogues/web-demo` qui
+# declarerait `name: autre` serait pousse sous `web-demo` et n'apparaitrait JAMAIS dans
+# `catalogue list`, qui indexe par identite declaree. Meme regle qu'a l'install, meme colonne zero.
+seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message)
+  local tok="$1" tree="$2" kind="$3"
+  [[ -d "$tree" ]] || return 0
+
+  local name
+  name="$(awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
+                          sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' \
+          "$tree/catalogue.yaml" 2>/dev/null || true)"
+  if [[ -z "$name" ]]; then
+    echo "forge-gestures: $tree ne declare pas de \`name:\` en colonne zero — $kind NON depose" >&2
+    return 0
+  fi
+
   local master
   master="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
             | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
@@ -370,14 +421,14 @@ seed_demo_catalogue() { # $1=jeton master
     return 0
   fi
 
-  echo "forge-gestures: catalogue de demonstration ($name -> $master/$name)"
+  echo "forge-gestures: $kind ($name -> $master/$name)"
   printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
     | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
       -d "{\"name\":\"$name\",\"private\":false,\"auto_init\":false}" \
       "${FORGE_BASE_URL%/}/api/v1/user/repos" 2>/dev/null || true
 
   local stage; stage="$(mktemp -d)"
-  cp -r "$DEMO_CATALOGUE/." "$stage/"
+  cp -r "$tree/." "$stage/"
   rm -rf "$stage/.git"
   ( cd "$stage" \
     && git init -q -b main \
