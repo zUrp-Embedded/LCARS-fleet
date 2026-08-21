@@ -54,7 +54,12 @@ SH
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   # L'entree ANNONCEE. Les deux ecritures de la loopback sont semees par le module lui-meme.
   export PROV_DECK_ORIGINS="http://10.0.0.5:20999"
-  echo '{"client_id":"CID"}' > "$PROV_DECK_OIDC_FILE"
+  # ⚠ LA FIXTURE PORTE L'ÉTAT-CIBLE COMPLET, PAS SEULEMENT LE `client_id`. Ce module écrit AUSSI les
+  # deux adresses dans ce fichier, et tant qu'elles n'y étaient pas, ces témoins mesuraient une
+  # convergence partielle — celle-là même que la sonde du module oubliait (2026-08-21 : `public_url`
+  # resté sur la loopback alors que l'apply répondait « déjà posé et vivant »).
+  printf '{"client_id":"CID","public_url":"%s","internal_url":"%s"}\n' \
+    "$PROV_FORGE_PUBLIC_URL" "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
 }
 
 # Les retours que le module DOIT vouloir : la loopback dans ses DEUX ecritures, plus l'annoncee.
@@ -168,4 +173,41 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
     source '$head' >/dev/null 2>&1; callback_uris"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | tr ' ' '\n' | grep -c '192.0.2.7')" -eq 1 ]
+}
+
+# ─── LE FICHIER QU'ON ECRIT FAIT PARTIE DE L'ETAT-CIBLE ─────────────────────────────────────────
+#
+# La sonde ne comparait que la liste des retours enregistree chez Gitea. Les deux adresses que ce
+# module POSE dans le meme fichier n'etaient regardees par personne : une adresse publique qui change
+# ne convergeait jamais, et l'apply repondait « deja pose et vivant » sur un fichier devenu faux.
+#
+# Mesure du 2026-08-21 : `forge.public.url` arrive, `PROV_FORGE_PUBLIC_URL` devient
+# `http://10.42.0.63:3000`, apply rejoue → « deja pose et vivant », et `deck-oidc.json` porte toujours
+# `public_url: http://127.0.0.1:3000`. Le bouton d'identification envoyait le visiteur sur SA
+# loopback. C'est la sonde qui repondait a une question voisine : l'enregistrement chez Gitea — vrai —
+# au lieu de l'etat-cible entier.
+
+@test "check : une adresse PUBLIQUE perimee dans le fichier est un DRIFT" {
+  apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
+  printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
+    "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
+
+  run bash "$SUT" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"adresses du deck non convergées"* ]]
+  # les DEUX etats nommes cote a cote — le symptome vit dans un navigateur, a l'autre bout du rail
+  [[ "$output" == *"127.0.0.1:3000"* ]]
+  [[ "$output" == *"10.0.0.5:21000"* ]]
+}
+
+@test "apply : une adresse perimee REPOSE le client, meme si les retours sont convergés" {
+  apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
+  printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
+    "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
+
+  run bash "$SUT" apply
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"déjà posé et vivant"* ]]
+  run jq -r '.public_url' "$PROV_DECK_OIDC_FILE"
+  [ "$output" = "http://10.0.0.5:21000" ]
 }

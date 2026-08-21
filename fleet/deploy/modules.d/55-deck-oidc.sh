@@ -83,6 +83,15 @@ callback_uris() {
 
 forge_tok() { tr -d '[:space:]' < "$TOKEN_FILE" 2>/dev/null || true; }
 
+# LES DEUX ADRESSES DU FICHIER, COMPARÉES À CE QU'ON POSERAIT — une seule fonction pour le check et
+# pour l'apply, sinon les deux se répondraient différemment le jour où l'une dérive.
+addrs_converged() { # 0 si le fichier porte déjà les deux adresses voulues
+  local cur_pub cur_int
+  cur_pub="$(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
+  cur_int="$(jq -r '.internal_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
+  [[ "$cur_pub" == "${PROV_FORGE_PUBLIC_URL%/}" && "$cur_int" == "${PROV_FORGE_URL%/}" ]]
+}
+
 # Every call goes through here so the token is read once per call and never lands in a variable
 # that could be echoed by `set -x`.
 forge_api() { # forge_api <METHOD> <path> [json-body]
@@ -196,6 +205,24 @@ check() {
   if [[ -n "$PROV_FORGE_PUBLIC_URL" && "$PROV_FORGE_PUBLIC_URL" == *"://forge:"* ]]; then
     p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom de service docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
   fi
+  # ⚠ ET LE FICHIER QU'ON ÉCRIT SE SONDE AUSSI, PAS SEULEMENT CE QUE LA FORGE ENREGISTRE. Cette
+  # sonde ne comparait que la liste des retours ; `public_url` et `internal_url`, qu'elle POSE dans
+  # le même fichier, n'étaient regardés par personne. Une adresse publique qui change ne convergeait
+  # donc jamais — le module répondait « déjà posé et vivant », en toute bonne foi, sur un fichier
+  # devenu faux.
+  #
+  # MESURE DU 2026-08-21 : `forge.public.url` arrive, `PROV_FORGE_PUBLIC_URL` devient
+  # `http://10.42.0.63:3000`, apply rejoué → « client OAuth2 du deck déjà posé et vivant », et
+  # `deck-oidc.json` porte toujours `public_url: http://127.0.0.1:3000`. Le bouton d'identification
+  # continuait d'envoyer le visiteur sur SA propre loopback.
+  #
+  # C'est la faute que ce dépôt nomme « la sonde répond à une question voisine » : elle mesurait
+  # l'enregistrement chez Gitea — vrai — au lieu de l'état-cible complet, dont le fichier fait partie.
+  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && ! addrs_converged; then
+    # NOMMER LES DEUX ÉTATS, comme pour les listes de retours juste au-dessus : le symptôme vit dans
+    # un navigateur, à l'autre bout du rail, et sans les valeurs côte à côte personne ne fait le lien.
+    p_drift "adresses du deck non convergées — fichier : navigateur « $(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null)  » / serveur « $(jq -r '.internal_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null) » ; voulues : « ${PROV_FORGE_PUBLIC_URL%/} » / « ${PROV_FORGE_URL%/} » (apply les repose)"
+  fi
   verdict_check
 }
 
@@ -216,7 +243,12 @@ apply() {
   local uris body resp cid csec
   uris="$(callback_uris)"
 
-  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris"; then
+  # ⚠ « DÉJÀ POSÉ » DOIT COUVRIR TOUT L'ÉTAT-CIBLE, PAS SEULEMENT LA MOITIÉ ENREGISTRÉE CHEZ GITEA.
+  # Ce raccourci ne regardait que le client et ses retours ; les deux adresses que ce module ÉCRIT
+  # dans le même fichier n'entraient pas dans la comparaison, donc une adresse publique qui change
+  # ne convergeait jamais — l'apply répondait « déjà posé et vivant » sur un fichier devenu faux
+  # (mesuré le 2026-08-21 : `public_url` resté sur la loopback après l'arrivée de `forge.public.url`).
+  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris" && addrs_converged; then
     p_ok "client OAuth2 du deck déjà posé et vivant"
     verdict_apply
   fi
