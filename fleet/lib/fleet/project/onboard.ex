@@ -172,7 +172,7 @@ defmodule Fleet.Project.Onboard do
          :ok <- maybe_seed_protocol_labels(provision, full_name, opts),
          :ok <- clone_main(url, dirs.code),
          :ok <- maybe_scaffold_main(provision, dirs.code, name, opts),
-         :ok <- Fleet.Project.Intensity.write(dirs.code, opts),
+         :ok <- write_declaration(dirs.code, full_name, opts),
          :ok <- commit(dirs.code, onboard_commit_msg(provision)),
          :ok <- push(dirs.code, "main", false),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
@@ -1406,7 +1406,7 @@ defmodule Fleet.Project.Onboard do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- maybe_seed_protocol_labels(:bare, full_name, opts),
          :ok <- set_origin(dirs.code, url),
-         :ok <- ensure_intensity(dirs.code, opts),
+         :ok <- ensure_intensity(dirs.code, full_name, opts),
          :ok <- push(dirs.code, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
@@ -1454,16 +1454,48 @@ defmodule Fleet.Project.Onboard do
   # default-card jury in silence).
   defp ensure_intensity(
          proj_dir,
+         full_name,
          opts,
          msg \\ "chore(adopt): déclaration de criticité (.lcars.json)"
        ) do
     if File.exists?(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       :ok
     else
-      with :ok <- Fleet.Project.Intensity.write(proj_dir, opts) do
+      with :ok <- write_declaration(proj_dir, full_name, opts) do
         commit(proj_dir, msg)
       end
     end
+  end
+
+  # ─── LE DEPOT SE NOMME, IL NE SE DEDUIT PAS ─────────────────────────────────────────────────────
+  #
+  # L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. `Intensity.write/2` resout la carte
+  # declaree dans le catalogue DU PROJET, et il apprend lequel par `opts[:repo]`. Les quatre portes
+  # d'ecriture de ce module tenaient toutes `full_name` et aucune ne le passait : la carte se
+  # resolvait donc dans le catalogue RACINE, quel que soit celui du projet.
+  #
+  # MESURE DU 2026-08-20, transcript d'architecte : le guichet presente les cartes de `web-demo`,
+  # l'agent en choisit une, `project_create` refuse en enumerant les cartes de `fleet`. Deux lignes
+  # de journal, deux listes `available:` differentes pour un seul appel — le prefiltre `admit()`
+  # resolvait juste, l'ecriture resolvait ailleurs.
+  #
+  # ⚠ LE CAS LE PLUS NET EST `revise`, ET IL SE CONTREDISAIT DANS SA PROPRE CLAUSE `with` :
+  # `require_loadable_card(card, full_name, opts)` accepte la carte contre le catalogue du projet,
+  # puis `Intensity.write` la refuse en la cherchant dans un autre. Une porte qui valide et ecrit ne
+  # peut pas poser la question a deux catalogues.
+  #
+  # POURQUOI UN POSITIONNEL ET PAS UNE CLE : une cle optionnelle s'oublie, et son oubli est SILENCIEUX
+  # — c'est litteralement le defaut qu'on ferme ici, quatre fois de suite. `Intensity.write/2` ne
+  # peut pas l'exiger de son cote (38 appels legitimes la declarent sans, et prennent le catalogue
+  # racine a bon droit) ; ce module, lui, le peut, parce qu'ici l'ignorer est TOUJOURS un defaut.
+  # Le compilateur devient le garde : on ne peut plus ecrire une declaration depuis Onboard sans
+  # nommer le depot.
+  #
+  # ⚠ LA FUSION SE FAIT ICI ET APRES, jamais dans l'appelant : `revision_write_opts/2` reconstruit
+  # une liste NEUVE et jetterait un `repo:` pose en amont. Fusionne au dernier moment, il survit a
+  # tout ce que les appelants font de leurs options.
+  defp write_declaration(proj_dir, full_name, opts) do
+    Fleet.Project.Intensity.write(proj_dir, Keyword.put(opts, :repo, full_name))
   end
 
   defp adopt_face(:absent, url, dir, branch, template, name, opts) do
@@ -1606,7 +1638,7 @@ defmodule Fleet.Project.Onboard do
          # The commit message names the ACTUAL door: this leg is shared by the external import and
          # the deposit, and a deposit whose history says "import-externe" tells the project's own
          # log something that did not happen.
-         :ok <- ensure_intensity(scratch, opts, intensity_commit_message(opts)),
+         :ok <- ensure_intensity(scratch, full_name, opts, intensity_commit_message(opts)),
          :ok <- set_origin(scratch, forge_url),
          :ok <- push(scratch, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
@@ -1857,8 +1889,9 @@ defmodule Fleet.Project.Onboard do
       try do
         with :ok <- clone_main(url, scratch),
              :ok <-
-               Fleet.Project.Intensity.write(
+               write_declaration(
                  scratch,
+                 full_name,
                  revision_write_opts(opts, current_declaration(proj_dir))
                ),
              {:ok, :changed} <- revision_changed(scratch) do

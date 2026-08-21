@@ -316,6 +316,71 @@ defmodule Fleet.Project.IntensityTest do
       assert :ok = Fleet.Project.Intensity.declarable_card("commune", "bbb/un-projet", [])
     end
 
+    # ─── LE MEME AIGUILLAGE, MAIS PAR LA PORTE QUE LES APPELANTS EMPRUNTENT ─────────────────────
+    #
+    # Les trois tests ci-dessus interrogent `declarable_card/3`, ou le depot est un ARGUMENT qu'on ne
+    # peut pas omettre. `write/2`, lui, le lit dans ses options — et c'est cette lecture-la que les
+    # quatre portes d'`Onboard` ne nourrissaient pas. Epingler la resolution sur la fonction dont la
+    # signature protege deja l'appelant, c'est mesurer le cas qui ne casse jamais.
+    test "write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme" do
+      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      assert :ok =
+               Fleet.Project.Intensity.write(tmp,
+                 workflow_map: "propre-a-aaa",
+                 repo: "aaa/un-projet",
+                 onboarded_by: "starfleet"
+               )
+    end
+
+    test "write/2 REFUSE la carte du voisin — et le refus nomme le catalogue qui la porte" do
+      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
+               Fleet.Project.Intensity.write(tmp,
+                 workflow_map: "propre-a-aaa",
+                 repo: "bbb/un-projet",
+                 onboarded_by: "starfleet"
+               )
+
+      # RIEN N'EST ECRIT SUR UN REFUS : la declaration est le contrat du projet, et une carte que le
+      # projet ne peut pas charger y serait un mensonge committe.
+      refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
+    end
+
+    test "sans depot, write/2 resout dans le catalogue RACINE — le silence que les appelants ont mange" do
+      # ⚠ CE TEST N'EPINGLE PAS UN BON COMPORTEMENT, IL EPINGLE LE PIEGE. `write/2` ne peut pas
+      # exiger `:repo` : 38 appels le declarent sans, et prennent la racine A BON DROIT. Sa
+      # tolerance est donc legitime ICI et fatale chez un appelant qui tient le depot et l'oublie —
+      # d'ou l'entonnoir a argument positionnel dans `Onboard`. Le jour ou quelqu'un voudra faire
+      # refuser `write/2`, ce test lui dira ce qu'il casse.
+      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      # LA PREUVE EST DANS LA LISTE `available:`, PAS DANS LE TERME D'ERREUR. Les deux appels
+      # refusent, et de la meme FORME — ce qui differe est le catalogue consulte, et c'est
+      # exactement ce que le transcript de l'architecte montrait : deux lignes de journal, deux
+      # listes, un seul appel. Un temoin qui ne regarderait que le terme passerait au vert sur le
+      # bug qu'il est cense tenir.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
+                   Fleet.Project.Intensity.write(tmp,
+                     workflow_map: "propre-a-aaa",
+                     onboarded_by: "starfleet"
+                   )
+        end)
+
+      # La RACINE canon, pas le catalogue d'un projet : c'est la que l'absence de `:repo` envoie.
+      assert log =~ "brief-gate"
+      refute log =~ "available: cassee, commune"
+    end
+
     test "declaree mais ILLISIBLE : `card_load_failed`, PAS `unknown_card` — BL-6-116" do
       # ⚠ LE POINT DE TOUT C1. Le corps etait un `rescue _ ->` qui rebaptisait chaque levee de
       # `load!` en « carte inconnue » : nom non-slug, absence de l'image, YAML illisible, schema
