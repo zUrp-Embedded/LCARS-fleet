@@ -603,11 +603,18 @@ EOF
   [[ "$output" == *"sa console n'a pas demarre"* ]]
 }
 
-@test "console: LE TROISIEME CHEMIN — les trois appelants passent par la MEME fonction" {
+@test "console: LE TROISIEME CHEMIN — les appelants passent tous par la MEME fonction" {
   # Ce qui a produit le defaut est le geste RECOPIE : deux exemplaires, un chemin oublie. Le temoin
-  # epingle la forme, pas seulement le comportement — trois appels, une fonction.
+  # epingle la forme, pas seulement le comportement — N appels, une fonction.
+  #
+  # ⚖ 2026-08-21 : QUATRE, ET LE QUATRIEME EST LA PROMOTION. Ce temoin a attrape son ajout, ce qui
+  # est son metier ; le nombre se corrige donc DELIBEREMENT, en disant pourquoi. `usermod -aG`
+  # ecrit la base et ne touche aucun process : sans ce quatrieme appel, la promotion attendait le
+  # tour suivant pour etre projetee dans la console — 30 s de plus sur un droit qu'on vient
+  # d'accorder, alors que le geste est deja en main. Ce qu'il n'est PAS : une copie du geste. Il
+  # appelle la meme fonction que les trois autres, et c'est tout ce que ce temoin garde.
   run grep -c '^\s*ensure_console "\$login"' "$SUT"
-  [ "$output" -eq 3 ]
+  [ "$output" -eq 4 ]
 
   # Et aucune copie ne subsiste : plus personne n'appelle `$CONSOLE` en direct.
   run grep -c '"\$CONSOLE" --human' "$SUT"

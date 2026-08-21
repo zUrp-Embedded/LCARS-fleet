@@ -522,8 +522,18 @@ converge_admins() { # converge_admins <login...>
     case "$rc" in
       0)
         if ! id -nG "$login" | tr ' ' '\n' | grep -qx "$ADMIN_GROUP"; then
+          # ⚠ `ensure_console` N'EST PAS DECORATIF ICI, ET SON ABSENCE RENDAIT CETTE PROMOTION
+          # INOPERANTE. `usermod -aG` ecrit la base et ne touche AUCUN process ; le ttyd de la
+          # console, lui, a fige ses groupes a son lancement (`setpriv --init-groups`), et
+          # `ensure_console` retournait tot tant que sa socket repondait. « Effectif a sa prochaine
+          # session » etait donc faux pour la seule surface ou l'humain tape des commandes : son
+          # onglet ne redemarre pas, il n'y a pas de prochaine session. `console.sh` mesure
+          # desormais la derive et tape `newgrp` dans ses panes — cf. `missing_group_of` la-bas.
+          # On l'appelle ICI plutot que d'attendre le tour suivant : 30 s de plus sur un droit
+          # qu'on vient d'accorder, pour un geste qu'on tient deja.
           usermod -aG "$ADMIN_GROUP" -- "$login" 2>/dev/null \
-            && say "$login : ADMIN sur la forge -> $ADMIN_GROUP (effectif a sa prochaine session)"
+            && { say "$login : ADMIN sur la forge -> $ADMIN_GROUP (« newgrp » est tape dans sa console ; une session ssh ouverte garde ses groupes jusqu'a sa fin)"
+                 ensure_console "$login"; }
         fi
         ;;
       1)

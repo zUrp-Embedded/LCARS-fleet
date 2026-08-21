@@ -471,6 +471,24 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 #
 # Sans `stat` ou sans groupe lisible, on retombe sur le message general : une mesure ratee ne
 # devient pas un diagnostic.
+# DEUX ETATS, DEUX MESSAGES — et le second a prescrit DEUX gestes faux avant celui-ci.
+# 1. « Deconnecte-toi et reconnecte-toi » est le reflexe Unix, et il est FAUX ici : la console du
+#    deck est un `tmux new-session -A` derriere ttyd, qui SURVIT au rechargement de l'onglet. On
+#    retombe sur le meme process, ne avant la promotion, portant les memes groupes.
+# 2. « tmux kill-server » etait faux aussi, et pour une raison qui vaut d'etre sue : le serveur tmux
+#    n'est pas le porteur du cache, il en est l'HERITIER. Le set de groupes est fige dans TTYD par
+#    `setpriv --init-groups`, une fois pour toutes ; le serveur suivant nait sous ce meme ttyd et
+#    herite exactement des memes groupes. Tuer l'heritier ne change rien a l'heritage.
+#
+# `newgrp` est le seul geste qui marche PARTOUT — console tmux comme session ssh : setuid-root, il
+# relit /etc/group et demarre un shell avec le set a jour. Un refus qui nomme un geste inexecutable
+# coute plus cher qu'un refus muet : il envoie chercher au mauvais endroit avec la certitude d'avoir
+# compris. Celui-ci a coute une heure a l'operateur, qui a cherche a sortir du conteneur en ssh.
+#
+# ⚖ 2026-08-21 : LA CONSOLE SE REPARE DESORMAIS TOUTE SEULE — `console.sh` mesure la derive du ttyd
+# et tape ce `newgrp` dans les panes qui sont a un shell, au tour du convergeur. Ce message reste
+# NECESSAIRE, et il n'est pas un doublon : il couvre la fenetre avant ce tour, les sessions ssh, et
+# le pane dont le shell tourne sous un agent au moment ou la frappe passe.
 _die_master_unreadable() {
   local master=$1 grp
   grp="$(stat -c %G "$master" 2>/dev/null || true)"
@@ -481,7 +499,11 @@ _die_master_unreadable() {
     die "catalogue install: ta SESSION est anterieure a ta promotion.
   Ton compte EST dans « $grp » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
   ne le sait pas : il porte les groupes qu'il avait a son ouverture, et personne ne les lui ajoute
-  en vol. Deconnecte-toi et reconnecte-toi. Il n'y a rien a redemander."
+  en vol.
+  Ouvre un shell qui les relit :  newgrp $grp
+  ⚠ Se deconnecter ne sert a RIEN depuis la console du deck : elle survit au rechargement de
+  l'onglet, et le shell que tu retrouves est le meme, ne avant ta promotion. « newgrp » est la
+  sortie — la console tape la meme chose d'elle-meme au tour suivant du convergeur."
   fi
 
   die "catalogue install: ton compte n'administre pas ce runtime.
