@@ -627,6 +627,36 @@ fi
 # Quatre modules en cascade, une seule cause, et la porte avait le geste sous la main.
 #
 # Pas de build en `--check` : une sonde read-only qui bâtirait 3 Go n'est plus une sonde.
+# ─── LES PAQUETS AVANT LE BUILD, QUAND C'EST LE RAIL QUI POSE DOCKER ────────
+#
+# ⚠ ORDRE, PAS CONTENU — ET C'EST LA PASSE À FROID QUI L'A RENDU VISIBLE. Depuis que la porte laisse
+# passer un Linux natif déclaré sans docker (le rail l'installe), elle atteint ce build AVANT que le
+# provisionnement n'ait tourné. Elle cherche donc un binaire que personne n'a encore posé.
+#
+# MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche :
+#     ligne  5  [à voir] docker absent — le rail le posera
+#     ligne 42  docker.sh: aucune CLI docker …            ← le build échoue
+#     ligne 61  POSÉ 10-packages: apt: install … docker.io  ← vingt secondes trop tard
+#
+# La dépendance est réelle et circulaire d'apparence : l'image a besoin de docker, `48-forge-host` a
+# besoin de l'image, docker vient de `10-packages`. Elle se dénoue par l'ORDRE, pas par un artifice :
+# on joue d'abord la tranche qui pose les paquets — le provisionnement est rejouable, donc ces trois
+# modules seront simplement conformes au passage suivant — puis on bâtit, puis on converge tout.
+#
+# `--only` NE CHANGE PAS le verdict final : c'est l'apply complet, plus bas, qui fait autorité.
+if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
+   && ! command -v "${PROV_DOCKER_BIN:-docker}" >/dev/null 2>&1 \
+   && docker_installable_here; then
+  echo ""
+  echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
+  "$PROVISION" apply "${PASSTHRU[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
+    || echo "  ${W}la tranche paquets n'a pas tout convergé — le build dira ce qui manque.${N}"
+  # LA SONDE SE REJOUE : `docker_endpoint` a répondu « absent » il y a trente secondes, et
+  # `PROV_DOCKER_BIN` porte encore cette réponse-là. Sans ce second passage, le build interrogerait
+  # un chemin périmé sur une machine qui a désormais docker.
+  docker_endpoint >/dev/null 2>&1 || true
+fi
+
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]]; then
   _wimg="${LCARS_IMAGE:-lcars-fleet:2}"
   if ! "$PROV_DOCKER_BIN" image inspect "$_wimg" >/dev/null 2>&1; then

@@ -454,3 +454,30 @@ SPY
     docker_installable_here && echo oui || echo non"
   [ "$output" = "non" ]
 }
+
+@test "ORDRE : les paquets sont joues AVANT le build quand c'est le rail qui pose docker" {
+  # Mesure du 2026-08-21, passe a froid : le build cherchait `docker` vingt secondes avant que
+  # `10-packages` ne l'installe. La dependance a l'air circulaire — l'image veut docker,
+  # `48-forge-host` veut l'image, docker vient de `10-packages` — et se denoue par l'ordre.
+  # ⚠ LE BUILD VISE EST CELUI DU RAIL POSTE (`$_wroot`), PAS CELUI DU RAIL BOÎTE : les deux
+  # existent, celui de la boîte est plus haut dans le fichier, et le premier `grep` tombait dessus.
+  local pre build
+  pre="$(grep -n 'only 10-packages' "$SRC" | head -1 | cut -d: -f1)"
+  build="$(grep -n '_wroot/docker.sh" build' "$SRC" | head -1 | cut -d: -f1)"
+  [ -n "$pre" ]
+  [ -n "$build" ]
+  [ "$pre" -lt "$build" ]
+}
+
+@test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {
+  # Sur une machine qui a deja docker, rejouer trois modules avant le build serait du bruit ; sur
+  # une machine non declaree, ce serait une promesse que 00-preflight refusera.
+  run bash -c "sed -n '/LES PAQUETS AVANT LE BUILD/,/^fi$/p' '$SRC'"
+  [[ "$output" == *"command -v"* ]]
+  [[ "$output" == *"docker_installable_here"* ]]
+}
+
+@test "la sonde docker est REJOUEE apres l'installation — sinon le build lit une reponse perimee" {
+  run bash -c "sed -n '/LES PAQUETS AVANT LE BUILD/,/^fi$/p' '$SRC'"
+  [[ "$output" == *"docker_endpoint"* ]]
+}
