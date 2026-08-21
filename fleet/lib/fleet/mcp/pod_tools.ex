@@ -768,8 +768,10 @@ defmodule Fleet.MCP.PodTools do
       name("Scratch")
 
       description(
-        "Park a thought in your workshop scratchpad — ONE line, no ceremony, and the system " <>
-          "commits and pushes it for you. USE IT AS A REFLEX, not as a decision: the moment a " <>
+        "Park a thought in your workshop scratchpad — one argument, no ceremony, and the system " <>
+          "commits and pushes it for you. Your note lands as its own markdown block, stamped and " <>
+          "closed by a rule, so it stays readable however you wrote it: keep your line breaks, " <>
+          "your lists, your snippet. USE IT AS A REFLEX, not as a decision: the moment a " <>
           "point stabilises in a conversation (a conclusion, an arbitration, a constat, a " <>
           "reasoned refusal), drop it here and go on with the next point. The criterion is the " <>
           "NATURE of the exchange, never how important it feels — an importance judgement, late " <>
