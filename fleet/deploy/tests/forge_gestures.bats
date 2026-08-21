@@ -322,7 +322,7 @@ FAKE
   [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
   [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
   grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
-  grep -q 'push .*cat/catalogue' "$GIT_LOG"
+  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
@@ -333,12 +333,12 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
   [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-  grep -q "clone .*http://forge.test/cat/catalogue.git" "$GIT_LOG"
+  grep -q "clone .*http://forge.test/cat/_catalogue.git" "$GIT_LOG"
   [[ "$output" == *"materiel pose"* ]]
 }
 
 
-@test "install: materiel local en echec — ni modele pose, ni promesse de l'avoir fait" {
+@test "install: materiel local en echec — le dire, ne pas defaire ce qui est bon" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
   # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
   setup_install
@@ -349,7 +349,7 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [[ "$output" == *"INSTALLE sur la forge"* ]]
   [[ "$output" == *"redemarrage"* ]]
-  grep -q 'push .*cat/catalogue' "$GIT_LOG"
+  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {

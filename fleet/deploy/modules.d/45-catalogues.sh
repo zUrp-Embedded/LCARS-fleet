@@ -9,7 +9,7 @@
 #
 # INSTALLE EST UN FAIT DE FORGE, ET CE MODULE EST CE QUI LE REND VRAI SUR LE DISQUE.
 # `lcars catalogue install <nom>` pose deux choses sur la forge : l'org avec ses comptes de role, et
-# la SOURCE du catalogue dans `<nom>/catalogue`. Ce depot-la est la signature de l'installation. Ce
+# la SOURCE du catalogue dans `<nom>/_catalogue`. Ce depot-la est la signature de l'installation. Ce
 # module lit cette signature et fait suivre le materiel local — un clone, rien de plus.
 #
 # LE MATERIEL LOCAL EST UN CACHE, PAS UN ETAT. C'est ce qui autorise ce module a supprimer : ce
@@ -34,17 +34,27 @@ set -euo pipefail
 
 # Le nom du depot ou la source d'un catalogue installe est POUSSEE. C'est une ADRESSE — l'endroit ou
 # `push_store` ecrit et ou l'on va donc chercher — jamais un predicat : rien ne se decide en la
-# lisant, cf. l'identite ci-dessous.
-STORE_REPO="catalogue"
+# lisant, cf. l'identite ci-dessous. Le `_` initial est de l'UX (⚖ user, 2026-08-21) : il separe a
+# l'oeil, dans une liste de depots, ce que la fleet a pose de ce qu'un humain a depose. Il ne
+# protege rien et ne doit jamais recommencer a proteger quoi que ce soit.
+STORE_REPO="_catalogue"
 MANIFEST="catalogue.yaml"
+
+# ⚠ LA REQUETE NE PORTE PAS LE PREFIXE, ET CE N'EST PAS UN OUBLI. `q=` est un match de SOUS-CHAINE
+# cote Gitea — mesure — et `_catalogue` contient `catalogue`, donc chercher le mot nu ramene les
+# deux. L'inverse n'est pas garanti : personne n'a mesure ce que le moteur de la forge fait d'un `_`
+# initial (tokenisation, troncature), et ce module SUPPRIME sur une liste vide. Interroger sur un
+# token dont le comportement EST mesure, puis trancher exactement ici, coute quelques entrees de
+# plus dans la reponse et ne parie jamais le materiel de la boite sur une supposition.
+STORE_QUERY="catalogue"
 
 # ─── ce que la FORGE signe ────────────────────────────────────────────────────────────────────────
 #
 # UN DEPOT QUI SE DECLARE AU NOM DE SON ORG = CE CATALOGUE EST INSTALLE. Quatre filtres, chacun paye :
 #
 #   * l'ADRESSE, exacte — `q=catalogue` est un match de SOUS-CHAINE cote Gitea,
-#     `mon-catalogue-perso` remonte aussi ; le filtre est fait ici, sur `.name`, jamais laisse au
-#     serveur. Il ne CONCLUT rien : il dit seulement ou regarder ;
+#     `mon-catalogue-perso` remonte aussi ; le filtre exact (`_catalogue`) est fait ici, sur
+#     `.name`, jamais laisse au serveur. Il ne CONCLUT rien : il dit seulement ou regarder ;
 #   * l'IDENTITE — `manifest.name == owner`. C'est ce qui decide. Un depot pose a l'adresse d'un
 #     magasin, dans une org, mais qui ne se declare pas au nom de cette org, n'est pas le magasin de
 #     ce catalogue : le cloner le servirait sous un nom qu'il ne revendique pas, et le roster du
@@ -52,7 +62,7 @@ MANIFEST="catalogue.yaml"
 #     HOLD (absence de reponse) ;
 #   * le TYPE DU PROPRIETAIRE — ⚠ D1 de l'audit independant (2026-08-16) : orgs et comptes perso
 #     partagent l'espace de noms, et sans ce filtre un user non-admin qui pousse un depot public
-#     `catalogue` chez lui faisait apparaitre son login comme catalogue INSTALLE — clone de son
+#     a cette adresse chez lui faisait apparaitre son login comme catalogue INSTALLE — clone de son
 #     materiel, roster derive pour le mint, « seul un admin installe » contourne par un push.
 #     L'IDENTITE NE LE REMPLACE PAS : `bob` qui declare `name: bob` chez lui la satisfait, et ment —
 #     le catalogue `bob` ne peut pas etre installe sur une forge ou `bob` est un humain, son org
@@ -71,7 +81,7 @@ MANIFEST="catalogue.yaml"
 forge_installed() {
   local hdr body total count
   hdr="$(mktemp)"
-  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=$STORE_REPO&limit=50" 2>/dev/null)" \
+  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=$STORE_QUERY&limit=50" 2>/dev/null)" \
     || { rm -f "$hdr"; return 1; }
   total="$(tr -d '\r' < "$hdr" | awk -F': ' 'tolower($1)=="x-total-count"{print $2}')"
   rm -f "$hdr"

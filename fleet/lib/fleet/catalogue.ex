@@ -307,7 +307,7 @@ defmodule Fleet.Catalogue do
   ## What makes the material appear
 
   `lcars catalogue install <name>`, played by an admin — the single verb. It lays the org and the
-  role accounts on the forge, pushes the catalogue's source into `<name>/catalogue`, and drops the
+  role accounts on the forge, pushes the catalogue's source into `<name>/_catalogue`, and drops the
   material here. Convergent provisioning replays the second half at every container boot, so this
   directory is a CACHE of what the forge carries rather than a state anyone maintains by hand.
   Deleting a directory here does not uninstall anything; the next boot puts it back.

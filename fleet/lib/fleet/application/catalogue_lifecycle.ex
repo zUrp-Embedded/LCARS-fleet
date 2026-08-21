@@ -15,16 +15,22 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## What signs an installation
 
-  `<org>/#{"catalogue"}` — the source WE pushed into the catalogue's own org. Not "the org exists":
-  an org without its source is an interrupted install, and no box can serve a catalogue whose
-  material is nowhere. Signing on the org alone would report such a catalogue as ready and let a
-  boot discover the hole. The store is the narrower signature and it is the one that matters.
+  A repo that DECLARES the name of the org it sits in — the source WE pushed into the catalogue's own
+  org. Not "the org exists": an org without its source is an interrupted install, and no box can
+  serve a catalogue whose material is nowhere. Signing on the org alone would report such a catalogue
+  as ready and let a boot discover the hole. The store is the narrower signature and it is the one
+  that matters.
+
+  It sits at `<org>/_catalogue`, and that is an ADDRESS, not the signature. What signs is
+  `owner == manifest.name` (`CatalogueDeposits.split/2`) TOGETHER WITH the owner being an ORG —
+  complementary conditions, neither covering the other. Signing on the repo NAME, as this did until
+  2026-08-21, reserved the most natural repo name in every user's namespace, and did it in silence.
 
   ## The reference catalogue is installed by construction
 
   `#{"fleet"}` ships inside the release. The box can serve it without asking anybody, so its state
   is not a forge question — and answering "available" for it, on a forge that carries no
-  `fleet/catalogue`, would be a lie about the only catalogue that always works.
+  `fleet/_catalogue`, would be a lie about the only catalogue that always works.
 
   ## An installed catalogue whose deposit vanished
 
@@ -92,7 +98,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   before installing: WHOSE material am I about to serve to everyone.
 
   Once installed it is dropped, and not only because nobody reads it. What the box follows from
-  then on is `<name>/catalogue`, the store — printing the deposit there names something that is no
+  then on is `<name>/_catalogue`, the store — printing the deposit there names something that is no
   longer the source, in the column an operator reads AS the source.
 
   `UPDATABLE` keeps it, and that is the same rule rather than an exception: the deposit is once

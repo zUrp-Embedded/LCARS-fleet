@@ -85,12 +85,12 @@ defmodule Fleet.Application.CatalogueDepositsTest do
   end
 
   test "le STORE d'un catalogue installe n'est pas un depot" do
-    # `<org>/catalogue` est la copie que NOUS y avons poussee. La lister ferait apparaitre chaque
+    # `<org>/_catalogue` est la copie que NOUS y avons poussee. La lister ferait apparaitre chaque
     # catalogue installe comme egalement disponible depuis lui-meme, donc toujours « a jour ».
     assert {:ok, found} =
              list(
-               [repo("web/catalogue"), repo("web/autre-chose")],
-               %{"web/catalogue" => "name: web\n", "web/autre-chose" => "name: web-bis\n"},
+               [repo("web/_catalogue"), repo("web/autre-chose")],
+               %{"web/_catalogue" => "name: web\n", "web/autre-chose" => "name: web-bis\n"},
                %{{"web/autre-chose", "main"} => "sha2"}
              )
 
@@ -104,6 +104,10 @@ defmodule Fleet.Application.CatalogueDepositsTest do
       # de refus. `bob` qui appelle son depot du nom le plus naturel voyait son catalogue ne jamais
       # apparaitre, sans un mot nulle part. La fleet reservait un nom dans l'espace des utilisateurs
       # sans le leur dire.
+      #
+      # ⚠ LE DEPOT S'APPELLE `catalogue` TOUT COURT, SANS LE `_`. C'est le nom qu'un humain choisit,
+      # et donc le seul qui mesure quelque chose : ecrit `_catalogue`, ce temoin epinglerait l'adresse
+      # de la fleet et laisserait le nom nu a nouveau prenable par une regression.
       assert {:ok, found} =
                list(
                  [repo("bob/catalogue")],
@@ -115,27 +119,27 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     end
 
     test "un depot A L'ADRESSE d'un store, mais qui declare un AUTRE nom, reste un depot" do
-      # Le complement du precedent, et le plus dur a passer par accident : `web/catalogue` est
+      # Le complement du precedent, et le plus dur a passer par accident : `web/_catalogue` est
       # exactement la ou un store se pose, sous une org de catalogue. Ce qui le sauve est son
       # identite — il ne declare pas `web`, donc il n'est pas le magasin de `web`.
       assert {:ok, found} =
                list(
-                 [repo("web/catalogue")],
-                 %{"web/catalogue" => "name: autre-chose\n"},
-                 %{{"web/catalogue", "main"} => "sha7"}
+                 [repo("web/_catalogue")],
+                 %{"web/_catalogue" => "name: autre-chose\n"},
+                 %{{"web/_catalogue", "main"} => "sha7"}
                )
 
-      assert %{"autre-chose" => %{repo: "web/catalogue"}} = found
+      assert %{"autre-chose" => %{repo: "web/_catalogue"}} = found
     end
 
     test "`split/2` rend les DEUX moities d'une seule classification" do
       # Les deux moities ne peuvent pas se contredire parce qu'elles sortent de la MEME decision.
       # Deux lecteurs de « est-ce un store ? » divergent le jour ou un seul est corrige — c'etait
       # l'etat d'avant, `store_or_empty?` d'un cote et `stores/3` de l'autre.
-      repos = [repo("web/catalogue"), repo("alice/mob"), repo("bob/catalogue")]
+      repos = [repo("web/_catalogue"), repo("alice/mob"), repo("bob/catalogue")]
 
       manifests = %{
-        "web/catalogue" => "name: web\n",
+        "web/_catalogue" => "name: web\n",
         "alice/mob" => "name: mobile\n",
         "bob/catalogue" => "name: notes\n"
       }
@@ -149,7 +153,7 @@ defmodule Fleet.Application.CatalogueDepositsTest do
                )
 
       assert Enum.sort(Map.keys(deposits)) == ["mobile", "notes"]
-      assert %{"web" => %{"full_name" => "web/catalogue"}} = stores
+      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
       assert Map.keys(stores) == ["web"]
     end
   end

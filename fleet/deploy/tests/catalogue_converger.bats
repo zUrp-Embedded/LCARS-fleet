@@ -110,7 +110,7 @@ seed_local() {
 # `full_name` est porte parce que le module en a besoin pour ALLER LIRE le manifeste : l'adresse du
 # depot vient de la reponse de la forge, jamais d'une recomposition `<owner>/<convention>` ici.
 json_one() {
-  printf '{"data":[{"name":"catalogue","full_name":"%s/catalogue","empty":false,"owner":{"login":"%s"},"clone_url":"http://forge.invalid/%s/catalogue.git"}]}' \
+  printf '{"data":[{"name":"_catalogue","full_name":"%s/_catalogue","empty":false,"owner":{"login":"%s"},"clone_url":"http://forge.invalid/%s/_catalogue.git"}]}' \
     "$1" "$1" "$1"
 }
 
@@ -162,7 +162,7 @@ json_one() {
 }
 
 @test "un depot VIDE ne signe rien — une org creee sans sa source est un install interrompu" {
-  fake_forge '{"data":[{"name":"catalogue","full_name":"web/catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/catalogue.git"}]}'
+  fake_forge '{"data":[{"name":"_catalogue","full_name":"web/_catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/_catalogue.git"}]}'
   fake_git
 
   run bash "$MOD" apply
@@ -194,7 +194,7 @@ json_one() {
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
   [ -d "$PROV_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/catalogue.git $PROV_CATALOGUES_DIR/web.tmp"* ]]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/_catalogue.git $PROV_CATALOGUES_DIR/web.tmp"* ]]
   [ ! -e "$PROV_CATALOGUES_DIR/web.tmp" ]
 }
 
@@ -268,7 +268,7 @@ json_one() {
 # ses roles descendaient dans le roster du mint.
 
 @test "IDENTITE: un depot a l'adresse d'un magasin qui declare un AUTRE nom ne signe rien" {
-  # `web/catalogue` est exactement la ou un magasin se pose, dans une vraie org. Ce qui le disqualifie
+  # `web/_catalogue` est exactement la ou un magasin se pose, dans une vraie org. Ce qui le disqualifie
   # est son manifeste : il ne declare pas `web`, donc il n'est pas le magasin de `web`.
   fake_forge "$(json_one web)"
   export FAKE_ORGS="web" FAKE_BAD_MANIFEST="web"
