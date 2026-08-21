@@ -397,7 +397,24 @@ apply() {
         -v "$vol:/authority" \
         -e LCARS_PRIVATE_DIR=/authority \
         -e FORGE_BASE_URL="http://forge:3000" \
-        -e LCARS_BUILTIN_HUMAN="$PROV_HUMAN" \
+        `# ⚠ L'HUMAIN INTÉGRÉ N'EST PAS L'OPÉRATEUR, ET CETTE LIGNE LES CONFONDAIT.` \
+        `# La recette le dit d'elle-même : « CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du` \
+        `# compte que l'admin d'une forge crée à son installation […] Un déploiement réel ne "passe` \
+        `# pas le sien" — les vraies personnes s'inscrivent seules et un admin les ajoute à humans ».` \
+        `# Les deux autres rails le savent : forge-gestures.sh défaute sur "lcars", bench-forge-` \
+        `# bootstrap passe l'humain de banc. Le rail poste était le seul à y mettre SUDO_USER.` \
+        `#` \
+        `# Ce que ça coûtait n'a été visible qu'à froid, et seulement depuis D7. La recette pose` \
+        `# admin = false sur ce compte ; tant que le #1 de la forge était "admiral", l'opérateur` \
+        `# était le #2 et personne ne s'en apercevait. Devenu #1 et admin, il est le DERNIER admin —` \
+        `# et Gitea refuse net : « can not delete the last admin user [uid: 1] ». Structure NON posée,` \
+        `# donc pas de jetons de rôle, donc pas d'OIDC ni de branche ops. Quatre modules pour une` \
+        `# ligne qui visait le mauvais humain depuis le début.` \
+        `#` \
+        `# VIDE EST UNE RÉPONSE : sans humain de fleet nommé, on ne passe rien et forge-gestures.sh` \
+        `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
+        `# fait ne restent d'accord que tant que personne n'en touche un.` \
+        -e LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
         "$PROV_FORGE_IMAGE" forge-apply 2>/dev/null)"
   [[ -n "$cid" ]] || { p_fail "conteneur de pose non créable ($PROV_FORGE_IMAGE)"; rm -rf "$enroll"; verdict_apply; }
   {

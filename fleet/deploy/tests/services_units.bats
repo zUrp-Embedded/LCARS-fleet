@@ -158,3 +158,13 @@ mod() { run bash "$MOD" "$1"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"lcars-converger.service absente ou divergente"* ]]
 }
+
+@test "l'environnement ne REDIT pas les defauts de la lib — un littéral mort se lit comme une décision" {
+  # `provision-lib.sh` pose `PROV_FORGE_ORG` et `PROV_HUMANS_TEAM` avant tout module : un `:-fleet`
+  # ecrit ici ne peut PAS s'executer. Et il ferait un cinquieme littéral `fleet` pour un nom qui en a
+  # deja quatre — le jour d'un renommage, c'est le nombre de copies qui decide combien de lecteurs
+  # suivent.
+  ! grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
+  ! grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
+  grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
+}

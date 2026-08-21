@@ -68,8 +68,13 @@ services_env_body() {
   echo "# Genere par 64-services.sh — l'environnement des services LCARS de cette machine."
   echo "# Un daemon n'herite d'aucun shell : ce qu'il lui faut est ICI, derive du provisionnement."
   echo "FORGE_BASE_URL=$(forge_url)"
-  echo "PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}"
-  echo "PROV_HUMANS_TEAM=${PROV_HUMANS_TEAM:-humans}"
+  # ⚠ PAS DE `:-` ICI, ET C'EST UNE CORRECTION. `provision-lib.sh` pose ces deux variables avant tout
+  # module (`: "${PROV_FORGE_ORG:=fleet}"`), donc un défaut écrit ici ne peut PAS s'exécuter : il se
+  # lit comme une décision et n'en est pas une. Pire, il ferait un cinquième littéral `fleet` pour un
+  # nom qui en a déjà quatre — et le jour où l'org est renommée, c'est le nombre de copies qui décide
+  # combien de lecteurs suivent.
+  echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
+  echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
   echo "PROV_ADMIN_GROUP=$PROV_ADMIN_GROUP"
   echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"

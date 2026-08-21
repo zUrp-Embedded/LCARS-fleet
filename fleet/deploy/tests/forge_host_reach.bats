@@ -191,3 +191,32 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   grep -q 'forge du poste vivante et convergée' "$SRC"
   grep -q 'forge du poste montée' "$SRC"
 }
+
+# ─── L'HUMAIN INTEGRE N'EST PAS L'OPERATEUR ─────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-21 : « l'user qui fait l'installation n'est pas l'user, c'est l'admin. Il doit se
+# creer un compte user ensuite. »
+#
+# La recette le dit d'elle-meme : « CE COMPTE N'EST PAS UNE PERSONNE : il tient le siege du compte
+# que l'admin d'une forge cree a son installation. » Les deux autres rails le savent —
+# `forge-gestures.sh` defaute sur `lcars`, `bench-forge-bootstrap.sh` passe l'humain de banc. Le rail
+# poste etait le SEUL a y mettre `SUDO_USER`.
+#
+# Ce que ca coutait n'est apparu qu'a froid, et seulement depuis D7 : la recette pose `admin = false`
+# sur ce compte ; devenu le #1 de la forge et admin, l'operateur en est le DERNIER admin, et Gitea
+# refuse — « can not delete the last admin user [uid: 1] ». Structure non posee, et trois modules en
+# cascade derriere.
+
+@test "l'humain integre vient de PROV_FLEET_HUMAN, jamais de l'operateur" {
+  grep -q 'LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}"' "$SRC"
+  ! grep -q 'LCARS_BUILTIN_HUMAN="\$PROV_HUMAN"' "$SRC"
+}
+
+@test "sans humain de fleet, on ne passe RIEN — le defaut vit dans forge-gestures, pas ici" {
+  # Un litteral `lcars` ici en ferait un SECOND defaut pour un meme fait, et deux defauts ne restent
+  # d'accord que tant que personne n'en touche un.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  grep -q 'TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"' "$g"
+  # et le module ne redit pas ce defaut
+  ! grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
+}
