@@ -16,19 +16,42 @@
 #   curl, jq    — clients HTTP forge + parse JSON (deps dures des scripts bin/ et etc/)
 #   unzip       — dépose du précompilé Elixir (module 15-toolchain)
 #   ca-certificates — TLS sortant (installer claude, forge https éventuelle)
+#   git-filter-repo — la réécriture d'historique de `bin/publish-transform.sh` : le script la
+#                     REFUSE si elle est absente (exit 1) et imprime une recette de venv à taper.
+#                     Une dépendance qu'on sait nommer est une dépendance qu'on installe.
+#   gh              — le geste de publication vers GitHub, celui que `publish-transform.sh` IMPRIME
+#                     pour l'humain : le script ne pousse jamais lui-même (contrainte dure du
+#                     projet), donc l'outil du dernier pas doit être dans la boîte.
 # En Docker ces paquets sont des LAYERS de l'image (docker/Dockerfile) — même liste, autre
 # mécanisme, ISO vérifiée par le même doctor sur place (d'où APPLY-ON sans docker, CHECK-ON any).
 #
 # PAS de yq (la donnée v2 est plate : env + listes — le blueprint YAML v1 meurt avec les
-# users-par-rôle), PAS de gh (la forge est Gitea, parlée en curl). python3 EST requis — pas
-# pour du patch-json (mort), mais comme interpréteur du bridge MCP des pods
-# (fleet_mcp_stdio_bridge.py) : l'ancien « PAS de python » ici mentait au sanctuaire.
+# users-par-rôle). python3 EST requis — pas pour du patch-json (mort), mais comme interpréteur du
+# bridge MCP des pods (fleet_mcp_stdio_bridge.py) : l'ancien « PAS de python » ici mentait au
+# sanctuaire.
+#
+# ⚠ « PAS de gh (la forge est Gitea, parlée en curl) » était écrit ici, et la moitié qui parle de la
+# forge reste VRAIE : aucun appel à la forge ne passe par `gh`, et aucun ne le doit. Ce qui était
+# faux, c'est d'en conclure que la boîte n'en a pas l'emploi — `gh` n'est pas un client de forge
+# ici, c'est l'outil de l'EXPORT vers un miroir externe, un chemin que Gitea ne couvre pas.
+#
+# LES DEUX VIENNENT D'APT, ET RIEN N'EST PINNÉ — ⚖ ARBITRAGE USER (2026-08-21) : *« la cible c'est
+# la dernière Ubuntu LTS, et on pin rien, on laisse faire Canonical. »* La distribution de référence
+# n'est ni Debian ni un dérivé Mint : c'est l'Ubuntu LTS courante, aujourd'hui **26.04 (resolute)**,
+# et sa version d'un paquet EST la version. Le pin version+sha256 reste réservé à ce qu'aucune
+# distribution ne livre (ttyd) ou dont la version est load-bearing (le précompilé Elixir) — pas à
+# un outil que l'archive tient à jour pour nous.
+#
+# ⚠ LES DEUX SONT DANS `universe`, PAS DANS `main` (mesuré sur Launchpad, resolute : `gh` 2.46.0-4,
+# `git-filter-repo` 2.47.0-3). Une image ou un cloud-init qui n'active que `main` ne les trouvera
+# pas — et `apt_ensure` dira « paquet absent », pas « dépôt absent ». C'est le seul piège de cette
+# ligne, et il ne se voit qu'à l'install.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates python3)
+PACKAGES=(tmux bubblewrap git curl jq unzip ca-certificates python3 git-filter-repo gh)
 
 # Sonde RÉELLE du containment : un bwrap minimal DOIT tourner sous un user NON-root (les pods
 # tournent comme l'humain). Lire une config ou un dpkg -s ne prouve rien — Ubuntu ≥23.10 peut

@@ -281,6 +281,14 @@ RUN apt-get update -qq \
        `# Absent, un pod est scelle et ne joint meme pas son vendor — bwrap_launch refuse (exit 2).` \
        socat \
        less bash-completion \
+       `# ─── L'EXPORT VERS UN MIROIR EXTERNE, ET SES DEUX OUTILS ───────────────────────────────` \
+       `# git-filter-repo est la reecriture d'historique de bin/publish-transform.sh, qui REFUSE de` \
+       `# tourner sans elle (exit 1) en imprimant une recette de venv a taper — une dependance` \
+       `# nommee par le produit lui-meme n'a rien a faire hors de l'image. gh est l'outil du` \
+       `# DERNIER pas : le script ne pousse jamais (contrainte dure), il imprime le geste, et le` \
+       `# geste s'appelle gh. La liste native (10-packages.sh) porte les deux, et le temoin` \
+       `# deploy_manifest.bats exige l'egalite des deux rails.` \
+       git-filter-repo gh \
        `# ─── BASELINE D'OUTILLAGE (lot 1 du rail toolchain) ────────────────────────────────────` \
        `# CE QUI EST DEJA LA NE SE DEMANDE PAS. Sans ces paquets un pod ne produit que du bash, du` \
        `# HTML et du python NU : ni venv, ni pip, ni compilateur. Chaque dependance de projet` \
