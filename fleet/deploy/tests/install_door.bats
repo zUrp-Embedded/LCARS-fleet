@@ -404,3 +404,53 @@ SPY
   # Hors WSL c'est le garde de substrat qui parle en premier ; l'un ou l'autre refuse, jamais aucun.
   [[ "$output" == *"n'a pas d'objet sur le rail poste"* ]] || [[ "$output" == *"réservé à WSL2"* ]]
 }
+
+# ─── UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PREREQUIS ───────────────────────────────────────
+#
+# MESURE DU 2026-08-21, Ubuntu 26.04 fraiche, passe a froid : la porte s'arretait sur « aucune CLI
+# docker : ni dans le PATH, ni dans le montage Docker Desktop » — en renvoyant vers un montage qui
+# n'existe pas sur une machine sans Windows — et le module capable de le poser (`10-packages`,
+# `docker.io` sur le substrat linux) n'etait JAMAIS atteint.
+#
+# Le motif d'origine du refus, ⚖ « ça, on refuse. docker-desktop c'est un clic », parle de WSL, ou
+# Docker Desktop EST un clic et ou rien ici ne peut l'installer. Les deux regles coexistent : c'est
+# le substrat qui les separe, exactement comme dans `10-packages`.
+
+@test "la porte ne refuse plus docker sur un LINUX NATIF DECLARE — le rail le pose" {
+  grep -q 'docker_installable_here' "$SRC"
+  # la condition est double : substrat linux ET machine declaree dediee
+  run bash -c "sed -n '/^docker_installable_here()/,/^}/p' "$SRC""
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
+  [[ "$output" == *'"$s" == "linux"'* ]]
+}
+
+@test "sans la DECLARATION, docker reste un prerequis — sinon la porte promet ce que 00-preflight refusera" {
+  # `LCARS_ALLOW_ANY_HOST` absent : ce provisionnement n'a pas le droit de toucher la machine, donc
+  # annoncer qu'il y installera docker serait une promesse non tenue trois lignes plus loin.
+  run bash -c "
+    FORCED_SUBSTRATE=linux
+    detect_substrate() { echo linux; }
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "non" ]
+}
+
+@test "declaree ET linux : la porte laisse passer" {
+  run bash -c "
+    export LCARS_ALLOW_ANY_HOST=1
+    FORCED_SUBSTRATE=linux
+    detect_substrate() { echo linux; }
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "oui" ]
+}
+
+@test "declaree mais WSL : docker reste un prerequis — rien ici n'installe Docker Desktop" {
+  run bash -c "
+    export LCARS_ALLOW_ANY_HOST=1
+    FORCED_SUBSTRATE=wsl
+    detect_substrate() { echo wsl; }
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "non" ]
+}

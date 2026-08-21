@@ -129,6 +129,20 @@ preflight_ok=1
 say_ok()   { echo "  ${G}[ok]${N} $1"; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
+# UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PRÉREQUIS. `10-packages` pose `docker.io` sur le
+# substrat `linux` et sur lui SEUL — sur WSL le daemon vient de Docker Desktop, que rien ici ne peut
+# installer, et dans un conteneur il n'y a rien à monter. La condition est donc la même des deux
+# côtés, et elle se dit une fois : Linux natif, machine déclarée dédiée.
+#
+# ⚠ LA DÉCLARATION COMPTE AUTANT QUE LE SUBSTRAT. Sans `LCARS_ALLOW_ANY_HOST`, ce provisionnement
+# n'a pas le droit de toucher cette machine — donc promettre qu'il y installera docker serait une
+# promesse qu'il ne tiendra pas : `00-preflight` refusera trois lignes plus loin.
+docker_installable_here() {
+  [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
+  local s="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || echo "")}"
+  [[ "$s" == "linux" ]]
+}
+
 echo ""
 echo "  ${W}Préflight${N}"
 for t in git curl; do
@@ -163,6 +177,19 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     # moque ; le rail BOÎTE tourne sous l'humain et ne peut pas travailler. Refuser ici, c'était
     # refuser une machine saine sur la moitié des cas — la décision descend donc à la branche.
     echo "  ${W}[à voir]${N} $PROV_DOCKER_WHY"
+  elif docker_installable_here; then
+    # ⚠ LA PORTE REFUSAIT CE QUE LE RAIL SAIT DÉSORMAIS COMBLER, et les deux ne peuvent pas rester
+    # en désaccord. Le motif d'origine — ⚖ « ça, on refuse. docker-desktop c'est un clic » — parle
+    # de WSL, où Docker Desktop EST un clic et où rien ici ne peut l'installer. Sur du Linux natif
+    # il n'y a pas de Docker Desktop : la réponse est `apt install docker.io`, et c'est exactement
+    # ce que `10-packages` fait depuis le 2026-08-21 (⚖ user : « tu peux toujours l'installer si tu
+    # ne trouves pas »).
+    #
+    # MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche : la porte s'arrêtait sur « aucune CLI docker », en
+    # renvoyant vers un montage Docker Desktop qui n'existe pas sur une machine sans Windows — et le
+    # module capable de le poser n'était jamais atteint. Un préflight ne doit refuser que ce que la
+    # suite ne peut pas réparer.
+    echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker.io + docker-compose-v2, universe)"
   else
     say_miss "$PROV_DOCKER_WHY"
   fi
