@@ -64,6 +64,87 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     CiGate.decide(42, "lcars/issue-7-engineer", c, fn -> :required end)
   end
 
+  # Le rail existe, un run existe, et rien ne l'a pris. Le TROISIEME etat de `:none`, et il se
+  # MESURE : `status: "waiting"` + `runner_id: 0`, avec les `labels` que le job demande.
+  defp decide_unclaimed(forge_opts, jobs, lister \\ nil) do
+    lister = lister || fn "fleet/demo", ".gitea/workflows", _ -> {:ok, ["ci.yml"]} end
+
+    c = %{
+      ctx(Forge, forge_opts)
+      | opts: [
+          list_dir_fun: lister,
+          runs_for_sha_fun: fn _repo, _sha, _f, _o -> {:ok, [%{"id" => 7}]} end,
+          run_jobs_fun: fn _repo, 7, _o -> {:ok, jobs} end
+        ]
+    }
+
+    CiGate.decide(42, "lcars/issue-7-engineer", c, fn -> :required end)
+  end
+
+  describe "un job que personne ne reclame" do
+    @waiting [%{"status" => "waiting", "runner_id" => 0, "labels" => ["ubuntu-latest"]}]
+
+    test "au-dela du delai court: escalade en NOMMANT le label, sans attendre 45 min" do
+      # MESURE DU 2026-08-21 : un job « Waiting », 0 s, avec un `runs-on:` qu'aucun runner de la
+      # boite ne servait. Indiscernable d'un job en cours, bloquant la fusion sans jamais rougir,
+      # et le gate gardait sa question pour trois quarts d'heure plus tard.
+      stale = Forge.iso_ago(10 * 60)
+
+      assert {:escalate, {:ci_stalled, :unclaimed}, msg} =
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @waiting)
+
+      # Le label EST le fait actionnable : sans lui, « un runner sert-il ce label ? » demande a
+      # l'operateur de deviner lequel.
+      assert msg =~ "ubuntu-latest"
+      assert msg =~ "AUCUN RUNNER"
+    end
+
+    test "sous le delai court: on attend, un runner met des secondes a reclamer" do
+      fresh = Forge.iso_ago(30)
+
+      assert {:wait, :ci_pending} =
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: fresh], @waiting)
+    end
+
+    test "job ASSIGNE: c'est du travail, pas une impasse — meme vieux" do
+      # `waiting` seul ne suffit pas : Gitea garde ce statut le temps d'assigner. Un job qui porte
+      # un runner a ete reclame, et l'attente bornee d'origine reprend la main.
+      stale = Forge.iso_ago(10 * 60)
+      assigned = [%{"status" => "waiting", "runner_id" => 3, "labels" => ["shell"]}]
+
+      # 10 min : au-dela du delai COURT, sous les 45 min d'origine. La patience longue reprend la
+      # main, ce qui est precisement ce que ce correctif ne doit PAS abimer.
+      assert {:wait, :ci_pending} =
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], assigned)
+    end
+
+    test "aucun run lisible: on ne fabrique pas d'impasse, l'attente bornee reprend" do
+      # Meme posture que partout sur ce rail : une forge muette differe, elle ne conclut jamais.
+      stale = Forge.iso_ago(10 * 60)
+
+      c = %{
+        ctx(Forge, _ci: {:ok, :none}, _updated_at: stale)
+        | opts: [
+            list_dir_fun: fn "fleet/demo", ".gitea/workflows", _ -> {:ok, ["ci.yml"]} end,
+            runs_for_sha_fun: fn _r, _s, _f, _o -> {:error, {:http, 500, "boom"}} end
+          ]
+      }
+
+      assert {:wait, :ci_pending} =
+               CiGate.decide(42, "lcars/issue-7-engineer", c, fn -> :required end)
+    end
+
+    test "AUCUN workflow: l'impasse d'origine passe AVANT — elle est plus precise" do
+      # Deux impasses peuvent etre vraies en meme temps ; nommer « pas de workflow » est plus
+      # actionnable que « personne ne reclame », et c'est celle qui doit sortir.
+      lister = fn "fleet/demo", _dir, _ -> {:error, :not_found} end
+      stale = Forge.iso_ago(10 * 60)
+
+      assert {:escalate, {:ci_impossible, :no_workflow}, _} =
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @waiting, lister)
+    end
+  end
+
   describe "the card governs" do
     test ":ignore short-circuits before touching the forge" do
       assert {:proceed, nil} = decide([], :ignore, ForbiddenForge)

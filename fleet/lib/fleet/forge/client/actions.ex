@@ -265,6 +265,19 @@ defmodule Fleet.Forge.Client.Actions do
     :ok
   end
 
+  @doc """
+  The jobs of `run_id`, raw.
+
+  Each job carries `status` (`waiting` while nothing has claimed it), `labels` — the `runs-on:` it
+  asks for — and `runner_id`/`runner_name`, zero and empty while unassigned. Those three answer, in
+  ONE read, the question the CI gate used to take forty-five minutes to ask: has anything picked
+  this job up, and what did it ask for?
+  """
+  @spec jobs(String.t(), pos_integer(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def jobs(repo, run_id, opts \\ []) when is_binary(repo) and is_integer(run_id) do
+    with {:ok, config} <- resolve_config(opts), do: run_jobs(config, repo, run_id)
+  end
+
   defp run_jobs(config, repo, run_id) do
     # Meme enveloppe declaree (`ActionWorkflowJobsResponse`), meme refus d'un repli complaisant.
     case http_get(config, "/repos/#{encode_repo(repo)}/actions/runs/#{run_id}/jobs") do

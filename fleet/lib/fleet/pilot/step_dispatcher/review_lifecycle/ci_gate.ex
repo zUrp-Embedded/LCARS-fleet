@@ -46,6 +46,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # bench), short enough that a dead rail is named the same hour.
   @pending_deadline_sec 45 * 60
 
+  # ⚠ UN JOB QUE PERSONNE N'A PRIS N'EST PAS UNE CI LENTE, et lui donner la patience d'une CI lente
+  # a coute deux heures a un operateur le 2026-08-21. Son job affichait « Waiting », 0 s, avec un
+  # `runs-on:` qu'aucun runner de la boite ne servait : indiscernable d'un job en cours, et bloquant
+  # la fusion sans jamais rougir. Un rouge dit quelque chose ; une attente ressemble a du travail.
+  #
+  # CE DELAI EST COURT PARCE QUE LA MESURE EST DIFFERENTE. On n'attend plus « que la CI finisse » :
+  # on attend qu'un runner la RECLAME, ce qui prend des secondes quand un runner sert le label. Au
+  # dela, soit aucun ne le sert — impasse structurelle — soit tous sont occupes, et le message pose
+  # la question au lieu de la garder pour dans trois quarts d'heure.
+  @unclaimed_deadline_sec 5 * 60
+
   # Where a repository DECLARES its workflows. Both, because Gitea serves both, and because being
   # wrong in this direction only costs the bounded wait we already had — while missing one would
   # escalate a repo that does have a rail.
@@ -168,9 +179,78 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
            "Ajoute un workflow, ou declare une carte dont `ci` vaut `ignore`."}
 
       _yes_or_unknown ->
-        stalled_or_wait(:none, sha, committed_at, pr_number)
+        unclaimed_or_wait(sha, committed_at, pr_number, ctx)
     end
   end
+
+  # LA TROISIEME CAUSE DE `:none`, ET ELLE SE MESURE AU LIEU DE S'ATTENDRE. Un workflow existe, donc
+  # `no_workflow` ne mord pas — mais si AUCUN runner ne reclame le job, aucun statut ne viendra non
+  # plus. L'API le dit en une lecture : `status: "waiting"` et `runner_id: 0`, avec les `labels` que
+  # le job demande.
+  #
+  # ⚠ ON NE CONCLUT PAS « AUCUN RUNNER NE SERT CE LABEL » — on rapporte ce qui est mesure. Tous les
+  # runners occupes produisent la meme observation, et affirmer la premiere cause enverrait reparer
+  # une configuration intacte. Le message NOMME le label et laisse la question ouverte : c'est ce
+  # qu'il faut pour agir, et c'est tout ce qui est prouve.
+  defp unclaimed_or_wait(sha, committed_at, pr_number, %Ctx{} = ctx) do
+    with true <- past?(committed_at, @unclaimed_deadline_sec),
+         {:ok, [_ | _] = labels} <- unclaimed_labels(sha, ctx) do
+      {:escalate, {:ci_stalled, :unclaimed},
+       "AUCUN RUNNER n'a reclame ce job depuis plus de " <>
+         "#{div(@unclaimed_deadline_sec, 60)} min sur #{String.slice(sha, 0, 8)} " <>
+         "(PR ##{pr_number}) — il demande #{inspect(labels)}. Un runner sert-il ce label ? " <>
+         "Un job jamais reclame ne rougit jamais : il bloque la fusion en ressemblant a du travail."}
+    else
+      _ -> stalled_or_wait(:none, sha, committed_at, pr_number)
+    end
+  end
+
+  # Les labels des jobs que rien n'a pris, sur les runs de ce sha. Liste vide = tout est reclame (ou
+  # il n'y a rien a lire), et l'attente bornee d'origine reprend la main.
+  defp unclaimed_labels(sha, %Ctx{} = ctx) do
+    runs_fun = Keyword.get(ctx.opts, :runs_for_sha_fun, &default_runs_for_sha/4)
+    jobs_fun = Keyword.get(ctx.opts, :run_jobs_fun, &default_run_jobs/3)
+
+    with {:ok, runs} <- runs_fun.(ctx.repo, sha, [], ctx.forge_opts) do
+      labels =
+        runs
+        |> Enum.flat_map(fn run ->
+          case jobs_fun.(ctx.repo, Map.get(run, "id"), ctx.forge_opts) do
+            {:ok, jobs} -> jobs
+            _ -> []
+          end
+        end)
+        |> Enum.filter(&unclaimed?/1)
+        |> Enum.flat_map(&(Map.get(&1, "labels") || []))
+        |> Enum.uniq()
+
+      {:ok, labels}
+    end
+  end
+
+  # `waiting` ET sans runner : les deux, parce que Gitea garde le statut le temps d'assigner, et
+  # qu'un job assigne qui demarre est du travail, pas une impasse.
+  defp unclaimed?(job) do
+    Map.get(job, "status") == "waiting" and Map.get(job, "runner_id") in [nil, 0]
+  end
+
+  defp past?(nil, _sec), do: false
+  defp past?(committed_at, sec), do: age_sec(committed_at) > sec
+
+  # ⚠ PAR LE SEAM RUNTIME, ET PAS PAR UN APPEL DIRECT. `Fleet.Forge.Client.Actions` n'est pas exporte
+  # par la boundary de `Fleet.Forge` : `Pilot` ne l'atteint jamais a la compilation. Son voisin
+  # `MergeAndPromote` resout le meme module par `:forge_actions`, et c'est la forme prevue —
+  # elargir la boundary pour se donner raison serait reparer le mur au lieu de l'appel.
+  #
+  # MEME CLEF QUE `MergeAndPromote` ET QUE LA SONDE DES JUGES, deliberement : la sonde et sa
+  # verification interrogent le meme sous-domaine, et deux clefs en donneraient deux avis en test.
+  defp forge_actions,
+    do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
+
+  defp default_runs_for_sha(repo, sha, filters, opts),
+    do: forge_actions().runs_for_sha(repo, sha, filters, opts)
+
+  defp default_run_jobs(repo, run_id, opts), do: forge_actions().jobs(repo, run_id, opts)
 
   defp declares_workflow?(ref, %Ctx{} = ctx) do
     lister = Keyword.get(ctx.opts, :list_dir_fun, &Fleet.Forge.Client.Files.list_dir/3)
