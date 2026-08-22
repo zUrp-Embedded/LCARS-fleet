@@ -118,6 +118,16 @@ first_free_uid() {
 # Les deux cas appellent deux gestes différents, donc deux verdicts. Sans aucun compte, il faut en
 # créer un. Avec des comptes non désignés, ils existent mais cette passe ne converge pas leur état
 # per-humain — et c'est CETTE conséquence-là qui est vraie.
+#
+# ⚠ ET « AUCUN » EST UN ÉTAT DE RANG 22, PAS UN ÉTAT FINAL. Ce module a longtemps conclu « personne
+# ne pourra lancer la fleet ici » — une phrase terminale, énoncée au milieu d'une passe qui va la
+# rendre fausse vingt-six modules plus loin : sans `--fleet-human`, `48-forge-host` passe une valeur
+# VIDE, la recette applique son propre défaut et crée le compte intégré sur la forge, puis le
+# convergeur posé par `64-services` le matérialise. Le rail produit donc un humain de fleet ; il ne
+# laisse simplement pas l'opérateur en choisir le nom.
+#
+# Le nom de ce compte n'est PAS recopié ici : son auteur est `forge-gestures.sh`, et un second
+# littéral ne resterait d'accord avec lui que jusqu'au jour où l'un des deux bouge.
 announce_no_fleet_human() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
   if [[ -n "$found" ]]; then
@@ -125,10 +135,11 @@ announce_no_fleet_human() {
      Leur état per-humain (~/.lcars, ~/pods, fleet_v2.env, identité git) n'est PAS convergé par
      cette passe — « provision apply --fleet-human <nom> » désigne celui qui le reçoit."
   else
-    p_drift "aucun humain de fleet DÉCLARÉ, et cette machine n'en porte aucun — personne ne pourra
-     lancer la fleet ici (l'opérateur, uid $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?'), est le
-     siège et GUARD B le lui interdit).
-     Nomme-le, et ce nom AUTORISE sa création : « provision apply --fleet-human <nom> »
+    p_drift "aucun humain de fleet DÉCLARÉ, et cette machine n'en porte aucun ENCORE.
+     L'opérateur (uid $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?')) est le siège : GUARD B lui interdit d'en lancer une.
+     Sans nom, la suite de cette passe s'en charge : la forge pose son compte intégré (48) et le
+     convergeur le matérialise ici (64) — tu ne choisis alors ni son nom ni son moment.
+     Pour en avoir un À TOI, MAINTENANT : « provision apply --fleet-human <nom> »
      — ou crée-le toi-même : « useradd -m -G $PROV_FLEET_GROUP <nom> »"
   fi
 }

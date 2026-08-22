@@ -238,9 +238,28 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
   [ -z "$output" ]
 }
 
-@test "aucun humain DECLARE et la machine n'en porte AUCUN : la phrase redevient vraie" {
+@test "aucun humain DECLARE et la machine n'en porte AUCUN : le verdict dit ce qui SUIT" {
+  # ⚠ « AUCUN » EST UN ETAT DE RANG 22, PAS UN ETAT FINAL, et ce temoin epinglait la phrase
+  # terminale. Le module annoncait « personne ne pourra lancer la fleet ici » vingt-six modules
+  # avant que la passe ne la rende fausse : sans `--fleet-human`, `48-forge-host` passe une valeur
+  # VIDE, la recette cree le compte integre sur la forge, et le convergeur de `64-services` le
+  # materialise. Le rail PRODUIT un humain de fleet — il ne laisse pas choisir son nom.
   passwd_with
   LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'announce_no_fleet_human'
-  [[ "$output" == *"personne ne pourra"* ]]
+  [[ "$output" != *"personne ne pourra"* ]]
+  # Ce que la suite de la passe fait, et le geste qui reprend la main dessus.
+  [[ "$output" == *"48"* ]]
+  [[ "$output" == *"64"* ]]
+  [[ "$output" == *"--fleet-human"* ]]
   [[ "$output" == *"useradd"* ]]
+}
+
+@test "le nom du compte integre n'est PAS recopie ici — son auteur est forge-gestures.sh" {
+  # Un second litteral ne reste d'accord avec le premier que jusqu'au jour ou l'un des deux bouge.
+  # C'est la meme regle que `LCARS_BUILTIN_HUMAN=""` dans 48-forge-host : vide est une reponse.
+  # ⚠ LE MOTIF EXCLUT UN POINT DEVANT : `~/.lcars` est un REPERTOIRE, pas le nom d'un compte, et il
+  # est legitime dans ce module. Un grep nu sur « lcars » rougit dessus et fait croire a une regle
+  # enfreinte la ou il n'y a qu'un chemin.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  ! grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
 }
