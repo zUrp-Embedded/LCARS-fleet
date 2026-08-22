@@ -207,14 +207,30 @@ printf "INSTALLED fleet -\n"
 # ne touche aucun process vivant : `id -nG <compte>` lit la base, `id -nG` nu lit le process. C'est
 # cette difference qu'on mesure, et ces deux temoins la tiennent dans les deux sens.
 
-_install_stubs() { # <groupe rendu par `id -nG` nu>
+# ⚠ LE STUB `stat` RENDAIT `lcars-admin` POUR TOUT, ET C'EST CE QUI A LAISSE PASSER LE DEFAUT.
+# Les deux objets sont gardes par DEUX groupes differents (mesure du 2026-08-22 sur un poste :
+# `/home/private` est `root:fleet`, le jeton `root:lcars-admin`), et `stat` sur le FICHIER exige
+# deja la traversee du REPERTOIRE. Un stub qui repond toujours ne peut donc pas voir le cas ou la
+# mesure fine echoue — c'est-a-dire le cas nominal qu'elle existe pour diagnostiquer.
+#
+# La doublure modelise les deux objets ET la traversee : le fichier ne se stat que si le PROCESS
+# porte le groupe du repertoire.
+_install_stubs() { # <groupes du PROCESS> [groupes de la BASE]
   STUBS="$BATS_TEST_TMPDIR/stubs"; mkdir -p "$STUBS"
   # Le jeton EXISTE et n'est PAS lisible — l'etat exact ou la commande doit choisir son message.
   MASTER="$BATS_TEST_TMPDIR/forge-master.token"; echo tok > "$MASTER"; chmod 000 "$MASTER"
+  local db="${2:-lcars fleet lcars-admin}"
 
   cat > "$STUBS/stat" <<EOF
 #!/usr/bin/env bash
-echo lcars-admin
+target="\${@: -1}"
+if [[ "\$target" == *forge-master.token ]]; then
+  # La traversee d'abord : sans le groupe du repertoire, ce stat-la ECHOUE, comme sur un vrai poste.
+  printf '%s\\n' "$1" | tr ' ' '\\n' | grep -qx fleet || { echo "stat: cannot statx" >&2; exit 1; }
+  echo lcars-admin
+else
+  echo fleet
+fi
 EOF
   # Avec un argument (`id -nG lcars`) : la BASE, ou le compte est admin.
   # Sans argument (`id -nG`) : le PROCESS, dont les groupes sont ceux du test.
@@ -222,7 +238,7 @@ EOF
 #!/usr/bin/env bash
 case "\$*" in
   "-un")    echo lcars ;;
-  "-nG lcars") echo "lcars fleet lcars-admin" ;;
+  "-nG lcars") echo "$db" ;;
   "-nG")    echo "$1" ;;
   *)        exec /usr/bin/id "\$@" ;;
 esac
@@ -287,6 +303,85 @@ EOF
 # `project reconcile`, `approve` le font). Consequence mesuree le 2026-08-20 : sous `sudo`, qui
 # reinitialise l'environnement et deplace $HOME, la commande accusait la boite de n'avoir pas de
 # `FORGE_BASE_URL` — un manque qui etait celui de l'appelant.
+# ─── LE TROISIEME ETAT, ET LE REFUS N'EN CONNAISSAIT QUE DEUX ────────────────────────────────────
+# « admin sur la forge » et « humain de cette flotte » sont DEUX faits distincts. Le convergeur
+# ITERE sur `fleet:humans` et n'appelle `forge_is_admin` que dans cette boucle : hors de la team,
+# personne ne lit ton `is_admin`, donc aucun groupe n'est projete — si admin sois-tu.
+#
+# ⚠ MESURE DU 2026-08-22, EN VOL. Un operateur ADMIN de sa forge, absent de `fleet:humans`, s'est vu
+# prescrire sa propre promotion. Meme forme que la cicatrice du dessus, un cran plus haut : le refus
+# nommait la mauvaise cause, donc il envoyait chercher au bon endroit pour un probleme qui etait
+# ailleurs.
+
+@test "catalogue install: ni groupe ni base — le refus nomme fleet:humans, pas is_admin" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # Le process ET la base sont d'accord : ce compte n'a jamais ete converge.
+  _install_stubs "lcars" "lcars"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"humain de cette flotte"* ]]
+  [[ "$output" == *"humans"* ]]
+  # LE MENSONGE INTERDIT #4 : accuser is_admin quand la promotion est faite et la team absente.
+  [[ "$output" != *"n'administre pas ce runtime"* ]]
+  [[ "$output" != *"y porte is_admin"* ]]
+  [[ "$output" != *"SESSION est anterieure"* ]]
+}
+
+@test "catalogue install: session anterieure a la CONVERGENCE — mesuree sur le repertoire" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # ⚠ LE CAS QUI ETAIT INATTEIGNABLE. La base porte les deux groupes, le process aucun — l'etat
+  # exact d'un shell ouvert avant le tour du convergeur. La mesure fine partait de
+  # `stat -c %G <jeton>`, qui exige la traversee du repertoire : elle echouait ici, et le refus
+  # retombait sur « ton compte n'administre pas ce runtime ». Le repli etait ecrit comme un cas
+  # rare ; il etait le cas nominal, parce que les deux objets n'ont pas le meme groupe.
+  # UNE seule adhesion en attente, pour que ce temoin tienne la MESURE et pas la redaction du geste
+  # (les deux voisins ci-dessous tiennent le geste, a une et a deux adhesions).
+  _install_stubs "lcars" "lcars fleet"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SESSION est anterieure"* ]]
+  [[ "$output" == *"newgrp fleet"* ]]
+  [[ "$output" != *"n'administre pas ce runtime"* ]]
+  [[ "$output" != *"humain de cette flotte"* ]]
+}
+
+@test "catalogue install: DEUX adhesions en attente — nommees ensemble, pas une par tour" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # ⚠ RELECTURE INDEPENDANTE DU 2026-08-23. Le geste ouvre la porte du REPERTOIRE (`fleet`), le jeton
+  # celle du FICHIER (`lcars-admin`). Quelqu'un promu aux deux dans le meme tour de convergeur voyait
+  # le premier, agissait, et retombait sur le second : deux allers-retours pour une cause unique.
+  #
+  # Et `newgrp` ne prend qu'un groupe par appel : le nommer comme LA sortie serait un demi-geste.
+  # On ne parie pas non plus sur sa portee reelle (ajout du groupe demande, ou relecture du set
+  # entier — non mesure) : la session neuve vaut dans les deux lectures.
+  _install_stubs "lcars" "lcars fleet lcars-admin"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"En attente : fleet lcars-admin"* ]]
+  [[ "$output" == *"session NEUVE"* ]]
+  # Le demi-geste : « newgrp <un seul> » presente comme la sortie alors qu'il en faudrait deux.
+  [[ "$output" != *"Ouvre un shell qui les relit :  newgrp fleet"* ]]
+}
+
+@test "catalogue install: UNE seule adhesion en attente — newgrp reste la sortie nommee" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # Le complement, et il tient la moitie qui n'a PAS bouge : un seul groupe en attente garde le
+  # geste court. Sans ce temoin, remplacer partout `newgrp` par « session neuve » passerait au vert.
+  _install_stubs "lcars fleet" "lcars fleet lcars-admin"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"newgrp lcars-admin"* ]]
+  [[ "$output" != *"session NEUVE"* ]]
+}
+
 @test "catalogue install: la configuration vient de fleet_v2.env, pas du shell" {
   [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
   T="$BATS_TEST_TMPDIR"

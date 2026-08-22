@@ -600,3 +600,100 @@ FAKE
   [ "$status" -eq 0 ]
   [ "$(stat -c '%a' "$LCARS_CATALOGUE_WORK/.apply.lock")" = "600" ]
 }
+
+# ─── LA RESOLUTION DE L'ENTRYPOINT — UN CHEMIN D'IMAGE DANS UN SCRIPT SANS HYPOTHESE DE CONTENEUR ──
+#
+# ⚠ MESURE DU 2026-08-22, SUR UN POSTE. `lcars catalogue install web-demo` rendait
+# « /opt/lcars/entrypoint.sh: No such file or directory », traduit en « pas de source installable » :
+# un fichier absent presente comme un catalogue introuvable. Le defaut de `$ENTRYPOINT` etait le
+# chemin de l'IMAGE, dans le seul script que le miroir des auxiliaires pose a plat sur l'hote — et
+# `62-runtime-helpers` exclut `entrypoint.sh` de ce miroir au motif qu'« il n'a pas de sens hors
+# conteneur » : vrai de son metier de BOOT, faux de son metier de PORTES OUTIL.
+#
+# IL N'Y A RIEN A COPIER : l'arbre `deploy/` est deja pose (`EMBEDDED=(deploy etc)`). Ces temoins
+# tiennent les DEUX dispositions ou ce script vit, et le refus quand il n'en trouve aucune.
+
+_flat_copy() { # <racine> -> pose une copie du script a plat, et rend son chemin
+  mkdir -p "$1"
+  cp "$SCRIPT" "$1/forge-gestures.sh"
+  chmod +x "$1/forge-gestures.sh"
+  printf '%s/forge-gestures.sh' "$1"
+}
+
+_fake_entry() { # <chemin> <marqueur> [mode]
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "$2" "\$*" >> "$ENTRY_LOG"
+case "\$1" in
+  catalogue-source) echo "alice/cat main deadbeef" ;;
+  roles-tfvars)     echo '{"org":"cat","roles":["cat_dev"]}' ;;
+esac
+exit 0
+EOF
+  chmod "${3:-0755}" "$1"
+}
+
+@test "entrypoint: le VOISIN gagne — la disposition de l'image" {
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat")"
+  _fake_entry "$BATS_TEST_TMPDIR/flat/entrypoint.sh" VOISIN
+  _fake_entry "$BATS_TEST_TMPDIR/flat/fleet/deploy/docker/entrypoint.sh" EMBARQUE
+
+  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+  grep -q "^VOISIN catalogue-source cat" "$ENTRY_LOG"
+  ! grep -q "^EMBARQUE" "$ENTRY_LOG"
+}
+
+@test "entrypoint: SANS voisin, l'arbre EMBARQUE repond — c'est le cas du poste" {
+  # ⚠ LE TEMOIN DU DEFAUT MESURE. Sur un poste, ce script vit a plat dans `/opt/lcars/` et son
+  # voisin `entrypoint.sh` n'existe pas ; l'arbre est deux crans plus bas. C'est exactement cet
+  # etat qui rendait « No such file or directory ».
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat2")"
+  _fake_entry "$BATS_TEST_TMPDIR/flat2/fleet/deploy/docker/entrypoint.sh" EMBARQUE
+
+  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+  grep -q "^EMBARQUE catalogue-source cat" "$ENTRY_LOG"
+}
+
+@test "entrypoint: un fichier NON EXECUTABLE repond quand meme — le mode du \`cp -a\`" {
+  # ⚠ `entrypoint.sh` est `100644` DANS LE DEPOT ; seule l'image le passe en `0755` (`RUN chmod`).
+  # Le `cp -a` de l'arbre embarque preserve donc un mode non executable, et un garde sur `-x`
+  # rejetterait exactement le fichier qu'il vient de trouver. On resout sur `-r`, on invoque par
+  # `bash` : le mode cesse d'etre une condition.
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat3")"
+  _fake_entry "$BATS_TEST_TMPDIR/flat3/fleet/deploy/docker/entrypoint.sh" EMBARQUE 0644
+
+  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+  grep -q "^EMBARQUE catalogue-source cat" "$ENTRY_LOG"
+}
+
+@test "entrypoint: AUCUN candidat -> refus A LA PORTE qui nomme le chemin, pas « pas de source »" {
+  # Un fichier absent annonce comme un catalogue introuvable envoie l'operateur interroger sa forge
+  # pour un manque qui est celui de sa boite. Le garde est donc a la porte du geste, avant tout le
+  # reste — quatre etapes plus tot que la ou l'absence se manifestait.
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat4")"
+
+  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"portes outil du release introuvables"* ]]
+  [[ "$output" == *"entrypoint.sh"* ]]
+  [[ "$output" != *"pas de source installable"* ]]
+}
+
+@test "entrypoint: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {
+  # La surcharge court-circuite la resolution — c'est son metier — donc elle court-circuite aussi
+  # les deux candidats qui auraient repondu. Le garde doit la traiter comme n'importe quelle
+  # absence : ce qui compte est qu'aucune porte outil ne repond, pas la raison pour laquelle.
+  setup_install
+
+  run env LCARS_ENTRYPOINT="$BATS_TEST_TMPDIR/nulle-part.sh" \
+      bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"portes outil du release introuvables"* ]]
+  [[ "$output" == *"nulle-part.sh"* ]]
+  [[ "$output" != *"pas de source installable"* ]]
+}

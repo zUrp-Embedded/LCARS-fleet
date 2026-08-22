@@ -204,7 +204,10 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "l'apply appelle compose SANS condition — une forge vivante doit pouvoir RECONVERGER" {
   # L'appel ne doit plus etre garde par la liveness : c'est `forge_up` AVANT qui dit si l'on a
   # monte ou simplement reconverge, pas s'il faut agir.
-  ! grep -qE 'if ! forge_up; then[[:space:]]*$' "$SRC"
+  # ⚠ COMPTE, N'INVERSE PAS : bash exempte de `set -e` toute commande dont le statut est inverse par
+  # `!`, donc un `! grep -q` qui n'est pas la DERNIERE instruction du test ne rougit jamais. Mesure
+  # du 2026-08-23 : 35 assertions du corpus bats sont dans ce cas.
+  [ "$(grep -cE 'if ! forge_up; then[[:space:]]*$' "$SRC")" -eq 0 ]
   grep -q 'local was_up=0; forge_up && was_up=1' "$SRC"
   # et le compose reste bien dans le chemin nominal, pas dans une branche
   grep -qE '^\s+run_quiet d compose -f "\$COMPOSE_FILE" -p "\$PROV_FORGE_PROJECT" up -d' "$SRC"
@@ -397,7 +400,31 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
   # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
   grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
-  grep -q 'ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"' "$g"
+
+  # ⚠ `ENTRYPOINT` ETAIT LE TROISIEME DE CETTE LISTE, ET IL N'Y EST PLUS — son defaut ne se recable
+  # plus, il se RESOUT. Il etait bien un chemin d'image, et il a coute une install le 2026-08-22 sur
+  # un poste : « /opt/lcars/entrypoint.sh: No such file or directory », rendu a l'operateur comme
+  # « pas de source installable ».
+  #
+  # UNE SURCHARGE DE PLUS ICI N'AURAIT RIEN REPARE, et c'est pour ca que la reponse est ailleurs :
+  # le verbe qui casse est `lcars catalogue install`, un geste HUMAIN que ce module n'appelle
+  # jamais. Recabler dans 48 aurait rendu vert le rail qui ne passe pas par la ligne cassee.
+  #
+  # Et il n'y avait rien a copier : `62-runtime-helpers` pose deja l'arbre `deploy/`
+  # (`EMBEDDED=(deploy etc)`), donc le fichier EST la, sous un autre chemin. Le geste se cherche
+  # donc lui-meme, dans les deux dispositions ou il vit — comportement tenu par quatre temoins de
+  # `forge_gestures.bats`.
+  # LA PROPRIETE, PAS LA LIGNE : aucun defaut ABSOLU. Epingler le texte de la resolution
+  # (`:-$(_entrypoint_path)`) ferait rougir ce temoin au premier renommage, sans qu'aucun
+  # comportement n'ait bouge — et le comportement, lui, est tenu par quatre temoins de
+  # `forge_gestures.bats`. Un chemin absolu en defaut est en revanche exactement ce qui a casse,
+  # quelle que soit sa valeur : `/opt/lcars/entrypoint.sh` hier, un autre demain.
+  # ⚠ PAS `! grep -q`, ET C'EST UNE MESURE : bash EXEMPTE de `set -e` toute commande dont le statut
+  # est inverse par `!` (manuel : « or if the command's return value is being inverted with ! »).
+  # Un `! grep -q` en temoin est donc INERTE — il ne rougit jamais, quoi qu'il trouve. Mesure du
+  # 2026-08-23 : la premiere redaction de cette assertion l'utilisait, et une mutation reintroduisant
+  # un defaut absolu (`/opt/lcars/bin/entrypoint.sh`) passait au VERT. On compte, et on compare.
+  [ "$(grep -cE 'ENTRYPOINT="\$\{LCARS_ENTRYPOINT:-/' "$g")" -eq 0 ]
   # et 48 les nomme tous les deux
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_DEMO_CATALOGUE='
@@ -634,7 +661,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # Le geste est celui des roles : PATCH admin avec le jeton master, jamais une lecture du seed.
   grep -q 'request = .PATCH.' <<<"$body"
   grep -q 'admin/users/' <<<"$body"
-  ! grep -q 'SEED_FILE' <<<"$body"
+  # Meme raison qu'en tete de fichier : `!` non terminal = assertion inerte.
+  [ "$(grep -c 'SEED_FILE' <<<"$body")" -eq 0 ]
   # Et il rejoint le banner par le canal, pas un echo perdu au rang 48.
   grep -q 'prov_announce_credential' <<<"$body"
 }
