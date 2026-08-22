@@ -17,7 +17,19 @@
 # basename ou chemin complet) contre le vrai `git ls-files`. Le test ne recopie aucune liste — une
 # liste recopiee derive de son sujet, et c'est exactement le defaut sous test.
 
+# ⚠ CE MUR JOUE LES CLAUSES CONTRE `git ls-files` : SANS DEPOT, LA POPULATION EST VIDE. Et une
+# population vide, ce fichier le dit lui-meme quinze lignes plus haut, n'est pas un vert — c'est un
+# instrument qui a cesse de voir son sujet. Un tarball n'emporte pas `.git` (`git archive` n'en
+# produit jamais), donc chaque clause y paraitrait morte et les quatre temoins rougissaient sur un
+# hook parfaitement sain. Mesure du 2026-08-22 : ils faisaient partie des douze qui tuaient
+# `60-deploy` sur toute install depuis un tarball.
+need_git_checkout() {
+  git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1 \
+    || skip "pas de checkout git (arbre livre par tarball) — ce temoin mesure un depot"
+}
+
 setup() {
+  need_git_checkout
   HOOK="$BATS_TEST_DIRNAME/../pre-commit"
   ROOT="$(git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)"
   mapfile -t FILES < <(git -C "$ROOT" ls-files)

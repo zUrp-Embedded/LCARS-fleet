@@ -170,6 +170,19 @@ EOF
 
 # ─── LA REVISION VOYAGE AVEC LA COPIE ───────────────────────────────────────────────────────────
 #
+# ⚠ TROIS DES TEMOINS CI-DESSOUS MESURENT UN CHECKOUT, PAS UN ARBRE LIVRE — ils lisent `git
+# rev-parse` du depot pour savoir ce que le tampon DOIT contenir. `git archive` n'emporte jamais
+# `.git`, donc une install depuis un tarball les jouait sur un arbre sans revision : trois rouges
+# sur un module sain. Le garde va sur EUX et pas dans `setup()`, parce que les douze autres
+# temoins de ce fichier mesurent la copie des auxiliaires, qui n'a pas besoin de depot.
+#
+# Mesure du 2026-08-22 : avec les neuf temoins de `git-hooks/tests`, ces trois-la tuaient
+# `60-deploy` sur « arbre source non atteste » a chaque install depuis un tarball.
+need_git_checkout() {
+  git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1 \
+    || skip "pas de checkout git (arbre livre par tarball) — ce temoin lit la revision du depot"
+}
+#
 # ⚖ USER 2026-08-21, apres la panne : « le rail natif se met a jour depuis un clone git, et rien ne
 # dit a quel commit ce clone est. Un provision apply sur un checkout en retard reinstalle
 # silencieusement l'etat d'avant. Aucun verdict ne le voit. »
@@ -180,6 +193,7 @@ EOF
 # part ne pouvait la relier a un arbre en retard — le module avait fait exactement son travail.
 
 @test "apply TAMPONNE la revision, a la racine que repo_root() de la copie retrouve" {
+  need_git_checkout
   # `repo_root()` remonte trois crans depuis `<...>/fleet/deploy/lib` : pour la copie, la racine est
   # $HELPERS_DIR, pas $HELPERS_DIR/fleet. Un tampon un cran plus bas ne serait lu par personne.
   stub_curl "peu importe"
@@ -201,6 +215,7 @@ EOF
 }
 
 @test "une source EN RETARD sur ce qui est pose est un ECHEC, pas une note de bas de page" {
+  need_git_checkout
   # Le cas exact de la panne : le tampon porte un descendant, l'arbre est son ancetre.
   stub_curl "peu importe"
   mod apply
@@ -216,6 +231,7 @@ EOF
 }
 
 @test "apply ANNONCE le retour en arriere AVANT de l'ecrire — apres, plus rien ne le dira" {
+  need_git_checkout
   stub_curl "peu importe"
   mod apply
   local head; head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"

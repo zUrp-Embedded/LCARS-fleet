@@ -18,7 +18,22 @@
 # saurait pas dire que le marqueur a derive. Le jour ou l'app est renommee, ce test le dit — au lieu
 # d'un hook redevenu silencieusement `project`.
 
+# ⚠ CES TEMOINS MESURENT UN CHECKOUT, PAS UN ARBRE LIVRE. Ils lisent le depot lui-meme — son
+# toplevel, son `fleet/mix.exs` suivi — et un hook git n'a de sens que la ou il y a un `.git`.
+# `git archive` n'en emporte jamais : une install depuis un tarball joue pourtant ce gate, sur un
+# arbre ou l'objet mesure n'existe pas. Mesure du 2026-08-22 : DOUZE temoins rouges d'un coup,
+# `60-deploy` mort sur « arbre source non atteste », et le rail tarball incapable de passer son
+# propre gate — sur un code entierement sain.
+#
+# Le skip ne baisse pas la barre : il dit que la question ne se pose pas ici. Ce qui la baisserait,
+# ce serait de faire croire qu'un depot a ete verifie la ou il n'y en a pas.
+need_git_checkout() {
+  git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1 \
+    || skip "pas de checkout git (arbre livre par tarball) — ce temoin mesure un depot"
+}
+
 setup() {
+  need_git_checkout
   HOOKS_SRC="$BATS_TEST_DIRNAME/.."
   REPO_ROOT="$(git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)"
 }
