@@ -30,10 +30,29 @@
 # `Fleet.Observation.Deck` (`media_root`, défaut `/usr/share/lcars`), `console-deck.py`
 # (`DECK_FAVICON`) et la recette de charte. Le rail natif les servait tous les trois en générique.
 #
-# ⚠ `doc/` N'EST PAS POSÉ ICI, ET C'EST DÉLIBÉRÉ. Le Dockerfile le remplit depuis un étage de build
-# du site (`COPY --from=site`), que ce rail ne bâtit pas. `console-deck.py` défaute dessus et son
-# absence coûte un lien mort, jamais un échec. Le poser demanderait de bâtir le site à l'install —
-# une décision qui n'a pas été prise, et qu'un module ne prend pas tout seul.
+# ─── ET `doc/`, QUI SE BÂTIT ICI ────────────────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-22 : « j'ai pas envie de taper un site remote pour afficher la doc locale ».
+#
+# Ce module a d'abord posé les deux arbres statiques et laissé `doc/` de côté, au motif qu'il vient
+# d'un étage de build que ce rail ne joue pas. C'était une omission déguisée en décision : la doc
+# n'est pas accessoire, c'est la doc UTILISATEUR du produit, et l'onglet `/doc/` du deck rendait un
+# `404 not found` nu sous un commentaire qui dit « doc absente = image ratée » — vrai dans la boîte,
+# faux ici.
+#
+# Elle se bâtit à partir du MÊME arbre : le site lit `fleet/priv/catalogue` (les cartes, les sièges)
+# et `fleet/lib/fleet/mcp/pod_tools.ex` (les outils). Même commit, donc rien à épingler et rien à
+# rafraîchir — et un déplacement de catalogue CASSE ce build, ce qui est le comportement voulu.
+#
+# ⚠ `LCARS_SITE_BASE=/doc/` EST LOAD-BEARING. `astro.config.mjs` fait `base = LCARS_SITE_BASE || '/'`.
+# GitHub Pages bâtit pour la racine ; le deck sert sous `/doc/`. Recopier l'artefact Pages ici
+# donnerait un site dont chaque URL d'asset est fausse — d'où un build local, avec la base du deck.
+# Le Dockerfile pose la même variable, pour la même raison.
+#
+# ⚠ ET LE BUILD TOURNE `as_human`, DANS LE CHECKOUT. `npm ci` écrit `node_modules/` (173 Mo) et
+# `dist/` — les deux sont gitignorés, comme `_build` et `deps` pour mix. En root, il laisserait à
+# l'opérateur un arbre qu'il ne peut plus effacer : c'est la leçon du `.terraform` de `46-tofu`,
+# payée au nettoyage de .63.
 #
 # ─── POURQUOI 44 ────────────────────────────────────────────────────────────────────────────────
 #
@@ -60,6 +79,15 @@ MEDIA_SRC_ROOT="${LCARS_MEDIA_SRC_ROOT:-$(repo_root)/assets}"
 
 media_src() { echo "$MEDIA_SRC_ROOT/$1"; }
 
+# Le projet du site, et la base sous laquelle le deck le sert. Les deux sont des coutures : le
+# premier pour qu'un témoin puisse jouer la branche « sources absentes », la seconde parce que c'est
+# le contrat entre ce build et la route `/doc/` de `console-deck.py`.
+SITE_SRC="${LCARS_SITE_SRC:-$(repo_root)/assets/github.io}"
+SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
+NPM_BIN="${LCARS_NPM_BIN:-npm}"
+
+doc_dir() { echo "$MEDIA_ROOT/doc"; }
+
 check() {
   local t src n
   for t in "${MEDIA_TREES[@]}"; do
@@ -77,7 +105,53 @@ check() {
       p_ok "$MEDIA_ROOT/$t posé ($n fichiers)"
     fi
   done
+
+  # ⚠ ON SONDE `index.html`, PAS LE RÉPERTOIRE. Un build interrompu laisse un `doc/` qui existe et
+  # que la route sert en 404 — la question posée est « le deck a-t-il une page d'accueil à rendre »,
+  # et c'est ce fichier-là qui y répond.
+  if [[ -s "$(doc_dir)/index.html" ]]; then
+    p_ok "$(doc_dir) posée ($(find "$(doc_dir)" -type f 2>/dev/null | wc -l) fichiers)"
+  else
+    p_drift "$(doc_dir) absente — l'onglet Doc du deck rendra 404 (16-node la bâtit, ce module la pose)"
+  fi
+
   verdict_check
+}
+
+# ─── build_doc — LA DOC, BÂTIE DU MÊME ARBRE ────────────────────────────────────────────────────
+#
+# Elle échoue FORT : une doc absente est une doc absente, pas un lien mort qu'on découvre en
+# cliquant. Le module qui la pose est le seul endroit où l'échec a encore un contexte.
+build_doc() {
+  [[ -d "$SITE_SRC" ]] \
+    || { p_fail "sources du site absentes ($SITE_SRC) — l'arbre livre-t-il encore sa doc ?"; verdict_apply; }
+  command -v "$NPM_BIN" >/dev/null 2>&1 \
+    || { p_fail "npm absent — 16-node pose le précompilé épinglé ; joue-le d'abord"; verdict_apply; }
+
+  # ⚠ `as_human` : `npm ci` ÉCRIT dans le checkout (`node_modules/`, `dist/`, tous deux gitignorés).
+  # En root il laisserait à l'opérateur un arbre qu'il ne peut plus effacer — la leçon du
+  # `.terraform` de `46-tofu`, payée au nettoyage de .63.
+  run_step "doc du deck · dépendances" -- as_human env -C "$SITE_SRC" "$NPM_BIN" ci --no-audit --no-fund \
+    || { p_fail "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"; verdict_apply; }
+
+  # ⚠ LA BASE VOYAGE PAR L'ENVIRONNEMENT, et sans elle le site sort pour la racine : servi sous
+  # `/doc/`, chacune de ses URL d'asset serait fausse. C'est la variable que le Dockerfile pose, et
+  # que le workflow GitHub NE pose pas — Pages sert au domaine, le deck sous un chemin.
+  run_step "doc du deck · build" -- as_human env -C "$SITE_SRC" LCARS_SITE_BASE="$SITE_BASE" "$NPM_BIN" run build \
+    || { p_fail "build du site en échec ($SITE_SRC) — un chemin du runtime a-t-il bougé ? le build LIT l'arbre"; verdict_apply; }
+
+  [[ -s "$SITE_SRC/dist/index.html" ]] \
+    || { p_fail "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"; verdict_apply; }
+
+  # Pose atomique : un `doc/` à moitié recopié se sert en 404 silencieux.
+  local partial; partial="$(doc_dir).partial"
+  rm -rf "$partial"
+  ensure_dir "$partial" 0755 "$MEDIA_OWNER" || verdict_apply
+  cp -a "$SITE_SRC/dist/." "$partial/" \
+    || { p_fail "doc non copiable ($SITE_SRC/dist → $(doc_dir))"; rm -rf "$partial"; verdict_apply; }
+  rm -rf "$(doc_dir)"
+  mv "$partial" "$(doc_dir)"
+  p_chg "doc du deck posée ($(doc_dir), base $SITE_BASE)"
 }
 
 apply() {
@@ -91,10 +165,12 @@ apply() {
     cp -a "$src/." "$MEDIA_ROOT/$t/" \
       || { p_fail "médias non copiables ($src → $MEDIA_ROOT/$t)"; verdict_apply; }
   done
+  build_doc
+
   # Lisible par tous : le deck tourne sous l'humain, la recette sous root, un pod sous un troisième.
   chmod -R a+rX "$MEDIA_ROOT" 2>/dev/null || true
   PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]})"
+  p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]} doc)"
   verdict_apply
 }
 

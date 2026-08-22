@@ -35,6 +35,29 @@ setup() {
 
   export LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/share/lcars"
   export LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"
+
+  # ⚠ AUCUN TEMOIN NE BATIT LE SITE, ET CE N'EST PAS UNE COMMODITE. Sans ces deux coutures la suite
+  # jouait un `npm ci` REEL dans le checkout de celui qui la lance : des minutes, du reseau, et un
+  # resultat qui depend de sa machine. Ce qui se mesure ici est la DERIVATION — la base passee, la
+  # pose atomique, le refus quand npm manque — jamais la sortie d'astro.
+  export LCARS_SITE_SRC="$BATS_TEST_TMPDIR/site"
+  mkdir -p "$LCARS_SITE_SRC"
+  export LCARS_NPM_BIN="$BATS_TEST_TMPDIR/bin/npm"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  # Le faux npm ECRIT ce qu'un vrai build ecrit, et TRACE la base qu'on lui a passee : c'est le seul
+  # fait que ce module doit garantir cote build.
+  cat > "$LCARS_NPM_BIN" <<'SH'
+#!/usr/bin/env bash
+echo "npm $*" >> "${NPM_TRACE:?}"
+if [[ "${1:-}" == "run" && "${2:-}" == "build" ]]; then
+  echo "base=${LCARS_SITE_BASE:-<vide>}" >> "$NPM_TRACE"
+  mkdir -p dist && printf '<html>doc</html>' > dist/index.html
+fi
+SH
+  chmod +x "$LCARS_NPM_BIN"
+  export NPM_TRACE="$BATS_TEST_TMPDIR/npm.trace"
+  : > "$NPM_TRACE"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
 mod() { run bash "$MOD" "$1"; }
@@ -66,12 +89,47 @@ mod() { run bash "$MOD" "$1"; }
   done
 }
 
-@test "\`doc\` n'est PAS pose, et son absence est MOTIVEE" {
-  # Le Dockerfile le remplit depuis un etage de build du site que ce rail ne batit pas. L'omettre
-  # est une decision ; l'omettre en silence serait un oubli.
-  grep -vE '^\s*#' "$MOD" | grep -q 'MEDIA_TREES=(avatars favicon)'
-  grep -q 'COPY --from=site' "$DOCKERFILE"
-  grep -q 'doc/` N.EST PAS POSÉ ICI' "$MOD"
+@test "la doc EST batie et posee — elle n'est pas accessoire" {
+  # ⚖ USER 2026-08-22 : « j'ai pas envie de taper un site remote pour afficher la doc locale ».
+  #
+  # ⚠ CE TEMOIN EPINGLAIT LA DECISION INVERSE (« doc n'est PAS pose, et son absence est MOTIVEE »).
+  # C'etait une omission deguisee en decision : la doc est la doc UTILISATEUR du produit, batie du
+  # MEME arbre — le site lit `fleet/priv/catalogue` et `pod_tools.ex`. Le laisser dehors rendait un
+  # `404 not found` nu sur l'onglet Doc du deck.
+  mod apply
+  [ -s "$LCARS_MEDIA_ROOT/doc/index.html" ]
+}
+
+@test "la BASE du deck voyage jusqu'au build — sinon chaque URL d'asset est fausse" {
+  # `astro.config.mjs` fait `base = LCARS_SITE_BASE || '/'`. GitHub Pages batit pour la racine, le
+  # deck sert sous `/doc/` : recopier l'artefact Pages ici donnerait un site aux assets casses. Le
+  # Dockerfile pose la meme variable pour la meme raison.
+  mod apply
+  grep -q '^base=/doc/$' "$NPM_TRACE"
+  grep -q "^LCARS_SITE_BASE=/doc/" "$BATS_TEST_DIRNAME/../docker/Dockerfile" \
+    || grep -q "ENV LCARS_SITE_BASE=/doc/" "$BATS_TEST_DIRNAME/../docker/Dockerfile"
+}
+
+@test "npm absent : ECHEC NOMME qui pointe le module qui le pose" {
+  export LCARS_NPM_BIN="$BATS_TEST_TMPDIR/bin/npm-absent"
+  mod apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"npm absent"* ]]
+  [[ "$output" == *"16-node"* ]]
+}
+
+@test "la doc se pose ATOMIQUEMENT — un demi-repertoire se sert en 404 silencieux" {
+  code() { grep -vE '^\s*#' "$MOD"; }
+  code | grep -q 'partial="\$(doc_dir).partial"'
+  code | grep -q 'mv "\$partial" "\$(doc_dir)"'
+}
+
+@test "le check sonde index.html, pas le repertoire" {
+  # Un build interrompu laisse un `doc/` qui existe et que la route sert en 404. La question posee
+  # est « le deck a-t-il une page d'accueil a rendre ».
+  grep -vE '^\s*#' "$MOD" | grep -q 'doc_dir)/index.html'
+  mod check
+  [[ "$output" == *"doc absente"* ]] || [[ "$output" == *"doc"* ]]
 }
 
 @test "le seam est celui du PRODUIT, pas un second defaut" {
