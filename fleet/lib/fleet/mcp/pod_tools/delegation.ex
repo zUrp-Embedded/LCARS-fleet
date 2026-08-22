@@ -191,8 +191,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
             full_body =
               body
-              |> with_pointer(pointer)
-              |> with_criteria_pointer(criteria_pointer)
+              |> with_pointer(pointer, repo)
+              |> with_criteria_pointer(criteria_pointer, repo)
               |> with_lot(lot_pointer)
               |> with_supersedes(supersedes)
               |> with_op_marker(marker)
@@ -1833,10 +1833,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
       else: head
   end
 
-  defp with_pointer(brief, nil), do: brief
+  defp with_pointer(brief, nil, _repo), do: brief
 
-  defp with_pointer(brief, {ref, sha}),
-    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+  defp with_pointer(brief, {ref, sha}, repo),
+    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, repo)
 
   # The criteria doc lives under `gate-briefs/` — `kind: "judge"` routes it there (`brief_ref/2`).
   # `nil`/empty criteria (a workshop ticket, or a degraded materialize) → no pointer, never a wall:
@@ -1846,7 +1846,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
        do: nil
 
   defp ensure_criteria_pointer(repo, title, criteria) do
-    base = [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "judge", push: :ops]
+    # transport_brief_v2 (#3.3) — the criteria carries a `--criteria` suffix so its BASENAME differs
+    # from the brief's. Both derive from the same title; the folder (`gate-briefs/` vs `briefs/`)
+    # already disambiguates for the runtime (the ref always carries it), but a human reading a bare
+    # filename in a log or a `git status` could not tell the brief from the criteria — same slug, two
+    # trees. The suffix kills that trap. The suffix cannot land in `brief_ref/2`: that primitive also
+    # names the judge WORK-ORDERS (`issue-N-<role>.md`), which must stay unmarked.
+    base = [
+      name_hint: Fleet.Layout.sanitize_artifact_name(title) <> "--criteria",
+      kind: "judge",
+      push: :ops
+    ]
 
     opts =
       case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
@@ -1860,10 +1870,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  defp with_criteria_pointer(body, nil), do: body
+  defp with_criteria_pointer(body, nil, _repo), do: body
 
-  defp with_criteria_pointer(body, {ref, sha}),
-    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha)
+  defp with_criteria_pointer(body, {ref, sha}, repo),
+    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha, repo)
 
   # THE CRITERIA MUST STAND ALONE — the judge mounts nothing but its criterion, so a criterion that
   # DELEGATES to another committed doc points at a tree the judge will never read. This wall is the

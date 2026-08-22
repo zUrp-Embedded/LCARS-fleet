@@ -1261,6 +1261,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert String.starts_with?(brief_ref, "briefs/")
       assert String.starts_with?(crit_ref, "gate-briefs/")
 
+      # transport_brief_v2 (#3.3) — the two docs derive from the SAME title but their BASENAMES must
+      # differ, so a human reading a bare filename is not trapped by the folder-only distinction. The
+      # criteria carries `--criteria`. Mutation-verified: dropping the suffix collides the basenames.
+      assert Path.basename(brief_ref) != Path.basename(crit_ref)
+      assert String.ends_with?(crit_ref, "--criteria.md")
+
       # Each pin resolves to ITS OWN content — the criteria is not a copy of the brief.
       {brief_shown, 0} = System.cmd("git", ["show", "#{brief_sha}:#{brief_ref}"], cd: work_dir)
       {crit_shown, 0} = System.cmd("git", ["show", "#{crit_sha}:#{crit_ref}"], cd: work_dir)
@@ -1319,7 +1325,11 @@ defmodule Fleet.MCP.PodToolsTest do
 
       pointing_criteria =
         "L'attendu :\n\n" <>
-          Fleet.Layout.criteria_pointer_line("gate-briefs/other.md", String.duplicate("a", 40))
+          Fleet.Layout.criteria_pointer_line(
+            "gate-briefs/other.md",
+            String.duplicate("a", 40),
+            "o/r"
+          )
 
       assert {:error, {:criteria_not_self_contained, _}, _} =
                PodTools.handle_tool_call(

@@ -78,33 +78,24 @@ defmodule Fleet.Workflow.GateBriefTest do
     assert brief =~ "Judged step: s"
   end
 
-  test "subject :brief WITH its address → the text is carried AND the pin is named" do
+  test "subject :brief MOUNTED → the order names the mounted file, no text, no pin" do
     brief =
       Fleet.Workflow.GateBrief.build(%{
         step: "brief-review",
         workflow_map_id: "brief-gate",
         gate: nil,
         subject: :brief,
-        outputs: %{
-          "brief" => "Implémente le décodeur morse.\nContrainte : pas d'allocation.",
-          "brief_ref" => "briefs/issue-5-engineer.md",
-          "brief_sha" => "0627de8abc"
-        }
+        outputs: %{"brief_mount" => "brief.md"}
       })
 
-    # THE SUBJECT IS PRESENT, not addressed. The judge used to receive only `{ref, sha}` plus a
-    # `git show` against a mounted ops — which is what obliged EVERY project pod to carry the
-    # runtime's record so that this one role could read one file out of it. Now the runtime
-    # resolves the pin at dispatch and the text travels.
-    assert brief =~ "> Implémente le décodeur morse."
-    assert brief =~ "> Contrainte : pas d'allocation."
+    # transport_brief_v2 — the brief the scoper judges is a MOUNTED file it reads, content-addressed:
+    # the order names `~/issues/<mount>` and nothing else. Not the text (read, not quoted), not the
+    # pin (the runtime engraves it; the agent does not relay it). One transport, no exception of role.
+    assert brief =~ "~/issues/brief.md"
 
-    # And the address travels WITH it: it is what ties this verdict to a version from the forge.
-    # What the judge loses is the ability to verify the pairing itself — a verification that ran
-    # against a live `--ro-bind` of the worktree the architect holds in RW, so it could confirm
-    # nothing the runtime had not already resolved.
-    assert brief =~ "briefs/issue-5-engineer.md"
-    assert brief =~ "0627de8abc"
+    # Mutation-verified: reinstating a ref/sha citation in `subject_body(:brief, ...)` reddens these.
+    refute brief =~ "briefs/issue-5-engineer.md"
+    refute brief =~ "0627de8abc"
 
     # NO errand: a payload naming that variable re-creates the need to mount ops.
     refute brief =~ "LCARS_PROJECT_OPS"

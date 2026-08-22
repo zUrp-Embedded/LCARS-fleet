@@ -528,6 +528,49 @@ defmodule Fleet.Spawner.PodTest do
       Process.exit(pid, :kill)
     end
 
+    test "PUSH — the mount's `filename` is honoured: a custom name lands under it, not mandate.md" do
+      StubBackend.set_reply(interactive_reply())
+      pod_id = "pod-filename-#{System.unique_integer([:positive])}"
+
+      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(ops, "briefs"))
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: ops)
+      {_, 0} = System.cmd("git", ["-C", ops, "config", "user.email", "h@l"])
+      {_, 0} = System.cmd("git", ["-C", ops, "config", "user.name", "H"])
+      File.write!(Path.join([ops, "briefs", "issue-1-engineer.md"]), "LE BRIEF")
+      {_, 0} = System.cmd("git", ["-C", ops, "add", "."])
+      {_, 0} = System.cmd("git", ["-C", ops, "commit", "-q", "-m", "v1"])
+      {sha, 0} = System.cmd("git", ["-C", ops, "rev-parse", "HEAD"])
+      sha = String.trim(sha)
+      on_exit(fn -> File.rm_rf(ops) end)
+
+      args = %{
+        cap_profile: valid_profile(),
+        issue_id: "issue-1",
+        pod_id: pod_id,
+        opts: [
+          mandate: %{
+            ref: "briefs/issue-1-engineer.md",
+            sha: sha,
+            ops_path: ops,
+            filename: "brief.md"
+          },
+          repo_id: @test_repo_id
+        ]
+      }
+
+      {:ok, pid} = spawn_via_supervisor(args)
+      assert_receive {:launch_called, _args, _env}, 2_000
+
+      info = GenServer.call(pid, :info)
+      # Mutation-verified: `materialize_mandate` must READ `mount.filename`, not hardcode
+      # "mandate.md" — this is the vehicle P4 rides to rename the mount per role (brief.md/criteria.md).
+      assert File.read!(Path.join(info.pod_dir, "issues/brief.md")) == "LE BRIEF"
+      refute File.exists?(Path.join(info.pod_dir, "issues/mandate.md"))
+
+      Process.exit(pid, :kill)
+    end
+
     test "PUSH — admin.spawn (opts[:brief] + self_enqueue_brief, no dispatcher) enqueues the brief in the TaskQueue (get_work_item channel) [F-arch-MCP]" do
       StubBackend.set_reply(interactive_reply())
 

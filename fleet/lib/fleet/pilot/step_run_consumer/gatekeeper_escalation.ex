@@ -123,6 +123,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     gk_role = Fleet.Project.Roles.gatekeeper_role()
 
     with {:ok, cap} <- Fleet.CapProfile.resolve(loader, gk_role) do
+      # transport_brief_v2 — DELIBERATELY INLINE, no `:mandate`. This is NOT a missed mount site
+      # (the third dispatch path a review flagged): the gate-eval order is SYNTHESISED here from the
+      # resume payload's `outputs`, not resolved from an authored, pinned ops doc — there is nothing
+      # content-addressed to mount and no pin to strip. It never names `~/issues/<file>`; the order
+      # travels in `brief:` in clear, which is the degraded rail the runtime contract already covers.
       spawn_opts = [
         pod_id: pod_id,
         repo: seams.repo,

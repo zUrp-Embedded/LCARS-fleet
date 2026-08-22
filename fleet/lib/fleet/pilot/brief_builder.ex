@@ -16,6 +16,14 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   require Logger
 
+  # The mount NAMES (transport_brief_v2): a pod reads its material from `~/issues/<name>`, and the
+  # name says WHAT the material is, never "mandate" (a concept, not a file). A producer and the brief
+  # judge (scoper) read the BRIEF; a deliverable judge reads the CRITERIA. One attribute per name so
+  # the order text (`mounted_mandate`/`build_brief_review_brief`) and the mount (`mandate_from_source`)
+  # can never drift — the spawner mounts under exactly the name the order pointed at.
+  @brief_mount "brief.md"
+  @criteria_mount "criteria.md"
+
   # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
   # CARRIES THE SAME git-native instruction as `build_worker_brief` (otherwise `:no_deliverable_commit`: the
   # rework "re-pushes" but the pod is FORGE-BLIND and without the order to COMMIT it delivers nothing —
@@ -246,23 +254,36 @@ defmodule Fleet.Pilot.BriefBuilder do
              opts
            ) do
         # THE MANDATE MOUNT LEAVES WITH THE BRIEF. `do_build_brief` surfaces the `{ref, sha}` the
-        # order actually references; we wrap it into the spawn's `:mandate` here, ONCE, so every
-        # dispatch path (initial and PR-driven) sets it from the SAME resolution that rendered the
-        # brief — the file the order names is always the file the spawner materializes.
-        {:ok, brief, kind, source} -> {:ok, brief, kind, mandate_from_source(source, repo, opts)}
-        other -> other
+        # order actually references AND the `filename` the order names it by; we wrap them into the
+        # spawn's `:mandate` here, ONCE, so every dispatch path (initial and PR-driven) sets it from
+        # the SAME resolution that rendered the brief — the file the order names is always the file
+        # the spawner materializes, under the same name.
+        {:ok, brief, kind, source, filename} ->
+          {:ok, brief, kind, mandate_from_source(source, filename, repo, opts)}
+
+        other ->
+          other
       end
     end
   end
 
   # `{ref, sha}` → the `:mandate` the spawner needs (`ops_path` = the project's ops worktree). `nil`
-  # source (an inline/degraded order, or a brief-judge that inlines) → no mount.
-  defp mandate_from_source({ref, sha}, repo, opts) do
+  # source (an inline/degraded order) → no mount. `filename` is the name the spawner mounts under in
+  # `~/issues/` AND the name the order text points at — ONE value threaded from the builder, so the
+  # two can never diverge (transport_brief_v2): `brief.md` for what a producer/scoper reads, `criteria.md`
+  # for what a deliverable judge reads. "mandate" is a concept (the order), no longer a filename.
+  defp mandate_from_source({ref, sha}, filename, repo, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
-    %{ref: ref, sha: sha, ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo))}
+
+    %{
+      ref: ref,
+      sha: sha,
+      ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo)),
+      filename: filename
+    }
   end
 
-  defp mandate_from_source(_source, _repo, _opts), do: nil
+  defp mandate_from_source(_source, _filename, _repo, _opts), do: nil
 
   defp do_build_brief(
          profile,
@@ -295,10 +316,12 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        # The BRIEF judge inlines the brief in `outputs` (it judges the brief itself, pre-PR) — it
-        # names no mounted file, so no mount source.
+        # The BRIEF judge (scoper) now READS a mounted file, like every other pod (transport_brief_v2):
+        # the brief it judges is `~/issues/<mount>`, content-addressed, not inlined into `outputs`. The
+        # mount source is the resolved brief pointer (`_brief_source`) — `nil` on a degraded/inline
+        # dispatch, which is the no-mount branch. `mandate_from_source` wraps it in `build_brief`.
         {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts),
-         "judge", nil}
+         "judge", Map.get(issue, "_brief_source"), @brief_mount}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
@@ -306,7 +329,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       {"judge", target} when target in [nil, "deliverable"] ->
         with {:ok, brief, mount} <-
                build_judge_brief(role, forge, repo, number, forge_opts, route, opts) do
-          {:ok, brief, "judge", mount}
+          {:ok, brief, "judge", mount, @criteria_mount}
         end
 
       # judge_target PRESENT but outside {brief, deliverable} → anomaly: we don't guess the target.
@@ -317,7 +340,8 @@ defmodule Fleet.Pilot.BriefBuilder do
       {"worker", _} ->
         # The worker's mount source is the brief pointer resolved at build_brief's entry
         # (`resolve_issue_brief` → `_brief_source` on the issue in hand).
-        {:ok, build_worker_brief(role, issue), "worker", Map.get(issue, "_brief_source")}
+        {:ok, build_worker_brief(role, issue), "worker", Map.get(issue, "_brief_source"),
+         @brief_mount}
 
       # kind ∉ {worker, judge} (brief_kind present but out-of-vocab) → fail-loud.
       {other, _} ->
@@ -343,38 +367,36 @@ defmodule Fleet.Pilot.BriefBuilder do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
-      "brief_body" => worker_order_body(issue),
-      "brief_source" => brief_source_line(issue)
+      "brief_body" => worker_order_body(issue)
     })
   end
 
   # SAME MOVE AS THE JUDGE: when a pointer resolved, the producer's order is a MOUNTED file it reads
-  # (`~/issues/mandate.md`, content-addressed), not inline text. `pin_object` materialized it at the
+  # (`~/issues/brief.md`, content-addressed), not inline text. `pin_object` materialized it at the
   # pinned sha, so what the producer works from is exactly what was authored. Inline (`:none`, a
   # degraded/PoC brief) → the body is the order, there being nothing to mount.
-  defp worker_order_body(%{"_brief_source" => source}),
-    do: mounted_mandate("Ton ordre de mission est", source, ". Lis-le : c'est ta tâche.")
+  defp worker_order_body(%{"_brief_source" => _source}),
+    do: mounted_mandate("Ton ordre de mission est", @brief_mount, ". Lis-le : c'est ta tâche.")
 
   defp worker_order_body(issue), do: issue["body"] || ""
 
   # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source, because they were
   # near-identical and would have drifted the day one was retouched (nobody would find the other). It
-  # names the mounted, content-addressed file and its pinned version; `lead` says what the file IS to
-  # this role, `tail` is that role's own instruction (it opens with its own separator, so the judge
-  # can continue the sentence lowercase and the producer can start a new one).
-  defp mounted_mandate(lead, {ref, sha}, tail) do
-    "#{lead} le fichier `~/issues/mandate.md`, monté en lecture seule dans ton pod. C'est le doc " <>
-      "d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` par " <>
-      "`git archive` — adressé par contenu, donc exactement ce qui a été écrit#{tail}"
+  # names the mounted, content-addressed file ONLY — never its sha: the pin is the runtime's to
+  # engrave (commit message + forge), not the agent's to relay on trust (transport_brief_v2). `file`
+  # is the mount name (`brief.md`/`criteria.md`), threaded from the builder so the name the order says
+  # is the name the spawner mounts. `lead` says what the file IS to this role, `tail` is that role's own
+  # instruction (it opens with its own separator, so the judge can continue the sentence lowercase, the
+  # producer a new one).
+  defp mounted_mandate(lead, file, tail) do
+    "#{lead} le fichier `~/issues/#{file}`, monté en lecture seule dans ton pod : le doc " <>
+      "d'auteur figé pour toi, adressé par contenu — exactement ce qui a été écrit, rien à " <>
+      "vérifier ni recalculer#{tail}"
   end
 
-  # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
-  # (`ref @ commit`, the walkable link into ops history); an inline brief says so
-  # honestly (never a fabricated citation). FR: rendered to the human eye via the forge.
-  defp brief_source_line(%{"_brief_source" => {ref, sha}}),
-    do: "`#{ref} @ #{sha}` (doc d'auteur commité dans ops — version pinnée ci-dessus)"
-
-  defp brief_source_line(_issue), do: "brief inline du ticket (pas de doc d'auteur séparé)"
+  # (transport_brief_v2) The order no longer cites its source in the body: `brief_source_line/1` is
+  # gone. Provenance for a human lives on the forge (the `Brief:` pointer trailer in the ticket) and
+  # durably in the ops commit message; the agent's order carries the mount, not an address to relay.
 
   # A **judge** pod must know WHAT
   # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`
@@ -709,16 +731,16 @@ defmodule Fleet.Pilot.BriefBuilder do
   # instead of judging), so the sentence says read-and-evaluate explicitly. A judge without a
   # criterion approves: that is the false GREEN this rail fail-closes against everywhere else.
   # THE CRITERION IS A MOUNTED FILE, READ — not inline text, trusted. When a pointer resolved
-  # (`_brief_source` present), the spawner materialized the pinned doc at `~/issues/mandate.md` via
+  # (`_brief_source` present), the spawner materialized the pinned doc at `~/issues/criteria.md` via
   # `git archive` at that sha: the judge READS its criterion from a content-addressed file, so what
   # it acts on is exactly what was authored — nothing to hash, nothing to trust. The inline text is
   # gone from the order; a pointer that resolved is always accompanied by its materialized mount
   # (both read the same ops worktree — resolve fail-closes the dispatch if it is unreachable, and
   # then there is no spawn to mis-mount). Shares `mounted_mandate/3` with the producer's order.
-  defp judge_criterion(%{"_brief_source" => source}) do
+  defp judge_criterion(%{"_brief_source" => _source}) do
     mounted_mandate(
       "Ton critère de succès est",
-      source,
+      @criteria_mount,
       " : lis-le, rien à vérifier. Juge le livrable contre lui ; ne l'exécute pas, il décrit un " <>
         "travail déjà livré. Tu n'as pas à citer sa version — le runtime la grave lui-même, il " <>
         "l'a résolue et il la connaît."
@@ -747,17 +769,16 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
-    # THE BRIEF TRAVELS, the address travels WITH it. This used to send only `{ref, sha}` and let
-    # the judge read the doc through a mounted ops — which is what made that mount necessary
-    # on every project pod. Sending the text costs a paragraph; the mount cost every producer a
-    # read handle on the record of what was asked of it and what was judged of its work.
-    #
-    # Both keys when a pin exists: the text is WHAT to judge, the pin is what to CITE. Keeping the
-    # pin is not decoration — it is how a third party ties a verdict back to a version, from the
-    # forge, without the pod having had to hold the tree.
+    # transport_brief_v2 — a resolved pointer means the brief is a MOUNTED file the scoper reads
+    # (`~/issues/<mount>`, content-addressed), exactly like the producer's order and the deliverable
+    # judge's criterion. `outputs` then carries only the mount NAME — never the text (it is read, not
+    # trusted) and never the pin (the runtime engraves it; the agent does not relay it). `@brief_mount`
+    # is the SAME attribute `do_build_brief` returns as the scoper's filename, so the name the order
+    # names and the name the spawner mounts under cannot drift. Inline (degraded/PoC, no authored doc)
+    # → the body IS the thing to judge, embedded as before, there being nothing to mount.
     outputs =
       case Map.get(issue, "_brief_source") do
-        {ref, sha} -> %{"brief" => brief, "brief_ref" => ref, "brief_sha" => sha}
+        {_ref, _sha} -> %{"brief_mount" => @brief_mount}
         _ -> %{"brief" => brief}
       end
 

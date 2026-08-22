@@ -817,7 +817,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
         work_dir: verdict_work_dir(state),
         ref: Fleet.Layout.gate_verdict_ref(n, role),
         kind: "Verdict",
-        label: "gate-verdict"
+        label: "gate-verdict",
+        repo: state.repo
       )
 
     case decision do

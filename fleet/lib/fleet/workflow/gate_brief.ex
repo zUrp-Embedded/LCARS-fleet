@@ -61,24 +61,15 @@ defmodule Fleet.Workflow.GateBrief do
   defp template_name(:brief), do: "gate-brief-brief"
   defp template_name(_deliverable), do: "gate-brief-deliverable"
 
-  # :brief WITH its address → the text is quoted AND the pin is named. FR: prose rendered to the
-  # agent (same stance as the git-native `livrable` text).
-  #
-  # THE SUBJECT IS HERE, IT IS NOT AN ERRAND. This used to carry only `{ref, sha}` and a
-  # `git show` command against a mounted ops, which is what obliged every project pod to
-  # carry the runtime's record so that one judge could read one file out of it. The runtime
-  # resolves the pin at dispatch and ships the resolved text: the judge reads what it judges,
-  # and it never holds the tree where what was asked of it is written down.
-  #
-  # THE PIN STAYS, and it is not decoration. It is what a third party uses to tie this verdict
-  # back to a version, from the forge. What the judge loses is the ability to VERIFY the pairing
-  # itself — and that verification was always against a live `--ro-bind` of the worktree the
-  # architect holds in RW, so it could confirm nothing the runtime had not already resolved.
-  defp subject_body(:brief, %{"brief" => brief, "brief_ref" => ref, "brief_sha" => sha})
-       when is_binary(brief) and is_binary(ref) and is_binary(sha) do
-    "Ce que tu juges est le doc d'auteur **`#{ref}`**, à sa version pinnée au commit " <>
-      "`#{sha}` — résolu pour toi et recopié ci-dessous. Cite `#{String.slice(sha, 0, 7)}` " <>
-      "dans ton verdict : c'est l'adresse de ce que tu as lu.\n\n" <> blockquote(brief)
+  # :brief MOUNTED → the brief the scoper judges is a content-addressed file it READS, not text
+  # quoted into the order (transport_brief_v2). The order names the mount and NOTHING of the pin:
+  # the sha is the runtime's to engrave (commit message + forge), never the agent's to relay. Same
+  # stance as the producer's order and the deliverable judge's criterion — one transport, no
+  # exception of role. The `<mount>` name here is set by `BriefBuilder.build_brief_review_brief`.
+  defp subject_body(:brief, %{"brief_mount" => file}) when is_binary(file) do
+    "Ce que tu juges est le fichier `~/issues/#{file}`, monté en lecture seule dans ton pod : le " <>
+      "brief d'auteur figé pour toi, adressé par contenu. Lis-le entièrement, puis évalue-le — est-il " <>
+      "exécutable tel quel, sans nouvelle question ? Ne l'exécute pas : tu juges le brief, pas la tâche."
   end
 
   # :brief inline (degraded dispatch, no authored doc) → READABLE defused blockquote (E2 — a

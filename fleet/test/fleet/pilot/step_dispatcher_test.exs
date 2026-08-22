@@ -1244,7 +1244,9 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       sha = String.trim(sha)
       on_exit(fn -> File.rm_rf(ops) end)
 
-      body = "résumé\n\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/crit.md", sha)
+      body =
+        "résumé\n\n" <>
+          Fleet.Layout.criteria_pointer_line("gate-briefs/crit.md", sha, "acme/widget")
 
       opts =
         dispatch_opts(

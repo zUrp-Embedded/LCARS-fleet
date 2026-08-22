@@ -1030,22 +1030,25 @@ defmodule Fleet.Spawner.Pod do
 
   # THE MANDATE, MOUNTED — the pod reads its order from a content-addressed file, not from text it
   # must trust. `LaunchSpec.pin_object` archives exactly the pinned doc at its sha; we place it under
-  # `<pod_dir>/issues/`, which bwrap binds to the pod's HOME (`/home/.pod`) — so the brief's
-  # `~/issues/mandate.md` (the path the order names, via `get_work_item`) resolves to this file.
-  # FAIL-CLOSED when a
+  # `<pod_dir>/issues/`, which bwrap binds to the pod's HOME (`/home/.pod`) — so the file the order
+  # names (`~/issues/<mount.filename>`: `brief.md` or `criteria.md`, via `get_work_item`) resolves to
+  # this file. FAIL-CLOSED when a
   # mandate is declared (`:mandate` present) but cannot be materialized: the order REFERENCES this
   # file, so a pod without it would read its order from nothing — it does not start, it defers. No
   # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
   defp materialize_mandate(%{opts: opts, pod_dir: pod_dir} = _data) do
     case Keyword.get(opts, :mandate) do
-      %{ref: ref, sha: sha, ops_path: ops_path} ->
-        # FAIL-CLOSED, and it must be: the order REFERENCES this file (`~/issues/mandate.md`). If it
+      %{ref: ref, sha: sha, ops_path: ops_path} = mandate ->
+        # FAIL-CLOSED, and it must be: the order REFERENCES this file (`~/issues/<filename>`). If it
         # is not there, the pod reads its order from nothing. The mount is expected only when the
         # dispatch already resolved the same pinned doc (so the ops worktree is reachable) — a
         # failure here is a real fault, and a pod that cannot be given its provable order does not
-        # start, it defers.
+        # start, it defers. `filename` is the SAME value the order text names (transport_brief_v2);
+        # defaulted for any mount minted before the field existed.
+        filename = Map.get(mandate, :filename, "mandate.md")
+
         with {:ok, file} <- LaunchSpec.pin_object(ops_path, pod_dir, sha, ref),
-             :ok <- File.cp(file, Path.join([pod_dir, "issues", "mandate.md"])) do
+             :ok <- File.cp(file, Path.join([pod_dir, "issues", filename])) do
           :ok
         else
           other ->

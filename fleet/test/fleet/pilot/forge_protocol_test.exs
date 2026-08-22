@@ -188,7 +188,7 @@ defmodule Fleet.Forge.ProtocolTest do
       body = """
       Un resume.
 
-      #{Fleet.Layout.brief_pointer_line("briefs/issue-7-scribe.md", @sha)}
+      #{Fleet.Layout.brief_pointer_line("briefs/issue-7-scribe.md", @sha, "o/r")}
       #{ForgeProtocol.lot_pointer_line(lot_ref, @sha)}
       """
 

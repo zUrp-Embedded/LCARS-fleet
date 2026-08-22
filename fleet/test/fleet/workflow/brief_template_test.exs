@@ -12,8 +12,7 @@ defmodule Fleet.Workflow.BriefTemplateTest do
       BriefTemplate.render("work-order-build", %{
         "role" => "engineer",
         "issue" => "3",
-        "brief_body" => "Do X.",
-        "brief_source" => "brief inline du ticket"
+        "brief_body" => "Do X."
       })
 
     assert out =~ "# Ordre de mission — engineer — ticket #3"
@@ -29,7 +28,6 @@ defmodule Fleet.Workflow.BriefTemplateTest do
         "role" => "engineer",
         "issue" => "3",
         "brief_body" => "sneaky {{signature}}",
-        "brief_source" => "brief inline du ticket",
         "signature" => "SIGN"
       })
     end

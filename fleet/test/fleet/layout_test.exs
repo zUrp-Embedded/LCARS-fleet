@@ -19,7 +19,7 @@ defmodule Fleet.LayoutTest do
   describe "brief pointer trailer — the ticket says which text is the order" do
     test "the block names the summary as a summary, and the parser still reads the line" do
       sha = String.duplicate("a", 40)
-      block = Layout.brief_pointer_trailer("briefs/issue-7-engineer.md", sha)
+      block = Layout.brief_pointer_trailer("briefs/issue-7-engineer.md", sha, "fleet/demo")
 
       # The sentence exists and says the load-bearing part: editing the summary changes nothing.
       # Without it, a ticket shows a summary and a pointer with nothing saying which one runs — and
@@ -27,8 +27,14 @@ defmodule Fleet.LayoutTest do
       assert block =~ "résumé"
       assert block =~ "éditer ce résumé ne le change pas"
 
-      # And it costs the machine nothing: the `Brief:` line keeps its exact shape, the parser
-      # anchors per line. A prose line above it must not become a parse hazard.
+      # transport_brief_v2 — the pointer is a CLICKABLE link (clean label + commit-browse URL), not
+      # a bare `ref @ sha`. The human sees neither the illegible filename nor the 40-hex sha as text.
+      assert block =~
+               "Brief: [le brief](/fleet/demo/src/commit/#{sha}/briefs/issue-7-engineer.md)"
+
+      refute block =~ "Brief: briefs/issue-7-engineer.md @"
+
+      # And it costs the machine nothing: the parser reads ref+sha back OUT of the link URL.
       body = "Résumé humain sur plusieurs\nlignes.\n\n---\n" <> block
       assert {:ok, {"briefs/issue-7-engineer.md", ^sha}} = Layout.parse_brief_pointer(body)
     end
@@ -175,9 +181,36 @@ defmodule Fleet.LayoutTest do
 
     test "brief pointer notation: trailer round-trips through parse (one truth, two domains)" do
       sha = String.duplicate("a", 40)
-      body = "Résumé humain.\n\n---\n" <> Layout.brief_pointer_trailer("briefs/my-slug.md", sha)
+
+      body =
+        "Résumé humain.\n\n---\n" <> Layout.brief_pointer_trailer("briefs/my-slug.md", sha, "o/r")
 
       assert {:ok, {"briefs/my-slug.md", ^sha}} = Layout.parse_brief_pointer(body)
+    end
+
+    test "unified link pointer: one notation for Brief/Criteria/Verdict, parsed back from the URL" do
+      sha = String.duplicate("b", 40)
+
+      # ONE renderer, one parser. The link carries a clean label + a commit-browse URL; the machine
+      # reads ref+sha OUT of the URL. Mutation-verified: a renderer that dropped the URL (or a parser
+      # that only knew the legacy shape) would fail the round-trip below.
+      brief = Layout.pointer_line("Brief", "briefs/x.md", sha, "o/r")
+      crit = Layout.criteria_pointer_line("gate-briefs/x--criteria.md", sha, "o/r")
+
+      assert brief == "Brief: [le brief](/o/r/src/commit/#{sha}/briefs/x.md)"
+      assert crit == "Criteria: [les critères](/o/r/src/commit/#{sha}/gate-briefs/x--criteria.md)"
+      assert {:ok, {"briefs/x.md", ^sha}} = Layout.parse_brief_pointer(brief)
+      assert {:ok, {"gate-briefs/x--criteria.md", ^sha}} = Layout.parse_criteria_pointer(crit)
+    end
+
+    test "legacy pointer shape is STILL parsed (tickets written before the link notation)" do
+      sha = String.duplicate("c", 40)
+
+      assert {:ok, {"briefs/old.md", ^sha}} =
+               Layout.parse_brief_pointer("Brief: briefs/old.md @ #{sha}")
+
+      assert {:ok, {"gate-briefs/old.md", ^sha}} =
+               Layout.parse_criteria_pointer("Criteria: gate-briefs/old.md @ #{sha}")
     end
 
     test "parse_brief_pointer: no pointer line → :none (inline brief, the normal PoC path)" do
