@@ -142,26 +142,46 @@ EOF
   #
   # La règle : on ne sonde pas avec un outil qui juge. `run_quiet` sert aux gestes qui doivent
   # réussir ; une question dont « non » est une réponse valide s'écrit nue.
+  # ⚠ ET L'INIT NE SE JOUE PAS DANS L'ARBRE DE L'OPÉRATEUR. `tofu init` ÉCRIT — il pose un
+  # `.terraform/` à côté de la recette — et ce module tourne en root. Mesuré au nettoyage de .63 le
+  # 2026-08-22 : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
+  # chaque provider. `60-deploy` porte déjà la règle pour l'autre outil (« un build root polluerait
+  # le `_build` du checkout ») ; elle vaut pour tout ce qui écrit, pas pour mix seul.
+  #
+  # On travaille donc sur une COPIE jetable. Ce qui sort d'ici est le miroir, pas l'état : le
+  # `.terraform/` de la copie meurt avec elle, et c'est ce qu'on veut — un état tofu décrit un
+  # répertoire à SON chemin, il ne se transporte pas.
+  local src work
+  src="$(repo_root)/fleet/deploy/deps"
+  [[ -d "$src" ]] || { p_fail "recette absente : $src"; verdict_apply; }
+  work="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" \
+    || { p_fail "tofu : tmp impossible"; verdict_apply; }
+  cp -a "$src/." "$work/" || { p_fail "recette non copiable ($src)"; rm -rf "$work"; verdict_apply; }
+  rm -rf "$work/.terraform" "$work/instance/.terraform"
+  local mods=("$work/instance" "$work")
+
   local m offline=1
-  for m in $(tofu_modules); do
-    [[ -d "$m" ]] || { p_fail "recette absente : $m"; verdict_apply; }
+  for m in "${mods[@]}"; do
+    [[ -d "$m" ]] || { p_fail "recette incomplète : $m"; rm -rf "$work"; verdict_apply; }
     TF_CLI_CONFIG_FILE="$(tofu_rc)" env -C "$m" "$TOFU_BIN" init -input=false -no-color >/dev/null 2>&1 \
       || offline=0
   done
   if [[ "$offline" -eq 1 ]]; then
+    rm -rf "$work"
     p_ok "miroir de providers complet (init hors-ligne OK)"
     verdict_apply
   fi
 
-  for m in $(tofu_modules); do
+  for m in "${mods[@]}"; do
     TF_CLI_CONFIG_FILE="$(tofu_rc)" run_quiet env -C "$m" "$TOFU_BIN" providers mirror -platform="linux_${arch}" "$TOFU_DIR/providers" \
-      || { p_fail "miroir de providers : échec sur $m"; verdict_apply; }
+      || { p_fail "miroir de providers : échec sur $m"; rm -rf "$work"; verdict_apply; }
   done
   chmod -R a+rX "$TOFU_DIR" 2>/dev/null || true
-  for m in $(tofu_modules); do
+  for m in "${mods[@]}"; do
     TF_CLI_CONFIG_FILE="$(tofu_rc)" run_quiet env -C "$m" "$TOFU_BIN" init -input=false -no-color \
-      || { p_fail "tofu : init hors-ligne en échec dans $m APRÈS miroir — le miroir ne couvre pas la recette"; verdict_apply; }
+      || { p_fail "tofu : init hors-ligne en échec dans $m APRÈS miroir — le miroir ne couvre pas la recette"; rm -rf "$work"; verdict_apply; }
   done
+  rm -rf "$work"
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "miroir de providers hors-ligne ($TOFU_DIR/providers)"
   verdict_apply
 }

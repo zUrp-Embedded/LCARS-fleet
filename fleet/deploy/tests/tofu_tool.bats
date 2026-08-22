@@ -171,3 +171,23 @@ mod() { run bash "$MOD" "$1"; }
   # le miroir, lui, DOIT reussir : il reste sous un outil qui juge
   grep -q 'run_quiet env -C "\$m" "\$TOFU_BIN" providers mirror' "$body"
 }
+
+@test "l'init ne touche PAS l'arbre de l'operateur — ce module tourne en root" {
+  # `tofu init` ECRIT (`.terraform/` a cote de la recette) et ce module est `NEEDS: root`. Mesure au
+  # nettoyage de .63 le 2026-08-22 : l'operateur ne pouvait plus effacer son propre checkout,
+  # `Permission denied` sur chaque provider. `60-deploy` porte deja la regle pour l'autre outil
+  # (« un build root polluerait le _build du checkout ») ; elle vaut pour tout ce qui ecrit.
+  local body="$BATS_TEST_TMPDIR/body3.sh"
+  grep -vE '^\s*#' "$MOD" > "$body"
+  # on travaille sur une COPIE jetable
+  grep -q 'mktemp -d' "$body"
+  grep -q 'cp -a "\$src/\." "\$work/"' "$body"
+  grep -q 'rm -rf "\$work/.terraform" "\$work/instance/.terraform"' "$body"
+  # et AUCUN init/mirror ne vise un chemin derive de repo_root
+  ! grep -E 'init -input=false|providers mirror' "$body" | grep -q 'repo_root'
+  # la copie est effacee sur CHAQUE sortie : les quatre echecs et les deux succes
+  local n_exit n_rm
+  n_exit="$(grep -c 'verdict_apply' "$body")"
+  n_rm="$(grep -c 'rm -rf "\$work"' "$body")"
+  [ "$n_rm" -ge 6 ]
+}
