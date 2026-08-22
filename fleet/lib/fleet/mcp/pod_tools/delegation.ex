@@ -726,6 +726,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
       CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes ne chargent pas ;
       vide, elles sont toutes techniques ou a portee ticket.
+    * `{:workflow_catalogue_unavailable, message}` — le repertoire de cartes existe et ne porte
+      AUCUN `*.yaml`. Il precede les deux autres et ne vient pas d'ici : `canon_names!/1` leve, et
+      `catalogue_cards/0` rattrape. C'est le seul des trois qui existait avant le 2026-08-22.
+
+      ⚠ IL EST DANS CETTE LISTE PARCE QU'ELLE PRETEND ETRE COMPLETE. Ecrite sans lui, elle
+      enumerait deux gestes sur trois sous un titre qui annonce le decoupage entier — une prose
+      fausse par omission, dans la section meme qui vient de fermer une promesse a moitie tenue.
+      Relevee par relecture independante le 2026-08-22, sur le texte ecrit la veille.
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do

@@ -985,7 +985,10 @@ defmodule Fleet.MCP.PodTools do
           "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
           "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
           "`jury` (the PR judges the card convenes) and `steps`. Cards marked TECHNIQUE are fleet tooling, " <>
-          "not for real projects. No arguments."
+          "not for real projects. It REFUSES rather than hand back an empty offer: no installed " <>
+          "catalogue carries cards (a DEPLOYMENT fact — ask `catalogue_list` what this box serves), " <>
+          "or the catalogue was scanned and offers nothing declarable. Never work around a refusal " <>
+          "with a card of your own: naming a card IS declaring criticality. No arguments."
       )
     end
 
@@ -1007,8 +1010,10 @@ defmodule Fleet.MCP.PodTools do
           "card). `unreadable` names installed material whose manifest yields no declared name — " <>
           "absent, unparseable or without one: it is served by nothing, the cause is `lcars " <>
           "catalogue verify`'s to name. Do NOT derive this list from " <>
-          "`card_list` — a catalogue shipping no card is invisible there. The result is DISPLAYED as " <>
-          "it stands: do not repeat it, answer what was asked of it. No arguments."
+          "`card_list` — a catalogue shipping no card is invisible there. It REFUSES rather than " <>
+          "hand back an empty offer: this box always serves at least the catalogue carried by the " <>
+          "release, so an empty one means its material is broken, not absent. The result is " <>
+          "DISPLAYED as it stands: do not repeat it, answer what was asked of it. No arguments."
       )
     end
 

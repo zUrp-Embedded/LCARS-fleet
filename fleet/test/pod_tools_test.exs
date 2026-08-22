@@ -1732,7 +1732,46 @@ defmodule Fleet.MCP.PodToolsTest do
       assert msg =~ "no *.yaml card"
     end
 
-    # ⚠ LES TROIS AUTRES ROUTES VERS UNE OFFRE VIDE. Le temoin ci-dessus tenait la promesse du
+    @tag :tmp_dir
+    test "l'offre suit l'ordre de BALAYAGE, pas son inverse", %{tmp_dir: tmp} do
+      # ⚠ MUTATION SILENCIEUSE, relevee par relecture independante le 2026-08-22 : `Enum.reduce`
+      # empile en TETE, donc `Enum.reverse` est ce qui rend l'ordre de balayage. Le retirer inversait
+      # la liste presentee a l'humain sans qu'aucun temoin bouge — tous les autres portent zero ou
+      # une carte, et le temoin nominal indexe par nom, ce qui est commutatif.
+      #
+      # L'ordre n'est pas cosmetique : `canon_names!/1` trie (`Enum.sort` sur les basenames du
+      # disque), donc l'offre est stable et deux lectures d'un meme catalogue donnent la meme suite.
+      # Un ordre qui s'inverse au refactor donnerait deux presentations d'une meme offre.
+      #
+      # FIXTURE CONTROLEE plutot que l'arbre reel : epingler « la premiere carte s'appelle X » lierait
+      # ce temoin au contenu du catalogue livre, et la prochaine carte ajoutee le casserait pour une
+      # raison qui n'est pas la sienne.
+      for n <- ~w(a-carte b-carte c-carte) do
+        File.write!(Path.join(tmp, "#{n}.yaml"), """
+        kind: WorkflowMap
+        metadata:
+          name: #{n}
+          presentation: "Carte de test."
+        spec:
+          max_rework_rounds: 1
+          jury: []
+          ci: ignore
+          steps:
+            only:
+              role: noop
+        """)
+      end
+
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
+
+      assert %{"cards" => cards} = Jason.decode!(txt)
+      assert Enum.map(cards, & &1["name"]) == ~w(a-carte b-carte c-carte)
+    end
+
+    # ⚠ LES TROIS AUTRES ROUTES VERS UNE OFFRE VIDE. Le temoin plus haut tenait la promesse du
     # `@doc` (« an ERROR, never an empty listing ») sur UN chemin — celui ou `canon_names!/1` leve.
     # Les trois suivants rendaient `{:ok, %{"cards" => []}}` : un succes avec zero choix, servi a
     # l'architecte au moment precis ou on lui demande de choisir. Mesure du 2026-08-22.

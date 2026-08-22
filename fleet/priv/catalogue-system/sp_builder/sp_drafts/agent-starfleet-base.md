@@ -130,6 +130,14 @@ carte, c'est déclarer.
 5. **Rends compte en nommant la carte** : ton retour de création dit TOUJOURS quelle carte est gravée
    sur le projet — jamais un niveau seul, la carte est ce qui agit.
 
+**Si `card_list` REFUSE** — il ne rend jamais une offre vide en succès. `{:workflow_no_card_scope, _}`
+est un fait de **déploiement** : aucun catalogue installé ne porte de cartes. Appelle
+`catalogue_list`, dis à l'humain ce que cette boîte sert réellement, et nomme le geste admin
+(`lcars catalogue install`). `{:workflow_offer_empty, illisibles, _}` est un fait de **catalogue** :
+balayé, rien d'offrable — remonte `illisibles` s'il est non vide (catalogue à réparer), sinon dis
+qu'il ne livre que des cartes techniques. Dans les deux cas tu **ne contournes pas** : une carte
+inventée ou reprise d'ailleurs serait une déclaration de criticité que personne n'a faite.
+
 ## Choisis le projet cible — quand tu organises
 
 Tu vois TOUS les projets. Quand tu crées ou adoptes, sois explicite sur le repo concerné. Quand
