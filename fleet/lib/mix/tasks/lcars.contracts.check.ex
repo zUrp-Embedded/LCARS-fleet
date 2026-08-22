@@ -2069,7 +2069,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           MapSet.new()
       end
 
-    read = site_build_inputs(lib)
+    read = site_build_inputs(repo)
 
     uncovered =
       read
@@ -2110,12 +2110,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # dit pas quel fichier, donc `fleet/bin` est bien l'entree, meme si un autre site en lit un fichier
   # nomme. Un prefixe rendu par une lecture dynamique reste une entree ; le meme prefixe rendu par
   # une definition de constante disparait.
-  defp site_build_inputs(lib) do
+  # ⚠ `src/lib/*.js` N'EST PAS TOUT CE QUI LIT L'ARBRE, ET LE CONTRAT A RENDU UN FAUX VERT DESSUS.
+  # `src/components/Seat.astro:14` fait `existsSync(join(here, '..','..','..','avatars', …))` — une
+  # lecture de `assets/avatars/` AU BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Les deux
+  # etaient invisibles ici.
+  #
+  # Mesure du 2026-08-22 : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
+  # contrat a repondu `pass`. Avec ce filtre, ajouter un avatar de role ne rebatit plus la vitrine
+  # qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer, et il le
+  # laissait passer parce qu'il ne regardait qu'un tiers des fichiers.
+  #
+  # ⚠ ET C'EST UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle etait juste ; l'instrument lisait a
+  # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
+  # dit « pass ».
+  @site_sources ["src/lib/*.js", "src/components/*.astro", "src/layouts/*.astro", "src/pages/*.astro"]
+
+  defp site_build_inputs(repo) do
+    site = Path.join(repo, "assets/github.io")
+
     all =
-      lib
-      |> Path.join("*.js")
-      |> Path.wildcard()
-      |> Enum.flat_map(&site_inputs_of_file/1)
+      @site_sources
+      |> Enum.flat_map(&Path.wildcard(Path.join(site, &1)))
+      |> Enum.flat_map(&site_inputs_of_file(&1, repo))
       |> Enum.uniq()
 
     deeper = fn p ->
@@ -2125,17 +2141,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     Enum.reject(all, fn {path, kind} -> kind == :file and deeper.(path) end)
   end
 
-  defp site_inputs_of_file(file) do
+  defp site_inputs_of_file(file, repo) do
     src = File.read!(file)
 
-    # 1. Les constantes : `const NAME = join(<base>, 'a', 'b')`. `here` vaut le dossier du fichier,
-    #    donc quatre `..` remontent a la racine du depot — ils s'annulent et ne laissent que la
-    #    suite. Deux passes suffisent : ces fichiers ne chainent jamais plus loin.
+    # LE REPERTOIRE DU FICHIER, RELATIF A LA RACINE. C'est de LUI que les `..` remontent — pas d'une
+    # profondeur supposee. Deux fichiers a la meme profondeur peuvent ecrire un nombre DIFFERENT de
+    # `..`, et c'est exactement ce qui rendait `avatars` la ou la cible est `assets/avatars`.
+    here_dir = file |> Path.dirname() |> Path.relative_to(repo)
+
+    # 1. Les constantes : `const NAME = join(<base>, 'a', 'b')`.
+    #    Deux passes suffisent : ces fichiers ne chainent jamais plus loin.
     consts =
       Enum.reduce(1..2, %{}, fn _, acc ->
         Regex.scan(~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/, src)
         |> Enum.reduce(acc, fn [_, name, base, rest], m ->
-          case site_resolve(base, rest, m) do
+          case site_resolve(base, rest, m, here_dir) do
             {:ok, p} ->
               Map.put(m, name, p)
 
@@ -2164,7 +2184,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # 2. Les usages : tout `join(<base>, …)` dont la base est `here` ou une constante connue.
     Regex.scan(~r/join\(\s*(\w+)\s*,([^)]*)\)/, src)
     |> Enum.flat_map(fn [_, base, rest] ->
-      case site_resolve(base, rest, consts) do
+      case site_resolve(base, rest, consts, here_dir) do
         # Un segment non litteral : on ne sait pas QUEL fichier, on sait dans quel repertoire.
         {:dynamic, p} -> [{p, :dir}]
         {:ok, p} -> if p == "", do: [], else: [{p, :file}]
@@ -2175,23 +2195,45 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # base + segments -> chemin repo-relatif. `here` = racine (les quatre `..` l'y ramenent).
-  defp site_resolve(base, rest, consts) do
+  # ⚠ LES `..` SE COMPTENT, ILS NE « S'ANNULENT » PAS. Cette fonction supposait que `here` valait la
+  # RACINE du depot et que les `..` disparaissaient — vrai par coincidence pour `src/lib/*.js`, qui
+  # est a quatre crans et n'ecrit jamais que quatre `..`. `src/components/Seat.astro` en ecrit TROIS
+  # depuis la meme profondeur : la vraie cible est `assets/avatars`, et l'ancienne regle rendait
+  # `avatars` — un chemin qui n'existe pas, donc jamais couvert, donc un `fail` inexplicable.
+  #
+  # On resout donc pour de vrai : depuis le repertoire du FICHIER, `..` par `..`, puis on rend le
+  # chemin relatif a la racine. `here_depth` est le nombre de crans du fichier sous la racine.
+  defp site_resolve(base, rest, consts, here_dir) do
     prefix =
       case base do
-        "here" -> {:ok, ""}
+        "here" -> {:ok, :here}
         n -> if p = consts[n], do: {:ok, p}, else: :error
       end
 
     with {:ok, pre} <- prefix do
       segs = String.split(rest, ",", trim: true) |> Enum.map(&String.trim/1)
-      # `'..'` ne sert qu'a remonter depuis `here` : ils s'annulent avec la profondeur du fichier.
+      ups = Enum.count(segs, &(&1 in ["'..'", "\"..\""]))
       lits = Enum.reject(segs, &(&1 in ["'..'", "\"..\"", ""]))
       dynamic? = Enum.any?(lits, &(not Regex.match?(~r/^'[^']*'$|^"[^"]*"$/, &1)))
 
       parts =
         lits |> Enum.filter(&Regex.match?(~r/^'|^"/, &1)) |> Enum.map(&String.slice(&1, 1..-2//1))
 
-      path = Enum.join([pre | parts] |> Enum.reject(&(&1 == "")), "/")
+      path =
+        case pre do
+          # Depuis `here` : on REMONTE reellement, `..` par `..`, depuis le repertoire du fichier.
+          :here ->
+            here_dir
+            |> String.split("/", trim: true)
+            |> then(&Enum.take(&1, max(length(&1) - ups, 0)))
+            |> Kernel.++(parts)
+            |> Enum.reject(&(&1 == ""))
+            |> Enum.join("/")
+
+          # Depuis une constante : elle est deja relative a la racine.
+          p ->
+            Enum.join(Enum.reject([p | parts], &(&1 == "")), "/")
+        end
 
       if dynamic?, do: {:dynamic, path}, else: {:ok, path}
     end
