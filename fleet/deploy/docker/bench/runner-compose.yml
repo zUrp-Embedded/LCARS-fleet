@@ -37,9 +37,21 @@ name: lcars-runner
 
 services:
   runner:
-    # TAG MOUVANT, DELIBERE — act_runner officiel (jamais d'image custom pour l'infra CI).
+    # TAG MOUVANT, DELIBERE — runner Gitea officiel (jamais d'image custom pour l'infra CI).
     #
-    # ⚠ CE FICHIER NE SERT QUE DES BANCS. `act_runner` n'apparait nulle part dans les deux compose
+    # ⚠ LE NOM A CHANGE EN AMONT, ET UN TAG MOUVANT NE POUVAIT PAS LE VOIR. Gitea a renomme le
+    # produit `act_runner` -> `runner` le 2026-04-30 (binaire `gitea-runner`, depot `gitea/runner`,
+    # `v1.0.0` en remise a zero de version). Mesure du 2026-08-22 sur Docker Hub :
+    #
+    #     gitea/act_runner:latest-dind-rootless   maj 2026-04-30   <- le jour du renommage
+    #     gitea/runner:latest-dind-rootless       maj 2026-08-22
+    #
+    # `latest` sur un nom abandonne ne bouge plus. L'arbitrage ci-dessous voulait DECOUVRIR qu'un
+    # amont bouge ; l'amont a bouge en se renommant, c'est-a-dire par le seul mouvement qu'un tag
+    # mouvant est structurellement incapable de rapporter. Tout banc monte apres avril recevait
+    # l'image d'avril en croyant suivre la courante.
+    #
+    # ⚠ CE FICHIER NE SERT QUE DES BANCS. Le runner n'apparait nulle part dans les deux compose
     # du PRODUIT : en prod, la forge et le runner sont provisionnes par l'admin, avec ses choix. Le
     # pin par digest qui vivait ici ne gouvernait donc que du jetable, et il l'a gouverne trois
     # semaines sans que personne ne le rouvre.
@@ -76,7 +88,7 @@ services:
     #
     # `apparmor=rootlesskit` : sur Ubuntu/Debian le profil par defaut bloque les changements de
     # namespace dont le daemon embarque a besoin (doc Gitea).
-    image: gitea/act_runner:latest-dind-rootless
+    image: gitea/runner:latest-dind-rootless
     privileged: true
     security_opt:
       - apparmor=rootlesskit

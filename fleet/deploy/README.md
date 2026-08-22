@@ -118,7 +118,7 @@ côtés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
-  le profil `forge` : act_runner officiel pinné, label `elixir` = la même image que le stage
+  le profil `forge` : runner Gitea officiel, label `elixir` = la même image que le stage
   build). Son enregistrement est un geste bootstrap (`fleet/deploy/docker/bench/bench-runner.sh`
   sur un banc ; sur une forge d'opérateur, le jeton de runner est minté à la main), hors du
   chemin machine-nue→fleet.
