@@ -1004,8 +1004,9 @@ defmodule Fleet.MCP.PodTools do
           "identity — pass it as project_create's `catalogue`; it is also its forge org), `bundled` " <>
           "(ships inside the release, so always available and never removable) and `default_card` " <>
           "(the card a project takes when it declares none — absent when the catalogue ships no " <>
-          "card). `unreadable` names installed material whose manifest declares no `name:`: it is " <>
-          "served by nothing and would otherwise vanish without a word. Do NOT derive this list from " <>
+          "card). `unreadable` names installed material whose manifest yields no declared name — " <>
+          "absent, unparseable or without one: it is served by nothing, the cause is `lcars " <>
+          "catalogue verify`'s to name. Do NOT derive this list from " <>
           "`card_list` — a catalogue shipping no card is invisible there. The result is DISPLAYED as " <>
           "it stands: do not repeat it, answer what was asked of it. No arguments."
       )
