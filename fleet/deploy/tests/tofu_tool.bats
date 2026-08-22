@@ -1,0 +1,158 @@
+#!/usr/bin/env bats
+# SOURCE: fleet/deploy/tests/tofu_tool.bats
+# AUTHOR: DrDree
+# STARDATE: 2026-08-22
+# STATUS: bats tests for 46-tofu — l'outil qui pose la structure de forge, SUR la machine
+#
+# ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de recette
+# tofu ? » puis « pourquoi tofu ne peut pas tourner directement ? »
+#
+# Mesure dans l'image : `tofu` 110 Mo + son miroir de providers 14 Mo — 124 Mo d'outil transportes
+# dans une image de 1,18 Go que le rail poste ne DEMARRE jamais et ne batissait que pour ca.
+#
+# La cause etait historique : « tofu n'etait installe NULLE PART », dit le Dockerfile. Et le
+# contournement etait devenu sa propre justification — le conteneur transitoire recevait ses
+# fichiers par un volume et trois `docker cp`, pour contourner un probleme (« le daemon peut vivre
+# ailleurs ») qui n'existe QUE parce qu'on tourne dans un conteneur.
+#
+# ⚠ AUCUN TEMOIN ICI NE VA SUR LE RESEAU NI NE LANCE tofu. Ce qui se mesure est la DERIVATION : les
+# pins, l'arch, la version sondee, et le fait que le miroir se refasse sur un verdict et pas a
+# chaque passage.
+
+setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+
+  MOD="$BATS_TEST_DIRNAME/../modules.d/46-tofu.sh"
+  DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  [ -f "$MOD" ] && [ -f "$DOCKERFILE" ]
+
+  export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  export PROVISION_MODULE=46-tofu
+  export PROV_SUBSTRATE=linux
+  export PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_ADMIN_GROUP="$(id -gn)"
+  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
+
+  # ⚠ LE BINAIRE SE NOMME, SINON LE TEMOIN MESURE LA MACHINE. `/usr/local/bin/tofu` existe sur
+  # certains postes de dev — mesure du 2026-08-22 : un symlink pose en juillet sur celui-ci. Sans ce
+  # nommage, « tofu absent » prend la branche « present, verifie la version » et repond sur l'hote.
+  # Quatrieme occurrence de ce piege en deux jours, apres `/etc/lcars/host-consent` et `ttyd`.
+  export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/bin/tofu"
+  export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/lcars/tofu"
+  export LCARS_TOFU_OWNER="$(id -un):$(id -gn)"
+}
+
+mod() { run bash "$MOD" "$1"; }
+
+@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS + les trois en-tetes de module" {
+  run head -9 "$MOD"
+  [[ "$output" == *"SOURCE:"* ]]
+  [[ "$output" == *"AUTHOR:"* ]]
+  [[ "$output" == *"STARDATE:"* ]]
+  [[ "$output" == *"STATUS:"* ]]
+  [[ "$output" == *"APPLY-ON: wsl linux"* ]]
+  [[ "$output" == *"CHECK-ON: any"* ]]
+  [[ "$output" == *"NEEDS: root"* ]]
+}
+
+@test "l'ORDRE porte le sens : ce module vient AVANT 48-forge-host, qui en depend" {
+  # `48-forge-host` pose la structure de la forge et a besoin de tofu POUR CA. Le mettre avec les
+  # autres auxiliaires (62) l'aurait rendu indisponible au moment exact ou la forge en a besoin —
+  # meme lecon que `22-fleet-human`, renomme de 65 a 22 pour cette raison.
+  local d="$BATS_TEST_DIRNAME/../modules.d"
+  [ -f "$d/46-tofu.sh" ]
+  [ -f "$d/48-forge-host.sh" ]
+  [[ "46-tofu" < "48-forge-host" ]]
+}
+
+@test "les pins sont IDENTIQUES a ceux du Dockerfile — deux rails, deux mecanismes, UNE version" {
+  local k from_mod from_docker
+  for k in TOFU_SHA256_AMD64 TOFU_SHA256_ARM64; do
+    from_mod="$(grep -oE "^${k}=[0-9a-f]+" "$MOD" | cut -d= -f2)"
+    from_docker="$(grep -oE "ARG ${k}=[0-9a-f]+" "$DOCKERFILE" | cut -d= -f2)"
+    [ -n "$from_mod" ]
+    [ -n "$from_docker" ]
+    [ "$from_mod" = "$from_docker" ]
+  done
+  local v_mod v_docker
+  v_mod="$(grep -oE 'LCARS_TOFU_VERSION:-[0-9.]+' "$MOD" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+  v_docker="$(grep -oE '^ARG TOFU_VERSION=[0-9.]+' "$DOCKERFILE" | cut -d= -f2)"
+  [ "$v_mod" = "$v_docker" ]
+}
+
+@test "l'absence de tofu se DIT avec sa consequence" {
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"absent"* ]]
+  [[ "$output" == *"territoire de tofu"* ]]
+}
+
+@test "un tofu d'une AUTRE version est un DRIFT, pas un « present »" {
+  # Le pin ne vaut que si on verifie ce qu'on a. Un tofu du systeme, pose par quelqu'un d'autre,
+  # jouerait la recette avec d'autres providers — et la structure de forge est son territoire.
+  mkdir -p "$(dirname "$LCARS_TOFU_BIN")"
+  printf '#!/usr/bin/env bash\necho "OpenTofu v1.6.0"\n' > "$LCARS_TOFU_BIN"
+  chmod 0755 "$LCARS_TOFU_BIN"
+
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1.6.0"* ]]
+  [[ "$output" == *"version épinglée"* ]]
+  [[ "$output" == *"d'autres providers"* ]]
+}
+
+@test "la version EPINGLEE est reconnue — pas de drift sur le cas nominal" {
+  mkdir -p "$(dirname "$LCARS_TOFU_BIN")"
+  printf '#!/usr/bin/env bash\necho "OpenTofu v1.12.3"\n' > "$LCARS_TOFU_BIN"
+  chmod 0755 "$LCARS_TOFU_BIN"
+
+  mod check
+  [[ "$output" == *"tofu 1.12.3 posé"* ]]
+  [[ "$output" != *"version épinglée"* ]]
+}
+
+@test "le miroir absent est un DRIFT nomme — sinon tofu irait sur le RESEAU sans le dire" {
+  mod check
+  [[ "$output" == *"miroir de providers absent"* ]]
+  [[ "$output" == *"réseau"* ]]
+}
+
+@test "une arch non epinglee est un REFUS, jamais un repli" {
+  # `uname -m` repondrait `x86_64` la ou les releases disent `amd64`, et repondrait pour la machine
+  # de build en cross-compilation. On lit `dpkg --print-architecture`, et une arch inconnue ECHOUE
+  # en se nommant plutot que de deviner une URL.
+  # ⚠ ON GREPPE LE CODE, PAS LA PROSE. Le module CITE `uname -m` dans son commentaire pour dire
+  # pourquoi il ne l'emploie pas ; un grep nu sur le fichier attrape cette phrase et fait echouer le
+  # temoin sur ce qu'il voulait justement saluer.
+  code() { grep -vE '^\s*#' "$MOD"; }
+  grep -q 'arch non épinglée pour tofu' "$MOD"
+  grep -q 'attendu amd64 ou arm64' "$MOD"
+  code | grep -q 'dpkg --print-architecture'
+  ! code | grep -q 'uname -m'
+}
+
+@test "le miroir se refait sur le VERDICT d'un init hors-ligne, pas a chaque passage" {
+  # `providers mirror` va sur le reseau, `init` hors-ligne non. L'init est donc le discriminant, et
+  # la seule chose qui PROUVE que le miroir couvre la recette telle qu'elle est aujourd'hui.
+  # ⚠ SUR LE CODE, PAS SUR LA PROSE : le commentaire qui explique la regle cite `providers mirror`
+  # AVANT que le code ne l'appelle, et un grep nu concluait donc l'inverse de ce qui est ecrit.
+  local body="$BATS_TEST_TMPDIR/body.sh"
+  grep -vE '^\s*#' "$MOD" > "$body"
+  grep -q 'init -input=false -no-color' "$body"
+  grep -q 'providers mirror -platform=' "$body"
+  # et l'init est joue AVANT le miroir — sinon on irait sur le reseau a chaque passage
+  local first_init first_mirror
+  first_init="$(grep -n 'init -input=false' "$body" | head -1 | cut -d: -f1)"
+  first_mirror="$(grep -n 'providers mirror' "$body" | head -1 | cut -d: -f1)"
+  [ "$first_init" -lt "$first_mirror" ]
+}
+
+@test "la liste des modules de recette se DERIVE de l'arbre, pas d'un tableau en dur" {
+  # C'est la recette que la machine jouera qui decide quels providers il lui faut. Un tableau en dur
+  # ici serait un second exemplaire de ce que le Dockerfile enumere.
+  grep -q 'repo_root)/fleet/deploy/deps' "$MOD"
+}

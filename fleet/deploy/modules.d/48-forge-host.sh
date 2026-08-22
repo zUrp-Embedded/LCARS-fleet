@@ -13,8 +13,8 @@
 # ⚠ `wsl linux` ET PAS `wsl` : le terrain de ce module est LE RAIL POSTE, pas un noyau. Il a porté
 # `wsl` seul pendant deux jours, et rien dans son corps ne le justifiait — `docker_endpoint` est
 # déjà substrat-conscient (il choisit son refus selon le terrain), l'adresse est `127.0.0.1`, le
-# compose vient du dépôt. Le seul pré-requis réel est l'image `lcars-fleet:2`, qui porte tofu, la
-# recette et les gestes, et son absence est déjà une dérive NOMMÉE plus bas.
+# compose vient du dépôt. Ses pré-requis réels sont un daemon docker (pour la Gitea) et `tofu`
+# (pour la structure) — le second est posé par `46-tofu`, et son absence est une dérive NOMMÉE.
 #
 # CE QUE LE GATE `wsl` A COÛTÉ, mesuré le 2026-08-20 : une install native s'est faite à la main —
 # conteneur Gitea, compte d'administration, jeton master, amorçage en deux passes — c'est-à-dire
@@ -32,10 +32,15 @@
 # CE QU'IL N'EST PAS : un second chemin de forge. Il n'y a QU'UNE forge dans ce dépôt, et c'est un
 # conteneur — `bench-up.sh` monte exactement la même. Ce module joue les mêmes gestes, sans boîte.
 #
-# ⚠ LA STRUCTURE EST POSÉE PAR UN RUN TRANSITOIRE DE L'IMAGE, et c'est possible parce que l'état de
-# tofu est JETABLE PAR CONSTRUCTION : la recette reconstruit ce qui existe par ses blocs `import`
-# (cf. forge-gestures.sh, et c'est pourquoi `--tofu-dir` est devenu un argument ignoré). Un
-# `docker run --rm` part donc d'un tfstate vide, ce qui est le cas nominal et non un pis-aller.
+# ⚠ LA STRUCTURE EST POSÉE PAR UN `tofu` DE LA MACHINE, et rejouable parce que l'état de tofu est
+# JETABLE PAR CONSTRUCTION : la recette reconstruit ce qui existe par ses blocs `import` (cf.
+# forge-gestures.sh, et c'est pourquoi `--tofu-dir` est devenu un argument ignoré). Chaque passage
+# part donc d'un tfstate vide, ce qui est le cas nominal et non un pis-aller.
+#
+# ⚖ CE BLOC A DÉCRIT UN « RUN TRANSITOIRE DE L'IMAGE » JUSQU'AU 2026-08-22, où l'user a demandé
+# « pourquoi tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette tofu ? ».
+# Réponse mesurée : parce que tofu n'était installé nulle part ailleurs. Une raison d'inventaire,
+# jamais d'architecture.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -56,7 +61,6 @@ set -euo pipefail
 # `admiral` reste le nom du siège DANS LA BOÎTE, où l'entrypoint crée un uid 1000 qu'aucun humain
 # n'a nommé. Ici il y a quelqu'un pour le nommer : c'est lui.
 : "${PROV_FORGE_ADMIN:=$PROV_HUMAN}"            # le compte qui ADMINISTRE la forge — l'opérateur
-: "${PROV_FORGE_IMAGE:=lcars-fleet:2}"          # l'image qui porte tofu, la recette et les gestes
 : "${PROV_DOCKER_BIN:=docker}"
 
 # ─── DEUX ADRESSES, ET LES CONFONDRE CASSE LA MOITIÉ DES LIENS ─────────────────────────────────
@@ -245,13 +249,17 @@ apply() {
     p_fail "$PROV_DOCKER_WHY — forge NON montée, et elle ne peut pas l'être autrement"
     verdict_apply
   fi
-  # L'IMAGE PORTE tofu, LA RECETTE ET LES GESTES. Sans elle il n'y a pas de structure à poser, et
-  # le dire ici évite un `docker run` qui échouerait sur un « image inconnue » sans nommer le geste.
-  if ! d image inspect "$PROV_FORGE_IMAGE" >/dev/null 2>&1; then
-    p_drift "image $PROV_FORGE_IMAGE absente — elle porte tofu, la recette et les gestes de forge : « ./docker.sh build » d'abord, puis relance"
+  # ⚠ CE MODULE NE DÉPEND PLUS D'UNE IMAGE, IL DÉPEND DE `46-tofu`. Il exigeait ici la présence de
+  # `lcars-fleet:2` — 1,18 Go bâtis pour exécuter 100 ko de recette dans un conteneur jetable, sur un
+  # rail qui ne démarre jamais cette image. Ce qu'elle apportait de réel (une version figée, des
+  # providers hors-ligne) est posé SUR la machine, deux crans plus tôt.
+  #
+  # On sonde le BINAIRE et non la version : `46-tofu` est l'autorité du pin, et re-juger ici en
+  # ferait un second. Ce qui manque à ce module, c'est un tofu — pas un avis sur lequel.
+  if [[ ! -x "${LCARS_TOFU_BIN:-/usr/local/bin/tofu}" ]]; then
+    p_drift "tofu absent — la structure de la forge est son territoire : joue « 46-tofu » d'abord, puis relance"
     verdict_apply
   fi
-
   # ─── 1. LE CONTENEUR ───────────────────────────────────────────────────────────────────────────
   #
   # ⚠ CE BLOC A ÉTÉ NON IDEMPOTENT PENDANT TOUTE SA VIE, SOUS UN COMMENTAIRE QUI DISAIT LE
@@ -375,65 +383,146 @@ apply() {
     p_ok "seed des comptes déjà posé ($SEED_FILE)"
   fi
 
-  # 4. LE ROSTER, dérivé du catalogue que l'IMAGE porte — jamais de l'arbre de l'hôte, qui peut
-  #    avoir bougé depuis le build, et dont les droits ferment la porte au conteneur.
+  # 4. LE ROSTER, dérivé du catalogue par `CatalogueRoles` — la MÊME autorité dans les deux cas,
+  #    seul l'endroit où elle s'exécute change.
+  #
+  # ⚠ `--repo` ET NON `--image`, SUR CE RAIL ET LUI SEUL. Le script préfère `--image` et le dit :
+  # « `--repo` compile l'arbre source : il exige un toolchain Elixir sur la machine qui appelle. Le
+  # chemin de livraison n'en a pas — le banc est mort dessus sur la première machine neuve
+  # (2026-08-22, `mix: ABSENT`). » C'est vrai de la BOÎTE, qui se livre sans toolchain. Le rail
+  # POSTE, lui, a posé Elixir au module 15 — et c'est sa raison d'être : il BÂTIT le runtime.
+  #
+  # ⚠ ET « ELIXIR EST POSÉ » NE SUFFIT PAS — révision du 2026-08-22, à froid. `mix compile` exige
+  # `deps/`, qui est GITIGNORÉ : sur un clone neuf il n'existe pas. Hex, rebar et `deps.get`
+  # arrivaient au module 60, DOUZE CRANS PLUS LOIN. La première passe mourait donc ici, en accusant
+  # le module 15 — qui avait fait son travail.
+  #
+  # C'est le prix de la bascule et il se paye ICI : ce module est devenu le PREMIER consommateur du
+  # toolchain de build, donc c'est à lui de le rendre utilisable. `60-deploy` garde les siens : il
+  # doit rester jouable seul (`--only 60-deploy`), et ces gestes sont idempotents.
+  #
+  # ⚠ ET TOUT PASSE PAR `as_human`, JAMAIS PAR root. `60-deploy` porte la raison : « un build root
+  # polluerait le `_build` du checkout ». Un `mix` en root ici laisserait un `_build` et un `deps`
+  # que l'humain ne peut plus écrire, et casserait le module 60 douze crans plus loin — en accusant
+  # le module 60.
+  local tree; tree="$(repo_root)/fleet"
+  p_step "outillage mix pour dériver le roster ($PROV_HUMAN)"
+  run_quiet as_human env -C "$tree" mix local.hex --force \
+    || { p_fail "hex non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
+  run_quiet as_human env -C "$tree" mix local.rebar --force \
+    || { p_fail "rebar non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
+  run_step "dépendances Elixir" -- as_human env -C "$tree" mix deps.get \
+    || { p_fail "dépendances Elixir non récupérables ($tree) — sans elles l'arbre ne compile pas"; verdict_apply; }
+
+  # Le dossier de sortie appartient à l'humain : c'est lui qui joue la dérivation.
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
-  run_quiet env DOCKER_BIN="$PROV_DOCKER_BIN" \
-      "$(repo_root)/fleet/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --image "$PROV_FORGE_IMAGE" \
-    || { p_fail "roster non dérivable de $PROV_FORGE_IMAGE"; rm -rf "$enroll"; verdict_apply; }
+  chown "$PROV_HUMAN" "$enroll" \
+    || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
+  run_step "roster du catalogue" -- as_human "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" \
+    || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
-
-  # 5. LA STRUCTURE, par un conteneur TRANSITOIRE de l'image (porte `forge-apply` de l'entrypoint).
+  # 5. LA STRUCTURE, jouée DIRECTEMENT — plus de conteneur, plus d'image.
   #
-  # ⚠ AUCUN BIND D'UN CHEMIN DE L'HÔTE, ET CE N'EST PAS UNE PRÉFÉRENCE. Le daemon peut vivre
-  # ailleurs que sur cette machine — sous Docker Desktop il est dans une autre VM — et un chemin
-  # d'hôte lui est alors INVISIBLE : il crée un répertoire vide à sa place, EN SILENCE. Mesuré ici
-  # le 2026-08-18 : `-v /home/private:/home/private` donnait au conteneur un dossier vide, et le
-  # geste répondait « la boîte ne détient pas ce qu'il faut » en nommant des fichiers qui existaient
-  # à trente centimètres. `bench-runner.sh` porte déjà cet avertissement mot pour mot ; j'y suis
-  # entré quand même.
+  # ⚖ USER 2026-08-22 : « tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette
+  # tofu ? » puis « pourquoi tofu ne peut pas tourner directement ? »
   #
-  # La forme qui traverse : `docker create` → `docker cp` → `docker start`. `cp` passe par l'API du
-  # daemon, donc il atteint le conteneur où qu'il soit. Le volume nommé porte l'autorité (un objet
-  # du daemon, pas un chemin), et il est monté HORS de `/home` — que l'image déclare déjà comme
-  # volume. `LCARS_PRIVATE_DIR` dit au geste où regarder ; il l'accepte depuis toujours.
+  # CE BLOC MONTAIT UN CONTENEUR TRANSITOIRE, et le commentaire qui l'expliquait décrivait un
+  # problème RÉEL — « aucun bind d'un chemin de l'hôte : le daemon peut vivre ailleurs, sous Docker
+  # Desktop il est dans une autre VM, et un chemin d'hôte lui est alors INVISIBLE ; il crée un
+  # répertoire vide à sa place, EN SILENCE » (mesuré le 2026-08-18). D'où le volume nommé, les trois
+  # `docker cp`, et l'image de 1,18 Go bâtie sur un rail qui ne la démarre jamais.
+  #
+  # ⚠ CE PROBLÈME N'EXISTAIT QUE PARCE QU'ON AVAIT CHOISI LE CONTENEUR. Un contournement était devenu
+  # sa propre justification : on tourne en conteneur → le daemon peut être ailleurs → il faut un
+  # volume et des `docker cp` → c'est compliqué → « on ne peut pas faire autrement ». Sur la machine,
+  # les fichiers d'autorité sont déjà là, et il n'y a rien à traverser.
+  #
+  # Le script, lui, n'a JAMAIS eu d'hypothèse de conteneur : `PRIVATE_DIR` défaute sur
+  # `/home/private`, `CATALOGUE_WORK` sur `/var/lib/lcars/tofu` — deux chemins d'hôte. C'est
+  # l'appelant qui le forçait dans un `docker create`.
+  #
+  # CE QUI EST GARDÉ : l'hermétisme, par `46-tofu` — version épinglée et providers en miroir
+  # hors-ligne. Le conteneur n'en était qu'un porteur possible, pas la source.
   p_step "forge du poste : pose de la structure (orgs, comptes de rôle, teams, dépôt modèle)"
-  local vol="${PROV_FORGE_PROJECT}-authority" cid rc=0
-  d volume create "$vol" >/dev/null 2>&1 || true
-  cid="$(d create --network "$FORGE_NET" \
-        -v "$vol:/authority" \
-        -e LCARS_PRIVATE_DIR=/authority \
-        -e FORGE_BASE_URL="http://forge:3000" \
-        `# ⚠ L'HUMAIN INTÉGRÉ N'EST PAS L'OPÉRATEUR, ET CETTE LIGNE LES CONFONDAIT.` \
-        `# La recette le dit d'elle-même : « CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du` \
-        `# compte que l'admin d'une forge crée à son installation […] Un déploiement réel ne "passe` \
-        `# pas le sien" — les vraies personnes s'inscrivent seules et un admin les ajoute à humans ».` \
-        `# Les deux autres rails le savent : forge-gestures.sh défaute sur "lcars", bench-forge-` \
-        `# bootstrap passe l'humain de banc. Le rail poste était le seul à y mettre SUDO_USER.` \
-        `#` \
-        `# Ce que ça coûtait n'a été visible qu'à froid, et seulement depuis D7. La recette pose` \
-        `# admin = false sur ce compte ; tant que le #1 de la forge était "admiral", l'opérateur` \
-        `# était le #2 et personne ne s'en apercevait. Devenu #1 et admin, il est le DERNIER admin —` \
-        `# et Gitea refuse net : « can not delete the last admin user [uid: 1] ». Structure NON posée,` \
-        `# donc pas de jetons de rôle, donc pas d'OIDC ni de branche ops. Quatre modules pour une` \
-        `# ligne qui visait le mauvais humain depuis le début.` \
-        `#` \
-        `# VIDE EST UNE RÉPONSE : sans humain de fleet nommé, on ne passe rien et forge-gestures.sh` \
-        `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
-        `# fait ne restent d'accord que tant que personne n'en touche un.` \
-        -e LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
-        "$PROV_FORGE_IMAGE" forge-apply 2>/dev/null)"
-  [[ -n "$cid" ]] || { p_fail "conteneur de pose non créable ($PROV_FORGE_IMAGE)"; rm -rf "$enroll"; verdict_apply; }
-  {
-    d cp "$MASTER_TOKEN_FILE" "$cid:/authority/forge-master.token" &&
-    d cp "$SEED_FILE"         "$cid:/authority/forge-seed.pass" &&
-    d cp "$enroll/roles.auto.tfvars.json" "$cid:/opt/lcars/fleet/deploy/deps/roles.auto.tfvars.json"
-  } >/dev/null 2>&1 \
-    || { p_fail "autorité/roster non déposés dans le conteneur de pose"; d rm -f "$cid" >/dev/null 2>&1; rm -rf "$enroll"; verdict_apply; }
-  run_step "structure de la forge" -- d start -a "$cid" || rc=$?
-  d rm -f "$cid" >/dev/null 2>&1 || true
-  rm -rf "$enroll"
+
+  # LA RECETTE SE JOUE SUR UNE COPIE, JAMAIS DANS LE CHECKOUT. Le conteneur recevait le roster par
+  # `docker cp` DANS sa recette ; ici on assemble le même couple (recette + roster) dans un dossier
+  # jetable. Écrire `roles.auto.tfvars.json` dans l'arbre de l'opérateur salirait son clone avec un
+  # fichier généré.
+  local recipe; recipe="$(mktemp -d "${TMPDIR:-/tmp}/prov-recipe.XXXXXX")"
+  cp -a "$(repo_root)/fleet/deploy/deps/." "$recipe/" \
+    || { p_fail "recette non copiable ($(repo_root)/fleet/deploy/deps)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+  cp "$enroll/roles.auto.tfvars.json" "$recipe/roles.auto.tfvars.json" \
+    || { p_fail "roster non déposé dans la recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+
+  # ⚠ ET LE `.terraform/` DE L'ARBRE NE VIENT PAS AVEC. `46-tofu` en laisse un dans le dépôt — c'est
+  # son témoin de miroir complet, et il est gitignoré — mais il décrit un répertoire À SON CHEMIN.
+  # Le recopier ailleurs, c'est hériter d'un état dont on ne sait pas ce qu'il pointe. On repart
+  # d'une init propre : hors-ligne, elle coûte une seconde.
+  #
+  # ⚠ ET IL FAUT L'INIT : `forge-gestures.sh apply` appelle `tofu apply` NU, sans init préalable —
+  # dans l'image, le Dockerfile l'avait joué AU BUILD (« LE TEMOIN DU LOT est le `tofu init` en fin
+  # de RUN »). En sortant du conteneur, on hérite de cette dette : sans ce geste, l'apply échoue sur
+  # des providers non installés. Le geste n'est pas modifié — la boîte marche, et un init ajouté
+  # là-bas irait sur le réseau si sa tofurc ne suivait pas.
+  rm -rf "$recipe/.terraform" "$recipe/instance/.terraform"
+  local m
+  for m in instance .; do
+    TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
+      run_quiet env -C "$recipe/$m" tofu init -input=false -no-color \
+      || { p_fail "recette non initialisable ($m) — le miroir de providers couvre-t-il cette recette ? (46-tofu)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+  done
+
+  # LES DEUX DÉPÔTS DE CATALOGUE, ET LEURS CHEMINS ÉTAIENT CEUX DE L'IMAGE.
+  #
+  # ⚠ RÉGRESSION SILENCIEUSE TROUVÉE EN REVUE (2026-08-22). `forge-gestures.sh` publie deux dépôts
+  # après la structure : la DÉMO (`web-demo`) et le catalogue de RÉFÉRENCE, celui qu'on forke. Leurs
+  # défauts sont des chemins de conteneur — `/opt/lcars/catalogues/web-demo` et l'entrypoint de
+  # l'image pour la référence. Dans le conteneur ils existaient ; sur la machine, non.
+  #
+  # Et les deux échecs sont NON FATAUX par conception (une forge sans démo reste une forge). En
+  # sortant du conteneur sans les recâbler, on obtenait donc une forge structurée mais VIDE des deux
+  # dépôts, sans qu'aucun verdict ne baisse. C'est la forme d'échec la plus chère : un succès qui
+  # dit vrai sur ce qu'il a fait, et rien sur ce qu'il n'a pas fait.
+  #
+  # ⚠ LA RÉFÉRENCE NE SE RECOMPOSE PAS À LA MAIN, et l'image porte la raison mot pour mot : la porte
+  # `catalogue-root` « existe pour que personne ne RECOMPOSE ce chemin […] un appelant shell qui le
+  # globberait marcherait jusqu'au jour où la disposition du release change ». On pose donc la même
+  # question à la même autorité — `Fleet.Catalogue.root()` — simplement là où elle tourne ici.
+  local ref_catalogue
+  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1)"
+  [[ -d "$ref_catalogue" ]] \
+    || { p_fail "le catalogue de référence est introuvable ($ref_catalogue) — la forge n'aurait rien à forker"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+
+  local rc=0
+  run_step "structure de la forge" -- env \
+    LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
+    FORGE_BASE_URL="$LOCAL_URL" \
+    LCARS_RECIPE_DIR="$recipe" \
+    LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
+    LCARS_REFERENCE_CATALOGUE="$ref_catalogue" \
+    TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
+    `# ⚠ L'HUMAIN INTÉGRÉ N'EST PAS L'OPÉRATEUR, ET CETTE LIGNE LES CONFONDAIT.` \
+    `# La recette le dit d'elle-même : « CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du` \
+    `# compte que l'admin d'une forge crée à son installation […] Un déploiement réel ne "passe` \
+    `# pas le sien" — les vraies personnes s'inscrivent seules et un admin les ajoute à humans ».` \
+    `# Les deux autres rails le savent : forge-gestures.sh défaute sur "lcars", bench-forge-` \
+    `# bootstrap passe l'humain de banc. Le rail poste était le seul à y mettre SUDO_USER.` \
+    `#` \
+    `# Ce que ça coûtait n'a été visible qu'à froid, et seulement depuis D7. La recette pose` \
+    `# admin = false sur ce compte ; tant que le #1 de la forge était "admiral", l'opérateur` \
+    `# était le #2 et personne ne s'en apercevait. Devenu #1 et admin, il est le DERNIER admin —` \
+    `# et Gitea refuse net : « can not delete the last admin user [uid: 1] ». Structure NON posée,` \
+    `# donc pas de jetons de rôle, donc pas d'OIDC ni de branche ops. Quatre modules pour une` \
+    `# ligne qui visait le mauvais humain depuis le début.` \
+    `#` \
+    `# VIDE EST UNE RÉPONSE : sans humain de fleet nommé, on ne passe rien et forge-gestures.sh` \
+    `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
+    `# fait ne restent d'accord que tant que personne n'en touche un.` \
+    LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
+    bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" apply || rc=$?
+  rm -rf "$recipe" "$enroll"
   [[ "$rc" -eq 0 ]] \
     || { p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
   PROV_CHANGED=$((PROV_CHANGED + 1))

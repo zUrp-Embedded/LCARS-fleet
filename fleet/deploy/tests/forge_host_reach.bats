@@ -220,3 +220,167 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # et le module ne redit pas ce defaut
   ! grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
 }
+
+# ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
+#
+# ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de recette
+# tofu ? » puis « pourquoi tofu ne peut pas tourner directement ? ».
+#
+# Ce module montait un conteneur TRANSITOIRE de `lcars-fleet:2` pour jouer `forge-apply`, avec un
+# volume nomme et trois `docker cp` — le tout pour contourner un probleme (« le daemon peut vivre
+# ailleurs, un chemin d'hote lui est INVISIBLE ») qui n'existe QUE parce qu'on tourne en conteneur.
+# Un contournement etait devenu sa propre justification.
+#
+# ⚠ CES TEMOINS NE LANCENT NI DOCKER NI TOFU. Ce qui se mesure est la FORME de l'appel.
+
+@test "la structure est jouee par le GESTE, pas par un conteneur transitoire" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'forge-gestures.sh" apply'
+  # et plus rien du dispositif de contournement
+  ! code | grep -q 'd create --network'
+  ! code | grep -q 'd cp '
+  ! code | grep -q 'volume create'
+  ! code | grep -q 'forge-apply'
+}
+
+@test "ce module n'UTILISE plus aucune image — elle n'etait batie que pour lui" {
+  # ⚠ SUR LE CODE, PAS SUR LA PROSE. Le module CITE `lcars-fleet:2` dans la cicatrice qui explique
+  # pourquoi il ne la reclame plus ; un grep nu attrape cette phrase et fait echouer le temoin sur
+  # ce qu'il voulait justement saluer. Troisieme fois en deux jours (`uname -m`, `providers mirror`).
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  ! code | grep -q 'PROV_FORGE_IMAGE'
+  ! code | grep -q 'lcars-fleet:2'
+  ! code | grep -q 'image inspect'
+  # et la cicatrice, elle, RESTE : sans elle un lecteur re-ajoute le build
+  grep -q 'NE DÉPEND PLUS D.UNE IMAGE' "$SRC"
+}
+
+@test "l'AUTORITE est lue la ou 48 l'a ECRITE — les trois \`docker cp\` deviennent zero geste" {
+  # Le conteneur recevait le jeton master et le seed par `docker cp` dans un volume. Sur la machine,
+  # `LCARS_PRIVATE_DIR` suffit : le geste y cherche exactement les deux noms que ce module pose.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  grep -q 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$SRC"
+  grep -q 'MASTER_TOKEN_FILE="\$PROV_TOKENS_DIR/forge-master.token"' "$SRC"
+  grep -q 'SEED_FILE="\$PROV_TOKENS_DIR/forge-seed.pass"' "$SRC"
+  grep -q 'MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-\$PRIVATE_DIR/forge-master.token}"' "$g"
+  grep -q 'SEED_FILE="${LCARS_FORGE_SEED_FILE:-\$PRIVATE_DIR/forge-seed.pass}"' "$g"
+}
+
+@test "l'URL passee est la LOOPBACK de l'hote, plus le nom de service du reseau compose" {
+  # Le conteneur parlait a `http://forge:3000`, resolu par le reseau `${projet}_default`. Depuis la
+  # machine, ce nom ne resout pas : c'est le port PUBLIE qu'on compose.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'FORGE_BASE_URL="\$LOCAL_URL"'
+  ! code | grep -q 'FORGE_BASE_URL="http://forge:3000"'
+}
+
+@test "la recette est une COPIE — le checkout de l'operateur ne recoit pas le roster genere" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'recipe="\$(mktemp -d'
+  code | grep -q 'LCARS_RECIPE_DIR="\$recipe"'
+  # le roster atterrit DANS la copie, jamais dans l'arbre
+  code | grep -q 'cp "\$enroll/roles.auto.tfvars.json" "\$recipe/roles.auto.tfvars.json"'
+  ! code | grep -qE 'deps/roles\.auto\.tfvars\.json'
+  # et la copie est effacee, dans les deux sorties
+  code | grep -q 'rm -rf "\$recipe" "\$enroll"'
+}
+
+@test "la copie est INITIALISEE hors-ligne — le geste appelle \`tofu apply\` NU" {
+  # Dans l'image, le Dockerfile jouait `tofu init` AU BUILD. En sortant du conteneur on herite de
+  # cette dette : sans init, l'apply echoue sur des providers non installes.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  # le geste n'init PAS avant son apply de recette — c'est le fait dont depend le temoin suivant
+  ! sed -n '/^  for m in instance \.; do/,/^  done/p' "$g" | grep -q 'tofu init'
+  # donc 48 le fait, avec la tofurc du miroir
+  code | grep -q 'tofu init -input=false -no-color'
+  code | grep -q 'TF_CLI_CONFIG_FILE='
+}
+
+@test "le \`.terraform\` de l'arbre NE VOYAGE PAS — un etat decrit un chemin, pas une recette" {
+  # `46-tofu` en laisse un dans le depot (gitignore, c'est son temoin de miroir complet). Le
+  # recopier ailleurs, c'est heriter d'un etat dont on ne sait pas ce qu'il pointe.
+  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'rm -rf "\$recipe/.terraform" "\$recipe/instance/.terraform"'
+}
+
+@test "le pre-requis manquant est NOMME avec le module qui le pose" {
+  # L'ancienne dérive nommait « ./docker.sh build ». La nouvelle nomme `46-tofu`, et rejuge PAS la
+  # version : `46-tofu` est l'autorite du pin, un second avis ici en ferait un second defaut.
+  grep -q '46-tofu' "$SRC"
+  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
+  ! grep -q 'docker.sh build' "$SRC"
+}
+
+@test "le roster se derive de l'ARBRE sur ce rail — Elixir y est pose 33 crans plus tot" {
+  # `enroll-catalogue.sh` PREFERE `--image`, et le dit : `--repo` exige un toolchain Elixir sur la
+  # machine qui appelle, que le chemin de LIVRAISON n'a pas. Le rail poste, lui, l'a pose au module
+  # 15 — il batit le runtime. La contrainte qui justifiait l'image n'existe pas ici.
+  local d="$BATS_TEST_DIRNAME/../modules.d"
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" --repo'
+  ! code | grep -q -- '--image "\$PROV_FORGE_IMAGE"'
+  # et le toolchain vient AVANT — l'ordre est le prefixe
+  [ -f "$d/15-toolchain.sh" ]
+  [[ "15-toolchain" < "48-forge-host" ]]
+}
+
+# ─── LES TROIS TROUS DE LA BASCULE, TROUVES EN REVUE (2026-08-22) ───────────────────────────────
+
+@test "le roster REND l'arbre compilable — sinon la premiere passe meurt sur \`deps/\`" {
+  # ⚠ « ELIXIR EST POSE » NE SUFFIT PAS. `enroll-catalogue.sh --repo` fait `mix compile`, qui exige
+  # `deps/` — GITIGNORE, donc absent d'un clone neuf. Hex, rebar et `deps.get` arrivaient au module
+  # 60, DOUZE CRANS plus loin : la premiere passe mourait ici en accusant le module 15.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'mix local.hex --force'
+  code | grep -q 'mix local.rebar --force'
+  code | grep -q 'mix deps.get'
+  # et ils viennent AVANT la derivation, pas apres
+  local b d
+  b="$(code | grep -n 'mix deps.get' | head -1 | cut -d: -f1)"
+  d="$(code | grep -n 'enroll-catalogue.sh' | head -1 | cut -d: -f1)"
+  [ "$b" -lt "$d" ]
+}
+
+@test "tout \`mix\` passe par as_human — un build root pollue le \`_build\` du checkout" {
+  # `60-deploy` porte la raison : « un build root polluerait le _build du checkout ». Un mix en root
+  # ici laisserait un `_build` et un `deps` que l'humain ne peut plus ecrire, et casserait le module
+  # 60 douze crans plus loin — en accusant le module 60.
+  # ⚠ ON COMPTE LE VERBE, PAS LE MOT. Un `p_step "outillage mix pour deriver le roster"` contient
+  # « mix » dans une CHAINE DE MESSAGE : un compte nu le prend pour une invocation et fait echouer
+  # le temoin sur une ligne qui n'execute rien. Meme piege que la prose, un cran plus bas — ici il
+  # est dans le code.
+  local n_mix n_as inv='mix (local\.|deps\.|run |compile|release)'
+  n_mix="$(grep -vE '^\s*#|^\s*`#' "$SRC" | grep -cE "$inv")"
+  n_as="$(grep -vE '^\s*#|^\s*`#' "$SRC" | grep -E "$inv" | grep -c 'as_human')"
+  [ "$n_mix" -gt 0 ]
+  [ "$n_mix" -eq "$n_as" ]
+  # et le dossier de sortie lui appartient, sinon il ne peut pas y ecrire
+  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'chown "\$PROV_HUMAN" "\$enroll"'
+}
+
+@test "les DEUX depots de catalogue sont recables — leurs defauts sont des chemins d'image" {
+  # `forge-gestures.sh` publie la demo et la reference APRES la structure, et les deux echecs sont
+  # NON FATAUX. Sans recablage : forge structuree, deux depots absents, aucun verdict qui baisse.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
+  grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
+  grep -q 'ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"' "$g"
+  # et 48 les nomme tous les deux
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'LCARS_DEMO_CATALOGUE='
+  code | grep -q 'LCARS_REFERENCE_CATALOGUE='
+  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`)
+  [ -d "$BATS_TEST_DIRNAME/../../../catalogues/web-demo" ]
+  grep -q '^COPY catalogues /opt/lcars/catalogues' "$BATS_TEST_DIRNAME/../docker/Dockerfile"
+}
+
+@test "la REFERENCE se demande a son autorite, elle ne se recompose pas" {
+  # L'image porte la raison mot pour mot : `catalogue-root` « existe pour que personne ne RECOMPOSE
+  # ce chemin […] un appelant shell qui le globberait marcherait jusqu'au jour ou la disposition du
+  # release change ». Meme autorite ici, autre lieu d'execution.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'Fleet.Catalogue.root()'
+  ! code | grep -qE 'LCARS_REFERENCE_CATALOGUE="[^$]'
+  # et un chemin qui ne repond pas est un ECHEC, pas un depot silencieusement saute
+  code | grep -q 'le catalogue de référence est introuvable'
+}

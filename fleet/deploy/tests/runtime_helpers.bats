@@ -101,7 +101,7 @@ EOF
   mod apply
 
   local n
-  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh; do
+  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh forge-gestures.sh; do
     [ -x "$LCARS_HELPERS_DIR/$n" ]
     cmp -s "$SRC_DIR/$n" "$LCARS_HELPERS_DIR/$n"
   done
@@ -162,7 +162,7 @@ EOF
   # Chaque nom pose ici doit avoir son `COPY … /opt/lcars/<nom>` dans le Dockerfile, et
   # reciproquement — sauf `entrypoint.sh`, qui n'a pas de sens hors conteneur.
   local n
-  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh; do
+  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh forge-gestures.sh; do
     grep -q "COPY fleet/deploy/docker/$n */opt/lcars/$n" "$DOCKERFILE"
   done
   ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
@@ -238,3 +238,4 @@ EOF
   mod check
   [[ "$output" == *"parenté indéterminable"* ]]
 }
+

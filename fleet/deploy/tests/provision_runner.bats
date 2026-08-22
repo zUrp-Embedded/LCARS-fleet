@@ -546,31 +546,46 @@ EOF
   [ "$(head -n1 "$BATS_TEST_TMPDIR/ordre")" = "48-forge-host.sh" ]
 }
 
-@test "48-forge-host : la structure passe par un run TRANSITOIRE, jamais par une boite vivante" {
+@test "48-forge-host : la structure ne passe JAMAIS par une boite LCARS vivante" {
   # ⚖ « reconstruire et relancer un LCARS en conteneur pour tester celui qu'on vient d'installer
-  # nativement » — c'est precisement ce que ce module evite. Il monte la forge et joue la recette
-  # par `docker run --rm`, possible parce que le tfstate est jetable par construction.
+  # nativement » — c'est ce que ce module evite, et cette regle-la n'a pas bouge.
+  #
+  # ⚠ CE TEMOIN A GRAVE UN MOYEN, PAS LA REGLE, et il est reecrit pour ca. Il exigeait `forge-apply`,
+  # c'est-a-dire un run TRANSITOIRE d'une image de 1,18 Go batie pour ce seul appel (⚖ user
+  # 2026-08-22). Le conteneur jetable etait une facon d'eviter la boite vivante ; en appeler le geste
+  # directement en est une autre, plus courte. La regle survit, son implementation non.
   MOD="$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh"
-  grep -q -- "forge-apply" "$MOD"
-  ! grep -q -- "compose .*create lcars\|exec .*lcars-1" "$MOD"
-  # et la porte existe cote image
+  local code; code="$BATS_TEST_TMPDIR/48-code.sh"
+  grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
+  # la structure vient du GESTE, joue sur la machine
+  grep -q -- 'forge-gestures.sh" apply' "$code"
+  # et jamais d'un LCARS qui tourne
+  ! grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
+  ! grep -q -- "forge-apply" "$code"
+  # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
   grep -q '"forge-apply"' "$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
 }
 
-@test "48-forge-host : AUCUN bind d'un chemin d'hote — le daemon peut vivre ailleurs" {
+@test "48-forge-host : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
   # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /home/private:/home/private` a donne au conteneur
   # un dossier VIDE, et le geste a repondu « la boite ne detient pas ce qu'il faut » en nommant des
   # fichiers qui existaient a trente centimetres. Le daemon vit dans une autre VM : un chemin de
   # cette distro lui est invisible, et il cree un repertoire vide a la place, EN SILENCE.
-  # `bench-runner.sh` porte deja cet avertissement — d'ou ce temoin, pour qu'il ne se reperde pas.
+  #
+  # ⚠ CE TEMOIN EXIGEAIT LE CONTOURNEMENT — volume nomme, `create` -> `cp` -> `start` — donc il
+  # gravait la forme d'un remede au lieu du mal. Or ce mal n'existait QUE parce qu'on avait choisi le
+  # conteneur : sur la machine, les fichiers sont deja la et rien ne traverse. La mesure reste
+  # inscrite ici parce qu'elle redeviendrait vraie le jour ou quelqu'un remet un conteneur.
   MOD="$BATS_TEST_DIRNAME/../modules.d/48-forge-host.sh"
-  # aucun `-v <chemin absolu d'hote>:` : seuls les volumes NOMMES traversent
-  ! grep -qE '\-v "\$PROV_TOKENS_DIR|\-v "?/[a-z]' "$MOD"
-  # la forme qui traverse : create -> cp -> start
-  grep -q -- "d create --network" "$MOD"
-  grep -q -- "d cp " "$MOD"
-  grep -q -- "d start -a" "$MOD"
-  grep -q -- "LCARS_PRIVATE_DIR=/authority" "$MOD"
+  local code; code="$BATS_TEST_TMPDIR/48-code2.sh"
+  grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
+  # aucun montage, d'aucune sorte : ni chemin d'hote, ni volume nomme
+  ! grep -qE -- '\-v "' "$code"
+  ! grep -q -- "volume create" "$code"
+  ! grep -q -- "d cp " "$code"
+  # l'autorite est nommee par un chemin de la MACHINE, lu la ou 48 l'a ecrit
+  grep -q -- 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$code"
+  ! grep -q -- "LCARS_PRIVATE_DIR=/authority" "$code"
 }
 
 @test "48-forge-host : la forge ANNONCE son adresse — les modules sont des processus" {

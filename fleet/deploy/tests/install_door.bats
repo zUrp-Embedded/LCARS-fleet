@@ -455,18 +455,29 @@ SPY
   [ "$output" = "non" ]
 }
 
-@test "ORDRE : les paquets sont joues AVANT le build quand c'est le rail qui pose docker" {
-  # Mesure du 2026-08-21, passe a froid : le build cherchait `docker` vingt secondes avant que
-  # `10-packages` ne l'installe. La dependance a l'air circulaire — l'image veut docker,
-  # `48-forge-host` veut l'image, docker vient de `10-packages` — et se denoue par l'ordre.
-  # ⚠ LE BUILD VISE EST CELUI DU RAIL POSTE (`$_wroot`), PAS CELUI DU RAIL BOÎTE : les deux
-  # existent, celui de la boîte est plus haut dans le fichier, et le premier `grep` tombait dessus.
-  local pre build
-  pre="$(grep -n 'only 10-packages' "$SRC" | head -1 | cut -d: -f1)"
-  build="$(grep -n '_wroot/docker.sh" build' "$SRC" | head -1 | cut -d: -f1)"
-  [ -n "$pre" ]
-  [ -n "$build" ]
-  [ "$pre" -lt "$build" ]
+@test "le rail POSTE ne batit AUCUNE image — le seul build de la porte est celui de la BOITE" {
+  # ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de
+  # recette tofu ? ». La porte bâtissait `lcars-fleet:2` sur le rail poste sous le motif « la forge
+  # du poste en a besoin (tofu, recette, gestes) » — dix minutes pour en extraire 124 Mo d'outil
+  # dans un conteneur jetable, sur un rail qui ne DEMARRE jamais cette image.
+  #
+  # ⚠ CE TEMOIN A GRAVE LA VALEUR CONTRAIRE, et c'est pour ca qu'il est reecrit et pas supprime. Il
+  # verifiait « les paquets sont joues AVANT le build quand c'est le rail qui pose docker » — une
+  # regle d'ordre reelle, mais adossee a un build qui n'existe plus. La dependance qu'elle denouait
+  # (docker avant ce qui en a besoin) est desormais portee par la NUMEROTATION des modules :
+  # `10-packages` pose docker, `48-forge-host` monte la Gitea, et 10 < 48 par construction.
+  #
+  # Ce qui reste a verrouiller est donc l'inverse : qu'aucun build ne reapparaisse sur ce rail.
+  local box ws
+  # le build de la BOITE survit — la, l'image EST le produit livre
+  box="$(grep -c 'SCRIPT_DIR/docker.sh" build' "$SRC")"
+  [ "$box" -ge 1 ]
+  # celui du rail poste, non : ni son invocation, ni la racine qu'il derivait
+  ws="$(grep -c '_wroot/docker.sh" build' "$SRC" || true)"
+  [ "$ws" -eq 0 ]
+  ! grep -q '_wimg' "$SRC"
+  # et le motif mort n'est pas reste en prose : un lecteur le lirait comme vrai au present
+  ! grep -q 'la forge du poste en a besoin' "$SRC"
 }
 
 @test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {

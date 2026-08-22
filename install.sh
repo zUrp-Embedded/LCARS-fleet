@@ -608,25 +608,29 @@ if [[ ! -x "$PROVISION" ]]; then
   [[ -x "$PROVISION" ]] || { echo "[install] provision introuvable après clone : $PROVISION" >&2; exit 1; }
 fi
 
-# ─── L'IMAGE EST AUSSI UNE PRÉCONDITION DU RAIL POSTE, DEPUIS `48-forge-host` ───────────────────
-# La porte bâtissait `lcars-fleet:2` sur la branche BOÎTE seulement — c'était juste tant que l'image
-# n'était qu'un artefact de boîte. Depuis le 2026-08-18, le rail poste monte SA forge par
-# `48-forge-host`, et ce module a besoin de la même image : elle porte tofu, la recette et les
-# gestes de forge. Personne n'a déplacé le build avec.
+# ─── CE QUE LE RAIL POSTE A COÛTÉ QUAND IL DÉPENDAIT DE L'IMAGE (cicatrice, 2026-08-21) ─────────
+# Ce bloc bâtissait `lcars-fleet:2` pour le rail poste, et le motif était juste à l'époque :
+# `48-forge-host` montait SA forge et posait sa structure par un conteneur transitoire de cette
+# image, qui portait tofu, la recette et les gestes.
 #
-# ⚠ ET LE TROU EST INVISIBLE SUR LE SUBSTRAT OÙ CE RAIL EST ÉCRIT — le commentaire du build le dit
-# déjà, quelques lignes plus haut, pour la branche boîte : « sous WSL le daemon est partagé par
-# toute la VM, donc une distro vierge n'est PAS un docker vierge — l'image était toujours déjà là ».
-# Le même masque a couvert le rail poste deux jours de plus.
+# ⚠ LE TROU AVAIT ÉTÉ INVISIBLE SUR LE SUBSTRAT OÙ CE RAIL EST ÉCRIT — sous WSL le daemon est
+# partagé par toute la VM, donc une distro vierge n'est PAS un docker vierge : l'image était
+# toujours déjà là. Le même masque a couvert le rail poste deux jours de plus.
 #
 # MESURÉ le 2026-08-21, install à froid sur une machine dédiée nue :
 #   DRIFT 48-forge-host: image lcars-fleet:2 absente
 #   DRIFT 50-forge: FORGE_BASE_URL non posé
 #   FAIL  52-ops-branch: forge injoignable
 #   DRIFT 55-deck-oidc: FORGE_BASE_URL non posé
-# Quatre modules en cascade, une seule cause, et la porte avait le geste sous la main.
+# Quatre modules en cascade, une seule cause.
 #
-# Pas de build en `--check` : une sonde read-only qui bâtirait 3 Go n'est plus une sonde.
+# ⚖ LA DÉPENDANCE EST MORTE LE 2026-08-22 (user : « tu build une image complète de 1,2 Go juste pour
+# exécuter 100 ko de recette tofu ? »). `46-tofu` pose tofu et son miroir SUR la machine, et
+# `48-forge-host` appelle le geste directement. LA CASCADE, ELLE, RESTE VRAIE : ces quatre modules
+# tombent toujours ensemble, seule leur cause commune a changé de nom.
+#
+# Ce qui reste de ce bloc est la leçon, pas le geste : sur ce rail, ne rebâtis rien ici — regarde
+# d'abord si la dépendance existe encore.
 # ─── LES PAQUETS AVANT LE BUILD, QUAND C'EST LE RAIL QUI POSE DOCKER ────────
 #
 # ⚠ ORDRE, PAS CONTENU — ET C'EST LA PASSE À FROID QUI L'A RENDU VISIBLE. Depuis que la porte laisse
@@ -657,24 +661,18 @@ if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
   docker_endpoint >/dev/null 2>&1 || true
 fi
 
-if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]]; then
-  _wimg="${LCARS_IMAGE:-lcars-fleet:2}"
-  if ! "$PROV_DOCKER_BIN" image inspect "$_wimg" >/dev/null 2>&1; then
-    echo ""
-    echo "  ${W}$_wimg${N} n'est pas là — la forge du poste en a besoin (tofu, recette, gestes)."
-    echo "  Je la construis (plusieurs minutes, une seule fois)."
-    # ⚠ LA RACINE SE DÉRIVE DE `$PROVISION`, PAS DE `$SCRIPT_DIR` : en mode standalone (script
-    # téléchargé seul) le checkout vient d'être cloné ailleurs, et `$SCRIPT_DIR` désigne le dossier
-    # du fichier téléchargé, où il n'y a pas de `docker.sh`.
-    _wroot="${PROVISION%/fleet/deploy/provision}"
-    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$_wimg" "$_wroot/docker.sh" build || {
-      echo "  ${R}Le build a échoué — son verdict est le sien.${N}"
-      echo "  Le provisionnement CONTINUE : la forge dérivera en le disant, le runtime sera posé."
-    }
-  else
-    say_ok "image $_wimg présente — la forge du poste l'utilisera telle quelle"
-  fi
-fi
+# ⚖ LE RAIL POSTE NE BÂTIT PLUS D'IMAGE, et l'absence de ce bloc est le gain du chantier.
+#
+# Il bâtissait ici `lcars-fleet:2` — dix minutes, 1,18 Go — sous le motif « la forge du poste en a
+# besoin (tofu, recette, gestes) ». C'était vrai, et c'était le SEUL motif : ce rail installe un
+# LCARS natif, il ne démarre jamais cette image. Il la bâtissait pour en extraire 124 Mo d'outil
+# dans un conteneur jetable.
+#
+# ⚖ USER 2026-08-22 : « tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette
+# tofu ? » — `46-tofu` pose désormais tofu et son miroir de providers SUR la machine, avec les mêmes
+# pins que le Dockerfile, et `48-forge-host` appelle le geste directement.
+#
+# ⚠ LE RAIL BOÎTE, LUI, BÂTIT TOUJOURS (plus haut) : là, l'image EST le produit livré.
 
 # ─── Déléguer TOUT au provisioning (l'autorité) ─────────────────────────────
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then

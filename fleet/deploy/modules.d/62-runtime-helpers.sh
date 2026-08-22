@@ -66,6 +66,11 @@ HELPERS=(
   console-deck.py
   console-pod.sh
   human-converger.sh
+  # Les gestes de forge. Dans l'image, l'entrypoint les atteint par son verbe `forge-apply` ; sur un
+  # poste, `48-forge-host` les appelle DIRECTEMENT, sans conteneur — le script n'a jamais eu la
+  # moindre hypothèse de conteneur, son `PRIVATE_DIR` défaute même sur `/home/private`, un chemin
+  # d'hôte. C'est l'appelant qui le forçait dans un `docker create`.
+  forge-gestures.sh
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
