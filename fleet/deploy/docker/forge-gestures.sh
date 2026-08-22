@@ -683,6 +683,30 @@ cmd_install() {
   fi
   local repo branch sha
   read -r repo branch sha <<< "$src"
+
+  # ⚠ UN CODE DE SORTIE 0 N'EST PAS UNE REPONSE, et ce geste le tenait pour tel. La porte annonce
+  # `<depot> <branche> <sha>` sur stdout ; aucune branche de `eval_source/1` ne rend 0 sans imprimer.
+  # Un 0 muet ne vient donc PAS d'elle — il vient de ce qui a repondu a sa place, et c'est justement
+  # ce qu'il faut nommer.
+  #
+  # MESURE DU 2026-08-23 sur un poste : `catalogue install web-demo` a affiche
+  # « web-demo <-  (@) » puis « fatal: repository 'http://127.0.0.1:21000/.git/' not found », et
+  # enfin « clone de  impossible ». Trois messages, aucun ne nomme le vrai manque : les trois champs
+  # etaient VIDES et le geste a construit une URL a partir de rien, l'a donnee a git, et a rapporte
+  # l'echec de git. Un refus qui cite l'erreur d'un outil auquel on a passe du vide accuse l'outil.
+  #
+  # ON VALIDE LA FORME, pas seulement la presence : `branch` et `sha` manquants produisent un clone
+  # sur une reference vide, qui echoue plus loin et pour une autre raison apparente.
+  if [[ -z "$repo" || -z "$branch" || -z "$sha" ]]; then
+    printf '%s\n' "$src" >&2
+    die "install: $name — la porte de resolution a rendu 0 sans reponse exploitable.
+  Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
+    [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
+  Ce n'est pas un refus de la forge : un refus porte un code de sortie et une phrase. Un zero muet
+  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « \$ENTRYPOINT » designe
+  ($ENTRYPOINT) et ce que « bash \"\$ENTRYPOINT\" catalogue-source $name » imprime a la main."
+  fi
+
   echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
 
   # 2. Le materiel, clone dans un jetable. Le jeton voyage par l'ENVIRON de git (extraheader),
