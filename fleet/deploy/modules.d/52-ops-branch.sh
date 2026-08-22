@@ -128,7 +128,17 @@ create_branch() {
   # branche exactement comme sur une branche absente d'un depot present. Il faut demander le depot.
   case "$(forge_repo_code)" in
     200) : ;;
-    404) p_drift "depot $LCARS_OPS_REPO pas encore seme — l'amorcage de la forge le cree ; la branche se posera a la convergence suivante"
+    # ⚠ CE MESSAGE AFFIRMAIT UNE PROPRIETE D'UN AUTRE ARTEFACT, ET ELLE ETAIT FAUSSE. Il disait
+    # « l'amorcage de la forge le cree » ; personne ne le creait. `Fleet.Toolchain.ops_repo/0`,
+    # `IncidentRegistry.Escalation` et `pod_tools/delegation.ex` le LISENT tous les trois, le seul
+    # `create_repo` du runtime sert aux depots de PROJET, et la recette tofu ne cree aucun depot.
+    # Resultat : derive a chaque passage sur les deux substrats, et un 404 lu comme une panne de
+    # l'IncidentRegistry — diagnostique deux fois de travers le 2026-08-22 avant qu'on regarde le
+    # depot lui-meme.
+    #
+    # `forge-gestures.sh apply` le cree depuis le 2026-08-22 (`ensure_ops_repo`). Ce garde reste :
+    # il couvre le cas ou l'amorcage n'a pas encore tourne, et il ne suppose plus qui le fait.
+    404) p_drift "depot $LCARS_OPS_REPO absent — l'amorcage de la forge le cree (forge-gestures apply) ; la branche se posera a la convergence suivante"
          return 0 ;;
     *)   p_fail "$LCARS_OPS_REPO : la forge ne dit pas s'il existe — on ne pousse pas a l'aveugle"
          return 1 ;;

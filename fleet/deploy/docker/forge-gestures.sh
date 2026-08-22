@@ -212,6 +212,66 @@ with_apply_lock() {
 # seule voie est donc la basic-auth DU COMPTE — et c'est ce qui rend cette boucle auto-limitante :
 # les comptes que tofu vient de creer portent le seed, une vraie personne porte le sien, donc un
 # 401 sur un humain est le comportement voulu et non une panne. On ne publicise que ce qu'on possede.
+# ─── ensure_ops_repo — LE DEPOT DU SYSADMIN, QUE PERSONNE NE CREAIT ─────────────────────────────
+#
+# ⚠ IL ETAIT LU PAR TROIS DOMAINES ET CREE PAR AUCUN. `Fleet.Toolchain.ops_repo/0`,
+# `IncidentRegistry.Escalation` et `pod_tools/delegation.ex` visent tous `fleet/lcars` ; le seul
+# `create_repo` du runtime sert aux depots de PROJET. La recette tofu, elle, ne cree aucun depot —
+# elle fait les orgs, les comptes, les teams.
+#
+# CE QUE LE TROU COUTAIT. `52-ops-branch` derive a chaque passage, sur les deux substrats, avec un
+# message qui accuse « l'amorcage de la forge » — une affirmation sur un AUTRE artefact, et elle
+# etait fausse. Et le 2026-08-22 il a fait pire : un 404 sur ce depot a ete lu comme une panne de
+# l'IncidentRegistry, et diagnostique deux fois de travers avant qu'on regarde le depot lui-meme.
+#
+# ⚠ POURQUOI ICI ET PAS DANS LA RECETTE. La structure de forge est le territoire de tofu, mais tofu
+# ne cree AUCUN depot dans ce depot-ci : les depots de catalogue sont pousses par ce fichier, en
+# POST + git (`push_store`). Ce geste reprend exactement ce mecanisme, au meme endroit, dans la
+# meme passe. Le jour ou la recette gagnera une ressource `gitea_repository`, ce geste devra
+# demenager avec les autres — pas avant.
+#
+# `auto_init` VRAI : un depot vide n'a pas de branche, et `52-ops-branch` pousse SUR une branche.
+# Sans branche par defaut, la forge repond « Push to create is not enabled for organizations » —
+# un message qui parle d'un reglage alors que le fait est « il n'y a rien ou pousser ».
+ensure_ops_repo() { # $1=org  $2=jeton master
+  local org="$1" tok="$2"
+  # ⚠ DEUX LIGNES, ET CE N'EST PAS DU STYLE. `local a=… b="${a#…}"` NE VOIT PAS `a` : bash expanse
+  # toute la ligne AVANT d'assigner, donc `$a` y est encore inconnu — et sous `set -u` c'est un
+  # « unbound variable » qui tue le script au milieu d'un apply. Mesure du 2026-08-22 : douze
+  # temoins rouges d'un coup, et l'erreur pointait une ligne qui avait l'air juste.
+  local repo="${LCARS_OPS_REPO:-$org/lcars}"
+  local name="${repo#*/}"
+
+  local code
+  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 \
+      "${FORGE_BASE_URL%/}/api/v1/repos/$repo" 2>/dev/null || true)"
+  if [[ "$code" == "200" ]]; then
+    echo "forge-gestures: depot ops $repo deja la"
+    return 0
+  fi
+
+  # ⚠ LA RELECTURE FAIT FOI, PAS LE CODE DU POST. Meme regle que la protection de branche plus bas :
+  # une v1 concluait « deja present » sur un 409/422 alors que Gitea rend d'autres codes selon la
+  # version. On POST au mieux, puis on REDEMANDE.
+  printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
+      -d "{\"name\":\"${name}\",\"private\":false,\"auto_init\":true,\"default_branch\":\"main\",\"description\":\"Depot du sysadmin : escalades, demandes d'outillage, registre d'incidents.\"}" \
+      "${FORGE_BASE_URL%/}/api/v1/orgs/${org}/repos" 2>/dev/null || true
+
+  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 \
+      "${FORGE_BASE_URL%/}/api/v1/repos/$repo" 2>/dev/null || true)"
+  if [[ "$code" == "200" ]]; then
+    echo "forge-gestures: depot ops $repo cree (auto_init, branche main)"
+  else
+    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `52-ops-branch` le
+    # dira en derive au passage suivant — ce qui est exactement son travail.
+    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 52-ops-branch le dira en derive" >&2
+  fi
+  return 0
+}
+
 publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
   local org="$1" tok="$2" seed="$3" acct code posed=0 skipped=0
   local -a members=()
@@ -328,6 +388,8 @@ cmd_apply() {
   done
 
   # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
+  ensure_ops_repo "${PROV_FORGE_ORG:-fleet}" "$tok"
+
   publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
 
   demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"

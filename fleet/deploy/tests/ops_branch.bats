@@ -73,7 +73,11 @@ EOF
   run bash "$MODULE" apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"DRIFT"* ]]
-  [[ "$output" == *"pas encore seme"* ]]
+  # ⚠ ON EPINGLE LE FAIT, PAS LE LIBELLE. Ce temoin exigeait « pas encore seme » mot pour mot et est
+  # tombe quand le message a cesse d'affirmer une propriete d'un AUTRE artefact (« l'amorcage de la
+  # forge le cree » — personne ne le creait). Ce qui doit tenir : la derive NOMME le depot, et elle
+  # dit que le passage suivant la ferme.
+  [[ "$output" == *"$LCARS_OPS_REPO"* ]]
   [[ "$output" == *"convergence suivante"* ]]
 }
 
@@ -153,4 +157,35 @@ EOF
   # molette locale, ce qui redonnerait au nom deux sources dont une seule serait verifiee.
   grep -qE '^readonly OPS_BRANCH="tool_request"' "$MODULE"
   ! grep -q 'LCARS_SYSADMIN_BRANCH' "$MODULE"
+}
+
+@test "le depot ops est CREE par l'amorcage — il etait lu par trois domaines et cree par aucun" {
+  # ⚠ TROU MESURE LE 2026-08-22. `Fleet.Toolchain.ops_repo/0`, `IncidentRegistry.Escalation` et
+  # `pod_tools/delegation.ex` visent tous `fleet/lcars` ; le seul `create_repo` du runtime sert aux
+  # depots de PROJET, et la recette tofu ne cree AUCUN depot. Resultat : derive a chaque passage sur
+  # les deux substrats, et un 404 sur ce depot lu comme une panne de l'IncidentRegistry.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  code() { grep -vE '^\s*#' "$g"; }
+  code | grep -q 'ensure_ops_repo()'
+  # il est APPELE dans la passe d'apply, pas seulement defini
+  code | sed -n '/^cmd_apply()/,/^}/p' | grep -q 'ensure_ops_repo'
+  # `auto_init` : un depot vide n'a pas de branche, et 52-ops-branch pousse SUR une branche
+  code | grep -q '\\"auto_init\\":true'
+}
+
+@test "la creation RELIT au lieu de croire le code du POST" {
+  # Meme regle que la protection de branche : une v1 concluait « deja present » sur un 409/422 alors
+  # que Gitea rend d'autres codes selon la version.
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local body; body="$(grep -vE '^\s*#' "$g" | sed -n '/^ensure_ops_repo()/,/^}/p')"
+  [ "$(grep -c 'api/v1/repos/\$repo' <<<"$body")" -ge 2 ]
+  grep -q 'NON cree (HTTP \$code)' <<<"$body"
+}
+
+@test "le message de derive n'affirme plus une propriete d'un AUTRE artefact" {
+  # « l'amorcage de la forge le cree » etait une affirmation sur un voisin, et elle etait fausse. Un
+  # commentaire perime est un mensonge ; un MESSAGE perime en est un que l'operateur lit.
+  local m="$BATS_TEST_DIRNAME/../modules.d/52-ops-branch.sh"
+  grep -q 'forge-gestures apply' "$m"
+  grep -q 'il ne suppose plus qui le fait' "$m"
 }
