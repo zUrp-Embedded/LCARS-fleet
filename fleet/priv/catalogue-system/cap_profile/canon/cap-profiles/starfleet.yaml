@@ -126,8 +126,6 @@ spec:
       - tool_search_bash
     # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`) — not duplicated.
     git_ops_denied: []
-    # (no `outputs`: the ready-room/outbox line came from the machine-tending role starfleet used to
-    # carry — the fleet-master produces no deliverable to a commons dir. Removed 2026-07-19.)
   knowledge:
     # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that never
     # existed (cf. architect.yaml, same note). card-revision is the FIRST real one — the

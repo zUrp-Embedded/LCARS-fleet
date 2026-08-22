@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/30-wsl.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — substrat WSL : lockdown C: (wsl.conf), purge snap, masque gpg-agent, ready-room optionnelle
+# STATUS: PROTO-V2 — substrat WSL : lockdown C: (wsl.conf), purge snap, masque gpg-agent
 # APPLY-ON: wsl
 # CHECK-ON: wsl
 # NEEDS: root
@@ -20,10 +20,6 @@
 # /etc/wsl.conf est possédé EN ENTIER par ce module (write_atomic du fichier complet) : c'est la
 # frontière de sécurité de la boîte (octogone — C: fermé, interop coupé), pas un fichier de
 # préférences. Un edit manuel = un drift au doctor, réécrit à l'apply. Assumé et dit ici.
-#
-# Ready-room (échange humain↔fleet via C:\Users\<win_user>\ready-room, monté drvfs) : OPTIONNELLE.
-# Gérée si PROV_WINDOWS_USER est posé (ou détectable par wslvar TANT QUE l'interop répond — après
-# lockdown, plus aucune requête vers Windows n'est possible : on le dit au lieu d'échouer).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -130,25 +126,7 @@ apply() {
     p_fail "home de $PROV_HUMAN introuvable — masque gpg impossible"
   fi
 
-  # 3. Ready-room (optionnelle — seulement si on peut nommer le user Windows).
-  local win_user="${PROV_WINDOWS_USER:-}"
-  if [[ -z "$win_user" ]] && command -v wslvar >/dev/null; then
-    # wslvar passe par l'interop : ne répond QUE tant que le lockdown n'est pas appliqué.
-    win_user="$(wslvar USERNAME 2>/dev/null || true)"
-  fi
-  if [[ -n "$win_user" ]]; then
-    ensure_dir /home/ready-room 0755 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
-    # Le flag `metadata` est ce qui donne des perms Unix sur NTFS (dette de guerre v1).
-    local uid gid
-    uid="$(id -u "$PROV_HUMAN")"; gid="$(getent group "$PROV_FLEET_GROUP" | cut -d: -f3)"
-    ensure_managed_block /etc/fstab lcars-ready-room 0644 root:root <<EOF
-C:\\Users\\${win_user}\\ready-room /home/ready-room drvfs uid=${uid},gid=${gid},metadata,umask=22,fmask=11,noatime 0 0
-EOF
-  else
-    p_warn "ready-room : user Windows inconnu (PROV_WINDOWS_USER non posé, wslvar muet — interop déjà coupé ?) — montage non géré, pose PROV_WINDOWS_USER et relance si tu la veux"
-  fi
-
-  # 4. wsl.conf EN DERNIER (le contrat de la dette de guerre : rien n'arme le reboot tant que
+  # 3. wsl.conf EN DERNIER (le contrat de la dette de guerre : rien n'arme le reboot tant que
   #    tout le reste n'est pas posé). B3 : redirection, jamais de pipe vers write_atomic (le
   #    sous-shell du pipe perdait PROV_FAILED → wsl.conf non posé rapporté vert).
   local wsl_tmp
@@ -157,7 +135,7 @@ EOF
   write_atomic "$WSL_CONF" 0644 root:root < "$wsl_tmp" || { rm -f "$wsl_tmp"; verdict_apply; }
   rm -f "$wsl_tmp"
 
-  # 5. État réel + consigne de reprise (pas de sentinelle, pas de trigger bashrc : l'humain
+  # 4. État réel + consigne de reprise (pas de sentinelle, pas de trigger bashrc : l'humain
   #    relance le MÊME apply après le reboot, l'idempotence fait le reste).
   if c_drive_open; then
     p_warn "wsl.conf posé mais C: encore OUVERT → « wsl --shutdown » (PowerShell), rouvre un NOUVEL onglet (pas l'ancien), relance « provision apply »"
