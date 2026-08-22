@@ -406,8 +406,9 @@ fi
 if [[ "$CONSENTED" -eq 0 ]]; then
 cat <<EOF
 
-${AMBER}    ______________________________________________________
-   /          ${BA}LCARS FLEET - FEDERATION DATABASE${N}           ${AMBER}\\
+${AMBER}     ____________________________________________________
+    /                                                    \\
+   /                ${BA}LCARS FLEET - FEDERATION DATABASE${N}     ${AMBER}\\
   |   ________   __________________________________________\\
   |  |  2026  |  | SOURCE: install.sh
   |  |________|  | SYSTEM: LCARS-FLEET v2 (Elixir/OTP)
@@ -415,7 +416,7 @@ ${AMBER}    ______________________________________________________
   |  | AGPL-3 |  |__________________________________________
   |  |________|  \\__________________________________________\\
   |                                                         /
-   \\   ${W}"To boldly go where no code has gone before..."${AMBER}  /
+   \\    ${W}"To boldly go where no code has gone before..."${AMBER}    /
     \\_____________________________________________________/${N}
 EOF
 
