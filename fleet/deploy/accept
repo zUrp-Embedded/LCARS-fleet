@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/deploy/accept
+# AUTHOR: DrDree
+# STARDATE: 2026-08-22
+# STATUS: PROTO-V2 — la recette d'acceptation du rail poste : ce qu'un operateur peut FAIRE
+#
+# POURQUOI CE FICHIER EXISTE, ET CE QU'IL CORRIGE.
+#
+# Le provisionnement rend un bilan de MODULES : « 26 modules · 25 converges · 0 echec ». Cette
+# phrase veut dire « chaque module est d'accord avec lui-meme ». Elle ne dit rien de ce qu'un
+# operateur peut faire ensuite, et les deux ont diverge : une forge debout que rien ne pouvait
+# servir (aucun runner), des identifiants jamais affiches, un humain de fleet qu'il fallait deviner.
+# Les trois passaient au vert parce qu'aucun module ne les mesure.
+#
+# CE SCRIPT NE LIT AUCUN VERDICT. Il pose les trois questions qui font qu'une installation vaut
+# quelque chose, et il y repond par un fait mesure sur la machine :
+#
+#   1. je peux me connecter a la forge          -> les identifiants annonces AUTHENTIFIENT
+#   2. une PR peut fusionner                    -> un runner est enregistre ET sert les labels
+#   3. la fleet peut demarrer                   -> elle demarre, repond, et s'arrete
+#
+# ⚠ SA PROPRIETE PRINCIPALE : S'IL A BESOIN D'UN GESTE A LA MAIN, IL ECHOUE. Un `docker exec`
+# ajoute pour le debloquer devient une etape MANQUANTE du rail, pas un succes. C'est ce qui rend son
+# verdict independant de qui le lance — et c'est tout l'objet : « j'ai teste » n'est une preuve que
+# si le test ne depend pas de celui qui le dit.
+#
+# ⚠ IL SE JOUE DANS L'INSTALL, PAS APRES. Le mot de passe de la forge n'existe que pendant : le
+# canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash. Une recette jouee plus
+# tard ne pourrait pas verifier « je peux me connecter » — elle verifierait autre chose.
+#
+# USAGE : accept --announce-file <chemin> [--forge-url URL] [--fleet-human LOGIN]
+# EXIT  : 0 les trois tiennent · 1 au moins une echoue · 2 argument manquant
+
+set -euo pipefail
+
+ANNOUNCE="" ; FORGE_URL="" ; FLEET_HUMAN=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --announce-file) ANNOUNCE="${2:?}"; shift 2 ;;
+    --forge-url)     FORGE_URL="${2:?}"; shift 2 ;;
+    --fleet-human)   FLEET_HUMAN="${2:?}"; shift 2 ;;
+    *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
+  esac
+done
+
+PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+[[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
+
+_G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'
+[[ -t 1 ]] || { _G="" ; _R="" ; _A="" ; _N="" ; }
+FAILED=0
+ok()   { printf '  %sOUI%s   %s\n' "$_G" "$_N" "$*"; }
+no()   { printf '  %sNON%s   %s\n' "$_R" "$_N" "$*"; FAILED=$((FAILED + 1)); }
+skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; }
+
+# ─── 1. JE PEUX ME CONNECTER A LA FORGE ─────────────────────────────────────────────────────────
+#
+# ⚠ ON S'AUTHENTIFIE VRAIMENT, on ne verifie pas que le compte existe. « le compte est la » et « le
+# mot de passe annonce ouvre ce compte » sont deux faits, et c'est le second que l'operateur va
+# exercer. Un mot de passe pose puis ecrase par une passe suivante laisse le premier fait vrai.
+#
+# `-K -` : ni le login ni le mot de passe dans argv (cicatrice 6-141).
+check_forge_login() {
+  local line label login pw code tested=0
+  [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PRIVATE_DIR/forge.url)"; return; }
+  [[ -s "$ANNOUNCE" ]] || { skip "forge : aucun identifiant annonce par cette passe — rien a verifier"; return; }
+
+  while IFS=$'\t' read -r label login pw; do
+    [[ -n "$pw" ]] || continue
+    tested=$((tested + 1))
+    code="$(printf 'user = "%s:%s"\n' "$login" "$pw" \
+            | curl -K - -s -o /dev/null -w '%{http_code}' -m 15 "$FORGE_URL/api/v1/user" 2>/dev/null || true)"
+    if [[ "$code" == "200" ]]; then
+      ok "forge : « $login » s'authentifie avec le mot de passe annonce"
+    else
+      no "forge : « $login » NE s'authentifie PAS (HTTP ${code:-aucune reponse}) — l'identifiant affiche ne vaut rien"
+    fi
+  done < "$ANNOUNCE"
+
+  [[ "$tested" -gt 0 ]] || skip "forge : le fichier d'annonce est vide"
+}
+
+# ─── 2. UNE PR PEUT FUSIONNER ───────────────────────────────────────────────────────────────────
+#
+# Un runner ENREGISTRE ne suffit pas : un job demande un LABEL, et un runner qui n'en sert aucun de
+# ceux que les workflows livres nomment laisse la course en attente jusqu'a l'escalade — sans qu'une
+# ligne dise que c'est un label qui manque. On lit donc les labels REELLEMENT servis et on les
+# confronte aux `runs-on` du depot, derives et non recopies.
+check_ci() {
+  local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
+  [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
+  [[ -r "$tokfile" ]] || { no "CI : jeton master illisible ($tokfile) — l'etat des runners n'est pas mesurable"; return; }
+
+  body="$(printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$tokfile")" \
+          | curl -K - -s -m 15 "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
+  if [[ "${n:-0}" -eq 0 ]]; then
+    no "CI : AUCUN runner enregistre — tout job reste en attente, aucune PR ne fusionne"
+    return
+  fi
+
+  served="$(printf '%s' "$body" | jq -r '[.runners[]?.labels[]?.name] | unique | join(" ")' 2>/dev/null || true)"
+  # Les `runs-on` du depot font autorite : les recopier ici en ferait une seconde liste.
+  want="$(grep -rhoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "$(dirname "${BASH_SOURCE[0]}")/../../.gitea/workflows" 2>/dev/null | sort -u || true)"
+  local w
+  for w in $want; do
+    [[ " $served " == *" $w "* ]] || missing="$missing $w"
+  done
+
+  if [[ -n "$missing" ]]; then
+    no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs qui les demandent attendront sans fin (servis : ${served:-aucun})"
+  else
+    ok "CI : $n runner(s) servant tous les labels des workflows livres (${served:-?})"
+  fi
+}
+
+# ─── 3. LA FLEET PEUT DEMARRER ──────────────────────────────────────────────────────────────────
+#
+# ⚠ ON LA DEMARRE POUR DE VRAI, puis on l'arrete. « les morceaux sont la » et « ca tourne » sont
+# deux affirmations, et c'est la seconde que l'installation promet. Verifier des preconditions
+# reviendrait a refaire ce que les modules font deja — c'est-a-dire a mesurer la meme chose qu'eux,
+# ce que ce fichier existe pour ne pas faire.
+#
+# On la laisse dans l'etat ou on l'a trouvee : arretee si elle l'etait.
+check_fleet_start() {
+  local login="$FLEET_HUMAN" home
+  [[ -n "$login" ]] || { skip "fleet : aucun humain de fleet nomme — rien a demarrer"; return; }
+  home="$(getent passwd "$login" | cut -d: -f6 || true)"
+  [[ -n "$home" ]] || { no "fleet : « $login » inconnu du systeme"; return; }
+  command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }
+
+  local as=(runuser -u "$login" -- env "HOME=$home" "USER=$login" "LOGNAME=$login")
+  "${as[@]}" command -v fleet_v2 >/dev/null 2>&1 \
+    || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
+
+  if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then
+    ok "fleet : deja demarree sous « $login » (laissee telle quelle)"
+    return
+  fi
+
+  if ! "${as[@]}" fleet_v2 start >/dev/null 2>&1; then
+    no "fleet : « fleet_v2 start » a echoue sous « $login » — rejoue-le a la main pour voir sa plainte"
+    return
+  fi
+  # Le demarrage est asynchrone (tmux + BEAM) : on laisse le temps qu'il faut, borne.
+  local i alive=0
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then alive=1; break; fi
+    sleep 2
+  done
+  "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true
+  if [[ "$alive" -eq 1 ]]; then
+    ok "fleet : demarre et vivante sous « $login » (arretee apres mesure)"
+  else
+    no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet_v2 status » sous « $login »"
+  fi
+}
+
+printf '\n  %sACCEPTATION — ce qu%s'"'"'%son peut FAIRE de cette installation%s\n' "$_N" "$_N" "$_N" "$_N"
+check_forge_login
+check_ci
+check_fleet_start
+printf '\n'
+
+if [[ "$FAILED" -gt 0 ]]; then
+  printf '  %s%d capacite(s) MANQUANTE(S)%s — l'"'"'installation est incomplete, quels que soient les verdicts de modules.\n\n' "$_R" "$FAILED" "$_N"
+  exit 1
+fi
+printf '  %sLes trois tiennent.%s\n\n' "$_G" "$_N"

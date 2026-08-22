@@ -765,6 +765,31 @@ else
   _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
   _step3b="                                                         "
 fi
+
+# ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
+#
+# ⚠ LE BILAN DE MODULES NE DIT PAS CE QU'ON PEUT FAIRE. « 26 modules · 0 échec » signifie que chaque
+# module est d'accord avec lui-même ; il a déjà été vert sur une forge que rien ne pouvait servir,
+# sans identifiants affichés et sans humain de fleet. Les trois capacités qui font qu'une
+# installation vaut quelque chose n'étaient mesurées par personne.
+#
+# ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette
+# passe — le `trap` ci-dessus détruit le fichier en sortant, et la forge n'en garde qu'un hash. Une
+# recette lancée plus tard ne pourrait pas vérifier « je peux me connecter », seulement « le compte
+# existe », qui est une autre question.
+#
+# Son verdict N'ÉCRASE PAS celui du provisionnement : les deux se cumulent, parce qu'ils ne mesurent
+# pas la même chose. Un rail qui converge et ne sert à rien doit dire les deux.
+if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/deploy/accept" ]]; then
+  _accept_args=(--announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}")
+  [[ -n "${FLEET_HUMAN:-}" ]] && _accept_args+=(--fleet-human "$FLEET_HUMAN")
+  # ⚠ SA PROPRE VARIABLE : `_apply_rc` a DÉJÀ été lu et tranché par le `case` bien plus haut — s'y
+  # ranger ici ne changerait rien, et une acceptation qui échoue sans porter à conséquence est
+  # exactement le défaut qu'elle existe pour fermer. Elle décide du code de sortie tout en bas.
+  _accept_rc=0
+  bash "$SCRIPT_DIR/fleet/deploy/accept" "${_accept_args[@]}" || _accept_rc=$?
+fi
+
 cat <<EOF
 
 ${CYAN}  ┌─────────────────────────────────────────────────────────┐
@@ -789,3 +814,8 @@ if [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]]; then
   ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
       && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
 fi
+
+# ⚠ LE CODE DE SORTIE PORTE L'ACCEPTATION, ET IL EST EN DERNIER PARCE QU'ELLE EST EN DERNIER. Les
+# identifiants s'impriment quoi qu'il arrive : une capacité manquante ne doit pas les emporter avec
+# elle — l'opérateur en a besoin PRÉCISÉMENT pour réparer.
+exit "${_accept_rc:-0}"
