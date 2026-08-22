@@ -683,3 +683,17 @@ EOF
   [[ "$output" == *"entrypoint.sh"* ]]
   [[ "$output" != *"pas de source installable"* ]]
 }
+
+@test "entrypoint: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {
+  # La surcharge court-circuite la resolution — c'est son metier — donc elle court-circuite aussi
+  # les deux candidats qui auraient repondu. Le garde doit la traiter comme n'importe quelle
+  # absence : ce qui compte est qu'aucune porte outil ne repond, pas la raison pour laquelle.
+  setup_install
+
+  run env LCARS_ENTRYPOINT="$BATS_TEST_TMPDIR/nulle-part.sh" \
+      bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"portes outil du release introuvables"* ]]
+  [[ "$output" == *"nulle-part.sh"* ]]
+  [[ "$output" != *"pas de source installable"* ]]
+}

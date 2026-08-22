@@ -336,7 +336,9 @@ EOF
   # `stat -c %G <jeton>`, qui exige la traversee du repertoire : elle echouait ici, et le refus
   # retombait sur « ton compte n'administre pas ce runtime ». Le repli etait ecrit comme un cas
   # rare ; il etait le cas nominal, parce que les deux objets n'ont pas le meme groupe.
-  _install_stubs "lcars" "lcars fleet lcars-admin"
+  # UNE seule adhesion en attente, pour que ce temoin tienne la MESURE et pas la redaction du geste
+  # (les deux voisins ci-dessous tiennent le geste, a une et a deux adhesions).
+  _install_stubs "lcars" "lcars fleet"
 
   run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
       LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
@@ -345,6 +347,39 @@ EOF
   [[ "$output" == *"newgrp fleet"* ]]
   [[ "$output" != *"n'administre pas ce runtime"* ]]
   [[ "$output" != *"humain de cette flotte"* ]]
+}
+
+@test "catalogue install: DEUX adhesions en attente — nommees ensemble, pas une par tour" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # ⚠ RELECTURE INDEPENDANTE DU 2026-08-23. Le geste ouvre la porte du REPERTOIRE (`fleet`), le jeton
+  # celle du FICHIER (`lcars-admin`). Quelqu'un promu aux deux dans le meme tour de convergeur voyait
+  # le premier, agissait, et retombait sur le second : deux allers-retours pour une cause unique.
+  #
+  # Et `newgrp` ne prend qu'un groupe par appel : le nommer comme LA sortie serait un demi-geste.
+  # On ne parie pas non plus sur sa portee reelle (ajout du groupe demande, ou relecture du set
+  # entier — non mesure) : la session neuve vaut dans les deux lectures.
+  _install_stubs "lcars" "lcars fleet lcars-admin"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"En attente : fleet lcars-admin"* ]]
+  [[ "$output" == *"session NEUVE"* ]]
+  # Le demi-geste : « newgrp <un seul> » presente comme la sortie alors qu'il en faudrait deux.
+  [[ "$output" != *"Ouvre un shell qui les relit :  newgrp fleet"* ]]
+}
+
+@test "catalogue install: UNE seule adhesion en attente — newgrp reste la sortie nommee" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : le gate ne se joue pas"
+  # Le complement, et il tient la moitie qui n'a PAS bouge : un seul groupe en attente garde le
+  # geste court. Sans ce temoin, remplacer partout `newgrp` par « session neuve » passerait au vert.
+  _install_stubs "lcars fleet" "lcars fleet lcars-admin"
+
+  run env PATH="$STUBS:$PATH" LCARS_MASTER_TOKEN_FILE="$MASTER" \
+      LCARS_FORGE_GESTURES="$GESTURES" "$SUT" catalogue install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"newgrp lcars-admin"* ]]
+  [[ "$output" != *"session NEUVE"* ]]
 }
 
 @test "catalogue install: la configuration vient de fleet_v2.env, pas du shell" {
