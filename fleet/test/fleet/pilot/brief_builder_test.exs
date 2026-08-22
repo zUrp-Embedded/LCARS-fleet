@@ -182,7 +182,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # The criterion is not INLINED — it is a mounted file the judge reads (content-addressed). The
       # disambiguation (criteria over brief) now lives on the MOUNT SOURCE, not on a citation in the
       # order text: the mount resolves the criteria doc (`gate-briefs/`), never the producer's brief.
-      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "~/issues/criteria.md"
       assert mount.ref == "gate-briefs/issue-42-reviewer.md"
 
       # transport_brief_v2 — the order text cites NO ops path and NO sha (pure pointer). Mutation-
@@ -217,8 +217,10 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       # Fallback: no criteria pointer → the mount resolves the brief doc (briefs/), the criterion of
       # last resort. The invariant lives on the mount source, not on the order text (which cites none).
-      assert brief =~ "~/issues/mandate.md"
+      # The judge's file is ALWAYS named `criteria.md` — even when its content falls back to the brief.
+      assert brief =~ "~/issues/criteria.md"
       assert mount.ref == "briefs/issue-42-engineer.md"
+      assert mount.filename == "criteria.md"
       refute brief =~ "briefs/issue-42-engineer.md"
       refute brief =~ "BRIEF-ONLY-CRITERION"
     end
@@ -227,7 +229,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     test "build_brief SURFACES the mandate mount (4th element) — what every dispatch path materializes",
          %{tmp_dir: tmp} do
       # The bug the review found: the PR-judge dispatch rendered a brief that references
-      # `~/issues/mandate.md` but never set `:mandate`, so nothing materialized it. The fix is that
+      # `~/issues/criteria.md` but never set `:mandate`, so nothing materialized it. The fix is that
       # build_brief RETURNS the mount source (from the SAME resolution that rendered the brief), so
       # no dispatch path can render the reference without also carrying what materializes it.
       work_dir = Path.join(tmp, "widget")
@@ -397,7 +399,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
                build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
 
       # The order is a MOUNTED file the producer reads (content-addressed), not the doc inlined.
-      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "~/issues/brief.md"
       refute brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
 
@@ -459,9 +461,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
                build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
       # THE CRITERION IS A MOUNTED FILE THE JUDGE READS, not inline text. The order references
-      # `~/issues/mandate.md` (content-addressed) instead of carrying the doc body — so what the
+      # `~/issues/criteria.md` (content-addressed) instead of carrying the doc body — so what the
       # judge acts on is exactly what was authored, read from the pin, nothing to trust.
-      assert brief =~ "~/issues/mandate.md"
+      assert brief =~ "~/issues/criteria.md"
       refute brief =~ "LE CRITÈRE COMPLET."
 
       # transport_brief_v2 — the pin does NOT travel in the order text: neither ref nor sha (short or
@@ -636,8 +638,8 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # and cite the pin. Mutation-verified: returning `nil` as the mount source (the old behavior)
       # reddens this, and reinstating the inline `%{"brief" => brief, ...}` outputs reddens the
       # refutes below.
-      assert %{ref: ^ref, sha: ^sha, filename: "mandate.md"} = mount
-      assert brief =~ "~/issues/mandate.md"
+      assert %{ref: ^ref, sha: ^sha, filename: "brief.md"} = mount
+      assert brief =~ "~/issues/brief.md"
       refute brief =~ "LE BRIEF À JUGER."
       refute brief =~ "#{ref}"
       refute brief =~ sha
@@ -652,7 +654,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       # Degraded/PoC: nothing pinned to mount → the body is embedded as before, and no mount travels.
       assert is_nil(mount)
       assert brief =~ "brief inline à juger"
-      refute brief =~ "~/issues/mandate.md"
+      refute brief =~ "~/issues/brief.md"
     end
   end
 end

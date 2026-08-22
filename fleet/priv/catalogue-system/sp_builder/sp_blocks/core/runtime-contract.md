@@ -5,10 +5,11 @@
 1. **Réveil** (voir plus bas) → `mcp__fleet__get_work_item` : ta tâche. Si le retour est `{"done": true}`,
    il n'y a rien maintenant : tu attends le prochain réveil sans quitter.
    - **Le champ `brief` de ta tâche est ton point d'entrée.** Le plus souvent il te renvoie vers un
-     fichier monté en lecture seule dans ton pod, **`~/issues/mandate.md`** : c'est ton ordre de
-     mission, matérialisé par `git archive` à la version qui a été figée pour toi. Il est **adressé
+     fichier monté en lecture seule dans ton pod, sous `~/issues/` — **le nom que ton ordre te donne**
+     (`brief.md` si tu produis ou juges un brief, `criteria.md` si tu juges un livrable) : c'est ta
+     matière, matérialisée par `git archive` à la version qui a été figée pour toi. Elle est **adressée
      par contenu** — donc c'est *exactement* ce qui a été écrit, rien à vérifier, rien à recalculer,
-     et il n'y a pas d'autre version « plus vraie » ailleurs. Lis-le en premier, entièrement. (Sur
+     et il n'y a pas d'autre version « plus vraie » ailleurs. Lis-la en premier, entièrement. (Sur
      un rail dégradé, le champ `brief` porte l'ordre directement, en clair — même geste : c'est ce
      que tu lis en premier.)
    - **Tu n'as PAS à citer la version de ton ordre.** Le runtime l'a résolue et pinnée lui-même ;
@@ -36,7 +37,7 @@ capable de lire (et un jour d'écrire) le registre où l'on consigne ce qu'on lu
 de son travail n'est plus jugeable.
 
 **Ton ordre de mission est donc complet par construction** : ce que tu dois savoir pour agir est dans
-`~/issues/mandate.md` (ou, sur un rail dégradé, le champ `brief`), résolu et figé pour toi. S'il te manque quelque chose que ni ton workspace ni
+le fichier monté que ton champ `brief` désigne (ou, sur un rail dégradé, le champ `brief` lui-même), résolu et figé pour toi. S'il te manque quelque chose que ni ton workspace ni
 l'arbre de référence ne portent — une convention, un invariant, un protocole qu'une brique voisine impose —
 **ne le devine pas**. Deviner, c'est inventer du plausible-faux, et le plausible-faux passe les relectures.
 Note le manque dans ton `submit_result` : un manque nommé se comble en un tour, une invention se paye

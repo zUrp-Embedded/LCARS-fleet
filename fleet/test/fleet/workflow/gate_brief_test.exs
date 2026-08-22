@@ -85,13 +85,13 @@ defmodule Fleet.Workflow.GateBriefTest do
         workflow_map_id: "brief-gate",
         gate: nil,
         subject: :brief,
-        outputs: %{"brief_mount" => "mandate.md"}
+        outputs: %{"brief_mount" => "brief.md"}
       })
 
     # transport_brief_v2 — the brief the scoper judges is a MOUNTED file it reads, content-addressed:
     # the order names `~/issues/<mount>` and nothing else. Not the text (read, not quoted), not the
     # pin (the runtime engraves it; the agent does not relay it). One transport, no exception of role.
-    assert brief =~ "~/issues/mandate.md"
+    assert brief =~ "~/issues/brief.md"
 
     # Mutation-verified: reinstating a ref/sha citation in `subject_body(:brief, ...)` reddens these.
     refute brief =~ "briefs/issue-5-engineer.md"

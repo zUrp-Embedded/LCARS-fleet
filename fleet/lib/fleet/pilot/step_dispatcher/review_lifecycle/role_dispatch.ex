@@ -238,8 +238,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
             # THE PR-DRIVEN JUDGE GETS ITS MANDATE MOUNT TOO — the bug this closes: the judge's order
-            # references `~/issues/mandate.md`, so the spawner MUST materialize it. `build_brief`
-            # surfaces it (same resolution that rendered the brief); this path used to drop it.
+            # references its mounted criterion (`~/issues/criteria.md`), so the spawner MUST
+            # materialize it. `build_brief` surfaces it (same resolution that rendered the brief, and
+            # the same name the order points at); this path used to drop it.
             |> Opts.maybe_put(:mandate, mandate)
 
           # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
