@@ -82,8 +82,10 @@ pins toolchain (`PROV_ELIXIR_*`).
 
 Chaque module est un PROCESSUS exécuté (`<module> check|apply`), qui déclare son terrain en tête
 sur DEUX axes (D6 : « qui applique » ≠ « ce qui doit être vrai ») — `# APPLY-ON:` (où les
-mutations tournent), `# CHECK-ON:` (où l'état-cible doit tenir), `# NEEDS:` — greppable, filtré
-par le runner. Ordre = préfixe numérique. En apply, un module CHECK-ON-retenu hors APPLY-ON
+mutations tournent), `# CHECK-ON:` (où l'état-cible doit tenir) — greppables, filtrés par le
+runner ; plus `# NEEDS: root|human`, l'identité SOUS LAQUELLE le module est joué, que le runner
+pose UNE FOIS au dispatch (le corps du module ne dés-escalade pas ligne à ligne).
+Ordre = préfixe numérique. En apply, un module CHECK-ON-retenu hors APPLY-ON
 tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — rebuild l'image).
 
 | Module | APPLY-ON | CHECK-ON | Pose |
@@ -94,7 +96,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
 | 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent |
-| 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via installer officiel, staging jetable — frontière vendor N1 |
+| 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via l'installeur officiel joué TEL QUEL — deux gestes (download, puis run), aucune machinerie qui double la sienne — frontière vendor N1 |
 | 48-forge-host | wsl | wsl | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 50-forge et 55-deck-oidc restent en dérive et leurs consignes nomment la boîte |
 | 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
 | 55-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json`. Les ENTRÉES (`PROV_DECK_ORIGINS`) convergent : la loopback y est semée dans ses **deux** écritures (`127.0.0.1` ET `localhost` — deux origines pour un même point d'écoute), et une liste changée repose le client |
