@@ -160,6 +160,12 @@ defmodule Fleet.Application.CatalogueRoles do
   """
   @spec eval_tfvars(Path.t()) :: no_return()
   def eval_tfvars(root) when is_binary(root) do
+    # ⚠ CE FLUX EST DU JSON, ET IL EST REDIRIGE DANS UN FICHIER QUE TOFU LIT
+    # (`roles.auto.tfvars.json`, `cmd_install`), puis dans `jq` par `prov_roles` (provision-lib).
+    # Une ligne de log sur stdout n'y fait pas une sortie bavarde : elle fait un JSON invalide, donc
+    # une recette sans roster ou un mint sans comptes. `list/1` et `tfvars/1` logguent tous deux.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case tfvars(root) do
       {:ok, %{"roles" => []}} ->
         IO.puts(
@@ -192,6 +198,8 @@ defmodule Fleet.Application.CatalogueRoles do
   """
   @spec eval_main(Path.t()) :: no_return()
   def eval_main(root) when is_binary(root) do
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case list(root) do
       {:ok, []} ->
         IO.puts(

@@ -117,6 +117,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
+        check_eval_doors_claim_stdout(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
         check_bats_descriptions_inert(root),
@@ -3146,6 +3147,127 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             )
         }
     end
+  end
+
+  @doc """
+  Une porte `eval*` qui ECRIT sur stdout doit d'abord le RECLAMER.
+
+  ## Ce que ca a coute, mesure
+
+  Une porte `eval` a un flux de sortie CONTRACTUEL : `catalogue-source` rend `<depot> <branche>
+  <sha>` que l'appelant donne a `git clone` ; `roles-tfvars` rend du JSON redirige dans un fichier
+  que tofu lit et repasse dans `jq`. Le handler Logger par defaut ecrit, lui aussi, sur stdout.
+  `Fleet.ReleaseDoor.claim_stdout!/0` le renvoie vers stderr, et c'est le seul geste qui separe les
+  deux flux.
+
+  Le 2026-08-23, sur un poste : `lcars catalogue install web-demo` a rendu
+
+      forge-gestures: web-demo <-  (@)
+      fatal: repository 'http://127.0.0.1:21000/.git/' not found
+
+  La porte avait imprime une ligne vide, puis un `Logger.info`, puis sa reponse. `read -r repo
+  branch sha` a lu la premiere ligne. L'URL a ete construite sur du vide et git s'est fait accuser.
+
+  Le `@doc` de cette porte ENONCAIT la regle depuis toujours — « and nothing else: the caller feeds
+  it to `git clone`, so a line of politeness would become part of a URL » — et rien ne la tenait.
+  Le defaut a dormi tant qu'aucun log ne sortait sur ce chemin ; il s'est reveille quand la fleet a
+  commence a publier son catalogue de reference, dont l'ecartement est DIT.
+
+  ## Pourquoi un mur et pas une relecture
+
+  Quatre portes sur sept le faisaient, trois ne le faisaient pas — dont deux que personne n'avait
+  regardees (`CatalogueRoles.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail, une
+  etape plus loin). Une regle tenue par quatre sites sur sept est une regle que le huitieme rate.
+
+  Derive de l'AST, donc rien a maintenir : une porte ajoutee demain est mesuree par construction.
+
+  ## Ce qu'il mesure exactement
+
+  Une fonction dont le nom commence par `eval` et dont le corps porte `IO.puts/1` (un seul
+  argument — `IO.puts(:stderr, x)` en a deux et ne compte pas) ou la capture `&IO.puts/1`, sans
+  appel a `Fleet.ReleaseDoor.claim_stdout!/0` dans le meme corps.
+  """
+  @spec check_eval_doors_claim_stdout(String.t()) :: result()
+  def check_eval_doors_claim_stdout(root) do
+    id = "runtime.eval_doors_claim_stdout"
+
+    doors =
+      Path.wildcard(Path.join(root, "lib/**/*.ex"))
+      |> Enum.flat_map(&eval_doors_in/1)
+
+    writers = Enum.filter(doors, fn {_f, _n, out, _c} -> out end)
+    naked = for {f, n, _, claim} <- writers, not claim, do: "#{Path.relative_to(f, root)}: #{n}"
+
+    # INSTRUMENT GUARD. Chaque finding est une ABSENCE, et un parseur casse en produit autant. La
+    # premiere ecriture de cette sonde ratait la forme `def f(x) when g` — la tete est enveloppee
+    # dans un `:when`, donc aucun corps n'etait scanne — et elle rendait un vert parfait sur un
+    # arbre qui portait TROIS portes nues. Le plancher est pose sous l'etat du jour, pas dessus.
+    broken =
+      cond do
+        length(doors) < 6 -> "only #{length(doors)} `eval*` function(s) found (expected 6+)"
+        writers == [] -> "no `eval*` function writes to stdout — the scan matched no IO.puts/1"
+        true -> nil
+      end
+
+    %{
+      id: id,
+      remediation:
+        "call `Fleet.ReleaseDoor.claim_stdout!/0` at the top of the door, before anything that " <>
+          "can log: the default Logger handler writes to stdout, and a door's stdout is a " <>
+          "CONTRACT read by a shell — a log line there becomes part of a URL or breaks a JSON",
+      status: if(is_nil(broken) and naked == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["lib/**/*.ex: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          naked != [] -> Enum.sort(naked)
+          true -> []
+        end,
+      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR. Elle disait « all claiming it » sans condition, donc
+      # elle affirmait la conformite dans le rapport meme d'un echec.
+      note:
+        "#{length(doors)} `eval*` door(s), #{length(writers)} writing to stdout, " <>
+          if(naked == [], do: "all claiming it", else: "#{length(naked)} NOT claiming it")
+    }
+  end
+
+  # ⚠ `def_name/1` (plus bas) DEPLIE le `:when` : la tete d'un `def f(x) when g` y est enveloppee,
+  # et sans ce depliage aucun corps n'est atteint. Ma premiere ecriture en avait un doublon local —
+  # le meme code, deux maisons, exactement ce que ce fichier refuse partout ailleurs.
+  defp eval_doors_in(path) do
+    {_, found} =
+      quoted!(Path.dirname(path), Path.basename(path))
+      |> Macro.prewalk([], fn
+        {:def, _, [head | _] = args} = n, acc ->
+          case def_name(head) do
+            nil -> {n, acc}
+            name -> {n, [{path, name, ast_writes_stdout?(args), ast_claims_stdout?(args)} | acc]}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.filter(found, fn {_, n, _, _} -> String.starts_with?(to_string(n), "eval") end)
+  end
+
+  defp ast_any?(ast, pred) do
+    {_, hits} = Macro.prewalk(ast, [], fn n, a -> if pred.(n), do: {n, [1 | a]}, else: {n, a} end)
+    hits != []
+  end
+
+  defp ast_writes_stdout?(ast) do
+    ast_any?(ast, fn
+      {{:., _, [{:__aliases__, _, [:IO]}, :puts]}, _, [_one]} -> true
+      {:/, _, [{{:., _, [{:__aliases__, _, [:IO]}, :puts]}, _, []}, 1]} -> true
+      _ -> false
+    end)
+  end
+
+  defp ast_claims_stdout?(ast) do
+    ast_any?(ast, fn
+      {{:., _, [{:__aliases__, _, [:Fleet, :ReleaseDoor]}, :claim_stdout!]}, _, _} -> true
+      _ -> false
+    end)
   end
 
   @doc """
