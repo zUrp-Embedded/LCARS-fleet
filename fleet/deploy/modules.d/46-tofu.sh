@@ -134,10 +134,19 @@ EOF
   # recette telle qu'elle est AUJOURD'HUI ; s'il échoue, elle a bougé sous lui et on le refait.
   # C'est aussi la seule chose qui PROUVE que le miroir est complet — le Dockerfile le joue pour la
   # même raison, et il coûte une seconde.
+  # ⚠ CETTE SONDE N'EST PAS `run_quiet`, ET LA CONFONDRE REND UN FAUX ROUGE. `run_quiet` a pour
+  # contrat que l'échec COMPTE : il appelle `p_fail` et incrémente `PROV_FAILED`. Or l'échec est
+  # ATTENDU ici — au premier passage le miroir n'existe pas encore, c'est tout ce que cet init
+  # mesure. Mesuré à froid le 2026-08-22 : deux FAIL et un verdict rouge sur un module dont le
+  # miroir venait d'être posé correctement.
+  #
+  # La règle : on ne sonde pas avec un outil qui juge. `run_quiet` sert aux gestes qui doivent
+  # réussir ; une question dont « non » est une réponse valide s'écrit nue.
   local m offline=1
   for m in $(tofu_modules); do
     [[ -d "$m" ]] || { p_fail "recette absente : $m"; verdict_apply; }
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_quiet env -C "$m" "$TOFU_BIN" init -input=false -no-color || offline=0
+    TF_CLI_CONFIG_FILE="$(tofu_rc)" env -C "$m" "$TOFU_BIN" init -input=false -no-color >/dev/null 2>&1 \
+      || offline=0
   done
   if [[ "$offline" -eq 1 ]]; then
     p_ok "miroir de providers complet (init hors-ligne OK)"

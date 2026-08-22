@@ -414,11 +414,27 @@ apply() {
   run_step "dépendances Elixir" -- as_human env -C "$tree" mix deps.get \
     || { p_fail "dépendances Elixir non récupérables ($tree) — sans elles l'arbre ne compile pas"; verdict_apply; }
 
+  # LA RACINE DU CATALOGUE, DEMANDÉE À SON AUTORITÉ — et elle sert DEUX fois : au roster ci-dessous,
+  # et au dépôt de référence après la structure.
+  #
+  # ⚠ `--catalogue` N'EST FACULTATIF QU'AVEC `--image`, et le script le dit : « une image porte le
+  # sien ». Avec `--repo` il est REQUIS, et l'omettre échoue net — mesuré à froid le 2026-08-22 :
+  # « ERREUR: --catalogue <root> requis ».
+  #
+  # ⚠ ET IL NE SE RECOMPOSE PAS À LA MAIN. L'image porte la raison mot pour mot : la porte
+  # `catalogue-root` « existe pour que personne ne RECOMPOSE ce chemin […] un appelant shell qui le
+  # globberait marcherait jusqu'au jour où la disposition du release change ». Même autorité ici —
+  # `Fleet.Catalogue.root()` — simplement là où elle tourne.
+  local ref_catalogue
+  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1)"
+  [[ -d "$ref_catalogue" ]] \
+    || { p_fail "catalogue de référence introuvable ($ref_catalogue) — ni roster ni dépôt à forker"; verdict_apply; }
+
   # Le dossier de sortie appartient à l'humain : c'est lui qui joue la dérivation.
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
   chown "$PROV_HUMAN" "$enroll" \
     || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue" -- as_human "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" \
+  run_step "roster du catalogue" -- as_human "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" --catalogue "$ref_catalogue" \
     || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
@@ -485,15 +501,6 @@ apply() {
   # sortant du conteneur sans les recâbler, on obtenait donc une forge structurée mais VIDE des deux
   # dépôts, sans qu'aucun verdict ne baisse. C'est la forme d'échec la plus chère : un succès qui
   # dit vrai sur ce qu'il a fait, et rien sur ce qu'il n'a pas fait.
-  #
-  # ⚠ LA RÉFÉRENCE NE SE RECOMPOSE PAS À LA MAIN, et l'image porte la raison mot pour mot : la porte
-  # `catalogue-root` « existe pour que personne ne RECOMPOSE ce chemin […] un appelant shell qui le
-  # globberait marcherait jusqu'au jour où la disposition du release change ». On pose donc la même
-  # question à la même autorité — `Fleet.Catalogue.root()` — simplement là où elle tourne ici.
-  local ref_catalogue
-  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1)"
-  [[ -d "$ref_catalogue" ]] \
-    || { p_fail "le catalogue de référence est introuvable ($ref_catalogue) — la forge n'aurait rien à forker"; rm -rf "$recipe" "$enroll"; verdict_apply; }
 
   local rc=0
   run_step "structure de la forge" -- env \

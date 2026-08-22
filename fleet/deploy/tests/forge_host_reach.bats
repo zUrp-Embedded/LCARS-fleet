@@ -381,6 +381,21 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'Fleet.Catalogue.root()'
   ! code | grep -qE 'LCARS_REFERENCE_CATALOGUE="[^$]'
-  # et un chemin qui ne repond pas est un ECHEC, pas un depot silencieusement saute
-  code | grep -q 'le catalogue de référence est introuvable'
+  # ⚠ ON EPINGLE LA REGLE, PAS LA PHRASE. Ce temoin citait le message d'erreur mot pour mot et est
+  # tombe a la premiere reformulation. Ce qui doit tenir : un chemin qui ne repond pas est un ECHEC,
+  # pas un depot silencieusement saute.
+  code | grep -qE '\[\[ -d "\$ref_catalogue" \]\]'
+  code | grep -A1 -E '\[\[ -d "\$ref_catalogue" \]\]' | grep -q 'p_fail'
+}
+
+@test "le roster NOMME son catalogue — \`--catalogue\` n'est facultatif qu'avec \`--image\`" {
+  # Mesure a froid du 2026-08-22 : « ERREUR: --catalogue <root> requis (ou --image, qui porte le
+  # sien) ». Le script le dit dans son en-tete ; je l'avais lu et pas applique.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'enroll-catalogue.sh".*--repo.*--catalogue'
+  # et la racine est derivee AVANT le roster, pas apres — elle sert aux deux usages
+  local d r
+  d="$(code | grep -n 'Fleet.Catalogue.root()' | head -1 | cut -d: -f1)"
+  r="$(code | grep -n 'enroll-catalogue.sh' | head -1 | cut -d: -f1)"
+  [ "$d" -lt "$r" ]
 }

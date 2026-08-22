@@ -156,3 +156,18 @@ mod() { run bash "$MOD" "$1"; }
   # ici serait un second exemplaire de ce que le Dockerfile enumere.
   grep -q 'repo_root)/fleet/deploy/deps' "$MOD"
 }
+
+@test "la SONDE hors-ligne ne passe pas par run_quiet — son echec est ATTENDU" {
+  # `run_quiet` a pour contrat que l'echec COMPTE : il appelle `p_fail` et incremente PROV_FAILED.
+  # L'init hors-ligne du premier passage DOIT echouer — c'est tout ce qu'il mesure. Mesure a froid
+  # du 2026-08-22 : deux FAIL et un verdict rouge sur un module dont le miroir venait d'etre pose.
+  #
+  # La regle : on ne sonde pas avec un outil qui juge.
+  local body="$BATS_TEST_TMPDIR/body2.sh"
+  grep -vE '^\s*#' "$MOD" > "$body"
+  # la sonde (premier init, celui qui decide) est nue et muette
+  grep -E 'init -input=false' "$body" | head -1 | grep -qv 'run_quiet'
+  grep -E 'init -input=false' "$body" | head -1 | grep -q '>/dev/null 2>&1'
+  # le miroir, lui, DOIT reussir : il reste sous un outil qui juge
+  grep -q 'run_quiet env -C "\$m" "\$TOFU_BIN" providers mirror' "$body"
+}
