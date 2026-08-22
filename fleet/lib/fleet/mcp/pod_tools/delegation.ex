@@ -1789,7 +1789,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
        do: nil
 
   defp ensure_criteria_pointer(repo, title, criteria) do
-    base = [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "judge", push: :ops]
+    # transport_brief_v2 (#3.3) — the criteria carries a `--criteria` suffix so its BASENAME differs
+    # from the brief's. Both derive from the same title; the folder (`gate-briefs/` vs `briefs/`)
+    # already disambiguates for the runtime (the ref always carries it), but a human reading a bare
+    # filename in a log or a `git status` could not tell the brief from the criteria — same slug, two
+    # trees. The suffix kills that trap. The suffix cannot land in `brief_ref/2`: that primitive also
+    # names the judge WORK-ORDERS (`issue-N-<role>.md`), which must stay unmarked.
+    base = [
+      name_hint: Fleet.Layout.sanitize_artifact_name(title) <> "--criteria",
+      kind: "judge",
+      push: :ops
+    ]
 
     opts =
       case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
