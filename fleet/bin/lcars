@@ -513,12 +513,42 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 _in_process_group() { id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
 _in_db_group() { id -nG "$(id -un)" 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
 
+# Les adhesions POSEES mais pas encore portees : la base moins le process. C'est une SOUSTRACTION et
+# pas un test, parce que le refus doit les nommer TOUTES en un tour.
+#
+# ⚠ SANS CA, LE REFUS ENVOIE L'OPERATEUR DEUX FOIS. Le geste ouvre la porte du repertoire (`fleet`),
+# le jeton celle du fichier (`lcars-admin`) : quelqu'un promu aux deux dans le meme tour de
+# convergeur voyait le premier groupe, agissait, et retombait sur le second. Deux allers-retours
+# pour une cause unique — sa session, ouverte avant les deux.
+#
+# ⚠ ET ON NE PARIE PAS SUR LA PORTEE DE `newgrp`. Selon les implementations il ajoute le groupe
+# demande ou reinitialise le set entier depuis `/etc/group` — je ne l'ai pas mesure, donc le message
+# ne s'y appuie pas : il nomme la session neuve, qui vaut dans les deux lectures, et n'offre
+# `newgrp` comme raccourci que lorsqu'UNE seule adhesion est en attente.
+_pending_groups() {
+  local db proc g out=""
+  db="$(id -nG "$(id -un)" 2>/dev/null || true)"
+  proc="$(id -nG 2>/dev/null || true)"
+  for g in $db; do
+    printf '%s\n' $proc | grep -qx "$g" || out="$out $g"
+  done
+  printf '%s' "${out# }"
+}
+
 _die_session_stale() {
+  local pending; pending="$(_pending_groups)"
+  local sortie="Ouvre un shell qui les relit :  newgrp $1"
+  # Plus d'une adhesion en attente : `newgrp` ne prend qu'un groupe en argument, donc le nommer
+  # comme LA sortie serait un demi-geste. La session neuve les prend toutes, quelle que soit la
+  # portee reelle de `newgrp`.
+  [[ "$pending" == *" "* ]] && sortie="Deux adhesions ou plus sont en attente ($pending) — ouvre une
+  session NEUVE, elle les prend toutes. « newgrp » n'en prend qu'une par appel."
+
   die "catalogue install: ta SESSION est anterieure a ta promotion.
   Ton compte EST dans « $1 » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
   ne le sait pas : il porte les groupes qu'il avait a son ouverture, et personne ne les lui ajoute
-  en vol.
-  Ouvre un shell qui les relit :  newgrp $1
+  en vol. En attente : $pending
+  $sortie
   ⚠ Se deconnecter ne sert a RIEN depuis la console du deck : elle survit au rechargement de
   l'onglet, et le shell que tu retrouves est le meme, ne avant ta promotion. « newgrp » est la
   sortie — la console tape la meme chose d'elle-meme au tour suivant du convergeur."

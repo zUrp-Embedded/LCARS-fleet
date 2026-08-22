@@ -204,7 +204,10 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "l'apply appelle compose SANS condition — une forge vivante doit pouvoir RECONVERGER" {
   # L'appel ne doit plus etre garde par la liveness : c'est `forge_up` AVANT qui dit si l'on a
   # monte ou simplement reconverge, pas s'il faut agir.
-  ! grep -qE 'if ! forge_up; then[[:space:]]*$' "$SRC"
+  # ⚠ COMPTE, N'INVERSE PAS : bash exempte de `set -e` toute commande dont le statut est inverse par
+  # `!`, donc un `! grep -q` qui n'est pas la DERNIERE instruction du test ne rougit jamais. Mesure
+  # du 2026-08-23 : 35 assertions du corpus bats sont dans ce cas.
+  [ "$(grep -cE 'if ! forge_up; then[[:space:]]*$' "$SRC")" -eq 0 ]
   grep -q 'local was_up=0; forge_up && was_up=1' "$SRC"
   # et le compose reste bien dans le chemin nominal, pas dans une branche
   grep -qE '^\s+run_quiet d compose -f "\$COMPOSE_FILE" -p "\$PROV_FORGE_PROJECT" up -d' "$SRC"
@@ -411,8 +414,17 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # (`EMBEDDED=(deploy etc)`), donc le fichier EST la, sous un autre chemin. Le geste se cherche
   # donc lui-meme, dans les deux dispositions ou il vit — comportement tenu par quatre temoins de
   # `forge_gestures.bats`.
-  ! grep -qF 'ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"' "$g"
-  grep -qF 'ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"' "$g"
+  # LA PROPRIETE, PAS LA LIGNE : aucun defaut ABSOLU. Epingler le texte de la resolution
+  # (`:-$(_entrypoint_path)`) ferait rougir ce temoin au premier renommage, sans qu'aucun
+  # comportement n'ait bouge — et le comportement, lui, est tenu par quatre temoins de
+  # `forge_gestures.bats`. Un chemin absolu en defaut est en revanche exactement ce qui a casse,
+  # quelle que soit sa valeur : `/opt/lcars/entrypoint.sh` hier, un autre demain.
+  # ⚠ PAS `! grep -q`, ET C'EST UNE MESURE : bash EXEMPTE de `set -e` toute commande dont le statut
+  # est inverse par `!` (manuel : « or if the command's return value is being inverted with ! »).
+  # Un `! grep -q` en temoin est donc INERTE — il ne rougit jamais, quoi qu'il trouve. Mesure du
+  # 2026-08-23 : la premiere redaction de cette assertion l'utilisait, et une mutation reintroduisant
+  # un defaut absolu (`/opt/lcars/bin/entrypoint.sh`) passait au VERT. On compte, et on compare.
+  [ "$(grep -cE 'ENTRYPOINT="\$\{LCARS_ENTRYPOINT:-/' "$g")" -eq 0 ]
   # et 48 les nomme tous les deux
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_DEMO_CATALOGUE='
@@ -631,7 +643,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # Le geste est celui des roles : PATCH admin avec le jeton master, jamais une lecture du seed.
   grep -q 'request = .PATCH.' <<<"$body"
   grep -q 'admin/users/' <<<"$body"
-  ! grep -q 'SEED_FILE' <<<"$body"
+  # Meme raison qu'en tete de fichier : `!` non terminal = assertion inerte.
+  [ "$(grep -c 'SEED_FILE' <<<"$body")" -eq 0 ]
   # Et il rejoint le banner par le canal, pas un echo perdu au rang 48.
   grep -q 'prov_announce_credential' <<<"$body"
 }
