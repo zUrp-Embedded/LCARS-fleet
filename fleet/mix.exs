@@ -243,6 +243,9 @@ defmodule LcarsFleet.MixProject do
       # newest. Nothing here references JOSE directly; the pin exists only to hold the dep on the last
       # release this Erlang can build. It lifts when OTP does, not before — and the reason is written
       # HERE because an exact pin with no stated cause reads as gratuitous and gets removed.
+      # ⚠ ITS CONDITION IS GONE (2026-08-22): the toolchain floor moved to OTP 27, which knows
+      # `dynamic()` (EEP-61, OTP 26). The pin is now HELD, not required — lifting it is a resolver
+      # change, so it belongs to the pass that purges the PLT and runs the gate, not to the pin bump.
       {:jose, "1.11.10", override: true},
       # — forge HTTP (Fleet.Forge ; finch aussi demarre seul par les portes `eval`) —
       {:req, "~> 0.7"},

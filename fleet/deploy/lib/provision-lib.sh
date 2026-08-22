@@ -143,9 +143,17 @@ PROVISION_LIB_LOADED=1
 : "${PROV_EXPECTED_REPO:=}"
 # Toolchain build — pins EXACTS (bump = changer la paire version+sha ICI, nulle part ailleurs).
 # Le zip est le précompilé officiel elixir-lang (assets de release, sha256sum publié à côté).
+#
+# ⚠ `PROV_ELIXIR_OTP_MAJOR` PORTE DEUX CHOSES, et c'est ce qui l'a fait mentir. C'est à la fois le
+# PLANCHER apt d'Erlang (`15-toolchain` accepte tout OTP >=) et la VARIANTE du précompilé Elixir
+# (`elixir-otp-<major>.zip` — Elixir 1.18.4 compilé CONTRE cet OTP). Un plancher tolère un écart ;
+# une variante non. Mesuré le 2026-08-22 : l'hôte est passé en Ubuntu 26.04, l'apt a livré OTP 27,
+# le plancher 25 l'a accepté en vert — et la boîte a téléchargé la variante OTP 25, donc du bytecode
+# compilé par le compilateur de 25 tournant sur une VM 27. Personne ne l'a décidé, rien ne l'a dit.
+# Bouger ce cran bouge LES DEUX ; c'est voulu, mais il faut le savoir avant de le toucher.
 : "${PROV_ELIXIR_VERSION:=1.18.4}"
-: "${PROV_ELIXIR_OTP_MAJOR:=25}"
-: "${PROV_ELIXIR_ZIP_SHA256:=04ecc784c59692ce15511fbba54638d947f0566f5baf69c6542d4bf2ea89cd1a}"
+: "${PROV_ELIXIR_OTP_MAJOR:=27}"
+: "${PROV_ELIXIR_ZIP_SHA256:=5be18f35e329f7c5914a80dd9f323d7bbb144616df1ed16f6f0862a1900b4bb5}"
 # L'humain cible des modules per-humain : celui qui a lancé (à travers sudo s'il y a lieu).
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 
