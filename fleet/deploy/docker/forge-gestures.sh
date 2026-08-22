@@ -55,6 +55,10 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 # Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
 # chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
 # une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
+# Le compte integre, resolu UNE fois : les deux `TF_VAR_builtin_human` plus bas et le verbe
+# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-lcars}` dans le meme fichier
+# seraient trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
@@ -375,7 +379,7 @@ cmd_apply() {
   # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
   # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
   # delibere et la variable dit ce qu'elle nomme.
-  export TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"
+  export TF_VAR_builtin_human="$BUILTIN_HUMAN"
   export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
 
   # L'ORDRE EST UN INVARIANT, pas une preference : `instance/` porte les comptes partages, et une
@@ -719,7 +723,7 @@ cmd_install() {
   # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
   # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
   # delibere et la variable dit ce qu'elle nomme.
-  export TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"
+  export TF_VAR_builtin_human="$BUILTIN_HUMAN"
   export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
@@ -827,5 +831,11 @@ case "${1:-}" in
   install)      shift; with_apply_lock cmd_install "$@" ;;
   runner-token) cmd_runner_token ;;
   toolchain-protection) shift; cmd_toolchain_protection "$@" ;;
-  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection)" >&2; exit 1 ;;
+  # ⚠ CE VERBE EXISTE POUR QU'AUCUN APPELANT N'AIT A RECOPIER LE DEFAUT. Le nom du compte integre a
+  # UN auteur — la ligne `TF_VAR_builtin_human` ci-dessus — et un second litteral ailleurs ne reste
+  # d'accord avec elle que jusqu'au jour ou l'un des deux bouge. `48-forge-host` doit poser un mot de
+  # passe sur ce compte : sans porte pour DEMANDER son nom, il ne pouvait le faire que quand
+  # l'operateur l'avait nomme lui-meme, c'est-a-dire jamais dans le cas nominal.
+  builtin-human) printf "%s\n" "$BUILTIN_HUMAN" ;;
+  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection|builtin-human)" >&2; exit 1 ;;
 esac

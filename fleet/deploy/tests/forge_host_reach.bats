@@ -239,8 +239,13 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "sans humain de fleet, on ne passe RIEN — le defaut vit dans forge-gestures, pas ici" {
   # Un litteral `lcars` ici en ferait un SECOND defaut pour un meme fait, et deux defauts ne restent
   # d'accord que tant que personne n'en touche un.
+  # ⚠ ON EPINGLE QUE LA RECETTE EST ALIMENTEE DEPUIS LA-BAS, PAS LA FORME DE LA LIGNE. Ce temoin
+  # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
+  # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
+  # propre sens. Ce qui compte est la direction — le nom vient de forge-gestures, pas du module.
   local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
-  grep -q 'TF_VAR_builtin_human="${LCARS_BUILTIN_HUMAN:-lcars}"' "$g"
+  grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
+  grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne redit pas ce defaut
   ! grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
 }
@@ -626,14 +631,43 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   ! grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
-@test "sans humain de fleet NOMME, on ne devine pas le login — vide est une reponse" {
-  # `forge-gestures.sh` a son propre defaut (`lcars`). Un litteral ici en ferait un SECOND, et deux
-  # defauts pour un fait ne restent d'accord que tant que personne n'en touche un.
+@test "sans humain NOMME, le login se DEMANDE — sortir en silence rendait la fonction morte" {
+  # ⚠ LA PREMIERE ECRITURE SORTAIT EN SILENCE QUAND `PROV_FLEET_HUMAN` ETAIT VIDE, au motif de ne
+  # pas recopier le defaut de `forge-gestures.sh`. La regle etait bonne, la consequence non : sans
+  # `--fleet-human` — le cas NOMINAL — le compte integre est cree par la recette et ne recevait
+  # jamais son mot de passe. Mesure du 2026-08-22, install fraiche : aucun identifiant au banner.
+  #
+  # Le nom a UNE autorite, on l'interroge. Pas de litteral ici, pas de silence non plus.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
   grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"
-  grep -qE '\[\[ -n "\$login" \]\] \|\| return 0' <<<"$body"
+  grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
   ! grep -q '"lcars"' <<<"$body"
+}
+
+@test "le nom du compte integre a UNE autorite, et elle repond" {
+  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  [ -f "$g" ]
+  run bash "$g" builtin-human
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  # La surcharge passe par la meme porte — sinon ce serait une seconde autorite deguisee en defaut.
+  run env LCARS_BUILTIN_HUMAN=vanille bash "$g" builtin-human
+  [ "$output" = "vanille" ]
+  # Et le litteral n'existe qu'UNE fois dans le CODE du fichier qui le porte — les commentaires en
+  # parlent, et un compte qui les inclut mesure la prose au lieu de la regle.
+  [ "$(grep -vE '^\s*#' "$g" | grep -c 'LCARS_BUILTIN_HUMAN:-')" -eq 1 ]
+}
+
+@test "la repose couvre les DEUX comptes — une porte a moitie n'est pas une porte" {
+  # L'annonce de l'humain integre est liee a la passe qui POSE la structure : sur une machine deja
+  # provisionnee elle est sautee. Un operateur qui a perdu ses identifiants les a perdus tous les
+  # deux, donc le recours doit rendre les deux.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
+  grep -q 'announce_builtin_human_password' <<<"$body"
+  # Et quand le nom manque, il le DIT au lieu de reposer la moitie en silence.
+  grep -qE 'p_warn .*--fleet-human' <<<"$body"
 }
 
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {

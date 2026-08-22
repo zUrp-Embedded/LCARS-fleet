@@ -229,11 +229,14 @@ announce_password() { # announce_password <login> <mot de passe>
 # à chaque convergence, sans qu'aucune ligne ne le rattache à un geste qu'elle aurait demandé.
 announce_builtin_human_password() {
   local login tok pw code
-  # VIDE EST UNE RÉPONSE, comme pour `LCARS_BUILTIN_HUMAN` plus haut : sans humain de fleet nommé,
-  # c'est le défaut de `forge-gestures.sh` qui a été appliqué, et on ne le devine pas ici — deux
-  # défauts pour un fait ne restent d'accord que tant que personne n'en touche un.
+  # ⚠ ON DEMANDE LE NOM, ON NE LE DEVINE NI NE LE RECOPIE. Sans humain de fleet nommé, c'est le
+  # défaut de `forge-gestures.sh` qui a été appliqué à la recette : ce module doit poser un mot de
+  # passe sur CE compte-là. Un littéral ici en ferait un second défaut ; sortir en silence — ce que
+  # faisait la première écriture — rendait la fonction morte dans le cas NOMINAL, c'est-à-dire
+  # exactement quand elle sert. Le verbe `builtin-human` est la porte : une autorité, interrogée.
   login="${PROV_FLEET_HUMAN:-}"
-  [[ -n "$login" ]] || return 0
+  [[ -n "$login" ]] || login="$(bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  [[ -n "$login" ]] || { p_warn "mot de passe forge de l'humain intégré NON posé : son nom est indéterminable"; return 0; }
   tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
 
@@ -273,6 +276,20 @@ reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste 
     announce_password "$PROV_FORGE_ADMIN" "$npw"
   else
     p_fail "repose du mot de passe de « $PROV_FORGE_ADMIN » en échec — le compte garde l'ancien"
+  fi
+
+  # ⚠ LES DEUX COMPTES SE PERDENT ENSEMBLE, DONC ILS SE REPOSENT ENSEMBLE. L'annonce de l'humain
+  # intégré est liée à la passe qui POSE la structure : sur une machine déjà provisionnée elle est
+  # sautée, et l'opérateur qui a perdu ses identifiants n'avait de recours que pour l'admin. Une
+  # porte qui ne rouvre que la moitié de ce qu'on a perdu n'est pas une porte.
+  #
+  # Elle exige le nom, et ce n'est pas une lacune : le compte intégré tient son nom du défaut de
+  # `forge-gestures.sh`, et le recopier ici en ferait un second. « --fleet-human <nom> » le NOMME,
+  # et nommer est déjà le geste par lequel ce rail autorise ce qui touche à un humain.
+  if [[ -n "${PROV_FLEET_HUMAN:-}" ]]; then
+    announce_builtin_human_password
+  else
+    p_warn "seul « $PROV_FORGE_ADMIN » a été reposé — pour l'humain de fleet aussi, nomme-le : « --fleet-human <nom> »"
   fi
 }
 
