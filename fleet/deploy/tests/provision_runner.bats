@@ -828,3 +828,23 @@ EOF
   done
   [ -z "$bad" ] || { echo "APPLY-ON hors de CHECK-ON :$bad" >&2; false; }
 }
+
+@test "MATRICE: le README DECRIT TOUS les modules, et avec les terrains QU'ILS DECLARENT" {
+  # Ce tableau est le SSoT du rail deploy, et un SSoT incomplet est pire qu'absent : il repond.
+  # Mesure du 2026-08-22 : ONZE modules sur vingt-quatre n'y figuraient pas — dont un modifie le
+  # jour meme — et une ligne annoncait `wsl` la ou son module declare `wsl linux`, ce qui niait un
+  # substrat entier. Rien dans le depot ne pouvait le dire : une doc ne casse pas, elle vieillit.
+  local readme="$BATS_TEST_DIRNAME/../README.md" missing="" wrong="" f name row a c ra rc
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
+    name="$(basename "$f" .sh)"
+    row="$(grep -m1 "^| $name |" "$readme" || true)"
+    [[ -n "$row" ]] || { missing+=" $name"; continue; }
+    a="$(cut -d'|' -f3 <<<"$row" | sed 's/^ *//;s/ *$//')"
+    c="$(cut -d'|' -f4 <<<"$row" | sed 's/^ *//;s/ *$//')"
+    ra="$(sed -n 's/^# APPLY-ON:[[:space:]]*//p' "$f" | head -1)"
+    rc="$(sed -n 's/^# CHECK-ON:[[:space:]]*//p' "$f" | head -1)"
+    [[ "$a" == "$ra" && "$c" == "$rc" ]] || wrong+=" $name(README:$a|$c vs source:$ra|$rc)"
+  done
+  [[ -z "$missing" ]] || { echo "absents du tableau:$missing"; false; }
+  [[ -z "$wrong" ]]   || { echo "terrains divergents:$wrong"; false; }
+}

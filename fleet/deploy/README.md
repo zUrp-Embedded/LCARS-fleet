@@ -91,16 +91,27 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|
 | 00-preflight | any | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
+| 05-host-consent | linux | linux | le consentement de l'opérateur à modifier CETTE machine, rendu DURABLE (`/etc/lcars/host-consent`) — seconde source de 00-preflight, parce qu'un daemon ou un convergeur n'a pas l'environnement de celui qui a tapé la commande |
 | 10-packages | wsl linux | any | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
 | 15-toolchain | wsl linux | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only, jamais dans le conteneur runtime |
+| 16-node | wsl linux | any | Node précompilé PINNÉ — le toolchain qui bâtit la DOC du produit |
 | 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
+| 22-fleet-human | wsl linux | wsl linux | l'humain de fleet du poste : un compte unix qui n'est PAS le siège (GUARD B interdit à l'uid 1000 de lancer une fleet). Le nom vient de l'opérateur — sans lui c'est un DRIFT, jamais une création silencieuse |
 | 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
+| 26-store | docker | docker | les MODES du magasin d'outillage sur les quatre volumes externes — PRESENT est un magasin ACTIF : un répertoire vide se bind quand même en `ro` dans chaque pod |
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via l'installeur officiel joué TEL QUEL — deux gestes (download, puis run), aucune machinerie qui double la sienne — frontière vendor N1 |
-| 48-forge-host | wsl | wsl | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 50-forge et 55-deck-oidc restent en dérive et leurs consignes nomment la boîte |
+| 44-media | wsl linux | any | les médias partagés (avatars, favicon) — le jumeau FICHIER du trou ISO des paquets |
+| 45-catalogues | any | any | le matériel des catalogues INSTALLÉS, convergé depuis la forge — « installé » est un fait de forge, ce module est ce qui le rend vrai sur le disque |
+| 45-sudoers-toolchain | any | any | les quatre ancrages système du domaine admiral (sudoers étroit, état conteneur, projection du login du siège, skill du siège). Rang 45 et pas moins : un NOPASSWD posé avant 20-groups viserait un groupe inexistant |
+| 46-tofu | wsl linux | any | OpenTofu + son miroir de providers SUR LA MACHINE — la structure de forge n'a plus besoin d'une image (1,18 Go et dix minutes bâtis pour 124 Mo d'outil jamais démarré) |
+| 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 50-forge et 55-deck-oidc restent en dérive et leurs consignes nomment la boîte |
 | 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
+| 52-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul — jamais sur un dépôt de projet |
 | 55-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json`. Les ENTRÉES (`PROV_DECK_ORIGINS`) convergent : la loopback y est semée dans ses **deux** écritures (`127.0.0.1` ET `localhost` — deux origines pour un même point d'écoute), et une liste changée repose le client |
 | 60-deploy | wsl linux | any | orchestre `fleet/etc/install.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
+| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte l'entrypoint les lance et `tini` les tient ; nativement, c'est systemd |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
