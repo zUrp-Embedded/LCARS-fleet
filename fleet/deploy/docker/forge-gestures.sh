@@ -25,6 +25,9 @@
 #   config-token   lit un jeton master sur STDIN, le VERIFIE contre la forge de la boite, puis le
 #                  pose en `0640 root:lcars-admin`. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
+#   builtin-human  imprime le nom du compte integre — `forge-gestures.sh builtin-human`. Ce fichier
+#                  en est l'AUTORITE (`LCARS_BUILTIN_HUMAN`, defaut plus bas) ; le verbe existe pour
+#                  que ses appelants le DEMANDENT au lieu d'en recopier le defaut. Ne touche a rien.
 #   apply          joue la recette : module instance/, puis module catalogue.
 #                  Ne prend RIEN — il lit ce que la boite detient. Un jeton sur STDIN l'emporte.
 #   toolchain-protection <login-du-siege> [admins...]
