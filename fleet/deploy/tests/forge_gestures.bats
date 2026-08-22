@@ -11,6 +11,25 @@
 # Dispositif identique a `forge_charte.bats` et `forge_existing.bats` : un faux `curl` en tete de
 # PATH qui journalise `"$@"` ET son stdin. Chaque assertion d'attaque va par paire avec un temoin.
 
+# ─── LE GESTE VIT DES DEUX COTES, ET LA PORTE DOIT LE SAVOIR ────────────────────────────────────
+#
+# `deploy/box` entrait dans le conteneur `lcars` pour jouer `forge-gestures.sh`. Sur un poste ce
+# conteneur n'existe pas — la fleet y tourne nativement et seule la forge est conteneurisee — donc
+# tout verbe qui passe par la mourait sur l'absence d'un objet sans rapport avec la demande. Le meme
+# script est pose sur l'hote par `62-runtime-helpers` : la porte doit chercher les DEUX.
+@test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand la boite n'est pas la" {
+  local box="$BATS_TEST_DIRNAME/../box"
+  [ -f "$box" ]
+  local body; body="$(grep -vE '^\s*#' "$box" | sed -n '/^gesture()/,/^}/p')"
+  [ -n "$body" ]
+  # Les deux chemins, et la condition qui les separe.
+  grep -q 'compose ps -q lcars' <<<"$body"
+  grep -q '/opt/lcars/forge-gestures.sh' <<<"$body"
+  # ⚠ ET AUCUN `sudo` : la promesse auditee de ce rail est de n'en jamais demander. Un operateur
+  # hors du groupe `lcars-admin` doit se faire REFUSER par les droits du fichier, pas contourner.
+  ! grep -q 'sudo' <<<"$body"
+}
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
   [ -f "$SCRIPT" ]

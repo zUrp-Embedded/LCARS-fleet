@@ -24,10 +24,17 @@
 #   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
 #      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
-#      bootstrap est posé (PROV_FORGE_SEED_FILE = le TF_VAR_seed_password de tofu — les bots
-#      le GARDENT : must_change_password=false dans forge.tf), le module le DÉRIVE :
-#      {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge donc les
-#      tokens dans le MÊME cycle — plus aucun geste.
+#      bootstrap est posé (PROV_FORGE_SEED_FILE = le TF_VAR_seed_password de tofu), le module
+#      le DÉRIVE : {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge
+#      donc les tokens dans le MÊME cycle — plus aucun geste.
+#      ⚠ LE SEED N'EST PLUS LE MOT DE PASSE DE PERSONNE, et cette ligne a dit le contraire :
+#      « les bots le GARDENT ». Le mint POSE un mot de passe neuf par le jeton master
+#      (`force_password_for`), s'en sert et l'oublie ; l'humain intégré reçoit le sien de
+#      `48-forge-host`. Le seed n'est plus qu'une valeur de CRÉATION — celle que tofu exige à la
+#      naissance d'un compte — et un REPLI si le PATCH du mint échoue. Il ne se supprime pas pour
+#      autant : le provider ne pose le password qu'à la création, donc un seed régénéré rendrait
+#      « changed » tous les plans à venir sans rien changer côté forge (piège documenté dans
+#      `deps/instance/accounts.tf`).
 #   3. SONDE (et ne converge plus) la VISIBILITÉ des adhésions d'org des comptes machine de l'org
 #      SYSTÈME. Une adhésion créée par API est PRIVÉE par défaut, donc invisible aux non-membres :
 #      un humain qui ouvre l'org ne voit pas quels workers y travaillent. C'est de l'UX, pas de la
