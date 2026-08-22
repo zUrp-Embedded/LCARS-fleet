@@ -6,11 +6,11 @@
 #
 # WHY THIS EXISTS. A bench is THREE compose projects — the box (`<project>`), the forge
 # (`<project>forge`) and the runner (`<project>-runner`, started by bench-up through
-# bench-runner.sh) — and this script tore down two. Measured 2026-08-09 on a real teardown:
+# forge-runner.sh) — and this script tore down two. Measured 2026-08-09 on a real teardown:
 # `lcars-faces-runner-runner-1` was still running afterwards and the forge's `down` ended on
 # "Network ... Resource is still in use". The runner sits on the forge's network, so while it
 # lives that network stays; and it stays REGISTERED against a forge that no longer exists — the
-# zombie bench-runner.sh describes in its own header, except nobody clears it until the NEXT
+# zombie forge-runner.sh describes in its own header, except nobody clears it until the NEXT
 # bench-up happens to reuse the same project name.
 #
 # The ORDER is the contract, not a preference: the runner must go first, or the forge teardown

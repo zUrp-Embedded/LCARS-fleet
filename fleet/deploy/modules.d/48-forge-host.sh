@@ -158,7 +158,7 @@ FORGE_NET="${PROV_FORGE_PROJECT}_default"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-forge-1"
 MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
-COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/bench/forge-compose.yml"
+COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/forge-compose.yml"
 # ⚠ DEUX URLS, ET CHACUNE A UN SEUL LECTEUR LÉGITIME.
 #   LOCAL_URL   par où CE module et ses voisins parlent à la forge — toujours la loopback, parce
 #               qu'ils tournent sur la machine. C'est elle qui va dans `forge.url`, lue par
@@ -178,7 +178,7 @@ forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null
 # depense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas. Il se pose
 # donc ici, apres la forge, sous la meme identite et avec la meme CLI qu'elle.
 #
-# ⚠ UN SEUL MECANISME D'ENROLEMENT. `bench-runner.sh` le porte en entier — jeton d'enregistrement
+# ⚠ UN SEUL MECANISME D'ENROLEMENT. `forge-runner.sh` le porte en entier — jeton d'enregistrement
 # par l'API admin, config des jobs, montage du compose — avec ses cicatrices (portee du jeton,
 # reseau des jobs, `docker cp` plutot que bind). Il est entierement parametre : on l'APPELLE. Un
 # second exemplaire divergerait du premier sur la premiere cicatrice qu'on ne recopierait pas.
@@ -237,7 +237,7 @@ converge_ci_runner() {
   # peut être un shim d'escalade. Laisser le délégué chercher « docker » dans le PATH le ferait
   # échouer sur une machine parfaitement saine : rien n'installe docker dans une VM WSL.
   DOCKER_BIN="$PROV_DOCKER_BIN" \
-    bash "$(repo_root)/fleet/deploy/docker/bench/bench-runner.sh" \
+    bash "$(repo_root)/fleet/deploy/docker/forge-runner.sh" \
       --forge-api "$LOCAL_URL/api/v1" --admin-token-file "$MASTER_TOKEN_FILE" \
       --network "$FORGE_NET" --project "$PROV_RUNNER_PROJECT" \
       ${PROV_RUNNER_LABELS:+--labels "$PROV_RUNNER_LABELS"} \

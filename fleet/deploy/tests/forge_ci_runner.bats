@@ -18,7 +18,7 @@
 # LE COEUR DU FICHIER : « zero runner » et « je ne peux pas savoir » sont deux reponses. Les
 # confondre dans un sens envoie enroler un runner qui existe deja ; dans l'autre, ca declare le rail
 # sain sur une forge muette. Un jeton trop etroit suffit a produire le silence — la portee du jeton
-# master a DEJA mordu ici (`--reg-token` de bench-runner.sh existe pour ca, mesure du 2026-08-09).
+# master a DEJA mordu ici (`--reg-token` de forge-runner.sh existe pour ca, mesure du 2026-08-09).
 #
 # ON EXECUTE LE MODULE, on ne le source pas : patron des autres temoins de `deploy/`.
 
@@ -87,11 +87,11 @@ EOF
   # demande est l'autre panne (mesure du 2026-08-21, un job `ubuntu-latest` sur une forge dont le
   # seul runner servait `shell,elixir,dood`). Cette sonde ne la TRANCHE pas — `CiGate` le fait au
   # ticket, en nommant le label — mais elle donne a l'operateur de quoi comparer.
-  stub_curl '{"total_count":1,"runners":[{"name":"bench-runner","labels":[{"name":"shell"},{"name":"elixir"}]}]}'
+  stub_curl '{"total_count":1,"runners":[{"name":"lcars-runner","labels":[{"name":"shell"},{"name":"elixir"}]}]}'
   run "$MODULE" check
 
   [[ "$output" == *"1 runner(s) CI"* ]]
-  [[ "$output" == *"bench-runner"* ]]
+  [[ "$output" == *"lcars-runner"* ]]
   [[ "$output" == *"shell,elixir"* ]]
   [[ "$output" != *"AUCUN runner"* ]]
 }

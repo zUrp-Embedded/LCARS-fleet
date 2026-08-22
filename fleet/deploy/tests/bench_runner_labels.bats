@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/tests/bench_runner_labels.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-05
-# STATUS: bats tests for bench-runner.sh — a label is a promise, checked before it is made
+# STATUS: bats tests for forge-runner.sh — a label is a promise, checked before it is made
 #
 # WHY THIS EXISTS. A runner label is a KEY the runner announces to the forge: "send me the jobs that
 # ask for this". The runner registers GREEN whatever image sits behind the key, then fails every job
@@ -19,7 +19,7 @@
 # absent exactly when it is needed.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
+  SRC="$BATS_TEST_DIRNAME/../docker/forge-runner.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"
@@ -66,8 +66,13 @@ EOF
   unset LCARS_RUNNER_LABELS
 }
 
+# ⚠ LE DECOR NOMME LE RESEAU ET LE PROJET, PARCE QUE LE SCRIPT LES EXIGE. Ils ont porte des
+# defauts de banc, qui visaient le deploiement d'un AUTRE rail : un appelant qui en heritait
+# enrolait son runner a cote de sa forge — il demarre, ne joint rien, et la CI reste muette. Sans
+# defaut, le refus est net ; ces temoins mesurent les LABELS, ils doivent donc fournir le reste.
 run_runner() {
-  run bash "$SRC" --forge-api http://f/api/v1 --admin-token tok "$@"
+  run bash "$SRC" --forge-api http://f/api/v1 --admin-token tok \
+      --network t_default --project t-runner "$@"
 }
 
 @test "no --labels at all is REFUSED, and the refusal carries the way out" {
@@ -160,7 +165,7 @@ run_runner() {
 # see its other containers »).
 
 @test "le compose du runner ne monte PLUS le socket de l'hote" {
-  C="$BATS_TEST_DIRNAME/../docker/bench/runner-compose.yml"
+  C="$BATS_TEST_DIRNAME/../docker/runner-compose.yml"
   [ -f "$C" ]
   # aucune ligne de MONTAGE du socket (les mentions en commentaire, elles, expliquent pourquoi)
   ! grep -qE '^\s*-\s*/var/run/docker\.sock' "$C"
@@ -184,7 +189,7 @@ run_runner() {
 @test "le magasin du daemon embarque est un volume NOMME — sinon le semis meurt au recreate" {
   # L'image DECLARE ce chemin comme volume : docker en cree donc un, mais ANONYME. Un `down -v`
   # l'emporte, un `recreate` l'orpheline, et `lcars-build` — qu'aucun registre ne porte — part avec.
-  C="$BATS_TEST_DIRNAME/../docker/bench/runner-compose.yml"
+  C="$BATS_TEST_DIRNAME/../docker/runner-compose.yml"
   grep -q 'runner-dind:/home/rootless/.local/share/docker' "$C"
   grep -qE '^\s{2}runner-dind:\s*$' "$C"
 }
@@ -193,7 +198,7 @@ run_runner() {
   # L'etape 0 de ce script le dit deja : `exec` rend zero octet et exit 0 a travers le relais
   # systemd du groupe fleet. Une sonde qui se contenterait du code de retour semerait dans le vide
   # en se croyant verte.
-  SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
+  SUT="$BATS_TEST_DIRNAME/../docker/forge-runner.sh"
   grep -q 'seed_dind_images' "$SUT"
   grep -q 'docker image inspect -f .{{.Id}}.' "$SUT"
   # le refus existe et il nomme les deux causes possibles
@@ -203,7 +208,7 @@ run_runner() {
 @test "le semeur lit LES LABELS — aucune seconde liste d'images a tenir" {
   # Une quatrieme liste du meme fait est morte ailleurs dans ce depot (PROV_ROLES). On ne
   # recommence pas : les labels nomment deja les images, l'etape 0 a deja verifie qu'elles existent.
-  SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-runner.sh"
+  SUT="$BATS_TEST_DIRNAME/../docker/forge-runner.sh"
   awk '/^seed_dind_images\(\)/,/^}/' "$SUT" | grep -q 'for entry in \$LABELS'
   awk '/^seed_dind_images\(\)/,/^}/' "$SUT" | grep -q 'image="\${entry#\*docker://}"'
 }

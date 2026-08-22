@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/bench/bench-runner.sh
+# SOURCE: fleet/deploy/docker/forge-runner.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — enregistre un runner CI de circonstance sur la forge jetable
@@ -28,7 +28,7 @@
 # compose ; un runner deja enregistre sur une forge MORTE est un zombie — d'ou le `down -v`
 # d'office avant chaque pose : sur un banc, l'histoire du runner ne vaut rien, l'appairage si.
 #
-# USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1>
+# USAGE : forge-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1>
 #                         (--admin-token <tok> | --admin-token-file <chemin>)
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/lcars]
@@ -40,8 +40,15 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK="lcars-ticketforge_default"
-PROJECT="lcars-ticket-runner" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
+# ⚠ LE RESEAU ET LE PROJET N'ONT PAS DE DEFAUT, ET C'EST VOULU. Ils portaient ceux d'un banc
+# (`lcars-ticketforge_default`, `lcars-ticket-runner`) : ce script sert aussi la forge d'un poste,
+# et un defaut qui vise le deploiement d'un AUTRE rail enrole le runner a cote de sa forge — il
+# demarre, ne joint rien, et la CI reste muette sans qu'une ligne le dise. L'appelant les NOMME.
+#
+# `INSTANCE_URL`, lui, garde le sien : c'est le nom de service de la forge SUR SON PROPRE RESEAU,
+# identique des deux cotes puisque les deux montent le meme `forge-compose.yml`.
+FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK=""
+PROJECT="" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
 # Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
 LABELS="${LCARS_RUNNER_LABELS:-}"
 ACCEPT_GENERIC=0
@@ -62,10 +69,13 @@ while [[ $# -gt 0 ]]; do
     --verify-repo)  VERIFY_REPO="${2:?}"; shift 2 ;;
     --labels)       LABELS="${2:?}"; shift 2 ;;
     --accept-generic) ACCEPT_GENERIC=1; shift ;;
-    *) echo "bench-runner: option inconnue: $1" >&2; exit 1 ;;
+    *) echo "forge-runner: option inconnue: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "bench-runner: --forge-api et --admin-token(-file) requis" >&2; exit 1; }
+[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "forge-runner: --forge-api et --admin-token(-file) requis" >&2; exit 1; }
+# Un refus NET vaut mieux qu'un runner enrole a cote de sa forge : sans reseau nomme il demarre,
+# ne joint rien, et l'absence de CI ne se rattache a aucune ligne.
+[[ -n "$NETWORK" && -n "$PROJECT" ]] || { echo "forge-runner: --network et --project requis (le reseau compose de LA forge visee)" >&2; exit 1; }
 
 # ─── L'AUTH DE LA FORGE PASSE PAR STDIN, JAMAIS PAR ARGV ────────────────────────────────────────
 #
@@ -81,7 +91,7 @@ done
 # `-K -` : curl lit sa config sur stdin. Le jeton n'apparait ni dans argv ni dans l'environnement.
 forge_curl() { printf 'header = "Authorization: token %s"\n' "$TOKEN" | curl -K - "$@"; }
 
-say() { echo "[bench-runner] $*"; }
+say() { echo "[forge-runner] $*"; }
 
 # ─── 0. LES LABELS SONT UNE PROMESSE, ET ELLE SE VERIFIE AVANT DE LA FAIRE ──────────────────────
 # Un label est une CLE que le runner annonce a la forge : « envoie-moi les jobs qui demandent ca ».
@@ -107,12 +117,12 @@ check_labels() {
   if [[ -z "$LABELS" ]]; then
     [[ "$ACCEPT_GENERIC" -eq 1 ]] && { say "labels: defaut generique ACCEPTE (--accept-generic) — ce runner ne sait pas jouer mix gate"; return 0; }
     cat >&2 <<'EOM'
-[bench-runner] REFUS : aucun --labels, donc le defaut de runner-compose.yml — dont l'image `elixir`
-[bench-runner]   est celle de BASE du stage build : Elixir et rien d'autre. `mix gate` y meurt sur
-[bench-runner]   `git` introuvable, et le runner aura l'air vert. Sortie :
-[bench-runner]     docker build --target build -t lcars-build:<tag> -f fleet/deploy/docker/Dockerfile .
-[bench-runner]     bench-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
-[bench-runner]   Un banc qui ne veut que le rail CI du template : --accept-generic (c'est une decision).
+[forge-runner] REFUS : aucun --labels, donc le defaut de runner-compose.yml — dont l'image `elixir`
+[forge-runner]   est celle de BASE du stage build : Elixir et rien d'autre. `mix gate` y meurt sur
+[forge-runner]   `git` introuvable, et le runner aura l'air vert. Sortie :
+[forge-runner]     docker build --target build -t lcars-build:<tag> -f fleet/deploy/docker/Dockerfile .
+[forge-runner]     forge-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
+[forge-runner]   Un banc qui ne veut que le rail CI du template : --accept-generic (c'est une decision).
 EOM
     exit 1
   fi
@@ -179,7 +189,7 @@ say "token d'enregistrement minte (${#REG} car)"
 # Quelques ko qui restent valent mieux qu'un projet compose qui ne se relit plus.
 GEN="$(mktemp -d)"
 cat > "$GEN/config.yaml" <<EOF
-# Genere par bench-runner.sh.
+# Genere par forge-runner.sh.
 #
 # ⚠ CE FICHIER FORÇAIT LES CONTENEURS DE JOB SUR LE RESEAU DE LA FORGE, et depuis que le runner
 # tourne en dind ce reseau N'EXISTE PLUS DE LEUR POINT DE VUE. Il appartient au daemon de la
@@ -201,7 +211,7 @@ EOF
 # en silence (troisieme incarnation du piege des deux points de vue, apres l'URL navigateur et le
 # reseau des jobs). Le fichier est copie dans le volume du runner (/data), qui appartient a la VM.
 cat > "$GEN/override.yml" <<EOF
-# Genere par bench-runner.sh — additif au runner-compose de l'operateur, jamais un remplacement.
+# Genere par forge-runner.sh — additif au runner-compose de l'operateur, jamais un remplacement.
 services:
   runner:
     environment:
@@ -236,7 +246,7 @@ EOF
 RUNNER_ENV="$GEN/runner.env"
 umask 077
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_RUNNER_LABELS=%s\n' \
-  "$INSTANCE_URL" "$REG" "bench-runner" "$LABELS" > "$RUNNER_ENV"
+  "$INSTANCE_URL" "$REG" "${LCARS_RUNNER_NAME:-lcars-runner}" "$LABELS" > "$RUNNER_ENV"
 # Le `down` d'office porte un token factice : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et
 # l'interpolation refuse MEME un down. Sans lui, ce nettoyage echoue en silence sous le `|| true`,
 # l'identite zombie survit dans le volume, et act_runner IGNORE le nouveau token (il ne s'enregistre

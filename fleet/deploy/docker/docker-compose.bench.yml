@@ -31,7 +31,7 @@
 # TRAVERSANT — le reseau de la forge est declare `external`, et compose branche la boite dessus a la
 # creation. Pas de `docker network connect` a la main, donc rien que le prochain nuke puisse oublier.
 #
-# CE N'EST PAS UNE INVENTION : `bench/bench-runner.sh` fait exactement ca depuis le 2026-08-02, et son
+# CE N'EST PAS UNE INVENTION : `forge-runner.sh` fait exactement ca depuis le 2026-08-02, et son
 # en-tete le dit — « l'override branche donc le projet runner sur CE reseau (network externe), au
 # lieu d'un `docker network connect` a la main que le prochain nuke oublierait ». Trois cycles de
 # vie independants, une seule facon de les joindre.
@@ -41,7 +41,7 @@
 # gestes contre un service QUI TOURNE — aucun compose ne les exprime, dans aucun mode. Ils vivent
 # dans `bench/bench-forge-bootstrap.sh`, et le nombre d'etapes y depend d'un FAIT et non d'un mode :
 # la forge arrive-t-elle avec son admin (`--admin-token`) ou vierge ?
-# DEMARRER LA FORGE ni LE RUNNER. `bench/forge-compose.yml` et `bench/bench-runner.sh` sont leurs
+# DEMARRER LA FORGE ni LE RUNNER. `forge-compose.yml` et `forge-runner.sh` sont leurs
 # recettes, et `bench/bench-up.sh` les enchaine.
 
 services:

@@ -132,7 +132,7 @@ côtés.
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
   le profil `forge` : runner Gitea officiel, label `elixir` = la même image que le stage
-  build). Son enregistrement est un geste bootstrap (`fleet/deploy/docker/bench/bench-runner.sh`
+  build). Son enregistrement est un geste bootstrap (`fleet/deploy/docker/forge-runner.sh`
   sur un banc ; sur une forge d'opérateur, le jeton de runner est minté à la main), hors du
   chemin machine-nue→fleet.
 - **Pas de gestion GitHub** (`gh`, branch-protection…) : la forge du triangle est Gitea.

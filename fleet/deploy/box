@@ -452,7 +452,7 @@ CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
                                 dit avec le geste exact pour le combler.
 
 BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
-      docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge up -d
+      docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge up -d
       → projet SÉPARÉ, volumes à lui, détruit uniquement par TA commande explicite.
       Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} ./docker.sh up
 EOF

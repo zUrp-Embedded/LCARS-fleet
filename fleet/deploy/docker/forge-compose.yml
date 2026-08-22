@@ -1,4 +1,4 @@
-# SOURCE: fleet/deploy/docker/bench/forge-compose.yml
+# SOURCE: fleet/deploy/docker/forge-compose.yml
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
 # STATUS: forge JETABLE du BANC — livrée avec la beta, ce n'est pas une forge de production
@@ -20,8 +20,8 @@
 # (`-p lcars-devforge` en autonome, `-p <projet>forge` sous `bench-up.sh`), donc ses volumes lui
 # appartiennent et AUCUNE commande de docker.sh ne peut les atteindre — c'est tout l'intérêt.
 #
-# LANCER :   docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge up -d
-# DÉTRUIRE : docker compose -f fleet/deploy/docker/bench/forge-compose.yml -p lcars-devforge down -v
+# LANCER :   docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge up -d
+# DÉTRUIRE : docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge down -v
 #            (le `-v` est ici, dans TON geste délibéré, jamais dans une commande LCARS)
 #
 # BRANCHER LCARS DESSUS : attacher le conteneur LCARS au réseau de CE projet, puis pointer

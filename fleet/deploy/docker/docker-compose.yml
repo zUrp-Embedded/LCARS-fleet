@@ -13,7 +13,7 @@
 # le fait. La forge est donc provisionnée par l'OPÉRATEUR, avec
 # l'outil qu'il veut (app TrueNAS, Docker Desktop, machine dédiée), et LCARS ne la connaît que
 # par deux entrées : son URL, et un token master fourni au déploiement.
-# Pour un BANC (une forge jetable en une commande) : `docker/bench/forge-compose.yml`, projet
+# Pour un BANC (une forge jetable en une commande) : `docker/forge-compose.yml`, projet
 # SÉPARÉ, hors du chemin nominal — cf. son en-tête. Ce dossier s'appelait `dev/`, et le nom mentait
 # depuis qu'on livre le banc complet : ce qu'on tend à quelqu'un pour essayer LCARS n'est pas un
 # outil de développeur.

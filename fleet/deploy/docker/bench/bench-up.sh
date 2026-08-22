@@ -82,7 +82,7 @@ ADVERTISE=""
 IMAGE="lcars-fleet:2"
 # Le runner du banc sert TROIS labels, et celui qui compte est `elixir` : il doit porter l'image du
 # stage `build`, pas celle de BASE — sinon `mix gate` y meurt sur `git` introuvable et le runner a
-# l'air vert. `bench-runner.sh` REFUSE de deviner et il a raison. On ne devine pas non plus : le
+# l'air vert. `forge-runner.sh` REFUSE de deviner et il a raison. On ne devine pas non plus : le
 # defaut se DERIVE du tag de l'image de banc (`lcars-fleet:v4` -> `lcars-build:v4`, jumeaux du meme
 # build) et n'est retenu QUE si cette image existe. Sinon on le dit et on saute — jamais un runner
 # qui tourne sans pouvoir servir.
@@ -134,7 +134,7 @@ done
 # avec la boite — mesure et corrigee le 2026-08-07.
 # Le piege 1 (resoudre `forge` AVANT le premier boot) ne se paie plus par un `network connect`
 # manuel : la surcouche declare le reseau de la forge en `external` et compose branche la boite a la
-# CREATION. Meme recette que `bench-runner.sh` pour le runner depuis le 2026-08-02.
+# CREATION. Meme recette que `forge-runner.sh` pour le runner depuis le 2026-08-02.
 FORGE_PROJECT="${PROJECT}forge"
 FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
 FORGE_NET="${FORGE_PROJECT}_default"
@@ -519,7 +519,7 @@ case "$BOX_PROV_RC" in
 esac
 
 # ─── 7. LE RUNNER — on APPELLE la recette, on ne la refait pas ───────────────────────────────────
-# `bench-runner.sh` (2026-08-02) EST le geste, et il porte deux pieges reseau qu'un appel naif
+# `forge-runner.sh` (2026-08-02) EST le geste, et il porte deux pieges reseau qu'un appel naif
 # reprendrait de plein fouet. Le projet unique en desamorce UN : le runner joint la forge parce
 # qu'ils partagent le reseau. Le SECOND reste entier et n'a rien a voir avec le notre — les
 # conteneurs de JOB n'heritent pas du reseau du runner, act_runner les cree sur son reseau par
@@ -578,13 +578,13 @@ elif [[ -z "$RUNNER_LABELS" ]]; then
   le gate attend un statut sur chaque PR, 45 min, puis ESCALADE. Aucun jury n'est convoque
   entre-temps — rien ne sera livre sur ce banc tant qu'aucun runner ne sert le label.
               Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f fleet/deploy/docker/Dockerfile .
-              puis rejouer bench-runner.sh, ou --runner-labels pour choisir soi-meme"
+              puis rejouer forge-runner.sh, ou --runner-labels pour choisir soi-meme"
 elif [[ -z "$MASTER_TOKEN" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
   # ⚠ LA SORTIE DU SOUS-SCRIPT EST CAPTUREE, PLUS JETEE. Elle partait en `>/dev/null 2>&1`, donc le
   # SEUL mode d'echec que ce script ne savait pas expliquer etait celui qu'il faisait taire
-  # lui-meme : le verdict se reduisait a « en echec (rejouable : bench-runner.sh --help) », et il
+  # lui-meme : le verdict se reduisait a « en echec (rejouable : forge-runner.sh --help) », et il
   # fallait rejouer le sous-script a la main — en reconstruisant ses six arguments, dont un token
   # qui vit dans un `mktemp` — pour lire une phrase que le banc avait deja eue sous les yeux.
   # Mesure du 2026-08-14 : le refus etait « image(s) introuvable(s) sur ce daemon : alpine:3.20,
@@ -592,13 +592,13 @@ else
   #
   # Le silence reste la regle au SUCCES — un banc qui marche n'a pas a deverser le journal de ses
   # sous-scripts. C'est l'echec qui parle, et il parle avec les mots du sous-script, pas les notres.
-  RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/bench-runner-${PROJECT}.XXXXXX")"
+  RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
   # LE JETON D'ENREGISTREMENT VIENT DE LA PORTE GENERIQUE (`forge-gestures.sh runner-token`), pas
   # d'un appel API refait ici : c'est le meme geste que l'operateur jouera pour SON runner, par
-  # `./docker.sh runner-token`. `bench-runner.sh` garde son `--reg-token`, qui existait deja pour
+  # `./docker.sh runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
   # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
   REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
-  if DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-runner.sh" \
+  if DOCKER_BIN="$DOCKER_BIN" "$HERE/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" \
        --admin-token "$MASTER_TOKEN" \
        ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
@@ -645,14 +645,14 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
       RUNNER_STATE="demarre mais AUCUN runner vu par la forge — enregistrement rate"
     fi
   else
-    RUNNER_STATE="ABSENT — bench-runner.sh en echec, son refus mot pour mot :
+    RUNNER_STATE="ABSENT — forge-runner.sh en echec, son refus mot pour mot :
 $(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
               sortie COMPLETE conservee : $RUNNER_LOG"
   fi
 
   # ⚠ CE FICHIER FUYAIT, ET SURTOUT QUAND TOUT ALLAIT BIEN. `mktemp` le cree a chaque passage ; le
   # chemin de SUCCES ne le lit jamais — la sortie du sous-script est muette au succes, par contrat —
-  # et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers `bench-runner-bt.*` dans /tmp, dont
+  # et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers `forge-runner-bt.*` dans /tmp, dont
   # 1189 de ZERO octet (des succes) et 372 portant un refus de 65 octets que le verdict cite deja EN
   # ENTIER. Une boucle de nuit sur un banc en a pose 1561, pour zero lecteur.
   #

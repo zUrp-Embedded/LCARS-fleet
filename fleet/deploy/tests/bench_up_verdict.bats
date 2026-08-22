@@ -14,7 +14,7 @@
 # script mourir dans l'amorçage forge : ce qu'il mesure (l'ordre create→cp→start) est atteint avant.
 # Le verdict, lui, est la DERNIERE ligne — il faut donc traverser tout le script. On copie
 # `bench-up.sh` dans un faux arbre pour que ses voisins appeles par chemin (`bench-forge-bootstrap.sh`,
-# `bench-runner.sh`) soient les notres : `HERE` derive de `BASH_SOURCE`, et `REPO_ROOT` de `HERE`.
+# `forge-runner.sh`) soient les notres : `HERE` derive de `BASH_SOURCE`, et `REPO_ROOT` de `HERE`.
 
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
@@ -72,14 +72,14 @@ FAKE
   # label manquant jusqu'a l'escalade, 45 min plus tard, sans qu'une ligne le dise.
   RUNNER_ARGV="$BATS_TEST_TMPDIR/runner.argv"
   export RUNNER_ARGV
-  cat > "$BENCH/bench-runner.sh" <<FAKE
+  cat > "$BENCH/forge-runner.sh" <<FAKE
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$RUNNER_ARGV"
 rc="\$(cat "$RUNNER_RC")"
 [[ "\$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
 exit "\$rc"
 FAKE
-  chmod 0755 "$BENCH/bench-runner.sh"
+  chmod 0755 "$BENCH/forge-runner.sh"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"
@@ -275,7 +275,7 @@ run_bench() {
   # escalade, et rien ne dit que c'est le LABEL qui manque.
   #
   # Ce temoin garde la DERIVATION, pas une chaine : il lit ce que `bench-up` a reellement transmis a
-  # `bench-runner.sh`. Un label retire du defaut n'a alors nulle part ou se cacher.
+  # `forge-runner.sh`. Un label retire du defaut n'a alors nulle part ou se cacher.
   run_bench
   [ "$status" -eq 0 ]
   run cat "$RUNNER_ARGV"
@@ -292,7 +292,7 @@ run_bench() {
   [[ "$output" == *"PAS PRET"* ]]
 }
 
-@test "6-133: bench-runner.sh en echec → PAS PRET, exit 6" {
+@test "6-133: forge-runner.sh en echec → PAS PRET, exit 6" {
   echo 1 > "$RUNNER_RC"
   run_bench
   [ "$status" -eq 6 ]
@@ -303,12 +303,12 @@ run_bench() {
   # ⚠ ELLE FUYAIT SURTOUT QUAND TOUT ALLAIT BIEN, ce qui est le pire cas : `mktemp` posait le log a
   # chaque passage, le chemin de SUCCES ne le lit jamais (la sortie du sous-script est muette au
   # succes, par contrat) et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers
-  # `bench-runner-bt.*` dans /tmp — `bt` est le projet de CETTE suite, donc c'est elle qui les a
+  # `forge-runner-bt.*` dans /tmp — `bt` est le projet de CETTE suite, donc c'est elle qui les a
   # poses, un par execution, pour zero lecteur. 1189 faisaient ZERO octet.
   local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
   TMPDIR="$T" run_bench
   [ "$status" -eq 0 ]
-  [ "$(find "$T" -name 'bench-runner-*' | wc -l)" -eq 0 ]
+  [ "$(find "$T" -name 'forge-runner-*' | wc -l)" -eq 0 ]
 }
 
 @test "FUITE: un banc EN ECHEC garde son log, et le verdict le NOMME" {
@@ -320,9 +320,9 @@ run_bench() {
   echo 1 > "$RUNNER_RC"
   TMPDIR="$T" run_bench
   [ "$status" -eq 6 ]
-  [ "$(find "$T" -name 'bench-runner-*' | wc -l)" -eq 1 ]
+  [ "$(find "$T" -name 'forge-runner-*' | wc -l)" -eq 1 ]
   [[ "$output" == *"sortie COMPLETE conservee"* ]]
-  [[ "$output" == *"$T/bench-runner-"* ]]
+  [[ "$output" == *"$T/forge-runner-"* ]]
 }
 
 @test "6-133: runner demarre mais AUCUN vu par la forge → PAS PRET, exit 6" {
@@ -373,11 +373,11 @@ run_bench() {
 }
 
 # 2026-08-14 — LE SEUL ECHEC QUE CE SCRIPT NE SAVAIT PAS EXPLIQUER ETAIT CELUI QU'IL FAISAIT TAIRE.
-# L'appel a `bench-runner.sh` partait en `>/dev/null 2>&1`, donc le verdict se reduisait a « en echec
-# (rejouable : bench-runner.sh --help) ». Le sous-script, lui, avait dit exactement quoi reparer —
+# L'appel a `forge-runner.sh` partait en `>/dev/null 2>&1`, donc le verdict se reduisait a « en echec
+# (rejouable : forge-runner.sh --help) ». Le sous-script, lui, avait dit exactement quoi reparer —
 # et le rejouer a la main demande de reconstruire ses six arguments, dont un token qui vit dans un
 # `mktemp` que rien ne documente. Le test epingle la PROPAGATION, pas la formulation du relais.
-@test "6-14: le refus de bench-runner.sh remonte MOT POUR MOT dans le verdict" {
+@test "6-14: le refus de forge-runner.sh remonte MOT POUR MOT dans le verdict" {
   echo 1 > "$RUNNER_RC"
   run_bench
   [ "$status" -eq 6 ]
