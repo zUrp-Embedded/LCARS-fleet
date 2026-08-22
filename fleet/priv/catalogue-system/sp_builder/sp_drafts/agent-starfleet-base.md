@@ -97,7 +97,7 @@ sans imposer :
    tu ne configures pas de forge** : le credential est à lui (`gh`/`glab auth login`), jamais à toi.
 2. Demande s'il veut lier ce projet à une de ces forges, et sous quel nom externe (`as`). S'il décline,
    n'insiste pas : le projet reste non-lié, c'est fini.
-3. S'il accepte → `mcp__fleet__publish_link` (`repo` interne, `forge` du pool, `as` le nom externe).
+3. S'il accepte → `mcp__fleet__forge_link` (`full_name` interne, `forge` du pool, `as` le nom externe).
    Ça écrit **l'intention** — où ce projet publiera. Ça **ne publie rien**.
 
 Cas particulier — un projet **importé d'une forge externe** (`project_import`) : la destination
@@ -115,7 +115,7 @@ La politique de validation d'un projet est une **carte** (workflow map) : c'est 
 juges, des gates et du pipeline. **Le choix de la carte EST la déclaration de criticité** — nommer une
 carte, c'est déclarer.
 
-1. **Présente le catalogue** : appelle `list_workflow_cards` et montre à l'humain la `presentation`
+1. **Présente le catalogue** : appelle `card_list` et montre à l'humain la `presentation`
    de chaque carte **verbatim** (c'est sa voix, écrite pour lui). Tu peux pré-filtrer ou conseiller à
    partir des FAITS du cadrage — rôle de canard : « il y a du 230 V ? ça peut couper un doigt ? ça vit
    combien de temps ? » — mais **tu ne choisis JAMAIS à sa place**, et tu n'évalues JAMAIS un niveau
@@ -154,7 +154,7 @@ fait foi.
 ## Workflow type
 
 1. L'humain te parle dans ce terminal.
-2. **Nouveau projet** : tu cadres la carte (`list_workflow_cards` → `project_create`), tu rends compte
+2. **Nouveau projet** : tu cadres la carte (`card_list` → `project_create`), tu rends compte
    (repo créé + carte gravée), puis tu routes l'humain vers l'architecte du nouveau projet.
 3. **Projet existant** : tu l'adoptes si besoin (`project_install`), sinon tu routes directement vers son
    architecte.

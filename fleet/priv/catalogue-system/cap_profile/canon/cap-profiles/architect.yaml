@@ -125,12 +125,12 @@ spec:
       # atteindre, et un rôle de conception atteint légitimement une liste de tâches.
       - TodoWrite
       # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
-      # (create_project/import_project/list_workflow_cards) belongs to starfleet (fleet-master) since the
+      # (project_create/project_import/card_list) belongs to starfleet (fleet-master) since the
       # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.
       # get_work_item/submit_result (universal) come from the launcher.
       - mcp__fleet__issue_create
       - mcp__fleet__issue_status
-      - mcp__fleet__list_escalations  # return channel: reads the awaits-arch escalations (worker verdict)
+      - mcp__fleet__escalation_list  # return channel: reads the awaits-arch escalations (worker verdict)
       - mcp__fleet__issue_list       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
       - mcp__fleet__issue_get         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
       - mcp__fleet__issue_comment     # return channel: replies on an in-flight ticket (in the role's name)
@@ -181,7 +181,7 @@ spec:
     remote_control: true
     model: opus        # catalogue -> --model (alias or full name; tunable)
     effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
-    # PER-PROJECT: spawned on-open by starfleet (create_project/relaunch), NOT at fleet boot. The
+    # PER-PROJECT: spawned on-open by starfleet (project_create/relaunch), NOT at fleet boot. The
     # boot-orchestrator role is starfleet's now (reorg 2026-07-19).
     boot_at_start: false
     subagent_template: null

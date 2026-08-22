@@ -31,7 +31,7 @@
         "presentation": {
           "type": "string",
           "minLength": 1,
-          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the list_workflow_cards tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
+          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the card_list tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
         },
         "applicable_intensity": {
           "type": "array",
@@ -58,7 +58,7 @@
             "smoke",
             "demo"
           ],
-          "description": "Card class. Absent = canon (a production card, offered to the architect via list_workflow_cards). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
+          "description": "Card class. Absent = canon (a production card, offered to the architect via card_list). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
         }
       }
     },

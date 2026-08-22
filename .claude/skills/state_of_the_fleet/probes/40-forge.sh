@@ -14,7 +14,7 @@
 # So this probe reads what an anonymous caller can read, and says `unreachable` for the rest rather
 # than pretending an unauthenticated answer is the whole picture.
 #
-# We never WRITE. Not even a harmless-looking create: `create_project` makes a real repo, a dual-dir
+# We never WRITE. Not even a harmless-looking create: `project_create` makes a real repo, a dual-dir
 # and a scaffold. A diagnostic that mutates to measure is not a diagnostic.
 
 SOTF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

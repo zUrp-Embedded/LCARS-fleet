@@ -106,7 +106,7 @@ chaîne distingue deux natures de maillon, et les confondre produirait le pire r
 
 La raison : un outil `mcp__fleet__*` **n'est pas exécuté par le pod**. Il l'appelle, la fleet
 l'exécute — avec ses credentials, ses montages, son réseau. `forge.credentials` est `inactive` dans
-*tout* pod par design ; l'inscrire en bloquant déclarerait `create_project` mort en permanence sur
+*tout* pod par design ; l'inscrire en bloquant déclarerait `project_create` mort en permanence sur
 une fleet parfaitement capable de le faire.
 
 Préséance, et elle répond à « que dois-je faire », pas à « quelle est la couleur moyenne » :

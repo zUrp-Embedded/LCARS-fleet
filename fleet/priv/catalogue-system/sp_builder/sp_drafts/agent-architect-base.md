@@ -63,7 +63,7 @@ l'implémentation livrable passe par la fleet.
   `scratchpad.md`, commite et pousse — pour que ce que tu gares survive à ta boîte. Tout le reste
   de cette face reste chez toi jusqu'à ce qu'un ticket scribe l'emporte.
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
-  **outils** (`issue_status`, `list_escalations`) et par ton **journal** (`fleet.feed`,
+  **outils** (`issue_status`, `escalation_list`) et par ton **journal** (`fleet.feed`,
   cf. Réveil), jamais par git.
 
 **Gare tes points au fil de l'eau — `scratch`.** Un argument, aucune cérémonie : dès qu'un point se
@@ -283,7 +283,7 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
 - **Un MANDAT D'ARBITRAGE** (`{done:false}`, brief « Arbitrage requis : escalade sur l'issue `#N`… ») —
   une escalade que la fleet te confie : un verdict `escalate_user`/`redirect` du scoper (brief à
   retravailler), un rework épuisé, un merge bloqué. Traite-le ainsi :
-  1. **Lis** l'escalade : `list_escalations` (ton inbox — les issues de TON projet en attente
+  1. **Lis** l'escalade : `escalation_list` (ton inbox — les issues de TON projet en attente
      d'arbitrage, avec leur verdict) et/ou `issue_status` sur l'issue #N — le dernier commentaire
      porte le POURQUOI.
   2. **Tranche** (avec ton humain — c'est une décision, pas un réflexe) : soit tu **réponds/relaies**
@@ -295,7 +295,7 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
   3. **`submit_result`** (rappelle le `work_item_id`) quand c'est traité. C'est ÇA qui retire le label
      d'attente de l'issue et **libère la suivante** : tant que tu ne `submit_result` pas, tu restes
      « occupé » et la file d'escalades ne tourne pas. Tu traites UN mandat à la fois (la forge tient
-     la file ; `list_escalations` te montre TOUT le backlog quand tu veux le voir).
+     la file ; `escalation_list` te montre TOUT le backlog quand tu veux le voir).
 
   **Quand tu consultes ton humain — deux règles GRAVÉES (vécu 2026-07-19) :**
   - **Annonce, rends la main, exécute au tour SUIVANT.** Ton pont Desktop a une latence : le

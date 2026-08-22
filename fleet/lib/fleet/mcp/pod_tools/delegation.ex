@@ -28,9 +28,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `project_create` / `project_install` /
       `project_open` / `project_close` / `project_delete` / `project_revise_card` /
-      `list_workflow_cards`: the PORTFOLIO head. Admits any role carrying `onboarder`.
+      `card_list`: the PORTFOLIO head. Admits any role carrying `onboarder`.
       Refusal → `:forbidden_not_onboarder`.
-    * **DELEGATION gate** (`require_architect/1`) — `issue_create` / `issue_status` / `list_escalations` /
+    * **DELEGATION gate** (`require_architect/1`) — `issue_create` / `issue_status` / `escalation_list` /
       `issue_list` / `issue_get` / `issue_comment`: the per-project head. Admits the role carrying
       `project_delegate`, and additionally requires a repo binding — delegating outside a project is
       not a thing. Refusal → `:forbidden_not_architect`.
@@ -286,7 +286,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
   PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
-  a large repo, so blocking the pod's turn is not an option. Returns `{:ok, %{"status" => "queued"}}`
+  a large repo, so blocking the pod's turn is not an option. Returns
+  `{:ok, %{"status" => "queued", "repo" => _}}`
   immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `project_publish.done` /
   `project_publish.failed`. The external token never enters a pod — the rail reads it host-side.
 
@@ -294,7 +295,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   binding and emits `project_publish.failed` — the request is well-formed, the target simply is not set.
   """
   @spec project_publish(map(), map()) :: {:ok, map()} | {:error, term()}
-  def project_publish(%{"repo" => repo}, state) when is_binary(repo) do
+  def project_publish(%{"full_name" => repo}, state) when is_binary(repo) do
     case require_onboarder(state) do
       {:error, reason} ->
         {:error, reason}
@@ -420,7 +421,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   Fails if the forge is not in the pool. Returns `{"status":"linked","repo":...,"dest":...,"base":...}`.
   """
   @spec publish_link(map(), map()) :: {:ok, map()} | {:error, term()}
-  def publish_link(%{"repo" => repo, "forge" => forge_name, "as" => as}, state)
+  def publish_link(%{"full_name" => repo, "forge" => forge_name, "as" => as}, state)
       when is_binary(repo) and is_binary(forge_name) and is_binary(as) do
     with {:ok, _role} <- require_onboarder(state),
          true <- valid_repo?(repo),
@@ -1174,7 +1175,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   #
   # Vrai aussi, et mon argument pour la garder etait FAUX. J'avais dit « friction pour zero
   # information » : l'information n'est pas absente, elle est dans l'objet que l'appelant vient de
-  # lire — `list_workflow_cards` rend chaque carte AVEC son catalogue. Exiger le champ coute une
+  # lire — `card_list` rend chaque carte AVEC son catalogue. Exiger le champ coute une
   # recopie, et l'inference achetait, contre ce rien : un comportement qui change quand un TIERS
   # installe un catalogue portant le meme nom de carte, et deux branches dont laquelle s'execute
   # depend de la population de la boite — donc jamais les deux au meme endroit.

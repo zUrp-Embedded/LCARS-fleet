@@ -114,6 +114,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
+        check_tool_descriptions_no_permuted_names(root),
+        check_tool_grants_resolve(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
         check_bats_descriptions_inert(root),
@@ -2980,6 +2982,240 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
           "(BL-6-36: bash's silent-coercion class)"
     }
+  end
+
+  @doc """
+  Every `mcp__fleet__*` grant in every cap-profile must resolve to a declared tool.
+
+  ## What it prevents, and what did NOT prevent it
+
+  A tool's id is written twice: at its `deftool`, and in the `allowedTools` of every role allowed to
+  call it. Rename the first and forget the second, and the role silently loses the tool — the
+  whitelist simply stops matching. No error, no log: the agent is handed a smaller toolbox and
+  discovers it by not having what its own system prompt tells it to call.
+
+  `roles.capabilities_exercisable` does NOT cover this. It fails only when a role carries NONE of a
+  capability's tools, so the architect — who holds four delegation tools — stays green after losing
+  one. Measured 2026-08-22, renaming three ids that were granted by name: the wall would not have
+  moved.
+
+  The alignment was verified BY HAND that day. A hand check protects the rename that prompted it and
+  nothing after — which is the third time this file's history records a rename missing a copy in
+  silence. The other two answers were mechanical (`@tool_effects` by AST,
+  `mcp.tool_descriptions_name_real_tools`); this is the same answer for the same shape.
+
+  Derived from the authority, so there is nothing to maintain: `deftool` declares, cap-profiles copy,
+  and a tool added or renamed tomorrow moves the wall by itself.
+  """
+  @spec check_tool_grants_resolve(String.t()) :: result()
+  def check_tool_grants_resolve(root) do
+    {:ok, _} = Application.ensure_all_started(:yaml_elixir)
+    id = "roles.tool_grants_resolve"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+    roles = scan_catalogue_roles(root)
+
+    grants =
+      for role <- roles,
+          tool <- role.allowed_tools,
+          String.starts_with?(tool, "mcp__fleet__"),
+          do: {role.name, String.replace_prefix(tool, "mcp__fleet__", "")}
+
+    # INSTRUMENT GUARD, the shape its siblings use: a `deftool` reshape or a cap-profile layout move
+    # would empty either side, and an empty side reports the same clean absence as full agreement.
+    broken =
+      cond do
+        MapSet.size(declared) < 12 ->
+          "deftool in #{tools_rel} (only #{MapSet.size(declared)}, expected 12+)"
+
+        grants == [] ->
+          "mcp__fleet__ grant across #{length(roles)} cap-profile(s)"
+
+        true ->
+          nil
+      end
+
+    if broken do
+      broken_result(id, broken)
+    else
+      dangling =
+        grants
+        |> Enum.reject(fn {_role, tool} -> MapSet.member?(declared, tool) end)
+        |> Enum.map(fn {role, tool} -> "#{role} grants mcp__fleet__#{tool} — no such tool" end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      %{
+        id: id,
+        remediation:
+          if(dangling == [],
+            do: "—",
+            else:
+              "rename the grant with the tool, or drop it — a whitelist entry that matches nothing " <>
+                "takes the tool away from the role without a word"
+          ),
+        status: if(dangling == [], do: :pass, else: :fail),
+        evidence: dangling,
+        note:
+          if(dangling == [],
+            do: "#{length(grants)} grant(s) across #{length(roles)} roles, all resolving",
+            else: "#{length(dangling)} grant(s) name a tool that does not exist"
+          )
+      }
+    end
+  end
+
+  @doc """
+  No tool description may name a tool by a PERMUTATION of a real tool's name.
+
+  ## The same rename, missing the same way, twice
+
+  Tool names went object-first on 2026-08-11 (`create_project` → `project_create`). The rename moved
+  the `deftool` names and the `mcp__fleet__` citations. It did NOT move the bare names written INSIDE
+  the description strings — and those strings are the tool catalogue an agent reads. Measured
+  2026-08-21: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
+  `project_import` even referred to itself by its old name.
+
+  This is worse than a stale comment. A comment misleads a human who can check; a description is an
+  INSTRUCTION to an agent, delivered at the moment it chooses what to call. `card_list`
+  told every architect to call `create_project` twice, in the one paragraph that exists to guide
+  project framing.
+
+  The scar next to `@tool_effects` already drew the lesson for a list of five bare words: *"a list
+  that is not written like the others is a list a rename misses"*, and the answer there was to make
+  exhaustiveness MECHANICAL. Prose is the same shape — it just looks like it could not be checked.
+
+  ## The rule DERIVES from the authority, so there is nothing to maintain
+
+  For every declared tool, any PERMUTATION of its own segments that is not the tool itself is
+  refused inside a description: `project_create` makes `create_project` illegal, and adding a tool
+  tomorrow extends the wall by itself. A trailing `s` is normalised, so `list_projects` is caught as
+  a permutation of `project_list`.
+
+  It reads by AST, not by line, so a description split across a `<>` chain is one text — the shape
+  that let these thirteen sit under a grep for years.
+
+  ## What it does NOT catch, and why the name says so
+
+  It was first written as `mcp.tool_descriptions_name_real_tools`, opening on *"no description may
+  name a tool that does not exist"* — a claim wider than the code, caught by independent review on
+  2026-08-22. An INVENTED name that is not a reordering passes: `project_import_external`,
+  `issue_open`, `project_list_all`. A guard whose name promises more than it measures is green
+  exactly where a reader trusts it most, which is this repo's own definition of a bad wall.
+
+  Widening it is not free and not obviously right: a description legitimately carries snake_case
+  that is not a tool — `workflow_map`, `declared_name`, `full_name`, `default_branch` — so refusing
+  every unknown token needs a hand-kept allow-list, and a hand-kept list is what this whole file
+  exists to avoid. The permutation rule is the part that DERIVES, and it is the failure mode that
+  actually happened, twice. The rest is named here rather than silently implied.
+
+  ⚠ THE `s` NORMALISATION IS LEXICAL, NOT GRAMMATICAL. `status` normalises to `statu`, so a
+  description writing `status_issue` about a concept would be flagged as a permutation of
+  `issue_status`. One such stem exists today; the cost grows with the catalogue, and a tool whose
+  segment ends in a non-plural `s` is the shape to avoid.
+  """
+  @spec check_tool_descriptions_no_permuted_names(String.t()) :: result()
+  def check_tool_descriptions_no_permuted_names(root) do
+    id = "mcp.tool_descriptions_no_permuted_names"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    remediation =
+      "write the tool's REAL name in the description — an agent reads it as an instruction, and " <>
+        "a name that does not resolve is a call it cannot make"
+
+    ast = quoted!(root, tools_rel)
+    declared = deftool_names(ast)
+    shapes = Enum.map(declared, &tool_shape/1)
+
+    cond do
+      MapSet.size(declared) < 12 ->
+        # Same population guard as its siblings: a `deftool` shape change would empty this set and
+        # the wall would pass by measuring nothing.
+        broken_result(id, "deftool in #{tools_rel} (only #{MapSet.size(declared)}, expected 12+)")
+
+      # ⚠ L'INDEXATION PAR FORME EST NON-INJECTIVE, ET ELLE SE TAIT. Deux outils de meme forme (meme
+      # multiset de segments normalises) s'ecrasent dans la map : le survivant garde sa couverture,
+      # le perdant n'est plus jamais mesure, et rien dans la sortie ne le dit. Les autres gardes de
+      # ce fichier comptent leur population ; celui-ci ne verifiait pas qu'elle survit a
+      # l'indexation. Trouve par relecture independante le 2026-08-22.
+      length(Enum.uniq(shapes)) != length(shapes) ->
+        broken_result(
+          id,
+          "distinct shapes among the #{length(shapes)} deftool names (two collide)"
+        )
+
+      true ->
+        by_shape = Map.new(declared, fn name -> {tool_shape(name), name} end)
+
+        offenders =
+          ast
+          |> description_texts()
+          |> Enum.flat_map(&permuted_names(&1, by_shape))
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        %{
+          id: id,
+          remediation: if(offenders == [], do: "—", else: remediation),
+          status: if(offenders == [], do: :pass, else: :fail),
+          evidence: offenders,
+          note:
+            if(offenders == [],
+              do:
+                "#{MapSet.size(declared)} tools declared; no description names a permutation of " <>
+                  "one of them that is not the tool itself",
+              else: "descriptions name #{length(offenders)} tool(s) that do not exist"
+            )
+        }
+    end
+  end
+
+  # Les jetons snake_case d'UN texte qui sont une permutation d'un outil declare sans etre cet outil.
+  defp permuted_names(text, by_shape) do
+    ~r/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/
+    |> Regex.scan(text)
+    |> Enum.map(&hd/1)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn token ->
+      case Map.get(by_shape, tool_shape(token)) do
+        nil -> []
+        ^token -> []
+        real -> ["#{token} → the tool is #{real}"]
+      end
+    end)
+  end
+
+  # The MULTISET of a tool name's segments, trailing `s` normalised — so `project_list` and
+  # `list_projects` share a shape while `project_create` and `project_close` do not.
+  defp tool_shape(name) do
+    name
+    |> String.split("_")
+    |> Enum.map(&String.replace_suffix(&1, "s", ""))
+    |> Enum.sort()
+  end
+
+  # Every `description(...)` body of a `deftool`, ONE text per call: a description written as a `<>`
+  # chain is a single instruction to the agent, and reading it line by line is what hid thirteen of
+  # them.
+  #
+  # ⚠ BORNE AU BLOC `deftool`, ET PAS AU FICHIER. La premiere version ramassait tout appel
+  # `description/1` de l'AST. Ca tient tant que `pod_tools.ex` n'est fait que de `deftool` — donc
+  # tant que personne n'y ecrit une fonction d'aide du meme nom, ou n'importe un `description/1`
+  # etranger. Le jour ou ca arrive, le mur mesure une population qu'il ne pretend pas mesurer, dans
+  # un sens comme dans l'autre. Trouve par relecture independante le 2026-08-22.
+  defp description_texts(ast) do
+    ast
+    |> collect(fn
+      {:deftool, _, [name | _]} = node when is_binary(name) -> node
+      _ -> nil
+    end)
+    |> Enum.flat_map(fn tool ->
+      collect(tool, fn
+        {:description, _, [arg]} -> Enum.join(collect(arg, &if(is_binary(&1), do: &1)), " ")
+        _ -> nil
+      end)
+    end)
   end
 
   @doc """

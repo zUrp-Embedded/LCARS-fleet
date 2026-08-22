@@ -833,7 +833,7 @@ jl() { # construit une ligne de flux : <probe> <verdict> [evidence]
   JSONL="$(jl instruments.mcp_socket operational)
 $(jl fleet.health operational)
 $(jl fleet.subsystem.mcp.pod_facing operational)"
-  run capability_verdict "$(chain_of list_workflow_cards)"
+  run capability_verdict "$(chain_of card_list)"
   [[ "$output" == operational\|* ]]
 }
 
@@ -844,7 +844,7 @@ $(jl fleet.subsystem.mcp.pod_facing operational)"
   JSONL="$(jl instruments.mcp_socket operational)
 $(jl fleet.health degraded 'HTTP 503 sur /api/health')
 $(jl fleet.subsystem.mcp.pod_facing operational)"
-  run capability_verdict "$(chain_of list_workflow_cards)"
+  run capability_verdict "$(chain_of card_list)"
   [[ "$output" == degraded\|* ]]
   echo "$output" | grep -q "fleet.health"
   echo "$output" | grep -q "503"
@@ -853,7 +853,7 @@ $(jl fleet.subsystem.mcp.pod_facing operational)"
 @test "sotf : un maillon INDICATIF rouge n'interdit pas — mais il interdit le vert" {
   # La distinction qui porte tout le fichier : un outil mcp est execute par la FLEET, pas par moi.
   # Ce que je mesure depuis ma place informe, ne tranche pas. La confondre avec du bloquant
-  # declarerait create_project mort en permanence dans tout pod (aucun n'a de credential forge).
+  # declarerait project_create mort en permanence dans tout pod (aucun n'a de credential forge).
   load_sotf
   JSONL="$(jl instruments.mcp_socket operational)
 $(jl fleet.health operational)
@@ -864,7 +864,7 @@ $(jl projects.root_projects operational)
 $(jl projects.root_work operational)
 $(jl fleet.subsystem.launch.backend operational)
 $(jl fleet.subsystem.pilot.step operational)"
-  run capability_verdict "$(chain_of create_project)"
+  run capability_verdict "$(chain_of project_create)"
   [[ "$output" == unknown\|* ]]
   echo "$output" | grep -q "forge.reachable"
 }
@@ -876,7 +876,7 @@ $(jl fleet.subsystem.pilot.step operational)"
   JSONL="$(jl instruments.mcp_socket operational)
 $(jl fleet.health operational)"
   RAN_PLANES=" instruments fleet "   # les deux sondes ONT tourne : l'absence est donc une derive
-  run capability_verdict "$(chain_of list_workflow_cards)"
+  run capability_verdict "$(chain_of card_list)"
   [[ "$output" == unreachable\|* ]]
   echo "$output" | grep -q "fleet.subsystem.mcp.pod_facing"
 }
@@ -887,7 +887,7 @@ $(jl fleet.health operational)"
   load_sotf
   JSONL="$(jl instruments.mcp_socket operational)"
   RAN_PLANES=" instruments "
-  run capability_verdict "$(chain_of list_workflow_cards)"
+  run capability_verdict "$(chain_of card_list)"
   [[ "$output" == operational\|* ]]
 }
 
@@ -895,7 +895,7 @@ $(jl fleet.health operational)"
   load_sotf
   JSONL="$(jl instruments.mcp_socket inactive 'hors pod')"
   RAN_PLANES=" instruments "
-  run capability_verdict "$(chain_of create_project)"
+  run capability_verdict "$(chain_of project_create)"
   [[ "$output" == inactive\|* ]]
 }
 
@@ -906,7 +906,7 @@ $(jl fleet.health operational)"
   JSONL="$(jl instruments.mcp_socket unreachable)
 $(jl fleet.health degraded 'muet')
 $(jl fleet.subsystem.mcp.pod_facing operational)"
-  run capability_verdict "$(chain_of list_workflow_cards)"
+  run capability_verdict "$(chain_of card_list)"
   [[ "$output" == degraded\|* ]]
 }
 
@@ -926,19 +926,19 @@ $(jl c.d unreachable)"
   # Hors du JSONL elles echapperaient au rendu, au comptage et au code de sortie — les trois choses
   # qui font qu'un rapport engage quelqu'un. C'est arrive : elles sortaient sur stdout, au-dessus.
   run env LCARS_POD_HOME="$TMP/nopod" "$SKILL_DIR/sotf.sh" diag --raw
-  assert_probe capacites.create_project
+  assert_probe capacites.project_create
   # aucune ligne non-JSON ne traine
   while read -r l; do [[ -z "$l" ]] || echo "$l" | jq -e . >/dev/null; done <<< "$output"
 }
 
 @test "sotf : le perimetre confronte les DEUX sens — outil sans chaine, chaine hors perimetre" {
   mkdir -p "$TMP/pod"
-  printf '{"spec":{"scope":{"allowedTools":["Read","mcp__fleet__create_project","mcp__fleet__truc_inconnu"]}}}' \
+  printf '{"spec":{"scope":{"allowedTools":["Read","mcp__fleet__project_create","mcp__fleet__truc_inconnu"]}}}' \
     > "$TMP/pod/.cap-profile.json"
   run env LCARS_POD_HOME="$TMP/pod" "$SKILL_DIR/sotf.sh" diag --raw
   assert_verdict capacites.perimetre unknown
   assert_field_contains capacites.perimetre evidence 'truc_inconnu'
-  assert_field_contains capacites.perimetre evidence 'open_project'
+  assert_field_contains capacites.perimetre evidence 'project_open'
 }
 
 @test "sotf : une capacite inconnue est nommee comme telle, jamais evaluee en silence" {
@@ -947,7 +947,7 @@ $(jl c.d unreachable)"
 }
 
 @test "sotf : report refuse une cible, et une commande inconnue ne fait pas semblant" {
-  run "$SKILL_DIR/sotf.sh" report create_project
+  run "$SKILL_DIR/sotf.sh" report project_create
   [ "$status" -eq 2 ]
   run "$SKILL_DIR/sotf.sh" rapport
   [ "$status" -eq 2 ]
@@ -990,4 +990,59 @@ $(jl c.d unreachable)"
   for v in $output; do
     grep -q "\`$v\`" "$SKILL_DIR/FORMAT.md" || { echo "verdict '$v' emis mais absent de FORMAT.md"; return 1; }
   done
+}
+
+# ── LA TABLE DES CHAINES EST UNE COPIE DE NOMS D'OUTILS ──────────────────────────────────────────
+#
+# ⚠ CE TEMOIN EXISTE PARCE QUE LA TABLE A DERIVE, DEUX FOIS, ET QUE PERSONNE NE L'A VU.
+#
+# Les ids d'outils sont passes objet-d'abord le 2026-08-11 (`create_project` -> `project_create`) et
+# `list_workflow_cards` -> `card_list` le 2026-08-22. `CHAINS` a garde les QUATRE anciens noms
+# jusqu'au 2026-08-22 : onze jours pour trois d'entre eux, et personne ne l'a vu — ce n'est pas la
+# DUREE qui compte ici, c'est que rien ne pouvait le voir.
+#
+# Ce n'est pas de la prose perimee. `capacites.perimetre` CONFRONTE le `allowedTools` du pod a cette
+# table dans les deux sens : chaque outil reel sortait « sans chaine » et chaque entree de la table
+# sortait « hors perimetre ». La sonde ecrite pour detecter exactement cette derive la rapportait a
+# chaque passage, et elle n'a de donnees que DANS un pod — invisible depuis le depot, noyee dans un
+# rapport pour qui la lisait.
+#
+# Les deux murs Elixir (`mcp.tool_descriptions_name_real_tools`, `roles.tool_grants_resolve`) ne
+# couvrent pas ce cas : l'un lit des descriptions Elixir, l'autre des cap-profiles. Aucun ne lit un
+# script shell. Le mur va donc la ou vit la copie.
+#
+# DERIVE DE L'AUTORITE : `deftool` declare, cette table copie. Un outil renomme demain deplace ce
+# temoin tout seul.
+@test "sotf : chaque capacite de CHAINS est un outil MCP qui existe" {
+  local tools_ex="$SKILL_DIR/../../../fleet/lib/fleet/mcp/pod_tools.ex"
+  [ -f "$tools_ex" ] || skip "hors du depot (skill copie seul) — rien a confronter"
+
+  local declared
+  declared="$(grep -oE 'deftool "[a-z0-9_]+"' "$tools_ex" | sed 's/deftool "//; s/"//')"
+
+  # GARDE D'INSTRUMENT : une forme de `deftool` qui change viderait la liste, et une liste vide
+  # declarerait toutes les chaines valides — le vert exact que ce temoin existe pour refuser.
+  [ "$(printf '%s\n' "$declared" | grep -c .)" -ge 12 ]
+
+  # ⚠ LA TABLE SE LIT DANS LE FICHIER, PAS PAR `chain_names`. La premiere version appelait
+  # `chain_names`, qui vit dans `sotf.sh` — que ce bats ne source PAS (il ne source que
+  # `probes/lib.sh`). La fonction etait donc absente, la boucle tournait sur RIEN, et un ensemble
+  # vide n'a aucun element fautif : le temoin restait vert avec la derive remise. Trouve par
+  # mutation, le 2026-08-22, sur le temoin lui-meme.
+  local chains
+  chains="$(grep -oE '^"[a-z0-9_]+¤' "$SKILL_DIR/sotf.sh" | sed 's/^"//; s/¤$//')"
+
+  # SECONDE GARDE D'INSTRUMENT, celle qui manquait : les DEUX cotes doivent avoir une population.
+  [ "$(printf '%s\n' "$chains" | grep -c .)" -ge 4 ]
+
+  local missing=""
+  while read -r name; do
+    [[ -z "$name" ]] && continue
+    grep -qx -- "$name" <<< "$declared" || missing="$missing $name"
+  done <<< "$chains"
+
+  [[ -z "$missing" ]] || {
+    echo "CHAINS nomme des outils qui n'existent pas :$missing" >&2
+    false
+  }
 }

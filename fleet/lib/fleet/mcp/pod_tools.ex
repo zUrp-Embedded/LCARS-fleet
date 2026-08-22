@@ -35,7 +35,7 @@ defmodule Fleet.MCP.PodTools do
       - `project_publish`   : phase-2 publish of a project to its linked external forge as a rolling
         PR/MR (ASYNC — returns queued, outcome on the bus; the token stays host-side).
       - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
-      - `list_escalations` : the arch reads its escalation inbox (awaits-arch issues).
+      - `escalation_list` : the arch reads its escalation inbox (awaits-arch issues).
       - `issue_list`      : the arch reads its project's open-ticket board (BL-6-28: the
         write channel existed without its read half — a radio that transmits but not receives).
       - `issue_get`        : the arch reads ONE ticket in full (body + comment thread).
@@ -52,9 +52,9 @@ defmodule Fleet.MCP.PodTools do
         kill: killing pods leaves the tickets open and the poller re-dispatches).
       - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
       - `project_delete`   : destroys a project. Disarmed by deployment flag.
-      - `list_workflow_cards` : the validation cards a project can be onboarded against.
+      - `card_list` : the validation cards a project can be onboarded against.
       - `forge_list`        : the human's registered external forges (the publish pool) — read-only.
-      - `publish_link`      : link a project to a forge (writes its publish binding) — reversible intent,
+      - `forge_link`      : link a project to a forge (writes its publish binding) — reversible intent,
         not a push (the human's `lcars approve` + PR merge stay the gates).
 
   ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
@@ -136,8 +136,8 @@ defmodule Fleet.MCP.PodTools do
     "project_delete" => :mutation,
     "issue_status" => :read,
     "scratch" => :mutation,
-    "list_escalations" => :read,
-    "list_workflow_cards" => :read,
+    "escalation_list" => :read,
+    "card_list" => :read,
     "issue_list" => :read,
     "issue_get" => :read,
     "issue_comment" => :mutation,
@@ -147,7 +147,7 @@ defmodule Fleet.MCP.PodTools do
     "project_list" => :read,
     "issue_retire" => :mutation,
     "forge_list" => :read,
-    "publish_link" => :mutation,
+    "forge_link" => :mutation,
     "toolchain_request" => :mutation,
     # ⚠ `:mutation` ET PAS `:read`, malgre un nom qui sonne comme une lecture. Un dispatch FAIT
     # TOURNER UN RUNNER : deux appels identiques concurrents jouent la sonde deux fois — observable,
@@ -376,7 +376,7 @@ defmodule Fleet.MCP.PodTools do
           "the workshop your drafts live in) + " <>
           "the base scaffold, and pushes it. Use it when the human wants to LAUNCH a fresh project. " <>
           "`name` = kebab-case slug. THE CARD CHOICE IS THE CRITICALITY DECLARATION: present the " <>
-          "catalogue first (`list_workflow_cards`, which names the CATALOGUE of every card) and pass " <>
+          "catalogue first (`card_list`, which names the CATALOGUE of every card) and pass " <>
           "the human's chosen card as `workflow_map` plus its `catalogue` — the project lives in that " <>
           "catalogue's forge org, and the binding is FIXED FOR ITS LIFE — so `catalogue` is REQUIRED, never " <>
           "inferred: the listing hands you each card WITH its catalogue, copy both. Two catalogues may " <>
@@ -436,14 +436,14 @@ defmodule Fleet.MCP.PodTools do
 
   deftool "project_install" do
     meta do
-      name("Import Project")
+      name("Install Project")
 
       description(
         "Import an EXISTING repo (already on the forge, in the org — pushed outside the fleet or by a human) " <>
           "into the agent machine: the three faces (`/home/projects/<name>` on `main`, " <>
           "`/home/projects.ops/<name>` on `ops`, `/home/projects.workshop/<name>` on `workshop`) + " <>
           "forge-enforced gate, WITHOUT touching the content " <>
-          "of `main` (it stays intact). Use it for a project that already exists (≠ create_project, which " <>
+          "of `main` (it stays intact). Use it for a project that already exists (≠ project_create, which " <>
           "starts a FRESH project). `full_name` = `owner/name` (e.g. `fleet/deja-la`) — must already be in " <>
           "the fleet org, default branch `main`. Returns {\"status\":\"imported\",\"repo\":...}."
       )
@@ -486,7 +486,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "The human's registered EXTERNAL forges (the pool they built with `lcars forge add`) — where a " <>
           "project could be published. Read-only; takes NO argument. Use it to PRESENT the forges before " <>
-          "proposing to link a project (`publish_link`). Whether each forge's CLI is authenticated is a " <>
+          "proposing to link a project (`forge_link`). Whether each forge's CLI is authenticated is a " <>
           "SEPARATE host check (`lcars forge status`), not this. Returns " <>
           "{\"status\":\"listed\",\"forges\":[{\"name\",\"host\",\"dest_host\",\"owner\"}, ...]}."
       )
@@ -495,7 +495,7 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}})
   end
 
-  deftool "publish_link" do
+  deftool "forge_link" do
     meta do
       name("Link Publish Target")
 
@@ -503,7 +503,8 @@ defmodule Fleet.MCP.PodTools do
         "LINK a project to a registered forge — declare WHERE it publishes, the reversible intent. It " <>
           "does NOT publish: nothing goes external until the human runs `lcars approve` (first populate, " <>
           "the hard host gate) and merges the PR/MR. Use it after `project_create`/`project_import` to " <>
-          "capture the destination the human picked from `forge_list`. `repo` = the internal `owner/name`; " <>
+          "capture the destination the human picked from `forge_list`. `full_name` = the internal " <>
+          "`owner/name`; " <>
           "`forge` = a name from `forge_list`; `as` = the destination repo name (becomes " <>
           "`<forge.owner>/<as>` on the forge). Returns {\"status\":\"linked\",\"repo\":...,\"dest\":...}."
       )
@@ -512,11 +513,11 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{
       "type" => "object",
       "properties" => %{
-        "repo" => %{"type" => "string"},
+        "full_name" => %{"type" => "string"},
         "forge" => %{"type" => "string"},
         "as" => %{"type" => "string"}
       },
-      "required" => ["repo", "forge", "as"]
+      "required" => ["full_name", "forge", "as"]
     })
   end
 
@@ -560,15 +561,15 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "ADOPT a project that lives on the agent machine's DISK but not on the forge — the " <>
-          "inverse of import_project: publishes the existing local content (repo created EMPTY, " <>
+          "inverse of project_import: publishes the existing local content (repo created EMPTY, " <>
           "the local main is pushed as-is, ops face brought up, forge gate placed). Use it " <>
           "for a project someone built locally (or whose forge was lost) that the fleet should " <>
           "now work. The local content is NEVER overwritten. `name` = the local dirs' basename " <>
-          "(kebab-case). The card/criticality declaration relays like create_project (present " <>
+          "(kebab-case). The card/criticality declaration relays like project_create (present " <>
           "the catalogue first when the human declares; an existing committed declaration in the " <>
           "project is kept as-is). Refusals name the right verb: repo already on the forge → use " <>
-          "import_project or open_project; no local main → nothing to adopt. Returns " <>
-          "{\"status\":\"adopted\",\"repo\":...} like create_project."
+          "project_import or project_open; no local main → nothing to adopt. Returns " <>
+          "{\"status\":\"adopted\",\"repo\":...} like project_create."
       )
     end
 
@@ -593,7 +594,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "IMPORT a repo from an EXTERNAL forge (GitHub or GitLab ONLY — https URL) into the " <>
           "fleet: full history repatriated, repo created in the org, the three faces + " <>
-          "forge gate like import_project. ONE-WAY: the external origin is left behind (this " <>
+          "forge gate like project_import. ONE-WAY: the external origin is left behind (this " <>
           "is an import, never a mirror). THE ADOPTION GATE runs first (a foreign repo is the " <>
           "found-USB-key of the parking lot): a repo shipping a `.claude/` tree is REFUSED en " <>
           "bloc (we never adopt someone else's hooks), and every CLAUDE.md must pass the " <>
@@ -603,7 +604,7 @@ defmodule Fleet.MCP.PodTools do
           "Private repos: auth is the operator's WIRED git credential helper (gh/glab auth login, " <>
           "or their own helper) — the host clones with it, no token in chat, no env token. `url` = " <>
           "https repo URL; `name` = the kebab-case project " <>
-          "name in our org. The card/criticality declaration relays like create_project. " <>
+          "name in our org. The card/criticality declaration relays like project_create. " <>
           "Returns {\"status\":\"imported_external\",\"repo\":...}."
       )
     end
@@ -630,23 +631,24 @@ defmodule Fleet.MCP.PodTools do
       description(
         "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab, both " <>
           "first-class) as a rolling PR/MR. ASYNC: returns " <>
-          "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
+          "{\"status\":\"queued\",\"repo\":...} immediately (a full history rewrite is minutes on a " <>
+          "large repo), " <>
           "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
           "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
           "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>
           "`lcars approve <repo> --forge <name> --as <dest>` — an unlinked repo returns queued " <>
           "and then fails on the bus (no destination). Force-updates ONE rolling branch " <>
           "(`lcars/publish`) and its single open PR/MR; the human merges it on the forge's web UI. " <>
-          "`repo` = the internal `owner/name`."
+          "`full_name` = the internal `owner/name`."
       )
     end
 
     input_schema(%{
       "type" => "object",
       "properties" => %{
-        "repo" => %{"type" => "string"}
+        "full_name" => %{"type" => "string"}
       },
-      "required" => ["repo"]
+      "required" => ["full_name"]
     })
   end
 
@@ -655,7 +657,7 @@ defmodule Fleet.MCP.PodTools do
       name("Close Project")
 
       description(
-        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ delete_project: " <>
+        "CLOSE a project: stops the fleet ON it — disk and forge stay INTACT (≠ project_delete: " <>
           "nothing is destroyed, this is a pause, fully reversible). The running brick finishes; " <>
           "the NEXT ticket never starts. Mechanics: an OPEN marker issue (`[lcars-parked]` title) " <>
           "holds the closed state on the forge — visible in the UI, no hidden state. The " <>
@@ -682,9 +684,9 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "REVISE the validation card of an EXISTING project: the declaration engraved at " <>
-          "create_project gets a tracked revision (a C0 PoC that grew serious no longer keeps its " <>
-          "fast-track for life). Same doctrine as create_project: PRESENT the catalogue first " <>
-          "(`list_workflow_cards`) and let the HUMAN choose — the card choice IS the criticality " <>
+          "project_create gets a tracked revision (a C0 PoC that grew serious no longer keeps its " <>
+          "fast-track for life). Same doctrine as project_create: PRESENT the catalogue first " <>
+          "(`card_list`) and let the HUMAN choose — the card choice IS the criticality " <>
           "declaration, you advise, you never decide. `justification` REQUIRED: the WHY of the " <>
           "revision, committed with the declaration in the project's repo (git history is the " <>
           "ledger). The branch protection re-sizes itself on the new card's jury in the same act. " <>
@@ -807,7 +809,7 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "list_escalations" do
+  deftool "escalation_list" do
     meta do
       name("List Escalations")
 
@@ -944,16 +946,16 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  deftool "list_workflow_cards" do
+  deftool "card_list" do
     meta do
       name("List Workflow Cards")
 
       description(
         "List the validation-card catalogue (the canon workflow maps). Use it DURING project framing, " <>
-          "BEFORE create_project: the card choice IS the criticality declaration (naming a card = declaring), " <>
+          "BEFORE project_create: the card choice IS the criticality declaration (naming a card = declaring), " <>
           "so PRESENT the catalogue to the human and let THEM choose — you may pre-filter or advise from the " <>
           "framing facts (mains voltage? cuts fingers? how long will it live?), you never decide for them. " <>
-          "Each entry carries `name` (the LOADABLE id — pass it as create_project's `workflow_map`), " <>
+          "Each entry carries `name` (the LOADABLE id — pass it as project_create's `workflow_map`), " <>
           "`declared_name` (the card's self-declared label, reference only), `presentation` (FR, show it " <>
           "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
           "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
@@ -971,7 +973,7 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "List the OPEN tickets of YOUR project — the situation board, not just your inbox " <>
-          "(`list_escalations` shows ONLY the issues awaiting YOUR arbitration; this shows " <>
+          "(`escalation_list` shows ONLY the issues awaiting YOUR arbitration; this shows " <>
           "everything in flight, including tickets a human opened without you). Each entry: " <>
           "`number`, `title`, `labels` (the `stage/*` and `genre/*` markers carry the pipeline " <>
           "state). Closed tickets do not appear — track a specific delegation with " <>
@@ -1015,7 +1017,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "Post a comment on an issue of YOUR project IN YOUR OWN NAME (the architect role account) — " <>
           "your reply on a ticket in flight, typically to answer an escalation surfaced by " <>
-          "`list_escalations`. `number` = the issue number. `body` = your comment (markdown). " <>
+          "`escalation_list`. `number` = the issue number. `body` = your comment (markdown). " <>
           "Returns {\"status\":\"commented\",\"number\":...}."
       )
     end
@@ -1354,14 +1356,14 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  def handle_tool_call("publish_link", %{"repo" => _, "forge" => _, "as" => _} = args, state) do
+  def handle_tool_call("forge_link", %{"full_name" => _, "forge" => _, "as" => _} = args, state) do
     case Delegation.publish_link(args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  def handle_tool_call("publish_link", _bad_args, state),
+  def handle_tool_call("forge_link", _bad_args, state),
     do: {:error, :invalid_arguments, state}
 
   def handle_tool_call(
@@ -1410,7 +1412,8 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("project_publish", %{"repo" => repo} = args, state) when is_binary(repo) do
+  def handle_tool_call("project_publish", %{"full_name" => full_name} = args, state)
+      when is_binary(full_name) do
     case Delegation.project_publish(args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -1499,7 +1502,7 @@ defmodule Fleet.MCP.PodTools do
     {:error, {:invalid_arguments, "scratch attend `note` (string non vide)"}, state}
   end
 
-  def handle_tool_call("list_escalations", _arguments, state) do
+  def handle_tool_call("escalation_list", _arguments, state) do
     case Delegation.list_escalations(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -1526,7 +1529,7 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  def handle_tool_call("list_workflow_cards", _arguments, state) do
+  def handle_tool_call("card_list", _arguments, state) do
     case Delegation.list_workflow_cards(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}

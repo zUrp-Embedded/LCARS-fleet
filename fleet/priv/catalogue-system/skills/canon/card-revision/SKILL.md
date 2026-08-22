@@ -23,7 +23,7 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
 
 ## Le déroulé
 
-1. **Présente le catalogue** : `list_workflow_cards`. Montre la `presentation` de chaque carte
+1. **Présente le catalogue** : `card_list`. Montre la `presentation` de chaque carte
    VERBATIM (c'est sa voix), avec `applicable_intensity` et `jury`. Si l'humain donne des
    éléments de cadrage (tension secteur ? ça coupe des doigts ? durée de vie ?), tu peux
    pré-filtrer et conseiller — rubber-duck, jamais évaluateur.
