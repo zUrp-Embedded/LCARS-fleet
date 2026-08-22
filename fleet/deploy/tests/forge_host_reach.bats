@@ -422,3 +422,21 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   ! code | grep -E 'Fleet.Catalogue.root' | grep -q '2>/dev/null'
   code | grep -q 'dernières lignes de mix'
 }
+
+@test "GUARD B : les appels mix qui EVALUENT la config portent LCARS_TOOL_EVAL" {
+  # `config/runtime.exs` refuse de demarrer sous le siege sysadmin (uid 1000) — « a fleet under the
+  # seat would run sudo-capable pods, the exact inverse of the sandbox ». L'operateur EST l'uid 1000
+  # et `as_human` lance sous lui : tout `mix` qui evalue la config runtime se fait refuser.
+  #
+  # Le seam est celui du PRODUIT : `runtime.exs` le declare, et la porte `catalogue-root` de l'image
+  # l'emploie exactement ainsi. Mesure du 2026-08-22 sur .63 : sans lui, « R-no-root-runtime ».
+  local rt="$BATS_TEST_DIRNAME/../../config/runtime.exs"
+  grep -q 'tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"' "$rt"
+  grep -q 'not tool_mode? do' "$rt"
+  # la porte de l'image l'emploie — on ne l'invente pas
+  grep -q 'LCARS_TOOL_EVAL=1' "$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
+  # et les deux appels de ce module qui evaluent la config le portent
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'LCARS_TOOL_EVAL=1 mix run --no-start'
+  code | grep -q 'LCARS_TOOL_EVAL=1 "\$tree/etc/enroll-catalogue.sh"'
+}

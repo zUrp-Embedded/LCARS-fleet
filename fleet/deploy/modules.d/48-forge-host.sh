@@ -455,7 +455,16 @@ apply() {
   local ref_catalogue refout
   refout="$(mktemp "${TMPDIR:-/tmp}/prov-catroot.XXXXXX")" \
     || { p_fail "tmp impossible pour la dérivation du catalogue"; verdict_apply; }
-  as_human env -C "$tree" mix run --no-start \
+  # ⚠ `LCARS_TOOL_EVAL=1` — SANS LUI, GUARD B REFUSE, ET IL A RAISON DE REFUSER.
+  # `config/runtime.exs` refuse de démarrer sous le siège sysadmin (uid 1000) : « a fleet under the
+  # seat would run sudo-capable pods, the exact inverse of the sandbox ». Or l'opérateur EST l'uid
+  # 1000, et `as_human` lance sous lui. Le garde vise le DAEMON ; ici on POSE UNE QUESTION.
+  #
+  # Le seam est celui du produit, pas un contournement : `runtime.exs:47` le déclare, et la porte
+  # `catalogue-root` de l'image l'emploie exactement ainsi — `env HOME=/tmp RELEASE_TMP=/tmp
+  # LCARS_TOOL_EVAL=1 … eval 'IO.puts(Fleet.Catalogue.root())'`. J'avais cité cette porte dans un
+  # commentaire sans en reprendre la forme.
+  as_human env -C "$tree" LCARS_TOOL_EVAL=1 mix run --no-start \
     -e 'IO.puts("LCARS_CATALOGUE_ROOT=" <> Fleet.Catalogue.root())' >"$refout" 2>&1 || true
   ref_catalogue="$(grep -m1 '^LCARS_CATALOGUE_ROOT=' "$refout" | cut -d= -f2- || true)"
   if [[ ! -d "$ref_catalogue" ]]; then
@@ -469,7 +478,10 @@ apply() {
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
   chown "$PROV_HUMAN" "$enroll" \
     || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue" -- as_human "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" --catalogue "$ref_catalogue" \
+  # `LCARS_TOOL_EVAL=1` ici AUSSI : le script joue `mix lcars.catalogue.roles`, qui évalue la même
+  # config runtime et se ferait refuser par le même garde. Mesuré sur .63 : sans le seam, la tâche
+  # meurt ; avec, elle rend son JSON.
+  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" --catalogue "$ref_catalogue" \
     || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
