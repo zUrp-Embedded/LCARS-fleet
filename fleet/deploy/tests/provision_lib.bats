@@ -29,6 +29,14 @@ setup() {
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 0700 "$XDG_RUNTIME_DIR"
+
+  # ⚠ MEME LECON, DEUXIEME VARIABLE, ET CELLE-CI EST ARRIVEE PAR LE HAUT. Ces temoins tournent
+  # AUSSI depuis `provision` — `60-deploy` appelle `etc/install.sh`, qui joue le gate — et le runner
+  # exporte `PROV_SUBSTRATE` (`provision:128`). Un temoin qui declare son substrat sans effacer
+  # celui-la mesure donc la machine qui le lance : vert sur un poste WSL, rouge le 2026-08-23 sur
+  # `.63` (Linux natif) sur du code identique. Le decor POSSEDE ces deux valeurs ; un test qui en
+  # veut une la pose lui-meme, sur la ligne qui la concerne.
+  unset PROV_SUBSTRATE LCARS_WSL_NETWORKING_MODE
 }
 
 # Helper: run a module-like snippet (fresh bash, module shell options, lib sourced).
@@ -454,8 +462,12 @@ module_sh() {
 }
 
 @test "advertise_addr: WSL en NAT annonce localhost, et DIT pourquoi" {
+  # ⚠ `PROV_SUBSTRATE`, PAS UN STUB DE `detect_substrate`. La fonction lit d'abord ce que le RUNNER a
+  # tranche (`provision --substrate`) et ne sonde qu'a defaut ; un stub de la sonde ne decrirait donc
+  # plus le chemin que la production prend. C'est aussi l'idiome deja etabli ailleurs dans ce corpus
+  # (`directories_runtime.bats`, `deploy_manifest.bats`) : le substrat SE POSE, il ne se simule pas.
   module_sh '
-    detect_substrate() { echo wsl; }
+    PROV_SUBSTRATE=wsl
     wsl_networking_mode() { echo nat; }
     lan_addr() { echo 172.25.115.129; }
     advertise_addr 0.0.0.0
@@ -467,7 +479,7 @@ module_sh() {
 
 @test "advertise_addr: WSL en MIROIR n'est pas un cas a part — l'adresse de sortie est vraie" {
   module_sh '
-    detect_substrate() { echo wsl; }
+    PROV_SUBSTRATE=wsl
     wsl_networking_mode() { echo mirrored; }
     lan_addr() { echo 10.42.0.63; }
     advertise_addr 0.0.0.0
@@ -479,7 +491,7 @@ module_sh() {
 
 @test "advertise_addr: aucune adresse de sortie = loopback ANNONCEE COMME TELLE" {
   module_sh '
-    detect_substrate() { echo linux; }
+    PROV_SUBSTRATE=linux
     lan_addr() { echo ""; }
     advertise_addr 0.0.0.0
     [ "$PROV_ADVERTISE" = "127.0.0.1" ]
@@ -493,7 +505,7 @@ module_sh() {
   # toute globale posee dedans meurt avec lui. Une fonction qui imprimerait l'adresse et poserait
   # la raison perdrait donc la raison, en silence, chez tous ses appelants. Elle pose les DEUX.
   module_sh '
-    detect_substrate() { echo linux; }
+    PROV_SUBSTRATE=linux
     lan_addr() { echo 10.42.0.63; }
     out="$(advertise_addr 0.0.0.0)"
     [ -z "$out" ]
