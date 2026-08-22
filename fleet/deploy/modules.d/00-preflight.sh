@@ -5,7 +5,14 @@
 # STATUS: PROTO-V2 — préflight fail-fast : plancher OS/arch/RAM/disque/WSL2, messages actionnables
 # APPLY-ON: any
 # CHECK-ON: any
-# NEEDS: human
+# NEEDS: root
+#
+# ⚠ `root` PARCE QU'IL MESURE LA MACHINE, PAS UN HUMAIN. Ce module ne lit que des faits systeme
+# (OS, bash, arch, RAM, disque, WSL2, userns, curl, git, docker) ; aucun d'eux n'appartient a
+# quelqu'un. Il a declare `human` tant que le runner ignorait la declaration — le jour ou elle a
+# commence a poser l'identite, sa sonde docker est passee sous un uid qui n'a pas le droit sur la
+# socket du daemon, et il a rendu « aucun daemon ne repond » sur une machine ou le daemon repond.
+# La regle : un module declare l'identite de ce qu'il MESURE, pas celle qui se trouvait la.
 #
 # AUCUNE mutation — ce module ne fait que sonder (apply = check). Chaque échec dit : le problème
 # précis, l'état DÉTECTÉ, et le geste pour réparer — jamais un « failed » nu.
