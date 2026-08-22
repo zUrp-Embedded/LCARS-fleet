@@ -134,10 +134,9 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 }
 
 @test "D7: le mot de passe rejoint le BANNER FINAL, il ne s'imprime plus au rang 48" {
-  # ⚠ CE TEMOIN EPINGLAIT L'INVERSE, ET C'ETAIT LE DEFAUT. Il tenait que l'encadre sortait ICI, avec
-  # une pause `read` quand il y avait un tty. Or ce module tourne au rang 48 : quarante modules de
-  # sortie passaient par-dessus avant que quiconque regarde, et la pause bloquait un installeur au
-  # milieu de son travail pour un secret devenu illisible a la fin. Le seul endroit ou un operateur
+  # ⚠ UN SECRET IMPRIME AU RANG 48 A DEFILE QUAND ON LE LIT : quarante modules de sortie passent
+  # par-dessus. Et une pause `read` pour le faire noter retient un installeur au milieu de son
+  # travail, pour une valeur qu'on ne pourra plus relire a la fin. Le seul endroit ou un operateur
   # lit vraiment, c'est la fin — le canal l'y porte, `install.sh` l'imprime et DETRUIT le fichier.
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   head_sh 'announce_password zoe MotDePasse < /dev/null'
@@ -632,12 +631,11 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 }
 
 @test "sans humain NOMME, le login se DEMANDE — sortir en silence rendait la fonction morte" {
-  # ⚠ LA PREMIERE ECRITURE SORTAIT EN SILENCE QUAND `PROV_FLEET_HUMAN` ETAIT VIDE, au motif de ne
-  # pas recopier le defaut de `forge-gestures.sh`. La regle etait bonne, la consequence non : sans
-  # `--fleet-human` — le cas NOMINAL — le compte integre est cree par la recette et ne recevait
-  # jamais son mot de passe. Mesure du 2026-08-22, install fraiche : aucun identifiant au banner.
+  # ⚠ SANS `--fleet-human` — LE CAS NOMINAL — le compte integre est cree par la recette sous le
+  # defaut de `forge-gestures.sh`. Une fonction qui sortirait en silence faute de nom ne poserait
+  # donc jamais le mot de passe de ce compte, c'est-a-dire jamais dans le cas ou elle sert.
   #
-  # Le nom a UNE autorite, on l'interroge. Pas de litteral ici, pas de silence non plus.
+  # Ne pas recopier ce defaut reste la regle ; on l'INTERROGE. Pas de litteral ici, pas de silence.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
   grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"

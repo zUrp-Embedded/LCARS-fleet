@@ -232,18 +232,18 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
 
 @test "nobody n'est JAMAIS un humain de fleet — enumerer exige la borne HAUTE" {
   # Il est sur toute machine, uid 65534 : superieur a UID_MIN et different du siege. La regle basse
-  # seule le compte, et une premiere ecriture annoncait « cette machine en porte deja : nobody ».
+  # seule le compte — enumerer exige donc les DEUX bornes que `login.defs` declare.
   passwd_with
   LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'fleet_humans'
   [ -z "$output" ]
 }
 
 @test "aucun humain DECLARE et la machine n'en porte AUCUN : le verdict dit ce qui SUIT" {
-  # ⚠ « AUCUN » EST UN ETAT DE RANG 22, PAS UN ETAT FINAL, et ce temoin epinglait la phrase
-  # terminale. Le module annoncait « personne ne pourra lancer la fleet ici » vingt-six modules
-  # avant que la passe ne la rende fausse : sans `--fleet-human`, `48-forge-host` passe une valeur
-  # VIDE, la recette cree le compte integre sur la forge, et le convergeur de `64-services` le
-  # materialise. Le rail PRODUIT un humain de fleet — il ne laisse pas choisir son nom.
+  # ⚠ « AUCUN » EST UN ETAT DE RANG 22, PAS UN ETAT FINAL. Sans `--fleet-human`, `48-forge-host`
+  # passe une valeur VIDE, la recette cree le compte integre sur la forge, et le convergeur de
+  # `64-services` le materialise : le rail PRODUIT un humain de fleet, il ne laisse pas choisir son
+  # nom. Un verdict de rang 22 qui conclurait « personne ne pourra lancer la fleet ici » serait donc
+  # faux vingt-six modules plus loin.
   passwd_with
   LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'announce_no_fleet_human'
   [[ "$output" != *"personne ne pourra"* ]]
