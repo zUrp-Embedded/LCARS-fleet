@@ -49,17 +49,15 @@ human_bin() { echo "$(human_home)/.local/bin/claude"; }
 
 claude_ok() {
   local bin; bin="$(human_bin)"
-  # stderr NON étouffé sur la jambe as_human : un doctor lancé par un user tiers échouait
-  # l'impersonation en silence et posait un FAUX diagnostic (« binaire cassé ? ») — la vraie
-  # cause (identité, p_fail d'as_human) doit atteindre l'opérateur. Révélé par la première
-  # passe de parité WSL/docker.
-  [[ -x "$bin" ]] && as_human "$bin" --version >/dev/null
+  # stderr NON étouffé : un binaire qui meurt le DIT, et sa plainte est le seul indice qui
+  # sépare « cassé » de « absent ». L'étouffer produit un diagnostic qui a l'air sûr et ne l'est pas.
+  [[ -x "$bin" ]] && "$bin" --version >/dev/null
 }
 
 check() {
   local bin; bin="$(human_bin)"
   if claude_ok; then
-    p_ok "claude répond ($bin, version $(as_human "$bin" --version 2>/dev/null | head -1))"
+    p_ok "claude répond ($bin, version $("$bin" --version 2>/dev/null | head -1))"
   elif [[ -e "$bin" ]]; then
     p_drift "$bin présent mais ne répond pas à --version (binaire cassé ?)"
   else
@@ -74,14 +72,14 @@ apply() {
   fi
 
   local tmp
-  tmp="$(as_human mktemp -d "${TMPDIR:-/tmp}/claude-install.XXXXXX")" \
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/claude-install.XXXXXX")" \
     || { p_fail "tmp d'installeur impossible"; verdict_apply; }
 
   # DEUX GESTES, DEUX VERDICTS. `curl … | bash` est la forme que le vendor publie ; la séparer est
   # la seule chose que l'ancien échafaudage achetait vraiment — « le réseau n'a pas répondu » et
   # « l'installeur a refusé » appellent deux gestes différents, et un pipe les confond.
-  if ! run_quiet as_human curl -fsSL --proto '=https' -m 300 -o "$tmp/install.sh" "$INSTALL_URL"; then
-    as_human rm -rf "$tmp"
+  if ! run_quiet curl -fsSL --proto '=https' -m 300 -o "$tmp/install.sh" "$INSTALL_URL"; then
+    rm -rf "$tmp"
     p_fail "download de l'installeur en échec ($INSTALL_URL)"
     verdict_apply
   fi
@@ -91,16 +89,16 @@ apply() {
   # tty depuis là reçoit `SIGTTOU` et le noyau l'ARRÊTE. Mesuré le 2026-08-22 : 23 minutes en
   # `State: T`, 16 ticks de CPU, et le `timeout 600` d'alors stoppé avec lui, donc incapable de
   # tuer quoi que ce soit. Sans tty, l'installeur reste non interactif et rend un CODE.
-  if ! run_quiet as_human bash "$tmp/install.sh" </dev/null; then
-    as_human rm -rf "$tmp"
+  if ! run_quiet bash "$tmp/install.sh" </dev/null; then
+    rm -rf "$tmp"
     p_fail "installeur officiel en échec"
     verdict_apply
   fi
-  as_human rm -rf "$tmp"
+  rm -rf "$tmp"
 
   if claude_ok; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "claude posé pour $PROV_HUMAN ($(human_bin), version $(as_human "$(human_bin)" --version 2>/dev/null | head -1))"
+    p_chg "claude posé pour $PROV_HUMAN ($(human_bin), version $("$(human_bin)" --version 2>/dev/null | head -1))"
   else
     p_fail "l'installeur a rendu 0 mais $(human_bin) ne répond pas à --version"
   fi

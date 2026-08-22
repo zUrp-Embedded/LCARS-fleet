@@ -32,6 +32,11 @@ setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+  # ⚠ `SUDO_USER` EST DE CETTE FAMILLE, MEME SANS EN PORTER LE PREFIXE : c'est LUI qui defaut
+  # `PROV_HUMAN` (provision-lib), donc il designe QUI joue les modules per-humain. Herite de
+  # l'appelant, il fait juger au temoin une identite que le decor n'a pas posee — et un shell garde
+  # un `SUDO_USER` perime longtemps apres le sudo qui l'a pose.
+  unset SUDO_USER
 
   SRC="$BATS_TEST_DIRNAME/.."
   SANDBOX="$BATS_TEST_TMPDIR/prov"
@@ -247,6 +252,32 @@ EOF
   [[ "$output" == *"échecs: 1"* ]]
 }
 
+@test "l'identite se decide au DISPATCH : le corps d'un module per-humain ne tourne pas sous un tiers" {
+  # Ce que ce temoin interdit : executer le corps d'un module sous une identite qui n'est pas celle
+  # qu'il DECLARE. Avant, le module tournait quand meme et ne butait que sur celles de ses lignes
+  # qui redemandaient l'humain une par une — donc toutes les autres s'executaient sous le mauvais
+  # uid, sans qu'aucune ne le dise. La declaration est le contrat ; l'honorer ou refuser, pas
+  # commencer et voir.
+  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
+  run env LCARS_SYSADMIN_UID=0 "$SANDBOX/provision" apply --substrate linux --human root
+
+  [ "$status" -ne 0 ]
+  ! grep -q "^human=" "$RUN_LOG"
+}
+
+# ⚠ BATS NE CHANGE PAS D'UID, ET CES TEMOINS NE MESURENT PAS L'UID. Le second passage joue les
+# modules per-humain pour un AUTRE humain que l'operateur : sur une machine, le runner y arrive par
+# `as_human` (root, puis `runuser`). Ici personne n'est root et il n'existe pas de second compte,
+# donc l'impersonation est neutralisee pour mesurer ce qui est reellement en jeu — QUELS modules
+# sont rejoues, POUR QUI, et COMBIEN DE FOIS. Le geste d'impersonation a ses propres temoins dans
+# `provision_lib.bats`, et il les a parce qu'il ne peut pas etre exerce ici.
+#
+# La redefinition est APPENDUE a la lib du bac a sable : le runner la source, donc elle gagne sur
+# celle du depot sans qu'aucun fichier livre ne porte de porte de test.
+stub_impersonation() {
+  echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-lib.sh"
+}
+
 # ─── LE SECOND PASSAGE : L'ETAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────
 # `--human` designe l'OPERATEUR (SUDO_USER), qui sur un poste est presque toujours l'uid 1000 que
 # GUARD B reserve au siege. `22-fleet-human` cree l'humain de fleet ; sans ce passage, son
@@ -254,6 +285,7 @@ EOF
 # echouerait sous lui pour une raison sans rapport avec ce qu'on vient d'installer.
 
 @test "second passage: les modules per-humain sont REJOUES pour l'humain de fleet" {
+  stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   # Le siege est ecarte de l'uid courant pour que `is_fleet_human` accepte le compte qui joue les
   # tests — sinon ce temoin mesurerait la composition de la machine au lieu du mecanisme.
@@ -271,6 +303,7 @@ EOF
   # Sans ce pendant, un correctif qui rejouerait TOUJOURS passerait le temoin ci-dessus, et chaque
   # apply de boite doublerait ses modules per-humain — deux fois le travail, et un bilan qui compte
   # deux fois les memes modules.
+  stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN=root \
     "$SANDBOX/provision" apply --substrate linux --human root
@@ -284,6 +317,7 @@ EOF
   # Dans la boite, `human-converger.sh` materialise N humains depuis la team `humans` de la forge et
   # rejoue leurs modules. Un second passage ici doublerait son travail et poserait l'etat d'un
   # humain que la forge n'a peut-etre pas declare.
+  stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="$(id -un)" \
     "$SANDBOX/provision" apply --substrate docker --human root
@@ -296,6 +330,7 @@ EOF
 @test "second passage: un humain de fleet INEXISTANT ne declenche rien, et ne casse rien" {
   # `22-fleet-human` derive quand `useradd` echoue : l'apply continue, et ce passage doit alors etre
   # inerte plutot que de jouer des modules pour un compte qui n'existe pas.
+  stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="n-existe-pas-$$" \
     "$SANDBOX/provision" apply --substrate linux --human root

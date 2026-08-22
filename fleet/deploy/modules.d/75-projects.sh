@@ -57,7 +57,7 @@ door() { # <check|apply>  → verdicts sur stdout
   local mode="$1" err out rc=0
   err="$(mktemp "${TMPDIR:-/tmp}/prov-reconcile.XXXXXX")"
 
-  out="$(as_human "$LCARS_CLI" project reconcile "$mode" 2>"$err")" || rc=$?
+  out="$("$LCARS_CLI" project reconcile "$mode" 2>"$err")" || rc=$?
   printf '%s\n' "$out"
 
   # LE CRI DE LA PORTE EST REPRIS DES QU'ON NE PEUT PAS LIRE SON VERDICT, et la condition est

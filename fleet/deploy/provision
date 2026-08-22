@@ -20,7 +20,7 @@
 #         # APPLY-ON: wsl linux   où les MUTATIONS tournent (en Docker le stage image a déjà
 #                                 appliqué → l'apply de ce module est remplacé par son check)
 #         # CHECK-ON: any         où l'ÉTAT-CIBLE doit être VRAI (le doctor sonde tout ça)
-#         # NEEDS: root|human     droit d'exécution de l'apply
+#         # NEEDS: root|human     SOUS QUELLE IDENTITÉ le module est joué (le runner la pose)
 #   - AUCUNE sentinelle d'état : l'état, c'est le système, re-sondé à chaque run. (La machine à
 #     états v1 — .install_ok/.fleet_ready/.deploy_ok/.offline-bootstrap éparpillées sur 2 dossiers —
 #     pouvait rester coincée « ni-vierge-ni-provisionnée » sans un message pour l'humain.)
@@ -253,8 +253,8 @@ fi
 
 # ─── Garde de privilège (apply) ───────────────────────────────────────────────────────────────────
 # Le runner N'ESCALADE JAMAIS lui-même (pas de exec sudo caché — l'entrée racine install.sh porte
-# le consentement + l'escalade). Il dit exactement ce qui manque. Les modules NEEDS:human sont
-# ramenés à PROV_HUMAN via as_human par le module lui-même — root peut donc tout appliquer.
+# le consentement + l'escalade). Il dit exactement ce qui manque. Il DÉS-escalade, en revanche :
+# un module `NEEDS: human` est joué sous son humain par `run_module`, donc root peut tout appliquer.
 if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
   for i in "${!SELECTED[@]}"; do
     # Seuls les modules qui vont réellement MUTER exigent root (un check-only reste read-only).
@@ -430,6 +430,44 @@ if [[ "$CMD" == "apply" ]]; then
   export PROV_JOURNAL_ACC
 fi
 
+# ─── run_module <mod> <eff> [humain] — L'UID SE DÉCIDE ICI, ET UNE SEULE FOIS ────────────────────
+#
+# Un module `# NEEDS: human` pose l'état d'UN humain DANS le home de cet humain. Il ne fait aucune
+# opération root — pas une seule sur les quatre qui le déclarent. Il tournait pourtant en root, et
+# redemandait ligne par ligne, par `as_human`, l'identité qu'on venait de lui retirer.
+#
+# ⚠ UNE DÉS-ESCALADE PAR LIGNE N'EST PAS UNE DÉS-ESCALADE : c'est autant d'occasions d'en oublier
+# une, et la ligne oubliée s'exécute en root sans que rien ne le dise. Le module DÉCLARE l'identité
+# dont il a besoin ; c'est au runner de la lui donner, pas à lui de la reconquérir.
+#
+# ⚠ `runuser` GARDE l'environnement exporté (mesuré) mais REPOSE le PATH depuis `login.defs`. Les
+# modules travaillent en chemins absolus et le runner ne pose aucun PATH, donc le décor est le même
+# des deux côtés de la frontière — mais un module qui prendrait une dépendance sur le PATH du runner
+# la perdrait ICI, silencieusement.
+#
+# ⚠ CE QUE ROOT TRAVERSAIT, L'HUMAIN DOIT Y AVOIR DROIT. L'install RO du prefix est `root:fleet`,
+# groupe seul (poste comme boîte) : un module per-humain qui y lit son template ne le peut que si
+# son humain est DANS le groupe de fleet. `20-groups` l'y met, et son rang est ce qui rend la
+# lecture possible aux rangs 40, 70 et 75 — réordonner casserait ça en silence, sur une lecture.
+#
+# L'humain passe en ARGUMENT, jamais en préfixe d'affectation : `PROV_HUMAN=x run_module …` devant
+# une FONCTION laisse la variable posée dans le shell appelant après le retour, donc le reste de la
+# boucle jouerait sous l'humain du dernier tour.
+run_module() {
+  local mod="$1" eff="$2" human="${3:-${PROV_HUMAN:-}}" name
+  name="$(basename "$mod" .sh)"
+  (
+    export PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$human"
+    if [[ "$(module_field "$mod" NEEDS)" != "human" || "$(id -un)" == "$human" ]]; then
+      bash "$mod" "$eff"
+    else
+      # `as_human` porte DÉJÀ les deux cas restants : root impersonne, un tiers est refusé avec le
+      # motif exact. Un second message ici ferait chercher deux causes à un seul fait.
+      as_human bash "$mod" "$eff"
+    fi
+  )
+}
+
 # ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
 total=0 ok=0 drift=0 failed=0
 declare -a REPORT=()
@@ -445,7 +483,7 @@ for i in "${!SELECTED[@]}"; do
     [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff) ===${_PN}"
   fi
   rc=0
-  PROVISION_RUN=1 PROVISION_MODULE="$name" bash "$mod" "$eff" || rc=$?
+  run_module "$mod" "$eff" || rc=$?
   case "$CMD:$eff:$rc" in
     # 3 = MORT AVANT SON VERDICT (garde de sortie de provision-lib). Un code a lui seul, parce que
     # `2` est deja pris — « erreur de sonde » au doctor, « appliqué, drift résiduel » a l'apply — et
@@ -523,7 +561,7 @@ if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
       total=$((total + 1))
       [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff — humain $_fleet_human) ===${_PN}"
       rc=0
-      PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$_fleet_human" bash "$mod" "$eff" || rc=$?
+      run_module "$mod" "$eff" "$_fleet_human" || rc=$?
       # Les codes s'interprètent selon le VERBE joué, jamais selon la commande demandée : `check`
       # rend 1 pour un drift, `apply` rend 2. Confondre les deux ferait compter un drift comme un
       # échec sur tout module hors de son substrat d'application.

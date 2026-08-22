@@ -50,7 +50,7 @@ TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 #
 # Ici, c'est per-humain par construction : ce module tourne pour CHAQUE humain convergé, y compris
 # ceux enrôlés après le boot — le cas que l'entrypoint ne pouvait pas couvrir.
-GITCONFIG_EMAIL() { as_human git config --global --get user.email 2>/dev/null || true; }
+GITCONFIG_EMAIL() { git config --global --get user.email 2>/dev/null || true; }
 
 # Le compte forge de PROV_HUMAN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
 # jeton système n'est pas là, ou si ce login n'a pas de compte — trois absences qu'on ne comble pas.
@@ -94,8 +94,8 @@ apply_git_identity() {
   name="${acct%%$'\t'*}"
   email="${acct#*$'\t'}"
   [[ -n "$name" ]] || name="$PROV_HUMAN"
-  as_human git config --global user.name  "$name"  || { p_fail "git config user.name pour $PROV_HUMAN"; return 1; }
-  as_human git config --global user.email "$email" || { p_fail "git config user.email pour $PROV_HUMAN"; return 1; }
+  git config --global user.name  "$name"  || { p_fail "git config user.name pour $PROV_HUMAN"; return 1; }
+  git config --global user.email "$email" || { p_fail "git config user.email pour $PROV_HUMAN"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "identité git posée : $name <$email> (depuis son compte forge — c'est elle qui mappe ses commits, avatar compris)"
 }
@@ -193,15 +193,15 @@ check() {
 apply() {
   [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $PROV_HUMAN introuvable"; verdict_apply; }
 
-  as_human mkdir -p "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods" || { p_fail "mkdir ~/.lcars ~/pods"; verdict_apply; }
-  as_human chmod 0700 "$HOME_DIR/.lcars" "$HOME_DIR/pods" || { p_fail "chmod 0700"; verdict_apply; }
+  mkdir -p "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods" || { p_fail "mkdir ~/.lcars ~/pods"; verdict_apply; }
+  chmod 0700 "$HOME_DIR/.lcars" "$HOME_DIR/pods" || { p_fail "chmod 0700"; verdict_apply; }
 
   # Seed-once de l'env : SI absent ET template déployé. On injecte FORGE_BASE_URL si connu
   # (le template le laisse en exemple NAS) — après ce seed, le fichier appartient à l'humain.
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ -r "$TEMPLATE" ]]; then
       local tmp
-      tmp="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env"; verdict_apply; }
+      tmp="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env"; verdict_apply; }
       if [[ -n "$PROV_FORGE_URL" ]]; then
         # Le template ne porte AUCUN FORGE_BASE_URL actif (une valeur en dur viserait une forge
         # réelle pour toute boîte seedée) : l'URL connue du provisioning s'APPEND. Un sed sur la
@@ -230,8 +230,8 @@ apply() {
           echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
         } >> "$tmp"
       fi
-      as_human chmod 0600 "$tmp"
-      as_human mv -f "$tmp" "$ENV_FILE"
+      chmod 0600 "$tmp"
+      mv -f "$tmp" "$ENV_FILE"
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "fleet_v2.env seedé depuis le template${PROV_FORGE_URL:+ (FORGE_BASE_URL=$PROV_FORGE_URL)} — désormais À L'HUMAIN, plus jamais réécrit ici"
     else
@@ -259,15 +259,15 @@ apply() {
   if [[ -f "$ENV_FILE" ]] && [[ -n "$PROV_FORGE_URL" ]] \
      && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
     local tmpu
-    tmpu="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (adresse forge)"; verdict_apply; }
+    tmpu="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (adresse forge)"; verdict_apply; }
     {
       cat "$ENV_FILE"
       echo ""
       echo "# — posé par 70-human : l'adresse de la forge, connue du provisionnement —"
       echo "FORGE_BASE_URL=$PROV_FORGE_URL"
     } > "$tmpu"
-    as_human chmod 0600 "$tmpu"
-    as_human mv -f "$tmpu" "$ENV_FILE"
+    chmod 0600 "$tmpu"
+    mv -f "$tmpu" "$ENV_FILE"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$PROV_FORGE_URL)"
   elif [[ -f "$ENV_FILE" ]] && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
@@ -293,7 +293,7 @@ apply() {
   if [[ -f "$ENV_FILE" ]] && [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] \
      && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
     local tmp2
-    tmp2="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (câblage)"; verdict_apply; }
+    tmp2="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (câblage)"; verdict_apply; }
     {
       cat "$ENV_FILE"
       echo ""
@@ -301,8 +301,8 @@ apply() {
       echo "FORGE_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
       echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
     } > "$tmp2"
-    as_human chmod 0600 "$tmp2"
-    as_human mv -f "$tmp2" "$ENV_FILE"
+    chmod 0600 "$tmp2"
+    mv -f "$tmp2" "$ENV_FILE"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet_v2 stop && start » pour l'appliquer"
   fi
