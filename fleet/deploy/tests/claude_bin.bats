@@ -46,6 +46,12 @@ EOF
   export PROVISION_LIB="$SANDBOX/lib/provision-lib.sh"
   export PROV_HUMAN="$(id -un)"
   export PATH="$BINDIR:$PATH"
+
+  # ⚠ `HOME` EST DU DECOR ICI, ET SON ABSENCE COUTE LE BINAIRE DU DEVELOPPEUR. Le module ne
+  # detourne plus le HOME de l'installeur — le rail vendor installe POUR l'utilisateur courant —
+  # donc la doublure d'installeur ecrit dans `$HOME`, et `~/.local/bin/claude` est un SYMLINK :
+  # une ecriture le suit et tronque la cible reelle. Le bac a sable doit porter le home.
+  export HOME="$HOMEDIR"
 }
 
 # A binary is a thing that answers --version. The fake is a script, which `cp -a`, `chmod` and the
@@ -125,7 +131,9 @@ EOF
   chmod 0755 "$BINDIR/curl"
   run_apply
 
-  [[ "$output" == *"download de l'installer en échec"* ]]
+  # La FORME, pas la phrase : le module DIT que le download a echoue. Epingler la formulation
+  # exacte fait tomber ce temoin sur une reecriture de message, ce qui ne prouve rien.
+  [[ "$output" == *"download"* && "$output" == *"échec"* ]]
   # La v1 faisait `rm` AVANT le download : un echec reseau coutait l'outil. Le fichier est toujours la.
   [ -f "$HOMEDIR/.local/bin/claude" ]
 }
