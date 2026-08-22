@@ -133,13 +133,37 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [ "$output" = "different" ]
 }
 
-@test "D7: le mot de passe est AFFICHE avec son login, et ne bloque pas sans terminal" {
-  # Sans tty (CI, unite systemd, install.sh pilote) on ne s'arrete pas — on le DIT.
+@test "D7: le mot de passe rejoint le BANNER FINAL, il ne s'imprime plus au rang 48" {
+  # ⚠ CE TEMOIN EPINGLAIT L'INVERSE, ET C'ETAIT LE DEFAUT. Il tenait que l'encadre sortait ICI, avec
+  # une pause `read` quand il y avait un tty. Or ce module tourne au rang 48 : quarante modules de
+  # sortie passaient par-dessus avant que quiconque regarde, et la pause bloquait un installeur au
+  # milieu de son travail pour un secret devenu illisible a la fin. Le seul endroit ou un operateur
+  # lit vraiment, c'est la fin — le canal l'y porte, `install.sh` l'imprime et DETRUIT le fichier.
+  export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
+  head_sh 'announce_password zoe MotDePasse < /dev/null'
+  [ "$status" -eq 0 ]
+  # Rien sur place : ce qui s'imprimerait ici serait ce qui aurait defile.
+  [[ "$output" != *"MotDePasse"* ]]
+  # Mais le secret est bien passe, avec son login et ce qu'il ouvre.
+  run cat "$PROV_ANNOUNCE_FILE"
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" == *"MotDePasse"* ]]
+  [[ "$output" == *"administration"* ]]
+}
+
+@test "D7: SANS canal, on imprime sur place — se taire serait strictement pire" {
+  # Un `provision apply` joue a la main n'a pas de banner final. Le canal ameliore l'affichage, il
+  # n'en est pas la condition : sinon on echangerait un secret defile contre un secret jamais montre.
+  unset PROV_ANNOUNCE_FILE
   head_sh 'announce_password zoe MotDePasse < /dev/null'
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
   [[ "$output" == *"MotDePasse"* ]]
-  [[ "$output" == *"confirmé par personne"* ]]
+}
+
+@test "D7: plus AUCUNE pause — un module ne retient pas un installeur au rang 48" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  ! code | sed -n '/^announce_password()/,/^}/p' | grep -q 'read -r'
 }
 
 @test "D7: sans jeton master, l'adminite est INCONNUE — jamais supposee absente" {
@@ -531,4 +555,91 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # Sans ca, il annonce « OUVERTE sur 0.0.0.0 » — vrai du bind, faux de ce qu'un tiers atteint.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | sed -n '/^forge_reach_note()/,/^}/p' | grep -q 'PROV_FORGE_ADVERTISE_WHY'
+}
+
+# ─── LE MOT DE PASSE ADMIN : TROIS SORTIES, PAS DEUX ─────────────────────────────────────────────
+#
+# La creation du compte d'administration traduisait TOUT code non nul en « deja present », stderr
+# jete. Une creation refusee pour une autre raison ressortait donc en OK sur un compte inexistant,
+# et l'operateur ne pouvait pas se connecter a sa propre forge sans qu'une seule ligne le dise.
+# Mesure du 2026-08-22, poste Nico : « impossible de me logger ».
+
+@test "creation admin : un refus qui n'est PAS « deja present » est un ECHEC, jamais un OK" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  # La sortie d'erreur est CAPTUREE — sans elle, aucune des trois branches n'est decidable.
+  code | grep -qE '2>"\$err"'
+  # La branche « deja present » se decide sur le MESSAGE, pas sur le code de sortie.
+  code | grep -qE "grep -qiE 'already exist"
+  # Et le reste est un p_fail qui PORTE le message de la forge, pas une phrase inventee.
+  code | grep -q 'p_fail "création du compte'
+  code | grep -qE 'REFUSÉE par la forge : \$\('
+}
+
+@test "le compte deja present NOMME la porte — sinon le verdict est vrai et inutile" {
+  # « son mot de passe est un hash » est un fait, pas un geste. Sans la seconde ligne, l'operateur
+  # apprend qu'il ne peut pas lire son mot de passe et repart sans moyen d'en avoir un.
+  grep -q 'PROV_FORGE_ADMIN_RESET' "$SRC"
+  grep -qE "p_warn .*PROV_FORGE_ADMIN_RESET" "$SRC"
+}
+
+@test "la repose vit HORS de la garde du jeton master — sinon elle est inerte quand on en a besoin" {
+  # Le bloc de creation ne tourne que sur une forge SANS jeton master : une seule fois par machine.
+  # Un operateur qui a perdu son mot de passe est toujours APRES ce moment-la.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -qE '^\s*\[\[ -s "\$MASTER_TOKEN_FILE" \]\] && reset_admin_password_if_asked 1'
+}
+
+@test "la repose ne se declenche QUE sur demande, et jamais sur un compte tout juste cree" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
+  [ -n "$body" ]
+  # Deux gardes, et les deux comptent : le drapeau, puis « le compte existait deja ».
+  grep -q 'PROV_FORGE_ADMIN_RESET:-' <<<"$body"
+  grep -qE '\[\[ "\$\{1:-1\}" -ne 0 \]\] \|\| return 0' <<<"$body"
+}
+
+# ─── LE SEED N'EST PAS UN MOT DE PASSE D'HUMAIN ─────────────────────────────────────────────────
+#
+# La recette pose `password = var.seed_password` sur TOUT ce qu'elle cree — roles, compte systeme,
+# et l'humain integre. Le credential d'une personne etait donc le meme que celui du compte qui signe
+# les marqueurs systeme : le lui communiquer ouvrait les dix. Les roles s'en affranchissent au mint
+# (`force_password_for`) ; personne ne le faisait pour l'humain.
+
+@test "l'humain integre recoit son PROPRE mot de passe forge, pas le seed" {
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
+  [ -n "$body" ]
+  # Le geste est celui des roles : PATCH admin avec le jeton master, jamais une lecture du seed.
+  grep -q 'request = .PATCH.' <<<"$body"
+  grep -q 'admin/users/' <<<"$body"
+  ! grep -q 'SEED_FILE' <<<"$body"
+  # Et il rejoint le banner par le canal, pas un echo perdu au rang 48.
+  grep -q 'prov_announce_credential' <<<"$body"
+}
+
+@test "aucun secret ne passe par ARGV — ni le jeton master ni le mot de passe pose" {
+  # Cicatrice 6-141 : `-d` met la donnee dans la ligne de commande, lisible dans /proc de tout
+  # l'hote pendant l'appel. Le fichier de config de curl accepte `data =`, donc stdin.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
+  grep -q 'curl -K -' <<<"$body"
+  ! grep -qE 'curl[^|]* -d ' <<<"$body"
+}
+
+@test "sans humain de fleet NOMME, on ne devine pas le login — vide est une reponse" {
+  # `forge-gestures.sh` a son propre defaut (`lcars`). Un litteral ici en ferait un SECOND, et deux
+  # defauts pour un fait ne restent d'accord que tant que personne n'en touche un.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
+  grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"
+  grep -qE '\[\[ -n "\$login" \]\] \|\| return 0' <<<"$body"
+  ! grep -q '"lcars"' <<<"$body"
+}
+
+@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
+  # `sudo` fait env_reset : un drapeau absent de REEXEC_ENV est mange en silence, et le geste de
+  # l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.
+  local door="$BATS_TEST_DIRNAME/../../../install.sh"
+  [ -f "$door" ]
+  grep -qE '^\s*for _v in .*PROV_FORGE_ADMIN_RESET' "$door"
 }

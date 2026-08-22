@@ -812,6 +812,65 @@ prov_journal_note() { # prov_journal_note <clef> <valeur…>
   return 0
 }
 
+# ─── prov_announce_credential <libellé> <login> <secret> — CE QUI NE SE RELIRA PLUS ──────────────
+#
+# ⚠ UN SECRET AFFICHÉ AU MILIEU DE DEUX CENTS LIGNES EST UN SECRET PERDU, et l'afficher au moment
+# où il naît le condamne à ça. Ces credentials sortent de modules joués au rang 22 ou 48 : quarante
+# modules plus tard, l'encadré a défilé. Le seul endroit où un opérateur regarde vraiment, c'est la
+# FIN — donc c'est là qu'ils s'impriment, tous ensemble, une fois.
+#
+# ⚠ MÊME CANAL QUE LE JOURNAL, ET POUR LA MÊME RAISON : les modules sont des processus, une variable
+# posée dans l'un ne remonte pas. Le fichier est créé par l'appelant racine (`install.sh`), en 0600,
+# et il le DÉTRUIT après l'avoir imprimé — le secret ne survit pas à l'installation qui l'a produit.
+#
+# ⚠ ET SANS ACCUMULATEUR, ON IMPRIME SUR PLACE. Un `provision apply` joué à la main n'a pas de
+# banner final : s'y taire échangerait un secret défilé contre un secret jamais montré, ce qui est
+# strictement pire. Le canal est une amélioration de l'affichage, jamais une condition de son
+# existence.
+prov_announce_credential() { # prov_announce_credential <libellé> <login> <secret>
+  [[ "$#" -ge 3 ]] || return 0
+  if [[ -n "${PROV_ANNOUNCE_FILE:-}" ]]; then
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3" 2>/dev/null >> "$PROV_ANNOUNCE_FILE" || true
+    return 0
+  fi
+  prov_print_credentials <<< "$(printf '%s\t%s\t%s\n' "$1" "$2" "$3")"
+}
+
+# L'encadré, séparé de la collecte : `install.sh` l'appelle sur le fichier accumulé, un module joué
+# nu l'appelle sur sa seule ligne. Une seule mise en forme, donc une seule à corriger.
+# ⚠ `printf '%-60s'` COMPTE DES OCTETS, PAS DES COLONNES, et tout libellé français casse alors le
+# cadre : « — », « é » et « ' » pèsent deux ou trois octets pour une seule colonne. `${#s}` en bash
+# compte des CARACTÈRES sous une locale UTF-8, donc la marge se calcule et ne se délègue pas.
+_prov_pad() { # <texte> <colonnes>
+  local s="$1" n=$(( $2 - ${#1} ))
+  (( n < 0 )) && n=0
+  printf '%s%*s' "$s" "$n" ''
+}
+
+prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » sur stdin
+  local lbl login secret n=0
+  while IFS=$'\t' read -r lbl login secret; do
+    [[ -n "$secret" ]] || continue
+    if [[ "$n" -eq 0 ]]; then
+      printf '\n'
+      printf '    ┌──────────────────────────────────────────────────────────────┐\n'
+      printf '    │  IDENTIFIANTS — note-les maintenant, ils ne seront PAS redits │\n'
+      printf '    ├──────────────────────────────────────────────────────────────┤\n'
+    else
+      printf '    │%s│\n' "$(_prov_pad '' 62)"
+    fi
+    n=$((n + 1))
+    printf '    │  %s│\n' "$(_prov_pad "$lbl" 60)"
+    # 62 colonnes entre les bordures : le préfixe en pèse 18, la marge 44. Le compte est fait ici
+    # une fois plutôt que répété en littéral — trois nombres pour une seule largeur dérivent.
+    printf '    │    login       : %s│\n' "$(_prov_pad "$login" 44)"
+    printf '    │    mot de passe: %s│\n' "$(_prov_pad "$secret" 44)"
+  done
+  [[ "$n" -eq 0 ]] && return 0
+  printf '    └──────────────────────────────────────────────────────────────┘\n\n'
+  return 0
+}
+
 apt_ensure() {
   local missing=() already=() pkg
   for pkg in "$@"; do
@@ -1015,15 +1074,37 @@ human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 #
 # ⚠ ARITHMÉTIQUE, jamais des chaînes : en comparaison lexicographique `"999" < "1000"` est FAUX, et
 # un compte système à uid 999 passerait la garde.
+# Les bornes se LISENT dans login.defs, elles ne s'écrivent pas ici. `|| true` LOAD-BEARING : sous
+# `set -euo pipefail`, un login.defs absent tuerait le module AVANT la garde, et une garde qui
+# s'évanouit sur une lecture ratée est pire que pas de garde.
+_uid_bound() { # <UID_MIN|UID_MAX> <défaut>
+  local v; v="$(awk -v k="^$1" '$0 ~ k {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
+  [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v" || printf '%s' "$2"
+}
+
 is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
   local login="${1:-$PROV_HUMAN}" uid uid_min
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
-  # `|| true` LOAD-BEARING : sous `set -euo pipefail`, un login.defs absent tuerait le module AVANT
-  # la garde. Une garde qui s'évanouit sur une lecture ratée est pire que pas de garde.
-  uid_min="$(awk '/^UID_MIN/ {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
-  [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
+  uid_min="$(_uid_bound UID_MIN 1000)"
   (( uid >= uid_min )) && (( uid != ${LCARS_SYSADMIN_UID:-1000} ))
+}
+
+# ─── fleet_humans — CEUX QUI EXISTENT DÉJÀ SUR CETTE MACHINE ────────────────────────────────────
+#
+# ⚠ ÉNUMÉRER N'EST PAS TESTER UN NOM, ET LA DIFFÉRENCE EST UNE BORNE. `is_fleet_human` répond « ce
+# login-là peut-il lancer une fleet » : on le lui a nommé, donc la borne HAUTE ne sert à rien. Balayer
+# `passwd` pose l'autre question, et `nobody` — uid 65534, présent sur toute machine — répond OUI à la
+# règle basse seule. Mesuré le 2026-08-22 : une première écriture de cette fonction annonçait
+# « cette machine porte déjà : nobody ».
+#
+# `UID_MAX` est la borne que login.defs déclare pour exactement ça. Et la lecture passe par le
+# FICHIER, jamais par `id` : c'est ce qui rend la population mesurable par un témoin (`PASSWD_FILE`,
+# même couture que le convergeur d'humains).
+fleet_humans() {
+  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \
+      -v s="${LCARS_SYSADMIN_UID:-1000}" \
+      '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
 # Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de

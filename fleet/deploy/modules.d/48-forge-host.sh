@@ -203,25 +203,76 @@ forge_reach_note() {
 # entière. On borne la SOURCE, pas la sortie.
 new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | head -c 10; }
 
-# L'AFFICHAGE ATTEND, quand il y a quelqu'un pour lire. Un mot de passe noyé dans deux cents lignes
-# de provisionnement est un mot de passe perdu : on s'arrête, une fois, le temps qu'il soit noté.
-# Sans terminal (CI, unité systemd, `install.sh` piloté), on ne bloque PAS — on le dit en clair et
-# on nomme le fait qu'il n'a été confirmé par personne.
+# ⚠ L'AFFICHAGE N'A PLUS LIEU ICI, ET S'ARRÊTER ICI ÉTAIT LA FAUTE. Ce module tourne au rang 48 :
+# l'encadré était suivi de quarante modules de sortie, donc il avait défilé avant que quiconque
+# regarde. Pire, la pause `read` bloquait un installeur au milieu de son travail pour un secret
+# qu'on ne pouvait de toute façon plus relire à la fin. Le seul endroit où un opérateur lit
+# vraiment, c'est le banner final — `prov_announce_credential` l'y porte.
 announce_password() { # announce_password <login> <mot de passe>
-  local _ignored
-  printf '\n'
-  printf '    ┌──────────────────────────────────────────────────────────────┐\n'
-  printf '    │  COMPTE ADMINISTRATEUR DE LA FORGE — note-le maintenant      │\n'
-  printf '    │                                                              │\n'
-  printf '    │    login       : %-42s│\n' "$1"
-  printf '    │    mot de passe: %-42s│\n' "$2"
-  printf '    │                                                              │\n'
-  printf '    │  Il ne sera PAS réaffiché. La forge ne le stocke qu'"'"'en hash.   │\n'
-  printf '    └──────────────────────────────────────────────────────────────┘\n\n'
-  if [[ -t 0 ]]; then
-    read -r -p "    Noté ? Entrée pour continuer. " _ignored || true
+  prov_announce_credential "forge du poste — compte d'administration" "$1" "$2"
+}
+
+# ─── LE MOT DE PASSE FORGE DE L'HUMAIN INTÉGRÉ — SON PROPRE SECRET, PAS CELUI DE DIX COMPTES ────
+#
+# ⚠ LE SEED N'EST PAS UN MOT DE PASSE D'HUMAIN, ET IL EN TENAIT LIEU. La recette pose
+# `password = var.seed_password` sur TOUT ce qu'elle crée : les comptes de rôle, le compte système,
+# et l'humain intégré (`deps/instance/accounts.tf:121`). Le credential avec lequel une personne se
+# connecte à la forge était donc le MÊME que celui du compte qui signe les marqueurs système —
+# le communiquer, c'était ouvrir les dix.
+#
+# Les rôles s'en sont affranchis : `provision-role-tokens.sh` pose un password neuf par le jeton
+# master, minte avec, et l'oublie. Personne ne faisait ce geste pour l'humain. On le fait ici, avec
+# exactement la même mécanique — un `PATCH /admin/users/<u>`, que Gitea accepte du jeton master.
+#
+# ⚠ ET SEULEMENT QUAND SON COMPTE VIENT D'ÊTRE CRÉÉ, c'est-à-dire dans la passe qui pose la
+# structure. Le refaire à chaque apply changerait le mot de passe d'une personne derrière son dos,
+# à chaque convergence, sans qu'aucune ligne ne le rattache à un geste qu'elle aurait demandé.
+announce_builtin_human_password() {
+  local login tok pw code
+  # VIDE EST UNE RÉPONSE, comme pour `LCARS_BUILTIN_HUMAN` plus haut : sans humain de fleet nommé,
+  # c'est le défaut de `forge-gestures.sh` qui a été appliqué, et on ne le devine pas ici — deux
+  # défauts pour un fait ne restent d'accord que tant que personne n'en touche un.
+  login="${PROV_FLEET_HUMAN:-}"
+  [[ -n "$login" ]] || return 0
+  tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
+
+  pw="$(new_password)"
+  # ⚠ RIEN NE PASSE PAR ARGV, NI LE JETON NI LE MOT DE PASSE — `-d` les mettrait dans la ligne de
+  # commande, lisible dans /proc de tout l'hôte pendant l'appel. Cicatrice 6-141, déjà payée deux
+  # fois sur des credentials moins puissants ; le fichier de config de curl accepte `header =` ET
+  # `data =`, donc les deux voyagent par stdin.
+  code="$(printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
+            "$tok" "$login" "$pw" \
+          | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$LOCAL_URL/api/v1/admin/users/$login" 2>/dev/null || true)"
+  if [[ "$code" == "200" ]]; then
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    prov_announce_credential "forge du poste — humain de fleet" "$login" "$pw"
   else
-    p_warn "pas de terminal : le mot de passe ci-dessus n'a été confirmé par personne — relis la sortie de cet install avant de la fermer"
+    p_warn "mot de passe forge de « $login » NON posé (HTTP ${code:-aucune réponse}) — son compte garde celui de la création"
+  fi
+}
+
+# ─── LA REPOSE DU MOT DE PASSE ADMIN — UN GESTE DEMANDÉ, JAMAIS UN EFFET DE BORD ────────────────
+#
+# La forge ne garde qu'un HASH : un mot de passe perdu ne se relit pas, il se remplace. Mais le
+# remplacer d'office à chaque apply casserait tout ce qui s'authentifie avec — sans le dire, et sur
+# le compte qui administre. Le geste se demande donc explicitement, et il n'a de sens que quand le
+# compte EXISTE DÉJÀ (une création vient d'afficher le sien).
+#
+# `PROV_FORGE_ADMIN_RESET` doit être ajouté à `REEXEC_ENV` d'`install.sh` pour survivre à l'escalade
+# sudo : sans ça l'opérateur pose le drapeau, `sudo` le mange, et rien ne se passe — sans un mot.
+reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste créé>
+  [[ -n "${PROV_FORGE_ADMIN_RESET:-}" ]] || return 0
+  [[ "${1:-1}" -ne 0 ]] || return 0
+  local npw; npw="$(new_password)"
+  if d exec -u git "$FORGE_CONTAINER" gitea admin user change-password \
+       --username "$PROV_FORGE_ADMIN" --password "$npw" --must-change-password=false \
+       >/dev/null 2>&1; then
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    announce_password "$PROV_FORGE_ADMIN" "$npw"
+  else
+    p_fail "repose du mot de passe de « $PROV_FORGE_ADMIN » en échec — le compte garde l'ancien"
   fi
 }
 
@@ -380,22 +431,47 @@ apply() {
   write_atomic "$PROV_TOKENS_DIR/forge.public.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$PUBLIC_URL" \
     || { p_fail "adresse publique de la forge non posée ($PROV_TOKENS_DIR/forge.public.url)"; verdict_apply; }
 
+  # ⚠ LA REPOSE VIT HORS DE LA GARDE DU JETON MASTER, ET C'EST TOUT L'INTÉRÊT. Le bloc ci-dessous
+  # ne s'exécute que sur une forge SANS jeton master — donc une seule fois dans la vie d'une
+  # machine. Un opérateur qui a perdu son mot de passe est, par construction, toujours après ce
+  # moment-là : une repose enfermée dedans serait inerte exactement quand on en a besoin.
+  [[ -s "$MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
+
   # 2. L'AUTORITÉ. Le compte d'administration et son jeton, mintés DANS le conteneur (`gitea admin`
   #    n'a pas besoin d'un jeton pour créer le premier). Le fichier est le même que celui que la
   #    boîte garde : `50-forge` le lit sans savoir qui l'a posé.
   if [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
     p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
-    local pw; pw="$(new_password)"
-    if d exec -u git "$FORGE_CONTAINER" gitea admin user create \
-           --username "$PROV_FORGE_ADMIN" --password "$pw" \
-           --email "$PROV_FORGE_ADMIN@lcars.local" --admin --must-change-password=false \
-           >/dev/null 2>&1; then
+    local pw err rc; pw="$(new_password)"
+    err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
+    rc=0
+    d exec -u git "$FORGE_CONTAINER" gitea admin user create \
+      --username "$PROV_FORGE_ADMIN" --password "$pw" \
+      --email "$PROV_FORGE_ADMIN@lcars.local" --admin --must-change-password=false \
+      >/dev/null 2>"$err" || rc=$?
+
+    # ⚠ TROIS SORTIES, PAS DEUX, ET LA CONFUSION SE PAYAIT EN COMPTE INEXISTANT. Cette branche
+    # traduisait TOUT code non nul en « déjà présent », `stderr` jeté. Une création refusée pour
+    # une autre raison — politique de mot de passe, forge pas encore prête, nom invalide —
+    # ressortait donc en `OK` sur un compte que personne n'avait créé, et l'opérateur découvrait
+    # des semaines plus tard qu'il ne pouvait pas se connecter à sa propre forge. Un verdict vert
+    # sur un fait faux ne se rattrape pas : il empêche de chercher.
+    if [[ "$rc" -eq 0 ]]; then
       announce_password "$PROV_FORGE_ADMIN" "$pw"
+    elif grep -qiE 'already exist|user already|login name.*taken' "$err" 2>/dev/null; then
+      # Le compte est là et son mot de passe est un HASH : la forge ne peut pas le rendre, et nous
+      # non plus. On ne le remplace pas au passage — des jetons et des sessions en dépendent. Mais
+      # on ne laisse pas l'opérateur sans porte : le geste qui en repose un est NOMMÉ.
+      p_ok "compte « $PROV_FORGE_ADMIN » déjà présent (son mot de passe est un hash, il n'est pas relisible)"
+      p_warn "besoin d'un mot de passe pour t'y connecter ? « PROV_FORGE_ADMIN_RESET=1 » sur un apply en pose un neuf et l'affiche"
     else
-      # Déjà là : on ne casse pas un compte existant, on lui refait juste un jeton. Son mot de
-      # passe est le sien — on ne le remplace pas, et on n'en affiche pas un qui serait faux.
-      p_ok "compte « $PROV_FORGE_ADMIN » déjà présent sur la forge (mot de passe inchangé)"
+      p_fail "création du compte « $PROV_FORGE_ADMIN » REFUSÉE par la forge : $(tr -d '\r' < "$err" | grep -v '^$' | tail -3 | tr '\n' ' ')"
+      rm -f "$err"
+      verdict_apply
     fi
+    rm -f "$err"
+
+    reset_admin_password_if_asked "$rc"
     # ⚠ SONDER LE FLUX AVANT DE CAPTURER — sinon le diagnostic accuse la forge, qui est saine.
     # Un relais docker peut répondre parfaitement à `version`/`ps`/`inspect` et rendre ZÉRO OCTET,
     # EXIT 0, sur `exec`. La capture ci-dessous devient alors une chaîne vide, et le refus juste en
@@ -652,6 +728,8 @@ apply() {
     || { p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
+
+  announce_builtin_human_password
   verdict_apply
 }
 

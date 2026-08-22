@@ -589,7 +589,10 @@ if [[ "$EUID" -ne 0 ]]; then
   # elle-même avec le message qui invite à poser le drapeau qu'on vient de poser. Le refus est alors
   # parfaitement circulaire, et rien dans la sortie ne dit que sudo est passé entre les deux.
   REEXEC_ENV=()
-  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST; do
+  # ⚠ CINQUIÈME EXEMPLAIRE : `PROV_FORGE_ADMIN_RESET`. Le drapeau par lequel un opérateur demande un
+  # mot de passe neuf pour sa forge — posé avant l'escalade, mangé par `env_reset`, et l'apply
+  # repartait sans lui : le geste ne produisait RIEN, et rien ne disait pourquoi.
+  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET; do
     [[ -n "${!_v:-}" ]] && REEXEC_ENV+=("$_v=${!_v}")
   done
   exec sudo "${REEXEC_ENV[@]}" bash "$(readlink -f "$0")" "${REEXEC_ARGS[@]}" "${PASSTHRU[@]}"
@@ -701,6 +704,19 @@ fi
 # La sémantique est celle du geste opérateur `deploy/box` (`await_provision_verdict`), reprise à
 # dessein plutôt que réinventée : deux portes qui lisent le même code de retour et en tirent deux
 # verdicts, c'est un code de retour qui ne veut plus rien dire.
+# ⚠ LE CANAL DES IDENTIFIANTS, ET IL EST À NOUS PARCE QUE LE BANNER FINAL EST À NOUS. Les modules
+# qui fabriquent un mot de passe tournent au rang 22 ou 48 : afficher sur place, c'est afficher puis
+# faire défiler deux cents lignes par-dessus. Ils écrivent donc ici, et on imprime à la fin.
+#
+# 0600 root, et DÉTRUIT juste après l'impression : le secret ne survit pas à l'installation qui l'a
+# produit. C'est la propriété qui rend l'affichage différé acceptable — sans elle on aurait échangé
+# « défilé » contre « posé en clair sur le disque ».
+PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
+export PROV_ANNOUNCE_FILE
+# Même sur Ctrl-C ou sur un refus en cours de route : un secret oublié dans /tmp est un secret qui
+# traîne, et c'est exactement ce qu'on refusait au fichier de seed.
+trap '[[ -n "${PROV_ANNOUNCE_FILE:-}" ]] && rm -f "$PROV_ANNOUNCE_FILE"' EXIT INT TERM
+
 _apply_rc=0
 "$PROVISION" apply "${PASSTHRU[@]}" || _apply_rc=$?
 
@@ -762,3 +778,14 @@ ${CYAN}  ┌──────────────────────�
   │${N}  Sonde à tout moment : ${W}bash install.sh --check${N}          ${CYAN}│
   └─────────────────────────────────────────────────────────┘${N}
 EOF
+
+# LES IDENTIFIANTS EN DERNIER, APRÈS le bloc « suite » : c'est la dernière chose à l'écran, donc la
+# seule qu'on est sûr de ne pas avoir fait défiler. Le fichier est vidé par le `trap` en sortant.
+if [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]]; then
+  # ⚠ SANS `PROVISION_RUN` : ce drapeau arme la garde de sortie de la lib, qui réclame un verdict de
+  # module. On n'en est pas un — on emprunte UNE mise en forme, et le poser ferait crier « MORT
+  # avant de rendre son verdict » juste après un install réussi.
+  # shellcheck source=fleet/deploy/lib/provision-lib.sh
+  ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
+      && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
+fi
