@@ -1763,6 +1763,101 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
+  # Le materiel converge sous `catalogue_install_dirs` : un PARENT qui contient des repertoires de
+  # catalogue, chacun porteur de son manifeste. C'est la forme exacte de `/home/catalogues` sur une
+  # boite, et `installed_dirs/0` la balaie en `<parent>/*/catalogue.yaml`.
+  defp install_catalogue!(parent, dir_name, manifest) do
+    dir = Path.join(parent, dir_name)
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "catalogue.yaml"), manifest)
+    dir
+  end
+
+  describe "catalogue_list (l'offre servie — le miroir de card_list, un cran au-dessus)" do
+    setup do
+      TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
+        {:ok, %{role: "starfleet"}}
+      end)
+
+      :ok
+    end
+
+    test "rend l'offre SERVIE : le catalogue livre, marque bundled, avec sa carte par defaut" do
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("catalogue_list", %{}, pod_state(uniq("pod-sf")))
+
+      assert %{"catalogues" => [_ | _] = cats} = Jason.decode!(txt)
+      by_name = Map.new(cats, &{&1["name"], &1})
+
+      assert %{"bundled" => true, "default_card" => "brief-gate"} = by_name["fleet"]
+
+      # Le catalogue SYSTEME n'est pas dans l'offre et ne peut pas y etre : c'est un contrat, pas un
+      # participant — aucun projet ne s'enrole dedans, il n'a pas d'org a lui. L'y voir voudrait dire
+      # que la liste est construite ailleurs que sur `installed_roots/0`.
+      refute Map.has_key?(by_name, "system")
+    end
+
+    @tag :tmp_dir
+    test "un catalogue installe SANS CARTE est liste — exactement ce que la derivation ne peut pas dire",
+         %{tmp_dir: tmp} do
+      # ⚠ LE TEMOIN QUI JUSTIFIE L'OUTIL. Faute de verbe, un agent a repondu « quels catalogues ? »
+      # en derivant `card_list`, qui nomme le catalogue de chaque carte. La derivation est juste tant
+      # que chaque catalogue installe porte au moins une carte — et courte, avec aplomb, des qu'un
+      # n'en porte aucune. Les deux moities du temoin sont necessaires : sans la seconde, il ne
+      # mesure qu'un listage qui marche, pas la difference qui l'a fait ecrire.
+      install_catalogue!(tmp, "muet", "api_version: 1\nname: muet\n")
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("catalogue_list", %{}, pod_state(uniq("pod-sf")))
+
+      %{"catalogues" => cats} = Jason.decode!(txt)
+      assert muet = Enum.find(cats, &(&1["name"] == "muet"))
+
+      # Il ne livre aucune carte : la cle est ABSENTE plutot que nulle — « pas de defaut » et
+      # « defaut inconnu » ne sont pas la meme reponse, et une seule des deux existe ici.
+      refute Map.has_key?(muet, "default_card")
+      assert muet["bundled"] == false
+
+      assert {:ok, %{content: [%{"text" => cards_txt}]}, _} =
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-sf")))
+
+      derived =
+        Jason.decode!(cards_txt)["cards"] |> Enum.map(& &1["catalogue"]) |> Enum.uniq()
+
+      refute "muet" in derived,
+             "si la derivation le voyait, ce temoin ne mesurerait plus l'ecart qu'il epingle"
+    end
+
+    @tag :tmp_dir
+    test "un materiel dont le manifeste ne DECLARE aucun nom est nomme, jamais escamote",
+         %{tmp_dir: tmp} do
+      # `Catalogue.verify!/0` ne tourne au boot que sur la racine LIVREE : le materiel converge est
+      # verifie par un geste d'operateur, jamais par le demarrage. Un manifeste sans `name:` vit donc
+      # sur le disque, n'est servi par rien, et `installed_catalogues/0` le laisse tomber EN SILENCE.
+      install_catalogue!(tmp, "sans-nom", "api_version: 1\n")
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call("catalogue_list", %{}, pod_state(uniq("pod-sf")))
+
+      assert %{"catalogues" => cats, "unreadable" => ["sans-nom"]} = Jason.decode!(txt)
+      refute "sans-nom" in Enum.map(cats, & &1["name"])
+    end
+
+    @tag :tmp_dir
+    test "une offre VIDE est une ERREUR, jamais une liste vide", %{tmp_dir: tmp} do
+      # « Aucun catalogue n'existe » est le mensonge vide : cette boite en sert toujours au moins un.
+      # Meme posture que `card_list` sur un catalogue de cartes introuvable.
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, tmp)
+
+      assert {:error, {:catalogue_offer_unavailable, msg}, _} =
+               PodTools.handle_tool_call("catalogue_list", %{}, pod_state(uniq("pod-sf")))
+
+      assert msg =~ "declares a name"
+    end
+  end
+
   describe "onboarding + delegation gates (two heads, two ROLES)" do
     @describetag :tmp_dir
 
@@ -1794,7 +1889,8 @@ defmodule Fleet.MCP.PodToolsTest do
       # different admission.
       {"deposit_list", %{}},
       {"deposit_import", %{"source" => "lordzurp/demo-proj", "catalogue" => "fleet"}},
-      {"card_list", %{}}
+      {"card_list", %{}},
+      {"catalogue_list", %{}}
     ]
     @delegation_tools [
       # No `project` wire param (reorg 2026-07-19): the repo comes from the pod binding.

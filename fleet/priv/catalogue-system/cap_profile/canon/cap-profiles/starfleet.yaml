@@ -93,7 +93,12 @@ spec:
       # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
       # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
       # it does not do a project's métier). The universal work-item pair comes from the launcher.
-      - mcp__fleet__card_list  # framing FIRST: the catalogue the human picks the card from
+      # L'OFFRE, PUIS LES CARTES — dans cet ordre, parce qu'une carte appartient a un catalogue et
+      # que `project_create` refuse un catalogue qui n'est pas installe ici. Sans ce premier verbe,
+      # ce role repondait « quels catalogues ? » en DERIVANT `card_list` : juste tant que chaque
+      # catalogue installe porte au moins une carte, et faussement court des qu'un n'en porte pas.
+      - mcp__fleet__catalogue_list  # framing FIRST: the offer a project is enrolled INTO
+      - mcp__fleet__card_list  # then the cards of that offer, each naming its catalogue
       - mcp__fleet__project_create       # start a fresh project (repo + its three faces + card)
       - mcp__fleet__project_install       # twin of project_create: ADOPTS an existing repo
       - mcp__fleet__project_open         # third verb: RELAUNCH a project already on the machine
