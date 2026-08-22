@@ -162,6 +162,10 @@ mod() { run bash "$MOD" "$1"; }
   [ "$status" -eq 0 ]
   [ ! -d "$LCARS_MEDIA_ROOT/avatars/avatars" ]
   [ -f "$LCARS_MEDIA_ROOT/avatars/admiral.png" ]
+  # Le mode DÉPLOYÉ est 0755 net — pas 2755 (setgid hérité d'un checkout fleet via `cp -a`, qui
+  # faisait échouer `ensure_dir` au 2e apply), pas 0775 (group-write de la source). Le module POSSÈDE
+  # le mode de son arbre : ce témoin verrouille la convergence, que la source soit setgid ou non.
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT/avatars")" = "755" ]
 }
 
 @test "un repertoire VIDE est un DRIFT — l'existence n'est pas la question posee" {
