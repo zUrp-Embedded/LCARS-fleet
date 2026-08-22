@@ -111,6 +111,13 @@ FAKE
   # apparaitre un utilisateur `lcars` que personne n'avait demande, sur un rail sans desinstalleur.
   # Le nom N'EST PAS un detail non plus — sur ce parc les humains s'appellent `vanille`, `bob`,
   # `alice` ; `lcars` n'a rien de special.
+  #
+  # ⚠ LE DECOR POSE SON `passwd`, ET SANS CA CE TEMOIN MESURE LA MACHINE QUI LE JOUE. Le verdict a
+  # DEUX branches depuis que « rien n'est declare » a cesse d'etre confondu avec « personne ne peut
+  # lancer la fleet » : sur une machine QUI PORTE des humains de fleet, le message les nomme et ne
+  # parle pas de `useradd`. Ce temoin tient la branche « aucun », il doit donc poser une machine
+  # sans aucun — sinon il est vert ou rouge selon le poste, ce qui ne mesure plus rien.
+  passwd_with
   export PROV_HUMAN="$(id -un)"
   mod 'check'
   [ "$status" -eq 1 ]     # check : 1 = DRIFT (le contrat INVERSE les codes entre check et apply)
@@ -125,6 +132,9 @@ FAKE
   # C'est le seul module du rail qui fait APPARAITRE UN UTILISATEUR sur la machine de quelqu'un. Le
   # defaut ne peut pas etre « le faire quand meme » : un apply muet sur ce point serait exactement
   # la mutation qu'on refuse.
+  # Meme raison qu'au temoin precedent : la machine du decor ne porte aucun humain de fleet, sinon
+  # c'est l'autre branche du verdict qu'on lirait.
+  passwd_with
   export PROV_HUMAN="$(id -un)"
   mod 'apply'
   [[ "$output" == *"aucun humain de fleet"* ]] || [[ "$output" == *"DÉCLARÉ"* ]]
@@ -194,4 +204,43 @@ FAKE
       && { echo "apply() delegue a check() : $(basename "$m")"; bad=1; }
   done
   [ "$bad" -eq 0 ]
+}
+
+# ─── « RIEN N'EST DECLARE » N'EST PAS « PERSONNE NE PEUT LANCER LA FLEET » ───────────────────────
+#
+# Le verdict lisait une VARIABLE (`PROV_FLEET_HUMAN`) et concluait sur la MACHINE. Mesure du
+# 2026-08-22, poste portant `lcars` (1001) et `mintos` (1002) : le module annonçait que personne ne
+# pourrait lancer la fleet ici. Les deux comptes passent la regle de GUARD B.
+passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
+  local f="$BATS_TEST_TMPDIR/passwd"
+  printf 'root:x:0:0:root:/root:/bin/bash\n' > "$f"
+  printf 'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n' >> "$f"
+  printf 'siege:x:1000:1000::/home/siege:/bin/bash\n' >> "$f"
+  local l; for l in "$@"; do printf '%s\n' "$l" >> "$f"; done
+  export PASSWD_FILE="$f"
+}
+
+@test "aucun humain DECLARE mais la machine en PORTE : le verdict les NOMME" {
+  passwd_with 'lcars:x:1001:1004::/home/lcars:/bin/bash' 'mintos:x:1002:1005::/home/mintos:/bin/bash'
+  LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'announce_no_fleet_human'
+  [[ "$output" == *"lcars"* ]]
+  [[ "$output" == *"mintos"* ]]
+  # ⚠ ET IL NE DIT PLUS LA PHRASE FAUSSE. Sans cette ligne, un verdict qui nommerait les comptes
+  # tout en affirmant que personne ne peut lancer la fleet passerait ce temoin.
+  [[ "$output" != *"personne ne pourra"* ]]
+}
+
+@test "nobody n'est JAMAIS un humain de fleet — enumerer exige la borne HAUTE" {
+  # Il est sur toute machine, uid 65534 : superieur a UID_MIN et different du siege. La regle basse
+  # seule le compte, et une premiere ecriture annoncait « cette machine en porte deja : nobody ».
+  passwd_with
+  LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'fleet_humans'
+  [ -z "$output" ]
+}
+
+@test "aucun humain DECLARE et la machine n'en porte AUCUN : la phrase redevient vraie" {
+  passwd_with
+  LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'announce_no_fleet_human'
+  [[ "$output" == *"personne ne pourra"* ]]
+  [[ "$output" == *"useradd"* ]]
 }

@@ -109,11 +109,28 @@ first_free_uid() {
 #
 # Mesuré le 2026-08-22, install à froid sans `--fleet-human`. Ce module est le SEUL des vingt-six à
 # déléguer ainsi ; le défaut n'était donc pas visible ailleurs.
+# ⚠ « RIEN N'EST DÉCLARÉ » N'EST PAS « PERSONNE NE PEUT LANCER LA FLEET ». Ce message affirmait la
+# seconde phrase en ayant mesuré la première : il lisait une VARIABLE et concluait sur la MACHINE.
+# Mesuré le 2026-08-22 sur un poste portant `lcars` (uid 1001) et `mintos` (uid 1002) — deux comptes
+# que `is_fleet_human` accepte — pendant que le module annonçait que personne ne pourrait lancer la
+# fleet ici. Un instrument qui répond à côté de sa question est pire que muet : il clôt le sujet.
+#
+# Les deux cas appellent deux gestes différents, donc deux verdicts. Sans aucun compte, il faut en
+# créer un. Avec des comptes non désignés, ils existent mais cette passe ne converge pas leur état
+# per-humain — et c'est CETTE conséquence-là qui est vraie.
 announce_no_fleet_human() {
-  p_drift "aucun humain de fleet DÉCLARÉ — personne ne pourra lancer la fleet ici (l'opérateur, uid
-     $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?'), est le siège et GUARD B le lui interdit).
+  local found; found="$(fleet_humans | paste -sd' ' -)"
+  if [[ -n "$found" ]]; then
+    p_drift "aucun humain de fleet DÉCLARÉ, mais cette machine en porte déjà : $found.
+     Leur état per-humain (~/.lcars, ~/pods, fleet_v2.env, identité git) n'est PAS convergé par
+     cette passe — « provision apply --fleet-human <nom> » désigne celui qui le reçoit."
+  else
+    p_drift "aucun humain de fleet DÉCLARÉ, et cette machine n'en porte aucun — personne ne pourra
+     lancer la fleet ici (l'opérateur, uid $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?'), est le
+     siège et GUARD B le lui interdit).
      Nomme-le, et ce nom AUTORISE sa création : « provision apply --fleet-human <nom> »
      — ou crée-le toi-même : « useradd -m -G $PROV_FLEET_GROUP <nom> »"
+  fi
 }
 
 check() {
