@@ -50,6 +50,13 @@ on:
       # tools.js — les outils MCP declares, et la delegation.
       - 'fleet/lib/fleet/mcp/pod_tools.ex'
       - 'fleet/lib/fleet/mcp/pod_tools/delegation.ex'
+      # catalogue.js — les catalogues d'EXEMPLE, qui vivent HORS de `priv/` (livres comme templates
+      # a forker). La page equipage montre desormais un siege PAR CATALOGUE, celui de demonstration
+      # compris : sans cette ligne, ajouter un siege a `web-demo` ne rebatit pas la vitrine qui le
+      # decrit. Le repertoire entier, comme `fleet/bin/**` et pour la meme raison — la lecture est
+      # DYNAMIQUE (`join(dir, f)` sur un `readdirSync`), donc les fichiers d'aujourd'hui ne sont pas
+      # une liste close.
+      - 'catalogues/**'
   workflow_dispatch:
 
 permissions:

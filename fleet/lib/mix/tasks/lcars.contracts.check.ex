@@ -2136,8 +2136,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Regex.scan(~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/, src)
         |> Enum.reduce(acc, fn [_, name, base, rest], m ->
           case site_resolve(base, rest, m) do
-            {:ok, p} -> Map.put(m, name, p)
-            :error -> m
+            {:ok, p} ->
+              Map.put(m, name, p)
+
+            # ⚠ UNE CONSTANTE DYNAMIQUE N'EST PAS UN PREFIXE, ET LA RECORDER MENTIRAIT. `const path
+            # = join(dir, f)` nomme un FICHIER dont le dernier segment est inconnu ; ranger `dir`
+            # sous le nom `path` ferait resoudre un futur `join(path, 'x')` vers un chemin qui
+            # n'existe pas, et le contrat conclurait sur une lecture imaginaire.
+            #
+            # Ne rien retenir ne perd rien : la passe des USAGES voit le meme `join` et rend
+            # `{dir, :dir}`, c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un
+            # glob, et nommer trois fichiers ne le ferme pas.
+            #
+            # ⚠ CETTE CLAUSE MANQUAIT, et son absence n'etait pas inerte : `site_resolve` rend TROIS
+            # formes depuis toujours, le `case` en connaissait deux. La premiere constante dynamique
+            # du site a fait tomber le contrat par CaseClauseError — un contrat qui CRASHE ne dit
+            # rien, ni pass ni fail (2026-08-22, `assets/github.io/src/lib/catalogue.js:81`).
+            {:dynamic, _} ->
+              m
+
+            :error ->
+              m
           end
         end)
       end)
