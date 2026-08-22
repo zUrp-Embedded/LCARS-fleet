@@ -1,9 +1,0 @@
-{
-  "id": "4",
-  "subject": "Modifier fleet-monitor.py — routing notify dispatch",
-  "description": "Remplacer fire_herald par dispatch_notify + fire_wake dans fleet-monitor.py pour router selon la valeur de notify.",
-  "activeForm": "Modification fleet-monitor.py",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

@@ -1,9 +1,0 @@
-{
-  "id": "8",
-  "subject": "Redémarrer fleet-hub + fleet-monitor",
-  "description": "Relancer fleet-hub.py et fleet-monitor.py (kill + relaunch ou fleet-restart.sh si disponible) pour prendre en compte les modifications.",
-  "activeForm": "Redémarrage fleet-hub et fleet-monitor",
-  "status": "pending",
-  "blocks": [],
-  "blockedBy": []
-}

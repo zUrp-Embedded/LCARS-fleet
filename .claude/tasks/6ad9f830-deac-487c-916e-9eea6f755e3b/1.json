@@ -1,9 +1,0 @@
-{
-  "id": "1",
-  "subject": "Créer les 2 nouveaux fichiers handoff builder→starfleet",
-  "description": "Créer /home/commons/handoff/build-arm-to-starfleet.md et build-x86-to-starfleet.md avec le STATE initial.",
-  "activeForm": "Création des canaux handoff builder→starfleet",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}
