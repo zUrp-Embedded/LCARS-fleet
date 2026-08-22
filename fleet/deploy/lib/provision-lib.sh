@@ -356,13 +356,19 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   wait "$pid" || rc=$?
   [[ -t 1 ]] && printf '\r\033[K'
   PROV_LAST_RC="$rc"
+  # ⚠ ON TESTE LA TAILLE, PAS UNE VALEUR PAR DÉFAUT SUR `[@]`. `"${arr[@]:-}"` sur un tableau VIDE
+  # produit une chaîne vide unique : la boucle tourne une fois avec `c=""`, et seule la garde
+  # `-n "$c"` rattrapait le coup. C'est un comportement de bash, pas un contrat — et une garde qui
+  # dépend d'un effet de bord n'en est pas une.
   local c
-  for c in "${ok_codes[@]:-}"; do
-    [[ -n "$c" && "$rc" == "$c" ]] || continue
-    p_ok "$label — terminé (rc=$rc, code attendu)"
-    rm -f "$out"
-    return 0
-  done
+  if [[ "${#ok_codes[@]}" -gt 0 ]]; then
+    for c in "${ok_codes[@]}"; do
+      [[ "$rc" == "$c" ]] || continue
+      p_ok "$label — terminé (rc=$rc, code attendu)"
+      rm -f "$out"
+      return 0
+    done
+  fi
   if [[ "$rc" -ne 0 ]]; then
     p_fail "commande en échec (rc=$rc) : $*"
     local n; n="$(wc -l < "$out")"

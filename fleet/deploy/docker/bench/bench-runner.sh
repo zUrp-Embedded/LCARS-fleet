@@ -28,7 +28,8 @@
 # compose ; un runner deja enregistre sur une forge MORTE est un zombie — d'ou le `down -v`
 # d'office avant chaque pose : sur un banc, l'histoire du runner ne vaut rien, l'appairage si.
 #
-# USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1> --admin-token <tok>
+# USAGE : bench-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1>
+#                         (--admin-token <tok> | --admin-token-file <chemin>)
 #                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/lcars]
 #                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
@@ -49,6 +50,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-api)    FORGE_API="${2:?}"; shift 2 ;;
     --admin-token)  TOKEN="${2:?}"; shift 2 ;;
+    # ⚠ UN SECRET DANS `argv` EST LISIBLE PAR TOUT L'HOTE dans `/proc` pendant l'appel, et il ressort
+    # dans la trace de tout appelant qui imprime la commande qu'il a jouee. Ce script protege deja
+    # le jeton de `curl` (`-K -`, plus bas) : il doit pouvoir le recevoir sans l'exposer lui-meme.
+    # Le CHEMIN n'est pas un secret ; le fichier porte ses propres droits.
+    --admin-token-file) TOKEN="$(tr -d '[:space:]' < "${2:?}")"; shift 2 ;;
     --reg-token)    REG_GIVEN="${2:?}"; shift 2 ;;
     --instance-url) INSTANCE_URL="${2:?}"; shift 2 ;;
     --network)      NETWORK="${2:?}"; shift 2 ;;
@@ -59,7 +65,7 @@ while [[ $# -gt 0 ]]; do
     *) echo "bench-runner: option inconnue: $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "bench-runner: --forge-api et --admin-token requis" >&2; exit 1; }
+[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "bench-runner: --forge-api et --admin-token(-file) requis" >&2; exit 1; }
 
 # ─── L'AUTH DE LA FORGE PASSE PAR STDIN, JAMAIS PAR ARGV ────────────────────────────────────────
 #
@@ -221,7 +227,12 @@ EOF
 # ET LE JETON NE PASSE PAS EN ARGV POUR AUTANT. Le shim NE transmet PAS les noms qui portent la
 # marque d'un secret, precisement pour ne pas les mettre dans une ligne de commande que /proc
 # expose (cicatrice 6-141). L'env-file est la troisieme voie : le CHEMIN est dans argv, la VALEUR
-# est dans un fichier 0600 qui meurt avec le tmpdir.
+# dans un fichier 0600.
+#
+# ⚠ CE FICHIER RESTE, il ne « meurt » avec rien : le tmpdir est deliberement NON nettoye (cf. plus
+# haut — `override.yml` est un `-f` de compose, que l'effacer casserait). Le jeton d'enregistrement
+# survit donc dans `/tmp` jusqu'au menage du systeme. Il est a usage unique et a courte portee, ce
+# qui rend le cout acceptable ; l'ecrire comme s'il disparaissait, non.
 RUNNER_ENV="$GEN/runner.env"
 umask 077
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_RUNNER_LABELS=%s\n' \
@@ -364,4 +375,7 @@ print(runs[0].get('status','') if runs else '')" 2>/dev/null || true)
   fi
 fi
 
-say "runner de banc operationnel — labels servis : shell, elixir, dood"
+# ⚠ LES LABELS SE LISENT, ILS NE SE RECITENT PAS. Cette ligne en nommait trois en dur : un runner
+# enrole avec un jeu different annoncait ceux d'un autre, et c'est justement ce message qu'un
+# operateur relit pour savoir quel `runs-on` sa forge sait servir.
+say "runner operationnel — labels servis : ${LABELS:-le defaut de runner-compose.yml}"

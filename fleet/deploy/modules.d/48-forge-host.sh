@@ -37,10 +37,10 @@
 # forge-gestures.sh, et c'est pourquoi `--tofu-dir` est devenu un argument ignoré). Chaque passage
 # part donc d'un tfstate vide, ce qui est le cas nominal et non un pis-aller.
 #
-# ⚖ CE BLOC A DÉCRIT UN « RUN TRANSITOIRE DE L'IMAGE » JUSQU'AU 2026-08-22, où l'user a demandé
-# « pourquoi tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette tofu ? ».
-# Réponse mesurée : parce que tofu n'était installé nulle part ailleurs. Une raison d'inventaire,
-# jamais d'architecture.
+# ⚠ LA RECETTE SE JOUE AVEC LE `tofu` DE LA MACHINE, jamais dans un conteneur monté pour l'occasion.
+# Bâtir 1,2 Go d'image pour exécuter 100 ko de recette est un coût d'inventaire — « tofu n'est
+# installé nulle part ailleurs » — déguisé en choix d'architecture. `46-tofu` l'installe ; ce module
+# l'utilise.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -188,6 +188,18 @@ forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null
 # forge, ou elle repond a `http://forge:3000`.
 : "${PROV_RUNNER_PROJECT:=${PROV_FORGE_PROJECT}-runner}"
 
+# ⚠ TROIS LABELS, TOUS PUBLICS, ET C'EST CE QUI REND CE RAIL AUTONOME. Ils couvrent les `runs-on`
+# des workflows livrés — `shell` (deps-upstream, template projet), `dood` (publish, qui fait du
+# docker), `ubuntu-latest` (le gate, et le `runs-on` que tout workflow importé écrit). Le runner
+# tire chaque image lui-même : rien à bâtir, rien à semer.
+#
+# ⚠ PAS DE LABEL `elixir`, ET C'EST DÉLIBÉRÉ. Le servir honnêtement exigerait `lcars-build`, une
+# image LOCALE que ce rail ne construit pas ; le servir avec l'image Elixir de base donnerait un
+# runner qui prend le job du gate et meurt sur `git` introuvable — vert à l'écran, faux au fond.
+# Le gate n'en a plus besoin : il s'installe son BEAM dans le job (`erlef/setup-beam`).
+# Annoncer un label qu'on ne sait pas servir est pire que ne pas l'annoncer.
+: "${PROV_RUNNER_LABELS:=shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
+
 ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond pas
   local tok body
   tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
@@ -199,30 +211,52 @@ ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond p
 }
 
 converge_ci_runner() {
-  local n tok
+  local n
   n="$(ci_runner_count || true)"
   if [[ "${n:-0}" -gt 0 ]]; then
     p_ok "$n runner(s) CI déjà enregistré(s) — la CI de cette forge a une machine"
     return 0
   fi
-  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
-  [[ -n "$tok" ]] || { p_warn "runner CI non enrôlable : aucun jeton master lisible"; return 0; }
+  # On teste la LISIBILITÉ du fichier, on n'en lit pas le contenu : le délégué le lira lui-même.
+  # Un secret qu'on ne met pas dans une variable ne peut être recopié nulle part par accident.
+  [[ -s "$MASTER_TOKEN_FILE" && -r "$MASTER_TOKEN_FILE" ]] \
+    || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($MASTER_TOKEN_FILE)"; return 0; }
 
   p_step "forge du poste : enrôlement du runner CI (projet $PROV_RUNNER_PROJECT, réseau $FORGE_NET)"
+
+  # ⚠ PAS `run_quiet` ICI, ET POUR DEUX RAISONS QUI SE CUMULENT. (1) Il imprime la COMMANDE quand
+  # elle échoue — donc tout secret passé en argument ressort dans la trace et dans le fichier de
+  # capture qu'il conserve. (2) Il émet déjà `p_fail`, ce qui ferait DEUX verdicts pour un seul
+  # fait et rendrait l'apply en `1` (échec) là où le contrat veut `2` (appliqué, drift résiduel).
+  #
+  # Le jeton part par CHEMIN (`--admin-token-file`) : `/proc` de l'hôte ne le voit pas pendant
+  # l'appel, et rien ne peut le recopier dans une trace.
+  local out rc=0
+  out="$(mktemp "${TMPDIR:-/tmp}/forge-runner.XXXXXX")"
   # `DOCKER_BIN` porte la CLI RÉSOLUE — sur ce substrat elle vit dans le montage Docker Desktop et
   # peut être un shim d'escalade. Laisser le délégué chercher « docker » dans le PATH le ferait
   # échouer sur une machine parfaitement saine : rien n'installe docker dans une VM WSL.
-  if DOCKER_BIN="$PROV_DOCKER_BIN" run_quiet \
-       bash "$(repo_root)/fleet/deploy/docker/bench/bench-runner.sh" \
-         --forge-api "$LOCAL_URL/api/v1" --admin-token "$tok" \
-         --network "$FORGE_NET" --project "$PROV_RUNNER_PROJECT"; then
+  DOCKER_BIN="$PROV_DOCKER_BIN" \
+    bash "$(repo_root)/fleet/deploy/docker/bench/bench-runner.sh" \
+      --forge-api "$LOCAL_URL/api/v1" --admin-token-file "$MASTER_TOKEN_FILE" \
+      --network "$FORGE_NET" --project "$PROV_RUNNER_PROJECT" \
+      ${PROV_RUNNER_LABELS:+--labels "$PROV_RUNNER_LABELS"} \
+      ${PROV_RUNNER_ACCEPT_GENERIC:+--accept-generic} \
+      >"$out" 2>&1 || rc=$?
+
+  if [[ "$rc" -eq 0 ]]; then
+    rm -f "$out"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
-  else
-    # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
-    # que la CI n'a pas de machine. Un apply qui MEURT ici rendrait une forge saine inatteignable.
-    p_drift "runner CI NON enrôlé (le délégué a refusé — sa sortie est au-dessus) — la CI restera en attente"
+    return 0
   fi
+
+  # La sortie du délégué SANS la ligne de commande : c'est elle qui dit pourquoi, et elle seule.
+  sed 's/^/     /' "$out" >&2
+  rm -f "$out"
+  # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
+  # que la CI n'a pas de machine. Un apply qui MEURT ici rendrait une forge saine inatteignable.
+  p_drift "runner CI NON enrôlé (rc=$rc — le refus du délégué est au-dessus) — la CI restera en attente"
 }
 
 # LE VERDICT DIT SUR QUOI ELLE ÉCOUTE, parce que c'est la seule chose qu'un opérateur ne peut pas
@@ -280,6 +314,16 @@ announce_password() { # announce_password <login> <mot de passe>
 # ⚠ ET SEULEMENT QUAND SON COMPTE VIENT D'ÊTRE CRÉÉ, c'est-à-dire dans la passe qui pose la
 # structure. Le refaire à chaque apply changerait le mot de passe d'une personne derrière son dos,
 # à chaque convergence, sans qu'aucune ligne ne le rattache à un geste qu'elle aurait demandé.
+# ⚠ POSÉ UNE FOIS, PAS À CHAQUE CONVERGENCE. La recette est idempotente et rend 0 au second tour :
+# son code de sortie ne distingue pas « je viens de créer ce compte » de « il était déjà là ». Sans
+# marqueur, chaque apply reposait donc le mot de passe d'une personne derrière son dos, et invalidait
+# celui qu'elle avait noté au run précédent.
+#
+# Le marqueur porte le LOGIN, pas un booléen : si l'humain intégré change de nom, c'est un autre
+# compte, et il a droit au sien. `PROV_FORGE_ADMIN_RESET` passe outre — c'est la porte par laquelle
+# un opérateur qui a perdu ses identifiants en redemande.
+BUILTIN_PW_MARK="$PROV_TOKENS_DIR/forge-builtin-human.posed"
+
 announce_builtin_human_password() {
   local login tok pw code
   # ⚠ ON DEMANDE LE NOM, ON NE LE DEVINE NI NE LE RECOPIE. Sans humain de fleet nommé, c'est le
@@ -290,6 +334,13 @@ announce_builtin_human_password() {
   login="${PROV_FLEET_HUMAN:-}"
   [[ -n "$login" ]] || login="$(bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   [[ -n "$login" ]] || { p_warn "mot de passe forge de l'humain intégré NON posé : son nom est indéterminable"; return 0; }
+
+  if [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] \
+     && [[ "$(cat "$BUILTIN_PW_MARK" 2>/dev/null || true)" == "$login" ]]; then
+    p_ok "mot de passe forge de « $login » déjà posé — non rejoué (« PROV_FORGE_ADMIN_RESET=1 » en repose un)"
+    return 0
+  fi
+
   tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
 
@@ -304,6 +355,10 @@ announce_builtin_human_password() {
   if [[ "$code" == "200" ]]; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     prov_announce_credential "forge du poste — humain de fleet" "$login" "$pw"
+    # Le marqueur s'écrit APRÈS la pose, jamais avant : posé d'avance, il ferait sauter la pose au
+    # run suivant sur la foi d'un geste qui a échoué.
+    write_atomic "$BUILTIN_PW_MARK" 0600 "root:root" <<<"$login" \
+      || p_warn "marqueur non écrit ($BUILTIN_PW_MARK) — le prochain apply reposera ce mot de passe"
   else
     p_warn "mot de passe forge de « $login » NON posé (HTTP ${code:-aucune réponse}) — son compte garde celui de la création"
   fi
@@ -357,7 +412,8 @@ forge_admin_state() { # forge_admin_state <login>
   #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
   tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
   [[ -n "$tok" ]] || { echo unknown; return 0; }
-  body="$(curl -fsS -m 10 -H "Authorization: token $tok" "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" || {
+  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
+          | curl -K - -fsS -m 10 "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" || {
     # 404 = pas de compte ; tout le reste (forge muette, jeton périmé) n'est pas une réponse sur
     # l'adminité, et se dire « absent » là-dessus ferait créer un compte qui existe peut-être.
     if curl -fsS -m 10 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; then echo absent; else echo unknown; fi
@@ -379,10 +435,12 @@ forge_promote_admin() { # forge_promote_admin <login>
   [[ -n "$tok" ]] || return 1
   # `login_name` et `source_id` sont EXIGÉS par l'endpoint (Gitea les relit pour la source
   # d'authentification) : les omettre rend 422 sur un corps qui a l'air complet.
-  curl -fsS -m 15 -X PATCH \
-       -H "Authorization: token $tok" -H "Content-Type: application/json" \
-       -d "{\"admin\":true,\"login_name\":\"$1\",\"source_id\":0}" \
-       "$LOCAL_URL/api/v1/admin/users/$1" >/dev/null 2>&1
+  # ⚠ NI LE JETON NI LE CORPS PAR `argv` (6-141) : `-K -` fait lire à curl son en-tête ET sa donnée
+  # sur stdin. `-H`/`-d` les mettraient dans la ligne de commande, lisible dans `/proc` de tout
+  # l'hôte pendant l'appel. La même forme est déjà en place trois fonctions plus haut.
+  printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"admin\\":true,\\"login_name\\":\\"%s\\",\\"source_id\\":0}"\n' \
+    "$tok" "$1" \
+    | curl -K - -fsS -m 15 "$LOCAL_URL/api/v1/admin/users/$1" >/dev/null 2>&1
 }
 
 check() {
@@ -766,7 +824,8 @@ apply() {
   # dépôts, sans qu'aucun verdict ne baisse. C'est la forme d'échec la plus chère : un succès qui
   # dit vrai sur ce qu'il a fait, et rien sur ce qu'il n'a pas fait.
 
-  local rc=0
+  local rc=0 tf_out
+  tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
   run_step "structure de la forge" -- env \
     LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
     FORGE_BASE_URL="$LOCAL_URL" \
@@ -792,12 +851,29 @@ apply() {
     `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
     `# fait ne restent d'accord que tant que personne n'en touche un.` \
     LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
-    bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" apply || rc=$?
+    bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" apply 2>&1 | tee "$tf_out" || rc="${PIPESTATUS[0]}"
   rm -rf "$recipe" "$enroll"
   [[ "$rc" -eq 0 ]] \
-    || { p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
-  PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
+    || { rm -f "$tf_out"; p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
+
+  # ⚠ « APPLIQUÉ » N'EST PAS « CHANGÉ », ET LE CODE DE SORTIE NE LES DISTINGUE PAS. La recette est
+  # idempotente : elle rend 0 aussi bien après avoir tout posé qu'après n'avoir rien eu à faire.
+  # Compter un changement à chaque passage rendrait ce module non-idempotent AU BILAN — une
+  # convergence stable annoncerait une mutation à chaque tour, et le compteur cesserait de
+  # distinguer « on a agi » de « on a regardé ».
+  #
+  # `tofu` le DIT, et c'est la seule source qui le sache : « Apply complete! Resources: N added,
+  # M changed, K destroyed », une ligne par module de la recette. Illisible (format changé, sortie
+  # tronquée) → on n'invente pas : on ne compte rien et on le nomme.
+  local moved
+  moved="$(grep -c -E 'Apply complete!.*Resources: [1-9][0-9]* (added|changed|destroyed)|, [1-9][0-9]* (changed|destroyed)' "$tf_out" 2>/dev/null || true)"
+  rm -f "$tf_out"
+  if [[ "${moved:-0}" -gt 0 ]]; then
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
+  else
+    p_ok "structure de la forge déjà conforme — rien à poser"
+  fi
 
   announce_builtin_human_password
   converge_ci_runner

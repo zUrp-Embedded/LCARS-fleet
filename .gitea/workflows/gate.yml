@@ -1,9 +1,17 @@
 name: Gate runtime (I-CBC)
 
 # R7 verrou — `mix gate` mécanique sur push : compile --warnings-as-errors +
-# suite umbrella + lcars.contracts.check. Rouge = le commit/la branche est
-# marqué KO sur la forge. Les dents de la méthodo cadrage, hardware-backed.
-# Runner : host local (label `elixir`), réutilise Elixir 1.18 de la machine.
+# suite + lcars.contracts.check. Rouge = le commit/la branche est marqué KO sur
+# la forge. Les dents de la méthodo cadrage, hardware-backed.
+#
+# ⚠ CE JOB TOURNE SUR `ubuntu-latest`, ET C'EST CE QUI LE REND PORTABLE. Le label `elixir` exigeait
+# une image LOCALE (`lcars-build`), bâtie puis semée dans le daemon du runner : une forge qui ne
+# l'avait pas ne pouvait pas jouer ce gate, et le rail poste — qui ne bâtit aucune image — n'avait
+# donc aucun moyen de servir sa propre CI. `ubuntu-latest` est servi par une image PUBLIQUE que le
+# runner tire seul, et l'environnement BEAM s'installe DANS le job.
+#
+# Elle porte node, ce que les images de label n'avaient pas : `actions/checkout` et `actions/cache`
+# redeviennent utilisables, et le checkout réimplémenté à la main disparaît avec ses trois pièges.
 
 on:
   push:
@@ -16,72 +24,86 @@ on:
 
 jobs:
   gate:
-    runs-on: elixir
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: fleet
     steps:
-      # PAS D'`actions/checkout` — c'est du node, et aucune image de label n'en porte. Le job
-      # mourait a cette ligne, en 0 seconde, sur `exec: "node": executable file not found in
-      # $PATH` -> exit 127 : un gate qui ne rend jamais de verdict sur le depot qu'il garde
-      # (mesure du 2026-08-04, premier runner de banc reellement enregistre). La regle etait deja
-      # ECRITE, ailleurs : le workflow du `project_template` porte le paragraphe qui l'interdit.
-      # Ce fichier lui est anterieur, il etait le seul du depot a la violer.
-      # `working-directory: .` : le defaut du job pointe `fleet`, qui n'existe pas encore.
-      # LE JETON N'EST PAS UNE PRECAUTION, C'EST LA CONDITION : `private: false` cote API ne dit
-      # RIEN de git-over-HTTP, qui refuse l'anonyme sur cette forge (`could not read Username`,
-      # exit 128 — mesure du 2026-08-04). Le jeton de job est fourni par la forge elle-meme et vit
-      # le temps du run ; il marche public comme prive, sur le banc comme sur le NAS.
-      - name: Source (shell — l'image du job n'a ni node ni action)
+      # ⚠ LE JOB JUGE **SON** SHA, JAMAIS LA TÊTE COURANTE. Un run qui a attendu son tour dans la
+      # file obtiendrait sinon un arbre plus récent que celui qu'il annonce juger. `checkout` vise
+      # `github.sha` par défaut sur un push ; le contrôle ci-dessous en fait un invariant vérifié
+      # plutôt qu'une propriété supposée d'une action tierce.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Le verdict porte sur l'arbre annoncé
         working-directory: .
-        env:
-          GATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          git init -q .
-          # ON RECUPERE LE SHA, PAS LA BRANCHE. En fetchant `$GITHUB_REF`, un run qui a attendu son
-          # tour obtenait la tete COURANTE de la branche, constatait `HEAD != GITHUB_SHA` et se
-          # taisait — correctement, mais en se marquant `failure` sur la forge. Mesure du
-          # 2026-08-14 : neuf commits ainsi marques rouges en une seconde chacun apres un
-          # deblocage de file. Indistinguable au premier coup d'oeil d'un rouge de code, et c'est le
-          # signal sur lequel repose la lecture du juge.
-          #
-          # Le SHA est fetchable en direct sur cette forge (verifie : `fetch --depth 1 <url> <sha>`
-          # rend ce commit exact), donc chaque run juge SON arbre plutot que de renoncer. Le
-          # controle ci-dessous reste : il devient un invariant, et un commit retire de la branche
-          # par un force-push fera echouer le fetch — un vrai rouge, a sa vraie place.
-          git -c http.extraheader="Authorization: Basic $(printf '%s:' "$GATE_TOKEN" | base64 -w0)" \
-              fetch --depth 1 "${GITHUB_SERVER_URL%/}/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
-          git checkout -q FETCH_HEAD
-          # Le gate doit dire SUR QUOI il rend son verdict, ou se taire. Un vert sur un autre arbre
-          # est pire qu'un rouge.
           got="$(git rev-parse HEAD)"
-          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA — le serveur a rendu un autre objet"; exit 1; }
+          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA"; exit 1; }
 
-      - name: Toolchain (versions)
+      # ⚠ LES VERSIONS SE LISENT, ELLES NE SE RECOPIENT PAS. `provision-lib.sh` les épingle pour
+      # toutes les machines du parc ; les réécrire ici en ferait une seconde autorité, et c'est
+      # celle qu'on ne relit pas qui finit par diverger d'un `mix compile` qui passe ailleurs.
+      - name: Versions de la toolchain (depuis le provisionnement)
+        id: toolchain
+        working-directory: .
         run: |
-          elixir --version
-          mix --version
+          set -eu
+          lib=fleet/deploy/lib/provision-lib.sh
+          ex="$(sed -n 's/^: "${PROV_ELIXIR_VERSION:=\([^}]*\)}".*/\1/p' "$lib")"
+          otp="$(sed -n 's/^: "${PROV_ELIXIR_OTP_MAJOR:=\([^}]*\)}".*/\1/p' "$lib")"
+          [ -n "$ex" ] && [ -n "$otp" ] || { echo "versions illisibles dans $lib"; exit 1; }
+          echo "elixir=$ex" >> "$GITHUB_OUTPUT"
+          echo "otp=$otp"   >> "$GITHUB_OUTPUT"
+          echo "elixir=$ex otp=$otp"
 
-      - name: Hex/Rebar présents
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
+      - name: Environnement BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ steps.toolchain.outputs.elixir }}
+          otp-version: ${{ steps.toolchain.outputs.otp }}
+
+      # `mix gate` n'est pas que du mix : il enchaîne `shell_gate`, qui joue les suites bats de
+      # `bin/`, `etc/`, `deploy/` et `git-hooks/`. Sans bats, cette moitié du filet ne tourne pas —
+      # et `shell_gate` le DIT (« bats=… MANQUES ») plutôt que de rendre un vert amputé.
+      #
+      # ⚠ L'ACTION OFFICIELLE, PAS UN `apt-get`. Le paquet d'une distro sert la version qu'elle a
+      # figée, qui n'est pas celle sur laquelle les suites sont écrites ; le fournisseur du projet
+      # sert la sienne. Même règle que pour le BEAM juste au-dessus : la CI installe l'outil À LA
+      # VERSION VOULUE dans le job, elle n'hérite pas de ce que l'image traînait.
+      # Les suites d'ici sont du bats NU — aucune n'appelle `bats_load_library` — donc les libs que
+      # cette action pose en plus ne sont pas chargées, et rien ne dépend de leur chemin.
+      - name: Bats (shell_gate)
+        uses: bats-core/bats-action@4.0.0
+
+      - name: Cache Mix
+        uses: actions/cache@v4
+        with:
+          path: |
+            fleet/deps
+            fleet/_build
+          key: mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-${{ hashFiles('fleet/mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-
 
       - name: Deps
         run: mix deps.get
 
       # `MIX_ENV=test` N'EST PAS UN DETAIL D'ENVIRONNEMENT : `config/runtime.exs` est un fichier de
       # BOOT, et hors test il exige les ports que `bin/fleet_v2` calcule par humain — d'ou
-      # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien (mesure du
-      # 2026-08-04). C'est exactement la ligne que joue `etc/install.sh` avant de poser la release :
-      # le gate de la CI et le gate du build ne doivent pas etre deux gates.
+      # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien. C'est
+      # exactement la ligne que joue `etc/install.sh` avant de poser la release : le gate de la CI
+      # et le gate du build ne doivent pas etre deux gates.
       #
-      # SANS BORNE, LE JUGE SE TAIT AU LIEU D'ECHOUER. Deux runs de banc ont cale A L'INTERIEUR de ce
-      # pas, a deux endroits differents — l'un apres la suite, l'autre pendant la compilation des
-      # deps : ce n'est pas un chemin de code, c'est la machine. Le second a garde l'unique runner
-      # plus de deux heures, file bloquee, sans verdict et sans rouge. Un gate sans fin ne rend pas
-      # un verdict tardif, il n'en rend aucun — et l'absence de rouge se lit comme du vert.
+      # SANS BORNE, LE JUGE SE TAIT AU LIEU D'ECHOUER. Deux runs ont calé A L'INTERIEUR de ce pas, a
+      # deux endroits differents — l'un apres la suite, l'autre pendant la compilation des deps : ce
+      # n'est pas un chemin de code, c'est la machine. Le second a garde l'unique runner plus de deux
+      # heures, file bloquee, sans verdict et sans rouge. Un gate sans fin ne rend pas un verdict
+      # tardif, il n'en rend aucun — et l'absence de rouge se lit comme du vert.
       # La borne est en `timeout(1)`, PAS en `timeout-minutes:` du job : le shell est execute par le
       # runner quoi qu'il arrive, tandis que la cle YAML dependrait de ce que cette version
       # d'act_runner en fait — et une garde qu'on ne peut pas prouver ne garde rien. Exit 124 = mur.

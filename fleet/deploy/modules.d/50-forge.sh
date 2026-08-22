@@ -250,13 +250,16 @@ ensure_passwords_entries() {
 # (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
 # COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
 # Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
+# ⚠ LE JETON NE PASSE JAMAIS PAR `argv` (6-141) : `-H "Authorization: token $tok"` le rend lisible
+# dans `/proc` de tout l'hôte pendant l'appel. `-K -` fait lire l'en-tête à curl sur stdin ; un
+# stdin VIDE est une requête anonyme parfaitement valide, donc la branche « pas de jeton » n'a
+# besoin d'aucune forme à part.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
-  local -a auth=()
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
-  curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
-       "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
+  { [[ -n "$tok" ]] && printf 'header = "Authorization: token %s"\n' "$tok" || true; } \
+    | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 \
+        "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
 }
 
 # TROIS états, pas deux — et c'est tout le correctif. `public_members/<u>` rend 404 aussi bien pour
@@ -365,8 +368,9 @@ check_ci_runner() {
     return 0
   }
   tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE")"
-  body="$(curl -fsS -m 10 -H "Authorization: token $tok" \
-          "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
+          | curl -K - -fsS -m 10 \
+              "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
   # Une API muette n'est PAS « zero runner » : la portee du jeton suffit a expliquer le silence, et
   # conclure a l'absence enverrait enroler un runner qui existe deja.
@@ -446,8 +450,9 @@ check_human_onboardable() {
   p_ok "compte forge de l'humain ($PROV_HUMAN)"
   [[ -r "$tokfile" ]] || { p_drift "token système illisible ($tokfile) — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0; }
   tok="$(tr -d '[:space:]' < "$tokfile")"
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" \
-          "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
+  code="$(printf 'header = "Authorization: token %s"\n' "$tok" \
+          | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 \
+              "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
   case "$code" in
     204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
     404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « ./docker.sh forge-apply »" ;;
