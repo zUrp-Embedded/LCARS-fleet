@@ -237,9 +237,43 @@ apply() {
     else
       p_fail "template absent ($TEMPLATE) — lance d'abord 60-deploy"
     fi
-  elif ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
-    # L'apply ne réécrit JAMAIS le fichier de l'humain : il converge SA part et DIT le reste.
-    p_warn "fleet_v2.env sans FORGE_BASE_URL — fleet_v2 start refusera ; édite $ENV_FILE (le doctor le comptera en drift tant que ce n'est pas fait)"
+  fi
+
+  # ─── L'ADRESSE DE LA FORGE CONVERGE AUSSI, ET POUR LE MÊME MOTIF QUE LE JETON ───────────────────
+  #
+  # ⚠ CE BLOC DISAIT, IL NE FAISAIT PAS — et l'asymétrie avec le câblage du jeton juste en dessous
+  # n'était pas un arbitrage, c'était un oubli. Le raisonnement écrit là-bas s'applique mot pour
+  # mot : « une clé ABSENTE n'est pas un choix : le runtime ne la lit pas, il RETOMBE sur un dernier
+  # recours. Une clé PRÉSENTE est un choix, et celui-là on n'y touche jamais. »
+  #
+  # CE QUE LE `p_warn` COÛTAIT, mesuré le 2026-08-22 sur une WSL neuve. Le seed est SEED-ONCE ; la
+  # première install de cette machine a semé l'env pendant que `48-forge-host` échouait, donc sans
+  # URL. Aux passages suivants la forge existait, l'URL était connue — et le fichier n'était jamais
+  # complété. Un `p_warn` ne baisse aucun verdict : le module rendait « convergé », puis
+  # `75-projects` échouait sur `{:config, {:missing, :base_url}}`, un message qui ne nomme pas sa
+  # cause. Le rail savait, et ne le disait qu'au `--check` que personne ne joue après un apply vert.
+  #
+  # ⚠ ET C'EST LE CHEMIN DU RE-RUN, celui qu'un opérateur prend RÉELLEMENT après un échec. Une
+  # valeur seed-once dérivée d'une ressource qui peut ne pas exister encore ne converge JAMAIS toute
+  # seule : elle fige le premier état, y compris quand cet état est un accident.
+  if [[ -f "$ENV_FILE" ]] && [[ -n "$PROV_FORGE_URL" ]] \
+     && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
+    local tmpu
+    tmpu="$(as_human mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (adresse forge)"; verdict_apply; }
+    {
+      cat "$ENV_FILE"
+      echo ""
+      echo "# — posé par 70-human : l'adresse de la forge, connue du provisionnement —"
+      echo "FORGE_BASE_URL=$PROV_FORGE_URL"
+    } > "$tmpu"
+    as_human chmod 0600 "$tmpu"
+    as_human mv -f "$tmpu" "$ENV_FILE"
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$PROV_FORGE_URL)"
+  elif [[ -f "$ENV_FILE" ]] && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
+    # Le trou est réel mais l'adresse est inconnue : rien à converger, et ça DOIT peser sur le
+    # verdict — sinon on rend « convergé » sur un état où `fleet_v2 start` refusera.
+    p_drift "fleet_v2.env sans FORGE_BASE_URL et aucune forge connue — fleet_v2 start refusera ; monte la forge (48-forge-host) ou édite $ENV_FILE"
   fi
 
   # ─── LE CÂBLAGE DU JETON SYSTÈME CONVERGE, IL NE S'INSTRUIT PLUS ────────────────────────────────

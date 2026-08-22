@@ -127,3 +127,47 @@ account() { # account <full_name> <email>
   ! grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   ! grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }
+
+# ─── L'ADRESSE DE LA FORGE CONVERGE, ELLE NE S'INSTRUIT PLUS ────────────────────────────────────
+#
+# Mesure du 2026-08-22, WSL neuve. Le seed de `fleet_v2.env` est SEED-ONCE : la premiere install de
+# cette machine l'a seme pendant que `48-forge-host` echouait, donc SANS `FORGE_BASE_URL`. Aux
+# passages suivants la forge existait et l'URL etait connue — le fichier n'etait jamais complete.
+#
+# Un `p_warn` ne baisse aucun verdict : `70-human` rendait « converge », puis `75-projects` echouait
+# sur `{:config, {:missing, :base_url}}` — un message qui ne nomme pas sa cause.
+#
+# Le module portait DEJA l'argument, applique au jeton systeme : « une cle ABSENTE n'est pas un
+# choix ; une cle PRESENTE en est un, et celui-la on n'y touche jamais ». L'asymetrie entre les deux
+# cles n'etait pas un arbitrage, c'etait un oubli.
+
+@test "l'adresse de la forge se CABLE quand elle est connue et absente du fichier" {
+  code() { grep -vE '^\s*#' "$SRC"; }
+  code | grep -q 'FORGE_BASE_URL=\$PROV_FORGE_URL'
+  # la garde est bien « absente ET connue », jamais « ecrase »
+  code | grep -q "! grep -q '\^FORGE_BASE_URL=' \"\$ENV_FILE\""
+  code | grep -q 'PROV_FORGE_URL" \]\]'
+}
+
+@test "une cle PRESENTE n'est jamais reecrite — c'est un choix de l'humain" {
+  # Le module ne doit porter AUCUN sed/awk qui remplace une ligne FORGE_BASE_URL existante : la
+  # convergence porte sur le trou, pas sur la decision.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  ! grep -qE "sed .*FORGE_BASE_URL|s\|\^FORGE_BASE_URL" <<<"$code"
+}
+
+@test "URL inconnue ET cle absente = DRIFT, jamais un warn qui laisse le verdict vert" {
+  # C'est ce qui a coute : `p_warn` ne pese sur rien, donc l'apply rendait vert sur un etat ou
+  # `fleet_v2 start` refuse, et le module suivant tombait sans nommer la cause.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'p_drift "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
+  ! grep -q 'p_warn "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
+}
+
+@test "les deux cles derivees suivent la MEME regle — jeton et adresse" {
+  # Elles vivent dans le meme fichier, viennent toutes deux du provisionnement, et sont toutes deux
+  # inutilisables si absentes. Une seule des deux convergeait.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'FORGE_TOKEN_FILE=\$PROV_SYSTEM_TOKEN_FILE' <<<"$code"
+  grep -q 'FORGE_BASE_URL=\$PROV_FORGE_URL' <<<"$code"
+}
