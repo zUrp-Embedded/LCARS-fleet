@@ -83,6 +83,12 @@ RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 FLEET_HUMAN=""       # posé par --fleet-human : NOMMER le compte, c'est autoriser sa création
 WITH_BENCH=0
+# ⚠ LE CONSENTEMENT TRAVERSE L'ESCALADE. Ce rail se ré-exécute sous `sudo` (plus bas) ; sans ce
+# drapeau la seconde instance rejoue tout l'accueil et REDEMANDE la validation — une seconde fois,
+# et cette fois APRÈS le mot de passe, quand l'opérateur croit avoir fini de décider. Il passe en
+# ARGUMENT et non en variable d'environnement : `sudo` fait `env_reset`, c'est le piège que la
+# construction de REEXEC_ENV documente déjà quatre fois.
+CONSENTED=0
 declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
@@ -92,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --workstation)    RAIL=workstation; shift ;;
     --box)            RAIL=box; shift ;;
     --bench)          WITH_BENCH=1; shift ;;
+    --consented)      CONSENTED=1; shift ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
     # ⚠ `--substrate` EST AUSSI LU ICI, PAS SEULEMENT TRANSMIS. Il était en passe-plat pur : la porte
@@ -383,7 +390,7 @@ if [[ "$RAIL" == "workstation" ]]; then
   # trouver — recopié, hérité d'une image, posé par un outil tiers — et le bloc l'annonçait alors
   # comme condamné. Promettre une destruction qui n'aura pas lieu est du même ordre qu'en taire une
   # qui aura lieu : dans les deux cas l'opérateur consent à autre chose que ce qui se passe.
-  if [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
+  if [[ "$CONSENTED" -eq 0 ]] && [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
     echo "  C'est la frontière de sécurité de la boîte (C: fermé, interop coupé), donc il n'est pas"
@@ -396,6 +403,7 @@ if [[ "$RAIL" == "workstation" ]]; then
 fi
 
 # ─── BANDEAU DE LA BRANCHE CHOISIE, ET LUI SEUL ─────────────────────────────
+if [[ "$CONSENTED" -eq 0 ]]; then
 cat <<EOF
 
 ${AMBER}    ______________________________________________________
@@ -470,6 +478,7 @@ echo ""
   echo "  [install] Pas de TTY — continue automatiquement (le rail est déjà choisi)."
   [[ -n "${LCARS_COLOR_HINT:-}" ]] && echo "  [install] Sortie non-terminal : couleurs coupées (PROV_COLOR=1 pour les garder dans le log)."
 }
+fi
 
 # ─── LA BRANCHE BOÎTE : aucune escalade, on délègue à la porte docker ───────
 # Elle ne demande PAS root, et c'est la promesse auditée du rail : « rien hors de ton clone et de
@@ -566,7 +575,7 @@ fi
 if [[ "$EUID" -ne 0 ]]; then
   echo ""
   echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
-  REEXEC_ARGS=(--workstation --repo "$REPO_URL" --branch "$BRANCH")
+  REEXEC_ARGS=(--workstation --repo "$REPO_URL" --branch "$BRANCH" --consented)
   [[ "$DOCTOR_MODE" -eq 1 ]] && REEXEC_ARGS+=(--check)
   # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO (env_reset), ET C'EST LE TROISIEME PIEGE DE CETTE FAMILLE
   # MESURE SUR CETTE MACHINE. Les reglages de provisionnement posés AVANT l'escalade meurent en la
