@@ -122,13 +122,37 @@ set -euo pipefail
 # sur la machine Windows. ⚖ user 2026-08-18, porté mot pour mot par `bench-up.sh` ; on ne le
 # re-découvre pas ici. Le runner, lui, tourne dans cette même VM : il y atteint la forge.
 : "${PROV_FORGE_BIND:=0.0.0.0}"
-: "${PROV_FORGE_ADVERTISE:=$PROV_FORGE_BIND}"
-# Un joker d'écoute n'est pas une adresse qu'on compose : si on annonce `0.0.0.0`, on retombe sur
-# l'adresse de sortie de la machine, qui est ce qu'un tiers peut réellement taper.
-case "$PROV_FORGE_ADVERTISE" in
-  0.0.0.0|::|"") PROV_FORGE_ADVERTISE="$(lan_addr 2>/dev/null || true)"
-                 [[ -n "$PROV_FORGE_ADVERTISE" ]] || PROV_FORGE_ADVERTISE=127.0.0.1 ;;
-esac
+# ─── UNE SEULE DÉRIVATION DE « QUELLE ADRESSE UN TIERS PEUT COMPOSER » ──────────────────────────
+#
+# ⚠ CE BLOC AVAIT LA SIENNE, ET ELLE IGNORAIT LE NAT. Il faisait `lan_addr` directement ; sous WSL
+# en NAT — le défaut de WSL et de Docker Desktop — ça rend l'adresse INTERNE de la VM, qui n'est
+# routée depuis aucune autre machine, Windows compris. Mesuré le 2026-08-22 sur une instance
+# fraîche : `forge.public.url` valait `http://172.25.115.129:3000`, une adresse que le navigateur de
+# l'hôte ne peut pas atteindre.
+#
+# ⚠ ET LE VOISIN SAVAIT DÉJÀ. `55-deck-oidc` appelle `advertise_addr`, qui connaît le NAT et rend
+# `localhost` AVEC son motif. Deux dérivations d'un même fait, et c'est celle qui ignorait le NAT
+# qui écrivait le fichier que `50-forge`, `55-deck-oidc` et le deck relisent. C'est exactement le
+# symptôme signalé le 2026-08-21 sur .63, dans l'autre sens : le bouton « s'identifier sur la forge »
+# envoyait sur une adresse que le visiteur ne pouvait pas composer.
+#
+# ⚠ LE MOTIF REMONTE AVEC L'ADRESSE. `advertise_addr` pose `PROV_ADVERTISE_WHY` — vide quand
+# l'adresse vaut quelque chose, une phrase quand elle ne vaut que localement. Le jeter reviendrait à
+# annoncer sans savoir ce qu'on annonce, et la lib le dit en toutes lettres.
+#
+# ⚠ ON LUI PASSE LE CHOIX ENTIER, PAS SEULEMENT L'ABSENCE — et la première écriture de ce bloc s'y
+# est trompée. Elle ne dérivait que si `PROV_FORGE_ADVERTISE` était VIDE, donc un opérateur qui
+# posait explicitement `0.0.0.0` obtenait `http://0.0.0.0:21000` : une adresse que personne ne peut
+# taper, quelle que soit la main qui l'a posée. Un joker d'écoute n'est pas une adresse, et ça ne
+# dépend pas de qui l'a écrit.
+#
+# `advertise_addr` traite déjà les trois cas dans un seul endroit : un bind PRÉCIS est l'adresse, un
+# JOKER se dérive, et la dérivation connaît le NAT. Lui passer `${ADVERTISE:-$BIND}` fait porter les
+# trois par la lib — c'est ce que « une seule dérivation » veut dire.
+: "${PROV_FORGE_ADVERTISE:=}"
+advertise_addr "${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}"
+PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
+PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 
 FORGE_NET="${PROV_FORGE_PROJECT}_default"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-forge-1"
@@ -154,7 +178,13 @@ forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null
 forge_reach_note() {
   case "$PROV_FORGE_BIND" in
     127.0.0.1|localhost|::1) printf ' — cette machine SEULE' ;;
-    *) printf ' — OUVERTE sur %s, composable en %s' "$PROV_FORGE_BIND" "$PUBLIC_URL" ;;
+    *) printf ' — OUVERTE sur %s, composable en %s' "$PROV_FORGE_BIND" "$PUBLIC_URL"
+       # ⚠ ET QUAND L'ADRESSE NE VAUT QUE LOCALEMENT, ON LE DIT ICI. Sans cette ligne, le verdict
+       # annonce « OUVERTE sur 0.0.0.0 » sous WSL en NAT — vrai du bind, faux de ce qu'un tiers
+       # peut atteindre. `advertise_addr` a déjà écrit pourquoi ; le jeter serait annoncer sans
+       # savoir ce qu'on annonce.
+       [[ -n "${PROV_FORGE_ADVERTISE_WHY:-}" ]] && printf ' (%s)' "$PROV_FORGE_ADVERTISE_WHY"
+       return 0 ;;
   esac
 }
 

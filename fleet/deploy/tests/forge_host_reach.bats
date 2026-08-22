@@ -492,3 +492,43 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # et ce n'est PAS 3000
   [ "$from_module" != "3000" ]
 }
+
+@test "UNE SEULE derivation de l'adresse annoncee — la lib, jamais lan_addr en direct" {
+  # ⚠ CE MODULE AVAIT LA SIENNE, ET ELLE IGNORAIT LE NAT. Il appelait `lan_addr` directement ; sous
+  # WSL en NAT ca rend l'adresse INTERNE de la VM, routee depuis aucune autre machine, Windows
+  # compris. Mesure du 2026-08-22 sur une instance fraiche : `forge.public.url` valait
+  # `http://172.25.115.129:3000`.
+  #
+  # `55-deck-oidc` savait deja : il appelle `advertise_addr`, qui connait le NAT. Deux derivations
+  # d'un meme fait — « quelle adresse un tiers peut composer » — et c'est celle qui l'ignorait qui
+  # ecrivait le fichier que trois modules relisent.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  # ⚠ ON EPINGLE L'APPEL, PAS SA FORME D'ARGUMENT. Ce temoin exigeait `advertise_addr
+  # "$PROV_FORGE_BIND"` mot pour mot et est tombe des que l'argument est devenu
+  # `${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}` — une correction qui RENFORCE la regle qu'il garde.
+  code | grep -qE 'advertise_addr "\$\{?PROV_FORGE'
+  ! code | grep -q 'lan_addr'
+}
+
+@test "sous WSL en NAT, l'adresse annoncee est COMPOSABLE, et le motif remonte" {
+  # Le fond : `0.0.0.0` publie DANS la VM, pas sur Windows. Annoncer l'IP de la VM promet une
+  # adresse que le navigateur de l'hote ne peut pas atteindre.
+  detect_substrate() { echo wsl; }
+  wsl_networking_mode() { echo nat; }
+  export -f detect_substrate wsl_networking_mode
+  head_sh 'echo "$PROV_FORGE_ADVERTISE|${PROV_FORGE_ADVERTISE_WHY:0:12}"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "localhost|WSL2 en mode"* ]]
+}
+
+@test "un ADVERTISE pose par l'operateur reste souverain — on ne derive que l'absence" {
+  PROV_FORGE_ADVERTISE=10.9.9.9 head_sh 'echo "$PROV_FORGE_ADVERTISE|$PUBLIC_URL"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "10.9.9.9|http://10.9.9.9:"* ]]
+}
+
+@test "le verdict DIT quand l'adresse ne vaut que localement" {
+  # Sans ca, il annonce « OUVERTE sur 0.0.0.0 » — vrai du bind, faux de ce qu'un tiers atteint.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | sed -n '/^forge_reach_note()/,/^}/p' | grep -q 'PROV_FORGE_ADVERTISE_WHY'
+}
