@@ -31,6 +31,7 @@ kind: CapabilityProfile
 
 metadata:
   name: writer
+  # vitrine: Il produit le contenu | L'autre producteur de l'exemple : il rédige, là où le dev code. Deux producteurs, un catalogue.
   containment: bwrap
   role_index: 3
 

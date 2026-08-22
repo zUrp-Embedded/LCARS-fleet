@@ -24,6 +24,7 @@
 kind: ReservedSeat
 metadata:
   name: vulcan
+  # vitrine: Le siège réservé | Vide aujourd'hui. Il attend un auditeur externe, tournant sous un autre modèle que le reste de la flotte — un regard qui ne partage pas nos angles morts.
   # 0..7 taken (starfleet 0, architect 1, gatekeeper 2, engineer 3, qualifier 4, reviewer 5,
   # scoper 6, scribe 7). Uniqueness is enforced by the contracts check (role_index scan).
   role_index: 8

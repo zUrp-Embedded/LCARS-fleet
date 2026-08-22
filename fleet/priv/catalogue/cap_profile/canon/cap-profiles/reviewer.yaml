@@ -4,6 +4,7 @@
 kind: CapabilityProfile
 metadata:
   name: reviewer
+  # vitrine: Il juge la qualité | Pas la conformité : la facture. Ce que vous auriez dit en relecture si vous aviez eu le temps de la faire.
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.

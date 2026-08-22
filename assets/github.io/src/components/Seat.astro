@@ -1,12 +1,23 @@
 ---
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { u } from '../lib/href.js';
-// Le siege lit son avatar dans assets/avatars du depot (recopie en public/ au build).
-// Un siege du canon sans avatar rendrait une image cassee : on prefere le savoir au build.
+// Le siege lit son avatar dans assets/avatars du depot (recopie en public/ au build). Un role SANS
+// avatar servi (ex. un catalogue d'exemple qui ne fournit pas de SVG) tombe sur un IDENTICON —
+// l'initiale dans sa couleur — au lieu d'une image cassee. Meme repli que la forge (« sans lui,
+// l'identicon »). L'existence est verifiee au build sur la source `assets/avatars/<name>.svg`.
 // Le src passe par u() : sous une base (/doc/ dans le deck) il DOIT se composer comme tout lien
 // interne, sinon il part a la racine et 404 — le deck ne sert que /doc/... et /static/...
 const { name, role, color, ghost = false } = Astro.props;
+const here = dirname(fileURLToPath(import.meta.url));
+const hasAvatar = existsSync(join(here, '..', '..', '..', 'avatars', `${name}.svg`));
 ---
 <div class:list={['seat', ghost && 'ghost']}>
-  <div class="face" style={`--seat:${color}`}><img alt="" src={u(`/avatars/${name}.svg`)} /></div>
+  <div class="face" style={`--seat:${color}`}>
+    {hasAvatar
+      ? <img alt="" src={u(`/avatars/${name}.svg`)} />
+      : <span class="identicon">{name.charAt(0).toUpperCase()}</span>}
+  </div>
   <div class="who"><b>{name.charAt(0).toUpperCase() + name.slice(1)}</b><i>{role}</i><span><slot /></span></div>
 </div>

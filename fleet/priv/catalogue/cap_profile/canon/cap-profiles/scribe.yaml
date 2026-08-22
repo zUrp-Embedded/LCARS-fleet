@@ -11,6 +11,7 @@
 kind: CapabilityProfile
 metadata:
   name: scribe
+  # vitrine: Il produit la doctrine | Même métier, autre face : il rédige les documents du projet, avec le code en référence lecture seule.
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID. 0..6 taken (architect/starfleet collapsed on 0).

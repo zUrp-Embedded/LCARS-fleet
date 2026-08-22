@@ -4,6 +4,7 @@
 kind: CapabilityProfile
 metadata:
   name: engineer
+  # vitrine: Il produit le code | Reçoit un brief, implémente, livre. Un pod par ticket : son contexte suit la mission du début à la fin.
   containment: bwrap
   # LE PREMIER PRODUCTEUR QUI LE DIT, et `architect.yaml` avait ecrit d'avance la regle :
   # « tous les autres roles restent au defaut vendor-only [...] c'est une DECLARATION, pas une

@@ -27,6 +27,7 @@ kind: CapabilityProfile
 
 metadata:
   name: code-reviewer
+  # vitrine: Il juge le code | Le juge de conformité de l'exemple, l'équivalent du qualifier, nommé pour ce catalogue.
   containment: bwrap
   role_index: 5
 

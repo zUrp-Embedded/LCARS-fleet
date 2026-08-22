@@ -25,6 +25,7 @@ kind: CapabilityProfile
 metadata:
   # Le nom appele par les cartes (`steps.<etape>.role: dev`) et par le jury.
   name: dev
+  # vitrine: Il produit le code | Le producteur de ce catalogue d'exemple — même métier que l'engineer de la fleet, sous un autre nom.
 
   # bwrap = l'agent tourne dans un bac a sable. C'est la seule valeur a utiliser.
   # L'autre valeur de l'enum (`none`) fait tourner l'agent a nu sur la machine :

@@ -4,6 +4,7 @@
 kind: CapabilityProfile
 metadata:
   name: gatekeeper
+  # vitrine: Il scelle | Il vérifie que l'arbre fusionné est bien celui qui a été jugé, et scelle la décision de promotion. C'est aussi lui qu'on appelle quand un jugement ne tranche pas.
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT).
   # PER-PROJECT (reorg 2026-07-19, cf. DESIGN-carte-des-roles §7): the gatekeeper is a project-bound
