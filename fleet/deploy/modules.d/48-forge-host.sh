@@ -440,10 +440,30 @@ apply() {
   # était mort sans passer par un seul `p_fail`.
   #
   # La règle : une commande dont on VEUT lire l'échec ne doit pas pouvoir tuer le lecteur.
-  local ref_catalogue
-  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1 || true)"
-  [[ -d "$ref_catalogue" ]] \
-    || { p_fail "catalogue de référence introuvable — « mix run -e 'IO.puts(Fleet.Catalogue.root())' » ne rend rien d'utilisable dans $tree (rendu : « ${ref_catalogue:-<vide>} »)"; verdict_apply; }
+  # ⚠ ON ÉTIQUETTE LA RÉPONSE, ON NE DEVINE PAS QUELLE LIGNE C'EST. `mix` écrit son avancement sur
+  # STDOUT — « Compiling 214 files », « Generated lcars_fleet app » — mêlé à ce que le script
+  # imprime. Un `tail -n1` prend donc la dernière ligne de BAVARDAGE quand il y en a après, et rien
+  # du tout quand la compilation échoue.
+  #
+  # Mesuré le 2026-08-22, les deux machines, la même ligne : .63 rendait « Generated lcars_fleet
+  # app », la WSL rendait le vide. Deux symptômes, une cause — je lisais une position au lieu d'un
+  # nom.
+  #
+  # ⚠ ET LA SORTIE NE SE JETTE PAS. `2>/dev/null` effaçait la seule chose qui aurait nommé la cause
+  # du vide. On la garde, et l'échec en cite la fin : un module qui échoue doit dire POURQUOI, pas
+  # seulement QUE.
+  local ref_catalogue refout
+  refout="$(mktemp "${TMPDIR:-/tmp}/prov-catroot.XXXXXX")" \
+    || { p_fail "tmp impossible pour la dérivation du catalogue"; verdict_apply; }
+  as_human env -C "$tree" mix run --no-start \
+    -e 'IO.puts("LCARS_CATALOGUE_ROOT=" <> Fleet.Catalogue.root())' >"$refout" 2>&1 || true
+  ref_catalogue="$(grep -m1 '^LCARS_CATALOGUE_ROOT=' "$refout" | cut -d= -f2- || true)"
+  if [[ ! -d "$ref_catalogue" ]]; then
+    p_fail "catalogue de référence introuvable dans $tree (rendu : « ${ref_catalogue:-<rien>} »)"
+    p_fail "dernières lignes de mix : $(tail -n3 "$refout" | tr '\n' '·')"
+    rm -f "$refout"; verdict_apply
+  fi
+  rm -f "$refout"
 
   # Le dossier de sortie appartient à l'humain : c'est lui qui joue la dérivation.
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"

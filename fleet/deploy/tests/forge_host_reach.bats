@@ -389,8 +389,12 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # ⚠ ON EPINGLE LA REGLE, PAS LA PHRASE. Ce temoin citait le message d'erreur mot pour mot et est
   # tombe a la premiere reformulation. Ce qui doit tenir : un chemin qui ne repond pas est un ECHEC,
   # pas un depot silencieusement saute.
-  code | grep -qE '\[\[ -d "\$ref_catalogue" \]\]'
-  code | grep -A1 -E '\[\[ -d "\$ref_catalogue" \]\]' | grep -q 'p_fail'
+  # ⚠ LA POLARITE DE LA GARDE N'EST PAS LA REGLE. Ce temoin epinglait `[[ -d "$ref_catalogue" ]]`
+  # mot pour mot et est tombe quand la garde est devenue `if [[ ! -d … ]]` — une reecriture qui ne
+  # change RIEN a ce qu'elle protege. On exige donc : le chemin derive est teste comme repertoire, et
+  # la branche d'echec appelle `p_fail`.
+  code | grep -qE '\-d "\$ref_catalogue"'
+  code | grep -A3 -E '\-d "\$ref_catalogue"' | grep -q 'p_fail'
 }
 
 @test "le roster NOMME son catalogue — \`--catalogue\` n'est facultatif qu'avec \`--image\`" {
@@ -403,4 +407,18 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   d="$(code | grep -n 'Fleet.Catalogue.root()' | head -1 | cut -d: -f1)"
   r="$(code | grep -n 'enroll-catalogue.sh' | head -1 | cut -d: -f1)"
   [ "$d" -lt "$r" ]
+}
+
+@test "la racine du catalogue est ETIQUETEE, jamais lue a une POSITION" {
+  # `mix` ecrit son avancement sur STDOUT — « Compiling N files », « Generated lcars_fleet app » —
+  # mele a ce que le script imprime. Un `tail -n1` prend la derniere ligne de BAVARDAGE quand il y
+  # en a apres, et rien du tout quand la compilation echoue. Mesure du 2026-08-22, les deux
+  # machines, la meme ligne : .63 rendait « Generated lcars_fleet app », la WSL rendait le vide.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'LCARS_CATALOGUE_ROOT='
+  code | grep -q "grep -m1 '\^LCARS_CATALOGUE_ROOT='"
+  ! code | grep -E 'Fleet.Catalogue.root' | grep -q 'tail -n1'
+  # et la sortie de mix n'est PAS jetee : sans elle, un vide n'a pas de cause
+  ! code | grep -E 'Fleet.Catalogue.root' | grep -q '2>/dev/null'
+  code | grep -q 'dernières lignes de mix'
 }
