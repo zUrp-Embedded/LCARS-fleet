@@ -397,7 +397,22 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
   # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
   grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
-  grep -q 'ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"' "$g"
+
+  # ⚠ `ENTRYPOINT` ETAIT LE TROISIEME DE CETTE LISTE, ET IL N'Y EST PLUS — son defaut ne se recable
+  # plus, il se RESOUT. Il etait bien un chemin d'image, et il a coute une install le 2026-08-22 sur
+  # un poste : « /opt/lcars/entrypoint.sh: No such file or directory », rendu a l'operateur comme
+  # « pas de source installable ».
+  #
+  # UNE SURCHARGE DE PLUS ICI N'AURAIT RIEN REPARE, et c'est pour ca que la reponse est ailleurs :
+  # le verbe qui casse est `lcars catalogue install`, un geste HUMAIN que ce module n'appelle
+  # jamais. Recabler dans 48 aurait rendu vert le rail qui ne passe pas par la ligne cassee.
+  #
+  # Et il n'y avait rien a copier : `62-runtime-helpers` pose deja l'arbre `deploy/`
+  # (`EMBEDDED=(deploy etc)`), donc le fichier EST la, sous un autre chemin. Le geste se cherche
+  # donc lui-meme, dans les deux dispositions ou il vit — comportement tenu par quatre temoins de
+  # `forge_gestures.bats`.
+  ! grep -qF 'ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"' "$g"
+  grep -qF 'ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"' "$g"
   # et 48 les nomme tous les deux
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_DEMO_CATALOGUE='

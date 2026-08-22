@@ -85,7 +85,48 @@ STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 # retiree avec le depot modele le 2026-08-21. Le repli sur l'ancien nom part avec elle : personne ne
 # le posait (verifie sur tout le depot), donc le garder ne compatibilisait rien et faisait croire a
 # un cablage.
-ENTRYPOINT="${LCARS_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
+#
+# ⚠ SON DEFAUT ETAIT `/opt/lcars/entrypoint.sh`, UN CHEMIN D'IMAGE, DANS LE SCRIPT DONT LE MIROIR DES
+# AUXILIAIRES AFFIRME QU'IL « n'a jamais eu la moindre hypothese de conteneur ». Il en avait une,
+# gelee dans ce defaut. `62-runtime-helpers` pose ce fichier-ci a plat dans `/opt/lcars/` et EXCLUT
+# `entrypoint.sh` au motif qu'« il n'a pas de sens hors conteneur » : vrai de son metier de BOOT,
+# faux de son metier de PORTES OUTIL. Mesure du 2026-08-22 sur un poste :
+# `lcars catalogue install web-demo` mourait en « /opt/lcars/entrypoint.sh: No such file or
+# directory », rendu a l'operateur comme « pas de source installable » — un fichier absent presente
+# comme un catalogue introuvable.
+#
+# IL N'Y A RIEN A COPIER, ET C'EST LE POINT. L'arbre `deploy/` est DEJA pose (`EMBEDDED=(deploy etc)`
+# du meme module), donc le fichier est la, sous un autre chemin. On le cherche depuis ICI, dans les
+# deux dispositions ou ce script peut vivre : a cote de lui (image, ou arbre embarque) puis sous
+# l'arbre embarque (copie a plat). Une troisieme copie du meme fichier serait la mauvaise reponse a
+# une absence qui n'en est pas une.
+#
+# ⚠ `-r` ET PAS `-x`, ET `bash` PLUTOT QUE L'EXECUTION DIRECTE. `entrypoint.sh` est `100644` dans le
+# depot ; seule l'image le passe en `0755` (`RUN chmod 0755`). Le `cp -a` de l'arbre embarque preserve
+# donc un mode NON executable, et un test sur `-x` echouerait APRES avoir trouve le bon chemin — un
+# garde qui rejette exactement ce qu'il cherchait.
+_entrypoint_path() {
+  local here c
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  for c in "$here/entrypoint.sh" "$here/fleet/deploy/docker/entrypoint.sh"; do
+    [[ -r "$c" ]] && { printf '%s' "$c"; return 0; }
+  done
+  # Aucun candidat lisible : on rend le premier quand meme, pour qu'un refus NOMME un chemin. Le
+  # garde qui tranche est `need_entrypoint`, a la porte du geste qui en depend.
+  printf '%s' "$here/entrypoint.sh"
+}
+ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"
+
+# LE GARDE, A LA PORTE ET PAS AU MILIEU DU PIPELINE. Sans lui, l'absence se manifestait quatre
+# etapes plus loin, traduite en « pas de source installable » : le refus accusait la forge d'un
+# manque qui etait celui de la boite.
+need_entrypoint() {
+  [[ -r "$ENTRYPOINT" ]] && return 0
+  die "portes outil du release introuvables ($ENTRYPOINT).
+  Ce script les appelle pour resoudre, verifier et enroler un catalogue. Sur un poste elles vivent
+  dans l'arbre embarque (<prefixe>/fleet/deploy/docker/entrypoint.sh), pose par « provision apply ».
+  « LCARS_ENTRYPOINT=<chemin> » force la resolution."
+}
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
@@ -448,7 +489,7 @@ reference_catalogue_root() {
   [[ -n "$REFERENCE_CATALOGUE" ]] && { printf '%s' "$REFERENCE_CATALOGUE"; return 0; }
 
   local root
-  root="$("$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
+  root="$(bash "$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
   if [[ -z "$root" || ! -d "$root" ]]; then
     # Un refus MUET ferait croire a une image sans reference — or elle en porte toujours une.
     echo "forge-gestures: le release ne dit pas ou vit son catalogue de reference — NON depose" >&2
@@ -610,6 +651,7 @@ cmd_install() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "install: nom de catalogue requis"
   need_forge_url
+  need_entrypoint
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
@@ -634,7 +676,7 @@ cmd_install() {
 
   local src rc=0
   src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$sys_token" \
-         "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
+         bash "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$src" >&2
     die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
@@ -667,7 +709,7 @@ cmd_install() {
   # 3. LE MEME CONTROLE QUE LE BOOT, avant de toucher la forge. Un catalogue incoherent refuse ici
   #    coute un message ; installe, il coute un boot qui refuse ou un dispatch qui boucle, loin de
   #    sa cause.
-  "$ENTRYPOINT" verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
+  bash "$ENTRYPOINT" verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
 
   # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
   local dir="$CATALOGUE_WORK/$name"
@@ -714,7 +756,7 @@ cmd_install() {
   # Facultatif : un catalogue qui n'en livre pas laisse ses comptes en identicon, et c'est tout.
   rm -rf "$dir/catalogue-avatars"
   [[ -d "$work/src/avatars" ]] && cp -r "$work/src/avatars" "$dir/catalogue-avatars"
-  "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
+  bash "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
     || die "install: roster non derive depuis $name"
 
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une

@@ -489,23 +489,68 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # et tape ce `newgrp` dans les panes qui sont a un shell, au tour du convergeur. Ce message reste
 # NECESSAIRE, et il n'est pas un doublon : il couvre la fenetre avant ce tour, les sessions ssh, et
 # le pane dont le shell tourne sous un agent au moment ou la frappe passe.
-_die_master_unreadable() {
-  local master=$1 grp
-  grp="$(stat -c %G "$master" 2>/dev/null || true)"
+# ⚠ TROISIEME ETAT, ET LE REFUS N'EN CONNAISSAIT QUE DEUX. « admin sur la forge » et « humain de
+# cette flotte » sont DEUX faits de forge distincts, et le convergeur ne lit le premier que pour les
+# membres du second : `converge_once` ITERE sur `fleet:humans`, et n'appelle `forge_is_admin` que
+# dans cette boucle. Hors de la team, personne ne lit ton `is_admin` — donc aucun groupe, si admin
+# sois-tu.
+#
+# Mesure du 2026-08-22, en vol : un operateur ADMIN de sa forge, absent de `fleet:humans`, s'est vu
+# repondre « ton compte n'y porte pas is_admin ; un proprietaire te promeut » — une promotion qu'il
+# avait deja. Meme forme que la cicatrice ci-dessous, un cran plus haut : un refus qui nomme la
+# mauvaise cause envoie chercher au bon endroit pour un probleme qui est ailleurs.
+#
+# ⚠ ET LA MESURE FINE NE POUVAIT PAS TOURNER DANS SON PROPRE CAS. Elle partait de
+# `stat -c %G <jeton>`, or les deux objets sont gardes par DEUX groupes differents (mesure :
+# `/home/private` est `root:fleet`, le jeton `root:lcars-admin`) et `stat` sur le FICHIER exige deja
+# la traversee du REPERTOIRE. Une session anterieure a la convergence n'a ni l'un ni l'autre : `stat`
+# echouait, `grp` restait vide, et on retombait sur le message general — celui qui accuse la forge.
+# Le repli etait ecrit comme un cas rare ; il etait le cas nominal.
+#
+# On mesure donc la TRAVERSEE d'abord, sur un repertoire qu'on peut lire sans elle, puis le fichier
+# une fois qu'on sait pouvoir y entrer. Les deux noms de groupe restent LUS sur le systeme de
+# fichiers, jamais recopies ici : le mode est le gate, il est donc aussi la source.
+_in_process_group() { id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
+_in_db_group() { id -nG "$(id -un)" 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
 
-  if [[ -n "$grp" ]] \
-     && id -nG "$(id -un)" 2>/dev/null | tr ' ' '\n' | grep -qx "$grp" \
-     && ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
-    die "catalogue install: ta SESSION est anterieure a ta promotion.
-  Ton compte EST dans « $grp » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
+_die_session_stale() {
+  die "catalogue install: ta SESSION est anterieure a ta promotion.
+  Ton compte EST dans « $1 » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
   ne le sait pas : il porte les groupes qu'il avait a son ouverture, et personne ne les lui ajoute
   en vol.
-  Ouvre un shell qui les relit :  newgrp $grp
+  Ouvre un shell qui les relit :  newgrp $1
   ⚠ Se deconnecter ne sert a RIEN depuis la console du deck : elle survit au rechargement de
   l'onglet, et le shell que tu retrouves est le meme, ne avant ta promotion. « newgrp » est la
   sortie — la console tape la meme chose d'elle-meme au tour suivant du convergeur."
+}
+
+_die_master_unreadable() {
+  local master=$1 grp
+
+  # 1. LA TRAVERSEE. Son groupe se lit sur le repertoire lui-meme, ce qui ne demande que d'atteindre
+  #    son parent — donc cette mesure-ci tient meme quand tout le reste est ferme.
+  grp="$(stat -c %G "$(dirname "$master")" 2>/dev/null || true)"
+  if [[ -n "$grp" ]] && ! _in_process_group "$grp"; then
+    _in_db_group "$grp" && _die_session_stale "$grp"
+
+    die "catalogue install: ton compte n'est pas un humain de cette flotte.
+  Etre ADMIN de la forge ne suffit pas, et ce sont deux faits distincts : le convergeur ne parcourt
+  que les membres de l'equipe « humans » de l'org, et ne lit ton « is_admin » que la. Hors de cette
+  equipe, ta promotion n'est projetee nulle part — tu n'es pas moins admin, tu es invisible.
+  Un proprietaire de l'org t'ajoute a « humans » ; le tour suivant (30 s) cree tes acces, et ils
+  sont effectifs a ta prochaine session."
   fi
 
+  # 2. LE FICHIER, maintenant qu'on sait pouvoir entrer dans son repertoire.
+  grp="$(stat -c %G "$master" 2>/dev/null || true)"
+  if [[ -n "$grp" ]] && _in_db_group "$grp" && ! _in_process_group "$grp"; then
+    _die_session_stale "$grp"
+  fi
+
+  _die_master_unreadable_general
+}
+
+_die_master_unreadable_general() {
   die "catalogue install: ton compte n'administre pas ce runtime.
   « admin » est un fait de la FORGE : ton compte y porte is_admin, ou il ne le porte pas. Un
   proprietaire de la forge te promeut, et le convergeur t'ouvre la porte au tour suivant (30 s) —
