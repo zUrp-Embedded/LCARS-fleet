@@ -86,15 +86,40 @@ first_free_uid() {
   echo "$uid"
 }
 
-check() {
-  local uid
-  # AUCUN HUMAIN NOMMÉ : ce n'est pas une panne, c'est une décision que personne n'a prise. On le
-  # DIT, avec le geste exact, et on ne devine pas de nom.
-  if [[ -z "$FLEET_HUMAN" ]]; then
-    p_drift "aucun humain de fleet DÉCLARÉ — personne ne pourra lancer la fleet ici (l'opérateur, uid
+# ─── LE MESSAGE EST PARTAGÉ, LE VERDICT NE L'EST JAMAIS ─────────────────────────────────────────
+#
+# AUCUN HUMAIN NOMMÉ : ce n'est pas une panne, c'est une décision que personne n'a prise. On le DIT,
+# avec le geste exact, et on ne devine pas de nom.
+#
+# ⚠ CETTE FONCTION EXISTE PARCE QUE LES CODES DE SORTIE SONT INVERSÉS ENTRE LES DEUX VERBES, et que
+# ce module servait les deux avec UN SEUL verdict :
+#
+#     check   0 conforme · 1 DRIFT          · 2 erreur de sonde
+#     apply   0 convergé · 1 ÉCHEC          · 2 appliqué, drift résiduel
+#
+# L'assignation est justifiée VERBE PAR VERBE — chacun donne `1` à son mauvais résultat principal :
+# l'échec pour un apply (la convention shell), la dérive pour une sonde. Le `2` d'apply a été AJOUTÉ
+# parce qu'un module qui constatait une non-convergence rendait `0`, donc « tout convergé », sur une
+# machine qui venait d'imprimer DRIFT (cf. `provision:38`).
+#
+# ⚠ MAIS RIEN N'A JAMAIS ÉCRIT LA CONTRAINTE EN TRAVERS. `apply()` faisait `{ check; return; }`, et
+# `verdict_check` fait un `exit`, pas un `return` : le module sortait donc en `1` pendant un APPLY,
+# et le runner — qui lit un apply — traduisait fidèlement « apply en echec … MORT avant de rendre
+# son verdict ». Le module avait parfaitement rendu son verdict, dans le mauvais dialecte.
+#
+# Mesuré le 2026-08-22, install à froid sans `--fleet-human`. Ce module est le SEUL des vingt-six à
+# déléguer ainsi ; le défaut n'était donc pas visible ailleurs.
+announce_no_fleet_human() {
+  p_drift "aucun humain de fleet DÉCLARÉ — personne ne pourra lancer la fleet ici (l'opérateur, uid
      $(id -u -- "$PROV_HUMAN" 2>/dev/null || echo '?'), est le siège et GUARD B le lui interdit).
      Nomme-le, et ce nom AUTORISE sa création : « provision apply --fleet-human <nom> »
      — ou crée-le toi-même : « useradd -m -G $PROV_FLEET_GROUP <nom> »"
+}
+
+check() {
+  local uid
+  if [[ -z "$FLEET_HUMAN" ]]; then
+    announce_no_fleet_human
     verdict_check
   fi
   if ! uid="$(id -u -- "$FLEET_HUMAN" 2>/dev/null)"; then
@@ -120,7 +145,11 @@ apply() {
   # ⚠ SANS NOM, L'APPLY NE CRÉE RIEN — il dit la même chose que le check et s'arrête. C'est le seul
   # module du rail qui fait APPARAÎTRE UN UTILISATEUR sur la machine de quelqu'un : le défaut ne
   # peut pas être « le faire quand même ».
-  [[ -n "$FLEET_HUMAN" ]] || { check; return; }
+  # ⚠ LE MÊME MESSAGE, MAIS `verdict_apply` — JAMAIS `check`. Déléguer faisait sortir ce module avec
+  # le code d'un CHECK (`1` = drift) pendant un APPLY (`1` = échec), et le runner lisait fidèlement
+  # « échec » sur une dérive parfaitement nommée. Le `return` n'était même jamais atteint :
+  # `verdict_check` fait un `exit`. Détail des deux dialectes dans `announce_no_fleet_human`.
+  [[ -n "$FLEET_HUMAN" ]] || { announce_no_fleet_human; verdict_apply; }
 
   if ! id -u -- "$FLEET_HUMAN" >/dev/null 2>&1; then
     local uid; uid="$(first_free_uid)"

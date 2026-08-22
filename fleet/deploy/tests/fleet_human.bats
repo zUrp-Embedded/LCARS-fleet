@@ -154,3 +154,44 @@ FAKE
   [ "$status" -eq 0 ]
   [[ "$output" == *"il peut lancer la fleet"* ]]
 }
+
+@test "sans humain nomme : DRIFT dans les deux verbes, mais CHAQUE VERBE SON CODE" {
+  # ⚠ LES CODES SONT INVERSES ENTRE LES DEUX VERBES, et ce module servait les deux avec UN SEUL
+  # verdict :
+  #     check   0 conforme · 1 DRIFT · 2 erreur de sonde
+  #     apply   0 converge · 1 ECHEC · 2 applique, drift residuel
+  #
+  # L'assignation est justifiee VERBE PAR VERBE — chacun donne `1` a son mauvais resultat principal.
+  # Mais rien n'ecrivait la contrainte EN TRAVERS : `apply()` faisait `{ check; return; }`, et
+  # `verdict_check` fait un `exit`. Le module sortait donc en `1` pendant un apply, et le runner
+  # traduisait « apply en echec … MORT avant de rendre son verdict » sur une derive parfaitement
+  # nommee. Mesure du 2026-08-22, install a froid sans `--fleet-human`.
+  #
+  # ⚠ `run`, PAS UN APPEL NU : bats tourne sous `set -e`, donc un module qui sort en 1 tue le temoin
+  # AVANT la ligne qui lit son code. L'instrument tuait la mesure qu'il devait prendre.
+  nu() { run env -u PROV_FLEET_HUMAN \
+      PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+      PROVISION_MODULE=22-fleet-human PROV_TOKENS_DIR="$BATS_TEST_TMPDIR" \
+      PROV_FLEET_GROUP="$(id -gn)" PROV_HUMAN="$(id -un)" \
+      bash "$BATS_TEST_DIRNAME/../modules.d/22-fleet-human.sh" "$1"; }
+
+  nu check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun humain de fleet DÉCLARÉ"* ]]
+
+  nu apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucun humain de fleet DÉCLARÉ"* ]]
+}
+
+@test "un apply ne DELEGUE JAMAIS a check — le verdict n'est pas partageable" {
+  # Le message, oui : `announce_no_fleet_human` est appele par les deux. Le VERDICT, jamais — c'est
+  # lui qui porte le dialecte. Ce temoin garde la regle pour les VINGT-SIX modules, pas seulement
+  # pour celui qui l'a payee.
+  local m bad=0
+  for m in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
+    awk '/^apply\(\) \{/,/^\}/' "$m" | grep -vE '^\s*#' | grep -qE '(^|[^_[:alnum:]])check;' \
+      && { echo "apply() delegue a check() : $(basename "$m")"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
