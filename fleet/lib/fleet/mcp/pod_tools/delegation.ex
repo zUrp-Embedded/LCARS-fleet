@@ -698,8 +698,34 @@ defmodule Fleet.MCP.PodTools.Delegation do
   identities are distinct, never collapsed), FR `presentation` (shown to the human VERBATIM —
   the card's own voice), `applicable_intensity` (level matrix), `jury` (PR judges) and `steps`.
   Architect gate (framing is the arch's job). A card that fails to load is SKIPPED loud and
-  reported in `unreadable` (the catalogue never lies silently); a missing/empty catalogue is an
-  ERROR, never an empty listing — "no cards exist" would be the vacuous lie.
+  reported in `unreadable` (the catalogue never lies silently); an empty OFFER is an ERROR, never
+  an empty listing — "no card exists" would be the vacuous lie.
+
+  ## ⚠ CETTE PROMESSE ETAIT ECRITE ET TENUE SUR UN CHEMIN SUR QUATRE
+
+  La ligne au-dessus disait deja « an ERROR, never an empty listing », et seule la racine
+  CONFIGUREE sans aucun `*.yaml` la tenait — parce que `canon_names!/1` leve, pas parce que quelque
+  chose ici le decidait. Les trois autres routes vers une offre vide rendaient `{:ok, %{"cards" =>
+  []}}` :
+
+    * aucun catalogue installe ne porte de repertoire de cartes — `card_scopes/0` filtre sur
+      `File.dir?`, donc il n'y a meme pas de quoi lever : RIEN n'a ete balaye ;
+    * des cartes existent et AUCUNE ne charge — l'offre est vide, la cause est dans `unreadable` ;
+    * des cartes existent et toutes sont TECHNIQUES ou a portee ticket — rien de declarable pour un
+      projet.
+
+  Dans les trois cas, l'architecte recevait un succes avec zero choix, au moment precis ou on lui
+  demande de choisir. Releve le 2026-08-22 par relecture independante en marge du chantier
+  `catalogue_list`, et laisse ouvert un tour de trop au motif que c'etait « hors perimetre » — le
+  perimetre est le projet.
+
+  Les refus distinguent donc ce que le geste suivant distingue :
+
+    * `{:workflow_no_card_scope, why}` — rien a balayer. C'est un fait de DEPLOIEMENT : la boite ne
+      sert aucun catalogue portant des cartes (cf. `list_catalogues/1`).
+    * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
+      CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes ne chargent pas ;
+      vide, elles sont toutes techniques ou a portee ticket.
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
@@ -725,11 +751,34 @@ defmodule Fleet.MCP.PodTools.Delegation do
           end
         end)
 
-      base = %{"cards" => Enum.reverse(cards)}
+      # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR, meme regle que chez `list_catalogues/1` :
+      # `{_, offer, bad}` filtre aussi `bad == []`, donc les intervertir poserait `"unreadable" => []`
+      # dans la reponse nominale — une cle vide la ou l'absence est la reponse.
+      case {length(pairs), Enum.reverse(cards), Enum.reverse(unreadable)} do
+        {0, _, _} ->
+          {:error,
+           {:workflow_no_card_scope,
+            "no installed catalogue carries a cards directory — nothing was scanned, so this is " <>
+              "not an empty catalogue but a box serving none. `catalogue_list` says what it serves."}}
 
-      case unreadable do
-        [] -> {:ok, base}
-        bad -> {:ok, Map.put(base, "unreadable", Enum.reverse(bad))}
+        {scanned, [], []} ->
+          {:error,
+           {:workflow_offer_empty, [],
+            "#{scanned} card(s) scanned, none declarable for a PROJECT — they are all technical " <>
+              "(smoke/demo) or ticket-scoped. A catalogue that ships no canon project card offers " <>
+              "no framing choice."}}
+
+        {scanned, [], bad} ->
+          {:error,
+           {:workflow_offer_empty, bad,
+            "#{scanned} card(s) scanned, NONE of them loads — the offer is empty because the " <>
+              "catalogue is broken, not because it is small. Each failure was logged as it happened."}}
+
+        {_scanned, offer, []} ->
+          {:ok, %{"cards" => offer}}
+
+        {_scanned, offer, bad} ->
+          {:ok, %{"cards" => offer, "unreadable" => bad}}
       end
     end
   end
@@ -802,9 +851,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   installe, tout casse » appellent deux gestes differents et qu'un refus qui les confond envoie
   l'operateur chercher le mauvais objet.
 
-  La dissymetrie avec `list_workflow_cards/1` est ASSUMEE et vaut d'etre lue : lui rend `{:ok,
-  %{"cards" => []}}` quand aucun catalogue installe ne porte de repertoire de cartes — meme forme
-  de vacuite, un cran plus bas, et elle n'est pas fermee.
+  `list_workflow_cards/1` tient la meme regle, et ne la tenait que sur un chemin sur quatre jusqu'au
+  2026-08-22 — son propre `@doc` porte la cicatrice. Les deux refus sont donc symetriques : une
+  offre vide n'est jamais un succes, ni ici ni un cran plus bas.
   """
   @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
   def list_catalogues(state) do

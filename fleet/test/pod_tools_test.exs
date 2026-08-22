@@ -1614,8 +1614,12 @@ defmodule Fleet.MCP.PodToolsTest do
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
-      %{"cards" => cards} = Jason.decode!(txt)
+      %{"cards" => cards} = decoded = Jason.decode!(txt)
       by_name = Map.new(cards, &{&1["name"], &1})
+
+      # Meme regle que chez le jumeau : l'absence de la cle EST la reponse, et sans ce refute la
+      # permutation des deux dernieres clauses du `case` passe en silence.
+      refute Map.has_key?(decoded, "unreadable")
 
       # Every canon card is listed with a non-empty FR presentation (the human's read) and a jury.
       for {name, card} <- by_name do
@@ -1726,6 +1730,89 @@ defmodule Fleet.MCP.PodToolsTest do
                PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
 
       assert msg =~ "no *.yaml card"
+    end
+
+    # ⚠ LES TROIS AUTRES ROUTES VERS UNE OFFRE VIDE. Le temoin ci-dessus tenait la promesse du
+    # `@doc` (« an ERROR, never an empty listing ») sur UN chemin — celui ou `canon_names!/1` leve.
+    # Les trois suivants rendaient `{:ok, %{"cards" => []}}` : un succes avec zero choix, servi a
+    # l'architecte au moment precis ou on lui demande de choisir. Mesure du 2026-08-22.
+
+    @tag :tmp_dir
+    test "AUCUN catalogue ne porte de cartes : refus de DEPLOIEMENT, pas de catalogue vide",
+         %{tmp_dir: tmp} do
+      # `card_scopes/0` filtre sur `File.dir?` : un catalogue sans repertoire de cartes n'entre pas
+      # dans la liste, donc il n'y a rien a lever. Rien n'a ete balaye — ce n'est pas la meme
+      # reponse qu'un catalogue balaye qui n'offre rien, et le geste est ailleurs.
+      TestEnv.restore_env_on_exit(:lcars_fleet, :workflow_workflow_maps_root)
+      Application.delete_env(:lcars_fleet, :workflow_workflow_maps_root)
+
+      File.mkdir_p!(Path.join(tmp, "sans-cartes"))
+
+      File.write!(
+        Path.join(tmp, "sans-cartes/catalogue.yaml"),
+        "api_version: 1\nname: sans-cartes\n"
+      )
+
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, Path.join(tmp, "sans-cartes"))
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
+
+      assert {:error, {:workflow_no_card_scope, why}, _} =
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
+
+      assert why =~ "nothing was scanned"
+      assert why =~ "catalogue_list"
+    end
+
+    @tag :tmp_dir
+    test "des cartes existent et AUCUNE ne charge : refus qui porte les illisibles", %{
+      tmp_dir: tmp
+    } do
+      File.write!(
+        Path.join(tmp, "broken.yaml"),
+        "kind: WorkflowMap\nmetadata:\n  name: broken\nspec: {}\n"
+      )
+
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:workflow_offer_empty, bad, why}, _} =
+                   PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
+
+          assert bad == ["broken.yaml"]
+          assert why =~ "NONE of them loads"
+        end)
+
+      assert log =~ "does not load"
+    end
+
+    @tag :tmp_dir
+    test "toutes les cartes sont TECHNIQUES : refus qui dit le catalogue, pas la panne",
+         %{tmp_dir: tmp} do
+      # Une carte `status: smoke` charge parfaitement — elle n'est simplement pas declarable pour un
+      # projet. `unreadable` est donc VIDE, et c'est ce vide qui distingue les deux refus : un
+      # catalogue casse et un catalogue qui ne livre que de l'outillage appellent deux gestes.
+      File.write!(Path.join(tmp, "tech.yaml"), """
+      kind: WorkflowMap
+      metadata:
+        name: tech
+        status: smoke
+      spec:
+        max_rework_rounds: 1
+        jury: []
+        ci: ignore
+        steps:
+          only:
+            role: noop
+      """)
+
+      TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp)
+
+      assert {:error, {:workflow_offer_empty, [], why}, _} =
+               PodTools.handle_tool_call("card_list", %{}, pod_state(uniq("pod-arch")))
+
+      assert why =~ "1 card(s) scanned"
+      assert why =~ "technical"
     end
 
     test "create_project REFUSE un catalogue qui n'est pas installe — un rail mort est silencieux" do
