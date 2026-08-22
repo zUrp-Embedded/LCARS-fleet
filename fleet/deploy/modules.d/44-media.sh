@@ -167,8 +167,24 @@ apply() {
   done
   build_doc
 
-  # Lisible par tous : le deck tourne sous l'humain, la recette sous root, un pod sous un troisième.
-  chmod -R a+rX "$MEDIA_ROOT" 2>/dev/null || true
+  # L'ARBRE DÉPLOYÉ APPARTIENT AU MODULE, PAS À LA SOURCE. `cp -a` a recopié les attributs du
+  # checkout — un checkout fleet est setgid + ACL par défaut `group:fleet` — et l'arbre en héritait.
+  # Deux gestes pour le posséder, et le second est load-bearing :
+  #  1) retirer les ACL héritées : le rail Docker (`COPY assets/…`) pose SANS ACL, les deux rails
+  #     doivent livrer le même état (ce module se targue d'être le jumeau du Dockerfile) ;
+  #  2) forcer 0755 sur les dossiers + lisible partout : le deck tourne sous l'humain, la recette
+  #     sous root, un pod sous un troisième.
+  # ⚠ LE SYMBOLIQUE EST OBLIGATOIRE. `chmod` NUMÉRIQUE ne retire pas le setgid d'un dossier (mesuré :
+  # `chmod 0755` sur un dossier setgid laisse `2755`, avec ou sans ACL) — seul `a-s`/`g-s` l'adresse.
+  # Sans lui, un checkout fleet (setgid) fait hériter la cible du setgid, et `ensure_dir … 0755`
+  # échoue au 2e apply (`2755 ≠ 755`, `ensure_mode` ne converge jamais) : le rail cesse d'être
+  # idempotent. Le `go=rx` ramène en plus le mask ACL à `r-x`, donc `stat %a` lit bien `755`.
+  # Pas de `2>/dev/null` muet ici (cf. l'en-tête de ce module, grief v1) : un refus se DIT.
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -bR "$MEDIA_ROOT" || p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"
+  fi
+  find "$MEDIA_ROOT" -type d -exec chmod a-s,u=rwx,go=rx {} + || p_warn "mode dossiers non posé sous $MEDIA_ROOT"
+  find "$MEDIA_ROOT" -type f -exec chmod a+rX {} + || p_warn "lecture fichiers non posée sous $MEDIA_ROOT"
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]} doc)"
   verdict_apply
