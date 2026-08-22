@@ -23,6 +23,7 @@
 kind: CapabilityProfile
 metadata:
   name: admiral
+  # vitrine: Votre poste | Le seul pod hors du bac à sable, sous votre uid — votre siège dans la boîte, obtenu à la main, jamais dispatché comme un agent.
   containment: none
   # Champ requis par le schema ; pour un pod hors sandbox il DOCUMENTE, il ne confine pas — le
   # mur d'egress est un objet bwrap (socket -> socat -> proxy), et ce pod n'en a aucun. `egress`

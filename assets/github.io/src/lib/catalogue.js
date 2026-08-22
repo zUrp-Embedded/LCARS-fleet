@@ -17,6 +17,8 @@ import yaml from 'js-yaml';
 const here = dirname(fileURLToPath(import.meta.url));
 const PRIV = join(here, '..', '..', '..', '..', 'fleet', 'priv');
 const CANON = join(PRIV, 'catalogue');
+// Les catalogues d'EXEMPLE vivent HORS de priv/ (livres comme templates a forker).
+const CATALOGUES = join(here, '..', '..', '..', '..', 'catalogues');
 
 const readYaml = (p) => yaml.load(readFileSync(p, 'utf8'));
 
@@ -41,25 +43,66 @@ export function cards() {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Les sieges — champs STRUCTURELS uniquement, jamais le prompt. */
+// Les catalogues qui portent des sieges : le socle mecanique, le metier de reference, et un
+// exemple a forker. La NATURE et la PRESENTATION (`# vitrine:`) sont lues ici, jamais le prompt SP.
+const SEAT_CATALOGUES = [
+  ['système', join(PRIV, 'catalogue-system')],
+  ['fleet', join(PRIV, 'catalogue')],
+  ['web-demo', join(CATALOGUES, 'web-demo')]
+];
+
+// La ligne `# vitrine: <label> | <texte>` du cap-profile — meme idee que le `# vitrine:` d'un
+// deftool. Lue dans le TEXTE du fichier, pas le YAML : le schema cap-profile est strict
+// (`additionalProperties:false`), un vrai champ la ferait REJETER — un commentaire, jamais.
+function seatVitrine(path) {
+  const m = readFileSync(path, 'utf8').match(/#\s*vitrine:\s*(.+)/);
+  if (!m) return null;
+  const [label, ...rest] = m[1].split('|');
+  return { label: label.trim(), text: rest.join('|').trim() };
+}
+
+// La nature d'un siege, DERIVEE : reserve > juge > producteur > mecanique (le socle, ni l'un ni
+// l'autre). Un juge est un `brief_kind: judge`, un producteur porte la capacite `producer`.
+function seatNature(d) {
+  if (d.kind === 'ReservedSeat') return 'réservé';
+  if ((d.spec?.brief_kind ?? 'worker') === 'judge') return 'juge';
+  if ((d.spec?.capabilities ?? []).includes('producer')) return 'producteur';
+  return 'mécanique';
+}
+
+/** Les sieges des trois catalogues — nature + presentation derivees, jamais le prompt. */
 export function seats() {
-  const dir = join(CANON, 'cap_profile', 'canon', 'cap-profiles');
-  return readdirSync(dir).filter((f) => f.endsWith('.yaml'))
-    .map((f) => ({ f, d: readYaml(join(dir, f)) }))
-    // Un `ReservedSeat` est une place TENUE, pas un siege qu'on peut occuper : il ne recoit ni
-    // mandat ni outils, et le spawn le refuse. La page dit « chaque siege recoit un mandat » —
-    // publier une place reservee rendrait cette phrase fausse pour l'une d'elles.
-    .filter(({ d }) => d.kind === 'CapabilityProfile')
-    .map(({ f, d }) => {
-    const inv = d.spec?.invocation ?? {};
-    return {
-      name: d.metadata?.name ?? f.replace(/\.yaml$/, ''),
-      lifetime: inv.lifetime_scope ?? null,
-      slot: inv.slot_scope ?? null,
-      desktop: inv.remote_control !== false,
-      judge: (d.spec?.brief_kind ?? 'worker') === 'judge'
-    };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  const out = [];
+  const naked = [];
+  for (const [catalogue, root] of SEAT_CATALOGUES) {
+    const dir = join(root, 'cap_profile', 'canon', 'cap-profiles');
+    if (!existsSync(dir)) throw new Error(`catalogue.js: cap-profiles introuvables (${catalogue})`);
+    for (const f of readdirSync(dir).filter((f) => f.endsWith('.yaml'))) {
+      const path = join(dir, f);
+      const d = readYaml(path);
+      const name = d.metadata?.name ?? f.replace(/\.yaml$/, '');
+      const v = seatVitrine(path);
+      if (!v) { naked.push(`${catalogue}/${name}`); continue; }
+      const inv = d.spec?.invocation ?? {};
+      out.push({
+        name, catalogue,
+        nature: seatNature(d),
+        judge: (d.spec?.brief_kind ?? 'worker') === 'judge',
+        reserved: d.kind === 'ReservedSeat',
+        lifetime: inv.lifetime_scope ?? null,
+        slot: inv.slot_scope ?? null,
+        desktop: inv.remote_control !== false,
+        label: v.label,
+        text: v.text
+      });
+    }
+  }
+  // LA GARDE — le mur qui manquait a cette page : un siege sans `# vitrine:` casse le build plutot
+  // que d'apparaitre sous son nom nu. La presentation vit dans le fichier du siege, donc elle ne
+  // peut pas devenir orpheline — une garde de PRESENCE suffit (pas de bidirectionnelle a tenir).
+  if (naked.length) throw new Error(`catalogue.js: cap-profile sans "# vitrine:" — ${naked.join(', ')}`);
+  if (out.length === 0) throw new Error('catalogue.js: aucun siege lu');
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Les cinq verdicts, lus dans l'enum du schema de decision. */

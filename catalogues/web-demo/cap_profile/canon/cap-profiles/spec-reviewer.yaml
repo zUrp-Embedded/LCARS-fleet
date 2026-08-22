@@ -26,6 +26,7 @@ kind: CapabilityProfile
 
 metadata:
   name: spec-reviewer
+  # vitrine: Il juge la spec | Le juge de cadrage de l'exemple : il vérifie que la livraison tient la spécification.
   containment: bwrap
   role_index: 4
 

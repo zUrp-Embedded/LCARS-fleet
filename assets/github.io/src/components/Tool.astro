@@ -1,0 +1,43 @@
+---
+// UN OUTIL, REPLIABLE — `<details>` natif, zero JS (comme le reste de la doc).
+// Replie : le nom + la vitrine FR + un compteur de flags + le badge gate.
+// Ouvert : la `description()` que lit l'AGENT (servie brute) + les flags detailles.
+// La vitrine (FR) et la description agent (EN) sont deux textes distincts, jamais melanges :
+// la premiere vient d'un `# vitrine:` du deftool, la seconde du `description()` — l'agent ne
+// recoit que la seconde.
+const {
+  tool,
+  tint = 'var(--dim)',
+  badge,
+  badgeClass = 'flag',
+  gateVerb = 'gate',
+  gateLabel
+} = Astro.props;
+---
+<details class:list={['entry', tool.kind === 'orphan' && 'off']} style={`--k:${tint}`}>
+  <summary>
+    <b class="nm">{tool.name}</b>
+    {badge && <span class={badgeClass}>{badge}</span>}
+    <span class="blurb">{tool.vitrine}</span>
+    <span class="tags">
+      {tool.flags.length > 0 &&
+        <i class="fc">{tool.flags.length} flag{tool.flags.length > 1 ? 's' : ''}</i>}
+      {tool.gate && <i class="gt">gate</i>}
+    </span>
+  </summary>
+  <div class="bd">
+    <div class="agentdoc"><span class="lab">ce que l'agent lit</span>{tool.description}</div>
+    {tool.flags.length > 0 && (
+      <dl class="kv flags">
+        {tool.flags.map((f) => (
+          <Fragment>
+            <dt><b>{f.name}</b>{f.type && <i>{f.type}</i>}{f.required && <span class="rq">requis</span>}</dt>
+            <dd>{f.description || <span class="none">aucune description dans le schéma</span>}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    )}
+    {tool.gate && <dl class="kv"><dt>{gateVerb}</dt><dd>capacité <b>{gateLabel}</b></dd></dl>}
+    <slot />
+  </div>
+</details>

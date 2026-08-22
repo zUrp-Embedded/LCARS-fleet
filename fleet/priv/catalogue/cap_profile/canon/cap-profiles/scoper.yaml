@@ -4,6 +4,7 @@
 kind: CapabilityProfile
 metadata:
   name: scoper
+  # vitrine: Il juge le brief | Avant que quiconque code. Un brief qu'on ne peut pas exécuter lui revient, avec la raison — c'est l'étape la moins chère du parcours.
   containment: bwrap
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.

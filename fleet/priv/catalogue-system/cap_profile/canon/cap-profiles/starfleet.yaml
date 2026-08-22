@@ -11,6 +11,7 @@
 kind: CapabilityProfile
 metadata:
   name: starfleet
+  # vitrine: Le standard | Permanent. Il démarre la flotte, tient l'audit et sert de guichet quand aucun projet n'est en cause.
   containment: bwrap
   # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
   # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
