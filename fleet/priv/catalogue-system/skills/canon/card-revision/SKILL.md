@@ -56,3 +56,23 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
 - `{:card_push_failed, _}` — la forge a refusé la traversée : rien n'a changé, la règle de
   protection est restaurée. Réessaie ou remonte à l'humain.
 - `justification` absente — le refus est voulu. Il n'y a pas de révision sans pourquoi.
+
+### Et sur `card_list` lui-même — il REFUSE au lieu de rendre une offre vide
+
+Depuis le 2026-08-22, `card_list` ne rend plus une liste vide en se déclarant en succès : une offre
+sans aucun choix, présentée au moment précis où on demande de choisir, n'est pas un petit catalogue,
+c'est un rail sans entrée. Trois refus, et le geste n'est pas le même :
+
+- `{:workflow_no_card_scope, _}` — **fait de déploiement**, pas de catalogue : aucun catalogue
+  installé ne porte de cartes. Appelle `catalogue_list` et dis à l'humain ce que cette boîte sert
+  réellement — le catalogue qu'il attend n'est pas installé ici, et le geste est côté admin
+  (`lcars catalogue install`).
+- `{:workflow_offer_empty, illisibles, _}` — **fait de catalogue** : il a été balayé et n'offre rien.
+  `illisibles` non vide = ses cartes ne chargent pas, remonte la liste telle quelle, c'est un
+  catalogue à réparer par qui le maintient. `illisibles` vide = il ne livre que des cartes TECHNIQUES
+  ou à portée ticket, donc aucune carte déclarable pour un projet ; c'est à son auteur d'en livrer une.
+- `{:workflow_catalogue_unavailable, message}` — le répertoire de cartes existe et ne porte aucun
+  fichier. Remonte le `message` tel quel.
+
+Dans les trois cas, **tu ne contournes pas**. Une carte inventée, ou reprise d'une session
+antérieure, serait une déclaration de criticité que personne n'a faite.
