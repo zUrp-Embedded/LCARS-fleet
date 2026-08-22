@@ -31,6 +31,7 @@ defmodule Fleet.Workflow.PinningTest do
       ref: "verdicts/issue-42-qualifier.md",
       kind: "Verdict",
       label: "verdict",
+      repo: "o/r",
       commit_fun: commit_fun
     )
   end
@@ -67,7 +68,13 @@ defmodule Fleet.Workflow.PinningTest do
       assert posted =~ "ligne 8"
       refute posted =~ "ligne 9"
       assert posted =~ "22 lignes de plus"
-      assert posted =~ "Verdict: verdicts/issue-42-qualifier.md @ #{@sha}"
+
+      # transport_brief_v2 — the pin is a unified CLICKABLE link (label + commit-browse URL), the same
+      # notation the brief/criteria pointers use. No bare `ref @ sha` on the surface.
+      assert posted =~
+               "Verdict: [le verdict](/o/r/src/commit/#{@sha}/verdicts/issue-42-qualifier.md)"
+
+      refute posted =~ "Verdict: verdicts/issue-42-qualifier.md @"
     end
 
     test "the disclaimer names WHAT is being cited — 'ordre de mission' over a verdict would be false" do
@@ -86,6 +93,23 @@ defmodule Fleet.Workflow.PinningTest do
       # matters is the ceiling, not beating the inline case.
       assert length(thirty) <= 14
     end
+
+    test "no `:repo` → the legacy `<kind>: <ref> @ <sha>` line (still parseable) — Pinning stays total" do
+      posted =
+        Pinning.render(long(),
+          work_dir: "/tmp/demo",
+          ref: "verdicts/issue-42-qualifier.md",
+          kind: "Verdict",
+          label: "verdict",
+          commit_fun: ok_commit()
+        )
+
+      # Defensive fallback: a caller that omits the repo still gets a VALID pointer (the machine
+      # parser reads it), never a broken link with an empty repo. The link is the norm, not a
+      # precondition of pinning at all.
+      assert posted =~ "Verdict: verdicts/issue-42-qualifier.md @ #{@sha}"
+      refute posted =~ "/src/commit/"
+    end
   end
 
   describe "a push that did not land is NOT a commit that did not happen" do
@@ -97,12 +121,14 @@ defmodule Fleet.Workflow.PinningTest do
       # pointer naming nothing, ever. An object committed but not yet pushed exists, is addressable
       # by sha, and reaches the forge at the branch's next successful push. Inlining it would trade
       # a temporary lateness for a permanently unquotable wall of text.
-      assert posted =~ "Verdict: verdicts/issue-42-qualifier.md @ #{@sha}"
+      assert posted =~
+               "Verdict: [le verdict](/o/r/src/commit/#{@sha}/verdicts/issue-42-qualifier.md)"
+
       refute posted =~ "ligne 30"
     end
 
     test "`:unknown` pins too — the commit is proven, only its publication is unobserved" do
-      assert pin(long(), fn _, _, _, _ -> {:ok, @sha, :unknown} end) =~ "@ #{@sha}"
+      assert pin(long(), fn _, _, _, _ -> {:ok, @sha, :unknown} end) =~ "/src/commit/#{@sha}/"
     end
   end
 

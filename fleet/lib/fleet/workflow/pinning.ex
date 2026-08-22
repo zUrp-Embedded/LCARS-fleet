@@ -49,6 +49,8 @@ defmodule Fleet.Workflow.Pinning do
     * `:work_dir` — the project's ops worktree (REQUIRED to pin; absent → always inline)
     * `:ref` — ops-relative ref to commit at (REQUIRED to pin)
     * `:kind` — the pointer keyword and the noun of the disclaimer, e.g. `"Verdict"`
+    * `:repo` — `owner/name`, for the clickable commit-browse link in the pointer (absent → the
+      legacy `<kind>: <ref> @ <sha>` line, still parseable; `Pinning` stays total either way)
     * `:label` — commit-message prefix handed to `OpsObject` (default `"emission"`)
     * `:commit_fun` — seam (tests): `(work_dir, ref, content, opts) -> {:ok, sha, push_state} |
       {:error, term}`
@@ -74,6 +76,7 @@ defmodule Fleet.Workflow.Pinning do
 
   defp pin(body, work_dir, ref, opts) do
     label = Keyword.get(opts, :label, "emission")
+    repo = Keyword.get(opts, :repo)
     commit = Keyword.get(opts, :commit_fun, &OpsObjectSync.commit_object/4)
 
     case commit.(work_dir, ref, body, label: label, push: :ops) do
@@ -83,7 +86,7 @@ defmodule Fleet.Workflow.Pinning do
       # the forge at the branch's next successful push — the citation is late, not false. Inlining
       # it would trade a temporary lateness for a permanently unquotable wall of text.
       {:ok, sha, _push_state} ->
-        pointer_body(body, ref, sha, Keyword.get(opts, :kind, "Doc"))
+        pointer_body(body, ref, sha, Keyword.get(opts, :kind, "Doc"), repo)
 
       {:error, reason} ->
         # INLINE, not a pointer. See the moduledoc: a dangling citation is worse than a long comment
@@ -97,17 +100,25 @@ defmodule Fleet.Workflow.Pinning do
     end
   end
 
-  defp pointer_body(body, ref, sha, kind) do
+  defp pointer_body(body, ref, sha, kind, repo) do
     """
     #{summary(body)}
 
     #{disclaimer(kind)}
 
-    #{kind}: #{ref} @ #{sha}
+    #{pointer_line(kind, ref, sha, repo)}
     """
     |> String.trim_trailing()
     |> Kernel.<>("\n")
   end
+
+  # The unified `<kind>: [label](url)` link when the repo is known (the norm — every caller passes
+  # it); the legacy `<kind>: <ref> @ <sha>` as a defensive fallback so `Pinning` stays TOTAL (it never
+  # returns an error) if a caller omits the repo. Both are the one notation `Fleet.Layout` owns.
+  defp pointer_line(kind, ref, sha, repo) when is_binary(repo),
+    do: Fleet.Layout.pointer_line(kind, ref, sha, repo)
+
+  defp pointer_line(kind, ref, sha, _repo), do: "#{kind}: #{ref} @ #{sha}"
 
   # The architect's sentence, structure kept verbatim; only the NOUN follows what is being cited.
   # Saying "ordre de mission" over a verdict would be false, and the sentence exists precisely to

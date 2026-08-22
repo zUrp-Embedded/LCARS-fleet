@@ -191,8 +191,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
             full_body =
               body
-              |> with_pointer(pointer)
-              |> with_criteria_pointer(criteria_pointer)
+              |> with_pointer(pointer, repo)
+              |> with_criteria_pointer(criteria_pointer, repo)
               |> with_lot(lot_pointer)
               |> with_supersedes(supersedes)
               |> with_op_marker(marker)
@@ -1776,10 +1776,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
       else: head
   end
 
-  defp with_pointer(brief, nil), do: brief
+  defp with_pointer(brief, nil, _repo), do: brief
 
-  defp with_pointer(brief, {ref, sha}),
-    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+  defp with_pointer(brief, {ref, sha}, repo),
+    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, repo)
 
   # The criteria doc lives under `gate-briefs/` — `kind: "judge"` routes it there (`brief_ref/2`).
   # `nil`/empty criteria (a workshop ticket, or a degraded materialize) → no pointer, never a wall:
@@ -1813,10 +1813,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  defp with_criteria_pointer(body, nil), do: body
+  defp with_criteria_pointer(body, nil, _repo), do: body
 
-  defp with_criteria_pointer(body, {ref, sha}),
-    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha)
+  defp with_criteria_pointer(body, {ref, sha}, repo),
+    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha, repo)
 
   # THE CRITERIA MUST STAND ALONE — the judge mounts nothing but its criterion, so a criterion that
   # DELEGATES to another committed doc points at a tree the judge will never read. This wall is the

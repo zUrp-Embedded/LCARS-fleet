@@ -1325,7 +1325,11 @@ defmodule Fleet.MCP.PodToolsTest do
 
       pointing_criteria =
         "L'attendu :\n\n" <>
-          Fleet.Layout.criteria_pointer_line("gate-briefs/other.md", String.duplicate("a", 40))
+          Fleet.Layout.criteria_pointer_line(
+            "gate-briefs/other.md",
+            String.duplicate("a", 40),
+            "o/r"
+          )
 
       assert {:error, {:criteria_not_self_contained, _}, _} =
                PodTools.handle_tool_call(

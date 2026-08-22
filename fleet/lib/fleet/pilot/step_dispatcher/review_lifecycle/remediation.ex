@@ -271,7 +271,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         work_dir: conflict_report_work_dir(ctx),
         ref: Fleet.Layout.conflict_ref(pr_number),
         kind: "Rapport",
-        label: "conflict"
+        label: "conflict",
+        repo: ctx.repo
       )
 
     # A0 — the engine's STABLE marker. The seal chooses its merge method by reading the conflict

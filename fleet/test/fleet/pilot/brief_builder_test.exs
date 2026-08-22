@@ -173,8 +173,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       body =
         "résumé\n\n" <>
-          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", sha) <>
-          "\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
+          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", sha, "acme/widget") <>
+          "\n" <>
+          Fleet.Layout.criteria_pointer_line(
+            "gate-briefs/issue-42-reviewer.md",
+            sha,
+            "acme/widget"
+          )
 
       assert {:ok, brief, "judge", mount} =
                build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
@@ -210,7 +215,11 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       body =
         "résumé\n\n" <>
-          Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", String.trim(sha))
+          Fleet.Layout.brief_pointer_line(
+            "briefs/issue-42-engineer.md",
+            String.trim(sha),
+            "acme/widget"
+          )
 
       assert {:ok, brief, "judge", mount} =
                build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
@@ -245,7 +254,11 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       body =
         "résumé\n\n" <>
-          Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
+          Fleet.Layout.criteria_pointer_line(
+            "gate-briefs/issue-42-reviewer.md",
+            sha,
+            "acme/widget"
+          )
 
       assert {:ok, _brief, "judge", mount} =
                BriefBuilder.build_brief(
@@ -393,7 +406,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     test "pointer ticket → the PINNED doc becomes the brief (worker order carries the doc, not the pointer)",
          %{tmp_dir: tmp} do
       {ref, sha} = authored_workops(tmp)
-      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, "acme/widget")
 
       assert {:ok, brief, "worker"} =
                build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
@@ -416,7 +429,8 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {ref, _sha} = authored_workops(tmp)
 
       body =
-        "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40))
+        "Résumé.\n\n---\n" <>
+          Fleet.Layout.brief_pointer_trailer(ref, String.duplicate("0", 40), "acme/widget")
 
       assert {:error, {:criterion_unavailable, {:brief_pointer, _}}} =
                build_worker(%{"number" => 42, "body" => body}, ops_root: tmp)
@@ -455,7 +469,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
            tmp_dir: tmp
          } do
       {ref, sha} = authored_criterion(tmp)
-      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, "acme/widget")
 
       assert {:ok, brief, "judge", mount} =
                build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
@@ -480,7 +494,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     test "the criterion says read-and-evaluate — defused means do-not-execute, not do-not-read",
          %{tmp_dir: tmp} do
       {ref, sha} = authored_criterion(tmp)
-      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, "acme/widget")
 
       assert {:ok, brief, "judge"} =
                build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
@@ -629,7 +643,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {:ok, %{ref: ref, sha: sha}} =
         Fleet.Workflow.BriefArtifact.commit(work_dir, "LE BRIEF À JUGER.\n", name_hint: "brf")
 
-      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, "acme/widget")
 
       assert {:ok, brief, "judge", mount} =
                build_scoper(%{"body" => body}, ops_root: tmp)

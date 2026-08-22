@@ -461,97 +461,106 @@ defmodule Fleet.Layout do
     if Regex.match?(@artifact_name_re, sanitized), do: sanitized, else: "x" <> sanitized
   end
 
-  # ── brief POINTER notation ────────────────────────────────────────────────
-  # A consequential brief lives as doc(s) committed in ops; the ticket body then carries a
-  # SUMMARY + this pointer line (`Brief: <ref> @ <commit>`). Composed by the delegation tool
-  # (mcp), parsed by the dispatch (pilot) — the notation lives HERE once (same reason as the
-  # ref shapes: two domains, one truth, foundation).
-  @brief_pointer_re Regex.compile!("^Brief: (\\S+) @ ([0-9a-f]{40})$", "m")
+  # ── POINTER notation, unified: Brief / Criteria / Verdict ─────────────────
+  # A consequential brief/criteria (and a verdict) lives as a doc committed in ops; the forge surface
+  # (ticket body, PR comment) carries a SUMMARY + a pointer to the pinned doc. ONE notation for every
+  # kind, ONE parser — they were three near-identical shapes and would have drifted the day one was
+  # retouched (nobody would find the others). Composed by the delegation tool / the verdict completer
+  # (mcp, pilot), parsed by the dispatch (pilot). The notation lives HERE once (same reason as the ref
+  # shapes: two domains, one truth, foundation).
+  #
+  # The pointer is a CLICKABLE markdown link: its text is a clean label a human reads, its URL is the
+  # commit-browse address of the pinned doc — `/<repo>/src/commit/<sha>/<ref>`, host-relative (needs
+  # only the repo, never the forge host) and commit-addressed (resolves the PINNED version, on the
+  # orphan `ops` branch of that repo). The machine reads `ref` and `sha` back OUT of the URL, so the
+  # SAME line serves the human's eye AND the dispatch's resolver — no literal filename, no bare sha on
+  # the surface. The parser also accepts the LEGACY `<kind>: <ref> @ <sha>` shape (tickets written
+  # before the link notation: resolved verbatim, never re-derived).
+
+  # Clean human label per kind — what the reader clicks, never the illegible filename.
+  defp pointer_label("Brief"), do: "le brief"
+  defp pointer_label("Criteria"), do: "les critères"
+  defp pointer_label("Verdict"), do: "le verdict"
+  defp pointer_label(kind), do: String.downcase(kind)
+
+  # Host-relative commit-browse URL of a pinned ops doc. Only the repo (`owner/name`) is needed.
+  defp pointer_url(repo, ref, sha), do: "/#{repo}/src/commit/#{sha}/#{ref}"
 
   @doc """
-  The pointer BLOCK closing a ticket whose brief lives in ops: a sentence that names what the
-  body above actually is, then the machine-parseable line `Brief: <ref> @ <commit-sha>`.
-
-  The sentence is not decoration. Without it the ticket shows a summary and a pointer side by side
-  with nothing saying which one the fleet executes — and the summary is the one a human can edit.
-  Editing it changes NOTHING: the order is the doc at that exact commit, and the pod never reads the
-  ticket. A ticket that lets a human believe otherwise is worse than one that says nothing, because
-  the belief is only disproved by a deliverable that ignored the edit.
-
-  The `Brief:` line keeps its exact shape — `parse_brief_pointer/1` anchors per line (`^…$`, `m`),
-  so the sentence above it costs the parser nothing. Emitted payload → French with its accents (it
-  is forge content a human reads), cf. CLAUDE.md.
+  The pointer LINE for `kind` (`Brief`/`Criteria`/`Verdict`): `<kind>: [label](url)` — a clickable
+  link whose URL carries ref+sha. One shape for every kind; the machine reads ref+sha back from it.
   """
-  @spec brief_pointer_trailer(String.t(), String.t()) :: String.t()
-  def brief_pointer_trailer(ref, sha) do
+  @spec pointer_line(String.t(), String.t(), String.t(), String.t()) :: String.t()
+  def pointer_line(kind, ref, sha, repo),
+    do: "#{kind}: [#{pointer_label(kind)}](#{pointer_url(repo, ref, sha)})"
+
+  @doc "Brief pointer line — `pointer_line(\"Brief\", …)`."
+  @spec brief_pointer_line(String.t(), String.t(), String.t()) :: String.t()
+  def brief_pointer_line(ref, sha, repo), do: pointer_line("Brief", ref, sha, repo)
+
+  @doc "Criteria pointer line — `pointer_line(\"Criteria\", …)`."
+  @spec criteria_pointer_line(String.t(), String.t(), String.t()) :: String.t()
+  def criteria_pointer_line(ref, sha, repo), do: pointer_line("Criteria", ref, sha, repo)
+
+  @doc """
+  The pointer BLOCK closing a ticket whose brief lives in ops: a sentence that names what the body
+  above actually is (a summary a human may edit — editing it changes nothing, the order is the doc at
+  that commit, and the pod never reads the ticket), then the clickable `Brief:` pointer link.
+  """
+  @spec brief_pointer_trailer(String.t(), String.t(), String.t()) :: String.t()
+  def brief_pointer_trailer(ref, sha, repo) do
     "_Ce qui précède est un **résumé**, pas l'ordre de mission. Ce que la fleet exécute est le doc " <>
-      "ci-dessous, à ce commit exact — éditer ce résumé ne le change pas._\n" <>
-      brief_pointer_line(ref, sha)
+      "lié ci-dessous, à ce commit exact — éditer ce résumé ne le change pas._\n" <>
+      brief_pointer_line(ref, sha, repo)
   end
 
   @doc """
-  The bare pointer LINE (`Brief: <ref> @ <sha>`) — the notation, without the ticket framing.
-
-  Split out of `brief_pointer_trailer/2` because that framing says "what PRECEDES is a summary",
-  which is true in a ticket body and false anywhere else. A caller that only needs the address was
-  otherwise choosing between re-writing the notation (a second source for the shape
-  `parse_brief_pointer/1` matches) and shipping a sentence about a summary that is not there.
-  """
-  @spec brief_pointer_line(String.t(), String.t()) :: String.t()
-  def brief_pointer_line(ref, sha), do: "Brief: #{ref} @ #{sha}"
-
-  @doc """
-  Scans a ticket body for the brief-pointer line. `:none` when absent (inline brief — the
-  normal PoC path). `{:ok, {ref, sha}}` on a well-formed pointer. `{:error, {:invalid_pointer_ref, ref}}`
-  when a line has the FULL pointer shape (40-hex commit) but an out-of-scheme ref — that is an
-  intent with a bad address, refused LOUDLY, never read as prose.
+  Scans a body for the `Brief:` pointer. `:none` when absent (inline brief — the normal PoC path).
+  `{:ok, {ref, sha}}` on a well-formed pointer (link OR legacy form). `{:error, {:invalid_pointer_ref,
+  ref}}` when a line has the pointer SHAPE (40-hex commit) but an out-of-scheme ref — an intent with a
+  bad address, refused LOUDLY, never read as prose.
   """
   @spec parse_brief_pointer(String.t() | nil) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_pointer_ref, String.t()}}
-  def parse_brief_pointer(nil), do: :none
-
-  def parse_brief_pointer(body) when is_binary(body) do
-    case Regex.run(@brief_pointer_re, body) do
-      nil ->
-        :none
-
-      [_, ref, sha] ->
-        if valid_brief_ref?(ref),
-          do: {:ok, {ref, sha}},
-          else: {:error, {:invalid_pointer_ref, ref}}
-    end
-  end
-
-  # ── criteria POINTER notation ─────────────────────────────────────────────
-  # THE SECOND POINTER, and it is a DIFFERENT ARTEFACT, not a second copy of the brief. `Brief:`
-  # addresses the producer's PROCEDURAL order (how to use the material — it may reference the
-  # workshop the producer mounts). `Criteria:` addresses the judge's DECLARATIVE summary of the
-  # expected — self-contained by nature, because the judge mounts nothing and a criterion that
-  # points is not a criterion. Same ref scheme (`gate-briefs/<name>.md`), same shape, one truth for
-  # the notation here, so the parser is the brief parser's twin, not a fork.
-  @criteria_pointer_re Regex.compile!("^Criteria: (\\S+) @ ([0-9a-f]{40})$", "m")
-
-  @doc "The bare criteria-pointer LINE (`Criteria: <ref> @ <sha>`)."
-  @spec criteria_pointer_line(String.t(), String.t()) :: String.t()
-  def criteria_pointer_line(ref, sha), do: "Criteria: #{ref} @ #{sha}"
+  def parse_brief_pointer(body), do: parse_pointer("Brief", body)
 
   @doc """
-  Scans a ticket body for the criteria-pointer line. `:none` / `{:ok, {ref, sha}}` /
-  `{:error, {:invalid_pointer_ref, ref}}`, exactly as `parse_brief_pointer/1`.
+  Twin of `parse_brief_pointer/1` for the `Criteria:` pointer. Same shapes, same errors — the criteria
+  is a DIFFERENT artefact (the judge's declarative expected, self-contained because the judge mounts
+  nothing and a criterion that points is not a criterion), but its notation is the brief's, not a fork.
   """
   @spec parse_criteria_pointer(String.t() | nil) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_pointer_ref, String.t()}}
-  def parse_criteria_pointer(nil), do: :none
+  def parse_criteria_pointer(body), do: parse_pointer("Criteria", body)
 
-  def parse_criteria_pointer(body) when is_binary(body) do
-    case Regex.run(@criteria_pointer_re, body) do
-      nil ->
-        :none
+  # ONE parser for every kind. The link form first (current), the legacy `<kind>: <ref> @ <sha>`
+  # second. A line with the pointer shape but an out-of-scheme ref is an ERROR (loud), not `:none`.
+  defp parse_pointer(_kind, nil), do: :none
 
-      [_, ref, sha] ->
-        if valid_brief_ref?(ref),
-          do: {:ok, {ref, sha}},
-          else: {:error, {:invalid_pointer_ref, ref}}
+  defp parse_pointer(kind, body) when is_binary(body) do
+    link =
+      Regex.compile!(
+        "^#{kind}: \\[[^\\]]*\\]\\([^)]*/src/commit/([0-9a-f]{40})/([^)]+)\\)$",
+        "m"
+      )
+
+    legacy = Regex.compile!("^#{kind}: (\\S+) @ ([0-9a-f]{40})$", "m")
+
+    cond do
+      caps = Regex.run(link, body) -> pointer_result(caps, :link)
+      caps = Regex.run(legacy, body) -> pointer_result(caps, :legacy)
+      true -> :none
     end
+  end
+
+  # The link captures `[_, sha, ref]`, the legacy `[_, ref, sha]` — normalize to `{ref, sha}`, then
+  # validate the ref against the scheme (the sha is 40-hex by construction of the match).
+  defp pointer_result([_, sha, ref], :link), do: checked_pointer(ref, sha)
+  defp pointer_result([_, ref, sha], :legacy), do: checked_pointer(ref, sha)
+
+  defp checked_pointer(ref, sha) do
+    if valid_brief_ref?(ref),
+      do: {:ok, {ref, sha}},
+      else: {:error, {:invalid_pointer_ref, ref}}
   end
 end

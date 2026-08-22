@@ -437,7 +437,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
         work_dir: work_dir,
         ref: Fleet.Layout.verdict_ref(Map.fetch!(step_run, :issue_number), role),
         kind: "Verdict",
-        label: "verdict"
+        label: "verdict",
+        repo: repo
       )
 
     # C2 — THE MACHINE VERDICT RIDES THE REVIEW ITSELF. C1 engraved it as an ops object, which is
