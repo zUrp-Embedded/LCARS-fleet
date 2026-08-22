@@ -52,6 +52,19 @@ SH
   export PROV_DECK_PORT=20999
   export PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   mkdir -p "$BATS_TEST_TMPDIR/etc"
+  # ⚠ LE BIND S'EPINGLE, SINON CES TEMOINS MESURENT LE RESEAU DE LA MACHINE. Sans cette ligne le
+  # module appelle `advertise_addr 0.0.0.0`, qui DERIVE : sous WSL en NAT il rend `localhost` avec
+  # un motif — donc aucune entree ajoutee — tandis que sur un Linux natif il rend l'adresse LAN, avec
+  # un motif VIDE, donc une QUATRIEME entree voulue que la fixture n'a pas.
+  #
+  # Consequence mesuree le 2026-08-22, install a froid sur .63 : ces deux temoins passent ici et
+  # tombent la-bas, sur du code identique. Le commentaire d'`advertise_addr` avait deja nomme le
+  # trou — « le chemin linux, celui qu'aucun appel de cette machine ne prend ».
+  #
+  # `127.0.0.1` est choisi parce qu'un bind PRECIS est l'adresse (pas de derivation), et que l'URI
+  # qui en decoule est DEJA voulue : la liste reste la meme sur tout substrat. Les temoins qui
+  # exercent l'annonce, eux, posent leur propre bind.
+  export PROV_DECK_BIND=127.0.0.1
   # L'entree ANNONCEE. Les deux ecritures de la loopback sont semees par le module lui-meme.
   export PROV_DECK_ORIGINS="http://10.0.0.5:20999"
   # ⚠ LA FIXTURE PORTE L'ÉTAT-CIBLE COMPLET, PAS SEULEMENT LE `client_id`. Ce module écrit AUSSI les

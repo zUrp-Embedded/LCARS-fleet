@@ -375,7 +375,12 @@ apply() {
   #    (mesure 2026-08-16), donc un seed neuf donnerait un fichier qui ne correspond plus aux
   #    comptes et le mint des jetons de rôle partirait en 401.
   if [[ ! -s "$SEED_FILE" ]]; then
-    local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+    # `|| true` : même classe que la dérivation du catalogue plus haut. `head -c 20` ferme le tuyau
+    # dès qu'il a ses 20 octets, ce qui SIGPIPE l'amont ; sous `pipefail` le pipeline rend 141 et
+    # `set -e` abat le module. Latent — il dépend du bufferisation — donc invisible jusqu'au jour où
+    # il tombe, sur une machine, sans laisser de ligne.
+    local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20 || true)"
+    [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
     write_atomic "$SEED_FILE" 0640 "root:$PROV_FLEET_GROUP" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
     p_chg "seed des comptes posé ($SEED_FILE)"
@@ -425,10 +430,20 @@ apply() {
   # `catalogue-root` « existe pour que personne ne RECOMPOSE ce chemin […] un appelant shell qui le
   # globberait marcherait jusqu'au jour où la disposition du release change ». Même autorité ici —
   # `Fleet.Catalogue.root()` — simplement là où elle tourne.
+  # ⚠ `|| true` OBLIGATOIRE, ET SON ABSENCE A TUÉ CE MODULE EN SILENCE. Le module tourne sous
+  # `set -euo pipefail` : avec `pipefail`, un `mix` qui échoue fait échouer TOUT le pipeline, donc
+  # l'affectation, donc `set -e` abat le shell — AVANT la garde juste en dessous, qui est
+  # précisément là pour dire ce qui manque.
+  #
+  # Mesuré à froid sur .63 le 2026-08-22 : « ERREUR 48-forge-host: MORT avant de rendre son verdict
+  # (rc=1) — aucune ligne ci-dessus ne le dit ». Le runner ne pouvait rien dire de plus : le module
+  # était mort sans passer par un seul `p_fail`.
+  #
+  # La règle : une commande dont on VEUT lire l'échec ne doit pas pouvoir tuer le lecteur.
   local ref_catalogue
-  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1)"
+  ref_catalogue="$(as_human env -C "$tree" mix run --no-start -e 'IO.puts(Fleet.Catalogue.root())' 2>/dev/null | tail -n1 || true)"
   [[ -d "$ref_catalogue" ]] \
-    || { p_fail "catalogue de référence introuvable ($ref_catalogue) — ni roster ni dépôt à forker"; verdict_apply; }
+    || { p_fail "catalogue de référence introuvable — « mix run -e 'IO.puts(Fleet.Catalogue.root())' » ne rend rien d'utilisable dans $tree (rendu : « ${ref_catalogue:-<vide>} »)"; verdict_apply; }
 
   # Le dossier de sortie appartient à l'humain : c'est lui qui joue la dérivation.
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"

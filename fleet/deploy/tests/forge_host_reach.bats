@@ -349,9 +349,14 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # « mix » dans une CHAINE DE MESSAGE : un compte nu le prend pour une invocation et fait echouer
   # le temoin sur une ligne qui n'execute rien. Meme piege que la prose, un cran plus bas — ici il
   # est dans le code.
+  # ⚠ ET LES MESSAGES NE SONT PAS DU CODE NON PLUS. Un `p_fail "« mix run -e … » ne rend rien"` cite
+  # la commande DANS SA PHRASE : le compteur la prend pour une invocation et le temoin tombe sur une
+  # ligne qui n'execute rien. Meme piege que `p_step`, corrige une fois, reintroduit par la porte
+  # d'a cote — on retire donc toute la famille `p_*`, pas un libelle a la fois.
   local n_mix n_as inv='mix (local\.|deps\.|run |compile|release)'
-  n_mix="$(grep -vE '^\s*#|^\s*`#' "$SRC" | grep -cE "$inv")"
-  n_as="$(grep -vE '^\s*#|^\s*`#' "$SRC" | grep -E "$inv" | grep -c 'as_human')"
+  code_nomsg() { grep -vE '^\s*#|^\s*`#' "$SRC" | grep -vE 'p_(fail|warn|ok|chg|step|drift|die)\b'; }
+  n_mix="$(code_nomsg | grep -cE "$inv")"
+  n_as="$(code_nomsg | grep -E "$inv" | grep -c 'as_human')"
   [ "$n_mix" -gt 0 ]
   [ "$n_mix" -eq "$n_as" ]
   # et le dossier de sortie lui appartient, sinon il ne peut pas y ecrire

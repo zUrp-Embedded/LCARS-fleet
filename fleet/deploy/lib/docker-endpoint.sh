@@ -97,6 +97,45 @@ _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
 _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/docker/cli-plugins"; }
 
+# ─── _docker_plugin_config [<dir>] — UN `DOCKER_CONFIG` QUI VOIT LES PLUGINS DU MONTAGE ─────────
+#
+# Rend le chemin d'un repertoire `DOCKER_CONFIG` dont le `config.json` pointe `cliPluginsExtraDirs`
+# vers les plugins de la CLI du montage. Sans lui, `docker compose` N'EXISTE PAS : le mot `compose`
+# tombe et `-f` devient un drapeau global (« unknown shorthand flag: 'f' »).
+#
+# ⚠ ON PART DE LA CONFIG DE L'HUMAIN QUAND ELLE EXISTE. Elle porte ses credentials de registry
+# (`auths`, `credHelpers`, `credsStore`) ; forcer un repertoire vide les rendrait invisibles, et un
+# `pull` d'image privee echouerait en accusant le reseau. Le repli qui ecrit un `config.json` reduit
+# aux seuls `cliPluginsExtraDirs` EFFACE ces clefs : il ne sert que quand il n'y a rien a preserver.
+# python3 est un prerequis DECLARE de ce rail (`10-packages`), jq ne l'est pas.
+_docker_plugin_config() {
+  local dir="${1:-}" plug src
+  plug="$(_docker_mount_plugins)"
+  [[ -d "$plug" ]] || return 1
+  if [[ -z "$dir" ]]; then
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-dockercfg.XXXXXX")" || return 1
+    chmod 0700 "$dir"
+  fi
+  mkdir -p "$dir"
+  src="${HOME:-}/.docker/config.json"
+  if [[ -r "$src" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$src" "$plug" > "$dir/config.json" <<'PYCFG' 2>/dev/null || \
+      printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$dir/config.json"
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+d["cliPluginsExtraDirs"] = [sys.argv[2]]
+json.dump(d, sys.stdout)
+PYCFG
+  else
+    printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$dir/config.json"
+  fi
+  chmod 0600 "$dir/config.json"
+  printf '%s' "$dir"
+}
+
 # ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
 #
 # ⚠ LA REGLE : l'adresse du daemon est FIXE pour un substrat donne. Sur WSL, Docker Desktop expose
@@ -158,6 +197,31 @@ docker_endpoint() {
   if [[ -z "$PROV_DOCKER_BIN" ]]; then
     PROV_DOCKER_WHY="aucune CLI docker : ni dans le PATH, ni dans le montage Docker Desktop ($(_docker_mount_cli))"
     return 1
+  fi
+
+  # ⚠ LE CHEMIN DES PLUGINS SE POSE ICI, PARCE QU'IL DEPEND DE LA CLI CHOISIE ET DE RIEN D'AUTRE.
+  #
+  # Il vivait plus bas, dans le shim d'escalade — un endroit ou il n'est qu'un EFFET DE BORD. Le
+  # shim ne se construit que sur une branche : socket refusee ET appelant non-root. Or le module qui
+  # a besoin de `compose` tourne EN ROOT, ou l'escalade n'a jamais lieu : il recevait la CLI du
+  # montage toute nue, sans `DOCKER_CONFIG`, donc sans plugins.
+  #
+  # Mesure du 2026-08-22, instance WSL vierge, install a froid :
+  #   FAIL 48-forge-host: (rc=125) d compose -f … up -d
+  #        unknown shorthand flag: 'f' in -f
+  # exactement le symptome que le commentaire du shim decrit — et qu'il ne guerissait que pour
+  # l'autre moitie des appelants. Un correctif accroche au mauvais porteur ne couvre que les
+  # chemins qui passent par ce porteur.
+  #
+  # `compose` n'est pas une sous-commande : c'est un PLUGIN, et la CLI du montage range les siens
+  # dans un repertoire qui n'est dans aucune liste par defaut. `DOCKER_CLI_PLUGIN_EXTRA_DIRS` n'est
+  # pas honore par cette version (mesure) ; la voie qui marche est `DOCKER_CONFIG` +
+  # `cliPluginsExtraDirs`.
+  #
+  # ⚠ UN `DOCKER_CONFIG` POSE PAR L'OPERATEUR EST UNE DECISION : on ne l'ecrase pas.
+  if [[ "$(detect_substrate)" == "wsl" && "$PROV_DOCKER_BIN" == "$(_docker_mount_cli)" \
+        && -z "${DOCKER_CONFIG:-}" ]]; then
+    local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
   fi
 
   # 2. L'endpoint. Un DOCKER_HOST posé par l'opérateur est une DÉCISION : on ne la contourne pas,
@@ -236,23 +300,9 @@ docker_endpoint() {
       # sous `DOCKER_CONFIG`, un `pull` d'image privee echoue alors en accusant le registry ou le
       # reseau, et la cause — jq absent — n'apparait nulle part. python3 est un prerequis DECLARE de
       # ce rail (`10-packages`), jq ne l'est pas : c'est donc lui qui porte le repli.
-      local cfg="$shim_dir/config"; mkdir -p "$cfg"
-      local src="${HOME:-}/.docker/config.json" plug; plug="$(_docker_mount_plugins)"
-      if [[ -r "$src" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$src" "$plug" > "$cfg/config.json" <<'PYCFG' 2>/dev/null || printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$cfg/config.json"
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    d = {}
-d["cliPluginsExtraDirs"] = [sys.argv[2]]
-json.dump(d, sys.stdout)
-PYCFG
-      else
-        # Aucune config a preserver (ou pas de python3) : on n'en invente pas, on pose le minimum.
-        printf '{"cliPluginsExtraDirs":["%s"]}\n' "$plug" > "$cfg/config.json"
-      fi
-      chmod 0600 "$cfg/config.json"
+      # Le repertoire de config vient de la fonction partagee : ce shim et le chemin nominal
+      # posaient le MEME `cliPluginsExtraDirs` en deux exemplaires, et seul l'un des deux existait.
+      local cfg; cfg="$(_docker_plugin_config "$shim_dir/config")" || cfg="$shim_dir/config"
 
       # ⚠ LE SHIM DOIT FAIRE TRAVERSER L'ENVIRONNEMENT, SINON IL CASSE TOUT CE QUI PILOTE COMPOSE.
       # `sudo` remet l'environnement a zero — sixieme occurrence de ce piege dans la journee, et
