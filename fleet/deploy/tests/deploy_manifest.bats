@@ -278,3 +278,34 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   grep -q 'done < <(effective_packages)' "$(pkg_mod)"
   grep -q 'mapfile -t pkgs < <(effective_packages)' "$(pkg_mod)"
 }
+
+@test "UN FAIT, DEUX RENDUS : le prefixe de la lib EGALE celui de l'installeur de release" {
+  # ⚠ CE COUPLAGE ETAIT ECRIT ET NON TENU. `provision-lib.sh` le dit en toutes lettres — « DOIT
+  # egaler le defaut d'etc/install.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
+  # et RIEN ne le verifiait. Une prose qui demande une synchronisation manuelle est une derive
+  # programmee : celui qui deplace l'un des deux ne lit pas forcement le commentaire de l'autre.
+  #
+  # Ce temoin existe pour le chantier EMPREINTE, qui va precisement deplacer ce prefixe. Sans lui,
+  # la phase B pouvait bouger la lib, laisser `etc/install.sh` derriere, et produire une machine ou
+  # le provisionnement cherche la release a un endroit ou l'installeur ne l'a pas posee.
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  local from_lib from_inst
+  from_lib="$(grep -oE '\$\{PROV_PREFIX:=[^}]+\}' "$lib" | head -1 | sed 's/.*:=//')"
+  from_inst="$(grep -oE '\$\{LCARS_INSTALL_PREFIX:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//')"
+  [ -n "$from_lib" ]
+  [ -n "$from_inst" ]
+  [ "$from_lib" = "$from_inst" ]
+}
+
+@test "UN FAIT, DEUX RENDUS : le repertoire de liens aussi" {
+  # Meme classe, meme piege : `PROV_LINK_DIR` se dit « miroir de LCARS_INSTALL_LINK_DIR ».
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  local from_lib from_inst
+  from_lib="$(grep -oE '\$\{PROV_LINK_DIR:=[^}]+\}' "$lib" | head -1 | sed 's/.*:=//')"
+  from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//')"
+  [ -n "$from_lib" ]
+  [ -n "$from_inst" ]
+  [ "$from_lib" = "$from_inst" ]
+}
