@@ -440,3 +440,55 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code | grep -q 'LCARS_TOOL_EVAL=1 mix run --no-start'
   code | grep -q 'LCARS_TOOL_EVAL=1 "\$tree/etc/enroll-catalogue.sh"'
 }
+
+@test "le PORT est sonde avant le montage, et le verdict NOMME l'occupant" {
+  # ⚖ USER 2026-08-22 : « les ports que tu montes, ils sont testes pour voir si c'est dispo ? » —
+  # non. Et l'echec etait MAL NOMME, ce qui est pire que bruyant : `compose up -d` rendait « port is
+  # already allocated » dans une sortie dumpee, et le module concluait « la forge ne converge pas ».
+  # L'operateur cherche un defaut de LCARS quand le fait est « autre chose tient 3000 ».
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  code | grep -q 'port_taken "\$PROV_FORGE_HOST_PORT"'
+  code | grep -q 'port_holder "\$PROV_FORGE_HOST_PORT"'
+  # le refus nomme le levier, pas seulement le probleme
+  code | grep -q 'PROV_FORGE_HOST_PORT=<port>'
+}
+
+@test "« PRIS PAR NOUS » n'est pas « PRIS PAR UN AUTRE » — sinon le second passage casse" {
+  # Au second passage, NOTRE forge tient le port. Refuser la rendrait non idempotente, et
+  # l'idempotence de ce module a deja ete cassee une fois pendant toute sa vie sous un commentaire
+  # qui disait le contraire.
+  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+  # la garde exige les DEUX : port pris ET forge muette
+  code | grep -qE 'was_up" -eq 0 \]\] && port_taken'
+}
+
+@test "les deux sondes de port vivent dans la LIB, pas dans un module" {
+  # Le deck en aura besoin aussi (`64-services`, port 20999) : deux implementations d'une meme
+  # question repondraient differemment le jour ou l'une bouge.
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  grep -q '^port_taken()' "$lib"
+  grep -q '^port_holder()' "$lib"
+  # `port_holder` rend VIDE quand il ne sait pas — jamais une phrase creuse
+  grep -A6 '^port_holder()' "$lib" | grep -q 'command -v ss'
+}
+
+@test "UN SEUL port de forge dans le produit : le poste s'aligne sur le banc" {
+  # ⚖ USER 2026-08-22 : « pour le mode bench, on pose 21000 […] poste aussi doit passer sur 21000
+  # par defaut. »
+  #
+  # ⚠ LE DEFAUT ETAIT `3000`, LE PORT LE PLUS DISPUTE D'UN POSTE DE DEV — React, Rails, Vite,
+  # Grafana le prennent tous. Un rail qui s'installe SUR le poste de quelqu'un ne peut pas
+  # revendiquer ce port : il gagne la course ou il la perd, et quelqu'un perd quelque chose.
+  #
+  # Deux defauts pour un meme fait ne restent d'accord que tant que personne n'en touche un : ce
+  # temoin lit les DEUX et exige l'egalite.
+  local bench="$BATS_TEST_DIRNAME/../docker/bench/bench-up.sh"
+  local from_module from_bench
+  from_module="$(grep -oE '\$\{PROV_FORGE_HOST_PORT:=[0-9]+\}' "$SRC" | head -1 | grep -oE '[0-9]+')"
+  from_bench="$(grep -oE '^FORGE_PORT="[0-9]+"' "$bench" | head -1 | grep -oE '[0-9]+')"
+  [ -n "$from_module" ]
+  [ -n "$from_bench" ]
+  [ "$from_module" = "$from_bench" ]
+  # et ce n'est PAS 3000
+  [ "$from_module" != "3000" ]
+}

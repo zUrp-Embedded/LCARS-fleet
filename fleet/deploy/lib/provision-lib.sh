@@ -927,6 +927,39 @@ advertise_addr() {
 # ─── as_human <cmd…> — exécute comme PROV_HUMAN avec le HOME de PROV_HUMAN ───────────────────────
 # Depuis root : runuser + env EXPLICITE (runuser sans -l garde le HOME de root — piège classique).
 # Déjà cet utilisateur : exécution directe. Autre user non-root : impossible proprement → échec dit.
+# ─── LES PORTS — FIXES PAR DÉFAUT, ET PERSONNE NE LES SONDAIT ───────────────────────────────────
+#
+# ⚖ USER 2026-08-22 : « les ports que tu montes, 3000 et 20999, ils sont fixes ? ils sont testés
+# pour voir si c'est dispo ? » — fixes et surchargeables ; sondés, non.
+#
+# ⚠ CE N'ÉTAIT PAS SILENCIEUX, C'ÉTAIT MAL NOMMÉ, et c'est pire. Un port occupé fait échouer
+# `compose up -d` (« port is already allocated ») et le module conclut « la forge ne converge pas » ;
+# le deck, lui, ne bind pas et l'unité meurt en « posé mais PAS actif ». Dans les deux cas la cause
+# est dans une sortie dumpée, jamais dans le verdict — l'opérateur cherche un défaut de LCARS quand
+# le fait est « autre chose tient ce port ».
+#
+# ⚠ ET LE RISQUE N'EST PAS SYMÉTRIQUE. `3000` est le défaut de la moitié de l'écosystème de dev —
+# React, Rails, Vite, Grafana. `20999` est choisi pour être improbable. Mesuré sur le poste de
+# l'auteur : `3000` est tenu par la forge de LCARS elle-même, et les bancs sont déjà décalés en
+# 3001/3002. Le produit CONNAÎT donc le besoin de ports distincts ; il ne le vérifiait pas.
+#
+# ⚠ « PRIS PAR NOUS » N'EST PAS « PRIS PAR UN AUTRE », et confondre les deux rendrait la sonde
+# nuisible : au second passage, notre propre service tient le port, et refuser là serait casser
+# l'idempotence. L'appelant tranche — il sait, lui, si le service qui répond est le sien.
+port_taken() { # port_taken <port> -> 0 si quelque chose ÉCOUTE sur la loopback
+  timeout 2 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null
+}
+
+# QUI le tient, quand on peut le dire. Sans privilège, `ss` ne rend pas le processus : on rend alors
+# une chaîne vide plutôt qu'une phrase creuse — un « occupé par (inconnu) » n'aide personne, et
+# prétendre nommer ce qu'on ne sait pas est la faute que ce dépôt paie le plus cher.
+port_holder() { # port_holder <port> -> description, ou VIDE
+  command -v ss >/dev/null 2>&1 || return 0
+  ss -ltnp 2>/dev/null \
+    | awk -v p=":$1\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
+    | sed -e 's/users:((//' -e 's/))$//' -e 's/,fd=[0-9]*//' | head -1
+}
+
 as_human() {
   local home
   # `|| true` : même classe que B5 — sous pipefail, getent sur un user inconnu ferait échouer

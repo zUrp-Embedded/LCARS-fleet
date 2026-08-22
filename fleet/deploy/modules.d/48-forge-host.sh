@@ -47,7 +47,23 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 : "${PROV_FORGE_PROJECT:=lcars-forge}"          # projet compose de la forge du poste
-: "${PROV_FORGE_HOST_PORT:=3000}"               # le port qu'elle publie
+# ─── LE PORT : 21000, COMME LE BANC ─────────────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-22 : « pour le mode bench, on pose 21000 comme port pour notre forge […] poste
+# aussi doit passer sur 21000 par défaut. »
+#
+# ⚠ CE DÉFAUT ÉTAIT `3000`, ET C'EST LE PORT LE PLUS DISPUTÉ D'UN POSTE DE DÉVELOPPEMENT — React,
+# Rails, Vite, Grafana le prennent tous par défaut. Un rail qui s'installe SUR le poste de quelqu'un
+# ne peut pas revendiquer ce port-là : il gagne la course ou il la perd, et dans les deux cas
+# quelqu'un perd quelque chose.
+#
+# `bench-up.sh` avait déjà tranché pour `21000` — c'est la plage haute, choisie pour être
+# improbable, la même logique que `20999` pour le deck. Le poste s'aligne : **un seul port de forge
+# dans le produit**, et deux défauts pour un même fait ne restent d'accord que tant que personne
+# n'en touche un.
+#
+# Le geste reste possible pour qui le veut : `PROV_FORGE_HOST_PORT=<port>`.
+: "${PROV_FORGE_HOST_PORT:=21000}"              # le port qu'elle publie (aligné sur bench-up.sh)
 # ─── QUI ADMINISTRE LA FORGE D'UN POSTE ─────────────────────────────────────────────────────────
 # ⚖ USER 2026-08-21 : « l'user qui installe devient admin, et son login remonte sur la forge. »
 # C'est D7 appliqué à ce rail : au poste, l'autorité est l'UNIX, pas la forge — le siège est celui
@@ -277,6 +293,31 @@ apply() {
   # no-op d'une seconde ; sur une déclaration modifiée il recrée. On l'appelle donc TOUJOURS, et
   # c'est `forge_up` AVANT qui dit si l'on a monté ou simplement reconvergé.
   local was_up=0; forge_up && was_up=1
+
+  # ⚠ LE PORT EST SONDÉ AVANT LE MONTAGE, ET LE VERDICT NOMME L'OCCUPANT.
+  #
+  # ⚖ USER 2026-08-22 : « les ports que tu montes, ils sont testés pour voir si c'est dispo ? » —
+  # non, et l'échec était MAL NOMMÉ, ce qui est pire que bruyant. `compose up -d` rendait
+  # « port is already allocated » dans une sortie dumpée, et ce module concluait « la forge ne
+  # converge pas » : l'opérateur cherche un défaut de LCARS quand le fait est « autre chose tient
+  # 3000 ».
+  #
+  # ⚠ ET `3000` EST LE DÉFAUT DE LA MOITIÉ DE L'ÉCOSYSTÈME DE DEV — React, Rails, Vite, Grafana.
+  # Mesuré sur le poste de l'auteur : il est tenu par la forge de LCARS elle-même, et les bancs sont
+  # déjà décalés en 3001/3002. Le besoin de ports distincts est connu du produit ; il n'était pas
+  # vérifié.
+  #
+  # ⚠ « PRIS PAR NOUS » N'EST PAS « PRIS PAR UN AUTRE ». `forge_up` vient de répondre : si NOTRE
+  # forge écoute, le port est légitimement occupé et refuser ici casserait l'idempotence — c'est le
+  # cas NOMINAL d'un second passage. On ne refuse que si le port est pris ET que la forge ne
+  # répond pas.
+  if [[ "$was_up" -eq 0 ]] && port_taken "$PROV_FORGE_HOST_PORT"; then
+    local holder; holder="$(port_holder "$PROV_FORGE_HOST_PORT")"
+    p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est PAS la forge de LCARS (elle ne répond pas sur $LOCAL_URL)"
+    p_fail "choisis-en un autre : PROV_FORGE_HOST_PORT=<port> — ou libère celui-ci"
+    verdict_apply
+  fi
+
   [[ "$was_up" -eq 1 ]] \
     || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
   LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="$PROV_FORGE_BIND" \
