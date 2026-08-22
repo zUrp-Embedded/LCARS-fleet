@@ -172,6 +172,59 @@ PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 d() { "$PROV_DOCKER_BIN" "$@"; }
 forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; }
 
+# ─── LE RUNNER CI — UNE FORGE QUE RIEN NE PEUT SERVIR N'EST PAS UNE FORGE ────────────────────────
+#
+# Le runner est un etat-cible de ce rail, pas un supplement : une forge sans lui accepte un ticket,
+# depense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas. Il se pose
+# donc ici, apres la forge, sous la meme identite et avec la meme CLI qu'elle.
+#
+# ⚠ UN SEUL MECANISME D'ENROLEMENT. `bench-runner.sh` le porte en entier — jeton d'enregistrement
+# par l'API admin, config des jobs, montage du compose — avec ses cicatrices (portee du jeton,
+# reseau des jobs, `docker cp` plutot que bind). Il est entierement parametre : on l'APPELLE. Un
+# second exemplaire divergerait du premier sur la premiere cicatrice qu'on ne recopierait pas.
+#
+# ⚠ LE RUNNER REJOINT LE RESEAU DE LA FORGE, il ne compose pas son adresse publiee : depuis un
+# conteneur, `127.0.0.1:21000` designe ce conteneur-la. `FORGE_NET` le met sur le bridge de la
+# forge, ou elle repond a `http://forge:3000`.
+: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_PROJECT}-runner}"
+
+ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond pas
+  local tok body
+  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  [[ -n "$tok" ]] || return 1
+  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
+          | curl -K - -s -m 10 "$LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 1
+  printf '%s' "$body" | jq -r '.total_count // empty' 2>/dev/null
+}
+
+converge_ci_runner() {
+  local n tok
+  n="$(ci_runner_count || true)"
+  if [[ "${n:-0}" -gt 0 ]]; then
+    p_ok "$n runner(s) CI déjà enregistré(s) — la CI de cette forge a une machine"
+    return 0
+  fi
+  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  [[ -n "$tok" ]] || { p_warn "runner CI non enrôlable : aucun jeton master lisible"; return 0; }
+
+  p_step "forge du poste : enrôlement du runner CI (projet $PROV_RUNNER_PROJECT, réseau $FORGE_NET)"
+  # `DOCKER_BIN` porte la CLI RÉSOLUE — sur ce substrat elle vit dans le montage Docker Desktop et
+  # peut être un shim d'escalade. Laisser le délégué chercher « docker » dans le PATH le ferait
+  # échouer sur une machine parfaitement saine : rien n'installe docker dans une VM WSL.
+  if DOCKER_BIN="$PROV_DOCKER_BIN" run_quiet \
+       bash "$(repo_root)/fleet/deploy/docker/bench/bench-runner.sh" \
+         --forge-api "$LOCAL_URL/api/v1" --admin-token "$tok" \
+         --network "$FORGE_NET" --project "$PROV_RUNNER_PROJECT"; then
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
+  else
+    # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
+    # que la CI n'a pas de machine. Un apply qui MEURT ici rendrait une forge saine inatteignable.
+    p_drift "runner CI NON enrôlé (le délégué a refusé — sa sortie est au-dessus) — la CI restera en attente"
+  fi
+}
+
 # LE VERDICT DIT SUR QUOI ELLE ÉCOUTE, parce que c'est la seule chose qu'un opérateur ne peut pas
 # deviner en la voyant répondre en local. Une forge ouverte au réseau et une forme fermée rendent
 # le même `200` sur la loopback.
@@ -747,6 +800,7 @@ apply() {
   p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
 
   announce_builtin_human_password
+  converge_ci_runner
   verdict_apply
 }
 

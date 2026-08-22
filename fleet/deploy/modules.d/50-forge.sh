@@ -377,28 +377,14 @@ check_ci_runner() {
 
   n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
   if [[ "${n:-0}" -eq 0 ]]; then
-    # ⚠ LE MEME FAIT, DEUX VERDICTS, PARCE QUE LES DEUX RAILS N'EN ATTENDENT PAS LA MEME CHOSE.
-    # Un DRIFT dit « pas tenu, et ce rail peut le tenir » — c'est ce qui rend le mot actionnable.
+    # Une forge sans runner accepte un ticket, depense un producteur, ouvre une PR — et la CI attend
+    # une machine qui n'existe pas. C'est un etat-cible, pas un supplement : `48-forge-host` enrole
+    # le runner apres avoir pose la forge, donc le rail PEUT le tenir, donc le mot est DRIFT.
     #
-    # SUR UNE BOITE, c'est vrai et c'est le motif d'origine de cette sonde : mesure du 2026-08-22,
-    # sept courses `queued`, aucune demarree, zero runner aux trois portees, et pas une ligne pour
-    # le dire — l'operateur l'a appris par un ticket bloque. Le sidecar compose EXISTE la, donc
-    # l'absence est une derive.
-    #
-    # SUR UN POSTE, non : AUCUN module de ce rail n'enrole de runner. Les seuls qui le font sont les
-    # scripts de banc — que ce message citait, envoyant un operateur de poste chercher son geste
-    # dans l'outillage d'un autre rail. Un drift que rien sur place ne peut lever n'est pas un
-    # etat-cible, c'est un reproche ; l'idiome pour ca est deja a cote (`70-human`, credentials
-    # claude : instruct-only, on CONSTATE et on nomme le geste).
-    #
-    # ⚠ ET LE BANC NE PERD RIEN : `bench-up.sh` tient sa propre garde et MEURT dessus (« runner
-    # DEMANDE et non servi — banc INCOMPLET »). Le rail qui exige la contrainte la porte lui-meme,
-    # la ou il peut aussi la satisfaire.
-    if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
-      p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. Geste operateur : « ./docker.sh runner-token » puis enrolement d'un runner (sur un banc : fleet/deploy/docker/bench/bench-runner.sh)"
-    else
-      p_warn "aucun runner CI enregistre sur cette forge — un job de CI y resterait en attente, et une PR qui l'attend ne fusionnerait pas. Ce rail n'en monte pas : c'est un geste d'operateur (« ./docker.sh runner-token » puis enrolement) ou un banc qui en fournit un"
-    fi
+    # ⚠ « CE RAIL N'EN MONTE PAS » N'EST JAMAIS UNE RAISON DE BAISSER LE VERDICT. Un drift que rien
+    # ne peut lever signale un module MANQUANT ; le degrader en constat rend le voyant muet et
+    # laisse livrer l'objet incomplet.
+    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`48-forge-host\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
   else
     labels="$(printf '%s' "$body" \
       | jq -r '[.runners[]? | .name + " [" + ([.labels[]?.name] | join(",")) + "]"] | join(" · ")' 2>/dev/null || true)"
