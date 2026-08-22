@@ -49,7 +49,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   setup do
-    root = Path.join(System.tmp_dir!(), "lcars-recon-#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("lcars-recon")
     File.mkdir_p!(root)
     prev_root = System.get_env("LCARS_TOOLCHAIN_RUN_STATE")
     System.put_env("LCARS_TOOLCHAIN_RUN_STATE", root)
@@ -174,7 +174,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       # Un CHEMIN qui ne peut pas exister (fichier en travers) : mkdir_p et write échouent tous
       # les deux — le cas « répertoire non posé par le provisioning », sans toucher au FS réel.
       blocker =
-        Path.join(System.tmp_dir!(), "lcars-recon-block-#{System.unique_integer([:positive])}")
+        Fleet.TestEnv.tmp_path("lcars-recon-block")
 
       File.write!(blocker, "pas un dossier")
       on_exit(fn -> File.rm_rf!(blocker) end)

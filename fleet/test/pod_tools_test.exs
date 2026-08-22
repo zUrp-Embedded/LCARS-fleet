@@ -3043,7 +3043,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "l'org d'un projet ne se DEVINE pas — le catalogue est OBLIGATOIRE" do
     setup do
-      tmp = Path.join(System.tmp_dir!(), "orgs-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("orgs")
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       root = Path.join(tmp, "aaa")

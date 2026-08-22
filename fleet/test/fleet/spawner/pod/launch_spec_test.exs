@@ -460,7 +460,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   describe "le magasin d'outillage — monte, et l'environnement qui le rend utilisable" do
     setup do
       root =
-        Path.join(System.tmp_dir!(), "lcars-store-test-#{System.unique_integer([:positive])}")
+        Fleet.TestEnv.tmp_path("lcars-store-test")
 
       File.mkdir_p!(Path.join(root, "state/env.d"))
       File.mkdir_p!(Path.join(root, "cache"))

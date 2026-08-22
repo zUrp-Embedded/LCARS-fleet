@@ -995,7 +995,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     end
 
     test "fichier projete present => son login part en assignee" do
-      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("lcars-assg")
       File.mkdir_p!(Path.join(root, "state"))
       File.write!(Path.join([root, "state", "pilot.assignee"]), "le-login-reel\n")
       on_exit(fn -> File.rm_rf!(root) end)
@@ -1012,7 +1012,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     test "fichier VIDE = ABSENT : UN SEUL appel, l'option OMISE, et un warning" do
       # Sans la clause vide->nil, `assignees: [""]` partirait, la forge refuserait, et le retry
       # sans option rattraperait — temoin naif vert, un appel API brule par escalade.
-      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("lcars-assg")
       File.mkdir_p!(Path.join(root, "state"))
       File.write!(Path.join([root, "state", "pilot.assignee"]), "  \n")
       on_exit(fn -> File.rm_rf!(root) end)
@@ -1033,7 +1033,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     end
 
     test "store present + fichier absent => nil + warning (panne dite, pas silence)" do
-      root = Path.join(System.tmp_dir!(), "lcars-assg-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("lcars-assg")
       File.mkdir_p!(Path.join(root, "state"))
       on_exit(fn -> File.rm_rf!(root) end)
       pid = self()

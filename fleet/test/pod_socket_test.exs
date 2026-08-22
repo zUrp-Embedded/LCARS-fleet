@@ -53,7 +53,7 @@ defmodule Fleet.MCP.PodSocketTest do
   alias Fleet.TaskQueue
 
   setup do
-    base = Path.join(System.tmp_dir!(), "lcars-mcp-sock-#{System.unique_integer([:positive])}")
+    base = Fleet.TestEnv.tmp_path("lcars-mcp-sock")
     on_exit(fn -> File.rm_rf(base) end)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, base)
 

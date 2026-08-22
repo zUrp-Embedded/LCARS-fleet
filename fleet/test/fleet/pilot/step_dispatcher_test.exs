@@ -1231,7 +1231,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # tests use an INLINE body (no pointer) → mount is nil → `maybe_put(:mandate, nil)` is a no-op,
       # so deleting the fix line passes 3200 tests. This test carries a real `Criteria:` pointer, so
       # a missing `:mandate` (the original bug) is now RED.
-      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      ops = Fleet.TestEnv.tmp_path("ops")
       work_dir = Path.join(ops, "lcars-test")
       File.mkdir_p!(Path.join(work_dir, "gate-briefs"))
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -1956,7 +1956,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       Fleet.TestEnv.put_env_restoring(
         :lcars_fleet,
         :credentials_role_tokens_dir,
-        Path.join(System.tmp_dir!(), "lcars-gk-only-#{System.unique_integer([:positive])}")
+        Fleet.TestEnv.tmp_path("lcars-gk-only")
       )
 
       Fleet.TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")

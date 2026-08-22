@@ -61,7 +61,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
   end
 
   defp tree(tools_src, deleg_src) do
-    root = Path.join(System.tmp_dir!(), "tools_gated_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("tools_gated")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp/pod_tools"))
     File.write!(Path.join(root, @tools_rel), tools_src)
     File.write!(Path.join(root, @deleg_rel), deleg_src)

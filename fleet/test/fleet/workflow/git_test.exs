@@ -340,7 +340,7 @@ defmodule Fleet.GitTest do
       # name (parentheses, `→`, `≠`) which, interpolated unquoted into the hook's `sh`, would break
       # the redirection.
       counter =
-        Path.join(System.tmp_dir!(), "ma05_hook_calls_#{System.unique_integer([:positive])}")
+        Fleet.TestEnv.tmp_path("ma05_hook_calls")
 
       File.rm(counter)
       hook = Path.join([bare, "hooks", "pre-receive"])

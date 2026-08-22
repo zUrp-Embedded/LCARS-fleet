@@ -126,7 +126,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     # is the one that goes red. Without it, the mandatory field is enforced only by the canon cards
     # happening to carry it — which is a convention, not a wall, and conventions do not survive the
     # next card someone writes in a hurry.
-    tmp = Path.join(System.tmp_dir!(), "ci-mandatory-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("ci-mandatory")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
 

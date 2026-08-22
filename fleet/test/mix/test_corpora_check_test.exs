@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check
 
   defp tree(files) do
-    root = Path.join(System.tmp_dir!(), "batscorp_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("batscorp")
     on_exit(fn -> File.rm_rf!(root) end)
 
     # The check derives the repo root as `..` from the Mix root it is handed. It was `../..` while
@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
 
   describe "the instrument answers for itself" do
     test "a tree that is not the repo root FAILS as broken — it never passes by measuring nothing" do
-      nowhere = Path.join(System.tmp_dir!(), "nowhere_#{System.unique_integer([:positive])}")
+      nowhere = Fleet.TestEnv.tmp_path("nowhere")
 
       result = Check.check_test_corpora_on_record(nowhere)
 

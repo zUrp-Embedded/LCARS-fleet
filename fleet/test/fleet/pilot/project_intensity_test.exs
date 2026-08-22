@@ -253,7 +253,7 @@ defmodule Fleet.Project.IntensityTest do
 
   describe "une carte inconnue ICI mais presente AILLEURS — le refus nomme le catalogue" do
     setup do
-      tmp = Path.join(System.tmp_dir!(), "carte-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("carte")
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       for {cat, cartes} <- [{"aaa", ["commune", "propre-a-aaa"]}, {"bbb", ["commune"]}] do
@@ -323,7 +323,7 @@ defmodule Fleet.Project.IntensityTest do
     # quatre portes d'`Onboard` ne nourrissaient pas. Epingler la resolution sur la fonction dont la
     # signature protege deja l'appelant, c'est mesurer le cas qui ne casse jamais.
     test "write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme" do
-      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("wr")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -336,7 +336,7 @@ defmodule Fleet.Project.IntensityTest do
     end
 
     test "write/2 REFUSE la carte du voisin — et le refus nomme le catalogue qui la porte" do
-      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("wr")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -358,7 +358,7 @@ defmodule Fleet.Project.IntensityTest do
       # tolerance est donc legitime ICI et fatale chez un appelant qui tient le depot et l'oublie —
       # d'ou l'entonnoir a argument positionnel dans `Onboard`. Le jour ou quelqu'un voudra faire
       # refuser `write/2`, ce test lui dira ce qu'il casse.
-      tmp = Path.join(System.tmp_dir!(), "wr-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("wr")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 

@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # premier vert.
   describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
     defp fixture_root!(ctx) do
-      root = Path.join(System.tmp_dir!(), "jg097-#{ctx}-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
       File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
       File.mkdir_p!(Path.join(root, "etc"))
       on_exit(fn -> File.rm_rf(root) end)
@@ -76,7 +76,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # echoue pour la bonne raison plutot que parce que le contrat echoue toujours.
   describe "residue_check — un mur ne rend pas compte d'un fichier qu'il n'a pas lu" do
     setup do
-      root = Path.join(System.tmp_dir!(), "jg088-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg088")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
       on_exit(fn -> File.rm_rf(root) end)
       %{root: root, target: Path.join([root, "lib", "fleet", "sp_builder.ex"])}
@@ -163,7 +163,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # serait fermee par un contrat qui voit la fonction et lui attribue la doc d'une autre.
   describe "docs.public_functions_documented — les modules imbriques sont dans la population" do
     setup do
-      root = Path.join(System.tmp_dir!(), "jg090-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg090")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
       on_exit(fn -> File.rm_rf(root) end)
       %{root: root, src: Path.join([root, "lib", "fleet", "nested.ex"])}
@@ -272,7 +272,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # `.egress`, `.identity` et deux lanceurs sans extension. Mesure : 253 fichiers avant, 279 apres.
   describe "vocab.sanctuary_contained — la population, c'est le repertoire, pas trois suffixes" do
     setup do
-      root = Path.join(System.tmp_dir!(), "jg085-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg085")
       File.mkdir_p!(Path.join(root, "bin"))
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
       File.mkdir_p!(Path.join(root, "etc"))
@@ -349,7 +349,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # {docker,wsl,linux}` montre le module selectionne sur les trois.
   describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
     setup do
-      root = Path.join(System.tmp_dir!(), "jg070-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg070")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
       File.mkdir_p!(Path.join([root, "deploy", "docker"]))
       File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
@@ -440,7 +440,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # reel, ce qu'aucun test hermetique ne joue. Troisieme de la famille (F8, catalogue_before_freeze).
   describe "boot.event_registry_before_children — l'ordre qui rend le defaut permissif sur" do
     setup do
-      root = Path.join(System.tmp_dir!(), "jg009-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("jg009")
       File.mkdir_p!(Path.join([root, "lib", "fleet", "event_router"]))
       on_exit(fn -> File.rm_rf(root) end)
       %{root: root, src: Path.join([root, "lib", "fleet", "event_router", "application.ex"])}

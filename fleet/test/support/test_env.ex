@@ -27,6 +27,36 @@ defmodule Fleet.TestEnv do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   @doc """
+  Un chemin JETABLE sous `/tmp`, qui ne peut pas entrer en collision avec un autre utilisateur.
+
+  ## Ce que `System.unique_integer` ne suffit pas a garantir
+
+  C'est un compteur PAR NŒUD : il repart a chaque demarrage de la BEAM, donc deux runs successifs
+  produisent la meme suite d'entiers. Sur un `/tmp` PARTAGE, deux utilisateurs de la meme machine
+  finissent donc par viser le meme chemin — et le second trouve un repertoire qui existe deja,
+  appartenant au premier. `File.mkdir_p!/1` REUSSIT (il ne cree rien, le repertoire est la), et
+  c'est l'ECRITURE qui echoue, une ligne plus loin, sur une permission.
+
+  ⚠ MESURE DU 2026-08-23. `step_dispatcher_test.exs` est mort sur
+  `could not write to file "/tmp/lcars-gk-only-38882/system_gatekeeper.gitea_token":
+  permission denied`, sur un repertoire pose par un AUTRE compte de la machine trois jours plus tot.
+  Le test n'avait pas change ; l'echec ne dependait que de qui avait joue la suite avant.
+
+  Le pid du systeme d'exploitation tranche : il est unique parmi les processus VIVANTS, donc deux
+  runs concurrents — meme utilisateur ou non — ne peuvent pas se retrouver sur le meme chemin.
+  Combine au compteur, il rend aussi les chemins distincts A L'INTERIEUR d'un run.
+
+  Ne cree RIEN : l'appelant garde son `File.mkdir_p!/1` et son nettoyage.
+  """
+  @spec tmp_path(String.t()) :: Path.t()
+  def tmp_path(prefix) when is_binary(prefix) do
+    Path.join(
+      System.tmp_dir!(),
+      "#{prefix}-#{System.pid()}-#{System.unique_integer([:positive])}"
+    )
+  end
+
+  @doc """
   Writes `content` as `role`'s forge token, AT THE PATH THE RUNTIME READS.
 
   A fixture that spells `<dir>/<role>.gitea_token` itself is a fixture that keeps passing on a

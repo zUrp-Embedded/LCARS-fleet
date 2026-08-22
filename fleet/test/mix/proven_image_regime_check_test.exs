@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check
 
   defp tree(files) do
-    root = Path.join(System.tmp_dir!(), "image_regime_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("image_regime")
     File.mkdir_p!(Path.join(root, "config"))
     for {name, src} <- files, do: File.write!(Path.join([root, "config", name]), src)
     on_exit(fn -> File.rm_rf!(root) end)

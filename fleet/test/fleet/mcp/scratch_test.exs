@@ -17,7 +17,7 @@ defmodule Fleet.MCP.ScratchTest do
   alias Fleet.MCP.PodTools.Delegation
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "scratch-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("scratch")
     dir = Path.join(tmp, "demo")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(tmp) end)

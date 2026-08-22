@@ -18,7 +18,7 @@ defmodule Fleet.Workflow.CardRolesTest do
   alias Fleet.Workflow.CardRoles
 
   setup do
-    root = Path.join(System.tmp_dir!(), "cr-#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("cr")
     on_exit(fn -> File.rm_rf!(root) end)
     {:ok, root: root}
   end

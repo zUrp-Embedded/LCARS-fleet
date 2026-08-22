@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
     #
     # Fail-closed intact, et c'est ce qu'on epingle ici : sans le jeton du rail merge, AUCUNE
     # tentative, jamais de repli sur le compte systeme ni sur l'autre rail.
-    empty = Path.join(System.tmp_dir!(), "no-role-token-#{System.unique_integer([:positive])}")
+    empty = Fleet.TestEnv.tmp_path("no-role-token")
     File.mkdir_p!(empty)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
 

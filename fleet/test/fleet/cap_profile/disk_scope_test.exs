@@ -37,7 +37,7 @@ defmodule Fleet.CapProfile.DiskScopeTest do
   """
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "dscope-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("dscope")
     on_exit(fn -> File.rm_rf!(tmp) end)
 
     cat_a = seed_catalogue(tmp, "aaa", "role-a")

@@ -163,7 +163,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
       # contenu qu'elle remplace. Sa formulation contient un exemple d'interdit (« ne jamais
       # rebaser sur main ») : c'est precisement le genre de phrase qui pourrait matcher, et rien
       # d'autre que ce test ne le verifiera le jour ou quelqu'un la reformule.
-      path = Path.join(System.tmp_dir!(), "jg028_#{System.unique_integer([:positive])}.md")
+      path = Fleet.TestEnv.tmp_path("jg028") <> ".md"
 
       File.write!(path, "## Conventions\nNe JAMAIS faire git push --force sur main.\n")
       on_exit(fn -> File.rm(path) end)

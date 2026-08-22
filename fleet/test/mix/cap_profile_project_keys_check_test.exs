@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
   end
 
   defp tree(props, keys) do
-    root = Path.join(System.tmp_dir!(), "project_keys_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("project_keys")
     File.mkdir_p!(Path.join(root, "priv/cap_profile/schema"))
     File.mkdir_p!(Path.join(root, "lib/fleet/pilot/step_dispatcher"))
     File.write!(Path.join(root, @schema_rel), schema(props))
@@ -68,7 +68,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
     end
 
     test "a resolver whose map it cannot find is BROKEN too" do
-      root = Path.join(System.tmp_dir!(), "project_keys_#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("project_keys")
       File.mkdir_p!(Path.join(root, "priv/cap_profile/schema"))
       File.mkdir_p!(Path.join(root, "lib/fleet/pilot/step_dispatcher"))
       File.write!(Path.join(root, @schema_rel), schema(%{"repo_path" => %{}}))
