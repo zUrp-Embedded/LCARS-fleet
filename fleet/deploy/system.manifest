@@ -1,0 +1,157 @@
+# SOURCE: fleet/deploy/system.manifest
+# STARDATE: (posée par /push-github)
+# STATUS: data, not code — CE QUE LE PROVISIONNEMENT A LE DROIT DE POSER SUR UNE MACHINE.
+#
+# ─── CE QUE CE FICHIER EST ──────────────────────────────────────────────────────────────────────
+#
+# `etc/install.manifest` decrit ce que le PRODUIT livre dans `$PREFIX/bin`. Celui-ci decrit
+# l'EMPREINTE MACHINE : tout ce qu'une install pose hors du checkout, et ce qu'elle ne doit jamais
+# toucher. Meme idiome, meme regle — la table est la source, personne ne recopie.
+#
+# ⚠ IL N'A AUCUN LECTEUR AU MOMENT OU IL EST POSE, ET C'EST VOULU. Trois gestes le liront
+# (`20-groups` pour les GID, `25-directories` pour sa table, `provision uninstall` a l'envers) ;
+# aucun ne peut etre ecrit avant lui. C'etait le trou d'ordre du corpus d'alice : trois gestes
+# bloques sur un objet que personne n'avait la charge de creer.
+#
+# ─── D'OU IL VIENT, ET POURQUOI IL FAUT LES TROIS SOURCES ───────────────────────────────────────
+#
+# Aucune source seule n'est complete, et croire le contraire est la faute qui produit un
+# desinstalleur qui laisse des choses derriere lui :
+#
+#   1. LA MACHINE  — releve sur .63 le 2026-08-22, apres une install complete (25 modules, 24
+#                    convergés, 0 echec). Elle dit ce qu'UNE install a produit. Elle ne montre PAS
+#                    ce qui n'est pose que sur l'autre substrat, ni les branches non prises.
+#   2. LE CODE     — extraction sur les 24 `modules.d/*.sh`. Il dit ce qui PEUT etre pose. Il ne
+#                    montre pas ce que posent `install.sh`, `etc/install.sh`, ni le runtime.
+#   3. LE RUNTIME  — `console.sh`, `human-converger.sh`, `70-human`. Ils posent APRES l'install, en
+#                    boucle : repertoires de console, comptes unix, `~/.lcars`. Un manifeste qui les
+#                    ignore declare une machine qui n'existe que la premiere seconde.
+#
+# ⚠ CE QUE LA SOURCE 3 A REVELE, ET QUE NI 1 NI 2 N'AVAIENT : `/run/lcars-converger.refused` vit a
+# la RACINE de `/run`, hors de l'arbre `/run/lcars/`. Un `rm -rf /run/lcars` ne l'emporte pas.
+#
+# ─── FORMAT ─────────────────────────────────────────────────────────────────────────────────────
+#
+#   <classe>  <objet>  <mode>  <proprietaire>  <substrat>
+#
+#   classe     prefix   la racine de l'install
+#              dir      un repertoire durable
+#              anchor   un fichier a un chemin FIXE hors prefixe (ce que l'OS ou le PATH exige)
+#              link     un symlink hors prefixe
+#              group    un groupe unix, avec son GID
+#              runtime  un objet volatile, refait au boot (tmpfs)
+#              human    un objet dans le home d'une personne — POSE, jamais preserve
+#              preserve ce qu'une desinstallation ne doit JAMAIS toucher
+#   mode       octal, ou `-` quand la classe n'en porte pas
+#   proprietaire `user:group`, ou `-`
+#   substrat   `any` | `wsl` | `linux` | `docker`, ou une combinaison separee par `+`
+#
+#   `<human>` dans un chemin est un joker : il vaut pour chaque humain enrole.
+#
+# ⚠ LES CHEMINS SONT CEUX D'AUJOURD'HUI, PAS CEUX DE LA CIBLE. La phase B du plan les regroupe sous
+# `/opt/lcars` ; ce fichier les suivra. Declarer la cible ici ferait mentir le temoin de diff des
+# aujourd'hui, et un instrument qui crie a chaque passage apprend a etre ignore.
+#
+# ─── CE QUI EST DELIBEREMENT ABSENT ─────────────────────────────────────────────────────────────
+#
+# Les paquets apt. Ils ont deja leur table (`10-packages.sh`) et leur temoin bidirectionnel
+# (`deploy_manifest.bats`) ; ce qui manquait etait le JOURNAL — qui distingue `apt_installed` de
+# `apt_already` — et il est genere par machine, pas declare ici.
+
+# ─── LA RACINE ──────────────────────────────────────────────────────────────────────────────────
+prefix    /local/LCARS_v2                              0750  root:fleet          wsl+linux
+
+# ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
+dir       /opt/lcars                                   0755  root:root           wsl+linux
+dir       /opt/lcars/admiral-skills                    0755  root:root           wsl+linux
+dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
+dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
+dir       /usr/share/lcars                             0755  root:root           wsl+linux
+dir       /usr/share/lcars/avatars                     0755  root:root           wsl+linux
+dir       /usr/share/lcars/favicon                     0755  root:root           wsl+linux
+dir       /usr/share/lcars/doc                         0755  root:root           wsl+linux
+dir       /home/private                                0750  root:fleet          any
+dir       /home/catalogues                             2775  root:lcars-admin    any
+# ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
+# (`LCARS_STORE_ROOT`, lu par `toolchain-converger.sh:39`) ; `/var/lib/lcars/tofu` est l'etat des
+# recettes (`PROV_CATALOGUES_WORK`). Ne declarer que le second laissait le premier hors de la table.
+dir       /var/lib/lcars                               2775  root:lcars-admin    any
+dir       /var/lib/lcars/tofu                          2770  root:lcars-admin    any
+dir       /etc/lcars                                   0755  root:root           wsl+linux
+
+# ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
+# Versionnes dans leur nom : deux versions cohabitent sans se marcher dessus, et le `rm` de
+# l'ancienne est un geste separe et sur.
+dir       /opt/elixir-<version>                        0755  root:root           wsl+linux
+dir       /opt/node-<version>                          0755  root:root           wsl+linux
+
+# ─── ANCRES — fichiers a chemin fixe hors prefixe ───────────────────────────────────────────────
+# ⚠ LE NOM REEL, PAS CELUI QU'ON CROIT. Le corpus d'alice declarait `/etc/tmpfiles.d/lcars.conf` ;
+# le fichier pose s'appelle `lcars-console.conf`. Un desinstalleur ecrit depuis la table fausse le
+# raterait, silencieusement et pour toujours. C'est l'ecart qui justifie a lui seul ce fichier.
+anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           linux
+anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           linux
+anchor    /etc/sudoers.d/lcars-toolchain               0440  root:root           any
+anchor    /etc/lcars/host-consent                      0644  root:root           linux
+anchor    /etc/lcars/services.env                      0640  root:fleet          linux
+anchor    /etc/lcars/deck-oidc.json                    0640  root:fleet          wsl+linux
+# ⚠ CES DEUX-LA SONT DES BINAIRES, PAS DES ANCRES DE L'OS, et la classe est un pis-aller assume :
+# rien dans le PATH n'a de raison d'etre a un chemin fixe. La phase B du plan les deplace sous le
+# prefixe et ils deviendront des `link`. Les declarer aujourd'hui est ce qui permet au temoin de
+# les VOIR — un objet non declare est un objet que l'uninstall laisse.
+anchor    /usr/local/bin/tofu                          0755  root:root           wsl+linux
+anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
+
+# ─── SYMLINKS DE PATH ───────────────────────────────────────────────────────────────────────────
+link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
+link      /usr/local/bin/lcars                         -     -                   wsl+linux
+link      /usr/local/bin/elixir                        -     -                   wsl+linux
+link      /usr/local/bin/elixirc                       -     -                   wsl+linux
+link      /usr/local/bin/iex                           -     -                   wsl+linux
+link      /usr/local/bin/mix                           -     -                   wsl+linux
+link      /usr/local/bin/node                          -     -                   wsl+linux
+link      /usr/local/bin/npm                           -     -                   wsl+linux
+link      /usr/local/bin/npx                           -     -                   wsl+linux
+
+# ─── GROUPES ────────────────────────────────────────────────────────────────────────────────────
+# ⚠ LES GID SONT FLOTTANTS AUJOURD'HUI (mesure .63 : fleet 1001, lcars-admin 1002, lcars-console
+# 1003), et le Dockerfile en fixe deux (fleet 2000, lcars-console 2001). Les deux substrats
+# divergent donc sur un fait que ce fichier existe pour tenir. Le geste `20-groups` de la phase A
+# lira cette colonne ; tant qu'il ne la lit pas, la valeur ici est la CIBLE, pas la mesure.
+group     fleet                                        2000  -                   any
+group     lcars-console                                2001  -                   any
+group     lcars-admin                                  2002  -                   any
+
+# ─── VOLATILES — refaits au boot ────────────────────────────────────────────────────────────────
+runtime   /run/lcars                                   0755  root:root           wsl+linux
+runtime   /run/lcars/console                           0711  root:root           wsl+linux
+runtime   /run/lcars/console/<human>                   2710  <human>:lcars-console  wsl+linux
+runtime   /run/lcars/toolchain                         0755  root:root           any
+# ⚠ HORS DE L'ARBRE `/run/lcars/`, et c'est la raison pour laquelle ces deux lignes existent : un
+# `rm -rf /run/lcars` ne les emporte pas. Ni la mesure machine ni la table du corpus ne les avaient —
+# c'est la lecture du RUNTIME et de l'entrypoint qui les a rendus visibles, et le second n'est
+# apparu qu'en ELARGISSANT les sources du temoin. Un instrument etroit rend un verdict etroit.
+runtime   /run/lcars-converger.refused                 0644  root:root           any
+runtime   /run/lcars-provision.rc                      0644  root:root           docker
+
+# ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
+# L'uninstall peut les PROPOSER, il ne les impose pas : ce sont des objets de travail, mais ils
+# n'existent que parce que LCARS les a poses.
+human     /home/<human>/.lcars                         0700  <human>:-           any
+human     /home/<human>/.lcars/log                     0700  <human>:-           any
+human     /home/<human>/.lcars/fleet_v2.env            0600  <human>:-           any
+human     /home/<human>/pods                           0700  <human>:-           any
+human     /home/<human>/.local/bin/claude              0755  <human>:-           any
+
+# ─── PRESERVE — ce qu'une desinstallation ne touche JAMAIS ──────────────────────────────────────
+# ⚠ CE N'EST PAS DE L'EMPREINTE, C'EST LE TRAVAIL. Un uninstall qui y touche est un bug, et c'est
+# le temoin de diff qui l'attrape.
+#
+# ⚠ ET UN OBJET PRESERVE PEUT DEPENDRE D'UN OBJET D'EMPREINTE : ces trois faces sont en
+# `2775 root:fleet`. Retirer le groupe `fleet` les laisse avec un GID orphelin. Mesure du nettoyage
+# manuel de .63 le 2026-08-22 : `groupdel fleet` a echoue, et c'etait la bonne reponse. Le groupe
+# survit, ou les faces changent de groupe — c'est une decision, pas un oubli.
+preserve  /home/projects                               2775  root:fleet          any
+preserve  /home/projects.ops                           2775  root:fleet          any
+preserve  /home/projects.workshop                      2775  root:fleet          any

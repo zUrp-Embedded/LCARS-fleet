@@ -72,6 +72,29 @@ SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
 
 UNITS=(lcars-landing lcars-converger)
 
+# ─── QUI DÉMARRE QUOI — LA TABLE, PARCE QU'UNE PROSE NE SE VÉRIFIE PAS ──────────────────────────
+#
+# ⚠ LE RAIL NATIF RE-DÉRIVE LE CONTRAT DE DÉMARRAGE DE LA BOÎTE, ET IL EN AVAIT PERDU UN TIERS.
+# `deploy/docker/entrypoint.sh` lance TROIS composants persistants au boot ; ce module posait DEUX
+# unités. Le troisième — `console.sh --all` — n'avait aucun démarreur, et le deck offrait donc des
+# consoles que personne n'ouvrait (`[Errno 2]` sur la socket, mesuré le 2026-08-22).
+#
+# ⚖ USER 2026-08-22 : « 2 on aligne ». Pas de troisième unité — le convergeur appelle `--all` une
+# fois par tour (`ensure_all_consoles`). Une unité de plus AJOUTERAIT un démarreur là où le défaut
+# était d'en avoir deux qui ne s'accordent pas.
+#
+# ⚠ D'OÙ CETTE TABLE. Sans elle, le témoin ISO des processus devrait accepter une exemption en
+# prose — « celui-là est démarré ailleurs, crois-moi » — c'est-à-dire devenir décoratif. La règle
+# qu'elle rend vérifiable est : **chaque composant persistant de l'entrypoint a un démarreur DÉCLARÉ
+# sur ce rail**, unité ou pilote, et la correspondance est lisible par une machine.
+#
+# Format : <composant de l'entrypoint>:<unit|driven-by>:<nom>
+STARTERS=(
+  "human-converger.sh:unit:lcars-converger"
+  "console-landing.sh:unit:lcars-landing"
+  "console.sh:driven-by:lcars-converger"
+)
+
 have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
 
 # ─── L'ENVIRONNEMENT DES DEUX SERVICES, DÉRIVÉ ─────────────────────────────────────────────────

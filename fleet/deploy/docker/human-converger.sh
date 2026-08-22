@@ -783,6 +783,42 @@ converge_once() {
     LAST_RECONCILE="$now"
     reconcile_humans "${roster[@]}"
   fi
+
+  ensure_all_consoles
+  return 0
+}
+
+# ─── ensure_all_consoles — LE DEMARREUR SUIT LE LECTEUR, PAS L'EQUIPE ───────────────────────────
+#
+# ⚖ USER 2026-08-22 : « 2 on aligne » — contre la troisieme unite systemd qui etait l'autre option.
+#
+# ⚠ DEUX POPULATIONS VIVAIENT COTE A COTE, ET ELLES NE COINCIDAIENT PAS. Le deck OFFRE une console a
+# tout humain que `console-humans.sh` liste — le groupe unix `fleet`. Ce convergeur n'en DEMARRAIT
+# que pour les membres de l'equipe forge `fleet:humans`. L'operateur de la machine, qui est dans
+# `fleet` et pas dans `fleet:humans`, recevait donc un onglet et une erreur :
+#
+#   [lcars-deck] relais console -> /run/lcars/console/<operateur>/console.sock : [Errno 2]
+#
+# Ce n'etait pas une exclusion voulue — `console-deck.py` dit l'inverse en toutes lettres :
+# « admiral est site-admin mais PAS dans fleet:humans […] sa console tourne sous lui (uid 1000) ».
+#
+# ⚠ ET LA BOITE N'AVAIT PAS CE DEFAUT, parce qu'elle demarre `console.sh --all` a son entrypoint —
+# et `--all` lit `console-humans.sh`, c'est-a-dire le lecteur du deck. Offre et demarrage y
+# coincident PAR CONSTRUCTION. Le rail natif re-derivait ce contrat en unites systemd et n'en avait
+# re-derive que deux sur trois.
+#
+# ⚠ POURQUOI ICI ET PAS DANS UNE UNITE. Une troisieme unite AJOUTERAIT un demarreur la ou le defaut
+# est d'en avoir deux qui ne s'accordent pas. Appeler `--all` une fois par tour SUPPRIME le second :
+# les appels par humain plus haut restent, parce qu'ils demarrent la console AU MOMENT de
+# l'enrolement — celui-ci rattrape tous les autres, et le tour d'apres ne coute rien.
+#
+# L'idempotence est reelle et elle vit dans `console.sh` (`console_alive`, une connexion reelle sur
+# la socket). Elle ne l'a pas toujours ete : mesure du 2026-08-18, **64 ttyd par humain** sur un banc
+# de trente minutes, quand cette fonction faisait `rm -f` sur la socket a chaque tour.
+ensure_all_consoles() {
+  [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]] || return 0
+  "$CONSOLE" --all >/dev/null 2>&1 \
+    || err "certaines consoles n'ont pas demarre — ssh reste la porte ($CONSOLE --all)"
   return 0
 }
 
