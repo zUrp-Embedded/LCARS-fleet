@@ -944,7 +944,13 @@ PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
 PROV_LAST_RC=0
 
+# ⚠ COUTURE DE DÉCOR, MÊME IDIOME QUE `LCARS_SYSADMIN_UID` ET `LCARS_DOCKER`. Sans elle, tout témoin
+# du mode réseau MESURE LA MACHINE qui le joue : la règle « sous WSL en NAT, on annonce localhost »
+# n'est exerçable que sur un WSL en NAT, donc elle passe au vert chez son auteur et rougit ailleurs
+# sans qu'aucune règle ait bougé. Mesuré le 2026-08-22 sur `.63` (Linux natif) : le témoin y tombait
+# alors que le produit était juste. Un témoin qui n'est vrai que sur une machine ne garde rien.
 wsl_networking_mode() {
+  [[ -n "${LCARS_WSL_NETWORKING_MODE:-}" ]] && { echo "$LCARS_WSL_NETWORKING_MODE"; return 0; }
   local m
   m="$(wslinfo --networking-mode 2>/dev/null | tr -d '[:space:]')"
   # `wslinfo` absent = WSL antérieur au mode miroir. Il n'existait alors QUE le NAT : c'est un fait
@@ -980,7 +986,13 @@ advertise_addr() {
     # Un bind précis EST l'adresse : rien à dériver, et la dérivation se tromperait.
     *) PROV_ADVERTISE="$bind"; return 0 ;;
   esac
-  if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
+  # ⚠ `PROV_SUBSTRATE` D'ABORD, LA SONDE SEULEMENT EN REPLI. Le runner a DÉJÀ tranché le substrat
+  # (`provision --substrate`, `provision:126-128`) et l'exporte ; re-sonder ici en ferait une seconde
+  # dérivation du même fait — celle-là même que l'en-tête de `48-forge-host` reproche à la version
+  # d'avant. Conséquence concrète et pas seulement doctrinale : `--substrate linux` joué sur une
+  # machine WSL prenait quand même la branche NAT, donc le drapeau ne portait pas jusqu'ici.
+  local _sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
+  if [[ "$_sub" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
     PROV_ADVERTISE="localhost"
     PROV_ADVERTISE_WHY="WSL2 en mode NAT (le défaut) — l'adresse de la VM n'est routée depuis aucune autre machine et change à chaque redémarrage de WSL ; localhost est le relais que Windows tient vers elle. Sous ce substrat, un déploiement est joignable de CETTE machine et pas du LAN : c'est du test/dev, et l'ouvrir demanderait de toucher au réseau Hyper-V du poste."
     return 0

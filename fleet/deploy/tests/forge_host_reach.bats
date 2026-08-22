@@ -541,12 +541,30 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "sous WSL en NAT, l'adresse annoncee est COMPOSABLE, et le motif remonte" {
   # Le fond : `0.0.0.0` publie DANS la VM, pas sur Windows. Annoncer l'IP de la VM promet une
   # adresse que le navigateur de l'hote ne peut pas atteindre.
-  detect_substrate() { echo wsl; }
-  wsl_networking_mode() { echo nat; }
-  export -f detect_substrate wsl_networking_mode
-  head_sh 'echo "$PROV_FORGE_ADVERTISE|${PROV_FORGE_ADVERTISE_WHY:0:12}"'
+  #
+  # ⚠ CE TEMOIN A MESURE LA MACHINE PENDANT UNE JOURNEE. Il posait deux stubs et les exportait —
+  # mais `head_sh` fait `source`, et la lib REDEFINIT les deux fonctions par-dessus. Les stubs
+  # etaient donc morts a l'arrivee, et ce qui repondait, c'etait le `/proc/version` de la machine :
+  # vert sur le WSL de l'auteur, rouge le 2026-08-22 sur `.63` (Linux natif) sans qu'une seule
+  # regle ait bouge. Un stub qu'on exporte ne survit pas au `source` qui le suit.
+  #
+  # Les deux coutures de decor tiennent, elles, parce que les fonctions les LISENT :
+  # `PROV_SUBSTRATE` est ce que le runner a tranche, `LCARS_WSL_NETWORKING_MODE` remplace `wslinfo`.
+  PROV_SUBSTRATE=wsl LCARS_WSL_NETWORKING_MODE=nat \
+    head_sh 'echo "$PROV_FORGE_ADVERTISE|${PROV_FORGE_ADVERTISE_WHY:0:12}"'
   [ "$status" -eq 0 ]
   [[ "$output" == "localhost|WSL2 en mode"* ]]
+}
+
+@test "hors WSL, la meme regle ne s'applique PAS — c'est le substrat qui tranche, pas la machine" {
+  # Le CONTRE-TEMOIN qui manquait, et son absence est ce qui a laisse le precedent mesurer la
+  # machine : tant qu'un seul cas est exerce, « ca marche » et « je tourne sur le bon substrat »
+  # rendent le meme vert. Sur `linux`, l'adresse annoncee est celle du LAN (ou `127.0.0.1` quand
+  # aucune sortie n'est detectable), jamais `localhost`, et le motif NAT n'a rien a dire.
+  PROV_SUBSTRATE=linux LCARS_WSL_NETWORKING_MODE=nat \
+    head_sh 'echo "$PROV_FORGE_ADVERTISE|${PROV_FORGE_ADVERTISE_WHY:0:12}"'
+  [ "$status" -eq 0 ]
+  [[ "$output" != "localhost|WSL2 en mode"* ]]
 }
 
 @test "un ADVERTISE pose par l'operateur reste souverain — on ne derive que l'absence" {
