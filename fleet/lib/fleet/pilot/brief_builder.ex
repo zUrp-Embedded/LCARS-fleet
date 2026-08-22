@@ -256,10 +256,18 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # `{ref, sha}` → the `:mandate` the spawner needs (`ops_path` = the project's ops worktree). `nil`
-  # source (an inline/degraded order, or a brief-judge that inlines) → no mount.
+  # source (an inline/degraded order) → no mount. `filename` is the name the spawner mounts under in
+  # `~/issues/` AND the name the order text points at — one value, so the two can never diverge
+  # (transport_brief_v2). Uniform `"mandate.md"` here; P4 makes it role-specific (`brief.md`/`criteria.md`).
   defp mandate_from_source({ref, sha}, repo, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
-    %{ref: ref, sha: sha, ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo))}
+
+    %{
+      ref: ref,
+      sha: sha,
+      ops_path: Path.join(ops_root, Fleet.Layout.project_name(repo)),
+      filename: "mandate.md"
+    }
   end
 
   defp mandate_from_source(_source, _repo, _opts), do: nil
@@ -295,10 +303,12 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        # The BRIEF judge inlines the brief in `outputs` (it judges the brief itself, pre-PR) — it
-        # names no mounted file, so no mount source.
+        # The BRIEF judge (scoper) now READS a mounted file, like every other pod (transport_brief_v2):
+        # the brief it judges is `~/issues/<mount>`, content-addressed, not inlined into `outputs`. The
+        # mount source is the resolved brief pointer (`_brief_source`) — `nil` on a degraded/inline
+        # dispatch, which is the no-mount branch. `mandate_from_source` wraps it in `build_brief`.
         {:ok, build_brief_review_brief(role, issue, forge, repo, number, forge_opts, route, opts),
-         "judge", nil}
+         "judge", Map.get(issue, "_brief_source")}
 
       # DELIVERABLE judge: judge_target ABSENT (nil → canonical default) or explicit "deliverable" →
       # judges a deliverable (PR). Already TYPED {:ok, brief} | {:error, {:criterion_unavailable, _}}
@@ -744,17 +754,15 @@ defmodule Fleet.Pilot.BriefBuilder do
         _ -> {nil, role}
       end
 
-    # THE BRIEF TRAVELS, the address travels WITH it. This used to send only `{ref, sha}` and let
-    # the judge read the doc through a mounted ops — which is what made that mount necessary
-    # on every project pod. Sending the text costs a paragraph; the mount cost every producer a
-    # read handle on the record of what was asked of it and what was judged of its work.
-    #
-    # Both keys when a pin exists: the text is WHAT to judge, the pin is what to CITE. Keeping the
-    # pin is not decoration — it is how a third party ties a verdict back to a version, from the
-    # forge, without the pod having had to hold the tree.
+    # transport_brief_v2 — a resolved pointer means the brief is a MOUNTED file the scoper reads
+    # (`~/issues/<mount>`, content-addressed), exactly like the producer's order and the deliverable
+    # judge's criterion. `outputs` then carries only the mount NAME — never the text (it is read, not
+    # trusted) and never the pin (the runtime engraves it; the agent does not relay it). The name here
+    # MUST match `mandate_from_source`'s `filename`; both flip together in P4. Inline (degraded/PoC, no
+    # authored doc) → the body IS the thing to judge, embedded as before, there being nothing to mount.
     outputs =
       case Map.get(issue, "_brief_source") do
-        {ref, sha} -> %{"brief" => brief, "brief_ref" => ref, "brief_sha" => sha}
+        {_ref, _sha} -> %{"brief_mount" => "mandate.md"}
         _ -> %{"brief" => brief}
       end
 

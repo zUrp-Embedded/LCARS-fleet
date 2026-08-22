@@ -589,4 +589,70 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       refute brief =~ "Passe d'exception"
     end
   end
+
+  describe "brief-judge (scoper) — mounts the brief it judges, cites no pin (transport_brief_v2)" do
+    @describetag :tmp_dir
+
+    defp scoper_profile do
+      %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "scoper"},
+        spec: %{"brief_kind" => "judge"}
+      }
+    end
+
+    # The scoper reads `_brief_source` from the ENTRY resolution of the ISSUE (position 6), so the
+    # pointer must live in the passed issue body, not in a forge fetch.
+    defp build_scoper(issue_map, opts) do
+      BriefBuilder.build_brief(
+        scoper_profile(),
+        "scoper",
+        StubForge,
+        "acme/widget",
+        42,
+        issue_map,
+        [],
+        {"brief-gate", "brief-review"},
+        %{"judge_target" => "brief"},
+        opts
+      )
+    end
+
+    test "pointer ticket → the scoper SURFACES a mount and judges a mounted file, no text, no pin",
+         %{tmp_dir: tmp} do
+      work_dir = Path.join(tmp, "widget")
+      File.mkdir_p!(work_dir)
+      {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
+
+      {:ok, %{ref: ref, sha: sha}} =
+        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE BRIEF À JUGER.\n", name_hint: "brf")
+
+      body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
+
+      assert {:ok, brief, "judge", mount} =
+               build_scoper(%{"body" => body}, ops_root: tmp)
+
+      # The scoper now READS a mounted file like every other pod — it used to inline the brief text
+      # and cite the pin. Mutation-verified: returning `nil` as the mount source (the old behavior)
+      # reddens this, and reinstating the inline `%{"brief" => brief, ...}` outputs reddens the
+      # refutes below.
+      assert %{ref: ^ref, sha: ^sha, filename: "mandate.md"} = mount
+      assert brief =~ "~/issues/mandate.md"
+      refute brief =~ "LE BRIEF À JUGER."
+      refute brief =~ "#{ref}"
+      refute brief =~ sha
+      refute brief =~ String.slice(sha, 0, 7)
+    end
+
+    test "inline ticket (no pointer) → the brief IS the thing to judge, embedded, no mount",
+         %{tmp_dir: tmp} do
+      assert {:ok, brief, "judge", mount} =
+               build_scoper(%{"body" => "brief inline à juger"}, ops_root: tmp)
+
+      # Degraded/PoC: nothing pinned to mount → the body is embedded as before, and no mount travels.
+      assert is_nil(mount)
+      assert brief =~ "brief inline à juger"
+      refute brief =~ "~/issues/mandate.md"
+    end
+  end
 end

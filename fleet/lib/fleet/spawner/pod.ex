@@ -1038,14 +1038,17 @@ defmodule Fleet.Spawner.Pod do
   # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
   defp materialize_mandate(%{opts: opts, pod_dir: pod_dir} = _data) do
     case Keyword.get(opts, :mandate) do
-      %{ref: ref, sha: sha, ops_path: ops_path} ->
-        # FAIL-CLOSED, and it must be: the order REFERENCES this file (`~/issues/mandate.md`). If it
+      %{ref: ref, sha: sha, ops_path: ops_path} = mandate ->
+        # FAIL-CLOSED, and it must be: the order REFERENCES this file (`~/issues/<filename>`). If it
         # is not there, the pod reads its order from nothing. The mount is expected only when the
         # dispatch already resolved the same pinned doc (so the ops worktree is reachable) — a
         # failure here is a real fault, and a pod that cannot be given its provable order does not
-        # start, it defers.
+        # start, it defers. `filename` is the SAME value the order text names (transport_brief_v2);
+        # defaulted for any mount minted before the field existed.
+        filename = Map.get(mandate, :filename, "mandate.md")
+
         with {:ok, file} <- LaunchSpec.pin_object(ops_path, pod_dir, sha, ref),
-             :ok <- File.cp(file, Path.join([pod_dir, "issues", "mandate.md"])) do
+             :ok <- File.cp(file, Path.join([pod_dir, "issues", filename])) do
           :ok
         else
           other ->
