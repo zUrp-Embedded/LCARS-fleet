@@ -171,3 +171,73 @@ account() { # account <full_name> <email>
   grep -q 'FORGE_TOKEN_FILE=\$PROV_SYSTEM_TOKEN_FILE' <<<"$code"
   grep -q 'FORGE_BASE_URL=\$PROV_FORGE_URL' <<<"$code"
 }
+
+# ─── LE GARDE-FOU D'ECRITURE DES AGENTS ─────────────────────────────────────────────────────────
+#
+# ⚠ CES TEMOINS POSENT LEUR PROPRE `HOME_DIR`, ET C'EST OBLIGATOIRE. Le module le derive de
+# `human_home()`, qui lit `getent passwd` : le VRAI home de qui joue les tests. Un temoin qui
+# oublierait cette ligne ferait fusionner le module dans le `~/.claude/settings.json` de son
+# auteur. Mesure du 2026-08-22, meme classe : un decor qui n'avait pas pose `HOME` a fait ecrire
+# une doublure d'installeur a travers un symlink, et tronquer un binaire de 328 Mo.
+sandbox() { # sandbox <expr> — joue <expr> avec un home jetable
+  run_fn "HOME_DIR=\"\$BATS_TEST_TMPDIR/agent\"; CLAUDE_SETTINGS=\"\$HOME_DIR/.claude/settings.json\"; mkdir -p \"\$HOME_DIR\"; $1"
+}
+
+@test "garde-fou : un home SANS settings.json en recoit un, avec le bloc canonique" {
+  sandbox 'apply_automode'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"POSÉ"* ]]
+  # Le bloc pose EST le fichier canonique, pas une copie qui lui ressemble.
+  local pose; pose="$(jq -S -c '.autoMode | {hard_deny, classifyAllShell}' "$BATS_TEST_TMPDIR/agent/.claude/settings.json")"
+  [ -n "$pose" ]
+  [ "$pose" = "$(jq -S -c '{hard_deny, classifyAllShell}' "$BATS_TEST_DIRNAME/../agent/claude-automode.json")" ]
+
+  # ⚠ ET LA FORME DU BLOC, parce que l'egalite ci-dessus est vraie QUOI QUE DISE la source : elle
+  # mesure la plomberie. Un fichier canonique vide ou reduit a `{}` la laisserait verte, et chaque
+  # agent recevrait un garde-fou qui n'interdit rien. On epingle la structure — pas la prose de la
+  # regle, qui est une politique et doit pouvoir se reformuler sans casser un temoin.
+  local f="$BATS_TEST_TMPDIR/agent/.claude/settings.json"
+  [ "$(jq -r '.autoMode.classifyAllShell' "$f")" = "true" ]
+  [ "$(jq -r '.autoMode.hard_deny | length' "$f")" -ge 2 ]
+  [ "$(jq -r '.autoMode.hard_deny[0]' "$f")" = '$defaults' ]
+}
+
+@test "garde-fou : les clefs de l'humain SURVIVENT — on pose une regle, on ne reconfigure personne" {
+  mkdir -p "$BATS_TEST_TMPDIR/agent/.claude"
+  cat > "$BATS_TEST_TMPDIR/agent/.claude/settings.json" <<'JSON'
+{"theme":"dark","statusLine":{"type":"command","command":"le mien"},
+ "autoMode":{"soft_deny":["a moi"],"environment":["a moi aussi"]}}
+JSON
+  sandbox 'apply_automode'
+  [ "$status" -eq 0 ]
+  local f="$BATS_TEST_TMPDIR/agent/.claude/settings.json"
+  # Ce qui etait la est encore la, jusque DANS autoMode : la fusion vise deux clefs, pas le bloc.
+  [ "$(jq -r '.theme' "$f")" = "dark" ]
+  [ "$(jq -r '.statusLine.command' "$f")" = "le mien" ]
+  [ "$(jq -r '.autoMode.soft_deny[0]' "$f")" = "a moi" ]
+  [ "$(jq -r '.autoMode.environment[0]' "$f")" = "a moi aussi" ]
+  [ "$(jq -r '.autoMode.classifyAllShell' "$f")" = "true" ]
+}
+
+@test "garde-fou : rejoue, il ne re-pose RIEN — une convergence n'est pas une reecriture" {
+  sandbox 'apply_automode'
+  [ "$status" -eq 0 ]
+  local before; before="$(cat "$BATS_TEST_TMPDIR/agent/.claude/settings.json")"
+  sandbox 'apply_automode'
+  [ "$status" -eq 0 ]
+  # Pas de POSÉ au second tour, et le fichier est identique a l'octet.
+  [[ "$output" != *"POSÉ"* ]]
+  [ "$before" = "$(cat "$BATS_TEST_TMPDIR/agent/.claude/settings.json")" ]
+}
+
+@test "garde-fou : un settings.json ILLISIBLE est un ECHEC, jamais un ecrasement" {
+  # Le pire des deux : detruire une configuration que son humain peut encore reparer, pour poser
+  # une regle. Le module le DIT et ne touche a rien.
+  mkdir -p "$BATS_TEST_TMPDIR/agent/.claude"
+  printf '{ ceci n est pas du json\n' > "$BATS_TEST_TMPDIR/agent/.claude/settings.json"
+  local before; before="$(cat "$BATS_TEST_TMPDIR/agent/.claude/settings.json")"
+  sandbox 'apply_automode'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"* ]]
+  [ "$before" = "$(cat "$BATS_TEST_TMPDIR/agent/.claude/settings.json")" ]
+}

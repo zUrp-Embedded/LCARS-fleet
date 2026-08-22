@@ -31,6 +31,68 @@ HOME_DIR="$(human_home)"
 ENV_FILE="$HOME_DIR/.lcars/fleet_v2.env"
 TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 
+# ─── LE GARDE-FOU D'ÉCRITURE DES AGENTS ──────────────────────────────────────────────────────────
+#
+# Un agent qui édite par `sed -i`, redirection ou heredoc produit un changement que personne ne
+# relit et que `/rewind` ne peut pas défaire. Les outils Edit/Write du harnais rendent un diff ;
+# c'est la seule forme sous laquelle un travail d'agent est révisable. Le bloc `autoMode` porte
+# cette règle, et il est le MÊME pour tous les agents de la fleet.
+#
+# ⚠ IL EST FUSIONNÉ, JAMAIS ÉCRIT PAR-DESSUS. `settings.json` appartient à son humain — statusline,
+# plugins, modèle, langue, et pour l'opérateur un `soft_deny` et un `environment` bâtis session
+# après session. Un `cp` du fichier canonique effacerait tout ça pour poser une règle. On ne pose
+# donc que les deux clefs, et le reste du fichier n'est pas notre affaire.
+#
+# ⚠ ET IL CONVERGE, il ne se seed PAS une fois. C'est l'inverse de `fleet_v2.env` juste en dessous,
+# et la différence est le SUJET : l'env est la configuration d'un humain, ce bloc est une limite
+# posée sur ce qu'un agent a le droit de faire. Une limite qu'un premier passage pose et qu'aucun
+# suivant ne rétablit n'est pas une limite.
+#
+# La source vit dans le provisionnement lui-même — pas sous `$PROV_PREFIX/etc` comme le template
+# d'env : celui-là dépend de `60-deploy`, et un garde-fou qui n'existe que si un autre module a
+# réussi avant lui est absent précisément les jours où il compte.
+AUTOMODE_SRC="$(repo_root)/fleet/deploy/agent/claude-automode.json"
+CLAUDE_SETTINGS="$HOME_DIR/.claude/settings.json"
+
+# Le fichier porte-t-il DÉJÀ le bloc canonique ? Comparaison sur la valeur normalisée (`jq -S`),
+# pas sur les octets : un fichier ré-indenté par le harnais n'est pas une dérive.
+automode_current() {
+  [[ -r "$CLAUDE_SETTINGS" ]] || return 1
+  jq -S -c '.autoMode // {} | {hard_deny, classifyAllShell}' "$CLAUDE_SETTINGS" 2>/dev/null
+}
+automode_wanted() {
+  jq -S -c '{hard_deny, classifyAllShell}' "$AUTOMODE_SRC" 2>/dev/null
+}
+
+apply_automode() {
+  [[ -r "$AUTOMODE_SRC" ]] || { p_fail "garde-fou d'écriture introuvable ($AUTOMODE_SRC)"; return 1; }
+  [[ "$(automode_current)" == "$(automode_wanted)" ]] && return 0
+
+  mkdir -p "$HOME_DIR/.claude" || { p_fail "mkdir ~/.claude"; return 1; }
+
+  # ⚠ UN `settings.json` ILLISIBLE N'EST PAS UN FICHIER ABSENT, et l'écraser serait la pire des
+  # deux réponses : on détruirait une configuration que son humain peut encore réparer, pour poser
+  # une règle. On le DIT et on ne touche à rien.
+  local base='{}'
+  if [[ -f "$CLAUDE_SETTINGS" ]]; then
+    jq -e . "$CLAUDE_SETTINGS" >/dev/null 2>&1 \
+      || { p_fail "$CLAUDE_SETTINGS n'est pas du JSON valide — garde-fou NON posé, rien n'a été touché"; return 1; }
+    base="$(cat "$CLAUDE_SETTINGS")"
+  fi
+
+  local tmp
+  tmp="$(mktemp "$HOME_DIR/.claude/.settings.XXXXXX")" || { p_fail "tmp settings"; return 1; }
+  # `*` fusionne les objets et REMPLACE les tableaux : les clefs voisines de l'humain survivent,
+  # `hard_deny` est repris en entier — une règle à moitié reprise ne garde rien.
+  if ! printf '%s' "$base" | jq --slurpfile a "$AUTOMODE_SRC" '.autoMode = ((.autoMode // {}) * $a[0])' > "$tmp"; then
+    rm -f "$tmp"; p_fail "fusion du garde-fou en échec"; return 1
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$CLAUDE_SETTINGS" || { rm -f "$tmp"; p_fail "écriture de $CLAUDE_SETTINGS"; return 1; }
+  PROV_CHANGED=$((PROV_CHANGED + 1))
+  p_chg "garde-fou d'écriture fusionné dans $CLAUDE_SETTINGS (les autres clefs sont intactes)"
+}
+
 # ─── L'IDENTITÉ GIT DE L'HUMAIN, ET POURQUOI ELLE VIENT DE LA FORGE ─────────────────────────────
 #
 # Sans `user.email`, git signe `<login>@<hostname>` — `lcars@bridge` sur cette image. La forge ne
@@ -185,6 +247,14 @@ check() {
     p_drift "fleet_v2.env absent ($ENV_FILE)"
   fi
 
+  if [[ ! -r "$AUTOMODE_SRC" ]]; then
+    p_fail "garde-fou d'écriture introuvable ($AUTOMODE_SRC) — le provisionnement est incomplet"
+  elif [[ "$(automode_current)" == "$(automode_wanted)" ]]; then
+    p_ok "garde-fou d'écriture des agents en place ($CLAUDE_SETTINGS)"
+  else
+    p_drift "garde-fou d'écriture absent ou divergent dans $CLAUDE_SETTINGS — l'apply le fusionne, le reste du fichier n'est pas touché"
+  fi
+
   check_git_identity
   probe_identity
   verdict_check
@@ -195,6 +265,8 @@ apply() {
 
   mkdir -p "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods" || { p_fail "mkdir ~/.lcars ~/pods"; verdict_apply; }
   chmod 0700 "$HOME_DIR/.lcars" "$HOME_DIR/pods" || { p_fail "chmod 0700"; verdict_apply; }
+
+  apply_automode
 
   # Seed-once de l'env : SI absent ET template déployé. On injecte FORGE_BASE_URL si connu
   # (le template le laisse en exemple NAS) — après ce seed, le fichier appartient à l'humain.
