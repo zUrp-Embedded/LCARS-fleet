@@ -23,6 +23,15 @@ defmodule Fleet.MCP do
       Fleet.PodId,
       Fleet.Event,
       Fleet.SchemaCache,
+      # LA FONDATION QUI SAIT CE QUE CETTE BOITE SERT (`deps: []`, donc aucun cycle possible). Le
+      # guichet de cadrage presente les CARTES (`Fleet.Workflow`, plus bas) et les CATALOGUES qui
+      # les portent : deux questions, une autorite chacune.
+      #
+      # Passer par `Fleet.Workflow.Loader.card_scopes/0` aurait evite cette dep et rendu une reponse
+      # FAUSSE : il ne retient qu'un catalogue portant un repertoire de cartes, donc un catalogue
+      # installe qui n'en porte aucune disparaitrait d'une liste de catalogues. Elargir la frontiere
+      # vers l'autorite est le geste ; deriver la reponse d'un objet voisin ne l'est jamais.
+      Fleet.Catalogue,
       Fleet.Credentials,
       Fleet.EventRouter,
       Fleet.TaskQueue,

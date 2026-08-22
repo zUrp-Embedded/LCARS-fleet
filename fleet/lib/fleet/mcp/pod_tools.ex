@@ -53,6 +53,8 @@ defmodule Fleet.MCP.PodTools do
       - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
       - `project_delete`   : destroys a project. Disarmed by deployment flag.
       - `card_list` : the validation cards a project can be onboarded against.
+      - `catalogue_list` : the catalogues this box SERVES — the offer a card is picked FROM
+        (`project_create` refuses a catalogue that is not installed here).
       - `forge_list`        : the human's registered external forges (the publish pool) — read-only.
       - `forge_link`      : link a project to a forge (writes its publish binding) — reversible intent,
         not a push (the human's `lcars approve` + PR merge stay the gates).
@@ -138,6 +140,7 @@ defmodule Fleet.MCP.PodTools do
     "scratch" => :mutation,
     "escalation_list" => :read,
     "card_list" => :read,
+    "catalogue_list" => :read,
     "issue_list" => :read,
     "issue_get" => :read,
     "issue_comment" => :mutation,
@@ -989,6 +992,29 @@ defmodule Fleet.MCP.PodTools do
     input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
   end
 
+  deftool "catalogue_list" do
+    # vitrine: Liste les catalogues que cette boîte sert — l'offre dans laquelle un projet est enrôlé, en amont du choix de la carte.
+    meta do
+      name("List Catalogues")
+
+      description(
+        "The catalogues this box SERVES — the offer a project is enrolled INTO. Present it BEFORE " <>
+          "`card_list` during framing: a card belongs to a catalogue, and `project_create` REFUSES a " <>
+          "catalogue that is not installed here. Each entry carries `name` (the catalogue's DECLARED " <>
+          "identity — pass it as project_create's `catalogue`; it is also its forge org), `bundled` " <>
+          "(ships inside the release, so always available and never removable) and `default_card` " <>
+          "(the card a project takes when it declares none — absent when the catalogue ships no " <>
+          "card). `unreadable` names installed material whose manifest yields no declared name — " <>
+          "absent, unparseable or without one: it is served by nothing, the cause is `lcars " <>
+          "catalogue verify`'s to name. Do NOT derive this list from " <>
+          "`card_list` — a catalogue shipping no card is invisible there. The result is DISPLAYED as " <>
+          "it stands: do not repeat it, answer what was asked of it. No arguments."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}, "required" => []})
+  end
+
   deftool "issue_list" do
     # vitrine: Liste les tickets ouverts de ton projet — le tableau de situation, pas seulement ta boîte.
     meta do
@@ -1561,6 +1587,13 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("card_list", _arguments, state) do
     case Delegation.list_workflow_cards(state) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("catalogue_list", _arguments, state) do
+    case Delegation.list_catalogues(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end

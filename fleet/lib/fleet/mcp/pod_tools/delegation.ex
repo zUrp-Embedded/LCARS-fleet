@@ -28,7 +28,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     * **ONBOARDING gate** (`require_onboarder/1`) — `project_create` / `project_install` /
       `project_open` / `project_close` / `project_delete` / `project_revise_card` /
-      `card_list`: the PORTFOLIO head. Admits any role carrying `onboarder`.
+      `card_list` / `catalogue_list`: the PORTFOLIO head. Admits any role carrying `onboarder`.
       Refusal → `:forbidden_not_onboarder`.
     * **DELEGATION gate** (`require_architect/1`) — `issue_create` / `issue_status` / `escalation_list` /
       `issue_list` / `issue_get` / `issue_comment`: the per-project head. Admits the role carrying
@@ -730,6 +730,125 @@ defmodule Fleet.MCP.PodTools.Delegation do
       case unreadable do
         [] -> {:ok, base}
         bad -> {:ok, Map.put(base, "unreadable", Enum.reverse(bad))}
+      end
+    end
+  end
+
+  @doc """
+  The catalogues this box SERVES — the mirror of `list_workflow_cards/1`, one level up.
+
+  Same gate, same shape, same authority discipline: the listing is read from
+  `Fleet.Catalogue.installed_catalogues/0`, the pairing that already answers this for the poller,
+  the card scopes and the enroller. Re-deriving "which catalogues exist" MCP-side would be a second
+  authority next to the one the boot resolves on.
+
+  ## Why the tool exists, measured
+
+  An agent asked for the catalogues and had no verb for it, so it DERIVED the answer from
+  `card_list` — which names each card's catalogue. That derivation is right only while every
+  installed catalogue ships at least one card: a catalogue with none is invisible to it, and the
+  answer is confidently short rather than wrong-looking. The same hole is why the listing here does
+  not go through `Loader.card_scopes/0` either.
+
+  ## What each entry carries, and what it deliberately does NOT
+
+    * `name` — the DECLARED identity, carried by the catalogue and not by the directory it was
+      unpacked into. It is what addresses the catalogue outside this box: the forge org that holds
+      its projects, and the prefix of its role logins.
+    * `bundled` — it ships INSIDE the release, so it is installed by construction and cannot be
+      removed. That is an availability guarantee, not an authority: a bundled catalogue is a peer.
+
+      ⚠ C'EST LA RACINE QUI EST LIVREE, JAMAIS LE NOM, et les deux ne coincident pas toujours.
+      Comparer l'identite declaree a `bundled_name/0` se LIT comme le meme test et ne l'est pas :
+      `installed_dirs/0` ecarte le catalogue livre sur le `Path.basename`, donc un repertoire nomme
+      autrement dont le manifeste declare ce nom-la passe le filtre et ressortait marque `bundled` —
+      une seconde entree pretendant vivre dans un release qui n'en porte qu'une. La racine EST la
+      definition (`Fleet.Catalogue.root/0`, la tete de `installed_roots/0`), donc c'est elle qu'on
+      compare. Releve par relecture independante le 2026-08-22.
+    * `default_card` — the card a project of this catalogue takes when it declares none. Absent
+      when the catalogue ships no card at all. ABSENT, never `null`: "ships no card" and "default
+      unknown" are two answers, and only the first exists here.
+
+  No card list: `card_list` already names each card's catalogue, and a second rendering of the
+  same table is the copy that drifts. The two tools are complementary halves, never nested ones.
+
+  ## `unreadable`, and it is REACHABLE — that is why it is here
+
+  `Fleet.Catalogue.verify!/0` runs at boot on the BUNDLED root alone. The material converged under
+  `catalogue_install_dirs` is verified by an operator gesture (`lcars catalogue verify`), never by
+  the boot, so a root whose manifest yields no declared name is present, served by nothing, and
+  dropped from `installed_catalogues/0` in SILENCE. Reporting it is the same rule
+  `list_workflow_cards/1` holds for a card that fails to load: the catalogue never lies by omission.
+
+  ⚠ IL NOMME UNE CONSEQUENCE, PAS UNE CAUSE, et la premiere redaction disait « no `name:` » — plus
+  precis que le code. `installed_catalogues/0` ecarte une racine sur un catch-all qui couvre AUSSI
+  un YAML invalide, un manifeste illisible et un `name` qui n'est pas une chaine. Trancher entre ces
+  causes demanderait de relire le manifeste ici, c'est-a-dire un second lecteur de la regle du
+  manifeste a cote de son autorite — le defaut precis que ce module passe son temps a fermer.
+  Le mot rendu est donc la consequence commune (« servi par rien »), et le geste est `lcars
+  catalogue verify <racine>`, dont c'est le metier de nommer la cause.
+
+  Le `Logger.warning` par racine ecartee n'est pas un doublon du payload : si l'agent ne rend pas la
+  reponse, la racine morte ne laisse aucune trace cote serveur. `list_workflow_cards/1` crie deja
+  chaque carte qui ne charge pas, pour cette raison-la.
+
+  Les deux moities se lisent dans UN module, un appel chacune — la difference ensembliste de
+  `installed_roots/0` et des racines qui ont repondu — donc rien ici ne relit un manifeste.
+
+  ## L'offre VIDE est une erreur, et le refus PORTE ce qu'il a vu
+
+  « Aucun catalogue n'existe » est le mensonge vide : cette boite sert toujours au moins le
+  catalogue livre. Le refus emporte les racines ecartees, parce que « rien d'installe » et « tout
+  installe, tout casse » appellent deux gestes differents et qu'un refus qui les confond envoie
+  l'operateur chercher le mauvais objet.
+
+  La dissymetrie avec `list_workflow_cards/1` est ASSUMEE et vaut d'etre lue : lui rend `{:ok,
+  %{"cards" => []}}` quand aucun catalogue installe ne porte de repertoire de cartes — meme forme
+  de vacuite, un cran plus bas, et elle n'est pas fermee.
+  """
+  @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
+  def list_catalogues(state) do
+    with {:ok, _role} <- require_onboarder(state) do
+      installed = Fleet.Catalogue.installed_catalogues()
+      bundled_root = Fleet.Catalogue.root()
+
+      answered = MapSet.new(installed, & &1.root)
+
+      unreadable =
+        Fleet.Catalogue.installed_roots()
+        |> Enum.reject(&MapSet.member?(answered, &1))
+        |> Enum.map(&Path.basename/1)
+
+      for name <- unreadable do
+        Logger.warning(
+          "Delegation: catalogue material '#{name}' carries a #{Fleet.Catalogue.manifest_file()} " <>
+            "that yields no declared name — served by NOTHING and offered to nobody. Its cause is " <>
+            "not decided here (absent, unparseable, or without a `name:`): `lcars catalogue " <>
+            "verify` names it. Without this line the directory would vanish in silence."
+        )
+      end
+
+      served =
+        Enum.map(installed, fn %{name: name, root: root} ->
+          %{"name" => name, "bundled" => root == bundled_root}
+          |> put_present("default_card", Fleet.Catalogue.default_card(root))
+        end)
+
+      # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR : `{offer, bad}` filtre aussi `bad == []`,
+      # donc les intervertir poserait `"unreadable" => []` dans la reponse nominale — une cle vide la
+      # ou l'absence est la reponse, exactement ce que `put_present` refuse un cran plus haut. Mesure
+      # du 2026-08-22 : aucun temoin ne rougissait sur cette permutation ; il en existe un depuis.
+      case {served, unreadable} do
+        {[], bad} ->
+          {:error,
+           {:catalogue_offer_unavailable, bad,
+            "no installed catalogue declares a name — this box serves nothing"}}
+
+        {offer, []} ->
+          {:ok, %{"catalogues" => offer}}
+
+        {offer, bad} ->
+          {:ok, %{"catalogues" => offer, "unreadable" => bad}}
       end
     end
   end
