@@ -185,7 +185,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   # LA TROISIEME CAUSE DE `:none`, ET ELLE SE MESURE AU LIEU DE S'ATTENDRE. Un workflow existe, donc
   # `no_workflow` ne mord pas — mais si AUCUN runner ne reclame le job, aucun statut ne viendra non
-  # plus. L'API le dit en une lecture : `status: "waiting"` et `runner_id: 0`, avec les `labels` que
+  # plus. L'API le dit en une lecture : un statut d'attente et `runner_id: 0`, avec les `labels` que
   # le job demande.
   #
   # ⚠ ON NE CONCLUT PAS « AUCUN RUNNER NE SERT CE LABEL » — on rapporte ce qui est mesure. Tous les
@@ -228,10 +228,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # `waiting` ET sans runner : les deux, parce que Gitea garde le statut le temps d'assigner, et
-  # qu'un job assigne qui demarre est du travail, pas une impasse.
+  # ⚠ `"queued"` EST CE QUE L'API REND ; `"waiting"` EST LE NOM INTERNE DE GITEA. Ce predicat n'a
+  # teste que le second jusqu'au 2026-08-22, donc il n'a JAMAIS ete vrai : tout le chemin des cinq
+  # minutes etait mort, et un job que personne ne reclamait retombait dans l'attente generique de 45
+  # minutes puis sortait en `{:ci_stalled, :pending}` — « echec de merge non classifie », c'est-a-dire
+  # le refus muet que ce garde existe pour remplacer.
+  #
+  # MESURE, pas relue : sur une forge 1.26 portant sept courses qu'aucun runner ne servait,
+  # `/actions/runs/<id>/jobs` a rendu SEPT FOIS `status: "queued", runner_id: 0, labels: ["shell"]`,
+  # et jamais `"waiting"`. Le commentaire du dessus affirmait « l'API le dit en une lecture » en
+  # citant le vocabulaire du code source de la forge — une mesure ecrite sans avoir ete faite.
+  #
+  # LES DEUX SONT ACCEPTES parce qu'aucun des deux n'est garanti par un contrat : c'est une
+  # conversion interne de Gitea, libre de changer dans un sens comme dans l'autre. Un garde qui ne
+  # reconnait qu'un seul mot meurt en silence a la version suivante — il vient de le faire.
+  @unclaimed_statuses ["queued", "waiting"]
+
   defp unclaimed?(job) do
-    Map.get(job, "status") == "waiting" and Map.get(job, "runner_id") in [nil, 0]
+    Map.get(job, "status") in @unclaimed_statuses and Map.get(job, "runner_id") in [nil, 0]
   end
 
   defp past?(nil, _sec), do: false
