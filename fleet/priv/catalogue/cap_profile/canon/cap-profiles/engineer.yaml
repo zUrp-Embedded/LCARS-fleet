@@ -117,7 +117,7 @@ spec:
     # pattern belongs in a separate cap-profile.
     subagent_template: null
     # No forge write channel — forge-blind barrier: the engineer reads its brief and
-    # returns its deliverable via MCP get_work_item/submit_result (the runtime does
+    # returns its deliverable through the universal work-item channel (the runtime does
     # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
     host_native: false
     bridge_enabled: false

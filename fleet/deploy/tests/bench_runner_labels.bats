@@ -173,9 +173,9 @@ run_runner() {
   # Le SUFFIXE, lui, reste tenu : `dind` decide si un job a un daemon docker — donc si `container:`
   # est jouable — et un `latest` nu ramenerait le montage du socket de l'hote que la ligne
   # ci-dessus refuse. C'est la variante qui porte la propriete de securite, pas le numero.
-  grep -qE 'act_runner:[a-z0-9.]+-dind-rootless' "$C"
+  grep -qE 'gitea/runner:[a-z0-9.]+-dind-rootless' "$C"
   # Et le digest ne revient pas par la fenetre : un pin ici serait un choix a re-arbitrer.
-  ! grep -qE 'act_runner:[^[:space:]]*@sha256:' "$C"
+  ! grep -qE 'gitea/runner:[^[:space:]]*@sha256:' "$C"
   grep -qE '^\s*privileged: true' "$C"
   grep -q 'apparmor=rootlesskit' "$C"
   grep -q 'DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"' "$C"

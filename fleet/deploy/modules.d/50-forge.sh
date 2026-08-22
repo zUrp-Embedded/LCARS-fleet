@@ -337,6 +337,54 @@ check_members_visible() {
 }
 
 
+# ─── LE RUNNER CI : MESURE, JAMAIS POSE ──────────────────────────────────────────────────────────
+#
+# ⚖ ARBITRAGE 2026-07-30 : le runner est un sidecar compose, PAS un module — l'admin le provisionne
+# avec ses choix. Cet arbitrage tient, et cette fonction ne le rouvre pas : elle ne pose rien.
+#
+# CE QU'IL NE DISAIT PAS, C'EST LE SILENCE. Une boite peut sortir sans aucun runner : la fleet
+# accepte alors un ticket, depense un producteur, ouvre une PR, et la CI attend une machine qui
+# n'existe pas. MESURE DU 2026-08-22 sur une forge de deux heures : sept courses `queued`, aucune
+# demarree, zero runner aux trois portees (depot, org, instance) — et pas une ligne pour le dire.
+# L'operateur l'a appris par un ticket bloque, pas par la boite.
+#
+# Ce fichier MESURE deja des preconditions d'INSTANCE qu'il ne pose pas — inscription ouverte,
+# comptes restreints, adhesions d'org — et nomme a chaque fois le geste de l'operateur. Celle-ci est
+# de la meme nature, au meme endroit, avec la meme sortie.
+#
+# ⚠ ON NE COMPARE PAS LES LABELS ICI, ET C'EST DELIBERE. « Un runner existe mais ne sert pas le label
+# demande » est l'autre moitie du probleme (mesure du 2026-08-21 : un job `ubuntu-latest` sur une
+# forge dont le seul runner servait `shell,elixir,dood`). Elle se mesure au TICKET et pas au boot :
+# `CiGate` escalade en cinq minutes en NOMMANT le label que le job demande. Poser ici une liste de
+# labels attendus en ferait une TROISIEME copie — le gabarit livre la porte deja, les defauts de
+# `bench-runner.sh` aussi — et c'est exactement la forme qui derive.
+check_ci_runner() {
+  local tok body n labels
+  [[ -r "$PROV_MASTER_TOKEN_FILE" ]] || {
+    p_warn "runners CI non sondables (jeton master absent : $PROV_MASTER_TOKEN_FILE) — rien n'est conclu"
+    return 0
+  }
+  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE")"
+  body="$(curl -fsS -m 10 -H "Authorization: token $tok" \
+          "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+
+  # Une API muette n'est PAS « zero runner » : la portee du jeton suffit a expliquer le silence, et
+  # conclure a l'absence enverrait enroler un runner qui existe deja.
+  [[ -n "$body" ]] || {
+    p_warn "runners CI non sondables (l'API admin n'a pas repondu — portee du jeton master ?) — rien n'est conclu"
+    return 0
+  }
+
+  n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
+  if [[ "${n:-0}" -eq 0 ]]; then
+    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. Geste operateur : « ./docker.sh runner-token » puis enrolement d'un runner (sur un banc : fleet/deploy/docker/bench/bench-runner.sh)"
+  else
+    labels="$(printf '%s' "$body" \
+      | jq -r '[.runners[]? | .name + " [" + ([.labels[]?.name] | join(",")) + "]"] | join(" · ")' 2>/dev/null || true)"
+    p_ok "$n runner(s) CI : ${labels:-labels illisibles}"
+  fi
+}
+
 check() {
   if [[ -z "$PROV_FORGE_URL" ]]; then
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
@@ -347,6 +395,7 @@ check() {
     verdict_check
   fi
   p_ok "forge joignable ($PROV_FORGE_URL)"
+  check_ci_runner
   probe_registration
   probe_restricted "$PROV_HUMAN"
   check_master_authority
@@ -410,6 +459,18 @@ apply() {
     p_drift "forge injoignable : $PROV_FORGE_URL — tokens non convergés (relance quand elle répond)"
     verdict_apply
   fi
+
+  # ⚠ TOT, ET DANS L'APPLY AUSSI — les deux points comptent.
+  #
+  # DANS L'APPLY : le boot joue `provision apply` (entrypoint.sh), jamais `check`. Une sonde qui ne
+  # vivrait que dans le check ne parlerait a personne au demarrage, c'est-a-dire au seul moment ou
+  # l'operateur peut encore enroler un runner AVANT que la fleet ne depense un producteur.
+  #
+  # TOT : posee en fin d'apply, elle n'etait atteinte que si tout le reste convergeait — la
+  # structure absente sort par `verdict_apply` bien avant. On n'aurait donc appris l'absence de
+  # runner que sur une boite deja parfaite par ailleurs, ce qui est l'inverse du besoin : une boite
+  # qui derive AUSSI ailleurs a exactement le meme rail de livraison mort.
+  check_ci_runner
   [[ -x "$A4_SCRIPT" ]] || { p_fail "script A4 introuvable : $A4_SCRIPT"; verdict_apply; }
   check_master_authority
   PROV_MODE=apply converge_authority_modes

@@ -30,7 +30,7 @@ metadata:
   # asymmetry lives here, in the data, never as an exception coded into the control.
   forge_identity: false
   # Large focal length (cf. DESIGN-carte-des-roles §2/§5): starfleet sees the WHOLE project space.
-  # RW on both — NOT to edit files routinely (the skills project_create/project_import do the structured
+  # RW on both — NOT to edit files routinely (the onboarding skills do the structured
   # work, system-side), but as a LEVER to act as the human's hand when needed. Default runtime activity
   # is low. (An ordinary parametric pod: this wide RW mount is the only thing that sets its focal length.)
   # RO on both faces (user, 2026-08-05). The RW was declared for a "manual fix, an exceptional
@@ -92,7 +92,7 @@ spec:
       # Fleet MCP tools of the FLEET-MASTER: ONLY the portfolio head (create/adopt a project + card
       # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
       # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
-      # it does not do a project's métier). get_work_item/submit_result (universal) come from the launcher.
+      # it does not do a project's métier). The universal work-item pair comes from the launcher.
       - mcp__fleet__card_list  # framing FIRST: the catalogue the human picks the card from
       - mcp__fleet__project_create       # start a fresh project (repo + its three faces + card)
       - mcp__fleet__project_install       # twin of project_create: ADOPTS an existing repo

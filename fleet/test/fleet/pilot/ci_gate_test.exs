@@ -65,7 +65,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   end
 
   # Le rail existe, un run existe, et rien ne l'a pris. Le TROISIEME etat de `:none`, et il se
-  # MESURE : `status: "waiting"` + `runner_id: 0`, avec les `labels` que le job demande.
+  # MESURE : un statut d'attente + `runner_id: 0`, avec les `labels` que le job demande.
   defp decide_unclaimed(forge_opts, jobs, lister \\ nil) do
     lister = lister || fn "fleet/demo", ".gitea/workflows", _ -> {:ok, ["ci.yml"]} end
 
@@ -82,16 +82,26 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   end
 
   describe "un job que personne ne reclame" do
+    # ⚠ `"queued"` EST LA VALEUR MESUREE, ET CE FICHIER A CRU L'INVERSE. Les fixtures ont porte
+    # `"waiting"` — le nom INTERNE de Gitea — du 2026-08-21 au 2026-08-22, en s'annoncant « MESURE ».
+    # Le code testait le meme mot, donc le temoin etait vert sur un monde que la forge ne produit
+    # pas, et le garde des cinq minutes n'a JAMAIS tire en production.
+    #
+    # DEUX FORGES, DIX-HUIT OBSERVATIONS, ZERO `"waiting"` : `/actions/runs/<id>/jobs` a rendu
+    # `queued` ou `completed`, jamais autre chose. `waiting` reste accepte par le code parce que la
+    # conversion interne de Gitea n'est pas un contrat — mais il n'a jamais ete observe, et ce
+    # commentaire le dit au lieu de laisser une fixture le suggerer.
+    @queued [%{"status" => "queued", "runner_id" => 0, "labels" => ["ubuntu-latest"]}]
     @waiting [%{"status" => "waiting", "runner_id" => 0, "labels" => ["ubuntu-latest"]}]
 
     test "au-dela du delai court: escalade en NOMMANT le label, sans attendre 45 min" do
-      # MESURE DU 2026-08-21 : un job « Waiting », 0 s, avec un `runs-on:` qu'aucun runner de la
-      # boite ne servait. Indiscernable d'un job en cours, bloquant la fusion sans jamais rougir,
-      # et le gate gardait sa question pour trois quarts d'heure plus tard.
+      # MESURE DU 2026-08-22, deux forges : un job `queued`, `runner_id: 0`, avec un `runs-on:`
+      # qu'aucun runner ne servait. Indiscernable d'un job en cours, bloquant la fusion sans jamais
+      # rougir, et le gate gardait sa question pour trois quarts d'heure plus tard.
       stale = Forge.iso_ago(10 * 60)
 
       assert {:escalate, {:ci_stalled, :unclaimed}, msg} =
-               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @waiting)
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @queued)
 
       # Le label EST le fait actionnable : sans lui, « un runner sert-il ce label ? » demande a
       # l'operateur de deviner lequel.
@@ -103,14 +113,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       fresh = Forge.iso_ago(30)
 
       assert {:wait, :ci_pending} =
-               decide_unclaimed([_ci: {:ok, :none}, _updated_at: fresh], @waiting)
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: fresh], @queued)
+    end
+
+    test "le nom INTERNE `waiting` est accepte aussi — une conversion n'est pas un contrat" do
+      # Il n'a jamais ete observe sur une forge. Il est reconnu quand meme : un garde qui ne
+      # connait qu'un seul des deux mots meurt en silence a la version suivante — il vient de le
+      # faire dans l'autre sens, et ca a coute quarante-cinq minutes par ticket.
+      stale = Forge.iso_ago(10 * 60)
+
+      assert {:escalate, {:ci_stalled, :unclaimed}, _msg} =
+               decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @waiting)
     end
 
     test "job ASSIGNE: c'est du travail, pas une impasse — meme vieux" do
-      # `waiting` seul ne suffit pas : Gitea garde ce statut le temps d'assigner. Un job qui porte
-      # un runner a ete reclame, et l'attente bornee d'origine reprend la main.
+      # Le statut seul ne suffit pas : Gitea le garde le temps d'assigner. Un job qui porte un
+      # runner a ete reclame, et l'attente bornee d'origine reprend la main.
       stale = Forge.iso_ago(10 * 60)
-      assigned = [%{"status" => "waiting", "runner_id" => 3, "labels" => ["shell"]}]
+      assigned = [%{"status" => "queued", "runner_id" => 3, "labels" => ["shell"]}]
 
       # 10 min : au-dela du delai COURT, sous les 45 min d'origine. La patience longue reprend la
       # main, ce qui est precisement ce que ce correctif ne doit PAS abimer.
