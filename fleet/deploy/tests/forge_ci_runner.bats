@@ -56,11 +56,16 @@ EOF
   chmod +x "$BIN/curl"
 }
 
-@test "zero runner -> DRIFT qui nomme la CONSEQUENCE et le GESTE" {
+@test "zero runner SUR UNE BOITE -> DRIFT qui nomme la CONSEQUENCE et le GESTE" {
+  # ⚠ LE SUBSTRAT EST POSE PAR LE DECOR, ET IL DOIT L'ETRE. Le verdict a deux branches : sur une
+  # boite le sidecar compose existe, donc l'absence est une DERIVE ; sur un poste aucun module
+  # n'enrole de runner, donc c'est un constat. Sans cette ligne le temoin lit le substrat de la
+  # machine qui le joue, et il est vert ou rouge selon le poste — ce qui ne mesure plus la regle.
   stub_curl '{"runners":[],"total_count":0}'
-  run "$MODULE" check
+  run env PROV_SUBSTRATE=docker "$MODULE" check
 
   [[ "$output" == *"AUCUN runner CI"* ]]
+  [[ "$output" == *"DRIFT"* ]]
   # Un drift qui dit « 0 runner » et s'arrete laisse l'operateur deviner que ca bloque tout. La
   # consequence MESUREE est ce qui rend le message actionnable.
   [[ "$output" == *"aucune PR ne fusionne"* ]]
@@ -111,7 +116,26 @@ EOF
   # c'est-a-dire au seul moment ou l'operateur peut encore enroler un runner AVANT que la fleet ne
   # depense un producteur sur un rail mort.
   stub_curl '{"runners":[],"total_count":0}'
-  run "$MODULE" apply
+  run env PROV_SUBSTRATE=docker "$MODULE" apply
 
   [[ "$output" == *"AUCUN runner CI"* ]]
+}
+
+@test "zero runner SUR UN POSTE -> un CONSTAT, pas une derive que rien ne peut lever" {
+  # ⚠ UN DRIFT DIT « PAS TENU, ET CE RAIL PEUT LE TENIR ». Aucun module du rail poste n'enrole de
+  # runner : les seuls qui le font sont les scripts de banc, que ce message citait — il envoyait un
+  # operateur de poste chercher son geste dans l'outillage d'un autre rail. Meme idiome que les
+  # credentials claude de `70-human` : on constate, on nomme le geste, on ne compte pas de derive.
+  stub_curl '{"runners":[],"total_count":0}'
+  run env PROV_SUBSTRATE=wsl "$MODULE" check
+
+  # ⚠ ON VISE LA LIGNE DU RUNNER, PAS LA SORTIE ENTIERE. Ce module porte d'autres sondes qui
+  # derivent legitimement (structure, inscription) : un `output != *DRIFT*` interdirait toute
+  # derive du module et tomberait pour une raison sans rapport avec ce qu'on mesure ici.
+  local line; line="$(grep -i 'runner CI' <<<"$output" | head -1)"
+  [ -n "$line" ]
+  [[ "$line" == *"WARN"* ]]
+  [[ "$line" != *"DRIFT"* ]]
+  # Et il ne renvoie plus vers l'outillage de banc comme si c'etait le geste de ce rail-ci.
+  [[ "$line" != *"bench-runner.sh"* ]]
 }
