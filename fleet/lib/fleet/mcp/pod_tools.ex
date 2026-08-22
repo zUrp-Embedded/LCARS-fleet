@@ -631,7 +631,8 @@ defmodule Fleet.MCP.PodTools do
       description(
         "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab, both " <>
           "first-class) as a rolling PR/MR. ASYNC: returns " <>
-          "{\"status\":\"queued\"} immediately (a full history rewrite is minutes on a large repo), " <>
+          "{\"status\":\"queued\",\"repo\":...} immediately (a full history rewrite is minutes on a " <>
+          "large repo), " <>
           "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
           "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
           "host-side. PREREQUISITE: the project must already be LINKED by the human via " <>

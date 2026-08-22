@@ -286,7 +286,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
   PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
-  a large repo, so blocking the pod's turn is not an option. Returns `{:ok, %{"status" => "queued"}}`
+  a large repo, so blocking the pod's turn is not an option. Returns
+  `{:ok, %{"status" => "queued", "repo" => _}}`
   immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `project_publish.done` /
   `project_publish.failed`. The external token never enters a pod — the rail reads it host-side.
 

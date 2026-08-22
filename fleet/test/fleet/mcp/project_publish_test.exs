@@ -25,7 +25,7 @@ defmodule Fleet.MCP.ProjectPublishTest do
   end
 
   describe "the door: gate + argument shape" do
-    test "missing repo -> invalid_arguments (no gate needed)" do
+    test "missing full_name -> invalid_arguments (no gate needed)" do
       assert {:error, :invalid_arguments, _} = call(%{}, %{pod_id: "x"})
     end
 
