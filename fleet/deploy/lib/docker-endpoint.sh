@@ -147,7 +147,17 @@ PYCFG
 # de son auteur — et fait alors juger toutes les autres a travers son cablage particulier. Si un
 # operateur a une topologie a lui, il pose `DOCKER_HOST` : c'est une DECISION, honoree avant tout
 # le reste. Ce n'est pas a la sonde de la deviner en fouillant.
+# ⚠ COUTURE DE DECOR, MEME IDIOME QUE `LCARS_HOST_CONSENT_FILE` ET `LCARS_SYSADMIN_UID`. Un temoin
+# qui veut mesurer « rien ne repond » ne peut pas le fabriquer sur une machine qui A docker : les
+# chemins sont des litteraux, et `DOCKER_HOST` n'est plus un levier — pointer une socket absente
+# fait desormais CONTINUER la resolution, ce qui est precisement le comportement voulu. Sans cette
+# couture, ce contrat-la n'est verifiable que sur une machine sans docker, c'est-a-dire nulle part
+# ou il compte.
 _docker_sockets() {
+  if [[ -n "${LCARS_DOCKER_SOCKETS:-}" ]]; then
+    printf '%s\n' "$LCARS_DOCKER_SOCKETS"
+    return 0
+  fi
   case "$(detect_substrate)" in
     wsl) printf '%s\n%s\n' /var/run/docker.sock "$(_docker_mount_sock)" ;;
     *)   printf '%s\n' /var/run/docker.sock ;;
@@ -224,13 +234,32 @@ docker_endpoint() {
     local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
   fi
 
-  # 2. L'endpoint. Un DOCKER_HOST posé par l'opérateur est une DÉCISION : on ne la contourne pas,
-  #    on la sonde telle quelle. Sinon on essaie les sockets connues, dans l'ordre du plus standard
-  #    au plus spécifique à ce substrat.
+  # 2. L'endpoint. Un `DOCKER_HOST` present est sonde EN PREMIER, tel quel — s'il repond, on s'arrete
+  #    la. Sinon on essaie les sockets connues, du plus standard au plus specifique au substrat.
+  #
+  # ⚠ ET IL N'EST PAS TOUJOURS UNE DECISION : l'integration WSL de Docker Desktop
+  # l'INJECTE dans le shell de la distro. Traiter l'injection comme un choix humain et s'arreter la
+  # refusait des machines saines — la socket injectee appartient a root, l'humain n'y ecrit pas, et
+  # le balayage ci-dessous savait deja quoi faire (DENIED, puis escalade). Il n'y arrivait jamais.
+  #
+  # La valeur reste donc essayee EN PREMIER — le choix de l'operateur garde sa priorite — mais son
+  # echec n'est plus un cul-de-sac. Et le motif dit LEQUEL des deux faits s'est produit : « refuse »
+  # et « rien n'ecoute » demandent deux gestes differents, et `docker version` rend 1 pour les deux.
+  local _envhost="" _dh=""
   if [[ -n "${DOCKER_HOST:-}" ]]; then
     if "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then return 0; fi
-    PROV_DOCKER_WHY="DOCKER_HOST=$DOCKER_HOST est posé et aucun daemon ne répond dessus"
-    return 1
+    _dh="${DOCKER_HOST#unix://}"
+    #
+    # Le FAIT rejoint l'enumeration du message final au lieu de s'ecrire dans `PROV_DOCKER_WHY` :
+    # ce champ est contractuellement VIDE quand docker repond (cf. l'en-tete), et le message final
+    # l'ecrase de toute facon. Une phrase posee ici serait perimee sur succes et perdue sur echec.
+    if [[ -S "$_dh" ]]; then
+      _envhost=" $DOCKER_HOST[env,$([[ -w "$_dh" ]] && echo "accessible" || echo "REFUSE $(id -un)")]"
+    else
+      _envhost=" $DOCKER_HOST[env,rien-a-cette-adresse]"
+    fi
+    # Sans cet `unset`, chaque essai du balayage re-heriterait la valeur qui vient d'echouer.
+    unset DOCKER_HOST
   fi
   # ⚠ « REFUSE » ET « INJOIGNABLE » NE SONT PAS LE MEME FAIT, et les confondre refuse des machines
   # saines. Sur une instance vierge, la socket du montage est `root:root 755` : le daemon REPOND, et
@@ -371,9 +400,9 @@ SHIM
     fi
   done < <(_docker_sockets)
   if [[ "$(detect_substrate)" == "wsl" ]]; then
-    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$tried. Sur WSL c'est Docker Desktop qui porte le daemon : démarre-le côté Windows, puis relance"
+    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$_envhost$tried. Sur WSL c'est Docker Desktop qui porte le daemon : démarre-le côté Windows, puis relance"
   else
-    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$tried. Le service tourne-t-il, et suis-je dans le groupe docker ?"
+    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$_envhost$tried. Le service tourne-t-il, et suis-je dans le groupe docker ?"
   fi
   return 1
 }
