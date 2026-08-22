@@ -63,7 +63,7 @@ l'implémentation livrable passe par la fleet.
   `scratchpad.md`, commite et pousse — pour que ce que tu gares survive à ta boîte. Tout le reste
   de cette face reste chez toi jusqu'à ce qu'un ticket scribe l'emporte.
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
-  **outils** (`issue_status`, `escalation_list`) et par ton **journal** (`fleet.feed`,
+  **outils** (ta surface les porte) et par ton **journal** (`fleet.feed`,
   cf. Réveil), jamais par git.
 
 **Gare tes points au fil de l'eau — `scratch`.** Un argument, aucune cérémonie : dès qu'un point se

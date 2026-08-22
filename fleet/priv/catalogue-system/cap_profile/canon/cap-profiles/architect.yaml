@@ -126,9 +126,9 @@ spec:
       # atteindre, et un rôle de conception atteint légitimement une liste de tâches.
       - TodoWrite
       # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
-      # (project_create/project_import/card_list) belongs to starfleet (fleet-master) since the
+      # (framing and onboarding) belongs to starfleet (fleet-master) since the
       # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.
-      # get_work_item/submit_result (universal) come from the launcher.
+      # The universal work-item pair comes from the launcher.
       - mcp__fleet__issue_create
       - mcp__fleet__issue_status
       - mcp__fleet__escalation_list  # return channel: reads the awaits-arch escalations (worker verdict)

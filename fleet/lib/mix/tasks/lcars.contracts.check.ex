@@ -116,6 +116,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_toolchain_branch_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
+        check_catalogue_enumerates_no_tools(root),
         check_gitea_template_expansion(root),
         check_site_build_inputs(root),
         check_bats_descriptions_inert(root),
@@ -3001,6 +3002,103 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
           "(BL-6-36: bash's silent-coercion class)"
     }
+  end
+
+  @doc """
+  A catalogue may not ENUMERATE tools. It may name the tool of a step.
+
+  ⚖ user, 2026-08-22: *"les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
+  pour voir ce qui existe, on n'a pas besoin de refaire une liste qui mentira."*
+
+  ## The defect is the LIST, not the name
+
+  A catalogue is material an agent reads to know how to work. When it carries an inventory of the
+  tool surface, that inventory is a second copy of `tools/list` — hand-kept, never regenerated, and
+  wrong the day a tool is added, renamed or withdrawn. `agent-starfleet-base.md` wrote it plainly:
+  *"tes skills (`project_create`, `project_install`…)"* — the ellipsis is the list admitting, in its
+  own punctuation, that it does not know what it contains.
+
+  Naming the tool of a STEP is the opposite gesture: `runtime-contract.md` saying the wake leads to
+  one tool and the completion to another is the protocol's ORDER, not a catalogue of what exists. It
+  cannot go stale by omission, because it never claimed to be complete.
+
+  ## The discriminant is PUNCTUATION, and it derives
+
+  Two tool names joined by a comma or a slash is an inventory. Joined by an arrow, it is a sequence.
+  Nothing else is read — not the file kind, not the surrounding words.
+
+  Two shapes are excluded by the rule itself rather than by an exception:
+
+    * an `allowedTools:` grant carries ONE name per line, so no pair is ever adjacent;
+    * a cross-reference (`- mcp__fleet__project_install  # twin of project_create`) separates its two
+      names with prose, not with enumeration punctuation.
+
+  A line-based "one name per line" rule was tried first and rejected: a markdown TABLE ROW cannot be
+  split, so the worker protocol's own cycle would have had to lose a name — and the rule would have
+  depended on where a paragraph happens to wrap.
+
+  ## Scope
+
+  `priv/catalogue` and `priv/catalogue-system` — the material that ships as a catalogue. Nine
+  enumerations were removed the day this was written, across SP drafts, cap-profile comments, a brief
+  and a project template.
+  """
+  @spec check_catalogue_enumerates_no_tools(String.t()) :: result()
+  def check_catalogue_enumerates_no_tools(root) do
+    id = "catalogue.enumerates_no_tools"
+    tools_rel = "lib/fleet/mcp/pod_tools.ex"
+
+    remediation =
+      "name the tool of a step, or name none and let `tools/list` answer — a hand-kept inventory " <>
+        "of the tool surface is a second list, and the second list is the one that lies"
+
+    declared = deftool_names(quoted!(root, tools_rel))
+
+    trees =
+      ["priv/catalogue", "priv/catalogue-system"]
+      |> Enum.map(&Path.join(root, &1))
+      |> Enum.filter(&File.dir?/1)
+
+    files =
+      Enum.flat_map(trees, fn dir ->
+        dir |> Path.join("**/*") |> Path.wildcard() |> Enum.filter(&File.regular?/1)
+      end)
+
+    cond do
+      MapSet.size(declared) < 12 ->
+        broken_result(id, "deftool in #{tools_rel} (only #{MapSet.size(declared)}, expected 12+)")
+
+      # Deux arbres, et les DEUX doivent etre la : n'en scanner qu'un rendrait le meme vert propre
+      # que n'en scanner aucun.
+      length(trees) < 2 ->
+        broken_result(id, "catalogue tree under #{root} (found #{length(trees)} of 2)")
+
+      files == [] ->
+        broken_result(id, "file under the catalogue trees")
+
+      true ->
+        names = declared |> MapSet.to_list() |> Enum.map(&Regex.escape/1) |> Enum.join("|")
+        rx = Regex.compile!("`?(#{names})`?[ \t]*[,/][ \t]*`?(#{names})`?")
+
+        offenders =
+          for path <- files,
+              {:ok, body} = File.read(path),
+              {line, n} <- Enum.with_index(String.split(body, "\n"), 1),
+              [_, a, b | _] <- [Regex.run(rx, line)],
+              do: "#{Path.relative_to(path, root)}:#{n} — #{a} and #{b} enumerated"
+
+        %{
+          id: id,
+          remediation: if(offenders == [], do: "—", else: remediation),
+          status: if(offenders == [], do: :pass, else: :fail),
+          evidence: Enum.sort(offenders),
+          note:
+            if(offenders == [],
+              do: "#{length(files)} catalogue file(s) scanned; none enumerates the tool surface",
+              else: "#{length(offenders)} line(s) carry an inventory of tools"
+            )
+        }
+    end
   end
 
   @doc """
