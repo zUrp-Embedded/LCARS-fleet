@@ -2124,7 +2124,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ⚠ ET C'EST UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle etait juste ; l'instrument lisait a
   # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
   # dit « pass ».
-  @site_sources ["src/lib/*.js", "src/components/*.astro", "src/layouts/*.astro", "src/pages/*.astro"]
+  @site_sources [
+    "src/lib/*.js",
+    "src/components/*.astro",
+    "src/layouts/*.astro",
+    "src/pages/*.astro"
+  ]
 
   defp site_build_inputs(repo) do
     site = Path.join(repo, "assets/github.io")
