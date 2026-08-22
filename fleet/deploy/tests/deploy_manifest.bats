@@ -236,24 +236,40 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   [[ "$output" != *"docker"* ]]
 }
 
-@test "docker est pose sur le substrat linux, et sur lui SEUL" {
-  # wsl : le daemon vient de Docker Desktop, monte dans /mnt/wsl/docker-desktop — poser docker.io
-  # dans la distro y fabriquerait un SECOND daemon. docker : on est DANS le conteneur.
-  # L'EN-TETE SEULE : le module se TERMINE par un `case "$1"` qui refuse une invocation sans verbe.
-  # Le sourcer entier tuerait le sous-shell avant la premiere assertion — meme idiome que
-  # `forge_host_reach.bats`, et pour la meme raison.
+@test "docker : pose sur linux SEULEMENT, et SEULEMENT si aucun daemon ne repond" {
+  # ⚠ CETTE REGLE EST DEVENUE CONDITIONNELLE, DONC LE TEMOIN TESTE LES DEUX BRANCHES. Il n'en
+  # testait qu'une, et ma condition l'a rendu dependant de la MACHINE : sur un poste ou docker
+  # repond, `eff linux` ne contient plus `docker.io` et le temoin tombait — en mesurant l'hote au
+  # lieu de la regle. Sixieme occurrence de ce piege en deux jours.
+  #
+  # LE FOND : la majorite des postes Linux ont docker par le depot upstream (`docker-ce`), pas par
+  # `docker.io`. Installer le second par-dessus le premier les met en conflit — au mieux apt refuse,
+  # au pire il retire le Docker de l'operateur.
   local head="$BATS_TEST_TMPDIR/pkg-head.sh"
   sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
 
-  eff() { PROV_SUBSTRATE="$1" PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
-            bash -c 'source "$1" >/dev/null 2>&1; effective_packages' _ "$head" 2>/dev/null | tr '\n' ' '; }
+  # La sonde est DOUBLEE, dans les deux sens. C'est la seule facon de mesurer une condition sans
+  # mesurer la machine qui joue le test.
+  eff() { # eff <substrat> <0 si un daemon repond | 1 sinon>
+    PROV_SUBSTRATE="$1" DOCKER_ANSWERS="$2" \
+    PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+      bash -c 'source "$1" >/dev/null 2>&1
+               docker_endpoint() { return "$DOCKER_ANSWERS"; }
+               effective_packages' _ "$head" 2>/dev/null | tr '\n' ' '
+  }
 
-  [[ "$(eff linux)" == *"docker.io"* ]]
-  [[ "$(eff linux)" == *"docker-compose-v2"* ]]
-  [[ "$(eff wsl)"    != *"docker.io"* ]]
-  [[ "$(eff docker)" != *"docker.io"* ]]
-  # et la liste commune reste la, sur les trois
-  [[ "$(eff docker)" == *"bubblewrap"* ]]
+  # aucun daemon : le rail POSE docker, c'est sa raison d'etre sur ce substrat
+  [[ "$(eff linux 1)" == *"docker.io"* ]]
+  [[ "$(eff linux 1)" == *"docker-compose-v2"* ]]
+  # un daemon repond : on ne pose RIEN, et on ne retire rien non plus
+  [[ "$(eff linux 0)" != *"docker.io"* ]]
+  [[ "$(eff linux 0)" != *"docker-compose-v2"* ]]
+  # les autres substrats ne le posent JAMAIS, quelle que soit la sonde
+  [[ "$(eff wsl 1)"    != *"docker.io"* ]]
+  [[ "$(eff docker 1)" != *"docker.io"* ]]
+  # et la liste commune reste la, dans tous les cas
+  [[ "$(eff docker 1)" == *"bubblewrap"* ]]
+  [[ "$(eff linux 0)"  == *"bubblewrap"* ]]
 }
 
 @test "check et apply lisent la MEME liste — deux derivations repondraient differemment" {

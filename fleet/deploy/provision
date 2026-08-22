@@ -78,6 +78,8 @@ CMD="${1:-}"; shift || true
 SUBSTRATE="auto"
 PORCELAIN=0
 ENV_FILE=""
+UNINSTALL_YES=0
+UNINSTALL_HUMANS=0
 declare -a ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -92,6 +94,14 @@ while [[ $# -gt 0 ]]; do
     --fleet-human) export PROV_FLEET_HUMAN="${2:?--fleet-human attend un user}"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
+    # ⚠ `uninstall` NE FAIT RIEN SANS `--yes`, ET CE N'EST PAS UNE COURTOISIE. Le verbe lit une
+    # table et retire ce qu'elle nomme : une erreur dans la table devient une erreur sur la machine.
+    # Sans ce drapeau il IMPRIME son plan et sort — la seule façon de relire une liste avant qu'elle
+    # ne s'exécute.
+    --yes)       UNINSTALL_YES=1; shift ;;
+    # Les objets du home d'une personne sont POSÉS par LCARS mais vécus par elle. On les PROPOSE,
+    # on ne les impose pas (§ `human` du manifeste).
+    --humans)    UNINSTALL_HUMANS=1; shift ;;
     # Le détail d'une étape longue, pour celui qui veut savoir sur quoi elle traîne. Hérité par les
     # modules (qui sont des processus) : d'où l'export.
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
@@ -99,7 +109,7 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|update|list) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|update|list|uninstall) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
 [[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
 
 if [[ -n "$ENV_FILE" ]]; then
@@ -264,6 +274,162 @@ if [[ "$CMD" == "apply" ]]; then
   flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
 fi
 
+# ─── LE JOURNAL DE CETTE MACHINE ─────────────────────────────────────────────────────────────────
+#
+# `system.manifest` dit ce que le provisionnement a le DROIT de poser — statique, versionné, le même
+# partout. Le journal dit ce qui a été posé ICI, et il porte le seul fait qu'aucun fichier statique
+# ne peut connaître : `apt_installed` contre `apt_already`. Sans cette séparation, une
+# désinstallation retire des paquets que l'opérateur avait avant — pire que d'en laisser.
+#
+# ⚠ L'ACCUMULATEUR EST UN FICHIER, ET LE RUNNER EST LE SEUL À POUVOIR L'OUVRIR. Les modules sont des
+# PROCESSUS : aucun d'eux ne voit ce qu'un autre a noté, et aucun ne sait quand la passe se termine.
+# Le runner le crée avant la boucle, les modules y notent par `prov_journal_note`, il le scelle après.
+#
+# ⚠ APPLY SEULEMENT. Un `doctor` ne pose rien ; lui faire écrire un journal ferait raconter à la
+# machine une pose qui n'a pas eu lieu.
+JOURNAL_FILE="${LCARS_JOURNAL_FILE:-/etc/lcars/install.journal}"
+MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
+
+# ─── uninstall — IL NE CONTIENT AUCUNE LISTE ────────────────────────────────────────────────────
+#
+# Il lit `system.manifest` (ce qu'on a le DROIT de poser) et `install.journal` (ce qui a été posé
+# ICI). Même règle que `etc/install.manifest` : la table est la source, personne ne recopie. Une
+# liste en dur dans ce fichier serait un second inventaire — et celui qui dérive est toujours celui
+# qu'on ne relit pas.
+#
+# ⚠ SIX RÈGLES DE SÛRETÉ, ET LA CINQUIÈME A ÉTÉ APPRISE À LA MAIN sur .63 le 2026-08-22 :
+#
+#   1. SANS MANIFESTE, ON REFUSE. Pas de repli, pas de « je fais au mieux » : un désinstalleur qui
+#      devine est plus dangereux qu'un qui s'arrête. Même contrat que le témoin de `install.manifest`
+#      — « manifest absent = erreur de sonde, PAS un pass silencieux ».
+#   2. `preserve` N'EST JAMAIS TOUCHÉ, ni lui ni ce qu'il contient. C'est le TRAVAIL des gens.
+#   3. SANS JOURNAL, AUCUN PAQUET N'EST RETIRÉ. Le journal est la seule chose qui distingue ce que
+#      LCARS a installé de ce que l'opérateur avait déjà ; sans lui, retirer serait un pari sur le
+#      bien d'autrui. On le DIT et on laisse les paquets.
+#   4. LE PLAN S'IMPRIME AVANT DE S'EXÉCUTER (`--yes`). Une erreur dans la table devient une erreur
+#      sur la machine ; il faut pouvoir la relire.
+#   5. UN OBJET PRÉSERVÉ PEUT DÉPENDRE D'UN OBJET D'EMPREINTE. Les trois faces sont en
+#      `2775 root:fleet` : retirer le groupe `fleet` les laisserait avec un GID orphelin. Mesuré au
+#      nettoyage manuel — `groupdel fleet` a échoué, et c'était la BONNE réponse. Un groupe encore
+#      porté par un objet préservé n'est pas retirable, et ce n'est pas une erreur.
+#   6. L'ORDRE EST L'INVERSE DE LA POSE. Fichiers et liens d'abord, répertoires du plus profond au
+#      moins profond, groupes en dernier. Un `rm` de répertoire avant son contenu ne rate pas — mais
+#      un `groupdel` avant les fichiers qu'il possède, si.
+uninstall_run() {
+  [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
+
+  local rows preserve_roots=() journal_pkgs=() line cls obj mode owner sub
+  rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
+
+  while read -r cls obj mode owner sub; do
+    [[ "$cls" == "preserve" ]] && preserve_roots+=("$obj")
+  done <<<"$rows"
+
+  preserved() { # preserved <chemin> -> 0 si lui-meme ou un ancetre est preserve
+    local p="$1" r
+    for r in "${preserve_roots[@]}"; do
+      [[ "$p" == "$r" || "$p" == "$r"/* ]] && return 0
+    done
+    return 1
+  }
+
+  # LES PAQUETS : le journal, et lui seul.
+  if [[ -r "$JOURNAL_FILE" ]]; then
+    mapfile -t journal_pkgs < <(awk '$1=="apt_installed"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
+  fi
+
+  # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
+  local -a files=() dirs=() groups=() humans=()
+  while read -r cls obj mode owner sub; do
+    preserved "$obj" && continue
+    case "$cls" in
+      anchor|link|runtime) files+=("$obj") ;;
+      dir|prefix)          dirs+=("$obj") ;;
+      group)               groups+=("$obj") ;;
+      human)               humans+=("$obj") ;;
+    esac
+  done <<<"$rows"
+
+  # Du plus profond au moins profond : `/opt/lcars/tofu/providers` avant `/opt/lcars`.
+  mapfile -t dirs < <(printf '%s\n' "${dirs[@]}" | awk '{ print gsub(/\//,"/"), $0 }' | sort -rn | cut -d' ' -f2-)
+
+  echo "${_PC}=== provision uninstall — plan lu dans $(basename "$MANIFEST_FILE") ===${_PN}"
+  printf '  %-10s %d objet(s)\n' "fichiers" "${#files[@]}"
+  printf '  %-10s %d répertoire(s)\n' "dirs" "${#dirs[@]}"
+  printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
+  if [[ "${#journal_pkgs[@]}" -gt 0 ]]; then
+    printf '  %-10s %d paquet(s) : %s\n' "apt" "${#journal_pkgs[@]}" "${journal_pkgs[*]}"
+  else
+    printf '  %-10s %s\n' "apt" "${_PA}AUCUN — journal absent ou vide ($JOURNAL_FILE) : impossible de distinguer ce que LCARS a posé de ce qui était déjà là${_PN}"
+  fi
+  if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
+    printf '  %-10s %d objet(s) dans les homes (--humans)\n' "humains" "${#humans[@]}"
+  else
+    printf '  %-10s %s\n' "humains" "${#humans[@]} objet(s) LAISSÉS — « --humans » pour les retirer aussi"
+  fi
+  printf '  %-10s %s\n' "préservé" "${preserve_roots[*]}"
+
+  if [[ "$UNINSTALL_YES" -ne 1 ]]; then
+    echo ""
+    echo "  ${_PA}RIEN N'A ÉTÉ RETIRÉ.${_PN} Relis ce plan, puis : sudo $SELF uninstall --yes"
+    return 0
+  fi
+
+  # ─── L'EXÉCUTION ──────────────────────────────────────────────────────────────────────────────
+  local o removed=0 kept=0
+  for o in "${files[@]}"; do
+    [[ -e "$o" || -L "$o" ]] || continue
+    rm -f "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+  done
+  if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
+    for o in "${humans[@]}"; do
+      # Le joker `<human>` se resout sur les homes reels — le manifeste ne peut pas les nommer.
+      local h
+      for h in /home/*; do
+        local real="${o//<human>/$(basename "$h")}"
+        [[ -e "$real" ]] && { rm -rf "$real" && removed=$((removed + 1)); }
+      done
+    done
+  fi
+  for o in "${dirs[@]}"; do
+    [[ -d "$o" ]] || continue
+    rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+  done
+  for o in "${groups[@]}"; do
+    getent group "$o" >/dev/null 2>&1 || continue
+    if groupdel "$o" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+    else
+      # RÈGLE 5 : un groupe encore porté par un objet préservé n'est pas retirable, et c'est JUSTE.
+      kept=$((kept + 1))
+      echo "  ${_PA}groupe $o gardé — encore porté par un objet préservé (les faces sont en root:$o)${_PN}"
+    fi
+  done
+  for o in "${journal_pkgs[@]}"; do
+    run_quiet env DEBIAN_FRONTEND=noninteractive apt-get remove -y "$o" \
+      && removed=$((removed + 1)) || echo "  ${_PA}paquet non retiré : $o${_PN}"
+  done
+
+  echo ""
+  printf '  %d objet(s) retiré(s), %d gardé(s) délibérément.\n' "$removed" "$kept"
+  echo "  ${_PC}Le travail est intact :${_PN} ${preserve_roots[*]}"
+  return 0
+}
+
+if [[ "$CMD" == "uninstall" ]]; then
+  # ⚠ ROOT N'EST EXIGÉ QUE POUR RETIRER. Lire un plan est une lecture : le refuser sans root
+  # obligerait l'opérateur à `sudo` pour SAVOIR ce qui va disparaître — c'est-à-dire à escalader
+  # avant de décider. La sonde reste ouverte, le geste reste fermé.
+  [[ "$UNINSTALL_YES" -ne 1 || "$EUID" -eq 0 ]] \
+    || die "uninstall --yes demande root (il retire des objets systeme) — sans --yes, il imprime son plan"
+  uninstall_run
+  exit $?
+fi
+if [[ "$CMD" == "apply" ]]; then
+  PROV_JOURNAL_ACC="$(mktemp "${TMPDIR:-/tmp}/prov-journal.XXXXXX" 2>/dev/null || true)"
+  export PROV_JOURNAL_ACC
+fi
+
 # ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
 total=0 ok=0 drift=0 failed=0
 declare -a REPORT=()
@@ -378,6 +544,44 @@ else
   echo ""
   # LA SOURCE EST DANS LE RÉCAP, PAS SEULEMENT EN TÊTE : c'est la ligne qu'un opérateur relit, et
   # c'est celle qu'il colle dans un rapport. Un verdict sans son origine ne se compare à rien.
+  # ⚠ LE JOURNAL SE SCELLE AVANT LE RÉCAP, ET IL NE PEUT PAS FAIRE ÉCHOUER UNE PASSE. Il RACONTE ce
+  # qui vient d'être posé ; il ne décide de rien. Un journal illisible est une perte d'information —
+  # elle se DIT, elle ne renverse pas un verdict que 25 modules viennent de rendre.
+  if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" && -s "$PROV_JOURNAL_ACC" ]]; then
+    if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
+      {
+        echo "# SOURCE: $JOURNAL_FILE"
+        echo "# STATUS: mesure, pas declaration — CE QUI A ETE POSE SUR CETTE MACHINE."
+        echo "#"
+        echo "# Son jumeau statique est fleet/deploy/system.manifest, qui dit ce que le"
+        echo "# provisionnement a le DROIT de poser. Celui-ci dit ce qu'il A pose, ici."
+        echo "#"
+        echo "# ⚠ apt_installed / apt_already EST LA RAISON D'ETRE DE CE FICHIER. La distinction"
+        echo "# n'est connaissable QU'AVANT l'install : une seconde plus tard, dpkg repond"
+        echo "# « present » pour les deux. Un uninstall qui l'ignore retire des paquets que"
+        echo "# l'operateur avait avant — pire que d'en laisser."
+        echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
+        echo "substrate     $SUBSTRATE"
+        echo "prefix        ${PROV_PREFIX:-inconnu}"
+        echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
+        # Une clef par ligne, valeurs fusionnées et dédoublonnées : `apt_ensure` est appelée par
+        # plusieurs modules, et trois lignes `apt_installed` pour un même paquet ne disent rien de
+        # plus qu'une.
+        awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
+             END { for (k in acc) {
+                     n=split(acc[k], w, " "); delete seen; out=""
+                     for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }
+                     printf "%-13s%s\n", k, out } }' "$PROV_JOURNAL_ACC" | sort
+      } > "$JOURNAL_FILE" 2>/dev/null \
+        && chmod 0644 "$JOURNAL_FILE" 2>/dev/null \
+        || echo "  ${_PA}journal NON écrit ($JOURNAL_FILE) — l'install est faite, sa trace ne l'est pas${_PN}"
+    else
+      echo "  ${_PA}journal NON écrit : $(dirname "$JOURNAL_FILE") inaccessible${_PN}"
+    fi
+    rm -f "$PROV_JOURNAL_ACC"
+  fi
+
   echo "${_PC}=== provision $CMD — substrat $SUBSTRATE · source $PROV_SOURCE_REV ===${_PN}"
   # UN COMPTEUR N'EST TEINTÉ QUE S'IL PORTE QUELQUE CHOSE. Un « échecs: 0 » en rouge apprend au
   # lecteur à ignorer le rouge, et le jour où il vaut 3 il ne le voit plus.

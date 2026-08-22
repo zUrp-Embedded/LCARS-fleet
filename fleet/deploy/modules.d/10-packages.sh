@@ -118,9 +118,35 @@ LINUX_PACKAGES=(docker.io docker-compose-v2)
 
 # La liste EFFECTIVE de ce passage — une seule fonction, lue par `check` ET par `apply`, pour que
 # les deux ne puissent pas répondre différemment sur le même substrat.
+#
+# ─── LA SONDE, PAS LE NOM DU PAQUET ─────────────────────────────────────────────────────────────
+#
+# ⚠ CETTE FONCTION NE TESTAIT QUE LE SUBSTRAT, et sur une machine qui a déjà docker c'était faux.
+# La majorité des postes Linux l'obtiennent par le dépôt upstream — `docker-ce` +
+# `docker-compose-plugin` — et non par `docker.io`. Le `dpkg -s docker.io` d'`apt_ensure` échoue
+# alors, l'installation se déclenche, et les deux empaquetages entrent en conflit : au mieux apt
+# refuse, au pire il retire le Docker de l'opérateur.
+#
+# ⚠ ET LA SONDE N'EST JAMAIS UN NOM DE PAQUET. Sonder `docker-ce` au lieu de `docker.io`
+# reproduirait la même faute déplacée d'un nom à l'autre. La doctrine est déjà écrite dans
+# `install.sh` : « ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE […] une distro sans intégration
+# activée n'a NI /usr/bin/docker NI /var/run/docker.sock, et le daemon répond quand même ».
+# `docker_endpoint` rend 0 quand un daemon a répondu ; c'est la seule question qui compte.
+#
+# ⚠ LA CONVERGENCE PORTE SUR CE QU'IL FAUT AJOUTER, JAMAIS SUR CE QU'IL FAUT ENLEVER. Si
+# `LINUX_PACKAGES` a été posé à une passe précédente et que docker répond maintenant, la liste ne
+# les contient plus — le `check` ne les réclame donc pas, et l'`apply` ne les retire pas. Retirer un
+# paquet que l'opérateur pouvait vouloir est exactement la faute que le journal existe pour
+# empêcher, et ce n'est pas à cette fonction de la commettre.
+#
+# ⚠ ET LE POINT D'INJECTION EST ICI, PAS DANS UN DES DEUX VERBES. `deploy_manifest.bats` porte déjà
+# « check et apply lisent la MÊME liste » : une condition posée dans `check()` seul les ferait
+# diverger, et le doctor réclamerait à vie un paquet que l'apply n'installe pas.
 effective_packages() {
   printf '%s\n' "${PACKAGES[@]}"
-  [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && printf '%s\n' "${LINUX_PACKAGES[@]}"
+  if [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && ! docker_endpoint >/dev/null 2>&1; then
+    printf '%s\n' "${LINUX_PACKAGES[@]}"
+  fi
   return 0
 }
 

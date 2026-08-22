@@ -786,12 +786,45 @@ fetch_verify() {
 }
 
 # ─── apt_ensure <pkg…> — le pattern MISSING-array v1 (le bon), avec verdict réel par paquet ──────
+# ─── prov_journal_note <clef> <valeur…> — CE QUI A ÉTÉ POSÉ *ICI* ───────────────────────────────
+#
+# `system.manifest` déclare ce que le provisionnement a le DROIT de poser. Il est statique, versionné,
+# le même pour toutes les machines. Le JOURNAL dit ce qui a été posé sur CELLE-CI, et il porte le
+# seul fait qu'aucun fichier statique ne peut connaître : la séparation entre ce que LCARS a
+# installé et ce qui était déjà là.
+#
+# ⚠ LE CANAL EST UN FICHIER, PARCE QUE LES MODULES SONT DES PROCESSUS. Le runner les lance ; une
+# variable posée dans l'un ne remonte pas au suivant. C'est la même leçon que `forge.url`, écrite
+# par `48-forge-host` pour que `50-forge` et `55-deck-oidc` la lisent — mesure du 2026-08-18, deux
+# modules en dérive parce qu'on croyait qu'un `export` traversait.
+#
+# ⚠ ET C'EST UNE NOTE, PAS UN VERDICT. Un journal qui échoue ne fait pas échouer un apply : il
+# raconte, il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est
+# muette et rend 0 — un appelant n'a jamais à savoir si le journal existe.
+prov_journal_note() { # prov_journal_note <clef> <valeur…>
+  [[ -n "${PROV_JOURNAL_ACC:-}" ]] || return 0
+  [[ "$#" -ge 2 ]] || return 0
+  # ⚠ `2>/dev/null` AVANT `>>`, ET L'ORDRE EST LOAD-BEARING. Les redirections se traitent de GAUCHE
+  # A DROITE : écrite après, elle arrive trop tard — l'ouverture du fichier a déjà échoué et le
+  # shell a déjà imprimé son « No such file » sur stderr. La fonction survivait, et polluait quand
+  # même la sortie de son appelant. Mesuré le 2026-08-22 par le témoin qui vérifie qu'elle survit.
+  printf '%s %s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_JOURNAL_ACC" || true
+  return 0
+}
+
 apt_ensure() {
-  local missing=() pkg
+  local missing=() already=() pkg
   for pkg in "$@"; do
-    dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    if dpkg -s "$pkg" >/dev/null 2>&1; then already+=("$pkg"); else missing+=("$pkg"); fi
   done
+  # ⚠ LA SÉPARATION EST NOTÉE AVANT L'INSTALL, ET C'EST LE SEUL MOMENT OÙ ELLE EST CONNAISSABLE.
+  # Une seconde plus tard, `dpkg -s` répond « présent » pour les deux listes et plus rien ne
+  # distingue ce que LCARS a posé de ce que l'opérateur avait déjà. C'est exactement le fait
+  # qu'aucun fichier statique ne peut porter — et sans lui, une désinstallation retire des paquets
+  # que quelqu'un avait avant, ce qui est pire que d'en laisser.
+  [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
+  prov_journal_note apt_installed "${missing[@]}"
   p_chg "apt: install ${missing[*]}"
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" || return 1
