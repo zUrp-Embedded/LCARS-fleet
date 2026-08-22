@@ -343,8 +343,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
       "issue" => to_string(issue["number"] || "?"),
-      "brief_body" => worker_order_body(issue),
-      "brief_source" => brief_source_line(issue)
+      "brief_body" => worker_order_body(issue)
     })
   end
 
@@ -359,22 +358,20 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source, because they were
   # near-identical and would have drifted the day one was retouched (nobody would find the other). It
-  # names the mounted, content-addressed file and its pinned version; `lead` says what the file IS to
-  # this role, `tail` is that role's own instruction (it opens with its own separator, so the judge
-  # can continue the sentence lowercase and the producer can start a new one).
-  defp mounted_mandate(lead, {ref, sha}, tail) do
-    "#{lead} le fichier `~/issues/mandate.md`, monté en lecture seule dans ton pod. C'est le doc " <>
-      "d'auteur `#{ref}`, matérialisé à sa version pinnée `#{String.slice(sha, 0, 7)}` par " <>
-      "`git archive` — adressé par contenu, donc exactement ce qui a été écrit#{tail}"
+  # names the mounted, content-addressed file ONLY — never its sha: the pin is the runtime's to
+  # engrave (commit message + forge), not the agent's to relay on trust (transport_brief_v2). The
+  # `_source` stays in the signature because the mount still travels out with the brief; the body just
+  # stopped citing it. `lead` says what the file IS to this role, `tail` is that role's own instruction
+  # (it opens with its own separator, so the judge can continue the sentence lowercase, the producer a new one).
+  defp mounted_mandate(lead, _source, tail) do
+    "#{lead} le fichier `~/issues/mandate.md`, monté en lecture seule dans ton pod : le doc " <>
+      "d'auteur figé pour toi, adressé par contenu — exactement ce qui a été écrit, rien à " <>
+      "vérifier ni recalculer#{tail}"
   end
 
-  # F-25 — the order CITES its source: a pointer-resolved brief names the authored doc
-  # (`ref @ commit`, the walkable link into ops history); an inline brief says so
-  # honestly (never a fabricated citation). FR: rendered to the human eye via the forge.
-  defp brief_source_line(%{"_brief_source" => {ref, sha}}),
-    do: "`#{ref} @ #{sha}` (doc d'auteur commité dans ops — version pinnée ci-dessus)"
-
-  defp brief_source_line(_issue), do: "brief inline du ticket (pas de doc d'auteur séparé)"
+  # (transport_brief_v2) The order no longer cites its source in the body: `brief_source_line/1` is
+  # gone. Provenance for a human lives on the forge (the `Brief:` pointer trailer in the ticket) and
+  # durably in the ops commit message; the agent's order carries the mount, not an address to relay.
 
   # A **judge** pod must know WHAT
   # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`

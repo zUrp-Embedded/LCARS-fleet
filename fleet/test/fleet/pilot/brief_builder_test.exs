@@ -56,6 +56,23 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
   end
 
+  # Same call, but keeps the 4th element: the mount source is where the "which doc" invariant lives
+  # now that the order text cites no ref (transport_brief_v2).
+  defp build4(forge_opts, opts) do
+    BriefBuilder.build_brief(
+      judge_profile(),
+      "reviewer",
+      StubForge,
+      "acme/widget",
+      42,
+      %{},
+      forge_opts,
+      {"pipe", "review"},
+      %{},
+      opts
+    )
+  end
+
   describe "build_brief — the CI fact rides into the judge brief (porte CI)" do
     test "a measured green CI is HANDED to the judge, with the boundary of what it means" do
       assert {:ok, brief, "judge"} =
@@ -159,15 +176,20 @@ defmodule Fleet.Pilot.BriefBuilderTest do
           Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", sha) <>
           "\n" <> Fleet.Layout.criteria_pointer_line("gate-briefs/issue-42-reviewer.md", sha)
 
-      assert {:ok, brief, "judge"} =
-               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+      assert {:ok, brief, "judge", mount} =
+               build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
-      # The criterion is not INLINED — it is a mounted file the judge reads (content-addressed). What
-      # the brief carries is the reference and the ADDRESS: the criteria doc (`gate-briefs/`), never
-      # the producer's brief (`briefs/`). That the cited ref is the criteria doc is the whole fix.
+      # The criterion is not INLINED — it is a mounted file the judge reads (content-addressed). The
+      # disambiguation (criteria over brief) now lives on the MOUNT SOURCE, not on a citation in the
+      # order text: the mount resolves the criteria doc (`gate-briefs/`), never the producer's brief.
       assert brief =~ "~/issues/mandate.md"
-      assert brief =~ "gate-briefs/issue-42-reviewer.md"
+      assert mount.ref == "gate-briefs/issue-42-reviewer.md"
+
+      # transport_brief_v2 — the order text cites NO ops path and NO sha (pure pointer). Mutation-
+      # verified: reinstating a ref citation in `mounted_mandate/3` reddens these refutes.
+      refute brief =~ "gate-briefs/issue-42-reviewer.md"
       refute brief =~ "briefs/issue-42-engineer.md"
+      refute brief =~ sha
       # Not inlined: the raw doc bodies do not travel in the order.
       refute brief =~ "ATTENDU-CRITERIA"
       refute brief =~ "PROCEDURAL-BRIEF"
@@ -190,10 +212,14 @@ defmodule Fleet.Pilot.BriefBuilderTest do
         "résumé\n\n" <>
           Fleet.Layout.brief_pointer_line("briefs/issue-42-engineer.md", String.trim(sha))
 
-      assert {:ok, brief, "judge"} = build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
-      # Fallback: the mounted file is still the criterion, its address is the brief doc.
+      assert {:ok, brief, "judge", mount} =
+               build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+
+      # Fallback: no criteria pointer → the mount resolves the brief doc (briefs/), the criterion of
+      # last resort. The invariant lives on the mount source, not on the order text (which cites none).
       assert brief =~ "~/issues/mandate.md"
-      assert brief =~ "briefs/issue-42-engineer.md"
+      assert mount.ref == "briefs/issue-42-engineer.md"
+      refute brief =~ "briefs/issue-42-engineer.md"
       refute brief =~ "BRIEF-ONLY-CRITERION"
     end
 
@@ -374,9 +400,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert brief =~ "~/issues/mandate.md"
       refute brief =~ "LE DOC COMPLET."
       refute brief =~ "Brief: #{ref}"
-      # F-25 — the order CITES its source: the resolved pointer stays walkable (ref @ commit),
-      # it is not consumed silently by the resolution.
-      assert brief =~ "Source du brief : `#{ref} @ #{sha}`"
+
+      # transport_brief_v2 — the body is a PURE pointer: it names the mounted file and NOTHING of
+      # the pin. The sha (and its 7-char prefix) is the runtime's to engrave, never the agent's to
+      # relay. Mutation-verified: reinstating any sha citation in `mounted_mandate/3` reddens this.
+      refute brief =~ sha
+      refute brief =~ String.slice(sha, 0, 7)
+      refute brief =~ "Source du brief"
     end
 
     test "unresolvable pointer (wrong sha) → DEFER via the criterion rail, never a guessed brief",
@@ -397,13 +427,14 @@ defmodule Fleet.Pilot.BriefBuilderTest do
                build_worker(%{"number" => 42, "body" => "inline brief"}, ops_root: tmp)
 
       assert brief =~ "inline brief"
-      # F-25 — honest citation: no separate authored doc → the order says so, it never
-      # fabricates a source reference.
-      assert brief =~ "Source du brief : brief inline du ticket"
+
+      # transport_brief_v2 — the inline order carries no source line at all: `brief_source_line/1`
+      # is gone. An inline brief IS the order; there is no separate doc to cite.
+      refute brief =~ "Source du brief"
     end
   end
 
-  describe "deliverable-judge criterion — the gate-brief CARRIES it, and names its pin" do
+  describe "deliverable-judge criterion — the gate-brief points at it, and cites no pin" do
     @describetag :tmp_dir
 
     defp authored_criterion(tmp) do
@@ -417,14 +448,15 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {ref, sha}
     end
 
-    test "pointer ticket → the judge gets the TEXT, resolved, plus the pin to cite", %{
-      tmp_dir: tmp
-    } do
+    test "pointer ticket → the judge gets a PURE POINTER, no pin cited (the runtime engraves it)",
+         %{
+           tmp_dir: tmp
+         } do
       {ref, sha} = authored_criterion(tmp)
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha)
 
-      assert {:ok, brief, "judge"} =
-               build([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
+      assert {:ok, brief, "judge", mount} =
+               build4([_issue: {:ok, %{"body" => body}}], ops_root: tmp)
 
       # THE CRITERION IS A MOUNTED FILE THE JUDGE READS, not inline text. The order references
       # `~/issues/mandate.md` (content-addressed) instead of carrying the doc body — so what the
@@ -432,10 +464,12 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       assert brief =~ "~/issues/mandate.md"
       refute brief =~ "LE CRITÈRE COMPLET."
 
-      # The address travels with it, to be CITED (its ref and short sha): how a third party ties the
-      # verdict to a version from the forge.
-      assert brief =~ "#{ref}"
-      assert brief =~ String.slice(sha, 0, 7)
+      # transport_brief_v2 — the pin does NOT travel in the order text: neither ref nor sha (short or
+      # full). It is the runtime's to engrave (commit message + forge), not the agent's to relay. The
+      # address still travels OUT on the mount source, for the spawner — never into the order.
+      refute brief =~ "#{ref}"
+      refute brief =~ String.slice(sha, 0, 7)
+      assert %{ref: ^ref, sha: ^sha} = mount
 
       # No payload may name that variable: naming it re-creates the need to mount ops.
       refute brief =~ "LCARS_PROJECT_OPS"
