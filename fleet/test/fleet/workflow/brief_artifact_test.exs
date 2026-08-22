@@ -36,6 +36,24 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert sha =~ ~r/\A[0-9a-f]{40}\z/
   end
 
+  test "PROVENANCE lives in git: the introducing commit's MESSAGE names the object (transport_brief_v2)",
+       %{tmp_dir: tmp} do
+    # #1/geste-2: the pin used to be COPIED into the agent's order body — a dangling reference it
+    # could neither reach nor verify. P1 stripped that copy; this locks the other half: the
+    # provenance is recorded where audit and humans read it — the ops commit. `git log <ref>` is the
+    # version ledger (the message names the object, the sha IS the version). `git prouve`, not the
+    # text the agent swallows.
+    git_init(tmp)
+
+    assert {:ok, %{ref: ref, sha: sha}} =
+             BriefArtifact.commit(tmp, "Brief: do X.\n", name_hint: "issue-7-engineer")
+
+    {msg, 0} = System.cmd("git", ["log", "-1", "--format=%s", sha], cd: tmp)
+    # Mutation-verified: a content-free commit message (dropping `ref` from `OpsObject`'s
+    # `"#{label}: #{ref}"`) reddens this — provenance would stop being answerable from git alone.
+    assert String.trim(msg) =~ ref
+  end
+
   test "name_hint: plain human path briefs/issue-<n>-<role>.md; same content → same identity, no new commit",
        %{tmp_dir: tmp} do
     git_init(tmp)
