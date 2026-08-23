@@ -104,6 +104,22 @@ have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR"
 # Le compteur de redemarrages automatiques du service — la seule mesure qu'un fork reussi ne fausse pas.
 restarts_of() { "$SYSTEMCTL" show -p NRestarts --value "$1.service" 2>/dev/null; }
 
+# ⚠ LA CAUSE LA PLUS FREQUENTE SE NOMME, SINON LE DIAGNOSTIC COUTE DEUX SAUTS. « redemarre en
+# boucle » puis `journalctl` puis un traceback Python : trois lectures pour apprendre qu'un port est
+# pris. La sonde ne tourne QU'APRES l'echec — sur le chemin nominal il n'y a rien a payer, et elle
+# n'a aucun faux positif : notre propre service, lui, n'arrive justement pas a se lier.
+
+loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l'operateur
+  case "$1" in
+    lcars-landing)
+      if port_taken "$PROV_DECK_PORT"; then
+        echo "le port $PROV_DECK_PORT est DEJA PRIS sur cette machine — relance avec « --port-deck <autre port> »"
+        return 0
+      fi ;;
+  esac
+  echo "« journalctl -u $1.service » dit pourquoi"
+}
+
 # ─── L'ENVIRONNEMENT DES DEUX SERVICES, DÉRIVÉ ─────────────────────────────────────────────────
 # Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
 # le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
@@ -310,7 +326,7 @@ apply() {
     u="${UNITS[$i]}"
     n="$(restarts_of "$u")"
     if [[ "${n:-0}" -gt "${was[$i]:-0}" ]]; then
-      p_fail "$u.service redémarre en boucle — « journalctl -u $u.service » dit pourquoi"
+      p_fail "$u.service redémarre en boucle — $(loop_hint "$u")"
     elif "$SYSTEMCTL" is-active --quiet "$u.service"; then
       p_chg "$u.service activé et debout"
     else

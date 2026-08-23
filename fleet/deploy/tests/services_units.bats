@@ -52,14 +52,14 @@ setup() {
   ACTIVE="$BATS_TEST_TMPDIR/active"; echo 0 > "$ACTIVE"
   # Le compteur de redemarrages, et le marqueur qui le fait monter APRES l'enable — comme `Restart=`
   # sur une vraie machine. C'est LUI qui distingue « demarre » de « debout ».
-  RESTARTS="$BATS_TEST_TMPDIR/restarts"; echo 0 > "$RESTARTS"
+  RESTARTS="$BATS_TEST_TMPDIR/restarts.d"; mkdir -p "$RESTARTS"
   LOOP="$BATS_TEST_TMPDIR/looping"
   cat > "$BINDIR/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "is-active" ]] && exit "\$(cat "$ACTIVE")"
-[[ "\$1" == "show" ]] && { cat "$RESTARTS"; exit 0; }
-[[ "\$1" == "enable" && -f "$LOOP" ]] && echo 9 > "$RESTARTS"
+[[ "\$1" == "show" ]] && { u="\${@: -1}"; cat "$RESTARTS/\${u%.service}" 2>/dev/null || echo 0; exit 0; }
+[[ "\$1" == "enable" && -f "$LOOP" ]] && { u="\${@: -1}"; echo 9 > "$RESTARTS/\${u%.service}"; }
 exit 0
 EOF
   chmod 0755 "$BINDIR/systemctl"
@@ -249,4 +249,45 @@ mod() { run bash "$MOD" "$1"; }
   mod apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"pas debout"* ]]
+}
+
+# ─── POURQUOI ELLE BOUCLE, DANS LES TERMES DE L'OPERATEUR ──────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-23, DEUXIEME INSTALL : « redemarre en boucle » puis `journalctl` puis un
+# traceback Python, pour apprendre qu'un port etait pris. Trois lectures. La cause la plus frequente
+# se nomme, et elle nomme le geste qui repare. La sonde ne tourne QU'APRES l'echec : rien a payer sur
+# le chemin nominal, et aucun faux positif possible — notre propre service n'arrive justement pas a
+# se lier.
+
+@test "un port DEJA PRIS se dit, et nomme --port-deck" {
+  # Un squatter reel : il demande le port 0, le noyau en choisit un libre, et il le GARDE le temps
+  # du temoin. Epingler un numero en dur ferait dependre le verdict de ce qui tourne sur la machine.
+  python3 -c '
+import socket, sys, time
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(1)
+open(sys.argv[1], "w").write(str(s.getsockname()[1]))
+time.sleep(120)
+' "$BATS_TEST_TMPDIR/port" &
+  local squatter=$!
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$BATS_TEST_TMPDIR/port" ] && break; sleep 0.2; done
+  [ -s "$BATS_TEST_TMPDIR/port" ]
+
+  export PROV_DECK_PORT="$(cat "$BATS_TEST_TMPDIR/port")"
+  : > "$LOOP"
+  mod apply
+  kill "$squatter" 2>/dev/null || true
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"le port $PROV_DECK_PORT est DEJA PRIS"* ]]
+  [[ "$output" == *"--port-deck"* ]]
+}
+
+# ⚠ CONTRE-TEMOIN, ET C'EST LUI QUI TIENT LE PRECEDENT : sans lui, un module qui collerait la phrase
+# « port deja pris » a TOUTE unite en boucle passerait. Le convergeur n'ecoute sur rien.
+@test "une unite qui n'ecoute sur rien renvoie au journal, pas au port" {
+  : > "$LOOP"
+  mod apply
+  [[ "$output" == *"lcars-converger.service redémarre en boucle — « journalctl"* ]]
+  [[ "$output" != *"lcars-converger.service redémarre en boucle — le port"* ]]
 }

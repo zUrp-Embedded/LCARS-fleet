@@ -768,3 +768,63 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code | grep -q 'forge-project'
   code | grep -q 'compose -p \$PROV_FORGE_PROJECT down'
 }
+
+# ─── UNE FORGE QUI REPOND N'EST PAS FORCEMENT LA NOTRE ──────────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-23, DEUXIEME INSTALL SUR LE MEME HOTE WINDOWS. Docker Desktop sert UN daemon a
+# toutes les distributions WSL, donc un seul espace de ports : le 21000 par defaut etait publie par
+# `final-forge-1`, la forge d'une AUTRE instance. `forge_up` repondait oui, le module concluait
+# « deja vivante », et la passe a cree ses comptes d'administration DANS la forge du voisin en
+# ecrivant son adresse dans `forge.url`. Aucune ligne ne l'a dit. Mesure : `48-forge-host check`
+# rendait CONFORME sur cette machine.
+
+@test "forge_is_ours : c'est docker qui repond, pas le port" {
+  head_sh 'PROV_FORGE_HOST_PORT=21000
+           forge_running_port() { echo 21000; }
+           forge_is_ours && echo OURS || echo FOREIGN'
+  [[ "$output" == *"OURS"* ]]
+
+  # Rien du projet ne publie : quoi qu'il y ait derriere le port, ce n'est pas a nous.
+  head_sh 'PROV_FORGE_HOST_PORT=21000
+           forge_running_port() { echo ""; }
+           forge_is_ours && echo OURS || echo FOREIGN'
+  [[ "$output" == *"FOREIGN"* ]]
+
+  # ⚠ CONTRE-TEMOIN : notre forge AILLEURS n'est pas notre forge ICI. Sans cette branche, un port
+  # deplace passerait pour conforme et le refus de deplacement juste au-dessus serait mort.
+  head_sh 'PROV_FORGE_HOST_PORT=21000
+           forge_running_port() { echo 21001; }
+           forge_is_ours && echo OURS || echo FOREIGN'
+  [[ "$output" == *"FOREIGN"* ]]
+}
+
+@test "docker muet ne vaut PAS forge etrangere — on ne refuse pas sur une sonde sans reponse" {
+  head_sh 'd() { return 1; }
+           docker_answers && echo PARLE || echo MUET'
+  [[ "$output" == *"MUET"* ]]
+
+  head_sh 'd() { echo abc123; }
+           docker_answers && echo PARLE || echo MUET'
+  [[ "$output" == *"PARLE"* ]]
+}
+
+@test "le refus nomme le projet, le port, et le geste qui repare" {
+  head_sh 'PROV_FORGE_PROJECT=lcars-forge; PROV_FORGE_HOST_PORT=21000
+           LOCAL_URL=http://127.0.0.1:21000
+           foreign_forge_refusal 2>&1'
+  [[ "$output" == *"lcars-forge"* ]]
+  [[ "$output" == *"21000"* ]]
+  [[ "$output" == *"--port-forge"* ]]
+}
+
+@test "le refus de forge etrangere vient AVANT tout geste qui ecrit dans une forge" {
+  # Un refus pose apres la creation des comptes n'est pas un refus : les comptes sont chez le voisin.
+  code() { grep -vE '^\s*#' "$SRC"; }
+  local refus montage
+  refus="$(code | grep -n 'docker_answers && ! forge_is_ours' | head -1 | cut -d: -f1)"
+  montage="$(code | grep -n 'compose -f "\$COMPOSE_FILE"' | head -1 | cut -d: -f1)"
+  [ -n "$refus" ] && [ -n "$montage" ]
+  [ "$refus" -lt "$montage" ]
+  # Les DEUX portes : `check` ne doit pas rendre CONFORME sur la forge d'un autre non plus.
+  [ "$(code | grep -c 'docker_answers && ! forge_is_ours')" -ge 2 ]
+}

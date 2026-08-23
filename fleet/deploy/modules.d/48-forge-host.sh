@@ -184,6 +184,24 @@ forge_running_port() {
     | sed -n 's/.*:\([0-9]\{1,5\}\)->3000\/tcp.*/\1/p' | head -n1
 }
 
+# ⚠ « QUELQUE CHOSE RÉPOND » N'EST PAS « NOTRE FORGE RÉPOND », et la nuance a coûté une install
+# entière. Sur un hôte qui porte plusieurs boîtes — un seul daemon Docker Desktop pour toutes les
+# distributions WSL, donc un seul espace de ports — le port par défaut était servi par la forge d'une
+# AUTRE instance. `forge_up` disait oui, ce module concluait « déjà vivante », et la passe créait ses
+# comptes d'administration dans la forge du voisin en écrivant son adresse dans `forge.url`. Rien ne
+# le disait. La PROPRIÉTÉ se demande à docker, exactement comme le port juste au-dessus.
+forge_is_ours() { [[ "$(forge_running_port)" == "$PROV_FORGE_HOST_PORT" ]]; }
+
+# ⚠ ET LA QUESTION N'A DE SENS QUE SI DOCKER PARLE. Sans lui `forge_running_port` rend vide, ce qui
+# est indiscernable de « la forge n'est pas à nous » : refuser là ferait échouer un rail sain sur une
+# sonde muette.
+docker_answers() { d ps --format '{{.ID}}' >/dev/null 2>&1; }
+
+foreign_forge_refusal() {
+  p_fail "une forge répond sur $LOCAL_URL, mais AUCUN conteneur du projet « $PROV_FORGE_PROJECT » ne publie $PROV_FORGE_HOST_PORT — ce n'est pas la forge de cette machine"
+  p_fail "  monte la tienne : « --port-forge <autre port> » (ajoute « --forge-project <nom> » si le nom est pris lui aussi)"
+}
+
 # ─── LE RUNNER CI — UNE FORGE QUE RIEN NE PEUT SERVIR N'EST PAS UNE FORGE ────────────────────────
 #
 # Le runner est un etat-cible de ce rail, pas un supplement : une forge sans lui accepte un ticket,
@@ -463,6 +481,10 @@ check() {
     p_fail "$PROV_DOCKER_WHY — la forge du poste est un CONTENEUR, il n'en existe aucune autre forme"
     verdict_check
   fi
+  if forge_up && docker_answers && ! forge_is_ours; then
+    foreign_forge_refusal
+    verdict_check
+  fi
   if forge_up; then
     p_ok "forge du poste vivante ($LOCAL_URL)$(forge_reach_note)"
     [[ -s "$MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($MASTER_TOKEN_FILE)" \
@@ -542,6 +564,11 @@ apply() {
   #
   # Les deux gestes sont nommés parce qu'ils sont deux INTENTIONS différentes, et que refuser sans
   # les distinguer laisserait l'opérateur deviner laquelle on lui refuse.
+  if [[ "$was_up" -eq 1 ]] && docker_answers && ! forge_is_ours; then
+    foreign_forge_refusal
+    verdict_apply
+  fi
+
   local _running; _running="$(forge_running_port)"
   if [[ -n "$_running" && "$_running" != "$PROV_FORGE_HOST_PORT" ]]; then
     p_fail "la forge du projet « $PROV_FORGE_PROJECT » tourne déjà sur le port $_running, et cette passe en demande $PROV_FORGE_HOST_PORT — je ne la déplace pas sans qu'on me le dise"
