@@ -67,7 +67,22 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # `system.manifest` porte les REPERTOIRES ; le mode des deux secrets est pose ailleurs, par TROIS
   # ecrivains — `48-forge-host` au mint, `50-forge converge_authority_modes()` a chaque apply, et
   # `put_secret()` a l'ecriture. Un mur bati sur le manifeste serait VERT avec le jeton en 0640.
-  local f mode
+  # ⚠ ET CE MUR AVAIT LE DEFAUT QU'IL EXISTE POUR ATTRAPER. Il parcourt les lignes qui posent un
+  # mode sur l'un des deux secrets — et si ces lignes DISPARAISSENT (un refactor amont, un rebase
+  # qui deplace le geste ailleurs), la boucle tourne a vide et le mur passe au VERT en n'ayant rien
+  # mesure. Un balayage doit distinguer « zero violation » de « population vide », toujours.
+  local trouvees=0 f mode
+  for f in "${CODE[@]}"; do
+    trouvees=$((trouvees + $(code_of "$f" \
+      | grep -cE 'MASTER_TOKEN_FILE|forge-master\.token|SEED_FILE|forge-seed\.pass' \
+      | head -1) ))
+  done
+  [ "$trouvees" -ge 3 ] || {
+    echo "MUR 1 INSTRUMENT CASSE — seulement $trouvees ligne(s) parlent des secrets d'autorite." >&2
+    echo "  Ce mur ne mesure plus rien : les ecrivains ont bouge, ou le balayage est faux." >&2
+    return 1
+  }
+
   for f in "${CODE[@]}"; do
     # Les lignes de CODE qui posent un mode sur l'un des deux secrets.
     while IFS= read -r ligne; do

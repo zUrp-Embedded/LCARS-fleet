@@ -501,7 +501,7 @@ else
   say "console web désactivée (LCARS_CONSOLE=0)"
 fi
 
-# ─── 3ter. L'exécuteur de catalogue (root, une socket, l'autorité de la forge) ───────────────────
+# ─── 3quater. L'exécuteur de catalogue (root, une socket, l'autorité de la forge) ───────────────
 # `lcars catalogue install` ne détient plus rien : il DEMANDE ici. Ce process tient le jeton master,
 # lit l'uid du pair que le noyau pose sur la socket, demande à la forge si ce login y porte
 # `is_admin`, et joue le geste. Séparer « prouver qui tu es » de « exécuter » est ce qui supprime le
