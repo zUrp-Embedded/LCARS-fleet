@@ -91,11 +91,17 @@ OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^
 # `git push` de ce dépôt (`http.<forge>.extraheader`), posé une fois par l'opérateur. Même machine,
 # même credential, aucune configuration à faire : le script « tourne tout seul » sans qu'un secret
 # entre dans l'arbre.
+#
+# ⚠ ET CELUI DES `git push` NE SUFFIT PAS. Mesuré au premier run : la forge rend
+# `token scope=write:issue,write:repository`, requis `write:package`. Les deux portées sont
+# distinctes chez Gitea et aucune ne se déduit de l'autre. Le jeton de publication est donc un AUTRE
+# objet, posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
+# dépôt.
 TOKEN="${LCARS_PACK_TOKEN:-}"
+[[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
 if [[ -z "$TOKEN" && -n "$FORGE" ]]; then
   TOKEN="$(git config --get "http.${FORGE}/.extraheader" 2>/dev/null | sed -n 's/^Authorization: *token *//p')"
 fi
-[[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}" 2>/dev/null || true)"
 
 if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
   say "forge ou jeton indéterminables — le tar est dans dist/, pousse-le à la main si tu veux"
