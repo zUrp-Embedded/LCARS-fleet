@@ -163,7 +163,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
 
   describe "max_fan/2 — the project's declaration, or the fleet's" do
     defp root_with(body) do
-      root = Path.join(System.tmp_dir!(), "adm_maxfan_#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("adm_maxfan")
       dir = Path.join(root, "p")
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf!(root) end)

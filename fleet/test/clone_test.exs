@@ -103,7 +103,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       # Il echouait donc AVANT de creer le temoin — le test aurait ete rouge sans le fix, mais pour
       # la mauvaise raison. Chemin sans apostrophe + quoting dans le hook : ce qui est mesure est
       # bien « le hook a-t-il TOURNE », pas « a-t-il su parser son propre chemin ».
-      temoin = Path.join(System.tmp_dir!(), "lcars-jg061-#{System.unique_integer([:positive])}")
+      temoin = Fleet.TestEnv.tmp_path("lcars-jg061")
       on_exit(fn -> File.rm(temoin) end)
 
       hook = Path.join(hooks, "post-checkout")

@@ -26,7 +26,7 @@ defmodule Fleet.MCP.SupervisorTest do
     # statut mais pas a ouvrir un incident : « il y a 2 sourds » n'est pas actionnable, « pod-x et
     # pod-y sont sourds » l'est. Le repertoire porte le pod_id — c'est `socket_path/1` qui le pose.
     setup do
-      base = Path.join(System.tmp_dir!(), "deaf-#{System.unique_integer([:positive])}")
+      base = Fleet.TestEnv.tmp_path("deaf")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, base)
       on_exit(fn -> File.rm_rf(base) end)
       {:ok, base: base}

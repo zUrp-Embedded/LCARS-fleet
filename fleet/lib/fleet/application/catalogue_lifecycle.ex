@@ -160,6 +160,21 @@ defmodule Fleet.Application.CatalogueLifecycle do
   Prints `<repo> <branch> <sha>` on stdout, and nothing else: the caller feeds it to `git clone`,
   so a line of politeness would become part of a URL.
 
+  ⚠ CETTE PHRASE ETAIT ECRITE ET RIEN NE LA TENAIT, et elle a coute une install. `claim_stdout!/0`
+  renvoie le handler Logger vers stderr ; ses quatre soeurs l'appellent (`eval_main/0` juste
+  au-dessus, les deux portes d'`Onboard`, `CatalogueVerify`), celle-ci ne l'appelait pas.
+
+  Le defaut a dormi tant qu'aucun log ne sortait sur ce chemin. Il s'est reveille le 2026-08-21,
+  quand la fleet a commence a publier son catalogue de reference sur la forge : `CatalogueDeposits`
+  ecarte ce depot en le DISANT (`Logger.info`, deliberement — une candidature ecartee en silence
+  etait le defaut d'avant), et cette ligne est tombee sur le stdout de la porte.
+
+  Mesure du 2026-08-23, sur un poste : la porte a rendu une ligne vide, puis le log, puis la
+  reponse. `read -r repo branch sha` a lu la PREMIERE ligne. Les trois champs sont sortis vides,
+  l'URL a ete construite sur du neant, et git a repondu
+  `fatal: repository 'http://127.0.0.1:21000/.git/' not found` — l'outil a qui on venait de passer
+  du vide s'est fait accuser. La bonne ligne etait la troisieme.
+
   The three refusals it owes the caller, each with its own exit code, because they call for three
   different gestures:
 
@@ -187,6 +202,10 @@ defmodule Fleet.Application.CatalogueLifecycle do
   # un prive aurait ete une annotation pour taire un outil. La forme a deux clauses dit la meme
   # chose sans rien annoter.
   def eval_source(name) when is_binary(name) do
+    # AVANT TOUT APPEL QUI PEUT LOGGUER — `list/1` en emet au moins deux (le depot du catalogue
+    # livre, un manifeste illisible), et un log emis avant ce geste part sur stdout.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     case with_transport(fn -> Fleet.Application.CatalogueDeposits.list([]) end) do
       {:ok, deposits} ->
         case Map.fetch(deposits, name) do

@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
   @moduletag :tmp_dir
 
   defp tree(files) do
-    root = Path.join(System.tmp_dir!(), "forge_fields_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("forge_fields")
     lib = Path.join(root, "lib/fleet")
     File.mkdir_p!(lib)
     Enum.each(files, fn {name, body} -> File.write!(Path.join(lib, name), body) end)
@@ -47,9 +47,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
   describe "the instrument answers for itself" do
     test "a tree with no lib/ FAILS as broken — it never passes by measuring nothing" do
       result =
-        Check.check_forge_fields_read(
-          Path.join(System.tmp_dir!(), "nowhere-#{:erlang.unique_integer([:positive])}")
-        )
+        Check.check_forge_fields_read(Fleet.TestEnv.tmp_path("nowhere"))
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
@@ -104,7 +102,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
     end
 
     test "a delegation it cannot parse FAILS as broken — never a pass by measuring nothing" do
-      root = Path.join(System.tmp_dir!(), "nodeleg-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("nodeleg")
       File.mkdir_p!(root)
       on_exit(fn -> File.rm_rf!(root) end)
 
@@ -115,7 +113,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
     end
 
     test "a delegation reaching NO mutation is broken too, not compliant" do
-      root = Path.join(System.tmp_dir!(), "emptydeleg-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("emptydeleg")
       File.mkdir_p!(Path.join(root, "lib/fleet/mcp/pod_tools"))
       on_exit(fn -> File.rm_rf!(root) end)
 

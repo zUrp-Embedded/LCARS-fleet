@@ -18,7 +18,7 @@ defmodule Fleet.Pilot.CompletionOutboxTest do
   alias Fleet.Pilot.CompletionOutbox
 
   setup do
-    root = Path.join(System.tmp_dir!(), "outbox-test-#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("outbox-test")
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_completion_outbox_root, root)
     on_exit(fn -> File.rm_rf(root) end)
     {:ok, root: root}

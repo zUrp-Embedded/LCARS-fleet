@@ -5,7 +5,7 @@ defmodule Fleet.Credentials.RoleIdentityTest do
   alias Fleet.Credentials.RoleIdentity
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "roleidentity-test-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("roleidentity-test")
     File.mkdir_p!(tmp)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     on_exit(fn -> File.rm_rf(tmp) end)

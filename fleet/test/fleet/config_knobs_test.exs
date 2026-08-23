@@ -48,7 +48,7 @@ defmodule Fleet.ConfigKnobsTest do
       # the stronger test anyway: it proves the bound holds, not merely that a value is read back.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_incident_registry_max_entries, 3)
 
-      tmp = Path.join(System.tmp_dir!(), "knobs-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("knobs")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf(tmp) end)
       wal_path = Path.join(tmp, "wal.json")

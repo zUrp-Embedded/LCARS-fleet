@@ -492,7 +492,7 @@ defmodule Fleet.Spawner.PodTest do
 
       # An ops-like worktree carrying the pinned order at a commit — and a LATER version, to prove
       # the pod is given the pinned one, not the current head.
-      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      ops = Fleet.TestEnv.tmp_path("ops")
       File.mkdir_p!(Path.join(ops, "briefs"))
       {_, 0} = System.cmd("git", ["init", "-q"], cd: ops)
       {_, 0} = System.cmd("git", ["-C", ops, "config", "user.email", "h@l"])
@@ -532,7 +532,7 @@ defmodule Fleet.Spawner.PodTest do
       StubBackend.set_reply(interactive_reply())
       pod_id = "pod-filename-#{System.unique_integer([:positive])}"
 
-      ops = Path.join(System.tmp_dir!(), "ops-#{System.unique_integer([:positive])}")
+      ops = Fleet.TestEnv.tmp_path("ops")
       File.mkdir_p!(Path.join(ops, "briefs"))
       {_, 0} = System.cmd("git", ["init", "-q"], cd: ops)
       {_, 0} = System.cmd("git", ["-C", ops, "config", "user.email", "h@l"])
@@ -1218,7 +1218,7 @@ defmodule Fleet.Spawner.PodTest do
       # then stopped answering. `transition_failed/2` is its exit, and it had no checkpoint.
       Process.flag(:trap_exit, true)
       StubBackend.set_reply(interactive_reply())
-      root = Path.join(System.tmp_dir!(), "seedroot-to-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("seedroot-to")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 
@@ -1535,7 +1535,7 @@ defmodule Fleet.Spawner.PodTest do
       # a pod killed by the watchdog or exited in error lost its seed, while a pod stopped cleanly
       # kept it — the inverse of what is useful: it is the suffered death you want to resume from.
       Process.flag(:trap_exit, true)
-      root = Path.join(System.tmp_dir!(), "seedroot-#{System.unique_integer([:positive])}")
+      root = Fleet.TestEnv.tmp_path("seedroot")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_seed_store_root, root)
       on_exit(fn -> File.rm_rf(root) end)
 

@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   # `roles` is a list of {name, capabilities, allowedTools}.
   defp tree(roles, opts \\ []) do
     gates = Keyword.get(opts, :gates, 2)
-    root = Path.join(System.tmp_dir!(), "caps_exercisable_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("caps_exercisable")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp/pod_tools"))
     File.mkdir_p!(Path.join(root, @roles_rel))
     File.write!(Path.join(root, @tools_rel), pod_tools(gates))

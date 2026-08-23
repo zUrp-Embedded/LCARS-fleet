@@ -178,7 +178,7 @@ defmodule Fleet.Observation.DeckTest do
     # perimetre quand l'arbre n'est pas la plutot que de rougir.
     setup do
       root =
-        Path.join(System.tmp_dir!(), "lcars-media-test-#{System.unique_integer([:positive])}")
+        Fleet.TestEnv.tmp_path("lcars-media-test")
 
       File.mkdir_p!(Path.join(root, "avatars"))
       File.mkdir_p!(Path.join(root, "favicon"))

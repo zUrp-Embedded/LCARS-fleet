@@ -206,7 +206,7 @@ defmodule Fleet.ToolchainTest do
            """, manifest}
 
         {shell, stdin} = extracted
-        tmp = Path.join(System.tmp_dir!(), "roundtrip-#{System.unique_integer([:positive])}")
+        tmp = Fleet.TestEnv.tmp_path("roundtrip")
         File.write!(tmp <> ".sh", shell)
         File.write!(tmp <> ".yaml", stdin)
 

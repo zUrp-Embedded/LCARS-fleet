@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
   end
 
   defp tree(tools_src) do
-    root = Path.join(System.tmp_dir!(), "tool_effects_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("tool_effects")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp"))
     File.write!(Path.join(root, @tools_rel), tools_src)
     on_exit(fn -> File.rm_rf!(root) end)

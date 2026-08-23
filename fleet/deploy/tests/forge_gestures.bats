@@ -697,3 +697,45 @@ EOF
   [[ "$output" == *"nulle-part.sh"* ]]
   [[ "$output" != *"pas de source installable"* ]]
 }
+
+@test "install: une porte MUETTE qui rend 0 est refusee — jamais un clone sur du vide" {
+  # ⚠ MESURE DU 2026-08-23, SUR UN POSTE. La porte a rendu 0 sans rien imprimer ; les trois champs
+  # sont sortis VIDES, le geste a construit une URL a partir de rien, git a repondu
+  # « repository 'http://.../.git/' not found », et le refus final a dit « clone de  impossible ».
+  # Trois messages, aucun ne nommant le vrai manque — et le seul cite accusait git, a qui on venait
+  # de passer du vide.
+  #
+  # Aucune branche de `eval_source/1` ne rend 0 sans imprimer : un zero muet ne vient pas de la
+  # porte, il vient de ce qui a repondu a sa place. Le refus doit donc nommer CA.
+  setup_install
+  cat > "$BIN/entrypoint" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0 sans reponse exploitable"* ]]
+  [[ "$output" == *"RIEN"* ]]
+  # Le geste ne doit RIEN avoir tente : pas de clone sur une URL construite a partir de vide.
+  [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
+}
+
+@test "install: une reponse TRONQUEE est refusee aussi — la forme, pas seulement la presence" {
+  # `<depot>` seul, sans branche ni sha : le clone partirait sur une reference vide et echouerait
+  # plus loin, pour une raison apparente qui n'est pas la sienne.
+  setup_install
+  cat > "$BIN/entrypoint" <<'FAKE'
+#!/usr/bin/env bash
+[[ "$1" == catalogue-source ]] && echo "alice/cat"
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0 sans reponse exploitable"* ]]
+  [[ "$output" == *"alice/cat"* ]]
+  [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
+}

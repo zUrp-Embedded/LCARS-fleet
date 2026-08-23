@@ -47,7 +47,7 @@ defmodule Fleet.MCP.ProjectPublishTest do
 
   describe "the worker: fail-closed on the bus" do
     test "a project with no publish binding emits project_publish.failed (not_linked), never a crash" do
-      tmp = System.tmp_dir!() |> Path.join("gh-pub-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("gh-pub")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf(tmp) end)
 

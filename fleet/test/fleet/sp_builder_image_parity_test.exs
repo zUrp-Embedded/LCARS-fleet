@@ -99,7 +99,7 @@ defmodule Fleet.SPBuilderImageParityTest do
     # arbre de drafts etranger aurait ete gele depuis lui, et lu depuis le bundle sur le chemin
     # non-publie : deux drafts differents pour un seul role.
     role = "engineer"
-    tmp = Path.join(System.tmp_dir!(), "drafts-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("drafts")
     File.mkdir_p!(tmp)
     marker = "MARQUEUR-PARITE-#{System.unique_integer([:positive])}"
     File.write!(Path.join(tmp, "agent-#{role}-base.md"), marker)

@@ -70,7 +70,7 @@ defmodule Fleet.Pilot.CompletionOutboxReplayTest do
   defp evenement, do: Fleet.Event.new(:spawner, :"pod.completed", payload: payload())
 
   setup do
-    root = Path.join(System.tmp_dir!(), "outbox-replay-#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("outbox-replay")
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_completion_outbox_root, root)
     on_exit(fn -> File.rm_rf(root) end)
     :ok

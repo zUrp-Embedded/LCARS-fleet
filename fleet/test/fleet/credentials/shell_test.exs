@@ -283,7 +283,7 @@ defmodule Fleet.Credentials.ShellTest do
       # L'enveloppe est la precondition ANNONCEE du kill de groupe : sans elle on ne peut pas
       # garantir « tout le groupe meurt », et rendre la main quand meme donnerait une borne qui a
       # l'air d'en etre une. Ce refus vaut mieux qu'une commande lancee sans filet.
-      tmp = Path.join(System.tmp_dir!(), "shell6031-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("shell6031")
       File.mkdir_p!(tmp)
       File.ln_s!("/bin/echo", Path.join(tmp, "echo"))
       on_exit(fn -> File.rm_rf(tmp) end)

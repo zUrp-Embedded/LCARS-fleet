@@ -63,7 +63,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
 
   # A projects root holding one declaration per project, the shape `ProjectIntensity` reads.
   defp declare(decls) do
-    root = Path.join(System.tmp_dir!(), "maxfan_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("maxfan")
     on_exit(fn -> File.rm_rf!(root) end)
 
     Enum.each(decls, fn {repo, body} ->

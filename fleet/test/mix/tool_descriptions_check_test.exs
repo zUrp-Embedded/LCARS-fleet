@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolDescriptionsCheckTest do
   end
 
   defp tree(src) do
-    root = Path.join(System.tmp_dir!(), "tool_desc_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("tool_desc")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp"))
     File.write!(Path.join(root, @tools_rel), src)
     on_exit(fn -> File.rm_rf!(root) end)

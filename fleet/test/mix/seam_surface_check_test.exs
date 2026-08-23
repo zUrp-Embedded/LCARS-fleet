@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   end
 
   defp tree(source) do
-    root = Path.join(System.tmp_dir!(), "seam_surface_#{System.unique_integer([:positive])}")
+    root = Fleet.TestEnv.tmp_path("seam_surface")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp/pod_tools"))
     File.write!(Path.join(root, @rel), source)
     on_exit(fn -> File.rm_rf!(root) end)

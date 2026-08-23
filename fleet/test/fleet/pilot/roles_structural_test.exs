@@ -16,7 +16,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   # bootait VERT et mourait au premier dispatch. Ces deux tests sont la seule raison pour laquelle
   # le litteral a ete retire.
   setup do
-    tmp = Path.join(System.tmp_dir!(), "roles-cat-#{System.unique_integer([:positive])}")
+    tmp = Fleet.TestEnv.tmp_path("roles-cat")
     File.mkdir_p!(tmp)
     # LES DEUX racines vers la fixture : ce bloc mesure des catalogues qu'il ecrit lui-meme, et la
     # racine systeme y apporterait quatre roles que le test n'a pas declares — « 2 roles declarent

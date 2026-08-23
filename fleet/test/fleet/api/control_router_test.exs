@@ -35,7 +35,7 @@ defmodule Fleet.API.ControlRouterTest do
     # SHORT path under the system tmp_dir (the AF_UNIX sun_path is capped at 108 bytes — ExUnit's
     # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
     defp short_sock,
-      do: Path.join(System.tmp_dir!(), "lc-ctl-#{System.unique_integer([:positive])}.sock")
+      do: Fleet.TestEnv.tmp_path("lc-ctl") <> ".sock"
 
     # Embedded-tree cleanup: the TEST process is the tree's parent (start_link) — when
     # ExUnit tears the test down (:shutdown), the tree may ALREADY be dying as this on_exit
@@ -513,7 +513,7 @@ defmodule Fleet.API.ControlRouterTest do
          %{} do
       # Le même profil que le 422 ci-dessous, la même porte — plus l'acquittement explicite que
       # seul `lcars admiral` pose. Aucun chemin automatique ne passe par cette porte avec ce champ.
-      tmp = Path.join(System.tmp_dir!(), "hostnative-ack-#{System.unique_integer([:positive])}")
+      tmp = Fleet.TestEnv.tmp_path("hostnative-ack")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
       write_hostnative_fixture(tmp)
