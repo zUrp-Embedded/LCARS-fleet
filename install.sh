@@ -25,6 +25,10 @@
 #       --bench         fournit les annexes (forge jetable + runner CI) au
 #                       lieu d'exiger que tu les aies déjà.
 #       --check         sonde read-only, rien n'est modifié.
+#       --fleet-human N nomme le compte de fleet à créer — le nommer, c'est
+#                       l'autoriser ; sans lui, aucun humain n'est créé.
+#       --port-forge N  le port que publie la forge du poste (défaut 21000).
+#       --port-deck N   le port du deck (défaut 20999).
 #
 #     Le re-run est TOUJOURS sûr : pas de sentinelle, l'état c'est le
 #     système, re-sondé à chaque passage.
@@ -114,6 +118,10 @@ while [[ $# -gt 0 ]]; do
     # n'a pas été consenti.
     --fleet-human) FLEET_HUMAN="${2:?--fleet-human attend un nom}"
                    PASSTHRU+=("$1" "$2"); shift 2 ;;
+    # Les deux ports publiés. PASSTHRU les porte à travers le `sudo` ET jusqu'à `provision`, qui les
+    # valide — un seul valideur, chez celui qui s'en sert. Le rail BOÎTE ne les lit pas : ses ports
+    # sont ceux du compose, et `--` les passe au délégué.
+    --port-forge|--port-deck) PASSTHRU+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
     # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),

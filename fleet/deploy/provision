@@ -41,6 +41,7 @@
 #
 # USAGE :
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
+#                    [--port-forge N] [--port-deck N]
 #   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain] [--verbose]
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
@@ -81,6 +82,17 @@ ENV_FILE=""
 UNINSTALL_YES=0
 UNINSTALL_HUMANS=0
 declare -a ONLY=()
+
+# Un port refusé se dit ICI, pas trois modules plus loin sur un `compose up` qui échoue.
+#
+# ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
+# tuait le SOUS-SHELL de la substitution : le script continuait, avec une valeur vide. Le refus
+# s'imprimait et ne refusait pas.
+valid_port() { # valid_port <valeur> <nom du drapeau> — valide ou meurt, n'imprime rien
+  [[ "$1" =~ ^[0-9]+$ ]] || die "$2 : « $1 » n'est pas un nombre"
+  (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne en « nobody », ne peut pas binder)"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
@@ -92,6 +104,14 @@ while [[ $# -gt 0 ]]; do
     # geste. Un défaut câblé (`lcars`) ferait apparaître un utilisateur que personne n'a demandé sur
     # une machine qui n'a aucun désinstalleur.
     --fleet-human) export PROV_FLEET_HUMAN="${2:?--fleet-human attend un user}"; shift 2 ;;
+    # Les deux ports que la machine PUBLIE. Ils ont un défaut (21000, 20999) et une sonde qui refuse
+    # si le port est déjà pris par autre chose — mais le geste de changer d'avis n'existait que par
+    # variable d'environnement, et une variable ne survit pas au `sudo` d'`install.sh`.
+    # ⚠ `< 1024` EST REFUSÉ : le deck tourne sous `nobody`, qui ne peut pas binder un port privilégié.
+    --port-forge) valid_port "${2:?--port-forge attend un port}" --port-forge
+                  export PROV_FORGE_HOST_PORT="$2"; shift 2 ;;
+    --port-deck)  valid_port "${2:?--port-deck attend un port}" --port-deck
+                  export PROV_DECK_PORT="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     # ⚠ `uninstall` NE FAIT RIEN SANS `--yes`, ET CE N'EST PAS UNE COURTOISIE. Le verbe lit une

@@ -848,3 +848,26 @@ EOF
   [[ -z "$missing" ]] || { echo "absents du tableau:$missing"; false; }
   [[ -z "$wrong" ]]   || { echo "terrains divergents:$wrong"; false; }
 }
+
+@test "ports : --port-forge et --port-deck atteignent les modules, et un port invalide est refuse ICI" {
+  # ⚠ LE GESTE N'EXISTAIT QUE PAR VARIABLE D'ENVIRONNEMENT, ET UNE VARIABLE NE SURVIT PAS AU `sudo`
+  # d'`install.sh` : `PROV_FORGE_HOST_PORT=21001 bash install.sh` posait la valeur avant l'escalade,
+  # `env_reset` la mangeait, et l'install repartait sur 21000 SANS RIEN DIRE. Le drapeau traverse,
+  # lui — `PASSTHRU` est repasse a la re-execution puis a `provision`.
+  #
+  # Un port refuse se dit chez le VALIDEUR, pas trois modules plus loin sur un `compose up` qui
+  # echoue : le message nommerait docker pour une valeur que l'operateur a tapee.
+  stub_module 10-x any any root
+  run bash "$SANDBOX/provision" list --port-forge 21001 --port-deck 20998
+  [ "$status" -eq 0 ]
+
+  run bash "$SANDBOX/provision" list --port-forge 80
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hors plage"* ]]
+  # `nobody` ne binde pas un port privilegie, et c'est le deck qui tourne sous cet uid.
+  [[ "$output" == *"nobody"* ]]
+
+  run bash "$SANDBOX/provision" list --port-deck pasunport
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"n'est pas un nombre"* ]]
+}
