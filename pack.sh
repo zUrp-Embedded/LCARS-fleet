@@ -79,12 +79,27 @@ say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 # s'arrête sur le tar, qui est déjà utilisable.
 [[ "$PUSH" -eq 1 ]] || { say "--no-push : le tar reste ici"; exit 0; }
 
-FORGE="${LCARS_PACK_FORGE:-${FORGE_BASE_URL:-}}"
-TOKEN="${LCARS_PACK_TOKEN:-$(cat "${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}" 2>/dev/null || true)}"
-OWNER="${LCARS_PACK_OWNER:-fleet}"
+# LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire `main.tar.gz`, donc le paquet doit
+# atterrir au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour
+# une forge, c'est celle qu'on ne lit pas qui finit par être la bonne.
+FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
+OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
+
+# ⚠ LE JETON N'EST PAS ÉCRIT ICI, ET CE N'EST PAS UN OUBLI DE CONFORT. Ce fichier est suivi par git :
+# un littéral partirait sur la forge, sur le remote github, ET dans chaque tar que ce script produit
+# — le paquet livrerait la clé de la forge qui le sert. On lit donc celui qui authentifie déjà les
+# `git push` de ce dépôt (`http.<forge>.extraheader`), posé une fois par l'opérateur. Même machine,
+# même credential, aucune configuration à faire : le script « tourne tout seul » sans qu'un secret
+# entre dans l'arbre.
+TOKEN="${LCARS_PACK_TOKEN:-}"
+if [[ -z "$TOKEN" && -n "$FORGE" ]]; then
+  TOKEN="$(git config --get "http.${FORGE}/.extraheader" 2>/dev/null | sed -n 's/^Authorization: *token *//p')"
+fi
+[[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}" 2>/dev/null || true)"
 
 if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
-  say "pas de forge configurée (LCARS_PACK_FORGE + LCARS_PACK_TOKEN) — le tar est dans dist/"
+  say "forge ou jeton indéterminables — le tar est dans dist/, pousse-le à la main si tu veux"
+  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : ${TOKEN:+trouvé}${TOKEN:-absent}"
   exit 0
 fi
 
