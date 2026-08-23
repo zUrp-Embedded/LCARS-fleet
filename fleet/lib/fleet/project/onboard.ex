@@ -1611,7 +1611,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   # A present declaration is LEFT AS-IS (the burn validates loudly; adopt does not overwrite the
-  # user's engraving) — an absent one is written from the relayed declaration (or the honest C0
+  # user's engraving) — an absent one is written from the relayed declaration (or the honest undeclared
   # default) and committed, BEFORE the single main push (v2-1 of the 6-16/6-31 plan: pushed
   # AFTER, it would never reach the forge and both lock_main reads would fall back to the
   # default-card jury in silence).

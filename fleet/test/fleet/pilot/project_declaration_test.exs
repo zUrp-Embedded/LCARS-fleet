@@ -1,8 +1,9 @@
 defmodule Fleet.Project.DeclarationTest do
   @moduledoc """
-  The criticality declaration: always written complete and schema-valid; the human's
-  level RELAYED (never agent-assessed); absence recorded honestly (undeclared C0), never
-  fabricated and never walled; the burn reads the declared card with quiet/loud fallbacks.
+  The criticality declaration: always written complete and schema-valid; the human's CARD
+  choice RELAYED (never agent-assessed — the card IS the criticality); absence recorded
+  honestly (undeclared, on the default card), never fabricated and never walled; the burn
+  reads the declared card with quiet/loud fallbacks.
   """
   # ⚠ `async: false` : ce fichier ECRIT `:catalogue_install_dirs` — la cle la plus large des six : toute resolution de catalogue la lit en env d'APPLICATION, qui est
   # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
