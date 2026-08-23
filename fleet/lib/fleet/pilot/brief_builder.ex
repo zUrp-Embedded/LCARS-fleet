@@ -169,7 +169,7 @@ defmodule Fleet.Pilot.BriefBuilder do
         "## Feedback de review à traiter (REQUEST_CHANGES)\n\n#{sections}"
 
       {:ok, []} ->
-        ""
+        ci_failure_section(forge, repo, pr, forge_opts)
 
       {:error, reason} ->
         # Rail prefix = the FACADE this module was extracted from (StepDispatcher), not its own
@@ -183,6 +183,31 @@ defmodule Fleet.Pilot.BriefBuilder do
           "Les reviews REQUEST_CHANGES de cette PR n'ont pas pu être lues sur la forge " <>
           "(erreur transitoire). Elles EXISTENT : cette PR a été retoquée. Lis-les toi-même sur " <>
           "la PR avant de corriger — ne suppose pas qu'il n'y avait rien à traiter."
+    end
+  end
+
+  # AUCUNE review REQUEST_CHANGES — alors POURQUOI ce rework ? La cause commune est un CI ROUGE :
+  # `protect_main` exige `CI / *`, et un CI rouge ne pose AUCUNE review, donc l'ancien `""` renvoyait
+  # le producteur en rework SANS lui dire quoi corriger (mesuré 2026-08-23, chifoumi ET pile-ou-face :
+  # « l'ordre de rework annonce une review, mais ne la porte pas »). On DEMANDE l'état CI de la tête
+  # de PR : rouge → on le NOMME et on pointe le run, au lieu d'un ordre muet. Vert/absent → rien à
+  # dire ici (un rework sans review ET sans CI rouge est un cas rare qu'on ne fabrique pas en prose).
+  defp ci_failure_section(forge, repo, pr, forge_opts) do
+    with {:ok, %{"head" => %{"sha" => sha}}} when is_binary(sha) <-
+           forge.get_pull(repo, pr, forge_opts),
+         {:ok, {:failure, contexts}} <- forge.commit_ci_report(repo, sha, forge_opts) do
+      ci_ctx = Enum.filter(contexts, &String.starts_with?(&1, "CI / "))
+      named = if ci_ctx == [], do: contexts, else: ci_ctx
+
+      "## CI ROUGE — c'est ÇA qu'il faut corriger (pas une review)\n\n" <>
+        "Aucun juge n'a demandé de changement : ce rework vient de la CI, ROUGE sur la tête de la PR. " <>
+        "Contexte(s) :\n" <>
+        Enum.map_join(named, "\n", &"- `#{&1}`") <>
+        "\n\nOuvre le run (onglet Actions du dépôt), lis le STEP en échec, corrige, repush. Piège " <>
+        "récurrent : un `actions/checkout` qui meurt = l'image du job n'a pas `node` — vise une image " <>
+        "grasse via `container:` dans le `ci.yml` (cf. son en-tête)."
+    else
+      _ -> ""
     end
   end
 
