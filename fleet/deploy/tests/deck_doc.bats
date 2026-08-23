@@ -104,3 +104,35 @@ setup() {
   grep -q 'os.path.realpath(os.path.join(DECK_DOC, rel))' "$DECK"
   grep -q 'full == root or full.startswith(root + os.sep)' "$DECK"
 }
+
+@test "VERROU : toute racine de catalogue que le SITE nomme est copiee dans son stage" {
+  # ⚠ MESURE DU 2026-08-23 : l'image etait INCONSTRUCTIBLE depuis la veille. `catalogue.js` nomme
+  # trois catalogues — deux sous `fleet/priv/`, et `web-demo` a la RACINE du depot. Le stage `site`
+  # copiait `assets/` et `fleet/`, jamais `catalogues/`. Donc `existsSync` faux, `throw`,
+  # `npm run build` exit 1, et le build de l'IMAGE meurt — pas seulement celui de la doc.
+  #
+  # ⚠ ET RIEN NE POUVAIT LE VOIR. Le site ne se batit qu'au build d'image : `mix gate` ne touche pas
+  # ce stage, `shell_gate` ignore son existence. Gate entierement vert, produit inconstructible,
+  # pendant douze heures. Ce temoin est le seul endroit ou les deux listes se rencontrent SANS
+  # docker — il ne bat pas l'image, il compare deux textes.
+  local js="$BATS_TEST_DIRNAME/../../../assets/github.io/src/lib/catalogue.js"
+  local df="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  [ -f "$js" ] && [ -f "$df" ]
+
+  # Ce que le stage `site` copie : les lignes COPY entre `AS site` et son `npm run build`.
+  # ⚠ LA BORNE EST ANCRÉE (`^RUN`), et elle ne l'était pas. Le commentaire qui explique ce témoin
+  # contient les mots `npm run build` : une borne non ancrée fermait la plage sur la PROSE, donc le
+  # `COPY catalogues` qu'elle décrit tombait hors du champ et le témoin rougissait sur son propre
+  # texte. Même classe que l'extraction de `native_list` — un instrument qui lit du code doit borner
+  # sur du code.
+  local copied; copied="$(sed -n '/AS site/,/^RUN npm run build/p' "$df" | sed -n 's/^COPY \([^ ]*\).*/\1/p')"
+  [ -n "$copied" ]
+
+  # Les racines que le site nomme, cote depot : `PRIV` -> fleet/priv, `CATALOGUES` -> catalogues.
+  # On ne lit pas les noms de catalogues (ils bougent), on lit les RACINES (elles sont deux).
+  grep -q 'PRIV' "$js"
+  grep -q 'CATALOGUES' "$js"
+  # `fleet` couvre PRIV ; `catalogues` couvre CATALOGUES. Chacune doit etre copiee.
+  printf '%s\n' "$copied" | grep -qx 'fleet'
+  printf '%s\n' "$copied" | grep -qx 'catalogues'
+}

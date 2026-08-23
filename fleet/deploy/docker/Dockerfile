@@ -240,6 +240,16 @@ COPY assets/github.io ./
 COPY assets/avatars ../avatars
 COPY assets/favicon ../favicon
 COPY fleet /src/fleet
+# ⚠ LE SITE DÉRIVE SES SIÈGES DE TROIS CATALOGUES, ET LE TROISIÈME N'EST PAS SOUS `fleet/`.
+# `catalogue.js:48-52` nomme `catalogue-system`, `catalogue` (tous deux dans `fleet/priv/`) et
+# `web-demo`, qui vit à la racine du dépôt. Sans cette ligne, `existsSync` est faux, la page
+# `equipage` LÈVE, et `npm run build` tue le build de l'IMAGE — pas seulement de la doc.
+#
+# Mesuré le 2026-08-23 : l'image était inconstructible depuis `ce90419f6` (la veille, 02:01), qui a
+# ajouté `web-demo` à la liste du site sans étendre celle-ci. Rien ne l'a vu parce que le site ne se
+# bâtit qu'ici — `mix gate` ne touche pas ce stage, `shell_gate` ignore son existence. Un gate
+# entièrement vert et un produit qu'on ne peut pas construire.
+COPY catalogues /src/catalogues
 ENV LCARS_SITE_BASE=/doc/
 RUN npm run build
 
