@@ -65,7 +65,7 @@ question à poser à l'humain sur « est-ce que c'est déjà dans LCARS ».
   le voit pas », et ton humain irait déboguer sa forge.
 - **`deposit_import`** — `source` (le `<login>/<nom>` de la liste) + `catalogue` (sa destination :
   l'org d'un catalogue porte le nom du catalogue). **Cadre au passage** : `workflow_map` +
-  `intensity_level`/`intensity_justification`, exactement comme sur `project_create`, et pour la
+  `justification`, exactement comme sur `project_create`, et pour la
   même raison — un projet qui arrive sans carte déclarée n'est pas un défaut, c'est un trou.
 
 **Le dépôt source n'est pas consommé** : ton humain garde son dépôt, la fleet travaille sur sa
@@ -113,22 +113,20 @@ approuvé — jamais avant, et le résultat (l'URL de PR/MR, ou « pousse, ouvre
 
 La politique de validation d'un projet est une **carte** (workflow map) : c'est ELLE qui décide des
 juges, des gates et du pipeline. **Le choix de la carte EST la déclaration de criticité** — nommer une
-carte, c'est déclarer.
+carte, c'est déclarer. Il n'y a pas de niveau séparé à côté : la carte porte toute la sévérité.
 
 1. **Présente le catalogue** : appelle `card_list` et montre à l'humain la `presentation`
    de chaque carte **verbatim** (c'est sa voix, écrite pour lui). Tu peux pré-filtrer ou conseiller à
    partir des FAITS du cadrage — rôle de canard : « il y a du 230 V ? ça peut couper un doigt ? ça vit
-   combien de temps ? » — mais **tu ne choisis JAMAIS à sa place**, et tu n'évalues JAMAIS un niveau
+   combien de temps ? » — mais **tu ne choisis JAMAIS à sa place**, et tu n'évalues JAMAIS la criticité
    toi-même (un agent rationalise ; l'humain paie l'erreur, c'est lui qui tranche).
-2. **Relaie le choix** : passe la carte choisie en `workflow_map`. Si l'humain énonce aussi un niveau
-   (C0-C4), passe `intensity_level` + `intensity_justification` (ses mots) — trace du cadrage, pas une
-   exigence : une carte sans niveau est une déclaration complète et honnête.
-3. **Hors matrice = son droit** : une carte hors de son `applicable_intensity` est ACCEPTÉE — tu
-   relaies, le système trace LOUD. Tu peux le signaler UNE fois, jamais le bloquer.
-4. **Rien de déclaré ?** Le projet part sur la carte par défaut, marqué non-déclaré — dis-le à l'humain
+2. **Relaie le choix** : passe la carte choisie en `workflow_map`, et `justification` (ses
+   mots — le POURQUOI des enjeux) quand il l'énonce. C'est la carte qui déclare ; la justification
+   garde la trace du cadrage en prose.
+3. **Rien de déclaré ?** Le projet part sur la carte par défaut, marqué non-déclaré — dis-le à l'humain
    en nommant la carte.
-5. **Rends compte en nommant la carte** : ton retour de création dit TOUJOURS quelle carte est gravée
-   sur le projet — jamais un niveau seul, la carte est ce qui agit.
+4. **Rends compte en nommant la carte** : ton retour de création dit TOUJOURS quelle carte est gravée
+   sur le projet — c'est ce qui agit.
 
 **Si `card_list` REFUSE** — il ne rend jamais une offre vide en succès. `{:workflow_no_card_scope, _}`
 est un fait de **déploiement** : aucun catalogue installé ne porte de cartes. Appelle

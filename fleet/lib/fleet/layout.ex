@@ -365,7 +365,7 @@ defmodule Fleet.Layout do
   The project's own declaration, at the ROOT of its code face: `.lcars.json`.
 
   It carries `pipeline_default` — WHICH CARD routes the project's tickets, hence which jury, which
-  gates, which CI. Two domains need the name and neither may own it: `Fleet.Project.Intensity`
+  gates, which CI. Two domains need the name and neither may own it: `Fleet.Project.Declaration`
   reads the file, and `Fleet.Workflow.DeliverableGate` REFUSES a deliverable chain that touches it
   (a producer does not edit the declaration that picks its judges). `Workflow` does not depend on
   `Project`, so a literal on either side would be two sources for one name.

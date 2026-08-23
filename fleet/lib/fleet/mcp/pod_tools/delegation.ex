@@ -508,9 +508,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, role} <- require_onboarder(state),
          {:ok, onboard} <- conforming_onboard() do
       opts = [
-        intensity_level: Map.get(args, "intensity_level"),
-        intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -696,7 +694,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   actually load). For each card: `name` (the LOADABLE id — the `workflow_map` value of
   `project_create`), `declared_name` (the card's self-declared label, for reference — the two
   identities are distinct, never collapsed), FR `presentation` (shown to the human VERBATIM —
-  the card's own voice), `applicable_intensity` (level matrix), `jury` (PR judges) and `steps`.
+  the card's own voice), `jury` (PR judges) and `steps`.
   Architect gate (framing is the arch's job). A card that fails to load is SKIPPED loud and
   reported in `unreadable` (the catalogue never lies silently); an empty OFFER is an ERROR, never
   an empty listing — "no card exists" would be the vacuous lie.
@@ -942,7 +940,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
        "status" => card["status"],
        "scope" => card["scope"],
        "presentation" => card["presentation"] || card["description"],
-       "applicable_intensity" => card["applicable_intensity"],
        "jury" => card["jury"],
        "steps" => card["steps"] |> Map.keys() |> Enum.sort()
      }}
@@ -1421,11 +1418,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
         description: Map.get(args, "description", pitch),
         pitch: pitch,
         # Criticality declaration RELAYED from the human (nil entries = undeclared → the
-        # onboard records an HONEST C0 default, marked undeclared; never fabricated facts,
+        # onboard records an HONEST undeclared default (the delegation default card), marked undeclared; never fabricated facts,
         # never a wall — a blocked declaration teaches the human to lie to the arch).
-        intensity_level: Map.get(args, "intensity_level"),
-        intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role
       ]
@@ -1559,9 +1554,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       opts = [
         org: org,
         description: Map.get(args, "description", ""),
-        intensity_level: Map.get(args, "intensity_level"),
-        intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1611,9 +1604,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, org} <- resolve_org(args) do
       opts = [
         org: org,
-        intensity_level: Map.get(args, "intensity_level"),
-        intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1709,8 +1700,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       opts = [
         workflow_map: Map.get(args, "workflow_map"),
         justification: Map.get(args, "justification"),
-        intensity_level: Map.get(args, "intensity_level"),
-        nature: Map.get(args, "nature"),
         # Throughput of THIS project (workflow_runs in flight). Absent leaves the declaration
         # untouched — the fleet default answers, and it is not frozen into the project's record.
         max_fan: Map.get(args, "max_fan"),

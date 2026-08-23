@@ -27,11 +27,11 @@ defmodule Fleet.Project.Incidents do
   alias Fleet.EventRouter.Bus
 
   # op → event type: the SAME two ops the old seam carried, so the registry's dedup namespaces
-  # (`card:`/`intensity:` signatures) survive the path change.
-  @events %{"card" => :"project.card_failed", "intensity" => :"project.intensity_invalid"}
+  # (`card:`/`declaration:` signatures) survive the path change.
+  @events %{"card" => :"project.card_failed", "declaration" => :"project.declaration_invalid"}
 
   @doc """
-  Publishes the incident event for a card/intensity fallback, or says loudly that nothing left.
+  Publishes the incident event for a card/declaration fallback, or says loudly that nothing left.
 
   Contract of the `:incident_fun` seam at both call sites: `(op, subject, reason, opts)`, always
   `:ok` — fire-and-forget, the fallback never depends on its trace.

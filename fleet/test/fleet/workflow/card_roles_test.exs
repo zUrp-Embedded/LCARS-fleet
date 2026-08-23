@@ -179,7 +179,7 @@ defmodule Fleet.Workflow.CardRolesTest do
       assert %{"scope" => "ticket"} = Fleet.Workflow.Loader.load!("atelier", opts)
 
       assert {:error, {:card_not_project_scoped, "atelier", "ticket"}} =
-               Fleet.Project.Intensity.declarable_card("atelier", nil, opts)
+               Fleet.Project.Declaration.declarable_card("atelier", nil, opts)
     end
 
     test "une carte ORDINAIRE reste `project` — la derivation ne mord que sur la face", %{
@@ -206,7 +206,7 @@ defmodule Fleet.Workflow.CardRolesTest do
 
       opts = [workflow_maps_root: dir]
       assert %{"scope" => "project"} = Fleet.Workflow.Loader.load!("ordinaire", opts)
-      assert :ok = Fleet.Project.Intensity.declarable_card("ordinaire", nil, opts)
+      assert :ok = Fleet.Project.Declaration.declarable_card("ordinaire", nil, opts)
     end
 
     test "un `scope` EXPLICITE gagne — la derivation ne comble qu'une absence", %{root: root} do

@@ -501,16 +501,16 @@ defmodule Fleet.Project.OnboardTest do
     # `project_create` refuse en enumerant celles de `fleet`. Le prefiltre resolvait dans le
     # catalogue du projet, l'ecriture dans la racine.
     #
-    # Le comportement de l'aiguillage lui-meme, lui, est mesure — cf. `project_intensity_test.exs`,
+    # Le comportement de l'aiguillage lui-meme, lui, est mesure — cf. `project_declaration_test.exs`,
     # « write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme ».
     @onboard_src "lib/fleet/project/onboard.ex"
 
-    test "aucune porte n'appelle `Intensity.write` en direct — toutes passent par l'entonnoir" do
+    test "aucune porte n'appelle `Declaration.write` en direct — toutes passent par l'entonnoir" do
       src = File.read!(@onboard_src)
 
       # Un seul appel direct subsiste : celui QUI EST l'entonnoir. Deux voudraient dire qu'une porte
       # a repris le chemin court, et le chemin court est celui qui oublie.
-      assert length(Regex.scan(~r/Fleet\.Project\.Intensity\.write\(/, src)) == 1
+      assert length(Regex.scan(~r/Fleet\.Project\.Declaration\.write\(/, src)) == 1
       assert src =~ ~r/defp write_declaration\(proj_dir, full_name, opts\)/
     end
 
@@ -526,11 +526,11 @@ defmodule Fleet.Project.OnboardTest do
       src = File.read!(@onboard_src)
 
       # C'est toute la difference entre ce correctif et un quatrieme rustine : le compilateur refuse
-      # desormais un appel qui ne nomme pas le depot. `Intensity.write/2` ne peut pas l'exiger de son
+      # desormais un appel qui ne nomme pas le depot. `Declaration.write/2` ne peut pas l'exiger de son
       # cote — 38 appels legitimes prennent la racine a bon droit — mais ici, l'omettre est TOUJOURS
       # un defaut.
-      assert src =~ ~r/defp ensure_intensity\(\s*proj_dir,\s*full_name,\s*opts,/
-      refute src =~ ~r/ensure_intensity\((?:dirs\.code|scratch), opts[,)]/
+      assert src =~ ~r/defp ensure_declaration\(\s*proj_dir,\s*full_name,\s*opts,/
+      refute src =~ ~r/ensure_declaration\((?:dirs\.code|scratch), opts[,)]/
     end
   end
 

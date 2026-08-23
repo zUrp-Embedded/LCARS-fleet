@@ -206,7 +206,6 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
       metadata:
         name: #{name}
         description: "carte de fixture"
-        applicable_intensity: [C0]
       spec:
         jury: []
         ci: ignore

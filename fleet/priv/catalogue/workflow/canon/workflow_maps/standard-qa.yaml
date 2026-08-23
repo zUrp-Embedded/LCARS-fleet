@@ -13,9 +13,8 @@
 kind: WorkflowMap
 metadata:
   name: standard-qa
-  description: "Carte C2+ : revue du brief (scoper) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
-  presentation: "C2→C4 — La carte SÉRIEUSE : un scoper valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui, matrice réservée C2→C4 : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
-  applicable_intensity: [C2, C3, C4]
+  description: "Carte lourde : revue du brief (scoper) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
+  presentation: "La carte SÉRIEUSE : un scoper valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement).

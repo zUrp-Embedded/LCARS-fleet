@@ -41,7 +41,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
            } = routing[{:workflow, :"workflow_map.failed"}]
 
     # BL-6-114 (arbitrage user 2026-08-19) : les deux fallbacks de declaration de Project entrent
-    # par CE rail — l'arete montante `:project_incident_rail` est morte. Les ops `card`/`intensity`
+    # par CE rail — l'arete montante `:project_incident_rail` est morte. Les ops `card`/`declaration`
     # reprennent les namespaces de dedup de l'ancien seam ; sujet = le DEPOT.
     assert %{
              action: :incident,
@@ -56,12 +56,12 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     assert %{
              action: :incident,
              incident: %{
-               op: "intensity",
+               op: "declaration",
                subject: "repo",
                gate: :immediate,
-               escalate_kind: :project_intensity_invalid
+               escalate_kind: :project_declaration_invalid
              }
-           } = routing[{:project, :"project.intensity_invalid"}]
+           } = routing[{:project, :"project.declaration_invalid"}]
 
     # (pod.drift, audit.verdict et les broadcasts de severite max sont partis — brouette
     # 2026-08-19. Les sept routes restantes sont toutes `action: incident`.)

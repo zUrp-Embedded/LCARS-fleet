@@ -91,7 +91,6 @@ defmodule Fleet.Workflow.Loader do
       # courbe déclarée»), pas un défaut choisi par accident : la différence tient à ce que le
       # consommateur en fait, et il ne fabrique aucun seuil à partir d'une absence.
       "verdict_policy" => Map.get(spec, "verdict_policy"),
-      "applicable_intensity" => get_in(yaml, ["metadata", "applicable_intensity"]) || [],
       "description" => get_in(yaml, ["metadata", "description"]),
       "presentation" => get_in(yaml, ["metadata", "presentation"]),
       "status" => get_in(yaml, ["metadata", "status"]) || "canon",

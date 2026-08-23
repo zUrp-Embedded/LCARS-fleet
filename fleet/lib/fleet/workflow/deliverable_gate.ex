@@ -301,7 +301,7 @@ defmodule Fleet.Workflow.DeliverableGate do
   # Le second est la DECLARATION DU PROJET, `.lcars.json` a la racine, et il est arrive apres coup
   # (2026-08-13) parce que personne n'avait mis les deux faits cote a cote : ce fichier porte
   # `pipeline_default`, c'est-a-dire QUELLE CARTE route le ticket — donc quel jury, quelles portes,
-  # quel CI. Il est lu a chaud par `StepDispatcher` (`Intensity.pipeline_default/2`) depuis la face
+  # quel CI. Il est lu a chaud par `StepDispatcher` (`Declaration.pipeline_default/2`) depuis la face
   # code, alignee sur `main` apres merge. Un producteur pouvait donc le reecrire dans son espace de
   # travail, le commiter, et la porte laissait passer : elle verifie l'ancetre, l'identite, le
   # trailer et les secrets, jamais ce chemin. Basculer la declaration vers une carte `jury: []` /

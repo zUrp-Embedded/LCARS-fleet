@@ -32,7 +32,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
   incident. `kind`: `:recurrence` | `:reroll_failed` |
   `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed` |
-  `:project_card_failed` | `:project_intensity_invalid`. The label is a DURABLE discovery signal (always set,
+  `:project_card_failed` | `:project_declaration_invalid`. The label is a DURABLE discovery signal (always set,
   bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
   retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
   is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
@@ -406,7 +406,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "delegation par defaut — une criticite que personne n'a choisie pour lui. Corriger la " <>
          "declaration du projet (ou la carte du catalogue qu'elle nomme)."}
 
-  defp kind_describe(:project_intensity_invalid),
+  defp kind_describe(:project_declaration_invalid),
     do:
       {"declaration d'intensite illisible — pipeline par defaut applique",
        "Le `.lcars.json` de ce depot est illisible ou invalide : le projet tourne sur le " <>

@@ -174,7 +174,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
     defp decl(n),
       do:
         Jason.encode!(%{
-          "_schema" => "lcars/intensity-v1",
+          "_schema" => "lcars/declaration-v1",
           "declared_at" => "2026-08-05",
           "declared_by" => "architect",
           "justification" => "x",

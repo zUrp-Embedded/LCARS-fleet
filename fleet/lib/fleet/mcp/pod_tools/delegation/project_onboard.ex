@@ -179,7 +179,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   REVISES an EXISTING project's validation-card declaration (BL-6-29) — commits the new
   `.lcars.json` on `main` through a scoped protection lift, protection re-sized on the new
   card's jury. `opts`: `:workflow_map` (required), `:justification` (required — the revision's
-  WHY, committed), `:intensity_level`/`:nature` (optional), `:revised_by` (the acting role).
+  WHY, committed), `:max_fan` (optional), `:revised_by` (the acting role).
   Result carries `repo`/`card`/`previous_card`/`outcome` (`:revised` | `:unchanged`).
   """
   @callback revise_card(full_name :: String.t(), opts :: keyword()) ::

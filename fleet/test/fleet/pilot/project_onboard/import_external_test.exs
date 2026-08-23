@@ -164,7 +164,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     out
   end
 
-  test "nominal: full history repatriated, master renamed main, intensity pushed, dual-dir up",
+  test "nominal: full history repatriated, master renamed main, declaration pushed, dual-dir up",
        %{tmp_dir: tmp} do
     o = opts(tmp)
     url = build_external_repo(tmp)
@@ -172,7 +172,7 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
     assert {:ok, %{repo: "fleet/pong", architect: %{status: "up"}}} =
              ProjectOnboard.import_external(url, "pong", o)
 
-    # The forge main IS the external history (renamed from master), plus the intensity
+    # The forge main IS the external history (renamed from master), plus the declaration
     # declaration committed BEFORE the push (v2-1: pushed after, every jury read would fall
     # back in silence).
     assert bare_git!(o, "fleet/pong", ["show", "main:app.py"]) =~ "external history"

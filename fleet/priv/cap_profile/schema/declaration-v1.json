@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:declaration-v1",
+  "title": "LCARS Project Declaration v1",
+  "description": "Structural schema for a per-project .lcars.json (template: priv/cap_profile/canon/config/declaration-template.json). Naming a validation card (pipeline_default) IS the criticality declaration — the card carries the whole gate (which judges, which CI, which verdict policy); there is no separate level. justification carries the WHY in prose (the framing interview: stakes of failure, lifetime — an agent NEVER self-assesses criticality; the architect relays the human). Underscore-prefixed keys are informational and ignored by the runtime.",
+  "type": "object",
+  "required": [
+    "declared_at",
+    "declared_by",
+    "justification",
+    "pipeline_default"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^_": {}
+  },
+  "properties": {
+    "declared_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "declared_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "justification": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pipeline_default": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_fan": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 15,
+      "description": "Workflow_runs this PROJECT may hold in flight at once. Absent = the fleet default (:fleet_pilot, :max_fan / --max-fan). The ceiling 15 mirrors Admission.max_fan_ceiling/0, which is the authority; the contracts check `declaration.max_fan_ceiling` refuses a divergence."
+    }
+  }
+}

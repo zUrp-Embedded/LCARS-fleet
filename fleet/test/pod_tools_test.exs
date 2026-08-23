@@ -1639,8 +1639,8 @@ defmodule Fleet.MCP.PodToolsTest do
         assert is_list(card["jury"]), "card #{name} has no jury list"
       end
 
-      assert %{"jury" => [], "applicable_intensity" => ["C0"]} = by_name["c0-poc"]
-      assert %{"jury" => ["qualifier"], "applicable_intensity" => ["C1"]} = by_name["c1-light"]
+      assert %{"jury" => []} = by_name["c0-poc"]
+      assert %{"jury" => ["qualifier"]} = by_name["c1-light"]
       assert by_name["brief-gate"]["jury"] == ["qualifier", "reviewer"]
       assert map_size(by_name) >= 5
 
@@ -2454,7 +2454,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert decoded["from"] == "lordzurp/chifoumi"
     end
 
-    test "the FRAMING travels with the deposit — card and criticality, like every creation verb" do
+    test "the FRAMING travels with the deposit — card and WHY, like every creation verb" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       assert {:ok, _, _} =
@@ -2464,18 +2464,14 @@ defmodule Fleet.MCP.PodToolsTest do
                    "source" => "lordzurp/chifoumi",
                    "catalogue" => "fleet",
                    "workflow_map" => "workshop-direct",
-                   "intensity_level" => "C2",
-                   "intensity_justification" => "le poc part en prod",
-                   "nature" => "outil interne"
+                   "justification" => "le poc part en prod"
                  },
                  pod_state(uniq("pod-sf"))
                )
 
       assert_received {:import_deposit, _src, _cat, opts}
       assert opts[:workflow_map] == "workshop-direct"
-      assert opts[:intensity_level] == "C2"
-      assert opts[:intensity_justification] == "le poc part en prod"
-      assert opts[:intensity_nature] == "outil interne"
+      assert opts[:justification] == "le poc part en prod"
     end
 
     test "a source that is not `<login>/<name>` is REFUSED before the seam" do

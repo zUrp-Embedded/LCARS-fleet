@@ -1,8 +1,9 @@
-defmodule Fleet.Project.IntensityTest do
+defmodule Fleet.Project.DeclarationTest do
   @moduledoc """
-  The criticality declaration: always written complete and schema-valid; the human's
-  level RELAYED (never agent-assessed); absence recorded honestly (undeclared C0), never
-  fabricated and never walled; the burn reads the declared card with quiet/loud fallbacks.
+  The criticality declaration: always written complete and schema-valid; the human's CARD
+  choice RELAYED (never agent-assessed — the card IS the criticality); absence recorded
+  honestly (undeclared, on the default card), never fabricated and never walled; the burn
+  reads the declared card with quiet/loud fallbacks.
   """
   # ⚠ `async: false` : ce fichier ECRIT `:catalogue_install_dirs` — la cle la plus large des six : toute resolution de catalogue la lit en env d'APPLICATION, qui est
   # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
@@ -14,133 +15,98 @@ defmodule Fleet.Project.IntensityTest do
 
   import ExUnit.CaptureLog
 
-  alias Fleet.Project.Intensity, as: ProjectIntensity
+  alias Fleet.Project.Declaration, as: ProjectDeclaration
 
   @moduletag :tmp_dir
 
-  test "declared: writes a schema-valid .lcars.json relaying the human's level", %{
-    tmp_dir: tmp
-  } do
+  test "level/nature opts are IGNORED — the card is the declaration, no decorative keys written",
+       %{
+         tmp_dir: tmp
+       } do
+    # Even when a caller still passes the retired opts, compose writes NEITHER key: the card carries
+    # the whole gate now, and a decorative level written back would resurrect the "declared C0, still
+    # blocked" confusion the removal exists to kill.
     assert :ok =
-             ProjectIntensity.write(tmp,
+             ProjectDeclaration.write(tmp,
+               workflow_map: "standard-qa",
                intensity_level: "C3",
-               intensity_justification: "dashboard client multi-year",
                intensity_nature: "web-gui",
+               justification: "dashboard client multi-year",
                onboarded_by: "architect"
              )
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == "C3"
+    refute Map.has_key?(d, "level")
+    refute Map.has_key?(d, "nature")
     assert d["declared_by"] == "architect"
-    assert d["nature"] == "web-gui"
-    assert d["pipeline_default"] == "brief-gate"
+    assert d["pipeline_default"] == "standard-qa"
   end
 
   @tag :tmp_dir
   test "a declaration whose declarer is unknown records UNKNOWN, never a plausible role",
        %{tmp_dir: tmp} do
-    # `declared_by` ships in the project repo for good. A caller that declares a level without
-    # saying who must not have a role name written on its behalf: that is a permanent false
-    # attribution, the same one `MergeAndPromote` refuses when it declines the system token.
-    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
+    # `declared_by` ships in the project repo for good. A caller that declares a card without saying
+    # who must not have a role name written on its behalf: that is a permanent false attribution, the
+    # same one `MergeAndPromote` refuses when it declines the system token.
+    assert :ok = ProjectDeclaration.write(tmp, workflow_map: "standard-qa")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == "C3"
+    assert d["pipeline_default"] == "standard-qa"
     assert d["declared_by"] == "unknown"
 
     refute d["declared_by"] in ["architect", "starfleet", "engineer"],
            "a role name was fabricated for a declaration nobody claimed"
   end
 
-  test "undeclared: the level silence buys, explicitly marked — absence recorded, never fabricated",
+  test "undeclared: writes a complete, schema-valid declaration naming the default card — absence recorded, never walled",
        %{tmp_dir: tmp} do
-    # It was C0, the BOTTOM of the scale, and that is a claim: C0 is the disposable posture and
-    # nobody said the work was disposable. Silence buys "we do not know, therefore we judge" — and
-    # it is also the only reading under which the catalogue holds together, since its `default_card`
-    # declares a matrix that starts at C1.
-    #
-    # Read from its owner rather than restated: a test that spells the constant is a test that
-    # keeps asserting yesterday's default.
-    assert :ok = ProjectIntensity.write(tmp, [])
+    # Nobody declared: the file is still written, complete and schema-valid, and it NAMES the
+    # delegation default card. The card IS the criticality declaration — there is no separate level
+    # to assert (crit_quarantine removed it).
+    assert :ok = ProjectDeclaration.write(tmp, [])
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == ProjectIntensity.undeclared_level()
     assert d["declared_by"] == "system-default"
     assert d["justification"] =~ "NON DÉCLARÉ"
 
-    # And it is ON-MATRIX for the card an undeclared project actually receives — the pairing the
-    # boot guard now refuses to let drift.
-    card = Fleet.Workflow.Loader.load!(d["pipeline_default"])
-    assert ProjectIntensity.undeclared_level() in card["applicable_intensity"]
+    # The named card LOADS — an undeclared project can actually be dispatched under it.
+    assert is_map(Fleet.Workflow.Loader.load!(d["pipeline_default"])["steps"])
   end
 
-  test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declarer recorded, NO off-matrix noise",
-       %{tmp_dir: tmp} do
-    # standard-qa claims [C2..C4]: under the old behavior the fabricated C0 default made
-    # this off-matrix LOUD — a "disagreement" nobody expressed. A system default can never
-    # be off-matrix against a human choice.
-    log =
-      capture_log(fn ->
-        assert :ok =
-                 ProjectIntensity.write(tmp,
-                   workflow_map: "standard-qa",
-                   onboarded_by: "starfleet"
-                 )
-      end)
-
-    refute log =~ "OFF-MATRIX"
+  test "naming a card IS a declaration — level ABSENT, real onboarder recorded", %{tmp_dir: tmp} do
+    assert :ok =
+             ProjectDeclaration.write(tmp,
+               workflow_map: "standard-qa",
+               onboarded_by: "starfleet"
+             )
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
     # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
     # 2026-07-19 reorg, and this field ships in the project's repo for good.
     assert d["declared_by"] == "starfleet"
-    assert d["justification"] =~ "carte choisie explicitement"
+    assert d["justification"] =~ "Carte choisie explicitement"
     assert d["pipeline_default"] == "standard-qa"
   end
 
-  test "malformed FORM is returned (fixing a format is not lying)", %{tmp_dir: tmp} do
-    assert {:error, {:invalid_declaration, _}} =
-             ProjectIntensity.write(tmp, intensity_level: "C9")
-  end
-
-  test "the intensity schema resolves through the SchemaCache authority, not a local pipeline copy",
+  test "the declaration schema resolves through the SchemaCache authority, not a local pipeline copy",
        %{tmp_dir: tmp} do
-    assert :ok = ProjectIntensity.write(tmp, [])
+    assert :ok = ProjectDeclaration.write(tmp, [])
 
     path =
       Path.join([
         to_string(:code.priv_dir(:lcars_fleet)),
         "cap_profile",
         "schema",
-        "intensity-v1.json"
+        "declaration-v1.json"
       ])
 
-    key = {ProjectIntensity, :schema, path}
+    key = {ProjectDeclaration, :schema, path}
 
     # A validation that re-reads the file through a private pipeline leaves this key
     # unpopulated — the assertion pins the authority, not just the outcome.
     assert %ExJsonSchema.Schema.Root{} = :persistent_term.get(key, :not_cached),
            "validation did not go through Fleet.SchemaCache (key not populated)"
-  end
-
-  test "off-matrix explicit override: ACCEPTED + logged LOUD (the human has the last word)",
-       %{tmp_dir: tmp} do
-    # audit-only claims [C0..C4]... use a card whose matrix excludes the level: brief-gate
-    # claims [C1..C4] → C0 + brief-gate override is off-matrix.
-    log =
-      capture_log(fn ->
-        assert :ok =
-                 ProjectIntensity.write(tmp,
-                   intensity_level: "C0",
-                   intensity_justification: "PoC assumé sur la carte lourde",
-                   workflow_map: "brief-gate"
-                 )
-      end)
-
-    assert log =~ "OFF-MATRIX"
-    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["pipeline_default"] == "brief-gate"
   end
 
   test "6-125: an override the loader cannot answer is REFUSED, and the refusal names the cards",
@@ -153,9 +119,8 @@ defmodule Fleet.Project.IntensityTest do
     log =
       capture_log(fn ->
         assert {:error, {:unknown_card, "wfmap/ghost"}} =
-                 ProjectIntensity.write(tmp,
-                   intensity_level: "C2",
-                   intensity_justification: "x",
+                 ProjectDeclaration.write(tmp,
+                   justification: "x",
                    workflow_map: "wfmap/ghost"
                  )
       end)
@@ -172,9 +137,8 @@ defmodule Fleet.Project.IntensityTest do
     # projet qui la declare routerait CHAQUE ticket par un sceau direct sans jury. La revision de
     # carte refusait deja ce cas ; la declaration l'acceptait.
     assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
-             ProjectIntensity.write(tmp,
-               intensity_level: "C2",
-               intensity_justification: "x",
+             ProjectDeclaration.write(tmp,
+               justification: "x",
                workflow_map: "workshop-direct"
              )
 
@@ -185,7 +149,7 @@ defmodule Fleet.Project.IntensityTest do
     # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
     # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur une boite dont le
     # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
-    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C2", intensity_justification: "x")
+    assert :ok = ProjectDeclaration.write(tmp, justification: "x")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["pipeline_default"] == "brief-gate"
@@ -197,16 +161,15 @@ defmodule Fleet.Project.IntensityTest do
     File.mkdir_p!(proj)
 
     :ok =
-      ProjectIntensity.write(proj,
-        intensity_level: "C2",
-        intensity_justification: "x",
+      ProjectDeclaration.write(proj,
+        justification: "x",
         workflow_map: "standard-qa"
       )
 
-    assert "standard-qa" == ProjectIntensity.pipeline_default("fleet/demo", code_root: tmp)
+    assert "standard-qa" == ProjectDeclaration.pipeline_default("fleet/demo", code_root: tmp)
 
     # absent (legacy project) → the delegation default, no log requirement
-    assert "brief-gate" == ProjectIntensity.pipeline_default("fleet/ghost", code_root: tmp)
+    assert "brief-gate" == ProjectDeclaration.pipeline_default("fleet/ghost", code_root: tmp)
 
     # invalid file → default + LOUD warning
     broken = Path.join(tmp, "broken")
@@ -216,7 +179,7 @@ defmodule Fleet.Project.IntensityTest do
     log =
       capture_log(fn ->
         assert "brief-gate" ==
-                 ProjectIntensity.pipeline_default("fleet/broken", code_root: tmp)
+                 ProjectDeclaration.pipeline_default("fleet/broken", code_root: tmp)
       end)
 
     assert log =~ "unreadable/invalid"
@@ -237,7 +200,7 @@ defmodule Fleet.Project.IntensityTest do
     log =
       capture_log(fn ->
         assert "brief-gate" ==
-                 ProjectIntensity.pipeline_default("fleet/broken",
+                 ProjectDeclaration.pipeline_default("fleet/broken",
                    code_root: tmp,
                    incident_fun: fn op, subject, reason, opts ->
                      send(me, {:incident, op, subject, reason, opts})
@@ -246,7 +209,7 @@ defmodule Fleet.Project.IntensityTest do
                  )
       end)
 
-    assert_received {:incident, "intensity", "fleet/broken", :declaration_invalid, iopts}
+    assert_received {:incident, "declaration", "fleet/broken", :declaration_invalid, iopts}
     assert iopts[:reason_detail] =~ ".lcars.json"
     assert log =~ "unreadable/invalid"
   end
@@ -302,18 +265,18 @@ defmodule Fleet.Project.IntensityTest do
       # l'agent en a conclu, raisonnablement et faussement, que « la creation ne sait resoudre que
       # les cartes de fleet ».
       assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-               Fleet.Project.Intensity.declarable_card("propre-a-aaa", "bbb/un-projet", [])
+               Fleet.Project.Declaration.declarable_card("propre-a-aaa", "bbb/un-projet", [])
     end
 
     test "vraiment inconnue partout : `unknown_card`, comme avant" do
       # Le refus d'origine survit pour ce qu'il decrit VRAIMENT — une faute de frappe. Sans cette
       # separation, le nouveau message dirait « elle existe ailleurs » en listant zero catalogue.
       assert {:error, {:unknown_card, "carte-fantome"}} =
-               Fleet.Project.Intensity.declarable_card("carte-fantome", "bbb/un-projet", [])
+               Fleet.Project.Declaration.declarable_card("carte-fantome", "bbb/un-projet", [])
     end
 
     test "la carte de SON catalogue passe — le refus ne mord pas sur le cas nominal" do
-      assert :ok = Fleet.Project.Intensity.declarable_card("commune", "bbb/un-projet", [])
+      assert :ok = Fleet.Project.Declaration.declarable_card("commune", "bbb/un-projet", [])
     end
 
     # ─── LE MEME AIGUILLAGE, MAIS PAR LA PORTE QUE LES APPELANTS EMPRUNTENT ─────────────────────
@@ -328,7 +291,7 @@ defmodule Fleet.Project.IntensityTest do
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       assert :ok =
-               Fleet.Project.Intensity.write(tmp,
+               Fleet.Project.Declaration.write(tmp,
                  workflow_map: "propre-a-aaa",
                  repo: "aaa/un-projet",
                  onboarded_by: "starfleet"
@@ -341,7 +304,7 @@ defmodule Fleet.Project.IntensityTest do
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-               Fleet.Project.Intensity.write(tmp,
+               Fleet.Project.Declaration.write(tmp,
                  workflow_map: "propre-a-aaa",
                  repo: "bbb/un-projet",
                  onboarded_by: "starfleet"
@@ -370,7 +333,7 @@ defmodule Fleet.Project.IntensityTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-                   Fleet.Project.Intensity.write(tmp,
+                   Fleet.Project.Declaration.write(tmp,
                      workflow_map: "propre-a-aaa",
                      onboarded_by: "starfleet"
                    )
@@ -393,7 +356,7 @@ defmodule Fleet.Project.IntensityTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_load_failed, "cassee", message}} =
-                   Fleet.Project.Intensity.declarable_card("cassee", "bbb/un-projet", [])
+                   Fleet.Project.Declaration.declarable_card("cassee", "bbb/un-projet", [])
 
           assert message =~ "schema"
         end)
@@ -406,7 +369,7 @@ defmodule Fleet.Project.IntensityTest do
 
       refute match?(
                {:error, {:unknown_card, _}},
-               Fleet.Project.Intensity.declarable_card("cassee", "bbb/un-projet", [])
+               Fleet.Project.Declaration.declarable_card("cassee", "bbb/un-projet", [])
              )
     end
   end

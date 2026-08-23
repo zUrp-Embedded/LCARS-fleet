@@ -31,19 +31,7 @@
         "presentation": {
           "type": "string",
           "minLength": 1,
-          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the card_list tool). States the card's positioning (level range, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
-        },
-        "applicable_intensity": {
-          "type": "array",
-          "items": {
-            "enum": [
-              "C0",
-              "C1",
-              "C2",
-              "C3",
-              "C4"
-            ]
-          }
+          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the card_list tool). States the card's positioning (what it is for, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
         },
         "scope": {
           "enum": [

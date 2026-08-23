@@ -4,7 +4,7 @@ defmodule Fleet.Project do
 
   Boundary anchor; the contract lives in each module's `@moduledoc`: `Fleet.Project.Onboard`
   (create / import / adopt / open / close / delete, and the card revision), `Fleet.Project.Roles`
-  (which role plays which part on a given project), `Fleet.Project.Intensity` (the engraved
+  (which role plays which part on a given project), `Fleet.Project.Declaration` (the engraved
   criticality declaration), `Fleet.Project.Architect` (the per-project architect's identity and
   its ensure-spawn), `Fleet.Project.WorktreeSync` (realigning a face's host clone after a merge),
   `Fleet.Project.GitOps` (the git verbs those need).
@@ -20,7 +20,7 @@ defmodule Fleet.Project do
   ## Why the whole cluster and not the one file
 
   Extracting `Onboard` alone was the plan. Measured, it reaches four other pilot modules
-  (`Intensity`, `Architect`, `WorktreeSync`, `Roles`) and `GitOps` — and `Roles` and `Intensity`
+  (`Declaration`, `Architect`, `WorktreeSync`, `Roles`) and `GitOps` — and `Roles` and `Declaration`
   call EACH OTHER. Pulling one out would have meant duplicating primitives or leaving a cycle
   across a boundary, which does not compile.
 
@@ -28,7 +28,7 @@ defmodule Fleet.Project do
   the rail (`Poller`, `StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `MergeAndPromote`,
   `IncidentRegistry`, `ReviewLifecycle`, `ArchWake`, `ArchFeed` — measured at extraction). The
   traffic is entirely the other way: the rail asks this domain who the jury is, what the card says,
-  where the architect lives. `Roles`/`Intensity` calling each other is fine INSIDE one boundary —
+  where the architect lives. `Roles`/`Declaration` calling each other is fine INSIDE one boundary —
   it was only a problem while the line was drawn between them.
 
   ## What it MAKES POSSIBLE — and what is not done yet
@@ -75,7 +75,7 @@ defmodule Fleet.Project do
       Onboard,
       Onboard.Scaffold,
       Roles,
-      Intensity,
+      Declaration,
       Architect,
       WorktreeSync,
       GitOps

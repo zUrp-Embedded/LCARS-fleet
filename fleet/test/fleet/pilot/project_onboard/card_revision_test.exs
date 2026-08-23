@@ -157,21 +157,15 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
          o: o
        } do
     # `compose/1` builds the declaration from OPTS ALONE and never reads the file it replaces. So a
-    # revision naming only the card DELETED `level`, `nature` and `max_fan` — the whole record of
-    # the framing interview, gone, with `declared_by` now naming the reviser. Measured before the
-    # fix on this exact fixture: C3 / "outil interne" / max_fan 4 in, nothing but the card out.
-    #
-    # The geste that pointed here asked for MONOTONICITY (forbid C3 -> C0). That is the wrong wall:
-    # the code says out loud, at `jury_delta/3`, that a downgrade is the human's to make and must
-    # only be LOUD. What was happening is not a downgrade — it is an erasure nobody declared.
+    # revision naming only the card DELETED `max_fan` — the throughput the human chose, gone, with
+    # `declared_by` now naming the reviser. The revision must carry forward what it does not restate.
+    # (`level`/`nature` are retired — crit_quarantine — so there is nothing of them left to drop.)
     proj = Path.join([o[:code_root], "tetris"])
 
     :ok =
-      Fleet.Project.Intensity.write(proj,
+      Fleet.Project.Declaration.write(proj,
         workflow_map: "c0-poc",
-        intensity_level: "C3",
-        intensity_nature: "outil interne",
-        intensity_justification: "entretien de cadrage",
+        justification: "entretien de cadrage",
         max_fan: 4,
         onboarded_by: "human"
       )
@@ -192,7 +186,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
           "user.name=t",
           "commit",
           "-aqm",
-          "seed intensity"
+          "seed declaration"
         ],
         stderr_to_stdout: true
       )
@@ -211,58 +205,11 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # What the revision DID say moves.
     assert landed["pipeline_default"] == "c1-light"
     assert landed["justification"] == "le poc est devenu serieux"
-    # What it did NOT say survives — three fields, none of them the reviser's to drop.
-    assert landed["level"] == "C3"
-    assert landed["nature"] == "outil interne"
+    # What it did NOT restate survives — max_fan is not the reviser's to drop.
     assert landed["max_fan"] == 4
-  end
-
-  test "a revision that DOES restate the level overrides it — carrying forward is not freezing",
-       %{
-         o: o
-       } do
-    proj = Path.join([o[:code_root], "tetris"])
-
-    :ok =
-      Fleet.Project.Intensity.write(proj,
-        workflow_map: "c0-poc",
-        intensity_level: "C3",
-        intensity_justification: "entretien de cadrage",
-        onboarded_by: "human"
-      )
-
-    # IDENTITE EXPLICITE, comme tout autre `git commit` de cette suite. Sans elle ce commit marche
-    # sur un poste (le `~/.gitconfig` de l'humain) et meurt en clean-room sur « Author identity
-    # unknown » — mesure du 2026-08-09, l'etage `build` de l'image a rougi sur ces deux tests-la
-    # alors qu'ils etaient verts ici. Un test vert grace a l'environnement de celui qui l'ecrit.
-    {_, 0} =
-      System.cmd(
-        "git",
-        [
-          "-C",
-          proj,
-          "-c",
-          "user.email=t@t",
-          "-c",
-          "user.name=t",
-          "commit",
-          "-aqm",
-          "seed intensity"
-        ],
-        stderr_to_stdout: true
-      )
-
-    {_, 0} =
-      System.cmd("git", ["-C", proj, "push", "-q", "origin", "main"], stderr_to_stdout: true)
-
-    assert {:ok, %{outcome: :revised}} =
-             ProjectOnboard.revise_card(
-               "fleet/tetris",
-               revision_opts(o, workflow_map: "c1-light", intensity_level: "C1")
-             )
-
-    landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"]))
-    assert landed["level"] == "C1"
+    # The retired keys are simply gone — nothing to carry forward (crit_quarantine).
+    refute Map.has_key?(landed, "level")
+    refute Map.has_key?(landed, "nature")
   end
 
   test "a revision that REDUCES the jury names it — in the commit, the log and the payload", %{
@@ -272,8 +219,8 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # `card revision: standard-qa -> c0-poc` — a wall coming down, written in the vocabulary of a
     # rename. Everything auditable, nothing legible: the card NAME does not say what the card does.
     #
-    # NOT refused. The criticality level is the human's declaration and a project that genuinely
-    # became less critical must be able to say so. What a downgrade may not be is quiet.
+    # NOT refused. The card IS the human's declaration and a project that genuinely became less
+    # critical must be able to say so by choosing a lighter card. What a downgrade may not be is quiet.
     assert {:ok, %{outcome: :revised}} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
@@ -307,11 +254,11 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # naming it in `.lcars.json` until the next revision. The NEW card is guarded
     # (`require_loadable_card`); the previous one never was.
     proj = Path.join([o[:code_root], "tetris"])
-    intensity = Path.join(proj, ".lcars.json")
+    declaration = Path.join(proj, ".lcars.json")
 
     File.write!(
-      intensity,
-      File.read!(intensity)
+      declaration,
+      File.read!(declaration)
       |> String.replace(
         ~s("pipeline_default": "c0-poc"),
         ~s("pipeline_default": "carte-disparue")

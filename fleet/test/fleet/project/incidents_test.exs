@@ -36,12 +36,12 @@ defmodule Fleet.Project.IncidentsTest do
     }
   end
 
-  test "op \"intensity\" → project.intensity_invalid — le second op garde SON événement" do
-    assert :ok = Incidents.emit("intensity", "fleet/broken", :declaration_invalid)
+  test "op \"declaration\" → project.declaration_invalid — le second op garde SON événement" do
+    assert :ok = Incidents.emit("declaration", "fleet/broken", :declaration_invalid)
 
     assert_receive %Fleet.Event{
       source: :project,
-      type: :"project.intensity_invalid",
+      type: :"project.declaration_invalid",
       payload: %{"repo" => "fleet/broken", "reason" => "declaration_invalid"}
     }
   end

@@ -35,7 +35,6 @@ export function cards() {
     return {
       name: d.metadata?.name ?? f.replace(/\.yaml$/, ''),
       presentation: d.metadata?.presentation ?? d.metadata?.description ?? '',
-      levels: d.metadata?.applicable_intensity ?? [],
       jury: d.spec?.jury ?? [],
       rounds: d.spec?.max_rework_rounds ?? null,
       steps: Object.keys(d.spec?.steps ?? {})

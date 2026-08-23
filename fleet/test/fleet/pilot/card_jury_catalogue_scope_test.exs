@@ -51,7 +51,6 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     metadata:
       name: standard
       description: "carte du catalogue metier"
-      applicable_intensity: [C0]
     spec:
       jury: [#{@judge}]
       ci: ignore

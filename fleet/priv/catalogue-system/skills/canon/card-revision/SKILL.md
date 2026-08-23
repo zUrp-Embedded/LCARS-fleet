@@ -6,14 +6,15 @@ description: Réviser la carte de validation d'un projet EXISTANT — l'humain c
 # card-revision — réviser la carte d'un projet existant
 
 La carte d'un projet est sa déclaration de criticité : elle nomme le jury, le pipeline, le
-niveau d'exigence. Elle a été gravée à la création — ce skill est le chemin de RÉVISION
-(BL-6-29) : un PoC C0 devenu sérieux mérite un vrai jury, un projet clos peut redescendre.
+niveau d'exigence — il n'y a pas de niveau séparé à côté. Elle a été gravée à la création — ce
+skill est le chemin de RÉVISION (BL-6-29) : un PoC jetable devenu sérieux mérite un vrai jury, un
+projet clos peut redescendre vers une carte plus légère.
 
 ## La doctrine, avant le geste
 
 - **Le choix de carte EST la déclaration de criticité, et il appartient à l'HUMAIN.** Tu
-  présentes, tu éclaires, tu ne décides jamais. Un choix hors-matrice est ACCEPTÉ (l'humain a
-  le dernier mot) — il sera loggé fort, pas bloqué.
+  présentes, tu éclaires, tu ne décides jamais. La carte porte toute la sévérité ; il n'y a pas
+  de niveau à côté à évaluer.
 - **La justification est OBLIGATOIRE** : c'est le POURQUOI de la révision, committé avec la
   déclaration dans le dépôt du projet — l'historique git est le registre. Une révision sans
   motif est exactement la mutation non tracée que la fleet interdit.
@@ -24,13 +25,13 @@ niveau d'exigence. Elle a été gravée à la création — ce skill est le chem
 ## Le déroulé
 
 1. **Présente le catalogue** : `card_list`. Montre la `presentation` de chaque carte
-   VERBATIM (c'est sa voix), avec `applicable_intensity` et `jury`. Si l'humain donne des
+   VERBATIM (c'est sa voix), avec son `jury`. Si l'humain donne des
    éléments de cadrage (tension secteur ? ça coupe des doigts ? durée de vie ?), tu peux
    pré-filtrer et conseiller — rubber-duck, jamais évaluateur.
 2. **Recueille le choix et le pourquoi.** Les deux, dans les mots de l'humain. Reformule le
    pourquoi en une phrase et fais-la valider : c'est elle qui part au commit.
-3. **Exécute** : `project_revise_card` avec `full_name`, `workflow_map` (la carte choisie),
-   `justification` (la phrase validée), et `intensity_level` si l'humain en a déclaré un.
+3. **Exécute** : `project_revise_card` avec `full_name`, `workflow_map` (la carte choisie) et
+   `justification` (la phrase validée).
 4. **Relaie le résultat** : `outcome` `revised` (la protection de branche s'est re-taillée
    d'elle-même sur le jury de la nouvelle carte) ou `unchanged` (déclaration identique,
    no-op honnête). Et répète la sémantique des tickets en vol (point doctrine 3).

@@ -186,7 +186,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
   test "6-125: an unknown workflow_map refuses BEFORE anything is created — no forge, no dirs",
        %{tmp_dir: tmp} do
     # La preuve de sortie de la fiche : « creation avec nom inconnu ne mute ni disque ni Forge ».
-    # La regle est appliquee chez l'ecrivain (`Intensity.write/2`), donc aucune porte ne peut la
+    # La regle est appliquee chez l'ecrivain (`Declaration.write/2`), donc aucune porte ne peut la
     # contourner — mais elle y tomberait APRES la creation du depot, et il faudrait compenser.
     # D'ou le meme preflight que le controle humain, dans le meme `with`, avant toute mutation.
     o = opts(tmp)

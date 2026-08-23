@@ -167,17 +167,17 @@ events:
   # seul le chemin d'entree change.
   # gate: immediate — une declaration qui ne charge pas refoirera a CHAQUE dispatch, et chaque
   # occurrence d'ici le ticket est un projet qui tourne sur la carte par defaut sans que personne
-  # le sache. Les ops `card`/`intensity` reprennent les namespaces de dedup de l'ancien seam.
+  # le sache. Les ops `card`/`declaration` reprennent les namespaces de dedup de l'ancien seam.
   # Sujet = le DEPOT : c'est sa declaration qu'on corrige (le detail — carte, fichier — est dans
   # `reason_detail`).
   project.card_failed:
     source: project
     action: incident
     incident: {op: card, subject: repo, gate: immediate, escalate_kind: project_card_failed}
-  project.intensity_invalid:
+  project.declaration_invalid:
     source: project
     action: incident
-    incident: {op: intensity, subject: repo, gate: immediate, escalate_kind: project_intensity_invalid}
+    incident: {op: declaration, subject: repo, gate: immediate, escalate_kind: project_declaration_invalid}
   # deliverable.published (slot-freeze): emitted by Pilot.StepRunCompleter (source :workflow — the
   # publication IS a workflow op via Deliverable.publish) AFTER push + PR confirmed, carries `pod_id` (the
   # producer pod, from the pod.completed payload). Consumed by Spawner.Pod: a resident pod (pipe) goes

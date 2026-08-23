@@ -99,12 +99,15 @@ services:
       GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'URL de TA forge (ex http://10.42.0.118)}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
       GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
-      # TROIS labels, trois besoins, un seul runner :
-      #   `shell` — le rail CI de TOUT projet créé par la fleet (le scaffold pose un workflow qui
-      #     demande ce label). Générique EXPRÈS : un projet neuf n'a ni langage ni toolchain, et
-      #     nommer ici `elixir` ferait hériter chaque projet d'une dépendance à celle de LCARS.
-      #     C'est le contrat minimal que doit servir l'opérateur qui pose son runner.
-      #     ⚠ `alpine` n'a pas bash — les workflows qui visent ce label écrivent du POSIX.
+      # QUATRE labels, quatre besoins, un seul runner :
+      #   `shell` — le label de ROUTAGE minimal que le scaffold demande (`runs-on: shell`). Ce qu'il
+      #     y a derrière (alpine ici) ne porte rien : le template pose `container:` sur le job, et le
+      #     daemon dind tire l'image réelle (node + langages). Le label ne fait qu'amener le job au
+      #     runner ; `container:` choisit l'image. Contrat minimal que sert tout runner LCARS.
+      #   `ubuntu-latest` — l'image GRASSE (`catthehacker/ubuntu:act-latest`, node + python + bash +
+      #     git) que les projets user visent en `runs-on: ubuntu-latest` (forme GitHub-standard), et
+      #     que `48-forge-host.sh` sert déjà côté poste. Le banc héberge aussi des projets user : il
+      #     doit la servir. `check_labels` la pré-tire → le `container:` du template tape le cache.
       #   `elixir` — le gate (.gitea/workflows/gate.yml). Le job tourne dans LA MÊME image que le
       #     stage build du Dockerfile : une seule vérité toolchain, trois rendus (15-toolchain WSL,
       #     stage build, CI). Bump = les DEUX pins ensemble.
@@ -123,11 +126,11 @@ services:
       # qu'un operateur quelconque ne peut pas resoudre une image locale de LCARS ; qui veut faire
       # tourner LE gate sert le stage build de SON build :
       #   docker build --target build -t lcars-build:<tag> -f .../Dockerfile .
-      #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli"
+      #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
       # ⚠ LE TAG SUIT `PROV_ELIXIR_*` DE `provision-lib.sh`, ET RIEN NE LE VERIFIE. Un runner qui
       # sert une toolchain autre que celle du deploiement fait juger sur un OTP ce qui tourne sur un
       # autre — un mensonge operationnel, pas un ecart de confort.
-      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
       # Le daemon EMBARQUE, rootless : c'est lui que les jobs utilisent, plus celui de la machine.
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"
