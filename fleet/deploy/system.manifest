@@ -93,6 +93,14 @@ anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root          
 anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           linux
 anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           linux
 anchor    /etc/sudoers.d/lcars-toolchain               0440  root:root           any
+# Le depot upstream de docker, pose par 10-packages SEULEMENT quand aucun daemon ne repond. Les deux
+# fichiers sont les SEULS que ce rail ajoute au systeme de paquets de la machine, et ils sont
+# declares ici pour deux raisons : `provision uninstall` les retire avec le reste, et un operateur
+# qui se demande d'ou sort ce depot tiers trouve la reponse dans l'inventaire plutot qu'au fond d'un
+# module. (Les PAQUETS, eux, ne sont pas ici : c'est `install.journal` qui sait lesquels ce rail a
+# poses et lesquels etaient deja la — la distinction n'est connaissable qu'AVANT l'install.)
+anchor    /etc/apt/keyrings/docker.asc                 0644  root:root           linux
+anchor    /etc/apt/sources.list.d/docker.list          0644  root:root           linux
 anchor    /etc/lcars/host-consent                      0644  root:root           linux
 anchor    /etc/lcars/services.env                      0640  root:fleet          linux
 anchor    /etc/lcars/deck-oidc.json                    0640  root:fleet          wsl+linux

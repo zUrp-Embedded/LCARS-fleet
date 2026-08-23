@@ -409,8 +409,8 @@ SPY
 #
 # MESURE DU 2026-08-21, Ubuntu 26.04 fraiche, passe a froid : la porte s'arretait sur « aucune CLI
 # docker : ni dans le PATH, ni dans le montage Docker Desktop » — en renvoyant vers un montage qui
-# n'existe pas sur une machine sans Windows — et le module capable de le poser (`10-packages`,
-# `docker.io` sur le substrat linux) n'etait JAMAIS atteint.
+# n'existe pas sur une machine sans Windows — et le module capable de le poser (`10-packages`, le
+# depot upstream sur le substrat linux) n'etait JAMAIS atteint.
 #
 # Le motif d'origine du refus, ⚖ « ça, on refuse. docker-desktop c'est un clic », parle de WSL, ou
 # Docker Desktop EST un clic et ou rien ici ne peut l'installer. Les deux regles coexistent : c'est

@@ -136,7 +136,7 @@ preflight_ok=1
 say_ok()   { echo "  ${G}[ok]${N} $1"; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
-# UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PRÉREQUIS. `10-packages` pose `docker.io` sur le
+# UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PRÉREQUIS. `10-packages` pose `docker-ce` sur le
 # substrat `linux` et sur lui SEUL — sur WSL le daemon vient de Docker Desktop, que rien ici ne peut
 # installer, et dans un conteneur il n'y a rien à monter. La condition est donc la même des deux
 # côtés, et elle se dit une fois : Linux natif, machine déclarée dédiée.
@@ -188,15 +188,17 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     # ⚠ LA PORTE REFUSAIT CE QUE LE RAIL SAIT DÉSORMAIS COMBLER, et les deux ne peuvent pas rester
     # en désaccord. Le motif d'origine — ⚖ « ça, on refuse. docker-desktop c'est un clic » — parle
     # de WSL, où Docker Desktop EST un clic et où rien ici ne peut l'installer. Sur du Linux natif
-    # il n'y a pas de Docker Desktop : la réponse est `apt install docker.io`, et c'est exactement
+    # il n'y a pas de Docker Desktop : la réponse est un docker posé par apt, et c'est exactement
     # ce que `10-packages` fait depuis le 2026-08-21 (⚖ user : « tu peux toujours l'installer si tu
-    # ne trouves pas »).
+    # ne trouves pas »). Depuis le 2026-08-23 c'est le dépôt upstream — la ligne affichée plus bas
+    # NOMME ce qui sera posé, et elle doit le suivre : une promesse faite au préflight qui ne
+    # correspond pas à ce que l'opérateur voit vingt lignes plus loin est un mensonge, pas un détail.
     #
     # MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche : la porte s'arrêtait sur « aucune CLI docker », en
     # renvoyant vers un montage Docker Desktop qui n'existe pas sur une machine sans Windows — et le
     # module capable de le poser n'était jamais atteint. Un préflight ne doit refuser que ce que la
     # suite ne peut pas réparer.
-    echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker.io + docker-compose-v2, universe)"
+    echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker-ce, dépôt upstream download.docker.com)"
   else
     say_miss "$PROV_DOCKER_WHY"
   fi
@@ -204,7 +206,7 @@ else
   # Mode standalone : le dépôt n'est pas encore là, donc la sonde partagée non plus. On se contente
   # du minimum honnête, et la vraie sonde tournera après le clone.
   command -v docker >/dev/null 2>&1 && { DOCKER_OK=1; say_ok "docker (sonde complète après le clone)"; } \
-    || say_miss "docker — Docker Desktop côté Windows, ou le paquet docker.io"
+    || say_miss "docker — Docker Desktop côté Windows, ou un docker natif (le rail le pose sur Linux dédié)"
 fi
 
 if [[ "$preflight_ok" -eq 0 ]]; then

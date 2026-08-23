@@ -232,7 +232,16 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   # `PACKAGES` est la liste que les DEUX rails obtiennent par apt, et le temoin d'egalite ci-dessus
   # exige que chacun de ses membres soit dans le Dockerfile. Y mettre docker ferait mentir ce
   # temoin ou installerait un daemon dans une image qui tourne DANS un daemon.
-  run sed -n 's/^PACKAGES=(\(.*\))$/\1/p' "$(pkg_mod)"
+  # ⚠ CE TEMOIN NE MESURAIT RIEN, ET IL EST VERT DEPUIS QU'IL EXISTE. Sa `sed` exigeait
+  # `^PACKAGES=(…)$` sur UNE ligne ; le tableau reel en fait vingt-huit, donc elle rendait la chaine
+  # VIDE et `[[ "" != *"docker"* ]]` passait a vide. Mesure du 2026-08-23 : 0 octet en sortie.
+  # Ajouter `docker` a `PACKAGES` n'aurait rien fait rougir.
+  #
+  # `native_list` existe dans ce fichier POUR CA — son propre commentaire decrit le piege — et il
+  # etait deja utilise deux tests plus bas. Une extraction correcte a cote d'une extraction fausse,
+  # c'est celle qui ne mord pas qui survit le plus longtemps : personne ne relit un test vert.
+  run native_list 'PACKAGES' "$(pkg_mod)"
+  [ -n "$output" ]
   [[ "$output" != *"docker"* ]]
 }
 
@@ -242,9 +251,11 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   # repond, `eff linux` ne contient plus `docker.io` et le temoin tombait — en mesurant l'hote au
   # lieu de la regle. Sixieme occurrence de ce piege en deux jours.
   #
-  # LE FOND : la majorite des postes Linux ont docker par le depot upstream (`docker-ce`), pas par
-  # `docker.io`. Installer le second par-dessus le premier les met en conflit — au mieux apt refuse,
-  # au pire il retire le Docker de l'operateur.
+  # LE FOND : la majorite des postes Linux ont docker par le depot upstream, et le rail y pose
+  # DESORMAIS le meme empaquetage (⚖ user 2026-08-23). Ce qui protege l'operateur n'est donc plus le
+  # choix du paquet mais la CONDITION : aucun daemon ne repond. Poser une source apt tierce sur une
+  # machine qui a deja docker serait ajouter un depot dont elle n'a pas besoin — la branche « 0 »
+  # ci-dessous est ce qui l'interdit, et c'est elle qu'il faut garder verte.
   local head="$BATS_TEST_TMPDIR/pkg-head.sh"
   sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
 
@@ -259,14 +270,14 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   }
 
   # aucun daemon : le rail POSE docker, c'est sa raison d'etre sur ce substrat
-  [[ "$(eff linux 1)" == *"docker.io"* ]]
-  [[ "$(eff linux 1)" == *"docker-compose-v2"* ]]
+  [[ "$(eff linux 1)" == *"docker-ce"* ]]
+  [[ "$(eff linux 1)" == *"docker-compose-plugin"* ]]
   # un daemon repond : on ne pose RIEN, et on ne retire rien non plus
-  [[ "$(eff linux 0)" != *"docker.io"* ]]
-  [[ "$(eff linux 0)" != *"docker-compose-v2"* ]]
+  [[ "$(eff linux 0)" != *"docker-ce"* ]]
+  [[ "$(eff linux 0)" != *"docker-compose-plugin"* ]]
   # les autres substrats ne le posent JAMAIS, quelle que soit la sonde
-  [[ "$(eff wsl 1)"    != *"docker.io"* ]]
-  [[ "$(eff docker 1)" != *"docker.io"* ]]
+  [[ "$(eff wsl 1)"    != *"docker-ce"* ]]
+  [[ "$(eff docker 1)" != *"docker-ce"* ]]
   # et la liste commune reste la, dans tous les cas
   [[ "$(eff docker 1)" == *"bubblewrap"* ]]
   [[ "$(eff linux 0)"  == *"bubblewrap"* ]]
@@ -308,4 +319,109 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   [ -n "$from_lib" ]
   [ -n "$from_inst" ]
   [ "$from_lib" = "$from_inst" ]
+}
+
+# ─── LE DEPOT UPSTREAM — ce qu'il pose, et surtout ce qu'il NE pose PAS ──────────────────────────
+#
+# ⚖ USER 2026-08-23 : le rail prend `docker-ce` chez Docker plutot que `docker.io` chez Canonical.
+# C'est le SEUL depot tiers que ce rail ajoute a une machine, donc les trois proprietes qui comptent
+# sont : il se derive (jamais de codename cable), il refuse en NOMMANT la cause, et un refus ne
+# laisse RIEN derriere lui.
+#
+# ⚠ LA TROISIEME EST LA MOINS EVIDENTE ET LA PLUS CHERE. Une source apt posee vers une suite qui
+# n'existe pas ne casse pas ici : elle casse au prochain `apt-get update` de l'operateur, des mois
+# plus tard, sur un message de depot introuvable que personne ne rattachera a LCARS.
+repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine jamais mesuree
+  local head="$BATS_TEST_TMPDIR/repo-head.sh"
+  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
+          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
+      bash -c 'source "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$head" "$1"
+}
+
+@test "depot docker : une distro que l'upstream ne publie pas est REFUSEE, et rien n'est pose" {
+  repo_sh 'os_field() { case "$1" in ID) echo arch ;; VERSION_CODENAME) echo rolling ;; esac; }
+           ensure_docker_repo'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"arch"* ]]
+  [[ "$output" == *"ubuntu et debian"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
+  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
+}
+
+@test "depot docker : sans VERSION_CODENAME la suite est INDERIVABLE — on le dit, on ne devine pas" {
+  repo_sh 'os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo "" ;; esac; }
+           ensure_docker_repo'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"VERSION_CODENAME"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
+}
+
+@test "depot docker : une suite ABSENTE chez Docker refuse AVANT de poser quoi que ce soit" {
+  # Le coeur du temoin : la sonde reseau passe AVANT la cle et la source. Un refus qui laisserait la
+  # source derriere lui armerait la panne differee decrite en tete de section.
+  repo_sh 'os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo suite-qui-nexiste-pas ;; esac; }
+           curl() { return 22; }
+           fetch_verify() { echo "FETCH NE DOIT PAS ETRE APPELE"; return 0; }
+           ensure_docker_repo'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"suite-qui-nexiste-pas"* ]]
+  [[ "$output" != *"FETCH NE DOIT PAS ETRE APPELE"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
+  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
+}
+
+@test "depot docker : la source est DERIVEE — id, codename et architecture, aucun litteral" {
+  # ⚠ LES DEUX POSEURS SONT DOUBLES SUR LEUR CHOWN, et ce n'est pas du confort. Le keyring et la
+  # source appartiennent a root en production — c'est juste — mais un temoin joue par un humain ne
+  # peut pas chowner : il tomberait donc sur l'IDENTITE de qui le lance au lieu de la regle qu'il
+  # garde. Meme piege que les deux d'aujourd'hui, troisieme forme.
+  #
+  # La propriete n'est pas perdue, elle est DEPLACEE la ou elle se verifie : `system.manifest`
+  # declare les deux fichiers en `0644 root:root`, et le temoin d'ISO de ce fichier l'exige.
+  # Ce test-ci ne garde qu'une chose, celle qui n'est verifiable qu'ici : la source est DERIVEE.
+  repo_sh 'os_field() { case "$1" in ID) echo debian ;; VERSION_CODENAME) echo trixie ;; esac; }
+           curl() { return 0; }
+           ensure_dir() { mkdir -p "$1"; }
+           write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
+           fetch_verify() { : > "$3"; }
+           dpkg() { echo arm64; }
+           run_quiet() { return 0; }
+           ensure_docker_repo'
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/docker.list"
+  [[ "$output" == *"https://download.docker.com/linux/debian trixie stable"* ]]
+  [[ "$output" == *"arch=arm64"* ]]
+  [[ "$output" == *"signed-by=$BATS_TEST_TMPDIR/keyrings/docker.asc"* ]]
+}
+
+@test "depot docker : REJOUER ne repose rien — la cle n'est pas re-telechargee" {
+  # ⚠ LE TEMOIN QUE LES QUATRE PREMIERS N'AVAIENT PAS, et c'est celui qui a attrape un vrai defaut.
+  # `fetch_verify` telecharge, pose et COMPTE un changement a chaque appel — c'est son contrat, et
+  # l'idempotence appartient a l'appelant. Sans garde, une machine ou docker est installe mais dont
+  # le daemon ne repond pas (service coupe) re-telecharge la cle a chaque passe et sort `POSE`.
+  #
+  # On compte les appels a `fetch_verify` : deux passes, UN seul appel. La sonde reseau, elle, a le
+  # droit de rejouer — c'est une lecture, elle ne pose rien.
+  local head="$BATS_TEST_TMPDIR/repo-head.sh"
+  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
+          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
+          LCARS_DOCKER_GPG_SHA256="$(printf '' | sha256sum | awk '{print $1}')" \
+      bash -c 'source "$1" >/dev/null 2>&1
+        os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo resolute ;; esac; }
+        curl() { return 0; }
+        ensure_dir() { mkdir -p "$1"; }
+        write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
+        # La cle posee est VIDE, et le pin ci-dessus est le sha256 du vide : la garde doit donc
+        # reconnaitre au second tour que ce qui est en place EST ce qui etait attendu.
+        fetch_verify() { echo "FETCH"; : > "$3"; }
+        dpkg() { echo amd64; }
+        run_quiet() { return 0; }
+        ensure_docker_repo
+        ensure_docker_repo' _ "$head"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^FETCH$' <<< "$output")" -eq 1 ]
 }
