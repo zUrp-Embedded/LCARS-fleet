@@ -106,7 +106,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   The item this closes, in one sentence: the counter was per project and the knob was per box, so
   `--max-fan 1` to watch one pipeline end to end serialized every other project in the fleet —
   a brake laid on unrelated work. The declaration lives in `<project>/.lcars.json` (see
-  `ProjectIntensity`) because a project can route its tickets through several cards, and a
+  `ProjectDeclaration`) because a project can route its tickets through several cards, and a
   per-card ceiling cannot bound something that spans them.
 
   Clamped HERE and only here: `max_fan/0` and this share one authority for `1..#{@max_max_fan}`,
@@ -114,7 +114,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   """
   @spec max_fan(String.t(), keyword()) :: pos_integer()
   def max_fan(repo, opts \\ []) when is_binary(repo) do
-    case Fleet.Project.Intensity.declared_max_fan(repo, opts) do
+    case Fleet.Project.Declaration.declared_max_fan(repo, opts) do
       n when is_integer(n) -> n |> max(1) |> min(@max_max_fan)
       _ -> max_fan()
     end

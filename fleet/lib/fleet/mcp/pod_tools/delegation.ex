@@ -508,7 +508,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, role} <- require_onboarder(state),
          {:ok, onboard} <- conforming_onboard() do
       opts = [
-        intensity_justification: Map.get(args, "intensity_justification"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1420,7 +1420,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # Criticality declaration RELAYED from the human (nil entries = undeclared → the
         # onboard records an HONEST C0 default, marked undeclared; never fabricated facts,
         # never a wall — a blocked declaration teaches the human to lie to the arch).
-        intensity_justification: Map.get(args, "intensity_justification"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role
       ]
@@ -1554,7 +1554,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       opts = [
         org: org,
         description: Map.get(args, "description", ""),
-        intensity_justification: Map.get(args, "intensity_justification"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1604,7 +1604,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, org} <- resolve_org(args) do
       opts = [
         org: org,
-        intensity_justification: Map.get(args, "intensity_justification"),
+        justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]

@@ -133,7 +133,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     assert {:ok, %{repo: "fleet/garage", architect: %{status: "up"}}} =
              ProjectOnboard.adopt_project("garage", o)
 
-    # The forge main IS the local content (never scaffolded over) + the intensity declaration
+    # The forge main IS the local content (never scaffolded over) + the declaration
     # this call committed (absent locally → written + committed before the single push).
     assert bare_git!(o, "fleet/garage", ["show", "main:code.txt"]) =~ "the user's real content"
     assert bare_git!(o, "fleet/garage", ["show", "main:.lcars.json"]) =~ "pipeline_default"

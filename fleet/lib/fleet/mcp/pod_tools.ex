@@ -389,7 +389,7 @@ defmodule Fleet.MCP.PodTools do
           "catalogue's forge org, and the binding is FIXED FOR ITS LIFE — so `catalogue` is REQUIRED, never " <>
           "inferred: the listing hands you each card WITH its catalogue, copy both. Two catalogues may " <>
           "both ship a `standard`, and a name alone then designates nothing. The card carries the " <>
-          "whole gate (which judges, which CI, which verdict policy); `intensity_justification` " <>
+          "whole gate (which judges, which CI, which verdict policy); `justification` " <>
           "records the WHY in prose. You MAY ask the framing questions (mains voltage? cuts fingers? " <>
           "how long will it live?) — rubber-duck, not assessor: you NEVER weigh criticality yourself, " <>
           "you relay the human's card choice. If the human declares NOTHING (no card), pass nothing: " <>
@@ -406,7 +406,7 @@ defmodule Fleet.MCP.PodTools do
         "name" => %{"type" => "string"},
         "pitch" => %{"type" => "string"},
         "description" => %{"type" => "string"},
-        "intensity_justification" => %{"type" => "string"},
+        "justification" => %{"type" => "string"},
         "catalogue" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
@@ -542,7 +542,7 @@ defmodule Fleet.MCP.PodTools do
           "en bloc, every `CLAUDE.md` goes through the reception filter, and the default branch is " <>
           "normalized to `main`. The source is NOT consumed — your human keeps their repo, the " <>
           "fleet works on its copy. Use `project_install` instead for a repo ALREADY in an org. " <>
-          "FRAME IT ON THE WAY IN: `workflow_map` + `intensity_justification` declare the card and " <>
+          "FRAME IT ON THE WAY IN: `workflow_map` + `justification` declare the card and " <>
           "the WHY, exactly as on `project_create` — the card IS the criticality. Undeclared is " <>
           "not forbidden — the project lands on the default card and the declaration says " <>
           "it was never declared, which is a readable state rather than a hole. " <>
@@ -555,7 +555,7 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "source" => %{"type" => "string"},
         "catalogue" => %{"type" => "string"},
-        "intensity_justification" => %{"type" => "string"},
+        "justification" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["source", "catalogue"]
@@ -586,7 +586,7 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "name" => %{"type" => "string"},
         "description" => %{"type" => "string"},
-        "intensity_justification" => %{"type" => "string"},
+        "justification" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["name", "catalogue"]
@@ -622,7 +622,7 @@ defmodule Fleet.MCP.PodTools do
         "catalogue" => %{"type" => "string"},
         "url" => %{"type" => "string"},
         "name" => %{"type" => "string"},
-        "intensity_justification" => %{"type" => "string"},
+        "justification" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}
       },
       "required" => ["url", "name", "catalogue"]

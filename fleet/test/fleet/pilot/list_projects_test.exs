@@ -36,10 +36,10 @@ defmodule Fleet.Pilot.ListProjectsTest do
     def list_open_issues(_repo, _opts), do: {:error, :forge_unreachable}
   end
 
-  defp project(root, name, intensity \\ nil) do
+  defp project(root, name, declaration \\ nil) do
     dir = Path.join(root, name)
     File.mkdir_p!(dir)
-    if intensity, do: File.write!(Path.join(dir, ".lcars.json"), intensity)
+    if declaration, do: File.write!(Path.join(dir, ".lcars.json"), declaration)
     dir
   end
 
@@ -72,9 +72,9 @@ defmodule Fleet.Pilot.ListProjectsTest do
       dir = project(tmp, "alpha")
 
       :ok =
-        Fleet.Project.Intensity.write(dir,
+        Fleet.Project.Declaration.write(dir,
           workflow_map: "standard-qa",
-          intensity_justification: "cadrage",
+          justification: "cadrage",
           onboarded_by: "starfleet"
         )
 

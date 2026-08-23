@@ -16,7 +16,7 @@
 - `test/*.exs` (root) — cross-domain/integration surfaces: `pod_tools_test.exs` +
   `pod_socket_test.exs` (MCP pod-facing wire), `cap_profile_v25_conformance_test.exs` +
   `monks_v25_conformance_test.exs` (canon conformance), `events_schema_test.exs` /
-  `coord_policies_schema_test.exs` / `intensity_schema_test.exs` (priv schemas),
+  `coord_policies_schema_test.exs` / `declaration_schema_test.exs` (priv schemas),
   `mcp_server_test.exs` / `mcp_supervisor_test.exs` / `poc_exmcp_native_test.exs` (MCP SDK
   boundary), `clone_test.exs` (project_bootstrap), `result_event_test.exs`.
 - `test/support/<domain>/` — stubs/TestEnv, compiled via `elixirc_paths(:test)`.

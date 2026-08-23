@@ -560,7 +560,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     workflow_map_name =
       if Fleet.Labels.destination_workshop() in labels,
         do: Fleet.Project.Roles.workshop_workflow_map(catalogue_root: repo),
-        else: Fleet.Project.Intensity.pipeline_default(repo)
+        else: Fleet.Project.Declaration.pipeline_default(repo)
 
     # `nil` = this catalogue ships no card with a `face: workshop` producer, so it has no doc rail.
     # A deployment is allowed not to have one; a doc ticket on it is not, and it says WHICH fact it
@@ -575,7 +575,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # LE CAS QUI SURVIT au refus d'onboarding (`Intensity.refute_unloadable_card/2`) : une carte
+  # LE CAS QUI SURVIT au refus d'onboarding (`Declaration.refute_unloadable_card/2`) : une carte
   # DECLAREE que le catalogue a perdue depuis. Ce site ne se rabat PAS, et c'est delibere — poser
   # une route est DURABLE, et une route engravee sous une carte que personne n'a choisie fait
   # tourner le projet sous une criticite que personne n'a declaree. `Roles.load_project_card/2`

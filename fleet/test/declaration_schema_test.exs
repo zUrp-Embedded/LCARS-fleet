@@ -1,11 +1,11 @@
-defmodule Fleet.CapProfile.IntensitySchemaTest do
+defmodule Fleet.CapProfile.DeclarationSchemaTest do
   @moduledoc """
-  Proves that the canon template `priv/catalogue/cap_profile/canon/config/intensity-template.json`
-  validates against `priv/schema/intensity-v1.json`, and that an invalid config is rejected.
+  Proves that the canon template `priv/catalogue/cap_profile/canon/config/declaration-template.json`
+  validates against `priv/schema/declaration-v1.json`, and that an invalid config is rejected.
   """
   use ExUnit.Case, async: true
 
-  @schema_path Path.join([__DIR__, "..", "priv", "cap_profile", "schema", "intensity-v1.json"])
+  @schema_path Path.join([__DIR__, "..", "priv", "cap_profile", "schema", "declaration-v1.json"])
   @canon_path Path.join([
                 __DIR__,
                 "..",
@@ -14,12 +14,12 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
                 "cap_profile",
                 "canon",
                 "config",
-                "intensity-template.json"
+                "declaration-template.json"
               ])
 
   setup_all do
     assert File.exists?(@schema_path), "schema missing: #{@schema_path}"
-    assert File.exists?(@canon_path), "canon intensity-template.json missing: #{@canon_path}"
+    assert File.exists?(@canon_path), "canon declaration-template.json missing: #{@canon_path}"
 
     schema =
       @schema_path
@@ -31,7 +31,7 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     {:ok, schema: schema, canon: canon}
   end
 
-  test "the canon intensity-template.json validates against intensity-v1.json", %{
+  test "the canon declaration-template.json validates against declaration-v1.json", %{
     schema: schema,
     canon: canon
   } do
@@ -42,7 +42,7 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
        %{schema: schema, canon: canon} do
     # They were valid fields once; `additionalProperties: false` now refuses them like any unknown
     # key. A legacy file still carrying `level` is schema-invalid — which is exactly why the READ
-    # path (`Intensity.pipeline_default/2`) stopped full-validating and reads only the card name.
+    # path (`Declaration.pipeline_default/2`) stopped full-validating and reads only the card name.
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, Map.put(canon, "level", "C2"))
 
     assert {:error, _} =
@@ -65,7 +65,7 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
 
   test "accepts — the minimal declaration (required fields + card, no level)", %{schema: schema} do
     minimal = %{
-      "_schema" => "lcars/intensity-v1",
+      "_schema" => "lcars/declaration-v1",
       "declared_at" => "2026-08-23",
       "declared_by" => "architect",
       "justification" => "PoC jetable — carte c0-poc.",

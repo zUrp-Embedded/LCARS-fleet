@@ -163,9 +163,9 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     proj = Path.join([o[:code_root], "tetris"])
 
     :ok =
-      Fleet.Project.Intensity.write(proj,
+      Fleet.Project.Declaration.write(proj,
         workflow_map: "c0-poc",
-        intensity_justification: "entretien de cadrage",
+        justification: "entretien de cadrage",
         max_fan: 4,
         onboarded_by: "human"
       )
@@ -186,7 +186,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
           "user.name=t",
           "commit",
           "-aqm",
-          "seed intensity"
+          "seed declaration"
         ],
         stderr_to_stdout: true
       )
@@ -254,11 +254,11 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     # naming it in `.lcars.json` until the next revision. The NEW card is guarded
     # (`require_loadable_card`); the previous one never was.
     proj = Path.join([o[:code_root], "tetris"])
-    intensity = Path.join(proj, ".lcars.json")
+    declaration = Path.join(proj, ".lcars.json")
 
     File.write!(
-      intensity,
-      File.read!(intensity)
+      declaration,
+      File.read!(declaration)
       |> String.replace(
         ~s("pipeline_default": "c0-poc"),
         ~s("pipeline_default": "carte-disparue")

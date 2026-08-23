@@ -124,7 +124,7 @@ defmodule Fleet.Project.Onboard do
 
     # `admit/3` porte le preambule commun aux cinq verbes d'entree — dont le refus de carte, qui
     # doit tomber AVANT que le depot existe : la regle vit chez le seul ecrivain
-    # (`Intensity.write/2`) pour qu'aucune porte ne la contourne, et ici on lui evite de refuser
+    # (`Declaration.write/2`) pour qu'aucune porte ne la contourne, et ici on lui evite de refuser
     # apres une creation, donc une compensation.
     with {:ok, org} <- required_org(opts),
          :ok <- admit(org, name, opts),
@@ -351,7 +351,7 @@ defmodule Fleet.Project.Onboard do
   def admit(org, name, opts) when is_binary(org) and is_binary(name) do
     with :ok <- require_installed(org),
          :ok <- validate_name(name) do
-      Fleet.Project.Intensity.refute_unloadable_card("#{org}/#{name}", opts)
+      Fleet.Project.Declaration.refute_unloadable_card("#{org}/#{name}", opts)
     end
   end
 
@@ -1238,7 +1238,7 @@ defmodule Fleet.Project.Onboard do
       no separate level field. An undeclared
       project falls back to the fleet default at burn time, and that fallback is deliberately NOT
       applied here: reporting the effective card would make an undeclared project indistinguishable
-      from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`
+      from one that declared the default on purpose, and `ProjectDeclaration.pipeline_default/2`
       records an INCIDENT on the invalid path — a listing must not have side effects.
     * the STATE, read from the forge: an open parked-marker issue is the state machine
       (`project_close`'s own truth, not a second reading of it).
@@ -1300,12 +1300,12 @@ defmodule Fleet.Project.Onboard do
     full_name = "#{Keyword.get(opts, :org) || listing_org_placeholder()}/#{name}"
 
     %{"name" => name, "repo" => full_name}
-    |> Map.merge(declared_intensity(Path.join(root, name)))
+    |> Map.merge(declaration_facts(Path.join(root, name)))
     |> Map.merge(parked_state(full_name, opts))
   end
 
   # What the project DECLARES, never what it would fall back to.
-  defp declared_intensity(proj_dir) do
+  defp declaration_facts(proj_dir) do
     case File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       {:ok, raw} ->
         case Jason.decode(raw) do
@@ -1530,7 +1530,7 @@ defmodule Fleet.Project.Onboard do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- seed_protocol_labels(full_name, opts),
          :ok <- set_origin(dirs.code, url),
-         :ok <- ensure_intensity(dirs.code, full_name, opts),
+         :ok <- ensure_declaration(dirs.code, full_name, opts),
          :ok <-
            ensure_ci_workflows(
              dirs.code,
@@ -1615,7 +1615,7 @@ defmodule Fleet.Project.Onboard do
   # default) and committed, BEFORE the single main push (v2-1 of the 6-16/6-31 plan: pushed
   # AFTER, it would never reach the forge and both lock_main reads would fall back to the
   # default-card jury in silence).
-  defp ensure_intensity(
+  defp ensure_declaration(
          proj_dir,
          full_name,
          opts,
@@ -1632,7 +1632,7 @@ defmodule Fleet.Project.Onboard do
 
   # ─── LE DEPOT SE NOMME, IL NE SE DEDUIT PAS ─────────────────────────────────────────────────────
   #
-  # L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. `Intensity.write/2` resout la carte
+  # L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. `Declaration.write/2` resout la carte
   # declaree dans le catalogue DU PROJET, et il apprend lequel par `opts[:repo]`. Les quatre portes
   # d'ecriture de ce module tenaient toutes `full_name` et aucune ne le passait : la carte se
   # resolvait donc dans le catalogue RACINE, quel que soit celui du projet.
@@ -1644,11 +1644,11 @@ defmodule Fleet.Project.Onboard do
   #
   # ⚠ LE CAS LE PLUS NET EST `revise`, ET IL SE CONTREDISAIT DANS SA PROPRE CLAUSE `with` :
   # `require_loadable_card(card, full_name, opts)` accepte la carte contre le catalogue du projet,
-  # puis `Intensity.write` la refuse en la cherchant dans un autre. Une porte qui valide et ecrit ne
+  # puis `Declaration.write` la refuse en la cherchant dans un autre. Une porte qui valide et ecrit ne
   # peut pas poser la question a deux catalogues.
   #
   # POURQUOI UN POSITIONNEL ET PAS UNE CLE : une cle optionnelle s'oublie, et son oubli est SILENCIEUX
-  # — c'est litteralement le defaut qu'on ferme ici, quatre fois de suite. `Intensity.write/2` ne
+  # — c'est litteralement le defaut qu'on ferme ici, quatre fois de suite. `Declaration.write/2` ne
   # peut pas l'exiger de son cote (38 appels legitimes la declarent sans, et prennent le catalogue
   # racine a bon droit) ; ce module, lui, le peut, parce qu'ici l'ignorer est TOUJOURS un defaut.
   # Le compilateur devient le garde : on ne peut plus ecrire une declaration depuis Onboard sans
@@ -1658,7 +1658,7 @@ defmodule Fleet.Project.Onboard do
   # une liste NEUVE et jetterait un `repo:` pose en amont. Fusionne au dernier moment, il survit a
   # tout ce que les appelants font de leurs options.
   defp write_declaration(proj_dir, full_name, opts) do
-    Fleet.Project.Intensity.write(proj_dir, Keyword.put(opts, :repo, full_name))
+    Fleet.Project.Declaration.write(proj_dir, Keyword.put(opts, :repo, full_name))
   end
 
   defp adopt_face(:absent, url, dir, branch, template, name, opts) do
@@ -1722,10 +1722,10 @@ defmodule Fleet.Project.Onboard do
     4. Default branch → `main`, THREE cases: already main → no-op; main absent → rename;
        default ≠ main while a remote `main` EXISTS → `{:branch_collision, _}` (half-migrated
        repos are common; we never guess which is the real one).
-    5. Empty org repo + protocol labels + intensity committed IN the scratch BEFORE the push
+    5. Empty org repo + protocol labels + declaration committed IN the scratch BEFORE the push
        (the push must CARRY .lcars.json or every later jury read falls back in silence) →
        push main (full history) → the local `finish_import` leg (clone from OUR forge,
-       ops, protection — its `lock_main` reads the now-present local intensity).
+       ops, protection — its `lock_main` reads the now-present local declaration).
 
   Refusals before any effect: dirs already on machine (`{:already_on_machine, _}` — that
   project wants `open`/`import`), forge repo existing (`{:repo_already_exists, _}`).
@@ -1782,10 +1782,10 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # The compensable window — finish_adopt's proven order (intensity BEFORE push), then the
+  # The compensable window — finish_adopt's proven order (declaration BEFORE push), then the
   # existing local import leg for what it does (clone from OUR forge brings .lcars.json
   # back down, so ITS lock_main reads the right jury).
-  defp intensity_commit_message(opts) do
+  defp declaration_commit_message(opts) do
     door =
       case Keyword.get(opts, :source_host, "") do
         "depot:" <> _ -> "import-depot"
@@ -1801,7 +1801,7 @@ defmodule Fleet.Project.Onboard do
          # The commit message names the ACTUAL door: this leg is shared by the external import and
          # the deposit, and a deposit whose history says "import-externe" tells the project's own
          # log something that did not happen.
-         :ok <- ensure_intensity(scratch, full_name, opts, intensity_commit_message(opts)),
+         :ok <- ensure_declaration(scratch, full_name, opts, declaration_commit_message(opts)),
          :ok <-
            ensure_ci_workflows(
              scratch,
@@ -2090,7 +2090,7 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # LA REGLE A DEMENAGE CHEZ `Fleet.Project.Intensity` — l'ecrivain de la declaration — et elle ne
+  # LA REGLE A DEMENAGE CHEZ `Fleet.Project.Declaration` — l'ecrivain de la declaration — et elle ne
   # gardait ici que la REVISION. Le verbe qui CHANGE la carte d'un projet refusait donc une faute
   # de frappe pendant que les verbes qui la DECLARENT en acceptaient une, et rien ne disait que les
   # deux portes repondaient differemment a la meme question (6-125).
@@ -2098,7 +2098,7 @@ defmodule Fleet.Project.Onboard do
   # Ce qui reste ici est ce qui appartient a CE verbe : pour une revision la carte est REQUISE,
   # alors qu'a la creation son absence vaut « le defaut du catalogue ».
   defp require_loadable_card(card, repo, opts) when is_binary(card) and card != "",
-    do: Fleet.Project.Intensity.declarable_card(card, repo, opts)
+    do: Fleet.Project.Declaration.declarable_card(card, repo, opts)
 
   defp require_loadable_card(_absent, _repo, _opts), do: {:error, :workflow_map_required}
 
@@ -2119,7 +2119,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   # A REVISION REWRITES THE WHOLE DECLARATION, AND IT USED TO REWRITE IT FROM THE OPTS ALONE.
-  # `ProjectIntensity.compose/1` is a pure function of its opts — correct for an ONBOARD, where
+  # `ProjectDeclaration.compose/1` is a pure function of its opts — correct for an ONBOARD, where
   # "absent" means "the human declared nothing". At a REVISION "absent" means "the reviser did not
   # mention it", and the two were indistinguishable: a revision naming only the card DELETED
   # `max_fan` — the throughput the human chose — while `declared_by` moved to the reviser.
@@ -2131,12 +2131,12 @@ defmodule Fleet.Project.Onboard do
   #
   # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a
   # `max_fan` a human chose and this revision merely carried. It names the last writer, not the
-  # origin of every field, and the schema (`lcars/intensity-v1`) has no per-field provenance. It is
+  # origin of every field, and the schema (`lcars/declaration-v1`) has no per-field provenance. It is
   # the smaller lie: the alternative was deleting the human's declaration outright.
   defp revision_write_opts(opts, previous) do
     [
       workflow_map: Keyword.get(opts, :workflow_map),
-      intensity_justification: Keyword.get(opts, :justification),
+      justification: Keyword.get(opts, :justification),
       max_fan: Keyword.get(opts, :max_fan) || Map.get(previous, "max_fan"),
       onboarded_by: Keyword.get(opts, :revised_by) || "unknown"
     ]

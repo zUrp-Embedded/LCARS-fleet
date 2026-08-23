@@ -315,7 +315,7 @@ defmodule Fleet.Project.Roles do
   def project_ci(repo, opts \\ []) when is_binary(repo), do: ci(load_project_card(repo, opts))
 
   defp load_project_card(repo, opts) do
-    name = Fleet.Project.Intensity.pipeline_default(repo, opts)
+    name = Fleet.Project.Declaration.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
     # THE PROJECT'S OWN CATALOGUE, and it was never consulted. This read named the card and let the

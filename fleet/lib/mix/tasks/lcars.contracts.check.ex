@@ -137,7 +137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_mcp_seam_surface(root),
         check_forge_fields_read(root),
         check_forge_mutations_exposed(root),
-        check_intensity_max_fan_ceiling(root),
+        check_declaration_max_fan_ceiling(root),
         check_test_corpora_on_record(root),
         check_doctest_declarations_have_examples(root),
         check_public_functions_documented(root)
@@ -5223,14 +5223,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   # ONE FACT, TWO RENDERS — the hard ceiling on a project's in-flight workflow_runs. It is typed in
   # Elixir (`Admission.max_fan_ceiling/0`, itself derived from the pool seats a role actually has)
-  # and AGAIN in `intensity-v1.json`, because a JSON Schema cannot call a function. The declaration
+  # and AGAIN in `declaration-v1.json`, because a JSON Schema cannot call a function. The declaration
   # a human writes is validated by the schema; the value the dispatcher enforces comes from the
   # module. Let those two drift and a project declares a throughput the schema accepts and the
   # engine silently clamps away — a declaration that validates and does not apply, which is the
   # worst of the three possible outcomes.
-  @spec check_intensity_max_fan_ceiling(String.t()) :: result()
-  def check_intensity_max_fan_ceiling(root) do
-    path = Path.join([root, "priv", "cap_profile", "schema", "intensity-v1.json"])
+  @spec check_declaration_max_fan_ceiling(String.t()) :: result()
+  def check_declaration_max_fan_ceiling(root) do
+    path = Path.join([root, "priv", "cap_profile", "schema", "declaration-v1.json"])
     src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
 
     # Read from the SOURCE, never by calling `Admission.max_fan_ceiling/0`. Two reasons, and the
@@ -5263,9 +5263,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       end
 
     %{
-      id: "intensity.max_fan_ceiling",
+      id: "declaration.max_fan_ceiling",
       remediation:
-        "make properties.max_fan.maximum in intensity-v1.json equal " <>
+        "make properties.max_fan.maximum in declaration-v1.json equal " <>
           "Admission.max_fan_ceiling/0 — the module is the authority, the schema is its render",
       status: if(is_nil(broken) and schema_ceiling == module_ceiling, do: :pass, else: :fail),
       evidence:

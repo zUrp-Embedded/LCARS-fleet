@@ -39,7 +39,7 @@ restated, only pointed at.
 - `Fleet.Pilot.PodFeed` — the feed FILE primitive shared by both (name, `HH:MM` stamp, 200-line bound). The format has one owner; the log prefix stays with each facade's rail.
 - `Fleet.Pilot.WakeRecovery` — hardening of `Spawner.wake_pod/1` (re-roll / escalate).
 - `Fleet.Project.Architect` — the PER-PROJECT architect: pod-id authority + idempotent `ensure/2` (one architect per repo, project-bound identity).
-- `Fleet.Project.Intensity` — single owner of the per-project criticality declaration (`<project>/.lcars.json`, schema `intensity-v1`): written at onboarding, read at the workflow-map burn.
+- `Fleet.Project.Declaration` — single owner of the per-project criticality declaration (`<project>/.lcars.json`, schema `declaration-v1`): written at onboarding, read at the workflow-map burn.
 - `Fleet.Project.Onboard` — `onboard/2` / `import/2`: mechanically create/import a dual-dir project. Sub-module `Scaffold` (pure templates).
 
 **Primitives (single-authority utils)**

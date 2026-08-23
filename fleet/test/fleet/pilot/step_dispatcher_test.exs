@@ -931,7 +931,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     end
 
     test "6-125: a DECLARED card the catalogue no longer serves → no route posted, and a DURABLE incident" do
-      # Le cas qui survit au refus d'onboarding (`Intensity.refute_unloadable_card/2`) : la carte
+      # Le cas qui survit au refus d'onboarding (`Declaration.refute_unloadable_card/2`) : la carte
       # etait chargeable a la declaration, le catalogue l'a perdue depuis. Ce site ne se rabat PAS
       # — poser une route est durable, et une route sous une carte que personne n'a choisie fait
       # tourner le projet sous une criticite que personne n'a declaree. Il refuse, mais son refus

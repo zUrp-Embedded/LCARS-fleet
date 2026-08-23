@@ -1,7 +1,7 @@
-defmodule Fleet.Project.Intensity do
+defmodule Fleet.Project.Declaration do
   @moduledoc """
   Single owner of the per-project criticality declaration (`<project>/.lcars.json`,
-  schema `intensity-v1`) — writes it at onboarding, reads it at the workflow-map burn.
+  schema `declaration-v1`) — writes it at onboarding, reads it at the workflow-map burn.
 
   **The CARD is the HUMAN's declaration** (elicited by the framing interview — what happens
   if this deliverable is wrong? how long will it live? — and RELAYED by the architect; an
@@ -50,13 +50,13 @@ defmodule Fleet.Project.Intensity do
   # l'autorite du rangement et les deux domaines en dependent deja.
   @file_name Fleet.Layout.project_declaration_file()
 
-  # The intensity schema lives in the cap_profile canon (data, not a module frontier —
+  # The declaration schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
-  @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
+  @schema_rel Path.join(["cap_profile", "schema", "declaration-v1.json"])
 
   @doc """
   Composes, validates and writes `<proj_dir>/.lcars.json` from the onboarding opts
-  (`:intensity_justification`, `:workflow_map`, `:max_fan` — all optional: nothing declared →
+  (`:justification`, `:workflow_map`, `:max_fan` — all optional: nothing declared →
   the delegation default card, marked undeclared).
 
   `{:error, {:invalid_declaration, errors}}` on a schema-invalid composition (malformed
@@ -156,7 +156,7 @@ defmodule Fleet.Project.Intensity do
   rescue
     e ->
       Logger.error(
-        "ProjectIntensity: card #{inspect(name)} IS declared by the catalogue but FAILED TO LOAD — " <>
+        "ProjectDeclaration: card #{inspect(name)} IS declared by the catalogue but FAILED TO LOAD — " <>
           "#{inspect(e.__struct__)}: #{Exception.message(e)} (looked in #{inspect(lopts)})"
       )
 
@@ -185,7 +185,7 @@ defmodule Fleet.Project.Intensity do
     elsewhere = carriers_of(name, repo)
 
     Logger.warning(
-      "ProjectIntensity: card #{inspect(name)} is not declarable by a project — REFUSED " <>
+      "ProjectDeclaration: card #{inspect(name)} is not declarable by a project — REFUSED " <>
         "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(lopts), ", ")})" <>
         case elsewhere do
           [] ->
@@ -275,7 +275,7 @@ defmodule Fleet.Project.Intensity do
 
       other ->
         Logger.warning(
-          "ProjectIntensity: #{path} unreadable/invalid (#{inspect(other)}) — " <>
+          "ProjectDeclaration: #{path} unreadable/invalid (#{inspect(other)}) — " <>
             "falling back to the delegation default card (re-declare to repair)"
         )
 
@@ -284,13 +284,13 @@ defmodule Fleet.Project.Intensity do
 
         _ =
           try do
-            incident.("intensity", repo, :declaration_invalid,
+            incident.("declaration", repo, :declaration_invalid,
               reason_detail: "#{path}: #{inspect(other)}"
             )
           catch
             kind, why ->
               Logger.warning(
-                "ProjectIntensity: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
+                "ProjectDeclaration: fallback incident NOT recorded (#{inspect(kind)}: #{inspect(why)})"
               )
           end
 
@@ -321,7 +321,7 @@ defmodule Fleet.Project.Intensity do
   end
 
   defp compose(opts) do
-    justification = Keyword.get(opts, :intensity_justification)
+    justification = Keyword.get(opts, :justification)
     card = Keyword.get(opts, :workflow_map)
 
     # Naming a card IS the declaration (crit_quarantine): there is no separate level. A write with
@@ -331,7 +331,7 @@ defmodule Fleet.Project.Intensity do
     onboarded_by = Keyword.get(opts, :onboarded_by) || "unknown"
 
     base = %{
-      "_schema" => "lcars/intensity-v1",
+      "_schema" => "lcars/declaration-v1",
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
       "justification" => justification || default_justification(card),

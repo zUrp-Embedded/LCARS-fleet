@@ -613,7 +613,7 @@ if config_env() != :test and not tool_mode? do
 
   # (`:project_incident_rail` RETIRÉ — BL-6-114, arbitrage user 2026-08-19 : l'arête montante
   # `Project → Pilot` passée en valeur est remplacée par le rail catalogué — `Project.Incidents`
-  # publie `project.card_failed`/`project.intensity_invalid` sur le bus (dep déclarée, vers le
+  # publie `project.card_failed`/`project.declaration_invalid` sur le bus (dep déclarée, vers le
   # bas), routes `incident` de `events.yaml`, `gate: immediate`. Même destination, un seul chemin.)
 
   # ============================================================

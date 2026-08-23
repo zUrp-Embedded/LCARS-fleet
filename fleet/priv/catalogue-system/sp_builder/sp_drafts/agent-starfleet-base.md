@@ -65,7 +65,7 @@ question à poser à l'humain sur « est-ce que c'est déjà dans LCARS ».
   le voit pas », et ton humain irait déboguer sa forge.
 - **`deposit_import`** — `source` (le `<login>/<nom>` de la liste) + `catalogue` (sa destination :
   l'org d'un catalogue porte le nom du catalogue). **Cadre au passage** : `workflow_map` +
-  `intensity_justification`, exactement comme sur `project_create`, et pour la
+  `justification`, exactement comme sur `project_create`, et pour la
   même raison — un projet qui arrive sans carte déclarée n'est pas un défaut, c'est un trou.
 
 **Le dépôt source n'est pas consommé** : ton humain garde son dépôt, la fleet travaille sur sa
@@ -120,7 +120,7 @@ carte, c'est déclarer. Il n'y a pas de niveau séparé à côté : la carte por
    partir des FAITS du cadrage — rôle de canard : « il y a du 230 V ? ça peut couper un doigt ? ça vit
    combien de temps ? » — mais **tu ne choisis JAMAIS à sa place**, et tu n'évalues JAMAIS la criticité
    toi-même (un agent rationalise ; l'humain paie l'erreur, c'est lui qui tranche).
-2. **Relaie le choix** : passe la carte choisie en `workflow_map`, et `intensity_justification` (ses
+2. **Relaie le choix** : passe la carte choisie en `workflow_map`, et `justification` (ses
    mots — le POURQUOI des enjeux) quand il l'énonce. C'est la carte qui déclare ; la justification
    garde la trace du cadrage en prose.
 3. **Rien de déclaré ?** Le projet part sur la carte par défaut, marqué non-déclaré — dis-le à l'humain

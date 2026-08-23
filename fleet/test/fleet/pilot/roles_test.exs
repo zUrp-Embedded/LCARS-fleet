@@ -55,8 +55,8 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Project.Intensity.write(proj,
-          intensity_justification: "light card",
+        Fleet.Project.Declaration.write(proj,
+          justification: "light card",
           workflow_map: "c1-light"
         )
 
@@ -66,8 +66,8 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(poc)
 
       :ok =
-        Fleet.Project.Intensity.write(poc,
-          intensity_justification: "throwaway",
+        Fleet.Project.Declaration.write(poc,
+          justification: "throwaway",
           workflow_map: "c0-poc"
         )
 
@@ -106,8 +106,8 @@ defmodule Fleet.Project.RolesTest do
       # elle a ete declaree, le catalogue l'a perdue depuis. On le fabrique en editant la
       # declaration ecrite, ce qui la garde schema-valide par construction.
       :ok =
-        Fleet.Project.Intensity.write(proj,
-          intensity_justification: "card lost by the catalogue since",
+        Fleet.Project.Declaration.write(proj,
+          justification: "card lost by the catalogue since",
           workflow_map: "standard-qa"
         )
 
@@ -136,8 +136,8 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Project.Intensity.write(proj,
-          intensity_justification: "x",
+        Fleet.Project.Declaration.write(proj,
+          justification: "x",
           workflow_map: "standard-qa"
         )
 

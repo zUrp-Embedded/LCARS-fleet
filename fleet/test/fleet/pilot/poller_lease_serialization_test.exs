@@ -61,7 +61,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
   defp opts(extra \\ []),
     do: [forge_client: NoRouteForge, repo: "fleet/p", forge_opts: []] ++ extra
 
-  # A projects root holding one declaration per project, the shape `ProjectIntensity` reads.
+  # A projects root holding one declaration per project, the shape `ProjectDeclaration` reads.
   defp declare(decls) do
     root = Fleet.TestEnv.tmp_path("maxfan")
     on_exit(fn -> File.rm_rf!(root) end)
@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
         Jason.encode!(
           Map.merge(
             %{
-              "_schema" => "lcars/intensity-v1",
+              "_schema" => "lcars/declaration-v1",
               "declared_at" => "2026-08-05",
               "declared_by" => "architect",
               "justification" => "banc",

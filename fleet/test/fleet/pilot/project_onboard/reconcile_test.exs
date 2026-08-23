@@ -37,7 +37,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
     # Seul `vitrine` DECLARE. Les deux autres depots existent et ne sont pas des projets.
     def get_file("fleet/vitrine", ".lcars.json", fc) do
       send(self(), {:declaration_read, "fleet/vitrine", Keyword.get(fc, :ref)})
-      {:ok, %{content: ~s({"schema":"intensity-v1"}), sha: "deadbeef"}}
+      {:ok, %{content: ~s({"schema":"declaration-v1"}), sha: "deadbeef"}}
     end
 
     def get_file(_repo, ".lcars.json", _fc), do: {:error, :not_found}

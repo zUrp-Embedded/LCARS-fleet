@@ -2464,14 +2464,14 @@ defmodule Fleet.MCP.PodToolsTest do
                    "source" => "lordzurp/chifoumi",
                    "catalogue" => "fleet",
                    "workflow_map" => "workshop-direct",
-                   "intensity_justification" => "le poc part en prod"
+                   "justification" => "le poc part en prod"
                  },
                  pod_state(uniq("pod-sf"))
                )
 
       assert_received {:import_deposit, _src, _cat, opts}
       assert opts[:workflow_map] == "workshop-direct"
-      assert opts[:intensity_justification] == "le poc part en prod"
+      assert opts[:justification] == "le poc part en prod"
     end
 
     test "a source that is not `<login>/<name>` is REFUSED before the seam" do
