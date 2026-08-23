@@ -127,7 +127,7 @@ services:
       # ⚠ LE TAG SUIT `PROV_ELIXIR_*` DE `provision-lib.sh`, ET RIEN NE LE VERIFIE. Un runner qui
       # sert une toolchain autre que celle du deploiement fait juger sur un OTP ce qui tourne sur un
       # autre — un mensonge operationnel, pas un ecart de confort.
-      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-27.3.4.6-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli}"
       # Le daemon EMBARQUE, rootless : c'est lui que les jobs utilisent, plus celui de la machine.
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"

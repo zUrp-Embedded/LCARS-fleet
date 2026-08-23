@@ -11,15 +11,12 @@
 # et vérifiable par LE MÊME doctor. Deux substrats, une seule vérité.
 #
 # Pins par DIGEST (l'imutabilité ne se déclare pas, elle s'épingle) :
-#   - build   : hexpm/elixir 1.18.4 + Erlang/OTP 27.3.4.6 — EXACTEMENT la toolchain du chemin
-#     WSL (apt erlang 27.3.4.6 sur Ubuntu 26.04 + précompilé Elixir 1.18.4 variante OTP 27,
-#     cf. modules.d/15-toolchain.sh). ⚠ CETTE PHRASE A ÉTÉ FAUSSE : le poste est passé en 26.04
-#     (donc OTP 27) pendant que ce pin restait en 25.3.2.8, et rien ne l'a signalé — le plancher
-#     apt, côté WSL, tolère l'écart par construction. La parité tient au patch tant que l'apt de
-#     26.04 sert `1:27.3.4.6+dfsg-1` ; c'est le CI qui verrouille la compat réelle, pas ce pin.
+#   - build   : hexpm/elixir 1.18.4 + Erlang/OTP 25.3.2.8 — la même paire que
+#     `modules.d/15-toolchain.sh` (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_ZIP_SHA256`). Les deux
+#     bougent ENSEMBLE ou l'image bâtit sur un OTP que la machine n'a pas.
 #   - runtime : debian bookworm-slim — même base que l'image build (l'ERTS bundlé y est chez lui).
 # Bump = nouvelle paire tag+digest ICI (et le pin 15-toolchain en face) — nulle part ailleurs.
-ARG BUILD_IMAGE=hexpm/elixir:1.18.4-erlang-27.3.4.6-debian-bookworm-20260610-slim@sha256:cb6ea1d91e0e2411a48ead164da64812d2c2a7cae51d719c52b4c0292f6e5d3d
+ARG BUILD_IMAGE=hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim@sha256:8cae38d9bfbe3d14fc73b687cf36a9a7d5ebd6aea894dc294f35e708320d06e1
 ARG RUNTIME_IMAGE=debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
 
 # ─── Stage 1 : build — la release self-contained, par l'autorité etc/install.sh ─────────────────

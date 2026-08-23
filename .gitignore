@@ -38,3 +38,6 @@ fleet-audit-report/
 # un jour il pourra etre appele d'ailleurs.
 .bench-seed.pass
 **/.bench-seed.pass
+
+# Les paquets de `pack.sh` — un artefact ne se versionne pas dans le dépôt qui le produit.
+dist/

@@ -152,8 +152,8 @@ PROVISION_LIB_LOADED=1
 # compilé par le compilateur de 25 tournant sur une VM 27. Personne ne l'a décidé, rien ne l'a dit.
 # Bouger ce cran bouge LES DEUX ; c'est voulu, mais il faut le savoir avant de le toucher.
 : "${PROV_ELIXIR_VERSION:=1.18.4}"
-: "${PROV_ELIXIR_OTP_MAJOR:=27}"
-: "${PROV_ELIXIR_ZIP_SHA256:=5be18f35e329f7c5914a80dd9f323d7bbb144616df1ed16f6f0862a1900b4bb5}"
+: "${PROV_ELIXIR_OTP_MAJOR:=25}"
+: "${PROV_ELIXIR_ZIP_SHA256:=04ecc784c59692ce15511fbba54638d947f0566f5baf69c6542d4bf2ea89cd1a}"
 # L'humain cible des modules per-humain : celui qui a lancé (à travers sudo s'il y a lieu).
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 

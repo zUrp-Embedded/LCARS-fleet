@@ -82,6 +82,15 @@ atomic_swap_file() {
 build_release() {
   local runtime_dir="$1"
 
+  # LA RELEASE EST DEJA LA : c'est un paquet, pas un checkout. `pack.sh` a joue le gate et le build
+  # ici, et le tar porte `_build/prod/rel/` — exactement le chemin que `REL_SRC` lit plus bas. Il n'y
+  # a donc rien a compiler, et rien d'autre ne change : la pose, les symlinks, les perms sont les
+  # memes gestes.
+  if [[ -x "$runtime_dir/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ]]; then
+    echo "install: release deja batie ($runtime_dir/_build/prod/rel) — ni gate ni compilation" >&2
+    return 0
+  fi
+
   # `set -e` explicit in the subshell: bats' `run` disables errexit in the caller and a subshell
   # inherits that, so each critical command is ALSO guarded with `|| exit` — a red gate must stop the
   # build regardless of the caller's errexit state.
