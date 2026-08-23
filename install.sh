@@ -497,23 +497,13 @@ if [[ "$RAIL" == "box" ]]; then
   # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La sonde escalade
   # donc elle-même quand la socket appartient à root — et ce qui reste ici est le cas où même ça ne
   # suffit pas.
-  # ⚠ « SUDO -N N'A PAS ABOUTI » N'EST PAS UNE FIN, C'EST UNE QUESTION QUE PERSONNE NE POSE. La sonde
-  # emploie `-n` DÉLIBÉRÉMENT — elle ne doit jamais bloquer sur une invite — et son en-tête délègue
-  # la suite : « sans NOPASSWD, on rend le fait tel quel et l'appelant décide d'escalader lui-même ».
-  # Cet appelant-ci ne décidait rien : il imprimait le refus et sortait.
+  # `sudo -v` et pas un vrai sudo : il DEMANDE le mot de passe et met en cache, sans rien exécuter.
+  # Le shim de la sonde consomme ensuite ce cache, commande par commande.
   #
-  # Le rail POSTE ne voit jamais ce cas — son `exec sudo` amorce le cache pour tout ce qui suit. Le
-  # rail BOÎTE n'a pas d'escalade globale, et il ne doit pas en avoir : bâtir l'image en root ferait
-  # tourner `git` sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
-  # Son besoin tient en UNE commande, celle qui parle à la socket — d'où le shim, par commande.
+  # ⚠ NE PAS REMPLACER PAR UN `exec sudo`. Ce rail bâtit une image sous l'uid de l'humain : en root,
+  # `git` lirait son clone en « dubious ownership » et l'image sortirait estampée `unknown`.
   #
-  # `sudo -v` est exactement ce qu'il faut : il DEMANDE, il met en cache, il n'exécute rien. Le shim
-  # consomme ensuite ce cache commande par commande. Une invite, une fois, et le rail reste sous
-  # l'uid de l'humain.
-  #
-  # ⚠ SOUS TTY SEULEMENT. Sans terminal — CI, cron, `docker exec` non interactif — une invite ne
-  # peut pas être satisfaite : elle pendrait jusqu'au timeout au lieu de refuser. Là, on refuse, mais
-  # en NOMMANT le geste : un refus qui dit sa cause sans dire la sortie est un demi-message.
+  # ⚠ TTY OBLIGATOIRE : sans terminal, une invite pend jusqu'au timeout au lieu de refuser.
   if [[ "$DOCKER_OK" -eq 0 && "${PROV_DOCKER_DENIED:-0}" == "1" ]] \
      && command -v sudo >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
     echo ""
