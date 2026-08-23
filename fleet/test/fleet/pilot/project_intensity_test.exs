@@ -119,7 +119,6 @@ defmodule Fleet.Project.IntensityTest do
       capture_log(fn ->
         assert {:error, {:unknown_card, "wfmap/ghost"}} =
                  ProjectIntensity.write(tmp,
-                   intensity_level: "C2",
                    intensity_justification: "x",
                    workflow_map: "wfmap/ghost"
                  )
@@ -138,7 +137,6 @@ defmodule Fleet.Project.IntensityTest do
     # carte refusait deja ce cas ; la declaration l'acceptait.
     assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
              ProjectIntensity.write(tmp,
-               intensity_level: "C2",
                intensity_justification: "x",
                workflow_map: "workshop-direct"
              )
@@ -150,7 +148,7 @@ defmodule Fleet.Project.IntensityTest do
     # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
     # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur une boite dont le
     # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
-    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C2", intensity_justification: "x")
+    assert :ok = ProjectIntensity.write(tmp, intensity_justification: "x")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     assert d["pipeline_default"] == "brief-gate"
@@ -163,7 +161,6 @@ defmodule Fleet.Project.IntensityTest do
 
     :ok =
       ProjectIntensity.write(proj,
-        intensity_level: "C2",
         intensity_justification: "x",
         workflow_map: "standard-qa"
       )

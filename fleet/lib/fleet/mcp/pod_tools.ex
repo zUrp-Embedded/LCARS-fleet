@@ -1156,14 +1156,14 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_list" do
-    # vitrine: Liste les projets de la boîte : nom, dépôt, carte, niveau, état.
+    # vitrine: Liste les projets de la boîte : nom, dépôt, carte, état.
     meta do
       name("List Projects")
 
       description(
         "LIST the projects on this box — the counterpart of the project gestures you already " <>
           "have. Takes no argument. Returns {\"count\":N,\"projects\":[{\"name\",\"repo\"," <>
-          "\"card\",\"card_source\",\"level\",\"state\"}]}. `card_source` says whether the " <>
+          "\"card\",\"card_source\",\"state\"}]}. `card_source` says whether the " <>
           "validation card was DECLARED by a human (`declared`), never declared (`undeclared` — " <>
           "the fleet default applies at burn time), or unreadable (`invalid`/`unreadable`): a " <>
           "project that declared nothing is NOT the same as one that chose the default. `state` " <>

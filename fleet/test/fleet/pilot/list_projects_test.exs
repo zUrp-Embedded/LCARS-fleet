@@ -105,7 +105,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
     test "a declaration without a card is invalid too — the key is what governs the burn", %{
       tmp_dir: tmp
     } do
-      project(tmp, "alpha", ~s({"intensity_level":"C2"}))
+      project(tmp, "alpha", ~s({"justification":"pas de carte nommée"}))
 
       assert {:ok, [p]} = list(tmp)
       assert p["card_source"] == "invalid"

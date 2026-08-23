@@ -2354,7 +2354,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
   # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
   # rail boot ». Mesure du 2026-08-14 : le boot en jouait SIX, le verificateur QUATRE —
-  # `validate_workshop_card!` et `validate_default_card_matrix!` manquaient. Un verificateur VERT
+  # `validate_workshop_card!` et `validate_default_card_loads!` (alors `validate_default_card_matrix!`)
+  # manquaient. Un verificateur VERT
   # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
   #
   # Les deux sequences sont lues A L'AST, pas au grep : une garde citee dans un commentaire ne doit

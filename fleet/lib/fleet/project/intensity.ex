@@ -263,8 +263,8 @@ defmodule Fleet.Project.Intensity do
     # still carrying a retired key (`level`, `nature`) is `additionalProperties: false`-invalid but
     # its card is intact — full-validating here would drop every existing project to the default. We
     # read the raw access (not a guard-bound var) on purpose: it keeps the pre-existing `binary()`
-    # success type (a verified catalogue's default is always a card), so the spec stays honest and
-    # `load_project_card` keeps its non-nil guarantee.
+    # success type (a verified catalogue that ships cards always names a loadable default), so the
+    # spec stays honest and `load_project_card` keeps its non-nil guarantee.
     with {:ok, raw} <- File.read(path),
          {:ok, declaration} <- Jason.decode(raw),
          true <- is_binary(declaration["pipeline_default"]) do

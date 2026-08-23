@@ -1234,7 +1234,8 @@ defmodule Fleet.Project.Onboard do
 
   Per project, three facts and no derivation:
 
-    * the DECLARED card and level (`.lcars.json`), reported as declared or NOT. An undeclared
+    * the DECLARED card (`.lcars.json`), reported as declared or NOT — criticality IS the card,
+      no separate level field. An undeclared
       project falls back to the fleet default at burn time, and that fallback is deliberately NOT
       applied here: reporting the effective card would make an undeclared project indistinguishable
       from one that declared the default on purpose, and `ProjectIntensity.pipeline_default/2`

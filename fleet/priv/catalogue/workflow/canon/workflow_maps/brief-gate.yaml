@@ -28,10 +28,10 @@ spec:
   # ressembler a un gate qui travaille. Vert -> le jury est convoque et le FAIT voyage dans son
   # brief (le juge ne re-derive pas ce qu'une machine atteste mieux que lui).
   ci: required
-  # C2 — carte par DÉFAUT de la flotte (celle qu'un projet non déclaré obtient, à C1 : « on ne sait
-  # pas, donc on juge »). Même plancher que standard-qa : seul un finding critique renverse une
+  # C2 — carte par DÉFAUT de la flotte (celle qu'un projet non déclaré obtient : « on ne sait pas,
+  # donc on juge »). Même plancher que standard-qa : seul un finding critique renverse une
   # approbation. Un seuil plus bas sur la carte par défaut ferait payer la sévérité à des projets
-  # que personne n'a qualifiés — exactement ce que `undeclared_level` refuse de fabriquer.
+  # que personne n'a qualifiés — exactement ce qu'interdit l'absence de champ `level` dans le schéma.
   verdict_policy:
     block_at: critical
   # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
