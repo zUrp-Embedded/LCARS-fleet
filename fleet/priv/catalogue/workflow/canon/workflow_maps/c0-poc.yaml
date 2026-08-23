@@ -13,8 +13,8 @@
 kind: WorkflowMap
 metadata:
   name: c0-poc
-  description: "PoC C0 : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
-  presentation: "C0 — PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
+  description: "PoC jetable : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
+  presentation: "PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
 
 spec:
   # Jury VIDE délibéré (doctrine schéma : « an empty array is a deliberate zero-judge card »).

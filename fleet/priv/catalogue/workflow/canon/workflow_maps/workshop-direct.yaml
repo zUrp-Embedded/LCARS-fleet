@@ -33,7 +33,7 @@ kind: WorkflowMap
 metadata:
   name: workshop-direct
   description: "Ticket d'atelier — le scribe rédige sur workshop, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (rien ne sort du projet, donc aucun lecteur absent à protéger)."
-  presentation: "C0→C4 — le chemin DIRECT de l'ATELIER : le scribe rédige sur workshop (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (`destination/workshop`), jamais par projet — toute carte de criticité garde son pipeline code."
+  presentation: "Le chemin DIRECT de l'ATELIER : le scribe rédige sur workshop (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (`destination/workshop`), jamais par projet — toute carte de criticité garde son pipeline code."
   # DECLARED PER TICKET, NEVER PER PROJECT — the presentation above already said it in prose, and
   # prose is not readable by the front desk: the card was therefore offered in the framing catalogue
   # as if a project could choose it. A project that declared it would route EVERY ticket through a

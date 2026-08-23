@@ -16,7 +16,7 @@ kind: WorkflowMap
 metadata:
   name: brief-gate
   description: "Revue du brief (scoper) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
-  presentation: "C1→C4 — La carte STANDARD : un scoper valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
+  presentation: "La carte STANDARD : un scoper valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
 
 spec:
   # Jury de PR (source UNIQUE — la carte gouverne le jugement) : reviews demandées sur la PR
