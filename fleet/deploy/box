@@ -269,9 +269,10 @@ cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 # `62-runtime-helpers` pose le MEME `/opt/lcars/forge-gestures.sh` sur la machine. On l'appelle donc
 # la ou il se trouve : dans le conteneur s'il tourne, sur l'hote sinon.
 #
-# ⚠ ET ON N'ESCALADE PAS. Les fichiers que le geste lit sont `root:lcars-admin` : un operateur qui
-# n'est pas dans ce groupe se fera refuser, et c'est le fait a lui dire — pas un `sudo` glisse dans
-# un rail dont la promesse auditee est de ne jamais en demander.
+# ⚠ ET ON N'ESCALADE PAS. Ce rail joue des gestes de STRUCTURE, pas le geste d'un humain : le
+# `catalogue install` d'un operateur passe par `lcars`, qui demande a un service root, lequel
+# interroge la forge sur son adminite. Ici on est deja root (boot, ou `compose exec -u root`) — il
+# n'y a donc rien a escalader, dans un rail dont la promesse auditee est de ne jamais en demander.
 gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
     compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"

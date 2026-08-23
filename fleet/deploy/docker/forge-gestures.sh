@@ -23,7 +23,7 @@
 #
 # USAGE : forge-gestures.sh <geste>
 #   config-token   lit un jeton master sur STDIN, le VERIFIE contre la forge de la boite, puis le
-#                  pose en `0640 root:lcars-admin`. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
+#                  pose en `0600 root:root`. Un jeton qui ne s'authentifie pas n'est PAS ecrit.
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
 #   builtin-human  imprime le nom du compte integre — `forge-gestures.sh builtin-human`. Ce fichier
 #                  en est l'AUTORITE (`LCARS_BUILTIN_HUMAN`, defaut plus bas) ; le verbe existe pour
@@ -71,8 +71,6 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
 # que le verrou d'apply y vit desormais — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
 CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
-# Le groupe qui porte `is_admin` de la forge — miroir de `PROV_ADMIN_GROUP` (provision-lib).
-ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
 # L'ADRESSE du magasin d'un catalogue installe, dans SON org. Ce fichier est ce qui l'ECRIT (le
 # `push_store` plus bas), et c'est pour ca que le nom vit ici : une adresse appartient a celui qui
 # pose. Rien ne se DECIDE en la lisant — l'identite d'un magasin est `manifest.name == owner`, et
@@ -157,19 +155,21 @@ put_secret() { # $1=chemin  $2=valeur
   umask 077
   printf '%s\n' "$2" > "$tmp"
 
-  # ⚖ 2026-08-17 : `0640 root:$ADMIN_GROUP` ET PLUS `0600 root`. Le mode EST le gate — « la
-  # capacite, pas un drapeau qu'on peut oublier de poser » — mais il gatait sur `uid 0`, or aucun
-  # humain n'est root et ne le sera : le seul root est `admiral`, compte d'administration SYSTEME,
-  # dont le metier est d'installer des paquets et non des catalogues. Le groupe porte `is_admin`
-  # de la forge, projete par le convergeur d'humains. La capacite ne change pas de nature, elle
-  # change de GRANTEUR : la forge au lieu de l'uid.
-  if [[ "$(id -u)" -eq 0 ]] && getent group "$ADMIN_GROUP" >/dev/null 2>&1; then
-    chmod 0640 "$tmp"
-    chown root:"$ADMIN_GROUP" "$tmp"
-  else
-    # Pas root, ou groupe absent : on RESSERRE plutot que d'ouvrir a un groupe qu'on n'a pas pu
-    # nommer. Un secret trop ferme se diagnostique ; trop ouvert, non.
-    chmod 0600 "$tmp"
+  # ⚠ `0600 root:root`, SANS BRANCHE. Ce mode a ete un GATE : quand le geste tournait sous l'uid de
+  # l'humain, DETENIR le jeton etait la preuve du droit, donc il fallait l'ouvrir a un groupe qui
+  # portait `is_admin`. Le geste vit maintenant dans un service root qui pose la question a la forge
+  # a l'instant ou elle compte — plus personne n'a besoin de lire ce fichier.
+  #
+  # Une branche de moins, et c'est le point : un mode qui depend de l'identite de l'ecrivain donne
+  # deux etats possibles au meme secret, et c'est celui qu'on n'a pas relu qui gagne.
+  # ⚠ UN `if`, PAS `[[ ]] && cmd`. Mesure : un AND-list dont le test est faux rend 1 ; c'est sans
+  # effet au milieu d'une fonction, mais MORTEL sous `set -e` s'il en devient la derniere
+  # instruction — la fonction rend 1 et l'appelant meurt sans un mot. Ce depot a deja paye ce piege
+  # (le `return 0` OBLIGATOIRE de `converge_authority_modes`). On n'ecrit pas une ligne dont la
+  # surete depend de ce qui la suit.
+  chmod 0600 "$tmp"
+  if [[ "$(id -u)" -eq 0 ]]; then
+    chown root:root "$tmp"
   fi
   mv -f "$tmp" "$1"
 }
@@ -194,14 +194,14 @@ cmd_config_token() {
     || die "ce jeton ne s'authentifie pas sur $FORGE_BASE_URL (HTTP $code) — RIEN n'a ete ecrit" 3
 
   put_secret "$MASTER_TOKEN_FILE" "$tok"
-  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, lisible par $ADMIN_GROUP)"
+  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, root seul)"
 }
 
 cmd_config_seed() {
   local seed; seed="$(read_stdin_secret)"
   [[ -n "$seed" ]] || die "seed vide sur stdin"
   put_secret "$SEED_FILE" "$seed"
-  echo "forge-gestures: seed pose ($SEED_FILE, lisible par $ADMIN_GROUP)"
+  echo "forge-gestures: seed pose ($SEED_FILE, root seul)"
 }
 
 # ⚠ UN SEUL APPLY A LA FOIS. Deux `forge-apply` concurrents ecriraient le meme `terraform.tfstate`
@@ -213,26 +213,23 @@ cmd_config_seed() {
 # quand l'autre finit, et il repartirait sur une forge qui a bouge sous lui. Meme choix que
 # `provision`, qui refuse aussi (`un autre apply est en cours`).
 #
-# ⚠ LE VERROU VIVAIT DANS `/run/lock`, ET IL N'ETAIT PRENABLE QUE PAR SON PREMIER CREATEUR.
-# `/run/lock` est en `1777` : n'importe qui y CREE un fichier — mais le boot joue l'apply en ROOT,
-# donc root creait `lcars-forge-apply.lock` en `0644 root:root`, et l'humain qui jouait
-# `lcars catalogue install` ensuite ouvrait en ecriture un fichier qui ne lui appartenait pas.
-# Mesure du 2026-08-18, reproduite sur deux bancs : « Permission denied », puis « verrou d'apply
-# inouvrable » — un refus qui accuse le verrou pour un probleme de proprietaire. Le geste etait
-# donc injouable par un humain sur toute boite ayant demarre une fois.
+# ⚠ IL N'Y A PLUS QU'UNE SEULE IDENTITE DE CHAQUE COTE DE CE VERROU, ET C'EST CE QUI LE SIMPLIFIE.
+# Il a fallu le partager entre DEUX : root au boot et l'humain admin ensuite. Il vivait dans
+# `/run/lock` (1777), donc root le creait en `0644 root:root` et l'humain qui jouait
+# `lcars catalogue install` ouvrait en ecriture un fichier qui ne lui appartenait pas — mesure du
+# 2026-08-18, sur deux bancs : « Permission denied », puis « verrou d'apply inouvrable », un refus
+# qui accuse le verrou pour un probleme de proprietaire. Le geste etait injouable par un humain sur
+# toute boite ayant demarre une fois. Le partage par setgid + `umask 007` a ferme ce defaut.
 #
-# Il vit maintenant dans `$CATALOGUE_WORK`, et ce n'est pas un deplacement de commodite : ce
-# repertoire est POSE PAR LE PROVISIONNEMENT en `2770 root:$ADMIN_GROUP`, c'est-a-dire avec
-# exactement la reponse a « qui a le droit de jouer un geste de structure ». Le setgid donne le
-# groupe, `umask 007` a la creation donne l'ecriture — donc root au boot et l'humain admin ensuite
-# ouvrent le MEME verrou, quel que soit celui des deux qui l'a cree en premier.
+# Les deux appelants sont ROOT desormais : le boot, et `catalogue-executor.py`. Le partage entre
+# deux identites n'a plus d'objet — mais on ne DURCIT pas le verrou pour autant, parce qu'un verrou
+# est un rendez-vous, pas un secret : le resserrer n'ajoute aucune garde et casserait toute boite
+# migree dont le fichier existe deja.
 with_apply_lock() {
   local lock="${LCARS_APPLY_LOCK:-$CATALOGUE_WORK/.apply.lock}"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
-  # `umask 007` PORTE LE PARTAGE, et il ne vaut qu'a la creation : un fichier deja la garde son
-  # mode. C'est voulu — un operateur qui a durci ce verrou n'est pas contredit en silence.
-  [[ -e "$lock" ]] || ( umask 007; : > "$lock" ) 2>/dev/null || true
-  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — regarde son proprietaire et son mode : il doit etre ouvrable en ecriture par $ADMIN_GROUP (le provisionnement pose $CATALOGUE_WORK en 2770 root:$ADMIN_GROUP)"
+  [[ -e "$lock" ]] || ( : > "$lock" ) 2>/dev/null || true
+  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — regarde son proprietaire et son mode : ce geste tourne en root, donc un refus ici designe un montage ou un systeme de fichiers en lecture seule, pas une permission"
   flock -n 9 || die "un autre apply de structure est en cours (verrou $lock) — rien n'a ete tente"
   "$@"
 }
@@ -636,10 +633,14 @@ cmd_runner_token() {
 # declenche par le boot : une mise a jour automatique changerait le metier sous les pieds d'une
 # flotte qui tourne.
 #
-# LE GATE ADMIN N'EST PAS UN DRAPEAU QU'ON INVENTE. Installer exige de lire le jeton master
-# (`0640 root:lcars-admin`, groupe derive de `is_admin`) et d'ecrire l'etat de tofu : la capacite
-# EST la permission. Un non-admin qui tente le
-# geste est refuse par le systeme de fichiers, pas par un booleen qu'on pourrait oublier de poser.
+# ⚠ CE FICHIER NE GATE PLUS RIEN, ET IL NE DOIT PAS ESSAYER. L'autorisation est prise EN AMONT, par
+# `catalogue-executor.py` : il lit l'uid du pair que le noyau pose sur sa socket, demande a la forge
+# si ce login y porte `is_admin`, et n'appelle ce geste que si la reponse est oui. Ce script tourne
+# donc toujours en root, appele par un service, jamais par un humain.
+#
+# Le mode du jeton a ete le gate — « la capacite EST la permission » — et c'est precisement ce qui
+# imposait un groupe unix, sa projection depuis `is_admin`, son cache et son rattrapage de derive.
+# Un second gate ici serait une seconde verite sur la meme question.
 #
 # ⚠ UN DOSSIER DE RECETTE PAR CATALOGUE. La recette lit `roles.auto.tfvars.json` dans son propre
 # dossier, et ce fichier porte l'org ET le roster : deux catalogues dans le meme dossier, c'est le

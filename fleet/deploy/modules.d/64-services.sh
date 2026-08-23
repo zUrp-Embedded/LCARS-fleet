@@ -73,7 +73,7 @@ SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
 # DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
-UNITS=(lcars-landing lcars-converger)
+UNITS=(lcars-landing lcars-converger lcars-catalogue)
 
 # ─── QUI DÉMARRE QUOI — LA TABLE, PARCE QU'UNE PROSE NE SE VÉRIFIE PAS ──────────────────────────
 #
@@ -96,6 +96,7 @@ STARTERS=(
   "human-converger.sh:unit:lcars-converger"
   "console-landing.sh:unit:lcars-landing"
   "console.sh:driven-by:lcars-converger"
+  "catalogue-executor.py:unit:lcars-catalogue"
 )
 
 have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
@@ -127,7 +128,6 @@ services_env_body() {
   echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
   echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
-  echo "PROV_ADMIN_GROUP=$PROV_ADMIN_GROUP"
   echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
@@ -181,6 +181,32 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
       ;;
+    lcars-catalogue)
+      # ⚠ CE SERVICE TIENT L'AUTORITÉ TOTALE DE LA FORGE, et c'est le seul de la machine dans ce cas.
+      # Il ne fait pas d'escalade pour un appelant : il RÉPOND à une demande, après avoir demandé à
+      # la forge si le pair — dont le noyau lui donne l'uid — y porte `is_admin`.
+      #
+      # ⚠ PAS DE `User=` : il lit le jeton master, qui est `0600 root:root`. Lui retirer root
+      # reviendrait à lui retirer la seule chose qu'il apporte, et le geste redeviendrait celui de
+      # l'humain — c'est-à-dire exactement l'état qu'il remplace.
+      cat <<EOF
+[Unit]
+Description=LCARS — installe un catalogue pour un admin de la forge, sans jamais lui donner le jeton
+Documentation=file://$HELPERS_DIR/catalogue-executor.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=/usr/bin/env python3 $HELPERS_DIR/catalogue-executor.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
     *) return 1 ;;
   esac
 }
@@ -217,7 +243,19 @@ check() {
     if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
       p_ok "$u.service actif"
     else
-      p_drift "$u.service posé mais PAS actif — $( [[ "$u" == lcars-landing ]] && echo 'personne ne peut entrer' || echo 'personne ne sera enrole' )"
+      # ⚠ UNE CONSEQUENCE PAR UNITE, ET LA TABLE EST LA POUR QU'ON NE PUISSE PAS EN OUBLIER UNE.
+      # Ce message a ete un ternaire sur `lcars-landing`, donc TOUTE autre unite heritait de
+      # « personne ne sera enrole ». L'ajout de `lcars-catalogue` a fait dire a un service de
+      # catalogue qu'il empechait l'enrolement des humains : la mauvaise porte, au moment ou
+      # l'operateur en cherche une.
+      local quoi
+      case "$u" in
+        lcars-landing)   quoi="personne ne peut entrer" ;;
+        lcars-converger) quoi="personne ne sera enrole" ;;
+        lcars-catalogue) quoi="« lcars catalogue install » refusera, en nommant ce service" ;;
+        *)               quoi="consequence NON DECLAREE pour cette unite — ajoute-la ici" ;;
+      esac
+      p_drift "$u.service posé mais PAS actif — $quoi"
     fi
   done
 

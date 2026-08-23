@@ -80,8 +80,8 @@ ONCE=0
 
 FORGE="${FORGE_BASE_URL:-}"
 # ⚠ CES NOMS SONT CEUX DU PROVISIONNEMENT, ET C'ETAIT UN SECOND JEU. Ce script lisait
-# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_ADMIN_GROUP` / `LCARS_FLEET_GROUP` pendant que
-# `provision-lib.sh` declare `PROV_FORGE_ORG` / `PROV_ADMIN_GROUP` / `PROV_FLEET_GROUP` — mesure du
+# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_FLEET_GROUP` pendant que `provision-lib.sh`
+# declare `PROV_FORGE_ORG` / `PROV_FLEET_GROUP` — mesure du
 # 2026-08-17 : 59 occurrences `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Deux
 # jeux de noms pour UN fait, que personne ne pose, et dont les DEFAUTS portaient seuls l'accord :
 # un operateur qui pose `PROV_FORGE_ORG=starfleet` provisionne une org que ce convergeur
@@ -99,10 +99,6 @@ TEAM="${PROV_HUMANS_TEAM:-humans}"
 # répond pas ».
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/$SYSTEM_ACCOUNT.gitea_token}"
-# L'AUTORITE, lue SEULEMENT pour la question de l'adminite — cf. `forge_is_admin`. Le convergeur
-# tourne en root permanent, donc il peut deja lire ce fichier ; ce qui change est qu'il s'en sert.
-MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
-ADMIN_GROUP="${PROV_ADMIN_GROUP:-lcars-admin}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 # CADENCE DE RECONCILIATION DE L'ETAT DES HUMAINS DEJA LA. La boucle rapide ci-dessus ne cree que
@@ -361,46 +357,20 @@ absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par 
   return 0
 }
 
-# ─── L'ADMINITE : UN FAIT DE FORGE, PROJETE EN GROUPE UNIX ──────────────────────────────────────
+# ─── L'ADMINITE N'EST PLUS PROJETEE, ET CE MODULE N'EN SAIT PLUS RIEN ───────────────────────────
 #
-# ⚖ ARBITRAGE USER (2026-08-17) : « mon is_admin, c'est l'user est admin SUR LA FORGE — le seul
-# root c'est l'admiral, et c'est le compte d'administration SYSTEME, pas un compte de gestion de la
-# fleet ». Le deck lit deja `is_admin` a chaque connexion OIDC (`console-deck.py`) ; le CLI, lui,
-# gatait `catalogue install` sur `uid 0`. Cette passe est ce qui met les deux d'accord.
+# IL Y A EU ICI UNE CINQUIEME PASSE, `converge_admins`, qui lisait `is_admin` sur la forge avec le
+# JETON MASTER et le recopiait en adhesion a un groupe unix. Elle est retiree, avec `forge_is_admin`
+# et la seule raison qu'avait ce fichier de lire l'autorite de la boite.
 #
-# ⚠ IL FAUT LE JETON MASTER, ET CE N'EST PAS UN CHOIX. MESURE 2026-08-17 sur Gitea 1.26.1 : le
-# champ `is_admin` est MASQUE aux lecteurs non-admin — `/api/v1/users/admiral` rend
-# `is_admin: false` sous le jeton systeme ET en anonyme, alors que le compte l'est. Seul un lecteur
-# site-admin voit vrai. Un convergeur branche sur le jeton systeme n'aurait donc jamais accorde
-# l'adminite a personne : fail-closed, et parfaitement inutile.
+# ⚠ CE N'EST PAS UNE SIMPLIFICATION, C'EST UN CHANGEMENT DE NATURE. Les quatre autres blocs font du
+# PROVISIONNEMENT : un compte unix ne se cree pas au moment ou quelqu'un tape, donc il faut le
+# poser d'avance. Une AUTORISATION, elle, se demande a l'instant ou elle compte. Recopier un booleen
+# d'autorisation en fait un CACHE — pose au login, jamais rattrape dans un process vivant — et un
+# cache demande un poll pour le rafraichir, puis un rattrapage pour les shells nes avant lui.
 #
-# PAR MEMBRE ET NON EN LOT (`/admin/users`), pour la semantique d'erreur : une lecture qui echoue
-# sur UNE personne laisse cette personne intacte, au lieu d'empoisonner la passe entiere. Le roster
-# d'une boite compte des unites, pas des milliers.
-#
-# rc 0 = PROUVE admin · 1 = PROUVE non-admin · 2 = pas su lire (on ne conclut RIEN)
-forge_is_admin() { # forge_is_admin <login>
-  [[ -r "$MASTER_TOKEN_FILE" ]] || return 2
-  local out code body
-  out="$(curl -s -m 15 -w '\n%{http_code}' \
-         -H "Authorization: token $(tr -d '[:space:]' < "$MASTER_TOKEN_FILE")" \
-         "$FORGE/api/v1/users/$1" 2>/dev/null)" || return 2
-  code="${out##*$'\n'}"
-  body="${out%$'\n'*}"
-  [[ "$code" == "200" ]] || return 2
-  # ⚠ `.is_admin // "?"` EST FAUX ET SON TEMOIN L'A ATTRAPE : l'operateur `//` de jq traite `false`
-  # comme une absence, donc un non-admin PROUVE se lisait « pas su lire ». La consequence n'etait
-  # pas theorique — c'est exactement la branche qui DEMOTE : une demotion sur la forge n'aurait
-  # jamais retire le groupe, et l'ancien admin aurait garde l'autorite de la boite indefiniment.
-  # `has()` distingue « le champ dit false » de « le champ n'est pas la », et c'est toute la
-  # question ici, puisque la charge d'un lecteur non-admin OMET la verite du champ.
-  case "$(printf '%s' "$body" | jq -r 'if has("is_admin") then .is_admin else "?" end' 2>/dev/null)" in
-    true)  return 0 ;;
-    false) return 1 ;;
-    *)     return 2 ;;
-  esac
-}
-
+# `catalogue-executor.py` pose la question a la forge quand le geste arrive. Il n'y a donc plus rien
+# a projeter, plus rien a rafraichir, et plus rien a rattraper.
 
 # UNE CONSOLE SE GARANTIT, ELLE NE SE LANCE PAS « UNE FOIS ». Ce geste etait ecrit DEUX fois — a la
 # creation d'un user, et a sa reintegration — et il manquait au TROISIEME chemin : l'humain dont le
@@ -439,10 +409,10 @@ ensure_console() { # ensure_console <login>
 # travaille, ou accordent l'administration du runtime a qui ne l'a pas — elles sont donc lisibles et
 # testables sans lancer la boucle.
 #
-# ⚠ CETTE FRONTIERE EXISTAIT ET JE L'AI ENJAMBEE EN ECRIVANT `forge_is_admin` PLUS BAS : la sonde
-# etait inatteignable a tout temoin, et ses six temoins echouaient en `command not found` — un
-# refus franc, mais qui aurait pu passer pour « la sonde refuse » si je les avais ecrits moins
-# serres. Ce qui doit etre epingle vit AVANT cette ligne ; ce qui AGIT vit apres.
+# ⚠ CETTE FRONTIERE A DEJA ETE ENJAMBEE UNE FOIS, par une sonde ecrite plus bas : elle devenait
+# inatteignable a tout temoin, et ses six temoins echouaient en `command not found` — un refus
+# franc, mais qui aurait pu passer pour « la sonde refuse » si je les avais ecrits moins serres.
+# Ce qui doit etre epingle vit AVANT cette ligne ; ce qui AGIT vit apres.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 command -v curl >/dev/null || { err "curl absent de l'image"; exit 1; }
@@ -574,66 +544,6 @@ reconcile_humans() { # reconcile_humans <login…>
   done
   [[ "$n" -gt 0 ]] && say "$n humain(s) reconcilie(s) (passe lente, toutes les ${RECONCILE_EVERY}s)"
   return 0
-}
-
-# ⚠ LA DEMOTION NE MORD PAS SUR CE QUI TOURNE DEJA, et c'est la meme mecanique que la revocation
-# documentee en tete de fichier : un process porte ses groupes supplementaires depuis son login, et
-# `/etc/group` ne le rattrape jamais. On ne tue PAS pour autant — une demotion n'est pas une
-# revocation : la personne reste un worker legitime, et interrompre son travail pour lui retirer un
-# droit qu'elle n'exerce peut-etre pas serait un cout sans rapport avec la decision prise.
-#
-# LE DECK NE FERME PAS PLUS VITE, contrairement a ce que cette ligne a longtemps affirme (« ferme
-# IMMEDIATEMENT »). Il lit `is_admin` UNE FOIS, au retour OIDC, et le booleen vit dans la session
-# jusqu'a son terme. Une demotion se voit donc a la prochaine CONNEXION, jamais au prochain clic —
-# et la phrase se contredisait dans sa propre seconde moitie. Sans consequence aujourd'hui :
-# l'onglet ne commande aucun backend. C'est la premiere chose a revoir le jour ou il en commandera
-# un, car le droit serait alors porte par un cache, pas par une lecture.
-#
-# Ce qui survit cote systeme est une session shell OUVERTE AVANT la demotion : un process porte ses
-# groupes depuis son login. Le geste qui la ferme est nomme dans le message, et il appartient a
-# l'operateur.
-converge_admins() { # converge_admins <login...>
-  getent group "$ADMIN_GROUP" >/dev/null 2>&1 || {
-    err "groupe $ADMIN_GROUP absent — aucune adminite projetee (« provision apply » le cree)"
-    return 0; }
-
-  local login rc
-  for login in "$@"; do
-    [[ -n "$login" ]] && ! reserved "$login" || continue
-    id "$login" >/dev/null 2>&1 || continue
-
-    forge_is_admin "$login"; rc=$?
-    case "$rc" in
-      0)
-        if ! id -nG "$login" | tr ' ' '\n' | grep -qx "$ADMIN_GROUP"; then
-          # ⚠ `ensure_console` N'EST PAS DECORATIF ICI, ET SON ABSENCE RENDAIT CETTE PROMOTION
-          # INOPERANTE. `usermod -aG` ecrit la base et ne touche AUCUN process ; le ttyd de la
-          # console, lui, a fige ses groupes a son lancement (`setpriv --init-groups`), et
-          # `ensure_console` retournait tot tant que sa socket repondait. « Effectif a sa prochaine
-          # session » etait donc faux pour la seule surface ou l'humain tape des commandes : son
-          # onglet ne redemarre pas, il n'y a pas de prochaine session. `console.sh` mesure
-          # desormais la derive et tape `newgrp` dans ses panes — cf. `missing_group_of` la-bas.
-          # On l'appelle ICI plutot que d'attendre le tour suivant : 30 s de plus sur un droit
-          # qu'on vient d'accorder, pour un geste qu'on tient deja.
-          usermod -aG "$ADMIN_GROUP" -- "$login" 2>/dev/null \
-            && { say "$login : ADMIN sur la forge -> $ADMIN_GROUP (« newgrp » est tape dans sa console ; une session ssh ouverte garde ses groupes jusqu'a sa fin)"
-                 ensure_console "$login"; }
-        fi
-        ;;
-      1)
-        if id -nG "$login" | tr ' ' '\n' | grep -qx "$ADMIN_GROUP"; then
-          gpasswd -d "$login" "$ADMIN_GROUP" >/dev/null 2>&1 \
-            && say "$login : plus admin sur la forge -> retire de $ADMIN_GROUP. Une session OUVERTE
-      garde le groupe jusqu'a sa fin (« pkill -u $login » pour trancher tout de suite) ; l'onglet
-      admin du deck, lui, se ferme des sa prochaine connexion."
-        fi
-        ;;
-      *)
-        # NI PROMOTION NI DEMOTION SUR UNE LECTURE NON PROUVEE — le meme garde que la revocation.
-        # Sans jeton master la boite ne peut pas repondre a la question : elle ne l'invente pas.
-        : ;;
-    esac
-  done
 }
 
 converge_once() {
@@ -770,10 +680,6 @@ converge_once() {
   # trouvee, reponse non vide) : les deux sorties precedentes de cette fonction sont ce qui empeche
   # un hoquet reseau de revoquer toute la boite.
   revoke_absent "${roster[@]}"
-
-  # L'ADMINITE, sur le MEME roster prouve : qui administre le runtime est une decision prise sur la
-  # forge, et ceci n'est que sa projection.
-  converge_admins "${roster[@]}"
 
   # LA PASSE LENTE, sur les membres DEJA presents. `id <login>` plus haut dit que l'user EXISTE —
   # pas que son etat est converge, et le commentaire disait « deja converge : rien a dire ».

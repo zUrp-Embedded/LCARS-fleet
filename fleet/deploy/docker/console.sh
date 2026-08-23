@@ -123,9 +123,14 @@ PROBE
 # MESURE DU 2026-08-21, ET C'EST LE DEFAUT QUI RENDAIT LA PROMOTION INOPERANTE. Une console est
 # lancee par `setpriv --reuid <h> --regid <h> --init-groups`, et `--init-groups` lit la base des
 # groupes UNE FOIS, a l'exec. Le set atterrit donc dans TTYD, et tout ce qu'il engendre en herite :
-# le serveur tmux, le shell, ce que l'humain y tape. Quand le convergeur projette `is_admin` en
-# `usermod -aG lcars-admin`, il ecrit /etc/group et ne touche AUCUN process vivant — la regle Unix
-# qui vaut deja pour la revocation, en tete de `human-converger.sh`.
+# le serveur tmux, le shell, ce que l'humain y tape. Un `usermod -aG` ecrit /etc/group et ne touche
+# AUCUN process vivant — la regle Unix qui vaut deja pour la revocation, en tete de
+# `human-converger.sh`.
+#
+# ⚠ CE GESTE NE NOMME AUCUN GROUPE, ET C'EST CE QUI LE FAIT SURVIVRE. Il est ne pour rattraper la
+# projection de `is_admin` en groupe unix, qui n'existe plus — l'adminite se demande a la forge a
+# l'instant du geste. Il mesure une derive GENERIQUE : le premier gid que la base accorde et que ce
+# ttyd ne porte pas, quel qu'il soit. `fleet` en fait partie, donc il garde un objet.
 #
 # Jusqu'ici la sonde d'idempotence ci-dessus etait le SEUL predicat : socket qui repond -> on ne
 # touche a rien. Pour la console du deck, la consequence n'etait pas « effectif a sa prochaine

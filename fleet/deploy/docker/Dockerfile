@@ -555,6 +555,9 @@ COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
 # d'en porter chacun une copie (le banc ne peut pas appeler `docker.sh` — sa boite vient d'un autre
 # couple de fichiers compose, et `docker.sh` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY fleet/deploy/docker/forge-gestures.sh /opt/lcars/forge-gestures.sh
+# L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
+# service demarre et refuse chaque demande sur un fichier absent.
+COPY fleet/deploy/docker/catalogue-executor.py /opt/lcars/catalogue-executor.py
 COPY fleet/deploy/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
@@ -615,6 +618,7 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/human-converger.sh \
+               /opt/lcars/catalogue-executor.py \
                /usr/local/bin/lcars-toolchain-converge \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \

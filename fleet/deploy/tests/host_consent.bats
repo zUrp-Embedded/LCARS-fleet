@@ -31,7 +31,6 @@ setup() {
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
   export PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_ADMIN_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 }

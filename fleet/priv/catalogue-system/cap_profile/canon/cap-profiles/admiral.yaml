@@ -29,10 +29,11 @@ metadata:
   # mur d'egress est un objet bwrap (socket -> socat -> proxy), et ce pod n'en a aucun. `egress`
   # dit l'intention vraie : cet agent atteint la forge et le monde directement.
   network: egress
-  # Pas de compte forge de ROLE : ses lectures forge passent par le master token que son skill
-  # `system-issues` lit sur le disque (0640 root:lcars-admin — atteignable parce que la seance
-  # tourne chez un humain que l'admin supervise, et par ssh/root en secours). Meme asymetrie
-  # declaree que starfleet, meme champ.
+  # Pas de compte forge de ROLE : les lectures de son skill `system-issues` passent par le JETON
+  # SYSTEME de la boite (0640 root:fleet) sur deux points d'entree PUBLICS du depot ops. Aucune
+  # n'est site-admin, donc aucune n'a besoin d'une autorite — et ce siege n'en detient aucune : la
+  # seule autorite est le drapeau `is_admin` de la forge, demande a l'instant d'un geste qui en
+  # exige une. Meme asymetrie declaree que starfleet, meme champ.
   forge_identity: false
   # Hors sandbox : AUCUN mount a declarer — bwrap n'existe pas ici, le pod voit la boite.
   mounts: []

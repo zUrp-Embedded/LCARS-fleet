@@ -33,7 +33,6 @@ setup() {
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
   export PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_ADMIN_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
@@ -96,15 +95,30 @@ EOF
   chmod 0755 "$BINDIR/curl"
 }
 
-@test "apply POSE les sept auxiliaires, identiques a leur source" {
+# LA LISTE VIENT DU MODULE, ELLE N'EST PAS RECOPIEE ICI. Deux temoins portaient chacun leur copie
+# des huit noms : ajouter un auxiliaire au module les laissait VERTS sur l'ancienne liste, donc
+# muets sur exactement ce qu'ils gardent. Un instrument qui mesure une copie de la source ne mesure
+# pas la source — il est vert au moment precis ou ca derive.
+helpers() {
+  sed -n '/^HELPERS=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d ' \t' | grep -v '^$'
+}
+
+@test "la liste des auxiliaires n'est pas VIDE — un instrument casse rend zero, comme un sans-faute" {
+  # Sans ce garde, une extraction cassee (tableau renomme, parenthese deplacee) rendrait une liste
+  # vide et les deux temoins ci-dessous passeraient en n'ayant RIEN verifie.
+  [ "$(helpers | wc -l)" -ge 8 ]
+  helpers | grep -qx 'console-deck.py'
+}
+
+@test "apply POSE les auxiliaires du module, identiques a leur source" {
   stub_curl "peu importe"
   mod apply
 
   local n
-  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh forge-gestures.sh; do
+  while read -r n; do
     [ -x "$LCARS_HELPERS_DIR/$n" ]
     cmp -s "$SRC_DIR/$n" "$LCARS_HELPERS_DIR/$n"
-  done
+  done < <(helpers)
 }
 
 @test "apply POSE le convergeur de toolchain au chemin que le sudoers etroit designe" {
@@ -159,12 +173,23 @@ EOF
 }
 
 @test "la liste des auxiliaires est le MIROIR du COPY de l'image — sans entrypoint.sh" {
-  # Chaque nom pose ici doit avoir son `COPY … /opt/lcars/<nom>` dans le Dockerfile, et
-  # reciproquement — sauf `entrypoint.sh`, qui n'a pas de sens hors conteneur.
+  # ⚠ CE TEMOIN PROMETTAIT « et reciproquement » ET NE LE FAISAIT PAS. Il portait une liste
+  # RECOPIEE de huit noms et verifiait un seul sens ; un auxiliaire ajoute au module sans son `COPY`
+  # passait au vert, et le rail conteneur demarrait un service sur un fichier absent. Les deux sens
+  # sont derives, maintenant, et c'est ce qui rend la phrase vraie.
   local n
-  for n in console.sh console-humans.sh console-status.sh console-landing.sh console-deck.py console-pod.sh human-converger.sh forge-gestures.sh; do
+  while read -r n; do
     grep -q "COPY fleet/deploy/docker/$n */opt/lcars/$n" "$DOCKERFILE"
-  done
+  done < <(helpers)
+
+  # SENS INVERSE : ce que l'image pose a plat dans /opt/lcars doit etre un auxiliaire du module.
+  # Deux exclusions, et elles sont NOMMEES : `entrypoint.sh` (aucun sens hors conteneur) et
+  # `console.tmux.conf` (une config, pas un executable a deployer).
+  while read -r n; do
+    case "$n" in entrypoint.sh|console.tmux.conf) continue ;; esac
+    helpers | grep -qx "$n"
+  done < <(sed -n 's|^COPY fleet/deploy/docker/\([^ ]*\) */opt/lcars/\1$|\1|p' "$DOCKERFILE")
+
   ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
 }
 
