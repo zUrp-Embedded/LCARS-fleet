@@ -59,14 +59,20 @@ say "release prod…"
 # `git archive` donne l'arbre suivi (ce que la forge sert déjà en `main.tar.gz`), et on y ajoute le
 # `_build/prod/rel/` que le gate vient d'attester. Deux morceaux, une seule racine : untar, et
 # `install.sh` est là où il a toujours été.
-say "tar → $OUT"
+# ⚠ UNE RACINE, ET FIXE. Un tar qui se déverse dans le répertoire courant salit ce qu'il touche et
+# ne se défait pas ; le nom est le MÊME à chaque version — `tar xzf … && cd lcars_install &&
+# bash install.sh` s'écrit une fois et ne change plus. Le numéro vit dans le nom du fichier, pas
+# dans le chemin qu'on tape.
+ROOT="lcars_install"
+say "tar → $OUT  (racine : $ROOT/)"
 mkdir -p dist
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
-git archive --format=tar HEAD | tar -x -C "$STAGE" || die "git archive KO"
-mkdir -p "$STAGE/fleet/_build/prod/rel"
-cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/fleet/_build/prod/rel/" || die "release introuvable après le build"
-tar -czf "$OUT" -C "$STAGE" . || die "tar KO"
+mkdir -p "$STAGE/$ROOT"
+git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
+mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
+cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
+tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 ( cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
 
 
