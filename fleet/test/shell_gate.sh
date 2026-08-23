@@ -30,6 +30,7 @@ PYTESTS=(
   "$HERE/test_fleet_mcp_stdio_bridge.py"
   "$HERE/test_console_deck.py"
   "$HERE/test_uninstructed_commands.py"
+  "$HERE/test_catalogue_executor.py"
 )
 
 # Politique bats-absent : warning compte (defaut) vs echec dur. Overridable par env pour le jour du

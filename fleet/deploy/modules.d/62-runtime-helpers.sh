@@ -71,6 +71,10 @@ HELPERS=(
   # moindre hypothèse de conteneur, son `PRIVATE_DIR` défaute même sur `/home/private`, un chemin
   # d'hôte. C'est l'appelant qui le forçait dans un `docker create`.
   forge-gestures.sh
+  # L'exécuteur de catalogue : le seul process de la boîte qui tienne l'autorité de la forge. Il est
+  # posé ICI et pas ailleurs parce qu'il APPELLE `forge-gestures.sh` — les deux doivent atterrir
+  # ensemble, sur les deux rails, ou le service démarre et refuse chaque geste sur un fichier absent.
+  catalogue-executor.py
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────

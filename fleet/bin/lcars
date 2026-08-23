@@ -449,189 +449,141 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # plus de materiel localement : la source arrive par la FORGE — un humain pousse son catalogue dans
 # son espace personnel, un admin l'installe. Le materiel local devient un cache derive.
 #
-# LE GATE EST LA CAPACITE, PAS UN DRAPEAU. Installer exige de lire le jeton master
-# (`0640 root:lcars-admin`) et d'ecrire l'etat de tofu : un non-admin est refuse par le systeme de
-# fichiers, jamais par un booleen qu'on pourrait oublier de poser. Cette commande NE LE CONTOURNE
-# PAS — elle NOMME ce qui manque au lieu d'echouer sur une permission qui n'apprend rien.
+# CETTE COMMANDE NE DETIENT PLUS RIEN, ET C'EST TOUT LE DESIGN. Elle ne lit aucun secret, n'execute
+# aucun geste, ne teste aucun groupe : elle DEMANDE a un service root par une socket unix, qui pose
+# la question a la forge et agit. Detenir le pouvoir n'est plus la preuve du droit.
 #
-# ⚖ 2026-08-17 : le groupe porte `is_admin` DE LA FORGE, projete par le convergeur d'humains. Le
-# gate ne change pas de nature, il change de GRANTEUR — la forge au lieu de `uid 0`, que personne
-# n'a ni n'aura.
-# DEUX ETATS, DEUX MESSAGES — et les confondre a coute une heure de diagnostic (2026-08-20).
-# `-r` echoue pour deux raisons qui n'ont rien a voir :
-#   1. le compte n'est pas admin sur la forge, donc pas dans le groupe ;
-#   2. il l'est devenu APRES l'ouverture de la session.
-# Un process porte ses groupes supplementaires depuis son LOGIN : `usermod -aG` ecrit /etc/group et
-# ne touche aucun process vivant. Le message unique annoncait la cause 1 et prescrivait une
-# promotion DEJA FAITE — un diagnostic faux qui envoie chercher ailleurs.
+# ⚠ IL N'Y A RIEN A PROUVER DANS CE QU'ON ENVOIE. L'identite de l'appelant est posee par le NOYAU
+# sur la socket (`SO_PEERCRED`, lu cote service) : elle n'est ni envoyee, ni declarable, ni
+# falsifiable ici. Un champ « login » sur le fil serait une seconde autorite, et la mauvaise.
 #
-# LA DIFFERENCE SE MESURE, elle ne se devine pas : `id -nG <compte>` lit la BASE, `id -nG` nu lit
-# le PROCESS. Le groupe compare est celui que porte le fichier, pas un nom recopie ici — le mode
-# est le gate, il est donc aussi la source.
+# ⚠ ET AUCUN SIEGE N'EST PRIVILEGIE. Ni un nom, ni un uid, ni un groupe : la seule autorite est le
+# drapeau `is_admin` de la forge, demande a l'instant du geste. Un chemin qui contournerait « parce
+# que c'est le siege » serait un second gate, donc une seconde verite, donc la derive qu'on retire.
 #
-# Sans `stat` ou sans groupe lisible, on retombe sur le message general : une mesure ratee ne
-# devient pas un diagnostic.
-# DEUX ETATS, DEUX MESSAGES — et le second a prescrit DEUX gestes faux avant celui-ci.
-# 1. « Deconnecte-toi et reconnecte-toi » est le reflexe Unix, et il est FAUX ici : la console du
-#    deck est un `tmux new-session -A` derriere ttyd, qui SURVIT au rechargement de l'onglet. On
-#    retombe sur le meme process, ne avant la promotion, portant les memes groupes.
-# 2. « tmux kill-server » etait faux aussi, et pour une raison qui vaut d'etre sue : le serveur tmux
-#    n'est pas le porteur du cache, il en est l'HERITIER. Le set de groupes est fige dans TTYD par
-#    `setpriv --init-groups`, une fois pour toutes ; le serveur suivant nait sous ce meme ttyd et
-#    herite exactement des memes groupes. Tuer l'heritier ne change rien a l'heritage.
+# ⚠ TOUT UN APPAREIL DE DIAGNOSTIC A VECU ICI, ET IL N'AVAIT PLUS D'OBJET. Il distinguait
+# « pas dans le groupe » de « session anterieure a la promotion », mesurait la traversee du
+# repertoire avant le mode du fichier, et prescrivait `newgrp` — trois raffinements justes, chacun
+# paye par une heure de diagnostic. Tous portaient sur un CACHE : un process fige ses groupes
+# supplementaires a son login, donc une promotion posee apres coup n'atteignait aucun shell vivant.
 #
-# `newgrp` est le seul geste qui marche PARTOUT — console tmux comme session ssh : setuid-root, il
-# relit /etc/group et demarre un shell avec le set a jour. Un refus qui nomme un geste inexecutable
-# coute plus cher qu'un refus muet : il envoie chercher au mauvais endroit avec la certitude d'avoir
-# compris. Celui-ci a coute une heure a l'operateur, qui a cherche a sortir du conteneur en ssh.
-#
-# ⚖ 2026-08-21 : LA CONSOLE SE REPARE DESORMAIS TOUTE SEULE — `console.sh` mesure la derive du ttyd
-# et tape ce `newgrp` dans les panes qui sont a un shell, au tour du convergeur. Ce message reste
-# NECESSAIRE, et il n'est pas un doublon : il couvre la fenetre avant ce tour, les sessions ssh, et
-# le pane dont le shell tourne sous un agent au moment ou la frappe passe.
-# ⚠ TROISIEME ETAT, ET LE REFUS N'EN CONNAISSAIT QUE DEUX. « admin sur la forge » et « humain de
-# cette flotte » sont DEUX faits de forge distincts, et le convergeur ne lit le premier que pour les
-# membres du second : `converge_once` ITERE sur `fleet:humans`, et n'appelle `forge_is_admin` que
-# dans cette boucle. Hors de la team, personne ne lit ton `is_admin` — donc aucun groupe, si admin
-# sois-tu.
-#
-# Mesure du 2026-08-22, en vol : un operateur ADMIN de sa forge, absent de `fleet:humans`, s'est vu
-# repondre « ton compte n'y porte pas is_admin ; un proprietaire te promeut » — une promotion qu'il
-# avait deja. Meme forme que la cicatrice ci-dessous, un cran plus haut : un refus qui nomme la
-# mauvaise cause envoie chercher au bon endroit pour un probleme qui est ailleurs.
-#
-# ⚠ ET LA MESURE FINE NE POUVAIT PAS TOURNER DANS SON PROPRE CAS. Elle partait de
-# `stat -c %G <jeton>`, or les deux objets sont gardes par DEUX groupes differents (mesure :
-# `/home/private` est `root:fleet`, le jeton `root:lcars-admin`) et `stat` sur le FICHIER exige deja
-# la traversee du REPERTOIRE. Une session anterieure a la convergence n'a ni l'un ni l'autre : `stat`
-# echouait, `grp` restait vide, et on retombait sur le message general — celui qui accuse la forge.
-# Le repli etait ecrit comme un cas rare ; il etait le cas nominal.
-#
-# On mesure donc la TRAVERSEE d'abord, sur un repertoire qu'on peut lire sans elle, puis le fichier
-# une fois qu'on sait pouvoir y entrer. Les deux noms de groupe restent LUS sur le systeme de
-# fichiers, jamais recopies ici : le mode est le gate, il est donc aussi la source.
-_in_process_group() { id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
-_in_db_group() { id -nG "$(id -un)" 2>/dev/null | tr ' ' '\n' | grep -qx "$1"; }
+# La question posee a l'instant du geste n'a pas de cache, donc pas de peremption, donc rien de tout
+# cela a rattraper. C'est la lecon la plus chere de ce chantier : chaque correctif etait juste, et
+# ensemble ils formaient l'usine a gaz que la separation des deux roles supprime d'un coup.
+_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-/run/lcars/catalogue.sock}"
 
-# Les adhesions POSEES mais pas encore portees : la base moins le process. C'est une SOUSTRACTION et
-# pas un test, parce que le refus doit les nommer TOUTES en un tour.
-#
-# ⚠ SANS CA, LE REFUS ENVOIE L'OPERATEUR DEUX FOIS. Le geste ouvre la porte du repertoire (`fleet`),
-# le jeton celle du fichier (`lcars-admin`) : quelqu'un promu aux deux dans le meme tour de
-# convergeur voyait le premier groupe, agissait, et retombait sur le second. Deux allers-retours
-# pour une cause unique — sa session, ouverte avant les deux.
-#
-# ⚠ ET ON NE PARIE PAS SUR LA PORTEE DE `newgrp`. Selon les implementations il ajoute le groupe
-# demande ou reinitialise le set entier depuis `/etc/group` — je ne l'ai pas mesure, donc le message
-# ne s'y appuie pas : il nomme la session neuve, qui vaut dans les deux lectures, et n'offre
-# `newgrp` comme raccourci que lorsqu'UNE seule adhesion est en attente.
-_pending_groups() {
-  local db proc g out=""
-  db="$(id -nG "$(id -un)" 2>/dev/null || true)"
-  proc="$(id -nG 2>/dev/null || true)"
-  for g in $db; do
-    printf '%s\n' $proc | grep -qx "$g" || out="$out $g"
-  done
-  printf '%s' "${out# }"
+# LE TRANSPORT, ET BASH N'EN A PAS. `/dev/tcp` est TCP seul : ce shell ne peut pas ouvrir une socket
+# unix lui-meme. `socat` d'abord, `nc -U` en repli — les deux sont poses par le provisionnement.
+_catalogue_transport() {
+  command -v socat >/dev/null 2>&1 && { printf 'socat'; return 0; }
+  command -v nc    >/dev/null 2>&1 && { printf 'nc';    return 0; }
+  return 1
 }
 
-_die_session_stale() {
-  local pending; pending="$(_pending_groups)"
-  local sortie="Ouvre un shell qui les relit :  newgrp $1"
-  # Plus d'une adhesion en attente : `newgrp` ne prend qu'un groupe en argument, donc le nommer
-  # comme LA sortie serait un demi-geste. La session neuve les prend toutes, quelle que soit la
-  # portee reelle de `newgrp`.
-  [[ "$pending" == *" "* ]] && sortie="Deux adhesions ou plus sont en attente ($pending) — ouvre une
-  session NEUVE, elle les prend toutes. « newgrp » n'en prend qu'une par appel."
-
-  die "catalogue install: ta SESSION est anterieure a ta promotion.
-  Ton compte EST dans « $1 » — la forge t'a promu et le convergeur l'a projete. Ce shell, lui,
-  ne le sait pas : il porte les groupes qu'il avait a son ouverture, et personne ne les lui ajoute
-  en vol. En attente : $pending
-  $sortie
-  ⚠ Se deconnecter ne sert a RIEN depuis la console du deck : elle survit au rechargement de
-  l'onglet, et le shell que tu retrouves est le meme, ne avant ta promotion. « newgrp » est la
-  sortie — la console tape la meme chose d'elle-meme au tour suivant du convergeur."
+# ⚠ `socat -t`, ET SON DEFAUT AURAIT MANGE CHAQUE INSTALL. Apres l'EOF de notre stdin, socat ferme
+# l'autre sens au bout de 0,5 s par defaut — or le geste tourne pendant des MINUTES. Mesure du
+# 2026-08-23 : sortie VIDE et code de retour ZERO, c'est-a-dire un succes silencieux qui a perdu le
+# verdict. C'est pour ca que rien ici ne fait confiance au code de sortie du transport : seule la
+# ligne de verdict compte, et son absence est un echec nomme.
+_catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le verdict sur stdout
+  local name=$1 t; t="$(_catalogue_transport)" || return 127
+  case "$t" in
+    socat) printf 'install %s\n' "$name" | socat -t 86400 - UNIX-CONNECT:"$_CATALOGUE_SOCKET" ;;
+    nc)    printf 'install %s\n' "$name" | nc -U "$_CATALOGUE_SOCKET" ;;
+  esac
 }
 
-_die_master_unreadable() {
-  local master=$1 grp
-
-  # 1. LA TRAVERSEE. Son groupe se lit sur le repertoire lui-meme, ce qui ne demande que d'atteindre
-  #    son parent — donc cette mesure-ci tient meme quand tout le reste est ferme.
-  grp="$(stat -c %G "$(dirname "$master")" 2>/dev/null || true)"
-  if [[ -n "$grp" ]] && ! _in_process_group "$grp"; then
-    _in_db_group "$grp" && _die_session_stale "$grp"
-
-    die "catalogue install: ton compte n'est pas un humain de cette flotte.
-  Etre ADMIN de la forge ne suffit pas, et ce sont deux faits distincts : le convergeur ne parcourt
-  que les membres de l'equipe « humans » de l'org, et ne lit ton « is_admin » que la. Hors de cette
-  equipe, ta promotion n'est projetee nulle part — tu n'es pas moins admin, tu es invisible.
-  Un proprietaire de l'org t'ajoute a « humans » ; le tour suivant (30 s) cree tes acces, et ils
-  sont effectifs a ta prochaine session."
-  fi
-
-  # 2. LE FICHIER, maintenant qu'on sait pouvoir entrer dans son repertoire.
-  grp="$(stat -c %G "$master" 2>/dev/null || true)"
-  if [[ -n "$grp" ]] && _in_db_group "$grp" && ! _in_process_group "$grp"; then
-    _die_session_stale "$grp"
-  fi
-
-  _die_master_unreadable_general
+# ─── LES CAUSES DE REFUS, UNE PHRASE CHACUNE ────────────────────────────────────────────────────
+#
+# CINQ CAUSES, CINQ GESTES DE SORTIE, JAMAIS CONFONDUS. C'est la lecon la plus chere de cette porte :
+# un refus qui nomme la mauvaise cause envoie chercher au bon endroit pour un probleme qui est
+# ailleurs, et il coute plus qu'un refus muet parce qu'il donne la certitude d'avoir compris.
+#
+# L'executeur rend un JETON stable (`FAIL:not_admin`), pas une phrase. Le vocabulaire de l'operateur
+# vit ICI, parce que c'est a ce programme qu'il parle — et un service qui redigerait pour la CLI
+# serait une seconde autorite sur ce que la CLI dit.
+_die_catalogue_refus() { # <jeton de cause> [detail]
+  case "$1" in
+    not_admin)
+      die "catalogue install: la forge dit que ton compte n'est pas admin.
+  « admin » est un fait de la FORGE, et c'est le SEUL qui compte ici : ton compte y porte is_admin,
+  ou il ne le porte pas. Un proprietaire de la forge te promeut, et c'est effectif A LA COMMANDE
+  SUIVANTE — il n'y a plus rien a projeter, ni session a rouvrir. Ce n'est PAS une histoire de
+  sudo : personne n'est root ici." ;;
+    forge_unreachable)
+      die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.
+  Ce n'est pas un refus — c'est une absence de reponse, et on ne la lit jamais comme un oui. La
+  forge est peut-etre en train de redemarrer. Reessaie ; si ca dure, « lcars forge status »." ;;
+    bad_name)
+      die "catalogue install: « ${2:-} » n'est pas un nom de catalogue.
+  Un nom est en minuscules, chiffres et tirets, et commence par une lettre ou un chiffre
+  (« web-demo »). La liste de ce que cette forge sert : « $PROG catalogue list »." ;;
+    unknown_peer)
+      die "catalogue install: le service ne sait pas qui tu es.
+  Ton uid n'a pas de compte unix sur cette boite — donc aucun login a demander a la forge. C'est le
+  convergeur qui enrole les humains de l'equipe « humans » de l'org ; un proprietaire t'y ajoute, et
+  le tour suivant (30 s) cree ton compte." ;;
+    busy)
+      die "catalogue install: un autre geste de structure est en cours.
+  Un seul a la fois — deux applies concurrents ecriraient le meme etat. RIEN n'a ete tente ;
+  reessaie quand l'autre a fini." ;;
+    *)
+      die "catalogue install: refus non interprete du service (« $1 »).
+  Le service a rendu une cause que cette version de « $PROG » ne connait pas. Les deux ne sont pas
+  du meme lot : « $PROG version », et regarde « journalctl -u lcars-catalogue »." ;;
+  esac
 }
 
-_die_master_unreadable_general() {
-  die "catalogue install: ton compte n'administre pas ce runtime.
-  « admin » est un fait de la FORGE : ton compte y porte is_admin, ou il ne le porte pas. Un
-  proprietaire de la forge te promeut, et le convergeur t'ouvre la porte au tour suivant (30 s) —
-  effectif a ta prochaine session. Ce n'est PAS une histoire de sudo : personne n'est root ici."
+_die_executor_absent() {
+  die "catalogue install: le service qui execute ce geste ne tourne pas.
+  Ce n'est pas un refus : la porte est fermee, pas gardee. « $_CATALOGUE_SOCKET » est absent ou
+  injoignable. C'est un geste SYSTEME, pas un geste d'admin de forge :
+    sudo systemctl status lcars-catalogue
+    sudo systemctl start  lcars-catalogue"
 }
 
 cmd_catalogue_install() {
   local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
 
-  # L'ENV DE LA BOITE, ET CETTE COMMANDE ETAIT LA SEULE A NE PAS LE CHARGER. Les quatre autres
-  # portes qui parlent a la forge le font (`cat_states`, `project migrate`, `project reconcile`,
-  # `approve`) ; celle-ci dependait du shell ambiant. Mesure du 2026-08-20 : sous `sudo`, qui
-  # reinitialise l'environnement ET deplace $HOME, `forge-gestures` mourait sur
-  # « cette boite n'a pas de FORGE_BASE_URL » — un refus qui accuse la boite d'un manque qui est
-  # celui de l'appelant.
-  #
-  # ⚠ AVANT TOUTE LIAISON `${VAR:-defaut}`, et je l'avais mis apres en premiere ecriture : un
-  # `local` resolu plus haut fige la valeur du shell ambiant, et l'env de la boite arrive trop tard
-  # pour la corriger. La commande aurait alors lu la boite pour une variable et pas pour l'autre —
-  # un chargement a moitie est pire qu'aucun, parce qu'il a l'air de marcher.
-  _load_box_env
-
-  local gestures="${LCARS_FORGE_GESTURES:-/opt/lcars/forge-gestures.sh}"
-
+  # CETTE COMMANDE N'A PLUS BESOIN DE L'ENV DE LA BOITE, et c'est une consequence directe. Elle
+  # chargeait `_load_box_env` pour que `forge-gestures` trouve `FORGE_BASE_URL` — sous `sudo`, qui
+  # reinitialise l'environnement, il mourait sur « cette boite n'a pas de FORGE_BASE_URL ». Le geste
+  # tourne maintenant dans un SERVICE, qui tient son environnement du disque et n'herite d'aucun
+  # shell. Un daemon n'a pas de shell ambiant a se faire voler.
   [[ "$name" == "$CAT_BUNDLED" ]] \
     && die "catalogue install: « $CAT_BUNDLED » est livre DANS le release — il n'y a pas de depot d'ou l'installer, et rien a mettre a jour"
 
-  [[ -x "$gestures" ]] \
-    || die "catalogue install: gestes forge introuvables ($gestures) — cette commande ne s'execute que DANS la boite"
+  [[ -S "$_CATALOGUE_SOCKET" ]] || _die_executor_absent
+  _catalogue_transport >/dev/null \
+    || die "catalogue install: ni « socat » ni « nc » sur cette boite — aucun des deux ne peut donc
+  parler a « $_CATALOGUE_SOCKET », et bash n'ouvre pas de socket unix tout seul. « provision apply »
+  les pose ; c'est un geste systeme."
 
-  # ⚖ ARBITRAGE USER (2026-08-17) : « ADMIN » EST UN FAIT DE FORGE, PAS `uid 0`.
-  # Ce test etait `[[ "$(id -u)" -ne 0 ]]`, et il gatait sur une propriete qu'AUCUN humain n'a ni
-  # n'aura : le seul root de la boite est `admiral`, compte d'administration SYSTEME, dont le
-  # metier est d'installer des paquets et non des catalogues. Le deck, lui, tenait deja le bon
-  # modele — il lit `is_admin` sur la forge a chaque connexion. Les deux portes disent desormais la
-  # meme chose.
-  #
-  # LE GATE RESTE LA CAPACITE, PAS UN BOOLEEN : c'est la lecture du jeton master
-  # (`0640 root:lcars-admin`) qui autorise, et l'appartenance au groupe vient de `is_admin` par le
-  # convergeur d'humains. Tester ici ne fait qu'expliquer un refus que le systeme de fichiers
-  # prononcerait de toute facon — un test oublie ne donnerait donc rien a personne.
-  local master="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
-  if [[ ! -r "$master" ]]; then
-    if [[ ! -e "$master" ]]; then
-      die "catalogue install: cette boite n'a AUCUNE autorite de creation ($master absent).
-  Un admin la pose une fois : « FORGE_ADMIN_TOKEN=<jeton site-admin> ./docker.sh config »."
-    fi
-    _die_master_unreadable "$master"
+  # ⚠ ON NE FAIT PAS CONFIANCE AU CODE DE SORTIE DU TRANSPORT, ET C'EST MESURE. `socat` rend ZERO
+  # avec une sortie VIDE quand il ferme avant la reponse. Le verdict est la SEULE preuve qu'un geste
+  # a eu lieu : pas de ligne de verdict = echec nomme, jamais un succes par defaut.
+  local vu="" cause=""
+  while IFS= read -r ligne; do
+    case "$ligne" in
+      "> "*) printf '%s\n' "${ligne#> }" ;;
+      OK)         vu=1 ;;
+      FAIL:*)     vu=1; cause="${ligne#FAIL:}" ;;
+    esac
+  done < <(_catalogue_ask "$name")
+
+  [[ -n "$vu" ]] || die "catalogue install: le service n'a rendu AUCUN verdict.
+  La demande est partie sur « $_CATALOGUE_SOCKET » et rien n'est revenu — ni accord, ni refus. On ne
+  lit pas ce silence comme un succes : l'etat de « $name » sur cette boite est INCONNU.
+  « journalctl -u lcars-catalogue » dit ce que le service a vu."
+
+  if [[ -n "$cause" ]]; then
+    # `gesture_failed:<rc>` porte le code du geste : on relaie SON echec, dont les lignes viennent
+    # d'etre imprimees au-dessus, plutot que de le retraduire en refus d'autorite.
+    case "$cause" in
+      gesture_failed:*) exit "${cause#gesture_failed:}" ;;
+      *) _die_catalogue_refus "${cause%%:*}" "$name" ;;
+    esac
   fi
-
-  "$gestures" install "$name"
 }
 
 cmd_project_migrate() {

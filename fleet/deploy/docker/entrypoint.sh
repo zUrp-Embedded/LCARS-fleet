@@ -501,6 +501,23 @@ else
   say "console web désactivée (LCARS_CONSOLE=0)"
 fi
 
+# ─── 3ter. L'exécuteur de catalogue (root, une socket, l'autorité de la forge) ───────────────────
+# `lcars catalogue install` ne détient plus rien : il DEMANDE ici. Ce process tient le jeton master,
+# lit l'uid du pair que le noyau pose sur la socket, demande à la forge si ce login y porte
+# `is_admin`, et joue le geste. Séparer « prouver qui tu es » de « exécuter » est ce qui supprime le
+# groupe unix, sa projection, son cache et son rattrapage de dérive.
+#
+# ⚠ SON ABSENCE N'EST PAS FATALE, ET ELLE N'EST PAS MUETTE NON PLUS. Sans lui, installer un
+# catalogue devient injouable — mais la boîte doit rester joignable pour être réparée, même règle
+# que la convergence et la console. Le refus côté `bin/lcars` nomme alors le service, pas l'adminité
+# de l'opérateur : une porte fermée n'est pas une porte gardée.
+if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]]; then
+  setsid python3 /opt/lcars/catalogue-executor.py </dev/null >>/var/log/lcars-catalogue.log 2>&1 &
+  say "executeur de catalogue ACTIF (pid $!) — « lcars catalogue install » passe par lui"
+else
+  say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"
+fi
+
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
 say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> puis « fleet_v2 start »"
 exec /usr/sbin/sshd -D -e

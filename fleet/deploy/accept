@@ -98,7 +98,19 @@ check_forge_login() {
 check_ci() {
   local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
-  [[ -r "$tokfile" ]] || { no "CI : jeton master illisible ($tokfile) — l'etat des runners n'est pas mesurable"; return; }
+  # ⚠ DEUX CAUSES, ET LES CONFONDRE ACCUSE LA BOITE D'UN MANQUE QUI EST CELUI DE L'APPELANT.
+  # `/api/v1/admin/actions/runners` est site-admin PAR SON CHEMIN : cette mesure exige le jeton
+  # master, qui est root seul. Lance par `install.sh` — qui se re-execute sous sudo — ce script
+  # tourne en root et le lit. Lance A LA MAIN par un humain, il ne le lira jamais, et « jeton
+  # illisible » se lit alors comme une boite mal provisionnee au lieu d'un manque de privilege.
+  if [[ ! -r "$tokfile" ]]; then
+    if [[ "$EUID" -ne 0 ]]; then
+      no "CI : cette mesure demande root (l'API des runners est site-admin, son jeton est root seul) — rejoue sous « sudo »"
+    else
+      no "CI : jeton master illisible ($tokfile) — l'etat des runners n'est pas mesurable"
+    fi
+    return
+  fi
 
   body="$(printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$tokfile")" \
           | curl -K - -s -m 15 "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"

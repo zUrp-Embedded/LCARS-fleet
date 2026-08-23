@@ -217,7 +217,7 @@ EOS
   chmod +x "$BIN/curl"
   export PATH="$BIN:$PATH"
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tok"; printf 'TOK\n' > "$LCARS_MASTER_TOKEN_FILE"
+  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/tok"; printf 'TOK\n' > "$LCARS_FORGE_TOKEN_FILE"
 
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -eq 0 ]]
@@ -227,10 +227,23 @@ EOS
   [[ "$output" == *"[toolchain] python"* ]]
 }
 
-@test "list.sh: token illisible => refus type, pas une liste vide" {
+@test "list.sh: jeton illisible => refus type, pas une liste vide" {
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/absent"
+  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/absent"
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"master token illisible"* ]]
+  [[ "$output" == *"jeton systeme illisible"* ]]
+}
+
+@test "list.sh: le jeton SYSTEME, jamais le master — deux lectures publiques n'ont pas d'autorite" {
+  # ⚠ MESURE DU 2026-08-23 SUR UNE FORGE VIVANTE : `fleet/lcars` est `private=false, internal=false`
+  # et ses deux points d'entree (`issues`, `pulls`) repondent 200 EN ANONYME. Ce script tenait le
+  # jeton master parce qu'il etait la, pas parce que son geste l'exige — et le tenir imposait que le
+  # master reste lisible par un humain, c'est-a-dire exactement l'ACL qu'on retire.
+  local src="$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  ! grep -q 'MASTER_TOKEN' "$src"
+  ! grep -q 'forge-master.token' "$src"
+  grep -q 'gitea_token' "$src"
+  # Et le skill ne PROMET plus un privilege de siege, qui n'existe pas.
+  ! grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
 }

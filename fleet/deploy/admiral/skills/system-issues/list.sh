@@ -14,7 +14,19 @@
 set -euo pipefail
 
 FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || true)}"
-TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
+# ⚠ LE JETON SYSTEME, PAS LE MASTER, ET C'EST UNE CORRECTION DE PRIVILEGE. Ce script ne fait que
+# DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : `fleet/lcars` est
+# `private=false, internal=false`, et ses deux points d'entree (`issues`, `pulls`) repondent 200 en
+# ANONYME. Aucune de ces lectures n'est site-admin.
+#
+# Il tenait le master parce qu'il etait la, pas parce que son geste l'exige — et le tenir imposait
+# que le fichier reste lisible par un humain, ce qui est exactement l'ACL qu'on retire. Le compte
+# systeme est l'identite juste : c'est avec lui que la boite lit sa forge. Donner un site-admin a
+# une lecture serait lui accorder un pouvoir dont elle n'a aucun usage — meme argument, et meme
+# formulation, que `cmd_install` dans `forge-gestures.sh`.
+PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+TOKEN_FILE="${LCARS_FORGE_TOKEN_FILE:-$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source`. Reglable a moitie, il faisait relever une boite aux lettres
@@ -22,7 +34,7 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 BRANCH="tool_request"
 
 [[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }
-[[ -r "$TOKEN_FILE" ]] || { echo "system-issues: master token illisible ($TOKEN_FILE) — cette session peut-elle le lire ?" >&2; exit 1; }
+[[ -r "$TOKEN_FILE" ]] || { echo "system-issues: jeton systeme illisible ($TOKEN_FILE) — « provision apply » le minte, et il est lisible par le groupe fleet" >&2; exit 1; }
 
 auth=(-H "Authorization: token $(tr -d '[:space:]' < "$TOKEN_FILE")")
 api="$FORGE_URL/api/v1"
