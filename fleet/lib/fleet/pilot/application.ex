@@ -280,7 +280,7 @@ defmodule Fleet.Pilot.Application do
     validate_structural_roles!()
     require_signer_tokens!()
     validate_workshop_card!()
-    validate_default_card_matrix!()
+    validate_default_card_loads!()
 
     # The verdict wire schemas (gate-decision-v1 envelope + findings-v1 machine payload)
     # are EXECUTED on every ingest by Verdict.gate_decision/1 / Verdict.take_findings/1 —
@@ -364,9 +364,9 @@ defmodule Fleet.Pilot.Application do
   """
   # ⚠ DEUX GARDES MANQUAIENT ICI, ET LE `@doc` AU-DESSUS DISAIT « EXACTLY » (6-008). Le boot en
   # joue SIX (`step_children!`, l. 272-278) ; cette fonction en jouait QUATRE :
-  # `validate_workshop_card!` et `validate_default_card_matrix!` n'y etaient pas. Un verificateur
+  # `validate_workshop_card!` et `validate_default_card_loads!` n'y etaient pas. Un verificateur
   # VERT pouvait donc preceder un boot ROUGE — le contraire exact de son objet, et sur les deux
-  # gardes qui refusent une carte d'atelier cassee et une matrice de carte par defaut incoherente.
+  # gardes qui refusent une carte d'atelier cassee et une carte par defaut qui ne charge pas.
   #
   # L'equivalence reste tenue A LA MAIN : rien dans le code ne lie les deux sequences. Ce qui la
   # tient desormais est le check `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui
@@ -382,7 +382,7 @@ defmodule Fleet.Pilot.Application do
     validate_card_steps!(opts)
     validate_structural_roles!()
     validate_workshop_card!(opts)
-    validate_default_card_matrix!(opts)
+    validate_default_card_loads!(opts)
     :ok
   end
 
@@ -502,39 +502,23 @@ defmodule Fleet.Pilot.Application do
   defp default_card_scopes(opts), do: [{opts, Keyword.get(opts, :catalogue_root)}]
 
   @doc false
-  # THE DEFAULT CARD MUST BE ABLE TO SERVE THE DEFAULT CASE, and the bundled catalogue did not hold
-  # that: `default_card: brief-gate` with `applicable_intensity: [C1, C2, C3, C4]`, while a project
-  # declaring nothing took `C0` — the card said itself it did not cover the only situation it is
-  # ever reached in. Nothing caught it. `Fleet.Catalogue.verify!/0` checks the default card EXISTS among
-  # the cards, not that it APPLIES; and the off-matrix warning watched explicit overrides only, so
-  # the one provenance nobody chose was the one nobody was told about.
+  # THE DEFAULT CARD MUST LOAD AT BOOT, and this is the ONLY place that proves it.
+  # `Fleet.Catalogue.verify!/0` checks the default card's NAME is among the cards (`card in cards`);
+  # it does not LOAD it. A default whose YAML is unreadable, schema-invalid, or graph-invalid would
+  # reach readiness GREEN and die at the first undeclared project's dispatch, far from the deploy
+  # fault. We load it HERE, fail-loud, same dead-man's-switch as the card guards above.
   #
-  # What it cost, end to end (bench 2026-08-12): a repo imported from GitHub, deliverable a single
-  # `.md`, took `brief-gate` hence `ci: required` — and an imported repo ships no
-  # `.gitea/workflows/`. The CI gate waited its 45 minutes and escalated, correctly, asking whether
-  # a runner served the label. Every part downstream behaved; the card was never the right one.
-  #
-  # RAISE and not warn: a catalogue whose default cannot serve its default level mis-routes every
-  # undeclared project it ever receives, silently, and the level is the one thing a human is
-  # entitled not to declare. `undeclared_level/0` is read from its owner — restating the level here
-  # would be the second copy of a default, which is how one fact acquires two answers.
-  @spec validate_default_card_matrix!(keyword()) :: :ok
-  def validate_default_card_matrix!(opts \\ []) do
-    level = Fleet.Project.Intensity.undeclared_level()
-
+  # It USED to also assert the default card's `applicable_intensity` covered the level an undeclared
+  # project takes. That level is gone (crit_quarantine): the card alone carries the gate, a project
+  # declares its criticality BY naming a card, and a card that loads is a card that can serve. What
+  # remains is the load itself — the guarantee `Catalogue.verify!` never gave.
+  @spec validate_default_card_loads!(keyword()) :: :ok
+  def validate_default_card_loads!(opts \\ []) do
     for {scope, root} <- default_card_scopes(opts),
         is_binary(root),
         card_name = Fleet.Catalogue.default_card(root),
         is_binary(card_name) do
-      levels = Fleet.Workflow.Loader.load!(card_name, scope)["applicable_intensity"] || []
-
-      unless levels == [] or level in levels do
-        raise "fleet_pilot: catalogue #{inspect(root)} declares default_card " <>
-                "#{inspect(card_name)}, whose applicable_intensity is #{inspect(levels)} and does " <>
-                "NOT cover #{level} — the level a project takes when the human declares none. " <>
-                "Every undeclared project of this catalogue would run on a card that states it " <>
-                "does not apply to it. Name a default that covers #{level}, or widen that card."
-      end
+      _ = Fleet.Workflow.Loader.load!(card_name, scope)
     end
 
     :ok

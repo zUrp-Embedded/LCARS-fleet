@@ -105,67 +105,47 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # THE KNOB IS GONE. `:lcars_fleet, :pilot_workshop_workflow_map` named the doc card globally, defaulting
-  # to `"workshop-direct"` — one catalogue's card. One name cannot serve N catalogues, and the
-  # catalogue serving a project is not the one that named the default. The rail is now resolved by
-  # what a card IS: it carries a producer step on `face: workshop`.
-  #
-  # Two of the three regimes that function guarded existed only because a NAME can be wrong (dead
-  # name, name pointing at an all-code card). A property cannot be wrong — it can only be absent, or
-  # claimed twice, and those are the two tests below.
-  describe "validate_default_card_matrix!/1 — le defaut doit savoir servir le cas par defaut" do
+  # `validate_default_card_loads!/1` is the ONLY boot check that LOADS the catalogue's default card.
+  # `Catalogue.verify!` checks the NAME is among the cards (`card in cards`); it never loads it. It
+  # used to ALSO assert the default's `applicable_intensity` covered the undeclared level — that
+  # level is gone (crit_quarantine): the card alone carries the gate, so what remains to guard at
+  # boot is the load itself, the guarantee the name-check never gave.
+  describe "validate_default_card_loads!/1 — le default_card du catalogue doit CHARGER au boot" do
     test "le catalogue livre passe" do
-      assert :ok = Application.validate_default_card_matrix!()
+      assert :ok = Application.validate_default_card_loads!()
     end
 
     @tag :tmp_dir
-    test "un default_card hors matrice du niveau non-declare REFUSE le boot", %{tmp_dir: tmp} do
-      # Le defaut du catalogue et le niveau qu'un projet prend quand personne ne declare sont, mis
-      # ensemble, ce qu'un projet non declare RECOIT. Ils se contredisaient par ecrit — carte
-      # `[C1..C4]`, niveau `C0` — et rien ne le disait : l'avertissement off-matrix ne regardait que
-      # les surcharges explicites, et le controle de boot verifiait que la carte EXISTE, pas qu'elle
-      # s'applique. Chaque projet non declare tournait sur une carte affirmant ne pas le couvrir.
-      level = Fleet.Project.Intensity.undeclared_level()
-      other = if level == "C0", do: "C4", else: "C0"
-
-      File.write!(Path.join(tmp, "etroite.yaml"), """
+    test "un default_card qui ne CHARGE pas REFUSE le boot", %{tmp_dir: tmp} do
+      # Le seul `Loader.load!(carte-defaut)` du boot. Une carte PRESENTE mais schema-invalide passe
+      # le check de NOM de `Catalogue.verify!` et casserait au premier dispatch d'un projet non
+      # declare — ici elle refuse le boot, pres du defaut de deploiement.
+      File.write!(Path.join(tmp, "cassee.yaml"), """
       kind: WorkflowMap
       metadata:
-        name: etroite
-        description: "une carte qui ne couvre pas le niveau non-declare"
-        applicable_intensity: [#{other}]
-      spec:
-        jury: []
-        ci: ignore
-        max_rework_rounds: 1
-        steps:
-          build:
-            role: engineer
-            needs: []
+        name: cassee
+      spec: pas-un-objet
       """)
 
       File.write!(
         Path.join(tmp, "catalogue.yaml"),
-        "api_version: 1\nname: etroit\ndefault_card: etroite\n"
+        "api_version: 1\nname: cat\ndefault_card: cassee\n"
       )
 
-      assert_raise RuntimeError, ~r/does NOT cover #{level}/, fn ->
-        Application.validate_default_card_matrix!(workflow_maps_root: tmp, catalogue_root: tmp)
+      assert_raise RuntimeError, ~r/cassee/, fn ->
+        Application.validate_default_card_loads!(workflow_maps_root: tmp, catalogue_root: tmp)
       end
     end
 
     @tag :tmp_dir
-    test "une carte qui couvre le niveau passe — la garde borne, elle n'interdit pas", %{
+    test "un default_card valide passe — la garde CHARGE, elle n'interdit rien d'autre", %{
       tmp_dir: tmp
     } do
-      level = Fleet.Project.Intensity.undeclared_level()
-
       File.write!(Path.join(tmp, "large.yaml"), """
       kind: WorkflowMap
       metadata:
         name: large
-        description: "une carte qui couvre le niveau non-declare"
-        applicable_intensity: [#{level}]
+        description: "une carte de fixture qui charge"
       spec:
         jury: []
         ci: ignore
@@ -182,7 +162,7 @@ defmodule Fleet.Pilot.ApplicationTest do
       )
 
       assert :ok =
-               Application.validate_default_card_matrix!(
+               Application.validate_default_card_loads!(
                  workflow_maps_root: tmp,
                  catalogue_root: tmp
                )

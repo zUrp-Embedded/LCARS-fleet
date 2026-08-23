@@ -52,26 +52,19 @@ defmodule Fleet.Project.IntensityTest do
            "a role name was fabricated for a declaration nobody claimed"
   end
 
-  test "undeclared: the level silence buys, explicitly marked — absence recorded, never fabricated",
+  test "undeclared: writes a complete, schema-valid declaration naming the default card — absence recorded, never walled",
        %{tmp_dir: tmp} do
-    # It was C0, the BOTTOM of the scale, and that is a claim: C0 is the disposable posture and
-    # nobody said the work was disposable. Silence buys "we do not know, therefore we judge" — and
-    # it is also the only reading under which the catalogue holds together, since its `default_card`
-    # declares a matrix that starts at C1.
-    #
-    # Read from its owner rather than restated: a test that spells the constant is a test that
-    # keeps asserting yesterday's default.
+    # Nobody declared: the file is still written, complete and schema-valid, and it NAMES the
+    # delegation default card. The card IS the criticality declaration — there is no separate level
+    # to assert (crit_quarantine removed it).
     assert :ok = ProjectIntensity.write(tmp, [])
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == ProjectIntensity.undeclared_level()
     assert d["declared_by"] == "system-default"
     assert d["justification"] =~ "NON DÉCLARÉ"
 
-    # And it is ON-MATRIX for the card an undeclared project actually receives — the pairing the
-    # boot guard now refuses to let drift.
-    card = Fleet.Workflow.Loader.load!(d["pipeline_default"])
-    assert ProjectIntensity.undeclared_level() in card["applicable_intensity"]
+    # The named card LOADS — an undeclared project can actually be dispatched under it.
+    assert is_map(Fleet.Workflow.Loader.load!(d["pipeline_default"])["steps"])
   end
 
   test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declarer recorded, NO off-matrix noise",
@@ -122,25 +115,6 @@ defmodule Fleet.Project.IntensityTest do
     # unpopulated — the assertion pins the authority, not just the outcome.
     assert %ExJsonSchema.Schema.Root{} = :persistent_term.get(key, :not_cached),
            "validation did not go through Fleet.SchemaCache (key not populated)"
-  end
-
-  test "off-matrix explicit override: ACCEPTED + logged LOUD (the human has the last word)",
-       %{tmp_dir: tmp} do
-    # audit-only claims [C0..C4]... use a card whose matrix excludes the level: brief-gate
-    # claims [C1..C4] → C0 + brief-gate override is off-matrix.
-    log =
-      capture_log(fn ->
-        assert :ok =
-                 ProjectIntensity.write(tmp,
-                   intensity_level: "C0",
-                   intensity_justification: "PoC assumé sur la carte lourde",
-                   workflow_map: "brief-gate"
-                 )
-      end)
-
-    assert log =~ "OFF-MATRIX"
-    d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["pipeline_default"] == "brief-gate"
   end
 
   test "6-125: an override the loader cannot answer is REFUSED, and the refusal names the cards",

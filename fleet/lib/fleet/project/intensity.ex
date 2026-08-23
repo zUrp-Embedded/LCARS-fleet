@@ -11,10 +11,8 @@ defmodule Fleet.Project.Intensity do
   (a blocked declaration teaches the human to lie to the arch).
 
   **The declaration names its card** (`pipeline_default`): the criticality mechanic IS the
-  card choice (user arbitration). An explicit `workflow_map` override that the catalogue can
-  ANSWER is always accepted — off-matrix (level outside the card's `applicable_intensity`) it is
-  logged LOUD and the disagreement stays visible in the committed file; the human has the last
-  word. A name the loader cannot load is a different question and is REFUSED
+  card choice (user arbitration). An explicit `workflow_map` override the catalogue can ANSWER
+  is always accepted. A name the loader cannot load is a different question and is REFUSED
   (`refute_unloadable_card/2`): a disagreement with a card is a judgement, a name nobody can burn
   is a typo, and the schema cannot tell them apart because `pipeline_default` is a free string.
 
@@ -26,8 +24,9 @@ defmodule Fleet.Project.Intensity do
   the counter was per project and the knob was per box.
 
   Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
-  the delegation default card, silently. Malformed/schema-invalid file → LOUD warning +
-  default card (a broken declaration never stalls the rail; it is repaired by re-declaring).
+  the delegation default card, silently. A file that no longer NAMES a card (unreadable, or the
+  key gone) → LOUD warning + default card. It reads ONLY the card name, never the whole schema:
+  a legacy file still carrying a retired key resolves its real card instead of the default.
   """
 
   require Logger
@@ -67,14 +66,6 @@ defmodule Fleet.Project.Intensity do
   # the boot guard that compares the catalogue's default card against it has to.
   @undeclared_level "C1"
 
-  @doc """
-  The level an undeclared project takes — the posture the system records for work nobody qualified.
-
-  Public because the boot guard that checks a catalogue's `default_card` against it must read it
-  HERE rather than restate it: two copies of a default are two answers the day one moves.
-  """
-  @spec undeclared_level() :: String.t()
-  def undeclared_level, do: @undeclared_level
   # The intensity schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
   @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
@@ -86,15 +77,14 @@ defmodule Fleet.Project.Intensity do
 
   `{:error, {:invalid_declaration, errors}}` on a schema-invalid composition (malformed
   FORM is returned to the caller — fixing a format is not lying); `{:error, term}` on a
-  write failure. An off-matrix `workflow_map` override is accepted + logged LOUD.
+  write failure. An explicit `workflow_map` override the loader can answer is accepted.
   """
   @spec write(Path.t(), keyword()) :: :ok | {:error, term()}
   def write(proj_dir, opts) when is_binary(proj_dir) and is_list(opts) do
     declaration = compose(opts)
 
     with :ok <- refute_unloadable_card(Keyword.get(opts, :repo), opts),
-         :ok <- validate(declaration),
-         :ok <- warn_off_matrix(declaration, opts) do
+         :ok <- validate(declaration) do
       atomic_write(
         Path.join(proj_dir, @file_name),
         Jason.encode!(declaration, pretty: true) <> "\n"
@@ -105,10 +95,9 @@ defmodule Fleet.Project.Intensity do
   @doc """
   Refuses an explicit `:workflow_map` a project cannot legitimately declare — absent option is `:ok`.
 
-  An OFF-MATRIX override stands, and that is a different question: it is the human's judgement
-  against the card's own claim about itself, and `write/2` traces the disagreement in the committed
-  file. A name that does not LOAD is not a judgement, it is a typo — and the schema cannot catch it
-  because `pipeline_default` is a free string, unique only inside one catalogue.
+  A LOADABLE card the human names explicitly stands — naming the card IS the criticality choice.
+  A name that does not LOAD is a different question: it is a typo, not a judgement — and the schema
+  cannot catch it because `pipeline_default` is a free string, unique only inside one catalogue.
 
   Enforced HERE, at the single writer, so no entry point can bypass it; the creation verbs call it
   again as a preflight so the refusal lands BEFORE the repo exists, next to the human preflight
@@ -286,9 +275,15 @@ defmodule Fleet.Project.Intensity do
     root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
     path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
 
+    # Legacy-tolerant read: only that a card is NAMED, never the whole schema. A legacy `.lcars.json`
+    # still carrying a retired key (`level`, `nature`) is `additionalProperties: false`-invalid but
+    # its card is intact — full-validating here would drop every existing project to the default. We
+    # read the raw access (not a guard-bound var) on purpose: it keeps the pre-existing `binary()`
+    # success type (a verified catalogue's default is always a card), so the spec stays honest and
+    # `load_project_card` keeps its non-nil guarantee.
     with {:ok, raw} <- File.read(path),
          {:ok, declaration} <- Jason.decode(raw),
-         :ok <- validate(declaration) do
+         true <- is_binary(declaration["pipeline_default"]) do
       declaration["pipeline_default"]
     else
       {:error, :enoent} ->
@@ -316,37 +311,6 @@ defmodule Fleet.Project.Intensity do
           end
 
         Fleet.Project.Roles.delegation_workflow_map(opts)
-    end
-  end
-
-  @doc """
-  The project's declared criticality — `"C0".."C4"`, `nil` if undeclared or unreadable.
-
-  ⚠ CE LECTEUR N'EXISTAIT PAS, ET C'EST LA MESURE LA PLUS NETTE DE L'ÉTAT DU RAIL VERDICT. Le
-  `level` était ÉCRIT par `write/2`, VALIDÉ par le schéma, et lu par personne : ce module exposait
-  `pipeline_default`, `declared_max_fan`, `declarable_card`, `undeclared_level`, `write` — aucune
-  fonction ne rendait la criticité d'un projet. Le niveau servait à choisir une CARTE
-  (`applicable_intensity`) et s'arrêtait là, donc sur un projet déclaré C4 la fonction de verdict
-  était byte-identique à celle d'un C0. Le modèle d'origine (« le verdict est une fonction de la
-  criticité ») n'était pas mal branché : il n'était pas LISIBLE.
-
-  Silencieux comme `declared_max_fan/2` et pour la même raison : ce qui alarme sur un fichier
-  cassé, c'est `pipeline_default/2` (substituer une carte change la couche de jugement), et deux
-  alarmes pour un fichier apprennent à un lecteur que la seconde ne veut rien dire.
-
-  L'absence se REND, jamais ne se fabrique : un appelant qui a besoin d'un niveau pour décider
-  prend `undeclared_level/0` — « on ne sait pas, donc on juge » — et le fait explicitement.
-  """
-  @spec declared_level(String.t(), keyword()) :: String.t() | nil
-  def declared_level(repo, opts \\ []) when is_binary(repo) do
-    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
-    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
-
-    with {:ok, raw} <- File.read(path),
-         {:ok, %{"level" => level}} when is_binary(level) <- Jason.decode(raw) do
-      level
-    else
-      _ -> nil
     end
   end
 
@@ -430,61 +394,6 @@ defmodule Fleet.Project.Intensity do
       :ok -> :ok
       {:error, errors} -> {:error, {:invalid_declaration, errors}}
     end
-  end
-
-  # IT WATCHED ONLY THE EXPLICIT OVERRIDE, and the `@moduledoc` promises otherwise: "off-matrix is
-  # logged LOUD and the disagreement stays visible in the committed file". A card arriving from the
-  # catalogue's `default_card` never passed here — so the one provenance NOBODY chose was also the
-  # one nobody was told about. Measured: every undeclared project ran on a card whose own matrix
-  # excluded it, in silence, for as long as the two defaults disagreed.
-  #
-  # The wording still separates the two provenances, because the reader's next gesture differs: an
-  # override is the human's last word and stands; a DEFAULT landing off-matrix is a catalogue that
-  # does not hold together, and it gets repaired there.
-  defp warn_off_matrix(declaration, opts) do
-    card = declaration["pipeline_default"]
-    override = Keyword.get(opts, :workflow_map)
-
-    with level when is_binary(level) <- declaration["level"],
-         name when is_binary(name) <- card,
-         %{"applicable_intensity" => levels} when levels != [] <- safe_load_card(name, opts),
-         false <- level in levels do
-      provenance = if override == name, do: "explicit override", else: "catalogue default"
-
-      Logger.warning(
-        "ProjectIntensity: card #{inspect(name)} (#{provenance}) is OFF-MATRIX for level " <>
-          "#{level} (card claims #{inspect(levels)}) — traced in the committed declaration"
-      )
-
-      :ok
-    else
-      _ -> :ok
-    end
-  end
-
-  # Scoped to the PROJECT's catalogue: a card name is unique only inside one, and read with no root
-  # this resolved in the default catalogue's image — the same defect the rest of the read side
-  # carried. `:repo` absent (a caller with no project in hand) keeps the default root.
-  # ⚠ CE MESSAGE PROMETTAIT UN REPLI QUI N'EXISTE QUE D'UN COTE. Il disait « the burn will fall
-  # back to the default card » : vrai pour `Roles.load_project_card/2`, qui rattrape et enregistre
-  # un incident, et FAUX pour `StepDispatcher`, qui charge en direct et refuse d'onboarder. Une
-  # issue sans route echouait donc a chaque tick, indefiniment, sous un log qui annoncait un repli.
-  #
-  # Depuis `refute_unloadable_card/2`, un override explicite n'arrive plus jusqu'ici : ce qui reste
-  # est une carte par DEFAUT du catalogue qui ne charge pas — un catalogue qui ne tient pas
-  # ensemble, et ca se repare la, pas dans une declaration de projet.
-  defp safe_load_card(name, opts) do
-    repo = Keyword.get(opts, :repo)
-    Fleet.Workflow.Loader.load!(name, Fleet.Workflow.Loader.card_opts_for_repo(repo))
-  rescue
-    e ->
-      Logger.warning(
-        "ProjectIntensity: catalogue default card #{inspect(name)} does not load " <>
-          "(#{Exception.message(e)}) — the off-matrix check is SKIPPED and the declaration is " <>
-          "written as-is; repair the catalogue, this project cannot be dispatched under that name"
-      )
-
-      %{}
   end
 
   defp schema do
