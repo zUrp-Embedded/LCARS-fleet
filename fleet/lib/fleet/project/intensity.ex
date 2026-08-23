@@ -3,10 +3,10 @@ defmodule Fleet.Project.Intensity do
   Single owner of the per-project criticality declaration (`<project>/.lcars.json`,
   schema `intensity-v1`) — writes it at onboarding, reads it at the workflow-map burn.
 
-  **The level is the HUMAN's declaration** (elicited by the framing interview — what
-  happens if this deliverable is wrong? how long will it live? — and RELAYED by the
-  architect; an agent never self-assesses criticality). Undeclared is a LEGITIMATE state:
-  the file is still written, complete and schema-valid, as an HONEST C0 default explicitly
+  **The CARD is the HUMAN's declaration** (elicited by the framing interview — what happens
+  if this deliverable is wrong? how long will it live? — and RELAYED by the architect; an
+  agent never self-assesses criticality). Undeclared is a LEGITIMATE state: the file is still
+  written, complete and schema-valid, running on the delegation default card and explicitly
   marked undeclared — absence is recorded, never fabricated into facts, and never a wall
   (a blocked declaration teaches the human to lie to the arch).
 
@@ -50,30 +50,14 @@ defmodule Fleet.Project.Intensity do
   # l'autorite du rangement et les deux domaines en dependent deja.
   @file_name Fleet.Layout.project_declaration_file()
 
-  # THE LEVEL A PROJECT GETS WHEN NOBODY DECLARED ONE, and it was `C0` — the bottom of the scale,
-  # which is a CLAIM: C0 is the disposable posture, and nobody said the work was disposable. The
-  # rule this module states two paragraphs up is "absence is recorded, never fabricated into
-  # facts"; writing "posture PoC" over silence fabricated one.
-  #
-  # `C1` is what silence actually buys (user ruling 2026-08-12): we do not know, therefore we
-  # judge. It is also the only reading under which the catalogue holds together — `default_card:
-  # brief-gate` declares `applicable_intensity: [C1, C2, C3, C4]`, so with `C0` the default card
-  # stated itself inapplicable to the only situation it is ever reached in, and nothing said so:
-  # the off-matrix warning watched explicit overrides only, and the boot check verified the default
-  # card EXISTS, not that it APPLIES.
-  #
-  # It was a bare literal at its single write site, so nothing else could ask the question — and
-  # the boot guard that compares the catalogue's default card against it has to.
-  @undeclared_level "C1"
-
   # The intensity schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
   @schema_rel Path.join(["cap_profile", "schema", "intensity-v1.json"])
 
   @doc """
   Composes, validates and writes `<proj_dir>/.lcars.json` from the onboarding opts
-  (`:intensity_level`, `:intensity_justification`, `:intensity_nature`, `:workflow_map` —
-  all optional: nothing declared → the honest C0 default, marked undeclared).
+  (`:intensity_justification`, `:workflow_map`, `:max_fan` — all optional: nothing declared →
+  the delegation default card, marked undeclared).
 
   `{:error, {:invalid_declaration, errors}}` on a schema-invalid composition (malformed
   FORM is returned to the caller — fixing a format is not lying); `{:error, term}` on a
@@ -337,11 +321,12 @@ defmodule Fleet.Project.Intensity do
   end
 
   defp compose(opts) do
-    level = Keyword.get(opts, :intensity_level)
     justification = Keyword.get(opts, :intensity_justification)
     card = Keyword.get(opts, :workflow_map)
 
-    declared? = is_binary(level) or is_binary(card)
+    # Naming a card IS the declaration (crit_quarantine): there is no separate level. A write with
+    # no card is an undeclared project — recorded honestly, running on the delegation default.
+    declared? = is_binary(card)
 
     onboarded_by = Keyword.get(opts, :onboarded_by) || "unknown"
 
@@ -349,22 +334,9 @@ defmodule Fleet.Project.Intensity do
       "_schema" => "lcars/intensity-v1",
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
-      "justification" => justification || default_justification(level, card),
+      "justification" => justification || default_justification(card),
       "pipeline_default" => card || Fleet.Project.Roles.delegation_workflow_map(opts)
     }
-
-    base =
-      cond do
-        is_binary(level) -> Map.put(base, "level", level)
-        is_binary(card) -> base
-        true -> Map.put(base, "level", @undeclared_level)
-      end
-
-    base =
-      case Keyword.get(opts, :intensity_nature) do
-        nature when is_binary(nature) and nature != "" -> Map.put(base, "nature", nature)
-        _ -> base
-      end
 
     # Written ONLY when declared. A key absent means "the fleet default", and materializing that
     # default into the file would freeze today's flag into the project's permanent record — the
@@ -375,17 +347,12 @@ defmodule Fleet.Project.Intensity do
     end
   end
 
-  defp default_justification(level, card) do
-    cond do
-      is_binary(level) ->
-        "Justification non fournie — niveau #{level} déclaré par l'humain."
-
-      is_binary(card) ->
-        "Niveau non déclaré — carte choisie explicitement par l'humain : #{card}."
-
-      true ->
-        "NON DÉCLARÉ — défaut système (niveau #{@undeclared_level} : on ne sait pas, donc on " <>
-          "juge). L'humain n'a pas déclaré la criticité."
+  defp default_justification(card) do
+    if is_binary(card) do
+      "Carte choisie explicitement par l'humain : #{card}."
+    else
+      "NON DÉCLARÉ — défaut système : l'humain n'a pas choisi de carte " <>
+        "(on ne sait pas, donc on juge)."
     end
   end
 

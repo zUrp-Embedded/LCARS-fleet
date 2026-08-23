@@ -18,34 +18,39 @@ defmodule Fleet.Project.IntensityTest do
 
   @moduletag :tmp_dir
 
-  test "declared: writes a schema-valid .lcars.json relaying the human's level", %{
-    tmp_dir: tmp
-  } do
+  test "level/nature opts are IGNORED — the card is the declaration, no decorative keys written",
+       %{
+         tmp_dir: tmp
+       } do
+    # Even when a caller still passes the retired opts, compose writes NEITHER key: the card carries
+    # the whole gate now, and a decorative level written back would resurrect the "declared C0, still
+    # blocked" confusion the removal exists to kill.
     assert :ok =
              ProjectIntensity.write(tmp,
+               workflow_map: "standard-qa",
                intensity_level: "C3",
-               intensity_justification: "dashboard client multi-year",
                intensity_nature: "web-gui",
+               intensity_justification: "dashboard client multi-year",
                onboarded_by: "architect"
              )
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == "C3"
+    refute Map.has_key?(d, "level")
+    refute Map.has_key?(d, "nature")
     assert d["declared_by"] == "architect"
-    assert d["nature"] == "web-gui"
-    assert d["pipeline_default"] == "brief-gate"
+    assert d["pipeline_default"] == "standard-qa"
   end
 
   @tag :tmp_dir
   test "a declaration whose declarer is unknown records UNKNOWN, never a plausible role",
        %{tmp_dir: tmp} do
-    # `declared_by` ships in the project repo for good. A caller that declares a level without
-    # saying who must not have a role name written on its behalf: that is a permanent false
-    # attribution, the same one `MergeAndPromote` refuses when it declines the system token.
-    assert :ok = ProjectIntensity.write(tmp, intensity_level: "C3")
+    # `declared_by` ships in the project repo for good. A caller that declares a card without saying
+    # who must not have a role name written on its behalf: that is a permanent false attribution, the
+    # same one `MergeAndPromote` refuses when it declines the system token.
+    assert :ok = ProjectIntensity.write(tmp, workflow_map: "standard-qa")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
-    assert d["level"] == "C3"
+    assert d["pipeline_default"] == "standard-qa"
     assert d["declared_by"] == "unknown"
 
     refute d["declared_by"] in ["architect", "starfleet", "engineer"],
@@ -67,34 +72,20 @@ defmodule Fleet.Project.IntensityTest do
     assert is_map(Fleet.Workflow.Loader.load!(d["pipeline_default"])["steps"])
   end
 
-  test "card WITHOUT level: naming a card IS a declaration — level ABSENT, declarer recorded, NO off-matrix noise",
-       %{tmp_dir: tmp} do
-    # standard-qa claims [C2..C4]: under the old behavior the fabricated C0 default made
-    # this off-matrix LOUD — a "disagreement" nobody expressed. A system default can never
-    # be off-matrix against a human choice.
-    log =
-      capture_log(fn ->
-        assert :ok =
-                 ProjectIntensity.write(tmp,
-                   workflow_map: "standard-qa",
-                   onboarded_by: "starfleet"
-                 )
-      end)
-
-    refute log =~ "OFF-MATRIX"
+  test "naming a card IS a declaration — level ABSENT, real onboarder recorded", %{tmp_dir: tmp} do
+    assert :ok =
+             ProjectIntensity.write(tmp,
+               workflow_map: "standard-qa",
+               onboarded_by: "starfleet"
+             )
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
     # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
     # 2026-07-19 reorg, and this field ships in the project's repo for good.
     assert d["declared_by"] == "starfleet"
-    assert d["justification"] =~ "carte choisie explicitement"
+    assert d["justification"] =~ "Carte choisie explicitement"
     assert d["pipeline_default"] == "standard-qa"
-  end
-
-  test "malformed FORM is returned (fixing a format is not lying)", %{tmp_dir: tmp} do
-    assert {:error, {:invalid_declaration, _}} =
-             ProjectIntensity.write(tmp, intensity_level: "C9")
   end
 
   test "the intensity schema resolves through the SchemaCache authority, not a local pipeline copy",

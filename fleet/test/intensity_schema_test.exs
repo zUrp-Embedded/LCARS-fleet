@@ -38,15 +38,21 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert :ok = ExJsonSchema.Validator.validate(schema, canon)
   end
 
-  test "rejects — level outside enum C0-C4", %{schema: schema, canon: canon} do
-    bad = Map.put(canon, "level", "C9")
-    assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
+  test "rejects — the RETIRED `level` and `nature` keys (crit_quarantine removed them from the schema)",
+       %{schema: schema, canon: canon} do
+    # They were valid fields once; `additionalProperties: false` now refuses them like any unknown
+    # key. A legacy file still carrying `level` is schema-invalid — which is exactly why the READ
+    # path (`Intensity.pipeline_default/2`) stopped full-validating and reads only the card name.
+    assert {:error, _} = ExJsonSchema.Validator.validate(schema, Map.put(canon, "level", "C2"))
+
+    assert {:error, _} =
+             ExJsonSchema.Validator.validate(schema, Map.put(canon, "nature", "web-gui"))
   end
 
   test "rejects — any structured block beyond the declared fields (a declaration IS exactly the schema)",
        %{schema: schema, canon: canon} do
-    # The declaration carries level + justification + card, nothing else: any extra
-    # non-underscore structure is refused (additionalProperties: false) — the level's WHY
+    # The declaration carries justification + card + provenance, nothing else: any extra
+    # non-underscore structure is refused (additionalProperties: false) — the WHY of the stakes
     # lives in the justification PROSE, never in side data.
     bad = Map.put(canon, "criteria", %{"anything" => true})
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
@@ -57,10 +63,16 @@ defmodule Fleet.CapProfile.IntensitySchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  test "accepts — declaration WITHOUT level (card-only declaration: absence recorded, never fabricated)",
-       %{schema: schema, canon: canon} do
-    ok = Map.delete(canon, "level")
-    assert :ok = ExJsonSchema.Validator.validate(schema, ok)
+  test "accepts — the minimal declaration (required fields + card, no level)", %{schema: schema} do
+    minimal = %{
+      "_schema" => "lcars/intensity-v1",
+      "declared_at" => "2026-08-23",
+      "declared_by" => "architect",
+      "justification" => "PoC jetable — carte c0-poc.",
+      "pipeline_default" => "brief-gate"
+    }
+
+    assert :ok = ExJsonSchema.Validator.validate(schema, minimal)
   end
 
   test "rejects — unknown non-underscore key", %{schema: schema, canon: canon} do
