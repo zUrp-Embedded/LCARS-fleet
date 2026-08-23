@@ -445,96 +445,48 @@ EOF
   [ -z "$output" ]
 }
 
-# ─── L'ADMINITE : UN FAIT DE FORGE, PROJETE EN GROUPE (⚖ user 2026-08-17) ───────────────────────
+# ─── L'ADMINITE N'EST PLUS PROJETEE — SEPT TEMOINS SONT PARTIS AVEC LEUR SUJET ─────────────────
 #
-# ⚠ CE QUE CES TEMOINS TIENNENT AVANT TOUT : la MESURE qui a change le design. Gitea 1.26.1 MASQUE
-# `is_admin` aux lecteurs non-admin — `/api/v1/users/admiral` rend `is_admin: false` sous le jeton
-# systeme ET en anonyme, alors que le compte l'est. Un convergeur branche sur le jeton systeme
-# n'aurait donc accorde l'adminite a personne : fail-closed, et parfaitement inutile. La sonde va
-# donc au jeton MASTER, et l'absence de ce jeton ne conclut RIEN.
+# Il y avait ici une sonde `forge_is_admin` et sa passe `converge_admins` : elles lisaient
+# `is_admin` sur la forge avec le jeton MASTER et le recopiaient en adhesion a un groupe unix. Sept
+# temoins les tenaient, dont la mesure qui avait dicte le design (Gitea 1.26.1 rend `is_admin`
+# PRESENT ET FAUX a un lecteur non site-admin, donc un convergeur branche sur le jeton systeme
+# aurait demote tout le monde a chaque tour).
 #
-# La forge est simulee par un `curl` en tete de PATH. Ce qui est mesure est la DECISION.
-
-# `admin_probe <login>` -> le rc de `forge_is_admin` : 0 prouve admin · 1 prouve non · 2 pas su lire
-admin_probe() { # admin_probe <login> <corps json|DOWN|NOTOKEN> [code http]
-  local body="$2" code="${3:-200}"
-  local tokfile="$BATS_TEST_TMPDIR/master.token"
-
-  if [[ "$body" == "NOTOKEN" ]]; then
-    rm -f "$tokfile"
-  else
-    printf 'MASTER\n' > "$tokfile"
-  fi
-
-  mkdir -p "$BATS_TEST_TMPDIR/bin"
-  if [[ "$body" == "DOWN" ]]; then
-    printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
-  else
-    { printf '#!/usr/bin/env bash\n'
-      printf 'printf %%s %s\n' "'$body'"
-      printf 'printf "\\n%s"\n' "$code"
-    } > "$BATS_TEST_TMPDIR/bin/curl"
-  fi
-  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-
-  run bash -c "
-    set -euo pipefail
-    export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
-    export LCARS_MASTER_TOKEN_FILE='$tokfile'
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
-    source '$SUT'
-    rc=0; forge_is_admin '$1' || rc=\$?; echo \"rc=\$rc\""
+# ⚠ CETTE MESURE N'EST PAS PERDUE, ELLE A CHANGE DE MAISON. C'est elle qui oblige le credential a
+# vivre dans un process qui n'est pas celui de l'humain, et elle est desormais epinglee la ou la
+# question se pose : `fleet/test/test_catalogue_executor.py`, temoin « interrogee avec le jeton
+# master ». Un temoin qui perd son sujet se retire ; une mesure qui garde sa valeur se deplace.
+#
+# CE QUI RESTE VERIFIE ICI, et c'est le contrat de ce fichier : ce convergeur ne connait plus
+# l'adminite du tout.
+@test "adminite: le convergeur n'en sait plus RIEN — ni sonde, ni groupe, ni jeton master" {
+  # Le fond du chantier : ce fichier fait du PROVISIONNEMENT (un compte unix ne se cree pas au
+  # moment ou quelqu'un tape), jamais de l'AUTORISATION (qui se demande a l'instant ou elle compte).
+  # Melanger les deux transformait un booleen d'autorisation en cache, et un cache appelle un poll,
+  # puis un rattrapage pour les sessions nees avant lui.
+  # ⚠ PAS DE `! grep` ICI, ET C'EST UNE CORRECTION MESUREE. Bash EXEMPTE de `set -e` toute commande
+  # dont le statut est inverse par `!` : une negation qui n'est pas la DERNIERE instruction du test
+  # est donc INERTE — elle s'execute, elle echoue, et rien ne le remarque. Ces cinq assertions
+  # etaient inertes a leur premiere ecriture, et une mutation l'a montre. `run` + un test nu est la
+  # forme qui ne peut pas mentir.
+  # ⚠ ET ON MESURE LE CODE, PAS LA PROSE. La cicatrice qui explique ce retrait NOMME ce qu'elle a
+  # retire — c'est son metier, et c'est ce qui evite qu'une prochaine session refasse le geste faute
+  # de savoir pourquoi il etait faux. Un instrument qui attrape l'explication interdit d'expliquer.
+  local motif
+  for motif in forge_is_admin converge_admins ADMIN_GROUP lcars-admin MASTER_TOKEN; do
+    run bash -c "sed 's/#.*//' '$SUT' | grep -c -- '$motif' || true"
+    [ "$output" -eq 0 ] || { echo "le convergeur nomme encore « $motif » dans son CODE ($output fois)" >&2; return 1; }
+  done
+  # Le garde d'instrument : une extraction cassee rendrait ces cinq assertions vraies sur du vide.
+  grep -q 'TOKEN_FILE=' "$SUT"
 }
 
-@test "adminite: la forge dit is_admin=true -> PROUVE admin" {
-  admin_probe alice '{"login":"alice","is_admin":true}'
-  [[ "$output" == *"rc=0"* ]]
-}
-
-@test "adminite: is_admin=false -> PROUVE non-admin (une demotion se lit, elle ne se devine pas)" {
-  admin_probe alice '{"login":"alice","is_admin":false}'
-  [[ "$output" == *"rc=1"* ]]
-}
-
-@test "adminite: SANS jeton master, on ne conclut RIEN — ni promotion, ni demotion" {
-  # Le jeton master est ce qui permet de VOIR l'adminite d'autrui. Sans lui la boite ne peut pas
-  # repondre a la question ; elle ne l'invente pas. Une lecture rendue « non-admin » ici
-  # DEMOTERAIT tout le monde au premier tour sur une boite sans autorite posee.
-  admin_probe alice NOTOKEN
-  [[ "$output" == *"rc=2"* ]]
-}
-
-@test "adminite: forge MUETTE -> pas su lire, jamais « non-admin »" {
-  admin_probe alice DOWN
-  [[ "$output" == *"rc=2"* ]]
-}
-
-@test "adminite: HTTP non-200 -> pas su lire (un 403 n'est pas une reponse a la question)" {
-  admin_probe alice '{"message":"token does not have scope"}' 403
-  [[ "$output" == *"rc=2"* ]]
-}
-
-@test "adminite: un champ ABSENT n'est pas un « false » — c'est une non-reponse" {
-  # LA MESURE QUI A CHANGE LE DESIGN, tenue ici : un lecteur non-admin recoit une charge SANS la
-  # verite du champ. Le lire comme `false` accorderait a la boite une certitude qu'elle n'a pas.
-  admin_probe alice '{"login":"alice"}'
-  [[ "$output" == *"rc=2"* ]]
-}
-
-@test "adminite: le groupe est celui de la config, pas un litteral" {
-  # Un groupe que le convergeur peuple et que personne ne lit, c'est deux noms qui ont diverge.
-  run bash -c "source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
-  [ "$output" = "lcars-admin" ]
-
-  run bash -c "export PROV_ADMIN_GROUP=autre; source '$SUT' 2>/dev/null; echo \"\$ADMIN_GROUP\""
-  [ "$output" = "autre" ]
-}
-
-# ─── UN SEUL JEU DE NOMS POUR LES QUATRE FAITS PARTAGES ─────────────────────────────────────────
+# ─── UN SEUL JEU DE NOMS POUR LES TROIS FAITS PARTAGES ──────────────────────────────────────────
 #
 # ⚠ CE TEMOIN EXISTE PARCE QU'IL Y AVAIT DEUX FAMILLES DE VARIABLES. Ce script lisait
-# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_ADMIN_GROUP` / `LCARS_FLEET_GROUP` pendant que
-# `provision-lib.sh` declarait `PROV_*` pour les memes faits — mesure du 2026-08-17 : 59 occurrences
+# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_FLEET_GROUP` pendant que `provision-lib.sh`
+# declarait `PROV_*` pour les memes faits — mesure du 2026-08-17 : 59 occurrences
 # `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Personne ne posait ni l'un ni
 # l'autre, donc les DEFAUTS portaient seuls l'accord : poser `PROV_FORGE_ORG=starfleet` provisionnait
 # une org que ce convergeur n'interrogeait jamais, en silence.
@@ -545,7 +497,7 @@ admin_probe() { # admin_probe <login> <corps json|DOWN|NOTOKEN> [code http]
 # deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
 @test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
   lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_ADMIN_GROUP:ADMIN_GROUP PROV_FLEET_GROUP:GROUP; do
+  for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
     declared="$(bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\${$prov}\"")"
     used="$(bash -c "source '$SUT' 2>/dev/null; printf '%s' \"\${$local_var}\"")"
@@ -635,14 +587,12 @@ EOF
   # Ce qui a produit le defaut est le geste RECOPIE : deux exemplaires, un chemin oublie. Le temoin
   # epingle la forme, pas seulement le comportement — N appels, une fonction.
   #
-  # ⚖ 2026-08-21 : QUATRE, ET LE QUATRIEME EST LA PROMOTION. Ce temoin a attrape son ajout, ce qui
-  # est son metier ; le nombre se corrige donc DELIBEREMENT, en disant pourquoi. `usermod -aG`
-  # ecrit la base et ne touche aucun process : sans ce quatrieme appel, la promotion attendait le
-  # tour suivant pour etre projetee dans la console — 30 s de plus sur un droit qu'on vient
-  # d'accorder, alors que le geste est deja en main. Ce qu'il n'est PAS : une copie du geste. Il
-  # appelle la meme fonction que les trois autres, et c'est tout ce que ce temoin garde.
+  # ⚖ 2026-08-21 : le nombre est passe a QUATRE quand la promotion en a ajoute un — ce temoin a
+  # attrape l'ajout, ce qui est son metier. Il redescend a TROIS avec le retrait de cette passe : la
+  # promotion n'existe plus, donc son appel non plus. Le nombre se corrige DELIBEREMENT, en disant
+  # pourquoi ; ce qu'il garde est la forme — N appelants, UNE fonction, aucune copie du geste.
   run grep -c '^\s*ensure_console "\$login"' "$SUT"
-  [ "$output" -eq 4 ]
+  [ "$output" -eq 3 ]
 
   # Et aucune copie ne subsiste : plus personne n'appelle `$CONSOLE` en direct.
   run grep -c '"\$CONSOLE" --human' "$SUT"

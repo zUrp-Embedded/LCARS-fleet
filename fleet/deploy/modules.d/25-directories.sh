@@ -54,16 +54,16 @@ set -euo pipefail
 # l'ajouter là-bas (ou l'inverse) fait rougir `layout.face_roots_provisioned`, en la NOMMANT.
 # ⚠ LES DEUX ZONES CATALOGUE N'ONT PAS LE MEME MODE, ET LA DIFFERENCE EST LEUR CONTENU.
 # `$PROV_CATALOGUES_DIR` (le materiel installe) est du METIER : les cap-profiles, les cartes, les
-# prompts. Tout le monde le lit — chaque fleet humaine, et les pods par leurs mounts — donc `2775`.
+# prompts. Il se LIT — chaque fleet humaine, et les pods par leurs mounts — donc `0750 root:fleet`.
 # `$PROV_CATALOGUES_WORK` (les recettes tofu par catalogue) porte l'ETAT terraform, qui contient
-# les valeurs des variables : le mot de passe de seed y figure. Donc `2770`, aucun acces monde.
+# les valeurs des variables : le mot de passe de seed y figure. Donc `0700 root:root`.
 #
-# `2` (setgid) sur les deux : un fichier cree par un admin y reste attribue au groupe, sinon le
-# second admin ne peut pas reprendre le travail du premier — et un install est rejouable par
-# DEFINITION, donc par quelqu'un d'autre.
-#
-# Le groupe est `$PROV_ADMIN_GROUP` et non `$PROV_FLEET_GROUP` : ecrire ici est un geste
-# d'administration (⚖ user 2026-08-17), lire le materiel ne l'est pas.
+# ⚠ PLUS AUCUN GROUPE N'Y ECRIT, ET C'EST LE CHANGEMENT. Les deux zones etaient `2775`/`2770` sur un
+# groupe d'admins, avec le setgid pour qu'un second admin puisse reprendre le travail du premier :
+# il fallait que des HUMAINS ecrivent ici, parce que le geste d'install tournait sous leur uid.
+# Il tourne maintenant dans un service root (`catalogue-executor.py`), donc un seul ecrivain, donc
+# ni groupe d'ecriture ni setgid a tenir. Ce qui reste est une question de LECTURE, et elle se
+# repond par `fleet` pour le materiel et par personne pour l'etat.
 # ─── LA RACINE DES SOCKETS DE CONSOLE — SANS ELLE LA FLEET NE BOOTE PAS ─────────────────────────
 # MEME CICATRICE QUE LES ZONES DE FACE, UN SITE PLUS LOIN. `Fleet.Observation` fait ecouter le deck
 # sur `/run/lcars/console/<humain>/deck.sock`, et ce dossier n'etait cree QUE par `console.sh`,
@@ -134,8 +134,8 @@ prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
     "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
-    "$PROV_CATALOGUES_DIR 2775 root:$PROV_ADMIN_GROUP" \
-    "$PROV_CATALOGUES_WORK 2770 root:$PROV_ADMIN_GROUP" \
+    "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
+    "$PROV_CATALOGUES_WORK 0700 root:root" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"

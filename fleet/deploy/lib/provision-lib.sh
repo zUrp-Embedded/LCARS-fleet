@@ -51,7 +51,6 @@ PROVISION_LIB_LOADED=1
 # la team `humans` : le convergeur d'humains l'ecrit, et il ouvre la lecture de l'autorite de la
 # boite (jeton master, seed). La capacite reste le systeme de fichiers — jamais un booleen qu'un
 # appelant pourrait oublier de tester.
-: "${PROV_ADMIN_GROUP:=lcars-admin}"           # is_admin sur la forge -> administre le runtime
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
 # Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
 # CONSOMMATEUR (le deck, sous `nobody`) doivent se rencontrer sans que ni l'un ni l'autre ne change

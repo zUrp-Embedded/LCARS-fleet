@@ -241,8 +241,11 @@ EOS
   # jeton master parce qu'il etait la, pas parce que son geste l'exige — et le tenir imposait que le
   # master reste lisible par un humain, c'est-a-dire exactement l'ACL qu'on retire.
   local src="$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
-  ! grep -q 'MASTER_TOKEN' "$src"
-  ! grep -q 'forge-master.token' "$src"
+  # `run` + test nu : une `! grep` non terminale serait exemptee de `set -e`, donc inerte.
+  run grep -c 'MASTER_TOKEN' "$src"
+  [ "$output" -eq 0 ]
+  run grep -c 'forge-master.token' "$src"
+  [ "$output" -eq 0 ]
   grep -q 'gitea_token' "$src"
   # Et le skill ne PROMET plus un privilege de siege, qui n'existe pas.
   ! grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"

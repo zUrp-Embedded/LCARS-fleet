@@ -71,12 +71,12 @@ dir       /usr/share/lcars/avatars                     0755  root:root          
 dir       /usr/share/lcars/favicon                     0755  root:root           wsl+linux
 dir       /usr/share/lcars/doc                         0755  root:root           wsl+linux
 dir       /home/private                                0750  root:fleet          any
-dir       /home/catalogues                             2775  root:lcars-admin    any
+dir       /home/catalogues                             0750  root:fleet          any
 # ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
 # (`LCARS_STORE_ROOT`, lu par `toolchain-converger.sh:39`) ; `/var/lib/lcars/tofu` est l'etat des
 # recettes (`PROV_CATALOGUES_WORK`). Ne declarer que le second laissait le premier hors de la table.
-dir       /var/lib/lcars                               2775  root:lcars-admin    any
-dir       /var/lib/lcars/tofu                          2770  root:lcars-admin    any
+dir       /var/lib/lcars                               0755  root:root           any
+dir       /var/lib/lcars/tofu                          0700  root:root           any
 dir       /etc/lcars                                   0755  root:root           wsl+linux
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
@@ -123,13 +123,17 @@ link      /usr/local/bin/npm                           -     -                  
 link      /usr/local/bin/npx                           -     -                   wsl+linux
 
 # ─── GROUPES ────────────────────────────────────────────────────────────────────────────────────
-# ⚠ LES GID SONT FLOTTANTS AUJOURD'HUI (mesure .63 : fleet 1001, lcars-admin 1002, lcars-console
-# 1003), et le Dockerfile en fixe deux (fleet 2000, lcars-console 2001). Les deux substrats
-# divergent donc sur un fait que ce fichier existe pour tenir. Le geste `20-groups` de la phase A
-# lira cette colonne ; tant qu'il ne la lit pas, la valeur ici est la CIBLE, pas la mesure.
+# ⚠ LES GID SONT FLOTTANTS AUJOURD'HUI (mesure .63 : fleet 1001, lcars-console 1003), et le
+# Dockerfile en fixe deux (fleet 2000, lcars-console 2001). Les deux substrats divergent donc sur un
+# fait que ce fichier existe pour tenir. Le geste `20-groups` de la phase A lira cette colonne ;
+# tant qu'il ne la lit pas, la valeur ici est la CIBLE, pas la mesure.
+#
+# ⚠ IL Y A EU UN TROISIEME GROUPE, `lcars-admin` (2002), ET IL N'EN RESTE RIEN. Il projetait le
+# `is_admin` de la forge en adhesion unix, pour que le mode d'un fichier serve de gate. L'adminite
+# se DEMANDE maintenant a la forge, a l'instant du geste, par un service root — donc plus rien a
+# projeter, donc plus de groupe. Un gid retire ne se recycle pas : 2002 reste libre.
 group     fleet                                        2000  -                   any
 group     lcars-console                                2001  -                   any
-group     lcars-admin                                  2002  -                   any
 
 # ─── VOLATILES — refaits au boot ────────────────────────────────────────────────────────────────
 runtime   /run/lcars                                   0755  root:root           wsl+linux

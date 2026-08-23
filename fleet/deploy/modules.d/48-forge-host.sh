@@ -644,9 +644,17 @@ apply() {
              --username "$PROV_FORGE_ADMIN" --token-name "poste-$(date +%s)" --scopes all --raw \
              2>/dev/null | tail -n1 | tr -d '[:space:]')"
     [[ -n "$tok" ]] || { p_fail "la forge n'a rendu aucun jeton master pour $PROV_FORGE_ADMIN"; verdict_apply; }
-    write_atomic "$MASTER_TOKEN_FILE" 0640 "root:$PROV_FLEET_GROUP" <<<"$tok" \
+    # ⚠ `0600 root:root` DÈS LE MINT, ET C'ÉTAIT LE TROU. Ce jeton est l'autorité TOTALE de la
+    # forge ; il naissait `0640 root:$PROV_FLEET_GROUP`, donc lisible par TOUT humain de la boîte,
+    # et c'est `50-forge converge_authority_modes()` qui le refermait — plus tard, dans un AUTRE
+    # module. Un secret dont la fermeture dépend d'un module qui n'a pas encore tourné est ouvert
+    # pendant l'intervalle, et ouvert tout court le jour où ce module rend la main plus tôt.
+    #
+    # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne en root : personne d'autre
+    # n'a besoin de ce fichier, donc personne d'autre ne doit pouvoir l'ouvrir.
+    write_atomic "$MASTER_TOKEN_FILE" 0600 "root:root" <<<"$tok" \
       || { p_fail "jeton master non posé ($MASTER_TOKEN_FILE)"; verdict_apply; }
-    p_chg "autorité de création posée ($MASTER_TOKEN_FILE)"
+    p_chg "autorité de création posée ($MASTER_TOKEN_FILE, root seul)"
   else
     p_ok "autorité de création déjà posée ($MASTER_TOKEN_FILE)"
   fi
@@ -686,9 +694,12 @@ apply() {
     # il tombe, sur une machine, sans laisser de ligne.
     local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20 || true)"
     [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
-    write_atomic "$SEED_FILE" 0640 "root:$PROV_FLEET_GROUP" <<<"$seed" \
+    # `0600 root:root`, comme le jeton master quelques lignes plus haut : les DEUX secrets d'autorité
+    # se ferment ensemble, ou l'install casse entre les deux. Seul `catalogue-executor.py` les ouvre,
+    # et il tourne en root.
+    write_atomic "$SEED_FILE" 0600 "root:root" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
-    p_chg "seed des comptes posé ($SEED_FILE)"
+    p_chg "seed des comptes posé ($SEED_FILE, root seul)"
   else
     p_ok "seed des comptes déjà posé ($SEED_FILE)"
   fi
