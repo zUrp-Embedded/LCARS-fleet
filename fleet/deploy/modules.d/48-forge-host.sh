@@ -172,6 +172,18 @@ PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 d() { "$PROV_DOCKER_BIN" "$@"; }
 forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; }
 
+# Le port sur lequel la forge de CE projet publie AUJOURD'HUI, ou vide si elle ne tourne pas.
+#
+# ⚠ ON DEMANDE A DOCKER, PAS AU PORT. `forge_up` sonde l'adresse qu'on VEUT ; elle ne dit rien de
+# celle qu'on a. Les deux questions se confondent tant que le port ne change pas, et divergent
+# exactement quand il change — c'est-a-dire quand la reponse compte.
+forge_running_port() {
+  d ps --filter "label=com.docker.compose.project=$PROV_FORGE_PROJECT" \
+       --filter "label=com.docker.compose.service=forge" \
+       --format '{{.Ports}}' 2>/dev/null \
+    | sed -n 's/.*:\([0-9]\{1,5\}\)->3000\/tcp.*/\1/p' | head -n1
+}
+
 # ─── LE RUNNER CI — UNE FORGE QUE RIEN NE PEUT SERVIR N'EST PAS UNE FORGE ────────────────────────
 #
 # Le runner est un etat-cible de ce rail, pas un supplement : une forge sans lui accepte un ticket,
@@ -520,6 +532,24 @@ apply() {
   # forge écoute, le port est légitimement occupé et refuser ici casserait l'idempotence — c'est le
   # cas NOMINAL d'un second passage. On ne refuse que si le port est pris ET que la forge ne
   # répond pas.
+  # ⚠ CHANGER LE PORT SANS CHANGER LE PROJET DÉPLACE LA FORGE, IL N'EN AJOUTE PAS UNE. `compose up`
+  # sur le même projet RECRÉE le conteneur avec le nouveau mapping : les volumes suivent, donc rien
+  # n'est perdu — mais l'ancienne adresse cesse de répondre, et tout ce qui la pointait devient
+  # périmé jusqu'à la prochaine convergence (`forge.url`, la config du runner, le callback OIDC).
+  #
+  # Et rien ne le disait : `forge_up` sonde le port DEMANDÉ, n'y trouve rien, et le module conclut
+  # « pas de forge » — puis en monte une, qui est l'ancienne, ailleurs.
+  #
+  # Les deux gestes sont nommés parce qu'ils sont deux INTENTIONS différentes, et que refuser sans
+  # les distinguer laisserait l'opérateur deviner laquelle on lui refuse.
+  local _running; _running="$(forge_running_port)"
+  if [[ -n "$_running" && "$_running" != "$PROV_FORGE_HOST_PORT" ]]; then
+    p_fail "la forge du projet « $PROV_FORGE_PROJECT » tourne déjà sur le port $_running, et cette passe en demande $PROV_FORGE_HOST_PORT — je ne la déplace pas sans qu'on me le dise"
+    p_fail "  une SECONDE forge      : « --forge-project <nom> » (conteneur, réseau, volumes et runner à elle)"
+    p_fail "  DÉPLACER celle-ci      : « $PROV_DOCKER_BIN compose -p $PROV_FORGE_PROJECT down » d'abord, puis relance"
+    verdict_apply
+  fi
+
   if [[ "$was_up" -eq 0 ]] && port_taken "$PROV_FORGE_HOST_PORT"; then
     local holder; holder="$(port_holder "$PROV_FORGE_HOST_PORT")"
     p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est PAS la forge de LCARS (elle ne répond pas sur $LOCAL_URL)"

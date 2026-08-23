@@ -721,3 +721,50 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [ -f "$door" ]
   grep -qE '^\s*for _v in .*PROV_FORGE_ADMIN_RESET' "$door"
 }
+
+# ─── CHANGER LE PORT SANS CHANGER LE PROJET DEPLACE LA FORGE ────────────────────────────────────
+#
+# `compose up` sur le meme projet RECREE le conteneur avec le nouveau mapping. Les volumes suivent,
+# donc rien n'est perdu — mais l'ancienne adresse cesse de repondre, et `forge.url`, la config du
+# runner et le callback OIDC la pointent encore. Rien ne le disait : `forge_up` sonde le port
+# DEMANDE, n'y trouve rien, et le module conclut « pas de forge » avant d'en monter une qui est
+# l'ancienne, ailleurs.
+
+@test "forge_running_port : le port PUBLIE se lit chez docker, pas sur l'adresse qu'on espere" {
+  # Les trois formes que `docker ps --format '{{.Ports}}'` rend reellement — dual-stack, bind
+  # precis, et rien. Une extraction qui ne tient pas les trois rend un port faux ou vide, et un
+  # port faux ici DEPLACE une forge en croyant en monter une.
+  head_sh 'd() { printf "%s\n" "0.0.0.0:21000->3000/tcp, [::]:21000->3000/tcp"; }
+           echo "[$(forge_running_port)]"'
+  [[ "$output" == *"[21000]"* ]]
+
+  head_sh 'd() { printf "%s\n" "127.0.0.1:3002->3000/tcp"; }
+           echo "[$(forge_running_port)]"'
+  [[ "$output" == *"[3002]"* ]]
+
+  head_sh 'd() { printf "%s\n" ""; }
+           echo "[$(forge_running_port)]"'
+  [[ "$output" == *"[]"* ]]
+}
+
+@test "forge_running_port : c'est le port de CE projet — le filtre porte le label compose" {
+  # Sans le filtre, la sonde lirait le premier conteneur venu — une autre forge, un banc — et
+  # refuserait un montage legitime en citant le port de quelqu'un d'autre.
+  code() { grep -vE '^\s*#' "$SRC"; }
+  code | grep -q 'com.docker.compose.project=\$PROV_FORGE_PROJECT'
+  code | grep -q 'com.docker.compose.service=forge'
+}
+
+@test "le refus de deplacement vient AVANT le montage, et il nomme les DEUX intentions" {
+  # Un refus pose apres `compose up` n'est pas un refus : la forge a deja bouge.
+  code() { grep -vE '^\s*#' "$SRC"; }
+  local refus montage
+  refus="$(code | grep -n 'tourne deja sur le port\|tourne déjà sur le port' | head -1 | cut -d: -f1)"
+  montage="$(code | grep -n 'compose -f "\$COMPOSE_FILE"' | head -1 | cut -d: -f1)"
+  [ -n "$refus" ] && [ -n "$montage" ]
+  [ "$refus" -lt "$montage" ]
+  # Les deux gestes : en monter une seconde, ou deplacer celle-ci. Nommer l'un sans l'autre
+  # laisserait l'operateur deviner laquelle des deux on lui refuse.
+  code | grep -q 'forge-project'
+  code | grep -q 'compose -p \$PROV_FORGE_PROJECT down'
+}

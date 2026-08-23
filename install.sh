@@ -29,6 +29,10 @@
 #                       l'autoriser ; sans lui, aucun humain n'est créé.
 #       --port-forge N  le port que publie la forge du poste (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
+#       --forge-project N  nomme l'instance de forge (défaut lcars-forge) —
+#                       conteneur, réseau, volumes et runner en dérivent. C'est
+#                       le geste qui en monte une SECONDE au lieu de déplacer
+#                       celle qui tourne.
 #
 #     Le re-run est TOUJOURS sûr : pas de sentinelle, l'état c'est le
 #     système, re-sondé à chaque passage.
@@ -122,6 +126,7 @@ while [[ $# -gt 0 ]]; do
     # valide — un seul valideur, chez celui qui s'en sert. Le rail BOÎTE ne les lit pas : ses ports
     # sont ceux du compose, et `--` les passe au délégué.
     --port-forge|--port-deck) PASSTHRU+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
+    --forge-project)          PASSTHRU+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
     # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),
