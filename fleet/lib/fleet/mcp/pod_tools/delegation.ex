@@ -696,7 +696,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   actually load). For each card: `name` (the LOADABLE id — the `workflow_map` value of
   `project_create`), `declared_name` (the card's self-declared label, for reference — the two
   identities are distinct, never collapsed), FR `presentation` (shown to the human VERBATIM —
-  the card's own voice), `applicable_intensity` (level matrix), `jury` (PR judges) and `steps`.
+  the card's own voice), `jury` (PR judges) and `steps`.
   Architect gate (framing is the arch's job). A card that fails to load is SKIPPED loud and
   reported in `unreadable` (the catalogue never lies silently); an empty OFFER is an ERROR, never
   an empty listing — "no card exists" would be the vacuous lie.
@@ -942,7 +942,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
        "status" => card["status"],
        "scope" => card["scope"],
        "presentation" => card["presentation"] || card["description"],
-       "applicable_intensity" => card["applicable_intensity"],
        "jury" => card["jury"],
        "steps" => card["steps"] |> Map.keys() |> Enum.sort()
      }}

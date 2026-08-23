@@ -982,8 +982,7 @@ defmodule Fleet.MCP.PodTools do
           "framing facts (mains voltage? cuts fingers? how long will it live?), you never decide for them. " <>
           "Each entry carries `name` (the LOADABLE id — pass it as project_create's `workflow_map`), " <>
           "`declared_name` (the card's self-declared label, reference only), `presentation` (FR, show it " <>
-          "to the human VERBATIM — it states the card's positioning and judges), `applicable_intensity` (the " <>
-          "card's level matrix — an off-matrix choice is ACCEPTED, logged loud, the human has the last word), " <>
+          "to the human VERBATIM — it states the card's positioning and judges), " <>
           "`jury` (the PR judges the card convenes) and `steps`. Cards marked TECHNIQUE are fleet tooling, " <>
           "not for real projects. It REFUSES rather than hand back an empty offer: no installed " <>
           "catalogue carries cards (a DEPLOYMENT fact — ask `catalogue_list` what this box serves), " <>

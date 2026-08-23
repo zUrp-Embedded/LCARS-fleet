@@ -1639,8 +1639,8 @@ defmodule Fleet.MCP.PodToolsTest do
         assert is_list(card["jury"]), "card #{name} has no jury list"
       end
 
-      assert %{"jury" => [], "applicable_intensity" => ["C0"]} = by_name["c0-poc"]
-      assert %{"jury" => ["qualifier"], "applicable_intensity" => ["C1"]} = by_name["c1-light"]
+      assert %{"jury" => []} = by_name["c0-poc"]
+      assert %{"jury" => ["qualifier"]} = by_name["c1-light"]
       assert by_name["brief-gate"]["jury"] == ["qualifier", "reviewer"]
       assert map_size(by_name) >= 5
 

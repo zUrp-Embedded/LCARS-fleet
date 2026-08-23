@@ -21,7 +21,6 @@ metadata:
   name: audit-only
   description: "Audit indépendant — pas de code généré. 1 step, gate terminal vérifiée par le système (le document déclaré en `outputs` doit exister et ne pas être vide dans le workspace). Escalade gatekeeper sur échec de règle (dispatch_gatekeeper)."
   presentation: "C0→C4 — AUDIT PUR : un auditeur lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant à n'importe quel niveau de criticité."
-  applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
   # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique

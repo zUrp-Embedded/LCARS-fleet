@@ -668,7 +668,7 @@ function newCard(){
   const P = pools();
   csel = name; editing = true;
   ED = {mode:'form', fits:true, text:'',
-        state:{ints:[], desc:'', pres:'', jury:[], juryOn:false, rework:2,
+        state:{desc:'', pres:'', jury:[], juryOn:false, rework:2,
                pre:null, audit:null, extra:[],
                producers:[{name:'build', role:P.producers[0]||'', face:'', inputs:[]}]}};
   drawCards();
@@ -684,8 +684,7 @@ function drawCards(){
     const meta = (cards[name].data||{}).metadata||{};
     const b = el('button','row'+(name===csel&&!editing?' on':''));
     b.appendChild(el('span','id', name));
-    b.appendChild(el('span','meta', ((meta.applicable_intensity||[]).join(' ')||'—')
-      + (meta.status && meta.status!=='canon' ? ' · '+meta.status : '')));
+    b.appendChild(el('span','meta', (meta.status && meta.status!=='canon' ? meta.status : '—')));
     b.onclick = () => { csel = name; editing=false; ED=null; drawCards(); };
     r.appendChild(b);
   }
@@ -856,7 +855,7 @@ function observedSeats(){
 function stageModel(data){
   const meta=(data||{}).metadata||{}, spec=(data||{}).spec||{};
   const steps=spec.steps||{}; const P=pools();
-  const st={ints:(meta.applicable_intensity||[]).slice(), desc:meta.description||'',
+  const st={desc:meta.description||'',
             pres:meta.presentation||'', rework: spec.max_rework_rounds ?? 2,
             jury:(spec.jury||[]).slice(), juryOn:(spec.jury||[]).length>0,
             pre:null, producers:[], audit:null, extra:[]};
@@ -885,7 +884,6 @@ function emitYaml(st){
   const L = ['kind: WorkflowMap','metadata:',`  name: ${csel}`];
   if(st.desc) L.push(`  description: ${q(st.desc)}`);
   if(st.pres) L.push(`  presentation: ${q(st.pres)}`);
-  if(st.ints.length) L.push(`  applicable_intensity: [${st.ints.join(', ')}]`);
   L.push('spec:');
   L.push(`  jury: [${st.jury.join(', ')}]`);
   L.push(`  max_rework_rounds: ${st.rework}`);
@@ -998,16 +996,6 @@ function editor(body, src){
     const st = ED.state;
 
     const g = el('div','fs'); g.appendChild(el('div','ftitle','gouvernance'));
-    const ints = el('div','ckrow');
-    for(const i of enumOf('applicable_intensity')){
-      const on = st.ints.includes(i);
-      const lb = el('label','ck'+(on?'':' off'));
-      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=on;
-      ck.onchange = () => { ck.checked ? st.ints.push(i) : st.ints.splice(st.ints.indexOf(i),1);
-                            st.ints.sort(); renderZone(); };
-      lb.appendChild(ck); lb.append(' '+i); ints.appendChild(lb);
-    }
-    g.appendChild(ints);
     const rw = el('div','frow'); rw.appendChild(el('label',null,'rework max'));
     const ri = document.createElement('input'); ri.type='number'; ri.min=0; ri.max=9; ri.value=st.rework;
     ri.onchange = () => { st.rework = parseInt(ri.value||'0',10); };
@@ -1117,10 +1105,6 @@ function cardCtx(){
   const data = src.data||{}, meta = data.metadata||{}, spec = data.spec||{};
 
   const g = el('div','card'); g.appendChild(el('h4',null,'gouvernance'));
-  const ints = el('div');
-  for(const i of (meta.applicable_intensity||[])) ints.appendChild(el('span','chip int', i));
-  if(!(meta.applicable_intensity||[]).length) ints.appendChild(el('span','kv','toutes criticites'));
-  g.appendChild(ints);
   const jr = el('div'); jr.style.marginTop='6px';
   for(const j of (spec.jury||[])) jr.appendChild(el('span','chip', 'jury: '+j));
   g.appendChild(jr);

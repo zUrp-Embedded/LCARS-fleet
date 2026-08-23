@@ -56,16 +56,16 @@ const sections = [
   <section>
     <SectionHead id="carte" title="Choisir sa politique" cap={`${CARDS.length} cartes, lues dans le catalogue`} />
     <p class="intro">Un PoC jetable et un système qui pilote du 230 V ne méritent pas la même
-    cérémonie. Vous déclarez ce que coûte une erreur ; ce niveau ouvre les politiques qui lui
-    conviennent ; la politique décide qui juge et combien de fois on repasse. Changer de sévérité
-    ne modifie <b>jamais</b> le moteur : on prend une autre carte. Voici celles du catalogue, avec
-    leur propre description.</p>
+    cérémonie. Vous choisissez une <b>carte</b> — elle décide qui juge, si la CI bloque, et combien
+    de fois on repasse. La carte <b>EST</b> la déclaration : pas de niveau séparé à côté. Changer de
+    sévérité ne modifie <b>jamais</b> le moteur : on prend une autre carte. Voici celles du catalogue,
+    avec leur propre description.</p>
     <div class="bands">
       {CARDS.map((c) => (
         <div class="band">
-          <div class="lab" style={`background:${c.levels.includes('C4') ? 'var(--salmon)' : c.levels.includes('C2') ? 'var(--amber)' : c.levels.length ? 'var(--blue)' : 'var(--faint)'}`}>
+          <div class="lab" style={`background:${c.jury.length >= 2 ? 'var(--salmon)' : c.jury.length === 1 ? 'var(--amber)' : 'var(--blue)'}`}>
             <b>{c.name}</b>
-            <i>{c.levels.length ? c.levels.join(' ') : 'technique'}</i>
+            <i>{c.jury.length ? `${c.jury.length} juge${c.jury.length > 1 ? 's' : ''}` : 'sans juge'}</i>
           </div>
           <div class="body">
             {c.presentation}
@@ -78,8 +78,9 @@ const sections = [
         </div>
       ))}
     </div>
-    <p class="note">Le niveau n’est jamais auto-évalué. Un agent qui rationalise « ce n’est pas si
-    grave » est exactement le comportement que cette séparation existe pour empêcher.</p>
+    <p class="note">Le choix de carte n’est jamais auto-évalué : c’est l’humain qui déclare, en
+    choisissant. Un agent qui rationalise « ce n’est pas si grave » est exactement le comportement
+    que ce choix humain existe pour empêcher.</p>
   </section>
 
   <section>
