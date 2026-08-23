@@ -43,7 +43,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   OWNER resumes work the judges approved, an OUTSIDER arrives on someone else's branch after that
   budget ran out, and telling the second "ton brief est INCHANGÉ" names a brief it never had.
   """
-  @spec rework_brief(String.t(), module(), String.t(), map(), keyword(), term(), keyword()) ::
+  @spec rework_brief(String.t(), module(), String.t(), integer(), keyword(), term(), keyword()) ::
           String.t()
   def rework_brief(role, forge, repo, pr, forge_opts, _route, opts \\ []) do
     # The eng-voice prose (OUTGOING info, twin of the incoming info starvation) lives IN the
@@ -190,26 +190,39 @@ defmodule Fleet.Pilot.BriefBuilder do
   # `protect_main` exige `CI / *`, et un CI rouge ne pose AUCUNE review, donc l'ancien `""` renvoyait
   # le producteur en rework SANS lui dire quoi corriger (mesuré 2026-08-23, chifoumi ET pile-ou-face :
   # « l'ordre de rework annonce une review, mais ne la porte pas »). On DEMANDE l'état CI de la tête
-  # de PR : rouge → on le NOMME et on pointe le run, au lieu d'un ordre muet. Vert/absent → rien à
-  # dire ici (un rework sans review ET sans CI rouge est un cas rare qu'on ne fabrique pas en prose).
+  # de PR ; `:failure` → on le dit et on pointe le run. Vert/pending/aucun → silence (pas de raison
+  # CI, et le dire serait du bruit). Forge illisible → on trace et on l'écrit, jamais un ordre muet.
   defp ci_failure_section(forge, repo, pr, forge_opts) do
     with {:ok, %{"head" => %{"sha" => sha}}} when is_binary(sha) <-
            forge.get_pull(repo, pr, forge_opts),
-         {:ok, {:failure, contexts}} <- forge.commit_ci_report(repo, sha, forge_opts) do
-      ci_ctx = Enum.filter(contexts, &String.starts_with?(&1, "CI / "))
-      named = if ci_ctx == [], do: contexts, else: ci_ctx
-
-      "## CI ROUGE — c'est ÇA qu'il faut corriger (pas une review)\n\n" <>
-        "Aucun juge n'a demandé de changement : ce rework vient de la CI, ROUGE sur la tête de la PR. " <>
-        "Contexte(s) :\n" <>
-        Enum.map_join(named, "\n", &"- `#{&1}`") <>
-        "\n\nOuvre le run (onglet Actions du dépôt), lis le STEP en échec, corrige, repush. Piège " <>
-        "récurrent : un `actions/checkout` qui meurt = l'image du job n'a pas `node` — vise une image " <>
-        "grasse via `container:` dans le `ci.yml` (cf. son en-tête)."
+         {:ok, state} <- forge.commit_ci_state(repo, sha, forge_opts) do
+      ci_state_section(state)
     else
-      _ -> ""
+      err ->
+        # Rail prefix = la FAÇADE dont ce module est extrait (cf. `render_rework_feedback`).
+        Logger.warning(
+          "StepDispatcher: rework CI state UNREADABLE repo=#{repo} pr=#{pr} " <>
+            "(#{inspect(err)}) — le brief ne peut pas nommer la raison (dégradé, pas différé)"
+        )
+
+        "## Raison du rework — NON LUE\n\n" <>
+          "Ni review REQUEST_CHANGES, ni état CI lisible sur la forge (erreur transitoire). " <>
+          "Ouvre l'onglet Actions de la PR : si la CI est ROUGE, c'est ÇA qu'il faut corriger."
     end
   end
+
+  # `commit_ci_state` rend l'état AGRÉGÉ, jamais la liste des contextes rouges — et c'est voulu ici :
+  # `commit_ci_report` rendrait TOUS les contextes (verts inclus), donc les nommer accuserait les
+  # verts (relecture 2026-08-23). On donne l'état ; le run est à un clic, l'engineer y lit le job ROUGE.
+  defp ci_state_section(:failure) do
+    "## CI ROUGE — c'est ÇA qu'il faut corriger (pas une review)\n\n" <>
+      "Aucun juge n'a demandé de changement : ce rework vient de la CI, ROUGE sur la tête de la PR. " <>
+      "Ouvre l'onglet Actions du dépôt, repère le job/step en ÉCHEC (pas les verts), corrige, repush. " <>
+      "Piège récurrent : un `actions/checkout` qui meurt = l'image du job n'a pas `node` — vise une " <>
+      "image grasse via `container:` dans le `ci.yml` (cf. son en-tête)."
+  end
+
+  defp ci_state_section(_green_or_pending), do: ""
 
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
   # role name. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.

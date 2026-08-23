@@ -318,7 +318,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       def get_pull(_repo, _pr, opts),
         do: Keyword.get(opts, :_pull, {:ok, %{"head" => %{"sha" => "deadbeef"}}})
 
-      def commit_ci_report(_repo, _sha, opts), do: Keyword.get(opts, :_ci, {:ok, {:success, []}})
+      def commit_ci_state(_repo, _sha, opts), do: Keyword.get(opts, :_ci, {:ok, :success})
     end
 
     defp rework(forge_opts),
@@ -342,25 +342,40 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     end
 
     test "AUCUN feedback + CI VERTE → silence : il n'y a rien à dire, et le dire serait du bruit" do
-      brief = rework(_fb: {:ok, []}, _ci: {:ok, {:success, []}})
+      brief = rework(_fb: {:ok, []}, _ci: {:ok, :success})
 
       # Le gabarit dit « REQUEST_CHANGES » dans son intro quoi qu'il arrive : ce qui distingue les
       # cas est l'EN-TÊTE DE SECTION, pas le mot.
       refute brief =~ "## Feedback de review"
       refute brief =~ "## CI ROUGE"
+      refute brief =~ "## Raison du rework — NON LUE"
     end
 
-    test "AUCUN feedback + CI ROUGE → le brief NOMME la CI (plus de rework aveugle)" do
+    test "AUCUN feedback + CI ROUGE → le brief DIT que c'est la CI (plus de rework aveugle)" do
       # Le défaut mesuré (2026-08-23, chifoumi ET pile-ou-face) : un CI rouge ne pose aucune review,
       # donc `{:ok, []}` rendait un ordre de rework au corps VIDE — « corrige selon la review » sans
-      # review. Ici on interroge la CI : rouge → on la nomme, on pointe le run.
-      brief =
-        rework(_fb: {:ok, []}, _ci: {:ok, {:failure, ["CI / test (pull_request)"]}})
+      # review. Ici on interroge l'état CI : rouge → on le dit et on pointe le run. On NE liste PAS
+      # les contextes (`commit_ci_state` rend l'agrégat, pas les rouges — nommer accuserait les verts).
+      brief = rework(_fb: {:ok, []}, _ci: {:ok, :failure})
 
       assert brief =~ "## CI ROUGE"
-      assert brief =~ "CI / test (pull_request)"
+      assert brief =~ "onglet Actions"
       assert brief =~ "checkout"
       refute brief =~ "## Feedback de review à traiter"
+    end
+
+    test "AUCUN feedback + état CI ILLISIBLE → on TRACE et le brief le dit, jamais un ordre muet" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          brief = rework(_fb: {:ok, []}, _ci: {:error, :timeout})
+
+          assert brief =~ "## Raison du rework — NON LUE"
+          assert brief =~ "onglet Actions"
+          refute brief =~ "## CI ROUGE"
+        end)
+
+      assert log =~ "rework CI state UNREADABLE"
+      assert log =~ "timeout"
     end
 
     test "READ-ERROR → le brief DIT que les reviews existent et n'ont pas été lues" do
@@ -550,7 +565,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       # Conflict-rework : pas de review et CI verte → la section CI reste vide, seul le conflit parle.
       def get_pull(_repo, _pr, _opts), do: {:ok, %{"head" => %{"sha" => "deadbeef"}}}
-      def commit_ci_report(_repo, _sha, _opts), do: {:ok, {:success, []}}
+      def commit_ci_state(_repo, _sha, _opts), do: {:ok, :success}
     end
 
     # JG-137 — `base_branch` est desormais REQUIS sur les deux voix conflit : la procedure donnee a
