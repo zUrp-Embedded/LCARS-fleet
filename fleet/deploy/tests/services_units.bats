@@ -29,6 +29,9 @@ setup() {
   export LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/etc/lcars/services.env"
   export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
   export LCARS_SERVICES_OWNER="$(id -un):$(id -gn)"
+  # La fenetre qui separe « forke » de « debout » dure douze secondes sur une vraie machine. Ce qui
+  # se mesure ici est la DECISION prise a ses deux bords, jamais le temps qui passe.
+  export LCARS_SERVICES_SETTLE=0
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
   export PROV_FLEET_GROUP="$(id -gn)"
@@ -44,11 +47,20 @@ setup() {
   # l'ordre des gestes — et l'ordre est le sujet (daemon-reload AVANT enable).
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/systemctl.calls"
-  ACTIVE="$BATS_TEST_TMPDIR/active"; echo 1 > "$ACTIVE"   # 1 = is-active repond NON
+  # 0 = is-active repond OUI. Le decor par defaut decrit une machine SAINE : depuis qu'`apply` verifie
+  # la liveness, un defaut « mort » ferait echouer tout apply qui ne parle pas du sujet. Les deux
+  # temoins qui veulent un service tombe le posent eux-memes.
+  ACTIVE="$BATS_TEST_TMPDIR/active"; echo 0 > "$ACTIVE"
+  # Le compteur de redemarrages, et le marqueur qui le fait monter APRES l'enable — comme `Restart=`
+  # sur une vraie machine. C'est LUI qui distingue « demarre » de « debout ».
+  RESTARTS="$BATS_TEST_TMPDIR/restarts"; echo 0 > "$RESTARTS"
+  LOOP="$BATS_TEST_TMPDIR/looping"
   cat > "$BINDIR/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "is-active" ]] && exit "\$(cat "$ACTIVE")"
+[[ "\$1" == "show" ]] && { cat "$RESTARTS"; exit 0; }
+[[ "\$1" == "enable" && -f "$LOOP" ]] && echo 9 > "$RESTARTS"
 exit 0
 EOF
   chmod 0755 "$BINDIR/systemctl"
@@ -172,4 +184,70 @@ mod() { run bash "$MOD" "$1"; }
   ! grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
   ! grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
   grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
+}
+
+# ─── LE PORT DU DECK — une valeur, les deux bouts ───────────────────────────────────────────────
+#
+# ⚠ UN PORT CHOISI QUI N'ATTEINT QU'UNE MOITIE DE SES LECTEURS EST PIRE QU'UN PORT FIXE. Mesure du
+# 2026-08-23, install a froid : `PROV_DECK_PORT` decrivait les `redirect_uris` OIDC et RIEN d'autre,
+# alors que le daemon lit `LCARS_LANDING_PORT`. `--port-deck 20997` deplacait donc l'identification
+# vers un port ou personne n'ecoutait pendant que le deck restait sur 20999 — et la panne tombait au
+# RETOUR du login, la ou elle se lit comme un probleme d'identite.
+
+@test "le port du deck choisi atteint le DAEMON, pas seulement les callbacks OIDC" {
+  export PROV_DECK_PORT=20997
+  mod apply
+  grep -qx 'LCARS_LANDING_PORT=20997' "$LCARS_SERVICES_ENV"
+  grep -q 'sur :20997' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+}
+
+@test "sans choix, le deck garde son port par defaut" {
+  mod apply
+  grep -qx 'LCARS_LANDING_PORT=20999' "$LCARS_SERVICES_ENV"
+}
+
+# ⚠ CONTRE-TEMOIN, ET IL EST LA RAISON D'ETRE DES DEUX PRECEDENTS : seuls, ils passeraient sur un
+# module qui ecrirait `LCARS_LANDING_PORT=20999` en dur. Ce qui se prouve ici est que la valeur
+# TRAVERSE, pas qu'une ligne existe.
+@test "un port arbitraire TRAVERSE jusqu'au fichier d'environnement" {
+  export PROV_DECK_PORT=31337
+  mod apply
+  grep -qx 'LCARS_LANDING_PORT=31337' "$LCARS_SERVICES_ENV"
+  ! grep -q '20999' "$LCARS_SERVICES_ENV"
+}
+
+# ─── DEBOUT N'EST PAS DEMARRE ───────────────────────────────────────────────────────────────────
+#
+# ⚠ `enable --now` REND 0 DES QUE SYSTEMD A FORKE. Le bind echoue une milliseconde plus tard, et
+# `Restart=` releve le service a chaque cycle : l'install imprimait POSE sur un deck qui n'avait
+# jamais servi une seule requete (113 redemarrages mesures sur l'install du 2026-08-23).
+
+@test "l'echec devient TERMINAL — sans borne, aucun observateur ne peut voir un service echouer" {
+  mod apply
+  grep -q '^StartLimitIntervalSec=' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  grep -q '^StartLimitBurst=' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  grep -q '^StartLimitBurst=' "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+}
+
+@test "un service qui BOUCLE sur son echec fait echouer l'apply" {
+  : > "$LOOP"
+  mod apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"redémarre en boucle"* ]]
+}
+
+@test "un service stable ET actif rend un apply vert" {
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"activé et debout"* ]]
+}
+
+# ⚠ CONTRE-TEMOIN du precedent : un service qui ne boucle pas mais ne repond pas non plus doit
+# echouer aussi. Sans lui, le compteur de redemarrages serait la seule sonde — et un service mort
+# du premier coup, jamais releve, passerait pour debout.
+@test "un service pose mais MORT fait echouer l'apply" {
+  echo 1 > "$ACTIVE"
+  mod apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"pas debout"* ]]
 }

@@ -69,6 +69,9 @@ HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
 # `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
 SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
+# La fenetre d'observation qui separe « forke » de « debout ». Seam de temoin : un bats mesure la
+# DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
+SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger)
 
@@ -97,6 +100,9 @@ STARTERS=(
 
 have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
 
+# Le compteur de redemarrages automatiques du service — la seule mesure qu'un fork reussi ne fausse pas.
+restarts_of() { "$SYSTEMCTL" show -p NRestarts --value "$1.service" 2>/dev/null; }
+
 # ─── L'ENVIRONNEMENT DES DEUX SERVICES, DÉRIVÉ ─────────────────────────────────────────────────
 # Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
 # le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
@@ -123,6 +129,11 @@ services_env_body() {
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
   echo "PROV_ADMIN_GROUP=$PROV_ADMIN_GROUP"
   echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"
+  # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
+  # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
+  # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
+  # personne n'écoute — la panne tombe au RETOUR du login, là où elle est le moins lisible.
+  echo "LCARS_LANDING_PORT=$PROV_DECK_PORT"
   echo "LCARS_PROVISION=$HELPERS_DIR/fleet/deploy/provision"
 }
 
@@ -131,10 +142,12 @@ unit_body() { # unit_body <nom sans .service>
     lcars-landing)
       cat <<EOF
 [Unit]
-Description=LCARS — la porte d'entree web (deck) sur :20999
+Description=LCARS — la porte d'entree web (deck) sur :$PROV_DECK_PORT
 Documentation=file://$HELPERS_DIR/console-landing.sh
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -154,6 +167,8 @@ Description=LCARS — la team humans de la forge vers les comptes Unix de cette 
 Documentation=file://$HELPERS_DIR/human-converger.sh
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -239,14 +254,31 @@ apply() {
   # l'ANCIENNE — et la mesure d'après lit un service actif qui n'est pas celui qu'on vient d'écrire.
   [[ "$reload" -eq 1 ]] && { "$SYSTEMCTL" daemon-reload || p_warn "daemon-reload en échec"; }
 
+  # ⚠ « DÉMARRÉ » N'EST PAS « DEBOUT ». `enable --now` rend 0 dès que systemd a forké le processus :
+  # un service qui meurt à sa première ligne — port déjà pris, fichier absent — passe pour démarré,
+  # et `Restart=` le relève ensuite en boucle, si bien qu'une mesure prise au bon instant le lit même
+  # ACTIF. Ce qui ne ment pas est le COMPTEUR DE REDÉMARRAGES : lu avant, relu après une fenêtre plus
+  # longue que le `RestartSec` le plus long du lot. S'il a bougé, le service boucle sur son échec.
+  local -a was=()
+  local i n
   for u in "${UNITS[@]}"; do
-    if "$SYSTEMCTL" enable --now "$u.service" >/dev/null 2>&1; then
-      p_chg "$u.service activé et démarré"
-    else
-      p_fail "$u.service n'a pas démarré — « $SYSTEMCTL status $u.service » et « journalctl -u $u.service » disent pourquoi"
-    fi
+    was+=("$(restarts_of "$u")")
+    "$SYSTEMCTL" enable --now "$u.service" >/dev/null 2>&1 \
+      || p_fail "$u.service n'a pas démarré — « $SYSTEMCTL status $u.service » et « journalctl -u $u.service » disent pourquoi"
   done
 
+  if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep "$SETTLE_SECS"; fi
+  for i in "${!UNITS[@]}"; do
+    u="${UNITS[$i]}"
+    n="$(restarts_of "$u")"
+    if [[ "${n:-0}" -gt "${was[$i]:-0}" ]]; then
+      p_fail "$u.service redémarre en boucle — « journalctl -u $u.service » dit pourquoi"
+    elif "$SYSTEMCTL" is-active --quiet "$u.service"; then
+      p_chg "$u.service activé et debout"
+    else
+      p_fail "$u.service posé mais pas debout — « $SYSTEMCTL status $u.service » dit pourquoi"
+    fi
+  done
   verdict_apply
 }
 
