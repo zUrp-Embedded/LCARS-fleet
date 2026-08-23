@@ -16,7 +16,15 @@
 #   curl, jq    — clients HTTP forge + parse JSON (deps dures des scripts bin/ et etc/)
 #   unzip       — dépose du précompilé Elixir (module 15-toolchain)
 #   ca-certificates — TLS sortant (installer claude, forge https éventuelle)
-#   socat       — LE RELAIS D'EGRESS DU POD, et il est load-bearing : le sanctuaire n'a AUCUN
+#   socat       — DEUX CONSOMMATEURS, ET ILS N'ONT RIEN À VOIR L'UN AVEC L'AUTRE. Le second est
+#                 `bin/lcars`, qui parle à la socket unix de `lcars-catalogue` : bash n'ouvre pas de
+#                 socket unix (`/dev/tcp` est TCP seul), donc sans socat le geste
+#                 `lcars catalogue install` n'a pas de transport. Il retombe sur `nc -U`, présent
+#                 ici aussi, mais ce repli dépend de l'implémentation de nc. Cette ligne existe pour
+#                 que retirer socat le jour où les pods n'en ont plus besoin ne casse pas l'autre
+#                 consommateur en silence.
+#
+#                 LE RELAIS D'EGRESS DU POD, et il est load-bearing : le sanctuaire n'a AUCUN
 #                 namespace réseau, donc `localhost:<port>` n'existe DANS le bac que parce que socat
 #                 y écoute et porte le flux vers la socket unix du proxy CONNECT. Absent, le pod est
 #                 scellé et `bwrap_launch.sh:478` REFUSE — « the pod would be sealed with no way to

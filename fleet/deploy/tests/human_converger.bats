@@ -258,8 +258,15 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "D8: plus AUCUNE arithmetique d'uid dans le convergeur — la formule est morte, pas commentee" {
   # Le motif de la disparition doit rester lisible, mais un `UID_OFFSET` encore CALCULE quelque part
   # serait une seconde regle silencieuse. On epingle l'absence du calcul, pas celle du mot.
-  ! grep -qE '\$\(\(.*(UID_OFFSET|forge_id).*\)\)' "$SUT"
-  ! grep -qE '^UID_OFFSET=' "$SUT"
+  # ⚠ CETTE PREMIERE ASSERTION ETAIT INERTE, ET UNE MUTATION L'A DEMASQUEE : en reinjectant
+  # `$(( UID_OFFSET + 1000 ))` dans le convergeur, ce test restait VERT. Bash exempte de `set -e`
+  # toute commande niee par `!` ; une `! grep` qui n'est pas la DERNIERE instruction s'execute,
+  # echoue, et rien ne le remarque. Les deux conditions sont distinctes, donc les deux doivent
+  # mordre — d'ou la forme `run` + test nu, qui ne peut pas mentir quel que soit son rang.
+  run bash -c "sed 's/#.*//' '$SUT' | grep -cE '[\$]\(\(.*(UID_OFFSET|forge_id).*\)\)' || true"
+  [ "$output" -eq 0 ]
+  run bash -c "sed 's/#.*//' '$SUT' | grep -cE '^UID_OFFSET=' || true"
+  [ "$output" -eq 0 ]
 }
 
 @test "l'uid revendique est-il deja pris par QUELQU'UN D'AUTRE ?" {

@@ -294,6 +294,22 @@ FAIL:gesture_failed:3"
   [[ "$output" != *"admin"* ]]
 }
 
+@test "catalogue install: geste INTERROMPU — se rejoue, il ne se diagnostique pas" {
+  # ⚠ MESURE : `Popen.wait()` rend `-15` quand l'enfant est tue par SIGTERM, et `exit -15` cote bash
+  # rend 241 — un nombre qui ne designe rien. Le service nomme donc cette nature a part, et la CLI
+  # rend une PHRASE : un geste interrompu se rejoue, un geste en echec se diagnostique. La cause la
+  # plus banale est un `systemctl restart lcars-catalogue` pendant une install.
+  _ask "> forge-gestures: web-demo <- fleet/web-demo
+FAIL:gesture_signalled:15"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"INTERROMPU"* ]]
+  [[ "$output" == *"signal 15"* ]]
+  [[ "$output" == *"rejoue"* ]]
+  # Ni un echec du geste, ni un refus d'autorite.
+  [[ "$output" != *"admin"* ]]
+  [[ "$output" != *"241"* ]]
+}
+
 @test "catalogue install: AUCUN verdict — echec nomme, JAMAIS un succes par defaut" {
   # ⚠ MESURE DU 2026-08-23, ET C'EST LE PIEGE QUI JUSTIFIE CE TEMOIN. `socat` ferme la connexion
   # 0,5 s apres l'EOF de stdin par defaut, alors que le geste dure des MINUTES : il rendait une
@@ -346,7 +362,11 @@ FAIL:gesture_failed:3"
   [[ "$body" != *"MASTER_TOKEN"* ]]
   [[ "$body" != *"forge-gestures"* ]]
   [[ "$body" != *"id -nG"* ]]
-  # Et plus aucun nom de groupe unix ne decide d'une adminite dans tout le fichier.
-  ! grep -q 'lcars-admin' "$SUT"
+  # Et plus aucun nom de groupe unix ne decide d'une adminite dans tout le fichier — mesure sur le
+  # CODE, comme les trois assertions ci-dessus. Sur le fichier BRUT, une cicatrice future qui
+  # expliquerait ce retrait ferait rougir ce temoin a tort : le mur qui interdit le groupe
+  # interdirait de dire pourquoi il est interdit.
+  run bash -c "sed 's/#.*//' '$SUT' | grep -c 'lcars-admin' || true"
+  [ "$output" -eq 0 ]
 }
 

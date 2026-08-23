@@ -69,6 +69,7 @@ with open(GESTURES, "w") as fh:
         'echo "forge-gestures: $2 <- fleet/$2 (main@deadbeef)"\n'
         'echo "forge-gestures: recette appliquee"\n'
         'sleep "${BANC_SLEEP:-0}"\n'
+        '[[ -n "${BANC_SIGNAL:-}" ]] && kill -TERM $$\n'
         'exit "${BANC_RC:-0}"\n'
     )
 os.chmod(GESTURES, 0o755)
@@ -218,7 +219,47 @@ check(verdict(r) == "FAIL:not_admin",
 check(mod.login_of(999321) is None,
       "pair inconnu: un uid sans compte unix ne rend aucun login")
 
-# ─── 9. UN PAIR QUI SE TAIT NE RETIENT PAS LE SERVICE ───────────────────────────────────────────
+# ─── 8. UN GESTE INTERROMPU N'EST PAS UN GESTE QUI ECHOUE ───────────────────────────────────────
+# `Popen.wait()` rend `-N` quand l'enfant a ete TUE par le signal N. Relaye tel quel, ca donnait
+# `exit -15` cote bash, qui rend 241 — un nombre qui ne designe rien. Les deux natures sont nommees
+# separement parce que les gestes different : un echec se diagnostique, une interruption se rejoue.
+# ⚠ L'ETAT EXIGE EST REPOSE ICI, il ne s'herite pas de la section precedente : celle-ci vide
+# `ADMINS` pour prouver qu'un non-admin ne peut pas se declarer admin. Un temoin qui depend de
+# l'ordre de ses voisins ment le jour ou l'un d'eux bouge.
+ADMINS.clear()
+ADMINS.add(MOI)
+os.environ["BANC_SIGNAL"] = "1"
+r = ask("install web-demo")
+check(verdict(r) == "FAIL:gesture_signalled:15",
+      "interrompu: un geste tue par SIGTERM est nomme comme tel, pas comme un echec")
+check("gesture_failed" not in verdict(r),
+      "interrompu: JAMAIS confondu avec un echec du geste — les sorties different")
+del os.environ["BANC_SIGNAL"]
+
+# ─── 8 bis. UN CLIENT PARTI N'INTERROMPT PAS LE GESTE ───────────────────────────────────────────
+# Si la coupure du client tuait le geste, le `finally` rendrait le verrou pendant que
+# `forge-gestures.sh` continue en orphelin : un second appelant prendrait le verrou, tomberait sur
+# le `flock -n` en dessous, et lirait « le geste a echoue » sur une machine parfaitement saine.
+ADMINS.clear()
+ADMINS.add(MOI)
+os.environ["BANC_SLEEP"] = "2"
+_c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+_c.connect(SOCK)
+_f = _c.makefile("rw", encoding="utf-8", newline="\n")
+_f.write("install web-demo\n")
+_f.flush()
+time.sleep(0.4)
+_c.close()                      # l'operateur coupe, le geste tourne encore
+time.sleep(3.0)                 # on laisse le geste finir
+del os.environ["BANC_SLEEP"]
+_t0 = time.time()
+r = ask("install autre-demo")
+check(verdict(r) == "OK",
+      "client parti: le verrou a bien ete rendu — le suivant passe, il ne lit pas « busy »")
+check(time.time() - _t0 < 2.0,
+      "client parti: et il passe TOUT DE SUITE, donc le geste orphelin s'est bien termine")
+
+# ─── 8. UN PAIR QUI SE TAIT NE RETIENT PAS LE SERVICE ───────────────────────────────────────────
 # Sans delai de lecture, une connexion ouverte et muette bloque un thread pour toujours : un membre
 # du groupe pourrait en ouvrir autant qu'il veut sans jamais formuler une demande.
 mod.REQUEST_TIMEOUT = 1
@@ -235,7 +276,7 @@ check(time.time() - _t0 < 8,
       "pair muet: le service LACHE la connexion au lieu de retenir un thread (%.1fs)"
       % (time.time() - _t0))
 
-# ─── 8. LE GARDE DE ROOT ────────────────────────────────────────────────────────────────────────
+# ─── 9. LE GARDE DE ROOT ────────────────────────────────────────────────────────────────────────
 check(mod.main() == 1,
       "garde root: ce service tient le jeton master, il refuse de tourner sans etre root")
 

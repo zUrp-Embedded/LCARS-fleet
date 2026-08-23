@@ -173,14 +173,37 @@ def serve_one(conn):
     that names the wrong one costs more than a mute one.
     """
     wire = conn.makefile("rw", encoding="utf-8", newline="\n")
+    gone = []
 
+    # ⚠ UN CLIENT PARTI N'INTERROMPT PAS UN GESTE EN COURS. `tofu apply` dure des minutes ; si
+    # l'operateur coupe, `emit` levait EPIPE, l'exception traversait `run_gesture`, le `finally`
+    # relachait le verrou -- et `forge-gestures.sh` continuait EN ORPHELIN, hors de tout verrou de ce
+    # process. Un second appelant prenait alors le verrou, tombait sur le `flock -n` en dessous, et
+    # recevait « le geste a echoue » au lieu de « un autre geste est en cours » : un diagnostic faux
+    # sur une machine parfaitement saine.
+    #
+    # On absorbe la coupure et on CONTINUE A DRAINER. Le geste va jusqu'au bout, le verrou n'est
+    # rendu que lorsqu'il l'est vraiment, et le journal recueille ce que l'operateur ne lit plus.
     def emit(line):
-        wire.write(f"> {line}\n")
-        wire.flush()
+        if not gone:
+            try:
+                wire.write(f"> {line}\n")
+                wire.flush()
+                return
+            except OSError:
+                gone.append(True)
+                log("le client est parti — le geste CONTINUE, sa sortie passe au journal")
+        log(f"| {line}")
 
     def done(status):
-        wire.write(f"{status}\n")
-        wire.flush()
+        if not gone:
+            try:
+                wire.write(f"{status}\n")
+                wire.flush()
+                return
+            except OSError:
+                gone.append(True)
+        log(f"verdict non remis, client parti : {status}")
 
     pid, uid, gid = peer_of(conn)
     login = login_of(uid)
@@ -223,6 +246,15 @@ def serve_one(conn):
     finally:
         _gesture_lock.release()
 
+    # ⚠ UN CODE NEGATIF N'EST PAS UN CODE DE SORTIE. `Popen.wait()` rend `-N` quand l'enfant a ete
+    # TUE par le signal N — et le relayer tel quel donnait `exit -15` cote bash, qui rend 241
+    # (mesure). L'operateur lisait un nombre qui ne designe rien, pour la cause la plus banale qui
+    # soit : `systemctl stop lcars-catalogue` pendant une install. Les deux natures sont donc
+    # nommees separement, parce que les gestes different — un geste qui ECHOUE se diagnostique, un
+    # geste INTERROMPU se rejoue.
+    if rc < 0:
+        log(f"interrompu: « {name} » pour {login} — signal {-rc}")
+        return done(f"FAIL:gesture_signalled:{-rc}")
     if rc != 0:
         log(f"echec: « {name} » pour {login} (rc={rc})")
         return done(f"FAIL:gesture_failed:{rc}")

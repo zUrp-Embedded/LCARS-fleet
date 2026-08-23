@@ -243,7 +243,19 @@ check() {
     if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
       p_ok "$u.service actif"
     else
-      p_drift "$u.service posé mais PAS actif — $( [[ "$u" == lcars-landing ]] && echo 'personne ne peut entrer' || echo 'personne ne sera enrole' )"
+      # ⚠ UNE CONSEQUENCE PAR UNITE, ET LA TABLE EST LA POUR QU'ON NE PUISSE PAS EN OUBLIER UNE.
+      # Ce message a ete un ternaire sur `lcars-landing`, donc TOUTE autre unite heritait de
+      # « personne ne sera enrole ». L'ajout de `lcars-catalogue` a fait dire a un service de
+      # catalogue qu'il empechait l'enrolement des humains : la mauvaise porte, au moment ou
+      # l'operateur en cherche une.
+      local quoi
+      case "$u" in
+        lcars-landing)   quoi="personne ne peut entrer" ;;
+        lcars-converger) quoi="personne ne sera enrole" ;;
+        lcars-catalogue) quoi="« lcars catalogue install » refusera, en nommant ce service" ;;
+        *)               quoi="consequence NON DECLAREE pour cette unite — ajoute-la ici" ;;
+      esac
+      p_drift "$u.service posé mais PAS actif — $quoi"
     fi
   done
 

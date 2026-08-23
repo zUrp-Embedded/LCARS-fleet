@@ -489,7 +489,13 @@ _catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le ver
   local name=$1 t; t="$(_catalogue_transport)" || return 127
   case "$t" in
     socat) printf 'install %s\n' "$name" | socat -t 86400 - UNIX-CONNECT:"$_CATALOGUE_SOCKET" ;;
-    nc)    printf 'install %s\n' "$name" | nc -U "$_CATALOGUE_SOCKET" ;;
+    # ⚠ `-q -1` EST LE JUMEAU DE `-t` CI-DESSUS, ET SON ABSENCE ETAIT UNE INCOHERENCE. On a mesure
+    #   que `socat` ferme apres l'EOF de stdin et on l'a corrige ; `nc` a le meme comportement selon
+    #   son implementation. Le `nc` d'OpenBSD attend par defaut (mesure), `ncat` non — et sans ce
+    #   drapeau le verdict d'un geste de plusieurs minutes est perdu. `-q -1` dit « n'abandonne
+    #   jamais l'autre sens » ; une implementation qui ne le connait pas ECHOUE ici, franchement,
+    #   au lieu de rendre un silence que le garde plus bas doit rattraper.
+    nc)    printf 'install %s\n' "$name" | nc -q -1 -U "$_CATALOGUE_SOCKET" ;;
   esac
 }
 
@@ -523,6 +529,11 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   Ton uid n'a pas de compte unix sur cette boite — donc aucun login a demander a la forge. C'est le
   convergeur qui enrole les humains de l'equipe « humans » de l'org ; un proprietaire t'y ajoute, et
   le tour suivant (30 s) cree ton compte." ;;
+    gesture_signalled)
+      die "catalogue install: le geste a ete INTERROMPU (signal ${2:-?}), il n'a pas echoue.
+  Quelque chose a arrete le service pendant le travail — « systemctl restart lcars-catalogue » en est
+  la cause la plus courante. L'etat de « $name » est partiel : rejoue la commande, le geste est
+  idempotent (rien n'a bouge -> il ne touche rien)." ;;
     busy)
       die "catalogue install: un autre geste de structure est en cours.
   Un seul a la fois — deux applies concurrents ecriraient le meme etat. RIEN n'a ete tente ;
@@ -581,6 +592,12 @@ cmd_catalogue_install() {
     # d'etre imprimees au-dessus, plutot que de le retraduire en refus d'autorite.
     case "$cause" in
       gesture_failed:*) exit "${cause#gesture_failed:}" ;;
+      # ⚠ UN GESTE TUE PAR UN SIGNAL N'A PAS DE CODE DE SORTIE A RELAYER. Le service le nomme a part
+      # justement pour qu'on ne fasse pas `exit -15` ici : bash rend alors 241 (mesure), un nombre
+      # qui ne designe rien. On passe donc par un refus ordinaire — meme sortie que les autres
+      # causes, et une PHRASE qui distingue « interrompu » de « echoue », parce que les deux
+      # appellent des gestes differents.
+      gesture_signalled:*) _die_catalogue_refus gesture_signalled "${cause#gesture_signalled:}" ;;
       *) _die_catalogue_refus "${cause%%:*}" "$name" ;;
     esac
   fi
