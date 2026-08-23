@@ -497,11 +497,41 @@ if [[ "$RAIL" == "box" ]]; then
   # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La sonde escalade
   # donc elle-même quand la socket appartient à root — et ce qui reste ici est le cas où même ça ne
   # suffit pas.
+  # ⚠ « SUDO -N N'A PAS ABOUTI » N'EST PAS UNE FIN, C'EST UNE QUESTION QUE PERSONNE NE POSE. La sonde
+  # emploie `-n` DÉLIBÉRÉMENT — elle ne doit jamais bloquer sur une invite — et son en-tête délègue
+  # la suite : « sans NOPASSWD, on rend le fait tel quel et l'appelant décide d'escalader lui-même ».
+  # Cet appelant-ci ne décidait rien : il imprimait le refus et sortait.
+  #
+  # Le rail POSTE ne voit jamais ce cas — son `exec sudo` amorce le cache pour tout ce qui suit. Le
+  # rail BOÎTE n'a pas d'escalade globale, et il ne doit pas en avoir : bâtir l'image en root ferait
+  # tourner `git` sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
+  # Son besoin tient en UNE commande, celle qui parle à la socket — d'où le shim, par commande.
+  #
+  # `sudo -v` est exactement ce qu'il faut : il DEMANDE, il met en cache, il n'exécute rien. Le shim
+  # consomme ensuite ce cache commande par commande. Une invite, une fois, et le rail reste sous
+  # l'uid de l'humain.
+  #
+  # ⚠ SOUS TTY SEULEMENT. Sans terminal — CI, cron, `docker exec` non interactif — une invite ne
+  # peut pas être satisfaite : elle pendrait jusqu'au timeout au lieu de refuser. Là, on refuse, mais
+  # en NOMMANT le geste : un refus qui dit sa cause sans dire la sortie est un demi-message.
+  if [[ "$DOCKER_OK" -eq 0 && "${PROV_DOCKER_DENIED:-0}" == "1" ]] \
+     && command -v sudo >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
+    echo ""
+    echo "  ${W}[sudo]${N} La socket du daemon appartient à root — une invite, une fois."
+    echo "         Elle amorce le cache que la sonde consomme commande par commande ;"
+    echo "         ce rail ne monte JAMAIS en root, ton image reste bâtie sous ton compte."
+    if sudo -v; then
+      docker_endpoint && { DOCKER_OK=1; echo "  ${G}[ok]${N} docker répond ($PROV_DOCKER_BIN)"; }
+    fi
+  fi
   if [[ "$DOCKER_OK" -eq 0 ]]; then
     echo ""
     echo "  ${R}$PROV_DOCKER_WHY${N}"
-    [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]] && \
+    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
       echo "  L'escalade a été tentée et refusée : « sudo -n » n'a pas abouti (mot de passe requis ?)."
+      [[ -t 0 && -t 1 ]] \
+        || echo "  Pas de terminal ici, donc pas d'invite possible : joue « sudo -v » d'abord, ou donne un NOPASSWD sur la CLI docker."
+    fi
     exit 1
   fi
   [[ -x "$SCRIPT_DIR/docker.sh" ]] || {
