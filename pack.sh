@@ -103,14 +103,23 @@ if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
   exit 0
 fi
 
+# ⚠ `/api/packages/`, SANS `v1` — DEUX API POUR DEUX CHOSES. `/api/v1/packages/` est celle de
+# CONSULTATION (lister, supprimer — c'est elle que `publish.yml` interroge pour l'immutabilité) ; le
+# registre lui-même vit sur `/api/packages/`. Se tromper rend un 404 qui ressemble à « ce paquet
+# n'existe pas » alors qu'il veut dire « cette route n'existe pas ».
+#
 # `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hôte (cicatrice 6-141).
-url="${FORGE%/}/api/v1/packages/${OWNER}/generic/lcars-fleet/${VERSION}-${SHA}"
+url="${FORGE%/}/api/packages/${OWNER}/generic/lcars-fleet/${VERSION}-${SHA}"
 for f in "$OUT" "${OUT}.sha256"; do
   code="$(printf 'header = "Authorization: token %s"\n' "$TOKEN" \
           | curl -sS -K - -X PUT --upload-file "$f" -o /dev/null -w '%{http_code}' \
                  "${url}/$(basename "$f")" 2>/dev/null || true)"
   case "$code" in
     201|200) say "poussé : $(basename "$f")" ;;
+    # ⚠ UN REFUS D'AUTORISATION SE NOMME, sinon on cherche la route. Le jeton des `git push` porte
+    # `write:repository` et PAS `write:package` : les deux portées sont distinctes chez Gitea, et
+    # aucune des deux ne se déduit de l'autre. Le tar, lui, est bon — il reste dans `dist/`.
+    401|403) die "push refusé ($code) : le jeton n'a pas la portée « write:package ». Celui des git push ne l'a pas. Crée-en un sur ${FORGE%/}/user/settings/applications et pose-le dans LCARS_PACK_TOKEN. Le paquet est prêt dans dist/." ;;
     *) die "push refusé ($code) pour $(basename "$f") — $url" ;;
   esac
 done
