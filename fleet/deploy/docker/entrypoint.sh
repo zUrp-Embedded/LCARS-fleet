@@ -16,8 +16,12 @@
 #   LCARS_ADMIRAL   login du master/sysadmin (bench: admiral, prod: login installeur) — uid 1000, sudo root, ssh
 #                   ⚠ DOIT etre EXACTEMENT le login forge du master (le `preferred_username` OIDC) : le
 #                   deck admet admiral par is_admin, puis mappe sa console sur `sess.login`. Si les deux
-#                   different, admiral entre mais ne trouve pas sa console (page « pas de bloc »). Pas de
-#                   check runtime possible (la forge n'est pas jointe au moment du useradd) — contrainte d'install.
+#                   different, admiral entre mais ne trouve pas sa console (page « pas de bloc »).
+#                   ⚠ CETTE VARIABLE EST DESORMAIS FACULTATIVE, et la laisser vide est le cas NOMINAL :
+#                   le siege se DERIVE du #1 de la forge (`resolve_admiral`, plus bas). La poser garde
+#                   la priorite — c'est le geste de l'operateur qui sait ce qu'il fait — mais ce n'est
+#                   plus a lui de tenir une egalite que la boite peut mesurer. « Pas de check runtime
+#                   possible » etait ecrit ici : c'etait vrai de la CONVERGENCE, pas du jeton master.
 #   LCARS_UID       uid du sysadmin (défaut : 1000, réservé) — stable = ownership du volume stable
 #   LCARS_SSH_AUTHORIZED_KEYS  contenu authorized_keys (sinon : accès par `docker exec` seulement)
 #   FORGE_BASE_URL  forge cible (avec le profil compose `forge` : http://forge:3000)
@@ -162,14 +166,111 @@ fi
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
-LCARS_ADMIRAL="${LCARS_ADMIRAL:-admiral}"
 LCARS_UID="${LCARS_UID:-1000}"
 PROVISION=/opt/lcars/fleet/deploy/provision
 HOST_KEYS_DIR=/home/.lcars-container/ssh
+# ⚠ LA MEME TABLE QUE LE CONVERGEUR, ET C'EST TOUT L'INTERET. Le siege est le #1 de la forge : son
+# enregistrement est donc la LIGNE `forge_id = 1` de `forge-uid.map`, pas un fichier a lui. Une
+# seconde table pour tenir une ligne de la premiere aurait fait deux verites d'un meme fait — celle
+# qu'on ne lit pas finit toujours par mentir — et deux formats a maintenir la ou le convergeur en a
+# deja un (`<forge_id>\t<uid>\t<login>`, keye sur l'id parce que Gitea le conserve au renommage).
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/home/private/forge-uid.map}"
+MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
 
 say() { echo "[lcars-entrypoint] $*"; }
 
+# ─── LE SIEGE EST LE #1 DE LA FORGE ─────────────────────────────────────────────────────────────
+#
+# LA REGLE : celui des deux qui existe nomme l'autre, et le lien est enregistre.
+#
+# ⚠ AUCUN RAIL NE PART DE RIEN, et c'est ce qui rend la regle suffisante. Le poste a son systeme
+# avant LCARS ; la boite vise une forge qui tourne deja. Le SEUL cas ou rien ne preexiste est
+# `--bench`, qui cree tout — et le bench PASSE le nom lui-meme (`bench-up.sh:353`). Il n'y a donc
+# aucun cas ou ce fichier aurait a inventer un nom, et il ne doit pas en inventer : un nom invente
+# est la coincidence que ce code existe pour retirer.
+#
+# `LCARS_ADMIRAL` A DONC UN SEUL SENS : la SEMENCE du cas from-scratch. Elle court-circuite la
+# derivation parce que dans ce cas-la il n'y a rien a deriver. Ce n'est pas une surcharge qui
+# contredirait la forge — il n'y a pas de forge a contredire quand le bench la cree.
+#
+# ⚠ ET ELLE NE DOIT PAS AVOIR DE DEFAUT PLUS HAUT. Les composes posaient
+# `LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"` : la variable etait alors TOUJOURS definie dans le
+# conteneur, la premiere branche court-circuitait tout, et la derivation ne s'executait JAMAIS. Une
+# semence qui a un defaut est un defaut, et c'est la coincidence a sa source.
+#
+# ⚠ LE VERROU N'EST PAS L'ORDRE, C'EST LE JETON. L'en-tete de ce fichier disait « pas de check
+# runtime possible (la forge n'est pas jointe au moment du useradd) » : vrai de la CONVERGENCE, qui
+# vient a l'etape 3. Resoudre le #1 ne demande que le jeton master, et il vit dans le VOLUME — donc
+# il precede l'entrypoint des que l'operateur a configure sa boite.
+resolve_admiral() {
+  local from_table tok resolved
+  if [[ -n "${LCARS_ADMIRAL:-}" ]]; then
+    say "siege : « $LCARS_ADMIRAL » seme par l'appelant (LCARS_ADMIRAL) — cas from-scratch, rien a deriver"
+    seat_record "$LCARS_ADMIRAL"
+    return 0
+  fi
+  # 1. La table du volume : elle survit au conteneur, `/etc/passwd` non. Aucune forge necessaire, et
+  #    c'est ce qui rend un redemarrage possible pendant que la forge est en carafe.
+  from_table="$(seat_from_map)"
+  if [[ -n "$from_table" ]]; then
+    LCARS_ADMIRAL="$from_table"
+    say "siege : « $LCARS_ADMIRAL » (table $UID_MAP_FILE, forge_id 1)"
+    return 0
+  fi
+  # 2. Le #1 de la forge, resolu par son ID et jamais par son nom — Gitea conserve l'`id` au
+  #    renommage, le login est une etiquette. Puis ENREGISTRE : le boot suivant ne demandera rien.
+  tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  if [[ -n "$tok" && -n "${FORGE_BASE_URL:-}" ]]; then
+    # `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hote (cicatrice 6-141).
+    resolved="$(printf 'header = "Authorization: token %s"\n' "$tok" \
+                | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
+                | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      LCARS_ADMIRAL="$resolved"
+      seat_record "$LCARS_ADMIRAL"
+      say "siege : « $LCARS_ADMIRAL » derive du #1 de ${FORGE_BASE_URL%/} — enregistre"
+      return 0
+    fi
+  fi
+  # 3. Ni semence, ni table, ni forge : sur un rail reel, ce triplet n'arrive pas. On REFUSE plutot
+  #    que de nommer — un siege invente s'installe dans le volume et survit a la cause qui l'a
+  #    produit, alors qu'un refus se lit et se repare.
+  say "siege : IMPOSSIBLE a determiner — ni semence (LCARS_ADMIRAL), ni ligne forge_id=1 dans $UID_MAP_FILE, ni #1 lisible sur ${FORGE_BASE_URL:-<aucune forge configuree>} ($([[ -z "$tok" ]] && echo "jeton master illisible : $MASTER_TOKEN_FILE" || echo 'forge muette')). « box config » pose la forge et son jeton ; le bench, lui, seme le nom."
+  return 1
+}
+
+seat_from_map() { # le login du siege, ou vide — la ligne `forge_id = 1` de la table du convergeur
+  [[ -r "$UID_MAP_FILE" ]] || return 0
+  awk -F'\t' '$1 == 1 { print $3; exit }' "$UID_MAP_FILE" 2>/dev/null
+}
+
+# ⚠ ECRIT UNE FOIS, JAMAIS RE-ECRIT. Le home du siege vit dans le volume sous son nom ; changer le
+# nom au boot suivant laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere
+# resolution fait foi — c'est elle qui correspond a ce qui est sur le disque.
+#
+# Le format est celui du convergeur (`<forge_id>\t<uid>\t<login>`) parce que c'est la MEME table :
+# le siege y est la ligne 1, les humains de fleet les autres. Une seconde table pour tenir une ligne
+# de la premiere ferait deux verites d'un meme fait.
+seat_record() { # seat_record <login>
+  [[ -n "${1:-}" ]] || return 0
+  [[ -n "$(seat_from_map)" ]] && return 0
+  mkdir -p "$(dirname "$UID_MAP_FILE")" 2>/dev/null || true
+  if printf '1\t%s\t%s\n' "${LCARS_UID:-1000}" "$1" >> "$UID_MAP_FILE" 2>/dev/null; then
+    chmod 0640 "$UID_MAP_FILE" 2>/dev/null || true
+  else
+    say "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
+  fi
+}
+
 # ─── 1. L'humain (idempotent — le home vit dans le volume, le user est recréé à l'identique) ─────
+#
+# Le nom se résout ICI et pas au chargement : c'est le premier geste qui en a besoin, et une
+# résolution jouée au `source` rendrait la fonction non rejouable — elle verrait sa propre sortie
+# comme un `LCARS_ADMIRAL` imposé par l'opérateur.
+# ⚠ LE REFUS EST EXPLICITE, PAS UN EFFET DE `set -e`. Un `resolve_admiral` nu mourrait aussi, mais
+# sur le code de retour d'une fonction — et le lecteur suivant ne saurait pas si c'est voulu. Ici le
+# boot s'arrete parce qu'on a decide qu'un siege inventable ne s'invente pas.
+resolve_admiral || exit 1
 if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then
   useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_ADMIRAL"
   say "sysadmin $LCARS_ADMIRAL cree (uid $LCARS_UID)"

@@ -90,7 +90,11 @@ services:
     # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
     hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:
-      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"
+      # ⚠ VIDE EST LA VALEUR NOMINALE, et un défaut ici tuerait la dérivation. L'entrypoint résout le
+      # siège depuis le #1 de la forge ; `LCARS_ADMIRAL` est la SEMENCE du seul cas où rien ne
+      # préexiste (`--bench`, qui la passe lui-même). Le défaut `:-admiral` qui vivait là rendait la
+      # variable TOUJOURS définie dans le conteneur, donc la dérivation ne s'exécutait jamais.
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
       LCARS_UID: "${LCARS_UID:-1000}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # La forge de l'opérateur. Pas de défaut vers un sidecar qui n'existe plus : vide =

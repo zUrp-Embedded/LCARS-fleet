@@ -65,7 +65,7 @@ services:
     pull_policy: missing
     hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:
-      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
       LCARS_UID: "${LCARS_UID:-1000}"
       # Le magasin. MEME VALEUR QUE `docker-compose.yml`, et ces deux fichiers sont les SEULS a
       # l'ecrire : tout ce qui vit dans la boite la lit ici, aucun script ne la redefault.
