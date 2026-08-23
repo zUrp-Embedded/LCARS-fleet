@@ -508,9 +508,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     with {:ok, role} <- require_onboarder(state),
          {:ok, onboard} <- conforming_onboard() do
       opts = [
-        intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1422,9 +1420,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # Criticality declaration RELAYED from the human (nil entries = undeclared → the
         # onboard records an HONEST C0 default, marked undeclared; never fabricated facts,
         # never a wall — a blocked declaration teaches the human to lie to the arch).
-        intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role
       ]
@@ -1558,9 +1554,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       opts = [
         org: org,
         description: Map.get(args, "description", ""),
-        intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1610,9 +1604,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          {:ok, org} <- resolve_org(args) do
       opts = [
         org: org,
-        intensity_level: Map.get(args, "intensity_level"),
         intensity_justification: Map.get(args, "intensity_justification"),
-        intensity_nature: Map.get(args, "nature"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: role
       ]
@@ -1708,8 +1700,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       opts = [
         workflow_map: Map.get(args, "workflow_map"),
         justification: Map.get(args, "justification"),
-        intensity_level: Map.get(args, "intensity_level"),
-        nature: Map.get(args, "nature"),
         # Throughput of THIS project (workflow_runs in flight). Absent leaves the declaration
         # untouched — the fleet default answers, and it is not frozen into the project's record.
         max_fan: Map.get(args, "max_fan"),

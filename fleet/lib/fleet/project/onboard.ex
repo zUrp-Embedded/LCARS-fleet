@@ -1312,26 +1312,20 @@ defmodule Fleet.Project.Onboard do
             %{
               "card" => card,
               "card_source" => "declared",
-              # `"level"`, et PAS `"intensity_level"` : c'est la cle que
-              # `ProjectIntensity.compose/1` ecrit. Le lecteur en cherchait une autre, donc ce
-              # champ etait nil sur TOUT projet declare — et le test qui le couvrait fabriquait sa
-              # fixture a la main, dans la forme du lecteur, jamais dans celle de l'ecrivain.
-              "level" => Map.get(decl, "level"),
               "declared_by" => Map.get(decl, "declared_by")
             }
 
           _ ->
-            %{"card" => nil, "card_source" => "invalid", "level" => nil}
+            %{"card" => nil, "card_source" => "invalid"}
         end
 
       {:error, :enoent} ->
-        %{"card" => nil, "card_source" => "undeclared", "level" => nil}
+        %{"card" => nil, "card_source" => "undeclared"}
 
       {:error, reason} ->
         %{
           "card" => nil,
           "card_source" => "unreadable",
-          "level" => nil,
           "card_error" => "#{:file.format_error(reason)}"
         }
     end
@@ -2127,23 +2121,21 @@ defmodule Fleet.Project.Onboard do
   # `ProjectIntensity.compose/1` is a pure function of its opts — correct for an ONBOARD, where
   # "absent" means "the human declared nothing". At a REVISION "absent" means "the reviser did not
   # mention it", and the two were indistinguishable: a revision naming only the card DELETED
-  # `level`, `nature` and `max_fan` — the entire record of the framing interview — while
-  # `declared_by` moved to the reviser. Measured on the E2E fixture: C3 / "outil interne" /
-  # max_fan 4 went in, only the card came out.
+  # `max_fan` — the throughput the human chose — while `declared_by` moved to the reviser.
   #
   # So the carry-forward lives HERE, at the revision's edge, and `compose/1` stays a pure function
   # of what it is handed. What the revision states wins; what it does not state survives.
+  # (`level`/`nature` were retired with the criticality level — crit_quarantine — so `max_fan` is
+  # the only framing field left to carry forward.)
   #
-  # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a level
-  # a human declared and this revision merely carried. It names the last writer, not the origin of
-  # every field, and the schema (`lcars/intensity-v1`) has no per-field provenance. It is the
-  # smaller lie: the alternative was deleting the human's declaration outright.
+  # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a
+  # `max_fan` a human chose and this revision merely carried. It names the last writer, not the
+  # origin of every field, and the schema (`lcars/intensity-v1`) has no per-field provenance. It is
+  # the smaller lie: the alternative was deleting the human's declaration outright.
   defp revision_write_opts(opts, previous) do
     [
       workflow_map: Keyword.get(opts, :workflow_map),
       intensity_justification: Keyword.get(opts, :justification),
-      intensity_level: Keyword.get(opts, :intensity_level) || Map.get(previous, "level"),
-      intensity_nature: Keyword.get(opts, :nature) || Map.get(previous, "nature"),
       max_fan: Keyword.get(opts, :max_fan) || Map.get(previous, "max_fan"),
       onboarded_by: Keyword.get(opts, :revised_by) || "unknown"
     ]

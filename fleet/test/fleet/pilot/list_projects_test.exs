@@ -90,7 +90,6 @@ defmodule Fleet.Pilot.ListProjectsTest do
       assert {:ok, [p]} = list(tmp)
       assert p["card"] == nil
       assert p["card_source"] == "undeclared"
-      assert p["level"] == nil
     end
 
     test "an unparseable declaration says INVALID — it is not the same as undeclared", %{

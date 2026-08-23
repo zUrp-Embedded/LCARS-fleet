@@ -466,7 +466,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
 
       :ok =
         Fleet.Project.Intensity.write(proj,
-          intensity_level: "C2",
           intensity_justification: "x",
           workflow_map: "gated",
           workflow_maps_root: maps

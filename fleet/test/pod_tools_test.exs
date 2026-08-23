@@ -2454,7 +2454,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert decoded["from"] == "lordzurp/chifoumi"
     end
 
-    test "the FRAMING travels with the deposit — card and criticality, like every creation verb" do
+    test "the FRAMING travels with the deposit — card and WHY, like every creation verb" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
 
       assert {:ok, _, _} =
@@ -2464,18 +2464,14 @@ defmodule Fleet.MCP.PodToolsTest do
                    "source" => "lordzurp/chifoumi",
                    "catalogue" => "fleet",
                    "workflow_map" => "workshop-direct",
-                   "intensity_level" => "C2",
-                   "intensity_justification" => "le poc part en prod",
-                   "nature" => "outil interne"
+                   "intensity_justification" => "le poc part en prod"
                  },
                  pod_state(uniq("pod-sf"))
                )
 
       assert_received {:import_deposit, _src, _cat, opts}
       assert opts[:workflow_map] == "workshop-direct"
-      assert opts[:intensity_level] == "C2"
       assert opts[:intensity_justification] == "le poc part en prod"
-      assert opts[:intensity_nature] == "outil interne"
     end
 
     test "a source that is not `<login>/<name>` is REFUSED before the seam" do

@@ -56,7 +56,6 @@ defmodule Fleet.Project.RolesTest do
 
       :ok =
         Fleet.Project.Intensity.write(proj,
-          intensity_level: "C1",
           intensity_justification: "light card",
           workflow_map: "c1-light"
         )
@@ -68,7 +67,6 @@ defmodule Fleet.Project.RolesTest do
 
       :ok =
         Fleet.Project.Intensity.write(poc,
-          intensity_level: "C0",
           intensity_justification: "throwaway",
           workflow_map: "c0-poc"
         )
@@ -109,7 +107,6 @@ defmodule Fleet.Project.RolesTest do
       # declaration ecrite, ce qui la garde schema-valide par construction.
       :ok =
         Fleet.Project.Intensity.write(proj,
-          intensity_level: "C1",
           intensity_justification: "card lost by the catalogue since",
           workflow_map: "standard-qa"
         )
@@ -140,7 +137,6 @@ defmodule Fleet.Project.RolesTest do
 
       :ok =
         Fleet.Project.Intensity.write(proj,
-          intensity_level: "C2",
           intensity_justification: "x",
           workflow_map: "standard-qa"
         )
