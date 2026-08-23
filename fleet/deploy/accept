@@ -48,10 +48,19 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 
 _G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'
 [[ -t 1 ]] || { _G="" ; _R="" ; _A="" ; _N="" ; }
-FAILED=0
-ok()   { printf '  %sOUI%s   %s\n' "$_G" "$_N" "$*"; }
+FAILED=0 ; HELD=0 ; SKIPPED=0 ; SKIPPED_NAMES=""
+ok()   { printf '  %sOUI%s   %s\n' "$_G" "$_N" "$*"; HELD=$((HELD + 1)); }
 no()   { printf '  %sNON%s   %s\n' "$_R" "$_N" "$*"; FAILED=$((FAILED + 1)); }
-skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; }
+# ⚠ UNE CAPACITE SAUTEE N'EST PAS UNE CAPACITE TENUE, et ce fichier l'a pretendu. Mesure du
+# 2026-08-23 sur un poste natif : deux des trois questions n'avaient rien a mesurer — aucun
+# identifiant annonce par cette passe, aucun humain de fleet nomme — et la derniere ligne annoncait
+# quand meme « Les trois tiennent ». Une seule avait ete verifiee.
+#
+# C'est EXACTEMENT le defaut que ce fichier existe pour tuer, commis par lui : compter les echecs et
+# conclure au succes revient a lire l'absence de mauvaise nouvelle comme une bonne. Un compteur de
+# ce qui est ETABLI est le seul qui puisse porter la phrase finale ; celui des echecs ne le peut pas.
+skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
+         SKIPPED_NAMES="${SKIPPED_NAMES}${SKIPPED_NAMES:+, }${1%% :*}"; }
 
 # ─── 1. JE PEUX ME CONNECTER A LA FORGE ─────────────────────────────────────────────────────────
 #
@@ -166,4 +175,13 @@ if [[ "$FAILED" -gt 0 ]]; then
   printf '  %s%d capacite(s) MANQUANTE(S)%s — l'"'"'installation est incomplete, quels que soient les verdicts de modules.\n\n' "$_R" "$FAILED" "$_N"
   exit 1
 fi
-printf '  %sLes trois tiennent.%s\n\n' "$_G" "$_N"
+
+# Aucune capacite en echec. Reste a dire COMBIEN ont ete etablies — et une passe qui n'a rien pu
+# mesurer sort en 0 sans rien promettre, parce qu'elle n'a rien constate de faux.
+if [[ "$SKIPPED" -eq 0 ]]; then
+  printf '  %sLes trois tiennent.%s\n\n' "$_G" "$_N"
+else
+  printf '  %s%d capacite(s) sur 3 VERIFIEE(S)%s — %s : rien a mesurer dans cette passe, donc %sPAS etablie(s)%s.\n' \
+    "$_G" "$HELD" "$_N" "$SKIPPED_NAMES" "$_A" "$_N"
+  printf '  Ce n'"'"'est pas un echec : rien de faux n'"'"'a ete constate. Ce n'"'"'est pas une garantie non plus.\n\n'
+fi

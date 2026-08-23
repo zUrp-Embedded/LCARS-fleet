@@ -714,9 +714,37 @@ fi
 # « défilé » contre « posé en clair sur le disque ».
 PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
 export PROV_ANNOUNCE_FILE
-# Même sur Ctrl-C ou sur un refus en cours de route : un secret oublié dans /tmp est un secret qui
-# traîne, et c'est exactement ce qu'on refusait au fichier de seed.
-trap '[[ -n "${PROV_ANNOUNCE_FILE:-}" ]] && rm -f "$PROV_ANNOUNCE_FILE"' EXIT INT TERM
+
+# ─── DÉTRUIRE, OUI — MAIS APRÈS AVOIR IMPRIMÉ, ET C'EST LA CORRECTION DU 2026-08-23 ──────────────
+#
+# ⚠ CE CANAL A PERDU UN MOT DE PASSE POUR DE BON. Sur un poste natif, la première passe a généré le
+# mot de passe forge de l'humain intégré, l'a POSÉ sur la forge, l'a écrit ici — et a écrit son
+# marqueur « déjà posé ». Puis `60-deploy` a échoué au gate, `install.sh` est sorti en erreur, et le
+# `trap` a détruit le fichier AVANT le banner final, qu'on n'atteint jamais sur ce chemin. Aux onze
+# relances suivantes, le marqueur a fait sauter la pose. Le compte existait, avec un mot de passe
+# que personne n'avait jamais vu : exactement « un compte d'administration où personne ne peut
+# entrer », le défaut que ce canal existait pour fermer.
+#
+# La propriété « le secret ne survit pas à l'installation qui l'a produit » est juste. Ce qui était
+# faux, c'est de la faire porter par un geste qui peut s'exécuter SANS que l'impression ait eu lieu.
+# Détruire est la seconde moitié d'un geste dont imprimer est la première — les deux vivent
+# ensemble, dans la sortie, quel que soit le code de retour.
+#
+# ⚠ ET SUR CTRL-C AUSSI. Un secret déjà posé sur la forge est perdu de la même manière si on
+# l'efface sans le dire ; l'interruption ne rend pas le compte inexistant.
+_CREDS_PRINTED=0
+print_credentials_once() {
+  [[ "$_CREDS_PRINTED" -eq 0 ]] || return 0
+  [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]] || return 0
+  _CREDS_PRINTED=1
+  # ⚠ SANS `PROVISION_RUN` : ce drapeau arme la garde de sortie de la lib, qui réclame un verdict de
+  # module. On n'en est pas un — on emprunte UNE mise en forme, et le poser ferait crier « MORT
+  # avant de rendre son verdict » juste après un install réussi.
+  # shellcheck source=fleet/deploy/lib/provision-lib.sh
+  ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
+      && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
+}
+trap 'print_credentials_once; [[ -n "${PROV_ANNOUNCE_FILE:-}" ]] && rm -f "$PROV_ANNOUNCE_FILE"' EXIT INT TERM
 
 _apply_rc=0
 "$PROVISION" apply "${PASSTHRU[@]}" || _apply_rc=$?
@@ -746,11 +774,11 @@ esac
 # Mesuré le 2026-08-21 sur l'install à froid : les deux lignes fausses, imprimées côte à côte, en
 # clôture d'un provisionnement par ailleurs juste.
 if [[ "$SUBSTRATE" == "wsl" ]]; then
-  _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),
-  │${N}     rouvrir un ${W}NOUVEL${N} onglet, relancer cet install.      ${CYAN}│"
+  _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
+  _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
 else
-  _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL.
-  │${N}                                                          ${CYAN}│"
+  _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
+  _step1b=""
 fi
 # Le lanceur nommé est celui qui MARCHE. Sur le rail poste la fleet appartient à l'humain de fleet ;
 # l'opérateur la lance par `sudo -u`, et atteint son deck par le groupe.
@@ -764,8 +792,28 @@ elif [[ "$RAIL" == "workstation" ]]; then
   _step3b="     ${W}bash $0 --workstation --fleet-human <nom>${N}"
 else
   _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
-  _step3b="                                                         "
+  _step3b=""
 fi
+
+# ─── LE CARTOUCHE SE MESURE, IL NE SE COMPTE PLUS À LA MAIN ─────────────────────────────────────
+#
+# ⚠ TROIS DE SES LIGNES NE FERMAIENT PAS, et c'est structurel, pas une coquille. Chaque ligne
+# portait sa propre bordure droite sous forme d'espaces comptés à l'œil, donc toute ligne écrite
+# ailleurs que dans le littéral du cartouche l'oubliait — mesuré le 2026-08-23 sur un poste natif :
+# `1.`, `3.` et la commande de `3.` sortaient sans leur `│`.
+#
+# ⚠ ET UNE D'ELLES NE POUVAIT PAS ÊTRE COMPTÉE. `bash $0 --workstation --fleet-human <nom>` porte le
+# chemin de l'installeur : sa longueur dépend d'où l'opérateur a déballé l'archive. Une largeur fixe
+# ne peut pas la contenir — la boîte se dérive donc de son contenu, et un chemin long l'élargit au
+# lieu de la percer.
+#
+# La largeur ignore les séquences ANSI : elles pèsent dans la chaîne et pas à l'écran, ce qui est
+# exactement pourquoi l'alignement ne se lisait pas dans le diff.
+_box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
+_box_pad() { # <texte> <largeur>
+  local p n; p="$(_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
+  printf '%s%*s' "$1" "$n" ''
+}
 
 # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
 #
@@ -791,30 +839,38 @@ if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/
   bash "$SCRIPT_DIR/fleet/deploy/accept" "${_accept_args[@]}" || _accept_rc=$?
 fi
 
-cat <<EOF
+_box_title="       LCARS-FLEET v2 — PROVISIONING TERMINÉ"
+_box_body=(
+  "  Suite (les verdicts ci-dessus font foi) :"
+  "  $_step1"
+)
+[[ -n "$_step1b" ]] && _box_body+=("  $_step1b")
+_box_body+=("  ${W}2.${N} ${W}claude${N} → /login (geste d'identité, une fois).")
+_box_body+=("  $_step3")
+[[ -n "$_step3b" ]] && _box_body+=("  $_step3b")
+_box_body+=("  Sonde à tout moment : ${W}bash install.sh --check${N}")
 
-${CYAN}  ┌─────────────────────────────────────────────────────────┐
-  │${W}         LCARS-FLEET v2 — PROVISIONING TERMINÉ           ${CYAN}│
-  ├─────────────────────────────────────────────────────────┤
-  │${N}  Suite (les verdicts ci-dessus font foi) :               ${CYAN}│
-  │${N}  $_step1
-  │${N}  ${W}2.${N} ${W}claude${N} → /login (geste d'identité, une fois).       ${CYAN}│
-  │${N}  $_step3
-  │${N}  $_step3b
-  │${N}  Sonde à tout moment : ${W}bash install.sh --check${N}          ${CYAN}│
-  └─────────────────────────────────────────────────────────┘${N}
-EOF
+# 57 est le PLANCHER, pas la largeur : c'est celle qu'avait le cartouche, et rien ne gagne à ce
+# qu'il rétrécisse selon le rail. Une ligne plus longue l'élargit, bordures comprises.
+_box_w=57
+for _l in "$_box_title" "${_box_body[@]}"; do
+  _p="$(_box_plain "$_l")"; (( ${#_p} > _box_w )) && _box_w=${#_p}
+done
+_box_rule="$(printf '%*s' "$_box_w" '' | sed 's/ /─/g')"
+
+printf '\n%s  ┌%s┐\n' "$CYAN" "$_box_rule"
+printf '  │%s%s%s│\n' "$W" "$(_box_pad "$_box_title" "$_box_w")" "$CYAN"
+printf '  ├%s┤\n' "$_box_rule"
+for _l in "${_box_body[@]}"; do
+  printf '  │%s%s%s│\n' "$N" "$(_box_pad "$_l" "$_box_w")" "$CYAN"
+done
+printf '  └%s┘%s\n' "$_box_rule" "$N"
 
 # LES IDENTIFIANTS EN DERNIER, APRÈS le bloc « suite » : c'est la dernière chose à l'écran, donc la
-# seule qu'on est sûr de ne pas avoir fait défiler. Le fichier est vidé par le `trap` en sortant.
-if [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]]; then
-  # ⚠ SANS `PROVISION_RUN` : ce drapeau arme la garde de sortie de la lib, qui réclame un verdict de
-  # module. On n'en est pas un — on emprunte UNE mise en forme, et le poser ferait crier « MORT
-  # avant de rendre son verdict » juste après un install réussi.
-  # shellcheck source=fleet/deploy/lib/provision-lib.sh
-  ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
-      && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
-fi
+# seule qu'on est sûr de ne pas avoir fait défiler. Le `trap` les imprimerait de toute façon en
+# sortant — l'appel ici sert à les placer AVANT le code de sortie plutôt qu'après, sur le chemin
+# nominal. Sur un chemin d'échec, le trap reste le seul à passer, et c'est tout l'objet.
+print_credentials_once
 
 # ⚠ LE CODE DE SORTIE PORTE L'ACCEPTATION, ET IL EST EN DERNIER PARCE QU'ELLE EST EN DERNIER. Les
 # identifiants s'impriment quoi qu'il arrive : une capacité manquante ne doit pas les emporter avec
