@@ -1,62 +1,55 @@
 name: CI
 
-# Le rail CI de TOUT projet créé par la fleet — posé par le scaffold, et poussé au dépôt template
-# que la forge recopie. Une seule source : `priv/catalogue/project_template/main/`.
+# Le rail CI de TOUT projet créé par la fleet — posé par le scaffold. Une seule source :
+# `priv/catalogue/project_template/main/`.
 #
-# CE QU'IL FAIT, ET C'EST DÉLIBÉRÉMENT PEU : il prouve que la chaîne existe — un push atteint la
-# forge, la forge dispatche, un runner exécute, un verdict revient. Rien de plus. Un projet neuf n'a
-# ni langage, ni dépendances, ni suite : un workflow qui suppose l'un des trois échouerait sur un
-# scaffold vide, et un rail qui naît rouge n'apprend rien à personne.
+# CE QU'IL FAIT : il prouve que la chaîne existe (un push atteint la forge, la forge dispatche, un
+# runner exécute, un verdict revient) ET il tourne dans une image qui SAIT faire tourner un vrai
+# harnais — node (donc `actions/checkout@v4`), python3, bash, git, les outils courants. Un projet
+# neuf n'a pas encore de suite : le step ci-dessous est un placeholder VERT. Le jour où le projet
+# sait ce qu'il est, il REMPLACE ce step par sa commande de test — DANS LE MÊME job, sur la même
+# image, sans rien reconfigurer.
 #
-# CE QU'IL DEVIENT : chaque projet le RÉÉCRIT quand il sait ce qu'il est (le lint de son langage,
-# ses tests, son build). C'est un point de départ livré vert, pas un gabarit à respecter.
+# ⚠ POURQUOI `container:` ET PAS `runs-on: <label-gras>`. Le label `shell` est le contrat MINIMAL
+# que tout runner LCARS sert ; ce qu'il y a derrière n'est pas garanti (le déploiement de référence
+# le mappe sur `alpine:3.20` — pas de node, pas de git, pas de bash). `container:` court-circuite
+# ça : le daemon du runner tire l'image nommée, quelle que soit la config du label. Une seule image
+# à tirer, une seule fois — le runner la CACHE (volume nommé `runner-dind`), donc seul le premier job
+# d'un runner neuf paie le téléchargement ; tous les suivants la réutilisent.
 #
-# LE LABEL — `shell`, générique, jamais la toolchain de LCARS. Un runner sert des projets qui ne
-# sont pas LCARS : nommer ici `elixir` ferait hériter chaque projet créé d'une dépendance à une
-# toolchain qui ne le regarde pas. L'opérateur qui pose son runner doit servir `shell` ; c'est le
-# contrat minimal du côté CI, et il est petit exprès.
+# ⚠ CE QUI A COÛTÉ TROIS JOURS, ET QUE CE FICHIER FERME. `actions/checkout@v4` est une action JS
+# node20 : elle EXIGE node dans l'image. Sur `alpine` nu (l'ancien défaut de ce rail) elle mourait
+# au step 0 — « rouge au checkout sur un code dont la suite passait » (mesuré 2026-08-03 ET 08-23).
+# `catthehacker/ubuntu:act-latest` est l'image de référence de gitea/act : elle porte node et les
+# langages courants. Le checkout marche, et un projet python/bash/go n'a RIEN à configurer.
 #
-# ⚠ CE QUE `shell` TE DONNE, ET CE QU'IL NE TE DONNE PAS. Le label est une CLÉ : l'opérateur la
-# mappe sur une image dans la config de son runner, et le déploiement de référence la mappe sur
-# `alpine:3.20`. Donc, dans ce job : pas de `git`, pas de `node`, pas de `bash` — un `sh` POSIX et
-# rien d'autre. Un step qui appelle `git` sort en **127 command not found**, ce qui a été mesuré
-# sur un projet ayant réécrit ce fichier pour récupérer ses sources (2026-08-03).
-#
-# TU RÉÉCRIS CE FICHIER ? Alors ce paragraphe est celui à ne pas perdre. Deux sorties, au choix :
-#   1. installer ce dont tu as besoin dans le job — `apk add --no-cache git` en premier step ;
-#   2. demander une AUTRE image — `container: <image>` sur le job, et le runner la tirera.
-# La seconde est la bonne dès que tu as plus d'un outil à poser : une liste d'`apk add` en tête de
-# workflow est une image, écrite au mauvais endroit et re-téléchargée à chaque run.
+# TU CHANGES D'IMAGE ? Mets le nom que tu veux sur `container:`. TU EN VEUX UNE PLUS PETITE pour un
+# projet mono-langage (ex. `python:3-slim`) ? Vérifie qu'elle porte node si tu gardes `checkout` —
+# sinon repli : `container:` sur une image qui l'a, ou `git clone` manuel avec le token du job.
 
 on:
   push:
   pull_request:
 
 jobs:
-  # LE NOM DU JOB EST LU PAR LA FLEET, ET C'EST LA RAISON POUR LAQUELLE IL N'EST PAS `ci`.
+  # LE NOM DU JOB EST LU PAR LA FLEET. Gitea compose le contexte du statut ainsi :
+  # `<workflow> / <job> (<déclencheur>)` → ici `CI / no-harness-yet (pull_request)`, sous le glob
+  # `CI / *` exigé par la protection de `main`. Le rail est vert, la première PR passe.
   #
-  # Gitea compose le contexte du statut ainsi : `<workflow> / <job> (<déclencheur>)`. Ce job
-  # produit donc `CI / no-harness-yet (pull_request)`, ce qui reste sous le glob `CI / *` de la
-  # protection de `main` — le rail est vert, la première PR d'un projet neuf passe, rien n'est
-  # bloqué. Ce qui change est que le vert n'est plus MUET : le brief remis au juge nomme les
-  # contextes qui ont tourné, donc « aucun harnais ici » devient une constatation qu'il peut
-  # rendre au lieu d'un fait invisible.
-  #
-  # Le renommer `ci` (ou n'importe quoi d'autre) est exactement ce qu'un projet FAIT quand il pose
-  # sa vraie suite : la disparition de ce nom est le signal, et elle est gratuite.
+  # `no-harness-yet` est le SIGNAL « ce projet n'a pas encore de vraie suite » : le brief remis au
+  # juge nomme les contextes qui ont tourné, donc « aucun harnais ici » devient une constatation
+  # qu'il rend au lieu d'un fait invisible. Le renommer (ex. `test`) est exactement ce qu'un projet
+  # FAIT quand il pose sa suite — la disparition de ce nom est le signal, et elle est gratuite.
   no-harness-yet:
     runs-on: shell
-    # `alpine` n'a pas bash — les steps ci-dessous sont POSIX, comme le job qui les exécute.
-    defaults:
-      run:
-        shell: sh
+    container: catthehacker/ubuntu:act-latest
     steps:
-      # Pas d'`actions/checkout` : l'action est du node, que l'image du job ne porte pas, et ce
-      # workflow n'a rien à lire dans l'arbre. Le jour où un projet en a besoin, il réécrit ce
-      # fichier — et il aura choisi une image qui sait le faire.
+      - uses: actions/checkout@v4
       - name: Le rail répond
         run: |
           echo "CI: le push a atteint la forge, la forge a dispatché, le runner exécute."
           echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          echo "image: node/python3/bash/git disponibles ; checkout OK."
           echo "⚠ Ce vert ne prouve RIEN du code : ce projet n'a pas encore de harnais."
-          echo "   Réécris ce fichier — le nom du job 'no-harness-yet' est ce qui le signale."
+          echo "   Remplace ce step par ta commande de test (## Test du CLAUDE.md),"
+          echo "   dans CE job — l'image porte déjà ta toolchain. Renomme le job = le signal."
