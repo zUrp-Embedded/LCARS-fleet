@@ -423,3 +423,35 @@ docker_stream_ok() {
   [[ "$out" == "lcars-stream-ok" ]]
 }
 
+
+# ─── docker_compose_cmd — QUEL COMPOSE, DEMANDÉ UNE FOIS ────────────────────────────────────────
+#
+# Deux formes existent dans la nature — le plugin (`docker compose`) et l'autonome
+# (`docker-compose`) — et une install récente n'a que la première. La question se pose donc
+# vraiment ; ce qui ne doit pas se poser deux fois, c'est la RÉPONSE.
+#
+# ⚠ ELLE SE NOMME AU DÉLÉGUÉ, ELLE NE SE REDÉCOUVRE PAS. Deux détections pour un fait donnent deux
+# verdicts possibles selon la porte empruntée — et celui qu'on ne lit pas est toujours celui qui
+# décide le jour où ça casse. Le même motif que `docker_endpoint` juste au-dessus : la sonde vit
+# ici, en un exemplaire, et chaque porte la joue puis TRANSMET son résultat.
+#
+# ⚠ LE BINAIRE VIENT DE L'APPELANT, PAS DU PATH. Sur WSL la CLI vit dans le montage Docker Desktop,
+# et sur une socket appartenant à root c'est un SHIM qui escalade : interroger `docker` nu ici
+# contournerait l'un et l'autre pour échouer plus loin, sur une permission.
+PROV_COMPOSE_CMD=""
+PROV_COMPOSE_WHY=""
+docker_compose_cmd() { # docker_compose_cmd [<binaire docker>] -> 0 et PROV_COMPOSE_CMD, ou 1 et _WHY
+  local bin="${1:-${PROV_DOCKER_BIN:-docker}}"
+  PROV_COMPOSE_CMD=""
+  PROV_COMPOSE_WHY=""
+  if "$bin" compose version >/dev/null 2>&1; then
+    PROV_COMPOSE_CMD="$bin compose"
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    PROV_COMPOSE_CMD="docker-compose"
+    return 0
+  fi
+  PROV_COMPOSE_WHY="docker répond, mais compose est absent (ni le plugin « docker compose », ni « docker-compose »)"
+  return 1
+}

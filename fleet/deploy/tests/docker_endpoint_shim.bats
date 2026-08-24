@@ -63,3 +63,49 @@ setup() {
   grep -q 'compose version' "$LIB"
   grep -q 'reste introuvable' "$LIB"
 }
+
+# ─── docker_compose_cmd — UNE SEULE REPONSE A « QUEL COMPOSE » ──────────────────────────────────
+#
+# ⚠ LA RESOLUTION VIVAIT DANS `docker.sh`, ET `box` EN PORTAIT UNE SECONDE EN DEFAUT. Deux
+# detections pour un fait donnent deux verdicts possibles selon la porte empruntee — et celui qu'on
+# ne lit pas est celui qui decide le jour ou ca casse. Elle vit ici, a cote de la sonde d'endpoint,
+# en un exemplaire ; chaque porte la joue puis TRANSMET son resultat.
+
+compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
+  run bash -c ". '$LIB' >/dev/null 2>&1; $1"
+}
+
+@test "compose: le plugin est prefere, et il porte le binaire qu'on lui donne" {
+  local bin="$BATS_TEST_TMPDIR/mydocker"
+  printf '#!/usr/bin/env bash\n[[ "$1" == compose ]] && exit 0\nexit 1\n' > "$bin"; chmod +x "$bin"
+  compose_lib "docker_compose_cmd '$bin' && echo \"[\$PROV_COMPOSE_CMD]\""
+  [[ "$output" == *"[$bin compose]"* ]]
+}
+
+@test "compose: sans plugin, l'autonome prend le relais" {
+  local bin="$BATS_TEST_TMPDIR/nodocker"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$bin"; chmod +x "$bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BATS_TEST_TMPDIR/docker-compose"
+  chmod +x "$BATS_TEST_TMPDIR/docker-compose"
+  compose_lib "PATH='$BATS_TEST_TMPDIR:\$PATH'; docker_compose_cmd '$bin' && echo \"[\$PROV_COMPOSE_CMD]\""
+  [[ "$output" == *"[docker-compose]"* ]]
+}
+
+@test "compose: aucune des deux formes -> REFUS nomme, jamais une commande vide" {
+  # ⚠ Un `PROV_COMPOSE_CMD` vide rendu avec un code 0 ferait lancer `"" -f … up` : le rail
+  # echouerait sur « command not found » en accusant le compose, pas l'absence.
+  local bin="$BATS_TEST_TMPDIR/nodocker2"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$bin"; chmod +x "$bin"
+  compose_lib "PATH='$BATS_TEST_TMPDIR/vide'; docker_compose_cmd '$bin' && echo OUI || echo \"NON [\$PROV_COMPOSE_WHY]\""
+  [[ "$output" == *"NON ["* ]]
+  [[ "$output" == *"compose est absent"* ]]
+}
+
+@test "compose: la porte NOMME sa reponse au delegue, elle ne le laisse pas re-chercher" {
+  # Sans cet export, `box` retomberait sur son propre defaut — la seconde reponse qu'on vient de
+  # supprimer. Le temoin porte sur le CABLAGE, que rien d'autre ne mesure.
+  local door="$BATS_TEST_DIRNAME/../../../docker.sh"
+  grep -q 'docker_compose_cmd || fail' "$door"
+  grep -q 'export LCARS_COMPOSE_CMD="\$PROV_COMPOSE_CMD"' "$door"
+  ! grep -q 'compose version >/dev/null' "$door"
+}

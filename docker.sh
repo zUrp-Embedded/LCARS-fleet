@@ -98,19 +98,14 @@ fail() { printf 'docker.sh: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n
 docker_endpoint || fail "$PROV_DOCKER_WHY" \
   "Rien n'a été construit, rien n'a été démarré. « ./docker.sh help » marche sans docker."
 
-# `docker compose` (plugin) ou `docker-compose` (standalone) : les deux existent dans la nature, et
-# une install récente n'a que le premier. On NOMME celui qu'on a trouvé au délégué plutôt que de
-# le laisser re-chercher — deux détections pour un fait donneraient deux réponses possibles.
-# Le délégué reçoit la résolution, il ne la refait pas — shim d'escalade compris.
+# `docker compose` (plugin) ou `docker-compose` (standalone) : la question est réelle, la réponse ne
+# se pose qu'une fois. Elle vit dans `lib/docker-endpoint.sh`, à côté de la sonde d'endpoint — même
+# motif, même raison : deux détections pour un fait donneraient deux verdicts possibles selon la
+# porte empruntée. On la joue ici, et on la NOMME au délégué — shim d'escalade compris.
 export LCARS_DOCKER_BIN="$PROV_DOCKER_BIN"
-if "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
-  export LCARS_COMPOSE_CMD="$PROV_DOCKER_BIN compose"
-elif command -v docker-compose >/dev/null 2>&1; then
-  export LCARS_COMPOSE_CMD="docker-compose"
-else
-  fail "docker répond, mais compose est absent (ni le plugin « docker compose », ni « docker-compose »)" \
-       "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
-fi
+docker_compose_cmd || fail "$PROV_COMPOSE_WHY" \
+     "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
+export LCARS_COMPOSE_CMD="$PROV_COMPOSE_CMD"
 
 # Le délégué fait partie du checkout. S'il manque, ce n'est pas une panne d'environnement — c'est
 # un arbre incomplet, et le dire évite une enquête sur docker qui n'y est pour rien.
