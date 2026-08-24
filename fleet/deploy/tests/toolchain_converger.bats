@@ -22,8 +22,9 @@
   local default
   default="$(sed -n 's/^WORK="\${LCARS_TOOLCHAIN_WORK:-\(.*\)}"$/\1/p' "$SUT")"
   [[ -n "$default" ]]
-  # `/var/lib/lcars/tofu` porte l'etat terraform des catalogues (2770 root:admin, le mot de passe de
-  # seed y figure). Un arbre `rm -rf` a chaque passe ne s'imbrique pas dans l'etat sensible d'un
+  # `/var/lib/lcars/tofu` porte l'etat terraform des catalogues, mot de passe de seed compris. Son
+  # mode et son proprietaire vivent dans `deploy/system.manifest`, pas ici : ce qui se verifie
+  # ci-dessous est qu'un arbre `rm -rf` a chaque passe ne s'imbrique pas dans l'etat sensible d'un
   # autre proprietaire.
   [[ "$default" != /var/lib/lcars/tofu* ]]
   # Ni sous la racine du magasin : les volumes externes y sont montes, et un voisin non monte

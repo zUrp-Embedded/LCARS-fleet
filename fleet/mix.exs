@@ -4,8 +4,12 @@ defmodule LcarsFleet.MixProject do
   # SINGLE app :lcars_fleet. The ex-umbrella apps are domains under lib/fleet/,
   # supervised by Fleet.Application (the boot order lives THERE, F8 scar inline —
   # never in a release list).
-  # The legacy config atoms (`config :fleet_spawner, …`) stay valid: the ETS config
-  # is keyed by atom regardless of any OTP app existing (decision D-07).
+  # ALL config lives under `:lcars_fleet`, the key prefixed by its domain
+  # (`:fleet_api, :http_port` => `:lcars_fleet, :api_http_port`). The prefix is NOT cosmetic:
+  # `http_port` and `start_listener` COLLIDE between `api` and `observation`, and a flat merge
+  # would make one service listen on another's port without a word.
+  # A surviving `:fleet_<domain>` atom is a BUILD FAILURE, never a compatibility path — the
+  # `config.no_legacy_namespace` wall of `mix lcars.contracts.check` refuses it.
   def project do
     [
       app: :lcars_fleet,

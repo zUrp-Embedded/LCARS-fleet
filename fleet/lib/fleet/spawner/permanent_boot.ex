@@ -10,14 +10,18 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   ## CRITICAL anti-violation guard
 
-  `boot_at_start?/1` only allows a fleet_spawner boot if
+  `boot_at_start?/1` only allows a spawner boot if
   `boot_at_start: true` **AND** `lifetime_scope: forever` **AND**
   `host_native != true`. The 3rd term is the **anti-violation guard**: a host_native profile
-  boots separately, host-native OUTSIDE fleet_spawner (`bin/host_launch.sh`, containment: none) —
-  it must NEVER be spawned via fleet_spawner bwrap. Since the 2026-07-19 reorg no canon profile is
-  host_native (starfleet became an ordinary bwrap orchestrator), so this term is now a purely
-  DEFENSIVE guard: it still fails-closed should a host_native profile ever carry
-  `boot_at_start: true` (a future off-fleet role, or a config mistake).
+  boots separately, host-native OUTSIDE the spawner (`bin/host_launch.sh`, containment: none) —
+  it must NEVER be spawned through the spawner's bwrap.
+
+  ⚠ THIS TERM IS LOAD-BEARING, NOT A LEFTOVER, and reading it as vestigial is the mistake that
+  would spend it. A canon profile IS host_native: `admiral`, the machine seat — `containment: none`
+  and `host_native: true`. It stays out of the boot only because it also carries
+  `boot_at_start: false`, one line in a catalogue an operator is entitled to replace. Flipping that
+  line is a plausible wish ("the seat should be up at boot"); this term is the only thing standing
+  between that wish and a host-native profile launched through bwrap. It fails closed. Keep it.
 
   ## String keys, not atom
 

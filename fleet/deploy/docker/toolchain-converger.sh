@@ -41,11 +41,14 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token}"
 # LE REPERTOIRE DE TRAVAIL EST JETABLE, ET IL NE S'OUVRE NI DANS L'ETAT TOFU NI DANS LE MAGASIN.
-# `/var/lib/lcars/tofu` porte les recettes tofu par catalogue — 2770 root:admin, aucun acces monde,
-# parce que l'etat terraform contient les valeurs des variables et que le mot de passe de seed y
-# figure. Un aptroot jetable, `rm -rf` a chaque passe, n'a rien a faire imbrique dans l'etat
-# sensible d'un autre proprietaire : les deux arbres ont des cycles de vie, des groupes et des
-# modes differents, et le jour ou l'un se nettoie il emporte l'autre.
+# `/var/lib/lcars/tofu` porte l'etat terraform des catalogues : il contient les valeurs des
+# variables, mot de passe de seed compris, et il est ferme en consequence.
+#
+# ⚠ SON MODE ET SON PROPRIETAIRE NE SE RECOPIENT PAS ICI. `deploy/system.manifest` en est la source
+# unique ; un chiffre recopie dans un commentaire ment le jour ou la table bouge, et rien ne rougit.
+# Ce qui se dit ici est la REGLE : un aptroot jetable, `rm -rf` a chaque passe, n'a rien a faire
+# imbrique dans l'etat sensible d'un autre proprietaire. Les deux arbres ont des cycles de vie
+# differents, et le jour ou l'un se nettoie il emporte l'autre.
 # Pas davantage sous `$STORE` : les quatre volumes externes y sont montes, et un chemin qui leur
 # ressemble sans etre monte promet une persistance qu'il n'a pas — un aptroot survivrait a un
 # rebuild dans l'esprit du lecteur, jamais sur le disque.

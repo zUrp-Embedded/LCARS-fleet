@@ -274,9 +274,11 @@ defmodule Fleet.Observation.Deck do
     do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
 
   # Role that runs as a fleet POD (so it can carry a pod state): `host_native != true`.
-  # Since the 2026-07-19 reorg NO canon role is host-native (starfleet became an ordinary bwrap pod
-  # and is instrumented like the rest) — the guard stays for a future off-fleet role. Unreadable
-  # profile → excluded.
+  #
+  # ⚠ THIS FILTER BITES TODAY, it is not waiting for a future role. A canon profile IS host-native:
+  # `admiral`, the machine seat (`containment: none`, `host_native: true`). Reading it as a guard
+  # held in reserve would suggest it never removes anything — when it removes exactly the seat,
+  # which does not run as a pod and therefore has no pod state to show. Unreadable profile → excluded.
   defp pod_role?(name) do
     case Fleet.CapProfile.load(name) do
       {:ok, %Fleet.CapProfile{spec: spec}} -> get_in(spec, ["invocation", "host_native"]) != true

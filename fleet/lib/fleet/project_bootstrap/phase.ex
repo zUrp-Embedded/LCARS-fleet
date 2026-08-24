@@ -719,7 +719,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     # pod_dir CONFINEMENT lives UPSTREAM: the spawner builds pod_dir as `<pod_dir_root>/pod_<pod_id>`
     # from a pod_id validated by `Fleet.Spawner.valid_pod_id?` (no `..`, no `/`). This module
-    # CANNOT re-derive that root without a `fleet_spawner` dep (compile cycle), so it cannot check
+    # CANNOT re-derive that root: `Fleet.Spawner` is not among this domain's boundary deps, and
+    # widening them for one path derivation would be an API decision. So it cannot check
     # "under root" here. What it CAN and MUST assert before any `rm_rf`/`mkdir` is that pod_dir is
     # ABSOLUTE: a relative pod_dir would make the fixed subdirs `<pod_dir>/workspace|work` resolve
     # against the runtime's CWD → `rm_rf`/`mkdir` on `<cwd>/workspace` (the one footgun visible without
