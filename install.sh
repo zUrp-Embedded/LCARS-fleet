@@ -473,7 +473,7 @@ ${CYAN}  ┌──────────────────────�
   │${W}  RAIL BOÎTE — rien hors de ton clone et de docker.${N}       ${CYAN}│
   │${N}  Pas de paquet, pas d'utilisateur, pas de groupe, rien   ${CYAN}│
   │${N}  dans /etc ni /usr. ~3 Go d'image, ~15 min de build.     ${CYAN}│
-  │${N}  Pour tout défaire : ${W}./docker.sh reset${N} — 30 s.           ${CYAN}│
+  │${N}  Pour tout défaire : ${W}fleet/deploy/box reset${N} — 30 s.           ${CYAN}│
 $( [[ -n "${PROV_DOCKER_SUDO:-}" ]] && printf '  │%s  ⚠ sudo sera demandé pour PARLER au daemon docker —%s     %s│\n  │%s    sa socket appartient à root. Aucune modification.%s    %s│\n' "$W" "$N" "$CYAN" "$N" "$N" "$CYAN" )
 $( [[ "$WITH_BENCH" -eq 1 ]] && printf '  │%s  --bench : forge jetable + runner CI montés ici.%s      %s│\n' "$W" "$N" "$CYAN" \
                              || printf '  │%s  Il te faut une forge : FORGE_BASE_URL + un token.%s    %s│\n' "$N" "$N" "$CYAN" )
@@ -537,20 +537,20 @@ if [[ "$RAIL" == "box" ]]; then
     fi
     exit 1
   fi
-  [[ -x "$SCRIPT_DIR/docker.sh" ]] || {
-    echo "  ${R}docker.sh introuvable — ce rail exige le checkout complet.${N}"
+  [[ -x "$SCRIPT_DIR/fleet/deploy/box" ]] || {
+    echo "  ${R}fleet/deploy/box introuvable — ce rail exige le checkout complet.${N}"
     echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"
     exit 1
   }
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    exec "$SCRIPT_DIR/docker.sh" doctor
+    exec "$SCRIPT_DIR/fleet/deploy/box" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
   # `--bench` promet « forge jetable + boîte + runner CI, EN UN GESTE », et la porte entière existe
   # pour FOURNIR les préconditions au lieu de les exiger. L'image était bâtie plus bas, sur le chemin
   # sans `--bench` UNIQUEMENT — et `--bench` `exec`ute son délégué bien avant d'y arriver. Donc sur
   # une machine sans image, le seul rail qui promet « en un geste » mourait sur « image absente
-  # localement » en DICTANT `./docker.sh build`. Le geste ne bouge pas, il REMONTE : un seul endroit,
+  # localement » en DICTANT `fleet/deploy/box build`. Le geste ne bouge pas, il REMONTE : un seul endroit,
   # les deux chemins.
   #
   # ⚠ ET LES DÉLÉGUÉS GARDENT LEUR REFUS. `up` porte `--no-build` sur une cicatrice mesurée (un `up`
@@ -561,7 +561,7 @@ if [[ "$RAIL" == "box" ]]; then
   # ⚠ LE TROU A SURVÉCU À QUATRE REJEUX SUR TROIS MACHINES, et la raison est dans le substrat : sous
   # WSL le daemon est partagé par toute la VM, donc une distro vierge n'est PAS un docker vierge —
   # l'image était toujours déjà là. Le chemin sans image ne s'est joué qu'une fois toutes les images
-  # supprimées. Les témoins de `install_door.bats` le couvrent maintenant avec un `docker.sh` espion.
+  # supprimées. Les témoins de `install_door.bats` le couvrent maintenant avec un `box` espion.
   #
   # L'image PRÉSENTE n'est jamais reconstruite : rebâtir à chaque passage ferait d'un `--check` de
   # dix secondes un quart d'heure, et le re-run doit rester sûr ET court.
@@ -572,7 +572,7 @@ if [[ "$RAIL" == "box" ]]; then
   if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
     echo ""
     echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
-    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/docker.sh" build || {
+    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/fleet/deploy/box" build || {
       echo "  ${R}Le build a échoué — son verdict est le sien, rien n'a été déployé.${N}"
       exit 1
     }
@@ -598,13 +598,13 @@ if [[ "$RAIL" == "box" ]]; then
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
     echo "  Deux voies :"
     echo "    ${W}--bench${N}                     LCARS monte une forge jetable + un runner pour toi"
-    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« ./docker.sh forge-check »)"
+    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« fleet/deploy/box forge-check »)"
     exit 1
   }
   echo ""
-  echo "  ${W}up${N} — la sortie qui suit est celle de ./docker.sh"
+  echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/box"
   # L'image est déjà là : le bloc au-dessus l'a construite si elle manquait, pour les DEUX chemins.
-  exec "$SCRIPT_DIR/docker.sh" up
+  exec "$SCRIPT_DIR/fleet/deploy/box" up
 fi
 
 # ─── LA BRANCHE POSTE : escalade, source, puis le délégué de provisionnement ─
@@ -687,7 +687,7 @@ fi
 #
 # MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche :
 #     ligne  5  [à voir] docker absent — le rail le posera
-#     ligne 42  docker.sh: aucune CLI docker …            ← le build échoue
+#     ligne 42  box: aucune CLI docker …                 ← le build échoue
 #     ligne 61  POSÉ 10-packages: apt: install … docker.io  ← vingt secondes trop tard
 #
 # La dépendance est réelle et circulaire d'apparence : l'image a besoin de docker, `48-forge-host` a

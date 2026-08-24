@@ -335,11 +335,11 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 }
 
 @test "le pre-requis manquant est NOMME avec le module qui le pose" {
-  # L'ancienne dérive nommait « ./docker.sh build ». La nouvelle nomme `46-tofu`, et rejuge PAS la
+  # L'ancienne dérive nommait « fleet/deploy/box build ». La nouvelle nomme `46-tofu`, et rejuge PAS la
   # version : `46-tofu` est l'autorite du pin, un second avis ici en ferait un second defaut.
   grep -q '46-tofu' "$SRC"
   grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  ! grep -q 'docker.sh build' "$SRC"
+  ! grep -q 'box build' "$SRC"
 }
 
 @test "le roster se derive de l'ARBRE sur ce rail — Elixir y est pose 33 crans plus tot" {

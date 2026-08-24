@@ -12,7 +12,7 @@
 # comptes/org/teams/hardening sont le territoire EXCLUSIF d'OpenTofu (forge.tf, arbitrage WS1 :
 # « TF fait toute la STRUCTURE, bash SEULEMENT les tokens »). Ce module :
 #   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il NOMME
-#      la commande qui la pose : « ./docker.sh forge-apply ».
+#      la commande qui la pose : « fleet/deploy/box forge-apply ».
 #      ⚠ LE MOTIF ÉCRIT ICI ÉTAIT « même famille de gestes d'identité que claude /login, sondés et
 #      instruits, jamais faits ». C'ÉTAIT UN COMMENTAIRE, PAS UNE DOCTRINE — écrit ici le
 #      2026-07-05 avec le code qu'il décrivait, sans arbitrage derrière. Et il est devenu faux : le
@@ -20,7 +20,7 @@
 #      Ce module ne le joue pas ENCORE, et ce « pas encore » n'a rien d'une propriété : où l'apply
 #      se déclenche dans le boot est une question ouverte du chantier « deploy avec tofu dedans ».
 #      Ce qui reste vrai sans discussion : l'apply a besoin d'une AUTORITÉ que l'opérateur fournit
-#      (`./docker.sh config`), et ce module ne l'invente pas ;
+#      (`fleet/deploy/box config`), et ce module ne l'invente pas ;
 #   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
 #      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
@@ -46,7 +46,7 @@
 #      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
 #
 # Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_SEED_FILE (défaut
-# <tokens-dir>/forge-seed.pass, 0600 root, posé par « ./docker.sh config ») · PROV_MASTER_TOKEN_FILE
+# <tokens-dir>/forge-seed.pass, 0600 root, posé par « fleet/deploy/box config ») · PROV_MASTER_TOKEN_FILE
 # (défaut <tokens-dir>/forge-master.token, 0600 root, même geste — l'autorité de création, elle
 # RESTE) · PROV_PASSWORDS_FILE (défaut <tokens-dir>/forge-role-passwords.json — l'A4 durable,
 # rejouable sur forge nuke).
@@ -154,7 +154,7 @@ check_master_authority() {
   if [[ -r "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
   else
-    p_warn "pas d'autorité de création ($PROV_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « ./docker.sh config » la pose"
+    p_warn "pas d'autorité de création ($PROV_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « fleet/deploy/box config » la pose"
   fi
 }
 
@@ -234,7 +234,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$PROV_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> ./docker.sh config » le pose (ou complète $PROV_PASSWORDS_FILE), puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> fleet/deploy/box config » le pose (ou complète $PROV_PASSWORDS_FILE), puis relance"
     return 1
   fi
   local seed tmp rc=0
@@ -288,7 +288,7 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # AUCUN JETON quand le token systeme n'existe pas encore, et Gitea rend alors 404 sur l'adhesion
 # d'une org privee : indiscernable d'une absence reelle. Le module accusait donc la recette
 # (« la recette ne les place dans aucune team ») pour un fait qu'il n'avait pas l'autorite de lire.
-# Mesure du 2026-08-16 sur une forge fraichement posee par `docker.sh forge-apply` : les cinq teams
+# Mesure du 2026-08-16 sur une forge fraichement posee par `fleet/deploy/box forge-apply` : les cinq teams
 # etaient peuplees et les dix comptes membres de l'org — le module annoncait le contraire, et
 # renvoyait le lecteur vers les listes writers/judges/externals, qui n'y etaient pour rien.
 # C'est l'etat NOMINAL d'une installation neuve : structure posee, jeton systeme pas encore minte.
@@ -342,7 +342,7 @@ check_members_visible() {
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"
   else
-    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « ./docker.sh forge-apply » (il les publicise juste après la structure)"
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « fleet/deploy/box forge-apply » (il les publicise juste après la structure)"
   fi
 
   # L'humain : sonde seule, geste instruit — jamais convergé ici (cf. en-tête, point 3).
@@ -430,7 +430,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « ./docker.sh forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « fleet/deploy/box forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -459,7 +459,7 @@ check() {
 check_human_onboardable() {
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok code
   if ! account_exists "$PROV_HUMAN"; then
-    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « ./docker.sh forge-apply »"
+    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « fleet/deploy/box forge-apply »"
     return 0
   fi
   p_ok "compte forge de l'humain ($PROV_HUMAN)"
@@ -470,7 +470,7 @@ check_human_onboardable() {
               "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
   case "$code" in
     204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
-    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « ./docker.sh forge-apply »" ;;
+    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « fleet/deploy/box forge-apply »" ;;
     *)   p_drift "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non vérifiable (HTTP $code) — scope du token système ?" ;;
   esac
 }
@@ -507,7 +507,7 @@ apply() {
   if [[ -n "$miss" ]]; then
     # Territoire tofu, et ce module ne le joue pas : il n'a ni l'URL ni le jeton MASTER, qui
     # arrivent par l'operateur. Le geste, lui, est desormais executable — tofu vit dans l'image.
-    p_drift "structure absente (comptes : $miss) — « ./docker.sh forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — « fleet/deploy/box forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
     verdict_apply
   fi
 

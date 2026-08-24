@@ -5,7 +5,7 @@
 # STATUS: bats tests for docker/forge-gestures.sh — LA porte des gestes forge de la boite
 #
 # CE SCRIPT PORTE LE JETON SITE-ADMIN, celui qui peut tout creer et tout detruire sur la forge, et
-# il est joue par DEUX appelants (`docker.sh` et le banc). Une regression ici ne se voit ni dans
+# il est joue par DEUX appelants (`box` et le banc). Une regression ici ne se voit ni dans
 # l'un ni dans l'autre : elle se voit sur la forge de quelqu'un.
 #
 # Dispositif identique a `forge_charte.bats` et `forge_existing.bats` : un faux `curl` en tete de
@@ -306,7 +306,7 @@ FAKE
 @test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"docker.sh config"* ]]
+  [[ "$output" == *"box config"* ]]
   [ ! -s "$ENTRY_LOG" ]
 }
 
@@ -551,7 +551,7 @@ FAKE
 @test "runner-token: sans autorite, il refuse au lieu de rendre une chaine vide" {
   run bash -c "'$SCRIPT' runner-token < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"docker.sh config"* ]]
+  [[ "$output" == *"box config"* ]]
 }
 
 @test "un geste inconnu est refuse, et les gestes sont NOMMES" {

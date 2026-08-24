@@ -274,7 +274,12 @@ setup() {
   # Ni paquet, ni utilisateur, ni groupe, ni ecriture dans /etc ou /usr.
   ! grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
   # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
-  grep -q 'exec "$SCRIPT_DIR/docker.sh" up' "$SRC"
+  # ⚠ CE TEMOIN EPINGLAIT UN NOM DE FICHIER, PAS UNE PROPRIETE. Il cherchait le litteral
+  # `exec "$SCRIPT_DIR/docker.sh" up` — donc il rougissait au renommage du delegue sans qu'aucune
+  # regle ne soit cassee, et il serait passe au vert sur un `exec` vers n'importe quoi d'autre. Ce
+  # qui se tient est : LA BRANCHE BOITE SE TERMINE PAR UN EXEC VERS LE DELEGUE DU RAIL, donc elle
+  # ne retombe jamais dans la branche poste.
+  grep -qE 'exec "\$SCRIPT_DIR/fleet/deploy/box" up' "$SRC"
 }
 
 @test "l'escalade pour JOINDRE le daemon est ANNONCEE avant la pause, jamais decouverte" {
@@ -311,7 +316,7 @@ setup() {
 printf '%s\n' "$#"; printf '[%s]' "$@"; echo
 SPY
   chmod 0755 "$fake/fleet/deploy/docker/bench/bench-up.sh"
-  touch "$fake/docker.sh"; chmod 0755 "$fake/docker.sh"
+  mkdir -p "$fake/fleet/deploy"; touch "$fake/fleet/deploy/box"; chmod 0755 "$fake/fleet/deploy/box"
 
   run bash "$fake/install.sh" --box --bench -- --project bt --ssh-port 2299 < /dev/null
   [ "$status" -eq 0 ]
@@ -325,22 +330,22 @@ SPY
 # dit qu'aucun temoin ne traverse, « le chemin boite par un build de 15 min » — vrai, et c'est
 # justement pour ca que le chemin `--bench` n'a jamais ete joue SANS IMAGE. Il `exec`utait son
 # delegue avant d'atteindre le build, qui ne vivait que sur l'autre chemin ; sur une machine sans
-# image, le seul rail qui promet « en un geste » mourait en dictant `./docker.sh build`.
+# image, le seul rail qui promet « en un geste » mourait en dictant `fleet/deploy/box build`.
 #
 # Le defaut a survecu a quatre rejeux sur trois machines : sous WSL le daemon est partage par toute
 # la VM, donc une distro vierge n'est PAS un docker vierge, et l'image etait toujours deja la.
 #
-# CE QU'ILS MESURENT EST L'APPEL, JAMAIS LE BUILD : `docker.sh` est un espion. Un temoin qui
+# CE QU'ILS MESURENT EST L'APPEL, JAMAIS LE BUILD : le delegue est un espion. Un temoin qui
 # batirait vraiment provisionnerait la machine qui joue la suite.
 
 # Un arbre factice complet : la porte, la sonde reelle, et deux espions a la place des delegues.
-# `$1` = code de sortie de `image inspect` (0 presente, 1 absente) · `$2` = celui de `docker.sh`.
+# `$1` = code de sortie de `image inspect` (0 presente, 1 absente) · `$2` = celui du delegue.
 _fake_tree() {
   local inspect_rc="${1:-0}" dockersh_rc="${2:-0}" fake="$BATS_TEST_TMPDIR/arbre-img"
   rm -rf "$fake"; mkdir -p "$fake/fleet/deploy/docker/bench" "$fake/fleet/deploy/lib"
   cp "$SRC" "$fake/install.sh"
   cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$fake/fleet/deploy/lib/"
-  cat > "$fake/docker.sh" <<SPY
+  cat > "$fake/fleet/deploy/box" <<SPY
 #!/usr/bin/env bash
 echo "DOCKERSH:\$*"
 exit $dockersh_rc
@@ -354,7 +359,7 @@ SPY
 [[ "\$1 \$2" == "image inspect" ]] && exit $inspect_rc
 exit 0
 SPY
-  chmod 0755 "$fake/docker.sh" "$fake/fleet/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
+  chmod 0755 "$fake/fleet/deploy/box" "$fake/fleet/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
   printf '%s' "$fake"
 }
 
@@ -470,10 +475,10 @@ SPY
   # Ce qui reste a verrouiller est donc l'inverse : qu'aucun build ne reapparaisse sur ce rail.
   local box ws
   # le build de la BOITE survit — la, l'image EST le produit livre
-  box="$(grep -c 'SCRIPT_DIR/docker.sh" build' "$SRC")"
+  box="$(grep -c 'SCRIPT_DIR/fleet/deploy/box" build' "$SRC")"
   [ "$box" -ge 1 ]
   # celui du rail poste, non : ni son invocation, ni la racine qu'il derivait
-  ws="$(grep -c '_wroot/docker.sh" build' "$SRC" || true)"
+  ws="$(grep -c '_wroot/fleet/deploy/box" build' "$SRC" || true)"
   [ "$ws" -eq 0 ]
   ! grep -q '_wimg' "$SRC"
   # et le motif mort n'est pas reste en prose : un lecteur le lirait comme vrai au present

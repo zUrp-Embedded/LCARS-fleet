@@ -13,7 +13,7 @@
 # de `provision` : la racine décide OÙ ON EST et délègue ; le délégué porte le métier.
 #
 # ⚠ LES DOUZE VERBES N'ONT PAS CHANGÉ DE NOM, et c'est délibéré. Ce déplacement ne doit rien
-# coûter à qui a des habitudes ou des scripts : `./docker.sh up` marche exactement comme avant, il
+# coûter à qui a des habitudes ou des scripts : `fleet/deploy/box up` marche exactement comme avant, il
 # passe juste par une porte plus courte. Ce qui bouge est le NOM DU FICHIER dans les README, rien
 # d'autre.
 #
@@ -37,7 +37,7 @@
 # comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
 # Le fichier compose vit dans fleet/deploy/docker/ — l'humain ne le touche pas.
 #
-# USAGE : ./docker.sh [-p <projet>] <commande>
+# USAGE : fleet/deploy/box [-p <projet>] <commande>
 #   build            construit l'image (labels OCI : sha git + date stampés ici)
 #   up               démarre le conteneur fleet (détaché). La forge est à TOI, ou LCARS te la
 #                    fabrique : « install.sh --box --bench » monte forge jetable + boîte + runner
@@ -191,7 +191,7 @@ assert_project_ours() {
     echo "  ce script appliquerait : $COMPOSE_FILE"
     echo ""
     echo "  Appliquer un compose à un projet qu'il n'a pas créé recrée et republie SANS erreur."
-    echo "  Vise le bon projet    : ./docker.sh -p <projet> $*"
+    echo "  Vise le bon projet    : fleet/deploy/box -p <projet> $*"
     echo "  Ou agis sur celui-ci avec SA recette (un banc se descend par bench/bench-down.sh)."
     echo "  Projets visibles      : docker compose ls"
   } >&2
@@ -247,12 +247,12 @@ cmd_up() {
   store_ensure_volumes "$DOCKER" || { echo "box: magasin non pose — up annule" >&2; exit 1; }
   # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
   # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
-  # « ./docker.sh build », et son verdict est le sien ; image absente → up échoue en le disant.
+  # « fleet/deploy/box build », et son verdict est le sien ; image absente → up échoue en le disant.
   compose up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up (projet $PROJECT). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
-  echo "  ./docker.sh doctor                                   # état provisionné ?"
+  echo "  fleet/deploy/box doctor                                   # état provisionné ?"
   await_provision_verdict
 }
 
@@ -284,18 +284,18 @@ await_provision_verdict() {
 
   case "$rc" in
     "")
-      echo "docker.sh up: verdict de provisionnement NON LU après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
-      echo "              La boîte tourne ; son état n'est PAS mesuré. « ./docker.sh doctor »." ;;
+      echo "box up: verdict de provisionnement NON LU après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
+      echo "              La boîte tourne ; son état n'est PAS mesuré. « fleet/deploy/box doctor »." ;;
     0)
-      echo "docker.sh up: provisionnement CONVERGÉ." ;;
+      echo "box up: provisionnement CONVERGÉ." ;;
     2)
       # 2 = appliqué, état-cible non tenu. Ce n'est pas un échec — un geste manque (forge,
       # credentials, réseau) — donc pas de sortie non nulle, mais il se dit.
-      echo "docker.sh up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
-      echo "              « ./docker.sh doctor » nomme lequel." ;;
+      echo "box up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
+      echo "              « fleet/deploy/box doctor » nomme lequel." ;;
     *)
-      echo "docker.sh up: provisionnement EN ÉCHEC (rc=$rc) — la boîte tourne et ne produira RIEN."
-      echo "              « ./docker.sh doctor » nomme ce qui manque." >&2
+      echo "box up: provisionnement EN ÉCHEC (rc=$rc) — la boîte tourne et ne produira RIEN."
+      echo "              « fleet/deploy/box doctor » nomme ce qui manque." >&2
       return 1 ;;
   esac
 }
@@ -368,7 +368,7 @@ gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
 cmd_config() {
   local token="${FORGE_ADMIN_TOKEN:-}" seed="${FORGE_SEED_PASSWORD:-}"
   if [[ -z "$token" && -z "$seed" ]]; then
-    { echo "docker.sh config: pose DURABLEMENT dans la boîte ce que LCARS ne peut pas deviner."
+    { echo "box config: pose DURABLEMENT dans la boîte ce que LCARS ne peut pas deviner."
       echo ""
       echo "  FORGE_ADMIN_TOKEN=<token master site-admin>   l'autorité qui CRÉE sur ta forge."
       echo "     Dans Gitea : Settings → Applications → Generate New Token, scope « all »."
@@ -378,16 +378,16 @@ cmd_config() {
       echo "     tofu ne le remplace PAS sur un compte existant. Le changer ne changerait rien"
       echo "     sur la forge — et casserait le mint."
       echo ""
-      echo "  FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… ./docker.sh config"
+      echo "  FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… fleet/deploy/box config"
       echo "  (l'un des deux suffit : ce qui n'est pas donné n'est pas touché)"
-      echo "  Puis :  ./docker.sh forge-apply    # sans plus rien fournir"
+      echo "  Puis :  fleet/deploy/box forge-apply    # sans plus rien fournir"
     } >&2
     exit 1
   fi
   [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
   [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
   echo ""
-  echo "docker.sh config: posé. La boîte tient son autorité — « ./docker.sh forge-apply » n'a plus"
+  echo "box config: posé. La boîte tient son autorité — « fleet/deploy/box forge-apply » n'a plus"
   echo "                  besoin d'aucune variable."
 }
 
@@ -413,7 +413,7 @@ cmd_config() {
 # s'accroche, et ce que ça veut dire qu'un démarrage mute la forge de l'opérateur tout seul.
 #
 # IL NE PREND PLUS RIEN EN ENTRÉE, et c'est tout l'intérêt : la boîte DÉTIENT son autorité et son
-# seed (`./docker.sh config`), et l'URL vient de son environnement. Un `FORGE_ADMIN_TOKEN` ou un
+# seed (`fleet/deploy/box config`), et l'URL vient de son environnement. Un `FORGE_ADMIN_TOKEN` ou un
 # `FORGE_SEED_PASSWORD` dans l'environnement l'emporte quand même — c'est le chemin d'un opérateur
 # qui veut jouer un apply avec une autre autorité sans toucher à ce que la boîte garde.
 cmd_forge_apply() {
@@ -421,10 +421,10 @@ cmd_forge_apply() {
     -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
     -e LCARS_HUMAN_EMAIL="${LCARS_HUMAN_EMAIL:-}" \
     lcars /opt/lcars/forge-gestures.sh apply \
-    || { echo "docker.sh forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
+    || { echo "box forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
   echo ""
-  echo "docker.sh forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
-  echo "  ./docker.sh doctor    # ce que la boîte voit de sa forge maintenant"
+  echo "box forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
+  echo "  fleet/deploy/box doctor    # ce que la boîte voit de sa forge maintenant"
 }
 
 # Le jeton d'ENREGISTREMENT d'un runner CI. Il s'imprime et ne se pose nulle part : c'est un
@@ -463,7 +463,7 @@ cmd_reset() {
   [[ "$a" == "yes" ]] || { echo "box: annulé."; exit 1; }
   compose down --rmi local
   "$DOCKER" volume rm -f "${PROJECT}_lcars-home" >/dev/null 2>&1 || true
-  echo "box: reset fait. « ./docker.sh up » pour repartir de zéro."
+  echo "box: reset fait. « fleet/deploy/box up » pour repartir de zéro."
 }
 
 cmd_source_push() {
@@ -476,7 +476,7 @@ cmd_source_push() {
   src="$(cd "$src" && pwd)"
   [[ -d "$src/.git" ]] || { echo "box: $src n'est pas un clone git (pas de .git)" >&2; exit 1; }
   ctr="$(compose ps -q lcars)"
-  [[ -n "$ctr" ]] || { echo "box: conteneur lcars absent — « ./docker.sh up » d'abord" >&2; exit 1; }
+  [[ -n "$ctr" ]] || { echo "box: conteneur lcars absent — « fleet/deploy/box up » d'abord" >&2; exit 1; }
   local human="${LCARS_HUMAN:-lcars}"
 
   echo "box: copie de $src → /home/projects/LCARS (historique git compris, ça prend un moment)…"
@@ -501,7 +501,7 @@ cmd_source_push() {
     git config --system --replace-all safe.directory /home/projects/LCARS
     test -d /home/projects/LCARS/.git
     git -C /home/projects/LCARS rev-parse --short HEAD"
-  echo "box: source posée. « ./docker.sh doctor » la sonde ; la fleet peut se maintenir."
+  echo "box: source posée. « fleet/deploy/box doctor » la sonde ; la fleet peut se maintenir."
 }
 
 cmd_forge_check() {
@@ -516,20 +516,20 @@ Un jetable ne doit pas pouvoir détruire ce qui ne l'est pas, donc il ne la gèr
 
 CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
 
-  1. SON URL           → FORGE_BASE_URL=http://<hôte-ou-service>:<port> ./docker.sh up
+  1. SON URL           → FORGE_BASE_URL=http://<hôte-ou-service>:<port> fleet/deploy/box up
      Depuis le conteneur, ta machine hôte se joint par « host.docker.internal ».
 
   2. UN TOKEN MASTER (site-admin) ET UN SEED. Dans Gitea : Settings → Applications →
      Generate New Token, scope « all ». Le seed est le mot de passe que les comptes de rôle
      recevront à leur création. Tu les poses UNE FOIS, ils restent dans la boîte :
 
-         FORGE_ADMIN_TOKEN=<token-master> FORGE_SEED_PASSWORD=<seed> ./docker.sh config
+         FORGE_ADMIN_TOKEN=<token-master> FORGE_SEED_PASSWORD=<seed> fleet/deploy/box config
 
      Puis, sans plus rien fournir — RIEN N'EST INSTALLÉ SUR TA MACHINE, OpenTofu, ses
      providers et la recette sont DANS l'image. L'apply est REJOUABLE : il importe ce que
      ta forge porte déjà au lieu de mourir en « user already exists ».
 
-         ./docker.sh forge-apply
+         fleet/deploy/box forge-apply
 
      POURQUOI LE TOKEN RESTE : la structure d'une forge change pendant toute la vie du
      système — enrôler un catalogue crée un compte par rôle. Au jour 400, ce geste a le même
@@ -547,14 +547,14 @@ CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
            <url>/api/v1/admin/users/<compte>
 
 CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
-      ./docker.sh doctor      → forge joignable ? org présente ? comptes de rôle ? tokens
+      fleet/deploy/box doctor      → forge joignable ? org présente ? comptes de rôle ? tokens
                                 valides ? l'humain est-il membre de l'org ? Chaque manque est
                                 dit avec le geste exact pour le combler.
 
 BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
       docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge up -d
       → projet SÉPARÉ, volumes à lui, détruit uniquement par TA commande explicite.
-      Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} ./docker.sh up
+      Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} fleet/deploy/box up
 EOF
 }
 

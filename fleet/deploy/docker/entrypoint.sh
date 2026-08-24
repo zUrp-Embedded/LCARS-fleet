@@ -127,7 +127,7 @@ fi
 
 # `forge-apply` : LA STRUCTURE DE LA FORGE, POSEE PAR UN RUN TRANSITOIRE ─────────────────────────
 #
-# Meme geste que `docker.sh forge-apply`, mais SANS boite vivante : `docker run --rm <image>
+# Meme geste que `fleet/deploy/box forge-apply`, mais SANS boite vivante : `docker run --rm <image>
 # forge-apply`. C'est ce qui permet a un POSTE DE TRAVAIL (rail WSL) d'avoir une forge utilisable
 # sans reconstruire et relancer un LCARS en conteneur alors qu'il vient de l'installer nativement.
 #
@@ -314,7 +314,7 @@ say "zones de face : /home/projects /home/projects.ops /home/projects.workshop (
 # La SOURCE — l'auto-maintenance en dépend : c'est le checkout que la fleet lit, met à jour
 # (`provision update`) et sur lequel ses agents travaillent.
 #
-# DEUX CHEMINS, ET UN SEUL EST CELUI D'UNE INSTALLATION. Le geste de dév est `./docker.sh
+# DEUX CHEMINS, ET UN SEUL EST CELUI D'UNE INSTALLATION. Le geste de dév est `fleet/deploy/box
 # source-push` : un `docker cp` depuis le clone de l'humain. Qui INSTALLE depuis une image tirée
 # d'une registry n'a aucun clone à pousser — il a une URL. Le chemin nominal est donc un CLONE,
 # fait ici, et il est possible sans credential : le dépôt est public en lecture (`git ls-remote`
@@ -407,7 +407,7 @@ if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
 else
   say "PAS de source LCARS sous $LCARS_SOURCE_DIR — la fleet ne peut PAS se maintenir elle-même"
   say "  install : LCARS_SOURCE_REMOTE=<url> [LCARS_SOURCE_REF=<branche|tag>] au démarrage"
-  say "  dév     : ./docker.sh source-push (docker cp depuis ton clone)"
+  say "  dév     : fleet/deploy/box source-push (docker cp depuis ton clone)"
 fi
 
 # ─── 2. Identité SSH du conteneur : clés d'hôte PERSISTANTES dans le volume ──────────────────────
@@ -430,7 +430,7 @@ fi
 # réparation. (Le détail des verdicts est dans les logs du conteneur.)
 #
 # ⚠ ET LE VERDICT SE PUBLIE, parce que « jamais fatal » n'a jamais voulu dire « jamais dit ». Il ne
-# vivait que dans les logs du conteneur, donc `./docker.sh up` rendait la main sur une boîte qui
+# vivait que dans les logs du conteneur, donc `fleet/deploy/box up` rendait la main sur une boîte qui
 # annonce « fleet up », se déclare *healthy* (son healthcheck teste le port 22) et ne peut démarrer
 # AUCUN pod. Un opérateur n'a aucune raison d'aller lire des logs après une commande qui a dit oui.
 #

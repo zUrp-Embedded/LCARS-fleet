@@ -243,7 +243,7 @@ fi
 
 # La sonde : un aller-retour attache sur l'image qu'on s'apprete a deployer (locale, aucun pull).
 #
-# ⚠ CE MESSAGE A TENDU UNE INCANTATION MANUELLE PENDANT TROIS JOURS, AU MOTIF QUE `./docker.sh
+# ⚠ CE MESSAGE A TENDU UNE INCANTATION MANUELLE PENDANT TROIS JOURS, AU MOTIF QUE `fleet/deploy/box
 # build` « n'existait pas dans ce depot ». Il existe, a la racine, et son `build_env()` exporte
 # exactement les DEUX estampilles que ce refus declare obligatoires (`LCARS_GIT_SHA`,
 # `LCARS_BUILD_DATE`). Le geste juste etait donc a une ligne, et le message envoyait recopier
@@ -255,7 +255,7 @@ fi
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement: $IMAGE
    Construire (depuis la racine du depot) :
-     ./docker.sh build
+     fleet/deploy/box build
    Il pose le sha et la date de build, tous deux OBLIGATOIRES (cf. le bloc revision plus bas)." 1
 
 # LA BOITE DOIT POUVOIR DIRE QUEL CODE ELLE PORTE, ET LE BANC DOIT LE LIRE AVANT DE L'ANNONCER.
@@ -595,7 +595,7 @@ else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
   # LE JETON D'ENREGISTREMENT VIENT DE LA PORTE GENERIQUE (`forge-gestures.sh runner-token`), pas
   # d'un appel API refait ici : c'est le meme geste que l'operateur jouera pour SON runner, par
-  # `./docker.sh runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
+  # `fleet/deploy/box runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
   # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
   REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
   if DOCKER_BIN="$DOCKER_BIN" "$HERE/forge-runner.sh" \

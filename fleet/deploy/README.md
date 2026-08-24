@@ -18,7 +18,7 @@ FERMÉS et épinglés :
   « sans ce paquet l'entrypoint casse au premier module humain ».
 
 Et `deploy/tests/*.bats` (13 suites) sont jouées par `shell_gate`, donc par `mix gate`.
-**Référencé par** : `install.sh` (racine), `docker.sh` (racine)
+**Référencé par** : `install.sh` (racine)
 
 Le provisioning du runtime v2 : amène une machine nue (WSL2, Docker, Linux natif) à l'état où
 un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
@@ -52,12 +52,12 @@ sudo fleet/deploy/provision apply --only 60  # un seul module
 `wsl.conf`) ; `box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes verbes
 documentés en tête, mêmes codes retour, même place dans l'arbre — qui sait lire l'un sait lire
 l'autre. Les douze verbes (`build up doctor shell logs down reset source-push config forge-check
-forge-apply runner-token`) s'appellent par `./docker.sh <verbe>` à la racine, qui détecte, refuse en
+forge-apply runner-token`) s'appellent par `fleet/deploy/box <verbe>` à la racine, qui détecte, refuse en
 nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
 
 **La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
 PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et délègue — `--workstation`
-vers `provision apply`, `--box` vers `docker.sh`, `--bench` vers le fournisseur de banc. Ce qui suit
+vers `provision apply`, `--box` vers `box`, `--bench` vers le fournisseur de banc. Ce qui suit
 `--` part verbatim au délégué de la branche.
 
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS

@@ -5,15 +5,15 @@
 # STATUS: les gestes forge de la boite — poses UNE fois, joues par tout appelant
 #
 # ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-# Ces trois gestes vivaient dans `docker.sh`, sous forme de scripts distants passes a
-# `compose exec bash -c`. Le banc ne peut PAS appeler `docker.sh` : sa boite est creee par un autre
-# couple de fichiers compose (`docker-compose.install.yml` + `.bench.yml`), et `docker.sh` refuse
+# Ces trois gestes vivaient dans la porte racine, sous forme de scripts distants passes a
+# `compose exec bash -c`. Le banc ne peut PAS appeler `fleet/deploy/box` : sa boite est creee par un autre
+# couple de fichiers compose (`docker-compose.install.yml` + `.bench.yml`), et `box` refuse
 # — a raison — d'agir sur un projet qu'il n'a pas cree. Le banc aurait donc recopie les memes
 # gestes, et deux copies d'un meme contrat derivent.
 #
-# Ils vivent donc DANS L'IMAGE, versionnes avec la recette qu'ils jouent. `docker.sh` et le banc
+# Ils vivent donc DANS L'IMAGE, versionnes avec la recette qu'ils jouent. `box` et le banc
 # sont alors deux facons d'entrer par la meme porte :
-#     docker.sh          -> compose exec -T -u root lcars /opt/lcars/forge-gestures.sh <geste>
+#     box                -> compose exec -T -u root lcars /opt/lcars/forge-gestures.sh <geste>
 #     bench              -> docker exec -i -u root <box>  /opt/lcars/forge-gestures.sh <geste>
 #
 # ─── LES SECRETS ENTRENT PAR STDIN, JAMAIS PAR argv ─────────────────────────────────────────────
@@ -131,7 +131,7 @@ die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 need_forge_url() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
     echo "forge-gestures: cette boite n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
-    echo "                FORGE_BASE_URL=<url> ./docker.sh up, puis rejoue." >&2
+    echo "                FORGE_BASE_URL=<url> fleet/deploy/box up, puis rejoue." >&2
     exit 2; }
 }
 
@@ -403,9 +403,9 @@ cmd_apply() {
   seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
 
   local manque=""
-  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> ./docker.sh up"
-  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> ./docker.sh config"
-  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> ./docker.sh config"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> fleet/deploy/box up"
+  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config"
+  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config"
   if [[ -n "$manque" ]]; then
     printf 'forge-gestures: la boite ne detient pas ce qu il faut :%b\n' "$manque" >&2
     exit 1
@@ -577,7 +577,7 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   need_forge_url
   [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
 
   # LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` — cette ligne en est une
   # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Il a ete reglable a moitie (une
@@ -616,7 +616,7 @@ cmd_runner_token() {
   local tok
   tok="$(read_stdin_secret)"
   [[ -n "$tok" ]] || tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
 
   local body
   body="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -655,9 +655,9 @@ cmd_install() {
   need_entrypoint
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> ./docker.sh config »"
+  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
-  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> ./docker.sh config »"
+  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config »"
 
   # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
   #    avec son code — on ne traduit pas, on relaie.
