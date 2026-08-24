@@ -41,16 +41,19 @@ PROVISION_LIB_LOADED=1
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
-# ⚖ ARBITRAGE USER (2026-08-17) : « ADMIN » EST UN FAIT DE FORGE, PAS `uid 0`.
-# `is_admin` cote Gitea dit qui administre le runtime — le deck le lit deja a chaque connexion
-# (`console-deck.py`, porte OIDC). Le CLI, lui, gatait `catalogue install` sur root : or AUCUN
-# humain n'est root et ne le sera. Le seul root est `admiral`, compte d'ADMINISTRATION SYSTEME —
-# son metier est d'installer des paquets, pas des catalogues.
+# ⚠ ONZE LIGNES DECRIVANT UN GROUPE D'ADMINITE VIVAIENT ICI, ET LEUR VARIABLE EST PARTIE SANS
+# ELLES. Elles disaient qu'un groupe Unix PROJETTE le `is_admin` de la forge et ouvre la lecture de
+# l'autorite de la boite — c'etait vrai, ca ne l'est plus, et le pire est qu'elles etaient
+# accrochees a la ligne `PROV_FLEET_GROUP` ci-dessus : un lecteur attachait donc l'histoire de la
+# projection au groupe `fleet`, qui n'a jamais eu ce metier.
 #
-# Ce groupe est la PROJECTION Unix de ce fait, exactement comme `fleet` projette l'appartenance a
-# la team `humans` : le convergeur d'humains l'ecrit, et il ouvre la lecture de l'autorite de la
-# boite (jeton master, seed). La capacite reste le systeme de fichiers — jamais un booleen qu'un
-# appelant pourrait oublier de tester.
+# L'ADMINITE NE SE PROJETTE PLUS : elle se DEMANDE a la forge a l'instant du geste, par un service
+# joignable sur une socket, qui lit l'uid de son pair dans le noyau (`catalogue-executor.py`). Il
+# n'y a plus de groupe a peupler, donc plus rien a defauter ici.
+#
+# `PROV_FLEET_GROUP` ci-dessus n'est PAS cet objet : il donne la lecture des jetons et de l'install
+# RO. C'est du partage de fichiers, pas une autorite — et le confondre est exactement ce que le
+# commentaire retire faisait faire.
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
 # Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
 # CONSOMMATEUR (le deck, sous `nobody`) doivent se rencontrer sans que ni l'un ni l'autre ne change
