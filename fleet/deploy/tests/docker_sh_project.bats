@@ -372,3 +372,41 @@ FAKE
   local box="$BATS_TEST_DIRNAME/../box"
   ! grep -q 'qui reste la source unique de l' "$box"
 }
+
+# ─── LE DELEGUE EST SA PROPRE PORTE ─────────────────────────────────────────────────────────────
+#
+# ⚠ TANT QU'IL LISAIT CE QU'UNE PORTE LUI POSAIT, `box` PORTAIT DEUX DEFAUTS :
+# `${LCARS_DOCKER_BIN:-docker}` et `${LCARS_COMPOSE_CMD:-docker compose}`. Sur une socket
+# appartenant a root, `PROV_DOCKER_BIN` est un SHIM qui escalade — un `docker` nu le contournerait
+# EN SILENCE pour echouer plus loin sur une permission. Les deux defauts n'ont plus d'objet
+# maintenant qu'il sonde lui-meme, et les garder serait garder la reponse d'une porte disparue.
+
+@test "le delegue SONDE, il ne lit plus ce qu'une porte lui pose" {
+  local box="$BATS_TEST_DIRNAME/../box"
+  grep -q 'docker_endpoint || fail' "$box"
+  grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$box"
+  ! grep -q 'LCARS_DOCKER_BIN:-' "$box"
+  ! grep -q 'LCARS_COMPOSE_CMD:-' "$box"
+}
+
+@test "le delegue rend l'aide SANS docker — elle passe avant la sonde" {
+  # ⚠ L'ORDRE EST LA PROPRIETE. Un `--help` qui exige l'outil qu'il documente est une porte fermee,
+  # et c'est le seul geste du rail qui n'a aucune condition.
+  local box="$BATS_TEST_DIRNAME/../box"
+  local l_help l_sonde
+  l_help="$(grep -n 'help|-h|--help) usage; exit 0' "$box" | head -1 | cut -d: -f1)"
+  l_sonde="$(grep -n 'docker-endpoint.sh"$' "$box" | head -1 | cut -d: -f1)"
+  [ -n "$l_help" ] && [ -n "$l_sonde" ]
+  [ "$l_help" -lt "$l_sonde" ]
+  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  [ "$status" -eq 0 ]
+}
+
+@test "la porte est reduite a un renvoi — plus d'aide, plus de sonde, plus de compose" {
+  # Deux copies d'une aide derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
+  [ "$(wc -l < "$SRC")" -lt 40 ]
+  ! grep -q 'LCARS fleet v2 en conteneur' "$SRC"
+  ! grep -q 'docker_endpoint' "$SRC"
+  ! grep -q 'compose' "$SRC"
+  grep -q '^exec "\$BOX" "\$@"$' "$SRC"
+}

@@ -101,11 +101,16 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   [[ "$output" == *"compose est absent"* ]]
 }
 
-@test "compose: la porte NOMME sa reponse au delegue, elle ne le laisse pas re-chercher" {
-  # Sans cet export, `box` retomberait sur son propre defaut — la seconde reponse qu'on vient de
-  # supprimer. Le temoin porte sur le CABLAGE, que rien d'autre ne mesure.
-  local door="$BATS_TEST_DIRNAME/../../../docker.sh"
-  grep -q 'docker_compose_cmd || fail' "$door"
-  grep -q 'export LCARS_COMPOSE_CMD="\$PROV_COMPOSE_CMD"' "$door"
-  ! grep -q 'compose version >/dev/null' "$door"
+@test "compose: qui SONDE nomme sa reponse a qui CONSOMME — jamais un second defaut" {
+  # ⚠ CE TEMOIN A EPINGLE UN FICHIER, ET LE FICHIER A BOUGE. Sa premiere forme cherchait le cablage
+  # dans `docker.sh` ; l'etape qui a fait passer le preflight dans `box` l'a rendu rouge sans que
+  # rien ne soit casse. Ce qui se tient est la REGLE : celui qui sonde pose `PROV_COMPOSE_CMD`, et
+  # celui qui lance compose le LIT — sans repli, parce qu'un repli est la seconde reponse qu'on
+  # vient de supprimer.
+  local box="$BATS_TEST_DIRNAME/../box"
+  grep -q 'docker_compose_cmd || fail' "$box"
+  grep -q 'COMPOSE=(\$PROV_COMPOSE_CMD)' "$box"
+  ! grep -q 'LCARS_COMPOSE_CMD:-' "$box"
+  # Et personne ne redecouvre : une seconde detection dans l'arbre rendrait deux verdicts possibles.
+  [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../.." --include='*.sh' --include=box --include=provision 2>/dev/null | wc -l)" -le 1 ]
 }

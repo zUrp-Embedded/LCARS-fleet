@@ -94,12 +94,6 @@ PROJECT="${LCARS_PROJECT:-lcars}"
 # shellcheck source=lib/store.sh
 . "$SCRIPT_DIR/fleet/deploy/lib/store.sh"
 
-# ⚠ LE BINAIRE DOCKER VIENT DE LA PORTE, IL NE SE REDECOUVRE PAS ICI. `docker.sh` a deja resolu la
-# paire CLI+endpoint qui repond — y compris, sur une socket appartenant a root, un SHIM qui escalade.
-# Le redecouvrir donnerait deux resolutions pour un fait, donc deux verdicts possibles selon la porte
-# empruntee ; et un `docker` nu ici contournerait l'escalade en silence, pour echouer plus loin sur
-# une permission. Defaut `docker` : ce delegue reste jouable seul sur une machine ou il suffit.
-DOCKER="${LCARS_DOCKER_BIN:-docker}"
 
 usage() { sed -n '/^# LCARS fleet v2 en conteneur/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -113,11 +107,40 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ⚠ LE PRÉFLIGHT N'EST PLUS ICI, ET C'EST LE POINT DE LA DÉCOUPE. `docker.sh` a déjà prouvé que
-# docker RÉPOND (pas qu'un binaire existe — cf. `lib/docker-endpoint.sh`) et que compose est là,
-# AVANT de nous appeler. Le refaire ici donnerait deux sondes pour un fait, donc deux verdicts
-# possibles selon la porte empruntée. On lit ce qu'il a posé.
-COMPOSE=(${LCARS_COMPOSE_CMD:-docker compose})
+# ─── L'AIDE PASSE AVANT LE PREFLIGHT, DELIBEREMENT ──────────────────────────────────────────────
+# Quelqu'un qui n'a pas encore docker doit pouvoir lire ce que ce depot propose. Un `--help` qui
+# exige l'outil qu'il documente est une porte fermee. Le `-p` est deja consomme au-dessus, donc
+# `box -p <projet> help` marche aussi.
+case "${1:-help}" in
+  help|-h|--help) usage; exit 0 ;;
+esac
+
+# ─── LE PREFLIGHT, NOMME — IL VIT ICI DEPUIS QUE CE FICHIER EST LA PORTE ────────────────────────
+#
+# ⚠ ON SONDE UN ENDPOINT QUI REPOND, PAS UN BINAIRE, et la nuance a coute une mesure pour etre vue.
+# `command -v docker` se trompe DANS LES DEUX SENS : sa presence ne prouve pas que le daemon tourne
+# (Docker Desktop eteint apres un reboot Windows), et son ABSENCE ne prouve pas qu'il manque — sur
+# WSL la CLI et les sockets vivent dans le montage `/mnt/wsl/docker-desktop`, present pour toute
+# distro meme sans integration activee. La sonde est partagee avec le rail de provisionnement, un
+# seul exemplaire.
+# shellcheck source=lib/docker-endpoint.sh
+. "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh"
+
+fail() { printf 'box: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
+
+docker_endpoint || fail "$PROV_DOCKER_WHY" \
+  "Rien n'a ete construit, rien n'a ete demarre. « box help » marche sans docker."
+
+# ⚠ LE BINAIRE VIENT DE LA SONDE, PAS DU PATH — et surtout pas d'un defaut. Sur une socket
+# appartenant a root, `PROV_DOCKER_BIN` est un SHIM qui escalade ; un `docker` nu le contournerait
+# EN SILENCE pour echouer plus loin sur une permission. Ce defaut a existe (`${LCARS_DOCKER_BIN:-docker}`)
+# tant que ce fichier lisait ce qu'une porte lui posait ; il n'a plus d'objet maintenant qu'il sonde.
+DOCKER="$PROV_DOCKER_BIN"
+
+docker_compose_cmd || fail "$PROV_COMPOSE_WHY" \
+  "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
+COMPOSE=($PROV_COMPOSE_CMD)
+
 [[ -f "$COMPOSE_FILE" ]] || { echo "box: compose introuvable: $COMPOSE_FILE (checkout incomplet ?)" >&2; exit 1; }
 
 compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
