@@ -104,15 +104,41 @@ def login_of(uid):
         return None
 
 
+class NoAuthority(Exception):
+    """
+    This box has no usable site-admin credential.
+
+    ⚠ IT IS A CAUSE OF ITS OWN, AND MERGING IT WAS A MEASURED DEFECT. `master_token()` used a bare
+    `open()`, and its caller caught `OSError` -- which `FileNotFoundError` and `PermissionError`
+    both inherit from. An absent, unreadable, empty or REVOKED token therefore came out as
+    `forge_unreachable`, and the operator was told "the forge is perhaps restarting, retry" about a
+    forge in perfect health. Measured 2026-08-24, all four cases.
+
+    The two remedies are OPPOSITE, which is what makes the merge expensive: a mute forge is retried,
+    a missing authority is RE-POSED by an admin. Nothing the operator can do fixes the first, and
+    retrying forever fixes neither.
+    """
+
+
 def master_token():
     """
     The site-admin credential, read fresh at each request.
 
     Read at each request and not cached at startup, so a rotated token is picked up without a
-    restart and a missing one is diagnosed against the state that actually holds now.
+    restart. Raises NoAuthority when this box cannot produce one -- never a bare OSError, which the
+    caller would read as "the forge did not answer".
     """
-    with open(MASTER_TOKEN_FILE, "r", encoding="utf-8") as fh:
-        return fh.read().strip()
+    try:
+        with open(MASTER_TOKEN_FILE, "r", encoding="utf-8") as fh:
+            token = fh.read().strip()
+    except OSError as exc:
+        raise NoAuthority(f"{MASTER_TOKEN_FILE} illisible ({exc.strerror})") from exc
+    # ⚠ VIDE N'EST PAS ABSENT, ET C'EST LE MEME MANQUE. Un fichier vide part sur le fil comme un
+    # en-tete sans jeton, la forge rend 401, et sans ce garde la cause devient « forge muette ».
+    # `forge-gestures.sh cmd_install` fait ce controle depuis toujours ; ce process l'avait perdu.
+    if not token:
+        raise NoAuthority(f"{MASTER_TOKEN_FILE} est VIDE")
+    return token
 
 
 def forge_is_admin(login):
@@ -131,8 +157,17 @@ def forge_is_admin(login):
     """
     url = f"{FORGE_BASE_URL.rstrip('/')}/api/v1/users/{urllib.parse.quote(login, safe='')}"
     req = urllib.request.Request(url, headers={"Authorization": f"token {master_token()}"})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-        return bool(json.load(resp).get("is_admin"))
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            return bool(json.load(resp).get("is_admin"))
+    except urllib.error.HTTPError as exc:
+        # ⚠ 401/403 EST UNE REPONSE, ET ELLE PARLE DE NOUS. La forge a repondu, clairement : le
+        # jeton qu'on lui presente ne vaut rien -- revoque, expire, ou jamais valide. Le ranger dans
+        # « pas de reponse » ferait reessayer l'operateur sur une forge qui vient de refuser, et
+        # `HTTPError` DERIVE de `URLError`, donc c'est exactement ce qui se passait.
+        if exc.code in (401, 403):
+            raise NoAuthority(f"la forge REFUSE le jeton de cette boite (HTTP {exc.code})") from exc
+        raise
 
 
 def run_gesture(name, emit):
@@ -169,7 +204,7 @@ def serve_one(conn):
         <- "FAIL:<cause>" refused or failed, cause is a stable token
 
     The cause is a TOKEN and not a sentence: `bin/lcars` owns the operator's wording, because it is
-    the thing the operator is talking to. Five causes exist and they are never merged -- a refusal
+    the thing the operator is talking to. SEVEN causes exist and they are never merged -- a refusal
     that names the wrong one costs more than a mute one.
     """
     wire = conn.makefile("rw", encoding="utf-8", newline="\n")
@@ -227,6 +262,11 @@ def serve_one(conn):
 
     try:
         admin = forge_is_admin(login)
+    except NoAuthority as exc:
+        # AVANT le filet large ci-dessous : `NoAuthority` est une classe a part, mais l'ordre des
+        # `except` reste ce qui rend la distinction reelle plutot que documentaire.
+        log(f"refus: cette boite n'a pas d'autorite utilisable — {exc}")
+        return done("FAIL:no_authority")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
         log(f"refus: adminite de {login} non lue ({exc})")
         return done("FAIL:forge_unreachable")

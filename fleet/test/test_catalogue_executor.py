@@ -26,6 +26,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import socket
 import sys
@@ -58,8 +59,9 @@ SOCK = os.path.join(WORK, "catalogue.sock")
 TOKEN = os.path.join(WORK, "master.token")
 GESTURES = os.path.join(WORK, "gestures.sh")
 
+TOKEN_VALUE = "banc-master-token"
 with open(TOKEN, "w") as fh:
-    fh.write("banc-master-token\n")
+    fh.write(TOKEN_VALUE + "\n")
 
 # Le faux geste PARLE, et son code de sortie est pilotable : le relais de sa sortie et la remontee
 # de son code sont deux promesses distinctes de l'executeur.
@@ -84,6 +86,14 @@ class Forge(BaseHTTPRequestHandler):
     def do_GET(self):
         login = self.path.rsplit("/", 1)[-1]
         ASKED.append((login, self.headers.get("Authorization")))
+        # ⚠ ELLE REFUSE UN JETON QUI N'EST PAS LE SIEN, comme la vraie. Une forge de banc qui dit
+        # « oui » a n'importe quel en-tete ne peut pas voir le cas du jeton vide ou revoque — et
+        # c'est exactement le cas qui etait confondu avec « forge muette ».
+        if (self.headers.get("Authorization") or "").removeprefix("token ").strip() != TOKEN_VALUE:
+            self.send_response(401)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         body = json.dumps({"login": login, "is_admin": login in ADMINS}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -218,6 +228,89 @@ check(verdict(r) == "FAIL:not_admin",
 
 check(mod.login_of(999321) is None,
       "pair inconnu: un uid sans compte unix ne rend aucun login")
+
+# ─── 7 ter. « CETTE BOITE N'A PAS D'AUTORITE » N'EST PAS « LA FORGE N'A PAS REPONDU » ────────────
+#
+# ⚠ QUATRE ETATS TOMBAIENT DANS `forge_unreachable`, par DEUX chemins distincts : `OSError` (absent,
+# illisible) et `HTTPError`, qui derive de `URLError` (vide -> 401, revoque -> 401). L'operateur
+# lisait « la forge redemarre peut-etre, reessaie » sur une forge en parfaite sante, et aucun
+# reessai n'y pouvait rien : le geste qui repare est de REPOSER le jeton, une fois.
+ADMINS.clear()
+ADMINS.add(MOI)
+_garde_token = open(TOKEN, encoding="utf-8").read()
+
+os.rename(TOKEN, TOKEN + ".parti")
+check(verdict(ask("install web-demo")) == "FAIL:no_authority",
+      "autorite: jeton ABSENT -> no_authority, jamais « la forge n'a pas repondu »")
+os.rename(TOKEN + ".parti", TOKEN)
+
+open(TOKEN, "w").close()
+_avant = len(ASKED)
+check(verdict(ask("install web-demo")) == "FAIL:no_authority",
+      "autorite: jeton VIDE -> no_authority")
+# ⚠ ET LE VERDICT NE SUFFIT PAS A PROUVER LE GARDE. Retirer le controle du vide laisse ce verdict
+# INCHANGE : le jeton part vide, la forge rend 401, et le 401 retombe sur la meme cause. Mesure du
+# 2026-08-24, mutation muette. Ce que le garde achete vraiment est en amont — on n'envoie PAS un
+# credential vide sur le fil — et c'est donc ca qu'il faut mesurer.
+check(len(ASKED) == _avant,
+      "autorite: jeton VIDE -> la forge n'est meme pas CONTACTEE (le garde est en amont du fil)")
+
+open(TOKEN, "w", encoding="utf-8").write("jeton-revoque-par-la-forge\n")
+check(verdict(ask("install web-demo")) == "FAIL:no_authority",
+      "autorite: jeton REFUSE par la forge (401) -> no_authority, pas « muette »")
+
+os.chmod(TOKEN, 0o000)
+_illisible = verdict(ask("install web-demo"))
+os.chmod(TOKEN, 0o600)
+check(_illisible == "FAIL:no_authority" or os.geteuid() == 0,
+      "autorite: jeton ILLISIBLE -> no_authority (root lit tout, le cas ne se joue pas sous root)")
+
+open(TOKEN, "w", encoding="utf-8").write(_garde_token)
+check(verdict(ask("install web-demo")) == "OK",
+      "autorite: le jeton rendu, le geste repasse — les quatre cas etaient bien la CAUSE")
+
+# Et la forge VRAIMENT muette garde sa cause a elle.
+_garde_url = mod.FORGE_BASE_URL
+mod.FORGE_BASE_URL = "http://127.0.0.1:1"
+check(verdict(ask("install web-demo")) == "FAIL:forge_unreachable",
+      "autorite: une forge injoignable reste forge_unreachable — les deux causes ne fusionnent pas")
+mod.FORGE_BASE_URL = _garde_url
+
+# ─── 7 bis. LA FORME DU NOM EST UN CONTRAT A DEUX MOTEURS ───────────────────────────────────────
+#
+# `@name_rx` fait autorite en Elixir (`lib/fleet/catalogue.ex`) ; l'executeur est en Python et ne
+# peut pas partager le litteral. Il en porte une copie citee — et une copie que rien ne compare est
+# une regle tenue par la DISCIPLINE, c'est-a-dire une regle que le prochain site rate.
+#
+# ⚠ ON NE COMPARE PAS LES DEUX TEXTES, ET C'EST DELIBERE. Ils sont legitimement differents : le
+# litteral Elixir porte ses ancres (`\A…\z`), la version Python les recoit de `fullmatch`. Un mur
+# qui comparerait les sources serait ROUGE aujourd'hui, sur du code juste — et un mur rouge sur du
+# code juste finit desactive.
+#
+# On compare donc ce qui compte : le VERDICT des deux moteurs sur un corpus partage. Le moteur
+# « Elixir » est reconstruit ici depuis SA source, ancres comprises, et confronte a celui que
+# l'executeur utilise vraiment.
+_cat_ex = os.path.join(HERE, "..", "lib", "fleet", "catalogue.ex")
+_src = open(_cat_ex, encoding="utf-8").read() if os.path.isfile(_cat_ex) else ""
+_m = re.search(r"@name_rx\s+~r/(.+?)/", _src)
+check(_m is not None, "forme du nom: le litteral @name_rx est TROUVE dans catalogue.ex")
+if _m:
+    # `\A`/`\z` de PCRE-Elixir -> `\A`/`\Z` de Python : memes ancres absolues, autre orthographe.
+    _elixir = re.compile(_m.group(1).replace(r"\z", r"\Z"))
+    _corpus = [
+        "web-demo", "a", "a1", "x-y-z", "0-abc", "demo-",
+        "Web-demo", "-demo", "", " web", "web ", "web demo", "web_demo", "web.demo",
+        "../../etc", "/etc/passwd", "web-demo\n", "web-demo\t", "wéb", "web\ndemo",
+    ]
+    _ecarts = [n for n in _corpus
+               if bool(_elixir.match(n)) != bool(mod.NAME_RX.fullmatch(n))]
+    check(not _ecarts,
+          "forme du nom: les DEUX moteurs rendent le meme verdict sur %d noms%s"
+          % (len(_corpus), "" if not _ecarts else " — ecarts: %r" % _ecarts))
+    # Le garde d'instrument : un corpus qui n'accepterait rien, ou tout, ne comparerait rien.
+    _oui = sum(1 for n in _corpus if mod.NAME_RX.fullmatch(n))
+    check(0 < _oui < len(_corpus),
+          "forme du nom: le corpus DISCRIMINE (%d acceptes sur %d)" % (_oui, len(_corpus)))
 
 # ─── 8. UN GESTE INTERROMPU N'EST PAS UN GESTE QUI ECHOUE ───────────────────────────────────────
 # `Popen.wait()` rend `-N` quand l'enfant a ete TUE par le signal N. Relaye tel quel, ca donnait

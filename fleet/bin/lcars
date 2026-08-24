@@ -501,7 +501,7 @@ _catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le ver
 
 # ─── LES CAUSES DE REFUS, UNE PHRASE CHACUNE ────────────────────────────────────────────────────
 #
-# CINQ CAUSES, CINQ GESTES DE SORTIE, JAMAIS CONFONDUS. C'est la lecon la plus chere de cette porte :
+# HUIT CAUSES, HUIT GESTES DE SORTIE, JAMAIS CONFONDUS. C'est la lecon la plus chere de cette porte :
 # un refus qui nomme la mauvaise cause envoie chercher au bon endroit pour un probleme qui est
 # ailleurs, et il coute plus qu'un refus muet parce qu'il donne la certitude d'avoir compris.
 #
@@ -516,6 +516,13 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   ou il ne le porte pas. Un proprietaire de la forge te promeut, et c'est effectif A LA COMMANDE
   SUIVANTE — il n'y a plus rien a projeter, ni session a rouvrir. Ce n'est PAS une histoire de
   sudo : personne n'est root ici." ;;
+    no_authority)
+      die "catalogue install: cette BOITE n'a pas d'autorite utilisable sur sa forge.
+  Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
+  machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
+  quantite de reessais ne le repose — c'est un geste d'admin, une fois :
+    FORGE_ADMIN_TOKEN=<jeton site-admin> ./docker.sh config
+  « journalctl -u lcars-catalogue » dit lequel des quatre cas c'est." ;;
     forge_unreachable)
       die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.
   Ce n'est pas un refus — c'est une absence de reponse, et on ne la lit jamais comme un oui. La
