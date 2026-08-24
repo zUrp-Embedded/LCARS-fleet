@@ -199,7 +199,7 @@ seed_project() {
 @test "help works with NO docker at all, and is not truncated" {
   # Help is the one command that must survive a machine without docker — it is what you read to
   # find out what is missing.
-  run env PATH=/usr/bin:/bin bash "$SRC" help
+  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
 
   [ "$status" -eq 0 ]
   # First line of the block and last line of the block: the extraction is anchored on content, so
@@ -320,4 +320,55 @@ FAKE
   [ "$status" -ne 0 ]
   [[ "$output" == *"Checkout incomplet"* ]]
   [[ "$output" != *"daemon"* ]]
+}
+
+# ─── L'AIDE APPARTIENT A QUI PORTE LES VERBES ───────────────────────────────────────────────────
+#
+# ⚠ ELLE A VECU DANS `docker.sh` PENDANT QUE LES DOUZE VERBES VIVAIENT DANS `box`, et le delegue la
+# LUI DEMANDAIT : `usage() { exec docker.sh help; }`. Le porteur du contrat empruntait son contrat
+# au shim qui ne fait que l'`exec`. Ces temoins tiennent le sens de la fleche.
+
+@test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
+  local box="$BATS_TEST_DIRNAME/../box"
+  # ⚠ LES CONTROLES STATIQUES D'ABORD, ET CE N'EST PAS UN DETAIL DE STYLE. Si le delegue redemande
+  # son aide a la porte pendant que la porte la lui demande, les deux `exec` s'appellent sans fond
+  # de pile : rien ne compte les tours, rien ne sort. Un temoin qui LANCE avant de LIRE PEND au lieu
+  # de rougir — et un temoin qui pend est un temoin que le prochain desactive.
+  grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$box"
+  ! grep -q '^usage() { exec ' "$box"
+
+  # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
+  # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
+  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LCARS fleet v2 en conteneur"* ]]
+  [[ "$output" == *"EXIT :"* ]]
+}
+
+@test "les DEUX portes rendent le MEME texte — une aide recopiee derive" {
+  local box="$BATS_TEST_DIRNAME/../box"
+  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
+  local par_la_porte="$output"
+  # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
+  # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
+  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  [[ "$par_la_porte" == "$output" ]]
+}
+
+@test "l'aide ne promet plus une forge que l'operateur devrait apporter" {
+  # ⚠ « La forge est a TOI : LCARS ne la fabrique pas » etait vrai le 2026-07-05 et faux depuis
+  # `--bench`, qui monte forge jetable + boite + runner CI en un geste (`install.sh:588`). C'etait
+  # le SEUL texte d'aide du rail boite, et il disait d'apporter ce que le produit sait fabriquer.
+  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
+  [[ "$output" == *"--bench"* ]]
+  [[ "$output" != *"LCARS ne la"$'\n'*"fabrique pas"* ]]
+  [[ "$output" != *"ne la fabrique pas"* ]]
+}
+
+@test "le delegue ne redit PAS que l'aide vit ailleurs" {
+  # Sa carte annoncait « `./docker.sh help`, qui reste la source unique de l'aide. Elle n'est pas
+  # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
+  # sessions suivantes sans date ni signature.
+  local box="$BATS_TEST_DIRNAME/../box"
+  ! grep -q 'qui reste la source unique de l' "$box"
 }

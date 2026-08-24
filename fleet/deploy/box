@@ -22,9 +22,66 @@
 # verbes documentés en tête, mêmes codes retour, même place dans l'arbre — un lecteur qui connaît
 # l'un sait lire l'autre.
 #
-# ENV, CODES RETOUR, ET LE DÉTAIL DE CHAQUE VERBE : `./docker.sh help`, qui reste la source unique
-# de l'aide. Elle n'est pas recopiée ici — deux copies d'une aide dérivent, et celle qu'on lit
-# n'est jamais celle qu'on a corrigée.
+# ─── L'AIDE DES DOUZE VERBES VIT ICI, PARCE QUE LES VERBES VIVENT ICI ───────────────────────────
+#
+# ⚠ ELLE A VECU DANS `docker.sh`, ET CE FICHIER LA LUI DEMANDAIT — `usage() { exec docker.sh help; }`.
+# Le delegue empruntait son propre contrat au shim qui ne fait que l'`exec`. Une aide appartient a
+# qui porte les verbes : c'est lui qui les change, donc lui qui doit voir le texte bouger dans le
+# meme diff. Et la cicatrice d'a cote le dit deja : une SECONDE definition d'`usage()` a vecu ici,
+# et c'etait ELLE qui servait.
+#
+# ⚠ ELLE SE DELIMITE PAR SON CONTENU, JAMAIS PAR DES NUMEROS DE LIGNE. La forme `sed -n '6,35p'`
+# tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
+# jamais. Ancrage sur la premiere et la derniere ligne du bloc.
+# LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
+# comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
+# Le fichier compose vit dans fleet/deploy/docker/ — l'humain ne le touche pas.
+#
+# USAGE : ./docker.sh [-p <projet>] <commande>
+#   build            construit l'image (labels OCI : sha git + date stampés ici)
+#   up               démarre le conteneur fleet (détaché). La forge est à TOI, ou LCARS te la
+#                    fabrique : « install.sh --box --bench » monte forge jetable + boîte + runner
+#                    CI en un geste. Sans ça, apporte la tienne (FORGE_BASE_URL + un token master)
+#   doctor           sonde l'état DANS le conteneur (le même doctor que le chemin WSL)
+#   shell            shell dans le conteneur, en tant qu'un WORKER (LCARS_HUMAN, defaut lcars)
+#   logs             logs du conteneur (suivi)
+#   down             arrête et retire lcars (les volumes restent)
+#   reset            détruit lcars : conteneur + image + volume /home. La forge n'est PAS
+#                    dans ce projet : aucune commande d'ici ne peut l'atteindre
+#   source-push [DIR] copie TON clone LCARS dans la boîte (/home/projects/LCARS) — la jambe
+#                     source du triangle, sans laquelle la fleet ne peut pas se maintenir
+#   config           pose DURABLEMENT dans la boîte le token master de ta forge et le seed des
+#                    comptes. Une fois. Ils y restent — un geste structurel (un catalogue de plus)
+#                    en a besoin au jour 400 comme au premier
+#   forge-check      le contrat que TA forge doit tenir + les gestes pour l'y amener
+#   forge-apply      pose la structure sur TA forge (OpenTofu tourne DANS la boîte — rien à
+#                    installer chez toi). Rejouable : un second passage importe ce qui existe
+#   runner-token     imprime un jeton d'enregistrement pour TON runner CI (usage unique)
+#   help             cette aide
+#
+# -p <projet> (ou LCARS_PROJECT) : QUEL déploiement on vise. Défaut « lcars ». Un poste de dev en
+#   porte plusieurs à la fois (un banc de validation, une boîte de travail, un rail) et le nom du
+#   projet est la SEULE chose qui les distingue. Les commandes qui créent ou détruisent refusent
+#   d'agir sur un projet que ce compose n'a pas créé — cf. la garde plus bas, elle mesure.
+#
+# ENV (tous optionnels) :
+#   LCARS_PROJECT              projet compose visé (défaut lcars) — équivalent de -p
+#   LCARS_HUMAN                login WORKER cible par shell/doctor/hint (defaut lcars) — PAS le
+#                              sysadmin de la boite (celui-la est `admiral`, cf. LCARS_ADMIRAL, entrypoint)
+#   LCARS_UID                  uid de l'humain (défaut 1000)
+#   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
+#   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)
+#   LCARS_CONSOLE_PORT         bind de la console web (défaut 127.0.0.1:21004)
+#   LCARS_HOSTNAME             hostname du conteneur (défaut bridge)
+#   FORGE_BASE_URL             URL de TA forge (ex http://host.docker.internal:3300) — vide =
+#                              modules forge en instruct-only, le doctor le dit
+#   FORGE_ADMIN_TOKEN          token master site-admin — lu par `config` (qui le POSE) et par
+#                              `forge-apply` (qui l'utilise sans le poser). Transmis par stdin :
+#                              jamais argv, jamais l'env du client docker
+#   FORGE_SEED_PASSWORD        mot de passe posé sur les comptes À LEUR CRÉATION — `config` seul
+#   LCARS_HUMAN_EMAIL          email du compte forge de l'humain (défaut <human>@lcars.local)
+#
+# EXIT : 0 succès · 1 erreur/commande inconnue
 
 set -euo pipefail
 
@@ -44,7 +101,7 @@ PROJECT="${LCARS_PROJECT:-lcars}"
 # une permission. Defaut `docker` : ce delegue reste jouable seul sur une machine ou il suffit.
 DOCKER="${LCARS_DOCKER_BIN:-docker}"
 
-usage() { exec "$SCRIPT_DIR/docker.sh" help; }
+usage() { sed -n '/^# LCARS fleet v2 en conteneur/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # ─── Le projet visé est un ARGUMENT (cf. assert_project_ours) ─────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -502,5 +559,5 @@ case "${1:-help}" in
   forge-apply) cmd_forge_apply ;;
   runner-token) cmd_runner_token ;;
   help|-h|--help) usage ;;
-  *) echo "box: commande inconnue: $1 (./docker.sh help)" >&2; exit 1 ;;
+  *) echo "box: commande inconnue: $1 — « box help » liste les verbes" >&2; exit 1 ;;
 esac

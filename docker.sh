@@ -72,9 +72,12 @@ BOX="$SCRIPT_DIR/fleet/deploy/box"
 # L'aide se DELIMITE par son contenu, pas par des numeros de ligne : la forme `sed -n '6,35p'`
 # tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
 # jamais. Ancrage sur la premiere et la derniere ligne du bloc.
-usage() {
-  sed -n '/^# LCARS fleet v2 en conteneur/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
-}
+# ⚠ L'AIDE N'EST PLUS ICI : elle appartient a qui porte les verbes, et c'est le delegue. Ce renvoi
+# est temporaire — il disparait avec ce fichier. L'ordre a l'interieur de ce geste n'etait PAS
+# indifferent : `box:usage()` a cesse d'appeler ce fichier AVANT que celui-ci n'appelle box. Les
+# deux sont des `exec`, pas des `source` : inverses, ils s'appellent sans fond de pile, chaque
+# `exec` remplace le processus, rien ne compte les tours et rien ne sort.
+usage() { exec "$BOX" help; }
 
 # ─── L'AIDE N'A AUCUNE CONDITION ─────────────────────────────────────────────────────────────────
 # Elle passe AVANT le préflight, délibérément : quelqu'un qui n'a pas encore docker doit pouvoir
