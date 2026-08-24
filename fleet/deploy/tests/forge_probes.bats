@@ -58,7 +58,7 @@ EOF
 
 @test "restricted=false -> OK explicite (et c'est le piege jq: false n'est pas une non-reponse)" {
   stub_curl '{"login":"zoe","restricted":false}'
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"zoe non restreint"* ]]
   # LE COEUR DU TEMOIN : `false` ne doit JAMAIS produire le message de non-lecture.
@@ -67,7 +67,7 @@ EOF
 
 @test "restricted=true -> DRIFT qui NOMME la consequence, pas seulement l'etat" {
   stub_curl '{"login":"zoe","restricted":true}'
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"RESTREINT"* ]]
   # Un drift qui dit « restricted=true » et s'arrete envoie l'operateur chercher pourquoi c'est
@@ -78,7 +78,7 @@ EOF
 
 @test "champ ABSENT -> non mesure, jamais un verdict invente" {
   stub_curl '{"login":"zoe"}'
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"non lisible"* ]]
   [[ "$output" != *"non restreint"* ]]
@@ -98,7 +98,7 @@ case "$url" in
 esac
 EOF
   chmod +x "$BIN/curl"
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"non lisible"* ]]
   # LE TEMOIN NEGATIF DE LA CONTINUITE : une sonde qui n'a pas su lire ne doit pas emporter le
@@ -119,7 +119,7 @@ case "$url" in
 esac
 EOF
   chmod +x "$BIN/curl"
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"inscription FERMÉE"* ]]
   [[ "$output" == *"DISABLE_REGISTRATION"* ]]
@@ -167,7 +167,7 @@ EOF2
 
 @test "apply : modes DEJA convergés → le module ne meurt pas, il atteint l'étape suivante" {
   apply_stubs "640 root:lcars-admin"
-  run "$MODULE" apply
+  run bash "$MODULE" apply
 
   # L'etape d'apres est la sonde de structure. Si elle parle, la ligne mortelle a ete franchie.
   [[ "$output" == *"structure absente"* ]]
@@ -177,7 +177,7 @@ EOF2
   # Ici la branche chgrp/chmod rend 0, donc le module survivait meme sans `return 0`. Le garder
   # comme temoin nomme le pourquoi : sans lui, on croirait que le premier test suffit.
   apply_stubs "600 root:root"
-  run "$MODULE" apply
+  run bash "$MODULE" apply
 
   [[ "$output" == *"structure absente"* ]]
 }

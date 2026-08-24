@@ -871,3 +871,35 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"n'est pas un nombre"* ]]
 }
+
+# ─── LE MODE D'UN MODULE DIT CE QU'ON A LE DROIT D'EN FAIRE ─────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-24 : 9 modules sur 24 avaient perdu leur bit executable, au fil de CINQ
+# commits differents, sans que rien ne le signale. Ils tournaient tous — `run_module` fait
+# `bash "$mod"`, jamais `./$mod` — donc la difference entre les deux moities ne portait aucune
+# information. Un mode qui varie sans consequence est le pire des deux mondes : il invite a chercher
+# une intention la ou il n'y en a pas.
+#
+# La forme retenue est NON EXECUTABLE, pour tous. Le bit `+x` promet qu'on peut lancer le fichier
+# directement ; or chaque module REFUSE de l'etre — `. "${PROVISION_LIB:?… lance via ./provision,
+# pas le module nu}"` est sa premiere ligne de code. Le mode dit maintenant la meme chose que le code.
+
+@test "AUCUN module n'est executable — ils sont joues par « bash », et refusent d'etre lances nus" {
+  local dir="$BATS_TEST_DIRNAME/../modules.d" bad=()
+  local m
+  for m in "$dir"/*.sh; do
+    [[ -x "$m" ]] && bad+=("$(basename "$m")")
+  done
+  [[ "${#bad[@]}" -eq 0 ]] || {
+    echo "modules executables (le bit promet un lancement direct que le module refuse) : ${bad[*]}" >&2
+    false
+  }
+}
+
+# ⚠ CONTRE-TEMOIN. Sans lui, le precedent passerait sur un repertoire vide ou renomme, et un corpus
+# entier disparu se lirait comme un corpus entierement conforme.
+@test "et le temoin ci-dessus mesure bien un corpus — pas un repertoire vide" {
+  local dir="$BATS_TEST_DIRNAME/../modules.d"
+  local n; n="$(ls -1 "$dir"/*.sh 2>/dev/null | wc -l)"
+  [[ "$n" -ge 20 ]]
+}

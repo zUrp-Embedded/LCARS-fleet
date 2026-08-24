@@ -46,7 +46,9 @@ setup() {
   mkdir -p "$PROV_TOKENS_DIR"
   MOD="$BATS_TEST_DIRNAME/../modules.d/75-projects.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  [ -x "$MOD" ]
+  # `-f`, pas `-x` : un module est joue par `bash`, jamais lance directement — il refuse meme de
+  # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
+  [ -f "$MOD" ]
   export PROVISION_LIB="$LIB"
   export PROV_FORGE_URL="http://forge.invalid"
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin"
@@ -89,7 +91,7 @@ SH
 
 @test "check: RIEN → conforme, et le module le DIT" {
   fake_door 0 <<< "RIEN aucun projet declare dans les catalogues installes"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"aucun projet declare"* ]]
   # Le mode transmis est celui du module, pas un defaut de la CLI.
@@ -98,7 +100,7 @@ SH
 
 @test "check: MANQUE → DRIFT (exit 1) et le geste de reparation est nomme" {
   fake_door 2 <<< "MANQUE  fleet/vitrine"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 1 ]
   [[ "$output" == *"fleet/vitrine"* ]]
   # UN DRIFT QUI NE DIT PAS QUOI FAIRE NE SE DISTINGUE PAS D'UNE PANNE.
@@ -107,7 +109,7 @@ SH
 
 @test "check: DEJA → conforme, aucune ligne de drift" {
   fake_door 0 <<< "DEJA    fleet/vitrine"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet/vitrine"* ]]
   [[ "$output" != *"DRIFT"* ]]
@@ -121,7 +123,7 @@ SH
 IMPORTE fleet/vitrine
 ECHEC   fleet/casse — {:branch_unreadable, "ops", :timeout}
 EOF
-  run "$MOD" apply
+  run bash "$MOD" apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"fleet/vitrine"* ]]
   [[ "$output" == *"fleet/casse"* ]]
@@ -134,7 +136,7 @@ EOF
 DEJA    fleet/vitrine
 DEJA    fleet/autre
 EOF
-  run "$MOD" apply
+  run bash "$MOD" apply
   [ "$status" -eq 0 ]
 }
 
@@ -142,7 +144,7 @@ EOF
 
 @test "une porte qui MEURT est un echec, et son cri est repris — jamais « aucun projet »" {
   fake_dead_door 127 "binaire de release introuvable"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"binaire de release introuvable"* ]]
   [[ "$output" == *"FAIL"* ]]
@@ -155,7 +157,7 @@ EOF
   # ECHEC », donc normal — et ZERO ligne sur stdout. La condition de reprise n'est donc pas le code
   # de sortie mais l'ABSENCE de verdict : sans ca, le module jette la seule chose qui dit pourquoi.
   fake_dead_door 1 "** (EXIT) no process: Fleet.Spawner.Supervisor"
-  run "$MOD" apply
+  run bash "$MOD" apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"no process"* ]]
   [[ "$output" == *"n'a rien rendu"* ]]
@@ -163,7 +165,7 @@ EOF
 
 @test "un mot inconnu de la porte est un echec, pas un silence" {
   fake_door 0 <<< "PEUTETRE fleet/vitrine"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"verdict illisible"* ]]
 }
@@ -173,14 +175,14 @@ EOF
   # boites qui n'ont jamais recu « docker.sh config ».
   export PROV_FORGE_URL=""
   fake_door 0 <<< "RIEN rien"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"pas d'autorite a suivre"* ]]
 }
 
 @test "sans release : on ne redit pas l'alarme de 60-deploy" {
   rm -f "$PROV_LINK_DIR/lcars"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"60-deploy"* ]]
   [[ "$output" != *"FAIL"* ]]
@@ -195,7 +197,7 @@ EOF
   # different. Ce n'est pas une derive : les humains, eux, les convergent.
   export LCARS_SYSADMIN_UID="$(id -u)"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"n'est pas un humain de fleet"* ]]
   # ET LA PORTE N'EST PAS JOUEE DU TOUT — pas un import silencieux sous le mauvais uid.
@@ -209,7 +211,7 @@ EOF
   # `UID_MIN 0` du setup, qui existe pour que les autres temoins ne dependent pas de l'uid reel.
   echo "UID_MIN $(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
-  run "$MOD" check
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"n'est pas un humain de fleet"* ]]
 }

@@ -60,7 +60,7 @@ EOF
   # Le runner est un etat-cible sur TOUS les rails : le banc monte le sien, `48-forge-host` monte
   # celui du poste. Le verdict est donc le meme partout, et le substrat n'y entre pas.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=docker "$MODULE" check
+  run env PROV_SUBSTRATE=docker bash "$MODULE" check
 
   [[ "$output" == *"AUCUN runner CI"* ]]
   [[ "$output" == *"DRIFT"* ]]
@@ -74,7 +74,7 @@ EOF
   # Degrader le mot la ou le rail ne convergeait pas rendait le seul voyant fiable muet, et laissait
   # livrer une forge que rien ne peut servir. Le rail converge : le mot ne bouge plus.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=wsl "$MODULE" check
+  run env PROV_SUBSTRATE=wsl bash "$MODULE" check
 
   local line; line="$(grep -i 'runner CI' <<<"$output" | head -1)"
   [ -n "$line" ]
@@ -88,7 +88,7 @@ EOF
   # seul runner servait `shell,elixir,dood`). Cette sonde ne la TRANCHE pas — `CiGate` le fait au
   # ticket, en nommant le label — mais elle donne a l'operateur de quoi comparer.
   stub_curl '{"total_count":1,"runners":[{"name":"lcars-runner","labels":[{"name":"shell"},{"name":"elixir"}]}]}'
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"1 runner(s) CI"* ]]
   [[ "$output" == *"lcars-runner"* ]]
@@ -101,7 +101,7 @@ EOF
   # l'endpoint admin, produisent le meme silence qu'une forge sans runner. Le lire comme « zero »
   # enverrait enroler un runner par-dessus celui qui tourne deja.
   stub_curl MUET
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"non sondables"* ]]
   [[ "$output" == *"rien n'est conclu"* ]]
@@ -114,7 +114,7 @@ EOF
   # legitime en drift permanent.
   rm -f "$PROV_MASTER_TOKEN_FILE"
   stub_curl '{"runners":[],"total_count":0}'
-  run "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"jeton master absent"* ]]
   [[ "$output" != *"AUCUN runner"* ]]
@@ -126,7 +126,7 @@ EOF
   # c'est-a-dire au seul moment ou l'operateur peut encore enroler un runner AVANT que la fleet ne
   # depense un producteur sur un rail mort.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=docker "$MODULE" apply
+  run env PROV_SUBSTRATE=docker bash "$MODULE" apply
 
   [[ "$output" == *"AUCUN runner CI"* ]]
 }

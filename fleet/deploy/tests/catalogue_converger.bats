@@ -17,7 +17,9 @@
 setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/45-catalogues.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  [ -x "$MOD" ]
+  # `-f`, pas `-x` : un module est joue par `bash`, jamais lance directement — il refuse meme de
+  # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
+  [ -f "$MOD" ]
   export PROVISION_LIB="$LIB"
   export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export PROV_FORGE_URL="http://forge.invalid"
