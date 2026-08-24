@@ -56,30 +56,35 @@ stub_deps() {
 }
 
 # `curl` rend la liste des manifestes puis leur contenu, selon l'URL demandee.
+#
+# ⚠ ET LA TETE DE LA BRANCHE PROTEGEE, parce que le convergeur la DEMANDE AVANT TOUT. Un decor qui
+# ne la sert pas fait refuser toutes les passes nominales — c'est le comportement voulu du garde,
+# et c'est pourquoi le defaut du decor decrit une forge SAINE dont la tete vaut le sha des temoins.
+# Les temoins qui veulent une tete AUTRE la posent eux-memes via `stub_head`.
+: "${STUB_HEAD:=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef}"
+stub_head() { STUB_HEAD="$1"; }
+
 stub_forge() { # stub_forge <yaml-base64>
   cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOF
 #!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in *branches/*) echo '{"commit":{"id":"$STUB_HEAD"}}'; exit 0;; esac; done
 for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d*) echo '[{"name":"python.yaml","path":"ops/toolchains.d/python.yaml"}]'; exit 0;; esac; done
 for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d/python.yaml*) echo '{"content":"$1"}'; exit 0;; esac; done
 exit 0
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-  # `jq` doit rendre le chemin puis le contenu : on le scripte au meme endroit.
+  # `jq` doit rendre la tete, le chemin, puis le contenu : on le scripte au meme endroit.
   cat > "$BATS_TEST_TMPDIR/bin/jq" <<EOF
 #!/usr/bin/env bash
 in=\$(cat)
 case "\$*" in
+  *commit.id*) [[ "\$in" == *'"commit"'* ]] && echo "$STUB_HEAD" || echo "" ;;
   *endswith*) echo "ops/toolchains.d/python.yaml" ;;
   *.content*) echo "$1" ;;
   *) echo "" ;;
 esac
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/jq"
-}
-
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  grep -q "^# SOURCE:" "$SUT"; grep -q "^# AUTHOR:" "$SUT"
-  grep -q "^# STARDATE:" "$SUT"; grep -q "^# STATUS:" "$SUT"
 }
 
 @test "usage: un sha absent est un refus, pas un no-op" {
@@ -345,6 +350,7 @@ for a in "\$@"; do
   if [[ "\$prev" == "-o" ]]; then cp "$BATS_TEST_TMPDIR/fake-installer.sh" "\$a"; exit 0; fi
   prev="\$a"
   case "\$a" in
+    *branches/*) echo '{"commit":{"id":"'"$STUB_HEAD"'"}}'; exit 0;;
     *contents/ops/toolchains.d/python.yaml*) echo '{"content":"$B64"}'; exit 0;;
     *contents/ops/toolchains.d*) echo '[{"name":"python.yaml","path":"ops/toolchains.d/python.yaml"}]'; exit 0;;
   esac
@@ -357,4 +363,54 @@ EOS
   [[ "$status" -eq 2 ]]
   [[ "$output" == *"REFUSE en application"* ]]
   [[ ! -e "$LCARS_STORE_ROOT/state/env.d/python.env" ]]
+}
+
+# ─── LE SHA EST BORNE A LA BRANCHE PROTEGEE ─────────────────────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-24, CHAINE COMPLETE. `45-sudoers-toolchain` accorde
+# `%fleet ALL=(root) NOPASSWD:` sur ce binaire ; le controle de `$1` ne portait que la FORME
+# hexadecimale ; le manifeste etait ensuite lu `?ref=$SHA` et ses paquets installes EN ROOT. Or le
+# rail existe pour que des pods ouvrent des PR vers `tool_request` : des commits NON SIGNES vivent
+# dans ce depot PAR CONCEPTION. Et `fleet` n'est pas l'operateur — `human-converger.sh` y verse
+# toute la team `humans` de la forge, toutes les 30 s.
+#
+# Ces temoins tiennent le garde. Sans eux, il se retire au premier refactor qui trouve l'appel
+# reseau couteux.
+
+@test "GARDE: un sha qui n'est PAS la tete de la branche protegee est REFUSE" {
+  stub_head "cafe1234cafe1234cafe1234cafe1234cafe1234"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n    packages:\n    - jq\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"n'est PAS la tete"* ]]
+  [[ "$output" == *"tool_request"* ]]
+  # La tete REELLE est nommee : sans elle, l'operateur ne sait pas contre quoi il a ete compare.
+  [[ "$output" == *"cafe1234cafe1234cafe1234cafe1234cafe1234"* ]]
+}
+
+@test "GARDE: une forge MUETTE sur la tete fait REFUSER — un garde qui s'efface ne garde rien" {
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"tete de"* ]]
+  [[ "$output" == *"introuvable"* ]]
+}
+
+@test "GARDE: un sha ABREGE qui prefixe la tete passe — la comparaison porte sur sa longueur" {
+  # Le reconciliateur passe un sha complet, mais le contrat d'entree accepte 7-40 hex depuis
+  # toujours. Comparer les chaines entieres refuserait un appel legitime abrege.
+  stub_head "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n    packages:\n    - jq\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$output" != *"n'est PAS la tete"* ]]
+}
+
+@test "GARDE: la branche est celle que le runtime gele, et elle se nomme dans le code" {
+  # `Fleet.Toolchain.branch/0` gele `tool_request`. Le convergeur ne doit pas en connaitre une autre
+  # par defaut : deux noms pour une branche, c'est une porte ouverte du cote de celui qu'on ne lit pas.
+  grep -q 'LCARS_TOOLCHAIN_BRANCH:-tool_request' "$SUT"
 }

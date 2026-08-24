@@ -84,6 +84,40 @@ TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 
 api() { curl -sS -m 30 -H "Authorization: token $TOKEN" "$FORGE/api/v1$1"; }
 
+# ─── LE SHA DOIT ETRE LA TETE DE LA BRANCHE PROTEGEE ────────────────────────────────────────────
+#
+# ⚠ SANS CE GARDE, LE RAIL D'OUTILLAGE EST UN CHEMIN `groupe -> root`. Mesure du 2026-08-24, chaine
+# complete : `45-sudoers-toolchain` accorde `%fleet ALL=(root) NOPASSWD:` sur ce binaire ; le
+# controle de `$1` ne portait que la FORME hexadecimale ; le manifeste est ensuite lu `?ref=$SHA` et
+# ses paquets installes en root. Or le rail existe pour que des pods ouvrent des PR vers
+# `tool_request` : des commits NON SIGNES vivent dans ce depot PAR CONCEPTION. N'importe quel membre
+# du groupe pouvait donc passer le SHA d'une PR en attente et faire installer son contenu en root —
+# exactement le geste que la signature existe pour exiger, contourne par le convergeur de cette
+# meme signature. Et `fleet` n'est pas l'operateur : `human-converger.sh` y verse TOUTE la team
+# `humans` de la forge, toutes les 30 s.
+#
+# ⚠ CE FICHIER AFFIRMAIT LA PROPRIETE QU'IL NE VERIFIAIT PAS — l'en-tete dit « un manifeste YAML
+# qu'un humain a approuve sur une branche protegee ». C'etait une intention, pas un controle.
+#
+# ⚠ LA TETE, PAS UN ANCETRE, ET C'EST PLUS SUR QUE LE PIN D'ORIGINE. Un merge qui atterrit entre la
+# mesure du reconciliateur et cette passe rend le SHA note different de la tete : on REFUSE, le
+# reconciliateur re-mesure et rejoue. L'ancienne forme lisait le manifeste au SHA pour ne pas
+# appliquer plus recent que ce qui etait signe ; refuser tient la meme promesse en fermant, au lieu
+# de l'ouvrir a tout ce qui porte quarante caracteres hexadecimaux.
+#
+# ⚠ ET SI LA FORGE NE REND PAS LA TETE, ON REFUSE. Un garde qui s'efface quand sa sonde est muette
+# ne garde rien : c'est le mode de defaillance que le rail entier est cense interdire.
+BRANCH="${LCARS_TOOLCHAIN_BRANCH:-tool_request}"
+head_of_branch() {
+  api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
+}
+HEAD_SHA="$(head_of_branch || true)"
+[[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
+  || die 1 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
+# Le SHA passe peut etre abrege (7-40) : on compare sur sa longueur, jamais l'inverse.
+[[ "${HEAD_SHA:0:${#SHA}}" == "$SHA" ]] \
+  || die 1 "sha '$SHA' n'est PAS la tete de la branche protegee « $BRANCH » ($HEAD_SHA) — refuse. Un manifeste ne s'applique qu'a la revision qu'un humain a signee sur cette branche."
+
 # ─── LE MANIFESTE EST LU AU SHA, JAMAIS SUR LA BRANCHE ──────────────────────────────────────────
 # Lire « la derniere version de la branche » ouvrirait une fenetre entre le moment ou le
 # reconciliateur a constate l'ecart et celui ou ce script lit : un merge qui atterrit entre les deux

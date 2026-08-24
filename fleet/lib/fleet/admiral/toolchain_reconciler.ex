@@ -332,9 +332,16 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     end
   end
 
-  # L'UNIQUE GESTE PRIVILÉGIÉ DU RAIL, et son argument a été signé avant d'exister. `sudo` sur UN
-  # binaire nommé (cf. le sudoers étroit, `45-sudoers-toolchain`), jamais un shell : la ligne de
-  # commande ne porte que le SHA, et le convergeur lit le manifeste à ce SHA depuis la forge.
+  # L'UNIQUE GESTE PRIVILÉGIÉ DU RAIL. `sudo` sur UN binaire nommé (cf. le sudoers étroit,
+  # `45-sudoers-toolchain`), jamais un shell : la ligne de commande ne porte que le SHA, et le
+  # convergeur lit le manifeste à ce SHA depuis la forge.
+  #
+  # ⚠ « SON ARGUMENT A ÉTÉ SIGNÉ » N'EST PAS UNE PROPRIÉTÉ DE CET APPEL, et l'avoir écrit ici comme
+  # telle a masqué un chemin `groupe → root` aussi longtemps que la phrase est restée. Le sudoers
+  # ouvre ce binaire à TOUT `%fleet` — que `human-converger` peuple depuis la team `humans` de la
+  # forge, toutes les 30 s — donc n'importe lequel de ses membres l'appelle sans passer par ici.
+  # La propriété est tenue EN AVAL : le convergeur refuse désormais tout SHA qui n'est pas la tête
+  # de `tool_request`. C'est là qu'elle vit, et là qu'elle se casse si on la retire.
   defp default_converger(head, _opts) do
     bin =
       Application.get_env(
