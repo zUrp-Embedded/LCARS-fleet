@@ -7,10 +7,11 @@
 #     fleet/deploy/box build | up | doctor | shell | logs | down | reset
 #                      source-push | config | forge-check | forge-apply | runner-token
 #
-# POURQUOI CE FICHIER EXISTE. `docker.sh` à la racine faisait 494 lignes et douze verbes, et c'est
-# la PREMIÈRE chose que lit quelqu'un qui découvre le dépôt. Un script d'entrée qui ne se lit pas
-# en trente secondes ne dit pas ce qu'il va faire — il le fait. Le geste est donc le même que celui
-# de `provision` : la racine décide OÙ ON EST et délègue ; le délégué porte le métier.
+# POURQUOI CE FICHIER EXISTE. Le rail boîte a douze verbes, et ils vivent avec leur porteur —
+# jamais dans un fichier qui ne fait que les relayer. La racine du dépôt ne porte QUE
+# l'installeur (⚖ user 2026-08-24) : ce qui décide OÙ ON EST y reste, ce qui porte le métier
+# vit ici, en jumeau de `provision`. Un script d'entrée qui ne se lit pas en trente secondes ne
+# dit pas ce qu'il va faire — il le fait.
 #
 # ⚠ LES DOUZE VERBES N'ONT PAS CHANGÉ DE NOM, et c'est délibéré. Ce déplacement ne doit rien
 # coûter à qui a des habitudes ou des scripts : `fleet/deploy/box up` marche exactement comme avant, il
@@ -24,11 +25,11 @@
 #
 # ─── L'AIDE DES DOUZE VERBES VIT ICI, PARCE QUE LES VERBES VIVENT ICI ───────────────────────────
 #
-# ⚠ ELLE A VECU DANS `docker.sh`, ET CE FICHIER LA LUI DEMANDAIT — `usage() { exec docker.sh help; }`.
-# Le delegue empruntait son propre contrat au shim qui ne fait que l'`exec`. Une aide appartient a
-# qui porte les verbes : c'est lui qui les change, donc lui qui doit voir le texte bouger dans le
-# meme diff. Et la cicatrice d'a cote le dit deja : une SECONDE definition d'`usage()` a vecu ici,
-# et c'etait ELLE qui servait.
+# ⚠ UNE AIDE APPARTIENT A QUI PORTE LES VERBES, et jamais a un relais. Un `usage()` qui `exec`
+# ailleurs fait emprunter au porteur du contrat son propre contrat ; il ne voit alors plus le
+# texte bouger dans le meme diff que les verbes qu'il change.
+# Et la cicatrice d'a cote le dit deja : une SECONDE definition d'`usage()` a vecu ici, et c'etait
+# ELLE qui servait.
 #
 # ⚠ ELLE SE DELIMITE PAR SON CONTENU, JAMAIS PAR DES NUMEROS DE LIGNE. La forme `sed -n '6,35p'`
 # tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
@@ -408,7 +409,7 @@ cmd_config() {
 # credentials moins puissants que celui-ci.
 #
 # ⚠ CE DÉCLENCHEMENT RESTE À LA MAIN, et la raison a changé — celle écrite ici disait « il manque
-# l'endroit où le jeton vit durablement », ce que `docker.sh config` a posé depuis. Ce qui manque
+# l'endroit où le jeton vit durablement », ce que `box config` a posé depuis. Ce qui manque
 # désormais est une DÉCISION, pas une pièce : à quel moment de la séquence de boot l'apply
 # s'accroche, et ce que ça veut dire qu'un démarrage mute la forge de l'opérateur tout seul.
 #

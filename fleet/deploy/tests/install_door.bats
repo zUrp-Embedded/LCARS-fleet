@@ -275,7 +275,7 @@ setup() {
   ! grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
   # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
   # ⚠ CE TEMOIN EPINGLAIT UN NOM DE FICHIER, PAS UNE PROPRIETE. Il cherchait le litteral
-  # `exec "$SCRIPT_DIR/docker.sh" up` — donc il rougissait au renommage du delegue sans qu'aucune
+  # un litteral d'exec vers un chemin precis — donc il rougissait au renommage du delegue sans qu'aucune
   # regle ne soit cassee, et il serait passe au vert sur un `exec` vers n'importe quoi d'autre. Ce
   # qui se tient est : LA BRANCHE BOITE SE TERMINE PAR UN EXEC VERS LE DELEGUE DU RAIL, donc elle
   # ne retombe jamais dans la branche poste.
@@ -496,4 +496,24 @@ SPY
 @test "la sonde docker est REJOUEE apres l'installation — sinon le build lit une reponse perimee" {
   run bash -c "sed -n '/LES PAQUETS AVANT LE BUILD/,/^fi$/p' '$SRC'"
   [[ "$output" == *"docker_endpoint"* ]]
+}
+
+# ─── LE DELEGUE DU RAIL BOITE FAIT PARTIE DU CHECKOUT ───────────────────────────────────────────
+#
+# ⚠ CETTE PROPRIETE A CHANGE DE MAISON, PAS DE VALEUR. Elle etait tenue par le shim racine, qui
+# refusait en nommant le CHECKOUT plutot que docker — « un arbre incomplet, et le dire evite une
+# enquete sur docker qui n'y est pour rien ». Le shim a disparu ; la porte porte la garde, donc le
+# temoin vit ici. Sans ce deplacement, la propriete serait morte avec le fichier qui la portait.
+
+@test "rail boite : un delegue absent nomme le CHECKOUT, jamais docker" {
+  local l_garde l_exec
+  l_garde="$(grep -n 'fleet/deploy/box" \]\] ||' "$SRC" | head -1 | cut -d: -f1)"
+  l_exec="$(grep -n 'exec "\$SCRIPT_DIR/fleet/deploy/box" doctor' "$SRC" | head -1 | cut -d: -f1)"
+  [ -n "$l_garde" ] && [ -n "$l_exec" ]
+  # La garde vient AVANT tout exec : refuser apres avoir tente est un diagnostic sur le mauvais objet.
+  [ "$l_garde" -lt "$l_exec" ]
+  # Et elle nomme l'arbre, pas le daemon.
+  local msg; msg="$(sed -n "$((l_garde+1))p" "$SRC")"
+  [[ "$msg" == *"checkout complet"* ]]
+  [[ "$msg" != *"daemon"* ]]
 }

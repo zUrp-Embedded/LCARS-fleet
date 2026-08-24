@@ -3,7 +3,7 @@
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — LCARS fleet v2. UN SEUL service : la forge n'est PAS ici (cf. ci-dessous)
 #
-# Détail d'implémentation derrière ./docker.sh (racine repo) — l'humain ne le touche pas.
+# Detail d'implementation derriere `fleet/deploy/box` — l'humain ne le touche pas.
 #
 # LA FORGE N'EST PAS DANS CE FICHIER, ET C'EST LA DÉCISION QUI COMPTE (user) :
 # LCARS est CATTLE (on ne le soigne pas, on le nuke et on redéploie) ; la forge est le PET —
@@ -188,7 +188,7 @@ services:
       # forcément le FS d'où l'on parle (Docker Desktop + WSL non intégrée → le bind se résout
       # dans le VM du daemon et rend un dossier VIDE, silencieusement — pire que pas de montage,
       # la fleet croirait sa source présente). La source vit donc DANS le volume d'état, posée
-      # par le geste « ./docker.sh source-push » qui marche quelle que soit la topologie.
+      # par le geste « box source-push » qui marche quelle que soit la topologie.
     cap_add:
       - SYS_ADMIN
     security_opt:

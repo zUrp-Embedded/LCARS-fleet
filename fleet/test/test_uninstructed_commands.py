@@ -179,7 +179,7 @@ def readmes(path):
 #
 # Deux formes admises, et rien d'autre :
 #   1. LIGNE DE SYNOPSIS — la commande est le PREMIER token de la ligne (apres un `#`, des espaces,
-#      ou le nom du script / `$PROG` / `$0`). C'est la forme de `docker.sh` et de `lcars`.
+#      ou le nom du script / `$PROG` / `$0`). C'est la forme de `box` et de `lcars`.
 #   2. DOS DE CITATION — la commande est dans un `code span`. C'est la forme de `fleet_v2` dans son
 #      bandeau (`` `fleet_v2 forge <n>` ``) et du protocole des modules (`` `<module> check|apply` ``).
 #   3. ALTERNANCE — la commande est un membre d'un `{start|stop|status}`. C'est la forme de l'usage

@@ -46,7 +46,7 @@ TEAMS="$(q teams)"
 # new requirement on the caller. `FORGE_ADMIN_TOKEN` comes first: it is the name the charte seam
 # already uses, and an explicit export must win over the ambient one.
 #
-# NO FILE PATH HERE, deliberately. The durable home of the master token is `docker.sh config`'s
+# NO FILE PATH HERE, deliberately. The durable home of the master token is `box config`'s
 # business, and whoever launches the apply reads it from there and exports it -- one channel, taken
 # by every caller. A second one, taken by none, is a branch nobody exercises and nobody tests.
 TOKEN="${FORGE_ADMIN_TOKEN:-${TF_VAR_gitea_token:-}}"

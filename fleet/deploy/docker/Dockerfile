@@ -466,7 +466,7 @@ COPY fleet/etc     /opt/lcars/fleet/etc
 # est copie juste au-dessus, la structure de la forge est indispensable, et c'est tofu qui la pose
 # — or tofu n'etait installe NULLE PART : ni dans cette image, ni par un module de `provision`, ni
 # par `install.sh`. La boucle etait fermee : `50-forge` sonde, ne trouve pas la structure, renvoie a
-# `docker.sh forge-check`, qui imprime une commande exigeant un binaire que rien ne pose. Un
+# `box forge-check`, qui imprime une commande exigeant un binaire que rien ne pose. Un
 # operateur qui clone et lance obtenait `tofu: command not found`, sans qu'aucun fichier du produit
 # ne dise ce qu'est OpenTofu ni ou l'obtenir.
 #
@@ -551,9 +551,9 @@ COPY fleet/deploy/docker/toolchain-converger.sh /usr/local/bin/lcars-toolchain-c
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
 COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
-# Les gestes forge, DANS l'image : `docker.sh` et le banc les jouent par la meme porte, au lieu
-# d'en porter chacun une copie (le banc ne peut pas appeler `docker.sh` — sa boite vient d'un autre
-# couple de fichiers compose, et `docker.sh` refuse a raison d'agir sur un projet qu'il n'a pas cree).
+# Les gestes forge, DANS l'image : `box` et le banc les jouent par la meme porte, au lieu
+# d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
+# couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY fleet/deploy/docker/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.

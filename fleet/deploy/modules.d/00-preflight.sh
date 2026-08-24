@@ -117,7 +117,7 @@ check() {
   # Il n'existe AUCUNE forge non-conteneurisée dans ce dépôt : `bench-up.sh` démarre un Gitea en
   # conteneur, et `50-forge` ne fait que SONDER une URL qu'on lui donne. Un poste de travail sans
   # docker installe donc un runtime parfaitement fonctionnel — et aucune forge, ce qui laisse
-  # `50-forge` et `55-deck-oidc` en dérive avec des consignes qui nomment `./docker.sh`, injouables.
+  # `50-forge` et `55-deck-oidc` en dérive avec des consignes qui nomment `box`, injouables.
   # Mesuré le 2026-08-18 sur une Ubuntu neuve sans docker : exactement ces deux dérives, et le
   # lecteur n'avait aucun moyen de savoir d'avance que c'était attendu. On le dit AVANT.
   if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then

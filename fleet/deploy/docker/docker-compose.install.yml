@@ -108,7 +108,7 @@ services:
       # le module ; ce qui se declare ici, c'est le reste (l'adresse de bind, le nom d'hote).
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
-      # Le geste de dev (`./docker.sh source-push`, un `docker cp` depuis le clone de l'humain)
+      # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
       # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
       # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.

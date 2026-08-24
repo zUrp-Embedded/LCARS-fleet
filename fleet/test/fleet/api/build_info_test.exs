@@ -8,7 +8,7 @@ defmodule Fleet.API.BuildInfoTest do
   path, and it is the ONLY way an image learns which code it runs.
 
   What these cases pin is the refusal side. `LCARS_GIT_SHA` is passed by a build ARG that DEFAULTS
-  to the string "unknown", so an operator who builds without `docker.sh` hands the fallback a
+  to the string "unknown", so an operator who builds without the box rail hands the fallback a
   sentinel rather than a revision. Accepting it would stamp the release with a plausible-looking
   fact that means the opposite of one — worse than the empty answer it replaces.
   """

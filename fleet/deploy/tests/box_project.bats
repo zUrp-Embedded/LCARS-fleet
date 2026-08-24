@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/docker_sh_project.bats
+# SOURCE: fleet/deploy/tests/box_project.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
-# STATUS: bats tests for docker.sh — a project NAME is not proof you are talking about the same box
+# STATUS: bats tests for fleet/deploy/box — a project NAME is not proof you are talking about the same box
 #
-# WHY THIS EXISTS. `docker.sh` targeted the compose project `lcars` as a hardcoded constant. Compose
+# WHY THIS EXISTS. The box rail targeted the compose project `lcars` as a hardcoded constant. Compose
 # will happily apply a file to a project it never created: it computes the desired state from THAT
 # file and recreates, republishes ports, drops what is absent — with no error, because from its own
 # point of view nothing is wrong. The name is enough to address the project; it is not enough to
@@ -12,7 +12,7 @@
 #
 # Measured on this workstation on 2026-08-07: `lcars` was a 47-hour-old working box created from
 # `fleet/provisioning_v2/docker/docker-compose.install.yml` — a path DELETED by the 2026-08-04 move.
-# `./docker.sh down` stopped it, `./docker.sh reset` took its /home volume, and neither said a word.
+# `box down` stopped it, `box reset` took its /home volume, and neither said a word.
 # That is the dominant defect family here: a defect that breaks gets killed by whoever meets it; a
 # defect that returns GREEN survives indefinitely.
 #
@@ -27,7 +27,7 @@
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  SRC="$REPO/docker.sh"
+  SRC="$REPO/fleet/deploy/box"
   CF="$REPO/fleet/deploy/docker/docker-compose.yml"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"
@@ -68,7 +68,7 @@ EOF
   unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC
 
   # ⚠ SANS CETTE LIGNE, CES SEIZE TEMOINS DEPENDENT D'UNE SOCKET SUR LA MACHINE QUI LES JOUE.
-  # `docker.sh` sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
+  # Le delegue sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
   # sonde parcourt /var/run/docker.sock, /run/docker-fleet.sock et la socket du montage WSL. Ici
   # elle en trouvait une VRAIE et passait — donc verts sur ce poste, et rouges d'un bloc sur une
   # machine sans daemon, pour une raison qui n'a rien a voir avec ce qu'ils mesurent. En la posant,
@@ -189,7 +189,7 @@ seed_project() {
 }
 
 @test "-p without a value is refused rather than swallowing the command" {
-  # `./docker.sh -p down` must not silently target a project named "down" and run no command.
+  # `box -p down` must not silently target a project named "down" and run no command.
   run bash "$SRC" -p
 
   [ "$status" -eq 1 ]
@@ -281,7 +281,7 @@ seed_project() {
 }
 
 # ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────
-# Les seize temoins ci-dessus passent par `docker.sh`, donc ils traversent la delegation sans le
+# Les seize temoins ci-dessus passent par le delegue, donc ils traversent la porte sans le
 # savoir. C'est voulu : le plan prevoyait de les DESCENDRE vers le delegue, et les garder ici prouve
 # strictement plus — l'entree ET le relais. Ce qu'ils ne prouvent pas, ce sont les deux proprietes
 # du relais lui-meme, et c'est ce que les deux temoins suivants ajoutent.
@@ -295,7 +295,7 @@ seed_project() {
   # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/fleet/deploy/box`).
   local root="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$root/fleet/deploy/lib"
-  cp "$SRC" "$root/docker.sh"
+  mkdir -p "$root/fleet/deploy"; cp "$SRC" "$root/fleet/deploy/box"
   cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$root/fleet/deploy/lib/"
   cat > "$root/fleet/deploy/box" <<'FAKE'
 #!/usr/bin/env bash
@@ -303,30 +303,18 @@ printf '%s\n' "$#"; printf '[%s]' "$@"; echo
 FAKE
   chmod 0755 "$root/fleet/deploy/box"
 
-  run bash "$root/docker.sh" logs --tail "deux mots" -f
+  run bash "$root/fleet/deploy/box" logs --tail "deux mots" -f
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "4" ]]
   [[ "${lines[1]}" == '[logs][--tail][deux mots][-f]' ]]
 }
 
-@test "delegue absent : on nomme le CHECKOUT, pas docker — il n'y est pour rien" {
-  local root="$BATS_TEST_TMPDIR/tronque"
-  mkdir -p "$root/fleet/deploy/lib"
-  cp "$SRC" "$root/docker.sh"
-  cp "$REPO/fleet/deploy/lib/docker-endpoint.sh" "$root/fleet/deploy/lib/"
-  # pas de `box` : c'est exactement un checkout incomplet
-
-  run bash "$root/docker.sh" up
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Checkout incomplet"* ]]
-  [[ "$output" != *"daemon"* ]]
-}
 
 # ─── L'AIDE APPARTIENT A QUI PORTE LES VERBES ───────────────────────────────────────────────────
 #
-# ⚠ ELLE A VECU DANS `docker.sh` PENDANT QUE LES DOUZE VERBES VIVAIENT DANS `box`, et le delegue la
-# LUI DEMANDAIT : `usage() { exec docker.sh help; }`. Le porteur du contrat empruntait son contrat
-# au shim qui ne fait que l'`exec`. Ces temoins tiennent le sens de la fleche.
+# ⚠ L'AIDE A VECU HORS DU FICHIER QUI PORTE LES VERBES, et ce fichier la LUI DEMANDAIT — un
+# `usage()` qui `exec` ailleurs. Le porteur du contrat empruntait son contrat a un relais qui ne
+# faisait que le passer. Ces temoins tiennent le sens de la fleche.
 
 @test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
   local box="$BATS_TEST_DIRNAME/../box"
@@ -366,7 +354,7 @@ FAKE
 }
 
 @test "le delegue ne redit PAS que l'aide vit ailleurs" {
-  # Sa carte annoncait « `./docker.sh help`, qui reste la source unique de l'aide. Elle n'est pas
+  # Sa carte annoncait « l'aide de la porte, qui reste la source unique de l'aide. Elle n'est pas
   # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
   # sessions suivantes sans date ni signature.
   local box="$BATS_TEST_DIRNAME/../box"
@@ -400,13 +388,4 @@ FAKE
   [ "$l_help" -lt "$l_sonde" ]
   run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
   [ "$status" -eq 0 ]
-}
-
-@test "la porte est reduite a un renvoi — plus d'aide, plus de sonde, plus de compose" {
-  # Deux copies d'une aide derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
-  [ "$(wc -l < "$SRC")" -lt 40 ]
-  ! grep -q 'LCARS fleet v2 en conteneur' "$SRC"
-  ! grep -q 'docker_endpoint' "$SRC"
-  ! grep -q 'compose' "$SRC"
-  grep -q '^exec "\$BOX" "\$@"$' "$SRC"
 }

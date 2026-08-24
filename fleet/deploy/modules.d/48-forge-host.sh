@@ -25,7 +25,7 @@
 # POURQUOI CE MODULE EXISTE. Le rail poste-de-travail installe un LCARS qui TOURNE — release posée,
 # `fleet_v2` câblé. Un LCARS qui tourne a besoin d'une forge : c'est là que vivent les projets, les
 # tickets, les PR et les comptes de rôle. Sans elle, `50-forge` et `55-deck-oidc` restent en dérive
-# et leurs consignes nomment `./docker.sh`, c'est-à-dire la BOÎTE — reconstruire et relancer un
+# et leurs consignes nomment `box`, c'est-à-dire la BOÎTE — reconstruire et relancer un
 # LCARS en conteneur pour tester celui qu'on vient d'installer nativement. Absurde, et mesuré tel
 # quel le 2026-08-18 : 11 modules sur 13 convergés, ces deux-là seuls, pour cette seule raison.
 #

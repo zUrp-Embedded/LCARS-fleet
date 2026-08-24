@@ -27,7 +27,7 @@
 #   4-5. DEPOSE le roster derive dans la recette de la boite, puis passe la main aux GESTES DE
 #      L'IMAGE (`/opt/lcars/forge-gestures.sh`) : les deux secrets par stdin, puis l'apply — module
 #      `instance/`, module catalogue, et le depot modele. Ce script ne joue plus tofu lui-meme, et
-#      n'exige plus de binaire tofu sur l'hote : il entre par la MEME porte que `docker.sh`, donc
+#      n'exige plus de binaire tofu sur l'hote : il entre par la MEME porte que `box`, donc
 #      ce qu'il exerce est ce que l'admin jouera ;
 #   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
 #      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
@@ -189,7 +189,7 @@ fi
 # de ces choses — donc tout ce qui se verifiait ici ne se verifiait que sur un banc.
 #
 # La boite porte desormais tofu, ses providers, la recette et les gestes (`/opt/lcars/
-# forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `docker.sh`, et
+# forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `box`, et
 # ce qu'il exerce est ce que l'admin jouera.
 [[ "$WITH_BOX" -eq 1 ]] || die "--no-box n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
 
@@ -239,7 +239,7 @@ say "org du catalogue : $ORG"
   || die "roster non depose dans la recette de $BOX" 4
 rm -rf "$ENROLL_DIR"
 
-# Les deux secrets, par STDIN, exactement comme `docker.sh config`.
+# Les deux secrets, par STDIN, exactement comme `box config`.
 printf '%s' "$MASTER_TOKEN" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-token \
   || die "jeton master refuse par la boite" 4
 printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-seed \

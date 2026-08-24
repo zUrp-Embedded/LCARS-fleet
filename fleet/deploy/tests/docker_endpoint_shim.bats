@@ -66,7 +66,7 @@ setup() {
 
 # ─── docker_compose_cmd — UNE SEULE REPONSE A « QUEL COMPOSE » ──────────────────────────────────
 #
-# ⚠ LA RESOLUTION VIVAIT DANS `docker.sh`, ET `box` EN PORTAIT UNE SECONDE EN DEFAUT. Deux
+# ⚠ ELLE A VECU EN DEUX EXEMPLAIRES — une resolution dans la porte, un DEFAUT dans le delegue. Deux
 # detections pour un fait donnent deux verdicts possibles selon la porte empruntee — et celui qu'on
 # ne lit pas est celui qui decide le jour ou ca casse. Elle vit ici, a cote de la sonde d'endpoint,
 # en un exemplaire ; chaque porte la joue puis TRANSMET son resultat.
@@ -103,7 +103,7 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
 
 @test "compose: qui SONDE nomme sa reponse a qui CONSOMME — jamais un second defaut" {
   # ⚠ CE TEMOIN A EPINGLE UN FICHIER, ET LE FICHIER A BOUGE. Sa premiere forme cherchait le cablage
-  # dans `docker.sh` ; l'etape qui a fait passer le preflight dans `box` l'a rendu rouge sans que
+  # dans la porte ; l'etape qui a fait passer le preflight dans le delegue l'a rendu rouge sans que
   # rien ne soit casse. Ce qui se tient est la REGLE : celui qui sonde pose `PROV_COMPOSE_CMD`, et
   # celui qui lance compose le LIT — sans repli, parce qu'un repli est la seconde reponse qu'on
   # vient de supprimer.

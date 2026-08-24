@@ -318,7 +318,7 @@ docker_endpoint() {
       #
       # C'est la meme classe que le relais muet : UN INSTRUMENT QUI REPOND A MOITIE. La sonde
       # prouvait que le daemon repond, pas que la CLI soit complete — et `--bench` court-circuite
-      # `docker.sh`, donc le controle `compose version` qui s'y trouve ne tournait pas.
+      # la porte du rail boite, donc le controle `compose version` qui s'y trouve ne tournait pas.
       #
       # `DOCKER_CLI_PLUGIN_EXTRA_DIRS` n'est pas honore par cette version (mesure). La voie qui
       # marche est `DOCKER_CONFIG` + `cliPluginsExtraDirs`. On PART de la config de l'humain quand

@@ -25,7 +25,7 @@
 #
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
-# la lecture et le clone se font en anonyme. Une boite qui n'a jamais recu `docker.sh config`
+# la lecture et le clone se font en anonyme. Une boite qui n'a jamais recu `box config`
 # converge quand meme son materiel — elle ne peut simplement pas en installer de nouveau.
 
 set -euo pipefail

@@ -193,9 +193,9 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `box reset`
   # epargne et le dit. Un BANC est jetable : le sien part avec lui, sinon le mot est faux.
   #
-  # ⚠ ET LE TEMOIN GREPPE `fleet/deploy/box`, PAS LA RACINE : les douze verbes ont quitte
-  # `docker.sh` a la decoupe, et un temoin reste sur l'ancien fichier passerait au vert sur un
-  # `reset` devenu muet — il mesurerait un fichier qui ne porte plus le geste.
+  # ⚠ ET LE TEMOIN GREPPE LE PORTEUR DU GESTE, PAS LA PORTE : un temoin reste sur un relais
+  # passerait au vert sur un `reset` devenu muet — il mesurerait un fichier qui ne porte plus le
+  # geste.
   grep -q "store_spared_line" "$DEPLOY/box"
   ! grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
