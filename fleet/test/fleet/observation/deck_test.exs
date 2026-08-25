@@ -87,7 +87,7 @@ defmodule Fleet.Observation.DeckTest do
   # 6-057 — `/api/pods` SERVAIT `role: null` POUR UN ROLE SANS ICONE. `role_of/2` filtrait sur la
   # liste des `.svg` presents : un pod `chief` — le seul role du catalogue sans asset, mesure le
   # 2026-08-14 — devenait indiscernable d'un pod sans role. Le point de terminaison est du JSON
-  # consomme par `console-deck.py` (qui affiche « ? ») et `console-agents.py`, pas une vue.
+  # consomme par `console-deck.py` (qui affiche « ? »), pas une vue.
   #
   # Le repli generique existait DEJA cote page (`favicon-minimal.svg`) : masquer le role etait le
   # MOYEN d'y arriver. Les deux questions sont maintenant separees, et c'est la doctrine que ce
