@@ -1,7 +1,7 @@
 # fleet/deploy — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-14
+**Dernière révision** : 2026-08-25 (le runtime privilégié sort vers `fleet/services/`)
 **Statut** : **EN SERVICE**, et le nord voulu reste un déployeur GÉNÉRIQUE catalogue-driven plutôt que
 ce code hardcodé LCARS — c'est une direction de conception, pas une interdiction d'usage. Analyse et
 ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
@@ -20,7 +20,26 @@ FERMÉS et épinglés :
 Et `deploy/tests/*.bats` (13 suites) sont jouées par `shell_gate`, donc par `mix gate`.
 **Référencé par** : `install.sh` (racine)
 
-Le provisioning du runtime v2 : amène une machine nue (WSL2, Docker, Linux natif) à l'état où
+## Ce que cette couche porte, et ce qu'elle ne porte plus
+
+`fleet/deploy/` porte L'INSTALLATION — et depuis le 2026-08-25, rien d'autre.
+
+⚠ **`deploy/docker/` A PORTE LA SOURCE CANONIQUE DE TOUT LE CODE PRIVILEGIE DE LA MACHINE**, sous
+le nom de l'outil qui le TRANSPORTE. Douze fichiers — l'executeur de catalogue (root, socket,
+autorite forge), le convergeur d'humains (root, `useradd`), le convergeur d'outillage (root, via
+le sudoers etroit), les consoles et le deck. Sur le rail poste il n'y a PAS de docker pour eux :
+un module les copie, systemd les tient, ils tournent nativement. Un lecteur qui cherchait le code
+privilegie de cette machine ne regardait pas dans un dossier appele `docker`.
+
+Ils vivent en **`fleet/services/`**, nomme comme le module qui les pose et les demarre
+(`modules.d/64-services.sh`) : qui trouve l'un trouve l'autre. Deux temoins tiennent la
+frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxiliaire, et tout
+fichier de `services/` est pose quelque part.
+
+Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile`, `entrypoint.sh`
+(PID 1 du conteneur, il n'existe que la), les cinq compose, le seccomp, `forge-runner.sh`
+(appele pendant l'apply, jamais apres) et `bench/`.
+
 un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
 (v1, archivée dans ses feuilles `v1/` — elle provisionnait la fleet bash v1, users-par-rôle,
 morte avec le modèle).

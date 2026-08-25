@@ -70,6 +70,13 @@ copied() {
   # crie sans raison apprend a etre ignore.
   while read -r base; do
     [[ "$base" == */* ]] && continue
+    # ⚠ UNE SEULE EXCLUSION, ET ELLE EST NOMMEE — meme regle que le miroir de
+    # `runtime_helpers.bats`, qui nomme les siennes. La carte d'une couche n'est pas un
+    # service : c'est la convention par laquelle ce depot documente un repertoire
+    # (`deploy/README.md`, `lib/fleet/<dom>/README.md`), et elle n'est posee nulle part par
+    # construction. Elargir cette exclusion — a `*.md`, a un repertoire — rouvrirait la porte
+    # exacte que ce temoin ferme.
+    [[ "$base" == "README.md" ]] && continue
     helpers | grep -qx "$base" && continue
     copied  | grep -qx "$base" && continue
     bad+=("$base")
