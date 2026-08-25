@@ -333,6 +333,13 @@ RUN apt-get update -qq \
     `# /local/LCARS_v2 et d'ailleurs. Le reutiliser aurait ete plus court et aurait accorde tout le` \
     `# reste par la meme occasion. Un pouvoir qu'on ne sait pas dire en une phrase est trop large.` \
     && groupadd -g 2001 lcars-console \
+    `# LE COMPTE DU SERVICE D'AUTORITE, MIROIR DE 21-service-accounts DU RAIL POSTE. Sans lui,` \
+    `# l'entrypoint ne peut pas deposer le service et le geste catalogue est injouable dans la boite.` \
+    `#` \
+    `# ⚠ MEMBRE DE fleet POUR TRAVERSER /local/LCARS_v2 (0750 root:fleet), JAMAIS POUR DECIDER.` \
+    `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
+    `# convergeur d'humains, qui a useradd et ne detient rien.` \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :

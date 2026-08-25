@@ -41,6 +41,11 @@ PROVISION_LIB_LOADED=1
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
+# Le compte du service d'autorite : il DETIENT les secrets de forge et n'a AUCUN privilege
+# noyau. L'inverse exact du convergeur, qui a le privilege et ne detient rien. Pose par
+# `21-service-accounts`, membre de `$PROV_FLEET_GROUP` pour TRAVERSER l'install RO — jamais
+# pour decider : l'adminite se demande a la forge a l'instant du geste.
+: "${PROV_AUTHORITY_USER:=lcars-authority}"
 # ⚠ ONZE LIGNES DECRIVANT UN GROUPE D'ADMINITE VIVAIENT ICI, ET LEUR VARIABLE EST PARTIE SANS
 # ELLES. Elles disaient qu'un groupe Unix PROJETTE le `is_admin` de la forge et ouvre la lecture de
 # l'autorite de la boite — c'etait vrai, ca ne l'est plus, et le pire est qu'elles etaient

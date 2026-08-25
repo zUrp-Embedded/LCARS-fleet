@@ -127,7 +127,8 @@ prov_runtime_dirs() {
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
     "/run/lcars/console 0711 root:root" \
-    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP"
+    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP" \
+    "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {
@@ -135,7 +136,7 @@ prov_dirs() {
     "/local 0755 root:root" \
     "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
-    "$PROV_CATALOGUES_WORK 0700 root:root" \
+    "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"

@@ -511,8 +511,14 @@ fi
 # catalogue devient injouable — mais la boîte doit rester joignable pour être réparée, même règle
 # que la convergence et la console. Le refus côté `bin/lcars` nomme alors le service, pas l'adminité
 # de l'opérateur : une porte fermée n'est pas une porte gardée.
-if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]]; then
-  setsid python3 /opt/lcars/catalogue-executor.py </dev/null >>/var/log/lcars-catalogue.log 2>&1 &
+LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
+if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
+   && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
+  # ⚠ `setpriv` PARCE QUE CE RAIL N'A PAS SYSTEMD. Sur le poste, `User=` de l'unite fait ce drop ;
+  # ici l'entrypoint est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter du
+  # root de l'entrypoint — il detient les secrets de la forge et n'a aucun privilege a exercer.
+  setsid setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \
+    python3 /opt/lcars/catalogue-executor.py </dev/null >>/var/log/lcars-catalogue.log 2>&1 &
   say "executeur de catalogue ACTIF (pid $!) — « lcars catalogue install » passe par lui"
 else
   say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"

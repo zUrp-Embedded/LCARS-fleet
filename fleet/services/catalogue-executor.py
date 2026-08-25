@@ -42,7 +42,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/catalogue.sock")
+# ⚠ SOUS `/run/lcars/authority/`, PAS `/run/lcars/`. Ce service n'est plus root : il ne peut pas
+# creer un fichier dans un repertoire `0755 root:root`. Le repertoire lui appartient, et il est
+# declare au manifeste ET au `tmpfiles.d` — `/run` est un tmpfs, ce qui n'y est pas declare ne se
+# refait pas au reboot.
+SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
 # THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- `SO_PEERCRED` does that. It only bounds who may
 # KNOCK: a member of the fleet group. Opening it to the world would not grant anyone anything, but
 # it would offer this root process to every account on the box for no gain.
@@ -317,16 +321,16 @@ def bind():
     os.makedirs(os.path.dirname(SOCKET_PATH), mode=0o755, exist_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCKET_PATH)
-    # `chown` is attempted ONLY as root -- same idiom, and same reason, as `put_secret()` in
-    # `forge-gestures.sh`: every real caller is root, a witness is not, and conditioning here avoids
-    # an `|| true` that would swallow a genuine ownership failure on a box.
-    if os.geteuid() == 0:
-        try:
-            os.chown(SOCKET_PATH, 0, grp.getgrnam(SOCKET_GROUP).gr_gid)
-        except KeyError:
-            # The group is absent: TIGHTEN rather than open to a group we could not name. A door
-            # that is too closed gets diagnosed; too open does not.
-            log(f"groupe {SOCKET_GROUP} absent — la socket reste root seul")
+    # ⚠ LE `chown` N'EST PLUS CONDITIONNE SUR ROOT, ET CE SERVICE NE L'EST PLUS NON PLUS. Il POSSEDE
+    # la socket qu'il vient de creer, et POSIX laisse un proprietaire changer le groupe d'un fichier
+    # vers un groupe DONT IL EST MEMBRE. Il l'est : `21-service-accounts` le met dans `fleet`.
+    #
+    # Un temoin, lui, n'est dans aucun de ces groupes — d'ou le `except`, qui RESSERRE au lieu
+    # d'ouvrir. Un secret trop ferme se diagnostique ; trop ouvert, non.
+    try:
+        os.chown(SOCKET_PATH, os.geteuid(), grp.getgrnam(SOCKET_GROUP).gr_gid)
+    except (KeyError, PermissionError, OSError) as exc:
+        log(f"groupe {SOCKET_GROUP} non pose sur la socket ({exc}) — elle reste au proprietaire seul")
     os.chmod(SOCKET_PATH, SOCKET_MODE)
     srv.listen(8)
     return srv
@@ -342,8 +346,19 @@ def serve_forever(srv):
 
 
 def main():
-    if os.geteuid() != 0:
-        log("ce service tient le jeton master : il ne tourne qu'en root")
+    # ⚠ LE GARDE NOMME CE QU'IL VERIFIE, ET IL A NOMME AUTRE CHOSE PENDANT DEUX JOURS. Il exigeait
+    # `geteuid() == 0` au motif que « ce service tient le jeton master » — le MECANISME par lequel on
+    # obtenait le droit de lire, pas le droit lui-meme. Root etait le moyen le moins cher de posseder
+    # quatre chemins ; il n'a jamais ete l'exigence.
+    #
+    # L'exigence est : je peux OUVRIR le jeton. Un garde qui l'enonce refuse tot et juste, sous
+    # n'importe quel uid — et il ne devient pas faux le jour ou le service descend de root.
+    try:
+        with open(MASTER_TOKEN_FILE, "r", encoding="utf-8"):
+            pass
+    except OSError as exc:
+        log(f"je ne peux pas ouvrir {MASTER_TOKEN_FILE} ({exc.strerror}) — "
+            f"ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans elle")
         return 1
     if not FORGE_BASE_URL:
         log("aucun FORGE_BASE_URL — un jeton sans forge ne veut rien dire")

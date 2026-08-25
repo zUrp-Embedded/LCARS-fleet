@@ -679,7 +679,7 @@ apply() {
     #
     # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne en root : personne d'autre
     # n'a besoin de ce fichier, donc personne d'autre ne doit pouvoir l'ouvrir.
-    write_atomic "$MASTER_TOKEN_FILE" 0600 "root:root" <<<"$tok" \
+    write_atomic "$MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
       || { p_fail "jeton master non posé ($MASTER_TOKEN_FILE)"; verdict_apply; }
     p_chg "autorité de création posée ($MASTER_TOKEN_FILE, root seul)"
   else
@@ -724,7 +724,7 @@ apply() {
     # `0600 root:root`, comme le jeton master quelques lignes plus haut : les DEUX secrets d'autorité
     # se ferment ensemble, ou l'install casse entre les deux. Seul `catalogue-executor.py` les ouvre,
     # et il tourne en root.
-    write_atomic "$SEED_FILE" 0600 "root:root" <<<"$seed" \
+    write_atomic "$SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
     p_chg "seed des comptes posé ($SEED_FILE, root seul)"
   else

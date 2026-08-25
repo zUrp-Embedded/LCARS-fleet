@@ -186,7 +186,23 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # Le manifeste se pose AVANT ses trois lecteurs (`20-groups`, `25-directories`, `uninstall`) :
   # c'etait le trou d'ordre du corpus. Ce temoin tombera le jour ou le premier lecteur arrive — et
   # sa chute sera le signal de le reecrire, pas un accident.
-  ! grep -rlq 'system\.manifest' "$BATS_TEST_DIRNAME"/../modules.d/ 2>/dev/null
+  #
+  # ⚠ IL MESURAIT LA PROSE, ET UN COMMENTAIRE L'A FAIT TOMBER. Un module qui CITE `system.manifest`
+  # comme reference croisee — « /local/LCARS_v2 est 0750 root:fleet (system.manifest) » — ne le LIT
+  # pas : il renvoie le lecteur a la source de verite, ce qui est precisement ce qu'on veut d'un
+  # commentaire. Un temoin qui interdit de citer la source interdit de la documenter.
+  #
+  # On mesure donc le CODE. Et la negation n'est plus nue : `! grep` non terminal est exempte de
+  # `set -e`, donc inerte — la cicatrice du corpus sur ce piege est deja ecrite ailleurs.
+  local n
+  n="$(sed 's/#.*//' "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -c 'system\.manifest' || true)"
+  [ "$n" -eq 0 ] || {
+    echo "un module LIT le manifeste ($n occurrence(s) hors commentaire) — le temoin de phase A tombe, reecris-le" >&2
+    sed 's/#.*//' "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -n 'system\.manifest' >&2
+    return 1
+  }
+  # Garde d'instrument : une coupe qui ne lirait plus aucun module rendrait zero, donc vert, sur rien.
+  [ "$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | wc -l)" -gt 500 ]
 }
 
 @test "les GID declares sont FIXES, et ils sont ceux de l'image" {

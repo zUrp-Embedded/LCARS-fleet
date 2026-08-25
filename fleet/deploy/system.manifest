@@ -70,13 +70,18 @@ dir       /usr/share/lcars                             0755  root:root          
 dir       /usr/share/lcars/avatars                     0755  root:root           wsl+linux
 dir       /usr/share/lcars/favicon                     0755  root:root           wsl+linux
 dir       /usr/share/lcars/doc                         0755  root:root           wsl+linux
+# ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
+# HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
+# du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la
+# boite en silence : le noeud demarre vert et le premier push meurt sur une auth vide.
+# `lcars-authority` traverse par le groupe `fleet`, dont il est membre.
 dir       /home/private                                0750  root:fleet          any
 dir       /home/catalogues                             0750  root:fleet          any
 # ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
 # (`LCARS_STORE_ROOT`, lu par `toolchain-converger.sh:39`) ; `/var/lib/lcars/tofu` est l'etat des
 # recettes (`PROV_CATALOGUES_WORK`). Ne declarer que le second laissait le premier hors de la table.
 dir       /var/lib/lcars                               0755  root:root           any
-dir       /var/lib/lcars/tofu                          0700  root:root           any
+dir       /var/lib/lcars/tofu                          0700  lcars-authority:lcars-authority  any
 dir       /etc/lcars                                   0755  root:root           wsl+linux
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
@@ -140,6 +145,11 @@ runtime   /run/lcars                                   0755  root:root          
 runtime   /run/lcars/console                           0711  root:root           wsl+linux
 runtime   /run/lcars/console/<human>                   2710  <human>:lcars-console  wsl+linux
 runtime   /run/lcars/toolchain                         0755  root:root           any
+# ⚠ LE SERVICE D'AUTORITE N'EST PAS ROOT, DONC IL NE PEUT PAS CREER SA SOCKET DANS `/run/lcars`
+# (0755 root:root). Il lui faut un repertoire A LUI. L'inventaire du chantier avait compte les
+# FICHIERS a changer de proprietaire et oublie le REPERTOIRE — la meme moitie d'axe que deux
+# relectures avaient deja sortie.
+runtime   /run/lcars/authority                         0750  lcars-authority:fleet  any
 # ⚠ HORS DE L'ARBRE `/run/lcars/`, et c'est la raison pour laquelle ces deux lignes existent : un
 # `rm -rf /run/lcars` ne les emporte pas. Ni la mesure machine ni la table du corpus ne les avaient —
 # c'est la lecture du RUNTIME et de l'entrypoint qui les a rendus visibles, et le second n'est

@@ -69,6 +69,8 @@ HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
 # `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
 SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
+# Le compte du service d'autorite — copie du defaut de `provision-lib.sh`, qu'un temoin compare.
+AUTHORITY_USER="${PROV_AUTHORITY_USER:-lcars-authority}"
 # La fenetre d'observation qui separe « forke » de « debout ». Seam de temoin : un bats mesure la
 # DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
@@ -202,9 +204,14 @@ EOF
       # Il ne fait pas d'escalade pour un appelant : il RÉPOND à une demande, après avoir demandé à
       # la forge si le pair — dont le noyau lui donne l'uid — y porte `is_admin`.
       #
-      # ⚠ PAS DE `User=` : il lit le jeton master, qui est `0600 root:root`. Lui retirer root
-      # reviendrait à lui retirer la seule chose qu'il apporte, et le geste redeviendrait celui de
-      # l'humain — c'est-à-dire exactement l'état qu'il remplace.
+      # ⚠ `User=` ET PAS root, ET C'ETAIT L'INVERSE PENDANT DEUX JOURS. Ce service ne demandait root
+      # que pour POSSEDER quatre chemins — le jeton, le seed, l'etat tofu, son repertoire de socket.
+      # Aucun appel privilegie dans sa chaine : `forge-gestures.sh` n'exige root nulle part, et
+      # `tofu` parle HTTP. Un compte dedie possede les quatre et fait le meme travail.
+      #
+      # Ce qu'on gagne n'est pas cosmetique : le detenteur des secrets de la forge n'a plus AUCUN
+      # privilege noyau, et le seul service qui en garde un (`lcars-converger`, pour `useradd`) ne
+      # detient rien. Celui qui detient ne peut pas escalader ; celui qui escalade n'a rien a voler.
       cat <<EOF
 [Unit]
 Description=LCARS — installe un catalogue pour un admin de la forge, sans jamais lui donner le jeton
@@ -215,6 +222,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-$SERVICES_ENV
+User=$AUTHORITY_USER
 ExecStart=/usr/bin/env python3 $HELPERS_DIR/catalogue-executor.py
 Restart=always
 RestartSec=5

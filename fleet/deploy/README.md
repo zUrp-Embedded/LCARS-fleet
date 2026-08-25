@@ -115,6 +115,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 15-toolchain | wsl linux | wsl linux | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only, jamais dans le conteneur runtime |
 | 16-node | wsl linux | any | Node précompilé PINNÉ — le toolchain qui bâtit la DOC du produit |
 | 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
+| 21-service-accounts | any | any | les comptes SYSTEME des services de la machine — aujourd'hui `lcars-authority`, qui DETIENT les secrets de forge et n'a AUCUN privilège noyau (l'inverse exact du convergeur, qui a le privilège et ne détient rien). Membre de `fleet` pour TRAVERSER `/local/LCARS_v2`, jamais pour décider : l'adminité se demande à la forge. Rang 21 et pas moins : le compte a besoin du groupe que 20 vient de créer |
 | 22-fleet-human | wsl linux | wsl linux | l'humain de fleet du poste : un compte unix qui n'est PAS le siège (GUARD B interdit à l'uid 1000 de lancer une fleet). Le nom vient de l'opérateur — sans lui c'est un DRIFT, jamais une création silencieuse |
 | 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
 | 26-store | docker | docker | les MODES du magasin d'outillage sur les quatre volumes externes — PRESENT est un magasin ACTIF : un répertoire vide se bind quand même en `ro` dans chaque pod |

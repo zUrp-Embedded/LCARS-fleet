@@ -370,8 +370,26 @@ check(time.time() - _t0 < 8,
       % (time.time() - _t0))
 
 # ─── 9. LE GARDE DE ROOT ────────────────────────────────────────────────────────────────────────
-check(mod.main() == 1,
-      "garde root: ce service tient le jeton master, il refuse de tourner sans etre root")
+# ⚠ CE TEMOIN A PENDU, ET C'EST LA PREUVE QU'IL MESURAIT LE MAUVAIS OBJET. Il appelait `main()` en
+# comptant sur le refus `geteuid() != 0` pour rendre la main. Le garde nomme desormais l'EXIGENCE —
+# « je peux ouvrir le jeton » — donc dans un banc ou le jeton EXISTE, `main()` passe le garde et part
+# en `serve_forever()` : le banc ne rendait plus rien, pas meme les tests deja verts, et sa sortie
+# bufferisee disparaissait avec lui.
+#
+# Un temoin qui PEND est pire qu'un temoin rouge : il n'echoue pas, il s'efface.
+#
+# On mesure donc le garde DANS L'ETAT QU'IL GARDE : le jeton inouvrable.
+_tok_garde = mod.MASTER_TOKEN_FILE
+mod.MASTER_TOKEN_FILE = os.path.join(WORK, "jeton-qui-n-existe-pas")
+_t0 = time.time()
+_rc = mod.main()
+_ecoule = time.time() - _t0
+mod.MASTER_TOKEN_FILE = _tok_garde
+check(_rc == 1,
+      "garde: sans pouvoir OUVRIR le jeton, le service refuse de demarrer (rc=%r)" % _rc)
+check(_ecoule < 5,
+      "garde: il refuse TOT — un garde franchi part en boucle de service et n'est plus un garde (%.1fs)"
+      % _ecoule)
 
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(0 if ok else 1)
