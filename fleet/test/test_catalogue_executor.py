@@ -467,5 +467,56 @@ check(_ecoule < 5,
       "garde: il refuse TOT — un garde franchi part en boucle de service et n'est plus un garde (%.1fs)"
       % _ecoule)
 
+# ─── 6d — LE JETON MASTER EST LU A CHAQUE REQUETE, ET JAMAIS GARDE ──────────────────────────────
+#
+# ⚠ CE N'EST PAS UNE PROPRIETE DE CONFORT : C'EST CE QUI TIENT UN ARBITRAGE.
+#
+# `02` a tranche « pas de troisieme process » — le jeton master (autorite TOTALE de la forge) et les
+# jetons de role (identites de travail) vivent dans le MEME espace d'adressage. La faiblesse est
+# assumee, et elle n'est defendable QUE parce que ce process ne garde rien : `master_token()` relit
+# le fichier a chaque requete, donc entre deux installs il n'y a RIEN a voler en memoire — seulement
+# un uid qui peut ouvrir un fichier.
+#
+# Le jour ou quelqu'un met ce jeton en cache pour « eviter une lecture disque », l'arbitrage tombe —
+# et il tombe SANS QUE PERSONNE S'EN APERCOIVE, parce que tout continue de fonctionner. Sans ce
+# temoin, la decision de ne pas separer les deux credentials n'est plus defendable.
+#
+# ⚠ ET C'EST UN TEMOIN FONCTIONNEL, PAS UN MUR TEXTUEL, POUR UNE RAISON MESUREE. Un balayage de
+# texte ne voit pas une memoisation : elle s'ecrit en variable globale, en attribut, en
+# `functools.cache`, ou simplement en gardant la valeur dans le handler. La phase 3 a paye
+# exactement ca — un mur qui cherchait un `chmod` et un nom de fichier sur la MEME ligne ne pouvait
+# pas voir une ecriture atomique, et il passait vert. Ici on CHANGE le fichier entre deux appels et
+# on regarde ce qui sort.
+_cache_tok = os.path.join(WORK, "jeton-rotatif")
+_garde_mt = mod.MASTER_TOKEN_FILE
+mod.MASTER_TOKEN_FILE = _cache_tok
+
+with open(_cache_tok, "w", encoding="utf-8") as _fh:
+    _fh.write("premier-jeton\n")
+_lu1 = mod.master_token()
+
+with open(_cache_tok, "w", encoding="utf-8") as _fh:
+    _fh.write("jeton-tourne\n")
+_lu2 = mod.master_token()
+
+# La ROTATION est l'autre face de la meme propriete : un jeton tourne est pris en compte sans
+# redemarrer le service. Une seule phrase, lue par les deux bouts.
+check(_lu1 == "premier-jeton", "6d: le jeton master est lu depuis le fichier (%r)" % _lu1)
+check(_lu2 == "jeton-tourne",
+      "6d: RELU a chaque appel — un jeton tourne est vu sans redemarrage, et rien ne reste en "
+      "memoire entre deux requetes (%r)" % _lu2)
+
+# ⚠ LA MOITIE QUI MANQUERAIT SANS CA : que le fichier redevienne ILLISIBLE doit se voir aussi. Un
+# cache rendrait l'ancienne valeur ici, et le service continuerait d'agir avec une autorite que la
+# boite n'a plus — le pire des deux mondes, puisque rien ne rougirait nulle part.
+os.unlink(_cache_tok)
+try:
+    mod.master_token()
+    check(False, "6d: un jeton master RETIRE doit lever NoAuthority, pas rendre l'ancienne valeur")
+except mod.NoAuthority:
+    check(True, "6d: le jeton retire leve NoAuthority — aucune valeur ne survit a son fichier")
+
+mod.MASTER_TOKEN_FILE = _garde_mt
+
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(0 if ok else 1)

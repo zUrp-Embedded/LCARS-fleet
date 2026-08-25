@@ -255,6 +255,47 @@ secret_writers() {
   absent '(==|=~).*"admiral"' "$hum"
 }
 
+# ─── MUR 7 — LE JETON MASTER NE SE GARDE PAS, ET C'EST CE QUI TIENT UN ARBITRAGE ────────────────
+#
+# ⚠ SANS CETTE PROPRIETE, UNE DECISION D'ARCHITECTURE N'EST PLUS DEFENDABLE. `02` a tranche « pas de
+# troisieme process » : le jeton master (autorite TOTALE de la forge) et les jetons de role
+# (identites de travail) partagent un espace d'adressage. La faiblesse est ASSUMEE, et elle ne l'est
+# que parce que ce process ne garde rien — entre deux installs il n'y a RIEN a voler en memoire.
+#
+# ⚖ CE MUR EST LA MOITIE FAIBLE, ET C'EST DIT. La memoisation s'ecrit de dix facons qu'un texte ne
+# voit pas. La propriete est tenue FONCTIONNELLEMENT par `test/test_catalogue_executor.py`, qui
+# CHANGE le fichier entre deux appels et regarde ce qui sort — mesure du 2026-08-25 : une
+# memoisation ajoutee fait rougir ses trois temoins. Ce mur-ci attrape les formes EXPLICITES, celles
+# qu'on ecrit en croyant optimiser.
+@test "MUR 7: le jeton master n'est ni memoise ni lu au chargement du module" {
+  local svc="$REPO/services/catalogue-executor.py"
+  [ -f "$svc" ] || { echo "executeur introuvable : $svc" >&2; return 1; }
+  # Les formes explicites de cache.
+  absent '(lru_cache|functools\.cache|@cache)' "$svc"
+  # Une seule ouverture du fichier, et elle est dans la fonction — pas au niveau module.
+  local n
+  n="$(sed 's/#.*//' "$svc" | grep -cE 'open\(MASTER_TOKEN_FILE' || true)"
+  [ "$n" -eq 2 ] || {
+    echo "MUR 7: $n ouverture(s) de MASTER_TOKEN_FILE — attendu 2 (le garde de main, et master_token)" >&2
+    sed 's/#.*//' "$svc" | grep -nE 'open\(MASTER_TOKEN_FILE' >&2
+    return 1
+  }
+  # Et aucune affectation de module qui garderait la valeur.
+  n="$(sed 's/#.*//' "$svc" | grep -cE '^[A-Z_]*(MASTER|TOKEN)[A-Z_]* *= *master_token' || true)"
+  [ "$n" -eq 0 ]
+}
+
+@test "MUR 7 bis: le temoin FONCTIONNEL de 6d existe — le mur textuel ne suffit pas" {
+  # GARDE D'INSTRUMENT, ET IL DIT UNE LIMITE. Le mur 7 attrape `@lru_cache` et une lecture au
+  # chargement ; il ne voit PAS une valeur gardee dans un attribut ou une fermeture. Ce qui tient
+  # vraiment la propriete est le banc python. Le supprimer laisserait le mur au vert et l'arbitrage
+  # sans preuve — exactement la situation que ce fichier existe pour rendre impossible.
+  local banc="$REPO/test/test_catalogue_executor.py"
+  [ -f "$banc" ] || { echo "banc de l'executeur introuvable : $banc" >&2; return 1; }
+  grep -q 'jeton-rotatif' "$banc"
+  grep -q '6d: RELU a chaque appel' "$banc"
+}
+
 @test "MUR 4: le minteur VERIFIE le proprietaire de ce qu'il vient d'ecrire" {
   # ⚠ LE CONTROLE EST LE JUMEAU DU MODE, ET LES DESYNCHRONISER FAIT ECHOUER CHAQUE COMPTE. Le script
   # posait `chgrp` puis verifiait `stat -c %G`. Passe au proprietaire sans changer le controle, il
