@@ -731,6 +731,40 @@ module_sh() {
   [[ "$output" == *"FAIL"* ]]
 }
 
+@test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
+  # ⚠ LE DEFAUT PRECEDENT AVAIT UNE SECONDE MOITIE, ET ELLE A SURVECU AU CORRECTIF. La branche
+  # `PROV_VERBOSE=1` de `run_step` deleguait a `run_quiet`, qui ne connait AUCUNE tolerance et
+  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/install.sh` redevenait un echec des que
+  # quelqu'un lancait `provision --verbose` — c'est-a-dire exactement quand ca va mal et qu'on
+  # regarde. Et `PROV_LAST_RC` n'etait pas pose du tout : l'appelant qui le relit lisait le code d'un
+  # appel PRECEDENT, donc prenait une decision sur la mesure d'autre chose.
+  #
+  # Les deux temoins ci-dessus tournaient en mode nominal et restaient VERTS pendant ce temps.
+  module_sh '
+    export PROV_VERBOSE=1
+    run_step --ok 3 "etape" -- bash -c "exit 3"
+    [ "$PROV_LAST_RC" -eq 3 ]
+    [ "$PROV_FAILED" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "run_step --verbose : un code NON tolere reste un echec entier, et PROV_LAST_RC le dit" {
+  # Le pendant : sans lui, une branche verbose qui tolererait TOUT passerait le temoin precedent.
+  module_sh '
+    export PROV_VERBOSE=1
+    rc=0
+    run_step --ok 3 "etape" -- bash -c "exit 4" || rc=$?
+    [ "$rc" -eq 4 ]
+    [ "$PROV_LAST_RC" -eq 4 ]
+    [ "$PROV_FAILED" -eq 1 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAIL"* ]]
+}
+
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
   # ⚠ TROISIEME INCARNATION DE B5 DANS LA MEME JOURNEE. `ip` n'existe pas partout — l'image du job
   # CI ne l'a pas — et sous `pipefail` une commande introuvable rend 127 que le pipeline propage :

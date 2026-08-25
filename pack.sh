@@ -142,8 +142,19 @@ if [[ -z "$TOKEN" && -n "$FORGE" ]]; then
 fi
 
 if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
+  # ⚠ CETTE LIGNE A IMPRIMÉ LE JETON EN CLAIR, ET ELLE CROYAIT DIRE « trouvé ». La forme était
+  # `${TOKEN:+trouvé}${TOKEN:-absent}` : la première moitié rend bien `trouvé` quand le jeton
+  # existe — mais `:-` ne substitue QUE sur vide ou non défini, donc la seconde rend LA VALEUR.
+  # Sortie réelle du 2026-08-25 : « jeton : trouvé9172f605… », quarante caractères de secret dans
+  # le terminal, dans le scrollback, et dans tout journal qui capture ce script.
+  #
+  # LA BRANCHE MENTEUSE EST CELLE QUI RÉUSSIT. Sur un jeton absent la ligne était correcte, donc
+  # elle se relisait comme juste : `${TOKEN:-absent}` ne se déclenche que là où il n'y a rien à
+  # fuiter. Un état se calcule AVANT d'être dit ; deux expansions collées ne sont pas une condition.
+  _tok_state="absent"
+  [[ -n "$TOKEN" ]] && _tok_state="trouvé"
   say "forge ou jeton indéterminables — le tar est dans dist/, pousse-le à la main si tu veux"
-  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : ${TOKEN:+trouvé}${TOKEN:-absent}"
+  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : $_tok_state"
   exit 0
 fi
 

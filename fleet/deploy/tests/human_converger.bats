@@ -176,20 +176,35 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 # un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre. L'identifiant de la forge, lui,
 # est un auto-increment SQL : lineaire, dense, JAMAIS reutilise apres suppression.
 
-@test "D8: sans home ET sans table, on ne revendique RIEN — useradd prend le premier uid libre" {
+@test "D8: sans home ET sans table, RIEN n'est derive de l'id de forge — le premier libre, pas un calcul" {
   # ⚖ USER 2026-08-21 (D8). La derivation `id_forge + 1000` tenait sur une hypothese vraie dans une
   # boite fabriquee pour LCARS et fausse ailleurs : que l'espace d'uid soit libre. Mesure du meme
   # jour, poste natif : `admiral` (id 1) revendiquait 1001, deja porte par `lcars` — refus sans
   # recours sur une machine ou rien n'etait casse.
+  #
+  # ⚠ CE TEMOIN EXIGEAIT LE VIDE, ET LE VIDE EST DEVENU LE DEFAUT. Il epinglait « on ne revendique
+  # rien, `useradd` prend le premier libre » — vrai tant que le SEUL createur d'humains etait
+  # `22-fleet-human`, qui portait le plancher. Depuis que ce module a cesse de creer (2026-08-25), le
+  # « premier libre » de `useradd` part de `UID_MIN` et peut donc rendre l'uid RESERVE du siege.
+  #
+  # CE QUE D8 A DECIDE RESTE INTACT : aucune ARITHMETIQUE sur l'id de forge. Ce qui change est QUI
+  # cherche le premier uid libre — nous, avec le plancher, au lieu de `useradd`, sans. Le temoin
+  # epingle donc les deux moities : pas de derivation, et jamais l'uid du siege.
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
-    export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map' LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
+    # `getent` double : sans ca ce temoin rend un uid libre de la MACHINE qui le joue.
+    mkdir -p \"$BATS_TEST_TMPDIR/b8\"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 2' > \"$BATS_TEST_TMPDIR/b8/getent\"
+    chmod 0755 \"$BATS_TEST_TMPDIR/b8/getent\"
+    PATH=\"$BATS_TEST_TMPDIR/b8:\$PATH\"
     source '$SUT'
     echo \"[\$(uid_wanted nouvelle 3)]\""
   [ "$status" -eq 0 ]
-  [ "$output" = "[]" ]
+  # Le premier libre au-dessus du siege (1000), et surtout PAS 3 + 1000 : la formule est morte.
+  [ "$output" = "[1001]" ]
 }
 
 @test "D8: la TABLE remplace la formule — un id deja vu rend SON uid, pas un calcul" {
@@ -241,18 +256,27 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [ "$output" = "ok" ]
 }
 
-@test "6-surface: sans home ET sans id de forge, on ne pose RIEN — l'OS choisit, et c'est dit" {
-  # Le mode degrade existe : une forge qui ne rend pas d'`id` (charge tronquee, version future).
-  # On ne fabrique pas un uid a partir de rien — on laisse `useradd` faire, comme avant, plutot que
-  # d'inventer un numero qui aurait l'air autoritaire.
+@test "6-surface: un id de forge ILLISIBLE ne fabrique rien — meme reponse que pas d'id du tout" {
+  # Le mode degrade existe : une forge qui ne rend pas d'`id` (charge tronquee, version future). On
+  # n'invente pas un numero qui aurait l'air autoritaire — mais on ne renvoie plus le vide non plus,
+  # parce que le vide rendait la main a `useradd`, qui n'a pas le plancher du siege (cf. D8 ci-dessus).
+  #
+  # LES DEUX FORMES DEGRADEES DOIVENT DONNER LA MEME REPONSE. Un `id` vide et un `id` non numerique
+  # sont le meme etat — « la forge n'a rien dit d'exploitable » — et deux chemins pour un etat sont
+  # un chemin de trop.
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
+    mkdir -p \"$BATS_TEST_TMPDIR/b6\"
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 2' > \"$BATS_TEST_TMPDIR/b6/getent\"
+    chmod 0755 \"$BATS_TEST_TMPDIR/b6/getent\"
+    PATH=\"$BATS_TEST_TMPDIR/b6:\$PATH\"
     source '$SUT'
     echo \"[\$(uid_wanted sansid '')][\$(uid_wanted sansid 'abc')]\""
   [ "$status" -eq 0 ]
-  [ "$output" = "[][]" ]
+  [ "$output" = "[1001][1001]" ]
 }
 
 @test "D8: plus AUCUNE arithmetique d'uid dans le convergeur — la formule est morte, pas commentee" {
@@ -672,4 +696,86 @@ EOF
   converge_with "$prov"
   [[ "$output" == *"CONVERGE"* ]]
   [[ "$output" != *"rc=2"* ]]
+}
+
+# ─── LE PLANCHER D'UID ──────────────────────────────────────────────────────────────────────────
+#
+# ⚠ CES CINQ TEMOINS VIENNENT DE `fleet_human.bats`, ET LE DEMENAGEMENT EST LE SUJET. Le plancher
+# vivait dans `22-fleet-human`, qui creait le compte du poste ; ce module a cesse de creer le
+# 2026-08-25 (un seul createur : la forge nomme, ce convergeur materialise). Le convergeur, LUI,
+# n'avait aucun plancher : son cas nominal passe un `uid_args` VIDE, donc `useradd` choisit en
+# partant de `UID_MIN` — et rendrait l'uid du siege s'il etait libre, c'est-a-dire exactement le
+# compte que GUARD B refuse ensuite de laisser lancer une fleet.
+#
+# Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer. Le
+# garde demenage avec le geste ; ses temoins demenagent avec le garde.
+#
+# La regle mesuree est celle de `is_fleet_human` et de GUARD B (`bin/fleet_v2`), les DEUX bornes :
+# `uid >= UID_MIN` ET `uid != LCARS_SYSADMIN_UID`.
+floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
+  run bash -c "set -euo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    source '$SUT' >/dev/null 2>&1
+    $1"
+}
+
+@test "plancher: JUSTE AU-DESSUS du siege — jamais l'uid du siege lui-meme" {
+  # C'est toute la faute : `useradd` sans `-u` part de UID_MIN et rendrait 1000 s'il est libre.
+  LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1001" ]
+}
+
+@test "plancher: il SUIT le siege quand on le deplace — il n'est pas ecrit en dur" {
+  # `LCARS_SYSADMIN_UID` est REGLABLE, et c'est ce qui rend le cas atteignable en vrai : un siege a
+  # 1500 sur une machine ou 1500 est libre.
+  LCARS_SYSADMIN_UID=1500 floor 'uid_floor'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1501" ]
+}
+
+@test "plancher: un UID_MIN plus haut que le siege l'emporte — les deux regles valent, pas une" {
+  printf 'UID_MIN 5000\n' > "$PASSWD_DEFS"
+  LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
+  [ "$status" -eq 0 ]
+  [ "$output" = "5000" ]
+}
+
+@test "plancher: login.defs ILLISIBLE ne tue pas le service — retombe sur le defaut, en silence sur" {
+  # Une garde qui s'evanouit sur une lecture ratee est pire que pas de garde : ici l'effet serait un
+  # convergeur MORT (`set -e`) au lieu d'un uid prudent.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/absent.defs"
+  LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1001" ]
+}
+
+@test "le premier uid LIBRE est cherche au-dessus du plancher, jamais en dessous" {
+  # On ne mesure pas contre le /etc/passwd de la machine : `getent` est double, 1001 et 1002 pris.
+  # Sinon ce temoin dirait la composition du poste qui le joue.
+  local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ "$1" == passwd ]] || exit 2' \
+    'case "$2" in 1001|1002) exit 0 ;; *) exit 2 ;; esac' > "$bin/getent"
+  chmod 0755 "$bin/getent"
+  PATH="$bin:$PATH" LCARS_SYSADMIN_UID=1000 floor 'first_free_uid'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1003" ]
+}
+
+@test "CAS NOMINAL: un humain SANS memoire recoit un uid, pas le choix de useradd" {
+  # ⚠ LE TEMOIN QUI FERME REELLEMENT LE TROU. Les quatre precedents mesurent le CALCUL ; celui-ci
+  # mesure que `uid_wanted` s'en SERT. Il rendait VIDE dans ce cas — ni home, ni entree dans la
+  # table — et `uid_args` restait vide, donc `useradd` choisissait seul depuis UID_MIN. Un plancher
+  # correct que personne n'appelle est un plancher absent.
+  local bin="$BATS_TEST_TMPDIR/bin2"; mkdir -p "$bin"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ "$1" == passwd ]] || exit 2' \
+    'case "$2" in 1001) exit 0 ;; *) exit 2 ;; esac' > "$bin/getent"
+  chmod 0755 "$bin/getent"
+  # `HOME_ROOT` sur un repertoire vide : l'humain n'a pas de home, donc aucune memoire d'uid.
+  PATH="$bin:$PATH" LCARS_SYSADMIN_UID=1000 LCARS_HOME_ROOT="$BATS_TEST_TMPDIR/homes" \
+    floor 'uid_wanted inconnu-du-parc ""'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1002" ]
 }

@@ -282,6 +282,40 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
 #   3. rien — et c'est `useradd` qui choisit le premier uid libre.
 # Rendre vide n'est donc pas un echec : c'est la reponse « personne n'a d'avis, prends ce qui est
 # libre ». La formule d'avant n'avait pas ce troisieme etat, et c'est pour ca qu'elle collisionnait.
+# Le premier uid LIBRE au-dessus du plancher — et le plancher est l'uid RESERVE du siege, pas
+# `UID_MIN`. On ne laisse pas `useradd` choisir : son propre choix part de `UID_MIN`, donc il
+# rendrait l'uid du siege si celui-ci etait libre — exactement le compte qu'on ne doit jamais creer,
+# puisque GUARD A et GUARD B le reservent.
+#
+# ⚠ CE GARDE VIVAIT DANS `22-fleet-human`, ET IL Y ETAIT SEUL. Ce module a cesse de creer des
+# comptes le 2026-08-25 (un seul createur, un seul sens : la forge nomme, le convergeur materialise).
+# Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer : le
+# garde demenage avec le geste. Sa raison est recopiee ici mot pour mot parce qu'elle explique un
+# choix qui a l'air arbitraire.
+#
+# Le cas est etroit — sur une boite le siege existe deja quand ce service demarre, donc `useradd`
+# passerait a l'uid suivant — mais `LCARS_SYSADMIN_UID` est REGLABLE : un siege a 1005 sur une
+# machine ou 1005 est libre rentre exactement dans ce chemin.
+uid_floor() {
+  local m s
+  m="$(uid_min)"
+  [[ "$m" =~ ^[0-9]+$ ]] || m=1000
+  s="$SYSADMIN_UID"
+  (( m > s )) && { echo "$m"; return 0; }
+  echo "$(( s + 1 ))"
+}
+
+# ⚠ `getent`, PAS `PASSWD_FILE` — ET C'EST LE SEUL ENDROIT DU FICHIER QUI DIVERGE. Le reste du
+# module lit `${PASSWD_FILE:-/etc/passwd}` pour rester mesurable ; ici la question n'est pas « qui
+# est ecrit dans ce fichier » mais « cet uid est-il pris SUR CETTE MACHINE », et NSS (LDAP, sssd)
+# repond ce que le fichier ignore. `getent` est un sur-ensemble : un uid qu'il declare libre l'est
+# aussi pour `PASSWD_FILE`, donc `uid_taken_by` ne peut pas contredire ce choix a tort.
+first_free_uid() {
+  local uid; uid="$(uid_floor)"
+  while getent passwd "$uid" >/dev/null 2>&1; do uid=$(( uid + 1 )); done
+  echo "$uid"
+}
+
 uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
   local from_home
   from_home="$(uid_of_home "$1")"
@@ -289,8 +323,13 @@ uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
     printf '%s\n' "$from_home"
     return 0
   fi
-  [[ "$2" =~ ^[0-9]+$ ]] || return 0
-  uid_from_map "$2"
+  if [[ "$2" =~ ^[0-9]+$ ]]; then
+    local from_map; from_map="$(uid_from_map "$2")"
+    [[ -n "$from_map" ]] && { printf '%s\n' "$from_map"; return 0; }
+  fi
+  # AUCUNE MEMOIRE DE CET HUMAIN : c'est le cas NOMINAL d'une premiere materialisation, et c'est
+  # celui ou `useradd` choisissait seul. On choisit au-dessus du siege.
+  first_free_uid
 }
 
 # Qui porte deja cet uid, s'il est pris par quelqu'un d'AUTRE que <login>.
@@ -615,14 +654,19 @@ converge_once() {
     # plus bas repondrait « il a un home » pour TOUT LE MONDE. Premiere version de cette trace, et
     # elle aurait dit « repris de son home » sur un uid pose par la forge — un mensonge qui n'aurait
     # coute que le jour ou un uid surprend quelqu'un.
-    # TROIS SOURCES, TROIS PHRASES. La derniere — « choisi par le systeme » — n'existait pas tant
-    # qu'une formule repondait toujours ; c'est desormais le cas NOMINAL sur une machine neuve.
+    # TROIS SOURCES, TROIS PHRASES. La derniere est le cas NOMINAL sur une machine neuve.
+    #
+    # ⚠ ELLE DISAIT « choisi par le systeme », ET CE N'EST PLUS VRAI. `useradd` ne choisit plus : il
+    # partait de `UID_MIN` et pouvait donc rendre l'uid RESERVE du siege s'il etait libre. Le
+    # plancher est desormais pose ici (`first_free_uid`, au-dessus de `SYSADMIN_UID`) — le garde a
+    # demenage depuis `22-fleet-human` en meme temps que le geste de creation. Une trace qui nomme
+    # le mauvais decideur est ce qui fait chercher un bug dans `useradd`.
     if [[ -d "$HOME_ROOT/$login" ]]; then
       uid_src="repris de son home"
     elif [[ -n "$(uid_from_map "$forge_id")" ]]; then
       uid_src="relu dans la table (id de forge $forge_id)"
     else
-      uid_src="choisi par le systeme"
+      uid_src="premier libre au-dessus du siege"
     fi
     want_uid="$(uid_wanted "$login" "$forge_id")"
     if [[ -n "$want_uid" ]]; then

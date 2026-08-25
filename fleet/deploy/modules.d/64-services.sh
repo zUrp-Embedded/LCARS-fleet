@@ -374,7 +374,72 @@ apply() {
       p_fail "$u.service posé mais pas debout — « $SYSTEMCTL status $u.service » dit pourquoi"
     fi
   done
+
+  converge_humans_now
   verdict_apply
+}
+
+# ─── LA CONVERGENCE DES HUMAINS, TIRÉE UNE FOIS ET VÉRIFIÉE ─────────────────────────────────────
+#
+# ⚠ L'INSTALL RENDAIT LA MAIN SANS SAVOIR SI UN HUMAIN AVAIT ÉTÉ MATÉRIALISÉ. Le convergeur poll
+# toutes les 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer une install.
+# Entre la fin de l'apply et son premier tour, la boîte n'a personne qui puisse lancer une fleet, et
+# rien ne le dit.
+#
+# Pire, mesuré le 2026-08-25 : son premier tour est TOMBÉ (verrou de provision tenu par cette
+# passe-là), il a compté « 1 humain(s) convergé(s) » quand même, et `lcars` est resté sans `claude`
+# pendant que l'install annonçait 0 échec. Le verrou est réparé — mais rien ne VÉRIFIAIT, et c'est
+# ça qui a rendu la panne muette.
+#
+# ⚠ ON NE FAIT PAS CONFIANCE AU CODE DE RETOUR SEUL. Le convergeur peut rendre 0 en n'ayant converti
+# personne (une team vide EST un résultat valide). Ce qui se vérifie est le FAIT : un compte unix
+# existe pour un humain de la team. `--once` est documenté en tête de ce script — « une passe, pour
+# sonder ou tester » — et rend 1 sur dépendance absente, 2 sur configuration absente.
+#
+# ⚖ CE N'EST PAS UN ÉCHEC S'IL N'Y A PERSONNE À CONVERGER. Une forge sans membre dans `humans` est
+# un état légitime (l'admin n'a pré-semé personne, les gens s'enrôlent eux-mêmes). On le DIT, on ne
+# le compte pas comme une faute — la distinction est celle que ce rail applique partout.
+converge_humans_now() {
+  local conv="${LCARS_HUMAN_CONVERGER:-$HELPERS_DIR/human-converger.sh}"
+  [[ -x "$conv" ]] || { p_warn "convergeur d'humains absent ($conv) — aucun humain ne sera matérialisé par cette passe"; return 0; }
+
+  # ⚠ `run_step --ok`, PAS `run_quiet` — ET LA PREMIÈRE VERSION DE CE BLOC ÉTAIT DÉCORATIVE.
+  # `run_quiet` fait `p_fail` sur TOUT rc non nul, et `p_fail` incrémente `PROV_FAILED` : le `case`
+  # qui suivait lisait un code dont le verdict était déjà tombé en ÉCHEC deux lignes plus haut. Trois
+  # branches écrites, commentées, et sans effet — la classe exacte de `391638668`. `run_step --ok N`
+  # est la primitive qui existe pour ça : le code toléré ne compte pas, et `PROV_LAST_RC` le garde.
+  #
+  # ⚠ ET L'ENVIRONNEMENT EST CELUI DU DAEMON, PAS CELUI DE L'APPLY. L'unité charge
+  # `EnvironmentFile=-$SERVICES_ENV` et rien d'autre ; cet apply, lui, a tous les `PROV_*` exportés
+  # par `provision`. Tirer la passe depuis notre propre environnement validerait un chemin que le
+  # service ne peut PAS reprendre : ça marcherait ici et pas au premier boot. `env -i` coupe
+  # l'héritage, le `PATH` est celui que systemd donne par défaut, et le reste vient du fichier qu'on
+  # vient d'écrire — la même source, dans le même ordre.
+  local rc=0
+  run_step --ok 1 --ok 2 "convergence des humains (une passe)" -- \
+    env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+    bash -c 'set -a; . "$1"; set +a; exec "$2" --once' _ "$SERVICES_ENV" "$conv" || rc=$?
+  [[ "$rc" -eq 0 ]] || return 0   # rc non toléré : `run_step` a déjà compté l'échec et dit pourquoi
+  case "$PROV_LAST_RC" in
+    0) ;;
+    2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet_v2 start » n'aura personne à lancer"
+       return 0 ;;
+    *) p_drift "convergeur d'humains : passe en échec (rc=$PROV_LAST_RC) — « journalctl -u lcars-converger » dit pourquoi"
+       return 0 ;;
+  esac
+
+  # LA VÉRIFICATION, ET C'EST ELLE QUI COMPTE. `fleet_humans` balaie `/etc/passwd` : uid dans la
+  # plage humaine, et pas le siège. C'est la même règle que GUARD B de `bin/fleet_v2`, donc ce qu'on
+  # mesure ici est exactement « quelqu'un peut-il lancer une fleet ».
+  local found; found="$(fleet_humans | paste -sd' ' -)"
+  if [[ -n "$found" ]]; then
+    p_ok "humain(s) de fleet matérialisé(s) : $found"
+  else
+    # ⚠ PAS DE `:-` SUR CE NOM — même règle que `services_env_body` trente lignes plus haut, et je
+    # venais de l'enfreindre. `provision-lib.sh` pose `PROV_HUMANS_TEAM` avant tout module, donc un
+    # défaut écrit ici ne peut PAS s'exécuter : il se lit comme une décision et n'en est pas une.
+    p_ok "aucun humain à matérialiser — la team « $PROV_HUMANS_TEAM » de la forge est vide. Ce n'est pas une faute : les gens s'enrôlent sur la forge, un propriétaire les ajoute à la team, et le convergeur les matérialise au tour suivant"
+  fi
 }
 
 case "${1:?usage: 64-services.sh <check|apply>}" in

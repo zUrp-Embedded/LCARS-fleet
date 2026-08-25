@@ -344,13 +344,33 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
+  local rc=0 c
   # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
+  #
+  # ⚠ CETTE BRANCHE DELEGUAIT A `run_quiet`, ET ELLE JETAIT `--ok` EN CHEMIN. `run_quiet` `p_fail`-e
+  # sur TOUT rc non nul et ne connait aucune tolerance : sous `--verbose`, un code declare acceptable
+  # par l'appelant redevenait un echec, et `PROV_LAST_RC` n'etait meme pas pose — donc l'appelant qui
+  # le relit lisait la valeur d'un appel PRECEDENT. La tolerance rc-3 de `60-deploy`, ecrite pour que
+  # `etc/install.sh` puisse dire « pose, cablage PATH incomplet » sans faire echouer le module,
+  # disparaissait sur un drapeau d'affichage. Un mode de sortie ne change pas un verdict.
+  #
+  # Le detail est le meme que plus bas, delibrement : ce sont les deux moities d'une seule regle, et
+  # les factoriser dans une fonction tierce mettrait la boucle `--ok` a distance de son `rc`.
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     p_step "$label"
-    run_quiet "$@"
-    return "$?"
+    "$@" || rc=$?
+    PROV_LAST_RC="$rc"
+    if [[ "${#ok_codes[@]}" -gt 0 ]]; then
+      for c in "${ok_codes[@]}"; do
+        [[ "$rc" == "$c" ]] || continue
+        p_ok "$label — terminé (rc=$rc, code attendu)"
+        return 0
+      done
+    fi
+    [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
+    return "$rc"
   fi
-  local out rc=0 t0="$SECONDS" phase="" prev="" el
+  local out t0="$SECONDS" phase="" prev="" el
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 &
   local pid=$!
@@ -375,7 +395,6 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   # produit une chaîne vide unique : la boucle tourne une fois avec `c=""`, et seule la garde
   # `-n "$c"` rattrapait le coup. C'est un comportement de bash, pas un contrat — et une garde qui
   # dépend d'un effet de bord n'en est pas une.
-  local c
   if [[ "${#ok_codes[@]}" -gt 0 ]]; then
     for c in "${ok_codes[@]}"; do
       [[ "$rc" == "$c" ]] || continue

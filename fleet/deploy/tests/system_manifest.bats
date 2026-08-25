@@ -82,8 +82,16 @@ code() {
 
 # Les chemins litteraux que le code pose, normalises : `}` de `${VAR:-/chemin}` retire, ponctuation
 # de fin retiree, versions repliees sur le joker du manifeste.
+#
+# ⚠ `:` BORNE UN CHEMIN, ET SON ABSENCE DE LA CLASSE A PRODUIT UN FAUX ROUGE. Un `PATH=` litteral —
+# celui que `64-services` donne a la passe de convergence pour reproduire l'environnement d'un
+# service systemd — commence par `/usr/local/sbin:/usr/local/bin:…`. La sonde accrochait
+# `/usr/local/bin` puis avalait TOUTE la suite, et reclamait la declaration d'un objet nomme
+# « /usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin ». Un separateur de liste n'a jamais fait partie
+# d'un chemin de fichier ; le sortir de la classe rend la sonde plus juste, pas plus permissive —
+# `/usr/local/bin` seul est toujours attrape, et il est declare.
 posed() {
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/private|/home/catalogues|/home/projects|/var/lib/lcars|/local/LCARS_v2|/etc/lcars|/run/lcars)[^"$ ),;'"'"']*' \
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/private|/home/catalogues|/home/projects|/var/lib/lcars|/local/LCARS_v2|/etc/lcars|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           -e 's#/opt/elixir-[^ ]*#/opt/elixir-<version>#' \

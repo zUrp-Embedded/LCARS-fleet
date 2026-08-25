@@ -56,51 +56,33 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [[ "$output" == *"STATUS:"* ]]
 }
 
-@test "le plancher est JUSTE AU-DESSUS du siege — jamais l'uid du siege lui-meme" {
-  # C'est toute la faute : `useradd` sans `-u` part de UID_MIN et rendrait 1000 s'il est libre,
-  # c'est-a-dire exactement le compte que GUARD B refuse.
-  LCARS_SYSADMIN_UID=1000 mod 'fleet_uid_floor'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1001" ]
+# ─── LE PLANCHER D'UID A DEMENAGE, ET SES CINQ TEMOINS AVEC LUI ─────────────────────────────────
+#
+# Ils vivaient ici — `fleet_uid_floor`, `first_free_uid` — parce que ce module creait le compte du
+# poste. Il a cesse le 2026-08-25 : il NOMME, la forge seme (48), le convergeur materialise (64).
+# Le garde suit le geste qu'il garde ; il est dans `human_converger.bats`, section « LE PLANCHER
+# D'UID », avec un sixieme temoin qui manquait — celui qui verifie que `uid_wanted` s'en SERT.
+#
+# ⚠ CE QUI RESTE EPINGLE ICI EST L'ABSENCE. Un module qui recreerait un compte reintroduirait le
+# deuxieme createur, donc le deuxieme jeu de regles.
+@test "ce module ne CREE plus de compte unix — un seul createur, et ce n'est pas lui" {
+  # ⚠ ON EPINGLE LA POSITION DE COMMANDE, PAS LE MOT. Premiere version de ce temoin : un `grep` nu
+  # sur `useradd` — il rougissait sur le VERDICT, qui propose legitimement le geste manuel a
+  # l'operateur (« ou crée-le toi-même : useradd -m -G fleet <nom> »). Un temoin qui interdit de
+  # PARLER d'un outil au lieu de l'APPELER fait supprimer la phrase utile.
+  #
+  # Un appel se reconnait a ce qui le PRECEDE : debut de ligne, `;`, `&&`, `||`, `then`, `do`, `{`.
+  # Dans une chaine, `useradd` suit du texte — ici un guillemet francais.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  ! grep -qE '(^|;|&&|\|\||\bthen\b|\bdo\b|\{)[[:space:]]*(useradd|adduser)\b' <<<"$code"
 }
 
-@test "le plancher SUIT le siege quand on le deplace — il n'est pas ecrit en dur" {
-  LCARS_SYSADMIN_UID=1500 mod 'fleet_uid_floor'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1501" ]
-}
-
-@test "un UID_MIN plus haut que le siege l'emporte — les deux regles valent, pas une" {
-  # `is_fleet_human` exige les DEUX : `uid >= UID_MIN` ET `uid != SYSADMIN_UID`. Un plancher qui ne
-  # regarderait que le siege rendrait un uid que le systeme classe encore comme systeme.
-  printf 'UID_MIN 5000\n' > "$PASSWD_DEFS"
-  LCARS_SYSADMIN_UID=1000 mod 'fleet_uid_floor'
-  [ "$status" -eq 0 ]
-  [ "$output" = "5000" ]
-}
-
-@test "login.defs ILLISIBLE ne tue pas le module — le plancher retombe sur le defaut, en silence sur" {
-  # `|| true` load-bearing, meme motif que dans la lib : une garde qui s'evanouit sur une lecture
-  # ratee est pire que pas de garde. Ici l'effet serait un module MORT avant son verdict (rc 3).
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/absent.defs"
-  LCARS_SYSADMIN_UID=1000 mod 'fleet_uid_floor'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1001" ]
-}
-
-@test "le premier uid LIBRE est cherche au-dessus du plancher, jamais en dessous" {
-  # On ne mesure pas contre le /etc/passwd de la machine : on remplace `getent` par une doublure qui
-  # declare 1001 et 1002 pris. Sinon ce temoin dirait la composition du poste qui le joue.
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
-  cat > "$BIN/getent" <<'FAKE'
-#!/usr/bin/env bash
-[[ "$1" == passwd ]] || exit 2
-case "$2" in 1001|1002) exit 0 ;; *) exit 2 ;; esac
-FAKE
-  chmod 0755 "$BIN/getent"
-  PATH="$BIN:$PATH" LCARS_SYSADMIN_UID=1000 mod 'first_free_uid'
-  [ "$status" -eq 0 ]
-  [ "$output" = "1003" ]
+@test "le geste manuel reste PROPOSE dans le verdict — on retire le createur, pas la sortie de secours" {
+  # Sans ce pendant, supprimer purement le mot `useradd` du fichier passerait le temoin precedent
+  # tout en privant l'operateur du seul geste qu'il puisse taper lui-meme (P-40).
+  passwd_with
+  LCARS_SYSADMIN_UID=1000 PROV_HUMAN=root mod 'announce_no_fleet_human'
+  [[ "$output" == *"useradd"* ]]
 }
 
 @test "AUCUN humain nomme : drift qui donne le GESTE, et surtout aucun compte cree" {
@@ -142,11 +124,33 @@ FAKE
   [[ "$output" != *"créé ("* ]]
 }
 
-@test "humain NOMME mais absent : drift qui annonce la creation — le nom EST l'autorisation" {
+@test "humain NOMME mais absent : la SONDE derive, et elle dit QUI le materialise" {
+  # ⚠ CE TEMOIN EXIGEAIT « CRÉERA » — la promesse de ce module. Elle n'est plus vraie : il ne cree
+  # plus. Ce que la sonde doit dire maintenant, c'est le CHEMIN — 48 seme, 64 materialise et
+  # verifie — sinon un operateur qui lit « absent » n'a aucune idee de ce qui va s'en occuper.
   PROV_FLEET_HUMAN="n-existe-pas-$$" mod 'check'
   [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT"* ]]
-  [[ "$output" == *"CRÉERA"* ]]
+  [[ "$output" == *"48"* ]]
+  [[ "$output" == *"64"* ]]
+}
+
+@test "humain NOMME mais absent : l'APPLY, LUI, ne derive PAS — le compte n'est pas encore du" {
+  # ⚠ LES DEUX VERBES DIVERGENT ICI, ET C'EST VOULU. Au rang 22 d'une install neuve le compte est
+  # TOUJOURS absent : le signaler en apply ferait imprimer une derive a chaque install sur un etat
+  # nominal, et une derive qui sort toujours n'est plus lue. La sonde se joue APRES la passe, ou
+  # l'absence est une vraie derive.
+  #
+  # ⚠ `run` VIA UN PROCESSUS NU, PAS `mod` : `mod` source un module tronque, donc il ne mesure pas
+  # le CODE DE SORTIE, et c'est precisement lui qui est en jeu.
+  run env PROV_FLEET_HUMAN="n-existe-pas-$$" \
+    PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+    PROVISION_MODULE=22-fleet-human PROV_TOKENS_DIR="$BATS_TEST_TMPDIR" \
+    PROV_FLEET_GROUP="$(id -gn)" PROV_HUMAN="$(id -un)" \
+    bash "$SRC" apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nommé"* ]]
+  [[ "$output" != *"DRIFT"* ]]
 }
 
 @test "check: un humain que GUARD B REFUSE est un drift NOMMÉ, pas un compte qu'on deplace" {

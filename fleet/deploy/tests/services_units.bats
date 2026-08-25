@@ -291,3 +291,125 @@ time.sleep(120)
   [[ "$output" == *"lcars-converger.service redémarre en boucle — « journalctl"* ]]
   [[ "$output" != *"lcars-converger.service redémarre en boucle — le port"* ]]
 }
+
+# ─── LA PASSE DE CONVERGENCE TIREE A LA MAIN, ET SA VERIFICATION ────────────────────────────────
+#
+# ⚠ L'INSTALL RENDAIT LA MAIN SANS SAVOIR SI UN HUMAIN AVAIT ETE MATERIALISE. Le convergeur poll a
+# 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer une install. Mesure du
+# 2026-08-25 : son premier tour est TOMBE (verrou de provision tenu par la passe elle-meme), il a
+# compte « 1 humain(s) converge(s) » quand meme, et `lcars` est reste sans `claude` pendant que
+# l'install annoncait 0 echec. Le verrou est repare — mais rien ne VERIFIAIT, et c'est ca qui a
+# rendu la panne muette.
+#
+# ⚖ USER 2026-08-25 : « le convergeur il poll a 30s par defaut pour pas spoof le reseau, mais ya quoi
+# qui t'empeche de le declencher une fois a la main juste apres avoir seme l'user sur la forge ? et
+# qu'est-ce qui t'empeche de verifier que l'user est cree cote unix avant de rendre la main ? »
+stub_converger() { # stub_converger <rc>  → un convergeur qui journalise son env et rend <rc>
+  export LCARS_HUMAN_CONVERGER="$BATS_TEST_TMPDIR/conv.sh"
+  CONV_ENV="$BATS_TEST_TMPDIR/conv.env"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "env | sort > '$CONV_ENV'" \
+    "printf 'ARGS=%s\n' \"\$*\" >> '$CONV_ENV'" \
+    "exit $1" > "$LCARS_HUMAN_CONVERGER"
+  chmod 0755 "$LCARS_HUMAN_CONVERGER"
+}
+
+# La population d'humains est une DONNEE du decor : sans ca ces temoins lisent le /etc/passwd de la
+# machine qui les joue, et repondent sa composition au lieu de la regle.
+humans_are() {
+  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  printf 'root:x:0:0:root:/root:/bin/bash\n' > "$PASSWD_FILE"
+  printf 'siege:x:1000:1000::/home/siege:/bin/bash\n' >> "$PASSWD_FILE"
+  local l; for l in "$@"; do printf '%s\n' "$l" >> "$PASSWD_FILE"; done
+  export LCARS_SYSADMIN_UID=1000
+}
+
+@test "convergeur ABSENT : on le DIT, et ce n'est pas un echec d'apply" {
+  # Le cas d'un rail incomplet. Un `p_fail` ici ferait echouer une install pour un auxiliaire dont
+  # `62-runtime-helpers` a deja la charge — et dont l'absence se voit la-bas.
+  humans_are
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"convergeur d'humains absent"* ]]
+}
+
+@test "la passe est TIREE UNE FOIS, en --once — pas un daemon de plus" {
+  humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
+  stub_converger 0
+  mod apply
+  [ "$status" -eq 0 ]
+  [ -f "$CONV_ENV" ]
+  grep -qx 'ARGS=--once' "$CONV_ENV"
+}
+
+@test "L'ENVIRONNEMENT DE LA PASSE EST CELUI DU DAEMON, PAS CELUI DE L'APPLY" {
+  # ⚠ LE TEMOIN QUI FERME LE VRAI TROU. L'unite charge `EnvironmentFile=-$SERVICES_ENV` et RIEN
+  # d'autre ; cet apply, lui, a tous les `PROV_*` que `provision` exporte. Une premiere version
+  # tirait la passe depuis notre propre environnement : elle aurait valide un chemin que le service
+  # ne peut PAS reprendre au boot — vert a l'install, mort au premier redemarrage. C'est la classe
+  # exacte que ce depot traque partout : mesurer le mecanisme au lieu de l'exigence.
+  humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
+  stub_converger 0
+  mod apply
+  [ "$status" -eq 0 ]
+  # CE QUI VIENT DU FICHIER — donc ce que le daemon aura aussi.
+  grep -q '^PROV_HUMANS_TEAM=' "$CONV_ENV"
+  grep -q '^FORGE_BASE_URL=http://127.0.0.1:3000$' "$CONV_ENV"
+  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/fleet/deploy/provision$" "$CONV_ENV"
+  # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
+  # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.
+  ! grep -q '^PROV_TOKENS_DIR=' "$CONV_ENV"
+  ! grep -q '^PROV_SUBSTRATE=' "$CONV_ENV"
+}
+
+@test "un humain MATERIALISE est NOMME — on verifie le FAIT, pas le code de retour" {
+  # Le convergeur peut rendre 0 sans avoir converge personne : une team vide EST un resultat valide.
+  # Ce qui se verifie est donc la population, avec la regle de GUARD B.
+  humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
+  stub_converger 0
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"matérialisé"* ]]
+  [[ "$output" == *"lcars"* ]]
+}
+
+@test "AUCUN humain a materialiser n'est PAS une faute — zero et vide se distinguent" {
+  # ⚖ USER 2026-08-25 : « en prod (le mode boite), on peut se passer de pre-seed un user (…) et
+  # l'inscription reste ouverte sur la forge. » Une team `humans` vide est donc un etat legitime.
+  # Un DRIFT ici ferait rougir toute install de production qui n'a pre-seme personne.
+  humans_are
+  stub_converger 0
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aucun humain à matérialiser"* ]]
+}
+
+@test "rc 2 (configuration absente) : DRIFT residuel, JAMAIS un echec d'apply" {
+  # ⚠ ET C'EST LA QUE LA PREMIERE VERSION MENTAIT. Elle passait par `run_quiet`, qui `p_fail`-e sur
+  # tout rc non nul : les trois branches du `case` lisaient un code dont le verdict etait deja tombe
+  # en ECHEC deux lignes plus haut. Ecrites, commentees, sans effet.
+  humans_are
+  stub_converger 2
+  mod apply
+  [ "$status" -eq 2 ]     # apply : 2 = applique, drift residuel — PAS 1
+  [[ "$output" == *"configuration absente"* ]]
+}
+
+@test "rc 1 (dependance absente) : DRIFT residuel aussi — le daemon reessaiera" {
+  humans_are
+  stub_converger 1
+  mod apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"journalctl"* ]]
+}
+
+@test "un rc INATTENDU reste un echec entier — la tolerance est bornee, pas generale" {
+  # Sans ce pendant, tolerer TOUT passerait les deux temoins precedents (P-40). 1 et 2 sont des
+  # etats que le convergeur DOCUMENTE ; 7 est une panne qu'on ne connait pas, donc un echec.
+  humans_are
+  stub_converger 7
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"* ]]
+}
