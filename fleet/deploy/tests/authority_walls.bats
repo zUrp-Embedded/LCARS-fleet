@@ -227,6 +227,34 @@ secret_writers() {
   absent '(MASTER_TOKEN|gitea_token|forge-master|forge-seed)' "$svc"
 }
 
+# ─── MUR 6 — LA REGLE D'ELIGIBILITE NE LIT PLUS AUCUN GROUPE ────────────────────────────────────
+#
+# ⚠ C'ETAIT LA DERNIERE LECTURE DE `/etc/group` QUI DECIDAIT QUELQUE CHOSE, et c'est ce qui la
+# rendait dangereuse : les autres ayant disparu, elle serait devenue celle dont plus personne ne sait
+# ce qu'elle tranche. Elle se disait « L'ELIGIBILITE DERIVE DE L'AUTORITE » — en nommant autorite une
+# PROJECTION que le convergeur refaisait toutes les trente secondes depuis l'equipe `humans`.
+#
+# ⚠ ET L'EXCLUSION DU SIEGE ETAIT UN EFFET DE BORD DE CE FILTRE, jamais une regle : le sysadmin est
+# dans `sudo` et pas dans `fleet`. Un effet de bord non nomme est ce qui disparait sans qu'on le
+# voie — d'ou le second mur, qui verifie que la condition est ECRITE et keyee sur l'uid.
+
+@test "MUR 6: la regle d'eligibilite ne lit AUCUN groupe" {
+  local hum="$REPO/services/console-humans.sh"
+  [ -f "$hum" ] || { echo "regle d'eligibilite introuvable : $hum" >&2; return 1; }
+  absent '(getent group|LCARS_CONSOLE_GROUP|FLEET_MEMBERS|/etc/group)' "$hum"
+}
+
+@test "MUR 6 bis: l'exclusion du siege est une condition ECRITE, keyee sur l'UID" {
+  # La contrepartie du mur 6. Sans elle, retirer le filtre de groupe ouvrirait une console worker au
+  # siege — un shell sudo-capable derriere la porte WEB de la boite, l'exact inverse de ce que les
+  # pods confinent. Et keyee sur l'UID, pas sur un login : `00` §5, le login du siege est variable.
+  local hum="$REPO/services/console-humans.sh"
+  grep -qE 'SYSADMIN_UID="\$\{LCARS_SYSADMIN_UID:-1000\}"' "$hum"
+  sed 's/#.*//' "$hum" | grep -qE '\$uid.*==.*\$SYSADMIN_UID'
+  # Et JAMAIS sur un nom : un login code en dur serait une seconde verite sur la reservation.
+  absent '(==|=~).*"admiral"' "$hum"
+}
+
 @test "MUR 4: le minteur VERIFIE le proprietaire de ce qu'il vient d'ecrire" {
   # ⚠ LE CONTROLE EST LE JUMEAU DU MODE, ET LES DESYNCHRONISER FAIT ECHOUER CHAQUE COMPTE. Le script
   # posait `chgrp` puis verifiait `stat -c %G`. Passe au proprietaire sans changer le controle, il

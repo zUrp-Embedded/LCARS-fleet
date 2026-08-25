@@ -35,14 +35,32 @@
 # sans tuer, c'est fermer la porte d'entree en laissant la maison allumee a l'interieur.
 #
 # D'ou les trois gestes, dans CET ordre :
-#   1. `gpasswd -d` — plus de credentials partages pour tout NOUVEAU process ;
-#   2. `pkill -u`   — les process qui portent encore l'ancien jeu de groupes meurent. Il n'existe
-#      pas de version douce : c'est le meme process qui porte le travail et les credentials, donc
+#   1. `gpasswd -d` — le groupe redevient exact ;
+#   2. `pkill -u`   — les process de la personne meurent. Il n'existe pas de version douce :
 #      revoquer INTERROMPT. C'est le prix, il est assume, il n'est pas contournable ;
 #   3. `usermod -s nologin` — la porte ne se rouvre pas. Sans ce troisieme geste, le prochain
 #      `console.sh --all` relance la console : elle ne lit que /etc/passwd, et `console-humans.sh`
 #      (source UNIQUE de l'eligibilite, lue aussi par la landing) ecarte deja `shell nologin`.
 # `usermod` APRES le kill : il refuse de toucher un compte dont des process tournent encore.
+#
+# ─── ⚠ LE MOTIF DU DEUXIEME GESTE A CHANGE, ET LE GESTE RESTE ───────────────────────────────────
+#
+# Il etait CRITIQUE : le groupe `fleet` ouvrait les jetons de forge (`0640 root:fleet`), donc un
+# process ne AVANT la revocation gardait un credential DEJA LU et pouvait continuer d'ecrire sur la
+# forge sous une identite de travail. Tuer etait le seul moyen de reprendre ce qui avait ete lu.
+#
+# Ce chemin n'existe plus. Les jetons sont `0600 lcars-authority` et le BEAM ne les lit pas — il les
+# DEMANDE, a chaque geste, a un service qui pose la question a la forge. Un process survivant n'a
+# donc plus RIEN a lire : sa demande suivante rend `not_a_worker`. Meme chose pour root, dont le
+# chemin `groupe -> root` (le sudoers d'outillage) a disparu avec la phase 4.
+#
+# Ce que `pkill` fait aujourd'hui est une FIN DE SESSION : fermer les terminaux et arreter le travail
+# en cours de quelqu'un qui n'est plus de l'equipe. La criticite est passee de « cette personne
+# detient encore une identite de forge » a « elle voit encore son terminal quelques secondes ».
+#
+# ⚠ ET IL NE SE RETIRE PAS POUR AUTANT. `gpasswd -d` n'enleve aucun groupe a un process VIVANT, et
+# le groupe ouvre encore des fichiers PARTAGES — l'arbre d'install en lecture, les zones de projet.
+# Le geste garde donc un objet ; il a seulement cesse d'etre le dernier rempart d'un credential.
 #
 # RIEN N'EST SUPPRIME : ni compte, ni home, ni donnees, ni uid. La revocation ferme des acces, elle
 # n'efface pas une personne — et re-entrer dans la team RESTAURE l'entree (cf. `restore_human`),
