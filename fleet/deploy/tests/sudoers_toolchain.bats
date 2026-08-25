@@ -53,40 +53,69 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   grep -q "^# STARDATE:" "$SRC"; grep -q "^# STATUS:" "$SRC"
 }
 
-@test "sudoers: pose, contenu exact, mode 0440" {
-  run_apply
-  [[ "$status" -eq 0 ]]
+# ─── LE SUDOERS EST RETIRE, ET CES TEMOINS ONT CHANGE DE SIGNE ──────────────────────────────────
+#
+# Ils epinglaient la POSE de `%fleet ALL=(root) NOPASSWD:` — sa forme exacte, son mode, l'atomicite
+# de sa mise a jour. Tous verts, et tous sur un objet qui etait le lien le plus fin du systeme : un
+# chemin `groupe -> root` direct, sur un groupe que le convergeur repeuple depuis la forge toutes
+# les trente secondes.
+#
+# Le geste passe par `toolchain.sock`. Ce qui se garde ici est desormais l'ABSENCE — et c'est un
+# contrat plus dur que la pose, parce qu'il porte sur les boites DEJA provisionnees.
+
+@test "sudoers: l'apply RETIRE la regle sur une boite qui la porte encore" {
+  # ⚠ LE TEMOIN QUI COMPTE LE PLUS DE CETTE PHASE. Cesser de POSER ne retire rien : le NOPASSWD
+  # survivrait au chantier qui le supprime, sur chaque machine deja convergee, indefiniment et sans
+  # qu'une ligne le dise. C'est mot pour mot la maladie que ce module cite a son point 3 — « sans
+  # convergence, un admin demis garde son droit indefiniment ».
   local f="$LCARS_SUDOERS_DIR/lcars-toolchain"
+  printf '%%%s ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge\n' "$PROV_FLEET_GROUP" > "$f"
   [[ -f "$f" ]]
-  grep -qx "%$PROV_FLEET_GROUP ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge" "$f"
-  [[ "$(stat -c %a "$f")" == "440" ]]
-}
 
-@test "sudoers: un contenu refuse par visudo N'EST PAS pose" {
-  # visudo double en tete de PATH : refuse tout. Si le module posait quand meme, sudo entier
-  # serait casse en prod — c'est le temoin de l'ordre valide-PUIS-pose.
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/visudo"; chmod +x "$BIN/visudo"
-  run_apply
-  [[ "$status" -ne 0 ]]
-  [[ ! -f "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
-}
-
-@test "sudoers: un REFUS en cours de mise a jour laisse l'ANCIEN fichier intact (atomicite observable)" {
-  # ⚠ La v1 de ce temoin cherchait des artefacts .prov.* survivants — write_atomic les nettoie sur
-  # TOUS ses chemins, et une redirection nue n'en laisse pas non plus : il etait vert sur
-  # l'implementation qu'il pretendait interdire (audit). La propriete OBSERVABLE est celle-ci :
-  # un sudoers valide est en place, la mise a jour est REFUSEE (visudo) => l'ancien fichier est
-  # toujours la, OCTET POUR OCTET. Une ecriture en place l'aurait tronque ou remplace avant le
-  # refus — la machine ou plus personne ne passe root (cicatrice provision-lib.sh:18).
   run_apply
   [[ "$status" -eq 0 ]]
-  local before; before="$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")"
+  [[ ! -e "$f" ]]
+}
 
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/visudo"; chmod +x "$BIN/visudo"
-  export LCARS_TOOLCHAIN_CONVERGE_BIN="/usr/local/bin/autre-binaire"
+@test "sudoers: le check DIT qu'il reste un chemin groupe → root, il ne le constate pas en silence" {
+  local f="$LCARS_SUDOERS_DIR/lcars-toolchain"
+  printf '%%%s ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge\n' "$PROV_FLEET_GROUP" > "$f"
+
+  run bash -c ". '$MOD'; check"
+  [[ "$output" == *"groupe → root"* ]]
+  [[ "$output" == *"toolchain.sock"* ]]
+}
+
+@test "sudoers: sur une boite propre, l'apply ne pose RIEN et reste vert" {
+  # LE TEMOIN DU TEMOIN : sans lui, un module qui echouerait sur l'absence du fichier passerait le
+  # premier test (qui, lui, en pose un) et casserait chaque apply d'une boite deja saine.
+  [[ ! -e "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
   run_apply
-  [[ "$status" -ne 0 ]]
-  [[ "$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")" == "$before" ]]
+  [[ "$status" -eq 0 ]]
+  [[ ! -e "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
+}
+
+@test "sudoers: plus AUCUNE ligne de CODE ne construit une regle NOPASSWD" {
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE, et ma premiere ecriture comptait les deux. Les cicatrices de
+  # ce module NOMMENT la regle retiree — c'est leur metier, et un temoin qui les compterait
+  # interdirait d'expliquer ce qu'on a retire. La prochaine session referait le defaut faute de
+  # savoir pourquoi c'en etait un.
+  #
+  # Le nom du convergeur, lui, n'a plus rien a faire ici : le seul a l'invoquer est
+  # `lcars-privileged`, qui le connait chez lui. Une seconde autorite sur un chemin est celle qu'on
+  # ne relit pas, et c'est elle qui ment.
+  # ⚠ ET ON CHERCHE LA SYNTAXE D'UNE REGLE, PAS LE MOT. Ma premiere ecriture comptait « NOPASSWD »
+  # et accusait le MESSAGE DE REFUS du module — « le groupe garde un NOPASSWD root » — qui est
+  # exactement la phrase qu'un operateur doit lire. Un temoin qui interdit de nommer le danger
+  # pousse a l'ecrire moins clairement. Ce qui construit une regle, c'est `ALL=(root)`.
+  local n
+  n="$(sed 's/#.*//' "$SRC" | grep -cE 'ALL=\(root\)' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'ALL=\(root\)' >&2; return 1; }
+  # Et rien n'ECRIT dans le fichier de sudoers : la seule chose qui lui arrive est `rm`.
+  n="$(sed 's/#.*//' "$SRC" | grep -cE '(write_atomic|install|>|tee)[^\n]*SUDOERS_FILE' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'SUDOERS_FILE' >&2; return 1; }
+  n="$(sed 's/#.*//' "$SRC" | grep -cE 'LCARS_TOOLCHAIN_CONVERGE_BIN' || true)"
+  [ "$n" -eq 0 ]
 }
 
 @test "etat conteneur: le repertoire du marqueur existe en 2775" {

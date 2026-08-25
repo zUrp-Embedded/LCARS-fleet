@@ -8,23 +8,27 @@
 # CHECK-ON: any
 # NEEDS: root
 #
-# RANG 45, ET C'EST PORTEUR : les modules se decouvrent par glob ordonne `NN-*.sh`
-# (`deploy/provision`), et `%$PROV_FLEET_GROUP` ci-dessous suppose un groupe que `20-groups.sh`
-# vient de creer. Un rang < 20 accorderait un NOPASSWD a un groupe inexistant.
+# RANG 45. Il etait PORTEUR tant que ce module accordait un droit a `%$PROV_FLEET_GROUP` : les
+# modules se decouvrent par glob ordonne `NN-*.sh` (`deploy/provision`), et un rang < 20 aurait
+# ouvert root a un groupe que `20-groups.sh` n'avait pas encore cree.
+# Ce module n'accorde plus rien — il RETIRE. Le rang ne porte donc plus de contrainte : il est garde
+# tel quel parce que le renumeroter deplacerait quatre gestes sans rien gagner.
 #
 # QUATRE GESTES, UN MOTIF : le rail toolchain (chantier admiral) est du code livre qui n'etait
 # CABLE nulle part — trouve par la validation adversariale du PLAN, 2026-08-19. Ce module est le
 # cablage cote provisioning ; le binaire est pose par l'image (Dockerfile), la supervision par le
 # domaine (BEAM).
 #
-#   1. le SUDOERS ETROIT (`01` §4.6) : `%fleet` peut invoquer UN binaire nomme, jamais un shell.
-#      Sur par construction : l'entree du binaire est un manifeste deja merge sur une branche
-#      protegee, et il est idempotent — un appel direct par n'importe quel membre applique un etat
-#      deja approuve.
-#      ⚠ CICATRICE `provision-lib.sh:18` : une v1 d'un autre sudoers ecrivait EN PLACE et rendait
-#      un fichier tronque — une machine ou plus personne ne passe root. D'ou `write_atomic`,
-#      JAMAIS une redirection — et `visudo -cf` sur le contenu AVANT la pose : un sudoers.d
-#      invalide fait refuser TOUT sudo, pas seulement celui-ci.
+#   1. le SUDOERS ETROIT — ⚠ RETIRE LE 2026-08-25, ET CE POINT EST DEVENU SON CONTRAIRE : ce module
+#      GARDE DESORMAIS SON ABSENCE. La regle etait `%fleet ALL=(root) NOPASSWD:` sur un binaire
+#      nomme. Elle etait defendue ici comme « sure par construction : l'entree du binaire est un
+#      manifeste deja merge sur une branche protegee » — c'etait FAUX au moment ou c'etait ecrit.
+#      L'appelant passait un SHA dont seule la FORME hexadecimale etait controlee, et le depot d'ops
+#      porte des commits NON REVUS par conception (c'est ce que le rail EST : des pods y ouvrent des
+#      PR). N'importe quel membre de `fleet` — groupe que le convergeur peuple depuis la forge
+#      toutes les 30 s — faisait donc appliquer en root le manifeste de n'importe quel commit.
+#      Le geste passe par `toolchain.sock` (`lcars-privileged`), et l'appelant n'y ecrit RIEN : le
+#      service resout la tete de la branche protegee lui-meme.
 #
 #   2. l'ETAT CONTENEUR du reconciliateur (`/run/lcars/toolchain` — un TMPFS : il meurt avec le
 #      conteneur PAR CONSTRUCTION, et aucun volume ne peut le recouvrir ; 2775 root:fleet) : le
@@ -61,7 +65,9 @@ set -euo pipefail
 
 SUDOERS_DIR="${LCARS_SUDOERS_DIR:-/etc/sudoers.d}"
 SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
-CONVERGE_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
+# ⚠ `CONVERGE_BIN` A DISPARU AVEC LA REGLE QUI LE NOMMAIT. Ce module ne designe plus aucun binaire :
+# le seul a l'invoquer est `lcars-privileged`, qui le connait chez lui. Garder la variable ici en
+# ferait une seconde autorite sur un chemin, et c'est celle qu'on ne relit pas qui ment.
 RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/run/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 # ─── LA SOURCE DU SKILL VIT AUX DEUX ENDROITS, ET LE DÉFAUT N'EN CONNAISSAIT QU'UN ──────────────
@@ -85,13 +91,29 @@ if [[ -z "$SKILL_SRC" ]]; then
   fi
 fi
 
-sudoers_line() { printf '%%%s ALL=(root) NOPASSWD: %s\n' "$PROV_FLEET_GROUP" "$CONVERGE_BIN"; }
-
+# ─── LE SUDOERS EST RETIRE, ET SON ABSENCE EST DESORMAIS CE QUI SE CONVERGE ─────────────────────
+#
+# La regle etait `%fleet ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge` — le lien le
+# plus fin du systeme, un chemin `groupe -> root` DIRECT. Et `fleet` n'etait pas une liste d'ayants
+# droit : `human-converger` le peuplait depuis l'equipe `humans` de la forge, TOUTES LES 30 s. Le
+# droit d'executer du code en root avait donc la peremption d'un cache, et se retirer demandait un
+# `pkill`.
+#
+# Le geste vit maintenant derriere `toolchain.sock`, servie par `lcars-privileged` — et l'appelant
+# n'y passe AUCUN argument : le service resout lui-meme la tete de la branche protegee. L'ancien
+# rail laissait passer un SHA dont seule la FORME hexadecimale etait controlee, sur un depot ou des
+# commits non revus vivent PAR CONCEPTION (c'est ce que le rail EST : des pods y ouvrent des PR).
+#
+# ⚠ CESSER DE POSER NE SUFFIT PAS, ET C'EST TOUT L'OBJET DE CE BLOC. Retirer l'ecrivain laisse le
+# fichier en place sur CHAQUE boite deja provisionnee : le NOPASSWD survivrait au chantier qui le
+# retire, indefiniment, sans que rien ne le dise. C'est mot pour mot la maladie que ce module cite
+# a son point 3 — « sans convergence, un admin demis garde son droit indefiniment ». La convergence
+# est donc un RETRAIT ACTIF, et l'ABSENCE est ce qui se verifie.
 check() {
-  if [[ -f "$SUDOERS_FILE" ]] && cmp -s <(sudoers_line) "$SUDOERS_FILE"; then
-    p_ok "sudoers etroit ($SUDOERS_FILE)"
+  if [[ -e "$SUDOERS_FILE" ]]; then
+    p_drift "IL RESTE UN CHEMIN groupe → root : $SUDOERS_FILE existe encore — l'apply le retire (le geste d'outillage passe par toolchain.sock depuis ce chantier)"
   else
-    p_drift "sudoers etroit absent ou divergent ($SUDOERS_FILE)"
+    p_ok "aucune règle sudoers pour l'outillage ($SUDOERS_FILE absent)"
   fi
   if [[ -d "$RUN_STATE" ]]; then
     p_ok "etat conteneur du reconciliateur ($RUN_STATE)"
@@ -123,19 +145,18 @@ check() {
 }
 
 apply() {
-  # 1. Le sudoers — valide AVANT la pose. `visudo -cf` lit un fichier : on valide le contenu dans
-  #    un tmp a nous, puis write_atomic pose (tmp + rename, jamais le fichier en etat partiel).
-  local vtmp
-  vtmp="$(mktemp)" || { p_fail "sudoers: mktemp"; verdict_apply; }
-  sudoers_line > "$vtmp"
-  if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$vtmp" >/dev/null 2>&1; then
-    rm -f "$vtmp"
-    p_fail "sudoers: contenu REFUSE par visudo — rien n'est pose"
-    verdict_apply
+  # 1. Le sudoers — RETIRE. Voir le bloc au-dessus de `check` : cesser de poser laisserait le
+  #    NOPASSWD sur toute boite deja provisionnee, et un droit qu'on a cesse d'accorder mais jamais
+  #    retire est un droit qui reste.
+  if [[ -e "$SUDOERS_FILE" ]]; then
+    if rm -f "$SUDOERS_FILE"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1))
+      p_chg "chemin groupe → root RETIRÉ ($SUDOERS_FILE) — le geste d'outillage passe par toolchain.sock"
+    else
+      p_fail "$SUDOERS_FILE non retiré — le groupe $PROV_FLEET_GROUP garde un NOPASSWD root"
+      verdict_apply
+    fi
   fi
-  write_atomic "$SUDOERS_FILE" 0440 < "$vtmp" || { rm -f "$vtmp"; verdict_apply; }
-  rm -f "$vtmp"
-  p_ok "sudoers etroit pose ($SUDOERS_FILE)"
 
   # 2. L'etat conteneur — 2775 : le BEAM (groupe fleet) ecrit le marqueur, root le possede.
   install -d -m 2775 "$RUN_STATE" || { p_fail "etat conteneur: install -d $RUN_STATE"; verdict_apply; }

@@ -75,7 +75,7 @@ AUTHORITY_USER="${PROV_AUTHORITY_USER:-lcars-authority}"
 # DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
-UNITS=(lcars-landing lcars-converger lcars-catalogue)
+UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
 # ─── QUI DÉMARRE QUOI — LA TABLE, PARCE QU'UNE PROSE NE SE VÉRIFIE PAS ──────────────────────────
 #
@@ -99,6 +99,7 @@ STARTERS=(
   "console-landing.sh:unit:lcars-landing"
   "console.sh:driven-by:lcars-converger"
   "catalogue-executor.py:unit:lcars-catalogue"
+  "privileged-executor.py:unit:lcars-privileged"
 )
 
 have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
@@ -224,6 +225,38 @@ Type=simple
 EnvironmentFile=-$SERVICES_ENV
 User=$AUTHORITY_USER
 ExecStart=/usr/bin/env python3 $HELPERS_DIR/catalogue-executor.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    lcars-privileged)
+      # ⚠ L'UNIQUE SERVICE ROOT DE CETTE MACHINE, ET IL NE DETIENT RIEN. C'est l'inverse exact de
+      # `lcars-catalogue` juste au-dessus : celui-la detient les secrets de la forge et n'a AUCUN
+      # privilege noyau ; celui-ci porte le seul geste privilege et n'ouvre AUCUN secret. Celui qui
+      # detient ne peut pas escalader, celui qui escalade n'a rien a voler.
+      #
+      # ⚠ PAS DE `User=` — ET C'EST LA SEULE UNITE DE CE FICHIER OU L'ABSENCE EST LE CONTRAT. Il
+      # remplace `%fleet ALL=(root) NOPASSWD:` : le privilege ne disparait pas, il cesse d'etre
+      # accessible par un GROUPE que la forge repeuple toutes les 30 s.
+      #
+      # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (mesure du
+      # 2026-08-25 : `/branches/tool_request` et `/contents/ops` repondent 200 en anonyme), et un
+      # service qui saurait ou trouver un secret aurait le droit de le lire. Une boite dont la forge
+      # exige une session en lecture l'ajoute a `$SERVICES_ENV`, explicitement.
+      cat <<EOF
+[Unit]
+Description=LCARS — l'unique geste privilegie de la machine, et il ne detient aucun secret
+Documentation=file://$HELPERS_DIR/privileged-executor.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=/usr/bin/env python3 $HELPERS_DIR/privileged-executor.py
 Restart=always
 RestartSec=5
 

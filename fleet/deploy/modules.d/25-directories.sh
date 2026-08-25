@@ -135,7 +135,12 @@ prov_runtime_dirs() {
     "/run/lcars 0755 root:root" \
     "/run/lcars/console 0711 root:root" \
     "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP" \
-    "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP"
+    "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
+    `# Le service privilégié est root : il POURRAIT créer sa socket dans /run/lcars (0755 root:root).` \
+    `# Elle a quand même son répertoire, pour la même raison que la voisine — un répertoire par` \
+    `# service rend l'ACL lisible d'un « ls », et une porte posée à la racine d'un arbre partagé se` \
+    `# retrouve un jour balayée par le nettoyage de quelqu'un d'autre.` \
+    "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {

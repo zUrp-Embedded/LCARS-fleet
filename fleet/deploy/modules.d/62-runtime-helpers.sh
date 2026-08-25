@@ -88,6 +88,12 @@ HELPERS=(
   # `catalogue-executor.py` l'importe depuis SON PROPRE repertoire, donc les deux atterrissent
   # ensemble ou le service meurt sur un `ModuleNotFoundError` au demarrage.
   lcars_socket.py
+  # L'unique service ROOT de la machine, et il ne detient rien. Il remplace la regle sudoers
+  # `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait. Pose ici parce
+  # qu'il APPELLE `lcars-toolchain-converge`, comme l'executeur de catalogue appelle
+  # `forge-gestures.sh` : les deux atterrissent ensemble, ou le service demarre et refuse chaque
+  # demande sur un binaire absent.
+  privileged-executor.py
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────

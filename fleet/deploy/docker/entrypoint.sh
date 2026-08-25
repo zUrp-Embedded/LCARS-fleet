@@ -535,6 +535,27 @@ else
   say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"
 fi
 
+# ─── 3quinquies. Le service PRIVILÉGIÉ (root, une socket, et AUCUN secret) ──────────────────────
+#
+# ⚠ IL REMPLACE `%fleet ALL=(root) NOPASSWD:`. C'était le lien le plus fin du système : un chemin
+# `groupe → root` direct, sur un groupe que le convergeur repeuple depuis la forge toutes les 30 s.
+# Le droit d'exécuter du code en root avait donc la péremption d'un cache.
+#
+# ⚠ PAS DE `setpriv` ICI, ET C'EST LE SEUL BLOC DE CE FICHIER OÙ SON ABSENCE EST LE CONTRAT. Le
+# voisin au-dessus DOIT descendre (il détient les secrets) ; celui-ci DOIT rester root (il porte le
+# geste privilégié) et ne détient rien. Les deux règles sont la même règle, lue des deux côtés.
+#
+# Son absence n'est pas fatale — même règle que le voisin : la boîte doit rester joignable pour être
+# réparée. Ce qui devient injouable est la convergence d'outillage, et le reconciliateur le dira en
+# nommant la socket : une porte fermée n'est pas une porte gardée.
+if [[ "${LCARS_PRIVILEGED_EXECUTOR:-1}" == "1" && -r /opt/lcars/privileged-executor.py ]]; then
+  setsid python3 /opt/lcars/privileged-executor.py \
+    </dev/null >>/var/log/lcars-privileged.log 2>&1 &
+  say "service privilégié ACTIF (pid $!) — la convergence d'outillage passe par sa socket, plus par sudo"
+else
+  say "service privilégié ABSENT — la convergence d'outillage refusera, en nommant sa socket"
+fi
+
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
 say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> puis « fleet_v2 start »"
 exec /usr/sbin/sshd -D -e

@@ -184,6 +184,49 @@ secret_writers() {
 
 # ─── MUR 4 — LA POSTCONDITION MESURE LE DETENTEUR, PAS LE GROUPE ────────────────────────────────
 
+# ─── MUR 5 — AUCUNE REGLE SUDOERS N'ACCORDE ROOT A UN GROUPE ────────────────────────────────────
+#
+# ⚠ C'ETAIT LE LIEN LE PLUS FIN DU SYSTEME. `%fleet ALL=(root) NOPASSWD:` ouvrait un binaire root a
+# TOUT membre d'un groupe que `human-converger` repeuple depuis l'equipe `humans` de la forge,
+# toutes les trente secondes. Le droit d'executer du code en root avait donc la peremption d'un
+# cache — et se retirer demandait un `pkill`.
+#
+# Le mur porte sur le DEPOT ENTIER, pas sur le module qui l'a pose : ce qu'on interdit n'est pas
+# « que ce fichier-la recommence », c'est qu'un vingt-cinquieme site, ecrit dans six mois par
+# quelqu'un qui n'a lu aucune de ces lignes, rouvre le chemin ailleurs.
+
+@test "MUR 5: aucune ligne de CODE n'accorde root a un groupe par sudoers" {
+  local f
+  for f in "${CODE[@]}"; do
+    # `ALL=(root)` est la syntaxe d'une regle. La PROSE qui nomme la regle retiree est legitime —
+    # c'est son metier — et `code_of` l'a deja retiree.
+    absent 'ALL=\(root\)' "$f"
+  done
+}
+
+@test "MUR 5 bis: le rail d'outillage ne passe plus par sudo" {
+  # GARDE D'INSTRUMENT ET DE SUBSTANCE A LA FOIS. Le mur 5 interdit d'ECRIRE la regle ; celui-ci
+  # verifie que l'APPELANT ne la cherche plus. Les deux moities vont par paire : une regle absente
+  # avec un appelant qui fait encore `sudo -n` donne un rail mort, pas un rail sur.
+  local recon="$REPO/lib/fleet/admiral/toolchain_reconciler.ex"
+  [ -f "$recon" ] || { echo "reconciliateur introuvable : $recon" >&2; return 1; }
+  local n
+  n="$(grep -cE 'System.cmd\("sudo"' "$recon" || true)"
+  [ "$n" -eq 0 ] || { grep -nE 'System.cmd\("sudo"' "$recon" >&2; return 1; }
+  grep -q 'toolchain.sock' "$recon"
+}
+
+@test "MUR 5 ter: le service privilegie n'OUVRE aucun secret" {
+  # ⚠ LA MOITIE QUI REND LE RETRAIT DEFENDABLE. Deplacer le geste root derriere une socket ne vaut
+  # que si le process qui le porte ne detient rien : sinon on a juste change la porte du meme
+  # cumul — privilege ET secrets dans le meme espace d'adressage, ou un defaut escalade ce qu'il
+  # vole. C'est la regle qui donne sa forme a tout ce chantier, lue de l'autre cote.
+  local svc="$REPO/services/privileged-executor.py"
+  [ -f "$svc" ] || { echo "service privilegie introuvable : $svc" >&2; return 1; }
+  absent '/home/private' "$svc"
+  absent '(MASTER_TOKEN|gitea_token|forge-master|forge-seed)' "$svc"
+}
+
 @test "MUR 4: le minteur VERIFIE le proprietaire de ce qu'il vient d'ecrire" {
   # ⚠ LE CONTROLE EST LE JUMEAU DU MODE, ET LES DESYNCHRONISER FAIT ECHOUER CHAQUE COMPTE. Le script
   # posait `chgrp` puis verifiait `stat -c %G`. Passe au proprietaire sans changer le controle, il

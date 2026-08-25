@@ -567,6 +567,10 @@ COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
 # Le module de socket voisin : `catalogue-executor.py` l'importe depuis son repertoire.
 COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
+# L'UNIQUE SERVICE ROOT DE LA MACHINE, ET IL NE DETIENT RIEN. Il remplace la regle sudoers
+# `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait, sur un groupe que le
+# convergeur repeuple depuis la forge toutes les 30 s. A cote du convergeur qu'il appelle.
+COPY fleet/services/privileged-executor.py /opt/lcars/privileged-executor.py
 # LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
 # de toolchain : c'est un outil d'EXPLOITATION, appele par des gestes d'operateur qui vivent dans
 # trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH
@@ -634,6 +638,7 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/human-converger.sh \
                /opt/lcars/catalogue-executor.py \
+               /opt/lcars/privileged-executor.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/fleet/deploy/provision \

@@ -193,6 +193,16 @@ runtime   /run/lcars/authority                         0750  lcars-authority:fle
 # sait par la porte d'arrivee. Rien de ce que l'appelant ecrit ne decide de ce qui s'execute.
 runtime   /run/lcars/authority/catalogue.sock          0660  lcars-authority:fleet  any
 runtime   /run/lcars/authority/roles.sock              0660  lcars-authority:fleet  any
+# ─── LA PORTE DU SERVICE PRIVILEGIE ─────────────────────────────────────────────────────────────
+#
+# ⚠ ELLE REMPLACE `/etc/sudoers.d/lcars-toolchain`, ET C'EST STRICTEMENT PLUS ETROIT. Le sudoers
+# accordait `%fleet ALL=(root) NOPASSWD:` sur un binaire qui prenait un SHA — dont seule la FORME
+# hexadecimale etait controlee, sur un depot ou des commits non revus vivent par conception. Ici le
+# verbe ne prend AUCUN argument : le service resout lui-meme la tete de la branche protegee.
+#
+# Meme population peut frapper (`fleet`), et elle ne peut plus rien choisir.
+runtime   /run/lcars/privileged                        0750  root:fleet          any
+runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 # ⚠ HORS DE L'ARBRE `/run/lcars/`, et c'est la raison pour laquelle ces deux lignes existent : un
 # `rm -rf /run/lcars` ne les emporte pas. Ni la mesure machine ni la table du corpus ne les avaient —
 # c'est la lecture du RUNTIME et de l'entrypoint qui les a rendus visibles, et le second n'est

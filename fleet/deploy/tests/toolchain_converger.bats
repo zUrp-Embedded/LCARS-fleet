@@ -40,9 +40,9 @@ setup() {
   export LCARS_TOOLCHAIN_WORK="$BATS_TEST_TMPDIR/work"
   export LCARS_TOOLCHAIN_LOCK="$BATS_TEST_TMPDIR/lock"
   export FORGE_BASE_URL="http://forge.test"
-  export FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/token"
+  # ⚠ AUCUN JETON POSE : le convergeur lit le depot d'ops en ANONYME. Un temoin qui en poserait
+  # un ferait passer au vert un script qui en exige encore.
   mkdir -p "$LCARS_STORE_ROOT/state" "$LCARS_TOOLCHAIN_WORK" "$BATS_TEST_TMPDIR/bin"
-  printf 'TOK\n' > "$FORGE_TOKEN_FILE"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   stub_deps
 }
@@ -108,11 +108,36 @@ EOF
   [[ "$output" == *"FORGE_BASE_URL"* ]]
 }
 
-@test "REFUS: jeton illisible" {
-  rm -f "$FORGE_TOKEN_FILE"
-  run "$SUT" deadbeef
-  [[ "$status" -eq 1 ]]
-  [[ "$output" == *"jeton"* ]]
+# ─── AUCUN SECRET DANS LE PROCESS LE PLUS PRIVILEGIE ────────────────────────────────────────────
+#
+# ⚠ CE TEMOIN GARDAIT UNE EXIGENCE QUI EST DEVENUE SON CONTRAIRE. Il epinglait « pas de jeton
+# lisible -> refus ». Or ce script porte le SEUL geste root de la machine, et la regle qui donne sa
+# forme au rail est que celui qui a le PRIVILEGE ne DETIENT aucun secret. Exiger un jeton, c'etait
+# exiger que le process le plus privilegie en tienne un — donc qu'un defaut chez lui puisse
+# escalader ce qu'il vole.
+#
+# Le depot d'ops est PUBLIC par construction — mesure du 2026-08-25 sur forge vivante :
+# `/repos/fleet/lcars/branches/tool_request` et `/contents/ops` repondent 200 SANS aucun en-tete
+# d'autorisation. La lecture part donc en anonyme, et ce temoin garde la propriete INVERSE.
+
+@test "AUCUN SECRET: ce script n'OUVRE aucun fichier de /home/private" {
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE : la cicatrice de ce fichier NOMME le chemin qu'elle a retire,
+  # et c'est son metier. Ce qui est interdit est de le LIRE.
+  local n
+  n="$(sed 's/#.*//' "$SUT" | grep -cE '/home/private' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SUT" | grep -nE '/home/private' >&2; return 1; }
+  n="$(sed 's/#.*//' "$SUT" | grep -cE 'TOKEN_FILE' || true)"
+  [ "$n" -eq 0 ]
+}
+
+@test "AUCUN SECRET: quand un jeton EST fourni, il ne passe pas en argv de curl" {
+  # La contrepartie du precedent. `FORGE_TOKEN` reste accepte pour une boite dont la forge exige une
+  # session en lecture — mais un en-tete construit en `-H` se lit dans `/proc/<pid>/cmdline`, par
+  # tout le monde, pendant toute la duree de l'appel, dans le process le plus privilegie qui soit.
+  local n
+  n="$(sed 's/#.*//' "$SUT" | grep -cE '\-H "Authorization' || true)"
+  [ "$n" -eq 0 ]
+  sed 's/#.*//' "$SUT" | grep -qE 'curl -sS -m 30 -K -'
 }
 
 @test "VERROU: une seconde convergence pendant la premiere sort 0 sans rien faire" {
