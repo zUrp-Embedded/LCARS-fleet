@@ -519,9 +519,39 @@ prov_parse_remote() {
 #
 # ECHEC = ARRET. Se rabattre sur `/tmp` serait re-ecrire le bug avec un commentaire qui dit qu'on ne
 # le fait pas.
+# ─── LA PORTEE DU VERROU — GLOBALE, OU CELLE D'UN SEUL HUMAIN ───────────────────────────────────
+#
+# ⚠ UN VERROU UNIQUE SERIALISAIT DES GESTES QUI NE SE TOUCHENT PAS, ET CA A COUTE UNE INSTALL.
+# Mesure du 2026-08-25 : le convergeur cree l'humain de fleet PENDANT que l'install tient son propre
+# apply, appelle `provision apply --human lcars --only 40-claude-bin …` pour l'equiper, et se fait
+# refuser — « un autre apply est en cours ». L'humain se retrouve avec un home, un shell, un groupe,
+# et PAS de `claude` : il ne peut lancer aucune fleet, et rien ne le lui dit.
+#
+# La collision n'est pas de la malchance : `48-forge-host` cree le compte de forge PENDANT l'apply,
+# et le convergeur poll toutes les 30 s — il tombe FORCEMENT dans la fenetre. C'est le chemin
+# nominal d'une premiere install, pas un cas de bord.
+#
+# ⚖ ARBITRAGE USER 2026-08-25 : « verrou per user, definitivement. On traite chaque user, on fait pas
+# un global : la preuve, si l'user qu'on teste est ok et qu'un autre user est fail, on passe par
+# dessus. » L'unite de travail EST l'humain — `reconcile_humans` le dit deja en `continue`-ant sur
+# l'echec de l'un pour traiter les suivants. Le verrou suit la meme unite.
+#
+# Deux humains n'ont aucun objet commun : leurs homes, leurs `~/.lcars`, leurs binaires `claude` sont
+# disjoints. Les serialiser n'a jamais rien protege.
+#
+# `prov_lock_path [portee]` — sans argument, le verrou GLOBAL (une passe complete, qui touche
+# `/local`, `/etc`, les unites) ; avec, le verrou de cette portee-la.
 prov_lock_path() {
-  local dir uid
+  local dir uid scope="${1:-}"
   uid="$(id -u)"
+
+  # ⚠ LA PORTEE DEVIENT UN NOM DE FICHIER : elle est bornee au charset des logins unix, jamais prise
+  # telle quelle. Un `../` ou un `/` dedans deplacerait le verrou hors du dossier qu'on vient de
+  # prouver sur — et le prouver pour ecrire ailleurs serait pire que ne pas le prouver.
+  if [[ -n "$scope" && ! "$scope" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    p_fail "verrou: portee « $scope » hors charset — REFUSE"
+    return 1
+  fi
 
   if [[ "$uid" -eq 0 ]]; then
     dir=/run/lock/lcars
@@ -548,7 +578,7 @@ prov_lock_path() {
   [[ "$owner" == "$uid" ]] || { p_fail "verrou: $dir appartient a l'uid $owner, pas a $uid"; return 1; }
   [[ "$mode" == "700" ]] || { p_fail "verrou: $dir est en $mode, attendu 700"; return 1; }
 
-  local lock="$dir/provision.lock"
+  local lock="$dir/provision${scope:+.$scope}.lock"
   # Le dossier est desormais prouve non-ecrivable par un tiers ; un lien A L'INTERIEUR ne peut donc
   # venir que de nous-memes ou d'un root anterieur. On le refuse quand meme : cette verification-la
   # coute un `[[ -L ]]` et c'est la seule qui reste entre `flock` et une troncature.

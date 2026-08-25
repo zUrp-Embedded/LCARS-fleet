@@ -326,6 +326,71 @@ module_sh() {
   [ "$status" -eq 0 ]
 }
 
+# ─── LE VERROU EST PER-HUMAIN QUAND LA PASSE L EST ──────────────────────────────────────────────
+#
+# ⚠ CE QUE CES TEMOINS GARDENT A COUTE L EQUIPEMENT D UN COMPTE. Mesure du 2026-08-25 : le
+# convergeur cree l humain de fleet PENDANT que l install tient son propre apply, appelle
+# `provision apply --human lcars --only 40-claude-bin …` pour l equiper, et se fait refuser — « un
+# autre apply est en cours ». L humain se retrouve avec un home, un shell, un groupe, et PAS de
+# `claude` : il ne peut lancer aucune fleet, et rien ne le lui dit.
+#
+# La collision est STRUCTURELLE : `48-forge-host` cree le compte de forge PENDANT l apply et le
+# convergeur poll toutes les 30 s. C est le chemin nominal d une premiere install, pas un cas de bord.
+#
+# ⚖ « on traite chaque user, on fait pas un global : si l user qu on teste est ok et qu un autre user
+# est fail, on passe par dessus » — l unite de travail est l humain, le verrou la suit.
+
+@test "verrou: deux humains ont deux verrous DISTINCTS — les serialiser ne protegeait rien" {
+  module_sh '
+    a="$(prov_lock_path alice)"
+    b="$(prov_lock_path bob)"
+    [[ "$a" != "$b" ]]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: le per-humain et le GLOBAL coexistent — c est le defaut qui a casse l install" {
+  # LE TEMOIN CENTRAL. Un apply complet tient le verrou global ; l equipement d un humain doit
+  # pouvoir tourner EN MEME TEMPS. Deux `flock` REELS sur les deux chemins, pas une comparaison de
+  # chaines : ce qui compte n est pas que les noms different, c est qu ils ne se bloquent pas.
+  module_sh '
+    g="$(prov_lock_path)"
+    h="$(prov_lock_path lcars)"
+    exec 8>"$g"; flock -n 8 || exit 1
+    exec 7>"$h"; flock -n 7 || exit 2
+    exec 7>&-; exec 8>&-
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: le MEME humain deux fois se bloque quand meme — la portee n a pas supprime le verrou" {
+  # LE TEMOIN DU TEMOIN. Sans lui, un `prov_lock_path` qui rendrait un chemin unique par APPEL
+  # passerait celui du dessus et ne verrouillerait plus rien du tout.
+  #
+  # ⚠ DEUX APPELS, PAS UNE VARIABLE REUTILISEE — ET MA PREMIERE ECRITURE FAISAIT L INVERSE. Elle
+  # appelait `prov_lock_path` UNE fois et ouvrait les deux descripteurs sur la meme chaine : un
+  # chemin unique par appel etait alors indetectable, et la mutation qui l introduisait passait
+  # VERTE. Ce qui se verifie ici n est pas que `flock` fonctionne — c est que le MEME humain resout
+  # au MEME verrou, deux appels de suite.
+  module_sh '
+    exec 8>"$(prov_lock_path lcars)"; flock -n 8 || exit 1
+    exec 7>"$(prov_lock_path lcars)"
+    flock -n 7 && exit 2
+    exec 7>&-; exec 8>&-
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: une portee qui s evade du dossier prouve est REFUSEE" {
+  # Le nom de portee devient un nom de FICHIER. Un `../` deplacerait le verrou hors du dossier dont
+  # on vient de prouver le mode et le proprietaire — et le prouver pour ecrire ailleurs serait pire
+  # que ne pas le prouver du tout.
+  module_sh 'prov_lock_path "../evade" >/dev/null 2>&1 && exit 1; :'
+  [ "$status" -eq 0 ]
+  module_sh 'prov_lock_path "a/b" >/dev/null 2>&1 && exit 1; :'
+  [ "$status" -eq 0 ]
+}
+
 @test "6-130: le verrou vit dans un dossier 0700 possede par l appelant" {
   module_sh '
     lock="$(prov_lock_path)"
