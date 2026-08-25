@@ -91,6 +91,9 @@ ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scri
 # demande a la forge, A L'INSTANT du geste. Le fichier n'a donc plus aucune raison d'etre lisible par
 # un groupe, et la question « qui a le droit » n'est plus une question de mode.
 OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
+# Le groupe qui TRAVERSE le repertoire des jetons — jamais celui qui les lit. Il n'apparait QUE sur
+# le repertoire ; les jetons eux-memes sont `0600 $OWNER:$OWNER`, et aucun groupe ne les ouvre.
+DIR_GROUP="${PROV_FLEET_GROUP:-fleet}"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
 # The SYSTEM account creates the org repos (create_project → onboard): POST /orgs/<org>/repos ALSO
@@ -359,10 +362,19 @@ for entry in "${ENTRIES[@]}"; do
   # ⚠ `-o`/`-g` NE SONT TENTES QUE SI ON EST ROOT, et le repli n'est PAS un `|| true` silencieux :
   # sans le droit de donner le fichier, le controle `stat` plus bas fait echouer le compte. Un secret
   # trop ferme se diagnostique ; mal attribue, non.
+  #
+  # ⚠ `0710 $OWNER:$DIR_GROUP` — LE GROUPE TRAVERSE, IL NE LIT PAS, et c'est le QUATRIEME poseur de
+  # ce repertoire. Les trois autres sont `system.manifest`, `25-directories` et
+  # `services/forge-gestures.sh` : quatre ecrivains pour un objet, et il suffit qu'UN d'eux pose un
+  # autre mode pour que le premier passage suivant defasse les trois autres, en silence.
+  #
+  # Le mode n'est pas `0700` parce que ce repertoire ne contient pas que des secrets : `forge.url` et
+  # `forge.public.url` y vivent en 0644 et trois modules `NEEDS: human` les lisent SOUS L'HUMAIN.
+  # Les jetons, eux, restent `0600` — c'est le mode du FICHIER qui les ferme.
   if [[ "$(id -u)" -eq 0 ]]; then
-    install -d -m 0700 -o "$OWNER" -g "$OWNER" "$TOKENS_DIR" 2>/dev/null || true
+    install -d -m 0710 -o "$OWNER" -g "$DIR_GROUP" "$TOKENS_DIR" 2>/dev/null || true
   else
-    install -d -m 0700 "$TOKENS_DIR" 2>/dev/null || true
+    install -d -m 0710 "$TOKENS_DIR" 2>/dev/null || true
   fi
   tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"

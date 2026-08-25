@@ -23,6 +23,7 @@
 #     sortie opposes (reessayer / se faire promouvoir). Les confondre envoie l'operateur reparer ce
 #     qui n'est pas casse.
 
+import grp
 import importlib.util
 import json
 import os
@@ -517,6 +518,62 @@ except mod.NoAuthority:
     check(True, "6d: le jeton retire leve NoAuthority — aucune valeur ne survit a son fichier")
 
 mod.MASTER_TOKEN_FILE = _garde_mt
+
+# ─── bind() : LE REPERTOIRE D'UNE PORTE PORTE LE GROUPE DE LA PORTE ─────────────────────────────
+#
+# ⚠ LE DEFAUT QUE CE TEMOIN GARDE A RENDU LE CHANTIER NON FONCTIONNEL, ET AUCUN MUR NE POUVAIT LE
+# VOIR. `bind()` chownait la SOCKET au groupe passe et laissait son REPERTOIRE a l'uid:gid du
+# process. Pour un service root : `drwxr-x--- root:root`. Mesure du 2026-08-25, install reelle —
+# `toolchain.sock` en `srw-rw---- root:fleet`, parfaite, dans ce repertoire-la : un membre de `fleet`
+# ne le TRAVERSE pas. Le sudoers `%fleet ALL=(root)` venait d'etre retire et la socket qui le
+# remplace ne repondait a personne.
+#
+# ⚠ ET C'EST FONCTIONNEL, PAS TEXTUEL, POUR UNE RAISON MESUREE. Un mur qui cherche le chemin sur la
+# ligne de l'appel ne voit rien : le code passe une VARIABLE. J'en ai ecrit un, son garde de
+# population a rendu « 0 chemin trouve ». La seule mesure qui tienne est d'APPELER `bind()` et de
+# regarder le disque.
+# ⚠ LE GROUPE CHOISI N'EST PAS LE GROUPE PRIMAIRE, ET C'EST TOUTE LA VALIDITE DE CE TEMOIN.
+#
+# Premiere ecriture : je passais le groupe primaire du process. `makedirs` cree DEJA le repertoire
+# avec ce gid — le `chown` etait donc un no-op, et retirer le correctif ne faisait rougir personne.
+# Mesure : la mutation « bind() cesse de chowner son repertoire » passait VERTE.
+#
+# C'est exactement l'accident qui a masque le defaut sur la vraie boite : `/run/lcars/authority` y
+# echappait parce que `lcars-authority` avait `fleet` en primaire, pendant que `/run/lcars/privileged`
+# — service root, primaire `root` — tombait. Un temoin qui reproduit l'accident ne mesure rien.
+#
+# On prend donc un groupe SECONDAIRE : le chown doit deplacer le gid pour que l'assertion tienne.
+_gid_primaire = os.getgid()
+_gid_secondaire = next((g for g in os.getgroups() if g != _gid_primaire), None)
+if _gid_secondaire is None:
+    check(False, "bind: ce runner n'a qu'UN groupe — le temoin ne peut pas distinguer un chown "
+                 "d'un no-op, et il ne doit pas passer vert en n'ayant rien mesure")
+    _gid_secondaire = _gid_primaire
+
+_sock_dir = os.path.join(WORK, "porte")
+_sock_path = os.path.join(_sock_dir, "t.sock")
+_mon_groupe = grp.getgrgid(_gid_secondaire).gr_name
+
+# `catalogue-executor.py` fait `import lcars_socket` apres avoir insere son propre repertoire dans
+# `sys.path` : le module voisin est donc un attribut de celui qu'on vient de charger. On l'atteint
+# par la, plutot qu'en recopiant le `sys.path.insert` — deux facons de trouver un module divergent.
+_srv = mod.lcars_socket.bind(_sock_path, _mon_groupe, 0o660, prefix="banc")
+try:
+    _st_dir = os.stat(_sock_dir)
+    _st_sock = os.stat(_sock_path)
+    _gid_attendu = grp.getgrnam(_mon_groupe).gr_gid
+
+    check(_st_sock.st_gid == _gid_attendu,
+          "bind: la SOCKET porte le groupe passe (%s)" % grp.getgrgid(_st_sock.st_gid).gr_name)
+    check(_st_dir.st_gid == _gid_attendu,
+          "bind: son REPERTOIRE porte le MEME groupe — sinon la porte est parfaite et "
+          "inatteignable (%s)" % grp.getgrgid(_st_dir.st_gid).gr_name)
+    # Et le repertoire donne bien la TRAVERSEE au groupe : 0750, pas 0700. Sans le bit `x`, le
+    # groupe ne peut pas atteindre la socket meme en la possedant.
+    check(_st_dir.st_mode & 0o010,
+          "bind: le repertoire accorde le bit x au groupe (mode 0%o)" % (_st_dir.st_mode & 0o777))
+finally:
+    _srv.close()
 
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(0 if ok else 1)

@@ -40,6 +40,27 @@ set -euo pipefail
 # Le nom vit ICI, une fois. Les unites systemd et l'entrypoint le copient — et un temoin compare les
 # copies, parce qu'une copie que personne ne verifie n'est pas une source unique de verite.
 AUTHORITY_USER="${PROV_AUTHORITY_USER:-lcars-authority}"
+# ─── LE GROUPE DU SERVICE, ET POURQUOI IL DOIT EXISTER ──────────────────────────────────────────
+#
+# ⚠ CE MODULE FAISAIT `useradd -g "$PROV_FLEET_GROUP"`, ET C'ETAIT LA MOITIE D'UN PATRON. Donner un
+# groupe primaire EXISTANT est legitime — `22-fleet-human:184` le fait deliberement pour l'humain de
+# fleet, dont la possession s'ecrit alors `user:fleet`. Ce qui est faux, c'est de le faire PUIS
+# d'ecrire `chown user:user` : `useradd -g <groupe existant>` ne cree AUCUN groupe du nom du compte.
+#
+# MESURE DU 2026-08-25, install reelle sur WSL : `uid=999(lcars-authority) gid=1001(fleet)`, et
+# `getent group lcars-authority` ne rend RIEN. Six `chown user:user` et deux lignes de manifeste
+# nommaient donc un groupe inexistant — `chown: invalid group` — et trois modules sont tombes.
+#
+# ⚠ ET LA CICATRICE ETAIT DEJA ECRITE, A DEUX PORTES D'ICI. `services/console.sh:328` porte, mesure
+# et datee du 2026-08-21 : « `useradd -g fleet lcars` ne cree aucun groupe `lcars` » — avec son
+# symptome, une console MORTE au demarrage. J'ai ecrit `-g` dans le fichier d'a cote deux jours
+# apres, sans lire le voisin.
+#
+# ⚖ POURQUOI UN GROUPE A LUI, ET PAS `user:fleet` : ecrire `chown user:fleet` sur les secrets
+# remettrait `fleet` en position d'AUTORITE sur eux — le nom du groupe redeviendrait une reponse a
+# « qui a le droit de lire », l'inverse exact de ce que ce chantier retire. A 0600 le groupe ne donne
+# rien AUJOURD'HUI ; il donnerait tout le jour ou quelqu'un relache un jeton en 0640.
+AUTHORITY_GROUP="${PROV_AUTHORITY_GROUP:-$AUTHORITY_USER}"
 NOLOGIN="${LCARS_NOLOGIN:-/usr/sbin/nologin}"
 
 # ⚠ SEAM DE TEMOIN, MEME IDIOME QUE `05-host-consent` ET `62-runtime-helpers` : un temoin ne peut pas
@@ -52,6 +73,16 @@ account_exists() { awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$PASSW
 shell_of()       { awk -F: -v n="$1" '$1==n {print $7; exit}' "$PASSWD_FILE"; }
 
 check() {
+  # ⚠ LE GROUPE EST SONDE AVANT LE COMPTE, ET SON ABSENCE ETAIT LE TROU DE CE `check`. Il verifiait
+  # le compte et l'adhesion, jamais le groupe — donc il rendait CONFORME sur la machine exacte ou
+  # `chown lcars-authority:lcars-authority` allait echouer trois modules plus loin. Un check qui ne
+  # sonde pas ce que l'apply pose est un check qui certifie l'etat qu'il ne regarde pas.
+  if getent group "$AUTHORITY_GROUP" >/dev/null 2>&1; then
+    p_ok "groupe de service $AUTHORITY_GROUP"
+  else
+    p_drift "groupe $AUTHORITY_GROUP absent — tout « chown $AUTHORITY_USER:$AUTHORITY_GROUP » échouera sur « invalid group », et les secrets de forge ne seront posés nulle part"
+  fi
+
   if account_exists "$AUTHORITY_USER"; then
     if [[ "$(shell_of "$AUTHORITY_USER")" == "$NOLOGIN" ]]; then
       p_ok "compte de service $AUTHORITY_USER ($NOLOGIN)"
@@ -77,11 +108,17 @@ check() {
 
 apply() {
   # `20-groups` a deja pose `$PROV_FLEET_GROUP` — ce module tourne apres lui, et son rang le dit.
+  #
+  # ⚠ LE GROUPE AVANT LE COMPTE, ET L'ORDRE EST UN CONTRAT : `useradd -g "$AUTHORITY_GROUP"` refuse
+  # net si le groupe n'existe pas. `ensure_group` est idempotent et verifie son propre `groupadd`
+  # (provision-lib) — un groupe qu'on croit pose et qui ne l'est pas est le defaut qu'on repare ici.
+  ensure_group "$AUTHORITY_GROUP" || { p_fail "groupe $AUTHORITY_GROUP non posé — le compte de service n'aura pas de groupe à lui, et tout chown sur les secrets échouera"; verdict_apply; }
+
   if ! account_exists "$AUTHORITY_USER"; then
     # `--system` : pas de home, uid sous UID_MIN, donc `bin/fleet_v2` refusera de lancer une fleet
     # sous ce compte — le garde qui protege les pods vaut aussi pour lui, et gratuitement.
     if run_quiet "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
-                 -g "$PROV_FLEET_GROUP" -- "$AUTHORITY_USER"; then
+                 -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $AUTHORITY_USER"
     else
       p_fail "création de $AUTHORITY_USER en échec — le service d'autorité restera sans identité"

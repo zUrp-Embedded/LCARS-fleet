@@ -150,7 +150,20 @@ defmodule Fleet.Credentials.RoleToken do
   # (`no_role_token`). Garder ce stat ici produirait un diagnostic sur un objet dont ce process n'est
   # plus responsable — et apres la fermeture des modes, il ne pourrait meme plus le traverser.
 
-  @doc "Root of the role tokens (`:lcars_fleet, :credentials_role_tokens_dir`, default `/home/private`)."
+  # ⚠ `dir/0` EST DEVENU PRIVE LE 2026-08-25, IL N'A PAS DISPARU — ET LA NUANCE EST UNE MESURE.
+  #
+  # Il etait annonce « sans aucun appelant dans `lib/` ni `bin/` », et c'etait vrai des appels
+  # EXTERNES. Le compilateur a dit le reste : `path_for/1` l'appelle, dans ce module meme. Le
+  # supprimer cassait la construction du chemin — et `path_for/1` est vivant, ce sont les fixtures de
+  # la suite qui l'emploient pour poser un jeton la ou la regle de nommage le veut.
+  #
+  # Ce qui est retire est donc l'ACCESSEUR PUBLIC : plus personne hors d'ici ne demande « ou vivent
+  # les jetons », parce que plus personne hors d'ici n'a de raison d'y aller. Le BEAM ne lit aucun de
+  # ces fichiers ; il demande au service d'autorite, qui possede le repertoire et resout le chemin de
+  # son cote.
+  #
+  # Le knob `:credentials_role_tokens_dir` reste — il steere `runtime.exs` et le double d'autorite de
+  # la suite — et le README ne pretend plus qu'un lecteur de runtime s'en sert.
   @spec dir() :: String.t()
-  def dir, do: Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || @default_dir
+  defp dir, do: Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || @default_dir
 end

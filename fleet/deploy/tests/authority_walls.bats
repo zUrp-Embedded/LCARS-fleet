@@ -58,38 +58,68 @@ absent() { # absent <motif etendu> <fichier>
   printf '%s\n' "${CODE[@]}" | grep -q 'modules.d/25-directories.sh'
 }
 
-# ─── MUR 1 — LE REPERTOIRE DES SECRETS N'EST OUVERT A AUCUN GROUPE ──────────────────────────────
+# ─── MUR 1 — LE GROUPE TRAVERSE LE REPERTOIRE DES SECRETS, IL NE LE LIT JAMAIS ──────────────────
 #
-# ⚠ CE MUR EXISTE PARCE QUE LES FICHIERS NE SUFFISENT PAS. Trois ecrivains posent ce repertoire —
-# `25-directories`, `provision-role-tokens`, `put_secret` — et il suffit qu'UN d'eux repose `0750`
-# pour que le groupe rentre au premier `provision apply`, quels que soient les modes des fichiers.
-# Une CLASSE D'OBJET entiere avait ete inventoriee a moitie au chantier precedent, un cran plus haut.
+# ⚠ CE MUR A ETE REECRIT LE 2026-08-25, ET SA PREMIERE VERSION AVAIT LE DEFAUT QU'IL EXISTE POUR
+# ATTRAPER. Il refusait tout mode dont le chiffre de GROUPE est non nul — `0[0-7][1-7][0-7]`. Joue
+# sur les trois modes possibles : `0700` passe, `0750` refuse, et `0710` REFUSE AUSSI, parce que le
+# `1` matche `[1-7]`.
+#
+# Or `0710` est l'etat CORRECT, et le mur l'interdisait : j'avais grave le MECANISME (« aucun bit de
+# groupe ») a la place de l'EXIGENCE (« aucun uid humain ne LIT un secret »). Le bit `x` donne la
+# traversee d'un chemin connu ; le bit `r` donne l'enumeration. Ce sont deux droits differents, et
+# seul le second est en cause.
+#
+# ⚠ POURQUOI `x` EST ACCORDE, ET POURQUOI `r` NE DOIT JAMAIS L'ETRE. Ce repertoire ne contient pas
+# que des secrets : `forge.url` et `forge.public.url` y vivent en `0644` — des ADRESSES — et trois
+# modules `NEEDS: human` les lisent sous l'uid de l'humain. En `0700` ils prenaient « Permission
+# denied » et la boite finissait sans `FORGE_BASE_URL` (mesure du 2026-08-25, install reelle).
+# Le `r`, lui, donnerait l'enumeration des comptes de forge de la boite — et c'est une information
+# en soi, meme sans le contenu des fichiers.
+#
+# ⚠ CE QUE LE `0710` DEPLACE, ET QUI SE TIENT ICI DESORMAIS : en `0700`, un secret qui perdait son
+# `0600` restait ferme PAR LE REPERTOIRE. En `0710`, il devient lisible par tout `fleet`. La garantie
+# n'a pas disparu, elle a change de porteur : c'est le MUR 2 et le temoin fonctionnel du minteur qui
+# la tiennent maintenant. Un mur qui accorde le `x` doit dire pourquoi le `r` reste interdit, sinon
+# le prochain elargira d'un cran en croyant suivre.
 
-@test "MUR 1: aucun ecrivain ne pose un mode de groupe sur le repertoire des secrets" {
+@test "MUR 1: aucun ecrivain ne donne le bit de LECTURE du groupe sur le repertoire des secrets" {
   local f hits=0
   for f in "${CODE[@]}"; do
-    # Un `install -d` / `ensure_dir` / `chmod` dont le mode ouvre le GROUPE (2e chiffre non nul) sur
-    # une ligne qui nomme le repertoire des secrets.
-    if code_of "$f" | grep -qE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][1-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)'; then
-      echo "MUR rompu — mode de groupe sur le repertoire des secrets dans $f :" >&2
-      code_of "$f" | grep -nE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][1-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' >&2
+    # Le chiffre de groupe vaut 4, 5, 6 ou 7 → le bit `r` est la. `1` (traverser seul) et `0` passent.
+    if code_of "$f" | grep -qE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][4-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)'; then
+      echo "MUR rompu — le groupe LIT le repertoire des secrets dans $f :" >&2
+      code_of "$f" | grep -nE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][4-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' >&2
       hits=$((hits + 1))
     fi
   done
   [ "$hits" -eq 0 ]
 }
 
-@test "MUR 1 bis: les TROIS ecrivains du repertoire sont bien la — sinon le mur ci-dessus est creux" {
-  # GARDE D'INSTRUMENT. Le mur 1 cherche une ABSENCE : il passe au vert si les trois ecrivains ont
-  # disparu, ete renommes, ou si le motif ne les matche plus. Ce test-ci compte la POPULATION que le
-  # mur est cense surveiller. Sans lui, un refactor qui renomme `install -d` en autre chose rendrait
-  # le mur muet, et personne ne le saurait.
-  local n
-  n="$(grep -cE 'install -d -m 0700' "$REPO/etc/provision-role-tokens.sh" || true)"
-  [ "$n" -ge 1 ] || { echo "provision-role-tokens ne pose plus le repertoire" >&2; return 1; }
-  n="$(grep -cE 'install -d -m 0700' "$REPO/services/forge-gestures.sh" || true)"
-  [ "$n" -ge 1 ] || { echo "put_secret ne pose plus le repertoire" >&2; return 1; }
-  grep -qE 'PROV_TOKENS_DIR 0700' "$REPO/deploy/modules.d/25-directories.sh"
+@test "MUR 1 bis: les QUATRE ecrivains du repertoire sont la, et ils posent le MEME mode" {
+  # GARDE D'INSTRUMENT, ET IL A ETE PLUS QUE CA. Le mur 1 cherche une ABSENCE : il passe au vert si
+  # les ecrivains ont disparu ou si le motif ne les matche plus. Ce test compte la POPULATION.
+  #
+  # ⚠ ET IL LA COMPTAIT DEJA QUAND J'AI ECRIT LE CORRECTIF, SANS QUE JE LA LISE COMME TELLE. Il
+  # enumerait les ecrivains du repertoire — c'etait la liste exacte des sites a changer, et je l'ai
+  # lue comme un test qui passe. Ce qui manquait n'etait pas la mesure : elle etait ecrite ici.
+  #
+  # ⚠ ET ILS SONT QUATRE, PAS TROIS. `etc/provision-role-tokens.sh` en fait partie et n'etait nomme
+  # nulle part dans la prose du chantier. Il suffit qu'UN pose un autre mode pour que le premier
+  # passage suivant defasse les trois autres, EN SILENCE — le gate ne le voit pas, il n'execute
+  # aucun de ces gestes contre une vraie table.
+  local f
+  for f in "$REPO/etc/provision-role-tokens.sh" "$REPO/services/forge-gestures.sh"; do
+    grep -qE 'install -d -m 0710' "$f" \
+      || { echo "$f ne pose plus le repertoire des secrets en 0710" >&2; return 1; }
+    # Et il ne reste AUCUN 0700 sur cet objet : deux modes dans un meme fichier, c'est celui qu'on
+    # n'a pas relu qui gagne.
+    local n
+    n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700[^\n]*(PRIVATE_DIR|TOKENS_DIR)' || true)"
+    [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
+  done
+  grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
+  grep -qE '^dir[[:space:]]+/home/private[[:space:]]+0710' "$MANIFEST"
 }
 
 # ─── MUR 2 — LES SECRETS NE SONT LISIBLES PAR AUCUN GROUPE ──────────────────────────────────────
@@ -146,16 +176,23 @@ secret_writers() {
   [ "$n" -eq 5 ]
 }
 
-@test "MUR 2 bis: le manifeste declare /home/private FERME, et a son detenteur" {
-  # ⚠ LE MANIFESTE N'EST PAS LA SOURCE DES MODES — trois ecrivains le sont, d'ou le mur 1. Il est
+@test "MUR 2 bis: le manifeste declare /home/private au detenteur, traversable et non listable" {
+  # ⚠ LE MANIFESTE N'EST PAS LA SOURCE DES MODES — QUATRE ecrivains le sont, d'ou le mur 1. Il est
   # la DECLARATION, et un `uninstall` s'en sert. Une table qui dirait encore `0750 root:fleet`
   # decrirait une machine qui n'existe plus.
+  #
+  # ⚠ CE MUR DISAIT `[[ "$row" != *fleet* ]]`, ET IL INTERDISAIT LE CORRECTIF. « le groupe fleet
+  # traverse encore » etait ecrit comme une faute ; c'est l'etat voulu. J'y avais grave le MECANISME
+  # par lequel j'obtenais l'exigence, pas l'exigence — et le mecanisme etait faux. Le groupe doit
+  # traverser (les modules `NEEDS: human` lisent `forge.url` sous l'uid de l'humain) et ne doit pas
+  # lister. Ce qui se verifie ici est donc : le detenteur est le service, le mode accorde `x` au
+  # groupe et pas `r`.
   local row
   row="$(grep -E '^dir[[:space:]]+/home/private[[:space:]]' "$MANIFEST")"
   [ -n "$row" ] || { echo "/home/private n'est plus declare dans le manifeste" >&2; return 1; }
-  [[ "$row" == *0700* ]] || { echo "declare non ferme : $row" >&2; return 1; }
-  [[ "$row" == *lcars-authority* ]] || { echo "declare sans detenteur : $row" >&2; return 1; }
-  [[ "$row" != *fleet* ]] || { echo "le groupe fleet traverse encore : $row" >&2; return 1; }
+  [[ "$row" == *0710* ]] || { echo "mode attendu 0710 (le groupe traverse, il ne liste pas) : $row" >&2; return 1; }
+  [[ "$row" == *lcars-authority:fleet* ]] \
+    || { echo "attendu « lcars-authority:fleet » — le service detient, le groupe traverse : $row" >&2; return 1; }
 }
 
 # ─── MUR 3 — AUCUN CHEMIN DE SECRET N'EST DONNE A QUI NE PEUT PAS L'OUVRIR ───────────────────────
@@ -295,6 +332,29 @@ secret_writers() {
   grep -q 'jeton-rotatif' "$banc"
   grep -q '6d: RELU a chaque appel' "$banc"
 }
+
+# ─── POSEUR → TABLE : POURQUOI IL N'Y A PAS DE MUR 8 TEXTUEL ICI ────────────────────────────────
+#
+# L'axe est juste, et c'est celui qui manquait : tous les murs de ce depot partent de la TABLE, donc
+# aucun ne pouvait voir `bind()` — un service qui cree `/run/lcars/<x>/` avec l'uid:gid du process,
+# une realite que la table ne decrit pas. La socket etait parfaite, son repertoire fermait la porte,
+# et le chantier etait NON FONCTIONNEL sans qu'une ligne le dise.
+#
+# ⚠ MAIS UN MUR TEXTUEL NE PEUT PAS LE TENIR, ET J'EN AI ECRIT UN AVANT DE LE MESURER. Il cherchait
+# le chemin litteral sur la ligne de l'appel ; le vrai code passe des VARIABLES
+# (`os.makedirs(parent, …)`, `install -d … "$CONSOLE_ROOT"`). Son garde de population a rendu
+# « 0 chemin trouve » — l'instrument s'est denonce lui-meme, ce pour quoi ces gardes existent.
+#
+# Et la moitie verifiable textuellement l'est DEJA : `system_manifest.bats` « ISO 1/2 » balaie les
+# litteraux de `services/*.{sh,py}` et exige leur declaration. Elle passait — les deux sockets sont
+# declarees. Ce qu'elle ne voit pas, c'est qu'un service pose un MODE ou un PROPRIETAIRE que la table
+# contredit : `/run/lcars/privileged` declare `0750 root:fleet`, pose `root:root`. Deux faits sur le
+# meme objet, dont un seul est du texte.
+#
+# ⚖ CETTE MOITIE-LA EST DONC TENUE FONCTIONNELLEMENT, dans `test/test_catalogue_executor.py` :
+# `bind()` est APPELE dans un tmp, et on regarde le groupe que porte le repertoire. C'est la
+# troisieme fois de ce chantier qu'un mur textuel ne suffit pas — apres le mode d'une ecriture
+# atomique, et apres la memoisation d'un jeton.
 
 @test "MUR 4: le minteur VERIFIE le proprietaire de ce qu'il vient d'ecrire" {
   # ⚠ LE CONTROLE EST LE JUMEAU DU MODE, ET LES DESYNCHRONISER FAIT ECHOUER CHAQUE COMPTE. Le script

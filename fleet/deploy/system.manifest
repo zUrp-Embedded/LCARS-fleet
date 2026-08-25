@@ -86,12 +86,28 @@ dir       /usr/share/lcars/doc                         0755  root:root          
 # UN SEUL process ouvre ces fichiers maintenant : `lcars-authority`. Ce qu'il rend, il le rend apres
 # avoir demande a la forge, A L'INSTANT du geste.
 #
-# ⚠ CE REPERTOIRE NE CONTIENT PAS QUE DES SECRETS, et c'est mesure : `forge.url` et
-# `forge.public.url` y vivent en `0644`, et ce ne sont pas des secrets. Leurs seuls lecteurs sont
-# `provision-lib.sh`, source par `provision`, qui tourne en ROOT — root traverse un `0700` sans le
-# voir. Aucun lecteur sous uid humain ne subsiste dans le code vivant (mesure du 2026-08-25 sur
-# `fleet/bin`, `fleet/lib`, les skills d'admiral et les mounts bwrap : les pods ne montent PAS ce
-# repertoire).
+# ⚠ CE REPERTOIRE NE CONTIENT PAS QUE DES SECRETS, et c'est ce qui a impose le `0710`. `forge.url`
+# et `forge.public.url` y vivent en `0644` : ce sont des ADRESSES, pas des secrets.
+#
+# ⚠ ET LA PHRASE QUI TENAIT ICI ETAIT FAUSSE. Elle disait : « leurs seuls lecteurs sont
+# `provision-lib.sh`, source par `provision`, qui tourne en ROOT — root traverse un 0700 sans le
+# voir ». J'avais suivi le LECTEUR sans regarder l'UID SOUS LEQUEL il est source. Trois modules sont
+# `NEEDS: human` et tournent sous l'humain via `as_human` — `40-claude-bin`, `70-human`,
+# `75-projects` — et ils sourcent tous cette lib. Mesure du 2026-08-25, install reelle :
+# `cat: /home/private/forge.url: Permission denied`, `PROV_FORGE_URL=[]`, donc `fleet_v2.env` sans
+# `FORGE_BASE_URL`, donc `fleet_v2 start` qui refuse. L'axe manquant n'etait pas un fichier, c'etait
+# un CROISEMENT : `NEEDS: human` x `source provision-lib`.
+#
+# `0710` : le groupe TRAVERSE, il ne LISTE pas. Un chemin connu s'ouvre (`forge.url`), l'enumeration
+# des comptes reste fermee, et les secrets restent `0600` — mesure sur banc : `cat forge.url` OK,
+# `ls` refuse, `cat` d'un `0600` refuse.
+#
+# ⚠ CE QUE LE `0710` COUTE, ET IL FAUT LE SAVOIR : il rend les MODES DE FICHIERS porteurs. En `0700`,
+# un secret qui perdait son `0600` restait ferme par le repertoire ; ici il devient lisible par tout
+# `fleet`. C'est tenable — trois ecrivains posent ces modes et `authority_walls` les garde — mais
+# c'est une garantie qui a change de porteur, pas une qui a disparu.
+#
+# Les pods ne montent PAS ce repertoire (`bwrap_launch.sh:357` est un commentaire, pas un bind).
 #
 # ⚠ CE QUI EST LAISSE CASSE, ET DIT PLUTOT QUE DECOUVERT : deux skills d'onboarding de l'ere v1
 # (`onboard_v2`, `fleet-init`) referencent d'autres fichiers d'ici — `.github-token`,
@@ -99,7 +115,7 @@ dir       /usr/share/lcars/doc                         0755  root:root          
 # pose, et `onboard_v2` en lit un SANS `sudo` (`SKILL.md:314`). Cette lecture-la meurt avec cette
 # ligne. Ce sont des vestiges d'un rail retire ; les reparer est un autre chantier, pas un effet de
 # bord de celui-ci.
-dir       /home/private                                0700  lcars-authority:lcars-authority  any
+dir       /home/private                                0710  lcars-authority:fleet  any
 dir       /home/catalogues                             0750  root:fleet          any
 # ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
 # (`LCARS_STORE_ROOT`, lu par `toolchain-converger.sh:39`) ; `/var/lib/lcars/tofu` est l'etat des

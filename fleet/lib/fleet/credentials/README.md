@@ -31,7 +31,8 @@ credential precedence, the `NEVER` invariants) is canonical in the doc lineage
 Pure library domain — no supervisor.
 
 ## Config & deps
-- Knob `:lcars_fleet, :credentials_forge_auth` (`%{url_prefix, token}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env.
-- Knob `:lcars_fleet, :credentials_role_tokens_dir` — read by `RoleToken` (default `/home/private`), set by `runtime.exs` from `FORGE_ROLE_TOKENS_DIR`.
+- Knob `:lcars_fleet, :credentials_forge_auth` (`%{url_prefix, account}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env. ⚠ It carries an ACCOUNT NAME, never a token: the credential is asked of the authority service at the instant it is used. This line said `%{url_prefix, token}` until 2026-08-25 — a doc that describes a shape nobody poses makes the next reader write code that never matches.
+- Knob `:lcars_fleet, :credentials_authority_socket` — read by `Authority` (default `/run/lcars/authority/roles.sock`), overridable because a witness cannot bind in `/run`.
+- ⚠ `:credentials_role_tokens_dir` NO LONGER HAS A RUNTIME READER, and the line claiming it did is gone. The BEAM does not open `<dir>/<account>.gitea_token` any more — it asks `roles.sock`, and the authority service resolves the path on its side. The knob still steers `runtime.exs` and the test suite's authority double; naming a reader that does not exist is the same class of defect as the `system.manifest` sentence this chantier had to correct.
 - Knob `:lcars_fleet, :credentials_forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/credentials.ex`).

@@ -70,6 +70,27 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
+
+# ⚠ LA RÉVISION VOYAGE AVEC L'ARCHIVE, ET SANS ELLE TOUTE INSTALL DEPUIS UN PACK MENT.
+#
+# `git archive` n'emporte PAS `.git` — c'est son métier. `prov_source_rev` cherche alors un
+# `.source-revision` à la racine (provision-lib:1175) et, sans lui, rend « inconnue ».
+# `62-runtime-helpers` estampille donc `/opt/lcars/.source-revision` avec « inconnue », et sa passe
+# suivante rend un DRIFT qui dit « absent » d'un fichier qui EXISTE et vaut « inconnue ». L'opérateur
+# cherche un fichier manquant, le trouve, et reste bloqué.
+#
+# MESURE DU 2026-08-25, install réelle depuis un pack : `-rw-r--r-- root:root 9 octets`, contenu
+# `inconnue`. Ce n'est pas un cas de bord — c'est le mode d'install nominal de ce dépôt.
+#
+# Le repli EXISTAIT déjà ; ce qui manquait était de l'alimenter. Une ligne ici rend le paquet
+# traçable à son commit, et rend au module de quoi comparer ce qui est posé à ce qui est en source —
+# la question qui a coûté un compte utilisateur le 2026-08-21.
+#
+# ⚠ `--short=8`, LA MÊME FORME QUE `prov_source_rev` : deux longueurs de sha ne se comparent pas, et
+# la comparaison est tout ce que ce fichier sert à faire.
+git rev-parse --short=8 HEAD > "$STAGE/$ROOT/.source-revision" 2>/dev/null \
+  || die "révision indéterminable — le paquet serait intraçable, et l'install le dirait mal"
+
 mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
 cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
 tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"

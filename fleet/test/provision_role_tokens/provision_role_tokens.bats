@@ -174,13 +174,24 @@ teardown() { rm -rf "$TMP"; }
 # ferme rien : ce script POSE le repertoire lui aussi, et il le posait `0750`. Le premier
 # `provision apply` suivant aurait donc rouvert au groupe, quel que soit le soin mis aux modes de
 # fichiers. Une CLASSE D'OBJET entiere avait ete inventoriee a moitie.
-@test "le REPERTOIRE des jetons est pose ferme, pas seulement les jetons" {
+#
+# ⚠ ET CE TEMOIN EPINGLAIT `700`, CE QUI EST DEVENU FAUX. Mesure du 2026-08-25 sur une install
+# reelle : `/home/private` ne contient pas que des secrets — `forge.url` et `forge.public.url` y sont
+# en 0644 — et TROIS modules `NEEDS: human` les lisent sous l'uid de l'humain. En `0700` ils
+# prenaient « Permission denied » et la boite finissait sans `FORGE_BASE_URL`.
+#
+# L'exigence n'a pas bouge d'un mot : AUCUN uid humain ne LIT un secret. Ce qui bouge est le moyen —
+# le groupe TRAVERSE (`x`), il ne LISTE pas (`r`), et les jetons restent `0600`. C'est ce qui se
+# verifie ici, et le chiffre du milieu est la seule chose qui change.
+@test "le REPERTOIRE des jetons : le groupe TRAVERSE, il ne LISTE pas" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
   local dir="$TMP/neuf"
   run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$dir" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$dir")" = "700" ]
+  [ "$(stat -c %a "$dir")" = "710" ]
+  # Et le jeton dedans reste ferme : c'est le mode du FICHIER qui le tient, plus celui du dossier.
+  [ "$(stat -c %a "$dir/engineer.gitea_token")" = "600" ]
 }
 
 @test "idempotence: second run on an already-valid token → OK skip, ZERO new POST" {

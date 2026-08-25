@@ -14,8 +14,13 @@
 #
 #   /local          0755 root:root — les prefixes d'install y sont crees par 60-deploy ;
 #                   root-only en ecriture = personne ne remplace un runtime deploye par surprise.
-#   /home/private   0700 lcars-authority — les secrets de forge de la boite (jetons de role,
-#                   jeton master, seed). UN SEUL process les ouvre : le service d'autorite.
+#   /home/private   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
+#                   jeton master, seed). UN SEUL process les OUVRE : le service d'autorite.
+#                   ⚠ `0710` ET PAS `0700` : le groupe TRAVERSE, il ne LISTE pas. Ce repertoire ne
+#                   contient pas que des secrets — `forge.url` et `forge.public.url` y sont en 0644,
+#                   et trois modules `NEEDS: human` les lisent SOUS L'HUMAIN via `as_human`. En 0700
+#                   ils prenaient « Permission denied », `PROV_FORGE_URL` restait vide, et
+#                   `fleet_v2.env` n'obtenait jamais son `FORGE_BASE_URL` (mesure du 2026-08-25).
 #                   ⚠ IL ETAIT `0750 root:fleet`, ET LE GROUPE ETAIT UNE PROJECTION. Le convergeur
 #                   remplissait `fleet` depuis l'equipe `humans` de la forge toutes les 30 s : le
 #                   droit de lire un credential avait donc la peremption d'un cache, et se retirer
@@ -146,7 +151,7 @@ prov_runtime_dirs() {
 prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
-    "$PROV_TOKENS_DIR 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
+    "$PROV_TOKENS_DIR 0710 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
@@ -214,11 +219,35 @@ check_tmpfiles() {
   fi
 }
 
+# ⚠ LE PREMIER ÉCHEC TERMINAIT LA TABLE, ET UNE SEULE LIGNE COÛTAIT LES SEIZE AUTRES.
+#
+# `verdict_apply` fait `exit` (provision-lib:282). Écrit dans la BOUCLE, il transformait un chown
+# raté en abandon du module : tout ce qui suivait dans la table n'était jamais posé, et
+# `apply_tmpfiles` non plus.
+#
+# MESURE DU 2026-08-25, install réelle sur WSL. Un groupe manquant sur `/home/private` a coûté SEPT
+# objets sans aucun rapport avec lui :
+#   /home/projects · /home/projects.ops · /home/projects.workshop   les racines de face
+#   /run/lcars/console · /run/lcars/console/<humain>                la racine des consoles
+#   /var/lib/lcars/tofu                                             l'état terraform
+#   /etc/tmpfiles.d/lcars-console.conf                              la persistance au reboot
+# Le dernier porte son propre verdict : « /run/lcars/console ne se refera pas au reboot, et la fleet
+# ne démarrera pas ». La machine s'est retrouvée avec `lcars-landing` « debout » et aucune racine de
+# console — un demi-état qu'aucune ligne ne nommait.
+#
+# ⚠ `|| true` N'EST PAS UNE NÉGLIGENCE ICI, ET C'EST LA SEULE CHOSE À VÉRIFIER AVANT DE LE LIRE
+# COMME TELLE. Le comptage a DÉJÀ eu lieu en amont : `ensure_dir`, `ensure_mode` et
+# `prov_refuse_symlink_path` passent tous par `p_fail`, qui incrémente `PROV_FAILED`
+# (provision-lib:221) — précisément ce que lit le `verdict_apply` de la fin. La boucle finit,
+# `apply_tmpfiles` tourne, et le module sort quand même en 1.
+#
+# On ne change pas S'IL échoue, seulement QUAND il le dit. Une entrée mauvaise — groupe absent,
+# mount pas prêt, disque plein — ne doit pas emporter tout l'arbre.
 apply() {
   local spec path mode owner
   while read -r spec; do
     read -r path mode owner <<< "$spec"
-    ensure_dir "$path" "$mode" "$owner" || verdict_apply
+    ensure_dir "$path" "$mode" "$owner" || true
   done < <(prov_dirs)
   apply_tmpfiles
   verdict_apply

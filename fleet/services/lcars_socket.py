@@ -46,14 +46,43 @@ def bind(path, group, mode=0o660, backlog=8, prefix="lcars"):
         os.unlink(path)
     except FileNotFoundError:
         pass
-    os.makedirs(os.path.dirname(path), mode=0o750, exist_ok=True)
+
+    # ⚠ LE REPERTOIRE PORTE LE MEME GROUPE QUE LA SOCKET, ET L'OUBLIER RENDAIT LA PORTE
+    # INATTEIGNABLE. `makedirs` cree avec l'uid:gid DU SERVICE. Pour un service root, c'est
+    # `root:root` en 0750 — donc un membre du groupe ne TRAVERSE pas, quelle que soit la finesse du
+    # mode de la socket qui est dedans.
+    #
+    # MESURE DU 2026-08-25, install reelle : `toolchain.sock` en `srw-rw---- root:fleet`, parfaite,
+    # dans un `drwxr-x--- root:root`. Le sudoers `%fleet ALL=(root)` venait d'etre retire et la
+    # socket qui le remplace etait injoignable. Le chantier etait NON FONCTIONNEL, et rien ne le
+    # disait : la socket existe, ses droits sont justes, elle repond a personne.
+    #
+    # C'est la meme moitie d'axe que ce depot a deja payee deux fois — le fichier traite, le
+    # contenant oublie. Ici c'est un `chown` qui portait sur la socket et pas sur ce qui la porte.
+    #
+    # ⚠ AU GROUPE PASSE, JAMAIS AU GROUPE PRIMAIRE DU SERVICE. `lcars-authority` a desormais un
+    # groupe a lui : chowner au primaire rendrait `/run/lcars/authority` en
+    # `lcars-authority:lcars-authority`, alors que `system.manifest` le declare
+    # `0750 lcars-authority:fleet` — la table dirait le contraire du disque, et `roles.sock`
+    # deviendrait injoignable exactement comme `toolchain.sock` l'etait. Avec le groupe passe, les
+    # deux portes collent a la table : `privileged` -> `root:fleet`, `authority` ->
+    # `lcars-authority:fleet`.
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o750, exist_ok=True)
 
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(path)
+    # UN SEUL `try` POUR LES DEUX, et c'est voulu : ils ont la meme condition de possibilite (le
+    # groupe existe, et on possede l'objet) et le meme repli — un temoin n'est dans aucun de ces
+    # groupes, et ce qui RESSERRE est sans danger. Un secret trop ferme se diagnostique ; trop
+    # ouvert, non.
     try:
-        os.chown(path, os.geteuid(), grp.getgrnam(group).gr_gid)
+        gid = grp.getgrnam(group).gr_gid
+        os.chown(parent, os.geteuid(), gid)
+        os.chown(path, os.geteuid(), gid)
     except (KeyError, PermissionError, OSError) as exc:
-        log(prefix, f"groupe {group} non pose sur {path} ({exc}) — elle reste au proprietaire seul")
+        log(prefix, f"groupe {group} non pose sur {path} ni sur {parent} ({exc}) — "
+                    f"la porte reste au proprietaire seul, et le groupe ne la traversera pas")
     os.chmod(path, mode)
     srv.listen(backlog)
     return srv

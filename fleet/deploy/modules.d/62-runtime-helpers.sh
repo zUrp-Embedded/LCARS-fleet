@@ -161,8 +161,23 @@ check() {
   # clone six commits en arrière a reposé l'ancienne allocation d'uid par-dessus la nouvelle, en
   # rendant vert, et le service systemd a tourné dessus jusqu'à la collision suivante.
   local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  # ⚠ « ABSENT » ÉTAIT FAUX DANS LE CAS LE PLUS FRÉQUENT, ET IL ENVOYAIT CHERCHER LE MAUVAIS OBJET.
+  #
+  # `posed_rev` rend « inconnue » pour DEUX états distincts : le fichier n'est pas là, ou il est là
+  # et il vaut littéralement `inconnue`. Le second est ce que produit toute install depuis un
+  # tarball — `git archive` n'emporte pas `.git`, donc `prov_source_rev` ne trouve rien et ce module
+  # estampille « inconnue ». Mesure du 2026-08-25 : `-rw-r--r-- 9 octets`, contenu `inconnue`, et le
+  # message disait « absent ». L'opérateur cherche un fichier manquant, le trouve, et reste bloqué.
+  #
+  # La cause est fermée en amont — `pack.sh` écrit désormais `.source-revision` dans l'archive — mais
+  # les deux états restent distinguables ici, parce qu'un tarball d'avant ce correctif existe encore
+  # et qu'un message doit nommer ce qu'il voit, pas ce qu'il suppose.
   if [[ "$posed" == "inconnue" ]]; then
-    p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+    if [[ -r "$(helpers_stamp)" ]]; then
+      p_drift "$(helpers_stamp) existe mais vaut « inconnue » — les auxiliaires ont été posés depuis un arbre SANS révision lisible (install depuis une archive : « git archive » n'emporte pas .git). Rien ne permet de comparer ce qui est posé à cette source"
+    else
+      p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+    fi
   elif [[ "$posed" == "$src" ]]; then
     p_ok "auxiliaires posés depuis $posed (identique à la source)"
   else

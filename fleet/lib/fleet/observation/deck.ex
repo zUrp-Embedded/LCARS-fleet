@@ -99,9 +99,40 @@ defmodule Fleet.Observation.Deck do
     })
   end
 
+  # ⚠ UNE ENTRÉE MALFORMÉE EMPORTAIT TOUT LE LISTING, ET C'EST UN ENDPOINT DE LECTURE.
+  #
+  # `pod_view/2` fait `info.pod_id` — un accès STRICT, qui lève `KeyError` si la clé manque. Un seul
+  # pod dont l'info n'en porte pas faisait donc tomber `/api/pods` ENTIER : le deck n'affichait plus
+  # rien, et le message parlait d'une clé, pas d'un pod.
+  #
+  # Or ce seam écarte DÉJÀ ce qu'il ne peut pas afficher. Un pod sans `pod_id` est exactement aussi
+  # inaffichable — on ne peut pas l'adresser — donc il rejoint la même famille au lieu d'emporter ses
+  # voisins. Une vue read-only qui meurt sur une donnée punit le lecteur pour l'état de ce qu'il
+  # regarde.
+  #
+  # ⚠ ET PAS `Map.get` → `pod_id: nil` : ce fichier interdit lui-même cette forme douze lignes plus
+  # bas, pour `role` — « indiscernable de : ce pod n'a pas de rôle ». Un pod servi avec un id nul
+  # s'afficherait comme un pod réel qu'on ne peut plus joindre. On écarte, et on le DIT.
+  #
+  # ⚖ ICI ET PAS DANS `Fleet.Spawner.list_pods/0` : le seam d'affichage décide ce qui s'affiche.
+  # `list_pods` sert aussi le groupage plus haut dans ce fichier, qui lit par `Map.get` et tolère
+  # l'absence — lui imposer le besoin de CETTE vue ferait décider une couche pour l'autre.
   get "/api/pods" do
     known = display_roles()
-    pods = Fleet.Spawner.list_pods() |> Enum.map(&pod_view(&1, known))
+
+    {affichables, ecartes} =
+      Fleet.Spawner.list_pods()
+      |> Enum.split_with(&is_binary(Map.get(&1, :pod_id)))
+
+    if ecartes != [] do
+      Logger.warning(
+        "Deck /api/pods: #{length(ecartes)} pod(s) SANS pod_id ecarte(s) du listing — " <>
+          "inaffichables (rien ne permet de les adresser), pas invisibles : les autres sont servis. " <>
+          "Une entree sans identifiant vient du substrat, pas de cette vue."
+      )
+    end
+
+    pods = Enum.map(affichables, &pod_view(&1, known))
     body = Jason.encode!(%{pods: pods, count: length(pods)})
 
     conn

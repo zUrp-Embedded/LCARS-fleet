@@ -161,3 +161,46 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [ ! -e "$LCARS_TMPFILES_CONF" ]
   [[ "$output" == *"retiree"* ]]
 }
+
+# ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,
+# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/home/private` a donc
+# coute SEPT objets sans aucun rapport avec lui : les trois racines de face, la racine des consoles,
+# l'etat tofu, et la declaration tmpfiles — celle-la meme dont le temoin d'au-dessus dit qu'elle
+# porte « la fleet ne demarrera pas ». La machine a fini avec `lcars-landing` debout et aucune
+# racine de console.
+#
+# LES DEUX MOITIES VONT PAR PAIRE, d'ou deux temoins : la boucle doit CONTINUER, et le module doit
+# quand meme SORTIR NON NUL. Tenir la premiere seule transformerait un echec en succes silencieux —
+# l'inverse exact du defaut qu'on repare.
+
+@test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
+  # `/proc/...` ne peut pas etre cree, a coup sur et sans droits speciaux : la premiere entree
+  # echoue pour de vrai, pas par un stub.
+  local bonne="$BATS_TEST_TMPDIR/apres"
+  run bash -c "set -uo pipefail
+    source '$MOD' >/dev/null 2>&1
+    prov_dirs() { printf '%s\n' '/proc/impossible-a-creer 0700 root:root' '$bonne 0755 $(id -un):$(id -gn)'; }
+    apply_tmpfiles() { :; }
+    apply"
+
+  # MOITIE 1 : l'entree d'APRES est posee. Sans le correctif, la boucle mourait sur la premiere.
+  [ -d "$bonne" ] || { echo "la table s'est arretee a la premiere entree en echec" >&2; return 1; }
+  # MOITIE 2 : et le module rend quand meme un echec.
+  [ "$status" -ne 0 ] || { echo "un module en echec a rendu 0 — le correctif a avale le verdict" >&2; return 1; }
+}
+
+@test "une table SANS echec rend toujours 0 — le correctif n'a pas rendu l'echec permanent" {
+  # LE TEMOIN DU TEMOIN. Sans lui, un module qui echouerait TOUJOURS passerait celui du dessus — il
+  # ne demande qu'un statut non nul — et chaque install serait rouge sur une machine saine.
+  local a="$BATS_TEST_TMPDIR/ok-a" b="$BATS_TEST_TMPDIR/ok-b"
+  run bash -c "set -uo pipefail
+    source '$MOD' >/dev/null 2>&1
+    prov_dirs() { printf '%s\n' '$a 0755 $(id -un):$(id -gn)' '$b 0755 $(id -un):$(id -gn)'; }
+    apply_tmpfiles() { :; }
+    apply"
+  [ "$status" -eq 0 ]
+  [ -d "$a" ]
+  [ -d "$b" ]
+}

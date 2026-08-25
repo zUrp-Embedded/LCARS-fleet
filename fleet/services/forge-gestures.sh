@@ -67,6 +67,10 @@ SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
 # compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
 AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}"
+# Le groupe qui TRAVERSE `/home/private` — jamais celui qui lit. Meme defaut que partout ailleurs
+# dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
+# et la table diraient deux choses differentes du meme objet.
+FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
@@ -151,15 +155,25 @@ put_secret() { # $1=chemin  $2=valeur
   # -u root`), et un temoin ne l'est pas : conditionner ici evite une garde `|| true` qui
   # avalerait un vrai echec de propriete sur une boite.
   #
-  # ⚠ `0700 $AUTHORITY_USER`, ET LE REPERTOIRE COMPTE AUTANT QUE LES FICHIERS. Il naissait ici
-  # `0750 root:fleet` : fermer les secrets sans fermer leur repertoire ne fermait rien, parce que
-  # CE geste-ci le rouvrait au premier passage. Le groupe `fleet` etait une projection de l'equipe
-  # `humans` de la forge, refaite toutes les 30 s — donc une ACL a peremption de cache sur les deux
-  # secrets les plus puissants de la boite.
+  # ⚠ LE REPERTOIRE COMPTE AUTANT QUE LES FICHIERS. Il naissait ici `0750 root:fleet` : fermer les
+  # secrets sans fermer leur repertoire ne fermait rien, parce que CE geste-ci le rouvrait au premier
+  # passage. Le groupe `fleet` etait une projection de l'equipe `humans` de la forge, refaite toutes
+  # les 30 s — donc une ACL a peremption de cache sur les deux secrets les plus puissants de la boite.
+  #
+  # ⚠ ET CE MEME GESTE A FAILLI REFERMER CE QUE LA TABLE OUVRE, DANS L'AUTRE SENS. Une premiere
+  # ecriture posait `0700 $AUTHORITY_USER:$AUTHORITY_USER` ici pendant que `system.manifest` et
+  # `25-directories` disaient `0710 …:fleet`. Le premier `put_secret` aurait REFERME le repertoire,
+  # en silence, et les trois modules `NEEDS: human` — qui lisent `forge.url` sous l'uid de l'humain —
+  # auraient recasse. Le gate ne peut pas voir ca : il n'execute pas ce geste contre une vraie table.
+  #
+  # LA REGLE, LA MEME DANS LES QUATRE POSEURS DE CE REPERTOIRE : le groupe TRAVERSE (`x`), il ne LIT
+  # jamais (`r`). Ce repertoire ne contient pas que des secrets — `forge.url` et `forge.public.url`
+  # y sont en 0644, et ce sont des adresses. Les secrets, eux, restent `0600` : c'est le MODE DU
+  # FICHIER qui les ferme, plus celui du repertoire.
   if [[ "$(id -u)" -eq 0 ]]; then
-    install -d -m 0700 -o "$AUTHORITY_USER" -g "$AUTHORITY_USER" "$PRIVATE_DIR"
+    install -d -m 0710 -o "$AUTHORITY_USER" -g "$FLEET_GROUP" "$PRIVATE_DIR"
   else
-    install -d -m 0700 "$PRIVATE_DIR"
+    install -d -m 0710 "$PRIVATE_DIR"
   fi
   local tmp="${1%/*}/.$(basename "$1").tmp"
   umask 077
