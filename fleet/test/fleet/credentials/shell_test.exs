@@ -331,6 +331,17 @@ defmodule Fleet.Credentials.ShellTest do
   describe "git/2 — injects git_env/0 by default (anti-prompt MA-22)" do
     setup do
       Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
+
+      # ⚠ LE JETON N'EST PLUS DANS LA CONFIG : elle porte le COMPTE, et le jeton se demande au
+      # service d'autorite (double de la suite, qui sert depuis `:credentials_role_tokens_dir`).
+      # Le mecanisme que ce temoin prouve — `git` lit l'en-tete dans l'ENV, jamais sur l'argv — est
+      # exactement le meme ; seul l'endroit d'ou vient le secret a change.
+      tmp = Fleet.TestEnv.tmp_path("shell-forgeauth")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf(tmp) end)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
+      File.write!(Path.join(tmp, "system_pusher.gitea_token"), "SECRET-shell")
+
       :ok
     end
 
@@ -341,7 +352,7 @@ defmodule Fleet.Credentials.ShellTest do
       # git_env() ALSO carries GIT_TERMINAL_PROMPT=0 (anti-prompt MA-22), covered by forge_auth_test.
       Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
         url_prefix: "https://forge.example/",
-        token: "SECRET-shell"
+        account: "system_pusher"
       })
 
       assert {:ok, {out, 0}} =

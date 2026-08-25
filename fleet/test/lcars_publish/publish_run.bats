@@ -37,10 +37,19 @@ EOF
   chmod +x "$BIN/publish-rail.sh"
 
   # The box env the verb needs before it will call anything.
-  printf 'FORGE_BASE_URL=http://forge.invalid\nFORGE_TOKEN_FILE=%s/tok\n' "$HOMEDIR" \
+  #
+  # ⚠ `FORGE_TOKEN_FILE` A QUITTE CE FICHIER D'ENV, ET C'EST LE CHANTIER, PAS LA FIXTURE. Le jeton
+  # systeme vivait en `0640 root:fleet`, lisible par l'humain a travers un groupe qui n'etait qu'une
+  # projection de l'equipe `humans` de la forge. `publish run` le DEMANDE maintenant au service
+  # d'autorite. Ce que la boite ecrit encore ici est le nom du COMPTE, pas un chemin vers un secret.
+  printf 'FORGE_BASE_URL=http://forge.invalid\nFORGE_BOT_LOGIN=system_starfleet\n' \
     > "$HOMEDIR/fleet_v2.env"
-  echo t > "$HOMEDIR/tok"
   export LCARS_FLEET_V2_ENV="$HOMEDIR/fleet_v2.env"
+
+  # La doublure du client d'autorite : elle rend un jeton, comme le vrai quand la forge dit oui.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask"
+  printf '#!/usr/bin/env bash\nprintf "t\\n"\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
 }
 
 _bind() { # _bind <json>
@@ -138,6 +147,64 @@ _full_binding='{"host":"github","dest_host":"ghe.example.com","dest_repo":"acme/
   [ -d "$work" ]
   [[ "$output" == *"conserve pour inspection"* ]]
   rm -rf "$(dirname "$work")"
+}
+
+# ─── le jeton : demande, materialise, et retire meme sur le chemin d'erreur ─────────────────────
+
+@test "le jeton part au rail par un CHEMIN, jamais en argv — et le fichier est 0600" {
+  # `publish-rail.sh` et `publish-transform.sh` prennent un chemin. Passer le jeton en argument le
+  # mettrait dans `/proc/<pid>/cmdline`, lisible par tout le monde pendant toute la duree du
+  # publish — ce qui annulerait, au moment ou il s'exerce, le geste de fermer le fichier `0640`.
+  _bind "$_full_binding"
+  # Le rail-doublure copie le fichier avant de rendre la main : apres coup il aura ete balaye.
+  cat > "$BIN/publish-rail.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "$RAILLOG"
+tok=""; work=""
+while [[ \$# -gt 0 ]]; do
+  [[ "\$1" == "--forge-token-file" ]] && tok="\$2"
+  [[ "\$1" == "--work" ]] && work="\$2"
+  shift
+done
+stat -c '%a' "\$tok" > "$BATS_TEST_TMPDIR/tokmode"
+cat "\$tok" > "$BATS_TEST_TMPDIR/tokvalue"
+mkdir -p "\$work"
+EOF
+  chmod +x "$BIN/publish-rail.sh"
+
+  run "$SUT" publish run fleet/demo
+  [ "$status" -eq 0 ]
+  # Le jeton demande au service est bien celui qui arrive au rail.
+  [ "$(cat "$BATS_TEST_TMPDIR/tokvalue")" = "t" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/tokmode")" = "600" ]
+  # Et il n'est PAS sur la ligne de commande.
+  ! grep -q '\bt\b' <<< "$(sed 's/--forge-token-file [^ ]*//' "$RAILLOG")"
+}
+
+# ⚠ LE TEMOIN QUI GARDE LE CHEMIN D'ERREUR, ET C'EST CELUI QU'ON OUBLIE. La sortie 6 CONSERVE le
+# repertoire pour inspection : sans un retrait explicite, le jeton y survivrait indefiniment, dans
+# le repertoire temporaire de la machine, sur la branche que personne ne relit.
+@test "sortie 6 : le clone est conserve, le JETON ne l'est pas" {
+  _bind "$_full_binding"
+  LCARS_TEST_RAIL_EXIT=6 run "$SUT" publish run fleet/demo
+  [ "$status" -eq 6 ]
+  work="$(sed -n 's/.*--work \([^ ]*\).*/\1/p' "$RAILLOG")"
+  tok="$(sed -n 's/.*--forge-token-file \([^ ]*\).*/\1/p' "$RAILLOG")"
+  [ -d "$work" ]          # le clone reste — c'est le contrat de la sortie 6
+  [ -n "$tok" ]
+  [ ! -e "$tok" ]         # le jeton, non
+  rm -rf "$(dirname "$work")"
+}
+
+@test "le service refuse : rien n'est appele, et le repertoire de travail ne reste pas" {
+  _bind "$_full_binding"
+  printf '#!/usr/bin/env bash\necho "autorite: refus de fixture" >&2\nexit 1\n' \
+    > "$LCARS_AUTHORITY_ASK_BIN"
+  run "$SUT" publish run fleet/demo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"pas de jeton de forge"* ]]
+  # LE RAIL N'A PAS ETE APPELE : un publish sans identite ne part pas a moitie.
+  [ ! -s "$RAILLOG" ]
 }
 
 @test "--linearize reaches the rail — the flag used to be dropped on the floor" {

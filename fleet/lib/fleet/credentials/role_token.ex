@@ -20,13 +20,41 @@ defmodule Fleet.Credentials.RoleToken do
   """
   @spec token(String.t() | nil) :: String.t() | nil
   def token(role) when is_binary(role) do
-    case path_for(role) do
-      {:ok, path} -> read_at(role, path)
-      :error -> nil
+    case Fleet.CapProfile.forge_login(role) do
+      {:ok, login} -> ask_authority(role, login)
+      {:error, reason} -> no_login(role, reason)
     end
   end
 
   def token(_), do: nil
+
+  @doc """
+  La MEME resolution que `token/1`, mais qui rend la CAUSE au lieu de `nil`.
+
+  ## Pourquoi les deux existent
+
+  `token/1` garde son contrat — un jeton, ou `nil` — et c'est ce qui a permis de deplacer la lecture
+  vers le service d'autorite sans toucher une ligne chez ses appelants. Ce contrat est aussi une
+  PERTE D'INFORMATION deliberee : la politique fail-closed vit chez `RoleIdentity`, qui n'a pas a
+  connaitre les causes.
+
+  Un appelant a pourtant besoin de les separer : le garde de BOOT du rail. Avant ce chantier,
+  « pas de jeton » voulait dire une seule chose — le provisionnement n'a pas tourne, la boite est
+  mal deployee, elle ne doit pas demarrer. Maintenant la meme absence recouvre aussi « le service
+  d'autorite ne tourne pas encore » et « la forge n'a pas repondu », qui sont des etats TRANSITOIRES
+  et distants. Refuser le boot dessus echangerait une panne rattrapable contre une boite morte, et
+  le message accuserait le provisionnement.
+  """
+  @spec token_result(String.t() | nil) ::
+          {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause() | :no_forge_login}
+  def token_result(role) when is_binary(role) do
+    case Fleet.CapProfile.forge_login(role) do
+      {:ok, login} -> Fleet.Credentials.Authority.token(login)
+      {:error, _reason} -> {:error, :no_forge_login}
+    end
+  end
+
+  def token_result(_), do: {:error, :no_forge_login}
 
   @doc """
   Where `role`'s token lives — `<dir>/<forge login>.gitea_token`, or `:error`.
@@ -77,49 +105,50 @@ defmodule Fleet.Credentials.RoleToken do
     end
   end
 
-  defp read_at(role, path) do
-    case File.read(path) do
-      {:ok, content} ->
-        case String.trim(content) do
-          "" ->
-            Logger.warning(
-              "RoleToken: role token #{inspect(role)} empty (#{path}) → unavailable " <>
-                "(caller policy in RoleIdentity: fail-closed, no system-account fallback)"
-            )
+  # ⚠ LE JETON SE DEMANDE, IL NE SE LIT PLUS. Il vivait en `0640 root:fleet` — donc lisible par TOUT
+  # humain de la boite, et ce groupe etait une PROJECTION de l'equipe `humans` de la forge, refaite
+  # toutes les trente secondes. Le droit de porter une identite de travail avait donc la peremption
+  # d'un cache : quelqu'un que la forge avait retire lisait encore jusqu'au tour suivant.
+  #
+  # La question est maintenant posee au service d'autorite, qui la pose a la forge. Elle ne porte
+  # plus de peremption, et le service sait QUI demande — le noyau le lui dit.
+  #
+  # ⚠ LE CONTRAT NE BOUGE PAS : un jeton, ou `nil`. Tout le fail-closed des appelants
+  # (`RoleIdentity.for_role/1` -> `{:error, :role_token_unavailable}`) continue de valoir sans une
+  # ligne de changement chez eux — c'est ce qui rend ce deplacement jouable en un seul geste.
+  defp ask_authority(role, login) do
+    case Fleet.Credentials.Authority.token(login) do
+      {:ok, token} ->
+        token
 
-            nil
-
-          token ->
-            token
-        end
-
-      {:error, reason} ->
+      {:error, cause} ->
         Logger.warning(
-          "RoleToken: role token #{inspect(role)} absent/unreadable (#{path} : " <>
-            "#{inspect(reason)})#{dir_hint()} → unavailable (caller policy in RoleIdentity: " <>
-            "fail-closed, no system-account fallback)"
+          "RoleToken: no token for role #{inspect(role)} (compte #{inspect(login)}) — " <>
+            "#{inspect(cause)} → unavailable (caller policy in RoleIdentity: fail-closed, no " <>
+            "system-account fallback)"
         )
 
         nil
     end
   end
 
-  # 6-030 — LE MESSAGE NOMMAIT UN FICHIER QUAND LA CAUSE ETAIT LE REPERTOIRE. Un deploiement dont
-  # `FORGE_ROLE_TOKENS_DIR` pointe a cote, ou dont le provisionnement n'a pas tourne, produisait UNE
-  # ligne PAR ROLE, chacune exacte et aucune ne disant la seule chose utile : aucun role ne peut
-  # signer, et ce n'est pas un probleme de role.
-  #
-  # Le stat ne se paie que dans la branche d'echec — donc jamais sur le chemin nominal, et seulement
-  # quand on est deja degrade.
-  defp dir_hint do
-    d = dir()
+  defp no_login(role, reason) do
+    Logger.warning(
+      "RoleToken: no forge login for role #{inspect(role)} (#{inspect(reason)}) — no account to " <>
+        "ask for (caller policy in RoleIdentity: fail-closed, no system-account fallback)"
+    )
 
-    if File.dir?(d),
-      do: "",
-      else:
-        " — NOTE: the tokens DIRECTORY #{d} is itself absent, so NO role can sign; " <>
-          "check FORGE_ROLE_TOKENS_DIR and provisioning (the deploy poses it 0750 root:fleet)"
+    nil
   end
+
+  # ⚠ 6-030 VIVAIT ICI, ET SA DISPARITION EST UN GAIN, PAS UNE PERTE. Ce helper regardait si le
+  # REPERTOIRE des jetons existait, pour qu'un deploiement mal pointe ne produise pas une ligne par
+  # role sans jamais dire la seule chose utile : aucun role ne peut signer.
+  #
+  # Le BEAM ne lit plus ce repertoire — il demande au service d'autorite, qui le possede. Le
+  # diagnostic a donc change de cote : c'est le service qui voit un repertoire absent, et il le dit
+  # (`no_role_token`). Garder ce stat ici produirait un diagnostic sur un objet dont ce process n'est
+  # plus responsable — et apres la fermeture des modes, il ne pourrait meme plus le traverser.
 
   @doc "Root of the role tokens (`:lcars_fleet, :credentials_role_tokens_dir`, default `/home/private`)."
   @spec dir() :: String.t()

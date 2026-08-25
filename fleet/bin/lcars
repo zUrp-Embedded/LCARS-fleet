@@ -354,6 +354,44 @@ _load_box_env() {
 # `catalogue list` la rend en 127 pour la dire, les autres portes meurent dessus.
 _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"; }
 
+# ─── LE JETON DE FORGE NE SE LIT PLUS, IL SE DEMANDE ────────────────────────────────────────────
+#
+# `publish run` et `approve` ouvraient tous deux `$FORGE_TOKEN_FILE` — `/home/private/<compte>.gitea_token`,
+# `0640 root:fleet`. Ils y arrivaient parce que le groupe `fleet` etait une PROJECTION de l'equipe
+# `humans` de la forge, reconstruite toutes les trente secondes : le droit de porter l'identite du
+# systeme avait donc la peremption d'un cache, et se retirer demandait un `pkill`.
+#
+# Ils demandent maintenant a `roles.sock`, qui pose la question a la forge A L'INSTANT du geste.
+#
+# ⚠ LE JETON ATTERRIT QUAND MEME DANS UN FICHIER, ET C'EST DELIBERE. `publish-rail.sh` et
+# `publish-transform.sh` prennent un CHEMIN ; leur passer le jeton en argument le mettrait dans
+# `/proc/<pid>/cmdline`, que tout le monde lit. La difference avec l'etat d'avant n'est pas
+# cosmetique : ce fichier-ci appartient a UNE personne, vit le temps d'UN geste, et n'existe que
+# parce que la forge vient de dire oui.
+_authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"; }
+
+# Le compte forge du SYSTEME. Meme chaine que `config/runtime.exs` — `FORGE_BOT_LOGIN` est la valeur
+# que la boite ECRIT dans son `fleet_v2.env` (`70-human.sh:302`), a cote du `FORGE_TOKEN_FILE` qu'on
+# vient de retirer. Suppose `_load_box_env` deja appele.
+_forge_account() {
+  printf '%s\n' "${FORGE_PUSH_ACCOUNT:-${FORGE_BOT_LOGIN:-system_starfleet}}"
+}
+
+# Materialise le jeton dans <dir>, rend son chemin. Meurt en nommant la cause — le client la porte
+# deja en francais sur stderr, on ne la reformule pas par-dessus.
+#
+# ⚠ `umask 077` DANS UN SOUS-SHELL. Le pose dans le shell courant le laisserait actif pour tout ce
+# que la porte ecrit ensuite ; les parentheses bornent sa duree de vie a la seule redirection.
+_authority_token_file() { # <compte> <dir>
+  local compte=$1 dir=$2 ask f
+  ask="$(_authority_ask_bin)"
+  [[ -x "$ask" ]] \
+    || die "client d'autorite absent ($ask) — « provision apply » le pose ; sans lui aucun jeton de forge n'est obtenable"
+  f="$dir/.forge-token"
+  ( umask 077; "$ask" "$compte" > "$f" ) || { rm -f "$f"; return 1; }
+  printf '%s\n' "$f"
+}
+
 cat_states() {
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || return 127
@@ -830,8 +868,6 @@ cmd_publish_run() {
 
   _load_box_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "publish run: FORGE_BASE_URL absent — boite non configuree"
-  [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] \
-    || die "publish run: FORGE_TOKEN_FILE absent/illisible"
 
   local rail; rail="$(dirname "$(readlink -f "$0")")/publish-rail.sh"
   [[ -x "$rail" ]] || die "publish run: rail introuvable a cote: $rail"
@@ -839,7 +875,14 @@ cmd_publish_run() {
   # A FRESH path per run, because the rail refuses an existing --work (the transform needs a clean
   # clone). Swept below on every outcome BUT exit 6, which the rail leaves for inspection when the
   # rewrite lost its determinism — the one failure that cannot be reproduced from a message.
-  local work; work="$(mktemp -d)/clone"
+  local base_dir; base_dir="$(mktemp -d)"
+  local work="$base_dir/clone"
+
+  # LE JETON EST DEMANDE ICI, APRES le repertoire qui le portera et AVANT le rail. Sa cause est
+  # imprimee par le client ; on ne la reformule pas, on constate seulement l'echec.
+  local tokfile
+  tokfile="$(_authority_token_file "$(_forge_account)" "$base_dir")" \
+    || { rm -rf "$base_dir"; die "publish run: pas de jeton de forge (cause ci-dessus)"; }
 
   # `--linearize` STAYS A HUMAN GESTURE, and the boundary is deliberate. The runtime publishes a
   # ROLLING pull request against a base we control, where merge bubbles are ordinary; the flattened
@@ -851,14 +894,19 @@ cmd_publish_run() {
   [[ -n "$linearize" ]] && extra=(--linearize "$linearize")
 
   local rc=0
-  "$rail" --project "$repo" --forge "$FORGE_BASE_URL" --forge-token-file "$FORGE_TOKEN_FILE" \
+  "$rail" --project "$repo" --forge "$FORGE_BASE_URL" --forge-token-file "$tokfile" \
     --host "$host" --dest-repo "$dest_repo" --dest-host "$dest_host" --base "$base" \
     --work "$work" "${extra[@]}" || rc=$?
+
+  # ⚠ RETIRE AVANT LE BRANCHEMENT, ET C'EST LA RAISON D'ETRE DE CETTE LIGNE. La sortie 6 CONSERVE
+  # le repertoire pour inspection ; le jeton y aurait survecu indefiniment, sur une machine, dans un
+  # chemin que personne ne surveille — un secret laisse en place par le chemin d'erreur.
+  rm -f "$tokfile"
 
   if [[ "$rc" == 6 ]]; then
     echo "publish run: clone conserve pour inspection -> $work" >&2
   else
-    rm -rf "$(dirname "$work")"
+    rm -rf "$base_dir"
   fi
   return "$rc"
 }
@@ -972,7 +1020,6 @@ cmd_approve() {
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
   _load_box_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
-  [[ -n "${FORGE_TOKEN_FILE:-}" && -r "${FORGE_TOKEN_FILE}" ]] || die "approve: FORGE_TOKEN_FILE absent/illisible ($env_file)"
 
   local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
@@ -989,9 +1036,16 @@ cmd_approve() {
   trap 'rm -rf "$work_base"' EXIT
   local work="$work_base/clone"
 
+  # LE JETON EST DEMANDE APRES LE TRAP, ET L'ORDRE EST LE CONTRAT. Pose dedans, il tombe avec le
+  # repertoire sur TOUTE sortie — y compris un `die`. Demande avant, il faudrait un second balayage,
+  # et c'est exactement la ligne qu'on oublie. Le refus se lit sur le stderr du client.
+  local tokfile
+  tokfile="$(_authority_token_file "$(_forge_account)" "$work_base")" \
+    || die "approve: pas de jeton de forge (cause ci-dessus)"
+
   # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
   "$(dirname "$(readlink -f "$0")")/publish-transform.sh" \
-    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$FORGE_TOKEN_FILE" --out "$work" \
+    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$tokfile" --out "$work" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"
 

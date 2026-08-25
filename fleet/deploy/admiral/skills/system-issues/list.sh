@@ -24,9 +24,18 @@ FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || 
 # systeme est l'identite juste : c'est avec lui que la boite lit sa forge. Donner un site-admin a
 # une lecture serait lui accorder un pouvoir dont elle n'a aucun usage — meme argument, et meme
 # formulation, que `cmd_install` dans `forge-gestures.sh`.
-PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+#
+# ─── ET IL NE LE LIT PLUS : IL LE DEMANDE ───────────────────────────────────────────────────────
+#
+# Le chantier precedent avait rattache ce script au jeton systeme et s'etait arrete la : le fichier
+# etait `0640 root:fleet`, et l'humain du siege le lisait parce que le convergeur l'avait mis dans le
+# groupe. L'ACL etait donc encore une PROJECTION de l'equipe `humans` de la forge, avec trente
+# secondes de peremption. Le refus, lui, disait « il est lisible par le groupe fleet » — une phrase
+# qui a cesse d'etre vraie avec ce chantier-ci, et qui aurait envoye chercher une adhesion.
+#
+# La question se pose maintenant a `roles.sock`. Le service la porte a la forge A L'INSTANT du geste.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
-TOKEN_FILE="${LCARS_FORGE_TOKEN_FILE:-$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token}"
+AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source`. Reglable a moitie, il faisait relever une boite aux lettres
@@ -34,20 +43,37 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 BRANCH="tool_request"
 
 [[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }
-[[ -r "$TOKEN_FILE" ]] || { echo "system-issues: jeton systeme illisible ($TOKEN_FILE) — « provision apply » le minte, et il est lisible par le groupe fleet" >&2; exit 1; }
+[[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorite absent ($AUTHORITY_ASK) — « provision apply » le pose" >&2; exit 1; }
 
-auth=(-H "Authorization: token $(tr -d '[:space:]' < "$TOKEN_FILE")")
+# La cause du refus est deja imprimee en francais par le client, sur stderr. La reformuler ici la
+# remplacerait par une plus vague : ce script sait qu'il n'a pas de jeton, il ne sait pas pourquoi.
+TOKEN="$("$AUTHORITY_ASK" "$SYSTEM_ACCOUNT")" \
+  || { echo "system-issues: pas de jeton de forge (cause ci-dessus)" >&2; exit 1; }
+
 api="$FORGE_URL/api/v1"
+
+# ⚠ `-K -` ET PAS `-H`, ET C'EST UNE CORRECTION AU PASSAGE. L'en-tete etait construit dans un
+# tableau passe a `curl` en ARGV : le jeton systeme etait donc lisible dans `/proc/<pid>/cmdline`
+# par n'importe quel process de la boite, pendant toute la duree de l'appel. Ce chantier ferme un
+# fichier `0640` pour que le jeton ne traine pas ; le laisser dans une ligne de commande annulerait
+# le geste au moment meme ou il s'exerce.
+#
+# `-K -` lit la configuration sur stdin — le secret passe par un tube, jamais par argv ni par un
+# fichier. La sortie de `curl` reste sur stdout, donc les `| jq` en aval ne changent pas.
+curl_auth() { # <url> — rend le corps de la reponse sur stdout
+  printf 'header = "Authorization: token %s"\n' "$TOKEN" \
+    | curl -sSf -m 15 -K - "$1"
+}
 
 echo "═══ Boite de reception sysadmin — $OPS_REPO ═══"
 echo
 echo "── Issues error_system (ouvertes) ──"
-curl -sSf -m 15 "${auth[@]}" "$api/repos/$OPS_REPO/issues?state=open&labels=error_system&type=issues&limit=50" \
+curl_auth "$api/repos/$OPS_REPO/issues?state=open&labels=error_system&type=issues&limit=50" \
   | jq -r '.[] | "#\(.number)  [\(.created_at[:10])]  \(.title)"' \
   || echo "(lecture impossible — forge down ?)"
 echo
 echo "── PR d'outillage en attente (vers $BRANCH) ──"
-curl -sSf -m 15 "${auth[@]}" "$api/repos/$OPS_REPO/pulls?state=open&limit=50" \
+curl_auth "$api/repos/$OPS_REPO/pulls?state=open&limit=50" \
   | jq -r --arg b "$BRANCH" '.[] | select(.base.ref == $b) | "!\(.number)  [\(.created_at[:10])]  \(.title)"' \
   || echo "(lecture impossible — forge down ?)"
 echo

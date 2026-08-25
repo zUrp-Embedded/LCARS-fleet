@@ -28,10 +28,19 @@ setup() {
   printf '{"host":"github","dest_host":"github.com","owner":"acme"}' > "$HOMEDIR/.lcars/forges/gh.json"
 
   # The box env `approve` refuses to run without.
-  printf 'FORGE_BASE_URL=file://%s/forge\nFORGE_TOKEN_FILE=%s/tok\n' "$HOMEDIR" "$HOMEDIR" \
+  #
+  # ⚠ `FORGE_TOKEN_FILE` A QUITTE CE FICHIER D'ENV, ET C'EST LE CHANTIER, PAS LA FIXTURE. Le jeton
+  # systeme vivait en `0640 root:fleet`, lisible par l'humain a travers un groupe qui n'etait qu'une
+  # projection de l'equipe `humans` de la forge. `approve` le DEMANDE maintenant au service
+  # d'autorite. Ce que la boite ecrit encore ici est le nom du COMPTE, pas un chemin vers un secret.
+  printf 'FORGE_BASE_URL=file://%s/forge\nFORGE_BOT_LOGIN=system_starfleet\n' "$HOMEDIR" \
     > "$HOMEDIR/fleet_v2.env"
-  echo t > "$HOMEDIR/tok"
   export LCARS_FLEET_V2_ENV="$HOMEDIR/fleet_v2.env"
+
+  # La doublure du client d'autorite : elle rend un jeton, comme le vrai quand la forge dit oui.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask"
+  printf '#!/usr/bin/env bash\nprintf "t\\n"\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
 
   # The transform is stubbed: it must leave a real git repo at --out, because the verb `cd`s into it
   # and runs git against it. What it CONTAINS is irrelevant to the existence probe.

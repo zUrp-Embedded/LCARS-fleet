@@ -567,6 +567,12 @@ COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
 # Le module de socket voisin : `catalogue-executor.py` l'importe depuis son repertoire.
 COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
+# LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
+# de toolchain : c'est un outil d'EXPLOITATION, appele par des gestes d'operateur qui vivent dans
+# trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH
+# est le seul rendez-vous qu'aucun des trois n'a a deviner. Il ne DETIENT rien : il demande, et
+# c'est la socket qui decide, sur un uid atteste par le noyau.
+COPY fleet/services/lcars-authority-ask.sh /usr/local/bin/lcars-authority-ask
 COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
@@ -629,6 +635,7 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/human-converger.sh \
                /opt/lcars/catalogue-executor.py \
                /usr/local/bin/lcars-toolchain-converge \
+               /usr/local/bin/lcars-authority-ask \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh

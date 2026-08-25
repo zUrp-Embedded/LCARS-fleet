@@ -23,12 +23,17 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role("gatekeeper")
   end
 
-  test "EMPTY token → {:error} (fail-closed)", %{dir: dir} do
+  # ⚠ « empty » A DISPARU DE L'ASSERTION PARCE QUE CE PROCESS NE LIT PLUS LE FICHIER. Le jeton se
+  # demande au service d'autorite, qui rend `no_role_token` pour un fichier vide comme pour un
+  # fichier absent — meme remede, meme effet. Ce que ce temoin garde est le point qui n'a jamais
+  # bouge et qui est le seul a compter ici : un jeton vide ne devient JAMAIS une identite. Pas de
+  # `%RoleIdentity{token: ""}`, pas de repli sur le compte systeme.
+  test "EMPTY token → {:error} (fail-closed)", %{dir: _dir} do
     Fleet.TestEnv.put_role_token!("reviewer", "   \n")
 
     assert capture_log(fn ->
              assert {:error, :role_token_unavailable} = RoleIdentity.for_role("reviewer")
-           end) =~ "empty"
+           end) =~ "no_role_token"
   end
 
   test "non-path-safe / empty / nil role → {:error}" do

@@ -10,20 +10,85 @@ defmodule Fleet.Credentials.ForgeAuth do
 
   @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
 
+  # ⚠ FAIL-CLOSED, ET DISTINCT D'UNE CONFIGURATION ABSENTE. `nil` en config veut dire « cette boite
+  # ne pousse pas », et c'est legitime (un banc, un mode outil). Un compte configure dont le service
+  # ne rend pas le jeton est autre chose : la boite CROIT pouvoir pousser et ne le peut pas. Les
+  # confondre rendrait un `git` sans auth, dont l'echec accuse git.
+  defp resolve(prefix, account) do
+    case Fleet.Credentials.Authority.token(account) do
+      {:ok, token} ->
+        {:ok, extraheader_env(prefix, "token " <> token)}
+
+      {:error, cause} ->
+        Logger.error(
+          "ForgeAuth: aucun jeton pour le compte #{inspect(account)} — #{inspect(cause)}. " <>
+            "Toute operation git authentifiee echouera, et ce n'est PAS un probleme de git."
+        )
+
+        {:error, :forge_auth_unavailable}
+    end
+  end
+
+  @doc """
+  Le compte de forge SOUS LEQUEL CETTE BOITE AGIT, ou `nil` si elle n'en a pas.
+
+  Il vit ici et pas dans chaque appelant parce que deux gestes le demandent — `git push` par
+  `git_env/0`, et l'outil de POD `project_publish`, qui doit materialiser un jeton pour un rail en
+  shell. Deux facons de trouver « le compte du systeme » divergent, et celle qu'on lit n'est jamais
+  celle qu'on a corrigee.
+
+  `nil` est un etat LEGITIME : une boite en mode outil, un banc sans forge. L'appelant en fait ce
+  qu'il veut ; ce module ne devine pas de nom par defaut.
+  """
+  @spec account() :: String.t() | nil
+  def account do
+    case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
+      %{account: account} when is_binary(account) and account != "" -> account
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Le jeton de forge d'un COMPTE, demandé au service d'autorité — ou une cause nommée.
+
+  ## Pourquoi il passe par ici
+
+  `Fleet.Credentials.Authority` est INTERNE au domaine, et doit le rester : c'est le client d'une
+  socket, pas une API. Deux appelants hors domaine ont pourtant besoin d'un jeton pour un compte —
+  le transport du client de forge (chaque verbe HTTP) et l'outil de POD `project_publish`, qui doit
+  matérialiser un fichier pour un rail en shell.
+
+  Leur donner le client direct multiplierait les endroits qui savent qu'une socket existe. Ce module
+  est déjà la porte de l'auth système ; il porte donc aussi cette question-là, et le jour où la
+  résolution change — un cache, un second service, une autre voie — un seul endroit le sait.
+
+  ⚠ AUCUN CACHE, ET C'EST LA PROPRIÉTÉ ACHETÉE. Un jeton gardé ici reprendrait la péremption
+  infinie que ce chantier retire : la révocation ne mordrait plus qu'au redémarrage du nœud.
+  """
+  @spec token_for(String.t()) ::
+          {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause()}
+  defdelegate token_for(account), to: Fleet.Credentials.Authority, as: :token
+
   @doc """
   Returns anti-prompt environment plus optional auth. DR-024 distinguishes an
   absent legitimate configuration from a present malformed credential.
   """
-  @spec git_env_result() :: {:ok, [{String.t(), String.t()}]} | {:error, :forge_auth_malformed}
+  @spec git_env_result() ::
+          {:ok, [{String.t(), String.t()}]}
+          | {:error, :forge_auth_malformed | :forge_auth_unavailable}
   def git_env_result do
     case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
       nil ->
         {:ok, [@git_no_prompt]}
 
-      %{url_prefix: prefix, token: token}
-      when is_binary(prefix) and is_binary(token) and prefix != "" and token != "" ->
+      # ⚠ LE JETON N'EST PLUS DANS LA CONFIG — SEULEMENT LE COMPTE. Il y vivait en clair pour toute
+      # la vie du noeud, lu au boot ; il se demande maintenant au service d'autorite AU MOMENT DE
+      # POUSSER. Deux consequences : la revocation mord au geste suivant au lieu du redemarrage, et
+      # l'application env n'a plus de secret a publier si une porte de dump apparaissait un jour.
+      %{url_prefix: prefix, account: account}
+      when is_binary(prefix) and is_binary(account) and prefix != "" and account != "" ->
         if safe_prefix?(prefix) do
-          {:ok, extraheader_env(prefix, "token #{token}")}
+          resolve(prefix, account)
         else
           # A newline/control char in `url_prefix` would inject a parasite git-config key. Refuse
           # (never `inspect` the value — it sits next to the token). LOUD, and typed as malformed.
@@ -36,10 +101,14 @@ defmodule Fleet.Credentials.ForgeAuth do
         end
 
       _other ->
-        # PRESENT but malformed (empty/missing url_prefix or token, wrong shape): typed error, not a silent
-        # UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01).
+        # PRESENT but malformed (empty/missing url_prefix or ACCOUNT, wrong shape): typed error, not a
+        # silent UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01).
+        #
+        # ⚠ « account » ET PLUS « token » : la config ne porte plus de secret. Laisser le mot d'avant
+        # enverrait chercher un jeton dans une config qui n'en contient aucun — un message d'erreur
+        # qui decrit le mecanisme retire est un faux diagnostic, pas une coquille.
         Logger.error(
-          "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or token) — REFUSED " <>
+          "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or account) — REFUSED " <>
             "(auth-required git ops fail loud). Fix the forge config."
         )
 
@@ -58,9 +127,21 @@ defmodule Fleet.Credentials.ForgeAuth do
   """
   @spec git_env() :: [{String.t(), String.t()}]
   def git_env do
+    # ⚠ LES DEUX CAUSES SE COMPORTENT PAREIL ICI, ET ELLES RESTENT DISTINCTES EN AMONT. Cette porte
+    # ne rend qu'un environnement : sans auth, git echoue bruyamment, ce qui est le bon repli pour
+    # les deux. Mais `git_env_result/0` les separe, parce que les gestes different — un credential
+    # MALFORME se corrige dans la config, un credential INDISPONIBLE veut savoir si le service
+    # d'autorite repond.
+    #
+    # ⚠ ET CE `case` ETAIT EXHAUSTIF SUR UNE SEULE CAUSE. Ajouter la seconde sans l'ajouter ici
+    # aurait leve un `CaseClauseError` — un crash a la place d'un echec nomme, sur le chemin exact
+    # ou la boite vient de perdre son identite de forge.
     case git_env_result() do
-      {:ok, env} -> env
-      {:error, :forge_auth_malformed} -> [@git_no_prompt]
+      {:ok, env} ->
+        env
+
+      {:error, cause} when cause in [:forge_auth_malformed, :forge_auth_unavailable] ->
+        [@git_no_prompt]
     end
   end
 

@@ -45,6 +45,11 @@ set -euo pipefail
 # de ce module — ne serait épinglée par personne.
 HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
+# Le client shell du service d'autorité, sur le PATH — et il y est pour la même raison que le
+# convergeur de toolchain juste au-dessus : ses appelants vivent dans trois arbres qui ne se voient
+# pas (la CLI `fleet/bin`, le skill du siège `deploy/admiral/skills`, et le release). Un nom sur le
+# PATH est le seul point de rendez-vous qu'aucun des trois n'a à deviner.
+AUTHORITY_ASK_BIN="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
 # ⚠ LA SOURCE EST `fleet/services/`, PAS `deploy/docker/`. Ces fichiers sont du RUNTIME — ils
 # sont poses hors du checkout et tournent apres l'install, la plupart en root. Les ranger sous
@@ -194,6 +199,15 @@ check() {
     && p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)" \
     || p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
 
+  # ⚠ SON ABSENCE NE SE VOIT QUE SOUS UID HUMAIN, ET C'EST POURQUOI ELLE SE DIT ICI. Les services
+  # tournent en root et lisent encore les jetons directement ; ce qui casse sans ce binaire, ce sont
+  # les gestes d'OPÉRATEUR — `lcars publish run`, `lcars approve`, la boîte de réception du siège —
+  # et ils ne cassent qu'au moment où quelqu'un les tape. Un check qui ne le nomme pas laisse la
+  # panne se découvrir au pire moment, avec « commande introuvable » pour tout diagnostic.
+  [[ -x "$AUTHORITY_ASK_BIN" ]] \
+    && p_ok "client d'autorité posé ($AUTHORITY_ASK_BIN)" \
+    || p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
+
   for n in "${EMBEDDED[@]}"; do
     [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && break
     p_drift "provisionnement embarqué absent ($EMBEDDED_FLEET/$n) — le convergeur ne pourra pas converger un humain"
@@ -237,6 +251,14 @@ apply() {
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
   install -m 0755 "${own[@]}" "$SRC_DIR/toolchain-converger.sh" "$TOOLCHAIN_BIN" \
     || { p_fail "pose ratée: $TOOLCHAIN_BIN"; verdict_apply; }
+
+  # 0755 : LISIBLE ET EXÉCUTABLE PAR TOUS, ET CE N'EST PAS UN RELÂCHEMENT. Ce script ne détient
+  # rien — il DEMANDE, et c'est la socket qui décide, sur un uid que le noyau atteste. Le fermer à
+  # un groupe rejouerait exactement le défaut que ce chantier retire : une autorisation lue dans
+  # `/etc/group` au lieu d'être demandée à la forge.
+  ensure_dir "$(dirname "$AUTHORITY_ASK_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
+  install -m 0755 "${own[@]}" "$SRC_DIR/lcars-authority-ask.sh" "$AUTHORITY_ASK_BIN" \
+    || { p_fail "pose ratée: $AUTHORITY_ASK_BIN"; verdict_apply; }
 
   # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —
   # ce qui est posé date de l'apply, pas d'un clone qui a pu bouger ou disparaître depuis.

@@ -115,6 +115,11 @@ anchor    /etc/lcars/deck-oidc.json                    0640  root:fleet         
 # les VOIR — un objet non declare est un objet que l'uninstall laisse.
 anchor    /usr/local/bin/tofu                          0755  root:root           wsl+linux
 anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
+# ⚠ 0755 — LISIBLE ET EXECUTABLE PAR TOUS, ET CE N'EST PAS UN RELACHEMENT. Ce client ne DETIENT
+# rien : il frappe a `roles.sock`, et c'est le service qui decide, sur un uid que le noyau atteste.
+# Le fermer a un groupe rejouerait exactement le defaut que ce chantier retire — une autorisation
+# lue dans `/etc/group` au lieu d'etre demandee a la forge.
+anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
 
 # ─── SYMLINKS DE PATH ───────────────────────────────────────────────────────────────────────────
 link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
@@ -150,6 +155,20 @@ runtime   /run/lcars/toolchain                         0755  root:root          
 # FICHIERS a changer de proprietaire et oublie le REPERTOIRE — la meme moitie d'axe que deux
 # relectures avaient deja sortie.
 runtime   /run/lcars/authority                         0750  lcars-authority:fleet  any
+# ─── LES DEUX PORTES DU SERVICE D'AUTORITE ──────────────────────────────────────────────────────
+#
+# ⚠ ELLES ONT EXISTE SANS ETRE DECLAREES, ET LE TEMOIN NE POUVAIT PAS LE VOIR : son balayage ne
+# lisait que les `services/*.sh`, alors que le service qui CREE ces sockets est en python. La sonde
+# mesurait le langage du fichier, pas le fait de poser. Elargie le 2026-08-25.
+#
+# ⚠ L'ACL D'UNE SOCKET NE PORTE AUCUNE AUTORISATION. Elle borne qui peut FRAPPER ; qui a le droit se
+# decide par `SO_PEERCRED` puis par une question a la forge. Confondre les deux serait refaire le
+# defaut que ce chantier retire — une decision prise en lisant une projection de groupe.
+#
+# UN VERBE PAR SOCKET : le service ne lit AUCUN mot sur le fil pour savoir quel code lancer, il le
+# sait par la porte d'arrivee. Rien de ce que l'appelant ecrit ne decide de ce qui s'execute.
+runtime   /run/lcars/authority/catalogue.sock          0660  lcars-authority:fleet  any
+runtime   /run/lcars/authority/roles.sock              0660  lcars-authority:fleet  any
 # ⚠ HORS DE L'ARBRE `/run/lcars/`, et c'est la raison pour laquelle ces deux lignes existent : un
 # `rm -rf /run/lcars` ne les emporte pas. Ni la mesure machine ni la table du corpus ne les avaient —
 # c'est la lecture du RUNTIME et de l'entrypoint qui les a rendus visibles, et le second n'est

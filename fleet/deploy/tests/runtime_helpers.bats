@@ -29,6 +29,10 @@ setup() {
   export PROVISION_MODULE=62-runtime-helpers
   export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
   export LCARS_TOOLCHAIN_CONVERGE_BIN="$BATS_TEST_TMPDIR/usr/local/bin/lcars-toolchain-converge"
+  # Meme seam, meme raison : un temoin ne peut pas ecrire dans `/usr/local/bin`. Sans lui, `apply`
+  # echoue sur la pose, `verdict_apply` sort, et TROIS temoins voisins rougissent sur une cause qui
+  # n'est pas la leur — ce qui deplace le diagnostic au lieu de le donner.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/usr/local/bin/lcars-authority-ask"
   export LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
@@ -128,6 +132,25 @@ helpers() {
   mod apply
   [ -x "$LCARS_TOOLCHAIN_CONVERGE_BIN" ]
   cmp -s "$SRC_DIR/toolchain-converger.sh" "$LCARS_TOOLCHAIN_CONVERGE_BIN"
+}
+
+@test "apply POSE le client d'autorite sur le PATH — sinon trois gestes d'operateur n'ont aucun jeton" {
+  # `lcars publish run`, `lcars approve` et le skill `system-issues` du siege obtiennent leur jeton
+  # de forge par ce seul binaire. Sur le rail poste, rien ne le posait avant cette ligne : les trois
+  # seraient morts sur « commande introuvable », au moment ou quelqu'un les tape.
+  stub_curl "peu importe"
+  mod apply
+  [ -x "$LCARS_AUTHORITY_ASK_BIN" ]
+  cmp -s "$SRC_DIR/lcars-authority-ask.sh" "$LCARS_AUTHORITY_ASK_BIN"
+}
+
+@test "check DIT l'absence du client d'autorite — elle ne se decouvre pas au premier publish" {
+  # Sans cette ligne, l'absence ne se voit qu'a l'usage, sous uid humain, avec « commande
+  # introuvable » pour tout diagnostic. Les services, eux, tournent en root et ne la sentent pas :
+  # c'est exactement le genre de panne qui n'apparait qu'au pire moment.
+  stub_curl "peu importe"
+  mod check   # `mod()` porte deja le `run` — en imbriquer un second perd la sortie
+  [[ "$output" == *"lcars-authority-ask"* ]]
 }
 
 @test "apply POSE le provisionnement EN FORME DE REPO — repo_root() doit s'y retrouver" {

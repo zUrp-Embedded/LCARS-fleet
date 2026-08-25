@@ -506,8 +506,26 @@ PY
 }
 
 @test "40-forge : aucun credential dans un pod est ATTENDU (inactive), pas une faute" {
-  run env -u FORGE_TOKEN_FILE -u FORGE_ROLE_TOKENS_DIR HOME="$TMP" "$PROBES/40-forge.sh"
+  # ⚠ `LCARS_ROLES_SOCKET` POINTE SUR UN CHEMIN QUI N'EXISTE PAS, ET C'EST DELIBERE : c'est la
+  # situation d'un pod, ou aucune socket de la boite n'est montee. Laisser le defaut
+  # (`/run/lcars/authority/roles.sock`) ferait passer ce temoin au ROUGE sur toute machine de dev
+  # qui fait tourner le service — et au vert ailleurs, pour une raison qui n'est pas la sienne.
+  run env LCARS_ROLES_SOCKET="$TMP/pas-de-socket" HOME="$TMP" "$PROBES/40-forge.sh"
   assert_verdict forge.credentials inactive
+}
+
+# LE TEMOIN DU TEMOIN, ET IL EST LE SEUL A PROUVER QUE LA SONDE MESURE ENCORE QUELQUE CHOSE. Sans
+# lui, une sonde rendant `inactive` INCONDITIONNELLEMENT — parce qu'elle teste un chemin que plus
+# personne ne pose, par exemple — passerait l'assertion ci-dessus en n'ayant rien regarde. C'est
+# exactement le defaut que cette sonde vient de porter pendant tout un chantier.
+@test "40-forge : une socket d'autorite PRESENTE rend operational" {
+  local sock="$TMP/roles.sock"
+  # UNE VRAIE SOCKET UNIX, PAS UN FICHIER. `test -S` distingue les deux ; poser un fichier ordinaire
+  # epinglerait un `test -e` que la sonde ne fait pas, et le temoin passerait au vert sur une sonde
+  # plus laxiste que celle qu'on croit avoir.
+  python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])" "$sock"
+  run env LCARS_ROLES_SOCKET="$sock" HOME="$TMP" "$PROBES/40-forge.sh"
+  assert_verdict forge.credentials operational
 }
 
 # ── 60-self : les liaisons declare↔observe ───────────────────────────────────────────────────────

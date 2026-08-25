@@ -60,6 +60,15 @@ rows() { grep -vE '^\s*#|^\s*$' "$MANIFEST"; }
 # Tout le code qui POSE quelque chose : les modules, les deux installeurs, et le RUNTIME — qui pose
 # apres l'install, en boucle. Ignorer le troisieme declare une machine qui n'existe que la premiere
 # seconde.
+#
+# ⚠ `services/*.py` A ETE AJOUTE LE 2026-08-25, ET SON ABSENCE ETAIT UN TROU, PAS UN CHOIX. Ce
+# balayage ne lisait que les `.sh`. Or trois services de cette machine sont ecrits en python —
+# `catalogue-executor`, `console-deck`, `lcars_socket` — et ils POSENT : deux sockets unix, entre
+# autres. Aucune n'etait couverte par la table, et le temoin passait au vert en n'ayant pas regarde.
+#
+# Trouve par accident : un client SHELL de la meme socket a rendu visible un chemin que le service
+# qui la CREE ecrivait depuis toujours. La sonde mesurait donc le LANGAGE du fichier, pas le fait de
+# poser — exactement la classe de defaut que ces murs existent pour attraper.
 code() {
   grep -hvE '^\s*#' \
     "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
@@ -67,6 +76,7 @@ code() {
     "$BATS_TEST_DIRNAME"/../../etc/install.sh \
     "$BATS_TEST_DIRNAME"/../docker/*.sh \
     "$BATS_TEST_DIRNAME"/../../services/*.sh \
+    "$BATS_TEST_DIRNAME"/../../services/*.py \
     "$BATS_TEST_DIRNAME"/../lib/*.sh 2>/dev/null
 }
 

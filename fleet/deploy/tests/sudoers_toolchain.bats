@@ -217,7 +217,12 @@ EOS
   chmod +x "$BIN/curl"
   export PATH="$BIN:$PATH"
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/tok"; printf 'TOK\n' > "$LCARS_FORGE_TOKEN_FILE"
+  # ⚠ LE JETON NE SE LIT PLUS DANS UN FICHIER, IL SE DEMANDE. La fixture n'est donc plus un fichier
+  # de jeton mais une doublure du CLIENT d'autorite — c'est par la que le skill obtient son
+  # credential depuis que le groupe `fleet` a cesse d'ouvrir `/home/private`.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask-ok"
+  printf '#!/usr/bin/env bash\nprintf "TOK\\n"\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
 
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -eq 0 ]]
@@ -227,12 +232,27 @@ EOS
   [[ "$output" == *"[toolchain] python"* ]]
 }
 
-@test "list.sh: jeton illisible => refus type, pas une liste vide" {
+@test "list.sh: pas de jeton => refus type, pas une liste vide" {
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/absent"
+  # Le client refuse en 1, sa cause sur stderr — exactement ce que fait le vrai quand la forge dit
+  # non. Le skill doit MOURIR dessus, jamais rendre deux listes vides qu'un lecteur prendrait pour
+  # « rien a traiter » : une boite de reception vide et une boite de reception inaccessible se
+  # ressemblent a l'ecran et ne veulent pas dire la meme chose.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask-ko"
+  printf '#!/usr/bin/env bash\necho "autorite: refus de fixture" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
+
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"jeton systeme illisible"* ]]
+  [[ "$output" == *"pas de jeton de forge"* ]]
+}
+
+@test "list.sh: client d'autorite ABSENT => refus qui le NOMME, pas « commande introuvable »" {
+  export LCARS_FORGE_URL="http://forge.test"
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/jamais-pose"
+  run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"client d'autorite absent"* ]]
 }
 
 @test "list.sh: le jeton SYSTEME, jamais le master — deux lectures publiques n'ont pas d'autorite" {
@@ -246,7 +266,26 @@ EOS
   [ "$output" -eq 0 ]
   run grep -c 'forge-master.token' "$src"
   [ "$output" -eq 0 ]
-  grep -q 'gitea_token' "$src"
+  # ⚠ `gitea_token` A QUITTE L'ASSERTION AVEC LE FICHIER QU'IL NOMMAIT. Ce skill ne construit plus
+  # AUCUN chemin de jeton : il demande un COMPTE au service d'autorite. Ce qui reste a epingler est
+  # l'identite — c'est bien le compte systeme, jamais le master — et elle se lit sur le nom du
+  # compte, pas sur un nom de fichier. Le second `grep` est la contrepartie : plus aucune trace du
+  # repertoire prive, sinon l'assertion du haut passerait sur un script qui lit encore.
+  grep -q 'SYSTEM_ACCOUNT' "$src"
+  run grep -c 'PRIVATE_DIR' "$src"
+  [ "$output" -eq 0 ]
   # Et le skill ne PROMET plus un privilege de siege, qui n'existe pas.
   ! grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
+}
+
+# ⚠ LE TEMOIN QUI GARDE LA CORRECTION AU PASSAGE. L'en-tete d'authentification etait construit dans
+# un tableau passe a `curl` en ARGV : le jeton systeme etait donc lisible dans `/proc/<pid>/cmdline`
+# par n'importe quel process de la boite, pendant toute la duree de l'appel. Fermer un fichier
+# `0640` et laisser le secret dans une ligne de commande annulerait le geste au moment ou il
+# s'exerce. `-K -` le fait passer par un tube.
+@test "list.sh: le jeton ne passe JAMAIS en argv de curl" {
+  local src="$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  grep -q 'curl -sSf -m 15 -K -' "$src"
+  run grep -c -- '-H "Authorization' "$src"
+  [ "$output" -eq 0 ]
 }

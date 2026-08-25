@@ -405,19 +405,72 @@ defmodule Fleet.Pilot.Application do
   # judges a catalogue that may not even be installed here) — playing it there would refuse valid
   # catalogues for a credential question. A box guard therefore does not wear the family name:
   # boot-only, by nature, and declared as such instead of hidden in an AST blind spot.
+  # ⚠ CE GARDE A CHANGE DE NATURE SANS CHANGER DE LIGNE, ET IL FALLAIT LE RATTRAPER.
+  #
+  # « pas de jeton » voulait dire UNE chose : le provisionnement n'a pas tourne, la boite est mal
+  # deployee, elle ne doit pas demarrer. C'etait vrai tant que le jeton etait un fichier local —
+  # une absence purement locale, definitive, qu'aucune attente ne repare.
+  #
+  # Depuis que le jeton se DEMANDE au service d'autorite, la meme absence recouvre trois etats :
+  #
+  #   provisionnement manquant    LOCAL, DEFINITIF   -> le boot refuse, comme avant
+  #   service d'autorite muet     LOCAL, TRANSITOIRE -> une unite qui n'a pas fini de demarrer
+  #   forge injoignable           DISTANT, TRANSITOIRE
+  #
+  # Refuser le boot sur les deux derniers echangerait une panne rattrapable contre une boite morte —
+  # et le message accuserait `provision-role-tokens.sh` pour un hoquet de reseau. C'est exactement
+  # l'arbitrage ecrit dans l'etat cible : une panne partielle de forge est un comportement CORRECT,
+  # le label reste, le poller reessaie, rien n'est perdu.
+  #
+  # ⚠ ET CE N'EST PAS « ON LAISSE PASSER » : les deux causes transitoires demarrent BRUYAMMENT. Un
+  # boot vert sur une boite structurellement incapable de sceller est precisement le succes muet que
+  # ce chantier retire ailleurs ; on ne l'introduit pas ici.
+  @signer_causes_fatales [:no_role_token, :no_forge_login, :bad_role, :not_a_worker]
+
   defp require_signer_tokens! do
-    # Through `as_role/2` — the seal's own door — and not `Credentials.RoleToken` directly: the
-    # boundary keeps RoleToken internal to Credentials, and probing through the exact call the
-    # seal will make is the stronger proof anyway (same resolution, same policy).
     for role <- [
           Fleet.Project.Roles.gatekeeper_role(),
           Fleet.Project.Roles.conflict_resolver_role()
-        ],
-        match?({:error, :role_token_unavailable}, Fleet.Forge.Client.as_role([], role)) do
-      raise "pilot: no role token for merge signer #{inspect(role)} — the seal signs merges " <>
-              "fail-closed as this role and would refuse every merge on its path. Provision the " <>
-              "token (etc/provision-role-tokens.sh) before booting the rail."
+        ] do
+      # Through `as_role/2` — the seal's own door — and not `Credentials.RoleToken` directly: the
+      # boundary keeps RoleToken internal to Credentials, and probing through the exact call the
+      # seal will make is the stronger proof anyway (same resolution, same policy).
+      #
+      # La CAUSE, elle, se redemande — et seulement sur le chemin d'echec. Le chemin heureux ne paie
+      # rien, et la preuve reste celle de la porte que le sceau empruntera.
+      if match?({:error, :role_token_unavailable}, Fleet.Forge.Client.as_role([], role)) do
+        signer_verdict!(role, Fleet.Credentials.RoleIdentity.token_cause(role))
+      end
     end
+
+    :ok
+  end
+
+  defp signer_verdict!(role, {:ok, _token}) do
+    # LA COURSE EST REELLE ET SON SENS EST LE BON : le jeton etait indisponible a l'appel precedent
+    # et disponible a celui-ci. C'est un service qui vient de finir de demarrer. On demarre.
+    Logger.warning(
+      "pilot: le jeton du signataire #{inspect(role)} etait indisponible puis disponible entre " <>
+        "deux appels — le service d'autorite finissait de demarrer. Boot poursuivi."
+    )
+
+    :ok
+  end
+
+  defp signer_verdict!(role, {:error, cause}) when cause in @signer_causes_fatales do
+    raise "pilot: no role token for merge signer #{inspect(role)} (#{inspect(cause)}) — the seal " <>
+            "signs merges fail-closed as this role and would refuse every merge on its path. " <>
+            "Provision the token (etc/provision-role-tokens.sh) before booting the rail."
+  end
+
+  defp signer_verdict!(role, {:error, cause}) do
+    Logger.error(
+      "pilot: le jeton du signataire #{inspect(role)} est INDISPONIBLE (#{inspect(cause)}) — ce " <>
+        "n'est PAS un defaut de provisionnement, c'est une porte qui ne repond pas : le service " <>
+        "d'autorite ou la forge. Le rail demarre parce que la cause est transitoire et que les " <>
+        "merges reessaient, mais TOUT SCELLEMENT ECHOUERA tant qu'elle dure. " <>
+        "« systemctl status lcars-catalogue », puis la joignabilite de la forge."
+    )
 
     :ok
   end
