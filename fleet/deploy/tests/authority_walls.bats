@@ -83,13 +83,28 @@ absent() { # absent <motif etendu> <fichier>
 # la tiennent maintenant. Un mur qui accorde le `x` doit dire pourquoi le `r` reste interdit, sinon
 # le prochain elargira d'un cran en croyant suivre.
 
-@test "MUR 1: aucun ecrivain ne donne le bit de LECTURE du groupe sur le repertoire des secrets" {
+# ⚠ ET LA PREMIERE REECRITURE ETAIT ENCORE TROP LARGE — DANS L'AUTRE SENS, ET C'ETAIT PIRE.
+#
+# Elle refusait le bit `r` (`0[0-7][4-7][0-7]`) et laissait donc passer `0720` et `0730` : le bit
+# `w` DU GROUPE sur le repertoire des secrets. Or `w` sur un REPERTOIRE ne depend d'aucun mode de
+# fichier — n'importe quel membre de `fleet` fait `unlink` de `forge-master.token` et repose le
+# sien. Le service d'autorite servirait alors un jeton de forge CHOISI PAR L'APPELANT : la classe
+# `groupe -> root` que ce chantier ferme, rouverte par l'autre porte.
+#
+# J'avais elargi en lisant l'arbitrage comme « pas le bit r » alors qu'il dit « le groupe TRAVERSE,
+# il ne LISTE pas » — donc le chiffre de groupe vaut 0 ou 1, jamais 2 a 7. Corriger un mur trop
+# etroit en le rendant trop large est la faute symetrique de celle qu'on repare.
+#
+# ⚠ ET `other` EST FERME AUSSI, CE QUI EST NEUF. L'ancien mur avait `[0-7]` en derniere position :
+# `0704` et `0707` passaient. Ca n'a jamais ete une regression, mais maintenant que les modes de
+# FICHIERS sont porteurs (0710), un `other` ouvert sur ce repertoire ne doit plus passer non plus.
+@test "MUR 1: le groupe TRAVERSE le repertoire des secrets — il ne le lit ni ne l'ecrit, et « other » est ferme" {
   local f hits=0
   for f in "${CODE[@]}"; do
-    # Le chiffre de groupe vaut 4, 5, 6 ou 7 → le bit `r` est la. `1` (traverser seul) et `0` passent.
-    if code_of "$f" | grep -qE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][4-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)'; then
+    # Chiffre de groupe ∈ {0,1} : `x` seul, jamais `r` ni `w`. Et `other` a zero.
+    if code_of "$f" | grep -qE '(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)'; then
       echo "MUR rompu — le groupe LIT le repertoire des secrets dans $f :" >&2
-      code_of "$f" | grep -nE '(install -d|ensure_dir|chmod)[^\n]*0[0-7][4-7][0-7][^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' >&2
+      code_of "$f" | grep -nE '(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' >&2
       hits=$((hits + 1))
     fi
   done

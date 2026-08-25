@@ -76,6 +76,12 @@ def bind(path, group, mode=0o660, backlog=8, prefix="lcars"):
     # groupe existe, et on possede l'objet) et le meme repli — un temoin n'est dans aucun de ces
     # groupes, et ce qui RESSERRE est sans danger. Un secret trop ferme se diagnostique ; trop
     # ouvert, non.
+    # ⚠ `chmod` EXPLICITE SUR LE REPERTOIRE, PARCE QUE `makedirs` NE SUFFIT PAS DEUX FOIS.
+    # Son `mode=` est soumis a l'UMASK du service (un umask 027 rendrait 0750 en 0750, un 077 en
+    # 0700), et surtout `exist_ok=True` ne touche RIEN si le repertoire est deja la. Une porte posee
+    # une fois avec un mauvais mode le garderait a chaque redemarrage suivant, et le service
+    # convergerait tout sauf ca.
+    os.chmod(parent, 0o750)
     try:
         gid = grp.getgrnam(group).gr_gid
         os.chown(parent, os.geteuid(), gid)

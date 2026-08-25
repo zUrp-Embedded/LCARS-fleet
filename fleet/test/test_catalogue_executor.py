@@ -572,6 +572,12 @@ try:
     # groupe ne peut pas atteindre la socket meme en la possedant.
     check(_st_dir.st_mode & 0o010,
           "bind: le repertoire accorde le bit x au groupe (mode 0%o)" % (_st_dir.st_mode & 0o777))
+    # ⚠ LE MODE EXACT, ET PAS SEULEMENT UN BIT. `makedirs(mode=…)` est soumis a l'UMASK et
+    # `exist_ok=True` ne touche pas un repertoire deja la : sans le `chmod` explicite, la porte
+    # pouvait naitre a un mode que la table ne declare pas, ou garder le sien indefiniment. La table
+    # dit `0750` pour les deux portes.
+    check((_st_dir.st_mode & 0o777) == 0o750,
+          "bind: le repertoire porte EXACTEMENT le mode de la table (0%o)" % (_st_dir.st_mode & 0o777))
 finally:
     _srv.close()
 

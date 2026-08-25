@@ -133,7 +133,8 @@ fi
 #
 # ⚠ CETTE PORTE N'EST PAS `nobody`, CONTRAIREMENT AUX AUTRES. `roles`, `catalogue-source` et
 # consorts sont des LECTURES ; celle-ci ecrit sur une forge et lit le jeton master et le seed dans
-# `/home/private` (0750 root:fleet). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
+# `/home/private` (0710 lcars-authority:fleet — le groupe TRAVERSE, il ne lit pas ; les secrets eux-
+# memes sont 0600). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
 #
 # ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
 # reconstruit ce qui existe par ses blocs `import`, donc partir d'un tfstate VIDE est le cas normal.
@@ -157,8 +158,11 @@ fi
 if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
   # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
-  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun secret de `/home/private`, qui
-  # est `0700 lcars-authority` depuis que le detenteur des secrets a perdu tout privilege noyau. Son
+  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/home/private`.
+  # ⚠ ET LA RAISON ECRITE ICI A ETE FAUSSE UN TEMPS : elle disait « qui est 0700 lcars-authority »,
+  # donc « elle ne traverse meme pas ». Le repertoire est `0710 …:fleet` — cette porte TRAVERSE.
+  # Ce qui la tient est le mode des FICHIERS (0600), pas celui du dossier. La conclusion n'a pas
+  # bouge, sa raison si — et une raison fausse est ce qui fait relacher le vrai garde un jour. Son
   # appelant — `forge-gestures.sh cmd_install`, qui EST le service d'autorite — lit donc le jeton
   # systeme et transmet sa VALEUR. Or `env` ne propage que ce qu'on lui NOMME : oublier cette
   # variable ici aurait rendu une porte sans credential, dont l'echec accuse la source du catalogue.

@@ -88,8 +88,19 @@ git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
 #
 # ⚠ `--short=8`, LA MÊME FORME QUE `prov_source_rev` : deux longueurs de sha ne se comparent pas, et
 # la comparaison est tout ce que ce fichier sert à faire.
-git rev-parse --short=8 HEAD > "$STAGE/$ROOT/.source-revision" 2>/dev/null \
+# ⚠ `+local` SUR UN ARBRE MODIFIÉ, ET SANS LUI LE STAMP MENT. `prov_source_rev`
+# (provision-lib:1171) marque `+local` quand l'arbre diffère de HEAD, et `runtime_helpers.bats`
+# assère cette convention. Un `rev-parse` nu ferait donc déclarer à un paquet fabriqué depuis un
+# arbre sale qu'il EST un commit publié — et la comparaison « posé vs source », celle qui a coûté un
+# compte utilisateur le 2026-08-21, se ferait contre une révision qui n'existe nulle part.
+#
+# Je viens de fermer « un message qui désigne le mauvais objet » ; l'écrire sans cette ligne le
+# rouvrait un étage au-dessus. `prov_rev_is_behind` fait déjà `${1%%+*}`, il l'encaisse.
+_rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
   || die "révision indéterminable — le paquet serait intraçable, et l'install le dirait mal"
+git diff --quiet HEAD -- 2>/dev/null || _rev="${_rev}+local"
+printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
+say "révision estampillée : $_rev"
 
 mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
 cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
