@@ -565,6 +565,8 @@ COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
+# Le module de socket voisin : `catalogue-executor.py` l'importe depuis son repertoire.
+COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
 COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :

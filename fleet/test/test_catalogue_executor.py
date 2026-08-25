@@ -77,6 +77,7 @@ with open(GESTURES, "w") as fh:
 os.chmod(GESTURES, 0o755)
 
 ADMINS = set()
+WORKERS = set()
 ASKED = []
 
 
@@ -89,6 +90,15 @@ class Forge(BaseHTTPRequestHandler):
         # ⚠ ELLE REFUSE UN JETON QUI N'EST PAS LE SIEN, comme la vraie. Une forge de banc qui dit
         # « oui » a n'importe quel en-tete ne peut pas voir le cas du jeton vide ou revoque — et
         # c'est exactement le cas qui etait confondu avec « forge muette ».
+        # L'equipe `humans` et ses membres — la question que `roles.sock` pose a la place du groupe.
+        if "/teams" in self.path or "/orgs/" in self.path:
+            if "/orgs/" in self.path and self.path.endswith("/teams"):
+                b = json.dumps([{"id": 6, "name": "humans"}]).encode()
+                self.send_response(200); self.send_header("Content-Length", str(len(b)))
+                self.end_headers(); self.wfile.write(b); return
+            membre = self.path.rsplit("/", 1)[-1]
+            self.send_response(200 if membre in WORKERS else 404)
+            self.send_header("Content-Length", "0"); self.end_headers(); return
         if (self.headers.get("Authorization") or "").removeprefix("token ").strip() != TOKEN_VALUE:
             self.send_response(401)
             self.send_header("Content-Length", "0")
@@ -124,6 +134,12 @@ spec.loader.exec_module(mod)
 
 srv = mod.bind()
 threading.Thread(target=mod.serve_forever, args=(srv,), daemon=True).start()
+ROLES = os.path.join(WORK, "roles.sock")
+mod.ROLES_SOCKET_PATH = ROLES
+mod.ROLE_TOKENS_DIR = WORK
+_srv_roles = mod.bind(ROLES)
+threading.Thread(target=mod.serve_forever, args=(_srv_roles, mod.serve_role_token),
+                 daemon=True).start()
 MOI = mod.login_of(os.getuid())
 
 
@@ -311,6 +327,66 @@ if _m:
     _oui = sum(1 for n in _corpus if mod.NAME_RX.fullmatch(n))
     check(0 < _oui < len(_corpus),
           "forme du nom: le corpus DISCRIMINE (%d acceptes sur %d)" % (_oui, len(_corpus)))
+
+# ─── 7 quater. `roles.sock` — LE GROUPE REMPLACE PAR UNE QUESTION ───────────────────────────────
+#
+# Le jeton d'un role etait lisible par TOUT humain de la boite (`0640 root:fleet`), et le groupe
+# etait peuple par le convergeur depuis l'equipe `humans` de la forge — donc une projection, avec sa
+# peremption. La question se pose maintenant a l'instant du geste.
+#
+# ⚠ CE QUE CE VERBE REND EST UN CREDENTIAL, ET C'EST UN RECUL ASSUME sur `catalogue.sock`, ou le
+# service AGIT et ou rien ne sort. Ce qui le rend defendable est le point de depart, pas une
+# propriete absolue. Les temoins mesurent ce qui est vraiment achete : plus de lecture muette, une
+# identite attestee par le noyau, et une revocation qui mord.
+def demande_role(role, timeout=20):
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.settimeout(timeout)
+    c.connect(ROLES)
+    f = c.makefile("rw", encoding="utf-8", newline="\n")
+    f.write(role + "\n"); f.flush()
+    lignes = [l.rstrip("\n") for l in f]
+    c.close()
+    return lignes[-1] if lignes else ""
+
+open(os.path.join(WORK, "fleet_engineer.gitea_token"), "w").write("jeton-du-role\n")
+WORKERS.clear(); WORKERS.add(MOI)
+
+check(demande_role("fleet_engineer") == "jeton-du-role",
+      "roles: un worker de l'equipe obtient le jeton du role demande")
+
+WORKERS.clear()
+check(demande_role("fleet_engineer") == "FAIL:not_a_worker",
+      "roles: retire de l'equipe sur la forge -> refus AU GESTE SUIVANT, pas au prochain tour")
+WORKERS.add(MOI)
+
+check(demande_role("../../home/private/forge-master") == "FAIL:bad_role",
+      "roles: un nom qui traverse est refuse AVANT de devenir un chemin")
+_avant = len(ASKED)
+check(demande_role("") == "FAIL:bad_role", "roles: un nom vide est refuse")
+check(len(ASKED) == _avant, "roles: un nom refuse ne fait poser AUCUNE question a la forge")
+
+check(demande_role("role_qui_nexiste_pas") == "FAIL:no_role_token",
+      "roles: un role sans jeton -> cause a lui, jamais « la forge n'a pas repondu »")
+
+# ⚠ VIDE N'EST PAS ABSENT, ET C'EST LE MEME MANQUE — trou trouve par mutation, pas par relecture :
+# retirer le garde du vide ne faisait rougir AUCUN temoin. Un fichier vide part sur le fil comme un
+# jeton, la forge rend 401 au premier usage, et la cause devient « la forge refuse » sur une boite
+# dont le provisionnement est incomplet.
+open(os.path.join(WORK, "role_vide.gitea_token"), "w").close()
+check(demande_role("role_vide") == "FAIL:no_role_token",
+      "roles: un jeton VIDE est un jeton absent — on ne le sert pas")
+
+_garde = mod.FORGE_BASE_URL
+mod.FORGE_BASE_URL = "http://127.0.0.1:1"
+check(demande_role("fleet_engineer") == "FAIL:forge_unreachable",
+      "roles: forge muette -> fail-closed, et distinct de « tu n'es pas un worker »")
+mod.FORGE_BASE_URL = _garde
+
+_tok = open(TOKEN).read()
+open(TOKEN, "w").close()
+check(demande_role("fleet_engineer") == "FAIL:no_authority",
+      "roles: sans autorite, la cause est celle de la BOITE, pas celle de l'appelant")
+open(TOKEN, "w").write(_tok)
 
 # ─── 8. UN GESTE INTERROMPU N'EST PAS UN GESTE QUI ECHOUE ───────────────────────────────────────
 # `Popen.wait()` rend `-N` quand l'enfant a ete TUE par le signal N. Relaye tel quel, ca donnait

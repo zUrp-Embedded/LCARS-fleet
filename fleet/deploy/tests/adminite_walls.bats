@@ -139,16 +139,24 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   #
   # La propriete, elle, est de PORTEE : toute consultation de groupe dans ce fichier vit dans
   # `bind()`. Ailleurs, c'est une decision d'autorisation qui lit une projection — le defaut.
-  local hors_bind
-  hors_bind="$(code_of "$REPO/services/catalogue-executor.py" \
-                | sed '/^def bind(/,/^def /d' | grep -cE 'grp\.|getgrnam|getgrall' || true)"
-  [ "$hors_bind" -eq 0 ] || {
-    echo "MUR 2 bis rompu — le groupe est consulte HORS de bind() ($hors_bind fois)" >&2
-    return 1
-  }
+  # ⚠ ET LA CONSULTATION A DEMENAGE : elle vit dans `lcars_socket.bind()`, le module que TOUS les
+  # services importent. Le mur suit l'objet, sinon il garde une adresse vide — c'est exactement le
+  # perimetre mort qu'un garde d'instrument existe pour attraper.
+  local cible hors_bind
+  for cible in "$REPO/services/catalogue-executor.py" "$REPO/services/lcars_socket.py"; do
+    [ -r "$cible" ]
+    hors_bind="$(code_of "$cible" | sed '/^def bind(/,/^def /d' \
+                  | grep -cE 'grp\.|getgrnam|getgrall' || true)"
+    [ "$hors_bind" -eq 0 ] || {
+      echo "MUR 2 bis rompu — le groupe est consulte HORS de bind() dans $cible ($hors_bind fois)" >&2
+      return 1
+    }
+  done
   # Garde d'instrument : si `bind()` cesse d'exister ou change de nom, la coupe ci-dessus ne
   # retirerait plus rien et le mur passerait au vert sur un fichier qu'il n'a pas lu.
-  code_of "$REPO/services/catalogue-executor.py" | grep -q '^def bind('
+  code_of "$REPO/services/lcars_socket.py" | grep -q '^def bind('
+  # Et la consultation existe QUELQUE PART : un mur vert sur zero occurrence ne mesure rien.
+  code_of "$REPO/services/lcars_socket.py" | grep -q 'getgrnam'
 }
 
 @test "MUR 3: le convergeur ne lit plus l'autorite de la boite" {

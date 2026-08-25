@@ -79,6 +79,10 @@ HELPERS=(
   # posé ICI et pas ailleurs parce qu'il APPELLE `forge-gestures.sh` — les deux doivent atterrir
   # ensemble, sur les deux rails, ou le service démarre et refuse chaque geste sur un fichier absent.
   catalogue-executor.py
+  # Le cycle de vie d'une socket de service, ecrit UNE fois. Il est POSE et pas seulement ecrit :
+  # `catalogue-executor.py` l'importe depuis SON PROPRE repertoire, donc les deux atterrissent
+  # ensemble ou le service meurt sur un `ModuleNotFoundError` au demarrage.
+  lcars_socket.py
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
