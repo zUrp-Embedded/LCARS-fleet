@@ -4,15 +4,14 @@
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for fleet/services — un repertoire par ROLE, et il doit le rester
 #
-# ⚠ CE QUE CES DEUX TEMOINS TIENNENT, ET POURQUOI AUCUN AUTRE NE LE FAIT.
+# ⚠ CE QUE CES TEMOINS TIENNENT, ET QU'UN MIROIR DE LISTES NE PEUT PAS TENIR.
 #
-# `runtime_helpers.bats` porte deja le miroir `HELPERS <-> COPY du Dockerfile` — dans les deux sens,
-# et derive du module, donc il suit un demenagement tout seul. Il croise une LISTE avec une AUTRE
-# LISTE. Ce qu'il ne voit pas, c'est le REPERTOIRE : un fichier present et declare NULLE PART lui est
-# invisible, parce qu'il n'est dans aucune des deux listes qu'il compare.
+# Croiser une LISTE avec une AUTRE LISTE — les auxiliaires declares contre les `COPY` de
+# l'image — ne voit pas le REPERTOIRE. Un fichier PRESENT et declare NULLE PART n'est dans
+# aucune des deux listes comparees : il est invisible a ce croisement-la, par construction.
 #
-# C'etait l'etat exact de `console-agents.py` — 1211 lignes, ni copiees, ni posees, ni appelees, dans
-# l'arbre pendant trois semaines sans qu'aucun temoin ne s'en apercoive. Ces deux-la ferment ca.
+# Un fichier range est un fichier dont plus personne ne se demande s'il sert. Ces temoins
+# refusent qu'un fichier vive ici sans etre pose quelque part.
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
@@ -69,6 +68,10 @@ copied() {
   # (`.gitignore:28`). Un temoin qui le compte crie a chaque execution de test, et un mur qui
   # crie sans raison apprend a etre ignore.
   while read -r base; do
+    # ⚠ PREMIER NIVEAU SEULEMENT, ET C'EST UNE LIMITE, PAS UNE INTENTION. Un sous-repertoire
+    # de `services/` serait invisible a ce temoin. Le jour ou l'un apparait — un regroupement
+    # `console/`, par exemple — c'est ICI qu'il faut descendre, sinon le repertoire retrouve
+    # exactement l'angle mort que ce fichier ferme.
     [[ "$base" == */* ]] && continue
     # ⚠ UNE SEULE EXCLUSION, ET ELLE EST NOMMEE — meme regle que le miroir de
     # `runtime_helpers.bats`, qui nomme les siennes. La carte d'une couche n'est pas un

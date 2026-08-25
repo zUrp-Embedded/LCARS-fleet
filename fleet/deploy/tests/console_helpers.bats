@@ -2,11 +2,12 @@
 # SOURCE: fleet/deploy/tests/console_helpers.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for console-status.sh and console-pod.sh — les deux auxiliaires que RIEN ne tenait
+# STATUS: bats tests for services/console-status.sh and services/console-pod.sh
 #
-# ⚠ CES DEUX FICHIERS N'AVAIENT AUCUN TEMOIN, et ils sont poses en `/opt/lcars` sur les deux rails.
-# Un fichier qui change d'adresse sans temoin ne peut pas prouver qu'il est arrive entier : c'est
-# pour ca qu'ils s'ecrivent AVANT le demenagement, pas apres.
+# ⚠ UN FICHIER QUI CHANGE D'ADRESSE SANS TEMOIN NE PEUT PAS PROUVER QU'IL EST ARRIVE ENTIER.
+# C'est pourquoi ceux-ci s'ecrivent AVANT un demenagement, jamais apres : ce qui n'est pas
+# mesure avant ne peut pas etre compare apres. Les deux sujets sont poses en `/opt/lcars` sur
+# les deux rails, et l'un touche les sockets de console.
 #
 # CE QUI EST MESURE : la DECISION de chaque script — ce qu'il refuse, ce qu'il compte, ce qu'il rend.
 # `tmux` et `lcars` sont des doublures en tete de PATH ; aucune session, aucun pod reel.
