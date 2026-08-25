@@ -28,7 +28,7 @@
 # entier (tofu, secrets, depot modele) pour mesurer quatre appels.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"

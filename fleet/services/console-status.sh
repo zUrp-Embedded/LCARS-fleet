@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/console-status.sh
+# SOURCE: fleet/services/console-status.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
 # STATUS: sonde une-ligne de l'etat fleet, pour la barre de statut tmux de la console

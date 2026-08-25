@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/console-humans.sh
+# SOURCE: fleet/services/console-humans.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
 # STATUS: enumeration des humains eligibles a une console — source UNIQUE de la regle

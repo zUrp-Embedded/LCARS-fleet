@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/tests/forge_gestures.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
-# STATUS: bats tests for docker/forge-gestures.sh — LA porte des gestes forge de la boite
+# STATUS: bats tests for services/forge-gestures.sh — LA porte des gestes forge de la boite
 #
 # CE SCRIPT PORTE LE JETON SITE-ADMIN, celui qui peut tout creer et tout detruire sur la forge, et
 # il est joue par DEUX appelants (`box` et le banc). Une regression ici ne se voit ni dans
@@ -31,7 +31,7 @@
 }
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"

@@ -245,7 +245,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
   # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
   # propre sens. Ce qui compte est la direction — le nom vient de forge-gestures, pas du module.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne redit pas ce defaut
@@ -289,7 +289,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "l'AUTORITE est lue la ou 48 l'a ECRITE — les trois \`docker cp\` deviennent zero geste" {
   # Le conteneur recevait le jeton master et le seed par `docker cp` dans un volume. Sur la machine,
   # `LCARS_PRIVATE_DIR` suffit : le geste y cherche exactement les deux noms que ce module pose.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   grep -q 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$SRC"
   grep -q 'MASTER_TOKEN_FILE="\$PROV_TOKENS_DIR/forge-master.token"' "$SRC"
   grep -q 'SEED_FILE="\$PROV_TOKENS_DIR/forge-seed.pass"' "$SRC"
@@ -319,7 +319,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "la copie est INITIALISEE hors-ligne — le geste appelle \`tofu apply\` NU" {
   # Dans l'image, le Dockerfile jouait `tofu init` AU BUILD. En sortant du conteneur on herite de
   # cette dette : sans init, l'apply echoue sur des providers non installes.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   # le geste n'init PAS avant son apply de recette — c'est le fait dont depend le temoin suivant
   ! sed -n '/^  for m in instance \.; do/,/^  done/p' "$g" | grep -q 'tofu init'
@@ -397,7 +397,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 @test "les DEUX depots de catalogue sont recables — leurs defauts sont des chemins d'image" {
   # `forge-gestures.sh` publie la demo et la reference APRES la structure, et les deux echecs sont
   # NON FATAUX. Sans recablage : forge structuree, deux depots absents, aucun verdict qui baisse.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
   grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
 
@@ -690,7 +690,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$g" ]
   run bash "$g" builtin-human
   [ "$status" -eq 0 ]

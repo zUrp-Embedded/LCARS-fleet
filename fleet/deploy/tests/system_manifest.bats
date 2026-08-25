@@ -66,6 +66,7 @@ code() {
     "$ROOT"/install.sh \
     "$BATS_TEST_DIRNAME"/../../etc/install.sh \
     "$BATS_TEST_DIRNAME"/../docker/*.sh \
+    "$BATS_TEST_DIRNAME"/../../services/*.sh \
     "$BATS_TEST_DIRNAME"/../lib/*.sh 2>/dev/null
 }
 
@@ -166,7 +167,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # pas. Ni la mesure machine ni la table du corpus ne l'avaient : c'est la lecture du RUNTIME qui
   # l'a rendu visible.
   grep -qE '^runtime +/run/lcars-converger\.refused ' "$MANIFEST"
-  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../docker/human-converger.sh"
+  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../services/human-converger.sh"
 }
 
 @test "preserve = POSE mais JAMAIS RETIRE — pas « non pose »" {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/console-pod.sh
+# SOURCE: fleet/services/console-pod.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
 # STATUS: PROTO-V2 — la console D'UN pod, cible d'un ttyd `--url-arg` (UN port pour tous les pods)

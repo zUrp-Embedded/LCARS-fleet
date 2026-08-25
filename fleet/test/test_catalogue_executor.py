@@ -45,7 +45,7 @@ def check(cond, label):
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "..", "deploy", "docker", "catalogue-executor.py")
+SRC = os.path.join(HERE, "..", "services", "catalogue-executor.py")
 
 if not os.path.isfile(SRC):
     # Sujet absent = perimetre manquant, pas un vert. Sans cette ligne `FAIL:`, un exit 1 sec

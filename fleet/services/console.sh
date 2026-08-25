@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/console.sh
+# SOURCE: fleet/services/console.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
 # STATUS: la console web du conteneur — un shell dans le navigateur, SOUS L'IDENTITE de l'humain

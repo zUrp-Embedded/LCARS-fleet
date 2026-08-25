@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/deploy/docker/console-deck.py
+# SOURCE: fleet/services/console-deck.py
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
 # STATUS: PROTO-V2 — le deck de la boite : UNE page, des onglets verticaux, l'etat sonde en continu
@@ -14,6 +14,11 @@
 #
 # CE QUE LE SERVEUR NE FAIT PAS : il ne PILOTE rien (aucun POST, aucune action). Il lit et il
 # montre. Toute la conduite passe par les consoles (ttyd) ou l'API de la fleet.
+#
+# ⚠ LA VUE AGENTS EST ICI, ET NULLE PART AILLEURS. Une page d'exploration a porte un onglet
+# AGENTS (pods vivants x roles declares) tant que cette liste n'existait pas ; elle existe
+# depuis, relue toutes les 10 s et groupee par projet. La page d'exploration est morte avec
+# cette phrase. Ne la reimplemente pas : ce qu'elle montrait est au-dessus.
 
 import html
 import http.client

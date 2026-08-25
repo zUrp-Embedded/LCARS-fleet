@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/human-converger.sh
+# SOURCE: fleet/services/human-converger.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — boucle root : la team `humans` de la forge -> les users Linux de la boite

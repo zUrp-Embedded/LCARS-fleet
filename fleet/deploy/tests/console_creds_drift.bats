@@ -22,7 +22,7 @@
 # live box on 2026-08-20 -- it is what unblocked `catalogue install` when nothing else did.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../docker/console.sh"
+  SRC="$BATS_TEST_DIRNAME/../../services/console.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
 

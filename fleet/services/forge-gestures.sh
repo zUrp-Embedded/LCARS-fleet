@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/forge-gestures.sh
+# SOURCE: fleet/services/forge-gestures.sh
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
 # STATUS: les gestes forge de la boite — poses UNE fois, joues par tout appelant

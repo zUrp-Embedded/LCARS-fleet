@@ -31,7 +31,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DECK = os.path.join(HERE, "..", "deploy", "docker", "console-deck.py")
+DECK = os.path.join(HERE, "..", "services", "console-deck.py")
 
 ok = True
 
@@ -963,7 +963,7 @@ import re as _re
 import shutil as _shutil
 import subprocess as _subprocess
 
-_src = open(os.path.join(HERE, "..", "deploy", "docker", "console-deck.py")).read()
+_src = open(os.path.join(HERE, "..", "services", "console-deck.py")).read()
 _page = _re.search(r'PAGE = r"""(.*?)"""', _src, _re.S)
 check(_page is not None, "la page du deck est trouvable dans le source")
 

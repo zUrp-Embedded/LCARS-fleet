@@ -26,7 +26,7 @@
 
 setup() {
   DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
-  DECK="$BATS_TEST_DIRNAME/../docker/console-deck.py"
+  DECK="$BATS_TEST_DIRNAME/../../services/console-deck.py"
   [ -f "$DOCKERFILE" ]
   [ -f "$DECK" ]
   # La destination du `COPY --from=site`, telle qu'ecrite dans l'image.

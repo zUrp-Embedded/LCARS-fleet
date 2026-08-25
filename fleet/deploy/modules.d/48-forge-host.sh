@@ -362,7 +362,7 @@ announce_builtin_human_password() {
   # faisait la première écriture — rendait la fonction morte dans le cas NOMINAL, c'est-à-dire
   # exactement quand elle sert. Le verbe `builtin-human` est la porte : une autorité, interrogée.
   login="${PROV_FLEET_HUMAN:-}"
-  [[ -n "$login" ]] || login="$(bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  [[ -n "$login" ]] || login="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   [[ -n "$login" ]] || { p_warn "mot de passe forge de l'humain intégré NON posé : son nom est indéterminable"; return 0; }
 
   if [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] \
@@ -919,7 +919,7 @@ apply() {
     `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
     `# fait ne restent d'accord que tant que personne n'en touche un.` \
     LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
-    bash "$(repo_root)/fleet/deploy/docker/forge-gestures.sh" apply 2>&1 | tee "$tf_out" || rc="${PIPESTATUS[0]}"
+    bash "$(repo_root)/fleet/services/forge-gestures.sh" apply 2>&1 | tee "$tf_out" || rc="${PIPESTATUS[0]}"
   rm -rf "$recipe" "$enroll"
   [[ "$rc" -eq 0 ]] \
     || { rm -f "$tf_out"; p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }

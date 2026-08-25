@@ -21,8 +21,8 @@
 # in the chantier design. A stub can only prove we ASK for the right mode.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../docker/console.sh"
-  LANDING="$BATS_TEST_DIRNAME/../docker/console-landing.sh"
+  SRC="$BATS_TEST_DIRNAME/../../services/console.sh"
+  LANDING="$BATS_TEST_DIRNAME/../../services/console-landing.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
 
@@ -356,7 +356,7 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   local grp="$BATS_TEST_TMPDIR/group.humans_sh"
   printf 'fleet:x:2000:%s\n' "$members" > "$grp"
   LCARS_CONSOLE_PASSWD="$pw" LCARS_CONSOLE_GROUP_FILE="$grp" \
-    run bash "$BATS_TEST_DIRNAME/../docker/console-humans.sh" "$@"
+    run bash "$BATS_TEST_DIRNAME/../../services/console-humans.sh" "$@"
 }
 
 @test "6-surface: console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {

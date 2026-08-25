@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/console-landing.sh
+# SOURCE: fleet/services/console-landing.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
 # STATUS: lance le DECK de la boite (page unique, onglets verticaux, etat sonde) — identifie par la forge

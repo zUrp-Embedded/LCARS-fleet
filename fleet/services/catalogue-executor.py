@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SOURCE: fleet/deploy/docker/catalogue-executor.py
+# SOURCE: fleet/services/catalogue-executor.py
 # AUTHOR: bob
 # STARDATE: 2026-08-23
 # STATUS: PROTO-V2 — the root side of `lcars catalogue install`: it holds the authority, the caller proves nothing
@@ -25,7 +25,7 @@
 #
 # WHY PYTHON, AND IT IS A DECISION. Bash can neither listen on a unix socket nor call
 # `getsockopt(SO_PEERCRED)`; `socat` does not propagate the peer's credentials. Python can, and it is
-# already a runtime of this product (`console-deck.py`, `console-agents.py`) -- so this costs no new
+# already a runtime of this product (`console-deck.py`) -- so this costs no new
 # dependency. Stdlib only, for the same reason the deck is stdlib only.
 
 import grp

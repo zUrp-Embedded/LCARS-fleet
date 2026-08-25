@@ -22,7 +22,7 @@ setup() {
 
   MOD="$BATS_TEST_DIRNAME/../modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
-  SRC_DIR="$BATS_TEST_DIRNAME/../docker"
+  SRC_DIR="$BATS_TEST_DIRNAME/../../services"
   [ -f "$MOD" ] && [ -f "$DOCKERFILE" ]
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
@@ -179,7 +179,7 @@ helpers() {
   # sont derives, maintenant, et c'est ce qui rend la phrase vraie.
   local n
   while read -r n; do
-    grep -q "COPY fleet/deploy/docker/$n */opt/lcars/$n" "$DOCKERFILE"
+    grep -q "COPY fleet/services/$n */opt/lcars/$n" "$DOCKERFILE"
   done < <(helpers)
 
   # SENS INVERSE : ce que l'image pose a plat dans /opt/lcars doit etre un auxiliaire du module.
@@ -188,7 +188,7 @@ helpers() {
   while read -r n; do
     case "$n" in entrypoint.sh|console.tmux.conf) continue ;; esac
     helpers | grep -qx "$n"
-  done < <(sed -n 's|^COPY fleet/deploy/docker/\([^ ]*\) */opt/lcars/\1$|\1|p' "$DOCKERFILE")
+  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) */opt/lcars/\1$|\1|p' "$DOCKERFILE")
 
   ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
 }

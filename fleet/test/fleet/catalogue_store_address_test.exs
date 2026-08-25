@@ -30,7 +30,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   # Les deux écrivains shell. `forge-gestures.sh` pousse et clone ; `45-catalogues.sh` cherche et
   # supprime. Ce sont les deux seuls fichiers qui portent l'adresse hors du BEAM.
   @mirrors [
-    "deploy/docker/forge-gestures.sh",
+    "services/forge-gestures.sh",
     "deploy/modules.d/45-catalogues.sh"
   ]
 

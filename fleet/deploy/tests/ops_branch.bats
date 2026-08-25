@@ -164,7 +164,7 @@ EOF
   # `pod_tools/delegation.ex` visent tous `fleet/lcars` ; le seul `create_repo` du runtime sert aux
   # depots de PROJET, et la recette tofu ne cree AUCUN depot. Resultat : derive a chaque passage sur
   # les deux substrats, et un 404 sur ce depot lu comme une panne de l'IncidentRegistry.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   code() { grep -vE '^\s*#' "$g"; }
   code | grep -q 'ensure_ops_repo()'
   # il est APPELE dans la passe d'apply, pas seulement defini
@@ -176,7 +176,7 @@ EOF
 @test "la creation RELIT au lieu de croire le code du POST" {
   # Meme regle que la protection de branche : une v1 concluait « deja present » sur un 409/422 alors
   # que Gitea rend d'autres codes selon la version.
-  local g="$BATS_TEST_DIRNAME/../docker/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   local body; body="$(grep -vE '^\s*#' "$g" | sed -n '/^ensure_ops_repo()/,/^}/p')"
   [ "$(grep -c 'api/v1/repos/\$repo' <<<"$body")" -ge 2 ]
   grep -q 'NON cree (HTTP \$code)' <<<"$body"

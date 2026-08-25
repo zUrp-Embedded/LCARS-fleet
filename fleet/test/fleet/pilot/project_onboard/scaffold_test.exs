@@ -1,5 +1,11 @@
 defmodule Fleet.Project.Onboard.ScaffoldTest do
-  use ExUnit.Case, async: true
+  # ⚠ `async: false` : CETTE SUITE ECRIT DANS L'APPLICATION ENV. L'env applicatif est GLOBAL au
+  # noeud — une suite qui le pose en async le fait voir a toutes celles qui tournent en meme
+  # temps, et le defaut sort en ECHEC INTERMITTENT chez un voisin qui n'y est pour rien.
+  # Mesure du 2026-08-25 : `scaffold_test` a fait rougir le gate sur une comparaison de
+  # racines de catalogue, verte en isolation. La regle est deja ecrite dans `fleet/CLAUDE.md`
+  # (les suites qui ecrivent l'env applicatif ne sont pas async) ; ces deux-la y echappaient.
+  use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
   alias Fleet.Project.Onboard.Scaffold

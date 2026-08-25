@@ -46,7 +46,11 @@ set -euo pipefail
 HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
-SRC_DIR="$(repo_root)/fleet/deploy/docker"
+# ⚠ LA SOURCE EST `fleet/services/`, PAS `deploy/docker/`. Ces fichiers sont du RUNTIME — ils
+# sont poses hors du checkout et tournent apres l'install, la plupart en root. Les ranger sous
+# le nom de l'outil qui les transporte faisait chercher le code privilegie de cette machine
+# dans un dossier appele `docker`, ou il n'y a pas de docker sur ce rail.
+SRC_DIR="$(repo_root)/fleet/services"
 # ⚠ SEAM SUR LE BINAIRE, ET IL EXISTE PARCE QU'UN TEMOIN NE PEUT PAS DESINSTALLER ttyd. Le temoin
 # « le manque de ttyd se DIT » retirait sa doublure du PATH — ce qui ne prouve rien sur une machine
 # ou le VRAI ttyd est installe, c'est-a-dire sur toute machine que ce module a deja convergee.

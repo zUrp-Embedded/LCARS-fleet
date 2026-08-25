@@ -35,7 +35,7 @@
 }
 
 setup() {
-  SUT="${BATS_TEST_DIRNAME}/../docker/toolchain-converger.sh"
+  SUT="${BATS_TEST_DIRNAME}/../../services/toolchain-converger.sh"
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
   export LCARS_TOOLCHAIN_WORK="$BATS_TEST_TMPDIR/work"
   export LCARS_TOOLCHAIN_LOCK="$BATS_TEST_TMPDIR/lock"

@@ -537,34 +537,34 @@ COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
 # change pas quel metier tourne, ca rend seulement le choix possible sans remonter une image.
 COPY catalogues /opt/lcars/catalogues
 COPY fleet/deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
-COPY fleet/deploy/docker/console.sh         /opt/lcars/console.sh
-COPY fleet/deploy/docker/console-humans.sh  /opt/lcars/console-humans.sh
-COPY fleet/deploy/docker/console-status.sh  /opt/lcars/console-status.sh
-COPY fleet/deploy/docker/console-landing.sh /opt/lcars/console-landing.sh
-COPY fleet/deploy/docker/console-deck.py    /opt/lcars/console-deck.py
-COPY fleet/deploy/docker/console-pod.sh     /opt/lcars/console-pod.sh
-COPY fleet/deploy/docker/human-converger.sh /opt/lcars/human-converger.sh
+COPY fleet/services/console.sh         /opt/lcars/console.sh
+COPY fleet/services/console-humans.sh  /opt/lcars/console-humans.sh
+COPY fleet/services/console-status.sh  /opt/lcars/console-status.sh
+COPY fleet/services/console-landing.sh /opt/lcars/console-landing.sh
+COPY fleet/services/console-deck.py    /opt/lcars/console-deck.py
+COPY fleet/services/console-pod.sh     /opt/lcars/console-pod.sh
+COPY fleet/services/human-converger.sh /opt/lcars/human-converger.sh
 # L'UNIQUE GESTE PRIVILEGIE DU RAIL TOOLCHAIN — au chemin que le sudoers etroit (45-sudoers) et le
 # reconciliateur (`toolchain_reconciler.ex` : `sudo -n <bin> <sha>`) attendent. Dans /usr/local/bin
 # et pas /opt : c'est un binaire d'exploitation, pas un composant de boot.
-COPY fleet/deploy/docker/toolchain-converger.sh /usr/local/bin/lcars-toolchain-converge
+COPY fleet/services/toolchain-converger.sh /usr/local/bin/lcars-toolchain-converge
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
 COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
 # Les gestes forge, DANS l'image : `box` et le banc les jouent par la meme porte, au lieu
 # d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
 # couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
-COPY fleet/deploy/docker/forge-gestures.sh /opt/lcars/forge-gestures.sh
+COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
-COPY fleet/deploy/docker/catalogue-executor.py /opt/lcars/catalogue-executor.py
-COPY fleet/deploy/docker/console.tmux.conf  /opt/lcars/console.tmux.conf
+COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
+COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
 # le Debian etendu (ll/la/l, couleurs, completion, lesspipe) que bookworm-slim n'a PAS, plus le
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
-COPY fleet/deploy/docker/skel.bashrc      /etc/skel/.bashrc
+COPY fleet/services/skel.bashrc      /etc/skel/.bashrc
 
 # ─── token-saver : EMBARQUE, et aucun pod ne l'execute — les deux moities comptent ──────────────
 #

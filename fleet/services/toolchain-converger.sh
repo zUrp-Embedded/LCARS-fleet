@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/docker/toolchain-converger.sh
+# SOURCE: fleet/services/toolchain-converger.sh
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO — l'UNIQUE geste privilegie du rail d'outillage : appliquer un manifeste deja signe

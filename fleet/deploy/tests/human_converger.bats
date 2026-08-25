@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/tests/human_converger.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for docker/human-converger.sh — l'ADMISSION, et elle seule
+# STATUS: bats tests for services/human-converger.sh — l'ADMISSION, et elle seule
 #
 # CE QUI EST EPINGLE, ET POURQUOI CE N'EST PAS DE LA PARANOIA. Ce convergeur cree des users Linux a
 # partir de noms choisis par des inconnus sur une page d'inscription ouverte. Les deux alphabets ne
@@ -21,7 +21,7 @@
 # reseau, aucun user cree.
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../docker/human-converger.sh"
+  SUT="$BATS_TEST_DIRNAME/../../services/human-converger.sh"
   export SUT
   [ -f "$SUT" ]
   PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"

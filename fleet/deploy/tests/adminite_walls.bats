@@ -27,7 +27,10 @@ setup() {
   # Le perimetre : ce qui S'EXECUTE. Les temoins (`deploy/tests`, `test/`) nomment legitimement ce
   # qu'ils epinglent, et les documents de chantier ne tournent nulle part.
   mapfile -t CODE < <(
-    find "$REPO/deploy" "$REPO/bin" "$REPO/priv" -type f \
+    # ⚠ `services` EST DANS LE PERIMETRE, ET C EST LA MOITIE QUI COMPTE : c'est la que vivent
+    # l'executeur de catalogue, le convergeur d'humains et le convergeur d'outillage — le code
+    # privilegie de la machine. L'oublier ferait passer les murs au vert en n'ayant rien lu.
+    find "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/priv" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name '*.yaml' -o -name 'lcars' -o -name 'box' \
          -o -name 'accept' -o -name 'provision' -o -name 'Dockerfile' -o -name '*.manifest' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
@@ -122,20 +125,20 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # deux fichiers qui decident si un geste de catalogue a lieu ne consultent pas la base des
   # groupes. `bin/lcars` ne decide plus rien (il demande), et l'executeur demande a la forge.
   local porte
-  for porte in "$REPO/bin/lcars" "$REPO/deploy/docker/catalogue-executor.py"; do
+  for porte in "$REPO/bin/lcars" "$REPO/services/catalogue-executor.py"; do
     [ -r "$porte" ]
     absent 'id -nG|getent group|os\.getgroups|grp\.getgrall' "$porte"
   done
   # ⚠ UNE EXCEPTION NOMMEE, ET ELLE N'EN EST PAS UNE : l'executeur appelle `grp.getgrnam` pour poser
   # le GROUPE DE SA SOCKET. Ce groupe borne qui peut FRAPPER, il n'autorise rien — l'autorisation
   # vient de `SO_PEERCRED` puis de la forge. Confondre les deux serait refaire le defaut.
-  code_of "$REPO/deploy/docker/catalogue-executor.py" | grep -q 'grp.getgrnam'
+  code_of "$REPO/services/catalogue-executor.py" | grep -q 'grp.getgrnam'
 }
 
 @test "MUR 3: le convergeur ne lit plus l'autorite de la boite" {
   # Il PROVISIONNE — un compte unix ne se cree pas au moment ou quelqu'un tape. Il n'AUTORISE pas :
   # ca se demande a l'instant ou ca compte. Son unique usage du jeton master etait la projection.
-  local c="$REPO/deploy/docker/human-converger.sh"
+  local c="$REPO/services/human-converger.sh"
   [ -r "$c" ]
   absent 'MASTER_TOKEN' "$c"
   absent 'forge-master' "$c"

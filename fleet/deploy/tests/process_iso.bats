@@ -32,7 +32,7 @@
 setup() {
   ENTRY="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   SERVICES="$BATS_TEST_DIRNAME/../modules.d/64-services.sh"
-  CONVERGER="$BATS_TEST_DIRNAME/../docker/human-converger.sh"
+  CONVERGER="$BATS_TEST_DIRNAME/../../services/human-converger.sh"
   [ -f "$ENTRY" ] && [ -f "$SERVICES" ] && [ -f "$CONVERGER" ]
 }
 
@@ -99,8 +99,8 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   # Le fond du defaut : deux populations. `--all` lit `console-humans.sh`, qui est exactement ce que
   # `console-deck.py` interroge pour dessiner ses onglets. Offre et demarrage coincident alors PAR
   # CONSTRUCTION, au lieu de coincider par accident.
-  local console="$BATS_TEST_DIRNAME/../docker/console.sh"
-  local deck="$BATS_TEST_DIRNAME/../docker/console-deck.py"
+  local console="$BATS_TEST_DIRNAME/../../services/console.sh"
+  local deck="$BATS_TEST_DIRNAME/../../services/console-deck.py"
   code "$console" | grep -qE 'LCARS_CONSOLE_HUMANS:-.*console-humans\.sh'
   grep -qE 'LCARS_CONSOLE_HUMANS", "[^"]*console-humans\.sh' "$deck"
 }
@@ -109,10 +109,10 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   # Mesure du 2026-08-18 : **64 ttyd par humain** sur un banc de trente minutes, quand le geste
   # faisait `rm -f` sur la socket a chaque passage. Ce qui a change est que l'idempotence vit
   # maintenant la ou elle se mesure — une connexion REELLE sur la socket, ce que le deck fera.
-  local console="$BATS_TEST_DIRNAME/../docker/console.sh"
+  local console="$BATS_TEST_DIRNAME/../../services/console.sh"
   code "$console" | grep -q 'console_alive'
   # et l'appel par tour ne contourne pas cette garde
-  code "$BATS_TEST_DIRNAME/../docker/human-converger.sh" | grep -qv 'rm -f.*console.sock'
+  code "$BATS_TEST_DIRNAME/../../services/human-converger.sh" | grep -qv 'rm -f.*console.sock'
 }
 
 @test "sshd n'est PAS dans la table, et son absence est motivee" {
@@ -131,9 +131,9 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   #
   # Ce temoin ne corrige pas : il EMPECHE que l'ecart devienne invisible. Le jour ou les deux sens
   # sont separes en deux variables, il tombe — et sa chute est le signal.
-  local hum="$BATS_TEST_DIRNAME/../docker/console-humans.sh"
-  local con="$BATS_TEST_DIRNAME/../docker/console.sh"
-  local lan="$BATS_TEST_DIRNAME/../docker/console-landing.sh"
+  local hum="$BATS_TEST_DIRNAME/../../services/console-humans.sh"
+  local con="$BATS_TEST_DIRNAME/../../services/console.sh"
+  local lan="$BATS_TEST_DIRNAME/../../services/console-landing.sh"
   grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-fleet\}"' "$hum"
   grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$con"
   grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$lan"
