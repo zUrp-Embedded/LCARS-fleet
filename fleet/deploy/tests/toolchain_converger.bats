@@ -409,8 +409,20 @@ EOF
   [[ "$output" != *"n'est PAS la tete"* ]]
 }
 
-@test "GARDE: la branche est celle que le runtime gele, et elle se nomme dans le code" {
-  # `Fleet.Toolchain.branch/0` gele `tool_request`. Le convergeur ne doit pas en connaitre une autre
-  # par defaut : deux noms pour une branche, c'est une porte ouverte du cote de celui qu'on ne lit pas.
-  grep -q 'LCARS_TOOLCHAIN_BRANCH:-tool_request' "$SUT"
+@test "GARDE: la branche est un LITTERAL GELE — une borne ne se regle pas" {
+  # ⚠ CE TEMOIN A CONSACRE UN DEFAUT. Sa premiere forme exigeait
+  # `LCARS_TOOLCHAIN_BRANCH:-tool_request` : elle rendait la borne REGLABLE et le verifiait, donc
+  # elle aurait empeche de la geler. Un temoin qui epingle l'implementation qu'on vient d'ecrire ne
+  # mesure rien — il fige.
+  #
+  # Ce qui se tient : `Fleet.Toolchain.branch/0` gele le nom, chaque lecteur shell en porte la COPIE,
+  # et AUCUN ne la derive d'une expansion. Le contrat `toolchain.branch_single_source` le dit dans
+  # sa remediation : « a name half of the rail can retune is a rail that splits in silence ».
+  # Ici ce n'est meme pas un nom de confort : c'est ce qui empeche d'installer en root un manifeste
+  # que personne n'a signe.
+  grep -qx 'BRANCH="tool_request"' "$SUT"
+  ! grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"
+  # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le
+  # runtime aurait pu changer sans lui.
+  grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../lib/fleet/toolchain.ex"
 }

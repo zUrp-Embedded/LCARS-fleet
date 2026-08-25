@@ -3525,7 +3525,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     mirrors = [
       "deploy/modules.d/52-ops-branch.sh",
       "deploy/docker/forge-gestures.sh",
-      "deploy/admiral/skills/system-issues/list.sh"
+      "deploy/admiral/skills/system-issues/list.sh",
+      # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
+      # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
+      # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
+      "deploy/docker/toolchain-converger.sh"
     ]
 
     id = "toolchain.branch_single_source"
@@ -3576,6 +3580,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               case File.read(Path.expand(rel, root)) do
                 {:ok, body} ->
                   cond do
+                    # ⚠ LA FORME, PAS UN NOM. Cette clause a epingle le litteral
+                    # `LCARS_SYSADMIN_BRANCH` — donc un quatrieme lecteur qui a nomme sa
+                    # variable AUTREMENT est passe au vert en rendant la borne reglable.
+                    # Un mur qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse
+                    # est qu'un nom de branche vienne d'une expansion, quel que soit son nom.
+                    Regex.match?(~r/\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[\}:]/, body) ->
+                      [
+                        {rel,
+                         "derives the branch from an expansion — the name is frozen, not tunable"}
+                      ]
+
                     String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
                       [{rel, "carries LCARS_SYSADMIN_BRANCH — the name is frozen, not tunable"}]
 

@@ -572,7 +572,12 @@ if [[ "$RAIL" == "box" ]]; then
   if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
     echo ""
     echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
-    DOCKER_BIN="$PROV_DOCKER_BIN" LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/fleet/deploy/box" build || {
+    # ⚠ PAS DE `DOCKER_BIN=` ICI, ET C'EST DELIBERE : le delegue SONDE lui-meme et lit
+    # `PROV_DOCKER_BIN` de sa propre sonde. Le prefixe a vecu ici sans lecteur — ni l'ancienne
+    # porte ni `box` ne l'ont jamais lu. ⚠ NE PAS L'AJOUTER PAR SYMETRIE avec le `--bench`
+    # plus bas : celui-la est REEL, `bench-up.sh` compose `"$DOCKER_BIN" <verbe>` et retombe
+    # sinon sur un `docker` nu, contournant le shim d'escalade.
+    LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/fleet/deploy/box" build || {
       echo "  ${R}Le build a échoué — son verdict est le sien, rien n'a été déployé.${N}"
       exit 1
     }

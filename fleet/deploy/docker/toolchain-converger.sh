@@ -107,7 +107,12 @@ api() { curl -sS -m 30 -H "Authorization: token $TOKEN" "$FORGE/api/v1$1"; }
 #
 # ⚠ ET SI LA FORGE NE REND PAS LA TETE, ON REFUSE. Un garde qui s'efface quand sa sonde est muette
 # ne garde rien : c'est le mode de defaillance que le rail entier est cense interdire.
-BRANCH="${LCARS_TOOLCHAIN_BRANCH:-tool_request}"
+# ⚠ UN LITTERAL, JAMAIS UNE VARIABLE — ET C EST UNE BORNE DE SECURITE, PAS UN NOM DE CONFORT.
+# `Fleet.Toolchain.branch/0` gele ce nom ; le contrat `toolchain.branch_single_source` exige
+# que chaque lecteur shell en porte la COPIE et refuse tout reglage : « a name half of the
+# rail can retune is a rail that splits in silence ». Rendre celui-ci reglable ouvrirait la
+# borne qui empeche d'installer en root un manifeste que personne n'a signe.
+BRANCH="tool_request"
 head_of_branch() {
   api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
 }
