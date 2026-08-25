@@ -30,8 +30,9 @@
 # fait creer, dont il detient donc legitimement les passwords. Emprunter le rail site-admin
 # exigerait qu'un credential capable de devenir n'importe qui vive la ou tourne ce script.
 # Le password est un SCALPEL (fichier operateur-only) : ce script se lance UNE fois par
-# quelqu'un qui a ce droit ; le runtime, lui, ne lit que les fichiers poses (0640, groupe fleet). Le
-# script n'invente aucun droit : il echoue proprement s'il n'a pas le sien.
+# quelqu'un qui a ce droit ; le runtime, lui, ne lit RIEN — il DEMANDE au service d'autorite, seul
+# proprietaire des fichiers poses (0600). Le script n'invente aucun droit : il echoue proprement
+# s'il n'a pas le sien.
 #
 # IDEMPOTENCE (provisioning brutal) : un token local DEJA VALIDE sur la forge est saute (aucune
 # ecriture). Invalide ou absent : l'ancien token remote du meme nom est supprime puis re-minte, et le
@@ -46,7 +47,7 @@
 # Options : --tokens-dir DIR (defaut /home/private) · --roles "a b c" (defaut : les 6) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
 #             fichier. Le compte systeme en etait le seul usager ; il suit le contrat de role depuis
-#             qu'il s'appelle `system_starfleet`) · --group GRP (defaut fleet) ·
+#             qu'il s'appelle `system_starfleet`) · --owner USER (defaut lcars-authority) ·
 #           --token-name NAME (defaut lcars-fleet) · -h|--help
 # passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte systeme
 #   y a sa cle, ex. "system_starfleet"). Cle insensible a la casse (Gitea resout les comptes
@@ -79,7 +80,17 @@ TOKENS_DIR="/home/private"
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
-GROUP="fleet"
+# ⚠ UN PROPRIETAIRE, PLUS UN GROUPE — ET CE N'EST PAS UN RESSERREMENT DE MODE, C'EST UN CHANGEMENT
+# DE NATURE. Ces fichiers naissaient `0640 root:fleet`, et le groupe `fleet` etait une PROJECTION de
+# l'equipe `humans` de la forge, refaite toutes les trente secondes par le convergeur. Le droit de
+# porter une identite de travail avait donc la peremption d'un cache : quelqu'un que la forge avait
+# retire lisait encore jusqu'au tour suivant, et jusqu'a la mort de chacun de ses process vivants —
+# d'ou le `pkill` de la procedure de revocation.
+#
+# Un seul process les ouvre desormais : le service d'autorite. Ce qu'il rend, il le rend apres avoir
+# demande a la forge, A L'INSTANT du geste. Le fichier n'a donc plus aucune raison d'etre lisible par
+# un groupe, et la question « qui a le droit » n'est plus une question de mode.
+OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
 # The SYSTEM account creates the org repos (create_project → onboard): POST /orgs/<org>/repos ALSO
@@ -124,7 +135,7 @@ while [[ $# -gt 0 ]]; do
     --forge) FORGE="$2"; shift 2 ;;
     --tokens-dir) TOKENS_DIR="$2"; shift 2 ;;
     --roles) ROLES="$2"; shift 2 ;;
-    --group) GROUP="$2"; shift 2 ;;
+    --owner) OWNER="$2"; shift 2 ;;
     --token-name) TOKEN_NAME="$2"; shift 2 ;;
     --passwords-file) PASSWORDS_FILE="$2"; shift 2 ;;
     --master-token-file) MASTER_TOKEN_FILE="$2"; shift 2 ;;
@@ -333,25 +344,38 @@ for entry in "${ENTRIES[@]}"; do
     continue
   fi
 
-  # Atomic write (tmp+mv) + POSIX rights: 0640, group fleet — the per-human BEAM reads through the
-  # group, nobody else. LOCAL READABILITY is a postcondition on a par with forge validity: a token
-  # valid on the forge but owned by the wrong group is UNREADABLE by the runtime — announcing POSE and
-  # exiting 0 there hid a broken deploy behind a WARN. So the group ownership is VERIFIED (stat, not
-  # just the chgrp exit code), and a mismatch FAILS the account: the file stays written (the mint cost
-  # was real, --check will confirm it), but it is not counted as posed and the run exits non-zero.
-  install -d -m 0750 "$TOKENS_DIR" 2>/dev/null || true
+  # Atomic write (tmp+mv) + POSIX rights: 0600, owned by the authority service — nobody else opens
+  # it, and no group traverses to it. LOCAL READABILITY is a postcondition on a par with forge
+  # validity: a token valid on the forge but owned by the wrong account is UNREADABLE by the service
+  # — announcing POSE and exiting 0 there hid a broken deploy behind a WARN. So ownership is VERIFIED
+  # (stat, not just the chown exit code), and a mismatch FAILS the account: the file stays written
+  # (the mint cost was real, --check will confirm it), but it is not counted as posed and the run
+  # exits non-zero.
+  #
+  # ⚠ LE REPERTOIRE EST POSE ICI AUSSI, ET L'OUBLIER NE FERMAIT RIEN. Il naissait `0750` : le premier
+  # `provision apply` suivant reposait le mode et le groupe rentrait, quelle que soit la finesse des
+  # modes de fichiers. Un axe entier — la CLASSE REPERTOIRE — avait ete inventorie a moitie.
+  #
+  # ⚠ `-o`/`-g` NE SONT TENTES QUE SI ON EST ROOT, et le repli n'est PAS un `|| true` silencieux :
+  # sans le droit de donner le fichier, le controle `stat` plus bas fait echouer le compte. Un secret
+  # trop ferme se diagnostique ; mal attribue, non.
+  if [[ "$(id -u)" -eq 0 ]]; then
+    install -d -m 0700 -o "$OWNER" -g "$OWNER" "$TOKENS_DIR" 2>/dev/null || true
+  else
+    install -d -m 0700 "$TOKENS_DIR" 2>/dev/null || true
+  fi
   tmp="$(mktemp "$TOKENS_DIR/.provision.XXXXXX")" || { echo "FAIL  $account — $TOKENS_DIR non writable" >&2; fail=1; continue; }
   printf '%s\n' "$tok" > "$tmp"
-  chmod 0640 "$tmp"
-  chgrp "$GROUP" "$tmp" 2>/dev/null || true
+  chmod 0600 "$tmp"
+  chown "$OWNER:$OWNER" "$tmp" 2>/dev/null || true
   mv -f "$tmp" "$file"
 
-  if [[ "$(stat -c %G "$file" 2>/dev/null)" != "$GROUP" ]]; then
-    echo "FAIL  $account — token valide sur la forge mais groupe != $GROUP : ILLISIBLE par le runtime (chgrp $GROUP requis, droit sur $TOKENS_DIR ?)" >&2
+  if [[ "$(stat -c %U "$file" 2>/dev/null)" != "$OWNER" ]]; then
+    echo "FAIL  $account — token valide sur la forge mais propriétaire != $OWNER : ILLISIBLE par le service d'autorité (chown $OWNER requis, droit sur $TOKENS_DIR ?)" >&2
     fail=1
     continue
   fi
-  echo "POSE  $account — nouveau token, sonde OK, lisible par le groupe $GROUP → $file"
+  echo "POSE  $account — nouveau token, sonde OK, détenu par $OWNER seul → $file"
 done
 
 if [[ "$fail" -ne 0 ]]; then

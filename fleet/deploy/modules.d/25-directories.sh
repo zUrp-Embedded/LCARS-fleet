@@ -14,9 +14,16 @@
 #
 #   /local          0755 root:root — les prefixes d'install y sont crees par 60-deploy ;
 #                   root-only en ecriture = personne ne remplace un runtime deploye par surprise.
-#   /home/private   0750 root:fleet — les role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR,
-#                   fichiers 0640 poses par etc/provision-role-tokens.sh). Lecture : groupe fleet
-#                   (le BEAM per-humain lit via le groupe) ; traversee interdite au reste.
+#   /home/private   0700 lcars-authority — les secrets de forge de la boite (jetons de role,
+#                   jeton master, seed). UN SEUL process les ouvre : le service d'autorite.
+#                   ⚠ IL ETAIT `0750 root:fleet`, ET LE GROUPE ETAIT UNE PROJECTION. Le convergeur
+#                   remplissait `fleet` depuis l'equipe `humans` de la forge toutes les 30 s : le
+#                   droit de lire un credential avait donc la peremption d'un cache, et se retirer
+#                   demandait un `pkill`. Le BEAM ne lit plus rien ici — il DEMANDE au service, qui
+#                   pose la question a la forge a l'instant du geste.
+#                   ⚠ ROOT TRAVERSE ENCORE, et c'est ce qui fait tenir le provisionnement : les
+#                   modules qui ecrivent ici tournent en root et ignorent le mode. Ce qui est
+#                   ferme, c'est l'uid HUMAIN.
 #
 # ─── LES ZONES DE FACE, ET POURQUOI ELLES SONT ICI ────────────────────────────────────────────
 # Une racine par face — le miroir shell de `Fleet.Layout.face_root/1`, tenu en phase avec lui par
@@ -134,7 +141,7 @@ prov_runtime_dirs() {
 prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
-    "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
+    "$PROV_TOKENS_DIR 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \

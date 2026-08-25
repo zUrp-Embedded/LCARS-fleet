@@ -533,7 +533,7 @@ apply() {
   # autre outil a bien voulu ecrire. Mesure sur instance vierge, 2026-08-19 : dix comptes en 401
   # avec le fichier, et PATCH 200 / basic-auth 200 / token minte par cette voie.
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-      --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
+      --passwords-file "$PROV_PASSWORDS_FILE" --owner "$PROV_AUTHORITY_USER" \
       ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
       --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))

@@ -156,9 +156,20 @@ fi
 # nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
 if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
+  # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
+  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun secret de `/home/private`, qui
+  # est `0700 lcars-authority` depuis que le detenteur des secrets a perdu tout privilege noyau. Son
+  # appelant — `forge-gestures.sh cmd_install`, qui EST le service d'autorite — lit donc le jeton
+  # systeme et transmet sa VALEUR. Or `env` ne propage que ce qu'on lui NOMME : oublier cette
+  # variable ici aurait rendu une porte sans credential, dont l'echec accuse la source du catalogue.
+  #
+  # LE CHEMIN RESTE ACCEPTE : un appelant ROOT (le rail poste, un banc) en a un qui lui est lisible,
+  # et `Transport.resolve_token/1` prend le jeton fourni AVANT le chemin. Deux entrees, une seule
+  # resolution, et la plus specifique gagne.
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
+    FORGE_TOKEN="${FORGE_TOKEN:-}" \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
 fi

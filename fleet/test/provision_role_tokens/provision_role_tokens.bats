@@ -64,20 +64,20 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "provisioning mode WITHOUT --passwords-file → exit 1, never a blind mint" {
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"droit de mint"* ]]
   [ ! -f "$MOCK/calls.log" ]
 }
 
 @test "--admin-token-file REMOVED (stillborn mode: Gitea refuses minting by admin token)" {
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --admin-token-file /whatever --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"option inconnue"* ]]
 }
 
 @test "unreadable passwords-file → exit 1 (the missing right is STATED, not worked around)" {
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --passwords-file "$TMP/inexistant.json" --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --passwords-file "$TMP/inexistant.json" --roles engineer
   [ "$status" -eq 1 ]
   [[ "$output" == *"illisible"* ]]
 }
@@ -85,7 +85,7 @@ teardown() { rm -rf "$TMP"; }
 @test "--check: valid local token (probe 200) → OK, exit 0" {
   printf 'tok-ok\n' > "$TOKDIR/engineer.gitea_token"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer --check
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles engineer --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    engineer"* ]]
 }
@@ -93,7 +93,7 @@ teardown() { rm -rf "$TMP"; }
 @test "--check: invalid token (probe 401) → FAIL, exit 2, file INTACT (--check never writes)" {
   printf 'tok-mort\n' > "$TOKDIR/engineer.gitea_token"
   printf '401' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles engineer --check
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles engineer --check
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  engineer"* ]]
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
@@ -110,7 +110,7 @@ teardown() { rm -rf "$TMP"; }
   # (`RoleIdentity.token_path/1`), et les deux moities se rencontrent sur ce nom.
   printf 'tok-ok\n' > "$TOKDIR/fleet_engineer.gitea_token"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles fleet_engineer --check
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles fleet_engineer --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    fleet_engineer"* ]]
   [[ "$output" == *"fleet_engineer.gitea_token)"* ]]
@@ -118,7 +118,7 @@ teardown() { rm -rf "$TMP"; }
   # Deux catalogues nommant le meme role tiennent DEUX fichiers distincts — la propriete perdue.
   printf 'tok-a\n' > "$TOKDIR/fleet_dev.gitea_token"
   printf 'tok-b\n' > "$TOKDIR/web_dev.gitea_token"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles "fleet_dev web_dev" --check
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles "fleet_dev web_dev" --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet_dev.gitea_token)"* ]]
   [[ "$output" == *"web_dev.gitea_token)"* ]]
@@ -127,18 +127,26 @@ teardown() { rm -rf "$TMP"; }
 
   # Un role compose garde son tiret : le souligne ne separe que les deux moities du compte.
   printf 'tok-ok\n' > "$TOKDIR/web_code-reviewer.gitea_token"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --roles web_code-reviewer --check
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles web_code-reviewer --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"web_code-reviewer.gitea_token)"* ]]
 }
 
-@test "local readability is load-bearing: a token whose group != GROUP FAILS (unreadable by runtime)" {
-  # Forge-valid but group-wrong = the runtime BEAM cannot read it. Announcing POSE + exit 0 there
-  # hid a broken deploy behind a WARN. A group the runner cannot chgrp to → the stat verify FAILS
-  # the account: the file is written (mint was real), but it is not counted as posed and exit != 0.
+# ⚠ CE TEMOIN A CHANGE DE SUJET AVEC LE CONTRAT QU'IL GARDE, ET SON EXIGENCE EST INTACTE.
+#
+# Il disait « groupe != GROUP ». Le jeton naissait `0640 root:fleet`, et le BEAM le lisait A TRAVERS
+# LE GROUPE — un groupe que le convergeur remplissait depuis l'equipe `humans` de la forge toutes les
+# trente secondes. Le droit de lire un credential avait donc la peremption d'un cache.
+#
+# Un SEUL process les ouvre maintenant : le service d'autorite, qui pose la question a la forge a
+# l'instant du geste. Ce qui doit etre juste n'est donc plus un groupe mais un PROPRIETAIRE.
+#
+# L'EXIGENCE, ELLE, EST MOT POUR MOT LA MEME : un jeton valide sur la forge mais que le runtime ne
+# peut pas ouvrir est un DEPLOIEMENT CASSE, et l'annoncer POSE + exit 0 le cachait derriere un WARN.
+@test "local readability is load-bearing: a token whose owner != OWNER FAILS (unreadable by the service)" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group nonexistent-group-zzz --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --owner nonexistent-user-zzz --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  engineer"* ]]
   [[ "$output" == *"ILLISIBLE"* ]]
@@ -146,23 +154,41 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$TOKDIR/engineer.gitea_token" ]
 }
 
-@test "happy path: mint (sha1) + probe 200 → file written 0640, exit 0" {
+@test "happy path: mint (sha1) + probe 200 → file written 0600, exit 0" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   [[ "$output" == *"POSE  engineer"* ]]
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-frais" ]
-  [ "$(stat -c %a "$TOKDIR/engineer.gitea_token")" = "640" ]
+  # ⚠ `600`, ET C'EST LE TEMOIN FONCTIONNEL DE LA FERMETURE. Un mur qui greppe `chmod 0600` ne peut
+  # PAS voir ce mode : l'ecriture est atomique (tmp + mv), donc le mode et le nom du fichier vivent
+  # sur deux lignes differentes. Mesure du 2026-08-25 : remettre `chmod 0640` dans le script ne
+  # faisait rougir AUCUN mur — seule cette ligne-ci mord. Un mur textuel garde une forme ; c'est un
+  # `stat` sur le fichier reellement pose qui garde le fait.
+  [ "$(stat -c %a "$TOKDIR/engineer.gitea_token")" = "600" ]
   grep -q "POST" "$MOCK/calls.log"
+}
+
+# ⚠ LE REPERTOIRE, ET PAS SEULEMENT LE FICHIER. Fermer les jetons sans fermer ce qui les porte ne
+# ferme rien : ce script POSE le repertoire lui aussi, et il le posait `0750`. Le premier
+# `provision apply` suivant aurait donc rouvert au groupe, quel que soit le soin mis aux modes de
+# fichiers. Une CLASSE D'OBJET entiere avait ete inventoriee a moitie.
+@test "le REPERTOIRE des jetons est pose ferme, pas seulement les jetons" {
+  printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
+  printf '200' > "$MOCK/probe_code"
+  local dir="$TMP/neuf"
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$dir" --passwords-file "$PWDFILE" --roles engineer
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$dir")" = "700" ]
 }
 
 @test "idempotence: second run on an already-valid token → OK skip, ZERO new POST" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   posts_before="$(grep -c POST "$MOCK/calls.log")"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK    engineer"* ]]
   [ "$(grep -c POST "$MOCK/calls.log")" = "$posts_before" ]
@@ -171,7 +197,7 @@ teardown() { rm -rf "$TMP"; }
 @test "password missing from the file for a role → FAIL that role, exit 2 (the others' mint is not masked)" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "architect engineer"
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "architect engineer"
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  architect"* ]]
   [[ "$output" == *"POSE  engineer"* ]]
@@ -180,7 +206,7 @@ teardown() { rm -rf "$TMP"; }
 @test "mint refused (POST without sha1) → FAIL, exit 2, no file written" {
   printf '{"message":"forbidden"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  engineer"* ]]
   [ ! -f "$TOKDIR/engineer.gitea_token" ]
@@ -189,7 +215,7 @@ teardown() { rm -rf "$TMP"; }
 @test "passwords-file: BOTH JSON shapes accepted (bare string and {password:...})" {
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "engineer qualifier"
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --roles "engineer qualifier"
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
   [ -f "$TOKDIR/qualifier.gitea_token" ]
@@ -201,7 +227,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"Architect":"pw-arch"}' > "$TMP/caps.json"
   printf '{"sha1":"tok-frais"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/caps.json" --roles architect
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/caps.json" --roles architect
   [ "$status" -eq 0 ]
   [ "$(cat "$TOKDIR/architect.gitea_token")" = "tok-frais" ]
 }
@@ -210,7 +236,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"system_starfleet":"pw-sys"}' > "$TMP/syspw.json"
   printf '{"sha1":"tok-sys"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/syspw.json" \
       --roles "" --extra-token system_starfleet:system.gitea_token
   [ "$status" -eq 0 ]
   [[ "$output" == *"POSE  system_starfleet"* ]]
@@ -219,7 +245,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "--extra-token without ':' → exit 1 fail-loud (account:file format required)" {
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$PWDFILE" --extra-token bidon
   [ "$status" -eq 1 ]
   [[ "$output" == *"compte>:<fichier"* ]]
 }
@@ -228,7 +254,7 @@ teardown() { rm -rf "$TMP"; }
   printf '{"engineer":"pw-eng","system_starfleet":"pw-sys"}' > "$TMP/full.json"
   printf '{"sha1":"tok-x"}' > "$MOCK/post_response"
   printf '200' > "$MOCK/probe_code"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --passwords-file "$TMP/full.json" \
       --roles engineer --extra-token system_starfleet:system.gitea_token
   [ "$status" -eq 0 ]
   [ -f "$TOKDIR/engineer.gitea_token" ]
@@ -259,7 +285,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
 
 @test "6-141: le mot de passe n'apparait JAMAIS dans argv, et il EST dans stdin" {
   mint_ok
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   ! grep -q 'pw-eng' "$MOCK/calls.log"
@@ -268,7 +294,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
 
 @test "6-141: le token minte ne repart pas en argv sur la sonde de validite" {
   mint_ok
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   ! grep -q 'TOKEN-MINTE' "$MOCK/calls.log"
@@ -282,7 +308,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   # silence, et le mint part en 401 sans que rien ne dise pourquoi.
   mint_ok
   printf '{"engineer":"a\\"b\\\\c d"}' > "$PWDFILE"
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
   grep -q 'a\\"b' "$MOCK/stdin.log"
@@ -299,7 +325,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
 
 @test "voie FORCE : le password utilise n'est PAS celui du fichier — il vient d'etre pose" {
   mint_ok
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --master-token-file <(printf 'JETON-MASTER\n') --roles engineer
   [ "$status" -eq 0 ]
   grep -q 'request = "PATCH"' "$MOCK/stdin.log"
@@ -309,7 +335,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
 
 @test "6-141 sur la voie FORCE : ni le jeton master ni le password force ne passent par argv" {
   mint_ok
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --master-token-file <(printf 'JETON-MASTER\n') --roles engineer
   [ "$status" -eq 0 ]
   ! grep -q 'JETON-MASTER' "$MOCK/calls.log"
@@ -322,7 +348,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   # Un jeton master perime ne rend pas faux le password pose a la creation. Refuser tout net
   # transformerait une degradation en panne.
   mint_ok
-  run "$SCRIPT" --forge http://f --group "$(id -gn)" --tokens-dir "$TOKDIR" \
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --master-token-file /inexistant/master.token --roles engineer
   [ "$status" -eq 0 ]
   grep -q 'pw-eng' "$MOCK/stdin.log"

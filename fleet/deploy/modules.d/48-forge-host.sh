@@ -896,6 +896,12 @@ apply() {
   tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
   run_step "structure de la forge" -- env \
     LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
+    `# ⚠ LE DÉTENTEUR VOYAGE AVEC LE CHEMIN, ET LES SÉPARER LES FAIT DIVERGER. « put_secret » pose` \
+    `# désormais un PROPRIÉTAIRE sur ce qu'il écrit ; sans cette ligne il retomberait sur son défaut` \
+    `# compilé pendant que ce module, lui, suivrait PROV_AUTHORITY_USER. Sur une boîte dont le compte` \
+    `# de service porte un autre nom, le secret naîtrait détenu par un compte qui n'existe pas — et` \
+    `# le service refuserait de démarrer sur un fichier que la boîte vient d'écrire.` \
+    LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
     FORGE_BASE_URL="$LOCAL_URL" \
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
