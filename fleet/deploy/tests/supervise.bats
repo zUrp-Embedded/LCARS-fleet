@@ -24,6 +24,8 @@
 # texte epinglerait la presence d'une boucle `while` ; ce qui compte est ce qui se passe au
 # cinquieme echec, et si le processus s'arrete VRAIMENT.
 
+load refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../services/supervise.sh"
   [ -f "$SUT" ]
@@ -76,7 +78,7 @@ setup() {
   run timeout 8 "$SUT" --name essai --log "$LOG" --burst 2 --interval 1 --delay 1 -- \
     bash -c "echo passage >> '$MARQUE'; exit 1"
   [ "$status" -eq 124 ]
-  ! grep -q 'ABANDON' "$LOG"
+  refute grep -q 'ABANDON' "$LOG"
   # Et il a bien relance plus que la borne : c'est ce que « glissante » veut dire.
   [ "$(wc -l < "$MARQUE")" -gt 2 ]
 }
@@ -101,6 +103,40 @@ setup() {
   grep -q 'ABANDON' "$LOG"
 }
 
+@test "un reglage qui DESARME la borne est refuse a l'entree" {
+  # ⚠ `--interval 0` RENDAIT LA BORNE INOPERANTE, et la boucle tournait sans fin. La purge de la
+  # fenetre teste `(( now - t < INTERVAL ))` : avec 0, toujours faux, donc `starts` reste VIDE, donc
+  # `>= BURST` n'arrive jamais. Le fichier atteignait par son propre reglage le mode de panne qu'il
+  # existe pour empecher. `--delay abc` avait la meme forme en plus doux : `sleep` refusait et la
+  # boucle continuait SANS delai.
+  local bad
+  for bad in "--interval 0" "--burst 0" "--delay abc" "--interval -1" "--grace x"; do
+    run timeout 5 "$SUT" --name essai $bad -- true
+    [ "$status" -eq 2 ] || { echo "accepte a tort : $bad (status $status)"; return 1; }
+  done
+}
+
+@test "--grace est LU — un drapeau qui se parse sans effet est pire qu'un drapeau absent" {
+  # ⚠ IL ETAIT INERTE. `GRACE` etait pose a cote de la trap qui s'en sert, donc APRES la boucle qui
+  # lit `--grace` : le parseur affectait, la ligne suivante ecrasait. On mesure donc l'EFFET, pas la
+  # presence du drapeau — un enfant qui ignore TERM doit mourir apres la grace DEMANDEE, pas apres
+  # les cinq secondes du defaut.
+  "$SUT" --name essai --log "$LOG" --burst 9 --grace 1 -- \
+    bash -c "trap '' TERM; echo \$\$ > '$MARQUE'; sleep 30" &
+  local sup=$! i
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$MARQUE" ] && break; sleep 0.3; done
+  [ -s "$MARQUE" ] || { echo "TEMOIN INVALIDE : l'enfant n'a jamais demarre"; return 1; }
+  local enfant; enfant="$(cat "$MARQUE")"
+  local t0="$SECONDS"
+  kill -TERM "$sup" 2>/dev/null || true
+  wait "$sup" 2>/dev/null || true
+  local dt=$(( SECONDS - t0 ))
+  ! kill -0 "$enfant" 2>/dev/null || { kill -9 "$enfant" 2>/dev/null; echo "ORPHELIN survivant"; return 1; }
+  # Avec le defaut (5 s) inerte, l'arret prendrait ~5 s : on exige la grace DEMANDEE.
+  [ "$dt" -le 3 ] || { echo "arret en ${dt}s — la grace demandee (1s) n'a pas ete lue"; return 1; }
+  grep -q 'ignore TERM' "$LOG"
+}
+
 @test "TERM se propage a l'enfant — sinon un « box down » laisse un orphelin" {
   # Le superviseur est le PARENT. Sans propagation, il meurt et son enfant reste, rattache a PID 1,
   # hors de portee de tout ce qui pourrait l'arreter ensuite.
@@ -113,6 +149,31 @@ setup() {
   local enfant; enfant="$(cat "$MARQUE")"
   kill -TERM "$sup" 2>/dev/null || true
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$enfant" 2>/dev/null || break; sleep 0.3; done
-  ! kill -0 "$enfant" 2>/dev/null
+  # ⚠ `refute`, PAS `! kill`. Mutation du 2026-08-26 : le `kill` retire de `relay()` laissait ce
+  # temoin VERT avec l'orphelin bien vivant — bash exempte d'`errexit` toute commande niee par `!`,
+  # et l'assertion suivante rattrapait le code. Le detail est dans `refute.bash`.
+  refute kill -0 "$enfant"
+  # ⚠ ET LE CODE DE SORTIE COMPTE. Ce temoin finissait sur `wait "$sup" || true` : le `|| true`
+  # avalait N'IMPORTE QUEL code, et une mutation `exit 0` → `exit 99` sur l'arret propre le laissait
+  # VERT. Un arret demande qui rend non-zero fait echouer l'appelant (`box down` sous `set -e`) sur
+  # un geste parfaitement reussi.
+  local rc=0; wait "$sup" 2>/dev/null || rc=$?
+  [ "$rc" -eq 0 ] || { echo "arret PROPRE rendu en $rc — un TERM demande n'est pas une panne"; return 1; }
+}
+
+@test "l'attente entre deux relances est INTERRUPTIBLE — un box down ne paie pas le delai" {
+  # ⚠ `sleep "$DELAY"` NU RETARDE LE SIGNAL DE TOUT SON DELAI : bash n'execute une trap qu'entre
+  # deux commandes, donc un TERM recu pendant un `sleep` externe attend sa fin naturelle. Mesure :
+  # `--delay 5` faisait mourir le superviseur en 4 s. Avec le defaut de 10 s et trois services
+  # supervises, chaque `box down` payait ca.
+  "$SUT" --name essai --log "$LOG" --burst 9 --interval 60 --delay 8 -- bash -c 'exit 1' &
+  local sup=$! i
+  # On attend d'etre DANS l'attente : la premiere ligne « relance dans » le dit.
+  for i in 1 2 3 4 5 6 7 8 9 10; do grep -q 'relance dans' "$LOG" 2>/dev/null && break; sleep 0.3; done
+  grep -q 'relance dans' "$LOG" || { kill "$sup" 2>/dev/null; echo "TEMOIN INVALIDE : jamais entre en attente"; return 1; }
+  local t0="$SECONDS"
+  kill -TERM "$sup" 2>/dev/null || true
   wait "$sup" 2>/dev/null || true
+  local dt=$(( SECONDS - t0 ))
+  [ "$dt" -le 2 ] || { echo "mort en ${dt}s — le signal a attendu la fin du sleep (delai : 8s)"; return 1; }
 }

@@ -15,6 +15,8 @@
 # doublure — ce qui se mesure est la DERIVATION (contenu des unites, ordre des gestes) et le fait
 # que « posee » ne soit jamais lu comme « debout ».
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -120,8 +122,12 @@ mod() { run bash "$MOD" "$1"; }
   # `User=nobody` retirerait au script le droit de faire son `setpriv`, et surtout le groupe
   # `lcars-console` : la page s'ouvrirait sur une liste vide en annoncant que tout va bien.
   mod apply
-  ! grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-landing.service"
-  ! grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+  # ⚠ `refute`, PAS `! grep` — ET LA PREMIERE DES DEUX ETAIT INERTE. Mutation du 2026-08-26 :
+  # `User=nobody` reinjecte dans la SEULE unite `lcars-landing` laissait ce temoin VERT, parce que
+  # bash exempte d'`errexit` une commande niee par `!` et que la seconde ligne, elle, reussissait.
+  # La regle porte sur les DEUX unites ; une seule des deux etait gardee. Detail : `refute.bash`.
+  refute grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  refute grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-converger.service"
 }
 
 @test "daemon-reload passe AVANT enable — systemd sert l'unite qu'il a en memoire" {
@@ -180,8 +186,13 @@ mod() { run bash "$MOD" "$1"; }
   # ecrit ici ne peut PAS s'executer. Et il ferait un cinquieme littéral `fleet` pour un nom qui en a
   # deja quatre — le jour d'un renommage, c'est le nombre de copies qui decide combien de lecteurs
   # suivent.
-  ! grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
-  ! grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
+  #
+  # ⚠ LES DEUX INTERDICTIONS ETAIENT INERTES, et c'est la troisieme ligne qui portait le verdict.
+  # Mutation du 2026-08-26 : un `PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}` reinjecte laissait ce
+  # temoin VERT — les deux `!` s'executaient, echouaient, et bash les exempte d'`errexit`. Seule la
+  # ligne `grep -q 'echo …'` comptait, et elle ne verifie pas ce que le titre promet.
+  refute grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
+  refute grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
   grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
 }
 
@@ -507,6 +518,18 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [ "$status" -eq 1 ]     # check : 1 = DRIFT
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
   [[ "$output" == *"GUARD B"* ]]
+}
+
+@test "check SANS systemd et SANS humain : le doctor d'une boite DERIVE, il ne rend pas OK" {
+  # ⚠ LE PENDANT MANQUAIT, ET C'EST LE CAS QUI COMPTE EN PRODUCTION. Le temoin voisin mesure la
+  # branche saine ; sans celui-ci, une regression de `probe_fleet_humans` qui cesserait de deriver
+  # passerait inapercue — et `provision doctor --substrate docker` redirait « tout va bien » sur une
+  # boite ou GUARD B refuse tout `fleet_v2 start`. C'est exactement l'etat d'avant ce lot.
+  humans_are
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  mod check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE '^DRIFT .*aucun humain de fleet sur cette machine'
 }
 
 @test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {

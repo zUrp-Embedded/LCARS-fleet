@@ -452,7 +452,9 @@ fi
 # `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
 # TOUJOURS ce boot-ci. Même emplacement et même motif que `/run/lcars-converger.refused` — un
 # composant sait pourquoi, il l'écrit là où un autre peut le lire.
-PROV_RC_FILE=/run/lcars-provision.rc
+# Surchargeable comme ses trois voisins, et pour la même raison : un chemin absolu en dur rend le
+# bloc qui l'écrit impossible à mesurer ailleurs que sur un vrai boot.
+PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
 "$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
 case "$prov_rc" in
@@ -464,11 +466,28 @@ credentials, réseau). Détail : $PROVISION doctor" ;;
   *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
 esac
 
-# APRÈS le `case`, pas dedans : le verdict se publie quel qu'il soit, y compris 0. Un fichier qui
-# n'apparaît que sur l'échec forcerait son lecteur à distinguer « pas encore écrit » de « tout va
-# bien », c'est-à-dire à deviner exactement ce que ce fichier existe pour dire.
-printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
-chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
+# ⚠ LE VERDICT NE SE PUBLIE PLUS ICI, ET LA RAISON EST UNE COURSE MESUREE. Il s'écrivait à cet
+# endroit, AVANT la convergence synchrone des humains ; `box up` poll `lcars-provision.rc` toutes
+# les cinq secondes, le trouvait aussitôt, puis lisait `lcars-humans.rc` UNE SEULE FOIS — un fichier
+# écrit jusqu'à 240 s plus tard. `box up` affichait donc « population NON MESURÉE » à tous les coups,
+# quelle que soit la population réelle : la vérification ajoutée au lot précédent était inerte de
+# l'autre côté du tuyau.
+#
+# La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
+# sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
+# n'a plus à connaître l'ordre — c'est le producteur qui le tient.
+#
+# Le verdict se publie quel qu'il soit, y compris 0. Un fichier qui n'apparaîtrait que sur l'échec
+# forcerait son lecteur à distinguer « pas encore écrit » de « tout va bien », c'est-à-dire à deviner
+# exactement ce que ce fichier existe pour dire.
+publier_verdicts() {
+  [[ -n "${humans_rc:-}" ]] && {
+    printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
+    chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
+  }
+  printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
+  chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
+}
 
 # ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────
 #
@@ -533,13 +552,23 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # `timeout` : ce premier tour parle à la forge et provisionne chaque humain. Il est BORNÉ parce
   # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que la boîte doit rester
   # joignable pour être réparée — même règle que tout le reste de ce fichier.
+  # ⚠ 240 s ETAIT TROP LONG POUR UN BOOT, et ce n'etait pas mesure — c'etait un chiffre pose au
+  # jugé. Le port 22 n'ouvre qu'apres cette passe : chaque seconde ici est une seconde ou personne ne
+  # peut entrer reparer. Le but de ce tour n'est PAS de tout provisionner — la boucle detachee s'en
+  # charge — mais de rendre le VERDICT significatif. 120 s couvre une forge qui repond et quelques
+  # humains ; au-dela, la boucle reprend et le verdict dit « non concluant », ce qui est vrai.
+  FIRST_PASS_TIMEOUT="${LCARS_FIRST_PASS_TIMEOUT:-120}"
   first_rc=0
-  timeout 240 "$CONVERGER_BIN" --once \
+  timeout "$FIRST_PASS_TIMEOUT" "$CONVERGER_BIN" --once \
     </dev/null >>"$CONVERGER_LOG" 2>&1 || first_rc=$?
   if [[ "$first_rc" -eq 0 ]]; then
     say "convergence des humains : premier tour fait"
   else
-    say "convergence des humains : premier tour NON CONCLUANT (rc=$first_rc) — la boucle reprendra ; détail dans /var/log/lcars-converger.log"
+    # ⚠ LE CHEMIN VIENT DE LA VARIABLE, ET CETTE LIGNE LE CODAIT EN DUR. J'ai rendu la REDIRECTION
+    # surchargeable et laissé le MESSAGE littéral : là où `LCARS_CONVERGER_LOG` pointe ailleurs, il
+    # envoyait l'opérateur lire un fichier qui n'existe pas. On corrige la moitié qui CASSE, et
+    # celle qui ment survit — parce qu'elle ne casse rien.
+    say "convergence des humains : premier tour NON CONCLUANT (rc=$first_rc) — la boucle reprendra ; détail dans $CONVERGER_LOG"
   fi
 
   # LE FAIT, PAS LE CODE DE RETOUR. Le convergeur peut rendre 0 sans avoir converti personne (une
@@ -555,10 +584,10 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   else
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet_v2 start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
-  # Publié comme le verdict de provision, et pour la même raison : un composant sait, il l'écrit là
-  # où un autre peut le lire. `/run` est un tmpfs — le fichier décrit TOUJOURS ce boot-ci.
-  printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
-  chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
+  # ⚠ L'ÉCRITURE EST DESCENDUE DANS `publier_verdicts`, ET CE N'EST PAS DU RANGEMENT. Publiée ici,
+  # elle arrivait APRÈS `lcars-provision.rc` — que `box up` attend et trouve en cinq secondes, avant
+  # de lire celui-ci UNE FOIS. Il lisait donc un fichier pas encore écrit, à tous les coups.
+  # Les deux verdicts se publient ensemble, `provision.rc` en dernier.
 
   # Détaché du shell de l'entrypoint : celui-ci finit sur `exec sshd`, ce qui remplace le process.
   # Un enfant simplement mis en arrière-plan survit à l'exec (même PID 1 tini le récolte), mais
@@ -568,6 +597,11 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
 else
   say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
 fi
+
+# LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
+# tourné ; sans elle, seul `provision.rc` est publié et `box up` dit « NON MESURÉE » — ce qui est
+# exactement vrai. La présence de `provision.rc` garantit que l'autre est là quand il doit l'être.
+publier_verdicts
 
 # ─── 3bis. La console web (ttyd sous l'humain, sur SA socket AF_UNIX) ───────────────────────────
 # Lancée APRÈS la convergence (elle a besoin de l'humain et de son home) et AVANT sshd (qui prend

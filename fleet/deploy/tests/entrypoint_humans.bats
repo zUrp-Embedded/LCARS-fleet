@@ -39,10 +39,20 @@ setup() {
   export LCARS_CONVERGER_LOG="$BATS_TEST_TMPDIR/converger.log"
   JOURNAL="$BATS_TEST_TMPDIR/journal"
 
-  # Le bloc reel, du poseur de `CONVERGER_BIN` jusqu'a la section suivante — bornes stables parce
-  # qu'elles sont des titres, pas des numeros de ligne.
+  export LCARS_PROV_RC_FILE="$BATS_TEST_TMPDIR/provision.rc"
+
+  # ⚠ DEUX MORCEAUX REELS, ET C'EST LEUR CONTRAT QU'ON MESURE. Le bloc de convergence POSE
+  # `humans_rc` ; `publier_verdicts` l'ECRIT. Les deux vivaient ensemble jusqu'au 2026-08-26, ou la
+  # publication est descendue apres le bloc pour fermer une course avec `box up`. Extraire le seul
+  # bloc laisserait le temoin vert sur une publication cassee — et c'est justement la moitie qui
+  # avait un defaut.
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
-  sed -n '/^CONVERGER_BIN=/,/^# ─── 3bis/p' "$SRC" | sed '$d' > "$BLOC"
+  {
+    sed -n '/^publier_verdicts() {/,/^}/p' "$SRC"
+    sed -n '/^CONVERGER_BIN=/,/^# ─── 3bis/p' "$SRC" | sed '$d'
+    # Le site d'appel reel est juste apres le bloc, hors des deux plages.
+    printf '%s\n' 'publier_verdicts'
+  } > "$BLOC"
 }
 
 # `say` journalise, `setsid` ne detache RIEN (sinon un daemon survit au temoin), et `$PROVISION`
@@ -62,6 +72,8 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION='$BIN/provision-double'
+    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    prov_rc=0
     source '$BLOC'"
 }
 
@@ -115,6 +127,57 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
   grep -q 'convergence des humains ACTIF' "$JOURNAL"
 }
 
+@test "L'ORDRE DE PUBLICATION FERME LA COURSE : provision.rc est ecrit APRES humans.rc" {
+  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `box up` poll `lcars-provision.rc`
+  # toutes les 5 s, le trouve, puis lit `lcars-humans.rc` UNE SEULE FOIS. Tant que `provision.rc`
+  # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `box up` lisait
+  # un fichier pas encore ecrit, et affichait « population NON MESUREE » A TOUS LES COUPS, quelle
+  # que soit la population reelle. Le lot precedent avait donc ajoute une mesure que son unique
+  # lecteur ne pouvait jamais voir.
+  #
+  # On mesure l'ORDRE, pas la presence : c'est l'ordre qui porte la garantie. `provision.rc` present
+  # DOIT impliquer `humans.rc` present.
+  bloc 0 0
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_HUMANS_RC_FILE" ]
+  [ -f "$LCARS_PROV_RC_FILE" ]
+  # ⚠ ON NE COMPARE PAS LES MTIME, ET LA PREMIERE VERSION LES CALCULAIT POUR RIEN. Les deux
+  # ecritures tombent dans la meme milliseconde : `-nt` ne les separe pas, et `stat %N` n'existe pas
+  # partout. L'ordre se lit dans le CORPS de la fonction, qui est la source de la garantie.
+  local fn; fn="$(sed -n '/^publier_verdicts() {/,/^}/p' "$SRC")"
+  local l_h l_p
+  l_h="$(grep -n 'HUMANS_RC_FILE' <<<"$fn" | head -1 | cut -d: -f1)"
+  l_p="$(grep -n 'PROV_RC_FILE'   <<<"$fn" | head -1 | cut -d: -f1)"
+  [ -n "$l_h" ] && [ -n "$l_p" ] || { echo "publier_verdicts n'ecrit plus les deux"; return 1; }
+  [ "$l_h" -lt "$l_p" ] || { echo "provision.rc ecrit AVANT humans.rc — la course est rouverte"; return 1; }
+}
+
+@test "un convergeur PRESENT mais NON EXECUTABLE compte comme absent — pas comme lancable" {
+  # ⚠ TEMOIN MUET DEMASQUE PAR MUTATION : remplacer `-x` par `-f` dans la garde laissait tout le
+  # corpus VERT. Le decor creait toujours le fichier en 0755, et le seul cas « absent » le
+  # SUPPRIMAIT — les deux tests etaient donc faux ensemble, et rien ne distinguait les conditions.
+  #
+  # En production le cas existe : un `cp` sans `-p`, un montage `noexec`, une archive depliee sans
+  # les modes. Avec `-f`, le bloc partirait, `timeout` rendrait 126 (permission denied), et la
+  # boucle relancerait indefiniment un fichier qu'elle ne peut pas executer.
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$LCARS_HUMAN_CONVERGER"
+  chmod 0644 "$LCARS_HUMAN_CONVERGER"
+  run bash -c "
+    set -euo pipefail
+    say() { printf '%s\n' \"\$*\" >> '$JOURNAL'; }
+    launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
+    setsid() { :; }
+    PROVISION=/bin/true
+    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    prov_rc=0
+    source '$BLOC'"
+  [ "$status" -eq 0 ]
+  [ ! -e "$LCARS_HUMANS_RC_FILE" ]
+  grep -q 'DÉSACTIVÉE' "$JOURNAL"
+  # Et surtout : la passe n'a PAS ete tentee.
+  ! grep -q 'premier tour' "$JOURNAL"
+}
+
 @test "le convergeur ABSENT : rien n'est publie, et le bloc le dit — pas de verdict invente" {
   # Sans convergeur, la question « qui peut lancer une fleet » n'a pas ete posee. Ecrire 0 ferait
   # dire au fichier « tout va bien » pour une mesure qui n'a pas eu lieu — et son lecteur
@@ -129,6 +192,8 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION=/bin/true
+    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    prov_rc=0
     source '$BLOC'"
   [ "$status" -eq 0 ]
   [ ! -e "$LCARS_HUMANS_RC_FILE" ]

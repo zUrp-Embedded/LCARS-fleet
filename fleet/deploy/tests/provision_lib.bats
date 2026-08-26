@@ -118,7 +118,12 @@ module_sh() {
     ensure_managed_block "$f" testmark 0644 <<< "old-content"
     ensure_managed_block "$f" testmark 0644 <<< "new-content"
     grep -q "new-content" "$f"
-    ! grep -q "old-content" "$f"
+    # ⚠ `&& exit 1`, PAS `! grep`. Ce bloc tourne dans un shell `set -euo pipefail`, et bash exempte
+    # d`errexit` toute commande niee par `!` : la ligne s exécutait, echouait, et le script
+    # continuait. Mutation du 2026-08-26 — la purge de l ancien bloc cassee dans
+    # `ensure_managed_block` — le temoin restait VERT avec l ancien contenu TOUJOURS present. La
+    # convergence d un bloc gere n etait donc gardee par rien.
+    grep -q "old-content" "$f" && { echo "l ancien contenu a SURVECU a la convergence"; exit 1; }
     [ "$(grep -c "lcars:testmark" "$f")" -eq 2 ]
   '
   [ "$status" -eq 0 ]

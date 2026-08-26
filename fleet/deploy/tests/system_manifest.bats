@@ -32,6 +32,8 @@
 #    veut dire POSE, JAMAIS RETIRE. Un temoin qui confondrait les deux declarerait une faute la ou
 #    il n'y en a pas, et le vrai contrat — celui de l'uninstall — resterait sans gardien.
 
+load refute
+
 setup() {
   MANIFEST="$BATS_TEST_DIRNAME/../system.manifest"
   ROOT="$BATS_TEST_DIRNAME/../../.."
@@ -168,7 +170,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   local vus; vus="$(code() { cat "$ech"; }; posed)"
 
   # Le PATH ne produit AUCUN objet a rallonge…
-  ! grep -q ':' <<<"$vus"
+  refute grep -q ':' <<<"$vus"
   # …et le chemin simple qu'il contient est quand meme vu, comme le chemin ordinaire d'a cote.
   grep -qx '/usr/local/bin' <<<"$vus"
   grep -qx '/run/lcars/quelque-chose' <<<"$vus"
@@ -202,7 +204,11 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # pose `lcars-console.conf`. Un desinstalleur ecrit depuis la table fausse le raterait,
   # silencieusement et pour toujours.
   grep -qE '^anchor +/etc/tmpfiles\.d/lcars-console\.conf ' "$MANIFEST"
-  ! grep -qE '^anchor +/etc/tmpfiles\.d/lcars\.conf ' "$MANIFEST"
+  # ⚠ ET CETTE INTERDICTION ETAIT INERTE — le temoin qui justifie ce fichier ne gardait qu'a moitie.
+  # Mutation du 2026-08-26 : l'ancien nom `lcars.conf` remis au manifeste a cote du bon laissait le
+  # temoin VERT. Les deux `grep` positifs encadrants reussissaient, et le `!` du milieu, exempte
+  # d'`errexit`, echouait sans consequence. Detail : `refute.bash`.
+  refute grep -qE '^anchor +/etc/tmpfiles\.d/lcars\.conf ' "$MANIFEST"
   grep -q 'lcars-console.conf' "$BATS_TEST_DIRNAME/../modules.d/25-directories.sh"
 }
 

@@ -658,7 +658,18 @@ EXPOSE 22
 
 # sshd répond = le conteneur tient sa promesse (login-manager). Sonde TCP réelle, pas un pgrep
 # d'un process que personne ne lance (le healthcheck-tmux menteur de la v1).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+#
+# ⚠ `--start-period` A ETE ALLONGE DE 20 s A 300 s, ET C'EST UN CORRECTIF, PAS UN CONFORT. Depuis
+# que l'entrypoint tire une premiere passe de convergence SYNCHRONE avant `exec sshd`, le port 22
+# n'ouvre qu'apres elle — bornee a `LCARS_FIRST_PASS_TIMEOUT` (defaut 120 s), plus le doctor qui
+# suit. Avec 20 s de grace, `--interval=30s` et `--retries=3`, docker declarait le conteneur
+# *unhealthy* des T+80 s et le laissait dans cet etat jusqu'a l'ouverture du port : une phase rouge
+# systematique de plusieurs minutes a CHAQUE demarrage, sur une boite parfaitement saine.
+#
+# Aucun compose n'a `condition: service_healthy` sur `lcars` aujourd'hui, donc rien ne se bloquait —
+# mais tout ce qui observe la sante (un orchestrateur, une supervision, un operateur) lisait un
+# mensonge. La grace couvre desormais le pire cas de la passe synchrone avec de la marge.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
   CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22"]
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
