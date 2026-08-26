@@ -216,6 +216,10 @@ le banc ci-dessus en crée un appelé `lcars-nuit` — sans le drapeau, tu inter
 qui n'existe pas. (`install.sh --box --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
 porte toujours le bon.)
 
+**Une PR bloquée par sa CI se répare depuis la PR.** Le runner joue le `ci.yml` du commit testé —
+la tête de ta branche —, donc corriger ce fichier là et repousser débloque la PR elle-même. Il n'y a
+rien à merger d'abord.
+
 Le fournisseur de banc imprime son bloc de verdict même quand il échoue — les détails sont ce qu'il te faut
 pour réparer, donc il ne les avale jamais.
 

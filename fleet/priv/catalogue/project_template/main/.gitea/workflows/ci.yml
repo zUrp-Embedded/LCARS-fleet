@@ -23,6 +23,11 @@ name: CI
 # `catthehacker/ubuntu:act-latest` est l'image de référence de gitea/act : elle porte node et les
 # langages courants. Le checkout marche, et un projet python/bash/go n'a RIEN à configurer.
 #
+# ⚠ SI CETTE CI TE BLOQUE, LE FIX SE CONSOMME IMMÉDIATEMENT. Le runner joue le `ci.yml` du commit
+# TESTÉ — la tête de ta branche, pour `push` comme pour `pull_request` (le merge-ref porte la
+# version du head). Corriger ce fichier DANS ta branche et repousser suffit : la PR se débloque
+# elle-même. Il n'y a rien à merger d'abord, rien à sortir de la PR, et pas de chicken-egg.
+#
 # TU CHANGES D'IMAGE ? Mets le nom que tu veux sur `container:`. TU EN VEUX UNE PLUS PETITE pour un
 # projet mono-langage (ex. `python:3-slim`) ? Vérifie qu'elle porte node si tu gardes `checkout` —
 # sinon repli : `container:` sur une image qui l'a, ou `git clone` manuel avec le token du job.
