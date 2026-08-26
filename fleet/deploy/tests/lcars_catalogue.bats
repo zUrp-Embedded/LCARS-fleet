@@ -370,3 +370,17 @@ FAIL:gesture_signalled:15"
   [ "$output" -eq 0 ]
 }
 
+
+@test "catalogue install: le defaut de la socket est l'adresse REELLE du service" {
+  # Tous les temoins qui touchent la socket posent `LCARS_CATALOGUE_SOCKET` : le defaut n'est
+  # exerce nulle part. Il a derive quand le service a cesse d'etre root et est passe sous
+  # `/run/lcars/authority/` — la porte frappait alors une adresse morte et rendait « le service ne
+  # tourne pas », c'est-a-dire la cause fausse que ce geste existe pour ne jamais dire.
+  local defaut manifeste
+  defaut="$(sed -n 's/^_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-\(.*\)}"$/\1/p' "$SUT")"
+  [ -n "$defaut" ]
+  manifeste="$(awk '$1 == "runtime" && $2 ~ /catalogue\.sock$/ { print $2 }' \
+                 "$BATS_TEST_DIRNAME/../system.manifest")"
+  [ -n "$manifeste" ]
+  [ "$defaut" = "$manifeste" ]
+}

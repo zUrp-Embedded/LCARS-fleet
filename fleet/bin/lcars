@@ -508,7 +508,10 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
 # La question posee a l'instant du geste n'a pas de cache, donc pas de peremption, donc rien de tout
 # cela a rattraper. C'est la lecon la plus chere de ce chantier : chaque correctif etait juste, et
 # ensemble ils formaient l'usine a gaz que la separation des deux roles supprime d'un coup.
-_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-/run/lcars/catalogue.sock}"
+# Le service n'est pas root : il pose sa socket sous `/run/lcars/authority/`, dont `system.manifest`
+# porte le mode. Ce defaut est une COPIE de cette adresse — les deux bougent ensemble ou le geste
+# frappe une porte qui n'existe pas, et accuse le service d'etre eteint.
+_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-/run/lcars/authority/catalogue.sock}"
 
 # LE TRANSPORT, ET BASH N'EN A PAS. `/dev/tcp` est TCP seul : ce shell ne peut pas ouvrir une socket
 # unix lui-meme. `socat` d'abord, `nc -U` en repli — les deux sont poses par le provisionnement.
