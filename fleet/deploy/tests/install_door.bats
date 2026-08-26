@@ -91,8 +91,8 @@ setup() {
   [[ "$(grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo autre)" == "wsl" ]] \
     || skip "la question n'est posee que sur WSL — ce substrat n'a qu'un rail possible"
   run bash "$SRC" < /dev/null
-  # Le rail poste annonce ce qu'il possede, et qu'on ne revient pas en arriere.
-  [[ "$output" == *"AUCUN désinstalleur"* ]]
+  # Le rail poste annonce ce qu'il possede, et que la convergence ne sait pas le retirer.
+  [[ "$output" == *"la convergence ajoute et ne retire pas"* ]]
   [[ "$output" == *"/etc/wsl.conf"* ]]
   # Le rail boite annonce son prix et sa reversibilite.
   [[ "$output" == *"rien dans /etc ni /usr"* ]]
@@ -139,7 +139,7 @@ setup() {
 @test "machine dédiée: AVEC le drapeau, la porte laisse passer et DIT ce que ça prend" {
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
   [[ "$output" == *"déclaré DÉDIÉ"* ]]
-  [[ "$output" == *"AUCUN désinstalleur"* ]]
+  [[ "$output" == *"provision uninstall"* ]]
   # Elle est passée : le bandeau du rail poste est imprimé, donc le garde de substrat est franchi.
   [[ "$output" == *"RAIL POSTE"* ]]
   [[ "$output" != *"réservé à WSL2"* ]]

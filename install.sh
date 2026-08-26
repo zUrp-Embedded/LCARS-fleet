@@ -276,17 +276,17 @@ if [[ -z "$RAIL" ]]; then
     #
     # ⚠ LA QUESTION DIT OÙ ON EST, et les deux terrains n'ont pas le même coût. Sur WSL le rail
     # poste possède `/etc/wsl.conf` en entier ; sur une machine dédiée il n'y a pas de wsl.conf mais
-    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et
-    # l'absence de désinstalleur y pèse d'un cran de plus. Une question qui décrirait le mauvais
-    # terrain ferait choisir sur un coût qui n'est pas celui qu'on paie.
+    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et la
+    # convergence monotone y pèse d'un cran de plus. Une question qui décrirait le mauvais terrain
+    # ferait choisir sur un coût qui n'est pas celui qu'on paie.
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /local et /home/private · et il n'existe AUCUN désinstalleur."
+     /local et /home/private · la convergence ajoute et ne retire pas."
     else
       _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
       _prend="sudo · un groupe système · /local et /home/private · des paquets ·
-     et il n'existe AUCUN désinstalleur — ici il n'y a pas de distro à jeter derrière."
+     la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
     cat <<EOF
 
@@ -334,8 +334,8 @@ if [[ "$RAIL" == "workstation" ]]; then
   #
   # ⚠ ET LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ — la distinction est tout ce qui change ici.
   # Ce rail est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système, /local,
-  # /home/private, aucun désinstalleur), pas parce qu'il ne saurait pas y tourner : sur une machine
-  # DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
+  # /home/private, et une convergence qui ne retire pas), pas parce qu'il ne saurait pas y tourner :
+  # sur une machine DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
   # quelqu'un ; il ne décrète pas que le natif est hors d'atteinte.
   #
   # `LCARS_ALLOW_ANY_HOST` est donc lu ICI comme il l'est dans `00-preflight` — MÊME drapeau, même
@@ -351,7 +351,8 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo ""
       echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
       echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /home/private."
-      echo "  Il n'y a AUCUN désinstalleur, et rien de LCARS n'est mesuré sur ce substrat."
+      echo "  « provision uninstall » retire ce que le journal a noté ; le reste, la convergence"
+      echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
     else
       echo ""
       echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
