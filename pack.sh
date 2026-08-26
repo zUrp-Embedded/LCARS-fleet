@@ -25,6 +25,7 @@
 #
 # USAGE : ./pack.sh            gate + release + tar (+ push si une forge est configurée)
 #         ./pack.sh --no-push  s'arrête au tar
+# ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
 # EXIT  : 0 le paquet est là · 1 gate rouge, build KO, ou push refusé
 
 set -euo pipefail
@@ -44,7 +45,24 @@ SHA="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
 NAME="lcars-fleet-${VERSION}-${SHA}-otp${OTP}-${ARCH}"
-OUT="dist/${NAME}.tar.gz"
+# ─── OÙ ATTERRIT LE PAQUET — HORS DE L'ARBRE, ET C'EST LE POINT ─────────────────────────────────
+# Il vivait dans `dist/` à la racine du checkout. Gitignoré, donc invisible au `git status` — et
+# c'est exactement ce qui l'a rendu coûteux : chaque poste de travail accumulait ses tars de 14 Mo
+# dans son propre clone, et un clone se jette. MESURE DU 2026-08-26 : le paquet de la dernière
+# révision viable, bâti onze minutes avant un arrêt froid, n'existait que dans le clone qui allait
+# être détruit. Un artefact que la forge doit porter n'a rien à faire dans un répertoire de travail.
+#
+# La forge EST la destination (la pousse est plus bas) ; ce répertoire n'est qu'un tiroir de transit,
+# d'où l'on `scp` quand on veut essayer le paquet ailleurs. Il est donc DÉRIVÉ, jamais câblé : voisin
+# du checkout, ce qui donne UN tiroir partagé par tous les clones d'une même machine — et le nom du
+# fichier porte déjà sa révision, donc deux clones n'y entrent pas en collision.
+#
+# ⚠ AUCUN CHEMIN DE CETTE MACHINE NE S'ÉCRIT ICI. `/home/commons` était le tiroir évident sur le
+# poste où ce changement a été fait ; c'est un dossier de la v1, que `25-directories` a justement
+# cessé de poser. Un chemin d'installation particulier gravé dans le produit est une panne pour tous
+# les autres. `LCARS_PACK_DIR` est là pour ceux qui veulent choisir.
+PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
+OUT="$PACK_DIR/${NAME}.tar.gz"
 
 # ─── LE GATE, PUIS LA RELEASE — dans cet ordre et sans échappatoire ──────────────────────────────
 # C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
@@ -65,7 +83,7 @@ say "release prod…"
 # dans le chemin qu'on tape.
 ROOT="lcars_install"
 say "tar → $OUT  (racine : $ROOT/)"
-mkdir -p dist
+mkdir -p "$PACK_DIR" || die "tiroir à paquets inaccessible : $PACK_DIR (pose LCARS_PACK_DIR ailleurs)"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 mkdir -p "$STAGE/$ROOT"
@@ -105,7 +123,7 @@ say "révision estampillée : $_rev"
 mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
 cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
 tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
-( cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
+( cd "$PACK_DIR" && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
 
 
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
@@ -153,7 +171,7 @@ if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
   # fuiter. Un état se calcule AVANT d'être dit ; deux expansions collées ne sont pas une condition.
   _tok_state="absent"
   [[ -n "$TOKEN" ]] && _tok_state="trouvé"
-  say "forge ou jeton indéterminables — le tar est dans dist/, pousse-le à la main si tu veux"
+  say "forge ou jeton indéterminables — le tar est dans $PACK_DIR, pousse-le à la main si tu veux"
   say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : $_tok_state"
   exit 0
 fi
@@ -173,8 +191,8 @@ for f in "$OUT" "${OUT}.sha256"; do
     201|200) say "poussé : $(basename "$f")" ;;
     # ⚠ UN REFUS D'AUTORISATION SE NOMME, sinon on cherche la route. Le jeton des `git push` porte
     # `write:repository` et PAS `write:package` : les deux portées sont distinctes chez Gitea, et
-    # aucune des deux ne se déduit de l'autre. Le tar, lui, est bon — il reste dans `dist/`.
-    401|403) die "push refusé ($code) : le jeton n'a pas la portée « write:package ». Celui des git push ne l'a pas. Crée-en un sur ${FORGE%/}/user/settings/applications et pose-le dans LCARS_PACK_TOKEN. Le paquet est prêt dans dist/." ;;
+    # aucune des deux ne se déduit de l'autre. Le tar, lui, est bon — il reste dans `$PACK_DIR`.
+    401|403) die "push refusé ($code) : le jeton n'a pas la portée « write:package ». Celui des git push ne l'a pas. Crée-en un sur ${FORGE%/}/user/settings/applications et pose-le dans LCARS_PACK_TOKEN. Le paquet est prêt dans $PACK_DIR." ;;
     *) die "push refusé ($code) pour $(basename "$f") — $url" ;;
   esac
 done
