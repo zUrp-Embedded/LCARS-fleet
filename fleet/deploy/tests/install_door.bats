@@ -518,6 +518,21 @@ SPY
   [[ "$msg" != *"daemon"* ]]
 }
 
+@test "le bandeau dit COMMENT on revient en arriere, et ce n'est pas le meme geste des deux cotes" {
+  # La convergence ajoute et ne retire pas : le bandeau nomme le point de restauration que ça
+  # suppose. Il existe par construction sous WSL, l'opérateur l'apporte ailleurs — une ligne unique
+  # dirait donc le mauvais geste sur l'un des deux terrains.
+  run bash "$SRC" --substrate wsl --workstation --check < /dev/null
+  [[ "$output" == *"la convergence AJOUTE, elle ne retire pas"* ]]
+  [[ "$output" == *"wsl --unregister"* ]]
+  [[ "$output" != *"Aucun désinstalleur n'existe"* ]]
+
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"la convergence AJOUTE, elle ne retire pas"* ]]
+  [[ "$output" == *"snapshot ou image"* ]]
+  [[ "$output" != *"wsl --unregister"* ]]
+}
+
 @test "les cartouches ne portent plus de bordure comptee a la main" {
   # La bordure droite se dérive du contenu ; les seules occurrences de `│…│` sont les formats de
   # printf du rendu. On mesure la SOURCE : la longueur d'une chaîne bash compte des octets hors

@@ -461,7 +461,17 @@ if [[ "$RAIL" == "workstation" ]]; then
   # `/etc/wsl.conf` n'est pris QUE sur WSL (`30-wsl`, APPLY-ON: wsl). Le bandeau annonce le coût :
   # y nommer un fichier qu'on ne touchera pas sur cette machine-ci est un coût inventé, et un coût
   # inventé décrédibilise ceux qui sont vrais.
-  if [[ "$SUBSTRATE" == "wsl" ]]; then _banner_wslconf="· /etc/wsl.conf. "; else _banner_wslconf="                  "; fi
+  #
+  # La convergence ajoute et ne retire pas : revenir en arrière demande un point de restauration,
+  # gratuit sous WSL, apporté par l'opérateur ailleurs. Aucune sonde ne peut le constater — le
+  # bandeau le nomme, il ne le vérifie pas, et il ne refuse pas faute de l'avoir.
+  if [[ "$SUBSTRATE" == "wsl" ]]; then
+    _banner_wslconf="  · /etc/wsl.conf, pris en entier."
+    _banner_back="  sous WSL il est gratuit — « wsl --unregister »."
+  else
+    _banner_wslconf=""
+    _banner_back="  snapshot ou image, et le rail n'en fournit aucun."
+  fi
   # ⚖ LE COMPTE SE DIT AVANT D'EXISTER (USER 2026-08-21). C'est la seule mutation de ce rail qui
   # crée un UTILISATEUR sur la machine de quelqu'un ; l'annoncer dans le bandeau du coût est ce qui
   # la rend consentie, et la taire la rendrait subie. Sans `--fleet-human`, rien n'est créé : le
@@ -478,9 +488,12 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo "    sudo … bash $0 --workstation --fleet-human <nom>"
     fi
   fi
-  _banner_body=(
-    "  sudo · paquets · groupe fleet · /local · /home/private"
-    "  ${_banner_wslconf}${R}Aucun désinstalleur n'existe.${N}"
+  _banner_body=("  sudo · paquets · groupe fleet · /local · /home/private")
+  if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
+  _banner_body+=(
+    "  ${R}Mode dev : la convergence AJOUTE, elle ne retire pas.${N}"
+    "  Revenir en arrière demande un point de restauration :"
+    "$_banner_back"
     "  Idempotent : relancer est toujours sûr ; « --check »"
     "  sonde sans rien modifier."
     "  Confinement : les pods tournent sous bwrap, la fleet"
