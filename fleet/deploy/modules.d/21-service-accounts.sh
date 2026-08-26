@@ -12,9 +12,8 @@
 # Ce module a failli ne pas exister. La question etait : elargir `20-groups` en « comptes ET groupes
 # du systeme », ou en poser un dedie ? Le premier coute une ligne — et rend son nom FAUX.
 #
-# C'est le defaut que deux chantiers voisins viennent de reparer : `docker.sh` nommait le transport
-# au lieu du rail, `deploy/docker/` nommait l'outil au lieu du metier. Elargir un module en gardant
-# son nom, c'est le meme geste en miniature — et un lecteur qui cherche ou naissent les comptes de
+# Un nom designe le rail ou le metier, jamais le transport ni l'outil. Elargir un module en gardant
+# son nom est ce meme defaut en miniature : un lecteur qui cherche ou naissent les comptes de
 # service ne regarde pas dans un module appele « groups ».
 #
 # ─── CE QUE CE COMPTE EST, ET CE QU'IL N'EST PAS ────────────────────────────────────────────────
