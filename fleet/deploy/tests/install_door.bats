@@ -517,3 +517,14 @@ SPY
   [[ "$msg" == *"checkout complet"* ]]
   [[ "$msg" != *"daemon"* ]]
 }
+
+@test "les cartouches ne portent plus de bordure comptee a la main" {
+  # La bordure droite se dérive du contenu ; les seules occurrences de `│…│` sont les formats de
+  # printf du rendu. On mesure la SOURCE : la longueur d'une chaîne bash compte des octets hors
+  # UTF-8, donc un témoin qui compterait des colonnes rougirait selon la locale de la machine.
+  run bash -c "grep -n '│.*│' '$SRC' | grep -vc printf"
+  [ "$output" = "0" ]
+  # Et les deux bandeaux passent bien par le rendu mesuré, pas par un heredoc.
+  run grep -c '^  _box_emit ' "$SRC"
+  [ "$output" = "2" ]
+}
