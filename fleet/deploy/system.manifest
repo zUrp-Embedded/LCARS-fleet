@@ -230,6 +230,13 @@ runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet         
 # apparu qu'en ELARGISSANT les sources du temoin. Un instrument etroit rend un verdict etroit.
 runtime   /run/lcars-converger.refused                 0644  root:root           any
 runtime   /run/lcars-provision.rc                      0644  root:root           docker
+# ⚠ SON VOISIN NE DIT PAS LA MEME CHOSE, ET C'EST POUR CA QU'IL EXISTE. Le rc ci-dessus mesure les
+# MODULES ; celui-ci mesure la POPULATION — « quelqu'un peut-il lancer une fleet ici ». Une boite
+# annoncait « provisionnement CONVERGE » (rc 0) et refusait tout `fleet_v2 start`, parce que le
+# convergeur d'humains tourne en boucle detachee et que sa premiere passe arrivait apres le
+# `exec sshd`. Le verdict de la sonde — la MEME que sur le rail poste, celle de `64-services` — est
+# donc publie separement. Deux questions, deux fichiers : les fondre rendrait la reponse ambigue.
+runtime   /run/lcars-humans.rc                         0644  root:root           docker
 
 # ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
 # L'uninstall peut les PROPOSER, il ne les impose pas : ce sont des objets de travail, mais ils
@@ -251,3 +258,16 @@ human     /home/<human>/.local/bin/claude              0755  <human>:-          
 preserve  /home/projects                               2775  root:fleet          any
 preserve  /home/projects.ops                           2775  root:fleet          any
 preserve  /home/projects.workshop                      2775  root:fleet          any
+
+# ⚠ CE FICHIER EXISTAIT AVANT NOUS, ET C'EST TOUTE LA RAISON DE SA CLASSE. `/etc/skel/.bashrc` est
+# livre par la distribution ; LCARS l'ECRASE (`62-runtime-helpers`, table DATA) pour que tout humain
+# cree ensuite recoive le prompt, les alias et `force_color_prompt` du rail — `useradd -m` recopie
+# `/etc/skel` a la CREATION, jamais apres.
+#
+# Le RETIRER a la desinstallation laisserait la machine sans squelette du tout, donc dans un etat
+# PIRE qu'avant l'install : chaque compte cree ensuite naitrait sans `.bashrc`. `preserve` dit
+# exactement ca — pose, jamais repris. Restaurer l'original demanderait de l'avoir sauvegarde, ce
+# qu'on ne fait pas : on ne promet pas une reversibilite qu'on ne tient pas.
+#
+# Il etait pose par le SEUL Dockerfile jusqu'au 2026-08-26 — donc en boite et nulle part ailleurs.
+preserve  /etc/skel/.bashrc                            0644  root:root           any

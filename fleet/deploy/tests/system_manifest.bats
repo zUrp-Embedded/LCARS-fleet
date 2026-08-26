@@ -215,15 +215,31 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 }
 
 @test "preserve = POSE mais JAMAIS RETIRE — pas « non pose »" {
-  # `25-directories:139` cree les trois faces. Confondre les deux sens ferait declarer une faute la
-  # ou il n'y en a pas, et laisserait le vrai contrat — celui de l'uninstall — sans gardien.
+  # `25-directories` cree les trois faces. Confondre les deux sens ferait declarer une faute la ou
+  # il n'y en a pas, et laisserait le vrai contrat — celui de l'uninstall — sans gardien.
+  #
+  # ⚠ CE TEMOIN CHERCHAIT LE POSEUR DANS UN SEUL MODULE, ET COMPTAIT « exactement trois ». Les deux
+  # etaient des raccourcis vrais au moment ou ils ont ete ecrits : toutes les lignes `preserve`
+  # etaient des faces, toutes posees par `25-directories`. Le 2026-08-26, `/etc/skel/.bashrc` est
+  # devenu preserve — pose par `62-runtime-helpers`, et quatrieme. Un compte litteral se relit comme
+  # une regle (« il ne peut y en avoir que trois ») alors qu'il n'etait qu'un inventaire.
+  #
+  # Ce qui se mesure vraiment est en DEUX parties : chaque ligne preservee a un poseur QUELQUE PART,
+  # et les trois faces canoniques sont toujours la. Le nombre total n'est ni l'un ni l'autre.
   local p
   while read -r p; do
-    grep -q "$(basename "$p")" "$BATS_TEST_DIRNAME/../modules.d/25-directories.sh" \
-      || { echo "face preservee sans poseur : $p"; return 1; }
+    grep -rqF -- "$p" "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
+      || { echo "objet preserve sans poseur dans modules.d : $p"; return 1; }
   done < <(awk '$1=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows")
-  # et les trois faces canoniques y sont
-  [ "$(awk '$1=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -eq 3 ]
+
+  local f
+  for f in /home/projects /home/projects.ops /home/projects.workshop; do
+    awk '$1=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows" | grep -qx -- "$f" \
+      || { echo "face canonique DISPARUE de preserve : $f"; return 1; }
+  done
+
+  # ⚠ GARDE DE POPULATION : zero ligne `preserve` passerait les deux boucles ci-dessus.
+  [ "$(awk '$1=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -ge 3 ]
 }
 
 @test "AUCUN LECTEUR pour l'instant, et c'est l'etat attendu de la phase A" {

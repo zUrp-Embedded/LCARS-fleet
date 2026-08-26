@@ -33,6 +33,10 @@ setup() {
   # echoue sur la pose, `verdict_apply` sort, et TROIS temoins voisins rougissent sur une cause qui
   # n'est pas la leur — ce qui deplace le diagnostic au lieu de le donner.
   export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/usr/local/bin/lcars-authority-ask"
+  # Le SQUELETTE des humains, meme couture et meme raison : sa destination reelle est `/etc/skel`,
+  # ou aucun temoin n'ecrit. Sans cette ligne, `apply` echoue sur la pose et CINQ temoins voisins
+  # rougissent sur une cause qui n'est pas la leur — mesure du 2026-08-26, en ajoutant la table DATA.
+  export LCARS_SKEL_FILE="$BATS_TEST_TMPDIR/etc/skel/.bashrc"
   export LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
@@ -205,15 +209,70 @@ helpers() {
     grep -q "COPY fleet/services/$n */opt/lcars/$n" "$DOCKERFILE"
   done < <(helpers)
 
-  # SENS INVERSE : ce que l'image pose a plat dans /opt/lcars doit etre un auxiliaire du module.
-  # Deux exclusions, et elles sont NOMMEES : `entrypoint.sh` (aucun sens hors conteneur) et
-  # `console.tmux.conf` (une config, pas un executable a deployer).
-  while read -r n; do
-    case "$n" in entrypoint.sh|console.tmux.conf) continue ;; esac
-    helpers | grep -qx "$n"
-  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) */opt/lcars/\1$|\1|p' "$DOCKERFILE")
-
+  # ⚠ LE SENS INVERSE A DEMENAGE, IL N'A PAS DISPARU. Il vivait ici avec deux exemptions nommees, et
+  # il ne regardait qu'une destination — `/opt/lcars/X`. Le temoin « TOUTE destination » plus bas le
+  # remplace : il lit les `COPY` QUELLE QUE SOIT leur cible, et accepte les trois poseurs du module
+  # (executables, donnees, binaires nommes). Le garder ici en double aurait fait deux regles pour un
+  # fait, dont une plus etroite — et c'est toujours la plus etroite qu'on croit avoir lue.
   ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
+}
+
+# La seconde table du module : <source> <destination> <mode>, une par ligne.
+data_srcs() {
+  sed -n '/^DATA=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d '"' \
+    | awk 'NF {print $1}'
+}
+
+# ⚠ ET LE TROISIEME POSEUR : deux fichiers ne passent NI par `HELPERS` NI par `DATA`. Ils vont sur
+# le PATH sous un autre nom — `toolchain-converger.sh` → `lcars-toolchain-converge`,
+# `lcars-authority-ask.sh` → `lcars-authority-ask` — donc chacun a son propre `install`, avec son
+# propre chemin surchargeable. Les inventorier par TABLE reviendrait a recopier ce que le code dit
+# deja ; on lit donc le code : toute source citee comme `$SRC_DIR/<nom>` est posee par ce module.
+sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' | sort -u; }
+
+@test "TOUTE destination de l'image a un poseur sur le rail poste — pas seulement /opt/lcars" {
+  # ⚠ LE MUR PRECEDENT NE VOYAIT QU'UN MOTIF : `COPY fleet/services/X /opt/lcars/X`. Ce que le
+  # Dockerfile pose AILLEURS lui echappait par CONSTRUCTION — pas par exemption, par angle mort.
+  # Un fichier y vivait deja : `COPY fleet/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
+  # et par RIEN sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
+  # `/etc/skel` : en boite un humain recevait le prompt LCARS et ses alias, sur un poste le
+  # `.bashrc` de la distribution. Deux environnements pour un meme role, silencieux des deux cotes.
+  #
+  # Ce temoin lit TOUTES les lignes `COPY fleet/services/...` quelle que soit leur destination, et
+  # exige que chaque source soit posee par le module — en executable (`HELPERS`) ou en donnee
+  # (`DATA`). L'exemption se reduit a `entrypoint.sh`, qui n'a aucun sens hors conteneur.
+  local n vus=0
+  while read -r n; do
+    case "$n" in entrypoint.sh) continue ;; esac
+    vus=$((vus + 1))
+    helpers        | grep -qx "$n" && continue
+    data_srcs      | grep -qx "$n" && continue
+    sources_citees | grep -qx "$n" && continue
+    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : fleet/services/$n"
+    return 1
+  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) .*|\1|p' "$DOCKERFILE")
+
+  # ⚠ GARDE D'INSTRUMENT : un `sed` casse rend zero ligne, et zero ligne examinee se lit comme un
+  # accord parfait. C'est la forme exacte du defaut que ce temoin vient fermer.
+  [ "$vus" -ge 10 ] || { echo "seulement $vus COPY examinees — l'extraction est cassee"; return 1; }
+}
+
+@test "les DONNEES sont posees a leur destination, avec leur mode, et identiques a la source" {
+  stub_curl "peu importe"
+  mod apply
+
+  # Les deux destinations du decor, derivees comme le module les derive.
+  [ -f "$LCARS_HELPERS_DIR/console.tmux.conf" ]
+  cmp -s "$SRC_DIR/console.tmux.conf" "$LCARS_HELPERS_DIR/console.tmux.conf"
+  [ "$(stat -c %a "$LCARS_HELPERS_DIR/console.tmux.conf")" = "644" ]
+
+  [ -f "$LCARS_SKEL_FILE" ]
+  cmp -s "$SRC_DIR/skel.bashrc" "$LCARS_SKEL_FILE"
+  [ "$(stat -c %a "$LCARS_SKEL_FILE")" = "644" ]
+
+  # ⚠ ET PAS EXECUTABLES. C'est toute la raison de la seconde table : `HELPERS` pose en 0755, et
+  # un `.bashrc` executable est un fichier que quelqu'un finira par lancer au lieu de le sourcer.
+  [[ "$(stat -c %A "$LCARS_SKEL_FILE")" != *x* ]]
 }
 
 # ─── LA REVISION VOYAGE AVEC LA COPIE ───────────────────────────────────────────────────────────

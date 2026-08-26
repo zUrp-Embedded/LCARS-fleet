@@ -299,6 +299,27 @@ await_provision_verdict() {
       echo "              « fleet/deploy/box doctor » nomme ce qui manque." >&2
       return 1 ;;
   esac
+
+  # ─── ET QUI PEUT LANCER UNE FLEET ? ───────────────────────────────────────────────────────────
+  #
+  # ⚠ « PROVISIONNEMENT CONVERGÉ » NE VEUT PAS DIRE « QUELQU'UN PEUT S'EN SERVIR ». Le rc ci-dessus
+  # mesure les modules ; il ne mesure PAS la population d'humains, parce que le convergeur tournait
+  # en boucle détachée et que sa première passe arrivait après. Une boîte pouvait donc annoncer
+  # CONVERGÉ, se déclarer *healthy* (le healthcheck teste le port 22) et refuser tout
+  # « fleet_v2 start » — le rail poste avait fermé exactement ça le 2026-08-25, celui-ci non.
+  #
+  # L'entrypoint publie désormais le verdict de la sonde — la MÊME que le rail poste, celle de
+  # `64-services` — dans un second fichier. Absent = boîte d'avant ce chantier, ou convergence
+  # désactivée : on ne l'invente pas, on dit qu'on ne sait pas.
+  local hrc
+  hrc="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hrc=""
+  case "$hrc" in
+    0)  echo "box up: humain(s) de fleet PRÉSENT(S) — « fleet_v2 start » a quelqu'un." ;;
+    "") echo "box up: population d'humains NON MESURÉE (pas de /run/lcars-humans.rc)." ;;
+    *)  echo "box up: AUCUN humain de fleet — la boîte tourne, et personne ne peut lancer de fleet."
+        echo "              Enrôle quelqu'un sur la forge, ajoute-le à la team « humans » :"
+        echo "              le convergeur le matérialise au tour suivant (30 s)." ;;
+  esac
 }
 
 cmd_doctor() {

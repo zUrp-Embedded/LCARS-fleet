@@ -571,6 +571,12 @@ COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
 # `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait, sur un groupe que le
 # convergeur repeuple depuis la forge toutes les 30 s. A cote du convergeur qu'il appelle.
 COPY fleet/services/privileged-executor.py /opt/lcars/privileged-executor.py
+# LE SUPERVISEUR — ce que `Restart=always` fait sur le rail poste, et que ce rail-ci n'avait PAS.
+# `entrypoint.sh` lancait `setsid <cmd> &` : tini recolte les orphelins, il n'en relance aucun. Un
+# convergeur mort restait mort jusqu'au prochain `box restart`, sur une boite qui reste *healthy*
+# (son healthcheck teste le port 22). Il ne peut pas vivre DANS l'entrypoint, qui finit sur
+# `exec sshd` — le shell y est remplace, et toute boucle qu'il porterait disparaitrait la.
+COPY fleet/services/supervise.sh          /opt/lcars/supervise.sh
 # LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
 # de toolchain : c'est un outil d'EXPLOITATION, appele par des gestes d'operateur qui vivent dans
 # trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH

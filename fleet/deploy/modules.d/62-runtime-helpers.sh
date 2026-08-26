@@ -94,6 +94,42 @@ HELPERS=(
   # `forge-gestures.sh` : les deux atterrissent ensemble, ou le service demarre et refuse chaque
   # demande sur un binaire absent.
   privileged-executor.py
+  # LE SUPERVISEUR DE LA BOITE — ce que `Restart=` fait sur ce rail-ci. `entrypoint.sh` lancait
+  # `setsid <cmd> &` et rien ne relancait un service mort : tini recolte les orphelins, il n'en
+  # ressuscite aucun. Il est pose sur les DEUX rails alors que seul docker s'en sert : sur un poste,
+  # systemd fait ce travail et ce fichier y dort. Ne le poser que d'un cote rouvrirait la divergence
+  # de mecanisme que ce lot ferme — et le mur de correspondance avec l'image l'exige de toute facon.
+  supervise.sh
+)
+
+# ─── LES DONNEES DU RAIL — NI EXECUTABLES, NI FORCEMENT DANS /opt/lcars ─────────────────────────
+#
+# ⚠ CE QUI SORT DE `/opt/lcars` ETAIT INVISIBLE AU MUR, ET UN FICHIER Y VIVAIT DEJA. Le temoin de
+# correspondance avec l'image ne lit qu'un motif : `COPY fleet/services/X /opt/lcars/X`. Tout ce que
+# le Dockerfile pose AILLEURS lui echappe par construction — pas par exemption, par angle mort.
+#
+# Mesure du 2026-08-26 : `Dockerfile` fait `COPY fleet/services/skel.bashrc /etc/skel/.bashrc`, et
+# RIEN ne le posait sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
+# `/etc/skel` — donc en boite un humain de fleet recoit le prompt LCARS, ses alias et
+# `force_color_prompt` ; sur un poste il recoit le `.bashrc` de la distribution. Silencieux des deux
+# cotes, et jamais le meme environnement selon le rail.
+#
+# `console.tmux.conf` etait, lui, exempte NOMMEMENT — « une config, pas un executable a deployer ».
+# La phrase explique pourquoi il n'est pas dans `HELPERS` (qui pose en 0755), pas pourquoi le poste
+# s'en passe : `console.sh` teste `[[ -r ]]` sur ce fichier et retombe sur le tmux par defaut, donc
+# deux comportements de console selon le rail. La bonne reponse n'etait pas l'exemption, c'etait une
+# SECONDE TABLE — meme regle, autre mode, autre destination.
+#
+# ⚠ LES DESTINATIONS SE DERIVENT, ELLES NE S'ECRIVENT PAS. Premiere version de cette table :
+# `/opt/lcars/console.tmux.conf` en litteral — une SECONDE autorite sur un chemin que ce module
+# tient deja dans `HELPERS_DIR`, et le jour ou la couture de test le deplace, la table pointe encore
+# l'ancien. Elle l'a fait tout de suite : cinq temoins rouges sur un `mkdir refusé: /opt/lcars`.
+#
+# Format : <source dans fleet/services/> <destination> <mode>
+SKEL_FILE="${LCARS_SKEL_FILE:-/etc/skel/.bashrc}"
+DATA=(
+  "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
+  "skel.bashrc $SKEL_FILE 0644"
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
@@ -267,6 +303,18 @@ apply() {
     install -m 0755 "${own[@]}" "$SRC_DIR/$n" "$HELPERS_DIR/$n" \
       || { p_fail "pose ratée: $HELPERS_DIR/$n"; verdict_apply; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$HELPERS_DIR/$n"
+  done
+
+  # LES DONNEES, apres les executables : meme source, autre mode, autre destination. `write_atomic`
+  # et pas `install` — il compare le contenu avant d'ecrire, donc une repasse ne compte pas de
+  # mutation, et le fichier n'est jamais a moitie ecrit sous un lecteur.
+  local spec d_src d_dst d_mode
+  for spec in "${DATA[@]}"; do
+    read -r d_src d_dst d_mode <<<"$spec"
+    [[ -f "$SRC_DIR/$d_src" ]] || { p_fail "source absente: $SRC_DIR/$d_src (arbre incomplet)"; verdict_apply; }
+    ensure_dir "$(dirname "$d_dst")" 0755 || verdict_apply
+    write_atomic "$d_dst" "$d_mode" < "$SRC_DIR/$d_src" \
+      || { p_fail "pose ratée: $d_dst"; verdict_apply; }
   done
 
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply

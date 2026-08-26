@@ -797,6 +797,49 @@ module_sh() {
   [[ "$output" == *"FAIL"* ]]
 }
 
+# ─── LE PIN ELIXIR/OTP EST UN MIROIR, ET IL N'AVAIT AUCUN GARDIEN ───────────────────────────────
+#
+# ⚠ DEUX RAILS, DEUX MECANISMES, UNE SEULE VERSION — mais rien ne le VERIFIAIT pour Elixir.
+#
+#   rail poste   `provision-lib.sh` : PROV_ELIXIR_VERSION + PROV_ELIXIR_OTP_MAJOR, zip verifie sha256
+#   rail boite   `Dockerfile`       : ARG BUILD_IMAGE=hexpm/elixir:<ver>-erlang-<otp>...@sha256:...
+#
+# Le Dockerfile ecrit « les deux bougent ENSEMBLE ». C'etait une convention de PROCESSUS : aucune
+# machine ne la lisait. Le pin tofu, lui, a son mur depuis toujours (`tofu_tool.bats`) — celui-ci
+# est ecrit sur le meme patron, et son absence etait un trou par symetrie manquante.
+#
+# CE QUE CA COUTERAIT : un bump du zip Elixir sans bump de l'image (ou l'inverse) donne un poste et
+# une boite qui compilent la MEME release avec deux compilateurs differents. Les artefacts BEAM sont
+# sensibles a la version d'OTP — c'est exactement la panne mesuree le 2026-08-22 (« un hote 26.04 a
+# servi OTP 27 sous un plancher 25 »), transposee d'un rail a l'autre.
+@test "le pin Elixir/OTP de la lib est IDENTIQUE a celui du Dockerfile" {
+  local dockerfile="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  [ -f "$dockerfile" ]
+
+  # La lib : les deux defauts, lus a la source (`: "${VAR:=valeur}"`).
+  local v_lib otp_lib
+  v_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_VERSION:=[0-9.]+' "$LIB" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+  otp_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_OTP_MAJOR:=[0-9]+' "$LIB" | grep -oE '[0-9]+$')"
+
+  # Le Dockerfile : la balise de l'image de build porte les deux, `<ver>-erlang-<otp>.<...>`.
+  local tag v_docker otp_docker
+  tag="$(grep -oE '^ARG BUILD_IMAGE=hexpm/elixir:[0-9.]+-erlang-[0-9.]+' "$dockerfile")"
+  v_docker="$(grep -oE 'elixir:[0-9.]+' <<<"$tag" | cut -d: -f2)"
+  otp_docker="$(grep -oE 'erlang-[0-9]+' <<<"$tag" | cut -d- -f2)"
+
+  # ⚠ GARDE D'INSTRUMENT : quatre extractions, et une seule qui rate rendrait deux chaines VIDES
+  # donc EGALES. Un mur qui compare du vide a du vide est vert sur n'importe quelle derive.
+  [ -n "$v_lib" ]    || { echo "extraction ratee : PROV_ELIXIR_VERSION dans $LIB"; return 1; }
+  [ -n "$otp_lib" ]  || { echo "extraction ratee : PROV_ELIXIR_OTP_MAJOR dans $LIB"; return 1; }
+  [ -n "$v_docker" ] || { echo "extraction ratee : ARG BUILD_IMAGE dans $dockerfile"; return 1; }
+  [ -n "$otp_docker" ] || { echo "extraction ratee : erlang-<otp> dans $dockerfile"; return 1; }
+
+  [ "$v_lib" = "$v_docker" ] \
+    || { echo "Elixir : lib $v_lib, Dockerfile $v_docker"; return 1; }
+  [ "$otp_lib" = "$otp_docker" ] \
+    || { echo "OTP majeur : lib $otp_lib, Dockerfile $otp_docker"; return 1; }
+}
+
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
   # ⚠ TROISIEME INCARNATION DE B5 DANS LA MEME JOURNEE. `ip` n'existe pas partout — l'image du job
   # CI ne l'a pas — et sous `pipefail` une commande introuvable rend 127 que le pipeline propage :
