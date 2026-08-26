@@ -91,8 +91,8 @@ setup() {
   [[ "$(grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo autre)" == "wsl" ]] \
     || skip "la question n'est posee que sur WSL — ce substrat n'a qu'un rail possible"
   run bash "$SRC" < /dev/null
-  # Le rail poste annonce ce qu'il possede, et qu'on ne revient pas en arriere.
-  [[ "$output" == *"AUCUN désinstalleur"* ]]
+  # Le rail poste annonce ce qu'il possede, et que la convergence ne sait pas le retirer.
+  [[ "$output" == *"la convergence ajoute et ne retire pas"* ]]
   [[ "$output" == *"/etc/wsl.conf"* ]]
   # Le rail boite annonce son prix et sa reversibilite.
   [[ "$output" == *"rien dans /etc ni /usr"* ]]
@@ -139,7 +139,7 @@ setup() {
 @test "machine dédiée: AVEC le drapeau, la porte laisse passer et DIT ce que ça prend" {
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
   [[ "$output" == *"déclaré DÉDIÉ"* ]]
-  [[ "$output" == *"AUCUN désinstalleur"* ]]
+  [[ "$output" == *"provision uninstall"* ]]
   # Elle est passée : le bandeau du rail poste est imprimé, donc le garde de substrat est franchi.
   [[ "$output" == *"RAIL POSTE"* ]]
   [[ "$output" != *"réservé à WSL2"* ]]
@@ -516,4 +516,40 @@ SPY
   local msg; msg="$(sed -n "$((l_garde+1))p" "$SRC")"
   [[ "$msg" == *"checkout complet"* ]]
   [[ "$msg" != *"daemon"* ]]
+}
+
+@test "le bandeau dit COMMENT on revient en arriere, et ce n'est pas le meme geste des deux cotes" {
+  # La convergence ajoute et ne retire pas : le bandeau nomme le point de restauration que ça
+  # suppose. Il existe par construction sous WSL, l'opérateur l'apporte ailleurs — une ligne unique
+  # dirait donc le mauvais geste sur l'un des deux terrains.
+  run bash "$SRC" --substrate wsl --workstation --check < /dev/null
+  [[ "$output" == *"la convergence AJOUTE, elle ne retire pas"* ]]
+  [[ "$output" == *"wsl --unregister"* ]]
+  [[ "$output" != *"Aucun désinstalleur n'existe"* ]]
+
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"la convergence AJOUTE, elle ne retire pas"* ]]
+  [[ "$output" == *"snapshot ou image"* ]]
+  [[ "$output" != *"wsl --unregister"* ]]
+}
+
+@test "les cartouches ne portent plus de bordure comptee a la main" {
+  # La bordure droite se dérive du contenu ; les seules occurrences de `│…│` sont les formats de
+  # printf du rendu. On mesure la SOURCE : la longueur d'une chaîne bash compte des octets hors
+  # UTF-8, donc un témoin qui compterait des colonnes rougirait selon la locale de la machine.
+  run bash -c "grep -n '│.*│' '$SRC' | grep -vc printf"
+  [ "$output" = "0" ]
+  # Et les deux bandeaux passent bien par le rendu mesuré, pas par un heredoc.
+  run grep -c '^  _box_emit ' "$SRC"
+  [ "$output" = "2" ]
+}
+
+@test "le bandeau ne promet pas la fleet sous l'uid de l'operateur — GUARD B la lui refuse" {
+  # GUARD B (`config/runtime.exs`, miroir de `bin/fleet_v2`) refuse uid 0, l'uid du siege
+  # (`LCARS_SYSADMIN_UID`, defaut 1000) et les comptes systeme : une fleet sous le siege donnerait
+  # des pods sudo-capables. Le siege pose la machine, l'humain de fleet fait tourner la fleet.
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"RAIL POSTE"* ]]
+  [[ "$output" == *"sous l'humain de fleet"* ]]
+  [[ "$output" != *"la fleet sous TON uid"* ]]
 }

@@ -276,24 +276,24 @@ if [[ -z "$RAIL" ]]; then
     #
     # ⚠ LA QUESTION DIT OÙ ON EST, et les deux terrains n'ont pas le même coût. Sur WSL le rail
     # poste possède `/etc/wsl.conf` en entier ; sur une machine dédiée il n'y a pas de wsl.conf mais
-    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et
-    # l'absence de désinstalleur y pèse d'un cran de plus. Une question qui décrirait le mauvais
-    # terrain ferait choisir sur un coût qui n'est pas celui qu'on paie.
+    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et la
+    # convergence monotone y pèse d'un cran de plus. Une question qui décrirait le mauvais terrain
+    # ferait choisir sur un coût qui n'est pas celui qu'on paie.
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /local et /home/private · et il n'existe AUCUN désinstalleur."
+     /local et /home/private · la convergence ajoute et ne retire pas."
     else
       _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
       _prend="sudo · un groupe système · /local et /home/private · des paquets ·
-     et il n'existe AUCUN désinstalleur — ici il n'y a pas de distro à jeter derrière."
+     la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
     cat <<EOF
 
   $_ici
 
   ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque,
-     la fleet tourne sous ton uid, le gate en 40 s.
+     la fleet tourne sous l'humain de fleet, le gate en 40 s.
      ${R}Ça prend${N} : $_prend
 
   ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
@@ -334,8 +334,8 @@ if [[ "$RAIL" == "workstation" ]]; then
   #
   # ⚠ ET LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ — la distinction est tout ce qui change ici.
   # Ce rail est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système, /local,
-  # /home/private, aucun désinstalleur), pas parce qu'il ne saurait pas y tourner : sur une machine
-  # DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
+  # /home/private, et une convergence qui ne retire pas), pas parce qu'il ne saurait pas y tourner :
+  # sur une machine DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
   # quelqu'un ; il ne décrète pas que le natif est hors d'atteinte.
   #
   # `LCARS_ALLOW_ANY_HOST` est donc lu ICI comme il l'est dans `00-preflight` — MÊME drapeau, même
@@ -351,7 +351,8 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo ""
       echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
       echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /home/private."
-      echo "  Il n'y a AUCUN désinstalleur, et rien de LCARS n'est mesuré sur ce substrat."
+      echo "  « provision uninstall » retire ce que le journal a noté ; le reste, la convergence"
+      echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
     else
       echo ""
       echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
@@ -417,6 +418,28 @@ if [[ "$RAIL" == "workstation" ]]; then
   fi
 fi
 
+# Un cartouche annonce le coût : sa bordure droite se dérive du contenu, séquences ANSI non
+# comptées. Comptée à la main, elle se désaligne dès qu'une ligne change ou qu'un nom s'allonge.
+_box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
+_box_pad() { # <texte> <largeur>
+  local p n; p="$(_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
+  printf '%s%*s' "$1" "$n" ''
+}
+# _box_emit [--rule] <titre> <ligne…> — `--rule` pose une règle sous le titre. Plancher : 57 colonnes.
+_box_emit() {
+  local _sep=0
+  if [[ "${1:-}" == "--rule" ]]; then _sep=1; shift; fi
+  local _title="$1"; shift
+  local _w=57 _l _p _rule
+  for _l in "$_title" "$@"; do _p="$(_box_plain "$_l")"; (( ${#_p} > _w )) && _w=${#_p}; done
+  _rule="$(printf '%*s' "$_w" '' | sed 's/ /─/g')"
+  printf '%s  ┌%s┐\n' "$CYAN" "$_rule"
+  printf '  │%s%s%s│\n' "$W" "$(_box_pad "$_title" "$_w")" "$CYAN"
+  if (( _sep )); then printf '  ├%s┤\n' "$_rule"; fi
+  for _l in "$@"; do printf '  │%s%s%s│\n' "$N" "$(_box_pad "$_l" "$_w")" "$CYAN"; done
+  printf '  └%s┘%s\n' "$_rule" "$N"
+}
+
 # ─── BANDEAU DE LA BRANCHE CHOISIE, ET LUI SEUL ─────────────────────────────
 if [[ "$CONSENTED" -eq 0 ]]; then
 cat <<EOF
@@ -439,7 +462,17 @@ if [[ "$RAIL" == "workstation" ]]; then
   # `/etc/wsl.conf` n'est pris QUE sur WSL (`30-wsl`, APPLY-ON: wsl). Le bandeau annonce le coût :
   # y nommer un fichier qu'on ne touchera pas sur cette machine-ci est un coût inventé, et un coût
   # inventé décrédibilise ceux qui sont vrais.
-  if [[ "$SUBSTRATE" == "wsl" ]]; then _banner_wslconf="· /etc/wsl.conf. "; else _banner_wslconf="                  "; fi
+  #
+  # La convergence ajoute et ne retire pas : revenir en arrière demande un point de restauration,
+  # gratuit sous WSL, apporté par l'opérateur ailleurs. Aucune sonde ne peut le constater — le
+  # bandeau le nomme, il ne le vérifie pas, et il ne refuse pas faute de l'avoir.
+  if [[ "$SUBSTRATE" == "wsl" ]]; then
+    _banner_wslconf="  · /etc/wsl.conf, pris en entier."
+    _banner_back="  sous WSL il est gratuit — « wsl --unregister »."
+  else
+    _banner_wslconf=""
+    _banner_back="  snapshot ou image, et le rail n'en fournit aucun."
+  fi
   # ⚖ LE COMPTE SE DIT AVANT D'EXISTER (USER 2026-08-21). C'est la seule mutation de ce rail qui
   # crée un UTILISATEUR sur la machine de quelqu'un ; l'annoncer dans le bandeau du coût est ce qui
   # la rend consentie, et la taire la rendrait subie. Sans `--fleet-human`, rien n'est créé : le
@@ -456,29 +489,37 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo "    sudo … bash $0 --workstation --fleet-human <nom>"
     fi
   fi
-  cat <<EOF
-${CYAN}  ┌─────────────────────────────────────────────────────────┐
-  │${W}  RAIL POSTE — LCARS s'installe DANS ce système.${N}          ${CYAN}│
-  │${N}  sudo · paquets · groupe fleet · /local · /home/private  ${CYAN}│
-  │${N}  ${_banner_wslconf}${R}Aucun désinstalleur n'existe.${N}         ${CYAN}│
-  │${N}  Idempotent : relancer est toujours sûr ; « --check »    ${CYAN}│
-  │${N}  sonde sans rien modifier.                               ${CYAN}│
-  │${N}  Confinement : les pods tournent sous bwrap, la fleet    ${CYAN}│
-  │${N}  sous TON uid. Pire cas = nuke + re-provision (minutes). ${CYAN}│
-  └─────────────────────────────────────────────────────────┘${N}
-EOF
+  _banner_body=("  sudo · paquets · groupe fleet · /local · /home/private")
+  if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
+  _banner_body+=(
+    "  ${R}Mode dev : la convergence AJOUTE, elle ne retire pas.${N}"
+    "  Revenir en arrière demande un point de restauration :"
+    "$_banner_back"
+    "  Idempotent : relancer est toujours sûr ; « --check »"
+    "  sonde sans rien modifier."
+    "  Confinement : les pods tournent sous bwrap, et la fleet"
+    "  sous l'humain de fleet : le siège a sudo, ses pods aussi."
+    "  Pire cas = nuke + re-provision (minutes)."
+  )
+  _box_emit "  RAIL POSTE — LCARS s'installe DANS ce système." "${_banner_body[@]}"
 else
-  cat <<EOF
-${CYAN}  ┌─────────────────────────────────────────────────────────┐
-  │${W}  RAIL BOÎTE — rien hors de ton clone et de docker.${N}       ${CYAN}│
-  │${N}  Pas de paquet, pas d'utilisateur, pas de groupe, rien   ${CYAN}│
-  │${N}  dans /etc ni /usr. ~3 Go d'image, ~15 min de build.     ${CYAN}│
-  │${N}  Pour tout défaire : ${W}fleet/deploy/box reset${N} — 30 s.           ${CYAN}│
-$( [[ -n "${PROV_DOCKER_SUDO:-}" ]] && printf '  │%s  ⚠ sudo sera demandé pour PARLER au daemon docker —%s     %s│\n  │%s    sa socket appartient à root. Aucune modification.%s    %s│\n' "$W" "$N" "$CYAN" "$N" "$N" "$CYAN" )
-$( [[ "$WITH_BENCH" -eq 1 ]] && printf '  │%s  --bench : forge jetable + runner CI montés ici.%s      %s│\n' "$W" "$N" "$CYAN" \
-                             || printf '  │%s  Il te faut une forge : FORGE_BASE_URL + un token.%s    %s│\n' "$N" "$N" "$CYAN" )
-  └─────────────────────────────────────────────────────────┘${N}
-EOF
+  _banner_body=(
+    "  Pas de paquet, pas d'utilisateur, pas de groupe, rien"
+    "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
+    "  Pour tout défaire : ${W}fleet/deploy/box reset${N} — 30 s."
+  )
+  if [[ -n "${PROV_DOCKER_SUDO:-}" ]]; then
+    _banner_body+=(
+      "  ${W}⚠ sudo sera demandé pour PARLER au daemon docker —${N}"
+      "    sa socket appartient à root. Aucune modification."
+    )
+  fi
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    _banner_body+=("  ${W}--bench : forge jetable + runner CI montés ici.${N}")
+  else
+    _banner_body+=("  Il te faut une forge : FORGE_BASE_URL + un token.")
+  fi
+  _box_emit "  RAIL BOÎTE — rien hors de ton clone et de docker." "${_banner_body[@]}"
 fi
 
 echo ""
@@ -804,15 +845,9 @@ case "$_apply_rc" in
     ;;
 esac
 
-# ⚠ LA DERNIÈRE CHOSE QU'ON LIT EST L'INSTRUCTION QU'ON SUIT — donc elle doit être vraie SUR CE
-# TERRAIN-CI. Ce bandeau disait « WSL : wsl --shutdown » sur une machine dédiée qui n'a pas de WSL,
-# et « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-# l'humain de fleet (`22-fleet-human`), pas sous l'opérateur : GUARD B refuse l'uid du siège, qui
-# est justement celui de l'opérateur sur une machine standard. Un opérateur qui suit la ligne 3 se
-# fait refuser par un garde, sans savoir pourquoi.
-#
-# Mesuré le 2026-08-21 sur l'install à froid : les deux lignes fausses, imprimées côte à côte, en
-# clôture d'un provisionnement par ailleurs juste.
+# La derniere instruction lue est celle qu'on suit : chaque ligne est derivee du terrain ET du
+# rail. Sur le poste la fleet appartient a l'humain de fleet — GUARD B refuse l'uid du siege, qui
+# porte sudo — et l'operateur la lance par `sudo -u`, puis atteint son deck par le groupe `fleet`.
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
   _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
@@ -820,8 +855,6 @@ else
   _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
   _step1b=""
 fi
-# Le lanceur nommé est celui qui MARCHE. Sur le rail poste la fleet appartient à l'humain de fleet ;
-# l'opérateur la lance par `sudo -u`, et atteint son deck par le groupe.
 if [[ "$RAIL" == "workstation" && -n "${FLEET_HUMAN:-}" ]]; then
   _step3="${W}3.${N} ${W}sudo -u $FLEET_HUMAN fleet_v2 start${N} — la fleet tourne sous"
   _step3b="     « $FLEET_HUMAN » ; toi tu l'atteins par le groupe ${W}fleet${N}."
@@ -831,29 +864,11 @@ elif [[ "$RAIL" == "workstation" ]]; then
   _step3="${W}3.${N} Nomme un humain de fleet, sinon personne ne peut la lancer :"
   _step3b="     ${W}bash $0 --workstation --fleet-human <nom>${N}"
 else
-  _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
-  _step3b=""
+  # ssh entre en `admiral`, le siege, a qui GUARD B refuse `fleet_v2 start`. La fleet se lance sous
+  # un humain de fleet, et sa porte est sa console (`console.sh` : ssh est la porte d'admin).
+  _step3="${W}3.${N} ${W}fleet_v2 start${N} — depuis la console de ton humain de"
+  _step3b="     fleet (deck sur 20999) ; ssh entre en admiral, que GUARD B refuse."
 fi
-
-# ─── LE CARTOUCHE SE MESURE, IL NE SE COMPTE PLUS À LA MAIN ─────────────────────────────────────
-#
-# ⚠ TROIS DE SES LIGNES NE FERMAIENT PAS, et c'est structurel, pas une coquille. Chaque ligne
-# portait sa propre bordure droite sous forme d'espaces comptés à l'œil, donc toute ligne écrite
-# ailleurs que dans le littéral du cartouche l'oubliait — mesuré le 2026-08-23 sur un poste natif :
-# `1.`, `3.` et la commande de `3.` sortaient sans leur `│`.
-#
-# ⚠ ET UNE D'ELLES NE POUVAIT PAS ÊTRE COMPTÉE. `bash $0 --workstation --fleet-human <nom>` porte le
-# chemin de l'installeur : sa longueur dépend d'où l'opérateur a déballé l'archive. Une largeur fixe
-# ne peut pas la contenir — la boîte se dérive donc de son contenu, et un chemin long l'élargit au
-# lieu de la percer.
-#
-# La largeur ignore les séquences ANSI : elles pèsent dans la chaîne et pas à l'écran, ce qui est
-# exactement pourquoi l'alignement ne se lisait pas dans le diff.
-_box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
-_box_pad() { # <texte> <largeur>
-  local p n; p="$(_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
-  printf '%s%*s' "$1" "$n" ''
-}
 
 # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
 #
@@ -890,21 +905,8 @@ _box_body+=("  $_step3")
 [[ -n "$_step3b" ]] && _box_body+=("  $_step3b")
 _box_body+=("  Sonde à tout moment : ${W}bash install.sh --check${N}")
 
-# 57 est le PLANCHER, pas la largeur : c'est celle qu'avait le cartouche, et rien ne gagne à ce
-# qu'il rétrécisse selon le rail. Une ligne plus longue l'élargit, bordures comprises.
-_box_w=57
-for _l in "$_box_title" "${_box_body[@]}"; do
-  _p="$(_box_plain "$_l")"; (( ${#_p} > _box_w )) && _box_w=${#_p}
-done
-_box_rule="$(printf '%*s' "$_box_w" '' | sed 's/ /─/g')"
-
-printf '\n%s  ┌%s┐\n' "$CYAN" "$_box_rule"
-printf '  │%s%s%s│\n' "$W" "$(_box_pad "$_box_title" "$_box_w")" "$CYAN"
-printf '  ├%s┤\n' "$_box_rule"
-for _l in "${_box_body[@]}"; do
-  printf '  │%s%s%s│\n' "$N" "$(_box_pad "$_l" "$_box_w")" "$CYAN"
-done
-printf '  └%s┘%s\n' "$_box_rule" "$N"
+echo ""
+_box_emit --rule "$_box_title" "${_box_body[@]}"
 
 # LES IDENTIFIANTS EN DERNIER, APRÈS le bloc « suite » : c'est la dernière chose à l'écran, donc la
 # seule qu'on est sûr de ne pas avoir fait défiler. Le `trap` les imprimerait de toute façon en

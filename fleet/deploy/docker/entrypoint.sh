@@ -680,5 +680,5 @@ else
 fi
 
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
-say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> puis « fleet_v2 start »"
+say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> : c'est la porte d'ADMIN. « fleet_v2 start » veut un humain de fleet, depuis sa console — GUARD B refuse le siège"
 exec /usr/sbin/sshd -D -e
