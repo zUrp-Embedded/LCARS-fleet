@@ -28,6 +28,8 @@
 # adresses — c'est la que la faute etait, et c'est la seule partie qui serait silencieuse. Monter la
 # forge demande docker et plusieurs minutes ; ce n'est pas ce qu'un temoin joue.
 
+load refute
+
 setup() {
   # Le decor possede l'environnement : ce module lit des `PROV_*` que l'appelant peut porter.
   local _v
@@ -268,10 +270,15 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'forge-gestures.sh" apply'
   # et plus rien du dispositif de contournement
-  ! code | grep -q 'd create --network'
-  ! code | grep -q 'd cp '
-  ! code | grep -q 'volume create'
-  ! code | grep -q 'forge-apply'
+  #
+  # ⚠ `refute_out`, PAS `! code | grep`. Bash exempte d'`errexit` toute commande niee par `!` : ces
+  # quatre lignes s'executaient, echouaient, et le test continuait — seule la DERNIERE d'un bloc
+  # compte. Les TROIS premieres etaient donc inertes : le dispositif de contournement pouvait
+  # revenir par trois de ses quatre portes sans que rien ne rougisse. Detail : `refute.bash`.
+  code | refute_out 'd create --network'
+  code | refute_out 'd cp '
+  code | refute_out 'volume create'
+  code | refute_out 'forge-apply'
 }
 
 @test "ce module n'UTILISE plus aucune image — elle n'etait batie que pour lui" {
@@ -279,9 +286,9 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # pourquoi il ne la reclame plus ; un grep nu attrape cette phrase et fait echouer le temoin sur
   # ce qu'il voulait justement saluer. Troisieme fois en deux jours (`uname -m`, `providers mirror`).
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  ! code | grep -q 'PROV_FORGE_IMAGE'
-  ! code | grep -q 'lcars-fleet:2'
-  ! code | grep -q 'image inspect'
+  code | refute_out 'PROV_FORGE_IMAGE'
+  code | refute_out 'lcars-fleet:2'
+  code | refute_out 'image inspect'
   # et la cicatrice, elle, RESTE : sans elle un lecteur re-ajoute le build
   grep -q 'NE DÉPEND PLUS D.UNE IMAGE' "$SRC"
 }
@@ -311,7 +318,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code | grep -q 'LCARS_RECIPE_DIR="\$recipe"'
   # le roster atterrit DANS la copie, jamais dans l'arbre
   code | grep -q 'cp "\$enroll/roles.auto.tfvars.json" "\$recipe/roles.auto.tfvars.json"'
-  ! code | grep -qE 'deps/roles\.auto\.tfvars\.json'
+  code | refute_out 'deps/roles\.auto\.tfvars\.json'
   # et la copie est effacee, dans les deux sorties
   code | grep -q 'rm -rf "\$recipe" "\$enroll"'
 }
@@ -322,7 +329,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   # le geste n'init PAS avant son apply de recette — c'est le fait dont depend le temoin suivant
-  ! sed -n '/^  for m in instance \.; do/,/^  done/p' "$g" | grep -q 'tofu init'
+  sed -n '/^  for m in instance \.; do/,/^  done/p' "$g" | refute_out 'tofu init'
   # donc 48 le fait, avec la tofurc du miroir
   code | grep -q 'tofu init -input=false -no-color'
   code | grep -q 'TF_CLI_CONFIG_FILE='
@@ -349,7 +356,9 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local d="$BATS_TEST_DIRNAME/../modules.d"
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" --repo'
-  ! code | grep -q -- '--image "\$PROV_FORGE_IMAGE"'
+  # Pas de `--` a passer : `refute_out` porte le sien devant son motif, donc un motif qui commence
+  # par un tiret arrive entier. Le lui donner ici en ferait le MOTIF, et le temoin chercherait « -- ».
+  code | refute_out '--image "\$PROV_FORGE_IMAGE"'
   # et le toolchain vient AVANT — l'ordre est le prefixe
   [ -f "$d/15-toolchain.sh" ]
   [[ "15-toolchain" < "48-forge-host" ]]
@@ -440,7 +449,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # release change ». Meme autorite ici, autre lieu d'execution.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'Fleet.Catalogue.root()'
-  ! code | grep -qE 'LCARS_REFERENCE_CATALOGUE="[^$]'
+  code | refute_out 'LCARS_REFERENCE_CATALOGUE="[^$]'
   # ⚠ ON EPINGLE LA REGLE, PAS LA PHRASE. Ce temoin citait le message d'erreur mot pour mot et est
   # tombe a la premiere reformulation. Ce qui doit tenir : un chemin qui ne repond pas est un ECHEC,
   # pas un depot silencieusement saute.
@@ -472,9 +481,9 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_CATALOGUE_ROOT='
   code | grep -q "grep -m1 '\^LCARS_CATALOGUE_ROOT='"
-  ! code | grep -E 'Fleet.Catalogue.root' | grep -q 'tail -n1'
+  code | grep -E 'Fleet.Catalogue.root' | refute_out 'tail -n1'
   # et la sortie de mix n'est PAS jetee : sans elle, un vide n'a pas de cause
-  ! code | grep -E 'Fleet.Catalogue.root' | grep -q '2>/dev/null'
+  code | grep -E 'Fleet.Catalogue.root' | refute_out '2>/dev/null'
   code | grep -q 'dernières lignes de mix'
 }
 

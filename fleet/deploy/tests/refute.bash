@@ -39,3 +39,23 @@ refute() { # refute <cmd...> — echoue si <cmd> REUSSIT
   fi
   return 0
 }
+
+# ⚠ ET LE PENDANT POUR LES TUBES, PARCE QUE `refute` NE PEUT PAS LES PRENDRE. `refute code | grep -q X`
+# se lit « refute code », tube vers grep — la negation porterait sur le mauvais bout. Les deux tiers
+# des sites du corpus sont de cette forme (`! code | grep -q …`, `! sed … | grep -q …`).
+#
+# Ici la fonction est le DERNIER maillon du tube. Le statut d'un tube est celui de son dernier
+# maillon, et un tube qui echoue SANS `!` devant est bien soumis a `errexit` : l'assertion mord.
+#
+# Elle IMPRIME ce qu'elle a trouve, borne a cinq lignes. Une garde qui dit seulement « quelque chose
+# ne va pas » oblige a rejouer la commande a la main pour savoir quoi.
+refute_out() { # <cmd> | refute_out <motif ERE> — echoue si le motif est TROUVE sur stdin
+  local motif="${1:?refute_out attend un motif}" trouve
+  trouve="$(grep -E -- "$motif" || true)"
+  [[ -z "$trouve" ]] && return 0
+  {
+    echo "REFUTE : « $motif » TROUVE, alors que ce temoin l'interdit :"
+    printf '%s\n' "$trouve" | head -5
+  } >&2
+  return 1
+}
