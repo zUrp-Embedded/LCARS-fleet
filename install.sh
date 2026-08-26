@@ -293,7 +293,7 @@ if [[ -z "$RAIL" ]]; then
   $_ici
 
   ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque,
-     la fleet tourne sous ton uid, le gate en 40 s.
+     la fleet tourne sous l'humain de fleet, le gate en 40 s.
      ${R}Ça prend${N} : $_prend
 
   ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
@@ -496,8 +496,9 @@ if [[ "$RAIL" == "workstation" ]]; then
     "$_banner_back"
     "  Idempotent : relancer est toujours sûr ; « --check »"
     "  sonde sans rien modifier."
-    "  Confinement : les pods tournent sous bwrap, la fleet"
-    "  sous TON uid. Pire cas = nuke + re-provision (minutes)."
+    "  Confinement : les pods tournent sous bwrap, et la fleet"
+    "  sous l'humain de fleet : le siège a sudo, ses pods aussi."
+    "  Pire cas = nuke + re-provision (minutes)."
   )
   _box_emit "  RAIL POSTE — LCARS s'installe DANS ce système." "${_banner_body[@]}"
 else
@@ -843,15 +844,9 @@ case "$_apply_rc" in
     ;;
 esac
 
-# ⚠ LA DERNIÈRE CHOSE QU'ON LIT EST L'INSTRUCTION QU'ON SUIT — donc elle doit être vraie SUR CE
-# TERRAIN-CI. Ce bandeau disait « WSL : wsl --shutdown » sur une machine dédiée qui n'a pas de WSL,
-# et « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-# l'humain de fleet (`22-fleet-human`), pas sous l'opérateur : GUARD B refuse l'uid du siège, qui
-# est justement celui de l'opérateur sur une machine standard. Un opérateur qui suit la ligne 3 se
-# fait refuser par un garde, sans savoir pourquoi.
-#
-# Mesuré le 2026-08-21 sur l'install à froid : les deux lignes fausses, imprimées côte à côte, en
-# clôture d'un provisionnement par ailleurs juste.
+# La derniere instruction lue est celle qu'on suit : chaque ligne est derivee du terrain ET du
+# rail. Sur le poste la fleet appartient a l'humain de fleet — GUARD B refuse l'uid du siege, qui
+# porte sudo — et l'operateur la lance par `sudo -u`, puis atteint son deck par le groupe `fleet`.
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
   _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
@@ -859,8 +854,6 @@ else
   _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
   _step1b=""
 fi
-# Le lanceur nommé est celui qui MARCHE. Sur le rail poste la fleet appartient à l'humain de fleet ;
-# l'opérateur la lance par `sudo -u`, et atteint son deck par le groupe.
 if [[ "$RAIL" == "workstation" && -n "${FLEET_HUMAN:-}" ]]; then
   _step3="${W}3.${N} ${W}sudo -u $FLEET_HUMAN fleet_v2 start${N} — la fleet tourne sous"
   _step3b="     « $FLEET_HUMAN » ; toi tu l'atteins par le groupe ${W}fleet${N}."
@@ -870,8 +863,10 @@ elif [[ "$RAIL" == "workstation" ]]; then
   _step3="${W}3.${N} Nomme un humain de fleet, sinon personne ne peut la lancer :"
   _step3b="     ${W}bash $0 --workstation --fleet-human <nom>${N}"
 else
-  _step3="${W}3.${N} ${W}fleet_v2 start${N} — ta fleet, sous ton uid."
-  _step3b=""
+  # ssh entre en `admiral`, le siege, a qui GUARD B refuse `fleet_v2 start`. La fleet se lance sous
+  # un humain de fleet, et sa porte est sa console (`console.sh` : ssh est la porte d'admin).
+  _step3="${W}3.${N} ${W}fleet_v2 start${N} — depuis la console de ton humain de"
+  _step3b="     fleet (deck sur 20999) ; ssh entre en admiral, que GUARD B refuse."
 fi
 
 # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────

@@ -543,3 +543,13 @@ SPY
   run grep -c '^  _box_emit ' "$SRC"
   [ "$output" = "2" ]
 }
+
+@test "le bandeau ne promet pas la fleet sous l'uid de l'operateur — GUARD B la lui refuse" {
+  # GUARD B (`config/runtime.exs`, miroir de `bin/fleet_v2`) refuse uid 0, l'uid du siege
+  # (`LCARS_SYSADMIN_UID`, defaut 1000) et les comptes systeme : une fleet sous le siege donnerait
+  # des pods sudo-capables. Le siege pose la machine, l'humain de fleet fait tourner la fleet.
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"RAIL POSTE"* ]]
+  [[ "$output" == *"sous l'humain de fleet"* ]]
+  [[ "$output" != *"la fleet sous TON uid"* ]]
+}
