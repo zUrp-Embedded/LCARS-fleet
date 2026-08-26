@@ -145,7 +145,18 @@ prov_runtime_dirs() {
     `# Elle a quand même son répertoire, pour la même raison que la voisine — un répertoire par` \
     `# service rend l'ACL lisible d'un « ls », et une porte posée à la racine d'un arbre partagé se` \
     `# retrouve un jour balayée par le nettoyage de quelqu'un d'autre.` \
-    "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP"
+    "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP" \
+    `# ⚠ CE REPERTOIRE VIVAIT HORS DE CETTE TABLE, ET IL NE SURVIVAIT PAS AUX REBOOTS. Son seul` \
+    `# createur etait 45-sudoers-toolchain, en install -d nu. Or c'est CETTE table qui engendre le` \
+    `# tmpfiles.d : un repertoire runtime qui n'y figure pas n'est pas recree au boot — il revient` \
+    `# au prochain « provision apply ». Entre les deux, le reconciliateur de toolchain du BEAM (qui` \
+    `# lit LCARS_TOOLCHAIN_RUN_STATE) ecrit dans un chemin absent.` \
+    `#` \
+    `# 2775 root:fleet — sgid et ecriture de groupe, parce que le BEAM ecrit le marqueur sous le` \
+    `# groupe fleet et que root possede. Le manifeste annonçait « 0755 root:root » : faux sur le mode` \
+    `# ET sur le groupe, dans le sens qui SOUS-ESTIME qui peut ecrire la. Les deux murs ISO comparent` \
+    `# la PRESENCE d'un chemin, jamais son mode : c'est pour ca que rien ne l'a vu.` \
+    "/run/lcars/toolchain 2775 root:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {

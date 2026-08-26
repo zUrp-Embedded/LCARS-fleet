@@ -189,7 +189,12 @@ group     lcars-console                                2001  -                  
 runtime   /run/lcars                                   0755  root:root           wsl+linux
 runtime   /run/lcars/console                           0711  root:root           wsl+linux
 runtime   /run/lcars/console/<human>                   2710  <human>:lcars-console  wsl+linux
-runtime   /run/lcars/toolchain                         0755  root:root           any
+# ⚠ CETTE LIGNE A ANNONCE `0755 root:root` PENDANT TOUTE SA VIE, ET LE SEUL POSEUR FAISAIT `2775`
+# `root:fleet`. Faux sur le mode ET sur le groupe, dans le sens qui SOUS-ESTIME qui peut ecrire : un
+# lecteur de cette table croyait le repertoire ferme au groupe alors que le BEAM y ecrit. Les deux
+# murs ISO comparent la PRESENCE d'un chemin, jamais son mode — ils ne pouvaient pas le voir.
+# Le sgid est porteur : le marqueur pose par le BEAM doit rester du groupe `fleet`.
+runtime   /run/lcars/toolchain                         2775  root:fleet          any
 # ⚠ LE SERVICE D'AUTORITE N'EST PAS ROOT, DONC IL NE PEUT PAS CREER SA SOCKET DANS `/run/lcars`
 # (0755 root:root). Il lui faut un repertoire A LUI. L'inventaire du chantier avait compte les
 # FICHIERS a changer de proprietaire et oublie le REPERTOIRE — la meme moitie d'axe que deux

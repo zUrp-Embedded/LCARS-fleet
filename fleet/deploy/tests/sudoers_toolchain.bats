@@ -125,6 +125,48 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [[ "$(stat -c %a "$LCARS_TOOLCHAIN_RUN_STATE")" == "2775" ]]
 }
 
+# ─── LE VECTEUR 6-131, MESURE PLUTOT QUE DECRIT ─────────────────────────────────────────────────
+#
+# ⚠ CE MODULE CREUSAIT EN `install -d` NU, ET `install -d` SUIT LES LIENS. La garde
+# `prov_refuse_symlink_path` vit dans `ensure_dir` pour exactement ca : quelqu'un pose un lien dans
+# un composant du chemin, et le prochain apply en ROOT chmode/chowne la CIBLE. Trois sites de ce
+# module et un de `55-deck-oidc` contournaient la garde en n'appelant pas la lib.
+#
+# UN TEMOIN DE TEXTE NE SUFFIT PAS ICI — il epinglerait l'orthographe d'un appel. On pose un vrai
+# lien vers une vraie cible, on joue l'apply, et on regarde si la cible a bouge.
+@test "etat conteneur: un LIEN a la place du repertoire est REFUSE, et la cible ne bouge pas" {
+  local cible="$BATS_TEST_TMPDIR/cible-innocente"
+  mkdir -p "$cible"; chmod 0700 "$cible"
+  rm -rf "$LCARS_TOOLCHAIN_RUN_STATE"
+  ln -s "$cible" "$LCARS_TOOLCHAIN_RUN_STATE"
+
+  run_apply
+  # LA CIBLE EST INTACTE — la seule assertion qui compte. Son mode aurait ete reecrit en 2775 et son
+  # groupe change si le lien avait ete suivi.
+  [[ "$(stat -c %a "$cible")" == "700" ]]
+  # Et le lien est toujours un lien : on ne l'a pas remplace en douce non plus.
+  [[ -L "$LCARS_TOOLCHAIN_RUN_STATE" ]]
+}
+
+@test "skill: un LIEN pose dans le home du siege ne fait pas chowner sa cible" {
+  # Le site le plus expose du module : root creuse `~/.claude/skills/...` dans un home que son
+  # proprietaire controle, puis chowne. La portee est etroite — le siege a deja root — mais c'est le
+  # motif que la lib ferme, et une garde qui ne vaut que quand l'attaquant n'a rien a gagner n'en
+  # est pas une.
+  local cible="$BATS_TEST_TMPDIR/etc-innocent"
+  mkdir -p "$cible"; chmod 0700 "$cible"
+  rm -rf "$LCARS_SIEGE_HOME/.claude"
+  ln -s "$cible" "$LCARS_SIEGE_HOME/.claude"
+
+  run_apply
+  [[ "$(stat -c %a "$cible")" == "700" ]]
+  [[ -L "$LCARS_SIEGE_HOME/.claude" ]]
+  # ⚠ ET RIEN N'EST ECRIT DANS LA CIBLE. Premiere ecriture du correctif : `|| skdst=""` — les deux
+  # `write_atomic` d'apres devenaient `/SKILL.md` et `/list.sh`, en ROOT, A LA RACINE. Le bloc doit
+  # SAUTER, pas se replier sur un autre chemin.
+  [[ -z "$(ls -A "$cible")" ]]
+}
+
 @test "projection: le login du siege atterrit dans pilot.assignee" {
   run_apply
   [[ "$status" -eq 0 ]]

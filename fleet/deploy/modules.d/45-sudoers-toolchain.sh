@@ -159,7 +159,25 @@ apply() {
   fi
 
   # 2. L'etat conteneur — 2775 : le BEAM (groupe fleet) ecrit le marqueur, root le possede.
-  install -d -m 2775 "$RUN_STATE" || { p_fail "etat conteneur: install -d $RUN_STATE"; verdict_apply; }
+  #
+  # ⚠ `ensure_dir`, PAS `install -d` + `chgrp`. Trois raisons, et la premiere est une garde :
+  #   · `install -d` ne passe pas par `prov_refuse_symlink_path`. C'est le vecteur 6-131 exact —
+  #     un lien pose dans un composant du chemin, et le prochain apply en root chmode/chowne la
+  #     CIBLE. La garde a ete ajoutee a `ensure_dir` pour ca ; ce site ne l'utilisait pas.
+  #   · creation et mode etaient DEUX gestes : un crash entre les deux laissait le repertoire sans
+  #     son groupe, donc un reconciliateur muet. `ensure_dir` les pose en un seul geste convergent.
+  #   · le chemin est desormais DECLARE dans `prov_runtime_dirs` de `25-directories`, donc pose au
+  #     boot par le tmpfiles.d. Cet appel-ci ne cree plus rien sur le rail poste — il VERIFIE. Il
+  #     reste indispensable sur docker, ou cette table-la rend vide et ou ce module tourne quand meme
+  #     (`APPLY-ON: any`).
+  #
+  # ⚠ LE GROUPE RESTE UN GESTE SEPARE ET TOLERANT, ET C'EST DELIBERE. `ensure_dir … "root:$GROUPE"`
+  # etait la forme evidente : elle `p_fail`-e des que le chown est refuse, donc elle transforme en
+  # ECHEC ce que ce module classe en DERIVE depuis toujours — un reconciliateur qui ne peut pas
+  # noter n'est pas une machine cassee. (Et `ensure_mode` ne sait comparer que `<user>:`, pas
+  # `:<groupe>` : lui apprendre la forme miroir pour un seul appelant serait une capacite pour rien.)
+  ensure_dir "$RUN_STATE" 2775 \
+    || p_drift "etat conteneur ($RUN_STATE) non convergé — le reconciliateur de toolchain ne pourra pas noter"
   chgrp "$PROV_FLEET_GROUP" "$RUN_STATE" 2>/dev/null \
     || p_drift "etat conteneur: chgrp $PROV_FLEET_GROUP a echoue — le reconciliateur ne pourra pas noter"
 
@@ -175,11 +193,26 @@ apply() {
       home="${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"
       if [[ -n "$home" && -d "$home" ]]; then
         skdst="$home/.claude/skills/system-issues"
-        install -d -m 0755 "$skdst"
-        write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/SKILL.md"           || p_fail "skill system-issues: SKILL.md"
-        write_atomic "$skdst/list.sh" 0755 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/list.sh"           || p_fail "skill system-issues: list.sh"
-        chown "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
-        p_ok "skill system-issues pose chez $PROV_HUMAN"
+        # ⚠ ROOT CREUSE ICI DANS UN HOME QUE SON PROPRIETAIRE CONTROLE, et c'est le seul site du
+        # module dans ce cas. `install -d` suit les liens, et le `chown` deux lignes plus bas aussi :
+        # un lien pose en `~/.claude` faisait chowner sa CIBLE. La portee est etroite — `PROV_HUMAN`
+        # est celui qui a tape `sudo`, il a deja root — mais c'est le motif que la lib ferme, et une
+        # garde qui ne vaut que quand l'attaquant n'a rien a gagner n'est pas une garde.
+        #
+        # ⚠ ET LE REPERTOIRE RATE FAIT SAUTER LE BLOC ENTIER, il ne se neutralise pas en variable
+        # vide. Premiere ecriture de ce correctif : `|| skdst=""` — et les deux `write_atomic`
+        # d'apres devenaient `/SKILL.md` et `/list.sh`, ecrits en ROOT A LA RACINE. Une garde qui
+        # transforme un echec en chemin different est pire que l'echec.
+        if ensure_dir "$skdst" 0755 "$PROV_HUMAN:"; then
+          write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/SKILL.md" || p_fail "skill system-issues: SKILL.md"
+          write_atomic "$skdst/list.sh"  0755 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/list.sh"  || p_fail "skill system-issues: list.sh"
+          # `-h` : on ne dereference pas. `ensure_dir` a deja refuse les liens du chemin, ceci ferme
+          # la fenetre entre les deux gestes — et ne coute rien sur un vrai repertoire.
+          chown -h "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
+          p_ok "skill system-issues pose chez $PROV_HUMAN"
+        else
+          p_drift "skill system-issues: $skdst non convergé — RIEN n'est posé chez $PROV_HUMAN"
+        fi
       else
         p_drift "skill system-issues: home de $PROV_HUMAN introuvable"
       fi
@@ -188,7 +221,12 @@ apply() {
     fi
 
     if [[ -n "${LCARS_STORE_ROOT:-}" && -d "$LCARS_STORE_ROOT" ]]; then
-      install -d -m 2775 "$LCARS_STORE_ROOT/state" 2>/dev/null || true
+      # ⚠ LA TOLERANCE EST DELIBEREE — le volume peut etre monte en lecture seule, et la projection
+      # n'est pas vitale. Mais elle ne dispense pas de la GARDE : `prov_refuse_symlink_path` refuse
+      # un lien dans le chemin AVANT qu'un `install -d` en root le suive. `ensure_dir` ne convient
+      # pas ici : il `p_fail`-e, donc il ferait compter un echec la ou on en tolere un.
+      prov_refuse_symlink_path "$LCARS_STORE_ROOT/state" \
+        && install -d -m 2775 "$LCARS_STORE_ROOT/state" 2>/dev/null || true
       # Redirection, JAMAIS un pipe vers write_atomic : ses compteurs de verdict vivraient dans le
       # subshell du pipe et seraient perdus (la regle B3 de `30-wsl.sh:152`).
       if write_atomic "$LCARS_STORE_ROOT/state/pilot.assignee" 0644 <<<"$PROV_HUMAN"; then
