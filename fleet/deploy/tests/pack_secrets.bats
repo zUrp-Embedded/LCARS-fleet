@@ -31,6 +31,11 @@ setup() {
   SENTINEL="s3cr3t-de-forge-a-ne-jamais-imprimer"
 }
 
+# ⚠ LE DECOR PORTE `PACK_DIR`, ET CE N'EST PAS UNE COMMODITE. Depuis le 2026-08-26 la premiere
+# ligne du bloc nomme le tiroir ou le tar attend (`fix(pack)`), donc le bloc DEPEND d'une variable
+# posee plus haut dans `pack.sh`. Sous le `set -u` de ce fichier ET celui de `pack.sh`, un bloc
+# remonte au-dessus de cette affectation tuerait le packageur sur variable non liee. Le decor
+# modelise donc le contexte reel ; l'ORDRE, lui, est tenu par `pack_outdir.bats`.
 # Le bloc qui calcule l'etat puis le dit — depuis `_tok_state` jusqu'a la ligne qui l'imprime.
 verdict_block() { sed -n '/_tok_state=/,/jeton :/p' "$PACK"; }
 
@@ -50,6 +55,7 @@ verdict_block() { sed -n '/_tok_state=/,/jeton :/p' "$PACK"; }
     say() { printf 'pack: %s\n' \"\$*\"; }
     FORGE=''
     TOKEN='$SENTINEL'
+    PACK_DIR='/tiroir-du-temoin'
     $(verdict_block)"
   [ "$status" -eq 0 ]
   [[ "$output" != *"$SENTINEL"* ]]
@@ -64,6 +70,7 @@ verdict_block() { sed -n '/_tok_state=/,/jeton :/p' "$PACK"; }
     say() { printf 'pack: %s\n' \"\$*\"; }
     FORGE=''
     TOKEN=''
+    PACK_DIR='/tiroir-du-temoin'
     $(verdict_block)"
   [ "$status" -eq 0 ]
   [[ "$output" == *"absent"* ]]

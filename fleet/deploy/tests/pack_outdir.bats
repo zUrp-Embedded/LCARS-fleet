@@ -70,3 +70,16 @@ resolve_in() { # <racine simulee> [valeur de LCARS_PACK_DIR]
   # seul le manifeste a le droit de nommer.
   grep -vE '^\s*#' "$SUT" | refute_out '/home/commons|/local/LCARS|/opt/lcars|/usr/share/lcars'
 }
+
+@test "PACK_DIR est POSE avant la ligne qui le nomme — sinon set -u tue le packageur" {
+  # La cicatrice : le message « le tar est dans … » a ete ecrit APRES coup, et il a immediatement
+  # casse `pack_secrets.bats`, qui execute ce bloc pour de vrai. Le temoin la-bas modelise le
+  # contexte ; celui-ci tient l'ORDRE dans le fichier, qui est ce dont depend l'execution reelle.
+  local pose l
+  pose="$(grep -n '^PACK_DIR=' "$SUT" | head -1 | cut -d: -f1)"
+  [ -n "$pose" ]
+  # toute mention de PACK_DIR dans le code vient APRES son affectation
+  for l in $(grep -nE 'PACK_DIR' "$SUT" | grep -vE ':\s*#' | cut -d: -f1); do
+    [ "$l" -ge "$pose" ] || { echo "PACK_DIR employe l.$l, avant son affectation l.$pose" >&2; return 1; }
+  done
+}
