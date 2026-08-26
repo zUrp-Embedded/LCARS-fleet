@@ -157,7 +157,11 @@ say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 # ⚠ LA DÉCLARATION COMPTE AUTANT QUE LE SUBSTRAT. Sans `LCARS_ALLOW_ANY_HOST`, ce provisionnement
 # n'a pas le droit de toucher cette machine — donc promettre qu'il y installera docker serait une
 # promesse qu'il ne tiendra pas : `00-preflight` refusera trois lignes plus loin.
-docker_installable_here() {
+# Loi 5 (fleet/deploy/README.md) : poser un paquet est réservé au rail qui a REÇU la machine. La
+# boîte est invitée — elle exige un daemon debout et n'en installe aucun, quel que soit le drapeau.
+# Le rail fait donc partie de la question : sans lui, la réponse vaut pour un rail qu'on ignore.
+docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
+  [[ "${RAIL:-}" != "box" ]] || return 1
   [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
   local s="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || echo "")}"
   [[ "$s" == "linux" ]]
@@ -211,7 +215,21 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     # renvoyant vers un montage Docker Desktop qui n'existe pas sur une machine sans Windows — et le
     # module capable de le poser n'était jamais atteint. Un préflight ne doit refuser que ce que la
     # suite ne peut pas réparer.
-    echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker-ce, dépôt upstream download.docker.com)"
+    # Rail encore ouvert = les deux moitiés sont vraies en même temps, et une seule phrase ne peut
+    # pas les porter : le poste posera docker, la boîte jamais. Les deux se disent, sinon on laisse
+    # choisir un chemin condamné.
+    if [[ -z "$RAIL" ]]; then
+      echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com) ;"
+      echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
+    else
+      echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker-ce, dépôt upstream download.docker.com)"
+    fi
+  elif [[ "$RAIL" == "box" ]]; then
+    # Loi 5 : ce rail est invité ici. Le daemon est un prérequis qu'on nomme, pas un manque qu'on
+    # comble — le refus porte donc les deux sorties, pas seulement la cause.
+    say_miss "$PROV_DOCKER_WHY"
+    echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
+    echo "           ou donne cette machine au rail poste — sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
   else
     say_miss "$PROV_DOCKER_WHY"
   fi
@@ -288,6 +306,13 @@ if [[ -z "$RAIL" ]]; then
       _prend="sudo · un groupe système · /local et /home/private · des paquets ·
      et il n'existe AUCUN désinstalleur — ici il n'y a pas de distro à jeter derrière."
     fi
+    # DOCKER_OK=0 ici signifie : le préflight a laissé passer parce que le rail POSTE peut poser
+    # docker. La BOÎTE ne le peut pas (loi 5), donc son option se barre au lieu de s'offrir.
+    if [[ "$DOCKER_OK" -eq 0 ]]; then
+      _opt2_etat="${R}INDISPONIBLE ici${N} — docker n'est pas debout, et la boîte ne l'installe pas."
+    else
+      _opt2_etat="     Pour tout défaire : reset, 30 s."
+    fi
     cat <<EOF
 
   $_ici
@@ -299,14 +324,22 @@ if [[ -z "$RAIL" ]]; then
   ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
      pas de paquet, pas d'utilisateur, pas de groupe, rien dans /etc ni /usr.
      ${R}Ça prend${N} : ~3 Go · ~15 min de build · deux ports · un volume qui survit.
-     Pour tout défaire : reset, 30 s.
+$_opt2_etat
 
 EOF
     ans=""
     { read -r -p "  ${G}1 ou 2 ?${N} " ans < /dev/tty; } 2>/dev/null || ans="__NO_TTY__"
     case "$ans" in
       1) RAIL=workstation ;;
-      2) RAIL=box ;;
+      2) if [[ "$DOCKER_OK" -eq 0 ]]; then
+           echo ""
+           echo "  ${R}La boîte exige un daemon docker debout, et elle n'en pose pas (loi 5).${N}"
+           echo "  $PROV_DOCKER_WHY"
+           echo "  Deux sorties : pose docker comme tu l'entends, puis relance ;"
+           echo "  ou donne cette machine au rail poste — réponds « 1 »."
+           exit 1
+         fi
+         RAIL=box ;;
       __NO_TTY__)
         # PAS DE DÉFAUT. Les deux erreurs sont graves et opposées ; on nomme les deux drapeaux.
         echo ""

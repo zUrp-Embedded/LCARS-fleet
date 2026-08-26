@@ -68,7 +68,13 @@ A4_SCRIPT="$(repo_root)/fleet/etc/provision-role-tokens.sh"
 ROLES="$(prov_roles)"
 ACCOUNTS="$ROLES $PROV_SYSTEM_ACCOUNT"
 
-forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
+# La forme se teste ICI, pas chez l'appelant : `curl` accepte un « host:port » nu et lui prefixe
+# `http://`, alors que le runtime concatene `base_url` verbatim (Fleet.Forge.Client.Transport) et
+# refuse. Une sonde plus tolerante que son consommateur rend un vert faux.
+forge_reachable() {   # 0 joignable · 1 forme invalide · 2 injoignable
+  [[ "$PROV_FORGE_URL" == http://* || "$PROV_FORGE_URL" == https://* ]] || return 1
+  curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null || return 2
+}
 
 # L'INSCRIPTION LIBRE EST UNE PRÉCONDITION DU MODÈLE D'ENROLLMENT, ET RIEN NE LA VÉRIFIAIT.
 # Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`.
@@ -416,10 +422,13 @@ check() {
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
     verdict_check
   fi
-  if ! forge_up; then
-    p_drift "forge injoignable : $PROV_FORGE_URL/api/v1/version"
-    verdict_check
-  fi
+  _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu
+  case "$_rc" in
+    1) p_drift "FORGE_BASE_URL=« $PROV_FORGE_URL » sans schéma — attendu : http://<hôte>:<port>"
+       verdict_check ;;
+    2) p_drift "forge injoignable : $PROV_FORGE_URL/api/v1/version"
+       verdict_check ;;
+  esac
   p_ok "forge joignable ($PROV_FORGE_URL)"
   check_ci_runner
   probe_registration
@@ -482,10 +491,13 @@ apply() {
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
     verdict_apply
   fi
-  if ! forge_up; then
-    p_drift "forge injoignable : $PROV_FORGE_URL — tokens non convergés (relance quand elle répond)"
-    verdict_apply
-  fi
+  _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu
+  case "$_rc" in
+    1) p_drift "FORGE_BASE_URL=« $PROV_FORGE_URL » sans schéma — attendu : http://<hôte>:<port> ; tokens non convergés"
+       verdict_apply ;;
+    2) p_drift "forge injoignable : $PROV_FORGE_URL — tokens non convergés (relance quand elle répond)"
+       verdict_apply ;;
+  esac
 
   # ⚠ TOT, ET DANS L'APPLY AUSSI — les deux points comptent.
   #

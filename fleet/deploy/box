@@ -74,8 +74,14 @@
 #   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)
 #   LCARS_CONSOLE_PORT         bind de la console web (défaut 127.0.0.1:21004)
 #   LCARS_HOSTNAME             hostname du conteneur (défaut bridge)
-#   FORGE_BASE_URL             URL de TA forge (ex http://host.docker.internal:3300) — vide =
-#                              modules forge en instruct-only, le doctor le dit
+#   FORGE_BASE_URL             URL de TA forge VUE DU CONTENEUR (Docker Desktop :
+#                              http://host.docker.internal:3300 · docker natif : le nom de service
+#                              sur un réseau partagé, http://forge:3000). « localhost » y désigne
+#                              la BOÎTE — vide = modules forge en instruct-only, le doctor le dit
+#   FORGE_PUBLIC_URL           la MÊME forge VUE DU NAVIGATEUR (ce que TU tapes). Défaute sur
+#                              FORGE_BASE_URL, et ce défaut n'est juste que si les deux
+#                              observateurs voient la même adresse — sinon le login OAuth2 part
+#                              et ne revient pas. Cf. « box forge-check »
 #   FORGE_ADMIN_TOKEN          token master site-admin — lu par `config` (qui le POSE) et par
 #                              `forge-apply` (qui l'utilise sans le poser). Transmis par stdin :
 #                              jamais argv, jamais l'env du client docker
@@ -536,12 +542,28 @@ machine dédiée), tu la sauvegardes, tu la mets à jour. Elle porte les repos, 
 PR — la seule copie durable du travail. LCARS, lui, est jetable : on le nuke et on le redéploie.
 Un jetable ne doit pas pouvoir détruire ce qui ne l'est pas, donc il ne la gère pas.
 
-CE QU'IL LUI FAUT, EXACTEMENT DEUX CHOSES :
+CE QU'IL LUI FAUT, EXACTEMENT TROIS CHOSES — et les deux premières sont la MÊME forge, vue par
+deux observateurs. Les confondre casse la porte du deck ; la règle est écrite en toutes lettres
+dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
 
-  1. SON URL           → FORGE_BASE_URL=http://<hôte-ou-service>:<port> fleet/deploy/box up
-     Depuis le conteneur, ta machine hôte se joint par « host.docker.internal ».
+  1. SON ADRESSE VUE DU CONTENEUR  → FORGE_BASE_URL=http://<hôte-ou-service>:<port>
+     C'est le RUNTIME qui l'ouvre, depuis l'intérieur : « localhost » y désigne la BOÎTE,
+     jamais ta machine. Le bon chemin dépend du daemon, et il n'y en a pas d'universel :
+       · Docker Desktop (WSL2, macOS) → http://host.docker.internal:<port publié>
+       · Docker natif (Linux)         → host.docker.internal N'EXISTE PAS sans un
+         « extra_hosts: host-gateway » que ce compose ne déclare pas. Attache la boîte au
+         réseau de ta forge et vise le NOM DE SERVICE avec son port INTERNE :
+         http://forge:3000 — surtout pas le port publié.
+         (fleet/deploy/docker/forge-compose.yml porte cette règle et son motif)
 
-  2. UN TOKEN MASTER (site-admin) ET UN SEED. Dans Gitea : Settings → Applications →
+  2. SON ADRESSE VUE DU NAVIGATEUR → FORGE_PUBLIC_URL=http://<ce que TU tapes>:<port>
+     Celle des retours OAuth2 du deck. Elle défaute sur la précédente, et ce défaut n'est
+     juste QUE si les deux observateurs voient la même adresse. Sur un poste de travail,
+     jamais : le serveur dit « host.docker.internal » ou « forge », toi tu tapes
+     « localhost ». Omise, le login part et ne revient pas — et la panne se lit au RETOUR,
+     là où elle ressemble à tout sauf à une variable manquante.
+
+  3. UN TOKEN MASTER (site-admin) ET UN SEED. Dans Gitea : Settings → Applications →
      Generate New Token, scope « all ». Le seed est le mot de passe que les comptes de rôle
      recevront à leur création. Tu les poses UNE FOIS, ils restent dans la boîte :
 
