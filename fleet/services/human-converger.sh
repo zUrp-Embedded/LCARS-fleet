@@ -296,11 +296,23 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
 # Le cas est etroit — sur une boite le siege existe deja quand ce service demarre, donc `useradd`
 # passerait a l'uid suivant — mais `LCARS_SYSADMIN_UID` est REGLABLE : un siege a 1005 sur une
 # machine ou 1005 est libre rentre exactement dans ce chemin.
+# ⚠ LES DEUX BORNES SE VALIDENT, ET LA PREMIERE VERSION N'EN VALIDAIT QU'UNE. `m` passait par un
+# `=~ ^[0-9]+$`, `s` non — asymetrie dans six lignes ecrites d'un coup. Ce que ca produit :
+#
+#   LCARS_SYSADMIN_UID="10 00"  (un espace au clavier)  →  `(( m > s ))` : syntax error
+#   LCARS_SYSADMIN_UID="abc"                            →  `s` lu comme un NOM de variable en
+#                                                          contexte arithmetique → unbound variable
+#
+# `:-` ne protege que du VIDE, pas du non-numerique. Sous le `set -e` du demarrage ca tue le service
+# — bruyant, donc acceptable. Sous le `set +e` de la BOUCLE, `uid_wanted` rend vide, `uid_args`
+# reste vide, `useradd` repart de `UID_MIN` : le plancher que ce fichier existe pour poser est
+# contourne EN SILENCE. La garde ci-dessous est donc le plancher du plancher.
 uid_floor() {
   local m s
   m="$(uid_min)"
   [[ "$m" =~ ^[0-9]+$ ]] || m=1000
   s="$SYSADMIN_UID"
+  [[ "$s" =~ ^[0-9]+$ ]] || s=1000
   (( m > s )) && { echo "$m"; return 0; }
   echo "$(( s + 1 ))"
 }
@@ -692,12 +704,18 @@ converge_once() {
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
       getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
-      # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS : `want_uid` est vide dans le cas nominal
-      # (c'est `useradd` qui a choisi), et c'est ce que le systeme a donne qu'il faut enregistrer.
+      # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS.
+      #
+      # ⚠ CE COMMENTAIRE DISAIT « `want_uid` est vide dans le cas nominal (c'est `useradd` qui a
+      # choisi) », ET CE N'EST PLUS VRAI depuis que `uid_wanted` retombe sur `first_free_uid` :
+      # `uid_args` porte TOUJOURS `-u`, et `useradd` ne choisit plus rien. La raison de relire reste
+      # entiere — c'est ce que le SYSTEME a pose qu'on enregistre, pas ce qu'on lui a demande — mais
+      # une phrase qui nomme le mauvais decideur envoie chercher un defaut dans `useradd` le jour ou
+      # un uid surprend quelqu'un.
       local got_uid; got_uid="$(id -u -- "$login" 2>/dev/null || true)"
       uid_map_record "$forge_id" "$got_uid" "$login"
-      # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « choisi
-      # par le systeme » sont trois histoires differentes le jour ou un uid surprend quelqu'un.
+      # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « premier
+      # libre au-dessus du siege » sont trois histoires differentes le jour ou un uid surprend.
       say "user $login cree (membre de $ORG/$TEAM${got_uid:+, uid $got_uid $uid_src})"
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne

@@ -750,6 +750,23 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   [ "$output" = "1001" ]
 }
 
+@test "plancher: un SYSADMIN_UID non numerique ne fait pas DISPARAITRE le plancher" {
+  # ⚠ `m` ETAIT VALIDE, `s` NON — asymetrie dans six lignes ecrites d'un coup. `:-` ne protege que du
+  # VIDE. Avec `"10 00"` (un espace au clavier) l'arithmetique de bash rend une erreur de syntaxe ;
+  # avec `"abc"`, le contexte arithmetique lit `s` comme un NOM de variable et `set -u` tue le shell.
+  #
+  # LE CAS QUI MORD EST LE SECOND, dans la BOUCLE du convergeur qui tourne sous `set +e` : la
+  # substitution rend vide, `uid_args` reste vide, `useradd` repart de `UID_MIN` — le plancher que ce
+  # fichier existe pour poser est contourne en silence. On epingle les deux formes.
+  local v
+  for v in 'abc' '10 00' '-5' '1e3'; do
+    LCARS_SYSADMIN_UID="$v" floor 'uid_floor'
+    [ "$status" -eq 0 ] || { echo "uid_floor MORT sur LCARS_SYSADMIN_UID=« $v »"; return 1; }
+    [[ "$output" =~ ^[0-9]+$ ]] || { echo "uid_floor rend « $output » sur « $v »"; return 1; }
+    [ "$output" -ge 1000 ] || { echo "plancher « $output » sous 1000 sur « $v »"; return 1; }
+  done
+}
+
 @test "le premier uid LIBRE est cherche au-dessus du plancher, jamais en dessous" {
   # On ne mesure pas contre le /etc/passwd de la machine : `getent` est double, 1001 et 1002 pris.
   # Sinon ce temoin dirait la composition du poste qui le joue.

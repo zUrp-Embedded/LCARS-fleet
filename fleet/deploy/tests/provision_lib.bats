@@ -13,6 +13,18 @@
 # The real filesystem effects (atomic write, managed block replacement) are asserted on tmpdirs.
 
 setup() {
+  # ⚠ LE DECOR POSSEDE SON ENVIRONNEMENT, ET CE FICHIER ETAIT LE SEUL DU CORPUS A NE PAS LE FAIRE.
+  # Mesure du 2026-08-26 : `PROV_VERBOSE=1 bats provision_lib.bats` rend DEUX temoins rouges — ceux
+  # qui mesurent la boucle de sonde et le bornage d'ecran de `run_step`, c'est-a-dire la branche NON
+  # verbose. Une variable heritee du shell de l'operateur basculait leur sujet sans qu'ils le sachent.
+  #
+  # Ce n'est pas une regression de `--ok` : l'ancienne branche verbose deversait tout aussi. C'est un
+  # temoin qui mesure la MACHINE QUI LE JOUE, exactement ce que ce corpus interdit partout ailleurs —
+  # `fleet_human.bats` et `services_units.bats` portent la meme boucle depuis leur premiere version.
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export LIB
   [ -f "$LIB" ]
@@ -744,6 +756,26 @@ module_sh() {
     export PROV_VERBOSE=1
     run_step --ok 3 "etape" -- bash -c "exit 3"
     [ "$PROV_LAST_RC" -eq 3 ]
+    [ "$PROV_FAILED" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "run_step --verbose : PLUSIEURS --ok sont tous tolérés, pas seulement le premier" {
+  # ⚠ MES DEUX TEMOINS VERBOSE NE COUVRAIENT QU'UN SEUL `--ok`, ET LA LACUNE A ETE PROUVEE PAR
+  # MUTATION : en remplacant la boucle `for c in "${ok_codes[@]}"` par un test sur `ok_codes[0]`
+  # seul, les deux restaient VERTS — alors que `64-services` appelle `run_step --ok 1 --ok 2`, donc
+  # le rc 2 du convergeur (drift residuel, le cas NOMINAL d'un humain frais) redevenait un echec
+  # d'apply des qu'on lance `provision --verbose`.
+  #
+  # Un contrat qui accepte une LISTE se mesure sur au moins deux elements, et sur le DERNIER : c'est
+  # celui qu'une implementation qui ne lit que le premier laisse tomber.
+  module_sh '
+    export PROV_VERBOSE=1
+    run_step --ok 1 --ok 2 "etape" -- bash -c "exit 2"
+    [ "$PROV_LAST_RC" -eq 2 ]
     [ "$PROV_FAILED" -eq 0 ]
   '
   [ "$status" -eq 0 ]

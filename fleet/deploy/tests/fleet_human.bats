@@ -66,15 +66,56 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 # ⚠ CE QUI RESTE EPINGLE ICI EST L'ABSENCE. Un module qui recreerait un compte reintroduirait le
 # deuxieme createur, donc le deuxieme jeu de regles.
 @test "ce module ne CREE plus de compte unix — un seul createur, et ce n'est pas lui" {
-  # ⚠ ON EPINGLE LA POSITION DE COMMANDE, PAS LE MOT. Premiere version de ce temoin : un `grep` nu
-  # sur `useradd` — il rougissait sur le VERDICT, qui propose legitimement le geste manuel a
-  # l'operateur (« ou crée-le toi-même : useradd -m -G fleet <nom> »). Un temoin qui interdit de
-  # PARLER d'un outil au lieu de l'APPELER fait supprimer la phrase utile.
+  # ⚠ CE TEMOIN A ETE UN MOTIF DE TEXTE, ET IL AVAIT TROIS TROUS MESURES. Il epinglait la position
+  # de commande — debut de ligne, `;`, `&&`, `||`, `then`, `do`, `{` — pour ne pas rougir sur le
+  # VERDICT, qui propose legitimement le geste manuel a l'operateur (« ou crée-le toi-même :
+  # useradd -m -G fleet <nom> »). La liste des separateurs est finie, et ces trois formes EXECUTENT
+  # `useradd` en passant au vert :
   #
-  # Un appel se reconnait a ce qui le PRECEDE : debut de ligne, `;`, `&&`, `||`, `then`, `do`, `{`.
-  # Dans une chaine, `useradd` suit du texte — ici un guillemet francais.
-  local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|;|&&|\|\||\bthen\b|\bdo\b|\{)[[:space:]]*(useradd|adduser)\b' <<<"$code"
+  #     r=$(useradd -m x)                    → precede de `$(`
+  #     runuser -u root -- useradd -m x      → precede de `-- `, la forme que provision-lib emploie
+  #     sudo useradd -m x                    → precede de `sudo `
+  #
+  # UN MUR DE TEXTE NE VOIT PAS UN APPEL, IL VOIT UNE ORTHOGRAPHE. On pose donc de FAUX `useradd` et
+  # `adduser` en tete du PATH, on joue l'apply pour de vrai, et on regarde s'ils ont ete appeles.
+  # Peu importe alors par quel detour on les atteint.
+  local bin="$BATS_TEST_TMPDIR/nocreate"; mkdir -p "$bin"
+  local mouchard="$BATS_TEST_TMPDIR/appele"
+  local u
+  for u in useradd adduser; do
+    printf '%s\n' '#!/usr/bin/env bash' \
+      "printf '%s %s\n' \"\$0\" \"\$*\" >> '$mouchard'" \
+      'exit 0' > "$bin/$u"
+    chmod 0755 "$bin/$u"
+  done
+
+  # Un humain NOMME et ABSENT : c'est le seul etat ou l'ancienne version creait un compte, donc le
+  # seul ou ce temoin mesure quelque chose. Sur un compte existant il n'y aurait rien a creer et le
+  # temoin serait vert sans avoir rien exerce.
+  PATH="$bin:$PATH" run env PROV_FLEET_HUMAN="n-existe-pas-$$" \
+    PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+    PROVISION_MODULE=22-fleet-human PROV_TOKENS_DIR="$BATS_TEST_TMPDIR" \
+    PROV_FLEET_GROUP="$(id -gn)" PROV_HUMAN="$(id -un)" PATH="$bin:$PATH" \
+    bash "$SRC" apply
+
+  [ ! -e "$mouchard" ] || { echo "createur APPELE : $(cat "$mouchard")"; return 1; }
+}
+
+@test "TEMOIN DU TEMOIN : le mouchard attrape bien un createur, quel que soit le detour" {
+  # ⚠ SANS CE PENDANT, UN MOUCHARD QUI N'ATTRAPE RIEN PASSE POUR UNE ABSENCE DE CREATION. On lui
+  # donne les trois formes qui contournaient le motif de texte, et il doit voir les trois.
+  local bin="$BATS_TEST_TMPDIR/probe"; mkdir -p "$bin"
+  local mouchard="$BATS_TEST_TMPDIR/probe.log"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "printf 'vu %s\n' \"\$*\" >> '$mouchard'" 'exit 0' > "$bin/useradd"
+  chmod 0755 "$bin/useradd"
+
+  # `$( … )` et un WRAPPER qui exec depuis le PATH — deux des trois formes qui passaient le motif.
+  # `env` tient lieu de `runuser`/`sudo` : meme mecanique (un programme qui en exec un autre), et il
+  # existe partout, la ou une doublure de `runuser` ajouterait un decor a debugger.
+  PATH="$bin:$PATH" bash -c 'r=$(useradd -m a); env useradd -m b'
+  [ -f "$mouchard" ]
+  [ "$(grep -c '^vu ' "$mouchard")" -eq 2 ]
 }
 
 @test "le geste manuel reste PROPOSE dans le verdict — on retire le createur, pas la sortie de secours" {

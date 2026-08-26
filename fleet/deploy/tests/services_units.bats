@@ -304,13 +304,25 @@ time.sleep(120)
 # ⚖ USER 2026-08-25 : « le convergeur il poll a 30s par defaut pour pas spoof le reseau, mais ya quoi
 # qui t'empeche de le declencher une fois a la main juste apres avoir seme l'user sur la forge ? et
 # qu'est-ce qui t'empeche de verifier que l'user est cree cote unix avant de rendre la main ? »
-stub_converger() { # stub_converger <rc>  → un convergeur qui journalise son env et rend <rc>
+# ⚠ LA DOUBLURE NE CREAIT PERSONNE, ET LE TEMOIN ASSERAIT « MATERIALISE ». Premiere version : elle
+# journalisait son env et sortait. Le decor semait l'humain DEJA dans le passwd, puis le temoin
+# verifiait que le message dit « materialise » — il fixait donc exactement l'etat que le defaut
+# produit, et ne pouvait pas distinguer « cree par cette passe » de « la depuis un autre run ».
+#
+# Une doublure de convergeur doit pouvoir CREER : c'est son metier, et c'est la seule chose qui
+# separe les deux phrases. Elle ecrit dans le `PASSWD_FILE` du decor — chemin cuit dans le script,
+# parce que `env -i` coupe l'heritage et que la doublure ne le recevrait pas autrement.
+stub_converger() { # stub_converger <rc> [<ligne passwd a creer>…]
   export LCARS_HUMAN_CONVERGER="$BATS_TEST_TMPDIR/conv.sh"
   CONV_ENV="$BATS_TEST_TMPDIR/conv.env"
-  printf '%s\n' '#!/usr/bin/env bash' \
-    "env | sort > '$CONV_ENV'" \
-    "printf 'ARGS=%s\n' \"\$*\" >> '$CONV_ENV'" \
-    "exit $1" > "$LCARS_HUMAN_CONVERGER"
+  local rc="$1"; shift
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' "env | sort > '$CONV_ENV'"
+    printf '%s\n' "printf 'ARGS=%s\\n' \"\$*\" >> '$CONV_ENV'"
+    local l; for l in "$@"; do printf '%s\n' "printf '%s\\n' '$l' >> '$PASSWD_FILE'"; done
+    printf '%s\n' "exit $rc"
+  } > "$LCARS_HUMAN_CONVERGER"
   chmod 0755 "$LCARS_HUMAN_CONVERGER"
 }
 
@@ -322,6 +334,22 @@ humans_are() {
   printf 'siege:x:1000:1000::/home/siege:/bin/bash\n' >> "$PASSWD_FILE"
   local l; for l in "$@"; do printf '%s\n' "$l" >> "$PASSWD_FILE"; done
   export LCARS_SYSADMIN_UID=1000
+}
+
+# ⚠ `! grep -q …` N'EST PAS UNE ASSERTION TANT QU'IL N'EST PAS LA DERNIERE INSTRUCTION. Bash exempte
+# d'`errexit` toute commande niee par `!` : la ligne s'execute, echoue, et le test continue jusqu'a
+# la suivante. Mesure : `! grep -q '^PROV_TOKENS_DIR='` suivi d'un second `! grep` etait INERTE — en
+# reinjectant `PROV_TOKENS_DIR` dans l'`env -i` du module, le temoin restait VERT alors que
+# l'isolation qu'il garde etait violee. C'est le meme piege que dans `human_converger.bats`, et je
+# l'avais ecrit dans le brief de relecture avant de le commettre ici.
+#
+# Un appel de fonction, lui, EST soumis a `errexit`. La negation vit donc dans la fonction.
+absent_de_l_env() { # absent_de_l_env <motif ancre>
+  if grep -q "$1" "$CONV_ENV"; then
+    echo "FUITE : « $1 » present dans l'environnement de la passe, alors que le daemon ne l'aura jamais"
+    return 1
+  fi
+  return 0
 }
 
 @test "convergeur ABSENT : on le DIT, et ce n'est pas un echec d'apply" {
@@ -358,19 +386,52 @@ humans_are() {
   grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/fleet/deploy/provision$" "$CONV_ENV"
   # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
   # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.
-  ! grep -q '^PROV_TOKENS_DIR=' "$CONV_ENV"
-  ! grep -q '^PROV_SUBSTRATE=' "$CONV_ENV"
+  absent_de_l_env '^PROV_TOKENS_DIR='
+  absent_de_l_env '^PROV_SUBSTRATE='
 }
 
-@test "un humain MATERIALISE est NOMME — on verifie le FAIT, pas le code de retour" {
-  # Le convergeur peut rendre 0 sans avoir converge personne : une team vide EST un resultat valide.
-  # Ce qui se verifie est donc la population, avec la regle de GUARD B.
+# ─── CREE PAR CETTE PASSE, OU DEJA LA : DEUX ETATS, DEUX PHRASES ────────────────────────────────
+#
+# ⚠ LE MODULE PROUVAIT LA PRESENCE ET ANNONCAIT LA CREATION. `fleet_humans` balaie `/etc/passwd` :
+# il repond « qui peut lancer une fleet », une question VOISINE, vraie independamment de la passe.
+# Sur un RE-ROLL — le cas normal — `lcars` survit d'une install precedente, et la ligne disait
+# « materialise » meme si le convergeur n'avait rien fait.
+#
+# ⚖ USER 2026-08-25, la question exacte : « qu'est-ce qui t'empeche de verifier que l'user est CREE
+# cote unix avant de rendre la main ? » — cree, pas present.
+#
+# ⚠ ET LES DEUX MESSAGES CONTIENNENT LE MOT « materialise ». Assertion sur le mot = tautologie ;
+# c'est ce qui a laisse passer la premiere version. On assere le SEGMENT exact, et le PREFIXE de
+# ligne — `POSÉ` pour une mutation, `OK` pour un constat — que rien ne mesurait non plus.
+
+@test "un humain CREE PAR CETTE PASSE est annonce comme tel, et compte comme une mutation" {
+  # Le decor part d'une machine SANS humain, et la doublure en cree un : c'est la seule forme qui
+  # distingue les deux etats.
+  humans_are
+  stub_converger 0 'lcars:x:1001:1001::/home/lcars:/bin/bash'
+  mod apply
+  [ "$status" -eq 0 ]
+  # ⚠ SUR LA LIGNE, PAS SUR TOUTE LA SORTIE. Un glob `*"POSÉ"*"lcars"*` traverse les sauts de ligne :
+  # il serait vert grace a un `POSÉ` d'unite systemd et a un `lcars` de nom de service, sans que la
+  # ligne qui nous interesse existe. `grep` ancre au debut de ligne mesure la BONNE ligne.
+  # `POSÉ`, pas `OK` : un compte qui n'existait pas il y a trois secondes est une mutation, et une
+  # mutation `p_chg`→`p_ok` laissait les trente temoins verts.
+  printf '%s\n' "$output" | grep -qE '^POSÉ .*matérialisé\(s\) PAR CETTE PASSE : lcars'
+}
+
+@test "un humain DEJA LA n'est pas annonce comme cree — le cas du RE-ROLL" {
+  # ⚠ LE TEMOIN QUI MANQUAIT, ET SANS LEQUEL LE PRECEDENT NE PROUVE RIEN. Le decor porte deja
+  # l'humain, la doublure ne cree personne : si le module s'attribuait la population trouvee, c'est
+  # ICI que ca se voit, et nulle part ailleurs.
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   stub_converger 0
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"matérialisé"* ]]
-  [[ "$output" == *"lcars"* ]]
+  [[ "$output" != *"PAR CETTE PASSE"* ]]
+  # Un CONSTAT, pas une mutation : la ligne porte `OK`, jamais `POSÉ`. Meme raison qu'au temoin
+  # precedent — l'ancrage est sur la ligne, sinon un `POSÉ` d'unite systemd suffit a la rendre verte.
+  printf '%s\n' "$output" | grep -qE '^OK .*déjà présent\(s\) : lcars'
+  ! printf '%s\n' "$output" | grep -qE '^POSÉ .*(déjà présent|lcars.*matérialis)'
 }
 
 @test "AUCUN humain a materialiser n'est PAS une faute — zero et vide se distinguent" {
@@ -382,6 +443,80 @@ humans_are() {
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"aucun humain à matérialiser"* ]]
+  # ⚠ LA SEVERITE SE MESURE AUSSI. Une mutation `p_ok`→`p_warn` sur cette branche laissait les
+  # trente temoins verts : en production, une forge dont la team se remplit encore verrait un WARN
+  # a chaque apply — du bruit permanent sur un etat normal.
+  [[ "$output" != *"WARN"*"aucun humain"* ]]
+}
+
+@test "un humain NOMME que rien n'a materialise est un DRIFT — pas « la team est vide »" {
+  # ⚠ « ce n'est pas une faute » EST VRAI QUAND PERSONNE N'A RIEN DEMANDE, et devient un mensonge
+  # des que l'operateur a tape `--fleet-human bob` : il a nomme, et il repart sans bob.
+  #
+  # Le cas qui mord n'est pas exotique : `48-forge-host` derive si `tofu` manque, mais la forge est
+  # DEBOUT (le compose a reussi). Le convergeur l'interroge, obtient une team vide, rend 0 — et sans
+  # cette garde le module concluait « ce n'est pas une faute » alors que la cause est vingt rangs
+  # plus haut. Une cause fausse coute plus cher a celui qui debugge que pas de cause du tout.
+  humans_are
+  stub_converger 0
+  PROV_FLEET_HUMAN=bob mod apply
+  [ "$status" -eq 2 ]     # applique, drift residuel
+  [[ "$output" == *"« bob » a été NOMMÉ et rien ne l'a matérialisé"* ]]
+  [[ "$output" == *"48-forge-host"* ]]
+}
+
+@test "un humain NOMME et BIEN materialise ne derive pas — le pendant du precedent" {
+  # Sans lui, une garde qui deriverait TOUJOURS des qu'un nom est pose passerait le temoin ci-dessus.
+  humans_are
+  stub_converger 0 'bob:x:1001:1001::/home/bob:/bin/bash'
+  PROV_FLEET_HUMAN=bob mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"a été NOMMÉ et rien"* ]]
+}
+
+@test "un environnement de services NON POSE arrete l'apply AVANT la passe — pas de garde en double" {
+  # ⚠ CE TEMOIN A FAILLI GARDER UNE GARDE INATTEIGNABLE. Une relecture demandait un `[[ -r ]]` avant
+  # la passe, au motif qu'un fichier absent rend le meme rc=1 qu'une dependance manquante. Vrai en
+  # soi — mais `apply()` ECRIT ce fichier plus haut et sort en `p_fail` si l'ecriture rate, donc
+  # l'etat n'existe pas au moment de la passe. Ce qui se mesure est donc l'INVARIANT qui rend la
+  # garde inutile : une ecriture ratee arrete l'apply, et la passe n'est jamais tiree.
+  humans_are
+  stub_converger 0
+  # Le repertoire de l'environnement est remplace par un FICHIER : `ensure_dir` ne peut pas le creer.
+  rm -rf "$BATS_TEST_TMPDIR/etc/lcars"
+  : > "$BATS_TEST_TMPDIR/etc/lcars"
+  mod apply
+  [ "$status" -ne 0 ]
+  # La passe n'a pas ete tiree : la doublure n'a jamais tourne.
+  [ ! -f "$BATS_TEST_TMPDIR/conv.env" ]
+}
+
+# ─── LA SONDE D'HUMAINS DU CHECK — LE TROU DE LA BOITE ──────────────────────────────────────────
+#
+# ⚠ SUR UNE BOITE DE PRODUCTION, AUCUN MODULE NE VERIFIAIT QU'IL EXISTE UN HUMAIN. `22-fleet-human`
+# et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont meme pas SELECTIONNES.
+# Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait en `p_warn` des
+# l'absence de systemd, AVANT toute sonde. Un `provision doctor` sur une boite annoncait donc 0
+# faute pendant que GUARD B aurait refuse tout `fleet_v2 start`, faute de compte.
+
+@test "check SANS systemd sonde quand meme la population — le cas exact de la boite" {
+  # Le decor coupe systemd : c'est le chemin de la boite, et c'est celui ou la sonde manquait.
+  humans_are
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  mod check
+  [ "$status" -eq 1 ]     # check : 1 = DRIFT
+  [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
+  [[ "$output" == *"GUARD B"* ]]
+}
+
+@test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {
+  # ⚠ LE PENDANT, ET SANS LUI LA SONDE POURRAIT DERIVER TOUJOURS. Elle sort avant la branche
+  # systemd : si elle rougissait sur une machine saine, tout doctor de boite deviendrait rouge.
+  humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  mod check
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars'
 }
 
 @test "rc 2 (configuration absente) : DRIFT residuel, JAMAIS un echec d'apply" {

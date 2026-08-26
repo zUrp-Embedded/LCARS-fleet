@@ -582,9 +582,16 @@ done
 # ─── SECOND PASSAGE : L'ÉTAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────────
 # `--human` désigne QUI joue les modules `# NEEDS: human`, et sur le rail poste c'est l'opérateur
 # (SUDO_USER) — c'est-à-dire, presque toujours, le compte uid 1000 que GUARD B réserve au siège.
-# `22-fleet-human` vient de créer l'humain de fleet ; sans ce passage, son `~/.lcars`, son `~/pods`
-# et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start` échouerait sous lui pour une
-# raison sans rapport avec ce qu'on a passé la nuit à corriger.
+# ⚠ CETTE PHRASE DISAIT « `22-fleet-human` vient de créer l'humain de fleet », ET ELLE EST FAUSSE
+# DEPUIS LE 2026-08-25. `22` NOMME ; `48-forge-host` sème le compte sur la forge ; `64-services`
+# tire le convergeur, qui matérialise le compte ET joue lui-même les modules `NEEDS: human` pour lui
+# (`converge_human` fait `provision apply --human <login> --only …`). Un lecteur qui dérivait de
+# cette phrase le moment où l'état per-humain apparaît cherchait au rang 22 ce qui se passe au 64.
+#
+# CE PASSAGE-CI RESTE, ET IL SERT L'AUTRE CAS : l'humain nommé avec `--fleet-human`. Sans lui, son
+# `~/.lcars`, son `~/pods` et son `fleet_v2.env` dépendraient entièrement d'un convergeur qui peut
+# être absent ou dériver — et `fleet_v2 start` échouerait sous lui pour une raison sans rapport avec
+# ce qu'on a passé la nuit à corriger. Les deux chemins sont idempotents et se recouvrent.
 #
 # LA LISTE SE CALCULE, ELLE NE SE RECOPIE PAS — même règle et même code que `converge_human` du
 # convergeur de boîte : le provisionnement DÉCLARE lesquels de ses modules sont per-humain

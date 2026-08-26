@@ -148,6 +148,32 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$bad" -eq 0 ]
 }
 
+# ⚠ AUCUN ACCENT GRAVE DANS CE TITRE, ET CE N'EST PAS UN CHOIX DE STYLE. Depuis bats 1.11 le nom
+# d'un test est evalue par le shell : la premiere version disait « borne un chemin sur `:` » et
+# EXECUTAIT `:` au chargement du fichier. Inoffensif ici, interdit partout — le gate porte une regle
+# `bats.descriptions_inert` pour exactement ca, et je venais de l'enfreindre en la connaissant.
+@test "le scraper BORNE un chemin sur le deux-points — un PATH= n'est pas un objet a declarer" {
+  # ⚠ LA CORRECTION QUI A OUVERT CE TEMOIN N'EN AVAIT AUCUN. `64-services` donne a la passe de
+  # convergence le `PATH` que systemd pose par defaut, en litteral. La classe d'exclusion de `posed()`
+  # ne contenait pas `:` : la sonde accrochait `/usr/local/bin` puis avalait toute la suite, et
+  # reclamait la declaration d'un objet nomme « /usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin ».
+  #
+  # ⚠ ET ON NE MESURE PAS SUR LE DEPOT. Le corriger en lisant les fichiers reels ferait un temoin
+  # vert le jour ou plus personne n'ecrit de `PATH=` — donc un temoin qui s'eteint tout seul. On lui
+  # donne son propre echantillon, et on verifie les DEUX moities : le separateur borne, et le chemin
+  # simple reste attrape.
+  local ech; ech="$BATS_TEST_TMPDIR/echantillon.sh"
+  printf '%s\n' 'env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin cmd' \
+                'install -d /run/lcars/quelque-chose' > "$ech"
+  local vus; vus="$(code() { cat "$ech"; }; posed)"
+
+  # Le PATH ne produit AUCUN objet a rallonge…
+  ! grep -q ':' <<<"$vus"
+  # …et le chemin simple qu'il contient est quand meme vu, comme le chemin ordinaire d'a cote.
+  grep -qx '/usr/local/bin' <<<"$vus"
+  grep -qx '/run/lcars/quelque-chose' <<<"$vus"
+}
+
 @test "ISO 2/2 : tout objet DECLARE a un poseur dans le code" {
   # Le sens qui attrape une declaration morte — la faute exacte du corpus d'alice, qui declarait
   # `/etc/tmpfiles.d/lcars.conf` quand le fichier pose s'appelle `lcars-console.conf`.
