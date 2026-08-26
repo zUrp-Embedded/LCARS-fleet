@@ -170,7 +170,7 @@ check_master_authority() {
 # Le CONTENU n'est jamais touché ici — seulement `chmod`/`chgrp`. Un module qui réécrirait un
 # secret pour en corriger le mode pourrait le perdre.
 converge_authority_modes() {
-  local f cur want="root:root"
+  local f cur want="$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER"
 
   # ⚠ CE MODE N'EST PLUS UN GATE, ET C'EST LE FOND DU CHANGEMENT. Il l'a été : le jeton était
   # `0640 root:<groupe admin>` parce que le geste tournait sous l'uid de l'humain, donc DÉTENIR le
@@ -190,12 +190,12 @@ converge_authority_modes() {
       if [[ "$PROV_MODE" == "check" ]]; then
         p_drift "$f est $cur — attendu 600 $want (aucun process d'humain ne doit pouvoir le lire)"
       else
-        chown root:root "$f" && chmod 0600 "$f" \
-          && p_chg "$f -> 0600 root:root (seul le service de catalogue l'ouvre)" \
+        chown "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" "$f" && chmod 0600 "$f" \
+          && p_chg "$f -> 0600 $want (seul le service d'autorite l'ouvre)" \
           || p_fail "$f : mode non convergé"
       fi
     else
-      [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0600 root:root)"
+      [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0600 $want)"
     fi
   done
 
@@ -533,7 +533,7 @@ apply() {
   # autre outil a bien voulu ecrire. Mesure sur instance vierge, 2026-08-19 : dix comptes en 401
   # avec le fichier, et PATCH 200 / basic-auth 200 / token minte par cette voie.
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-      --passwords-file "$PROV_PASSWORDS_FILE" --group "$PROV_FLEET_GROUP" \
+      --passwords-file "$PROV_PASSWORDS_FILE" --owner "$PROV_AUTHORITY_USER" \
       ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
       --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))

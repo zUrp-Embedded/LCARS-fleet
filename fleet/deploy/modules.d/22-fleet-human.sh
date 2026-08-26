@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/22-fleet-human.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
-# STATUS: PROTO-V2 — l'humain de fleet du POSTE : un compte unix qui n'est pas le siège
+# STATUS: PROTO-V2 — l'humain de fleet du POSTE : il le NOMME, la forge le sème, le convergeur le pose
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
@@ -33,17 +33,35 @@
 # « the landing — a DIFFERENT uid holding the console group — must open it ». Son identité, à lui,
 # c'est son compte de FORGE : le deck s'ouvre sur un login forge, pas sur un uid.
 #
-# ─── CE MODULE N'EST PAS UN CONVERGEUR D'HUMAINS ───────────────────────────────────────────────
-# Dans la boîte, `human-converger.sh` matérialise N humains inconnus depuis la team `humans` de la
-# forge, et il continue de le faire. Ici il y a UN poste, UN humain de fleet, et la forge n'existe
-# pas forcément encore quand ce module tourne (48-forge-host peut dériver). Ce module pose donc le
-# compte, rien d'autre — pas de roster, pas de boucle, pas de révocation.
+# ─── CE MODULE NOMME. IL NE CRÉE PLUS. ─────────────────────────────────────────────────────────
+# ⚖ QUESTION USER 2026-08-25, posée plusieurs fois : « pourquoi on n'utilise pas le convergeur pour
+# créer les humains à l'install ? on crée l'humain sur la forge, et on fait tourner le convergeur.
+# ya une bonne raison pour ne pas faire ça ? »
 #
-# ⚠ IL DÉRIVE, IL N'ÉCHOUE PAS. Un `useradd` refusé n'est pas une machine cassée : c'est un geste
-# qui manque, et tout le reste du provisionnement est déjà posé quand on arrive ici. Un échec ferait
+# Il n'y en avait pas. Ce module portait son propre `useradd`, et la boîte a le sien dans
+# `human-converger.sh` : DEUX créateurs pour un même objet, donc deux jeux de règles d'uid, de shell
+# et de groupe qui ne dérivent pas au même rythme. Le rail poste testait alors un chemin que la
+# production n'emprunte jamais — l'inverse exact de ce qu'un poste de démo doit prouver.
+#
+# CE QUE FAIT CE MODULE MAINTENANT : il NOMME l'humain, et il vérifie. `48-forge-host` sème le compte
+# sur la forge (la recette tofu l'ajoute déjà à la team `humans`), `64-services` déclenche le
+# convergeur UNE FOIS en synchrone après l'avoir semé, et le compte unix apparaît par le SEUL chemin
+# qui existe aussi en production. Un seul créateur, un seul jeu de règles, un seul endroit à corriger.
+#
+# ⚠ ET LE PRÉ-SEMIS RESTE, PARCE QU'IL A UNE RAISON. ⚖ USER 2026-08-25 : « lcars, l'idée derrière,
+# c'est de livrer out of the box un user "fleet enabled", par confort puisqu'on verrouille admin hors
+# de la fleet. le poste/bench c'est pour la démo, le test, l'évaluation ou le dev, il faut que ça
+# démarre directement. en prod (le mode boîte), on peut se passer de pré-seed un user (…) et
+# l'inscription reste ouverte sur la forge, donc les users peuvent s'enrôler eux-mêmes. »
+#
+# D'où `APPLY-ON: wsl linux` : la boîte ne joue pas ce module, et n'a personne à nommer. Le confort
+# est pour le poste ; le mécanisme est le même partout.
+#
+# ⚠ IL DÉRIVE, IL N'ÉCHOUE PAS. Un compte absent n'est pas une machine cassée : c'est un geste qui
+# manque, et tout le reste du provisionnement est déjà posé quand on arrive ici. Un échec ferait
 # rendre 1 à l'apply entier — la faute exacte que `52-ops-branch` portait le même jour.
 #
-# Données : PROV_FLEET_HUMAN (défaut `lcars`) · PROV_FLEET_GROUP · LCARS_SYSADMIN_UID
+# Données : PROV_FLEET_HUMAN (aucun défaut — le nommer EST la validation) · PROV_FLEET_GROUP
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -62,29 +80,16 @@ set -euo pipefail
 # sur ce parc les humains s'appellent `vanille`, `bob`, `alice`. Sans ce drapeau, le module ne crée
 # RIEN et dérive en nommant le geste exact.
 FLEET_HUMAN="${PROV_FLEET_HUMAN:-}"
-FLEET_SHELL="${PROV_FLEET_HUMAN_SHELL:-/bin/bash}"
 
-# LE PLANCHER D'UID SE DÉRIVE, IL NE S'ÉCRIT PAS. `is_fleet_human` exige `uid >= UID_MIN` ET
-# `uid != LCARS_SYSADMIN_UID` : le premier uid acceptable est donc juste au-dessus du plus grand des
-# deux. Recopier « 1001 » ici en ferait un troisième exemplaire d'un nombre que le système et la lib
-# déclarent déjà — et il serait faux le jour où l'un des deux bouge.
-fleet_uid_floor() {
-  local uid_min sysadmin
-  uid_min="$(awk '/^UID_MIN/ {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
-  [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
-  sysadmin="${LCARS_SYSADMIN_UID:-1000}"
-  (( uid_min > sysadmin )) && { echo "$uid_min"; return 0; }
-  echo "$(( sysadmin + 1 ))"
-}
-
-# Le premier uid LIBRE au-dessus du plancher. On ne le laisse pas à `useradd` : son propre choix
-# part de UID_MIN, donc il rendrait l'uid du siège si celui-ci était libre — exactement le compte
-# qu'on ne veut pas créer.
-first_free_uid() {
-  local uid; uid="$(fleet_uid_floor)"
-  while getent passwd "$uid" >/dev/null 2>&1; do uid=$(( uid + 1 )); done
-  echo "$uid"
-}
+# ⚠ LE PLANCHER D'UID VIVAIT ICI, IL VIT MAINTENANT DANS `human-converger.sh` (`uid_floor`,
+# `first_free_uid`), AVEC SES TÉMOINS. Ce module ne crée plus de compte — il NOMME, et la forge plus
+# le convergeur matérialisent — donc garder ici le calcul qui garde `useradd` en aurait fait un
+# deuxième exemplaire d'une règle appliquée ailleurs : celui qu'on lit quand on cherche pourquoi un
+# uid surprend, et celui qu'on corrige sans rien changer. Le garde déménage avec le geste qu'il garde.
+#
+# `PROV_FLEET_HUMAN_SHELL` est mort avec : ce module le lisait sans jamais s'en servir, et personne
+# d'autre ne le posait. Le shell se règle là où le compte se crée — `LCARS_HUMAN_SHELL`, chez le
+# convergeur. Deux noms pour un même réglage, dont un inerte, c'est celui qu'on tourne pour rien.
 
 # ─── LE MESSAGE EST PARTAGÉ, LE VERDICT NE L'EST JAMAIS ─────────────────────────────────────────
 #
@@ -144,15 +149,28 @@ announce_no_fleet_human() {
   fi
 }
 
-check() {
+# ─── OBSERVER N'EST PAS JUGER ───────────────────────────────────────────────────────────────────
+#
+# ⚠ CETTE SÉPARATION EST LA CONTRAINTE DU HAUT DE FICHIER, ENFIN ÉCRITE EN CODE. `apply()` finissait
+# par `check`, et `check` finit par `verdict_check` — qui `exit`, et dont le `1` veut dire DRIFT
+# quand le `1` d'un apply veut dire ÉCHEC. Le module rendait donc son verdict dans le mauvais
+# dialecte, et le runner le traduisait fidèlement en panne.
+#
+# ⚠ ET LE DÉFAUT VENAIT DE DEVENIR CERTAIN. Tant que ce module créait le compte, `check` le trouvait
+# juste après ; depuis qu'il ne fait que NOMMER, le compte est TOUJOURS absent au rang 22 d'une
+# install neuve — la délégation aurait donc fait échouer l'apply à chaque fois. Un défaut latent que
+# le changement voisin arme : c'est exactement ce qui ne se voit pas en relisant le diff.
+#
+# Ce qui suit n'a donc pas de verdict : il DÉCRIT, chaque verbe conclut.
+observe() {
   local uid
   if [[ -z "$FLEET_HUMAN" ]]; then
     announce_no_fleet_human
-    verdict_check
+    return 0
   fi
   if ! uid="$(id -u -- "$FLEET_HUMAN" 2>/dev/null)"; then
-    p_drift "humain de fleet « $FLEET_HUMAN » absent — l'apply le CRÉERA (tu l'as nommé, donc autorisé)"
-    verdict_check
+    p_drift "humain de fleet « $FLEET_HUMAN » absent — la forge posera son compte (48) et le convergeur le matérialisera (64) ; « 64-services » vérifie avant de rendre la main"
+    return 0
   fi
   if is_fleet_human "$FLEET_HUMAN"; then
     p_ok "humain de fleet « $FLEET_HUMAN » (uid $uid) — il peut lancer la fleet"
@@ -166,8 +184,11 @@ check() {
   else
     p_drift "« $FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /home/private ni les zones de face"
   fi
-  verdict_check
 }
+
+# UNE SONDE JUGE LA MACHINE MAINTENANT. Un compte absent est ici une vraie dérive : `check` se joue
+# APRÈS l'install, quand 48 et 64 sont passés.
+check() { observe; verdict_check; }
 
 apply() {
   # ⚠ SANS NOM, L'APPLY NE CRÉE RIEN — il dit la même chose que le check et s'arrête. C'est le seul
@@ -179,19 +200,47 @@ apply() {
   # `verdict_check` fait un `exit`. Détail des deux dialectes dans `announce_no_fleet_human`.
   [[ -n "$FLEET_HUMAN" ]] || { announce_no_fleet_human; verdict_apply; }
 
+  # ─── CE MODULE NE CRÉE PLUS DE COMPTE UNIX, ET C'EST LE POINT ───────────────────────────────
+  #
+  # ⚠ IL Y AVAIT DEUX CRÉATEURS D'HUMAIN DE FLEET, ET ILS DIVERGEAIENT DÉJÀ.
+  #     22-fleet-human    useradd -u … -g "$PROV_FLEET_GROUP"   → groupe primaire = fleet
+  #     human-converger   useradd … (aucun -g)                  → groupe privé
+  # Mesuré sur une install réelle le 2026-08-25 : `lordzurp` en gid `fleet`, `lcars` en gid 1004.
+  # Sans conséquence ce jour-là — mais c'est la classe exacte qui a fait tomber trois modules deux
+  # heures plus tôt (`useradd -g <groupe existant>` ne crée AUCUN groupe du nom du compte).
+  #
+  # ⚠ ET SURTOUT : LE RAIL POSTE N'EXERÇAIT PAS LE CHEMIN DE PROD. En mode boîte — le seul cas de
+  # production — ni ce module ni `48-forge-host` ne tournent (`APPLY-ON: wsl linux`) : l'humain y est
+  # matérialisé par le convergeur, depuis la team `humans` de la forge, exclusivement. Le poste en
+  # avait une SECONDE version, unix-first, qui n'existait que pour choisir le nom en ligne de
+  # commande. Tester un mécanisme qui ne tourne pas en production est la classe de défaut que ce
+  # dépôt traque partout ailleurs, appliquée à son propre rail d'install.
+  #
+  # ⚖ CE QUI EST GARDÉ, PARCE QUE C'EST LE MÉTIER DU RAIL POSTE : le PRÉ-SEMIS. Une machine de démo,
+  # de test, d'évaluation ou de dev doit démarrer avec un humain « fleet enabled » sans geste manuel
+  # — l'admin étant verrouillé hors de la fleet, sans lui il n'y aurait personne à lancer. En
+  # production ce pré-semis n'a pas lieu d'être : l'admin a déjà testé, il ne veut pas d'un intrus
+  # dans sa liste d'utilisateurs, et l'inscription reste ouverte sur SA forge.
+  #
+  # Ce qui change n'est donc pas le pré-semis, c'est son SENS : le nom part vers la forge
+  # (`48-forge-host` lit `PROV_FLEET_HUMAN`, la recette pose le compte ET son adhésion à `humans` —
+  # `gitea_team_membership.human`), puis le convergeur le matérialise ici. Une différence de
+  # DONNÉES entre les deux rails — un membre de plus dans la team — au lieu d'une différence de
+  # MÉCANISME.
+  #
+  # Et la matérialisation ne se devine pas : `64-services` tire le convergeur en `--once` et VÉRIFIE
+  # qu'un humain de fleet existe avant que l'install rende la main.
+  # ⚠ UN APPLY NE DÉRIVE PAS SUR UN COMPTE QUI N'EST PAS ENCORE DÛ. Au rang 22 d'une install neuve
+  # le compte est TOUJOURS absent — 48 le sème, 64 le matérialise et le VÉRIFIE. Le signaler ici
+  # ferait imprimer une dérive à chaque install sur un état parfaitement nominal, et une dérive qui
+  # sort toujours n'est plus lue. La sonde, elle, le compte comme une dérive : elle se joue après.
   if ! id -u -- "$FLEET_HUMAN" >/dev/null 2>&1; then
-    local uid; uid="$(first_free_uid)"
-    if useradd -u "$uid" -m -s "$FLEET_SHELL" -g "$PROV_FLEET_GROUP" -- "$FLEET_HUMAN" 2>/dev/null; then
-      PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "humain de fleet « $FLEET_HUMAN » créé (uid $uid, groupe $PROV_FLEET_GROUP)"
-    else
-      p_drift "useradd « $FLEET_HUMAN » (uid $uid) a échoué — le poste reste sans humain de fleet"
-      verdict_apply
-    fi
+    p_ok "« $FLEET_HUMAN » nommé — la forge pose son compte (48), le convergeur le matérialise (64) : le même chemin qu'en production"
+    verdict_apply
   fi
 
-  # L'APPARTENANCE SE CONVERGE MÊME SUR UN COMPTE QUI EXISTAIT DÉJÀ : `useradd -g` ne vaut que pour
-  # une création, et un compte posé à la main (ou par une version antérieure) peut être hors groupe.
+  # LE COMPTE EXISTE DÉJÀ : re-passe, ou compte posé à la main. Le convergeur pose l'adhésion à la
+  # création (`useradd … -G`), donc ce qui reste ici est le rattrapage d'un compte qu'il n'a pas créé.
   if ! id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
     if usermod -aG "$PROV_FLEET_GROUP" -- "$FLEET_HUMAN" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
@@ -201,7 +250,8 @@ apply() {
     fi
   fi
 
-  check
+  observe
+  verdict_apply
 }
 
 case "${1:?usage: 22-fleet-human.sh <check|apply>}" in

@@ -63,6 +63,14 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 # seraient trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
 BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+# LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
+# et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
+# compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
+AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}"
+# Le groupe qui TRAVERSE `/home/private` — jamais celui qui lit. Meme defaut que partout ailleurs
+# dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
+# et la table diraient deux choses differentes du meme objet.
+FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
@@ -143,25 +151,49 @@ curl_cfg_escape() { local v="$1"; v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; printf '
 # fichiers) : un appel interrompu ne laisse jamais un demi-secret que le lecteur suivant prendrait
 # pour le vrai.
 put_secret() { # $1=chemin  $2=valeur
-  # `chown`/`-o root` ne sont tentes QUE si on est root. Tout appelant reel l'est (`docker exec
+  # `chown`/`-o` ne sont tentes QUE si on est root. Tout appelant reel l'est (`docker exec
   # -u root`), et un temoin ne l'est pas : conditionner ici evite une garde `|| true` qui
   # avalerait un vrai echec de propriete sur une boite.
+  #
+  # ⚠ LE REPERTOIRE COMPTE AUTANT QUE LES FICHIERS. Il naissait ici `0750 root:fleet` : fermer les
+  # secrets sans fermer leur repertoire ne fermait rien, parce que CE geste-ci le rouvrait au premier
+  # passage. Le groupe `fleet` etait une projection de l'equipe `humans` de la forge, refaite toutes
+  # les 30 s — donc une ACL a peremption de cache sur les deux secrets les plus puissants de la boite.
+  #
+  # ⚠ ET CE MEME GESTE A FAILLI REFERMER CE QUE LA TABLE OUVRE, DANS L'AUTRE SENS. Une premiere
+  # ecriture posait `0700 $AUTHORITY_USER:$AUTHORITY_USER` ici pendant que `system.manifest` et
+  # `25-directories` disaient `0710 …:fleet`. Le premier `put_secret` aurait REFERME le repertoire,
+  # en silence, et les trois modules `NEEDS: human` — qui lisent `forge.url` sous l'uid de l'humain —
+  # auraient recasse. Le gate ne peut pas voir ca : il n'execute pas ce geste contre une vraie table.
+  #
+  # LA REGLE, LA MEME DANS LES QUATRE POSEURS DE CE REPERTOIRE : le groupe TRAVERSE (`x`), il ne LIT
+  # jamais (`r`). Ce repertoire ne contient pas que des secrets — `forge.url` et `forge.public.url`
+  # y sont en 0644, et ce sont des adresses. Les secrets, eux, restent `0600` : c'est le MODE DU
+  # FICHIER qui les ferme, plus celui du repertoire.
   if [[ "$(id -u)" -eq 0 ]]; then
-    install -d -m 0750 -o root -g fleet "$PRIVATE_DIR"
+    install -d -m 0710 -o "$AUTHORITY_USER" -g "$FLEET_GROUP" "$PRIVATE_DIR"
   else
-    install -d -m 0750 "$PRIVATE_DIR"
+    install -d -m 0710 "$PRIVATE_DIR"
   fi
   local tmp="${1%/*}/.$(basename "$1").tmp"
   umask 077
   printf '%s\n' "$2" > "$tmp"
 
-  # ⚠ `0600 root:root`, SANS BRANCHE. Ce mode a ete un GATE : quand le geste tournait sous l'uid de
-  # l'humain, DETENIR le jeton etait la preuve du droit, donc il fallait l'ouvrir a un groupe qui
-  # portait `is_admin`. Le geste vit maintenant dans un service root qui pose la question a la forge
-  # a l'instant ou elle compte — plus personne n'a besoin de lire ce fichier.
+  # ⚠ `0600`, SANS BRANCHE SUR LE MODE. Ce mode a ete un GATE : quand le geste tournait sous l'uid
+  # de l'humain, DETENIR le jeton etait la preuve du droit, donc il fallait l'ouvrir a un groupe qui
+  # portait `is_admin`. Le geste vit maintenant dans un service qui pose la question a la forge a
+  # l'instant ou elle compte — plus personne n'a besoin de lire ce fichier.
   #
   # Une branche de moins, et c'est le point : un mode qui depend de l'identite de l'ecrivain donne
   # deux etats possibles au meme secret, et c'est celui qu'on n'a pas relu qui gagne.
+  #
+  # ⚠ LE PROPRIETAIRE ETAIT `root:root`, ET C'ETAIT UN DEFAUT VIVANT. Ce service N'EST PLUS ROOT
+  # depuis que le detenteur des secrets a perdu tout privilege noyau. Un appelant root qui minte
+  # par ici posait donc un jeton master que le service ne peut PAS ouvrir — et il refuse de demarrer
+  # sans lui. Dans un `provision apply` complet, `converge_authority_modes` (50-forge) reparait au
+  # module suivant ; appele seul — le verbe `forge-apply` de l'entrypoint, ou `48-forge-host` sur le
+  # rail poste — rien ne reparait, et la boite se retrouve avec un secret qu'elle a mais ne lit pas.
+  #
   # ⚠ UN `if`, PAS `[[ ]] && cmd`. Mesure : un AND-list dont le test est faux rend 1 ; c'est sans
   # effet au milieu d'une fonction, mais MORTEL sous `set -e` s'il en devient la derniere
   # instruction — la fonction rend 1 et l'appelant meurt sans un mot. Ce depot a deja paye ce piege
@@ -169,7 +201,7 @@ put_secret() { # $1=chemin  $2=valeur
   # surete depend de ce qui la suit.
   chmod 0600 "$tmp"
   if [[ "$(id -u)" -eq 0 ]]; then
-    chown root:root "$tmp"
+    chown "$AUTHORITY_USER:$AUTHORITY_USER" "$tmp"
   fi
   mv -f "$tmp" "$1"
 }
@@ -635,8 +667,15 @@ cmd_runner_token() {
 #
 # ⚠ CE FICHIER NE GATE PLUS RIEN, ET IL NE DOIT PAS ESSAYER. L'autorisation est prise EN AMONT, par
 # `catalogue-executor.py` : il lit l'uid du pair que le noyau pose sur sa socket, demande a la forge
-# si ce login y porte `is_admin`, et n'appelle ce geste que si la reponse est oui. Ce script tourne
-# donc toujours en root, appele par un service, jamais par un humain.
+# si ce login y porte `is_admin`, et n'appelle ce geste que si la reponse est oui. Ce script est donc
+# appele par un service, jamais par un humain.
+#
+# ⚠ ET CE SERVICE N'EST PLUS ROOT. La ligne d'avant disait « tourne donc toujours en root » ; c'est
+# faux depuis que le detenteur des secrets a perdu tout privilege noyau. Il tourne sous
+# `lcars-authority` — assez pour ouvrir les secrets qu'il possede, pas assez pour quoi que ce soit
+# d'autre. La consequence pratique est plus bas, dans `cmd_install` : les portes qui tombent en
+# `nobody` ne peuvent plus lire les fichiers de `/home/private`, donc ce qu'on leur passe est une
+# VALEUR, plus un chemin.
 #
 # Le mode du jeton a ete le gate — « la capacite EST la permission » — et c'est precisement ce qui
 # imposait un groupe unix, sa projection depuis `is_admin`, son cache et son rattrapage de derive.
@@ -667,16 +706,31 @@ cmd_install() {
   #    `UNREACHABLE {:config, {:token_file, …, :eacces}}` — un refus de permission presente comme
   #    « pas de source installable », c'est-a-dire le mauvais diagnostic pour le mauvais probleme.
   #
-  #    `<compte-systeme>.gitea_token` est `0640 root:fleet`, donc lisible par la porte, et c'est l'identite
-  #    juste : `$SYSTEM_ACCOUNT` (defaut `system_starfleet`) est le compte avec lequel la boite lit sa forge. Un depot de catalogue
-  #    est public par construction, donc ce jeton suffit — donner le site-admin a une lecture serait
-  #    lui accorder un pouvoir dont elle n'a aucun usage.
+  #    `$SYSTEM_ACCOUNT` (defaut `system_starfleet`) est l'identite juste : c'est le compte avec
+  #    lequel la boite LIT sa forge. Un depot de catalogue est public par construction, donc ce jeton
+  #    suffit — donner le site-admin a une lecture serait lui accorder un pouvoir dont elle n'a aucun
+  #    usage.
+  #
+  # ⚠ ON PASSE LA VALEUR, PLUS LE CHEMIN, ET C'EST UNE CASSE EVITEE DE JUSTESSE. Ce geste donnait
+  # `FORGE_TOKEN_FILE=<chemin>` a une porte qui tombe en `nobody:fleet` : ca ne marchait QUE parce
+  # que le fichier etait `0640 root:fleet`. En `0600 lcars-authority` — l'etat que ce chantier pose —
+  # la porte ne peut plus l'ouvrir, et `catalogue install` mourrait sur un `:eacces` presente comme
+  # « pas de source installable ». Exactement le mauvais diagnostic que les six lignes au-dessus
+  # racontent avoir deja paye une fois, sur ce meme fichier, pour le jeton master.
+  #
+  # CE PROCESS, LUI, PEUT LIRE : il EST le service d'autorite. Il lit et transmet la VALEUR par
+  # l'environnement — `/proc/<pid>/environ` n'est lisible que par le proprietaire du process et par
+  # root, alors qu'un argv est lisible par tout le monde. Meme canal, et meme raison, que
+  # `ForgeAuth.git_env` cote BEAM.
   local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
   [[ -r "$sys_token" ]] \
     || die "install: $sys_token illisible — la boite n'a pas encore de jeton systeme (« provision apply » le minte)"
+  local sys_tok_value; sys_tok_value="$(tr -d '[:space:]' < "$sys_token")"
+  [[ -n "$sys_tok_value" ]] \
+    || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
 
   local src rc=0
-  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN_FILE="$sys_token" \
+  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
          bash "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$src" >&2

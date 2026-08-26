@@ -50,8 +50,15 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
     * `:lcars_fleet, :admiral_toolchain_reconcile_interval_ms` — défaut `60_000`
     * `:lcars_fleet, :forge_client` — seam de lecture (`branch_head/3`)
-    * `:lcars_fleet, :toolchain_converger` — seam du geste (défaut : `sudo -n` sur le binaire)
-    * `:lcars_fleet, :toolchain_converger_bin` — défaut `/usr/local/bin/lcars-toolchain-converge`
+    * `:lcars_fleet, :toolchain_converger` — seam du geste (défaut : une demande sur
+      `toolchain.sock`, servie par `lcars-privileged`). Rend `{:ok, sha_appliqué}` ou
+      `{:error, cause}` ; `:ok` nu reste accepté pour les doublures de témoins.
+    * `:lcars_fleet, :toolchain_socket` — défaut `/run/lcars/privileged/toolchain.sock`
+
+  ⚠ `:toolchain_converger_bin` A DISPARU AVEC LE `sudo` QUI LE NOMMAIT. Ce module ne désigne plus
+  aucun binaire : il ne dit pas QUOI exécuter, ni sur QUOI — il ouvre une socket, et c'est le
+  service privilégié qui résout la tête de la branche protégée. Le nom du binaire vit chez lui,
+  qui est le seul à l'invoquer.
   """
 
   use GenServer
@@ -62,6 +69,14 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   @default_interval_ms 60_000
   @default_run_state "/run/lcars/toolchain"
+
+  # ⚠ DEUX DÉLAIS, ET ILS NE MESURENT PAS LA MÊME CHOSE. Ouvrir une socket unix locale est
+  # instantané ou impossible — cinq secondes suffisent, et au-delà c'est que l'unité ne répond pas.
+  # La CONVERGENCE, elle, installe des paquets : elle dure des minutes. Un délai unique aurait forcé
+  # à choisir entre « une porte morte fait attendre un quart d'heure » et « un `apt` normal est tué
+  # en plein vol », et le second se lit comme un convergeur cassé.
+  @socket_connect_ms 5_000
+  @converge_timeout_ms 30 * 60_000
 
   # ── API ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -316,8 +331,29 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # LE SHA N'EST NOTÉ QU'APRÈS UN SUCCÈS, et jamais avant. L'inverse — noter puis appliquer — ferait
   # d'un convergeur mort en route une boîte qui se croit à jour : le tick suivant verrait « pas
   # d'écart » et l'état approuvé resterait non appliqué, en silence, ce que tout ce rail refuse.
+  # ⚠ LE MARQUEUR PORTE LE SHA QUE LE SERVICE A APPLIQUÉ, PAS CELUI QU'ON AVAIT LU.
+  #
+  # Entre notre lecture de la tête et la résolution que le service fait de son côté, la branche a pu
+  # avancer — le rail EXISTE pour que des PR y atterrissent. Noter notre tête ferait croire la boîte
+  # à jour sur un état qu'elle n'a pas appliqué, et le tick suivant ne verrait AUCUN écart : la
+  # panne muette exacte que tout le reste de ce module refuse.
+  #
+  # `:ok` NU EST ENCORE ACCEPTÉ, et c'est pour les doublures de témoins qui ne rendent pas de SHA.
+  # Sur ce chemin le marqueur retombe sur la tête lue — correct pour un double, jamais atteint par
+  # le service réel, qui répond toujours `OK:<sha>`.
   defp run_converger(head) do
     case converger().(head, []) do
+      {:ok, applied} when is_binary(applied) and applied != "" ->
+        if applied != head do
+          Logger.info(
+            "ToolchainReconciler: la branche a avancé entre la lecture (#{head}) et la " <>
+              "convergence (#{applied}) — c'est l'état APPLIQUÉ qui est noté."
+          )
+        end
+
+        _ = write_marker(applied)
+        {:ok, :converged, applied}
+
       :ok ->
         _ = write_marker(head)
         {:ok, :converged, head}
@@ -342,17 +378,54 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # forge, toutes les 30 s — donc n'importe lequel de ses membres l'appelle sans passer par ici.
   # La propriété est tenue EN AVAL : le convergeur refuse désormais tout SHA qui n'est pas la tête
   # de `tool_request`. C'est là qu'elle vit, et là qu'elle se casse si on la retire.
-  defp default_converger(head, _opts) do
-    bin =
-      Application.get_env(
-        :lcars_fleet,
-        :toolchain_converger_bin,
-        "/usr/local/bin/lcars-toolchain-converge"
-      )
+  defp default_converger(_head, _opts) do
+    path =
+      Application.get_env(:lcars_fleet, :toolchain_socket) ||
+        System.get_env("LCARS_TOOLCHAIN_SOCKET") ||
+        "/run/lcars/privileged/toolchain.sock"
 
-    case System.cmd("sudo", ["-n", bin, head], stderr_to_stdout: true) do
-      {_out, 0} -> :ok
-      {out, code} -> {:error, {:converger_failed, code, String.slice(out, 0, 2000)}}
+    # ⚠ `{:local, path}` AVEC `0` EN PORT : la forme qu'Erlang exige pour AF_UNIX. Le zéro n'est pas
+    # un port — même idiome que `Fleet.Credentials.Authority` et le listener d'événements.
+    opts = [:binary, packet: :line, active: false]
+
+    case :gen_tcp.connect({:local, path}, 0, opts, @socket_connect_ms) do
+      {:ok, sock} ->
+        try do
+          read_converge_answer(sock, path)
+        after
+          :gen_tcp.close(sock)
+        end
+
+      {:error, reason} ->
+        # LA PORTE FERMÉE ET LA PORTE GARDÉE NE SE DISENT PAS PAREIL. Une socket absente est un fait
+        # SYSTÈME (l'unité ne tourne pas) ; un refus est une réponse. Les confondre envoie chercher
+        # une autorisation manquante alors qu'il manque un service.
+        {:error, {:privileged_unreachable, path, reason}}
+    end
+  end
+
+  # ⚠ RIEN N'EST ÉCRIT SUR LE FIL. La socket dit le verbe, la forge dit le contenu : ouvrir la
+  # connexion EST la demande. Un mot envoyé ici rouvrirait la seule surface par laquelle un appelant
+  # pourrait influer sur ce que root exécute.
+  defp read_converge_answer(sock, path) do
+    case :gen_tcp.recv(sock, 0, @converge_timeout_ms) do
+      {:ok, line} ->
+        case String.trim_trailing(line, "\n") do
+          "OK:" <> sha when byte_size(sha) > 0 ->
+            {:ok, sha}
+
+          "FAIL:" <> cause ->
+            {:error, {:converger_refused, cause}}
+
+          # ⚠ UNE LIGNE VIDE N'EST PAS UN SUCCÈS. Un service qui ferme avant de répondre rendrait
+          # une chaîne vide ; la lire comme « appliqué » noterait un SHA jamais posé, et le tick
+          # suivant ne verrait plus d'écart.
+          other ->
+            {:error, {:converger_mute, path, other}}
+        end
+
+      {:error, reason} ->
+        {:error, {:converger_mute, path, reason}}
     end
   end
 
@@ -421,7 +494,11 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   @doc false
   @spec default_converger_fun(String.t(), keyword()) ::
-          :ok | {:error, {:converger_failed, pos_integer(), binary()}}
+          {:ok, String.t()}
+          | {:error,
+             {:converger_refused, binary()}
+             | {:converger_mute, Path.t(), term()}
+             | {:privileged_unreachable, Path.t(), term()}}
   def default_converger_fun(head, opts), do: default_converger(head, opts)
 
   defp nil_if_empty(""), do: nil

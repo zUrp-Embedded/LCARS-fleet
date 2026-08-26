@@ -45,4 +45,20 @@ for {binary, tag} <- missing_prerequisites do
   )
 end
 
+# LE SERVICE D'AUTORITE, EN DOUBLE, POUR TOUTE LA SUITE.
+#
+# `Fleet.Credentials.RoleToken.token/1` ne lit plus `<dir>/<compte>.gitea_token` : il le DEMANDE a
+# `roles.sock`. Sans ce double, les ~170 temoins qui posent leurs jetons en ecrivant ces fichiers
+# echouent tous sur la meme cause — `:authority_unreachable` — c'est-a-dire sur l'ABSENCE DU BANC,
+# pas sur ce qu'ils mesurent.
+#
+# ⚠ UN SEUL PROCESS SUFFIT, ET C'EST UNE PROPRIETE, PAS UNE ECONOMIE. Le double resout
+# `:credentials_role_tokens_dir` A CHAQUE REQUETE, exactement comme le vrai service : chaque temoin
+# qui pose son propre `tmp` continue donc d'etre servi depuis SON repertoire, sans qu'aucune fixture
+# n'ait a changer. Ce qui a change est QUI ouvre le fichier — et c'etait tout l'objet du chantier.
+#
+# La course sur cette cle de config existait DEJA (`RoleToken.dir/0` la lisait dans le meme
+# `Application.get_env` global) : le double ne l'introduit pas, il en herite.
+_ = Fleet.Test.AuthorityDouble.start()
+
 ExUnit.start(exclude: Enum.map(missing_prerequisites, fn {_binary, tag} -> tag end))

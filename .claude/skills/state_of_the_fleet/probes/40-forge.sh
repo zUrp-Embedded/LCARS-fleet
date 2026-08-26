@@ -138,25 +138,32 @@ probe_human_account() {
 }
 
 # ── Les credentials dont JE dispose ───────────────────────────────────────────────────────────────
-# Presence and readability only — never the value, never a test call that would spend it. A report
-# ends up in a conversation log.
+#
+# ⚠ CETTE SONDE MESURAIT UN MECANISME RETIRE. Elle testait `-r "$FORGE_TOKEN_FILE"` et comptait les
+# `*.gitea_token` d'un repertoire : deux lectures qui ne repondent plus a la question posee. Le BEAM
+# ne lit plus ces fichiers, il DEMANDE a `roles.sock` ; et apres la fermeture des modes, un uid
+# humain ne pourra meme plus traverser le repertoire. La sonde aurait donc rendu « aucun credential
+# accessible » sur une boite parfaitement capable de pousser — un rouge faux, dans un rapport dont
+# tout l'objet est de dire l'etat exact.
+#
+# CE QUI SE MESURE MAINTENANT EST LA PORTE, ET C'EST LA MEME CLASSE DE MESURE QU'AVANT : une
+# presence, jamais une valeur, jamais un appel qui depenserait le credential. Ouvrir la socket ET
+# DEMANDER rendrait un jeton — donc materialiserait un secret dans le process d'une sonde dont la
+# sortie finit dans un log de conversation. On regarde que la porte existe, pas ce qu'il y a
+# derriere.
 probe_credentials() {
-  local tokdir="${FORGE_ROLE_TOKENS_DIR:-}" tokfile="${FORGE_TOKEN_FILE:-$HOME/.gitea_token}"
-  local found=""
-  [[ -r "$tokfile" ]] && found="token systeme lisible ($tokfile)"
-  if [[ -n "$tokdir" && -d "$tokdir" ]]; then
-    local n; n="$(find "$tokdir" -maxdepth 1 -name '*.gitea_token' 2>/dev/null | wc -l)"
-    found="${found:+$found · }$n role-token(s) dans $tokdir"
-  fi
+  local sock="${LCARS_ROLES_SOCKET:-/run/lcars/authority/roles.sock}"
 
-  if [[ -z "$found" ]]; then
-    emit "forge.credentials" "$PLANE" "inactive" "local" 'test -r "$FORGE_TOKEN_FILE"' \
-      "aucun credential forge accessible depuis ici" \
-      "ATTENDU dans un pod (aucun credential n'y est monte, par design). Consequence : tout ce qui precede est ANONYME, donc partiellement aveugle."
+  if [[ -S "$sock" ]]; then
+    emit "forge.credentials" "$PLANE" "operational" "local" 'test -S "$LCARS_ROLES_SOCKET"' \
+      "service d'autorite en ecoute ($sock)" \
+      "PRESENCE DE LA PORTE seulement. Ni que la forge repond, ni que ce demandeur-ci obtiendrait un jeton : le savoir demanderait d'en depenser un."
   else
-    emit "forge.credentials" "$PLANE" "operational" "local" 'test -r "$FORGE_TOKEN_FILE"' \
-      "$found" \
-      "Presence et lisibilite seulement. Ni validite, ni portee, ni expiration : les eprouver demanderait de les depenser."
+    # LA PORTE FERMEE ET LA PORTE GARDEE NE SE DISENT PAS PAREIL. Dans un pod, l'absence est
+    # ATTENDUE et par conception. Sur un hote, c'est une unite qui ne tourne pas.
+    emit "forge.credentials" "$PLANE" "inactive" "local" 'test -S "$LCARS_ROLES_SOCKET"' \
+      "aucun service d'autorite joignable depuis ici ($sock absent)" \
+      "ATTENDU dans un pod (aucun credential n'y est joignable, par design). Sur un hote, c'est « systemctl status lcars-catalogue » : tout ce qui precede est ANONYME, donc partiellement aveugle."
   fi
 }
 

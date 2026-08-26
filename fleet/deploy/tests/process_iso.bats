@@ -124,17 +124,30 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   grep -q 'sshd' "$BATS_TEST_DIRNAME/process_iso.bats"
 }
 
-@test "LCARS_CONSOLE_GROUP porte DEUX defauts, et c'est nomme tant que ca dure" {
-  # ⚠ UN NOM, DEUX SENS. `console-humans.sh` l'entend comme « qui a droit a une console » (defaut
-  # `fleet`) ; `console.sh` et `console-landing.sh` comme « quel groupe traverse les sockets »
-  # (defaut `lcars-console`). Un operateur qui pose la variable deplace les DEUX.
+@test "LCARS_CONSOLE_GROUP n'a plus qu'UN sens — l'ambiguite est levee, et elle le reste" {
+  # ⚠ CE TEMOIN A FAIT EXACTEMENT CE QU'IL ANNONÇAIT, ET IL EST TOMBE COMME PREVU.
   #
-  # Ce temoin ne corrige pas : il EMPECHE que l'ecart devienne invisible. Le jour ou les deux sens
-  # sont separes en deux variables, il tombe — et sa chute est le signal.
+  # Il disait : « UN NOM, DEUX SENS. `console-humans.sh` l'entend comme "qui a droit a une console"
+  # (defaut `fleet`) ; `console.sh` et `console-landing.sh` comme "quel groupe traverse les sockets"
+  # (defaut `lcars-console`). Un operateur qui pose la variable deplace les DEUX. […] Le jour ou les
+  # deux sens sont separes en deux variables, il tombe — et sa chute est le signal. »
+  #
+  # Le signal est venu. Le sens de trop n'a pas ete separe : il a CESSE D'EXISTER.
+  # `console-humans.sh` ne lit plus aucun groupe — l'eligibilite derive de conditions de SIEGE, et
+  # le groupe `fleet` etait une projection de l'equipe `humans` de la forge, refaite toutes les 30 s.
+  #
+  # Ce qui se garde maintenant : le nom porte UN sens, et il ne doit pas en reprendre un second.
   local hum="$BATS_TEST_DIRNAME/../../services/console-humans.sh"
   local con="$BATS_TEST_DIRNAME/../../services/console.sh"
   local lan="$BATS_TEST_DIRNAME/../../services/console-landing.sh"
-  grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-fleet\}"' "$hum"
+
+  # Le sens SURVIVANT, sur ses deux lecteurs : un groupe de TRAVERSEE de sockets, jamais un droit.
   grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$con"
   grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$lan"
+
+  # Et la regle d'eligibilite n'en lit plus AUCUN. On mesure le CODE : la cicatrice de ce fichier
+  # nomme le groupe qu'elle a retire, et c'est son metier.
+  local n
+  n="$(sed 's/#.*//' "$hum" | grep -cE 'LCARS_CONSOLE_GROUP|getent group|FLEET_MEMBERS' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$hum" | grep -nE 'LCARS_CONSOLE_GROUP|getent group|FLEET_MEMBERS' >&2; return 1; }
 }

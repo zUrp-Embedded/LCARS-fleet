@@ -333,6 +333,13 @@ RUN apt-get update -qq \
     `# /local/LCARS_v2 et d'ailleurs. Le reutiliser aurait ete plus court et aurait accorde tout le` \
     `# reste par la meme occasion. Un pouvoir qu'on ne sait pas dire en une phrase est trop large.` \
     && groupadd -g 2001 lcars-console \
+    `# LE COMPTE DU SERVICE D'AUTORITE, MIROIR DE 21-service-accounts DU RAIL POSTE. Sans lui,` \
+    `# l'entrypoint ne peut pas deposer le service et le geste catalogue est injouable dans la boite.` \
+    `#` \
+    `# ⚠ MEMBRE DE fleet POUR TRAVERSER /local/LCARS_v2 (0750 root:fleet), JAMAIS POUR DECIDER.` \
+    `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
+    `# convergeur d'humains, qui a useradd et ne detient rien.` \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :
@@ -558,6 +565,24 @@ COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
+# Le module de socket voisin : `catalogue-executor.py` l'importe depuis son repertoire.
+COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
+# L'UNIQUE SERVICE ROOT DE LA MACHINE, ET IL NE DETIENT RIEN. Il remplace la regle sudoers
+# `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait, sur un groupe que le
+# convergeur repeuple depuis la forge toutes les 30 s. A cote du convergeur qu'il appelle.
+COPY fleet/services/privileged-executor.py /opt/lcars/privileged-executor.py
+# LE SUPERVISEUR — ce que `Restart=always` fait sur le rail poste, et que ce rail-ci n'avait PAS.
+# `entrypoint.sh` lancait `setsid <cmd> &` : tini recolte les orphelins, il n'en relance aucun. Un
+# convergeur mort restait mort jusqu'au prochain `box restart`, sur une boite qui reste *healthy*
+# (son healthcheck teste le port 22). Il ne peut pas vivre DANS l'entrypoint, qui finit sur
+# `exec sshd` — le shell y est remplace, et toute boucle qu'il porterait disparaitrait la.
+COPY fleet/services/supervise.sh          /opt/lcars/supervise.sh
+# LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
+# de toolchain : c'est un outil d'EXPLOITATION, appele par des gestes d'operateur qui vivent dans
+# trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH
+# est le seul rendez-vous qu'aucun des trois n'a a deviner. Il ne DETIENT rien : il demande, et
+# c'est la socket qui decide, sur un uid atteste par le noyau.
+COPY fleet/services/lcars-authority-ask.sh /usr/local/bin/lcars-authority-ask
 COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
@@ -619,7 +644,9 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
                /opt/lcars/human-converger.sh \
                /opt/lcars/catalogue-executor.py \
+               /opt/lcars/privileged-executor.py \
                /usr/local/bin/lcars-toolchain-converge \
+               /usr/local/bin/lcars-authority-ask \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh
@@ -631,7 +658,18 @@ EXPOSE 22
 
 # sshd répond = le conteneur tient sa promesse (login-manager). Sonde TCP réelle, pas un pgrep
 # d'un process que personne ne lance (le healthcheck-tmux menteur de la v1).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+#
+# ⚠ `--start-period` A ETE ALLONGE DE 20 s A 300 s, ET C'EST UN CORRECTIF, PAS UN CONFORT. Depuis
+# que l'entrypoint tire une premiere passe de convergence SYNCHRONE avant `exec sshd`, le port 22
+# n'ouvre qu'apres elle — bornee a `LCARS_FIRST_PASS_TIMEOUT` (defaut 120 s), plus le doctor qui
+# suit. Avec 20 s de grace, `--interval=30s` et `--retries=3`, docker declarait le conteneur
+# *unhealthy* des T+80 s et le laissait dans cet etat jusqu'a l'ouverture du port : une phase rouge
+# systematique de plusieurs minutes a CHAQUE demarrage, sur une boite parfaitement saine.
+#
+# Aucun compose n'a `condition: service_healthy` sur `lcars` aujourd'hui, donc rien ne se bloquait —
+# mais tout ce qui observe la sante (un orchestrateur, une supervision, un operateur) lisait un
+# mensonge. La grace couvre desormais le pire cas de la passe synchrone avec de la marge.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
   CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22"]
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.

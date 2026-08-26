@@ -133,7 +133,8 @@ fi
 #
 # ⚠ CETTE PORTE N'EST PAS `nobody`, CONTRAIREMENT AUX AUTRES. `roles`, `catalogue-source` et
 # consorts sont des LECTURES ; celle-ci ecrit sur une forge et lit le jeton master et le seed dans
-# `/home/private` (0750 root:fleet). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
+# `/home/private` (0710 lcars-authority:fleet — le groupe TRAVERSE, il ne lit pas ; les secrets eux-
+# memes sont 0600). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
 #
 # ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
 # reconstruit ce qui existe par ses blocs `import`, donc partir d'un tfstate VIDE est le cas normal.
@@ -156,9 +157,23 @@ fi
 # nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
 if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
+  # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
+  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/home/private`.
+  # ⚠ ET LA RAISON ECRITE ICI A ETE FAUSSE UN TEMPS : elle disait « qui est 0700 lcars-authority »,
+  # donc « elle ne traverse meme pas ». Le repertoire est `0710 …:fleet` — cette porte TRAVERSE.
+  # Ce qui la tient est le mode des FICHIERS (0600), pas celui du dossier. La conclusion n'a pas
+  # bouge, sa raison si — et une raison fausse est ce qui fait relacher le vrai garde un jour. Son
+  # appelant — `forge-gestures.sh cmd_install`, qui EST le service d'autorite — lit donc le jeton
+  # systeme et transmet sa VALEUR. Or `env` ne propage que ce qu'on lui NOMME : oublier cette
+  # variable ici aurait rendu une porte sans credential, dont l'echec accuse la source du catalogue.
+  #
+  # LE CHEMIN RESTE ACCEPTE : un appelant ROOT (le rail poste, un banc) en a un qui lui est lisible,
+  # et `Transport.resolve_token/1` prend le jeton fourni AVANT le chemin. Deux entrees, une seule
+  # resolution, et la plus specifique gagne.
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
+    FORGE_TOKEN="${FORGE_TOKEN:-}" \
     /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
     "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
 fi
@@ -437,7 +452,9 @@ fi
 # `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
 # TOUJOURS ce boot-ci. Même emplacement et même motif que `/run/lcars-converger.refused` — un
 # composant sait pourquoi, il l'écrit là où un autre peut le lire.
-PROV_RC_FILE=/run/lcars-provision.rc
+# Surchargeable comme ses trois voisins, et pour la même raison : un chemin absolu en dur rend le
+# bloc qui l'écrit impossible à mesurer ailleurs que sur un vrai boot.
+PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
 "$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
 case "$prov_rc" in
@@ -449,11 +466,58 @@ credentials, réseau). Détail : $PROVISION doctor" ;;
   *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
 esac
 
-# APRÈS le `case`, pas dedans : le verdict se publie quel qu'il soit, y compris 0. Un fichier qui
-# n'apparaît que sur l'échec forcerait son lecteur à distinguer « pas encore écrit » de « tout va
-# bien », c'est-à-dire à deviner exactement ce que ce fichier existe pour dire.
-printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
-chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
+# ⚠ LE VERDICT NE SE PUBLIE PLUS ICI, ET LA RAISON EST UNE COURSE MESUREE. Il s'écrivait à cet
+# endroit, AVANT la convergence synchrone des humains ; `box up` poll `lcars-provision.rc` toutes
+# les cinq secondes, le trouvait aussitôt, puis lisait `lcars-humans.rc` UNE SEULE FOIS — un fichier
+# écrit jusqu'à 240 s plus tard. `box up` affichait donc « population NON MESURÉE » à tous les coups,
+# quelle que soit la population réelle : la vérification ajoutée au lot précédent était inerte de
+# l'autre côté du tuyau.
+#
+# La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
+# sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
+# n'a plus à connaître l'ordre — c'est le producteur qui le tient.
+#
+# Le verdict se publie quel qu'il soit, y compris 0. Un fichier qui n'apparaîtrait que sur l'échec
+# forcerait son lecteur à distinguer « pas encore écrit » de « tout va bien », c'est-à-dire à deviner
+# exactement ce que ce fichier existe pour dire.
+publier_verdicts() {
+  [[ -n "${humans_rc:-}" ]] && {
+    printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
+    chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
+  }
+  printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
+  chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
+}
+
+# ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────
+#
+# ⚠ RIEN NE RELANÇAIT UN SERVICE MORT ICI. `64-services` pose des unités systemd avec
+# `Restart=always`, `RestartSec=10` et `StartLimitBurst=5` ; ce fichier lançait `setsid <cmd> &` et
+# passait à la suite. tini est PID 1 et RÉCOLTE les orphelins — il n'en relance aucun. Un convergeur
+# qui meurt restait mort jusqu'au prochain `box restart`, sur une boîte qui reste *healthy* (son
+# healthcheck teste le port 22). Le rail poste testait donc des politiques de redémarrage que la
+# production n'avait pas, et la production avait un mode de panne que rien ne testait.
+#
+# ⚠ ET LE SUPERVISEUR NE PEUT PAS VIVRE ICI. Ce script finit sur `exec /usr/sbin/sshd -D -e` : le
+# shell est REMPLACÉ, donc toute boucle qu'il porterait disparaîtrait à cet instant. D'où un
+# processus à part, lancé en `setsid` exactement comme les services l'étaient.
+#
+# ⚠ SON ABSENCE N'EST PAS FATALE, ET C'EST LA RÈGLE DE TOUT CE FICHIER. Une image d'avant ce
+# chantier n'a pas `supervise.sh` : on retombe alors sur le lancement nu — sans relance, comme
+# avant, mais la boîte démarre. Une boîte qui refuse de booter parce qu'il lui manque un
+# superviseur est une boîte qu'on ne peut plus réparer.
+SUPERVISE="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}"
+launch() { # launch <nom> <log> -- <cmd...>
+  local name="$1" log="$2"; shift 2
+  [[ "${1:-}" == "--" ]] && shift
+  if [[ -x "$SUPERVISE" ]]; then
+    setsid "$SUPERVISE" --name "$name" --log "$log" -- "$@" </dev/null >>"$log" 2>&1 &
+    say "$name ACTIF (pid $!, supervisé — relance automatique, bornée)"
+  else
+    setsid "$@" </dev/null >>"$log" 2>&1 &
+    say "$name ACTIF (pid $!, NON supervisé — $SUPERVISE absent : une mort du service ne sera pas rattrapée)"
+  fi
+}
 
 # ─── 3ter. Convergence CONTINUE des humains (forge `humans` → users Linux) ───────────────────────
 # L'étape 3 converge un état FIGÉ, au boot. Enrôler quelqu'un demandait donc un redémarrage — ce qui
@@ -463,15 +527,81 @@ chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
 # installer, pas de droit à accorder à quiconque.
 # Elle ne SUPPRIME jamais : la révocation est un retrait côté forge, et ce qui reste sur la machine
 # est de la donnée, pas un accès (sans compte forge, ni console ni fleet ne s'ouvrent).
-if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x /opt/lcars/human-converger.sh ]]; then
+# ⚠ LE CHEMIN EST UNE VARIABLE, ET PAS SEULEMENT POUR LE RENDRE TESTABLE. `64-services` lit déjà
+# `LCARS_HUMAN_CONVERGER` sur le rail poste : le même nom des deux côtés, c'est un réglage de moins
+# à retrouver, et surtout une couture qui permet de MESURER ce bloc au lieu de le relire. Trois
+# chemins absolus en dur, c'était trois endroits où seul un vrai boot pouvait dire si ça marchait.
+CONVERGER_BIN="${LCARS_HUMAN_CONVERGER:-/opt/lcars/human-converger.sh}"
+CONVERGER_LOG="${LCARS_CONVERGER_LOG:-/var/log/lcars-converger.log}"
+if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
+  # ─── UN PREMIER TOUR SYNCHRONE, PUIS LA BOUCLE ────────────────────────────────────────────────
+  #
+  # ⚠ CETTE BOÎTE RENDAIT LA MAIN SANS SAVOIR SI QUELQU'UN POUVAIT LANCER UNE FLEET. La boucle poll
+  # à 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer un boot. Entre le
+  # `exec sshd` et son premier tour, la boîte se déclare *healthy* (son healthcheck teste le port 22)
+  # et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 : il n'a aucune raison de
+  # douter. C'est exactement la panne que le rail poste a fermée le 2026-08-25, restée ouverte ici —
+  # et le rail qui compte le moins était donc le mieux vérifié des deux.
+  #
+  # ⚠ ET LA VÉRIFICATION N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. `64-services` porte déjà la
+  # sonde (`probe_fleet_humans`), et ce module est `CHECK-ON: any` : il tourne donc en docker. Un
+  # `doctor --only` rejoue LA MÊME sonde que le poste, sur le même code. Recopier la règle d'uid ici
+  # en aurait fait un troisième exemplaire — après `fleet_humans` et `converged_humans` du
+  # convergeur — et c'est toujours celui qu'on ne relit pas qui ment.
+  #
+  # `timeout` : ce premier tour parle à la forge et provisionne chaque humain. Il est BORNÉ parce
+  # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que la boîte doit rester
+  # joignable pour être réparée — même règle que tout le reste de ce fichier.
+  # ⚠ 240 s ETAIT TROP LONG POUR UN BOOT, et ce n'etait pas mesure — c'etait un chiffre pose au
+  # jugé. Le port 22 n'ouvre qu'apres cette passe : chaque seconde ici est une seconde ou personne ne
+  # peut entrer reparer. Le but de ce tour n'est PAS de tout provisionner — la boucle detachee s'en
+  # charge — mais de rendre le VERDICT significatif. 120 s couvre une forge qui repond et quelques
+  # humains ; au-dela, la boucle reprend et le verdict dit « non concluant », ce qui est vrai.
+  FIRST_PASS_TIMEOUT="${LCARS_FIRST_PASS_TIMEOUT:-120}"
+  first_rc=0
+  timeout "$FIRST_PASS_TIMEOUT" "$CONVERGER_BIN" --once \
+    </dev/null >>"$CONVERGER_LOG" 2>&1 || first_rc=$?
+  if [[ "$first_rc" -eq 0 ]]; then
+    say "convergence des humains : premier tour fait"
+  else
+    # ⚠ LE CHEMIN VIENT DE LA VARIABLE, ET CETTE LIGNE LE CODAIT EN DUR. J'ai rendu la REDIRECTION
+    # surchargeable et laissé le MESSAGE littéral : là où `LCARS_CONVERGER_LOG` pointe ailleurs, il
+    # envoyait l'opérateur lire un fichier qui n'existe pas. On corrige la moitié qui CASSE, et
+    # celle qui ment survit — parce qu'elle ne casse rien.
+    say "convergence des humains : premier tour NON CONCLUANT (rc=$first_rc) — la boucle reprendra ; détail dans $CONVERGER_LOG"
+  fi
+
+  # LE FAIT, PAS LE CODE DE RETOUR. Le convergeur peut rendre 0 sans avoir converti personne (une
+  # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
+  # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
+  # Surchargeable pour la même raison que `CONVERGER_BIN` : sans couture, ce bloc ne se mesure que
+  # par un vrai boot — c'est-à-dire nulle part avant la production.
+  HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
+  humans_rc=0
+  "$PROVISION" doctor --substrate docker --only 64-services >/dev/null 2>&1 || humans_rc=$?
+  if [[ "$humans_rc" -eq 0 ]]; then
+    say "humain(s) de fleet : présent(s) — « fleet_v2 start » a quelqu'un pour le lancer"
+  else
+    say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet_v2 start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
+  fi
+  # ⚠ L'ÉCRITURE EST DESCENDUE DANS `publier_verdicts`, ET CE N'EST PAS DU RANGEMENT. Publiée ici,
+  # elle arrivait APRÈS `lcars-provision.rc` — que `box up` attend et trouve en cinq secondes, avant
+  # de lire celui-ci UNE FOIS. Il lisait donc un fichier pas encore écrit, à tous les coups.
+  # Les deux verdicts se publient ensemble, `provision.rc` en dernier.
+
   # Détaché du shell de l'entrypoint : celui-ci finit sur `exec sshd`, ce qui remplace le process.
   # Un enfant simplement mis en arrière-plan survit à l'exec (même PID 1 tini le récolte), mais
   # setsid le détache aussi du terminal, donc un signal de session ne l'emporte pas avec elle.
-  setsid /opt/lcars/human-converger.sh </dev/null >>/var/log/lcars-converger.log 2>&1 &
-  say "convergence des humains ACTIVE (pid $!) — un ajout à la team « humans » suffit, sans redémarrage"
+  launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN"
+  say "un ajout à la team « humans » suffit désormais, sans redémarrage"
 else
   say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
 fi
+
+# LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
+# tourné ; sans elle, seul `provision.rc` est publié et `box up` dit « NON MESURÉE » — ce qui est
+# exactement vrai. La présence de `provision.rc` garantit que l'autre est là quand il doit l'être.
+publier_verdicts
 
 # ─── 3bis. La console web (ttyd sous l'humain, sur SA socket AF_UNIX) ───────────────────────────
 # Lancée APRÈS la convergence (elle a besoin de l'humain et de son home) et AVANT sshd (qui prend
@@ -511,11 +641,42 @@ fi
 # catalogue devient injouable — mais la boîte doit rester joignable pour être réparée, même règle
 # que la convergence et la console. Le refus côté `bin/lcars` nomme alors le service, pas l'adminité
 # de l'opérateur : une porte fermée n'est pas une porte gardée.
-if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]]; then
-  setsid python3 /opt/lcars/catalogue-executor.py </dev/null >>/var/log/lcars-catalogue.log 2>&1 &
-  say "executeur de catalogue ACTIF (pid $!) — « lcars catalogue install » passe par lui"
+LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
+if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
+   && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
+  # ⚠ `setpriv` PARCE QUE CE RAIL N'A PAS SYSTEMD. Sur le poste, `User=` de l'unite fait ce drop ;
+  # ici l'entrypoint est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter du
+  # root de l'entrypoint — il detient les secrets de la forge et n'a aucun privilege a exercer.
+  # Le `setpriv` est DANS la commande supervisée, pas autour du superviseur : celui-ci doit rester
+  # root pour pouvoir relancer, et c'est l'ENFANT qui descend — exactement ce que `User=` fait dans
+  # l'unité systemd du rail poste, où systemd reste root et le service non.
+  launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
+    setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \
+    python3 /opt/lcars/catalogue-executor.py
+  say "« lcars catalogue install » passe par lui"
 else
   say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"
+fi
+
+# ─── 3quinquies. Le service PRIVILÉGIÉ (root, une socket, et AUCUN secret) ──────────────────────
+#
+# ⚠ IL REMPLACE `%fleet ALL=(root) NOPASSWD:`. C'était le lien le plus fin du système : un chemin
+# `groupe → root` direct, sur un groupe que le convergeur repeuple depuis la forge toutes les 30 s.
+# Le droit d'exécuter du code en root avait donc la péremption d'un cache.
+#
+# ⚠ PAS DE `setpriv` ICI, ET C'EST LE SEUL BLOC DE CE FICHIER OÙ SON ABSENCE EST LE CONTRAT. Le
+# voisin au-dessus DOIT descendre (il détient les secrets) ; celui-ci DOIT rester root (il porte le
+# geste privilégié) et ne détient rien. Les deux règles sont la même règle, lue des deux côtés.
+#
+# Son absence n'est pas fatale — même règle que le voisin : la boîte doit rester joignable pour être
+# réparée. Ce qui devient injouable est la convergence d'outillage, et le reconciliateur le dira en
+# nommant la socket : une porte fermée n'est pas une porte gardée.
+if [[ "${LCARS_PRIVILEGED_EXECUTOR:-1}" == "1" && -r /opt/lcars/privileged-executor.py ]]; then
+  launch "service privilégié" /var/log/lcars-privileged.log -- \
+    python3 /opt/lcars/privileged-executor.py
+  say "la convergence d'outillage passe par sa socket, plus par sudo"
+else
+  say "service privilégié ABSENT — la convergence d'outillage refusera, en nommant sa socket"
 fi
 
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──

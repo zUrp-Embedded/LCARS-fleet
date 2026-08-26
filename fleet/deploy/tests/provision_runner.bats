@@ -328,8 +328,13 @@ stub_impersonation() {
 }
 
 @test "second passage: un humain de fleet INEXISTANT ne declenche rien, et ne casse rien" {
-  # `22-fleet-human` derive quand `useradd` echoue : l'apply continue, et ce passage doit alors etre
-  # inerte plutot que de jouer des modules pour un compte qui n'existe pas.
+  # ⚠ CE COMMENTAIRE DISAIT « `22-fleet-human` derive quand `useradd` echoue », ET CE MODULE NE FAIT
+  # PLUS DE `useradd` depuis le 2026-08-25 — il NOMME, la forge seme, le convergeur materialise. Le
+  # temoin, lui, est intact : il mesure le RUNNER sur un module doublure, pas le module 22. Seule sa
+  # raison affichee etait perimee, et une raison fausse envoie chercher au mauvais endroit.
+  #
+  # Ce qui reste vrai, et qui est le sujet : un humain de fleet qui n'existe pas cote unix laisse ce
+  # second passage INERTE, plutot que de jouer des modules per-humain pour un compte absent.
   stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
   run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="n-existe-pas-$$" \

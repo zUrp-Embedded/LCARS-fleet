@@ -53,40 +53,69 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   grep -q "^# STARDATE:" "$SRC"; grep -q "^# STATUS:" "$SRC"
 }
 
-@test "sudoers: pose, contenu exact, mode 0440" {
-  run_apply
-  [[ "$status" -eq 0 ]]
+# ─── LE SUDOERS EST RETIRE, ET CES TEMOINS ONT CHANGE DE SIGNE ──────────────────────────────────
+#
+# Ils epinglaient la POSE de `%fleet ALL=(root) NOPASSWD:` — sa forme exacte, son mode, l'atomicite
+# de sa mise a jour. Tous verts, et tous sur un objet qui etait le lien le plus fin du systeme : un
+# chemin `groupe -> root` direct, sur un groupe que le convergeur repeuple depuis la forge toutes
+# les trente secondes.
+#
+# Le geste passe par `toolchain.sock`. Ce qui se garde ici est desormais l'ABSENCE — et c'est un
+# contrat plus dur que la pose, parce qu'il porte sur les boites DEJA provisionnees.
+
+@test "sudoers: l'apply RETIRE la regle sur une boite qui la porte encore" {
+  # ⚠ LE TEMOIN QUI COMPTE LE PLUS DE CETTE PHASE. Cesser de POSER ne retire rien : le NOPASSWD
+  # survivrait au chantier qui le supprime, sur chaque machine deja convergee, indefiniment et sans
+  # qu'une ligne le dise. C'est mot pour mot la maladie que ce module cite a son point 3 — « sans
+  # convergence, un admin demis garde son droit indefiniment ».
   local f="$LCARS_SUDOERS_DIR/lcars-toolchain"
+  printf '%%%s ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge\n' "$PROV_FLEET_GROUP" > "$f"
   [[ -f "$f" ]]
-  grep -qx "%$PROV_FLEET_GROUP ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge" "$f"
-  [[ "$(stat -c %a "$f")" == "440" ]]
-}
 
-@test "sudoers: un contenu refuse par visudo N'EST PAS pose" {
-  # visudo double en tete de PATH : refuse tout. Si le module posait quand meme, sudo entier
-  # serait casse en prod — c'est le temoin de l'ordre valide-PUIS-pose.
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/visudo"; chmod +x "$BIN/visudo"
-  run_apply
-  [[ "$status" -ne 0 ]]
-  [[ ! -f "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
-}
-
-@test "sudoers: un REFUS en cours de mise a jour laisse l'ANCIEN fichier intact (atomicite observable)" {
-  # ⚠ La v1 de ce temoin cherchait des artefacts .prov.* survivants — write_atomic les nettoie sur
-  # TOUS ses chemins, et une redirection nue n'en laisse pas non plus : il etait vert sur
-  # l'implementation qu'il pretendait interdire (audit). La propriete OBSERVABLE est celle-ci :
-  # un sudoers valide est en place, la mise a jour est REFUSEE (visudo) => l'ancien fichier est
-  # toujours la, OCTET POUR OCTET. Une ecriture en place l'aurait tronque ou remplace avant le
-  # refus — la machine ou plus personne ne passe root (cicatrice provision-lib.sh:18).
   run_apply
   [[ "$status" -eq 0 ]]
-  local before; before="$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")"
+  [[ ! -e "$f" ]]
+}
 
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/visudo"; chmod +x "$BIN/visudo"
-  export LCARS_TOOLCHAIN_CONVERGE_BIN="/usr/local/bin/autre-binaire"
+@test "sudoers: le check DIT qu'il reste un chemin groupe → root, il ne le constate pas en silence" {
+  local f="$LCARS_SUDOERS_DIR/lcars-toolchain"
+  printf '%%%s ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge\n' "$PROV_FLEET_GROUP" > "$f"
+
+  run bash -c ". '$MOD'; check"
+  [[ "$output" == *"groupe → root"* ]]
+  [[ "$output" == *"toolchain.sock"* ]]
+}
+
+@test "sudoers: sur une boite propre, l'apply ne pose RIEN et reste vert" {
+  # LE TEMOIN DU TEMOIN : sans lui, un module qui echouerait sur l'absence du fichier passerait le
+  # premier test (qui, lui, en pose un) et casserait chaque apply d'une boite deja saine.
+  [[ ! -e "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
   run_apply
-  [[ "$status" -ne 0 ]]
-  [[ "$(cat "$LCARS_SUDOERS_DIR/lcars-toolchain")" == "$before" ]]
+  [[ "$status" -eq 0 ]]
+  [[ ! -e "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
+}
+
+@test "sudoers: plus AUCUNE ligne de CODE ne construit une regle NOPASSWD" {
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE, et ma premiere ecriture comptait les deux. Les cicatrices de
+  # ce module NOMMENT la regle retiree — c'est leur metier, et un temoin qui les compterait
+  # interdirait d'expliquer ce qu'on a retire. La prochaine session referait le defaut faute de
+  # savoir pourquoi c'en etait un.
+  #
+  # Le nom du convergeur, lui, n'a plus rien a faire ici : le seul a l'invoquer est
+  # `lcars-privileged`, qui le connait chez lui. Une seconde autorite sur un chemin est celle qu'on
+  # ne relit pas, et c'est elle qui ment.
+  # ⚠ ET ON CHERCHE LA SYNTAXE D'UNE REGLE, PAS LE MOT. Ma premiere ecriture comptait « NOPASSWD »
+  # et accusait le MESSAGE DE REFUS du module — « le groupe garde un NOPASSWD root » — qui est
+  # exactement la phrase qu'un operateur doit lire. Un temoin qui interdit de nommer le danger
+  # pousse a l'ecrire moins clairement. Ce qui construit une regle, c'est `ALL=(root)`.
+  local n
+  n="$(sed 's/#.*//' "$SRC" | grep -cE 'ALL=\(root\)' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'ALL=\(root\)' >&2; return 1; }
+  # Et rien n'ECRIT dans le fichier de sudoers : la seule chose qui lui arrive est `rm`.
+  n="$(sed 's/#.*//' "$SRC" | grep -cE '(write_atomic|install|>|tee)[^\n]*SUDOERS_FILE' || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'SUDOERS_FILE' >&2; return 1; }
+  n="$(sed 's/#.*//' "$SRC" | grep -cE 'LCARS_TOOLCHAIN_CONVERGE_BIN' || true)"
+  [ "$n" -eq 0 ]
 }
 
 @test "etat conteneur: le repertoire du marqueur existe en 2775" {
@@ -94,6 +123,48 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [[ "$status" -eq 0 ]]
   [[ -d "$LCARS_TOOLCHAIN_RUN_STATE" ]]
   [[ "$(stat -c %a "$LCARS_TOOLCHAIN_RUN_STATE")" == "2775" ]]
+}
+
+# ─── LE VECTEUR 6-131, MESURE PLUTOT QUE DECRIT ─────────────────────────────────────────────────
+#
+# ⚠ CE MODULE CREUSAIT EN `install -d` NU, ET `install -d` SUIT LES LIENS. La garde
+# `prov_refuse_symlink_path` vit dans `ensure_dir` pour exactement ca : quelqu'un pose un lien dans
+# un composant du chemin, et le prochain apply en ROOT chmode/chowne la CIBLE. Trois sites de ce
+# module et un de `55-deck-oidc` contournaient la garde en n'appelant pas la lib.
+#
+# UN TEMOIN DE TEXTE NE SUFFIT PAS ICI — il epinglerait l'orthographe d'un appel. On pose un vrai
+# lien vers une vraie cible, on joue l'apply, et on regarde si la cible a bouge.
+@test "etat conteneur: un LIEN a la place du repertoire est REFUSE, et la cible ne bouge pas" {
+  local cible="$BATS_TEST_TMPDIR/cible-innocente"
+  mkdir -p "$cible"; chmod 0700 "$cible"
+  rm -rf "$LCARS_TOOLCHAIN_RUN_STATE"
+  ln -s "$cible" "$LCARS_TOOLCHAIN_RUN_STATE"
+
+  run_apply
+  # LA CIBLE EST INTACTE — la seule assertion qui compte. Son mode aurait ete reecrit en 2775 et son
+  # groupe change si le lien avait ete suivi.
+  [[ "$(stat -c %a "$cible")" == "700" ]]
+  # Et le lien est toujours un lien : on ne l'a pas remplace en douce non plus.
+  [[ -L "$LCARS_TOOLCHAIN_RUN_STATE" ]]
+}
+
+@test "skill: un LIEN pose dans le home du siege ne fait pas chowner sa cible" {
+  # Le site le plus expose du module : root creuse `~/.claude/skills/...` dans un home que son
+  # proprietaire controle, puis chowne. La portee est etroite — le siege a deja root — mais c'est le
+  # motif que la lib ferme, et une garde qui ne vaut que quand l'attaquant n'a rien a gagner n'en
+  # est pas une.
+  local cible="$BATS_TEST_TMPDIR/etc-innocent"
+  mkdir -p "$cible"; chmod 0700 "$cible"
+  rm -rf "$LCARS_SIEGE_HOME/.claude"
+  ln -s "$cible" "$LCARS_SIEGE_HOME/.claude"
+
+  run_apply
+  [[ "$(stat -c %a "$cible")" == "700" ]]
+  [[ -L "$LCARS_SIEGE_HOME/.claude" ]]
+  # ⚠ ET RIEN N'EST ECRIT DANS LA CIBLE. Premiere ecriture du correctif : `|| skdst=""` — les deux
+  # `write_atomic` d'apres devenaient `/SKILL.md` et `/list.sh`, en ROOT, A LA RACINE. Le bloc doit
+  # SAUTER, pas se replier sur un autre chemin.
+  [[ -z "$(ls -A "$cible")" ]]
 }
 
 @test "projection: le login du siege atterrit dans pilot.assignee" {
@@ -217,7 +288,12 @@ EOS
   chmod +x "$BIN/curl"
   export PATH="$BIN:$PATH"
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/tok"; printf 'TOK\n' > "$LCARS_FORGE_TOKEN_FILE"
+  # ⚠ LE JETON NE SE LIT PLUS DANS UN FICHIER, IL SE DEMANDE. La fixture n'est donc plus un fichier
+  # de jeton mais une doublure du CLIENT d'autorite — c'est par la que le skill obtient son
+  # credential depuis que le groupe `fleet` a cesse d'ouvrir `/home/private`.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask-ok"
+  printf '#!/usr/bin/env bash\nprintf "TOK\\n"\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
 
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -eq 0 ]]
@@ -227,12 +303,27 @@ EOS
   [[ "$output" == *"[toolchain] python"* ]]
 }
 
-@test "list.sh: jeton illisible => refus type, pas une liste vide" {
+@test "list.sh: pas de jeton => refus type, pas une liste vide" {
   export LCARS_FORGE_URL="http://forge.test"
-  export LCARS_FORGE_TOKEN_FILE="$BATS_TEST_TMPDIR/absent"
+  # Le client refuse en 1, sa cause sur stderr — exactement ce que fait le vrai quand la forge dit
+  # non. Le skill doit MOURIR dessus, jamais rendre deux listes vides qu'un lecteur prendrait pour
+  # « rien a traiter » : une boite de reception vide et une boite de reception inaccessible se
+  # ressemblent a l'ecran et ne veulent pas dire la meme chose.
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask-ko"
+  printf '#!/usr/bin/env bash\necho "autorite: refus de fixture" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  chmod +x "$LCARS_AUTHORITY_ASK_BIN"
+
   run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"jeton systeme illisible"* ]]
+  [[ "$output" == *"pas de jeton de forge"* ]]
+}
+
+@test "list.sh: client d'autorite ABSENT => refus qui le NOMME, pas « commande introuvable »" {
+  export LCARS_FORGE_URL="http://forge.test"
+  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/jamais-pose"
+  run "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"client d'autorite absent"* ]]
 }
 
 @test "list.sh: le jeton SYSTEME, jamais le master — deux lectures publiques n'ont pas d'autorite" {
@@ -246,7 +337,26 @@ EOS
   [ "$output" -eq 0 ]
   run grep -c 'forge-master.token' "$src"
   [ "$output" -eq 0 ]
-  grep -q 'gitea_token' "$src"
+  # ⚠ `gitea_token` A QUITTE L'ASSERTION AVEC LE FICHIER QU'IL NOMMAIT. Ce skill ne construit plus
+  # AUCUN chemin de jeton : il demande un COMPTE au service d'autorite. Ce qui reste a epingler est
+  # l'identite — c'est bien le compte systeme, jamais le master — et elle se lit sur le nom du
+  # compte, pas sur un nom de fichier. Le second `grep` est la contrepartie : plus aucune trace du
+  # repertoire prive, sinon l'assertion du haut passerait sur un script qui lit encore.
+  grep -q 'SYSTEM_ACCOUNT' "$src"
+  run grep -c 'PRIVATE_DIR' "$src"
+  [ "$output" -eq 0 ]
   # Et le skill ne PROMET plus un privilege de siege, qui n'existe pas.
   ! grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
+}
+
+# ⚠ LE TEMOIN QUI GARDE LA CORRECTION AU PASSAGE. L'en-tete d'authentification etait construit dans
+# un tableau passe a `curl` en ARGV : le jeton systeme etait donc lisible dans `/proc/<pid>/cmdline`
+# par n'importe quel process de la boite, pendant toute la duree de l'appel. Fermer un fichier
+# `0640` et laisser le secret dans une ligne de commande annulerait le geste au moment ou il
+# s'exerce. `-K -` le fait passer par un tube.
+@test "list.sh: le jeton ne passe JAMAIS en argv de curl" {
+  local src="$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
+  grep -q 'curl -sSf -m 15 -K -' "$src"
+  run grep -c -- '-H "Authorization' "$src"
+  [ "$output" -eq 0 ]
 }

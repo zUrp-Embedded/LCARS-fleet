@@ -112,6 +112,53 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [ "$output" = "0" ]
 }
 
+# ─── LA TABLE ET LE MANIFESTE DISENT-ILS LA MEME CHOSE DU MEME OBJET ? ──────────────────────────
+#
+# ⚠ RIEN NE LES COMPARAIT, ET ILS AVAIENT DIVERGE. Mesure du 2026-08-26 :
+#
+#     system.manifest   /run/lcars/toolchain   0755  root:root
+#     le seul poseur    /run/lcars/toolchain   2775  root:fleet   (45-sudoers-toolchain, install -d nu)
+#
+# Faux sur le MODE et sur le GROUPE, dans le sens qui SOUS-ESTIME qui peut ecrire — un lecteur du
+# manifeste croyait le repertoire ferme au groupe alors que le BEAM y ecrit son marqueur. Et le
+# chemin vivait hors de cette table, donc hors du `tmpfiles.d` : il ne revenait pas au boot.
+#
+# LES DEUX MURS ISO NE POUVAIENT PAS LE VOIR : ils comparent la PRESENCE d'un chemin (« pose mais
+# non declare », « declare mais sans poseur »), jamais son mode ni son proprietaire. C'est un axe
+# entier de la table qui n'avait aucun lecteur. Ce temoin est cet axe.
+@test "MANIFESTE vs TABLE : mode et proprietaire s'accordent sur chaque repertoire runtime" {
+  local manifest="$BATS_TEST_DIRNAME/../system.manifest"
+  [ -f "$manifest" ]
+  PROV_SUBSTRATE=linux mod 'prov_runtime_dirs'
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+
+  local path mode owner m_mode m_owner row key want_owner bad=0 n=0
+  while read -r path mode owner; do
+    [[ -n "$path" ]] || continue
+    # Le manifeste ecrit le dossier de l'humain avec un joker ; la table rend le nom reel.
+    key="$path"; want_owner="$owner"
+    if [[ "$path" == /run/lcars/console/* ]]; then
+      key="/run/lcars/console/<human>"
+      want_owner="<human>:${owner#*:}"
+    fi
+    row="$(awk -v p="$key" '$1=="runtime" && $2==p {print; exit}' "$manifest")"
+    [[ -n "$row" ]] || { echo "DANS LA TABLE, PAS AU MANIFESTE : $path"; bad=1; continue; }
+    m_mode="$(awk '{print $3}' <<<"$row")"
+    m_owner="$(awk '{print $4}' <<<"$row")"
+    n=$((n + 1))
+    [[ "${m_mode#0}" == "${mode#0}" ]] \
+      || { echo "MODE : $path — manifeste $m_mode, table $mode"; bad=1; }
+    [[ "$m_owner" == "$want_owner" ]] \
+      || { echo "OWNER : $path — manifeste $m_owner, table $want_owner"; bad=1; }
+  done <<<"$output"
+
+  # ⚠ GARDE DE POPULATION : zero ligne comparee et zero desaccord rendent le meme vert. Sans elle,
+  # un `prov_runtime_dirs` qui rendrait vide ferait passer ce temoin pour un accord parfait.
+  [ "$n" -ge 5 ] || { echo "seulement $n lignes comparees — le decor ne rend pas la table"; return 1; }
+  [ "$bad" -eq 0 ]
+}
+
 @test "la declaration tmpfiles est DERIVEE de la table — une seule source, pas deux" {
   PROV_SUBSTRATE=linux mod 'prov_tmpfiles_body'
   [ "$status" -eq 0 ]
@@ -160,4 +207,47 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [ "$status" -eq 0 ]
   [ ! -e "$LCARS_TMPFILES_CONF" ]
   [[ "$output" == *"retiree"* ]]
+}
+
+# ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,
+# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/home/private` a donc
+# coute SEPT objets sans aucun rapport avec lui : les trois racines de face, la racine des consoles,
+# l'etat tofu, et la declaration tmpfiles — celle-la meme dont le temoin d'au-dessus dit qu'elle
+# porte « la fleet ne demarrera pas ». La machine a fini avec `lcars-landing` debout et aucune
+# racine de console.
+#
+# LES DEUX MOITIES VONT PAR PAIRE, d'ou deux temoins : la boucle doit CONTINUER, et le module doit
+# quand meme SORTIR NON NUL. Tenir la premiere seule transformerait un echec en succes silencieux —
+# l'inverse exact du defaut qu'on repare.
+
+@test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
+  # `/proc/...` ne peut pas etre cree, a coup sur et sans droits speciaux : la premiere entree
+  # echoue pour de vrai, pas par un stub.
+  local bonne="$BATS_TEST_TMPDIR/apres"
+  run bash -c "set -uo pipefail
+    source '$MOD' >/dev/null 2>&1
+    prov_dirs() { printf '%s\n' '/proc/impossible-a-creer 0700 root:root' '$bonne 0755 $(id -un):$(id -gn)'; }
+    apply_tmpfiles() { :; }
+    apply"
+
+  # MOITIE 1 : l'entree d'APRES est posee. Sans le correctif, la boucle mourait sur la premiere.
+  [ -d "$bonne" ] || { echo "la table s'est arretee a la premiere entree en echec" >&2; return 1; }
+  # MOITIE 2 : et le module rend quand meme un echec.
+  [ "$status" -ne 0 ] || { echo "un module en echec a rendu 0 — le correctif a avale le verdict" >&2; return 1; }
+}
+
+@test "une table SANS echec rend toujours 0 — le correctif n'a pas rendu l'echec permanent" {
+  # LE TEMOIN DU TEMOIN. Sans lui, un module qui echouerait TOUJOURS passerait celui du dessus — il
+  # ne demande qu'un statut non nul — et chaque install serait rouge sur une machine saine.
+  local a="$BATS_TEST_TMPDIR/ok-a" b="$BATS_TEST_TMPDIR/ok-b"
+  run bash -c "set -uo pipefail
+    source '$MOD' >/dev/null 2>&1
+    prov_dirs() { printf '%s\n' '$a 0755 $(id -un):$(id -gn)' '$b 0755 $(id -un):$(id -gn)'; }
+    apply_tmpfiles() { :; }
+    apply"
+  [ "$status" -eq 0 ]
+  [ -d "$a" ]
+  [ -d "$b" ]
 }

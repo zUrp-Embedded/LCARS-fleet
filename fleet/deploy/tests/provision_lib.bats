@@ -13,6 +13,18 @@
 # The real filesystem effects (atomic write, managed block replacement) are asserted on tmpdirs.
 
 setup() {
+  # ⚠ LE DECOR POSSEDE SON ENVIRONNEMENT, ET CE FICHIER ETAIT LE SEUL DU CORPUS A NE PAS LE FAIRE.
+  # Mesure du 2026-08-26 : `PROV_VERBOSE=1 bats provision_lib.bats` rend DEUX temoins rouges — ceux
+  # qui mesurent la boucle de sonde et le bornage d'ecran de `run_step`, c'est-a-dire la branche NON
+  # verbose. Une variable heritee du shell de l'operateur basculait leur sujet sans qu'ils le sachent.
+  #
+  # Ce n'est pas une regression de `--ok` : l'ancienne branche verbose deversait tout aussi. C'est un
+  # temoin qui mesure la MACHINE QUI LE JOUE, exactement ce que ce corpus interdit partout ailleurs —
+  # `fleet_human.bats` et `services_units.bats` portent la meme boucle depuis leur premiere version.
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export LIB
   [ -f "$LIB" ]
@@ -106,7 +118,12 @@ module_sh() {
     ensure_managed_block "$f" testmark 0644 <<< "old-content"
     ensure_managed_block "$f" testmark 0644 <<< "new-content"
     grep -q "new-content" "$f"
-    ! grep -q "old-content" "$f"
+    # ⚠ `&& exit 1`, PAS `! grep`. Ce bloc tourne dans un shell `set -euo pipefail`, et bash exempte
+    # d`errexit` toute commande niee par `!` : la ligne s exécutait, echouait, et le script
+    # continuait. Mutation du 2026-08-26 — la purge de l ancien bloc cassee dans
+    # `ensure_managed_block` — le temoin restait VERT avec l ancien contenu TOUJOURS present. La
+    # convergence d un bloc gere n etait donc gardee par rien.
+    grep -q "old-content" "$f" && { echo "l ancien contenu a SURVECU a la convergence"; exit 1; }
     [ "$(grep -c "lcars:testmark" "$f")" -eq 2 ]
   '
   [ "$status" -eq 0 ]
@@ -323,6 +340,71 @@ module_sh() {
     lock="$(prov_lock_path)" || true
     [[ "$lock" != "$TMPDIR"* ]]
   '
+  [ "$status" -eq 0 ]
+}
+
+# ─── LE VERROU EST PER-HUMAIN QUAND LA PASSE L EST ──────────────────────────────────────────────
+#
+# ⚠ CE QUE CES TEMOINS GARDENT A COUTE L EQUIPEMENT D UN COMPTE. Mesure du 2026-08-25 : le
+# convergeur cree l humain de fleet PENDANT que l install tient son propre apply, appelle
+# `provision apply --human lcars --only 40-claude-bin …` pour l equiper, et se fait refuser — « un
+# autre apply est en cours ». L humain se retrouve avec un home, un shell, un groupe, et PAS de
+# `claude` : il ne peut lancer aucune fleet, et rien ne le lui dit.
+#
+# La collision est STRUCTURELLE : `48-forge-host` cree le compte de forge PENDANT l apply et le
+# convergeur poll toutes les 30 s. C est le chemin nominal d une premiere install, pas un cas de bord.
+#
+# ⚖ « on traite chaque user, on fait pas un global : si l user qu on teste est ok et qu un autre user
+# est fail, on passe par dessus » — l unite de travail est l humain, le verrou la suit.
+
+@test "verrou: deux humains ont deux verrous DISTINCTS — les serialiser ne protegeait rien" {
+  module_sh '
+    a="$(prov_lock_path alice)"
+    b="$(prov_lock_path bob)"
+    [[ "$a" != "$b" ]]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: le per-humain et le GLOBAL coexistent — c est le defaut qui a casse l install" {
+  # LE TEMOIN CENTRAL. Un apply complet tient le verrou global ; l equipement d un humain doit
+  # pouvoir tourner EN MEME TEMPS. Deux `flock` REELS sur les deux chemins, pas une comparaison de
+  # chaines : ce qui compte n est pas que les noms different, c est qu ils ne se bloquent pas.
+  module_sh '
+    g="$(prov_lock_path)"
+    h="$(prov_lock_path lcars)"
+    exec 8>"$g"; flock -n 8 || exit 1
+    exec 7>"$h"; flock -n 7 || exit 2
+    exec 7>&-; exec 8>&-
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: le MEME humain deux fois se bloque quand meme — la portee n a pas supprime le verrou" {
+  # LE TEMOIN DU TEMOIN. Sans lui, un `prov_lock_path` qui rendrait un chemin unique par APPEL
+  # passerait celui du dessus et ne verrouillerait plus rien du tout.
+  #
+  # ⚠ DEUX APPELS, PAS UNE VARIABLE REUTILISEE — ET MA PREMIERE ECRITURE FAISAIT L INVERSE. Elle
+  # appelait `prov_lock_path` UNE fois et ouvrait les deux descripteurs sur la meme chaine : un
+  # chemin unique par appel etait alors indetectable, et la mutation qui l introduisait passait
+  # VERTE. Ce qui se verifie ici n est pas que `flock` fonctionne — c est que le MEME humain resout
+  # au MEME verrou, deux appels de suite.
+  module_sh '
+    exec 8>"$(prov_lock_path lcars)"; flock -n 8 || exit 1
+    exec 7>"$(prov_lock_path lcars)"
+    flock -n 7 && exit 2
+    exec 7>&-; exec 8>&-
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "verrou: une portee qui s evade du dossier prouve est REFUSEE" {
+  # Le nom de portee devient un nom de FICHIER. Un `../` deplacerait le verrou hors du dossier dont
+  # on vient de prouver le mode et le proprietaire — et le prouver pour ecrire ailleurs serait pire
+  # que ne pas le prouver du tout.
+  module_sh 'prov_lock_path "../evade" >/dev/null 2>&1 && exit 1; :'
+  [ "$status" -eq 0 ]
+  module_sh 'prov_lock_path "a/b" >/dev/null 2>&1 && exit 1; :'
   [ "$status" -eq 0 ]
 }
 
@@ -664,6 +746,103 @@ module_sh() {
   '
   [ "$status" -eq 0 ]
   [[ "$output" == *"FAIL"* ]]
+}
+
+@test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
+  # ⚠ LE DEFAUT PRECEDENT AVAIT UNE SECONDE MOITIE, ET ELLE A SURVECU AU CORRECTIF. La branche
+  # `PROV_VERBOSE=1` de `run_step` deleguait a `run_quiet`, qui ne connait AUCUNE tolerance et
+  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/install.sh` redevenait un echec des que
+  # quelqu'un lancait `provision --verbose` — c'est-a-dire exactement quand ca va mal et qu'on
+  # regarde. Et `PROV_LAST_RC` n'etait pas pose du tout : l'appelant qui le relit lisait le code d'un
+  # appel PRECEDENT, donc prenait une decision sur la mesure d'autre chose.
+  #
+  # Les deux temoins ci-dessus tournaient en mode nominal et restaient VERTS pendant ce temps.
+  module_sh '
+    export PROV_VERBOSE=1
+    run_step --ok 3 "etape" -- bash -c "exit 3"
+    [ "$PROV_LAST_RC" -eq 3 ]
+    [ "$PROV_FAILED" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "run_step --verbose : PLUSIEURS --ok sont tous tolérés, pas seulement le premier" {
+  # ⚠ MES DEUX TEMOINS VERBOSE NE COUVRAIENT QU'UN SEUL `--ok`, ET LA LACUNE A ETE PROUVEE PAR
+  # MUTATION : en remplacant la boucle `for c in "${ok_codes[@]}"` par un test sur `ok_codes[0]`
+  # seul, les deux restaient VERTS — alors que `64-services` appelle `run_step --ok 1 --ok 2`, donc
+  # le rc 2 du convergeur (drift residuel, le cas NOMINAL d'un humain frais) redevenait un echec
+  # d'apply des qu'on lance `provision --verbose`.
+  #
+  # Un contrat qui accepte une LISTE se mesure sur au moins deux elements, et sur le DERNIER : c'est
+  # celui qu'une implementation qui ne lit que le premier laisse tomber.
+  module_sh '
+    export PROV_VERBOSE=1
+    run_step --ok 1 --ok 2 "etape" -- bash -c "exit 2"
+    [ "$PROV_LAST_RC" -eq 2 ]
+    [ "$PROV_FAILED" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "run_step --verbose : un code NON tolere reste un echec entier, et PROV_LAST_RC le dit" {
+  # Le pendant : sans lui, une branche verbose qui tolererait TOUT passerait le temoin precedent.
+  module_sh '
+    export PROV_VERBOSE=1
+    rc=0
+    run_step --ok 3 "etape" -- bash -c "exit 4" || rc=$?
+    [ "$rc" -eq 4 ]
+    [ "$PROV_LAST_RC" -eq 4 ]
+    [ "$PROV_FAILED" -eq 1 ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAIL"* ]]
+}
+
+# ─── LE PIN ELIXIR/OTP EST UN MIROIR, ET IL N'AVAIT AUCUN GARDIEN ───────────────────────────────
+#
+# ⚠ DEUX RAILS, DEUX MECANISMES, UNE SEULE VERSION — mais rien ne le VERIFIAIT pour Elixir.
+#
+#   rail poste   `provision-lib.sh` : PROV_ELIXIR_VERSION + PROV_ELIXIR_OTP_MAJOR, zip verifie sha256
+#   rail boite   `Dockerfile`       : ARG BUILD_IMAGE=hexpm/elixir:<ver>-erlang-<otp>...@sha256:...
+#
+# Le Dockerfile ecrit « les deux bougent ENSEMBLE ». C'etait une convention de PROCESSUS : aucune
+# machine ne la lisait. Le pin tofu, lui, a son mur depuis toujours (`tofu_tool.bats`) — celui-ci
+# est ecrit sur le meme patron, et son absence etait un trou par symetrie manquante.
+#
+# CE QUE CA COUTERAIT : un bump du zip Elixir sans bump de l'image (ou l'inverse) donne un poste et
+# une boite qui compilent la MEME release avec deux compilateurs differents. Les artefacts BEAM sont
+# sensibles a la version d'OTP — c'est exactement la panne mesuree le 2026-08-22 (« un hote 26.04 a
+# servi OTP 27 sous un plancher 25 »), transposee d'un rail a l'autre.
+@test "le pin Elixir/OTP de la lib est IDENTIQUE a celui du Dockerfile" {
+  local dockerfile="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  [ -f "$dockerfile" ]
+
+  # La lib : les deux defauts, lus a la source (`: "${VAR:=valeur}"`).
+  local v_lib otp_lib
+  v_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_VERSION:=[0-9.]+' "$LIB" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+  otp_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_OTP_MAJOR:=[0-9]+' "$LIB" | grep -oE '[0-9]+$')"
+
+  # Le Dockerfile : la balise de l'image de build porte les deux, `<ver>-erlang-<otp>.<...>`.
+  local tag v_docker otp_docker
+  tag="$(grep -oE '^ARG BUILD_IMAGE=hexpm/elixir:[0-9.]+-erlang-[0-9.]+' "$dockerfile")"
+  v_docker="$(grep -oE 'elixir:[0-9.]+' <<<"$tag" | cut -d: -f2)"
+  otp_docker="$(grep -oE 'erlang-[0-9]+' <<<"$tag" | cut -d- -f2)"
+
+  # ⚠ GARDE D'INSTRUMENT : quatre extractions, et une seule qui rate rendrait deux chaines VIDES
+  # donc EGALES. Un mur qui compare du vide a du vide est vert sur n'importe quelle derive.
+  [ -n "$v_lib" ]    || { echo "extraction ratee : PROV_ELIXIR_VERSION dans $LIB"; return 1; }
+  [ -n "$otp_lib" ]  || { echo "extraction ratee : PROV_ELIXIR_OTP_MAJOR dans $LIB"; return 1; }
+  [ -n "$v_docker" ] || { echo "extraction ratee : ARG BUILD_IMAGE dans $dockerfile"; return 1; }
+  [ -n "$otp_docker" ] || { echo "extraction ratee : erlang-<otp> dans $dockerfile"; return 1; }
+
+  [ "$v_lib" = "$v_docker" ] \
+    || { echo "Elixir : lib $v_lib, Dockerfile $v_docker"; return 1; }
+  [ "$otp_lib" = "$otp_docker" ] \
+    || { echo "OTP majeur : lib $otp_lib, Dockerfile $otp_docker"; return 1; }
 }
 
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {

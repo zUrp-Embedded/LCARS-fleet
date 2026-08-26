@@ -165,8 +165,14 @@ EOF2
   : > "$BATS_TEST_TMPDIR/tokens/forge-seed.pass"
 }
 
+# ⚠ LES DEUX FIXTURES CI-DESSOUS ONT ETE ECHANGEES PAR LA CIBLE, PAS PAR UNE EDITION. L'etat
+# convergé était `640 root:<groupe admin>` ; il est `600 root:root` depuis que le geste vit dans un
+# service root et que plus aucun humain n'a besoin de lire ces secrets. Les noms des deux temoins
+# sont donc restes attaches a l'ANCIENNE cible : chacun annonçait la branche que l'autre exerce.
+# Les deux passaient — c'est bien le probleme. Un nom de test est ce qu'un lecteur croit sur parole
+# pour savoir quelle branche est couverte ; faux, il est pire qu'un commentaire perime.
 @test "apply : modes DEJA convergés → le module ne meurt pas, il atteint l'étape suivante" {
-  apply_stubs "640 root:lcars-admin"
+  apply_stubs "600 root:root"
   run bash "$MODULE" apply
 
   # L'etape d'apres est la sonde de structure. Si elle parle, la ligne mortelle a ete franchie.
@@ -176,7 +182,8 @@ EOF2
 @test "apply : modes À CORRIGER → même chemin, et c'est le cas qui MASQUAIT le défaut" {
   # Ici la branche chgrp/chmod rend 0, donc le module survivait meme sans `return 0`. Le garder
   # comme temoin nomme le pourquoi : sans lui, on croirait que le premier test suffit.
-  apply_stubs "600 root:root"
+  # La fixture est un mode QUI N'EST PLUS LA CIBLE — donc le module doit le corriger.
+  apply_stubs "640 root:lcars-admin"
   run bash "$MODULE" apply
 
   [[ "$output" == *"structure absente"* ]]

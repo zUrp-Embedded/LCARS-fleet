@@ -299,7 +299,14 @@ apply() {
     verdict_apply
   fi
 
-  install -d -m 0755 "$(dirname "$PROV_DECK_OIDC_FILE")"
+  # ⚠ `ensure_dir`, PAS `install -d` : ce dernier ne passe pas par `prov_refuse_symlink_path`, donc
+  # un lien pose dans un composant du chemin faisait chmoder sa CIBLE en root (vecteur 6-131). Le
+  # repertoire — `/etc/lcars` — appartient a `25-directories`, qui le declare `0755 root:root`. Ce
+  # site ne PASSE DONC PAS d'owner : il garantit l'existence et le mode avant d'ecrire, rien de plus.
+  # Le lui faire revendiquer `root:root` en ferait une seconde autorite sur le meme objet — et ca se
+  # voit tout de suite hors production, ou le proprietaire n'est pas root et ou le chown est refuse.
+  ensure_dir "$(dirname "$PROV_DECK_OIDC_FILE")" 0755 \
+    || { p_fail "répertoire de la config OIDC non convergé ($(dirname "$PROV_DECK_OIDC_FILE"))"; verdict_apply; }
   local tmp; tmp="$(mktemp "${PROV_DECK_OIDC_FILE}.XXXXXX")"
   # LES URI ENREGISTREES VOYAGENT AVEC LA CONFIG, et ce n'est pas de la redondance. Le deck derive
   # son `redirect_uri` du `Host` de la requete ; si la personne arrive par une entree qui n'est PAS

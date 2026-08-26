@@ -39,7 +39,22 @@ set -euo pipefail
 STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token}"
+# ⚠ CE SCRIPT N'OUVRE PLUS AUCUN SECRET, ET C'EST UNE PROPRIETE DU RAIL, PAS UNE ECONOMIE.
+#
+# Il lisait `/home/private/<compte>.gitea_token` — donc il DETENAIT un credential de forge en meme
+# temps qu'il portait le seul geste root de la machine. La regle qui donne sa forme a ce rail est
+# l'inverse exact : celui qui a le PRIVILEGE ne detient AUCUN secret, et celui qui detient n'a aucun
+# privilege. Un process qui a les deux peut escalader ce qu'il vole.
+#
+# ⚠ LA LECTURE PART EN ANONYME, ET C'EST MESURE. Mesure du 2026-08-25 sur forge vivante :
+# `fleet/lcars` est `private=false, internal=false`, et `/branches/tool_request` comme
+# `/contents/ops` repondent 200 SANS aucun en-tete d'autorisation. Le depot d'ops est public par
+# construction — c'est celui que tout le monde doit pouvoir lire pour savoir ce que la boite declare.
+#
+# `FORGE_TOKEN` reste accepte pour une boite dont la forge exige une session en lecture. C'est une
+# entree EXPLICITE, posee sur l'unite, jamais un chemin que ce script irait ouvrir : savoir OU
+# trouver un secret, c'est deja avoir le droit de le lire.
+TOKEN="${FORGE_TOKEN:-}"
 # LE REPERTOIRE DE TRAVAIL EST JETABLE, ET IL NE S'OUVRE NI DANS L'ETAT TOFU NI DANS LE MAGASIN.
 # `/var/lib/lcars/tofu` porte l'etat terraform des catalogues : il contient les valeurs des
 # variables, mot de passe de seed compris, et il est ferme en consequence.
@@ -79,10 +94,19 @@ exec 9>"$LOCK" || die 1 "verrou inouvrable ($LOCK)"
 flock -n 9 || die 0 "une convergence tourne deja — celle-ci n'a rien a faire (ce n'est PAS un echec)"
 
 [[ -n "$FORGE" ]] || die 1 "FORGE_BASE_URL absent — impossible de lire le manifeste"
-[[ -r "$TOKEN_FILE" ]] || die 1 "jeton illisible ($TOKEN_FILE)"
-TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 
-api() { curl -sS -m 30 -H "Authorization: token $TOKEN" "$FORGE/api/v1$1"; }
+# ⚠ `-K -` ET PAS `-H`, ET C'EST UNE FUITE FERMEE AU PASSAGE. L'en-tete etait construit en ARGV :
+# quand un jeton EST fourni, il se lisait dans `/proc/<pid>/cmdline` — par tout le monde, pendant
+# toute la duree de l'appel, dans le process le plus privilegie de la machine. `-K -` le fait passer
+# par un tube. Sans jeton, aucune configuration n'est produite et l'appel part en anonyme.
+api() {
+  if [[ -n "$TOKEN" ]]; then
+    printf 'header = "Authorization: token %s"\n' "$TOKEN" \
+      | curl -sS -m 30 -K - "$FORGE/api/v1$1"
+  else
+    curl -sS -m 30 "$FORGE/api/v1$1"
+  fi
+}
 
 # ─── LE SHA DOIT ETRE LA TETE DE LA BRANCHE PROTEGEE ────────────────────────────────────────────
 #

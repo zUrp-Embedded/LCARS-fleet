@@ -348,14 +348,14 @@ ports_of() {
 # lieu de refaire son propre filtre sur /etc/passwd — c'est ce qui met fin a la seconde autorite. Un
 # contrat que deux programmes lisent et que rien n'epingle est un contrat en sursis.
 
-humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
-  # identite-v2 : l'eligibilite derive du groupe `fleet`. Le 2e arg = les membres (csv) que le test
-  # declare dans le groupe ; un compte absent de cette liste est rejete meme s'il est valide par ailleurs.
+humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
+  # ⚠ LE 2e ARGUMENT NE SERT PLUS A RIEN, ET IL EST GARDE EXPRES. L'eligibilite ne lit plus AUCUN
+  # groupe : elle derive de conditions de SIEGE (uid dans la plage, home, shell, et pas le siege).
+  # Garder la position evite de reecrire vingt appels pour un parametre mort — et le nommer `ignore`
+  # dit ce qu'il est. Le jour ou quelqu'un lui redonne un sens, il le fera en le renommant.
   local pw="$1"; shift
-  local members="${1:-}"; [[ $# -gt 0 ]] && shift
-  local grp="$BATS_TEST_TMPDIR/group.humans_sh"
-  printf 'fleet:x:2000:%s\n' "$members" > "$grp"
-  LCARS_CONSOLE_PASSWD="$pw" LCARS_CONSOLE_GROUP_FILE="$grp" \
+  [[ $# -gt 0 ]] && shift
+  LCARS_CONSOLE_PASSWD="$pw" \
     run bash "$BATS_TEST_DIRNAME/../../services/console-humans.sh" "$@"
 }
 
@@ -370,36 +370,77 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   [ "${lines[0]}" = "zoe 1015 $home/zoe" ]
 }
 
-@test "identite-v2: un compte eligible HORS du groupe fleet est rejete (derive de l'autorite, pas de l'uid)" {
+# ─── L'ELIGIBILITE NE DERIVE PLUS D'UN GROUPE, ELLE DERIVE DU SIEGE ─────────────────────────────
+#
+# ⚠ CE TEMOIN EPINGLAIT « hors du groupe `fleet` -> rejete », et il appelait ce groupe une AUTORITE.
+# C'en etait une PROJECTION : le convergeur y ajoutait chaque membre de l'equipe `humans` de la
+# forge, toutes les trente secondes. Filtrer dessus, c'etait lire un cache pour repondre a une
+# question qui n'en a pas besoin — « cette personne a-t-elle un siege de travail sur cette machine ».
+#
+# Le groupe n'ouvre plus rien depuis ce chantier. Ce qui reste a garder est la seule exclusion qui
+# ait jamais eu une raison — et elle etait un EFFET DE BORD, jamais une regle : le siege.
+@test "le SIEGE n'a pas de console worker — condition ECRITE, plus un effet de bord du groupe" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
-  mkdir -p "$home/zoe" "$home/ghost"
-  # ghost : uid valide, home, /bin/bash -> eligible sur TOUS les criteres SAUF le groupe fleet.
-  # (admiral, lui, EST dans le groupe fleet — c'est ainsi qu'il a sa console ; cf. entrypoint/20-groups.)
-  printf 'ghost:x:1044:1044::%s/ghost:/bin/bash\n' "$home" > "$pw"
+  mkdir -p "$home/zoe" "$home/admiral"
+  # Le siege est eligible sur TOUS les autres criteres : uid dans la plage, home, /bin/bash. Seule
+  # sa qualite de siege le sort — lui ouvrir une console worker mettrait un shell sudo-capable
+  # derriere la porte WEB de la boite, l'exact inverse de ce que les pods confinent.
+  printf 'admiral:x:1000:1000::%s/admiral:/bin/bash\n' "$home" > "$pw"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
 
-  humans_sh "$pw" "zoe"   # seul zoe est membre du groupe fleet
+  humans_sh "$pw" ""
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
-  [[ "$output" != *"ghost"* ]]
+  [[ "$output" != *"admiral"* ]]
 }
 
-# ─── LE MEMBRE QUE `/etc/group` NE NOMME PAS ────────────────────────────────────────────────────
+@test "le siege se reconnait a son UID, jamais a son login — le login est VARIABLE" {
+  # `00` §5 : `admiral` sur banc, le login que l'installeur a cree en prod. La cle est l'uid, la
+  # meme que GUARD A/B et que le miroir BEAM de `runtime.exs`. Ici le siege s'appelle `patron` et il
+  # est exclu quand meme ; un compte NOMME `admiral` a un uid ordinaire ne l'est PAS.
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/patron" "$home/admiral"
+  printf 'patron:x:1000:1000::%s/patron:/bin/bash\n' "$home" > "$pw"
+  printf 'admiral:x:1042:1042::%s/admiral:/bin/bash\n' "$home" >> "$pw"
+
+  humans_sh "$pw" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"patron"* ]]
+  [[ "$output" == *"admiral"* ]]
+}
+
+@test "l'uid du siege est un REGLAGE, pas le chiffre 1000 code en dur" {
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe" "$home/chef"
+  printf 'chef:x:1077:1077::%s/chef:/bin/bash\n' "$home" > "$pw"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
+
+  LCARS_SYSADMIN_UID=1077 humans_sh "$pw" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" != *"chef"* ]]
+}
+
+# ─── LE MEMBRE QUE `/etc/group` NE NOMMAIT PAS — LA CICATRICE, ET POURQUOI ELLE RESTE ───────────
 #
 # Un compte cree `useradd -g fleet` a le groupe pour gid PRIMAIRE, et /etc/group ne le liste PAS
-# dans son champ 4 — ce champ ne porte que les ajouts secondaires. `id -nG` le dit membre, ce
-# fichier ne le dit pas : deux reponses vraies a deux questions differentes, et la regle de la
-# console veut la premiere.
+# dans son champ 4 — ce champ ne porte que les ajouts secondaires. `id -nG` le disait membre, le
+# fichier non : deux reponses vraies a deux questions differentes, et la regle lisait la mauvaise.
 #
 # Mesure du 2026-08-21, poste natif : `lcars`, l'humain de fleet pose par 22-fleet-human, tenait le
 # BEAM et sa `deck.sock` — et etait absent de cette liste. Le deck ne lisait donc jamais sa socket
 # et affichait « 0 pod » sur une fleet vivante. Le mode de defaillance est le pire qui soit : un
 # compteur a zero, identique a celui d'une fleet reellement vide.
-@test "un humain dont le groupe fleet est le groupe PRIMAIRE est un membre — /etc/group ne le nomme pas" {
+#
+# ⚠ CE PIEGE N'EXISTE PLUS, ET LE TEMOIN RESTE PARCE QUE SON CAS EST REEL. `lcars` est le compte que
+# `22-fleet-human` pose sur toute boite native, avec exactement cette forme de ligne de passwd — il
+# DOIT etre servi. Il l'est maintenant pour une raison plus simple : plus rien ne regarde son gid.
+# Garder le cas coute une ligne et attrape le jour ou quelqu'un rebranche une lecture de groupe ;
+# le retirer parce que « sa cause a disparu » retirerait la preuve que la cause a disparu.
+@test "l'humain de fleet du rail poste (useradd -g fleet) est servi — le cas qui affichait « 0 pod »" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/lcars"
-  # gid 2000 = celui que la fixture donne au groupe fleet ; le champ 4 reste VIDE, comme sur la
-  # machine reelle apres un `useradd -g fleet`.
+  # La forme EXACTE que `22-fleet-human` produit : gid primaire = celui de `fleet`, champ 4 vide.
   printf 'lcars:x:1001:2000::%s/lcars:/bin/bash\n' "$home" > "$pw"
 
   humans_sh "$pw" ""
@@ -407,15 +448,25 @@ humans_sh() { # humans_sh <passwd-file> <fleet-members-csv> [--verbose]
   [ "${lines[0]}" = "lcars 1001 $home/lcars" ]
 }
 
-@test "le gid primaire n'ouvre QUE sur le groupe de la console — un autre gid reste dehors" {
+# ⚠ CE TEMOIN EPINGLAIT « un autre gid reste dehors », ET SON SUJET A DISPARU AVEC LE FILTRE. Il
+# gardait une comparaison d'egalite sur un gid — utile tant que le gid decidait. Il ne decide plus
+# rien : ce qui le remplace est sa CONTREPARTIE, et elle est la moitie qu'aucun temoin ne tenait.
+#
+# Sans elle, un `console-humans.sh` qui rejetterait TOUT passerait les trois temoins du siege
+# ci-dessus — ils cherchent tous une ABSENCE — et la boite n'ouvrirait plus une seule console, en
+# affichant « 0 pod », c'est-a-dire exactement ce qu'affiche une fleet vide.
+@test "un humain ORDINAIRE est servi quels que soient ses groupes — le gid ne decide plus rien" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
-  mkdir -p "$home/ghost"
-  # 2001 est voisin de 2000 et n'est pas lui : la comparaison doit etre une egalite, pas un prefixe.
-  printf 'ghost:x:1044:2001::%s/ghost:/bin/bash\n' "$home" > "$pw"
+  mkdir -p "$home/zoe" "$home/max"
+  # Deux gids sans aucun rapport avec `fleet`, et aucun fichier de groupe n'est fourni : sous
+  # l'ancienne regle, les deux etaient rejetes.
+  printf 'zoe:x:1015:4242::%s/zoe:/bin/bash\n' "$home" > "$pw"
+  printf 'max:x:1016:7777::%s/max:/bin/bash\n' "$home" >> "$pw"
 
   humans_sh "$pw" ""
   [ "$status" -eq 0 ]
-  [[ "$output" != *"ghost"* ]]
+  [[ "$output" == *"zoe"* ]]
+  [[ "$output" == *"max"* ]]
 }
 
 @test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {

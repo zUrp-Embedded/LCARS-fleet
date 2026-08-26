@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/services/lcars-authority-ask.sh   (posé: /usr/local/bin/lcars-authority-ask)
+# AUTHOR: bob
+# STARDATE: 2026-08-25
+# STATUS: PROTO-V2 — demander un jeton de forge au service d'autorite, depuis un shell
+#
+# ─── POURQUOI CE FICHIER ────────────────────────────────────────────────────────────────────────
+#
+# Trois gestes de shell lisaient `/home/private/<compte>.gitea_token` sous l'uid d'un humain :
+# `lcars publish run`, `lcars approve`, et le skill `system-issues` du siege. Le fichier etait
+# `0640 root:fleet`, et ce groupe etait une PROJECTION de l'equipe `humans` de la forge, refaite
+# toutes les trente secondes — donc le droit de porter une identite de travail avait la peremption
+# d'un cache, et sa revocation demandait un `pkill`.
+#
+# La question se pose maintenant a la socket. Elle ne porte aucune peremption, et le service sait QUI
+# demande : le noyau le lui dit (`SO_PEERCRED`), pas le fil.
+#
+# ─── POURQUOI UN EXECUTABLE SUR LE PATH, ET PAS UN FICHIER A SOURCER ────────────────────────────
+#
+# Ses trois appelants vivent dans trois arbres qui ne se voient pas : `fleet/bin/` (la CLI),
+# `fleet/deploy/admiral/skills/` (le siege), et le release. Un fichier a sourcer les obligerait
+# chacun a deviner ou il a atterri — et un `source` importe aussi les options de shell du fichier
+# chez son appelant, ce qui arme ou desarme `set -e` a distance.
+#
+# Meme forme que `toolchain-converger.sh` -> `/usr/local/bin/lcars-toolchain-converge` : un nom sur
+# le PATH, pose par `62-runtime-helpers` sur le rail poste et par le `COPY` de l'image sur l'autre.
+#
+# ─── LE CONTRAT ─────────────────────────────────────────────────────────────────────────────────
+#
+#   lcars-authority-ask <compte-forge>
+#
+#   sortie 0  : le jeton, seul, sur stdout, suivi d'un saut de ligne
+#   sortie 1  : RIEN sur stdout, une cause en francais sur stderr
+#
+# ⚠ RIEN SUR STDOUT EN CAS D'ECHEC, ET C'EST LA MOITIE DU CONTRAT. L'appelant type est
+# `… > "$fichier"` : une cause imprimee sur stdout deviendrait un « jeton » de trente mots, envoye
+# a la forge, refuse en 401, et diagnostique comme une revocation.
+
+set -euo pipefail
+
+SOCKET="${LCARS_ROLES_SOCKET:-/run/lcars/authority/roles.sock}"
+
+usage() { echo "usage: ${0##*/} <compte-forge>" >&2; exit 2; }
+[[ $# -eq 1 && -n "${1:-}" ]] || usage
+compte=$1
+
+# ⚠ LE COMPTE EST VALIDE ICI *AUSSI*, ET CE N'EST PAS UNE REDONDANCE. Le service le revalide de son
+# cote — c'est lui qui garde la frontiere, et il ne s'appuie sur personne. Ce controle-ci sert a
+# autre chose : un nom qui contient un saut de ligne enverrait DEUX lignes sur la socket, dont la
+# seconde serait lue comme une requete distincte. On ne laisse pas un appelant decider du cadrage.
+[[ "$compte" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+  echo "autorite: « $compte » n'est pas un nom de compte forge" >&2; exit 1; }
+
+if command -v socat >/dev/null 2>&1; then
+  transport=socat
+elif command -v nc >/dev/null 2>&1; then
+  transport=nc
+else
+  echo "autorite: ni « socat » ni « nc » sur cette boite — bash n'ouvre pas de socket unix nu" >&2
+  exit 1
+fi
+
+# LA PORTE FERMEE ET LA PORTE GARDEE NE SE DISENT PAS PAREIL. Une socket absente est un fait
+# SYSTEME (le service ne tourne pas) ; un refus est une reponse. Les confondre envoie l'operateur
+# chercher une autorisation manquante alors qu'il lui manque une unite.
+[[ -S "$SOCKET" ]] || {
+  echo "autorite: le service d'autorite n'ecoute pas ($SOCKET absent). Ce n'est pas un refus.
+  « systemctl status lcars-catalogue » — puis « journalctl -u lcars-catalogue »" >&2
+  exit 1; }
+
+# ⚠ DEUX PIEGES DEJA PAYES SUR LE CLIENT DE `catalogue.sock`, ET ILS SE REPAYENT ICI :
+#
+#   · `socat -t` — apres l'EOF de NOTRE stdin, socat ferme l'autre sens au bout de 0,5 s par defaut.
+#     La reponse est immediate en temps normal ; un defaut qui n'apparait que sous latence est un
+#     defaut qui apparait le jour ou la forge rame, c'est-a-dire le jour ou on le diagnostique mal.
+#
+#   · LE CODE DE SORTIE DU TRANSPORT NE PROUVE RIEN. Mesure du chantier precedent : `socat` rend
+#     ZERO avec une sortie VIDE quand il ferme avant la reponse. Un succes silencieux. Seule la
+#     ligne rendue fait foi — d'ou le `|| true` et le controle qui suit.
+case "$transport" in
+  socat) reponse="$(printf '%s\n' "$compte" | socat -t 60 - UNIX-CONNECT:"$SOCKET" 2>/dev/null || true)" ;;
+  nc)    reponse="$(printf '%s\n' "$compte" | nc -q -1 -U "$SOCKET" 2>/dev/null || true)" ;;
+esac
+reponse="${reponse%%$'\n'*}"
+
+[[ -n "$reponse" ]] || {
+  echo "autorite: AUCUNE reponse pour « $compte » — ni jeton, ni cause. Ce silence ne se lit pas
+  comme un oui. « journalctl -u lcars-catalogue » dit ce que le service a vu." >&2
+  exit 1; }
+
+# LES CAUSES RESTENT SEPAREES PARCE QUE LEURS REMEDES SONT OPPOSES : une forge muette se reessaie,
+# une autorite absente se repose par un admin, et `not_a_worker` veut dire que la forge t'a retire.
+# Les fondre en « pas de jeton » enverrait la moitie des cas au mauvais geste.
+case "$reponse" in
+  FAIL:not_a_worker)
+    echo "autorite: la forge dit que tu n'es pas de l'equipe « humans » de l'org.
+  Un proprietaire t'y ajoute, et c'est effectif A LA COMMANDE SUIVANTE — rien a redemarrer." >&2
+    exit 1 ;;
+  FAIL:no_authority)
+    echo "autorite: cette BOITE n'a pas d'autorite utilisable sur sa forge — jeton master absent,
+  illisible, vide, ou refuse. Aucun reessai ne le repose :
+  « FORGE_ADMIN_TOKEN=<jeton> ./docker.sh config »" >&2
+    exit 1 ;;
+  FAIL:forge_unreachable)
+    echo "autorite: la forge n'a pas repondu. Ce n'est pas un refus, c'est une absence de reponse —
+  le geste se reessaie tel quel." >&2
+    exit 1 ;;
+  FAIL:no_role_token)
+    echo "autorite: aucun jeton pose pour le compte « $compte » — « provision apply » le minte." >&2
+    exit 1 ;;
+  FAIL:bad_role)
+    echo "autorite: « $compte » refuse par le service comme nom de compte forge." >&2
+    exit 1 ;;
+  FAIL:unknown_peer)
+    echo "autorite: le noyau donne un uid que ce systeme ne connait pas. Compte supprime pendant que
+  le geste tournait ?" >&2
+    exit 1 ;;
+  FAIL:*)
+    echo "autorite: cause non interpretee (« ${reponse#FAIL:} ») — ce script et le service ne sont
+  pas du meme lot. Verifie que /usr/local/bin/lcars-authority-ask et /opt/lcars/catalogue-executor.py
+  viennent du meme deploiement." >&2
+    exit 1 ;;
+esac
+
+printf '%s\n' "$reponse"

@@ -679,7 +679,7 @@ apply() {
     #
     # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne en root : personne d'autre
     # n'a besoin de ce fichier, donc personne d'autre ne doit pouvoir l'ouvrir.
-    write_atomic "$MASTER_TOKEN_FILE" 0600 "root:root" <<<"$tok" \
+    write_atomic "$MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
       || { p_fail "jeton master non posé ($MASTER_TOKEN_FILE)"; verdict_apply; }
     p_chg "autorité de création posée ($MASTER_TOKEN_FILE, root seul)"
   else
@@ -724,7 +724,7 @@ apply() {
     # `0600 root:root`, comme le jeton master quelques lignes plus haut : les DEUX secrets d'autorité
     # se ferment ensemble, ou l'install casse entre les deux. Seul `catalogue-executor.py` les ouvre,
     # et il tourne en root.
-    write_atomic "$SEED_FILE" 0600 "root:root" <<<"$seed" \
+    write_atomic "$SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
     p_chg "seed des comptes posé ($SEED_FILE, root seul)"
   else
@@ -896,6 +896,12 @@ apply() {
   tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
   run_step "structure de la forge" -- env \
     LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
+    `# ⚠ LE DÉTENTEUR VOYAGE AVEC LE CHEMIN, ET LES SÉPARER LES FAIT DIVERGER. « put_secret » pose` \
+    `# désormais un PROPRIÉTAIRE sur ce qu'il écrit ; sans cette ligne il retomberait sur son défaut` \
+    `# compilé pendant que ce module, lui, suivrait PROV_AUTHORITY_USER. Sur une boîte dont le compte` \
+    `# de service porte un autre nom, le secret naîtrait détenu par un compte qui n'existe pas — et` \
+    `# le service refuserait de démarrer sur un fichier que la boîte vient d'écrire.` \
+    LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
     FORGE_BASE_URL="$LOCAL_URL" \
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \

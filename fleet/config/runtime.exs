@@ -64,6 +64,23 @@ if config_env() != :test do
   config :lcars_fleet, catalogue_install_dirs: [Fleet.Layout.catalogues_installed_dir()]
 end
 
+# LE COMPTE FORGE DU SYSTEME, POSE ICI PARCE QUE DEUX CONFIGS LE PARTAGENT — `:pilot_forge` (tous
+# les verbes de forge du runtime) et `:credentials_forge_auth` (l'auth des `git push`). Deux copies
+# du meme nom derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
+#
+# `FORGE_PUSH_ACCOUNT` reste surchargeable pour un deploiement qui agit sous une autre identite que
+# celle du systeme ; sans lui, c'est le compte systeme de la boite.
+#
+# ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
+# `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet_v2.env`,
+# derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
+# PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
+# BEAM. La lire ici, c'etait lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut
+# code en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte
+# un autre nom, et muet dans les deux cas.
+forge_push_account =
+  System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") || "system_starfleet"
+
 # HORS du garde pour la meme raison que le bloc ci-dessus, et le meme defaut l'a revele : lire trois
 # variables d'env n'ouvre rien et ne demarre rien. Resolue par `ForgeClient.resolve_config/1` a
 # l'appel, cette config est ce qui permet a une porte `eval` d'AGIR sur la forge — et c'est le
@@ -72,12 +89,23 @@ end
 # `lcars project migrate` structurellement incapable : mesure du 2026-08-11 sur banc,
 # `ECHEC : {:config, {:missing, :base_url}}` — le transfert echoue FERME, sans demi-etat, mais la
 # porte n'avait jamais pu fonctionner.
+#
+# ⚠ `token_file:` A QUITTE CETTE CONFIG, ET C'EST LE PLUS GROS LECTEUR DU CHANTIER — celui que
+# l'inventaire de la phase 0b a manque. Le balayage cherchait la CHAINE `FORGE_TOKEN_FILE` et l'a
+# bien trouvee ici ; ce qui n'a pas ete suivi, c'est ou la VALEUR atterrissait. Un saut :
+# `:pilot_forge[:token_file]` -> `Transport.resolve_token/1`, lu A CHAQUE VERBE de forge du runtime,
+# sous l'uid du BEAM, donc sous l'uid d'un humain. Une trentaine de sites dans `client/repo.ex`.
+# Inventorier la chaine et pas ses consommateurs, c'est mesurer le mecanisme au lieu de l'exigence —
+# la classe de defaut que ce chantier repare, commise dans son propre inventaire.
+#
+# `account:` le remplace : le jeton se demande au service d'autorite a l'appel. `FORGE_TOKEN` reste,
+# parce qu'un jeton fourni EXPLICITEMENT par l'operateur n'est pas un repli silencieux.
 forge_opts =
   if config_env() != :test do
     [
       base_url: System.get_env("FORGE_BASE_URL"),
       token: System.get_env("FORGE_TOKEN"),
-      token_file: System.get_env("FORGE_TOKEN_FILE")
+      account: forge_push_account
     ]
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
   else
@@ -104,49 +132,45 @@ end
 # OUTSIDE argv AND OUTSIDE .git/config). System token (system_starfleet, write:repository).
 # FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
 #
-# ⚠ THE TOKEN LIVES IN THE APPLICATION ENV, IN CLEAR, FOR THE WHOLE LIFE OF THE NODE. That is a
-# DECISION, not an oversight: `ForgeAuth` reads it from there on every auth-required git op, and
-# a vault would move the secret without removing the moment it is in memory. It is written here
-# because a secret whose exposure is undocumented gets re-exposed by the next well-meaning patch.
+# ⚠ LE JETON NE VIT PLUS DANS L'APPLICATION ENV, ET CE N'EST PAS UN DEPLACEMENT — C'EST UN RETRAIT.
 #
-# WHAT MAKES IT ACCEPTABLE IS A PROPERTY OF THE SURFACE, AND THAT PROPERTY MUST BE PRESERVED:
-# nothing in the runtime reads the application env WHOLESALE, and the pod-facing MCP surface is a
-# closed list of business verbs — no pod can ask for configuration. Adding a config-dump door
-# (an "/api/config" route, a doctor that prints the env, a crash reporter that inspects it)
-# publishes this token, and the door will not look like a credentials change when it is written.
-# Never `inspect` this value: `ForgeAuth` says the same at its own site, for the same reason.
+# Il y vivait EN CLAIR POUR TOUTE LA VIE DU NOEUD, lu au BOOT depuis un fichier. Deux consequences
+# que ce bloc portait, et qui disparaissent avec lui :
+#
+#   1. UNE PANNE MUETTE. Sur echec de lecture la branche etait `_ -> nil`, donc
+#      `:credentials_forge_auth` n'etait JAMAIS pose, donc `git_env` rendait des credentials vides.
+#      Le noeud demarrait VERT et TOUS les push mouraient au premier essai sur une auth vide —
+#      onboarding, completion de step, merge. Un boot vert et un produit mort.
+#   2. UNE PEREMPTION INFINIE. Un jeton revoque sur la forge restait en memoire jusqu'au
+#      redemarrage du noeud ; rien dans la boite ne l'apprenait.
+#
+# Ce qui est pose ici est desormais un NOM DE COMPTE, pas un secret. `ForgeAuth` demande le jeton au
+# service d'autorite au moment de s'en servir — donc la revocation mord au geste suivant, et il n'y
+# a plus rien a voler dans l'application env.
+#
+# LA PROPRIETE DE SURFACE QUI RENDAIT L'ANCIEN ETAT ACCEPTABLE N'A PLUS D'OBJET ICI, mais elle reste
+# vraie et vaut d'etre sue : rien dans le runtime ne lit l'application env EN BLOC, et la surface MCP
+# des pods est une liste fermee de verbes metier. Une porte qui viderait la config (`/api/config`,
+# un doctor qui imprime l'env, un rapporteur de crash qui l'inspecte) publierait ce qui s'y trouve —
+# et elle ne ressemblera pas a un changement de credentials le jour ou quelqu'un l'ecrira.
 forge_base = System.get_env("FORGE_BASE_URL")
 
-# The push token must come from the SAME source as the poller token: var (FORGE_PUSH_TOKEN / FORGE_TOKEN)
-# THEN the FILE (FORGE_TOKEN_FILE, default ~/.gitea_token). Without this file fallback, a deployment
-# that only sets the file (the nominal case) would have an auth-less push → "could not read Username"
-# (the poller would read the file while the push reads only the var).
-default_token_file =
-  case System.user_home() do
-    home when is_binary(home) -> Path.join(home, ".gitea_token")
-    _ -> nil
-  end
-
-forge_push_token =
-  System.get_env("FORGE_PUSH_TOKEN") || System.get_env("FORGE_TOKEN") ||
-    case System.get_env("FORGE_TOKEN_FILE") || default_token_file do
-      path when is_binary(path) ->
-        case File.read(path) do
-          {:ok, t} -> String.trim(t)
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end
+# ⚠ IL Y AVAIT ICI UNE LECTURE DE FICHIER AU BOOT, ET SON REPLI ETAIT LE DEFAUT. Le jeton se
+# cherchait dans `FORGE_PUSH_TOKEN`, puis `FORGE_TOKEN`, puis `FORGE_TOKEN_FILE`, puis
+# `~/.gitea_token` — quatre sources, et la derniere resolvait sous le HOME de qui lance. Le repli
+# existait parce qu'un deploiement qui ne posait que le fichier poussait sans auth.
+#
+# Plus rien a lire : on pose un NOM DE COMPTE, et le jeton se demande au moment de pousser. Les
+# quatre sources deviennent une seule question, et le repli qui les rattrapait n'a plus d'objet.
 
 # `config_env() != :test` COMME LES DEUX BLOCS AU-DESSUS : la regle de ce fichier est que toute
 # config runtime reste hors de `:test`, et sortir du garde `tool_mode?` ne dispense pas de celui-la.
-if config_env() != :test and is_binary(forge_base) and is_binary(forge_push_token) and
-     forge_push_token != "" do
+# LE COMPTE, PAS LE JETON — et c'est le MEME `forge_push_account` que `:pilot_forge` ci-dessus, pose
+# une fois en tete de fichier.
+if config_env() != :test and is_binary(forge_base) do
   config :lcars_fleet, :credentials_forge_auth, %{
     url_prefix: forge_base,
-    token: forge_push_token
+    account: forge_push_account
   }
 end
 

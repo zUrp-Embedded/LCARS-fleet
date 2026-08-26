@@ -28,6 +28,28 @@ defmodule Fleet.Credentials.RoleIdentity do
   def for_role(_), do: {:error, :role_token_unavailable}
 
   @doc """
+  POURQUOI `for_role/1` a refusé — la cause, sans le jeton.
+
+  ## Ce que ce module refuse de faire, et pourquoi il l'expose quand même
+
+  `for_role/1` rend UNE forme d'échec, `:role_token_unavailable`, et c'est sa politique : les
+  appelants du domaine agissent pareil dans tous les cas, ils ferment. Leur donner les causes les
+  ferait décider au cas par cas, chacun à sa façon.
+
+  Un appelant a pourtant besoin de les séparer, et il est hors du domaine : le garde de BOOT du
+  rail. Depuis que le jeton se demande à un service, « pas de jeton » recouvre un défaut de
+  provisionnement (LOCAL, définitif — la boîte ne doit pas démarrer) et une porte qui ne répond pas
+  (TRANSITOIRE — refuser le boot dessus échangerait une panne rattrapable contre une boîte morte).
+
+  ⚠ CE N'EST PAS UNE PORTE DE REPLI. Elle ne rend jamais de jeton que `for_role/1` aurait refusé —
+  elle rend `{:ok, _}` seulement là où `for_role/1` aurait réussi. Ce qui se lit ici est un
+  DIAGNOSTIC, jamais une seconde chance.
+  """
+  @spec token_cause(String.t() | nil) ::
+          {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause() | :no_forge_login}
+  defdelegate token_cause(role), to: RoleToken, as: :token_result
+
+  @doc """
   Where `role`'s forge token lives — `<dir>/<login>.gitea_token`, or `:error`.
 
   The third face of the same identity, beside the token and the account: a credential FILE is named

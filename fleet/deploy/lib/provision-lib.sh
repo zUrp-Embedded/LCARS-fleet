@@ -41,16 +41,24 @@ PROVISION_LIB_LOADED=1
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
-# ⚖ ARBITRAGE USER (2026-08-17) : « ADMIN » EST UN FAIT DE FORGE, PAS `uid 0`.
-# `is_admin` cote Gitea dit qui administre le runtime — le deck le lit deja a chaque connexion
-# (`console-deck.py`, porte OIDC). Le CLI, lui, gatait `catalogue install` sur root : or AUCUN
-# humain n'est root et ne le sera. Le seul root est `admiral`, compte d'ADMINISTRATION SYSTEME —
-# son metier est d'installer des paquets, pas des catalogues.
+# Le compte du service d'autorite : il DETIENT les secrets de forge et n'a AUCUN privilege
+# noyau. L'inverse exact du convergeur, qui a le privilege et ne detient rien. Pose par
+# `21-service-accounts`, membre de `$PROV_FLEET_GROUP` pour TRAVERSER l'install RO — jamais
+# pour decider : l'adminite se demande a la forge a l'instant du geste.
+: "${PROV_AUTHORITY_USER:=lcars-authority}"
+# ⚠ ONZE LIGNES DECRIVANT UN GROUPE D'ADMINITE VIVAIENT ICI, ET LEUR VARIABLE EST PARTIE SANS
+# ELLES. Elles disaient qu'un groupe Unix PROJETTE le `is_admin` de la forge et ouvre la lecture de
+# l'autorite de la boite — c'etait vrai, ca ne l'est plus, et le pire est qu'elles etaient
+# accrochees a la ligne `PROV_FLEET_GROUP` ci-dessus : un lecteur attachait donc l'histoire de la
+# projection au groupe `fleet`, qui n'a jamais eu ce metier.
 #
-# Ce groupe est la PROJECTION Unix de ce fait, exactement comme `fleet` projette l'appartenance a
-# la team `humans` : le convergeur d'humains l'ecrit, et il ouvre la lecture de l'autorite de la
-# boite (jeton master, seed). La capacite reste le systeme de fichiers — jamais un booleen qu'un
-# appelant pourrait oublier de tester.
+# L'ADMINITE NE SE PROJETTE PLUS : elle se DEMANDE a la forge a l'instant du geste, par un service
+# joignable sur une socket, qui lit l'uid de son pair dans le noyau (`catalogue-executor.py`). Il
+# n'y a plus de groupe a peupler, donc plus rien a defauter ici.
+#
+# `PROV_FLEET_GROUP` ci-dessus n'est PAS cet objet : il donne la lecture des jetons et de l'install
+# RO. C'est du partage de fichiers, pas une autorite — et le confondre est exactement ce que le
+# commentaire retire faisait faire.
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
 # Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
 # CONSOMMATEUR (le deck, sous `nobody`) doivent se rencontrer sans que ni l'un ni l'autre ne change
@@ -336,13 +344,33 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
+  local rc=0 c
   # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
+  #
+  # ⚠ CETTE BRANCHE DELEGUAIT A `run_quiet`, ET ELLE JETAIT `--ok` EN CHEMIN. `run_quiet` `p_fail`-e
+  # sur TOUT rc non nul et ne connait aucune tolerance : sous `--verbose`, un code declare acceptable
+  # par l'appelant redevenait un echec, et `PROV_LAST_RC` n'etait meme pas pose — donc l'appelant qui
+  # le relit lisait la valeur d'un appel PRECEDENT. La tolerance rc-3 de `60-deploy`, ecrite pour que
+  # `etc/install.sh` puisse dire « pose, cablage PATH incomplet » sans faire echouer le module,
+  # disparaissait sur un drapeau d'affichage. Un mode de sortie ne change pas un verdict.
+  #
+  # Le detail est le meme que plus bas, delibrement : ce sont les deux moities d'une seule regle, et
+  # les factoriser dans une fonction tierce mettrait la boucle `--ok` a distance de son `rc`.
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     p_step "$label"
-    run_quiet "$@"
-    return "$?"
+    "$@" || rc=$?
+    PROV_LAST_RC="$rc"
+    if [[ "${#ok_codes[@]}" -gt 0 ]]; then
+      for c in "${ok_codes[@]}"; do
+        [[ "$rc" == "$c" ]] || continue
+        p_ok "$label — terminé (rc=$rc, code attendu)"
+        return 0
+      done
+    fi
+    [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
+    return "$rc"
   fi
-  local out rc=0 t0="$SECONDS" phase="" prev="" el
+  local out t0="$SECONDS" phase="" prev="" el
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 &
   local pid=$!
@@ -367,7 +395,6 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   # produit une chaîne vide unique : la boucle tourne une fois avec `c=""`, et seule la garde
   # `-n "$c"` rattrapait le coup. C'est un comportement de bash, pas un contrat — et une garde qui
   # dépend d'un effet de bord n'en est pas une.
-  local c
   if [[ "${#ok_codes[@]}" -gt 0 ]]; then
     for c in "${ok_codes[@]}"; do
       [[ "$rc" == "$c" ]] || continue
@@ -511,9 +538,39 @@ prov_parse_remote() {
 #
 # ECHEC = ARRET. Se rabattre sur `/tmp` serait re-ecrire le bug avec un commentaire qui dit qu'on ne
 # le fait pas.
+# ─── LA PORTEE DU VERROU — GLOBALE, OU CELLE D'UN SEUL HUMAIN ───────────────────────────────────
+#
+# ⚠ UN VERROU UNIQUE SERIALISAIT DES GESTES QUI NE SE TOUCHENT PAS, ET CA A COUTE UNE INSTALL.
+# Mesure du 2026-08-25 : le convergeur cree l'humain de fleet PENDANT que l'install tient son propre
+# apply, appelle `provision apply --human lcars --only 40-claude-bin …` pour l'equiper, et se fait
+# refuser — « un autre apply est en cours ». L'humain se retrouve avec un home, un shell, un groupe,
+# et PAS de `claude` : il ne peut lancer aucune fleet, et rien ne le lui dit.
+#
+# La collision n'est pas de la malchance : `48-forge-host` cree le compte de forge PENDANT l'apply,
+# et le convergeur poll toutes les 30 s — il tombe FORCEMENT dans la fenetre. C'est le chemin
+# nominal d'une premiere install, pas un cas de bord.
+#
+# ⚖ ARBITRAGE USER 2026-08-25 : « verrou per user, definitivement. On traite chaque user, on fait pas
+# un global : la preuve, si l'user qu'on teste est ok et qu'un autre user est fail, on passe par
+# dessus. » L'unite de travail EST l'humain — `reconcile_humans` le dit deja en `continue`-ant sur
+# l'echec de l'un pour traiter les suivants. Le verrou suit la meme unite.
+#
+# Deux humains n'ont aucun objet commun : leurs homes, leurs `~/.lcars`, leurs binaires `claude` sont
+# disjoints. Les serialiser n'a jamais rien protege.
+#
+# `prov_lock_path [portee]` — sans argument, le verrou GLOBAL (une passe complete, qui touche
+# `/local`, `/etc`, les unites) ; avec, le verrou de cette portee-la.
 prov_lock_path() {
-  local dir uid
+  local dir uid scope="${1:-}"
   uid="$(id -u)"
+
+  # ⚠ LA PORTEE DEVIENT UN NOM DE FICHIER : elle est bornee au charset des logins unix, jamais prise
+  # telle quelle. Un `../` ou un `/` dedans deplacerait le verrou hors du dossier qu'on vient de
+  # prouver sur — et le prouver pour ecrire ailleurs serait pire que ne pas le prouver.
+  if [[ -n "$scope" && ! "$scope" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    p_fail "verrou: portee « $scope » hors charset — REFUSE"
+    return 1
+  fi
 
   if [[ "$uid" -eq 0 ]]; then
     dir=/run/lock/lcars
@@ -540,7 +597,7 @@ prov_lock_path() {
   [[ "$owner" == "$uid" ]] || { p_fail "verrou: $dir appartient a l'uid $owner, pas a $uid"; return 1; }
   [[ "$mode" == "700" ]] || { p_fail "verrou: $dir est en $mode, attendu 700"; return 1; }
 
-  local lock="$dir/provision.lock"
+  local lock="$dir/provision${scope:+.$scope}.lock"
   # Le dossier est desormais prouve non-ecrivable par un tiers ; un lien A L'INTERIEUR ne peut donc
   # venir que de nous-memes ou d'un root anterieur. On le refuse quand meme : cette verification-la
   # coute un `[[ -L ]]` et c'est la seule qui reste entre `flock` et une troncature.

@@ -45,30 +45,37 @@ VERBOSE=0
 UID_MIN="${LCARS_CONSOLE_UID_MIN:-1000}"
 UID_MAX="${LCARS_CONSOLE_UID_MAX:-59999}"
 
-# L'ELIGIBILITE DERIVE DE L'AUTORITE : membre du groupe `fleet`. La liste des humains est portee par
-# la forge (team `humans`) et materialisee par le convergeur, qui ajoute chaque worker au groupe
-# `fleet` (`usermod -aG fleet`). Filtrer sur le groupe, c'est lire ce que le convergeur a converge,
-# au lieu de re-deviner par uid+home+shell (identite-v2). Effet de bord voulu : le sysadmin `admiral`
-# (uid 1000, groupe `sudo`, PAS `fleet`) est exclu des consoles worker — il passe par ssh. Seam de
-# test `LCARS_CONSOLE_GROUP_FILE`, meme idiome que `LCARS_CONSOLE_PASSWD`.
-CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-fleet}"
-FLEET_MEMBERS=",$(if [[ -n "${LCARS_CONSOLE_GROUP_FILE:-}" ]]; then awk -F: -v g="$CONSOLE_GROUP" '$1==g {print $4}' "$LCARS_CONSOLE_GROUP_FILE"; else getent group "$CONSOLE_GROUP" 2>/dev/null | cut -d: -f4; fi),"
-
-# ⚠ LA LISTE DE MEMBRES DE `/etc/group` NE CONTIENT PAS LES MEMBRES PAR GROUPE PRIMAIRE, et c'est
-# le piege Unix le plus vieux de ce fichier. Un compte cree `useradd -g fleet` a `fleet` pour groupe
-# primaire : `id -nG` le dit membre, le champ 4 de `/etc/group` ne le nomme nulle part. Filtrer sur
-# le seul champ 4, c'est donc repondre a « qui a ete AJOUTE au groupe », pas a « qui en est ».
+# ─── L'ELIGIBILITE EST UNE CONDITION DE SIEGE, ELLE N'EST PLUS UNE ADHESION DE GROUPE ───────────
 #
-# MESURE DU 2026-08-21, poste natif .63 : `lcars` (uid 1001, gid 1003 = fleet) est l'humain de fleet
-# — c'est LUI qui fait tourner le BEAM et qui possede `/run/lcars/console/lcars/deck.sock`. Il etait
-# absent de cette liste, donc le deck ne lisait jamais sa socket : la landing affichait « 0 pod »
-# sur une fleet vivante. Aucune erreur nulle part — la seule surface ou ca se voit est un compteur
-# a zero, qui est aussi ce qu'affiche une fleet reellement vide.
+# ⚠ CETTE REGLE DISAIT « L'ELIGIBILITE DERIVE DE L'AUTORITE : membre du groupe `fleet` », ET ELLE
+# NOMMAIT AUTORITE UNE COMMODITE. Le groupe etait une PROJECTION : le convergeur y ajoutait chaque
+# membre de l'equipe `humans` de la forge, toutes les trente secondes. Filtrer dessus, c'etait lire
+# un cache — pratique, et sans rapport avec la question posee ici, qui est « cette personne a-t-elle
+# un siege de travail sur cette machine ».
 #
-# Le gid, lui, est DEJA dans la ligne de passwd qu'on lit plus bas ; il suffisait de ne pas le
-# jeter. Meme seam pour les deux formes (`LCARS_CONSOLE_GROUP_FILE`), sinon la regle serait
-# epinglable a moitie.
-CONSOLE_GID="$(if [[ -n "${LCARS_CONSOLE_GROUP_FILE:-}" ]]; then awk -F: -v g="$CONSOLE_GROUP" '$1==g {print $3}' "$LCARS_CONSOLE_GROUP_FILE"; else getent group "$CONSOLE_GROUP" 2>/dev/null | cut -d: -f3; fi)"
+# Le groupe n'ouvre plus rien depuis ce chantier : ni les jetons de forge, ni root. En faire la
+# derniere lecture survivante de `/etc/group` en aurait fait celle dont plus personne ne sait ce
+# qu'elle decide.
+#
+# ⚠ ET L'EXCLUSION DU SIEGE ETAIT UN EFFET DE BORD, PAS UNE REGLE. Elle tenait parce que le sysadmin
+# (uid 1000) est dans `sudo` et pas dans `fleet` — une console worker pour lui aurait ete un shell
+# sudo-capable derriere la porte web de la boite. Elle devient une CONDITION ECRITE, keyee sur
+# l'UID : la meme cle que GUARD A/B et que le miroir BEAM de `runtime.exs`, jamais un login (`00` §5
+# — le login du siege est variable, l'uid est la reservation). Un effet de bord non nomme est
+# exactement ce qui disparait sans que personne le voie.
+#
+# ⚠ DEUX PIEGES DISPARAISSENT AVEC LE FILTRE, ET ILS VALENT D'ETRE SUS. La liste de membres de
+# `/etc/group` ne contient PAS les membres par groupe PRIMAIRE : un compte cree `useradd -g fleet`
+# n'y figure nulle part, alors que `id -nG` le dit membre. Mesure du 2026-08-21 : `lcars`, l'humain
+# qui FAIT TOURNER LE BEAM, etait absent de cette liste — le deck ne lisait jamais sa socket et la
+# landing affichait « 0 pod » sur une fleet vivante. Aucune erreur nulle part : la seule surface ou
+# ca se voyait etait un compteur a zero, qui est aussi ce qu'affiche une fleet reellement vide.
+# Il fallait donc lire DEUX sources pour une seule question. Il n'y en a plus aucune.
+#
+# CE QUI DECIDE MAINTENANT, ET RIEN D'AUTRE : un uid dans la plage humaine, un home qui existe, un
+# shell qui n'est pas `nologin`, et ce n'est pas le siege. Quatre faits LOCAUX, tous lisibles sur la
+# ligne de passwd qu'on parcourt — et aucun n'a de peremption.
+SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 
 # Deux classes de rejet, et elles ne meritent PAS le meme bruit :
 #   - hors plage d'uid (root, daemon, www-data, nobody…) : ATTENDU a chaque boot. Detailler 19
@@ -79,7 +86,9 @@ system_n=0
 reject_system() { system_n=$(( system_n + 1 )); }
 reject_odd()    { [[ "$VERBOSE" -eq 1 ]] && echo "[humans] rejete $1 : $2" >&2; return 0; }
 
-while IFS=: read -r login _ uid gid _ home shell; do
+# Le gid n'est plus lu : l'eligibilite ne regarde plus aucun groupe. `_` a la place, pour que la
+# forme de la ligne de passwd reste lisible telle qu'elle est.
+while IFS=: read -r login _ uid _ _ home shell; do
   [[ -n "$login" ]] || continue
 
   if [[ "$uid" -lt "$UID_MIN" ]]; then
@@ -101,13 +110,15 @@ while IFS=: read -r login _ uid gid _ home shell; do
       reject_odd "$login" "shell $shell — le compte n'est pas fait pour ouvrir un shell"
       continue ;;
   esac
-  # Membre du groupe fleet ? Sinon ce n'est pas un humain de la fleet (sysadmin admiral, compte
-  # hors-fleet) : pas de console worker. C'est la garde qui derive de l'autorite, pas de l'uid seul.
-  # Les deux formes d'appartenance, chacune sur sa source : le champ 4 pour l'ajout explicite
-  # (`usermod -aG`, ce que fait le convergeur), le gid de la ligne passwd pour le groupe primaire
-  # (`useradd -g`, ce que fait 22-fleet-human sur le rail poste).
-  if [[ "$FLEET_MEMBERS" != *",$login,"* && ( -z "$CONSOLE_GID" || "$gid" != "$CONSOLE_GID" ) ]]; then
-    reject_odd "$login" "hors du groupe $CONSOLE_GROUP — pas un humain converge de la fleet"
+  # ⚠ LE SIEGE N'A PAS DE CONSOLE WORKER, ET C'EST UNE CONDITION, PLUS UN EFFET DE BORD. Le sysadmin
+  # est sudo-capable : lui ouvrir une console worker mettrait un shell root-capable derriere la porte
+  # WEB de la boite — l'exact inverse de ce que les pods confinent. Il passe par ssh.
+  #
+  # Keye sur l'UID (`00` §5) : le login du siege est VARIABLE — `admiral` sur banc, celui que
+  # l'installeur a cree en prod — et l'uid est la reservation. La meme cle que GUARD A/B et que le
+  # miroir BEAM ; un nom aurait fait une seconde verite sur une question qui n'en a qu'une.
+  if [[ "$uid" == "$SYSADMIN_UID" ]]; then
+    reject_odd "$login" "siege de la machine (uid $SYSADMIN_UID) — sudo-capable, il passe par ssh, jamais par une console worker"
     continue
   fi
 

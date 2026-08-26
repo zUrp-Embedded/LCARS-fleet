@@ -227,4 +227,55 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     assert err.message =~ "atelier-deux, atelier-un"
     assert err.message =~ "One card per catalogue"
   end
+
+  # ─── LE GARDE DES SIGNATAIRES A CHANGE DE NATURE SANS CHANGER DE LIGNE ─────────────────────────
+  #
+  # « pas de jeton de signataire » voulait dire UNE chose tant que le jeton etait un fichier local :
+  # le provisionnement n'a pas tourne, la boite est mal deployee, elle ne demarre pas.
+  #
+  # Depuis que le jeton se DEMANDE au service d'autorite, la meme absence recouvre aussi « le
+  # service ne repond pas encore » et « la forge est injoignable » — deux etats TRANSITOIRES. Le
+  # garde inchange aurait tue le boot sur un hoquet de reseau, en accusant `provision-role-tokens.sh`.
+  #
+  # Ces deux temoins sont un COUPLE : chacun seul se satisferait d'un garde degenere. Sans le
+  # premier, un garde qui ne leve jamais passe ; sans le second, un garde qui leve toujours passe.
+  describe "signataires de merge : la cause decide, pas l'absence" do
+    @tag :tmp_dir
+    test "provisionnement manquant (no_role_token) → RAISE : la boite ne doit pas demarrer", %{
+      tmp_dir: tmp
+    } do
+      Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
+      Application.put_env(:lcars_fleet, :pilot_forge, base_url: "http://forge.local")
+      # Un repertoire de jetons VIDE : le service repond, et il repond qu'il n'y a rien a servir.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
+
+      assert_raise RuntimeError, ~r/merge signer/, fn ->
+        Fleet.Pilot.Application.step_children_for_test()
+      end
+    end
+
+    @tag :tmp_dir
+    test "forge injoignable → PAS de raise, mais un journal qui NOMME la porte", %{tmp_dir: tmp} do
+      Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
+      Application.put_env(:lcars_fleet, :pilot_forge, base_url: "http://forge.local")
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
+
+      Fleet.Test.AuthorityDouble.force_fail(:forge_unreachable)
+      on_exit(fn -> Fleet.Test.AuthorityDouble.force_fail(nil) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert [_ | _] = Fleet.Pilot.Application.step_children_for_test()
+        end)
+
+      # ⚠ « PAS DE RAISE » NE SUFFIT PAS, ET C'EST LA MOITIE QUI COMPTE. Un rail qui demarre vert
+      # sur une boite structurellement incapable de sceller est exactement le succes muet que ce
+      # chantier retire ailleurs. Le journal doit dire QUELLE porte ne repond pas, et dire que ce
+      # n'est PAS un defaut de provisionnement — sinon l'operateur relance un `provision apply` qui
+      # n'a aucune chance d'y changer quoi que ce soit.
+      assert log =~ "forge_unreachable"
+      assert log =~ "PAS un defaut de provisionnement"
+      assert log =~ "TOUT SCELLEMENT ECHOUERA"
+    end
+  end
 end

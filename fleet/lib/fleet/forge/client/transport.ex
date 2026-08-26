@@ -16,9 +16,24 @@ defmodule Fleet.Forge.Client.Transport do
   Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:lcars_fleet, :pilot_forge)`:
 
     * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://10.42.0.118"` (forge NAS).
-    * `:token` — Gitea token. Read from `:token_file` if absent.
-    * `:token_file` — file path (default `~/.gitea_token`).
+    * `:token` — Gitea token, supplied directly by the caller.
+    * `:token_file` — an EXPLICIT path. A caller that already holds one (a second forge, a witness).
+    * `:account` — a forge ACCOUNT name. The token is ASKED of the authority service, at call time.
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
+
+  ## `~/.gitea_token` a disparu de cette resolution, et c'etait un REPLI SILENCIEUX VERS LA MAUVAISE
+  ## IDENTITE
+
+  Sans `:token` ni `:token_file`, ce module lisait `~/.gitea_token`. Le BEAM tourne sous l'uid de
+  l'humain de fleet : ce chemin resout donc vers le jeton PERSONNEL de cette personne. Une boite dont
+  le cablage systeme manquait ne tombait pas en panne — elle agissait sur la forge sous l'identite
+  d'un humain, avec ses droits, et sans qu'une ligne le dise. La forge voyait cette personne faire ce
+  que le systeme faisait.
+
+  Ce repli tenait une vraie situation (un deploiement qui n'avait pose que le fichier), et il la
+  tenait en substituant une identite. Il n'a plus d'objet : le nom du compte suffit, et le jeton se
+  demande. En son absence, la resolution rend `{:config, :no_token_source}` — un refus nomme, la ou
+  il y avait un succes faux.
   """
 
   require Logger
@@ -74,35 +89,43 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
+  # TROIS SOURCES, ORDONNEES, ET AUCUN REPLI IMPLICITE. Un jeton fourni, un chemin fourni, un compte
+  # a demander — et si aucune n'est la, un refus qui le dit. L'ordre est celui du SPECIFIQUE vers le
+  # GENERAL : ce que l'appelant tient de la main gagne sur ce que la boite a configure.
   defp resolve_token(opts) do
-    case Keyword.get(opts, :token) do
-      token when is_binary(token) and token != "" ->
+    cond do
+      is_binary(token = Keyword.get(opts, :token)) and token != "" ->
         {:ok, token}
 
-      _ ->
-        case Keyword.get(opts, :token_file) || default_token_file() do
-          nil ->
-            {:error, {:config, :no_token_source}}
+      is_binary(path = Keyword.get(opts, :token_file)) and path != "" ->
+        read_token_file(path)
 
-          path ->
-            case File.read(path) do
-              {:ok, content} ->
-                case String.trim(content) do
-                  "" -> {:error, {:config, {:token_file_empty, path}}}
-                  token -> {:ok, token}
-                end
-
-              {:error, reason} ->
-                {:error, {:config, {:token_file, path, reason}}}
-            end
+      is_binary(account = Keyword.get(opts, :account)) and account != "" ->
+        # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un
+        # jeton mis en cache ici reprendrait exactement la peremption infinie que ce chantier retire.
+        # Le cout est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du
+        # bruit. Le jour ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra
+        # le dire ailleurs que dans un `defp`.
+        case Fleet.Credentials.ForgeAuth.token_for(account) do
+          {:ok, token} -> {:ok, token}
+          {:error, cause} -> {:error, {:config, {:authority, account, cause}}}
         end
+
+      true ->
+        {:error, {:config, :no_token_source}}
     end
   end
 
-  defp default_token_file do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join(home, ".gitea_token")
+  defp read_token_file(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        case String.trim(content) do
+          "" -> {:error, {:config, {:token_file_empty, path}}}
+          token -> {:ok, token}
+        end
+
+      {:error, reason} ->
+        {:error, {:config, {:token_file, path, reason}}}
     end
   end
 

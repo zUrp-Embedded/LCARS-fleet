@@ -35,14 +35,32 @@
 # sans tuer, c'est fermer la porte d'entree en laissant la maison allumee a l'interieur.
 #
 # D'ou les trois gestes, dans CET ordre :
-#   1. `gpasswd -d` — plus de credentials partages pour tout NOUVEAU process ;
-#   2. `pkill -u`   — les process qui portent encore l'ancien jeu de groupes meurent. Il n'existe
-#      pas de version douce : c'est le meme process qui porte le travail et les credentials, donc
+#   1. `gpasswd -d` — le groupe redevient exact ;
+#   2. `pkill -u`   — les process de la personne meurent. Il n'existe pas de version douce :
 #      revoquer INTERROMPT. C'est le prix, il est assume, il n'est pas contournable ;
 #   3. `usermod -s nologin` — la porte ne se rouvre pas. Sans ce troisieme geste, le prochain
 #      `console.sh --all` relance la console : elle ne lit que /etc/passwd, et `console-humans.sh`
 #      (source UNIQUE de l'eligibilite, lue aussi par la landing) ecarte deja `shell nologin`.
 # `usermod` APRES le kill : il refuse de toucher un compte dont des process tournent encore.
+#
+# ─── ⚠ LE MOTIF DU DEUXIEME GESTE A CHANGE, ET LE GESTE RESTE ───────────────────────────────────
+#
+# Il etait CRITIQUE : le groupe `fleet` ouvrait les jetons de forge (`0640 root:fleet`), donc un
+# process ne AVANT la revocation gardait un credential DEJA LU et pouvait continuer d'ecrire sur la
+# forge sous une identite de travail. Tuer etait le seul moyen de reprendre ce qui avait ete lu.
+#
+# Ce chemin n'existe plus. Les jetons sont `0600 lcars-authority` et le BEAM ne les lit pas — il les
+# DEMANDE, a chaque geste, a un service qui pose la question a la forge. Un process survivant n'a
+# donc plus RIEN a lire : sa demande suivante rend `not_a_worker`. Meme chose pour root, dont le
+# chemin `groupe -> root` (le sudoers d'outillage) a disparu avec la phase 4.
+#
+# Ce que `pkill` fait aujourd'hui est une FIN DE SESSION : fermer les terminaux et arreter le travail
+# en cours de quelqu'un qui n'est plus de l'equipe. La criticite est passee de « cette personne
+# detient encore une identite de forge » a « elle voit encore son terminal quelques secondes ».
+#
+# ⚠ ET IL NE SE RETIRE PAS POUR AUTANT. `gpasswd -d` n'enleve aucun groupe a un process VIVANT, et
+# le groupe ouvre encore des fichiers PARTAGES — l'arbre d'install en lecture, les zones de projet.
+# Le geste garde donc un objet ; il a seulement cesse d'etre le dernier rempart d'un credential.
 #
 # RIEN N'EST SUPPRIME : ni compte, ni home, ni donnees, ni uid. La revocation ferme des acces, elle
 # n'efface pas une personne — et re-entrer dans la team RESTAURE l'entree (cf. `restore_human`),
@@ -264,6 +282,52 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
 #   3. rien — et c'est `useradd` qui choisit le premier uid libre.
 # Rendre vide n'est donc pas un echec : c'est la reponse « personne n'a d'avis, prends ce qui est
 # libre ». La formule d'avant n'avait pas ce troisieme etat, et c'est pour ca qu'elle collisionnait.
+# Le premier uid LIBRE au-dessus du plancher — et le plancher est l'uid RESERVE du siege, pas
+# `UID_MIN`. On ne laisse pas `useradd` choisir : son propre choix part de `UID_MIN`, donc il
+# rendrait l'uid du siege si celui-ci etait libre — exactement le compte qu'on ne doit jamais creer,
+# puisque GUARD A et GUARD B le reservent.
+#
+# ⚠ CE GARDE VIVAIT DANS `22-fleet-human`, ET IL Y ETAIT SEUL. Ce module a cesse de creer des
+# comptes le 2026-08-25 (un seul createur, un seul sens : la forge nomme, le convergeur materialise).
+# Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer : le
+# garde demenage avec le geste. Sa raison est recopiee ici mot pour mot parce qu'elle explique un
+# choix qui a l'air arbitraire.
+#
+# Le cas est etroit — sur une boite le siege existe deja quand ce service demarre, donc `useradd`
+# passerait a l'uid suivant — mais `LCARS_SYSADMIN_UID` est REGLABLE : un siege a 1005 sur une
+# machine ou 1005 est libre rentre exactement dans ce chemin.
+# ⚠ LES DEUX BORNES SE VALIDENT, ET LA PREMIERE VERSION N'EN VALIDAIT QU'UNE. `m` passait par un
+# `=~ ^[0-9]+$`, `s` non — asymetrie dans six lignes ecrites d'un coup. Ce que ca produit :
+#
+#   LCARS_SYSADMIN_UID="10 00"  (un espace au clavier)  →  `(( m > s ))` : syntax error
+#   LCARS_SYSADMIN_UID="abc"                            →  `s` lu comme un NOM de variable en
+#                                                          contexte arithmetique → unbound variable
+#
+# `:-` ne protege que du VIDE, pas du non-numerique. Sous le `set -e` du demarrage ca tue le service
+# — bruyant, donc acceptable. Sous le `set +e` de la BOUCLE, `uid_wanted` rend vide, `uid_args`
+# reste vide, `useradd` repart de `UID_MIN` : le plancher que ce fichier existe pour poser est
+# contourne EN SILENCE. La garde ci-dessous est donc le plancher du plancher.
+uid_floor() {
+  local m s
+  m="$(uid_min)"
+  [[ "$m" =~ ^[0-9]+$ ]] || m=1000
+  s="$SYSADMIN_UID"
+  [[ "$s" =~ ^[0-9]+$ ]] || s=1000
+  (( m > s )) && { echo "$m"; return 0; }
+  echo "$(( s + 1 ))"
+}
+
+# ⚠ `getent`, PAS `PASSWD_FILE` — ET C'EST LE SEUL ENDROIT DU FICHIER QUI DIVERGE. Le reste du
+# module lit `${PASSWD_FILE:-/etc/passwd}` pour rester mesurable ; ici la question n'est pas « qui
+# est ecrit dans ce fichier » mais « cet uid est-il pris SUR CETTE MACHINE », et NSS (LDAP, sssd)
+# repond ce que le fichier ignore. `getent` est un sur-ensemble : un uid qu'il declare libre l'est
+# aussi pour `PASSWD_FILE`, donc `uid_taken_by` ne peut pas contredire ce choix a tort.
+first_free_uid() {
+  local uid; uid="$(uid_floor)"
+  while getent passwd "$uid" >/dev/null 2>&1; do uid=$(( uid + 1 )); done
+  echo "$uid"
+}
+
 uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
   local from_home
   from_home="$(uid_of_home "$1")"
@@ -271,8 +335,13 @@ uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
     printf '%s\n' "$from_home"
     return 0
   fi
-  [[ "$2" =~ ^[0-9]+$ ]] || return 0
-  uid_from_map "$2"
+  if [[ "$2" =~ ^[0-9]+$ ]]; then
+    local from_map; from_map="$(uid_from_map "$2")"
+    [[ -n "$from_map" ]] && { printf '%s\n' "$from_map"; return 0; }
+  fi
+  # AUCUNE MEMOIRE DE CET HUMAIN : c'est le cas NOMINAL d'une premiere materialisation, et c'est
+  # celui ou `useradd` choisissait seul. On choisit au-dessus du siege.
+  first_free_uid
 }
 
 # Qui porte deja cet uid, s'il est pris par quelqu'un d'AUTRE que <login>.
@@ -597,14 +666,19 @@ converge_once() {
     # plus bas repondrait « il a un home » pour TOUT LE MONDE. Premiere version de cette trace, et
     # elle aurait dit « repris de son home » sur un uid pose par la forge — un mensonge qui n'aurait
     # coute que le jour ou un uid surprend quelqu'un.
-    # TROIS SOURCES, TROIS PHRASES. La derniere — « choisi par le systeme » — n'existait pas tant
-    # qu'une formule repondait toujours ; c'est desormais le cas NOMINAL sur une machine neuve.
+    # TROIS SOURCES, TROIS PHRASES. La derniere est le cas NOMINAL sur une machine neuve.
+    #
+    # ⚠ ELLE DISAIT « choisi par le systeme », ET CE N'EST PLUS VRAI. `useradd` ne choisit plus : il
+    # partait de `UID_MIN` et pouvait donc rendre l'uid RESERVE du siege s'il etait libre. Le
+    # plancher est desormais pose ici (`first_free_uid`, au-dessus de `SYSADMIN_UID`) — le garde a
+    # demenage depuis `22-fleet-human` en meme temps que le geste de creation. Une trace qui nomme
+    # le mauvais decideur est ce qui fait chercher un bug dans `useradd`.
     if [[ -d "$HOME_ROOT/$login" ]]; then
       uid_src="repris de son home"
     elif [[ -n "$(uid_from_map "$forge_id")" ]]; then
       uid_src="relu dans la table (id de forge $forge_id)"
     else
-      uid_src="choisi par le systeme"
+      uid_src="premier libre au-dessus du siege"
     fi
     want_uid="$(uid_wanted "$login" "$forge_id")"
     if [[ -n "$want_uid" ]]; then
@@ -630,12 +704,18 @@ converge_once() {
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
       getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
-      # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS : `want_uid` est vide dans le cas nominal
-      # (c'est `useradd` qui a choisi), et c'est ce que le systeme a donne qu'il faut enregistrer.
+      # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS.
+      #
+      # ⚠ CE COMMENTAIRE DISAIT « `want_uid` est vide dans le cas nominal (c'est `useradd` qui a
+      # choisi) », ET CE N'EST PLUS VRAI depuis que `uid_wanted` retombe sur `first_free_uid` :
+      # `uid_args` porte TOUJOURS `-u`, et `useradd` ne choisit plus rien. La raison de relire reste
+      # entiere — c'est ce que le SYSTEME a pose qu'on enregistre, pas ce qu'on lui a demande — mais
+      # une phrase qui nomme le mauvais decideur envoie chercher un defaut dans `useradd` le jour ou
+      # un uid surprend quelqu'un.
       local got_uid; got_uid="$(id -u -- "$login" 2>/dev/null || true)"
       uid_map_record "$forge_id" "$got_uid" "$login"
-      # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « choisi
-      # par le systeme » sont trois histoires differentes le jour ou un uid surprend quelqu'un.
+      # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « premier
+      # libre au-dessus du siege » sont trois histoires differentes le jour ou un uid surprend.
       say "user $login cree (membre de $ORG/$TEAM${got_uid:+, uid $got_uid $uid_src})"
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne

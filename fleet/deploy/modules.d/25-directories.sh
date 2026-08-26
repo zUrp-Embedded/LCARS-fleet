@@ -14,9 +14,21 @@
 #
 #   /local          0755 root:root — les prefixes d'install y sont crees par 60-deploy ;
 #                   root-only en ecriture = personne ne remplace un runtime deploye par surprise.
-#   /home/private   0750 root:fleet — les role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR,
-#                   fichiers 0640 poses par etc/provision-role-tokens.sh). Lecture : groupe fleet
-#                   (le BEAM per-humain lit via le groupe) ; traversee interdite au reste.
+#   /home/private   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
+#                   jeton master, seed). UN SEUL process les OUVRE : le service d'autorite.
+#                   ⚠ `0710` ET PAS `0700` : le groupe TRAVERSE, il ne LISTE pas. Ce repertoire ne
+#                   contient pas que des secrets — `forge.url` et `forge.public.url` y sont en 0644,
+#                   et trois modules `NEEDS: human` les lisent SOUS L'HUMAIN via `as_human`. En 0700
+#                   ils prenaient « Permission denied », `PROV_FORGE_URL` restait vide, et
+#                   `fleet_v2.env` n'obtenait jamais son `FORGE_BASE_URL` (mesure du 2026-08-25).
+#                   ⚠ IL ETAIT `0750 root:fleet`, ET LE GROUPE ETAIT UNE PROJECTION. Le convergeur
+#                   remplissait `fleet` depuis l'equipe `humans` de la forge toutes les 30 s : le
+#                   droit de lire un credential avait donc la peremption d'un cache, et se retirer
+#                   demandait un `pkill`. Le BEAM ne lit plus rien ici — il DEMANDE au service, qui
+#                   pose la question a la forge a l'instant du geste.
+#                   ⚠ ROOT TRAVERSE ENCORE, et c'est ce qui fait tenir le provisionnement : les
+#                   modules qui ecrivent ici tournent en root et ignorent le mode. Ce qui est
+#                   ferme, c'est l'uid HUMAIN.
 #
 # ─── LES ZONES DE FACE, ET POURQUOI ELLES SONT ICI ────────────────────────────────────────────
 # Une racine par face — le miroir shell de `Fleet.Layout.face_root/1`, tenu en phase avec lui par
@@ -127,15 +139,32 @@ prov_runtime_dirs() {
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
     "/run/lcars/console 0711 root:root" \
-    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP"
+    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP" \
+    "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
+    `# Le service privilégié est root : il POURRAIT créer sa socket dans /run/lcars (0755 root:root).` \
+    `# Elle a quand même son répertoire, pour la même raison que la voisine — un répertoire par` \
+    `# service rend l'ACL lisible d'un « ls », et une porte posée à la racine d'un arbre partagé se` \
+    `# retrouve un jour balayée par le nettoyage de quelqu'un d'autre.` \
+    "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP" \
+    `# ⚠ CE REPERTOIRE VIVAIT HORS DE CETTE TABLE, ET IL NE SURVIVAIT PAS AUX REBOOTS. Son seul` \
+    `# createur etait 45-sudoers-toolchain, en install -d nu. Or c'est CETTE table qui engendre le` \
+    `# tmpfiles.d : un repertoire runtime qui n'y figure pas n'est pas recree au boot — il revient` \
+    `# au prochain « provision apply ». Entre les deux, le reconciliateur de toolchain du BEAM (qui` \
+    `# lit LCARS_TOOLCHAIN_RUN_STATE) ecrit dans un chemin absent.` \
+    `#` \
+    `# 2775 root:fleet — sgid et ecriture de groupe, parce que le BEAM ecrit le marqueur sous le` \
+    `# groupe fleet et que root possede. Le manifeste annonçait « 0755 root:root » : faux sur le mode` \
+    `# ET sur le groupe, dans le sens qui SOUS-ESTIME qui peut ecrire la. Les deux murs ISO comparent` \
+    `# la PRESENCE d'un chemin, jamais son mode : c'est pour ca que rien ne l'a vu.` \
+    "/run/lcars/toolchain 2775 root:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {
   printf '%s\n' \
     "/local 0755 root:root" \
-    "$PROV_TOKENS_DIR 0750 root:$PROV_FLEET_GROUP" \
+    "$PROV_TOKENS_DIR 0710 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
-    "$PROV_CATALOGUES_WORK 0700 root:root" \
+    "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"
@@ -201,11 +230,35 @@ check_tmpfiles() {
   fi
 }
 
+# ⚠ LE PREMIER ÉCHEC TERMINAIT LA TABLE, ET UNE SEULE LIGNE COÛTAIT LES SEIZE AUTRES.
+#
+# `verdict_apply` fait `exit` (provision-lib:282). Écrit dans la BOUCLE, il transformait un chown
+# raté en abandon du module : tout ce qui suivait dans la table n'était jamais posé, et
+# `apply_tmpfiles` non plus.
+#
+# MESURE DU 2026-08-25, install réelle sur WSL. Un groupe manquant sur `/home/private` a coûté SEPT
+# objets sans aucun rapport avec lui :
+#   /home/projects · /home/projects.ops · /home/projects.workshop   les racines de face
+#   /run/lcars/console · /run/lcars/console/<humain>                la racine des consoles
+#   /var/lib/lcars/tofu                                             l'état terraform
+#   /etc/tmpfiles.d/lcars-console.conf                              la persistance au reboot
+# Le dernier porte son propre verdict : « /run/lcars/console ne se refera pas au reboot, et la fleet
+# ne démarrera pas ». La machine s'est retrouvée avec `lcars-landing` « debout » et aucune racine de
+# console — un demi-état qu'aucune ligne ne nommait.
+#
+# ⚠ `|| true` N'EST PAS UNE NÉGLIGENCE ICI, ET C'EST LA SEULE CHOSE À VÉRIFIER AVANT DE LE LIRE
+# COMME TELLE. Le comptage a DÉJÀ eu lieu en amont : `ensure_dir`, `ensure_mode` et
+# `prov_refuse_symlink_path` passent tous par `p_fail`, qui incrémente `PROV_FAILED`
+# (provision-lib:221) — précisément ce que lit le `verdict_apply` de la fin. La boucle finit,
+# `apply_tmpfiles` tourne, et le module sort quand même en 1.
+#
+# On ne change pas S'IL échoue, seulement QUAND il le dit. Une entrée mauvaise — groupe absent,
+# mount pas prêt, disque plein — ne doit pas emporter tout l'arbre.
 apply() {
   local spec path mode owner
   while read -r spec; do
     read -r path mode owner <<< "$spec"
-    ensure_dir "$path" "$mode" "$owner" || verdict_apply
+    ensure_dir "$path" "$mode" "$owner" || true
   done < <(prov_dirs)
   apply_tmpfiles
   verdict_apply

@@ -274,10 +274,21 @@ setup_install() {
   # `nobody:fleet` parce que c'est une lecture ; le jeton master est `0600 root`, donc illisible
   # pour elle. Le refus de permission ressortait en « pas de source installable » — le mauvais
   # diagnostic pour le mauvais probleme, sur le geste central du chantier.
+  #
+  # ⚠ CE TEMOIN MESURAIT LE MECANISME, ET LE MECANISME A CHANGE SOUS LUI. Il epinglait un CHEMIN
+  # (`TOKFILE=<…>/system_starfleet.gitea_token`). Depuis que `/home/private` est
+  # `0700 lcars-authority`, la porte `nobody` ne peut plus ouvrir AUCUN fichier d'ici — pas plus le
+  # jeton systeme que le master. Ce qui traverse est donc la VALEUR, lue par le service qui la
+  # possede et transmise par l'environnement (`/proc/<pid>/environ` n'est lisible que du
+  # proprietaire du process ; un argv l'est de tout le monde).
+  #
+  # L'EXIGENCE, ELLE, N'A PAS BOUGE D'UN MOT : la lecture se fait sous l'identite SYSTEME, jamais
+  # sous l'autorite totale de la boite. C'est elle qui est epinglee ici, la ou elle se lit
+  # maintenant.
   setup_install
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
-printf '%s TOKFILE=%s\n' "\$*" "\${FORGE_TOKEN_FILE:-}" >> "$ENTRY_LOG"
+printf '%s TOK=%s TOKFILE=%s\n' "\$*" "\${FORGE_TOKEN:-}" "\${FORGE_TOKEN_FILE:-}" >> "$ENTRY_LOG"
 case "\$1" in
   catalogue-source) echo "alice/cat main deadbeef" ;;
   roles-tfvars)     echo '{"org":"cat","roles":["cat_dev"]}' ;;
@@ -287,8 +298,27 @@ FAKE
   chmod +x "$BIN/entrypoint"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
-  grep -q "catalogue-source cat TOKFILE=$PRIV/system_starfleet.gitea_token" "$ENTRY_LOG"
-  ! grep -q "catalogue-source .*forge-master.token" "$ENTRY_LOG"
+  # `SYS` est le contenu de `system_starfleet.gitea_token` ; `TOK` celui du master (setup_install).
+  grep -q "catalogue-source cat TOK=SYS " "$ENTRY_LOG"
+  ! grep -q "catalogue-source cat TOK=TOK " "$ENTRY_LOG"
+  # ET PLUS AUCUN CHEMIN NE TRAVERSE : le passer reviendrait a donner a la porte un fichier qu'elle
+  # ne peut pas ouvrir — un refus de permission presente comme un catalogue introuvable.
+  ! grep -q "catalogue-source .*TOKFILE=$PRIV" "$ENTRY_LOG"
+}
+
+# ⚠ LE TEMOIN DU VIDE, ET IL GARDE UN DIAGNOSTIC. Un jeton systeme present mais VIDE donnerait
+# `FORGE_TOKEN=`, que la resolution traite comme « pas de source » : la forge repond 401 et le refus
+# accuse le catalogue. Le geste doit mourir ICI, en nommant le fichier. C'est la contrepartie de la
+# lecture par valeur : un chemin illisible se diagnostique tout seul, une chaine vide non.
+@test "install: un jeton systeme VIDE est refuse AVANT la porte, et il est nomme" {
+  printf 'TOK\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  : > "$PRIV/system_starfleet.gitea_token"
+
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"VIDE"* ]]
+  [[ "$output" == *"system_starfleet.gitea_token"* ]]
 }
 
 @test "install: sans jeton systeme, il REFUSE en le NOMMANT (pas un echec de lecture opaque)" {

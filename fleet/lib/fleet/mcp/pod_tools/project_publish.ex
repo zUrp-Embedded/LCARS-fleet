@@ -90,22 +90,88 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   @spec binding_key(String.t()) :: String.t()
   def binding_key(repo) when is_binary(repo), do: String.replace(repo, "/", "__")
 
+  @token_basename ".forge-token"
+
   defp do_run(repo) do
     slug = binding_key(repo)
-    work = fresh_work(slug)
+    base = fresh_work(slug)
+    work = Path.join(base, "clone")
 
     with {:ok, b} <- read_binding(slug),
          {:ok, forge_url} <- env("FORGE_BASE_URL"),
-         {:ok, forge_tok} <- env("FORGE_TOKEN_FILE"),
+         {:ok, forge_tok} <- materialise_token(base),
          args = rail_args(repo, b, forge_url, forge_tok, work),
          {:ok, {out, code}} <-
            Fleet.Credentials.Shell.run(rail_path(), args, timeout_ms: @rail_timeout_ms) do
-      _ = sweep_work(work, code)
+      # ⚠ LE JETON PART AVANT LE BALAYAGE, ET C'EST TOUTE LA RAISON DE CETTE LIGNE. `sweep_work`
+      # CONSERVE le repertoire en sortie 6 (« pour inspection ») : le jeton y survivrait
+      # indefiniment, dans le repertoire temporaire du systeme, sur le chemin d'ERREUR — celui que
+      # personne ne relit.
+      _ = File.rm(Path.join(base, @token_basename))
+      _ = sweep_work(base, code)
 
       case code do
         0 -> {:ok, parse_result(out)}
         _ -> {:error, {:rail_exit, code, last_line(out)}}
       end
+    else
+      # ⚠ ECHEC AVANT LE RAIL : `materialise_token/1` a pu creer `base` et y ecrire un SECRET. Le
+      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie. Ce
+      # n'etait pas necessaire avant ce chantier — aucun des maillons precedents n'ecrivait rien.
+      #
+      # La clause est TOTALE (`other`), pas `{:error, _}`. Un `else` partiel leve un
+      # `WithClauseError` sur toute forme non prevue : le maillon suivant deciderait ce que fait le
+      # chemin d'erreur du maillon precedent, et le secret resterait sur le disque.
+      other ->
+        _ = File.rm_rf(base)
+        other
+    end
+  end
+
+  # ─── LE JETON SE DEMANDE, ET IL FINIT QUAND MEME DANS UN FICHIER ──────────────────────────────
+  #
+  # `env("FORGE_TOKEN_FILE")` rendait ici le chemin de `/home/private/<compte>.gitea_token`, ouvert
+  # par le rail SOUS L'UID DU POD — donc sous celui de l'humain, a travers le groupe `fleet`, qui
+  # etait une projection de l'equipe `humans` refaite toutes les trente secondes.
+  #
+  # ⚠ CE LECTEUR-CI N'EST PAS DE LA MEME CLASSE QUE LES DEUX AUTRES. `lcars publish run` est tape
+  # par un humain qui voit le refus ; ici c'est un AGENT en vol, au milieu d'un workflow. Son echec
+  # touche l'arbitrage « on ne perd pas de travail », d'ou le soin sur les deux chemins de sortie.
+  #
+  # Le fichier reste parce que `publish-rail.sh` prend un CHEMIN. Passer le jeton en argument le
+  # mettrait dans `/proc/<pid>/cmdline`. Ce fichier-ci vit dans un repertoire `0700` que ce process
+  # vient de creer, porte `0600`, et meurt avec le geste.
+  #
+  # ⚠ `:exclusive` A L'ECRITURE : le fichier doit etre NEUF. Sans ce mode, un fichier pose la par un
+  # tiers — meme chemin, deja ouvert par lui — se verrait ecraser d'un jeton frais qu'il tiendrait
+  # encore. `base` est unique par run, donc le cas est theorique ; ecrire un secret sur un
+  # descripteur qu'on n'a pas cree ne se fait pas sur la foi d'un « ca n'arrivera pas ».
+  defp materialise_token(base) do
+    with {:ok, account} <- forge_account(),
+         {:ok, token} <- ask_authority(account),
+         :ok <- File.mkdir_p(base),
+         :ok <- File.chmod(base, 0o700),
+         path = Path.join(base, @token_basename),
+         :ok <- File.write(path, token, [:exclusive]),
+         :ok <- File.chmod(path, 0o600) do
+      {:ok, path}
+    else
+      {:error, {_, _} = named} -> {:error, named}
+      {:error, reason} -> {:error, {:forge_token_unavailable, reason}}
+    end
+  end
+
+  defp forge_account do
+    case Fleet.Credentials.ForgeAuth.account() do
+      nil -> {:error, {:env_missing, "FORGE_PUSH_ACCOUNT"}}
+      account -> {:ok, account}
+    end
+  end
+
+  defp ask_authority(account) do
+    case Fleet.Credentials.ForgeAuth.token_for(account) do
+      {:ok, token} -> {:ok, token}
+      {:error, cause} -> {:error, {:forge_token_unavailable, cause}}
     end
   end
 
@@ -213,7 +279,12 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     Path.join(Path.dirname(launcher), "publish-rail.sh")
   end
 
-  # The rail REFUSES an existing --work; a unique fresh path per run satisfies that.
+  # Le repertoire PORTEUR d'un run, unique. Le clone est `<base>/clone` et le jeton `<base>/.forge-token`.
+  #
+  # ⚠ CE N'EST PLUS `--work` LUI-MEME, ET LA DISTINCTION COMPTE : le rail REFUSE un `--work` qui
+  # existe deja. Rendre ce chemin directement au rail ET y ecrire le jeton avant de l'appeler
+  # ferait echouer chaque publication sur « --work doit etre un chemin neuf ». D'ou le niveau
+  # intermediaire : le repertoire est a nous, le chemin que le rail recoit reste vierge.
   defp fresh_work(slug) do
     Path.join(System.tmp_dir!(), "lcars-publish-#{slug}-#{System.unique_integer([:positive])}")
   end

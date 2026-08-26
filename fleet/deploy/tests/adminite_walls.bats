@@ -129,10 +129,34 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
     [ -r "$porte" ]
     absent 'id -nG|getent group|os\.getgroups|grp\.getgrall' "$porte"
   done
-  # ⚠ UNE EXCEPTION NOMMEE, ET ELLE N'EN EST PAS UNE : l'executeur appelle `grp.getgrnam` pour poser
-  # le GROUPE DE SA SOCKET. Ce groupe borne qui peut FRAPPER, il n'autorise rien — l'autorisation
-  # vient de `SO_PEERCRED` puis de la forge. Confondre les deux serait refaire le defaut.
-  code_of "$REPO/services/catalogue-executor.py" | grep -q 'grp.getgrnam'
+  # ⚠ UNE EXCEPTION NOMMEE, ET ELLE N'EN EST PAS UNE : l'executeur consulte le groupe pour poser
+  # celui DE SA SOCKET. Ce groupe borne qui peut FRAPPER, il n'autorise rien — l'autorisation vient
+  # de `SO_PEERCRED` puis de la forge. Confondre les deux serait refaire le defaut.
+  #
+  # ⚠ ET CE TEMOIN EXIGEAIT `grp.getgrnam`, C'EST-A-DIRE UNE IMPLEMENTATION. Il aurait rougi sur un
+  # `bind()` qui pose son groupe autrement — donc il EMPECHAIT un changement legitime au lieu de
+  # garder une propriete. Un temoin qui epingle le code qu'on vient d'ecrire ne mesure rien, il fige.
+  #
+  # La propriete, elle, est de PORTEE : toute consultation de groupe dans ce fichier vit dans
+  # `bind()`. Ailleurs, c'est une decision d'autorisation qui lit une projection — le defaut.
+  # ⚠ ET LA CONSULTATION A DEMENAGE : elle vit dans `lcars_socket.bind()`, le module que TOUS les
+  # services importent. Le mur suit l'objet, sinon il garde une adresse vide — c'est exactement le
+  # perimetre mort qu'un garde d'instrument existe pour attraper.
+  local cible hors_bind
+  for cible in "$REPO/services/catalogue-executor.py" "$REPO/services/lcars_socket.py"; do
+    [ -r "$cible" ]
+    hors_bind="$(code_of "$cible" | sed '/^def bind(/,/^def /d' \
+                  | grep -cE 'grp\.|getgrnam|getgrall' || true)"
+    [ "$hors_bind" -eq 0 ] || {
+      echo "MUR 2 bis rompu — le groupe est consulte HORS de bind() dans $cible ($hors_bind fois)" >&2
+      return 1
+    }
+  done
+  # Garde d'instrument : si `bind()` cesse d'exister ou change de nom, la coupe ci-dessus ne
+  # retirerait plus rien et le mur passerait au vert sur un fichier qu'il n'a pas lu.
+  code_of "$REPO/services/lcars_socket.py" | grep -q '^def bind('
+  # Et la consultation existe QUELQUE PART : un mur vert sur zero occurrence ne mesure rien.
+  code_of "$REPO/services/lcars_socket.py" | grep -q 'getgrnam'
 }
 
 @test "MUR 3: le convergeur ne lit plus l'autorite de la boite" {
@@ -144,4 +168,51 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   absent 'forge-master' "$c"
   # Le garde d'instrument : il lit TOUJOURS le jeton systeme, sinon il ne converge rien.
   code_of "$c" | grep -q 'TOKEN_FILE='
+}
+
+@test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau, sur les DEUX rails" {
+  # ⚠ LE PARTAGE QUI TIENT TOUT LE MODELE : celui qui DETIENT ne peut pas escalader, celui qui
+  # ESCALADE ne detient rien. `lcars-authority` porte les secrets de la forge et tourne sous un
+  # compte systeme ; `lcars-converger` porte `useradd` et n'ouvre aucun secret.
+  #
+  # Deux rails, deux mecanismes de drop, et il FAUT les deux : l'unite systemd sur le poste,
+  # `setpriv` dans le conteneur — qui n'a pas systemd et dont l'entrypoint est PID 1. En verifier un
+  # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
+  local unit="$REPO/deploy/modules.d/64-services.sh"
+  local entry="$REPO/deploy/docker/entrypoint.sh"
+  local dockerfile="$REPO/deploy/docker/Dockerfile"
+
+  # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
+  code_of "$unit" | sed -n '/lcars-catalogue)/,/^      ;;/p' | grep -q 'User='
+  run bash -c "sed 's/#.*//' '$unit' | sed -n '/lcars-converger)/,/^      ;;/p' | grep -c 'User=' || true"
+  [ "$output" -eq 0 ]
+
+  # RAIL CONTENEUR : le service est depose par setpriv, et le compte existe dans l'image.
+  code_of "$entry" | grep -q 'setpriv .*catalogue-executor.py\|setpriv[^|]*\\$'
+  code_of "$entry" | grep -q 'catalogue-executor.py'
+  grep -q 'useradd --system .* lcars-authority' "$dockerfile"
+
+  # LE COMPTE EST POSE PAR LE RAIL POSTE AUSSI — sinon `User=` designe un compte absent et l'unite
+  # meurt au demarrage sur `failed to determine user credentials`.
+  [ -r "$REPO/deploy/modules.d/21-service-accounts.sh" ]
+  code_of "$REPO/deploy/modules.d/21-service-accounts.sh" | grep -q 'useradd'
+}
+
+@test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {
+  # Quatre fichiers le nomment : la lib (defaut), le module qui le cree, l'unite, et l'image.
+  # Une copie que personne ne compare n'est pas une source unique de verite — meme regle que la
+  # branche protegee du rail toolchain, et elle a deja coute une borne de securite reglable.
+  local attendu
+  attendu="$(sed -n 's/^: "${PROV_AUTHORITY_USER:=\([a-z-]*\)}"$/\1/p' "$REPO/deploy/lib/provision-lib.sh")"
+  [ -n "$attendu" ]
+  local f
+  for f in "$REPO/deploy/modules.d/21-service-accounts.sh" \
+           "$REPO/deploy/modules.d/64-services.sh" \
+           "$REPO/deploy/docker/entrypoint.sh" \
+           "$REPO/deploy/docker/Dockerfile"; do
+    grep -q -- "$attendu" "$f" || {
+      echo "MUR 4 bis rompu — $f ne nomme pas « $attendu »" >&2
+      return 1
+    }
+  done
 }

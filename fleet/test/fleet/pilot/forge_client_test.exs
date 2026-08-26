@@ -892,6 +892,74 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
     end
 
+    # ─── LA TROISIEME SOURCE : LE COMPTE, DEMANDE AU SERVICE D'AUTORITE ────────────────────────
+    #
+    # C'est par la que passe DESORMAIS tout le runtime : `config/runtime.exs` pose `account:` dans
+    # `:pilot_forge`, et une trentaine de verbes de `client/repo.ex` resolvent par ici. Le lecteur
+    # que l'inventaire de la phase 0b avait manque.
+    @tag :tmp_dir
+    test "un compte → le jeton est DEMANDE, jamais lu depuis un chemin", %{tmp_dir: tmp_dir} do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp_dir)
+      File.write!(Path.join(tmp_dir, "system_pusher.gitea_token"), "tok-par-la-socket\n")
+
+      handlers = %{
+        {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
+          {200, [%{"id" => 7, "name" => "lcars-dispatched"}]}
+      }
+
+      opts = [
+        base_url: "http://fake.test",
+        account: "system_pusher",
+        req_options: [plug: {FakeForge, handlers}]
+      ]
+
+      assert {:ok, :already_present} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+    end
+
+    @tag :tmp_dir
+    test "compte sans jeton → {:config, {:authority, compte, cause}}, AVANT tout appel HTTP",
+         %{tmp_dir: tmp_dir} do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp_dir)
+
+      # AUCUN handler : si une requete partait quand meme, FakeForge rendrait un 500. Asserter sur
+      # l'erreur de config prouve qu'on decide AVANT le tour de reseau — meme doctrine que F-031.
+      opts = [
+        base_url: "http://fake.test",
+        account: "compte_sans_jeton",
+        req_options: [plug: {FakeForge, %{}}]
+      ]
+
+      assert {:error, {:config, {:authority, "compte_sans_jeton", :no_role_token}}} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+    end
+
+    # ⚠ CE TEMOIN GARDE UNE SUPPRESSION, ET C'EST LE SEUL A LE FAIRE.
+    #
+    # Sans `:token`, `:token_file` ni `:account`, ce module lisait `~/.gitea_token`. Le BEAM tourne
+    # sous l'uid de l'humain de fleet : ce chemin resout vers son jeton PERSONNEL. Une boite dont le
+    # cablage systeme manquait ne tombait donc pas en panne — elle agissait sur la forge sous
+    # l'identite d'une personne, avec ses droits, et la forge voyait cette personne faire ce que le
+    # systeme faisait.
+    #
+    # Le repli est retire. Rien d'autre que ce temoin n'empeche qu'on le remette « parce que ca
+    # marchait avant » : un repli silencieux ne fait rougir aucune suite, par construction.
+    #
+    # ⚠ POURQUOI CE TEMOIN N'ESSAIE PAS DE DEPLACER `HOME`, ET POURQUOI IL PROUVE QUAND MEME.
+    # `System.user_home/0` lit un argument fige au demarrage de la VM : le poser dans
+    # `System.put_env` ne changerait rien, et le temoin serait un theatre.
+    #
+    # L'assertion sur la FORME EXACTE de l'erreur suffit, et elle mord sur les deux machines
+    # possibles. Si quelqu'un remet le repli : la ou `~/.gitea_token` existe, la resolution reussit
+    # et rend `{:ok, _}` ou une erreur HTTP ; la ou il n'existe pas, elle rend
+    # `{:config, {:token_file, <chemin>, :enoent}}`. Aucune des deux n'est `:no_token_source`.
+    test "aucune source → {:config, :no_token_source}, JAMAIS un repli sur ~/.gitea_token" do
+      opts = [base_url: "http://fake.test", req_options: [plug: {FakeForge, %{}}]]
+
+      assert {:error, {:config, :no_token_source}} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+    end
+
     test "trims trailing slash on base_url" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>

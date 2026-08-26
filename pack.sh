@@ -70,6 +70,38 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
+
+# ⚠ LA RÉVISION VOYAGE AVEC L'ARCHIVE, ET SANS ELLE TOUTE INSTALL DEPUIS UN PACK MENT.
+#
+# `git archive` n'emporte PAS `.git` — c'est son métier. `prov_source_rev` cherche alors un
+# `.source-revision` à la racine (provision-lib:1175) et, sans lui, rend « inconnue ».
+# `62-runtime-helpers` estampille donc `/opt/lcars/.source-revision` avec « inconnue », et sa passe
+# suivante rend un DRIFT qui dit « absent » d'un fichier qui EXISTE et vaut « inconnue ». L'opérateur
+# cherche un fichier manquant, le trouve, et reste bloqué.
+#
+# MESURE DU 2026-08-25, install réelle depuis un pack : `-rw-r--r-- root:root 9 octets`, contenu
+# `inconnue`. Ce n'est pas un cas de bord — c'est le mode d'install nominal de ce dépôt.
+#
+# Le repli EXISTAIT déjà ; ce qui manquait était de l'alimenter. Une ligne ici rend le paquet
+# traçable à son commit, et rend au module de quoi comparer ce qui est posé à ce qui est en source —
+# la question qui a coûté un compte utilisateur le 2026-08-21.
+#
+# ⚠ `--short=8`, LA MÊME FORME QUE `prov_source_rev` : deux longueurs de sha ne se comparent pas, et
+# la comparaison est tout ce que ce fichier sert à faire.
+# ⚠ `+local` SUR UN ARBRE MODIFIÉ, ET SANS LUI LE STAMP MENT. `prov_source_rev`
+# (provision-lib:1171) marque `+local` quand l'arbre diffère de HEAD, et `runtime_helpers.bats`
+# assère cette convention. Un `rev-parse` nu ferait donc déclarer à un paquet fabriqué depuis un
+# arbre sale qu'il EST un commit publié — et la comparaison « posé vs source », celle qui a coûté un
+# compte utilisateur le 2026-08-21, se ferait contre une révision qui n'existe nulle part.
+#
+# Je viens de fermer « un message qui désigne le mauvais objet » ; l'écrire sans cette ligne le
+# rouvrait un étage au-dessus. `prov_rev_is_behind` fait déjà `${1%%+*}`, il l'encaisse.
+_rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
+  || die "révision indéterminable — le paquet serait intraçable, et l'install le dirait mal"
+git diff --quiet HEAD -- 2>/dev/null || _rev="${_rev}+local"
+printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
+say "révision estampillée : $_rev"
+
 mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
 cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
 tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
@@ -110,8 +142,19 @@ if [[ -z "$TOKEN" && -n "$FORGE" ]]; then
 fi
 
 if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
+  # ⚠ CETTE LIGNE A IMPRIMÉ LE JETON EN CLAIR, ET ELLE CROYAIT DIRE « trouvé ». La forme était
+  # `${TOKEN:+trouvé}${TOKEN:-absent}` : la première moitié rend bien `trouvé` quand le jeton
+  # existe — mais `:-` ne substitue QUE sur vide ou non défini, donc la seconde rend LA VALEUR.
+  # Sortie réelle du 2026-08-25 : « jeton : trouvé9172f605… », quarante caractères de secret dans
+  # le terminal, dans le scrollback, et dans tout journal qui capture ce script.
+  #
+  # LA BRANCHE MENTEUSE EST CELLE QUI RÉUSSIT. Sur un jeton absent la ligne était correcte, donc
+  # elle se relisait comme juste : `${TOKEN:-absent}` ne se déclenche que là où il n'y a rien à
+  # fuiter. Un état se calcule AVANT d'être dit ; deux expansions collées ne sont pas une condition.
+  _tok_state="absent"
+  [[ -n "$TOKEN" ]] && _tok_state="trouvé"
   say "forge ou jeton indéterminables — le tar est dans dist/, pousse-le à la main si tu veux"
-  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : ${TOKEN:+trouvé}${TOKEN:-absent}"
+  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : $_tok_state"
   exit 0
 fi
 

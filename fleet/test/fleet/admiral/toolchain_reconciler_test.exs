@@ -298,11 +298,147 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       server: server
     } do
       converger_result({:error, {:converger_failed, 3, "apt transitoire"}})
-      assert {:error, {:converger_failed, 3, _}} = R.check_now(server)
+      assert {:error, {:converger_failed, 3, "apt transitoire"}} = R.check_now(server)
       assert_received {:converged, "sha-1"}
 
       assert {:error, {:converger_failed, 3, _}} = R.check_now(server)
       assert_received {:converged, "sha-1"}
+    end
+  end
+
+  # ─── LE SUDO A DISPARU, ET AVEC LUI L'ARGUMENT ────────────────────────────────────────────────
+  #
+  # Le geste était `sudo -n /usr/local/bin/lcars-toolchain-converge <sha>`, autorisé par
+  # `%fleet ALL=(root) NOPASSWD:` — un chemin `groupe → root` DIRECT, sur un groupe que le
+  # convergeur d'humains repeuple depuis la forge toutes les 30 s. Il passe par `toolchain.sock`,
+  # et le service y résout LUI-MÊME la tête de la branche protégée : ce module ne dit plus QUOI
+  # appliquer, il dit « converge ».
+
+  # Un serveur de socket unix qui rend UNE ligne puis ferme. `nil` = il ferme sans rien écrire.
+  defp fake_privileged(reply) do
+    path = Path.join(System.tmp_dir!(), "tc-#{System.unique_integer([:positive])}.sock")
+
+    {:ok, listen} =
+      :gen_tcp.listen(0, [{:ifaddr, {:local, path}}, :binary, packet: :line, active: false])
+
+    {:ok, _} =
+      Task.start(fn ->
+        case :gen_tcp.accept(listen, 5_000) do
+          {:ok, conn} ->
+            if reply, do: :gen_tcp.send(conn, reply <> "\n")
+            :gen_tcp.close(conn)
+
+          _ ->
+            :ok
+        end
+      end)
+
+    Application.delete_env(:lcars_fleet, :toolchain_converger)
+    Application.put_env(:lcars_fleet, :toolchain_socket, path)
+
+    on_exit(fn ->
+      _ = :gen_tcp.close(listen)
+      _ = File.rm(path)
+      Application.delete_env(:lcars_fleet, :toolchain_socket)
+    end)
+
+    path
+  end
+
+  describe "le SHA noté est celui qui a été APPLIQUÉ" do
+    # ⚠ SANS CE TÉMOIN, LA PANNE EST MUETTE ET DÉFINITIVE. Entre notre lecture de la tête et la
+    # résolution que le service fait de son côté, la branche peut avancer — le rail EXISTE pour que
+    # des PR y atterrissent. Noter NOTRE tête ferait croire la boîte à jour sur un état qu'elle n'a
+    # pas appliqué, et le tick suivant ne verrait AUCUN écart : plus jamais de convergence, et rien
+    # ne le dirait.
+    test "la branche a avancé pendant la convergence → c'est l'état APPLIQUÉ qui est noté", %{
+      server: server
+    } do
+      fake_privileged("OK:sha-plus-recent")
+
+      assert {:ok, :converged, "sha-plus-recent"} = R.check_now(server)
+      assert R.applied_sha() == "sha-plus-recent"
+    end
+
+    # LE TÉMOIN DU TÉMOIN : sans lui, un module qui noterait n'importe quoi passerait le test
+    # ci-dessus, et le cas nominal ne serait couvert par personne.
+    test "cas nominal : le service rend la tête qu'on avait lue, elle est notée telle quelle", %{
+      server: server
+    } do
+      fake_privileged("OK:sha-1")
+
+      assert {:ok, :converged, "sha-1"} = R.check_now(server)
+      assert R.applied_sha() == "sha-1"
+    end
+  end
+
+  describe "la porte fermée et la porte gardée ne se disent pas pareil" do
+    # ⚠ UNE SOCKET ABSENTE EST UN FAIT SYSTÈME, PAS UN REFUS. Les confondre envoie l'opérateur
+    # chercher une autorisation manquante alors qu'il lui manque une unité qui tourne. Même
+    # séparation que `Fleet.Credentials.Authority` tient côté credentials.
+    test "socket absente → :privileged_unreachable, jamais un refus du convergeur", %{
+      server: server
+    } do
+      Application.delete_env(:lcars_fleet, :toolchain_converger)
+      Application.put_env(:lcars_fleet, :toolchain_socket, "/nonexistent/toolchain.sock")
+      on_exit(fn -> Application.delete_env(:lcars_fleet, :toolchain_socket) end)
+
+      assert {:error, {:privileged_unreachable, "/nonexistent/toolchain.sock", _}} =
+               R.check_now(server)
+
+      refute R.applied_sha() == "sha-1"
+    end
+
+    # ⚠ ET UNE LIGNE VIDE N'EST PAS UN SUCCÈS. Un service qui ferme avant de répondre rend une
+    # chaîne vide ; la lire comme « appliqué » noterait un SHA jamais posé — exactement le succès
+    # muet que tout ce rail refuse. Le chantier voisin a mesuré la même chose sur `socat`, qui rend
+    # ZÉRO avec une sortie VIDE.
+    test "le service ferme sans répondre → :converger_mute, jamais « appliqué »", %{
+      server: server
+    } do
+      path = fake_privileged(nil)
+
+      assert {:error, {:converger_mute, ^path, _}} = R.check_now(server)
+      refute R.applied_sha() == "sha-1"
+    end
+
+    test "le service REFUSE → :converger_refused, avec la cause qu'il a nommée", %{server: server} do
+      fake_privileged("FAIL:forge_unreachable")
+
+      assert {:error, {:converger_refused, "forge_unreachable"}} = R.check_now(server)
+      refute R.applied_sha() == "sha-1"
+    end
+
+    # ⚠ CE TÉMOIN A ÉTÉ AJOUTÉ PARCE QU'UNE MUTATION EST PASSÉE MUETTE, ET LA LEÇON VAUT PLUS QUE
+    # LE CAS. Je croyais couvrir « réponse illisible » avec le service qui ferme sans écrire — mais
+    # une socket fermée rend `{:error, :closed}`, PAS une ligne vide. Les deux situations empruntent
+    # deux branches différentes, et seule la première était exercée : rendre `{:ok, _}` sur une
+    # réponse inintelligible ne faisait rougir personne.
+    #
+    # C'est exactement le succès muet que ce rail refuse ailleurs : un service d'un autre lot, ou un
+    # relais qui s'intercale, répondrait autre chose — et la boîte noterait un SHA jamais appliqué.
+    test "une réponse INCOMPRÉHENSIBLE n'est pas un succès", %{server: server} do
+      path = fake_privileged("bonjour")
+
+      assert {:error, {:converger_mute, ^path, "bonjour"}} = R.check_now(server)
+      refute R.applied_sha() == "sha-1"
+    end
+
+    test "une ligne VIDE n'est pas un succès non plus", %{server: server} do
+      path = fake_privileged("")
+
+      assert {:error, {:converger_mute, ^path, ""}} = R.check_now(server)
+      refute R.applied_sha() == "sha-1"
+    end
+
+    # ⚠ ET `OK:` SANS SHA NON PLUS. La garde `byte_size(sha) > 0` existe pour ça : un service qui
+    # répond `OK:` tout court ferait écrire un marqueur VIDE, et `applied_sha/0` lit alors « aucun
+    # SHA appliqué » — donc une reconvergence à chaque tick, indéfiniment, sans qu'une ligne le dise.
+    test "« OK: » sans SHA n'est pas un succès", %{server: server} do
+      path = fake_privileged("OK:")
+
+      assert {:error, {:converger_mute, ^path, "OK:"}} = R.check_now(server)
+      refute R.applied_sha() == "sha-1"
     end
   end
 end

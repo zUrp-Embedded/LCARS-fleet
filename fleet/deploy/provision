@@ -302,9 +302,34 @@ if [[ "$CMD" == "apply" ]]; then
   # 6-130 — le nom était `${TMPDIR:-/tmp}/lcars-provision.$(id -u).lock`, donc sous `sudo`
   # `/tmp/lcars-provision.0.lock` : FIXE, devinable, dans un dossier que tout le monde écrit. Et
   # `exec 9>` suit les liens et TRONQUE avant que `flock` ne protège quoi que ce soit.
-  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply REFUSÉ"
+  #
+  # ─── LA PORTÉE SE DÉRIVE DE LA SÉLECTION, ELLE NE SE DÉCLARE PAS ──────────────────────────────
+  #
+  # Une passe dont TOUS les modules sont `NEEDS: human` ne touche qu'un seul home : elle prend le
+  # verrou DE CET HUMAIN. Tout le reste — un apply complet, qui pose `/local`, `/etc`, les unités —
+  # prend le verrou global. Deux humains n'ont aucun objet commun ; les sérialiser ne protégeait rien
+  # et coûtait l'équipement d'un compte (mesure du 2026-08-25, voir `prov_lock_path`).
+  #
+  # ⚠ DÉRIVÉE, JAMAIS PASSÉE EN ARGUMENT, et c'est la même doctrine que les sockets de service :
+  # rien de ce que l'APPELANT écrit ne décide de ce qui est verrouillé. Un `--per-human` pourrait
+  # mentir ; `SELECTED` est ce qui va réellement tourner. Elle est déjà calculée ici (l.245-294) —
+  # le verrou vient après, exprès.
+  #
+  # ⚠ ET `PROV_HUMAN` DOIT ÊTRE NON VIDE POUR QUE LA PORTÉE EXISTE. Sans lui, une passe per-humain
+  # n'a pas d'humain : on retombe sur le verrou global, qui est le comportement sûr — sérialiser à
+  # tort coûte une attente, ne pas sérialiser assez coûte deux écrivains sur un objet.
+  _lock_scope=""
+  if [[ -n "${PROV_HUMAN:-}" ]]; then
+    _lock_scope="$PROV_HUMAN"
+    for mod in "${SELECTED[@]}"; do
+      [[ "$(module_field "$mod" NEEDS)" == "human" ]] || { _lock_scope=""; break; }
+    done
+  fi
+
+  LOCK="$(prov_lock_path "$_lock_scope")" || die "verrou: emplacement sûr indisponible — apply REFUSÉ"
   exec 9>"$LOCK"
-  flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
+  flock -n 9 \
+    || die "un autre apply est en cours${_lock_scope:+ pour « $_lock_scope »} (lock: $LOCK)"
 fi
 
 # ─── LE JOURNAL DE CETTE MACHINE ─────────────────────────────────────────────────────────────────
@@ -557,9 +582,16 @@ done
 # ─── SECOND PASSAGE : L'ÉTAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────────
 # `--human` désigne QUI joue les modules `# NEEDS: human`, et sur le rail poste c'est l'opérateur
 # (SUDO_USER) — c'est-à-dire, presque toujours, le compte uid 1000 que GUARD B réserve au siège.
-# `22-fleet-human` vient de créer l'humain de fleet ; sans ce passage, son `~/.lcars`, son `~/pods`
-# et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start` échouerait sous lui pour une
-# raison sans rapport avec ce qu'on a passé la nuit à corriger.
+# ⚠ CETTE PHRASE DISAIT « `22-fleet-human` vient de créer l'humain de fleet », ET ELLE EST FAUSSE
+# DEPUIS LE 2026-08-25. `22` NOMME ; `48-forge-host` sème le compte sur la forge ; `64-services`
+# tire le convergeur, qui matérialise le compte ET joue lui-même les modules `NEEDS: human` pour lui
+# (`converge_human` fait `provision apply --human <login> --only …`). Un lecteur qui dérivait de
+# cette phrase le moment où l'état per-humain apparaît cherchait au rang 22 ce qui se passe au 64.
+#
+# CE PASSAGE-CI RESTE, ET IL SERT L'AUTRE CAS : l'humain nommé avec `--fleet-human`. Sans lui, son
+# `~/.lcars`, son `~/pods` et son `fleet_v2.env` dépendraient entièrement d'un convergeur qui peut
+# être absent ou dériver — et `fleet_v2 start` échouerait sous lui pour une raison sans rapport avec
+# ce qu'on a passé la nuit à corriger. Les deux chemins sont idempotents et se recouvrent.
 #
 # LA LISTE SE CALCULE, ELLE NE SE RECOPIE PAS — même règle et même code que `converge_human` du
 # convergeur de boîte : le provisionnement DÉCLARE lesquels de ses modules sont per-humain

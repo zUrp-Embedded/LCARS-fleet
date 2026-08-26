@@ -45,6 +45,11 @@ set -euo pipefail
 # de ce module — ne serait épinglée par personne.
 HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
+# Le client shell du service d'autorité, sur le PATH — et il y est pour la même raison que le
+# convergeur de toolchain juste au-dessus : ses appelants vivent dans trois arbres qui ne se voient
+# pas (la CLI `fleet/bin`, le skill du siège `deploy/admiral/skills`, et le release). Un nom sur le
+# PATH est le seul point de rendez-vous qu'aucun des trois n'a à deviner.
+AUTHORITY_ASK_BIN="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
 # ⚠ LA SOURCE EST `fleet/services/`, PAS `deploy/docker/`. Ces fichiers sont du RUNTIME — ils
 # sont poses hors du checkout et tournent apres l'install, la plupart en root. Les ranger sous
@@ -79,6 +84,52 @@ HELPERS=(
   # posé ICI et pas ailleurs parce qu'il APPELLE `forge-gestures.sh` — les deux doivent atterrir
   # ensemble, sur les deux rails, ou le service démarre et refuse chaque geste sur un fichier absent.
   catalogue-executor.py
+  # Le cycle de vie d'une socket de service, ecrit UNE fois. Il est POSE et pas seulement ecrit :
+  # `catalogue-executor.py` l'importe depuis SON PROPRE repertoire, donc les deux atterrissent
+  # ensemble ou le service meurt sur un `ModuleNotFoundError` au demarrage.
+  lcars_socket.py
+  # L'unique service ROOT de la machine, et il ne detient rien. Il remplace la regle sudoers
+  # `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait. Pose ici parce
+  # qu'il APPELLE `lcars-toolchain-converge`, comme l'executeur de catalogue appelle
+  # `forge-gestures.sh` : les deux atterrissent ensemble, ou le service demarre et refuse chaque
+  # demande sur un binaire absent.
+  privileged-executor.py
+  # LE SUPERVISEUR DE LA BOITE — ce que `Restart=` fait sur ce rail-ci. `entrypoint.sh` lancait
+  # `setsid <cmd> &` et rien ne relancait un service mort : tini recolte les orphelins, il n'en
+  # ressuscite aucun. Il est pose sur les DEUX rails alors que seul docker s'en sert : sur un poste,
+  # systemd fait ce travail et ce fichier y dort. Ne le poser que d'un cote rouvrirait la divergence
+  # de mecanisme que ce lot ferme — et le mur de correspondance avec l'image l'exige de toute facon.
+  supervise.sh
+)
+
+# ─── LES DONNEES DU RAIL — NI EXECUTABLES, NI FORCEMENT DANS /opt/lcars ─────────────────────────
+#
+# ⚠ CE QUI SORT DE `/opt/lcars` ETAIT INVISIBLE AU MUR, ET UN FICHIER Y VIVAIT DEJA. Le temoin de
+# correspondance avec l'image ne lit qu'un motif : `COPY fleet/services/X /opt/lcars/X`. Tout ce que
+# le Dockerfile pose AILLEURS lui echappe par construction — pas par exemption, par angle mort.
+#
+# Mesure du 2026-08-26 : `Dockerfile` fait `COPY fleet/services/skel.bashrc /etc/skel/.bashrc`, et
+# RIEN ne le posait sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
+# `/etc/skel` — donc en boite un humain de fleet recoit le prompt LCARS, ses alias et
+# `force_color_prompt` ; sur un poste il recoit le `.bashrc` de la distribution. Silencieux des deux
+# cotes, et jamais le meme environnement selon le rail.
+#
+# `console.tmux.conf` etait, lui, exempte NOMMEMENT — « une config, pas un executable a deployer ».
+# La phrase explique pourquoi il n'est pas dans `HELPERS` (qui pose en 0755), pas pourquoi le poste
+# s'en passe : `console.sh` teste `[[ -r ]]` sur ce fichier et retombe sur le tmux par defaut, donc
+# deux comportements de console selon le rail. La bonne reponse n'etait pas l'exemption, c'etait une
+# SECONDE TABLE — meme regle, autre mode, autre destination.
+#
+# ⚠ LES DESTINATIONS SE DERIVENT, ELLES NE S'ECRIVENT PAS. Premiere version de cette table :
+# `/opt/lcars/console.tmux.conf` en litteral — une SECONDE autorite sur un chemin que ce module
+# tient deja dans `HELPERS_DIR`, et le jour ou la couture de test le deplace, la table pointe encore
+# l'ancien. Elle l'a fait tout de suite : cinq temoins rouges sur un `mkdir refusé: /opt/lcars`.
+#
+# Format : <source dans fleet/services/> <destination> <mode>
+SKEL_FILE="${LCARS_SKEL_FILE:-/etc/skel/.bashrc}"
+DATA=(
+  "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
+  "skel.bashrc $SKEL_FILE 0644"
 )
 
 # ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
@@ -146,8 +197,23 @@ check() {
   # clone six commits en arrière a reposé l'ancienne allocation d'uid par-dessus la nouvelle, en
   # rendant vert, et le service systemd a tourné dessus jusqu'à la collision suivante.
   local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  # ⚠ « ABSENT » ÉTAIT FAUX DANS LE CAS LE PLUS FRÉQUENT, ET IL ENVOYAIT CHERCHER LE MAUVAIS OBJET.
+  #
+  # `posed_rev` rend « inconnue » pour DEUX états distincts : le fichier n'est pas là, ou il est là
+  # et il vaut littéralement `inconnue`. Le second est ce que produit toute install depuis un
+  # tarball — `git archive` n'emporte pas `.git`, donc `prov_source_rev` ne trouve rien et ce module
+  # estampille « inconnue ». Mesure du 2026-08-25 : `-rw-r--r-- 9 octets`, contenu `inconnue`, et le
+  # message disait « absent ». L'opérateur cherche un fichier manquant, le trouve, et reste bloqué.
+  #
+  # La cause est fermée en amont — `pack.sh` écrit désormais `.source-revision` dans l'archive — mais
+  # les deux états restent distinguables ici, parce qu'un tarball d'avant ce correctif existe encore
+  # et qu'un message doit nommer ce qu'il voit, pas ce qu'il suppose.
   if [[ "$posed" == "inconnue" ]]; then
-    p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+    if [[ -r "$(helpers_stamp)" ]]; then
+      p_drift "$(helpers_stamp) existe mais vaut « inconnue » — les auxiliaires ont été posés depuis un arbre SANS révision lisible (install depuis une archive : « git archive » n'emporte pas .git). Rien ne permet de comparer ce qui est posé à cette source"
+    else
+      p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+    fi
   elif [[ "$posed" == "$src" ]]; then
     p_ok "auxiliaires posés depuis $posed (identique à la source)"
   else
@@ -190,6 +256,15 @@ check() {
     && p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)" \
     || p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
 
+  # ⚠ SON ABSENCE NE SE VOIT QUE SOUS UID HUMAIN, ET C'EST POURQUOI ELLE SE DIT ICI. Les services
+  # tournent en root et lisent encore les jetons directement ; ce qui casse sans ce binaire, ce sont
+  # les gestes d'OPÉRATEUR — `lcars publish run`, `lcars approve`, la boîte de réception du siège —
+  # et ils ne cassent qu'au moment où quelqu'un les tape. Un check qui ne le nomme pas laisse la
+  # panne se découvrir au pire moment, avec « commande introuvable » pour tout diagnostic.
+  [[ -x "$AUTHORITY_ASK_BIN" ]] \
+    && p_ok "client d'autorité posé ($AUTHORITY_ASK_BIN)" \
+    || p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
+
   for n in "${EMBEDDED[@]}"; do
     [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && break
     p_drift "provisionnement embarqué absent ($EMBEDDED_FLEET/$n) — le convergeur ne pourra pas converger un humain"
@@ -230,9 +305,29 @@ apply() {
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$HELPERS_DIR/$n"
   done
 
+  # LES DONNEES, apres les executables : meme source, autre mode, autre destination. `write_atomic`
+  # et pas `install` — il compare le contenu avant d'ecrire, donc une repasse ne compte pas de
+  # mutation, et le fichier n'est jamais a moitie ecrit sous un lecteur.
+  local spec d_src d_dst d_mode
+  for spec in "${DATA[@]}"; do
+    read -r d_src d_dst d_mode <<<"$spec"
+    [[ -f "$SRC_DIR/$d_src" ]] || { p_fail "source absente: $SRC_DIR/$d_src (arbre incomplet)"; verdict_apply; }
+    ensure_dir "$(dirname "$d_dst")" 0755 || verdict_apply
+    write_atomic "$d_dst" "$d_mode" < "$SRC_DIR/$d_src" \
+      || { p_fail "pose ratée: $d_dst"; verdict_apply; }
+  done
+
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
   install -m 0755 "${own[@]}" "$SRC_DIR/toolchain-converger.sh" "$TOOLCHAIN_BIN" \
     || { p_fail "pose ratée: $TOOLCHAIN_BIN"; verdict_apply; }
+
+  # 0755 : LISIBLE ET EXÉCUTABLE PAR TOUS, ET CE N'EST PAS UN RELÂCHEMENT. Ce script ne détient
+  # rien — il DEMANDE, et c'est la socket qui décide, sur un uid que le noyau atteste. Le fermer à
+  # un groupe rejouerait exactement le défaut que ce chantier retire : une autorisation lue dans
+  # `/etc/group` au lieu d'être demandée à la forge.
+  ensure_dir "$(dirname "$AUTHORITY_ASK_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
+  install -m 0755 "${own[@]}" "$SRC_DIR/lcars-authority-ask.sh" "$AUTHORITY_ASK_BIN" \
+    || { p_fail "pose ratée: $AUTHORITY_ASK_BIN"; verdict_apply; }
 
   # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —
   # ce qui est posé date de l'apply, pas d'un clone qui a pu bouger ou disparaître depuis.
