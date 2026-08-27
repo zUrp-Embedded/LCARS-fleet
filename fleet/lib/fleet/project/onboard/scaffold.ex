@@ -183,6 +183,41 @@ defmodule Fleet.Project.Onboard.Scaffold do
   end
 
   @doc """
+  RÉÉCRIT le rail CI de `dir` depuis le template — celui-là écrase, et c'est tout ce qui le sépare
+  de `ci_workflows/3`.
+
+  **POURQUOI DEUX PORTES ET PAS UN DRAPEAU.** `ci_workflows/3` n'écrase JAMAIS, délibérément : un
+  dépôt importé porte peut-être sa propre CI, et un humain en a peut-être écrit une à la main après
+  s'être cogné au mur. Les deux sont des réponses, et les remplacer par un placeholder serait pire
+  que le trou. Cette porte-ci fait exactement ce que l'autre refuse, donc elle ne peut pas être une
+  option de l'autre : on ne se trompe pas de porte par défaut.
+
+  **CE QU'ELLE EXISTE POUR DÉBLOQUER.** Un `ci.yml` cassé — image sans `node`, `runs-on:` qu'aucun
+  runner ne sert, workflow renommé hors de `CI` — ne produit plus le statut que la protection de
+  `main` exige. Aucune PR ne fusionne, et personne ne peut le réparer côté forge : les humains y
+  sont en `read`. Le rail livré, lui, est vert par construction (`no-harness-yet` echo). Le
+  remettre est la sortie de secours, et elle est EXPLICITE : personne ne l'appelle par accident.
+  """
+  @spec reset_ci_workflows(Path.t(), String.t(), keyword()) ::
+          {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
+  def reset_ci_workflows(dir, name, opts) do
+    root = face_root("main", opts)
+    vars = template_vars(name, opts, "")
+
+    rail =
+      for path <- face_files(root),
+          rel = Path.relative_to(path, root),
+          String.starts_with?(rel, ".gitea/workflows/"),
+          into: %{},
+          do: {rel, expand(File.read!(path), vars)}
+
+    case write_all(dir, rail) do
+      :ok -> {:ok, rail |> Map.keys() |> Enum.sort()}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Writes a WRITER face's template subtree (`"ops"`, `"workshop"`). `:pitch` falls back to
   `:description`, then `""`; `:today` overrides the current UTC date.
 

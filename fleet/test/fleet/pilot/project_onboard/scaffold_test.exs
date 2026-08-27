@@ -130,6 +130,22 @@ defmodule Fleet.Project.Onboard.ScaffoldTest do
     assert File.exists?(Path.join(dir, ".gitea/workflows/probe-test-relevance.yml"))
   end
 
+  test "reset_ci_workflows/3 ECRASE, la ou ci_workflows/3 n'ecrase JAMAIS", %{tmp_dir: dir} do
+    # Les deux portes existent parce qu'un depot importe porte peut-etre sa propre CI : la remplacer
+    # par un placeholder serait pire que le trou. Celle-ci fait ce que l'autre refuse — donc elle
+    # est une PORTE et pas un drapeau : on ne se trompe pas de defaut.
+    File.mkdir_p!(Path.join(dir, ".gitea/workflows"))
+    File.write!(Path.join(dir, ".gitea/workflows/ci.yml"), "casse: oui\n")
+
+    assert {:ok, ajoutes} = Scaffold.ci_workflows(dir, "p", [])
+    refute ".gitea/workflows/ci.yml" in ajoutes
+    assert File.read!(Path.join(dir, ".gitea/workflows/ci.yml")) == "casse: oui\n"
+
+    assert {:ok, ecrits} = Scaffold.reset_ci_workflows(dir, "p", [])
+    assert ".gitea/workflows/ci.yml" in ecrits
+    refute File.read!(Path.join(dir, ".gitea/workflows/ci.yml")) =~ "casse: oui"
+  end
+
   test "ci_workflows/3: n'ecrit QUE le rail — ni README, ni CLAUDE.md, ni .gitignore",
        %{tmp_dir: dir} do
     # ⚠ LE TEMOIN QUI SEPARE CETTE PORTE DE `main/3`. Celle-la ecrit la face entiere, ce qui est
