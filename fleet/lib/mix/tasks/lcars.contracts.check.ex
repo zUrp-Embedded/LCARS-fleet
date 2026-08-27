@@ -115,6 +115,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
         check_catalogue_roots_single_source(root),
+        check_private_dir_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -3860,6 +3861,165 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               skipped_note(skipped_labels)
         }
       end
+    end
+  end
+
+  @doc """
+  The secrets directory is DECLARED in five places and created in a sixth, and they must agree.
+
+  ## No authority is designated, and that is deliberate
+
+  Its four siblings in this section read ONE declaration and compare copies against it. This fact
+  has no such declaration to read: it is named by `@default_dir` in `Fleet.Credentials.RoleToken`,
+  by `PROV_TOKENS_DIR` in `provision-lib.sh`, by `LCARS_PRIVATE_DIR` in `deploy/accept`, and twice
+  more inside the box entrypoint's file paths. **Nobody has said which one prevails**, and choosing
+  here would be inventing an arbitration rather than checking one.
+
+  The manifest cannot serve as the authority either, and the reason is worth writing down: its row
+  is `dir <path> <mode> <owner> <rail>` — there is no NAME to ask. You cannot query it for "the
+  secrets directory"; you can only confirm that a path you already know is created there. A creator
+  is not a declaration.
+
+  So this check states the weaker claim that is actually true: **whatever the authority turns out
+  to be, the declarations agree, and the machine creates exactly the directory they name.** A
+  designation can be added later and this check keeps holding; a designation invented today would
+  be a decision no one made, written into a wall.
+
+  ## What breaks without it
+
+  `/home/private` is the most copied fact in the corpus. It holds the forge master token, the seed,
+  the role tokens and the uid map, in `0710 lcars-authority:fleet`. A declaration that drifts from
+  the created directory does not fail loudly: the daemon reads an empty directory and reports the
+  credential as absent — the same output as a machine that was never provisioned.
+  """
+  @spec check_private_dir_single_source(String.t()) :: result()
+  def check_private_dir_single_source(root) do
+    id = "layout.private_dir_single_source"
+
+    remediation =
+      "make every declaration of the secrets directory name the same path, and the manifest " <>
+        "create exactly that path — no authority is designated, so agreement IS the invariant"
+
+    # Chaque porteur : {fichier, regex de capture, ce qu'il est}. Le PERIMETRE se dit par fichier —
+    # `lib/` part avec l'image, `deploy/` non.
+    holders = [
+      {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"/,
+       "the BEAM's role-token directory"},
+      {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+       "the provisioning default"},
+      {"deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
+       "the acceptance gate's default"},
+      # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
+      # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
+      # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
+      {"deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
+       "the box's uid-map path"},
+      {"deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
+       "the box's master-token path"}
+    ]
+
+    read_holder = fn {rel, rx, what} ->
+      case File.read(Path.expand(rel, root)) do
+        {:ok, body} ->
+          case Regex.run(rx, body) do
+            [_, v] -> {:ok, rel, what, v}
+            _ -> {:unreadable, rel, what}
+          end
+
+        _ ->
+          {:absent, rel, what}
+      end
+    end
+
+    {in_scope, out} =
+      Enum.split_with(holders, fn {rel, _, _} ->
+        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+      end)
+
+    results = Enum.map(in_scope, read_holder)
+    values = for {:ok, rel, what, v} <- results, do: {rel, what, v}
+
+    broken =
+      for {:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}
+
+    skipped = out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+    cond do
+      # Moins de DEUX declarations lisibles : il n'y a pas d'accord a verifier. On le DIT, on ne
+      # rend pas un vert muet — c'est la regle de tout ce fichier.
+      length(values) < 2 and broken == [] ->
+        %{
+          id: id,
+          remediation: "—",
+          status: :pass,
+          evidence: [],
+          note:
+            "NOT CHECKED here — fewer than two declarations present in this artifact " <>
+              "(runtime-only context)" <> skipped_note(skipped)
+        }
+
+      broken != [] ->
+        %{
+          id: id,
+          remediation: remediation,
+          status: :fail,
+          evidence: Enum.map(broken, &elem(&1, 0)),
+          note:
+            "a declaration no longer reads as a frozen literal — " <>
+              Enum.map_join(broken, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+              skipped_note(skipped)
+        }
+
+      true ->
+        distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
+        [expected | _] = distinct
+
+        manifest_rel = "deploy/system.manifest"
+        manifest_scoped? = tree_scope(Path.expand("deploy", root)) == :required
+
+        manifest_ok? =
+          not manifest_scoped? or
+            case File.read(Path.expand(manifest_rel, root)) do
+              {:ok, m} -> Regex.match?(~r/^dir\s+#{Regex.escape(expected)}\s/m, m)
+              _ -> false
+            end
+
+        cond do
+          length(distinct) > 1 ->
+            %{
+              id: id,
+              remediation: remediation,
+              status: :fail,
+              evidence: Enum.map(values, fn {rel, _, _} -> rel end),
+              note:
+                "#{length(distinct)} different paths declared for one directory — " <>
+                  Enum.map_join(values, " · ", fn {f, what, v} -> "#{f} (#{what}): #{v}" end) <>
+                  skipped_note(skipped)
+            }
+
+          not manifest_ok? ->
+            %{
+              id: id,
+              remediation: remediation,
+              status: :fail,
+              evidence: [manifest_rel],
+              note:
+                "every declaration says #{inspect(expected)} but the manifest creates no such " <>
+                  "directory — the box would come up without it" <> skipped_note(skipped)
+            }
+
+          true ->
+            %{
+              id: id,
+              remediation: "—",
+              status: :pass,
+              evidence: values |> Enum.map(fn {rel, _, _} -> rel end) |> Enum.uniq(),
+              note:
+                "#{length(values)} declaration(s) agree on #{inspect(expected)}" <>
+                  if(manifest_scoped?, do: ", and the manifest creates it", else: "") <>
+                  skipped_note(skipped)
+            }
+        end
     end
   end
 

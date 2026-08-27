@@ -53,12 +53,26 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # assets/github.io absent de cet arbre »), et leur cause est la meme que les trois du dessus : un
   # arbre voisin que le stage `build` de l'image ne copie pas. Le troisieme invisible,
   # `template.gitea_expansion`, N'EST PAS ICI : il ne declarait rien, il est passe fail-closed.
+  # ⚠ `layout.private_dir_single_source` A ETE ATTRAPE PAR CE FICHIER LE JOUR DE SON ECRITURE, et
+  # c'est le garde renforce le matin meme qui l'a vu. Son exemption est pesee ici, comme ce
+  # commentaire l'exige, et elle n'a PAS la meme cause que les cinq du dessus.
+  #
+  # Ce check ne compare pas des copies a une autorite : il verifie que N declarations d'un meme
+  # repertoire s'ACCORDENT — aucune n'a ete designee comme faisant foi. En dessous de DEUX
+  # declarations lisibles, il n'y a pas d'accord a verifier : ni faute, ni preuve. Sur un arbre
+  # vide il y en a zero ; dans l'artefact runtime il y en a UNE (le `@default_dir` du BEAM), les
+  # quatre autres vivant sous `deploy/`.
+  #
+  # Le rendre fail-closed la ferait rougir la construction de l'image sur un artefact CORRECT —
+  # exactement la faute que `site.build_inputs` documente deux lignes plus haut, et qui a deja
+  # coute un build. Il passe donc, EN LE DISANT, et sa note nomme les declarations qu'il n'a pas vues.
   @declares_it_did_not_measure [
     "shell.sourcers_set_strict",
     "layout.face_roots_provisioned",
     "toolchain.branch_single_source",
     "bats.descriptions_inert",
-    "site.build_inputs"
+    "site.build_inputs",
+    "layout.private_dir_single_source"
   ]
 
   defp empty_root do
