@@ -32,6 +32,9 @@ setup() {
   SRC="$BATS_TEST_DIRNAME/../modules.d/22-fleet-human.sh"
   [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  # `deploy/provision` derive le siege de l'appelant et l'exporte avant tout module ; sans defaut
+  # `:-1000` dans la lib, une fixture qui ne le pose pas mesure une machine sans siege.
+  export LCARS_SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
   export PROVISION_MODULE=22-fleet-human
   export PROV_FLEET_GROUP="$(id -gn)"
 

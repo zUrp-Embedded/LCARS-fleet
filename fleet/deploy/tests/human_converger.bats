@@ -353,6 +353,7 @@ converged() { # converged -> la liste calculee
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export LCARS_SYSADMIN_UID='${LCARS_SYSADMIN_UID:-1000}'
     source '$SUT'
     converged_humans"
 }
@@ -719,19 +720,20 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
     $1"
 }
 
-@test "plancher: JUSTE AU-DESSUS du siege — jamais l'uid du siege lui-meme" {
-  # C'est toute la faute : `useradd` sans `-u` part de UID_MIN et rendrait 1000 s'il est libre.
-  LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
+@test "plancher: c'est UID_MIN, et rien d'autre — le siege n'est pas un plancher" {
+  # Les deux gardes sont ORTHOGONAUX. Partir de `siege + 1` les cumulait : avec un siege a 1237, les
+  # uid 1000..1236 devenaient inutilisables alors que les deux gardes les acceptent.
+  LCARS_SYSADMIN_UID=1237 floor 'uid_floor'
   [ "$status" -eq 0 ]
-  [ "$output" = "1001" ]
+  [ "$output" = "1000" ]
 }
 
-@test "plancher: il SUIT le siege quand on le deplace — il n'est pas ecrit en dur" {
-  # `LCARS_SYSADMIN_UID` est REGLABLE, et c'est ce qui rend le cas atteignable en vrai : un siege a
-  # 1500 sur une machine ou 1500 est libre.
-  LCARS_SYSADMIN_UID=1500 floor 'uid_floor'
+@test "le siege est un TROU dans la plage : first_free_uid le saute, il ne demarre pas apres" {
+  # Le siege ne se devine pas — il vient du fichier ou de la variable — et il ne se franchit pas non
+  # plus : c'est un uid reserve au milieu d'une plage qui reste ouverte des deux cotes.
+  LCARS_SYSADMIN_UID=1000 floor 'first_free_uid'
   [ "$status" -eq 0 ]
-  [ "$output" = "1501" ]
+  [ "$output" != "1000" ]
 }
 
 @test "plancher: un UID_MIN plus haut que le siege l'emporte — les deux regles valent, pas une" {
@@ -747,7 +749,7 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/absent.defs"
   LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
   [ "$status" -eq 0 ]
-  [ "$output" = "1001" ]
+  [ "$output" = "1000" ]
 }
 
 @test "plancher: un SYSADMIN_UID non numerique ne fait pas DISPARAITRE le plancher" {
