@@ -41,7 +41,15 @@ jobs:
   # `<workflow> / <job> (<déclencheur>)` → ici `CI / no-harness-yet (pull_request)`, sous le glob
   # `CI / *` exigé par la protection de `main`. Le rail est vert, la première PR passe.
   #
-  # `no-harness-yet` est le SIGNAL « ce projet n'a pas encore de vraie suite » : le brief remis au
+  # ⚠ CE VERT EST EXIGE DE TOUT LE MONDE, ET CE QU'IL VEUT DIRE DEPEND DE LA CARTE. La protection de
+# `main` exige un statut `CI / *` quelle que soit la carte du projet — c'est le mur qui empeche une
+# main humaine de passer a cote du rail, et il ne se negocie pas. Une carte qui declare n'avoir rien
+# a prouver (`ci: ignore` — PoC jetable, smoke technique, audit sans code) doit donc quand meme
+# PRODUIRE ce statut : ce job le produit, et la ligne `${CI_STANCE}` dit alors que ce vert est un
+# RECU et pas une preuve. Sur une carte qui a quelque chose a prouver, la meme ligne invite a poser
+# la vraie suite ici.
+#
+# `no-harness-yet` est le SIGNAL « ce projet n'a pas encore de vraie suite » : le brief remis au
   # juge nomme les contextes qui ont tourné, donc « aucun harnais ici » devient une constatation
   # qu'il rend au lieu d'un fait invisible. Le renommer (ex. `test`) est exactement ce qu'un projet
   # FAIT quand il pose sa suite — la disparition de ce nom est le signal, et elle est gratuite.
@@ -55,6 +63,5 @@ jobs:
           echo "CI: le push a atteint la forge, la forge a dispatché, le runner exécute."
           echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
           echo "image: node/python3/bash/git disponibles ; checkout OK."
-          echo "⚠ Ce vert ne prouve RIEN du code : ce projet n'a pas encore de harnais."
-          echo "   Remplace ce step par ta commande de test (## Test du CLAUDE.md),"
-          echo "   dans CE job — l'image porte déjà ta toolchain. Renomme le job = le signal."
+          echo "⚠ Ce vert ne prouve RIEN du code."
+          echo "   ${CI_STANCE}"

@@ -171,7 +171,7 @@ defmodule Fleet.Project.Onboard do
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- seed_protocol_labels(full_name, opts),
          :ok <- clone_main(url, dirs.code),
-         :ok <- Scaffold.main(dirs.code, name, opts),
+         :ok <- Scaffold.main(dirs.code, name, with_ci_stance(full_name, opts)),
          :ok <- write_declaration(dirs.code, full_name, opts),
          :ok <- commit(dirs.code, "chore(onboard): scaffold initial du projet"),
          :ok <- push(dirs.code, "main", false),
@@ -1535,7 +1535,7 @@ defmodule Fleet.Project.Onboard do
            ensure_ci_workflows(
              dirs.code,
              name,
-             opts,
+             with_ci_stance(full_name, opts),
              "ci(adopt): rail CI du depot (.gitea/workflows)"
            ),
          :ok <- push(dirs.code, "main", true),
@@ -1593,6 +1593,32 @@ defmodule Fleet.Project.Onboard do
   # ⚠ `Scaffold.main/3` NE POUVAIT PAS SERVIR : il ecrit la face ENTIERE (README, CLAUDE.md,
   # .gitignore), ce qui est juste pour un depot que la fleet vient de creer et destructeur pour un
   # depot qu'elle importe. Cette porte-ci n'ajoute que ce qui MANQUE.
+  # LA POSTURE DU RAIL SE LIT SUR LA CARTE, ET LE DEFAUT EST L'INVITATION A PROUVER. Une carte
+  # illisible, absente, ou un catalogue casse rendent `:required` : le projet recoit un rail qui
+  # l'invite a poser sa suite. La dispense ne s'obtient que d'une carte qui la DECLARE.
+  defp with_ci_stance(repo, opts),
+    do: Keyword.put_new(opts, :ci_stance, ci_stance(repo, opts))
+
+  defp ci_stance(repo, opts) do
+    case Keyword.get(opts, :workflow_map) do
+      card when is_binary(card) and card != "" ->
+        loader_opts =
+          case Keyword.take(opts, [:workflow_maps_root]) do
+            [] -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+            given -> given
+          end
+
+        try do
+          Fleet.Project.Roles.ci(Fleet.Workflow.Loader.load!(card, loader_opts))
+        rescue
+          _ -> :required
+        end
+
+      _ ->
+        :required
+    end
+  end
+
   defp ensure_ci_workflows(proj_dir, name, opts, msg) do
     case Scaffold.ci_workflows(proj_dir, name, opts) do
       {:ok, []} ->
@@ -1806,7 +1832,7 @@ defmodule Fleet.Project.Onboard do
            ensure_ci_workflows(
              scratch,
              name,
-             opts,
+             with_ci_stance(full_name, opts),
              "ci(import): rail CI du depot (.gitea/workflows)"
            ),
          :ok <- set_origin(scratch, forge_url),

@@ -128,12 +128,36 @@ defmodule Fleet.Project.Onboard.Scaffold do
 
     %{
       "REPO_NAME" => name,
+      "CI_STANCE" => ci_stance_line(Keyword.get(opts, :ci_stance, :required)),
       "REPO_DESCRIPTION" => pitch,
       "YEAR" => year,
       "MONTH" => month,
       "DAY" => day
     }
   end
+
+  # LE RAIL LIVRE EST VERT DES DEUX COTES — `protect_main` exige `CI / *` pour TOUT LE MONDE, et ce
+  # mur ne se negocie pas : c'est lui qui empeche une main humaine de passer a cote du rail. Ce qui
+  # change avec la carte n'est donc PAS l'existence du statut, c'est ce que ce vert VEUT DIRE, et
+  # personne ne le disait.
+  #
+  #   `required` — la carte a quelque chose a prouver : ce vert est un PLACEHOLDER, et le projet le
+  #               remplace par sa suite le jour ou il sait ce qu'il est.
+  #   `ignore`   — la carte declare n'avoir rien a prouver (PoC jetable, smoke technique, audit sans
+  #               code) : ce vert est le RECU du plancher, pas une preuve. Y poser une suite
+  #               gaterait un livrable que personne n'attend.
+  #
+  # Le defaut est `required` : une carte qu'on n'a pas su lire recoit l'invitation a prouver, jamais
+  # la dispense.
+  defp ci_stance_line(:ignore),
+    do:
+      "Cette carte declare n'avoir RIEN a prouver (ci: ignore) : ce vert est le recu du plancher " <>
+        "CI / *, pas une preuve. N'y pose pas de suite — elle gaterait un livrable que personne n'attend."
+
+  defp ci_stance_line(_required),
+    do:
+      "Remplace ce step par ta commande de test (## Test du CLAUDE.md), dans CE job — l'image porte " <>
+        "deja ta toolchain. Renommer le job EST le signal que ce projet a pose sa suite."
 
   defp expand(content, vars) do
     Enum.reduce(vars, content, fn {k, v}, acc -> String.replace(acc, "${#{k}}", v) end)
