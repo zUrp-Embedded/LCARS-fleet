@@ -63,7 +63,16 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   # Stub seams for dispatch_issue/2
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
-    def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
+    # ⚠ BAVARD SUR UN SEUL MARQUEUR, et c'est ce qui permet de l'épingler sans changer la boîte aux
+    # lettres des 87 autres tests : eux ne postent jamais de marqueur ci-rework.
+    def post_comment(_repo, n, body, _opts) do
+      case Fleet.Forge.Protocol.parse_ci_rework_marker(body) do
+        {:ok, {^n, _head12}} -> send(self(), {:ci_rework_marked, n})
+        _ -> :ok
+      end
+
+      {:ok, :posted}
+    end
     def start_stopwatch(_repo, _n, _opts), do: :ok
 
     # Regression guard: signals `n` — proves that `promote_pr` (poller-driven merge,
@@ -130,8 +139,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
     # Tier 1 (conflict-rework budget): counts the `[conflict-rework:pr-N` markers. Seam
     # `_test_conflict_rounds` (default {:ok, 0} = first conflict → producer rework, not escalation).
-    def count_comments_marked(_repo, _index, _prefix, opts),
-      do: Keyword.get(opts, :_test_conflict_rounds, {:ok, 0})
+    # ⚠ LE PREFIXE DISCRIMINE : le compteur générique sert DEUX freins (conflit tier 1, rework CI),
+    # et un stub qui rend la même valeur aux deux rend les deux budgets indissociables en test.
+    def count_comments_marked(_repo, _index, prefix, opts) do
+      if String.starts_with?(prefix, "[ci-rework:"),
+        do: Keyword.get(opts, :_test_ci_reworks, {:ok, 0}),
+        else: Keyword.get(opts, :_test_conflict_rounds, {:ok, 0})
+    end
 
     # F181: compensation — lock removal on a post-lock failure. Seam `_test_remove_label` (default
     # {:ok, :removed}) lets a test force the removal to FAIL (CI-10: honest "lock removal FAILED" log).
@@ -182,6 +196,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # what every pre-existing test of this module describes: their policy blocks are re-requests.
     def commit_ci_state(_repo, _sha, opts),
       do: {:ok, Keyword.get(opts, :_test_ci, :none)}
+
   end
 
   defmodule StubLoader do
@@ -1616,15 +1631,119 @@ defmodule Fleet.Pilot.StepDispatcherTest do
             _test_merge_result: {:error, {:http, 405, "policy"}},
             _test_pull: %{"number" => 6, "state" => "open", "draft" => false, "mergeable" => true},
             _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
             _test_ci: :failure
           ]
         )
 
-      # NOT `{:merge_blocked_escalated, _}` — that is the arch, and this is the producer's.
-      refute match?(
-               {:skipped, {:merge_blocked_escalated, 6}},
-               StepDispatcher.dispatch_review(pr, opts)
-             )
+      # ⚠ CE TEMOIN ETAIT VERT SUR LE MAUVAIS FAIT. Il ne refusait QUE `{:merge_blocked_escalated,
+      # _}` — une des DEUX formes d'escalade — pendant que la fixture, sans `_test_route`, faisait
+      # echouer la lecture du budget et rendait `{:rework_exhausted_escalated, 6}` : l'architecte
+      # etait saisi, exactement ce que le nom du test dit qui n'arrive pas. Un refus d'UNE forme ne
+      # prouve pas le fait ; le fait, c'est qu'un POD est demande.
+      assert {:ok, _} = StepDispatcher.dispatch_review(pr, opts)
+      assert_received {:spawned, _issue, _opts}
+    end
+
+    test "CI rouge : le round est COMPTE sur le ticket — sinon le budget ne borne rien" do
+      # `count_change_request_rounds` compte des reviews REQUEST_CHANGES ; un CI rouge n'en pose
+      # AUCUNE. Le budget qui s'appuie dessus laisse donc passer une suite infinie de rounds, un pod
+      # a chaque fois que le label `in_flight` retombe. Le marqueur EST le round depense.
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
+            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
+            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"}
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :failure,
+            _test_ci_reworks: {:ok, 0}
+          ]
+        )
+
+      assert {:ok, _} =
+               StepDispatcher.dispatch_review(
+                 pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+                 opts
+               )
+
+      assert_received {:spawned, _issue, _opts}
+      assert_received {:ci_rework_marked, 42}
+    end
+
+    test "CI rouge AU-DELA du budget : l'architecte est saisi, et aucun pod de plus" do
+      # `max_rework_rounds` vaut 2 dans ces fixtures : deux rounds deja depenses ferment la porte.
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
+            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
+            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"}
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :failure,
+            _test_ci_reworks: {:ok, 2}
+          ]
+        )
+
+      StepDispatcher.dispatch_review(
+        pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+        opts
+      )
+
+      refute_received {:spawned, _issue, _opts}
+      # Et le round non joue n'est pas facture : on ne marque que ce qui a spawn.
+      refute_received {:ci_rework_marked, 42}
+    end
+
+    test "CI rouge, compteur ILLISIBLE : on escalade, on ne boucle pas en aveugle" do
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
+            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
+            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"}
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :failure,
+            _test_ci_reworks: {:error, :forge_down}
+          ]
+        )
+
+      StepDispatcher.dispatch_review(
+        pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+        opts
+      )
+
+      refute_received {:spawned, _issue, _opts}
     end
 
     test "merge blocked while the CI is still PENDING → the next tick asks again, nobody is summoned" do

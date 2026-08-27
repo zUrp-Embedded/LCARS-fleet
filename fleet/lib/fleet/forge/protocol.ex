@@ -237,6 +237,60 @@ defmodule Fleet.Forge.Protocol do
 
   def parse_publish_fail_marker(_), do: :error
 
+  # ============================================================
+  # CI-REWORK marker `[ci-rework:issue-<n>:head-<sha12>]` — le frein forge-natif du rework CAUSE PAR
+  # LA CI. `count_change_request_rounds` compte les reviews REQUEST_CHANGES ; un CI rouge n'en pose
+  # AUCUNE, donc ce compteur ne bouge pas et le budget qui s'appuie dessus ne borne rien sur ce
+  # chemin. Ce marqueur est le round dépensé : un par rework CI réellement dispatché.
+  # ============================================================
+
+  @ci_rework_prefix "[ci-rework:issue-"
+  # {4,12} : le parseur accepte ce que le constructeur PRODUIT (il tronque à 12, un sha de test peut
+  # être plus court). Un parseur plus strict que son constructeur décompte en silence ce qui vient
+  # d'être posé.
+  @ci_rework_rx Regex.compile!(
+                  Regex.escape(@ci_rework_prefix) <> "(\\d+):head-([0-9a-f]{4,12})\\]"
+                )
+
+  @doc """
+  Marqueur d'UN rework causé par une CI rouge, pour l'issue `n` sur la tête `head_sha` (12 hex).
+
+      iex> m = Fleet.Forge.Protocol.ci_rework_marker(7, String.duplicate("b", 40))
+      iex> m
+      "[ci-rework:issue-7:head-bbbbbbbbbbbb]"
+      iex> Fleet.Forge.Protocol.parse_ci_rework_marker(m)
+      {:ok, {7, "bbbbbbbbbbbb"}}
+      iex> Fleet.Forge.Protocol.parse_ci_rework_marker("un commentaire")
+      :error
+  """
+  @spec ci_rework_marker(integer(), String.t()) :: String.t()
+  def ci_rework_marker(n, head_sha) when is_integer(n) and is_binary(head_sha) do
+    "#{@ci_rework_prefix}#{n}:head-#{String.slice(head_sha, 0, 12)}]"
+  end
+
+  @doc """
+  Le PRÉFIXE des marqueurs ci-rework de l'issue `n` — ce que `count_comments_marked/4` compte.
+
+  Le compteur générique du rail conflit sert ici aussi : un seul mécanisme de comptage, et le
+  littéral reste collé à son constructeur plutôt que recopié chez l'appelant.
+
+      iex> Fleet.Forge.Protocol.ci_rework_prefix(7)
+      "[ci-rework:issue-7:"
+  """
+  @spec ci_rework_prefix(integer()) :: String.t()
+  def ci_rework_prefix(n) when is_integer(n), do: "#{@ci_rework_prefix}#{n}:"
+
+  @doc "Extrait `{issue_n, head12}` d'un corps portant un marqueur ci-rework ; `:error` sinon."
+  @spec parse_ci_rework_marker(String.t()) :: {:ok, {integer(), String.t()}} | :error
+  def parse_ci_rework_marker(body) when is_binary(body) do
+    case Regex.run(@ci_rework_rx, body) do
+      [_, n, head12] -> {:ok, {String.to_integer(n), head12}}
+      _ -> :error
+    end
+  end
+
+  def parse_ci_rework_marker(_), do: :error
+
   @doc """
   Marker of ONE post-push propagation failure for issue `n` (BL-6-34): the deliverable IS pushed
   (`sha`, truncated 12 hex — the branch survives on the forge) but the PR was never born
