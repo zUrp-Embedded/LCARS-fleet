@@ -73,7 +73,12 @@ defmodule Fleet.Test.AuthorityDouble do
     path =
       Path.join(
         System.tmp_dir!(),
-        "lcars-authority-double-#{System.unique_integer([:positive])}.sock"
+        # ⚠ LE PID DE L'OS, PAS SEULEMENT LE COMPTEUR DU BEAM. `System.unique_integer` repart de
+        # petits nombres à chaque VM : deux suites lancées par DEUX UTILISATEURS sur la même
+        # machine se disputent le même nom dans `/tmp`, et le second échoue en `:eaddrinuse` sur
+        # une socket qu'il n'a pas le droit d'effacer (sticky bit). Le pid du système sépare les
+        # deux runs ; le compteur sépare les listeners d'un même run.
+        "lcars-authority-double-#{System.pid()}-#{System.unique_integer([:positive])}.sock"
       )
 
     _ = File.rm(path)
