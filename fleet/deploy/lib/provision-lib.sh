@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ⚠ SC2034 AU NIVEAU DU FICHIER, ET C'EST LE CONTRAT DE CETTE LIB QUI LE JUSTIFIE. Ses fonctions
+# rendent leurs resultats par des GLOBALES `PROV_*` que l'APPELANT lit : `prov_seat_binding` pose
+# trois variables et n'imprime rien, `run_step` laisse le code reel dans `PROV_LAST_RC`,
+# `docker_endpoint` pose `PROV_DOCKER_*`. Aucune n'est lue DANS ce fichier, donc shellcheck les voit
+# toutes inutilisees ; six modules les lisent, verifie. Une directive par site serait la meme phrase
+# treize fois — et la directive doit preceder TOUTE commande, `set -` compris, sinon elle est inerte.
+# shellcheck disable=SC2034
 # SOURCE: fleet/deploy/lib/provision-lib.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
@@ -1446,5 +1453,7 @@ prov_roles() {
     done
   fi
 
+  # `$out` est une LISTE separee par des espaces, a eclater — c'est le but de cette ligne.
+  # shellcheck disable=SC2086 # eclatement voulu : une entree par mot
   printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
