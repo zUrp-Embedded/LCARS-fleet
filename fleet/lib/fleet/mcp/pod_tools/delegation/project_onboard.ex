@@ -185,6 +185,16 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @callback revise_card(full_name :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
+  @doc """
+  RÉÉCRIT le rail CI d'un projet sur `main` depuis le template livré — la sortie de secours quand
+  un `ci.yml` cassé empêche toute PR de fusionner (le plancher `CI / *` de `protect_main` exige un
+  statut que le rail ne produit plus, et les humains sont en `read` sur la forge). `opts` :
+  `:justification` (requise), `:reset_by` (le rôle qui agit). Résultat : `repo`/`outcome`
+  (`:reset` | `:unchanged`)/`files`.
+  """
+  @callback reset_ci_rail(full_name :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+
   # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom
   # (not a literal remote call) → no compile-time dep. Set HERE once.
   @default_onboard Fleet.Project.Onboard

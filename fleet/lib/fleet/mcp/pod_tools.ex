@@ -135,6 +135,7 @@ defmodule Fleet.MCP.PodTools do
     "project_publish" => :mutation,
     "project_close" => :mutation,
     "project_revise_card" => :mutation,
+    "project_reset_ci_rail" => :mutation,
     "project_delete" => :mutation,
     "issue_status" => :read,
     "scratch" => :mutation,
@@ -717,6 +718,37 @@ defmodule Fleet.MCP.PodTools do
         "max_fan" => %{"type" => "integer", "minimum" => 1, "maximum" => 15}
       },
       "required" => ["full_name", "workflow_map", "justification"]
+    })
+  end
+
+  deftool "project_reset_ci_rail" do
+    # vitrine: Remet le rail CI d'un projet a l'etat livre — la sortie quand un ci.yml casse bloque toutes les PR.
+    meta do
+      name("Reset Project CI Rail")
+
+      description(
+        "REWRITES the project's CI rail on `main` from the shipped template, and pushes it. THE " <>
+          "ESCAPE HATCH OF THE FLOOR: `main` protection requires a `CI / *` status from EVERY " <>
+          "project, and a BROKEN `ci.yml` (image without `node`, a `runs-on:` no runner serves, " <>
+          "the workflow renamed away from `CI`) produces none — so NO pull request can merge, and " <>
+          "nobody can repair it on the forge: humans are `read` there. This verb puts back the " <>
+          "shipped rail, green by construction. IT OVERWRITES, and that is its whole point: the " <>
+          "existing file IS the defect. `justification` REQUIRED — it replaces someone's work, it " <>
+          "is not played by accident. RELAY to the human: a pull request ALREADY open keeps its " <>
+          "own rail until its producer fixes it or it rebases; this repairs the SOURCE the next " <>
+          "branches inherit. `full_name` = `owner/name`. Returns {\"status\":\"ci_rail_reset\"," <>
+          "\"outcome\":\"reset\"|\"unchanged\",\"files\":[...]}; \"unchanged\" = the shipped " <>
+          "rail already stands (honest no-op, nothing pushed)."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "full_name" => %{"type" => "string"},
+        "justification" => %{"type" => "string"}
+      },
+      "required" => ["full_name", "justification"]
     })
   end
 
@@ -1504,6 +1536,24 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("project_revise_card", _bad_args, state) do
+    {:error, :invalid_arguments, state}
+  end
+
+  def handle_tool_call("project_reset_ci_rail", %{"full_name" => full_name} = args, state)
+      when is_binary(full_name) and full_name != "" do
+    if valid_repo_ref?(full_name) do
+      case Delegation.reset_project_ci_rail(full_name, args, state) do
+        {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+        {:error, reason} -> {:error, reason, state}
+      end
+    else
+      {:error,
+       {:invalid_full_name,
+        "`full_name` must be an `owner/name` repo (got #{inspect(full_name)})"}, state}
+    end
+  end
+
+  def handle_tool_call("project_reset_ci_rail", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
 

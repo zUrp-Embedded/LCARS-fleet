@@ -87,6 +87,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
     def import_deposit(_s, _c, _o), do: {:error, :unused}
     def close_project(_f, _o), do: {:error, :unused}
     def revise_card(_f, _o), do: {:error, :unused}
+    def reset_ci_rail(_f, _o), do: {:error, :unused}
   end
 
   setup do
@@ -196,6 +197,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
         def import_deposit(_s, _c, _o), do: {:error, :unused}
         def close_project(_f, _o), do: {:error, :unused}
         def revise_card(_f, _o), do: {:error, :unused}
+        def reset_ci_rail(_f, _o), do: {:error, :unused}
       end
 
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, MuteOnboard)

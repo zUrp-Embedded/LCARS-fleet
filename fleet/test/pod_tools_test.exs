@@ -663,6 +663,19 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
+    def reset_ci_rail(full_name, opts) do
+      send(self(), {:reset_ci_rail, full_name, opts})
+
+      {:ok,
+       %{
+         repo: full_name,
+         outcome: :reset,
+         files: [".gitea/workflows/ci.yml"],
+         protection: :restored
+       }}
+    end
+
+    @impl true
     # The READ half of the project surface: a stub that could destroy but not enumerate is exactly
     # the shape this tool was added to close.
     def list_projects(_opts),
@@ -2059,6 +2072,8 @@ defmodule Fleet.MCP.PodToolsTest do
          "workflow_map" => "workshop-direct",
          "justification" => "le poc est devenu serieux"
        }},
+      {"project_reset_ci_rail",
+       %{"full_name" => "fleet/demo-proj", "justification" => "le rail est casse, aucune PR ne merge"}},
       {"project_close", %{"full_name" => "fleet/demo-proj"}},
       {"project_adopt", %{"name" => "demo-proj", "catalogue" => "fleet"}},
       {"project_import",
@@ -2351,6 +2366,33 @@ defmodule Fleet.MCP.PodToolsTest do
                  %{"full_name" => "fleet/x", "forge" => "any", "as" => "Y"},
                  pod_state(uniq("pod-eng"))
                )
+    end
+
+    test "reset_project_ci_rail: la justification et le ROLE traversent, et la note dit ce qui NE bouge pas" do
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "starfleet"}} end)
+
+      assert {:ok, %{content: [%{"text" => txt}]}, _} =
+               PodTools.handle_tool_call(
+                 "project_reset_ci_rail",
+                 %{
+                   "full_name" => "fleet/demo-proj",
+                   "justification" => "le rail est casse, aucune PR ne merge"
+                 },
+                 pod_state(uniq("pod-sf"))
+               )
+
+      assert_received {:reset_ci_rail, "fleet/demo-proj", opts}
+      assert opts[:justification] == "le rail est casse, aucune PR ne merge"
+      # `reset_by` = l'identite du canal, jamais un champ du fil — meme regle que `revised_by`.
+      assert opts[:reset_by] == "starfleet"
+
+      assert {:ok, result} = Jason.decode(txt)
+      assert result["status"] == "ci_rail_reset"
+      assert result["outcome"] == "reset"
+      assert ".gitea/workflows/ci.yml" in result["files"]
+      # LA SEULE SEMANTIQUE QUE L'HUMAIN DOIT ENTENDRE : ce geste repare la SOURCE, pas la PR qui
+      # bloque devant lui. Sans cette phrase, il attend un deblocage qui ne vient pas.
+      assert result["note"] =~ "PR DEJA ouverte"
     end
 
     test "revise_project_card: threads the human declaration + the ACTING role, renders the note" do
