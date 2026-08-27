@@ -211,12 +211,41 @@ if config_env() != :test and not tool_mode? do
       e -> {:unreadable, Exception.message(e)}
     end
 
-  # `""` (variable posee VIDE) retomberait sur… rien : une garde desarmee en silence (audit).
-  sysadmin_uid =
-    case System.get_env("LCARS_SYSADMIN_UID", "1000") do
-      "" -> "1000"
-      v -> v
+  # ─── LA CLEF DE LA GARDE NE VIENT PLUS DE L'ENVIRONNEMENT DU GARDE ─────────────────────────────
+  #
+  # ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARMAIT CETTE GARDE. Elle
+  # lisait sa politique dans l'environnement du processus qu'elle garde — or cet environnement
+  # appartient au garde, qui n'a qu'a le poser en prefixe de commande. Et le BEAM, lance APRES
+  # `setup_env`, heritait en plus de `~/.lcars/fleet_v2.env`, un fichier que le template invite
+  # explicitement l'humain a editer : la dispense y devenait persistante.
+  #
+  # L'uid du siege est un FAIT DE MACHINE, pas un reglage. Il vit donc dans un fichier `root:root`
+  # que le garde ne peut pas reecrire, pose par le provisionnement (`64-services` au poste,
+  # l'entrypoint en boite). Le fichier GAGNE sur la variable : sans cette precedence, il suffirait
+  # de reposer la variable pour revenir a l'etat d'avant.
+  #
+  # `LCARS_SEAT_UID_FILE` est une couture de TEMOIN — elle deplace le CHEMIN, jamais la valeur, donc
+  # elle ne rend pas au garde le pouvoir qu'on vient de lui retirer.
+  #
+  # Sans fichier (poste non provisionne, arbre de dev), on retombe sur la variable puis sur `1000` :
+  # refuser tout demarrage la ou LCARS n'a jamais tourne echangerait une garde contre une porte
+  # fermee. `""` (variable posee VIDE) retomberait sur… rien : une garde desarmee en silence (audit).
+  seat_uid_from_file =
+    with path <- System.get_env("LCARS_SEAT_UID_FILE", "/etc/lcars/seat.uid"),
+         {:ok, body} <- File.read(path),
+         trimmed <- String.trim(body),
+         {n, ""} when n >= 0 <- Integer.parse(trimmed) do
+      Integer.to_string(n)
+    else
+      _ -> nil
     end
+
+  sysadmin_uid =
+    seat_uid_from_file ||
+      case System.get_env("LCARS_SYSADMIN_UID", "1000") do
+        "" -> "1000"
+        v -> v
+      end
 
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
   # ET la frontiere systeme/humain (`uid >= UID_MIN`). Un compte SYSTEME (uid < 1000) lancant la

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: test/fleet_v2/fleet_v2.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.227
+# STARDATE: 2026.239
 # STATUS: bats tests for bin/fleet_v2 env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -16,6 +16,13 @@ setup() {
   mkdir -p "$HOME/.lcars"
   # setup_env fail-louds on a missing forge URL (legitimate guard) — satisfied here.
   export FORGE_BASE_URL="http://forge.test"
+  # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CES TEMOINS MESURERAIENT LA MACHINE.
+  # Depuis le 2026-08-27, GUARD B lit `/etc/lcars/seat.uid` et ce FICHIER GAGNE sur la variable :
+  # c'est ce qui empeche le garde de lever sa propre garde. Sur une machine provisionnee, le vrai
+  # fichier ecraserait donc le decor de chaque test ci-dessous — verts ici, rouges sur un poste
+  # installe, meme arbre. On pointe la couture sur un chemin qui n'existe pas : la variable
+  # redevient le levier, et c'est le contrat documente du repli.
+  export LCARS_SEAT_UID_FILE="$TMP_BASE/seat.uid"
 }
 
 teardown() {
@@ -92,6 +99,30 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 # Le BEAM herite de l'uid du lanceur et ses pods avec : lancer sous l'uid reserve du sysadmin
 # (admiral, 1000) donnerait des pods root. Le garde est EN TETE de cmd_start, avant tout le reste.
 # On simule l'uid via `LCARS_SYSADMIN_UID` (la valeur de comparaison), pas en changeant d'uid reel.
+
+@test "GUARD B: le FICHIER gagne sur la variable — la dispense ne se pose plus en prefixe" {
+  # ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait cette garde. Elle
+  # lisait sa politique dans l'environnement du processus qu'elle garde. Le fichier `root:root` la
+  # lui retire — a condition de GAGNER, sinon il suffit de reposer la variable.
+  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "export LCARS_SYSADMIN_UID=99999; source '$SCRIPT'; cmd_start"
+  [[ "$output" == *"admiral/sysadmin"* ]]
+  [ "$status" -ne 0 ]
+}
+
+@test "GUARD B: le fichier fait AUTORITE aussi quand il innocente" {
+  # LE PENDANT : sans lui, une garde qui refuserait TOUJOURS passerait le temoin d'a cote.
+  echo "99999" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  [[ "$output" != *"admiral/sysadmin"* ]]
+}
+
+@test "GUARD B: un fichier ILLISIBLE n'arme rien de faux — on retombe sur la variable" {
+  printf 'pasunuid\n' > "$LCARS_SEAT_UID_FILE"
+  run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  [[ "$output" == *"admiral/sysadmin"* ]]
+  [ "$status" -ne 0 ]
+}
 
 @test "GUARD B: start REFUSE sous l'uid du sysadmin (admiral) et nomme le plan" {
   run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"

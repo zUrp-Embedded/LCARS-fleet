@@ -29,6 +29,8 @@ setup() {
   export PROVISION_MODULE=64-services
   export LCARS_SYSTEMD_DIR="$BATS_TEST_TMPDIR/etc/systemd/system"
   export LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/etc/lcars/services.env"
+  # Le fichier que lisent les DEUX moities de GUARD B. Couture de chemin, jamais de valeur.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
   export LCARS_SERVICES_OWNER="$(id -un):$(id -gn)"
   # La fenetre qui separe « forke » de « debout » dure douze secondes sur une vraie machine. Ce qui
@@ -129,6 +131,41 @@ mod() { run bash "$MOD" "$1"; }
   [ "$status" -eq 0 ]
   grep -qx 'LCARS_SYSADMIN_UID=1007' "$LCARS_SERVICES_ENV"
   refute grep -q 'LCARS_SYSADMIN_UID=1000' "$LCARS_SERVICES_ENV"
+}
+
+@test "l'uid du siege est POSE dans un fichier que le garde ne peut pas reecrire" {
+  # ⚠ POURQUOI UN FICHIER ET PAS LA VARIABLE : mesure du 2026-08-27,
+  # `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait GUARD B. L'environnement d'un processus
+  # appartient a ce processus ; une garde ne peut pas y prendre sa politique. `0644` parce que le
+  # lecteur est le shell d'un humain quelconque, `root:root` parce que c'est ce qui l'empeche de le
+  # reecrire — les deux moities du mode portent chacune la moitie du contrat.
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_SEAT_UID_FILE" ]
+  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
+  [ "$(stat -c '%a' "$LCARS_SEAT_UID_FILE")" = "644" ]
+}
+
+@test "le check DERIVE quand le fichier de siege manque — le garde y retombe sur son litteral" {
+  mod apply
+  rm -f "$LCARS_SEAT_UID_FILE"
+  mod check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE '^DRIFT .*seat\.uid absent'
+}
+
+@test "un fichier de siege qui CONTREDIT services.env est un ECHEC, pas une derive" {
+  # ⚠ LES DEUX ARTEFACTS SORTENT DE LA MEME DERIVATION, donc un desaccord n'est pas un retard : il
+  # veut dire que `uid_floor` (le plancher de creation des humains) et GUARD B (le refus de
+  # lancement) ne reservent pas le meme uid. Le convergeur creerait alors des humains sur l'uid que
+  # la garde refuse — une machine qui se contredit elle-meme, en silence.
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  echo 2008 > "$LCARS_SEAT_UID_FILE"
+  mod check
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qE '^FAIL .*ne réservent pas le même uid'
 }
 
 @test "sans uid de siege, l'ecriture est ABANDONNEE — jamais tronquee" {

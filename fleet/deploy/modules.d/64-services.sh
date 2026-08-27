@@ -73,6 +73,13 @@ set -euo pipefail
 
 SYSTEMD_DIR="${LCARS_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+# ⚠ LE FICHIER QUE LIT GUARD B, ET IL N'EST PAS DANS `services.env`. Celui-ci sert les DAEMONS par
+# `EnvironmentFile=` ; la garde, elle, tourne dans le shell d'un HUMAIN, qui n'herite d'aucun des
+# deux. Et surtout : une garde ne peut pas prendre sa clef dans l'environnement de ce qu'elle garde
+# — `LCARS_SYSADMIN_UID=99999 fleet_v2 start` la desarmait (mesure du 2026-08-27). D'ou un fichier
+# `root:root` que le garde ne peut pas reecrire, et qui GAGNE sur la variable chez ses deux lecteurs
+# (`bin/fleet_v2` et son miroir `config/runtime.exs`).
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
 HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
@@ -340,6 +347,36 @@ probe_seat_uid() {
   fi
 }
 
+# ─── LE FICHIER QUE LISENT LES DEUX MOITIES DE GUARD B ─────────────────────────────────────────
+#
+# Absent, les deux gardes retombent sur le litteral `1000` — juste tant que le siege est le premier
+# uid de la machine, et muet quand il ne l'est pas. C'est exactement l'etat d'avant ce lot.
+probe_seat_file() {
+  local v name
+  if [[ ! -r "$SEAT_UID_FILE" ]]; then
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) retombera sur le littéral 1000, qui n'est le siège que par coïncidence"
+    return 0
+  fi
+  v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ ! "$v" =~ ^[0-9]+$ ]]; then
+    p_drift "$SEAT_UID_FILE ne porte pas un uid (« $v ») — les deux gardes l'ignoreront et retomberont sur leur littéral"
+    return 0
+  fi
+  # ⚠ LES DEUX ARTEFACTS DOIVENT S'ACCORDER, ET ILS VIENNENT DE LA MEME DERIVATION. `services.env`
+  # sert `uid_floor` (le plancher de creation des humains), ce fichier sert GUARD B (le refus de
+  # lancement). Deux valeurs differentes creeraient des humains sur l'uid que la garde reserve.
+  local declared
+  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1 || true)"
+  if [[ -n "$declared" && "$declared" != "$v" ]]; then
+    p_fail "$SEAT_UID_FILE dit $v et $SERVICES_ENV dit $declared — GUARD B et uid_floor ne réservent pas le même uid ; le convergeur créerait des humains sur celui que la garde refuse"
+    return 0
+  fi
+  name="$(getent passwd "$v" 2>/dev/null | cut -d: -f1 || true)"
+  [[ -n "$name" ]] \
+    && p_ok "GUARD B lit $SEAT_UID_FILE → uid $v (« $name »)" \
+    || p_drift "$SEAT_UID_FILE dit $v, uid qu'aucun compte ne porte — la garde réserve un siège absent"
+}
+
 check() {
   local u
 
@@ -361,6 +398,7 @@ check() {
   # Celle-ci lit `$SERVICES_ENV`, qui est un artefact du rail POSTE — la boîte n'en a pas, son
   # environnement vient du conteneur. Sondée trop tôt, elle rendait ROUGE tout doctor de boîte.
   probe_seat_uid
+  probe_seat_file
 
   for u in "${UNITS[@]}"; do
     if ! unit_current "$u"; then
@@ -424,6 +462,13 @@ apply() {
     || { p_fail "environnement des services non calculable — l'écriture est ABANDONNÉE, pas tronquée"; verdict_apply; }
   write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" <<<"$env_body" \
     || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
+
+  # ⚠ `0644 root:root`, ET LES DEUX MOITIES DU MODE COMPTENT. Le `644` parce que le lecteur est le
+  # shell d'un humain quelconque : un fichier que le garde ne peut pas ouvrir ne garde rien. Le
+  # `root:root` parce que c'est ce qui empeche ce meme humain de le REECRIRE — c'est toute la
+  # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
+  write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
+    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B retomberait sur son littéral"; verdict_apply; }
   # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
   # lire deux écritures là où il n'y en a qu'une.)
 

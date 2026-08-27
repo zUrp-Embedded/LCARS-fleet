@@ -31,6 +31,9 @@ setup() {
   # L'uid du siege et sa reservation : meme regle de decor. Les heriter ferait mesurer la machine
   # qui lance les temoins au lieu de la derivation.
   unset LCARS_UID LCARS_SYSADMIN_UID
+  # ⚠ COUTURE OBLIGATOIRE : la tete de l'entrypoint ECRIT ce fichier au moment ou on la source.
+  # Sans elle, ces temoins ecriraient dans le /etc/lcars de la machine qui les lance.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
   MAP="$BATS_TEST_TMPDIR/forge-uid.map"
   TOKF="$BATS_TEST_TMPDIR/forge-master.token"
   # LA TETE SEULE : tout ce qui precede l'etape 1. La resolution y vit, et ca evite d'embarquer le
@@ -70,6 +73,19 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   seat_sh 'echo "UID=$LCARS_UID SYSADMIN=$LCARS_SYSADMIN_UID"'
   [ "$status" -eq 0 ]
   [[ "$output" == *"UID=1005 SYSADMIN=1005"* ]]
+}
+
+@test "siege : l'uid part dans un FICHIER, parce que l'export ne traverse pas « exec sshd »" {
+  # ⚠ L'EXPORT NE SUFFISAIT PAS, ET C'EST LE DEFAUT QUE CE TEMOIN GARDE. L'entrypoint finit sur
+  # `exec sshd` ; une session ssh part d'un environnement NEUF (l'image ne pose ni `AcceptEnv` ni
+  # `PermitUserEnvironment`). L'humain qui tape `fleet_v2 start` n'avait donc jamais vu la variable,
+  # et GUARD B y retombait sur son litteral 1000 — juste par coincidence tant que `LCARS_UID` valait
+  # son defaut. Le fichier, lui, survit a l'exec parce qu'il n'est pas dans un environnement.
+  export LCARS_UID=1005
+  seat_sh 'true'
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_SEAT_UID_FILE" ]
+  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1005" ]
 }
 
 @test "siege : la TABLE du convergeur fait foi — aucune forge n'est interrogee" {

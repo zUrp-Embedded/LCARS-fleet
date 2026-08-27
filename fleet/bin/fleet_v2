@@ -309,6 +309,43 @@ apply_start_flags() {
   return 0
 }
 
+# ─── L'UID DU SIEGE : UN FAIT DE MACHINE, PAS UN REGLAGE DU GARDE ───────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARMAIT GUARD B. La garde
+# lisait sa politique dans l'environnement du processus qu'elle garde — et cet environnement
+# appartient au garde, qui n'a qu'a poser la variable en prefixe de commande. Aucun `unset`, aucun
+# `env -i`, rien ne l'en empechait.
+#
+# ⚠ ET LE FICHIER D'ENVIRONNEMENT NE POUVAIT PAS ETRE LE CANAL NON PLUS, meme si l'ordre s'y
+# pretait : `~/.lcars/fleet_v2.env` appartient a l'humain — le template l'invite a l'editer. Une
+# garde dont la clef vit dans un fichier que le garde possede n'est pas une garde ; y semer la
+# valeur aurait rendu la dispense PERSISTANTE au lieu de tenir le temps d'une commande.
+#
+# Le siege est un fait de la machine : il vit dans un fichier `root:root` que le garde ne peut pas
+# reecrire, pose par le provisionnement (`64-services` au poste, l'entrypoint en boite). Le FICHIER
+# GAGNE sur la variable — sans cette precedence, il suffirait de reposer la variable.
+#
+# `LCARS_SEAT_UID_FILE` deplace le CHEMIN (couture de temoin), jamais la valeur : elle ne rend pas
+# au garde le pouvoir qu'on vient de lui retirer.
+#
+# Sans fichier — poste non provisionne, arbre de dev — on retombe sur la variable puis sur `1000`.
+# Refuser tout demarrage la ou LCARS n'a jamais tourne echangerait une garde contre une porte
+# fermee, et `config/runtime.exs` (le miroir) applique la MEME precedence, mot pour mot.
+seat_uid() {
+  local f v
+  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  if [[ -r "$f" ]]; then
+    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; return 0; fi
+  fi
+  # ⚠ `:-` NE PROTEGE QUE DU VIDE, PAS DU NON-NUMERIQUE — et `(( x == abc ))` lit `abc` comme un NOM
+  # de variable en contexte arithmetique, donc `unbound variable` sous `set -u` : la garde MEURT au
+  # lieu de refuser. Meme cicatrice que `uid_floor` dans le convergeur.
+  v="${LCARS_SYSADMIN_UID:-1000}"
+  [[ "$v" =~ ^[0-9]+$ ]] || v=1000
+  echo "$v"
+}
+
 cmd_start() {
   parse_start_opts "$@"
   set -- "${START_ARGS[@]}"
@@ -360,8 +397,9 @@ cmd_start() {
   if (( _uid < _uid_min )); then
     die "refus de lancer une fleet sous l'uid $_uid — c'est un compte SYSTEME (uid < UID_MIN=$_uid_min, declare dans ${PASSWD_DEFS:-/etc/login.defs}). Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
   fi
-  if (( _uid == ${LCARS_SYSADMIN_UID:-1000} )); then
-    die "refus de lancer une fleet sous l'uid $_uid (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= $(( ${LCARS_SYSADMIN_UID:-1000} + 1 )))."
+  local _seat; _seat="$(seat_uid)"
+  if (( _uid == _seat )); then
+    die "refus de lancer une fleet sous l'uid $_uid (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= $(( _seat + 1 )))."
   fi
 
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"

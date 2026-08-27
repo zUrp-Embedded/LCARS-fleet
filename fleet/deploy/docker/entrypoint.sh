@@ -198,6 +198,29 @@ LCARS_UID="${LCARS_UID:-1000}"
 # `LCARS_SYSADMIN_UID` est le NOM DU FAIT que tout le reste lit. Le second derive du premier ici,
 # une fois, avant que quoi que ce soit ne le lise.
 export LCARS_SYSADMIN_UID="$LCARS_UID"
+
+# ⚠ ET L'EXPORT NE SUFFIT PAS, PARCE QU'IL NE TRAVERSE PAS `exec sshd`. Une session ssh part d'un
+# environnement NEUF — l'image ne pose ni `AcceptEnv` ni `PermitUserEnvironment` — donc l'humain qui
+# tape `fleet_v2 start` n'a jamais vu cette variable, et GUARD B y retombait sur son litteral `1000`.
+# La garde etait donc juste par COINCIDENCE tant que `LCARS_UID` valait son defaut.
+#
+# ⚠ ET MEME ACHEMINEE, UNE VARIABLE NE PEUT PAS PORTER CETTE CLEF : mesure du 2026-08-27,
+# `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait la garde. L'environnement d'un processus
+# appartient a ce processus ; une garde ne peut pas y prendre sa politique.
+#
+# D'ou un FICHIER, `root:root`, que le garde ne peut pas reecrire et qui GAGNE sur la variable chez
+# ses deux lecteurs (`bin/fleet_v2` et son miroir `config/runtime.exs`). `64-services` le pose au
+# poste ; ce module-la est `APPLY-ON: wsl linux`, donc en boite c'est ici, et nulle part ailleurs.
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+if mkdir -p "$(dirname "$SEAT_UID_FILE")" 2>/dev/null \
+   && printf '%s\n' "$LCARS_UID" > "$SEAT_UID_FILE" 2>/dev/null; then
+  chmod 0644 "$SEAT_UID_FILE" 2>/dev/null || true
+  chown root:root "$SEAT_UID_FILE" 2>/dev/null || true
+else
+  # Non fatal, et NOMME : la boite doit rester joignable pour etre reparee — meme regle que la
+  # convergence et la console. Ce qui se degrade est la garde, et le message le dit.
+  echo "[lcars-entrypoint] $SEAT_UID_FILE NON pose — GUARD B retombera sur son litteral 1000 au lieu de l'uid $LCARS_UID du siege" >&2
+fi
 PROVISION=/opt/lcars/fleet/deploy/provision
 HOST_KEYS_DIR=/home/.lcars-container/ssh
 # ⚠ LA MEME TABLE QUE LE CONVERGEUR, ET C'EST TOUT L'INTERET. Le siege est le #1 de la forge : son
