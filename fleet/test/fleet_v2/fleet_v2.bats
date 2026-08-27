@@ -17,12 +17,22 @@ setup() {
   # setup_env fail-louds on a missing forge URL (legitimate guard) — satisfied here.
   export FORGE_BASE_URL="http://forge.test"
   # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CES TEMOINS MESURERAIENT LA MACHINE.
-  # Depuis le 2026-08-27, GUARD B lit `/etc/lcars/seat.uid` et ce FICHIER GAGNE sur la variable :
-  # c'est ce qui empeche le garde de lever sa propre garde. Sur une machine provisionnee, le vrai
-  # fichier ecraserait donc le decor de chaque test ci-dessous — verts ici, rouges sur un poste
-  # installe, meme arbre. On pointe la couture sur un chemin qui n'existe pas : la variable
-  # redevient le levier, et c'est le contrat documente du repli.
+  # GUARD B lit `/etc/lcars/seat.uid` et ce FICHIER GAGNE sur la variable : c'est ce qui empeche le
+  # garde de lever sa propre garde. Sur une machine provisionnee, le vrai fichier ecraserait le decor
+  # de chaque test ci-dessous — verts ici, rouges sur un poste installe, meme arbre. La couture
+  # deplace donc le CHEMIN vers le decor.
+  #
+  # ⚠ ET LE DECOR POSE LE FICHIER, IL NE COMPTE PLUS SUR SON ABSENCE. Ce harnais pointait la couture
+  # vers un chemin INEXISTANT, en s'appuyant sur un repli — « sans fichier, on retombe sur la
+  # variable ». Ce repli est mort le 2026-08-27, et sa premisse etait fausse : une machine sans siege
+  # est une machine ou l'installeur n'a pas tourne en entier, pas un arbre de dev. Le siege est l'uid
+  # de l'humain qui installe LCARS — ou, quand une forge est deja fournie, celui derive du nom de son
+  # admin. Il n'existe aucun cas legitime ou la fleet demarre sans lui.
+  #
+  # 99999 : un uid que personne ne porte, donc GUARD B laisse passer par defaut et chaque temoin
+  # atteint la porte qu'il vise. Ceux qui mesurent le REFUS ecrivent `$(id -u)` eux-memes.
   export LCARS_SEAT_UID_FILE="$TMP_BASE/seat.uid"
+  echo 99999 > "$LCARS_SEAT_UID_FILE"
 }
 
 teardown() {
@@ -117,15 +127,32 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   [[ "$output" != *"admiral/sysadmin"* ]]
 }
 
-@test "GUARD B: un fichier ILLISIBLE n'arme rien de faux — on retombe sur la variable" {
+@test "GUARD B: un siege ILLISIBLE se REFUSE, il ne se remplace pas" {
+  # ⚠ CE TEMOIN AFFIRMAIT L'INVERSE JUSQU'AU 2026-08-27 : « on retombe sur la variable ». Un defaut
+  # repond par un NOMBRE la ou le garde a besoin d'un FAIT, et `1000` — premier uid humain de toute
+  # distro — accuse le lecteur le plus probable. Un fichier siege qui ne porte pas un uid est un etat
+  # (installeur incomplet), pas une valeur : on le NOMME et on refuse.
   printf 'pasunuid\n' > "$LCARS_SEAT_UID_FILE"
   run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
-  [[ "$output" == *"admiral/sysadmin"* ]]
+  [[ "$output" == *"siege illisible"* ]]
+  [ "$status" -ne 0 ]
+}
+
+@test "GUARD B: un siege ABSENT se REFUSE aussi — la machine n'est pas provisionnee" {
+  # Le pendant du precedent, et il ferme le cas que le harnais exploitait : pas de fichier du tout.
+  # Une machine sans siege est une machine ou l'installeur n'a pas tourne en entier ; la variable ne
+  # peut pas y suppleer, sinon le garde lit sa politique dans l'environnement du processus qu'il garde.
+  rm -f "$LCARS_SEAT_UID_FILE"
+  run bash -c "export LCARS_SYSADMIN_UID=99999; source '$SCRIPT'; cmd_start"
+  [[ "$output" == *"siege non declare"* ]]
   [ "$status" -ne 0 ]
 }
 
 @test "GUARD B: start REFUSE sous l'uid du sysadmin (admiral) et nomme le plan" {
-  run bash -c "export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  # ⚠ LE SIEGE SE POSE PAR LE FICHIER, PLUS PAR LA VARIABLE — c'est le sens meme de la garde : elle
+  # ne lit pas sa politique dans l'environnement du processus qu'elle garde.
+  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "source '$SCRIPT'; cmd_start"
   [[ "$output" == *"admiral/sysadmin"* ]]
   [ "$status" -ne 0 ]
 }
@@ -170,7 +197,9 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 @test "GUARD B: un login.defs illisible retombe sur 1000, il ne desarme pas le garde" {
   # Fail-closed : `awk` sur un fichier absent rend une chaine vide, et `(( _uid < "" ))` aurait
   # laisse passer tout le monde en silence. Le defaut est repose explicitement.
-  run bash -c "export PASSWD_DEFS='/nulle/part/login.defs'; export LCARS_SYSADMIN_UID=\$(id -u); source '$SCRIPT'; cmd_start"
+  # Le siege vient du FICHIER : ce temoin mesure le plancher UID_MIN, pas la source du siege.
+  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "export PASSWD_DEFS='/nulle/part/login.defs'; source '$SCRIPT'; cmd_start"
   [[ "$output" == *"admiral/sysadmin"* ]]
   [ "$status" -ne 0 ]
 }
