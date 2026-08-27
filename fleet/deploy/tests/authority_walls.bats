@@ -24,8 +24,11 @@ setup() {
   # l'exclusion `-not -path '*/tests/*'` viderait alors TOUT le perimetre — les murs passeraient au
   # vert sur une liste vide. Le voisin a paye exactement ce defaut ; on ne le rejoue pas.
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
+  # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, pour que le garde du perimetre la CONSOMME au lieu de
+  # la recopier. Deux listes a maintenir, c'est une liste qui derive et un garde qui ne garde plus.
+  ARBRES=("$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/etc")
   mapfile -t CODE < <(
-    find "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/etc" -type f \
+    find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'box' \
          -o -name 'provision' -o -name 'Dockerfile' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
@@ -52,7 +55,19 @@ absent() { # absent <motif etendu> <fichier>
   # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, extension renommee) rendrait
   # tous les murs verts en n'ayant RIEN lu. Une population vide et zero violation se ressemblent
   # exactement dans la sortie ; seul ce test les separe.
-  [ "${#CODE[@]}" -gt 30 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
+  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE. Celui-ci etait a 30 pour 65 fichiers (mesure du
+  # 2026-08-27 : deploy 41, services 12, bin 9, etc 3) — perdre `services`, `bin` ET `etc` EN ENTIER
+  # laisse 41 fichiers, donc vert. Le plancher n'attrape que le balayage totalement casse.
+  #
+  # Chaque arbre nomme doit contribuer, et la regle se DERIVE de `ARBRES`.
+  local a
+  for a in "${ARBRES[@]}"; do
+    printf '%s\n' "${CODE[@]}" | grep -q "^$a/" || {
+      echo "MUR 0 rompu — l'arbre « ${a#"$REPO"/} » ne contribue AUCUN fichier au perimetre" >&2
+      return 1
+    }
+  done
+  [ "${#CODE[@]}" -gt 55 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
   printf '%s\n' "${CODE[@]}" | grep -q 'services/forge-gestures.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'etc/provision-role-tokens.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'modules.d/25-directories.sh'

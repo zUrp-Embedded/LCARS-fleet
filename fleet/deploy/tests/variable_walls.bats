@@ -25,9 +25,16 @@ setup() {
   # bash sans suffixe. La question n'est pas « quel nom porte le fichier » mais « quel interprete
   # le lit », et la seule reponse est sur sa premiere ligne.
   #
-  # `tests/` est hors perimetre : c'est le code qui S'EXECUTE qu'on mesure. Ce fichier-ci y est
-  # donc aussi, ce qui n'est pas un detail — la liste des variables ci-dessous est du CODE, et un
-  # mur inclus dans son propre balayage s'accuse lui-meme au premier motif qu'il epingle.
+  # ⚠ CE QUI EST EXCLU, ET CE QUI NE L'EST PAS — la premiere redaction de ce commentaire disait
+  # « tests hors perimetre », et c'etait FAUX de son propre instrument : `*/tests/*` ne retire que
+  # les suites de `deploy/tests/` et `git-hooks/tests/`, pas les 32 fichiers bash de `test/`, qui
+  # SONT balayes. La mesure du 2026-08-27 : deploy 41 · test 32 · bin 11 · services 8 ·
+  # git-hooks 4 · etc 3 · vendor 2 · priv 1 = 102.
+  #
+  # Et c'est le bon perimetre : un repli mort dans un temoin est une affirmation fausse comme
+  # ailleurs. La seule exclusion NECESSAIRE est celle des fichiers de mur eux-memes — la liste de
+  # variables ci-dessous est du CODE, donc un mur inclus dans son propre balayage s'accuse au
+  # premier motif qu'il epingle. `*/tests/*` la couvre, et c'est sa vraie raison d'etre.
   mapfile -t BASH_CODE < <(
     find "$REPO" -type f \
       -not -path '*/tests/*' -not -path '*/_build/*' -not -path '*/deps/*' -not -path '*/.git/*' \
@@ -46,7 +53,21 @@ code_of() { sed 's/#.*//' "$1"; }
 @test "MUR: le perimetre n'est pas VIDE — un balayage casse compte zero, comme un sans-faute" {
   # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, `head -1` qui change de forme)
   # rendrait le mur vert en n'ayant rien lu. C'est la forme d'echec la plus chere : elle certifie.
-  [ "${#BASH_CODE[@]}" -ge 60 ]
+  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE, ET J'AI POSE LE DEFAUT ICI AVANT DE LE CHASSER
+  # AILLEURS : 60 pour 102 fichiers laisse perdre `test` (32) EN ENTIER sans un mot. Les deux murs
+  # voisins portaient la meme forme, a 30 pour 123 et 30 pour 65.
+  #
+  # Le balayage etant par SHEBANG, il n'y a pas de liste d'arbres a consommer — le garde nomme donc
+  # les cinq arbres stables, un par voie d'entree du bash dans ce depot : recette, temoins,
+  # programmes de PATH, demons, outils d'install. Perdre l'un d'eux se voit ici.
+  local t
+  for t in deploy test bin services etc; do
+    printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
+      echo "MUR 0 rompu — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre" >&2
+      return 1
+    }
+  done
+  [ "${#BASH_CODE[@]}" -ge 85 ]
   # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
   # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/etc/install.sh$'

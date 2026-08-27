@@ -26,11 +26,16 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
   # Le perimetre : ce qui S'EXECUTE. Les temoins (`deploy/tests`, `test/`) nomment legitimement ce
   # qu'ils epinglent, et les documents de chantier ne tournent nulle part.
+  # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, ET C'EST CE QUI REND LE GARDE DERIVABLE. Ecrite en
+  # dur dans le `find`, elle ne pouvait etre comparee a rien : le garde plus bas devait la RECOPIER,
+  # donc il aurait fallu maintenir deux listes pour qu'un arbre perdu se voie. Une seule source, et
+  # le garde la consomme.
+  ARBRES=("$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/priv")
   mapfile -t CODE < <(
     # ⚠ `services` EST DANS LE PERIMETRE, ET C EST LA MOITIE QUI COMPTE : c'est la que vivent
     # l'executeur de catalogue, le convergeur d'humains et le convergeur d'outillage — le code
     # privilegie de la machine. L'oublier ferait passer les murs au vert en n'ayant rien lu.
-    find "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/priv" -type f \
+    find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name '*.yaml' -o -name 'lcars' -o -name 'box' \
          -o -name 'accept' -o -name 'provision' -o -name 'Dockerfile' -o -name '*.manifest' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
@@ -59,7 +64,23 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 @test "MUR: le perimetre n'est pas VIDE — un balayage casse compte zero, comme un sans-faute" {
   # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, extension renommee) rendrait
   # les deux murs verts en n'ayant rien lu. C'est la forme d'echec la plus chere : elle certifie.
-  [ "${#CODE[@]}" -ge 30 ]
+  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE, ET CELUI-CI ETAIT A 30 POUR 123 FICHIERS
+  # (mesure du 2026-08-27 : deploy 43, priv 59, services 12, bin 9). Perdre `priv` en entier laisse
+  # 64 fichiers — vert. Perdre `services`, la moitie qui compte selon le commentaire du `find`
+  # ci-dessus, en laisse 111 — vert. Le plancher ne detecte que le balayage TOTALEMENT casse.
+  #
+  # CHAQUE ARBRE NOMME DOIT DONC CONTRIBUER, et la regle se DERIVE de `ARBRES` — elle ne le recopie
+  # pas. Un arbre ajoute au `find` est garde le jour meme, sans que personne y pense.
+  local a
+  for a in "${ARBRES[@]}"; do
+    printf '%s\n' "${CODE[@]}" | grep -q "^$a/" || {
+      echo "MUR 0 rompu — l'arbre « ${a#"$REPO"/} » ne contribue AUCUN fichier au perimetre" >&2
+      return 1
+    }
+  done
+  # Le plancher reste, un cran sous la mesure : il attrape la perte massive qu'un arbre encore
+  # represente par un seul fichier laisserait passer.
+  [ "${#CODE[@]}" -ge 100 ]
   printf '%s\n' "${CODE[@]}" | grep -q 'forge-gestures.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'catalogue-executor.py'
   printf '%s\n' "${CODE[@]}" | grep -q 'bin/lcars'

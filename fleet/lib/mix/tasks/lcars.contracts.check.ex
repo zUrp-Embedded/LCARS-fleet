@@ -3021,19 +3021,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
     # run, which is the worst of the three outcomes: a green that checked nothing.
-    dir = Path.expand("deploy", root)
+    # ⚠ LE PERIMETRE SE DISAIT SUR `deploy/` SEUL, POUR UNE POPULATION QUI VIT SOUS DEUX RACINES.
+    # Le commentaire du calcul plus bas nommait deja l'asymetrie — « these are TWO roots, only one
+    # of them is scoped » — et l'a portee au garde de POPULATION sans la porter au garde de
+    # PERIMETRE. Consequence mesuree le 2026-08-27 : `etc/` porte DEUX sourcers
+    # (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY fleet/etc`,
+    # et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Dans l'artefact, ce
+    # check declarait « NOT CHECKED » sur deux fichiers qu'il tenait dans la main.
+    #
+    # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
+    # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
+    roots = [
+      {"deploy/modules.d", Path.join(Path.expand("deploy", root), "modules.d")},
+      {"etc", Path.join(root, "etc")}
+    ]
 
-    case tree_scope(dir) do
-      :out_of_scope ->
+    {present, skipped} = Enum.split_with(roots, fn {_label, d} -> File.dir?(d) end)
+    skipped_labels = Enum.map(skipped, &elem(&1, 0))
+
+    case present do
+      [] ->
         %{
           id: "shell.sourcers_set_strict",
           remediation: "—",
           status: :pass,
           evidence: [],
-          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+          note:
+            "NOT CHECKED here — no sourcer root present in this artifact (runtime-only context): " <>
+              Enum.join(skipped_labels, ", ")
         }
 
-      :required ->
+      _ ->
         # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
         # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
         # alone. The population is a different question: these are TWO roots, only one of them is
@@ -3045,21 +3063,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # The comment above this function already named the risk: "a green that checked nothing".
         # It guarded the scope and not the population, which is exactly the half that was missing.
         sourcers =
-          [
-            Path.join(dir, "modules.d"),
-            Path.join(root, "etc")
-          ]
-          |> Enum.flat_map(fn d -> Path.wildcard(Path.join(d, "*.sh")) end)
+          present
+          |> Enum.flat_map(fn {_label, d} -> Path.wildcard(Path.join(d, "*.sh")) end)
 
         if measured_nothing?(sourcers) do
           broken_result("shell.sourcers_set_strict", "sourcer scripts")
         else
-          do_check_sourcers(sourcers, root)
+          do_check_sourcers(sourcers, root, skipped_labels)
         end
     end
   end
 
-  defp do_check_sourcers(sourcers, root) do
+  defp do_check_sourcers(sourcers, root, skipped_labels) do
     offenders =
       sourcers
       |> Enum.filter(fn f ->
@@ -3085,7 +3100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       evidence: Enum.map(offenders, &Path.relative_to(&1, root)),
       note:
         "#{length(sourcers)} shell file(s) scanned; every sourcer of provision-lib.sh sets -u " <>
-          "(BL-6-36: bash's silent-coercion class)"
+          "(BL-6-36: bash's silent-coercion class)" <> skipped_note(skipped_labels)
     }
   end
 
