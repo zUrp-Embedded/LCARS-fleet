@@ -3,7 +3,9 @@ defmodule Fleet.Observation.DeckTest do
   Deck `:8091` tested via `Plug.Test` (never a real socket — hermetic
   invariant, `start_listener: false` in test). Read-only, no-auth.
   """
-  use ExUnit.Case, async: true
+  # Ecrit `:media_root` dans l'app env, globale au noeud : sync, comme les 38 autres suites qui
+  # font un `put_env`. Celle-ci etait la seule async — une course qui attend un second lecteur.
+  use ExUnit.Case, async: false
   import Plug.Test
 
   @opts Fleet.Observation.Deck.init([])
