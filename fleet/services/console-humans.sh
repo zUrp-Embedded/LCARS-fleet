@@ -4,16 +4,13 @@
 # STARDATE: 2026-07-31
 # STATUS: enumeration des humains eligibles a une console — source UNIQUE de la regle
 #
-# La regle « qui recoit une console sur cette boite » vit ICI et nulle part ailleurs : une copie chez
-# un appelant derive le jour ou on corrige l'original, et une garde qui derive est pire qu'absente.
+# La forge decide QUI est un humain (team `humans`), `human-converger.sh` en derive les comptes
+# Unix, et ce script repond a la seule question restante : lesquels recoivent une console ICI.
+# Ses consommateurs l'appellent au lieu de refiltrer `/etc/passwd`.
 #
-# CE FICHIER NE DECIDE PAS QUI EST UN HUMAIN. La forge le decide (team `humans` de l'org),
-# `human-converger.sh` en derive les comptes Unix, et ce script repond a la question suivante :
-# lesquels de ces comptes peuvent recevoir une console ICI. Un compte que la forge ne connait plus
-# arrive deja revoque — shell `nologin` — et le filtre le rejette pour cette raison-la.
-#
-# PLANCHER ET PLAFOND D'UID : un compte systeme n'a pas de console, et `nobody` (65534) n'est pas un
-# humain. Convention Debian, < 1000 = systeme.
+# LE SIEGE EN FAIT PARTIE : sa console tourne sous son uid, donc sudo-capable, comme son terminal
+# ssh. Ce qui lui reste ferme est la FLEET — le BEAM herite de l'uid du lanceur et ses pods avec,
+# et GUARD B l'y refuse. Deux questions, deux gardes.
 #
 # USAGE  : console-humans.sh            → une ligne par humain : « login uid home »
 #          console-humans.sh --verbose  → + les rejets sur stderr, avec leur motif
@@ -24,47 +21,38 @@ set -uo pipefail
 VERBOSE=0
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=1
 
-UID_MIN="${LCARS_CONSOLE_UID_MIN:-1000}"
-UID_MAX="${LCARS_CONSOLE_UID_MAX:-59999}"
-
-# ─── L'ELIGIBILITE EST LOCALE, ET ELLE NE LIT AUCUN GROUPE ─────────────────────────────────────
+# LES BORNES SE LISENT, ELLES NE SE DEVINENT PAS. `/etc/login.defs` les DECLARE, `useradd` les lit,
+# et trois autres lecteurs de ce depot les lisent la aussi (`fleet_v2`, `human-converger`,
+# `provision-lib`). Un litteral ici en ferait une quatrieme copie, fausse sur toute machine dont
+# l'administrateur a bouge la frontiere.
 #
-# Trois faits, tous lisibles sur la ligne de `passwd` qu'on parcourt : un uid dans la plage humaine,
-# un home qui existe, un shell qui n'est pas `nologin`. Rien d'autre — et surtout aucune adhesion de
-# groupe : `/etc/group` ne liste pas les membres par groupe PRIMAIRE, donc filtrer dessus manque
-# silencieusement les comptes crees `useradd -g fleet`.
-#
-# LE SIEGE EN FAIT PARTIE. Il tient la machine, il a un home et un shell : il a une console comme
-# tout humain d'ici, servie sous SON uid — donc sudo-capable, exactement comme son terminal ssh, et
-# derriere une porte qui exige une session de la forge. Ce qui lui reste ferme n'est pas le shell
-# mais la FLEET : le BEAM herite de l'uid du lanceur et ses pods avec, donc GUARD B refuse
-# `fleet_v2 start` sous le siege. Deux questions distinctes, deux gardes distinctes.
+# ⚠ ET LE DEFAUT SERAIT FAIL-OPEN, contrairement a celui de `fleet_v2`. La-bas, retomber sur 1000
+# REFUSE davantage : c'est conservateur. Ici, la borne decide qui RECOIT une console — un UID_MIN
+# reel a 2000 devine a 1000 ouvre un shell web a tout ce qui vit entre les deux. Bornes illisibles :
+# on ne rend aucune liste, et on le dit.
+DEFS="${PASSWD_DEFS:-/etc/login.defs}"
+UID_MIN="$(awk '/^UID_MIN/ {print $2}' "$DEFS" 2>/dev/null | head -n1 || true)"
+UID_MAX="$(awk '/^UID_MAX/ {print $2}' "$DEFS" 2>/dev/null | head -n1 || true)"
+if ! [[ "$UID_MIN" =~ ^[0-9]+$ && "$UID_MAX" =~ ^[0-9]+$ ]]; then
+  echo "[humans] bornes d'uid illisibles ($DEFS) — la frontiere systeme/humain n'est pas etablie, aucune liste rendue" >&2
+  exit 0
+fi
 
-
-# Deux classes de rejet, et elles ne meritent PAS le meme bruit :
-#   - hors plage d'uid (root, daemon, www-data, nobody…) : ATTENDU a chaque boot. Detailler 19
-#     lignes de comptes systeme, c'est apprendre a l'humain a ne plus lire ses logs. → un compte.
-#   - dans la plage mais inapte (pas de home, shell nologin) : SURPRENANT. C'est un humain qui
-#     aurait du avoir une console et ne l'a pas. → detaille, nominativement.
+# Deux classes de rejet, deux volumes de bruit : hors plage est attendu a chaque boot (un compte),
+# inapte dans la plage est surprenant — un humain qui aurait du avoir une console (nominatif).
 system_n=0
 reject_system() { system_n=$(( system_n + 1 )); }
 reject_odd()    { [[ "$VERBOSE" -eq 1 ]] && echo "[humans] rejete $1 : $2" >&2; return 0; }
 
-# Le gid n'est plus lu : l'eligibilite ne regarde plus aucun groupe. `_` a la place, pour que la
-# forme de la ligne de passwd reste lisible telle qu'elle est.
+# Le gid est ignore : `/etc/group` ne liste pas les membres par groupe PRIMAIRE, donc un filtre de
+# groupe manque en silence les comptes crees `useradd -g <groupe>`.
 while IFS=: read -r login _ uid _ _ home shell; do
   [[ -n "$login" ]] || continue
 
-  if [[ "$uid" -lt "$UID_MIN" ]]; then
-    # Le cas qui compte : root. Une console de root serait un shell root ouvert derriere la porte
-    # web de la boite — c'est la raison, et elle ne depend d'aucune arithmetique de ports.
-    reject_system
-    continue
-  fi
-  if [[ "$uid" -gt "$UID_MAX" ]]; then
-    reject_system
-    continue
-  fi
+  # root n'a pas de console : ce serait un shell root derriere la porte web de la boite.
+  if [[ "$uid" -lt "$UID_MIN" ]]; then reject_system; continue; fi
+  # `nobody` (65534) est au-dessus de la plage humaine et n'est pas un humain.
+  if [[ "$uid" -gt "$UID_MAX" ]]; then reject_system; continue; fi
   if [[ ! -d "$home" ]]; then
     reject_odd "$login" "home absent ($home) — une console sans home s'ouvre sur / et ment"
     continue
@@ -75,21 +63,12 @@ while IFS=: read -r login _ uid _ _ home shell; do
       continue ;;
   esac
 
-  # LA TROISIEME COLONNE A CHANGE DE NATURE, elle n'a pas ete « remise ». Elle portait
-  # `21000 + (uid % 500) * 10` — le bloc de ports de cet humain, dont le seul lecteur le jetait, et
-  # dont la formule a quitte la boite le 2026-08-14. Elle porte maintenant le HOME, c'est-a-dire
-  # exactement ce que la garde du dessus vient de verifier. Emettre un fait deja etabli evite au
-  # consommateur de le re-deriver, et c'est cette re-derivation qui avait fabrique une seconde
-  # regle dans le deck.
+  # Le home est emis parce qu'il vient d'etre verifie : le consommateur n'a pas a le re-deriver.
   printf '%s %s %s\n' "$login" "$uid" "$home"
-  # MEME SEAM QUE `human-converger.sh` (`PASSWD_FILE`), ET POUR LA MEME RAISON : cette regle decide
-  # qui recoit une console, donc elle doit etre epinglable sans fabriquer des comptes Unix sur la
-  # machine qui fait tourner les tests. `getent` reste le defaut — il couvre NSS, la ou un `cat`
-  # de /etc/passwd ne verrait que les comptes locaux.
+  # `LCARS_CONSOLE_PASSWD` est la couture des temoins ; `getent` est le defaut et couvre NSS.
 done < <(if [[ -n "${LCARS_CONSOLE_PASSWD:-}" ]]; then cat "$LCARS_CONSOLE_PASSWD"; else getent passwd; fi)
 
-# Une ligne, pas dix-neuf : le compte des rejets attendus prouve que la garde a tourne, sans
-# noyer le seul rejet qui meriterait qu'on le lise.
+# Un compte, pas dix-neuf lignes : la garde a tourne, sans noyer le rejet qui merite d'etre lu.
 [[ "$VERBOSE" -eq 1 && "$system_n" -gt 0 ]] && \
   echo "[humans] $system_n comptes systeme ecartes (uid hors [$UID_MIN..$UID_MAX] — dont root, qui n'a pas de console)" >&2
 

@@ -352,16 +352,31 @@ ports_of() {
 # contrat que deux programmes lisent et que rien n'epingle est un contrat en sursis.
 
 humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
-  # ⚠ LE 2e ARGUMENT NE SERT PLUS A RIEN, ET IL EST GARDE EXPRES. L'eligibilite ne lit plus AUCUN
-  # groupe : elle derive de conditions de SIEGE (uid dans la plage, home, shell, et pas le siege).
-  # Garder la position evite de reecrire vingt appels pour un parametre mort — et le nommer `ignore`
-  # dit ce qu'il est. Le jour ou quelqu'un lui redonne un sens, il le fera en le renommant.
+  # Le 2e argument est mort — l'eligibilite ne lit aucun groupe — et sa POSITION est gardee pour ne
+  # pas reecrire vingt appels. Le nommer `ignore` dit ce qu'il est.
   local pw="$1"; shift
   [[ $# -gt 0 ]] && shift
-  # Le siege se POSE : `console-humans.sh` n'a plus de defaut `:-1000`, et sans siege etabli il ne
-  # rend aucune liste — une liste ou le siege figure se lit comme une population.
-  LCARS_CONSOLE_PASSWD="$pw" LCARS_SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}" \
+  # LES BORNES SONT EPINGLEES, sinon ces temoins mesurent le `login.defs` de la machine qui les
+  # joue : des fixtures a uid 1000 tombent en bloc sur un poste dont UID_MIN vaut 2000, et le rouge
+  # ne dit alors rien du code.
+  local defs="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$defs"
+  LCARS_CONSOLE_PASSWD="$pw" PASSWD_DEFS="$defs" \
     run bash "$BATS_TEST_DIRNAME/../../services/console-humans.sh" "$@"
+}
+
+@test "bornes d'uid illisibles : AUCUNE liste, et le motif est dit" {
+  # La borne decide qui recoit une console. La deviner ouvrirait un shell web a tout ce qui vit
+  # sous un UID_MIN reel plus haut que le defaut — un fail-open silencieux.
+  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
+  mkdir -p "$home/zoe"
+  printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
+
+  LCARS_CONSOLE_PASSWD="$pw" PASSWD_DEFS="$BATS_TEST_TMPDIR/nexistepas" \
+    run bash "$BATS_TEST_DIRNAME/../../services/console-humans.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"zoe"* ]]
+  [[ "$output" == *"bornes d'uid illisibles"* ]]
 }
 
 @test "6-surface: console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {
