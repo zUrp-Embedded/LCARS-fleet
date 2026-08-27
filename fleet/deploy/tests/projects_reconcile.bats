@@ -60,6 +60,14 @@ setup() {
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
   # Le siege du sysadmin est un uid que personne ici ne porte.
   export LCARS_SYSADMIN_UID="$(( $(id -u) + 1 ))"
+  # ⚠ TROISIEME PORTE VERS LA MEME VARIABLE, ET ELLE GAGNE SUR LES DEUX AUTRES. Depuis le
+  # 2026-08-19, le siege se lit dans `/etc/lcars/seat.uid` AVANT `LCARS_SYSADMIN_UID` — c'est
+  # GUARD B : la variable appartient au processus garde, donc elle ne decide pas de sa borne. Sur
+  # une machine PROVISIONNEE ce fichier existe, il gagne, et les deux lignes ci-dessus ne sont plus
+  # lues. Mesure du 2026-08-27, siege etabli a 1001 : « le sysadmin n'est pas un humain de fleet »
+  # rouge sur du code juste. Meme classe que les deux cicatrices du haut de ce `setup`, une porte
+  # plus loin — on ferme le canal fichier pour que la premisse declaree ici soit celle qui s'applique.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
 }
 
 # La porte rend ce qu'on lui dit de rendre. $1 = code de sortie, stdin = les lignes de verdict.
