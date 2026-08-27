@@ -131,7 +131,7 @@ setup() {
   kill -TERM "$sup" 2>/dev/null || true
   wait "$sup" 2>/dev/null || true
   local dt=$(( SECONDS - t0 ))
-  ! kill -0 "$enfant" 2>/dev/null || { kill -9 "$enfant" 2>/dev/null; echo "ORPHELIN survivant"; return 1; }
+  if kill -0 "$enfant" 2>/dev/null; then kill -9 "$enfant" 2>/dev/null; echo "ORPHELIN survivant"; return 1; fi
   # Avec le defaut (5 s) inerte, l'arret prendrait ~5 s : on exige la grace DEMANDEE.
   [ "$dt" -le 3 ] || { echo "arret en ${dt}s — la grace demandee (1s) n'a pas ete lue"; return 1; }
   grep -q 'ignore TERM' "$LOG"

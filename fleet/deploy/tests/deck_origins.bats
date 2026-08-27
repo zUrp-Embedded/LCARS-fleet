@@ -19,6 +19,8 @@
 # Aucune socket : `curl` est une doublure en tete de PATH, et ce qui est mesure est la decision du
 # module (ce qu'il DELETE, ce qu'il POST, ce qu'il ecrit).
 
+load refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../modules.d/55-deck-oidc.sh"
   [ -f "$SUT" ]
@@ -134,7 +136,7 @@ apps_with() { # apps_with <uris...>
   run bash "$SUT" apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"déjà posé et vivant"* ]]
-  ! grep -q "DELETE" "$TRACE"
+  refute grep -q "DELETE" "$TRACE"
   ! grep -q "POST" "$TRACE"
 }
 

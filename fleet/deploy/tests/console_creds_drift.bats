@@ -21,6 +21,8 @@
 # and hands back a shell carrying it. That is the tool's behaviour, measured by the operator on the
 # live box on 2026-08-20 -- it is what unblocked `catalogue install` when nothing else did.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../services/console.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
@@ -193,7 +195,7 @@ sendkeys_line() { grep -- "tmux send-keys -t .* C-u " "$CALLS" | head -1; }
 
   # ⚠ THE POINT OF THE WHOLE DESIGN. Killing ttyd refreshes the groups too -- and takes the
   # human's console, and whatever runs in it, with it.
-  ! grep -q -- "kill-server" "$CALLS"
+  refute grep -q -- "kill-server" "$CALLS"
   ! grep -qE "^ttyd .*console\.sock" "$CALLS"
 }
 

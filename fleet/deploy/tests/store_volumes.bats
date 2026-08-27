@@ -25,6 +25,8 @@
 # `lcars-toolchains`, `-p storetest down -v`, project volume destroyed, the four externals and the
 # marker intact) and recorded in `docker-compose.yml`. A stub cannot answer for it.
 
+load refute
+
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   STORE_LIB="$DEPLOY/lib/store.sh"
@@ -197,7 +199,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # passerait au vert sur un `reset` devenu muet — il mesurerait un fichier qui ne porte plus le
   # geste.
   grep -q "store_spared_line" "$DEPLOY/box"
-  ! grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
+  refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
   ! grep -q "store_destroy_volumes" "$DEPLOY/box"
 }

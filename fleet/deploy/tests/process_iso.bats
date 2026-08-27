@@ -29,6 +29,8 @@
 # ne demarrait plus, les fichiers parce qu'une recette a plante. Celui-ci a ete trouve parce qu'un
 # operateur s'est plaint. Trois fois le meme aveuglement ; c'est le troisieme temoin qui le ferme.
 
+load refute
+
 setup() {
   ENTRY="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   SERVICES="$BATS_TEST_DIRNAME/../modules.d/64-services.sh"
@@ -175,7 +177,7 @@ launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
   # pas un composant LCARS : sur le rail natif, c'est le systeme qui le tient. L'exclure est une
   # decision ; l'exclure en silence serait un oubli, et le prochain lecteur compterait quatre.
   code "$ENTRY" | grep -qE 'exec .*sshd'
-  ! starters | grep -q '^sshd:'
+  starters | refute_out '^sshd:'
   grep -q 'sshd' "$BATS_TEST_DIRNAME/process_iso.bats"
 }
 

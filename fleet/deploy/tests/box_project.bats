@@ -25,6 +25,8 @@
 # text used to be extracted by line numbers (`sed -n '6,35p'`), so inserting one header line
 # truncated it silently. An amputated help never reports itself either.
 
+load refute
+
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   SRC="$REPO/fleet/deploy/box"
@@ -323,7 +325,7 @@ FAKE
   # de pile : rien ne compte les tours, rien ne sort. Un temoin qui LANCE avant de LIRE PEND au lieu
   # de rougir — et un temoin qui pend est un temoin que le prochain desactive.
   grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$box"
-  ! grep -q '^usage() { exec ' "$box"
+  refute grep -q '^usage() { exec ' "$box"
 
   # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
   # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
@@ -373,8 +375,13 @@ FAKE
   local box="$BATS_TEST_DIRNAME/../box"
   grep -q 'docker_endpoint || fail' "$box"
   grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$box"
-  ! grep -q 'LCARS_DOCKER_BIN:-' "$box"
-  ! grep -q 'LCARS_COMPOSE_CMD:-' "$box"
+  # ⚠ LE CODE, PAS LE FICHIER. Rendue mordante, la premiere de ces deux lignes a accuse `box:137` —
+  # une CICATRICE qui cite `${LCARS_DOCKER_BIN:-docker}` pour expliquer le defaut qu'elle a ferme.
+  # La seconde etait derniere de son bloc, donc vivante, et verte : son motif n'existe nulle part,
+  # pas meme en prose. Les deux lisent desormais ce qui S'EXECUTE — sinon la premiere cicatrice
+  # ecrite pour `LCARS_COMPOSE_CMD` ferait rougir un fichier sain.
+  grep -vE '^[[:space:]]*#' "$box" | refute_out 'LCARS_DOCKER_BIN:-'
+  grep -vE '^[[:space:]]*#' "$box" | refute_out 'LCARS_COMPOSE_CMD:-'
 }
 
 @test "le delegue rend l'aide SANS docker — elle passe avant la sonde" {

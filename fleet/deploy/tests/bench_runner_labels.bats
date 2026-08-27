@@ -18,6 +18,8 @@
 # The probe therefore works on both sockets — a probe that only works on the good one would be
 # absent exactly when it is needed.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../docker/forge-runner.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
@@ -138,7 +140,7 @@ run_runner() {
   [[ "$output" != *"REFUS"* ]]
   grep -q "^pull -q docker:cli" "$CALLS"
   # Une image DEJA la n'est pas re-tiree : la garde tire ce qui manque, pas ce qui est.
-  ! grep -q "^pull -q alpine:3.20" "$CALLS"
+  refute grep -q "^pull -q alpine:3.20" "$CALLS"
   grep -q '^CURL' "$CALLS"
 }
 
@@ -168,7 +170,7 @@ run_runner() {
   C="$BATS_TEST_DIRNAME/../docker/runner-compose.yml"
   [ -f "$C" ]
   # aucune ligne de MONTAGE du socket (les mentions en commentaire, elles, expliquent pourquoi)
-  ! grep -qE '^\s*-\s*/var/run/docker\.sock' "$C"
+  refute grep -qE '^\s*-\s*/var/run/docker\.sock' "$C"
   # ⚠ CE QUI EST TENU EST LA VARIANTE, PLUS LA VERSION. Ce temoin exigeait un digest fige
   # (`0.6.1-dind-rootless@sha256:…`). Le pin est parti — ⚖ user 2026-08-20 : ce compose ne sert que
   # des BANCS (`act_runner` n'apparait dans aucun des deux compose produit ; en prod l'admin
@@ -180,7 +182,7 @@ run_runner() {
   # ci-dessus refuse. C'est la variante qui porte la propriete de securite, pas le numero.
   grep -qE 'gitea/runner:[a-z0-9.]+-dind-rootless' "$C"
   # Et le digest ne revient pas par la fenetre : un pin ici serait un choix a re-arbitrer.
-  ! grep -qE 'gitea/runner:[^[:space:]]*@sha256:' "$C"
+  refute grep -qE 'gitea/runner:[^[:space:]]*@sha256:' "$C"
   grep -qE '^\s*privileged: true' "$C"
   grep -q 'apparmor=rootlesskit' "$C"
   grep -q 'DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"' "$C"

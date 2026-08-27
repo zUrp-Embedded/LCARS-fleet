@@ -16,6 +16,8 @@
 # `bench-up.sh` dans un faux arbre pour que ses voisins appeles par chemin (`bench-forge-bootstrap.sh`,
 # `forge-runner.sh`) soient les notres : `HERE` derive de `BASH_SOURCE`, et `REPO_ROOT` de `HERE`.
 
+load refute
+
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
   BENCH="$ROOT/fleet/deploy/docker/bench"
@@ -494,8 +496,8 @@ run_bench() {
   #
   # TEMOIN STRUCTUREL, et il l'est par necessite : la ligne ne s'imprime que sur un substrat WSL en
   # NAT. Un temoin qui l'executerait mesurerait la machine qui joue les tests, pas le script.
-  ! grep -qE '^[[:space:]]*say .*netsh' "$SRC"
-  ! grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
+  refute grep -qE '^[[:space:]]*say .*netsh' "$SRC"
+  refute grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
   grep -q "n'est joignable que depuis CETTE machine" "$SRC"
 }
 

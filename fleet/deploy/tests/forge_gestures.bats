@@ -30,6 +30,8 @@
   ! grep -q 'sudo' <<<"$body"
 }
 
+load refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
@@ -300,7 +302,7 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   # `SYS` est le contenu de `system_starfleet.gitea_token` ; `TOK` celui du master (setup_install).
   grep -q "catalogue-source cat TOK=SYS " "$ENTRY_LOG"
-  ! grep -q "catalogue-source cat TOK=TOK " "$ENTRY_LOG"
+  refute grep -q "catalogue-source cat TOK=TOK " "$ENTRY_LOG"
   # ET PLUS AUCUN CHEMIN NE TRAVERSE : le passer reviendrait a donner a la porte un fichier qu'elle
   # ne peut pas ouvrir — un refus de permission presente comme un catalogue introuvable.
   ! grep -q "catalogue-source .*TOKFILE=$PRIV" "$ENTRY_LOG"

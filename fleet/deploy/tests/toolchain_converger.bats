@@ -34,6 +34,8 @@
   [[ "$default" != /run/* ]]
 }
 
+load refute
+
 setup() {
   SUT="${BATS_TEST_DIRNAME}/../../services/toolchain-converger.sh"
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
@@ -446,7 +448,7 @@ EOF
   # Ici ce n'est meme pas un nom de confort : c'est ce qui empeche d'installer en root un manifeste
   # que personne n'a signe.
   grep -qx 'BRANCH="tool_request"' "$SUT"
-  ! grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"
+  refute grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"
   # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le
   # runtime aurait pu changer sans lui.
   grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../lib/fleet/toolchain.ex"
