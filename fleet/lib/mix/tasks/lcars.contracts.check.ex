@@ -114,6 +114,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
         check_toolchain_branch_single_source(root),
+        check_catalogue_roots_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -3724,6 +3725,141 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             }
           end
         end
+    end
+  end
+
+  @doc """
+  The two catalogue roots are declared ONCE in `Fleet.Layout` and copied into the shell, and the
+  copies are checked here.
+
+  `catalogues_shipped_dir/0` (`@platform_root` + `@catalogues_dirname`) is where the IMAGE deposits
+  its seeds; `catalogues_installed_dir/0` (`@installed_catalogues_root`) is the cache the forge
+  restores into. Nine files carry one of the two: the BEAM declares them, the Dockerfile CREATES
+  the shipped tree, the manifest creates the installed one, and five shell/CLI readers copy them.
+  They cannot share a literal across the language boundary, so `Layout` DECLARES and the rest copy.
+
+  ⚠ `bin/lcars` ALREADY NAMED THIS LOCK, AND THE LOCK DID NOT EXIST. Its comment reads: *"C'est un
+  fait ecrit deux fois, dans deux langages qui ne peuvent pas s'appeler — la meme forme que les
+  listes de roles verrouillees par `mix lcars.contracts.check`"*. It named the pattern, named the
+  tool, and nothing held it. Naming a cost is not paying it.
+
+  ⚠ AND TWO WITNESSES PINNED THE LITERAL WITHOUT KNOWING THE AUTHORITY.
+  `forge_host_reach.bats` asserts the exact strings `/opt/lcars/catalogues/web-demo` and
+  `COPY catalogues /opt/lcars/catalogues`. Move `@platform_root` and both stay GREEN on the old
+  value — a witness that pins a literal defends the literal, not the agreement.
+
+  What breaks without this: the fleet reads seeds where the image never wrote them. `bin/lcars`
+  says when it hurts most — the CLI shows the cache in DEGRADED mode, release unreachable, which
+  is precisely the moment the operator has no second source to cross-check against.
+  """
+  @spec check_catalogue_roots_single_source(String.t()) :: result()
+  def check_catalogue_roots_single_source(root) do
+    id = "layout.catalogue_roots_single_source"
+
+    remediation =
+      "copy the value from `Fleet.Layout.catalogues_shipped_dir/0` / `catalogues_installed_dir/0` " <>
+        "into the shell copy — the BEAM and the shell cannot call each other, so the agreement is " <>
+        "what makes the single source true"
+
+    src =
+      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    attr = fn name ->
+      with true <- is_binary(src),
+           [_, v] <- Regex.run(~r/@#{name}\s+"([^"]+)"/, src) do
+        v
+      else
+        _ -> nil
+      end
+    end
+
+    platform = attr.("platform_root")
+    dirname = attr.("catalogues_dirname")
+    installed = attr.("installed_catalogues_root")
+
+    if is_nil(platform) or is_nil(dirname) or is_nil(installed) do
+      # Fail-closed, same rule as its sibling: an unreadable authority is not "nothing to compare",
+      # it is the one case where every mirror passes by default.
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/layout.ex"],
+        note:
+          "Fleet.Layout no longer reads as three frozen literals (@platform_root, " <>
+            "@catalogues_dirname, @installed_catalogues_root) — nothing was compared"
+      }
+    else
+      shipped = Path.join(platform, dirname)
+
+      mirrors = [
+        {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
+         "the CLI's shipped-catalogue default"},
+        {"bin/lcars", ~r/CAT_DIR="\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}"/,
+         "the CLI's installed-catalogue default"},
+        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-#{Regex.escape(shipped)}\//,
+         "the demo catalogue the forge gesture publishes"},
+        {"services/forge-gestures.sh", ~r/\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}/,
+         "the installed root the forge gesture reads"},
+        # ⚠ LE CREATEUR, PAS UN LECTEUR — et c'est le miroir qui compte le plus. Si le `COPY` ne
+        # suit pas l'autorite, la fleet lit un arbre que l'image n'a jamais ecrit.
+        {"deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
+         "the image COPY that creates the shipped tree"},
+        {"deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
+         "the manifest row that creates the installed tree"},
+        {"deploy/lib/provision-lib.sh",
+         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(installed)}\}"/,
+         "the provisioning default"}
+      ]
+
+      # ⚠ LE PERIMETRE SE DIT PAR MIROIR. `bin/` et `services/` partent avec l'image, `deploy/` non
+      # (le stage `build` l'exclut explicitement). Un perimetre decide sur un seul arbre declarerait
+      # « NOT CHECKED » sur quatre fichiers presents — la faute corrigee le meme jour sur les deux
+      # verrous voisins.
+      {checked, skipped} =
+        Enum.split_with(mirrors, fn {rel, _rx, _what} ->
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        end)
+
+      bad =
+        Enum.flat_map(checked, fn {rel, rx, what} ->
+          case File.read(Path.expand(rel, root)) do
+            {:ok, body} ->
+              if Regex.match?(rx, body), do: [], else: [{rel, what}]
+
+            _ ->
+              [{rel, "unreadable"}]
+          end
+        end)
+
+      skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      if bad == [] do
+        %{
+          id: id,
+          remediation: "—",
+          status: :pass,
+          evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
+          note:
+            "shipped=#{inspect(shipped)} installed=#{inspect(installed)} declared by Fleet.Layout " <>
+              "and carried by the #{length(checked)} checked copies" <>
+              skipped_note(skipped_labels)
+        }
+      else
+        %{
+          id: id,
+          remediation: remediation,
+          status: :fail,
+          evidence: Enum.map(bad, &elem(&1, 0)),
+          note:
+            "authority says shipped=#{inspect(shipped)} installed=#{inspect(installed)} — " <>
+              Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+              skipped_note(skipped_labels)
+        }
+      end
     end
   end
 

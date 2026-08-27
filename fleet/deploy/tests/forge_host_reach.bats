@@ -407,8 +407,41 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # `forge-gestures.sh` publie la demo et la reference APRES la structure, et les deux echecs sont
   # NON FATAUX. Sans recablage : forge structuree, deux depots absents, aucun verdict qui baisse.
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
-  # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
-  grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
+  # ⚠ LA RACINE SE DERIVE DU `COPY`, ELLE NE S'EPINGLE PLUS. Cette ligne portait
+  # `/opt/lcars/catalogues/web-demo` en dur, et l'assertion voisine le `COPY` du Dockerfile de meme.
+  # Deux litteraux epingles ne sont pas un accord : ils defendent LA VALEUR, pas l'entente. Mesure
+  # du 2026-08-27 — `@platform_root` de `Fleet.Layout` deplace vers `/opt/lcars2`, ces deux
+  # assertions restaient VERTES sur l'ancienne valeur pendant que le contrat Elixir
+  # `layout.catalogue_roots_single_source` rougissait en nommant les trois porteurs.
+  #
+  # Le partage est net : le contrat tient l'accord BEAM <-> tout le monde ; ce temoin tient l'accord
+  # LOCAL entre le geste de forge et l'image qui depose l'arbre. Deriver ici retire la seule chose
+  # que ce fichier ajoutait de faux — un troisieme exemplaire du litteral.
+  #
+  # ⚠ ET IL Y A DEUX `COPY catalogues` DANS CE DOCKERFILE : `/src/catalogues` pour l'etage `site`
+  # (qui construit la plaquette) et `/opt/lcars/catalogues` pour l'etage `runtime`. La premiere
+  # ecriture de cette derivation les prenait TOUS LES DEUX — `$racine` valait deux lignes, et
+  # `grep` traite un motif multi-ligne comme deux motifs ALTERNATIFS : le test passait par la
+  # seconde, donc par chance. Un instrument qui rend le bon verdict pour la mauvaise raison est un
+  # instrument qui rendra le mauvais des que l'ordre change.
+  #
+  # On ecarte donc l'etage de construction et on EXIGE l'unicite de ce qui reste : deux cibles
+  # runtime, ou zero, sont un Dockerfile que ce temoin ne sait pas lire — il le dit au lieu d'en
+  # choisir une.
+  local racines racine
+  racines="$(sed -nE 's|^COPY[[:space:]]+catalogues[[:space:]]+([^[:space:]]+)[[:space:]]*$|\1|p' \
+               "$BATS_TEST_DIRNAME/../docker/Dockerfile" | grep -v '^/src/' || true)"
+  [ "$(printf '%s\n' "$racines" | grep -c .)" -eq 1 ] || {
+    echo "le Dockerfile ne depose pas UN arbre de catalogues runtime, il en depose : ${racines:-aucun}" >&2
+    return 1
+  }
+  racine="$racines"
+  # le geste defaute bien sur un chemin d'image, et sur CELUI que l'image depose
+  grep -q "DEMO_CATALOGUE=\"\${LCARS_DEMO_CATALOGUE:-$racine/web-demo}\"" "$g" || {
+    echo "le defaut de DEMO_CATALOGUE ne suit pas « $racine » depose par le Dockerfile :" >&2
+    grep -n 'DEMO_CATALOGUE=' "$g" >&2
+    return 1
+  }
 
   # ⚠ `ENTRYPOINT` ETAIT LE TROISIEME DE CETTE LISTE, ET IL N'Y EST PLUS — son defaut ne se recable
   # plus, il se RESOUT. Il etait bien un chemin d'image, et il a coute une install le 2026-08-22 sur
@@ -438,9 +471,10 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_DEMO_CATALOGUE='
   code | grep -q 'LCARS_REFERENCE_CATALOGUE='
-  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`)
+  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`).
+  # La ligne du `COPY` est deja lue plus haut (`$racine`) : la re-epingler par sa valeur ferait le
+  # troisieme exemplaire du meme litteral dans ce seul test.
   [ -d "$BATS_TEST_DIRNAME/../../../catalogues/web-demo" ]
-  grep -q '^COPY catalogues /opt/lcars/catalogues' "$BATS_TEST_DIRNAME/../docker/Dockerfile"
 }
 
 @test "la REFERENCE se demande a son autorite, elle ne se recompose pas" {
