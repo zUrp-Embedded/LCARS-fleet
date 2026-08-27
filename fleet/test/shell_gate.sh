@@ -342,7 +342,14 @@ elif [[ "$SHELL_FILE_COUNT" -eq 0 ]]; then
 else
   echo "--- shellcheck $SC_VERSION : $SHELL_FILE_COUNT fichier(s) suivi(s), aucun filtre ---"
   set +e
-  SC_OUT="$(shellcheck -f gcc "${SHELL_FILES[@]}" 2>&1)"
+  # ⚠ `-x` N'EST PAS UN FILTRE, C'EST DAVANTAGE D'ANALYSE — il fait SUIVRE les `source`. Sans lui,
+  # chaque module rend un SC1091 « Not following » et shellcheck ignore ce que la lib definit ; avec
+  # lui il resout `# shellcheck source=../lib/provision-lib.sh`, deja ecrit dans les modules.
+  # `--source-path=SCRIPTDIR` est ce qui manquait : ces directives sont relatives au SCRIPT, pas au
+  # repertoire d'ou le gate est lance.
+  # MESURE sur la liste ci-dessus : 1249 -> 1208 signalements, dont -21 sur le seul rail deploy.
+  # AUCUN signalement ajoute : suivre une source ne peut que lever des faux positifs, jamais en creer.
+  SC_OUT="$(shellcheck -x --source-path=SCRIPTDIR -f gcc "${SHELL_FILES[@]}" 2>&1)"
   SC_RC=$?
   set -e
   if [[ "$SC_RC" -ne 0 ]]; then
