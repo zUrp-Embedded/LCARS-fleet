@@ -2691,7 +2691,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     # LES TROIS LISTES DE PLACEMENT etaient hors du verrou, et c'est le meme defaut d'un cran plus
     # bas : `writers`/`judges`/`externals` sont des defauts tenus A LA MAIN pendant que la derivation
-    # (`CatalogueRoles.tfvars/1`) produit deja la reponse. Rien ne les comparait, donc rien
+    # (`Fleet.Roster.tfvars/1`) produit deja la reponse. Rien ne les comparait, donc rien
     # n'empechait la divergence qui a coute `chief` — present dans `roles`, absent de `writers`,
     # compte sans droit d'ecriture, trouve a l'oeil sur une forge.
     #
@@ -3231,7 +3231,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   ## Pourquoi un mur et pas une relecture
 
   Quatre portes sur sept le faisaient, trois ne le faisaient pas — dont deux que personne n'avait
-  regardees (`CatalogueRoles.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail, une
+  regardees (`Fleet.Roster.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail, une
   etape plus loin). Une regle tenue par quatre sites sur sept est une regle que le huitieme rate.
 
   Derive de l'AST, donc rien a maintenir : une porte ajoutee demain est mesuree par construction.
@@ -4060,7 +4060,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   ## Why the value is not plumbed through to tofu
 
-  The obvious follow-up — emit `system_account` in `CatalogueRoles.tfvars/1` so tofu consumes it
+  The obvious follow-up — emit `system_account` in `Fleet.Roster.tfvars/1` so tofu consumes it
   instead of holding a literal — would make `Fleet.Application` reference `Fleet.Credentials`,
   which is NOT in the root boundary's deps. That is an API change of a domain, a decision to be
   argued on its own, not a side effect of writing a wall. So this check does what
@@ -4109,8 +4109,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       mirrors = [
         # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
         # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
-        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"[^}]*default\s*=\s*"#{e}"/s,
-         "the tofu default that CREATES the account"},
+        # ⚠ CE MIROIR A CHANGE DE NATURE LE JOUR MEME OU IL A ETE ECRIT, et c'est un progres :
+        # `forge.tf` ne porte plus le litteral, il RECOIT la valeur par `roles.auto.tfvars.json`,
+        # projetee depuis l'autorite. Ce qui se garde ici n'est donc plus « la copie s'accorde »
+        # mais « il n'y a PLUS de copie » — un `default =` reintroduit rendrait a tofu le pouvoir
+        # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
+        # ce que la suppression a ferme.
+        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
+         "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
+         :forbidden},
         {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
          "the provisioning default (its token file derives from it)"},
         {"deploy/deps/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
@@ -4131,16 +4138,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       ]
 
       {checked, skipped} =
-        Enum.split_with(mirrors, fn {rel, _rx, _what} ->
+        Enum.split_with(mirrors, fn m ->
+          rel = elem(m, 0)
           tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
       bad =
-        Enum.flat_map(checked, fn {rel, rx, what} ->
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
-            _ -> [{rel, "unreadable"}]
-          end
+        Enum.flat_map(checked, fn
+          # Miroir INVERSE : ce qui est verifie est une ABSENCE. Un miroir qui doit porter le
+          # litteral et un miroir qui ne doit plus rien porter sont deux formes du meme invariant —
+          # « le nom vit a un seul endroit » — et le moteur les traite ensemble plutot que dans deux
+          # boucles qui deriveraient.
+          {rel, rx, what, :forbidden} ->
+            case File.read(Path.expand(rel, root)) do
+              {:ok, body} -> if Regex.match?(rx, body), do: [{rel, what}], else: []
+              _ -> [{rel, "unreadable"}]
+            end
+
+          {rel, rx, what} ->
+            case File.read(Path.expand(rel, root)) do
+              {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
+              _ -> [{rel, "unreadable"}]
+            end
         end)
 
       skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
@@ -4164,8 +4183,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             status: :pass,
             evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
             note:
-              "#{inspect(expected)} declared by ForgeIdentity @system_name and copied by the " <>
-                "#{length(checked)} checked sites" <> skipped_note(skipped_labels)
+              "#{inspect(expected)} declared by ForgeIdentity @system_name; #{length(checked)} " <>
+                "sites checked (tofu RECEIVES it, it no longer copies it)" <>
+                skipped_note(skipped_labels)
           }
 
         true ->
@@ -4394,7 +4414,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # skippaient proprement pendant que celle-ci rendait « not readable — fail-closed ». Un gate vert
     # sur l'hote et rouge dans l'image, sur un artefact qui n'a jamais fait partie du perimetre.
     if File.dir?(Path.expand("deploy", root)) and File.dir?(catalogue) do
-      case Fleet.Application.CatalogueRoles.tfvars(catalogue) do
+      case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->
           ev =
             Enum.flat_map(~w(writers judges externals), fn key ->

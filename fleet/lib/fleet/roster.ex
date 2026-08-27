@@ -1,4 +1,19 @@
-defmodule Fleet.Application.CatalogueRoles do
+defmodule Fleet.Roster do
+  # ⚠ CE MODULE VIVAIT SOUS `Fleet.Application`, ET IL N'EST PAS DU CODE DE BOOT. Mesure du
+  # 2026-08-27 : zero reference dans `application.ex`, aucune place dans la sequence de demarrage.
+  # Il y etait RANGE, pas deploye. Le cout de ce rangement s'est vu le jour ou il a fallu qu'il
+  # lise une identite de forge : la racine OTP aurait du declarer `Fleet.Credentials` dans ses deps,
+  # c'est-a-dire annoncer dans le graphe que le BOOT connait les identites — faux, et faux pour
+  # toujours, au benefice d'un seul emetteur.
+  #
+  # ⚖ ARBITRAGE USER, 2026-08-27 : sortir le module plutot qu'elargir la racine. Un domaine a lui
+  # dit ce qu'il est — la PROJECTION du roster de forge d'un catalogue — et porte ses quatre deps
+  # sans en preter aucune a la racine. La liste de deps d'une boundary est l'enonce d'honnetete du
+  # graphe : elle doit nommer ce dont le domaine a besoin, jamais ce dont un locataire a besoin.
+  use Boundary,
+    deps: [Fleet.CapProfile, Fleet.Catalogue, Fleet.Credentials, Fleet.ReleaseDoor],
+    exports: []
+
   @moduledoc """
   Reads the forge roster OF A CATALOGUE — the roles a deployment must enroll before that catalogue
   can work — without starting a fleet.
@@ -107,7 +122,18 @@ defmodule Fleet.Application.CatalogueRoles do
            # L'ORG qui portera les projets de ce catalogue, et c'est son NOM : « ou vit ce projet »
            # repond alors a « quel catalogue le traite », interrogeable sans LCARS. La recette le
            # recoit d'ici plutot que de le tenir en litteral — un litteral ne peut nommer qu'une org.
-           "org" => cat
+           "org" => cat,
+           # ⚠ LE COMPTE SYSTEME SE CONSOMME, IL NE SE RECOPIE PLUS. Jusqu'au 2026-08-27 la recette
+           # portait `variable "system_account" { default = "system_starfleet" }`, un litteral
+           # qu'aucun `.tfvars` n'alimentait et qu'aucun verrou ne comparait — alors que ce compte
+           # est dans la team `Owners` de l'org, que son email passe le gate d'identite de commit
+           # et qu'il est le `forge_push_account` par defaut. Le compte qui POSSEDE l'org naissait
+           # d'un nom que personne ne tenait.
+           #
+           # ⚖ Arbitrage user : l'autorite est `ForgeIdentity` — l'identite du compte (email,
+           # signature, `allowed_emails/2`) en derive et ne peut pas s'en detacher. La recette le
+           # RECOIT donc, comme elle recoit deja l'org et les quatre listes.
+           "system_account" => Fleet.Credentials.ForgeIdentity.system_identity().name
          }}
       end
     after
@@ -156,7 +182,7 @@ defmodule Fleet.Application.CatalogueRoles do
   @doc """
   The RELEASE door for the tfvars: print the JSON on stdout and halt 0, reason on stderr and halt 1.
 
-      bin/lcars_fleet eval 'Fleet.Application.CatalogueRoles.eval_tfvars("/cat")'
+      bin/lcars_fleet eval 'Fleet.Roster.eval_tfvars("/cat")'
   """
   @spec eval_tfvars(Path.t()) :: no_return()
   def eval_tfvars(root) when is_binary(root) do
@@ -189,7 +215,7 @@ defmodule Fleet.Application.CatalogueRoles do
   The RELEASE door: print one role per line and halt 0, or print the reason on stderr and halt 1.
   Called from the image entrypoint via a release eval —
 
-      bin/lcars_fleet eval 'Fleet.Application.CatalogueRoles.eval_main("/cat")'
+      bin/lcars_fleet eval 'Fleet.Roster.eval_main("/cat")'
 
   One name per line, nothing else on stdout: the consumer is a shell that captures it into a
   variable. Diagnostics go to stderr precisely so that capturing stdout on a failure yields the

@@ -74,10 +74,22 @@ variable "system_roles" {
   default     = ["system_architect", "system_chief", "system_gatekeeper"]
 }
 
+# ⚠ AUCUN DEFAUT, ET C'EST LE POINT. Cette variable portait `default = "system_starfleet"` — un
+# litteral qu'aucun `.tfvars` n'alimentait et qu'aucun verrou ne comparait, alors que ce compte est
+# dans la team `Owners` de l'org (il possede tous les depots projet), que son email passe le gate
+# d'identite de commit, et qu'il est le `forge_push_account` par defaut. Le compte qui POSSEDE l'org
+# naissait d'un nom que personne ne tenait.
+#
+# Il arrive desormais par `roles.auto.tfvars.json`, comme l'org et les quatre listes, projete depuis
+# `Fleet.Credentials.ForgeIdentity` — l'autorite designee (arbitrage user, 2026-08-27), parce que
+# l'identite du compte (email, signature, `allowed_emails/2`) en derive et ne peut pas s'en detacher.
+#
+# SANS DEFAUT, tofu REFUSE de planifier si le JSON manque, au lieu de creer un compte sous un nom
+# que personne n'a choisi. Le verrou `forge.system_account_single_source` garde l'absence de defaut :
+# le reintroduire ferait rougir le gate.
 variable "system_account" {
   type        = string
-  default     = "system_starfleet"
-  description = "Compte systeme, cree par le module instance/ — nomme ici pour ses adhesions"
+  description = "Compte systeme, cree par le module instance/ — recu de roles.auto.tfvars.json (autorite : Fleet.Credentials.ForgeIdentity)"
 }
 
 variable "role_names" {

@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Lcars.Catalogue.Roles do
   # Z4 — Mix task classified into the boundary of its subject (Fleet.Application): the orchestrator
-  # `Fleet.Application.CatalogueRoles` is a sub-module of that boundary, so this task reaches it.
+  # `Fleet.Roster` is a sub-module of that boundary, so this task reaches it.
   use Boundary, classify_to: Fleet.Application
 
   @shortdoc "Prints the forge roster a catalogue declares — names, or the recipe's input JSON"
@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Lcars.Catalogue.Roles do
 
   `--tfvars` emits the four lists (`roles`, `writers`, `judges`, `externals`) in the shape tofu
   reads natively from a `*.auto.tfvars.json`. It emits DATA, never a recipe — see
-  `Fleet.Application.CatalogueRoles` for why that line is where it is.
+  `Fleet.Roster` for why that line is where it is.
 
   Nothing but the payload on stdout: the consumer is a shell capturing it. Reasons go to stderr, so
   a failed run captures the empty string instead of a diagnostic parsed as a role name.
@@ -38,8 +38,8 @@ defmodule Mix.Tasks.Lcars.Catalogue.Roles do
         _ = Mix.Task.run("loadpaths")
 
         if Keyword.get(opts, :tfvars, false),
-          do: report_tfvars(Fleet.Application.CatalogueRoles.tfvars(root), root),
-          else: report_names(Fleet.Application.CatalogueRoles.list(root), root)
+          do: report_tfvars(Fleet.Roster.tfvars(root), root),
+          else: report_names(Fleet.Roster.list(root), root)
 
       _ ->
         Mix.raise("usage: mix lcars.catalogue.roles <catalogue-root> [--tfvars]")

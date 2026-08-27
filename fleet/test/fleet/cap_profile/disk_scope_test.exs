@@ -85,7 +85,7 @@ defmodule Fleet.CapProfile.DiskScopeTest do
   end
 
   test "forge_roster/0 : le catalogue en main + system, JAMAIS l'union des installes" do
-    # Le cavalier qui rendait la dette CHERE : `CatalogueRoles.tfvars/1` derive le roster d'un
+    # Le cavalier qui rendait la dette CHERE : `Fleet.Roster.tfvars/1` derive le roster d'un
     # install par cette porte. Sur l'union, installer A avec B en cache aurait fondu les roles de B
     # dans le roster de A — et la projection de login prefixe par l'org CIBLE, donc la recette
     # aurait frappe des comptes `A_<role-de-B>` qui n'appartiennent a personne.

@@ -237,7 +237,7 @@ defmodule Fleet.CapProfile.Catalog do
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   def forge_roster do
     # THE catalogue in hand plus the system half — never the union of every installed catalogue.
-    # The zero-arity's one production caller is `CatalogueRoles.tfvars/1`, which names its target
+    # The zero-arity's one production caller is `Fleet.Roster.tfvars/1`, which names its target
     # through the big wheel (`:catalogue_root`) before calling: `disk_scope(nil)` resolves to that
     # root + system, which is exactly the split tfvars derives accounts from. On the UNION, a box
     # with a second catalogue installed would have folded B's roles into A's roster at install
