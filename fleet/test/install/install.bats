@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: test/install/install.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.226
+# STARDATE: 2026.239
 # STATUS: bats tests for etc/install.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
@@ -130,6 +130,19 @@ MIX
 @test "refuse_root: an ordinary uid passes" {
   run refuse_root 1000
   [ "$status" -eq 0 ]
+}
+
+@test "refuse_root: called with NO argument, the default IS the effective uid" {
+  # The two tests above only ever drive the seam. Nothing pinned what the seam falls back to, so
+  # the default could have been anything -- and it was `${EUID:-$(id -u)}`, a fallback against a
+  # variable bash always sets, i.e. a branch no run of this suite could reach.
+  #
+  # The assertion is a COMPARISON, not a value: it holds whoever runs the suite, root included,
+  # and it is exactly the claim "no argument means my own uid".
+  run refuse_root
+  local bare_status="$status"
+  run refuse_root "$EUID"
+  [ "$bare_status" -eq "$status" ]
 }
 
 @test "require_prefix_writable: a writable prefix passes" {

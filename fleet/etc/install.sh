@@ -121,7 +121,12 @@ build_release() {
 # install (or grant it write on the prefix); elevate only the copy, as etc/README.md's manual
 # procedure does. Elevating the whole script is what conflates the two.
 refuse_root() {
-  local uid="${1:-${EUID:-$(id -u)}}"
+  # `$1` is the WITNESS SEAM (both branches are exercised in test/install/install.bats); the default
+  # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
+  # this file runs. The line read `${1:-${EUID:-$(id -u)}}` until 2026-08-27: the `$(id -u)` was
+  # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED
+  # the effective uid can be missing, which the next reader copies into their own guard.
+  local uid="${1:-$EUID}"
   [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
 }
 
